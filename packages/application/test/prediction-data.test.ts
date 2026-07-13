@@ -1,0 +1,265 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
+
+import {
+  loadLactateThresholdEvidence,
+  loadLabeledRaceOutcomes,
+  loadPerformanceVdotEvidence,
+  loadRaceReadiness
+} from "../src/prediction-data.js";
+import {
+  buildPredictionReport,
+  buildPredictionReportAsync
+} from "../src/prediction-report.js";
+
+function fixtureDatabase(): DatabaseSync {
+  const database = new DatabaseSync(":memory:");
+  database.exec(`
+    CREATE TABLE training_sessions (
+      id TEXT PRIMARY KEY,
+      anchor_start_at TEXT NOT NULL,
+      anchor_end_at TEXT NOT NULL,
+      anchor_distance_km REAL,
+      canonical_workout_id TEXT,
+      status TEXT NOT NULL
+    );
+    CREATE TABLE workouts (
+      id TEXT PRIMARY KEY,
+      source_name TEXT NOT NULL,
+      metadata_json TEXT NOT NULL
+    );
+    CREATE TABLE workout_features (
+      id TEXT PRIMARY KEY,
+      feature_run_id TEXT NOT NULL,
+      training_session_id TEXT NOT NULL,
+      source_confidence REAL NOT NULL,
+      quality_score REAL NOT NULL,
+      eligibility_status TEXT NOT NULL,
+      heart_rate_coverage REAL
+    );
+    CREATE TABLE model_runs (
+      id TEXT PRIMARY KEY,
+      feature_run_id TEXT NOT NULL
+    );
+    CREATE TABLE active_model_run (
+      singleton INTEGER PRIMARY KEY,
+      model_run_id TEXT NOT NULL
+    );
+    CREATE TABLE effective_workout_overrides (
+      training_session_id TEXT PRIMARY KEY,
+      session_type TEXT,
+      performance_protocol TEXT,
+      rpe INTEGER,
+      condition_tags_json TEXT
+    );
+    CREATE TABLE health_records (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      source_name TEXT NOT NULL,
+      source_category TEXT NOT NULL,
+      unit TEXT,
+      value_numeric REAL,
+      start_at TEXT NOT NULL
+    );
+  `);
+  database.prepare("INSERT INTO workouts (id, source_name, metadata_json) VALUES (?, ?, '{}')")
+    .run("workout", "Watch");
+  database.prepare(`
+    INSERT INTO training_sessions (
+      id, anchor_start_at, anchor_end_at, anchor_distance_km,
+      canonical_workout_id, status
+    ) VALUES (?, ?, ?, ?, ?, 'active')
+  `).run(
+    "session",
+    "2026-01-10T00:00:00.000Z",
+    "2026-01-10T00:30:00.000Z",
+    5,
+    "workout"
+  );
+  database.prepare(`
+    INSERT INTO workout_features (
+      id, feature_run_id, training_session_id, source_confidence,
+      quality_score, eligibility_status, heart_rate_coverage
+    ) VALUES ('feature', 'feature-run', 'session', 1, 1, 'eligible', 1)
+  `).run();
+  database.prepare("INSERT INTO model_runs (id, feature_run_id) VALUES ('model', 'feature-run')")
+    .run();
+  database.prepare("INSERT INTO active_model_run (singleton, model_run_id) VALUES (1, 'model')")
+    .run();
+  const insertRecord = database.prepare(`
+    INSERT INTO health_records (
+      id, type, source_name, source_category, unit, value_numeric, start_at
+    ) VALUES (?, ?, ?, 'apple_watch', ?, ?, ?)
+  `);
+  insertRecord.run(
+    "resting",
+    "HKQuantityTypeIdentifierRestingHeartRate",
+    "Watch",
+    "count/min",
+    60,
+    "2026-01-09T00:00:00.000Z"
+  );
+  insertRecord.run(
+    "maximum",
+    "HKQuantityTypeIdentifierHeartRate",
+    "Watch",
+    "count/min",
+    200,
+    "2026-01-09T01:00:00.000Z"
+  );
+  for (let minute = 0; minute < 30; minute += 1) {
+    const at = new Date(Date.parse("2026-01-10T00:00:00.000Z") + minute * 60_000)
+      .toISOString();
+    insertRecord.run(
+      `speed-${minute}`,
+      "HKQuantityTypeIdentifierRunningSpeed",
+      "Watch",
+      "m/s",
+      minute < 5 ? 2.5 : 3,
+      at
+    );
+    insertRecord.run(
+      `heart-${minute}`,
+      "HKQuantityTypeIdentifierHeartRate",
+      "Watch",
+      "count/min",
+      minute < 5 ? 140 : 175,
+      at
+    );
+  }
+  return database;
+}
+
+test("extracts a stable high-intensity 20-minute threshold segment without future leakage", () => {
+  const database = fixtureDatabase();
+  try {
+    const evidence = loadLactateThresholdEvidence(
+      database,
+      "2026-01-11T00:00:00.000Z"
+    );
+    assert.equal(evidence.length, 1);
+    assert.equal(evidence[0]?.source, "sustained_segment");
+    assert.ok(Math.abs((evidence[0]?.paceSecondsPerKm ?? 0) - 333.333) < 0.01);
+    assert.equal(evidence[0]?.heartRateBpm, 175);
+    assert.equal(
+      loadLactateThresholdEvidence(database, "2026-01-09T00:00:00.000Z").length,
+      0
+    );
+  } finally {
+    database.close();
+  }
+});
+
+test("distance-specific readiness is bounded and stricter for longer races", () => {
+  const database = fixtureDatabase();
+  try {
+    const readiness = loadRaceReadiness(database, "2026-01-11T00:00:00.000Z");
+    assert.ok((readiness.five_k ?? 0) > (readiness.ten_k ?? 0));
+    assert.ok((readiness.ten_k ?? 0) > (readiness.half_marathon ?? 0));
+    assert.ok(Object.values(readiness).every((value) => value >= 0 && value <= 1));
+  } finally {
+    database.close();
+  }
+});
+
+test("structured standard-test protocol becomes calibration and evaluation evidence", () => {
+  const database = fixtureDatabase();
+  try {
+    database.prepare(`
+      INSERT INTO effective_workout_overrides (
+        training_session_id, session_type, performance_protocol, condition_tags_json
+      ) VALUES ('session', 'race', 'five_k_time_trial', '[]')
+    `).run();
+    const asOf = "2026-01-11T00:00:00.000Z";
+    const outcomes = loadLabeledRaceOutcomes(database, asOf);
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0]?.distance, "five_k");
+    assert.equal(outcomes[0]?.labelSource, "standard_test");
+    const performance = loadPerformanceVdotEvidence(database, asOf);
+    assert.equal(performance.length, 1);
+    assert.equal(performance[0]?.source, "standard_test");
+  } finally {
+    database.close();
+  }
+});
+
+test("does not expose a labeled outcome until the workout has completed", () => {
+  const database = fixtureDatabase();
+  try {
+    database.prepare(`
+      INSERT INTO effective_workout_overrides (
+        training_session_id, session_type, performance_protocol, condition_tags_json
+      ) VALUES ('session', 'race', 'five_k_time_trial', '[]')
+    `).run();
+    assert.equal(
+      loadLabeledRaceOutcomes(database, "2026-01-10T00:15:00.000Z").length,
+      0
+    );
+    assert.equal(
+      loadLabeledRaceOutcomes(database, "2026-01-10T00:30:00.000Z").length,
+      1
+    );
+  } finally {
+    database.close();
+  }
+});
+
+test("builds a reusable scenario prediction report without reading future evidence", async () => {
+  const database = fixtureDatabase();
+  try {
+    database.prepare(`
+      INSERT INTO health_records (
+        id, type, source_name, source_category, unit, value_numeric, start_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "vo2-current",
+      "HKQuantityTypeIdentifierVO2Max",
+      "Watch",
+      "apple_watch",
+      "mL/min·kg",
+      45,
+      "2026-01-09T02:00:00.000Z"
+    );
+    database.prepare(`
+      INSERT INTO health_records (
+        id, type, source_name, source_category, unit, value_numeric, start_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "vo2-future",
+      "HKQuantityTypeIdentifierVO2Max",
+      "Watch",
+      "apple_watch",
+      "mL/min·kg",
+      70,
+      "2027-01-09T02:00:00.000Z"
+    );
+    const report = buildPredictionReport(database, {
+      asOf: "2026-01-11T00:00:00.000Z",
+      temperatureC: 30,
+      humidityPercent: 80,
+      elevationGainMeters: { ten_k: 150 }
+    });
+    assert.equal(report.inputs.directVo2Evidence, 1);
+    assert.equal(report.inputs.scenario.temperatureC, 30);
+    assert.equal(report.inputs.scenario.elevationGainMeters.ten_k, 150);
+    assert.ok((report.snapshot.vo2Max.valueMlKgMin ?? 0) < 50);
+    const tenK = report.snapshot.races.find((race) => race.distance === "ten_k");
+    assert.equal(tenK?.status, "available");
+    assert.ok((tenK?.environmentAdjustmentSeconds ?? 0) > 0);
+    assert.ok((tenK?.elevationAdjustmentSeconds ?? 0) > 0);
+    assert.equal(report.modelSelection.machineLearning.status, "insufficient_samples");
+    assert.equal(tenK?.machineLearningFallbackReason, "no_active_model");
+    const asyncReport = await buildPredictionReportAsync(database, {
+      asOf: "2026-01-11T00:00:00.000Z"
+    });
+    assert.equal(asyncReport.modelSelection.machineLearning.activeModelRunId, null);
+    assert.equal(
+      asyncReport.snapshot.races.find((race) => race.distance === "five_k")
+        ?.machineLearningFallbackReason,
+      "no_active_model"
+    );
+  } finally {
+    database.close();
+  }
+});

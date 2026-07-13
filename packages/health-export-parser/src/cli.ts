@@ -1,0 +1,391 @@
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { backup, DatabaseSync } from "node:sqlite";
+import { basename, dirname, resolve } from "node:path";
+
+import { parseAppleHealthXml } from "./apple-health-parser.js";
+import { stageAuditFiles, writeAuditFiles } from "./audit.js";
+import { canonicalizeRunningWorkouts } from "./canonicalize.js";
+import { RaiDatabase } from "./database.js";
+import { importGpxRoutes } from "./gpx-parser.js";
+import { stableId } from "./utils.js";
+
+interface ParsedArguments {
+  command: "import" | "incremental-import" | "audit";
+  input: string;
+  database: string;
+  report: string;
+  jsonReport: string;
+  replace: boolean;
+  batchId: string | null;
+}
+
+function optionValue(args: string[], name: string, fallback: string): string {
+  const index = args.indexOf(name);
+  if (index === -1) return fallback;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
+  return value;
+}
+
+function parseArguments(argv: string[]): ParsedArguments {
+  const command = argv[0];
+  if (command !== "import" && command !== "incremental-import" && command !== "audit") {
+    throw new Error(
+      "Usage: data:import -- --input <export-folder> --database <sqlite> --replace\n" +
+        "   or: tsx packages/health-export-parser/src/cli.ts incremental-import --input <export-folder> --database <cloned-sqlite> [--batch-id <id>]\n" +
+        "   or: data:audit -- --database <sqlite> --report <markdown>"
+    );
+  }
+
+  return {
+    command,
+    input: resolve(optionValue(argv, "--input", "apple_health_export")),
+    database: resolve(optionValue(argv, "--database", "var/rai.sqlite")),
+    report: resolve(optionValue(argv, "--report", "docs/DATA_AUDIT.md")),
+    jsonReport: resolve(
+      optionValue(argv, "--json-report", "var/reports/data-audit.json")
+    ),
+    replace: argv.includes("--replace")
+    ,batchId: argv.includes("--batch-id") ? optionValue(argv, "--batch-id", "") : null
+  };
+}
+
+function locateHealthXml(input: string): string {
+  const preferred = [resolve(input, "export.xml"), resolve(input, "导出.xml")];
+  const match = preferred.find(existsSync);
+  if (match) return match;
+  throw new Error(`No Apple Health export XML found in ${input}`);
+}
+
+function removeDatabaseFiles(path: string): void {
+  for (const candidate of [path, `${path}-shm`, `${path}-wal`]) {
+    if (existsSync(candidate)) rmSync(candidate);
+  }
+}
+
+async function prepareStagingDatabase(target: string, incremental: boolean): Promise<string> {
+  const staging = `${target}.importing.${randomUUID()}`;
+  removeDatabaseFiles(staging);
+  if (!incremental) return staging;
+
+  const source = new DatabaseSync(target, { readOnly: true });
+  try {
+    await backup(source, staging);
+  } finally {
+    source.close();
+  }
+  return staging;
+}
+
+interface DatabaseActivation {
+  displacedDatabase: string | null;
+  rollback(): Promise<void>;
+}
+
+function acquireImportLock(target: string): () => void {
+  const lockPath = `${target}.import.lock`;
+  try {
+    mkdirSync(lockPath);
+  } catch (error) {
+    if (existsSync(lockPath)) {
+      throw new Error(`Another import is already publishing to ${target}`);
+    }
+    throw error;
+  }
+  try {
+    writeFileSync(
+      resolve(lockPath, "owner.json"),
+      `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`,
+      "utf8"
+    );
+  } catch (error) {
+    rmSync(lockPath, { recursive: true, force: true });
+    throw error;
+  }
+  return () => rmSync(lockPath, { recursive: true, force: true });
+}
+
+async function activateStagingDatabase(
+  staging: string,
+  target: string
+): Promise<DatabaseActivation> {
+  const displaced = `${target}.replaced.${randomUUID()}`;
+  const hadTarget = existsSync(target);
+  if (hadTarget) {
+    const active = new DatabaseSync(target, { readOnly: true });
+    try {
+      await backup(active, displaced);
+    } finally {
+      active.close();
+    }
+  }
+
+  const staged = new DatabaseSync(staging, { readOnly: true });
+  try {
+    await backup(staged, target);
+  } catch (error) {
+    if (hadTarget && existsSync(displaced)) {
+      const previous = new DatabaseSync(displaced, { readOnly: true });
+      try {
+        await backup(previous, target);
+      } finally {
+        previous.close();
+      }
+    } else if (!hadTarget) {
+      removeDatabaseFiles(target);
+    }
+    throw error;
+  } finally {
+    staged.close();
+  }
+
+  return {
+    displacedDatabase: hadTarget ? displaced : null,
+    async rollback() {
+      if (!hadTarget) {
+        removeDatabaseFiles(target);
+        return;
+      }
+      const previous = new DatabaseSync(displaced, { readOnly: true });
+      try {
+        await backup(previous, target);
+      } finally {
+        previous.close();
+      }
+    }
+  };
+}
+
+async function importCommand(args: ParsedArguments): Promise<void> {
+  const incremental = args.command === "incremental-import";
+  if (!existsSync(args.input)) throw new Error(`Input folder does not exist: ${args.input}`);
+  if (!incremental && existsSync(args.database) && !args.replace) {
+    throw new Error(
+      `Database already exists: ${args.database}. Pass --replace to rebuild it explicitly.`
+    );
+  }
+  if (incremental && !existsSync(args.database)) {
+    throw new Error(`Incremental import requires a cloned active database: ${args.database}`);
+  }
+  mkdirSync(dirname(args.database), { recursive: true });
+  const xmlPath = locateHealthXml(args.input);
+  const xmlSize = statSync(xmlPath).size;
+  const releaseImportLock = acquireImportLock(args.database);
+  let stagingDatabase: string;
+  try {
+    stagingDatabase = await prepareStagingDatabase(args.database, incremental);
+  } catch (error) {
+    releaseImportLock();
+    throw error;
+  }
+  let store: RaiDatabase;
+  try {
+    store = await RaiDatabase.open(stagingDatabase);
+  } catch (error) {
+    removeDatabaseFiles(stagingDatabase);
+    releaseImportLock();
+    throw error;
+  }
+  const importJobId = stableId("recompute_job", ["import", new Date().toISOString(), xmlPath]);
+  let storeClosed = false;
+  let activated = false;
+  let activation: DatabaseActivation | null = null;
+
+  try {
+    const batchId = args.batchId ?? stableId("import_batch", [new Date().toISOString(), xmlPath]);
+    if (incremental) store.database.prepare(`
+      INSERT OR IGNORE INTO import_batches (
+        id, xml_sha256, status, import_mode, previous_dataset_version, summary_json
+      ) VALUES (?, 'pending', 'running', 'incremental',
+        (SELECT value FROM import_manifest WHERE key = 'dataset_version'), '{}')
+    `).run(batchId);
+    store.database
+      .prepare(`
+        INSERT INTO recompute_jobs (
+          id, job_type, status, request_json, progress_phase, started_at
+        ) VALUES (?, 'import', 'running', ?, 'prepare', ?)
+      `)
+      .run(importJobId, JSON.stringify({ mode: "cli_export_import" }), new Date().toISOString());
+    store.database
+      .prepare(`
+        INSERT INTO recompute_job_events (
+          id, job_id, phase, progress_current, progress_total, message
+        ) VALUES (?, ?, 'prepare', 0, 0, 'Apple Health import started')
+      `)
+      .run(stableId("recompute_job_event", [importJobId, "prepare"]), importJobId);
+    store.setManifest("source_xml_name", basename(xmlPath));
+    store.setManifest("source_xml_bytes", String(xmlSize));
+    store.setManifest("import_started_at", new Date().toISOString());
+    store.flush();
+
+    console.log(`Parsing Apple Health XML (${Math.round(xmlSize / 1024 / 1024)} MiB)...`);
+    const xmlResult = await parseAppleHealthXml(xmlPath, store, {
+      fileSize: xmlSize,
+      ...(incremental ? { incremental: {
+        generation: stableId("import_generation", [batchId, new Date().toISOString()]),
+        batchId
+      } } : {}),
+      onProgress: ({ bytesRead, totalBytes, recordCount, workoutCount }) => {
+        const percent = ((bytesRead / totalBytes) * 100).toFixed(0);
+        console.log(`  ${percent}% | records=${recordCount} workouts=${workoutCount}`);
+      }
+    });
+
+    console.log("Parsing GPX routes...");
+    const gpxResult = await importGpxRoutes(args.input, store);
+
+    console.log("Building canonical running workout groups...");
+    const routeDirtyTimes = (gpxResult.changedRouteIds ?? []).flatMap((routeId) => {
+      const row = store.database.prepare(`
+        SELECT w.start_at AS startAt FROM workout_routes route
+        JOIN workouts w ON w.id = route.workout_id WHERE route.id = ?
+      `).get(routeId) as unknown as { startAt: string } | undefined;
+      return row ? [row.startAt] : [];
+    });
+    const dirtyWorkoutTimes = [...(xmlResult.dirtyWorkoutTimes ?? []), ...routeDirtyTimes];
+    const canonicalResult = canonicalizeRunningWorkouts(
+      store.database,
+      incremental ? { dirtyWorkoutTimes } : undefined
+    );
+
+    const fingerprints = store.database
+      .prepare(
+        "SELECT key, value FROM import_manifest WHERE key IN ('source_xml_sha256', 'source_gpx_bundle_sha256') ORDER BY key"
+      )
+      .all() as unknown as Array<{ key: string; value: string }>;
+    store.setManifest("dataset_version", stableId("dataset", fingerprints));
+
+    store.setManifest("import_completed_at", new Date().toISOString());
+    store.flush();
+    const datasetVersionRow = store.database
+      .prepare("SELECT value FROM import_manifest WHERE key = 'dataset_version'")
+      .get() as unknown as { value: string } | undefined;
+    const changeRows = incremental ? store.database.prepare(`
+      SELECT change_type AS changeType, COUNT(*) AS count
+      FROM import_entity_changes WHERE batch_id = ? GROUP BY change_type
+    `).all(batchId) as unknown as Array<{ changeType: string; count: number }> : [];
+    const changes = Object.fromEntries(changeRows.map((row) => [row.changeType, row.count]));
+    const dirtyFromAt = dirtyWorkoutTimes.sort()[0] ?? null;
+    if (incremental) store.database.prepare(`
+      UPDATE import_batches SET xml_sha256 = ?, route_bundle_sha256 = ?, status = 'succeeded',
+        dataset_version = ?, dirty_from_at = ?, summary_json = ?, completed_at = ? WHERE id = ?
+    `).run(
+      fingerprints.find((row) => row.key === "source_xml_sha256")?.value ?? "unknown",
+      fingerprints.find((row) => row.key === "source_gpx_bundle_sha256")?.value ?? null,
+      datasetVersionRow?.value ?? null, dirtyFromAt,
+      JSON.stringify({ changes, xml: xmlResult, gpx: gpxResult, canonicalization: canonicalResult }),
+      new Date().toISOString(), batchId
+    );
+    store.database
+      .prepare(`
+        UPDATE recompute_jobs
+        SET status = 'succeeded', dataset_version = ?, progress_phase = 'completed',
+            progress_current = 1, progress_total = 1, completed_at = ?
+        WHERE id = ?
+      `)
+      .run(
+        datasetVersionRow?.value ?? null,
+        new Date().toISOString(),
+        importJobId
+      );
+    store.database
+      .prepare(`
+        INSERT INTO recompute_job_events (
+          id, job_id, phase, progress_current, progress_total, message
+        ) VALUES (?, ?, 'completed', 1, 1, 'Apple Health import completed')
+      `)
+      .run(stableId("recompute_job_event", [importJobId, "completed"]), importJobId);
+    const stagedAudit = stageAuditFiles(
+      store.database,
+      args.report,
+      args.jsonReport
+    );
+
+    store.close();
+    storeClosed = true;
+    try {
+      activation = await activateStagingDatabase(stagingDatabase, args.database);
+      activated = true;
+      stagedAudit.commit();
+    } catch (error) {
+      stagedAudit.discard();
+      if (activation) {
+        await activation.rollback();
+        activated = false;
+      }
+      throw error;
+    }
+
+    console.log(
+      JSON.stringify(
+        {
+          xml: xmlResult,
+          gpx: gpxResult,
+          canonicalization: canonicalResult,
+          modelCohorts: stagedAudit.audit.readiness,
+          report: args.report,
+          database: args.database
+          ,mode: incremental ? "incremental" : "full"
+          ,batchId
+          ,changes
+          ,dirtyFromAt
+          ,datasetVersion: datasetVersionRow?.value ?? null
+          ,displacedDatabase: activation.displacedDatabase
+        },
+        null,
+        2
+      )
+    );
+  } finally {
+    try {
+      if (!storeClosed) store.close();
+    } finally {
+      removeDatabaseFiles(stagingDatabase);
+      releaseImportLock();
+    }
+  }
+}
+
+async function auditCommand(args: ParsedArguments): Promise<void> {
+  if (!existsSync(args.database)) throw new Error(`Database not found: ${args.database}`);
+  const releaseImportLock = acquireImportLock(args.database);
+  let store: RaiDatabase;
+  try {
+    store = await RaiDatabase.open(args.database);
+  } catch (error) {
+    releaseImportLock();
+    throw error;
+  }
+  try {
+    const audit = writeAuditFiles(store.database, args.report, args.jsonReport);
+    console.log(
+      JSON.stringify(
+        {
+          running: audit.running,
+          readiness: audit.readiness,
+          report: args.report
+        },
+        null,
+        2
+      )
+    );
+  } finally {
+    try {
+      store.close();
+    } finally {
+      releaseImportLock();
+    }
+  }
+}
+
+async function main(): Promise<void> {
+  const args = parseArguments(process.argv.slice(2));
+  if (args.command === "import" || args.command === "incremental-import") await importCommand(args);
+  else await auditCommand(args);
+}
+
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

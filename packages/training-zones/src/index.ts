@@ -1,0 +1,580 @@
+import type {
+  DailyZoneProfile,
+  HeartRateZone,
+  HeartRateZoneBand,
+  PaceZone,
+  PaceZoneBand,
+  SessionType,
+  StimulusScore,
+  StimulusType,
+  TrainingLoadBreakdown,
+  TrainingZoneProfileSettings,
+  WorkoutZoneSummary,
+  ZoneExposure,
+  ZoneValueSource
+} from "@rai/contracts";
+
+export interface TimedMetricSample {
+  value: number;
+  durationSeconds: number;
+  startOffsetSeconds?: number;
+  distanceMeters?: number;
+}
+
+export interface RestingHeartRateEvidence { valueBpm: number; observedAt: string }
+export interface MaximumHeartRateEvidence {
+  peakBpm: number;
+  observedAt: string;
+  coverage: number;
+  sourceConfidence: number;
+}
+export interface ThresholdPaceCandidate {
+  paceSecondsPerKm: number;
+  confidence: number;
+  evidenceCount: number;
+  dataThroughAt: string | null;
+}
+
+export interface BuildZoneProfileInput {
+  id: string;
+  localDate: string;
+  timezoneIdentifier: string;
+  effectiveAt: string;
+  createdAt: string;
+  dateOfBirth?: string | null;
+  restingHeartRates: RestingHeartRateEvidence[];
+  maximumHeartRates: MaximumHeartRateEvidence[];
+  thresholdPace: ThresholdPaceCandidate | null;
+  previousProfile?: DailyZoneProfile | null;
+  settings?: TrainingZoneProfileSettings | null;
+}
+
+export interface AnalyzeWorkoutZonesInput {
+  trainingSessionId: string;
+  durationSeconds: number;
+  distanceMeters: number | null;
+  sourceConfidence: number;
+  profile: DailyZoneProfile;
+  heartRateSamples: TimedMetricSample[];
+  speedSamples: TimedMetricSample[];
+  averageHeartRateBpm?: number | null;
+  averagePaceSecondsPerKm?: number | null;
+}
+
+export interface CompositeLoadInput {
+  durationSeconds: number;
+  distanceMeters: number | null;
+  profile: DailyZoneProfile;
+  zoneSummary: WorkoutZoneSummary;
+  heartRateSamples: TimedMetricSample[];
+  speedSamples: TimedMetricSample[];
+  averageHeartRateBpm?: number | null;
+  averagePaceSecondsPerKm?: number | null;
+  distanceReferenceMeters?: number | null;
+  rpe?: number | null;
+  sessionType?: SessionType;
+}
+
+const clamp = (value: number, low = 0, high = 1): number => Math.min(high, Math.max(low, value));
+const finite = (value: number | null | undefined): value is number => typeof value === "number" && Number.isFinite(value);
+const round = (value: number): number => Math.round(value * 1e6) / 1e6;
+const DAY_MS = 86_400_000;
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+    : sorted[middle] ?? null;
+}
+
+function localDate(value: string, timezoneIdentifier: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezoneIdentifier,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const get = (type: string): string => parts.find((part) => part.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function daysBefore(observedAt: string, effectiveAt: string): number {
+  return (Date.parse(effectiveAt) - Date.parse(observedAt)) / DAY_MS;
+}
+
+function robustDailyRestingHeartRate(
+  evidence: RestingHeartRateEvidence[],
+  effectiveAt: string,
+  timezoneIdentifier: string,
+  lookbackDays: number
+): { value: number | null; days: number } {
+  const byDate = new Map<string, number[]>();
+  for (const item of evidence) {
+    const age = daysBefore(item.observedAt, effectiveAt);
+    if (!finite(item.valueBpm) || item.valueBpm < 35 || item.valueBpm > 110 || age <= 0 || age > lookbackDays) continue;
+    const date = localDate(item.observedAt, timezoneIdentifier);
+    byDate.set(date, [...(byDate.get(date) ?? []), item.valueBpm]);
+  }
+  const daily = [...byDate.values()].map((values) => median(values)).filter(finite);
+  const center = median(daily);
+  if (center === null) return { value: null, days: 0 };
+  const mad = median(daily.map((value) => Math.abs(value - center))) ?? 0;
+  const radius = 3 * mad;
+  const filtered = daily.filter((value) => Math.abs(value - center) <= radius);
+  return { value: median(filtered), days: filtered.length };
+}
+
+function ageYears(dateOfBirth: string | null | undefined, at: string): number | null {
+  if (!dateOfBirth) return null;
+  const born = new Date(`${dateOfBirth.slice(0, 10)}T00:00:00.000Z`);
+  const current = new Date(at);
+  if (!Number.isFinite(born.getTime()) || !Number.isFinite(current.getTime()) || born >= current) return null;
+  return (current.getTime() - born.getTime()) / (365.2425 * DAY_MS);
+}
+
+function buildHeartRateBands(resting: number, maximum: number): HeartRateZoneBand[] {
+  const bpm = (fraction: number): number => resting + fraction * (maximum - resting);
+  return [
+    { zone: "recovery", lowerReserveFraction: null, upperReserveFraction: 0.6, lowerBpm: null, upperBpm: bpm(0.6) },
+    { zone: "aerobic_base", lowerReserveFraction: 0.6, upperReserveFraction: 0.7, lowerBpm: bpm(0.6), upperBpm: bpm(0.7) },
+    { zone: "aerobic_power", lowerReserveFraction: 0.7, upperReserveFraction: 0.8, lowerBpm: bpm(0.7), upperBpm: bpm(0.8) },
+    { zone: "lactate_threshold", lowerReserveFraction: 0.8, upperReserveFraction: 0.9, lowerBpm: bpm(0.8), upperBpm: bpm(0.9) },
+    { zone: "anaerobic", lowerReserveFraction: 0.9, upperReserveFraction: null, lowerBpm: bpm(0.9), upperBpm: null }
+  ];
+}
+
+function buildPaceBands(threshold: number | null): PaceZoneBand[] {
+  if (threshold === null) return [
+    "easy", "marathon", "lactate_threshold", "anaerobic_endurance", "sprint"
+  ].map((zone) => ({ zone: zone as PaceZone, lowerSecondsPerKm: null, upperSecondsPerKm: null }));
+  return [
+    { zone: "easy", lowerSecondsPerKm: threshold * 1.15, upperSecondsPerKm: null },
+    { zone: "marathon", lowerSecondsPerKm: threshold * 1.06, upperSecondsPerKm: threshold * 1.15 },
+    { zone: "lactate_threshold", lowerSecondsPerKm: threshold * 0.97, upperSecondsPerKm: threshold * 1.06 },
+    { zone: "anaerobic_endurance", lowerSecondsPerKm: threshold * 0.9, upperSecondsPerKm: threshold * 0.97 },
+    { zone: "sprint", lowerSecondsPerKm: null, upperSecondsPerKm: threshold * 0.9 }
+  ];
+}
+
+function activeManualSettings(settings: TrainingZoneProfileSettings | null | undefined, localDateValue: string): TrainingZoneProfileSettings | null {
+  return settings && settings.effectiveFromLocalDate <= localDateValue ? settings : null;
+}
+
+export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZoneProfile {
+  const previous = input.previousProfile ?? null;
+  const settings = activeManualSettings(input.settings, input.localDate);
+  const recent = robustDailyRestingHeartRate(input.restingHeartRates, input.effectiveAt, input.timezoneIdentifier, 28);
+  const extended = recent.days >= 7 ? recent : robustDailyRestingHeartRate(input.restingHeartRates, input.effectiveAt, input.timezoneIdentifier, 90);
+  const restingCandidate = recent.days >= 7 ? recent.value : extended.days >= 7 ? extended.value : null;
+  let resting = previous?.restingHeartRateBpm ?? 60;
+  let heartRateSource: ZoneValueSource = previous ? "carried_forward" : "fallback";
+  let restingDays = recent.days >= 7 ? recent.days : extended.days;
+  if (restingCandidate !== null) {
+    resting = previous
+      ? previous.restingHeartRateBpm + clamp(0.25 * (restingCandidate - previous.restingHeartRateBpm), -2, 2)
+      : restingCandidate;
+    heartRateSource = "automatic";
+  }
+
+  const qualifiedPeaks = input.maximumHeartRates.filter((item) => {
+    const age = daysBefore(item.observedAt, input.effectiveAt);
+    return finite(item.peakBpm) && item.peakBpm >= 120 && item.peakBpm <= 230 && age > 0 && item.coverage >= 0.7 && item.sourceConfidence >= 0.6;
+  });
+  const validPeaks = qualifiedPeaks.filter((item) => daysBefore(item.observedAt, input.effectiveAt) <= 180);
+  const observedMaximum = validPeaks.length ? Math.max(...validPeaks.map((item) => item.peakBpm)) : null;
+  const age = ageYears(input.dateOfBirth, input.effectiveAt);
+  const formulaMaximum = age === null ? 190 : 208 - 0.7 * age;
+  let maximum = previous?.maximumHeartRateBpm ?? formulaMaximum;
+  if (!previous && observedMaximum !== null) {
+    maximum = observedMaximum;
+    heartRateSource = "automatic";
+  } else if (previous) {
+    if (observedMaximum !== null && observedMaximum > maximum) {
+      maximum += Math.min(observedMaximum - maximum, 3);
+      heartRateSource = "automatic";
+    }
+    const comparableEvidence = qualifiedPeaks.some((item) =>
+      daysBefore(item.observedAt, input.effectiveAt) <= 365 && item.peakBpm >= previous.maximumHeartRateBpm - 1
+    );
+    const declineTarget = Math.max(formulaMaximum, observedMaximum ?? 0);
+    if (observedMaximum !== null) heartRateSource = "automatic";
+    if (!comparableEvidence && declineTarget < maximum) {
+      maximum += Math.max(declineTarget - maximum, -1 / 90);
+      heartRateSource = "automatic";
+    }
+  }
+
+  if (settings?.restingHeartRate.mode === "manual" && finite(settings.restingHeartRate.valueBpm)) {
+    resting = settings.restingHeartRate.valueBpm;
+    heartRateSource = "manual";
+    restingDays = 0;
+  }
+  if (settings?.maximumHeartRate.mode === "manual" && finite(settings.maximumHeartRate.valueBpm)) {
+    maximum = settings.maximumHeartRate.valueBpm;
+    heartRateSource = "manual";
+  }
+  resting = clamp(resting, 35, 110);
+  maximum = clamp(maximum, Math.max(120, resting + 30), 230);
+
+  let threshold = previous?.lactateThresholdPaceSecondsPerKm ?? null;
+  let paceSource: ZoneValueSource = previous?.paceSource === "manual" ? "automatic" : previous ? "carried_forward" : "fallback";
+  let paceConfidence = previous ? previous.paceConfidence * Math.pow(0.5, 1 / 180) : 0;
+  const candidate = input.thresholdPace;
+  if (candidate && finite(candidate.paceSecondsPerKm) && candidate.paceSecondsPerKm >= 150 && candidate.paceSecondsPerKm <= 900) {
+    if (threshold === null) {
+      threshold = candidate.paceSecondsPerKm;
+      paceConfidence = candidate.confidence;
+      paceSource = "automatic";
+    } else if (candidate.confidence >= 0.35) {
+      const alpha = clamp(candidate.confidence, 0.2, 0.6);
+      const proposed = threshold + alpha * (candidate.paceSecondsPerKm - threshold);
+      threshold = clamp(proposed, threshold * (1 - 0.03 / 28), threshold * (1 + 0.03 / 28));
+      paceConfidence = candidate.confidence;
+      paceSource = "automatic";
+    }
+  }
+  if (settings?.lactateThresholdPace.mode === "manual" && finite(settings.lactateThresholdPace.valueSecondsPerKm)) {
+    threshold = settings.lactateThresholdPace.valueSecondsPerKm;
+    paceConfidence = 1;
+    paceSource = "manual";
+  }
+
+  const heartRateConfidence = heartRateSource === "manual"
+    ? 1
+    : clamp(0.35 + Math.min(restingDays, 14) / 28 + Math.min(validPeaks.length, 3) / 12, 0.25, 0.9);
+  const status = heartRateSource === "fallback" || threshold === null
+    ? "fallback"
+    : paceConfidence < 0.35 ? "provisional" : "stable";
+  return {
+    id: input.id,
+    localDate: input.localDate,
+    timezoneIdentifier: input.timezoneIdentifier,
+    effectiveAt: input.effectiveAt,
+    dataThroughAt: candidate?.dataThroughAt ?? null,
+    restingHeartRateBpm: round(resting),
+    maximumHeartRateBpm: round(maximum),
+    lactateThresholdPaceSecondsPerKm: threshold === null ? null : round(threshold),
+    heartRateSource,
+    paceSource,
+    heartRateConfidence: round(heartRateConfidence),
+    paceConfidence: round(clamp(paceConfidence)),
+    status,
+    heartRateBands: buildHeartRateBands(resting, maximum).map((band) => ({
+      ...band,
+      lowerBpm: band.lowerBpm === null ? null : round(band.lowerBpm),
+      upperBpm: band.upperBpm === null ? null : round(band.upperBpm)
+    })),
+    paceBands: buildPaceBands(threshold).map((band) => ({
+      ...band,
+      lowerSecondsPerKm: band.lowerSecondsPerKm === null ? null : round(band.lowerSecondsPerKm),
+      upperSecondsPerKm: band.upperSecondsPerKm === null ? null : round(band.upperSecondsPerKm)
+    })),
+    evidence: {
+      restingHeartRateDays: restingDays,
+      maximumHeartRateWorkouts: validPeaks.length,
+      thresholdEvidenceCount: candidate?.evidenceCount ?? 0
+    },
+    createdAt: input.createdAt
+  };
+}
+
+export function heartRateZoneFor(heartRateBpm: number, profile: DailyZoneProfile): HeartRateZone | null {
+  if (!finite(heartRateBpm) || profile.maximumHeartRateBpm <= profile.restingHeartRateBpm) return null;
+  const reserve = (heartRateBpm - profile.restingHeartRateBpm) /
+    (profile.maximumHeartRateBpm - profile.restingHeartRateBpm);
+  if (reserve < 0.6) return "recovery";
+  if (reserve < 0.7) return "aerobic_base";
+  if (reserve < 0.8) return "aerobic_power";
+  if (reserve < 0.9) return "lactate_threshold";
+  return "anaerobic";
+}
+
+export function paceZoneFor(paceSecondsPerKm: number, profile: DailyZoneProfile): PaceZone | null {
+  const threshold = profile.lactateThresholdPaceSecondsPerKm;
+  if (!finite(paceSecondsPerKm) || paceSecondsPerKm < 150 || paceSecondsPerKm > 900 || threshold === null) return null;
+  if (paceSecondsPerKm >= threshold * 1.15) return "easy";
+  if (paceSecondsPerKm >= threshold * 1.06) return "marathon";
+  if (paceSecondsPerKm >= threshold * 0.97) return "lactate_threshold";
+  if (paceSecondsPerKm >= threshold * 0.9) return "anaerobic_endurance";
+  return "sprint";
+}
+
+function emptyExposure<TZone extends string>(zones: readonly TZone[]): Array<ZoneExposure<TZone>> {
+  return zones.map((zone) => ({ zone, durationSeconds: 0, distanceMeters: 0, fraction: 0 }));
+}
+
+function normalizeExposure<TZone extends string>(items: Array<ZoneExposure<TZone>>, durationSeconds: number): Array<ZoneExposure<TZone>> {
+  return items.map((item) => ({
+    ...item,
+    durationSeconds: round(item.durationSeconds),
+    distanceMeters: round(item.distanceMeters),
+    fraction: durationSeconds > 0 ? round(item.durationSeconds / durationSeconds) : 0
+  }));
+}
+
+function addExposure<TZone extends string>(items: Array<ZoneExposure<TZone>>, zone: TZone, duration: number, distance: number): void {
+  const item = items.find((candidate) => candidate.zone === zone);
+  if (!item) return;
+  item.durationSeconds += duration;
+  item.distanceMeters += distance;
+}
+
+const heartZoneOrder: HeartRateZone[] = ["recovery", "aerobic_base", "aerobic_power", "lactate_threshold", "anaerobic"];
+const paceZoneOrder: PaceZone[] = ["easy", "marathon", "lactate_threshold", "anaerobic_endurance", "sprint"];
+
+function validSamples(samples: TimedMetricSample[]): TimedMetricSample[] {
+  return samples.filter((sample) => finite(sample.value) && finite(sample.durationSeconds) && sample.durationSeconds > 0);
+}
+
+function exposureSeconds<TZone extends string>(exposure: Array<ZoneExposure<TZone>>, ...zones: TZone[]): number {
+  return exposure.filter((item) => zones.includes(item.zone)).reduce((sum, item) => sum + item.durationSeconds, 0);
+}
+
+function qualifyingBouts(samples: TimedMetricSample[], qualifies: (value: number) => boolean, minimum: number, maximum: number): { total: number; count: number; continuousMaximum: number } {
+  let total = 0;
+  let count = 0;
+  let current = 0;
+  let continuousMaximum = 0;
+  let previousEnd: number | null = null;
+  const ordered = [...samples].sort((left, right) => (left.startOffsetSeconds ?? 0) - (right.startOffsetSeconds ?? 0));
+  const finish = (): void => {
+    continuousMaximum = Math.max(continuousMaximum, current);
+    if (current >= minimum && current <= maximum) { total += current; count += 1; }
+    current = 0;
+  };
+  for (const sample of ordered) {
+    const start: number = sample.startOffsetSeconds ?? previousEnd ?? 0;
+    if (previousEnd !== null && start - previousEnd > 15) finish();
+    if (qualifies(sample.value)) current += sample.durationSeconds;
+    else finish();
+    previousEnd = start + sample.durationSeconds;
+  }
+  finish();
+  return { total, count, continuousMaximum };
+}
+
+function stimulusScore(
+  stimulusType: Exclude<StimulusType, "unclassified">,
+  qualifyingSeconds: number,
+  targetSeconds: number,
+  confidence: number
+): StimulusScore {
+  return {
+    stimulusType,
+    qualifyingSeconds: round(qualifyingSeconds),
+    targetSeconds,
+    score: round(qualifyingSeconds / targetSeconds * confidence),
+    confidence: round(confidence)
+  };
+}
+
+export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZoneSummary {
+  const duration = Math.max(0, input.durationSeconds);
+  const heartExposure = emptyExposure(heartZoneOrder);
+  const paceExposure = emptyExposure(paceZoneOrder);
+  let heartCovered = 0;
+  let paceCovered = 0;
+  const heartSamples = validSamples(input.heartRateSamples);
+  const speedSamples = validSamples(input.speedSamples).filter((sample) => sample.value > 0);
+  for (const sample of heartSamples) {
+    const zone = heartRateZoneFor(sample.value, input.profile);
+    if (!zone) continue;
+    const seconds = Math.min(sample.durationSeconds, Math.max(0, duration - heartCovered));
+    addExposure(heartExposure, zone, seconds, 0);
+    heartCovered += seconds;
+  }
+  for (const sample of speedSamples) {
+    const pace = 1000 / sample.value;
+    const zone = paceZoneFor(pace, input.profile);
+    if (!zone) continue;
+    const seconds = Math.min(sample.durationSeconds, Math.max(0, duration - paceCovered));
+    const distance = finite(sample.distanceMeters) ? sample.distanceMeters : sample.value * seconds;
+    addExposure(paceExposure, zone, seconds, distance);
+    paceCovered += seconds;
+  }
+  let averageOnlyHeart = false;
+  let averageOnlyPace = false;
+  if (heartCovered === 0 && finite(input.averageHeartRateBpm)) {
+    const zone = heartRateZoneFor(input.averageHeartRateBpm, input.profile);
+    if (zone) { addExposure(heartExposure, zone, duration, 0); heartCovered = duration; averageOnlyHeart = true; }
+  }
+  if (paceCovered === 0 && finite(input.averagePaceSecondsPerKm)) {
+    const zone = paceZoneFor(input.averagePaceSecondsPerKm, input.profile);
+    if (zone) {
+      addExposure(paceExposure, zone, duration, input.distanceMeters ?? 0);
+      paceCovered = duration;
+      averageOnlyPace = true;
+    }
+  }
+  const normalizedHeart = normalizeExposure(heartExposure, duration);
+  const normalizedPace = normalizeExposure(paceExposure, duration);
+  const exposedDistance = normalizedPace.reduce((sum, item) => sum + item.distanceMeters, 0);
+  if (finite(input.distanceMeters) && input.distanceMeters >= 0 && exposedDistance > input.distanceMeters && exposedDistance > 0) {
+    const scale = input.distanceMeters / exposedDistance;
+    for (const item of normalizedPace) item.distanceMeters = round(item.distanceMeters * scale);
+  }
+  const heartCoverage = duration > 0 ? clamp(heartCovered / duration) : 0;
+  const paceCoverage = duration > 0 ? clamp(paceCovered / duration) : 0;
+  const hrConfidence = Math.min(averageOnlyHeart ? 0.4 : 1, input.sourceConfidence * Math.min(1, heartCoverage / 0.7) * input.profile.heartRateConfidence);
+  const paceConfidence = Math.min(averageOnlyPace ? 0.4 : 1, input.sourceConfidence * Math.min(1, paceCoverage / 0.7) * input.profile.paceConfidence);
+  const highHeart = exposureSeconds(normalizedHeart, "lactate_threshold", "anaerobic");
+  const recoverySeconds = exposureSeconds(normalizedHeart, "recovery");
+  const aerobicSeconds = Math.max(
+    exposureSeconds(normalizedHeart, "aerobic_base"),
+    exposureSeconds(normalizedPace, "easy")
+  );
+  const marathonSeconds = exposureSeconds(normalizedPace, "marathon");
+  const thresholdSeconds = Math.max(
+    exposureSeconds(normalizedHeart, "lactate_threshold"),
+    exposureSeconds(normalizedPace, "lactate_threshold")
+  );
+  const vo2PaceBouts = qualifyingBouts(speedSamples, (speed) => paceZoneFor(1000 / speed, input.profile) === "anaerobic_endurance", 120, 480);
+  const vo2HeartBouts = qualifyingBouts(heartSamples, (heartRate) => heartRateZoneFor(heartRate, input.profile) === "anaerobic", 120, 480);
+  const continuousVo2 = Math.max(vo2PaceBouts.continuousMaximum, vo2HeartBouts.continuousMaximum) >= 480
+    ? Math.max(vo2PaceBouts.continuousMaximum, vo2HeartBouts.continuousMaximum) : 0;
+  const vo2Seconds = Math.max(vo2PaceBouts.total, vo2HeartBouts.total, continuousVo2);
+  const sprintBouts = qualifyingBouts(speedSamples, (speed) => paceZoneFor(1000 / speed, input.profile) === "sprint", 10, 120);
+  const sprintSeconds = sprintBouts.count >= 3 ? sprintBouts.total : 0;
+  const thresholdConfidence = Math.max(hrConfidence, paceConfidence);
+  const scores: StimulusScore[] = [
+    stimulusScore("recovery", highHeart <= duration * 0.05 ? recoverySeconds : 0, 1800, hrConfidence),
+    stimulusScore("aerobic_base", aerobicSeconds, 1800, Math.max(hrConfidence, paceConfidence)),
+    stimulusScore("marathon_pace", marathonSeconds, 1200, paceConfidence),
+    stimulusScore("lactate_threshold", thresholdSeconds, 900, thresholdConfidence),
+    stimulusScore("vo2max", vo2Seconds, 600, Math.max(hrConfidence, paceConfidence)),
+    stimulusScore("anaerobic_endurance", sprintSeconds, 180, paceConfidence)
+  ];
+  const minimums: Record<Exclude<StimulusType, "unclassified">, number> = {
+    recovery: 1200,
+    aerobic_base: 1200,
+    marathon_pace: 720,
+    lactate_threshold: 600,
+    vo2max: 360,
+    anaerobic_endurance: 90
+  };
+  const intensityOrder: Array<Exclude<StimulusType, "unclassified">> = [
+    "recovery", "aerobic_base", "marathon_pace", "lactate_threshold", "vo2max", "anaerobic_endurance"
+  ];
+  const eligible = scores.filter((item) => item.qualifyingSeconds >= minimums[item.stimulusType]);
+  eligible.sort((left, right) => right.score - left.score || intensityOrder.indexOf(right.stimulusType) - intensityOrder.indexOf(left.stimulusType));
+  const fallback = [...scores].filter((item) => item.qualifyingSeconds > 0).sort((left, right) => right.score - left.score)[0];
+  const primary = eligible[0] ?? fallback;
+  const usedFallback = eligible.length === 0 && primary !== undefined;
+  const stimulusType: StimulusType = primary?.stimulusType ?? "unclassified";
+  const secondary = primary
+    ? eligible.filter((item) => item.stimulusType !== primary.stimulusType && item.score >= primary.score * 0.5).map((item) => item.stimulusType)
+    : [];
+  const explanationCodes: string[] = [];
+  if (averageOnlyHeart) explanationCodes.push("heart_rate_average_fallback");
+  if (averageOnlyPace) explanationCodes.push("pace_average_fallback");
+  if (input.profile.status !== "stable") explanationCodes.push("zone_profile_provisional");
+  const dominantHeart = normalizedHeart.reduce((best, item, index) => item.durationSeconds > best.seconds ? { index, seconds: item.durationSeconds } : best, { index: 0, seconds: 0 });
+  const dominantPace = normalizedPace.reduce((best, item, index) => item.durationSeconds > best.seconds ? { index, seconds: item.durationSeconds } : best, { index: 0, seconds: 0 });
+  const conflictFraction = duration > 0 ? Math.min(dominantHeart.seconds, dominantPace.seconds) / duration : 0;
+  const conflict = heartCoverage >= 0.5 && paceCoverage >= 0.5 && conflictFraction > 0.3 && Math.abs(dominantHeart.index - dominantPace.index) >= 2;
+  if (conflict) explanationCodes.push("heart_rate_pace_conflict");
+  if (usedFallback) explanationCodes.push("stimulus_low_confidence");
+  if (!primary) explanationCodes.push("stimulus_unclassified");
+  const stimulusConfidence = primary
+    ? clamp(Math.min(primary.confidence, usedFallback ? 0.4 : 1) - (conflict ? 0.2 : 0))
+    : 0;
+  return {
+    trainingSessionId: input.trainingSessionId,
+    zoneProfileId: input.profile.id,
+    stimulusType,
+    secondaryStimulusTypes: secondary,
+    stimulusConfidence: round(stimulusConfidence),
+    heartRateCoverage: round(heartCoverage),
+    paceCoverage: round(paceCoverage),
+    heartRateExposure: normalizedHeart,
+    paceExposure: normalizedPace,
+    stimulusScores: scores,
+    explanationCodes
+  };
+}
+
+export function trimpMinute(intensity: number): number {
+  const normalized = clamp(intensity);
+  return normalized * Math.exp(1.92 * normalized);
+}
+
+const sessionIntensity: Record<SessionType, number> = {
+  unknown: 0.48, recovery: 0.3, easy: 0.42, steady: 0.52,
+  tempo: 0.7, interval: 0.8, long_run: 0.55, race: 0.86
+};
+
+export function calculateCompositeTrainingLoad(input: CompositeLoadInput): TrainingLoadBreakdown {
+  const durationMinutes = Math.max(0, input.durationSeconds) / 60;
+  const resting = input.profile.restingHeartRateBpm;
+  const maximum = input.profile.maximumHeartRateBpm;
+  let rawHrrTrimp: number | null = null;
+  const heartSamples = validSamples(input.heartRateSamples);
+  if (heartSamples.length > 0 && maximum > resting) {
+    rawHrrTrimp = heartSamples.reduce((sum, sample) => {
+      const reserve = clamp((sample.value - resting) / (maximum - resting));
+      return sum + sample.durationSeconds / 60 * trimpMinute(reserve);
+    }, 0);
+  } else if (finite(input.averageHeartRateBpm) && maximum > resting) {
+    rawHrrTrimp = durationMinutes * trimpMinute((input.averageHeartRateBpm - resting) / (maximum - resting));
+  }
+  const internalLoad = rawHrrTrimp === null ? null : rawHrrTrimp * 100 / (60 * trimpMinute(0.85));
+
+  const threshold = input.profile.lactateThresholdPaceSecondsPerKm;
+  const speedSamples = validSamples(input.speedSamples).filter((sample) => sample.value > 0 && paceZoneFor(1000 / sample.value, input.profile) !== null);
+  let paceLoad: number | null = null;
+  if (threshold !== null && speedSamples.length > 0) {
+    paceLoad = speedSamples.reduce((sum, sample) => {
+      const pace = 1000 / sample.value;
+      const intensityFactor = clamp(threshold / pace, 0.5, 1.3);
+      return sum + sample.durationSeconds / 3600 * 100 * intensityFactor ** 2;
+    }, 0);
+  } else if (threshold !== null && finite(input.averagePaceSecondsPerKm)) {
+    const intensityFactor = clamp(threshold / input.averagePaceSecondsPerKm, 0.5, 1.3);
+    paceLoad = input.durationSeconds / 3600 * 100 * intensityFactor ** 2;
+  }
+
+  const distance = finite(input.distanceMeters) ? Math.max(0, input.distanceMeters) : null;
+  const reference = finite(input.distanceReferenceMeters) && input.distanceReferenceMeters > 0 ? input.distanceReferenceMeters : null;
+  const distanceExposureRatio = distance !== null && reference !== null ? distance / reference : null;
+  const distanceFactor = distanceExposureRatio === null ? 1 : 1 + 0.15 * clamp(distanceExposureRatio - 1, 0, 1);
+  const heartConfidence = internalLoad === null ? 0 : input.zoneSummary.heartRateCoverage > 0
+    ? input.zoneSummary.heartRateCoverage * input.profile.heartRateConfidence : 0;
+  const paceConfidence = paceLoad === null ? 0 : input.zoneSummary.paceCoverage > 0
+    ? input.zoneSummary.paceCoverage * input.profile.paceConfidence : 0;
+  const heartWeight = 0.6 * heartConfidence;
+  const paceWeight = 0.4 * paceConfidence;
+  let baseLoad: number;
+  if (heartWeight + paceWeight > 0) {
+    baseLoad = (heartWeight * (internalLoad ?? 0) + paceWeight * (paceLoad ?? 0)) / (heartWeight + paceWeight);
+  } else if (finite(input.rpe) && input.rpe >= 1 && input.rpe <= 10) {
+    baseLoad = input.durationSeconds / 3600 * 100 * (input.rpe / 10) ** 2;
+  } else {
+    const intensity = sessionIntensity[input.sessionType ?? "unknown"];
+    baseLoad = durationMinutes * trimpMinute(intensity) * 100 / (60 * trimpMinute(0.85));
+  }
+  return {
+    rawHrrTrimp: rawHrrTrimp === null ? null : round(rawHrrTrimp),
+    internalLoad: internalLoad === null ? null : round(internalLoad),
+    paceLoad: paceLoad === null ? null : round(paceLoad),
+    distanceReferenceMeters: reference === null ? null : round(reference),
+    distanceExposureRatio: distanceExposureRatio === null ? null : round(distanceExposureRatio),
+    distanceFactor: round(distanceFactor),
+    compositeLoad: round(Math.max(0, baseLoad * distanceFactor)),
+    heartRateConfidence: round(clamp(heartConfidence)),
+    paceConfidence: round(clamp(paceConfidence))
+  };
+}
+
+export function percentile(values: number[], fraction: number): number | null {
+  const finiteValues = values.filter(Number.isFinite).sort((left, right) => left - right);
+  if (finiteValues.length === 0) return null;
+  const position = (finiteValues.length - 1) * clamp(fraction);
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  const weight = position - lower;
+  return (finiteValues[lower] ?? 0) * (1 - weight) + (finiteValues[upper] ?? 0) * weight;
+}

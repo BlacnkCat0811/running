@@ -1,0 +1,208 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+import { InferenceSession, Tensor } from "onnxruntime-node";
+import {
+  CATBOOST_PREDICTION_MODEL_VERSION,
+  PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
+  predictionResidualOnnxFeatureNames,
+  PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION
+} from "@rai/contracts";
+
+export const CATBOOST_RESIDUAL_MODEL_VERSION = CATBOOST_PREDICTION_MODEL_VERSION;
+
+export interface CatBoostArtifactMetrics {
+  baseline: Record<string, unknown>;
+  candidate: Record<string, unknown>;
+  byDistance: {
+    baseline: Record<string, Record<string, unknown>>;
+    candidate: Record<string, Record<string, unknown>>;
+  };
+  meanAbsoluteErrorImprovement: number | null;
+  intervalCoverageDrop: number | null;
+}
+
+export interface CatBoostArtifactManifest {
+  modelVersion: typeof CATBOOST_RESIDUAL_MODEL_VERSION;
+  algorithm: "catboost";
+  featureSchemaVersion: string;
+  featureSchemaHash: string;
+  trainingDataHash: string;
+  modelSha256: string;
+  labelCount: number;
+  supportedDistances: Array<"five_k" | "ten_k" | "half_marathon">;
+  featureNames: string[];
+  inputName: string;
+  outputName: string;
+  correctionCapFraction: number;
+  generatedAt: string;
+  status: "accepted";
+  metrics: CatBoostArtifactMetrics;
+}
+
+export interface CatBoostPredictionResult {
+  targetLogResidual: number;
+  correctionFraction: number;
+}
+
+const sha256 = (value: Uint8Array): string =>
+  createHash("sha256").update(value).digest("hex");
+
+const clamp = (value: number, minimum: number, maximum: number): number =>
+  Math.min(maximum, Math.max(minimum, value));
+
+const isSha256 = (value: unknown): value is string =>
+  typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
+
+export function assertCatBoostArtifactManifest(
+  value: unknown
+): asserts value is CatBoostArtifactManifest {
+  if (!value || typeof value !== "object") throw new Error("CatBoost manifest must be an object");
+  const manifest = value as Partial<CatBoostArtifactManifest>;
+  if (
+    manifest.modelVersion !== CATBOOST_RESIDUAL_MODEL_VERSION ||
+    manifest.algorithm !== "catboost" ||
+    manifest.featureSchemaVersion !== PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION ||
+    manifest.status !== "accepted"
+  ) {
+    throw new Error("Unsupported CatBoost artifact version");
+  }
+  if (
+    !isSha256(manifest.featureSchemaHash) ||
+    !isSha256(manifest.trainingDataHash) ||
+    !isSha256(manifest.modelSha256) ||
+    typeof manifest.inputName !== "string" || manifest.inputName.length === 0 ||
+    typeof manifest.outputName !== "string" || manifest.outputName.length === 0 ||
+    manifest.inputName === manifest.outputName ||
+    typeof manifest.generatedAt !== "string" || !Number.isFinite(Date.parse(manifest.generatedAt)) ||
+    !Array.isArray(manifest.featureNames) ||
+    manifest.featureNames.length === 0 ||
+    !manifest.featureNames.every((name) => typeof name === "string") ||
+    new Set(manifest.featureNames).size !== manifest.featureNames.length ||
+    !Array.isArray(manifest.supportedDistances) ||
+    manifest.supportedDistances.length === 0 ||
+    !manifest.supportedDistances.every((distance) =>
+      distance === "five_k" || distance === "ten_k" || distance === "half_marathon"
+    ) ||
+    new Set(manifest.supportedDistances).size !== manifest.supportedDistances.length ||
+    typeof manifest.labelCount !== "number" ||
+    !Number.isInteger(manifest.labelCount) ||
+    manifest.labelCount <= 0 ||
+    typeof manifest.correctionCapFraction !== "number" ||
+    !Number.isFinite(manifest.correctionCapFraction) ||
+    manifest.correctionCapFraction <= 0 ||
+    manifest.correctionCapFraction > 0.25
+  ) {
+    throw new Error("CatBoost manifest is incomplete or invalid");
+  }
+  if (!manifest.metrics || typeof manifest.metrics !== "object") {
+    throw new Error("CatBoost manifest metrics are missing");
+  }
+  if (
+    manifest.featureSchemaHash !== PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH ||
+    JSON.stringify(manifest.featureNames) !== JSON.stringify(predictionResidualOnnxFeatureNames)
+  ) {
+    throw new Error("CatBoost manifest does not match the runtime feature contract");
+  }
+}
+
+export function correctionFractionFromLogResidual(
+  targetLogResidual: number,
+  maximumCorrectionFraction = 0.12
+): number {
+  if (!Number.isFinite(targetLogResidual)) throw new Error("CatBoost output must be finite");
+  if (
+    !Number.isFinite(maximumCorrectionFraction) ||
+    maximumCorrectionFraction <= 0 ||
+    maximumCorrectionFraction > 0.25
+  ) {
+    throw new Error("maximumCorrectionFraction must be between 0 and 0.25");
+  }
+  return clamp(
+    Math.exp(targetLogResidual) - 1,
+    -maximumCorrectionFraction,
+    maximumCorrectionFraction
+  );
+}
+
+export class OnnxCatBoostResidualModel {
+  private constructor(
+    readonly artifactDirectory: string,
+    readonly manifest: CatBoostArtifactManifest,
+    private readonly session: InferenceSession
+  ) {}
+
+  static async load(artifactDirectory: string): Promise<OnnxCatBoostResidualModel> {
+    const directory = resolve(artifactDirectory);
+    const manifestPath = resolve(directory, "manifest.json");
+    const modelPath = resolve(directory, "model.onnx");
+    const [manifestBytes, modelBytes] = await Promise.all([
+      readFile(manifestPath),
+      readFile(modelPath)
+    ]);
+    const parsed = JSON.parse(manifestBytes.toString("utf8")) as unknown;
+    assertCatBoostArtifactManifest(parsed);
+    if (sha256(modelBytes) !== parsed.modelSha256) {
+      throw new Error("CatBoost ONNX artifact hash mismatch");
+    }
+    const session = await InferenceSession.create(modelBytes, {
+      executionProviders: ["cpu"],
+      graphOptimizationLevel: "all"
+    });
+    if (session.inputNames.length !== 1 || session.inputNames[0] !== parsed.inputName) {
+      throw new Error(`CatBoost ONNX input not found: ${parsed.inputName}`);
+    }
+    if (session.outputNames.length !== 1 || session.outputNames[0] !== parsed.outputName) {
+      throw new Error(`CatBoost ONNX output not found: ${parsed.outputName}`);
+    }
+    const input = session.inputMetadata[0];
+    const output = session.outputMetadata[0];
+    if (
+      input?.isTensor !== true ||
+      input?.type !== "float32" ||
+      input.shape.length !== 2 ||
+      input.shape[1] !== parsed.featureNames.length
+    ) {
+      throw new Error("CatBoost ONNX input metadata does not match the feature contract");
+    }
+    if (output?.isTensor !== true || output.type !== "float32") {
+      throw new Error("CatBoost ONNX output must be float32");
+    }
+    const model = new OnnxCatBoostResidualModel(directory, parsed, session);
+    await model.predict(Object.fromEntries(parsed.featureNames.map((name) => [name, 0])));
+    return model;
+  }
+
+  supportsDistance(distance: "five_k" | "ten_k" | "half_marathon"): boolean {
+    return this.manifest.supportedDistances.includes(distance);
+  }
+
+  async predict(features: Readonly<Record<string, number | null | undefined>>): Promise<CatBoostPredictionResult> {
+    const values = this.manifest.featureNames.map((name) => {
+      if (!Object.prototype.hasOwnProperty.call(features, name)) {
+        throw new Error(`CatBoost feature is missing: ${name}`);
+      }
+      const value = features[name];
+      if (value === null || value === undefined) return Number.NaN;
+      if (!Number.isFinite(value)) throw new Error(`CatBoost feature must be finite: ${name}`);
+      return value;
+    });
+    const tensor = new Tensor("float32", Float32Array.from(values), [1, values.length]);
+    const outputs = await this.session.run({ [this.manifest.inputName]: tensor });
+    const output = outputs[this.manifest.outputName];
+    if (!output || output.data.length !== 1) {
+      throw new Error("CatBoost ONNX output shape is invalid");
+    }
+    const raw = output?.data[0];
+    const targetLogResidual = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(targetLogResidual)) throw new Error("CatBoost ONNX output is invalid");
+    return {
+      targetLogResidual,
+      correctionFraction: correctionFractionFromLogResidual(
+        targetLogResidual,
+        this.manifest.correctionCapFraction
+      )
+    };
+  }
+}

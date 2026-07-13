@@ -1,0 +1,28 @@
+# Sensitive source data and generated databases
+apple_health_export/
+*.zip
+var/
+data/private/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python research environments
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

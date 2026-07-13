@@ -1,0 +1,45 @@
+{
+  "name": "rai-running-intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --import tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts",
+    "test:e2e": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/*.test.ts",
+    "test:all": "npm run typecheck && npm test && npm run ml:test && npm run test:e2e",
+    "dev": "concurrently -n api,web -c green,cyan \"npm run dev -w @rai/api\" \"npm run dev -w @rai/web\"",
+    "dev:api": "npm run dev -w @rai/api",
+    "dev:web": "npm run dev -w @rai/web",
+    "build": "npm run build -w @rai/web",
+    "start": "npm run ml:check && npm run build && npm run start -w @rai/api",
+    "smoke:api": "node apps/api/test/production-runtime-smoke.mjs",
+    "data:import": "tsx packages/health-export-parser/src/cli.ts import",
+    "data:incremental-import": "tsx packages/health-export-parser/src/cli.ts incremental-import",
+    "data:audit": "tsx packages/health-export-parser/src/cli.ts audit",
+    "data:recompute": "tsx packages/application/src/cli.ts recompute",
+    "data:refresh-snapshots": "tsx packages/application/src/cli.ts refresh-snapshots",
+    "data:analyze": "tsx packages/application/src/analyze-cli.ts",
+    "data:predict": "tsx packages/application/src/prediction-cli.ts",
+    "data:prediction-eval": "tsx packages/application/src/prediction-eval-cli.ts",
+    "ml:bootstrap": "node research/scripts/python-env.mjs --bootstrap",
+    "ml:check": "node research/scripts/python-env.mjs --check",
+    "ml:install": "npm run ml:bootstrap",
+    "ml:test": "node research/scripts/python-env.mjs --pytest",
+    "ml:train": "node research/scripts/python-env.mjs --train"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "concurrently": "^9.2.0",
+    "playwright-core": "^1.61.1",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

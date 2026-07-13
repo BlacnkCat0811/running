@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import json
+import math
+
+import pytest
+
+from rai_ml.contract import (
+    BASE_FEATURE_NAMES,
+    ContractError,
+    FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION,
+    dataset_sha256,
+    load_jsonl,
+)
+
+
+def row(sample_id: str = "sample-1", observed_at: str = "2026-01-01T00:00:00Z"):
+    baseline = 1500.0
+    features = {name: 1.0 for name in BASE_FEATURE_NAMES}
+    features["logPredictedSeconds"] = math.log(baseline)
+    features["readiness"] = 0.7
+    features["lactateThresholdConfidence"] = 0.5
+    features["recoveryReadiness"] = 0.8
+    features["overallDataQuality"] = 0.9
+    return {
+        "schemaVersion": FEATURE_SCHEMA_VERSION,
+        "sampleId": sample_id,
+        "observedAt": observed_at,
+        "completedAt": "2026-01-01T00:30:00Z",
+        "distance": "five_k",
+        "baselinePredictedSeconds": baseline,
+        "baselineOptimisticSeconds": 1450.0,
+        "baselinePessimisticSeconds": 1600.0,
+        "actualSeconds": 1530.0,
+        "features": features,
+    }
+
+
+def write_jsonl(tmp_path, rows):
+    path = tmp_path / "samples.jsonl"
+    path.write_text("".join(json.dumps(item) + "\n" for item in rows), encoding="utf-8")
+    return path
+
+
+def test_loads_contract_and_builds_ordered_float_features(tmp_path):
+    sample = load_jsonl(write_jsonl(tmp_path, [row()]))[0]
+    assert len(sample.feature_row()) == len(FEATURE_NAMES)
+    assert sample.feature_row()[-3:] == [1.0, 0.0, 0.0]
+    assert sample.target_log_residual == pytest.approx(math.log(1530 / 1500))
+
+
+def test_null_feature_becomes_nan(tmp_path):
+    value = row()
+    value["features"]["temperatureC"] = None
+    sample = load_jsonl(write_jsonl(tmp_path, [value]))[0]
+    index = FEATURE_NAMES.index("temperatureC")
+    assert math.isnan(sample.feature_row()[index])
+
+
+def test_rejects_unknown_fields_and_future_order(tmp_path):
+    unknown = row()
+    unknown["features"]["futureMetric"] = 1
+    with pytest.raises(ContractError, match="unknown feature"):
+        load_jsonl(write_jsonl(tmp_path, [unknown]))
+    later = row("later", "2026-01-02T00:00:00Z")
+    later["completedAt"] = "2026-01-02T00:30:00Z"
+    earlier = row("earlier")
+    with pytest.raises(ContractError, match="must be ordered"):
+        load_jsonl(write_jsonl(tmp_path, [later, earlier]))
+
+
+def test_dataset_hash_is_canonical(tmp_path):
+    first = load_jsonl(write_jsonl(tmp_path, [row()]))
+    second = load_jsonl(write_jsonl(tmp_path, [row()]))
+    assert dataset_sha256(first) == dataset_sha256(second)
+
+
+def test_ordering_uses_absolute_instants_instead_of_raw_timezone_strings(tmp_path):
+    later = row("later", "2026-01-01T00:00:00Z")
+    earlier = row("earlier", "2026-01-01T00:30:00+02:00")
+    earlier["completedAt"] = "2025-12-31T23:00:00Z"
+    with pytest.raises(ContractError, match="must be ordered"):
+        load_jsonl(write_jsonl(tmp_path, [later, earlier]))
