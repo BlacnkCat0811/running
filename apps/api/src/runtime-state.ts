@@ -41,21 +41,35 @@ export class RuntimeStateStore {
   }
 
   migrateLegacySources(path: string): void {
-    this.migrateOnce("legacy_sources_json_v1", () => {
-      if (!existsSync(path)) return;
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: number; sources?: RuntimeImportSourceRow[] };
-      if (parsed.version !== 1 || !Array.isArray(parsed.sources)) return;
-      for (const source of parsed.sources) this.upsertSource(source);
+    if (!existsSync(path)) return;
+    let parsed: { version?: number; sources?: RuntimeImportSourceRow[] };
+    try {
+      parsed = JSON.parse(readFileSync(path, "utf8")) as typeof parsed;
+    } catch (error) {
+      if (error instanceof SyntaxError) return;
+      throw error;
+    }
+    if (parsed.version !== 1 || !Array.isArray(parsed.sources)) return;
+    this.migrateOnce("legacy_sources_json_v1", (db) => {
+      for (const source of parsed.sources ?? []) this.upsertSourceIn(db, source);
     });
   }
 
   migrateLegacyJobs(path: string): void {
-    this.migrateOnce("legacy_import_jobs_json_v1", () => {
-      if (!existsSync(path)) return;
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as RuntimeImportJobRow[];
-      if (!Array.isArray(parsed)) return;
+    if (!existsSync(path)) return;
+    let parsed: RuntimeImportJobRow[];
+    try {
+      parsed = JSON.parse(readFileSync(path, "utf8")) as RuntimeImportJobRow[];
+    } catch (error) {
+      if (error instanceof SyntaxError) return;
+      throw error;
+    }
+    if (!Array.isArray(parsed)) return;
+    this.migrateOnce("legacy_import_jobs_json_v1", (db) => {
       for (const job of parsed.slice(-20)) {
-        if (job && typeof job.id === "string" && typeof job.inputPath === "string") this.upsertJob(job);
+        if (job && typeof job.id === "string" && typeof job.inputPath === "string") {
+          this.upsertJobIn(db, job);
+        }
       }
     });
   }
@@ -75,7 +89,12 @@ export class RuntimeStateStore {
   upsertSource(source: RuntimeImportSourceRow): void {
     const db = this.open();
     try {
-      db.prepare(`INSERT INTO import_sources (id, kind, display_name, input_path, original_path,
+      this.upsertSourceIn(db, source);
+    } finally { db.close(); }
+  }
+
+  private upsertSourceIn(db: DatabaseSync, source: RuntimeImportSourceRow): void {
+    db.prepare(`INSERT INTO import_sources (id, kind, display_name, input_path, original_path,
         source_sha256, export_file_name, export_bytes, route_file_count, modified_at, created_at, last_used_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, display_name=excluded.display_name,
@@ -93,7 +112,6 @@ export class RuntimeStateStore {
         source.sourceSha256, source.exportFileName, source.exportBytes, source.routeFileCount,
         source.modifiedAt, source.createdAt, source.lastUsedAt
       );
-    } finally { db.close(); }
   }
 
   deleteSource(id: string): void {
@@ -119,7 +137,12 @@ export class RuntimeStateStore {
   upsertJob(job: RuntimeImportJobRow): void {
     const db = this.open();
     try {
-      db.prepare(`INSERT INTO import_jobs (id, status, phase, message, created_at, completed_at,
+      this.upsertJobIn(db, job);
+    } finally { db.close(); }
+  }
+
+  private upsertJobIn(db: DatabaseSync, job: RuntimeImportJobRow): void {
+    db.prepare(`INSERT INTO import_jobs (id, status, phase, message, created_at, completed_at,
         error, input_path, progress, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET status=excluded.status, phase=excluded.phase,
         message=excluded.message, completed_at=excluded.completed_at, error=excluded.error,
@@ -127,7 +150,6 @@ export class RuntimeStateStore {
         job.id, job.status, job.phase, job.message, job.createdAt, job.completedAt,
         job.error, job.inputPath, job.progress ?? null, job.summary === undefined ? null : JSON.stringify(job.summary)
       );
-    } finally { db.close(); }
   }
 
   private initialize(): void {
@@ -154,15 +176,23 @@ export class RuntimeStateStore {
     } finally { db.close(); }
   }
 
-  private migrateOnce(key: string, migration: () => void): void {
+  private migrateOnce(key: string, migration: (db: DatabaseSync) => void): void {
     const db = this.open();
     try {
-      if (db.prepare("SELECT 1 FROM runtime_meta WHERE key = ?").get(key)) return;
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        if (db.prepare("SELECT 1 FROM runtime_meta WHERE key = ?").get(key)) {
+          db.exec("COMMIT");
+          return;
+        }
+        migration(db);
+        db.prepare("INSERT INTO runtime_meta (key, value) VALUES (?, ?)").run(key, new Date().toISOString());
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
     } finally { db.close(); }
-    try { migration(); } catch { /* Invalid legacy state must not block startup. */ }
-    const marker = this.open();
-    try { marker.prepare("INSERT OR IGNORE INTO runtime_meta (key, value) VALUES (?, ?)").run(key, new Date().toISOString()); }
-    finally { marker.close(); }
   }
 
   private open(): DatabaseSync {

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import type { HealthResponse } from "@rai/api-contracts";
 import {
   NavLink,
@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   Target,
   Timer,
+  Warning,
 } from "./icons.js";
 
 const DashboardPage = lazy(() =>
@@ -99,6 +100,26 @@ const mobileNavigation = [
   { to: "/more", label: "更多", icon: DotsThree },
 ];
 
+const pageTitles: Record<string, string> = {
+  "/": "概览",
+  "/workouts": "训练记录",
+  "/zones": "训练分区",
+  "/statistics": "运动统计",
+  "/trends": "能力趋势",
+  "/predictions": "成绩预测",
+  "/data": "数据与模型",
+  "/data/audit": "数据审计",
+  "/settings": "设置",
+  "/more": "更多",
+};
+
+function titleForPath(pathname: string): string {
+  const pageTitle = pathname.startsWith("/workouts/")
+    ? "训练详情"
+    : pageTitles[pathname] ?? "个人跑步能力";
+  return `${pageTitle} - RAI`;
+}
+
 function NavigationLinks({
   items,
   className,
@@ -157,6 +178,8 @@ function AppNavigation() {
 
 export function App() {
   const health = useRemote<HealthResponse>("/v1/health", true, true, false);
+  const mainRef = useRef<HTMLElement>(null);
+  const previousPathname = useRef<string | null>(null);
   useEffect(() => {
     const refreshDatabaseState = () => {
       void health.reload();
@@ -169,6 +192,16 @@ export function App() {
       );
   }, [health.reload]);
   const location = useLocation();
+  useEffect(() => {
+    document.title = titleForPath(location.pathname);
+    if (
+      previousPathname.current !== null &&
+      previousPathname.current !== location.pathname
+    ) {
+      mainRef.current?.focus({ preventScroll: true });
+    }
+    previousPathname.current = location.pathname;
+  }, [location.pathname]);
   const canOpenWithoutDatabase =
     location.pathname === "/data" ||
     location.pathname === "/settings" ||
@@ -177,7 +210,7 @@ export function App() {
     <div className="page">
       <LoadingBlock label="正在检查本地数据库" />
     </div>
-  ) : health.error || !health.data ? (
+  ) : !health.data ? (
     <div className="page">
       <ErrorBlock
         message={health.error ?? "无法连接本地 API"}
@@ -223,7 +256,28 @@ export function App() {
       </a>
       <AppNavigation />
       <GlobalTaskStatus />
-      <main id="main-content" className="app-content" tabIndex={-1}>
+      <main
+        ref={mainRef}
+        id="main-content"
+        className="app-content"
+        tabIndex={-1}
+      >
+        {health.error && health.data ? (
+          <div className="background-refresh-error" role="status">
+            <Warning size={18} />
+            <span>
+              <b>数据库状态刷新失败</b>
+              <small>{health.error}，当前继续显示上次成功读取的数据。</small>
+            </span>
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => void health.reload()}
+            >
+              重试
+            </button>
+          </div>
+        ) : null}
         {content}
       </main>
     </div>

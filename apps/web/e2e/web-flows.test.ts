@@ -4,7 +4,8 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { backup, DatabaseSync } from "node:sqlite";
 import test, { after, before, type TestContext } from "node:test";
 
 import { chromium, type Browser, type Page } from "playwright-core";
@@ -40,6 +41,7 @@ interface RunningApi {
 
 let browser: Browser;
 let realApi: RunningApi | null = null;
+let fixtureApi: RunningApi;
 let firstRunApi: RunningApi;
 let temporaryRoot: string;
 let syntheticExport: string;
@@ -140,6 +142,26 @@ async function createSyntheticExport(path: string): Promise<void> {
   <Me biologicalSex="HKBiologicalSexMale"/>${workouts}
 </HealthData>`;
   await writeFile(resolve(path, "export.xml"), xml, "utf8");
+}
+
+async function backupDatabase(sourcePath: string, destinationPath: string): Promise<void> {
+  await mkdir(dirname(destinationPath), { recursive: true });
+  const source = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    await backup(source, destinationPath);
+  } finally {
+    source.close();
+  }
+}
+
+async function importSyntheticFixture(api: RunningApi): Promise<void> {
+  const response = await fetch(`${api.origin}/v1/import-jobs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ inputPath: syntheticExport, confirmReplace: true }),
+  });
+  assert.equal(response.status, 200, await response.text());
+  await waitForImport(api.origin);
 }
 
 async function forceStopApiProcess(child: ChildProcess): Promise<void> {
@@ -399,13 +421,23 @@ before(async () => {
   await createSyntheticExport(syntheticExport);
   firstRunApi = await startApi(
     resolve(temporaryRoot, "database", "rai.sqlite"),
-    temporaryRoot,
+    resolve(temporaryRoot, "first-run"),
   );
-  if (existsSync(realDatabase)) realApi = await startApi(realDatabase);
+  const fixtureRoot = resolve(temporaryRoot, "fixture");
+  fixtureApi = await startApi(resolve(fixtureRoot, "var/rai.sqlite"), fixtureRoot);
+  await importSyntheticFixture(fixtureApi);
+  if (
+    process.env.npm_lifecycle_event === "test:e2e:responsive" &&
+    existsSync(realDatabase)
+  ) {
+    const realDatabaseCopy = resolve(temporaryRoot, "workspace-copy", "var/rai.sqlite");
+    await backupDatabase(realDatabase, realDatabaseCopy);
+    realApi = await startApi(realDatabaseCopy, resolve(temporaryRoot, "workspace-copy"));
+  }
 });
 
 after(async () => {
-  await Promise.all([stopApi(realApi), stopApi(firstRunApi)]);
+  await Promise.all([stopApi(realApi), stopApi(fixtureApi), stopApi(firstRunApi)]);
   await browser?.close();
   if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
 });
@@ -437,6 +469,41 @@ desktopTest("无数据库时只开放安全的首次导入流程", async () => {
         name: "从 Apple Health 导出 建立你的 RAI 时间线",
       })
       .waitFor();
+    assert.equal(await page.title(), "概览 - RAI");
+    await page.route(
+      "**/v1/health",
+      async (route) => {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ message: "后台健康检查暂不可用" }),
+        });
+      },
+      { times: 1 },
+    );
+    await page.evaluate(() =>
+      window.dispatchEvent(new Event("rai:database-state-changed")),
+    );
+    await page
+      .getByRole("status")
+      .filter({ hasText: "后台健康检查暂不可用" })
+      .waitFor();
+    await page
+      .getByRole("heading", {
+        name: "从 Apple Health 导出 建立你的 RAI 时间线",
+      })
+      .waitFor();
+    consumeExpectedHttpFailures(runtimeErrors, 503, "/v1/health");
+    await page.getByRole("button", { name: "重试" }).click();
+    await page
+      .getByText("数据库状态刷新失败")
+      .waitFor({ state: "hidden" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page
+      .getByRole("heading", {
+        name: "从 Apple Health 导出 建立你的 RAI 时间线",
+      })
+      .waitFor();
     await page.keyboard.press("Tab");
     assert.equal(
       await page
@@ -460,6 +527,7 @@ desktopTest("无数据库时只开放安全的首次导入流程", async () => {
     await page.goto(`${firstRunApi.origin}/data`, {
       waitUntil: "domcontentloaded",
     });
+    assert.equal(await page.title(), "数据与模型 - RAI");
     assert.equal(
       await page.getByRole("button", { name: "完整重算" }).isDisabled(),
       true,
@@ -498,11 +566,7 @@ desktopTest("无数据库时只开放安全的首次导入流程", async () => {
   }
 });
 
-desktopTest("概览趋势失败时显示可重试错误而非永久加载", async (t) => {
-  if (!realApi) {
-    t.skip("工作区没有 var/rai.sqlite，跳过真实数据趋势错误态 E2E");
-    return;
-  }
+desktopTest("概览趋势失败时显示可重试错误而非永久加载", async () => {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
   });
@@ -520,7 +584,7 @@ desktopTest("概览趋势失败时显示可重试错误而非永久加载", asyn
       },
       { times: 1 },
     );
-    await page.goto(realApi.origin, { waitUntil: "domcontentloaded" });
+    await page.goto(fixtureApi.origin, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "你的跑步能力" }).waitFor();
     await page.getByRole("alert").filter({ hasText: "趋势暂不可用" }).waitFor();
     consumeExpectedHttpFailures(runtimeErrors, 500, "/v1/trends?days=28");
@@ -532,23 +596,26 @@ desktopTest("概览趋势失败时显示可重试错误而非永久加载", asyn
   }
 });
 
-desktopTest("真实数据主流程可导航、筛选、检查详情和只读比较", async (t) => {
-  if (!realApi) {
-    t.skip("工作区没有 var/rai.sqlite，跳过真实数据只读 E2E");
-    return;
-  }
+desktopTest("合成数据主流程可导航、筛选、检查详情和只读比较", async () => {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
   });
   const page = await context.newPage();
   const runtimeErrors = collectRuntimeErrors(page);
   try {
-    await page.goto(realApi.origin, { waitUntil: "domcontentloaded" });
+    await page.goto(fixtureApi.origin, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "你的跑步能力" }).waitFor();
     await page.getByText("诊断，不参与当前 CA", { exact: true }).waitFor();
 
     await page.getByRole("link", { name: "训练", exact: true }).click();
     await page.getByRole("heading", { name: "训练记录" }).waitFor();
+    assert.equal(await page.title(), "训练记录 - RAI");
+    assert.equal(
+      await page
+        .locator("#main-content")
+        .evaluate((element) => element === document.activeElement),
+      true,
+    );
     const normalizedWorkoutRequest = page.waitForResponse(
       (response) =>
         response.url().includes("/v1/workouts?") &&
@@ -556,7 +623,7 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
         response.url().includes("offset=0"),
     );
     await page.goto(
-      `${realApi.origin}/workouts?unknown=1&status=bogus&environment=outdoor&offset=NaN`,
+      `${fixtureApi.origin}/workouts?unknown=1&status=bogus&environment=outdoor&offset=NaN`,
       { waitUntil: "domcontentloaded" },
     );
     await normalizedWorkoutRequest;
@@ -564,7 +631,7 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
       () => window.location.search === "?environment=outdoor",
     );
     assert.equal(await page.getByLabel("环境").inputValue(), "outdoor");
-    await page.goto(`${realApi.origin}/workouts?offset=-3.8`, {
+    await page.goto(`${fixtureApi.origin}/workouts?offset=-3.8`, {
       waitUntil: "domcontentloaded",
     });
     await page.waitForFunction(() => window.location.search === "");
@@ -580,7 +647,21 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
     await page.getByLabel("来源").selectOption("apple_watch");
     await filteredResponse;
     await page.locator(".workout-table .row-link").first().waitFor();
+    await page.getByRole("table", { name: "训练记录" }).waitFor();
     assert.ok((await page.locator(".workout-table tbody tr").count()) > 0);
+    await page.goBack();
+    await page.waitForFunction(
+      () => !window.location.search.includes("sourceGroup="),
+    );
+    assert.equal(await page.getByLabel("来源").inputValue(), "");
+    await page.goForward();
+    await page.waitForFunction(() =>
+      window.location.search.includes("sourceGroup=apple_watch"),
+    );
+    assert.equal(
+      await page.getByLabel("来源").inputValue(),
+      "apple_watch",
+    );
     const stimulusResponse = page.waitForResponse(
       (response) =>
         response.url().includes("/v1/workouts?") &&
@@ -603,6 +684,9 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
     await page.locator(".workout-table .row-link").first().click();
     await page.getByRole("heading", { name: /跑步$/ }).waitFor();
     await page.getByRole("heading", { name: "公里分段" }).waitFor();
+    if (await page.locator(".splits-table").count()) {
+      await page.getByRole("table", { name: "公里分段" }).waitFor();
+    }
     if (await page.locator(".workout-zones-panel").count()) {
       await page.locator(".workout-zone-distribution", { hasText: "心率分区" }).waitFor();
       await page.locator(".workout-zone-distribution", { hasText: "配速分区" }).waitFor();
@@ -621,6 +705,22 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
       await page
         .locator(".series-chart header span", { hasText: title })
         .waitFor();
+    }
+    const heartRateData = page.getByText("查看心率数据", { exact: true });
+    if (await heartRateData.count()) {
+      assert.equal(
+        await page.getByRole("table", { name: "心率训练时间序列数据" }).count(),
+        0,
+      );
+      await heartRateData.click();
+      await page
+        .getByRole("table", { name: "心率训练时间序列数据" })
+        .waitFor();
+      await heartRateData.click();
+      assert.equal(
+        await page.getByRole("table", { name: "心率训练时间序列数据" }).count(),
+        0,
+      );
     }
     await page.getByRole("button", { name: "编辑覆盖" }).click();
     const overrideDialog = page.getByRole("dialog", { name: "编辑训练覆盖" });
@@ -672,6 +772,19 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
     await page.getByText("TA 真实跑力", { exact: true }).waitFor();
     await page.getByRole("heading", { name: "五维即时趋势" }).waitFor();
     await page.getByRole("heading", { name: "训练上下文" }).waitFor();
+    const dimensionData = page.getByText("查看五维即时趋势数据", {
+      exact: true,
+    });
+    if (await dimensionData.count()) {
+      await dimensionData.click();
+      await page
+        .getByRole("table", { name: "五维即时能力趋势数据" })
+        .waitFor();
+    }
+    await page.getByText("查看训练上下文数据", { exact: true }).click();
+    await page
+      .getByRole("table", { name: "训练上下文数据" })
+      .waitFor();
     const caDataEntry = page.locator(".ability-chart-data summary").first();
     assert.equal(await page.getByRole("link", { name: /即时能力 CA.*查看训练详情/ }).count(), 0);
     await caDataEntry.focus();
@@ -716,15 +829,15 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
     await page.getByRole("heading", { name: "CatBoost 预测模型" }).waitFor();
     await page.getByText(/CatBoost 已激活|公式基线/, { exact: true }).waitFor();
     const invalidHumidity = await fetch(
-      `${realApi.origin}/v1/predictions?humidityPercent=101`,
+      `${fixtureApi.origin}/v1/predictions?humidityPercent=101`,
     );
     assert.equal(invalidHumidity.status, 400);
     const unknownPredictionParameter = await fetch(
-      `${realApi.origin}/v1/predictions?unknown=1`,
+      `${fixtureApi.origin}/v1/predictions?unknown=1`,
     );
     assert.equal(unknownPredictionParameter.status, 400);
     const predictionPrivacy = JSON.stringify(
-      await fetch(`${realApi.origin}/v1/predictions`).then((response) =>
+      await fetch(`${fixtureApi.origin}/v1/predictions`).then((response) =>
         response.json(),
       ),
     );
@@ -758,7 +871,7 @@ desktopTest("真实数据主流程可导航、筛选、检查详情和只读比�
 
     await page.getByRole("link", { name: "设置", exact: true }).click();
     await page.getByRole("heading", { name: "健康免责声明" }).waitFor();
-    const diagnosticResponse = await fetch(`${realApi.origin}/v1/diagnostics`);
+    const diagnosticResponse = await fetch(`${fixtureApi.origin}/v1/diagnostics`);
     assert.equal(diagnosticResponse.ok, true);
     assert.match(
       diagnosticResponse.headers.get("content-disposition") ?? "",

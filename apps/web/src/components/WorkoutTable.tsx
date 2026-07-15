@@ -11,7 +11,8 @@ export function WorkoutTable({ items, compact = false }: { items: WorkoutListIte
   return (
     <div className="workout-table-wrap">
       <table className={`workout-table ${compact ? "compact" : ""}`}>
-        <thead><tr><th>日期</th><th>训练</th><th>距离</th><th>配速</th><th>心率</th><th>CA</th><th>置信度</th><th>状态</th></tr></thead>
+        <caption className="sr-only">{compact ? "最近训练" : "训练记录"}</caption>
+        <thead><tr><th scope="col">日期</th><th scope="col">训练</th><th scope="col">距离</th><th scope="col">配速</th><th scope="col">心率</th><th scope="col">CA</th><th scope="col">置信度</th><th scope="col">状态</th></tr></thead>
         <tbody>
           {items.map((item) => (
             <tr key={item.id}>

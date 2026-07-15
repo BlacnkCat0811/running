@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 import yazl from "yazl";
 
-import { ImportSourceManager } from "../src/import-sources.js";
+import { ImportSourceManager, ImportSourceNotFoundError } from "../src/import-sources.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 
 async function zip(path: string, entries: Array<{ name: string; body: string }>): Promise<void> {
@@ -49,7 +49,8 @@ test("uploads and inspects a nested Apple Health ZIP", async () => {
 
     await manager.markUsed(inspection.sourceId);
     assert.equal((await manager.recent())[0]?.id, inspection.sourceId);
-    await manager.cleanupUpload(inspection.sourceId);
+    assert.equal(await manager.cleanupUpload(inspection.sourceId), true);
+    assert.equal(await manager.cleanupUpload(inspection.sourceId), false);
     assert.equal(existsSync(join(root, "var", "imports", inspection.sourceId)), false);
     assert.equal(await manager.get(inspection.sourceId), null);
     assert.deepEqual(await manager.recent(), []);
@@ -153,5 +154,36 @@ test("migrates legacy source JSON once and keeps SQLite as the source of truth",
     writeFileSync(metadata, JSON.stringify({ version: 1, sources: [{ ...legacy, displayName: "changed-json" }] }), "utf8");
     assert.equal((await new ImportSourceManager(root, root).get(legacy.id))?.displayName, "legacy");
     assert.equal(existsSync(join(root, "var", "runtime.sqlite")), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("rolls back a failed legacy migration and retries it on the next startup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-source-migration-retry-"));
+  const imports = join(root, "var", "imports");
+  mkdirSync(imports, { recursive: true });
+  const valid = {
+    id: "local_valid", kind: "directory", displayName: "valid", inputPath: join(root, "export"),
+    originalPath: join(root, "export"), sourceSha256: null, exportFileName: "export.xml",
+    exportBytes: 42, routeFileCount: 0, modifiedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z", lastUsedAt: null
+  };
+  const metadata = join(imports, "sources.json");
+  writeFileSync(metadata, JSON.stringify({ version: 1, sources: [valid, { ...valid, kind: null }] }), "utf8");
+  try {
+    assert.throws(() => new ImportSourceManager(root, root));
+    assert.deepEqual(new RuntimeStateStore(root).sources(), []);
+    writeFileSync(metadata, JSON.stringify({ version: 1, sources: [valid] }), "utf8");
+    assert.equal((await new ImportSourceManager(root, root).get(valid.id))?.displayName, "valid");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ignores malformed legacy JSON without hiding typed source lookup errors", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-source-invalid-legacy-"));
+  const imports = join(root, "var", "imports");
+  mkdirSync(imports, { recursive: true });
+  writeFileSync(join(imports, "sources.json"), "{not-json", "utf8");
+  try {
+    const manager = new ImportSourceManager(root, root);
+    await assert.rejects(manager.inspect("upload_missing"), ImportSourceNotFoundError);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

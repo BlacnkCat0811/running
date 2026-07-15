@@ -45,6 +45,90 @@ test("creates an online backup containing committed WAL data and lists it", asyn
   }
 });
 
+test("enforces backup retention while preserving the newest snapshot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-retention-"));
+  const databasePath = join(root, "rai.sqlite");
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('retained');");
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { maxCount: 2, maxTotalBytes: Number.MAX_SAFE_INTEGER, minimumFreeBytes: 1 }
+    );
+    await maintenance.createBackup("first");
+    await maintenance.createBackup("second");
+    const newest = await maintenance.createBackup("third");
+    const listed = await maintenance.listBackups();
+    assert.equal(listed.length, 2);
+    assert.equal(listed.some((item) => item.name === newest.name), true);
+    assert.equal(listed.some((item) => item.name.includes("first")), false);
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("does not prune a backup selected as a restore source", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-protected-restore-"));
+  const databasePath = join(root, "rai.sqlite");
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('protected');");
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { maxCount: 1, maxTotalBytes: Number.MAX_SAFE_INTEGER, minimumFreeBytes: 1 }
+    );
+    const restoreSource = await maintenance.createBackup("restore-source");
+    const safety = await maintenance.createBackup("before-restore", [restoreSource.name]);
+    const names = (await maintenance.listBackups()).map((item) => item.name);
+    assert.equal(names.includes(restoreSource.name), true);
+    assert.equal(names.includes(safety.name), true);
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("deletes an explicitly selected backup and rejects insufficient disk capacity", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-capacity-"));
+  const databasePath = join(root, "rai.sqlite");
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('capacity');");
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    const created = await maintenance.createBackup("delete-me");
+    assert.equal((await maintenance.deleteBackup(created.name)).name, created.name);
+    assert.deepEqual(await maintenance.listBackups(), []);
+
+    const constrained = new DatabaseMaintenance(
+      databasePath,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { minimumFreeBytes: Number.MAX_SAFE_INTEGER }
+    );
+    await assert.rejects(constrained.createBackup(), /磁盘空间不足/);
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("does not expose a partial backup when SQLite backup fails", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-maintenance-failed-backup-"));
   const databasePath = join(root, "invalid.sqlite");

@@ -46,6 +46,14 @@ export interface ZipLimits {
   maxCompressionRatio: number;
 }
 
+export class ImportSourceNotFoundError extends Error {
+  readonly statusCode = 404;
+
+  constructor() {
+    super("未找到导入来源");
+  }
+}
+
 const DEFAULT_LIMITS: ZipLimits = {
   maxArchiveBytes: 4 * 1024 ** 3,
   maxExtractedBytes: 12 * 1024 ** 3,
@@ -108,7 +116,7 @@ export class ImportSourceManager {
 
   async inspect(id: string): Promise<ImportInspection> {
     const source = await this.get(id);
-    if (!source) throw new Error("未找到导入来源");
+    if (!source) throw new ImportSourceNotFoundError();
     return await this.inspection(source);
   }
 
@@ -157,11 +165,12 @@ export class ImportSourceManager {
       .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
   }
 
-  async cleanupUpload(id: string): Promise<void> {
+  async cleanupUpload(id: string): Promise<boolean> {
     const source = await this.get(id);
-    if (!source || source.kind !== "upload") return;
+    if (!source || source.kind !== "upload") return false;
     await rm(resolve(this.root, id), { recursive: true, force: true });
     this.state.deleteSource(id);
+    return true;
   }
 
   private async buildSource(id: string, kind: ImportSourceKind, displayName: string, searchRoot: string, originalPath: string, sha: string | null): Promise<ImportSource> {

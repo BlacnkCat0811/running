@@ -1,4 +1,5 @@
 import type { WorkoutMetricSeries } from "@rai/api-contracts";
+import { useState } from "react";
 import { CartesianGrid, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 const minute = (seconds: number): string => `${Math.round(seconds / 60)}′`;
@@ -16,13 +17,14 @@ export function WorkoutSeriesChart({ title, series, color, bands = [] }: {
   color: string;
   bands?: SeriesReferenceBand[];
 }) {
+  const [dataExpanded, setDataExpanded] = useState(false);
   const values = series.points.map((point) => point.value);
   const minimum = values.length ? Math.min(...values) : 0;
   const maximum = values.length ? Math.max(...values) : 1;
   return (
     <article className="series-chart">
       <header><span>{title}</span><b>{series.totalSamples.toLocaleString("zh-CN")} 个样本</b></header>
-      {series.points.length > 1 ? <div className="series-chart-content"><div className="series-chart-visual" role="img" aria-label={`${title}随训练时间变化，共 ${series.points.length} 个数据点`}><ResponsiveContainer width="100%" height="100%"><LineChart syncId="workout-series" data={series.points} margin={{ top: 10, right: 10, bottom: 0, left: -10 }}><CartesianGrid stroke="#e1e6e1" vertical={false} />{bands.map((band) => <ReferenceArea key={band.label} y1={band.lower ?? minimum} y2={band.upper ?? maximum} fill={band.color} fillOpacity={0.32} ifOverflow="hidden" />)}<XAxis dataKey="offsetSeconds" tickFormatter={minute} tick={{ fontSize: 9, fill: "#748078" }} tickLine={false} axisLine={false} minTickGap={28} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 9, fill: "#748078" }} tickLine={false} axisLine={false} width={42} /><Tooltip formatter={(value) => [`${Number(value).toFixed(1)} ${series.unit}`, title]} labelFormatter={(value) => `训练 ${minute(Number(value))}`} contentStyle={{ borderRadius: 6, borderColor: "#d9dfd9", fontSize: 11 }} /><Line type="monotone" dataKey="value" stroke={color} strokeWidth={1.7} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div><details className="chart-data-details"><summary>查看{title}数据</summary><div className="chart-data-table-wrap"><table><caption className="sr-only">{title}训练时间序列数据</caption><thead><tr><th>训练偏移</th><th>{title}</th></tr></thead><tbody>{series.points.map((point) => <tr key={point.offsetSeconds}><td>{minute(point.offsetSeconds)}</td><td>{point.value.toFixed(1)} {series.unit}</td></tr>)}</tbody></table></div></details></div> : <div className="series-empty">该训练没有足够的 {title} Record。</div>}
+      {series.points.length > 1 ? <div className="series-chart-content"><div className="series-chart-visual" role="img" aria-label={`${title}随训练时间变化，共 ${series.points.length} 个数据点`}><ResponsiveContainer width="100%" height="100%"><LineChart syncId="workout-series" data={series.points} margin={{ top: 10, right: 10, bottom: 0, left: -10 }}><CartesianGrid stroke="#e1e6e1" vertical={false} />{bands.map((band) => <ReferenceArea key={band.label} y1={band.lower ?? minimum} y2={band.upper ?? maximum} fill={band.color} fillOpacity={0.32} ifOverflow="hidden" />)}<XAxis dataKey="offsetSeconds" tickFormatter={minute} tick={{ fontSize: 9, fill: "#748078" }} tickLine={false} axisLine={false} minTickGap={28} /><YAxis domain={["auto", "auto"]} tick={{ fontSize: 9, fill: "#748078" }} tickLine={false} axisLine={false} width={42} /><Tooltip formatter={(value) => [`${Number(value).toFixed(1)} ${series.unit}`, title]} labelFormatter={(value) => `训练 ${minute(Number(value))}`} contentStyle={{ borderRadius: 6, borderColor: "#d9dfd9", fontSize: 11 }} /><Line type="monotone" dataKey="value" stroke={color} strokeWidth={1.7} dot={false} isAnimationActive={false} /></LineChart></ResponsiveContainer></div><details className="chart-data-details" onToggle={(event) => setDataExpanded(event.currentTarget.open)}><summary>查看{title}数据</summary>{dataExpanded ? <div className="chart-data-table-wrap"><table><caption className="sr-only">{title}训练时间序列数据</caption><thead><tr><th scope="col">训练偏移</th><th scope="col">{title}</th></tr></thead><tbody>{series.points.map((point) => <tr key={point.offsetSeconds}><td>{minute(point.offsetSeconds)}</td><td>{point.value.toFixed(1)} {series.unit}</td></tr>)}</tbody></table></div> : null}</details></div> : <div className="series-empty">该训练没有足够的 {title} Record。</div>}
     </article>
   );
 }

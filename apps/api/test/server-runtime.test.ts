@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -12,6 +13,20 @@ import { RaiDatabase } from "@rai/health-export-parser";
 import { DatabaseMaintenance } from "../src/maintenance.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
+
+async function removeRuntimeRoot(path: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      await rm(path, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    }
+  }
+  throw lastError;
+}
 
 async function waitForApi(child: ChildProcess, url: string, output: () => string): Promise<void> {
   const deadline = Date.now() + 20_000;
@@ -168,7 +183,7 @@ test("runtime status includes persisted prediction work and restore recovers rec
     assert.ok(!['running', 'validating', 'queued'].includes(restoredPredictionStatus));
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
-    rmSync(runtimeRoot, { recursive: true, force: true, maxRetries: 100, retryDelay: 100 });
+    await removeRuntimeRoot(runtimeRoot);
   }
 });
 
@@ -251,7 +266,7 @@ test("restore request fails and keeps the current database when job recovery fai
     assert.equal((await fetch(`${url}/v1/health`)).status, 200);
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
-    rmSync(runtimeRoot, { recursive: true, force: true, maxRetries: 100, retryDelay: 100 });
+    await removeRuntimeRoot(runtimeRoot);
   }
 });
 
@@ -337,6 +352,6 @@ test("database-backed writes cannot recreate a deleted database", async () => {
     }
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
-    rmSync(runtimeRoot, { recursive: true, force: true, maxRetries: 100, retryDelay: 100 });
+    await removeRuntimeRoot(runtimeRoot);
   }
 });

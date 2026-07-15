@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { copyFile, mkdir, rename, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -24,6 +24,7 @@ import {
   type StagedAuditFiles,
 } from "@rai/health-export-parser";
 import { RuntimeStateStore } from "./runtime-state.js";
+import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 
 export class RecomputeWorker {
   private scheduled = false;
@@ -630,7 +631,7 @@ export class ImportWorker {
       ]);
       this.assertNotClosing();
       const change = currentBackupPath
-        ? this.analyzeDatasetChange(stagingDatabase, currentBackupPath)
+        ? this.analyzeDatasetChange(stagingDatabase, currentBackupPath, job.id)
         : {
             mode: "full" as const,
             dirtyFromAt: null,
@@ -792,7 +793,7 @@ export class ImportWorker {
     } finally { database.close(); }
   }
 
-  private analyzeDatasetChange(stagingPath: string, previousPath: string): ImportDatasetChange {
+  private analyzeDatasetChange(stagingPath: string, previousPath: string, batchId?: string): ImportDatasetChange {
     const database = new DatabaseSync(stagingPath);
     try {
       database.prepare("ATTACH DATABASE ? AS previous").run(previousPath);
@@ -823,7 +824,20 @@ export class ImportWorker {
         healthTypes.sleepAnalysis,
         healthTypes.vo2Max
       ].map((type) => `'${type}'`).join(", ")})`;
-      const healthChanged = count(`SELECT COUNT(*) AS count FROM (
+      const batch = batchId ? database.prepare(`
+        SELECT status FROM import_batches WHERE id = ?
+      `).get(batchId) as { status: string } | undefined : undefined;
+      const useChangeLedger = batch?.status === "succeeded";
+      const ledgerBatchId = batchId ?? "";
+      const healthChanged = useChangeLedger ? Number((database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM import_entity_changes change
+        LEFT JOIN health_records current ON current.id = change.entity_id
+        LEFT JOIN previous.health_records old ON old.id = change.entity_id
+        WHERE change.batch_id = ?
+          AND change.entity_kind = 'record'
+          AND COALESCE(current.type, old.type) IN ${relevantTypes}
+      `).get(ledgerBatchId) as { count: number }).count) > 0 : count(`SELECT COUNT(*) AS count FROM (
         SELECT id FROM (
           SELECT id FROM health_records WHERE type IN ${relevantTypes}
           EXCEPT SELECT id FROM previous.health_records WHERE type IN ${relevantTypes}
@@ -834,7 +848,10 @@ export class ImportWorker {
           EXCEPT SELECT id FROM health_records WHERE type IN ${relevantTypes}
         )
       )`) > 0;
-      const anyHealthRecordChanged = count(`SELECT COUNT(*) AS count FROM (
+      const anyHealthRecordChanged = useChangeLedger ? Number((database.prepare(`
+        SELECT COUNT(*) AS count FROM import_entity_changes
+        WHERE batch_id = ? AND entity_kind = 'record'
+      `).get(ledgerBatchId) as { count: number }).count) > 0 : count(`SELECT COUNT(*) AS count FROM (
         SELECT id FROM (
           SELECT id FROM health_records
           EXCEPT SELECT id FROM previous.health_records
@@ -845,7 +862,10 @@ export class ImportWorker {
           EXCEPT SELECT id FROM health_records
         )
       )`) > 0;
-      const activitySummaryChanged = count(`SELECT COUNT(*) AS count FROM (
+      const activitySummaryChanged = useChangeLedger ? Number((database.prepare(`
+        SELECT COUNT(*) AS count FROM import_entity_changes
+        WHERE batch_id = ? AND entity_kind = 'activity_summary'
+      `).get(ledgerBatchId) as { count: number }).count) > 0 : count(`SELECT COUNT(*) AS count FROM (
         SELECT date_components, attributes_json FROM (
           SELECT date_components, attributes_json FROM activity_summaries
           EXCEPT SELECT date_components, attributes_json FROM previous.activity_summaries
@@ -923,7 +943,34 @@ export class ImportWorker {
           SELECT key, value FROM import_manifest WHERE key = 'source_gpx_bundle_sha256'
         )
       )`) > 0;
-      const routesUpdated = routeFingerprintChanged ? count("SELECT COUNT(*) AS count FROM workout_routes") : 0;
+      const routeChanges = routeFingerprintChanged ? database.prepare(`
+        WITH changed_routes(route_id) AS (
+          SELECT current.route_id
+          FROM route_file_fingerprints current
+          LEFT JOIN previous.route_file_fingerprints old ON old.relative_path = current.relative_path
+          WHERE old.relative_path IS NULL OR old.sha256 <> current.sha256 OR old.route_id <> current.route_id
+          UNION
+          SELECT old.route_id
+          FROM previous.route_file_fingerprints old
+          LEFT JOIN route_file_fingerprints current ON current.relative_path = old.relative_path
+          WHERE current.relative_path IS NULL OR current.sha256 <> old.sha256 OR current.route_id <> old.route_id
+        ), route_times(value) AS (
+          SELECT workout.start_at FROM changed_routes changed
+          JOIN workout_routes route ON route.id = changed.route_id
+          JOIN workouts workout ON workout.id = route.workout_id
+          UNION ALL
+          SELECT workout.start_at FROM changed_routes changed
+          JOIN previous.workout_routes route ON route.id = changed.route_id
+          JOIN previous.workouts workout ON workout.id = route.workout_id
+        )
+        SELECT
+          (SELECT COUNT(*) FROM changed_routes) AS count,
+          (SELECT MIN(value) FROM route_times) AS dirtyFromAt
+      `).get() as { count: number; dirtyFromAt: string | null } : { count: 0, dirtyFromAt: null };
+      const hasGranularRouteChanges = routeChanges.count > 0;
+      const routesUpdated = routeFingerprintChanged
+        ? hasGranularRouteChanges ? Number(routeChanges.count) : count("SELECT COUNT(*) AS count FROM workout_routes")
+        : 0;
       const dirty = database.prepare(`SELECT MIN(value) AS dirtyFromAt FROM (
         SELECT current.anchor_start_at AS value FROM training_sessions current
           WHERE NOT EXISTS (SELECT 1 FROM previous.training_sessions old WHERE old.id = current.id)
@@ -953,9 +1000,12 @@ export class ImportWorker {
           routesUpdated
         };
       }
-      const dirtyFromAt = routeFingerprintChanged && !dirty.dirtyFromAt
+      const granularDirtyFromAt = [dirty.dirtyFromAt, routeChanges.dirtyFromAt]
+        .filter((value): value is string => value !== null)
+        .sort()[0] ?? null;
+      const dirtyFromAt = routeFingerprintChanged && !hasGranularRouteChanges && !dirty.dirtyFromAt
         ? (database.prepare("SELECT MIN(anchor_start_at) AS value FROM training_sessions").get() as { value: string | null }).value
-        : dirty.dirtyFromAt;
+        : granularDirtyFromAt;
       return {
         mode: healthChanged || profileChanged || !dirtyFromAt ? "full" : "incremental",
         dirtyFromAt,
@@ -971,12 +1021,24 @@ export class ImportWorker {
     if (!existsSync(this.databasePath)) return null;
     const backupDirectory = resolve(this.runtimeRoot, "var/backups");
     await mkdir(backupDirectory, { recursive: true });
+    const maintenance = new DatabaseMaintenance(
+      this.databasePath,
+      this.runtimeRoot,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      backupPolicyFromEnvironment()
+    );
+    await maintenance.ensureBackupCapacity();
     const backupPath = resolve(backupDirectory, `rai.before-web-import.${jobId}.sqlite`);
     const stagingBackupPath = `${backupPath}.partial-${randomUUID()}`;
     const currentDatabase = new DatabaseSync(this.databasePath, { readOnly: true });
     try {
       await this.backupDatabase(currentDatabase, stagingBackupPath);
       await rename(stagingBackupPath, backupPath);
+      await maintenance.enforceBackupPolicy(basename(backupPath));
     } catch (error) {
       try {
         await this.cleanupPartialBackup(stagingBackupPath);

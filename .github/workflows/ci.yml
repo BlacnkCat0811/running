@@ -9,6 +9,29 @@ permissions:
   contents: read
 
 jobs:
+  windows-runtime:
+    runs-on: windows-latest
+    timeout-minutes: 12
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Windows unit and integration tests
+        run: npm test
+
+      - name: Smoke test production API startup and shutdown
+        run: npm run smoke:api
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 25

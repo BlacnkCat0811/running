@@ -28,8 +28,8 @@ import { RaiDatabase } from "@rai/health-export-parser";
 import Fastify from "fastify";
 
 import { RaiReadStore } from "./data.js";
-import { DatabaseMaintenance } from "./maintenance.js";
-import { ImportSourceManager } from "./import-sources.js";
+import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
+import { ImportSourceManager, ImportSourceNotFoundError } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { installLocalRequestSecurity } from "./local-request-security.js";
 import { ReadStoreManager } from "./read-store-manager.js";
@@ -123,7 +123,16 @@ const recomputeWorker = new RecomputeWorker(databasePath);
 const importWorker = new ImportWorker(databasePath, projectRoot, runtimeRoot, () => readStores.beginReplace(), () => readStores.endReplace());
 const importSources = new ImportSourceManager(runtimeRoot, projectRoot);
 const predictionModelWorker = new PredictionModelWorker(databasePath, projectRoot, runtimeRoot);
-const maintenance = new DatabaseMaintenance(databasePath, runtimeRoot, () => readStores.beginReplace(), () => readStores.endReplace());
+const maintenance = new DatabaseMaintenance(
+  databasePath,
+  runtimeRoot,
+  () => readStores.beginReplace(),
+  () => readStores.endReplace(),
+  undefined,
+  undefined,
+  undefined,
+  backupPolicyFromEnvironment()
+);
 let closing = false;
 let trainingZoneBackfillPromise: Promise<void> | null = null;
 app.addHook("onClose", async () => {
@@ -756,8 +765,10 @@ app.post<{ Body: CreateImportJobBody }>(
     try {
       return importWorker.create(source.inputPath, async (succeeded) => {
         try {
-          if (succeeded) await importSources.markUsed(sourceId);
-          if (source.kind === "upload") await importSources.cleanupUpload(sourceId);
+          if (succeeded) {
+            await importSources.markUsed(sourceId);
+            if (source.kind === "upload") await importSources.cleanupUpload(sourceId);
+          }
         } finally {
           release();
         }
@@ -800,8 +811,22 @@ app.post("/v1/imports/uploads", async (request, reply) => {
 
 app.post<{ Body: { sourceId: string } }>("/v1/imports/inspect", { schema: { body: importSourceBodySchema } }, async (request, reply) => {
   try { return await importSources.inspect(request.body.sourceId); }
-  catch (error) { return reply.code(404).send({ message: error instanceof Error ? error.message : "未找到导入来源" }); }
+  catch (error) {
+    if (error instanceof ImportSourceNotFoundError) return reply.code(404).send({ message: error.message });
+    throw error;
+  }
 });
+
+app.delete<{ Params: { id: string } }>(
+  "/v1/import-sources/:id",
+  { schema: { params: identifierParamsSchema } },
+  async (request, reply) => {
+    if (!await importSources.cleanupUpload(request.params.id)) {
+      return reply.code(404).send({ message: "未找到可清理的上传来源" });
+    }
+    return { deleted: true };
+  }
+);
 
 app.post("/v1/import-sources/discover", async () => ({ sources: await importSources.discover() }));
 
@@ -837,6 +862,13 @@ app.get<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: b
     const message = error instanceof Error ? error.message : "备份文件无效";
     return reply.code(message.includes("无效") ? 400 : 404).send({ message });
   }
+});
+
+app.delete<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
+  if (importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning) {
+    return reply.code(409).send({ message: "任务执行期间不能删除备份" });
+  }
+  return { deleted: true, backup: await maintenance.deleteBackup(request.params.name) };
 });
 
 app.post<{ Params: { name: string }; Body: { confirmation: string } }>(

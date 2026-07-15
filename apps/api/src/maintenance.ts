@@ -1,5 +1,5 @@
 import { createReadStream, existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, rename, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rename, rm, stat, statfs } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -45,6 +45,37 @@ const validateRaiDatabaseIdentity = (database: DatabaseSync): void => {
   }
 };
 
+export interface BackupPolicyOptions {
+  maxCount?: number;
+  maxTotalBytes?: number;
+  minimumFreeBytes?: number;
+}
+
+export const backupPolicyFromEnvironment = (
+  environment: NodeJS.ProcessEnv = process.env
+): BackupPolicyOptions => {
+  const positive = (name: string): number | undefined => {
+    const value = environment[name];
+    if (value === undefined) return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  };
+  const maxCount = positive("RAI_BACKUP_MAX_COUNT");
+  const maxTotalBytes = positive("RAI_BACKUP_MAX_TOTAL_BYTES");
+  const minimumFreeBytes = positive("RAI_BACKUP_MIN_FREE_BYTES");
+  return {
+    ...(maxCount !== undefined ? { maxCount } : {}),
+    ...(maxTotalBytes !== undefined ? { maxTotalBytes } : {}),
+    ...(minimumFreeBytes !== undefined ? { minimumFreeBytes } : {})
+  };
+};
+
+const DEFAULT_BACKUP_POLICY = {
+  maxCount: 10,
+  maxTotalBytes: 20 * 1024 ** 3,
+  minimumFreeBytes: 512 * 1024 ** 2
+} as const;
+
 export class DatabaseMaintenance {
   readonly backupDirectory: string;
 
@@ -55,14 +86,16 @@ export class DatabaseMaintenance {
     private readonly afterReplace: () => void | Promise<void> = () => {},
     private readonly installReplacement: (source: string, destination: string) => Promise<void> = rename,
     private readonly removeFile: (path: string) => Promise<void> = (path) => rm(path, { force: true }),
-    private readonly moveFile: (source: string, destination: string) => Promise<void> = rename
+    private readonly moveFile: (source: string, destination: string) => Promise<void> = rename,
+    private readonly backupPolicy: BackupPolicyOptions = {}
   ) {
     this.backupDirectory = resolve(projectRoot, "var/backups");
   }
 
-  async createBackup(reason = "manual"): Promise<BackupDto> {
+  async createBackup(reason = "manual", additionalProtectedNames: readonly string[] = []): Promise<BackupDto> {
     if (!existsSync(this.databasePath)) throw new Error("本地 RAI 数据库不存在");
     await mkdir(this.backupDirectory, { recursive: true });
+    await this.ensureBackupCapacity();
     const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
     const safeReason = reason.replace(/[^a-z0-9-]/gi, "-").slice(0, 48) || "manual";
     const name = `rai.${safeReason}.${timestamp}.${randomUUID().slice(0, 8)}.sqlite`;
@@ -86,7 +119,9 @@ export class DatabaseMaintenance {
     } finally {
       database.close();
     }
-    return this.describe(name);
+    const result = await this.describe(name);
+    await this.enforceBackupPolicy([name, ...additionalProtectedNames]);
+    return result;
   }
 
   async listBackups(): Promise<BackupDto[]> {
@@ -102,6 +137,14 @@ export class DatabaseMaintenance {
     const path = resolve(this.backupDirectory, name);
     if (!existsSync(path)) throw new Error("备份文件不存在");
     return createReadStream(path);
+  }
+
+  async deleteBackup(name: string): Promise<BackupDto> {
+    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new Error("备份文件名无效");
+    const backupInfo = await this.describe(name).catch(() => null);
+    if (!backupInfo) throw new Error("备份文件不存在");
+    await this.removeFileWithRetry(resolve(this.backupDirectory, name));
+    return backupInfo;
   }
 
   async deleteDatabase(): Promise<BackupDto> {
@@ -158,7 +201,9 @@ export class DatabaseMaintenance {
     if (name !== basename(name) || !name.endsWith(".sqlite")) throw new Error("备份文件名无效");
     const source = resolve(this.backupDirectory, name);
     if (!existsSync(source)) throw new Error("备份文件不存在");
-    const safetyBackup = existsSync(this.databasePath) ? await this.createBackup("before-restore") : null;
+    const safetyBackup = existsSync(this.databasePath)
+      ? await this.createBackup("before-restore", [name])
+      : null;
     const staging = `${this.databasePath}.restoring.${randomUUID()}`;
     const rollback = resolve(this.backupDirectory, `rai.restore-rollback.${randomUUID()}.sqlite`);
     try {
@@ -339,6 +384,47 @@ export class DatabaseMaintenance {
 
   private async backupDatabase(database: DatabaseSync, destination: string): Promise<void> {
     await backup(database, destination);
+  }
+
+  private resolvedBackupPolicy(): Required<BackupPolicyOptions> {
+    const positive = (value: number | undefined, fallback: number): number =>
+      Number.isFinite(value) && (value ?? 0) > 0 ? Math.floor(value!) : fallback;
+    return {
+      maxCount: positive(this.backupPolicy.maxCount, DEFAULT_BACKUP_POLICY.maxCount),
+      maxTotalBytes: positive(this.backupPolicy.maxTotalBytes, DEFAULT_BACKUP_POLICY.maxTotalBytes),
+      minimumFreeBytes: positive(this.backupPolicy.minimumFreeBytes, DEFAULT_BACKUP_POLICY.minimumFreeBytes)
+    };
+  }
+
+  async ensureBackupCapacity(): Promise<void> {
+    const [databaseInfo, filesystem] = await Promise.all([
+      stat(this.databasePath),
+      statfs(this.backupDirectory)
+    ]);
+    const availableBytes = filesystem.bavail * filesystem.bsize;
+    const requiredBytes = databaseInfo.size + this.resolvedBackupPolicy().minimumFreeBytes;
+    if (availableBytes < requiredBytes) {
+      throw new Error(
+        `磁盘空间不足，创建备份至少需要 ${requiredBytes} 字节，当前可用 ${availableBytes} 字节`
+      );
+    }
+  }
+
+  async enforceBackupPolicy(protectedNames: string | readonly string[]): Promise<void> {
+    const policy = this.resolvedBackupPolicy();
+    const protectedSet = new Set(
+      typeof protectedNames === "string" ? [protectedNames] : protectedNames
+    );
+    const backups = await this.listBackups();
+    let totalBytes = backups.reduce((sum, item) => sum + item.sizeBytes, 0);
+    let count = backups.length;
+    for (const candidate of [...backups].reverse()) {
+      if (count <= 1 || (count <= policy.maxCount && totalBytes <= policy.maxTotalBytes)) break;
+      if (protectedSet.has(candidate.name)) continue;
+      await this.removeFileWithRetry(resolve(this.backupDirectory, candidate.name));
+      totalBytes -= candidate.sizeBytes;
+      count -= 1;
+    }
   }
 
   private checkpointDatabase(path: string): void {

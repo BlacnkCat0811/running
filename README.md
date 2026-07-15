@@ -145,7 +145,9 @@ npm start
 
 首次启动或数据库删除后，概览、训练和趋势会显示 Apple Health 导入引导；“数据与模型”仍可提交首次导入，“设置”仍可下载已有备份。没有数据库时，重算、创建备份和删除按钮会保持禁用。
 
-设置页可以创建和下载本地 SQLite 备份。删除数据库必须输入完整确认文字，且系统会先创建一份 `before-delete` 在线备份；该操作不会删除 `apple_health_export/` 中的 Apple Health 原始文件。
+设置页可以创建、下载和显式删除本地 SQLite 备份。删除数据库必须输入完整确认文字，且系统会先创建一份 `before-delete` 在线备份；该操作不会删除 `apple_health_export/` 中的 Apple Health 原始文件。创建备份前会检查可用空间，自动备份默认保留最近 10 份且总量不超过 20 GiB，并至少保留最新一份。
+
+备份容量策略可通过环境变量调整：`RAI_BACKUP_MAX_COUNT`、`RAI_BACKUP_MAX_TOTAL_BYTES` 和 `RAI_BACKUP_MIN_FREE_BYTES`（后两项单位为字节）。
 
 备份可在设置页直接恢复。恢复前会执行 SQLite 完整性、必要表和外键检查；当前数据库存在时会先创建 `before-restore` 安全快照。
 

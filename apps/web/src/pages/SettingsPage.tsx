@@ -141,6 +141,25 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     }
   };
 
+  const deleteBackup = async (backup: BackupDto) => {
+    if (!window.confirm(`确认永久删除本地备份 ${backup.name}？`)) return;
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await api<{ deleted: boolean; backup: BackupDto }>(
+        `/v1/backups/${encodeURIComponent(backup.name)}`,
+        { method: "DELETE" },
+      );
+      setSuccess(`备份已删除：${backup.name}`);
+      await backups.reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "无法删除备份");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const deleteDatabase = async () => {
     setBusy(true);
     setDeleteError(null);
@@ -300,7 +319,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
         <div className="panel-heading">
           <div>
             <h2>本地备份</h2>
-            <p>使用 SQLite 在线备份，包含尚在 WAL 中的已提交数据。</p>
+            <p>使用 SQLite 在线备份，包含尚在 WAL 中的已提交数据；系统默认保留最近 10 份且总量不超过 20 GB。</p>
           </div>
           <button
             className="button secondary"
@@ -342,6 +361,14 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
                     }}
                   >
                     恢复
+                  </button>
+                  <button
+                    className="text-button"
+                    disabled={busy}
+                    aria-label={`删除备份 ${backup.name}`}
+                    onClick={() => void deleteBackup(backup)}
+                  >
+                    删除
                   </button>
                 </span>
               </div>

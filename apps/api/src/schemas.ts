@@ -435,16 +435,24 @@ export const openapiDocument = {
     "/v1/imports/inspect": { post: operation(["Jobs"], "预检已上传或本机导入来源", {
       requestBody: body(importSourceBodySchema, "待预检的来源")
     }) },
+    "/v1/import-sources/{id}": { delete: operation(["Jobs"], "清理保留的失败上传来源", {
+      parameters: pathId
+    }) },
     "/v1/import-sources/discover": { post: operation(["Jobs"], "发现常用目录中的 Apple Health 导出") },
     "/v1/import-sources/recent": { get: operation(["Jobs"], "最近成功使用的导入来源") },
     "/v1/backups": {
       get: operation(["Maintenance"], "本地备份列表"),
       post: operation(["Maintenance"], "创建 SQLite 在线备份")
     },
-    "/v1/backups/{name}": { get: operation(["Maintenance"], "下载本地 SQLite 备份", {
-      parameters: [{ name: "name", in: "path", required: true, schema: backupParamsSchema.properties.name }],
-      responses: { "200": { description: "SQLite 备份", content: { "application/x-sqlite3": { schema: { type: "string", format: "binary" } } } }, "404": errorResponse }
-    }) },
+    "/v1/backups/{name}": {
+      get: operation(["Maintenance"], "下载本地 SQLite 备份", {
+        parameters: [{ name: "name", in: "path", required: true, schema: backupParamsSchema.properties.name }],
+        responses: { "200": { description: "SQLite 备份", content: { "application/x-sqlite3": { schema: { type: "string", format: "binary" } } } }, "404": errorResponse }
+      }),
+      delete: operation(["Maintenance"], "删除指定的本地 SQLite 备份", {
+        parameters: [{ name: "name", in: "path", required: true, schema: backupParamsSchema.properties.name }]
+      })
+    },
     "/v1/backups/{name}/restore": { post: operation(["Maintenance"], "校验并原子恢复本地 SQLite 备份", {
       parameters: [{ name: "name", in: "path", required: true, schema: backupParamsSchema.properties.name }],
       requestBody: body({ $ref: "#/components/schemas/RestoreBackupRequest" }, "恢复确认文字")

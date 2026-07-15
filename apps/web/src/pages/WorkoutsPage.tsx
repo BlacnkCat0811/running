@@ -76,13 +76,13 @@ export function WorkoutsPage() {
     if (nextValue) next.set(key, nextValue);
     else next.delete(key);
     next.delete("offset");
-    setSearchParams(next, { replace: true });
+    setSearchParams(next);
   };
   const setOffset = (nextOffset: number) => {
     const next = new URLSearchParams(sanitizedParams);
     if (nextOffset > 0) next.set("offset", String(nextOffset));
     else next.delete("offset");
-    setSearchParams(next, { replace: true });
+    setSearchParams(next);
   };
   const apiParams = new URLSearchParams(sanitizedParams);
   apiParams.set("limit", String(limit));
@@ -108,7 +108,7 @@ export function WorkoutsPage() {
           {activeFilterCount ? (
             <button
               className="text-button"
-              onClick={() => setSearchParams({}, { replace: true })}
+              onClick={() => setSearchParams({})}
             >
               清除筛选
             </button>

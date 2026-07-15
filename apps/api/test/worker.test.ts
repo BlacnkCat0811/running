@@ -29,7 +29,7 @@ interface ImportWorkerTestSurface {
   backupDatabase(database: DatabaseSync, destination: string): Promise<void>;
   removePartialBackupFile(path: string): Promise<void>;
   preserveHistoricalState(stagingDatabase: string, previousDatabase: string): void;
-  analyzeDatasetChange(stagingDatabase: string, previousDatabase: string): {
+  analyzeDatasetChange(stagingDatabase: string, previousDatabase: string, batchId?: string): {
     mode: "unchanged" | "data-only" | "incremental" | "full";
     dirtyFromAt: string | null;
     insertedWorkouts: number;
@@ -762,6 +762,38 @@ test("skips recompute when the imported scoring dataset is unchanged", async () 
   }
 });
 
+test("uses the import change ledger to classify scoring health changes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-ledger-diff-"));
+  const previousPath = join(root, "previous.sqlite");
+  const stagingPath = join(root, "staging.sqlite");
+  const previous = await seedCanonical(previousPath);
+  const staging = await seedCanonical(stagingPath);
+  const batchId = "web_import_ledger_diff";
+  staging.database.prepare(`
+    INSERT INTO import_batches (id, xml_sha256, status, import_mode, summary_json)
+    VALUES (?, 'hash', 'succeeded', 'incremental', '{}')
+  `).run(batchId);
+  staging.database.prepare(`
+    INSERT INTO health_records (
+      id, type, source_name, source_category, unit, value_numeric,
+      start_at, end_at, metadata_json, raw_attributes_json
+    ) VALUES ('ledger_hr', ?, 'Fixture', 'apple_watch', 'count/min', 150, ?, ?, '{}', '{}')
+  `).run(healthTypes.heartRate, runDate(7), runDate(7));
+  staging.database.prepare(`
+    INSERT INTO import_entity_changes (
+      batch_id, entity_kind, entity_id, change_type, effective_at, content_hash
+    ) VALUES (?, 'record', 'ledger_hr', 'inserted', ?, 'hash')
+  `).run(batchId, runDate(7));
+  previous.close();
+  staging.close();
+  try {
+    const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+    assert.equal(worker.analyzeDatasetChange(stagingPath, previousPath, batchId).mode, "full");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 for (const operation of ["inserted", "removed"] as const) {
   test(`uses full recompute when a running-speed health record is ${operation}`, async () => {
     const root = mkdtempSync(join(tmpdir(), "rai-import-diff-"));
@@ -1092,6 +1124,41 @@ for (const transition of ["missing-to-present", "present-to-missing", "value-cha
     }
   });
 }
+
+test("starts route recompute at the changed GPX workout instead of the first workout", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-route-granular-diff-"));
+  const previousPath = join(root, "previous.sqlite");
+  const stagingPath = join(root, "staging.sqlite");
+  const previous = await seedCanonical(previousPath);
+  const staging = await seedCanonical(stagingPath);
+  for (const [database, bundleHash, fileHash] of [
+    [previous.database, "old-bundle", "old-file"],
+    [staging.database, "new-bundle", "new-file"]
+  ] as const) {
+    database.prepare("INSERT INTO import_manifest (key, value) VALUES ('source_gpx_bundle_sha256', ?)").run(bundleHash);
+    database.prepare(`
+      INSERT INTO workout_routes (
+        id, workout_id, source_category, relative_path, metadata_json, point_count, file_status
+      ) VALUES ('worker_route_recent', 'worker_workout_7', 'apple_watch', 'routes/recent.gpx', '{}', 2, 'imported')
+    `).run();
+    database.prepare(`
+      INSERT INTO route_file_fingerprints (
+        relative_path, size_bytes, modified_at_ms, sha256, route_id, point_count
+      ) VALUES ('routes/recent.gpx', 100, 1, ?, 'worker_route_recent', 2)
+    `).run(fileHash);
+  }
+  previous.close();
+  staging.close();
+  try {
+    const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+    const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+    assert.equal(change.mode, "incremental");
+    assert.equal(change.dirtyFromAt, runDate(7));
+    assert.equal(change.routesUpdated, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("recomputes and activates routes when an upgraded database gains its first GPX fingerprint", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-route-fingerprint-run-"));
