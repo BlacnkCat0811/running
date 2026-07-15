@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { RaiApplicationService } from "@rai/application";
+import { healthTypes } from "@rai/contracts";
 import { RaiDatabase } from "@rai/health-export-parser";
 
+import { DatabaseMaintenance } from "../src/maintenance.js";
 import {
   ExternalPredictionModelTrainer,
   ImportWorker,
@@ -16,13 +19,38 @@ import {
 } from "../src/worker.js";
 
 interface ImportWorkerTestSurface {
-  activateDatabase(stagingDatabase: string, jobId: string, existingBackupPath?: string | null): Promise<void>;
+  activateDatabase(
+    stagingDatabase: string,
+    jobId: string,
+    existingBackupPath?: string | null,
+    beforeCommit?: () => void | Promise<void>,
+  ): Promise<void>;
+  createCurrentBackup(jobId: string): Promise<string | null>;
+  backupDatabase(database: DatabaseSync, destination: string): Promise<void>;
+  removePartialBackupFile(path: string): Promise<void>;
   preserveHistoricalState(stagingDatabase: string, previousDatabase: string): void;
   analyzeDatasetChange(stagingDatabase: string, previousDatabase: string): {
-    mode: "unchanged" | "incremental" | "full";
+    mode: "unchanged" | "data-only" | "incremental" | "full";
     dirtyFromAt: string | null;
     insertedWorkouts: number;
+    updatedWorkouts: number;
+    unchangedWorkouts: number;
+    routesUpdated: number;
   };
+  removeDatabaseFiles(databasePath: string): Promise<void>;
+  installDatabase(source: string, destination: string): Promise<void>;
+  moveDatabaseFile(source: string, destination: string): Promise<void>;
+  copyDatabaseFile(source: string, destination: string): Promise<void>;
+  stageAuditReports(databasePath: string, markdownPath: string, jsonPath: string): {
+    commit(): void;
+    rollback(): void;
+    finalize(): void;
+    discard(): void;
+  };
+  removeDatabaseFile(path: string): Promise<void>;
+  persistJobs(): void;
+  command(args: string[]): Promise<void>;
+  run(job: Record<string, unknown>): Promise<void>;
 }
 
 interface ExternalTrainerTestSurface {
@@ -31,6 +59,7 @@ interface ExternalTrainerTestSurface {
 
 interface RecomputeWorkerTestSurface {
   runOneInWorkerThread(): Promise<boolean>;
+  activeWorker: unknown | null;
 }
 
 const delay = (milliseconds: number): Promise<void> =>
@@ -88,7 +117,7 @@ test("cancelling prediction training terminates the Windows process tree", {
       }
     });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
 
@@ -108,6 +137,22 @@ test("recompute worker catches startup failures and stops after bounded retries"
     await waitFor(() => !worker.isRunning);
     await delay(100);
     assert.equal(attempts, 3);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recompute worker run completes only after its thread releases database resources", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-recompute-thread-close-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(databasePath);
+  store.close();
+  const worker = new RecomputeWorker(databasePath);
+  const surface = worker as unknown as RecomputeWorkerTestSurface;
+  try {
+    assert.equal(await surface.runOneInWorkerThread(), false);
+    assert.equal(surface.activeWorker, null);
+    await worker.close();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -177,6 +222,457 @@ test("activates a staged database only after preserving the current database", a
   }
 });
 
+test("keeps the current database active when sidecar cleanup fails before import activation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-sidecar-failure-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingPath = join(root, "var", "rai.staging.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  const gateEvents: string[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    () => { gateEvents.push("closed"); },
+    () => { gateEvents.push(`opened:${marker(databasePath)}`); }
+  ) as unknown as ImportWorkerTestSurface;
+  const removeDatabaseFile = worker.removeDatabaseFile.bind(worker);
+  worker.removeDatabaseFile = async (path) => {
+    if (path === `${databasePath}-wal`) throw new Error("simulated sidecar deletion failure");
+    await removeDatabaseFile(path);
+  };
+  try {
+    await assert.rejects(
+      worker.activateDatabase(stagingPath, "sidecar-failure"),
+      /simulated sidecar deletion failure/
+    );
+    assert.equal(marker(databasePath), "current-database");
+    assert.equal(marker(stagingPath), "staged-database");
+    assert.deepEqual(gateEvents, ["closed", "opened:current-database"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("releases a partially entered import activation gate when beforeActivate fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-before-gate-"));
+  const databasePath = join(root, "rai.sqlite");
+  const stagingPath = join(root, "rai.staging.sqlite");
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  let releaseAttempts = 0;
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    () => { throw new Error("simulated beforeActivate failure"); },
+    () => {
+      releaseAttempts += 1;
+      if (releaseAttempts === 1) throw new Error("simulated transient gate release failure");
+    }
+  ) as unknown as ImportWorkerTestSurface;
+  try {
+    await assert.rejects(
+      worker.activateDatabase(stagingPath, "before-gate-failure"),
+      /simulated beforeActivate failure/
+    );
+    assert.equal(releaseAttempts, 2);
+    assert.equal(marker(databasePath), "current-database");
+    assert.equal(marker(stagingPath), "staged-database");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps a readable candidate active when candidate installation and rollback movement fail", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-install-rollback-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingPath = join(root, "var", "rai.staging.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  const gateEvents: string[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    () => { gateEvents.push("closed"); },
+    () => { gateEvents.push(`opened:${marker(databasePath)}`); }
+  ) as unknown as ImportWorkerTestSurface;
+  worker.installDatabase = async (source, destination) => {
+    await rename(source, destination);
+    throw new Error("simulated post-install failure");
+  };
+  const moveDatabaseFile = worker.moveDatabaseFile.bind(worker);
+  worker.moveDatabaseFile = async (source, destination) => {
+    if (source.includes("import-rollback")) throw new Error("simulated rollback movement failure");
+    await moveDatabaseFile(source, destination);
+  };
+  try {
+    await assert.rejects(
+      worker.activateDatabase(stagingPath, "install-rollback-failure"),
+      (error: unknown) => error instanceof AggregateError &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated post-install failure") &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated rollback movement failure")
+    );
+    assert.equal(marker(databasePath), "staged-database");
+    assert.deepEqual(gateEvents, ["closed", "opened:staged-database"]);
+    const backups = await new DatabaseMaintenance(databasePath, root).listBackups();
+    assert.ok(backups.some((entry) => /^rai\.import-rollback\..+\.sqlite$/.test(entry.name)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps a readable candidate active when rollback movement and backup copy both fail", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-double-rollback-failure-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingPath = join(root, "var", "rai.staging.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  const gateEvents: string[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    () => { gateEvents.push("closed"); },
+    () => { gateEvents.push(`opened:${marker(databasePath)}`); }
+  ) as unknown as ImportWorkerTestSurface;
+  worker.installDatabase = async (source, destination) => {
+    await rename(source, destination);
+    throw new Error("simulated post-install failure");
+  };
+  const moveDatabaseFile = worker.moveDatabaseFile.bind(worker);
+  worker.moveDatabaseFile = async (source, destination) => {
+    if (source.includes("import-rollback")) throw new Error("simulated rollback movement failure");
+    await moveDatabaseFile(source, destination);
+  };
+  try {
+    await assert.rejects(
+      worker.activateDatabase(stagingPath, "double-rollback-failure", join(root, "missing-backup.sqlite")),
+      (error: unknown) => error instanceof AggregateError &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated post-install failure") &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated rollback movement failure")
+    );
+    assert.equal(marker(databasePath), "staged-database");
+    assert.deepEqual(gateEvents, ["closed", "opened:staged-database"]);
+    const backups = await new DatabaseMaintenance(databasePath, root).listBackups();
+    assert.ok(backups.some((entry) => /^rai\.import-rollback\..+\.sqlite$/.test(entry.name)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("removes an unreadable candidate before restoring the rollback on Windows", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-unreadable-candidate-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingPath = join(root, "var", "rai.staging.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  const gateEvents: string[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    () => { gateEvents.push("closed"); },
+    () => { gateEvents.push(`opened:${marker(databasePath)}`); }
+  ) as unknown as ImportWorkerTestSurface;
+  worker.installDatabase = async (source, destination) => {
+    await rename(source, destination);
+    writeFileSync(destination, "not a sqlite database");
+  };
+  const moveDatabaseFile = worker.moveDatabaseFile.bind(worker);
+  worker.moveDatabaseFile = async (source, destination) => {
+    if (source.includes("import-rollback") && existsSync(destination)) {
+      throw Object.assign(new Error("Windows cannot replace an existing database"), { code: "EEXIST" });
+    }
+    await moveDatabaseFile(source, destination);
+  };
+  try {
+    await assert.rejects(
+      worker.activateDatabase(stagingPath, "unreadable-candidate"),
+      /Imported database is not readable after activation/
+    );
+    assert.equal(marker(databasePath), "current-database");
+    assert.deepEqual(gateEvents, ["closed", "opened:current-database"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("aggregates rollback movement and online backup copy failures for an unreadable candidate", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-unreadable-recovery-failure-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingPath = join(root, "var", "rai.staging.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  const gateEvents: string[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    () => { gateEvents.push("closed"); },
+    () => { gateEvents.push("opened"); }
+  ) as unknown as ImportWorkerTestSurface;
+  worker.installDatabase = async (source, destination) => {
+    await rename(source, destination);
+    writeFileSync(destination, "not a sqlite database");
+  };
+  const moveDatabaseFile = worker.moveDatabaseFile.bind(worker);
+  worker.moveDatabaseFile = async (source, destination) => {
+    if (source.includes("import-rollback")) throw new Error("simulated rollback movement failure");
+    await moveDatabaseFile(source, destination);
+  };
+  worker.copyDatabaseFile = async () => {
+    throw new Error("simulated online backup copy failure");
+  };
+  try {
+    await assert.rejects(
+      worker.activateDatabase(stagingPath, "unreadable-recovery-failure"),
+      (error: unknown) => error instanceof AggregateError &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated rollback movement failure") &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated online backup copy failure") &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "Import rollback did not restore a readable active database")
+    );
+    assert.equal(existsSync(databasePath), false);
+    assert.deepEqual(gateEvents, ["closed"]);
+    const backups = await new DatabaseMaintenance(databasePath, root).listBackups();
+    assert.ok(backups.some((entry) => /^rai\.import-rollback\..+\.sqlite$/.test(entry.name)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const failure of ["partial-copy", "validation", "move"] as const) {
+  test(`does not expose an active database when online backup ${failure} fails`, async () => {
+    const root = mkdtempSync(join(tmpdir(), `rai-import-atomic-backup-${failure}-`));
+    const databasePath = join(root, "var", "rai.sqlite");
+    const stagingPath = join(root, "var", "rai.staging.sqlite");
+    mkdirSync(join(root, "var"));
+    marker(databasePath, "current-database");
+    marker(stagingPath, "staged-database");
+    const gateEvents: string[] = [];
+    const worker = new ImportWorker(
+      databasePath,
+      root,
+      root,
+      () => { gateEvents.push("closed"); },
+      () => { gateEvents.push("opened"); }
+    ) as unknown as ImportWorkerTestSurface;
+    worker.installDatabase = async () => {
+      throw new Error("simulated pre-install failure");
+    };
+    const moveDatabaseFile = worker.moveDatabaseFile.bind(worker);
+    worker.moveDatabaseFile = async (source, destination) => {
+      if (source.includes("import-rollback")) {
+        throw new Error("simulated rollback movement failure");
+      }
+      if (failure === "move" && source.includes("import-backup-restore")) {
+        throw new Error("simulated online backup installation failure");
+      }
+      await moveDatabaseFile(source, destination);
+    };
+    if (failure === "partial-copy") {
+      worker.copyDatabaseFile = async (_source, destination) => {
+        writeFileSync(destination, "partial sqlite data");
+        throw new Error("simulated partial online backup copy failure");
+      };
+    } else if (failure === "validation") {
+      worker.copyDatabaseFile = async (_source, destination) => {
+        writeFileSync(destination, "not a sqlite database");
+      };
+    }
+    try {
+      await assert.rejects(
+        worker.activateDatabase(stagingPath, `atomic-backup-${failure}`),
+        (error: unknown) => error instanceof AggregateError &&
+          error.errors.some((cause) => cause instanceof Error && cause.message === "simulated rollback movement failure") &&
+          error.errors.some((cause) => cause instanceof Error && (
+            failure === "partial-copy"
+              ? cause.message === "simulated partial online backup copy failure"
+              : failure === "validation"
+                ? cause.message === "Online import backup is not readable before restoration"
+                : cause.message === "simulated online backup installation failure"
+          ))
+      );
+      assert.equal(existsSync(databasePath), false);
+      assert.deepEqual(gateEvents, ["closed"]);
+      assert.deepEqual(
+        readdirSync(join(root, "var")).filter((name) => name.includes("import-backup-restore")),
+        [],
+      );
+      const backups = await new DatabaseMaintenance(databasePath, root).listBackups();
+      assert.ok(backups.some((entry) => /^rai\.import-rollback\..+\.sqlite$/.test(entry.name)));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("restores the online backup when installation leaves no active database and rollback movement fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-backup-fallback-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingPath = join(root, "var", "rai.staging.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  const gateEvents: string[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    () => { gateEvents.push("closed"); },
+    () => { gateEvents.push(`opened:${marker(databasePath)}`); }
+  ) as unknown as ImportWorkerTestSurface;
+  worker.installDatabase = async () => {
+    throw new Error("simulated pre-install failure");
+  };
+  const moveDatabaseFile = worker.moveDatabaseFile.bind(worker);
+  worker.moveDatabaseFile = async (source, destination) => {
+    if (source.includes("import-rollback")) throw new Error("simulated rollback movement failure");
+    await moveDatabaseFile(source, destination);
+  };
+  try {
+    await assert.rejects(
+      worker.activateDatabase(stagingPath, "backup-fallback"),
+      (error: unknown) => error instanceof AggregateError &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated pre-install failure") &&
+        error.errors.some((cause) => cause instanceof Error && cause.message === "simulated rollback movement failure")
+    );
+    assert.equal(marker(databasePath), "current-database");
+    assert.deepEqual(gateEvents, ["closed", "opened:current-database"]);
+    const backups = await new DatabaseMaintenance(databasePath, root).listBackups();
+    assert.ok(backups.some((entry) => /^rai\.import-rollback\..+\.sqlite$/.test(entry.name)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("leaves a committed rollback cleanup failure as a listed backup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-rollback-cleanup-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingPath = join(root, "var", "rai.staging.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  marker(stagingPath, "staged-database");
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  const removeDatabaseFile = worker.removeDatabaseFile.bind(worker);
+  worker.removeDatabaseFile = async (path) => {
+    if (path.includes("rai.import-rollback.")) {
+      throw Object.assign(new Error("simulated rollback cleanup failure"), { code: "EPERM" });
+    }
+    await removeDatabaseFile(path);
+  };
+  try {
+    await worker.activateDatabase(stagingPath, "cleanup-failure");
+    assert.equal(marker(databasePath), "staged-database");
+    const backups = await new DatabaseMaintenance(databasePath, root).listBackups();
+    const rollback = backups.find((entry) => /^rai\.import-rollback\..+\.sqlite$/.test(entry.name));
+    assert.ok(rollback);
+    assert.equal(marker(join(root, "var", "backups", rollback.name)), "current-database");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("does not expose a partial import backup when SQLite backup fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-backup-failure-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  const worker = new ImportWorker(databasePath, root) as unknown as ImportWorkerTestSurface;
+  worker.backupDatabase = async (_database, destination) => {
+    writeFileSync(destination, "incomplete backup", "utf8");
+    throw new Error("injected backup failure");
+  };
+  const backupDirectory = join(root, "var", "backups");
+  const backupPath = join(backupDirectory, "rai.before-web-import.failed-job.sqlite");
+  try {
+    await assert.rejects(worker.createCurrentBackup("failed-job"), /injected backup failure/);
+    assert.equal(existsSync(backupPath), false);
+    assert.deepEqual(readdirSync(backupDirectory), []);
+    assert.equal(marker(databasePath), "current-database");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retries transient Windows errors while removing a partial import backup", async () => {
+  for (const busyFailures of [1, 3]) {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-backup-cleanup-retry-"));
+    const databasePath = join(root, "var", "rai.sqlite");
+    mkdirSync(join(root, "var"));
+    marker(databasePath, "current-database");
+    const worker = new ImportWorker(databasePath, root) as unknown as ImportWorkerTestSurface;
+    const backupError = new Error("injected backup failure");
+    worker.backupDatabase = async (_database, destination) => {
+      writeFileSync(destination, "incomplete backup", "utf8");
+      throw backupError;
+    };
+    let cleanupAttempts = 0;
+    worker.removePartialBackupFile = async (path) => {
+      cleanupAttempts += 1;
+      if (cleanupAttempts <= busyFailures) {
+        throw Object.assign(new Error("partial backup is busy"), { code: "EBUSY" });
+      }
+      await rm(path, { force: true });
+    };
+    const backupDirectory = join(root, "var", "backups");
+    try {
+      let rejected: unknown;
+      try {
+        await worker.createCurrentBackup(`transient-cleanup-${busyFailures}`);
+      } catch (error) {
+        rejected = error;
+      }
+      assert.equal(rejected, backupError);
+      assert.equal(cleanupAttempts, busyFailures + 1);
+      assert.deepEqual(readdirSync(backupDirectory), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("preserves the backup error when partial cleanup remains locked", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-backup-cleanup-failure-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  marker(databasePath, "current-database");
+  const worker = new ImportWorker(databasePath, root) as unknown as ImportWorkerTestSurface;
+  const backupError = new Error("injected backup failure");
+  const cleanupError = Object.assign(new Error("partial backup remains locked"), { code: "EPERM" });
+  worker.backupDatabase = async (_database, destination) => {
+    writeFileSync(destination, "incomplete backup", "utf8");
+    throw backupError;
+  };
+  let cleanupAttempts = 0;
+  worker.removePartialBackupFile = async () => {
+    cleanupAttempts += 1;
+    throw cleanupError;
+  };
+  const backupDirectory = join(root, "var", "backups");
+  try {
+    let rejected: unknown;
+    try {
+      await worker.createCurrentBackup("persistent-cleanup");
+    } catch (error) {
+      rejected = error;
+    }
+    assert.equal(rejected, backupError);
+    assert.equal((rejected as { cleanupError?: unknown }).cleanupError, cleanupError);
+    assert.equal(cleanupAttempts, 5);
+    assert.equal(readdirSync(backupDirectory).length, 1);
+    assert.match(readdirSync(backupDirectory)[0] ?? "", /^rai\.before-web-import\.persistent-cleanup\.sqlite\.partial-/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects activation when the staged database is missing", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-worker-"));
   const databasePath = join(root, "rai.sqlite");
@@ -231,6 +727,8 @@ test("preserves overrides and immutable model history before recomputing an impo
       assert.equal((merged.prepare("SELECT COUNT(*) AS count FROM ability_assessments").get() as { count: number }).count, 8);
       assert.equal((merged.prepare("SELECT COUNT(*) AS count FROM training_metric_runs").get() as { count: number }).count, 1);
       assert.equal((merged.prepare("SELECT COUNT(*) AS count FROM workout_training_loads").get() as { count: number }).count, 8);
+      assert.ok((merged.prepare("SELECT COUNT(*) AS count FROM daily_zone_profiles").get() as { count: number }).count > 0);
+      assert.equal((merged.prepare("SELECT COUNT(*) AS count FROM workout_zone_summaries").get() as { count: number }).count, 8);
       assert.ok((merged.prepare("SELECT COUNT(*) AS count FROM daily_training_metrics").get() as { count: number }).count > 0);
       assert.equal((merged.prepare("SELECT COUNT(*) AS count FROM active_model_run").get() as { count: number }).count, 0);
       assert.equal((merged.prepare("SELECT note FROM workout_overrides WHERE id = 'worker_override'").get() as { note: string }).note, "保留我");
@@ -259,6 +757,1059 @@ test("skips recompute when the imported scoring dataset is unchanged", async () 
     const change = worker.analyzeDatasetChange(stagingPath, previousPath);
     assert.equal(change.mode, "unchanged");
     assert.equal(change.insertedWorkouts, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const operation of ["inserted", "removed"] as const) {
+  test(`uses full recompute when a running-speed health record is ${operation}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    const target = operation === "inserted" ? staging : previous;
+    target.database.prepare(`
+      INSERT INTO health_records (
+        id, type, source_name, source_category, unit, value_numeric,
+        start_at, end_at, metadata_json, raw_attributes_json
+      ) VALUES (
+        'worker_running_speed', 'HKQuantityTypeIdentifierRunningSpeed',
+        'Fixture', 'apple_watch', 'm/s', 3.5, ?, ?, '{}', '{}'
+      )
+    `).run(runDate(1), new Date(Date.parse(runDate(1)) + 10_000).toISOString());
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "full");
+      assert.equal(change.dirtyFromAt, null);
+      assert.equal(change.insertedWorkouts, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const operation of ["inserted", "removed"] as const) {
+  test(`uses full recompute when a VO2 max health record is ${operation}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-vo2-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    const target = operation === "inserted" ? staging : previous;
+    target.database.prepare(`
+      INSERT INTO health_records (
+        id, type, source_name, source_category, unit, value_numeric,
+        start_at, end_at, metadata_json, raw_attributes_json
+      ) VALUES (?, ?, 'Fixture', 'apple_watch', 'ml/kg*min', 52, ?, ?, '{}', '{}')
+    `).run("worker_vo2_max", healthTypes.vo2Max, runDate(1), runDate(1));
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "full");
+      assert.equal(change.dirtyFromAt, null);
+      assert.equal(change.insertedWorkouts, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("uses full recompute when a scoring health record is inserted", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-diff-"));
+  const previousPath = join(root, "previous.sqlite");
+  const stagingPath = join(root, "staging.sqlite");
+  const previous = await seedCanonical(previousPath);
+  const staging = await seedCanonical(stagingPath);
+  staging.database.prepare(`
+    INSERT INTO health_records (
+      id, type, source_name, source_category, unit, value_numeric,
+      start_at, end_at, metadata_json, raw_attributes_json
+    ) VALUES (
+      'worker_resting_heart_rate', 'HKQuantityTypeIdentifierRestingHeartRate',
+      'Fixture', 'apple_watch', 'count/min', 52, ?, ?, '{}', '{}'
+    )
+  `).run(runDate(1), runDate(1));
+  previous.close();
+  staging.close();
+  try {
+    const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+    assert.equal(worker.analyzeDatasetChange(stagingPath, previousPath).mode, "full");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const [beforeStatus, afterStatus] of [
+  ["active", "ambiguous"],
+  ["ambiguous", "active"],
+  ["active", "inactive"],
+] as const) {
+  test(`uses incremental recompute when a training session changes from ${beforeStatus} to ${afterStatus}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-session-status-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    previous.database.prepare("UPDATE training_sessions SET status = ? WHERE id = 'worker_session_0'")
+      .run(beforeStatus);
+    staging.database.prepare("UPDATE training_sessions SET status = ? WHERE id = 'worker_session_0'")
+      .run(afterStatus);
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "incremental");
+      assert.equal(change.dirtyFromAt, runDate(0));
+      assert.equal(change.insertedWorkouts, 0);
+      assert.equal(change.updatedWorkouts, 1);
+      assert.equal(change.unchangedWorkouts, 7);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("recomputes and activates a training session that becomes ambiguous", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-session-status-run-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    if (commandCount === 1) {
+      const staging = new DatabaseSync(stagingPath);
+      try {
+        staging.prepare(`
+          UPDATE training_sessions SET status = 'ambiguous'
+          WHERE id = 'worker_session_0'
+        `).run();
+        staging.prepare(`
+          INSERT INTO import_issues (severity, code, object_id, message)
+          VALUES ('warning', 'AMBIGUOUS_TRAINING_SESSION_MATCH', 'worker_session_0',
+            'A candidate workout group matched more than one existing training session.')
+        `).run();
+        staging.prepare(`
+          UPDATE import_manifest SET value = 'worker_fixture_ambiguous'
+          WHERE key = 'dataset_version'
+        `).run();
+      } finally {
+        staging.close();
+      }
+      return;
+    }
+    assert.equal(commandCount, 2, "a training-session status change must invoke exactly one recompute");
+    assert.ok(args.includes("recompute"));
+    const dirtyFromArgument = args.indexOf("--dirty-from");
+    assert.ok(dirtyFromArgument >= 0);
+    assert.equal(args[dirtyFromArgument + 1], runDate(0));
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_session_became_ambiguous",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export"),
+  };
+  try {
+    await worker.run(job);
+    assert.equal(job.status, "succeeded", String(job.error ?? ""));
+    assert.equal(commandCount, 2);
+    assert.equal((job.summary as {
+      importMode: string;
+      updatedWorkouts: number;
+      modelReplayFrom: string | null;
+    }).importMode, "incremental");
+    assert.equal((job.summary as { updatedWorkouts: number }).updatedWorkouts, 1);
+    assert.equal((job.summary as { modelReplayFrom: string | null }).modelReplayFrom, runDate(0));
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((activated.prepare(`
+        SELECT status FROM training_sessions WHERE id = 'worker_session_0'
+      `).get() as { status: string }).status, "ambiguous");
+      assert.equal((activated.prepare(`
+        SELECT COUNT(*) AS count FROM import_issues
+        WHERE code = 'AMBIGUOUS_TRAINING_SESSION_MATCH' AND object_id = 'worker_session_0'
+      `).get() as { count: number }).count, 1);
+    } finally {
+      activated.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const field of [
+  "HKCharacteristicTypeIdentifierDateOfBirth",
+  "HKCharacteristicTypeIdentifierBiologicalSex"
+] as const) {
+  test(`uses full recompute when profile field ${field} changes`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-profile-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    const original = {
+      HKCharacteristicTypeIdentifierDateOfBirth: "1990-01-01",
+      HKCharacteristicTypeIdentifierBiologicalSex: "HKBiologicalSexMale"
+    };
+    previous.database.prepare("INSERT INTO profile (id, attributes_json) VALUES (1, ?)")
+      .run(JSON.stringify(original));
+    staging.database.prepare("INSERT INTO profile (id, attributes_json) VALUES (1, ?)")
+      .run(JSON.stringify({
+        ...original,
+        [field]: field === "HKCharacteristicTypeIdentifierDateOfBirth"
+          ? "1991-01-01"
+          : "HKBiologicalSexFemale"
+      }));
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "full");
+      assert.equal(change.dirtyFromAt, null);
+      assert.equal(change.insertedWorkouts, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("recomputes and activates a changed profile", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-profile-full-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.database.prepare("INSERT INTO profile (id, attributes_json) VALUES (1, ?)")
+    .run(JSON.stringify({ HKCharacteristicTypeIdentifierDateOfBirth: "1990-01-01" }));
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    if (commandCount === 1) {
+      const staging = new DatabaseSync(stagingPath);
+      try {
+        staging.prepare("UPDATE profile SET attributes_json = ? WHERE id = 1")
+          .run(JSON.stringify({ HKCharacteristicTypeIdentifierDateOfBirth: "1991-01-01" }));
+      } finally {
+        staging.close();
+      }
+      return;
+    }
+    assert.equal(commandCount, 2, "profile changes must invoke exactly one recompute");
+    assert.ok(args.includes("recompute"));
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_profile_full",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(commandCount, 2);
+    assert.equal(job.status, "succeeded", String(job.error ?? ""));
+    assert.equal((job.summary as { importMode: string }).importMode, "full");
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const row = activated.prepare("SELECT attributes_json AS attributesJson FROM profile WHERE id = 1")
+        .get() as { attributesJson: string };
+      assert.deepEqual(JSON.parse(row.attributesJson), {
+        HKCharacteristicTypeIdentifierDateOfBirth: "1991-01-01"
+      });
+    } finally {
+      activated.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const transition of ["missing-to-present", "present-to-missing", "value-change"] as const) {
+  test(`recomputes from the first workout when the GPX fingerprint has a ${transition} transition`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-route-fingerprint-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    if (transition !== "missing-to-present") {
+      previous.database.prepare(`
+        INSERT INTO import_manifest (key, value) VALUES ('source_gpx_bundle_sha256', 'old-gpx-hash')
+      `).run();
+    }
+    if (transition !== "present-to-missing") {
+      staging.database.prepare(`
+        INSERT INTO import_manifest (key, value) VALUES ('source_gpx_bundle_sha256', 'new-gpx-hash')
+      `).run();
+    }
+    if (transition === "missing-to-present") {
+      staging.database.prepare(`
+        INSERT INTO workout_routes (
+          id, workout_id, source_category, relative_path, metadata_json,
+          point_count, file_status
+        ) VALUES ('worker_route_new', 'worker_workout_0', 'apple_watch',
+          'routes/new.gpx', '{}', 2, 'imported')
+      `).run();
+    }
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "incremental");
+      assert.equal(change.dirtyFromAt, runDate(0));
+      assert.equal(change.insertedWorkouts, 0);
+      assert.equal(change.routesUpdated, transition === "missing-to-present" ? 1 : 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("recomputes and activates routes when an upgraded database gains its first GPX fingerprint", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-route-fingerprint-run-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    if (commandCount === 1) {
+      const staging = new DatabaseSync(stagingPath);
+      try {
+        staging.prepare(`
+          INSERT INTO import_manifest (key, value)
+          VALUES ('source_gpx_bundle_sha256', 'first-gpx-hash')
+        `).run();
+        staging.prepare(`
+          UPDATE import_manifest SET value = 'worker_fixture_with_routes'
+          WHERE key = 'dataset_version'
+        `).run();
+        staging.prepare(`
+          INSERT INTO workout_routes (
+            id, workout_id, source_category, relative_path, metadata_json,
+            point_count, file_status
+          ) VALUES ('worker_route_new', 'worker_workout_0', 'apple_watch',
+            'routes/new.gpx', '{}', 2, 'imported')
+        `).run();
+        staging.prepare(`
+          INSERT INTO route_points (
+            route_id, sequence, timestamp, latitude, longitude, elevation_meters,
+            horizontal_accuracy_meters
+          ) VALUES
+            ('worker_route_new', 0, ?, 31.20, 121.40, 5, 4),
+            ('worker_route_new', 1, ?, 31.21, 121.41, 15, 4)
+        `).run(runDate(0), new Date(Date.parse(runDate(0)) + 60_000).toISOString());
+      } finally {
+        staging.close();
+      }
+      return;
+    }
+    assert.equal(commandCount, 2, "a newly available GPX bundle must invoke exactly one recompute");
+    assert.ok(args.includes("recompute"));
+    const dirtyFromArgument = args.indexOf("--dirty-from");
+    assert.ok(dirtyFromArgument >= 0);
+    assert.equal(args[dirtyFromArgument + 1], runDate(0));
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_first_gpx_fingerprint",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(commandCount, 2);
+    assert.equal(job.status, "succeeded");
+    assert.equal((job.summary as { importMode: string; routesUpdated: number }).importMode, "incremental");
+    assert.equal((job.summary as { importMode: string; routesUpdated: number }).routesUpdated, 1);
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((activated.prepare(`
+        SELECT COUNT(*) AS count FROM route_points WHERE route_id = 'worker_route_new'
+      `).get() as { count: number }).count, 2);
+      assert.equal((activated.prepare(`
+        SELECT value FROM import_manifest WHERE key = 'source_gpx_bundle_sha256'
+      `).get() as { value: string }).value, "first-gpx-hash");
+    } finally {
+      activated.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const projection of ["inventory", "manifest"] as const) {
+  test(`classifies an audit ${projection} change as data-only`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-audit-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    if (projection === "inventory") {
+      const insertInventory = (database: DatabaseSync, count: number): void => {
+        database.prepare(`
+          INSERT INTO entity_inventory (
+            entity_kind, entity_type, item_count, first_at, last_at, details_json
+          ) VALUES ('record', 'HKQuantityTypeIdentifierBodyMass', ?, ?, ?, ?)
+        `).run(count, runDate(1), runDate(1), JSON.stringify({ units: ["kg"], sourceCategories: ["apple_watch"] }));
+      };
+      insertInventory(previous.database, 1);
+      insertInventory(staging.database, 2);
+    } else {
+      previous.database.prepare("INSERT INTO import_manifest (key, value) VALUES ('record_count', '1')").run();
+      staging.database.prepare("INSERT INTO import_manifest (key, value) VALUES ('record_count', '2')").run();
+    }
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "data-only");
+      assert.equal(change.dirtyFromAt, null);
+      assert.equal(change.insertedWorkouts, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const operation of ["inserted", "removed"] as const) {
+  test(`classifies an ${operation} import issue as data-only`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-issue-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    const target = operation === "inserted" ? staging : previous;
+    target.database.prepare(`
+      INSERT INTO import_issues (severity, code, object_id, message)
+      VALUES ('warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
+    `).run();
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "data-only");
+      assert.equal(change.dirtyFromAt, null);
+      assert.equal(change.insertedWorkouts, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("ignores import issue surrogate IDs when the current issue projection is unchanged", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-issue-unchanged-"));
+  const previousPath = join(root, "previous.sqlite");
+  const stagingPath = join(root, "staging.sqlite");
+  const previous = await seedCanonical(previousPath);
+  const staging = await seedCanonical(stagingPath);
+  previous.database.prepare(`
+    INSERT INTO import_issues (id, severity, code, object_id, message)
+    VALUES (10, 'warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
+  `).run();
+  staging.database.prepare(`
+    INSERT INTO import_issues (id, severity, code, object_id, message)
+    VALUES (20, 'warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
+  `).run();
+  previous.close();
+  staging.close();
+  try {
+    const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+    assert.equal(worker.analyzeDatasetChange(stagingPath, previousPath).mode, "unchanged");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const [previousCount, stagingCount] of [[2, 1], [1, 2]] as const) {
+  test(`classifies an import issue multiplicity change from ${previousCount} to ${stagingCount} as data-only`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-issue-multiplicity-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    const insertIssues = (database: DatabaseSync, count: number): void => {
+      const insert = database.prepare(`
+        INSERT INTO import_issues (severity, code, object_id, message)
+        VALUES ('warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
+      `);
+      for (let index = 0; index < count; index += 1) insert.run();
+    };
+    insertIssues(previous.database, previousCount);
+    insertIssues(staging.database, stagingCount);
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "data-only");
+      assert.equal(change.dirtyFromAt, null);
+      assert.equal(change.insertedWorkouts, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("activates a rebuilt issue generation that removes legacy duplicates", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-issue-upgrade-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  const insertIssue = active.database.prepare(`
+    INSERT INTO import_issues (severity, code, object_id, message)
+    VALUES ('warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
+  `);
+  insertIssue.run();
+  insertIssue.run();
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    assert.equal(commandCount, 1, "issue generation cleanup must not invoke recompute");
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    const staging = new DatabaseSync(stagingPath);
+    try {
+      staging.prepare("DELETE FROM import_issues").run();
+      staging.prepare(`
+        INSERT INTO import_issues (severity, code, object_id, message)
+        VALUES ('warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
+      `).run();
+    } finally {
+      staging.close();
+    }
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_issue_upgrade",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(commandCount, 1);
+    assert.equal(job.status, "succeeded");
+    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const issueCount = (activated.prepare("SELECT COUNT(*) AS count FROM import_issues").get() as { count: number }).count;
+      const report = JSON.parse(readFileSync(join(root, "var", "reports", "data-audit.json"), "utf8")) as {
+        totals: { importIssues: number };
+      };
+      assert.equal(issueCount, 1);
+      assert.equal(report.totals.importIssues, issueCount);
+    } finally {
+      activated.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const failurePhase of ["recompute", "activate"] as const) {
+  test(`keeps the active database and audit reports unchanged when import ${failurePhase} fails`, async () => {
+    const root = mkdtempSync(join(tmpdir(), `rai-import-audit-${failurePhase}-`));
+    const databasePath = join(root, "var", "rai.sqlite");
+    const markdownPath = join(root, "docs", "DATA_AUDIT.md");
+    const jsonPath = join(root, "var", "reports", "data-audit.json");
+    mkdirSync(join(root, "var"));
+    mkdirSync(join(root, "docs"));
+    mkdirSync(join(root, "var", "reports"));
+    const active = await seedCanonical(databasePath);
+    active.database.exec("CREATE TABLE audit_marker (value TEXT NOT NULL); INSERT INTO audit_marker VALUES ('old-generation')");
+    active.close();
+    writeFileSync(markdownPath, "old markdown report", "utf8");
+    writeFileSync(jsonPath, JSON.stringify({ datasetVersion: "old-generation" }), "utf8");
+    const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+    let commandCount = 0;
+    worker.command = async (args) => {
+      commandCount += 1;
+      const databaseArgument = args.indexOf("--database");
+      const candidatePath = args[databaseArgument + 1];
+      assert.ok(candidatePath);
+      if (commandCount === 1) {
+        const candidate = new DatabaseSync(candidatePath);
+        try {
+          candidate.prepare(`
+            INSERT INTO health_records (
+              id, type, source_name, source_category, unit, value_numeric,
+              start_at, end_at, metadata_json, raw_attributes_json
+            ) VALUES (?, ?, 'Fixture', 'apple_watch', 'ml/kg*min', 52, ?, ?, '{}', '{}')
+          `).run(`audit_${failurePhase}_vo2`, healthTypes.vo2Max, runDate(1), runDate(1));
+        } finally {
+          candidate.close();
+        }
+        return;
+      }
+      if (failurePhase === "recompute") throw new Error("simulated recompute failure");
+    };
+    if (failurePhase === "activate") {
+      worker.installDatabase = async () => {
+        throw new Error("simulated activation failure");
+      };
+    }
+    const job: Record<string, unknown> = {
+      id: `web_import_audit_${failurePhase}`,
+      status: "queued",
+      phase: "queued",
+      message: "queued",
+      createdAt: new Date().toISOString(),
+      completedAt: null,
+      error: null,
+      inputPath: join(root, "export"),
+    };
+    try {
+      await worker.run(job);
+      assert.equal(job.status, "failed");
+      assert.match(String(job.error), new RegExp(`simulated ${failurePhase === "recompute" ? "recompute" : "activation"} failure`));
+      assert.equal(readFileSync(markdownPath, "utf8"), "old markdown report");
+      assert.deepEqual(JSON.parse(readFileSync(jsonPath, "utf8")), { datasetVersion: "old-generation" });
+      const preserved = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        assert.equal((preserved.prepare("SELECT value FROM audit_marker").get() as { value: string }).value, "old-generation");
+      } finally {
+        preserved.close();
+      }
+      assert.deepEqual(
+        readdirSync(join(root, "var")).filter((name) => name.includes(job.id as string)),
+        [],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("rolls back the active database and both reports when audit report commit fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-audit-commit-failure-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  const markdownPath = join(root, "docs", "DATA_AUDIT.md");
+  const jsonPath = join(root, "var", "reports", "data-audit.json");
+  mkdirSync(join(root, "var"));
+  mkdirSync(join(root, "docs"));
+  mkdirSync(join(root, "var", "reports"));
+  const active = await seedCanonical(databasePath);
+  active.database.exec("CREATE TABLE audit_marker (value TEXT NOT NULL); INSERT INTO audit_marker VALUES ('old-generation')");
+  active.close();
+  writeFileSync(markdownPath, "old markdown report", "utf8");
+  writeFileSync(jsonPath, JSON.stringify({ datasetVersion: "old-generation" }), "utf8");
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  worker.command = async (args) => {
+    const databaseArgument = args.indexOf("--database");
+    const candidatePath = args[databaseArgument + 1];
+    assert.ok(candidatePath);
+    const candidate = new DatabaseSync(candidatePath);
+    try {
+      candidate.prepare("UPDATE audit_marker SET value = 'new-generation'").run();
+      candidate.prepare(`
+        INSERT INTO health_records (
+          id, type, source_name, source_category, unit, value_numeric,
+          start_at, end_at, metadata_json, raw_attributes_json
+        ) VALUES ('audit_commit_body_mass', 'HKQuantityTypeIdentifierBodyMass',
+          'Fixture', 'apple_watch', 'kg', 65, ?, ?, '{}', '{}')
+      `).run(runDate(1), runDate(1));
+    } finally {
+      candidate.close();
+    }
+  };
+  const stageAuditReports = worker.stageAuditReports.bind(worker);
+  worker.stageAuditReports = (candidatePath, finalMarkdownPath, finalJsonPath) => {
+    const publication = stageAuditReports(candidatePath, finalMarkdownPath, finalJsonPath);
+    const pendingJson = readdirSync(join(root, "var", "reports"))
+      .find((name) => name.startsWith("data-audit.json.pending."));
+    assert.ok(pendingJson);
+    rmSync(join(root, "var", "reports", pendingJson));
+    return publication;
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_audit_commit_failure",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export"),
+  };
+  try {
+    await worker.run(job);
+    assert.equal(job.status, "failed");
+    assert.equal(readFileSync(markdownPath, "utf8"), "old markdown report");
+    assert.deepEqual(JSON.parse(readFileSync(jsonPath, "utf8")), { datasetVersion: "old-generation" });
+    const preserved = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((preserved.prepare("SELECT value FROM audit_marker").get() as { value: string }).value, "old-generation");
+    } finally {
+      preserved.close();
+    }
+    assert.deepEqual(
+      readdirSync(join(root, "docs")).filter((name) => name.includes(".pending.") || name.includes(".replaced.")),
+      [],
+    );
+    assert.deepEqual(
+      readdirSync(join(root, "var", "reports")).filter((name) => name.includes(".pending.") || name.includes(".replaced.")),
+      [],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("activates audit projections without recompute so the database matches the CLI report", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-audit-projection-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.database.prepare(`
+    INSERT INTO entity_inventory (
+      entity_kind, entity_type, item_count, first_at, last_at, details_json
+    ) VALUES ('record', 'HKQuantityTypeIdentifierBodyMass', 1, ?, ?, ?)
+  `).run(runDate(1), runDate(1), JSON.stringify({ units: ["kg"], sourceCategories: ["apple_watch"] }));
+  active.database.prepare("INSERT INTO import_manifest (key, value) VALUES ('record_count', '1')").run();
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    assert.equal(commandCount, 1, "audit-only changes must not invoke recompute");
+    const databaseArgument = args.indexOf("--database");
+    const reportArgument = args.indexOf("--json-report");
+    assert.ok(databaseArgument >= 0);
+    assert.ok(reportArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    const reportPath = args[reportArgument + 1];
+    assert.ok(stagingPath);
+    assert.ok(reportPath);
+    const staging = new DatabaseSync(stagingPath);
+    try {
+      staging.prepare(`
+        UPDATE entity_inventory SET item_count = 2
+        WHERE entity_kind = 'record' AND entity_type = 'HKQuantityTypeIdentifierBodyMass'
+      `).run();
+      staging.prepare("UPDATE import_manifest SET value = '2' WHERE key = 'record_count'").run();
+      staging.prepare("UPDATE import_manifest SET value = 'worker_fixture_duplicate' WHERE key = 'dataset_version'").run();
+      staging.prepare(`
+        INSERT INTO import_issues (severity, code, object_id, message)
+        VALUES ('warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
+      `).run();
+    } finally {
+      staging.close();
+    }
+    mkdirSync(join(root, "var", "reports"), { recursive: true });
+    writeFileSync(reportPath, JSON.stringify({
+      datasetVersion: "worker_fixture_duplicate",
+      parsedRecords: 2,
+      importIssues: 1
+    }), "utf8");
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_audit_projection",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(commandCount, 1);
+    assert.equal(job.status, "succeeded");
+    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const manifest = activated.prepare(`
+        SELECT key, value FROM import_manifest WHERE key IN ('dataset_version', 'record_count')
+      `).all() as unknown as Array<{ key: string; value: string }>;
+      const inventory = activated.prepare(`
+        SELECT item_count AS itemCount FROM entity_inventory
+        WHERE entity_kind = 'record' AND entity_type = 'HKQuantityTypeIdentifierBodyMass'
+      `).get() as { itemCount: number };
+      const report = JSON.parse(readFileSync(join(root, "var", "reports", "data-audit.json"), "utf8")) as {
+        datasetVersion: string;
+        totals: {
+          parsedRecords: number;
+          importIssues: number;
+        };
+      };
+      assert.deepEqual(Object.fromEntries(manifest.map((row) => [row.key, row.value])), {
+        dataset_version: report.datasetVersion,
+        record_count: String(report.totals.parsedRecords)
+      });
+      assert.equal(inventory.itemCount, report.totals.parsedRecords);
+      assert.equal((activated.prepare("SELECT COUNT(*) AS count FROM import_issues").get() as { count: number }).count,
+        report.totals.importIssues);
+    } finally {
+      activated.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const operation of ["inserted", "removed", "updated"] as const) {
+  test(`classifies an ${operation} activity summary as data-only`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-import-activity-summary-diff-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    const dateComponents = "2026-01-04";
+    if (operation !== "inserted") {
+      previous.database.prepare(`
+        INSERT INTO activity_summaries (date_components, attributes_json) VALUES (?, ?)
+      `).run(dateComponents, JSON.stringify({ activeEnergyBurned: 450 }));
+    }
+    if (operation !== "removed") {
+      staging.database.prepare(`
+        INSERT INTO activity_summaries (date_components, attributes_json) VALUES (?, ?)
+      `).run(dateComponents, JSON.stringify({ activeEnergyBurned: 500 }));
+    }
+    previous.close();
+    staging.close();
+    try {
+      const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+      const change = worker.analyzeDatasetChange(stagingPath, previousPath);
+      assert.equal(change.mode, "data-only");
+      assert.equal(change.dirtyFromAt, null);
+      assert.equal(change.insertedWorkouts, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("activates activity summary changes without running model recompute", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-activity-summary-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.database.prepare(`
+    INSERT INTO activity_summaries (date_components, attributes_json) VALUES (?, ?)
+  `).run("2026-01-04", JSON.stringify({ activeEnergyBurned: 450 }));
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    assert.equal(commandCount, 1, "activity summary changes must not invoke recompute");
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    const staging = new DatabaseSync(stagingPath);
+    try {
+      staging.prepare(`
+        UPDATE activity_summaries SET attributes_json = ? WHERE date_components = ?
+      `).run(JSON.stringify({ activeEnergyBurned: 500 }), "2026-01-04");
+    } finally {
+      staging.close();
+    }
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_activity_summary",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(commandCount, 1);
+    assert.equal(job.status, "succeeded");
+    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const row = activated.prepare(`
+        SELECT attributes_json AS attributesJson FROM activity_summaries WHERE date_components = ?
+      `).get("2026-01-04") as { attributesJson: string };
+      assert.deepEqual(JSON.parse(row.attributesJson), { activeEnergyBurned: 500 });
+    } finally {
+      activated.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("activates data-only health changes without running model recompute", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-data-only-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    assert.equal(commandCount, 1, "data-only imports must not invoke recompute");
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    const staging = new DatabaseSync(stagingPath);
+    try {
+      staging.prepare(`
+        INSERT INTO health_records (
+          id, type, source_name, source_category, unit, value_numeric,
+          start_at, end_at, metadata_json, raw_attributes_json
+        ) VALUES (
+          'worker_body_mass', 'HKQuantityTypeIdentifierBodyMass',
+          'Fixture', 'apple_watch', 'kg', 65, ?, ?, '{}', '{}'
+        )
+      `).run(runDate(1), new Date(Date.parse(runDate(1)) + 10_000).toISOString());
+    } finally {
+      staging.close();
+    }
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_data_only",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  let finishTerminalCleanup: (() => void) | undefined;
+  let terminalCleanupStarted = false;
+  const terminalCleanup = new Promise<void>((resolvePromise) => {
+    finishTerminalCleanup = resolvePromise;
+  });
+  job.onTerminal = async () => {
+    terminalCleanupStarted = true;
+    await terminalCleanup;
+  };
+  try {
+    const runPromise = worker.run(job);
+    await waitFor(() => terminalCleanupStarted);
+    assert.equal(job.status, "running", "terminal status must remain hidden until cleanup completes");
+    finishTerminalCleanup?.();
+    await runPromise;
+    assert.equal(commandCount, 1);
+    assert.equal(job.status, "succeeded");
+    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((activated.prepare(`
+        SELECT COUNT(*) AS count FROM health_records WHERE id = 'worker_body_mass'
+      `).get() as { count: number }).count, 1);
+    } finally {
+      activated.close();
+    }
+  } finally {
+    finishTerminalCleanup?.();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runs a full recompute when an import only adds VO2 max evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-vo2-full-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    if (commandCount === 1) {
+      const staging = new DatabaseSync(stagingPath);
+      try {
+        staging.prepare(`
+          INSERT INTO health_records (
+            id, type, source_name, source_category, unit, value_numeric,
+            start_at, end_at, metadata_json, raw_attributes_json
+          ) VALUES (?, ?, 'Fixture', 'apple_watch', 'ml/kg*min', 52, ?, ?, '{}', '{}')
+        `).run("worker_imported_vo2_max", healthTypes.vo2Max, runDate(1), runDate(1));
+      } finally {
+        staging.close();
+      }
+      return;
+    }
+    assert.equal(commandCount, 2, "VO2 max changes must invoke exactly one recompute");
+    assert.ok(args.includes("recompute"));
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_vo2_full",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(commandCount, 2);
+    assert.equal(job.status, "succeeded");
+    assert.equal((job.summary as { importMode: string }).importMode, "full");
+    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((activated.prepare(`
+        SELECT COUNT(*) AS count FROM health_records WHERE id = 'worker_imported_vo2_max'
+      `).get() as { count: number }).count, 1);
+    } finally {
+      activated.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -320,6 +1871,109 @@ test("persists import jobs and marks an interrupted job after API restart", () =
     const restarted = new ImportWorker(join(root, "rai.sqlite"), root, root);
     assert.equal(restarted.latest()?.id, "web_import_interrupted");
     assert.equal(existsSync(join(root, "var", "runtime.sqlite")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("releases import worker state and calls terminal cleanup when staging cleanup fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-cleanup-"));
+  const inputPath = join(root, "export");
+  mkdirSync(inputPath);
+  writeFileSync(join(inputPath, "export.xml"), "<HealthData />", "utf8");
+  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  const surface = worker as unknown as ImportWorkerTestSurface;
+  surface.removeDatabaseFiles = async () => {
+    throw new Error("fixture cleanup failure");
+  };
+  let terminalResult: boolean | null = null;
+  try {
+    const created = worker.create(inputPath, (succeeded) => {
+      terminalResult = succeeded;
+    });
+    await waitFor(() => !worker.isRunning);
+    assert.equal(terminalResult, false);
+    assert.equal(worker.get(created.id)?.status, "failed");
+    assert.match(worker.get(created.id)?.error ?? "", /fixture cleanup failure/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("releases import worker state when the initial running-state persistence fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-persist-"));
+  const inputPath = join(root, "export");
+  mkdirSync(inputPath);
+  writeFileSync(join(inputPath, "export.xml"), "<HealthData />", "utf8");
+  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  const surface = worker as unknown as ImportWorkerTestSurface;
+  const persistJobs = surface.persistJobs.bind(worker);
+  let persistenceAttempts = 0;
+  surface.persistJobs = () => {
+    persistenceAttempts += 1;
+    if (persistenceAttempts === 2) throw new Error("fixture persistence failure");
+    persistJobs();
+  };
+  let terminalResult: boolean | null = null;
+  try {
+    const created = worker.create(inputPath, (succeeded) => {
+      terminalResult = succeeded;
+    });
+    await waitFor(() => !worker.isRunning);
+    assert.equal(terminalResult, false);
+    assert.equal(worker.get(created.id)?.status, "failed");
+    assert.match(worker.get(created.id)?.error ?? "", /fixture persistence failure/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reports the import worker as running until asynchronous terminal cleanup finishes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-terminal-"));
+  const inputPath = join(root, "export");
+  mkdirSync(inputPath);
+  writeFileSync(join(inputPath, "export.xml"), "<HealthData />", "utf8");
+  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  const surface = worker as unknown as ImportWorkerTestSurface;
+  surface.removeDatabaseFiles = async () => {
+    throw new Error("fixture cleanup failure");
+  };
+  let finishTerminalCleanup: (() => void) | undefined;
+  let terminalCleanupStarted = false;
+  const terminalCleanup = new Promise<void>((resolvePromise) => {
+    finishTerminalCleanup = resolvePromise;
+  });
+  try {
+    worker.create(inputPath, async () => {
+      terminalCleanupStarted = true;
+      await terminalCleanup;
+    });
+    await waitFor(() => terminalCleanupStarted);
+    assert.equal(worker.isRunning, true);
+    finishTerminalCleanup?.();
+    await waitFor(() => !worker.isRunning);
+  } finally {
+    finishTerminalCleanup?.();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("closes a queued import before it starts and runs terminal cleanup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-close-"));
+  const inputPath = join(root, "export");
+  mkdirSync(inputPath);
+  writeFileSync(join(inputPath, "export.xml"), "<HealthData />", "utf8");
+  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  let terminalResult: boolean | null = null;
+  try {
+    const created = worker.create(inputPath, (succeeded) => {
+      terminalResult = succeeded;
+    });
+    await worker.close();
+    assert.equal(worker.isRunning, false);
+    assert.equal(terminalResult, false);
+    assert.equal(worker.get(created.id)?.phase, "interrupted");
+    assert.throws(() => worker.create(inputPath), /正在关闭/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

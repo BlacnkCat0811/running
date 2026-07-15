@@ -8,6 +8,7 @@ import { test } from "node:test";
 import yazl from "yazl";
 
 import { ImportSourceManager } from "../src/import-sources.js";
+import { RuntimeStateStore } from "../src/runtime-state.js";
 
 async function zip(path: string, entries: Array<{ name: string; body: string }>): Promise<void> {
   const archive = new yazl.ZipFile();
@@ -66,6 +67,26 @@ test("recent sources omit directories that no longer exist", async () => {
     await manager.markUsed(source.sourceId);
     rmSync(exportRoot, { recursive: true, force: true });
     assert.deepEqual(await manager.recent(), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stale source discovery does not erase a newer last-used timestamp", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-source-last-used-"));
+  const exportRoot = join(root, "export");
+  mkdirSync(exportRoot);
+  writeFileSync(join(exportRoot, "export.xml"), "<HealthData/>");
+  try {
+    const manager = new ImportSourceManager(root, root);
+    const inspection = await manager.registerDirectory(exportRoot);
+    const staleSource = await manager.get(inspection.sourceId);
+    assert.ok(staleSource);
+    await manager.markUsed(inspection.sourceId);
+
+    new RuntimeStateStore(root).upsertSource(staleSource);
+
+    const current = await manager.get(inspection.sourceId);
+    assert.ok(current?.lastUsedAt);
+    assert.equal((await manager.recent())[0]?.id, inspection.sourceId);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

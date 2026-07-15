@@ -52,6 +52,7 @@ export interface BuildZoneProfileInput {
 export interface AnalyzeWorkoutZonesInput {
   trainingSessionId: string;
   durationSeconds: number;
+  elapsedDurationSeconds?: number;
   distanceMeters: number | null;
   sourceConfidence: number;
   profile: DailyZoneProfile;
@@ -63,6 +64,7 @@ export interface AnalyzeWorkoutZonesInput {
 
 export interface CompositeLoadInput {
   durationSeconds: number;
+  elapsedDurationSeconds?: number;
   distanceMeters: number | null;
   profile: DailyZoneProfile;
   zoneSummary: WorkoutZoneSummary;
@@ -79,6 +81,11 @@ const clamp = (value: number, low = 0, high = 1): number => Math.min(high, Math.
 const finite = (value: number | null | undefined): value is number => typeof value === "number" && Number.isFinite(value);
 const round = (value: number): number => Math.round(value * 1e6) / 1e6;
 const DAY_MS = 86_400_000;
+
+function latestTimestamp(current: string | null, candidate: string | null): string | null {
+  if (candidate === null) return current;
+  return current === null || candidate > current ? candidate : current;
+}
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -123,7 +130,7 @@ function robustDailyRestingHeartRate(
   const center = median(daily);
   if (center === null) return { value: null, days: 0 };
   const mad = median(daily.map((value) => Math.abs(value - center))) ?? 0;
-  const radius = 3 * mad;
+  const radius = Math.max(3 * mad, 2);
   const filtered = daily.filter((value) => Math.abs(value - center) <= radius);
   return { value: median(filtered), days: filtered.length };
 }
@@ -171,13 +178,17 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
   const extended = recent.days >= 7 ? recent : robustDailyRestingHeartRate(input.restingHeartRates, input.effectiveAt, input.timezoneIdentifier, 90);
   const restingCandidate = recent.days >= 7 ? recent.value : extended.days >= 7 ? extended.value : null;
   let resting = previous?.restingHeartRateBpm ?? 60;
-  let heartRateSource: ZoneValueSource = previous ? "carried_forward" : "fallback";
+  let restingSource: ZoneValueSource = previous
+    ? previous.heartRateSource === "fallback" && previous.evidence.restingHeartRateDays < 7
+      ? "fallback"
+      : "carried_forward"
+    : "fallback";
   let restingDays = recent.days >= 7 ? recent.days : extended.days;
   if (restingCandidate !== null) {
     resting = previous
       ? previous.restingHeartRateBpm + clamp(0.25 * (restingCandidate - previous.restingHeartRateBpm), -2, 2)
       : restingCandidate;
-    heartRateSource = "automatic";
+    restingSource = "automatic";
   }
 
   const qualifiedPeaks = input.maximumHeartRates.filter((item) => {
@@ -189,63 +200,103 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
   const age = ageYears(input.dateOfBirth, input.effectiveAt);
   const formulaMaximum = age === null ? 190 : 208 - 0.7 * age;
   let maximum = previous?.maximumHeartRateBpm ?? formulaMaximum;
+  let maximumSource: ZoneValueSource = previous
+    ? previous.heartRateSource === "fallback" && previous.evidence.maximumHeartRateWorkouts === 0
+      ? "fallback"
+      : "carried_forward"
+    : "fallback";
   if (!previous && observedMaximum !== null) {
     maximum = observedMaximum;
-    heartRateSource = "automatic";
+    maximumSource = "automatic";
   } else if (previous) {
     if (observedMaximum !== null && observedMaximum > maximum) {
       maximum += Math.min(observedMaximum - maximum, 3);
-      heartRateSource = "automatic";
+      maximumSource = "automatic";
     }
     const comparableEvidence = qualifiedPeaks.some((item) =>
       daysBefore(item.observedAt, input.effectiveAt) <= 365 && item.peakBpm >= previous.maximumHeartRateBpm - 1
     );
     const declineTarget = Math.max(formulaMaximum, observedMaximum ?? 0);
-    if (observedMaximum !== null) heartRateSource = "automatic";
+    if (observedMaximum !== null) maximumSource = "automatic";
     if (!comparableEvidence && declineTarget < maximum) {
       maximum += Math.max(declineTarget - maximum, -1 / 90);
-      heartRateSource = "automatic";
+      maximumSource = "automatic";
     }
   }
 
   if (settings?.restingHeartRate.mode === "manual" && finite(settings.restingHeartRate.valueBpm)) {
     resting = settings.restingHeartRate.valueBpm;
-    heartRateSource = "manual";
+    restingSource = "manual";
     restingDays = 0;
   }
   if (settings?.maximumHeartRate.mode === "manual" && finite(settings.maximumHeartRate.valueBpm)) {
     maximum = settings.maximumHeartRate.valueBpm;
-    heartRateSource = "manual";
+    maximumSource = "manual";
   }
   resting = clamp(resting, 35, 110);
   maximum = clamp(maximum, Math.max(120, resting + 30), 230);
 
-  let threshold = previous?.lactateThresholdPaceSecondsPerKm ?? null;
-  let paceSource: ZoneValueSource = previous?.paceSource === "manual" ? "automatic" : previous ? "carried_forward" : "fallback";
-  let paceConfidence = previous ? previous.paceConfidence * Math.pow(0.5, 1 / 180) : 0;
+  const switchedPaceToAutomatic = previous?.paceSource === "manual" &&
+    settings?.lactateThresholdPace.mode !== "manual";
+  let threshold = switchedPaceToAutomatic ? null : previous?.lactateThresholdPaceSecondsPerKm ?? null;
+  let paceSource: ZoneValueSource = switchedPaceToAutomatic ? "fallback" : previous ? "carried_forward" : "fallback";
+  let paceConfidence = switchedPaceToAutomatic ? 0 : previous ? previous.paceConfidence * Math.pow(0.5, 1 / 180) : 0;
+  let thresholdDataThroughAt = switchedPaceToAutomatic ? null : previous?.dataThroughAt ?? null;
   const candidate = input.thresholdPace;
+  const thresholdEvidenceCount = Math.max(
+    previous?.evidence.thresholdEvidenceCount ?? 0,
+    candidate?.evidenceCount ?? 0
+  );
   if (candidate && finite(candidate.paceSecondsPerKm) && candidate.paceSecondsPerKm >= 150 && candidate.paceSecondsPerKm <= 900) {
+    const hasNewEvidence = previous === null ||
+      (candidate.dataThroughAt !== null && (thresholdDataThroughAt === null || candidate.dataThroughAt > thresholdDataThroughAt)) ||
+      candidate.evidenceCount > (previous?.evidence.thresholdEvidenceCount ?? 0);
     if (threshold === null) {
       threshold = candidate.paceSecondsPerKm;
       paceConfidence = candidate.confidence;
       paceSource = "automatic";
-    } else if (candidate.confidence >= 0.35) {
+      thresholdDataThroughAt = latestTimestamp(thresholdDataThroughAt, candidate.dataThroughAt);
+    } else if (hasNewEvidence && candidate.confidence >= 0.35) {
       const alpha = clamp(candidate.confidence, 0.2, 0.6);
       const proposed = threshold + alpha * (candidate.paceSecondsPerKm - threshold);
       threshold = clamp(proposed, threshold * (1 - 0.03 / 28), threshold * (1 + 0.03 / 28));
       paceConfidence = candidate.confidence;
       paceSource = "automatic";
+      thresholdDataThroughAt = latestTimestamp(thresholdDataThroughAt, candidate.dataThroughAt);
+    } else if (hasNewEvidence && paceConfidence < 0.35) {
+      threshold = candidate.paceSecondsPerKm;
+      paceConfidence = candidate.confidence;
+      paceSource = "automatic";
+      thresholdDataThroughAt = latestTimestamp(thresholdDataThroughAt, candidate.dataThroughAt);
+    } else if (hasNewEvidence) {
+      // dataThroughAt is the evaluated-evidence cursor. Advancing it prevents a
+      // rejected candidate from becoming eligible later only because confidence decayed.
+      thresholdDataThroughAt = latestTimestamp(thresholdDataThroughAt, candidate.dataThroughAt);
     }
   }
   if (settings?.lactateThresholdPace.mode === "manual" && finite(settings.lactateThresholdPace.valueSecondsPerKm)) {
     threshold = settings.lactateThresholdPace.valueSecondsPerKm;
     paceConfidence = 1;
     paceSource = "manual";
+    thresholdDataThroughAt = input.effectiveAt;
   }
 
-  const heartRateConfidence = heartRateSource === "manual"
+  const restingConfidence = restingSource === "manual"
     ? 1
-    : clamp(0.35 + Math.min(restingDays, 14) / 28 + Math.min(validPeaks.length, 3) / 12, 0.25, 0.9);
+    : clamp(0.35 + Math.min(restingDays, 14) / 28, 0.25, 0.9);
+  const maximumConfidence = maximumSource === "manual"
+    ? 1
+    : clamp(0.35 + Math.min(validPeaks.length, 3) / 12, 0.25, 0.9);
+  const heartRateConfidence = Math.min(restingConfidence, maximumConfidence);
+  const heartRateSource: ZoneValueSource = restingSource === "fallback" || maximumSource === "fallback"
+    ? "fallback"
+    : restingSource === "manual" && maximumSource === "manual"
+      ? "manual"
+      : restingSource === "automatic" || maximumSource === "automatic"
+        ? "automatic"
+        : restingSource === "manual" || maximumSource === "manual"
+          ? "manual"
+          : "carried_forward";
   const status = heartRateSource === "fallback" || threshold === null
     ? "fallback"
     : paceConfidence < 0.35 ? "provisional" : "stable";
@@ -254,7 +305,7 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
     localDate: input.localDate,
     timezoneIdentifier: input.timezoneIdentifier,
     effectiveAt: input.effectiveAt,
-    dataThroughAt: candidate?.dataThroughAt ?? null,
+    dataThroughAt: thresholdDataThroughAt,
     restingHeartRateBpm: round(resting),
     maximumHeartRateBpm: round(maximum),
     lactateThresholdPaceSecondsPerKm: threshold === null ? null : round(threshold),
@@ -276,7 +327,9 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
     evidence: {
       restingHeartRateDays: restingDays,
       maximumHeartRateWorkouts: validPeaks.length,
-      thresholdEvidenceCount: candidate?.evidenceCount ?? 0
+      // This is an evaluated-evidence cursor, so temporary candidate loss or
+      // a regressed aggregate must not make old evidence appear new later.
+      thresholdEvidenceCount
     },
     createdAt: input.createdAt
   };
@@ -330,6 +383,73 @@ function validSamples(samples: TimedMetricSample[]): TimedMetricSample[] {
   return samples.filter((sample) => finite(sample.value) && finite(sample.durationSeconds) && sample.durationSeconds > 0);
 }
 
+interface TimelineSample extends TimedMetricSample {
+  startOffsetSeconds: number;
+  distanceMeters: number;
+}
+
+function normalizedTimeline(samples: TimedMetricSample[], durationSeconds: number): TimelineSample[] {
+  const duration = Math.max(0, durationSeconds);
+  let sequentialOffset = 0;
+  const intervals = validSamples(samples).flatMap((sample, index) => {
+    const requestedStart = finite(sample.startOffsetSeconds) ? sample.startOffsetSeconds : sequentialOffset;
+    const requestedEnd = requestedStart + sample.durationSeconds;
+    sequentialOffset = Math.max(sequentialOffset, requestedEnd);
+    const start = clamp(requestedStart, 0, duration);
+    const end = clamp(requestedEnd, 0, duration);
+    return end > start ? [{ ...sample, index, start, end }] : [];
+  });
+  if (intervals.length === 0) return [];
+
+  const events = intervals.flatMap((sample) => [
+    { at: sample.start, kind: "start" as const, sample },
+    { at: sample.end, kind: "end" as const, sample }
+  ]).sort((left, right) => left.at - right.at ||
+    (left.kind === right.kind ? 0 : left.kind === "end" ? -1 : 1));
+  const active = new Map<number, typeof intervals[number]>();
+  const result: TimelineSample[] = [];
+  let previousAt = events[0]?.at ?? 0;
+  let eventIndex = 0;
+  while (eventIndex < events.length) {
+    const at = events[eventIndex]?.at ?? previousAt;
+    if (at > previousAt && active.size > 0) {
+      const current = [...active.values()];
+      const segmentDuration = at - previousAt;
+      const value = current.reduce((sum, sample) => sum + sample.value, 0) / current.length;
+      const distanceRate = current.reduce((sum, sample) =>
+        sum + (finite(sample.distanceMeters) ? sample.distanceMeters / sample.durationSeconds : sample.value), 0
+      ) / current.length;
+      result.push({
+        value,
+        startOffsetSeconds: previousAt,
+        durationSeconds: segmentDuration,
+        distanceMeters: distanceRate * segmentDuration
+      });
+    }
+    while (eventIndex < events.length && events[eventIndex]?.at === at) {
+      const event = events[eventIndex];
+      if (event?.kind === "end") active.delete(event.sample.index);
+      else if (event) active.set(event.sample.index, event.sample);
+      eventIndex += 1;
+    }
+    previousAt = at;
+  }
+  return result;
+}
+
+function limitTimelineCoverage(samples: TimelineSample[], durationSeconds: number): TimelineSample[] {
+  const coveredSeconds = samples.reduce((sum, sample) => sum + sample.durationSeconds, 0);
+  const availableSeconds = Math.max(0, durationSeconds);
+  if (coveredSeconds <= availableSeconds || coveredSeconds === 0) return samples;
+  const scale = availableSeconds / coveredSeconds;
+  return samples.map((sample) => ({
+    ...sample,
+    startOffsetSeconds: sample.startOffsetSeconds * scale,
+    durationSeconds: sample.durationSeconds * scale,
+    distanceMeters: sample.distanceMeters * scale
+  }));
+}
+
 function exposureSeconds<TZone extends string>(exposure: Array<ZoneExposure<TZone>>, ...zones: TZone[]): number {
   return exposure.filter((item) => zones.includes(item.zone)).reduce((sum, item) => sum + item.durationSeconds, 0);
 }
@@ -374,16 +494,23 @@ function stimulusScore(
 
 export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZoneSummary {
   const duration = Math.max(0, input.durationSeconds);
+  const timelineDuration = Math.max(duration, input.elapsedDurationSeconds ?? duration);
   const heartExposure = emptyExposure(heartZoneOrder);
   const paceExposure = emptyExposure(paceZoneOrder);
   let heartCovered = 0;
   let paceCovered = 0;
-  const heartSamples = validSamples(input.heartRateSamples);
-  const speedSamples = validSamples(input.speedSamples).filter((sample) => sample.value > 0);
+  const heartSamples = limitTimelineCoverage(
+    normalizedTimeline(input.heartRateSamples, timelineDuration),
+    duration
+  );
+  const speedSamples = limitTimelineCoverage(
+    normalizedTimeline(input.speedSamples, timelineDuration).filter((sample) => sample.value > 0),
+    duration
+  );
   for (const sample of heartSamples) {
     const zone = heartRateZoneFor(sample.value, input.profile);
     if (!zone) continue;
-    const seconds = Math.min(sample.durationSeconds, Math.max(0, duration - heartCovered));
+    const seconds = sample.durationSeconds;
     addExposure(heartExposure, zone, seconds, 0);
     heartCovered += seconds;
   }
@@ -391,7 +518,7 @@ export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZon
     const pace = 1000 / sample.value;
     const zone = paceZoneFor(pace, input.profile);
     if (!zone) continue;
-    const seconds = Math.min(sample.durationSeconds, Math.max(0, duration - paceCovered));
+    const seconds = sample.durationSeconds;
     const distance = finite(sample.distanceMeters) ? sample.distanceMeters : sample.value * seconds;
     addExposure(paceExposure, zone, seconds, distance);
     paceCovered += seconds;
@@ -509,10 +636,14 @@ const sessionIntensity: Record<SessionType, number> = {
 
 export function calculateCompositeTrainingLoad(input: CompositeLoadInput): TrainingLoadBreakdown {
   const durationMinutes = Math.max(0, input.durationSeconds) / 60;
+  const timelineDuration = Math.max(input.durationSeconds, input.elapsedDurationSeconds ?? input.durationSeconds, 0);
   const resting = input.profile.restingHeartRateBpm;
   const maximum = input.profile.maximumHeartRateBpm;
   let rawHrrTrimp: number | null = null;
-  const heartSamples = validSamples(input.heartRateSamples);
+  const heartSamples = limitTimelineCoverage(
+    normalizedTimeline(input.heartRateSamples, timelineDuration),
+    input.durationSeconds
+  );
   if (heartSamples.length > 0 && maximum > resting) {
     rawHrrTrimp = heartSamples.reduce((sum, sample) => {
       const reserve = clamp((sample.value - resting) / (maximum - resting));
@@ -524,7 +655,11 @@ export function calculateCompositeTrainingLoad(input: CompositeLoadInput): Train
   const internalLoad = rawHrrTrimp === null ? null : rawHrrTrimp * 100 / (60 * trimpMinute(0.85));
 
   const threshold = input.profile.lactateThresholdPaceSecondsPerKm;
-  const speedSamples = validSamples(input.speedSamples).filter((sample) => sample.value > 0 && paceZoneFor(1000 / sample.value, input.profile) !== null);
+  const speedSamples = limitTimelineCoverage(
+    normalizedTimeline(input.speedSamples, timelineDuration)
+      .filter((sample) => sample.value > 0 && paceZoneFor(1000 / sample.value, input.profile) !== null),
+    input.durationSeconds
+  );
   let paceLoad: number | null = null;
   if (threshold !== null && speedSamples.length > 0) {
     paceLoad = speedSamples.reduce((sum, sample) => {

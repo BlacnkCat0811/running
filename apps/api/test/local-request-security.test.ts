@@ -45,7 +45,7 @@ test("unsafe requests reject DNS rebinding hosts and untrusted origins", async (
   }
 });
 
-test("read requests do not require a local Host", async () => {
+test("read requests reject DNS rebinding hosts", async () => {
   const app = Fastify();
   installLocalRequestSecurity(app, { apiPort: 8787 });
   app.get("/read", async () => ({ ok: true }));
@@ -54,6 +54,11 @@ test("read requests do not require a local Host", async () => {
       method: "GET",
       url: "/read",
       headers: { host: "docs.example" }
+    })).statusCode, 403);
+    assert.equal((await app.inject({
+      method: "GET",
+      url: "/read",
+      headers: { host: "localhost:8787" }
     })).statusCode, 200);
   } finally {
     await app.close();

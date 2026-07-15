@@ -18,3 +18,27 @@ test("validates complete finite physiology estimates and ordered race intervals"
   assert.throws(() => assertPhysiologyPredictionSnapshot({ ...snapshot, races: [{ ...snapshot.races[0]!, optimisticSeconds: 1300 }] }));
   assert.throws(() => assertPhysiologyPredictionSnapshot({ ...snapshot, vo2Max: { ...snapshot.vo2Max, valueMlKgMin: null } }));
 });
+
+test("rejects invalid race adjustment and readiness values", () => {
+  const race = snapshot.races[0]!;
+  const adjustmentFields = [
+    "readinessAdjustmentSeconds",
+    "environmentAdjustmentSeconds",
+    "elevationAdjustmentSeconds",
+    "fatigueAdjustmentSeconds",
+    "calibrationAdjustmentSeconds",
+    "machineLearningAdjustmentSeconds"
+  ] as const;
+  for (const field of adjustmentFields) {
+    assert.throws(() => assertPhysiologyPredictionSnapshot({
+      ...snapshot,
+      races: [{ ...race, [field]: Number.NaN }]
+    }), /adjustments must be finite/);
+  }
+  for (const readiness of [Number.NaN, Number.POSITIVE_INFINITY, -0.01, 1.01]) {
+    assert.throws(() => assertPhysiologyPredictionSnapshot({
+      ...snapshot,
+      races: [{ ...race, readiness }]
+    }), /readiness must be between 0 and 1/);
+  }
+});

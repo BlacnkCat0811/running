@@ -589,14 +589,38 @@ export class RaiApplicationService {
   }
 
   requestJobCancellation(jobId: string): "requested" | "terminal" | "not_found" {
-    const updated = this.database
-      .prepare("UPDATE recompute_jobs SET cancel_requested = 1 WHERE id = ? AND status IN ('queued', 'running')")
-      .run(jobId);
-    if (Number(updated.changes) === 1) return "requested";
-    const existing = this.database
-      .prepare("SELECT 1 FROM recompute_jobs WHERE id = ?")
-      .get(jobId);
-    return existing ? "terminal" : "not_found";
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const job = this.database
+        .prepare("SELECT status FROM recompute_jobs WHERE id = ?")
+        .get(jobId) as unknown as { status: string } | undefined;
+      if (!job) {
+        this.database.exec("COMMIT");
+        return "not_found";
+      }
+      if (job.status === "queued") {
+        const completedAt = appNow();
+        this.database.prepare(`
+          UPDATE recompute_jobs
+          SET status = 'cancelled', completed_at = ?, progress_phase = 'cancelled',
+              cancel_requested = 0
+          WHERE id = ? AND status = 'queued'
+        `).run(completedAt, jobId);
+        this.logJobEvent(jobId, "cancelled", 0, 0, "Queued task cancelled before execution");
+        this.database.exec("COMMIT");
+        return "requested";
+      }
+      if (job.status === "running") {
+        this.database.prepare("UPDATE recompute_jobs SET cancel_requested = 1 WHERE id = ?").run(jobId);
+        this.database.exec("COMMIT");
+        return "requested";
+      }
+      this.database.exec("COMMIT");
+      return "terminal";
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   runNextJob(): RecomputeJob | null {
@@ -654,8 +678,8 @@ export class RaiApplicationService {
           WHERE id = ?
         `)
         .run(appNow(), String(row.id));
-      this.database.exec("COMMIT");
       this.logJobEvent(String(row.id), "claimed", 0, 0, "Single worker claimed task");
+      this.database.exec("COMMIT");
       return this.getJob(String(row.id));
     } catch (error) {
       this.database.exec("ROLLBACK");
@@ -1305,6 +1329,16 @@ export class RaiApplicationService {
       routePointCount: route.pointCount,
       routeQuality,
       speed,
+      speedSamples: weightedRecordIntervals(
+        speedRecords,
+        row.workoutStartAt,
+        row.workoutEndAt,
+        (value) => convertSpeedToMetersPerSecond(value, "km/hr")
+      ).map((interval) => ({
+        value: interval.value,
+        startOffsetSeconds: Math.max(0, (interval.startMs - Date.parse(row.workoutStartAt)) / 1000),
+        durationSeconds: interval.durationSeconds
+      })),
       heartRate,
       restingHeartRate: this.loadRecoveryAverage(restingHeartRateType, row.workoutStartAt),
       hrvSdnn: this.loadRecoveryAverage(hrvType, row.workoutStartAt),
@@ -1714,9 +1748,16 @@ export class RaiApplicationService {
       const averagePaceSecondsPerKm = feature.distanceKm !== null && feature.distanceKm > 0
         ? feature.durationSeconds / feature.distanceKm
         : null;
+      const elapsedSeconds = session
+        ? (Date.parse(session.workoutEndAt) - Date.parse(session.workoutStartAt)) / 1000
+        : Number.NaN;
+      const elapsedDurationSeconds = Number.isFinite(elapsedSeconds)
+        ? Math.max(feature.durationSeconds, elapsedSeconds)
+        : feature.durationSeconds;
       const zoneSummary = analyzeWorkoutZones({
         trainingSessionId: feature.trainingSessionId,
         durationSeconds: feature.durationSeconds,
+        elapsedDurationSeconds,
         distanceMeters,
         sourceConfidence: feature.sourceConfidence,
         profile: zoneProfile,
@@ -1732,6 +1773,7 @@ export class RaiApplicationService {
       const distanceReferenceMeters = distanceValues.length >= 5 ? percentile(distanceValues, 0.75) : null;
       const breakdown = calculateCompositeTrainingLoad({
         durationSeconds: feature.durationSeconds,
+        elapsedDurationSeconds,
         distanceMeters,
         profile: zoneProfile,
         zoneSummary,

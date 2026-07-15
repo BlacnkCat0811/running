@@ -9,6 +9,7 @@ import {
   calibrateRacePrediction,
   estimateLactateThreshold,
   estimateLactateThresholdFromEvidence,
+  estimateLactateThresholdFromPerformanceVdot,
   estimatePerformanceVdot,
   estimateVo2Max,
   evaluateRacePrediction,
@@ -241,6 +242,37 @@ test("sustained threshold segments calibrate the VO2 prior without accepting fut
   assert.ok((calibrated.paceSecondsPerKm ?? 0) > (prior.paceSecondsPerKm ?? 0));
   assert.ok(calibrated.evidenceCodes.includes("threshold_test_segment"));
   assert.ok(calibrated.evidenceCodes.includes("future_evidence_excluded"));
+});
+
+test("threshold cursor advances when newer performance VDOT changes an existing segment-calibrated prior", () => {
+  const performance = {
+    status: "available" as const,
+    value: 50,
+    range: { lower: 48, upper: 52 },
+    confidence: 0.8,
+    confidenceLevel: "high" as const,
+    evidenceCount: 2,
+    latestEvidenceAt: "2026-01-25T00:00:00.000Z",
+    method: "performance_envelope_v1" as const,
+    evidenceCodes: []
+  };
+  const threshold = estimateLactateThresholdFromPerformanceVdot(
+    performance,
+    { restingHeartRateBpm: 60, observedMaximumHeartRateBpm: 195 },
+    [{
+      id: "older-segment",
+      observedAt: "2026-01-20T00:00:00.000Z",
+      paceSecondsPerKm: 300,
+      heartRateBpm: 175,
+      durationSeconds: 1_500,
+      source: "threshold_test",
+      quality: 0.95
+    }],
+    "2026-02-01T00:00:00.000Z"
+  );
+
+  assert.equal(threshold.latestEvidenceAt, performance.latestEvidenceAt);
+  assert.equal(threshold.evidenceCount, 2);
 });
 
 test("snapshot stays unavailable without valid evidence", () => {

@@ -37,6 +37,25 @@ test("builds robust HRR and provisional pace zones without accepting invalid res
   assert.equal(paceZoneFor(336 * 0.89, profile), "sprint");
 });
 
+test("keeps seven valid resting-heart-rate days when MAD is zero or near zero", () => {
+  for (const values of [
+    [61, 61, 61, 61, 60, 60, 60],
+    [61, 61, 61, 61, 60.5, 60.5, 60.5]
+  ]) {
+    const profile = buildDailyZoneProfile({
+      ...baseInput,
+      id: `zone-zero-mad-${values[4]}`,
+      restingHeartRates: values.map((valueBpm, index) => ({
+        valueBpm,
+        observedAt: `2026-07-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`
+      }))
+    });
+
+    assert.equal(profile.evidence.restingHeartRateDays, 7);
+    assert.ok(profile.restingHeartRateBpm >= 60 && profile.restingHeartRateBpm <= 61);
+  }
+});
+
 test("manual values take precedence only after their effective date", () => {
   const settings = {
     revision: 1,
@@ -83,6 +102,241 @@ test("requires seven valid resting-heart-rate days and limits maximum-heart-rate
     maximumHeartRates: [{ peakBpm: 180, observedAt: "2026-07-13T00:00:00.000Z", coverage: 1, sourceConfidence: 1 }]
   });
   assert.ok(previous.maximumHeartRateBpm - recentLower.maximumHeartRateBpm <= 1 / 90 + 1e-6);
+});
+
+test("keeps fallback provenance when a profile is carried without heart-rate evidence", () => {
+  const first = buildDailyZoneProfile({
+    ...baseInput,
+    restingHeartRates: [],
+    maximumHeartRates: []
+  });
+  const next = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-fallback-next",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    restingHeartRates: [],
+    maximumHeartRates: [],
+    previousProfile: first
+  });
+  assert.equal(first.status, "fallback");
+  assert.equal(next.heartRateSource, "fallback");
+  assert.equal(next.status, "fallback");
+});
+
+test("uses conservative heart-rate confidence when only one input is manual", () => {
+  const profile = buildDailyZoneProfile({
+    ...baseInput,
+    restingHeartRates: [],
+    maximumHeartRates: [],
+    settings: {
+      revision: 1,
+      effectiveFromLocalDate: "2026-07-13",
+      restingHeartRate: { mode: "manual", valueBpm: 52 },
+      maximumHeartRate: { mode: "auto", valueBpm: null },
+      lactateThresholdPace: { mode: "auto", valueSecondsPerKm: null },
+      createdAt: "2026-07-12T00:00:00.000Z"
+    }
+  });
+  assert.equal(profile.restingHeartRateBpm, 52);
+  assert.ok(profile.heartRateConfidence < 1);
+  assert.equal(profile.heartRateSource, "fallback");
+  assert.equal(profile.status, "fallback");
+});
+
+test("replaces a manual pace anchor immediately after switching to automatic", () => {
+  const manual = buildDailyZoneProfile({
+    ...baseInput,
+    settings: {
+      revision: 1,
+      effectiveFromLocalDate: "2026-07-13",
+      restingHeartRate: { mode: "auto", valueBpm: null },
+      maximumHeartRate: { mode: "auto", valueBpm: null },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 300 },
+      createdAt: "2026-07-12T00:00:00.000Z"
+    }
+  });
+  const automatic = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-pace-automatic",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    previousProfile: manual,
+    thresholdPace: { paceSecondsPerKm: 345, confidence: 0.2, evidenceCount: 2, dataThroughAt: "2026-07-13T00:00:00.000Z" },
+    settings: {
+      revision: 2,
+      effectiveFromLocalDate: "2026-07-14",
+      restingHeartRate: { mode: "auto", valueBpm: null },
+      maximumHeartRate: { mode: "auto", valueBpm: null },
+      lactateThresholdPace: { mode: "auto", valueSecondsPerKm: null },
+      createdAt: "2026-07-13T00:00:00.000Z"
+    }
+  });
+  assert.equal(automatic.lactateThresholdPaceSecondsPerKm, 345);
+  assert.equal(automatic.paceSource, "automatic");
+  assert.equal(automatic.paceConfidence, 0.2);
+  assert.equal(automatic.status, "provisional");
+});
+
+test("refreshes a provisional pace anchor only when low-confidence evidence is new", () => {
+  const first = buildDailyZoneProfile(baseInput);
+  const carried = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-carried",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    previousProfile: first,
+    thresholdPace: { paceSecondsPerKm: 300, confidence: 0.2, evidenceCount: 2, dataThroughAt: first.dataThroughAt }
+  });
+  assert.equal(carried.lactateThresholdPaceSecondsPerKm, first.lactateThresholdPaceSecondsPerKm);
+  assert.ok(carried.paceConfidence < first.paceConfidence);
+
+  const refreshed = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-refreshed",
+    localDate: "2026-07-15",
+    effectiveAt: "2026-07-14T16:00:00.000Z",
+    previousProfile: carried,
+    thresholdPace: { paceSecondsPerKm: 340, confidence: 0.1, evidenceCount: 3, dataThroughAt: "2026-07-14T00:00:00.000Z" }
+  });
+  assert.equal(refreshed.lactateThresholdPaceSecondsPerKm, 340);
+  assert.equal(refreshed.dataThroughAt, "2026-07-14T00:00:00.000Z");
+  assert.equal(refreshed.status, "provisional");
+});
+
+test("does not repeatedly move a pace anchor for already-consumed high-confidence evidence", () => {
+  const first = buildDailyZoneProfile({
+    ...baseInput,
+    thresholdPace: { paceSecondsPerKm: 300, confidence: 0.8, evidenceCount: 3, dataThroughAt: "2026-07-10T00:00:00.000Z" }
+  });
+  const updated = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-high-confidence-updated",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    previousProfile: first,
+    thresholdPace: { paceSecondsPerKm: 360, confidence: 0.8, evidenceCount: 4, dataThroughAt: "2026-07-13T00:00:00.000Z" }
+  });
+  assert.equal(updated.lactateThresholdPaceSecondsPerKm, 300.321429);
+  assert.equal(updated.dataThroughAt, "2026-07-13T00:00:00.000Z");
+  const repeated = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-high-confidence-repeated",
+    localDate: "2026-07-15",
+    effectiveAt: "2026-07-14T16:00:00.000Z",
+    previousProfile: updated,
+    thresholdPace: { paceSecondsPerKm: 360, confidence: 0.8, evidenceCount: 4, dataThroughAt: updated.dataThroughAt }
+  });
+  assert.equal(repeated.lactateThresholdPaceSecondsPerKm, updated.lactateThresholdPaceSecondsPerKm);
+  assert.equal(repeated.dataThroughAt, updated.dataThroughAt);
+  assert.equal(repeated.paceSource, "carried_forward");
+});
+
+test("updates pace when performance evidence advances the cursor without changing threshold evidence count", () => {
+  const first = buildDailyZoneProfile({
+    ...baseInput,
+    thresholdPace: { paceSecondsPerKm: 300, confidence: 0.8, evidenceCount: 3, dataThroughAt: "2026-07-10T00:00:00.000Z" }
+  });
+  const updated = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-performance-cursor-updated",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    previousProfile: first,
+    thresholdPace: { paceSecondsPerKm: 250, confidence: 0.8, evidenceCount: 3, dataThroughAt: "2026-07-13T00:00:00.000Z" }
+  });
+
+  assert.ok((updated.lactateThresholdPaceSecondsPerKm ?? Infinity) < 300);
+  assert.equal(updated.dataThroughAt, "2026-07-13T00:00:00.000Z");
+  assert.equal(updated.evidence.thresholdEvidenceCount, 3);
+  assert.equal(updated.paceSource, "automatic");
+});
+
+test("does not adopt previously rejected threshold evidence after confidence decay", () => {
+  let profile = buildDailyZoneProfile({
+    ...baseInput,
+    thresholdPace: { paceSecondsPerKm: 300, confidence: 0.8, evidenceCount: 3, dataThroughAt: "2026-07-10T00:00:00.000Z" }
+  });
+  const rejectedEvidence = {
+    paceSecondsPerKm: 400, confidence: 0.1, evidenceCount: 4, dataThroughAt: "2026-07-11T00:00:00.000Z"
+  };
+  for (let day = 0; day < 10; day += 1) {
+    profile = buildDailyZoneProfile({
+      ...baseInput,
+      id: `zone-rejected-${day}`,
+      localDate: `2026-07-${String(14 + day).padStart(2, "0")}`,
+      effectiveAt: new Date(Date.UTC(2026, 6, 13 + day, 16)).toISOString(),
+      previousProfile: profile,
+      thresholdPace: rejectedEvidence
+    });
+  }
+  assert.equal(profile.lactateThresholdPaceSecondsPerKm, 300);
+  assert.equal(profile.dataThroughAt, rejectedEvidence.dataThroughAt);
+  assert.equal(profile.evidence.thresholdEvidenceCount, rejectedEvidence.evidenceCount);
+});
+
+test("preserves the threshold evidence cursor while a candidate is temporarily missing", () => {
+  const first = buildDailyZoneProfile({
+    ...baseInput,
+    thresholdPace: { paceSecondsPerKm: 300, confidence: 0.8, evidenceCount: 3, dataThroughAt: "2026-07-10T00:00:00.000Z" }
+  });
+  const missing = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-missing-candidate",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    previousProfile: first,
+    thresholdPace: null
+  });
+  assert.equal(missing.evidence.thresholdEvidenceCount, 3);
+
+  const returned = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-returned-candidate",
+    localDate: "2026-07-15",
+    effectiveAt: "2026-07-14T16:00:00.000Z",
+    previousProfile: missing,
+    thresholdPace: { paceSecondsPerKm: 360, confidence: 0.8, evidenceCount: 3, dataThroughAt: first.dataThroughAt }
+  });
+  assert.equal(returned.lactateThresholdPaceSecondsPerKm, first.lactateThresholdPaceSecondsPerKm);
+  assert.equal(returned.evidence.thresholdEvidenceCount, 3);
+  assert.equal(returned.paceSource, "carried_forward");
+});
+
+test("switching a manual pace to automatic adopts the available candidate as a fresh anchor", () => {
+  const manual = buildDailyZoneProfile({
+    ...baseInput,
+    thresholdPace: { paceSecondsPerKm: 330, confidence: 0.7, evidenceCount: 5, dataThroughAt: "2026-07-10T00:00:00.000Z" },
+    settings: {
+      revision: 1,
+      effectiveFromLocalDate: "2026-07-13",
+      restingHeartRate: { mode: "auto", valueBpm: null },
+      maximumHeartRate: { mode: "auto", valueBpm: null },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 300 },
+      createdAt: "2026-07-12T00:00:00.000Z"
+    }
+  });
+  const automatic = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-manual-to-auto-same-evidence",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    previousProfile: manual,
+    thresholdPace: { paceSecondsPerKm: 330, confidence: 0.7, evidenceCount: 5, dataThroughAt: "2026-07-10T00:00:00.000Z" },
+    settings: {
+      revision: 2,
+      effectiveFromLocalDate: "2026-07-14",
+      restingHeartRate: { mode: "auto", valueBpm: null },
+      maximumHeartRate: { mode: "auto", valueBpm: null },
+      lactateThresholdPace: { mode: "auto", valueSecondsPerKm: null },
+      createdAt: "2026-07-13T00:00:00.000Z"
+    }
+  });
+  assert.equal(automatic.lactateThresholdPaceSecondsPerKm, 330);
+  assert.equal(automatic.paceSource, "automatic");
+  assert.equal(automatic.paceConfidence, 0.7);
+  assert.equal(automatic.dataThroughAt, "2026-07-10T00:00:00.000Z");
+  assert.equal(automatic.evidence.thresholdEvidenceCount, 5);
 });
 
 test("classifies aerobic, threshold, VO2 and sprint stimulus from zone dose", () => {
@@ -167,4 +421,115 @@ test("does not double-count dual-zone dose or extrapolate sparse load samples", 
   });
   assert.ok((sparse.internalLoad ?? 0) < 5);
   assert.ok((sparse.paceLoad ?? 0) < 5);
+});
+
+test("uses one clipped timeline for overlapping zone exposure and load", () => {
+  const profile = buildDailyZoneProfile({
+    ...baseInput,
+    settings: {
+      revision: 1, effectiveFromLocalDate: "2026-07-13", createdAt: "2026-07-12T00:00:00.000Z",
+      restingHeartRate: { mode: "manual", valueBpm: 50 },
+      maximumHeartRate: { mode: "manual", valueBpm: 190 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 300 }
+    }
+  });
+  const heartRateSamples = [
+    { value: 169, durationSeconds: 3600, startOffsetSeconds: 0 },
+    { value: 169, durationSeconds: 3600, startOffsetSeconds: 0 },
+    { value: 169, durationSeconds: 120, startOffsetSeconds: 3540 }
+  ];
+  const speedSamples = [
+    { value: 1000 / 300, durationSeconds: 3600, startOffsetSeconds: 0 },
+    { value: 1000 / 300, durationSeconds: 3600, startOffsetSeconds: 0 }
+  ];
+  const summary = analyzeWorkoutZones({
+    trainingSessionId: "overlap", durationSeconds: 3600, distanceMeters: 12000,
+    sourceConfidence: 1, profile, heartRateSamples, speedSamples
+  });
+  const load = calculateCompositeTrainingLoad({
+    durationSeconds: 3600, distanceMeters: 12000, profile, zoneSummary: summary,
+    heartRateSamples, speedSamples
+  });
+  assert.equal(summary.heartRateCoverage, 1);
+  assert.equal(summary.paceCoverage, 1);
+  assert.equal(summary.heartRateExposure.reduce((sum, item) => sum + item.durationSeconds, 0), 3600);
+  assert.equal(summary.paceExposure.reduce((sum, item) => sum + item.durationSeconds, 0), 3600);
+  assert.ok(Math.abs((load.internalLoad ?? 0) - 100) < 0.001);
+  assert.ok(Math.abs((load.paceLoad ?? 0) - 100) < 0.001);
+});
+
+test("keeps samples recorded after a paused workout resumes", () => {
+  const profile = buildDailyZoneProfile({
+    ...baseInput,
+    settings: {
+      revision: 1, effectiveFromLocalDate: "2026-07-13", createdAt: "2026-07-12T00:00:00.000Z",
+      restingHeartRate: { mode: "manual", valueBpm: 50 },
+      maximumHeartRate: { mode: "manual", valueBpm: 190 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 300 }
+    }
+  });
+  const heartRateSamples = [
+    { value: 120, durationSeconds: 900, startOffsetSeconds: 0 },
+    { value: 169, durationSeconds: 900, startOffsetSeconds: 1800 }
+  ];
+  const speedSamples = [
+    { value: 1000 / 420, durationSeconds: 900, startOffsetSeconds: 0 },
+    { value: 1000 / 300, durationSeconds: 900, startOffsetSeconds: 1800 }
+  ];
+  const summary = analyzeWorkoutZones({
+    trainingSessionId: "paused", durationSeconds: 1800, elapsedDurationSeconds: 2700,
+    distanceMeters: 5000, sourceConfidence: 1, profile, heartRateSamples, speedSamples
+  });
+  const load = calculateCompositeTrainingLoad({
+    durationSeconds: 1800, elapsedDurationSeconds: 2700, distanceMeters: 5000,
+    profile, zoneSummary: summary, heartRateSamples, speedSamples
+  });
+
+  assert.equal(summary.heartRateCoverage, 1);
+  assert.equal(summary.paceCoverage, 1);
+  assert.equal(summary.heartRateExposure.reduce((sum, item) => sum + item.durationSeconds, 0), 1800);
+  assert.equal(summary.paceExposure.reduce((sum, item) => sum + item.durationSeconds, 0), 1800);
+  assert.ok((load.internalLoad ?? 0) > 20);
+  assert.ok((load.paceLoad ?? 0) > 20);
+});
+
+test("caps continuously recorded paused-workout exposure, stimulus, and load at active duration", () => {
+  const profile = buildDailyZoneProfile({
+    ...baseInput,
+    settings: {
+      revision: 1, effectiveFromLocalDate: "2026-07-13", createdAt: "2026-07-12T00:00:00.000Z",
+      restingHeartRate: { mode: "manual", valueBpm: 50 },
+      maximumHeartRate: { mode: "manual", valueBpm: 190 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 300 }
+    }
+  });
+  const heartRateSamples = [
+    { value: 120, durationSeconds: 900, startOffsetSeconds: 0 },
+    { value: 169, durationSeconds: 1_800, startOffsetSeconds: 900 }
+  ];
+  const speedSamples = [
+    { value: 1000 / 420, durationSeconds: 900, startOffsetSeconds: 0 },
+    { value: 1000 / 300, durationSeconds: 1_800, startOffsetSeconds: 900 }
+  ];
+  const summary = analyzeWorkoutZones({
+    trainingSessionId: "paused-continuous", durationSeconds: 1_800, elapsedDurationSeconds: 2_700,
+    distanceMeters: 5_000, sourceConfidence: 1, profile, heartRateSamples, speedSamples
+  });
+  const load = calculateCompositeTrainingLoad({
+    durationSeconds: 1_800, elapsedDurationSeconds: 2_700, distanceMeters: 5_000,
+    profile, zoneSummary: summary, heartRateSamples, speedSamples
+  });
+  const heartSeconds = summary.heartRateExposure.reduce((sum, item) => sum + item.durationSeconds, 0);
+  const paceSeconds = summary.paceExposure.reduce((sum, item) => sum + item.durationSeconds, 0);
+  const thresholdScore = summary.stimulusScores.find((item) => item.stimulusType === "lactate_threshold");
+
+  assert.equal(heartSeconds, 1_800);
+  assert.equal(paceSeconds, 1_800);
+  assert.equal(summary.heartRateExposure.reduce((sum, item) => sum + item.fraction, 0), 1);
+  assert.equal(summary.paceExposure.reduce((sum, item) => sum + item.fraction, 0), 1);
+  assert.ok((thresholdScore?.qualifyingSeconds ?? Infinity) <= 1_800);
+  assert.ok((load.internalLoad ?? Infinity) < 50);
+  assert.ok((load.paceLoad ?? Infinity) < 50);
+  assert.ok(summary.heartRateExposure.some((item) => item.zone === "lactate_threshold" && item.durationSeconds > 0));
+  assert.ok(summary.paceExposure.some((item) => item.zone === "lactate_threshold" && item.durationSeconds > 0));
 });

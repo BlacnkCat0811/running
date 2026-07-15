@@ -107,7 +107,7 @@ export interface ImportIssue {
   message: string;
 }
 
-export const FEATURE_SCHEMA_VERSION = "workout-feature-v2" as const;
+export const FEATURE_SCHEMA_VERSION = "workout-feature-v3" as const;
 
 export const sessionTypes = [
   "unknown",
@@ -858,7 +858,7 @@ export interface RacePredictionMetrics {
 
 export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION =
   "race-residual-feature-v2" as const;
-export const predictionResidualOnnxFeatureNames = [
+export const predictionResidualFeatureNames = [
   "logPredictedSeconds", "readiness", "conditionAdjustmentFraction",
   "performanceVdot", "vo2Max", "vo2Gap", "lactateThresholdPaceSecondsPerKm",
   "lactateThresholdConfidence", "recoveryReadiness", "weeklyDistance4wKm",
@@ -866,11 +866,33 @@ export const predictionResidualOnnxFeatureNames = [
   "targetDistanceExposure8w", "daysSinceLastRun", "acuteChronicLoadRatio",
   "temperatureC", "humidityPercent", "elevationGainMeters",
   "directVo2EvidenceCount", "thresholdEvidenceCount",
-  "performanceVdotEvidenceCount", "overallDataQuality", "isFiveK", "isTenK",
-  "isHalfMarathon"
+  "performanceVdotEvidenceCount", "overallDataQuality"
 ] as const;
+export const predictionResidualOnnxFeatureNames = [
+  ...predictionResidualFeatureNames,
+  "isFiveK", "isTenK", "isHalfMarathon"
+] as const;
+export const predictionResidualFeatureSchema = {
+  distanceEncoding: {
+    five_k: "isFiveK",
+    half_marathon: "isHalfMarathon",
+    ten_k: "isTenK"
+  },
+  featureNames: predictionResidualOnnxFeatureNames,
+  featureSemantics: {
+    acuteChronicLoadRatio:
+      "active composite daily training load; 7-day/28-day half-life EWMA ratio through asOf"
+  },
+  featureSchemaVersion: PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
+  inputDtype: "float32",
+  inputShape: ["N", predictionResidualOnnxFeatureNames.length],
+  missingValue: "NaN",
+  outputDtype: "float32",
+  outputSemantics: "targetLogResidual=log(actualSeconds/baselinePredictedSeconds)",
+  outputShape: ["N", 1]
+} as const;
 export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH =
-  "7b92cf1657794d20a182fd672a7680d478aa41c8ee4bdef720f3fbd422591439" as const;
+  "77a352b9035b68c584bd2b6147fc1156c22423ffa806b0da42462afd2b10dfb2" as const;
 export const CATBOOST_PREDICTION_MODEL_VERSION =
   "race-residual-catboost-v1" as const;
 
@@ -907,8 +929,8 @@ export interface PredictionModelEvaluationMetrics {
 export interface PredictionModelRun {
   id: string;
   algorithm: "catboost";
-  modelVersion: typeof CATBOOST_PREDICTION_MODEL_VERSION;
-  featureSchemaVersion: typeof PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION;
+  modelVersion: string;
+  featureSchemaVersion: string;
   featureSchemaHash: string | null;
   trainingDataHash: string | null;
   trainingDataThroughAt: string;
@@ -996,6 +1018,21 @@ export function assertPhysiologyPredictionSnapshot(
         !(prediction.optimisticSeconds <= prediction.predictedSeconds &&
           prediction.predictedSeconds <= prediction.pessimisticSeconds)) {
       throw new Error("Race prediction interval must contain the point estimate");
+    }
+    const adjustments = [
+      prediction.readinessAdjustmentSeconds,
+      prediction.environmentAdjustmentSeconds,
+      prediction.elevationAdjustmentSeconds,
+      prediction.fatigueAdjustmentSeconds,
+      prediction.calibrationAdjustmentSeconds,
+      prediction.machineLearningAdjustmentSeconds
+    ];
+    if (adjustments.some((value) => value !== null && !Number.isFinite(value))) {
+      throw new Error("Race prediction adjustments must be finite");
+    }
+    if (prediction.readiness !== null &&
+        (!Number.isFinite(prediction.readiness) || prediction.readiness < 0 || prediction.readiness > 1)) {
+      throw new Error("Race prediction readiness must be between 0 and 1");
     }
   }
 

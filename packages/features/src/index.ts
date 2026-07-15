@@ -7,7 +7,7 @@ import {
   type WorkoutOverride
 } from "@rai/contracts";
 
-export const FEATURE_CONFIG_VERSION = "feature-config-v3" as const;
+export const FEATURE_CONFIG_VERSION = "feature-config-v5" as const;
 
 export interface FeatureConfig {
   minimumDistanceKm: number;
@@ -19,11 +19,16 @@ export interface FeatureConfig {
   longRunDurationMinutes: number;
   longRunDistanceKm: number;
   intervalSpeedCvThreshold: number;
+  minimumIntervalSpeedCoverage: number;
   recoveryHeartRateReserveThreshold: number;
   easyHeartRateReserveThreshold: number;
   steadyHeartRateReserveThreshold: number;
   raceHeartRateReserveThreshold: number;
 }
+
+export type FeatureConfigInput = Omit<FeatureConfig, "minimumIntervalSpeedCoverage"> & {
+  minimumIntervalSpeedCoverage?: number | undefined;
+};
 
 export const defaultFeatureConfig: FeatureConfig = {
   minimumDistanceKm: 1,
@@ -34,7 +39,8 @@ export const defaultFeatureConfig: FeatureConfig = {
   maximumPaceMinutesPerKilometer: 15,
   longRunDurationMinutes: 75,
   longRunDistanceKm: 15,
-  intervalSpeedCvThreshold: 0.14,
+  intervalSpeedCvThreshold: 0.18,
+  minimumIntervalSpeedCoverage: 0.5,
   recoveryHeartRateReserveThreshold: 0.5,
   easyHeartRateReserveThreshold: 0.65,
   steadyHeartRateReserveThreshold: 0.75,
@@ -52,6 +58,12 @@ export interface NumericSeriesSummary {
   coveredDurationSeconds?: number | null;
 }
 
+export interface TimedSeriesSample {
+  value: number;
+  startOffsetSeconds: number;
+  durationSeconds: number;
+}
+
 export interface WorkoutFeatureSource {
   id: string;
   trainingSessionId: string;
@@ -65,6 +77,7 @@ export interface WorkoutFeatureSource {
   routePointCount: number;
   routeQuality: number | null;
   speed: NumericSeriesSummary;
+  speedSamples?: TimedSeriesSample[];
   heartRate: NumericSeriesSummary;
   restingHeartRate: number | null;
   hrvSdnn: number | null;
@@ -99,18 +112,93 @@ function sourceConfidence(sourceCategory: string): number {
 
 interface SessionTypeEvidence {
   durationSeconds: number;
+  elapsedDurationSeconds: number;
   distanceKm: number | null;
   speedCv: number | null;
+  speedSamples: TimedSeriesSample[];
   heartRateReserveFraction: number | null;
+  confirmedRace: boolean;
 }
 
-const raceDistancesKm = [3, 5, 10, 15, 21.0975, 42.195];
+function percentile(values: number[], fraction: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const position = (sorted.length - 1) * fraction;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  const weight = position - lower;
+  return (sorted[lower] ?? 0) * (1 - weight) + (sorted[upper] ?? 0) * weight;
+}
 
-function isRaceDistance(distanceKm: number): boolean {
-  return raceDistancesKm.some((raceDistance) => {
-    const tolerance = raceDistance <= 5 ? 0.04 : 0.03;
-    return Math.abs(distanceKm - raceDistance) / raceDistance <= tolerance;
-  });
+function hasRepeatedIntervalStructure(
+  samples: TimedSeriesSample[],
+  activeDurationSeconds: number,
+  elapsedDurationSeconds: number,
+  minimumCoverage: number
+): boolean {
+  const binSeconds = 30;
+  const valid = samples.filter((sample) =>
+    Number.isFinite(sample.value) && sample.value > 0 &&
+    Number.isFinite(sample.startOffsetSeconds) && sample.startOffsetSeconds >= 0 &&
+    Number.isFinite(sample.durationSeconds) && sample.durationSeconds > 0
+  );
+  if (valid.length === 0) return false;
+
+  const duration = Math.max(0, elapsedDurationSeconds);
+  const bins: Array<number | null> = [];
+  let totalCoveredSeconds = 0;
+  for (let start = 0; start + binSeconds <= duration; start += binSeconds) {
+    let weightedValue = 0;
+    let coveredSeconds = 0;
+    const coveredIntervals: Array<{ start: number; end: number }> = [];
+    for (const sample of valid) {
+      const overlapStart = Math.max(start, sample.startOffsetSeconds);
+      const overlapEnd = Math.min(start + binSeconds, sample.startOffsetSeconds + sample.durationSeconds);
+      const overlap = Math.max(0, overlapEnd - overlapStart);
+      weightedValue += sample.value * overlap;
+      coveredSeconds += overlap;
+      if (overlap > 0) coveredIntervals.push({ start: overlapStart, end: overlapEnd });
+    }
+    coveredIntervals.sort((left, right) => left.start - right.start);
+    let uniqueCoverage = 0;
+    let coveredThrough = start;
+    for (const interval of coveredIntervals) {
+      if (interval.end <= coveredThrough) continue;
+      uniqueCoverage += interval.end - Math.max(interval.start, coveredThrough);
+      coveredThrough = interval.end;
+    }
+    totalCoveredSeconds += uniqueCoverage;
+    bins.push(uniqueCoverage >= binSeconds * 0.6 ? weightedValue / coveredSeconds : null);
+  }
+  if (activeDurationSeconds <= 0 || totalCoveredSeconds / activeDurationSeconds < minimumCoverage) return false;
+  const coveredBins = bins.filter((value): value is number => value !== null);
+  if (coveredBins.length < 10) return false;
+
+  const low = percentile(coveredBins, 0.2);
+  const high = percentile(coveredBins, 0.8);
+  if (low === null || high === null || low <= 0 || high / low < 1.15) return false;
+
+  const midpoint = (low + high) / 2;
+  const runs: Array<{ fast: boolean; bins: number }> = [];
+  for (const value of bins) {
+    if (value === null) {
+      runs.push({ fast: false, bins: 0 });
+      continue;
+    }
+    const fast = value >= midpoint;
+    const previous = runs.at(-1);
+    if (previous?.fast === fast && previous.bins > 0) previous.bins += 1;
+    else runs.push({ fast, bins: 1 });
+  }
+
+  const workBouts = runs.filter((run) => run.fast && run.bins * binSeconds >= 60);
+  if (workBouts.length < 3) return false;
+  const firstWork = runs.findIndex((run) => run.fast && run.bins * binSeconds >= 60);
+  const lastWork = runs.findLastIndex((run) => run.fast && run.bins * binSeconds >= 60);
+  const recoveries = runs.slice(firstWork + 1, lastWork).filter((run) =>
+    !run.fast && run.bins * binSeconds >= 30
+  );
+  return recoveries.length >= 2;
 }
 
 function automaticSessionType(
@@ -125,12 +213,7 @@ function automaticSessionType(
   ) return "unknown";
 
   const hrr = evidence.heartRateReserveFraction;
-  if (
-    hrr !== null &&
-    hrr >= config.raceHeartRateReserveThreshold &&
-    evidence.distanceKm !== null &&
-    isRaceDistance(evidence.distanceKm)
-  ) return "race";
+  if (evidence.confirmedRace) return "race";
 
   if (
     evidence.durationSeconds / 60 >= config.longRunDurationMinutes ||
@@ -138,7 +221,13 @@ function automaticSessionType(
   ) return "long_run";
   if (
     evidence.speedCv !== null &&
-    evidence.speedCv >= config.intervalSpeedCvThreshold
+    evidence.speedCv >= config.intervalSpeedCvThreshold &&
+    hasRepeatedIntervalStructure(
+      evidence.speedSamples,
+      evidence.durationSeconds,
+      evidence.elapsedDurationSeconds,
+      config.minimumIntervalSpeedCoverage
+    )
   ) return "interval";
 
   // Heart-rate reserve normalizes effort to the runner instead of relying on
@@ -238,9 +327,15 @@ export function extractWorkoutFeatureVector(
   featureId: string,
   featureRunId: string,
   source: WorkoutFeatureSource,
-  config: FeatureConfig = defaultFeatureConfig,
+  config: FeatureConfigInput = defaultFeatureConfig,
   computedAt = new Date().toISOString()
 ): WorkoutFeatureVector {
+  const normalizedConfig: FeatureConfig = {
+    ...defaultFeatureConfig,
+    ...config,
+    minimumIntervalSpeedCoverage:
+      config.minimumIntervalSpeedCoverage ?? defaultFeatureConfig.minimumIntervalSpeedCoverage
+  };
   const speed =
     source.speed.average ??
     (source.distanceKm !== null && source.durationSeconds > 0
@@ -276,14 +371,21 @@ export function extractWorkoutFeatureVector(
       : 1 - clamp(source.recentLoadMinutes / (7 * 60), 0, 1)
   ].filter((value): value is number => value !== null);
   const recoveryRaw = average(recoveryParts);
+  const elapsedSeconds = (Date.parse(source.workoutEndAt) - Date.parse(source.workoutStartAt)) / 1000;
   const sessionType = source.override?.sessionType ?? automaticSessionType({
     durationSeconds: source.durationSeconds,
+    elapsedDurationSeconds: Number.isFinite(elapsedSeconds)
+      ? Math.max(source.durationSeconds, elapsedSeconds)
+      : source.durationSeconds,
     distanceKm: source.distanceKm,
     speedCv: source.speed.coefficientOfVariation,
-    heartRateReserveFraction: hrr
-  }, config);
+    speedSamples: source.speedSamples ?? [],
+    heartRateReserveFraction: hrr,
+    confirmedRace: source.override?.performanceProtocol === "half_marathon_race" ||
+      source.override?.performanceProtocol === "other_race"
+  }, normalizedConfig);
   const sessionTypeSource = source.override?.sessionType ? "override" : "auto";
-  const result = eligibility(source, config);
+  const result = eligibility(source, normalizedConfig);
   const coverageScore = average([
     source.distanceKm !== null ? 1 : 0,
     hrCoverage ?? 0,
@@ -332,7 +434,7 @@ export function extractWorkoutFeatureVector(
     },
     provenance: {
       featureConfigVersion: FEATURE_CONFIG_VERSION,
-      featureConfig: config,
+      featureConfig: normalizedConfig,
       sourceCategory: source.sourceCategory,
       observedMaximumHeartRate: source.observedMaximumHeartRate
     },

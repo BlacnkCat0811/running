@@ -755,8 +755,9 @@ export function estimateLactateThresholdFromEvidence(
     0,
     0.93
   );
-  const latestEvidenceAt = usable
-    .map((item) => item.observedAt)
+  const latestEvidenceAt = [...usable
+    .map((item) => item.observedAt), prior.latestEvidenceAt]
+    .filter((item): item is string => item !== null)
     .sort((left, right) => right.localeCompare(left))[0] ?? prior.latestEvidenceAt;
   return {
     status: "available",

@@ -11,6 +11,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       matrix:
         node-version: [24.x]
@@ -25,6 +26,13 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: research/requirements.lock
+
       - name: Install dependencies
         run: npm ci
 
@@ -33,3 +41,15 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Bootstrap Python training environment
+        run: npm run ml:bootstrap
+
+      - name: Run Python training tests
+        run: npm run ml:test
+
+      - name: Build and test desktop Web flows
+        run: npm run test:e2e:web
+
+      - name: Smoke test production API startup and shutdown
+        run: npm run smoke:api

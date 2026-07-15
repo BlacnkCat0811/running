@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 
 import {
   CATBOOST_PREDICTION_MODEL_VERSION,
@@ -357,6 +358,13 @@ function assertArtifactContract(
   }
 }
 
+export async function verifyAcceptedOnnxArtifact(
+  status: EvaluationJson["status"],
+  verify: () => Promise<void>
+): Promise<void> {
+  if (status === "accepted") await verify();
+}
+
 async function main(): Promise<void> {
   const args = parseArguments(process.argv.slice(2));
   const workspace = resolve(dirname(args.artifactDirectory), `.work-${args.runId}`);
@@ -400,16 +408,18 @@ async function main(): Promise<void> {
       args.asOf
     );
 
-    const model = await OnnxCatBoostResidualModel.load(args.artifactDirectory);
-    if (model.manifest.modelSha256 !== manifest.modelSha256) {
-      throw new Error("Node ONNX loader 与 manifest artifact hash 不一致");
-    }
-    const first = samples[0]!;
-    await model.predict({
-      ...first.features,
-      isFiveK: first.distance === "five_k" ? 1 : 0,
-      isTenK: first.distance === "ten_k" ? 1 : 0,
-      isHalfMarathon: first.distance === "half_marathon" ? 1 : 0
+    await verifyAcceptedOnnxArtifact(evaluation.status, async () => {
+      const model = await OnnxCatBoostResidualModel.load(args.artifactDirectory);
+      if (model.manifest.modelSha256 !== manifest.modelSha256) {
+        throw new Error("Node ONNX loader 与 manifest artifact hash 不一致");
+      }
+      const first = samples[0]!;
+      await model.predict({
+        ...first.features,
+        isFiveK: first.distance === "five_k" ? 1 : 0,
+        isTenK: first.distance === "ten_k" ? 1 : 0,
+        isHalfMarathon: first.distance === "half_marathon" ? 1 : 0
+      });
     });
 
     const result: PredictionModelTrainingResult = {
@@ -438,8 +448,10 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`${message}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`${message}\n`);
+    process.exitCode = 1;
+  });
+}

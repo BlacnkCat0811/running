@@ -1,8 +1,10 @@
 # RAI 个人跑步能力 App 产品需求文档（PRD）
 
+> **历史提案，已归档。** 本文描述未实施的原生 iPhone/HealthKit 方向，不是当前产品需求或验收依据。仓库当前只开发浏览器 Web、localhost API 及其共享包；当前范围以根目录 `AGENTS.md`、`README.md` 和 `docs/WEB_IMPLEMENTATION.md` 为准。任何原生客户端工作必须重新立项并获得明确授权。
+
 > 产品代号：RAI（Running Ability Intelligence）  
 > 文档版本：V1.0  
-> 文档状态：可进入原型与技术设计  
+> 文档状态：历史提案 / 已归档
 > 更新日期：2026-07-10  
 > 目标平台：iPhone，iOS 17 及以上  
 > 数据来源：Apple 健康 / HealthKit  

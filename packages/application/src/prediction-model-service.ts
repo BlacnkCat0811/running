@@ -13,6 +13,7 @@ import {
 import type { RaiDatabase } from "@rai/health-export-parser";
 
 import { loadLabeledRaceOutcomes } from "./prediction-data.js";
+import { raceResidualFeatureSchemaHash } from "./prediction-training-data.js";
 
 const distances: RaceDistance[] = ["five_k", "ten_k", "half_marathon"];
 export const MINIMUM_PREDICTION_LABELS = 50;
@@ -104,6 +105,20 @@ export class PredictionTrainingInProgressError extends Error {
 
 export class PredictionTrainingInputError extends Error {
   readonly code = "invalid_prediction_training_input" as const;
+}
+
+export class PredictionModelActivationCompatibilityError extends Error {
+  readonly code = "prediction_model_incompatible" as const;
+
+  constructor(
+    readonly reasons: Array<
+      "model_version_mismatch" |
+      "feature_schema_version_mismatch" |
+      "feature_schema_hash_mismatch"
+    >
+  ) {
+    super(`预测模型与当前推理版本不兼容：${reasons.join(", ")}`);
+  }
 }
 
 export type PredictionCancellationResult = "requested" | "cancelled" | "terminal";
@@ -279,6 +294,14 @@ export class PredictionModelService {
       throw new Error("leaseTimeoutMs 必须是非负有限数");
     }
     const cutoff = new Date(now.getTime() - leaseTimeoutMs).toISOString();
+    return this.recoverLeases(cutoff, now);
+  }
+
+  recoverAllLeases(now = new Date()): number {
+    return this.recoverLeases(null, now);
+  }
+
+  private recoverLeases(cutoff: string | null, now: Date): number {
     const recoveredAt = now.toISOString();
     let recovered = 0;
     this.store.database.exec("BEGIN IMMEDIATE");
@@ -287,9 +310,9 @@ export class PredictionModelService {
         SELECT id, cancel_requested AS cancelRequested, attempt_count AS attemptCount
         FROM prediction_model_runs
         WHERE status IN ('running', 'validating')
-          AND (heartbeat_at IS NULL OR heartbeat_at <= ?)
+          AND (? IS NULL OR heartbeat_at IS NULL OR heartbeat_at <= ?)
         ORDER BY created_at, id
-      `).all(cutoff) as unknown as Array<{
+      `).all(cutoff, cutoff) as unknown as Array<{
         id: string;
         cancelRequested: number;
         attemptCount: number;
@@ -428,6 +451,42 @@ export class PredictionModelService {
     }
   }
 
+  releaseLeaseForShutdown(id: string, workerToken: string): void {
+    const now = new Date().toISOString();
+    this.store.database.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.store.database.prepare(`
+        SELECT cancel_requested AS cancelRequested
+        FROM prediction_model_runs
+        WHERE id = ? AND worker_token = ? AND status IN ('running', 'validating')
+      `).get(id, workerToken) as { cancelRequested: number } | undefined;
+      if (!row) {
+        this.store.database.exec("COMMIT");
+        return;
+      }
+      if (row.cancelRequested === 1) {
+        this.store.database.prepare(`
+          UPDATE prediction_model_runs
+          SET status = 'cancelled', completed_at = ?, worker_token = NULL, heartbeat_at = NULL
+          WHERE id = ? AND worker_token = ? AND status IN ('running', 'validating')
+        `).run(now, id, workerToken);
+        this.insertEvent(id, "cancelled", 0, 5, "服务关闭时完成取消", now);
+      } else {
+        this.store.database.prepare(`
+          UPDATE prediction_model_runs
+          SET status = 'queued', started_at = NULL, worker_token = NULL, heartbeat_at = NULL,
+            attempt_count = MAX(0, attempt_count - 1)
+          WHERE id = ? AND worker_token = ? AND status IN ('running', 'validating')
+        `).run(id, workerToken);
+        this.insertEvent(id, "recovered", 0, 5, "服务关闭，训练任务已重新排队", now);
+      }
+      this.store.database.exec("COMMIT");
+    } catch (error) {
+      this.store.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   completeAndActivate(
     id: string,
     result: PredictionModelTrainingResult,
@@ -560,6 +619,10 @@ export class PredictionModelService {
     const run = this.get(id);
     if (!run) throw new Error("预测模型运行不存在");
     if (run.status !== "succeeded") throw new Error("只能激活验证成功的预测模型");
+    const compatibilityReasons = this.activationCompatibilityReasons(run);
+    if (compatibilityReasons.length > 0) {
+      throw new PredictionModelActivationCompatibilityError(compatibilityReasons);
+    }
     if (run.active) return run;
     const now = new Date().toISOString();
     this.store.database.exec("BEGIN IMMEDIATE");
@@ -611,7 +674,11 @@ export class PredictionModelService {
 
   private validateTrainingResult(result: PredictionModelTrainingResult): string[] {
     const reasons: string[] = [];
-    if (!isSha256(result.featureSchemaHash)) reasons.push("feature_schema_hash_invalid");
+    if (!isSha256(result.featureSchemaHash)) {
+      reasons.push("feature_schema_hash_invalid");
+    } else if (result.featureSchemaHash !== raceResidualFeatureSchemaHash()) {
+      reasons.push("feature_schema_hash_mismatch");
+    }
     if (!isSha256(result.trainingDataHash)) reasons.push("training_data_hash_invalid");
     if (!isSha256(result.artifactSha256) || result.artifactPath.length === 0) {
       reasons.push("artifact_invalid");
@@ -664,6 +731,22 @@ export class PredictionModelService {
         [metric.baselineMaeSeconds, metric.modelMaeSeconds, metric.maeImprovement]
           .every((value) => value === null || finite(value));
     });
+  }
+
+  private activationCompatibilityReasons(
+    run: PredictionModelRun
+  ): PredictionModelActivationCompatibilityError["reasons"] {
+    const reasons: PredictionModelActivationCompatibilityError["reasons"] = [];
+    if (run.modelVersion !== CATBOOST_PREDICTION_MODEL_VERSION) {
+      reasons.push("model_version_mismatch");
+    }
+    if (run.featureSchemaVersion !== PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION) {
+      reasons.push("feature_schema_version_mismatch");
+    }
+    if (run.featureSchemaHash !== raceResidualFeatureSchemaHash()) {
+      reasons.push("feature_schema_hash_mismatch");
+    }
+    return reasons;
   }
 
   private insertEvent(
@@ -719,8 +802,8 @@ export class PredictionModelService {
     return {
       id: row.id,
       algorithm: row.algorithm,
-      modelVersion: CATBOOST_PREDICTION_MODEL_VERSION,
-      featureSchemaVersion: PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
+      modelVersion: row.modelVersion,
+      featureSchemaVersion: row.featureSchemaVersion,
       featureSchemaHash: row.featureSchemaHash,
       trainingDataHash: row.trainingDataHash,
       trainingDataThroughAt: row.trainingDataThroughAt,

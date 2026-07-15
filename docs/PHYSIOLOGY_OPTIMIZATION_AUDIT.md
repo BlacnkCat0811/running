@@ -1,5 +1,7 @@
 # RAI 生理预测 10 轮优化完成审计
 
+> 历史验收快照：以下测试数量和 `test:all` 行为仅记录当次优化审计。当前桌面 Web E2E 使用 `npm run test:e2e:web`；390px 冻结兼容覆盖使用独立的 `npm run test:e2e:responsive`。
+
 签署时间：2026-07-11 02:41（Asia/Shanghai）
 
 ## 目标与结论

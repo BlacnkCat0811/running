@@ -590,12 +590,15 @@ export function writeAuditFiles(
 ): DataAudit {
   const staged = stageAuditFiles(database, markdownPath, jsonPath);
   staged.commit();
+  staged.finalize();
   return staged.audit;
 }
 
 export interface StagedAuditFiles {
   audit: DataAudit;
   commit(): void;
+  rollback(): void;
+  finalize(): void;
   discard(): void;
 }
 
@@ -638,14 +641,14 @@ export function stageAuditFiles(
     }
   ];
   for (const file of files) writeDurableFile(file.temporary, file.contents);
-  let settled = false;
+  let state: "prepared" | "published" | "settled" = "prepared";
+  const displaced: typeof files = [];
+  const published: typeof files = [];
 
   return {
     audit,
     commit() {
-      if (settled) throw new Error("Audit files have already been settled");
-      const displaced: typeof files = [];
-      const published: typeof files = [];
+      if (state !== "prepared") throw new Error("Audit files are not prepared for publication");
       try {
         for (const file of files) {
           if (existsSync(file.target)) {
@@ -665,10 +668,26 @@ export function stageAuditFiles(
         for (const file of files) {
           if (existsSync(file.temporary)) rmSync(file.temporary, { force: true });
         }
-        settled = true;
+        state = "settled";
         throw error;
       }
-      settled = true;
+      state = "published";
+    },
+    rollback() {
+      if (state === "settled") return;
+      if (state === "prepared") {
+        for (const file of files) rmSync(file.temporary, { force: true });
+        state = "settled";
+        return;
+      }
+      for (const file of [...files].reverse()) {
+        if (existsSync(file.target)) rmSync(file.target, { force: true });
+        if (existsSync(file.previous)) renameSync(file.previous, file.target);
+      }
+      state = "settled";
+    },
+    finalize() {
+      if (state !== "published") throw new Error("Audit files are not published");
       for (const file of displaced) {
         try {
           rmSync(file.previous, { force: true });
@@ -676,11 +695,10 @@ export function stageAuditFiles(
           // The published pair is complete; retain an undeletable old generation.
         }
       }
+      state = "settled";
     },
     discard() {
-      if (settled) return;
-      settled = true;
-      for (const file of files) rmSync(file.temporary, { force: true });
+      this.rollback();
     }
   };
 }

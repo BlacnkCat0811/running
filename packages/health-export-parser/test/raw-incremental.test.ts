@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,7 @@ import { workoutTypes } from "@rai/contracts";
 import { parseAppleHealthXml } from "../src/apple-health-parser.js";
 import { canonicalizeRunningWorkouts } from "../src/canonicalize.js";
 import { RaiDatabase } from "../src/database.js";
+import { importGpxRoutes } from "../src/gpx-parser.js";
 
 function exportXml(workouts: Array<{ start: string; duration: number }>): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -95,6 +96,46 @@ test("incremental XML scan updates a changed ActivitySummary for the same date",
       WHERE batch_id = 'summary-batch' AND entity_kind = 'activity_summary'
     `).get() as unknown as { changeType: string };
     assert.equal(change.changeType, "updated");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("incremental scans rebuild invalid record and GPX issues without accumulating them", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-issue-generation-"));
+  const databasePath = join(root, "rai.sqlite");
+  const xmlPath = join(root, "export.xml");
+  const routeDirectory = join(root, "workout-routes");
+  mkdirSync(routeDirectory);
+  writeFileSync(join(routeDirectory, "invalid.gpx"), "<gpx><trkpt", "utf8");
+  const xml = `<HealthData>
+    <Record type="HKQuantityTypeIdentifierHeartRate" value="150"/>
+    <Workout workoutActivityType="${workoutTypes.running}" sourceName="Watch"
+      startDate="2026-01-02 08:00:00 +0800" endDate="2026-01-02 08:30:00 +0800" duration="30" durationUnit="min">
+      <WorkoutRoute><FileReference path="/workout-routes/invalid.gpx"/></WorkoutRoute>
+    </Workout>
+  </HealthData>`;
+  writeFileSync(xmlPath, xml, "utf8");
+  const store = await RaiDatabase.open(databasePath);
+  const issueProjection = (): Array<{ code: string; objectId: string | null; message: string }> =>
+    store.database.prepare(`
+      SELECT code, object_id AS objectId, message FROM import_issues ORDER BY code, object_id
+    `).all() as unknown as Array<{ code: string; objectId: string | null; message: string }>;
+  try {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+    await importGpxRoutes(root, store);
+    canonicalizeRunningWorkouts(store.database);
+    const first = issueProjection();
+    assert.deepEqual(first.map((issue) => issue.code), ["INVALID_GPX", "INVALID_RECORD"]);
+
+    await parseAppleHealthXml(xmlPath, store, {
+      fileSize: statSync(xmlPath).size,
+      incremental: { generation: "issue-generation-2" }
+    });
+    await importGpxRoutes(root, store);
+    canonicalizeRunningWorkouts(store.database, { dirtyWorkoutTimes: [] });
+    assert.deepEqual(issueProjection(), first);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

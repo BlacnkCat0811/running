@@ -9,11 +9,14 @@ import { RaiDatabase } from "@rai/health-export-parser";
 
 import {
   MAXIMUM_PREDICTION_TRAINING_ATTEMPTS,
+  PredictionModelActivationCompatibilityError,
   PredictionModelService,
   PredictionTrainingInProgressError,
   PredictionTrainingInputError,
   PredictionTrainingPreconditionError
 } from "../src/prediction-model-service.js";
+import { raceResidualFeatureSchemaHash } from "../src/prediction-training-data.js";
+import { verifyAcceptedOnnxArtifact } from "../src/prediction-training-runner.js";
 
 const asOf = "2026-07-11T00:00:00.000Z";
 
@@ -61,13 +64,12 @@ function distanceMetrics(sampleCount: number) {
 }
 
 function successfulResult(): PredictionModelTrainingResult {
-  const repeatedHash = "a".repeat(64);
   const byDistance = Object.fromEntries(
     (["five_k", "ten_k", "half_marathon"] as RaceDistance[])
       .map((distance) => [distance, distanceMetrics(5)])
   ) as PredictionModelTrainingResult["metrics"]["byDistance"];
   return {
-    featureSchemaHash: repeatedHash,
+    featureSchemaHash: raceResidualFeatureSchemaHash(),
     trainingDataHash: "b".repeat(64),
     labelCount: 51,
     labelCountByDistance: { five_k: 17, ten_k: 17, half_marathon: 17 },
@@ -132,7 +134,28 @@ test("passes offline gates and atomically activates a completed CatBoost run", a
   }
 });
 
-test("rejects a trained model without replacing the current active model", async () => {
+test("returns a shutdown-interrupted training lease to the queue without consuming an attempt", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-shutdown-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    assert.equal(service.claimNext("shutdown-worker")?.id, runId);
+    const attemptCount = (): number => Number((store.database.prepare(
+      "SELECT attempt_count AS attemptCount FROM prediction_model_runs WHERE id = ?"
+    ).get(runId) as { attemptCount: number }).attemptCount);
+    assert.equal(attemptCount(), 1);
+    service.releaseLeaseForShutdown(runId, "shutdown-worker");
+    assert.equal(service.get(runId)?.status, "queued");
+    assert.equal(attemptCount(), 0);
+    assert.equal(service.claimNext("replacement-worker")?.id, runId);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("preserves a runner-rejected result without loading ONNX or replacing the active model", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
   try {
@@ -145,7 +168,13 @@ test("rejects a trained model without replacing the current active model", async
     service.claimNext();
     const rejectedResult = successfulResult();
     rejectedResult.metrics.maeImprovement = 0.01;
+    let onnxVerificationCalls = 0;
+    await verifyAcceptedOnnxArtifact("rejected", async () => {
+      onnxVerificationCalls += 1;
+      throw new Error("rejected artifacts are not loadable by the production ONNX loader");
+    });
     const rejected = service.completeAndActivate(rejectedId, rejectedResult);
+    assert.equal(onnxVerificationCalls, 0);
     assert.equal(rejected.status, "rejected");
     assert.equal(rejected.active, false);
     assert.deepEqual(rejected.failure, {
@@ -153,6 +182,98 @@ test("rejects a trained model without replacing the current active model", async
       reasons: ["mae_improvement_below_3_percent"]
     });
     assert.equal(service.get(acceptedId)?.active, true);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("requires Node ONNX verification for runner-accepted artifacts", async () => {
+  let onnxVerificationCalls = 0;
+  await verifyAcceptedOnnxArtifact("accepted", async () => {
+    onnxVerificationCalls += 1;
+  });
+  assert.equal(onnxVerificationCalls, 1);
+  await assert.rejects(
+    verifyAcceptedOnnxArtifact("accepted", async () => {
+      throw new Error("ONNX inference failed");
+    }),
+    /ONNX inference failed/
+  );
+});
+
+test("rejects a result built for a different feature schema", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-schema-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    const result = successfulResult();
+    result.featureSchemaHash = "a".repeat(64);
+    const completed = service.completeAndActivate(runId, result);
+    assert.equal(completed.status, "rejected");
+    assert.deepEqual(completed.failure, {
+      code: "activation_gate_failed",
+      reasons: ["feature_schema_hash_mismatch"]
+    });
+    assert.equal(completed.active, false);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("preserves stored model versions and refuses to activate incompatible history", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-activation-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const historicalId = service.enqueue({ asOf });
+    service.claimNext();
+    service.completeAndActivate(historicalId, successfulResult());
+    const historical = service.get(historicalId)!;
+
+    const currentId = service.enqueue({ asOf });
+    service.claimNext();
+    service.completeAndActivate(currentId, successfulResult());
+
+    const assertActivationRejected = (
+      column: "model_version" | "feature_schema_version" | "feature_schema_hash",
+      value: string,
+      reason: PredictionModelActivationCompatibilityError["reasons"][number]
+    ): void => {
+      store.database.prepare(`
+        UPDATE prediction_model_runs SET ${column} = ? WHERE id = ?
+      `).run(value, historicalId);
+      assert.throws(
+        () => service.activate(historicalId),
+        (error: unknown) =>
+          error instanceof PredictionModelActivationCompatibilityError &&
+          error.code === "prediction_model_incompatible" &&
+          error.reasons.includes(reason)
+      );
+      assert.equal(service.get(currentId)?.active, true);
+      assert.equal(service.get(historicalId)?.active, false);
+    };
+
+    assertActivationRejected("model_version", "race-residual-catboost-v0", "model_version_mismatch");
+    assert.equal(service.get(historicalId)?.modelVersion, "race-residual-catboost-v0");
+    store.database.prepare(`
+      UPDATE prediction_model_runs SET model_version = ? WHERE id = ?
+    `).run(historical.modelVersion, historicalId);
+
+    assertActivationRejected(
+      "feature_schema_version",
+      "race-residual-features-v0",
+      "feature_schema_version_mismatch"
+    );
+    assert.equal(service.get(historicalId)?.featureSchemaVersion, "race-residual-features-v0");
+    store.database.prepare(`
+      UPDATE prediction_model_runs SET feature_schema_version = ? WHERE id = ?
+    `).run(historical.featureSchemaVersion, historicalId);
+
+    assertActivationRejected("feature_schema_hash", "a".repeat(64), "feature_schema_hash_mismatch");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -230,6 +351,28 @@ test("recovers an abandoned leased run and fences the previous worker", async ()
     `).get(runId) as unknown as { attemptCount: number };
     assert.equal(attempts.attemptCount, 2);
     assert.ok(service.events(runId).some((event) => event.phase === "recovered"));
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("force-recovers every restored lease even when its heartbeat is in the future", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext("worker_token_future");
+    store.database.prepare(`
+      UPDATE prediction_model_runs SET heartbeat_at = '2099-01-01T00:00:00.000Z'
+      WHERE id = ?
+    `).run(runId);
+
+    assert.equal(service.recoverAbandoned(0, new Date(asOf)), 0);
+    assert.equal(service.get(runId)?.status, "running");
+    assert.equal(service.recoverAllLeases(new Date(asOf)), 1);
+    assert.equal(service.get(runId)?.status, "queued");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

@@ -82,7 +82,13 @@ export class RuntimeStateStore {
         input_path=excluded.input_path, original_path=excluded.original_path,
         source_sha256=excluded.source_sha256, export_file_name=excluded.export_file_name,
         export_bytes=excluded.export_bytes, route_file_count=excluded.route_file_count,
-        modified_at=excluded.modified_at, last_used_at=excluded.last_used_at`).run(
+        modified_at=excluded.modified_at,
+        last_used_at=CASE
+          WHEN import_sources.last_used_at IS NULL THEN excluded.last_used_at
+          WHEN excluded.last_used_at IS NULL THEN import_sources.last_used_at
+          WHEN excluded.last_used_at > import_sources.last_used_at THEN excluded.last_used_at
+          ELSE import_sources.last_used_at
+        END`).run(
         source.id, source.kind, source.displayName, source.inputPath, source.originalPath,
         source.sourceSha256, source.exportFileName, source.exportBytes, source.routeFileCount,
         source.modifiedAt, source.createdAt, source.lastUsedAt

@@ -13,12 +13,12 @@ export function isTrustedUnsafeRequest(
   origin: string | undefined,
   options: LocalRequestSecurityOptions
 ): boolean {
-  if (!unsafeMethods.has(method)) return true;
   const trustedHosts = new Set([
     `127.0.0.1:${options.apiPort}`,
     `localhost:${options.apiPort}`
   ]);
   if (!host || !trustedHosts.has(host.toLowerCase())) return false;
+  if (!unsafeMethods.has(method)) return true;
   if (!origin) return true;
   const trustedOrigins = new Set([
     `http://127.0.0.1:${options.apiPort}`,
@@ -41,7 +41,7 @@ export function installLocalRequestSecurity(
     )) return;
     return reply.code(403).send({
       code: "untrusted_origin",
-      message: "拒绝来自非本地页面的写请求"
+      message: "拒绝来自非本地页面的请求"
     });
   });
 }

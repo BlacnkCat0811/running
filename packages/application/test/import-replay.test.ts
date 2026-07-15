@@ -144,7 +144,8 @@ test("imports a small Health fixture and replays features, CA/TA, and daily snap
     `).get(checkpointJobId) as unknown as { status: string; hashesJson: string };
     assert.equal(validation.status, "matched");
     assert.deepEqual(Object.keys(JSON.parse(validation.hashesJson)).sort(), [
-      "assessments", "dailyTrainingMetrics", "features", "snapshots", "workoutTrainingLoads"
+      "assessments", "dailyTrainingMetrics", "dailyZoneProfiles", "features", "snapshots",
+      "workoutTrainingLoads", "workoutZoneSummaries"
     ]);
 
     const activeBeforeMismatch = store.database.prepare(

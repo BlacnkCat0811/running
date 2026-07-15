@@ -11,6 +11,8 @@ from rai_ml.contract import (
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
     dataset_sha256,
+    feature_schema_document,
+    feature_schema_sha256,
     load_jsonl,
 )
 
@@ -74,6 +76,16 @@ def test_dataset_hash_is_canonical(tmp_path):
     first = load_jsonl(write_jsonl(tmp_path, [row()]))
     second = load_jsonl(write_jsonl(tmp_path, [row()]))
     assert dataset_sha256(first) == dataset_sha256(second)
+
+
+def test_feature_schema_hash_includes_acwr_semantics():
+    assert feature_schema_document()["featureSemantics"]["acuteChronicLoadRatio"] == (
+        "active composite daily training load; 7-day/28-day half-life EWMA ratio "
+        "through asOf"
+    )
+    assert feature_schema_sha256() == (
+        "77a352b9035b68c584bd2b6147fc1156c22423ffa806b0da42462afd2b10dfb2"
+    )
 
 
 def test_ordering_uses_absolute_instants_instead_of_raw_timezone_strings(tmp_path):

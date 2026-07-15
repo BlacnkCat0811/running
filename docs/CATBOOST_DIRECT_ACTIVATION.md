@@ -28,6 +28,8 @@ flowchart LR
 
 训练数据契约为 `race-residual-feature-v2`，模型版本为 `race-residual-catboost-v1`。目标值固定为：
 
+`acuteChronicLoadRatio` 使用 active composite training load 构建的正式 7/28 天半衰期 EWMA 比值，并只读取 `asOf` 之前已结束训练的负荷。该语义进入 feature schema hash；旧语义模型不能通过激活校验。
+
 ```text
 targetLogResidual = log(actualSeconds / baselinePredictedSeconds)
 ```
@@ -97,7 +99,7 @@ npm run ml:install
 npm run typecheck
 npm test
 npm run ml:test
-npm run test:e2e
+npm run build
 ```
 
 训练由 API 的持久化 worker 启动。也可直接调试 runner：

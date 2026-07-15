@@ -24,7 +24,6 @@ RAI 是一个本地优先的个人跑步能力分析项目。当前阶段先解�
 - 校准进度、7 日 TA 变化、CA/TA 差值、五维滚动趋势、跑量与训练负荷上下文。
 - 训练列表支持模型参与、资格、环境、日期范围、来源、置信度、路线和训练类型筛选，筛选状态保存在 URL。
 - 无数据库首次启动引导，以及删除数据库后的安全恢复入口。
-- 基于本机 Chrome/Edge 的桌面与 390px 浏览器 E2E。
 - 脱敏诊断 JSON、任务阶段查看/取消、SQLite 备份恢复和导入任务状态落盘。
 - “导入更新”在完整重建 canonical 数据时保留用户覆盖、RPE/备注和不可变模型历史。
 - 独立的生理预测核心：Apple Health VO₂max 稳健集成、有效 VDOT、乳酸阈值配速/心率、5K/10K/半马预测。
@@ -41,7 +40,7 @@ RAI 是一个本地优先的个人跑步能力分析项目。当前阶段先解�
 
 - Node.js 24 及以上；
 - npm 11 及以上；
-- Python 3.12 或 3.13；基础分析和 ONNX 推理不依赖 Python，但内置模型训练需要通过 `npm run ml:bootstrap` 安装锁定环境，生产启动会预检该环境。
+- Python 3.12 或 3.13（可选）；只有内置 CatBoost 训练和 Python 测试需要通过 `npm run ml:bootstrap` 安装锁定环境。基础分析、公式回退、ONNX 推理和生产 Web/API 启动只依赖 Node.js。
 
 ## 安装
 
@@ -111,16 +110,17 @@ npm run data:refresh-snapshots -- `
 ```powershell
 npm run typecheck
 npm test
-npm run test:e2e
+npm run build
+npm run test:e2e:web
 ```
 
-一次执行类型检查、单元/集成测试和浏览器 E2E：
+`test:e2e:web` 使用本机 Chrome/Edge 验证 1440 x 900 桌面流程。冻结的 390px 兼容覆盖保留在 `npm run test:e2e:responsive`，仅在明确修改响应式代码时运行；`npm run test:e2e` 会顺序运行两者。
+
+一次执行类型检查、单元/集成测试、模型训练测试、Web 构建和桌面浏览器 E2E：
 
 ```powershell
 npm run test:all
 ```
-
-`test:e2e` 使用已安装的本机 Chrome 或 Edge，不下载额外浏览器。它会在独立临时运行目录中用合成 Apple Health 数据验证首次导入、训练覆盖重算、模型切换、备份删除与恢复；若 `var/rai.sqlite` 存在，还会对真实数据执行只读导航、筛选、详情、趋势、模型对照和响应式检查。写入型测试绝不操作真实数据库或真实 Apple Health 导出。
 
 ## 启动 Web
 
@@ -138,6 +138,8 @@ npm run dev
 ```powershell
 npm start
 ```
+
+生产启动不要求 Python。需要训练或验证 CatBoost 模型时，另行执行 `npm run ml:bootstrap`、`npm run ml:check` 和相应的 `ml:*` 命令。
 
 打开 http://127.0.0.1:8787。API 固定监听本机地址，不开放局域网访问。
 

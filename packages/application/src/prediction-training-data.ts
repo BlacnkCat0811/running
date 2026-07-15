@@ -1,7 +1,18 @@
-import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { PhysiologyPredictionScenario, RaceDistance } from "@rai/contracts";
+import {
+  PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
+  PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
+  predictionResidualFeatureNames,
+  predictionResidualOnnxFeatureNames,
+  type PhysiologyPredictionScenario,
+  type RaceDistance,
+  type WorkoutTrainingLoad
+} from "@rai/contracts";
+import {
+  buildDailyTrainingMetrics,
+  localDateInTimeZone
+} from "@rai/training-load";
 
 import {
   loadLabeledRaceOutcomes,
@@ -9,43 +20,15 @@ import {
 } from "./prediction-data.js";
 import { buildFormulaPredictionBase, type FormulaPredictionBase } from "./prediction-report.js";
 
-export const RACE_RESIDUAL_FEATURE_SCHEMA_VERSION = "race-residual-feature-v2" as const;
+export const RACE_RESIDUAL_FEATURE_SCHEMA_VERSION =
+  PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION;
 
-export const raceResidualFeatureNames = [
-  "logPredictedSeconds",
-  "readiness",
-  "conditionAdjustmentFraction",
-  "performanceVdot",
-  "vo2Max",
-  "vo2Gap",
-  "lactateThresholdPaceSecondsPerKm",
-  "lactateThresholdConfidence",
-  "recoveryReadiness",
-  "weeklyDistance4wKm",
-  "weeklyDistance8wKm",
-  "longestRun8wKm",
-  "runFrequency4wPerWeek",
-  "targetDistanceExposure8w",
-  "daysSinceLastRun",
-  "acuteChronicLoadRatio",
-  "temperatureC",
-  "humidityPercent",
-  "elevationGainMeters",
-  "directVo2EvidenceCount",
-  "thresholdEvidenceCount",
-  "performanceVdotEvidenceCount",
-  "overallDataQuality"
-] as const;
+export const raceResidualFeatureNames = predictionResidualFeatureNames;
 
 export type RaceResidualFeatureName = (typeof raceResidualFeatureNames)[number];
 export type RaceResidualFeatureValues = Record<RaceResidualFeatureName, number | null>;
 
-export const raceResidualOnnxFeatureNames = [
-  ...raceResidualFeatureNames,
-  "isFiveK",
-  "isTenK",
-  "isHalfMarathon"
-] as const;
+export const raceResidualOnnxFeatureNames = predictionResidualOnnxFeatureNames;
 
 export interface RaceResidualTrainingSample {
   schemaVersion: typeof RACE_RESIDUAL_FEATURE_SCHEMA_VERSION;
@@ -74,7 +57,7 @@ interface TrainingContext {
   runFrequency4wPerWeek: number;
   targetDistanceExposure8w: number;
   daysSinceLastRun: number;
-  acuteChronicLoadRatio: number;
+  acuteChronicLoadRatio: number | null;
   overallDataQuality: number | null;
 }
 
@@ -91,24 +74,7 @@ const numeric = (value: unknown, fallback = 0): number =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
 export function raceResidualFeatureSchemaHash(): string {
-  const schemaDocument = {
-    distanceEncoding: {
-      five_k: "isFiveK",
-      half_marathon: "isHalfMarathon",
-      ten_k: "isTenK"
-    },
-    featureNames: raceResidualOnnxFeatureNames,
-    featureSchemaVersion: RACE_RESIDUAL_FEATURE_SCHEMA_VERSION,
-    inputDtype: "float32",
-    inputShape: ["N", raceResidualOnnxFeatureNames.length],
-    missingValue: "NaN",
-    outputDtype: "float32",
-    outputSemantics: "targetLogResidual=log(actualSeconds/baselinePredictedSeconds)",
-    outputShape: ["N", 1]
-  };
-  return createHash("sha256")
-    .update(JSON.stringify(schemaDocument))
-    .digest("hex");
+  return PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH;
 }
 
 function loadOutcomeMetadata(database: DatabaseSync, trainingSessionId: string): string {
@@ -121,6 +87,51 @@ function loadOutcomeMetadata(database: DatabaseSync, trainingSessionId: string):
   return row?.metadataJson ?? "{}";
 }
 
+interface ActiveTrainingLoadRow {
+  trainingSessionId: string;
+  localDate: string;
+  timezoneIdentifier: string;
+  durationSeconds: number;
+  trainingLoad: number;
+  distanceKm: number | null;
+  confidence: number;
+}
+
+export function loadAcuteChronicLoadRatio(
+  database: DatabaseSync,
+  asOf: string
+): number | null {
+  const rows = database.prepare(`
+    SELECT
+      load.training_session_id AS trainingSessionId,
+      load.local_date AS localDate,
+      load.timezone_identifier AS timezoneIdentifier,
+      load.duration_seconds AS durationSeconds,
+      load.training_load AS trainingLoad,
+      load.distance_km AS distanceKm,
+      load.confidence AS confidence
+    FROM active_workout_training_loads load
+    JOIN training_sessions session ON session.id = load.training_session_id
+    WHERE session.status = 'active'
+      AND session.anchor_end_at <= ?
+    ORDER BY load.local_date, load.training_session_id
+  `).all(asOf) as unknown as ActiveTrainingLoadRow[];
+  if (rows.length === 0) return null;
+
+  const timezoneIdentifier = rows.at(-1)?.timezoneIdentifier ?? "Asia/Shanghai";
+  const throughDate = localDateInTimeZone(asOf, timezoneIdentifier);
+  const loads = rows.map((row) => ({
+    trainingSessionId: row.trainingSessionId,
+    localDate: row.localDate,
+    durationSeconds: row.durationSeconds,
+    distanceMeters: row.distanceKm === null ? null : row.distanceKm * 1_000,
+    load: row.trainingLoad,
+    confidence: row.confidence
+  })) as WorkoutTrainingLoad[];
+  const metrics = buildDailyTrainingMetrics(loads, throughDate);
+  return metrics.at(-1)?.loadRatio ?? null;
+}
+
 function loadTrainingContext(
   database: DatabaseSync,
   asOf: string,
@@ -128,8 +139,6 @@ function loadTrainingContext(
 ): TrainingContext {
   const start4w = new Date(Date.parse(asOf) - 28 * 86_400_000).toISOString();
   const start8w = new Date(Date.parse(asOf) - 56 * 86_400_000).toISOString();
-  const start7d = new Date(Date.parse(asOf) - 7 * 86_400_000).toISOString();
-  const start35d = new Date(Date.parse(asOf) - 35 * 86_400_000).toISOString();
   const row = database.prepare(`
     SELECT
       SUM(CASE WHEN session.anchor_start_at >= ? THEN session.anchor_distance_km ELSE 0 END) AS distance4w,
@@ -164,20 +173,6 @@ function loadTrainingContext(
     latestAt: string | null;
     averageQuality: number | null;
   };
-  const load = database.prepare(`
-    SELECT
-      SUM(CASE WHEN anchor_start_at >= ? THEN
-        (julianday(anchor_end_at) - julianday(anchor_start_at)) * 1440.0 ELSE 0 END) AS acuteMinutes,
-      SUM((julianday(anchor_end_at) - julianday(anchor_start_at)) * 1440.0) / 5.0 AS chronicWeeklyMinutes
-    FROM training_sessions
-    WHERE status = 'active'
-      AND anchor_start_at >= ?
-      AND anchor_end_at <= ?
-  `).get(start7d, start35d, asOf) as unknown as {
-    acuteMinutes: number | null;
-    chronicWeeklyMinutes: number | null;
-  };
-  const chronic = Math.max(numeric(load.chronicWeeklyMinutes), 30);
   return {
     weeklyDistance4wKm: numeric(row.distance4w) / 4,
     weeklyDistance8wKm: numeric(row.distance8w) / 8,
@@ -185,7 +180,7 @@ function loadTrainingContext(
     runFrequency4wPerWeek: numeric(row.runs4w) / 4,
     targetDistanceExposure8w: numeric(row.exposure8w),
     daysSinceLastRun: row.latestAt === null ? 56 : daysBetween(row.latestAt, asOf),
-    acuteChronicLoadRatio: numeric(load.acuteMinutes) / chronic,
+    acuteChronicLoadRatio: loadAcuteChronicLoadRatio(database, asOf),
     overallDataQuality: row.averageQuality
   };
 }

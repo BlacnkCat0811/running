@@ -252,6 +252,12 @@ def feature_schema_document() -> dict[str, Any]:
     return {
         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
         "featureNames": list(FEATURE_NAMES),
+        "featureSemantics": {
+            "acuteChronicLoadRatio": (
+                "active composite daily training load; 7-day/28-day half-life "
+                "EWMA ratio through asOf"
+            ),
+        },
         "inputDtype": "float32",
         "inputShape": ["N", len(FEATURE_NAMES)],
         "outputDtype": "float32",

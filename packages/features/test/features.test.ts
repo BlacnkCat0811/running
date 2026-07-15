@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { extractWorkoutFeatureVector, type WorkoutFeatureSource } from "../src/index.js";
+import {
+  defaultFeatureConfig,
+  extractWorkoutFeatureVector,
+  type FeatureConfig,
+  type WorkoutFeatureSource
+} from "../src/index.js";
 
 const startAt = "2025-01-01T00:00:00.000Z";
 const endAt = "2025-01-01T00:30:00.000Z";
@@ -116,7 +121,12 @@ test("classifies ordinary runs from normalized heart-rate effort", () => {
 
 test("prioritizes interval, long-run, and race evidence", () => {
   const interval = extractWorkoutFeatureVector("interval", "run", source({
-    speed: { ...source().speed, coefficientOfVariation: 0.18 }
+    speed: { ...source().speed, coefficientOfVariation: 0.22 },
+    speedSamples: Array.from({ length: 36 }, (_, index) => ({
+      value: Math.floor(index / 2) % 2 === 0 ? 4 : 2.5,
+      startOffsetSeconds: index * 30,
+      durationSeconds: 30
+    }))
   }));
   assert.equal(interval.sessionType, "interval");
 
@@ -132,9 +142,125 @@ test("prioritizes interval, long-run, and race evidence", () => {
     distanceKm: 5.02,
     heartRate: { ...source().heartRate, average: 175 },
     restingHeartRate: 50,
-    observedMaximumHeartRate: 190
+    observedMaximumHeartRate: 190,
+    override: {
+      id: "override_1", trainingSessionId: "session_1", revision: 1,
+      eligibilityOverride: null, statisticsParticipation: null, sessionType: null,
+      performanceProtocol: "other_race", rpe: null, conditionTags: [], note: null,
+      createdAt: startAt
+    }
   }));
   assert.equal(race.sessionType, "race");
+});
+
+test("does not infer race intent from a standard distance and high heart rate", () => {
+  const feature = extractWorkoutFeatureVector("hard_5k", "run", source({
+    durationSeconds: 30 * 60,
+    distanceKm: 5.03,
+    heartRate: { ...source().heartRate, average: 180 },
+    restingHeartRate: 60,
+    observedMaximumHeartRate: 198
+  }));
+  assert.equal(feature.sessionType, "tempo");
+});
+
+test("does not mistake aerobic progression and short surges for intervals", () => {
+  const blocks = [
+    { bins: 2, value: 2.2 }, { bins: 3, value: 2.8 }, { bins: 8, value: 2.2 },
+    { bins: 6, value: 2.8 }, { bins: 12, value: 2.2 }, { bins: 2, value: 2.8 },
+    { bins: 1, value: 2.2 }, { bins: 3, value: 2.8 }, { bins: 6, value: 2.2 },
+    { bins: 11, value: 3.2 }
+  ];
+  let offset = 0;
+  const speedSamples = blocks.flatMap((block) => Array.from({ length: block.bins }, () => {
+    const sample = { value: block.value, startOffsetSeconds: offset, durationSeconds: 30 };
+    offset += 30;
+    return sample;
+  }));
+  const feature = extractWorkoutFeatureVector("progressive", "run", source({
+    durationSeconds: offset,
+    distanceKm: 4.3,
+    speed: { ...source().speed, coefficientOfVariation: 0.164 },
+    speedSamples,
+    heartRate: { ...source().heartRate, average: 165 },
+    restingHeartRate: 70,
+    observedMaximumHeartRate: 201
+  }));
+  assert.equal(feature.sessionType, "steady");
+});
+
+test("does not infer intervals from sparse speed islands", () => {
+  const speedSamples = Array.from({ length: 10 }, (_, index) => ({
+    value: index % 2 === 0 ? 4.5 : 2.2,
+    startOffsetSeconds: index * 360,
+    durationSeconds: 30
+  }));
+  const feature = extractWorkoutFeatureVector("sparse-speed", "run", source({
+    durationSeconds: 3600,
+    distanceKm: 10,
+    workoutEndAt: "2025-01-01T01:00:00.000Z",
+    speed: { ...source().speed, coefficientOfVariation: 0.3 },
+    speedSamples,
+    heartRate: { ...source().heartRate, average: 165 },
+    restingHeartRate: 70,
+    observedMaximumHeartRate: 201
+  }));
+  assert.equal(feature.sessionType, "steady");
+});
+
+test("recognizes repeated intervals after a workout pause", () => {
+  const speedSamples = Array.from({ length: 18 }, (_, index) => ({
+    value: Math.floor(index / 2) % 2 === 0 ? 4.5 : 2.2,
+    startOffsetSeconds: 900 + index * 30,
+    durationSeconds: 30
+  }));
+  const feature = extractWorkoutFeatureVector("paused-intervals", "run", source({
+    durationSeconds: 900,
+    workoutEndAt: "2025-01-01T00:24:00.000Z",
+    distanceKm: 3.2,
+    speed: { ...source().speed, coefficientOfVariation: 0.3 },
+    speedSamples,
+    heartRate: { ...source().heartRate, average: 165 },
+    restingHeartRate: 70,
+    observedMaximumHeartRate: 201
+  }));
+
+  assert.equal(feature.sessionType, "interval");
+});
+
+test("defaults interval speed coverage for feature configs created before the setting existed", () => {
+  const { minimumIntervalSpeedCoverage: _removed, ...legacyConfig } = defaultFeatureConfig;
+  const speedSamples = Array.from({ length: 12 }, (_, index) => ({
+    value: Math.floor(index / 2) % 2 === 0 ? 4.5 : 2.2,
+    startOffsetSeconds: index * 30,
+    durationSeconds: 30
+  }));
+  const feature = extractWorkoutFeatureVector("legacy-config", "run", source({
+    durationSeconds: 1800,
+    distanceKm: 5,
+    speed: { ...source().speed, coefficientOfVariation: 0.3 },
+    speedSamples,
+    heartRate: { ...source().heartRate, average: 165 },
+    restingHeartRate: 70,
+    observedMaximumHeartRate: 201
+  }), legacyConfig);
+
+  assert.equal(feature.sessionType, "steady");
+  assert.equal(
+    (feature.provenance.featureConfig as FeatureConfig).minimumIntervalSpeedCoverage,
+    defaultFeatureConfig.minimumIntervalSpeedCoverage
+  );
+
+  const explicitlyUndefined = extractWorkoutFeatureVector(
+    "undefined-coverage",
+    "run",
+    source(),
+    { ...legacyConfig, minimumIntervalSpeedCoverage: undefined }
+  );
+  assert.equal(
+    (explicitlyUndefined.provenance.featureConfig as FeatureConfig).minimumIntervalSpeedCoverage,
+    defaultFeatureConfig.minimumIntervalSpeedCoverage
+  );
 });
 
 test("keeps implausible and incomplete runs unclassified", () => {

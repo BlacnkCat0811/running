@@ -1,5 +1,7 @@
 # RAI 项目架构
 
+> 当前实施范围：本文档以浏览器 Web、localhost API 和共享 TypeScript 包为当前产品。文中移动端内容仅记录未来适配方向，不属于当前开发或验收范围；当前范围以仓库根目录 `AGENTS.md` 为准。
+
 ## 1. 架构目标
 
 1. Web 版本先完成数据检查、模型实验和可视化。
@@ -420,7 +422,7 @@ calculated_at
 | Golden replay | 完整输入到历史 TA 时间线 |
 | API contract | OpenAPI 与 client 一致 |
 | Web E2E | 导入、筛选、详情、模型切换 |
-| Mobile integration | 真机 HealthKit 增量和删除 |
+| Future mobile integration | 未来独立立项后验证真机 HealthKit 增量和删除；不属于当前 Web 验收 |
 
 ## 12. 近期实施顺序
 

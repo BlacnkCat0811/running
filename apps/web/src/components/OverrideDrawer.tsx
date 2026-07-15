@@ -38,8 +38,11 @@ export function OverrideDrawer({ detail, onClose, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const drawerRef = useRef<HTMLElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
   const savingRef = useRef(saving);
+  const onCloseRef = useRef(onClose);
   savingRef.current = saving;
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -51,7 +54,7 @@ export function OverrideDrawer({ detail, onClose, onSaved }: {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (!savingRef.current) onClose();
+        if (!savingRef.current) onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -72,9 +75,15 @@ export function OverrideDrawer({ detail, onClose, onSaved }: {
       document.removeEventListener("keydown", handleKeyDown);
       previousFocus?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   const submit = async () => {
+    const parsedRpe = rpe.trim() === "" ? null : Number(rpe);
+    if (parsedRpe !== null && (!Number.isInteger(parsedRpe) || parsedRpe < 1 || parsedRpe > 10)) {
+      setError("RPE 必须是 1–10 之间的整数");
+      requestAnimationFrame(() => errorRef.current?.focus());
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -83,7 +92,7 @@ export function OverrideDrawer({ detail, onClose, onSaved }: {
         statisticsParticipation: statisticsParticipation || null,
         sessionType: type,
         performanceProtocol,
-        rpe: rpe ? Number(rpe) : null,
+        rpe: parsedRpe,
         conditionTags: tags.split(/[，,]/).map((value) => value.trim()).filter(Boolean),
         note: note.trim() || null
       };
@@ -94,6 +103,7 @@ export function OverrideDrawer({ detail, onClose, onSaved }: {
       onSaved(result.jobId);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "保存失败");
+      requestAnimationFrame(() => errorRef.current?.focus());
     } finally {
       setSaving(false);
     }
@@ -108,10 +118,10 @@ export function OverrideDrawer({ detail, onClose, onSaved }: {
           <label className="field"><span>是否计入运动统计</span><select value={statisticsParticipation} onChange={(event) => setStatisticsParticipation(event.target.value as typeof statisticsParticipation)}><option value="">计入统计（默认）</option><option value="include">明确计入</option><option value="exclude">不计入跑量与负荷</option></select><small>与“是否用于 RAI”相互独立；仅用于排除误记录或不属于你的训练。</small></label>
           <label className="field"><span>训练类型</span><select value={type ?? ""} onChange={(event) => setType((event.target.value || null) as OverrideWorkoutInput["sessionType"])}><option value="">不覆盖</option>{types.map((item) => <option key={item} value={item}>{labels[item]}</option>)}</select></label>
           <label className="field"><span>标准测试 / 比赛</span><select value={performanceProtocol ?? ""} onChange={(event) => setPerformanceProtocol((event.target.value || null) as OverrideWorkoutInput["performanceProtocol"])}><option value="">不是标准测试</option>{protocols.map((item) => <option key={item} value={item}>{protocolLabels[item]}</option>)}</select><small>只有全力或按协议完成的测试才应标记，用于校准 VO₂max、VDOT 和成绩预测。</small></label>
-          <label className="field"><span>RPE</span><input type="number" min="1" max="10" value={rpe} onChange={(event) => setRpe(event.target.value)} /><small>主观用力程度，1-10。</small></label>
+          <label className="field"><span>RPE</span><input type="number" min="1" max="10" step="1" value={rpe} aria-invalid={error?.startsWith("RPE ") || undefined} onChange={(event) => { setRpe(event.target.value); if (error?.startsWith("RPE ")) setError(null); }} /><small>主观用力程度，1-10。</small></label>
           <label className="field"><span>状态标签</span><input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="例如：睡眠不足，天气炎热" /></label>
           <label className="field"><span>备注</span><textarea rows={5} value={note} onChange={(event) => setNote(event.target.value)} /></label>
-          {error ? <p id="override-save-error" className="form-error" role="alert">{error}</p> : null}
+          {error ? <p ref={errorRef} id="override-save-error" className="form-error" role="alert" tabIndex={-1}>{error}</p> : null}
         </fieldset>
         <footer><button className="button secondary" disabled={saving} onClick={onClose}>取消</button><button className="button primary" disabled={saving} onClick={() => void submit()}>{saving ? "正在保存" : "保存并重算"}</button></footer>
       </aside>

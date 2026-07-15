@@ -435,7 +435,7 @@ export const openapiDocument = {
     "/v1/imports/inspect": { post: operation(["Jobs"], "预检已上传或本机导入来源", {
       requestBody: body(importSourceBodySchema, "待预检的来源")
     }) },
-    "/v1/import-sources/discover": { get: operation(["Jobs"], "发现常用目录中的 Apple Health 导出") },
+    "/v1/import-sources/discover": { post: operation(["Jobs"], "发现常用目录中的 Apple Health 导出") },
     "/v1/import-sources/recent": { get: operation(["Jobs"], "最近成功使用的导入来源") },
     "/v1/backups": {
       get: operation(["Maintenance"], "本地备份列表"),

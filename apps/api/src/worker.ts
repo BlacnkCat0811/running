@@ -8,19 +8,31 @@ import { resolve } from "node:path";
 import { Worker } from "node:worker_threads";
 
 import type { ImportJobResponse } from "@rai/api-contracts";
-import type { PredictionModelTrainingRequest, PredictionModelTrainingResult } from "@rai/contracts";
+import {
+  healthTypes,
+  type PredictionModelTrainingRequest,
+  type PredictionModelTrainingResult
+} from "@rai/contracts";
 import {
   PREDICTION_MODEL_LEASE_TIMEOUT_MS,
   PredictionModelService,
   type PredictionModelTrainer
 } from "@rai/application";
-import { RaiDatabase } from "@rai/health-export-parser";
+import {
+  RaiDatabase,
+  stageAuditFiles,
+  type StagedAuditFiles,
+} from "@rai/health-export-parser";
 import { RuntimeStateStore } from "./runtime-state.js";
 
 export class RecomputeWorker {
   private scheduled = false;
   private running = false;
   private consecutiveFailures = 0;
+  private closing = false;
+  private timer: NodeJS.Timeout | null = null;
+  private drainPromise: Promise<void> | null = null;
+  private activeWorker: Worker | null = null;
 
   constructor(private readonly databasePath: string) {}
 
@@ -29,10 +41,32 @@ export class RecomputeWorker {
   }
 
   schedule(): void {
-    if (this.scheduled || this.running) return;
+    if (this.closing || this.scheduled || this.running) return;
     this.consecutiveFailures = 0;
     this.scheduled = true;
-    setTimeout(() => void this.drain(), 20);
+    this.queueDrain(20);
+  }
+
+  async close(): Promise<void> {
+    this.closing = true;
+    this.scheduled = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    await this.activeWorker?.terminate();
+    await this.drainPromise;
+  }
+
+  private queueDrain(delayMs: number): void {
+    if (this.closing) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      const promise = this.drain();
+      this.drainPromise = promise;
+      void promise.finally(() => {
+        if (this.drainPromise === promise) this.drainPromise = null;
+      });
+    }, delayMs);
+    this.timer.unref();
   }
 
   private async drain(): Promise<void> {
@@ -40,7 +74,7 @@ export class RecomputeWorker {
     this.scheduled = false;
     this.running = true;
     try {
-      while (existsSync(this.databasePath)) {
+      while (!this.closing && existsSync(this.databasePath)) {
         const ran = await this.runOneInWorkerThread();
         this.consecutiveFailures = 0;
         if (!ran) break;
@@ -49,12 +83,12 @@ export class RecomputeWorker {
       this.consecutiveFailures += 1;
       const message = error instanceof Error ? error.stack ?? error.message : String(error);
       process.stderr.write(`Recompute worker failed: ${message}\n`);
-      if (this.consecutiveFailures < 3) this.scheduled = true;
+      if (!this.closing && this.consecutiveFailures < 3) this.scheduled = true;
     } finally {
       this.running = false;
-      if (this.scheduled) {
+      if (!this.closing && this.scheduled) {
         const retryDelay = Math.min(1000, 20 * (2 ** this.consecutiveFailures));
-        setTimeout(() => void this.drain(), retryDelay);
+        this.queueDrain(retryDelay);
       }
     }
   }
@@ -65,37 +99,88 @@ export class RecomputeWorker {
         workerData: { databasePath: this.databasePath },
         execArgv: ["--import", "tsx"]
       });
-      let settled = false;
+      this.activeWorker = worker;
+      let result: boolean | null = null;
+      let workerError: Error | null = null;
       worker.once("message", (message: { ran?: boolean }) => {
-        settled = true;
-        resolvePromise(message.ran === true);
+        result = message.ran === true;
       });
       worker.once("error", (error) => {
-        if (!settled) reject(error);
+        workerError = error;
       });
       worker.once("exit", (code) => {
-        if (!settled && code !== 0) reject(new Error(`Recompute worker thread exited with code ${code}`));
-        else if (!settled) resolvePromise(false);
+        if (this.activeWorker === worker) this.activeWorker = null;
+        if (workerError) reject(workerError);
+        else if (code !== 0 && !this.closing) reject(new Error(`Recompute worker thread exited with code ${code}`));
+        else resolvePromise(result ?? false);
       });
     });
   }
 }
 
-function terminateProcessTree(child: ChildProcess): void {
-  if (child.pid === undefined) return;
+function waitForProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolvePromise) => {
+    const finish = (exited: boolean): void => {
+      clearTimeout(timer);
+      child.off("exit", onExit);
+      child.off("error", onExit);
+      resolvePromise(exited);
+    };
+    const onExit = (): void => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    timer.unref();
+    child.once("exit", onExit);
+    child.once("error", onExit);
+    if (child.exitCode !== null || child.signalCode !== null) finish(true);
+  });
+}
+
+function waitForShutdown<T>(promise: Promise<T> | null, timeoutMs: number): Promise<T | undefined> {
+  if (!promise) return Promise.resolve(undefined);
+  return new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timed out waiting for worker shutdown")), timeoutMs);
+    timer.unref();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolvePromise(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+async function terminateProcessTree(child: ChildProcess): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32") {
-    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-      windowsHide: true,
-      stdio: "ignore"
-    });
-    killer.on("error", () => child.kill());
-    return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore"
+      });
+      const taskkillExited = await waitForProcessExit(killer, 1_500);
+      if (taskkillExited && killer.exitCode === 0 && await waitForProcessExit(child, 1_500)) return;
+    }
+    throw new Error("Failed to terminate Windows worker process tree");
+  } else {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      child.kill("SIGTERM");
+    }
+    if (!await waitForProcessExit(child, 1_500)) {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch {
+        child.kill("SIGKILL");
+      }
+    }
   }
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    child.kill("SIGTERM");
-  }
+  if (!await waitForProcessExit(child, 1_500)) throw new Error("Timed out terminating worker process tree");
 }
 
 export class ExternalPredictionModelTrainer implements PredictionModelTrainer {
@@ -136,6 +221,7 @@ export class ExternalPredictionModelTrainer implements PredictionModelTrainer {
   }
 
   private command(args: string[], signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(new Error("prediction_training_cancelled"));
     return new Promise((resolvePromise, reject) => {
       const child = spawn(process.execPath, args, {
         cwd: this.projectRoot,
@@ -150,7 +236,7 @@ export class ExternalPredictionModelTrainer implements PredictionModelTrainer {
       child.stdout.on("data", append);
       child.stderr.on("data", append);
       const abort = (): void => {
-        terminateProcessTree(child);
+        void terminateProcessTree(child).catch(() => child.kill("SIGKILL"));
       };
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) abort();
@@ -169,6 +255,10 @@ export class PredictionModelWorker {
   private scheduled = false;
   private running = false;
   private readonly instanceToken = `prediction_worker_${randomUUID()}`;
+  private closing = false;
+  private timer: NodeJS.Timeout | null = null;
+  private drainPromise: Promise<void> | null = null;
+  private activeAbortController: AbortController | null = null;
 
   constructor(
     private readonly databasePath: string,
@@ -183,18 +273,34 @@ export class PredictionModelWorker {
   }
 
   schedule(): void {
-    if (this.running || this.scheduled) return;
+    if (this.closing || this.running || this.scheduled) return;
     this.scheduled = true;
     this.queueDrain(20);
   }
 
   private queueDrain(delayMs: number): void {
-    setTimeout(() => {
-      void this.drain().catch(() => {
+    if (this.closing) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      const promise = this.drain().catch(() => {
         this.running = false;
-        setTimeout(() => this.schedule(), 1_000).unref();
+        if (!this.closing) this.queueDrain(1_000);
       });
-    }, delayMs).unref();
+      this.drainPromise = promise;
+      void promise.finally(() => {
+        if (this.drainPromise === promise) this.drainPromise = null;
+      });
+    }, delayMs);
+    this.timer.unref();
+  }
+
+  async close(): Promise<void> {
+    this.closing = true;
+    this.scheduled = false;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.activeAbortController?.abort();
+    await this.drainPromise;
   }
 
   private async drain(): Promise<void> {
@@ -203,7 +309,7 @@ export class PredictionModelWorker {
     this.running = true;
     let leasedRunRemains = false;
     try {
-      while (existsSync(this.databasePath)) {
+      while (!this.closing && existsSync(this.databasePath)) {
         const store = await RaiDatabase.open(this.databasePath);
         let runId: string | null = null;
         let workerToken: string | null = null;
@@ -220,19 +326,36 @@ export class PredictionModelWorker {
         } finally {
           store.close();
         }
+        if (this.closing) {
+          const shutdownStore = await RaiDatabase.open(this.databasePath);
+          try {
+            new PredictionModelService(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
+          } finally {
+            shutdownStore.close();
+          }
+          break;
+        }
         await this.execute(runId, workerToken);
       }
     } finally {
       this.running = false;
-      if (this.scheduled) this.queueDrain(20);
-      else if (leasedRunRemains) {
-        setTimeout(() => this.schedule(), PREDICTION_MODEL_LEASE_TIMEOUT_MS + 250).unref();
+      if (!this.closing && this.scheduled) this.queueDrain(20);
+      else if (!this.closing && leasedRunRemains) {
+        this.queueDrain(PREDICTION_MODEL_LEASE_TIMEOUT_MS + 250);
       }
     }
   }
 
   private async execute(runId: string, workerToken: string): Promise<void> {
     const readStore = await RaiDatabase.open(this.databasePath);
+    if (this.closing) {
+      try {
+        new PredictionModelService(readStore).releaseLeaseForShutdown(runId, workerToken);
+      } finally {
+        readStore.close();
+      }
+      return;
+    }
     const run = new PredictionModelService(readStore).get(runId);
     const attempt = readStore.database.prepare(`
       SELECT attempt_count AS attemptCount
@@ -246,8 +369,19 @@ export class PredictionModelWorker {
       attempt.attemptCount
     );
     await mkdir(dirname(artifactDirectory), { recursive: true });
+    if (this.closing) {
+      const shutdownStore = await RaiDatabase.open(this.databasePath);
+      try {
+        new PredictionModelService(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
+      } finally {
+        shutdownStore.close();
+      }
+      return;
+    }
 
     const abortController = new AbortController();
+    this.activeAbortController = abortController;
+    if (this.closing) abortController.abort();
     const leaseDatabase = new DatabaseSync(this.databasePath);
     leaseDatabase.exec("PRAGMA busy_timeout = 2000");
     const cancellationPoll = setInterval(() => {
@@ -279,9 +413,12 @@ export class PredictionModelWorker {
         databasePath: this.databasePath,
         artifactDirectory
       }, abortController.signal);
+      if (this.closing) throw new Error("prediction_training_shutdown");
       const store = await RaiDatabase.open(this.databasePath);
       try {
-        new PredictionModelService(store).completeAndActivate(runId, result, workerToken);
+        const service = new PredictionModelService(store);
+        if (this.closing) service.releaseLeaseForShutdown(runId, workerToken);
+        else service.completeAndActivate(runId, result, workerToken);
       } finally {
         store.close();
       }
@@ -289,7 +426,9 @@ export class PredictionModelWorker {
       const store = await RaiDatabase.open(this.databasePath);
       try {
         const service = new PredictionModelService(store);
-        if (service.isCancellationRequested(runId) || abortController.signal.aborted) {
+        if (this.closing) {
+          service.releaseLeaseForShutdown(runId, workerToken);
+        } else if (service.isCancellationRequested(runId) || abortController.signal.aborted) {
           service.markCancelled(runId, workerToken);
         } else {
           service.fail(runId, error, workerToken);
@@ -298,6 +437,7 @@ export class PredictionModelWorker {
         store.close();
       }
     } finally {
+      if (this.activeAbortController === abortController) this.activeAbortController = null;
       clearInterval(cancellationPoll);
       leaseDatabase.close();
     }
@@ -331,7 +471,7 @@ interface MutableImportJob extends ImportJobResponse {
 }
 
 interface ImportDatasetChange {
-  mode: "unchanged" | "incremental" | "full";
+  mode: "unchanged" | "data-only" | "incremental" | "full";
   dirtyFromAt: string | null;
   insertedWorkouts: number;
   updatedWorkouts: number;
@@ -345,6 +485,10 @@ export class ImportWorker {
   private readonly jobStatePath: string;
   private readonly state: RuntimeStateStore;
   private running = false;
+  private closing = false;
+  private timer: NodeJS.Timeout | null = null;
+  private runPromise: Promise<void> | null = null;
+  private activeChild: ChildProcess | null = null;
 
   constructor(
     private readonly databasePath: string,
@@ -364,6 +508,7 @@ export class ImportWorker {
   }
 
   create(inputPathValue: string, onTerminal?: (succeeded: boolean) => void | Promise<void>): ImportJobResponse {
+    if (this.closing) throw new Error("导入服务正在关闭");
     if (this.running) throw new Error("已有导入任务正在执行");
     const inputPath = resolve(inputPathValue);
     if (!existsSync(inputPath) || !statSync(inputPath).isDirectory()) {
@@ -387,8 +532,49 @@ export class ImportWorker {
     this.jobs.set(id, job);
     this.persistJobs();
     this.running = true;
-    setTimeout(() => void this.run(job), 20);
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      const promise = this.run(job).catch((error) => {
+        const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        process.stderr.write(`Import worker failed unexpectedly: ${message}\n`);
+      });
+      this.runPromise = promise;
+      void promise.finally(() => {
+        if (this.runPromise === promise) this.runPromise = null;
+      });
+    }, 20);
+    this.timer.unref();
     return this.publicJob(job);
+  }
+
+  async close(): Promise<void> {
+    this.closing = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (this.running && !this.runPromise) {
+      const job = [...this.jobs.values()].at(-1);
+      if (job && ["queued", "running"].includes(job.status)) {
+        job.status = "failed";
+        job.phase = "interrupted";
+        job.message = "导入因本地服务关闭而中断，可重新提交导入";
+        job.error = "Local API closed before the import started";
+        job.completedAt = new Date().toISOString();
+        this.persistJobs();
+        try { await job.onTerminal?.(false); } catch { /* Terminal cleanup is best-effort during shutdown. */ }
+      }
+      this.running = false;
+    }
+    let terminationError: unknown;
+    try {
+      if (this.activeChild) await terminateProcessTree(this.activeChild);
+    } catch (error) {
+      terminationError = error;
+      this.activeChild?.kill("SIGKILL");
+    } finally {
+      if (terminationError) await waitForShutdown(this.runPromise, 3_000);
+      else await this.runPromise;
+    }
+    if (terminationError) throw terminationError;
   }
 
   get(id: string): ImportJobResponse | null {
@@ -404,14 +590,24 @@ export class ImportWorker {
 
   private async run(job: MutableImportJob): Promise<void> {
     const startedAtMs = Date.now();
-    job.status = "running";
-    this.persistJobs();
     const stagingDatabase = resolve(this.runtimeRoot, "var", `rai.importing.${job.id}.sqlite`);
+    const stagedMarkdownReport = resolve(this.runtimeRoot, "var", `data-audit.${job.id}.md`);
+    const stagedJsonReport = resolve(this.runtimeRoot, "var", `data-audit.${job.id}.json`);
+    const finalMarkdownReport = resolve(this.runtimeRoot, "docs/DATA_AUDIT.md");
+    const finalJsonReport = resolve(this.runtimeRoot, "var/reports/data-audit.json");
     let currentBackupPath: string | null = null;
+    let auditPublication: StagedAuditFiles | null = null;
+    let terminalSucceeded = false;
+    let publishTerminalState: (() => void) | null = null;
     try {
+      job.status = "running";
+      this.persistJobs();
       await this.removeDatabaseFiles(stagingDatabase);
+      this.assertNotClosing();
       currentBackupPath = await this.createCurrentBackup(job.id);
+      this.assertNotClosing();
       if (currentBackupPath) await copyFile(currentBackupPath, stagingDatabase);
+      this.assertNotClosing();
       job.phase = "import";
       job.message = currentBackupPath
         ? "正在临时数据库中增量同步 Apple Health 数据"
@@ -427,11 +623,12 @@ export class ImportWorker {
         "--database",
         stagingDatabase,
         "--report",
-        resolve(this.runtimeRoot, "docs/DATA_AUDIT.md"),
+        stagedMarkdownReport,
         "--json-report",
-        resolve(this.runtimeRoot, "var/reports/data-audit.json"),
+        stagedJsonReport,
         ...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"])
       ]);
+      this.assertNotClosing();
       const change = currentBackupPath
         ? this.analyzeDatasetChange(stagingDatabase, currentBackupPath)
         : {
@@ -444,74 +641,136 @@ export class ImportWorker {
             routesUpdated: this.countRows(stagingDatabase, "workout_routes")
           };
       if (change.mode === "unchanged") {
+        terminalSucceeded = true;
+        publishTerminalState = () => {
+          job.status = "succeeded";
+          job.phase = "completed";
+          job.message = "导出文件中没有影响分析的新数据";
+          job.completedAt = new Date().toISOString();
+          job.summary = {
+            importMode: "unchanged",
+            ...change,
+            featuresReused: 0,
+            featuresRecomputed: 0,
+            modelReplayFrom: null,
+            durationMs: Date.now() - startedAtMs,
+            backupName: currentBackupPath ? currentBackupPath.split(/[\\/]/).at(-1) ?? null : null
+          };
+        };
+        return;
+      }
+      let featureSummary = { reused: 0, recomputed: 0 };
+      if (change.mode !== "data-only") {
+        // Incremental staging starts from an online backup, so overrides and immutable
+        // histories already remain attached to their stable training-session identities.
+        job.phase = "recompute";
+        job.message = "导入完成，正在重算 RAI 时间线";
+        this.persistJobs();
+        await this.command([
+          "--import",
+          "tsx",
+          "packages/application/src/cli.ts",
+          "recompute",
+          "--database",
+          stagingDatabase,
+          "--timezone",
+          "Asia/Shanghai",
+          ...(change.mode === "incremental" && change.dirtyFromAt
+            ? ["--dirty-from", change.dirtyFromAt, "--shadow-validate"]
+            : [])
+        ]);
+        this.assertNotClosing();
+        featureSummary = this.latestFeatureRunSummary(stagingDatabase);
+      }
+      job.phase = "activate";
+      job.message = change.mode === "data-only"
+        ? "导入完成，正在保存无需重算的数据"
+        : "验证完成，正在切换本地数据库";
+      this.persistJobs();
+      auditPublication = this.stageAuditReports(
+        stagingDatabase,
+        finalMarkdownReport,
+        finalJsonReport,
+      );
+      await this.activateDatabase(
+        stagingDatabase,
+        job.id,
+        currentBackupPath,
+        () => auditPublication?.commit(),
+      );
+      auditPublication.finalize();
+      terminalSucceeded = true;
+      publishTerminalState = () => {
         job.status = "succeeded";
         job.phase = "completed";
-        job.message = "导出文件中没有影响分析的新数据";
+        job.message = change.mode === "data-only" ? "导入完成，分析数据没有变化" : "导入与模型重算完成";
         job.completedAt = new Date().toISOString();
         job.summary = {
-          importMode: "unchanged",
-          ...change,
-          featuresReused: 0,
-          featuresRecomputed: 0,
-          modelReplayFrom: null,
+          importMode: change.mode === "data-only" ? "incremental" : change.mode,
+          insertedWorkouts: change.insertedWorkouts,
+          updatedWorkouts: change.updatedWorkouts,
+          removedWorkouts: change.removedWorkouts,
+          unchangedWorkouts: change.unchangedWorkouts,
+          routesUpdated: change.routesUpdated,
+          featuresReused: featureSummary.reused,
+          featuresRecomputed: featureSummary.recomputed,
+          modelReplayFrom: change.mode === "incremental" ? change.dirtyFromAt : null,
           durationMs: Date.now() - startedAtMs,
           backupName: currentBackupPath ? currentBackupPath.split(/[\\/]/).at(-1) ?? null : null
         };
-        this.persistJobs();
-        return;
-      }
-      // Incremental staging starts from an online backup, so overrides and immutable
-      // histories already remain attached to their stable training-session identities.
-      job.phase = "recompute";
-      job.message = "导入完成，正在重算 RAI 时间线";
-      this.persistJobs();
-      await this.command([
-        "--import",
-        "tsx",
-        "packages/application/src/cli.ts",
-        "recompute",
-        "--database",
-        stagingDatabase,
-        "--timezone",
-        "Asia/Shanghai",
-        ...(change.mode === "incremental" && change.dirtyFromAt
-          ? ["--dirty-from", change.dirtyFromAt, "--shadow-validate"]
-          : [])
-      ]);
-      const featureSummary = this.latestFeatureRunSummary(stagingDatabase);
-      job.phase = "activate";
-      job.message = "验证完成，正在切换本地数据库";
-      this.persistJobs();
-      await this.activateDatabase(stagingDatabase, job.id, currentBackupPath);
-      job.status = "succeeded";
-      job.phase = "completed";
-      job.message = "导入与模型重算完成";
-      job.completedAt = new Date().toISOString();
-      job.summary = {
-        importMode: change.mode,
-        insertedWorkouts: change.insertedWorkouts,
-        updatedWorkouts: change.updatedWorkouts,
-        removedWorkouts: change.removedWorkouts,
-        unchangedWorkouts: change.unchangedWorkouts,
-        routesUpdated: change.routesUpdated,
-        featuresReused: featureSummary.reused,
-        featuresRecomputed: featureSummary.recomputed,
-        modelReplayFrom: change.mode === "incremental" ? change.dirtyFromAt : null,
-        durationMs: Date.now() - startedAtMs,
-        backupName: currentBackupPath ? currentBackupPath.split(/[\\/]/).at(-1) ?? null : null
       };
-      this.persistJobs();
     } catch (error) {
-      job.status = "failed";
-      job.phase = "failed";
-      job.message = "导入失败，原始导出文件未被修改";
-      job.error = error instanceof Error ? error.message : String(error);
-      job.completedAt = new Date().toISOString();
-      this.persistJobs();
+      let failure: unknown = error;
+      try {
+        auditPublication?.rollback();
+      } catch (rollbackError) {
+        failure = new AggregateError(
+          [error, rollbackError],
+          "Import failed and audit report publication could not be rolled back",
+        );
+      }
+      terminalSucceeded = false;
+      publishTerminalState = () => {
+        job.status = "failed";
+        job.phase = "failed";
+        job.message = "导入失败，原始导出文件未被修改";
+        job.error = failure instanceof Error ? failure.message : String(failure);
+        job.completedAt = new Date().toISOString();
+      };
     } finally {
-      await this.removeDatabaseFiles(stagingDatabase);
-      this.running = false;
-      try { await job.onTerminal?.(job.status === "succeeded"); } catch { /* Cleanup metadata must not change the completed import result. */ }
+      try {
+        await Promise.all([
+          this.removeDatabaseFiles(stagingDatabase),
+          rm(stagedMarkdownReport, { force: true }),
+          rm(stagedJsonReport, { force: true }),
+        ]);
+      } catch (error) {
+        const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        process.stderr.write(`Failed to clean up import staging database: ${message}\n`);
+      } finally {
+        try {
+          await job.onTerminal?.(terminalSucceeded);
+        } catch {
+          // Cleanup metadata must not change the completed import result.
+        } finally {
+          this.running = false;
+          publishTerminalState?.();
+          this.persistJobs();
+        }
+      }
+    }
+  }
+
+  private stageAuditReports(
+    databasePath: string,
+    markdownPath: string,
+    jsonPath: string,
+  ): StagedAuditFiles {
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      return stageAuditFiles(database, markdownPath, jsonPath);
+    } finally {
+      database.close();
     }
   }
 
@@ -547,29 +806,123 @@ export class ImportWorker {
         WHERE current.canonical_workout_id IS NOT old.canonical_workout_id
            OR current.anchor_start_at <> old.anchor_start_at
            OR current.anchor_end_at <> old.anchor_end_at
-           OR current.anchor_distance_km IS NOT old.anchor_distance_km`);
+           OR current.anchor_distance_km IS NOT old.anchor_distance_km
+           OR current.status IS NOT old.status`);
       const unchangedWorkouts = count(`SELECT COUNT(*) AS count FROM training_sessions current
         JOIN previous.training_sessions old ON old.id = current.id
         WHERE current.canonical_workout_id IS old.canonical_workout_id
           AND current.anchor_start_at = old.anchor_start_at
           AND current.anchor_end_at = old.anchor_end_at
-          AND current.anchor_distance_km IS old.anchor_distance_km`);
-      const relevantTypes = `(
-        'HKQuantityTypeIdentifierHeartRate',
-        'HKQuantityTypeIdentifierRestingHeartRate',
-        'HKQuantityTypeIdentifierHeartRateVariabilitySDNN',
-        'HKCategoryTypeIdentifierSleepAnalysis'
-      )`;
+          AND current.anchor_distance_km IS old.anchor_distance_km
+          AND current.status IS old.status`);
+      const relevantTypes = `(${[
+        healthTypes.heartRate,
+        healthTypes.restingHeartRate,
+        healthTypes.hrvSdnn,
+        healthTypes.runningSpeed,
+        healthTypes.sleepAnalysis,
+        healthTypes.vo2Max
+      ].map((type) => `'${type}'`).join(", ")})`;
       const healthChanged = count(`SELECT COUNT(*) AS count FROM (
-        SELECT id FROM health_records WHERE type IN ${relevantTypes}
-        EXCEPT SELECT id FROM previous.health_records WHERE type IN ${relevantTypes}
+        SELECT id FROM (
+          SELECT id FROM health_records WHERE type IN ${relevantTypes}
+          EXCEPT SELECT id FROM previous.health_records WHERE type IN ${relevantTypes}
+        )
         UNION ALL
-        SELECT id FROM previous.health_records WHERE type IN ${relevantTypes}
-        EXCEPT SELECT id FROM health_records WHERE type IN ${relevantTypes}
+        SELECT id FROM (
+          SELECT id FROM previous.health_records WHERE type IN ${relevantTypes}
+          EXCEPT SELECT id FROM health_records WHERE type IN ${relevantTypes}
+        )
       )`) > 0;
-      const routeFingerprintChanged = count(`SELECT COUNT(*) AS count
-        FROM import_manifest current JOIN previous.import_manifest old ON old.key = current.key
-        WHERE current.key = 'source_gpx_bundle_sha256' AND current.value <> old.value`) > 0;
+      const anyHealthRecordChanged = count(`SELECT COUNT(*) AS count FROM (
+        SELECT id FROM (
+          SELECT id FROM health_records
+          EXCEPT SELECT id FROM previous.health_records
+        )
+        UNION ALL
+        SELECT id FROM (
+          SELECT id FROM previous.health_records
+          EXCEPT SELECT id FROM health_records
+        )
+      )`) > 0;
+      const activitySummaryChanged = count(`SELECT COUNT(*) AS count FROM (
+        SELECT date_components, attributes_json FROM (
+          SELECT date_components, attributes_json FROM activity_summaries
+          EXCEPT SELECT date_components, attributes_json FROM previous.activity_summaries
+        )
+        UNION ALL
+        SELECT date_components, attributes_json FROM (
+          SELECT date_components, attributes_json FROM previous.activity_summaries
+          EXCEPT SELECT date_components, attributes_json FROM activity_summaries
+        )
+      )`) > 0;
+      const profileChanged = count(`SELECT COUNT(*) AS count FROM (
+        SELECT id, attributes_json FROM (
+          SELECT id, attributes_json FROM profile
+          EXCEPT SELECT id, attributes_json FROM previous.profile
+        )
+        UNION ALL
+        SELECT id, attributes_json FROM (
+          SELECT id, attributes_json FROM previous.profile
+          EXCEPT SELECT id, attributes_json FROM profile
+        )
+      )`) > 0;
+      const inventoryChanged = count(`SELECT COUNT(*) AS count FROM (
+        SELECT entity_kind, entity_type, item_count, first_at, last_at, details_json FROM (
+          SELECT entity_kind, entity_type, item_count, first_at, last_at, details_json FROM entity_inventory
+          EXCEPT
+          SELECT entity_kind, entity_type, item_count, first_at, last_at, details_json FROM previous.entity_inventory
+        )
+        UNION ALL
+        SELECT entity_kind, entity_type, item_count, first_at, last_at, details_json FROM (
+          SELECT entity_kind, entity_type, item_count, first_at, last_at, details_json FROM previous.entity_inventory
+          EXCEPT
+          SELECT entity_kind, entity_type, item_count, first_at, last_at, details_json FROM entity_inventory
+        )
+      )`) > 0;
+      const auditManifestChanged = count(`SELECT COUNT(*) AS count FROM (
+        SELECT key, value FROM (
+          SELECT key, value FROM import_manifest WHERE key IN ('dataset_version', 'record_count')
+          EXCEPT
+          SELECT key, value FROM previous.import_manifest WHERE key IN ('dataset_version', 'record_count')
+        )
+        UNION ALL
+        SELECT key, value FROM (
+          SELECT key, value FROM previous.import_manifest WHERE key IN ('dataset_version', 'record_count')
+          EXCEPT
+          SELECT key, value FROM import_manifest WHERE key IN ('dataset_version', 'record_count')
+        )
+      )`) > 0;
+      const importIssuesChanged = count(`SELECT COUNT(*) AS count FROM (
+        SELECT severity, code, object_id, message, occurrence_count FROM (
+          SELECT severity, code, object_id, message, COUNT(*) AS occurrence_count
+          FROM import_issues GROUP BY severity, code, object_id, message
+          EXCEPT
+          SELECT severity, code, object_id, message, COUNT(*) AS occurrence_count
+          FROM previous.import_issues GROUP BY severity, code, object_id, message
+        )
+        UNION ALL
+        SELECT severity, code, object_id, message, occurrence_count FROM (
+          SELECT severity, code, object_id, message, COUNT(*) AS occurrence_count
+          FROM previous.import_issues GROUP BY severity, code, object_id, message
+          EXCEPT
+          SELECT severity, code, object_id, message, COUNT(*) AS occurrence_count
+          FROM import_issues GROUP BY severity, code, object_id, message
+        )
+      )`) > 0;
+      const routeFingerprintChanged = count(`SELECT COUNT(*) AS count FROM (
+        SELECT key, value FROM (
+          SELECT key, value FROM import_manifest WHERE key = 'source_gpx_bundle_sha256'
+          EXCEPT
+          SELECT key, value FROM previous.import_manifest WHERE key = 'source_gpx_bundle_sha256'
+        )
+        UNION ALL
+        SELECT key, value FROM (
+          SELECT key, value FROM previous.import_manifest WHERE key = 'source_gpx_bundle_sha256'
+          EXCEPT
+          SELECT key, value FROM import_manifest WHERE key = 'source_gpx_bundle_sha256'
+        )
+      )`) > 0;
       const routesUpdated = routeFingerprintChanged ? count("SELECT COUNT(*) AS count FROM workout_routes") : 0;
       const dirty = database.prepare(`SELECT MIN(value) AS dirtyFromAt FROM (
         SELECT current.anchor_start_at AS value FROM training_sessions current
@@ -580,19 +933,31 @@ export class ImportWorker {
         UNION ALL
         SELECT current.anchor_start_at FROM training_sessions current
           JOIN previous.training_sessions old ON old.id = current.id
-          WHERE current.canonical_workout_id IS NOT old.canonical_workout_id
-             OR current.anchor_end_at <> old.anchor_end_at
-             OR current.anchor_distance_km IS NOT old.anchor_distance_km
+           WHERE current.canonical_workout_id IS NOT old.canonical_workout_id
+              OR current.anchor_end_at <> old.anchor_end_at
+              OR current.anchor_distance_km IS NOT old.anchor_distance_km
+              OR current.status IS NOT old.status
       )`).get() as unknown as { dirtyFromAt: string | null };
       const hasWorkoutChange = insertedWorkouts + updatedWorkouts + removedWorkouts > 0;
-      if (!hasWorkoutChange && !routeFingerprintChanged && !healthChanged) {
-        return { mode: "unchanged", dirtyFromAt: null, insertedWorkouts, updatedWorkouts, removedWorkouts, unchangedWorkouts, routesUpdated };
+      if (!hasWorkoutChange && !routeFingerprintChanged && !healthChanged && !profileChanged) {
+        return {
+          mode: anyHealthRecordChanged || activitySummaryChanged || inventoryChanged ||
+            auditManifestChanged || importIssuesChanged
+            ? "data-only"
+            : "unchanged",
+          dirtyFromAt: null,
+          insertedWorkouts,
+          updatedWorkouts,
+          removedWorkouts,
+          unchangedWorkouts,
+          routesUpdated
+        };
       }
       const dirtyFromAt = routeFingerprintChanged && !dirty.dirtyFromAt
         ? (database.prepare("SELECT MIN(anchor_start_at) AS value FROM training_sessions").get() as { value: string | null }).value
         : dirty.dirtyFromAt;
       return {
-        mode: healthChanged || !dirtyFromAt ? "full" : "incremental",
+        mode: healthChanged || profileChanged || !dirtyFromAt ? "full" : "incremental",
         dirtyFromAt,
         insertedWorkouts, updatedWorkouts, removedWorkouts, unchangedWorkouts, routesUpdated
       };
@@ -607,13 +972,50 @@ export class ImportWorker {
     const backupDirectory = resolve(this.runtimeRoot, "var/backups");
     await mkdir(backupDirectory, { recursive: true });
     const backupPath = resolve(backupDirectory, `rai.before-web-import.${jobId}.sqlite`);
+    const stagingBackupPath = `${backupPath}.partial-${randomUUID()}`;
     const currentDatabase = new DatabaseSync(this.databasePath, { readOnly: true });
     try {
-      await backup(currentDatabase, backupPath);
+      await this.backupDatabase(currentDatabase, stagingBackupPath);
+      await rename(stagingBackupPath, backupPath);
+    } catch (error) {
+      try {
+        await this.cleanupPartialBackup(stagingBackupPath);
+      } catch (cleanupError) {
+        if (error && typeof error === "object") {
+          try {
+            (error as { cleanupError?: unknown }).cleanupError = cleanupError;
+          } catch { /* Preserve the original backup error even when it is immutable. */ }
+        }
+      }
+      throw error;
     } finally {
       currentDatabase.close();
     }
     return backupPath;
+  }
+
+  private async backupDatabase(database: DatabaseSync, destination: string): Promise<void> {
+    await backup(database, destination);
+  }
+
+  private async cleanupPartialBackup(path: string): Promise<void> {
+    const attempts = 5;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        await this.removePartialBackupFile(path);
+        return;
+      } catch (error) {
+        const code = error && typeof error === "object" && "code" in error
+          ? String((error as { code?: unknown }).code)
+          : "";
+        if (!["EBUSY", "EPERM", "EACCES"].includes(code) || attempt === attempts) throw error;
+        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
+      }
+    }
+  }
+
+  private async removePartialBackupFile(path: string): Promise<void> {
+    await rm(path, { force: true });
   }
 
   private preserveHistoricalState(stagingDatabase: string, previousDatabase: string): void {
@@ -725,6 +1127,18 @@ export class ImportWorker {
           WHERE current_model.id = historical.model_run_id
         );
 
+        INSERT OR IGNORE INTO training_zone_profile_settings
+        SELECT historical.*
+        FROM previous.training_zone_profile_settings historical;
+
+        INSERT OR IGNORE INTO daily_zone_profiles
+        SELECT historical.*
+        FROM previous.daily_zone_profiles historical
+        WHERE EXISTS (
+          SELECT 1 FROM training_metric_runs current_metric_run
+          WHERE current_metric_run.id = historical.training_metric_run_id
+        );
+
         INSERT OR IGNORE INTO workout_training_loads
         SELECT historical.*
         FROM previous.workout_training_loads historical
@@ -747,6 +1161,23 @@ export class ImportWorker {
         WHERE EXISTS (
           SELECT 1 FROM training_metric_runs current_metric_run
           WHERE current_metric_run.id = historical.training_metric_run_id
+        );
+
+        INSERT OR IGNORE INTO workout_zone_summaries
+        SELECT historical.*
+        FROM previous.workout_zone_summaries historical
+        WHERE EXISTS (
+          SELECT 1 FROM training_metric_runs current_metric_run
+          WHERE current_metric_run.id = historical.training_metric_run_id
+        ) AND EXISTS (
+          SELECT 1 FROM training_sessions current_session
+          WHERE current_session.id = historical.training_session_id
+        ) AND EXISTS (
+          SELECT 1 FROM workout_features current_feature
+          WHERE current_feature.id = historical.feature_id
+        ) AND EXISTS (
+          SELECT 1 FROM daily_zone_profiles current_profile
+          WHERE current_profile.id = historical.zone_profile_id
         );
 
         INSERT OR IGNORE INTO recompute_jobs
@@ -892,29 +1323,219 @@ export class ImportWorker {
     }
   }
 
-  private async activateDatabase(stagingDatabase: string, jobId: string, existingBackupPath: string | null = null): Promise<void> {
+  private async activateDatabase(
+    stagingDatabase: string,
+    jobId: string,
+    existingBackupPath: string | null = null,
+    beforeCommit: () => void | Promise<void> = () => {},
+  ): Promise<void> {
     if (!existsSync(stagingDatabase)) throw new Error("临时数据库未生成");
     const backupPath = existingBackupPath ?? await this.createCurrentBackup(jobId);
-    await this.beforeActivate();
+    const rollbackDirectory = resolve(this.runtimeRoot, "var/backups");
+    const rollbackPath = resolve(rollbackDirectory, `rai.import-rollback.${randomUUID()}.sqlite`);
+    await mkdir(rollbackDirectory, { recursive: true });
+    this.assertNotClosing();
+    let gateEntered = true;
     try {
-      await this.removeDatabaseFilesWithRetry(this.databasePath);
-      await mkdir(dirname(this.databasePath), { recursive: true });
-      await rename(stagingDatabase, this.databasePath);
+      await this.beforeActivate();
     } catch (error) {
-      if (!existsSync(this.databasePath) && backupPath && existsSync(backupPath)) {
-        await copyFile(backupPath, this.databasePath);
+      const errors: unknown[] = [error];
+      if (this.isReadableDatabase(this.databasePath)) {
+        try {
+          await this.releaseActivateGate();
+          gateEntered = false;
+        } catch (releaseError) {
+          errors.push(releaseError);
+        }
       }
-      throw error;
+      throw errors.length === 1
+        ? error
+        : new AggregateError(errors, "Import activation gate failed and could not be released");
+    }
+
+    const originalExisted = existsSync(this.databasePath);
+    let originalMoved = false;
+    let committed = false;
+    let commitBoundaryEntered = false;
+    try {
+      this.assertNotClosing();
+      if (originalExisted) {
+        this.checkpointDatabase(this.databasePath);
+        await this.removeDatabaseSidecarsWithRetry(this.databasePath);
+        await this.moveDatabaseFile(this.databasePath, rollbackPath);
+        originalMoved = true;
+      }
+      this.assertNotClosing();
+      await mkdir(dirname(this.databasePath), { recursive: true });
+      await this.installDatabase(stagingDatabase, this.databasePath);
+      if (!this.isReadableDatabase(this.databasePath)) {
+        throw new Error("Imported database is not readable after activation");
+      }
+      commitBoundaryEntered = true;
+      await beforeCommit();
+      await this.releaseActivateGate();
+      gateEntered = false;
+      committed = true;
+    } catch (error) {
+      const errors: unknown[] = [error];
+      if (originalMoved) {
+        errors.push(...await this.restoreImportDatabase(rollbackPath, backupPath));
+      } else if (!originalExisted && commitBoundaryEntered) {
+        try {
+          this.checkpointDatabase(this.databasePath);
+          await this.removeDatabaseSidecarsWithRetry(this.databasePath);
+          await this.removeDatabaseFileWithRetry(this.databasePath);
+        } catch (cleanupError) {
+          errors.push(cleanupError);
+        }
+      }
+      const activeReadable = this.isReadableDatabase(this.databasePath);
+      if (gateEntered && activeReadable) {
+        try {
+          await this.releaseActivateGate();
+          gateEntered = false;
+        } catch (releaseError) {
+          errors.push(releaseError);
+        }
+      }
+      throw errors.length === 1
+        ? error
+        : new AggregateError(errors, "Import activation failed and required recovery actions also failed");
     } finally {
-      await this.afterActivate();
+      if (committed && originalMoved) {
+        await this.removeDatabaseFileWithRetry(rollbackPath).catch(() => {});
+      }
     }
   }
 
-  private async removeDatabaseFilesWithRetry(path: string): Promise<void> {
+  private async restoreImportDatabase(rollbackPath: string, backupPath: string | null): Promise<unknown[]> {
+    const errors: unknown[] = [];
+    const activeExists = existsSync(this.databasePath);
+    const activeReadable = activeExists && this.isReadableDatabase(this.databasePath);
+    if (activeReadable) {
+      try {
+        this.checkpointDatabase(this.databasePath);
+        await this.removeDatabaseSidecarsWithRetry(this.databasePath);
+        await this.moveDatabaseFile(rollbackPath, this.databasePath);
+      } catch (error) {
+        errors.push(error);
+      }
+    } else {
+      if (activeExists) {
+        try {
+          try { this.checkpointDatabase(this.databasePath); } catch { /* Candidate is already unreadable. */ }
+          await this.removeDatabaseSidecarsWithRetry(this.databasePath);
+          await this.removeDatabaseFileWithRetry(this.databasePath);
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (!existsSync(this.databasePath)) {
+        try {
+          await this.moveDatabaseFile(rollbackPath, this.databasePath);
+        } catch (rollbackError) {
+          errors.push(rollbackError);
+          if (backupPath && existsSync(backupPath)) {
+            errors.push(...await this.restoreOnlineBackup(backupPath));
+          }
+        }
+      }
+    }
+    if (!this.isReadableDatabase(this.databasePath)) {
+      errors.push(new Error("Import rollback did not restore a readable active database"));
+    }
+    return errors;
+  }
+
+  private async restoreOnlineBackup(backupPath: string): Promise<unknown[]> {
+    const errors: unknown[] = [];
+    const stagingPath = `${this.databasePath}.import-backup-restore.${randomUUID()}`;
+    let installed = false;
+    try {
+      await this.copyDatabaseFile(backupPath, stagingPath);
+      if (!this.isReadableDatabase(stagingPath)) {
+        throw new Error("Online import backup is not readable before restoration");
+      }
+      await this.moveDatabaseFile(stagingPath, this.databasePath);
+      if (!this.isReadableDatabase(this.databasePath)) {
+        throw new Error("Online import backup is not readable after restoration");
+      }
+      installed = true;
+    } catch (error) {
+      errors.push(error);
+      for (const candidate of [
+        `${this.databasePath}-shm`,
+        `${this.databasePath}-wal`,
+        this.databasePath
+      ]) {
+        try {
+          await this.removeDatabaseFileWithRetry(candidate);
+        } catch (cleanupError) {
+          errors.push(cleanupError);
+        }
+      }
+    } finally {
+      for (const candidate of [stagingPath, `${stagingPath}-shm`, `${stagingPath}-wal`]) {
+        try {
+          await this.removeDatabaseFileWithRetry(candidate);
+        } catch (cleanupError) {
+          errors.push(cleanupError);
+        }
+      }
+    }
+    if (!installed && existsSync(this.databasePath)) {
+      errors.push(new Error("Failed online import backup restoration exposed an active database file"));
+    }
+    return errors;
+  }
+
+  private checkpointDatabase(path: string): void {
+    const database = new DatabaseSync(path);
+    try {
+      database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } finally {
+      database.close();
+    }
+  }
+
+  private isReadableDatabase(path: string): boolean {
+    if (!existsSync(path)) return false;
+    try {
+      const database = new DatabaseSync(path, { readOnly: true });
+      try {
+        return (database.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined)?.quick_check === "ok";
+      } finally {
+        database.close();
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  private async releaseActivateGate(): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await this.afterActivate();
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
+      }
+    }
+    throw lastError;
+  }
+
+  private async removeDatabaseSidecarsWithRetry(path: string): Promise<void> {
+    await this.removeDatabaseFileWithRetry(`${path}-shm`);
+    await this.removeDatabaseFileWithRetry(`${path}-wal`);
+  }
+
+  private async removeDatabaseFileWithRetry(path: string): Promise<void> {
     const attempts = 20;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        await this.removeDatabaseFiles(path);
+        await this.removeDatabaseFile(path);
         return;
       } catch (error) {
         const code = error && typeof error === "object" && "code" in error
@@ -926,6 +1547,22 @@ export class ImportWorker {
     }
   }
 
+  private async installDatabase(source: string, destination: string): Promise<void> {
+    await rename(source, destination);
+  }
+
+  private async moveDatabaseFile(source: string, destination: string): Promise<void> {
+    await rename(source, destination);
+  }
+
+  private async copyDatabaseFile(source: string, destination: string): Promise<void> {
+    await copyFile(source, destination);
+  }
+
+  private async removeDatabaseFile(path: string): Promise<void> {
+    await rm(path, { force: true });
+  }
+
   private async removeDatabaseFiles(path: string): Promise<void> {
     for (const candidate of [path, `${path}-shm`, `${path}-wal`]) {
       await rm(candidate, { force: true });
@@ -933,22 +1570,34 @@ export class ImportWorker {
   }
 
   private command(args: string[]): Promise<void> {
+    if (this.closing) return Promise.reject(new Error("Import worker is shutting down"));
     return new Promise((resolvePromise, reject) => {
       const child = spawn(process.execPath, args, {
         cwd: this.projectRoot,
+        detached: process.platform !== "win32",
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"]
       });
+      this.activeChild = child;
+      if (this.closing) void terminateProcessTree(child).catch(reject);
       let errorOutput = "";
       child.stderr.on("data", (chunk: Buffer) => {
         errorOutput = `${errorOutput}${chunk.toString()}`.slice(-4000);
       });
-      child.on("error", reject);
+      child.on("error", (error) => {
+        if (this.activeChild === child) this.activeChild = null;
+        reject(error);
+      });
       child.on("exit", (code) => {
+        if (this.activeChild === child) this.activeChild = null;
         if (code === 0) resolvePromise();
         else reject(new Error(errorOutput.trim() || `导入进程退出，代码 ${String(code)}`));
       });
     });
+  }
+
+  private assertNotClosing(): void {
+    if (this.closing) throw new Error("Import worker is shutting down");
   }
 
   private publicJob(job: MutableImportJob): ImportJobResponse {

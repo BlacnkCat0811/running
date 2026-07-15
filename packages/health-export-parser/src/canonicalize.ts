@@ -330,10 +330,6 @@ export function canonicalizeRunningWorkouts(
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id = ?
     `);
-    const insertIssue = database.prepare(`
-      INSERT INTO import_issues (severity, code, object_id, message)
-      VALUES ('warning', 'AMBIGUOUS_TRAINING_SESSION_MATCH', ?, ?)
-    `);
     const usedExistingSessionIds = new Set<string>();
 
     for (const members of groups.values()) {
@@ -378,10 +374,6 @@ export function canonicalizeRunningWorkouts(
         if (matches.length > 1) {
           sessionStatus = "ambiguous";
           ambiguousTrainingSessionCount += 1;
-          insertIssue.run(
-            trainingSessionId,
-            "A candidate workout group matched more than one existing training session."
-          );
         }
         insertSession.run(
           trainingSessionId,
@@ -416,6 +408,19 @@ export function canonicalizeRunningWorkouts(
           AND id NOT IN (SELECT training_session_id FROM workout_groups WHERE training_session_id IS NOT NULL)
       `)
       .run(workoutTypes.running);
+
+    database.prepare("DELETE FROM import_issues WHERE code = 'AMBIGUOUS_TRAINING_SESSION_MATCH'").run();
+    database.prepare(`
+      INSERT INTO import_issues (severity, code, object_id, message)
+      SELECT
+        'warning',
+        'AMBIGUOUS_TRAINING_SESSION_MATCH',
+        id,
+        'A candidate workout group matched more than one existing training session.'
+      FROM training_sessions
+      WHERE activity_type = ? AND status = 'ambiguous'
+      ORDER BY id
+    `).run(workoutTypes.running);
 
     database.exec("COMMIT");
   } catch (error) {

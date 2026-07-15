@@ -21,6 +21,10 @@ interface Migration {
   up: (database: DatabaseSync) => void;
 }
 
+export interface RaiDatabaseOpenOptions {
+  createMigrationBackup?: boolean;
+}
+
 const nowSql = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
 const migrations: readonly Migration[] = [
@@ -1136,10 +1140,10 @@ export class RaiDatabase {
     this.database.exec("PRAGMA synchronous = NORMAL");
   }
 
-  static async open(path: string): Promise<RaiDatabase> {
+  static async open(path: string, options: RaiDatabaseOpenOptions = {}): Promise<RaiDatabase> {
     const database = new RaiDatabase(path);
     try {
-      await database.migrate();
+      await database.migrate(options.createMigrationBackup ?? true);
       database.prepareStatements();
       return database;
     } catch (error) {
@@ -1191,7 +1195,7 @@ export class RaiDatabase {
     await backup(this.database, destination);
   }
 
-  private async migrate(): Promise<void> {
+  private async migrate(createMigrationBackup: boolean): Promise<void> {
     this.ensureMigrationTable();
     const appliedRows = this.database
       .prepare("SELECT version, name, checksum FROM schema_migrations")
@@ -1224,7 +1228,7 @@ export class RaiDatabase {
       }
     }
 
-    if (pending.length > 0 && this.tableExists("workouts")) {
+    if (createMigrationBackup && pending.length > 0 && this.tableExists("workouts")) {
       await this.createBackup(pending[0]?.version ?? 1);
     }
 
@@ -1602,8 +1606,9 @@ export class RaiDatabase {
 
   seedImportGenerations(generation: string): void {
     this.begin();
-    // Inventory is a compact projection of the current export and is rebuilt by the scan.
+    // These are compact projections of the current export and are rebuilt by the scan.
     this.database.exec("DELETE FROM entity_inventory");
+    this.database.exec("DELETE FROM import_issues");
     const previous = `${generation}:previous`;
     this.database.prepare(`
       INSERT OR IGNORE INTO import_entity_generations

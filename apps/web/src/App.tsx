@@ -156,7 +156,7 @@ function AppNavigation() {
 }
 
 export function App() {
-  const health = useRemote<HealthResponse>("/v1/health", true, true);
+  const health = useRemote<HealthResponse>("/v1/health", true, true, false);
   useEffect(() => {
     const refreshDatabaseState = () => {
       void health.reload();

@@ -5,9 +5,10 @@ import { RaiDatabase } from "@rai/health-export-parser";
 
 const databasePath = String((workerData as { databasePath: string }).databasePath);
 const store = await RaiDatabase.open(databasePath);
+let completed: ReturnType<RaiApplicationService["runNextJob"]> = null;
 try {
-  const completed = new RaiApplicationService(store).runNextJob();
-  parentPort?.postMessage({ ran: completed !== null, jobId: completed?.id ?? null });
+  completed = new RaiApplicationService(store).runNextJob();
 } finally {
   store.close();
 }
+parentPort?.postMessage({ ran: completed !== null, jobId: completed?.id ?? null });

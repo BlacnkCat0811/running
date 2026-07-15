@@ -69,20 +69,18 @@ DELETE /v1/database
 
 Web 导入需要本机 Apple Health 导出目录。用户确认后执行：
 
-1. 在 `var/` 创建临时 SQLite。
-2. 解析 XML 和 GPX，生成 canonical 数据。
-3. 在临时数据库完成特征提取与模型回放。
-4. 为当前数据库创建备份。
-5. 将仍存在的 Training Session 对应用户覆盖、Feature/Model Run、Assessment、Snapshot 和已完成任务历史迁入临时数据库。
-6. 在新 canonical 数据与历史覆盖上创建新的完整模型运行。
-7. 只有全部成功后才切换到新数据库。
-8. 失败时删除临时文件，保留当前 active 数据库。
+1. 对当前 SQLite 创建在线备份，并以该备份克隆 staging 数据库；首次导入则创建空 staging 数据库。
+2. 按 entity generation 增量同步 XML，按文件指纹更新 GPX，并只重建受影响的 canonical 分组。
+3. 比较数据指纹；无变化直接结束，只有非评分数据变化时跳过模型重算。
+4. 对评分相关变化从兼容 checkpoint 增量重放 Feature、训练负荷和模型；无法安全界定时降级为完整重放。
+5. 校验 staging 数据库、外键和回放结果，必要时与完整回放 hash 对照。
+6. 关闭当前读连接后原子切换数据库；任何失败都删除 staging 并保留当前 active 数据库。
 
 训练覆盖会追加新的 revision，并排入完整重算。Web 在新 Run 成功前继续展示旧 active Run。
 
 应用壳会轮询 `/v1/runtime-status`：空闲时降低频率，导入或重算期间提高频率。用户切换页面后仍能看到任务阶段与进度；任务成功时触发统一的 active 数据刷新事件，各页面重新读取 API，不在浏览器中推演模型状态。
 
-导入任务元数据持久化到 `RAI_RUNTIME_ROOT/var/import-jobs.json`。服务重启时，未完成任务会被标记为 `interrupted/failed` 并提供重新提交路径，不会消失或被误报为成功。
+导入任务与来源元数据持久化到 `RAI_RUNTIME_ROOT/var/runtime.sqlite`。旧 `import-jobs.json` 和来源 JSON 只在首次启动时迁移一次。服务重启时，未完成任务会被标记为 `interrupted/failed` 并提供重新提交路径，不会消失或被误报为成功。
 
 ## 5. 首次启动与恢复
 
@@ -102,8 +100,9 @@ Web 导入需要本机 Apple Health 导出目录。用户确认后执行：
 - 删除必须提交精确确认文字 `删除我的 RAI 数据`。
 - 删除前先创建 `before-delete` 备份，再移除当前 `.sqlite`、`-wal` 和 `-shm`；Apple Health 原始导出不在删除范围内。
 - 设置页不会计算资产数字，记录、训练、Session、路线点与 Assessment 数量均来自 `/v1/data-summary`。
-- 恢复备份要求精确确认文字 `恢复此备份`，并在切换前执行 `quick_check`、必要表检查和外键检查。
+- 恢复备份要求精确确认文字 `恢复此备份`，并先在 staging 副本上执行正式数据库迁移、完整 Schema 校验、`quick_check` 和外键检查。
 - 当前数据库存在时，恢复前先创建 `before-restore` 在线安全快照；恢复采用临时文件和原子改名。
+- 恢复发布失败时读闸门保持关闭，安全快照也通过临时文件原子回滚，避免请求读到缺失或半复制的 SQLite。
 - `/v1/diagnostics` 默认移除经纬度、健康时间序列、来源设备名和本机路径。
 
 ## 7. 验证
@@ -111,17 +110,11 @@ Web 导入需要本机 Apple Health 导出目录。用户确认后执行：
 ```powershell
 npm run typecheck
 npm test
-npm run test:e2e
+npm run build
+npm run test:e2e:web
 ```
 
-自动化浏览器 E2E 使用 `playwright-core` 驱动本机 Chrome/Edge，覆盖：
-
-- 无数据库首页、受保护路由、导入页与设置页安全边界；
-- 概览导航、训练资格筛选、训练详情时间序列和覆盖抽屉；
-- 趋势范围、模型运行对照、数据审计和删除确认保护；
-- 首次启动及全部真实数据关键页面在 390px 下无横向溢出；
-- 合成 Apple Health 数据的首次导入、覆盖 revision、完整重算、active Run 切换、删除前备份与删除后首次启动恢复；
-- 页面运行期间无 console error 或未处理异常。
+桌面浏览器回归固定在 1440 x 900。390px 冻结兼容测试通过 `npm run test:e2e:responsive` 独立执行，不属于普通 Web 修改的默认验收。
 
 单元/集成测试另包含小型 Apple Health fixture，完整验证 XML 导入、canonical Session、Feature Run、CA/TA 回放、Daily Snapshot、active Model Run、导入历史迁移、任务状态恢复和备份恢复。
 

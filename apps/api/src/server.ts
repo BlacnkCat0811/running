@@ -16,6 +16,7 @@ import type {
 import {
   MINIMUM_LABELS_PER_DISTANCE,
   MINIMUM_PREDICTION_LABELS,
+  PredictionModelActivationCompatibilityError,
   PredictionModelService,
   PredictionTrainingInProgressError,
   PredictionTrainingInputError,
@@ -29,7 +30,7 @@ import Fastify from "fastify";
 import { RaiReadStore } from "./data.js";
 import { DatabaseMaintenance } from "./maintenance.js";
 import { ImportSourceManager } from "./import-sources.js";
-import { MutationCoordinator } from "./mutation-coordinator.js";
+import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { installLocalRequestSecurity } from "./local-request-security.js";
 import { ReadStoreManager } from "./read-store-manager.js";
 import {
@@ -53,6 +54,7 @@ import {
   workoutListQuerySchema
 } from "./schemas.js";
 import { ImportWorker, PredictionModelWorker, RecomputeWorker } from "./worker.js";
+import { needsFullTrainingZoneBackfill, readTrainingZoneWorkoutSetCounts } from "./training-zone-backfill.js";
 
 const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const runtimeRoot = resolve(process.env.RAI_RUNTIME_ROOT ?? projectRoot);
@@ -70,17 +72,43 @@ await app.register(multipart, {
 });
 const developmentOrigins = new Set(["http://127.0.0.1:5173", "http://localhost:5173"]);
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const metadataOnlyMutationRoutes = new Set(["/v1/import-sources/discover"]);
+const databaseRequiredMutationRoutes = new Set([
+  "/v1/workouts/:id/override",
+  "/v1/training-zones/profile",
+  "/v1/prediction-models/train",
+  "/v1/prediction-models/:id/cancel",
+  "/v1/prediction-models/:id/activate",
+  "/v1/model-runs",
+  "/v1/model-runs/:id/activate",
+  "/v1/jobs/:id/cancel",
+  "/v1/backups",
+  "/v1/database"
+]);
 const mutationCoordinator = new MutationCoordinator();
 const mutationReleases = new WeakMap<object, () => void>();
 installLocalRequestSecurity(app, { apiPort: port, developmentOrigins });
-app.addHook("preHandler", async (request) => {
-  if (!unsafeMethods.has(request.method)) return;
-  const release = mutationCoordinator.acquire(`${request.method} ${request.routeOptions.url}`);
+app.addHook("preHandler", async (request, reply) => {
+  const routeUrl = request.routeOptions.url;
+  if (!unsafeMethods.has(request.method) || (routeUrl !== undefined && metadataOnlyMutationRoutes.has(routeUrl))) return;
+  if (routeUrl !== undefined && databaseRequiredMutationRoutes.has(routeUrl) && !existsSync(databasePath)) {
+    return reply.code(409).send({
+      code: "database_not_ready",
+      message: "本地 RAI 数据库尚未就绪，请先导入或恢复数据"
+    });
+  }
+  const release = mutationCoordinator.acquire(`${request.method} ${routeUrl ?? request.url}`);
   mutationReleases.set(request, release);
 });
 const releaseMutation = (request: object): void => {
   mutationReleases.get(request)?.();
   mutationReleases.delete(request);
+};
+const takeMutationRelease = (request: object): (() => void) => {
+  const release = mutationReleases.get(request);
+  if (!release) throw new Error("Mutation lock is not held by this request");
+  mutationReleases.delete(request);
+  return release;
 };
 app.addHook("onError", async (request) => releaseMutation(request));
 app.addHook("onRequestAbort", async (request) => releaseMutation(request));
@@ -96,13 +124,41 @@ const importWorker = new ImportWorker(databasePath, projectRoot, runtimeRoot, ()
 const importSources = new ImportSourceManager(runtimeRoot, projectRoot);
 const predictionModelWorker = new PredictionModelWorker(databasePath, projectRoot, runtimeRoot);
 const maintenance = new DatabaseMaintenance(databasePath, runtimeRoot, () => readStores.beginReplace(), () => readStores.endReplace());
-app.addHook("onClose", async () => readStores.close());
+let closing = false;
+let trainingZoneBackfillPromise: Promise<void> | null = null;
+app.addHook("onClose", async () => {
+  closing = true;
+  const results = await Promise.allSettled([
+    trainingZoneBackfillPromise ?? Promise.resolve(),
+    importWorker.close(),
+    recomputeWorker.close(),
+    predictionModelWorker.close()
+  ]);
+  try {
+    readStores.close();
+  } finally {
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length) throw new AggregateError(failures, "Failed to close API background resources");
+  }
+});
 
-if (existsSync(databasePath)) {
+const recoverDatabaseJobs = async (recoverPredictionLeases = false): Promise<void> => {
+  if (!existsSync(databasePath)) return;
   const migrationStore = await RaiDatabase.open(databasePath);
-  new RaiApplicationService(migrationStore).recoverInterruptedJobs();
-  migrationStore.close();
-}
+  try {
+    new RaiApplicationService(migrationStore).recoverInterruptedJobs();
+    if (recoverPredictionLeases) {
+      // A restored database is an offline snapshot, so any persisted worker lease is stale.
+      new PredictionModelService(migrationStore).recoverAllLeases();
+    }
+  } finally {
+    migrationStore.close();
+  }
+};
+
+await recoverDatabaseJobs();
 
 const withReadStore = <T>(callback: (store: RaiReadStore) => T): T => {
   return readStores.use(callback);
@@ -137,48 +193,101 @@ const localToday = (): string => new Intl.DateTimeFormat("en-CA", {
   day: "2-digit"
 }).format(new Date());
 
-const ensureTrainingZoneBackfill = async (): Promise<void> => {
-  if (
-    !existsSync(databasePath) || importWorker.isRunning || recomputeWorker.isRunning ||
-    predictionModelWorker.isRunning || hasActiveRecomputeJob() || hasActivePredictionModelJob()
-  ) return;
-  const store = await RaiDatabase.open(databasePath);
-  let queued = false;
+const checkTrainingZoneBackfill = async (): Promise<void> => {
+  if (closing) return;
+  let release: (() => void) | null = null;
   try {
-    const active = store.database.prepare("SELECT 1 FROM active_model_run WHERE singleton = 1").get();
-    if (!active) return;
-    const counts = store.database.prepare(`
-      SELECT
-        (SELECT COUNT(*) FROM active_workout_training_loads) AS load_count,
-        (SELECT COUNT(*) FROM active_workout_zone_summaries) AS summary_count,
-        (SELECT MAX(local_date) FROM active_daily_zone_profiles) AS latest_profile_date
-    `).get() as unknown as { load_count: number; summary_count: number; latest_profile_date: string | null };
-    const service = new RaiApplicationService(store);
-    if (Number(counts.load_count) > Number(counts.summary_count)) {
-      service.enqueueFullRecompute({
-        evaluatedAt: new Date().toISOString(),
-        timezoneIdentifier: "Asia/Shanghai"
-      });
-      queued = true;
-    } else if (counts.latest_profile_date === null || counts.latest_profile_date < localToday()) {
-      service.enqueueSnapshotRefresh({
-        evaluatedAt: new Date().toISOString(),
-        timezoneIdentifier: "Asia/Shanghai"
-      });
-      queued = true;
-    }
-  } finally {
-    store.close();
+    release = mutationCoordinator.acquire("training zone backfill");
+  } catch (error) {
+    if (error instanceof MutationConflictError) return;
+    throw error;
   }
-  if (queued) recomputeWorker.schedule();
+  try {
+    if (
+      !existsSync(databasePath) || importWorker.isRunning || recomputeWorker.isRunning ||
+      predictionModelWorker.isRunning || hasActiveRecomputeJob() || hasActivePredictionModelJob()
+    ) return;
+    const store = await RaiDatabase.open(databasePath);
+    let queued = false;
+    try {
+      if (closing) return;
+      const active = store.database.prepare("SELECT 1 FROM active_model_run WHERE singleton = 1").get();
+      if (!active) return;
+      const workoutSetCounts = readTrainingZoneWorkoutSetCounts(store.database);
+      const counts = store.database.prepare(`
+        SELECT
+          (SELECT MAX(local_date) FROM active_daily_zone_profiles) AS latest_profile_date,
+          (
+            SELECT metric.algorithm_version
+            FROM training_metric_runs metric
+            JOIN active_model_run active ON active.model_run_id = metric.model_run_id
+            WHERE metric.status = 'succeeded'
+            ORDER BY metric.completed_at DESC, metric.created_at DESC
+            LIMIT 1
+          ) AS active_algorithm_version,
+          (
+            SELECT feature.feature_schema_version
+            FROM active_model_run active
+            JOIN model_runs model ON model.id = active.model_run_id
+            JOIN feature_runs feature ON feature.id = model.feature_run_id
+            WHERE active.singleton = 1
+          ) AS active_feature_schema_version
+      `).get() as unknown as {
+        latest_profile_date: string | null;
+        active_algorithm_version: string | null;
+        active_feature_schema_version: string | null;
+      };
+      const service = new RaiApplicationService(store);
+      if (needsFullTrainingZoneBackfill({
+        activeAlgorithmVersion: counts.active_algorithm_version,
+        activeFeatureSchemaVersion: counts.active_feature_schema_version,
+        missingSummaryCount: workoutSetCounts.missingSummaryCount,
+        orphanSummaryCount: workoutSetCounts.orphanSummaryCount
+      })) {
+        service.enqueueFullRecompute({
+          evaluatedAt: new Date().toISOString(),
+          timezoneIdentifier: "Asia/Shanghai"
+        });
+        queued = true;
+      } else if (counts.latest_profile_date === null || counts.latest_profile_date < localToday()) {
+        service.enqueueSnapshotRefresh({
+          evaluatedAt: new Date().toISOString(),
+          timezoneIdentifier: "Asia/Shanghai"
+        });
+        queued = true;
+      }
+    } finally {
+      store.close();
+    }
+    if (queued && !closing) recomputeWorker.schedule();
+  } finally {
+    release();
+  }
+};
+
+const ensureTrainingZoneBackfill = (): Promise<void> => {
+  if (closing) return Promise.resolve();
+  if (trainingZoneBackfillPromise) return trainingZoneBackfillPromise;
+  const promise = checkTrainingZoneBackfill().finally(() => {
+    if (trainingZoneBackfillPromise === promise) trainingZoneBackfillPromise = null;
+  });
+  trainingZoneBackfillPromise = promise;
+  return promise;
 };
 
 await ensureTrainingZoneBackfill();
 recomputeWorker.schedule();
 predictionModelWorker.schedule();
-const zoneRefreshTimer = setInterval(() => void ensureTrainingZoneBackfill(), 5 * 60_000);
+const zoneRefreshTimer = setInterval(() => {
+  if (closing) return;
+  void ensureTrainingZoneBackfill().catch((error) => {
+    app.log.error(error, "Training zone backfill check failed");
+  });
+}, 5 * 60_000);
 zoneRefreshTimer.unref();
-app.addHook("onClose", async () => clearInterval(zoneRefreshTimer));
+app.addHook("onClose", async () => {
+  clearInterval(zoneRefreshTimer);
+});
 
 app.get("/v1/health", async () => ({
   status: "ok",
@@ -201,6 +310,7 @@ app.get("/v1/runtime-status", async () => {
   const recomputeJob = existsSync(databasePath)
     ? withReadStore((store) => store.jobs(1)[0] ?? null)
     : null;
+  const predictionModelJobActive = hasActivePredictionModelJob();
   const importJob = importWorker.latest();
   return {
     databaseReady: existsSync(databasePath),
@@ -208,6 +318,7 @@ app.get("/v1/runtime-status", async () => {
       importWorker.isRunning ||
       recomputeWorker.isRunning ||
       predictionModelWorker.isRunning ||
+      predictionModelJobActive ||
       recomputeJob?.status === "queued" ||
       recomputeJob?.status === "running",
     recomputeJob,
@@ -502,7 +613,18 @@ app.post<{ Params: { id: string } }>(
       if (run.status !== "succeeded") {
         return reply.code(409).send({ message: "只能激活验证成功的预测模型" });
       }
-      service.activate(request.params.id);
+      try {
+        service.activate(request.params.id);
+      } catch (error) {
+        if (error instanceof PredictionModelActivationCompatibilityError) {
+          return reply.code(409).send({
+            code: error.code,
+            message: error.message,
+            reasons: error.reasons
+          });
+        }
+        throw error;
+      }
       return { activePredictionModelRunId: request.params.id };
     } finally {
       store.close();
@@ -630,12 +752,28 @@ app.post<{ Body: CreateImportJobBody }>(
   if (sourceId) {
     const source = await importSources.get(sourceId);
     if (!source) return reply.code(404).send({ message: "未找到导入来源" });
-    return importWorker.create(source.inputPath, async (succeeded) => {
-      if (succeeded) await importSources.markUsed(sourceId);
-      if (source.kind === "upload") await importSources.cleanupUpload(sourceId);
-    });
+    const release = takeMutationRelease(request);
+    try {
+      return importWorker.create(source.inputPath, async (succeeded) => {
+        try {
+          if (succeeded) await importSources.markUsed(sourceId);
+          if (source.kind === "upload") await importSources.cleanupUpload(sourceId);
+        } finally {
+          release();
+        }
+      });
+    } catch (error) {
+      release();
+      throw error;
+    }
   }
-  return importWorker.create((request.body as ImportJobRequest).inputPath);
+  const release = takeMutationRelease(request);
+  try {
+    return importWorker.create((request.body as ImportJobRequest).inputPath, () => release());
+  } catch (error) {
+    release();
+    throw error;
+  }
   }
 );
 
@@ -665,7 +803,7 @@ app.post<{ Body: { sourceId: string } }>("/v1/imports/inspect", { schema: { body
   catch (error) { return reply.code(404).send({ message: error instanceof Error ? error.message : "未找到导入来源" }); }
 });
 
-app.get("/v1/import-sources/discover", async () => ({ sources: await importSources.discover() }));
+app.post("/v1/import-sources/discover", async () => ({ sources: await importSources.discover() }));
 
 app.get("/v1/import-sources/recent", async () => ({ sources: await importSources.recent() }));
 
@@ -714,7 +852,12 @@ app.post<{ Params: { name: string }; Body: { confirmation: string } }>(
     ) {
       return reply.code(409).send({ message: "任务执行期间不能恢复数据库" });
     }
-    const result = await maintenance.restoreBackup(request.params.name);
+    const result = await maintenance.restoreBackup(
+      request.params.name,
+      () => recoverDatabaseJobs(true)
+    );
+    recomputeWorker.schedule();
+    predictionModelWorker.schedule();
     return { restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup };
   }
 );
@@ -752,4 +895,25 @@ app.setErrorHandler((error, _request, reply) => {
 });
 
 await app.listen({ host, port });
+let shutdownPromise: Promise<void> | null = null;
+const shutdown = (signal: NodeJS.Signals | "IPC"): Promise<void> => {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    app.log.info({ signal }, "Shutting down local API");
+    try {
+      await app.close();
+    } catch (error) {
+      app.log.error(error, "Local API shutdown failed");
+      process.exitCode = 1;
+    } finally {
+      if (process.connected) process.disconnect();
+    }
+  })();
+  return shutdownPromise;
+};
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("message", (message: unknown) => {
+  if (message === "rai:shutdown") void shutdown("IPC");
+});
 app.log.info({ databasePath, runtimeRoot, url: `http://${host}:${port}` }, "RAI local API ready");

@@ -13,6 +13,10 @@ import { Link } from "react-router-dom";
 
 import { ApiError, api } from "../api.js";
 import {
+  notifyDatabaseStateChanged,
+  notifyDataUpdated,
+} from "../events.js";
+import {
   EmptyBlock,
   ErrorBlock,
   LoadingBlock,
@@ -127,6 +131,7 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
   const [selectedJob, setSelectedJob] = useState<RecomputeJobDto | null>(null);
   const [selectedPredictionModel, setSelectedPredictionModel] =
     useState<PredictionModelDetailResponse | null>(null);
+  const notifiedSuccessfulImports = useRef(new Set<string>());
   const [predictionModelBusy, setPredictionModelBusy] = useState(false);
   const [predictionModelNotice, setPredictionModelNotice] = useState<{
     tone: "info" | "success" | "error";
@@ -145,8 +150,13 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
     const savedJobId = localStorage.getItem(IMPORT_JOB_STORAGE_KEY);
     if (savedJobId) {
       void api<EnhancedImportJob>(`/v1/import-jobs/${savedJobId}`)
-        .then(setImportJob)
-      .catch(() => localStorage.removeItem(IMPORT_JOB_STORAGE_KEY));
+        .then((job) => {
+          setImportJob(job);
+          if (!["queued", "running"].includes(job.status)) {
+            localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+          }
+        })
+        .catch(() => localStorage.removeItem(IMPORT_JOB_STORAGE_KEY));
     } else {
       void api<EnhancedImportJob | null>("/v1/import-jobs/active")
         .then((job) => {
@@ -156,7 +166,7 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
         })
         .catch(() => undefined);
     }
-    void api<{ sources: ImportSourceCandidate[] }>("/v1/import-sources/discover")
+    void api<{ sources: ImportSourceCandidate[] }>("/v1/import-sources/discover", { method: "POST", body: "{}" })
       .then((result) => setCandidates(result.sources ?? []))
       .catch(() => undefined);
   }, []);
@@ -197,6 +207,13 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
       if (timer) clearTimeout(timer);
     };
   }, [importJob, jobs.reload, models.reload]);
+
+  useEffect(() => {
+    if (importJob?.status !== "succeeded" || notifiedSuccessfulImports.current.has(importJob.id)) return;
+    notifiedSuccessfulImports.current.add(importJob.id);
+    notifyDatabaseStateChanged(importJob.id);
+    notifyDataUpdated(importJob.id);
+  }, [importJob?.id, importJob?.status]);
 
   useEffect(() => {
     if (!models.data || candidateRunId || baseRunId) return;

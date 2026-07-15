@@ -5,9 +5,19 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import test, { after, before } from "node:test";
+import test, { after, before, type TestContext } from "node:test";
 
 import { chromium, type Browser, type Page } from "playwright-core";
+
+import { JobEventNotifier } from "../src/events.js";
+
+type E2eTestFn = (context: TestContext) => void | Promise<void>;
+const desktopTest = (name: string, fn: E2eTestFn) => test(name, {
+  skip: process.env.npm_lifecycle_event === "test:e2e:responsive",
+}, fn);
+const responsiveTest = (name: string, fn: E2eTestFn) => test(name, {
+  skip: process.env.npm_lifecycle_event === "test:e2e:web",
+}, fn);
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 const realDatabase = resolve(projectRoot, "var/rai.sqlite");
@@ -16,6 +26,10 @@ const chromeCandidates = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
 ];
 
 interface RunningApi {
@@ -65,7 +79,7 @@ async function startApi(
         RAI_RUNTIME_ROOT: runtimeRoot,
         RAI_LOG_LEVEL: "fatal",
       },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
       windowsHide: true,
     },
   );
@@ -75,9 +89,23 @@ async function startApi(
   child.stdout?.on("data", append);
   child.stderr?.on("data", append);
   const origin = `http://127.0.0.1:${port}`;
+  const failStart = async (message: string): Promise<never> => {
+    const startupError = new Error(message);
+    try {
+      await stopApi({ child, origin, output: () => output });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [startupError, cleanupError],
+        "API startup failed and cleanup did not complete",
+      );
+    }
+    throw startupError;
+  };
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`API 提前退出：${output}`);
+    if (child.exitCode !== null) {
+      return failStart(`API 提前退出：${output}`);
+    }
     try {
       const response = await fetch(`${origin}/v1/health`);
       if (response.ok) return { child, origin, output: () => output };
@@ -86,8 +114,7 @@ async function startApi(
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 100));
   }
-  child.kill();
-  throw new Error(`API 启动超时：${output}`);
+  return failStart(`API 启动超时：${output}`);
 }
 
 function appleDate(day: number, time: string): string {
@@ -115,29 +142,196 @@ async function createSyntheticExport(path: string): Promise<void> {
   await writeFile(resolve(path, "export.xml"), xml, "utf8");
 }
 
-async function stopApi(api: RunningApi | null): Promise<void> {
-  if (!api || api.child.exitCode !== null) return;
-  await new Promise<void>((resolveStop) => {
-    const timeout = setTimeout(() => {
-      api.child.kill("SIGKILL");
-      resolveStop();
-    }, 3000);
-    api.child.once("exit", () => {
-      clearTimeout(timeout);
-      resolveStop();
+async function forceStopApiProcess(child: ChildProcess): Promise<void> {
+  if (process.platform !== "win32") {
+    if (!child.kill("SIGKILL") && child.exitCode === null) {
+      throw new Error("Failed to send SIGKILL to API process");
+    }
+    return;
+  }
+  if (child.pid === undefined) throw new Error("API process has no PID for taskkill");
+  const killer = spawn(
+    "taskkill",
+    ["/PID", String(child.pid), "/T", "/F"],
+    { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let output = "";
+  const append = (chunk: Buffer): void => {
+    output = `${output}${chunk.toString()}`.slice(-4000);
+  };
+  killer.stdout?.on("data", append);
+  killer.stderr?.on("data", append);
+  const completed = new Promise<void>((resolveKill, rejectKill) => {
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      if (error) rejectKill(error);
+      else resolveKill();
+    };
+    killer.once("error", (error) => finish(error));
+    killer.once("close", (code) => {
+      if (code === 0) finish();
+      else finish(new Error(`taskkill exited with code ${String(code)}${output ? `: ${output.trim()}` : ""}`));
     });
-    api.child.kill();
   });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      completed,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("taskkill timed out")),
+          10_000,
+        );
+      }),
+    ]);
+  } catch (error) {
+    if (killer.exitCode === null) killer.kill("SIGKILL");
+    await completed.catch(() => undefined);
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
-function collectRuntimeErrors(page: Page): string[] {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
+async function stopApi(api: RunningApi | null): Promise<void> {
+  if (!api) return;
+  const child = api.child;
+  if (child.exitCode !== null && child.stdout?.closed && child.stderr?.closed && !child.connected) return;
+  const closed = new Promise<void>((resolveStop) => {
+    child.once("close", () => resolveStop());
+  });
+  const waitForClose = (timeoutMs: number): Promise<void> => {
+    return new Promise<void>((resolveStop, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error("API shutdown timed out")),
+        timeoutMs,
+      );
+      closed.then(() => {
+        clearTimeout(timeout);
+        resolveStop();
+      });
+    });
+  };
+  if (child.connected) child.send("rai:shutdown");
+  else child.kill("SIGTERM");
+  try {
+    await waitForClose(10_000);
+  } catch (error) {
+    const failures: unknown[] = [error];
+    try {
+      await forceStopApiProcess(child);
+    } catch (forceError) {
+      failures.push(forceError);
+    }
+    try {
+      await waitForClose(10_000);
+    } catch (closeError) {
+      failures.push(closeError);
+    }
+    if (failures.length > 1) {
+      throw new AggregateError(
+        failures,
+        "API graceful shutdown timed out and forced cleanup did not complete cleanly",
+      );
+    }
+    throw error;
+  }
+}
+
+interface RuntimeErrorRecord {
+  source: "pageerror" | "console";
+  message: string;
+  url?: string;
+}
+
+function collectRuntimeErrors(page: Page): RuntimeErrorRecord[] {
+  const errors: RuntimeErrorRecord[] = [];
+  page.on("pageerror", (error) => errors.push({ source: "pageerror", message: error.message }));
   page.on("console", (message) => {
-    if (message.type() === "error") errors.push(message.text());
+    if (message.type() === "error") {
+      errors.push({
+        source: "console",
+        message: message.text(),
+        url: message.location().url,
+      });
+    }
   });
   return errors;
 }
+
+function consumeExpectedHttpFailures(
+  errors: RuntimeErrorRecord[],
+  status: number,
+  expectedUrl: string | RegExp,
+  expectedCount = 1,
+): void {
+  const expected = new RegExp(
+    `^Failed to load resource: the server responded with a status of ${status}(?: \\([^)]*\\))?$`,
+  );
+  const matchingIndexes: number[] = [];
+  for (let index = 0; index < errors.length; index += 1) {
+    const error = errors[index];
+    if (error?.source !== "console" || !expected.test(error.message) || !error.url) continue;
+    const urlMatches = typeof expectedUrl === "string"
+      ? error.url.endsWith(expectedUrl)
+      : (expectedUrl.lastIndex = 0, expectedUrl.test(error.url));
+    if (urlMatches) matchingIndexes.push(index);
+  }
+  assert.equal(
+    matchingIndexes.length,
+    expectedCount,
+    `预期 ${expectedCount} 个 ${status} ${String(expectedUrl)} 失败，实际 ${matchingIndexes.length} 个`,
+  );
+  for (let index = matchingIndexes.length - 1; index >= 0; index -= 1) {
+    errors.splice(matchingIndexes[index]!, 1);
+  }
+}
+
+desktopTest("预期 HTTP 失败过滤不会吞掉其他运行时错误", () => {
+  const errors: RuntimeErrorRecord[] = [
+    { source: "console", message: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)", url: "http://127.0.0.1:4173/v1/expected" },
+    { source: "console", message: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)", url: "http://127.0.0.1:4173/v1/unrelated" },
+    { source: "console", message: "unexpected console failure" },
+    { source: "pageerror", message: "unexpected page failure" },
+  ];
+  consumeExpectedHttpFailures(errors, 503, "/v1/expected");
+  assert.deepEqual(errors, [
+    { source: "console", message: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)", url: "http://127.0.0.1:4173/v1/unrelated" },
+    { source: "console", message: "unexpected console failure" },
+    { source: "pageerror", message: "unexpected page failure" },
+  ]);
+
+  const duplicates: RuntimeErrorRecord[] = [
+    { source: "console", message: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)", url: "http://127.0.0.1:4173/v1/expected" },
+    { source: "console", message: "Failed to load resource: the server responded with a status of 503 (Service Unavailable)", url: "http://127.0.0.1:4173/v1/expected" },
+  ];
+  assert.throws(
+    () => consumeExpectedHttpFailures(duplicates, 503, "/v1/expected"),
+    /预期 1 个 503 \/v1\/expected 失败，实际 2 个/,
+  );
+  assert.equal(duplicates.length, 2);
+});
+
+desktopTest("后台任务事件按 job 和事件类型独立去重", () => {
+  const target = new EventTarget();
+  const notifier = new JobEventNotifier(target);
+  let dataUpdates = 0;
+  let databaseStateChanges = 0;
+  target.addEventListener("rai:data-updated", () => { dataUpdates += 1; });
+  target.addEventListener("rai:database-state-changed", () => { databaseStateChanges += 1; });
+
+  assert.equal(notifier.notifyDataUpdated("import-1"), true);
+  assert.equal(notifier.notifyDataUpdated("import-1"), false);
+  assert.equal(notifier.notifyDatabaseStateChanged("import-1"), true);
+  assert.equal(notifier.notifyDatabaseStateChanged("import-1"), false);
+  assert.equal(notifier.notifyDataUpdated("import-2"), true);
+  assert.deepEqual({ dataUpdates, databaseStateChanges }, {
+    dataUpdates: 2,
+    databaseStateChanges: 1,
+  });
+});
 
 async function assertNoHorizontalOverflow(
   page: Page,
@@ -216,9 +410,9 @@ after(async () => {
   if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
 });
 
-test("无数据库时只开放安全的首次导入流程", async () => {
+desktopTest("无数据库时只开放安全的首次导入流程", async () => {
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 1000 },
+    viewport: { width: 1440, height: 900 },
   });
   const page = await context.newPage();
   const runtimeErrors = collectRuntimeErrors(page);
@@ -304,13 +498,13 @@ test("无数据库时只开放安全的首次导入流程", async () => {
   }
 });
 
-test("概览趋势失败时显示可重试错误而非永久加载", async (t) => {
+desktopTest("概览趋势失败时显示可重试错误而非永久加载", async (t) => {
   if (!realApi) {
     t.skip("工作区没有 var/rai.sqlite，跳过真实数据趋势错误态 E2E");
     return;
   }
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 1000 },
+    viewport: { width: 1440, height: 900 },
   });
   const page = await context.newPage();
   const runtimeErrors = collectRuntimeErrors(page);
@@ -329,7 +523,7 @@ test("概览趋势失败时显示可重试错误而非永久加载", async (t) =
     await page.goto(realApi.origin, { waitUntil: "domcontentloaded" });
     await page.getByRole("heading", { name: "你的跑步能力" }).waitFor();
     await page.getByRole("alert").filter({ hasText: "趋势暂不可用" }).waitFor();
-    runtimeErrors.length = 0; // 500 是本用例主动注入并由趋势面板处理的预期响应。
+    consumeExpectedHttpFailures(runtimeErrors, 500, "/v1/trends?days=28");
     await page.getByRole("button", { name: "重试" }).click();
     await page.getByText("TA 真实跑力", { exact: true }).waitFor();
     assert.deepEqual(runtimeErrors, []);
@@ -338,13 +532,13 @@ test("概览趋势失败时显示可重试错误而非永久加载", async (t) =
   }
 });
 
-test("真实数据主流程可导航、筛选、检查详情和只读比较", async (t) => {
+desktopTest("真实数据主流程可导航、筛选、检查详情和只读比较", async (t) => {
   if (!realApi) {
     t.skip("工作区没有 var/rai.sqlite，跳过真实数据只读 E2E");
     return;
   }
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 1000 },
+    viewport: { width: 1440, height: 900 },
   });
   const page = await context.newPage();
   const runtimeErrors = collectRuntimeErrors(page);
@@ -387,9 +581,32 @@ test("真实数据主流程可导航、筛选、检查详情和只读比较", as
     await filteredResponse;
     await page.locator(".workout-table .row-link").first().waitFor();
     assert.ok((await page.locator(".workout-table tbody tr").count()) > 0);
+    const stimulusResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/v1/workouts?") &&
+        response.url().includes("stimulusType=unclassified") &&
+        response.ok(),
+    );
+    await page.getByLabel("生理刺激").selectOption("unclassified");
+    await stimulusResponse;
+    assert.match(page.url(), /stimulusType=unclassified/);
+    const resetStimulusResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/v1/workouts?") &&
+        !response.url().includes("stimulusType=") &&
+        response.ok(),
+    );
+    await page.getByLabel("生理刺激").selectOption("");
+    await resetStimulusResponse;
+    await page.locator(".workout-table .row-link").first().waitFor();
 
     await page.locator(".workout-table .row-link").first().click();
     await page.getByRole("heading", { name: /跑步$/ }).waitFor();
+    await page.getByRole("heading", { name: "公里分段" }).waitFor();
+    if (await page.locator(".workout-zones-panel").count()) {
+      await page.locator(".workout-zone-distribution", { hasText: "心率分区" }).waitFor();
+      await page.locator(".workout-zone-distribution", { hasText: "配速分区" }).waitFor();
+    }
     await page.getByRole("heading", { name: "训练内变化" }).waitFor();
     for (const title of [
       "心率",
@@ -425,7 +642,20 @@ test("真实数据主流程可导航、筛选、检查详情和只读比较", as
     await page.getByRole("link", { name: "统计", exact: true }).click();
     await page.getByRole("heading", { name: "运动统计" }).waitFor();
     await page.getByRole("heading", { name: "负荷摘要" }).waitFor();
-    await page.getByRole("heading", { name: "急性与慢性负荷" }).waitFor();
+    await page.getByRole("heading", { name: "负荷趋势" }).waitFor();
+    const volumeData = page.getByText("查看跑量与负荷数据", { exact: true });
+    await volumeData.focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("table", { name: "跑量与训练负荷历史数据" }).waitFor();
+    await volumeData.focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("button", { name: "内部", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "内部", exact: true }).getAttribute("aria-pressed"), "true");
+    await page.getByText("查看内部负荷数据", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "配速", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "配速", exact: true }).getAttribute("aria-pressed"), "true");
+    await page.getByText("查看配速负荷数据", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "综合", exact: true }).click();
     assert.equal(await page.getByRole("button", { name: "周" }).getAttribute("aria-pressed"), "true");
     await page.getByRole("button", { name: "月" }).click();
     assert.equal(await page.getByRole("button", { name: "月" }).getAttribute("aria-pressed"), "true");
@@ -590,7 +820,7 @@ test("真实数据主流程可导航、筛选、检查详情和只读比较", as
   }
 });
 
-test("390px 下首次启动可从更多进入恢复设置，且关键页无横向溢出", async () => {
+responsiveTest("390px 下首次启动可从更多进入恢复设置，且关键页无横向溢出", async () => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 1,
@@ -648,19 +878,53 @@ test("390px 下首次启动可从更多进入恢复设置，且关键页无横�
   }
 });
 
-test("合成数据可完成首次导入、覆盖重算、模型切换和删除恢复", async () => {
+desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和删除恢复", async () => {
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 1000 },
+    viewport: { width: 1440, height: 900 },
   });
   const page = await context.newPage();
   const runtimeErrors = collectRuntimeErrors(page);
   try {
+    let releaseInitialRuntimeStatus: (() => void) | undefined;
+    let releaseTerminalRuntimeStatus: (() => void) | undefined;
+    let delayedInitialRuntimeStatus = false;
+    let createdImportJob: ({ id: string } & Record<string, unknown>) | null = null;
+    const importCreated = new Promise<void>((resolveCreated) => {
+      releaseInitialRuntimeStatus = resolveCreated;
+    });
+    const terminalRuntimeStatusGate = new Promise<void>((resolveTerminal) => {
+      releaseTerminalRuntimeStatus = resolveTerminal;
+    });
+    await page.route("**/v1/runtime-status", async (route) => {
+      if (!delayedInitialRuntimeStatus) {
+        delayedInitialRuntimeStatus = true;
+        await importCreated;
+        assert.ok(createdImportJob);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            databaseReady: false,
+            busy: true,
+            recomputeJob: null,
+            importJob: { ...createdImportJob, status: "running" },
+          }),
+        });
+        return;
+      }
+      await terminalRuntimeStatusGate;
+      await route.continue();
+    });
     await page.goto(`${firstRunApi.origin}/data`, {
       waitUntil: "domcontentloaded",
     });
     await page.getByText("高级：从已解压目录导入").click();
     await page.getByLabel("导出目录").fill(syntheticExport);
     let rejectedFirstImportPoll = false;
+    let releaseTerminalImportPoll: (() => void) | undefined;
+    const terminalImportPollGate = new Promise<void>((resolvePoll) => {
+      releaseTerminalImportPoll = resolvePoll;
+    });
     await page.route("**/v1/import-jobs/*", async (route) => {
       if (route.request().method() === "GET" && !rejectedFirstImportPoll) {
         rejectedFirstImportPoll = true;
@@ -670,28 +934,70 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
           body: JSON.stringify({ message: "临时不可用" }),
         });
       } else {
+        if (route.request().method() === "GET") await terminalImportPollGate;
         await route.continue();
       }
     });
+    const createdImportResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/v1/import-jobs") &&
+        response.request().method() === "POST" &&
+        response.ok(),
+    );
     await page.getByRole("button", { name: "从目录更新" }).click();
+    createdImportJob = await (await createdImportResponse).json() as {
+      id: string;
+    } & Record<string, unknown>;
+    releaseInitialRuntimeStatus?.();
     const importCompleted = waitForImport(firstRunApi.origin);
+    await page.getByLabel("后台任务状态").waitFor();
     await page.getByText("正在重新连接导入任务", { exact: true }).waitFor();
-    const firstImportJobId = await importCompleted;
-    runtimeErrors.length = 0; // 首次轮询 503 是本用例主动注入并由页面重试的预期响应。
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("rai:active-import-job")),
+      createdImportJob.id,
+    );
+    assert.equal(delayedInitialRuntimeStatus, true);
+    consumeExpectedHttpFailures(runtimeErrors, 503, /\/v1\/import-jobs\/[^/]+$/);
+    await page.getByRole("link", { name: "设置", exact: true }).click();
+    await page.getByRole("heading", { name: "设置" }).waitFor();
+    releaseTerminalImportPoll?.();
     await page.unroute("**/v1/import-jobs/*");
-    await page
-      .locator(".import-status .status-badge")
-      .getByText("已通过", { exact: true })
-      .waitFor({ timeout: 10_000 });
-    await page.reload({ waitUntil: "domcontentloaded" });
-
+    let healthRequestCount = 0;
+    await page.route("**/v1/health", async (route) => {
+      healthRequestCount += 1;
+      await route.continue();
+    });
+    const refreshedHealth = page.waitForResponse(
+      (response) => response.url().endsWith("/v1/health") && response.ok(),
+    );
+    releaseTerminalRuntimeStatus?.();
+    const firstImportJobId = await importCompleted;
+    assert.equal(firstImportJobId, createdImportJob.id);
+    await refreshedHealth;
+    await page.waitForTimeout(250);
+    assert.equal(healthRequestCount, 1);
+    await page.unroute("**/v1/health");
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("rai:active-import-job")),
+      firstImportJobId,
+    );
     const importedHealth = (await fetch(`${firstRunApi.origin}/v1/health`).then(
       (response) => response.json(),
     )) as { databaseReady: boolean };
     assert.equal(importedHealth.databaseReady, true);
+    await page.getByRole("link", { name: "概览", exact: true }).click();
+    await page.getByRole("heading", { name: "你的跑步能力" }).waitFor();
+    await page.getByRole("link", { name: "数据与模型", exact: true }).click();
+    await page.getByRole("heading", { name: "数据与模型" }).waitFor();
     await page
       .getByRole("link", { name: "查看数据审计" })
       .waitFor({ timeout: 15_000 });
+    assert.equal(await page.getByRole("button", { name: "完整重算" }).isEnabled(), true);
+    assert.equal(
+      await page.evaluate(() => localStorage.getItem("rai:active-import-job")),
+      null,
+    );
+    await page.unroute("**/v1/runtime-status");
 
     const insufficientTrainingResponse = await fetch(
       `${firstRunApi.origin}/v1/prediction-models/train`,
@@ -701,7 +1007,11 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
         body: "{}",
       },
     );
-    assert.equal(insufficientTrainingResponse.status, 422);
+    assert.equal(
+      insufficientTrainingResponse.status,
+      422,
+      JSON.stringify(await insufficientTrainingResponse.clone().json()),
+    );
     const insufficientTrainingBody =
       (await insufficientTrainingResponse.json()) as {
         code: string;
@@ -725,7 +1035,7 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
     await trainingError.getByText("5K0/8", { exact: true }).waitFor();
     await trainingError.getByText("10K0/8", { exact: true }).waitFor();
     await trainingError.getByText("半马0/8", { exact: true }).waitFor();
-    runtimeErrors.length = 0; // 422 是本用例主动触发并已由界面处理的预期响应。
+    consumeExpectedHttpFailures(runtimeErrors, 422, "/v1/prediction-models/train");
     await page.route(
       "**/v1/prediction-models/train",
       async (route) => {
@@ -741,9 +1051,41 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
     await page.getByRole("status").filter({ hasText: "已进入队列" }).waitFor();
 
     await page.getByRole("link", { name: "训练", exact: true }).click();
+    const syntheticWorkouts = (await fetch(
+      `${firstRunApi.origin}/v1/workouts?limit=1&offset=0`,
+    ).then((response) => response.json())) as {
+      items: Array<{ stimulusType: string }>;
+    };
+    const syntheticStimulus = syntheticWorkouts.items[0]?.stimulusType;
+    assert.ok(syntheticStimulus);
+    const syntheticStimulusResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/v1/workouts?") &&
+        response.url().includes(`stimulusType=${syntheticStimulus}`) &&
+        response.ok(),
+    );
+    await page.getByLabel("生理刺激").selectOption(syntheticStimulus);
+    await syntheticStimulusResponse;
     await page.locator(".workout-table .row-link").first().click();
     const syntheticWorkoutId = new URL(page.url()).pathname.split("/").at(-1);
     assert.ok(syntheticWorkoutId);
+    await page.getByRole("heading", { name: "公里分段" }).waitFor();
+    await page.locator(".workout-zones-panel").waitFor();
+    await page.locator(".workout-zone-distribution", { hasText: "心率分区" }).waitFor();
+    await page.locator(".workout-zone-distribution", { hasText: "配速分区" }).waitFor();
+    await page.locator(".workout-load-band").waitFor();
+
+    await page.getByRole("link", { name: "统计", exact: true }).click();
+    await page.getByRole("heading", { name: "负荷趋势" }).waitFor();
+    await page.getByRole("button", { name: "内部", exact: true }).click();
+    await page.getByText("查看内部负荷数据", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "配速", exact: true }).click();
+    await page.getByText("查看配速负荷数据", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "综合", exact: true }).click();
+    await page.goto(`${firstRunApi.origin}/workouts/${syntheticWorkoutId}`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.getByRole("heading", { name: /跑步$/ }).waitFor();
     await page.getByRole("button", { name: "编辑覆盖" }).click();
     await page.getByLabel("训练类型").selectOption("easy");
     await page.getByLabel("RPE").fill("6");
@@ -768,7 +1110,7 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
     await page.keyboard.press("Escape");
     assert.equal(await page.getByRole("dialog", { name: "编辑训练覆盖" }).isVisible(), true);
     await page.getByRole("alert").filter({ hasText: "覆盖保存测试失败" }).waitFor();
-    runtimeErrors.length = 0; // 500 是本用例主动注入并由抽屉内错误提示处理的预期响应。
+    consumeExpectedHttpFailures(runtimeErrors, 500, /\/v1\/workouts\/[^/]+\/override$/);
     assert.equal(await page.getByLabel("备注").isEnabled(), true);
     await page.getByRole("button", { name: "保存并重算" }).click();
     await page
@@ -871,7 +1213,7 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
     await deleteDialogError.waitFor();
     assert.equal(await deleteDialogError.evaluate((element) => element === document.activeElement), true);
     assert.equal(await page.getByRole("dialog", { name: "确认删除本地数据库" }).isVisible(), true);
-    runtimeErrors.length = 0; // 500 是本用例主动注入并由删除模态框处理的预期响应。
+    consumeExpectedHttpFailures(runtimeErrors, 500, "/v1/database");
     await page.getByRole("button", { name: "确认删除" }).click();
     await page
       .getByText(/本地数据库已删除；删除前备份/)
@@ -927,7 +1269,7 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
     await restoreDialogError.waitFor();
     assert.equal(await restoreDialogError.evaluate((element) => element === document.activeElement), true);
     assert.equal(await page.getByRole("dialog", { name: "恢复本地数据库备份" }).isVisible(), true);
-    runtimeErrors.length = 0; // 500 是本用例主动注入并由恢复模态框处理的预期响应。
+    consumeExpectedHttpFailures(runtimeErrors, 500, /\/v1\/backups\/[^/]+\/restore$/);
     await restoreButton.click();
     await page.getByText(/已恢复备份/).waitFor({ timeout: 30_000 });
     await page.waitForFunction(async () => {
@@ -943,6 +1285,279 @@ test("合成数据可完成首次导入、覆盖重算、模型切换和删除�
     assert.equal(restoredModels.length, 2);
     assert.deepEqual(runtimeErrors, []);
   } finally {
+    await context.close();
+  }
+});
+
+desktopTest("训练分区设置校验、刷新重试并连续递增 revision", async () => {
+  const initialResponse = await fetch(
+    `${firstRunApi.origin}/v1/training-zones/current`,
+  );
+  assert.equal(initialResponse.ok, true);
+  const initial = (await initialResponse.json()) as {
+    settings: {
+      revision: number;
+      effectiveFromLocalDate: string;
+      restingHeartRate: { mode: "auto" | "manual"; valueBpm: number | null };
+      maximumHeartRate: { mode: "auto" | "manual"; valueBpm: number | null };
+      lactateThresholdPace: {
+        mode: "auto" | "manual";
+        valueSecondsPerKm: number | null;
+      };
+      createdAt: string;
+    };
+    profile: { maximumHeartRateBpm: number } & Record<string, unknown>;
+  } & Record<string, unknown>;
+  const baseRevision = initial.settings.revision;
+  const initialView = {
+    ...initial,
+    settings: {
+      ...initial.settings,
+      maximumHeartRate: { mode: "auto" as const, valueBpm: null },
+    },
+  };
+  const savedSettings = (revision: number, valueBpm: number) => ({
+    ...initialView.settings,
+    revision,
+    effectiveFromLocalDate: "2026-07-16",
+    restingHeartRate: { mode: "manual" as const, valueBpm },
+    createdAt: `2026-07-15T00:00:0${revision - baseRevision}.000Z`,
+  });
+  const patchBodies: Array<{ expectedRevision: number }> = [];
+  let currentRequestCount = 0;
+  let latestSettings = initial.settings;
+  let releaseFirstPatch: () => void = () => {};
+  let reportFirstPatchStarted: () => void = () => {};
+  const firstPatchGate = new Promise<void>((resolveGate) => { releaseFirstPatch = resolveGate; });
+  const firstPatchStarted = new Promise<void>((resolveStarted) => { reportFirstPatchStarted = resolveStarted; });
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = await context.newPage();
+  const runtimeErrors = collectRuntimeErrors(page);
+  try {
+    await page.route("**/v1/training-zones/current", async (route) => {
+      currentRequestCount += 1;
+      if (currentRequestCount === 2) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ message: "分区刷新测试失败" }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...initialView,
+          profile: {
+            ...initialView.profile,
+            maximumHeartRateBpm: currentRequestCount >= 3
+              ? initialView.profile.maximumHeartRateBpm + 3
+              : initialView.profile.maximumHeartRateBpm,
+          },
+          settings: latestSettings,
+        }),
+      });
+    });
+    await page.route("**/v1/training-zones/profile", async (route) => {
+      const body = route.request().postDataJSON() as { expectedRevision: number };
+      patchBodies.push(body);
+      latestSettings = savedSettings(
+        baseRevision + patchBodies.length,
+        patchBodies.length === 1 ? 55 : 56,
+      );
+      if (patchBodies.length === 1) {
+        reportFirstPatchStarted();
+        await firstPatchGate;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(latestSettings),
+      });
+    });
+    await page.goto(`${firstRunApi.origin}/zones`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.getByRole("heading", { name: "训练分区" }).waitFor();
+
+    await page
+      .getByRole("group", { name: "静息心率模式" })
+      .getByRole("button", { name: "手动" })
+      .click();
+    const restingHeartRateInput = page
+      .locator(".zone-setting-row")
+      .filter({ hasText: "静息心率" })
+      .locator('input[type="number"]');
+    await restingHeartRateInput.fill("20");
+    await page.getByRole("button", { name: "保存设置" }).click();
+    await page.getByText(/请输入 35.*110 bpm 范围内的有效数值/).waitFor();
+    assert.equal(patchBodies.length, 0);
+
+    await restingHeartRateInput.fill("55");
+    await page.getByRole("button", { name: "保存设置" }).click();
+    await firstPatchStarted;
+    assert.equal(await page.getByRole("button", { name: "正在保存" }).isDisabled(), true);
+    for (const label of ["静息心率模式", "最高心率模式", "乳酸阈配速模式"]) {
+      const group = page.getByRole("group", { name: label });
+      assert.equal(await group.getByRole("button", { name: "自动" }).isDisabled(), true);
+      assert.equal(await group.getByRole("button", { name: "手动" }).isDisabled(), true);
+    }
+    const numericInputs = page.locator('.zone-setting-row input[type="number"]');
+    assert.equal(await numericInputs.count(), 3);
+    for (let index = 0; index < 3; index += 1) {
+      assert.equal(await numericInputs.nth(index).isDisabled(), true);
+    }
+    assert.equal(await restingHeartRateInput.inputValue(), "55");
+    releaseFirstPatch();
+    await page
+      .getByRole("status")
+      .filter({ hasText: `revision ${baseRevision + 1}` })
+      .waitFor();
+    assert.equal(await restingHeartRateInput.inputValue(), "55");
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "设置已保存，但最新分区刷新失败" })
+      .waitFor();
+    consumeExpectedHttpFailures(runtimeErrors, 503, "/v1/training-zones/current");
+    const maximumHeartRateInput = page
+      .locator(".zone-setting-row")
+      .filter({ hasText: "最高心率" })
+      .locator('input[type="number"]');
+    const originalMaximumHeartRate = await maximumHeartRateInput.inputValue();
+    const refreshed = page.waitForResponse(
+      (response) => response.url().includes("/v1/training-zones/current") && response.ok(),
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("rai:data-updated")));
+    await refreshed;
+    await page
+      .getByText("设置已保存，但最新分区刷新失败")
+      .waitFor({ state: "hidden" });
+    assert.notEqual(await maximumHeartRateInput.inputValue(), originalMaximumHeartRate);
+
+    await restingHeartRateInput.fill("56");
+    await page.getByRole("button", { name: "保存设置" }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: `revision ${baseRevision + 2}` })
+      .waitFor();
+    assert.deepEqual(
+      patchBodies.map((body) => body.expectedRevision),
+      [baseRevision, baseRevision + 1],
+    );
+    assert.deepEqual(runtimeErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
+desktopTest("训练分区编辑在外部 revision 更新时保留草稿并提交编辑基线", async () => {
+  const initialResponse = await fetch(
+    `${firstRunApi.origin}/v1/training-zones/current`,
+  );
+  assert.equal(initialResponse.ok, true);
+  const initial = (await initialResponse.json()) as {
+    settings: {
+      revision: number;
+      effectiveFromLocalDate: string;
+      restingHeartRate: { mode: "auto" | "manual"; valueBpm: number | null };
+      maximumHeartRate: { mode: "auto" | "manual"; valueBpm: number | null };
+      lactateThresholdPace: {
+        mode: "auto" | "manual";
+        valueSecondsPerKm: number | null;
+      };
+      createdAt: string;
+    };
+  } & Record<string, unknown>;
+  const baseRevision = initial.settings.revision;
+  let latest = initial;
+  const patchBodies: Array<{ expectedRevision: number }> = [];
+  let reportPatchStarted!: () => void;
+  const patchStarted = new Promise<void>((resolvePromise) => {
+    reportPatchStarted = resolvePromise;
+  });
+  let releasePatch!: () => void;
+  const patchGate = new Promise<void>((resolvePromise) => {
+    releasePatch = resolvePromise;
+  });
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = await context.newPage();
+  const runtimeErrors = collectRuntimeErrors(page);
+  try {
+    await page.route("**/v1/training-zones/current", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(latest),
+      });
+    });
+    await page.route("**/v1/training-zones/profile", async (route) => {
+      patchBodies.push(route.request().postDataJSON() as { expectedRevision: number });
+      reportPatchStarted();
+      await patchGate;
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "Training zone settings revision conflict" }),
+      });
+    });
+    await page.goto(`${firstRunApi.origin}/zones`, {
+      waitUntil: "domcontentloaded",
+    });
+    await page.getByRole("heading", { name: "训练分区" }).waitFor();
+    await page
+      .getByRole("group", { name: "静息心率模式" })
+      .getByRole("button", { name: "手动" })
+      .click();
+    const restingHeartRateInput = page
+      .locator(".zone-setting-row")
+      .filter({ hasText: "静息心率" })
+      .locator('input[type="number"]');
+    await restingHeartRateInput.fill("57");
+
+    latest = {
+      ...initial,
+      settings: {
+        ...initial.settings,
+        revision: baseRevision + 1,
+        restingHeartRate: { mode: "manual", valueBpm: 58 },
+      },
+    };
+    assert.equal(await restingHeartRateInput.inputValue(), "57");
+    await page.getByRole("button", { name: "保存设置" }).evaluate((element) => {
+      (element as HTMLButtonElement).click();
+      (element as HTMLButtonElement).click();
+    });
+    await patchStarted;
+    assert.equal(patchBodies.length, 1);
+    const refreshed = page.waitForResponse(
+      (response) => response.url().includes("/v1/training-zones/current") && response.ok(),
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("rai:data-updated")));
+    await refreshed;
+    const loadLatestButton = page.getByRole("button", { name: "加载最新设置" });
+    await loadLatestButton.waitFor();
+    assert.equal(await loadLatestButton.isDisabled(), true);
+    assert.equal(await restingHeartRateInput.inputValue(), "57");
+    releasePatch();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: "Training zone settings revision conflict" })
+      .waitFor();
+    await page
+      .getByRole("alert")
+      .filter({ hasText: `revision ${baseRevision + 1} 的外部更新` })
+      .waitFor();
+    assert.deepEqual(patchBodies.map((body) => body.expectedRevision), [baseRevision]);
+    assert.equal(await restingHeartRateInput.inputValue(), "57");
+    consumeExpectedHttpFailures(runtimeErrors, 409, "/v1/training-zones/profile");
+    assert.deepEqual(runtimeErrors, []);
+  } finally {
+    releasePatch();
     await context.close();
   }
 });

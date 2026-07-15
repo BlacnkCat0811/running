@@ -222,6 +222,91 @@ test("creates immutable feature/model runs and switches the active model", async
   }
 });
 
+test("validates and revisions training zone profile settings", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-zone-settings-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    const first = service.appendTrainingZoneProfileSettings({
+      expectedRevision: 0,
+      restingHeartRate: { mode: "manual", valueBpm: 55 },
+      maximumHeartRate: { mode: "manual", valueBpm: 195 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 330 }
+    }, "UTC");
+    assert.equal(first.revision, 1);
+    assert.equal(first.restingHeartRate.valueBpm, 55);
+    assert.throws(() => service.appendTrainingZoneProfileSettings({
+      expectedRevision: 0,
+      restingHeartRate: { mode: "auto", valueBpm: null },
+      maximumHeartRate: { mode: "auto", valueBpm: null },
+      lactateThresholdPace: { mode: "auto", valueSecondsPerKm: null }
+    }, "UTC"), /revision conflict/);
+    assert.throws(() => service.appendTrainingZoneProfileSettings({
+      expectedRevision: 1,
+      restingHeartRate: { mode: "manual", valueBpm: 34 },
+      maximumHeartRate: { mode: "manual", valueBpm: 195 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 330 }
+    }, "UTC"), /between 35 and 110/);
+    assert.throws(() => service.appendTrainingZoneProfileSettings({
+      expectedRevision: 1,
+      restingHeartRate: { mode: "manual", valueBpm: 100 },
+      maximumHeartRate: { mode: "manual", valueBpm: 125 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 901 }
+    }, "UTC"), /between 150 and 900/);
+    assert.throws(() => service.appendTrainingZoneProfileSettings({
+      expectedRevision: 1,
+      restingHeartRate: { mode: "manual", valueBpm: 100 },
+      maximumHeartRate: { mode: "manual", valueBpm: 125 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 330 }
+    }, "UTC"), /at least 30 bpm/);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps used daily zone profiles frozen during snapshot refresh", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-zone-profile-freeze-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+    const frozenThrough = store.database
+      .prepare("SELECT MAX(local_date) AS localDate FROM active_daily_zone_profiles")
+      .get() as unknown as { localDate: string };
+    const frozenBefore = store.database
+      .prepare("SELECT * FROM active_daily_zone_profiles WHERE local_date <= ? ORDER BY local_date")
+      .all(frozenThrough.localDate);
+
+    const futureEvidenceAt = new Date(Date.parse(dateForRun(8)) + 86_400_000).toISOString();
+    store.database.prepare(`
+      INSERT INTO health_records (
+        id, type, source_name, source_category, unit, value_numeric,
+        start_at, end_at, metadata_json, raw_attributes_json
+      ) VALUES ('future_resting_hr', 'HKQuantityTypeIdentifierRestingHeartRate',
+        'Fixture Apple Watch', 'apple_watch', 'count/min', 100, ?, ?, '{}', '{}')
+    `).run(futureEvidenceAt, futureEvidenceAt);
+
+    service.enqueueSnapshotRefresh({
+      evaluatedAt: new Date(Date.parse(dateForRun(8)) + 3 * 86_400_000).toISOString(),
+      timezoneIdentifier: "UTC"
+    });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+    const frozenAfter = store.database
+      .prepare("SELECT * FROM active_daily_zone_profiles WHERE local_date <= ? ORDER BY local_date")
+      .all(frozenThrough.localDate);
+    const refreshedThrough = store.database
+      .prepare("SELECT MAX(local_date) AS localDate FROM active_daily_zone_profiles")
+      .get() as unknown as { localDate: string };
+    assert.deepEqual(frozenAfter, frozenBefore);
+    assert.ok(refreshedThrough.localDate > frozenThrough.localDate);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("rolls back active activation when job completion cannot be persisted", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-activation-rollback-"));
   const store = await seedDatabase(join(root, "rai.sqlite"));
@@ -252,6 +337,47 @@ test("rolls back active activation when job completion cannot be persisted", asy
       .prepare("SELECT status FROM model_runs WHERE id = ?")
       .get(failed?.modelRunId ?? "") as unknown as { status: string };
     assert.equal(failedModel.status, "failed");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rolls back a job claim when its claimed event cannot be persisted", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-claim-rollback-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    const jobId = service.enqueueFullRecompute({
+      evaluatedAt: dateForRun(8),
+      timezoneIdentifier: "UTC"
+    });
+    store.database.exec(`
+      CREATE TRIGGER fail_claimed_recompute_event
+      BEFORE INSERT ON recompute_job_events
+      WHEN NEW.phase = 'claimed'
+      BEGIN
+        SELECT RAISE(ABORT, 'fixture claimed event failure');
+      END;
+    `);
+
+    assert.throws(() => service.runNextJob(), /fixture claimed event failure/);
+    const queued = store.database.prepare(`
+      SELECT status, started_at AS startedAt, progress_phase AS progressPhase
+      FROM recompute_jobs WHERE id = ?
+    `).get(jobId) as unknown as {
+      status: string;
+      startedAt: string | null;
+      progressPhase: string;
+    };
+    assert.equal(queued.status, "queued");
+    assert.equal(queued.startedAt, null);
+    assert.equal(queued.progressPhase, "queued");
+
+    store.database.exec("DROP TRIGGER fail_claimed_recompute_event");
+    const completed = service.runNextJob();
+    assert.equal(completed?.id, jobId);
+    assert.equal(completed?.status, "succeeded");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -365,7 +491,18 @@ test("distinguishes missing, active, and terminal job cancellation", async () =>
     assert.equal(service.requestJobCancellation("missing_job"), "not_found");
     const activeId = service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
     assert.equal(service.requestJobCancellation(activeId), "requested");
-    assert.equal(service.runNextJob()?.status, "cancelled");
+    assert.equal(service.runNextJob(), null);
+    const cancelled = store.database.prepare(`
+      SELECT status, progress_phase AS progressPhase, completed_at AS completedAt
+      FROM recompute_jobs WHERE id = ?
+    `).get(activeId) as unknown as { status: string; progressPhase: string; completedAt: string | null };
+    assert.deepEqual(
+      { status: cancelled.status, progressPhase: cancelled.progressPhase },
+      { status: "cancelled", progressPhase: "cancelled" }
+    );
+    assert.ok(cancelled.completedAt);
+    const featureRuns = store.database.prepare("SELECT COUNT(*) AS count FROM feature_runs").get() as unknown as { count: number };
+    assert.equal(featureRuns.count, 0);
     assert.equal(service.requestJobCancellation(activeId), "terminal");
   } finally {
     store.close();

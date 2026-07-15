@@ -1,5 +1,11 @@
 export { parseAppleHealthXml } from "./apple-health-parser.js";
-export { buildAudit, renderAuditMarkdown, writeAuditFiles } from "./audit.js";
+export {
+  buildAudit,
+  renderAuditMarkdown,
+  stageAuditFiles,
+  writeAuditFiles,
+  type StagedAuditFiles,
+} from "./audit.js";
 export {
   canonicalizeRunningWorkouts,
   type IncrementalCanonicalizationOptions

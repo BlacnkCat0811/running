@@ -3,6 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "../api.js";
+import {
+  notifyDatabaseStateChanged,
+  notifyDataUpdated,
+} from "../events.js";
 import { ArrowClockwise, CheckCircle, Warning } from "../icons.js";
 import { StatusBadge } from "./StatusBadge.js";
 
@@ -25,8 +29,8 @@ export function GlobalTaskStatus() {
         const before = previous.current;
         if (initialized.current && before) {
           const transitions = [
-            { before: before.recomputeJob, after: next.recomputeJob, type: "模型重算" },
-            { before: before.importJob, after: next.importJob, type: "数据导入" }
+            { before: before.recomputeJob, after: next.recomputeJob, type: "模型重算", changesDatabaseState: false },
+            { before: before.importJob, after: next.importJob, type: "数据导入", changesDatabaseState: true }
           ];
           for (const transition of transitions) {
             const sameJobFinished =
@@ -45,7 +49,12 @@ export function GlobalTaskStatus() {
                 status: transition.after.status,
                 message: succeeded ? `${transition.type}完成，已刷新当前数据。` : `${transition.type}未完成，请查看任务记录。`
               });
-              if (succeeded) window.dispatchEvent(new Event("rai:data-updated"));
+              if (succeeded) {
+                if (transition.changesDatabaseState) {
+                  notifyDatabaseStateChanged(transition.after.id);
+                }
+                notifyDataUpdated(transition.after.id);
+              }
             }
           }
         }

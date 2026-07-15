@@ -308,6 +308,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       activation = await activateStagingDatabase(stagingDatabase, args.database);
       activated = true;
       stagedAudit.commit();
+      stagedAudit.finalize();
     } catch (error) {
       stagedAudit.discard();
       if (activation) {

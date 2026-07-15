@@ -416,6 +416,7 @@ export interface WorkoutSeriesResponse {
   startedAt: string;
   endedAt: string;
   sourceCategory: string;
+  splits: WorkoutSplit[];
   series: {
     heartRate: WorkoutMetricSeries;
     speed: WorkoutMetricSeries;
@@ -426,6 +427,15 @@ export interface WorkoutSeriesResponse {
     verticalOscillation: WorkoutMetricSeries;
     groundContactTime: WorkoutMetricSeries;
   };
+}
+
+export interface WorkoutSplit {
+  index: number;
+  distanceMeters: number;
+  durationSeconds: number;
+  averagePaceSecondsPerKm: number;
+  averageHeartRateBpm: number | null;
+  averageCadenceSpm: number | null;
 }
 
 export interface WorkoutMetricSeries {
