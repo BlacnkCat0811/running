@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import {
   CATBOOST_PREDICTION_MODEL_VERSION,
+  PREDICTION_CORRECTION_CAP_FRACTION,
   PHYSIOLOGY_REPORT_VERSION,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
   assertPhysiologyPredictionSnapshot,
@@ -40,6 +41,7 @@ import {
   loadRaceReadiness,
   loadRecoveryReadiness
 } from "./prediction-data.js";
+import { currentAbilityBaselineHash } from "./prediction-ability-baseline.js";
 
 const distances: RaceDistance[] = ["five_k", "ten_k", "half_marathon"];
 
@@ -101,6 +103,21 @@ interface HistoricalEvaluation {
   mlImprovement: number | null;
   mlRegressesDistance: boolean;
   recommendMlActivation: boolean;
+}
+
+interface AvailableHistoricalValue<T> {
+  availableAt: string;
+  value: T;
+}
+
+export function historicalValuesAvailableAt<T>(
+  values: ReadonlyArray<AvailableHistoricalValue<T>>,
+  predictionAt: string
+): T[] {
+  const cutoff = Date.parse(predictionAt);
+  return values
+    .filter((entry) => Date.parse(entry.availableAt) <= cutoff)
+    .map((entry) => entry.value);
 }
 
 interface RuntimePredictionEvaluation {
@@ -230,6 +247,8 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
   const mlBaselineErrors: RacePredictionError[] = [];
   const mlErrors: RacePredictionError[] = [];
   const mlExamples: RaceMlTrainingExample[] = [];
+  const historicalRawErrors: Array<AvailableHistoricalValue<RacePredictionError>> = [];
+  const historicalMlExamples: Array<AvailableHistoricalValue<RaceMlTrainingExample>> = [];
 
   for (const outcome of outcomes) {
     const base = buildFormulaPredictionBase(database, outcome.observedAt, {});
@@ -242,7 +261,15 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
       base.snapshot.performanceVdot,
       base.snapshot.vo2Max
     );
-    const priorMlModel = fitRaceResidualRidge(mlExamples);
+    const availableRawErrors = historicalValuesAvailableAt(
+      historicalRawErrors,
+      outcome.observedAt
+    );
+    const availableMlExamples = historicalValuesAvailableAt(
+      historicalMlExamples,
+      outcome.observedAt
+    );
+    const priorMlModel = fitRaceResidualRidge(availableMlExamples);
     if (priorMlModel !== null) {
       const mlPrediction = applyRaceResidualRidge(prediction, priorMlModel, mlFeatures);
       mlBaselineErrors.push(evaluateRacePrediction(
@@ -261,25 +288,29 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
     const calibrated = calibrateRacePrediction(
       prediction,
       outcome.observedAt,
-      rawErrors
+      availableRawErrors
     );
-    rawErrors.push(evaluateRacePrediction(
+    const rawError = evaluateRacePrediction(
       prediction,
       outcome.actualSeconds,
       outcome.completedAt,
       outcome.observedAt
-    ));
+    );
+    rawErrors.push(rawError);
     calibratedErrors.push(evaluateRacePrediction(
       calibrated,
       outcome.actualSeconds,
       outcome.completedAt,
       outcome.observedAt
     ));
-    mlExamples.push({
+    const mlExample = {
       features: mlFeatures,
       predictedSeconds: prediction.predictedSeconds,
       actualSeconds: outcome.actualSeconds
-    });
+    };
+    mlExamples.push(mlExample);
+    historicalRawErrors.push({ availableAt: outcome.labelAvailableAt, value: rawError });
+    historicalMlExamples.push({ availableAt: outcome.labelAvailableAt, value: mlExample });
   }
 
   const mlBaselineMetrics = aggregateRacePredictionErrors(mlBaselineErrors);
@@ -414,6 +445,9 @@ interface ActivePredictionModelRow {
   modelVersion: string;
   featureSchemaVersion: string;
   featureSchemaHash: string | null;
+  abilityBaselineHash: string | null;
+  trainingDataThroughAt: string;
+  trainingDataHash: string;
   metricsJson: string | null;
   labelCount: number;
   holdoutPredictionCount: number;
@@ -434,6 +468,9 @@ function activePredictionModel(database: DatabaseSync): ActivePredictionModelRow
       SELECT run.id, run.model_version AS modelVersion,
         run.feature_schema_version AS featureSchemaVersion,
         run.feature_schema_hash AS featureSchemaHash,
+        run.ability_baseline_hash AS abilityBaselineHash,
+        run.training_data_through_at AS trainingDataThroughAt,
+        run.training_data_hash AS trainingDataHash,
         run.metrics_json AS metricsJson, run.label_count AS labelCount,
         run.holdout_prediction_count AS holdoutPredictionCount,
         run.supported_distances_json AS supportedDistancesJson,
@@ -565,14 +602,15 @@ export async function buildPredictionReportAsync(
   database: DatabaseSync,
   options: PredictionReportOptions = {}
 ): Promise<PhysiologyPredictionReport> {
+  const active = activePredictionModel(database);
+  const initialBaselineHash = active === null ? null : currentAbilityBaselineHash(database);
   const context = buildPredictionReportContext(database, options);
   const formulaReport = context.report;
-  const active = activePredictionModel(database);
   if (active === null) return formulaReport;
 
   const metrics = parseJson<PredictionModelEvaluationMetrics | null>(active.metricsJson, null);
   const supportedDistances = parseJson<RaceDistance[]>(active.supportedDistancesJson, []);
-  const machineLearningSelection: PredictionEnhancementSelection["machineLearning"] = {
+  const baseSelection = (): PredictionEnhancementSelection["machineLearning"] => ({
     status: "active",
     modelVersion: CATBOOST_PREDICTION_MODEL_VERSION,
     trainedExampleCount: active.labelCount,
@@ -585,8 +623,11 @@ export async function buildPredictionReportAsync(
     featureSchemaVersion: active.featureSchemaVersion,
     artifactSha256: active.artifactSha256,
     activatedAt: active.activatedAt
-  };
-  const withSelection = (races: RaceTimePrediction[]): PhysiologyPredictionReport => ({
+  });
+  const withSelection = (
+    races: RaceTimePrediction[],
+    status: PredictionEnhancementSelection["machineLearning"]["status"] = "active"
+  ): PhysiologyPredictionReport => ({
     ...formulaReport,
     modelSelection: {
       ...formulaReport.modelSelection,
@@ -596,23 +637,65 @@ export async function buildPredictionReportAsync(
           (distance) => races.find((race) => race.distance === distance)?.method !== "catboost_residual_v6"
         )
       },
-      machineLearning: machineLearningSelection
+      machineLearning: { ...baseSelection(), status }
     },
     snapshot: { ...formulaReport.snapshot, races }
   });
 
   const { buildRaceResidualFeatureValues, raceResidualFeatureSchemaHash } =
     await import("./prediction-training-data.js");
+  const generatedAt = formulaReport.generatedAt;
   const schemaMatches =
     active.modelVersion === CATBOOST_PREDICTION_MODEL_VERSION &&
     active.featureSchemaVersion === PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION &&
-    active.featureSchemaHash === raceResidualFeatureSchemaHash();
-  if (!schemaMatches) {
+    active.featureSchemaHash === raceResidualFeatureSchemaHash() &&
+    active.abilityBaselineHash !== null &&
+    active.abilityBaselineHash === initialBaselineHash;
+  const trainingCutoffMatches =
+    Date.parse(active.trainingDataThroughAt) <= Date.parse(generatedAt);
+  if (!schemaMatches || !trainingCutoffMatches) {
     return withSelection(formulaReport.snapshot.races.map((prediction) => ({
       ...prediction,
       machineLearningFallbackReason:
         prediction.status === "available" ? "feature_schema_mismatch" : null
-    })));
+    })), "inference_unavailable");
+  }
+
+  if (currentAbilityBaselineHash(database) !== initialBaselineHash) {
+    return withSelection(formulaReport.snapshot.races.map((prediction) => ({
+      ...prediction,
+      machineLearningFallbackReason:
+        prediction.status === "available" ? "feature_schema_mismatch" : null
+    })), "inference_unavailable");
+  }
+
+  const base = context.base;
+  const inferenceBase = buildFormulaPredictionBase(database, generatedAt, {
+    recoveryReadiness: base.recoveryReadiness
+  });
+  const inferenceScenario: PhysiologyPredictionScenario = {
+    temperatureC: null,
+    humidityPercent: null,
+    elevationGainMeters: { five_k: null, ten_k: null, half_marathon: null }
+  };
+  const featureValues = new Map<
+    RaceDistance,
+    ReturnType<typeof buildRaceResidualFeatureValues>
+  >();
+  for (const prediction of formulaReport.snapshot.races) {
+    if (prediction.status !== "available" || !supportedDistances.includes(prediction.distance)) {
+      continue;
+    }
+    featureValues.set(
+      prediction.distance,
+      buildRaceResidualFeatureValues(
+        database,
+        generatedAt,
+        prediction.distance,
+        inferenceBase,
+        inferenceScenario
+      )
+    );
   }
 
   let model: OnnxCatBoostResidualModel;
@@ -623,22 +706,26 @@ export async function buildPredictionReportAsync(
       ...prediction,
       machineLearningFallbackReason:
         prediction.status === "available" ? "inference_failed" : null
-    })));
+    })), "inference_unavailable");
   }
   if (
+    currentAbilityBaselineHash(database) !== initialBaselineHash ||
     model.manifest.featureSchemaVersion !== active.featureSchemaVersion ||
-    model.manifest.featureSchemaHash !== active.featureSchemaHash
+    model.manifest.featureSchemaHash !== active.featureSchemaHash ||
+    model.manifest.trainingDataHash !== active.trainingDataHash ||
+    model.manifest.labelCount !== active.labelCount ||
+    model.manifest.modelSha256 !== active.artifactSha256 ||
+    model.manifest.correctionCapFraction !== PREDICTION_CORRECTION_CAP_FRACTION ||
+    model.manifest.supportedDistances.length !== supportedDistances.length ||
+    model.manifest.supportedDistances.some((distance) => !supportedDistances.includes(distance))
   ) {
     return withSelection(formulaReport.snapshot.races.map((prediction) => ({
       ...prediction,
       machineLearningFallbackReason:
         prediction.status === "available" ? "feature_schema_mismatch" : null
-    })));
+    })), "inference_unavailable");
   }
 
-  const generatedAt = formulaReport.generatedAt;
-  const base = context.base;
-  const scenario = formulaReport.inputs.scenario;
   const races = await Promise.all(formulaReport.snapshot.races.map(async (formulaPrediction) => {
     if (formulaPrediction.status !== "available") return formulaPrediction;
     if (!supportedDistances.includes(formulaPrediction.distance) || !model.supportsDistance(formulaPrediction.distance)) {
@@ -650,13 +737,7 @@ export async function buildPredictionReportAsync(
     if (!rawPrediction || rawPrediction.status !== "available") {
       return { ...formulaPrediction, machineLearningFallbackReason: "inference_failed" as const };
     }
-    const features = buildRaceResidualFeatureValues(
-      database,
-      generatedAt,
-      formulaPrediction.distance,
-      base,
-      scenario
-    );
+    const features = featureValues.get(formulaPrediction.distance) ?? null;
     if (features === null) {
       return { ...formulaPrediction, machineLearningFallbackReason: "inference_failed" as const };
     }
@@ -672,7 +753,18 @@ export async function buildPredictionReportAsync(
       return { ...formulaPrediction, machineLearningFallbackReason: "inference_failed" as const };
     }
   }));
-  const report = withSelection(races);
+  const availableRaces = races.filter((race) => race.status === "available");
+  const appliedMlRaces = availableRaces.filter(
+    (race) => race.method === "catboost_residual_v6"
+  );
+  // "active" only when every available race applied CatBoost; partial apply is "stale".
+  const mlStatus: PredictionEnhancementSelection["machineLearning"]["status"] =
+    appliedMlRaces.length === 0
+      ? "inference_unavailable"
+      : appliedMlRaces.length === availableRaces.length
+        ? "active"
+        : "stale";
+  const report = withSelection(races, mlStatus);
   assertPhysiologyPredictionSnapshot(report.snapshot);
   return report;
 }

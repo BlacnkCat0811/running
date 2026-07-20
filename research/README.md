@@ -24,7 +24,7 @@ equivalent managed environment instead of `research/.venv`.
 
 Input is UTF-8 JSONL, sorted by the absolute instant represented by `observedAt`
 and then `sampleId`. Every row must
-use `schemaVersion: "race-residual-feature-v2"`. The TypeScript exporter owns
+use `schemaVersion: "race-residual-feature-v3"`. The TypeScript exporter owns
 feature calculation and must use only information available strictly before the
 labeled test or race starts. `null` is the only valid representation of a
 missing numeric value; it is converted to `NaN` for CatBoost.
@@ -53,6 +53,7 @@ The output directory must not already exist. Publication is atomic and contains:
 - `manifest.json`
 - `feature-schema.json`
 - `evaluation.json`
+- `onnx-golden.json`
 
 The worker may equivalently invoke
 `python research/rai_ml/train.py --input <jsonl> --output-dir <directory> --data-through-at <ISO-8601>`.
@@ -61,9 +62,9 @@ artifacts were produced but the model was rejected, and `1` means training or
 contract validation failed. A rejected model must never become active.
 
 The manifest records the exact input-file SHA-256 and hashes for `model.onnx`,
-`feature-schema.json`, and `evaluation.json`. The TypeScript runner verifies all
+`feature-schema.json`, `evaluation.json`, and `onnx-golden.json`. The TypeScript runner verifies all
 of them, along with CatBoost parameters, activation thresholds, exit-code/status
-agreement, and ONNX parity before returning a result to the activation service.
+agreement, Python ONNX parity, and Node runtime golden-vector parity before returning a result to the activation service.
 
 Residual corrections are multiplicative. The predicted, optimistic, and
 pessimistic times are all scaled by the same bounded factor, preserving the

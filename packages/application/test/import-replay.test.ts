@@ -6,7 +6,8 @@ import test from "node:test";
 
 import { RaiApplicationService } from "@rai/application";
 import { healthTypes, workoutTypes } from "@rai/contracts";
-import { canonicalizeRunningWorkouts, parseAppleHealthXml, RaiDatabase } from "@rai/health-export-parser";
+import { canonicalizeRunningWorkouts, parseAppleHealthXml } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 const appleDate = (day: number, time: string): string =>
   `2026-01-${String(day).padStart(2, "0")} ${time}:00 +0800`;
@@ -22,10 +23,19 @@ test("imports a small Health fixture and replays features, CA/TA, and daily snap
     <WorkoutStatistics type="${healthTypes.distanceWalkingRunning}" startDate="${appleDate(day, "08:00")}" endDate="${appleDate(day, "08:30")}" sum="${(5 + index * 0.08).toFixed(2)}" unit="km"/>
     <WorkoutStatistics type="${healthTypes.heartRate}" startDate="${appleDate(day, "08:00")}" endDate="${appleDate(day, "08:30")}" average="${145 + index}" minimum="120" maximum="172" unit="count/min"/>
   </Workout>`).join("");
+  // Dense HR records so R3-16 stats-only path is not used (series eligibility).
+  const heartRecords = days.flatMap((day, index) =>
+    Array.from({ length: 15 }, (_, sample) => {
+      const minute = String(sample * 2).padStart(2, "0");
+      const endMinute = String(sample * 2 + 1).padStart(2, "0");
+      return `
+  <Record type="${healthTypes.heartRate}" sourceName="Fixture Apple Watch" sourceVersion="1" unit="count/min" creationDate="${appleDate(day, "08:31")}" startDate="${appleDate(day, `08:${minute}`)}" endDate="${appleDate(day, `08:${endMinute}`)}" value="${140 + index + (sample % 3)}"/>`;
+    })
+  ).join("");
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <HealthData locale="zh_CN">
   <ExportDate value="${appleDate(25, "12:00")}"/>
-  <Me biologicalSex="HKBiologicalSexMale"/>${workouts}
+  <Me biologicalSex="HKBiologicalSexMale"/>${workouts}${heartRecords}
 </HealthData>`;
   writeFileSync(xmlPath, xml, "utf8");
 

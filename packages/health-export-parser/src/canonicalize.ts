@@ -25,6 +25,14 @@ interface ExistingTrainingSession {
   anchorStartAt: string;
   anchorEndAt: string;
   anchorDistanceKm: number | null;
+  status: string;
+}
+
+/** Prefer rematching onto live sessions: active < ambiguous < inactive. */
+function sessionStatusRank(status: string): number {
+  if (status === "active") return 0;
+  if (status === "ambiguous") return 1;
+  return 2; // inactive (and any unexpected status)
 }
 
 export interface CanonicalizationResult {
@@ -211,9 +219,13 @@ function loadExistingTrainingSessions(database: DatabaseSync): ExistingTrainingS
         activity_type AS activityType,
         anchor_start_at AS anchorStartAt,
         anchor_end_at AS anchorEndAt,
-        anchor_distance_km AS anchorDistanceKm
+        anchor_distance_km AS anchorDistanceKm,
+        status
       FROM training_sessions
-      WHERE activity_type = ? AND status IN ('active', 'ambiguous')
+      WHERE activity_type = ? AND status IN ('active', 'ambiguous', 'inactive')
+      ORDER BY
+        CASE status WHEN 'active' THEN 0 WHEN 'ambiguous' THEN 1 ELSE 2 END,
+        id
     `)
     .all(workoutTypes.running) as unknown as ExistingTrainingSession[];
 }
@@ -229,6 +241,13 @@ export function canonicalizeRunningWorkouts(
     const selected = new Set(allWorkouts.filter((workout) => dirtyTimes.some(
       (time) => Math.abs(Date.parse(workout.startAt) - time) <= 120_000
     )).map((workout) => workout.id));
+    const priorMembers = database.prepare(`
+      SELECT DISTINCT member.workout_id AS workoutId
+      FROM workout_group_members member
+      WHERE member.group_id IN (
+        SELECT group_id FROM workout_group_members WHERE workout_id = ?
+      )
+    `);
     let changed = true;
     while (changed) {
       changed = false;
@@ -239,17 +258,15 @@ export function canonicalizeRunningWorkouts(
           changed = true;
         }
       }
-    }
-    const priorMembers = database.prepare(`
-      SELECT DISTINCT member.workout_id AS workoutId
-      FROM workout_group_members member
-      WHERE member.group_id IN (
-        SELECT group_id FROM workout_group_members WHERE workout_id = ?
-      )
-    `);
-    for (const workoutId of [...selected]) {
-      const rows = priorMembers.all(workoutId) as unknown as Array<{ workoutId: string }>;
-      for (const row of rows) selected.add(row.workoutId);
+      for (const workoutId of [...selected]) {
+        const rows = priorMembers.all(workoutId) as unknown as Array<{ workoutId: string }>;
+        for (const row of rows) {
+          if (!selected.has(row.workoutId)) {
+            selected.add(row.workoutId);
+            changed = true;
+          }
+        }
+      }
     }
     workouts = allWorkouts.filter((workout) => selected.has(workout.id));
   }
@@ -356,25 +373,30 @@ export function canonicalizeRunningWorkouts(
       let trainingSessionId: string;
       let sessionStatus: "active" | "ambiguous" = "active";
 
-      if (matches.length === 1) {
-        const matched = matches[0];
-        if (!matched) throw new Error("Expected exactly one existing training session");
+      if (matches.length >= 1) {
+        // Multi-match: prefer active over ambiguous over inactive, then stable id.
+        const matched = [...matches].sort(
+          (left, right) =>
+            sessionStatusRank(left.status) - sessionStatusRank(right.status) ||
+            left.id.localeCompare(right.id)
+        )[0];
+        if (!matched) throw new Error("Expected an existing training session match");
         trainingSessionId = matched.id;
         usedExistingSessionIds.add(trainingSessionId);
+        if (matches.length > 1) {
+          sessionStatus = "ambiguous";
+          ambiguousTrainingSessionCount += 1;
+        }
         updateSession.run(
           canonical.startAt,
           canonical.endAt,
           canonicalDistanceKm,
           canonical.id,
-          "active",
+          sessionStatus,
           trainingSessionId
         );
       } else {
         trainingSessionId = stableId("training_session", [groupId]);
-        if (matches.length > 1) {
-          sessionStatus = "ambiguous";
-          ambiguousTrainingSessionCount += 1;
-        }
         insertSession.run(
           trainingSessionId,
           canonical.activityType,

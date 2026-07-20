@@ -1,18 +1,27 @@
+import "../pixel-layout.css";
+import "../dashboard-reference.css";
 import type {
   DashboardResponse,
+  DailyTrainingMetric,
   TrainingStatisticsOverviewResponse,
   TrainingStatusCode,
   TrendResponse,
 } from "@rai/api-contracts";
 import { Link } from "react-router-dom";
 
-import { AbilityChart } from "../components/AbilityChart.js";
+import { DashboardPerformanceChart } from "../components/DashboardPerformanceChart.js";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { StatusBadge } from "../components/StatusBadge.js";
 import { WorkoutTable } from "../components/WorkoutTable.js";
-import { date, explanation, number, sessionType } from "../format.js";
+import { pace } from "../format.js";
 import { useRemote } from "../hooks.js";
-import { ArrowRight, Pulse, TrendDown, TrendUp } from "../icons.js";
+import {
+  ArrowRight,
+  ChartBar,
+  Heartbeat,
+  Pulse,
+  Timer,
+} from "../icons.js";
 
 export function DashboardPage() {
   const dashboard = useRemote<DashboardResponse>("/v1/dashboard");
@@ -28,35 +37,29 @@ export function DashboardPage() {
         onRetry={() => void dashboard.reload()}
       />
     );
+
   const data = dashboard.data;
-  const gv = data.latestSnapshot?.growthVelocityPerWeek ?? null;
-  const weekChange = data.latestSnapshot?.changeFrom7DaysAgo ?? null;
   const latest = data.latestWorkout;
-  const caGap =
-    latest?.currentAbility !== null &&
-    latest?.currentAbility !== undefined &&
-    data.latestSnapshot?.trueAbility !== null &&
-    data.latestSnapshot?.trueAbility !== undefined
-      ? latest.currentAbility - data.latestSnapshot.trueAbility
+  const dimensions = data.dimensions;
+  const status = statistics.data?.status ?? null;
+  const rolling = statistics.data?.rolling28Days ?? null;
+  const paceDelta =
+    latest?.averagePaceSecondsPerKm !== null &&
+    latest?.averagePaceSecondsPerKm !== undefined &&
+    rolling?.averagePaceSecondsPerKm !== null &&
+    rolling?.averagePaceSecondsPerKm !== undefined
+      ? latest.averagePaceSecondsPerKm - rolling.averagePaceSecondsPerKm
       : null;
-  const calibration = data.calibration;
+  const loadDelta =
+    status && status.previous7dLoad > 0
+      ? (status.current7dLoad - status.previous7dLoad) / status.previous7dLoad
+      : null;
+
   return (
-    <div className="page dashboard-page">
-      <header className="page-header split">
-        <div>
-          <h1>你的跑步能力</h1>
-          <p>区分单次发挥和长期训练水平。</p>
-        </div>
-        <div className="dashboard-header-actions">
-          <div className="model-chip">
-            <span>Active model</span>
-            <b>{data.activeModel?.modelVersion ?? "未激活"}</b>
-            <small>{data.latestSnapshot?.localDate ?? "--"}</small>
-          </div>
-          <Link to="/data" className="button secondary">
-            导入更新
-          </Link>
-        </div>
+    <div className="page dashboard-page dashboard-reference-layout">
+      <header className="page-header dashboard-reference-header">
+        <span className="dashboard-runner-mark" aria-hidden="true" />
+        <h1>你的跑步能力</h1>
       </header>
 
       {data.runningJob ? (
@@ -64,159 +67,78 @@ export function DashboardPage() {
           <Pulse size={20} />
           <span>
             <b>模型正在重算</b>
-            <small>继续展示当前 active Run，完成后自动切换。</small>
+            <small>继续展示当前结果，完成后自动切换。</small>
           </span>
           <StatusBadge value={data.runningJob.status} />
         </div>
       ) : null}
-      {calibration.status !== "completed" ? (
-        <section className="panel calibration-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>
-                {calibration.status === "not_started"
-                  ? "等待校准数据"
-                  : "真实跑力正在校准"}
-              </h2>
-              <p>
-                模型当前以有效训练次数和时间跨度建立个人基准；时长与高覆盖心率作为质量参考。
-              </p>
-            </div>
-            <StatusBadge value="calibrating" />
-          </div>
-          <div className="calibration-grid">
-            <span>
-              <small>有效训练</small>
-              <b>
-                {calibration.eligibleSessions} /{" "}
-                {calibration.requirements.sessions}
-              </b>
-            </span>
-            <span>
-              <small>累计时长</small>
-              <b>
-                {Math.round(calibration.eligibleDurationMinutes)} /{" "}
-                {calibration.requirements.durationMinutes} 分
-              </b>
-            </span>
-            <span>
-              <small>覆盖跨度</small>
-              <b>
-                {calibration.spanDays} / {calibration.requirements.spanDays} 天
-              </b>
-            </span>
-            <span>
-              <small>高心率覆盖</small>
-              <b>
-                {calibration.highCoverageSessions} /{" "}
-                {calibration.requirements.highCoverageSessions}
-              </b>
-            </span>
-          </div>
-        </section>
-      ) : null}
 
-      <section className="hero-metrics" aria-label="能力概览">
-        <article className="metric-primary">
-          <span>真实跑力 / TA</span>
-          <strong>{number(data.latestSnapshot?.trueAbility ?? null)}</strong>
-          <small>
-            {data.latestSnapshot?.decayPoints
-              ? `含 ${number(data.latestSnapshot.decayPoints)} 点停跑衰减`
-              : weekChange === null
-                ? "长期训练能力"
-                : `较 7 天前 ${weekChange >= 0 ? "+" : ""}${weekChange.toFixed(2)}`}
-          </small>
-        </article>
-        <article className="metric-ca">
-          <span>最新即时能力 / CA</span>
-          <strong>{number(latest?.currentAbility ?? null)}</strong>
-          <small>
-            {latest
-              ? `${date(latest.startedAt)} · ${sessionType(latest.sessionType)}${caGap === null ? "" : ` · 比 TA ${caGap >= 0 ? "+" : ""}${caGap.toFixed(2)}`}`
-              : "暂无有效训练"}
-          </small>
-        </article>
-        <article className="metric-support">
-          <span>成长速度 / GV</span>
-          <strong>
-            {gv === null ? "--" : `${gv >= 0 ? "+" : ""}${gv.toFixed(2)}`}
-          </strong>
-          <small>每周能力点</small>
-          {gv !== null && gv >= 0 ? (
-            <TrendUp size={28} />
-          ) : (
-            <TrendDown size={28} />
-          )}
-        </article>
-        <article className="metric-support">
-          <span>当前模型样本</span>
-          <strong>
-            {data.activeModel?.featureCount ?? data.totals.sessions}
-          </strong>
-          <small>
-            {data.totals.eligible} 有效 · {data.totals.trial} 试算 ·{" "}
-            {data.totals.excluded} 排除
-          </small>
-        </article>
+      <section className="dashboard-capability-grid" aria-label="跑步能力概览">
+        <CapabilityCard
+          tone="pace"
+          icon={<Timer size={50} />}
+          label="有氧配速"
+          value={pace(latest?.averagePaceSecondsPerKm ?? null)}
+          unit="/km"
+          delta={
+            paceDelta === null
+              ? "最近一次有效训练"
+              : `${paceDelta <= 0 ? "快" : "慢"} ${formatSeconds(Math.abs(paceDelta))}，较 28 天均值`
+          }
+        />
+        <CapabilityCard
+          tone="endurance"
+          icon={<Heartbeat size={50} />}
+          label="有氧耐力"
+          value={score(dimensions?.stability)}
+          unit="/100"
+          delta="来自最近一次训练的稳定性评分"
+        />
+        <CapabilityCard
+          tone="intensity"
+          icon={<ChartBar size={50} />}
+          label="训练强度"
+          value={score(status?.current7dLoad)}
+          unit=""
+          delta={
+            loadDelta === null
+              ? "最近 7 日综合训练负荷"
+              : `${loadDelta >= 0 ? "+" : ""}${Math.round(loadDelta * 100)}%，较前 7 日`
+          }
+        />
+        <CapabilityCard
+          tone="recovery"
+          icon={<Pulse size={50} />}
+          label="恢复程度"
+          value={score(dimensions?.recovery)}
+          unit="/100"
+          delta={
+            status?.recoveryEvidence === null ||
+            status?.recoveryEvidence === undefined
+              ? "等待恢复证据"
+              : `恢复证据 ${Math.round(status.recoveryEvidence * 100)}%`
+          }
+        />
       </section>
 
-      {statistics.data?.week ? (
-        <Link
-          to="/statistics"
-          className="training-summary-band"
-          aria-label="查看运动统计"
-        >
-          <span>
-            <small>本周跑量</small>
-            <b>{(statistics.data.week.distanceMeters / 1_000).toFixed(1)} km</b>
-            <em>
-              {statistics.data.week.comparison?.distanceChangeFraction ===
-                null ||
-              statistics.data.week.comparison?.distanceChangeFraction ===
-                undefined
-                ? "--"
-                : `${statistics.data.week.comparison.distanceChangeFraction >= 0 ? "+" : ""}${Math.round(statistics.data.week.comparison.distanceChangeFraction * 100)}%`}
-            </em>
-          </span>
-          <span>
-            <small>训练状态</small>
-            <b>
-              {trainingStatusLabel(
-                statistics.data.status?.trainingStatus ?? "insufficient_data",
-              )}
-            </b>
-            <em>
-              负荷置信度{" "}
-              {statistics.data.statusConfidence === null
-                ? "--"
-                : `${Math.round(statistics.data.statusConfidence * 100)}%`}
-            </em>
-          </span>
-          <span>
-            <small>最近 7 日负荷</small>
-            <b>{Math.round(statistics.data.status?.current7dLoad ?? 0)}</b>
-            <em>
-              负荷比 {statistics.data.status?.loadRatio?.toFixed(2) ?? "--"}
-            </em>
-          </span>
-          <ArrowRight size={18} />
-        </Link>
-      ) : null}
-
-      <section className="dashboard-grid">
-        <article className="panel trend-panel">
+      <section className="dashboard-reference-grid">
+        <article className="panel dashboard-performance-panel">
           <div className="panel-heading">
             <div>
               <h2>近四周能力</h2>
-              <p>TA 是趋势，CA 是每次训练的即时表现。</p>
+              <p>同一量纲查看耐力稳定性、训练负荷和配速能力。</p>
             </div>
             <Link to="/trends" className="text-link">
-              查看完整趋势 <ArrowRight size={15} />
+              完整趋势 <ArrowRight size={15} />
             </Link>
           </div>
+          <div className="dashboard-performance-legend">
+            <span className="endurance">耐力稳定性</span>
+            <span className="intensity">训练负荷</span>
+            <span className="pace">配速能力</span>
+          </div>
           {trend.data ? (
-            <AbilityChart trend={trend.data} height={285} />
+            <DashboardPerformanceChart trend={trend.data} />
           ) : trend.error ? (
             <ErrorBlock
               message={trend.error}
@@ -225,53 +147,35 @@ export function DashboardPage() {
           ) : (
             <LoadingBlock label="正在读取趋势" />
           )}
-          {trend.data ? (
-            <div className="chart-legend">
-              <span className="ta">TA 真实跑力</span>
-              <span className="ca">CA 即时能力</span>
-            </div>
-          ) : null}
-        </article>
-        <article className="panel explanation-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>本次更新说明</h2>
-              <p>解释当前 CA 与 TA 变化。</p>
-            </div>
-          </div>
-          {data.explanationCodes.length > 0 ? (
-            <ol className="explanation-list">
-              {data.explanationCodes.map((code, index) => (
-                <li key={code}>
-                  <span>{index + 1}</span>
-                  {explanation(code)}
-                </li>
-              ))}
-            </ol>
-          ) : (
-            <p className="muted">暂无可用解释。</p>
-          )}
-          <div className="cardio-note">
-            <b>Cardio {number(data.dimensions?.cardio ?? null)}</b>
+          <div className="dashboard-model-contract">
+            <span>TA 真实跑力</span>
             <span>诊断，不参与当前 CA</span>
           </div>
-          {latest ? (
-            <Link
-              to={`/workouts/${latest.id}`}
-              state={{ from: "/" }}
-              className="button primary full"
-            >
-              查看训练详情
-            </Link>
-          ) : null}
+          <p className="dashboard-performance-note">
+            {performanceSummary(trend.data, status)}
+          </p>
         </article>
+
+        {statistics.error ? (
+          <ErrorBlock
+            title="训练统计刷新失败"
+            message={statistics.error}
+            onRetry={() => void statistics.reload()}
+          />
+        ) : statistics.loading && !statistics.data ? (
+          <article className="panel dashboard-status-panel">
+            <LoadingBlock label="正在读取训练状态" />
+          </article>
+        ) : (
+          <TrainingStatusPanel status={status} />
+        )}
       </section>
 
-      <section className="panel recent-panel">
+      <section className="panel recent-panel dashboard-recent-panel">
         <div className="panel-heading">
           <div>
             <h2>最近训练</h2>
-            <p>按训练时间倒序，展示 active Model Run 结果。</p>
+            <p>最近六次跑步的结构、配速、心率与评分结果。</p>
           </div>
           <Link to="/workouts" className="text-link">
             全部训练 <ArrowRight size={15} />
@@ -283,15 +187,138 @@ export function DashboardPage() {
   );
 }
 
+function CapabilityCard({
+  tone,
+  icon,
+  label,
+  value,
+  unit,
+  delta,
+}: {
+  tone: string;
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  unit: string;
+  delta: string;
+}) {
+  return (
+    <article className={`dashboard-capability-card ${tone}`}>
+      <span className="capability-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <div>
+        <span className="capability-label">{label}</span>
+        <strong>
+          {value}<small>{unit}</small>
+        </strong>
+        <p>{delta}</p>
+      </div>
+    </article>
+  );
+}
+
+function TrainingStatusPanel({ status }: { status: DailyTrainingMetric | null }) {
+  const code = status?.trainingStatus ?? "insufficient_data";
+  return (
+    <article className={`panel dashboard-status-panel ${code}`}>
+      <div className="panel-heading">
+        <div>
+          <h2>训练状态</h2>
+          <p>综合短期负荷、长期负荷与恢复证据。</p>
+        </div>
+      </div>
+      <div className="dashboard-status-summary">
+        <b>{trainingStatusLabel(code)}</b>
+        <span>{trainingStatusDescription(code)}</span>
+      </div>
+      <div className="dashboard-status-facts">
+        <StatusFact label="短期负荷" value={status ? Math.round(status.current7dLoad) : null} note="最近 7 日" />
+        <StatusFact label="长期负荷" value={status ? Math.round(status.chronicEwma * 7) : null} note="慢性 EWMA" />
+        <StatusFact label="负荷比" value={status?.loadRatio ?? null} note={loadRatioNote(status?.loadRatio ?? null)} decimals={2} />
+        <StatusFact label="恢复证据" value={status?.recoveryEvidence === null || status?.recoveryEvidence === undefined ? null : status.recoveryEvidence * 100} note="可用恢复信号" suffix="%" />
+      </div>
+      <Link to="/statistics" className="button primary full">
+        查看运动统计 <ArrowRight size={15} />
+      </Link>
+    </article>
+  );
+}
+
+function StatusFact({
+  label,
+  value,
+  note,
+  decimals = 0,
+  suffix = "",
+}: {
+  label: string;
+  value: number | null;
+  note: string;
+  decimals?: number;
+  suffix?: string;
+}) {
+  return (
+    <span>
+      <small>{label}</small>
+      <b>{value === null ? "--" : `${value.toFixed(decimals)}${suffix}`}</b>
+      <em>{note}</em>
+    </span>
+  );
+}
+
+function score(value: number | null | undefined): string {
+  return value === null || value === undefined ? "--" : String(Math.round(value));
+}
+
+function formatSeconds(value: number): string {
+  const seconds = Math.max(0, Math.round(value));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function performanceSummary(
+  trend: TrendResponse | null | undefined,
+  status: DailyTrainingMetric | null,
+): string {
+  if (!trend?.workouts.length) return "完成更多有效训练后，这里会显示能力变化。";
+  const first = trend.workouts[0]?.dimensions.stability;
+  const last = trend.workouts.at(-1)?.dimensions.stability;
+  if (first === null || first === undefined || last === null || last === undefined)
+    return "训练趋势已更新，部分维度仍在积累数据。";
+  const direction = last >= first ? "提升" : "回落";
+  const load = status?.loadRatio;
+  return `耐力稳定性较区间首项${direction} ${Math.abs(last - first).toFixed(1)} 分；${load !== null && load !== undefined && load > 1.5 ? "近期负荷偏高，优先安排恢复。" : "当前负荷处于可控范围。"}`;
+}
+
 function trainingStatusLabel(status: TrainingStatusCode): string {
   return (
     {
       insufficient_data: "数据积累中",
-      recovery: "恢复 / 训练减少",
-      maintaining: "负荷维持",
-      effective_stimulus: "有效训练刺激",
-      high_load: "当前负荷较高",
+      recovery: "恢复阶段",
+      maintaining: "状态稳定",
+      effective_stimulus: "训练有效",
+      high_load: "负荷较高",
       attention: "需要关注恢复",
     } as Record<TrainingStatusCode, string>
   )[status];
+}
+
+function trainingStatusDescription(status: TrainingStatusCode): string {
+  return (
+    {
+      insufficient_data: "训练样本不足，继续保持规律记录。",
+      recovery: "近期训练量降低，身体正在恢复。",
+      maintaining: "负荷稳定，适合保持当前训练节奏。",
+      effective_stimulus: "训练刺激充分，恢复与负荷较平衡。",
+      high_load: "负荷上升明显，需要关注睡眠和轻松跑比例。",
+      attention: "急性负荷高于长期基线，建议优先恢复。",
+    } as Record<TrainingStatusCode, string>
+  )[status];
+}
+
+function loadRatioNote(value: number | null): string {
+  if (value === null) return "数据不足";
+  if (value > 1.5) return "偏高";
+  if (value < 0.8) return "偏低";
+  return "适中";
 }

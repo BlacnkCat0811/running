@@ -1,20 +1,27 @@
+import "../pixel-layout.css";
+import "../data-reference.css";
 import type {
   BackupDto,
   DashboardResponse,
+  DatabaseDeletionResponse,
   DataSummaryResponse,
+  HealthResponse,
 } from "@rai/api-contracts";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { api } from "../api.js";
+import { ApiError, api } from "../api.js";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { date } from "../format.js";
 import { useRemote } from "../hooks.js";
 import {
+  Database,
   HardDrives,
   LockKey,
   MapPinLine,
+  PersonSimpleRun,
   ShieldCheck,
+  Timer,
   Warning,
 } from "../icons.js";
 
@@ -24,6 +31,9 @@ const bytes = (value: number): string => {
   if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
   return `${(value / 1024 ** 3).toFixed(2)} GB`;
 };
+
+const mutationResultIsUncertain = (caught: unknown): boolean =>
+  !(caught instanceof ApiError) || caught.status >= 500;
 
 function useDialogFocus(open: boolean, busy: boolean, close: () => void) {
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -57,10 +67,17 @@ function useDialogFocus(open: boolean, busy: boolean, close: () => void) {
       }
       if (event.key !== "Tab") return;
       const items = focusable();
-      if (items.length === 0) return;
+      if (items.length === 0) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
       const first = items[0]!;
       const last = items.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
+      if (!dialog?.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last?.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -71,7 +88,10 @@ function useDialogFocus(open: boolean, busy: boolean, close: () => void) {
     document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      previousFocusRef.current?.focus();
+      const previousFocus = previousFocusRef.current;
+      if (previousFocus?.isConnected && !(previousFocus instanceof HTMLButtonElement && previousFocus.disabled)) {
+        previousFocus.focus();
+      }
       previousFocusRef.current = null;
     };
   }, [open]);
@@ -99,8 +119,12 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   const [restoreTarget, setRestoreTarget] = useState<BackupDto | null>(null);
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [backupDeleteTarget, setBackupDeleteTarget] = useState<BackupDto | null>(null);
+  const [backupDeleteError, setBackupDeleteError] = useState<string | null>(null);
   const deleteErrorRef = useRef<HTMLParagraphElement>(null);
   const restoreErrorRef = useRef<HTMLParagraphElement>(null);
+  const backupDeleteErrorRef = useRef<HTMLParagraphElement>(null);
+  const successRef = useRef<HTMLDivElement>(null);
   const hasDatabase = databaseReady && !deleted;
   const closeDeleteDialog = () => {
     setConfirmOpen(false);
@@ -112,6 +136,10 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     setRestoreConfirmation("");
     setRestoreError(null);
   };
+  const closeBackupDeleteDialog = () => {
+    setBackupDeleteTarget(null);
+    setBackupDeleteError(null);
+  };
   const [deleteDialogRef, rememberDeleteFocus] = useDialogFocus(
     confirmOpen,
     busy,
@@ -122,6 +150,16 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     busy,
     closeRestoreDialog,
   );
+  const [backupDeleteDialogRef, rememberBackupDeleteFocus] = useDialogFocus(
+    Boolean(backupDeleteTarget),
+    busy,
+    closeBackupDeleteDialog,
+  );
+
+  useEffect(() => {
+    if (!success || busy || confirmOpen || restoreTarget || backupDeleteTarget) return;
+    successRef.current?.focus();
+  }, [success, busy, confirmOpen, restoreTarget, backupDeleteTarget]);
 
   const createBackup = async () => {
     setBusy(true);
@@ -141,20 +179,23 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     }
   };
 
-  const deleteBackup = async (backup: BackupDto) => {
-    if (!window.confirm(`确认永久删除本地备份 ${backup.name}？`)) return;
+  const deleteBackup = async () => {
+    if (!backupDeleteTarget) return;
     setBusy(true);
+    setBackupDeleteError(null);
     setError(null);
     setSuccess(null);
     try {
       await api<{ deleted: boolean; backup: BackupDto }>(
-        `/v1/backups/${encodeURIComponent(backup.name)}`,
+        `/v1/backups/${encodeURIComponent(backupDeleteTarget.name)}`,
         { method: "DELETE" },
       );
-      setSuccess(`备份已删除：${backup.name}`);
+      setSuccess(`备份已删除：${backupDeleteTarget.name}`);
+      closeBackupDeleteDialog();
       await backups.reload();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "无法删除备份");
+      setBackupDeleteError(caught instanceof Error ? caught.message : "无法删除备份");
+      requestAnimationFrame(() => backupDeleteErrorRef.current?.focus());
     } finally {
       setBusy(false);
     }
@@ -165,7 +206,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     setDeleteError(null);
     setSuccess(null);
     try {
-      const result = await api<{ deleted: boolean; backup: BackupDto }>(
+      const result = await api<DatabaseDeletionResponse>(
         "/v1/database",
         {
           method: "DELETE",
@@ -175,9 +216,33 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
       setDeleted(result.deleted);
       window.dispatchEvent(new Event("rai:database-state-changed"));
       closeDeleteDialog();
-      setSuccess(`本地数据库已删除；删除前备份：${result.backup.name}`);
+      setSuccess(
+        result.preservation.kind === "backup"
+          ? `本地数据库已删除；可恢复的删除前备份：${result.preservation.backup.name}`
+          : `本地数据库已删除；损坏数据库已隔离，仅供取证，不能直接恢复：${result.preservation.snapshot.name}`,
+      );
       await backups.reload();
     } catch (caught) {
+      if (mutationResultIsUncertain(caught)) {
+        let health: HealthResponse;
+        try {
+          health = await api<HealthResponse>("/v1/health");
+        } catch (healthError) {
+          setDeleteError(
+            `无法确认删除结果：${healthError instanceof Error ? healthError.message : "无法读取数据库状态"}`,
+          );
+          requestAnimationFrame(() => deleteErrorRef.current?.focus());
+          return;
+        }
+        window.dispatchEvent(new Event("rai:database-state-changed"));
+        if (!health.databaseReady) {
+          setDeleted(true);
+          closeDeleteDialog();
+          setSuccess("本地数据库已删除；连接中断后已通过运行状态确认。");
+          void backups.reload();
+          return;
+        }
+      }
       setDeleteError(caught instanceof Error ? caught.message : "无法删除本地数据库");
       requestAnimationFrame(() => deleteErrorRef.current?.focus());
     } finally {
@@ -208,6 +273,35 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
       window.dispatchEvent(new Event("rai:data-updated"));
       await backups.reload();
     } catch (caught) {
+      if (mutationResultIsUncertain(caught)) {
+        let health: HealthResponse;
+        try {
+          health = await api<HealthResponse>("/v1/health");
+        } catch (healthError) {
+          setRestoreError(
+            `无法确认恢复结果：${healthError instanceof Error ? healthError.message : "无法读取数据库状态"}`,
+          );
+          requestAnimationFrame(() => restoreErrorRef.current?.focus());
+          return;
+        }
+        window.dispatchEvent(new Event("rai:database-state-changed"));
+        if (health.databaseReady && !databaseReady) {
+          const restoredName = restoreTarget.name;
+          setDeleted(false);
+          closeRestoreDialog();
+          setSuccess(`已恢复备份：${restoredName}；连接中断后已通过运行状态确认。`);
+          window.dispatchEvent(new Event("rai:data-updated"));
+          void backups.reload();
+          return;
+        }
+        if (health.databaseReady) {
+          setRestoreError("数据库当前可用，但无法确认是否已切换到所选备份；页面状态已刷新，请核对数据后再操作。");
+          window.dispatchEvent(new Event("rai:data-updated"));
+          void backups.reload();
+          requestAnimationFrame(() => restoreErrorRef.current?.focus());
+          return;
+        }
+      }
       setRestoreError(caught instanceof Error ? caught.message : "无法恢复备份");
       requestAnimationFrame(() => restoreErrorRef.current?.focus());
     } finally {
@@ -218,12 +312,14 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   return (
     <div className="page settings-page">
       <header className="page-header">
-        <h1>设置</h1>
-        <p>当前版本为单用户、本地优先的个人工具。</p>
+        <div className="header-title-with-icon"><HardDrives size={54} /><div>
+          <h1>设置</h1>
+          <p>当前版本为单用户、本地优先的个人工具。</p>
+        </div></div>
       </header>
       {error ? <ErrorBlock message={error} /> : null}
       {success ? (
-        <div className="success-message">
+        <div className="success-message" ref={successRef} tabIndex={-1}>
           <ShieldCheck size={18} />
           <span>{success}</span>
         </div>
@@ -284,28 +380,34 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
         ) : (
           <div className="summary-metrics">
             <span>
+              <Database aria-hidden="true" />
               <small>健康记录</small>
               <b>{summary.data.counts.healthRecords.toLocaleString("zh-CN")}</b>
             </span>
             <span>
+              <PersonSimpleRun aria-hidden="true" />
               <small>原始训练</small>
               <b>{summary.data.counts.workouts.toLocaleString("zh-CN")}</b>
             </span>
             <span>
+              <ShieldCheck aria-hidden="true" />
               <small>真实训练 Session</small>
               <b>
                 {summary.data.counts.trainingSessions.toLocaleString("zh-CN")}
               </b>
             </span>
             <span>
+              <MapPinLine aria-hidden="true" />
               <small>路线点</small>
               <b>{summary.data.counts.routePoints.toLocaleString("zh-CN")}</b>
             </span>
             <span>
+              <Timer aria-hidden="true" />
               <small>当前评分</small>
               <b>{summary.data.counts.assessments.toLocaleString("zh-CN")}</b>
             </span>
             <span>
+              <LockKey aria-hidden="true" />
               <small>数据集版本</small>
               <b className="dataset-value">
                 {summary.data.datasetVersion ?? "--"}
@@ -366,7 +468,11 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
                     className="text-button"
                     disabled={busy}
                     aria-label={`删除备份 ${backup.name}`}
-                    onClick={() => void deleteBackup(backup)}
+                    onClick={() => {
+                      rememberBackupDeleteFocus();
+                      setBackupDeleteTarget(backup);
+                      setBackupDeleteError(null);
+                    }}
                   >
                     删除
                   </button>
@@ -444,8 +550,8 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           <span>
             <h2>删除本地 RAI 数据</h2>
             <p>
-              删除当前 SQLite 及 WAL
-              文件。系统会先自动创建一份可下载的本机备份，Apple Health
+              删除当前 SQLite 及 WAL 文件。可读取的数据库会先创建可恢复的本机备份；
+              损坏数据库会隔离为仅供取证的快照，不能直接恢复。Apple Health
               原始导出目录不会被修改。
             </p>
           </span>
@@ -492,6 +598,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
         >
           <section
             ref={deleteDialogRef}
+            tabIndex={-1}
             className="confirm-dialog"
             role="dialog"
             aria-modal="true"
@@ -525,7 +632,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
                 disabled={busy || confirmation !== "删除我的 RAI 数据"}
                 onClick={() => void deleteDatabase()}
               >
-                {busy ? "正在备份并删除" : "确认删除"}
+                {busy ? "正在保留并删除" : "确认删除"}
               </button>
             </footer>
           </section>
@@ -542,6 +649,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
         >
           <section
             ref={restoreDialogRef}
+            tabIndex={-1}
             className="confirm-dialog restore-dialog"
             role="dialog"
             aria-modal="true"
@@ -579,6 +687,59 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
                 onClick={() => void restoreBackup()}
               >
                 {busy ? "正在校验并恢复" : "确认恢复"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
+      {backupDeleteTarget ? (
+        <div
+          className="confirm-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy)
+              closeBackupDeleteDialog();
+          }}
+        >
+          <section
+            ref={backupDeleteDialogRef}
+            tabIndex={-1}
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="backup-delete-title"
+            aria-describedby={backupDeleteError ? "backup-delete-error" : undefined}
+          >
+            <Warning size={28} />
+            <h2 id="backup-delete-title">确认删除本地备份</h2>
+            <p>此操作会永久删除该备份文件，无法撤销。</p>
+            <p className="restore-name">{backupDeleteTarget.name}</p>
+            {backupDeleteError ? (
+              <p
+                id="backup-delete-error"
+                ref={backupDeleteErrorRef}
+                className="form-error dialog-error"
+                role="alert"
+                tabIndex={-1}
+              >
+                {backupDeleteError}
+              </p>
+            ) : null}
+            <footer>
+              <button
+                className="button secondary"
+                disabled={busy}
+                onClick={closeBackupDeleteDialog}
+              >
+                取消
+              </button>
+              <button
+                className="button danger"
+                disabled={busy}
+                autoFocus
+                onClick={() => void deleteBackup()}
+              >
+                {busy ? "正在删除" : "确认删除"}
               </button>
             </footer>
           </section>

@@ -10,8 +10,14 @@ export {
   canonicalizeRunningWorkouts,
   type IncrementalCanonicalizationOptions
 } from "./canonicalize.js";
-export { RaiDatabase } from "./database.js";
+export {
+  RaiDatabase,
+  SEED_CONTENT_HASH,
+  type RaiDatabaseOpenOptions,
+  type RouteImportTarget
+} from "./database.js";
 export { importGpxRoutes } from "./gpx-parser.js";
+export { acquireDatabasePublicationLock } from "@rai/storage-sqlite";
 export {
   diffDataset,
   fingerprintFile,

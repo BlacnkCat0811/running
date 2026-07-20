@@ -8,7 +8,30 @@
     "apps/*"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:node": "node scripts/check-node-version.mjs",
+    "preinstall": "node scripts/check-node-version.mjs",
+    "pretypecheck": "node scripts/check-node-version.mjs",
+    "pretest": "node scripts/check-node-version.mjs",
+    "prebuild": "node scripts/check-node-version.mjs",
+    "predev": "node scripts/check-node-version.mjs",
+    "predev:api": "npm run check:node",
+    "predev:web": "npm run check:node",
+    "prestart": "node scripts/check-node-version.mjs && node scripts/check-web-build.mjs",
+    "presmoke:api": "node scripts/check-node-version.mjs",
+    "predata:import": "npm run check:node",
+    "predata:incremental-import": "npm run check:node",
+    "predata:audit": "npm run check:node",
+    "predata:recompute": "npm run check:node",
+    "predata:refresh-snapshots": "npm run check:node",
+    "predata:analyze": "npm run check:node",
+    "predata:predict": "npm run check:node",
+    "predata:prediction-eval": "npm run check:node",
+    "preml:bootstrap": "npm run check:node",
+    "preml:check": "npm run check:node",
+    "preml:install": "npm run check:node",
+    "preml:test": "npm run check:node",
+    "preml:train": "npm run check:node",
+    "typecheck": "tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts && npm run test -w @rai/web",
     "test:e2e:web": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
     "test:e2e:responsive": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
@@ -18,7 +41,7 @@
     "dev:api": "npm run dev -w @rai/api",
     "dev:web": "npm run dev -w @rai/web",
     "build": "npm run build -w @rai/web",
-    "start": "npm run build && npm run start -w @rai/api",
+    "start": "npm run start -w @rai/api",
     "smoke:api": "node apps/api/test/production-runtime-smoke.mjs",
     "data:import": "tsx packages/health-export-parser/src/cli.ts import",
     "data:incremental-import": "tsx packages/health-export-parser/src/cli.ts incremental-import",
@@ -35,13 +58,18 @@
     "ml:train": "node research/scripts/python-env.mjs --train"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^22.0.0",
     "concurrently": "^9.2.0",
     "playwright-core": "^1.61.1",
     "tsx": "^4.20.0",
     "typescript": "^5.8.0"
   },
   "engines": {
-    "node": ">=24.0.0"
+    "node": ">=22.12.0 <23"
+  },
+  "overrides": {
+    "onnxruntime-node": {
+      "adm-zip": "0.6.0"
+    }
   }
 }

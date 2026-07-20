@@ -1,27 +1,93 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import type { PredictionModelTrainingResult, RaceDistance } from "@rai/contracts";
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 import {
   MAXIMUM_PREDICTION_TRAINING_ATTEMPTS,
+  PredictionAbilityBaselineUnavailableError,
   PredictionModelActivationCompatibilityError,
   PredictionModelService,
   PredictionTrainingInProgressError,
   PredictionTrainingInputError,
   PredictionTrainingPreconditionError
 } from "../src/prediction-model-service.js";
-import { raceResidualFeatureSchemaHash } from "../src/prediction-training-data.js";
-import { verifyAcceptedOnnxArtifact } from "../src/prediction-training-runner.js";
+import {
+  raceResidualFeatureSchemaHash,
+  type RaceResidualTrainingSample
+} from "../src/prediction-training-data.js";
+import {
+  orderedSamples,
+  temporalEventKey,
+  trainingInstantMicros,
+  verifyAcceptedOnnxArtifact,
+  verifyOnnxGoldenVectors
+} from "../src/prediction-training-runner.js";
+import { buildPredictionReportAsync } from "../src/prediction-report.js";
 
 const asOf = "2026-07-11T00:00:00.000Z";
 
+test("normalizes equivalent timezone representations for artifact event identity", () => {
+  assert.equal(
+    temporalEventKey("2026-01-01T00:00:00Z", "2026-01-01T00:30:00Z"),
+    temporalEventKey("2026-01-01T08:00:00+08:00", "2026-01-01T08:30:00+08:00")
+  );
+  assert.throws(() => temporalEventKey("invalid", "2026-01-01T00:30:00Z"));
+});
+
+test("preserves microseconds in normalized training instants and event identity", () => {
+  assert.equal(
+    trainingInstantMicros("2026-01-01T00:00:00.000100Z"),
+    trainingInstantMicros("2026-01-01T08:00:00.000100+08:00")
+  );
+  assert.notEqual(
+    temporalEventKey("2026-01-01T00:00:00.000100Z", "2026-01-01T00:30:00Z"),
+    temporalEventKey("2026-01-01T00:00:00.000900Z", "2026-01-01T00:30:00Z")
+  );
+});
+
+test("orders training samples by absolute instant before sample id", () => {
+  const sample = (sampleId: string, observedAt: string) =>
+    ({ sampleId, observedAt }) as RaceResidualTrainingSample;
+  const ordered = orderedSamples([
+    sample("later", "2026-01-01T00:30:00Z"),
+    sample("earlier-b", "2026-01-01T01:00:00+01:00"),
+    sample("earlier-a", "2026-01-01T00:00:00Z")
+  ]);
+  assert.deepEqual(ordered.map((row) => row.sampleId), ["earlier-a", "earlier-b", "later"]);
+  assert.throws(
+    () => orderedSamples([sample("invalid", "not-an-instant")]),
+    /timezone-qualified ISO 8601/
+  );
+});
+
 async function seedLabeledOutcomes(path: string, count: number): Promise<RaiDatabase> {
   const store = await RaiDatabase.open(path);
+  store.database.exec(`
+    INSERT INTO feature_runs (
+      id, dataset_version, canonical_contract_version, feature_schema_version,
+      feature_config_json, feature_config_hash, status, created_at, completed_at
+    ) VALUES (
+      'prediction-feature-run', 'dataset-1', 'contract-1', 'features-1',
+      '{}', 'feature-config-1', 'succeeded',
+      '2023-12-01T00:00:00.000Z', '2023-12-01T00:00:01.000Z'
+    );
+    INSERT INTO model_runs (
+      id, feature_run_id, dataset_version, model_version, model_config_json,
+      model_config_hash, evaluated_at, status, created_at, completed_at
+    ) VALUES (
+      'prediction-ability-run', 'prediction-feature-run', 'dataset-1', 'ability-1',
+      '{}', 'ability-config-1', '2023-12-01T00:00:00.000Z', 'succeeded',
+      '2023-12-01T00:00:00.000Z', '2023-12-01T00:00:01.000Z'
+    );
+    INSERT INTO active_model_run (singleton, model_run_id, activated_at)
+    VALUES (1, 'prediction-ability-run', '2023-12-01T00:00:02.000Z');
+  `);
   const insertSession = store.database.prepare(`
     INSERT INTO training_sessions (
       id, activity_type, anchor_start_at, anchor_end_at, anchor_distance_km,
@@ -31,9 +97,18 @@ async function seedLabeledOutcomes(path: string, count: number): Promise<RaiData
   const insertOverride = store.database.prepare(`
     INSERT INTO workout_overrides (
       id, training_session_id, revision, session_type, performance_protocol,
-      condition_tags_json
-    ) VALUES (?, ?, 1, 'race', ?, '[]')
+      condition_tags_json, created_at
+    ) VALUES (?, ?, 1, 'race', ?, '[]', '2023-12-31T00:00:00.000Z')
   `);
+  store.database.prepare(`
+    INSERT INTO health_records (
+      id, type, source_name, source_category, unit, value_numeric,
+      start_at, end_at, metadata_json, raw_attributes_json
+    ) VALUES (
+      'prediction-vo2', 'HKQuantityTypeIdentifierVO2Max', 'Watch', 'apple_watch',
+      'mL/min*kg', 50, '2023-12-01T00:00:00.000Z', '2023-12-01T00:00:01.000Z', '{}', '{}'
+    )
+  `).run();
   const fixtures: Array<{ distance: number; protocol: string; seconds: number }> = [
     { distance: 5, protocol: "five_k_time_trial", seconds: 1_500 },
     { distance: 10, protocol: "ten_k_time_trial", seconds: 3_100 },
@@ -63,17 +138,39 @@ function distanceMetrics(sampleCount: number) {
   };
 }
 
-function successfulResult(): PredictionModelTrainingResult {
+function writeArtifact(root: string, label = "test-run"): {
+  artifactPath: string;
+  artifactSha256: string;
+} {
+  const artifactPath = join(
+    root,
+    "var",
+    "model-artifacts",
+    "prediction",
+    label,
+    "attempt-1"
+  );
+  mkdirSync(artifactPath, { recursive: true });
+  const bytes = Buffer.from(`onnx-fixture:${label}`);
+  writeFileSync(join(artifactPath, "model.onnx"), bytes);
+  return {
+    artifactPath,
+    artifactSha256: createHash("sha256").update(bytes).digest("hex")
+  };
+}
+
+function successfulResult(root: string, label = "test-run"): PredictionModelTrainingResult {
+  const artifact = writeArtifact(root, label);
   const byDistance = Object.fromEntries(
     (["five_k", "ten_k", "half_marathon"] as RaceDistance[])
-      .map((distance) => [distance, distanceMetrics(5)])
+      .map((distance) => [distance, distanceMetrics(8)])
   ) as PredictionModelTrainingResult["metrics"]["byDistance"];
   return {
     featureSchemaHash: raceResidualFeatureSchemaHash(),
     trainingDataHash: "b".repeat(64),
     labelCount: 51,
     labelCountByDistance: { five_k: 17, ten_k: 17, half_marathon: 17 },
-    holdoutPredictionCount: 15,
+    holdoutPredictionCount: 24,
     metrics: {
       baselineMaeSeconds: 100,
       modelMaeSeconds: 90,
@@ -81,11 +178,14 @@ function successfulResult(): PredictionModelTrainingResult {
       intervalCoverageChange: 0,
       regressesAnyDistanceByMoreThan5Percent: false,
       onnxMaximumAbsoluteError: 1e-8,
+      maeImprovementBootstrap95Lower: 0.02,
       byDistance
     },
     supportedDistances: ["five_k", "ten_k", "half_marathon"],
-    artifactPath: "var/model-artifacts/prediction/model.onnx",
-    artifactSha256: "c".repeat(64)
+    artifactPath: artifact.artifactPath,
+    artifactSha256: artifact.artifactSha256,
+    evaluationStatus: "accepted",
+    rejectionReasons: []
   };
 }
 
@@ -109,6 +209,114 @@ test("rejects CatBoost training before enough real labeled outcomes exist", asyn
   }
 });
 
+test("preflight counts only labels that can produce historical formula features", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-preflight-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 50);
+  try {
+    store.database.prepare("DELETE FROM health_records WHERE id = 'prediction-vo2'").run();
+    const preflight = new PredictionModelService(store).preflight(asOf);
+    assert.equal(preflight.available, 49);
+    assert.equal(preflight.eligible, false);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("requires an active ability baseline before enqueueing training", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-baseline-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    store.database.prepare("DELETE FROM active_model_run").run();
+    assert.throws(
+      () => new PredictionModelService(store).enqueue({ asOf }),
+      PredictionAbilityBaselineUnavailableError
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("builds the full prediction preflight outside the write transaction", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-lock-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const originalPreflight = service.preflight.bind(service);
+    service.preflight = (cutoff: string) => {
+      assert.equal(store.database.isTransaction, false);
+      return originalPreflight(cutoff);
+    };
+    assert.ok(service.enqueue({ asOf }));
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("does not serve an active residual model before its training cutoff", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-cutoff-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    store.database.prepare(`
+      UPDATE prediction_model_runs
+      SET status = 'succeeded', feature_schema_hash = ?, metrics_json = '{}',
+          supported_distances_json = '["five_k","ten_k","half_marathon"]',
+          artifact_path = 'unused', artifact_sha256 = ?, completed_at = ?
+      WHERE id = ?
+    `).run(raceResidualFeatureSchemaHash(), "a".repeat(64), asOf, runId);
+    store.database.prepare(`
+      INSERT INTO active_prediction_model (singleton, prediction_model_run_id, activated_at)
+      VALUES (1, ?, ?)
+    `).run(runId, asOf);
+
+    const historicalAsOf = "2025-01-01T00:00:00.000Z";
+    const report = await buildPredictionReportAsync(store.database, { asOf: historicalAsOf });
+    assert.equal(report.modelSelection.machineLearning.status, "inference_unavailable");
+    assert.equal(
+      report.snapshot.races.some((race) => race.method === "catboost_residual_v6"),
+      false
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("does not serve an active residual model for a different formula baseline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-serving-baseline-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    store.database.prepare(`
+      UPDATE prediction_model_runs
+      SET status = 'succeeded', feature_schema_hash = ?, ability_baseline_hash = ?,
+          metrics_json = '{}',
+          supported_distances_json = '["five_k","ten_k","half_marathon"]',
+          artifact_path = 'unused', artifact_sha256 = ?, completed_at = ?
+      WHERE id = ?
+    `).run(raceResidualFeatureSchemaHash(), "0".repeat(64), "a".repeat(64), asOf, runId);
+    store.database.prepare(`
+      INSERT INTO active_prediction_model (singleton, prediction_model_run_id, activated_at)
+      VALUES (1, ?, ?)
+    `).run(runId, asOf);
+
+    const report = await buildPredictionReportAsync(store.database, { asOf });
+    assert.equal(report.modelSelection.machineLearning.status, "inference_unavailable");
+    assert.equal(
+      report.snapshot.races.some((race) => race.method === "catboost_residual_v6"),
+      false
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("passes offline gates and atomically activates a completed CatBoost run", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
@@ -119,7 +327,7 @@ test("passes offline gates and atomically activates a completed CatBoost run", a
     assert.equal(service.claimNext()?.id, runId);
     assert.equal(service.get(runId)?.status, "running");
 
-    const completed = service.completeAndActivate(runId, successfulResult());
+    const completed = service.completeAndActivate(runId, successfulResult(root));
     assert.equal(completed.status, "succeeded");
     assert.equal(completed.active, true);
     assert.equal(completed.metrics?.maeImprovement, 0.1);
@@ -162,11 +370,11 @@ test("preserves a runner-rejected result without loading ONNX or replacing the a
     const service = new PredictionModelService(store);
     const acceptedId = service.enqueue({ asOf });
     service.claimNext();
-    service.completeAndActivate(acceptedId, successfulResult());
+    service.completeAndActivate(acceptedId, successfulResult(root, "accepted"));
 
     const rejectedId = service.enqueue({ asOf });
     service.claimNext();
-    const rejectedResult = successfulResult();
+    const rejectedResult = successfulResult(root, "rejected-mae");
     rejectedResult.metrics.maeImprovement = 0.01;
     let onnxVerificationCalls = 0;
     await verifyAcceptedOnnxArtifact("rejected", async () => {
@@ -179,12 +387,111 @@ test("preserves a runner-rejected result without loading ONNX or replacing the a
     assert.equal(rejected.active, false);
     assert.deepEqual(rejected.failure, {
       code: "activation_gate_failed",
-      reasons: ["mae_improvement_below_3_percent"]
+      reasons: ["mae_improvement_below_5_percent"]
     });
     assert.equal(service.get(acceptedId)?.active, true);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses activation when Python evaluationStatus is rejected", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-eval-status-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    const result = successfulResult(root);
+    result.evaluationStatus = "rejected";
+    result.rejectionReasons = ["bootstrap_lower_not_positive"];
+    const completed = service.completeAndActivate(runId, result);
+    assert.equal(completed.status, "rejected");
+    assert.equal(completed.active, false);
+    assert.deepEqual(completed.failure, {
+      code: "activation_gate_failed",
+      reasons: [
+        "evaluation_status_not_accepted",
+        "python:bootstrap_lower_not_positive"
+      ]
+    });
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("refuses activation when artifact hash or root confinement fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-artifact-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    const result = successfulResult(root);
+    result.artifactSha256 = "d".repeat(64);
+    const completed = service.completeAndActivate(runId, result);
+    assert.equal(completed.status, "rejected");
+    assert.ok(
+      (completed.failure as { reasons: string[] }).reasons.includes("artifact_sha256_mismatch")
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects an external artifact path that merely contains the expected directory names", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-artifact-boundary-"));
+  const external = mkdtempSync(join(tmpdir(), "model-artifacts-prediction-external-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    const result = successfulResult(root);
+    const externalArtifact = writeArtifact(external, "model-artifacts/prediction/forged");
+    result.artifactPath = externalArtifact.artifactPath;
+    result.artifactSha256 = externalArtifact.artifactSha256;
+    const completed = service.completeAndActivate(runId, result);
+    assert.equal(completed.status, "rejected");
+    assert.ok((completed.failure as { reasons: string[] }).reasons.includes("artifact_path_outside_root"));
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  }
+});
+
+test("rejects an artifact directory junction that resolves outside the configured root", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-artifact-link-"));
+  const external = mkdtempSync(join(tmpdir(), "rai-prediction-artifact-target-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const result = successfulResult(root, "linked");
+    const externalArtifact = writeArtifact(external, "outside");
+    rmSync(result.artifactPath, { recursive: true, force: true });
+    try {
+      symlinkSync(externalArtifact.artifactPath, result.artifactPath, "junction");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EPERM") {
+        context.skip("junction creation is unavailable in this environment");
+        return;
+      }
+      throw error;
+    }
+    result.artifactSha256 = externalArtifact.artifactSha256;
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    const completed = service.completeAndActivate(runId, result);
+    assert.equal(completed.status, "rejected");
+    assert.ok((completed.failure as { reasons: string[] }).reasons.includes("artifact_path_outside_root"));
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
   }
 });
 
@@ -202,6 +509,32 @@ test("requires Node ONNX verification for runner-accepted artifacts", async () =
   );
 });
 
+test("compares Node ONNX outputs with Python golden vectors", async () => {
+  const vectors = [0, 1, 2].map((index) => ({
+    sampleId: `sample-${index}`,
+    distance: (["five_k", "ten_k", "half_marathon"] as const)[index]!,
+    features: { value: index },
+    targetLogResidual: index / 100,
+    correctionFraction: index / 10,
+    actualSeconds: 1000 + index * 100,
+    baselinePredictedSeconds: 1000,
+    baselineOptimisticSeconds: 900,
+    baselinePessimisticSeconds: 1200
+  }));
+  await verifyOnnxGoldenVectors({
+    predict: async (features) => ({
+      targetLogResidual: Number(features.value) / 100,
+      correctionFraction: Number(features.value) / 10
+    })
+  }, { toleranceExclusive: 1e-6, scope: "release_holdout", vectors });
+  await assert.rejects(
+    verifyOnnxGoldenVectors({
+      predict: async () => ({ targetLogResidual: 1, correctionFraction: 0 })
+    }, { toleranceExclusive: 1e-6, scope: "release_holdout", vectors }),
+    /Node ONNX golden parity/
+  );
+});
+
 test("rejects a result built for a different feature schema", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-schema-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
@@ -209,7 +542,7 @@ test("rejects a result built for a different feature schema", async () => {
     const service = new PredictionModelService(store);
     const runId = service.enqueue({ asOf });
     service.claimNext();
-    const result = successfulResult();
+    const result = successfulResult(root);
     result.featureSchemaHash = "a".repeat(64);
     const completed = service.completeAndActivate(runId, result);
     assert.equal(completed.status, "rejected");
@@ -231,12 +564,12 @@ test("preserves stored model versions and refuses to activate incompatible histo
     const service = new PredictionModelService(store);
     const historicalId = service.enqueue({ asOf });
     service.claimNext();
-    service.completeAndActivate(historicalId, successfulResult());
+    service.completeAndActivate(historicalId, successfulResult(root, "historical"));
     const historical = service.get(historicalId)!;
 
     const currentId = service.enqueue({ asOf });
     service.claimNext();
-    service.completeAndActivate(currentId, successfulResult());
+    service.completeAndActivate(currentId, successfulResult(root, "current"));
 
     const assertActivationRejected = (
       column: "model_version" | "feature_schema_version" | "feature_schema_hash",
@@ -280,6 +613,81 @@ test("preserves stored model versions and refuses to activate incompatible histo
   }
 });
 
+test("refuses to reactivate a residual after the ability baseline changes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-baseline-drift-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    service.completeAndActivate(runId, successfulResult(root, "baseline-drift"));
+    assert.match(service.get(runId)?.abilityBaselineHash ?? "", /^[a-f0-9]{64}$/);
+
+    store.database.exec(`
+      DELETE FROM active_prediction_model;
+      UPDATE model_runs SET model_config_hash = 'ability-config-2'
+      WHERE id = 'prediction-ability-run';
+    `);
+    assert.throws(
+      () => service.activate(runId),
+      (error: unknown) =>
+        error instanceof PredictionModelActivationCompatibilityError &&
+        error.reasons.includes("ability_baseline_mismatch")
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("treats a legacy NULL baseline and a missing active baseline as incompatible", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-null-baseline-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    service.completeAndActivate(runId, successfulResult(root, "null-baseline"));
+    store.database.prepare(`
+      UPDATE prediction_model_runs SET ability_baseline_hash = NULL WHERE id = ?
+    `).run(runId);
+    store.database.exec("DELETE FROM active_prediction_model; DELETE FROM active_model_run;");
+
+    assert.throws(
+      () => service.activate(runId),
+      (error: unknown) =>
+        error instanceof PredictionModelActivationCompatibilityError &&
+        error.reasons.includes("ability_baseline_mismatch")
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects a completed training result if its ability baseline changed in flight", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-inflight-baseline-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    store.database.prepare(`
+      UPDATE model_runs SET model_config_hash = 'ability-config-2'
+      WHERE id = 'prediction-ability-run'
+    `).run();
+
+    const completed = service.completeAndActivate(runId, successfulResult(root, "inflight-baseline"));
+    assert.equal(completed.status, "rejected");
+    assert.ok(
+      (completed.failure as { reasons: string[] }).reasons.includes("ability_baseline_mismatch")
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("cancels a queued model without invoking a trainer", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
@@ -303,11 +711,34 @@ test("enqueues idempotently and rejects a conflicting concurrent training reques
     const runId = service.enqueue({ asOf });
     assert.equal(service.enqueue({ asOf }), runId);
     assert.equal(service.list().length, 1);
+    assert.equal(service.claimNext("worker_token_idempotent")?.id, runId);
+    assert.equal(service.enqueue({ asOf }), runId);
+    assert.equal(service.get(runId)?.status, "running");
     assert.throws(
       () => service.enqueue({ asOf: "2026-07-10T00:00:00.000Z" }),
       (error: unknown) => error instanceof PredictionTrainingInProgressError &&
         error.existingRunId === runId
     );
+    assert.equal(service.list().length, 1);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retries an implicit-asOf enqueue by returning any active training run", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    const runId = service.enqueue({ asOf });
+    assert.equal(service.enqueue({}), runId);
+    assert.equal(service.claimNext("worker_token_implicit_retry")?.id, runId);
+    assert.equal(service.enqueue({}), runId);
+    store.database.prepare(
+      "UPDATE prediction_model_runs SET status = 'validating' WHERE id = ?"
+    ).run(runId);
+    assert.equal(service.enqueue({}), runId);
     assert.equal(service.list().length, 1);
   } finally {
     store.close();
@@ -323,6 +754,11 @@ test("requires a strict timezone-qualified ISO timestamp", async () => {
     assert.throws(
       () => service.preflight("July 11, 2026"),
       (error: unknown) => error instanceof PredictionTrainingInputError
+    );
+    assert.throws(
+      () => service.enqueue({ asOf: "2999-01-01T00:00:00.000Z" }),
+      (error: unknown) => error instanceof PredictionTrainingInputError &&
+        /future/.test(error.message)
     );
   } finally {
     store.close();
@@ -389,7 +825,7 @@ test("honors cancellation before activation and keeps terminal operations idempo
     assert.equal(service.requestCancellation(runId), "requested");
     const completed = service.completeAndActivate(
       runId,
-      successfulResult(),
+      successfulResult(root),
       "worker_token_cancel"
     );
     assert.equal(completed.status, "cancelled");

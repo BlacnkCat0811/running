@@ -114,8 +114,9 @@ export function classifySource(
   return "other";
 }
 
+/** Normalize export-relative paths; lowercase so UNIQUE(relative_path) matches GPX lookups. */
 export function normalizeRelativePath(value: string): string {
-  return value.replaceAll("\\", "/").replace(/^\/+/, "");
+  return value.replaceAll("\\", "/").replace(/^\/+/, "").toLowerCase();
 }
 
 export function distanceToKilometers(

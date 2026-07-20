@@ -1,7 +1,9 @@
-import { randomUUID } from "node:crypto";
-
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
   CATBOOST_PREDICTION_MODEL_VERSION,
+  PREDICTION_CORRECTION_CAP_FRACTION,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
   type PredictionModelEvent,
   type PredictionModelEvaluationMetrics,
@@ -10,22 +12,45 @@ import {
   type PredictionModelTrainingResult,
   type RaceDistance
 } from "@rai/contracts";
-import type { RaiDatabase } from "@rai/health-export-parser";
+import type { DatabaseSync } from "node:sqlite";
 
-import { loadLabeledRaceOutcomes } from "./prediction-data.js";
-import { raceResidualFeatureSchemaHash } from "./prediction-training-data.js";
+import {
+  buildRaceResidualTrainingDataset,
+  raceResidualFeatureSchemaHash
+} from "./prediction-training-data.js";
+import { currentAbilityBaselineHash } from "./prediction-ability-baseline.js";
+
+export { currentAbilityBaselineHash } from "./prediction-ability-baseline.js";
 
 const distances: RaceDistance[] = ["five_k", "ten_k", "half_marathon"];
+
+function sanitizeClientFacingError(message: string): string {
+  const withoutPaths = message
+    .replace(/[A-Za-z]:\\[^\s"']+/g, "[path]")
+    .replace(/\/(?:Users|home|var|tmp|private)[^\s"']*/g, "[path]")
+    .replace(/\\/g, "/");
+  if (withoutPaths.length > 240) return `${withoutPaths.slice(0, 240)}…`;
+  return withoutPaths || "预测训练失败";
+}
+
 export const MINIMUM_PREDICTION_LABELS = 50;
 export const MINIMUM_LABELS_PER_DISTANCE = 8;
-export const MINIMUM_HOLDOUT_PREDICTIONS = 15;
-export const MINIMUM_HOLDOUTS_PER_DISTANCE = 3;
-export const MINIMUM_MAE_IMPROVEMENT = 0.03;
+export const MINIMUM_ARTIFACT_TRAINING_LABELS = 24;
+export const MINIMUM_ARTIFACT_TRAINING_LABELS_PER_DISTANCE = 4;
+export const MINIMUM_HOLDOUT_PREDICTIONS = 24;
+export const MINIMUM_HOLDOUTS_PER_DISTANCE = 6;
+export const MINIMUM_WALK_FORWARD_PREDICTIONS = 12;
+export const MINIMUM_WALK_FORWARD_PER_DISTANCE = 3;
+export const MINIMUM_MAE_IMPROVEMENT = 0.05;
 export const MAXIMUM_DISTANCE_MAE_REGRESSION = 0.05;
 export const MAXIMUM_INTERVAL_COVERAGE_DROP = 0.05;
 export const ONNX_PARITY_TOLERANCE = 1e-6;
-export const PREDICTION_CORRECTION_CAP_FRACTION = 0.12;
-export const WALK_FORWARD_INITIAL_TRAINING_SIZE = 30;
+export { PREDICTION_CORRECTION_CAP_FRACTION } from "@rai/contracts";
+export const WALK_FORWARD_INITIAL_TRAINING_SIZE = 12;
+export const RELEASE_HOLDOUT_EMBARGO_HOURS = 24;
+export const RELEASE_BOOTSTRAP_ITERATIONS = 2000;
+export const RELEASE_BOOTSTRAP_BLOCK_EVENTS = 3;
+export const MINIMUM_RELEASE_BOOTSTRAP_BLOCKS = 6;
 
 export const CATBOOST_V1_HYPERPARAMETERS = {
   loss_function: "RMSE",
@@ -45,6 +70,7 @@ interface PredictionModelRunRow {
   modelVersion: string;
   featureSchemaVersion: string;
   featureSchemaHash: string | null;
+  abilityBaselineHash: string | null;
   trainingDataHash: string | null;
   trainingDataThroughAt: string;
   hyperparametersJson: string;
@@ -107,6 +133,14 @@ export class PredictionTrainingInputError extends Error {
   readonly code = "invalid_prediction_training_input" as const;
 }
 
+export class PredictionAbilityBaselineUnavailableError extends Error {
+  readonly code = "prediction_ability_baseline_unavailable" as const;
+
+  constructor() {
+    super("An active ability model is required before prediction model training");
+  }
+}
+
 export class PredictionModelActivationCompatibilityError extends Error {
   readonly code = "prediction_model_incompatible" as const;
 
@@ -114,7 +148,8 @@ export class PredictionModelActivationCompatibilityError extends Error {
     readonly reasons: Array<
       "model_version_mismatch" |
       "feature_schema_version_mismatch" |
-      "feature_schema_hash_mismatch"
+      "feature_schema_hash_mismatch" |
+      "ability_baseline_mismatch"
     >
   ) {
     super(`预测模型与当前推理版本不兼容：${reasons.join(", ")}`);
@@ -127,7 +162,11 @@ export const PREDICTION_MODEL_LEASE_TIMEOUT_MS = 30_000;
 export const MAXIMUM_PREDICTION_TRAINING_ATTEMPTS = 3;
 
 export interface EnqueuePredictionTrainingInput {
-  asOf: string;
+  asOf?: string;
+}
+
+interface PredictionModelStore {
+  database: DatabaseSync;
 }
 
 export interface PredictionModelTrainer {
@@ -163,21 +202,54 @@ function finite(value: number): boolean {
   return Number.isFinite(value);
 }
 
+function predictionTrainingSourceFingerprint(database: DatabaseSync): string {
+  const dataVersion = database.prepare("PRAGMA data_version").get() as unknown as {
+    data_version: number;
+  };
+  const row = database.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM training_sessions) AS sessionCount,
+      (SELECT MAX(anchor_end_at) FROM training_sessions) AS latestSessionAt,
+      (SELECT COUNT(*) FROM health_records) AS healthRecordCount,
+      (SELECT MAX(end_at) FROM health_records) AS latestHealthRecordAt,
+      (SELECT COUNT(*) FROM workout_overrides) AS overrideCount,
+      (SELECT MAX(created_at || ':' || revision) FROM workout_overrides) AS latestOverride,
+      (SELECT model_run_id FROM active_model_run WHERE singleton = 1) AS activeModelRunId
+  `).get() as unknown as Record<string, unknown>;
+  return JSON.stringify({ dataVersion: dataVersion.data_version, ...row });
+}
+
 export class PredictionModelService {
-  constructor(private readonly store: RaiDatabase) {}
+  private readonly artifactRoot: string;
+
+  constructor(
+    private readonly store: PredictionModelStore,
+    artifactRoot?: string
+  ) {
+    const main = store.database.prepare("PRAGMA database_list").all()
+      .find((row) => (row as { name?: unknown }).name === "main") as { file?: unknown } | undefined;
+    const databaseDirectory = dirname(String(main?.file ?? resolve("var", "rai.sqlite")));
+    const runtimeVar = basename(databaseDirectory).toLowerCase() === "var"
+      ? databaseDirectory
+      : resolve(databaseDirectory, "var");
+    this.artifactRoot = resolve(artifactRoot ?? runtimeVar, artifactRoot ? "" : "model-artifacts/prediction");
+  }
 
   preflight(asOf: string): PredictionTrainingPreflight {
     if (!isIsoDate(asOf)) {
       throw new PredictionTrainingInputError("asOf 必须是带时区的有效 ISO 8601 时间");
     }
-    const outcomes = loadLabeledRaceOutcomes(this.store.database, asOf);
+    if (Date.parse(asOf) > Date.now()) {
+      throw new PredictionTrainingInputError("asOf must not be in the future");
+    }
+    const samples = buildRaceResidualTrainingDataset(this.store.database, asOf).samples;
     const availableByDistance = emptyDistanceCounts();
-    for (const outcome of outcomes) availableByDistance[outcome.distance] += 1;
+    for (const sample of samples) availableByDistance[sample.distance] += 1;
     return {
-      available: outcomes.length,
+      available: samples.length,
       availableByDistance,
       eligible:
-        outcomes.length >= MINIMUM_PREDICTION_LABELS &&
+        samples.length >= MINIMUM_PREDICTION_LABELS &&
         distances.every(
           (distance) => availableByDistance[distance] >= MINIMUM_LABELS_PER_DISTANCE
         )
@@ -185,10 +257,32 @@ export class PredictionModelService {
   }
 
   enqueue(input: EnqueuePredictionTrainingInput): string {
-    const preflight = this.preflight(input.asOf);
-    if (!preflight.eligible) throw new PredictionTrainingPreconditionError(preflight);
     const id = `prediction_model_${randomUUID()}`;
     const now = new Date().toISOString();
+    const asOf = input.asOf ?? now;
+    if (!isIsoDate(asOf)) {
+      throw new PredictionTrainingInputError("asOf must be a valid timezone-qualified ISO 8601 timestamp");
+    }
+    const existingBeforePreflight = this.store.database.prepare(`
+      SELECT id, training_data_through_at AS trainingDataThroughAt
+      FROM prediction_model_runs
+      WHERE status IN ('queued', 'running', 'validating')
+      ORDER BY created_at, id
+      LIMIT 1
+    `).get() as unknown as { id: string; trainingDataThroughAt: string } | undefined;
+    if (existingBeforePreflight) {
+      if (input.asOf === undefined || existingBeforePreflight.trainingDataThroughAt === asOf) {
+        return existingBeforePreflight.id;
+      }
+      throw new PredictionTrainingInProgressError(existingBeforePreflight.id);
+    }
+    const sourceFingerprint = predictionTrainingSourceFingerprint(this.store.database);
+    const preflight = this.preflight(asOf);
+    if (!preflight.eligible) throw new PredictionTrainingPreconditionError(preflight);
+    const abilityBaselineHash = currentAbilityBaselineHash(this.store.database);
+    if (abilityBaselineHash === null) {
+      throw new PredictionAbilityBaselineUnavailableError();
+    }
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
       const existing = this.store.database.prepare(`
@@ -199,25 +293,35 @@ export class PredictionModelService {
         LIMIT 1
       `).get() as unknown as { id: string; trainingDataThroughAt: string } | undefined;
       if (existing) {
-        if (existing.trainingDataThroughAt === input.asOf) {
+        if (input.asOf === undefined || existing.trainingDataThroughAt === asOf) {
           this.store.database.exec("COMMIT");
           return existing.id;
         }
         throw new PredictionTrainingInProgressError(existing.id);
       }
+      if (
+        predictionTrainingSourceFingerprint(this.store.database) !== sourceFingerprint ||
+        currentAbilityBaselineHash(this.store.database) !== abilityBaselineHash
+      ) {
+        throw new PredictionTrainingInputError(
+          "Prediction training data changed during preflight; retry the request"
+        );
+      }
       this.store.database.prepare(`
         INSERT INTO prediction_model_runs (
           id, algorithm, model_version, feature_schema_version,
-          training_data_through_at, hyperparameters_json, request_json, status,
+          ability_baseline_hash, training_data_through_at,
+          hyperparameters_json, request_json, status,
           label_count, label_count_by_distance_json, created_at
-        ) VALUES (?, 'catboost', ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
+        ) VALUES (?, 'catboost', ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
       `).run(
         id,
         CATBOOST_PREDICTION_MODEL_VERSION,
         PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
-        input.asOf,
+        abilityBaselineHash,
+        asOf,
         JSON.stringify(CATBOOST_V1_HYPERPARAMETERS),
-        JSON.stringify(input),
+        JSON.stringify({ asOf }),
         preflight.available,
         JSON.stringify(preflight.availableByDistance),
         now
@@ -518,7 +622,6 @@ export class PredictionModelService {
 
     const rejectionReasons = this.validateTrainingResult(result);
     const now = new Date().toISOString();
-    const accepted = rejectionReasons.length === 0;
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
       const latest = this.store.database.prepare(`
@@ -543,6 +646,15 @@ export class PredictionModelService {
       if (latest.status !== "validating" || (workerToken && latest.workerToken !== workerToken)) {
         throw new Error("预测模型运行租约已失效");
       }
+      const activeAbilityBaselineHash = currentAbilityBaselineHash(this.store.database);
+      if (
+        current.abilityBaselineHash === null ||
+        activeAbilityBaselineHash === null ||
+        current.abilityBaselineHash !== activeAbilityBaselineHash
+      ) {
+        rejectionReasons.push("ability_baseline_mismatch");
+      }
+      const accepted = rejectionReasons.length === 0;
       const updated = this.store.database.prepare(`
         UPDATE prediction_model_runs
         SET feature_schema_hash = ?, training_data_hash = ?, label_count = ?,
@@ -593,9 +705,11 @@ export class PredictionModelService {
 
   fail(id: string, error: unknown, workerToken?: string): void {
     const now = new Date().toISOString();
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const publicMessage = sanitizeClientFacingError(rawMessage);
     const failure = error instanceof Error
-      ? { name: error.name, message: error.message }
-      : { message: String(error) };
+      ? { name: error.name, message: publicMessage }
+      : { message: publicMessage };
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
       const changed = this.store.database.prepare(`
@@ -606,7 +720,7 @@ export class PredictionModelService {
           AND (? IS NULL OR worker_token = ?)
       `).run(JSON.stringify(failure), now, id, workerToken ?? null, workerToken ?? null);
       if (Number(changed.changes) === 1) {
-        this.insertEvent(id, "failed", 0, 5, failure.message, now);
+        this.insertEvent(id, "failed", 0, 5, publicMessage, now);
       }
       this.store.database.exec("COMMIT");
     } catch (transactionError) {
@@ -624,6 +738,15 @@ export class PredictionModelService {
       throw new PredictionModelActivationCompatibilityError(compatibilityReasons);
     }
     if (run.active) return run;
+    if (run.artifactPath) {
+      const artifactReasons = this.validateArtifactBoundary(
+        run.artifactPath,
+        run.artifactSha256 ?? ""
+      );
+      if (artifactReasons.length > 0) {
+        throw new Error(`历史预测模型 artifact 校验失败：${artifactReasons.join(", ")}`);
+      }
+    }
     const now = new Date().toISOString();
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
@@ -674,6 +797,20 @@ export class PredictionModelService {
 
   private validateTrainingResult(result: PredictionModelTrainingResult): string[] {
     const reasons: string[] = [];
+    // Prefer the Python evaluation gate: rejected models must never activate even if
+    // TypeScript metric thresholds happen to pass on a forged or partial result.
+    if (result.evaluationStatus !== "accepted") {
+      reasons.push("evaluation_status_not_accepted");
+      for (const reason of result.rejectionReasons ?? []) {
+        if (typeof reason === "string" && reason.length > 0 && reason.length < 120) {
+          reasons.push(`python:${reason}`);
+        }
+      }
+      return reasons;
+    }
+    if ((result.rejectionReasons ?? []).length > 0) {
+      reasons.push("evaluation_rejection_reasons_present");
+    }
     if (!isSha256(result.featureSchemaHash)) {
       reasons.push("feature_schema_hash_invalid");
     } else if (result.featureSchemaHash !== raceResidualFeatureSchemaHash()) {
@@ -682,10 +819,12 @@ export class PredictionModelService {
     if (!isSha256(result.trainingDataHash)) reasons.push("training_data_hash_invalid");
     if (!isSha256(result.artifactSha256) || result.artifactPath.length === 0) {
       reasons.push("artifact_invalid");
+    } else {
+      reasons.push(...this.validateArtifactBoundary(result.artifactPath, result.artifactSha256));
     }
-    if (result.labelCount < MINIMUM_PREDICTION_LABELS) reasons.push("label_count_below_minimum");
+    if (result.labelCount < MINIMUM_ARTIFACT_TRAINING_LABELS) reasons.push("label_count_below_minimum");
     for (const distance of distances) {
-      if (result.labelCountByDistance[distance] < MINIMUM_LABELS_PER_DISTANCE) {
+      if (result.labelCountByDistance[distance] < MINIMUM_ARTIFACT_TRAINING_LABELS_PER_DISTANCE) {
         reasons.push(`${distance}_label_count_below_minimum`);
       }
       if (result.metrics.byDistance[distance].sampleCount < MINIMUM_HOLDOUTS_PER_DISTANCE) {
@@ -697,7 +836,18 @@ export class PredictionModelService {
     }
     if (!this.validMetrics(result.metrics)) reasons.push("metrics_invalid");
     if (result.metrics.maeImprovement < MINIMUM_MAE_IMPROVEMENT) {
-      reasons.push("mae_improvement_below_3_percent");
+      reasons.push("mae_improvement_below_5_percent");
+    }
+    if (
+      result.metrics.maeImprovementBootstrap95Lower !== null &&
+      result.metrics.maeImprovementBootstrap95Lower !== undefined
+    ) {
+      if (
+        !finite(result.metrics.maeImprovementBootstrap95Lower) ||
+        result.metrics.maeImprovementBootstrap95Lower <= 0
+      ) {
+        reasons.push("bootstrap_mae_improvement_not_positive");
+      }
     }
     if (result.metrics.regressesAnyDistanceByMoreThan5Percent) {
       reasons.push("distance_regression_above_5_percent");
@@ -714,6 +864,83 @@ export class PredictionModelService {
     return reasons;
   }
 
+  /**
+   * Boundary check for activation: artifact directory confinement under
+   * model-artifacts/prediction, model.onnx presence, and SHA-256 match.
+   * Full ONNX session load remains the runner's responsibility for accepted
+   * evaluations; this gate prevents path escape / hash spoofing at activate time.
+   */
+  private validateArtifactBoundary(artifactPath: string, artifactSha256: string): string[] {
+    const reasons: string[] = [];
+    if (artifactPath.length === 0 || !isSha256(artifactSha256)) {
+      reasons.push("artifact_invalid");
+      return reasons;
+    }
+    let artifactDirectory: string;
+    try {
+      artifactDirectory = resolve(artifactPath);
+    } catch {
+      reasons.push("artifact_path_invalid");
+      return reasons;
+    }
+    const relativeArtifact = relative(resolve(this.artifactRoot), artifactDirectory);
+    if (
+      relativeArtifact === "" ||
+      isAbsolute(relativeArtifact) ||
+      relativeArtifact === ".." ||
+      relativeArtifact.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+    ) {
+      reasons.push("artifact_path_outside_root");
+    }
+    const normalizedDir = artifactDirectory.replace(/\\/g, "/").toLowerCase();
+    const modelPath = resolve(artifactDirectory, "model.onnx");
+    const normalizedModel = modelPath.replace(/\\/g, "/").toLowerCase();
+    const expectedPrefix = normalizedDir.endsWith("/") ? normalizedDir : `${normalizedDir}/`;
+    if (
+      normalizedModel !== `${normalizedDir}/model.onnx` &&
+      !normalizedModel.startsWith(expectedPrefix)
+    ) {
+      reasons.push("artifact_path_escape");
+      return reasons;
+    }
+    try {
+      if (!existsSync(modelPath) || !statSync(modelPath).isFile()) {
+        reasons.push("artifact_model_missing");
+        return reasons;
+      }
+    } catch {
+      reasons.push("artifact_model_missing");
+      return reasons;
+    }
+    try {
+      const realRoot = realpathSync(this.artifactRoot);
+      const realArtifact = realpathSync(artifactDirectory);
+      const realModel = realpathSync(modelPath);
+      const artifactFromRoot = relative(realRoot, realArtifact);
+      const modelFromArtifact = relative(realArtifact, realModel);
+      if (
+        artifactFromRoot === "" || isAbsolute(artifactFromRoot) || artifactFromRoot === ".." ||
+        artifactFromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+      ) reasons.push("artifact_path_outside_root");
+      if (
+        isAbsolute(modelFromArtifact) || modelFromArtifact === ".." ||
+        modelFromArtifact.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+      ) reasons.push("artifact_path_escape");
+    } catch {
+      reasons.push("artifact_unreadable");
+      return reasons;
+    }
+    try {
+      const digest = createHash("sha256").update(readFileSync(modelPath)).digest("hex");
+      if (digest.toLowerCase() !== artifactSha256.toLowerCase()) {
+        reasons.push("artifact_sha256_mismatch");
+      }
+    } catch {
+      reasons.push("artifact_unreadable");
+    }
+    return reasons;
+  }
+
   private validMetrics(metrics: PredictionModelEvaluationMetrics): boolean {
     const topLevel = [
       metrics.baselineMaeSeconds,
@@ -723,6 +950,13 @@ export class PredictionModelService {
       metrics.onnxMaximumAbsoluteError
     ];
     if (!topLevel.every(finite) || metrics.baselineMaeSeconds <= 0 || metrics.modelMaeSeconds < 0) {
+      return false;
+    }
+    if (
+      metrics.maeImprovementBootstrap95Lower !== null &&
+      metrics.maeImprovementBootstrap95Lower !== undefined &&
+      !finite(metrics.maeImprovementBootstrap95Lower)
+    ) {
       return false;
     }
     return distances.every((distance) => {
@@ -745,6 +979,14 @@ export class PredictionModelService {
     }
     if (run.featureSchemaHash !== raceResidualFeatureSchemaHash()) {
       reasons.push("feature_schema_hash_mismatch");
+    }
+    const activeAbilityBaselineHash = currentAbilityBaselineHash(this.store.database);
+    if (
+      run.abilityBaselineHash === null ||
+      activeAbilityBaselineHash === null ||
+      run.abilityBaselineHash !== activeAbilityBaselineHash
+    ) {
+      reasons.push("ability_baseline_mismatch");
     }
     return reasons;
   }
@@ -778,6 +1020,7 @@ export class PredictionModelService {
       SELECT run.id, run.algorithm, run.model_version AS modelVersion,
         run.feature_schema_version AS featureSchemaVersion,
         run.feature_schema_hash AS featureSchemaHash,
+        run.ability_baseline_hash AS abilityBaselineHash,
         run.training_data_hash AS trainingDataHash,
         run.training_data_through_at AS trainingDataThroughAt,
         run.hyperparameters_json AS hyperparametersJson, run.status,
@@ -805,6 +1048,7 @@ export class PredictionModelService {
       modelVersion: row.modelVersion,
       featureSchemaVersion: row.featureSchemaVersion,
       featureSchemaHash: row.featureSchemaHash,
+      abilityBaselineHash: row.abilityBaselineHash,
       trainingDataHash: row.trainingDataHash,
       trainingDataThroughAt: row.trainingDataThroughAt,
       hyperparameters: parseJson(row.hyperparametersJson, {}),

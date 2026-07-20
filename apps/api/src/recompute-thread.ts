@@ -1,7 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 
 import { RaiApplicationService } from "@rai/application";
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 const databasePath = String((workerData as { databasePath: string }).databasePath);
 const store = await RaiDatabase.open(databasePath);

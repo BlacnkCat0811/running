@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
 
 interface MaintenanceTestSurface {
   backupDatabase(database: DatabaseSync, destination: string): Promise<void>;
+  describe(name: string): Promise<{ name: string; sizeBytes: number; createdAt: string }>;
 }
 
 const readMarker = (path: string): string => {
@@ -70,6 +71,192 @@ test("enforces backup retention while preserving the newest snapshot", async () 
     assert.equal(listed.some((item) => item.name.includes("first")), false);
   } finally {
     database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("preserves corrupt database bytes before deleting an unrecoverable database", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-corrupt-delete-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const corrupt = Buffer.from("not a sqlite database");
+  writeFileSync(databasePath, corrupt);
+  try {
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    const backup = await maintenance.deleteDatabase();
+    assert.equal(existsSync(databasePath), false);
+    assert.equal(backup.restorable, false);
+    assert.deepEqual(readFileSync(join(maintenance.quarantineDirectory, backup.name)), corrupt);
+    assert.deepEqual(await maintenance.listBackups(), []);
+    assert.match(backup.name, /before-delete-corrupt/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("restores a corrupt database group when deletion fails after removing its sidecars", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-corrupt-delete-rollback-"));
+  const databasePath = join(root, "rai.sqlite");
+  const files = {
+    "": Buffer.from("corrupt main"),
+    "-wal": Buffer.from("recoverable wal bytes"),
+    "-shm": Buffer.from("shared memory evidence")
+  };
+  for (const [suffix, bytes] of Object.entries(files)) writeFileSync(`${databasePath}${suffix}`, bytes);
+  let mainRemovalFailures = 0;
+  const gateEvents: string[] = [];
+  try {
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      () => { gateEvents.push("closed"); },
+      () => { gateEvents.push("opened"); },
+      undefined,
+      async (path) => {
+        rmSync(path, { force: true });
+        if (path === databasePath && mainRemovalFailures < 4) {
+          mainRemovalFailures += 1;
+          throw new Error("simulated corrupt delete failure");
+        }
+      }
+    );
+    await assert.rejects(maintenance.deleteDatabase(), /simulated corrupt delete failure/);
+    const snapshot = readdirSync(maintenance.quarantineDirectory)
+      .find((candidate) => candidate.endsWith(".sqlite"));
+    assert.ok(snapshot);
+    for (const suffix of Object.keys(files)) {
+      assert.deepEqual(
+        readFileSync(`${databasePath}${suffix}`),
+        readFileSync(join(maintenance.quarantineDirectory, `${snapshot}${suffix}`))
+      );
+    }
+    assert.deepEqual(gateEvents, ["closed", "opened"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("publishes corrupt main, WAL, and SHM files as one quarantine group", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-quarantine-group-"));
+  const databasePath = join(root, "rai.sqlite");
+  const files = {
+    "": Buffer.from("corrupt main"),
+    "-wal": Buffer.from("wal evidence"),
+    "-shm": Buffer.from("shm evidence")
+  };
+  for (const [suffix, bytes] of Object.entries(files)) writeFileSync(`${databasePath}${suffix}`, bytes);
+  try {
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    const snapshot = await maintenance.preserveCorruptDatabase("group");
+    for (const [suffix, bytes] of Object.entries(files)) {
+      assert.deepEqual(readFileSync(join(maintenance.quarantineDirectory, `${snapshot.name}${suffix}`)), bytes);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("corrupt quarantine snapshots never evict the last valid backup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-quarantine-retention-"));
+  const databasePath = join(root, "rai.sqlite");
+  const database = new DatabaseSync(databasePath);
+  database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('valid')");
+  database.close();
+  try {
+    const maintenance = new DatabaseMaintenance(
+      databasePath, root, undefined, undefined, undefined, undefined, undefined,
+      { maxCount: 1, minimumFreeBytes: 1 }
+    );
+    const valid = await maintenance.createBackup("valid");
+    writeFileSync(databasePath, "not a sqlite database");
+    await maintenance.preserveCorruptDatabase("corrupt");
+    assert.deepEqual((await maintenance.listBackups()).map((item) => item.name), [valid.name]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejecting an invalid restore does not evict a valid backup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-invalid-restore-retention-"));
+  const databasePath = join(root, "rai.sqlite");
+  try {
+    const store = await RaiDatabase.open(databasePath, { createMigrationBackup: false });
+    store.close();
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { maxCount: 2, maxTotalBytes: Number.MAX_SAFE_INTEGER, minimumFreeBytes: 1 }
+    );
+    const valid = await maintenance.createBackup("known-good");
+    const invalidName = "rai.invalid.sqlite";
+    writeFileSync(join(maintenance.backupDirectory, invalidName), "not a sqlite database");
+
+    await assert.rejects(maintenance.restoreBackup(invalidName), /not a database/);
+
+    const backups = await maintenance.listBackups();
+    assert.equal(backups.some((backup) => backup.name === valid.name), true);
+    assert.equal(backups.some((backup) => backup.name.includes("before-restore")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("returns a published backup when retention cleanup fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-retention-failure-"));
+  const databasePath = join(root, "rai.sqlite");
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('retained');");
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      async () => { throw Object.assign(new Error("retention target is locked"), { code: "EBUSY" }); },
+      undefined,
+      { maxCount: 1, maxTotalBytes: Number.MAX_SAFE_INTEGER, minimumFreeBytes: 1 }
+    );
+    await maintenance.createBackup("first");
+    const published = await maintenance.createBackup("second");
+    assert.equal(readMarker(join(maintenance.backupDirectory, published.name)), "retained");
+    assert.equal((await maintenance.listBackups()).length, 2);
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("capacity cleanup skips locked backups and removes other eligible candidates", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-capacity-locked-"));
+  const databasePath = join(root, "rai.sqlite");
+  const database = new DatabaseSync(databasePath);
+  database.exec("CREATE TABLE marker (value TEXT)");
+  database.close();
+  const backupDirectory = join(root, "var", "backups");
+  mkdirSync(backupDirectory, { recursive: true });
+  for (const name of ["a.sqlite", "b.sqlite", "c.sqlite"]) writeFileSync(join(backupDirectory, name), name);
+  utimesSync(join(backupDirectory, "a.sqlite"), new Date(1_000), new Date(1_000));
+  utimesSync(join(backupDirectory, "b.sqlite"), new Date(2_000), new Date(2_000));
+  utimesSync(join(backupDirectory, "c.sqlite"), new Date(3_000), new Date(3_000));
+  try {
+    const maintenance = new DatabaseMaintenance(
+      databasePath, root, undefined, undefined, undefined,
+      async (path) => {
+        if (path.endsWith("a.sqlite")) throw Object.assign(new Error("locked"), { code: "EBUSY" });
+        await rm(path, { force: true });
+      },
+      undefined,
+      { maxCount: 1, minimumFreeBytes: Number.MAX_SAFE_INTEGER }
+    );
+    await assert.rejects(maintenance.ensureBackupCapacity(), AggregateError);
+    assert.deepEqual(readdirSync(backupDirectory), ["a.sqlite"]);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -227,12 +414,38 @@ test("preserves the backup error when partial cleanup remains locked", async () 
   }
 });
 
-test("rejects backup path traversal", () => {
+test("rejects backup path traversal", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-maintenance-"));
   try {
     const maintenance = new DatabaseMaintenance(join(root, "rai.sqlite"), root);
-    assert.throws(() => maintenance.backupStream("../rai.sqlite"), /备份文件名无效/);
-    assert.throws(() => maintenance.backupStream("not-a-database.txt"), /备份文件名无效/);
+    await assert.rejects(maintenance.backupStream("../rai.sqlite"), /备份文件名无效/);
+    await assert.rejects(maintenance.backupStream("not-a-database.txt"), /备份文件名无效/);
+    await assert.rejects(maintenance.backupStream("missing.sqlite"), /备份文件不存在/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ignores a backup deleted between directory enumeration and metadata lookup", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-list-race-"));
+  const databasePath = join(root, "rai.sqlite");
+  try {
+    const database = new DatabaseSync(databasePath);
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('listed')");
+    database.close();
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    const kept = await maintenance.createBackup("kept");
+    const disappearing = await maintenance.createBackup("disappearing");
+    const surface = maintenance as unknown as MaintenanceTestSurface;
+    const describe = surface.describe.bind(maintenance);
+    surface.describe = async (name) => {
+      if (name === disappearing.name) {
+        throw Object.assign(new Error("deleted during list"), { code: "ENOENT" });
+      }
+      return describe(name);
+    };
+
+    assert.deepEqual((await maintenance.listBackups()).map((backup) => backup.name), [kept.name]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -259,7 +472,7 @@ test("backs up the current database before deleting SQLite files", async () => {
   }
 });
 
-test("releases the delete gate when beforeReplace fails", async () => {
+test("does not release a delete gate that beforeReplace failed to acquire", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-maintenance-delete-before-"));
   const databasePath = join(root, "rai.sqlite");
   try {
@@ -274,7 +487,7 @@ test("releases the delete gate when beforeReplace fails", async () => {
       () => { releaseAttempts += 1; }
     );
     await assert.rejects(maintenance.deleteDatabase(), /simulated delete gate failure/);
-    assert.equal(releaseAttempts, 1);
+    assert.equal(releaseAttempts, 0);
     assert.equal(readMarker(databasePath), "current-version");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -379,6 +592,114 @@ test("validates and atomically restores a RAI backup while preserving the replac
     assert.equal(readMarker(join(maintenance.backupDirectory, restored.safetyBackup?.name ?? "")), "current-version");
     assert.equal(readdirSync(maintenance.backupDirectory).filter((entry) => entry.endsWith(".sqlite")).length, 2);
     assert.deepEqual(readdirSync(root).filter((entry) => entry.includes(".restoring.")), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("retries transient Windows file locks while publishing a restore", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-transient-publish-lock-"));
+  const databasePath = join(root, "rai.sqlite");
+  try {
+    const store = await RaiDatabase.open(databasePath);
+    store.close();
+    const fixture = new DatabaseMaintenance(databasePath, root);
+    const backup = await fixture.createBackup("transient-publish-lock");
+    let moveAttempts = 0;
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async (source, destination) => {
+        if (source === databasePath && moveAttempts < 2) {
+          moveAttempts += 1;
+          throw Object.assign(new Error("database handle is still closing"), { code: "EBUSY" });
+        }
+        moveAttempts += 1;
+        await rename(source, destination);
+      }
+    );
+
+    await maintenance.restoreBackup(backup.name);
+    assert.ok(moveAttempts >= 3);
+    const active = new DatabaseSync(databasePath, { readOnly: true });
+    active.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("restores over a corrupt database and quarantines the original bytes when safety backup fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-corrupt-restore-"));
+  const databasePath = join(root, "rai.sqlite");
+  try {
+    const store = await RaiDatabase.open(databasePath);
+    store.database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('backup-version')");
+    store.close();
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    const backup = await maintenance.createBackup("corrupt-restore-fixture");
+    const corruptFiles = {
+      "": Buffer.from("not a sqlite database"),
+      "-wal": Buffer.from("corrupt restore wal evidence"),
+      "-shm": Buffer.from("corrupt restore shm evidence")
+    };
+    for (const [suffix, bytes] of Object.entries(corruptFiles)) writeFileSync(`${databasePath}${suffix}`, bytes);
+
+    const restored = await maintenance.restoreBackup(backup.name);
+
+    assert.equal(restored.safetyBackup, null);
+    assert.equal(readMarker(databasePath), "backup-version");
+    assert.deepEqual((await maintenance.listBackups()).map((candidate) => candidate.name), [backup.name]);
+    const quarantined = readdirSync(maintenance.quarantineDirectory)
+      .find((candidate) => candidate.endsWith(".sqlite"));
+    assert.ok(quarantined);
+    assert.deepEqual(readFileSync(join(maintenance.quarantineDirectory, quarantined)), corruptFiles[""]);
+    assert.deepEqual(readFileSync(join(maintenance.quarantineDirectory, `${quarantined}-wal`)), corruptFiles["-wal"]);
+    assert.ok(readFileSync(join(maintenance.quarantineDirectory, `${quarantined}-shm`)).length > 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("restores a quarantined corrupt group when restore fails before commit", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-corrupt-restore-rollback-"));
+  const databasePath = join(root, "rai.sqlite");
+  try {
+    const store = await RaiDatabase.open(databasePath);
+    store.close();
+    const fixture = new DatabaseMaintenance(databasePath, root);
+    const backup = await fixture.createBackup("corrupt-rollback-fixture");
+    const corruptFiles = {
+      "": Buffer.from("corrupt main before failed restore"),
+      "-wal": Buffer.from("wal before failed restore"),
+      "-shm": Buffer.from("shm before failed restore")
+    };
+    for (const [suffix, bytes] of Object.entries(corruptFiles)) writeFileSync(`${databasePath}${suffix}`, bytes);
+    const gateEvents: string[] = [];
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      () => { gateEvents.push("closed"); },
+      () => { gateEvents.push("opened"); }
+    );
+    await assert.rejects(
+      maintenance.restoreBackup(backup.name, () => { throw new Error("simulated corrupt pre-commit failure"); }),
+      /simulated corrupt pre-commit failure/
+    );
+    const snapshot = readdirSync(maintenance.quarantineDirectory)
+      .find((candidate) => candidate.endsWith(".sqlite"));
+    assert.ok(snapshot);
+    for (const suffix of Object.keys(corruptFiles)) {
+      assert.deepEqual(
+        readFileSync(`${databasePath}${suffix}`),
+        readFileSync(join(maintenance.quarantineDirectory, `${snapshot}${suffix}`))
+      );
+    }
+    assert.deepEqual(gateEvents, ["closed", "opened"]);
+    assert.deepEqual((await maintenance.listBackups()).map((candidate) => candidate.name), [backup.name]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -660,7 +981,7 @@ test("commits and retains a visible backup when the rollback file cannot be remo
   }
 });
 
-test("releases the replacement gate when beforeReplace fails after partially entering", async () => {
+test("does not release a replacement gate that beforeReplace failed to acquire", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-maintenance-before-gate-"));
   const databasePath = join(root, "rai.sqlite");
   try {
@@ -679,14 +1000,14 @@ test("releases the replacement gate when beforeReplace fails after partially ent
       }
     );
     await assert.rejects(maintenance.restoreBackup(backup.name), /simulated beforeReplace failure/);
-    assert.equal(releaseAttempts, 2);
+    assert.equal(releaseAttempts, 0);
     assert.equal(existsSync(databasePath), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("preserves both persistent beforeReplace and gate-release failures", async () => {
+test("preserves a persistent beforeReplace failure without releasing another owner", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-maintenance-persistent-before-gate-"));
   const databasePath = join(root, "rai.sqlite");
   try {
@@ -704,13 +1025,8 @@ test("preserves both persistent beforeReplace and gate-release failures", async 
         throw new Error("persistent gate release failure");
       }
     );
-    await assert.rejects(
-      maintenance.restoreBackup(backup.name),
-      (error: unknown) => error instanceof AggregateError &&
-        error.errors.some((cause) => cause instanceof Error && cause.message === "persistent beforeReplace failure") &&
-        error.errors.some((cause) => cause instanceof Error && cause.message === "persistent gate release failure")
-    );
-    assert.equal(releaseAttempts, 4);
+    await assert.rejects(maintenance.restoreBackup(backup.name), /persistent beforeReplace failure/);
+    assert.equal(releaseAttempts, 0);
     assert.equal(existsSync(databasePath), true);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -53,9 +53,11 @@ function safelyResolve(root: string, relativePath: string): string | null {
 }
 
 async function parseGpxFile(
-  path: string
-): Promise<{ points: RoutePoint[]; sha256: string }> {
-  const points: RoutePoint[] = [];
+  path: string,
+  onPoints: (points: RoutePoint[]) => void
+): Promise<{ pointCount: number; sha256: string }> {
+  let points: RoutePoint[] = [];
+  let pointCount = 0;
   const sourceHash = createHash("sha256");
   let currentPoint: PointDraft | null = null;
   let textField: string | null = null;
@@ -122,7 +124,7 @@ async function parseGpxFile(
     if (name === "trkpt" && currentPoint) {
       if (currentPoint.latitude !== null && currentPoint.longitude !== null) {
         points.push({
-          sequence: points.length,
+          sequence: pointCount,
           timestamp: currentPoint.timestamp,
           latitude: currentPoint.latitude,
           longitude: currentPoint.longitude,
@@ -132,6 +134,11 @@ async function parseGpxFile(
           horizontalAccuracyMeters: currentPoint.horizontalAccuracyMeters,
           verticalAccuracyMeters: currentPoint.verticalAccuracyMeters
         });
+        pointCount += 1;
+        if (points.length >= 1_000) {
+          onPoints(points);
+          points = [];
+        }
       }
       currentPoint = null;
     }
@@ -147,7 +154,8 @@ async function parseGpxFile(
     parser.write(text);
   }
   parser.close();
-  return { points, sha256: sourceHash.digest("hex") };
+  if (points.length > 0) onPoints(points);
+  return { pointCount, sha256: sourceHash.digest("hex") };
 }
 
 function allGpxRelativePaths(exportRoot: string): string[] {
@@ -155,7 +163,7 @@ function allGpxRelativePaths(exportRoot: string): string[] {
   if (!existsSync(routeFolder)) return [];
   return readdirSync(routeFolder, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".gpx"))
-    .map((entry) => normalizeRelativePath(`workout-routes/${entry.name}`))
+    .map((entry) => `workout-routes/${entry.name}`.replaceAll("\\", "/").replace(/^\/+/, ""))
     .sort();
 }
 
@@ -235,12 +243,16 @@ export async function importGpxRoutes(
         pointCount += cached.pointCount;
         continue;
       }
-      const { points, sha256 } = await parseGpxFile(fullPath);
+      store.beginRoutePointReplacement(routeId);
+      const { pointCount: importedPoints, sha256 } = await parseGpxFile(
+        fullPath,
+        (points) => store.appendRoutePoints(routeId, points)
+      );
       bundleHash.update(relativePath, "utf8");
       bundleHash.update("\0");
       bundleHash.update(sha256, "utf8");
       bundleHash.update("\0");
-      store.replaceRoutePoints(routeId, points);
+      store.completeRoutePointReplacement(routeId, importedPoints);
       store.database.prepare(`
         INSERT INTO route_file_fingerprints (
           relative_path, size_bytes, modified_at_ms, sha256, route_id, point_count, imported_at
@@ -249,10 +261,10 @@ export async function importGpxRoutes(
           size_bytes = excluded.size_bytes, modified_at_ms = excluded.modified_at_ms,
           sha256 = excluded.sha256, route_id = excluded.route_id,
           point_count = excluded.point_count, imported_at = excluded.imported_at
-      `).run(relativePath, stat.size, stat.mtimeMs, sha256, routeId, points.length, new Date().toISOString());
+      `).run(relativePath, stat.size, stat.mtimeMs, sha256, routeId, importedPoints, new Date().toISOString());
       importedRouteCount += 1;
       changedRouteIds.push(routeId);
-      pointCount += points.length;
+      pointCount += importedPoints;
     } catch (error) {
       store.markRouteStatus(routeId, "invalid");
       store.database.prepare(

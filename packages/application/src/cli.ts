@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { RaiDatabase } from "@rai/health-export-parser";
 import type { RecomputePlan } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { RaiApplicationService } from "./service.js";
 

@@ -40,23 +40,30 @@ export function localDateStartAt(localDate: string, timezone: string): string {
   const [year, month, day] = localDate.split("-").map(Number);
   if (!year || !month || !day) throw new Error(`Invalid local date: ${localDate}`);
   const utcGuess = Date.UTC(year, month - 1, day);
-  const parts = new Intl.DateTimeFormat("en-CA", {
+  const validated = new Date(utcGuess).toISOString().slice(0, 10);
+  if (validated !== localDate) throw new Error(`Invalid local date: ${localDate}`);
+  const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(new Date(utcGuess));
-  const read = (type: Intl.DateTimeFormatPartTypes): number =>
-    Number(parts.find((part) => part.type === type)?.value ?? 0);
-  const representedUtc = Date.UTC(
-    read("year"), read("month") - 1, read("day"),
-    read("hour"), read("minute"), read("second")
-  );
-  return new Date(utcGuess - (representedUtc - utcGuess)).toISOString();
+    day: "2-digit"
+  });
+  const dateAt = (instant: number): string => {
+    const parts = formatter.formatToParts(new Date(instant));
+    const read = (type: Intl.DateTimeFormatPartTypes): string =>
+      parts.find((part) => part.type === type)?.value ?? "00";
+    return `${read("year")}-${read("month")}-${read("day")}`;
+  };
+
+  let lower = utcGuess - 36 * 60 * 60 * 1000;
+  let upper = utcGuess + 36 * 60 * 60 * 1000;
+  while (lower < upper) {
+    const middle = lower + Math.floor((upper - lower) / 2);
+    if (dateAt(middle) < localDate) lower = middle + 1;
+    else upper = middle;
+  }
+  if (dateAt(lower) !== localDate) throw new Error(`Local date does not exist in ${timezone}: ${localDate}`);
+  return new Date(lower).toISOString();
 }
 
 export function addDays(localDate: string, days: number): string {

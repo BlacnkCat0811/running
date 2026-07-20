@@ -190,11 +190,13 @@ export function danielsFractionOfVo2Max(durationMinutes: number): number {
 
 export function oxygenCostAtVelocity(velocityMetersPerMinute: number): number {
   assertPositiveFinite("velocityMetersPerMinute", velocityMetersPerMinute);
-  return (
+  const oxygenCost = (
     -4.6 +
     0.182258 * velocityMetersPerMinute +
     0.000104 * velocityMetersPerMinute ** 2
   );
+  if (oxygenCost <= 0) throw new Error("velocityMetersPerMinute is outside the Daniels running domain");
+  return oxygenCost;
 }
 
 export function velocityAtOxygenCost(oxygenCostMlKgMin: number): number {

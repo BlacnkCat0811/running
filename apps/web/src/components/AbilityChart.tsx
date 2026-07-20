@@ -55,6 +55,10 @@ function AbilityTooltip({ active, payload, label }: { active?: boolean; payload?
   return <div className="chart-tooltip"><b>{String(source?.date ?? label ?? "")}</b>{source ? <><span>即时能力 CA：{Number(source.ca).toFixed(2)}</span><span>置信度：{source.confidence === null ? "--" : `${Math.round(Number(source.confidence) * 100)}%`}</span><span>状态：{String(source.assessmentStatus)}</span><span>模型：{String(source.modelVersion)}</span></> : payload.map((item) => <span key={item.name}>{item.name}：{typeof item.value === "number" ? item.value.toFixed(2) : String(item.value ?? "--")}</span>)}</div>;
 }
 
+export function activeTrendModelVersion(trend: TrendResponse): string {
+  return trend.modelRuns.find((run) => run.active)?.modelVersion ?? "--";
+}
+
 export function AbilityChart({ trend, height = 300, showTa = true, showCa = true }: { trend: TrendResponse; height?: number; showTa?: boolean; showCa?: boolean }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -66,7 +70,7 @@ export function AbilityChart({ trend, height = 300, showTa = true, showCa = true
     confidence: null,
     decay: point.decayPoints
   }));
-  const activeModelVersion = trend.modelRuns.find((run) => run.active)?.modelVersion ?? trend.modelRuns.at(-1)?.modelVersion ?? "--";
+  const activeModelVersion = activeTrendModelVersion(trend);
   const caData: CaDatum[] = trend.workouts.filter((workout) => workout.currentAbility !== null).map((workout) => ({
     id: workout.id,
     date: workout.date.slice(0, 10),

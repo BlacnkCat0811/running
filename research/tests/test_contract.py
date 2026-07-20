@@ -30,6 +30,7 @@ def row(sample_id: str = "sample-1", observed_at: str = "2026-01-01T00:00:00Z"):
         "sampleId": sample_id,
         "observedAt": observed_at,
         "completedAt": "2026-01-01T00:30:00Z",
+        "labelAvailableAt": "2026-01-01T00:30:00Z",
         "distance": "five_k",
         "baselinePredictedSeconds": baseline,
         "baselineOptimisticSeconds": 1450.0,
@@ -67,6 +68,7 @@ def test_rejects_unknown_fields_and_future_order(tmp_path):
         load_jsonl(write_jsonl(tmp_path, [unknown]))
     later = row("later", "2026-01-02T00:00:00Z")
     later["completedAt"] = "2026-01-02T00:30:00Z"
+    later["labelAvailableAt"] = "2026-01-02T00:30:00Z"
     earlier = row("earlier")
     with pytest.raises(ContractError, match="must be ordered"):
         load_jsonl(write_jsonl(tmp_path, [later, earlier]))
@@ -84,7 +86,7 @@ def test_feature_schema_hash_includes_acwr_semantics():
         "through asOf"
     )
     assert feature_schema_sha256() == (
-        "77a352b9035b68c584bd2b6147fc1156c22423ffa806b0da42462afd2b10dfb2"
+        "bea6a4ffaec363ab1e78639935c643d8f7310db4d16ce7a6934a5fae2c463a6b"
     )
 
 
@@ -92,5 +94,15 @@ def test_ordering_uses_absolute_instants_instead_of_raw_timezone_strings(tmp_pat
     later = row("later", "2026-01-01T00:00:00Z")
     earlier = row("earlier", "2026-01-01T00:30:00+02:00")
     earlier["completedAt"] = "2025-12-31T23:00:00Z"
+    earlier["labelAvailableAt"] = "2025-12-31T23:00:00Z"
     with pytest.raises(ContractError, match="must be ordered"):
         load_jsonl(write_jsonl(tmp_path, [later, earlier]))
+
+
+@pytest.mark.parametrize("observed_at", [
+    "2026-01-01 00:00:00Z",
+    "2026-01-01T00:00:00.1234567Z",
+])
+def test_rejects_timestamp_syntax_not_supported_by_the_ts_runner(tmp_path, observed_at):
+    with pytest.raises(ContractError, match="timezone-qualified ISO 8601 instant"):
+        load_jsonl(write_jsonl(tmp_path, [row(observed_at=observed_at)]))

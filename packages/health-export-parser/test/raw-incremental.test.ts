@@ -65,6 +65,121 @@ test("incremental XML scan skips unchanged rows and removes entities absent from
   }
 });
 
+test("sync identifiers keep workout identity stable while payload updates in place", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-sync-identity-"));
+  const databasePath = join(root, "rai.sqlite");
+  const xmlPath = join(root, "export.xml");
+  const xml = (duration: number) => `<HealthData><Workout workoutActivityType="${workoutTypes.running}"
+    sourceName="Watch" startDate="2026-01-02 08:00:00 +0800" endDate="2026-01-02 08:30:00 +0800"
+    duration="${duration}" durationUnit="min"><MetadataEntry key="HKMetadataKeySyncIdentifier"
+    value="stable-workout"/></Workout></HealthData>`;
+  writeFileSync(xmlPath, xml(30));
+  const store = await RaiDatabase.open(databasePath);
+  try {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+    const before = store.database.prepare("SELECT id FROM workouts").get() as { id: string };
+    writeFileSync(xmlPath, xml(31));
+    const result = await parseAppleHealthXml(xmlPath, store, {
+      fileSize: statSync(xmlPath).size,
+      incremental: { generation: "sync-generation-2" }
+    });
+    const after = store.database.prepare("SELECT id, duration_seconds AS duration FROM workouts").get() as { id: string; duration: number };
+    assert.equal(after.id, before.id);
+    assert.equal(after.duration, 1860);
+    assert.equal(result.insertedWorkoutCount, 0);
+    assert.equal((store.database.prepare("SELECT COUNT(*) AS count FROM workouts").get() as { count: number }).count, 1);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ambiguous rematches retain a deterministic existing session id", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-session-lineage-"));
+  const databasePath = join(root, "rai.sqlite");
+  const xmlPath = join(root, "export.xml");
+  writeFileSync(xmlPath, exportXml([{ start: "2026-01-02 08:00:00 +0800", duration: 30 }]));
+  const store = await RaiDatabase.open(databasePath);
+  try {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+    canonicalizeRunningWorkouts(store.database);
+    const original = store.database.prepare(`
+      SELECT id, activity_type AS activityType, anchor_start_at AS startAt,
+        anchor_end_at AS endAt, anchor_distance_km AS distanceKm, canonical_workout_id AS workoutId
+      FROM training_sessions
+    `).get() as { id: string; activityType: string; startAt: string; endAt: string; distanceKm: number | null; workoutId: string };
+    store.database.prepare(`
+      INSERT INTO training_sessions (
+        id, activity_type, anchor_start_at, anchor_end_at, anchor_distance_km,
+        canonical_workout_id, status
+      ) VALUES ('zzzz-duplicate-session', ?, ?, ?, ?, ?, 'active')
+    `).run(original.activityType, original.startAt, original.endAt, original.distanceKm, original.workoutId);
+
+    const result = canonicalizeRunningWorkouts(store.database);
+    const rematched = store.database.prepare(`
+      SELECT training_session_id AS id FROM workout_groups
+    `).get() as { id: string };
+    assert.equal(result.ambiguousTrainingSessionCount, 1);
+    assert.equal(rematched.id, original.id);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("multi-match rematch prefers active session over inactive", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-session-status-rank-"));
+  const databasePath = join(root, "rai.sqlite");
+  const xmlPath = join(root, "export.xml");
+  writeFileSync(xmlPath, exportXml([{ start: "2026-01-02 08:00:00 +0800", duration: 30 }]));
+  const store = await RaiDatabase.open(databasePath);
+  try {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+    canonicalizeRunningWorkouts(store.database);
+    const original = store.database.prepare(`
+      SELECT id, activity_type AS activityType, anchor_start_at AS startAt,
+        anchor_end_at AS endAt, anchor_distance_km AS distanceKm, canonical_workout_id AS workoutId
+      FROM training_sessions
+    `).get() as {
+      id: string;
+      activityType: string;
+      startAt: string;
+      endAt: string;
+      distanceKm: number | null;
+      workoutId: string;
+    };
+
+    // Mark the original session inactive and insert a later-id active twin that also matches.
+    // Status rank must prefer the active row even when its id sorts after the inactive one.
+    store.database.prepare(`
+      UPDATE training_sessions SET status = 'inactive' WHERE id = ?
+    `).run(original.id);
+    store.database.prepare(`
+      INSERT INTO training_sessions (
+        id, activity_type, anchor_start_at, anchor_end_at, anchor_distance_km,
+        canonical_workout_id, status
+      ) VALUES ('zzzz-active-session', ?, ?, ?, ?, ?, 'active')
+    `).run(
+      original.activityType,
+      original.startAt,
+      original.endAt,
+      original.distanceKm,
+      original.workoutId
+    );
+
+    const result = canonicalizeRunningWorkouts(store.database);
+    const rematched = store.database.prepare(`
+      SELECT training_session_id AS id FROM workout_groups
+    `).get() as { id: string };
+    assert.equal(result.ambiguousTrainingSessionCount, 1);
+    assert.equal(rematched.id, "zzzz-active-session");
+    assert.notEqual(rematched.id, original.id);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("incremental XML scan updates a changed ActivitySummary for the same date", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-summary-incremental-"));
   const databasePath = join(root, "rai.sqlite");

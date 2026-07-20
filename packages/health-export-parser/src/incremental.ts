@@ -33,6 +33,11 @@ export interface DatasetDiff {
 
 export interface RecomputePlan {
   mode: "none" | "partial" | "full";
+  /**
+   * Dirty entity anchors for partial recompute — workout/route entity ids from
+   * import changes (not necessarily training_sessions.id). Callers resolve these
+   * to training sessions when building the recompute window.
+   */
   dirtySessionIds: string[];
   dirtyFromAt: string | null;
   reasons: string[];

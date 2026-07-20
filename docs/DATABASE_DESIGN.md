@@ -3,7 +3,8 @@
 > Schema 版本：v9  
 > Canonical contract：`canonical-health-v2`  
 > Feature schema：`workout-feature-v1`  
-> 运行时数据库：本地 SQLite
+> 运行时数据库：本地 SQLite  
+> Schema 源码：`packages/storage-sqlite/src/database.ts`（migrations + `RaiDatabase`）
 
 ## 1. 分层原则
 

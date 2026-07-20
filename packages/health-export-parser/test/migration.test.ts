@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { RaiDatabase } from "../src/database.js";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 test("upgrades a v1 canonical database with a backup and training-session backfill", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-migration-"));
@@ -195,4 +195,129 @@ test("rejects drift in an applied migration", async () => {
   database.close();
   await assert.rejects(RaiDatabase.open(databasePath), /checksum does not match/);
   rmSync(root, { recursive: true, force: true });
+});
+
+test("v15 preserves v14 training-load columns when their physical order differs", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-migration-v15-load-"));
+  const databasePath = join(root, "rai.sqlite");
+  let store = await RaiDatabase.open(databasePath);
+  store.close();
+
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec("PRAGMA foreign_keys = OFF");
+  legacy.exec(`
+    INSERT INTO training_sessions (
+      id, activity_type, anchor_start_at, anchor_end_at, status
+    ) VALUES (
+      'session-v14', 'HKWorkoutActivityTypeRunning',
+      '2026-01-01T00:00:00.000Z', '2026-01-01T01:00:00.000Z', 'active'
+    );
+    INSERT INTO feature_runs (
+      id, dataset_version, canonical_contract_version, feature_schema_version,
+      feature_config_json, feature_config_hash, status
+    ) VALUES ('feature-run-v14', 'dataset', 'contract', 'feature', '{}', 'feature-hash', 'succeeded');
+    INSERT INTO model_runs (
+      id, feature_run_id, dataset_version, model_version, model_config_json,
+      model_config_hash, evaluated_at, status
+    ) VALUES (
+      'model-run-v14', 'feature-run-v14', 'dataset', 'model', '{}', 'model-hash',
+      '2026-01-02T00:00:00.000Z', 'succeeded'
+    );
+    INSERT INTO training_metric_runs (
+      id, model_run_id, algorithm_version, config_json, config_hash,
+      timezone_identifier, evaluated_at, status
+    ) VALUES (
+      'metric-run-v14', 'model-run-v14', 'algorithm', '{}', 'config-hash', 'UTC',
+      '2026-01-02T00:00:00.000Z', 'succeeded'
+    );
+
+    DROP VIEW active_workout_training_loads;
+    DROP TABLE workout_training_loads;
+    CREATE TABLE workout_training_loads (
+      id TEXT PRIMARY KEY,
+      training_metric_run_id TEXT NOT NULL,
+      training_session_id TEXT NOT NULL,
+      feature_id TEXT,
+      local_date TEXT NOT NULL,
+      timezone_identifier TEXT NOT NULL,
+      distance_km REAL,
+      duration_seconds REAL NOT NULL,
+      training_load REAL NOT NULL,
+      intensity REAL NOT NULL,
+      load_source TEXT NOT NULL CHECK (load_source IN (
+        'heart_rate_series', 'average_heart_rate', 'rpe', 'session_type'
+      )),
+      confidence REAL NOT NULL,
+      heart_rate_coverage REAL,
+      rpe INTEGER,
+      session_type TEXT NOT NULL,
+      explanation_codes_json TEXT NOT NULL,
+      provenance_json TEXT NOT NULL,
+      computed_at TEXT NOT NULL,
+      average_heart_rate_bpm REAL,
+      elevation_gain_meters REAL,
+      zone_profile_id TEXT,
+      stimulus_type TEXT NOT NULL DEFAULT 'unclassified',
+      raw_hrr_trimp REAL,
+      internal_load REAL,
+      pace_load REAL,
+      distance_reference_meters REAL,
+      distance_exposure_ratio REAL,
+      distance_factor REAL NOT NULL DEFAULT 1,
+      heart_rate_load_confidence REAL NOT NULL DEFAULT 0,
+      pace_load_confidence REAL NOT NULL DEFAULT 0,
+      UNIQUE (training_metric_run_id, training_session_id)
+    );
+    INSERT INTO workout_training_loads (
+      id, training_metric_run_id, training_session_id, local_date, timezone_identifier,
+      distance_km, duration_seconds, training_load, intensity, load_source, confidence,
+      heart_rate_coverage, rpe, session_type, explanation_codes_json, provenance_json,
+      computed_at, average_heart_rate_bpm, elevation_gain_meters, stimulus_type,
+      raw_hrr_trimp, internal_load, pace_load, distance_factor,
+      heart_rate_load_confidence, pace_load_confidence
+    ) VALUES (
+      'load-v14', 'metric-run-v14', 'session-v14', '2026-01-01', 'UTC',
+      10.5, 3600, 88.25, 0.73, 'heart_rate_series', 0.91,
+      0.87, 7, 'steady', '["legacy"]', '{"marker":"preserved"}',
+      '2026-01-02T03:04:05.000Z', 151.25, 432.5, 'aerobic_base',
+      77.5, 80.25, 92.75, 1.1, 0.87, 0.66
+    );
+    DELETE FROM schema_migrations WHERE version = 15;
+  `);
+  legacy.close();
+
+  store = await RaiDatabase.open(databasePath);
+  try {
+    const row = store.database.prepare(`
+      SELECT average_heart_rate_bpm AS averageHeartRate,
+        elevation_gain_meters AS elevationGain, rpe, provenance_json AS provenance,
+        computed_at AS computedAt, load_source AS loadSource
+      FROM workout_training_loads WHERE id = 'load-v14'
+    `).get() as unknown as {
+      averageHeartRate: number;
+      elevationGain: number;
+      rpe: number;
+      provenance: string;
+      computedAt: string;
+      loadSource: string;
+    };
+    assert.deepEqual({ ...row }, {
+      averageHeartRate: 151.25,
+      elevationGain: 432.5,
+      rpe: 7,
+      provenance: '{"marker":"preserved"}',
+      computedAt: "2026-01-02T03:04:05.000Z",
+      loadSource: "heart_rate_series"
+    });
+    const migration = store.database.prepare(
+      "SELECT name FROM schema_migrations WHERE version = 15"
+    ).get() as unknown as { name: string };
+    assert.equal(migration.name, "composite_training_load_source");
+    store.database.prepare(
+      "UPDATE workout_training_loads SET load_source = 'composite' WHERE id = 'load-v14'"
+    ).run();
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

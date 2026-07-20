@@ -25,9 +25,9 @@ test("rejects invalid residual outputs and correction limits", () => {
 test("validates the immutable CatBoost artifact manifest contract", () => {
   const hash = "a".repeat(64);
   const manifest = {
-    modelVersion: "race-residual-catboost-v1",
+    modelVersion: "race-residual-catboost-v3",
     algorithm: "catboost",
-    featureSchemaVersion: "race-residual-feature-v2",
+    featureSchemaVersion: "race-residual-feature-v3",
     featureSchemaHash: PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
     trainingDataHash: hash,
     modelSha256: hash,
@@ -62,4 +62,8 @@ test("validates the immutable CatBoost artifact manifest contract", () => {
     featureSchemaHash: hash
   }));
   assert.throws(() => assertCatBoostArtifactManifest({ ...manifest, modelSha256: "bad" }));
+  assert.throws(() => assertCatBoostArtifactManifest({
+    ...manifest,
+    correctionCapFraction: 0.25
+  }));
 });

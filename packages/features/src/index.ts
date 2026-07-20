@@ -7,7 +7,9 @@ import {
   type WorkoutOverride
 } from "@rai/contracts";
 
-export const FEATURE_CONFIG_VERSION = "feature-config-v5" as const;
+export const FEATURE_CONFIG_VERSION = "feature-config-v7" as const;
+
+const SPEED_STABILITY_WINDOW_SECONDS = 60;
 
 export interface FeatureConfig {
   minimumDistanceKm: number;
@@ -23,7 +25,6 @@ export interface FeatureConfig {
   recoveryHeartRateReserveThreshold: number;
   easyHeartRateReserveThreshold: number;
   steadyHeartRateReserveThreshold: number;
-  raceHeartRateReserveThreshold: number;
 }
 
 export type FeatureConfigInput = Omit<FeatureConfig, "minimumIntervalSpeedCoverage"> & {
@@ -43,8 +44,7 @@ export const defaultFeatureConfig: FeatureConfig = {
   minimumIntervalSpeedCoverage: 0.5,
   recoveryHeartRateReserveThreshold: 0.5,
   easyHeartRateReserveThreshold: 0.65,
-  steadyHeartRateReserveThreshold: 0.75,
-  raceHeartRateReserveThreshold: 0.85
+  steadyHeartRateReserveThreshold: 0.75
 };
 
 export interface NumericSeriesSummary {
@@ -128,6 +128,58 @@ function percentile(values: number[], fraction: number): number | null {
   const upper = Math.ceil(position);
   const weight = position - lower;
   return (sorted[lower] ?? 0) * (1 - weight) + (sorted[upper] ?? 0) * weight;
+}
+
+function smoothedSpeedCoefficientOfVariation(
+  samples: TimedSeriesSample[],
+  activeDurationSeconds: number,
+  elapsedDurationSeconds: number,
+  minimumCoverage: number
+): number | null {
+  const valid = samples.filter((sample) =>
+    Number.isFinite(sample.value) && sample.value > 0 &&
+    Number.isFinite(sample.startOffsetSeconds) && sample.startOffsetSeconds >= 0 &&
+    Number.isFinite(sample.durationSeconds) && sample.durationSeconds > 0
+  );
+  if (valid.length === 0 || activeDurationSeconds <= 0) return null;
+
+  const values: number[] = [];
+  let totalCoveredSeconds = 0;
+  for (
+    let start = 0;
+    start + SPEED_STABILITY_WINDOW_SECONDS <= elapsedDurationSeconds;
+    start += SPEED_STABILITY_WINDOW_SECONDS
+  ) {
+    let weightedValue = 0;
+    const overlaps: Array<{ start: number; end: number }> = [];
+    for (const sample of valid) {
+      const overlapStart = Math.max(start, sample.startOffsetSeconds);
+      const overlapEnd = Math.min(
+        start + SPEED_STABILITY_WINDOW_SECONDS,
+        sample.startOffsetSeconds + sample.durationSeconds
+      );
+      if (overlapEnd <= overlapStart) continue;
+      weightedValue += sample.value * (overlapEnd - overlapStart);
+      overlaps.push({ start: overlapStart, end: overlapEnd });
+    }
+    overlaps.sort((left, right) => left.start - right.start);
+    let coveredSeconds = 0;
+    let coveredThrough = start;
+    for (const overlap of overlaps) {
+      if (overlap.end <= coveredThrough) continue;
+      coveredSeconds += overlap.end - Math.max(overlap.start, coveredThrough);
+      coveredThrough = overlap.end;
+    }
+    totalCoveredSeconds += coveredSeconds;
+    if (coveredSeconds >= SPEED_STABILITY_WINDOW_SECONDS * 0.6) {
+      values.push(weightedValue / coveredSeconds);
+    }
+  }
+  if (values.length < 2 || totalCoveredSeconds / activeDurationSeconds < minimumCoverage) return null;
+  const mean = average(values);
+  if (mean === null || mean === 0) return null;
+  const variance = average(values.map((value) => (value - mean) ** 2));
+  return variance === null ? null : Math.sqrt(variance) / Math.abs(mean);
 }
 
 function hasRepeatedIntervalStructure(
@@ -216,10 +268,6 @@ function automaticSessionType(
   if (evidence.confirmedRace) return "race";
 
   if (
-    evidence.durationSeconds / 60 >= config.longRunDurationMinutes ||
-    (evidence.distanceKm ?? 0) >= config.longRunDistanceKm
-  ) return "long_run";
-  if (
     evidence.speedCv !== null &&
     evidence.speedCv >= config.intervalSpeedCvThreshold &&
     hasRepeatedIntervalStructure(
@@ -229,12 +277,21 @@ function automaticSessionType(
       config.minimumIntervalSpeedCoverage
     )
   ) return "interval";
+  if (hrr !== null && hrr < config.recoveryHeartRateReserveThreshold) return "recovery";
+  // Long easy volume stays "easy" so TA evidence is not inflated by duration alone.
+  if (hrr !== null && hrr < config.easyHeartRateReserveThreshold) return "easy";
+  // Auto long_run requires non-easy HRR (or higher intensity). Duration/distance
+  // alone without HRR must not promote a workout before the easy fallback.
+  const longVolume =
+    evidence.durationSeconds / 60 >= config.longRunDurationMinutes ||
+    (evidence.distanceKm ?? 0) >= config.longRunDistanceKm;
+  if (longVolume && hrr !== null && hrr >= config.easyHeartRateReserveThreshold) {
+    return "long_run";
+  }
 
   // Heart-rate reserve normalizes effort to the runner instead of relying on
   // absolute pace, which changes substantially with fitness and conditions.
   if (hrr !== null) {
-    if (hrr < config.recoveryHeartRateReserveThreshold) return "recovery";
-    if (hrr < config.easyHeartRateReserveThreshold) return "easy";
     if (hrr < config.steadyHeartRateReserveThreshold) return "steady";
     return "tempo";
   }
@@ -288,11 +345,23 @@ function eligibility(
     reasons.push("implausible_average_pace");
   }
   if (source.heartRate.average === null) reasons.push("heart_rate_missing");
+  // Aggregate WorkoutStatistics expose an average without sample density.
+  // Stats-only averages must not satisfy full eligibility — force trial unless
+  // the user include override is set. Still surface the coverage reason.
+  const statisticOnlyAverage =
+    source.heartRate.average !== null &&
+    source.heartRate.sampleCount > 0 &&
+    source.heartRate.sampleCount < config.minimumHeartRateSamples &&
+    source.heartRate.coveredDurationSeconds === null;
   const hasRequiredHeartEvidence =
     source.heartRate.average !== null &&
+    !statisticOnlyAverage &&
     (source.heartRate.sampleCount >= config.minimumHeartRateSamples ||
       (coverage !== null && coverage >= config.minimumHeartRateCoverage));
-  if (source.heartRate.average !== null && !hasRequiredHeartEvidence) {
+  if (
+    source.heartRate.average !== null &&
+    (statisticOnlyAverage || !hasRequiredHeartEvidence)
+  ) {
     reasons.push("heart_rate_coverage_low");
   }
   if (source.routePointCount === 0) reasons.push("route_missing");
@@ -341,6 +410,16 @@ export function extractWorkoutFeatureVector(
     (source.distanceKm !== null && source.durationSeconds > 0
       ? (source.distanceKm * 1000) / source.durationSeconds
       : null);
+  const speedCoefficientOfVariation =
+    smoothedSpeedCoefficientOfVariation(
+      source.speedSamples ?? [],
+      source.durationSeconds,
+      Math.max(
+        source.durationSeconds,
+        (Date.parse(source.workoutEndAt) - Date.parse(source.workoutStartAt)) / 1000
+      ),
+      normalizedConfig.minimumIntervalSpeedCoverage
+    ) ?? source.speed.coefficientOfVariation;
   const hrCoverage = heartRateCoverage(source);
   const averageHeartRate = source.heartRate.average;
   const hrr =
@@ -355,7 +434,7 @@ export function extractWorkoutFeatureVector(
           1.1
         )
       : null;
-  const stabilityInputs = [source.speed.coefficientOfVariation, source.heartRate.coefficientOfVariation]
+  const stabilityInputs = [speedCoefficientOfVariation, source.heartRate.coefficientOfVariation]
     .filter((value): value is number => value !== null)
     .map((value) => clamp(value, 0, 1));
   const stabilityRaw =
@@ -378,7 +457,7 @@ export function extractWorkoutFeatureVector(
       ? Math.max(source.durationSeconds, elapsedSeconds)
       : source.durationSeconds,
     distanceKm: source.distanceKm,
-    speedCv: source.speed.coefficientOfVariation,
+    speedCv: speedCoefficientOfVariation,
     speedSamples: source.speedSamples ?? [],
     heartRateReserveFraction: hrr,
     confirmedRace: source.override?.performanceProtocol === "half_marathon_race" ||
@@ -426,7 +505,7 @@ export function extractWorkoutFeatureVector(
       recoveryRaw,
       heartRateReserveFraction: hrr,
       heartRateCoefficientOfVariation: source.heartRate.coefficientOfVariation,
-      speedCoefficientOfVariation: source.speed.coefficientOfVariation,
+      speedCoefficientOfVariation,
       sleepDurationMinutes: source.sleepDurationMinutes,
       restingHeartRateBpm: source.restingHeartRate,
       hrvSdnnMs: source.hrvSdnn,

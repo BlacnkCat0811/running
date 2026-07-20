@@ -15,9 +15,13 @@ import {
 } from "@rai/training-load";
 
 import {
-  loadLabeledRaceOutcomes,
-  parsePerformanceConditions
+  loadLabeledRaceOutcomes
 } from "./prediction-data.js";
+import {
+  historicalEligibilitySql,
+  historicalOverrideJoin,
+  historicalQualitySql
+} from "./prediction-historical-features.js";
 import { buildFormulaPredictionBase, type FormulaPredictionBase } from "./prediction-report.js";
 
 export const RACE_RESIDUAL_FEATURE_SCHEMA_VERSION =
@@ -35,6 +39,7 @@ export interface RaceResidualTrainingSample {
   sampleId: string;
   observedAt: string;
   completedAt: string;
+  labelAvailableAt: string;
   distance: RaceDistance;
   baselinePredictedSeconds: number;
   baselineOptimisticSeconds: number | null;
@@ -77,16 +82,6 @@ export function raceResidualFeatureSchemaHash(): string {
   return PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH;
 }
 
-function loadOutcomeMetadata(database: DatabaseSync, trainingSessionId: string): string {
-  const row = database.prepare(`
-    SELECT workout.metadata_json AS metadataJson
-    FROM training_sessions session
-    JOIN workouts workout ON workout.id = session.canonical_workout_id
-    WHERE session.id = ?
-  `).get(trainingSessionId) as unknown as { metadataJson: string } | undefined;
-  return row?.metadataJson ?? "{}";
-}
-
 interface ActiveTrainingLoadRow {
   trainingSessionId: string;
   localDate: string;
@@ -101,7 +96,56 @@ export function loadAcuteChronicLoadRatio(
   database: DatabaseSync,
   asOf: string
 ): number | null {
-  const rows = database.prepare(`
+  const sourceTables = database.prepare(`
+    SELECT COUNT(*) AS count FROM sqlite_master
+    WHERE type = 'table' AND name IN (
+      'workout_overrides', 'workout_training_loads', 'training_metric_runs',
+      'model_runs', 'active_model_run'
+    )
+  `).get() as unknown as { count: number };
+  const rows = sourceTables.count === 5
+    ? database.prepare(`
+    WITH future_override AS (
+      SELECT training_session_id, MIN(created_at) AS created_at
+      FROM workout_overrides
+      WHERE created_at > ?
+      GROUP BY training_session_id
+    ), eligible_loads AS (
+      SELECT
+        load.training_session_id AS trainingSessionId,
+        load.local_date AS localDate,
+        load.timezone_identifier AS timezoneIdentifier,
+        load.duration_seconds AS durationSeconds,
+        load.training_load AS trainingLoad,
+        load.distance_km AS distanceKm,
+        load.confidence AS confidence,
+        ROW_NUMBER() OVER (
+          PARTITION BY load.training_session_id
+           ORDER BY metric_run.created_at DESC, metric_run.id DESC
+        ) AS rowNumber
+      FROM workout_training_loads load
+      JOIN training_metric_runs metric_run
+        ON metric_run.id = load.training_metric_run_id
+       AND metric_run.status = 'succeeded'
+      JOIN training_sessions session ON session.id = load.training_session_id
+      LEFT JOIN future_override future
+        ON future.training_session_id = load.training_session_id
+      LEFT JOIN active_model_run active
+        ON active.model_run_id = metric_run.model_run_id
+      WHERE session.status = 'active'
+        AND session.anchor_end_at <= ?
+        AND (
+          (future.created_at IS NULL AND active.model_run_id IS NOT NULL)
+           OR (future.created_at IS NOT NULL AND metric_run.created_at < future.created_at)
+        )
+    )
+    SELECT trainingSessionId, localDate, timezoneIdentifier, durationSeconds,
+      trainingLoad, distanceKm, confidence
+    FROM eligible_loads
+    WHERE rowNumber = 1
+    ORDER BY localDate, trainingSessionId
+  `).all(asOf, asOf) as unknown as ActiveTrainingLoadRow[]
+    : database.prepare(`
     SELECT
       load.training_session_id AS trainingSessionId,
       load.local_date AS localDate,
@@ -147,18 +191,20 @@ function loadTrainingContext(
       SUM(CASE WHEN session.anchor_start_at >= ? THEN 1 ELSE 0 END) AS runs4w,
       SUM(CASE WHEN session.anchor_distance_km >= ? THEN 1 ELSE 0 END) AS exposure8w,
       MAX(session.anchor_start_at) AS latestAt,
-      AVG(feature.quality_score) AS averageQuality
+      AVG(${historicalQualitySql()}) AS averageQuality
     FROM training_sessions session
     JOIN workout_features feature ON feature.training_session_id = session.id
     JOIN model_runs model ON model.feature_run_id = feature.feature_run_id
     JOIN active_model_run active ON active.model_run_id = model.id
+    ${historicalOverrideJoin("LEFT JOIN")}
     WHERE session.status = 'active'
       AND session.anchor_start_at >= ?
       AND session.anchor_end_at <= ?
       AND session.anchor_distance_km IS NOT NULL
       AND session.anchor_distance_km > 0
-      AND feature.eligibility_status <> 'excluded'
+      AND (${historicalEligibilitySql()}) <> 'excluded'
   `).get(
+    asOf,
     start4w,
     start4w,
     exposureThresholdKm[distance],
@@ -220,6 +266,9 @@ export function buildRaceResidualFeatureValues(
     targetDistanceExposure8w: context.targetDistanceExposure8w,
     daysSinceLastRun: context.daysSinceLastRun,
     acuteChronicLoadRatio: context.acuteChronicLoadRatio,
+    // Weather train/serve parity: training uses historical race conditions (often null);
+    // serve may inject scenario weather. Do not dual-sample null+observed here — keep a
+    // single sample matching observed conditions so feature semantics stay consistent.
     temperatureC: scenario.temperatureC,
     humidityPercent: scenario.humidityPercent,
     elevationGainMeters: scenario.elevationGainMeters[distance],
@@ -238,28 +287,20 @@ export function buildRaceResidualTrainingDataset(
   const outcomes = loadLabeledRaceOutcomes(database, asOf);
   const samples: RaceResidualTrainingSample[] = [];
   for (const outcome of outcomes) {
-    const conditions = parsePerformanceConditions(
-      loadOutcomeMetadata(database, outcome.id)
-    );
-    const elevationGainMeters = conditions.elevationGainMeters === null
-      ? undefined
-      : { [outcome.distance]: conditions.elevationGainMeters };
-    const base = buildFormulaPredictionBase(database, outcome.observedAt, {
-      ...(conditions.temperatureC === null ? {} : { temperatureC: conditions.temperatureC }),
-      ...(conditions.humidityPercent === null ? {} : { humidityPercent: conditions.humidityPercent }),
-      ...(elevationGainMeters === undefined ? {} : { elevationGainMeters })
-    });
+    // Apple workout weather and accumulated elevation are result metadata. Without
+    // an independently timestamped pre-race scenario they are unavailable here.
+    const base = buildFormulaPredictionBase(database, outcome.observedAt, {});
     const prediction = base.snapshot.races.find((race) => race.distance === outcome.distance);
     if (!prediction || prediction.status !== "available" || prediction.predictedSeconds === null) {
       continue;
     }
     const scenario: PhysiologyPredictionScenario = {
-      temperatureC: conditions.temperatureC,
-      humidityPercent: conditions.humidityPercent,
+      temperatureC: null,
+      humidityPercent: null,
       elevationGainMeters: {
-        five_k: outcome.distance === "five_k" ? conditions.elevationGainMeters : null,
-        ten_k: outcome.distance === "ten_k" ? conditions.elevationGainMeters : null,
-        half_marathon: outcome.distance === "half_marathon" ? conditions.elevationGainMeters : null
+        five_k: null,
+        ten_k: null,
+        half_marathon: null
       }
     };
     const features = buildRaceResidualFeatureValues(
@@ -275,6 +316,7 @@ export function buildRaceResidualTrainingDataset(
       sampleId: outcome.id,
       observedAt: outcome.observedAt,
       completedAt: outcome.completedAt,
+      labelAvailableAt: outcome.labelAvailableAt,
       distance: outcome.distance,
       baselinePredictedSeconds: prediction.predictedSeconds,
       baselineOptimisticSeconds: prediction.optimisticSeconds,

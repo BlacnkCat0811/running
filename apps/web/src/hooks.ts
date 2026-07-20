@@ -10,10 +10,35 @@ export function useRemote<T>(
 ) {
   const [data, setData] = useState<T | null>(null);
   const dataRef = useRef<T | null>(null);
+  const [dataPath, setDataPath] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Track path/enabled so the first render after a change is not a stale success frame.
+  const [requestKey, setRequestKey] = useState({ path, enabled });
+  if (requestKey.path !== path || requestKey.enabled !== enabled) {
+    setRequestKey({ path, enabled });
+    requestIdRef.current += 1;
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    if (!enabled) {
+      dataRef.current = null;
+      setData(null);
+      setDataPath(null);
+      setError(null);
+      setLoading(false);
+    } else if (!backgroundRefresh) {
+      dataRef.current = null;
+      setData(null);
+      setDataPath(null);
+      setError(null);
+      setLoading(true);
+    } else {
+      setError(null);
+      setLoading(dataRef.current === null);
+    }
+  }
   const reload = useCallback(async (): Promise<boolean> => {
     const requestId = ++requestIdRef.current;
     controllerRef.current?.abort();
@@ -21,6 +46,7 @@ export function useRemote<T>(
       controllerRef.current = null;
       dataRef.current = null;
       setData(null);
+      setDataPath(null);
       setError(null);
       setLoading(false);
       return true;
@@ -34,6 +60,7 @@ export function useRemote<T>(
       if (requestId !== requestIdRef.current) return true;
       dataRef.current = next;
       setData(next);
+      setDataPath(path);
       return true;
     } catch (caught) {
       if (requestId !== requestIdRef.current) return true;
@@ -54,5 +81,5 @@ export function useRemote<T>(
     window.addEventListener("rai:data-updated", refresh);
     return () => window.removeEventListener("rai:data-updated", refresh);
   }, [refreshOnDataUpdate, reload]);
-  return { data, error, loading, reload };
+  return { data, dataPath, error, loading, reload };
 }

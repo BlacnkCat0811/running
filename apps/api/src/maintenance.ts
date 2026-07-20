@@ -1,11 +1,15 @@
-import { createReadStream, existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, rename, rm, stat, statfs } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { copyFile, mkdir, open, readdir, rename, rm, stat, statfs } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 
 import type { BackupDto } from "@rai/api-contracts";
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
+
+const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => {
+  database.exec(`PRAGMA busy_timeout = ${milliseconds}`);
+};
 
 const hasRequiredColumns = (
   database: DatabaseSync,
@@ -78,6 +82,7 @@ const DEFAULT_BACKUP_POLICY = {
 
 export class DatabaseMaintenance {
   readonly backupDirectory: string;
+  readonly quarantineDirectory: string;
 
   constructor(
     private readonly databasePath: string,
@@ -90,12 +95,13 @@ export class DatabaseMaintenance {
     private readonly backupPolicy: BackupPolicyOptions = {}
   ) {
     this.backupDirectory = resolve(projectRoot, "var/backups");
+    this.quarantineDirectory = resolve(projectRoot, "var/quarantine");
   }
 
   async createBackup(reason = "manual", additionalProtectedNames: readonly string[] = []): Promise<BackupDto> {
     if (!existsSync(this.databasePath)) throw new Error("本地 RAI 数据库不存在");
     await mkdir(this.backupDirectory, { recursive: true });
-    await this.ensureBackupCapacity();
+    await this.ensureBackupCapacity(additionalProtectedNames);
     const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
     const safeReason = reason.replace(/[^a-z0-9-]/gi, "-").slice(0, 48) || "manual";
     const name = `rai.${safeReason}.${timestamp}.${randomUUID().slice(0, 8)}.sqlite`;
@@ -120,7 +126,12 @@ export class DatabaseMaintenance {
       database.close();
     }
     const result = await this.describe(name);
-    await this.enforceBackupPolicy([name, ...additionalProtectedNames]);
+    try {
+      await this.enforceBackupPolicy([name, ...additionalProtectedNames]);
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      process.stderr.write(`Backup retention cleanup failed after backup was published: ${message}\n`);
+    }
     return result;
   }
 
@@ -128,15 +139,32 @@ export class DatabaseMaintenance {
     if (!existsSync(this.backupDirectory)) return [];
     const names = (await readdir(this.backupDirectory))
       .filter((name) => name.endsWith(".sqlite"));
-    const backups = await Promise.all(names.map((name) => this.describe(name)));
-    return backups.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const backups = await Promise.all(names.map(async (name) => {
+      try {
+        return await this.describe(name);
+      } catch (error) {
+        // Retention and explicit deletion may remove an entry after readdir().
+        if (this.isMissingFileError(error)) return null;
+        throw error;
+      }
+    }));
+    return backups
+      .filter((backup): backup is BackupDto => backup !== null)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  backupStream(name: string) {
+  async backupStream(name: string) {
     if (name !== basename(name) || !name.endsWith(".sqlite")) throw new Error("备份文件名无效");
     const path = resolve(this.backupDirectory, name);
-    if (!existsSync(path)) throw new Error("备份文件不存在");
-    return createReadStream(path);
+    try {
+      // Opening first removes the exists/open race. On Windows the handle also
+      // keeps deletion from invalidating a response already being streamed.
+      const handle = await open(path, "r");
+      return handle.createReadStream();
+    } catch (error) {
+      if (this.isMissingFileError(error)) throw new Error("备份文件不存在");
+      throw error;
+    }
   }
 
   async deleteBackup(name: string): Promise<BackupDto> {
@@ -147,28 +175,27 @@ export class DatabaseMaintenance {
     return backupInfo;
   }
 
-  async deleteDatabase(): Promise<BackupDto> {
-    const backupInfo = await this.createBackup("before-delete");
-    const backupPath = resolve(this.backupDirectory, backupInfo.name);
-    let replaceGateEntered = true;
+  async deleteDatabase(): Promise<BackupDto & { restorable?: boolean }> {
+    const originalReadable = this.isReadableDatabase(this.databasePath);
+    let backupIsQuarantine = false;
+    let backupInfo: BackupDto;
+    try {
+      backupInfo = await this.createBackup("before-delete");
+    } catch (error) {
+      if (this.isReadableDatabase(this.databasePath)) throw error;
+      backupInfo = await this.preserveCorruptDatabase("before-delete-corrupt");
+      backupIsQuarantine = true;
+    }
+    const backupPath = resolve(backupIsQuarantine ? this.quarantineDirectory : this.backupDirectory, backupInfo.name);
+    let replaceGateEntered = false;
     try {
       await this.beforeReplace();
+      replaceGateEntered = true;
     } catch (error) {
-      const errors: unknown[] = [error];
-      if (this.isReadableDatabase(this.databasePath)) {
-        try {
-          await this.releaseReplaceGate();
-          replaceGateEntered = false;
-        } catch (releaseError) {
-          errors.push(releaseError);
-        }
-      }
-      throw errors.length === 1
-        ? error
-        : new AggregateError(errors, "Database deletion gate failed and could not be released");
+      throw error;
     }
     try {
-      this.checkpointDatabase(this.databasePath);
+      if (this.isReadableDatabase(this.databasePath)) this.checkpointDatabase(this.databasePath);
       await this.removeFileWithRetry(`${this.databasePath}-shm`);
       await this.removeFileWithRetry(`${this.databasePath}-wal`);
       await this.removeFileWithRetry(this.databasePath);
@@ -177,10 +204,13 @@ export class DatabaseMaintenance {
       return backupInfo;
     } catch (error) {
       const errors: unknown[] = [error];
+      let originalRestored = false;
       if (!this.isReadableDatabase(this.databasePath)) {
-        errors.push(...await this.restoreDeletedDatabase(backupPath));
+        const restoreErrors = await this.restoreDeletedDatabase(backupPath, backupIsQuarantine);
+        errors.push(...restoreErrors);
+        originalRestored = restoreErrors.length === 0;
       }
-      if (replaceGateEntered && this.isReadableDatabase(this.databasePath)) {
+      if (replaceGateEntered && (this.isReadableDatabase(this.databasePath) || (!originalReadable && originalRestored))) {
         try {
           await this.releaseReplaceGate();
           replaceGateEntered = false;
@@ -201,9 +231,7 @@ export class DatabaseMaintenance {
     if (name !== basename(name) || !name.endsWith(".sqlite")) throw new Error("备份文件名无效");
     const source = resolve(this.backupDirectory, name);
     if (!existsSync(source)) throw new Error("备份文件不存在");
-    const safetyBackup = existsSync(this.databasePath)
-      ? await this.createBackup("before-restore", [name])
-      : null;
+    let safetyBackup: BackupDto | null = null;
     const staging = `${this.databasePath}.restoring.${randomUUID()}`;
     const rollback = resolve(this.backupDirectory, `rai.restore-rollback.${randomUUID()}.sqlite`);
     try {
@@ -232,37 +260,54 @@ export class DatabaseMaintenance {
       // Read-only validation can recreate WAL sidecars for a WAL-mode database.
       await this.removeFileWithRetry(`${staging}-shm`);
       await this.removeFileWithRetry(`${staging}-wal`);
+      // A rejected restore must not consume retention slots or evict good backups.
+      if (existsSync(this.databasePath)) {
+        try {
+          safetyBackup = await this.createBackup("before-restore", [name]);
+        } catch (error) {
+          const message = error instanceof Error ? error.stack ?? error.message : String(error);
+          process.stderr.write(`Restore safety backup failed; the replacement gate will preserve corrupt bytes in quarantine: ${message}\n`);
+        }
+      }
       let replaceGateEntered = false;
       try {
-        replaceGateEntered = true;
         await this.beforeReplace();
+        replaceGateEntered = true;
       } catch (error) {
-        if (replaceGateEntered && this.isReadableDatabase(this.databasePath)) {
-          try {
-            await this.releaseReplaceGate();
-          } catch (releaseError) {
-            throw new AggregateError([error, releaseError], "Failed to enter and release database replacement gate");
-          }
-        }
         throw error;
       }
       const originalExisted = existsSync(this.databasePath);
+      const originalReadable = originalExisted && this.isReadableDatabase(this.databasePath);
       let originalMoved = false;
+      let corruptSnapshotPath: string | null = null;
+      let originalMutationStarted = false;
       let committed = false;
       try {
         if (originalExisted) {
-          const current = new DatabaseSync(this.databasePath);
-          try {
-            current.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-          } finally {
-            current.close();
+          if (originalReadable) {
+            const current = new DatabaseSync(this.databasePath);
+            applyBusyTimeout(current);
+            try {
+              current.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+            } finally {
+              current.close();
+            }
           }
-          await this.moveFile(this.databasePath, rollback);
-          originalMoved = true;
+          if (originalReadable) {
+            await this.moveFileWithRetry(this.databasePath, rollback);
+            originalMoved = true;
+          } else {
+            const snapshot = await this.preserveCorruptDatabase("before-restore-corrupt");
+            corruptSnapshotPath = resolve(this.quarantineDirectory, snapshot.name);
+            originalMutationStarted = true;
+            await this.removeFileWithRetry(`${this.databasePath}-shm`);
+            await this.removeFileWithRetry(`${this.databasePath}-wal`);
+            await this.removeFileWithRetry(this.databasePath);
+          }
         }
         await this.removeFileWithRetry(`${this.databasePath}-shm`);
         await this.removeFileWithRetry(`${this.databasePath}-wal`);
-        await this.installReplacement(staging, this.databasePath);
+        await this.installReplacementWithRetry(staging, this.databasePath);
         await beforeCommit();
         await this.releaseReplaceGate();
         replaceGateEntered = false;
@@ -271,7 +316,9 @@ export class DatabaseMaintenance {
         const errors: unknown[] = [error];
         if (originalMoved) {
           errors.push(...await this.restoreOriginalDatabase(rollback));
-        } else if (existsSync(this.databasePath)) {
+        } else if (corruptSnapshotPath) {
+          errors.push(...await this.restoreDatabaseGroup(corruptSnapshotPath, false));
+        } else if (!originalExisted && existsSync(this.databasePath)) {
           try {
             await this.removeFileWithRetry(`${this.databasePath}-shm`);
             await this.removeFileWithRetry(`${this.databasePath}-wal`);
@@ -280,7 +327,11 @@ export class DatabaseMaintenance {
           }
         }
         const activeReadable = this.isReadableDatabase(this.databasePath);
-        if (replaceGateEntered && activeReadable) {
+        if (replaceGateEntered && (
+          activeReadable ||
+          (!originalReadable && !originalMutationStarted && existsSync(this.databasePath)) ||
+          (!originalReadable && corruptSnapshotPath !== null && errors.length === 1)
+        )) {
           if (!originalExisted) {
             try {
               // quick_check can open WAL sidecars even in read-only mode.
@@ -351,14 +402,15 @@ export class DatabaseMaintenance {
       }
     }
     try {
-      await this.moveFile(rollback, this.databasePath);
+      await this.moveFileWithRetry(rollback, this.databasePath);
     } catch (error) {
       errors.push(error);
     }
     return errors;
   }
 
-  private async restoreDeletedDatabase(backupPath: string): Promise<unknown[]> {
+  private async restoreDeletedDatabase(backupPath: string, restoreSidecars = false): Promise<unknown[]> {
+    if (restoreSidecars) return await this.restoreDatabaseGroup(backupPath, false);
     const errors: unknown[] = [];
     const staging = `${this.databasePath}.delete-rollback.${randomUUID()}`;
     try {
@@ -366,7 +418,7 @@ export class DatabaseMaintenance {
         await this.removeFileWithRetry(candidate);
       }
       await copyFile(backupPath, staging);
-      await this.moveFile(staging, this.databasePath);
+      await this.moveFileWithRetry(staging, this.databasePath);
       if (!this.isReadableDatabase(this.databasePath)) {
         throw new Error("Safety backup did not restore a readable active database");
       }
@@ -382,8 +434,76 @@ export class DatabaseMaintenance {
     return errors;
   }
 
+  private async restoreDatabaseGroup(sourceBase: string, requireReadable: boolean): Promise<unknown[]> {
+    const errors: unknown[] = [];
+    const stagingBase = `${this.databasePath}.group-rollback.${randomUUID()}`;
+    const suffixes = ["-wal", "-shm", ""] as const;
+    const available = suffixes.filter((suffix) => existsSync(`${sourceBase}${suffix}`));
+    try {
+      if (!available.includes("")) throw new Error("Database group main file is missing");
+      for (const suffix of available) await copyFile(`${sourceBase}${suffix}`, `${stagingBase}${suffix}`);
+      for (const suffix of ["-shm", "-wal", ""] as const) {
+        await this.removeFileWithRetry(`${this.databasePath}${suffix}`);
+      }
+      for (const suffix of available.filter((suffix) => suffix !== "")) {
+        await this.moveFileWithRetry(`${stagingBase}${suffix}`, `${this.databasePath}${suffix}`);
+      }
+      await this.moveFileWithRetry(stagingBase, this.databasePath);
+      if (requireReadable && !this.isReadableDatabase(this.databasePath)) {
+        throw new Error("Safety backup did not restore a readable active database");
+      }
+    } catch (error) {
+      errors.push(error);
+    } finally {
+      for (const suffix of suffixes) {
+        try {
+          await this.removeFileWithRetry(`${stagingBase}${suffix}`);
+        } catch (cleanupError) {
+          errors.push(cleanupError);
+        }
+      }
+    }
+    return errors;
+  }
+
   private async backupDatabase(database: DatabaseSync, destination: string): Promise<void> {
     await backup(database, destination);
+  }
+
+  async preserveCorruptDatabase(reason: string): Promise<BackupDto & { restorable: false }> {
+    if (!existsSync(this.databasePath)) throw new Error("Local RAI database does not exist");
+    await mkdir(this.quarantineDirectory, { recursive: true });
+    const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
+    const safeReason = reason.replace(/[^a-z0-9-]/gi, "-").slice(0, 48) || "corrupt";
+    const name = `rai.${safeReason}.${timestamp}.${randomUUID().slice(0, 8)}.sqlite`;
+    const destination = resolve(this.quarantineDirectory, name);
+    const stagingId = randomUUID();
+    const staged = ["", "-wal", "-shm"]
+      .map((suffix) => ({ suffix, source: `${this.databasePath}${suffix}` }))
+      .filter(({ source }) => existsSync(source))
+      .map(({ suffix, source }) => ({
+        suffix,
+        source,
+        staging: `${destination}${suffix}.partial-${stagingId}`,
+        published: `${destination}${suffix}`
+      }));
+    try {
+      for (const item of staged) await copyFile(item.source, item.staging);
+      for (const item of staged.filter((item) => item.suffix !== "")) {
+        await rename(item.staging, item.published);
+      }
+      const main = staged.find((item) => item.suffix === "");
+      if (!main) throw new Error("Local RAI database does not exist");
+      await rename(main.staging, main.published);
+    } catch (error) {
+      for (const item of staged) {
+        await this.removeFileWithRetry(item.staging).catch(() => {});
+        await this.removeFileWithRetry(item.published).catch(() => {});
+      }
+      throw error;
+    }
+    const info = await stat(destination);
+    return { name, sizeBytes: info.size, createdAt: info.mtime.toISOString(), restorable: false };
   }
 
   private resolvedBackupPolicy(): Required<BackupPolicyOptions> {
@@ -396,17 +516,40 @@ export class DatabaseMaintenance {
     };
   }
 
-  async ensureBackupCapacity(): Promise<void> {
-    const [databaseInfo, filesystem] = await Promise.all([
-      stat(this.databasePath),
-      statfs(this.backupDirectory)
-    ]);
-    const availableBytes = filesystem.bavail * filesystem.bsize;
+  async ensureBackupCapacity(protectedNames: readonly string[] = []): Promise<void> {
+    await mkdir(this.backupDirectory, { recursive: true });
+    try {
+      await this.enforceBackupPolicy(protectedNames);
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      process.stderr.write(`Pre-backup retention cleanup failed; checking capacity without pruning: ${message}\n`);
+    }
+    const databaseInfo = await stat(this.databasePath);
     const requiredBytes = databaseInfo.size + this.resolvedBackupPolicy().minimumFreeBytes;
+    let backups = await this.listBackups();
+    let filesystem = await statfs(this.backupDirectory);
+    let availableBytes = filesystem.bavail * filesystem.bsize;
+    const protectedSet = new Set(protectedNames);
+    const removalErrors: unknown[] = [];
+    for (const candidate of [...backups].reverse()) {
+      if (availableBytes >= requiredBytes || backups.length <= 1) break;
+      if (protectedSet.has(candidate.name)) continue;
+      try {
+        await this.removeFileWithRetry(resolve(this.backupDirectory, candidate.name));
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (!["EBUSY", "EPERM", "EACCES"].includes(code ?? "")) throw error;
+        removalErrors.push(error);
+        continue;
+      }
+      backups = backups.filter((backupInfo) => backupInfo.name !== candidate.name);
+      filesystem = await statfs(this.backupDirectory);
+      availableBytes = filesystem.bavail * filesystem.bsize;
+    }
     if (availableBytes < requiredBytes) {
-      throw new Error(
-        `磁盘空间不足，创建备份至少需要 ${requiredBytes} 字节，当前可用 ${availableBytes} 字节`
-      );
+      const message = `磁盘空间不足，创建备份至少需要 ${requiredBytes} 字节，当前可用 ${availableBytes} 字节`;
+      if (removalErrors.length > 0) throw new AggregateError(removalErrors, message);
+      throw new Error(message);
     }
   }
 
@@ -429,6 +572,7 @@ export class DatabaseMaintenance {
 
   private checkpointDatabase(path: string): void {
     const database = new DatabaseSync(path);
+    applyBusyTimeout(database);
     try {
       database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } finally {
@@ -485,5 +629,34 @@ export class DatabaseMaintenance {
       sizeBytes: info.size,
       createdAt: info.mtime.toISOString()
     };
+  }
+
+  private async moveFileWithRetry(source: string, destination: string): Promise<void> {
+    await this.retryWindowsFileOperation(() => this.moveFile(source, destination));
+  }
+
+  private async installReplacementWithRetry(source: string, destination: string): Promise<void> {
+    await this.retryWindowsFileOperation(() => this.installReplacement(source, destination));
+  }
+
+  private async retryWindowsFileOperation(operation: () => Promise<void>): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        await operation();
+        return;
+      } catch (error) {
+        lastError = error;
+        const code = (error as NodeJS.ErrnoException).code;
+        if (!["EBUSY", "EPERM", "EACCES"].includes(code ?? "") || attempt === 19) throw error;
+        await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 100));
+      }
+    }
+    throw lastError;
+  }
+
+  private isMissingFileError(error: unknown): boolean {
+    return typeof error === "object" && error !== null &&
+      "code" in error && (error as { code?: unknown }).code === "ENOENT";
   }
 }

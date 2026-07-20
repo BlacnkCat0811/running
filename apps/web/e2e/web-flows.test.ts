@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import test, { after, before, type TestContext } from "node:test";
 
-import { chromium, type Browser, type Page } from "playwright-core";
+import { chromium, type Browser, type Page, type Request } from "playwright-core";
+import { ImportSourceManager } from "../../api/src/import-sources.js";
 
 import { JobEventNotifier } from "../src/events.js";
 
@@ -46,28 +46,10 @@ let firstRunApi: RunningApi;
 let temporaryRoot: string;
 let syntheticExport: string;
 
-async function availablePort(): Promise<number> {
-  return await new Promise((resolvePort, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("无法分配 E2E 端口"));
-        return;
-      }
-      const port = address.port;
-      server.close((error) => (error ? reject(error) : resolvePort(port)));
-    });
-  });
-}
-
 async function startApi(
   databasePath: string,
   runtimeRoot = projectRoot,
 ): Promise<RunningApi> {
-  const port = await availablePort();
   let output = "";
   const child = spawn(
     process.execPath,
@@ -76,7 +58,7 @@ async function startApi(
       cwd: projectRoot,
       env: {
         ...process.env,
-        RAI_API_PORT: String(port),
+        RAI_API_PORT: "0",
         RAI_DATABASE: databasePath,
         RAI_RUNTIME_ROOT: runtimeRoot,
         RAI_LOG_LEVEL: "fatal",
@@ -90,6 +72,28 @@ async function startApi(
   };
   child.stdout?.on("data", append);
   child.stderr?.on("data", append);
+  const port = await new Promise<number>((resolvePort, reject) => {
+    const timer = setTimeout(() => reject(new Error(output || "API did not report its bound port")), 20_000);
+    const onExit = (code: number | null) => {
+      clearTimeout(timer);
+      reject(new Error(output || `API exited with ${code}`));
+    };
+    child.once("exit", onExit);
+    child.on("message", (message: unknown) => {
+      if (
+        typeof message === "object" && message !== null &&
+        (message as { type?: unknown }).type === "rai:ready" &&
+        Number.isInteger((message as { port?: unknown }).port)
+      ) {
+        clearTimeout(timer);
+        child.off("exit", onExit);
+        resolvePort((message as { port: number }).port);
+      }
+    });
+  }).catch(async (error) => {
+    await stopApi({ child, origin: "", output: () => output }).catch(() => child.kill("SIGKILL"));
+    throw error;
+  });
   const origin = `http://127.0.0.1:${port}`;
   const failStart = async (message: string): Promise<never> => {
     const startupError = new Error(message);
@@ -136,10 +140,18 @@ async function createSyntheticExport(path: string): Promise<void> {
   </Workout>`,
     )
     .join("");
+  const heartRateRecords = days.flatMap((day, index) =>
+    Array.from({ length: 15 }, (_, sample) => {
+      const minute = String(sample * 2).padStart(2, "0");
+      const endMinute = String(sample * 2 + 1).padStart(2, "0");
+      return `
+  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="E2E Apple Watch" sourceVersion="1" unit="count/min" creationDate="${appleDate(day, "08:31")}" startDate="${appleDate(day, `08:${minute}`)}" endDate="${appleDate(day, `08:${endMinute}`)}" value="${140 + index + (sample % 3)}"/>`;
+    }),
+  ).join("");
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <HealthData locale="zh_CN">
   <ExportDate value="${appleDate(25, "12:00")}"/>
-  <Me biologicalSex="HKBiologicalSexMale"/>${workouts}
+  <Me biologicalSex="HKBiologicalSexMale"/>${workouts}${heartRateRecords}
 </HealthData>`;
   await writeFile(resolve(path, "export.xml"), xml, "utf8");
 }
@@ -154,11 +166,14 @@ async function backupDatabase(sourcePath: string, destinationPath: string): Prom
   }
 }
 
-async function importSyntheticFixture(api: RunningApi): Promise<void> {
+async function importSyntheticFixture(api: RunningApi, sourceId: string): Promise<void> {
   const response = await fetch(`${api.origin}/v1/import-jobs`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ inputPath: syntheticExport, confirmReplace: true }),
+    headers: {
+      "content-type": "application/json",
+      "x-rai-local-request": "1",
+    },
+    body: JSON.stringify({ sourceId }),
   });
   assert.equal(response.status, 200, await response.text());
   await waitForImport(api.origin);
@@ -281,6 +296,43 @@ function collectRuntimeErrors(page: Page): RuntimeErrorRecord[] {
     }
   });
   return errors;
+}
+
+function collectPendingRequests(page: Page): () => string[] {
+  const pending = new Map<Request, { method: string; url: string; startedAt: number }>();
+  page.on("request", (request) => {
+    pending.set(request, {
+      method: request.method(),
+      url: request.url(),
+      startedAt: Date.now(),
+    });
+  });
+  const remove = (request: Request): void => {
+    pending.delete(request);
+  };
+  page.on("requestfinished", remove);
+  page.on("requestfailed", remove);
+  return () => [...pending.values()].map(
+    ({ method, url, startedAt }) => `${method} ${url} (${Date.now() - startedAt}ms)`,
+  );
+}
+
+async function navigateToSettingsWithDiagnostics(
+  page: Page,
+  runtimeErrors: RuntimeErrorRecord[],
+  pendingRequests: () => string[],
+): Promise<void> {
+  const urlReady = page.waitForURL((url) => url.pathname === "/settings");
+  const headingReady = page.getByRole("heading", { name: "设置" }).waitFor();
+  try {
+    await page.getByRole("link", { name: "设置", exact: true }).click();
+    await Promise.all([urlReady, headingReady]);
+  } catch (error) {
+    throw new Error(
+      `设置导航未完成：url=${page.url()} pending=${JSON.stringify(pendingRequests())} runtimeErrors=${JSON.stringify(runtimeErrors)}`,
+      { cause: error },
+    );
+  }
 }
 
 function consumeExpectedHttpFailures(
@@ -424,8 +476,12 @@ before(async () => {
     resolve(temporaryRoot, "first-run"),
   );
   const fixtureRoot = resolve(temporaryRoot, "fixture");
+  const fixtureSource = await new ImportSourceManager(
+    fixtureRoot,
+    projectRoot,
+  ).registerDirectory(syntheticExport);
   fixtureApi = await startApi(resolve(fixtureRoot, "var/rai.sqlite"), fixtureRoot);
-  await importSyntheticFixture(fixtureApi);
+  await importSyntheticFixture(fixtureApi, fixtureSource.sourceId);
   if (
     process.env.npm_lifecycle_event === "test:e2e:responsive" &&
     existsSync(realDatabase)
@@ -440,6 +496,55 @@ after(async () => {
   await Promise.all([stopApi(realApi), stopApi(fixtureApi), stopApi(firstRunApi)]);
   await browser?.close();
   if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+});
+
+desktopTest("1024px desktop keeps prediction model actions within the viewport", async () => {
+  const context = await browser.newContext({
+    viewport: { width: 1024, height: 900 },
+  });
+  const page = await context.newPage();
+  const runtimeErrors = collectRuntimeErrors(page);
+  try {
+    await page.route("**/v1/prediction-models", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          runs: [{
+            id: "prediction-layout-run",
+            status: "succeeded",
+            active: false,
+            modelVersion: "catboost-layout-verification",
+            featureSchemaVersion: "prediction_features_v1",
+            createdAt: new Date().toISOString(),
+            labelCount: 60,
+            holdoutPredictionCount: 12,
+            labelCountByDistance: { five_k: 20, ten_k: 20, half_marathon: 20 },
+            metrics: {
+              maeImprovement: 0.12,
+              baselineMaeSeconds: 30,
+              modelMaeSeconds: 26,
+            },
+          }],
+        }),
+      });
+    });
+    await page.goto(`${fixtureApi.origin}/data`, { waitUntil: "domcontentloaded" });
+    await page.getByText("catboost-layout-verification").waitFor();
+    const metrics = await page.evaluate(() => ({
+      viewport: window.innerWidth,
+      document: document.documentElement.scrollWidth,
+      body: document.body.scrollWidth,
+      modelList: document.querySelector(".prediction-model-list")?.scrollWidth ?? 0,
+      modelPanel: document.querySelector(".prediction-model-management")?.clientWidth ?? 0,
+    }));
+    assert.ok(metrics.document <= metrics.viewport, JSON.stringify(metrics));
+    assert.ok(metrics.body <= metrics.viewport, JSON.stringify(metrics));
+    assert.ok(metrics.modelList <= metrics.modelPanel, JSON.stringify(metrics));
+    assert.deepEqual(runtimeErrors, []);
+  } finally {
+    await context.close();
+  }
 });
 
 desktopTest("无数据库时只开放安全的首次导入流程", async () => {
@@ -596,6 +701,37 @@ desktopTest("概览趋势失败时显示可重试错误而非永久加载", asyn
   }
 });
 
+desktopTest("概览统计失败时显示错误而不伪装成数据积累", async () => {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = await context.newPage();
+  const runtimeErrors = collectRuntimeErrors(page);
+  try {
+    await page.route(
+      "**/v1/training-statistics/overview",
+      async (route) => {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ message: "统计暂不可用" }),
+        });
+      },
+      { times: 1 },
+    );
+    await page.goto(fixtureApi.origin, { waitUntil: "domcontentloaded" });
+    await page.getByRole("heading", { name: "你的跑步能力" }).waitFor();
+    await page.getByRole("alert").filter({ hasText: "统计暂不可用" }).waitFor();
+    assert.equal(await page.getByText("数据积累中", { exact: true }).count(), 0);
+    consumeExpectedHttpFailures(runtimeErrors, 500, "/v1/training-statistics/overview");
+    await page.getByRole("button", { name: "重试" }).click();
+    await page.getByRole("heading", { name: "训练状态" }).waitFor();
+    assert.deepEqual(runtimeErrors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 desktopTest("合成数据主流程可导航、筛选、检查详情和只读比较", async () => {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
@@ -635,6 +771,32 @@ desktopTest("合成数据主流程可导航、筛选、检查详情和只读比�
       waitUntil: "domcontentloaded",
     });
     await page.waitForFunction(() => window.location.search === "");
+    const outOfRangeResponsePromise = page.waitForResponse(
+      (response) =>
+        response.url().includes("/v1/workouts?") &&
+        response.url().includes("offset=999999") &&
+        response.ok(),
+    );
+    await page.goto(`${fixtureApi.origin}/workouts?offset=999999`, {
+      waitUntil: "domcontentloaded",
+    });
+    const outOfRangeResponse = (await outOfRangeResponsePromise);
+    const outOfRangeBody = (await outOfRangeResponse.json()) as {
+      total: number;
+    };
+    const expectedLastOffset =
+      outOfRangeBody.total === 0
+        ? 0
+        : Math.floor((outOfRangeBody.total - 1) / 30) * 30;
+    await page.waitForFunction(
+      (expectedOffset) =>
+        new URLSearchParams(window.location.search).get("offset") ===
+        (expectedOffset === 0 ? null : String(expectedOffset)),
+      expectedLastOffset,
+    );
+    if (outOfRangeBody.total > 0) {
+      await page.locator(".workout-table .row-link").first().waitFor();
+    }
     await page.getByLabel("资格").selectOption("eligible");
     await page.getByLabel("环境").selectOption("outdoor");
     await page.getByLabel("时间").selectOption("365");
@@ -765,7 +927,12 @@ desktopTest("合成数据主流程可导航、筛选、检查详情和只读比�
     await page.getByRole("button", { name: "周" }).click();
     await page.getByRole("heading", { name: "周跑量与负荷" }).waitFor();
 
+    const defaultTrendResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/v1/trends?days=90") && response.ok(),
+    );
     await page.getByRole("link", { name: "趋势", exact: true }).click();
+    await defaultTrendResponse;
     await page.getByRole("heading", { name: "能力趋势" }).waitFor();
     await page.getByRole("button", { name: "1 年" }).click();
     assert.equal(await page.getByRole("button", { name: "1 年" }).getAttribute("aria-pressed"), "true");
@@ -801,6 +968,9 @@ desktopTest("合成数据主流程可导航、筛选、检查详情和只读比�
     await page.getByRole("link", { name: "预测", exact: true }).click();
     await page.getByRole("heading", { name: "生理与成绩预测" }).waitFor();
     await page.getByText("有效 VDOT", { exact: true }).waitFor();
+    assert.equal(await page.getByText("较上周", { exact: false }).count(), 0);
+    assert.ok(await page.getByText("当前模型快照", { exact: false }).count() >= 2);
+    assert.equal(await page.getByLabel("天气").count(), 0);
     await page.getByLabel("温度").fill("30");
     await page.getByLabel("湿度").fill("80");
     await page.getByLabel("10K 爬升").fill("150");
@@ -827,7 +997,7 @@ desktopTest("合成数据主流程可导航、筛选、检查详情和只读比�
     assert.equal(scenarioBody.inputs.scenario.elevationGainMeters.ten_k, 150);
     await page.getByText("温湿度", { exact: true }).first().waitFor();
     await page.getByRole("heading", { name: "CatBoost 预测模型" }).waitFor();
-    await page.getByText(/CatBoost 已激活|公式基线/, { exact: true }).waitFor();
+    await page.getByText(/CatBoost 已激活|公式基线/, { exact: true }).first().waitFor();
     const invalidHumidity = await fetch(
       `${fixtureApi.origin}/v1/predictions?humidityPercent=101`,
     );
@@ -868,6 +1038,8 @@ desktopTest("合成数据主流程可导航、筛选、检查详情和只读比�
 
     await page.getByRole("link", { name: "查看数据审计" }).click();
     await page.getByRole("heading", { name: "数据审计" }).waitFor();
+    assert.equal(await page.getByText("变化（7天）", { exact: true }).count(), 0);
+    assert.ok(await page.getByText("当前数据集", { exact: true }).count() > 0);
 
     await page.getByRole("link", { name: "设置", exact: true }).click();
     await page.getByRole("heading", { name: "健康免责声明" }).waitFor();
@@ -997,9 +1169,11 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
   });
   const page = await context.newPage();
   const runtimeErrors = collectRuntimeErrors(page);
+  const pendingRequests = collectPendingRequests(page);
+  let releaseInitialRuntimeStatus: (() => void) | undefined;
+  let releaseTerminalRuntimeStatus: (() => void) | undefined;
+  let releaseTerminalImportPoll: (() => void) | undefined;
   try {
-    let releaseInitialRuntimeStatus: (() => void) | undefined;
-    let releaseTerminalRuntimeStatus: (() => void) | undefined;
     let delayedInitialRuntimeStatus = false;
     let createdImportJob: ({ id: string } & Record<string, unknown>) | null = null;
     const importCreated = new Promise<void>((resolveCreated) => {
@@ -1028,13 +1202,16 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       await terminalRuntimeStatusGate;
       await route.continue();
     });
+    await new ImportSourceManager(
+      resolve(temporaryRoot, "first-run"),
+      projectRoot,
+    ).registerDirectory(syntheticExport);
     await page.goto(`${firstRunApi.origin}/data`, {
       waitUntil: "domcontentloaded",
     });
-    await page.getByText("高级：从已解压目录导入").click();
-    await page.getByLabel("导出目录").fill(syntheticExport);
+    await page.getByRole("button", { name: /synthetic-apple-health/ }).click();
+    await page.getByRole("button", { name: "开始更新" }).waitFor();
     let rejectedFirstImportPoll = false;
-    let releaseTerminalImportPoll: (() => void) | undefined;
     const terminalImportPollGate = new Promise<void>((resolvePoll) => {
       releaseTerminalImportPoll = resolvePoll;
     });
@@ -1057,7 +1234,7 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
         response.request().method() === "POST" &&
         response.ok(),
     );
-    await page.getByRole("button", { name: "从目录更新" }).click();
+    await page.getByRole("button", { name: "开始更新" }).click();
     createdImportJob = await (await createdImportResponse).json() as {
       id: string;
     } & Record<string, unknown>;
@@ -1071,8 +1248,7 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     );
     assert.equal(delayedInitialRuntimeStatus, true);
     consumeExpectedHttpFailures(runtimeErrors, 503, /\/v1\/import-jobs\/[^/]+$/);
-    await page.getByRole("link", { name: "设置", exact: true }).click();
-    await page.getByRole("heading", { name: "设置" }).waitFor();
+    await navigateToSettingsWithDiagnostics(page, runtimeErrors, pendingRequests);
     releaseTerminalImportPoll?.();
     await page.unroute("**/v1/import-jobs/*");
     let healthRequestCount = 0;
@@ -1116,7 +1292,10 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       `${firstRunApi.origin}/v1/prediction-models/train`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "x-rai-local-request": "1",
+        },
         body: "{}",
       },
     );
@@ -1161,7 +1340,7 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       { times: 1 },
     );
     await page.getByRole("button", { name: "训练并自动激活" }).click();
-    await page.getByRole("status").filter({ hasText: "已进入队列" }).waitFor();
+    await page.getByRole("status").filter({ hasText: "当前排队中" }).waitFor();
 
     await page.getByRole("link", { name: "训练", exact: true }).click();
     const syntheticWorkouts = (await fetch(
@@ -1290,9 +1469,8 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     await page.goto(`${firstRunApi.origin}/data`, {
       waitUntil: "domcontentloaded",
     });
-    await page.getByText("高级：从已解压目录导入").click();
-    await page.getByLabel("导出目录").fill(syntheticExport);
-    await page.getByRole("button", { name: "从目录更新" }).click();
+    await page.getByRole("button", { name: /synthetic-apple-health/ }).click();
+    await page.getByRole("button", { name: "开始更新" }).click();
     await waitForImport(firstRunApi.origin, firstImportJobId);
     const modelsAfterUpdate = (await fetch(
       `${firstRunApi.origin}/v1/model-runs`,
@@ -1329,7 +1507,7 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     consumeExpectedHttpFailures(runtimeErrors, 500, "/v1/database");
     await page.getByRole("button", { name: "确认删除" }).click();
     await page
-      .getByText(/本地数据库已删除；删除前备份/)
+      .getByText(/本地数据库已删除；可恢复的删除前备份/)
       .waitFor({ timeout: 30_000 });
 
     const deletedHealth = (await fetch(`${firstRunApi.origin}/v1/health`).then(
@@ -1398,6 +1576,10 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     assert.equal(restoredModels.length, 2);
     assert.deepEqual(runtimeErrors, []);
   } finally {
+    releaseInitialRuntimeStatus?.();
+    releaseTerminalImportPoll?.();
+    releaseTerminalRuntimeStatus?.();
+    await page.unrouteAll({ behavior: "wait" });
     await context.close();
   }
 });

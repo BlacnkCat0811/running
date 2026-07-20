@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import type { DatabaseSync } from "node:sqlite";
+import { basename, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import cors from "@fastify/cors";
@@ -9,6 +9,7 @@ import fastifyStatic from "@fastify/static";
 import type {
   ImportJobRequest,
   OverrideWorkoutInput,
+  PredictionModelRun,
   TrainPredictionModelRequest,
   UpdateTrainingZoneProfileInput,
   TrainingStatisticsGranularity
@@ -16,23 +17,31 @@ import type {
 import {
   MINIMUM_LABELS_PER_DISTANCE,
   MINIMUM_PREDICTION_LABELS,
+  PredictionAbilityBaselineUnavailableError,
   PredictionModelActivationCompatibilityError,
   PredictionModelService,
   PredictionTrainingInProgressError,
   PredictionTrainingInputError,
   PredictionTrainingPreconditionError,
   RaiApplicationService,
+  TrainingZoneProfileRevisionConflictError,
+  TrainingZoneProfileValidationError,
   buildPredictionReportAsync
 } from "@rai/application";
-import { RaiDatabase } from "@rai/health-export-parser";
+import { acquireDatabasePublicationLock, RaiDatabase } from "@rai/storage-sqlite";
 import Fastify from "fastify";
 
+import { apiErrorPayload } from "./api-error.js";
 import { RaiReadStore } from "./data.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
-import { ImportSourceManager, ImportSourceNotFoundError } from "./import-sources.js";
+import {
+  ImportArchiveTooLargeError,
+  createImportSourceManager,
+  ImportSourceNotFoundError
+} from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { installLocalRequestSecurity } from "./local-request-security.js";
-import { ReadStoreManager } from "./read-store-manager.js";
+import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js";
 import {
   backupParamsSchema,
   deleteBodySchema,
@@ -59,8 +68,21 @@ import { needsFullTrainingZoneBackfill, readTrainingZoneWorkoutSetCounts } from 
 const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const runtimeRoot = resolve(process.env.RAI_RUNTIME_ROOT ?? projectRoot);
 const databasePath = resolve(process.env.RAI_DATABASE ?? resolve(projectRoot, "var/rai.sqlite"));
+const predictionArtifactRoot = resolve(runtimeRoot, "var", "model-artifacts", "prediction");
 const port = Number(process.env.RAI_API_PORT ?? 8787);
 const host = "127.0.0.1";
+const maxImportZipBytes = Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 4 * 1024 ** 3);
+if (!Number.isFinite(maxImportZipBytes) || maxImportZipBytes <= 0) {
+  throw new Error("RAI_IMPORT_MAX_ZIP_BYTES must be a positive number");
+}
+const releaseDatabasePublicationLock = acquireDatabasePublicationLock(databasePath, "api");
+let publicationLockReleased = false;
+const releasePublicationLock = (): void => {
+  if (publicationLockReleased) return;
+  publicationLockReleased = true;
+  releaseDatabasePublicationLock();
+};
+process.once("exit", releasePublicationLock);
 
 const app = Fastify({
   logger: { level: process.env.RAI_LOG_LEVEL ?? "info" },
@@ -68,11 +90,16 @@ const app = Fastify({
 });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
 await app.register(multipart, {
-  limits: { files: 1, fileSize: Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 4 * 1024 ** 3) }
+  limits: { files: 1, fileSize: maxImportZipBytes }
 });
 const developmentOrigins = new Set(["http://127.0.0.1:5173", "http://localhost:5173"]);
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const metadataOnlyMutationRoutes = new Set(["/v1/import-sources/discover"]);
+// Upload streams and discover are long/IO-only; they must not hold the mutation lock.
+// Import job start still acquires the coordinator for the job lifecycle.
+const metadataOnlyMutationRoutes = new Set([
+  "/v1/import-sources/discover",
+  "/v1/imports/uploads"
+]);
 const databaseRequiredMutationRoutes = new Set([
   "/v1/workouts/:id/override",
   "/v1/training-zones/profile",
@@ -87,7 +114,8 @@ const databaseRequiredMutationRoutes = new Set([
 ]);
 const mutationCoordinator = new MutationCoordinator();
 const mutationReleases = new WeakMap<object, () => void>();
-installLocalRequestSecurity(app, { apiPort: port, developmentOrigins });
+const localRequestSecurityOptions = { apiPort: port, developmentOrigins };
+installLocalRequestSecurity(app, localRequestSecurityOptions);
 app.addHook("preHandler", async (request, reply) => {
   const routeUrl = request.routeOptions.url;
   if (!unsafeMethods.has(request.method) || (routeUrl !== undefined && metadataOnlyMutationRoutes.has(routeUrl))) return;
@@ -119,10 +147,38 @@ if (existsSync(webDist)) {
 }
 
 const readStores = new ReadStoreManager(databasePath);
-const recomputeWorker = new RecomputeWorker(databasePath);
-const importWorker = new ImportWorker(databasePath, projectRoot, runtimeRoot, () => readStores.beginReplace(), () => readStores.endReplace());
-const importSources = new ImportSourceManager(runtimeRoot, projectRoot);
-const predictionModelWorker = new PredictionModelWorker(databasePath, projectRoot, runtimeRoot);
+let observeWorkerDatabaseError: (error: unknown) => void = () => {};
+const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error));
+const importSources = createImportSourceManager(runtimeRoot, projectRoot, maxImportZipBytes);
+await importSources.cleanupAbandonedUploads().catch((error) => {
+  app.log.warn(error, "Failed to clean abandoned import uploads during startup");
+});
+const importWorker = new ImportWorker(
+  databasePath,
+  projectRoot,
+  runtimeRoot,
+  () => readStores.beginReplace(),
+  () => readStores.endReplace(),
+  (error) => observeWorkerDatabaseError(error)
+);
+await importSources.cleanupAbandonedUploads(
+  Date.now(), undefined, importWorker.activeInputPaths()
+).catch((error) => {
+  app.log.warn(error, "Failed to clean uploads after interrupted import recovery");
+});
+const uploadCleanupTimer = setInterval(() => {
+  void importSources.cleanupAbandonedUploads(
+    Date.now(), undefined, importWorker.activeInputPaths()
+  ).catch((error) => app.log.warn(error, "Failed to clean expired import uploads"));
+}, 60 * 60_000);
+uploadCleanupTimer.unref();
+const predictionModelWorker = new PredictionModelWorker(
+  databasePath,
+  projectRoot,
+  runtimeRoot,
+  undefined,
+  (error) => observeWorkerDatabaseError(error)
+);
 const maintenance = new DatabaseMaintenance(
   databasePath,
   runtimeRoot,
@@ -137,6 +193,7 @@ let closing = false;
 let trainingZoneBackfillPromise: Promise<void> | null = null;
 app.addHook("onClose", async () => {
   closing = true;
+  clearInterval(uploadCleanupTimer);
   const results = await Promise.allSettled([
     trainingZoneBackfillPromise ?? Promise.resolve(),
     importWorker.close(),
@@ -146,10 +203,15 @@ app.addHook("onClose", async () => {
   try {
     readStores.close();
   } finally {
-    const failures = results
-      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      .map((result) => result.reason);
-    if (failures.length) throw new AggregateError(failures, "Failed to close API background resources");
+    try {
+      const failures = results
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason);
+      if (failures.length) throw new AggregateError(failures, "Failed to close API background resources");
+    } finally {
+      process.off("exit", releasePublicationLock);
+      releasePublicationLock();
+    }
   }
 });
 
@@ -160,27 +222,96 @@ const recoverDatabaseJobs = async (recoverPredictionLeases = false): Promise<voi
     new RaiApplicationService(migrationStore).recoverInterruptedJobs();
     if (recoverPredictionLeases) {
       // A restored database is an offline snapshot, so any persisted worker lease is stale.
-      new PredictionModelService(migrationStore).recoverAllLeases();
+      new PredictionModelService(migrationStore, predictionArtifactRoot).recoverAllLeases();
     }
   } finally {
     migrationStore.close();
   }
 };
 
-await recoverDatabaseJobs();
+let databaseReadyAtStartup = true;
+try {
+  await recoverDatabaseJobs();
+} catch (error) {
+  databaseReadyAtStartup = false;
+  app.log.error(error, "Database startup recovery failed; maintenance restore remains available");
+}
+let databaseRecoveryRequired = !databaseReadyAtStartup;
+let readinessCache: boolean | null = null;
+const invalidateDatabaseReadiness = (): void => { readinessCache = null; };
+
+const databaseIsReady = (): boolean => {
+  if (readStores.isReplacing || !existsSync(databasePath) || databaseRecoveryRequired) return false;
+  try {
+    if (readinessCache !== null) return readinessCache;
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const required = database.prepare(`
+        SELECT COUNT(*) AS count FROM sqlite_master
+        WHERE type = 'table' AND name IN (
+          'schema_migrations', 'health_records', 'workouts', 'recompute_jobs',
+          'prediction_model_runs'
+        )
+      `).get() as { count: number };
+      const quick = database.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+      const foreignKeyProblems = database.prepare("PRAGMA foreign_key_check").all();
+      const ready = required.count === 5 && quick?.quick_check === "ok" && foreignKeyProblems.length === 0;
+      readinessCache = ready;
+      if (!ready) databaseRecoveryRequired = true;
+      return ready;
+    } finally {
+      database.close();
+    }
+  } catch {
+    databaseRecoveryRequired = true;
+    return false;
+  }
+};
+
+const observeMainDatabaseError = (error: unknown): void => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/file is not a database|database disk image is malformed|database.*corrupt/i.test(message)) return;
+  databaseRecoveryRequired = true;
+  invalidateDatabaseReadiness();
+};
+observeWorkerDatabaseError = observeMainDatabaseError;
+
+const openMainDatabase = async (): Promise<RaiDatabase> => {
+  try {
+    return await RaiDatabase.open(databasePath);
+  } catch (error) {
+    observeMainDatabaseError(error);
+    throw error;
+  }
+};
 
 const withReadStore = <T>(callback: (store: RaiReadStore) => T): T => {
-  return readStores.use(callback);
+  try {
+    return readStores.use(callback);
+  } catch (error) {
+    observeMainDatabaseError(error);
+    throw error;
+  }
 };
 
 const withReadDatabase = <T>(callback: (database: DatabaseSync) => T): T => {
-  return readStores.useDatabase(callback);
+  try {
+    return readStores.useDatabase(callback);
+  } catch (error) {
+    observeMainDatabaseError(error);
+    throw error;
+  }
 };
 
 const withReadDatabaseAsync = async <T>(
   callback: (database: DatabaseSync) => Promise<T>
 ): Promise<T> => {
-  return readStores.useDatabaseAsync(callback);
+  try {
+    return await readStores.useDatabaseAsync(callback);
+  } catch (error) {
+    observeMainDatabaseError(error);
+    throw error;
+  }
 };
 
 const hasActivePredictionModelJob = (): boolean => existsSync(databasePath) &&
@@ -194,6 +325,32 @@ const hasActiveRecomputeJob = (): boolean => existsSync(databasePath) &&
     SELECT 1 FROM recompute_jobs
     WHERE status IN ('queued', 'running') LIMIT 1
   `).get()));
+
+/**
+ * Full busy snapshot for HTTP main-DB writers.
+ * Prefer durable job tables over worker `isRunning` (which includes a short
+ * pre-timer `scheduled` window after schedule() and would false-positive 409s).
+ */
+const isDatabaseWriteBusy = (): boolean =>
+  importWorker.isRunning ||
+  hasActiveRecomputeJob() ||
+  hasActivePredictionModelJob();
+
+const isDatabaseRestoreBusy = (): boolean => {
+  if (importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning) return true;
+  try {
+    return hasActiveRecomputeJob() || hasActivePredictionModelJob();
+  } catch {
+    // A damaged or pre-schema database is exactly when restore must stay usable.
+    return false;
+  }
+};
+
+/** Hide host filesystem paths from public prediction API responses. */
+const publicPredictionRun = (run: PredictionModelRun): PredictionModelRun => ({
+  ...run,
+  artifactPath: run.artifactPath ? basename(run.artifactPath) : null
+});
 
 const localToday = (): string => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
@@ -216,7 +373,7 @@ const checkTrainingZoneBackfill = async (): Promise<void> => {
       !existsSync(databasePath) || importWorker.isRunning || recomputeWorker.isRunning ||
       predictionModelWorker.isRunning || hasActiveRecomputeJob() || hasActivePredictionModelJob()
     ) return;
-    const store = await RaiDatabase.open(databasePath);
+    const store = await openMainDatabase();
     let queued = false;
     try {
       if (closing) return;
@@ -284,9 +441,11 @@ const ensureTrainingZoneBackfill = (): Promise<void> => {
   return promise;
 };
 
-await ensureTrainingZoneBackfill();
-recomputeWorker.schedule();
-predictionModelWorker.schedule();
+if (databaseReadyAtStartup) {
+  await ensureTrainingZoneBackfill();
+  recomputeWorker.schedule();
+  predictionModelWorker.schedule();
+}
 const zoneRefreshTimer = setInterval(() => {
   if (closing) return;
   void ensureTrainingZoneBackfill().catch((error) => {
@@ -298,12 +457,15 @@ app.addHook("onClose", async () => {
   clearInterval(zoneRefreshTimer);
 });
 
-app.get("/v1/health", async () => ({
-  status: "ok",
-  databaseReady: existsSync(databasePath),
-  localOnly: true,
-  now: new Date().toISOString()
-}));
+app.get("/v1/health", async () => {
+  const databaseReady = databaseIsReady();
+  return {
+    status: databaseReady ? "ok" : "recovery_required",
+    databaseReady,
+    localOnly: true,
+    now: new Date().toISOString()
+  };
+});
 app.get("/v1/openapi.json", async () => openapiDocument);
 
 app.get("/v1/dashboard", async () => withReadStore((store) => store.dashboard()));
@@ -316,13 +478,22 @@ app.get("/v1/diagnostics", async (_request, reply) => {
   return diagnostics;
 });
 app.get("/v1/runtime-status", async () => {
-  const recomputeJob = existsSync(databasePath)
+  const databaseReady = databaseIsReady();
+  const recomputeJob = databaseReady
     ? withReadStore((store) => store.jobs(1)[0] ?? null)
     : null;
-  const predictionModelJobActive = hasActivePredictionModelJob();
+  const predictionModelJobActive = databaseReady && hasActivePredictionModelJob();
+  const predictionModelJob = databaseReady
+    ? withReadDatabase((database) =>
+        new PredictionModelService(
+          { database },
+          predictionArtifactRoot
+        ).list(1)[0] ?? null
+      )
+    : null;
   const importJob = importWorker.latest();
   return {
-    databaseReady: existsSync(databasePath),
+    databaseReady,
     busy:
       importWorker.isRunning ||
       recomputeWorker.isRunning ||
@@ -331,7 +502,8 @@ app.get("/v1/runtime-status", async () => {
       recomputeJob?.status === "queued" ||
       recomputeJob?.status === "running",
     recomputeJob,
-    importJob
+    importJob,
+    predictionModelJob: predictionModelJob ? publicPredictionRun(predictionModelJob) : null
   };
 });
 
@@ -372,13 +544,22 @@ app.patch<{ Params: { id: string }; Body: OverrideWorkoutInput }>(
   "/v1/workouts/:id/override",
   { schema: { params: identifierParamsSchema, body: overrideBodySchema } },
   async (request, reply) => {
-    if (importWorker.isRunning || predictionModelWorker.isRunning || hasActivePredictionModelJob()) {
-      return reply.code(409).send({ message: "导入或预测模型训练期间不能修改训练覆盖" });
+    // Prefer 404 for unknown sessions even when other jobs are running.
+    // Use training_sessions existence (not full detail DTO) — overrides are valid
+    // before features/assessments exist.
+    const sessionExists = existsSync(databasePath) && withReadDatabase((database) =>
+      Boolean(database.prepare("SELECT 1 FROM training_sessions WHERE id = ?").get(request.params.id))
+    );
+    if (!sessionExists) {
+      return reply.code(404).send({ code: "request_error", message: "未找到该训练记录" });
     }
-    const store = await RaiDatabase.open(databasePath);
+    if (isDatabaseWriteBusy()) {
+      return reply.code(409).send({ message: "任务执行期间不能修改训练覆盖" });
+    }
+    const store = await openMainDatabase();
     try {
       const service = new RaiApplicationService(store);
-      const overrideId = service.appendWorkoutOverride({
+      const { overrideId, jobId } = service.appendWorkoutOverride({
         trainingSessionId: request.params.id,
         eligibilityOverride: request.body.eligibilityOverride,
         statisticsParticipation: request.body.statisticsParticipation,
@@ -388,11 +569,8 @@ app.patch<{ Params: { id: string }; Body: OverrideWorkoutInput }>(
         conditionTags: request.body.conditionTags,
         note: request.body.note
       });
-      const queued = store.database
-        .prepare("SELECT id FROM recompute_jobs WHERE status = 'queued' ORDER BY created_at DESC LIMIT 1")
-        .get() as { id: string } | undefined;
       recomputeWorker.schedule();
-      return { overrideId, jobId: queued?.id ?? null };
+      return { overrideId, jobId };
     } finally {
       store.close();
     }
@@ -442,20 +620,21 @@ app.patch<{ Body: UpdateTrainingZoneProfileInput }>(
   "/v1/training-zones/profile",
   { schema: { body: trainingZoneProfileBodySchema } },
   async (request, reply) => {
-    if (
-      importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning ||
-      hasActiveRecomputeJob() || hasActivePredictionModelJob()
-    ) {
+    if (isDatabaseWriteBusy()) {
       return reply.code(409).send({ message: "任务执行期间不能修改训练分区设置" });
     }
-    const store = await RaiDatabase.open(databasePath);
+    const store = await openMainDatabase();
     try {
       const settings = new RaiApplicationService(store).appendTrainingZoneProfileSettings(request.body);
       return settings;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "训练分区设置无效";
-      if (message.includes("revision conflict")) return reply.code(409).send({ message });
-      return reply.code(400).send({ message });
+      if (error instanceof TrainingZoneProfileRevisionConflictError) {
+        return reply.code(409).send({ code: error.code, message: error.message });
+      }
+      if (error instanceof TrainingZoneProfileValidationError) {
+        return reply.code(400).send({ code: error.code, message: error.message });
+      }
+      throw error;
     } finally {
       store.close();
     }
@@ -498,27 +677,33 @@ app.get<{ Querystring: PredictionQuery }>(
 );
 
 app.get("/v1/prediction-models", async () => {
-  if (!existsSync(databasePath)) throw new Error("本地 RAI 数据库不存在，请先导入 Apple Health 数据");
-  return readStores.lease(async () => {
-    const store = await RaiDatabase.open(databasePath);
-    try { return { runs: new PredictionModelService(store).list() }; }
-    finally { store.close(); }
-  });
+  if (!databaseIsReady()) throw new DatabaseNotReadyError();
+  return withReadDatabase((database) => ({
+    runs: new PredictionModelService(
+      { database },
+      predictionArtifactRoot
+    ).list().map(publicPredictionRun)
+  }));
 });
 
 app.get<{ Params: { id: string } }>(
   "/v1/prediction-models/:id",
   { schema: { params: predictionModelIdParamsSchema } },
   async (request, reply) => {
-    if (!existsSync(databasePath)) throw new Error("本地 RAI 数据库不存在，请先导入 Apple Health 数据");
-    return readStores.lease(async () => {
-      const store = await RaiDatabase.open(databasePath);
-      try {
-        const service = new PredictionModelService(store);
-        const run = service.get(request.params.id);
-        if (!run) return reply.code(404).send({ message: "未找到预测模型运行" });
-        return { run, events: service.events(request.params.id) };
-      } finally { store.close(); }
+    if (!databaseIsReady()) throw new DatabaseNotReadyError();
+    return withReadDatabase((database) => {
+      const service = new PredictionModelService(
+        { database },
+        predictionArtifactRoot
+      );
+      const run = service.get(request.params.id);
+      if (!run) {
+        return reply.code(404).send({ message: "未找到预测模型运行" });
+      }
+      return {
+        run: publicPredictionRun(run),
+        events: service.events(request.params.id)
+      };
     });
   }
 );
@@ -527,9 +712,7 @@ app.post<{ Body: TrainPredictionModelRequest }>(
   "/v1/prediction-models/train",
   { schema: { body: predictionModelTrainBodySchema } },
   async (request, reply) => {
-    if (
-      importWorker.isRunning || recomputeWorker.isRunning || hasActiveRecomputeJob()
-    ) {
+    if (isDatabaseWriteBusy()) {
       return reply.code(409).send({ message: "导入或重算期间不能开始预测模型训练" });
     }
     const asOf = request.body?.asOf
@@ -541,9 +724,9 @@ app.post<{ Body: TrainPredictionModelRequest }>(
         message: "请先导入 Apple Health 数据，再训练预测模型"
       });
     }
-    const store = await RaiDatabase.open(databasePath);
+    const store = await openMainDatabase();
     try {
-      const service = new PredictionModelService(store);
+      const service = new PredictionModelService(store, predictionArtifactRoot);
       try {
         const runId = service.enqueue({ asOf });
         predictionModelWorker.schedule();
@@ -558,6 +741,9 @@ app.post<{ Body: TrainPredictionModelRequest }>(
             availableByDistance: error.preflight.availableByDistance,
             message: error.message
           });
+        }
+        if (error instanceof PredictionAbilityBaselineUnavailableError) {
+          return reply.code(409).send({ code: error.code, message: error.message });
         }
         if (error instanceof PredictionTrainingInProgressError) {
           return reply.code(409).send({
@@ -581,9 +767,9 @@ app.post<{ Params: { id: string } }>(
   "/v1/prediction-models/:id/cancel",
   { schema: { params: predictionModelIdParamsSchema } },
   async (request, reply) => {
-    const store = await RaiDatabase.open(databasePath);
+    const store = await openMainDatabase();
     try {
-      const service = new PredictionModelService(store);
+      const service = new PredictionModelService(store, predictionArtifactRoot);
       if (!service.get(request.params.id)) {
         return reply.code(404).send({ message: "未找到预测模型运行" });
       }
@@ -608,15 +794,12 @@ app.post<{ Params: { id: string } }>(
   "/v1/prediction-models/:id/activate",
   { schema: { params: predictionModelIdParamsSchema } },
   async (request, reply) => {
-    if (
-      importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning ||
-      hasActiveRecomputeJob() || hasActivePredictionModelJob()
-    ) {
+    if (isDatabaseWriteBusy()) {
       return reply.code(409).send({ message: "任务执行期间不能切换 active Prediction Model" });
     }
-    const store = await RaiDatabase.open(databasePath);
+    const store = await openMainDatabase();
     try {
-      const service = new PredictionModelService(store);
+      const service = new PredictionModelService(store, predictionArtifactRoot);
       const run = service.get(request.params.id);
       if (!run) return reply.code(404).send({ message: "未找到预测模型运行" });
       if (run.status !== "succeeded") {
@@ -656,10 +839,10 @@ app.get<{ Querystring: { base: string; candidate: string } }>(
 );
 
 app.post("/v1/model-runs", async (_request, reply) => {
-  if (importWorker.isRunning || predictionModelWorker.isRunning || hasActivePredictionModelJob()) {
-    return reply.code(409).send({ message: "导入或预测模型训练期间不能创建模型运行" });
+  if (isDatabaseWriteBusy()) {
+    return reply.code(409).send({ message: "任务执行期间不能创建模型运行" });
   }
-  const store = await RaiDatabase.open(databasePath);
+  const store = await openMainDatabase();
   try {
     const jobId = new RaiApplicationService(store).enqueueFullRecompute({
       evaluatedAt: new Date().toISOString(),
@@ -673,13 +856,10 @@ app.post("/v1/model-runs", async (_request, reply) => {
 });
 
 app.post<{ Params: { id: string } }>("/v1/model-runs/:id/activate", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
-  if (
-    importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning ||
-    hasActiveRecomputeJob() || hasActivePredictionModelJob()
-  ) {
+  if (isDatabaseWriteBusy()) {
     return reply.code(409).send({ message: "任务执行期间不能切换 active Model Run" });
   }
-  const store = await RaiDatabase.open(databasePath);
+  const store = await openMainDatabase();
   try {
     const row = store.database
       .prepare(`
@@ -707,6 +887,8 @@ app.post<{ Params: { id: string } }>("/v1/model-runs/:id/activate", { schema: { 
             activated_at = excluded.activated_at
         `)
         .run(request.params.id, new Date().toISOString());
+      // Ability model switch invalidates residual baselines; clear active CatBoost (R3-9).
+      store.database.exec("DELETE FROM active_prediction_model");
       store.database.exec("COMMIT");
     } catch (error) {
       store.database.exec("ROLLBACK");
@@ -727,13 +909,13 @@ app.get<{ Params: { id: string } }>("/v1/jobs/:id", { schema: { params: identifi
 });
 
 app.post<{ Params: { id: string } }>("/v1/jobs/:id/cancel", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
-  const store = await RaiDatabase.open(databasePath);
+  const store = await openMainDatabase();
   try {
     const cancellation = new RaiApplicationService(store).requestJobCancellation(request.params.id);
-    if (cancellation === "not_found") {
+    if (cancellation.outcome === "not_found") {
       return reply.code(404).send({ message: "未找到任务" });
     }
-    if (cancellation === "terminal") {
+    if (cancellation.outcome === "terminal") {
       return reply.code(409).send({ message: "已完成的任务不能取消" });
     }
     return { cancelled: true };
@@ -742,46 +924,36 @@ app.post<{ Params: { id: string } }>("/v1/jobs/:id/cancel", { schema: { params: 
   }
 });
 
-type CreateImportJobBody = ImportJobRequest | { sourceId: string };
-
-app.post<{ Body: CreateImportJobBody }>(
+app.post<{ Body: ImportJobRequest }>(
   "/v1/import-jobs",
   { schema: { body: importJobBodySchema } },
   async (request, reply) => {
-  const sourceId = "sourceId" in request.body ? request.body.sourceId : null;
-  if (!sourceId && !("confirmReplace" in request.body && request.body.confirmReplace)) {
-    return reply.code(400).send({ message: "目录导入会重建本地数据库，请先确认" });
-  }
-  if (
-    recomputeWorker.isRunning || predictionModelWorker.isRunning ||
-    hasActiveRecomputeJob() || hasActivePredictionModelJob()
-  ) {
+  const { sourceId } = request.body;
+  if (isDatabaseRestoreBusy()) {
     return reply.code(409).send({ message: "模型任务执行期间不能开始导入" });
   }
-  if (sourceId) {
-    const source = await importSources.get(sourceId);
-    if (!source) return reply.code(404).send({ message: "未找到导入来源" });
-    const release = takeMutationRelease(request);
-    try {
-      return importWorker.create(source.inputPath, async (succeeded) => {
-        try {
-          if (succeeded) {
-            await importSources.markUsed(sourceId);
-            if (source.kind === "upload") await importSources.cleanupUpload(sourceId);
-          }
-        } finally {
-          release();
-        }
-      });
-    } catch (error) {
-      release();
-      throw error;
-    }
-  }
+  const source = await importSources.get(sourceId);
+  if (!source) return reply.code(404).send({ message: "未找到导入来源" });
   const release = takeMutationRelease(request);
   try {
-    return importWorker.create((request.body as ImportJobRequest).inputPath, () => release());
+    return importWorker.create(source.inputPath, async (succeeded) => {
+      try {
+        if (succeeded) {
+          databaseRecoveryRequired = false;
+          invalidateDatabaseReadiness();
+        }
+        if (source.kind === "upload") await importSources.cleanupUpload(sourceId);
+        else if (succeeded) await importSources.markUsed(sourceId);
+      } finally {
+        release();
+      }
+    }, sourceId);
   } catch (error) {
+    if (source.kind === "upload") {
+      await importSources.cleanupUpload(sourceId).catch((cleanupError) => {
+        app.log.warn(cleanupError, "Failed to clean upload after import job creation failed");
+      });
+    }
     release();
     throw error;
   }
@@ -794,19 +966,22 @@ app.post("/v1/imports/uploads", async (request, reply) => {
   if (file.mimetype !== "application/zip" && file.mimetype !== "application/x-zip-compressed" && !file.filename.toLowerCase().endsWith(".zip")) {
     return reply.code(415).send({ message: "只支持 ZIP 文件" });
   }
-  try {
-    const inspection = await importSources.saveUpload(file.file, file.filename);
-    const source = await importSources.get(inspection.sourceId);
-    const sizeBytes = source ? (await (await import("node:fs/promises")).stat(source.originalPath)).size : inspection.exportBytes;
-    return {
-      sourceId: inspection.sourceId,
-      uploadId: inspection.sourceId,
-      fileName: file.filename,
-      sizeBytes
-    };
-  } catch (error) {
-    return reply.code(400).send({ message: error instanceof Error ? error.message : "ZIP 处理失败" });
+  const inspection = await importSources.saveUpload(file.file, file.filename).catch((error: unknown) => {
+    if (file.file.truncated) throw new ImportArchiveTooLargeError("ZIP 文件超过大小限制");
+    throw error;
+  });
+  if (file.file.truncated) {
+    await importSources.cleanupUpload(inspection.sourceId);
+    throw new ImportArchiveTooLargeError("ZIP 文件超过大小限制");
   }
+  const source = await importSources.get(inspection.sourceId);
+  const sizeBytes = source ? (await (await import("node:fs/promises")).stat(source.originalPath)).size : inspection.exportBytes;
+  return {
+    sourceId: inspection.sourceId,
+    uploadId: inspection.sourceId,
+    fileName: file.filename,
+    sizeBytes
+  };
 });
 
 app.post<{ Body: { sourceId: string } }>("/v1/imports/inspect", { schema: { body: importSourceBodySchema } }, async (request, reply) => {
@@ -821,7 +996,7 @@ app.delete<{ Params: { id: string } }>(
   "/v1/import-sources/:id",
   { schema: { params: identifierParamsSchema } },
   async (request, reply) => {
-    if (!await importSources.cleanupUpload(request.params.id)) {
+    if (!await importSources.cleanupUpload(request.params.id, importWorker.activeInputPaths())) {
       return reply.code(404).send({ message: "未找到可清理的上传来源" });
     }
     return { deleted: true };
@@ -837,6 +1012,8 @@ app.get("/v1/import-jobs/active", async () => {
   return job && ["queued", "running"].includes(job.status) ? job : null;
 });
 
+app.get("/v1/import-jobs/latest", async () => importWorker.latest());
+
 app.get<{ Params: { id: string } }>("/v1/import-jobs/:id", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
   const job = importWorker.get(request.params.id);
   if (!job) return reply.code(404).send({ message: "未找到导入任务" });
@@ -846,7 +1023,7 @@ app.get<{ Params: { id: string } }>("/v1/import-jobs/:id", { schema: { params: i
 app.get("/v1/backups", async () => maintenance.listBackups());
 
 app.post("/v1/backups", async (_request, reply) => {
-  if (importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning) {
+  if (isDatabaseWriteBusy()) {
     return reply.code(409).send({ message: "任务执行期间不能创建备份" });
   }
   return maintenance.createBackup();
@@ -854,7 +1031,7 @@ app.post("/v1/backups", async (_request, reply) => {
 
 app.get<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
   try {
-    const stream = maintenance.backupStream(request.params.name);
+    const stream = await maintenance.backupStream(request.params.name);
     reply.header("content-type", "application/x-sqlite3");
     reply.header("content-disposition", `attachment; filename="${request.params.name}"`);
     return reply.send(stream);
@@ -865,7 +1042,7 @@ app.get<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: b
 });
 
 app.delete<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
-  if (importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning) {
+  if (isDatabaseWriteBusy()) {
     return reply.code(409).send({ message: "任务执行期间不能删除备份" });
   }
   return { deleted: true, backup: await maintenance.deleteBackup(request.params.name) };
@@ -878,16 +1055,15 @@ app.post<{ Params: { name: string }; Body: { confirmation: string } }>(
     if (request.body.confirmation !== "恢复此备份") {
       return reply.code(400).send({ message: "确认文字不匹配" });
     }
-    if (
-      importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning ||
-      hasActiveRecomputeJob() || hasActivePredictionModelJob()
-    ) {
+    if (isDatabaseRestoreBusy()) {
       return reply.code(409).send({ message: "任务执行期间不能恢复数据库" });
     }
     const result = await maintenance.restoreBackup(
       request.params.name,
       () => recoverDatabaseJobs(true)
     );
+    databaseRecoveryRequired = false;
+    invalidateDatabaseReadiness();
     recomputeWorker.schedule();
     predictionModelWorker.schedule();
     return { restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup };
@@ -898,14 +1074,15 @@ app.delete<{ Body: { confirmation: string } }>("/v1/database", { schema: { body:
   if (request.body?.confirmation !== "删除我的 RAI 数据") {
     return reply.code(400).send({ message: "确认文字不匹配" });
   }
-  if (
-    importWorker.isRunning || recomputeWorker.isRunning || predictionModelWorker.isRunning ||
-    hasActiveRecomputeJob() || hasActivePredictionModelJob()
-  ) {
+  if (isDatabaseRestoreBusy()) {
     return reply.code(409).send({ message: "任务执行期间不能删除数据库" });
   }
   const backupInfo = await maintenance.deleteDatabase();
-  return { deleted: true, backup: backupInfo };
+  databaseRecoveryRequired = true;
+  invalidateDatabaseReadiness();
+  return backupInfo.restorable === false
+    ? { deleted: true, preservation: { kind: "quarantine" as const, snapshot: backupInfo } }
+    : { deleted: true, preservation: { kind: "backup" as const, backup: backupInfo } };
 });
 
 if (existsSync(webDist)) {
@@ -914,19 +1091,17 @@ if (existsSync(webDist)) {
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
-  const message = error instanceof Error ? error.message : String(error);
-  const providedStatus = (error as { statusCode?: unknown }).statusCode;
-  const status = typeof providedStatus === "number"
-    ? providedStatus
-    : message.includes("不存在") || message.includes("未找到") ? 404 : 500;
-  const safeMessage = status >= 500 ? "本地服务处理请求失败" : message;
-  void reply.code(status).send({
-    code: status >= 500 ? "internal_error" : "request_error",
-    message: safeMessage
-  });
+  const payload = apiErrorPayload(error);
+  void reply.code(payload.status).send(payload.body);
 });
 
 await app.listen({ host, port });
+const address = app.server.address();
+if (!address || typeof address === "string") {
+  throw new Error("API did not bind to a TCP port");
+}
+localRequestSecurityOptions.apiPort = address.port;
+if (process.send) process.send({ type: "rai:ready", port: address.port });
 let shutdownPromise: Promise<void> | null = null;
 const shutdown = (signal: NodeJS.Signals | "IPC"): Promise<void> => {
   if (shutdownPromise) return shutdownPromise;
@@ -948,4 +1123,4 @@ process.once("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("message", (message: unknown) => {
   if (message === "rai:shutdown") void shutdown("IPC");
 });
-app.log.info({ databasePath, runtimeRoot, url: `http://${host}:${port}` }, "RAI local API ready");
+app.log.info({ databasePath, runtimeRoot, url: `http://${host}:${address.port}` }, "RAI local API ready");

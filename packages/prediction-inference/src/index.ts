@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { InferenceSession, Tensor } from "onnxruntime-node";
 import {
   CATBOOST_PREDICTION_MODEL_VERSION,
+  PREDICTION_CORRECTION_CAP_FRACTION,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
   predictionResidualOnnxFeatureNames,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION
@@ -91,8 +92,7 @@ export function assertCatBoostArtifactManifest(
     manifest.labelCount <= 0 ||
     typeof manifest.correctionCapFraction !== "number" ||
     !Number.isFinite(manifest.correctionCapFraction) ||
-    manifest.correctionCapFraction <= 0 ||
-    manifest.correctionCapFraction > 0.25
+    manifest.correctionCapFraction !== PREDICTION_CORRECTION_CAP_FRACTION
   ) {
     throw new Error("CatBoost manifest is incomplete or invalid");
   }

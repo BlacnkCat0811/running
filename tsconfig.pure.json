@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": [
+    "packages/contracts/src/**/*.ts",
+    "packages/api-contracts/src/**/*.ts",
+    "packages/features/src/**/*.ts",
+    "packages/physiology/src/**/*.ts",
+    "packages/scoring/src/**/*.ts",
+    "packages/training-load/src/**/*.ts",
+    "packages/training-zones/src/**/*.ts"
+  ]
+}

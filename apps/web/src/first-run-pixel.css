@@ -1,0 +1,115 @@
+@media (min-width: 1024px) {
+  .first-run-page { min-height: 900px; grid-template-columns: minmax(0,1.33fr) minmax(440px,1fr); gap: 8px; padding: 8px 10px 8px 8px; }
+  .first-run-hero { position: relative; min-height: 884px; display: flex; flex-direction: column; justify-content: flex-start; padding: 82px 48px 24px; overflow: hidden; border: 3px solid #247446; border-radius: 0; background: #fffef8; clip-path: var(--pixel-cut); }
+  .first-run-hero::after, .first-run-hero .brand-mark, .first-run-hero .eyebrow { display: none; }
+  .first-run-hero h1 { max-width: none; margin: 0; color: #123f2b; font-size: 0; line-height: 1.16; letter-spacing: 0; }
+  .first-run-hero h1::after { content: "建立你的跑步时间线"; display: block; font-size: 42px; line-height: 1.2; }
+  .first-run-hero > p:not(.eyebrow):not(.first-run-disclaimer) { max-width: 38ch; margin: 28px 0 22px; color: #123f2b; font-size: 13px; line-height: 1.8; }
+  .first-run-hero .button { position: relative; z-index: 3; align-self: flex-start; min-width: 205px; min-height: 58px; border-radius: 0; color: #fff; background: #ed6549; font-size: 18px; clip-path: var(--pixel-cut); }
+  .first-run-scene { position: absolute; right: 0; bottom: 0; left: 0; height: 490px; overflow: hidden; background: linear-gradient(180deg,transparent 0 38%,#dceee2 38% 41%,transparent 41%),linear-gradient(165deg,transparent 0 57%,#9dcf91 57% 70%,#65aa64 70%); }
+  .scene-skyline { position: absolute; right: 8%; bottom: 100px; left: 18%; height: 140px; opacity: .62; background: repeating-linear-gradient(90deg,#b8d8c6 0 34px,transparent 34px 44px); clip-path: polygon(0 80%,0 60%,7% 60%,7% 26%,12% 26%,12% 72%,19% 72%,19% 44%,27% 44%,27% 82%,36% 82%,36% 18%,42% 18%,42% 68%,51% 68%,51% 34%,59% 34%,59% 82%,68% 82%,68% 48%,77% 48%,77% 72%,86% 72%,86% 26%,93% 26%,93% 80%,100% 80%,100% 100%,0 100%); }
+  .scene-tree { position: absolute; z-index: 2; bottom: 92px; width: 126px; height: 170px; background: linear-gradient(90deg,transparent 45%,#6f5731 45% 58%,transparent 58%) bottom/100% 65% no-repeat,radial-gradient(circle at 50% 36%,#4c914d 0 34%,transparent 35%),radial-gradient(circle at 28% 49%,#73ad56 0 26%,transparent 27%),radial-gradient(circle at 72% 52%,#377c43 0 27%,transparent 28%); }
+  .tree-left { left: -18px; } .tree-right { right: -24px; bottom: 78px; transform: scale(.78); }
+  .scene-route { position: absolute; z-index: 1; left: 4%; bottom: 42px; width: 94%; height: 120px; border-top: 22px solid #fff7cf; box-shadow: 0 -7px 0 #d9c98c; transform: rotate(8deg) skewX(-22deg); }
+  .scene-marker,.scene-flag { position: absolute; z-index: 4; display: grid; width: 42px; height: 42px; place-items: center; border: 3px solid #247446; color: #fff; background: #e9b91f; font: 800 14px "SFMono-Regular",Consolas,monospace; clip-path: var(--pixel-cut); }
+  .marker-start { left: 8%; bottom: 116px; } .marker-heart { left: 44%; bottom: 250px; background: #ed6549; } .marker-medal { right: 22%; bottom: 205px; color: #123f2b; }
+  .scene-flag { right: 7%; bottom: 280px; width: 12px; height: 80px; border: 0; border-left: 5px solid #123f2b; background: transparent; clip-path: none; }
+  .scene-flag::after { content: ""; position: absolute; top: 0; left: 0; width: 34px; height: 24px; background: #ed6549; clip-path: polygon(0 0,100% 0,72% 50%,100% 100%,0 100%); }
+  .scene-runner { position: absolute; z-index: 5; left: 20%; bottom: 70px; width: 128px; height: 180px; background: url("/assets/runner-chibi.webp") 0 -25px/512px 192px no-repeat; image-rendering: pixelated; }
+  .first-run-disclaimer { display: none; }
+  .first-run-steps { min-height: 884px; align-self: stretch; display: grid; align-content: start; padding: 32px 24px 18px; border: 3px solid #247446; border-radius: 0; background: #fffef8; clip-path: var(--pixel-cut); }
+  .first-run-steps article { position: relative; min-height: 220px; display: grid; grid-template-columns: 64px 1fr; gap: 14px; padding: 42px 8px 24px; border-top: 1px dashed #b9cdbd; }
+  .first-run-steps article:first-child { border-top: 0; }
+  .first-run-steps article:not(:last-of-type)::after { content: ""; position: absolute; left: 37px; bottom: -18px; height: 36px; border-left: 2px dashed #247446; }
+  .first-run-steps article > b { display: grid; width: 49px; height: 49px; place-items: center; color: #fff; background: #247446; font: 800 19px "SFMono-Regular",Consolas,monospace; clip-path: var(--pixel-cut); }
+  .first-run-steps h2 { margin: 0; color: #123f2b; font-size: 20px; } .first-run-steps p { margin: 14px 0 0; color: #123f2b; font-size: 11px; line-height: 1.8; }
+  .first-run-privacy { min-height: 64px; display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 15px 18px; border: 1px solid #247446; color: #247446; background: #f6fbf2; font-size: 11px; }
+}
+
+/* Loaded before the shared sheet; the shell prefix keeps the supplied desktop comp authoritative. */
+@media (min-width: 1024px) {
+  .app-content .first-run-page {
+    min-height: 900px;
+    grid-template-columns: minmax(0, 1.33fr) minmax(440px, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 8px 10px 8px 8px;
+  }
+  .app-content .first-run-page .first-run-hero {
+    min-height: 884px;
+    padding: 82px 48px 24px;
+    border-width: 3px;
+  }
+  .app-content .first-run-page .first-run-hero h1 {
+    max-width: none;
+    margin: 0;
+    font-size: 0;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+  .app-content .first-run-page .first-run-hero h1::after {
+    content: "建立你的跑步时间线";
+    display: block;
+    font-size: 56px;
+    line-height: 1;
+  }
+  .app-content .first-run-page .first-run-hero > p:not(.eyebrow):not(.first-run-disclaimer) {
+    max-width: 38ch;
+    margin: 30px 0 50px;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  .app-content .first-run-page .first-run-hero .button {
+    min-width: 205px;
+    min-height: 62px;
+    border-color: #b83f32;
+    color: #fff;
+    background: #ed6549;
+    box-shadow: 0 5px 0 #b94332;
+    font-size: 18px;
+  }
+  .app-content .first-run-page .first-run-scene { height: 440px; }
+  .app-content .first-run-page .first-run-disclaimer { display: none; }
+  .app-content .first-run-page .first-run-steps {
+    min-height: 884px;
+    align-content: start;
+    padding: 32px 24px 18px;
+    border-width: 3px;
+  }
+  .app-content .first-run-page .first-run-steps article {
+    min-height: 240px;
+    grid-template-columns: 64px 1fr;
+    padding: 54px 8px 12px;
+  }
+  .app-content .first-run-page .first-run-steps article > b {
+    width: 49px;
+    height: 49px;
+    font-size: 19px;
+    color: #fff;
+    background: #247446;
+  }
+  .app-content .first-run-page .first-run-steps h2 { font-size: 18px; }
+  .app-content .first-run-page .first-run-steps p { font-size: 11px; line-height: 1.8; }
+  .app-content .first-run-page .first-run-privacy {
+    position: relative;
+    min-height: 64px;
+    display: block;
+    margin-top: 4px;
+    padding: 12px 16px 10px 58px;
+    font-size: 11px;
+  }
+  .app-content .first-run-page .first-run-privacy > svg {
+    position: absolute;
+    left: 20px;
+    top: 21px;
+  }
+  .app-content .first-run-page .first-run-privacy::before {
+    content: "全部数据仅在本机处理";
+    display: block;
+    margin-bottom: 4px;
+    font-weight: 700;
+  }
+  .app-content .first-run-page .scene-skyline { bottom: 210px; }
+  .app-content .first-run-page .scene-tree { bottom: 200px; }
+  .app-content .first-run-page .tree-right { bottom: 185px; }
+}

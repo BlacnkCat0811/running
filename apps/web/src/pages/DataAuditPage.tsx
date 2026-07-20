@@ -1,30 +1,87 @@
+import "../pixel-layout.css";
+import "../data-reference.css";
 import type { DataAuditResponse } from "@rai/api-contracts";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { date, number } from "../format.js";
 import { useRemote } from "../hooks.js";
-import { ArrowLeft, CheckCircle, Database, Warning } from "../icons.js";
+import { CheckCircle, Database, Heartbeat, PersonSimpleRun, ShieldCheck, Timer, Warning } from "../icons.js";
 
 const percent = (value: number | null): string => value === null ? "--" : `${(value * 100).toFixed(1)}%`;
+const share = (value: number, total: number): string => total ? `${((value / total) * 100).toFixed(1)}%` : "0.0%";
 
 export function DataAuditPage() {
   const audit = useRemote<DataAuditResponse>("/v1/data-audit");
   if (audit.loading) return <LoadingBlock label="正在审计本地数据" />;
   if (audit.error || !audit.data) return <ErrorBlock message={audit.error ?? "无法读取数据审计"} onRetry={() => void audit.reload()} />;
   const data = audit.data;
+  const totalIssues = data.issues.reduce((sum, item) => sum + item.count, 0);
+  const topRecords = data.recordTypes.slice(0, 6);
+  const topMissing = data.missingReasons.slice(0, 5);
+  const sourceCategoryTotal = data.sourceCategories.reduce((sum, item) => sum + item.count, 0);
+  const qualityScore = percent(data.featureQuality.averageQualityScore);
+  const heartMin = percent(data.featureQuality.minimumHeartRateCoverage);
+  const heartAvg = percent(data.featureQuality.averageHeartRateCoverage);
+  const heartMax = percent(data.featureQuality.maximumHeartRateCoverage);
+
   return (
-    <div className="page audit-page">
-      <Link to="/data" className="back-link"><ArrowLeft size={17} /> 返回数据与模型</Link>
-      <header className="page-header split"><div><h1>数据审计</h1><p>检查导入覆盖、canonical 收敛、特征缺失和质量分布。</p></div><div className="model-chip"><span>Dataset</span><b>{data.datasetVersion?.slice(0, 20) ?? "--"}</b><small>{data.importCompletedAt ? date(data.importCompletedAt, true) : "--"}</small></div></header>
+    <div className="page audit-page data-reference-page">
+      <header className="page-header audit-reference-header">
+        <Database size={48} />
+        <h1>数据审计</h1>
+        <span className="audit-dataset-tag">Dataset</span>
+      </header>
+      <div className="audit-source-strip">
+        <span>当前 Dataset：{data.datasetVersion ?? "Apple Health 运动与健康数据"}</span>
+        <span>来源：Apple Health 导出</span>
+        <span>文件：export.xml</span>
+        <span>导入时间：{data.importCompletedAt ? date(data.importCompletedAt, true) : "--"}</span>
+      </div>
 
-      <section className="audit-metrics"><article><span>健康记录</span><b>{data.canonical.healthRecords.toLocaleString("zh-CN")}</b><small>{data.ranges.healthRecords.first ? `${date(data.ranges.healthRecords.first)} — ${date(data.ranges.healthRecords.last ?? data.ranges.healthRecords.first)}` : "无时间范围"}</small></article><article><span>Workout 收敛</span><b>{data.canonical.workouts} → {data.canonical.canonicalWorkouts}</b><small>{data.canonical.workoutGroups} Group · {data.canonical.trainingSessions} Session</small></article><article><span>路线资产</span><b>{data.canonical.routes}</b><small>{data.canonical.routePoints.toLocaleString("zh-CN")} 个轨迹点</small></article><article><span>平均质量分</span><b>{number(data.featureQuality.averageQualityScore)}</b><small>平均心率覆盖 {percent(data.featureQuality.averageHeartRateCoverage)}</small></article></section>
+      <section className="audit-overview" aria-label="审计概览">
+        <article><Database size={43} /><span><small>总记录条数</small><b>{data.canonical.healthRecords.toLocaleString("zh-CN")}</b><em>/ 健康记录</em></span></article>
+        <article><PersonSimpleRun size={43} /><span><small>运动次数</small><b>{data.canonical.trainingSessions.toLocaleString("zh-CN")}</b><em>条</em></span></article>
+        <article><Timer size={43} /><span><small>训练资产</small><b>{data.canonical.workouts.toLocaleString("zh-CN")}</b><em>Workout</em></span></article>
+        <article><Heartbeat size={43} /><span><small>平均质量分</small><b className="cyan">{qualityScore}</b><em>心率覆盖 {heartAvg}</em></span></article>
+        <article><Warning size={43} /><span><small>待处理问题</small><b className="coral">{totalIssues}</b><em>{data.issues.length} 类</em></span></article>
+      </section>
 
-      <section className="audit-grid"><article className="panel"><div className="panel-heading"><div><h2>训练来源与状态</h2><p>来源分类不展示设备原名。</p></div><Database size={20} /></div><div className="audit-groups"><div><h3>来源类别</h3>{data.sourceCategories.map((item) => <span key={item.category}><code>{item.category}</code><b>{item.count}</b></span>)}</div><div><h3>Session 状态</h3>{data.sessionStatuses.map((item) => <span key={item.status}><code>{item.status}</code><b>{item.count}</b></span>)}</div></div></article><article className="panel"><div className="panel-heading"><div><h2>心率覆盖范围</h2><p>缺失保持为 null，不补写 0 或中性分。</p></div></div><div className="coverage-range"><span><small>最低</small><b>{percent(data.featureQuality.minimumHeartRateCoverage)}</b></span><span><small>平均</small><b>{percent(data.featureQuality.averageHeartRateCoverage)}</b></span><span><small>最高</small><b>{percent(data.featureQuality.maximumHeartRateCoverage)}</b></span></div></article></section>
+      <div className="audit-reference-grid">
+        <section className="audit-reference-panel source-panel">
+          <h2>训练来源与状态</h2>
+          <div className="audit-table audit-source-table">
+            <div className="audit-tr head"><span>来源</span><span>记录条数</span><span>占比</span><span>状态分布</span></div>
+            {data.sourceCategories.slice(0, 5).map((item, index) => <div className="audit-tr" key={item.category}><span><i>{["♥", "▣", "▥", "☁", "✚"][index] ?? "●"}</i>{item.category}</span><span>{item.count.toLocaleString("zh-CN")}</span><span>{share(item.count, sourceCategoryTotal)}</span><span><b className="mini-bar" style={{ "--bar": `${Math.max(5, (item.count / Math.max(1, sourceCategoryTotal)) * 100)}%` } as CSSProperties} /></span></div>)}
+            <div className="audit-tr total"><span>合计</span><span>{sourceCategoryTotal.toLocaleString("zh-CN")}</span><span>{sourceCategoryTotal ? "100%" : "0.0%"}</span><span>{data.canonical.workouts.toLocaleString("zh-CN")} Workouts</span></div>
+          </div>
+        </section>
 
-      <section className="audit-grid lower"><article className="panel"><div className="panel-heading"><div><h2>主要健康记录类型</h2><p>按数量倒序，最多显示 24 类。</p></div></div><div className="audit-list">{data.recordTypes.map((item) => <span key={item.type}><code>{item.type.replace("HKQuantityTypeIdentifier", "")}</code><b>{item.count.toLocaleString("zh-CN")}</b></span>)}</div></article><article className="panel"><div className="panel-heading"><div><h2>特征缺失原因</h2><p>来自 active Feature 的结构化缺失证据。</p></div></div>{data.missingReasons.length ? <div className="audit-list">{data.missingReasons.map((item) => <span key={item.reason}><code>{item.reason}</code><b>{item.count}</b></span>)}</div> : <div className="audit-empty"><CheckCircle size={24} /><p>当前 active Feature 没有结构化缺失原因。</p></div>}</article></section>
+        <section className="audit-reference-panel coverage-panel">
+          <h2>心率覆盖范围</h2>
+          <div className="coverage-values"><span><small>最低</small><b>{heartMin}</b></span><span><small>平均</small><b>{heartAvg}</b></span><span><small>最高</small><b>{heartMax}</b></span></div>
+          <div className="coverage-ruler"><i /><i /><i /><b /></div>
+          <div className="coverage-legend"><span>■ 最低覆盖</span><span>■ 平均覆盖</span><span>■ 最高覆盖</span></div>
+        </section>
 
-      <section className="panel audit-issues"><div className="panel-heading"><div><h2>导入质量问题</h2><p>按严重级别和代码聚合，不在页面暴露原始对象 ID。</p></div>{data.issues.length ? <Warning size={20} /> : <CheckCircle size={20} />}</div>{data.issues.length ? <div className="audit-list">{data.issues.map((item) => <span key={`${item.severity}:${item.code}`}><code>{item.severity} · {item.code}</code><b>{item.count}</b></span>)}</div> : <div className="audit-empty"><CheckCircle size={24} /><p>本次导入没有记录 canonical 或结构质量问题。</p></div>}</section>
+        <section className="audit-reference-panel record-panel">
+          <h2>主要健康记录类型</h2>
+          <div className="audit-table"><div className="audit-tr head"><span>#　类型</span><span>记录条数</span><span>占比</span><span>统计范围</span></div>{topRecords.map((item, index) => <div className="audit-tr" key={item.type}><span>{index + 1}　{item.type.replace("HKQuantityTypeIdentifier", "")}</span><span>{item.count.toLocaleString("zh-CN")}</span><span>{share(item.count, data.canonical.healthRecords)}</span><span>当前数据集</span></div>)}</div>
+        </section>
+
+        <section className="audit-reference-panel missing-panel">
+          <h2>特征缺失原因</h2>
+          {topMissing.length ? <div className="audit-table"><div className="audit-tr head"><span>#　缺失原因</span><span>影响记录数</span><span>占比</span><span>统计范围</span></div>{topMissing.map((item, index) => <div className="audit-tr" key={item.reason}><span>{index + 1}　{item.reason}</span><span>{item.count.toLocaleString("zh-CN")}</span><span>{share(item.count, data.canonical.trainingSessions)}</span><span>当前数据集</span></div>)}</div> : <div className="audit-reference-empty"><CheckCircle size={24} /> 当前 active Feature 没有结构化缺失原因</div>}
+        </section>
+      </div>
+
+      <section className="audit-reference-panel issues-panel">
+        <h2>导入质量问题</h2>
+        {data.issues.length ? <div className="audit-table issues-table"><div className="audit-tr head"><span>严重级别</span><span>问题类型</span><span>问题描述</span><span>影响记录条数</span><span>状态</span></div>{data.issues.slice(0, 5).map((item) => <div className="audit-tr" key={`${item.severity}:${item.code}`}><span><b className={`severity ${item.severity}`}>{item.severity}</b></span><span>{item.code}</span><span>检测到需要复核的数据质量问题</span><span>{item.count.toLocaleString("zh-CN")}</span><span><b className="status-outline">待处理</b></span></div>)}</div> : <div className="audit-reference-empty"><CheckCircle size={24} /> 本次导入没有 canonical 或结构质量问题</div>}
+      </section>
+
+      <footer className="audit-health-bar"><ShieldCheck size={26} /><b>当前数据健康</b><strong>{totalIssues ? "待复核" : "良好"}</strong><span>数据完整性：{qualityScore}</span><span>心率覆盖：{heartAvg}</span><span>建议：继续保持良好的数据记录习惯</span><Link to="/data">返回数据与模型</Link></footer>
     </div>
   );
 }

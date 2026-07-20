@@ -203,7 +203,7 @@ flowchart TB
 
 ### 4.6 Application services
 
-计划包：`packages/application`。
+当前实现：`packages/application`。
 
 负责用例编排：
 
@@ -218,57 +218,60 @@ Application service 可以依赖 repository interface 和 scoring，但不能依
 
 ### 4.7 Infrastructure
 
-计划包：`packages/storage-sqlite`。
+`packages/storage-sqlite` 是 SQLite 唯一入口：schema / migrations、`RaiDatabase` 打开与导入写入、
+publication lock、数据库文件发布、model-run / recompute-job / training-session repository，
+以及 dashboard / workouts 只读 repository 与共享 SQL 片段。
+`packages/health-export-parser` 负责 XML/GPX 解析与 canonicalization（`RaiDatabase` 仍 re-export 兼容）。
+`apps/api` 直接依赖 `@rai/storage-sqlite`；`RaiReadStore` 对 dashboard、workouts、zones、training statistics、
+series、trends、audit/summary、model-run、job 均走 storage 读 repository，API 层只做缓存与 HTTP DTO 组装。
 
-- migrations；
+
+- migrations（唯一源：`storage-sqlite`）；
 - Node SQLite repository；
 - Web import job state；
 - 原子重算结果切换；
 - 备份和恢复。
 
-未来移动端使用 `expo-sqlite` 实现相同 repository interface，不把 Node SQLite API带入 domain。
+纯领域包不得依赖 Node SQLite API。详见 `docs/ARCHITECTURE_DEBT_MIGRATION.md`。
 
 ### 4.8 Presentation
 
 - `apps/api`：本机 Fastify API，默认只监听 `127.0.0.1`；
-- `apps/web`：React / Vite，使用 API client；
-- `apps/mobile`：React Native，直接调用 application/scoring 或通过 repository；
+- `apps/web`：React / Vite，只依赖 `packages/api-contracts` 中的 HTTP DTO；
 - 页面不自己计算分数。
 
-## 5. 目标目录
+当前产品范围仅包含浏览器 Web、本地 API 及其共享包。原生移动端和桌面端不属于本仓库当前范围。
+
+## 5. 当前目录与演进目标
 
 ```text
 apps/
   api/
-    src/modules/import/
-    src/modules/workouts/
-    src/modules/ability/
+    src/                           Fastify、读取模型、后台 worker
   web/
-    src/features/dashboard/
-    src/features/workouts/
-    src/features/trends/
-  mobile/                         后续创建
-    src/features/
-    modules/healthkit/ios/
+    src/                           React 页面、组件和 HTTP client
 
 packages/
-  contracts/                      已创建
-  health-export-parser/           已创建
-  scoring/                        已创建
-  features/                       已创建：纯 Feature Vector 提取
-  application/                    已创建：SQLite 回放、任务队列与 Run 管理
-  storage-sqlite/                 从当前 parser DB 抽出 repository 时创建
-  api-client/                     OpenAPI 生成
-  test-fixtures/                  脱敏黄金数据
+  contracts/                      领域 contract
+  api-contracts/                  HTTP DTO
+  health-export-parser/           Apple Health 解析、canonical、incremental plan
+  storage-sqlite/                 schema、migrations、repos、publication lock/publish
+  features/                       纯 Feature Vector 提取
+  physiology/                     生理与比赛预测公式
+  scoring/                        CA / TA 评分
+  training-load/                  训练负荷
+  training-zones/                 训练分区与时间线
+  prediction-inference/           Node ONNX 推理
+  application/                    用例门面 + RecomputePipeline
 
 research/
-  notebooks/                      不提交输出和真实数据
-  experiments/
-  reports/
+  rai_ml/                         CatBoost 训练与 ONNX 导出
+  tests/
 
 docs/
   decisions/                      ADR
   ARCHITECTURE.md
+  ARCHITECTURE_DEBT_MIGRATION.md
   PARSER_DESIGN.md
   MODEL_VALIDATION_PLAN.md
 
@@ -277,7 +280,8 @@ var/                              本地生成，不提交
   reports/
 ```
 
-只在进入某阶段时创建对应包，避免大量空目录和占位实现。
+Application 侧：`RaiApplicationService` 为门面（enqueue / override / zone settings / runNextJob）；
+重算流水线在 `services/recompute-pipeline.ts`。读路径可继续把剩余 SQL 下沉到 storage repository。
 
 ## 6. Web 版本
 
@@ -315,7 +319,8 @@ GET  /v1/dashboard
 GET  /v1/trends
 ```
 
-API schema 通过 OpenAPI 生成 `packages/api-client`，不在前端手写第二套响应类型。
+API schema 由 OpenAPI 描述，HTTP DTO 统一定义在 `packages/api-contracts`；Web 不手写第二套响应类型。
+若未来引入生成式 client，应从现有 OpenAPI 生成并替换当前轻量请求封装，而不是并行维护两套 contract。
 
 ### 6.3 Web 不负责
 
@@ -325,45 +330,9 @@ API schema 通过 OpenAPI 生成 `packages/api-client`，不在前端手写第�
 - 不维护自己的日期/单位转换；
 - 不将原始路线发往第三方地图服务。
 
-## 7. 移动端
+## 7. 原生客户端范围
 
-### 7.1 HealthKit adapter
-
-原生 Swift module 只负责：
-
-- 权限；
-- anchored query；
-- Workout 与关联 samples；
-- route query；
-- 删除对象；
-- 转换成 canonical contract。
-
-它不负责 CA/TA 计算。
-
-### 7.2 同步
-
-移动端数据库保存：
-
-- HealthKit object ID / UUID；
-- anchored query cursor；
-- canonical Workout；
-- feature/model version；
-- assessment timeline。
-
-HealthKit 是事实源，移动数据库是缓存和派生结果。修改或删除 HealthKit 对象后，从最早受影响点重算。
-
-### 7.3 Web 与移动端并行开发条件
-
-满足以下条件后再并行：
-
-1. canonical contract v1 冻结；
-2. feature vector v1 冻结；
-3. scoring 输入/输出 schema 冻结；
-4. 至少 20 个脱敏黄金 fixture；
-5. 模型回放结果可复现；
-6. Web 不再依赖临时 notebook 输出。
-
-在此前并行做两个 UI 会放大数据语义变化成本，不建议。
+本仓库当前只开发浏览器 Web、本地 API 和所需共享包。HealthKit adapter、原生移动端与原生桌面端均为范围外项目；除非经过单独产品决策，不在本仓库创建相关目录、同步协议或占位实现。
 
 ## 8. 模型和数据版本
 

@@ -1,3 +1,5 @@
+import "../pixel-layout.css";
+import "../data-reference.css";
 import type {
   ImportJobResponse,
   InsufficientPredictionLabelsResponse,
@@ -22,7 +24,7 @@ import {
   LoadingBlock,
 } from "../components/Feedback.js";
 import { StatusBadge } from "../components/StatusBadge.js";
-import { date } from "../format.js";
+import { date, status as statusLabel } from "../format.js";
 import { useRemote } from "../hooks.js";
 import {
   ArrowClockwise,
@@ -50,11 +52,7 @@ type ImportInspection = {
 
 type ImportSourceCandidate = {
   id: string;
-  sourceId?: string;
   displayName: string;
-  path?: string;
-  inputPath?: string;
-  originalPath?: string;
   sizeBytes?: number;
   exportBytes?: number;
   modifiedAt?: string;
@@ -79,26 +77,92 @@ type EnhancedImportJob = ImportJobResponse & {
 
 const IMPORT_JOB_STORAGE_KEY = "rai:active-import-job";
 
+interface UncertainImportSubmission {
+  sourceId: string;
+  submittedAt: number;
+}
+
+function belongsToSubmission(job: EnhancedImportJob | null, submission: UncertainImportSubmission): boolean {
+  return job?.sourceId === submission.sourceId &&
+    Number.isFinite(Date.parse(job.createdAt)) &&
+    Date.parse(job.createdAt) >= submission.submittedAt;
+}
+
+async function findSubmittedImportJob(
+  submission: UncertainImportSubmission,
+): Promise<EnhancedImportJob | null> {
+  const activeJob = await api<EnhancedImportJob | null>("/v1/import-jobs/active");
+  if (belongsToSubmission(activeJob, submission)) return activeJob;
+  const latestJob = await api<EnhancedImportJob | null>("/v1/import-jobs/latest");
+  return belongsToSubmission(latestJob, submission) ? latestJob : null;
+}
+
+function rememberImportJob(job: EnhancedImportJob): void {
+  if (["queued", "running"].includes(job.status)) {
+    localStorage.setItem(IMPORT_JOB_STORAGE_KEY, job.id);
+  } else if (localStorage.getItem(IMPORT_JOB_STORAGE_KEY) === job.id) {
+    localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+  }
+}
+
 function formatBytes(value: number) {
   if (value < 1024 ** 2) return `${Math.max(1, Math.round(value / 1024))} KB`;
   if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
   return `${(value / 1024 ** 3).toFixed(2)} GB`;
 }
 
-function uploadExport(file: File, onProgress: (value: number) => void) {
+interface UploadExportOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+export function uploadExport(
+  file: File,
+  onProgress: (value: number) => void,
+  options: UploadExportOptions = {},
+) {
   return new Promise<{ sourceId: string }>((resolve, reject) => {
     const request = new XMLHttpRequest();
+    // The response includes server-side ZIP validation and extraction, which can
+    // legitimately take much longer than the local file transfer.
+    const timeoutMs = options.timeoutMs ?? 0;
+    let settled = false;
+    const cleanup = () => options.signal?.removeEventListener("abort", abort);
+    const succeed = (value: { sourceId: string }) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const abort = () => request.abort();
     request.open("POST", "/v1/imports/uploads");
     request.responseType = "json";
+    request.timeout = timeoutMs;
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
     };
-    request.onerror = () => reject(new Error("上传中断，请检查本地 API 后重试"));
+    request.onerror = () => fail(new Error("上传中断，请检查本地 API 后重试"));
+    request.ontimeout = () => {
+      fail(new Error("上传超时，请检查本地 API 后重试"));
+      request.abort();
+    };
+    request.onabort = () => fail(new Error("上传已取消"));
     request.onload = () => {
       const body = request.response as { sourceId?: string; message?: string } | null;
-      if (request.status >= 200 && request.status < 300 && body?.sourceId) resolve({ sourceId: body.sourceId });
-      else reject(new Error(body?.message ?? "无法接收导出文件"));
+      if (request.status >= 200 && request.status < 300 && body?.sourceId) succeed({ sourceId: body.sourceId });
+      else fail(new Error(body?.message ?? "无法接收导出文件"));
     };
+    if (options.signal?.aborted) {
+      fail(new Error("上传已取消"));
+      return;
+    }
+    options.signal?.addEventListener("abort", abort, { once: true });
     const data = new FormData();
     data.append("file", file);
     request.send(data);
@@ -107,16 +171,19 @@ function uploadExport(file: File, onProgress: (value: number) => void) {
 
 export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
   const models = useRemote<ModelRunSummary[]>("/v1/model-runs", databaseReady);
-  const jobs = useRemote<RecomputeJobDto[]>("/v1/jobs", databaseReady);
+  const jobs = useRemote<RecomputeJobDto[]>("/v1/jobs", databaseReady, true);
   const predictionModels = useRemote<PredictionModelListResponse>(
     "/v1/prediction-models",
     databaseReady,
+    true,
   );
-  const [path, setPath] = useState("");
   const [importJob, setImportJob] = useState<EnhancedImportJob | null>(null);
   const [importPollError, setImportPollError] = useState<string | null>(null);
+  const [uncertainImportSubmission, setUncertainImportSubmission] =
+    useState<UncertainImportSubmission | null>(null);
   const [inspection, setInspection] = useState<ImportInspection | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [importSourceBusy, setImportSourceBusy] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [candidates, setCandidates] = useState<ImportSourceCandidate[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -128,16 +195,44 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
     useState<ModelRunComparisonResponse | null>(null);
   const [comparisonBusy, setComparisonBusy] = useState(false);
   const comparisonRequestId = useRef(0);
+  const importSourceOperationId = useRef(0);
+  const importSourceOperationActive = useRef(false);
+  const importJobCoordinationId = useRef(0);
+  const activeUploadController = useRef<AbortController | null>(null);
+  const pendingUploadSourceId = useRef<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<RecomputeJobDto | null>(null);
+  const [selectedJobPollError, setSelectedJobPollError] = useState<string | null>(null);
   const [selectedPredictionModel, setSelectedPredictionModel] =
     useState<PredictionModelDetailResponse | null>(null);
   const notifiedSuccessfulImports = useRef(new Set<string>());
+  const observedActiveRecomputeJobs = useRef(new Set<string>());
+  const notifiedPredictionRuns = useRef(new Set<string>());
   const [predictionModelBusy, setPredictionModelBusy] = useState(false);
   const [predictionModelNotice, setPredictionModelNotice] = useState<{
     tone: "info" | "success" | "error";
     message: string;
     shortage?: InsufficientPredictionLabelsResponse;
+    runId?: string;
   } | null>(null);
+
+  const discardPendingUpload = () => {
+    const sourceId = pendingUploadSourceId.current;
+    if (!sourceId) return;
+    pendingUploadSourceId.current = null;
+    void api(`/v1/import-sources/${sourceId}`, {
+      method: "DELETE",
+      keepalive: true,
+    }).catch(() => undefined);
+  };
+
+  useEffect(() => () => {
+    importSourceOperationId.current += 1;
+    importJobCoordinationId.current += 1;
+    importSourceOperationActive.current = false;
+    activeUploadController.current?.abort();
+    activeUploadController.current = null;
+    discardPendingUpload();
+  }, []);
 
   const activePredictionRun =
     predictionModels.data?.runs.find((run) => run.active) ?? null;
@@ -145,30 +240,83 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
     predictionModels.data?.runs.find((run) =>
       ["queued", "running", "validating"].includes(run.status),
     ) ?? null;
+  const importRecoveryUncertain = importJob === null && importPollError !== null;
 
   useEffect(() => {
-    const savedJobId = localStorage.getItem(IMPORT_JOB_STORAGE_KEY);
-    if (savedJobId) {
-      void api<EnhancedImportJob>(`/v1/import-jobs/${savedJobId}`)
-        .then((job) => {
-          setImportJob(job);
-          if (!["queued", "running"].includes(job.status)) {
-            localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+    let stopped = false;
+    let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+    const coordinationId = importJobCoordinationId.current;
+    const isCurrent = () =>
+      !stopped && coordinationId === importJobCoordinationId.current;
+    const adoptImportJob = (job: EnhancedImportJob) => {
+      if (!isCurrent()) return;
+      setImportJob(job);
+      setImportPollError(null);
+      if (["queued", "running"].includes(job.status)) {
+        localStorage.setItem(IMPORT_JOB_STORAGE_KEY, job.id);
+      } else if (localStorage.getItem(IMPORT_JOB_STORAGE_KEY) === job.id) {
+        localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+      }
+    };
+    const scheduleRecovery = () => {
+      if (!isCurrent() || recoveryTimer) return;
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = undefined;
+        void recoverImportJob();
+      }, 1500);
+    };
+    async function recoverImportJob(): Promise<void> {
+      const savedJobId = localStorage.getItem(IMPORT_JOB_STORAGE_KEY);
+      let savedLookupUncertain = false;
+      if (savedJobId) {
+        try {
+          const savedJob = await api<EnhancedImportJob>(`/v1/import-jobs/${savedJobId}`);
+          if (!isCurrent() || localStorage.getItem(IMPORT_JOB_STORAGE_KEY) !== savedJobId) return;
+          adoptImportJob(savedJob);
+          return;
+        } catch (caught) {
+          if (caught instanceof ApiError && caught.status === 404) {
+            if (!isCurrent()) return;
+            if (localStorage.getItem(IMPORT_JOB_STORAGE_KEY) === savedJobId) {
+              localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+            }
+          } else {
+            savedLookupUncertain = true;
+            if (isCurrent()) {
+              setImportPollError(
+                caught instanceof Error ? caught.message : "无法恢复导入任务",
+              );
+            }
           }
-        })
-        .catch(() => localStorage.removeItem(IMPORT_JOB_STORAGE_KEY));
-    } else {
-      void api<EnhancedImportJob | null>("/v1/import-jobs/active")
-        .then((job) => {
-          if (!job) return;
-          setImportJob(job);
-          localStorage.setItem(IMPORT_JOB_STORAGE_KEY, job.id);
-        })
-        .catch(() => undefined);
+        }
+      }
+      if (!isCurrent()) return;
+      try {
+        const activeJob = await api<EnhancedImportJob | null>("/v1/import-jobs/active");
+        if (!isCurrent()) return;
+        if (activeJob) {
+          adoptImportJob(activeJob);
+        } else if (savedLookupUncertain) {
+          scheduleRecovery();
+        } else {
+          setImportPollError(null);
+        }
+      } catch (caught) {
+        if (!isCurrent()) return;
+        setImportPollError(
+          caught instanceof Error ? caught.message : "无法恢复导入任务",
+        );
+        scheduleRecovery();
+      }
     }
+    void recoverImportJob();
     void api<{ sources: ImportSourceCandidate[] }>("/v1/import-sources/discover", { method: "POST", body: "{}" })
       .then((result) => setCandidates(result.sources ?? []))
       .catch(() => undefined);
+    return () => {
+      stopped = true;
+      if (recoveryTimer) clearTimeout(recoveryTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -184,7 +332,9 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
         setImportJob(next);
         setImportPollError(null);
         if (!["queued", "running"].includes(next.status)) {
-          localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+          if (localStorage.getItem(IMPORT_JOB_STORAGE_KEY) === next.id) {
+            localStorage.removeItem(IMPORT_JOB_STORAGE_KEY);
+          }
           void jobs.reload();
           void models.reload();
           return;
@@ -207,6 +357,48 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
       if (timer) clearTimeout(timer);
     };
   }, [importJob, jobs.reload, models.reload]);
+
+  useEffect(() => {
+    if (!uncertainImportSubmission) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const submission = uncertainImportSubmission;
+    const sourceId = submission.sourceId;
+    const poll = async () => {
+      try {
+        const activeJob = await findSubmittedImportJob(submission);
+        if (stopped) return;
+        if (activeJob?.sourceId === sourceId) {
+          if (pendingUploadSourceId.current === sourceId) pendingUploadSourceId.current = null;
+          setImportJob(activeJob);
+          setInspection(null);
+          setError(null);
+          setImportPollError(null);
+          setUncertainImportSubmission(null);
+          rememberImportJob(activeJob);
+          if (!["queued", "running"].includes(activeJob.status)) {
+            void jobs.reload();
+            void models.reload();
+          }
+          return;
+        }
+        if (activeJob) setError("另一个导入任务正在运行，本次提交未被接管");
+        setImportPollError(null);
+        setUncertainImportSubmission(null);
+      } catch (caught) {
+        if (stopped) return;
+        setImportPollError(
+          caught instanceof Error ? caught.message : "无法确认导入任务",
+        );
+        timer = setTimeout(() => { void poll(); }, 1500);
+      }
+    };
+    timer = setTimeout(() => { void poll(); }, 1500);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [uncertainImportSubmission, jobs.reload, models.reload]);
 
   useEffect(() => {
     if (importJob?.status !== "succeeded" || notifiedSuccessfulImports.current.has(importJob.id)) return;
@@ -240,54 +432,248 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
     return () => clearInterval(timer);
   }, [predictionModels.data, predictionModels.reload]);
 
-  const inspectSource = async (sourceId: string) => {
-    setBusy(true);
+  useEffect(() => {
+    if (
+      !selectedPredictionModel ||
+      !["queued", "running", "validating"].includes(selectedPredictionModel.run.status)
+    ) return;
+    const runId = selectedPredictionModel.run.id;
+    let stopped = false;
+    const refresh = async () => {
+      try {
+        const detail = await api<PredictionModelDetailResponse>(`/v1/prediction-models/${runId}`);
+        if (!stopped) {
+          setSelectedPredictionModel(detail);
+          if (!["queued", "running", "validating"].includes(detail.run.status)) {
+            void predictionModels.reload();
+          }
+        }
+      } catch {
+        // Keep the last successful detail visible; list/global polling reports failures.
+      }
+    };
+    const timer = setInterval(() => void refresh(), 2000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [predictionModels.reload, selectedPredictionModel?.run.id, selectedPredictionModel?.run.status]);
+
+  useEffect(() => {
+    const activeJobs = jobs.data?.filter((job) =>
+      ["queued", "running"].includes(job.status),
+    ) ?? [];
+    if (activeJobs.length === 0) return;
+    for (const job of activeJobs) observedActiveRecomputeJobs.current.add(job.id);
+    const timer = setInterval(() => {
+      void jobs.reload();
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [jobs.data, jobs.reload]);
+
+  useEffect(() => {
+    if (!selectedJob || !["queued", "running"].includes(selectedJob.status)) return;
+    const selectedJobId = selectedJob.id;
+    let stopped = false;
+    const timer = setInterval(() => {
+      void api<RecomputeJobDto>(`/v1/jobs/${selectedJobId}`)
+        .then((next) => {
+          if (stopped) return;
+          setSelectedJob((current) => current?.id === selectedJobId ? next : current);
+          setSelectedJobPollError(null);
+          if (!["queued", "running"].includes(next.status)) void jobs.reload();
+        })
+        .catch((caught) => {
+          if (!stopped) {
+            setSelectedJobPollError(
+              caught instanceof Error ? caught.message : "无法读取任务详情",
+            );
+          }
+        });
+    }, 2000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [jobs.reload, selectedJob?.id, selectedJob?.status]);
+
+  useEffect(() => {
+    if (!jobs.data) return;
+    for (const job of jobs.data) {
+      if (
+        observedActiveRecomputeJobs.current.delete(job.id) &&
+        ["succeeded", "failed", "cancelled"].includes(job.status)
+      ) {
+        notifyDataUpdated(job.id);
+      }
+    }
+  }, [jobs.data]);
+
+  useEffect(() => {
+    const runId = predictionModelNotice?.runId;
+    if (!runId) return;
+    const run = predictionModels.data?.runs.find((candidate) => candidate.id === runId);
+    if (!run) return;
+    if (["queued", "running", "validating"].includes(run.status)) {
+      setPredictionModelNotice((current) => current?.runId === runId ? {
+        ...current,
+        tone: "info",
+        message: `训练任务 ${runId.slice(0, 12)} 当前${statusLabel(run.status)}。验证期间继续使用当前预测路径，通过全部门槛后直接激活。`,
+      } : current);
+      return;
+    }
+    const succeeded = run.status === "succeeded";
+    if (succeeded && !notifiedPredictionRuns.current.has(run.id)) {
+      notifiedPredictionRuns.current.add(run.id);
+      notifyDataUpdated(run.id);
+    }
+    setPredictionModelNotice((current) => current?.runId === runId ? {
+      tone: succeeded ? "success" : "error",
+      message: succeeded
+        ? `训练任务 ${runId.slice(0, 12)} 已通过验证${run.active ? "并激活" : ""}。`
+        : `训练任务 ${runId.slice(0, 12)} ${statusLabel(run.status)}，当前 active 模型未受影响。`,
+    } : current);
+  }, [predictionModelNotice?.runId, predictionModels.data]);
+
+  const beginImportSourceOperation = () => {
+    if (importSourceOperationActive.current || importRecoveryUncertain) return null;
+    discardPendingUpload();
+    importSourceOperationActive.current = true;
+    const operationId = ++importSourceOperationId.current;
+    setImportSourceBusy(true);
+    setInspection(null);
     setError(null);
+    return operationId;
+  };
+  const finishImportSourceOperation = (operationId: number) => {
+    if (operationId !== importSourceOperationId.current) return;
+    importSourceOperationActive.current = false;
+    setImportSourceBusy(false);
+  };
+  const requestInspection = async (sourceId: string, operationId: number) => {
+    const next = await api<ImportInspection>("/v1/imports/inspect", {
+      method: "POST",
+      body: JSON.stringify({ sourceId }),
+    });
+    if (operationId === importSourceOperationId.current) setInspection(next);
+  };
+  const inspectSource = async (sourceId: string) => {
+    const operationId = beginImportSourceOperation();
+    if (operationId === null) return;
     try {
-      setInspection(await api<ImportInspection>("/v1/imports/inspect", {
-        method: "POST",
-        body: JSON.stringify({ sourceId }),
-      }));
+      await requestInspection(sourceId, operationId);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "无法检查导出文件");
+      if (operationId === importSourceOperationId.current) {
+        setError(caught instanceof Error ? caught.message : "无法检查导出文件");
+      }
     } finally {
-      setBusy(false);
+      finishImportSourceOperation(operationId);
     }
   };
   const selectExport = async (file: File) => {
     if (!file.name.toLowerCase().endsWith(".zip")) {
+      importSourceOperationId.current += 1;
+      importSourceOperationActive.current = false;
+      activeUploadController.current?.abort();
+      activeUploadController.current = null;
+      setImportSourceBusy(false);
+      setUploadProgress(null);
+      setInspection(null);
+      discardPendingUpload();
       setError("请选择 Apple 健康导出的 ZIP 文件");
       return;
     }
-    setInspection(null);
+    const operationId = beginImportSourceOperation();
+    if (operationId === null) return;
+    const uploadController = new AbortController();
+    activeUploadController.current = uploadController;
     setUploadProgress(0);
-    setError(null);
+    let uploadedSourceId: string | null = null;
     try {
-      const uploaded = await uploadExport(file, setUploadProgress);
+      const uploaded = await uploadExport(file, (progress) => {
+        if (operationId === importSourceOperationId.current) setUploadProgress(progress);
+      }, { signal: uploadController.signal });
+      uploadedSourceId = uploaded.sourceId;
+      pendingUploadSourceId.current = uploaded.sourceId;
+      if (operationId !== importSourceOperationId.current) {
+        discardPendingUpload();
+        return;
+      }
       setUploadProgress(100);
-      await inspectSource(uploaded.sourceId);
+      await requestInspection(uploaded.sourceId, operationId);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "上传失败");
+      if (uploadedSourceId && pendingUploadSourceId.current === uploadedSourceId) {
+        discardPendingUpload();
+      }
+      if (operationId === importSourceOperationId.current) {
+        setError(caught instanceof Error ? caught.message : "上传失败");
+      }
     } finally {
-      setUploadProgress(null);
+      if (activeUploadController.current === uploadController) activeUploadController.current = null;
+      if (operationId === importSourceOperationId.current) setUploadProgress(null);
+      finishImportSourceOperation(operationId);
     }
   };
-  const startImport = async (requestBody: { sourceId: string } | { inputPath: string; confirmReplace: true }) => {
+  const startImport = async (sourceId: string) => {
+    if (importSourceOperationActive.current || importRecoveryUncertain) return;
+    const submission = { sourceId, submittedAt: Date.now() };
+    const coordinationId = ++importJobCoordinationId.current;
+    const isCurrent = () => coordinationId === importJobCoordinationId.current;
     setBusy(true);
     setError(null);
     setImportPollError(null);
     try {
       const job = await api<EnhancedImportJob>("/v1/import-jobs", {
           method: "POST",
-          body: JSON.stringify(requestBody),
+          body: JSON.stringify({ sourceId }),
         });
+      if (!isCurrent()) return;
+      if (pendingUploadSourceId.current === sourceId) pendingUploadSourceId.current = null;
       setImportJob(job);
       setInspection(null);
+      setUncertainImportSubmission(null);
       localStorage.setItem(IMPORT_JOB_STORAGE_KEY, job.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "导入失败");
+      const resultIsUncertain =
+        !(caught instanceof ApiError) || caught.status >= 500;
+      if (resultIsUncertain) {
+        // Once submission may have reached the API, only the server can safely
+        // decide when the upload input is no longer owned by a worker.
+        if (pendingUploadSourceId.current === sourceId) pendingUploadSourceId.current = null;
+        try {
+          const activeJob = await findSubmittedImportJob(submission);
+          if (!isCurrent()) return;
+          if (activeJob?.sourceId === sourceId) {
+            if (pendingUploadSourceId.current === sourceId) pendingUploadSourceId.current = null;
+            setImportJob(activeJob);
+            setInspection(null);
+            setImportPollError(null);
+            setUncertainImportSubmission(null);
+            rememberImportJob(activeJob);
+            if (!["queued", "running"].includes(activeJob.status)) {
+              void jobs.reload();
+              void models.reload();
+            }
+            return;
+          }
+        } catch (reconciliationError) {
+          if (isCurrent()) {
+            setError(caught instanceof Error ? caught.message : "导入失败");
+            setImportPollError(
+              reconciliationError instanceof Error
+                ? reconciliationError.message
+                : "无法确认导入任务",
+            );
+            setUncertainImportSubmission(submission);
+          }
+          return;
+        }
+      }
+      if (isCurrent()) {
+        setError(caught instanceof Error ? caught.message : "导入失败");
+      }
     } finally {
-      setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   };
   const recompute = async () => {
@@ -314,7 +700,8 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
         method: "POST",
         body: "{}",
       });
-      void models.reload();
+      await models.reload();
+      notifyDataUpdated(`model-run:${id}`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "无法激活模型");
     } finally {
@@ -343,6 +730,7 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
   const inspectJob = async (id: string) => {
     setBusy(true);
     setError(null);
+    setSelectedJobPollError(null);
     try {
       setSelectedJob(await api<RecomputeJobDto>(`/v1/jobs/${id}`));
     } catch (caught) {
@@ -374,7 +762,8 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
       );
       setPredictionModelNotice({
         tone: "info",
-        message: `训练任务 ${result.runId.slice(0, 12)} 已进入队列。验证期间继续使用当前预测路径，通过全部门槛后直接激活。`,
+        message: `训练任务 ${result.runId.slice(0, 12)} 当前${statusLabel(result.status)}。验证期间继续使用当前预测路径，通过全部门槛后直接激活。`,
+        runId: result.runId,
       });
       await predictionModels.reload();
     } catch (caught) {
@@ -427,6 +816,7 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
         tone: "info",
         message:
           "已提交取消请求，当前阶段完成后停止训练；当前 active 模型不受影响。",
+        runId: id,
       });
       await predictionModels.reload();
     } catch (caught) {
@@ -462,9 +852,10 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
   return (
     <div className="page data-page">
       <header className="page-header split">
-        <div>
-          <h1>数据与模型</h1>
-          <p>管理 Apple Health 导入、任务队列与模型历史。</p>
+        <div className="header-title-with-icon">
+          <Database size={54} />
+          <div><h1>数据与模型</h1>
+          <p>管理 Apple Health 导入、任务队列与模型历史。</p></div>
         </div>
         {databaseReady ? (
           <Link to="/data/audit" className="button secondary">
@@ -480,25 +871,33 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
           <div className="panel-heading">
             <div>
               <h2>更新健康数据</h2>
-              <p>选择 Apple 健康导出的 ZIP，其余步骤由系统在本机完成。</p>
+              <p>先上传并检查 Apple 健康导出的 ZIP，确认后再开始更新。</p>
             </div>
             <FolderOpen size={22} />
           </div>
+          {importRecoveryUncertain ? (
+            <div className="import-status" role="alert" aria-live="assertive">
+              <StatusBadge value="running" />
+              <div>
+                <b>正在确认上次导入任务</b>
+                <small>{importPollError}</small>
+              </div>
+            </div>
+          ) : null}
           {!importJob || ["failed", "cancelled", "succeeded"].includes(importJob.status) ? <>
           <input ref={fileInput} className="visually-hidden" type="file" accept=".zip,application/zip" onChange={(event) => { const file = event.target.files?.[0]; if (file) void selectExport(file); event.target.value = ""; }} />
-          <button className={`import-dropzone ${dragActive ? "active" : ""}`} type="button" disabled={busy || uploadProgress !== null} onClick={() => fileInput.current?.click()} onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); const file = event.dataTransfer.files[0]; if (file) void selectExport(file); }}>
+          <button className={`import-dropzone ${dragActive ? "active" : ""}`} type="button" disabled={busy || importSourceBusy || importRecoveryUncertain} onClick={() => fileInput.current?.click()} onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }} onDragOver={(event) => event.preventDefault()} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); if (importRecoveryUncertain) return; const file = event.dataTransfer.files[0]; if (file) void selectExport(file); }}>
             <span className="import-dropzone-icon"><UploadSimple size={24} /></span>
             <span><b>选择 Apple 健康导出 ZIP</b><small>也可以将文件拖到这里</small></span>
           </button>
-          {uploadProgress !== null ? <div className="upload-progress" role="progressbar" aria-label="上传导出文件" aria-valuenow={uploadProgress} aria-valuemin={0} aria-valuemax={100}><span><b>正在接收导出文件</b><small>{uploadProgress}%</small></span><i><em style={{ width: `${uploadProgress}%` }} /></i></div> : null}
+          {uploadProgress !== null ? <div className="upload-progress" role="progressbar" aria-label={uploadProgress >= 100 ? "正在校验并解压导出文件" : "上传导出文件"} aria-valuenow={uploadProgress} aria-valuemin={0} aria-valuemax={100}><span><b>{uploadProgress >= 100 ? "正在校验并解压导出文件" : "正在接收导出文件"}</b><small>{uploadProgress}%</small></span><i><em style={{ width: `${uploadProgress}%` }} /></i><button type="button" className="text-button" onClick={() => activeUploadController.current?.abort()}>取消上传</button></div> : null}
           {inspection ? <div className={`import-inspection ${inspection.status}`}>
             <div className="inspection-title"><FileZip size={20} /><span><b>{inspection.displayName ?? inspection.exportFileName}</b><small>{formatBytes(inspection.exportBytes)}{inspection.exportCreatedAt ? ` · ${date(inspection.exportCreatedAt, true)}` : ""}</small></span><StatusBadge value={inspection.status} /></div>
             <dl><div><dt>预计训练</dt><dd>{inspection.estimatedWorkoutCount?.toLocaleString("zh-CN") ?? "待导入确认"}</dd></div><div><dt>路线文件</dt><dd>{inspection.routeFileCount.toLocaleString("zh-CN")}</dd></div><div><dt>更新判断</dt><dd>{inspection.status === "unchanged" ? "没有变化" : inspection.status === "ready" ? "可以更新" : "无法导入"}</dd></div></dl>
             {inspection.warnings.length ? <ul>{inspection.warnings.map((warning, index) => <li key={typeof warning === "string" ? warning : warning.code ?? index}>{typeof warning === "string" ? warning : warning.message}</li>)}</ul> : null}
-            <button className="button primary" disabled={busy || inspection.status !== "ready"} onClick={() => void startImport({ sourceId: inspection.sourceId })}>{inspection.status === "unchanged" ? "数据已是最新" : busy ? "正在开始" : "开始更新"}</button>
+            <button className="button primary" disabled={busy || importSourceBusy || importRecoveryUncertain || inspection.status !== "ready"} onClick={() => void startImport(inspection.sourceId)}>{inspection.status === "unchanged" ? "数据已是最新" : busy ? "正在开始" : "开始更新"}</button>
           </div> : null}
-          {candidates.length ? <div className="discovered-sources"><span><b>发现本机导出</b><small>选择后先检查变化，不会自动更新</small></span>{candidates.slice(0, 3).map((candidate) => <button key={candidate.id} type="button" disabled={busy} onClick={() => void inspectSource(candidate.sourceId ?? candidate.id)}><FolderOpen size={17} /><span><b>{candidate.displayName}</b><small>{candidate.exportBytes || candidate.sizeBytes ? formatBytes(candidate.exportBytes ?? candidate.sizeBytes ?? 0) : candidate.originalPath ?? candidate.inputPath ?? candidate.path ?? "Apple 健康导出"}</small></span></button>)}</div> : null}
-          <details className="advanced-import"><summary>高级：从已解压目录导入</summary><label className="field"><span>导出目录</span><input value={path} placeholder="例如 D:\\健康数据\\apple_health_export" onChange={(event) => setPath(event.target.value)} /></label><button className="button secondary" disabled={!path.trim() || busy} onClick={() => void startImport({ inputPath: path.trim(), confirmReplace: true })}>从目录更新</button></details>
+          {candidates.length ? <div className="discovered-sources"><span><b>发现本机导出</b><small>选择后先检查变化，不会自动更新</small></span>{candidates.slice(0, 3).map((candidate) => <button key={candidate.id} type="button" disabled={busy || importSourceBusy || importRecoveryUncertain} onClick={() => void inspectSource(candidate.id)}><FolderOpen size={17} /><span><b>{candidate.displayName}</b><small>{candidate.exportBytes || candidate.sizeBytes ? formatBytes(candidate.exportBytes ?? candidate.sizeBytes ?? 0) : "Apple 健康导出"}</small></span></button>)}</div> : null}
           </> : null}
           {importJob ? (
             <div className={`import-job-view ${importJob.status}`}
@@ -787,7 +1186,7 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
             <small>切换规则</small>
             <b>
               {pendingPredictionRun
-                ? "验证中，保持当前结果"
+                ? `${statusLabel(pendingPredictionRun.status)}，保持当前结果`
                 : "验证通过后原子激活"}
             </b>
           </span>
@@ -860,9 +1259,9 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
             title="首次导入后可训练"
             body="导入数据并标记标准测试或比赛结果后，才能建立个人残差模型。"
           />
-        ) : predictionModels.loading ? (
+        ) : predictionModels.loading && !predictionModels.data ? (
           <LoadingBlock label="正在读取预测模型历史" />
-        ) : predictionModels.error || !predictionModels.data ? (
+        ) : !predictionModels.data ? (
           <ErrorBlock
             message={predictionModels.error ?? "无法读取预测模型"}
             onRetry={() => void predictionModels.reload()}
@@ -873,6 +1272,8 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
             body="尚无 CatBoost 模型。积累足够的真实比赛与标准测试标签后，可在这里训练；验证通过会直接激活。"
           />
         ) : (
+          <>
+          {predictionModels.error ? <p className="zone-setting-refresh-error" role="alert">预测模型历史自动刷新失败，当前保留上次成功加载的列表。<button type="button" className="text-button" onClick={() => void predictionModels.reload()}>重新加载</button></p> : null}
           <div className="prediction-model-list">
             {predictionModels.data.runs.map((run) => (
               <article
@@ -955,6 +1356,7 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
               </article>
             ))}
           </div>
+          </>
         )}
         {selectedPredictionModel ? (
           <section
@@ -1028,10 +1430,23 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
           <p className="empty-inline">
             首次导入任务提交后，进度会显示在这里和全局状态栏。
           </p>
-        ) : jobs.loading ? (
+        ) : jobs.loading && !jobs.data ? (
           <LoadingBlock />
-        ) : jobs.data ? (
+        ) : !jobs.data ? (
+          <ErrorBlock
+            message={jobs.error ?? "无法读取任务记录"}
+            onRetry={() => void jobs.reload()}
+          />
+        ) : (
           <>
+            {jobs.error ? (
+              <p className="zone-setting-refresh-error" role="alert">
+                任务记录自动刷新失败，当前保留上次成功加载的状态。
+                <button type="button" className="text-button" onClick={() => void jobs.reload()}>
+                  重新加载
+                </button>
+              </p>
+            ) : null}
             <div className="job-list">
               {jobs.data.slice(0, 12).map((job) => {
                 const progress = job.progressTotal
@@ -1087,7 +1502,10 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
                   <button
                     className="icon-button"
                     aria-label="关闭任务详情"
-                    onClick={() => setSelectedJob(null)}
+                    onClick={() => {
+                      setSelectedJob(null);
+                      setSelectedJobPollError(null);
+                    }}
                   >
                     ×
                   </button>
@@ -1106,6 +1524,11 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
                     <dd>{selectedJob.modelRunId?.slice(0, 18) ?? "--"}</dd>
                   </div>
                 </dl>
+                {selectedJobPollError ? (
+                  <p className="zone-setting-refresh-error" role="alert">
+                    {selectedJobPollError}，正在自动重试。
+                  </p>
+                ) : null}
                 {selectedJob.error ? (
                   <pre aria-label="任务错误详情">
                     {JSON.stringify(selectedJob.error, null, 2)}
@@ -1125,7 +1548,7 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
               </div>
             ) : null}
           </>
-        ) : null}
+        )}
       </section>
     </div>
   );

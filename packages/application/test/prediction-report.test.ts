@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { RaceTimePrediction } from "@rai/contracts";
 
-import { adjustPredictionWithCatBoost } from "../src/prediction-report.js";
+import {
+  adjustPredictionWithCatBoost,
+  historicalValuesAvailableAt
+} from "../src/prediction-report.js";
 
 const prediction: RaceTimePrediction = {
   distance: "ten_k",
@@ -42,4 +45,20 @@ test("applies CatBoost log-residual correction multiplicatively to the full inte
 test("rejects an invalid production correction before changing a prediction", () => {
   assert.throws(() => adjustPredictionWithCatBoost(prediction, Number.NaN));
   assert.throws(() => adjustPredictionWithCatBoost(prediction, 0.3));
+});
+
+test("historical evaluation exposes labels only after their availability time", () => {
+  const values = [
+    { availableAt: "2026-01-03T00:00:00.000Z", value: "late" },
+    { availableAt: "2026-01-01T12:00:00.000Z", value: "ready" },
+    { availableAt: "2026-01-02T00:30:00.000Z", value: "overlapping" }
+  ];
+  assert.deepEqual(
+    historicalValuesAvailableAt(values, "2026-01-02T00:00:00.000Z"),
+    ["ready"]
+  );
+  assert.deepEqual(
+    historicalValuesAvailableAt(values, "2026-01-03T00:00:00.000Z"),
+    ["late", "ready", "overlapping"]
+  );
 });

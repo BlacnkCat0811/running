@@ -38,7 +38,7 @@ RAI 是一个本地优先的个人跑步能力分析项目。当前阶段先解�
 
 ## 环境
 
-- Node.js 24 及以上；
+- Node.js 22 LTS（22.12.0 及以上、低于 23；推荐使用 `.nvmrc` 中的版本）；
 - npm 11 及以上；
 - Python 3.12 或 3.13（可选）；只有内置 CatBoost 训练和 Python 测试需要通过 `npm run ml:bootstrap` 安装锁定环境。基础分析、公式回退、ONNX 推理和生产 Web/API 启动只依赖 Node.js。
 
@@ -91,7 +91,7 @@ npm run data:recompute -- `
 npm run data:predict -- --as-of 2026-07-11T00:00:00+08:00
 ```
 
-执行严格 walk-forward 预测评估：
+查看当前 active CatBoost 模型的严格 walk-forward 评估产物：
 
 ```powershell
 npm run data:prediction-eval -- --as-of 2026-07-11T00:00:00+08:00
@@ -136,8 +136,11 @@ npm run dev
 生产模式先构建 Web，再由 Fastify 同一进程提供页面和 API：
 
 ```powershell
+npm run build
 npm start
 ```
+
+`npm start` 只运行已经构建的 `apps/web/dist`，不会在生产启动时调用 Vite。部署时可先在构建环境执行 `npm run build`，随后执行 `npm ci --omit=dev` 和 `npm start`；缺少 Web 构建产物时会立即退出并给出明确提示。
 
 生产启动不要求 Python。需要训练或验证 CatBoost 模型时，另行执行 `npm run ml:bootstrap`、`npm run ml:check` 和相应的 `ml:*` 命令。
 

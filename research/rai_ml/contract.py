@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Final, Iterable
 
-FEATURE_SCHEMA_VERSION: Final = "race-residual-feature-v2"
+FEATURE_SCHEMA_VERSION: Final = "race-residual-feature-v3"
 DISTANCES: Final = ("five_k", "ten_k", "half_marathon")
+ISO_INSTANT_PATTERN: Final = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 # This order is the public ONNX input contract. Never reorder in-place: publish a
 # new feature schema version instead.
@@ -52,13 +56,15 @@ class ContractError(ValueError):
 def _parse_iso8601(name: str, value: Any) -> datetime:
     if not isinstance(value, str) or not value.strip():
         raise ContractError(f"{name} must be a non-empty ISO 8601 string")
+    if ISO_INSTANT_PATTERN.fullmatch(value) is None:
+        raise ContractError(
+            f"{name} must be a timezone-qualified ISO 8601 instant with at most 6 fractional digits"
+        )
     normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as error:
         raise ContractError(f"{name} must be a valid ISO 8601 date-time") from error
-    if parsed.tzinfo is None:
-        raise ContractError(f"{name} must include a timezone")
     return parsed
 
 
@@ -87,6 +93,7 @@ class TrainingSample:
     sample_id: str
     observed_at: str
     completed_at: str
+    label_available_at: str
     distance: str
     baseline_predicted_seconds: float
     baseline_optimistic_seconds: float | None
@@ -126,10 +133,14 @@ def parse_sample(raw: Any, line_number: int) -> TrainingSample:
         raise ContractError(prefix + f"distance must be one of {DISTANCES}")
     observed_at = raw.get("observedAt")
     completed_at = raw.get("completedAt")
+    label_available_at = raw.get("labelAvailableAt")
     observed = _parse_iso8601(prefix + "observedAt", observed_at)
     completed = _parse_iso8601(prefix + "completedAt", completed_at)
+    label_available = _parse_iso8601(prefix + "labelAvailableAt", label_available_at)
     if completed <= observed:
         raise ContractError(prefix + "completedAt must be later than observedAt")
+    if label_available < completed:
+        raise ContractError(prefix + "labelAvailableAt must not be earlier than completedAt")
 
     baseline = _positive_number(
         prefix + "baselinePredictedSeconds", raw.get("baselinePredictedSeconds")
@@ -182,6 +193,7 @@ def parse_sample(raw: Any, line_number: int) -> TrainingSample:
         sample_id=sample_id,
         observed_at=observed_at,
         completed_at=completed_at,
+        label_available_at=label_available_at,
         distance=distance,
         baseline_predicted_seconds=baseline,
         baseline_optimistic_seconds=optimistic,
@@ -228,6 +240,7 @@ def canonical_dataset_bytes(samples: Iterable[TrainingSample]) -> bytes:
                 "sampleId": sample.sample_id,
                 "observedAt": sample.observed_at,
                 "completedAt": sample.completed_at,
+                "labelAvailableAt": sample.label_available_at,
                 "distance": sample.distance,
                 "baselinePredictedSeconds": sample.baseline_predicted_seconds,
                 "baselineOptimisticSeconds": sample.baseline_optimistic_seconds,
@@ -256,6 +269,10 @@ def feature_schema_document() -> dict[str, Any]:
             "acuteChronicLoadRatio": (
                 "active composite daily training load; 7-day/28-day half-life "
                 "EWMA ratio through asOf"
+            ),
+            "environmentalScenario": (
+                "missing unless an independently timestamped pre-race scenario is available; "
+                "workout result metadata is excluded"
             ),
         },
         "inputDtype": "float32",

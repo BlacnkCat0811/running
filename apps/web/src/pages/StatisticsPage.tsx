@@ -1,3 +1,5 @@
+import "../pixel-layout.css";
+import "../training-reference.css";
 import type {
   DailyTrainingMetric,
   TrainingPeriodSummary,
@@ -92,6 +94,25 @@ function VolumeHistoryChart({ periods }: { periods: TrainingPeriodSummary[] }) {
   return <div className="statistics-chart chart-with-data"><div className="chart-visual" role="img" aria-label={`跑量与负荷历史，共 ${data.length} 个周期`}><ResponsiveContainer width="100%" height="100%"><ComposedChart data={data} margin={{ top: 16, right: 10, bottom: 0, left: 0 }}><CartesianGrid vertical={false} stroke="#dfe5df" /><XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#6d786f" }} tickLine={false} axisLine={false} minTickGap={30} /><YAxis yAxisId="distance" width={38} tick={{ fontSize: 9, fill: "#6d786f" }} tickLine={false} axisLine={false} /><YAxis yAxisId="load" orientation="right" width={38} tick={{ fontSize: 9, fill: "#a96c19" }} tickLine={false} axisLine={false} /><Tooltip formatter={(value, name) => [name === "跑量 km" ? `${Number(value).toFixed(1)} km` : Math.round(Number(value)), name]} labelFormatter={(value) => String(value)} /><Bar yAxisId="distance" dataKey="distance" name="跑量 km" fill="#76a489" radius={[3, 3, 0, 0]} /><Line yAxisId="load" type="monotone" dataKey="trainingLoad" name="训练负荷" stroke="#b87822" strokeWidth={2} dot={false} /></ComposedChart></ResponsiveContainer></div><details className="chart-data-details"><summary>查看跑量与负荷数据</summary><div className="chart-data-table-wrap"><table><caption className="sr-only">跑量与训练负荷历史数据</caption><thead><tr><th>周期开始</th><th>跑量</th><th>训练负荷</th></tr></thead><tbody>{data.map((item) => <tr key={item.date}><td>{item.date}</td><td>{item.distance.toFixed(1)} km</td><td>{item.trainingLoad.toFixed(1)}</td></tr>)}</tbody></table></div></details></div>;
 }
 
+function EvidenceTimeline({ periods }: { periods: TrainingPeriodSummary[] }) {
+  const events = [...periods]
+    .sort((left, right) => left.periodStart.localeCompare(right.periodStart))
+    .slice(-7);
+  if (!events.length) return <div className="series-empty">当前范围没有训练证据。</div>;
+  return <section className="panel statistics-evidence-timeline" aria-label="证据时间线">
+    <div className="panel-heading"><div><h2>证据时间线</h2><p>周期训练数据持续写入模型证据</p></div></div>
+    <div className="statistics-event-track">
+      {events.map((event, index) => <article key={event.periodStart}>
+        <time>{shortDate(event.periodStart)}</time>
+        <i aria-hidden="true">{index % 4 === 0 ? "◷" : index % 4 === 1 ? "⚑" : index % 4 === 2 ? "▥" : "♥"}</i>
+        <b>{event.workoutCount} 次训练</b>
+        <span>{km(event.distanceMeters)} km</span>
+        <small>训练负荷 <em>{load(event.totalLoad)}</em></small>
+      </article>)}
+    </div>
+  </section>;
+}
+
 type LoadView = "composite" | "internal" | "pace";
 
 function LoadTimelineChart({ items, components, view }: {
@@ -125,8 +146,8 @@ export function StatisticsPage() {
   if (overview.error || !overview.data) return <div className="page"><ErrorBlock message={overview.error ?? "无法读取训练统计"} onRetry={() => void overview.reload()} /></div>;
   const current = granularity === "week" ? overview.data.week : granularity === "month" ? overview.data.month : overview.data.year;
   const distribution = current ? (distributionView === "structure" ? current.typeDistribution.map((item) => ({ key: item.sessionType, label: sessionType(item.sessionType), ...item })) : current.stimulusDistribution.map((item) => ({ key: item.stimulusType, label: stimulusType(item.stimulusType), ...item }))) : [];
-  return <div className="page statistics-page">
-    <header className="page-header split"><div><h1>运动统计</h1><p>{overview.data.status?.localDate ?? "--"} · 跑量、训练负荷与恢复节奏</p></div><div className="segmented" role="group" aria-label="统计周期">{granularities.map((item) => <button type="button" key={item.value} className={granularity === item.value ? "active" : ""} aria-pressed={granularity === item.value} onClick={() => setGranularity(item.value)}>{item.label}</button>)}</div></header>
+  return <div className="page statistics-page statistics-reference-page">
+    <header className="page-header split runner-page-header statistics-reference-header"><div><h1>运动统计</h1><p>{overview.data.status?.localDate ?? "--"} · 跑量、训练负荷与恢复节奏</p></div><div className="segmented" role="group" aria-label="统计周期">{granularities.map((item) => <button type="button" key={item.value} className={granularity === item.value ? "active" : ""} aria-pressed={granularity === item.value} onClick={() => setGranularity(item.value)}>{item.label}</button>)}</div></header>
     <StatusPanel metric={overview.data.status} confidence={overview.data.statusConfidence} />
     {current ? <>
       <section className="statistics-kpis" aria-label="当前周期统计">
@@ -136,18 +157,21 @@ export function StatisticsPage() {
         <PeriodMetric label="训练负荷" value={load(current.totalLoad)} comparison={current.comparison?.loadChangeFraction ?? null} />
         <PeriodMetric label="平均配速" value={`${pace(current.averagePaceSecondsPerKm)}/km`} />
         <PeriodMetric label="最长跑" value={`${km(current.longestRunMeters)} km`} />
+      </section>
+      <section className="statistics-grid statistics-reference-main">
+        <article className="panel statistics-history-panel"><div className="panel-heading"><div><h2>{granularity === "week" ? "周" : granularity === "month" ? "月" : "年"}跑量与负荷</h2><p>{current.isComplete ? "完整周期" : "当前周期按同进度比较"}</p></div><span className="chart-key"><i />跑量 <i />负荷</span></div>{history.loading ? <LoadingBlock /> : history.error || !history.data ? <ErrorBlock message={history.error ?? "没有历史统计"} /> : <VolumeHistoryChart periods={history.data.periods} />}</article>
+        <article className="panel type-distribution-panel statistics-reference-distribution"><div className="panel-heading"><div><h2>{distributionView === "structure" ? "训练类型分布" : "生理刺激分布"}</h2><p>按当前周期的训练负荷</p></div><div className="segmented compact" role="group" aria-label="训练分布类型"><button type="button" className={distributionView === "structure" ? "active" : ""} aria-pressed={distributionView === "structure"} onClick={() => setDistributionView("structure")}>结构</button><button type="button" className={distributionView === "stimulus" ? "active" : ""} aria-pressed={distributionView === "stimulus"} onClick={() => setDistributionView("stimulus")}>刺激</button></div></div>{distribution.length ? <div>{distribution.map((item) => <div key={item.key}><span><b>{item.label}</b><small>{item.workoutCount} 次 · {km(item.distanceMeters)} km</small></span><strong>{load(item.load)}</strong><i><em style={{ width: `${Math.min(100, current.totalLoad > 0 ? item.load / current.totalLoad * 100 : 0)}%` }} /></i></div>)}</div> : <div className="series-empty"><WarningCircle size={20} />当前周期没有训练</div>}</article>
+      </section>
+      {history.loading || history.error || !history.data ? null : <EvidenceTimeline periods={history.data.periods} />}
+      <section className="statistics-grid lower">
+        <article className="panel"><div className="panel-heading"><div><h2>负荷趋势</h2><p>{loadView === "composite" ? "综合负荷及急慢性 EWMA" : loadView === "internal" ? "按储备心率计算的内部负荷" : "按阈配速计算的外部负荷"}</p></div><div className="segmented compact" role="group" aria-label="负荷趋势类型">{([{"value":"composite","label":"综合"},{"value":"internal","label":"内部"},{"value":"pace","label":"配速"}] as const).map((item) => <button type="button" key={item.value} className={loadView === item.value ? "active" : ""} aria-pressed={loadView === item.value} onClick={() => setLoadView(item.value)}>{item.label}</button>)}</div></div>{timeline.loading ? <LoadingBlock /> : timeline.error || !timeline.data ? <ErrorBlock message={timeline.error ?? "没有负荷时间线"} /> : <LoadTimelineChart items={timeline.data.days} components={timeline.data.components} view={loadView} />}</article>
+        <article className="panel load-summary-panel"><div className="panel-heading"><div><h2>负荷摘要</h2><p>最近 7 日与长期训练节奏</p></div>{overview.data.status?.rampRate !== null && overview.data.status?.rampRate !== undefined && overview.data.status.rampRate >= 0 ? <TrendUp size={20} /> : <TrendDown size={20} />}</div><dl><div><dt>最近 7 日</dt><dd>{load(overview.data.status?.current7dLoad)}</dd></div><div><dt>前 7 日</dt><dd>{load(overview.data.status?.previous7dLoad)}</dd></div><div><dt>增长率</dt><dd>{percent(overview.data.status?.rampRate ?? null)}</dd></div><div><dt>单调度</dt><dd>{overview.data.status?.monotony?.toFixed(2) ?? "--"}</dd></div><div><dt>训练应激</dt><dd>{load(overview.data.status?.strain)}</dd></div><div><dt>恢复证据</dt><dd>{overview.data.status?.recoveryEvidence === null || overview.data.status?.recoveryEvidence === undefined ? "--" : `${Math.round(overview.data.status.recoveryEvidence * 100)}%`}</dd></div></dl></article>
+      </section>
+      <section className="statistics-secondary-kpis" aria-label="补充周期统计">
         <PeriodMetric label="累计爬升" value={`${Math.round(current.elevationGainMeters)} m`} />
         <PeriodMetric label="平均心率" value={current.averageHeartRate === null ? "--" : `${Math.round(current.averageHeartRate)} bpm`} />
         <PeriodMetric label="数据完整度" value={`${Math.round(current.dataCompleteness * 100)}%`} />
         <PeriodMetric label="负荷置信度" value={current.loadConfidence === null ? "--" : `${Math.round(current.loadConfidence * 100)}%`} />
-      </section>
-      <section className="statistics-grid">
-        <article className="panel statistics-history-panel"><div className="panel-heading"><div><h2>{granularity === "week" ? "周" : granularity === "month" ? "月" : "年"}跑量与负荷</h2><p>{current.isComplete ? "完整周期" : "当前周期按同进度比较"}</p></div><span className="chart-key"><i />跑量 <i />负荷</span></div>{history.loading ? <LoadingBlock /> : history.error || !history.data ? <ErrorBlock message={history.error ?? "没有历史统计"} /> : <VolumeHistoryChart periods={history.data.periods} />}</article>
-        <article className="panel load-summary-panel"><div className="panel-heading"><div><h2>负荷摘要</h2><p>最近 7 日与长期训练节奏</p></div>{overview.data.status?.rampRate !== null && overview.data.status?.rampRate !== undefined && overview.data.status.rampRate >= 0 ? <TrendUp size={20} /> : <TrendDown size={20} />}</div><dl><div><dt>最近 7 日</dt><dd>{load(overview.data.status?.current7dLoad)}</dd></div><div><dt>前 7 日</dt><dd>{load(overview.data.status?.previous7dLoad)}</dd></div><div><dt>增长率</dt><dd>{percent(overview.data.status?.rampRate ?? null)}</dd></div><div><dt>单调度</dt><dd>{overview.data.status?.monotony?.toFixed(2) ?? "--"}</dd></div><div><dt>训练应激</dt><dd>{load(overview.data.status?.strain)}</dd></div><div><dt>恢复证据</dt><dd>{overview.data.status?.recoveryEvidence === null || overview.data.status?.recoveryEvidence === undefined ? "--" : `${Math.round(overview.data.status.recoveryEvidence * 100)}%`}</dd></div></dl></article>
-      </section>
-      <section className="statistics-grid lower">
-        <article className="panel"><div className="panel-heading"><div><h2>负荷趋势</h2><p>{loadView === "composite" ? "综合负荷及急慢性 EWMA" : loadView === "internal" ? "按储备心率计算的内部负荷" : "按阈配速计算的外部负荷"}</p></div><div className="segmented compact" role="group" aria-label="负荷趋势类型">{([{"value":"composite","label":"综合"},{"value":"internal","label":"内部"},{"value":"pace","label":"配速"}] as const).map((item) => <button type="button" key={item.value} className={loadView === item.value ? "active" : ""} aria-pressed={loadView === item.value} onClick={() => setLoadView(item.value)}>{item.label}</button>)}</div></div>{timeline.loading ? <LoadingBlock /> : timeline.error || !timeline.data ? <ErrorBlock message={timeline.error ?? "没有负荷时间线"} /> : <LoadTimelineChart items={timeline.data.days} components={timeline.data.components} view={loadView} />}</article>
-        <article className="panel type-distribution-panel"><div className="panel-heading"><div><h2>{distributionView === "structure" ? "训练结构" : "生理刺激"}</h2><p>按当前周期的训练负荷</p></div><div className="segmented compact" role="group" aria-label="训练分布类型"><button type="button" className={distributionView === "structure" ? "active" : ""} aria-pressed={distributionView === "structure"} onClick={() => setDistributionView("structure")}>结构</button><button type="button" className={distributionView === "stimulus" ? "active" : ""} aria-pressed={distributionView === "stimulus"} onClick={() => setDistributionView("stimulus")}>刺激</button></div></div>{distribution.length ? <div>{distribution.map((item) => <div key={item.key}><span><b>{item.label}</b><small>{item.workoutCount} 次 · {km(item.distanceMeters)} km</small></span><strong>{load(item.load)}</strong><i><em style={{ width: `${Math.min(100, current.totalLoad > 0 ? item.load / current.totalLoad * 100 : 0)}%` }} /></i></div>)}</div> : <div className="series-empty"><WarningCircle size={20} />当前周期没有训练</div>}</article>
       </section>
     </> : <section className="panel statistics-empty"><WarningCircle size={24} /><h2>正在生成运动统计</h2><p>完成一次完整重算后显示周、月、年跑量和负荷趋势。</p></section>}
   </div>;

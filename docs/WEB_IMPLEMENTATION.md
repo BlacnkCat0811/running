@@ -129,7 +129,8 @@ npm run dev
 生产：
 
 ```powershell
+npm run build
 npm start
 ```
 
-`npm start` 会构建 Web，并由 Fastify 提供静态页面、SPA 深链接和本地 API。
+`npm run build` 使用 Vite 生成 `apps/web/dist`；`npm start` 只运行该构建产物，并由 Fastify 提供静态页面、SPA 深链接和本地 API。生产部署可在构建后执行 `npm ci --omit=dev`，启动过程不依赖 Vite。

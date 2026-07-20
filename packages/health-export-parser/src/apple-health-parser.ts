@@ -75,6 +75,7 @@ export interface AppleHealthParseOptions {
   fileSize: number;
   onProgress?: (progress: ParseProgress) => void;
   incremental?: { generation: string; batchId?: string };
+  atomic?: boolean;
 }
 
 function attributesOf(tag: SaxesTagPlain): Record<string, string> {
@@ -126,11 +127,17 @@ function buildRecord(draft: RecordDraft): CanonicalHealthRecord | null {
     draft.metadata,
     "HKMetadataKeySyncIdentifier"
   );
-  const id = stableId("record", [
-    syncIdentifier,
-    attributes,
-    draft.metadata
-  ]);
+  const id = syncIdentifier
+    ? stableId("record", [type, sourceName, syncIdentifier])
+    : stableId("record", [
+        type,
+        sourceName,
+        startAt,
+        endAt,
+        attributes.value ?? null,
+        attributes.unit ?? null,
+        attributes.device ?? null
+      ]);
 
   return {
     id,
@@ -163,26 +170,20 @@ function buildWorkout(draft: WorkoutDraft): CanonicalWorkout | null {
     draft.metadata,
     "HKMetadataKeySyncIdentifier"
   );
-  const id = stableId("workout", [
-    syncIdentifier,
-    attributes,
-    draft.metadata,
-    draft.statistics,
-    draft.events,
-    draft.routes.map((route) => ({
-      attributes: route.attributes,
-      metadata: route.metadata,
-      relativePath: route.relativePath
-    }))
-  ]);
+  // Identity fields only (PARSER_DESIGN §4.4). Statistics/events/routes and duration
+  // belong in the content hash so duration corrections keep the same workout id.
+  const id = syncIdentifier
+    ? stableId("workout", [activityType, sourceName, syncIdentifier])
+    : stableId("workout", [
+        activityType,
+        sourceName,
+        startAt,
+        endAt,
+        attributes.device ?? null
+      ]);
 
   const routes: CanonicalRouteReference[] = draft.routes.map((route) => ({
-    id: stableId("route", [
-      id,
-      route.relativePath,
-      route.attributes.startDate ?? null,
-      route.attributes.endDate ?? null
-    ]),
+    id: stableId("route", [id, route.relativePath ?? route.attributes.startDate ?? "route"]),
     sourceName: route.attributes.sourceName ?? null,
     sourceVersion: route.attributes.sourceVersion ?? null,
     startAt: normalizeAppleDate(route.attributes.startDate),
@@ -215,7 +216,9 @@ export async function parseAppleHealthXml(
   store: RaiDatabase,
   options: AppleHealthParseOptions
 ): Promise<AppleHealthParseResult> {
-  store.beginAtomicImport();
+  const atomic = options.atomic !== false;
+  if (atomic) store.beginAtomicImport();
+  const entityGeneration = options.incremental?.generation ?? "full-import";
   if (options.incremental) store.seedImportGenerations(options.incremental.generation);
   let currentRecord: RecordDraft | null = null;
   let currentWorkout: WorkoutDraft | null = null;
@@ -342,13 +345,15 @@ export async function parseAppleHealthXml(
       const record = buildRecord(currentRecord);
       if (record) {
         const category = classifySource(record.sourceName, record.device, record.metadata);
-        const shouldWrite = !options.incremental || store.observeImportEntity(
-          "record", record.id, options.incremental.generation, record.startAt,
-          options.incremental.batchId
-        ).inserted;
+        const contentHash = stableId("record_content", [currentRecord.attributes, currentRecord.metadata]);
+        const observation = store.observeImportEntity(
+          "record", record.id, entityGeneration, record.startAt,
+          options.incremental?.batchId, contentHash
+        );
+        const shouldWrite = !options.incremental || observation.inserted || observation.updated;
         if (shouldWrite) {
           store.insertRecord(record, category, currentRecord.attributes);
-          insertedRecordCount += 1;
+          if (!options.incremental || observation.inserted) insertedRecordCount += 1;
         }
         updateInventory(
           recordInventory,
@@ -375,13 +380,18 @@ export async function parseAppleHealthXml(
       const workout = buildWorkout(currentWorkout);
       if (workout) {
         const category = classifySource(workout.sourceName, workout.device, workout.metadata);
-        const shouldWrite = !options.incremental || store.observeImportEntity(
-          "workout", workout.id, options.incremental.generation, workout.startAt,
-          options.incremental.batchId
-        ).inserted;
+        const contentHash = stableId("workout_content", [
+          currentWorkout.attributes, currentWorkout.metadata, currentWorkout.statistics,
+          currentWorkout.events, currentWorkout.routes
+        ]);
+        const observation = store.observeImportEntity(
+          "workout", workout.id, entityGeneration, workout.startAt,
+          options.incremental?.batchId, contentHash
+        );
+        const shouldWrite = !options.incremental || observation.inserted || observation.updated;
         if (shouldWrite) {
           store.insertWorkout(workout, category, currentWorkout.attributes);
-          insertedWorkoutCount += 1;
+          if (!options.incremental || observation.inserted) insertedWorkoutCount += 1;
           insertedWorkoutTimes.push(workout.startAt);
         }
         updateInventory(
@@ -449,7 +459,8 @@ export async function parseAppleHealthXml(
     const finalized = options.incremental
       ? store.finalizeImportGeneration(options.incremental.generation, options.incremental.batchId)
       : { removedRecords: 0, removedWorkouts: 0, dirtyWorkoutTimes: [] as string[] };
-    store.commitAtomicImport();
+    if (atomic) store.commitAtomicImport();
+    else store.flush();
     return {
       recordCount, workoutCount, activitySummaryCount, issueCount,
       insertedRecordCount, insertedWorkoutCount,
@@ -458,7 +469,8 @@ export async function parseAppleHealthXml(
       dirtyWorkoutTimes: [...insertedWorkoutTimes, ...finalized.dirtyWorkoutTimes]
     };
   } catch (error) {
-    store.rollbackAtomicImport();
+    if (atomic) store.rollbackAtomicImport();
+    else store.rollback();
     throw error;
   }
 

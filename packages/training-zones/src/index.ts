@@ -13,6 +13,12 @@ import type {
   ZoneExposure,
   ZoneValueSource
 } from "@rai/contracts";
+import {
+  RPE_INTENSITY,
+  SESSION_TYPE_INTENSITY,
+  TRIMP_EXPONENT_MALE,
+  trimpMinuteLoad
+} from "@rai/training-load";
 
 export interface TimedMetricSample {
   value: number;
@@ -75,6 +81,8 @@ export interface CompositeLoadInput {
   distanceReferenceMeters?: number | null;
   rpe?: number | null;
   sessionType?: SessionType;
+  /** Source-device confidence (0–1); folded into load provenance confidences. */
+  sourceConfidence?: number;
 }
 
 const clamp = (value: number, low = 0, high = 1): number => Math.min(high, Math.max(low, value));
@@ -624,22 +632,20 @@ export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZon
   };
 }
 
+/** Re-export Banister TRIMP minute helper; male coefficient by default (see TRIMP_EXPONENT_MALE). */
 export function trimpMinute(intensity: number): number {
-  const normalized = clamp(intensity);
-  return normalized * Math.exp(1.92 * normalized);
+  return trimpMinuteLoad(intensity, TRIMP_EXPONENT_MALE);
 }
-
-const sessionIntensity: Record<SessionType, number> = {
-  unknown: 0.48, recovery: 0.3, easy: 0.42, steady: 0.52,
-  tempo: 0.7, interval: 0.8, long_run: 0.55, race: 0.86
-};
 
 export function calculateCompositeTrainingLoad(input: CompositeLoadInput): TrainingLoadBreakdown {
   const durationMinutes = Math.max(0, input.durationSeconds) / 60;
   const timelineDuration = Math.max(input.durationSeconds, input.elapsedDurationSeconds ?? input.durationSeconds, 0);
+  const sourceConfidence = clamp(input.sourceConfidence ?? 1);
   const resting = input.profile.restingHeartRateBpm;
   const maximum = input.profile.maximumHeartRateBpm;
   let rawHrrTrimp: number | null = null;
+  let heartIntensity: number | null = null;
+  let averageOnlyHeart = false;
   const heartSamples = limitTimelineCoverage(
     normalizedTimeline(input.heartRateSamples, timelineDuration),
     input.durationSeconds
@@ -649,8 +655,13 @@ export function calculateCompositeTrainingLoad(input: CompositeLoadInput): Train
       const reserve = clamp((sample.value - resting) / (maximum - resting));
       return sum + sample.durationSeconds / 60 * trimpMinute(reserve);
     }, 0);
+    const heartSeconds = heartSamples.reduce((sum, sample) => sum + sample.durationSeconds, 0);
+    heartIntensity = heartSeconds > 0 ? heartSamples.reduce((sum, sample) =>
+      sum + clamp((sample.value - resting) / (maximum - resting)) * sample.durationSeconds, 0) / heartSeconds : null;
   } else if (finite(input.averageHeartRateBpm) && maximum > resting) {
-    rawHrrTrimp = durationMinutes * trimpMinute((input.averageHeartRateBpm - resting) / (maximum - resting));
+    averageOnlyHeart = true;
+    heartIntensity = clamp((input.averageHeartRateBpm - resting) / (maximum - resting));
+    rawHrrTrimp = durationMinutes * trimpMinute(heartIntensity);
   }
   const internalLoad = rawHrrTrimp === null ? null : rawHrrTrimp * 100 / (60 * trimpMinute(0.85));
 
@@ -661,35 +672,66 @@ export function calculateCompositeTrainingLoad(input: CompositeLoadInput): Train
     input.durationSeconds
   );
   let paceLoad: number | null = null;
+  let paceIntensity: number | null = null;
+  let averageOnlyPace = false;
   if (threshold !== null && speedSamples.length > 0) {
     paceLoad = speedSamples.reduce((sum, sample) => {
       const pace = 1000 / sample.value;
       const intensityFactor = clamp(threshold / pace, 0.5, 1.3);
       return sum + sample.durationSeconds / 3600 * 100 * intensityFactor ** 2;
     }, 0);
+    const paceSeconds = speedSamples.reduce((sum, sample) => sum + sample.durationSeconds, 0);
+    paceIntensity = paceSeconds > 0 ? speedSamples.reduce((sum, sample) => {
+      const pace = 1000 / sample.value;
+      return sum + clamp(threshold / pace, 0.5, 1.3) / 1.3 * sample.durationSeconds;
+    }, 0) / paceSeconds : null;
   } else if (threshold !== null && finite(input.averagePaceSecondsPerKm)) {
+    averageOnlyPace = true;
     const intensityFactor = clamp(threshold / input.averagePaceSecondsPerKm, 0.5, 1.3);
     paceLoad = input.durationSeconds / 3600 * 100 * intensityFactor ** 2;
+    paceIntensity = intensityFactor / 1.3;
   }
 
   const distance = finite(input.distanceMeters) ? Math.max(0, input.distanceMeters) : null;
   const reference = finite(input.distanceReferenceMeters) && input.distanceReferenceMeters > 0 ? input.distanceReferenceMeters : null;
   const distanceExposureRatio = distance !== null && reference !== null ? distance / reference : null;
   const distanceFactor = distanceExposureRatio === null ? 1 : 1 + 0.15 * clamp(distanceExposureRatio - 1, 0, 1);
-  const heartConfidence = internalLoad === null ? 0 : input.zoneSummary.heartRateCoverage > 0
-    ? input.zoneSummary.heartRateCoverage * input.profile.heartRateConfidence : 0;
-  const paceConfidence = paceLoad === null ? 0 : input.zoneSummary.paceCoverage > 0
-    ? input.zoneSummary.paceCoverage * input.profile.paceConfidence : 0;
+  // Average-only paths inflate zoneSummary coverage to 1.0; discount like stimulus scoring (~0.4).
+  const heartCoverageForLoad = averageOnlyHeart
+    ? Math.min(0.4, input.zoneSummary.heartRateCoverage > 0 ? input.zoneSummary.heartRateCoverage : 0.4)
+    : input.zoneSummary.heartRateCoverage;
+  const paceCoverageForLoad = averageOnlyPace
+    ? Math.min(0.4, input.zoneSummary.paceCoverage > 0 ? input.zoneSummary.paceCoverage : 0.4)
+    : input.zoneSummary.paceCoverage;
+  const heartConfidence = internalLoad === null || heartCoverageForLoad <= 0
+    ? 0
+    : sourceConfidence * heartCoverageForLoad * input.profile.heartRateConfidence;
+  const paceConfidence = paceLoad === null || paceCoverageForLoad <= 0
+    ? 0
+    : sourceConfidence * paceCoverageForLoad * input.profile.paceConfidence;
   const heartWeight = 0.6 * heartConfidence;
   const paceWeight = 0.4 * paceConfidence;
   let baseLoad: number;
+  let compositeIntensity: number;
+  let fallbackHeartConfidence = heartConfidence;
+  let fallbackPaceConfidence = paceConfidence;
   if (heartWeight + paceWeight > 0) {
     baseLoad = (heartWeight * (internalLoad ?? 0) + paceWeight * (paceLoad ?? 0)) / (heartWeight + paceWeight);
+    compositeIntensity = (heartWeight * (heartIntensity ?? 0) + paceWeight * (paceIntensity ?? 0)) / (heartWeight + paceWeight);
   } else if (finite(input.rpe) && input.rpe >= 1 && input.rpe <= 10) {
-    baseLoad = input.durationSeconds / 3600 * 100 * (input.rpe / 10) ** 2;
-  } else {
-    const intensity = sessionIntensity[input.sessionType ?? "unknown"];
+    // Same RPE→intensity table and TRIMP family as Banister (training-load).
+    const intensity = RPE_INTENSITY[Math.round(input.rpe)] ?? 0.48;
     baseLoad = durationMinutes * trimpMinute(intensity) * 100 / (60 * trimpMinute(0.85));
+    compositeIntensity = intensity;
+    // Banister RPE confidence 0.65 * source; training-load skips 0.6/0.4 blend when both loads null.
+    fallbackHeartConfidence = 0.65 * sourceConfidence;
+    fallbackPaceConfidence = 0;
+  } else {
+    const intensity = SESSION_TYPE_INTENSITY[input.sessionType ?? "unknown"];
+    baseLoad = durationMinutes * trimpMinute(intensity) * 100 / (60 * trimpMinute(0.85));
+    compositeIntensity = intensity;
+    fallbackHeartConfidence = 0.4 * sourceConfidence;
+    fallbackPaceConfidence = 0;
   }
   return {
     rawHrrTrimp: rawHrrTrimp === null ? null : round(rawHrrTrimp),
@@ -699,8 +741,9 @@ export function calculateCompositeTrainingLoad(input: CompositeLoadInput): Train
     distanceExposureRatio: distanceExposureRatio === null ? null : round(distanceExposureRatio),
     distanceFactor: round(distanceFactor),
     compositeLoad: round(Math.max(0, baseLoad * distanceFactor)),
-    heartRateConfidence: round(clamp(heartConfidence)),
-    paceConfidence: round(clamp(paceConfidence))
+    compositeIntensity: round(clamp(compositeIntensity)),
+    heartRateConfidence: round(clamp(fallbackHeartConfidence)),
+    paceConfidence: round(clamp(fallbackPaceConfidence))
   };
 }
 

@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { RaiApplicationService } from "@rai/application";
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { RaiReadStore } from "../src/data.js";
 
@@ -40,15 +40,24 @@ async function seed(path: string): Promise<RaiDatabase> {
     ) VALUES (?, 'HKWorkoutActivityTypeRunning', ?, ?, 5, ?, 'active')
   `);
 
+  const insertOverride = database.prepare(`
+    INSERT INTO workout_overrides (
+      id, training_session_id, revision, eligibility_override, session_type,
+      statistics_participation, performance_protocol, rpe, condition_tags_json, note
+    ) VALUES (?, ?, 1, 'include', NULL, NULL, NULL, NULL, '[]', NULL)
+  `);
   for (let index = 0; index < 8; index += 1) {
     const workoutId = `api_workout_${index}`;
+    const sessionId = `api_session_${index}`;
     const start = runDate(index);
     const end = new Date(Date.parse(start) + 1_800_000).toISOString();
     insertWorkout.run(workoutId, start, end);
     insertStatistic.run(workoutId, 0, "HKQuantityTypeIdentifierDistanceWalkingRunning", "km", 5, null, null, null);
     insertStatistic.run(workoutId, 1, "HKQuantityTypeIdentifierHeartRate", "count/min", null, 145 - index, 130, 165);
     insertStatistic.run(workoutId, 2, "HKQuantityTypeIdentifierRunningSpeed", "km/hr", null, 10 + index * 0.15, 9, 11);
-    insertSession.run(`api_session_${index}`, start, end, workoutId);
+    insertSession.run(sessionId, start, end, workoutId);
+    // Stats-only HR is trial after R3-16; force include so fixture recompute can calibrate.
+    insertOverride.run(`api_override_${index}`, sessionId);
   }
   const service = new RaiApplicationService(store);
   service.enqueueFullRecompute({ evaluatedAt: runDate(8), timezoneIdentifier: "UTC" });
@@ -173,6 +182,38 @@ test("maps active SQLite results into Web API DTOs", async () => {
     assert.equal(diagnostics.privacy.coordinatesRemoved, true);
     assert.equal(diagnostics.activeModel?.calibrationFeatureIds.length, 6);
     assert.equal(JSON.stringify(diagnostics).includes("Fixture Apple Watch"), false);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("uses stored Shanghai local dates for trend windows and context", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-api-trend-local-date-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  const database = store.database;
+  try {
+    const end = database.prepare(
+      "SELECT MAX(local_date) AS localDate FROM active_daily_ability_snapshots"
+    ).get() as { localDate: string };
+    const previous = new Date(`${end.localDate}T00:30:00+08:00`).toISOString();
+    database.prepare(`
+      UPDATE workout_features SET workout_start_at = ? WHERE training_session_id = 'api_session_7'
+    `).run(previous);
+    database.prepare(`
+      UPDATE workout_training_loads SET local_date = ? WHERE training_session_id = 'api_session_7'
+    `).run(end.localDate);
+    database.prepare("UPDATE model_runs SET evaluated_at = ?").run(previous);
+  } finally {
+    store.close();
+  }
+  const read = new RaiReadStore(databasePath);
+  try {
+    const trends = read.trends(1);
+    assert.ok(trends.workouts.some((workout) => workout.id === "api_session_7"));
+    assert.ok(trends.context.some((entry) => entry.date === trends.endDate));
+    assert.equal(trends.modelRuns.length, 1);
   } finally {
     read.close();
     rmSync(root, { recursive: true, force: true });

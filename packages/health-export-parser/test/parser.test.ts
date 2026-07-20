@@ -171,6 +171,29 @@ test("classifies vendor watches before Apple Watch and recognizes user-entered d
   assert.equal(classifySource("Health", null, { HKWasUserEntered: ["1"] }), "manual");
 });
 
+test("imports a GPX file whose on-disk name contains uppercase characters", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-parser-gpx-case-"));
+  const routeDirectory = join(root, "workout-routes");
+  mkdirSync(routeDirectory);
+  const xmlPath = join(root, "export.xml");
+  writeFileSync(xmlPath, `<HealthData><Workout workoutActivityType="${workoutTypes.running}"
+    sourceName="Watch" startDate="${appleDate("08:00")}" endDate="${appleDate("08:30")}" duration="30" durationUnit="min">
+    <WorkoutRoute><FileReference path="/workout-routes/Route-A.GPX"/></WorkoutRoute>
+  </Workout></HealthData>`, "utf8");
+  writeFileSync(join(routeDirectory, "Route-A.GPX"),
+    `<gpx><trk><trkseg><trkpt lat="31.1" lon="121.1"/></trkseg></trk></gpx>`, "utf8");
+  const store = await RaiDatabase.open(join(root, "rai.sqlite"));
+  try {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+    const result = await importGpxRoutes(root, store);
+    assert.equal(result.importedRouteCount, 1);
+    assert.equal(result.missingRouteCount, 0);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("rolls back the entire XML import when parsing fails after a batch boundary", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-parser-atomic-"));
   const xmlPath = join(root, "broken.xml");

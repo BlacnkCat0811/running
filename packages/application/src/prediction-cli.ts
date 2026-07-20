@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 
 import type { RaceDistance } from "@rai/contracts";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
-import { buildPredictionReport } from "./prediction-report.js";
+import { buildPredictionReportAsync } from "./prediction-report.js";
 
 function optionValue(args: string[], name: string, fallback: string): string {
   const index = args.indexOf(name);
@@ -24,7 +24,7 @@ function optionalNumber(args: string[], name: string): number | undefined {
   return value;
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const databasePath = resolve(optionValue(args, "--database", "var/rai.sqlite"));
   const asOf = optionValue(args, "--as-of", new Date().toISOString());
@@ -39,9 +39,9 @@ function main(): void {
   const temperatureC = optionalNumber(args, "--temperature-c");
   const humidityPercent = optionalNumber(args, "--humidity-percent");
   const recoveryReadiness = optionalNumber(args, "--recovery-readiness");
-  const database = new DatabaseSync(databasePath, { readOnly: true });
+  const database = RaiDatabase.openReadonly(databasePath);
   try {
-    const report = buildPredictionReport(database, {
+    const report = await buildPredictionReportAsync(database, {
       asOf,
       ...(temperatureC === undefined ? {} : { temperatureC }),
       ...(humidityPercent === undefined ? {} : { humidityPercent }),
@@ -54,4 +54,4 @@ function main(): void {
   }
 }
 
-main();
+await main();

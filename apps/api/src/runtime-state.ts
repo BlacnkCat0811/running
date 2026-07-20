@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -37,7 +37,13 @@ export class RuntimeStateStore {
   constructor(runtimeRoot: string) {
     this.path = resolve(runtimeRoot, "var/runtime.sqlite");
     mkdirSync(dirname(this.path), { recursive: true });
-    this.initialize();
+    try {
+      this.initialize();
+    } catch (error) {
+      if (!this.isCorruptDatabaseError(error) || !existsSync(this.path)) throw error;
+      this.quarantineCorruptDatabase();
+      this.initialize();
+    }
   }
 
   migrateLegacySources(path: string): void {
@@ -75,6 +81,10 @@ export class RuntimeStateStore {
   }
 
   sources(): RuntimeImportSourceRow[] {
+    return this.withCorruptionRecovery(() => this.readSources());
+  }
+
+  private readSources(): RuntimeImportSourceRow[] {
     const db = this.open();
     try {
       return db.prepare(`SELECT id, kind, display_name AS displayName, input_path AS inputPath,
@@ -87,6 +97,10 @@ export class RuntimeStateStore {
   }
 
   upsertSource(source: RuntimeImportSourceRow): void {
+    this.withCorruptionRecovery(() => this.writeSource(source));
+  }
+
+  private writeSource(source: RuntimeImportSourceRow): void {
     const db = this.open();
     try {
       this.upsertSourceIn(db, source);
@@ -115,12 +129,20 @@ export class RuntimeStateStore {
   }
 
   deleteSource(id: string): void {
+    this.withCorruptionRecovery(() => this.removeSource(id));
+  }
+
+  private removeSource(id: string): void {
     const db = this.open();
     try { db.prepare("DELETE FROM import_sources WHERE id = ?").run(id); }
     finally { db.close(); }
   }
 
   jobs(limit = 20): RuntimeImportJobRow[] {
+    return this.withCorruptionRecovery(() => this.readJobs(limit));
+  }
+
+  private readJobs(limit: number): RuntimeImportJobRow[] {
     const db = this.open();
     try {
       const rows = db.prepare(`SELECT id, status, phase, message, created_at AS createdAt,
@@ -135,6 +157,10 @@ export class RuntimeStateStore {
   }
 
   upsertJob(job: RuntimeImportJobRow): void {
+    this.withCorruptionRecovery(() => this.writeJob(job));
+  }
+
+  private writeJob(job: RuntimeImportJobRow): void {
     const db = this.open();
     try {
       this.upsertJobIn(db, job);
@@ -197,7 +223,37 @@ export class RuntimeStateStore {
 
   private open(): DatabaseSync {
     const db = new DatabaseSync(this.path);
-    db.exec("PRAGMA busy_timeout=5000");
-    return db;
+    try {
+      db.exec("PRAGMA busy_timeout=5000");
+      return db;
+    } catch (error) {
+      db.close();
+      throw error;
+    }
+  }
+
+  private isCorruptDatabaseError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return /file is not a database|database disk image is malformed|database.*corrupt/i.test(message);
+  }
+
+  private quarantineCorruptDatabase(): void {
+    const quarantineId = `${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}.${randomUUID().slice(0, 8)}`;
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const source = `${this.path}${suffix}`;
+      if (!existsSync(source)) continue;
+      renameSync(source, `${this.path}.corrupt-${quarantineId}${suffix}`);
+    }
+  }
+
+  private withCorruptionRecovery<T>(operation: () => T): T {
+    try {
+      return operation();
+    } catch (error) {
+      if (!this.isCorruptDatabaseError(error) || !existsSync(this.path)) throw error;
+      this.quarantineCorruptDatabase();
+      this.initialize();
+      return operation();
+    }
   }
 }

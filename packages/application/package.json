@@ -10,6 +10,7 @@
     "@rai/contracts": "*",
     "@rai/features": "*",
     "@rai/health-export-parser": "*",
+    "@rai/storage-sqlite": "*",
     "@rai/physiology": "*",
     "@rai/prediction-inference": "*",
     "@rai/scoring": "*",

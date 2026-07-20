@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/check-node-version.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "vite build && node scripts/check-bundle.mjs",
     "test": "vitest run",

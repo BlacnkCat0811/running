@@ -41,6 +41,13 @@ test("OpenAPI operations declare responses and write contracts", () => {
   assert.ok("components" in openapiDocument);
   assert.ok("413" in openapiDocument.paths["/v1/imports/uploads"].post.responses);
   assert.ok("415" in openapiDocument.paths["/v1/imports/uploads"].post.responses);
+  assert.ok("429" in openapiDocument.paths["/v1/imports/uploads"].post.responses);
+  assert.ok("507" in openapiDocument.paths["/v1/imports/uploads"].post.responses);
+  const deletionSchema = openapiDocument.paths["/v1/database"].delete.responses["200"]
+    .content["application/json"].schema as {
+      properties: { preservation: { oneOf: unknown[] } };
+    };
+  assert.equal(deletionSchema.properties.preservation.oneOf.length, 2);
   assert.ok("422" in openapiDocument.paths["/v1/prediction-models/train"].post.responses);
 });
 
@@ -54,7 +61,7 @@ test("inspect source schema rejects missing and additional fields", async () => 
   } finally { await app.close(); }
 });
 
-test("import job schema accepts exactly one supported request shape", async () => {
+test("import job schema accepts only a source identifier", async () => {
   const app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
   app.post("/imports", { schema: { body: importJobBodySchema } }, async () => ({ ok: true }));
   try {
@@ -74,7 +81,7 @@ test("import job schema accepts exactly one supported request shape", async () =
     })).statusCode, 200);
     assert.equal((await app.inject({
       method: "POST", url: "/imports", payload: { inputPath: "D:/export", confirmReplace: true }
-    })).statusCode, 200);
+    })).statusCode, 400);
   } finally {
     await app.close();
   }

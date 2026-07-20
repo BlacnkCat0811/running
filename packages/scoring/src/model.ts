@@ -243,7 +243,10 @@ export function scoreFeature(
   });
   const availableWeight = available.reduce((sum, item) => sum + item.baseWeight, 0);
   const effectiveWeights = Object.fromEntries(
-    available.map((item) => [item.dimension, item.baseWeight / Math.max(availableWeight, 1)])
+    available.map((item) => [
+      item.dimension,
+      availableWeight > 0 ? item.baseWeight / availableWeight : 0
+    ])
   ) as Partial<Record<AbilityDimension, number>>;
   const coverage = clamp(feature.qualityScore, 0, 1);
   const comparability = clamp(

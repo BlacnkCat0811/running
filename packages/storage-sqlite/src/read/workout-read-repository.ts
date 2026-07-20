@@ -1,0 +1,495 @@
+import type { DatabaseSync } from "node:sqlite";
+
+import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
+
+import { nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
+
+export interface StoredWorkoutOverride {
+  revision: number;
+  eligibilityOverride: "include" | "exclude" | null;
+  statisticsParticipation: "include" | "exclude" | null;
+  sessionType: string | null;
+  performanceProtocol: PerformanceProtocol | null;
+  rpe: number | null;
+  conditionTags: string[];
+  note: string | null;
+  createdAt: string;
+}
+
+export interface WorkoutListFilterQuery {
+  limit: number;
+  offset: number;
+  status?: string;
+  sessionType?: string;
+  stimulusType?: string;
+  participation?: string;
+  environment?: string;
+  days?: number;
+  sourceGroup?: string;
+  confidence?: string;
+  route?: string;
+}
+
+export interface StoredWorkoutListItem {
+  id: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  distanceKm: number | null;
+  averagePaceSecondsPerKm: number | null;
+  averageHeartRateBpm: number | null;
+  indoor: boolean | null;
+  sourceCategory: string;
+  sessionType: string;
+  stimulusType: string;
+  stimulusConfidence: number | null;
+  eligibilityStatus: string;
+  assessmentStatus: string | null;
+  missingReasons: string[];
+  qualityScore: number;
+  currentAbility: number | null;
+  confidence: number | null;
+  trueAbilityDelta: number | null;
+  hasRoute: boolean;
+}
+
+export interface StoredWorkoutDetailRow {
+  sessionId: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  distanceKm: number | null;
+  averageHeartRateBpm: number | null;
+  indoor: boolean | null;
+  sourceCategory: string;
+  sessionType: string;
+  eligibilityStatus: string;
+  assessmentStatus: string;
+  missingReasons: string[];
+  qualityScore: number;
+  currentAbility: number | null;
+  confidence: number | null;
+  trueAbilityDelta: number | null;
+  hasRoute: boolean;
+  canonicalWorkoutId: string;
+  modelVersion: string;
+  updatedTrueAbility: boolean;
+  heartRateCoverage: number | null;
+  heartRateSampleCount: number;
+  routeQuality: number | null;
+  routePointCount: number;
+  sourceConfidence: number;
+  effectiveWeights: Record<string, number>;
+  confidenceFactors: Record<string, number>;
+  explanationCodes: string[];
+  explanation: Record<string, unknown>;
+  trueAbilityBefore: number | null;
+  trueAbilityAfter: number | null;
+  workoutContribution: number | null;
+  dimensions: {
+    efficiency: number | null;
+    pace: number | null;
+    cardio: number | null;
+    stability: number | null;
+    recovery: number | null;
+  };
+}
+
+export interface WorkoutListSqlFilter {
+  where: string;
+  params: Array<string | number>;
+}
+
+export class SqliteWorkoutReadRepository {
+  constructor(private readonly database: DatabaseSync) {}
+
+  latestWorkoutStartAt(): string | null {
+    const latest = this.database
+      .prepare(`
+        SELECT MAX(workout_start_at) AS value
+        FROM active_ability_assessments a
+        JOIN workout_features f ON f.id = a.feature_id
+      `)
+      .get() as Record<string, unknown>;
+    return typeof latest.value === "string" ? latest.value : null;
+  }
+
+  buildListFilter(query: Omit<WorkoutListFilterQuery, "limit" | "offset">): WorkoutListSqlFilter {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+    if (query.status) {
+      clauses.push("f.eligibility_status = ?");
+      params.push(query.status);
+    }
+    if (query.sessionType) {
+      clauses.push("f.session_type = ?");
+      params.push(query.sessionType);
+    }
+    if (query.stimulusType) {
+      clauses.push("COALESCE(zs.stimulus_type, 'unclassified') = ?");
+      params.push(query.stimulusType);
+    }
+    if (query.participation === "included") clauses.push("f.eligibility_status = 'eligible'");
+    if (query.participation === "not_included") clauses.push("f.eligibility_status <> 'eligible'");
+    if (query.environment === "outdoor") clauses.push("w.indoor = 0");
+    if (query.environment === "indoor") clauses.push("w.indoor = 1");
+    if (query.environment === "unknown") clauses.push("w.indoor IS NULL");
+    if (query.sourceGroup === "apple_watch") clauses.push("w.source_category = 'apple_watch'");
+    if (query.sourceGroup === "third_party") {
+      clauses.push("w.source_category NOT IN ('apple_watch', 'manual', 'unknown')");
+    }
+    if (query.sourceGroup === "manual") clauses.push("w.source_category = 'manual'");
+    if (query.confidence === "high") clauses.push("a.confidence >= 0.8");
+    if (query.confidence === "medium") clauses.push("a.confidence >= 0.6 AND a.confidence < 0.8");
+    if (query.confidence === "low") clauses.push("a.confidence < 0.6");
+    if (query.route === "available") {
+      clauses.push(
+        "EXISTS (SELECT 1 FROM workout_routes filter_route WHERE filter_route.workout_id = w.id AND filter_route.point_count > 0)"
+      );
+    }
+    if (query.route === "missing") {
+      clauses.push(
+        "NOT EXISTS (SELECT 1 FROM workout_routes filter_route WHERE filter_route.workout_id = w.id AND filter_route.point_count > 0)"
+      );
+    }
+    if (query.days && query.days > 0) {
+      const latest = this.latestWorkoutStartAt();
+      if (latest) {
+        const cutoff = new Date(latest);
+        cutoff.setUTCDate(cutoff.getUTCDate() - query.days + 1);
+        clauses.push("f.workout_start_at >= ?");
+        params.push(cutoff.toISOString());
+      }
+    }
+    return {
+      where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "",
+      params
+    };
+  }
+
+  count(where: string, params: Array<string | number>): number {
+    const count = this.database
+      .prepare(`
+        SELECT COUNT(*) AS total
+        FROM active_ability_assessments a
+        JOIN workout_features f ON f.id = a.feature_id
+        JOIN training_sessions ts ON ts.id = a.training_session_id
+        JOIN workouts w ON w.id = ts.canonical_workout_id
+        LEFT JOIN active_workout_zone_summaries zs ON zs.training_session_id = ts.id
+        ${where}
+      `)
+      .get(...params) as Record<string, unknown>;
+    return Number(count.total ?? 0);
+  }
+
+  list(where: string, params: Array<string | number>, limit: number, offset: number): StoredWorkoutListItem[] {
+    const rows = this.database
+      .prepare(`
+        SELECT
+          a.training_session_id AS session_id,
+          f.workout_start_at,
+          ts.anchor_end_at,
+          f.duration_seconds,
+          f.distance_km,
+          f.average_heart_rate_bpm,
+          f.missing_reasons_json,
+          f.session_type,
+          COALESCE(zs.stimulus_type, 'unclassified') AS stimulus_type,
+          zs.stimulus_confidence,
+          f.eligibility_status,
+          f.quality_score,
+          w.indoor,
+          w.source_category,
+          a.assessment_status,
+          a.current_ability,
+          a.confidence,
+          a.true_ability_delta,
+          EXISTS (
+            SELECT 1
+            FROM training_sessions ts
+            JOIN workout_routes wr ON wr.workout_id = ts.canonical_workout_id
+            WHERE ts.id = a.training_session_id AND wr.point_count > 0
+          ) AS has_route
+        FROM active_ability_assessments a
+        JOIN workout_features f ON f.id = a.feature_id
+        JOIN training_sessions ts ON ts.id = a.training_session_id
+        JOIN workouts w ON w.id = ts.canonical_workout_id
+        LEFT JOIN active_workout_zone_summaries zs ON zs.training_session_id = ts.id
+        ${where}
+        ORDER BY f.workout_start_at DESC
+        LIMIT ? OFFSET ?
+      `)
+      .all(...params, limit, offset) as Record<string, unknown>[];
+    return rows.map(mapListItem);
+  }
+
+  listByQuery(query: WorkoutListFilterQuery): { items: StoredWorkoutListItem[]; total: number } {
+    const filter = this.buildListFilter(query);
+    return {
+      items: this.list(filter.where, filter.params, query.limit, query.offset),
+      total: this.count(filter.where, filter.params)
+    };
+  }
+
+  getDetailRow(trainingSessionId: string): StoredWorkoutDetailRow | null {
+    const row = this.database
+      .prepare(`
+        SELECT
+          ts.id AS session_id,
+          ts.anchor_end_at,
+          ts.canonical_workout_id,
+          w.indoor,
+          w.source_category,
+          mr.model_version,
+          f.*,
+          a.assessment_status,
+          a.current_ability,
+          a.efficiency_score,
+          a.pace_score,
+          a.cardio_score,
+          a.stability_score,
+          a.recovery_score,
+          a.confidence,
+          a.true_ability_before,
+          a.true_ability_after,
+          a.true_ability_delta,
+          a.workout_contribution,
+          a.updated_true_ability,
+          a.effective_weights_json,
+          a.confidence_factors_json,
+          a.explanation_codes_json,
+          a.explanation_json,
+          EXISTS (
+            SELECT 1 FROM workout_routes wr
+            WHERE wr.workout_id = ts.canonical_workout_id AND wr.point_count > 0
+          ) AS has_route
+        FROM training_sessions ts
+        JOIN active_ability_assessments a ON a.training_session_id = ts.id
+        JOIN workout_features f ON f.id = a.feature_id
+        JOIN workouts w ON w.id = ts.canonical_workout_id
+        JOIN model_runs mr ON mr.id = a.model_run_id
+        WHERE ts.id = ?
+      `)
+      .get(trainingSessionId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      sessionId: String(row.session_id),
+      startedAt: String(row.workout_start_at),
+      endedAt: String(row.anchor_end_at),
+      durationSeconds: Number(row.duration_seconds),
+      distanceKm: nullableNumber(row.distance_km),
+      averageHeartRateBpm: nullableNumber(row.average_heart_rate_bpm),
+      indoor: row.indoor === null ? null : Number(row.indoor) === 1,
+      sourceCategory: String(row.source_category),
+      sessionType: String(row.session_type),
+      eligibilityStatus: String(row.eligibility_status),
+      assessmentStatus: String(row.assessment_status),
+      missingReasons: parseJson<string[]>(row.missing_reasons_json, []),
+      qualityScore: Number(row.quality_score),
+      currentAbility: nullableNumber(row.current_ability),
+      confidence: nullableNumber(row.confidence),
+      trueAbilityDelta: nullableNumber(row.true_ability_delta),
+      hasRoute: Number(row.has_route) === 1,
+      canonicalWorkoutId: String(row.canonical_workout_id),
+      modelVersion: String(row.model_version),
+      updatedTrueAbility: Number(row.updated_true_ability) === 1,
+      heartRateCoverage: nullableNumber(row.heart_rate_coverage),
+      heartRateSampleCount: Number(row.heart_rate_sample_count ?? 0),
+      routeQuality: nullableNumber(row.route_quality),
+      routePointCount: Number(row.route_point_count ?? 0),
+      sourceConfidence: Number(row.source_confidence),
+      effectiveWeights: parseJson<Record<string, number>>(row.effective_weights_json, {}),
+      confidenceFactors: parseJson<Record<string, number>>(row.confidence_factors_json, {}),
+      explanationCodes: parseJson<string[]>(row.explanation_codes_json, []),
+      explanation: parseJson<Record<string, unknown>>(row.explanation_json, {}),
+      trueAbilityBefore: nullableNumber(row.true_ability_before),
+      trueAbilityAfter: nullableNumber(row.true_ability_after),
+      workoutContribution: nullableNumber(row.workout_contribution),
+      dimensions: {
+        efficiency: nullableNumber(row.efficiency_score),
+        pace: nullableNumber(row.pace_score),
+        cardio: nullableNumber(row.cardio_score),
+        stability: nullableNumber(row.stability_score),
+        recovery: nullableNumber(row.recovery_score)
+      }
+    };
+  }
+
+  workoutStatistic(
+    workoutId: string,
+    type: string,
+    preference: "sum" | "average"
+  ): number | null {
+    const row = this.database
+      .prepare(`
+        SELECT sum_value, average_value
+        FROM workout_statistics
+        WHERE workout_id = ? AND type = ?
+        ORDER BY ordinal
+        LIMIT 1
+      `)
+      .get(workoutId, type) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return preference === "sum"
+      ? nullableNumber(row.sum_value) ?? nullableNumber(row.average_value)
+      : nullableNumber(row.average_value) ?? nullableNumber(row.sum_value);
+  }
+
+  averageCadence(workoutId: string, durationSeconds: number): number | null {
+    const steps = this.workoutStatistic(workoutId, "HKQuantityTypeIdentifierStepCount", "sum");
+    if (steps !== null && durationSeconds > 0) return steps / (durationSeconds / 60);
+
+    const workout = this.database
+      .prepare("SELECT source_name, start_at, end_at FROM workouts WHERE id = ?")
+      .get(workoutId) as Record<string, unknown> | undefined;
+    if (
+      typeof workout?.source_name !== "string" ||
+      typeof workout.start_at !== "string" ||
+      typeof workout.end_at !== "string"
+    ) return null;
+    const workoutStartMs = Date.parse(workout.start_at);
+    const workoutEndMs = Date.parse(workout.end_at);
+    if (!Number.isFinite(workoutStartMs) || !Number.isFinite(workoutEndMs) || workoutEndMs <= workoutStartMs) {
+      return null;
+    }
+    const records = this.database
+      .prepare(`
+        SELECT value_numeric, start_at, end_at
+        FROM health_records
+        WHERE source_name = ?
+          AND type = 'HKQuantityTypeIdentifierStepCount'
+          AND value_numeric IS NOT NULL
+          AND start_at < ? AND end_at > ?
+      `)
+      .all(workout.source_name, workout.end_at, workout.start_at) as Record<string, unknown>[];
+    const recordedSteps = records.reduce((total, record) => {
+      const value = nullableNumber(record.value_numeric);
+      const startMs = Date.parse(String(record.start_at));
+      const endMs = Date.parse(String(record.end_at));
+      if (value === null || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        return total;
+      }
+      const overlapMs = Math.max(0, Math.min(workoutEndMs, endMs) - Math.max(workoutStartMs, startMs));
+      return total + value * overlapMs / (endMs - startMs);
+    }, 0);
+    return recordedSteps > 0 && durationSeconds > 0
+      ? recordedSteps / (durationSeconds / 60)
+      : null;
+  }
+
+  elevationGain(workoutId: string): number | null {
+    const rows = this.database
+      .prepare(`
+        SELECT rp.elevation_meters
+        FROM workout_routes wr
+        JOIN route_points rp ON rp.route_id = wr.id
+        WHERE wr.workout_id = ? AND rp.elevation_meters IS NOT NULL
+        ORDER BY rp.sequence
+      `)
+      .all(workoutId) as Record<string, unknown>[];
+    if (rows.length < 2) return null;
+    let gain = 0;
+    let previous = nullableNumber(rows[0]?.elevation_meters);
+    for (const row of rows.slice(1)) {
+      const current = nullableNumber(row.elevation_meters);
+      if (current !== null && previous !== null) {
+        const delta = current - previous;
+        if (delta > 0 && delta < 30) gain += delta;
+      }
+      if (current !== null) previous = current;
+    }
+    return gain;
+  }
+
+  override(trainingSessionId: string): StoredWorkoutOverride | null {
+    const row = this.database
+      .prepare("SELECT * FROM effective_workout_overrides WHERE training_session_id = ?")
+      .get(trainingSessionId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      revision: Number(row.revision),
+      eligibilityOverride:
+        row.eligibility_override === "include" || row.eligibility_override === "exclude"
+          ? row.eligibility_override
+          : null,
+      statisticsParticipation:
+        row.statistics_participation === "include" || row.statistics_participation === "exclude"
+          ? row.statistics_participation
+          : null,
+      sessionType: typeof row.session_type === "string" ? row.session_type : null,
+      performanceProtocol:
+        typeof row.performance_protocol === "string"
+          ? (row.performance_protocol as PerformanceProtocol)
+          : null,
+      rpe: nullableNumber(row.rpe),
+      conditionTags: parseJson(typeof row.condition_tags_json === "string" ? row.condition_tags_json : "[]", []),
+      note: typeof row.note === "string" ? row.note : null,
+      createdAt: String(row.created_at)
+    };
+  }
+
+  trainingLoad(trainingSessionId: string): WorkoutTrainingLoad | null {
+    const row = this.database
+      .prepare(`SELECT * FROM active_workout_training_loads WHERE training_session_id = ?`)
+      .get(trainingSessionId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      trainingSessionId: String(row.training_session_id),
+      localDate: String(row.local_date),
+      distanceMeters:
+        nullableNumber(row.distance_km) === null ? null : Number(row.distance_km) * 1000,
+      durationSeconds: Number(row.duration_seconds),
+      load: Number(row.training_load),
+      intensity: Number(row.intensity),
+      source: String(row.load_source) as WorkoutTrainingLoad["source"],
+      confidence: Number(row.confidence),
+      rpe: nullableNumber(row.rpe),
+      sessionType: String(row.session_type) as SessionType,
+      averageHeartRate: nullableNumber(row.average_heart_rate_bpm),
+      elevationGainMeters: nullableNumber(row.elevation_gain_meters),
+      stimulusType: String(row.stimulus_type ?? "unclassified") as StimulusType,
+      breakdown: {
+        rawHrrTrimp: nullableNumber(row.raw_hrr_trimp),
+        internalLoad: nullableNumber(row.internal_load),
+        paceLoad: nullableNumber(row.pace_load),
+        distanceReferenceMeters: nullableNumber(row.distance_reference_meters),
+        distanceExposureRatio: nullableNumber(row.distance_exposure_ratio),
+        distanceFactor: Number(row.distance_factor ?? 1),
+        compositeLoad: Number(row.training_load),
+        compositeIntensity: Number(row.intensity ?? 0),
+        heartRateConfidence: Number(row.heart_rate_load_confidence ?? 0),
+        paceConfidence: Number(row.pace_load_confidence ?? 0)
+      },
+      explanations:
+        parseJson<{ explanations?: WorkoutTrainingLoad["explanations"] }>(row.provenance_json, {})
+          .explanations ?? []
+    };
+  }
+}
+
+function mapListItem(row: Record<string, unknown>): StoredWorkoutListItem {
+  const duration = Number(row.duration_seconds);
+  const distance = nullableNumber(row.distance_km);
+  return {
+    id: String(row.session_id),
+    startedAt: String(row.workout_start_at),
+    endedAt: String(row.anchor_end_at),
+    durationSeconds: duration,
+    distanceKm: distance,
+    averagePaceSecondsPerKm: paceSeconds(duration, distance),
+    averageHeartRateBpm: nullableNumber(row.average_heart_rate_bpm),
+    indoor: row.indoor === null ? null : Number(row.indoor) === 1,
+    sourceCategory: String(row.source_category),
+    sessionType: String(row.session_type),
+    stimulusType: String(row.stimulus_type ?? "unclassified"),
+    stimulusConfidence: nullableNumber(row.stimulus_confidence),
+    eligibilityStatus: String(row.eligibility_status),
+    assessmentStatus: typeof row.assessment_status === "string" ? row.assessment_status : null,
+    missingReasons: parseJson<string[]>(row.missing_reasons_json, []),
+    qualityScore: Number(row.quality_score),
+    currentAbility: nullableNumber(row.current_ability),
+    confidence: nullableNumber(row.confidence),
+    trueAbilityDelta: nullableNumber(row.true_ability_delta),
+    hasRoute: Number(row.has_route) === 1
+  };
+}

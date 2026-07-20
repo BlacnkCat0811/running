@@ -38,12 +38,13 @@ import type {
 } from "@rai/contracts";
 
 export interface TrainPredictionModelRequest {
+  /** Omit to reuse the current active training request, or use the server's current time for a new run. */
   asOf?: string;
 }
 
 export interface TrainPredictionModelResponse {
   runId: string;
-  status: Extract<PredictionModelRunStatus, "queued">;
+  status: Extract<PredictionModelRunStatus, "queued" | "running" | "validating">;
 }
 
 export interface PredictionModelTrainingInProgressResponse {
@@ -55,6 +56,11 @@ export interface PredictionModelTrainingInProgressResponse {
 export interface PredictionModelCancellationResponse {
   cancelRequested: boolean;
   status: "cancelling" | "cancelled";
+}
+
+export interface RecomputeJobCancellationResponse {
+  cancelRequested: boolean;
+  status: "running" | "cancelled";
 }
 
 export interface ApiErrorResponse {
@@ -307,12 +313,12 @@ export interface OverrideWorkoutInput {
 }
 
 export interface ImportJobRequest {
-  inputPath: string;
-  confirmReplace: boolean;
+  sourceId: string;
 }
 
 export interface ImportJobResponse {
   id: string;
+  sourceId?: string;
   status: JobStatus;
   phase: string;
   message: string;
@@ -341,6 +347,16 @@ export interface BackupDto {
   createdAt: string;
 }
 
+export interface QuarantineDto {
+  name: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export type DatabaseDeletionResponse =
+  | { deleted: true; preservation: { kind: "backup"; backup: BackupDto } }
+  | { deleted: true; preservation: { kind: "quarantine"; snapshot: QuarantineDto } };
+
 export interface DataSummaryResponse {
   databaseBytes: number;
   datasetVersion: string | null;
@@ -360,6 +376,7 @@ export interface RuntimeStatusResponse {
   busy: boolean;
   recomputeJob: RecomputeJobDto | null;
   importJob: ImportJobResponse | null;
+  predictionModelJob: PredictionModelRun | null;
 }
 
 export interface ModelRunComparisonResponse {

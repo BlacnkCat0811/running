@@ -26,3 +26,5 @@ __pycache__/
 Thumbs.db
 .idea/
 .vscode/
+.claude/
+.grok/

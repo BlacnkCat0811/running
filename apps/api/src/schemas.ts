@@ -187,16 +187,6 @@ export const overrideBodySchema = {
   }
 } as const;
 
-export const importBodySchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["inputPath", "confirmReplace"],
-  properties: {
-    inputPath: { type: "string", minLength: 1, maxLength: 4096 },
-    confirmReplace: { type: "boolean" }
-  }
-} as const;
-
 export const importSourceBodySchema = {
   type: "object",
   additionalProperties: false,
@@ -207,7 +197,7 @@ export const importSourceBodySchema = {
 } as const;
 
 export const importJobBodySchema = {
-  oneOf: [importBodySchema, importSourceBodySchema]
+  ...importSourceBodySchema
 } as const;
 
 export const deleteBodySchema = {
@@ -265,7 +255,7 @@ const successSchema = (summary: string): Record<string, unknown> => {
     "激活成功的历史模型运行": ["activeModelRunId"],
     "任务与阶段事件": ["id", "status", "events"],
     "请求取消任务": ["cancelled"],
-    "从本机 Apple Health 导出目录或已检查来源导入": ["id", "status", "phase", "message"],
+    "从已检查的 Apple Health 来源导入": ["id", "status", "phase", "message"],
     "导入任务状态": ["id", "status", "phase", "message"],
     "流式上传并安全解压 Apple Health ZIP": ["sourceId", "uploadId", "fileName", "sizeBytes"],
     "预检已上传或本机导入来源": ["sourceId", "status", "exportFileName", "routeFileCount"],
@@ -273,7 +263,7 @@ const successSchema = (summary: string): Record<string, unknown> => {
     "最近成功使用的导入来源": ["sources"],
     "创建 SQLite 在线备份": ["name", "sizeBytes", "createdAt"],
     "校验并原子恢复本地 SQLite 备份": ["restored", "restoredBackup", "safetyBackup"],
-    "备份后删除当前本地数据库": ["deleted", "backup"]
+    "备份后删除当前本地数据库": ["deleted", "preservation"]
   };
   const arrays: Record<string, string[]> = {
     "模型运行历史": ["id", "status"],
@@ -422,15 +412,20 @@ export const openapiDocument = {
     "/v1/jobs": { get: operation(["Jobs"], "重算任务历史") },
     "/v1/jobs/{id}": { get: operation(["Jobs"], "任务与阶段事件", { parameters: pathId }) },
     "/v1/jobs/{id}/cancel": { post: operation(["Jobs"], "请求取消任务", { parameters: pathId }) },
-    "/v1/import-jobs": { post: operation(["Jobs"], "从本机 Apple Health 导出目录或已检查来源导入", {
-      requestBody: body({ $ref: "#/components/schemas/ImportJobRequest" }, "两种请求体严格二选一")
+    "/v1/import-jobs": { post: operation(["Jobs"], "从已检查的 Apple Health 来源导入", {
+      requestBody: body({ $ref: "#/components/schemas/ImportJobRequest" }, "已预检的导入来源标识")
     }) },
     "/v1/import-jobs/{id}": { get: operation(["Jobs"], "导入任务状态", { parameters: pathId }) },
     "/v1/import-jobs/active": { get: operation(["Jobs"], "当前运行中的导入任务") },
     "/v1/imports/uploads": { post: operation(["Jobs"], "流式上传并安全解压 Apple Health ZIP", {
       requestBody: { required: true, content: { "multipart/form-data": { schema: {
         type: "object", required: ["file"], properties: { file: { type: "string", format: "binary" } }
-      } } } }
+      } } } },
+      responses: {
+        ...responses("流式上传并安全解压 Apple Health ZIP"),
+        "429": errorResponse,
+        "507": errorResponse
+      }
     }) },
     "/v1/imports/inspect": { post: operation(["Jobs"], "预检已上传或本机导入来源", {
       requestBody: body(importSourceBodySchema, "待预检的来源")
@@ -458,7 +453,35 @@ export const openapiDocument = {
       requestBody: body({ $ref: "#/components/schemas/RestoreBackupRequest" }, "恢复确认文字")
     }) },
     "/v1/database": { delete: operation(["Maintenance"], "备份后删除当前本地数据库", {
-      requestBody: body({ $ref: "#/components/schemas/DeleteDatabaseRequest" }, "删除确认文字")
+      requestBody: body({ $ref: "#/components/schemas/DeleteDatabaseRequest" }, "删除确认文字"),
+      responses: {
+        ...responses("备份后删除当前本地数据库"),
+        "200": jsonResponse("数据库已删除，原始数据已保存", {
+          type: "object",
+          required: ["deleted", "preservation"],
+          properties: {
+            deleted: { const: true },
+            preservation: {
+              oneOf: [
+                {
+                  type: "object", required: ["kind", "backup"], additionalProperties: false,
+                  properties: {
+                    kind: { const: "backup" },
+                    backup: objectSchema("name", "sizeBytes", "createdAt")
+                  }
+                },
+                {
+                  type: "object", required: ["kind", "snapshot"], additionalProperties: false,
+                  properties: {
+                    kind: { const: "quarantine" },
+                    snapshot: objectSchema("name", "sizeBytes", "createdAt")
+                  }
+                }
+              ]
+            }
+          }
+        })
+      }
     }) }
   }
 } as const;

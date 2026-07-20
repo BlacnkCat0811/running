@@ -16,14 +16,15 @@ CatBoost 只学习“公式预测与真实标准测试/比赛成绩之间的残�
 ```mermaid
 flowchart LR
   A["结构化比赛/标准测试标签"] --> B["TypeScript 防未来泄漏特征导出"]
-  B --> C["CatBoost expanding-window walk-forward"]
-  C --> D["离线激活门槛"]
-  D -->|通过| E["ONNX artifact 原子发布"]
-  E --> F["prediction_model_runs 成功记录"]
-  F --> G["active_prediction_model 原子切换"]
-  G --> H["Node ONNX 实时推理"]
-  D -->|未通过| I["rejected，不改变 active"]
-  H -->|异常| J["公式回退 + 原因码"]
+  B --> C["时间/事件分组 release split"]
+  C --> D["训练区 expanding-window walk-forward"]
+  D --> E["仅 fit 训练区并冻结 artifact"]
+  E --> F["release holdout + Node ONNX 验收"]
+  F -->|通过| G["prediction_model_runs 成功记录"]
+  G --> H["active_prediction_model 原子切换"]
+  H --> I["Node ONNX 实时推理"]
+  F -->|未通过| J["rejected，不改变 active"]
+  I -->|异常| K["公式回退 + 原因码"]
 ```
 
 训练数据契约为 `race-residual-feature-v2`，模型版本为 `race-residual-catboost-v1`。目标值固定为：
@@ -43,14 +44,22 @@ targetLogResidual = log(actualSeconds / baselinePredictedSeconds)
 - 总真实标签不少于 50。
 - 5K、10K、半马每个距离不少于 8。
 
-walk-forward 验证：
+训练区 walk-forward 验证：
 
-- expanding-window 持出预测不少于 15。
+- expanding-window 持出预测不少于 12。
 - 每个距离持出预测不少于 3。
-- 总体 MAE 至少改善 3%。
+- 总体 MAE 至少改善 5%。
 - 任一距离 MAE 退化不得超过 5%。
 - 预测区间覆盖率下降不得超过 5 个百分点。
 - CatBoost 原生输出与 ONNX 输出最大绝对误差必须小于 `1e-6`。
+
+发布验收使用按时间排序、按 `(observedAt, completedAt)` 事件原子分组的尾部 release holdout：
+
+- holdout 不少于 24，且每个距离不少于 6；训练区不少于 24，且每个距离不少于 4。
+- 训练标签完成时间必须早于 holdout 起点 24 小时，embargo 内标签不进入训练。
+- 冻结模型只拟合训练区一次；holdout 验收后不再 refit，评估 SHA 即激活 SHA。
+- paired bootstrap 按事件成组重采样 2000 次，MAE 改善 95% 区间下界必须大于 0。
+- Python native、Python ONNX 与 Node ONNX 对全部 holdout 逐项一致；Node 重新计算的 MAE 和区间覆盖必须与评估文件一致。
 
 全部通过后，`prediction_model_runs.status` 更新为 `succeeded`，并在同一 SQLite 事务内更新 `active_prediction_model`。任一门槛失败则记录为 `rejected`，旧 active 模型保持不变。
 
@@ -65,13 +74,14 @@ var/model-artifacts/prediction/<prediction-model-run-id>/
     manifest.json
     feature-schema.json
     evaluation.json
+    onnx-golden.json
 ```
 
 任务因进程异常而恢复时使用新的 `attempt-N` 子目录，避免旧训练进程与重试进程同时写入同一 artifact。数据库只保存最终通过验证的尝试目录。
 
 CatBoost 导出的随机 `model_guid` 和训练完成时间会在发布前移除，ONNX 使用确定性 protobuf 序列化。相同数据、配置和评估时间应生成相同模型哈希。
 
-Node 加载时验证：模型版本、特征版本、特征顺序、schema hash、ONNX 文件 SHA-256、输入输出名称，并执行一次 smoke inference。
+Node 加载时验证：模型版本、特征版本、特征顺序、schema hash、T/H 数据 hash、embargo、ONNX 文件 SHA-256、输入输出名称、holdout 全量 golden parity 与聚合指标。
 
 ## API 与状态
 

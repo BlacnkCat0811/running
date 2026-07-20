@@ -43,6 +43,7 @@ def samples() -> list[TrainingSample]:
                 sample_id=f"sample-{index:03d}",
                 observed_at=observed.isoformat(),
                 completed_at=(observed + timedelta(minutes=30)).isoformat(),
+                label_available_at=(observed + timedelta(minutes=30)).isoformat(),
                 distance=distance,
                 baseline_predicted_seconds=baseline,
                 baseline_optimistic_seconds=baseline * 0.85,
@@ -77,7 +78,7 @@ def test_real_catboost_walk_forward_and_onnx_export_are_deterministic(tmp_path):
     assert first.manifest["correctionCapFraction"] == 0.12
     assert first.manifest["onnxParity"]["passed"] is True
     assert first.manifest["onnxParity"]["maximumAbsoluteError"] < 1e-6
-    for name in ("model.onnx", "manifest.json", "feature-schema.json", "evaluation.json"):
+    for name in ("model.onnx", "manifest.json", "feature-schema.json", "evaluation.json", "onnx-golden.json"):
         assert (tmp_path / "first" / name).is_file()
     model_hash = hashlib.sha256((tmp_path / "first" / "model.onnx").read_bytes()).hexdigest()
     assert model_hash == first.manifest["modelSha256"]
@@ -86,4 +87,15 @@ def test_real_catboost_walk_forward_and_onnx_export_are_deterministic(tmp_path):
         assert actual_hash == expected_hash
     evaluation = json.loads((tmp_path / "first" / "evaluation.json").read_text("utf-8"))
     assert evaluation["walkForward"]["method"] == "expanding_window"
-    assert evaluation["activationGate"]["holdoutCount"] == 21
+    assert evaluation["releaseSplit"]["trainingCount"] == 27
+    assert evaluation["releaseSplit"]["holdoutCount"] == 24
+    assert evaluation["activationGate"]["holdoutCount"] == 15
+    assert evaluation["releaseHoldout"]["candidateMetrics"]["sampleCount"] == 24
+    assert evaluation["releaseHoldout"]["maeImprovementBootstrap95"]["lower"] > 0
+    assert evaluation["publishedArtifact"] == {
+        "directGeneralizationMetric": True,
+        "evaluatedArtifactSha256": first.manifest["modelSha256"],
+        "fitStrategy": "training_partition_only",
+        "generalizationMetricsSource": "temporal_release_holdout",
+        "numericParityFixture": "onnx-golden.json",
+    }

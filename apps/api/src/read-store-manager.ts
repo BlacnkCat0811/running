@@ -1,7 +1,31 @@
 import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { RaiReadStore } from "./data.js";
+
+/** Default wait for read leases to drain before database file replacement. */
+export const BEGIN_REPLACE_TIMEOUT_MS = 20_000;
+
+export class DatabaseReplaceTimeoutError extends Error {
+  readonly statusCode = 409;
+  readonly code = "database_busy";
+
+  constructor(message = "本地数据库正在切换，请稍后重试") {
+    super(message);
+    this.name = "DatabaseReplaceTimeoutError";
+  }
+}
+
+export class DatabaseNotReadyError extends Error {
+  readonly statusCode = 409;
+  readonly code = "database_not_ready";
+
+  constructor(message = "本地 RAI 数据库不存在，请先导入 Apple Health 数据") {
+    super(message);
+    this.name = "DatabaseNotReadyError";
+  }
+}
 
 export class ReadStoreManager {
   private store: RaiReadStore | null = null;
@@ -11,12 +35,16 @@ export class ReadStoreManager {
 
   constructor(private readonly databasePath: string) {}
 
+  get isReplacing(): boolean {
+    return this.replacing;
+  }
+
   use<T>(callback: (store: RaiReadStore) => T): T {
     this.acquire();
     try {
       if (!existsSync(this.databasePath)) {
         this.closeStore();
-        throw new Error("本地 RAI 数据库不存在，请先导入 Apple Health 数据");
+        throw new DatabaseNotReadyError();
       }
       this.store ??= new RaiReadStore(this.databasePath);
       return callback(this.store);
@@ -34,8 +62,8 @@ export class ReadStoreManager {
   useDatabase<T>(callback: (database: import("node:sqlite").DatabaseSync) => T): T {
     this.acquire();
     try {
-      if (!existsSync(this.databasePath)) throw new Error("本地 RAI 数据库不存在，请先导入 Apple Health 数据");
-      const database = new DatabaseSync(this.databasePath, { readOnly: true });
+      if (!existsSync(this.databasePath)) throw new DatabaseNotReadyError();
+      const database = RaiDatabase.openReadonly(this.databasePath);
       try { return callback(database); } finally { database.close(); }
     } finally {
       this.release();
@@ -45,20 +73,42 @@ export class ReadStoreManager {
   async useDatabaseAsync<T>(callback: (database: import("node:sqlite").DatabaseSync) => Promise<T>): Promise<T> {
     this.acquire();
     try {
-      if (!existsSync(this.databasePath)) throw new Error("本地 RAI 数据库不存在，请先导入 Apple Health 数据");
-      const database = new DatabaseSync(this.databasePath, { readOnly: true });
+      if (!existsSync(this.databasePath)) throw new DatabaseNotReadyError();
+      const database = RaiDatabase.openReadonly(this.databasePath);
       try { return await callback(database); } finally { database.close(); }
     } finally {
       this.release();
     }
   }
 
-  async beginReplace(): Promise<void> {
+  async beginReplace(timeoutMs = BEGIN_REPLACE_TIMEOUT_MS): Promise<void> {
+    if (this.replacing) throw new DatabaseReplaceTimeoutError();
     this.replacing = true;
-    if (this.activeLeases > 0) {
-      await new Promise<void>((resolve) => this.idleWaiters.add(resolve));
+    try {
+      if (this.activeLeases > 0) {
+        await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const waiter = (): void => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve();
+          };
+          const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            this.idleWaiters.delete(waiter);
+            this.replacing = false;
+            reject(new DatabaseReplaceTimeoutError());
+          }, timeoutMs);
+          this.idleWaiters.add(waiter);
+        });
+      }
+      this.closeStore();
+    } catch (error) {
+      this.replacing = false;
+      throw error;
     }
-    this.closeStore();
   }
 
   endReplace(): void {
@@ -66,7 +116,7 @@ export class ReadStoreManager {
   }
 
   private acquire(): void {
-    if (this.replacing) throw new Error("本地数据库正在切换，请稍后重试");
+    if (this.replacing) throw new DatabaseReplaceTimeoutError();
     this.activeLeases += 1;
   }
 

@@ -1,6 +1,8 @@
+import "../pixel-layout.css";
+import "../training-reference.css";
 import type { WorkoutListResponse } from "@rai/api-contracts";
 import { useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import {
   EmptyBlock,
@@ -8,8 +10,18 @@ import {
   LoadingBlock,
 } from "../components/Feedback.js";
 import { WorkoutTable } from "../components/WorkoutTable.js";
+import {
+  date,
+  duration,
+  environment,
+  number,
+  pace,
+  sessionType,
+  source,
+  stimulusType,
+} from "../format.js";
 import { useRemote } from "../hooks.js";
-import { FunnelSimple } from "../icons.js";
+import { ArrowRight, FunnelSimple, MapTrifold, Pulse } from "../icons.js";
 
 const limit = 30;
 const filterKeys = [
@@ -87,16 +99,37 @@ export function WorkoutsPage() {
   const apiParams = new URLSearchParams(sanitizedParams);
   apiParams.set("limit", String(limit));
   apiParams.set("offset", String(offset));
+  const apiPath = `/v1/workouts?${apiParams.toString()}`;
   const result = useRemote<WorkoutListResponse>(
-    `/v1/workouts?${apiParams.toString()}`,
+    apiPath,
   );
+  useEffect(() => {
+    if (
+      result.loading ||
+      !result.data ||
+      result.dataPath !== apiPath ||
+      result.error ||
+      offset === 0 ||
+      result.data.items.length > 0
+    ) {
+      return;
+    }
+    const lastOffset =
+      result.data.total === 0
+        ? 0
+        : Math.floor((result.data.total - 1) / limit) * limit;
+    setOffset(lastOffset);
+  }, [apiPath, offset, result.data, result.dataPath, result.error, result.loading]);
   const activeFilterCount = filterKeys.filter((key) =>
     Boolean(value(key)),
   ).length;
+  const preview = !result.loading && !result.error && result.dataPath === apiPath
+    ? result.data?.items[0] ?? null
+    : null;
 
   return (
-    <div className="page">
-      <header className="page-header split">
+    <div className="page workouts-page">
+      <header className="page-header split runner-page-header training-list-header">
         <div>
           <h1>训练记录</h1>
           <p>查看每次跑步的特征、评分证据与数据质量。</p>
@@ -115,6 +148,8 @@ export function WorkoutsPage() {
           ) : null}
         </div>
       </header>
+      <div className="workouts-layout">
+        <div className="workouts-main-column">
       <div className="filter-bar">
         <FunnelSimple size={18} />
         <label>
@@ -233,47 +268,113 @@ export function WorkoutsPage() {
           </select>
         </label>
       </div>
-      <section className="panel workout-list-panel">
-        {result.loading ? (
-          <LoadingBlock />
-        ) : result.error ? (
-          <ErrorBlock
-            message={result.error}
-            onRetry={() => void result.reload()}
-          />
-        ) : result.data && result.data.items.length > 0 ? (
-          <>
-            <WorkoutTable items={result.data.items} />
-            <div className="pagination">
-              <span>
-                {offset + 1}-{Math.min(offset + limit, result.data.total)} /{" "}
-                {result.data.total}
-              </span>
-              <div>
-                <button
-                  className="button secondary"
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - limit))}
-                >
-                  上一页
-                </button>
-                <button
-                  className="button secondary"
-                  disabled={offset + limit >= result.data.total}
-                  onClick={() => setOffset(offset + limit)}
-                >
-                  下一页
-                </button>
+        <section className="panel workout-list-panel">
+          {result.loading ? (
+            <LoadingBlock />
+          ) : result.error ? (
+            <ErrorBlock
+              message={result.error}
+              onRetry={() => void result.reload()}
+            />
+          ) : result.data && result.data.items.length > 0 ? (
+            <>
+              <WorkoutTable items={result.data.items} />
+              <div className="pagination">
+                <span>
+                  {offset + 1}-{Math.min(offset + limit, result.data.total)} /{" "}
+                  {result.data.total}
+                </span>
+                <div>
+                  <button
+                    className="button secondary"
+                    disabled={offset === 0}
+                    onClick={() => setOffset(Math.max(0, offset - limit))}
+                  >
+                    上一页
+                  </button>
+                  <button
+                    className="button secondary"
+                    disabled={offset + limit >= result.data.total}
+                    onClick={() => setOffset(offset + limit)}
+                  >
+                    下一页
+                  </button>
+                </div>
               </div>
+            </>
+          ) : (
+            <EmptyBlock
+              title="没有符合条件的训练"
+              body="调整筛选条件，或前往数据页导入新的 Apple Health 导出。"
+            />
+          )}
+        </section>
+        </div>
+        <aside
+          className="panel workout-preview-panel"
+          aria-label="最近训练速览"
+        >
+          {preview ? (
+            <>
+              <div className="workout-preview-heading">
+                <span>最近一项</span>
+                <b>{sessionType(preview.sessionType)}</b>
+                <small>{date(preview.startedAt, true)}</small>
+              </div>
+              <div className="workout-preview-metrics">
+                <span>
+                  <small>距离</small>
+                  <b>{number(preview.distanceKm)} km</b>
+                </span>
+                <span>
+                  <small>用时</small>
+                  <b>{duration(preview.durationSeconds)}</b>
+                </span>
+                <span>
+                  <small>平均配速</small>
+                  <b>{pace(preview.averagePaceSecondsPerKm)}/km</b>
+                </span>
+                <span>
+                  <small>平均心率</small>
+                  <b>
+                    {preview.averageHeartRateBpm === null
+                      ? "--"
+                      : `${Math.round(preview.averageHeartRateBpm)} bpm`}
+                  </b>
+                </span>
+              </div>
+              <div className="workout-preview-route" aria-hidden="true">
+                <MapTrifold size={28} />
+                <i />
+                <i />
+                <i />
+                <i />
+              </div>
+              <div className="workout-preview-analysis">
+                <span>
+                  <Pulse size={15} />
+                  {stimulusType(preview.stimulusType)}
+                </span>
+                <p>
+                  {environment(preview.indoor)} · {source(preview.sourceCategory)} · CA{" "}
+                  {number(preview.currentAbility)}
+                </p>
+              </div>
+              <Link
+                to={`/workouts/${preview.id}`}
+                state={{ from: "/workouts" }}
+                className="button primary full"
+              >
+                查看训练详情 <ArrowRight size={16} />
+              </Link>
+            </>
+          ) : (
+            <div className="workout-preview-empty">
+              筛选结果将在这里显示速览。
             </div>
-          </>
-        ) : (
-          <EmptyBlock
-            title="没有符合条件的训练"
-            body="调整筛选条件，或前往数据页导入新的 Apple Health 导出。"
-          />
-        )}
-      </section>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }

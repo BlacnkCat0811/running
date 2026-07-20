@@ -11,7 +11,7 @@ import type {
   TrainingLoadBreakdown
 } from "@rai/contracts";
 
-export interface HeartRateSample { heartRate: number; durationSeconds: number }
+export interface HeartRateSample { heartRate: number; durationSeconds: number; startOffsetSeconds?: number }
 export interface WorkoutLoadInput {
   trainingSessionId: string;
   localDate: string;
@@ -48,24 +48,63 @@ export const defaultDailyMetricConfig: DailyMetricConfig = {
   minimumChronicLoad: 5
 };
 
-const typeIntensity: Record<SessionType, number> = {
+/** Session-type intensity factors shared with composite load (training-zones). */
+export const SESSION_TYPE_INTENSITY: Record<SessionType, number> = {
   unknown: 0.48, recovery: 0.30, easy: 0.42, steady: 0.52,
   tempo: 0.70, interval: 0.80, long_run: 0.55, race: 0.86
 };
-const rpeIntensity = [0, 0.25, 0.30, 0.38, 0.45, 0.52, 0.60, 0.68, 0.76, 0.84, 0.90] as const;
+
+/** RPE→intensity lookup (index 0 unused; RPE 1–10). Shared with composite load. */
+export const RPE_INTENSITY = [0, 0.25, 0.30, 0.38, 0.45, 0.52, 0.60, 0.68, 0.76, 0.84, 0.90] as const;
+
+/**
+ * Banister TRIMP exponential coefficient.
+ * Male default 1.92; female literature value is 1.67 when sex is known.
+ * DailyZoneProfile does not yet carry sex — always use male until that field exists.
+ */
+export const TRIMP_EXPONENT_MALE = 1.92;
+export const TRIMP_EXPONENT_FEMALE = 1.67;
+
 const clamp = (value: number, low = 0, high = 1): number => Math.min(high, Math.max(low, value));
 const finite = (value: number | null | undefined): value is number => typeof value === "number" && Number.isFinite(value);
 const round = (value: number): number => Math.round(value * 1e6) / 1e6;
+
+function uniqueHeartRateTimeline(samples: HeartRateSample[], durationSeconds: number): HeartRateSample[] {
+  let sequentialOffset = 0;
+  const intervals = samples.flatMap((sample, index) => {
+    if (!finite(sample.heartRate) || !finite(sample.durationSeconds) || sample.durationSeconds <= 0) return [];
+    const requestedStart = finite(sample.startOffsetSeconds) ? sample.startOffsetSeconds : sequentialOffset;
+    const requestedEnd = requestedStart + sample.durationSeconds;
+    sequentialOffset = Math.max(sequentialOffset, requestedEnd);
+    const start = clamp(requestedStart, 0, durationSeconds);
+    const end = clamp(requestedEnd, 0, durationSeconds);
+    return end > start ? [{ sample, index, start, end }] : [];
+  });
+  const boundaries = [...new Set(intervals.flatMap((item) => [item.start, item.end]))].sort((a, b) => a - b);
+  const result: HeartRateSample[] = [];
+  for (let index = 0; index + 1 < boundaries.length; index += 1) {
+    const start = boundaries[index]!;
+    const end = boundaries[index + 1]!;
+    const active = intervals.filter((item) => item.start < end && item.end > start);
+    if (active.length === 0) continue;
+    result.push({
+      heartRate: active.reduce((sum, item) => sum + item.sample.heartRate, 0) / active.length,
+      durationSeconds: end - start,
+      startOffsetSeconds: start
+    });
+  }
+  return result;
+}
 
 export function heartRateReserve(heartRate: number, restingHeartRate: number, observedMaxHeartRate: number): number | null {
   if (![heartRate, restingHeartRate, observedMaxHeartRate].every(Number.isFinite) || observedMaxHeartRate <= restingHeartRate) return null;
   return clamp((heartRate - restingHeartRate) / (observedMaxHeartRate - restingHeartRate));
 }
 
-export function trimpMinuteLoad(intensity: number): number {
+export function trimpMinuteLoad(intensity: number, exponent: number = TRIMP_EXPONENT_MALE): number {
   if (!Number.isFinite(intensity)) throw new Error("intensity must be finite");
   const normalized = clamp(intensity);
-  return normalized * Math.exp(1.92 * normalized);
+  return normalized * Math.exp(exponent * normalized);
 }
 
 export function calculateWorkoutTrainingLoad(input: WorkoutLoadInput): WorkoutTrainingLoad | null {
@@ -78,7 +117,8 @@ export function calculateWorkoutTrainingLoad(input: WorkoutLoadInput): WorkoutTr
   let confidence: number;
   const validHrr = (hr: number): number | null => finite(input.restingHeartRate) && finite(input.observedMaxHeartRate)
     ? heartRateReserve(hr, input.restingHeartRate, input.observedMaxHeartRate) : null;
-  const samples = (input.heartRateSamples ?? []).map(sample => ({ ...sample, hrr: validHrr(sample.heartRate) }))
+  const samples = uniqueHeartRateTimeline(input.heartRateSamples ?? [], input.durationSeconds)
+    .map(sample => ({ ...sample, hrr: validHrr(sample.heartRate) }))
     .filter((sample): sample is HeartRateSample & { hrr: number } => sample.hrr !== null && finite(sample.durationSeconds) && sample.durationSeconds > 0);
   const sampleCoverage = samples.reduce((sum, sample) => sum + sample.durationSeconds, 0) / input.durationSeconds;
   const declaredCoverage = finite(input.heartRateCoverage) ? input.heartRateCoverage : sampleCoverage;
@@ -95,9 +135,9 @@ export function calculateWorkoutTrainingLoad(input: WorkoutLoadInput): WorkoutTr
     if (averageHrr !== null) {
       source = "average_heart_rate"; intensity = averageHrr; confidence = 0.8 * baseConfidence;
     } else if (finite(input.rpe) && input.rpe >= 1 && input.rpe <= 10) {
-      source = "rpe"; intensity = rpeIntensity[Math.round(input.rpe)] ?? 0.48; confidence = 0.65 * baseConfidence;
+      source = "rpe"; intensity = RPE_INTENSITY[Math.round(input.rpe)] ?? 0.48; confidence = 0.65 * baseConfidence;
     } else {
-      source = "session_type"; intensity = typeIntensity[sessionType]; confidence = 0.4 * baseConfidence;
+      source = "session_type"; intensity = SESSION_TYPE_INTENSITY[sessionType]; confidence = 0.4 * baseConfidence;
     }
     load = input.durationSeconds / 60 * trimpMinuteLoad(intensity);
   }
@@ -109,9 +149,22 @@ export function calculateWorkoutTrainingLoad(input: WorkoutLoadInput): WorkoutTr
     distanceExposureRatio: null,
     distanceFactor: 1,
     compositeLoad: round(Math.max(0, load)),
+    compositeIntensity: round(intensity),
     heartRateConfidence: source === "heart_rate_series" || source === "average_heart_rate" ? round(clamp(confidence)) : 0,
     paceConfidence: 0
   };
+  if (input.loadBreakdown) {
+    source = "composite";
+    intensity = breakdown.compositeIntensity;
+    // Pure RPE/session fallbacks store Banister target confidences on one axis
+    // with both modality loads null — use them as-is so the 0.6/0.4 blend does
+    // not drag 0.65 → 0.39 or 0.4 → 0.24.
+    if (breakdown.internalLoad === null && breakdown.paceLoad === null) {
+      confidence = clamp(Math.max(breakdown.heartRateConfidence, breakdown.paceConfidence));
+    } else {
+      confidence = clamp(0.6 * breakdown.heartRateConfidence + 0.4 * breakdown.paceConfidence);
+    }
+  }
   return {
     trainingSessionId: input.trainingSessionId, localDate: input.localDate,
     distanceMeters: finite(input.distanceMeters) ? Math.max(0, input.distanceMeters) : null,
@@ -165,11 +218,14 @@ export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughD
   for (const load of sorted) byDate.set(load.localDate, [...(byDate.get(load.localDate) ?? []), load]);
   const dailyLoads: number[] = []; const results: DailyTrainingMetric[] = [];
   const acuteAlpha = 1 - Math.exp(-Math.LN2 / config.acuteHalfLifeDays); const chronicAlpha = 1 - Math.exp(-Math.LN2 / config.chronicHalfLifeDays);
-  let acute = 0, chronic = 0, workouts = 0, lastRunIndex = -1;
+  // The series starts on the first observed workout day. Seed both EWMAs from
+  // that observation so the absent pre-history is not interpreted as zero load.
+  let acute: number | null = null, chronic: number | null = null, workouts = 0, lastRunIndex = -1;
   for (let index = 0; index < days.length; index++) {
     const localDate = days[index]!; const items = byDate.get(localDate) ?? [];
     const load = items.reduce((sum, item) => sum + item.load, 0); dailyLoads.push(load);
-    acute = acuteAlpha * load + (1 - acuteAlpha) * acute; chronic = chronicAlpha * load + (1 - chronicAlpha) * chronic;
+    acute = acute === null ? load : acuteAlpha * load + (1 - acuteAlpha) * acute;
+    chronic = chronic === null ? load : chronicAlpha * load + (1 - chronicAlpha) * chronic;
     workouts += items.length; if (items.length > 0) lastRunIndex = index;
     const current7dLoad = sumRange(dailyLoads, index, 7); const previous7dLoad = dailyLoads.slice(Math.max(0, index - 13), Math.max(0, index - 6)).reduce((a, b) => a + b, 0);
     const floor = Math.max(10, chronic * 7 * 0.25); const rampRate = (current7dLoad - previous7dLoad) / Math.max(previous7dLoad, floor);

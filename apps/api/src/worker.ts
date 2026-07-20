@@ -16,15 +16,26 @@ import {
 import {
   PREDICTION_MODEL_LEASE_TIMEOUT_MS,
   PredictionModelService,
+  currentAbilityBaselineHash,
   type PredictionModelTrainer
 } from "@rai/application";
 import {
-  RaiDatabase,
   stageAuditFiles,
   type StagedAuditFiles,
 } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 import { RuntimeStateStore } from "./runtime-state.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
+
+/** Client-visible import failure text; full diagnostics stay in server logs only. */
+export const PUBLIC_IMPORT_FAILURE_ERROR = "导入失败，请查看服务日志";
+
+const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => {
+  database.exec(`PRAGMA busy_timeout = ${milliseconds}`);
+};
+
+export const predictionModelWorkerRetryDelay = (consecutiveFailures: number): number =>
+  Math.min(30_000, 1_000 * (2 ** Math.max(0, consecutiveFailures - 1)));
 
 export class RecomputeWorker {
   private scheduled = false;
@@ -35,7 +46,10 @@ export class RecomputeWorker {
   private drainPromise: Promise<void> | null = null;
   private activeWorker: Worker | null = null;
 
-  constructor(private readonly databasePath: string) {}
+  constructor(
+    private readonly databasePath: string,
+    private readonly onDatabaseError: (error: unknown) => void = () => {}
+  ) {}
 
   get isRunning(): boolean {
     return this.running || this.scheduled;
@@ -58,7 +72,7 @@ export class RecomputeWorker {
   }
 
   private queueDrain(delayMs: number): void {
-    if (this.closing) return;
+    if (this.closing || this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
       const promise = this.drain();
@@ -81,10 +95,23 @@ export class RecomputeWorker {
         if (!ran) break;
       }
     } catch (error) {
+      this.onDatabaseError(error);
       this.consecutiveFailures += 1;
       const message = error instanceof Error ? error.stack ?? error.message : String(error);
       process.stderr.write(`Recompute worker failed: ${message}\n`);
-      if (!this.closing && this.consecutiveFailures < 3) this.scheduled = true;
+      if (!this.closing && this.consecutiveFailures < 3) {
+        this.scheduled = true;
+      } else if (!this.closing) {
+        try {
+          this.failOutstandingJobs(error);
+        } catch (terminalError) {
+          const terminalMessage = terminalError instanceof Error
+            ? terminalError.stack ?? terminalError.message
+            : String(terminalError);
+          process.stderr.write(`Recompute worker could not release failed jobs: ${terminalMessage}\n`);
+          this.scheduled = true;
+        }
+      }
     } finally {
       this.running = false;
       if (!this.closing && this.scheduled) {
@@ -94,11 +121,49 @@ export class RecomputeWorker {
     }
   }
 
+  private failOutstandingJobs(error: unknown): void {
+    const database = new DatabaseSync(this.databasePath);
+    applyBusyTimeout(database, 2_000);
+    const completedAt = new Date().toISOString();
+    const payload = JSON.stringify({
+      name: error instanceof Error ? error.name : "Error",
+      message: error instanceof Error ? error.message : String(error)
+    });
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      const jobs = database.prepare(`
+        SELECT id, progress_current AS progressCurrent, progress_total AS progressTotal
+        FROM recompute_jobs WHERE status IN ('queued', 'running')
+      `).all() as unknown as Array<{ id: string; progressCurrent: number; progressTotal: number }>;
+      const fail = database.prepare(`
+        UPDATE recompute_jobs
+        SET status = 'failed', completed_at = ?, progress_phase = 'failed', error_json = ?
+        WHERE id = ? AND status IN ('queued', 'running')
+      `);
+      const log = database.prepare(`
+        INSERT INTO recompute_job_events (
+          id, job_id, phase, progress_current, progress_total, message, created_at
+        ) VALUES (?, ?, 'failed', ?, ?, 'Worker failed to start after 3 attempts', ?)
+      `);
+      for (const job of jobs) {
+        const changed = fail.run(completedAt, payload, job.id);
+        if (Number(changed.changes) === 1) {
+          log.run(`recompute_job_event_${randomUUID()}`, job.id, job.progressCurrent, job.progressTotal, completedAt);
+        }
+      }
+      database.exec("COMMIT");
+    } catch (failure) {
+      try { database.exec("ROLLBACK"); } catch { /* Transaction did not start. */ }
+      throw failure;
+    } finally {
+      database.close();
+    }
+  }
+
   private runOneInWorkerThread(): Promise<boolean> {
     return new Promise((resolvePromise, reject) => {
-      const worker = new Worker(new URL("./recompute-thread.ts", import.meta.url), {
-        workerData: { databasePath: this.databasePath },
-        execArgv: ["--import", "tsx"]
+      const worker = new Worker(new URL("./recompute-worker-bootstrap.mjs", import.meta.url), {
+        workerData: { databasePath: this.databasePath }
       });
       this.activeWorker = worker;
       let result: boolean | null = null;
@@ -260,17 +325,26 @@ export class PredictionModelWorker {
   private timer: NodeJS.Timeout | null = null;
   private drainPromise: Promise<void> | null = null;
   private activeAbortController: AbortController | null = null;
+  private consecutiveDrainFailures = 0;
 
   constructor(
     private readonly databasePath: string,
     private readonly projectRoot: string,
     private readonly runtimeRoot = projectRoot,
     private readonly trainer: PredictionModelTrainer =
-      new ExternalPredictionModelTrainer(projectRoot, runtimeRoot)
+      new ExternalPredictionModelTrainer(projectRoot, runtimeRoot),
+    private readonly onDatabaseError: (error: unknown) => void = () => {}
   ) {}
 
   get isRunning(): boolean {
     return this.running || this.scheduled;
+  }
+
+  private service(store: RaiDatabase): PredictionModelService {
+    return new PredictionModelService(
+      store,
+      resolve(this.runtimeRoot, "var", "model-artifacts", "prediction")
+    );
   }
 
   schedule(): void {
@@ -280,12 +354,21 @@ export class PredictionModelWorker {
   }
 
   private queueDrain(delayMs: number): void {
-    if (this.closing) return;
+    if (this.closing || this.timer) return;
     this.timer = setTimeout(() => {
       this.timer = null;
-      const promise = this.drain().catch(() => {
+      const promise = this.drain().then(() => {
+        this.consecutiveDrainFailures = 0;
+      }).catch((error) => {
+        this.onDatabaseError(error);
         this.running = false;
-        if (!this.closing) this.queueDrain(1_000);
+        this.consecutiveDrainFailures += 1;
+        const message = error instanceof Error ? error.stack ?? error.message : String(error);
+        process.stderr.write(`Prediction model worker failed: ${message}\n`);
+        if (!this.closing) {
+          const retryDelay = predictionModelWorkerRetryDelay(this.consecutiveDrainFailures);
+          this.queueDrain(retryDelay);
+        }
       });
       this.drainPromise = promise;
       void promise.finally(() => {
@@ -315,7 +398,7 @@ export class PredictionModelWorker {
         let runId: string | null = null;
         let workerToken: string | null = null;
         try {
-          const service = new PredictionModelService(store);
+          const service = this.service(store);
           service.recoverAbandoned();
           workerToken = `${this.instanceToken}_${randomUUID()}`;
           const run = service.claimNext(workerToken);
@@ -330,7 +413,7 @@ export class PredictionModelWorker {
         if (this.closing) {
           const shutdownStore = await RaiDatabase.open(this.databasePath);
           try {
-            new PredictionModelService(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
+            this.service(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
           } finally {
             shutdownStore.close();
           }
@@ -351,13 +434,13 @@ export class PredictionModelWorker {
     const readStore = await RaiDatabase.open(this.databasePath);
     if (this.closing) {
       try {
-        new PredictionModelService(readStore).releaseLeaseForShutdown(runId, workerToken);
+        this.service(readStore).releaseLeaseForShutdown(runId, workerToken);
       } finally {
         readStore.close();
       }
       return;
     }
-    const run = new PredictionModelService(readStore).get(runId);
+    const run = this.service(readStore).get(runId);
     const attempt = readStore.database.prepare(`
       SELECT attempt_count AS attemptCount
       FROM prediction_model_runs WHERE id = ?
@@ -373,7 +456,7 @@ export class PredictionModelWorker {
     if (this.closing) {
       const shutdownStore = await RaiDatabase.open(this.databasePath);
       try {
-        new PredictionModelService(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
+        this.service(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
       } finally {
         shutdownStore.close();
       }
@@ -384,7 +467,7 @@ export class PredictionModelWorker {
     this.activeAbortController = abortController;
     if (this.closing) abortController.abort();
     const leaseDatabase = new DatabaseSync(this.databasePath);
-    leaseDatabase.exec("PRAGMA busy_timeout = 2000");
+    applyBusyTimeout(leaseDatabase, 2000);
     const cancellationPoll = setInterval(() => {
       if (!existsSync(this.databasePath)) return;
       try {
@@ -401,7 +484,8 @@ export class PredictionModelWorker {
           FROM prediction_model_runs WHERE id = ?
         `).get(runId) as { cancelRequested: number } | undefined;
         if (row?.cancelRequested === 1) abortController.abort();
-      } catch {
+      } catch (error) {
+        this.onDatabaseError(error);
         // A short SQLite writer lock must not kill a healthy training process.
       }
     }, 1_000);
@@ -417,7 +501,7 @@ export class PredictionModelWorker {
       if (this.closing) throw new Error("prediction_training_shutdown");
       const store = await RaiDatabase.open(this.databasePath);
       try {
-        const service = new PredictionModelService(store);
+        const service = this.service(store);
         if (this.closing) service.releaseLeaseForShutdown(runId, workerToken);
         else service.completeAndActivate(runId, result, workerToken);
       } finally {
@@ -426,7 +510,7 @@ export class PredictionModelWorker {
     } catch (error) {
       const store = await RaiDatabase.open(this.databasePath);
       try {
-        const service = new PredictionModelService(store);
+        const service = this.service(store);
         if (this.closing) {
           service.releaseLeaseForShutdown(runId, workerToken);
         } else if (service.isCancellationRequested(runId) || abortController.signal.aborted) {
@@ -496,7 +580,8 @@ export class ImportWorker {
     private readonly projectRoot: string,
     private readonly runtimeRoot = projectRoot,
     private readonly beforeActivate: () => void | Promise<void> = () => {},
-    private readonly afterActivate: () => void | Promise<void> = () => {}
+    private readonly afterActivate: () => void | Promise<void> = () => {},
+    private readonly onDatabaseError: (error: unknown) => void = () => {}
   ) {
     this.jobStatePath = resolve(runtimeRoot, "var/import-jobs.json");
     this.state = new RuntimeStateStore(runtimeRoot);
@@ -508,7 +593,11 @@ export class ImportWorker {
     return this.running;
   }
 
-  create(inputPathValue: string, onTerminal?: (succeeded: boolean) => void | Promise<void>): ImportJobResponse {
+  create(
+    inputPathValue: string,
+    onTerminal?: (succeeded: boolean) => void | Promise<void>,
+    sourceId?: string
+  ): ImportJobResponse {
     if (this.closing) throw new Error("导入服务正在关闭");
     if (this.running) throw new Error("已有导入任务正在执行");
     const inputPath = resolve(inputPathValue);
@@ -527,7 +616,8 @@ export class ImportWorker {
       createdAt: new Date().toISOString(),
       completedAt: null,
       error: null,
-      inputPath
+      inputPath,
+      ...(sourceId === undefined ? {} : { sourceId })
     };
     if (onTerminal) job.onTerminal = onTerminal;
     this.jobs.set(id, job);
@@ -558,7 +648,7 @@ export class ImportWorker {
         job.status = "failed";
         job.phase = "interrupted";
         job.message = "导入因本地服务关闭而中断，可重新提交导入";
-        job.error = "Local API closed before the import started";
+        job.error = PUBLIC_IMPORT_FAILURE_ERROR;
         job.completedAt = new Date().toISOString();
         this.persistJobs();
         try { await job.onTerminal?.(false); } catch { /* Terminal cleanup is best-effort during shutdown. */ }
@@ -721,6 +811,7 @@ export class ImportWorker {
         };
       };
     } catch (error) {
+      this.onDatabaseError(error);
       let failure: unknown = error;
       try {
         auditPublication?.rollback();
@@ -732,10 +823,15 @@ export class ImportWorker {
       }
       terminalSucceeded = false;
       publishTerminalState = () => {
+        const detail = failure instanceof Error
+          ? (failure.stack ?? failure.message)
+          : String(failure);
+        // Keep full diagnostics in server logs only; never return child stderr or paths to clients.
+        console.error(`Import job ${job.id} failed: ${detail}`);
         job.status = "failed";
         job.phase = "failed";
         job.message = "导入失败，原始导出文件未被修改";
-        job.error = failure instanceof Error ? failure.message : String(failure);
+        job.error = PUBLIC_IMPORT_FAILURE_ERROR;
         job.completedAt = new Date().toISOString();
       };
     } finally {
@@ -795,6 +891,7 @@ export class ImportWorker {
 
   private analyzeDatasetChange(stagingPath: string, previousPath: string, batchId?: string): ImportDatasetChange {
     const database = new DatabaseSync(stagingPath);
+    applyBusyTimeout(database);
     try {
       database.prepare("ATTACH DATABASE ? AS previous").run(previousPath);
       const count = (sql: string): number => Number((database.prepare(sql).get() as { count: number }).count);
@@ -1031,6 +1128,11 @@ export class ImportWorker {
       undefined,
       backupPolicyFromEnvironment()
     );
+    if (!this.isReadableDatabase(this.databasePath)) {
+      this.onDatabaseError(new Error("Main database is corrupt or failed its integrity check"));
+      await maintenance.preserveCorruptDatabase(`before-web-import-${jobId}-corrupt`);
+      return null;
+    }
     await maintenance.ensureBackupCapacity();
     const backupPath = resolve(backupDirectory, `rai.before-web-import.${jobId}.sqlite`);
     const stagingBackupPath = `${backupPath}.partial-${randomUUID()}`;
@@ -1038,7 +1140,6 @@ export class ImportWorker {
     try {
       await this.backupDatabase(currentDatabase, stagingBackupPath);
       await rename(stagingBackupPath, backupPath);
-      await maintenance.enforceBackupPolicy(basename(backupPath));
     } catch (error) {
       try {
         await this.cleanupPartialBackup(stagingBackupPath);
@@ -1052,6 +1153,12 @@ export class ImportWorker {
       throw error;
     } finally {
       currentDatabase.close();
+    }
+    try {
+      await maintenance.enforceBackupPolicy(basename(backupPath));
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      process.stderr.write(`Import backup retention cleanup failed after backup was published: ${message}\n`);
     }
     return backupPath;
   }
@@ -1082,6 +1189,7 @@ export class ImportWorker {
 
   private preserveHistoricalState(stagingDatabase: string, previousDatabase: string): void {
     const database = new DatabaseSync(stagingDatabase);
+    applyBusyTimeout(database);
     let attached = false;
     try {
       database.exec("PRAGMA foreign_keys = ON");
@@ -1089,6 +1197,11 @@ export class ImportWorker {
       attached = true;
       database.exec("BEGIN IMMEDIATE");
       this.stabilizeTrainingSessionIds(database);
+      const activeAbilityBaselineHash = currentAbilityBaselineHash(database);
+      const previousPredictionColumns = new Set(
+        (database.prepare("PRAGMA previous.table_info(prediction_model_runs)").all() as Array<{ name: string }>)
+          .map((column) => column.name)
+      );
       database.exec(`
         INSERT OR IGNORE INTO feature_runs
         SELECT * FROM previous.feature_runs;
@@ -1263,9 +1376,31 @@ export class ImportWorker {
           WHERE current_job.id = historical.job_id
         );
 
-        INSERT OR IGNORE INTO prediction_model_runs
-        SELECT * FROM previous.prediction_model_runs
-        WHERE status IN ('succeeded', 'rejected', 'failed', 'cancelled');
+      `);
+      database.exec(`
+        INSERT OR IGNORE INTO prediction_model_runs (
+          id, algorithm, model_version, feature_schema_version, feature_schema_hash,
+          training_data_hash, training_data_through_at, hyperparameters_json, request_json,
+          status, label_count, label_count_by_distance_json, holdout_prediction_count,
+          metrics_json, supported_distances_json, artifact_path, artifact_sha256,
+          cancel_requested, failure_json, created_at, started_at, completed_at, activated_at,
+          worker_token, heartbeat_at, attempt_count, ability_baseline_hash
+        )
+        SELECT
+          historical.id, historical.algorithm, historical.model_version,
+          historical.feature_schema_version, historical.feature_schema_hash,
+          historical.training_data_hash, historical.training_data_through_at,
+          historical.hyperparameters_json, historical.request_json, historical.status,
+          historical.label_count, historical.label_count_by_distance_json,
+          historical.holdout_prediction_count, historical.metrics_json,
+          historical.supported_distances_json, historical.artifact_path,
+          historical.artifact_sha256, historical.cancel_requested, historical.failure_json,
+          historical.created_at, historical.started_at, historical.completed_at,
+          historical.activated_at, historical.worker_token, historical.heartbeat_at,
+          historical.attempt_count,
+          ${previousPredictionColumns.has("ability_baseline_hash") ? "historical.ability_baseline_hash" : "NULL"}
+        FROM previous.prediction_model_runs historical
+        WHERE historical.status IN ('succeeded', 'rejected', 'failed', 'cancelled');
 
         INSERT OR IGNORE INTO prediction_model_events
         SELECT historical.*
@@ -1274,16 +1409,22 @@ export class ImportWorker {
           SELECT 1 FROM prediction_model_runs current_run
           WHERE current_run.id = historical.prediction_model_run_id
         );
-
-        INSERT OR REPLACE INTO active_prediction_model
-        SELECT historical.*
-        FROM previous.active_prediction_model historical
-        WHERE EXISTS (
-          SELECT 1 FROM prediction_model_runs current_run
-          WHERE current_run.id = historical.prediction_model_run_id
-            AND current_run.status = 'succeeded'
-        );
       `);
+      if (previousPredictionColumns.has("ability_baseline_hash")) {
+        database.prepare(`
+          INSERT OR REPLACE INTO active_prediction_model
+          SELECT historical.*
+          FROM previous.active_prediction_model historical
+          JOIN previous.prediction_model_runs historical_run
+            ON historical_run.id = historical.prediction_model_run_id
+          JOIN prediction_model_runs current_run
+            ON current_run.id = historical.prediction_model_run_id
+          WHERE current_run.status = 'succeeded'
+            AND historical_run.ability_baseline_hash IS NOT NULL
+            AND historical_run.ability_baseline_hash = ?
+            AND current_run.ability_baseline_hash = ?
+        `).run(activeAbilityBaselineHash, activeAbilityBaselineHash);
+      }
       const violations = database.prepare("PRAGMA foreign_key_check").all();
       if (violations.length > 0) throw new Error("历史派生数据迁移后外键校验失败");
       database.exec("COMMIT");
@@ -1296,6 +1437,12 @@ export class ImportWorker {
       }
       database.close();
     }
+  }
+
+  activeInputPaths(): string[] {
+    return [...this.jobs.values()]
+      .filter((job) => ["queued", "running"].includes(job.status))
+      .map((job) => job.inputPath);
   }
 
   private stabilizeTrainingSessionIds(database: DatabaseSync): void {
@@ -1388,41 +1535,39 @@ export class ImportWorker {
   private async activateDatabase(
     stagingDatabase: string,
     jobId: string,
-    existingBackupPath: string | null = null,
+    existingBackupPath?: string | null,
     beforeCommit: () => void | Promise<void> = () => {},
   ): Promise<void> {
     if (!existsSync(stagingDatabase)) throw new Error("临时数据库未生成");
-    const backupPath = existingBackupPath ?? await this.createCurrentBackup(jobId);
+    // undefined means activation owns the backup step; null means the caller
+    // already handled the active database and no usable backup was produced.
+    const backupPath = existingBackupPath === undefined
+      ? await this.createCurrentBackup(jobId)
+      : existingBackupPath;
     const rollbackDirectory = resolve(this.runtimeRoot, "var/backups");
     const rollbackPath = resolve(rollbackDirectory, `rai.import-rollback.${randomUUID()}.sqlite`);
     await mkdir(rollbackDirectory, { recursive: true });
     this.assertNotClosing();
-    let gateEntered = true;
+    let gateEntered = false;
     try {
       await this.beforeActivate();
+      gateEntered = true;
     } catch (error) {
-      const errors: unknown[] = [error];
-      if (this.isReadableDatabase(this.databasePath)) {
-        try {
-          await this.releaseActivateGate();
-          gateEntered = false;
-        } catch (releaseError) {
-          errors.push(releaseError);
-        }
-      }
-      throw errors.length === 1
-        ? error
-        : new AggregateError(errors, "Import activation gate failed and could not be released");
+      throw error;
     }
 
     const originalExisted = existsSync(this.databasePath);
+    const originalReadable = originalExisted && this.isReadableDatabase(this.databasePath);
+    if (originalExisted && !originalReadable) {
+      this.onDatabaseError(new Error("Main database is corrupt or failed its integrity check"));
+    }
     let originalMoved = false;
     let committed = false;
     let commitBoundaryEntered = false;
     try {
       this.assertNotClosing();
       if (originalExisted) {
-        this.checkpointDatabase(this.databasePath);
+        if (originalReadable) this.checkpointDatabase(this.databasePath);
         await this.removeDatabaseSidecarsWithRetry(this.databasePath);
         await this.moveDatabaseFile(this.databasePath, rollbackPath);
         originalMoved = true;
@@ -1452,7 +1597,7 @@ export class ImportWorker {
         }
       }
       const activeReadable = this.isReadableDatabase(this.databasePath);
-      if (gateEntered && activeReadable) {
+      if (gateEntered && (activeReadable || (originalExisted && !originalReadable && existsSync(this.databasePath)))) {
         try {
           await this.releaseActivateGate();
           gateEntered = false;
@@ -1553,6 +1698,7 @@ export class ImportWorker {
 
   private checkpointDatabase(path: string): void {
     const database = new DatabaseSync(path);
+    applyBusyTimeout(database);
     try {
       database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     } finally {
@@ -1663,14 +1809,18 @@ export class ImportWorker {
   }
 
   private publicJob(job: MutableImportJob): ImportJobResponse {
+    const publicError = job.error === null || job.error === undefined
+      ? job.error
+      : PUBLIC_IMPORT_FAILURE_ERROR;
     return {
       id: job.id,
+      ...(job.sourceId === undefined ? {} : { sourceId: job.sourceId }),
       status: job.status,
       phase: job.phase,
       message: job.message,
       createdAt: job.createdAt,
       completedAt: job.completedAt,
-      error: job.error
+      error: publicError
       ,...(job.progress === undefined ? {} : { progress: job.progress })
       ,...(job.summary === undefined ? {} : { summary: job.summary })
     };
@@ -1685,7 +1835,7 @@ export class ImportWorker {
           value.status = "failed";
           value.phase = "interrupted";
           value.message = "上次导入因本地服务重启而中断，可重新提交导入";
-          value.error = "Local API restarted before the import completed";
+          value.error = PUBLIC_IMPORT_FAILURE_ERROR;
           value.completedAt = new Date().toISOString();
         }
         this.jobs.set(value.id, value);

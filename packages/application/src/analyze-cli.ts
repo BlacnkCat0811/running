@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
+
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 type FeatureStatus = "eligible" | "trial" | "excluded";
 type AssessmentStatus = FeatureStatus | "calibrating";
@@ -275,7 +277,7 @@ function main(): void {
   const args = process.argv.slice(2);
   const databasePath = resolve(optionValue(args, "--database", "var/rai.sqlite"));
   if (!existsSync(databasePath)) throw new Error(`Database not found: ${databasePath}`);
-  const database = new DatabaseSync(databasePath, { readOnly: true });
+  const database = RaiDatabase.openReadonly(databasePath);
   try {
     const modelRunId = optionalValue(args, "--model-run") ?? activeModelRunId(database);
     const compareWith = optionalValue(args, "--compare-with");

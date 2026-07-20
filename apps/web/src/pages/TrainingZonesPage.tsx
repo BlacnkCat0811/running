@@ -1,3 +1,5 @@
+import "../pixel-layout.css";
+import "../analysis-reference.css";
 import type {
   DailyZoneProfile,
   TrainingZoneProfileSettings,
@@ -6,15 +8,6 @@ import type {
   UpdateTrainingZoneProfileInput
 } from "@rai/api-contracts";
 import { useEffect, useRef, useState } from "react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
 
 import { api, ApiError } from "../api.js";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
@@ -63,10 +56,10 @@ function ZoneTable({ profile, kind }: { profile: DailyZoneProfile; kind: "heart"
   const confidence = heart ? profile.heartRateConfidence : profile.paceConfidence;
   const lowConfidence = confidence < 0.35 || (heart ? profile.heartRateSource : profile.paceSource) === "fallback";
   return (
-    <section className="panel zone-table-panel">
+    <section className={`panel zone-table-panel ${heart ? "heart-zones" : "pace-zones"}`}>
       <div className="panel-heading">
         <div>
-          <h2>{heart ? "储备心率五区" : "阈配速五区"}</h2>
+          <h2>{heart ? "心率分区" : "配速分区"}</h2>
           <p>{heart ? `静息 ${Math.round(profile.restingHeartRateBpm)} · 最高 ${Math.round(profile.maximumHeartRateBpm)} bpm` : profile.lactateThresholdPaceSecondsPerKm === null ? "阈配速证据不足" : `乳酸阈配速 ${pace(profile.lactateThresholdPaceSecondsPerKm)}/km`}</p>
         </div>
         <span className={`zone-confidence ${lowConfidence ? "low" : ""}`}>
@@ -75,17 +68,19 @@ function ZoneTable({ profile, kind }: { profile: DailyZoneProfile; kind: "heart"
       </div>
       <div className="zone-table" role="list">
         {heart ? profile.heartRateBands.map((band, index) => (
-          <div key={band.zone} role="listitem">
+          <div key={band.zone} role="listitem" className={`zone-row zone-row-${index + 1}`}>
             <i className={heartZoneClass[band.zone]} aria-hidden="true" />
             <span><small>Z{index + 1}</small><b>{heartRateZone(band.zone)}</b></span>
             <strong>{bpmRange(band.lowerBpm, band.upperBpm)}</strong>
             <small>{band.lowerReserveFraction === null ? "HRR <60%" : band.upperReserveFraction === null ? "HRR ≥90%" : `HRR ${Math.round(band.lowerReserveFraction * 100)}–<${Math.round(band.upperReserveFraction * 100)}%`}</small>
+            <span className="zone-reference-axis" aria-hidden="true"><i /></span>
           </div>
         )) : profile.paceBands.map((band, index) => (
-          <div key={band.zone} role="listitem">
+          <div key={band.zone} role="listitem" className={`zone-row zone-row-${index + 1}`}>
             <i className={paceZoneClass[band.zone]} aria-hidden="true" />
             <span><small>Z{index + 1}</small><b>{paceZone(band.zone)}</b></span>
             <strong>{paceRange(band.lowerSecondsPerKm, band.upperSecondsPerKm)}</strong>
+            <span className="zone-reference-axis" aria-hidden="true"><i /></span>
           </div>
         ))}
       </div>
@@ -94,44 +89,41 @@ function ZoneTable({ profile, kind }: { profile: DailyZoneProfile; kind: "heart"
 }
 
 function AnchorHistory({ profiles }: { profiles: DailyZoneProfile[] }) {
-  const data = profiles.map((profile) => ({
-    date: profile.localDate,
-    resting: profile.restingHeartRateBpm,
-    maximum: profile.maximumHeartRateBpm,
-    thresholdPace: profile.lactateThresholdPaceSecondsPerKm
-  }));
+  const recent = profiles.slice(-5).reverse();
   return (
     <section className="panel zone-history-panel">
-      <div className="panel-heading"><div><h2>90 天锚点变化</h2><p>每个自然日的冻结值，历史训练不会随当前估计变化</p></div></div>
-      {data.length ? <div className="zone-history-chart">
-        <div className="zone-history-visual" role="img" aria-label={`分区锚点历史，共 ${data.length} 天`}>
-          <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 18, right: 14, bottom: 0, left: 0 }}>
-            <CartesianGrid vertical={false} stroke="#dfe5df" />
-            <XAxis dataKey="date" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#6d786f" }} tickLine={false} axisLine={false} minTickGap={32} />
-            <YAxis yAxisId="heart" width={38} domain={["auto", "auto"]} tick={{ fontSize: 9, fill: "#6d786f" }} tickLine={false} axisLine={false} />
-            <YAxis yAxisId="pace" orientation="right" width={48} domain={["auto", "auto"]} tickFormatter={(value) => pace(Number(value))} tick={{ fontSize: 9, fill: "#b25b4b" }} tickLine={false} axisLine={false} />
-            <Tooltip formatter={(value, name) => [name === "阈配速" ? `${pace(Number(value))}/km` : `${Math.round(Number(value))} bpm`, name]} labelFormatter={(value) => String(value)} />
-            <Line yAxisId="heart" dataKey="resting" name="静息心率" stroke="#3c6e9d" strokeWidth={1.7} dot={false} isAnimationActive={false} />
-            <Line yAxisId="heart" dataKey="maximum" name="最高心率" stroke="#a96c19" strokeWidth={1.7} dot={false} isAnimationActive={false} />
-            <Line yAxisId="pace" dataKey="thresholdPace" name="阈配速" stroke="#b25b4b" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
-          </LineChart>
-          </ResponsiveContainer>
-        </div>
-        <details className="ability-chart-data zone-history-data">
-          <summary>浏览分区锚点历史数据（{data.length}）</summary>
-          <div className="ability-chart-data-list zone-history-data-list" role="list" aria-label="分区锚点历史数据">
-            {data.map((point) => <div key={point.date} role="listitem">
-              <b>{point.date}</b>
-              <span>静息心率 {Math.round(point.resting)} bpm</span>
-              <span>最高心率 {Math.round(point.maximum)} bpm</span>
-              <span>阈配速 {point.thresholdPace === null ? "--" : `${pace(point.thresholdPace)}/km`}</span>
-            </div>)}
-          </div>
-        </details>
+      <div className="panel-heading"><div><h2>分区历史</h2><p>每日冻结快照不会随当前估计变化</p></div></div>
+      {recent.length ? <div className="zone-history-cards" role="list" aria-label={`分区锚点历史，共 ${profiles.length} 天`}>
+        {recent.map((profile) => <article key={profile.id} role="listitem">
+          <b>{shortDate(profile.localDate)}</b>
+          <small>{zoneSource(profile.heartRateSource)}</small>
+          <span>最高心率 <strong>{Math.round(profile.maximumHeartRateBpm)} bpm</strong></span>
+          <span>LT 配速 <strong>{profile.lactateThresholdPaceSecondsPerKm === null ? "--" : `${pace(profile.lactateThresholdPaceSecondsPerKm)}/km`}</strong></span>
+          <em>置信度 {Math.round(((profile.heartRateConfidence + profile.paceConfidence) / 2) * 100)}%</em>
+        </article>)}
       </div> : <div className="series-empty">暂无分区历史。</div>}
     </section>
   );
+}
+
+function ZoneEvidence({ profiles }: { profiles: DailyZoneProfile[] }) {
+  const recent = profiles.slice(-7);
+  return (
+    <section className="panel zone-evidence-panel">
+      <div className="panel-heading"><div><h2>近 7 日证据</h2><p>每日心率与配速分区置信度</p></div><div className="zone-evidence-legend"><span>心率</span><span>配速</span></div></div>
+      {recent.length ? <div className="zone-evidence-chart" role="img" aria-label={`近 ${recent.length} 日分区证据`}>
+        {recent.map((profile) => <div key={profile.id} className="zone-evidence-day">
+          <b>{Math.round(((profile.heartRateConfidence + profile.paceConfidence) / 2) * 100)}</b>
+          <span><i style={{ height: `${confidenceHeightPercent(profile.heartRateConfidence)}%` }} /><em style={{ height: `${confidenceHeightPercent(profile.paceConfidence)}%` }} /></span>
+          <small>{shortDate(profile.localDate)}</small>
+        </div>)}
+      </div> : <div className="series-empty">暂无证据。</div>}
+    </section>
+  );
+}
+
+export function confidenceHeightPercent(confidence: number): number {
+  return Math.max(0, Math.min(100, confidence * 100));
 }
 
 type Modes = { resting: "auto" | "manual"; maximum: "auto" | "manual"; pace: "auto" | "manual" };
@@ -281,8 +273,9 @@ export function TrainingZonesPage() {
       : "阈值证据不足时会保留上次锚点并衰减置信度；训练分类会同步降低置信度。";
   return (
     <div className="page zones-page">
-      <header className="page-header split">
+      <header className="page-header split zones-reference-header">
         <div><h1>训练分区</h1><p>{profile.localDate} · Asia/Shanghai · 快照 {profile.id.slice(-8)}</p></div>
+        <div className="zones-snapshot-control"><span>▣</span><b>每日冻结快照</b><strong>{profile.localDate}</strong></div>
         <span className={`zone-status ${lowConfidence ? "low" : ""}`}>{lowConfidence ? <WarningCircle size={17} /> : <CheckCircle size={17} />}{lowConfidence ? "低置信试算" : zoneStatus(profile.status)}</span>
       </header>
       {current.error ? <ErrorBlock title="分区刷新失败" message={current.error} onRetry={() => void current.reload()} /> : null}
@@ -295,8 +288,9 @@ export function TrainingZonesPage() {
       {lowConfidence ? <div className="zone-confidence-note"><WarningCircle size={18} /><span><b>当前训练分区为低置信试算</b><small>{confidenceNote}</small></span></div> : null}
       <div className="zone-tables"><ZoneTable profile={profile} kind="heart" /><ZoneTable profile={profile} kind="pace" /></div>
       <div className="zone-lower-grid">
-        {history.loading ? <section className="panel"><LoadingBlock /></section> : history.error || !history.data ? <section className="panel"><ErrorBlock message={history.error ?? "没有分区历史"} /></section> : <AnchorHistory profiles={history.data.profiles} />}
+        {history.loading ? <section className="panel"><LoadingBlock /></section> : history.error || !history.data ? <section className="panel"><ErrorBlock message={history.error ?? "没有分区历史"} /></section> : <ZoneEvidence profiles={history.data.profiles} />}
         <ZoneSettings current={current.data} onSaved={current.reload} />
+        {history.data ? <AnchorHistory profiles={history.data.profiles} /> : null}
       </div>
     </div>
   );

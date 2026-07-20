@@ -6,15 +6,17 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import { RaiApplicationService } from "@rai/application";
+import { RaiApplicationService, currentAbilityBaselineHash } from "@rai/application";
 import { healthTypes } from "@rai/contracts";
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
 import {
   ExternalPredictionModelTrainer,
   ImportWorker,
+  PredictionModelWorker,
   RecomputeWorker,
+  predictionModelWorkerRetryDelay,
   predictionModelArtifactDirectory
 } from "../src/worker.js";
 
@@ -121,11 +123,18 @@ test("cancelling prediction training terminates the Windows process tree", {
   }
 });
 
-test("recompute worker catches startup failures and stops after bounded retries", async () => {
+test("recompute worker marks outstanding jobs failed after bounded startup retries", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-recompute-retry-"));
   const databasePath = join(root, "rai.sqlite");
-  writeFileSync(databasePath, "fixture", "utf8");
-  const worker = new RecomputeWorker(databasePath);
+  const store = await RaiDatabase.open(databasePath);
+  const jobId = "recompute_job_startup_failure_fixture";
+  store.database.prepare(`
+    INSERT INTO recompute_jobs (id, job_type, status, request_json, progress_phase)
+    VALUES (?, 'full_recompute', 'queued', '{}', 'queued')
+  `).run(jobId);
+  store.close();
+  const observedErrors: unknown[] = [];
+  const worker = new RecomputeWorker(databasePath, (error) => { observedErrors.push(error); });
   let attempts = 0;
   (worker as unknown as RecomputeWorkerTestSurface).runOneInWorkerThread = async () => {
     attempts += 1;
@@ -137,7 +146,55 @@ test("recompute worker catches startup failures and stops after bounded retries"
     await waitFor(() => !worker.isRunning);
     await delay(100);
     assert.equal(attempts, 3);
+    assert.equal(observedErrors.length, 3);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const job = database.prepare(`
+        SELECT status, progress_phase AS progressPhase, completed_at AS completedAt, error_json AS errorJson
+        FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as { status: string; progressPhase: string; completedAt: string | null; errorJson: string | null };
+      assert.equal(job.status, "failed");
+      assert.equal(job.progressPhase, "failed");
+      assert.ok(job.completedAt);
+      assert.match(job.errorJson ?? "", /fixture worker startup failure/);
+      const event = database.prepare(`
+        SELECT message FROM recompute_job_events WHERE job_id = ? AND phase = 'failed'
+      `).get(jobId) as { message: string };
+      assert.match(event.message, /3 attempts/);
+    } finally {
+      database.close();
+    }
   } finally {
+    await worker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prediction worker retry delay backs off exponentially and caps at thirty seconds", () => {
+  assert.deepEqual(
+    [1, 2, 3, 4, 5, 6, 7].map(predictionModelWorkerRetryDelay),
+    [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]
+  );
+});
+
+test("prediction worker reports main database corruption to its observer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-corruption-observer-"));
+  const databasePath = join(root, "rai.sqlite");
+  writeFileSync(databasePath, "not a sqlite database");
+  const observedErrors: unknown[] = [];
+  const worker = new PredictionModelWorker(
+    databasePath,
+    root,
+    root,
+    undefined,
+    (error) => { observedErrors.push(error); }
+  );
+  try {
+    worker.schedule();
+    await waitFor(() => observedErrors.length > 0);
+    assert.match(String(observedErrors[0]), /not a database|malformed|corrupt/i);
+  } finally {
+    await worker.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -255,7 +312,7 @@ test("keeps the current database active when sidecar cleanup fails before import
   }
 });
 
-test("releases a partially entered import activation gate when beforeActivate fails", async () => {
+test("does not release an import activation gate that beforeActivate failed to acquire", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-before-gate-"));
   const databasePath = join(root, "rai.sqlite");
   const stagingPath = join(root, "rai.staging.sqlite");
@@ -277,7 +334,7 @@ test("releases a partially entered import activation gate when beforeActivate fa
       worker.activateDatabase(stagingPath, "before-gate-failure"),
       /simulated beforeActivate failure/
     );
-    assert.equal(releaseAttempts, 2);
+    assert.equal(releaseAttempts, 0);
     assert.equal(marker(databasePath), "current-database");
     assert.equal(marker(stagingPath), "staged-database");
   } finally {
@@ -673,6 +730,102 @@ test("preserves the backup error when partial cleanup remains locked", async () 
   }
 });
 
+test("returns a published import safety backup when retention cleanup fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-backup-retention-failure-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(databasePath);
+  store.close();
+  const worker = new ImportWorker(databasePath, root) as unknown as ImportWorkerTestSurface;
+  const original = DatabaseMaintenance.prototype.enforceBackupPolicy;
+  DatabaseMaintenance.prototype.enforceBackupPolicy = async () => {
+    throw Object.assign(new Error("retention target is locked"), { code: "EBUSY" });
+  };
+  try {
+    const backupPath = await worker.createCurrentBackup("retention-failure");
+    assert.ok(backupPath);
+    assert.equal(existsSync(backupPath ?? ""), true);
+    const backup = new DatabaseSync(backupPath ?? "", { readOnly: true });
+    try {
+      assert.equal(backup.prepare("PRAGMA quick_check").get() !== undefined, true);
+    } finally {
+      backup.close();
+    }
+  } finally {
+    DatabaseMaintenance.prototype.enforceBackupPolicy = original;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("preserves a corrupt active database and starts import from a fresh database", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-corrupt-active-"));
+  const databasePath = join(root, "rai.sqlite");
+  const corrupt = Buffer.from("not a sqlite database");
+  writeFileSync(databasePath, corrupt);
+  const observedErrors: unknown[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    undefined,
+    undefined,
+    (error) => { observedErrors.push(error); }
+  ) as unknown as ImportWorkerTestSurface;
+  try {
+    assert.equal(await worker.createCurrentBackup("corrupt-active"), null);
+    assert.equal(observedErrors.length, 1);
+    assert.match(String(observedErrors[0]), /database.*corrupt/i);
+    const quarantineDirectory = join(root, "var", "quarantine");
+    const backupName = readdirSync(quarantineDirectory).find((name) => name.includes("corrupt-active-corrupt") && name.endsWith(".sqlite"));
+    assert.ok(backupName);
+    assert.deepEqual(readFileSync(join(quarantineDirectory, backupName)), corrupt);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("quarantines a corrupt active database only once across import and activation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-corrupt-run-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"), { recursive: true });
+  writeFileSync(databasePath, "not a sqlite database");
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    if (commandCount !== 1) return;
+    const databaseArgument = args.indexOf("--database");
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    const staging = await seedCanonical(stagingPath);
+    staging.close();
+  };
+  worker.stageAuditReports = () => ({
+    commit() {}, rollback() {}, finalize() {}, discard() {}
+  });
+  const job: Record<string, unknown> = {
+    id: "web_import_corrupt_once",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(job.status, "succeeded");
+    assert.equal(commandCount, 2);
+    assert.equal(
+      readdirSync(join(root, "var", "quarantine"))
+        .filter((name) => name.endsWith(".sqlite")).length,
+      1
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects activation when the staged database is missing", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-worker-"));
   const databasePath = join(root, "rai.sqlite");
@@ -734,6 +887,119 @@ test("preserves overrides and immutable model history before recomputing an impo
       assert.equal((merged.prepare("SELECT note FROM workout_overrides WHERE id = 'worker_override'").get() as { note: string }).note, "保留我");
       assert.equal((merged.prepare("SELECT performance_protocol AS protocol FROM workout_overrides WHERE id = 'worker_override'").get() as { protocol: string }).protocol, "five_k_time_trial");
       assert.equal((merged.prepare("SELECT statistics_participation AS participation FROM workout_overrides WHERE id = 'worker_override'").get() as { participation: string }).participation, "exclude");
+    } finally {
+      merged.close();
+    }
+  } finally {
+    try { previous.close(); } catch { /* Already closed. */ }
+    try { staging.close(); } catch { /* Already closed. */ }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("copies v15 prediction history without restoring an unfingerprinted active model", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-v15-prediction-history-"));
+  const previousPath = join(root, "previous.sqlite");
+  const stagingPath = join(root, "staging.sqlite");
+  const previous = await seedCanonical(previousPath);
+  const staging = await seedCanonical(stagingPath);
+  const runId = "prediction_model_11111111-1111-1111-1111-111111111111";
+  try {
+    previous.database.prepare(`
+      INSERT INTO prediction_model_runs (
+        id, algorithm, model_version, feature_schema_version, ability_baseline_hash,
+        training_data_through_at, hyperparameters_json, request_json, status
+      ) VALUES (?, 'catboost', 'catboost_v1', 'race_residual_features_v1',
+        'legacy-fingerprint', ?, '{}', '{}', 'succeeded')
+    `).run(runId, runDate(8));
+    previous.database.prepare(`
+      INSERT INTO active_prediction_model (singleton, prediction_model_run_id) VALUES (1, ?)
+    `).run(runId);
+    previous.database.exec("ALTER TABLE prediction_model_runs DROP COLUMN ability_baseline_hash");
+    previous.close();
+    staging.close();
+
+    const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+    worker.preserveHistoricalState(stagingPath, previousPath);
+    const merged = new DatabaseSync(stagingPath, { readOnly: true });
+    try {
+      const copied = merged.prepare(`
+        SELECT ability_baseline_hash AS abilityBaselineHash
+        FROM prediction_model_runs WHERE id = ?
+      `).get(runId) as { abilityBaselineHash: string | null };
+      assert.equal(copied.abilityBaselineHash, null);
+      assert.equal(
+        (merged.prepare("SELECT COUNT(*) AS count FROM active_prediction_model").get() as { count: number }).count,
+        0
+      );
+    } finally {
+      merged.close();
+    }
+  } finally {
+    try { previous.close(); } catch { /* Already closed. */ }
+    try { staging.close(); } catch { /* Already closed. */ }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("restores historical prediction activation only for the current ability run identity", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-prediction-identity-"));
+  const previousPath = join(root, "previous.sqlite");
+  const stagingPath = join(root, "staging.sqlite");
+  const previous = await seedCanonical(previousPath);
+  const staging = await seedCanonical(stagingPath);
+  const runId = "prediction_model_22222222-2222-2222-2222-222222222222";
+  try {
+    for (const store of [previous, staging]) {
+      const service = new RaiApplicationService(store);
+      service.enqueueFullRecompute({ evaluatedAt: runDate(8), timezoneIdentifier: "UTC" });
+      assert.equal(service.runNextJob()?.status, "succeeded");
+    }
+    const previousHash = currentAbilityBaselineHash(previous.database);
+    const stagingHash = currentAbilityBaselineHash(staging.database);
+    assert.ok(previousHash);
+    assert.ok(stagingHash);
+    assert.notEqual(previousHash, stagingHash, "separate model run identities must change the fingerprint");
+    previous.database.prepare(`
+      INSERT INTO prediction_model_runs (
+        id, algorithm, model_version, feature_schema_version, ability_baseline_hash,
+        training_data_through_at, hyperparameters_json, request_json, status
+      ) VALUES (?, 'catboost', 'catboost_v1', 'race_residual_features_v1', ?, ?, '{}', '{}', 'succeeded')
+    `).run(runId, previousHash, runDate(8));
+    previous.database.prepare(`
+      INSERT INTO active_prediction_model (singleton, prediction_model_run_id) VALUES (1, ?)
+    `).run(runId);
+    previous.close();
+    staging.close();
+
+    const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+    worker.preserveHistoricalState(stagingPath, previousPath);
+    let merged = new DatabaseSync(stagingPath);
+    try {
+      assert.equal(
+        (merged.prepare("SELECT COUNT(*) AS count FROM active_prediction_model").get() as { count: number }).count,
+        0
+      );
+      merged.prepare("DELETE FROM prediction_model_runs WHERE id = ?").run(runId);
+    } finally {
+      merged.close();
+    }
+
+    const historical = new DatabaseSync(previousPath);
+    try {
+      historical.prepare(`
+        UPDATE prediction_model_runs SET ability_baseline_hash = ? WHERE id = ?
+      `).run(stagingHash, runId);
+    } finally {
+      historical.close();
+    }
+    worker.preserveHistoricalState(stagingPath, previousPath);
+    merged = new DatabaseSync(stagingPath, { readOnly: true });
+    try {
+      const active = merged.prepare(`
+        SELECT prediction_model_run_id AS runId FROM active_prediction_model WHERE singleton = 1
+      `).get() as { runId: string };
+      assert.equal(active.runId, runId);
     } finally {
       merged.close();
     }
@@ -1476,7 +1742,8 @@ for (const failurePhase of ["recompute", "activate"] as const) {
     try {
       await worker.run(job);
       assert.equal(job.status, "failed");
-      assert.match(String(job.error), new RegExp(`simulated ${failurePhase === "recompute" ? "recompute" : "activation"} failure`));
+      // Client-visible error is sanitized; raw failure detail goes to server logs only.
+      assert.equal(job.error, "导入失败，请查看服务日志");
       assert.equal(readFileSync(markdownPath, "utf8"), "old markdown report");
       assert.deepEqual(JSON.parse(readFileSync(jsonPath, "utf8")), { datasetVersion: "old-generation" });
       const preserved = new DatabaseSync(databasePath, { readOnly: true });
@@ -1933,7 +2200,7 @@ test("persists import jobs and marks an interrupted job after API restart", () =
     assert.equal(job?.id, "web_import_interrupted");
     assert.equal(job?.status, "failed");
     assert.equal(job?.phase, "interrupted");
-    assert.match(job?.error ?? "", /restarted/);
+    assert.equal(job?.error, "导入失败，请查看服务日志");
     writeFileSync(join(root, "var", "import-jobs.json"), "[]", "utf8");
     const restarted = new ImportWorker(join(root, "rai.sqlite"), root, root);
     assert.equal(restarted.latest()?.id, "web_import_interrupted");
@@ -1957,11 +2224,13 @@ test("releases import worker state and calls terminal cleanup when staging clean
   try {
     const created = worker.create(inputPath, (succeeded) => {
       terminalResult = succeeded;
-    });
+    }, "source-cleanup-test");
+    assert.equal(created.sourceId, "source-cleanup-test");
+    assert.equal(worker.get(created.id)?.sourceId, "source-cleanup-test");
     await waitFor(() => !worker.isRunning);
     assert.equal(terminalResult, false);
     assert.equal(worker.get(created.id)?.status, "failed");
-    assert.match(worker.get(created.id)?.error ?? "", /fixture cleanup failure/);
+    assert.equal(worker.get(created.id)?.error, "导入失败，请查看服务日志");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1989,7 +2258,7 @@ test("releases import worker state when the initial running-state persistence fa
     await waitFor(() => !worker.isRunning);
     assert.equal(terminalResult, false);
     assert.equal(worker.get(created.id)?.status, "failed");
-    assert.match(worker.get(created.id)?.error ?? "", /fixture persistence failure/);
+    assert.equal(worker.get(created.id)?.error, "导入失败，请查看服务日志");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

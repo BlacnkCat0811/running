@@ -394,6 +394,7 @@ test("normalizes threshold HR and pace to 100 load and caps distance adjustment"
   assert.ok(Math.abs((load.paceLoad ?? 0) - 100) < 0.001);
   assert.equal(load.distanceFactor, 1.15);
   assert.ok(Math.abs(load.compositeLoad - 115) < 0.001);
+  assert.ok(load.compositeIntensity > 0 && load.compositeIntensity <= 1);
 });
 
 test("does not double-count dual-zone dose or extrapolate sparse load samples", () => {
@@ -532,4 +533,89 @@ test("caps continuously recorded paused-workout exposure, stimulus, and load at 
   assert.ok((load.paceLoad ?? Infinity) < 50);
   assert.ok(summary.heartRateExposure.some((item) => item.zone === "lactate_threshold" && item.durationSeconds > 0));
   assert.ok(summary.paceExposure.some((item) => item.zone === "lactate_threshold" && item.durationSeconds > 0));
+});
+
+test("folds sourceConfidence and discounts average-only heart coverage for load confidence", () => {
+  const profile = buildDailyZoneProfile({
+    ...baseInput,
+    settings: {
+      revision: 1, effectiveFromLocalDate: "2026-07-13", createdAt: "2026-07-12T00:00:00.000Z",
+      restingHeartRate: { mode: "manual", valueBpm: 50 },
+      maximumHeartRate: { mode: "manual", valueBpm: 190 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 300 }
+    }
+  });
+  const fullSeriesSummary = analyzeWorkoutZones({
+    trainingSessionId: "series", durationSeconds: 3600, distanceMeters: 10_000,
+    sourceConfidence: 0.8, profile,
+    heartRateSamples: [{ value: 169, durationSeconds: 3600 }],
+    speedSamples: []
+  });
+  const fullSeries = calculateCompositeTrainingLoad({
+    durationSeconds: 3600, distanceMeters: 10_000, profile, zoneSummary: fullSeriesSummary,
+    heartRateSamples: [{ value: 169, durationSeconds: 3600 }],
+    speedSamples: [], sourceConfidence: 0.8
+  });
+  // sourceConfidence * coverage(1) * profile.hrConf(1) = 0.8
+  assert.equal(fullSeries.heartRateConfidence, 0.8);
+  assert.equal(fullSeries.paceConfidence, 0);
+
+  const averageOnlySummary = analyzeWorkoutZones({
+    trainingSessionId: "avg-only", durationSeconds: 3600, distanceMeters: 10_000,
+    sourceConfidence: 1, profile,
+    heartRateSamples: [], speedSamples: [],
+    averageHeartRateBpm: 169
+  });
+  assert.equal(averageOnlySummary.heartRateCoverage, 1);
+  assert.ok(averageOnlySummary.explanationCodes.includes("heart_rate_average_fallback"));
+  const averageOnly = calculateCompositeTrainingLoad({
+    durationSeconds: 3600, distanceMeters: 10_000, profile, zoneSummary: averageOnlySummary,
+    heartRateSamples: [], speedSamples: [], averageHeartRateBpm: 169, sourceConfidence: 1
+  });
+  // Average-only must not treat coverage as 1.0 for load provenance (~0.4 discount).
+  assert.equal(averageOnly.heartRateConfidence, 0.4);
+  assert.ok((averageOnly.internalLoad ?? 0) > 0);
+});
+
+test("RPE and session fallbacks use Banister intensity and target confidences", () => {
+  const profile = buildDailyZoneProfile({
+    ...baseInput,
+    settings: {
+      revision: 1, effectiveFromLocalDate: "2026-07-13", createdAt: "2026-07-12T00:00:00.000Z",
+      restingHeartRate: { mode: "manual", valueBpm: 50 },
+      maximumHeartRate: { mode: "manual", valueBpm: 190 },
+      lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 300 }
+    }
+  });
+  const emptySummary = analyzeWorkoutZones({
+    trainingSessionId: "fallback", durationSeconds: 3600, distanceMeters: null,
+    sourceConfidence: 1, profile, heartRateSamples: [], speedSamples: []
+  });
+  const rpe = calculateCompositeTrainingLoad({
+    durationSeconds: 3600, distanceMeters: null, profile, zoneSummary: emptySummary,
+    heartRateSamples: [], speedSamples: [], rpe: 5, sourceConfidence: 1
+  });
+  // RPE 5 → intensity 0.52 (shared table), not (5/10)^2.
+  assert.equal(rpe.compositeIntensity, 0.52);
+  assert.equal(rpe.heartRateConfidence, 0.65);
+  assert.equal(rpe.paceConfidence, 0);
+  assert.equal(rpe.internalLoad, null);
+  assert.equal(rpe.paceLoad, null);
+  // Normalized TRIMP at intensity 0.52 for 60 minutes relative to 0.85 threshold.
+  const expectedRpeLoad = 60 * (0.52 * Math.exp(1.92 * 0.52)) * 100 / (60 * (0.85 * Math.exp(1.92 * 0.85)));
+  assert.ok(Math.abs(rpe.compositeLoad - expectedRpeLoad) < 1e-4);
+
+  const session = calculateCompositeTrainingLoad({
+    durationSeconds: 3600, distanceMeters: null, profile, zoneSummary: emptySummary,
+    heartRateSamples: [], speedSamples: [], sessionType: "easy", sourceConfidence: 1
+  });
+  assert.equal(session.compositeIntensity, 0.42);
+  assert.equal(session.heartRateConfidence, 0.4);
+  assert.equal(session.paceConfidence, 0);
+
+  const lowSource = calculateCompositeTrainingLoad({
+    durationSeconds: 3600, distanceMeters: null, profile, zoneSummary: emptySummary,
+    heartRateSamples: [], speedSamples: [], rpe: 7, sourceConfidence: 0.5
+  });
+  assert.equal(lowSource.heartRateConfidence, 0.325);
 });

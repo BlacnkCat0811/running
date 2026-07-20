@@ -13,6 +13,27 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { RaiDatabase } from "../src/database.js";
+import { retryTransientFileOperation } from "../src/file-operations.js";
+
+test("retries transient Windows file locks during database publication", async () => {
+  let attempts = 0;
+  await retryTransientFileOperation(async () => {
+    attempts += 1;
+    if (attempts < 3) {
+      const error = new Error("locked") as NodeJS.ErrnoException;
+      error.code = attempts === 1 ? "EBUSY" : "EPERM";
+      throw error;
+    }
+  }, 4, 0);
+  assert.equal(attempts, 3);
+
+  const fatal = new Error("invalid") as NodeJS.ErrnoException;
+  fatal.code = "EINVAL";
+  await assert.rejects(
+    retryTransientFileOperation(async () => { throw fatal; }, 4, 0),
+    fatal
+  );
+});
 
 test("CLI replacement keeps the original database when a post-parse stage fails", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-cli-atomic-"));
@@ -127,6 +148,10 @@ test("CLI refuses a concurrent publisher before changing the active database", a
   const databasePath = join(root, "rai.sqlite");
   mkdirSync(input);
   mkdirSync(`${databasePath}.import.lock`);
+  writeFileSync(
+    join(`${databasePath}.import.lock`, "owner.json"),
+    JSON.stringify({ token: "active-test", pid: process.pid, kind: "cli", startedAt: new Date().toISOString() })
+  );
   writeFileSync(join(input, "export.xml"), "<HealthData/>");
   const original = await RaiDatabase.open(databasePath);
   original.setManifest("original_marker", "locked");
@@ -144,7 +169,7 @@ test("CLI refuses a concurrent publisher before changing the active database", a
       { cwd: resolve("."), encoding: "utf8" }
     );
     assert.notEqual(result.status, 0);
-    assert.match(result.stderr, /Another import is already publishing/);
+    assert.match(result.stderr, /Another cli process is using/);
     const preserved = await RaiDatabase.open(databasePath);
     try {
       const marker = preserved.database.prepare(`

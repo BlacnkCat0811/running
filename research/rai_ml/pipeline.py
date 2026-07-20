@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Final, Sequence
 
@@ -16,6 +16,7 @@ import sys
 from importlib.metadata import version as package_version
 
 from .contract import (
+    BASE_FEATURE_NAMES,
     DISTANCES,
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
@@ -45,13 +46,21 @@ class TrainingError(RuntimeError):
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    model_version: str = "race-residual-catboost-v1"
+    model_version: str = "race-residual-catboost-v3"
     minimum_labels: int = 50
     minimum_labels_per_distance: int = 8
-    initial_training_size: int = 30
-    minimum_holdout_predictions: int = 15
-    minimum_holdout_per_distance: int = 3
-    minimum_mae_improvement: float = 0.03
+    initial_training_size: int = 12
+    minimum_walk_forward_predictions: int = 12
+    minimum_walk_forward_per_distance: int = 3
+    minimum_training_labels: int = 24
+    minimum_training_labels_per_distance: int = 4
+    minimum_release_holdout: int = 24
+    minimum_release_holdout_per_distance: int = 6
+    release_embargo_hours: int = 24
+    bootstrap_iterations: int = 2000
+    bootstrap_block_events: int = 3
+    minimum_bootstrap_blocks: int = 6
+    minimum_mae_improvement: float = 0.05
     maximum_distance_regression: float = 0.05
     maximum_coverage_drop: float = 0.05
     correction_cap_fraction: float = 0.12
@@ -73,15 +82,19 @@ def _instant(value: str) -> datetime:
     return parsed
 
 
+def _event_key(sample: TrainingSample) -> tuple[datetime, datetime]:
+    return (_instant(sample.observed_at), _instant(sample.completed_at))
+
+
 def _validate_training_cutoff(
     samples: Sequence[TrainingSample], training_data_through_at: str
 ) -> None:
     cutoff = _instant(training_data_through_at)
-    future = [sample.sample_id for sample in samples if _instant(sample.completed_at) > cutoff]
+    future = [sample.sample_id for sample in samples if _instant(sample.label_available_at) > cutoff]
     if future:
         preview = ", ".join(future[:3])
         raise TrainingError(
-            "training labels completed after training_data_through_at: " + preview
+            "training labels unavailable at training_data_through_at: " + preview
         )
 
 
@@ -141,6 +154,63 @@ def _metrics_by_distance(rows: Sequence[PredictionResult]) -> dict[str, Any]:
     }
 
 
+def _release_split(
+    samples: Sequence[TrainingSample], config: TrainingConfig
+) -> tuple[list[TrainingSample], list[TrainingSample], dict[str, Any]]:
+    ordered = sorted(samples, key=lambda row: (_instant(row.observed_at), row.sample_id))
+    grouped: dict[tuple[datetime, datetime], list[TrainingSample]] = {}
+    for sample in ordered:
+        event_key = _event_key(sample)
+        grouped.setdefault(event_key, []).append(sample)
+    groups = [grouped[key] for key in sorted(grouped)]
+    holdout: list[TrainingSample] = []
+    split_index = len(groups)
+    for index in range(len(groups) - 1, -1, -1):
+        holdout = groups[index] + holdout
+        counts = {distance: sum(row.distance == distance for row in holdout) for distance in DISTANCES}
+        if (
+            len(holdout) >= config.minimum_release_holdout
+            and all(value >= config.minimum_release_holdout_per_distance for value in counts.values())
+        ):
+            split_index = index
+            break
+    if split_index == len(groups):
+        raise TrainingError("release holdout does not satisfy total and per-distance minimums")
+    holdout_start = min(_instant(row.observed_at) for row in holdout)
+    label_cutoff = holdout_start - timedelta(hours=config.release_embargo_hours)
+    training = [
+        row for group in groups[:split_index] for row in group
+        if _instant(row.label_available_at) <= label_cutoff
+    ]
+    training_counts = {distance: sum(row.distance == distance for row in training) for distance in DISTANCES}
+    if (
+        len(training) < config.minimum_training_labels
+        or any(value < config.minimum_training_labels_per_distance for value in training_counts.values())
+    ):
+        raise TrainingError("release training split does not satisfy total and per-distance minimums")
+    training_ids = {row.sample_id for row in training}
+    holdout_ids = {row.sample_id for row in holdout}
+    if training_ids & holdout_ids:
+        raise TrainingError("release training and holdout samples overlap")
+    return training, holdout, {
+        "method": "temporal_event_grouped_holdout_v1",
+        "eventGrouping": ["observedAt", "completedAt"],
+        "embargoHours": config.release_embargo_hours,
+        "holdoutStartsAt": holdout_start.isoformat(),
+        "trainingLabelAvailabilityCutoff": label_cutoff.isoformat(),
+        "trainingSampleIds": [row.sample_id for row in training],
+        "holdoutSampleIds": [row.sample_id for row in holdout],
+        "trainingDataHash": dataset_sha256(training),
+        "holdoutDataHash": dataset_sha256(holdout),
+        "trainingCount": len(training),
+        "holdoutCount": len(holdout),
+        "trainingCountByDistance": training_counts,
+        "holdoutCountByDistance": {
+            distance: sum(row.distance == distance for row in holdout) for distance in DISTANCES
+        },
+    }
+
+
 def _walk_forward(
     samples: Sequence[TrainingSample], config: TrainingConfig
 ) -> tuple[list[PredictionResult], list[PredictionResult], list[dict[str, Any]]]:
@@ -156,7 +226,7 @@ def _walk_forward(
         training_samples = [
             prior
             for prior in samples
-            if _instant(prior.completed_at) <= observed
+            if _instant(prior.label_available_at) <= observed
         ]
         if len(training_samples) < config.initial_training_size:
             continue
@@ -177,7 +247,7 @@ def _walk_forward(
                 "rawTargetLogResidual": raw,
                 "trainingLabelCount": len(training_samples),
                 "trainingDataThroughAt": max(
-                    prior.completed_at for prior in training_samples
+                    prior.label_available_at for prior in training_samples
                 ),
                 "appliedCorrectionFraction": (
                     candidate_row.predicted_seconds / sample.baseline_predicted_seconds - 1
@@ -198,13 +268,13 @@ def _gate(
     holdout_counts = {
         distance: sum(row.distance == distance for row in candidate) for distance in DISTANCES
     }
-    if len(samples) < config.minimum_labels:
+    if len(samples) < config.minimum_training_labels:
         reasons.append("insufficient_total_labels")
-    if any(value < config.minimum_labels_per_distance for value in counts.values()):
+    if any(value < config.minimum_training_labels_per_distance for value in counts.values()):
         reasons.append("insufficient_labels_per_distance")
-    if len(candidate) < config.minimum_holdout_predictions:
+    if len(candidate) < config.minimum_walk_forward_predictions:
         reasons.append("insufficient_walk_forward_predictions")
-    if any(value < config.minimum_holdout_per_distance for value in holdout_counts.values()):
+    if any(value < config.minimum_walk_forward_per_distance for value in holdout_counts.values()):
         reasons.append("insufficient_walk_forward_predictions_per_distance")
 
     baseline_metrics = regression_metrics(baseline)
@@ -250,17 +320,128 @@ def _gate(
         "distanceMaeRegression": distance_regressions,
         "intervalCoverageDrop": coverage_drop,
         "thresholds": {
-            "minimumLabels": config.minimum_labels,
-            "minimumLabelsPerDistance": config.minimum_labels_per_distance,
+            "minimumLabels": config.minimum_training_labels,
+            "minimumLabelsPerDistance": config.minimum_training_labels_per_distance,
             "initialTrainingSize": config.initial_training_size,
-            "minimumHoldoutPredictions": config.minimum_holdout_predictions,
-            "minimumHoldoutPerDistance": config.minimum_holdout_per_distance,
+            "minimumWalkForwardPredictions": config.minimum_walk_forward_predictions,
+            "minimumWalkForwardPerDistance": config.minimum_walk_forward_per_distance,
             "minimumMaeImprovement": config.minimum_mae_improvement,
             "maximumDistanceRegression": config.maximum_distance_regression,
             "maximumCoverageDrop": config.maximum_coverage_drop,
         },
     }
     return not reasons, reasons, details
+
+
+def _bootstrap_improvement_interval(
+    baseline: Sequence[PredictionResult], candidate: Sequence[PredictionResult],
+    samples: Sequence[TrainingSample], iterations: int, block_events: int,
+    minimum_blocks: int,
+) -> tuple[float | None, float | None, int]:
+    baseline_errors = np.asarray(
+        [abs(row.predicted_seconds - row.actual_seconds) for row in baseline], dtype=np.float64
+    )
+    candidate_errors = np.asarray(
+        [abs(row.predicted_seconds - row.actual_seconds) for row in candidate], dtype=np.float64
+    )
+    if len(baseline_errors) == 0 or len(baseline_errors) != len(candidate_errors):
+        raise TrainingError("release holdout errors are unavailable")
+    if block_events < 1 or minimum_blocks < 2:
+        raise TrainingError("temporal bootstrap block settings are invalid")
+    grouped_indices: dict[tuple[datetime, datetime], list[int]] = {}
+    for index, sample in enumerate(samples):
+        grouped_indices.setdefault(_event_key(sample), []).append(index)
+    event_groups = list(grouped_indices.values())
+    blocks = [
+        [index for group in event_groups[start:start + block_events] for index in group]
+        for start in range(0, len(event_groups), block_events)
+    ]
+    if len(blocks) < minimum_blocks:
+        return None, None, len(blocks)
+    random = np.random.default_rng(20260717)
+    estimates = []
+    for _ in range(iterations):
+        sampled_blocks = random.integers(0, len(blocks), len(blocks))
+        indices = np.asarray(
+            [index for block_index in sampled_blocks for index in blocks[int(block_index)]],
+            dtype=np.int64,
+        )
+        baseline_mae = float(np.mean(baseline_errors[indices]))
+        candidate_mae = float(np.mean(candidate_errors[indices]))
+        estimates.append(
+            0.0 if baseline_mae == 0 and candidate_mae == 0
+            else -1.0 if baseline_mae == 0
+            else 1 - candidate_mae / baseline_mae
+        )
+    return (
+        float(np.quantile(estimates, 0.025)),
+        float(np.quantile(estimates, 0.975)),
+        len(blocks),
+    )
+
+
+def _release_gate(
+    baseline: Sequence[PredictionResult], candidate: Sequence[PredictionResult],
+    samples: Sequence[TrainingSample], config: TrainingConfig
+) -> tuple[bool, list[str], dict[str, Any]]:
+    reasons: list[str] = []
+    baseline_metrics = regression_metrics(baseline)
+    candidate_metrics = regression_metrics(candidate)
+    baseline_mae = baseline_metrics.meanAbsoluteErrorSeconds
+    candidate_mae = candidate_metrics.meanAbsoluteErrorSeconds
+    improvement = None if baseline_mae in (None, 0) or candidate_mae is None else 1 - candidate_mae / baseline_mae
+    lower, upper, effective_blocks = _bootstrap_improvement_interval(
+        baseline, candidate, samples, config.bootstrap_iterations,
+        config.bootstrap_block_events, config.minimum_bootstrap_blocks,
+    )
+    counts = {distance: sum(row.distance == distance for row in candidate) for distance in DISTANCES}
+    if len(candidate) < config.minimum_release_holdout:
+        reasons.append("release_holdout_below_minimum")
+    if any(value < config.minimum_release_holdout_per_distance for value in counts.values()):
+        reasons.append("release_holdout_per_distance_below_minimum")
+    if improvement is None or improvement < config.minimum_mae_improvement:
+        reasons.append("release_mae_improvement_below_threshold")
+    if effective_blocks < config.minimum_bootstrap_blocks:
+        reasons.append("release_temporal_blocks_below_minimum")
+    elif lower is None or lower <= 0:
+        reasons.append("release_mae_improvement_confidence_not_positive")
+    distance_regressions: dict[str, float | None] = {}
+    for distance in DISTANCES:
+        base = regression_metrics(row for row in baseline if row.distance == distance)
+        model = regression_metrics(row for row in candidate if row.distance == distance)
+        regression = None if base.meanAbsoluteErrorSeconds in (None, 0) or model.meanAbsoluteErrorSeconds is None else model.meanAbsoluteErrorSeconds / base.meanAbsoluteErrorSeconds - 1
+        distance_regressions[distance] = regression
+        if regression is None or regression > config.maximum_distance_regression:
+            reasons.append(f"release_distance_mae_regression:{distance}")
+    coverage_drop = None if baseline_metrics.intervalCoverage is None or candidate_metrics.intervalCoverage is None else baseline_metrics.intervalCoverage - candidate_metrics.intervalCoverage
+    if coverage_drop is None or coverage_drop > config.maximum_coverage_drop:
+        reasons.append("release_interval_coverage_drop_above_threshold")
+    return not reasons, reasons, {
+        "baselineMetrics": baseline_metrics.to_dict(),
+        "candidateMetrics": candidate_metrics.to_dict(),
+        "baselineByDistance": _metrics_by_distance(baseline),
+        "candidateByDistance": _metrics_by_distance(candidate),
+        "meanAbsoluteErrorImprovement": improvement,
+        "maeImprovementBootstrap95": {
+            "method": "non_overlapping_temporal_event_block_v1",
+            "lower": lower,
+            "upper": upper,
+            "iterations": config.bootstrap_iterations,
+            "blockEvents": config.bootstrap_block_events,
+            "effectiveBlocks": effective_blocks,
+        },
+        "distanceMaeRegression": distance_regressions,
+        "intervalCoverageDrop": coverage_drop,
+        "thresholds": {
+            "minimumHoldout": config.minimum_release_holdout,
+            "minimumHoldoutPerDistance": config.minimum_release_holdout_per_distance,
+            "minimumMaeImprovement": config.minimum_mae_improvement,
+            "maximumDistanceRegression": config.maximum_distance_regression,
+            "maximumCoverageDrop": config.maximum_coverage_drop,
+            "requirePositiveBootstrapLowerBound": True,
+            "minimumBootstrapBlocks": config.minimum_bootstrap_blocks,
+        },
+    }
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -283,9 +464,9 @@ def _export_onnx(model: Any, path: Path) -> tuple[str, str]:
         format="onnx",
         export_parameters={
             "onnx_domain": "ai.rai",
-            "onnx_model_version": 1,
+            "onnx_model_version": 2,
             "onnx_doc_string": "RAI CatBoost race residual targetLogResidual",
-            "onnx_graph_name": "rai_race_residual_catboost_v1",
+            "onnx_graph_name": "rai_race_residual_catboost_v3",
         },
     )
     # CatBoost writes a wall-clock train_finish_time and a random model_guid into
@@ -360,6 +541,32 @@ def _onnx_parity(
     }
 
 
+def _golden_vectors(model: Any, samples: Sequence[TrainingSample], cap: float) -> dict[str, Any]:
+    predictions = np.asarray(model.predict(_matrix(samples)), dtype=np.float32).reshape(-1)
+    vectors = []
+    for sample, raw in zip(samples, predictions, strict=True):
+        flags = {
+            "isFiveK": 1.0 if sample.distance == "five_k" else 0.0,
+            "isTenK": 1.0 if sample.distance == "ten_k" else 0.0,
+            "isHalfMarathon": 1.0 if sample.distance == "half_marathon" else 0.0,
+        }
+        features = {name: sample.features.get(name) for name in BASE_FEATURE_NAMES}
+        features.update(flags)
+        target = float(raw)
+        vectors.append({
+            "sampleId": sample.sample_id,
+            "distance": sample.distance,
+            "features": features,
+            "targetLogResidual": target,
+            "correctionFraction": _clamp(math.exp(target) - 1, -cap, cap),
+            "actualSeconds": sample.actual_seconds,
+            "baselinePredictedSeconds": sample.baseline_predicted_seconds,
+            "baselineOptimisticSeconds": sample.baseline_optimistic_seconds,
+            "baselinePessimisticSeconds": sample.baseline_pessimistic_seconds,
+        })
+    return {"toleranceExclusive": 1e-6, "scope": "release_holdout", "vectors": vectors}
+
+
 def train_and_export(
     samples: Sequence[TrainingSample],
     output_directory: str | Path,
@@ -371,23 +578,45 @@ def train_and_export(
 ) -> TrainingResult:
     if config.initial_training_size < 2:
         raise TrainingError("initial_training_size must be at least 2")
-    if len(samples) <= config.initial_training_size:
+    if len(samples) < config.minimum_labels:
         raise TrainingError(
-            f"dataset requires more than {config.initial_training_size} samples for walk-forward"
+            f"dataset requires at least {config.minimum_labels} samples"
         )
     _validate_training_cutoff(samples, training_data_through_at)
     output = Path(output_directory).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{output.name}-", dir=output.parent))
     try:
-        baseline, candidate, predictions = _walk_forward(samples, config)
-        accepted, rejection_reasons, gate = _gate(samples, baseline, candidate, config)
+        training, holdout, split = _release_split(samples, config)
+        baseline, candidate, predictions = _walk_forward(training, config)
+        algorithm_accepted, algorithm_reasons, gate = _gate(training, baseline, candidate, config)
         baseline_metrics = regression_metrics(baseline)
         candidate_metrics = regression_metrics(candidate)
+        release_model = _fit(training)
+        release_raw = np.asarray(
+            release_model.predict(_matrix(holdout)), dtype=np.float32
+        ).reshape(-1)
+        release_baseline = [_baseline_prediction(sample) for sample in holdout]
+        release_candidate = [
+            _adjusted_prediction(sample, float(raw), config.correction_cap_fraction)
+            for sample, raw in zip(holdout, release_raw, strict=True)
+        ]
+        release_accepted, release_reasons, release_gate = _release_gate(
+            release_baseline, release_candidate, holdout, config
+        )
+        accepted = algorithm_accepted and release_accepted
+        rejection_reasons = algorithm_reasons + release_reasons
+        model_path = temporary / "model.onnx"
+        input_name, output_name = _export_onnx(release_model, model_path)
+        model_sha256 = _sha256(model_path)
+        parity = _onnx_parity(
+            release_model, model_path, input_name, output_name, holdout, config.parity_tolerance
+        )
         evaluation = {
-            "evaluationVersion": "race-residual-walk-forward-v1",
+            "evaluationVersion": "race-residual-temporal-release-v1",
             "status": "accepted" if accepted else "rejected",
             "rejectionReasons": rejection_reasons,
+            "releaseSplit": split,
             "walkForward": {
                 "method": "expanding_window",
                 "futureLeakagePolicy": "sample i is predicted using samples [0,i)",
@@ -398,19 +627,20 @@ def train_and_export(
                 "predictions": predictions,
             },
             "activationGate": gate,
+            "releaseHoldout": release_gate,
+            "publishedArtifact": {
+                "fitStrategy": "training_partition_only",
+                "generalizationMetricsSource": "temporal_release_holdout",
+                "directGeneralizationMetric": True,
+                "numericParityFixture": "onnx-golden.json",
+                "evaluatedArtifactSha256": model_sha256,
+            },
+            "onnxParity": parity,
         }
-        final_model = _fit(samples)
-        model_path = temporary / "model.onnx"
-        input_name, output_name = _export_onnx(final_model, model_path)
-        parity = _onnx_parity(
-            final_model,
-            model_path,
-            input_name,
-            output_name,
-            samples,
-            config.parity_tolerance,
+        _write_json(
+            temporary / "onnx-golden.json",
+            _golden_vectors(release_model, holdout, config.correction_cap_fraction),
         )
-        evaluation["onnxParity"] = parity
         schema = feature_schema_document()
         schema["featureSchemaHash"] = feature_schema_sha256()
         _write_json(temporary / "feature-schema.json", schema)
@@ -428,25 +658,26 @@ def train_and_export(
             },
             "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
             "featureSchemaHash": feature_schema_sha256(),
-            "trainingDataHash": dataset_sha256(samples),
+            "trainingDataHash": dataset_sha256(training),
+            "holdoutDataHash": dataset_sha256(holdout),
             "trainingDataThroughAt": training_data_through_at,
             "inputFileSha256": input_file_sha256,
-            "modelSha256": _sha256(model_path),
-            "labelCount": len(samples),
+            "modelSha256": model_sha256,
+            "labelCount": len(training),
             "supportedDistances": list(DISTANCES),
             "featureNames": list(FEATURE_NAMES),
             "inputName": input_name,
             "outputName": output_name,
             "correctionCapFraction": config.correction_cap_fraction,
             "metrics": {
-                "baseline": baseline_metrics.to_dict(),
-                "candidate": candidate_metrics.to_dict(),
+                "baseline": release_gate["baselineMetrics"],
+                "candidate": release_gate["candidateMetrics"],
                 "byDistance": {
-                    "baseline": _metrics_by_distance(baseline),
-                    "candidate": _metrics_by_distance(candidate),
+                    "baseline": release_gate["baselineByDistance"],
+                    "candidate": release_gate["candidateByDistance"],
                 },
-                "meanAbsoluteErrorImprovement": gate["meanAbsoluteErrorImprovement"],
-                "intervalCoverageDrop": gate["intervalCoverageDrop"],
+                "meanAbsoluteErrorImprovement": release_gate["meanAbsoluteErrorImprovement"],
+                "intervalCoverageDrop": release_gate["intervalCoverageDrop"],
             },
             "generatedAt": timestamp,
             "status": "accepted" if accepted else "rejected",
@@ -456,6 +687,7 @@ def train_and_export(
                 "model.onnx": _sha256(model_path),
                 "feature-schema.json": _sha256(temporary / "feature-schema.json"),
                 "evaluation.json": _sha256(temporary / "evaluation.json"),
+                "onnx-golden.json": _sha256(temporary / "onnx-golden.json"),
             },
         }
         _write_json(temporary / "manifest.json", manifest)

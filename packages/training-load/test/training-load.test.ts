@@ -67,6 +67,96 @@ test("does not extrapolate sparse heart-rate samples from declared coverage", ()
   assert.ok((load?.load ?? 0) < 409);
 });
 
+test("composite load confidence follows component provenance", () => {
+  const load = calculateWorkoutTrainingLoad({
+    trainingSessionId: "composite", localDate: "2026-07-01", durationSeconds: 3600,
+    sessionType: "steady", loadBreakdown: {
+      rawHrrTrimp: 80, internalLoad: 70, paceLoad: 90,
+      distanceReferenceMeters: 10_000, distanceExposureRatio: 1,
+      distanceFactor: 1, compositeLoad: 78, compositeIntensity: 0.72,
+      heartRateConfidence: 0.8, paceConfidence: 0.5
+    }
+  });
+  assert.equal(load?.load, 78);
+  assert.equal(load?.confidence, 0.68);
+  assert.equal(load?.source, "composite");
+  assert.equal(load?.intensity, 0.72);
+  assert.equal(load?.breakdown.paceLoad, 90);
+});
+
+test("pure RPE/session composite fallbacks keep Banister confidence targets", () => {
+  const rpe = calculateWorkoutTrainingLoad({
+    trainingSessionId: "rpe-fallback", localDate: "2026-07-01", durationSeconds: 3600,
+    sessionType: "easy", loadBreakdown: {
+      rawHrrTrimp: null, internalLoad: null, paceLoad: null,
+      distanceReferenceMeters: null, distanceExposureRatio: null,
+      distanceFactor: 1, compositeLoad: 40, compositeIntensity: 0.52,
+      heartRateConfidence: 0.65, paceConfidence: 0
+    }
+  });
+  // Must not re-blend 0.65 * 0.6 → 0.39.
+  assert.equal(rpe?.confidence, 0.65);
+  assert.equal(rpe?.source, "composite");
+  assert.equal(rpe?.intensity, 0.52);
+
+  const session = calculateWorkoutTrainingLoad({
+    trainingSessionId: "session-fallback", localDate: "2026-07-01", durationSeconds: 3600,
+    sessionType: "easy", loadBreakdown: {
+      rawHrrTrimp: null, internalLoad: null, paceLoad: null,
+      distanceReferenceMeters: null, distanceExposureRatio: null,
+      distanceFactor: 1, compositeLoad: 30, compositeIntensity: 0.42,
+      heartRateConfidence: 0.4, paceConfidence: 0
+    }
+  });
+  assert.equal(session?.confidence, 0.4);
+});
+
+test("merges overlapping heart-rate samples into one unique timeline", () => {
+  const overlap = calculateWorkoutTrainingLoad({
+    trainingSessionId: "overlap", localDate: "2026-07-01", durationSeconds: 600,
+    restingHeartRate: 50, observedMaxHeartRate: 190,
+    heartRateSamples: [
+      { heartRate: 120, durationSeconds: 600, startOffsetSeconds: 0 },
+      { heartRate: 160, durationSeconds: 600, startOffsetSeconds: 0 }
+    ]
+  });
+  const merged = calculateWorkoutTrainingLoad({
+    trainingSessionId: "merged", localDate: "2026-07-01", durationSeconds: 600,
+    restingHeartRate: 50, observedMaxHeartRate: 190,
+    heartRateSamples: [{ heartRate: 140, durationSeconds: 600, startOffsetSeconds: 0 }]
+  });
+  assert.equal(overlap?.source, "heart_rate_series");
+  assert.equal(overlap?.intensity, merged?.intensity);
+  assert.equal(overlap?.load, merged?.load);
+  assert.equal(overlap?.confidence, 0.95);
+});
+
+test("composite metadata covers pace-only, conflicting components, and distance correction", () => {
+  const make = (heartRateConfidence: number, paceConfidence: number, compositeIntensity: number, distanceFactor: number) =>
+    calculateWorkoutTrainingLoad({
+      trainingSessionId: "composite-case", localDate: "2026-07-01", durationSeconds: 3600,
+      sessionType: "easy", loadBreakdown: {
+        rawHrrTrimp: heartRateConfidence > 0 ? 50 : null,
+        internalLoad: heartRateConfidence > 0 ? 50 : null,
+        paceLoad: paceConfidence > 0 ? 100 : null,
+        distanceReferenceMeters: 10_000, distanceExposureRatio: distanceFactor > 1 ? 2 : 1,
+        distanceFactor, compositeLoad: 75 * distanceFactor, compositeIntensity,
+        heartRateConfidence, paceConfidence
+      }
+    });
+  const paceOnly = make(0, 1, 0.8, 1);
+  const conflict = make(1, 1, 0.55, 1);
+  const corrected = make(1, 1, 0.55, 1.15);
+  assert.deepEqual(
+    [paceOnly?.source, paceOnly?.intensity, paceOnly?.confidence],
+    ["composite", 0.8, 0.4]
+  );
+  assert.equal(conflict?.source, "composite");
+  assert.equal(conflict?.intensity, 0.55);
+  assert.equal(corrected?.load, 86.25);
+  assert.equal(corrected?.intensity, conflict?.intensity);
+});
+
 test("fills rest days and updates EWMA with zero load", () => {
   const first = calculateWorkoutTrainingLoad({ trainingSessionId: "a", localDate: "2026-06-01", durationSeconds: 3600, sessionType: "easy" })!;
   const second = calculateWorkoutTrainingLoad({ trainingSessionId: "b", localDate: "2026-06-08", durationSeconds: 3600, sessionType: "tempo" })!;
@@ -76,6 +166,8 @@ test("fills rest days and updates EWMA with zero load", () => {
   assert.ok(days[1]!.acuteEwma < days[0]!.acuteEwma);
   assert.equal(days[7]?.workoutCount, 1);
   assert.equal(days[0]?.loadRatio, null);
+  assert.equal(days[0]?.acuteEwma, days[0]?.load);
+  assert.equal(days[0]?.chronicEwma, days[0]?.load);
 });
 
 test("training-state priority protects insufficient history and attention", () => {

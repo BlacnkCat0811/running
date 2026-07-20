@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 import { basename, dirname, resolve } from "node:path";
@@ -7,8 +7,14 @@ import { parseAppleHealthXml } from "./apple-health-parser.js";
 import { stageAuditFiles, writeAuditFiles } from "./audit.js";
 import { canonicalizeRunningWorkouts } from "./canonicalize.js";
 import { RaiDatabase } from "./database.js";
+import {
+  moveFileWithRetry,
+  removeDatabaseFilesWithRetry,
+  removeFileWithRetry
+} from "./file-operations.js";
 import { importGpxRoutes } from "./gpx-parser.js";
 import { stableId } from "./utils.js";
+import { acquireDatabasePublicationLock, publishDatabaseFile } from "@rai/storage-sqlite";
 
 interface ParsedArguments {
   command: "import" | "incremental-import" | "audit";
@@ -84,26 +90,7 @@ interface DatabaseActivation {
 }
 
 function acquireImportLock(target: string): () => void {
-  const lockPath = `${target}.import.lock`;
-  try {
-    mkdirSync(lockPath);
-  } catch (error) {
-    if (existsSync(lockPath)) {
-      throw new Error(`Another import is already publishing to ${target}`);
-    }
-    throw error;
-  }
-  try {
-    writeFileSync(
-      resolve(lockPath, "owner.json"),
-      `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`,
-      "utf8"
-    );
-  } catch (error) {
-    rmSync(lockPath, { recursive: true, force: true });
-    throw error;
-  }
-  return () => rmSync(lockPath, { recursive: true, force: true });
+  return acquireDatabasePublicationLock(target, "cli");
 }
 
 async function activateStagingDatabase(
@@ -112,47 +99,47 @@ async function activateStagingDatabase(
 ): Promise<DatabaseActivation> {
   const displaced = `${target}.replaced.${randomUUID()}`;
   const hadTarget = existsSync(target);
-  if (hadTarget) {
-    const active = new DatabaseSync(target, { readOnly: true });
-    try {
-      await backup(active, displaced);
-    } finally {
-      active.close();
-    }
-  }
-
-  const staged = new DatabaseSync(staging, { readOnly: true });
   try {
-    await backup(staged, target);
+    await publishDatabaseFile({
+      candidatePath: staging,
+      targetPath: target,
+      rollbackPath: displaced,
+      targetExists: () => existsSync(target),
+      prepareOriginal: async () => {
+        const active = new DatabaseSync(target);
+        try { active.exec("PRAGMA wal_checkpoint(TRUNCATE)"); }
+        finally { active.close(); }
+        for (const sidecar of [`${target}-wal`, `${target}-shm`]) {
+          await removeFileWithRetry(sidecar);
+        }
+      },
+      moveFile: moveFileWithRetry,
+      validateInstalled: () => {
+        const installed = new DatabaseSync(target, { readOnly: true });
+        try {
+          return (installed.prepare("PRAGMA quick_check").get() as { quick_check?: string }).quick_check === "ok";
+        } finally { installed.close(); }
+      }
+    });
   } catch (error) {
     if (hadTarget && existsSync(displaced)) {
-      const previous = new DatabaseSync(displaced, { readOnly: true });
-      try {
-        await backup(previous, target);
-      } finally {
-        previous.close();
-      }
+      await removeDatabaseFilesWithRetry(target);
+      await moveFileWithRetry(displaced, target);
     } else if (!hadTarget) {
-      removeDatabaseFiles(target);
+      await removeDatabaseFilesWithRetry(target);
     }
     throw error;
-  } finally {
-    staged.close();
   }
 
   return {
     displacedDatabase: hadTarget ? displaced : null,
     async rollback() {
       if (!hadTarget) {
-        removeDatabaseFiles(target);
+        await removeDatabaseFilesWithRetry(target);
         return;
       }
-      const previous = new DatabaseSync(displaced, { readOnly: true });
-      try {
-        await backup(previous, target);
-      } finally {
-        previous.close();
-      }
+      await removeDatabaseFilesWithRetry(target);
+      await moveFileWithRetry(displaced, target);
     }
   };
 }
@@ -222,6 +209,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     console.log(`Parsing Apple Health XML (${Math.round(xmlSize / 1024 / 1024)} MiB)...`);
     const xmlResult = await parseAppleHealthXml(xmlPath, store, {
       fileSize: xmlSize,
+      atomic: false,
       ...(incremental ? { incremental: {
         generation: stableId("import_generation", [batchId, new Date().toISOString()]),
         batchId

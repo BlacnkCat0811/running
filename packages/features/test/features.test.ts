@@ -130,10 +130,17 @@ test("prioritizes interval, long-run, and race evidence", () => {
   }));
   assert.equal(interval.sessionType, "interval");
 
+  // Non-easy HRR + long duration → long_run (HRR ≥ easy threshold).
   const longRun = extractWorkoutFeatureVector("long", "run", source({
     durationSeconds: 80 * 60,
     distanceKm: 14,
-    workoutEndAt: "2025-01-01T01:20:00.000Z"
+    workoutEndAt: "2025-01-01T01:20:00.000Z",
+    heartRate: {
+      average: 155, minimum: 140, maximum: 170, sampleCount: 30,
+      firstAt: startAt, lastAt: "2025-01-01T01:20:00.000Z", coefficientOfVariation: 0.05
+    },
+    restingHeartRate: 50,
+    observedMaximumHeartRate: 190
   }));
   assert.equal(longRun.sessionType, "long_run");
 
@@ -151,6 +158,100 @@ test("prioritizes interval, long-run, and race evidence", () => {
     }
   }));
   assert.equal(race.sessionType, "race");
+});
+
+test("does not promote long volume to long_run without non-easy HRR", () => {
+  const noHrr = extractWorkoutFeatureVector("long-no-hrr", "run", source({
+    durationSeconds: 80 * 60,
+    distanceKm: 16,
+    workoutEndAt: "2025-01-01T01:20:00.000Z",
+    heartRate: {
+      average: null, minimum: null, maximum: null, sampleCount: 0,
+      firstAt: null, lastAt: null, coefficientOfVariation: null
+    },
+    restingHeartRate: null,
+    observedMaximumHeartRate: null
+  }));
+  assert.equal(noHrr.sessionType, "easy");
+
+  const easyLong = extractWorkoutFeatureVector("long-easy-hrr", "run", source({
+    durationSeconds: 80 * 60,
+    distanceKm: 16,
+    workoutEndAt: "2025-01-01T01:20:00.000Z",
+    heartRate: {
+      average: 125, minimum: 115, maximum: 135, sampleCount: 30,
+      firstAt: startAt, lastAt: "2025-01-01T01:20:00.000Z", coefficientOfVariation: 0.04
+    },
+    restingHeartRate: 50,
+    observedMaximumHeartRate: 190
+  }));
+  assert.equal(easyLong.sessionType, "easy");
+});
+
+test("statistic-only average heart rate stays trial unless user includes", () => {
+  const statsOnly = extractWorkoutFeatureVector("stats-only", "run", source({
+    heartRate: {
+      average: 150,
+      minimum: 140,
+      maximum: 160,
+      sampleCount: 1,
+      firstAt: startAt,
+      lastAt: endAt,
+      coefficientOfVariation: null,
+      coveredDurationSeconds: null
+    }
+  }));
+  assert.equal(statsOnly.eligibilityStatus, "trial");
+  assert.ok(statsOnly.missingReasons.includes("heart_rate_coverage_low"));
+
+  const included = extractWorkoutFeatureVector("stats-include", "run", source({
+    heartRate: {
+      average: 150,
+      minimum: 140,
+      maximum: 160,
+      sampleCount: 1,
+      firstAt: startAt,
+      lastAt: endAt,
+      coefficientOfVariation: null,
+      coveredDurationSeconds: null
+    },
+    override: {
+      id: "override_include", trainingSessionId: "session_1", revision: 1,
+      eligibilityOverride: "include", statisticsParticipation: null, sessionType: null,
+      performanceProtocol: null, rpe: null, conditionTags: [], note: null,
+      createdAt: startAt
+    }
+  }));
+  assert.equal(included.eligibilityStatus, "eligible");
+  assert.ok(included.missingReasons.includes("heart_rate_coverage_low"));
+});
+
+test("keeps repeated interval evidence ahead of long-run duration", () => {
+  const speedSamples = Array.from({ length: 160 }, (_, index) => ({
+    value: Math.floor(index / 4) % 2 === 0 ? 4.2 : 2.6,
+    startOffsetSeconds: index * 30,
+    durationSeconds: 30
+  }));
+  const feature = extractWorkoutFeatureVector("long-interval", "run", source({
+    durationSeconds: 80 * 60,
+    workoutEndAt: "2025-01-01T01:20:00.000Z",
+    distanceKm: 15,
+    speed: { ...source().speed, coefficientOfVariation: 0.24 },
+    speedSamples
+  }));
+  assert.equal(feature.sessionType, "interval");
+});
+
+test("keeps explicit recovery effort ahead of long-run distance", () => {
+  const feature = extractWorkoutFeatureVector("recovery-long", "run", source({
+    durationSeconds: 80 * 60,
+    workoutEndAt: "2025-01-01T01:20:00.000Z",
+    distanceKm: 15,
+    heartRate: { ...source().heartRate, average: 100 },
+    restingHeartRate: 50,
+    observedMaximumHeartRate: 190
+  }));
+  assert.equal(feature.sessionType, "recovery");
 });
 
 test("does not infer race intent from a standard distance and high heart rate", () => {
@@ -187,6 +288,25 @@ test("does not mistake aerobic progression and short surges for intervals", () =
     observedMaximumHeartRate: 201
   }));
   assert.equal(feature.sessionType, "steady");
+});
+
+test("smooths second-level speed noise before stability scoring and interval classification", () => {
+  const speedSamples = Array.from({ length: 1800 }, (_, index) => ({
+    value: index % 2 === 0 ? 1.7 : 3.3,
+    startOffsetSeconds: index,
+    durationSeconds: 1
+  }));
+  const feature = extractWorkoutFeatureVector("noisy-steady", "run", source({
+    speed: { ...source().speed, average: 2.5, coefficientOfVariation: 0.32 },
+    speedSamples,
+    heartRate: { ...source().heartRate, average: 145, coefficientOfVariation: 0.05 },
+    restingHeartRate: 50,
+    observedMaximumHeartRate: 190
+  }));
+
+  assert.equal(feature.sessionType, "steady");
+  assert.ok((feature.signals.speedCoefficientOfVariation ?? 1) < 0.01);
+  assert.ok((feature.signals.stabilityRaw ?? 0) > 0.97);
 });
 
 test("does not infer intervals from sparse speed islands", () => {

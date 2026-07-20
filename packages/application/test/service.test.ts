@@ -4,9 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
-import { RaiApplicationService } from "../src/index.js";
+import {
+  RaiApplicationService,
+  TrainingZoneProfileRevisionConflictError,
+  TrainingZoneProfileValidationError,
+  WorkoutNotFoundError
+} from "../src/index.js";
 
 function dateForRun(index: number): string {
   return new Date(Date.UTC(2025, 0, 1 + index * 3, 0, 0, 0)).toISOString();
@@ -134,7 +139,7 @@ test("creates immutable feature/model runs and switches the active model", async
       .get() as unknown as { status: string };
     assert.equal(initialSnapshot.status, "calibrating");
 
-    service.appendWorkoutOverride({
+    const firstOverride = service.appendWorkoutOverride({
       trainingSessionId: "session_7",
       eligibilityOverride: "exclude",
       statisticsParticipation: null,
@@ -145,6 +150,8 @@ test("creates immutable feature/model runs and switches the active model", async
       note: "Exclude test run"
     });
     const secondJob = service.runNextJob();
+    assert.equal(secondJob?.id, firstOverride.jobId);
+    assert.match(firstOverride.overrideId, /^workout_override_/);
     assert.equal(secondJob?.status, "succeeded");
 
     const active = store.database
@@ -222,6 +229,104 @@ test("creates immutable feature/model runs and switches the active model", async
   }
 });
 
+test("historical recompute excludes sessions that have not ended by evaluatedAt", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-historical-recompute-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seedDatabase(databasePath);
+  try {
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+
+    store.setManifest("dataset_version", "dataset_historical_fixture");
+    store.flush();
+    const jobId = service.enqueueIncrementalRecompute({
+      mode: "partial",
+      dirtySessionIds: [],
+      dirtyFromAt: dateForRun(7),
+      reasons: ["workout_or_route_change"]
+    }, {
+      evaluatedAt: dateForRun(5),
+      timezoneIdentifier: "UTC"
+    });
+    assert.ok(jobId);
+    const job = service.runNextJob();
+    assert.equal(job?.status, "succeeded");
+
+    const counts = store.database.prepare(`
+      SELECT feature.reused_feature_count AS reused,
+             feature.recomputed_feature_count AS recomputed,
+             (SELECT COUNT(*) FROM workout_features WHERE feature_run_id = feature.id) AS features,
+             (SELECT COUNT(*) FROM ability_assessments WHERE model_run_id = model.id) AS assessments
+      FROM active_model_run active
+      JOIN model_runs model ON model.id = active.model_run_id
+      JOIN feature_runs feature ON feature.id = model.feature_run_id
+    `).get() as unknown as { reused: number; recomputed: number; features: number; assessments: number };
+    assert.deepEqual({ ...counts }, { reused: 5, recomputed: 0, features: 5, assessments: 5 });
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("normalizes offset recompute boundaries before filtering and prefix reuse", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-offset-recompute-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({
+      evaluatedAt: "2025-01-16T08:00:00+08:00",
+      timezoneIdentifier: "UTC"
+    });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+    assert.equal((store.database.prepare(`
+      SELECT COUNT(*) AS count
+      FROM active_model_run active
+      JOIN model_runs model ON model.id = active.model_run_id
+      JOIN workout_features feature ON feature.feature_run_id = model.feature_run_id
+    `).get() as unknown as { count: number }).count, 5);
+
+    store.setManifest("dataset_version", "dataset_offset_incremental_fixture");
+    store.flush();
+    const jobId = service.enqueueIncrementalRecompute({
+      mode: "partial",
+      dirtySessionIds: [],
+      dirtyFromAt: "2025-01-10T19:00:00-05:00",
+      reasons: ["workout_or_route_change"]
+    }, {
+      evaluatedAt: "2025-01-16T08:00:00+08:00",
+      timezoneIdentifier: "UTC"
+    });
+    assert.ok(jobId);
+    assert.equal(service.runNextJob()?.status, "succeeded");
+    const featureRun = store.database.prepare(`
+      SELECT feature.reused_feature_count AS reused, feature.recomputed_feature_count AS recomputed
+      FROM active_model_run active
+      JOIN model_runs model ON model.id = active.model_run_id
+      JOIN feature_runs feature ON feature.id = model.feature_run_id
+    `).get() as unknown as { reused: number; recomputed: number };
+    assert.deepEqual({ ...featureRun }, { reused: 4, recomputed: 1 });
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects invalid recompute timestamps before enqueue", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-invalid-recompute-time-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    assert.throws(() => service.enqueueFullRecompute({ evaluatedAt: "not-a-date" }), /evaluatedAt/);
+    assert.throws(() => service.enqueueIncrementalRecompute({
+      mode: "partial", dirtySessionIds: [], dirtyFromAt: "invalid", reasons: []
+    }), /dirtyFromAt/);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("validates and revisions training zone profile settings", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-zone-settings-"));
   const store = await seedDatabase(join(root, "rai.sqlite"));
@@ -240,25 +345,28 @@ test("validates and revisions training zone profile settings", async () => {
       restingHeartRate: { mode: "auto", valueBpm: null },
       maximumHeartRate: { mode: "auto", valueBpm: null },
       lactateThresholdPace: { mode: "auto", valueSecondsPerKm: null }
-    }, "UTC"), /revision conflict/);
+    }, "UTC"), (error: unknown) => error instanceof TrainingZoneProfileRevisionConflictError);
     assert.throws(() => service.appendTrainingZoneProfileSettings({
       expectedRevision: 1,
       restingHeartRate: { mode: "manual", valueBpm: 34 },
       maximumHeartRate: { mode: "manual", valueBpm: 195 },
       lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 330 }
-    }, "UTC"), /between 35 and 110/);
+    }, "UTC"), (error: unknown) =>
+      error instanceof TrainingZoneProfileValidationError && /between 35 and 110/.test(error.message));
     assert.throws(() => service.appendTrainingZoneProfileSettings({
       expectedRevision: 1,
       restingHeartRate: { mode: "manual", valueBpm: 100 },
       maximumHeartRate: { mode: "manual", valueBpm: 125 },
       lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 901 }
-    }, "UTC"), /between 150 and 900/);
+    }, "UTC"), (error: unknown) =>
+      error instanceof TrainingZoneProfileValidationError && /between 150 and 900/.test(error.message));
     assert.throws(() => service.appendTrainingZoneProfileSettings({
       expectedRevision: 1,
       restingHeartRate: { mode: "manual", valueBpm: 100 },
       maximumHeartRate: { mode: "manual", valueBpm: 125 },
       lactateThresholdPace: { mode: "manual", valueSecondsPerKm: 330 }
-    }, "UTC"), /at least 30 bpm/);
+    }, "UTC"), (error: unknown) =>
+      error instanceof TrainingZoneProfileValidationError && /at least 30 bpm/.test(error.message));
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -384,7 +492,7 @@ test("rolls back a job claim when its claimed event cannot be persisted", async 
   }
 });
 
-test("weights interval heart-rate records by their covered duration", async () => {
+test("uses the best cross-source heart-rate series and weights covered duration", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-heart-interval-"));
   const store = await seedDatabase(join(root, "rai.sqlite"));
   try {
@@ -402,6 +510,10 @@ test("weights interval heart-rate records by their covered duration", async () =
     insert.run("resting_prior", "HKQuantityTypeIdentifierRestingHeartRate", 60, previous, previous);
     insert.run("hr_interval_1", "HKQuantityTypeIdentifierHeartRate", 140, start, tenMinutes);
     insert.run("hr_interval_2", "HKQuantityTypeIdentifierHeartRate", 160, tenMinutes, end);
+    store.database.prepare(`
+      UPDATE health_records SET source_name = 'Companion Apple Watch'
+      WHERE id IN ('hr_interval_1', 'hr_interval_2')
+    `).run();
 
     const service = new RaiApplicationService(store);
     service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
@@ -419,7 +531,7 @@ test("weights interval heart-rate records by their covered duration", async () =
       SELECT load_source AS source, training_load AS value, internal_load AS internalLoad
       FROM active_workout_training_loads WHERE training_session_id = 'session_7'
     `).get() as unknown as { source: string; value: number; internalLoad: number };
-    assert.equal(load.source, "heart_rate_series");
+    assert.equal(load.source, "composite");
     assert.ok(Number.isFinite(load.internalLoad) && load.internalLoad > 0);
     assert.ok(Number.isFinite(load.value) && load.value > 0);
   } finally {
@@ -483,14 +595,40 @@ test("rolls back a workout override when recompute enqueue fails", async () => {
   }
 });
 
+test("reports a missing workout with a typed application error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-override-missing-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    assert.throws(() => service.appendWorkoutOverride({
+      trainingSessionId: "missing_session",
+      eligibilityOverride: null,
+      statisticsParticipation: null,
+      sessionType: null,
+      performanceProtocol: null,
+      rpe: null,
+      conditionTags: [],
+      note: null
+    }), (error: unknown) =>
+      error instanceof WorkoutNotFoundError && error.code === "workout_not_found");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("distinguishes missing, active, and terminal job cancellation", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-job-cancellation-"));
   const store = await seedDatabase(join(root, "rai.sqlite"));
   try {
     const service = new RaiApplicationService(store);
-    assert.equal(service.requestJobCancellation("missing_job"), "not_found");
+    assert.deepEqual(service.requestJobCancellation("missing_job"), { outcome: "not_found" });
     const activeId = service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
-    assert.equal(service.requestJobCancellation(activeId), "requested");
+    assert.deepEqual(service.requestJobCancellation(activeId), {
+      outcome: "cancelled",
+      status: "cancelled",
+      cancelRequested: false
+    });
     assert.equal(service.runNextJob(), null);
     const cancelled = store.database.prepare(`
       SELECT status, progress_phase AS progressPhase, completed_at AS completedAt
@@ -503,7 +641,67 @@ test("distinguishes missing, active, and terminal job cancellation", async () =>
     assert.ok(cancelled.completedAt);
     const featureRuns = store.database.prepare("SELECT COUNT(*) AS count FROM feature_runs").get() as unknown as { count: number };
     assert.equal(featureRuns.count, 0);
-    assert.equal(service.requestJobCancellation(activeId), "terminal");
+    assert.deepEqual(service.requestJobCancellation(activeId), { outcome: "terminal" });
+
+    const runningId = service.enqueueFullRecompute({ evaluatedAt: dateForRun(9), timezoneIdentifier: "UTC" });
+    store.database.prepare(`
+      UPDATE recompute_jobs SET status = 'running', started_at = ?, progress_phase = 'feature_extraction'
+      WHERE id = ?
+    `).run(new Date().toISOString(), runningId);
+    assert.deepEqual(service.requestJobCancellation(runningId), {
+      outcome: "cancellation_requested",
+      status: "running",
+      cancelRequested: true
+    });
+    const running = store.database.prepare(`
+      SELECT status, cancel_requested AS cancelRequested FROM recompute_jobs WHERE id = ?
+    `).get(runningId) as unknown as { status: string; cancelRequested: number };
+    assert.equal(running.status, "running");
+    assert.equal(running.cancelRequested, 1);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("normalizes persisted fields when a running recompute reaches cancellation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-running-job-cancellation-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    const jobId = service.enqueueFullRecompute({ evaluatedAt: dateForRun(9), timezoneIdentifier: "UTC" });
+    store.database.exec(`
+      CREATE TRIGGER request_cancel_after_claim
+      AFTER UPDATE OF status ON recompute_jobs
+      WHEN NEW.id = '${jobId}' AND NEW.status = 'running'
+      BEGIN
+        UPDATE recompute_jobs SET cancel_requested = 1 WHERE id = NEW.id;
+      END;
+    `);
+
+    const result = service.runNextJob();
+    assert.equal(result?.status, "cancelled");
+    assert.equal(result?.progressPhase, "cancelled");
+    assert.equal(result?.cancelRequested, false);
+    const persisted = store.database.prepare(`
+      SELECT status, progress_phase AS progressPhase,
+             cancel_requested AS cancelRequested, completed_at AS completedAt
+      FROM recompute_jobs WHERE id = ?
+    `).get(jobId) as unknown as {
+      status: string;
+      progressPhase: string;
+      cancelRequested: number;
+      completedAt: string | null;
+    };
+    assert.deepEqual(
+      {
+        status: persisted.status,
+        progressPhase: persisted.progressPhase,
+        cancelRequested: persisted.cancelRequested
+      },
+      { status: "cancelled", progressPhase: "cancelled", cancelRequested: 0 }
+    );
+    assert.ok(persisted.completedAt);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

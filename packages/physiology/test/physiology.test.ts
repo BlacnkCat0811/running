@@ -291,6 +291,10 @@ test("invalid performance inputs are rejected", () => {
   assert.throws(() => performanceSecondsFromVdot(5_000, 0), /vdot/);
 });
 
+test("rejects positive velocities below the Daniels running domain", () => {
+  assert.throws(() => vdotFromPerformance(100, 60 * 60), /Daniels running domain/);
+});
+
 test("race prediction errors report bias, MAE, RMSE, MAPE, and interval coverage", () => {
   const prediction = predictRaceTimes({
     status: "available",

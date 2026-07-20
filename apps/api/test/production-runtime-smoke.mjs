@@ -40,7 +40,11 @@ try {
     throw new Error(output || `API health endpoint did not become ready; child exitCode=${child.exitCode}`);
   }
   const health = await response.json();
-  if (health.status !== "ok" || health.localOnly !== true || health.databaseReady !== false) {
+  if (
+    health.status !== "recovery_required" ||
+    health.localOnly !== true ||
+    health.databaseReady !== false
+  ) {
     throw new Error("API health response is invalid or the smoke database is not isolated");
   }
   if (existsSync(databasePath)) throw new Error("API unexpectedly created the isolated smoke database");

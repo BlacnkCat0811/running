@@ -236,7 +236,19 @@ function hasHeartRateEvidence(
         FROM health_records hr
         JOIN workouts w ON w.id = ?
         WHERE hr.type = ?
-          AND hr.source_name = w.source_name
+          AND (
+            hr.source_name = w.source_name
+            OR (
+              NOT EXISTS (
+                SELECT 1 FROM health_records same
+                WHERE same.type = hr.type
+                  AND same.source_name = w.source_name
+                  AND same.start_at <= w.end_at
+                  AND same.end_at >= w.start_at
+              )
+              AND hr.source_category IN ('apple_watch', 'apple_phone', 'coros', 'huawei', 'connect', 'other')
+            )
+          )
           AND hr.start_at <= w.end_at
           AND hr.end_at >= w.start_at
       `

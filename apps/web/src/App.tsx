@@ -1,3 +1,4 @@
+import "./first-run-pixel.css";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import type { HealthResponse } from "@rai/api-contracts";
 import {
@@ -14,7 +15,6 @@ import { GlobalTaskStatus } from "./components/GlobalTaskStatus.js";
 import { ErrorBlock } from "./components/Feedback.js";
 import { useRemote } from "./hooks.js";
 import {
-  ArrowClockwise,
   ArrowRight,
   ChartBar,
   ChartLine,
@@ -88,7 +88,8 @@ const desktopNavigation = [
   { to: "/statistics", label: "统计", icon: ChartBar },
   { to: "/trends", label: "趋势", icon: ChartLine },
   { to: "/predictions", label: "预测", icon: Timer },
-  { to: "/data", label: "数据与模型", icon: Database },
+  { to: "/data", label: "数据与模型", icon: Database, end: true },
+  { to: "/data/audit", label: "数据审计", icon: ShieldCheck },
   { to: "/settings", label: "设置", icon: GearSix },
 ];
 
@@ -128,13 +129,17 @@ function NavigationLinks({
   className: string;
 }) {
   const location = useLocation();
+  const visibleItems =
+    className === "desktop-nav-links" && location.pathname !== "/data/audit"
+      ? items.filter((item) => item.to !== "/data/audit")
+      : items;
   const moreIsActive = ["/zones", "/predictions", "/data", "/settings"].some(
     (path) =>
       location.pathname === path || location.pathname.startsWith(`${path}/`),
   );
   return (
     <div className={`nav-links ${className}`}>
-      {items.map(({ to, label, icon: Icon, end }) => (
+      {visibleItems.map(({ to, label, icon: Icon, end }) => (
         <NavLink
           key={to}
           to={to}
@@ -169,8 +174,12 @@ function AppNavigation() {
       />
       <NavigationLinks items={mobileNavigation} className="mobile-nav-links" />
       <div className="local-note">
-        <ArrowClockwise size={15} />
-        本机数据
+        <span className="local-note-runner" aria-hidden="true" />
+        <span className="local-note-copy">
+          <b>保持进步</b>
+          <b>享受跑步</b>
+          <small aria-hidden="true">♥ ♥ ◆</small>
+        </span>
       </div>
     </nav>
   );
@@ -353,6 +362,17 @@ function FirstRunPage() {
         <Link to="/data" className="button primary">
           前往导入 <ArrowRight size={16} />
         </Link>
+        <div className="first-run-scene" aria-hidden="true">
+          <i className="scene-skyline" />
+          <i className="scene-tree tree-left" />
+          <i className="scene-tree tree-right" />
+          <i className="scene-route" />
+          <span className="scene-marker marker-start">01</span>
+          <span className="scene-marker marker-heart">♥</span>
+          <span className="scene-marker marker-medal">★</span>
+          <span className="scene-flag" />
+          <span className="scene-runner" />
+        </div>
         <p className="first-run-disclaimer">
           RAI
           是个人训练趋势工具，不是医疗设备，不能用于诊断疾病或替代专业医疗建议。

@@ -1,6 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
+import { activeDurationSecondsSql } from "@rai/storage-sqlite";
+
+import {
+  historicalEligibilitySql,
+  historicalOverrideJoin,
+  historicalQualitySql
+} from "./prediction-historical-features.js";
 import {
   performanceEvidence,
   performanceVdotEvidence,
@@ -29,6 +36,7 @@ interface PerformanceRow {
   performanceProtocol: string | null;
   rpe: number | null;
   conditionTagsJson: string;
+  overrideCreatedAt: string;
 }
 
 interface ThresholdSessionRow {
@@ -60,6 +68,7 @@ export interface LabeledRaceOutcome {
   distance: RaceDistance;
   observedAt: string;
   completedAt: string;
+  labelAvailableAt: string;
   actualDistanceMeters: number;
   actualSeconds: number;
   labelSource: Exclude<PerformanceObservation["source"], "hard_workout">;
@@ -124,7 +133,7 @@ function evidenceLabel(row: PerformanceRow): {
 
 function performanceProtocolExpression(database: DatabaseSync): string {
   const columns = database
-    .prepare("PRAGMA table_info(effective_workout_overrides)")
+    .prepare("PRAGMA table_info(workout_overrides)")
     .all() as unknown as Array<{ name: string }>;
   return columns.some((column) => column.name === "performance_protocol")
     ? "override.performance_protocol"
@@ -139,21 +148,21 @@ function performanceRows(database: DatabaseSync, asOf: string): PerformanceRow[]
         session.anchor_start_at AS observedAt,
         session.anchor_end_at AS completedAt,
         session.anchor_distance_km AS distanceKm,
-        (julianday(session.anchor_end_at) - julianday(session.anchor_start_at)) * 86400.0 AS durationSeconds,
+        ${activeDurationSecondsSql("session")} AS durationSeconds,
         override.session_type AS sessionType,
         ${performanceProtocolExpression(database)} AS performanceProtocol,
         override.rpe,
         override.condition_tags_json AS conditionTagsJson
+        , override.created_at AS overrideCreatedAt
       FROM training_sessions session
-      JOIN effective_workout_overrides override
-        ON override.training_session_id = session.id
+      ${historicalOverrideJoin("JOIN")}
       WHERE session.status = 'active'
         AND session.anchor_distance_km IS NOT NULL
         AND session.anchor_distance_km > 0
         AND session.anchor_end_at <= ?
       ORDER BY session.anchor_start_at
     `)
-    .all(asOf) as unknown as PerformanceRow[];
+    .all(asOf, asOf) as unknown as PerformanceRow[];
 }
 
 export function loadDirectVo2Evidence(
@@ -213,12 +222,12 @@ export function loadPerformanceVdotEvidence(
         session.anchor_start_at AS observedAt,
         session.anchor_end_at AS completedAt,
         session.anchor_distance_km AS distanceKm,
-        (julianday(session.anchor_end_at) - julianday(session.anchor_start_at)) * 86400.0 AS durationSeconds,
+        ${activeDurationSecondsSql("session")} AS durationSeconds,
         override.session_type AS sessionType,
         ${performanceProtocolExpression(database)} AS performanceProtocol,
         override.rpe,
         COALESCE(override.condition_tags_json, '[]') AS conditionTagsJson,
-        feature.quality_score AS qualityScore,
+        ${historicalQualitySql()} AS qualityScore,
         feature.source_confidence AS sourceConfidence,
         feature.eligibility_status AS eligibilityStatus,
         workout.metadata_json AS metadataJson
@@ -228,16 +237,15 @@ export function loadPerformanceVdotEvidence(
         ON feature.training_session_id = session.id
       JOIN model_runs model ON model.feature_run_id = feature.feature_run_id
       JOIN active_model_run active ON active.model_run_id = model.id
-      LEFT JOIN effective_workout_overrides override
-        ON override.training_session_id = session.id
+      ${historicalOverrideJoin("LEFT JOIN")}
       WHERE session.status = 'active'
         AND session.anchor_distance_km BETWEEN 3 AND 30
         AND session.anchor_start_at >= ?
         AND session.anchor_end_at <= ?
-        AND feature.eligibility_status <> 'excluded'
+        AND (${historicalEligibilitySql()}) <> 'excluded'
       ORDER BY session.anchor_start_at
     `)
-    .all(cutoff, asOf) as unknown as PerformanceEnvelopeRow[];
+    .all(asOf, cutoff, asOf) as unknown as PerformanceEnvelopeRow[];
   return rows.flatMap((row) => {
     if (
       row.durationSeconds < 12 * 60 ||
@@ -409,21 +417,22 @@ export function loadRaceReadiness(
       SELECT
         session.anchor_start_at AS observedAt,
         session.anchor_distance_km AS distanceKm,
-        (julianday(session.anchor_end_at) - julianday(session.anchor_start_at)) * 86400.0 AS durationSeconds
+        ${activeDurationSecondsSql("session")} AS durationSeconds
       FROM training_sessions session
       JOIN workout_features feature
         ON feature.training_session_id = session.id
       JOIN model_runs model ON model.feature_run_id = feature.feature_run_id
       JOIN active_model_run active ON active.model_run_id = model.id
+      ${historicalOverrideJoin("LEFT JOIN")}
       WHERE session.status = 'active'
         AND session.anchor_distance_km IS NOT NULL
         AND session.anchor_distance_km > 0
         AND session.anchor_start_at >= ?
         AND session.anchor_end_at <= ?
-        AND feature.eligibility_status <> 'excluded'
+        AND (${historicalEligibilitySql()}) <> 'excluded'
       ORDER BY session.anchor_start_at
     `)
-    .all(cutoff, asOf) as unknown as Array<{
+    .all(asOf, cutoff, asOf) as unknown as Array<{
       observedAt: string;
       distanceKm: number;
       durationSeconds: number;
@@ -536,7 +545,7 @@ function targetDistance(distanceMeters: number): RaceDistance | null {
     }))
     .sort((left, right) => left.relativeError - right.relativeError);
   const closest = candidates[0];
-  return closest && closest.relativeError <= 0.06 ? closest.distance : null;
+  return closest && closest.relativeError <= 0.01 ? closest.distance : null;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -674,17 +683,16 @@ export function loadLactateThresholdEvidence(
         ON feature.training_session_id = session.id
       JOIN model_runs model ON model.feature_run_id = feature.feature_run_id
       JOIN active_model_run active ON active.model_run_id = model.id
-      LEFT JOIN effective_workout_overrides override
-        ON override.training_session_id = session.id
+      ${historicalOverrideJoin("LEFT JOIN")}
       WHERE session.status = 'active'
         AND session.anchor_start_at >= ?
         AND session.anchor_end_at <= ?
-        AND feature.eligibility_status <> 'excluded'
+        AND (${historicalEligibilitySql()}) <> 'excluded'
         AND feature.heart_rate_coverage >= 0.75
         AND (julianday(session.anchor_end_at) - julianday(session.anchor_start_at)) * 1440.0 >= 20
       ORDER BY session.anchor_start_at
     `)
-    .all(cutoff, asOf) as unknown as ThresholdSessionRow[];
+    .all(asOf, cutoff, asOf) as unknown as ThresholdSessionRow[];
   const evidence: LactateThresholdEvidence[] = [];
   for (const session of sessions) {
     const speedBins = minuteMedians(
@@ -779,11 +787,22 @@ export function loadLabeledRaceOutcomes(
     if (label === null || label.source === "hard_workout") return [];
     const distance = targetDistance(row.distanceKm * 1_000);
     if (distance === null) return [];
+    const paceMinutesPerKm = row.durationSeconds / 60 / row.distanceKm;
+    if (
+      row.durationSeconds < 12 * 60 ||
+      row.durationSeconds > 4 * 60 * 60 ||
+      paceMinutesPerKm < 2.5 ||
+      paceMinutesPerKm > 15
+    ) return [];
     return [{
       id: row.id,
       distance,
       observedAt: row.observedAt,
       completedAt: row.completedAt,
+      labelAvailableAt:
+        Date.parse(row.overrideCreatedAt) > Date.parse(row.completedAt)
+          ? row.overrideCreatedAt
+          : row.completedAt,
       actualDistanceMeters: row.distanceKm * 1_000,
       actualSeconds: row.durationSeconds,
       labelSource: label.source

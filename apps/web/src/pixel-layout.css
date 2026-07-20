@@ -1,0 +1,904 @@
+/* Full desktop redesign translated from the generated pixel UI references. */
+@media (min-width: 1024px) {
+  :root {
+    --pixel-ink: #123f2b;
+    --pixel-green: #247446;
+    --pixel-leaf: #54a864;
+    --pixel-mint: #e7f5e5;
+    --pixel-cyan: #3aa6c6;
+    --pixel-coral: #ed6549;
+    --pixel-yellow: #e9b91f;
+    --pixel-paper: #fffef8;
+    --pixel-grid: #b9cdbd;
+  }
+
+  .app-navigation {
+    width: 235px;
+    padding: 20px 16px 18px;
+  }
+  .app-content { margin-left: 242px; }
+  .page {
+    width: min(1440px, 100%);
+    padding: 34px 36px 54px;
+  }
+  .page-header {
+    min-height: 72px;
+    margin-bottom: 16px;
+  }
+  .page-header.split { align-items: center; }
+  .page-header h1 { font-size: 44px; }
+  .page-header p { margin-top: 5px; font-size: 11px; }
+  .page-header.runner-page-header::before {
+    content: "";
+    flex: 0 0 80px;
+    width: 80px;
+    height: 72px;
+    background: url("/assets/runner-chibi.webp") -1px -18px / 320px 120px no-repeat;
+    image-rendering: pixelated;
+  }
+  .header-title-with-icon { display: flex; align-items: center; gap: 16px; }
+  .header-title-with-icon > svg { flex: 0 0 auto; color: var(--pixel-green); }
+  .page-header.split:not(.detail-reference-header) { justify-content: flex-start; gap: 18px; }
+  .page-header.split:not(.detail-reference-header) > :last-child { margin-left: auto; }
+
+  .panel, .hero-metrics, .performance-strip, .statistics-kpis,
+  .training-summary-band, .filter-bar, .model-chip, .first-run-steps {
+    border-width: 2px;
+    box-shadow: 2px 2px 0 rgba(18, 63, 43, .1);
+  }
+  .panel-heading {
+    min-height: 54px;
+    padding: 12px 15px 10px;
+  }
+  .panel-heading h2 { font-size: 15px; }
+  .panel-heading p { margin-top: 3px; font-size: 9px; }
+  .button { min-height: 36px; padding: 0 13px; font-size: 11px; }
+  .segmented { padding: 3px; }
+  .segmented button { min-height: 29px; }
+
+  /* Dashboard */
+  .dashboard-page .page-header { margin-bottom: 16px; }
+  .dashboard-page .hero-metrics {
+    grid-template-columns: 1.15fr 1.15fr .85fr .9fr;
+  }
+  .dashboard-page .hero-metrics article {
+    min-height: 132px;
+    padding: 18px 20px;
+  }
+  .dashboard-page .hero-metrics strong {
+    margin: 11px 0 7px;
+    font-size: 42px;
+  }
+  .dashboard-page .metric-support strong { font-size: 29px; }
+  .dashboard-page .training-summary-band { margin-top: 10px; }
+  .dashboard-page .dashboard-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(260px, .75fr);
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .dashboard-page .trend-panel .panel-heading { min-height: 59px; }
+  .dashboard-page .explanation-panel { padding-bottom: 12px; }
+  .dashboard-page .explanation-list { padding: 11px 16px; gap: 8px; }
+  .dashboard-page .cardio-note { margin: 0 16px 12px; }
+  .dashboard-page .explanation-panel > .button { width: calc(100% - 32px); margin: 0 16px; }
+  .dashboard-page .recent-panel { margin-top: 12px; }
+
+  .dashboard-reference-header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+  .dashboard-runner-mark {
+    flex: 0 0 80px;
+    width: 80px;
+    height: 72px;
+    background: url("/assets/runner-chibi.webp") -1px -18px / 320px 120px no-repeat;
+    image-rendering: pixelated;
+  }
+  .dashboard-capability-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .dashboard-capability-card {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    min-height: 140px;
+    padding: 18px 16px;
+    overflow: hidden;
+    border: 2px solid var(--pixel-green);
+    background: var(--pixel-paper);
+    box-shadow: 3px 3px 0 rgba(18, 63, 43, .1);
+    clip-path: var(--pixel-cut);
+  }
+  .dashboard-capability-card .capability-icon {
+    display: grid;
+    width: 48px;
+    height: 58px;
+    place-items: center;
+  }
+  .dashboard-capability-card .capability-label {
+    display: block;
+    color: var(--pixel-ink);
+    font-size: 13px;
+    font-weight: 750;
+  }
+  .dashboard-capability-card strong {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-top: 7px;
+    color: var(--pixel-ink);
+    font: 800 36px "SFMono-Regular", Consolas, monospace;
+    line-height: 1;
+  }
+  .dashboard-capability-card strong small {
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .dashboard-capability-card p {
+    margin: 9px 0 0;
+    color: var(--muted);
+    font-size: 8px;
+    line-height: 1.5;
+  }
+  .dashboard-capability-card.pace .capability-icon { color: var(--pixel-cyan); }
+  .dashboard-capability-card.endurance .capability-icon { color: var(--pixel-leaf); }
+  .dashboard-capability-card.intensity .capability-icon { color: var(--pixel-coral); }
+  .dashboard-capability-card.recovery .capability-icon { color: var(--pixel-yellow); }
+  .dashboard-capability-card.pace { border-top-color: var(--pixel-cyan); }
+  .dashboard-capability-card.endurance { border-top-color: var(--pixel-leaf); }
+  .dashboard-capability-card.intensity { border-top-color: var(--pixel-coral); }
+  .dashboard-capability-card.recovery { border-top-color: var(--pixel-yellow); }
+  .dashboard-reference-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.47fr) minmax(400px, 1fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+  .dashboard-performance-panel { min-width: 0; }
+  .dashboard-performance-chart { height: 201px; padding: 4px 12px 0; }
+  .dashboard-performance-legend {
+    display: flex;
+    gap: 18px;
+    padding: 4px 20px 10px;
+    color: var(--muted);
+    font-size: 9px;
+  }
+  .dashboard-performance-legend span::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+    background: currentColor;
+  }
+  .dashboard-performance-legend .endurance { color: var(--pixel-leaf); }
+  .dashboard-performance-legend .intensity { color: var(--pixel-coral); }
+  .dashboard-performance-legend .pace { color: var(--pixel-cyan); }
+  .dashboard-model-contract {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 14px 8px;
+    color: var(--muted);
+    font-size: 8px;
+  }
+  .dashboard-performance-note {
+    margin: 0 14px 14px;
+    padding: 10px 12px;
+    border: 1px dashed var(--pixel-green);
+    color: var(--pixel-ink);
+    font-size: 10px;
+    line-height: 1.5;
+    background: #f6fbf2;
+  }
+  .dashboard-status-panel {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    background: #f9fcf5;
+  }
+  .dashboard-status-summary {
+    padding: 12px 18px;
+    border-bottom: 1px dashed var(--pixel-grid);
+  }
+  .dashboard-status-summary b {
+    display: inline-block;
+    padding: 6px 9px;
+    color: #fffef8;
+    background: var(--pixel-green);
+    font-size: 14px;
+  }
+  .dashboard-status-panel.attention .dashboard-status-summary b,
+  .dashboard-status-panel.high_load .dashboard-status-summary b { background: var(--pixel-coral); }
+  .dashboard-status-panel.recovery .dashboard-status-summary b { background: var(--pixel-cyan); }
+  .dashboard-status-summary span {
+    display: block;
+    margin-top: 8px;
+    color: var(--pixel-ink);
+    font-size: 10px;
+    line-height: 1.65;
+  }
+  .dashboard-status-facts { padding: 0 18px; }
+  .dashboard-status-facts > span {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    min-height: 41px;
+    border-bottom: 1px dashed var(--pixel-grid);
+  }
+  .dashboard-status-facts small { color: var(--pixel-ink); font-size: 10px; font-weight: 700; }
+  .dashboard-status-facts b { color: var(--pixel-ink); font: 750 15px "SFMono-Regular", Consolas, monospace; }
+  .dashboard-status-facts em { grid-column: 1 / -1; margin-top: -7px; color: var(--muted); font-size: 8px; font-style: normal; }
+  .dashboard-status-panel > .button { margin: auto 18px 12px; }
+  .dashboard-recent-panel { margin-top: 12px; }
+
+  /* Workouts list + live preview */
+  .workouts-page .filter-bar {
+    display: grid;
+    grid-template-columns: 22px repeat(8, minmax(82px, 1fr));
+    align-items: end;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+  }
+  .workouts-page .filter-bar label:last-child { grid-column: 2 / 4; }
+  .workouts-page .filter-bar label span { font-size: 8px; }
+  .workouts-page .filter-bar select { width: 100%; min-height: 34px; font-size: 10px; }
+  .workouts-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 386px;
+    gap: 12px;
+    align-items: start;
+  }
+  .workouts-main-column { min-width: 0; }
+  .workout-list-panel { min-width: 0; }
+  .workouts-page .workout-table { font-size: 10px; }
+  .workouts-page .workout-table th { height: 34px; padding: 0 9px; font-size: 8px; }
+  .workouts-page .workout-table td { padding: 9px; }
+  .workouts-page .workout-table td small { font-size: 8px; }
+  .workout-preview-panel {
+    position: sticky;
+    top: 16px;
+    min-height: 570px;
+    overflow: hidden;
+    padding: 16px;
+    background: #f5fbf1;
+  }
+  .workout-preview-heading { display: grid; gap: 5px; padding-bottom: 13px; border-bottom: 1px dashed var(--pixel-grid); }
+  .workout-preview-heading span, .workout-preview-heading small { color: var(--muted); font-size: 9px; }
+  .workout-preview-heading b { color: var(--pixel-ink); font-size: 22px; }
+  .workout-preview-metrics { display: grid; grid-template-columns: 1fr 1fr; margin: 12px -16px 0; }
+  .workout-preview-metrics span { padding: 12px 14px; border-right: 1px dashed var(--pixel-grid); border-bottom: 1px dashed var(--pixel-grid); }
+  .workout-preview-metrics span:nth-child(2n) { border-right: 0; }
+  .workout-preview-metrics small, .workout-preview-metrics b { display: block; }
+  .workout-preview-metrics small { color: var(--muted); font-size: 8px; }
+  .workout-preview-metrics b { margin-top: 5px; font: 700 14px "SFMono-Regular", Consolas, monospace; }
+  .workout-preview-route {
+    position: relative;
+    height: 150px;
+    margin: 14px 0;
+    overflow: hidden;
+    border: 1px dashed var(--pixel-green);
+    background-color: #e8f4e3;
+    background-image: linear-gradient(90deg, transparent 23px, rgba(58,166,198,.22) 24px, transparent 25px), linear-gradient(transparent 23px, rgba(36,116,70,.12) 24px, transparent 25px);
+    background-size: 48px 48px;
+  }
+  .workout-preview-route svg { position: absolute; right: 12px; top: 10px; color: var(--pixel-cyan); }
+  .workout-preview-route i { position: absolute; display: block; width: 58px; height: 3px; background: var(--pixel-green); transform-origin: left center; }
+  .workout-preview-route i:nth-of-type(1) { left: 20px; top: 100px; transform: rotate(-25deg); }
+  .workout-preview-route i:nth-of-type(2) { left: 72px; top: 76px; transform: rotate(12deg); }
+  .workout-preview-route i:nth-of-type(3) { left: 128px; top: 88px; transform: rotate(-34deg); }
+  .workout-preview-route i:nth-of-type(4) { left: 176px; top: 56px; transform: rotate(18deg); }
+  .workout-preview-analysis { padding: 12px 0; border-top: 1px dashed var(--pixel-grid); }
+  .workout-preview-analysis span { display: flex; align-items: center; gap: 7px; color: var(--pixel-coral); font-weight: 700; }
+  .workout-preview-analysis p { margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+  .workout-preview-panel .button { margin-top: 10px; }
+  .workout-preview-empty { color: var(--muted); font-size: 11px; }
+
+  /* Workout detail */
+  .detail-page { display: flex; flex-direction: column; }
+  .detail-page .back-link { order: 0; margin-bottom: 8px; }
+  .detail-page .page-header { order: 1; }
+  .detail-page > .job-banner { order: 2; }
+  .detail-page > .performance-strip { order: 3; }
+  .detail-page > .detail-grid:not(.lower) { order: 4; }
+  .detail-page > .workout-series-panel { order: 5; }
+  .detail-page > .workout-splits-panel { order: 6; }
+  .detail-page > .workout-load-band { order: 7; }
+  .detail-page > .workout-load-explanations { order: 8; }
+  .detail-page > .workout-zones-panel { order: 9; }
+  .detail-page > .detail-grid.lower { order: 10; }
+  .detail-page > .review-panel { order: 11; }
+  .detail-page .performance-strip { grid-template-columns: repeat(8, 1fr); }
+  .detail-page .performance-strip article { padding: 14px 12px; }
+  .detail-page .performance-strip b { font-size: 13px; }
+  .detail-page .detail-grid {
+    grid-template-columns: minmax(0, 1.55fr) minmax(250px, .55fr);
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .detail-page .route-panel .route-plot { min-height: 250px; }
+  .detail-page .score-summary { min-height: 100%; padding: 20px; background: #f4faef; }
+  .detail-page .score-summary > strong { font-size: 54px; }
+  .detail-page .workout-series-panel, .detail-page .workout-splits-panel,
+  .detail-page .workout-zones-panel, .detail-page .review-panel { margin-top: 12px; }
+  .detail-page .series-grid { grid-template-columns: 1fr 1fr; }
+  .detail-page .series-grid > :nth-child(n+3) { min-height: 180px; }
+  .detail-page .splits-table th, .detail-page .splits-table td { padding: 9px 12px; }
+  .detail-page .workout-load-band { margin-top: 12px; }
+  .detail-reference-header { min-height: 74px; }
+  .detail-title-block { display: flex; align-items: center; gap: 12px; }
+  .detail-runner-mark {
+    flex: 0 0 74px;
+    width: 74px;
+    height: 70px;
+    background: url("/assets/runner-chibi.webp") -1px -18px / 296px 111px no-repeat;
+    image-rendering: pixelated;
+  }
+  .detail-reference-metrics { grid-template-columns: repeat(6, 1fr) !important; }
+  .detail-reference-metrics article {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 8px;
+    min-height: 78px;
+    padding: 10px 12px !important;
+  }
+  .detail-reference-metrics article > svg { grid-row: 1 / 3; color: var(--pixel-cyan); }
+  .detail-reference-metrics article:nth-child(4) > svg { color: var(--pixel-coral); }
+  .detail-reference-metrics article:nth-child(5) > svg,
+  .detail-reference-metrics article:nth-child(6) > svg { color: var(--pixel-yellow); }
+  .detail-reference-metrics article span { font-size: 8px; }
+  .detail-reference-metrics article b { font-size: 14px; }
+  .detail-page > .detail-grid:not(.lower) { grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); }
+  .workout-analysis-panel { padding: 0 !important; background: #fbfff7 !important; }
+  .workout-analysis-panel ul { display: grid; margin: 0; padding: 0 16px; list-style: none; }
+  .workout-analysis-panel li {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 9px;
+    padding: 11px 0;
+    border-bottom: 1px dashed var(--pixel-grid);
+  }
+  .workout-analysis-panel li > svg { color: var(--pixel-green); }
+  .workout-analysis-panel li:nth-child(2) > svg { color: var(--pixel-coral); }
+  .workout-analysis-panel li:nth-child(3) > svg { color: var(--pixel-cyan); }
+  .workout-analysis-panel li:nth-child(4) > svg { color: var(--pixel-yellow); }
+  .workout-analysis-panel li b { display: block; color: var(--pixel-ink); font-size: 10px; }
+  .workout-analysis-panel li small { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; line-height: 1.5; }
+  .analysis-ta-update {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 10px;
+    margin: 11px 16px 14px;
+    padding: 9px 10px;
+    border: 1px dashed var(--pixel-green);
+  }
+  .analysis-ta-update span { color: var(--muted); font-size: 8px; }
+  .analysis-ta-update b { color: var(--pixel-ink); font: 700 11px "SFMono-Regular", Consolas, monospace; }
+  .analysis-ta-update small { grid-column: 1 / -1; font-size: 9px; }
+
+  /* Training zones */
+  .zones-page .zone-profile-strip {
+    grid-template-columns: repeat(5, 1fr);
+    margin-bottom: 12px;
+    border-width: 2px;
+  }
+  .zones-page .zone-tables {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .zones-page .zone-table-panel { min-width: 0; }
+  .zones-page .zone-table th, .zones-page .zone-table td { padding: 9px 10px; }
+  .zones-page .zone-lower-grid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(350px, .85fr);
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .zones-page .zone-history-chart { height: 320px; }
+  .zones-page .zone-settings-panel { background: #f5fbf1; }
+  .zones-page .zone-setting-fields { gap: 7px; }
+  .zones-page .zone-setting-row { min-height: 44px; }
+
+  /* Statistics */
+  .statistics-page .training-status-panel {
+    grid-template-columns: minmax(0, 1fr) 165px;
+    min-height: 112px;
+    padding: 16px 20px;
+  }
+  .statistics-page .training-status-panel h2 { margin: 5px 0; font-size: 26px; }
+  .statistics-page .statistics-kpis {
+    grid-template-columns: repeat(10, 1fr);
+    margin-top: 12px;
+  }
+  .statistics-page .statistics-kpis article { padding: 13px 11px; }
+  .statistics-page .statistics-kpis b { font-size: 16px; }
+  .statistics-page .statistics-grid {
+    grid-template-columns: minmax(0, 1.6fr) minmax(265px, .65fr);
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .statistics-page .statistics-grid.lower { grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); }
+  .statistics-page .statistics-chart { height: 285px; }
+  .statistics-page .load-timeline-chart { height: 300px; }
+
+  /* Trends */
+  .trends-page { display: flex; flex-direction: column; }
+  .trends-page .page-header { order: 0; }
+  .trends-page .trend-summary-grid { order: 1; }
+  .trends-page .full-chart { order: 2; }
+  .trends-page .trend-analysis-grid { order: 3; }
+  .trends-page .trend-events { order: 4; }
+  .trends-page .trend-summary-grid {
+    grid-template-columns: repeat(4, 1fr);
+    margin: 0 0 12px;
+    border: 2px solid var(--pixel-green);
+  }
+  .trends-page .trend-summary-grid article {
+    min-height: 96px;
+    padding: 16px 20px;
+    border-right: 1px dashed var(--pixel-grid);
+    background: var(--pixel-paper);
+  }
+  .trends-page .trend-summary-grid article:last-child { border-right: 0; }
+  .trends-page .trend-summary-grid span { color: var(--muted); font-size: 9px; }
+  .trends-page .trend-summary-grid b { display: block; margin-top: 9px; color: var(--pixel-ink); font: 750 28px "SFMono-Regular", Consolas, monospace; }
+  .trends-page .full-chart { min-width: 0; }
+  .trends-page .full-chart .ability-chart { height: 340px !important; }
+  .trends-page .trend-analysis-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .trends-page .trend-events { margin-top: 12px; }
+  .trends-page .event-grid { grid-template-columns: repeat(6, 1fr); }
+  .trends-page .event-grid a { min-height: 96px; padding: 12px; }
+
+  .trends-reference-layout { display: block; }
+  .trends-reference-header { min-height: 58px; }
+  .trends-title-block { display: flex; align-items: center; gap: 10px; }
+  .trends-title-block > svg { color: var(--pixel-green); }
+  .trends-reference-summary article {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+  }
+  .trend-metric-icon { display: grid; place-items: center; }
+  .trend-reference-summary .ta .trend-metric-icon { color: var(--pixel-cyan); }
+  .trend-reference-summary .ca .trend-metric-icon { color: var(--pixel-coral); }
+  .trend-reference-summary .growth .trend-metric-icon { color: var(--pixel-leaf); }
+  .trend-reference-summary .confidence .trend-metric-icon { color: var(--pixel-yellow); }
+  .trend-reference-summary article b { margin-top: 4px; font-size: 24px; }
+  .trend-reference-summary article small { display: block; margin-top: 7px; color: var(--muted); font-size: 8px; }
+  .trends-primary-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(300px, .8fr);
+    gap: 12px;
+  }
+  .trends-primary-grid .full-chart { min-width: 0; }
+  .trends-primary-grid .full-chart { order: 0; }
+  .trends-reference-layout .full-chart .ability-chart { height: 330px !important; }
+  .trend-interpretation-panel { background: #f8fcf4; }
+  .trend-interpretation-panel ul { display: grid; gap: 0; margin: 0; padding: 2px 16px 0; list-style: none; }
+  .trend-interpretation-panel li {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px 0;
+    border-bottom: 1px dashed var(--pixel-grid);
+  }
+  .trend-interpretation-panel li > i { width: 8px; height: 8px; margin-top: 4px; background: var(--pixel-leaf); }
+  .trend-interpretation-panel li > i.ta { background: var(--pixel-cyan); }
+  .trend-interpretation-panel li > i.ca { background: var(--pixel-coral); }
+  .trend-interpretation-panel li span { color: var(--pixel-ink); font-size: 9px; line-height: 1.55; }
+  .trend-interpretation-panel li b { display: block; margin-bottom: 3px; font-size: 11px; }
+  .trend-direction-meter { padding: 18px 16px 14px; }
+  .trend-direction-meter > span { color: var(--pixel-ink); font-size: 11px; font-weight: 700; }
+  .trend-direction-meter > i {
+    position: relative;
+    display: block;
+    height: 9px;
+    margin: 10px 0 7px;
+    border: 1px solid var(--pixel-green);
+    background: linear-gradient(90deg, var(--pixel-coral) 0 30%, var(--pixel-yellow) 30% 70%, var(--pixel-leaf) 70%);
+  }
+  .trend-direction-meter > i em {
+    position: absolute;
+    top: -7px;
+    width: 0;
+    height: 0;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid var(--pixel-ink);
+    border-left: 6px solid transparent;
+    transform: translateX(-50%);
+  }
+  .trend-direction-meter small { display: flex; justify-content: space-between; color: var(--muted); font-size: 8px; }
+  .trends-reference-lower {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(360px, .85fr);
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .trends-reference-lower .trend-events { margin-top: 0; }
+  .trends-reference-lower .event-grid { grid-template-columns: repeat(6, 1fr); }
+  .trends-reference-lower .event-grid a { min-height: 128px; }
+  .trend-dimensions-panel { min-width: 0; }
+  .trend-dimensions-panel .trend-secondary-chart { height: 240px; }
+  .trend-context-panel { margin-top: 12px; }
+  .trend-context-panel .trend-secondary-chart { height: 250px; }
+
+  /* Predictions */
+  .predictions-page .prediction-overview {
+    grid-template-columns: repeat(4, 1fr);
+    margin-bottom: 12px;
+    border: 2px solid var(--pixel-green);
+  }
+  .predictions-page .prediction-overview article { min-height: 116px; padding: 16px 18px; }
+  .predictions-page .race-prediction-grid {
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 0;
+    border: 2px solid var(--pixel-green);
+    background: var(--pixel-paper);
+  }
+  .predictions-page .race-prediction-card {
+    min-height: 290px;
+    border: 0;
+    border-right: 1px dashed var(--pixel-grid);
+    box-shadow: none;
+    clip-path: none;
+  }
+  .predictions-page .race-prediction-card:last-child { border-right: 0; }
+  .predictions-page .race-prediction-card:nth-child(1) { border-top: 4px solid var(--pixel-cyan); }
+  .predictions-page .race-prediction-card:nth-child(2) { border-top: 4px solid var(--pixel-leaf); }
+  .predictions-page .race-prediction-card:nth-child(3) { border-top: 4px solid var(--pixel-coral); }
+  .predictions-page .race-prediction-card:nth-child(4) { border-top: 4px solid var(--pixel-yellow); }
+  .predictions-page .race-time-pair { padding: 14px 16px; }
+  .predictions-page .scenario-panel { margin-top: 12px; }
+  .predictions-page .scenario-form { grid-template-columns: repeat(6, 1fr) auto; padding: 12px 14px; }
+  .predictions-page .prediction-detail-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .predictions-page .prediction-disclaimer { margin-top: 12px; }
+
+  /* Data model + audit */
+  .data-page .data-grid {
+    grid-template-columns: minmax(0, 1.7fr) minmax(280px, .65fr);
+    gap: 12px;
+  }
+  .data-page .import-update-panel { min-height: 250px; }
+  .data-page .privacy-panel { min-height: 250px; padding: 20px; }
+  .data-page .model-panel, .data-page .comparison-panel,
+  .data-page .prediction-model-management, .data-page .jobs-panel { margin-top: 12px; }
+  .data-page .model-list > div, .data-page .job-list > div { min-height: 48px; }
+  .data-page .comparison-metrics { grid-template-columns: repeat(4, 1fr); }
+
+  .audit-page .audit-metrics {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin-bottom: 12px;
+    border-width: 2px;
+  }
+  .audit-page .audit-metrics article { min-height: 105px; padding: 16px 18px; }
+  .audit-page .audit-grid {
+    grid-template-columns: 1.25fr .75fr;
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .audit-page .audit-grid.lower { grid-template-columns: 1fr 1fr; }
+  .audit-page .audit-groups { grid-template-columns: 1fr 1fr; }
+  .audit-page .audit-list span, .audit-page .audit-groups span { min-height: 36px; border-top-style: dashed; }
+  .audit-page .coverage-range { min-height: 170px; align-items: center; }
+  .audit-page .audit-issues { margin-top: 12px; }
+
+  /* Settings */
+  .settings-page .settings-list {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 2px solid var(--pixel-green);
+  }
+  .settings-page .settings-list article {
+    min-height: 86px;
+    padding: 14px 16px;
+    border-right: 1px dashed var(--pixel-grid);
+    border-bottom: 0;
+  }
+  .settings-page .settings-list article:last-child { border-right: 0; }
+  .settings-page .database-summary, .settings-page .backup-panel,
+  .settings-page .model-settings-panel, .settings-page .about-panel,
+  .settings-page .disclaimer-panel, .settings-page .danger-panel { margin-top: 12px; }
+  .settings-page .summary-metrics { grid-template-columns: repeat(6, 1fr); }
+  .settings-page .summary-metrics > span { min-height: 80px; padding: 15px; }
+  .settings-page .backup-list > div { min-height: 50px; border-top-style: dashed; }
+  .settings-page .backup-list { max-height: 214px; overflow-y: auto; }
+  .settings-page .model-settings-grid { grid-template-columns: repeat(4, 1fr); }
+  .settings-page .about-panel { width: calc(50% - 6px); min-height: 150px; }
+  .settings-page .disclaimer-panel { width: calc(50% - 6px); min-height: 150px; margin-left: calc(50% + 6px); margin-top: -150px; }
+  .settings-page .danger-panel { border-width: 2px; }
+
+  /* First-run experience */
+  .first-run-page {
+    min-height: calc(100vh - 1px);
+    grid-template-columns: minmax(0, 1.35fr) minmax(350px, .65fr);
+    gap: 22px;
+    padding-top: 34px;
+    padding-bottom: 34px;
+  }
+  .first-run-hero {
+    min-height: 720px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    padding: 56px 50px;
+    border: 2px solid var(--pixel-green);
+    background-color: #fbfff7;
+    background-image: linear-gradient(165deg, transparent 62%, rgba(84,168,100,.2) 62% 66%, transparent 66%), linear-gradient(12deg, transparent 68%, rgba(237,101,73,.22) 68% 70%, transparent 70%);
+    clip-path: var(--pixel-cut);
+  }
+  .first-run-hero h1 { max-width: 720px; font-size: 54px; line-height: 1.05; }
+  .first-run-hero > p:not(.eyebrow) { max-width: 54ch; }
+  .first-run-hero .button { align-self: flex-start; min-width: 170px; min-height: 48px; background: var(--pixel-coral); }
+  .first-run-hero::after {
+    right: 8%;
+    bottom: 34px;
+    width: 230px;
+    height: 230px;
+    background-size: 920px 460px;
+  }
+  .first-run-steps { align-self: stretch; display: grid; align-content: center; }
+  .first-run-steps article { min-height: 155px; padding: 26px 22px; }
+  .first-run-steps article > b { font-size: 22px; }
+  .first-run-steps h2 { font-size: 18px; }
+
+  /* Fidelity pass: preserve the reference hierarchy on every desktop page. */
+  .zones-page .zone-profile-strip { display: none; }
+  .zones-page .zone-tables { margin-top: 0; }
+  .zones-page .zone-confidence-note + .zone-tables { margin-top: 12px; }
+  .zones-page .zone-table-panel { padding-bottom: 8px; }
+  .zones-page .zone-table-panel .panel-heading p { display: none; }
+  .zones-page .zone-table {
+    gap: 7px;
+    padding: 4px 10px 2px;
+  }
+  .zones-page .zone-table > .zone-row {
+    --zone-color: var(--pixel-cyan);
+    --zone-soft: #e7f4fa;
+    position: relative;
+    grid-template-columns: 5px minmax(110px, .9fr) minmax(115px, .8fr) minmax(78px, .55fr);
+    min-height: 54px;
+    gap: 9px;
+    padding: 8px 132px 8px 10px;
+    border: 1px solid var(--zone-color);
+    background: var(--zone-soft);
+  }
+  .zones-page .zone-table > .zone-row::after {
+    content: "";
+    position: absolute;
+    top: 14px;
+    right: 12px;
+    width: 106px;
+    height: 24px;
+    border-top: 2px solid var(--zone-color);
+    border-bottom: 1px dashed color-mix(in srgb, var(--zone-color), transparent 25%);
+    background:
+      linear-gradient(var(--zone-color), var(--zone-color)) center / 58% 8px no-repeat,
+      repeating-linear-gradient(90deg, var(--zone-color) 0 1px, transparent 1px 25%) top / 100% 7px no-repeat;
+  }
+  .zones-page .zone-table > .zone-row-2 { --zone-color: var(--pixel-leaf); --zone-soft: #e8f5e7; }
+  .zones-page .zone-table > .zone-row-3 { --zone-color: var(--pixel-yellow); --zone-soft: #fff8dc; }
+  .zones-page .zone-table > .zone-row-4 { --zone-color: #ef7c35; --zone-soft: #fff0e4; }
+  .zones-page .zone-table > .zone-row-5 { --zone-color: var(--pixel-coral); --zone-soft: #ffe9e3; }
+  .zones-page .zone-table > .zone-row > i { height: 34px; border-radius: 0; background: var(--zone-color) !important; }
+  .zones-page .zone-table > .zone-row > span small,
+  .zones-page .zone-table > .zone-row > span b { color: var(--zone-color); }
+  .zones-page .zone-table > .zone-row > span small { font-size: 13px; font-weight: 800; }
+  .zones-page .zone-table > .zone-row > span b { font-size: 11px; }
+  .zones-page .zone-table > .zone-row strong { color: var(--pixel-ink); font-size: 10px; }
+  .zones-page .zone-table > .zone-row > small { color: var(--muted); font-size: 8px; }
+
+  .statistics-page .training-status-panel {
+    grid-template-columns: minmax(0, 1fr) 190px;
+    min-height: 54px;
+    height: 54px;
+    gap: 12px;
+    padding: 6px 16px;
+    background: #eff8ed;
+  }
+  .statistics-page .training-status-panel > div:first-child {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+  .statistics-page .training-status-panel > div:first-child > span { color: var(--pixel-ink); font-size: 14px; font-weight: 800; }
+  .statistics-page .training-status-panel h2 { margin: 0; padding: 6px 10px; color: #fff; background: var(--pixel-green); font-size: 15px; }
+  .statistics-page .training-status-panel p { font-size: 10px; }
+  .statistics-page .status-load-ratio { min-height: 40px; padding: 2px 12px; }
+  .statistics-page .status-load-ratio strong { margin: 1px 0; font-size: 24px; }
+  .statistics-page .status-evidence { display: none; }
+  .statistics-page .statistics-kpis { grid-template-columns: repeat(6, 1fr); }
+  .statistics-page .statistics-kpis article:nth-child(n+7) { display: none; }
+  .statistics-page .statistics-kpis article:nth-child(6) { border-right: 0; }
+  .statistics-page .statistics-kpis article {
+    min-height: 112px;
+    padding: 16px 14px;
+    background: var(--pixel-paper);
+  }
+  .statistics-page .statistics-kpis article:nth-child(1) { border-top: 4px solid var(--pixel-cyan); }
+  .statistics-page .statistics-kpis article:nth-child(2) { border-top: 4px solid #4c9cc1; }
+  .statistics-page .statistics-kpis article:nth-child(3) { border-top: 4px solid var(--pixel-leaf); }
+  .statistics-page .statistics-kpis article:nth-child(4) { border-top: 4px solid var(--pixel-coral); }
+  .statistics-page .statistics-kpis article:nth-child(5) { border-top: 4px solid var(--pixel-cyan); }
+  .statistics-page .statistics-kpis article:nth-child(6) { border-top: 4px solid var(--pixel-yellow); }
+
+  .predictions-page { display: flex; flex-direction: column; }
+  .predictions-page .page-header { order: 0; }
+  .predictions-page .prediction-guidance { order: 1; }
+  .predictions-page .prediction-overview { order: 2; }
+  .predictions-page .race-prediction-grid { order: 3; }
+  .predictions-page .scenario-panel { order: 4; }
+  .predictions-page .prediction-detail-grid { order: 5; }
+  .predictions-page .prediction-disclaimer { order: 6; }
+  .predictions-page .race-prediction-grid { grid-template-columns: repeat(3, 1fr); }
+  .predictions-page .prediction-overview article { min-height: 102px; }
+  .predictions-page .prediction-overview strong { margin: 9px 0 5px; font-size: 28px; }
+  .predictions-page .prediction-overview p { margin-top: 7px; }
+  .predictions-page .prediction-detail-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+
+  .data-page .data-grid { grid-template-columns: 1fr; }
+  .data-page .import-update-panel { min-height: 190px; }
+  .data-page .privacy-panel {
+    min-height: 62px;
+    display: grid;
+    grid-template-columns: auto auto minmax(280px, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+  }
+  .data-page .privacy-panel h2,
+  .data-page .privacy-panel p { margin: 0; }
+  .data-page .privacy-panel h2 { font-size: 12px; }
+  .data-page .privacy-panel p { font-size: 9px; }
+  .data-page .privacy-panel > div { display: flex; gap: 12px; }
+  .data-page .privacy-panel > div span { font-size: 8px; }
+
+  .audit-page .audit-metrics { grid-template-columns: repeat(5, 1fr); }
+  .audit-page .audit-metrics article { min-height: 94px; padding: 13px 15px; }
+  .audit-page .audit-metrics article:nth-child(1) { border-top: 4px solid var(--pixel-green); }
+  .audit-page .audit-metrics article:nth-child(2) { border-top: 4px solid var(--pixel-leaf); }
+  .audit-page .audit-metrics article:nth-child(3) { border-top: 4px solid var(--pixel-cyan); }
+  .audit-page .audit-metrics article:nth-child(4) { border-top: 4px solid var(--pixel-yellow); }
+  .audit-page .audit-metrics article:nth-child(5) { border-top: 4px solid var(--pixel-coral); }
+
+  .settings-page .settings-list article { grid-template-columns: 40px minmax(0, 1fr); }
+  .settings-page .settings-list article > div p { display: none; }
+  .settings-page .settings-list article > span { grid-column: 2; color: var(--pixel-ink); font-size: 11px; }
+  .settings-page .database-summary .panel-heading p { display: none; }
+  .settings-page .summary-metrics > span:nth-child(1) { color: var(--pixel-green); }
+  .settings-page .summary-metrics > span:nth-child(2) { color: var(--pixel-coral); }
+  .settings-page .summary-metrics > span:nth-child(3) { color: var(--pixel-cyan); }
+  .settings-page .summary-metrics > span:nth-child(4) { color: var(--pixel-yellow); }
+
+  .first-run-page {
+    grid-template-columns: minmax(0, 1.35fr) minmax(350px, .65fr);
+    gap: 18px;
+    padding: 10px 18px 10px 12px;
+  }
+  .first-run-hero {
+    min-height: 830px;
+    padding: 70px 52px 24px;
+    overflow: hidden;
+    background: #fffef8;
+  }
+  .first-run-hero::after { display: none; }
+  .first-run-hero .brand-mark,
+  .first-run-hero .eyebrow { display: none; }
+  .first-run-hero h1 { max-width: 720px; font-size: 48px; line-height: 1.16; }
+  .first-run-hero > p:not(.eyebrow):not(.first-run-disclaimer) { max-width: 45ch; margin: 24px 0 20px; color: var(--pixel-ink); font-size: 13px; }
+  .first-run-hero .button { position: relative; z-index: 3; min-width: 220px; min-height: 56px; font-size: 17px; }
+  .first-run-scene {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 480px;
+    overflow: hidden;
+    background:
+      linear-gradient(180deg, transparent 0 44%, #dceee2 44% 47%, transparent 47%),
+      linear-gradient(165deg, transparent 0 62%, #9dcf91 62% 73%, #65aa64 73% 100%);
+  }
+  .scene-skyline {
+    position: absolute;
+    right: 8%;
+    bottom: 100px;
+    left: 18%;
+    height: 140px;
+    opacity: .62;
+    background: repeating-linear-gradient(90deg, #b8d8c6 0 34px, transparent 34px 44px);
+    clip-path: polygon(0 80%, 0 60%, 7% 60%, 7% 26%, 12% 26%, 12% 72%, 19% 72%, 19% 44%, 27% 44%, 27% 82%, 36% 82%, 36% 18%, 42% 18%, 42% 68%, 51% 68%, 51% 34%, 59% 34%, 59% 82%, 68% 82%, 68% 48%, 77% 48%, 77% 72%, 86% 72%, 86% 26%, 93% 26%, 93% 80%, 100% 80%, 100% 100%, 0 100%);
+  }
+  .scene-tree {
+    position: absolute;
+    z-index: 2;
+    bottom: 92px;
+    width: 126px;
+    height: 170px;
+    background:
+      linear-gradient(90deg, transparent 45%, #6f5731 45% 58%, transparent 58%) bottom / 100% 65% no-repeat,
+      radial-gradient(circle at 50% 36%, #4c914d 0 34%, transparent 35%),
+      radial-gradient(circle at 28% 49%, #73ad56 0 26%, transparent 27%),
+      radial-gradient(circle at 72% 52%, #377c43 0 27%, transparent 28%);
+    image-rendering: pixelated;
+  }
+  .tree-left { left: -18px; }
+  .tree-right { right: -24px; bottom: 78px; transform: scale(.78); }
+  .scene-route {
+    position: absolute;
+    z-index: 1;
+    left: 4%;
+    bottom: 42px;
+    width: 94%;
+    height: 120px;
+    border-top: 22px solid #fff7cf;
+    transform: rotate(8deg) skewX(-22deg);
+    box-shadow: 0 -7px 0 #d9c98c;
+  }
+  .scene-marker, .scene-flag {
+    position: absolute;
+    z-index: 4;
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 3px solid var(--pixel-green);
+    color: #fff;
+    background: var(--pixel-yellow);
+    font: 800 14px "SFMono-Regular", Consolas, monospace;
+    clip-path: var(--pixel-cut);
+  }
+  .marker-start { left: 8%; bottom: 116px; }
+  .marker-heart { left: 44%; bottom: 250px; background: var(--pixel-coral); }
+  .marker-medal { right: 22%; bottom: 205px; color: var(--pixel-ink); }
+  .scene-flag { right: 7%; bottom: 280px; width: 12px; height: 80px; border: 0; border-left: 5px solid var(--pixel-ink); background: transparent; clip-path: none; }
+  .scene-flag::after { content: ""; position: absolute; top: 0; left: 0; width: 34px; height: 24px; background: var(--pixel-coral); clip-path: polygon(0 0, 100% 0, 72% 50%, 100% 100%, 0 100%); }
+  .scene-runner {
+    position: absolute;
+    z-index: 5;
+    left: 20%;
+    bottom: 70px;
+    width: 128px;
+    height: 180px;
+    background: url("/assets/runner-chibi.webp") 0 -25px / 512px 192px no-repeat;
+    image-rendering: pixelated;
+  }
+  .first-run-disclaimer { position: absolute; z-index: 6; right: 24px; bottom: 12px; left: 24px; margin: 0 !important; padding: 8px 10px !important; border: 1px dashed var(--pixel-green) !important; background: rgba(255,254,248,.88); }
+  .first-run-steps {
+    min-height: 830px;
+    align-content: start;
+    padding: 30px 24px 20px;
+    border: 2px solid var(--pixel-green);
+    background: #fffef8;
+  }
+  .first-run-steps article { position: relative; min-height: 218px; grid-template-columns: 62px 1fr; padding: 36px 8px 26px; border-top: 1px dashed var(--pixel-grid); }
+  .first-run-steps article:first-child { border-top: 0; }
+  .first-run-steps article:not(:last-of-type)::after { content: ""; position: absolute; left: 37px; bottom: -18px; height: 36px; border-left: 2px dashed var(--pixel-green); }
+  .first-run-steps article > b { display: grid; width: 46px; height: 46px; place-items: center; color: #fff; background: var(--pixel-green); font-size: 18px; clip-path: var(--pixel-cut); }
+  .first-run-steps h2 { font-size: 20px; }
+  .first-run-steps p { margin-top: 14px; color: var(--pixel-ink); font-size: 11px; line-height: 1.8; }
+  .first-run-privacy { margin-top: auto; border: 1px solid var(--pixel-green); background: #f6fbf2; }
+}
+
+@media (min-width: 1024px) and (max-width: 1320px) {
+  .trends-page .trend-summary-grid article { min-width: 0; padding-right: 12px; padding-left: 12px; }
+  .trends-page .trend-summary-grid b,
+  .trends-page .trend-reference-summary article b { font-size: 19px; overflow-wrap: anywhere; }
+  .trends-primary-grid,
+  .trends-reference-lower { grid-template-columns: minmax(0, 1fr); }
+  .trends-reference-lower .trend-dimensions-panel { margin-top: 12px; }
+}

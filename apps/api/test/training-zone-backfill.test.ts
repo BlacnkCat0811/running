@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { FEATURE_SCHEMA_VERSION, TRAINING_LOAD_CONFIG_VERSION } from "@rai/contracts";
-import { RaiDatabase } from "@rai/health-export-parser";
+import { RaiDatabase } from "@rai/storage-sqlite";
 
 import {
   needsFullTrainingZoneBackfill,

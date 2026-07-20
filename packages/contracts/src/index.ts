@@ -229,6 +229,7 @@ export interface TrainingLoadBreakdown {
   distanceExposureRatio: number | null;
   distanceFactor: number;
   compositeLoad: number;
+  compositeIntensity: number;
   heartRateConfidence: number;
   paceConfidence: number;
 }
@@ -262,9 +263,10 @@ export interface UpdateTrainingZoneProfileInput {
 }
 
 export const TRAINING_ZONE_CONFIG_VERSION = "training-zone-config-v3" as const;
-export const TRAINING_LOAD_CONFIG_VERSION = "training-load-config-v3" as const;
+export const TRAINING_LOAD_CONFIG_VERSION = "training-load-config-v4" as const;
 
 export type TrainingLoadSource =
+  | "composite"
   | "heart_rate_series"
   | "average_heart_rate"
   | "rpe"
@@ -799,8 +801,18 @@ export interface PredictionEnhancementSelection {
     appliedDistances: RaceDistance[];
   };
   machineLearning: {
-    status: "insufficient_samples" | "keep_formula_baseline" | "active";
-    modelVersion: "race-residual-ridge-v1" | "race-residual-catboost-v1" | null;
+    status:
+      | "insufficient_samples"
+      | "keep_formula_baseline"
+      | "active"
+      | "inference_unavailable"
+      | "stale";
+    modelVersion:
+      | "race-residual-ridge-v1"
+      | "race-residual-catboost-v1"
+      | "race-residual-catboost-v2"
+      | "race-residual-catboost-v3"
+      | null;
     trainedExampleCount: number;
     evaluatedOutcomeCount: number;
     meanAbsoluteErrorImprovement: number | null;
@@ -857,7 +869,7 @@ export interface RacePredictionMetrics {
 }
 
 export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION =
-  "race-residual-feature-v2" as const;
+  "race-residual-feature-v3" as const;
 export const predictionResidualFeatureNames = [
   "logPredictedSeconds", "readiness", "conditionAdjustmentFraction",
   "performanceVdot", "vo2Max", "vo2Gap", "lactateThresholdPaceSecondsPerKm",
@@ -881,7 +893,9 @@ export const predictionResidualFeatureSchema = {
   featureNames: predictionResidualOnnxFeatureNames,
   featureSemantics: {
     acuteChronicLoadRatio:
-      "active composite daily training load; 7-day/28-day half-life EWMA ratio through asOf"
+      "active composite daily training load; 7-day/28-day half-life EWMA ratio through asOf",
+    environmentalScenario:
+      "missing unless an independently timestamped pre-race scenario is available; workout result metadata is excluded"
   },
   featureSchemaVersion: PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
   inputDtype: "float32",
@@ -892,9 +906,10 @@ export const predictionResidualFeatureSchema = {
   outputShape: ["N", 1]
 } as const;
 export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH =
-  "77a352b9035b68c584bd2b6147fc1156c22423ffa806b0da42462afd2b10dfb2" as const;
+  "bea6a4ffaec363ab1e78639935c643d8f7310db4d16ce7a6934a5fae2c463a6b" as const;
 export const CATBOOST_PREDICTION_MODEL_VERSION =
-  "race-residual-catboost-v1" as const;
+  "race-residual-catboost-v3" as const;
+export const PREDICTION_CORRECTION_CAP_FRACTION = 0.12 as const;
 
 export const predictionModelRunStatuses = [
   "queued",
@@ -923,6 +938,8 @@ export interface PredictionModelEvaluationMetrics {
   intervalCoverageChange: number;
   regressesAnyDistanceByMoreThan5Percent: boolean;
   onnxMaximumAbsoluteError: number;
+  /** Temporal event-block bootstrap 95% CI lower bound; null when unavailable. */
+  maeImprovementBootstrap95Lower: number | null;
   byDistance: Record<RaceDistance, PredictionModelDistanceMetrics>;
 }
 
@@ -932,6 +949,7 @@ export interface PredictionModelRun {
   modelVersion: string;
   featureSchemaVersion: string;
   featureSchemaHash: string | null;
+  abilityBaselineHash: string | null;
   trainingDataHash: string | null;
   trainingDataThroughAt: string;
   hyperparameters: Record<string, unknown>;
@@ -979,6 +997,9 @@ export interface PredictionModelTrainingResult {
   supportedDistances: RaceDistance[];
   artifactPath: string;
   artifactSha256: string;
+  /** Python evaluation gate outcome; activation requires "accepted". */
+  evaluationStatus: "accepted" | "rejected";
+  rejectionReasons: string[];
 }
 
 export function assertPhysiologyPredictionSnapshot(

@@ -1,0 +1,126 @@
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { useRemoteMock } = vi.hoisted(() => ({ useRemoteMock: vi.fn() }));
+vi.mock("../src/hooks.js", () => ({ useRemote: useRemoteMock }));
+
+import { DataAuditPage } from "../src/pages/DataAuditPage.js";
+import { PredictionsPage } from "../src/pages/PredictionsPage.js";
+import { WorkoutsPage } from "../src/pages/WorkoutsPage.js";
+
+const remote = (data: unknown, overrides: Record<string, unknown> = {}) => ({
+  data,
+  dataPath: null,
+  error: null,
+  loading: false,
+  reload: vi.fn(),
+  ...overrides
+});
+
+describe("page data presentation", () => {
+  beforeEach(() => useRemoteMock.mockReset());
+
+  it("uses workout source totals for audit shares and formats quality as a percentage", () => {
+    useRemoteMock.mockReturnValue(remote({
+      datasetVersion: "test",
+      importCompletedAt: null,
+      canonical: {
+        healthRecords: 1000,
+        workouts: 4,
+        canonicalWorkouts: 4,
+        workoutGroups: 4,
+        trainingSessions: 3,
+        routes: 0,
+        routePoints: 0
+      },
+      featureQuality: {
+        averageQualityScore: 0.82,
+        averageHeartRateCoverage: 0.75,
+        minimumHeartRateCoverage: 0.5,
+        maximumHeartRateCoverage: 1
+      },
+      recordTypes: [],
+      sourceCategories: [
+        { category: "Apple Watch", count: 3 },
+        { category: "Manual", count: 1 }
+      ],
+      sessionStatuses: [],
+      missingReasons: [],
+      issues: []
+    }));
+
+    render(<MemoryRouter><DataAuditPage /></MemoryRouter>);
+
+    expect(screen.getByText("75.0%", { selector: ".audit-source-table span" })).toBeTruthy();
+    expect(screen.getByText("25.0%", { selector: ".audit-source-table span" })).toBeTruthy();
+    expect(screen.getByText("4 Workouts")).toBeTruthy();
+    expect(screen.getByText("82.0%", { selector: ".audit-overview b" })).toBeTruthy();
+    expect(screen.getByText("数据完整性：82.0%", { selector: ".audit-health-bar span" })).toBeTruthy();
+  });
+
+  it("shows prediction uncertainty, method, fallback reason, and report guidance", () => {
+    useRemoteMock.mockReturnValue(remote({
+      generatedAt: "2026-07-17T00:00:00.000Z",
+      inputs: {
+        recoveryReadiness: 0.7,
+        performanceVdotEvidence: 2,
+        lactateThresholdSegments: 0,
+        labeledRaceOutcomes: 0,
+        directVo2Evidence: 0
+      },
+      modelSelection: {
+        machineLearning: {
+          status: "inference_unavailable",
+          activeModelVersion: null,
+          featureSchemaVersion: null,
+          trainedExampleCount: 0,
+          evaluatedOutcomeCount: 0,
+          meanAbsoluteErrorImprovement: null
+        }
+      },
+      guidanceCodes: ["prediction_confidence_low"],
+      snapshot: {
+        modelVersion: "rai-test-v1",
+        vo2Max: { valueMlKgMin: 45, confidence: 0.6 },
+        performanceVdot: { value: 44 },
+        lactateThreshold: { paceSecondsPerKm: 300, heartRateBpm: 170 },
+        races: [{
+          distance: "five_k",
+          status: "available",
+          potentialSeconds: 1200,
+          predictedSeconds: 1260,
+          readiness: 0.7,
+          confidence: 0.55,
+          optimisticSeconds: 1200,
+          pessimisticSeconds: 1320,
+          method: "daniels_vdot_conditions_v3",
+          machineLearningFallbackReason: "inference_failed"
+        }]
+      }
+    }));
+
+    render(<MemoryRouter><PredictionsPage /></MemoryRouter>);
+
+    expect(screen.getByText("VDOT + 场景修正")).toBeTruthy();
+    expect(screen.getByText("55%")).toBeTruthy();
+    expect(screen.getByText("20:00 至 22:00")).toBeTruthy();
+    expect(screen.getByText("机器学习推理失败，本距离已回退到公式基线。")).toBeTruthy();
+    expect(screen.getByText(/请把区间而不是单一点值作为主要参考/)).toBeTruthy();
+  });
+
+  it("does not show a cached workout preview while a different path is loading", () => {
+    useRemoteMock.mockReturnValue(remote({
+      total: 1,
+      items: [{ id: "stale-workout" }]
+    }, {
+      dataPath: "/v1/workouts?limit=30&offset=30",
+      loading: true
+    }));
+
+    render(<MemoryRouter initialEntries={["/workouts"]}><WorkoutsPage /></MemoryRouter>);
+
+    expect(screen.queryByRole("link", { name: /查看训练详情/ })).toBeNull();
+    expect(screen.getByText(/筛选结果将在这里显示速览/)).toBeTruthy();
+  });
+});
