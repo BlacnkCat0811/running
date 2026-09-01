@@ -22,7 +22,7 @@ export const workoutListQuerySchema = {
   properties: {
     limit: { type: "string", pattern: "^[0-9]{1,3}$" },
     offset: { type: "string", pattern: "^[0-9]{1,9}$" },
-    status: { type: "string", enum: ["eligible", "trial", "excluded", "calibrating"] },
+    status: { type: "string", enum: ["eligible", "trial", "excluded"] },
     sessionType: {
       type: "string",
       enum: ["easy", "steady", "tempo", "interval", "long_run", "race", "recovery", "unknown"]
@@ -224,6 +224,44 @@ const arraySchema = (...required: string[]) => ({
   type: "array" as const,
   items: objectSchema(...required)
 });
+const importJobSummarySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "importMode", "insertedWorkouts", "updatedWorkouts", "removedWorkouts", "unchangedWorkouts",
+    "routesUpdated", "featuresReused", "featuresRecomputed", "modelReplayFrom", "durationMs", "backupName"
+  ],
+  properties: {
+    importMode: { type: "string", enum: ["unchanged", "incremental", "full"] },
+    insertedWorkouts: { type: "integer" },
+    updatedWorkouts: { type: "integer" },
+    removedWorkouts: { type: "integer" },
+    unchangedWorkouts: { type: "integer" },
+    routesUpdated: { type: "integer" },
+    featuresReused: { type: "integer" },
+    featuresRecomputed: { type: "integer" },
+    modelReplayFrom: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+    durationMs: { type: "number", minimum: 0 },
+    backupName: { anyOf: [{ type: "string" }, { type: "null" }] }
+  }
+} as const;
+const importJobResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "status", "phase", "message", "createdAt", "completedAt", "error"],
+  properties: {
+    id: { type: "string" },
+    sourceId: { type: "string" },
+    status: { type: "string" },
+    phase: { type: "string" },
+    message: { type: "string" },
+    createdAt: { type: "string", format: "date-time" },
+    completedAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+    error: { anyOf: [{ type: "string" }, { type: "null" }] },
+    progress: { type: "number", minimum: 0, maximum: 1 },
+    summary: importJobSummarySchema
+  }
+} as const;
 const successSchema = (summary: string): Record<string, unknown> => {
   const objects: Record<string, string[]> = {
     "OpenAPI 3.1 契约": ["openapi", "info", "paths"],
@@ -254,9 +292,10 @@ const successSchema = (summary: string): Record<string, unknown> => {
     "创建完整重算任务": ["jobId"],
     "激活成功的历史模型运行": ["activeModelRunId"],
     "任务与阶段事件": ["id", "status", "events"],
-    "请求取消任务": ["cancelled"],
+    "请求取消任务": ["cancelRequested", "status"],
     "从已检查的 Apple Health 来源导入": ["id", "status", "phase", "message"],
     "导入任务状态": ["id", "status", "phase", "message"],
+    "最近的导入任务": ["id", "status", "phase", "message"],
     "流式上传并安全解压 Apple Health ZIP": ["sourceId", "uploadId", "fileName", "sizeBytes"],
     "预检已上传或本机导入来源": ["sourceId", "status", "exportFileName", "routeFileCount"],
     "发现常用目录中的 Apple Health 导出": ["sources"],
@@ -270,8 +309,11 @@ const successSchema = (summary: string): Record<string, unknown> => {
     "重算任务历史": ["id", "status"],
     "本地备份列表": ["name", "sizeBytes", "createdAt"]
   };
-  if (summary === "当前运行中的导入任务") {
-    return { anyOf: [objectSchema("id", "status", "phase", "message"), { type: "null" }] };
+  if (summary === "当前运行中的导入任务" || summary === "最近的导入任务") {
+    return { anyOf: [{ $ref: "#/components/schemas/ImportJobResponse" }, { type: "null" }] };
+  }
+  if (summary === "从已检查的 Apple Health 来源导入" || summary === "导入任务状态") {
+    return { $ref: "#/components/schemas/ImportJobResponse" };
   }
   const arrayFields = arrays[summary];
   if (arrayFields) return arraySchema(...arrayFields);
@@ -332,6 +374,7 @@ export const openapiDocument = {
         properties: { code: { type: "string" }, message: { type: "string" } }
       },
       ImportJobRequest: importJobBodySchema,
+      ImportJobResponse: importJobResponseSchema,
       WorkoutOverride: overrideBodySchema,
       TrainingZoneProfileUpdate: trainingZoneProfileBodySchema,
       PredictionModelTrainRequest: predictionModelTrainBodySchema,
@@ -417,6 +460,7 @@ export const openapiDocument = {
     }) },
     "/v1/import-jobs/{id}": { get: operation(["Jobs"], "导入任务状态", { parameters: pathId }) },
     "/v1/import-jobs/active": { get: operation(["Jobs"], "当前运行中的导入任务") },
+    "/v1/import-jobs/latest": { get: operation(["Jobs"], "最近的导入任务") },
     "/v1/imports/uploads": { post: operation(["Jobs"], "流式上传并安全解压 Apple Health ZIP", {
       requestBody: { required: true, content: { "multipart/form-data": { schema: {
         type: "object", required: ["file"], properties: { file: { type: "string", format: "binary" } }

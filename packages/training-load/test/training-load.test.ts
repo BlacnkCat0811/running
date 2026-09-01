@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { WorkoutTrainingLoad } from "@rai/contracts";
+
 import {
   aggregateTrainingPeriod,
   buildDailyTrainingMetrics,
@@ -9,10 +11,44 @@ import {
   calculateWorkoutTrainingLoad,
   classifyTrainingStatus,
   heartRateReserve,
+  latestAcuteChronicLoadRatio,
   localDateInTimeZone,
   periodBounds,
   trimpMinuteLoad
 } from "../src/index.js";
+
+const historicalLoad = (
+  trainingSessionId: string,
+  localDate: string,
+  load: number
+): WorkoutTrainingLoad => ({
+  trainingSessionId,
+  localDate,
+  durationSeconds: 3600,
+  distanceMeters: 10_000,
+  load,
+  intensity: 0.5,
+  source: "session_type",
+  confidence: 1,
+  rpe: null,
+  sessionType: "easy",
+  averageHeartRate: null,
+  elevationGainMeters: null,
+  stimulusType: "aerobic_base",
+  breakdown: {
+    rawHrrTrimp: null,
+    internalLoad: null,
+    paceLoad: null,
+    distanceReferenceMeters: null,
+    distanceExposureRatio: null,
+    distanceFactor: 1,
+    compositeLoad: load,
+    compositeIntensity: 0.5,
+    heartRateConfidence: 0,
+    paceConfidence: 0
+  },
+  explanations: []
+});
 
 test("clamps HRR and rejects an invalid personal heart-rate range", () => {
   assert.equal(heartRateReserve(40, 50, 190), 0);
@@ -168,6 +204,30 @@ test("fills rest days and updates EWMA with zero load", () => {
   assert.equal(days[0]?.loadRatio, null);
   assert.equal(days[0]?.acuteEwma, days[0]?.load);
   assert.equal(days[0]?.chronicEwma, days[0]?.load);
+});
+
+test("computes the latest acute/chronic ratio without building the full daily series", () => {
+  const loads = Array.from({ length: 80 }, (_, index) => historicalLoad(
+    `run-${index}`,
+    new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
+    index > 65 ? 180 : 60
+  ));
+  const throughDate = "2026-03-21";
+  assert.equal(
+    latestAcuteChronicLoadRatio(loads, throughDate),
+    buildDailyTrainingMetrics(loads, throughDate).at(-1)?.loadRatio ?? null
+  );
+});
+
+test("computes a decades-long latest ratio in linear time", () => {
+  const loads = Array.from({ length: 800 }, (_, index) => historicalLoad(
+    `historical-${index}`,
+    new Date(Date.UTC(2000, 0, 1 + index * 12)).toISOString().slice(0, 10),
+    70 + index % 30
+  ));
+  const startedAt = performance.now();
+  assert.notEqual(latestAcuteChronicLoadRatio(loads, "2026-01-01"), null);
+  assert.ok(performance.now() - startedAt < 1_000);
 });
 
 test("training-state priority protects insufficient history and attention", () => {

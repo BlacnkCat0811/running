@@ -203,9 +203,10 @@ export function applyRaceResidualRidge(
     -config.maximumCorrectionFraction,
     config.maximumCorrectionFraction
   );
+  const correctionMultiplier = 1 + correctionFraction;
   const adjustment = prediction.predictedSeconds * correctionFraction;
   const shift = (value: number | null): number | null =>
-    value === null ? null : Math.max(1, value + adjustment);
+    value === null ? null : Math.max(1, value * correctionMultiplier);
   const confidence = clamp(
     prediction.confidence + 0.04 * (1 - Math.exp(-model.sampleCount / 12)),
     0,

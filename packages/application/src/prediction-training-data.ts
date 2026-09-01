@@ -10,7 +10,7 @@ import {
   type WorkoutTrainingLoad
 } from "@rai/contracts";
 import {
-  buildDailyTrainingMetrics,
+  latestAcuteChronicLoadRatio,
   localDateInTimeZone
 } from "@rai/training-load";
 
@@ -100,16 +100,73 @@ export function loadAcuteChronicLoadRatio(
     SELECT COUNT(*) AS count FROM sqlite_master
     WHERE type = 'table' AND name IN (
       'workout_overrides', 'workout_training_loads', 'training_metric_runs',
-      'model_runs', 'active_model_run'
+      'model_runs'
     )
   `).get() as unknown as { count: number };
-  const rows = sourceTables.count === 5
+  const rows = sourceTables.count === 4
     ? database.prepare(`
-    WITH future_override AS (
-      SELECT training_session_id, MIN(created_at) AS created_at
-      FROM workout_overrides
-      WHERE created_at > ?
-      GROUP BY training_session_id
+    WITH effective_override AS (
+      SELECT
+        override.training_session_id,
+        override.id AS override_id,
+        override.statistics_participation,
+        julianday(override.created_at) AS created_at_julian
+      FROM workout_overrides override
+      WHERE override.id = (
+        SELECT historical_override.id
+        FROM workout_overrides historical_override
+        WHERE historical_override.training_session_id = override.training_session_id
+          AND julianday(historical_override.created_at) <= julianday(?)
+        ORDER BY julianday(historical_override.created_at) DESC,
+          historical_override.revision DESC
+        LIMIT 1
+      )
+    ), override_bounds AS (
+      SELECT
+        MAX(created_at_julian) AS effective_at_julian,
+        (
+          SELECT MIN(julianday(created_at))
+          FROM workout_overrides
+          WHERE julianday(created_at) > julianday(?)
+        ) AS future_at_julian
+      FROM effective_override
+    ), eligible_metric_run AS (
+      SELECT metric_run.id
+      FROM training_metric_runs metric_run
+      JOIN model_runs model_run
+        ON model_run.id = metric_run.model_run_id
+       AND model_run.status = 'succeeded'
+      CROSS JOIN override_bounds bounds
+      WHERE metric_run.status = 'succeeded'
+        AND (
+          (
+            json_type(metric_run.config_json, '$.overrideSnapshotIds') = 'array'
+            AND NOT EXISTS (
+              SELECT 1 FROM effective_override effective
+              WHERE NOT EXISTS (
+                SELECT 1
+                FROM json_each(metric_run.config_json, '$.overrideSnapshotIds') snapshot
+                WHERE snapshot.value = effective.override_id
+              )
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM json_each(metric_run.config_json, '$.overrideSnapshotIds') snapshot
+              WHERE NOT EXISTS (
+                SELECT 1 FROM effective_override effective
+                WHERE snapshot.value = effective.override_id
+              )
+            )
+          ) OR (
+            json_type(metric_run.config_json, '$.overrideSnapshotIds') IS NULL
+            AND (bounds.effective_at_julian IS NULL OR
+              julianday(metric_run.created_at) >= bounds.effective_at_julian)
+            AND (bounds.future_at_julian IS NULL OR
+              julianday(metric_run.created_at) < bounds.future_at_julian)
+          )
+        )
+      ORDER BY julianday(metric_run.created_at) DESC, metric_run.id DESC
+      LIMIT 1
     ), eligible_loads AS (
       SELECT
         load.training_session_id AS trainingSessionId,
@@ -118,33 +175,22 @@ export function loadAcuteChronicLoadRatio(
         load.duration_seconds AS durationSeconds,
         load.training_load AS trainingLoad,
         load.distance_km AS distanceKm,
-        load.confidence AS confidence,
-        ROW_NUMBER() OVER (
-          PARTITION BY load.training_session_id
-           ORDER BY metric_run.created_at DESC, metric_run.id DESC
-        ) AS rowNumber
-      FROM workout_training_loads load
-      JOIN training_metric_runs metric_run
-        ON metric_run.id = load.training_metric_run_id
-       AND metric_run.status = 'succeeded'
+        load.confidence AS confidence
+      FROM eligible_metric_run selected
+      JOIN workout_training_loads load
+        ON load.training_metric_run_id = selected.id
       JOIN training_sessions session ON session.id = load.training_session_id
-      LEFT JOIN future_override future
-        ON future.training_session_id = load.training_session_id
-      LEFT JOIN active_model_run active
-        ON active.model_run_id = metric_run.model_run_id
+      LEFT JOIN effective_override effective
+        ON effective.training_session_id = load.training_session_id
       WHERE session.status = 'active'
         AND session.anchor_end_at <= ?
-        AND (
-          (future.created_at IS NULL AND active.model_run_id IS NOT NULL)
-           OR (future.created_at IS NOT NULL AND metric_run.created_at < future.created_at)
-        )
+        AND COALESCE(effective.statistics_participation, '') <> 'exclude'
     )
     SELECT trainingSessionId, localDate, timezoneIdentifier, durationSeconds,
       trainingLoad, distanceKm, confidence
     FROM eligible_loads
-    WHERE rowNumber = 1
     ORDER BY localDate, trainingSessionId
-  `).all(asOf, asOf) as unknown as ActiveTrainingLoadRow[]
+  `).all(asOf, asOf, asOf) as unknown as ActiveTrainingLoadRow[]
     : database.prepare(`
     SELECT
       load.training_session_id AS trainingSessionId,
@@ -172,11 +218,10 @@ export function loadAcuteChronicLoadRatio(
     load: row.trainingLoad,
     confidence: row.confidence
   })) as WorkoutTrainingLoad[];
-  const metrics = buildDailyTrainingMetrics(loads, throughDate);
-  return metrics.at(-1)?.loadRatio ?? null;
+  return latestAcuteChronicLoadRatio(loads, throughDate);
 }
 
-function loadTrainingContext(
+export function loadTrainingContext(
   database: DatabaseSync,
   asOf: string,
   distance: RaceDistance
@@ -204,10 +249,10 @@ function loadTrainingContext(
       AND session.anchor_distance_km > 0
       AND (${historicalEligibilitySql()}) <> 'excluded'
   `).get(
-    asOf,
     start4w,
     start4w,
     exposureThresholdKm[distance],
+    asOf,
     start8w,
     asOf
   ) as unknown as {

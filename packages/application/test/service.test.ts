@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 import {
   RaiApplicationService,
@@ -153,6 +153,15 @@ test("creates immutable feature/model runs and switches the active model", async
     assert.equal(secondJob?.id, firstOverride.jobId);
     assert.match(firstOverride.overrideId, /^workout_override_/);
     assert.equal(secondJob?.status, "succeeded");
+    const metricConfig = store.database.prepare(`
+      SELECT metric.config_json AS configJson
+      FROM training_metric_runs metric
+      WHERE metric.model_run_id = ?
+    `).get(secondJob?.modelRunId) as unknown as { configJson: string };
+    assert.deepEqual(
+      (JSON.parse(metricConfig.configJson) as { overrideSnapshotIds: string[] }).overrideSnapshotIds,
+      [firstOverride.overrideId]
+    );
 
     const active = store.database
       .prepare("SELECT model_run_id AS modelRunId FROM active_model_run WHERE singleton = 1")
@@ -223,6 +232,52 @@ test("creates immutable feature/model runs and switches the active model", async
       .prepare("SELECT COUNT(*) AS count FROM active_daily_training_metrics")
       .get() as unknown as { count: number };
     assert.ok(afterRefresh.count > beforeRefresh.count);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("freezes the override snapshot before feature extraction starts", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-override-snapshot-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    const pipeline = Reflect.get(service, "pipeline") as object;
+    const extractFeatures = Reflect.get(pipeline, "extractFeatures") as (
+      ...args: unknown[]
+    ) => unknown;
+    let inserted = false;
+    Reflect.set(pipeline, "extractFeatures", (...args: unknown[]) => {
+      if (!inserted) {
+        inserted = true;
+        store.database.exec(`
+          INSERT INTO workout_overrides (
+            id, training_session_id, revision, session_type, rpe,
+            condition_tags_json, note
+          ) VALUES (
+            'mid-run-override', 'session_7', 1, 'race', 10, '[]',
+            'Inserted after the recompute snapshot was captured'
+          )
+        `);
+      }
+      return extractFeatures.apply(pipeline, args);
+    });
+
+    service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
+    const completed = service.runNextJob();
+    assert.equal(completed?.status, "succeeded");
+    const row = store.database.prepare(`
+      SELECT metric.config_json AS configJson, load.rpe
+      FROM training_metric_runs metric
+      JOIN workout_training_loads load ON load.training_metric_run_id = metric.id
+      WHERE metric.model_run_id = ? AND load.training_session_id = 'session_7'
+    `).get(completed?.modelRunId) as unknown as { configJson: string; rpe: number | null };
+    assert.deepEqual(
+      (JSON.parse(row.configJson) as { overrideSnapshotIds: string[] }).overrideSnapshotIds,
+      []
+    );
+    assert.equal(row.rpe, null);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -702,6 +757,105 @@ test("normalizes persisted fields when a running recompute reaches cancellation"
       { status: "cancelled", progressPhase: "cancelled", cancelRequested: 0 }
     );
     assert.ok(persisted.completedAt);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancelling a completed replay leaves the previous model and prediction activation in place", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-complete-cancel-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({
+      evaluatedAt: dateForRun(8),
+      timezoneIdentifier: "UTC"
+    });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+    const previousModel = store.database.prepare(`
+      SELECT model_run_id AS modelRunId FROM active_model_run WHERE singleton = 1
+    `).get() as { modelRunId: string };
+    const predictionId = "prediction_model_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    store.database.prepare(`
+      INSERT INTO prediction_model_runs (
+        id, algorithm, model_version, feature_schema_version, ability_baseline_hash,
+        training_data_through_at, hyperparameters_json, request_json, status
+      ) VALUES (?, 'catboost', 'catboost_v1', 'race_residual_features_v1', 'fixture',
+        ?, '{}', '{}', 'succeeded')
+    `).run(predictionId, dateForRun(8));
+    store.database.prepare(`
+      INSERT INTO active_prediction_model (singleton, prediction_model_run_id) VALUES (1, ?)
+    `).run(predictionId);
+
+    const jobId = service.enqueueFullRecompute({
+      evaluatedAt: dateForRun(8),
+      timezoneIdentifier: "UTC"
+    });
+    store.database.exec(`
+      CREATE TRIGGER request_cancel_before_activation
+      AFTER UPDATE OF status ON model_runs
+      WHEN NEW.status = 'succeeded'
+      BEGIN
+        UPDATE recompute_jobs SET cancel_requested = 1
+        WHERE id = '${jobId}' AND status = 'running';
+      END;
+    `);
+
+    const result = service.runNextJob();
+    assert.equal(result?.id, jobId);
+    assert.equal(result?.status, "cancelled");
+    assert.equal(result?.cancelRequested, false);
+    const active = store.database.prepare(`
+      SELECT model_run_id AS modelRunId FROM active_model_run WHERE singleton = 1
+    `).get() as { modelRunId: string };
+    assert.equal(active.modelRunId, previousModel.modelRunId);
+    const prediction = store.database.prepare(`
+      SELECT prediction_model_run_id AS runId FROM active_prediction_model WHERE singleton = 1
+    `).get() as { runId: string };
+    assert.equal(prediction.runId, predictionId);
+    new RecomputeJobRepository(store.database).fail(jobId, new Error("duplicate fail after cancel"));
+    assert.equal(service.requestJobCancellation(jobId).outcome, "terminal");
+    assert.equal(
+      (store.database.prepare("SELECT status FROM recompute_jobs WHERE id = ?").get(jobId) as { status: string }).status,
+      "cancelled"
+    );
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cancelling snapshot refresh after writing snapshots keeps the job cancelled", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-snapshot-cancel-"));
+  const store = await seedDatabase(join(root, "rai.sqlite"));
+  try {
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({
+      evaluatedAt: dateForRun(8),
+      timezoneIdentifier: "UTC"
+    });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+
+    const jobId = service.enqueueSnapshotRefresh({
+      evaluatedAt: new Date(Date.parse(dateForRun(8)) + 3 * 86_400_000).toISOString(),
+      timezoneIdentifier: "UTC"
+    });
+    store.database.exec(`
+      CREATE TRIGGER request_cancel_after_snapshot_write
+      AFTER INSERT ON daily_ability_snapshots
+      BEGIN
+        UPDATE recompute_jobs SET cancel_requested = 1
+        WHERE id = '${jobId}' AND status = 'running';
+      END;
+    `);
+
+    const result = service.runNextJob();
+    assert.equal(result?.id, jobId);
+    assert.equal(result?.status, "cancelled");
+    assert.equal(result?.progressPhase, "cancelled");
+    assert.notEqual(result?.status, "succeeded");
+    assert.notEqual(result?.status, "failed");
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

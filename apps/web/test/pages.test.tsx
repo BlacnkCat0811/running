@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { useRemoteMock } = vi.hoisted(() => ({ useRemoteMock: vi.fn() }));
@@ -17,6 +17,11 @@ const remote = (data: unknown, overrides: Record<string, unknown> = {}) => ({
   reload: vi.fn(),
   ...overrides
 });
+
+function LocationStateProbe() {
+  const location = useLocation();
+  return <span data-testid="return-to">{(location.state as { from?: string } | null)?.from}</span>;
+}
 
 describe("page data presentation", () => {
   beforeEach(() => useRemoteMock.mockReset());
@@ -122,5 +127,45 @@ describe("page data presentation", () => {
 
     expect(screen.queryByRole("link", { name: /查看训练详情/ })).toBeNull();
     expect(screen.getByText(/筛选结果将在这里显示速览/)).toBeTruthy();
+  });
+
+  it("preserves workout filters and pagination when opening the preview detail", () => {
+    useRemoteMock.mockReturnValue(remote({
+      total: 60,
+      items: [{
+        id: "workout-31",
+        startedAt: "2026-07-17T00:00:00.000Z",
+        durationSeconds: 3600,
+        distanceKm: 10,
+        averagePaceSecondsPerKm: 360,
+        averageHeartRateBpm: 150,
+        indoor: false,
+        sourceCategory: "apple_watch",
+        sessionType: "easy",
+        stimulusType: "aerobic_base",
+        stimulusConfidence: 0.8,
+        currentAbility: 42,
+        confidence: 0.9,
+        assessmentStatus: "eligible",
+        eligibilityStatus: "eligible",
+        missingReasons: [],
+        hasRoute: true
+      }]
+    }, {
+      dataPath: "/v1/workouts?status=eligible&offset=30&limit=30"
+    }));
+
+    const view = render(
+      <MemoryRouter initialEntries={["/workouts?status=eligible&offset=30"]}>
+        <Routes>
+          <Route path="/workouts" element={<WorkoutsPage />} />
+          <Route path="/workouts/:id" element={<LocationStateProbe />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(view.container.querySelector<HTMLAnchorElement>(".workout-preview-panel a")!);
+
+    expect(screen.getByTestId("return-to").textContent).toBe("/workouts?status=eligible&offset=30");
   });
 });

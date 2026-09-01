@@ -90,7 +90,15 @@ async function waitForBoundPort(child: ChildProcess, output: () => string): Prom
 
 async function stopApi(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null && child.stdout?.closed && child.stderr?.closed && !child.connected) return;
-  const closed = new Promise<void>((resolvePromise) => child.once("close", () => resolvePromise()));
+  const closed = new Promise<void>((resolvePromise) => {
+    const resolveIfClosed = (): void => {
+      if (child.exitCode !== null && child.stdout?.closed && child.stderr?.closed && !child.connected) {
+        resolvePromise();
+      }
+    };
+    child.once("close", () => resolvePromise());
+    resolveIfClosed();
+  });
   const waitForClose = (timeoutMs: number): Promise<void> => {
     return new Promise<void>((resolvePromise, reject) => {
       const timer = setTimeout(() => reject(new Error("API shutdown timed out")), timeoutMs);
@@ -100,12 +108,24 @@ async function stopApi(child: ChildProcess): Promise<void> {
       });
     });
   };
-  if (child.connected) child.send("rai:shutdown");
-  else child.kill("SIGTERM");
+  try {
+    if (child.connected) child.send("rai:shutdown");
+    else child.kill("SIGTERM");
+  } catch {
+    child.kill("SIGTERM");
+  }
   try {
     await waitForClose(10_000);
   } catch (error) {
-    child.kill("SIGKILL");
+    if (process.platform === "win32" && child.pid !== undefined) {
+      const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        stdio: "ignore"
+      });
+      await new Promise<void>((resolvePromise) => killer.once("close", () => resolvePromise()));
+    } else {
+      child.kill("SIGKILL");
+    }
     await waitForClose(10_000).catch(() => {});
     throw error;
   }
@@ -288,8 +308,15 @@ test("runtime status includes persisted prediction work and restore recovers rec
     let restoredStatus = "running";
     while (Date.now() < deadline) {
       const restored = new DatabaseSync(databasePath, { readOnly: true });
-      restoredStatus = (restored.prepare("SELECT status FROM recompute_jobs WHERE id = ?").get(jobId) as { status: string }).status;
-      restored.close();
+      try {
+        restoredStatus = (restored.prepare(
+          "SELECT status FROM recompute_jobs WHERE id = ?"
+        ).get(jobId) as { status: string }).status;
+      } catch (error) {
+        if (!/database is locked/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      } finally {
+        restored.close();
+      }
       if (restoredStatus !== "running" && restoredStatus !== "queued") break;
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
@@ -300,10 +327,15 @@ test("runtime status includes persisted prediction work and restore recovers rec
     let restoredPredictionStatus = "running";
     while (Date.now() < predictionDeadline) {
       const restored = new DatabaseSync(databasePath, { readOnly: true });
-      restoredPredictionStatus = (restored.prepare(
-        "SELECT status FROM prediction_model_runs WHERE id = ?"
-      ).get(restoredPredictionId) as { status: string }).status;
-      restored.close();
+      try {
+        restoredPredictionStatus = (restored.prepare(
+          "SELECT status FROM prediction_model_runs WHERE id = ?"
+        ).get(restoredPredictionId) as { status: string }).status;
+      } catch (error) {
+        if (!/database is locked/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      } finally {
+        restored.close();
+      }
       if (!['running', 'validating', 'queued'].includes(restoredPredictionStatus)) break;
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
@@ -386,6 +418,7 @@ test("HTTP restore remains available when the active database is corrupt at star
     assert.equal(restoredHealth.status, "ok");
     assert.equal(restoredHealth.databaseReady, true);
 
+    await stopApi(child);
     const active = new DatabaseSync(databasePath, { readOnly: true });
     try {
       assert.equal((active.prepare("SELECT value FROM marker").get() as { value: string }).value, "backup-version");
@@ -710,6 +743,26 @@ test("dynamic-port startup reports readiness and workout overrides preserve serv
     } finally {
       database.close();
     }
+
+    const cancellationDatabase = new DatabaseSync(databasePath);
+    try {
+      cancellationDatabase.prepare(`
+        INSERT INTO recompute_jobs (
+          id, job_type, status, request_json, progress_phase, started_at
+        ) VALUES (?, 'snapshot_refresh', 'running', '{}', 'snapshot_refresh', ?)
+      `).run("runtime-cancellation-contract", new Date().toISOString());
+    } finally {
+      cancellationDatabase.close();
+    }
+    const cancellation = await fetch(`${url}/v1/jobs/runtime-cancellation-contract/cancel`, {
+      method: "POST"
+    });
+    const cancellationText = await cancellation.text();
+    assert.equal(cancellation.status, 200, cancellationText);
+    assert.deepEqual(JSON.parse(cancellationText), {
+      cancelRequested: true,
+      status: "running"
+    });
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

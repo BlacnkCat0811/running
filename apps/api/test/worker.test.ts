@@ -8,7 +8,7 @@ import test from "node:test";
 
 import { RaiApplicationService, currentAbilityBaselineHash } from "@rai/application";
 import { healthTypes } from "@rai/contracts";
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
 import {
@@ -62,6 +62,7 @@ interface ExternalTrainerTestSurface {
 interface RecomputeWorkerTestSurface {
   runOneInWorkerThread(): Promise<boolean>;
   activeWorker: unknown | null;
+  scheduled: boolean;
 }
 
 const delay = (milliseconds: number): Promise<void> =>
@@ -160,7 +161,152 @@ test("recompute worker marks outstanding jobs failed after bounded startup retri
       const event = database.prepare(`
         SELECT message FROM recompute_job_events WHERE job_id = ? AND phase = 'failed'
       `).get(jobId) as { message: string };
-      assert.match(event.message, /3 attempts/);
+      assert.equal(event.message, "Task failed");
+    } finally {
+      database.close();
+    }
+  } finally {
+    await worker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recompute worker recovers a claimed job after the thread crashes then an empty run", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-recompute-recover-crash-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(databasePath);
+  const jobId = "recompute_job_crash_after_claim";
+  store.database.prepare(`
+    INSERT INTO recompute_jobs (id, job_type, status, request_json, progress_phase)
+    VALUES (?, 'full_recompute', 'queued', '{}', 'queued')
+  `).run(jobId);
+  store.close();
+  const worker = new RecomputeWorker(databasePath);
+  const surface = worker as unknown as RecomputeWorkerTestSurface;
+  let attempts = 0;
+  surface.runOneInWorkerThread = async () => {
+    attempts += 1;
+    const database = new DatabaseSync(databasePath);
+    try {
+      const jobs = new RecomputeJobRepository(database);
+      if (attempts === 1) {
+        assert.equal(jobs.claimNext()?.id, jobId);
+        throw new Error("fixture crash after claim");
+      }
+      const recovered = jobs.claimNext();
+      if (!recovered) return false;
+      assert.equal(recovered.id, jobId);
+      assert.equal(jobs.complete(jobId, "completed", 1, 1, "Recovered after crash"), true);
+      return true;
+    } finally {
+      database.close();
+    }
+  };
+  try {
+    worker.schedule();
+    await waitFor(() => attempts >= 2);
+    await waitFor(() => !worker.isRunning);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const job = database.prepare(`
+        SELECT status, progress_phase AS progressPhase FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as { status: string; progressPhase: string };
+      assert.equal(job.status, "succeeded");
+      assert.equal(job.progressPhase, "completed");
+    } finally {
+      database.close();
+    }
+  } finally {
+    await worker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recompute worker wakeups while draining are not dropped", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-recompute-wakeup-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(databasePath);
+  store.close();
+  const worker = new RecomputeWorker(databasePath);
+  const surface = worker as unknown as RecomputeWorkerTestSurface;
+  let holdFirst: () => void = () => {};
+  const firstGate = new Promise<void>((resolvePromise) => {
+    holdFirst = resolvePromise;
+  });
+  let attempts = 0;
+  surface.runOneInWorkerThread = async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      await firstGate;
+      return false;
+    }
+    return false;
+  };
+  try {
+    worker.schedule();
+    await waitFor(() => attempts === 1);
+    worker.schedule();
+    assert.equal(surface.scheduled, true);
+    holdFirst();
+    await waitFor(() => attempts === 2);
+    await waitFor(() => !worker.isRunning);
+    assert.equal(attempts, 2);
+  } finally {
+    await worker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recompute worker fails a claimed job and its child runs after bounded retries", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-recompute-fail-claimed-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(databasePath);
+  const jobId = "recompute_job_claimed_retry_failure";
+  store.database.prepare(`
+    INSERT INTO recompute_jobs (id, job_type, status, request_json, progress_phase)
+    VALUES (?, 'full_recompute', 'queued', '{}', 'queued')
+  `).run(jobId);
+  store.close();
+  const worker = new RecomputeWorker(databasePath);
+  const surface = worker as unknown as RecomputeWorkerTestSurface;
+  let attempts = 0;
+  surface.runOneInWorkerThread = async () => {
+    attempts += 1;
+    const database = new DatabaseSync(databasePath);
+    try {
+      const jobs = new RecomputeJobRepository(database);
+      const job = jobs.claimNext();
+      assert.equal(job?.id, jobId);
+      const featureRunId = `feature_run_claimed_${attempts}`;
+      database.prepare(`
+        INSERT INTO feature_runs (
+          id, dataset_version, canonical_contract_version, feature_schema_version,
+          feature_config_json, feature_config_hash, status
+        ) VALUES (?, 'dataset-1', 'canonical-health-v1', 'v1', '{}', 'hash', 'running')
+      `).run(featureRunId);
+      jobs.setRunIds(jobId, featureRunId, null);
+      throw new Error("fixture crash after claim");
+    } finally {
+      database.close();
+    }
+  };
+  try {
+    worker.schedule();
+    await waitFor(() => attempts === 3);
+    await waitFor(() => !worker.isRunning);
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      const job = database.prepare(`
+        SELECT status, cancel_requested AS cancelRequested, error_json AS errorJson
+        FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as { status: string; cancelRequested: number; errorJson: string | null };
+      assert.equal(job.status, "failed");
+      assert.equal(job.cancelRequested, 0);
+      assert.match(job.errorJson ?? "", /fixture crash after claim/);
+      const child = database.prepare(`
+        SELECT status FROM feature_runs WHERE id = 'feature_run_claimed_3'
+      `).get() as { status: string };
+      assert.equal(child.status, "failed");
     } finally {
       database.close();
     }
@@ -2022,9 +2168,12 @@ test("activates data-only health changes without running model recompute", async
   const root = mkdtempSync(join(tmpdir(), "rai-import-data-only-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
+  mkdirSync(join(root, "export"));
+  writeFileSync(join(root, "export", "export.xml"), "<HealthData />", "utf8");
   const active = await seedCanonical(databasePath);
   active.close();
-  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  const importWorker = new ImportWorker(databasePath, root, root);
+  const worker = importWorker as unknown as ImportWorkerTestSurface;
   let commandCount = 0;
   worker.command = async (args) => {
     commandCount += 1;
@@ -2048,34 +2197,43 @@ test("activates data-only health changes without running model recompute", async
       staging.close();
     }
   };
-  const job: Record<string, unknown> = {
-    id: "web_import_data_only",
-    status: "queued",
-    phase: "queued",
-    message: "queued",
-    createdAt: new Date().toISOString(),
-    completedAt: null,
-    error: null,
-    inputPath: join(root, "export")
+  const persistJobs = worker.persistJobs.bind(importWorker);
+  let terminalPersistenceFailures = 0;
+  worker.persistJobs = () => {
+    if (importWorker.latest()?.status === "succeeded" && terminalPersistenceFailures === 0) {
+      terminalPersistenceFailures += 1;
+      throw new Error("fixture transient terminal persistence failure");
+    }
+    persistJobs();
   };
   let finishTerminalCleanup: (() => void) | undefined;
   let terminalCleanupStarted = false;
   const terminalCleanup = new Promise<void>((resolvePromise) => {
     finishTerminalCleanup = resolvePromise;
   });
-  job.onTerminal = async () => {
-    terminalCleanupStarted = true;
-    await terminalCleanup;
-  };
   try {
-    const runPromise = worker.run(job);
+    const created = importWorker.create(join(root, "export"), async () => {
+      const runtime = new DatabaseSync(join(root, "var", "runtime.sqlite"), { readOnly: true });
+      try {
+        const stored = runtime.prepare("SELECT status FROM import_jobs WHERE id = ?").get(created.id) as {
+          status: string;
+        };
+        assert.equal(stored.status, "succeeded", "terminal cleanup must start after durable publication");
+      } finally {
+        runtime.close();
+      }
+      terminalCleanupStarted = true;
+      await terminalCleanup;
+    }, "source-data-only");
     await waitFor(() => terminalCleanupStarted);
-    assert.equal(job.status, "running", "terminal status must remain hidden until cleanup completes");
+    assert.equal(terminalPersistenceFailures, 1);
+    assert.equal(importWorker.get(created.id)?.status, "succeeded");
+    assert.equal(importWorker.isRunning, true, "worker remains active until terminal cleanup completes");
     finishTerminalCleanup?.();
-    await runPromise;
+    await waitFor(() => !importWorker.isRunning);
     assert.equal(commandCount, 1);
-    assert.equal(job.status, "succeeded");
-    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    assert.equal(importWorker.get(created.id)?.status, "succeeded");
+    assert.equal(importWorker.get(created.id)?.summary?.importMode, "incremental");
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
       assert.equal((activated.prepare(`
@@ -2186,6 +2344,7 @@ test("persists import jobs and marks an interrupted job after API restart", () =
   mkdirSync(join(root, "var"));
   writeFileSync(join(root, "var", "import-jobs.json"), JSON.stringify([{
     id: "web_import_interrupted",
+    sourceId: "upload_interrupted",
     status: "running",
     phase: "recompute",
     message: "正在重算",
@@ -2198,13 +2357,47 @@ test("persists import jobs and marks an interrupted job after API restart", () =
     const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
     const job = worker.latest();
     assert.equal(job?.id, "web_import_interrupted");
+    assert.equal(job?.sourceId, "upload_interrupted");
     assert.equal(job?.status, "failed");
     assert.equal(job?.phase, "interrupted");
     assert.equal(job?.error, "导入失败，请查看服务日志");
     writeFileSync(join(root, "var", "import-jobs.json"), "[]", "utf8");
     const restarted = new ImportWorker(join(root, "rai.sqlite"), root, root);
     assert.equal(restarted.latest()?.id, "web_import_interrupted");
+    assert.equal(restarted.latest()?.sourceId, "upload_interrupted");
     assert.equal(existsSync(join(root, "var", "runtime.sqlite")), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("adds sourceId storage when opening an existing runtime database", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-jobs-schema-"));
+  const runtimeDirectory = join(root, "var");
+  mkdirSync(runtimeDirectory);
+  const runtimePath = join(runtimeDirectory, "runtime.sqlite");
+  const database = new DatabaseSync(runtimePath);
+  database.exec(`
+    CREATE TABLE runtime_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE import_jobs (
+      sequence_number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL, phase TEXT NOT NULL, message TEXT NOT NULL,
+      created_at TEXT NOT NULL, completed_at TEXT, error TEXT,
+      input_path TEXT NOT NULL, progress REAL, summary_json TEXT
+    );
+    INSERT INTO import_jobs (id, status, phase, message, created_at, completed_at, error, input_path)
+    VALUES ('web_import_legacy', 'succeeded', 'completed', 'done',
+      '2026-01-01T00:00:00.000Z', '2026-01-01T00:01:00.000Z', NULL, 'C:/legacy-export');
+  `);
+  database.close();
+  try {
+    const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+    assert.equal(worker.latest()?.id, "web_import_legacy");
+    assert.equal(worker.latest()?.sourceId, undefined);
+    const migrated = new DatabaseSync(runtimePath, { readOnly: true });
+    const columns = migrated.prepare("PRAGMA table_info(import_jobs)").all() as Array<{ name: string }>;
+    migrated.close();
+    assert.ok(columns.some(({ name }) => name === "source_id"));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2221,16 +2414,59 @@ test("releases import worker state and calls terminal cleanup when staging clean
     throw new Error("fixture cleanup failure");
   };
   let terminalResult: boolean | null = null;
+  let terminalAttempts = 0;
   try {
     const created = worker.create(inputPath, (succeeded) => {
+      terminalAttempts += 1;
+      if (terminalAttempts < 3) throw new Error("fixture transient terminal cleanup failure");
       terminalResult = succeeded;
     }, "source-cleanup-test");
     assert.equal(created.sourceId, "source-cleanup-test");
     assert.equal(worker.get(created.id)?.sourceId, "source-cleanup-test");
     await waitFor(() => !worker.isRunning);
     assert.equal(terminalResult, false);
+    assert.equal(terminalAttempts, 3);
     assert.equal(worker.get(created.id)?.status, "failed");
     assert.equal(worker.get(created.id)?.error, "导入失败，请查看服务日志");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("releases terminal ownership without cleaning the source when terminal state cannot be persisted", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-terminal-persist-failure-"));
+  const inputPath = join(root, "export");
+  mkdirSync(inputPath);
+  writeFileSync(join(inputPath, "export.xml"), "<HealthData />", "utf8");
+  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  const surface = worker as unknown as ImportWorkerTestSurface;
+  surface.removeDatabaseFiles = async () => {
+    throw new Error("fixture import failure");
+  };
+  const persistJobs = surface.persistJobs.bind(worker);
+  let terminalPersistenceAttempts = 0;
+  surface.persistJobs = () => {
+    if (worker.latest()?.status === "failed") {
+      terminalPersistenceAttempts += 1;
+      throw new Error("fixture permanent runtime persistence failure");
+    }
+    persistJobs();
+  };
+  let released = false;
+  let sourceCleaned = false;
+  try {
+    worker.create(inputPath, (_succeeded, durable) => {
+      try {
+        if (durable) sourceCleaned = true;
+      } finally {
+        released = true;
+      }
+    }, "source-must-remain");
+    await waitFor(() => !worker.isRunning);
+    assert.equal(terminalPersistenceAttempts, 4);
+    assert.equal(released, true, "terminal callback must still release external ownership");
+    assert.equal(sourceCleaned, false, "non-durable terminal state must preserve the retry source");
+    assert.equal(worker.latest()?.status, "failed");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

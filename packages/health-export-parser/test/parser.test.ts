@@ -171,6 +171,26 @@ test("classifies vendor watches before Apple Watch and recognizes user-entered d
   assert.equal(classifySource("Health", null, { HKWasUserEntered: ["1"] }), "manual");
 });
 
+test("falls back to workout dates when the exported duration is negative", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-parser-negative-duration-"));
+  const xmlPath = join(root, "export.xml");
+  writeFileSync(xmlPath, `<HealthData><Workout workoutActivityType="${workoutTypes.running}"
+    sourceName="Watch" startDate="${appleDate("08:00")}" endDate="${appleDate("08:30")}"
+    duration="-30" durationUnit="min"/></HealthData>`, "utf8");
+  const store = await RaiDatabase.open(join(root, "rai.sqlite"));
+  try {
+    const result = await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+    const workout = store.database.prepare(
+      "SELECT duration_seconds AS durationSeconds FROM workouts"
+    ).get() as unknown as { durationSeconds: number };
+    assert.equal(result.workoutCount, 1);
+    assert.equal(workout.durationSeconds, 1800);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("imports a GPX file whose on-disk name contains uppercase characters", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-parser-gpx-case-"));
   const routeDirectory = join(root, "workout-routes");

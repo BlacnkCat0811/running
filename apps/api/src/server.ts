@@ -10,6 +10,7 @@ import type {
   ImportJobRequest,
   OverrideWorkoutInput,
   PredictionModelRun,
+  RecomputeJobCancellationResponse,
   TrainPredictionModelRequest,
   UpdateTrainingZoneProfileInput,
   TrainingStatisticsGranularity
@@ -246,6 +247,10 @@ const databaseIsReady = (): boolean => {
     if (readinessCache !== null) return readinessCache;
     const database = new DatabaseSync(databasePath, { readOnly: true });
     try {
+      // Do not run PRAGMA quick_check / foreign_key_check here. Both scan the
+      // full file and block the HTTP thread for minutes on a multi-GB export.
+      // Unreadable files still throw; startup recovery and observeMainDatabaseError
+      // flip recovery_required when SQLite reports corruption on a real query.
       const required = database.prepare(`
         SELECT COUNT(*) AS count FROM sqlite_master
         WHERE type = 'table' AND name IN (
@@ -253,9 +258,7 @@ const databaseIsReady = (): boolean => {
           'prediction_model_runs'
         )
       `).get() as { count: number };
-      const quick = database.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
-      const foreignKeyProblems = database.prepare("PRAGMA foreign_key_check").all();
-      const ready = required.count === 5 && quick?.quick_check === "ok" && foreignKeyProblems.length === 0;
+      const ready = required.count === 5;
       readinessCache = ready;
       if (!ready) databaseRecoveryRequired = true;
       return ready;
@@ -918,7 +921,11 @@ app.post<{ Params: { id: string } }>("/v1/jobs/:id/cancel", { schema: { params: 
     if (cancellation.outcome === "terminal") {
       return reply.code(409).send({ message: "已完成的任务不能取消" });
     }
-    return { cancelled: true };
+    const response: RecomputeJobCancellationResponse = {
+      cancelRequested: cancellation.cancelRequested,
+      status: cancellation.status
+    };
+    return response;
   } finally {
     store.close();
   }
@@ -936,14 +943,14 @@ app.post<{ Body: ImportJobRequest }>(
   if (!source) return reply.code(404).send({ message: "未找到导入来源" });
   const release = takeMutationRelease(request);
   try {
-    return importWorker.create(source.inputPath, async (succeeded) => {
+    return importWorker.create(source.inputPath, async (succeeded, durable) => {
       try {
-        if (succeeded) {
+        if (succeeded && durable) {
           databaseRecoveryRequired = false;
           invalidateDatabaseReadiness();
         }
-        if (source.kind === "upload") await importSources.cleanupUpload(sourceId);
-        else if (succeeded) await importSources.markUsed(sourceId);
+        if (durable && source.kind === "upload") await importSources.cleanupUpload(sourceId);
+        else if (durable && succeeded) await importSources.markUsed(sourceId);
       } finally {
         release();
       }

@@ -23,7 +23,7 @@ import {
   stageAuditFiles,
   type StagedAuditFiles,
 } from "@rai/health-export-parser";
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 import { RuntimeStateStore } from "./runtime-state.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 
@@ -56,7 +56,12 @@ export class RecomputeWorker {
   }
 
   schedule(): void {
-    if (this.closing || this.scheduled || this.running) return;
+    if (this.closing) return;
+    if (this.scheduled) return;
+    if (this.running) {
+      this.scheduled = true;
+      return;
+    }
     this.consecutiveFailures = 0;
     this.scheduled = true;
     this.queueDrain(20);
@@ -89,9 +94,10 @@ export class RecomputeWorker {
     this.scheduled = false;
     this.running = true;
     try {
+      this.recoverInterruptedJobs();
       while (!this.closing && existsSync(this.databasePath)) {
         const ran = await this.runOneInWorkerThread();
-        this.consecutiveFailures = 0;
+        if (ran) this.consecutiveFailures = 0;
         if (!ran) break;
       }
     } catch (error) {
@@ -121,40 +127,24 @@ export class RecomputeWorker {
     }
   }
 
+  private recoverInterruptedJobs(): void {
+    if (!existsSync(this.databasePath)) return;
+    this.withJobRepository((jobs) => {
+      jobs.recoverInterrupted();
+    });
+  }
+
   private failOutstandingJobs(error: unknown): void {
+    this.withJobRepository((jobs) => {
+      jobs.failOutstanding(error);
+    });
+  }
+
+  private withJobRepository(action: (jobs: RecomputeJobRepository) => void): void {
     const database = new DatabaseSync(this.databasePath);
     applyBusyTimeout(database, 2_000);
-    const completedAt = new Date().toISOString();
-    const payload = JSON.stringify({
-      name: error instanceof Error ? error.name : "Error",
-      message: error instanceof Error ? error.message : String(error)
-    });
     try {
-      database.exec("BEGIN IMMEDIATE");
-      const jobs = database.prepare(`
-        SELECT id, progress_current AS progressCurrent, progress_total AS progressTotal
-        FROM recompute_jobs WHERE status IN ('queued', 'running')
-      `).all() as unknown as Array<{ id: string; progressCurrent: number; progressTotal: number }>;
-      const fail = database.prepare(`
-        UPDATE recompute_jobs
-        SET status = 'failed', completed_at = ?, progress_phase = 'failed', error_json = ?
-        WHERE id = ? AND status IN ('queued', 'running')
-      `);
-      const log = database.prepare(`
-        INSERT INTO recompute_job_events (
-          id, job_id, phase, progress_current, progress_total, message, created_at
-        ) VALUES (?, ?, 'failed', ?, ?, 'Worker failed to start after 3 attempts', ?)
-      `);
-      for (const job of jobs) {
-        const changed = fail.run(completedAt, payload, job.id);
-        if (Number(changed.changes) === 1) {
-          log.run(`recompute_job_event_${randomUUID()}`, job.id, job.progressCurrent, job.progressTotal, completedAt);
-        }
-      }
-      database.exec("COMMIT");
-    } catch (failure) {
-      try { database.exec("ROLLBACK"); } catch { /* Transaction did not start. */ }
-      throw failure;
+      action(new RecomputeJobRepository(database));
     } finally {
       database.close();
     }
@@ -348,7 +338,12 @@ export class PredictionModelWorker {
   }
 
   schedule(): void {
-    if (this.closing || this.running || this.scheduled) return;
+    if (this.closing) return;
+    if (this.scheduled) return;
+    if (this.running) {
+      this.scheduled = true;
+      return;
+    }
     this.scheduled = true;
     this.queueDrain(20);
   }
@@ -446,7 +441,15 @@ export class PredictionModelWorker {
       FROM prediction_model_runs WHERE id = ?
     `).get(runId) as unknown as { attemptCount: number } | undefined;
     readStore.close();
-    if (!run || !attempt) return;
+    if (!run || !attempt) {
+      const shutdownStore = await RaiDatabase.open(this.databasePath);
+      try {
+        this.service(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
+      } finally {
+        shutdownStore.close();
+      }
+      return;
+    }
     const artifactDirectory = predictionModelArtifactDirectory(
       this.runtimeRoot,
       runId,
@@ -552,7 +555,7 @@ export function predictionModelArtifactDirectory(
 
 interface MutableImportJob extends ImportJobResponse {
   inputPath: string;
-  onTerminal?: (succeeded: boolean) => void | Promise<void>;
+  onTerminal?: (succeeded: boolean, durable: boolean) => void | Promise<void>;
 }
 
 interface ImportDatasetChange {
@@ -595,7 +598,7 @@ export class ImportWorker {
 
   create(
     inputPathValue: string,
-    onTerminal?: (succeeded: boolean) => void | Promise<void>,
+    onTerminal?: (succeeded: boolean, durable: boolean) => void | Promise<void>,
     sourceId?: string
   ): ImportJobResponse {
     if (this.closing) throw new Error("导入服务正在关闭");
@@ -650,8 +653,18 @@ export class ImportWorker {
         job.message = "导入因本地服务关闭而中断，可重新提交导入";
         job.error = PUBLIC_IMPORT_FAILURE_ERROR;
         job.completedAt = new Date().toISOString();
-        this.persistJobs();
-        try { await job.onTerminal?.(false); } catch { /* Terminal cleanup is best-effort during shutdown. */ }
+        let durable = false;
+        let persistenceError: unknown;
+        try {
+          await this.persistJobsWithRetry();
+          durable = true;
+        } catch (error) {
+          persistenceError = error;
+        }
+        try { await this.runTerminalCallbackWithRetry(job, false, durable); }
+        catch { /* Terminal cleanup is best-effort during shutdown. */ }
+        this.running = false;
+        if (persistenceError) throw persistenceError;
       }
       this.running = false;
     }
@@ -845,17 +858,61 @@ export class ImportWorker {
         const message = error instanceof Error ? error.stack ?? error.message : String(error);
         process.stderr.write(`Failed to clean up import staging database: ${message}\n`);
       } finally {
+        let terminalStatePersisted = false;
         try {
-          await job.onTerminal?.(terminalSucceeded);
-        } catch {
-          // Cleanup metadata must not change the completed import result.
-        } finally {
-          this.running = false;
           publishTerminalState?.();
-          this.persistJobs();
+          if (publishTerminalState) {
+            await this.persistJobsWithRetry();
+            terminalStatePersisted = true;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.stack ?? error.message : String(error);
+          process.stderr.write(`Failed to persist terminal import state for ${job.id}: ${message}\n`);
+        } finally {
+          try {
+            await this.runTerminalCallbackWithRetry(job, terminalSucceeded, terminalStatePersisted);
+          } catch (error) {
+            const message = error instanceof Error ? error.stack ?? error.message : String(error);
+            process.stderr.write(`Failed to finalize import source for ${job.id}: ${message}\n`);
+          } finally {
+            this.running = false;
+          }
         }
       }
     }
+  }
+
+  private async persistJobsWithRetry(): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        this.persistJobs();
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
+      }
+    }
+    throw lastError;
+  }
+
+  private async runTerminalCallbackWithRetry(
+    job: MutableImportJob,
+    succeeded: boolean,
+    durable: boolean
+  ): Promise<void> {
+    if (!job.onTerminal) return;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        await job.onTerminal(succeeded, durable);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 50));
+      }
+    }
+    throw lastError;
   }
 
   private stageAuditReports(

@@ -92,7 +92,7 @@ const DAY_MS = 86_400_000;
 
 function latestTimestamp(current: string | null, candidate: string | null): string | null {
   if (candidate === null) return current;
-  return current === null || candidate > current ? candidate : current;
+  return current === null || Date.parse(candidate) > Date.parse(current) ? candidate : current;
 }
 
 function median(values: number[]): number | null {
@@ -257,7 +257,8 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
   );
   if (candidate && finite(candidate.paceSecondsPerKm) && candidate.paceSecondsPerKm >= 150 && candidate.paceSecondsPerKm <= 900) {
     const hasNewEvidence = previous === null ||
-      (candidate.dataThroughAt !== null && (thresholdDataThroughAt === null || candidate.dataThroughAt > thresholdDataThroughAt)) ||
+      (candidate.dataThroughAt !== null && (thresholdDataThroughAt === null ||
+        Date.parse(candidate.dataThroughAt) > Date.parse(thresholdDataThroughAt))) ||
       candidate.evidenceCount > (previous?.evidence.thresholdEvidenceCount ?? 0);
     if (threshold === null) {
       threshold = candidate.paceSecondsPerKm;

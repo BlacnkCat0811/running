@@ -252,6 +252,34 @@ test("updates pace when performance evidence advances the cursor without changin
   assert.equal(updated.paceSource, "automatic");
 });
 
+test("advances the evidence cursor by instant across mixed offsets", () => {
+  const first = buildDailyZoneProfile({
+    ...baseInput,
+    thresholdPace: {
+      paceSecondsPerKm: 300,
+      confidence: 0.8,
+      evidenceCount: 3,
+      dataThroughAt: "2026-07-10T10:00:00+10:00"
+    }
+  });
+  const updated = buildDailyZoneProfile({
+    ...baseInput,
+    id: "zone-offset-cursor",
+    localDate: "2026-07-14",
+    effectiveAt: "2026-07-13T16:00:00.000Z",
+    previousProfile: first,
+    thresholdPace: {
+      paceSecondsPerKm: 250,
+      confidence: 0.8,
+      evidenceCount: 3,
+      dataThroughAt: "2026-07-10T02:00:00+00:00"
+    }
+  });
+
+  assert.ok((updated.lactateThresholdPaceSecondsPerKm ?? Infinity) < 300);
+  assert.equal(updated.dataThroughAt, "2026-07-10T02:00:00+00:00");
+});
+
 test("does not adopt previously rejected threshold evidence after confidence decay", () => {
   let profile = buildDailyZoneProfile({
     ...baseInput,

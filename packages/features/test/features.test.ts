@@ -309,6 +309,22 @@ test("smooths second-level speed noise before stability scoring and interval cla
   assert.ok((feature.signals.stabilityRaw ?? 0) > 0.97);
 });
 
+test("normalizes overlapping speed samples before stability scoring", () => {
+  const speedSamples = Array.from({ length: 60 }, (_, index) => ({
+    value: 3,
+    startOffsetSeconds: index * 30,
+    durationSeconds: 30
+  }));
+  speedSamples.push({ value: 3, startOffsetSeconds: 15, durationSeconds: 45 });
+  const feature = extractWorkoutFeatureVector("overlapping-steady", "run", source({
+    speed: { ...source().speed, average: 3, coefficientOfVariation: 0.2 },
+    speedSamples
+  }));
+
+  assert.ok((feature.signals.speedCoefficientOfVariation ?? 1) < 1e-10);
+  assert.notEqual(feature.sessionType, "interval");
+});
+
 test("does not infer intervals from sparse speed islands", () => {
   const speedSamples = Array.from({ length: 10 }, (_, index) => ({
     value: index % 2 === 0 ? 4.5 : 2.2,

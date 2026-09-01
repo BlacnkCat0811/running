@@ -245,6 +245,44 @@ export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughD
   return results;
 }
 
+export function latestAcuteChronicLoadRatio(
+  loads: WorkoutTrainingLoad[],
+  throughDate: string,
+  config = defaultDailyMetricConfig
+): number | null {
+  if (loads.length === 0) return null;
+  const sorted = [...loads].sort((a, b) => a.localDate.localeCompare(b.localDate));
+  const start = sorted[0]!.localDate;
+  if (throughDate < start) return null;
+
+  const byDate = new Map<string, { load: number; workouts: number }>();
+  for (const item of sorted) {
+    if (item.localDate > throughDate) continue;
+    const current = byDate.get(item.localDate) ?? { load: 0, workouts: 0 };
+    current.load += item.load;
+    current.workouts += 1;
+    byDate.set(item.localDate, current);
+  }
+
+  const acuteAlpha = 1 - Math.exp(-Math.LN2 / config.acuteHalfLifeDays);
+  const chronicAlpha = 1 - Math.exp(-Math.LN2 / config.chronicHalfLifeDays);
+  let acute: number | null = null;
+  let chronic: number | null = null;
+  let workouts = 0;
+  const dayCount = dateDiff(start, throughDate) + 1;
+  for (let index = 0; index < dayCount; index += 1) {
+    const daily = byDate.get(addDays(start, index)) ?? { load: 0, workouts: 0 };
+    acute = acute === null ? daily.load : acuteAlpha * daily.load + (1 - acuteAlpha) * acute;
+    chronic = chronic === null ? daily.load : chronicAlpha * daily.load + (1 - chronicAlpha) * chronic;
+    workouts += daily.workouts;
+  }
+  if (
+    acute === null || chronic === null || dayCount < config.minimumHistoryDays ||
+    workouts < config.minimumWorkoutCount || chronic < config.minimumChronicLoad
+  ) return null;
+  return round(acute / chronic);
+}
+
 export function localDateInTimeZone(instant: string | Date, timeZone = "Asia/Shanghai"): string {
   const date = typeof instant === "string" ? new Date(instant) : instant;
   if (!Number.isFinite(date.getTime())) throw new Error("instant must be a valid date");

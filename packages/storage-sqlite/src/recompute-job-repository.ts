@@ -96,17 +96,6 @@ export class RecomputeJobRepository {
   }
 
   recoverInterrupted(): number {
-    const jobs = this.database.prepare(`
-      SELECT id, feature_run_id AS featureRunId, model_run_id AS modelRunId,
-        cancel_requested AS cancelRequested
-      FROM recompute_jobs WHERE status = 'running' ORDER BY created_at
-    `).all() as unknown as Array<{
-      id: string;
-      featureRunId: string | null;
-      modelRunId: string | null;
-      cancelRequested: number;
-    }>;
-    if (jobs.length === 0) return 0;
     const now = appNow();
     const failure = JSON.stringify({
       name: "InterruptedRecompute",
@@ -114,37 +103,40 @@ export class RecomputeJobRepository {
     });
     this.database.exec("BEGIN IMMEDIATE");
     try {
+      const jobs = this.database.prepare(`
+        SELECT id, feature_run_id AS featureRunId, model_run_id AS modelRunId,
+          cancel_requested AS cancelRequested
+        FROM recompute_jobs WHERE status = 'running' ORDER BY created_at
+      `).all() as unknown as Array<{
+        id: string;
+        featureRunId: string | null;
+        modelRunId: string | null;
+        cancelRequested: number;
+      }>;
+      if (jobs.length === 0) {
+        this.database.exec("COMMIT");
+        return 0;
+      }
       for (const job of jobs) {
-        if (job.featureRunId) {
-          this.database.prepare(`
-            UPDATE feature_runs SET status = 'failed', completed_at = ?, failure_json = ?
-            WHERE id = ? AND status = 'running'
-          `).run(now, failure, job.featureRunId);
-        }
-        if (job.modelRunId) {
-          this.database.prepare(`
-            UPDATE training_metric_runs SET status = 'failed', completed_at = ?, failure_json = ?
-            WHERE model_run_id = ? AND status = 'running'
-          `).run(now, failure, job.modelRunId);
-          this.database.prepare(`
-            UPDATE model_runs SET status = 'failed', completed_at = ?, failure_json = ?
-            WHERE id = ? AND status = 'running'
-          `).run(now, failure, job.modelRunId);
-        }
+        this.failAssociatedRuns(job.featureRunId, job.modelRunId, now, failure);
         const cancelled = job.cancelRequested === 1;
-        this.database.prepare(`
+        const changed = this.database.prepare(`
           UPDATE recompute_jobs
           SET status = ?, started_at = NULL, completed_at = ?, progress_phase = ?,
               progress_current = 0, progress_total = 0, cancel_requested = 0,
               error_json = ?
-          WHERE id = ?
+          WHERE id = ? AND status = 'running' AND cancel_requested = ?
         `).run(
           cancelled ? "cancelled" : "queued",
           cancelled ? now : null,
           cancelled ? "cancelled" : "recovered",
           cancelled ? failure : null,
-          job.id
+          job.id,
+          job.cancelRequested
         );
+        if (Number(changed.changes) !== 1) {
+          throw new Error(`Recompute job ${job.id} changed while recovering`);
+        }
         this.logEvent(
           job.id,
           cancelled ? "cancelled" : "recovered",
@@ -163,17 +155,36 @@ export class RecomputeJobRepository {
   }
 
   cancelIfRequested(jobId: string): boolean {
-    const row = this.database.prepare(
-      "SELECT cancel_requested AS cancelRequested FROM recompute_jobs WHERE id = ?"
-    ).get(jobId) as unknown as { cancelRequested: number } | undefined;
-    if (row?.cancelRequested !== 1) return false;
-    this.database.prepare(`
-      UPDATE recompute_jobs
-      SET status = 'cancelled', completed_at = ?, progress_phase = 'cancelled',
-          cancel_requested = 0
-      WHERE id = ?
-    `).run(appNow(), jobId);
-    return true;
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.database.prepare(`
+        SELECT status, cancel_requested AS cancelRequested,
+          progress_current AS progressCurrent, progress_total AS progressTotal
+        FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as unknown as {
+        status: string;
+        cancelRequested: number;
+        progressCurrent: number;
+        progressTotal: number;
+      } | undefined;
+      if (row?.status !== "running" || row.cancelRequested !== 1) {
+        this.database.exec("COMMIT");
+        return false;
+      }
+      const changed = this.database.prepare(`
+        UPDATE recompute_jobs
+        SET status = 'cancelled', completed_at = ?, progress_phase = 'cancelled',
+            cancel_requested = 0, error_json = NULL
+        WHERE id = ? AND status = 'running' AND cancel_requested = 1
+      `).run(appNow(), jobId);
+      if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while cancelling");
+      this.logEvent(jobId, "cancelled", row.progressCurrent, row.progressTotal, "Task cancelled");
+      this.database.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   setRunIds(jobId: string, featureRunId: string | null, modelRunId: string | null): void {
@@ -194,32 +205,136 @@ export class RecomputeJobRepository {
     this.logEvent(jobId, phase, current, total, message);
   }
 
-  complete(jobId: string, phase: string, current: number, total: number, message: string): void {
-    this.database.prepare(`
-      UPDATE recompute_jobs
-      SET status = 'succeeded', completed_at = ?, progress_phase = ?,
-          progress_current = ?, progress_total = ?
-      WHERE id = ?
-    `).run(appNow(), phase, current, total, jobId);
-    this.logEvent(jobId, phase, current, total, message);
+  complete(
+    jobId: string,
+    phase: string,
+    current: number,
+    total: number,
+    message: string,
+    beforeComplete?: () => void
+  ): boolean {
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const job = this.database.prepare(`
+        SELECT status, cancel_requested AS cancelRequested
+        FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as unknown as {
+        status: string;
+        cancelRequested: number;
+      } | undefined;
+      if (job?.status !== "running") {
+        this.database.exec("COMMIT");
+        return false;
+      }
+      if (job.cancelRequested === 1) {
+        const progress = this.database.prepare(`
+          SELECT progress_current AS progressCurrent, progress_total AS progressTotal
+          FROM recompute_jobs WHERE id = ?
+        `).get(jobId) as unknown as { progressCurrent: number; progressTotal: number };
+        const changed = this.database.prepare(`
+          UPDATE recompute_jobs
+          SET status = 'cancelled', completed_at = ?, progress_phase = 'cancelled',
+              cancel_requested = 0, error_json = NULL
+          WHERE id = ? AND status = 'running' AND cancel_requested = 1
+        `).run(appNow(), jobId);
+        if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while completing cancellation");
+        this.logEvent(
+          jobId,
+          "cancelled",
+          progress.progressCurrent,
+          progress.progressTotal,
+          "Task cancelled"
+        );
+        this.database.exec("COMMIT");
+        return false;
+      }
+      beforeComplete?.();
+      const changed = this.database.prepare(`
+        UPDATE recompute_jobs
+        SET status = 'succeeded', completed_at = ?, progress_phase = ?,
+            progress_current = ?, progress_total = ?, cancel_requested = 0
+        WHERE id = ? AND status = 'running' AND cancel_requested = 0
+      `).run(appNow(), phase, current, total, jobId);
+      if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while completing");
+      this.logEvent(jobId, phase, current, total, message);
+      this.database.exec("COMMIT");
+      return true;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   fail(jobId: string, error: unknown): void {
-    const current = this.get(jobId);
-    if (current?.status === "cancelled") {
-      this.logEvent(jobId, "cancelled", current.progressCurrent, current.progressTotal, "Task cancelled");
-      return;
+    const payload = this.errorPayload(error);
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.database.prepare(`
+        SELECT status, cancel_requested AS cancelRequested,
+               progress_current AS progressCurrent, progress_total AS progressTotal,
+               feature_run_id AS featureRunId, model_run_id AS modelRunId
+        FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as unknown as {
+        status: string;
+        cancelRequested: number;
+        progressCurrent: number;
+        progressTotal: number;
+        featureRunId: string | null;
+        modelRunId: string | null;
+      } | undefined;
+      if (current?.status !== "running") {
+        this.database.exec("COMMIT");
+        return;
+      }
+
+      const now = appNow();
+      this.failAssociatedRuns(
+        current.featureRunId,
+        current.modelRunId,
+        now,
+        JSON.stringify(payload)
+      );
+      const cancelled = current.cancelRequested === 1;
+      const phase = cancelled ? "cancelled" : "failed";
+      const changed = this.database.prepare(`
+        UPDATE recompute_jobs
+        SET status = ?, completed_at = ?, progress_phase = ?, cancel_requested = 0,
+            error_json = ?
+        WHERE id = ? AND status = 'running' AND cancel_requested = ?
+      `).run(
+        cancelled ? "cancelled" : "failed",
+        now,
+        phase,
+        cancelled ? null : JSON.stringify(payload),
+        jobId,
+        current.cancelRequested
+      );
+      if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while failing");
+      this.logEvent(
+        jobId,
+        phase,
+        current.progressCurrent,
+        current.progressTotal,
+        cancelled ? "Task cancelled" : "Task failed"
+      );
+      this.database.exec("COMMIT");
+    } catch (transactionError) {
+      this.database.exec("ROLLBACK");
+      throw transactionError;
     }
-    const payload = {
-      message: error instanceof Error ? error.message : String(error),
-      name: error instanceof Error ? error.name : "Error"
-    };
-    this.database.prepare(`
-      UPDATE recompute_jobs
-      SET status = 'failed', completed_at = ?, error_json = ?
-      WHERE id = ?
-    `).run(appNow(), JSON.stringify(payload), jobId);
-    this.logEvent(jobId, "failed", 0, 0, "Task failed");
+  }
+
+  failOutstanding(error: unknown): number {
+    const jobs = this.database.prepare(`
+      SELECT id, status FROM recompute_jobs
+      WHERE status IN ('queued', 'running')
+      ORDER BY created_at, rowid
+    `).all() as unknown as Array<{ id: string; status: string }>;
+    for (const job of jobs) {
+      if (job.status === "running") this.fail(job.id, error);
+      else this.failQueued(job.id, error);
+    }
+    return jobs.length;
   }
 
   logEvent(
@@ -253,6 +368,68 @@ export class RecomputeJobRepository {
     return this.database
       .prepare("SELECT * FROM recompute_job_events WHERE job_id = ? ORDER BY created_at, id")
       .all(jobId) as unknown as Array<Record<string, unknown>>;
+  }
+
+  private failQueued(jobId: string, error: unknown): void {
+    const payload = this.errorPayload(error);
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.database.prepare(`
+        SELECT status, progress_current AS progressCurrent, progress_total AS progressTotal
+        FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as unknown as {
+        status: string;
+        progressCurrent: number;
+        progressTotal: number;
+      } | undefined;
+      if (current?.status !== "queued") {
+        this.database.exec("COMMIT");
+        return;
+      }
+      const changed = this.database.prepare(`
+        UPDATE recompute_jobs
+        SET status = 'failed', completed_at = ?, progress_phase = 'failed',
+            cancel_requested = 0, error_json = ?
+        WHERE id = ? AND status = 'queued'
+      `).run(appNow(), JSON.stringify(payload), jobId);
+      if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while failing queued task");
+      this.logEvent(jobId, "failed", current.progressCurrent, current.progressTotal, "Task failed");
+      this.database.exec("COMMIT");
+    } catch (transactionError) {
+      this.database.exec("ROLLBACK");
+      throw transactionError;
+    }
+  }
+
+  private failAssociatedRuns(
+    featureRunId: string | null,
+    modelRunId: string | null,
+    now: string,
+    failure: string
+  ): void {
+    if (featureRunId) {
+      this.database.prepare(`
+        UPDATE feature_runs SET status = 'failed', completed_at = ?, failure_json = ?
+        WHERE id = ? AND status = 'running'
+      `).run(now, failure, featureRunId);
+    }
+    if (modelRunId) {
+      this.database.prepare(`
+        UPDATE training_metric_runs SET status = 'failed', completed_at = ?, failure_json = ?
+        WHERE model_run_id = ? AND status = 'running'
+      `).run(now, failure, modelRunId);
+      this.database.prepare(`
+        UPDATE model_runs SET status = 'failed', completed_at = ?, failure_json = ?
+        WHERE id = ? AND status = 'running'
+      `).run(now, failure, modelRunId);
+    }
+  }
+
+  private errorPayload(error: unknown): { message: string; name: string } {
+    return {
+      message: error instanceof Error ? error.message : String(error),
+      name: error instanceof Error ? error.name : "Error"
+    };
   }
 
   private map(row: Record<string, unknown>): RecomputeJob {

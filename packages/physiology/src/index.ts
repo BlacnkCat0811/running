@@ -420,7 +420,7 @@ export function estimateVo2Max(
   );
   const latestEvidenceAt = weighted
     .map((item) => item.observedAt)
-    .sort((left, right) => right.localeCompare(left))[0] ?? null;
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
   if (latestEvidenceAt !== null && daysBetween(latestEvidenceAt, asOf) > 180) {
     codes.add("stale_evidence");
   }
@@ -551,7 +551,7 @@ export function estimatePerformanceVdot(
   );
   const latestEvidenceAt = selected
     .map((item) => item.observedAt)
-    .sort((left, right) => right.localeCompare(left))[0] ?? vo2Max.latestEvidenceAt;
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? vo2Max.latestEvidenceAt;
   return {
     status: "available",
     value,
@@ -760,7 +760,7 @@ export function estimateLactateThresholdFromEvidence(
   const latestEvidenceAt = [...usable
     .map((item) => item.observedAt), prior.latestEvidenceAt]
     .filter((item): item is string => item !== null)
-    .sort((left, right) => right.localeCompare(left))[0] ?? prior.latestEvidenceAt;
+    .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? prior.latestEvidenceAt;
   return {
     status: "available",
     paceSecondsPerKm: pace.value,

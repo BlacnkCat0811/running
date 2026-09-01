@@ -79,6 +79,48 @@ test("VO2max ensemble excludes future evidence and limits an outlier", () => {
   assert.ok(estimate.evidenceCodes.includes("future_evidence_excluded"));
 });
 
+test("selects latest physiology evidence by instant across mixed offsets", () => {
+  const estimate = estimateVo2Max(
+    [
+      { id: "older", observedAt: "2026-01-01T10:00:00+10:00", valueMlKgMin: 44, source: "apple_health", quality: 1 },
+      { id: "newer", observedAt: "2026-01-01T02:00:00+00:00", valueMlKgMin: 45, source: "hard_workout", quality: 1 }
+    ],
+    "2026-01-02T00:00:00.000Z"
+  );
+
+  assert.equal(estimate.latestEvidenceAt, "2026-01-01T02:00:00+00:00");
+
+  const performance = estimatePerformanceVdot(
+    estimate,
+    [
+      { id: "performance-older", observedAt: "2026-01-02T10:00:00+10:00", value: 44, source: "training_envelope", quality: 1 },
+      { id: "performance-newer", observedAt: "2026-01-02T02:00:00+00:00", value: 45, source: "race", quality: 1 }
+    ],
+    "2026-01-03T00:00:00.000Z"
+  );
+  assert.equal(performance.latestEvidenceAt, "2026-01-02T02:00:00+00:00");
+
+  const olderVo2 = estimateVo2Max(
+    [{ id: "vo2-prior", observedAt: "2026-01-03T10:00:00+10:00", valueMlKgMin: 45, source: "apple_health", quality: 1 }],
+    "2026-01-04T00:00:00.000Z"
+  );
+  const threshold = estimateLactateThresholdFromEvidence(
+    olderVo2,
+    { restingHeartRateBpm: 60, observedMaximumHeartRateBpm: 195 },
+    [{
+      id: "threshold-newer",
+      observedAt: "2026-01-03T02:00:00+00:00",
+      paceSecondsPerKm: 300,
+      heartRateBpm: 175,
+      durationSeconds: 1_500,
+      source: "threshold_test",
+      quality: 1
+    }],
+    "2026-01-04T00:00:00.000Z"
+  );
+  assert.equal(threshold.latestEvidenceAt, "2026-01-03T02:00:00+00:00");
+});
+
 test("repeated evidence from one device remains moderate confidence", () => {
   const evidence = Array.from({ length: 20 }, (_, index) => ({
     id: String(index),
@@ -410,4 +452,7 @@ test("ridge residual candidate learns a systematic readiness error", () => {
       Math.abs(raw.predictedSeconds! - actual)
   );
   assert.equal(adjusted.method, "ridge_ensemble_v5");
+  const multiplier = adjusted.predictedSeconds! / raw.predictedSeconds!;
+  assert.ok(Math.abs(adjusted.optimisticSeconds! - raw.optimisticSeconds! * multiplier) < 1e-9);
+  assert.ok(Math.abs(adjusted.pessimisticSeconds! - raw.pessimisticSeconds! * multiplier) < 1e-9);
 });

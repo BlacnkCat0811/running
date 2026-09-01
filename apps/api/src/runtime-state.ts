@@ -20,6 +20,7 @@ export interface RuntimeImportSourceRow {
 
 export interface RuntimeImportJobRow {
   id: string;
+  sourceId?: string;
   status: string;
   phase: string;
   message: string;
@@ -145,11 +146,15 @@ export class RuntimeStateStore {
   private readJobs(limit: number): RuntimeImportJobRow[] {
     const db = this.open();
     try {
-      const rows = db.prepare(`SELECT id, status, phase, message, created_at AS createdAt,
+      const rows = db.prepare(`SELECT id, source_id AS sourceId, status, phase, message, created_at AS createdAt,
         completed_at AS completedAt, error, input_path AS inputPath, progress, summary_json AS summaryJson
-        FROM import_jobs ORDER BY sequence_number DESC LIMIT ?`).all(limit) as unknown as Array<RuntimeImportJobRow & { summaryJson: string | null }>;
-      return rows.reverse().map(({ summaryJson, progress, ...row }) => ({
+        FROM import_jobs ORDER BY sequence_number DESC LIMIT ?`).all(limit) as unknown as Array<RuntimeImportJobRow & {
+          sourceId: string | null;
+          summaryJson: string | null;
+        }>;
+      return rows.reverse().map(({ sourceId, summaryJson, progress, ...row }) => ({
         ...row,
+        ...(sourceId === null ? {} : { sourceId }),
         ...(progress === null || progress === undefined ? {} : { progress }),
         ...(summaryJson ? { summary: JSON.parse(summaryJson) } : {})
       }));
@@ -168,12 +173,12 @@ export class RuntimeStateStore {
   }
 
   private upsertJobIn(db: DatabaseSync, job: RuntimeImportJobRow): void {
-    db.prepare(`INSERT INTO import_jobs (id, status, phase, message, created_at, completed_at,
-        error, input_path, progress, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET status=excluded.status, phase=excluded.phase,
+    db.prepare(`INSERT INTO import_jobs (id, source_id, status, phase, message, created_at, completed_at,
+        error, input_path, progress, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id, status=excluded.status, phase=excluded.phase,
         message=excluded.message, completed_at=excluded.completed_at, error=excluded.error,
         input_path=excluded.input_path, progress=excluded.progress, summary_json=excluded.summary_json`).run(
-        job.id, job.status, job.phase, job.message, job.createdAt, job.completedAt,
+        job.id, job.sourceId ?? null, job.status, job.phase, job.message, job.createdAt, job.completedAt,
         job.error, job.inputPath, job.progress ?? null, job.summary === undefined ? null : JSON.stringify(job.summary)
       );
   }
@@ -194,11 +199,15 @@ export class RuntimeStateStore {
         CREATE INDEX IF NOT EXISTS idx_import_sources_sha ON import_sources(source_sha256);
         CREATE TABLE IF NOT EXISTS import_jobs (
           sequence_number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE,
-          status TEXT NOT NULL, phase TEXT NOT NULL, message TEXT NOT NULL,
+          source_id TEXT, status TEXT NOT NULL, phase TEXT NOT NULL, message TEXT NOT NULL,
           created_at TEXT NOT NULL, completed_at TEXT, error TEXT,
           input_path TEXT NOT NULL, progress REAL, summary_json TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_import_jobs_created ON import_jobs(created_at DESC);`);
+      const jobColumns = db.prepare("PRAGMA table_info(import_jobs)").all() as unknown as Array<{ name: string }>;
+      if (!jobColumns.some(({ name }) => name === "source_id")) {
+        db.exec("ALTER TABLE import_jobs ADD COLUMN source_id TEXT");
+      }
     } finally { db.close(); }
   }
 

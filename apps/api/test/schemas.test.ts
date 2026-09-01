@@ -12,7 +12,8 @@ import {
   trainingZoneProfileBodySchema,
   trainingZonesHistoryQuerySchema,
   trainingLoadQuerySchema,
-  trainingStatisticsHistoryQuerySchema
+  trainingStatisticsHistoryQuerySchema,
+  workoutListQuerySchema
 } from "../src/schemas.js";
 
 test("OpenAPI operations declare responses and write contracts", () => {
@@ -43,6 +44,20 @@ test("OpenAPI operations declare responses and write contracts", () => {
   assert.ok("415" in openapiDocument.paths["/v1/imports/uploads"].post.responses);
   assert.ok("429" in openapiDocument.paths["/v1/imports/uploads"].post.responses);
   assert.ok("507" in openapiDocument.paths["/v1/imports/uploads"].post.responses);
+  assert.ok("/v1/import-jobs/latest" in openapiDocument.paths);
+  const importJobSchema = openapiDocument.components.schemas.ImportJobResponse;
+  assert.deepEqual(importJobSchema.required, [
+    "id", "status", "phase", "message", "createdAt", "completedAt", "error"
+  ]);
+  assert.ok("sourceId" in importJobSchema.properties);
+  assert.ok("progress" in importJobSchema.properties);
+  assert.ok("summary" in importJobSchema.properties);
+  const latestImportSchema = openapiDocument.paths["/v1/import-jobs/latest"].get.responses["200"]
+    .content["application/json"].schema as { anyOf: Array<{ $ref?: string }> };
+  assert.equal(latestImportSchema.anyOf[0]?.$ref, "#/components/schemas/ImportJobResponse");
+  const cancellationSchema = openapiDocument.paths["/v1/jobs/{id}/cancel"].post.responses["200"]
+    .content["application/json"].schema as { required: string[] };
+  assert.deepEqual(cancellationSchema.required, ["cancelRequested", "status"]);
   const deletionSchema = openapiDocument.paths["/v1/database"].delete.responses["200"]
     .content["application/json"].schema as {
       properties: { preservation: { oneOf: unknown[] } };
@@ -125,6 +140,24 @@ test("prediction training schema rejects ambiguous timestamps and unknown input"
       payload: { asOf: "2026-07-11T08:00:00+08:00" }
     });
     assert.equal(valid.statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("workout list queries accept eligibility filters and reject calibrating status", async () => {
+  const app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
+  app.get("/workouts", { schema: { querystring: workoutListQuerySchema } }, async () => ({ ok: true }));
+  try {
+    assert.equal((await app.inject({ method: "GET", url: "/workouts" })).statusCode, 200);
+    assert.equal((await app.inject({
+      method: "GET",
+      url: "/workouts?status=eligible&stimulusType=lactate_threshold&sessionType=tempo&days=90&limit=30&offset=0"
+    })).statusCode, 200);
+    assert.equal((await app.inject({ method: "GET", url: "/workouts?days=4000" })).statusCode, 200);
+    assert.equal((await app.inject({ method: "GET", url: "/workouts?status=calibrating" })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: "/workouts?status=unknown" })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: "/workouts?extra=1" })).statusCode, 400);
   } finally {
     await app.close();
   }

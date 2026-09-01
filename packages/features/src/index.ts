@@ -130,6 +130,37 @@ function percentile(values: number[], fraction: number): number | null {
   return (sorted[lower] ?? 0) * (1 - weight) + (sorted[upper] ?? 0) * weight;
 }
 
+function summarizeSpeedWindow(
+  samples: TimedSeriesSample[],
+  start: number,
+  end: number
+): { weightedValue: number; coveredSeconds: number } {
+  const overlaps = samples.flatMap((sample) => {
+    const overlapStart = Math.max(start, sample.startOffsetSeconds);
+    const overlapEnd = Math.min(end, sample.startOffsetSeconds + sample.durationSeconds);
+    return overlapEnd > overlapStart
+      ? [{ start: overlapStart, end: overlapEnd, value: sample.value }]
+      : [];
+  });
+  const boundaries = [...new Set(overlaps.flatMap((overlap) => [overlap.start, overlap.end]))]
+    .sort((left, right) => left - right);
+  let weightedValue = 0;
+  let coveredSeconds = 0;
+  for (let index = 1; index < boundaries.length; index += 1) {
+    const segmentStart = boundaries[index - 1] ?? start;
+    const segmentEnd = boundaries[index] ?? segmentStart;
+    const active = overlaps.filter(
+      (overlap) => overlap.start < segmentEnd && overlap.end > segmentStart
+    );
+    if (active.length === 0) continue;
+    const segmentSeconds = segmentEnd - segmentStart;
+    const segmentValue = active.reduce((sum, overlap) => sum + overlap.value, 0) / active.length;
+    weightedValue += segmentValue * segmentSeconds;
+    coveredSeconds += segmentSeconds;
+  }
+  return { weightedValue, coveredSeconds };
+}
+
 function smoothedSpeedCoefficientOfVariation(
   samples: TimedSeriesSample[],
   activeDurationSeconds: number,
@@ -150,26 +181,11 @@ function smoothedSpeedCoefficientOfVariation(
     start + SPEED_STABILITY_WINDOW_SECONDS <= elapsedDurationSeconds;
     start += SPEED_STABILITY_WINDOW_SECONDS
   ) {
-    let weightedValue = 0;
-    const overlaps: Array<{ start: number; end: number }> = [];
-    for (const sample of valid) {
-      const overlapStart = Math.max(start, sample.startOffsetSeconds);
-      const overlapEnd = Math.min(
-        start + SPEED_STABILITY_WINDOW_SECONDS,
-        sample.startOffsetSeconds + sample.durationSeconds
-      );
-      if (overlapEnd <= overlapStart) continue;
-      weightedValue += sample.value * (overlapEnd - overlapStart);
-      overlaps.push({ start: overlapStart, end: overlapEnd });
-    }
-    overlaps.sort((left, right) => left.start - right.start);
-    let coveredSeconds = 0;
-    let coveredThrough = start;
-    for (const overlap of overlaps) {
-      if (overlap.end <= coveredThrough) continue;
-      coveredSeconds += overlap.end - Math.max(overlap.start, coveredThrough);
-      coveredThrough = overlap.end;
-    }
+    const { weightedValue, coveredSeconds } = summarizeSpeedWindow(
+      valid,
+      start,
+      start + SPEED_STABILITY_WINDOW_SECONDS
+    );
     totalCoveredSeconds += coveredSeconds;
     if (coveredSeconds >= SPEED_STABILITY_WINDOW_SECONDS * 0.6) {
       values.push(weightedValue / coveredSeconds);
@@ -200,27 +216,9 @@ function hasRepeatedIntervalStructure(
   const bins: Array<number | null> = [];
   let totalCoveredSeconds = 0;
   for (let start = 0; start + binSeconds <= duration; start += binSeconds) {
-    let weightedValue = 0;
-    let coveredSeconds = 0;
-    const coveredIntervals: Array<{ start: number; end: number }> = [];
-    for (const sample of valid) {
-      const overlapStart = Math.max(start, sample.startOffsetSeconds);
-      const overlapEnd = Math.min(start + binSeconds, sample.startOffsetSeconds + sample.durationSeconds);
-      const overlap = Math.max(0, overlapEnd - overlapStart);
-      weightedValue += sample.value * overlap;
-      coveredSeconds += overlap;
-      if (overlap > 0) coveredIntervals.push({ start: overlapStart, end: overlapEnd });
-    }
-    coveredIntervals.sort((left, right) => left.start - right.start);
-    let uniqueCoverage = 0;
-    let coveredThrough = start;
-    for (const interval of coveredIntervals) {
-      if (interval.end <= coveredThrough) continue;
-      uniqueCoverage += interval.end - Math.max(interval.start, coveredThrough);
-      coveredThrough = interval.end;
-    }
-    totalCoveredSeconds += uniqueCoverage;
-    bins.push(uniqueCoverage >= binSeconds * 0.6 ? weightedValue / coveredSeconds : null);
+    const { weightedValue, coveredSeconds } = summarizeSpeedWindow(valid, start, start + binSeconds);
+    totalCoveredSeconds += coveredSeconds;
+    bins.push(coveredSeconds >= binSeconds * 0.6 ? weightedValue / coveredSeconds : null);
   }
   if (activeDurationSeconds <= 0 || totalCoveredSeconds / activeDurationSeconds < minimumCoverage) return false;
   const coveredBins = bins.filter((value): value is number => value !== null);

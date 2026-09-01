@@ -119,6 +119,10 @@ import {
   type WeightedRecordInterval
 } from "../recompute-helpers.js";
 
+interface OverrideSnapshot {
+  ids: string[];
+  byTrainingSessionId: Map<string, WorkoutOverride>;
+}
 
 /**
  * Feature extraction, training metrics/zones, and ability timeline replay.
@@ -151,13 +155,14 @@ export class RecomputePipeline {
   runFullRecompute(job: RecomputeJob): void {
     const request = this.parseRequest(job.request);
     const datasetVersion = this.manifestValue("dataset_version") ?? "dataset_unknown";
+    const overrideSnapshot = this.captureOverrideSnapshot();
     const featureRun = this.createFeatureRun(datasetVersion, request.featureConfig);
     this.setJobRunIds(job.id, featureRun.id, null);
     this.updateJobProgress(job.id, "feature_extraction", 0, 0, "Extracting canonical workout features");
 
     let features: WorkoutFeatureVector[];
     try {
-      features = this.extractFeatures(job.id, featureRun, request);
+      features = this.extractFeatures(job.id, featureRun, request, overrideSnapshot);
       this.finishFeatureRun(featureRun.id, "succeeded", null);
     } catch (error) {
       this.finishFeatureRun(featureRun.id, this.isCancellationError(error) ? "cancelled" : "failed", error);
@@ -167,16 +172,16 @@ export class RecomputePipeline {
     this.throwIfCancelled(job.id);
     const modelRun = this.createModelRun(datasetVersion, featureRun.id, request);
     this.setJobRunIds(job.id, featureRun.id, modelRun.id);
-    const metricRunId = this.createTrainingMetricRun(modelRun.id, request);
+    const metricRunId = this.createTrainingMetricRun(modelRun.id, request, overrideSnapshot.ids);
     try {
       this.updateJobProgress(job.id, "training_metrics", 0, features.length, "Calculating training load");
-      this.replayTrainingMetrics(job.id, metricRunId, features, request);
+      this.replayTrainingMetrics(job.id, metricRunId, features, request, overrideSnapshot);
       this.finishTrainingMetricRun(metricRunId, "succeeded", null);
       this.updateJobProgress(job.id, "model_replay", 0, features.length, "Replaying ability timeline");
       this.replayModel(job.id, modelRun, features, request);
       this.finishModelRun(modelRun.id, "succeeded", null);
       if (request.validationMode === "shadow" && request.incrementalPlan) {
-        this.runShadowValidation(job.id, modelRun, request);
+        this.runShadowValidation(job.id, modelRun, request, overrideSnapshot);
       }
       this.activateModelRunAndCompleteJob(job.id, modelRun.id, features.length);
     } catch (error) {
@@ -190,7 +195,12 @@ export class RecomputePipeline {
     }
   }
 
-  private runShadowValidation(jobId: string, candidate: ModelRun, request: RecomputeRequest): void {
+  private runShadowValidation(
+    jobId: string,
+    candidate: ModelRun,
+    request: RecomputeRequest,
+    overrideSnapshot: OverrideSnapshot
+  ): void {
     const datasetVersion = this.manifestValue("dataset_version") ?? "dataset_unknown";
     const fullRequest: RecomputeRequest = { ...request, validationMode: "off" };
     delete fullRequest.incrementalPlan;
@@ -199,11 +209,11 @@ export class RecomputePipeline {
     let reference: ModelRun | null = null;
     let metricRunId: string | null = null;
     try {
-      const features = this.extractFeatures(jobId, featureRun, fullRequest);
+      const features = this.extractFeatures(jobId, featureRun, fullRequest, overrideSnapshot);
       this.finishFeatureRun(featureRun.id, "succeeded", null);
       reference = this.createModelRun(datasetVersion, featureRun.id, fullRequest);
-      metricRunId = this.createTrainingMetricRun(reference.id, fullRequest);
-      this.replayTrainingMetrics(jobId, metricRunId, features, fullRequest);
+      metricRunId = this.createTrainingMetricRun(reference.id, fullRequest, overrideSnapshot.ids);
+      this.replayTrainingMetrics(jobId, metricRunId, features, fullRequest, overrideSnapshot);
       this.finishTrainingMetricRun(metricRunId, "succeeded", null);
       this.replayModel(jobId, reference, features, fullRequest);
       this.finishModelRun(reference.id, "succeeded", null);
@@ -284,6 +294,7 @@ export class RecomputePipeline {
 
   runSnapshotRefresh(job: RecomputeJob): void {
     const request = this.parseRequest(job.request);
+    this.throwIfCancelled(job.id);
     const active = this.database
       .prepare("SELECT model_run_id AS modelRunId FROM active_model_run WHERE singleton = 1")
       .get() as unknown as { modelRunId: string } | undefined;
@@ -292,6 +303,7 @@ export class RecomputePipeline {
       return;
     }
     this.setJobRunIds(job.id, null, active.modelRunId);
+    this.throwIfCancelled(job.id);
     const timeline = this.loadTimelineAssessments(active.modelRunId);
     this.writeDailySnapshots(
       active.modelRunId,
@@ -300,6 +312,7 @@ export class RecomputePipeline {
       request.timezoneIdentifier,
       true
     );
+    this.throwIfCancelled(job.id);
     const metricRun = this.database
       .prepare("SELECT id FROM training_metric_runs WHERE model_run_id = ? AND status = 'succeeded'")
       .get(active.modelRunId) as unknown as { id: string } | undefined;
@@ -312,6 +325,7 @@ export class RecomputePipeline {
           new Map(this.loadSessions(request.evaluatedAt).map((session) => [session.trainingSessionId, session])),
           request
         );
+        this.throwIfCancelled(job.id);
       }
       const loads = this.loadPersistedTrainingLoads(metricRun.id);
       const throughDate = localDateAt(request.evaluatedAt, request.timezoneIdentifier);
@@ -324,6 +338,7 @@ export class RecomputePipeline {
         this.persistDailyTrainingMetrics(metricRun.id, daily, request, true);
       }
     }
+    this.throwIfCancelled(job.id);
     this.completeJob(job.id, "snapshot_refreshed", 1, 1, "Current-day snapshot appended");
   }
 
@@ -465,14 +480,19 @@ export class RecomputePipeline {
       .run(status, appNow(), error === null ? null : JSON.stringify(this.errorPayload(error)), id);
   }
 
-  private createTrainingMetricRun(modelRunId: string, request: RecomputeRequest): string {
+  private createTrainingMetricRun(
+    modelRunId: string,
+    request: RecomputeRequest,
+    overrideSnapshotIds: string[]
+  ): string {
     const id = opaqueId("training_metric_run");
     const createdAt = appNow();
     const config = {
       dailyMetrics: defaultDailyMetricConfig,
       zoneVersion: TRAINING_ZONE_CONFIG_VERSION,
       heartRateReserveBoundaries: [0.6, 0.7, 0.8, 0.9],
-      paceThresholdMultipliers: [1.15, 1.06, 0.97, 0.9]
+      paceThresholdMultipliers: [1.15, 1.06, 0.97, 0.9],
+      overrideSnapshotIds
     };
     this.database.prepare(`
       INSERT INTO training_metric_runs (
@@ -528,8 +548,36 @@ export class RecomputePipeline {
     );
   }
 
-  private loadOverride(trainingSessionId: string): WorkoutOverride | null {
-    return this.sessions.loadOverride(trainingSessionId);
+  private captureOverrideSnapshot(): OverrideSnapshot {
+    const rows = this.database.prepare(`
+      SELECT * FROM effective_workout_overrides ORDER BY training_session_id
+    `).all() as unknown as Array<Record<string, unknown>>;
+    const overrides = rows.map((row): WorkoutOverride => ({
+      id: String(row.id),
+      trainingSessionId: String(row.training_session_id),
+      revision: Number(row.revision),
+      eligibilityOverride:
+        row.eligibility_override === "include" || row.eligibility_override === "exclude"
+          ? row.eligibility_override
+          : null,
+      statisticsParticipation:
+        row.statistics_participation === "include" || row.statistics_participation === "exclude"
+          ? row.statistics_participation
+          : null,
+      sessionType: typeof row.session_type === "string" ? row.session_type as SessionType : null,
+      performanceProtocol:
+        typeof row.performance_protocol === "string"
+          ? row.performance_protocol as PerformanceProtocol
+          : null,
+      rpe: typeof row.rpe === "number" ? row.rpe : null,
+      conditionTags: parseJson(typeof row.condition_tags_json === "string" ? row.condition_tags_json : "[]", []),
+      note: typeof row.note === "string" ? row.note : null,
+      createdAt: String(row.created_at)
+    }));
+    return {
+      ids: overrides.map((override) => override.id),
+      byTrainingSessionId: new Map(overrides.map((override) => [override.trainingSessionId, override]))
+    };
   }
 
   private loadStatistic(workoutId: string, type: string): StatisticRow | null {
@@ -690,7 +738,7 @@ export class RecomputePipeline {
     return gain;
   }
 
-  private buildFeatureSource(row: SessionRow): WorkoutFeatureSource {
+  private buildFeatureSource(row: SessionRow, override: WorkoutOverride | null): WorkoutFeatureSource {
     const heartRecords = this.loadRecordSeries(
       row.sourceName,
       row.workoutStartAt,
@@ -760,14 +808,15 @@ export class RecomputePipeline {
       sleepDurationMinutes: this.loadSleepDurationMinutes(row.workoutStartAt),
       recentLoadMinutes: this.loadRecentLoadMinutes(row.workoutStartAt),
       observedMaximumHeartRate: this.loadObservedMaximumHeartRate(row.workoutStartAt),
-      override: this.loadOverride(row.trainingSessionId)
+      override
     };
   }
 
   private extractFeatures(
     jobId: string,
     featureRun: FeatureRun,
-    request: RecomputeRequest
+    request: RecomputeRequest,
+    overrideSnapshot: OverrideSnapshot
   ): WorkoutFeatureVector[] {
     const allSessions = this.loadSessions(request.evaluatedAt);
     const reuse = this.reuseFeaturePrefix(featureRun, request);
@@ -794,7 +843,10 @@ export class RecomputePipeline {
       const feature = extractWorkoutFeatureVector(
         featureId,
         featureRun.id,
-        this.buildFeatureSource(session),
+        this.buildFeatureSource(
+          session,
+          overrideSnapshot.byTrainingSessionId.get(session.trainingSessionId) ?? null
+        ),
         request.featureConfig,
         request.evaluatedAt
       );
@@ -1106,7 +1158,8 @@ export class RecomputePipeline {
     jobId: string,
     metricRunId: string,
     features: WorkoutFeatureVector[],
-    request: RecomputeRequest
+    request: RecomputeRequest,
+    overrideSnapshot: OverrideSnapshot
   ): void {
     const sessions = new Map(
       this.loadSessions(request.evaluatedAt).map((session) => [session.trainingSessionId, session])
@@ -1137,7 +1190,7 @@ export class RecomputePipeline {
     for (const [index, feature] of features.entries()) {
       this.throwIfCancelled(jobId);
       const session = sessions.get(feature.trainingSessionId);
-      const override = this.loadOverride(feature.trainingSessionId);
+      const override = overrideSnapshot.byTrainingSessionId.get(feature.trainingSessionId) ?? null;
       const implausibleStatistics = feature.missingReasons.includes("implausible_average_pace") &&
         override?.statisticsParticipation !== "include";
       const excluded = session?.trainingSessionStatus !== "active" ||
@@ -1858,17 +1911,19 @@ export class RecomputePipeline {
   }
 
   private activateModelRunAndCompleteJob(jobId: string, modelRunId: string, featureCount: number): void {
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      this.modelRuns.activateSucceeded(modelRunId, appNow());
-      // CA/feature rebuild changes residual baselines; drop active CatBoost until retrain.
-      this.modelRuns.clearActivePredictionModel();
-      this.jobs.complete(jobId, "completed", featureCount, featureCount, "Model run activated");
-      this.database.exec("COMMIT");
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
+    const completed = this.jobs.complete(
+      jobId,
+      "completed",
+      featureCount,
+      featureCount,
+      "Model run activated",
+      () => {
+        this.modelRuns.activateSucceeded(modelRunId, appNow());
+        // CA/feature rebuild changes residual baselines; drop active CatBoost until retrain.
+        this.modelRuns.clearActivePredictionModel();
+      }
+    );
+    if (!completed) throw new Error("Task cancellation requested");
   }
 
   private throwIfCancelled(jobId: string): void {
@@ -1896,7 +1951,9 @@ export class RecomputePipeline {
     total: number,
     message: string
   ): void {
-    this.jobs.complete(jobId, phase, current, total, message);
+    if (!this.jobs.complete(jobId, phase, current, total, message)) {
+      throw new Error("Task cancellation requested");
+    }
   }
 
   private errorPayload(error: unknown): Record<string, unknown> {

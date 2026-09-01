@@ -41,7 +41,7 @@ export function durationToSeconds(
   unit: string | undefined
 ): number | null {
   const amount = parseFiniteNumber(value);
-  if (amount === null) return null;
+  if (amount === null || amount < 0) return null;
 
   switch ((unit ?? "s").toLowerCase()) {
     case "s":

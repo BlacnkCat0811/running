@@ -2,7 +2,7 @@ import "../pixel-layout.css";
 import "../training-reference.css";
 import type { WorkoutListResponse } from "@rai/api-contracts";
 import { useEffect } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import {
   EmptyBlock,
@@ -65,7 +65,9 @@ const filterValues: Record<(typeof filterKeys)[number], ReadonlySet<string>> = {
 };
 
 export function WorkoutsPage() {
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const from = `${location.pathname}${location.search}`;
   const parsedOffset = Number(searchParams.get("offset") ?? 0);
   const offset = Number.isFinite(parsedOffset)
     ? Math.max(Math.floor(parsedOffset), 0)
@@ -362,7 +364,7 @@ export function WorkoutsPage() {
               </div>
               <Link
                 to={`/workouts/${preview.id}`}
-                state={{ from: "/workouts" }}
+                state={{ from }}
                 className="button primary full"
               >
                 查看训练详情 <ArrowRight size={16} />
