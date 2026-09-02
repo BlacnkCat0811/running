@@ -50,3 +50,19 @@
 - 不读取 HealthKit，也不在手机上跑 Node / SQLite。
 - 不能离线独立使用。Mac 上的 `npm run dev:device` 停了，手机页面也就停了。
 - 原生 SwiftUI / React Native 产品需要单独立项。
+
+## 像素风 UI 与移动端 API 映射
+
+设计稿 `apps/ios/design/ios-app-design.html`（清新像素风 v3）五个页面对应的后端聚合端点，全部实现于 `apps/api`（契约类型在 `packages/api-contracts`，OpenAPI 已登记）：
+
+| 设计稿页面 | 端点 | 数据说明 |
+| --- | --- | --- |
+| 首页（今日卡/活动圆环/周柱图/最近训练） | `GET /v1/mobile/today` | 今日距离/时长/配速/卡路里/次数；本周跑量 + 目标进度（goal 来自 `/v1/mobile/goals`）；周内逐日柱（周一..今天，零填充）；最近 5 条训练 |
+| 训练（列表/分段器） | 复用既有 `/v1/workouts` 列表接口 | 无新增端点 |
+| 统计（月度柱/指标格/心率区间） | `GET /v1/mobile/statistics` | 近 3 自然月按跑步/骑行/其他拆分；28 天滚动汇总 + 环比；心率区间占比（coverage ≥ 0.3） |
+| 趋势（阶梯折线/洞察/纪录） | `GET /v1/mobile/trends` | 12 周跑量、4 周增幅、个人纪录（最快 5km/10km、最长距离、最大月）、正/警告洞察 |
+| 设置（周目标编辑） | `GET/PUT /v1/mobile/goals` | 周跑量目标，文件持久化（`var/mobile-goals.json`），1–500km 校验 |
+
+所有聚合窗口按 **数据最新日期（`MAX(local_date)`）** 锚定而非墙钟——Apple Health 导入滞后时，统计/趋势仍渲染完整窗口（含 28 天滚动汇总与环比）。
+
+真实库冒烟：`bash scripts/mobile-smoke.sh`（自动起 API → 校验四端点 → goals 往返与越界校验）。

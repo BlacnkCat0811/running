@@ -446,6 +446,89 @@ export interface WorkoutSeriesResponse {
   };
 }
 
+/** Aggregated payload for the iOS home page ("今天"). */
+export interface MobileTodayResponse {
+  generatedAt: string;
+  timezone: string;
+  today: {
+    localDate: string;
+    distanceKm: number;
+    durationSeconds: number;
+    paceSecondsPerKm: number | null;
+    energyKcal: number | null;
+    workoutCount: number;
+  };
+  week: {
+    periodStart: string;
+    periodEnd: string;
+    distanceKm: number;
+    durationSeconds: number;
+    workoutCount: number;
+    goalDistanceKm: number | null;
+    goalProgressFraction: number | null;
+  };
+  /** Monday..Sunday of the current week; missing days are zero-filled. */
+  weekDaily: Array<{ localDate: string; distanceKm: number; workoutCount: number }>;
+  recentWorkouts: WorkoutListItem[];
+}
+
+/** Aggregated payload for the iOS statistics page. */
+export interface MobileStatisticsResponse {
+  generatedAt: string;
+  timezone: string;
+  /** Last 3 calendar months (current month included), newest last. */
+  months: Array<{
+    month: string;
+    runningDistanceKm: number;
+    cyclingDistanceKm: number;
+    otherDistanceKm: number;
+    totalDistanceKm: number;
+    durationSeconds: number;
+    workoutCount: number;
+  }>;
+  totals: {
+    distanceKm: number;
+    durationSeconds: number;
+    workoutCount: number;
+    averagePaceSecondsPerKm: number | null;
+    distanceChangeFraction: number | null;
+  };
+  heartRateZones: Array<{ zone: string; durationSeconds: number; fraction: number }>;
+}
+
+/** Aggregated payload for the iOS trends page. */
+export interface MobileTrendsResponse {
+  generatedAt: string;
+  timezone: string;
+  /** Last 12 ISO weeks (current week included), oldest first. */
+  weeks: Array<{
+    periodStart: string;
+    periodEnd: string;
+    distanceKm: number;
+    workoutCount: number;
+    isComplete: boolean;
+  }>;
+  /** Total distance of the last 4 weeks vs the previous 4 weeks. */
+  distanceChangeFraction4Weeks: number | null;
+  records: {
+    fastest5k: { distanceKm: number; paceSecondsPerKm: number; startedAt: string } | null;
+    fastest10k: { distanceKm: number; paceSecondsPerKm: number; startedAt: string } | null;
+    longestDistance: { distanceKm: number; startedAt: string } | null;
+    biggestMonth: { month: string; distanceKm: number } | null;
+  };
+  insights: Array<{ kind: "positive" | "warning"; title: string; detail: string }>;
+}
+
+/** Weekly training goals persisted server-side for the iOS settings page. */
+export interface MobileGoalsResponse {
+  weeklyDistanceKm: number;
+  updatedAt: string;
+}
+
+export interface UpdateMobileGoalsInput {
+  weeklyDistanceKm: number;
+}
+
 export interface WorkoutSplit {
   index: number;
   distanceMeters: number;

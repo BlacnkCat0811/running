@@ -68,6 +68,15 @@ export const trainingZonesHistoryQuerySchema = {
   properties: { days: { type: "string", pattern: "^[0-9]{1,4}$" } }
 } as const;
 
+export const mobileGoalsBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["weeklyDistanceKm"],
+  properties: {
+    weeklyDistanceKm: { type: "number", minimum: 1, maximum: 500 }
+  }
+} as const;
+
 const automaticOrManualNumber = (minimum: number, maximum: number, valueName: string) => ({
   oneOf: [
     {
@@ -379,7 +388,8 @@ export const openapiDocument = {
       TrainingZoneProfileUpdate: trainingZoneProfileBodySchema,
       PredictionModelTrainRequest: predictionModelTrainBodySchema,
       DeleteDatabaseRequest: deleteBodySchema,
-      RestoreBackupRequest: restoreBodySchema
+      RestoreBackupRequest: restoreBodySchema,
+      MobileGoalsUpdate: mobileGoalsBodySchema
     }
   },
   paths: {
@@ -415,6 +425,15 @@ export const openapiDocument = {
       parameters: [{ name: "days", in: "query", schema: trainingLoadQuerySchema.properties.days }]
     }) },
     "/v1/training-zones/current": { get: operation(["Read"], "今日心率与配速分区") },
+    "/v1/mobile/today": { get: operation(["Read"], "iOS 首页聚合：今日汇总、周进度、本周每日里程与最近训练") },
+    "/v1/mobile/statistics": { get: operation(["Read"], "iOS 统计页聚合：近 3 月分运动类型里程、滚动汇总与心率区间分布") },
+    "/v1/mobile/trends": { get: operation(["Read"], "iOS 趋势页聚合：12 周跑量、四周增幅、个人纪录与洞察") },
+    "/v1/mobile/goals": {
+      get: operation(["Read"], "读取 iOS 周目标"),
+      put: operation(["Workouts"], "更新 iOS 周目标", {
+        requestBody: body({ $ref: "#/components/schemas/MobileGoalsUpdate" }, "周跑量目标（公里）")
+      })
+    },
     "/v1/training-zones/history": { get: operation(["Read"], "历史心率与配速分区", {
       parameters: [{ name: "days", in: "query", schema: trainingZonesHistoryQuerySchema.properties.days }]
     }) },

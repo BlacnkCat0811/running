@@ -745,6 +745,9 @@ test("dynamic-port startup reports readiness and workout overrides preserve serv
     }
 
     const cancellationDatabase = new DatabaseSync(databasePath);
+    // The API child's recompute worker may be writing the triggered job at this
+    // moment; wait for the write lock instead of failing with SQLITE_BUSY.
+    cancellationDatabase.exec("PRAGMA busy_timeout = 5000");
     try {
       cancellationDatabase.prepare(`
         INSERT INTO recompute_jobs (
@@ -864,7 +867,16 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
       ...(await fetch(`${url}/v1/import-jobs/${importJobId}`).then((response) => response.json()) as object)
     });
     assert.equal(await fetch(`${url}/v1/import-jobs/active`).then((response) => response.json()), null);
-    const cleanedSource = await fetch(`${url}/v1/import-sources/${sourceId}`, { method: "DELETE" });
+    // The failed import releases its mutation slot slightly after the job
+    // reaches the terminal status; a DELETE fired in that gap is rejected with
+    // 409. Retry briefly instead of racing the coordinator.
+    let cleanedSource: Response | null = null;
+    const deleteDeadline = Date.now() + 5_000;
+    for (;;) {
+      cleanedSource = await fetch(`${url}/v1/import-sources/${sourceId}`, { method: "DELETE" });
+      if (cleanedSource.status !== 409 || Date.now() >= deleteDeadline) break;
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+    }
     assert.equal(cleanedSource.status, 404, await cleanedSource.text());
 
     const importsPath = join(runtimeRoot, "var", "imports");

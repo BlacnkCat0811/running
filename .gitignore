@@ -28,6 +28,7 @@ Thumbs.db
 .vscode/
 .claude/
 .grok/
+.workbuddy/
 
 # Xcode
 xcuserdata/

@@ -20,6 +20,9 @@ import type {
   DataAuditResponse,
   DashboardResponse,
   DiagnosticExportResponse,
+  MobileStatisticsResponse,
+  MobileTodayResponse,
+  MobileTrendsResponse,
   ModelRunComparisonResponse,
   ModelRunSummary,
   RecomputeJobDto,
@@ -57,6 +60,31 @@ const parseJson = <T>(value: unknown, fallback: T): T => {
 
 const paceSeconds = (duration: number, distance: number | null): number | null =>
   distance !== null && distance > 0 ? duration / distance : null;
+
+const mobileLocalDate = (): string => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit"
+}).format(new Date());
+
+const shiftMobileDate = (date: string, days: number): string => {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+};
+
+/** Monday of the ISO week containing `date`. */
+const mobileWeekStart = (date: string): string => {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
+  return value.toISOString().slice(0, 10);
+};
+
+interface ZoneExposureRow {
+  zone: string;
+  durationSeconds: number;
+}
 
 export class RaiReadStore {
   private readonly database: DatabaseSync;
@@ -176,6 +204,319 @@ export class RaiReadStore {
       total: result.total,
       limit: query.limit,
       offset: query.offset
+    };
+  }
+
+  /**
+   * Aggregated payload for the iOS home page: today's totals (with energy),
+   * current-week progress against the stored goal, Monday..Sunday daily bars
+   * and the most recent workouts.
+   */
+  mobileToday(goalDistanceKm: number | null): MobileTodayResponse {
+    const today = mobileLocalDate();
+    const weekStart = mobileWeekStart(today);
+    const weekEnd = shiftMobileDate(weekStart, 6);
+
+    const todayRow = this.database.prepare(`
+      SELECT
+        COALESCE(SUM(distance_km), 0) AS distance_km,
+        COALESCE(SUM(duration_seconds), 0) AS duration_seconds,
+        COUNT(*) AS workout_count
+      FROM active_workout_training_loads
+      WHERE local_date = ?
+    `).get(today) as Record<string, unknown>;
+    const todayEnergy = this.database.prepare(`
+      SELECT COALESCE(SUM(stat.sum_value), 0) AS energy_kcal
+      FROM active_workout_training_loads load
+      JOIN training_sessions ts ON ts.id = load.training_session_id
+      JOIN workout_statistics stat ON stat.workout_id = ts.canonical_workout_id
+        AND stat.type = 'HKQuantityTypeIdentifierActiveEnergyBurned'
+      WHERE load.local_date = ?
+    `).get(today) as Record<string, unknown>;
+
+    const dailyRows = this.database.prepare(`
+      SELECT local_date, distance_km, workout_count
+      FROM active_daily_training_metrics
+      WHERE local_date BETWEEN ? AND ?
+      ORDER BY local_date
+    `).all(weekStart, today) as unknown as Array<Record<string, unknown>>;
+    const dailyByDate = new Map(dailyRows.map((row) => [String(row.local_date), row]));
+    const weekDaily: MobileTodayResponse["weekDaily"] = [];
+    for (let cursor = weekStart; cursor <= today; cursor = shiftMobileDate(cursor, 1)) {
+      const row = dailyByDate.get(cursor);
+      weekDaily.push({
+        localDate: cursor,
+        distanceKm: row ? Number(row.distance_km ?? 0) : 0,
+        workoutCount: row ? Number(row.workout_count ?? 0) : 0
+      });
+    }
+
+    const weekRow = this.database.prepare(`
+      SELECT
+        COALESCE(SUM(distance_km), 0) AS distance_km,
+        COALESCE(SUM(duration_seconds), 0) AS duration_seconds,
+        COUNT(*) AS workout_count
+      FROM active_workout_training_loads
+      WHERE local_date BETWEEN ? AND ?
+    `).get(weekStart, weekEnd) as Record<string, unknown>;
+
+    const weekDistanceKm = Number(weekRow.distance_km ?? 0);
+    return {
+      generatedAt: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      today: {
+        localDate: today,
+        distanceKm: Number(todayRow.distance_km ?? 0),
+        durationSeconds: Number(todayRow.duration_seconds ?? 0),
+        paceSecondsPerKm: paceSeconds(
+          Number(todayRow.duration_seconds ?? 0),
+          Number(todayRow.distance_km ?? 0) > 0 ? Number(todayRow.distance_km) : null
+        ),
+        energyKcal: Number(todayEnergy.energy_kcal ?? 0) > 0 ? Number(todayEnergy.energy_kcal) : null,
+        workoutCount: Number(todayRow.workout_count ?? 0)
+      },
+      week: {
+        periodStart: weekStart,
+        periodEnd: weekEnd,
+        distanceKm: weekDistanceKm,
+        durationSeconds: Number(weekRow.duration_seconds ?? 0),
+        workoutCount: Number(weekRow.workout_count ?? 0),
+        goalDistanceKm: goalDistanceKm,
+        goalProgressFraction:
+          goalDistanceKm !== null && goalDistanceKm > 0
+            ? Math.min(1, weekDistanceKm / goalDistanceKm)
+            : null
+      },
+      weekDaily,
+      recentWorkouts: this.workoutsRepository.list("", [], 5, 0).map((item) => this.toWorkoutListItem(item)!)
+    };
+  }
+
+  /**
+   * Aggregated payload for the iOS statistics page: last 3 calendar months
+   * split by activity type, rolling totals with change fraction, and the
+   * heart-rate zone time distribution from active zone summaries.
+   */
+  mobileStatistics(): MobileStatisticsResponse {
+    const today = mobileLocalDate();
+    // Anchor on the latest data date (not the wall clock) so imports that lag
+    // behind still render three full months of history.
+    const anchorRow = this.database.prepare(`
+      SELECT COALESCE(MAX(local_date), ?) AS anchor FROM active_workout_training_loads
+    `).get(today) as Record<string, unknown>;
+    const anchor = String(anchorRow.anchor ?? today);
+    const threeMonthsAgo = shiftMobileDate(`${anchor.slice(0, 7)}-01`, -62).slice(0, 7);
+
+    const monthRows = this.database.prepare(`
+      SELECT
+        substr(load.local_date, 1, 7) AS month,
+        COALESCE(SUM(CASE WHEN ts.activity_type LIKE '%Running%' THEN load.distance_km ELSE 0 END), 0) AS running_km,
+        COALESCE(SUM(CASE WHEN ts.activity_type LIKE '%Cycling%' THEN load.distance_km ELSE 0 END), 0) AS cycling_km,
+        COALESCE(SUM(load.distance_km), 0) AS total_km,
+        COALESCE(SUM(load.duration_seconds), 0) AS duration_seconds,
+        COUNT(*) AS workout_count
+      FROM active_workout_training_loads load
+      JOIN training_sessions ts ON ts.id = load.training_session_id
+      WHERE substr(load.local_date, 1, 7) >= ?
+      GROUP BY month
+      ORDER BY month DESC
+      LIMIT 3
+    `).all(threeMonthsAgo) as unknown as Array<Record<string, unknown>>;
+
+    // Rolling 28-day totals anchored on the data date as well: current window
+    // is (anchor-28, anchor], previous is (anchor-56, anchor-28], so lagging
+    // imports still produce meaningful totals instead of a wall-clock zero.
+    const rollingRows = this.database.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN local_date > ? THEN distance_km ELSE 0 END), 0) AS current_km,
+        COALESCE(SUM(CASE WHEN local_date <= ? THEN distance_km ELSE 0 END), 0) AS previous_km,
+        COALESCE(SUM(CASE WHEN local_date > ? THEN duration_seconds ELSE 0 END), 0) AS duration_seconds,
+        COALESCE(SUM(CASE WHEN local_date > ? THEN 1 ELSE 0 END), 0) AS workout_count
+      FROM active_workout_training_loads
+      WHERE local_date > ?
+    `).get(
+      shiftMobileDate(anchor, -28), shiftMobileDate(anchor, -28), shiftMobileDate(anchor, -28),
+      shiftMobileDate(anchor, -28), shiftMobileDate(anchor, -56)
+    ) as Record<string, unknown>;
+
+    const zoneTotals = new Map<string, number>();
+    const exposureRows = this.database.prepare(`
+      SELECT heart_rate_exposure_json
+      FROM active_workout_zone_summaries
+      WHERE heart_rate_coverage >= 0.3
+    `).all() as unknown as Array<Record<string, unknown>>;
+    for (const row of exposureRows) {
+      const exposures = parseJson<ZoneExposureRow[]>(row.heart_rate_exposure_json, []);
+      for (const exposure of exposures) {
+        if (!exposure || typeof exposure.zone !== "string") continue;
+        const seconds = Number(exposure.durationSeconds ?? 0);
+        if (!Number.isFinite(seconds) || seconds <= 0) continue;
+        zoneTotals.set(exposure.zone, (zoneTotals.get(exposure.zone) ?? 0) + seconds);
+      }
+    }
+    const zoneTotalSeconds = [...zoneTotals.values()].reduce((sum, value) => sum + value, 0);
+    const heartRateZones = [...zoneTotals.entries()]
+      .map(([zone, durationSeconds]) => ({
+        zone,
+        durationSeconds,
+        fraction: zoneTotalSeconds > 0 ? durationSeconds / zoneTotalSeconds : 0
+      }))
+      .sort((a, b) => b.durationSeconds - a.durationSeconds);
+
+    const totalsDistanceKm = Number(rollingRows.current_km ?? 0);
+    const totalsDurationSeconds = Number(rollingRows.duration_seconds ?? 0);
+    const previousKm = Number(rollingRows.previous_km ?? 0);
+    return {
+      generatedAt: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      months: monthRows.map((row) => ({
+        month: String(row.month),
+        runningDistanceKm: Number(row.running_km ?? 0),
+        cyclingDistanceKm: Number(row.cycling_km ?? 0),
+        otherDistanceKm: Math.max(0, Number(row.total_km ?? 0) - Number(row.running_km ?? 0) - Number(row.cycling_km ?? 0)),
+        totalDistanceKm: Number(row.total_km ?? 0),
+        durationSeconds: Number(row.duration_seconds ?? 0),
+        workoutCount: Number(row.workout_count ?? 0)
+      })),
+      totals: {
+        distanceKm: totalsDistanceKm,
+        durationSeconds: totalsDurationSeconds,
+        workoutCount: Number(rollingRows.workout_count ?? 0),
+        averagePaceSecondsPerKm: paceSeconds(totalsDurationSeconds, totalsDistanceKm > 0 ? totalsDistanceKm : null),
+        distanceChangeFraction: previousKm > 0 ? (totalsDistanceKm - previousKm) / previousKm : null
+      },
+      heartRateZones
+    };
+  }
+
+  /**
+   * Aggregated payload for the iOS trends page: 12-week distance bars,
+   * 4-week ramp fraction, personal records and simple coaching insights.
+   */
+  mobileTrends(): MobileTrendsResponse {
+    const today = mobileLocalDate();
+    // Anchor weekly history on the latest data date so stale imports still
+    // render the full 12-week window.
+    const anchorRow = this.database.prepare(`
+      SELECT COALESCE(MAX(local_date), ?) AS anchor FROM active_workout_training_loads
+    `).get(today) as Record<string, unknown>;
+    const anchor = String(anchorRow.anchor ?? today);
+
+    const weekRows = this.database.prepare(`
+      SELECT
+        MIN(local_date) AS period_start,
+        MAX(local_date) AS period_end,
+        SUM(distance_km) AS distance_km,
+        COUNT(*) AS workout_count
+      FROM active_workout_training_loads
+      WHERE local_date > ?
+      GROUP BY (julianday(local_date) + 4) / 7
+      ORDER BY period_start DESC
+      LIMIT 12
+    `).all(shiftMobileDate(anchor, -83)) as unknown as Array<Record<string, unknown>>;
+    const weeks = weekRows
+      .map((row) => {
+        const periodStart = mobileWeekStart(String(row.period_start));
+        return {
+          periodStart,
+          periodEnd: shiftMobileDate(periodStart, 6),
+          distanceKm: Number(row.distance_km ?? 0),
+          workoutCount: Number(row.workout_count ?? 0),
+          isComplete: String(row.period_end) >= shiftMobileDate(today, -1)
+        };
+      })
+      .sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+
+    let distanceChangeFraction4Weeks: number | null = null;
+    if (weeks.length >= 8) {
+      const recent = weeks.slice(-4).reduce((sum, week) => sum + week.distanceKm, 0);
+      const previous = weeks.slice(-8, -4).reduce((sum, week) => sum + week.distanceKm, 0);
+      distanceChangeFraction4Weeks = previous > 0 ? (recent - previous) / previous : null;
+    }
+
+    const recordQuery = (lowerKm: number, upperKm: number): { distanceKm: number; paceSecondsPerKm: number; startedAt: string } | null => {
+      const row = this.database.prepare(`
+        SELECT f.distance_km, f.duration_seconds, f.workout_start_at
+        FROM active_ability_assessments a
+        JOIN workout_features f ON f.id = a.feature_id
+        WHERE f.eligibility_status = 'eligible'
+          AND f.distance_km BETWEEN ? AND ?
+          AND f.duration_seconds > 0
+        ORDER BY f.duration_seconds / f.distance_km ASC
+        LIMIT 1
+      `).get(lowerKm, upperKm) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      const distanceKm = Number(row.distance_km);
+      const durationSeconds = Number(row.duration_seconds);
+      if (!(distanceKm > 0) || !(durationSeconds > 0)) return null;
+      return {
+        distanceKm,
+        paceSecondsPerKm: durationSeconds / distanceKm,
+        startedAt: String(row.workout_start_at)
+      };
+    };
+    const longestRow = this.database.prepare(`
+      SELECT f.distance_km, f.workout_start_at
+      FROM active_ability_assessments a
+      JOIN workout_features f ON f.id = a.feature_id
+      WHERE f.eligibility_status = 'eligible' AND f.distance_km IS NOT NULL
+      ORDER BY f.distance_km DESC
+      LIMIT 1
+    `).get() as Record<string, unknown> | undefined;
+    const biggestMonthRow = this.database.prepare(`
+      SELECT substr(local_date, 1, 7) AS month, SUM(distance_km) AS distance_km
+      FROM active_daily_training_metrics
+      GROUP BY month
+      ORDER BY distance_km DESC
+      LIMIT 1
+    `).get() as Record<string, unknown> | undefined;
+
+    const insights: MobileTrendsResponse["insights"] = [];
+    if (distanceChangeFraction4Weeks !== null) {
+      const percent = Math.round(distanceChangeFraction4Weeks * 100);
+      if (percent > 30) {
+        insights.push({
+          kind: "warning",
+          title: "跑量增幅偏快",
+          detail: `近 4 周跑量较前 4 周 +${percent}%，超过 30% 安全阈值，建议控制本周总量或安排恢复日。`
+        });
+      } else if (percent > 0) {
+        insights.push({
+          kind: "positive",
+          title: "跑量爬坡健康",
+          detail: `近 4 周跑量较前 4 周 +${percent}%，处于安全区间（<30%），可维持当前节奏。`
+        });
+      }
+    }
+    if (weeks.length >= 2) {
+      const currentWeek = weeks[weeks.length - 1];
+      const previousWeek = weeks[weeks.length - 2];
+      if (currentWeek && previousWeek && previousWeek.distanceKm > 0 &&
+          currentWeek.distanceKm > previousWeek.distanceKm * 1.5 && currentWeek.distanceKm > 5) {
+        insights.push({
+          kind: "warning",
+          title: "单周跑量跳升",
+          detail: `本周跑量较上周 +${Math.round((currentWeek.distanceKm / previousWeek.distanceKm - 1) * 100)}%，注意疲劳管理，避免连续两周大幅增量。`
+        });
+      }
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      weeks,
+      distanceChangeFraction4Weeks,
+      records: {
+        fastest5k: recordQuery(4.9, 5.2),
+        fastest10k: recordQuery(9.8, 10.5),
+        longestDistance: longestRow
+          ? { distanceKm: Number(longestRow.distance_km), startedAt: String(longestRow.workout_start_at) }
+          : null,
+        biggestMonth: biggestMonthRow
+          ? { month: String(biggestMonthRow.month), distanceKm: Number(biggestMonthRow.distance_km ?? 0) }
+          : null
+      },
+      insights
     };
   }
 

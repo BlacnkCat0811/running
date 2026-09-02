@@ -12,6 +12,7 @@ import type {
   PredictionModelRun,
   RecomputeJobCancellationResponse,
   TrainPredictionModelRequest,
+  UpdateMobileGoalsInput,
   UpdateTrainingZoneProfileInput,
   TrainingStatisticsGranularity
 } from "@rai/api-contracts";
@@ -41,6 +42,7 @@ import {
   ImportSourceNotFoundError
 } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
+import { MobileGoalsStore } from "./mobile-goals.js";
 import {
   installLocalRequestSecurity,
   isTrustedDevelopmentOrigin
@@ -52,6 +54,7 @@ import {
   identifierParamsSchema,
   importJobBodySchema,
   importSourceBodySchema,
+  mobileGoalsBodySchema,
   modelComparisonQuerySchema,
   openapiDocument,
   overrideBodySchema,
@@ -173,6 +176,7 @@ if (existsSync(webDist)) {
 }
 
 const readStores = new ReadStoreManager(databasePath);
+const mobileGoalsStore = new MobileGoalsStore(runtimeRoot);
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
 const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error));
 const importSources = createImportSourceManager(runtimeRoot, projectRoot, maxImportZipBytes);
@@ -635,6 +639,24 @@ app.get("/v1/training-zones/current", async (_request, reply) => {
   if (!current) return reply.code(404).send({ message: "尚未生成训练分区，请先完成一次重新计算" });
   return current;
 });
+
+app.get("/v1/mobile/today", async () => {
+  // Goals live in a plain file and do not depend on database readiness.
+  const goal = mobileGoalsStore.read().weeklyDistanceKm;
+  return withReadStore((store) => store.mobileToday(goal));
+});
+
+app.get("/v1/mobile/statistics", async () => withReadStore((store) => store.mobileStatistics()));
+
+app.get("/v1/mobile/trends", async () => withReadStore((store) => store.mobileTrends()));
+
+app.get("/v1/mobile/goals", async () => mobileGoalsStore.read());
+
+app.put<{ Body: UpdateMobileGoalsInput }>(
+  "/v1/mobile/goals",
+  { schema: { body: mobileGoalsBodySchema } },
+  async (request) => mobileGoalsStore.write(request.body)
+);
 
 app.get<{ Querystring: { days?: string } }>(
   "/v1/training-zones/history",
