@@ -1069,6 +1069,7 @@ code, .numeric, strong { font-family: "Cascadia Mono", "SFMono-Regular", Consola
   html[data-shell="ios"] {
     --rai-safe-top: 47px;
     --rai-safe-bottom: 34px;
+    --rai-chrome-top: 40px;
   }
   html[data-shell="ios"] .app-navigation {
     align-items: flex-start;
@@ -1081,10 +1082,16 @@ code, .numeric, strong { font-family: "Cascadia Mono", "SFMono-Regular", Consola
     pointer-events: auto;
   }
   html[data-shell="ios"] .app-content {
-    padding-top: max(var(--rai-safe-top), env(safe-area-inset-top, 0px));
+    padding-top: calc(max(var(--rai-safe-top), env(safe-area-inset-top, 0px)) + var(--rai-chrome-top));
     padding-bottom: calc(56px + max(34px, var(--rai-safe-bottom), env(safe-area-inset-bottom, 0px)));
   }
-  html[data-shell="ios"] .global-task { top: calc(10px + max(var(--rai-safe-top), env(safe-area-inset-top, 0px))); }
+  html[data-shell="ios"] .global-task {
+    top: calc(8px + max(var(--rai-safe-top), env(safe-area-inset-top, 0px)) + var(--rai-chrome-top));
+  }
+  html[data-shell="ios"] .first-run-page {
+    min-height: calc(100dvh - 56px - max(34px, var(--rai-safe-bottom), env(safe-area-inset-bottom, 0px)));
+    padding-top: 12px;
+  }
   .global-task .status-badge { display: none; }
   .page { padding: 25px 16px 42px; }
   .import-dropzone { min-height: 96px; padding: 16px; }
@@ -1200,7 +1207,9 @@ code, .numeric, strong { font-family: "Cascadia Mono", "SFMono-Regular", Consola
   .button, .icon-button, .text-button, .text-link { min-height: 44px; }
   .text-button, .text-link { padding: 0 4px; }
   .global-task { top: 8px; right: 8px; width: calc(100vw - 16px); gap: 7px; padding: 10px; }
-  html[data-shell="ios"] .global-task { top: calc(8px + env(safe-area-inset-top, 0px)); }
+  html[data-shell="ios"] .global-task {
+    top: calc(8px + max(var(--rai-safe-top), env(safe-area-inset-top, 0px)) + var(--rai-chrome-top, 40px));
+  }
   .global-task b { white-space: normal; }
   .global-task .text-link { min-height: 36px; }
   .global-task-close { width: 36px; height: 36px; }

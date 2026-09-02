@@ -4,6 +4,7 @@ const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export interface LocalRequestSecurityOptions {
   apiPort: number;
+  apiToken?: string;
   developmentOrigins?: ReadonlySet<string>;
   allowPrivateLanWebPort?: number;
 }
@@ -60,6 +61,7 @@ export function isTrustedUnsafeRequest(
   origin: string | undefined,
   options: LocalRequestSecurityOptions
 ): boolean {
+  if (options.apiToken && origin === undefined) return false;
   const trustedHosts = new Set([
     `127.0.0.1:${options.apiPort}`,
     `localhost:${options.apiPort}`
@@ -75,6 +77,11 @@ export function installLocalRequestSecurity(
   options: LocalRequestSecurityOptions
 ): void {
   app.addHook("onRequest", async (request, reply) => {
+    if (options.apiToken && (request.url.split("?", 1)[0] ?? "").startsWith("/v1/")) {
+      const authorization = request.headers.authorization;
+      if (authorization === `Bearer ${options.apiToken}`) return;
+      return reply.code(401).send({ code: "unauthorized", message: "需要有效的 API Token" });
+    }
     if (isTrustedUnsafeRequest(
       request.method,
       request.headers.host,

@@ -207,11 +207,6 @@ export class RaiReadStore {
     };
   }
 
-  /**
-   * Aggregated payload for the iOS home page: today's totals (with energy),
-   * current-week progress against the stored goal, Monday..Sunday daily bars
-   * and the most recent workouts.
-   */
   mobileToday(goalDistanceKm: number | null): MobileTodayResponse {
     const today = mobileLocalDate();
     const weekStart = mobileWeekStart(today);
@@ -240,14 +235,18 @@ export class RaiReadStore {
     `).get(today) as Record<string, unknown>;
 
     const dailyRows = this.database.prepare(`
-      SELECT local_date, distance_km, workout_count
-      FROM active_daily_training_metrics
+      SELECT
+        local_date,
+        COALESCE(SUM(distance_km), 0) AS distance_km,
+        COUNT(*) AS workout_count
+      FROM active_workout_training_loads
       WHERE local_date BETWEEN ? AND ?
+      GROUP BY local_date
       ORDER BY local_date
-    `).all(weekStart, today) as unknown as Array<Record<string, unknown>>;
+    `).all(weekStart, weekEnd) as unknown as Array<Record<string, unknown>>;
     const dailyByDate = new Map(dailyRows.map((row) => [String(row.local_date), row]));
     const weekDaily: MobileTodayResponse["weekDaily"] = [];
-    for (let cursor = weekStart; cursor <= today; cursor = shiftMobileDate(cursor, 1)) {
+    for (let cursor = weekStart; cursor <= weekEnd; cursor = shiftMobileDate(cursor, 1)) {
       const row = dailyByDate.get(cursor);
       weekDaily.push({
         localDate: cursor,
@@ -298,15 +297,8 @@ export class RaiReadStore {
     };
   }
 
-  /**
-   * Aggregated payload for the iOS statistics page: last 3 calendar months
-   * split by activity type, rolling totals with change fraction, and the
-   * heart-rate zone time distribution from active zone summaries.
-   */
   mobileStatistics(): MobileStatisticsResponse {
     const today = mobileLocalDate();
-    // Anchor on the latest data date (not the wall clock) so imports that lag
-    // behind still render three full months of history.
     const anchorRow = this.database.prepare(`
       SELECT COALESCE(MAX(local_date), ?) AS anchor FROM active_workout_training_loads
     `).get(today) as Record<string, unknown>;
@@ -329,9 +321,6 @@ export class RaiReadStore {
       LIMIT 3
     `).all(threeMonthsAgo) as unknown as Array<Record<string, unknown>>;
 
-    // Rolling 28-day totals anchored on the data date as well: current window
-    // is (anchor-28, anchor], previous is (anchor-56, anchor-28], so lagging
-    // imports still produce meaningful totals instead of a wall-clock zero.
     const rollingRows = this.database.prepare(`
       SELECT
         COALESCE(SUM(CASE WHEN local_date > ? THEN distance_km ELSE 0 END), 0) AS current_km,
@@ -347,10 +336,13 @@ export class RaiReadStore {
 
     const zoneTotals = new Map<string, number>();
     const exposureRows = this.database.prepare(`
-      SELECT heart_rate_exposure_json
-      FROM active_workout_zone_summaries
-      WHERE heart_rate_coverage >= 0.3
-    `).all() as unknown as Array<Record<string, unknown>>;
+      SELECT zs.heart_rate_exposure_json
+      FROM active_workout_zone_summaries zs
+      JOIN active_workout_training_loads load
+        ON load.training_session_id = zs.training_session_id
+      WHERE zs.heart_rate_coverage >= 0.3
+        AND load.local_date > ?
+    `).all(shiftMobileDate(anchor, -28)) as unknown as Array<Record<string, unknown>>;
     for (const row of exposureRows) {
       const exposures = parseJson<ZoneExposureRow[]>(row.heart_rate_exposure_json, []);
       for (const exposure of exposures) {
@@ -383,7 +375,7 @@ export class RaiReadStore {
         totalDistanceKm: Number(row.total_km ?? 0),
         durationSeconds: Number(row.duration_seconds ?? 0),
         workoutCount: Number(row.workout_count ?? 0)
-      })),
+      })).reverse(),
       totals: {
         distanceKm: totalsDistanceKm,
         durationSeconds: totalsDurationSeconds,
@@ -395,49 +387,40 @@ export class RaiReadStore {
     };
   }
 
-  /**
-   * Aggregated payload for the iOS trends page: 12-week distance bars,
-   * 4-week ramp fraction, personal records and simple coaching insights.
-   */
   mobileTrends(): MobileTrendsResponse {
     const today = mobileLocalDate();
-    // Anchor weekly history on the latest data date so stale imports still
-    // render the full 12-week window.
     const anchorRow = this.database.prepare(`
       SELECT COALESCE(MAX(local_date), ?) AS anchor FROM active_workout_training_loads
     `).get(today) as Record<string, unknown>;
     const anchor = String(anchorRow.anchor ?? today);
+    const anchorWeekStart = mobileWeekStart(anchor);
+    const oldestWeekStart = shiftMobileDate(anchorWeekStart, -11 * 7);
+    const currentCalendarWeekStart = mobileWeekStart(today);
 
-    // Weekly buckets. GROUP BY (julianday+4)/7 is a float division that splits
-    // a week into per-day groups (julianday of a bare date ends in .5, so each
-    // day lands on a distinct float); bucket by the integer day distance from
-    // the anchor instead. Group 0 = the anchor's own week, -k = k weeks before.
+    // ISO week = Monday of local_date; emit 12 consecutive weeks ending at the data-anchor week.
     const weekRows = this.database.prepare(`
       SELECT
-        MIN(local_date) AS period_start,
-        MAX(local_date) AS period_end,
+        date(local_date, '-' || ((CAST(strftime('%w', local_date) AS INTEGER) + 6) % 7) || ' days') AS period_start,
         SUM(distance_km) AS distance_km,
         COUNT(*) AS workout_count
       FROM active_workout_training_loads
-      WHERE local_date > ?
-      GROUP BY CAST((julianday(local_date) - julianday(?)) / 7 AS INTEGER)
-      ORDER BY period_start DESC
-      LIMIT 12
-    `).all(shiftMobileDate(anchor, -83), anchor) as unknown as Array<Record<string, unknown>>;
-    const weeks = weekRows
-      .map((row) => {
-        const periodStart = mobileWeekStart(String(row.period_start));
-        return {
-          periodStart,
-          periodEnd: shiftMobileDate(periodStart, 6),
-          distanceKm: Number(row.distance_km ?? 0),
-          workoutCount: Number(row.workout_count ?? 0),
-          // A week counts as complete once it has fully ended before the
-          // current calendar week (lagging imports still mark past weeks done).
-          isComplete: String(row.period_end) < mobileWeekStart(today)
-        };
-      })
-      .sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+      WHERE local_date >= ? AND local_date <= ?
+      GROUP BY period_start
+    `).all(oldestWeekStart, shiftMobileDate(anchorWeekStart, 6)) as unknown as Array<Record<string, unknown>>;
+    const weekByStart = new Map(weekRows.map((row) => [String(row.period_start), row]));
+    const weeks: MobileTrendsResponse["weeks"] = [];
+    for (let offset = 11; offset >= 0; offset -= 1) {
+      const periodStart = shiftMobileDate(anchorWeekStart, -offset * 7);
+      const periodEnd = shiftMobileDate(periodStart, 6);
+      const row = weekByStart.get(periodStart);
+      weeks.push({
+        periodStart,
+        periodEnd,
+        distanceKm: row ? Number(row.distance_km ?? 0) : 0,
+        workoutCount: row ? Number(row.workout_count ?? 0) : 0,
+        isComplete: periodEnd < currentCalendarWeekStart
+      });
+    }
 
     let distanceChangeFraction4Weeks: number | null = null;
     if (weeks.length >= 8) {

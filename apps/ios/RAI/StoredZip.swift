@@ -16,8 +16,8 @@ enum StoredZip {
         for entry in entries {
             let nameData = Data(entry.name.utf8)
             let crc = crc32(entry.data)
-            // Deflate when it actually shrinks the payload; fall back to store
-            // for small or already-compressed data so header and method agree.
+            // ZIP method 8 is raw deflate (RFC 1951). zlib-wrapped bytes
+            // (compress2) will fail in the Node extractor.
             let compressed = deflate(entry.data)
             let (storedData, method): (Data, UInt16) =
                 compressed.count > 0 && compressed.count < entry.data.count
@@ -76,22 +76,43 @@ enum StoredZip {
 
     private static func deflate(_ data: Data) -> Data {
         guard !data.isEmpty else { return Data() }
-        let bound = compressBound(uLong(data.count))
-        var destination = [UInt8](repeating: 0, count: Int(bound))
-        var destinationLength = bound
-        let status: Int32 = data.withUnsafeBytes { sourceBuffer in
-            destination.withUnsafeMutableBytes { destinationBuffer in
-                compress2(
-                    destinationBuffer.bindMemory(to: Bytef.self).baseAddress,
-                    &destinationLength,
-                    sourceBuffer.bindMemory(to: Bytef.self).baseAddress,
-                    uLong(data.count),
-                    Z_DEFAULT_COMPRESSION
-                )
+        return data.withUnsafeBytes { sourceBuffer in
+            guard let source = sourceBuffer.bindMemory(to: Bytef.self).baseAddress else {
+                return Data()
             }
+            var stream = z_stream()
+            stream.next_in = UnsafeMutablePointer(mutating: source)
+            stream.avail_in = uInt(data.count)
+            let initStatus = deflateInit2_(
+                &stream,
+                Z_DEFAULT_COMPRESSION,
+                Z_DEFLATED,
+                -MAX_WBITS,
+                MAX_MEM_LEVEL,
+                Z_DEFAULT_STRATEGY,
+                ZLIB_VERSION,
+                Int32(MemoryLayout<z_stream>.size)
+            )
+            guard initStatus == Z_OK else { return Data() }
+            defer { deflateEnd(&stream) }
+
+            let chunkSize = 16 * 1024
+            var output = Data()
+            var buffer = [UInt8](repeating: 0, count: chunkSize)
+            var status: Int32
+            repeat {
+                status = buffer.withUnsafeMutableBytes { destBuffer in
+                    stream.next_out = destBuffer.bindMemory(to: Bytef.self).baseAddress
+                    stream.avail_out = uInt(destBuffer.count)
+                    return zlib.deflate(&stream, Z_FINISH)
+                }
+                let produced = chunkSize - Int(stream.avail_out)
+                if produced > 0 {
+                    output.append(contentsOf: buffer.prefix(produced))
+                }
+            } while status == Z_OK
+            return status == Z_STREAM_END ? output : Data()
         }
-        guard status == Z_OK else { return Data() }
-        return Data(destination.prefix(Int(destinationLength)))
     }
 
     private static func crc32(_ data: Data) -> UInt32 {

@@ -33,7 +33,7 @@ struct RootView: View {
     private func connectedView(url: URL) -> some View {
         #if os(iOS)
         ZStack(alignment: .topTrailing) {
-            AppWebView(url: url, reloadToken: session.reloadToken)
+            AppWebView(url: url, reloadToken: session.reloadToken, apiToken: session.apiToken)
                 .ignoresSafeArea()
             VStack(alignment: .trailing, spacing: 8) {
                 chromeButtons
@@ -44,7 +44,7 @@ struct RootView: View {
         }
         #else
         NavigationStack {
-            AppWebView(url: url, reloadToken: session.reloadToken)
+            AppWebView(url: url, reloadToken: session.reloadToken, apiToken: session.apiToken)
                 .ignoresSafeArea(edges: .bottom)
                 .navigationTitle("RAI")
                 .toolbar {
@@ -64,7 +64,7 @@ struct RootView: View {
             #if os(iOS)
             Button(healthSync.isBusy ? "同步中" : "同步健康") {
                 Task {
-                    await healthSync.sync(to: session.serverURL)
+                    await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
                     if healthSync.lastError == nil {
                         session.reload()
                     }
@@ -147,6 +147,7 @@ struct SetupView: View {
                     .autocorrectionDisabled()
                     #endif
                     .submitLabel(.done)
+                SecureField("API Token（云端部署时填写）", text: $session.apiToken)
                 if session.isReachable {
                     Label("已连接到开发服务器", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)

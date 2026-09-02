@@ -2,26 +2,29 @@ import SwiftUI
 import WebKit
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 
 #if os(iOS)
 struct AppWebView: UIViewRepresentable {
     let url: URL
     let reloadToken: Int
+    let apiToken: String
 
     func makeCoordinator() -> WebCoordinator {
         WebCoordinator()
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = makeConfiguredWebView(coordinator: context.coordinator)
-        context.coordinator.load(url, in: webView)
+        let webView = makeConfiguredWebView(coordinator: context.coordinator, apiToken: apiToken)
+        context.coordinator.load(url, in: webView, apiToken: apiToken)
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         injectIosSafeArea(webView)
-        context.coordinator.update(url: url, reloadToken: reloadToken, webView: webView)
+        context.coordinator.update(url: url, reloadToken: reloadToken, apiToken: apiToken, webView: webView)
     }
 }
 #else
@@ -34,13 +37,13 @@ struct AppWebView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> WKWebView {
-        let webView = makeConfiguredWebView(coordinator: context.coordinator)
-        context.coordinator.load(url, in: webView)
+        let webView = makeConfiguredWebView(coordinator: context.coordinator, apiToken: apiToken)
+        context.coordinator.load(url, in: webView, apiToken: apiToken)
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
-        context.coordinator.update(url: url, reloadToken: reloadToken, webView: webView)
+        context.coordinator.update(url: url, reloadToken: reloadToken, apiToken: apiToken, webView: webView)
     }
 }
 #endif
@@ -49,22 +52,31 @@ struct AppWebView: NSViewRepresentable {
 final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     var loadedURL: URL?
     var reloadToken = 0
+    var loadedToken = ""
     private var retryCount = 0
     private var retryTask: Task<Void, Never>?
 
-    func load(_ url: URL, in webView: WKWebView) {
+    func load(_ url: URL, in webView: WKWebView, apiToken: String = "") {
         loadedURL = url
+        loadedToken = apiToken
         retryCount = 0
         webView.load(URLRequest(url: iosShellURL(url), cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20))
     }
 
-    func update(url: URL, reloadToken: Int, webView: WKWebView) {
+    func update(url: URL, reloadToken: Int, apiToken: String, webView: WKWebView) {
         if loadedURL != url {
-            load(url, in: webView)
+            load(url, in: webView, apiToken: apiToken)
             self.reloadToken = reloadToken
             return
         }
-        if self.reloadToken != reloadToken {
+        if loadedToken != apiToken {
+            loadedToken = apiToken
+            self.reloadToken = reloadToken
+            #if os(iOS)
+            injectApiToken(apiToken, into: webView)
+            #endif
+            webView.reload()
+        } else if self.reloadToken != reloadToken {
             self.reloadToken = reloadToken
             retryCount = 0
             webView.reload()
@@ -206,7 +218,7 @@ func injectIosSafeArea(_ webView: WKWebView) {
 #endif
 
 @MainActor
-private func makeConfiguredWebView(coordinator: WebCoordinator) -> WKWebView {
+private func makeConfiguredWebView(coordinator: WebCoordinator, apiToken: String = "") -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .default()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -218,6 +230,25 @@ private func makeConfiguredWebView(coordinator: WebCoordinator) -> WKWebView {
     configuration.allowsInlineMediaPlayback = true
     configuration.mediaTypesRequiringUserActionForPlayback = []
     configuration.userContentController.addUserScript(iosSafeAreaUserScript())
+    if !apiToken.isEmpty {
+        let escaped = apiToken.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+        let authScript = """
+        (() => {
+          if (window.__raiToken === undefined) window.__raiToken = '\(escaped)';
+          const originalFetch = window.fetch;
+          window.fetch = (input, init = {}) => {
+            const headers = new Headers(init.headers || {});
+            if (!headers.has('authorization') && window.__raiToken) headers.set('authorization', 'Bearer ' + window.__raiToken);
+            return originalFetch(input, {...init, headers});
+          };
+          const originalOpen = XMLHttpRequest.prototype.open;
+          const originalSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function() { this.__raiAuth = true; return originalOpen.apply(this, arguments); };
+          XMLHttpRequest.prototype.send = function() { if (this.__raiAuth && window.__raiToken) this.setRequestHeader('authorization', 'Bearer ' + window.__raiToken); return originalSend.apply(this, arguments); };
+        })();
+        """
+        configuration.userContentController.addUserScript(WKUserScript(source: authScript, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+    }
     #endif
     let webView = WKWebView(frame: .zero, configuration: configuration)
     webView.navigationDelegate = coordinator
@@ -238,6 +269,14 @@ private func makeConfiguredWebView(coordinator: WebCoordinator) -> WKWebView {
     #endif
     return webView
 }
+
+#if os(iOS)
+@MainActor
+private func injectApiToken(_ token: String, into webView: WKWebView) {
+    let escaped = token.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "'", with: "\\'")
+    webView.evaluateJavaScript("window.__raiToken='\(escaped)';", completionHandler: nil)
+}
+#endif
 
 func iosShellURL(_ url: URL) -> URL {
     #if os(iOS)

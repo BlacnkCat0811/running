@@ -10,6 +10,7 @@ final class HealthKitSync {
     var isBusy = false
     var message: String?
     var lastError: String?
+    private var activeToken = ""
 
     private let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -20,7 +21,7 @@ final class HealthKitSync {
         return URLSession(configuration: configuration)
     }()
 
-    func sync(to serverURL: URL?) async {
+    func sync(to serverURL: URL?, apiToken: String = "") async {
         guard !isBusy else { return }
         guard let serverURL else {
             lastError = "先连接 Mac 开发服务器"
@@ -29,6 +30,7 @@ final class HealthKitSync {
         }
         #if os(iOS)
         isBusy = true
+        activeToken = apiToken
         lastError = nil
         message = "正在请求 Apple 健康权限"
         UIApplication.shared.isIdleTimerDisabled = true
@@ -52,14 +54,15 @@ final class HealthKitSync {
             }
             if inspection.status == "unchanged" {
                 message = "Apple 健康数据已是最新"
-                return
+                await deleteUpload(sourceId: sourceId, on: serverURL)
+            } else {
+                message = "正在导入并计算跑力"
+                let job = try await withRetry {
+                    try await self.startImport(sourceId: sourceId, on: serverURL)
+                }
+                try await waitForJob(id: job.id, on: serverURL)
+                message = "已从 Apple 健康导入 \(exported.workoutCount) 次跑步"
             }
-            message = "正在导入并计算跑力"
-            let job = try await withRetry {
-                try await self.startImport(sourceId: sourceId, on: serverURL)
-            }
-            try await waitForJob(id: job.id, on: serverURL)
-            message = "已从 Apple 健康导入 \(exported.workoutCount) 次跑步"
         } catch is CancellationError {
             message = "已取消同步"
         } catch {
@@ -89,6 +92,7 @@ final class HealthKitSync {
         try writeMultipart(zipURL: zipURL, boundary: boundary, to: multipartURL)
 
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/imports/uploads"))
+        addAuthorization(to: &request)
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 600
@@ -121,6 +125,7 @@ final class HealthKitSync {
 
     private func inspect(sourceId: String, on serverURL: URL) async throws -> InspectionResponse {
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/imports/inspect"))
+        addAuthorization(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["sourceId": sourceId])
@@ -131,12 +136,20 @@ final class HealthKitSync {
 
     private func startImport(sourceId: String, on serverURL: URL) async throws -> ImportJobResponse {
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-jobs"))
+        addAuthorization(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["sourceId": sourceId])
         let (data, response) = try await session.data(for: request)
         try throwIfNeeded(response, data: data)
         return try JSONDecoder().decode(ImportJobResponse.self, from: data)
+    }
+
+    private func deleteUpload(sourceId: String, on serverURL: URL) async {
+        var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-sources/\(sourceId)"))
+        addAuthorization(to: &request)
+        request.httpMethod = "DELETE"
+        _ = try? await session.data(for: request)
     }
 
     private func waitForJob(id: String, on serverURL: URL) async throws {
@@ -176,6 +189,7 @@ final class HealthKitSync {
 
     private func getJob(id: String, on serverURL: URL) async throws -> ImportJobResponse {
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-jobs/\(id)"))
+        addAuthorization(to: &request)
         request.timeoutInterval = 15
         let (data, response) = try await session.data(for: request)
         try throwIfNeeded(response, data: data)
@@ -188,6 +202,10 @@ final class HealthKitSync {
         components.query = nil
         components.fragment = nil
         return components.url ?? base
+    }
+
+    private func addAuthorization(to request: inout URLRequest) {
+        if !activeToken.isEmpty { request.setValue("Bearer \(activeToken)", forHTTPHeaderField: "Authorization") }
     }
 
     private func withRetry<T>(

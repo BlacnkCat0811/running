@@ -1,4 +1,5 @@
 import "./first-run-pixel.css";
+import { IosMobileApp } from "./IosMobileApp.js";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import type { HealthResponse } from "@rai/api-contracts";
 import {
@@ -186,6 +187,8 @@ function AppNavigation() {
 }
 
 export function App() {
+  const isIosShell = typeof document !== "undefined" && document.documentElement.dataset.shell === "ios";
+  if (isIosShell) return <IosMobileApp />;
   const health = useRemote<HealthResponse>("/v1/health", true, true, false);
   const mainRef = useRef<HTMLElement>(null);
   const previousPathname = useRef<string | null>(null);

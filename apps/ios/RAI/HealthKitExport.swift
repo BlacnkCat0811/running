@@ -66,6 +66,7 @@ enum HealthKitExport {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("rai-hk-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
         let xmlURL = directory.appendingPathComponent("export.xml")
         FileManager.default.createFile(atPath: xmlURL.path, contents: nil)
         let xml = try FileHandle(forWritingTo: xmlURL)
@@ -101,7 +102,6 @@ enum HealthKitExport {
         let zipURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("apple-health-healthkit-\(UUID().uuidString).zip")
         try StoredZip.write(files: files, to: zipURL)
-        try? FileManager.default.removeItem(at: directory)
         return HealthKitExportResult(
             zipURL: zipURL,
             workoutCount: workouts.count,
@@ -131,6 +131,9 @@ enum HealthKitExport {
         ]
         if let recovery = HKQuantityType.quantityType(forIdentifier: .heartRateRecoveryOneMinute) {
             types.insert(recovery)
+        }
+        if let biologicalSex = HKObjectType.characteristicType(forIdentifier: .biologicalSex) {
+            types.insert(biologicalSex)
         }
         return types
     }
@@ -241,12 +244,20 @@ enum HealthKitExport {
         let start = Calendar.current.date(byAdding: .year, value: -3, to: Date()) ?? Date.distantPast
         let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
         var count = 0
-        let quantities: [(HKQuantityType, HKUnit, String, String)] = [
+        var quantities: [(HKQuantityType, HKUnit, String, String)] = [
             (HKQuantityType(.restingHeartRate), HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierRestingHeartRate", "count/min"),
             (HKQuantityType(.heartRateVariabilitySDNN), HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierHeartRateVariabilitySDNN", "ms"),
-            (HKQuantityType(.vo2Max), HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute())), "HKQuantityTypeIdentifierVO2Max", "mL/kg·min"),
+            (HKQuantityType(.vo2Max), HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute())), "HKQuantityTypeIdentifierVO2Max", "mL/min·kg"),
             (HKQuantityType(.bodyMass), .gramUnit(with: .kilo), "HKQuantityTypeIdentifierBodyMass", "kg")
         ]
+        if let recovery = HKQuantityType.quantityType(forIdentifier: .heartRateRecoveryOneMinute) {
+            quantities.append((
+                recovery,
+                HKUnit.count().unitDivided(by: .minute()),
+                "HKQuantityTypeIdentifierHeartRateRecoveryOneMinute",
+                "count/min"
+            ))
+        }
         for (type, unit, xmlType, xmlUnit) in quantities {
             let samples: [HKQuantitySample] = (try? await samples(type: type, predicate: predicate, store: store)) ?? []
             for sample in samples {
@@ -328,7 +339,7 @@ enum HealthKitExport {
         var entries: [(name: String, url: URL)] = []
         let routesDirectory = directory.appendingPathComponent("workout-routes", isDirectory: true)
         try? FileManager.default.createDirectory(at: routesDirectory, withIntermediateDirectories: true)
-        for (offset, route) in routes.enumerated() {
+        for route in routes {
             let locations: [CLLocation]
             do {
                 locations = try await routeLocations(route, store: store)
@@ -336,7 +347,7 @@ enum HealthKitExport {
                 continue
             }
             guard !locations.isEmpty else { continue }
-            let name = "workout-routes/route_\(startIndex + offset + 1).gpx"
+            let name = "workout-routes/route_\(startIndex + entries.count + 1).gpx"
             let url = directory.appendingPathComponent(name)
             try? gpx(locations).write(to: url, atomically: true, encoding: .utf8)
             if FileManager.default.fileExists(atPath: url.path) {
@@ -349,15 +360,19 @@ enum HealthKitExport {
     private static func routeLocations(_ route: HKWorkoutRoute, store: HKHealthStore) async throws -> [CLLocation] {
         try await withCheckedThrowingContinuation { continuation in
             let box = ResumeBox<[CLLocation]>(continuation)
+            let lock = NSLock()
             var collected: [CLLocation] = []
             let query = HKWorkoutRouteQuery(route: route) { _, locations, done, error in
                 if let error {
                     box.resume(throwing: error)
                     return
                 }
+                lock.lock()
                 if let locations { collected.append(contentsOf: locations) }
-                if done {
-                    box.resume(returning: collected)
+                let finished = done ? collected : nil
+                lock.unlock()
+                if let finished {
+                    box.resume(returning: finished)
                 }
             }
             store.execute(query)

@@ -13,12 +13,7 @@ interface StoredGoals {
 
 const clampGoal = (value: number): number => Math.min(500, Math.max(1, value));
 
-/**
- * File-backed persistence for the iOS weekly goal. Kept outside SQLite so the
- * read-only read-store path and schema migrations are untouched; the API is a
- * single-user local service, so a small JSON document under var/ is durable
- * and easy to back up alongside the runtime data.
- */
+/** Weekly goal persisted at `var/mobile-goals.json`. */
 export class MobileGoalsStore {
   private readonly filePath: string;
   private cached: StoredGoals | null = null;

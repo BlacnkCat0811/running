@@ -122,7 +122,7 @@ export function uploadExport(
   options: UploadExportOptions = {},
 ) {
   return new Promise<{ sourceId: string }>((resolve, reject) => {
-    const request = new XMLHttpRequest();
+      const request = new XMLHttpRequest();
     // The response includes server-side ZIP validation and extraction, which can
     // legitimately take much longer than the local file transfer.
     const timeoutMs = options.timeoutMs ?? 0;
@@ -141,7 +141,7 @@ export function uploadExport(
       reject(error);
     };
     const abort = () => request.abort();
-    request.open("POST", "/v1/imports/uploads");
+      request.open("POST", "/v1/imports/uploads");
     request.responseType = "json";
     request.timeout = timeoutMs;
     request.upload.onprogress = (event) => {

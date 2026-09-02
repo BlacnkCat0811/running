@@ -4,6 +4,7 @@ set -u
 PORT=8791
 BASE="http://127.0.0.1:${PORT}"
 ORIGIN="http://127.0.0.1:5173"
+BEFORE_GOAL=""
 
 echo "== boot API (RAI_DATABASE=var/rai.sqlite) =="
 # Windows Node cannot resolve MSYS paths like /d/applerun; pwd -W yields D:/applerun
@@ -12,7 +13,15 @@ RAI_DATABASE="${SMOKE_ROOT}/var/rai.sqlite" RAI_API_PORT=$PORT RAI_LOG_LEVEL=war
   node --import tsx apps/api/src/server.ts > var/smoke-api.log 2>&1 &
 API_PID=$!
 
-cleanup() { kill $API_PID 2>/dev/null; wait $API_PID 2>/dev/null; }
+cleanup() {
+  if [ -n "$BEFORE_GOAL" ]; then
+    curl -s -m 2 -X PUT "$BASE/v1/mobile/goals" \
+      -H "content-type: application/json" -H "Origin: $ORIGIN" \
+      -d "$BEFORE_GOAL" >/dev/null || true
+  fi
+  kill $API_PID 2>/dev/null
+  wait $API_PID 2>/dev/null
+}
 trap cleanup EXIT
 
 # Wait for readiness (up to 45s, DB is 1.9GB)
@@ -46,24 +55,26 @@ echo "== GET /v1/mobile/today =="
 curl -s "$BASE/v1/mobile/today" -o var/smoke-today.json
 node -e "const d=require('./var/smoke-today.json'); console.log('today:', JSON.stringify({date:d.today.localDate, km:d.today.distanceKm, pace:d.today.paceSecondsPerKm, kcal:d.today.energyKcal, count:d.today.workoutCount})); console.log('week:', JSON.stringify({km:d.week.distanceKm, goal:d.week.goalDistanceKm, progress:d.week.goalProgressFraction})); console.log('weekDaily days:', d.weekDaily.length, 'recent:', d.recentWorkouts.length)"
 check "today.distanceKm is number" var/smoke-today.json "d.today.distanceKm >= 0"
-check "today.weekDaily length 1..7" var/smoke-today.json "d.weekDaily.length >= 1 && d.weekDaily.length <= 7"
+check "today.weekDaily length 7" var/smoke-today.json "d.weekDaily.length === 7"
 check "today.recentWorkouts <= 5" var/smoke-today.json "d.recentWorkouts.length <= 5"
 
 echo "== GET /v1/mobile/statistics =="
 curl -s "$BASE/v1/mobile/statistics" -o var/smoke-stats.json
 node -e "const d=require('./var/smoke-stats.json'); console.log('months:', d.months.map(m=>m.month+':'+m.totalDistanceKm.toFixed(1)+'km('+(m.runningDistanceKm|0)+'r/'+(m.cyclingDistanceKm|0)+'c)').join(' | ')); console.log('totals:', JSON.stringify({km:d.totals.distanceKm.toFixed(1), pace:d.totals.averagePaceSecondsPerKm, delta:d.totals.distanceChangeFraction})); console.log('hrZones:', d.heartRateZones.map(z=>z.zone+':'+(z.fraction*100).toFixed(0)+'%').join(' | '))"
 check "statistics.months <= 3" var/smoke-stats.json "d.months.length <= 3"
+check "statistics.months oldest first" var/smoke-stats.json "d.months.length < 2 || d.months[0].month < d.months[d.months.length - 1].month"
 check "statistics.totals.distanceKm >= 0" var/smoke-stats.json "d.totals.distanceKm >= 0"
 
 echo "== GET /v1/mobile/trends =="
 curl -s "$BASE/v1/mobile/trends" -o var/smoke-trends.json
 node -e "const d=require('./var/smoke-trends.json'); console.log('weeks:', d.weeks.length, 'last4:', d.weeks.slice(-4).map(w=>w.distanceKm.toFixed(1)).join('/')); console.log('ramp4w:', d.distanceChangeFraction4Weeks); console.log('records:', JSON.stringify({f5:d.records.fastest5k, longest:d.records.longestDistance && d.records.longestDistance.distanceKm, month:d.records.biggestMonth})); console.log('insights:', d.insights.map(i=>i.kind+':'+i.title).join(' | '))"
-check "trends.weeks 1..12" var/smoke-trends.json "d.weeks.length >= 1 && d.weeks.length <= 12"
+check "trends.weeks is 12 consecutive ISO weeks" var/smoke-trends.json "d.weeks.length === 12 && d.weeks.every((w,i)=> i===0 || (Date.parse(w.periodStart)-Date.parse(d.weeks[i-1].periodStart)===7*864e5))"
 check "trends.records object" var/smoke-trends.json "typeof d.records === 'object' && d.records !== null"
 
 echo "== GET/PUT /v1/mobile/goals =="
 curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-before.json
 echo "before: $(cat var/smoke-goals-before.json)"
+BEFORE_GOAL=$(node -e "const d=require('./var/smoke-goals-before.json'); process.stdout.write(JSON.stringify({weeklyDistanceKm:d.weeklyDistanceKm}))")
 HTTP=$(curl -s -o var/smoke-goals-put.json -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
   -H "content-type: application/json" -H "Origin: $ORIGIN" \
   -d '{"weeklyDistanceKm": 33.3}')
@@ -71,8 +82,6 @@ echo "PUT http=$HTTP body=$(cat var/smoke-goals-put.json)"
 [ "$HTTP" = "200" ] && { echo "PASS: PUT returns 200"; pass=$((pass+1)); } || { echo "FAIL: PUT expected 200 got $HTTP"; fail=$((fail+1)); }
 curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-after.json
 node -e "const a=require('./var/smoke-goals-after.json'); console.log('after:', JSON.stringify(a)); process.exit(a.weeklyDistanceKm === 33.3 ? 0 : 1)" && { echo "PASS: goals round-trip"; pass=$((pass+1)); } || { echo "FAIL: goals round-trip"; fail=$((fail+1)); }
-# restore default
-curl -s -X PUT "$BASE/v1/mobile/goals" -H "content-type: application/json" -H "Origin: $ORIGIN" -d '{"weeklyDistanceKm": 30}' > /dev/null
 
 echo "== validation: PUT rejects out-of-range =="
 HTTP2=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \

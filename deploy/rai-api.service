@@ -1,0 +1,23 @@
+[Unit]
+Description=RAI running intelligence API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rai
+Group=rai
+WorkingDirectory=/opt/rai
+EnvironmentFile=/etc/rai/rai.env
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rai
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

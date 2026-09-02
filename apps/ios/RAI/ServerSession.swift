@@ -7,6 +7,9 @@ final class ServerSession {
     var serverURLString: String {
         didSet { UserDefaults.standard.set(serverURLString, forKey: Self.storageKey) }
     }
+    var apiToken: String {
+        didSet { UserDefaults.standard.set(apiToken, forKey: Self.tokenKey) }
+    }
     var isReachable = false
     var lastError: String?
     var reloadToken = 0
@@ -23,6 +26,7 @@ final class ServerSession {
     }()
 
     private static let storageKey = "rai.serverURL"
+    private static let tokenKey = "rai.apiToken"
     private static let failureThreshold = 3
 
     init() {
@@ -35,6 +39,7 @@ final class ServerSession {
             serverURLString = ""
             #endif
         }
+        apiToken = UserDefaults.standard.string(forKey: Self.tokenKey) ?? ""
     }
 
     var serverURL: URL? {
@@ -101,6 +106,7 @@ final class ServerSession {
         }
 
         var request = URLRequest(url: healthURL)
+        if !apiToken.isEmpty { request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization") }
         request.timeoutInterval = 4
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {

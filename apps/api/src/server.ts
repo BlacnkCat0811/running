@@ -77,7 +77,8 @@ const runtimeRoot = resolve(process.env.RAI_RUNTIME_ROOT ?? projectRoot);
 const databasePath = resolve(process.env.RAI_DATABASE ?? resolve(projectRoot, "var/rai.sqlite"));
 const predictionArtifactRoot = resolve(runtimeRoot, "var", "model-artifacts", "prediction");
 const port = Number(process.env.RAI_API_PORT ?? 8787);
-const host = "127.0.0.1";
+const host = process.env.RAI_API_HOST ?? "127.0.0.1";
+const apiToken = process.env.RAI_API_TOKEN?.trim() || undefined;
 const maxImportZipBytes = Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 4 * 1024 ** 3);
 if (!Number.isFinite(maxImportZipBytes) || maxImportZipBytes <= 0) {
   throw new Error("RAI_IMPORT_MAX_ZIP_BYTES must be a positive number");
@@ -123,7 +124,8 @@ const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // Import job start still acquires the coordinator for the job lifecycle.
 const metadataOnlyMutationRoutes = new Set([
   "/v1/import-sources/discover",
-  "/v1/imports/uploads"
+  "/v1/imports/uploads",
+  "/v1/mobile/goals"
 ]);
 const databaseRequiredMutationRoutes = new Set([
   "/v1/workouts/:id/override",
@@ -141,6 +143,7 @@ const mutationCoordinator = new MutationCoordinator();
 const mutationReleases = new WeakMap<object, () => void>();
 const localRequestSecurityOptions = {
   apiPort: port,
+  ...(apiToken ? { apiToken } : {}),
   developmentOrigins,
   ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort })
 };

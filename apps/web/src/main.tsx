@@ -6,6 +6,7 @@ import { App } from "./App.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import "./styles.css";
 import "./reference-shell.css";
+import "./ios-pixel.css";
 
 const shellKey = "rai.shell";
 const params = new URLSearchParams(window.location.search);

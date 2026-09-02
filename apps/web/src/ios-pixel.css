@@ -1,0 +1,184 @@
+/* iPhone shell theme. The generic sub-1024 layout stays unchanged for browsers. */
+@media (max-width: 1023px) {
+  html[data-shell="ios"] {
+    --ios-ink: #123f2b;
+    --ios-green: #247446;
+    --ios-leaf: #54a864;
+    --ios-mint: #e7f5e5;
+    --ios-cyan: #3aa6c6;
+    --ios-coral: #ed6549;
+    --ios-yellow: #e9b91f;
+    --ios-paper: #fffef8;
+    --ios-grid: #b9cdbd;
+    background: #f7faf5;
+  }
+
+  html[data-shell="ios"] body {
+    color: var(--ios-ink);
+    background-color: #f7faf5;
+    background-image: radial-gradient(circle, rgba(36, 116, 70, .13) 1px, transparent 1px);
+    background-size: 8px 8px;
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  }
+
+  html[data-shell="ios"] .app-navigation {
+    border-top: 3px solid var(--ios-ink);
+    border-right: 0;
+    background: var(--ios-paper);
+    box-shadow: 0 -3px 0 var(--ios-green);
+  }
+
+  html[data-shell="ios"] .mobile-nav-links a {
+    color: var(--ios-green);
+    border-radius: 0;
+    font-weight: 800;
+  }
+
+  html[data-shell="ios"] .mobile-nav-links a.active {
+    color: var(--ios-ink);
+    background: var(--ios-mint);
+    box-shadow: inset 0 -4px 0 var(--ios-coral);
+  }
+
+  html[data-shell="ios"] .mobile-nav-links a svg { color: currentColor; }
+  html[data-shell="ios"] .app-content { color: var(--ios-ink); }
+  html[data-shell="ios"] .page { width: 100%; padding: 18px 14px 34px; }
+
+  html[data-shell="ios"] .page-header {
+    margin-bottom: 15px;
+    padding: 0 2px 10px;
+    border-bottom: 2px solid var(--ios-ink);
+  }
+
+  html[data-shell="ios"] .page-header h1,
+  html[data-shell="ios"] .first-run-hero h1 {
+    color: var(--ios-ink);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 24px;
+    font-weight: 900;
+    letter-spacing: 0;
+  }
+
+  html[data-shell="ios"] .page-header h1::after {
+    width: 6px;
+    height: 6px;
+    margin-left: 7px;
+    background: var(--ios-coral);
+    box-shadow: 7px 0 0 var(--ios-cyan), 14px 0 0 var(--ios-yellow);
+  }
+
+  html[data-shell="ios"] .page-header p { color: var(--ios-green); font-size: 11px; }
+
+  html[data-shell="ios"] .panel,
+  html[data-shell="ios"] .hero-metrics,
+  html[data-shell="ios"] .training-summary-band,
+  html[data-shell="ios"] .performance-strip,
+  html[data-shell="ios"] .statistics-kpis,
+  html[data-shell="ios"] .filter-bar,
+  html[data-shell="ios"] .model-chip,
+  html[data-shell="ios"] .first-run-steps {
+    border: 2px solid var(--ios-green);
+    border-radius: 3px;
+    background: var(--ios-paper);
+    box-shadow: 3px 3px 0 rgba(18, 63, 43, .15);
+    clip-path: none;
+  }
+
+  html[data-shell="ios"] .panel-heading {
+    min-height: 48px;
+    border-bottom: 1px dashed var(--ios-grid);
+    background: var(--ios-mint);
+  }
+
+  html[data-shell="ios"] .panel-heading h2 { color: var(--ios-green); font-size: 13px; font-weight: 900; }
+
+  html[data-shell="ios"] .button,
+  html[data-shell="ios"] .icon-button,
+  html[data-shell="ios"] .filter-bar select,
+  html[data-shell="ios"] .field input,
+  html[data-shell="ios"] .field select,
+  html[data-shell="ios"] .field textarea,
+  html[data-shell="ios"] .zone-setting-row input {
+    border: 2px solid var(--ios-ink);
+    border-radius: 2px;
+    clip-path: none;
+    box-shadow: 2px 2px 0 rgba(18, 63, 43, .18);
+  }
+
+  html[data-shell="ios"] .button.primary { border-color: var(--ios-ink); background: var(--ios-green); }
+  html[data-shell="ios"] .button.secondary { border-color: var(--ios-green); background: var(--ios-paper); color: var(--ios-green); }
+  html[data-shell="ios"] .button:active { transform: translate(2px, 2px); box-shadow: none; }
+
+  html[data-shell="ios"] .hero-metrics,
+  html[data-shell="ios"] .performance-strip,
+  html[data-shell="ios"] .statistics-kpis { gap: 0; }
+  html[data-shell="ios"] .hero-metrics article,
+  html[data-shell="ios"] .performance-strip article,
+  html[data-shell="ios"] .statistics-kpis article { border-color: var(--ios-grid); }
+  html[data-shell="ios"] .hero-metrics strong,
+  html[data-shell="ios"] .performance-strip strong,
+  html[data-shell="ios"] .statistics-kpis b { color: var(--ios-ink); font-family: "SFMono-Regular", Consolas, monospace; }
+
+  html[data-shell="ios"] .status-badge {
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    clip-path: none;
+    font-weight: 800;
+  }
+
+  html[data-shell="ios"] .workout-table th { color: var(--ios-green); background: var(--ios-mint); border-bottom: 2px solid var(--ios-green); }
+  html[data-shell="ios"] .workout-table td { border-top: 1px dashed var(--ios-grid); }
+  html[data-shell="ios"] .workout-table tbody tr:hover { background: var(--ios-mint); }
+  html[data-shell="ios"] .segmented { border: 2px solid var(--ios-green); border-radius: 2px; background: var(--ios-paper); }
+  html[data-shell="ios"] .segmented button { border-radius: 0; color: var(--ios-green); }
+  html[data-shell="ios"] .segmented button.active { color: #fff; background: var(--ios-green); }
+
+  html[data-shell="ios"] .global-task {
+    border: 2px solid var(--ios-ink);
+    border-radius: 2px;
+    background: var(--ios-paper);
+    box-shadow: 3px 3px 0 rgba(18, 63, 43, .18);
+  }
+
+  html[data-shell="ios"] .first-run-hero {
+    border: 3px solid var(--ios-ink);
+    border-radius: 3px;
+    background: var(--ios-paper);
+    box-shadow: 4px 4px 0 rgba(18, 63, 43, .14);
+    clip-path: none;
+  }
+  html[data-shell="ios"] .first-run-hero .button { background: var(--ios-coral); }
+  html[data-shell="ios"] .first-run-steps { border-color: var(--ios-ink); }
+}
+
+@media (max-width: 1023px) {
+  html[data-shell="ios"] .ios-mobile-app { min-height: 100dvh; color: var(--ios-ink); padding-bottom: 76px; }
+  html[data-shell="ios"] .ios-mobile-header { display:flex; align-items:flex-end; justify-content:space-between; padding: 10px 16px 12px; border-bottom: 2px solid var(--ios-ink); background:var(--ios-paper); }
+  html[data-shell="ios"] .ios-mobile-kicker { display:block; color:var(--ios-green); font: 800 9px/1.2 "SFMono-Regular",Consolas,monospace; letter-spacing:.5px; }
+  html[data-shell="ios"] .ios-mobile-header h1 { margin:4px 0 0; font:900 26px/1.05 "SFMono-Regular",Consolas,monospace; }
+  html[data-shell="ios"] .ios-mobile-avatar { display:grid; place-items:center; width:34px; height:34px; color:#fff; background:var(--ios-coral); border:2px solid var(--ios-ink); box-shadow:2px 2px 0 rgba(18,63,43,.3); font-weight:900; }
+  html[data-shell="ios"] .ios-mobile-content { padding: 12px 14px 20px; }
+  html[data-shell="ios"] .ios-card { margin:0 0 12px; padding:13px 14px; border:2px solid var(--ios-green); border-radius:3px; background:var(--ios-paper); box-shadow:3px 3px 0 rgba(18,63,43,.12); }
+  html[data-shell="ios"] .ios-card-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; color:var(--ios-green); font:900 11px/1.2 "SFMono-Regular",Consolas,monospace; letter-spacing:.5px; }
+  html[data-shell="ios"] .ios-card-title span { display:flex; align-items:center; gap:3px; color:var(--ios-cyan); font:800 10px/1 system-ui,sans-serif; }
+  html[data-shell="ios"] .ios-today-card { position:relative; margin-bottom:12px; padding:16px; color:#fff; border:3px solid var(--ios-ink); background:var(--ios-green); box-shadow:4px 4px 0 rgba(18,63,43,.25); }
+  html[data-shell="ios"] .ios-today-label { font-size:11px; font-weight:900; opacity:.9; }
+  html[data-shell="ios"] .ios-today-card > strong { display:block; margin:4px 0 12px; font:900 36px/1 "SFMono-Regular",Consolas,monospace; text-shadow:3px 3px 0 rgba(18,63,43,.35); }
+  html[data-shell="ios"] .ios-today-card > strong small { font:800 14px system-ui,sans-serif; }
+  html[data-shell="ios"] .ios-today-metrics { display:flex; gap:7px; position:relative; z-index:1; }
+  html[data-shell="ios"] .ios-today-metrics span { flex:1; min-width:0; padding:7px 6px; color:var(--ios-ink); background:rgba(255,255,255,.93); border:2px solid var(--ios-ink); box-shadow:2px 2px 0 rgba(18,63,43,.35); }
+  html[data-shell="ios"] .ios-today-metrics b, html[data-shell="ios"] .ios-today-metrics small { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  html[data-shell="ios"] .ios-today-metrics b { font:900 14px "SFMono-Regular",Consolas,monospace; } html[data-shell="ios"] .ios-today-metrics small { margin-top:2px; font-size:9px; opacity:.7; }
+  html[data-shell="ios"] .ios-pixel-runner { position:absolute; top:12px; right:14px; width:38px; height:38px; opacity:.9; background:linear-gradient(90deg,#fff 25%,transparent 25% 50%,#fff 50% 75%,transparent 75%),linear-gradient(#fff 25%,transparent 25% 50%,#fff 50% 75%,transparent 75%); background-size:19px 19px; }
+  html[data-shell="ios"] .ios-goal-row { display:flex; align-items:center; gap:14px; } html[data-shell="ios"] .ios-ring { display:grid; place-items:center; width:78px; height:78px; flex:none; border:8px solid var(--ios-coral); border-right-color:var(--ios-mint); border-radius:50%; font:900 16px "SFMono-Regular",Consolas,monospace; }
+  html[data-shell="ios"] .ios-goal-copy { flex:1; min-width:0; } html[data-shell="ios"] .ios-goal-copy b, html[data-shell="ios"] .ios-goal-copy small { display:block; } html[data-shell="ios"] .ios-goal-copy b { font:900 15px "SFMono-Regular",Consolas,monospace; } html[data-shell="ios"] .ios-goal-copy small { margin-top:4px; color:#5d6f64; font-size:10px; }
+  html[data-shell="ios"] .ios-progress { height:8px; margin-top:10px; background:var(--ios-mint); border:1px solid var(--ios-green); } html[data-shell="ios"] .ios-progress i { display:block; height:100%; background:var(--ios-leaf); }
+  html[data-shell="ios"] .ios-week-chart { display:flex; align-items:flex-end; justify-content:space-between; height:96px; gap:5px; } html[data-shell="ios"] .ios-week-col { display:flex; height:100%; flex:1; flex-direction:column; align-items:center; justify-content:flex-end; gap:5px; } html[data-shell="ios"] .ios-week-bar { width:100%; max-width:22px; min-height:4px; background:var(--ios-green); border:2px solid var(--ios-ink); box-shadow:2px 2px 0 rgba(18,63,43,.12); } html[data-shell="ios"] .ios-week-col:last-child .ios-week-bar { background:var(--ios-coral); } html[data-shell="ios"] .ios-week-col small { color:#5d6f64; font-size:9px; }
+  html[data-shell="ios"] .ios-workout-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:2px dashed rgba(18,63,43,.16); } html[data-shell="ios"] .ios-workout-row:last-child { border-bottom:0; padding-bottom:0; } html[data-shell="ios"] .ios-workout-icon { display:grid; place-items:center; width:36px; height:36px; flex:none; color:var(--ios-green); background:var(--ios-mint); border:2px solid var(--ios-ink); } html[data-shell="ios"] .ios-workout-row > span:nth-child(2) { flex:1; min-width:0; } html[data-shell="ios"] .ios-workout-row b, html[data-shell="ios"] .ios-workout-row small { display:block; } html[data-shell="ios"] .ios-workout-row b { font-size:13px; } html[data-shell="ios"] .ios-workout-row small { margin-top:2px; color:#5d6f64; font-size:10px; } html[data-shell="ios"] .ios-workout-row > strong { font:900 14px "SFMono-Regular",Consolas,monospace; } html[data-shell="ios"] .ios-workout-row > strong small { display:inline; font:700 10px system-ui,sans-serif; }
+  html[data-shell="ios"] .ios-month-chart { display:flex; align-items:flex-end; justify-content:space-around; height:146px; gap:12px; } html[data-shell="ios"] .ios-month-chart > div { display:flex; flex:1; height:100%; flex-direction:column; align-items:center; justify-content:flex-end; gap:4px; } html[data-shell="ios"] .ios-month-bar { width:26px; max-width:70%; background:var(--ios-green); border:2px solid var(--ios-ink); } html[data-shell="ios"] .ios-month-chart b { font:900 11px "SFMono-Regular",Consolas,monospace; } html[data-shell="ios"] .ios-month-chart small { color:#5d6f64; font-size:10px; }
+  html[data-shell="ios"] .ios-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px; } html[data-shell="ios"] .ios-stat { padding:11px 12px; background:var(--ios-paper); border:2px solid var(--ios-green); box-shadow:2px 2px 0 rgba(18,63,43,.1); } html[data-shell="ios"] .ios-stat small, html[data-shell="ios"] .ios-stat b { display:block; } html[data-shell="ios"] .ios-stat small { color:#5d6f64; font-size:10px; } html[data-shell="ios"] .ios-stat b { margin-top:4px; color:var(--ios-ink); font:900 17px "SFMono-Regular",Consolas,monospace; }
+  html[data-shell="ios"] .ios-zone-list > div { display:flex; align-items:center; gap:8px; margin:10px 0; font-size:11px; } html[data-shell="ios"] .ios-zone-list span { width:40px; font-weight:800; } html[data-shell="ios"] .ios-zone-list i { flex:1; height:8px; background:var(--ios-mint); border:1px solid var(--ios-green); } html[data-shell="ios"] .ios-zone-list i b { display:block; height:100%; background:var(--ios-coral); } html[data-shell="ios"] .ios-zone-list strong { width:34px; text-align:right; font:800 10px "SFMono-Regular",Consolas,monospace; }
+  html[data-shell="ios"] .ios-trend-stat { text-align:center; color:var(--ios-green); font:900 30px "SFMono-Regular",Consolas,monospace; } html[data-shell="ios"] .ios-trend-stat small { display:block; margin-top:3px; color:#5d6f64; font:600 10px system-ui,sans-serif; } html[data-shell="ios"] .ios-trend-chart { display:flex; align-items:flex-end; gap:4px; height:116px; margin-top:10px; padding:8px 4px 0; border-bottom:1px dashed var(--ios-grid); } html[data-shell="ios"] .ios-trend-chart i { flex:1; min-width:4px; background:var(--ios-green); border:1px solid var(--ios-ink); } html[data-shell="ios"] .ios-trend-chart i:last-child { background:var(--ios-coral); }
+  html[data-shell="ios"] .ios-insight { display:grid; gap:4px; margin-bottom:10px; padding:10px 12px; border:2px solid var(--ios-leaf); background:var(--ios-mint); font-size:11px; line-height:1.5; } html[data-shell="ios"] .ios-insight.warning { border-color:var(--ios-yellow); background:#fff8dc; } html[data-shell="ios"] .ios-insight b { font-size:12px; } html[data-shell="ios"] .ios-insight span { color:#456458; }
+  html[data-shell="ios"] .ios-record, html[data-shell="ios"] .ios-setting-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 0; border-bottom:2px dashed rgba(18,63,43,.15); font-size:12px; } html[data-shell="ios"] .ios-record:last-child { border-bottom:0; padding-bottom:0; } html[data-shell="ios"] .ios-record b { color:var(--ios-ink); font:900 14px "SFMono-Regular",Consolas,monospace; } html[data-shell="ios"] .ios-online { color:var(--ios-green); } html[data-shell="ios"] .ios-setting-note, html[data-shell="ios"] .ios-muted { color:#5d6f64; font-size:10px; line-height:1.5; } html[data-shell="ios"] .ios-input-label { display:block; color:#5d6f64; font-size:10px; } html[data-shell="ios"] .ios-input { width:100%; margin-top:6px; padding:10px; color:var(--ios-ink); background:var(--ios-paper); border:2px solid var(--ios-ink); border-radius:2px; font:800 16px "SFMono-Regular",Consolas,monospace; } html[data-shell="ios"] .ios-save { width:100%; margin-top:10px; padding:11px; color:#fff; background:var(--ios-green); border:2px solid var(--ios-ink); border-radius:2px; box-shadow:2px 2px 0 rgba(18,63,43,.25); font-weight:900; } html[data-shell="ios"] .ios-loading { padding:28px 10px; color:var(--ios-green); text-align:center; font:800 12px "SFMono-Regular",Consolas,monospace; }
+}
