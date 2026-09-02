@@ -7,6 +7,15 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import "./styles.css";
 import "./reference-shell.css";
 
+const shellKey = "rai.shell";
+const params = new URLSearchParams(window.location.search);
+if (params.get("raiShell") === "ios") {
+  sessionStorage.setItem(shellKey, "ios");
+}
+if (sessionStorage.getItem(shellKey) === "ios") {
+  document.documentElement.dataset.shell = "ios";
+}
+
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing application root");
 

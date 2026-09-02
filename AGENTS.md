@@ -9,6 +9,15 @@ Native mobile applications and native desktop applications are out of scope.
 Do not create or modify Electron, Tauri, React Native, Flutter, iOS, Android,
 macOS, or Windows client projects unless the user explicitly requests it.
 
+`apps/ios` is an explicitly requested local Xcode debug host: a WKWebView
+shell that loads the existing Web app on an iPhone or Mac. HealthKit
+read-only sync is authorized: the iOS shell may request Apple Health read
+permission, export running-related samples to the existing Apple Health
+ZIP/XML import pipeline, and upload them to the local API. Do not rewrite
+the TypeScript scoring core on device, and do not add HealthKit write,
+background delivery, or a standalone mobile product unless the user
+explicitly asks.
+
 ## Supported Web Viewport
 
 The actively supported experience is desktop browser Web:

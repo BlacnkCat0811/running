@@ -41,7 +41,10 @@ import {
   ImportSourceNotFoundError
 } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
-import { installLocalRequestSecurity } from "./local-request-security.js";
+import {
+  installLocalRequestSecurity,
+  isTrustedDevelopmentOrigin
+} from "./local-request-security.js";
 import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js";
 import {
   backupParamsSchema,
@@ -89,11 +92,29 @@ const app = Fastify({
   logger: { level: process.env.RAI_LOG_LEVEL ?? "info" },
   ajv: { customOptions: { removeAdditional: false } }
 });
-await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
+const parsedWebPort = Number(process.env.RAI_WEB_PORT ?? 5173);
+const webPort = Number.isFinite(parsedWebPort) && parsedWebPort > 0 ? parsedWebPort : 5173;
+const allowPrivateLanWebPort = process.env.RAI_ALLOW_LAN_DEV === "1" ? webPort : undefined;
+const developmentOrigins = new Set([
+  `http://127.0.0.1:${webPort}`,
+  `http://localhost:${webPort}`
+]);
+await app.register(cors, {
+  origin: (origin, callback) => {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    callback(null, isTrustedDevelopmentOrigin(origin, {
+      apiPort: port,
+      developmentOrigins,
+      ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort })
+    }));
+  }
+});
 await app.register(multipart, {
   limits: { files: 1, fileSize: maxImportZipBytes }
 });
-const developmentOrigins = new Set(["http://127.0.0.1:5173", "http://localhost:5173"]);
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // Upload streams and discover are long/IO-only; they must not hold the mutation lock.
 // Import job start still acquires the coordinator for the job lifecycle.
@@ -115,7 +136,11 @@ const databaseRequiredMutationRoutes = new Set([
 ]);
 const mutationCoordinator = new MutationCoordinator();
 const mutationReleases = new WeakMap<object, () => void>();
-const localRequestSecurityOptions = { apiPort: port, developmentOrigins };
+const localRequestSecurityOptions = {
+  apiPort: port,
+  developmentOrigins,
+  ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort })
+};
 installLocalRequestSecurity(app, localRequestSecurityOptions);
 app.addHook("preHandler", async (request, reply) => {
   const routeUrl = request.routeOptions.url;

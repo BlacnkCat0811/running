@@ -6,6 +6,7 @@
   "scripts": {
     "predev": "node ../../scripts/check-node-version.mjs",
     "dev": "vite --host 127.0.0.1",
+    "dev:lan": "vite --host 0.0.0.0",
     "build": "vite build && node scripts/check-bundle.mjs",
     "test": "vitest run",
     "preview": "vite preview --host 127.0.0.1"

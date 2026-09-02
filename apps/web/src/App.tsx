@@ -343,22 +343,53 @@ function MorePage() {
 }
 
 function FirstRunPage() {
+  const { pathname } = useLocation();
+  const isIosShell =
+    typeof document !== "undefined" && document.documentElement.dataset.shell === "ios";
+  const waitingFor =
+    pathname.startsWith("/workouts")
+      ? "训练记录"
+      : pathname === "/statistics"
+        ? "运动统计"
+        : pathname === "/trends"
+          ? "能力趋势"
+          : pathname === "/predictions"
+            ? "成绩预测"
+            : pathname === "/zones"
+              ? "训练分区"
+              : pathname === "/data/audit"
+                ? "数据审计"
+                : null;
   return (
     <div className="page first-run-page">
       <section className="first-run-hero">
         <span className="brand-mark">
           <Heartbeat size={20} weight="bold" />
         </span>
-        <p className="eyebrow">本地数据库尚未准备</p>
+        <p className="eyebrow">{waitingFor ?? "本地数据库尚未准备"}</p>
         <h1>
-          从 Apple Health 导出
-          <br />
-          建立你的 RAI 时间线
+          {waitingFor ? (
+            <>导入健康数据后即可查看{waitingFor}</>
+          ) : (
+            <>
+              从 Apple Health 导出
+              <br />
+              建立你的 RAI 时间线
+            </>
+          )}
         </h1>
         <p>
-          选择本机 Apple Health 导出目录后，系统会在临时 SQLite
-          中完成解析、canonical 收敛、特征提取和模型回放，全部成功才激活数据库。
+          {waitingFor
+            ? isIosShell
+              ? "当前还没有可用的本地数据库。点右上角「同步健康」读取本机 Apple 健康后，这个页面会显示对应的训练、统计和趋势。"
+              : "当前还没有可用的本地数据库。上传 Apple Health 导出 ZIP 后，这个页面会显示对应的训练、统计和趋势。"
+            : isIosShell
+              ? "在 iPhone 上点右上角「同步健康」，RAI 会读取本机 Apple 健康中的跑步数据，发到这台 Mac 上完成解析和模型回放。"
+              : "选择本机 Apple Health 导出目录后，系统会在临时 SQLite 中完成解析、canonical 收敛、特征提取和模型回放，全部成功才激活数据库。"}
         </p>
+        {isIosShell ? (
+          <p className="eyebrow">也可以继续用 ZIP 导入</p>
+        ) : null}
         <Link to="/data" className="button primary">
           前往导入 <ArrowRight size={16} />
         </Link>
@@ -383,7 +414,7 @@ function FirstRunPage() {
           <b>01</b>
           <span>
             <h2>导出健康数据</h2>
-            <p>在 iPhone 健康 App 中导出全部健康数据，并解压到本机目录。</p>
+            <p>在 iPhone 健康 App 中导出全部健康数据 ZIP，然后在「数据与模型」里上传。</p>
           </span>
         </article>
         <article>
