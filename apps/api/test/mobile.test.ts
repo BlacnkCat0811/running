@@ -77,6 +77,9 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     assert.equal(today.today.workoutCount, 0);
     assert.equal(today.today.paceSecondsPerKm, null);
     assert.equal(today.today.energyKcal, null);
+    // Latest data date reflects the newest workout (2025-01-22), not the wall
+    // clock, so lagging imports can surface a staleness hint in the UI.
+    assert.equal(today.latestDataDate, "2025-01-22");
     // weekDaily covers Monday..today of the current ISO week (1..7 entries).
     assert.ok(today.weekDaily.length >= 1 && today.weekDaily.length <= 7);
     assert.ok(today.weekDaily.every((day) => day.distanceKm >= 0));
@@ -224,12 +227,36 @@ test("mobileTrends returns weeks, personal records and insights", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-mobile-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await seed(databasePath);
+  // Fixture recompute leaves load distances null; give every load row 5km so
+  // weekly distance buckets are exact. Runs land on 2025-01-01/04/07/10/13/16/19/22,
+  // anchored at 2025-01-22: anchor week (01-16..01-22) holds 3 runs = 15km,
+  // the previous week (01-09..01-15) holds 2 runs = 10km.
+  store.database.prepare(`
+    UPDATE workout_training_loads
+    SET distance_km = 5
+    WHERE distance_km IS NULL
+  `).run();
   store.close();
   const read = new RaiReadStore(databasePath);
   try {
     const trends = read.mobileTrends();
     assert.equal(trends.timezone, "Asia/Shanghai");
     assert.ok(trends.weeks.length >= 1 && trends.weeks.length <= 12);
+    const byStart = new Map(trends.weeks.map((week) => [week.periodStart, week]));
+    // Anchor week (2025-01-16..2025-01-22) must aggregate 3 x 5km, not one
+    // per-day group: guards against the julianday float-division regression
+    // that split weeks into single-day buckets.
+    const anchorWeek = byStart.get("2025-01-13");
+    assert.ok(anchorWeek, "expected the anchor week starting Monday 2025-01-13");
+    assert.equal(anchorWeek.distanceKm, 15);
+    assert.equal(anchorWeek.workoutCount, 3);
+    const previousWeek = byStart.get("2025-01-06");
+    assert.ok(previousWeek, "expected the previous week starting Monday 2025-01-06");
+    assert.equal(previousWeek.distanceKm, 10);
+    assert.equal(previousWeek.workoutCount, 2);
+    assert.equal(trends.weeks.reduce((sum, week) => sum + week.workoutCount, 0), 8);
+    // Every listed week ended before the current calendar week → all complete.
+    assert.ok(trends.weeks.every((week) => week.isComplete));
     for (const week of trends.weeks) {
       assert.match(week.periodStart, /^\d{4}-\d{2}-\d{2}$/);
       assert.ok(week.distanceKm >= 0);

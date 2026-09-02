@@ -450,6 +450,8 @@ export interface WorkoutSeriesResponse {
 export interface MobileTodayResponse {
   generatedAt: string;
   timezone: string;
+  /** Latest local_date present in the training loads; null when the store is empty. */
+  latestDataDate: string | null;
   today: {
     localDate: string;
     distanceKm: number;

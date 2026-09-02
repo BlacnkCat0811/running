@@ -164,6 +164,31 @@
     box-shadow: 4px 4px 0 rgba(18,63,43,0.25);
     color:#fff;
   }
+  /* 数据新鲜度提示（latestDataDate） */
+  .stale-banner {
+    margin: 0 2px 12px;
+    padding: 6px 9px;
+    border: 2px solid var(--pixel-yellow);
+    background: #fffef0;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #7a5b00;
+    text-align: center;
+    box-shadow: 2px 2px 0 rgba(122, 91, 0, 0.15);
+  }
+  /* 数据不足占位（distanceChangeFraction4Weeks=null） */
+  .trend-empty {
+    margin: 10px 0 12px;
+    padding: 8px 10px;
+    border: 2px dashed #c8d2c8;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #5d6f64;
+    text-align: center;
+    background: #f6f8f4;
+  }
   .today-card .pixel-runner {
     position:absolute; right:14px; top:10px; width:44px; height:44px;
     display:grid; grid-template-columns:repeat(4, 1fr); grid-template-rows:repeat(4, 1fr);
@@ -396,6 +421,9 @@
               <div class="t-metric"><div class="m-v">456</div><div class="m-k">千卡</div></div>
             </div>
           </div>
+
+          <!-- 数据新鲜度（来自 GET /v1/mobile/today → latestDataDate） -->
+          <div class="stale-banner">📡 数据截至 07-31 · 点「同步健康」更新</div>
 
           <!-- 活动进度 -->
           <div class="card ring-card">
@@ -660,6 +688,8 @@
               <div class="v accent-green">+23%</div>
               <div class="k">较 4 周前 · 均周跑量 18.4km → 22.6km</div>
             </div>
+            <!-- 数据不足 8 周时（distanceChangeFraction4Weeks=null）以此占位替换上方增幅 -->
+            <div class="trend-empty">📉 数据不足 · 累计 8 周跑量后显示增幅</div>
             <div class="trend-line">
               <svg viewBox="0 0 320 170" preserveAspectRatio="none">
                 <defs>

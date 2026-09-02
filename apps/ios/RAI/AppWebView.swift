@@ -76,7 +76,23 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        decisionHandler(.allow)
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+        // Keep file/about and same-host navigations (including port changes,
+        // which the dev frontend uses to reach the API) inside the shell.
+        // Cross-host http(s) links open in the system browser instead.
+        if url.isFileURL || url.scheme == "about" || url.host == nil || url.host == loadedURL?.host {
+            decisionHandler(.allow)
+            return
+        }
+        #if os(iOS)
+        UIApplication.shared.open(url)
+        #else
+        NSWorkspace.shared.open(url)
+        #endif
+        decisionHandler(.cancel)
     }
 
     func webView(
@@ -194,7 +210,9 @@ private func makeConfiguredWebView(coordinator: WebCoordinator) -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .default()
     configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+    #if DEBUG
     configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+    #endif
     #if os(iOS)
     configuration.defaultWebpagePreferences.preferredContentMode = .mobile
     configuration.allowsInlineMediaPlayback = true
@@ -213,9 +231,11 @@ private func makeConfiguredWebView(coordinator: WebCoordinator) -> WKWebView {
     webView.backgroundColor = UIColor(red: 0.95, green: 0.96, blue: 0.95, alpha: 1)
     webView.isOpaque = true
     #endif
+    #if DEBUG
     if #available(iOS 16.4, macOS 13.3, *) {
         webView.isInspectable = true
     }
+    #endif
     return webView
 }
 

@@ -217,6 +217,11 @@ export class RaiReadStore {
     const weekStart = mobileWeekStart(today);
     const weekEnd = shiftMobileDate(weekStart, 6);
 
+    const anchorRow = this.database.prepare(`
+      SELECT MAX(local_date) AS anchor FROM active_workout_training_loads
+    `).get() as Record<string, unknown> | undefined;
+    const latestDataDate = anchorRow && anchorRow.anchor != null ? String(anchorRow.anchor) : null;
+
     const todayRow = this.database.prepare(`
       SELECT
         COALESCE(SUM(distance_km), 0) AS distance_km,
@@ -264,6 +269,7 @@ export class RaiReadStore {
     return {
       generatedAt: new Date().toISOString(),
       timezone: "Asia/Shanghai",
+      latestDataDate,
       today: {
         localDate: today,
         distanceKm: Number(todayRow.distance_km ?? 0),
@@ -402,6 +408,10 @@ export class RaiReadStore {
     `).get(today) as Record<string, unknown>;
     const anchor = String(anchorRow.anchor ?? today);
 
+    // Weekly buckets. GROUP BY (julianday+4)/7 is a float division that splits
+    // a week into per-day groups (julianday of a bare date ends in .5, so each
+    // day lands on a distinct float); bucket by the integer day distance from
+    // the anchor instead. Group 0 = the anchor's own week, -k = k weeks before.
     const weekRows = this.database.prepare(`
       SELECT
         MIN(local_date) AS period_start,
@@ -410,10 +420,10 @@ export class RaiReadStore {
         COUNT(*) AS workout_count
       FROM active_workout_training_loads
       WHERE local_date > ?
-      GROUP BY (julianday(local_date) + 4) / 7
+      GROUP BY CAST((julianday(local_date) - julianday(?)) / 7 AS INTEGER)
       ORDER BY period_start DESC
       LIMIT 12
-    `).all(shiftMobileDate(anchor, -83)) as unknown as Array<Record<string, unknown>>;
+    `).all(shiftMobileDate(anchor, -83), anchor) as unknown as Array<Record<string, unknown>>;
     const weeks = weekRows
       .map((row) => {
         const periodStart = mobileWeekStart(String(row.period_start));
@@ -422,7 +432,9 @@ export class RaiReadStore {
           periodEnd: shiftMobileDate(periodStart, 6),
           distanceKm: Number(row.distance_km ?? 0),
           workoutCount: Number(row.workout_count ?? 0),
-          isComplete: String(row.period_end) >= shiftMobileDate(today, -1)
+          // A week counts as complete once it has fully ended before the
+          // current calendar week (lagging imports still mark past weeks done).
+          isComplete: String(row.period_end) < mobileWeekStart(today)
         };
       })
       .sort((a, b) => a.periodStart.localeCompare(b.periodStart));
