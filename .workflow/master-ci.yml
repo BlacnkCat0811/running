@@ -1,0 +1,35 @@
+# Gitee Go 主干门禁（草案）
+#
+# 交付说明（迁移自 .github/workflows/ci.yml 的语义）：
+# 1. 先在仓库页 服务 → Gitee Go 开通（免费额度：仓库 200 分钟 + 个人/组织每月 500 分钟）。
+# 2. 建议用平台模板生成 .workflow/ 后，将本文件 commands 替换进 node 模板；
+#    字段名（nodeVersion / commands 等）以平台生成的官方模板为准，若保存失败请按模板微调。
+# 3. Gitee Go 容器默认无 Chrome / 未配置 Python 训练环境，故本门禁覆盖
+#    typecheck + 全仓测试 + 构建 + 生产冒烟；ml:test 与 e2e 仍需本地 `npm run ml:test`
+#    与本机 Chrome 的 `npm run test:e2e:web`（与既有 GitHub Actions 的职责划分一致）。
+version: '1.0'
+name: rai-master-ci
+displayName: RAI 主干门禁
+triggers:
+  trigger: auto
+  push:
+    branches:
+      precise:
+        - main
+stages:
+  - stage:
+      name: verify
+      displayName: 安装 / 类型 / 测试 / 构建 / 冒烟
+      strategy: naturally
+      trigger: auto
+      steps:
+        - step: nodejs-build
+          name: ci-gate
+          displayName: npm ci && typecheck && test && build && smoke
+          nodeVersion: '22'
+          commands:
+            - npm ci
+            - npm run typecheck
+            - npm test
+            - npm run build
+            - npm run smoke:api
