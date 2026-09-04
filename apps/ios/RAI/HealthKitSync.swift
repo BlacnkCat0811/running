@@ -172,11 +172,12 @@ final class HealthKitSync {
                     onProgress: onProgress
                 )
             }.value
-            zipURL = persistZip(exported.zipURL)
+            let persisted = try persistZip(exported.zipURL)
+            zipURL = persisted
             let pendingAnchor = exported.workoutAnchor
             message = "正在上传 \(exported.workoutCount) 次跑步"
             let sourceId = try await withRetry {
-                try await self.upload(zipURL: exported.zipURL, to: serverURL)
+                try await self.upload(zipURL: persisted, to: serverURL)
             }
             message = "正在检查健康数据"
             let inspection = try await withRetry {
@@ -416,15 +417,18 @@ final class HealthKitSync {
         }
     }
 
-    private func persistZip(_ zipURL: URL) -> URL {
-        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let durable = folder.appendingPathComponent("rai-healthkit-upload.zip")
-        try? FileManager.default.removeItem(at: durable)
-        try? FileManager.default.copyItem(at: zipURL, to: durable)
+    private func persistZip(_ zipURL: URL) throws -> URL {
+        let folder = (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent("rai-healthkit", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let durable = folder.appendingPathComponent("upload.zip")
+        if FileManager.default.fileExists(atPath: durable.path) {
+            try FileManager.default.removeItem(at: durable)
+        }
+        try FileManager.default.copyItem(at: zipURL, to: durable)
         try? FileManager.default.removeItem(at: zipURL)
-        return FileManager.default.fileExists(atPath: durable.path) ? durable : zipURL
+        return durable
     }
 
     private func pendingFailedZip() -> URL? {
@@ -448,6 +452,9 @@ final class HealthKitSync {
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {
             return "网络中断。请确认 npm run dev:device 仍在运行，然后重试。"
+        }
+        if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError {
+            return "本地健康导出文件已丢失，请再点一次「同步健康」。"
         }
         return error.localizedDescription
     }
