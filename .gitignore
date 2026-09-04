@@ -30,6 +30,9 @@ Thumbs.db
 .grok/
 .workbuddy/
 
+# Local outputs and temp artifacts (CA mobileconfig, exports, previews)
+output/
+
 # Xcode
 xcuserdata/
 DerivedData/
