@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkBundleBudgets } from "../scripts/check-bundle.mjs";
+import { budgets, checkBundleBudgets } from "../scripts/check-bundle.mjs";
 
 const temporaryDirectories = [];
 const testBudgets = [
@@ -23,6 +23,14 @@ afterEach(async () => {
 });
 
 describe("checkBundleBudgets", () => {
+  it("matches the current Vite application stylesheet name", async () => {
+    const directory = await makeAssetDirectory();
+    await writeFile(join(directory, "styles-current.css"), "small");
+
+    const stylesheetBudget = budgets.find((budget) => budget.label === "application styles");
+    await expect(checkBundleBudgets(directory, [stylesheetBudget])).resolves.toBeUndefined();
+  });
+
   it("fails when a budget does not match any bundle asset", async () => {
     const directory = await makeAssetDirectory();
     await writeFile(join(directory, "renamed-entry.js"), "small");

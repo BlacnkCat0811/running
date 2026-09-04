@@ -6,7 +6,9 @@ const assetDirectory = resolve(import.meta.dirname, "../dist/assets");
 export const budgets = [
   { pattern: /^charts-.*\.js$/, maximumBytes: 450 * 1024, label: "shared chart code" },
   { pattern: /^index-.*\.js$/, maximumBytes: 250 * 1024, label: "application entry" },
-  { pattern: /^index-.*\.css$/, maximumBytes: 100 * 1024, label: "application styles" }
+  // Vite emits the HTML entry stylesheet as styles-[hash].css in the current
+  // build; keep index-[hash].css compatible with older output manifests.
+  { pattern: /^(?:index|styles)-.*\.css$/, maximumBytes: 100 * 1024, label: "application styles" }
 ];
 
 export async function checkBundleBudgets(directory, configuredBudgets = budgets) {
