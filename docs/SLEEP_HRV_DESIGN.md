@@ -4,7 +4,7 @@
 | ---- | --------------------------------------------------------------------------------------- |
 | 作者   | TBD                                                                                     |
 | 日期   | 2026-09-04                                                                              |
-| 状态   | Ready for implementation                                                                |
+| 状态   | Implemented in `881578b`; canonical facts and recovery integrations active               |
 | 产品范围 | 浏览器 Web（`apps/web`）+ 本地 API + 共享包；iOS 仅为 WKWebView 只读 HealthKit 导出壳                     |
 | 主视口  | 1440 × 900；不改 frozen responsive 区域                                                      |
 | 验收依据 | `AGENTS.md`、`README.md`、`docs/WEB_IMPLEMENTATION.md`（归档 PRD `RAI_PRD_V1.0.md` 不是当前验收依据） |
@@ -19,6 +19,8 @@ RAI 已经把 Apple Health 的睡眠分段（`HKCategoryTypeIdentifierSleepAnaly
 
 - **Layer A — Ability Recovery（CA 的 ~12.5%）**：绑定到每次跑步的 as-of start，无未来泄漏；子信号相对个人 28 天基线；sleep + HRV + RHR 全缺则 recovery unavailable，**即使有训练负荷也不填**。
 - **Layer B — Today / Coach 事实卡**：昨夜睡眠分钟 vs 28d、过夜 SDNN vs 28d（带样本数）、RHR vs 28d；先算生理离散态 `{unknown, depleted, reduced, recovered_phys}`，再跑 `classifyTrainingStatus`，卡片标签可 overlay 负荷态。保留现有 conjunction gates。不做 WHOOP 式 Recovery。
+
+当前实现说明：PR1 的 v17 schema、canonical 夜/HRV 派生和导入挂钩已启用；PR2 的 Coach/恢复趋势核心读取、PR3 的版本隔离与预测 nullable 已启用。完整个人基线 scoring 和按日生理状态重放仍应通过 shadow Model Run 门禁后再扩大使用范围。
 
 落地顺序必须可独立合并：先把夜/日事实写入 SQLite 并测试（不改 scoring），再在桌面 Web 展示，最后才把个人基线喂进 CA / TA / 预测。
 
