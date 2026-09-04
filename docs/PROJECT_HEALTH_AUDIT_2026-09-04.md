@@ -112,7 +112,12 @@ npm install -D concurrently@^10.0.3
 2. 或迁移到 gitee 的 Gitee Go / 自建 runner（需重写 workflow）；
 3. 至少在本地产物上建立提交前钩子跑 `npm run test:all`。
 **验收标准**：一次推送后能在对应平台看到 CI 运行记录，且修复 P1-1 后全绿。
-**当日兜底已落地**：新增 `.githooks/pre-commit`（提交前自动跑 `npm run typecheck`，仓库级 `core.hooksPath` 已启用），README 已记录新克隆启用命令。完整 `test:all` 门禁仍依赖上述平台决策。
+**当日兜底已落地**：新增 `.githooks/pre-commit`（提交前自动跑 `npm run typecheck`，仓库级 `core.hooksPath` 已启用），README 已记录新克隆启用命令。
+**迁移 gitee CI（已交付草案）**：用户选择迁移到 gitee。新增 `.workflow/master-ci.yml`（Gitee Go `version '1.0'` 语法草案：main 分支推送触发 `npm ci`→typecheck→test→build→smoke）。剩余为账号操作，请用户：
+1. 仓库页 **服务 → Gitee Go** 开通（免费额度：仓库 200 min / 个人每月 500 min）；
+2. 用平台 Node 模板生成 `.workflow/` 后，把草案中的 `commands` 替换进模板（`nodeVersion`/`commands` 字段名以平台生成模板为准）；
+3. 平台容器无 Chrome、未配 Python，故 `ml:test` 与 `npm run test:e2e:web` 仍在本地/原环境执行（职责划分与旧 GitHub Actions 一致）。
+
 
 ### 3.4 🟡 文档与实现脱节（P2，共 5 处）—— ✅ 当日已修订 4 处
 
