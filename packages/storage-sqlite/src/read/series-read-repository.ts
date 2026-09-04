@@ -102,17 +102,20 @@ export class SqliteSeriesReadRepository {
   ): StoredMetricSeries {
     const rows = this.database
       .prepare(`
-        WITH numbered AS (
-          SELECT start_at, end_at, value_numeric, unit,
-            ROW_NUMBER() OVER (ORDER BY start_at) AS sample_number,
-            COUNT(*) OVER () AS total_samples,
-            FIRST_VALUE(unit) OVER (ORDER BY start_at) AS first_unit
+        WITH deduplicated AS (
+          SELECT DISTINCT start_at, end_at, value_numeric, unit
           FROM health_records
           WHERE type = ?
             AND source_category = ?
             AND start_at >= ?
             AND start_at <= ?
             AND value_numeric IS NOT NULL
+        ), numbered AS (
+          SELECT start_at, end_at, value_numeric, unit,
+            ROW_NUMBER() OVER (ORDER BY start_at) AS sample_number,
+            COUNT(*) OVER () AS total_samples,
+            FIRST_VALUE(unit) OVER (ORDER BY start_at) AS first_unit
+          FROM deduplicated
         )
         SELECT start_at, end_at, value_numeric, unit, total_samples, first_unit
         FROM numbered
@@ -146,16 +149,19 @@ export class SqliteSeriesReadRepository {
     const rows = this.database
       .prepare(`
         SELECT start_at, end_at, value_numeric, unit
-        FROM health_records
-        WHERE type = ? AND source_name = ? AND value_numeric IS NOT NULL
-          AND start_at < ?
-          AND (
-            start_at >= ?
-            OR (
-              julianday(end_at) > julianday(start_at)
-              AND julianday(end_at) > julianday(?)
+        FROM (
+          SELECT DISTINCT start_at, end_at, value_numeric, unit
+          FROM health_records
+          WHERE type = ? AND source_name = ? AND value_numeric IS NOT NULL
+            AND start_at < ?
+            AND (
+              start_at >= ?
+              OR (
+                julianday(end_at) > julianday(start_at)
+                AND julianday(end_at) > julianday(?)
+              )
             )
-          )
+        )
         ORDER BY start_at
       `)
       .all(type, sourceName, endedAt, startedAt, startedAt) as unknown as Record<string, unknown>[];

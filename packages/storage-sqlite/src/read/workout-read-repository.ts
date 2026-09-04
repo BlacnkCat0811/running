@@ -355,11 +355,14 @@ export class SqliteWorkoutReadRepository {
     const records = this.database
       .prepare(`
         SELECT value_numeric, start_at, end_at
-        FROM health_records
-        WHERE source_name = ?
-          AND type = 'HKQuantityTypeIdentifierStepCount'
-          AND value_numeric IS NOT NULL
-          AND start_at < ? AND end_at > ?
+        FROM (
+          SELECT DISTINCT value_numeric, start_at, end_at
+          FROM health_records
+          WHERE source_name = ?
+            AND type = 'HKQuantityTypeIdentifierStepCount'
+            AND value_numeric IS NOT NULL
+            AND start_at < ? AND end_at > ?
+        )
       `)
       .all(workout.source_name, workout.end_at, workout.start_at) as Record<string, unknown>[];
     const recordedSteps = records.reduce((total, record) => {

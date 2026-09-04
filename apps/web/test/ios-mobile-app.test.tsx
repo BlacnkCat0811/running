@@ -553,6 +553,7 @@ describe("iOS mobile detail navigation", () => {
     expect(screen.getByRole("button", { name: "锁定今天" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "本周" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "身体指标" })).toBeTruthy();
+    expect(screen.getByText("7h00min")).toBeTruthy();
   });
 
   it("opens physiology detail from the body status card", () => {

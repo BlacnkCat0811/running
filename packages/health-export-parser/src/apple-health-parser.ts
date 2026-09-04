@@ -127,6 +127,8 @@ function buildRecord(draft: RecordDraft): CanonicalHealthRecord | null {
     draft.metadata,
     "HKMetadataKeySyncIdentifier"
   );
+  // Device is metadata, not identity: Apple Health can export the same sample
+  // once with a device attribute and once without it.
   const id = syncIdentifier
     ? stableId("record", [type, sourceName, syncIdentifier])
     : stableId("record", [
@@ -135,8 +137,7 @@ function buildRecord(draft: RecordDraft): CanonicalHealthRecord | null {
         startAt,
         endAt,
         attributes.value ?? null,
-        attributes.unit ?? null,
-        attributes.device ?? null
+        attributes.unit ?? null
       ]);
 
   return {

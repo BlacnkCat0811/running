@@ -36,6 +36,14 @@ export const duration = (seconds: number): string => {
     : `${minutes}:${rest.toString().padStart(2, "0")}`;
 };
 
+export const sleepDuration = (minutes: number | null): string => {
+  if (minutes === null || !Number.isFinite(minutes) || minutes < 0) return "--";
+  const rounded = Math.round(minutes);
+  const hours = Math.floor(rounded / 60);
+  const rest = rounded % 60;
+  return `${hours}h${rest.toString().padStart(2, "0")}min`;
+};
+
 export const pace = (seconds: number | null): string => {
   if (seconds === null) return "--";
   const rounded = Math.round(seconds);

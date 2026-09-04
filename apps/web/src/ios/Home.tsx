@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api } from "../api.js";
 import { notifyDataUpdated } from "../events.js";
-import { duration, explanation, pace, sessionKind } from "../format.js";
+import { duration, explanation, pace, sessionKind, sleepDuration } from "../format.js";
 import { useRemote } from "../hooks.js";
 import { hasNativeBridge, postNative, useNativeStatus } from "./native.js";
 import { Card, IosLoading } from "./shared.js";
@@ -105,7 +105,7 @@ function MorningBlocks({
       </section>
       <Card title="昨夜恢复事实">
         <div className="ios-fact-list">
-          <div className="ios-fact"><small>睡眠</small><b>{data.recovery.lastNightSleepMinutes == null ? "--" : `${Math.round(data.recovery.lastNightSleepMinutes)} 分钟`}</b></div>
+          <div className="ios-fact"><small>睡眠</small><b>{sleepDuration(data.recovery.lastNightSleepMinutes)}</b></div>
           <div className="ios-fact"><small>过夜 HRV (SDNN)</small><b>{data.recovery.morningHrvMs == null ? "--" : `${Math.round(data.recovery.morningHrvMs)} ms`}</b></div>
           <div className="ios-fact"><small>RHR</small><b>{data.recovery.restingHeartRateBpm == null ? "--" : `${Math.round(data.recovery.restingHeartRateBpm)} bpm`}</b></div>
         </div>

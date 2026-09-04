@@ -91,9 +91,12 @@ function median(values: number[]): number | null {
 
 function loadSegments(database: DatabaseSync): Segment[] {
   const rows = database.prepare(`
-    SELECT id, source_name AS sourceName, source_category AS sourceCategory,
+    SELECT MIN(id) AS id, source_name AS sourceName, source_category AS sourceCategory,
            value_text AS value, start_at AS startAt, end_at AS endAt
-    FROM health_records WHERE type = ? ORDER BY start_at, id
+    FROM health_records
+    WHERE type = ?
+    GROUP BY source_name, source_category, value_text, start_at, end_at
+    ORDER BY start_at, id
   `).all(healthTypes.sleepAnalysis) as unknown as Array<Record<string, string>>;
   return rows.map((row) => ({
     id: row.id!, sourceName: row.sourceName!, sourceCategory: row.sourceCategory!, value: row.value ?? "",
@@ -103,8 +106,11 @@ function loadSegments(database: DatabaseSync): Segment[] {
 
 function loadHrv(database: DatabaseSync): Array<{ id: string; sourceName: string; start: number; value: number }> {
   const rows = database.prepare(`
-    SELECT id, source_name AS sourceName, start_at AS startAt, value_numeric AS value
-    FROM health_records WHERE type = ? AND value_numeric IS NOT NULL ORDER BY start_at, id
+    SELECT MIN(id) AS id, source_name AS sourceName, start_at AS startAt, value_numeric AS value
+    FROM health_records
+    WHERE type = ? AND value_numeric IS NOT NULL
+    GROUP BY source_name, start_at, value_numeric
+    ORDER BY start_at, id
   `).all(healthTypes.hrvSdnn) as unknown as Array<Record<string, string | number>>;
   return rows.map((row) => ({ id: String(row.id), sourceName: String(row.sourceName), start: Date.parse(String(row.startAt)), value: Number(row.value) }))
     .filter((row) => Number.isFinite(row.start) && Number.isFinite(row.value) && row.value >= 0);

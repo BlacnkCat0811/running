@@ -1,7 +1,7 @@
 # Apple 健康导出数据审计
 
-> 生成时间：2026-09-04T00:42:33.526Z  
-> 数据集版本：dataset_e0101f4da591537d0ce787fcd37dba1e  
+> 生成时间：2026-09-04T07:33:32.843Z  
+> 数据集版本：dataset_a319dfb9c85edd8470a918bff88d71a8  
 > 隐私：本报告只包含聚合统计，不包含原始来源名称、健康值、精确时间或路线坐标。
 
 ## 1. 数据总览
@@ -9,7 +9,7 @@
 | 对象 | 数量 |
 |---|---:|
 | 解析到的 Health records | 83116 |
-| 稳定 ID 去重后的 Health records | 160048 |
+| 稳定 ID 去重后的 Health records | 160051 |
 | 完全相同的 record 副本 | 0 |
 | Workouts | 271 |
 | Activity summaries | 0 |

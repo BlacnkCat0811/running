@@ -621,12 +621,15 @@ export class RecomputePipeline {
     const exact = this.database
       .prepare(`
         SELECT value_numeric AS value, start_at AS startAt, end_at AS endAt${unitSelect}
-        FROM health_records
-        WHERE source_name = ?
-          AND type = ?
-          AND value_numeric IS NOT NULL
-          AND start_at <= ?
-          AND end_at >= ?
+        FROM (
+          SELECT DISTINCT value_numeric, start_at, end_at${unitSelect}
+          FROM health_records
+          WHERE source_name = ?
+            AND type = ?
+            AND value_numeric IS NOT NULL
+            AND start_at <= ?
+            AND end_at >= ?
+        )
         ORDER BY start_at
       `)
       .all(sourceName, type, workoutEndAt, workoutStartAt) as unknown as RecordRow[];
@@ -651,9 +654,12 @@ export class RecomputePipeline {
     if (!fallback) return exact;
     return this.database.prepare(`
       SELECT value_numeric AS value, start_at AS startAt, end_at AS endAt${unitSelect}
-      FROM health_records
-      WHERE source_name = ? AND type = ? AND value_numeric IS NOT NULL
-        AND start_at <= ? AND end_at >= ?
+      FROM (
+        SELECT DISTINCT value_numeric, start_at, end_at${unitSelect}
+        FROM health_records
+        WHERE source_name = ? AND type = ? AND value_numeric IS NOT NULL
+          AND start_at <= ? AND end_at >= ?
+      )
       ORDER BY start_at
     `).all(fallback.sourceName, type, workoutEndAt, workoutStartAt) as unknown as RecordRow[];
   }

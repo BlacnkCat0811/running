@@ -85,6 +85,7 @@ test("maps active SQLite results into Web API DTOs", async () => {
       insertRecord.run(`speed_${kilometer}`, "HKQuantityTypeIdentifierRunningSpeed", "km/hr", 10, start, end);
       insertRecord.run(`heart_${kilometer}`, "HKQuantityTypeIdentifierHeartRate", "count/min", 140 + kilometer, start, end);
       insertRecord.run(`steps_${kilometer}`, "HKQuantityTypeIdentifierStepCount", "count", 960, start, end);
+      insertRecord.run(`steps_duplicate_${kilometer}`, "HKQuantityTypeIdentifierStepCount", "count", 960, start, end);
     }
   } finally {
     fixtureWriter.close();
@@ -171,6 +172,7 @@ test("maps active SQLite results into Web API DTOs", async () => {
     assert.equal(series?.sourceCategory, "apple_watch");
     assert.equal(series?.series.heartRate.totalSamples, 5);
     assert.equal(series?.series.cadence.unit, "spm");
+    assert.equal(series?.series.cadence.totalSamples, 5);
     assert.equal(series?.splits.length, 5);
     assert.equal(series?.splits[0]?.distanceMeters, 1000);
     assert.equal(series?.splits[0]?.durationSeconds, 360);

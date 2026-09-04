@@ -25,7 +25,7 @@ nonisolated enum HealthKitExportError: LocalizedError {
         case .notAuthorized:
             return "未获得 Apple 健康读取权限。请在 iPhone 设置 → 健康 → 数据访问与设备 中打开 RAI。"
         case .noRunningWorkouts:
-            return "Apple 健康里没有跑步记录。如果刚才没允许读取，请到设置 → 健康 → 数据访问与设备 中打开 RAI。"
+            return "Apple 健康里没有可读取的跑步记录。请确认健康 App 中已有跑步记录，并在设置 → 健康 → 数据访问与设备中确认 RAI 已开启，然后返回 RAI 重试。"
         }
     }
 }
@@ -96,10 +96,11 @@ nonisolated enum HealthKitExport {
             anchorData: workoutAnchor
         )
         if workouts.isEmpty {
-            let status = store.authorizationStatus(for: HKObjectType.workoutType())
-            if status == .sharingDenied || status == .notDetermined {
-                throw HealthKitExportError.notAuthorized
-            }
+            // authorizationStatus(for:) only reports whether this app may *save*
+            // samples of the type. It does not report read authorization. Since
+            // RAI intentionally requests no write types, this status is normally
+            // .notDetermined even when the user has granted read access. Query
+            // errors are mapped to .notAuthorized in runningWorkouts instead.
             if startDate == nil {
                 throw HealthKitExportError.noRunningWorkouts
             }

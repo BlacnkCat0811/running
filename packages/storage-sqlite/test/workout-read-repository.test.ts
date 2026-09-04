@@ -21,6 +21,8 @@ test("average cadence falls back to overlapping step-count records", () => {
     );
     INSERT INTO health_records VALUES
       ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 80, '2026-07-16T12:00:00.000Z', '2026-07-16T12:00:30.000Z'),
+      ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 80, '2026-07-16T12:00:30.000Z', '2026-07-16T12:01:00.000Z'),
+      ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 80, '2026-07-16T12:00:00.000Z', '2026-07-16T12:00:30.000Z'),
       ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 80, '2026-07-16T12:00:30.000Z', '2026-07-16T12:01:00.000Z');
   `);
 
