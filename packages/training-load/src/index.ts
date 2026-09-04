@@ -10,6 +10,35 @@ import type {
   WorkoutZoneSummary,
   TrainingLoadBreakdown
 } from "@rai/contracts";
+import type { PhysState } from "@rai/contracts";
+
+export { type PhysState } from "@rai/contracts";
+
+export function countNightsBelowSleepBaseline(
+  slots: Array<{ asleepUnionMinutes: number | null } | null>,
+  sleepBaselineMinutes: number | null
+): number {
+  if (sleepBaselineMinutes == null || sleepBaselineMinutes <= 0) return 0;
+  return slots.filter((night) => night?.asleepUnionMinutes != null && night.asleepUnionMinutes < sleepBaselineMinutes * 0.8).length;
+}
+
+export function classifyPhysState(input: {
+  sleepMinutes: number | null; sleepBaselineMinutes: number | null;
+  hrvSdnnMs: number | null; hrvBaselineMs: number | null;
+  rhrBpm: number | null; rhrBaselineBpm: number | null;
+  nightsBelowSleepBaseline: number;
+}): PhysState {
+  const sleepRatio = input.sleepMinutes != null && input.sleepBaselineMinutes != null && input.sleepBaselineMinutes > 0 ? input.sleepMinutes / input.sleepBaselineMinutes : null;
+  const hrvRatio = input.hrvSdnnMs != null && input.hrvBaselineMs != null && input.hrvBaselineMs > 0 ? input.hrvSdnnMs / input.hrvBaselineMs : null;
+  const rhrRatio = input.rhrBpm != null && input.rhrBaselineBpm != null && input.rhrBaselineBpm > 0 ? input.rhrBpm / input.rhrBaselineBpm : null;
+  if (sleepRatio == null && hrvRatio == null && rhrRatio == null) return "unknown";
+  if (input.nightsBelowSleepBaseline >= 3) return "depleted";
+  const rhrUp = rhrRatio != null && rhrRatio > 1.03;
+  if (sleepRatio != null && sleepRatio < 0.75 && hrvRatio != null && hrvRatio < 0.85 && rhrUp) return "depleted";
+  if ((sleepRatio != null && sleepRatio < 0.75) || (hrvRatio != null && hrvRatio < 0.85 && rhrUp)) return "reduced";
+  if ((sleepRatio != null && sleepRatio >= 0.9) || (hrvRatio != null && hrvRatio >= 0.9) || (rhrRatio != null && rhrRatio <= 1)) return "recovered_phys";
+  return "reduced";
+}
 
 export interface HeartRateSample { heartRate: number; durationSeconds: number; startOffsetSeconds?: number }
 export interface WorkoutLoadInput {
@@ -32,6 +61,7 @@ export interface WorkoutLoadInput {
 }
 
 export interface RecoveryEvidence { localDate: string; value: number }
+export interface DailyPhysEvidence { localDate: string; physState: PhysState }
 export interface DailyMetricConfig {
   acuteHalfLifeDays: number;
   chronicHalfLifeDays: number;
@@ -190,26 +220,26 @@ const percentile = (values: number[], fraction: number): number | null => {
 
 export function classifyTrainingStatus(input: {
   historyDays: number; workoutCount: number; chronicEwma: number; loadRatio: number | null;
-  rampRate: number; recoveryEvidence: number | null; strain: number | null; strainP90: number | null; daysSinceLastRun: number;
+  rampRate: number; recoveryEvidence: number | null; physState?: PhysState | undefined; strain: number | null; strainP90: number | null; daysSinceLastRun: number;
 }, config = defaultDailyMetricConfig): { status: TrainingStatusCode; explanations: TrainingStatusExplanation[] } {
   const explanation = (code: string, value: number | null, threshold: number | null): TrainingStatusExplanation => ({ code, value, threshold });
   if (input.historyDays < config.minimumHistoryDays || input.workoutCount < config.minimumWorkoutCount || input.chronicEwma < config.minimumChronicLoad || input.loadRatio === null)
     return { status: "insufficient_data", explanations: [explanation("insufficient_training_history", input.historyDays, config.minimumHistoryDays)] };
   if (input.loadRatio > 1.5) return { status: "attention", explanations: [explanation("load_ratio_attention", input.loadRatio, 1.5)] };
   if (input.rampRate > 0.5) return { status: "attention", explanations: [explanation("ramp_rate_attention", input.rampRate, 0.5)] };
-  if (input.recoveryEvidence !== null && input.recoveryEvidence < 0.35 && input.loadRatio >= 1.1)
+  if ((input.physState === "depleted" || (input.physState === undefined && input.recoveryEvidence !== null && input.recoveryEvidence < 0.35)) && input.loadRatio >= 1.1)
     return { status: "attention", explanations: [explanation("low_recovery_with_load", input.recoveryEvidence, 0.35)] };
   if (input.loadRatio > 1.3) return { status: "high_load", explanations: [explanation("load_ratio_high", input.loadRatio, 1.3)] };
   if (input.strain !== null && input.strainP90 !== null && input.strain > input.strainP90)
     return { status: "high_load", explanations: [explanation("strain_above_personal_p90", input.strain, input.strainP90)] };
   if (input.loadRatio < 0.7 || input.daysSinceLastRun >= 7)
     return { status: "recovery", explanations: [explanation(input.daysSinceLastRun >= 7 ? "seven_days_without_run" : "load_ratio_recovery", input.daysSinceLastRun >= 7 ? input.daysSinceLastRun : input.loadRatio, input.daysSinceLastRun >= 7 ? 7 : 0.7)] };
-  if (input.loadRatio >= 0.9 && input.loadRatio <= 1.3 && (input.recoveryEvidence === null || input.recoveryEvidence >= 0.45) && input.rampRate >= 0)
+  if (input.loadRatio >= 0.9 && input.loadRatio <= 1.3 && (input.physState !== "depleted" && (input.physState !== undefined || input.recoveryEvidence === null || input.recoveryEvidence >= 0.45)) && input.rampRate >= 0)
     return { status: "effective_stimulus", explanations: [explanation("effective_load_range", input.loadRatio, 0.9)] };
   return { status: "maintaining", explanations: [explanation("load_maintaining", input.loadRatio, null)] };
 }
 
-export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughDate: string, recovery: RecoveryEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
+export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughDate: string, recovery: Array<RecoveryEvidence | DailyPhysEvidence> = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
   if (loads.length === 0) return [];
   const sorted = [...loads].sort((a, b) => a.localDate.localeCompare(b.localDate));
   const start = sorted[0]!.localDate; if (throughDate < start) return [];
@@ -232,11 +262,12 @@ export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughD
     const seven = dailyLoads.slice(Math.max(0, index - 6), index + 1); const mean = seven.reduce((a, b) => a + b, 0) / seven.length;
     const variance = seven.reduce((sum, value) => sum + (value - mean) ** 2, 0) / seven.length;
     const monotony = mean > 0 ? Math.min(5, variance === 0 ? 5 : mean / Math.sqrt(variance)) : null; const strain = monotony === null ? null : current7dLoad * monotony;
-    const recentRecovery = recovery.filter(item => item.localDate <= localDate && dateDiff(item.localDate, localDate) <= 7).sort((a, b) => b.localDate.localeCompare(a.localDate)).slice(0, 3);
+    const recentRecovery = recovery.filter((item): item is RecoveryEvidence => "value" in item).filter(item => item.localDate <= localDate && dateDiff(item.localDate, localDate) <= 7).sort((a, b) => b.localDate.localeCompare(a.localDate)).slice(0, 3);
+    const physState = recovery.find((item): item is DailyPhysEvidence => "physState" in item && item.localDate === localDate)?.physState;
     const recoveryEvidence = recentRecovery.length ? recentRecovery.reduce((sum, item, i) => sum + clamp(item.value) * (3 - i), 0) / recentRecovery.reduce((sum, _item, i) => sum + 3 - i, 0) : null;
     const loadRatio = index + 1 >= config.minimumHistoryDays && workouts >= config.minimumWorkoutCount && chronic >= config.minimumChronicLoad ? acute / chronic : null;
     const historicalStrains = results.filter(item => dateDiff(item.localDate, localDate) <= 56).map(item => item.strain).filter(finite);
-    const classified = classifyTrainingStatus({ historyDays: index + 1, workoutCount: workouts, chronicEwma: chronic, loadRatio, rampRate, recoveryEvidence, strain, strainP90: index >= 55 ? percentile(historicalStrains, 0.9) : null, daysSinceLastRun: lastRunIndex < 0 ? index + 1 : index - lastRunIndex }, config);
+    const classified = classifyTrainingStatus({ historyDays: index + 1, workoutCount: workouts, chronicEwma: chronic, loadRatio, rampRate, recoveryEvidence, physState, strain, strainP90: index >= 55 ? percentile(historicalStrains, 0.9) : null, daysSinceLastRun: lastRunIndex < 0 ? index + 1 : index - lastRunIndex }, config);
     const duration = items.reduce((sum, item) => sum + item.durationSeconds, 0);
     results.push({ localDate, distanceMeters: items.reduce((sum, item) => sum + (item.distanceMeters ?? 0), 0), durationSeconds: duration, workoutCount: items.length,
       load: round(load), current7dLoad: round(current7dLoad), previous7dLoad: round(previous7dLoad), acuteEwma: round(acute), chronicEwma: round(chronic), loadRatio: loadRatio === null ? null : round(loadRatio), rampRate: round(rampRate), monotony: monotony === null ? null : round(monotony), strain: strain === null ? null : round(strain), recoveryEvidence: recoveryEvidence === null ? null : round(recoveryEvidence), trainingStatus: classified.status, statusExplanations: classified.explanations,

@@ -175,7 +175,7 @@ export function PredictionsPage() {
   const data = report.data;
   const snapshot = data.snapshot;
   const ml = data.modelSelection.machineLearning;
-  const recoveryScore = Math.round(data.inputs.recoveryReadiness * 100);
+  const recoveryScore = data.inputs.recoveryReadiness == null ? null : Math.round(data.inputs.recoveryReadiness * 100);
   const evidenceCounts = [
     ["表现 VDOT 证据", data.inputs.performanceVdotEvidence],
     ["阈值片段", data.inputs.lactateThresholdSegments],
@@ -211,7 +211,7 @@ export function PredictionsPage() {
           <span className="overview-icon heart"><Heartbeat size={40} weight="fill" /></span><div><span>阈值心率</span><strong>{snapshot.lactateThreshold.heartRateBpm === null ? "--" : Math.round(snapshot.lactateThreshold.heartRateBpm)}<small>bpm</small></strong><p><b>当前模型快照</b></p></div>
         </article>
         <article>
-          <span className="overview-icon battery"><ShieldCheck size={39} /></span><div><span>恢复准备度</span><strong>{recoveryScore}<small>%</small></strong><p><b>基于当前恢复输入</b></p></div>
+          <span className="overview-icon battery"><ShieldCheck size={39} /></span><div><span>恢复准备度</span><strong>{recoveryScore == null ? "--" : <>{recoveryScore}<small>%</small></>}</strong><p><b>{recoveryScore == null ? "数据不足，已省略疲劳修正" : "基于当前恢复输入"}</b></p></div>
         </article>
       </section>
 
@@ -245,7 +245,7 @@ export function PredictionsPage() {
               ))}
             </div>
             <div className="readiness-score">
-              <span><b>{recoveryScore}<small>%</small></b></span>
+              <span><b>{recoveryScore == null ? "--" : <>{recoveryScore}<small>%</small></>}</b></span>
               <strong>恢复准备度</strong>
               <small>来自 API 恢复输入</small>
             </div>

@@ -1203,6 +1203,59 @@ const migrations: readonly Migration[] = [
         DELETE FROM active_prediction_model;
       `);
     }
+  },
+  {
+    version: 17,
+    name: "canonical_nights_and_hrv_days",
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS canonical_nights (
+          id TEXT PRIMARY KEY,
+          wake_date TEXT NOT NULL,
+          timezone_identifier TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('main', 'nap')),
+          source_name TEXT NOT NULL,
+          source_category TEXT NOT NULL,
+          source_rank INTEGER NOT NULL CHECK (source_rank BETWEEN 1 AND 5),
+          has_stages INTEGER NOT NULL CHECK (has_stages IN (0, 1)),
+          sleep_onset_at TEXT,
+          wake_at TEXT,
+          asleep_union_minutes REAL CHECK (asleep_union_minutes IS NULL OR asleep_union_minutes >= 0),
+          in_bed_union_minutes REAL CHECK (in_bed_union_minutes IS NULL OR in_bed_union_minutes >= 0),
+          awake_minutes REAL CHECK (awake_minutes IS NULL OR awake_minutes >= 0),
+          stage_minutes_json TEXT NOT NULL,
+          segment_count INTEGER NOT NULL CHECK (segment_count >= 0),
+          provenance_json TEXT NOT NULL,
+          computed_at TEXT NOT NULL DEFAULT (${nowSql}),
+          CHECK (kind <> 'main' OR (sleep_onset_at IS NOT NULL AND wake_at IS NOT NULL AND asleep_union_minutes IS NOT NULL)),
+          CHECK (kind <> 'nap' OR sleep_onset_at IS NOT NULL)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_canonical_nights_main
+          ON canonical_nights(wake_date, timezone_identifier) WHERE kind = 'main';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_canonical_nights_nap
+          ON canonical_nights(wake_date, timezone_identifier, source_name, sleep_onset_at)
+          WHERE kind = 'nap' AND sleep_onset_at IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_canonical_nights_kind_wake ON canonical_nights(kind, wake_date);
+        CREATE INDEX IF NOT EXISTS idx_canonical_nights_wake_at ON canonical_nights(wake_at);
+
+        CREATE TABLE IF NOT EXISTS canonical_hrv_days (
+          id TEXT PRIMARY KEY,
+          local_date TEXT NOT NULL,
+          timezone_identifier TEXT NOT NULL,
+          night_id TEXT NOT NULL REFERENCES canonical_nights(id) ON DELETE CASCADE,
+          hrv_sdnn_ms REAL CHECK (hrv_sdnn_ms IS NULL OR hrv_sdnn_ms >= 0),
+          sample_count INTEGER NOT NULL DEFAULT 0 CHECK (sample_count >= 0),
+          confidence TEXT NOT NULL CHECK (confidence IN ('confident', 'sparse', 'missing')),
+          window_start_at TEXT,
+          window_end_at TEXT,
+          source_name TEXT,
+          provenance_json TEXT NOT NULL,
+          computed_at TEXT NOT NULL DEFAULT (${nowSql}),
+          UNIQUE (local_date, timezone_identifier)
+        );
+        CREATE INDEX IF NOT EXISTS idx_canonical_hrv_days_night ON canonical_hrv_days(night_id);
+      `);
+    }
   }
 ];
 

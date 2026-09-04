@@ -9,6 +9,8 @@ import type {
   WorkoutListItem
 } from "@rai/api-contracts";
 import { healthTypes, type DailyTrainingMetric } from "@rai/contracts";
+import { SqliteRecoveryFactsReadRepository } from "@rai/storage-sqlite";
+import { classifyPhysState, countNightsBelowSleepBaseline } from "@rai/training-load";
 import { loadRaceReadiness } from "@rai/application";
 
 import {
@@ -118,9 +120,15 @@ export function assembleMobileCoach(args: {
     ? loadLatestCoachWorkout(database, latestWorkout)
     : null;
   const weekSessions = loadWeekSessions(database, week.periodStart, week.periodEnd);
-  const sleep = loadSleepWindow(database, today);
-  const hrv = loadMetricWindow(database, healthTypes.hrvSdnn, today, 4, 12);
-  const rhr = loadMetricWindow(database, healthTypes.restingHeartRate, today, 0, 14);
+  const recoveryFacts = new SqliteRecoveryFactsReadRepository(database);
+  const currentNight = recoveryFacts.loadCanonicalNight(today, "Asia/Shanghai") ?? recoveryFacts.loadCanonicalNight(shiftDate(today, -1), "Asia/Shanghai");
+  const factsBaseline = recoveryFacts.loadBaselines(new Date().toISOString(), "Asia/Shanghai");
+  const currentHrv = currentNight ? recoveryFacts.loadHrvDay(currentNight.wakeDate, "Asia/Shanghai") : null;
+  const sleep = { lastNight: currentNight?.asleepUnionMinutes ?? null, baseline: factsBaseline.sleepMinutes, nightsBelow: countNightsBelowSleepBaseline([0,1,2].map((offset) => recoveryFacts.loadCanonicalNight(shiftDate(currentNight?.wakeDate ?? today, -offset), "Asia/Shanghai")), factsBaseline.sleepMinutes) };
+  const hrv = { current: currentHrv?.hrvSdnnMs ?? null, baseline: factsBaseline.hrvSdnnMs };
+  const rhrCurrent = recoveryFacts.loadRhrMedian(new Date(Date.now() - 36 * 3600000).toISOString(), new Date().toISOString());
+  const rhr = { current: rhrCurrent, baseline: factsBaseline.rhrBpm };
+  const physState = classifyPhysState({ sleepMinutes: sleep.lastNight, sleepBaselineMinutes: sleep.baseline, hrvSdnnMs: hrv.current, hrvBaselineMs: hrv.baseline, rhrBpm: rhr.current, rhrBaselineBpm: rhr.baseline, nightsBelowSleepBaseline: sleep.nightsBelow });
   const qualityDays = consecutiveQualityDays(weekSessions.recentByDate, args.latestDataDate ?? today);
   const asOf = `${(args.latestDataDate ?? today)}T16:00:00.000Z`;
   let readiness: { five_k?: number; ten_k?: number; half_marathon?: number } = {};
@@ -222,7 +230,7 @@ export function assembleMobileCoach(args: {
     calibration,
     verdict,
     nextSession,
-    recovery: buildRecovery(input),
+    recovery: { ...buildRecovery(input), score: null, state: physState === "recovered_phys" ? "recovered" : physState, hrvSampleCount: currentHrv?.sampleCount ?? 0 },
     postRun: buildPostRun(
       postRunWorkout,
       input.trueAbility,

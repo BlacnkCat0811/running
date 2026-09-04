@@ -494,7 +494,7 @@ function metricMedian(
 export function loadRecoveryReadiness(
   database: DatabaseSync,
   asOf: string
-): number {
+): number | null {
   const sevenDaysAgo = new Date(Date.parse(asOf) - 7 * 86_400_000).toISOString();
   const thirtyFiveDaysAgo = new Date(Date.parse(asOf) - 35 * 86_400_000).toISOString();
   const recentResting = metricMedian(database, healthTypes.restingHeartRate, sevenDaysAgo, asOf);
@@ -502,6 +502,13 @@ export function loadRecoveryReadiness(
   const recentHrv = metricMedian(database, healthTypes.hrvSdnn, sevenDaysAgo, asOf);
   const baselineHrv = metricMedian(database, healthTypes.hrvSdnn, thirtyFiveDaysAgo, sevenDaysAgo);
   const scores: number[] = [];
+  try {
+    const latestNight = database.prepare(`SELECT asleep_union_minutes AS value FROM canonical_nights WHERE kind='main' AND wake_at < ? ORDER BY wake_at DESC LIMIT 1`).get(asOf) as { value?: number } | undefined;
+    const sleepBaseline = database.prepare(`SELECT AVG(asleep_union_minutes) AS value FROM canonical_nights WHERE kind='main' AND wake_at >= ? AND wake_at < ?`).get(thirtyFiveDaysAgo, sevenDaysAgo) as { value?: number } | undefined;
+    if (latestNight?.value != null && sleepBaseline?.value != null && Number(sleepBaseline.value) > 0) scores.push(clamp(Number(latestNight.value) / Number(sleepBaseline.value), 0, 1));
+  } catch {
+    // Legacy v16 databases do not have canonical sleep facts yet.
+  }
   if (recentResting !== null && baselineResting !== null) {
     scores.push(clamp(1 - Math.max(0, recentResting - baselineResting) / 12, 0, 1));
   }
@@ -528,12 +535,8 @@ export function loadRecoveryReadiness(
   const recentMinutes = load.recentMinutes ?? 0;
   const baselineWeeklyMinutes = Math.max(load.baselineWeeklyMinutes ?? 0, 30);
   const acuteRatio = recentMinutes / baselineWeeklyMinutes;
-  scores.push(clamp(1 - Math.max(0, acuteRatio - 1) * 0.35, 0.45, 1));
-  if (load.latestAt !== null) {
-    const daysSinceLastRun = Math.max(0, daysBetween(load.latestAt, asOf));
-    scores.push(daysSinceLastRun < 1 ? 0.7 : daysSinceLastRun < 2 ? 0.85 : 1);
-  }
-  return clamp(average(scores) ?? 0.65, 0, 1);
+  if (scores.length === 0) return null;
+  return clamp(average(scores) ?? 0, 0, 1);
 }
 
 function targetDistance(distanceMeters: number): RaceDistance | null {

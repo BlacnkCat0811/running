@@ -56,7 +56,7 @@ export function IosBodyStatusCard() {
         <IosLoading compact error={predictions.error} onRetry={() => void predictions.reload()} />
       ) : (
         <div className="ios-phy-grid">
-          <PhyTile label="恢复准备度" value={percent(recovery)} />
+          <PhyTile label="恢复准备度" value={recovery == null ? "--" : percent(recovery)} />
           <PhyTile
             label="VO₂max"
             value={snapshot?.vo2Max.valueMlKgMin == null ? "--" : snapshot.vo2Max.valueMlKgMin.toFixed(1)}
@@ -115,7 +115,7 @@ export function IosPhysiologyPage() {
       <section className="ios-detail-hero">
         <span>恢复准备度</span>
         <strong>
-          {percent(recovery)}
+          {recovery == null ? "--" : percent(recovery)}
         </strong>
         <p>
           {status

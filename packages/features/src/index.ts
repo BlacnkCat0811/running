@@ -7,7 +7,7 @@ import {
   type WorkoutOverride
 } from "@rai/contracts";
 
-export const FEATURE_CONFIG_VERSION = "feature-config-v7" as const;
+export const FEATURE_CONFIG_VERSION = "feature-config-v8" as const;
 
 const SPEED_STABILITY_WINDOW_SECONDS = 60;
 
@@ -437,6 +437,7 @@ export function extractWorkoutFeatureVector(
     .map((value) => clamp(value, 0, 1));
   const stabilityRaw =
     stabilityInputs.length > 0 ? 1 - (average(stabilityInputs) ?? 0) : null;
+  const physiologicalParts = [source.sleepDurationMinutes, source.restingHeartRate, source.hrvSdnn].filter((value): value is number => value !== null);
   const recoveryParts = [
     source.sleepDurationMinutes === null ? null : clamp(source.sleepDurationMinutes / 480, 0, 1),
     source.restingHeartRate === null
@@ -447,7 +448,7 @@ export function extractWorkoutFeatureVector(
       ? null
       : 1 - clamp(source.recentLoadMinutes / (7 * 60), 0, 1)
   ].filter((value): value is number => value !== null);
-  const recoveryRaw = average(recoveryParts);
+  const recoveryRaw = physiologicalParts.length === 0 ? null : average(recoveryParts);
   const elapsedSeconds = (Date.parse(source.workoutEndAt) - Date.parse(source.workoutStartAt)) / 1000;
   const sessionType = source.override?.sessionType ?? automaticSessionType({
     durationSeconds: source.durationSeconds,

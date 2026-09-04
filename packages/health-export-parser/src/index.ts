@@ -11,6 +11,14 @@ export {
   type IncrementalCanonicalizationOptions
 } from "./canonicalize.js";
 export {
+  canonicalizeNights,
+  CANONICAL_NIGHT_ALGORITHM_VERSION,
+  type CanonicalNight,
+  type CanonicalHrvDay,
+  type CanonicalizationNightsResult,
+  type HrvDayConfidence
+} from "./canonicalize-nights.js";
+export {
   RaiDatabase,
   SEED_CONTENT_HASH,
   type RaiDatabaseOpenOptions,

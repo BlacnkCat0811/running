@@ -66,3 +66,4 @@ export {
   type StoredDataSummary,
   type StoredDiagnosticsActiveModel
 } from "./read/audit-read-repository.js";
+export { SqliteRecoveryFactsReadRepository, type StoredCanonicalNight, type StoredCanonicalHrvDay } from "./read/recovery-facts-read-repository.js";

@@ -6,6 +6,7 @@ import { basename, dirname, resolve } from "node:path";
 import { parseAppleHealthXml } from "./apple-health-parser.js";
 import { stageAuditFiles, writeAuditFiles } from "./audit.js";
 import { canonicalizeRunningWorkouts } from "./canonicalize.js";
+import { canonicalizeNights } from "./canonicalize-nights.js";
 import { RaiDatabase } from "./database.js";
 import {
   moveFileWithRetry,
@@ -243,6 +244,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       store.database,
       incremental ? { dirtyWorkoutTimes } : undefined
     );
+    const nightlyResult = canonicalizeNights(store.database, "Asia/Shanghai");
 
     const fingerprints = store.database
       .prepare(
@@ -317,6 +319,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       JSON.stringify(
         {
           xml: xmlResult,
+          nightly: nightlyResult,
           gpx: gpxResult,
           canonicalization: canonicalResult,
           modelCohorts: stagedAudit.audit.readiness,

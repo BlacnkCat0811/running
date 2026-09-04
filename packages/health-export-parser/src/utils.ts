@@ -36,6 +36,31 @@ export function normalizeAppleDate(value: string | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+/** Return the calendar date in an IANA timezone for an instant. */
+export function localDateAt(instantOrIso: number | string, timezone = "Asia/Shanghai"): string {
+  const instant = typeof instantOrIso === "string" ? Date.parse(instantOrIso) : instantOrIso;
+  if (!Number.isFinite(instant)) throw new Error(`Invalid instant: ${instantOrIso}`);
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(instant));
+  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+/** Resolve a local wall-clock timestamp to an instant, including DST transitions. */
+export function localDateTimeAt(value: string, timezone = "Asia/Shanghai"): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  if (!match) throw new Error(`Invalid local date-time: ${value}`);
+  const target = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] ?? "00"}`;
+  const naive = Date.parse(`${target}Z`);
+  for (let offset = -16 * 60; offset <= 16 * 60; offset += 15) {
+    const candidate = naive - offset * 60_000;
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(candidate));
+    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    const hour = values.hour === "24" ? "00" : values.hour;
+    if (`${values.year}-${values.month}-${values.day}T${hour}:${values.minute}:${values.second}` === target) return new Date(candidate).toISOString();
+  }
+  throw new Error(`Local date-time does not exist in ${timezone}: ${value}`);
+}
+
 export function durationToSeconds(
   value: string | undefined,
   unit: string | undefined

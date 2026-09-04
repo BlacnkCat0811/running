@@ -4,17 +4,16 @@
 |---|---|
 | 排查时间 | 2026-09-04 |
 | 排查依据 | `docs/SLEEP_HRV_DESIGN.md`（PR1 / PR2 / PR3a / PR3b） |
-| 排查范围 | 工作树 `main` @ `fd311ac`、分支 `execute-plan/cbe06362-pr-1-...`、活库 `var/rai.sqlite` |
-| 基线健康度 | `npm run typecheck` 通过（clean tree，仅 `docs/SLEEP_HRV_DESIGN.md` 未跟踪） |
+| 排查范围 | 工作树 `main` @ `b451f04`、活库 `var/rai.sqlite`；本轮已开始 PR1-PR3 分阶段实现 |
+| 基线健康度 | `npm run typecheck` 通过；完整测试中的 server runtime 失败为沙箱禁止监听端口（`listen EPERM`） |
 
 ---
 
 ## 一句话结论
 
-**PR1 / PR2 / PR3a / PR3b 全部 0% 落地。** 设计文档已完成 4 轮审查并定稿，但代码库里
-**没有一行实现代码**。PR1 分支已创建但为空分支（0 提交），活库仍是 schema v16，
-`canonical_nights` / `canonical_hrv_days` 两张表均不存在。设计文档描述的 7 个缺陷
-**在活数据上全部仍然成立且可复现**。
+**设计文档已完成审查，当前工作树已落地 PR1 的事实层和 PR2/PR3 的兼容性改造。**
+schema 已加入 v17，canonical 表、导入挂钩、恢复 repository、Coach/趋势读取和预测 null 传播已实现；
+个人基线的完整 as-of 接入与训练状态全量切换仍需在真实数据 shadow run 后验收。
 
 ---
 
@@ -22,10 +21,10 @@
 
 | PR | 标题 | 落地 | 关键判据 | 状态 |
 |---|---|---|---|---|
-| 1 | Store nightly facts | **0%** | migration v17 缺失、两张表缺失、`canonicalizeNights` 不存在 | 🔴 |
-| 2 | Trends + Coach 事实卡 | **0%** | `classifyPhysState` 0 命中、`/v1/recovery-trends` 不存在、`RecoveryFactsChart` 不存在 | 🔴 |
-| 3a | Feature + TA 个人基线 | **0%** | `FEATURE_CONFIG_VERSION` 仍 `v7`、`MODEL_CONFIG_VERSION` 仍 `v2`、804 行 feature 全 v7 | 🔴 |
-| 3b | 训练状态 + 预测 | **0%** | `RecoveryEvidence[]` 未换 `PhysDailyEvidence[]`、预测 readiness 仍无条件 push 负荷 | 🔴 |
+| 1 | Store nightly facts | **已落地** | migration v17、两张表、canonicalizer、CLI 挂钩与 repository 已实现 | 🟢 |
+| 2 | Trends + Coach 事实卡 | **核心已落地** | `classifyPhysState`、`/v1/recovery-trends`、Coach canonical facts 已接入；桌面专用图表待补 | 🟡 |
+| 3a | Feature + TA 个人基线 | **部分落地** | feature/model 版本已 bump，load-only 已禁止；完整个人基线接入待 shadow run | 🟡 |
+| 3b | 训练状态 + 预测 | **部分落地** | prediction readiness 支持 null、训练状态支持 phys state；全量 pipeline 接线待验收 | 🟡 |
 
 ---
 

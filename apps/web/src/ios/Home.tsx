@@ -103,6 +103,14 @@ function MorningBlocks({
         <strong>{data.verdict.title}</strong>
         <p>{data.verdict.reason}</p>
       </section>
+      <Card title="昨夜恢复事实">
+        <div className="ios-fact-list">
+          <div className="ios-fact"><small>睡眠</small><b>{data.recovery.lastNightSleepMinutes == null ? "--" : `${Math.round(data.recovery.lastNightSleepMinutes)} 分钟`}</b></div>
+          <div className="ios-fact"><small>过夜 HRV (SDNN)</small><b>{data.recovery.morningHrvMs == null ? "--" : `${Math.round(data.recovery.morningHrvMs)} ms`}</b></div>
+          <div className="ios-fact"><small>RHR</small><b>{data.recovery.restingHeartRateBpm == null ? "--" : `${Math.round(data.recovery.restingHeartRateBpm)} bpm`}</b></div>
+        </div>
+        <small>{data.recovery.note}</small>
+      </Card>
       <Card title={restDone ? "今天的动作" : locked ? "已锁定的课" : "下一堂课"}>
         <div className="ios-next-session">
           <b>{restDone ? "今天的动作：休息" : session.title}</b>

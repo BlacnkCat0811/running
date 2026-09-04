@@ -664,6 +664,9 @@ app.get("/v1/mobile/today", async () => {
 app.get("/v1/mobile/statistics", async () => withReadStore((store) => store.mobileStatistics()));
 
 app.get("/v1/mobile/trends", async () => withReadStore((store) => store.mobileTrends()));
+app.get<{ Querystring: { days?: string } }>("/v1/recovery-trends", async (request) =>
+  withReadStore((store) => store.recoveryTrends(Math.min(Math.max(Number(request.query.days ?? 28), 1), 365)))
+);
 
 app.get("/v1/mobile/goals", async () => mobileGoalsStore.read());
 

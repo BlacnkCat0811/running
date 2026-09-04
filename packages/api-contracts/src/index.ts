@@ -513,6 +513,8 @@ export interface MobileRecoveryBreakdown {
   hrvBaselineMs: number | null;
   restingHeartRateBpm: number | null;
   restingHeartRateBaselineBpm: number | null;
+  state?: "unknown" | "depleted" | "reduced" | "recovered";
+  hrvSampleCount?: number;
   note: string;
 }
 

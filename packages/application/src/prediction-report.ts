@@ -50,7 +50,7 @@ export interface PredictionReportOptions {
   temperatureC?: number;
   humidityPercent?: number;
   elevationGainMeters?: Partial<Record<RaceDistance, number>>;
-  recoveryReadiness?: number;
+  recoveryReadiness?: number | null;
 }
 
 export interface PredictionEvaluationReport {
@@ -85,7 +85,7 @@ export interface FormulaPredictionBase {
   thresholdEvidenceCount: number;
   performanceVdotEvidenceCount: number;
   readiness: Record<RaceDistance, number>;
-  recoveryReadiness: number;
+  recoveryReadiness: number | null;
   profile: {
     restingHeartRateBpm: number | null;
     observedMaximumHeartRateBpm: number | null;
@@ -133,11 +133,11 @@ function isoDate(value: string | undefined): string {
 
 function assertRange(
   name: string,
-  value: number | undefined,
+  value: number | null | undefined,
   minimum: number,
   maximum: number
 ): void {
-  if (value === undefined) return;
+  if (value == null) return;
   if (!Number.isFinite(value) || value < minimum || value > maximum) {
     throw new Error(`${name} must be between ${minimum} and ${maximum}`);
   }
@@ -165,7 +165,7 @@ function resolvedScenario(options: PredictionReportOptions): PhysiologyPredictio
 
 function predictionConditions(
   scenario: PhysiologyPredictionScenario,
-  recoveryReadiness: number
+  recoveryReadiness: number | null
 ): RacePredictionConditions {
   const conditions: RacePredictionConditions = { recoveryReadiness };
   if (scenario.temperatureC !== null) conditions.temperatureC = scenario.temperatureC;
@@ -210,7 +210,7 @@ export function buildFormulaPredictionBase(
   const performanceVdotEvidence = loadPerformanceVdotEvidence(database, asOf);
   const thresholdEvidence = loadLactateThresholdEvidence(database, asOf);
   const readiness = resolvedReadiness(loadRaceReadiness(database, asOf));
-  const recoveryReadiness = options.recoveryReadiness ?? loadRecoveryReadiness(database, asOf);
+  const recoveryReadiness = options.recoveryReadiness === undefined ? loadRecoveryReadiness(database, asOf) : options.recoveryReadiness;
   const scenario = resolvedScenario(options);
   const profile = loadPhysiologyProfile(database, asOf);
   const snapshot = buildPhysiologyPredictionSnapshot({

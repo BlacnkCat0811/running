@@ -412,10 +412,10 @@ export function buildRecovery(input: CoachInput): MobileRecoveryBreakdown {
     parts.push(`静息心率 ${Math.round(input.restingHeartRateBpm)}，较基线 ${delta >= 0 ? "+" : ""}${Math.round(delta)}`);
   }
   if (parts.length === 0) {
-    parts.push("还没有昨夜睡眠或今晨 HRV，闸门按负荷状态估计。");
+    parts.push("还没有昨夜睡眠或过夜 HRV，恢复状态暂不可用。");
   }
   return {
-    score: input.recoveryEvidence,
+    score: null,
     lastNightSleepMinutes: input.lastNightSleepMinutes,
     sleepBaselineMinutes: input.sleepBaselineMinutes,
     morningHrvMs: input.morningHrvMs,

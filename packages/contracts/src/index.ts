@@ -25,6 +25,21 @@ export const workoutTypes = {
   running: "HKWorkoutActivityTypeRunning"
 } as const;
 
+export const SLEEP_ANALYSIS_VALUES = {
+  inBed: "HKCategoryValueSleepAnalysisInBed",
+  awake: "HKCategoryValueSleepAnalysisAwake",
+  asleepUnspecified: "HKCategoryValueSleepAnalysisAsleepUnspecified",
+  asleepCore: "HKCategoryValueSleepAnalysisAsleepCore",
+  asleepDeep: "HKCategoryValueSleepAnalysisAsleepDeep",
+  asleepRem: "HKCategoryValueSleepAnalysisAsleepREM",
+  asleepDeprecated: "HKCategoryValueSleepAnalysisAsleep"
+} as const;
+
+export type CanonicalNightKind = "main" | "nap";
+export type HrvDayConfidence = "confident" | "sparse" | "missing";
+export type PhysState = "unknown" | "depleted" | "reduced" | "recovered_phys";
+export interface DailyPhysState { localDate: string; physState: PhysState }
+
 export type MetadataMap = Record<string, string[]>;
 
 export interface CanonicalHealthRecord {
@@ -835,7 +850,7 @@ export interface PhysiologyPredictionReport {
     performanceVdotEvidence: number;
     labeledRaceOutcomes: number;
     readiness: Record<RaceDistance, number>;
-    recoveryReadiness: number;
+    recoveryReadiness: number | null;
     scenario: PhysiologyPredictionScenario;
     profile: {
       restingHeartRateBpm: number | null;

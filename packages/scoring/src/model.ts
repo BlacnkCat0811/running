@@ -13,7 +13,7 @@ import {
   type AbilityDimension
 } from "./index.js";
 
-export const MODEL_CONFIG_VERSION = "rai-model-config-v2" as const;
+export const MODEL_CONFIG_VERSION = "rai-model-config-v3" as const;
 
 export interface RaiModelConfig {
   calibrationMinimumSessions: number;
@@ -351,7 +351,7 @@ export function updateTrueAbilityFromFeatureScore(
     };
   }
   const negative = score.currentAbility < currentTrueAbility;
-  const directionFactor = negative && (score.dimensions.recovery ?? 50) < 40 ? 0.25 : negative ? 0.4 : 1;
+  const directionFactor = negative && score.dimensions.recovery !== null && score.dimensions.recovery < 40 ? 0.25 : negative ? 0.4 : 1;
   const resistance = negative ? 1 : growthResistance(currentTrueAbility);
   const nextTrueAbility = updateTrueAbility({
     trueAbility: currentTrueAbility,

@@ -84,7 +84,7 @@ export interface PredictionReadiness {
 export interface RacePredictionConditions {
   temperatureC?: number;
   humidityPercent?: number;
-  recoveryReadiness?: number;
+  recoveryReadiness?: number | null;
   elevationGainMeters?: Partial<Record<RaceDistance, number>>;
 }
 
@@ -864,7 +864,7 @@ export function predictRaceTimes(
       distanceMeters,
       conditions.elevationGainMeters?.[distance]
     );
-    const recoveryReadiness = conditions.recoveryReadiness === undefined
+    const recoveryReadiness = conditions.recoveryReadiness == null
       ? null
       : clamp(conditions.recoveryReadiness, 0, 1);
     const fatiguePenalty = recoveryReadiness === null ? 0 : (1 - recoveryReadiness) * 0.04;

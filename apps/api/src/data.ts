@@ -11,6 +11,7 @@ import {
   SqliteTrendsReadRepository,
   SqliteWorkoutReadRepository,
   SqliteZoneReadRepository,
+  SqliteRecoveryFactsReadRepository,
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
 
@@ -100,6 +101,7 @@ export class RaiReadStore {
   private readonly seriesRepository: SqliteSeriesReadRepository;
   private readonly trendsRepository: SqliteTrendsReadRepository;
   private readonly auditRepository: SqliteAuditReadRepository;
+  private readonly recoveryRepository: SqliteRecoveryFactsReadRepository;
   private cacheVersion = -1;
   private readonly cache = new Map<string, unknown>();
 
@@ -114,6 +116,7 @@ export class RaiReadStore {
     this.seriesRepository = new SqliteSeriesReadRepository(this.database);
     this.trendsRepository = new SqliteTrendsReadRepository(this.database);
     this.auditRepository = new SqliteAuditReadRepository(this.database);
+    this.recoveryRepository = new SqliteRecoveryFactsReadRepository(this.database);
   }
 
   close(): void {
@@ -603,6 +606,20 @@ export class RaiReadStore {
       growthVelocityPerWeek: latestAbility?.growthVelocityPerWeek ?? null,
       decayPoints: latestAbility?.decayPoints ?? 0
     };
+  }
+
+  recoveryTrends(days: number) {
+    const end = new Date();
+    const dates: string[] = [];
+    for (let i = Math.max(1, days) - 1; i >= 0; i -= 1) {
+      const d = new Date(end.getTime() - i * 86400000).toISOString().slice(0, 10);
+      dates.push(d);
+    }
+    return { days: dates.map((date) => {
+      const night = this.recoveryRepository.loadCanonicalNight(date, "Asia/Shanghai");
+      const hrv = this.recoveryRepository.loadHrvDay(date, "Asia/Shanghai");
+      return { date, sleepMinutes: night?.asleepUnionMinutes ?? null, hrvSdnnMs: hrv?.hrvSdnnMs ?? null, hrvSampleCount: hrv?.sampleCount ?? 0, hrvConfidence: hrv?.confidence ?? "missing", sourceCategory: night?.sourceCategory ?? null };
+    }) };
   }
 
   workout(id: string): WorkoutDetailResponse | null {
