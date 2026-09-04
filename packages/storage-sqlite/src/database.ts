@@ -1256,6 +1256,30 @@ const migrations: readonly Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_canonical_hrv_days_night ON canonical_hrv_days(night_id);
       `);
     }
+  },
+  {
+    version: 18,
+    name: "model_validation_gates",
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS model_validation_gates (
+          id TEXT PRIMARY KEY,
+          candidate_model_run_id TEXT NOT NULL REFERENCES model_runs(id) ON DELETE CASCADE,
+          base_model_run_id TEXT REFERENCES model_runs(id) ON DELETE SET NULL,
+          gate_version TEXT NOT NULL,
+          status TEXT NOT NULL CHECK (status IN ('passed', 'failed', 'skipped')),
+          metrics_json TEXT NOT NULL,
+          thresholds_json TEXT NOT NULL,
+          failure_reasons_json TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (${nowSql}),
+          UNIQUE(candidate_model_run_id, gate_version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_model_validation_gates_candidate
+          ON model_validation_gates(candidate_model_run_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_model_validation_gates_base
+          ON model_validation_gates(base_model_run_id, created_at DESC);
+      `);
+    }
   }
 ];
 

@@ -1,6 +1,7 @@
 import {
   assertWorkoutFeatureVector,
   type EligibilityStatus,
+  type HrvDayConfidence,
   type MissingReasonCode,
   type SessionType,
   type WorkoutFeatureVector,
@@ -64,6 +65,27 @@ export interface TimedSeriesSample {
   durationSeconds: number;
 }
 
+/**
+ * Personal recovery baselines are computed as-of the workout start by the
+ * application layer. Keeping them on the feature source makes the feature
+ * extractor deterministic and prevents it from reaching into storage.
+ */
+export interface RecoveryBaseline {
+  sleepMinutes: number | null;
+  restingHeartRateBpm: number | null;
+  hrvSdnnMs: number | null;
+  loadMinutes: number | null;
+  lookbackDays?: number;
+  validDays?: Partial<Record<"sleep" | "rhr" | "hrv" | "load", number>>;
+}
+
+export interface RecoveryContext {
+  asOfAt?: string;
+  nightId?: string | null;
+  hrvConfidence?: HrvDayConfidence | null;
+  rhrSourceCategory?: string | null;
+}
+
 export interface WorkoutFeatureSource {
   id: string;
   trainingSessionId: string;
@@ -83,9 +105,33 @@ export interface WorkoutFeatureSource {
   hrvSdnn: number | null;
   sleepDurationMinutes: number | null;
   recentLoadMinutes: number | null;
+  recoveryBaseline?: RecoveryBaseline | null;
+  recoveryContext?: RecoveryContext | null;
   observedMaximumHeartRate: number | null;
   override: WorkoutOverride | null;
 }
+
+const RECOVERY_WEIGHTS = {
+  sleep: 0.35,
+  rhr: 0.25,
+  hrv: 0.25,
+  load: 0.15
+} as const;
+
+type RecoveryPartName = keyof typeof RECOVERY_WEIGHTS;
+
+export interface RecoveryParts {
+  sleepRatio: number | null;
+  rhrRatio: number | null;
+  hrvRatio: number | null;
+  loadPart: number | null;
+  weights: Partial<Record<RecoveryPartName, number>>;
+  nightId: string | null;
+  hrvConfidence: HrvDayConfidence | null;
+  baselineLookbackDays: number | null;
+}
+
+export const recoveryWeights = RECOVERY_WEIGHTS;
 
 const clamp = (value: number, minimum: number, maximum: number): number =>
   Math.min(maximum, Math.max(minimum, value));
@@ -390,6 +436,68 @@ function eligibility(
   return { status: "eligible", reasons };
 }
 
+const finitePositive = (value: number | null | undefined): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
+const finiteNonNegative = (value: number | null | undefined): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+/**
+ * Converts current recovery observations to personal-relative signals. A
+ * missing baseline intentionally makes that component unavailable rather
+ * than falling back to population thresholds. Load is only meaningful in the
+ * presence of at least one physiological observation.
+ */
+export function calculateRecoveryParts(source: WorkoutFeatureSource): {
+  parts: RecoveryParts;
+  recoveryRaw: number | null;
+} {
+  const baseline = source.recoveryBaseline ?? null;
+  const sleepRatio = finitePositive(source.sleepDurationMinutes) && finitePositive(baseline?.sleepMinutes)
+    ? clamp(source.sleepDurationMinutes / baseline.sleepMinutes, 0, 1)
+    : null;
+  const rhrRatio = finitePositive(source.restingHeartRate) && finitePositive(baseline?.restingHeartRateBpm)
+    ? clamp(baseline.restingHeartRateBpm / source.restingHeartRate, 0, 1)
+    : null;
+  const hrvRatio = finitePositive(source.hrvSdnn) && finitePositive(baseline?.hrvSdnnMs)
+    ? clamp(source.hrvSdnn / baseline.hrvSdnnMs, 0, 1)
+    : null;
+  const loadPart = finiteNonNegative(source.recentLoadMinutes) && finiteNonNegative(baseline?.loadMinutes)
+    ? 1 - clamp(source.recentLoadMinutes / Math.max(baseline.loadMinutes, 1) - 1, 0, 1)
+    : null;
+
+  const physiological: Array<[RecoveryPartName, number | null]> = [
+    ["sleep", sleepRatio],
+    ["rhr", rhrRatio],
+    ["hrv", hrvRatio]
+  ];
+  const physiologicalAvailable = physiological.filter(([, value]) => value !== null);
+  const available = physiologicalAvailable.length > 0
+    ? [...physiologicalAvailable, ["load", loadPart] as [RecoveryPartName, number | null]]
+        .filter(([, value]) => value !== null)
+    : [];
+  const weights: Partial<Record<RecoveryPartName, number>> = {};
+  const totalWeight = available.reduce((sum, [name]) => sum + RECOVERY_WEIGHTS[name], 0);
+  for (const [name] of available) weights[name] = RECOVERY_WEIGHTS[name] / totalWeight;
+  const recoveryRaw = totalWeight > 0
+    ? available.reduce((sum, [name, value]) => sum + (value ?? 0) * RECOVERY_WEIGHTS[name], 0) / totalWeight
+    : null;
+
+  return {
+    parts: {
+      sleepRatio,
+      rhrRatio,
+      hrvRatio,
+      loadPart: physiologicalAvailable.length > 0 ? loadPart : null,
+      weights,
+      nightId: source.recoveryContext?.nightId ?? null,
+      hrvConfidence: source.recoveryContext?.hrvConfidence ?? null,
+      baselineLookbackDays: baseline?.lookbackDays ?? null
+    },
+    recoveryRaw
+  };
+}
+
 export function extractWorkoutFeatureVector(
   featureId: string,
   featureRunId: string,
@@ -437,18 +545,8 @@ export function extractWorkoutFeatureVector(
     .map((value) => clamp(value, 0, 1));
   const stabilityRaw =
     stabilityInputs.length > 0 ? 1 - (average(stabilityInputs) ?? 0) : null;
-  const physiologicalParts = [source.sleepDurationMinutes, source.restingHeartRate, source.hrvSdnn].filter((value): value is number => value !== null);
-  const recoveryParts = [
-    source.sleepDurationMinutes === null ? null : clamp(source.sleepDurationMinutes / 480, 0, 1),
-    source.restingHeartRate === null
-      ? null
-      : 1 - clamp((source.restingHeartRate - 40) / 80, 0, 1),
-    source.hrvSdnn === null ? null : clamp(source.hrvSdnn / 100, 0, 1),
-    source.recentLoadMinutes === null
-      ? null
-      : 1 - clamp(source.recentLoadMinutes / (7 * 60), 0, 1)
-  ].filter((value): value is number => value !== null);
-  const recoveryRaw = physiologicalParts.length === 0 ? null : average(recoveryParts);
+  const recovery = calculateRecoveryParts(source);
+  const recoveryRaw = recovery.recoveryRaw;
   const elapsedSeconds = (Date.parse(source.workoutEndAt) - Date.parse(source.workoutStartAt)) / 1000;
   const sessionType = source.override?.sessionType ?? automaticSessionType({
     durationSeconds: source.durationSeconds,
@@ -514,7 +612,10 @@ export function extractWorkoutFeatureVector(
       featureConfigVersion: FEATURE_CONFIG_VERSION,
       featureConfig: normalizedConfig,
       sourceCategory: source.sourceCategory,
-      observedMaximumHeartRate: source.observedMaximumHeartRate
+      observedMaximumHeartRate: source.observedMaximumHeartRate,
+      recoveryParts: recovery.parts,
+      recoveryBaseline: source.recoveryBaseline ?? null,
+      recoveryContext: source.recoveryContext ?? null
     },
     computedAt
   };

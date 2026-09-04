@@ -18,6 +18,33 @@ export interface StoredModelRunSummary {
   active: boolean;
 }
 
+export interface ModelValidationGateResult {
+  candidateModelRunId: string;
+  baseModelRunId: string | null;
+  gateVersion: string;
+  status: "passed" | "failed" | "skipped";
+  metrics: {
+    baseModelVersion?: string | null;
+    candidateModelVersion?: string | null;
+    matchedSessions: number;
+    baseEligibleSessions: number;
+    candidateEligibleSessions: number;
+    eligibleSessionDelta: number;
+    recoveryNullRateBase: number | null;
+    recoveryNullRateCandidate: number | null;
+    recoveryNullRateDelta: number | null;
+    recoverySaturationRate: number | null;
+    currentAbilityMeanAbsoluteDelta: number | null;
+    currentAbilityP95AbsoluteDelta: number | null;
+    finalTrueAbilityDelta: number | null;
+    assessmentStatusChanged: number;
+    assessmentStatusChangeRate?: number;
+    invalidValueCount: number;
+  };
+  thresholds: Record<string, number>;
+  failureReasons: string[];
+}
+
 export class SqliteModelRunRepository {
   constructor(private readonly database: DatabaseSync) {}
 
@@ -68,6 +95,19 @@ export class SqliteModelRunRepository {
     if (metricRun?.status !== "succeeded") {
       throw new Error("Model run requires a succeeded training metric run before activation");
     }
+    // A candidate explicitly evaluated by the production shadow gate may not
+    // bypass a failed result, including through the manual activation API.
+    const hasGateTable = this.database
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_validation_gates'")
+      .get();
+    if (hasGateTable) {
+      const failedGate = this.database.prepare(`
+        SELECT 1 FROM model_validation_gates
+        WHERE candidate_model_run_id = ? AND status = 'failed'
+        ORDER BY created_at DESC LIMIT 1
+      `).get(modelRunId);
+      if (failedGate) throw new Error("Model run failed the shadow validation gate and cannot become active");
+    }
     this.database.prepare(`
       INSERT INTO active_model_run (singleton, model_run_id, activated_at)
       VALUES (1, ?, ?)
@@ -81,6 +121,140 @@ export class SqliteModelRunRepository {
 
   clearActivePredictionModel(): void {
     this.database.exec("DELETE FROM active_prediction_model");
+  }
+
+  /** Compare a candidate replay with the currently active model and persist an auditable gate result. */
+  evaluateValidationGate(candidateId: string, baseId: string | null): ModelValidationGateResult {
+    const gateVersion = "rai-shadow-gate-v1";
+    const thresholds = {
+      maxRecoveryNullRateDelta: 0.1,
+      maxEligibleSessionDelta: 0.05,
+      maxCurrentAbilityMeanAbsoluteDelta: 8,
+      maxCurrentAbilityP95AbsoluteDelta: 15,
+      maxFinalTrueAbilityDelta: 10,
+      maxStatusChangeRate: 0.1,
+      maxRecoverySaturationRate: 0.2
+    };
+    if (!baseId || baseId === candidateId) {
+      const result: ModelValidationGateResult = {
+        candidateModelRunId: candidateId,
+        baseModelRunId: null,
+        gateVersion,
+        status: "skipped",
+        metrics: {
+          matchedSessions: 0, baseEligibleSessions: 0, candidateEligibleSessions: 0,
+          eligibleSessionDelta: 0, recoveryNullRateBase: null, recoveryNullRateCandidate: null,
+          recoveryNullRateDelta: null, recoverySaturationRate: null,
+          currentAbilityMeanAbsoluteDelta: null, currentAbilityP95AbsoluteDelta: null,
+          finalTrueAbilityDelta: null, assessmentStatusChanged: 0, invalidValueCount: 0
+        },
+        thresholds,
+        failureReasons: []
+      };
+      this.persistValidationGate(result);
+      return result;
+    }
+    const row = (id: string) => this.database.prepare(`
+      SELECT COUNT(*) AS total,
+        SUM(CASE WHEN assessment_status IN ('eligible','trial') THEN 1 ELSE 0 END) AS eligible,
+        SUM(CASE WHEN current_ability IS NULL THEN 1 ELSE 0 END) AS ca_null,
+        SUM(CASE WHEN recovery_score IS NULL THEN 1 ELSE 0 END) AS recovery_null,
+        SUM(CASE WHEN recovery_score <= 0.001 OR recovery_score >= 99.999 THEN 1 ELSE 0 END) AS recovery_saturated,
+        SUM(CASE WHEN current_ability IS NOT NULL AND (current_ability < 0 OR current_ability > 100) THEN 1 ELSE 0 END) AS invalid
+      FROM ability_assessments WHERE model_run_id = ?
+    `).get(id) as Record<string, unknown>;
+    const base = row(baseId);
+    const candidate = row(candidateId);
+    const versions = this.database.prepare("SELECT id, model_version AS modelVersion FROM model_runs WHERE id IN (?, ?)").all(baseId, candidateId) as Array<{ id: string; modelVersion: string }>;
+    const baseVersion = versions.find((v) => v.id === baseId)?.modelVersion ?? null;
+    const candidateVersion = versions.find((v) => v.id === candidateId)?.modelVersion ?? null;
+    const comparison = this.compareMetrics(baseId, candidateId);
+    const del = (a: number, b: number): number => Math.abs(a - b) / Math.max(1, a);
+    const baseTotal = Number(base.total ?? 0);
+    const candTotal = Number(candidate.total ?? 0);
+    const baseEligible = Number(base.eligible ?? 0);
+    const candEligible = Number(candidate.eligible ?? 0);
+    const baseNull = baseTotal > 0 ? Number(base.recovery_null ?? 0) / baseTotal : null;
+    const candNull = candTotal > 0 ? Number(candidate.recovery_null ?? 0) / candTotal : null;
+    const absDeltas = (this.database.prepare(`
+      SELECT ABS(c.current_ability - b.current_ability) AS d
+      FROM ability_assessments b JOIN ability_assessments c ON c.training_session_id = b.training_session_id
+      WHERE b.model_run_id = ? AND c.model_run_id = ?
+        AND b.current_ability IS NOT NULL AND c.current_ability IS NOT NULL
+      ORDER BY d
+    `).all(baseId, candidateId) as Array<{ d: number }>).map((x) => Number(x.d)).filter(Number.isFinite);
+    const p95 = absDeltas.length ? absDeltas[Math.min(absDeltas.length - 1, Math.floor(absDeltas.length * 0.95))] ?? null : null;
+    const statusRate = comparison.matchedSessions > 0 ? comparison.assessmentStatusChanged / comparison.matchedSessions : 0;
+    const metrics = {
+      baseModelVersion: baseVersion,
+      candidateModelVersion: candidateVersion,
+      matchedSessions: comparison.matchedSessions,
+      baseEligibleSessions: baseEligible,
+      candidateEligibleSessions: candEligible,
+      eligibleSessionDelta: del(baseEligible, candEligible),
+      recoveryNullRateBase: baseNull,
+      recoveryNullRateCandidate: candNull,
+      recoveryNullRateDelta: baseNull !== null && candNull !== null ? candNull - baseNull : null,
+      recoverySaturationRate: candTotal > 0 ? Number(candidate.recovery_saturated ?? 0) / candTotal : null,
+      currentAbilityMeanAbsoluteDelta: comparison.currentAbilityMeanAbsoluteDelta,
+      currentAbilityP95AbsoluteDelta: p95,
+      finalTrueAbilityDelta: comparison.finalTrueAbilityDelta,
+      assessmentStatusChanged: comparison.assessmentStatusChanged,
+      assessmentStatusChangeRate: statusRate,
+      invalidValueCount: Number(candidate.invalid ?? 0)
+    };
+    const failureReasons: string[] = [];
+    if (metrics.recoveryNullRateDelta !== null && metrics.recoveryNullRateDelta > thresholds.maxRecoveryNullRateDelta) failureReasons.push("recovery_null_rate_delta");
+    if (metrics.eligibleSessionDelta > thresholds.maxEligibleSessionDelta) failureReasons.push("eligible_session_delta");
+    if (metrics.currentAbilityMeanAbsoluteDelta !== null && metrics.currentAbilityMeanAbsoluteDelta > thresholds.maxCurrentAbilityMeanAbsoluteDelta) failureReasons.push("current_ability_mean_absolute_delta");
+    if (metrics.currentAbilityP95AbsoluteDelta !== null && metrics.currentAbilityP95AbsoluteDelta > thresholds.maxCurrentAbilityP95AbsoluteDelta) failureReasons.push("current_ability_p95_absolute_delta");
+    if (metrics.finalTrueAbilityDelta !== null && Math.abs(metrics.finalTrueAbilityDelta) > thresholds.maxFinalTrueAbilityDelta) failureReasons.push("final_true_ability_delta");
+    if (statusRate > thresholds.maxStatusChangeRate) failureReasons.push("assessment_status_change_rate");
+    if (metrics.recoverySaturationRate !== null && metrics.recoverySaturationRate > thresholds.maxRecoverySaturationRate) failureReasons.push("recovery_saturation_rate");
+    if (metrics.invalidValueCount > 0) failureReasons.push("invalid_values");
+    const result: ModelValidationGateResult = {
+      candidateModelRunId: candidateId, baseModelRunId: baseId, gateVersion,
+      status: failureReasons.length ? "failed" : "passed", metrics, thresholds, failureReasons
+    };
+    this.persistValidationGate(result);
+    return result;
+  }
+
+  private persistValidationGate(result: ModelValidationGateResult): void {
+    this.database.prepare(`
+      INSERT INTO model_validation_gates
+        (id, candidate_model_run_id, base_model_run_id, gate_version, status, metrics_json, thresholds_json, failure_reasons_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(candidate_model_run_id, gate_version) DO UPDATE SET
+        base_model_run_id = excluded.base_model_run_id, status = excluded.status,
+        metrics_json = excluded.metrics_json, thresholds_json = excluded.thresholds_json,
+        failure_reasons_json = excluded.failure_reasons_json, created_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    `).run(
+      `validation_gate-${result.candidateModelRunId}-${result.gateVersion}`,
+      result.candidateModelRunId, result.baseModelRunId, result.gateVersion, result.status,
+      JSON.stringify(result.metrics), JSON.stringify(result.thresholds), JSON.stringify(result.failureReasons)
+    );
+  }
+
+  latestValidationGate(candidateId: string): ModelValidationGateResult | null {
+    const row = this.database.prepare(`
+      SELECT candidate_model_run_id AS candidateModelRunId,
+        base_model_run_id AS baseModelRunId, gate_version AS gateVersion,
+        status, metrics_json AS metricsJson, thresholds_json AS thresholdsJson,
+        failure_reasons_json AS failureReasonsJson
+      FROM model_validation_gates
+      WHERE candidate_model_run_id = ? ORDER BY created_at DESC LIMIT 1
+    `).get(candidateId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      candidateModelRunId: String(row.candidateModelRunId),
+      baseModelRunId: row.baseModelRunId ? String(row.baseModelRunId) : null,
+      gateVersion: String(row.gateVersion),
+      status: String(row.status) as ModelValidationGateResult["status"],
+      metrics: JSON.parse(String(row.metricsJson)) as ModelValidationGateResult["metrics"],
+      thresholds: JSON.parse(String(row.thresholdsJson)) as Record<string, number>,
+      failureReasons: JSON.parse(String(row.failureReasonsJson)) as string[]
+    };
   }
 
   compareMetrics(baseId: string, candidateId: string): {

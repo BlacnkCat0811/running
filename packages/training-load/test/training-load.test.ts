@@ -240,6 +240,26 @@ test("training-state priority protects insufficient history and attention", () =
   assert.equal(classifyTrainingStatus({ ...common, loadRatio: 0.8 }).status, "maintaining");
 });
 
+test("daily physiological state drives status and legacy recovery evidence stays null", () => {
+  const loads = Array.from({ length: 30 }, (_, index) => historicalLoad(
+    `run-${index}`,
+    new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
+    index === 29 ? 120 : 40
+  ));
+  const metrics = buildDailyTrainingMetrics(loads, "2026-01-30", [
+    { localDate: "2026-01-30", physState: "depleted" }
+  ]);
+  const latest = metrics.at(-1)!;
+  assert.equal(latest.recoveryEvidence, null);
+  assert.equal(latest.trainingStatus, "attention");
+  assert.equal(latest.statusExplanations[0]?.code, "depleted_phys_with_load");
+});
+
+test("legacy recovery evidence cannot change training status without a physiological state", () => {
+  const common = { historyDays: 60, workoutCount: 20, chronicEwma: 20, loadRatio: 1, rampRate: 0, strain: 100, strainP90: 200, daysSinceLastRun: 1 };
+  assert.equal(classifyTrainingStatus({ ...common, recoveryEvidence: 0.1 }).status, "effective_stimulus");
+});
+
 test("uses Shanghai local dates and Monday week boundaries", () => {
   assert.equal(localDateInTimeZone("2026-07-01T16:30:00Z"), "2026-07-02");
   assert.deepEqual(periodBounds("2026-07-05", "week"), { start: "2026-06-29", end: "2026-07-05" });

@@ -60,6 +60,7 @@ export interface WorkoutLoadInput {
   loadBreakdown?: TrainingLoadBreakdown | null;
 }
 
+/** @deprecated Recovery scores are no longer consumed by training status. */
 export interface RecoveryEvidence { localDate: string; value: number }
 export interface DailyPhysEvidence { localDate: string; physState: PhysState }
 export interface DailyMetricConfig {
@@ -227,19 +228,19 @@ export function classifyTrainingStatus(input: {
     return { status: "insufficient_data", explanations: [explanation("insufficient_training_history", input.historyDays, config.minimumHistoryDays)] };
   if (input.loadRatio > 1.5) return { status: "attention", explanations: [explanation("load_ratio_attention", input.loadRatio, 1.5)] };
   if (input.rampRate > 0.5) return { status: "attention", explanations: [explanation("ramp_rate_attention", input.rampRate, 0.5)] };
-  if ((input.physState === "depleted" || (input.physState === undefined && input.recoveryEvidence !== null && input.recoveryEvidence < 0.35)) && input.loadRatio >= 1.1)
-    return { status: "attention", explanations: [explanation("low_recovery_with_load", input.recoveryEvidence, 0.35)] };
+  if (input.physState === "depleted" && input.loadRatio >= 1.1)
+    return { status: "attention", explanations: [explanation("depleted_phys_with_load", null, null)] };
   if (input.loadRatio > 1.3) return { status: "high_load", explanations: [explanation("load_ratio_high", input.loadRatio, 1.3)] };
   if (input.strain !== null && input.strainP90 !== null && input.strain > input.strainP90)
     return { status: "high_load", explanations: [explanation("strain_above_personal_p90", input.strain, input.strainP90)] };
   if (input.loadRatio < 0.7 || input.daysSinceLastRun >= 7)
     return { status: "recovery", explanations: [explanation(input.daysSinceLastRun >= 7 ? "seven_days_without_run" : "load_ratio_recovery", input.daysSinceLastRun >= 7 ? input.daysSinceLastRun : input.loadRatio, input.daysSinceLastRun >= 7 ? 7 : 0.7)] };
-  if (input.loadRatio >= 0.9 && input.loadRatio <= 1.3 && (input.physState !== "depleted" && (input.physState !== undefined || input.recoveryEvidence === null || input.recoveryEvidence >= 0.45)) && input.rampRate >= 0)
+  if (input.loadRatio >= 0.9 && input.loadRatio <= 1.3 && input.physState !== "depleted" && input.rampRate >= 0)
     return { status: "effective_stimulus", explanations: [explanation("effective_load_range", input.loadRatio, 0.9)] };
   return { status: "maintaining", explanations: [explanation("load_maintaining", input.loadRatio, null)] };
 }
 
-export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughDate: string, recovery: Array<RecoveryEvidence | DailyPhysEvidence> = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
+export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughDate: string, physEvidence: DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
   if (loads.length === 0) return [];
   const sorted = [...loads].sort((a, b) => a.localDate.localeCompare(b.localDate));
   const start = sorted[0]!.localDate; if (throughDate < start) return [];
@@ -262,9 +263,11 @@ export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughD
     const seven = dailyLoads.slice(Math.max(0, index - 6), index + 1); const mean = seven.reduce((a, b) => a + b, 0) / seven.length;
     const variance = seven.reduce((sum, value) => sum + (value - mean) ** 2, 0) / seven.length;
     const monotony = mean > 0 ? Math.min(5, variance === 0 ? 5 : mean / Math.sqrt(variance)) : null; const strain = monotony === null ? null : current7dLoad * monotony;
-    const recentRecovery = recovery.filter((item): item is RecoveryEvidence => "value" in item).filter(item => item.localDate <= localDate && dateDiff(item.localDate, localDate) <= 7).sort((a, b) => b.localDate.localeCompare(a.localDate)).slice(0, 3);
-    const physState = recovery.find((item): item is DailyPhysEvidence => "physState" in item && item.localDate === localDate)?.physState;
-    const recoveryEvidence = recentRecovery.length ? recentRecovery.reduce((sum, item, i) => sum + clamp(item.value) * (3 - i), 0) / recentRecovery.reduce((sum, _item, i) => sum + 3 - i, 0) : null;
+    const physState = physEvidence.find((item) => item.localDate === localDate)?.physState;
+    // Recovery evidence is intentionally retired. Training status consumes the
+    // factual daily physiological state; the legacy column remains nullable for
+    // schema/API compatibility only.
+    const recoveryEvidence = null;
     const loadRatio = index + 1 >= config.minimumHistoryDays && workouts >= config.minimumWorkoutCount && chronic >= config.minimumChronicLoad ? acute / chronic : null;
     const historicalStrains = results.filter(item => dateDiff(item.localDate, localDate) <= 56).map(item => item.strain).filter(finite);
     const classified = classifyTrainingStatus({ historyDays: index + 1, workoutCount: workouts, chronicEwma: chronic, loadRatio, rampRate, recoveryEvidence, physState, strain, strainP90: index >= 55 ? percentile(historicalStrains, 0.9) : null, daysSinceLastRun: lastRunIndex < 0 ? index + 1 : index - lastRunIndex }, config);

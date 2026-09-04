@@ -15,7 +15,7 @@ function createDatabase(): DatabaseSync {
       model_config_hash TEXT NOT NULL,
       evaluated_at TEXT NOT NULL,
       status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT '2026-07-17T10:00:00.000Z',
       completed_at TEXT,
       summary_json TEXT NOT NULL
     );
@@ -26,11 +26,30 @@ function createDatabase(): DatabaseSync {
     );
     CREATE TABLE ability_assessments (
       id TEXT PRIMARY KEY,
-      model_run_id TEXT NOT NULL
+      model_run_id TEXT NOT NULL,
+      feature_id TEXT,
+      training_session_id TEXT,
+      sequence_number INTEGER,
+      assessment_status TEXT,
+      current_ability REAL,
+      recovery_score REAL,
+      effective_weights_json TEXT,
+      confidence REAL,
+      confidence_factors_json TEXT,
+      updated_true_ability INTEGER,
+      explanation_codes_json TEXT,
+      explanation_json TEXT,
+      assessed_at TEXT
     );
     CREATE TABLE daily_ability_snapshots (
       id TEXT PRIMARY KEY,
-      model_run_id TEXT NOT NULL
+      model_run_id TEXT NOT NULL,
+      local_date TEXT,
+      true_ability REAL
+    );
+    CREATE TABLE training_sessions (
+      id TEXT PRIMARY KEY,
+      anchor_start_at TEXT
     );
     CREATE TABLE training_metric_runs (
       id TEXT PRIMARY KEY,
@@ -41,6 +60,18 @@ function createDatabase(): DatabaseSync {
       singleton INTEGER PRIMARY KEY,
       prediction_model_run_id TEXT NOT NULL,
       activated_at TEXT NOT NULL
+    );
+    CREATE TABLE model_validation_gates (
+      id TEXT PRIMARY KEY,
+      candidate_model_run_id TEXT NOT NULL,
+      base_model_run_id TEXT,
+      gate_version TEXT NOT NULL,
+      status TEXT NOT NULL,
+      metrics_json TEXT NOT NULL,
+      thresholds_json TEXT NOT NULL,
+      failure_reasons_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT '2026-07-17T10:00:00.000Z',
+      UNIQUE(candidate_model_run_id, gate_version)
     );
   `);
   return database;
@@ -75,9 +106,9 @@ test("maps model-run summaries, counts related rows, and resolves the active run
     insertModelRun(database, "newer", "succeeded");
     database.exec(`
       INSERT INTO active_model_run VALUES (1, 'newer', '2026-07-17T10:06:00.000Z');
-      INSERT INTO ability_assessments VALUES ('assessment-1', 'newer');
-      INSERT INTO ability_assessments VALUES ('assessment-2', 'newer');
-      INSERT INTO daily_ability_snapshots VALUES ('snapshot-1', 'newer');
+      INSERT INTO ability_assessments (id, model_run_id) VALUES ('assessment-1', 'newer');
+      INSERT INTO ability_assessments (id, model_run_id) VALUES ('assessment-2', 'newer');
+      INSERT INTO daily_ability_snapshots (id, model_run_id) VALUES ('snapshot-1', 'newer');
     `);
 
     const repository = new SqliteModelRunRepository(database);
@@ -119,6 +150,36 @@ test("activates only succeeded model runs with a succeeded training metric run",
       "SELECT COUNT(*) AS count FROM active_prediction_model"
     ).get() as { count: number };
     assert.equal(predictionActive.count, 0);
+  } finally {
+    database.close();
+  }
+});
+
+test("persists a failed shadow gate and rejects activation without replacing incumbent", () => {
+  const database = createDatabase();
+  try {
+    insertModelRun(database, "base", "succeeded");
+    insertModelRun(database, "candidate", "succeeded");
+    database.exec(`
+      INSERT INTO active_model_run VALUES (1, 'base', '2026-07-17T10:06:00.000Z');
+      INSERT INTO training_metric_runs VALUES ('metric-base', 'base', 'succeeded');
+      INSERT INTO training_metric_runs VALUES ('metric-candidate', 'candidate', 'succeeded');
+      INSERT INTO ability_assessments (
+        id, model_run_id, feature_id, training_session_id, sequence_number,
+        assessment_status, current_ability, recovery_score, effective_weights_json,
+        confidence, confidence_factors_json, updated_true_ability,
+        explanation_codes_json, explanation_json, assessed_at
+      ) VALUES
+        ('base-a', 'base', 'feature-a', 'session-a', 1, 'eligible', 50, 50, '{}', 1, '{}', 1, '[]', '{}', '2026-07-17T10:00:00.000Z'),
+        ('candidate-a', 'candidate', 'feature-a', 'session-a', 1, 'eligible', 80, 0, '{}', 1, '{}', 1, '[]', '{}', '2026-07-17T10:00:00.000Z');
+      INSERT INTO training_sessions (id, anchor_start_at) VALUES ('session-a', '2026-07-17T10:00:00.000Z');
+    `);
+    const repository = new SqliteModelRunRepository(database);
+    const gate = repository.evaluateValidationGate("candidate", "base");
+    assert.equal(gate.status, "failed");
+    assert.ok(gate.failureReasons.includes("current_ability_mean_absolute_delta"));
+    assert.throws(() => repository.activateSucceeded("candidate", "2026-07-17T10:07:00.000Z"), /shadow validation gate/);
+    assert.equal(repository.activeSummary()?.id, "base");
   } finally {
     database.close();
   }

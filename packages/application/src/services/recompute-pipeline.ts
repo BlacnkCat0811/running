@@ -45,8 +45,9 @@ import {
 import {
   buildDailyTrainingMetrics,
   calculateWorkoutTrainingLoad,
+  classifyPhysState,
   defaultDailyMetricConfig,
-  type RecoveryEvidence
+  type DailyPhysEvidence,
 } from "@rai/training-load";
 import { TRAINING_LOAD_CONFIG_VERSION, type DailyTrainingMetric, type WorkoutTrainingLoad } from "@rai/contracts";
 import { TRAINING_ZONE_CONFIG_VERSION } from "@rai/contracts";
@@ -154,6 +155,12 @@ export class RecomputePipeline {
 
   runFullRecompute(job: RecomputeJob): void {
     const request = this.parseRequest(job.request);
+    // Capture the incumbent before writing a candidate. The incumbent remains
+    // active until the candidate has passed the shadow gate.
+    const incumbent = this.database
+      .prepare("SELECT model_run_id AS modelRunId FROM active_model_run WHERE singleton = 1")
+      .get() as { modelRunId: string } | undefined;
+    const incumbentModelRunId = incumbent?.modelRunId ?? null;
     const datasetVersion = this.manifestValue("dataset_version") ?? "dataset_unknown";
     const overrideSnapshot = this.captureOverrideSnapshot();
     const featureRun = this.createFeatureRun(datasetVersion, request.featureConfig);
@@ -182,6 +189,15 @@ export class RecomputePipeline {
       this.finishModelRun(modelRun.id, "succeeded", null);
       if (request.validationMode === "shadow" && request.incrementalPlan) {
         this.runShadowValidation(job.id, modelRun, request, overrideSnapshot);
+      }
+      // Version-to-version comparison is mandatory whenever an incumbent
+      // exists. `validationMode` only controls the additional incremental
+      // replay check above; it must not provide a way around the gate.
+      if (incumbentModelRunId) {
+        const gate = this.modelRuns.evaluateValidationGate(modelRun.id, incumbentModelRunId);
+        if (gate.status === "failed") {
+          throw new Error(`Shadow model gate failed: ${gate.failureReasons.join(", ")}`);
+        }
       }
       this.activateModelRunAndCompleteJob(job.id, modelRun.id, features.length);
     } catch (error) {
@@ -333,8 +349,9 @@ export class RecomputePipeline {
         .prepare("SELECT MAX(local_date) AS localDate FROM daily_training_metrics WHERE training_metric_run_id = ?")
         .get(metricRun.id) as unknown as { localDate: string | null };
       if (existingThrough.localDate === null || existingThrough.localDate < throughDate) {
-        const recovery = this.loadRecoveryEvidence(active.modelRunId, request.timezoneIdentifier);
-        const daily = buildDailyTrainingMetrics(loads, throughDate, recovery);
+        const startDate = loads[0]?.localDate ?? throughDate;
+        const physEvidence = this.loadDailyPhysEvidence(startDate, throughDate, request.timezoneIdentifier, request.evaluatedAt);
+        const daily = buildDailyTrainingMetrics(loads, throughDate, physEvidence);
         this.persistDailyTrainingMetrics(metricRun.id, daily, request, true);
       }
     }
@@ -641,17 +658,113 @@ export class RecomputePipeline {
     `).all(fallback.sourceName, type, workoutEndAt, workoutStartAt) as unknown as RecordRow[];
   }
 
-  private loadRecoveryAverage(type: string, workoutStartAt: string): number | null {
-    const cutoff = new Date(Date.parse(workoutStartAt) - 28 * 86_400_000).toISOString();
-    const row = this.database
-      .prepare(`
-        SELECT AVG(value_numeric) AS value
-        FROM health_records
-        WHERE type = ? AND value_numeric IS NOT NULL
-          AND start_at >= ? AND start_at < ?
-      `)
-      .get(type, cutoff, workoutStartAt) as unknown as { value: number | null } | undefined;
-    return asNullableNumber(row?.value);
+  private loadPersonalRecovery(workoutStartAt: string, timezoneIdentifier: string): {
+    restingHeartRate: number | null;
+    hrvSdnn: number | null;
+    sleepDurationMinutes: number | null;
+    recentLoadMinutes: number | null;
+    baseline: NonNullable<WorkoutFeatureSource["recoveryBaseline"]>;
+    context: NonNullable<WorkoutFeatureSource["recoveryContext"]>;
+  } {
+    const instant = Date.parse(workoutStartAt);
+    const localDate = localDateAt(workoutStartAt, timezoneIdentifier);
+    const medianValue = (values: number[]): number | null => {
+      const valid = values.filter((value) => Number.isFinite(value));
+      return valid.length ? median(valid) : null;
+    };
+    const night = this.database.prepare(`
+      SELECT id, wake_at AS wakeAt, asleep_union_minutes AS sleepMinutes
+      FROM canonical_nights
+      WHERE kind = 'main' AND timezone_identifier = ? AND wake_at IS NOT NULL AND wake_at < ?
+      ORDER BY wake_at DESC LIMIT 1
+    `).get(timezoneIdentifier, workoutStartAt) as unknown as { id: string; wakeAt: string; sleepMinutes: number | null } | undefined;
+    const recentNight = night && Number.isFinite(Date.parse(night.wakeAt)) && instant - Date.parse(night.wakeAt) <= 36 * 3_600_000
+      ? night
+      : undefined;
+    const hrv = recentNight
+      ? this.database.prepare(`
+          SELECT hrv_sdnn_ms AS value, confidence
+          FROM canonical_hrv_days WHERE night_id = ? AND hrv_sdnn_ms IS NOT NULL
+          ORDER BY computed_at DESC LIMIT 1
+        `).get(recentNight.id) as unknown as { value: number; confidence: string } | undefined
+      : undefined;
+    const rhrRows = this.database.prepare(`
+      SELECT source_category AS sourceCategory, value_numeric AS value
+      FROM health_records
+      WHERE type = ? AND value_numeric IS NOT NULL
+        AND source_category IN ('apple_watch', 'connect')
+        AND start_at >= ? AND start_at < ?
+      ORDER BY start_at
+    `).all(
+      restingHeartRateType,
+      new Date(instant - 36 * 3_600_000).toISOString(),
+      workoutStartAt
+    ) as unknown as Array<{ sourceCategory: string; value: number }>;
+    const watchRhr = rhrRows.filter((row) => row.sourceCategory === "apple_watch");
+    const restingHeartRate = medianValue((watchRhr.length ? watchRhr : rhrRows).map((row) => Number(row.value)));
+
+    const readBaseline = (table: "sleep" | "hrv" | "rhr" | "load", days: number): number[] => {
+      const fromDate = addDays(localDate, -days);
+      if (table === "sleep") {
+        return (this.database.prepare(`SELECT asleep_union_minutes AS value FROM canonical_nights WHERE kind='main' AND timezone_identifier=? AND wake_date >= ? AND wake_date < ? AND wake_at < ?`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number | null }>).flatMap((row) => row.value == null ? [] : [Number(row.value)]);
+      }
+      if (table === "hrv") {
+        return (this.database.prepare(`SELECT hrv_sdnn_ms AS value FROM canonical_hrv_days WHERE timezone_identifier=? AND local_date >= ? AND local_date < ? AND confidence <> 'missing' AND window_end_at < ? AND hrv_sdnn_ms IS NOT NULL`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number }>).map((row) => Number(row.value));
+      }
+      if (table === "rhr") {
+        const rows = this.database.prepare(`SELECT source_category AS sourceCategory, value_numeric AS value, start_at AS startAt FROM health_records WHERE type=? AND value_numeric IS NOT NULL AND source_category IN ('apple_watch', 'connect') AND start_at >= ? AND start_at < ?`).all(restingHeartRateType, localDateStartAt(fromDate, timezoneIdentifier), workoutStartAt) as Array<{ sourceCategory: string; value: number; startAt: string }>;
+        // Apply Watch-first/Connect fallback independently for each local day.
+        const byDate = new Map<string, Array<{ sourceCategory: string; value: number }>>();
+        for (const row of rows) {
+          const date = localDateAt(row.startAt, timezoneIdentifier);
+          const bucket = byDate.get(date) ?? [];
+          bucket.push(row);
+          byDate.set(date, bucket);
+        }
+        return [...byDate.values()].flatMap((dayRows) => {
+          const watch = dayRows.filter((row) => row.sourceCategory === "apple_watch");
+          return (watch.length ? watch : dayRows).map((row) => Number(row.value));
+        });
+      }
+      const rows = this.database.prepare(`SELECT workout.start_at AS startAt, workout.duration_seconds AS durationSeconds FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at < ?`).all(runningType, workoutStartAt) as Array<{ startAt: string; durationSeconds: number }>;
+      const byDate = new Map<string, number>();
+      for (const row of rows) {
+        const date = localDateAt(row.startAt, timezoneIdentifier);
+        if (date >= fromDate && date < localDate) byDate.set(date, (byDate.get(date) ?? 0) + Number(row.durationSeconds) / 60);
+      }
+      return [...byDate.values()];
+    };
+    const baselineFor = (table: "sleep" | "hrv" | "rhr" | "load"): { value: number | null; lookbackDays: number; validDays: number } => {
+      const recent = readBaseline(table, 28).filter(Number.isFinite);
+      if (recent.length >= 7) return { value: medianValue(recent), lookbackDays: 28, validDays: recent.length };
+      const extended = readBaseline(table, 60).filter(Number.isFinite);
+      return { value: extended.length >= 7 ? medianValue(extended) : null, lookbackDays: 60, validDays: extended.length };
+    };
+    const sleepBase = baselineFor("sleep");
+    const hrvBase = baselineFor("hrv");
+    const rhrBase = baselineFor("rhr");
+    const loadBase = baselineFor("load");
+    const recentLoadRows = this.database.prepare(`SELECT SUM(duration_seconds)/60.0 AS value FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at >= ? AND workout.start_at < ?`).get(runningType, new Date(instant - 7 * 86_400_000).toISOString(), workoutStartAt) as unknown as { value: number | null } | undefined;
+    return {
+      restingHeartRate,
+      hrvSdnn: hrv?.value == null ? null : Number(hrv.value),
+      sleepDurationMinutes: recentNight?.sleepMinutes == null ? null : Number(recentNight.sleepMinutes),
+      recentLoadMinutes: asNullableNumber(recentLoadRows?.value),
+      baseline: {
+        sleepMinutes: sleepBase.value,
+        restingHeartRateBpm: rhrBase.value,
+        hrvSdnnMs: hrvBase.value,
+        loadMinutes: loadBase.value,
+        lookbackDays: Math.max(sleepBase.lookbackDays, hrvBase.lookbackDays, rhrBase.lookbackDays, loadBase.lookbackDays),
+        validDays: { sleep: sleepBase.validDays, hrv: hrvBase.validDays, rhr: rhrBase.validDays, load: loadBase.validDays }
+      },
+      context: {
+        asOfAt: workoutStartAt,
+        nightId: recentNight?.id ?? null,
+        hrvConfidence: hrv?.confidence as NonNullable<WorkoutFeatureSource["recoveryContext"]>["hrvConfidence"] ?? null,
+        rhrSourceCategory: watchRhr.length ? "apple_watch" : rhrRows.length ? "connect" : null
+      }
+    };
   }
 
   private loadObservedMaximumHeartRate(workoutStartAt: string): number | null {
@@ -667,24 +780,6 @@ export class RecomputePipeline {
     return asNullableNumber(row?.value);
   }
 
-  private loadSleepDurationMinutes(workoutStartAt: string): number | null {
-    const cutoff = new Date(Date.parse(workoutStartAt) - 36 * 3_600_000).toISOString();
-    const rows = this.database
-      .prepare(`
-        SELECT start_at AS startAt, end_at AS endAt, value_text AS valueText
-        FROM health_records
-        WHERE type = ? AND start_at >= ? AND end_at <= ?
-      `)
-      .all(sleepType, cutoff, workoutStartAt) as unknown as Array<{
-      startAt: string;
-      endAt: string;
-      valueText: string | null;
-    }>;
-    const minutes = rows
-      .filter((row) => row.valueText?.includes("Asleep") ?? false)
-      .reduce((total, row) => total + Math.max(0, Date.parse(row.endAt) - Date.parse(row.startAt)) / 60_000, 0);
-    return minutes > 0 ? minutes : null;
-  }
 
   private loadRecentLoadMinutes(workoutStartAt: string): number | null {
     const cutoff = new Date(Date.parse(workoutStartAt) - 7 * 86_400_000).toISOString();
@@ -738,7 +833,7 @@ export class RecomputePipeline {
     return gain;
   }
 
-  private buildFeatureSource(row: SessionRow, override: WorkoutOverride | null): WorkoutFeatureSource {
+  private buildFeatureSource(row: SessionRow, override: WorkoutOverride | null, timezoneIdentifier = "Asia/Shanghai"): WorkoutFeatureSource {
     const heartRecords = this.loadRecordSeries(
       row.sourceName,
       row.workoutStartAt,
@@ -803,10 +898,17 @@ export class RecomputePipeline {
         durationSeconds: interval.durationSeconds
       })),
       heartRate,
-      restingHeartRate: this.loadRecoveryAverage(restingHeartRateType, row.workoutStartAt),
-      hrvSdnn: this.loadRecoveryAverage(hrvType, row.workoutStartAt),
-      sleepDurationMinutes: this.loadSleepDurationMinutes(row.workoutStartAt),
-      recentLoadMinutes: this.loadRecentLoadMinutes(row.workoutStartAt),
+      ...(() => {
+        const recovery = this.loadPersonalRecovery(row.workoutStartAt, timezoneIdentifier);
+        return {
+          restingHeartRate: recovery.restingHeartRate,
+          hrvSdnn: recovery.hrvSdnn,
+          sleepDurationMinutes: recovery.sleepDurationMinutes,
+          recentLoadMinutes: recovery.recentLoadMinutes,
+          recoveryBaseline: recovery.baseline,
+          recoveryContext: recovery.context
+        };
+      })(),
       observedMaximumHeartRate: this.loadObservedMaximumHeartRate(row.workoutStartAt),
       override
     };
@@ -845,7 +947,8 @@ export class RecomputePipeline {
         featureRun.id,
         this.buildFeatureSource(
           session,
-          overrideSnapshot.byTrainingSessionId.get(session.trainingSessionId) ?? null
+          overrideSnapshot.byTrainingSessionId.get(session.trainingSessionId) ?? null,
+          request.timezoneIdentifier
         ),
         request.featureConfig,
         request.evaluatedAt
@@ -1331,13 +1434,9 @@ export class RecomputePipeline {
       this.updateJobProgress(jobId, "training_metrics", index + 1, features.length, "Training load calculated");
     }
     const throughDate = localDateAt(request.evaluatedAt, request.timezoneIdentifier);
-    const recovery = features
-      .filter((feature) => feature.signals.recoveryRaw !== null)
-      .map((feature) => ({
-        localDate: localDateAt(feature.workoutStartAt, request.timezoneIdentifier),
-        value: feature.signals.recoveryRaw!
-      }));
-    const daily = buildDailyTrainingMetrics(loads, throughDate, recovery);
+    const startDate = loads[0]?.localDate ?? throughDate;
+    const physEvidence = this.loadDailyPhysEvidence(startDate, throughDate, request.timezoneIdentifier, request.evaluatedAt);
+    const daily = buildDailyTrainingMetrics(loads, throughDate, physEvidence);
     this.persistDailyTrainingMetrics(metricRunId, daily, request, false);
   }
 
@@ -1427,18 +1526,99 @@ export class RecomputePipeline {
     }));
   }
 
-  private loadRecoveryEvidence(modelRunId: string, timezoneIdentifier: string): RecoveryEvidence[] {
-    const rows = this.database.prepare(`
-      SELECT feature.workout_start_at AS workoutStartAt, feature.features_json AS featuresJson
-      FROM model_runs model
-      JOIN workout_features feature ON feature.feature_run_id = model.feature_run_id
-      WHERE model.id = ? ORDER BY feature.workout_start_at
-    `).all(modelRunId) as unknown as Array<{ workoutStartAt: string; featuresJson: string }>;
-    return rows.flatMap((row) => {
-      const signals = parseJson<Record<string, unknown>>(row.featuresJson, {});
-      const value = asNullableNumber(signals.recoveryRaw);
-      return value === null ? [] : [{ localDate: localDateAt(row.workoutStartAt, timezoneIdentifier), value }];
-    });
+  /**
+   * Build one physiological state per local calendar day. All inputs are
+   * canonical facts and every baseline is strictly as-of the day being scored.
+   * The resulting state is used by training status; recovery_evidence remains
+   * null and is retained only as a compatibility column.
+   */
+  private loadDailyPhysEvidence(startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {
+    if (throughDate < startDate) return [];
+    const baselineStart = addDays(startDate, -60);
+    const nightRows = this.database.prepare(`
+      SELECT wake_date AS wakeDate, wake_at AS wakeAt, asleep_union_minutes AS sleepMinutes
+      FROM canonical_nights
+      WHERE kind = 'main' AND timezone_identifier = ?
+        AND wake_date >= ? AND wake_date <= ? AND wake_at < ?
+      ORDER BY wake_date
+    `).all(timezoneIdentifier, baselineStart, throughDate, asOfAt) as unknown as Array<{ wakeDate: string; wakeAt: string | null; sleepMinutes: number | null }>;
+    const hrvRows = this.database.prepare(`
+      SELECT local_date AS localDate, window_end_at AS windowEndAt, hrv_sdnn_ms AS hrvMs
+      FROM canonical_hrv_days
+      WHERE timezone_identifier = ? AND local_date >= ? AND local_date <= ?
+      ORDER BY local_date
+    `).all(timezoneIdentifier, baselineStart, throughDate) as unknown as Array<{ localDate: string; windowEndAt: string | null; hrvMs: number | null }>;
+    const rhrRows = this.database.prepare(`
+      SELECT start_at AS startAt, source_category AS sourceCategory, value_numeric AS value
+      FROM health_records
+      WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate'
+        AND source_category IN ('apple_watch', 'connect')
+        AND start_at >= ? AND start_at < ? AND value_numeric IS NOT NULL
+      ORDER BY start_at
+    `).all(
+      localDateStartAt(baselineStart, timezoneIdentifier),
+      localDateStartAt(addDays(throughDate, 1), timezoneIdentifier)
+    ) as unknown as Array<{ startAt: string; sourceCategory: string; value: number }>;
+
+    const finiteValues = (values: Array<number | null | undefined>): number[] => values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    const medianValue = (values: number[]): number | null => {
+      if (!values.length) return null;
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+    };
+    const baseline = (values: Map<string, number>, localDate: string): number | null => {
+      const read = (days: number): number[] => {
+        const from = addDays(localDate, -days);
+        return [...values.entries()].filter(([date]) => date >= from && date < localDate).map(([, value]) => value);
+      };
+      const recent = read(28);
+      if (recent.length >= 7) return medianValue(recent);
+      const extended = read(60);
+      return extended.length >= 7 ? medianValue(extended) : null;
+    };
+    const sleepByDate = new Map(nightRows.flatMap((row) => row.sleepMinutes == null || !Number.isFinite(Number(row.sleepMinutes)) ? [] : [[row.wakeDate, Number(row.sleepMinutes)]]));
+    const asOfMs = Date.parse(asOfAt);
+    const hrvByDate = new Map(hrvRows.flatMap((row) => row.hrvMs == null || !Number.isFinite(Number(row.hrvMs)) || (row.windowEndAt && Date.parse(row.windowEndAt) >= Date.parse(localDateStartAt(addDays(row.localDate, 1), timezoneIdentifier))) || (row.localDate === throughDate && row.windowEndAt && Date.parse(row.windowEndAt) >= asOfMs) ? [] : [[row.localDate, Number(row.hrvMs)]]));
+    const rhrByDate = new Map<string, number>();
+    for (let date = baselineStart; date <= throughDate; date = addDays(date, 1)) {
+      const fullDayEnd = Date.parse(localDateStartAt(addDays(date, 1), timezoneIdentifier));
+      const dayEnd = date === throughDate ? Math.min(fullDayEnd, Date.parse(asOfAt)) : fullDayEnd;
+      const from = dayEnd - 36 * 60 * 60 * 1000;
+      const selected = rhrRows.filter((row) => {
+        const at = Date.parse(row.startAt);
+        return Number.isFinite(at) && at >= from && at < dayEnd && Number.isFinite(Number(row.value));
+      });
+      const watch = selected.filter((row) => row.sourceCategory === "apple_watch");
+      const values = finiteValues((watch.length ? watch : selected).map((row) => Number(row.value)));
+      const value = medianValue(values);
+      if (value !== null) rhrByDate.set(date, value);
+    }
+    const result: DailyPhysEvidence[] = [];
+    for (let date = startDate; date <= throughDate; date = addDays(date, 1)) {
+      const sleepBaseline = baseline(sleepByDate, date);
+      const hrvBaseline = baseline(hrvByDate, date);
+      const rhrBaseline = baseline(rhrByDate, date);
+      const sleepMinutes = sleepByDate.get(date) ?? null;
+      const hrvMs = hrvByDate.get(date) ?? null;
+      const rhrBpm = rhrByDate.get(date) ?? null;
+      const nightsBelowSleepBaseline = sleepBaseline === null ? 0 : [date, addDays(date, -1), addDays(date, -2)]
+        .map((day) => sleepByDate.get(day))
+        .filter((minutes): minutes is number => minutes !== undefined && minutes < sleepBaseline * 0.8).length;
+      result.push({
+        localDate: date,
+        physState: classifyPhysState({
+          sleepMinutes,
+          sleepBaselineMinutes: sleepBaseline,
+          hrvSdnnMs: hrvMs,
+          hrvBaselineMs: hrvBaseline,
+          rhrBpm,
+          rhrBaselineBpm: rhrBaseline,
+          nightsBelowSleepBaseline
+        })
+      });
+    }
+    return result;
   }
 
   private resumeModelReplay(

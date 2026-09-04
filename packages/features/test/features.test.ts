@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  calculateRecoveryParts,
   defaultFeatureConfig,
   extractWorkoutFeatureVector,
   type FeatureConfig,
@@ -59,6 +60,87 @@ test("does not treat sparse endpoint timestamps as full heart-rate coverage", ()
   assert.equal(feature.heartRateCoverage, 4 / 30);
   assert.equal(feature.eligibilityStatus, "trial");
   assert.ok(feature.missingReasons.includes("heart_rate_coverage_low"));
+});
+
+test("calculates recovery from personal baselines with fixed weighted renormalization", () => {
+  const result = calculateRecoveryParts(source({
+    sleepDurationMinutes: 360,
+    restingHeartRate: 60,
+    hrvSdnn: 40,
+    recentLoadMinutes: 180,
+    recoveryBaseline: {
+      sleepMinutes: 420,
+      restingHeartRateBpm: 50,
+      hrvSdnnMs: 50,
+      loadMinutes: 180,
+      lookbackDays: 28,
+      validDays: { sleep: 20, rhr: 25, hrv: 14, load: 22 }
+    },
+    recoveryContext: { nightId: "night-1", hrvConfidence: "confident" }
+  }));
+
+  assert.equal(result.parts.sleepRatio, 360 / 420);
+  assert.equal(result.parts.rhrRatio, 50 / 60);
+  assert.equal(result.parts.hrvRatio, 40 / 50);
+  assert.equal(result.parts.loadPart, 1);
+  assert.deepEqual(result.parts.weights, { sleep: 0.35, rhr: 0.25, hrv: 0.25, load: 0.15 });
+  assert.equal(result.recoveryRaw, (0.35 * (360 / 420) + 0.25 * (50 / 60) + 0.25 * 0.8 + 0.15) / 1);
+});
+
+test("renormalizes weights when only some physiological signals are available", () => {
+  const result = calculateRecoveryParts(source({
+    sleepDurationMinutes: null,
+    restingHeartRate: 55,
+    hrvSdnn: null,
+    recentLoadMinutes: 300,
+    recoveryBaseline: {
+      sleepMinutes: 420,
+      restingHeartRateBpm: 50,
+      hrvSdnnMs: 50,
+      loadMinutes: 200,
+      lookbackDays: 60
+    }
+  }));
+
+  // RHR (0.25) and load (0.15) are re-normalized to 0.4.
+  assert.deepEqual(Object.keys(result.parts.weights).sort(), ["load", "rhr"]);
+  assert.ok(Math.abs((result.parts.weights.rhr ?? 0) - 0.625) < 1e-12);
+  assert.ok(Math.abs((result.parts.weights.load ?? 0) - 0.375) < 1e-12);
+  assert.equal(result.parts.loadPart, 0.5);
+  assert.ok(Math.abs((result.recoveryRaw ?? 0) - ((0.25 * (50 / 55) + 0.15 * 0.5) / 0.4)) < 1e-12);
+});
+
+test("load-only recovery remains unavailable", () => {
+  const result = calculateRecoveryParts(source({
+    sleepDurationMinutes: null,
+    restingHeartRate: null,
+    hrvSdnn: null,
+    recentLoadMinutes: 20,
+    recoveryBaseline: {
+      sleepMinutes: 420,
+      restingHeartRateBpm: 50,
+      hrvSdnnMs: 50,
+      loadMinutes: 200
+    }
+  }));
+  assert.equal(result.recoveryRaw, null);
+  assert.equal(result.parts.loadPart, null);
+  assert.deepEqual(result.parts.weights, {});
+});
+
+test("missing or non-positive baselines do not fall back to population thresholds", () => {
+  const result = calculateRecoveryParts(source({
+    recoveryBaseline: {
+      sleepMinutes: null,
+      restingHeartRateBpm: 0,
+      hrvSdnnMs: null,
+      loadMinutes: null
+    }
+  }));
+  assert.equal(result.recoveryRaw, null);
+  assert.equal(result.parts.sleepRatio, null);
+  assert.equal(result.parts.rhrRatio, null);
+  assert.equal(result.parts.hrvRatio, null);
 });
 
 test("keeps sparse instantaneous heart-rate records in trial status", () => {

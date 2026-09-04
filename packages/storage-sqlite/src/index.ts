@@ -6,7 +6,8 @@ export {
 } from "./database-file-publisher.js";
 export {
   SqliteModelRunRepository,
-  type StoredModelRunSummary
+  type StoredModelRunSummary,
+  type ModelValidationGateResult
 } from "./model-run-repository.js";
 export {
   RaiDatabase,

@@ -951,9 +951,13 @@ app.post<{ Params: { id: string } }>("/v1/model-runs/:id/activate", { schema: { 
   }
   const store = await openMainDatabase();
   try {
+    const validationGateTable = store.database
+      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_validation_gates'")
+      .get();
     const row = store.database
       .prepare(`
         SELECT model.status,
+          ${validationGateTable ? "EXISTS (SELECT 1 FROM model_validation_gates gate WHERE gate.candidate_model_run_id = model.id AND gate.status = 'failed')" : "0"} AS has_failed_validation_gate,
           EXISTS (
             SELECT 1 FROM training_metric_runs metric
             WHERE metric.model_run_id = model.id AND metric.status = 'succeeded'
@@ -961,11 +965,14 @@ app.post<{ Params: { id: string } }>("/v1/model-runs/:id/activate", { schema: { 
         FROM model_runs model
         WHERE model.id = ?
       `)
-      .get(request.params.id) as { status: string; has_succeeded_training_metrics: number } | undefined;
+      .get(request.params.id) as { status: string; has_succeeded_training_metrics: number; has_failed_validation_gate: number } | undefined;
     if (!row) return reply.code(404).send({ message: "未找到模型运行" });
     if (row.status !== "succeeded") return reply.code(409).send({ message: "只能激活成功的模型运行" });
     if (row.has_succeeded_training_metrics !== 1) {
       return reply.code(409).send({ message: "该模型运行没有成功的运动统计结果，不能激活" });
+    }
+    if (row.has_failed_validation_gate === 1) {
+      return reply.code(409).send({ message: "该模型运行未通过 shadow model 门禁，不能激活" });
     }
     store.database.exec("BEGIN IMMEDIATE");
     try {
