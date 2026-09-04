@@ -15,7 +15,9 @@ import {
   ImportSourceNotFoundError,
   ImportUploadBusyError,
   ImportUploadCapacityError,
-  createImportSourceManager
+  createImportSourceManager,
+  digestHealthKitExportContent,
+  isHealthKitUploadSource
 } from "../src/import-sources.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 
@@ -489,6 +491,72 @@ test("rolls back a failed legacy migration and retries it on the next startup", 
     assert.deepEqual(new RuntimeStateStore(root).sources(), []);
     writeFileSync(metadata, JSON.stringify({ version: 1, sources: [valid] }), "utf8");
     assert.equal((await new ImportSourceManager(root, root).get(valid.id))?.displayName, "valid");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("HealthKit content digest ignores ExportDate and inspects matching uploads as unchanged", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-healthkit-digest-"));
+  const exportRoot = join(root, "export");
+  mkdirSync(join(exportRoot, "workout-routes"), { recursive: true });
+  const xml = (exportDate: string) => `<?xml version="1.0"?><HealthData locale="en_US">
+  <ExportDate value="${exportDate}"/>
+  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Watch"
+    startDate="2026-01-02 08:00:00 +0800" endDate="2026-01-02 08:30:00 +0800" duration="30" durationUnit="min"/>
+</HealthData>`;
+  writeFileSync(join(exportRoot, "export.xml"), xml("2026-01-03 00:00:00 +0800"));
+  writeFileSync(join(exportRoot, "workout-routes", "route_1.gpx"), "<gpx/>");
+  const firstDigest = await digestHealthKitExportContent(exportRoot);
+  writeFileSync(join(exportRoot, "export.xml"), xml("2026-01-04 12:34:56 +0800"));
+  assert.equal(await digestHealthKitExportContent(exportRoot), firstDigest);
+  writeFileSync(join(exportRoot, "workout-routes", "route_1.gpx"), "<gpx extra=\"1\"/>");
+  assert.notEqual(await digestHealthKitExportContent(exportRoot), firstDigest);
+  assert.equal(isHealthKitUploadSource({ kind: "upload", displayName: "apple-health-healthkit.zip" }), true);
+  assert.equal(isHealthKitUploadSource({
+    kind: "upload",
+    displayName: "health.zip",
+    originalPath: join(root, "apple-health-healthkit-local.zip")
+  }), true);
+  assert.equal(isHealthKitUploadSource({ kind: "directory", displayName: "apple-health-healthkit.zip" }), false);
+  assert.equal(isHealthKitUploadSource({ kind: "discovered", displayName: "apple-health-healthkit.zip" }), false);
+
+  const firstArchive = join(root, "first.zip");
+  const secondArchive = join(root, "second.zip");
+  const changedArchive = join(root, "changed.zip");
+  const regularArchive = join(root, "regular.zip");
+  try {
+    await zip(firstArchive, [
+      { name: "apple_health_export/export.xml", body: xml("2026-01-03 00:00:00 +0800") },
+      { name: "apple_health_export/workout-routes/route_1.gpx", body: "<gpx/>" }
+    ]);
+    await zip(secondArchive, [
+      { name: "apple_health_export/export.xml", body: xml("2026-01-04 12:34:56 +0800") },
+      { name: "apple_health_export/workout-routes/route_1.gpx", body: "<gpx/>" }
+    ]);
+    await zip(changedArchive, [
+      { name: "apple_health_export/export.xml", body: xml("2026-01-04 12:34:56 +0800").replace("duration=\"30\"", "duration=\"31\"") },
+      { name: "apple_health_export/workout-routes/route_1.gpx", body: "<gpx/>" }
+    ]);
+    await zip(regularArchive, [
+      { name: "apple_health_export/export.xml", body: xml("2026-01-03 00:00:00 +0800") }
+    ]);
+    const manager = new ImportSourceManager(root, root);
+    const first = await manager.saveUpload(createReadStream(firstArchive), "apple-health-healthkit.zip");
+    assert.equal(first.status, "ready");
+    await manager.retainImportedUpload(first.sourceId);
+    assert.equal((await manager.get(first.sourceId))?.lastUsedAt != null, true);
+    assert.equal(existsSync(join(root, "var", "imports", first.sourceId)), false);
+
+    const second = await manager.saveUpload(createReadStream(secondArchive), "apple-health-healthkit.zip");
+    assert.equal(second.status, "unchanged");
+    assert.equal(second.sourceSha256, first.sourceSha256);
+
+    const changed = await manager.saveUpload(createReadStream(changedArchive), "apple-health-healthkit.zip");
+    assert.equal(changed.status, "ready");
+    assert.notEqual(changed.sourceSha256, first.sourceSha256);
+
+    const regular = await manager.saveUpload(createReadStream(regularArchive), "health.zip");
+    assert.equal(regular.status, "ready");
+    assert.notEqual(regular.sourceSha256, first.sourceSha256);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

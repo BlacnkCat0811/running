@@ -1,7 +1,7 @@
 # Apple 健康导出数据审计
 
-> 生成时间：2026-09-02T00:51:56.815Z  
-> 数据集版本：dataset_39c13ed49df56ca35a8d1c6633a0526d  
+> 生成时间：2026-09-04T00:36:00.676Z  
+> 数据集版本：dataset_747df1390c4f82ddd50f64e5070ba523  
 > 隐私：本报告只包含聚合统计，不包含原始来源名称、健康值、精确时间或路线坐标。
 
 ## 1. 数据总览
@@ -9,12 +9,12 @@
 | 对象 | 数量 |
 |---|---:|
 | 解析到的 Health records | 83116 |
-| 稳定 ID 去重后的 Health records | 83116 |
+| 稳定 ID 去重后的 Health records | 160048 |
 | 完全相同的 record 副本 | 0 |
 | Workouts | 271 |
 | Activity summaries | 0 |
-| GPX routes | 46 |
-| GPX points | 102142 |
+| GPX routes | 92 |
+| GPX points | 204284 |
 | Import issues | 0 |
 
 ## 2. 跑步数据

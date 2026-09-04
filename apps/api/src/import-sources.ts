@@ -1,6 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomUUID, type Hash } from "node:crypto";
 import { isUtf8 } from "node:buffer";
-import { createWriteStream, existsSync, type Dirent } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, type Dirent } from "node:fs";
 import { mkdir, readdir, rm, stat, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, resolve, sep } from "node:path";
@@ -95,6 +95,61 @@ const DEFAULT_LIMITS: ZipLimits = {
 };
 
 export const ABANDONED_UPLOAD_TTL_MS = 24 * 60 * 60 * 1_000;
+export const HEALTHKIT_UPLOAD_FILENAME_TOKEN = "apple-health-healthkit";
+const EXPORT_DATE_TAG = /<ExportDate\b[^>]*\/>|<ExportDate\b[^>]*>\s*<\/ExportDate>/gi;
+const EXPORT_DATE_HASH_TAIL = 1024;
+
+export function isHealthKitUploadFilename(name: string | null | undefined): boolean {
+  return (name ?? "").toLowerCase().includes(HEALTHKIT_UPLOAD_FILENAME_TOKEN);
+}
+
+export function isHealthKitUploadSource(source: {
+  kind?: string | null;
+  displayName?: string | null;
+  originalPath?: string | null;
+}): boolean {
+  if (source.kind != null && source.kind !== "upload") return false;
+  return isHealthKitUploadFilename(source.displayName)
+    || isHealthKitUploadFilename(source.originalPath ? basename(source.originalPath) : "");
+}
+
+function stripExportDate(text: string): string {
+  EXPORT_DATE_TAG.lastIndex = 0;
+  return text.replace(EXPORT_DATE_TAG, "");
+}
+
+async function hashXmlWithoutExportDate(path: string, hash: Hash): Promise<void> {
+  const stream = createReadStream(path, { encoding: "utf8" });
+  let leftover = "";
+  for await (const chunk of stream) {
+    leftover = stripExportDate(leftover + chunk);
+    if (leftover.length > EXPORT_DATE_HASH_TAIL) {
+      hash.update(leftover.slice(0, leftover.length - EXPORT_DATE_HASH_TAIL));
+      leftover = leftover.slice(-EXPORT_DATE_HASH_TAIL);
+    }
+  }
+  hash.update(stripExportDate(leftover));
+}
+
+export async function digestHealthKitExportContent(exportRoot: string): Promise<string> {
+  const xmlPath = existsSync(resolve(exportRoot, "export.xml"))
+    ? resolve(exportRoot, "export.xml")
+    : resolve(exportRoot, "导出.xml");
+  const hash = createHash("sha256");
+  await hashXmlWithoutExportDate(xmlPath, hash);
+  const routeRoot = resolve(exportRoot, "workout-routes");
+  if (existsSync(routeRoot)) {
+    const names = (await readdir(routeRoot, { recursive: true }))
+      .map((name) => String(name).replaceAll("\\", "/"))
+      .filter((name) => extname(name).toLowerCase() === ".gpx")
+      .sort((left, right) => left.localeCompare(right));
+    for (const name of names) {
+      const info = await stat(resolve(routeRoot, name));
+      hash.update(`\0${name}\0${info.size}`);
+    }
+  }
+  return hash.digest("hex");
+}
 
 export class ImportSourceManager {
   private readonly root: string;
@@ -136,7 +191,8 @@ export class ImportSourceManager {
         throw new ImportUploadCapacityError("上传空间不足，请清理旧上传或释放磁盘空间");
       }
       await mkdir(directory, { recursive: true });
-      const hash = createHash("sha256");
+      const healthKitUpload = isHealthKitUploadFilename(filename);
+      const hash = healthKitUpload ? null : createHash("sha256");
       let bytes = 0;
       stream.once("limit", () => {
         (stream as NodeJS.ReadableStream & { destroy(error: Error): void })
@@ -151,7 +207,7 @@ export class ImportSourceManager {
           (stream as NodeJS.ReadableStream & { destroy(error: Error): void })
             .destroy(new ImportUploadCapacityError("上传空间不足，请清理旧上传或释放磁盘空间"));
         }
-        hash.update(chunk);
+        hash?.update(chunk);
       });
       await pipeline(stream, createWriteStream(archivePath, { flags: "wx" }));
       await this.assertZipMagic(archivePath);
@@ -165,7 +221,14 @@ export class ImportSourceManager {
         throw new ImportUploadCapacityError("解压空间不足，请清理旧上传或释放磁盘空间");
       }
       await this.extractZip(archivePath, extracted, extractionBudget);
-      const source = await this.buildSource(id, "upload", filename, extracted, archivePath, hash.digest("hex"));
+      const source = await this.buildSource(
+        id,
+        "upload",
+        filename,
+        extracted,
+        archivePath,
+        hash ? hash.digest("hex") : null
+      );
       await this.upsert(source);
       return await this.inspection(source);
     } catch (error) {
@@ -207,6 +270,13 @@ export class ImportSourceManager {
     if (!source) return;
     source.lastUsedAt = new Date().toISOString();
     await this.writeSources(sources);
+  }
+
+  async retainImportedUpload(id: string): Promise<void> {
+    const source = await this.get(id);
+    if (!source || source.kind !== "upload") return;
+    await this.markUsed(id);
+    await rm(resolve(this.root, id), { recursive: true, force: true });
   }
 
   async discover(): Promise<ImportSource[]> {
@@ -292,8 +362,11 @@ export class ImportSourceManager {
     let routeFileCount = 0;
     if (existsSync(routeRoot)) routeFileCount = (await readdir(routeRoot, { recursive: true })).filter((name) => extname(String(name)).toLowerCase() === ".gpx").length;
     const old = await this.get(id);
+    const sourceSha256 = kind === "upload" && isHealthKitUploadFilename(displayName)
+      ? await digestHealthKitExportContent(inputPath)
+      : sha;
     return {
-      id, kind, displayName, inputPath, originalPath, sourceSha256: sha,
+      id, kind, displayName, inputPath, originalPath, sourceSha256,
       exportFileName: basename(exportPath), exportBytes: exportInfo.size, routeFileCount,
       modifiedAt: exportInfo.mtime.toISOString(), createdAt: old?.createdAt ?? new Date().toISOString(),
       lastUsedAt: old?.lastUsedAt ?? null

@@ -57,6 +57,10 @@ node -e "const d=require('./var/smoke-today.json'); console.log('today:', JSON.s
 check "today.distanceKm is number" var/smoke-today.json "d.today.distanceKm >= 0"
 check "today.weekDaily length 7" var/smoke-today.json "d.weekDaily.length === 7"
 check "today.recentWorkouts <= 5" var/smoke-today.json "d.recentWorkouts.length <= 5"
+check "today.verdict tone" var/smoke-today.json "['green','yellow','red'].includes(d.verdict.tone)"
+check "today.nextSession title" var/smoke-today.json "typeof d.nextSession.title === 'string' && d.nextSession.title.length > 0"
+check "today.weekPlan length 7" var/smoke-today.json "Array.isArray(d.weekPlan) && d.weekPlan.length === 7"
+check "today.phase" var/smoke-today.json "['need_sync','morning_open','locked','post_run','rest_done'].includes(d.phase)"
 
 echo "== GET /v1/mobile/statistics =="
 curl -s "$BASE/v1/mobile/statistics" -o var/smoke-stats.json
@@ -70,6 +74,7 @@ curl -s "$BASE/v1/mobile/trends" -o var/smoke-trends.json
 node -e "const d=require('./var/smoke-trends.json'); console.log('weeks:', d.weeks.length, 'last4:', d.weeks.slice(-4).map(w=>w.distanceKm.toFixed(1)).join('/')); console.log('ramp4w:', d.distanceChangeFraction4Weeks); console.log('records:', JSON.stringify({f5:d.records.fastest5k, longest:d.records.longestDistance && d.records.longestDistance.distanceKm, month:d.records.biggestMonth})); console.log('insights:', d.insights.map(i=>i.kind+':'+i.title).join(' | '))"
 check "trends.weeks is 12 consecutive ISO weeks" var/smoke-trends.json "d.weeks.length === 12 && d.weeks.every((w,i)=> i===0 || (Date.parse(w.periodStart)-Date.parse(d.weeks[i-1].periodStart)===7*864e5))"
 check "trends.records object" var/smoke-trends.json "typeof d.records === 'object' && d.records !== null"
+check "trends.ability series" var/smoke-trends.json "Array.isArray(d.ability)"
 
 echo "== GET/PUT /v1/mobile/goals =="
 curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-before.json

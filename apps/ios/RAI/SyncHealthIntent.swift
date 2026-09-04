@@ -1,0 +1,38 @@
+#if os(iOS)
+import AppIntents
+
+struct SyncHealthIntent: AppIntent {
+    static var title: LocalizedStringResource = "同步健康"
+    static var description: IntentDescription = "从 Apple 健康增量同步跑步数据到 RAI"
+    static var openAppWhenRun = true
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let text = await Self.syncOnMainActor()
+        return .result(dialog: IntentDialog(stringLiteral: text))
+    }
+
+    @MainActor
+    private static func syncOnMainActor() async -> String {
+        let model = AppModel.shared
+        await model.healthSync.sync(to: model.session.serverURL, apiToken: model.session.apiToken)
+        if let error = model.healthSync.lastError {
+            return error
+        }
+        return model.healthSync.message ?? "已开始同步 Apple 健康"
+    }
+}
+
+struct RAIShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(
+            intent: SyncHealthIntent(),
+            phrases: [
+                "同步 \(.applicationName) 健康",
+                "用 \(.applicationName) 同步跑步"
+            ],
+            shortTitle: "同步健康",
+            systemImageName: "heart.fill"
+        )
+    }
+}
+#endif

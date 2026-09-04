@@ -12,6 +12,7 @@ import type {
   PredictionModelRun,
   RecomputeJobCancellationResponse,
   TrainPredictionModelRequest,
+  LockMobileSessionInput,
   UpdateMobileGoalsInput,
   UpdateTrainingZoneProfileInput,
   TrainingStatisticsGranularity
@@ -39,7 +40,8 @@ import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.
 import {
   ImportArchiveTooLargeError,
   createImportSourceManager,
-  ImportSourceNotFoundError
+  ImportSourceNotFoundError,
+  isHealthKitUploadSource
 } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { MobileGoalsStore } from "./mobile-goals.js";
@@ -55,6 +57,7 @@ import {
   importJobBodySchema,
   importSourceBodySchema,
   mobileGoalsBodySchema,
+  mobileLockBodySchema,
   modelComparisonQuerySchema,
   openapiDocument,
   overrideBodySchema,
@@ -125,7 +128,8 @@ const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const metadataOnlyMutationRoutes = new Set([
   "/v1/import-sources/discover",
   "/v1/imports/uploads",
-  "/v1/mobile/goals"
+  "/v1/mobile/goals",
+  "/v1/mobile/lock"
 ]);
 const databaseRequiredMutationRoutes = new Set([
   "/v1/workouts/:id/override",
@@ -645,8 +649,8 @@ app.get("/v1/training-zones/current", async (_request, reply) => {
 
 app.get("/v1/mobile/today", async () => {
   // Goals live in a plain file and do not depend on database readiness.
-  const goal = mobileGoalsStore.read().weeklyDistanceKm;
-  return withReadStore((store) => store.mobileToday(goal));
+  const goals = mobileGoalsStore.read();
+  return withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, goals));
 });
 
 app.get("/v1/mobile/statistics", async () => withReadStore((store) => store.mobileStatistics()));
@@ -659,6 +663,28 @@ app.put<{ Body: UpdateMobileGoalsInput }>(
   "/v1/mobile/goals",
   { schema: { body: mobileGoalsBodySchema } },
   async (request) => mobileGoalsStore.write(request.body)
+);
+
+app.post<{ Body: LockMobileSessionInput }>(
+  "/v1/mobile/lock",
+  { schema: { body: mobileLockBodySchema } },
+  async (request) => {
+    const goals = mobileGoalsStore.read();
+    const ignoreLock = request.body.action === "relock";
+    const snapshot = withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, {
+      ...goals,
+      lockedSession: ignoreLock ? null : goals.lockedSession
+    }));
+    if (request.body.action === "lock" && snapshot.lock.present) {
+      return mobileGoalsStore.read();
+    }
+    return mobileGoalsStore.lockSession({
+      localDate: snapshot.today.localDate,
+      session: snapshot.nextSession,
+      verdictTone: snapshot.verdict.tone,
+      lockedAt: new Date().toISOString()
+    });
+  }
 );
 
 app.get<{ Querystring: { days?: string } }>(
@@ -999,12 +1025,21 @@ app.post<{ Body: ImportJobRequest }>(
           databaseRecoveryRequired = false;
           invalidateDatabaseReadiness();
         }
-        if (durable && source.kind === "upload") await importSources.cleanupUpload(sourceId);
-        else if (durable && succeeded) await importSources.markUsed(sourceId);
+        if (durable && source.kind === "upload") {
+          if (succeeded && isHealthKitUploadSource(source)) {
+            await importSources.retainImportedUpload(sourceId);
+          } else {
+            await importSources.cleanupUpload(sourceId);
+          }
+        } else if (durable && succeeded) await importSources.markUsed(sourceId);
       } finally {
         release();
       }
-    }, sourceId);
+    }, sourceId, {
+      kind: source.kind,
+      displayName: source.displayName,
+      originalPath: source.originalPath
+    });
   } catch (error) {
     if (source.kind === "upload") {
       await importSources.cleanupUpload(sourceId).catch((cleanupError) => {

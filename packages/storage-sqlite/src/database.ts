@@ -1496,8 +1496,28 @@ export class RaiDatabase {
       .run(key, value);
   }
 
-  setProfile(attributes: Record<string, string>): void {
+  setProfile(attributes: Record<string, string>, options?: { merge?: boolean }): void {
     this.begin();
+    if (options?.merge) {
+      const incoming = Object.fromEntries(
+        Object.entries(attributes).filter(([, value]) => value !== undefined && value !== "")
+      );
+      if (Object.keys(incoming).length === 0) return;
+      const row = this.database
+        .prepare("SELECT attributes_json AS attributesJson FROM profile WHERE id = 1")
+        .get() as unknown as { attributesJson: string } | undefined;
+      const existing = row
+        ? (JSON.parse(row.attributesJson) as Record<string, string>)
+        : {};
+      const existingKeys = new Set(Object.keys(existing));
+      const incomingKeys = Object.keys(incoming);
+      const isSubset = incomingKeys.every((key) => existingKeys.has(key));
+      if (isSubset && incomingKeys.every((key) => existing[key] === incoming[key])) return;
+      this.database
+        .prepare("INSERT OR REPLACE INTO profile (id, attributes_json) VALUES (1, ?)")
+        .run(JSON.stringify({ ...existing, ...incoming }));
+      return;
+    }
     this.database
       .prepare("INSERT OR REPLACE INTO profile (id, attributes_json) VALUES (1, ?)")
       .run(JSON.stringify(attributes));
@@ -1531,7 +1551,8 @@ export class RaiDatabase {
   insertWorkout(
     workout: CanonicalWorkout,
     sourceCategory: string,
-    rawAttributes: Record<string, string>
+    rawAttributes: Record<string, string>,
+    options?: { preserveAbsent?: boolean }
   ): void {
     this.begin();
     this.insertWorkoutStatement.run(
@@ -1584,23 +1605,35 @@ export class RaiDatabase {
       ...route,
       relativePath: route.relativePath ? normalizeRouteRelativePath(route.relativePath) : null
     }));
-    const incomingIds = new Set(incomingRoutes.map((route) => route.id));
-    const existingRoutes = this.database
-      .prepare(
-        "SELECT id, relative_path AS relativePath FROM workout_routes WHERE workout_id = ?"
-      )
-      .all(workout.id) as unknown as Array<{ id: string; relativePath: string | null }>;
-    for (const existing of existingRoutes) {
-      if (!incomingIds.has(existing.id)) {
-        this.deleteRouteFingerprints(existing.id, existing.relativePath);
-        this.database.prepare("DELETE FROM workout_routes WHERE id = ?").run(existing.id);
+    // HealthKit incremental payloads often omit WorkoutRoute; keep stored GPS.
+    if (options?.preserveAbsent && incomingRoutes.length === 0) {
+      this.markObject();
+      return;
+    }
+    if (!options?.preserveAbsent) {
+      const incomingIds = new Set(incomingRoutes.map((route) => route.id));
+      const existingRoutes = this.database
+        .prepare(
+          "SELECT id, relative_path AS relativePath FROM workout_routes WHERE workout_id = ?"
+        )
+        .all(workout.id) as unknown as Array<{ id: string; relativePath: string | null }>;
+      for (const existing of existingRoutes) {
+        if (!incomingIds.has(existing.id)) {
+          this.deleteRouteFingerprints(existing.id, existing.relativePath);
+          this.database.prepare("DELETE FROM workout_routes WHERE id = ?").run(existing.id);
+        }
       }
     }
     for (const route of incomingRoutes) {
       if (route.relativePath) {
         // Drop stale route rows that share a relative_path but a different id so
         // UNIQUE(relative_path) does not fail when route identity drifts.
-        this.deleteRoutesByPathExcept(route.relativePath, route.id);
+        const replaced = this.deleteRoutesByPathExcept(
+          route.relativePath,
+          route.id,
+          options
+        );
+        if (!replaced) continue;
       }
       this.insertRouteStatement.run(
         route.id,
@@ -1666,10 +1699,22 @@ export class RaiDatabase {
       .all() as unknown as RouteImportTarget[];
   }
 
-  ensureOrphanRoute(routeId: string, relativePath: string): void {
+  ensureOrphanRoute(
+    routeId: string,
+    relativePath: string,
+    options?: { preserveAbsent?: boolean }
+  ): string {
     this.begin();
     const normalizedPath = normalizeRouteRelativePath(relativePath);
-    this.deleteRoutesByPathExcept(normalizedPath, routeId);
+    const replaced = this.deleteRoutesByPathExcept(normalizedPath, routeId, options);
+    if (!replaced) {
+      const owner = this.database
+        .prepare(
+          `SELECT id FROM workout_routes WHERE lower(relative_path) = lower(?) LIMIT 1`
+        )
+        .get(normalizedPath) as unknown as { id: string } | undefined;
+      return owner?.id ?? routeId;
+    }
     this.insertRouteStatement.run(
       routeId,
       null,
@@ -1682,6 +1727,7 @@ export class RaiDatabase {
       normalizedPath,
       "{}"
     );
+    return routeId;
   }
 
   replaceRoutePoints(routeId: string, points: RoutePoint[]): void {
@@ -1766,8 +1812,13 @@ export class RaiDatabase {
   /**
    * Delete workout_routes (and their fingerprints) that claim `relativePath`
    * but are not `keepRouteId`. CASCADE removes route_points.
+   * Returns false when preserve-absent leaves a colliding owner in place.
    */
-  private deleteRoutesByPathExcept(relativePath: string, keepRouteId: string): void {
+  private deleteRoutesByPathExcept(
+    relativePath: string,
+    keepRouteId: string,
+    options?: { preserveAbsent?: boolean }
+  ): boolean {
     const conflicting = this.database
       .prepare(
         `SELECT id, relative_path AS relativePath FROM workout_routes
@@ -1777,10 +1828,12 @@ export class RaiDatabase {
       id: string;
       relativePath: string | null;
     }>;
+    if (options?.preserveAbsent && conflicting.length > 0) return false;
     for (const row of conflicting) {
       this.deleteRouteFingerprints(row.id, row.relativePath);
     }
     this.deleteRouteByPathStatement.run(relativePath, keepRouteId);
+    return true;
   }
 
   observeImportEntity(
@@ -1824,10 +1877,11 @@ export class RaiDatabase {
     return { inserted: !exists, updated };
   }
 
-  seedImportGenerations(generation: string): void {
+  seedImportGenerations(generation: string, options?: { preserveAbsent?: boolean }): void {
     this.begin();
     // These are compact projections of the current export and are rebuilt by the scan.
-    this.database.exec("DELETE FROM entity_inventory");
+    // Preserve-absent payloads are incomplete, so keep the previous inventory totals.
+    if (!options?.preserveAbsent) this.database.exec("DELETE FROM entity_inventory");
     this.database.exec("DELETE FROM import_issues");
     const previous = `${generation}:previous`;
     this.database.prepare(`
@@ -1863,9 +1917,18 @@ export class RaiDatabase {
 
   finalizeImportGeneration(
     generation: string,
-    batchId?: string
+    batchId?: string,
+    options?: { preserveAbsent?: boolean }
   ): { removedRecords: number; removedWorkouts: number; removedActivitySummaries: number; dirtyWorkoutTimes: string[] } {
     this.begin();
+    if (options?.preserveAbsent) {
+      return {
+        removedRecords: 0,
+        removedWorkouts: 0,
+        removedActivitySummaries: 0,
+        dirtyWorkoutTimes: []
+      };
+    }
     const stale = this.database.prepare(`
       SELECT entity_kind AS entityKind, entity_id AS entityId, effective_at AS effectiveAt
       FROM import_entity_generations

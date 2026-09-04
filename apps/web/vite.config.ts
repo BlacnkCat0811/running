@@ -20,9 +20,20 @@ export default defineConfig({
     host: lanDev ? "0.0.0.0" : "127.0.0.1",
     port: 5173,
     strictPort: true,
-    ...(lanDev ? { hmr: false as const } : {}),
+    ...(lanDev
+      ? {
+          hmr: process.env.RAI_HMR_HOST
+            ? { host: process.env.RAI_HMR_HOST }
+            : (false as const),
+        }
+      : {}),
     proxy: {
-      "/v1": "http://127.0.0.1:8787"
-    }
-  }
+      "/v1": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+        timeout: 600000,
+        proxyTimeout: 600000,
+      },
+    },
+  },
 });

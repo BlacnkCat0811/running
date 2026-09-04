@@ -12,6 +12,7 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_http._tcp</string>
+		<string>_rai._tcp</string>
 	</array>
 	<key>NSHealthShareUsageDescription</key>
 	<string>RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于在本机计算即时跑力和长期真实跑力。数据只发到你 Mac 上的本地 RAI 服务，不会上传云端。</string>

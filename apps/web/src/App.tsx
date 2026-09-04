@@ -1,5 +1,4 @@
 import "./first-run-pixel.css";
-import { IosMobileApp } from "./IosMobileApp.js";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import type { HealthResponse } from "@rai/api-contracts";
 import {
@@ -79,6 +78,11 @@ const WorkoutsPage = lazy(() =>
 const TrainingZonesPage = lazy(() =>
   import("./pages/TrainingZonesPage.js").then((module) => ({
     default: module.TrainingZonesPage,
+  })),
+);
+const IosMobileApp = lazy(() =>
+  import("./IosMobileApp.js").then((module) => ({
+    default: module.IosMobileApp,
   })),
 );
 
@@ -188,7 +192,13 @@ function AppNavigation() {
 
 export function App() {
   const isIosShell = typeof document !== "undefined" && document.documentElement.dataset.shell === "ios";
-  if (isIosShell) return <IosMobileApp />;
+  if (isIosShell) {
+    return (
+      <Suspense fallback={null}>
+        <IosMobileApp />
+      </Suspense>
+    );
+  }
   const health = useRemote<HealthResponse>("/v1/health", true, true, false);
   const mainRef = useRef<HTMLElement>(null);
   const previousPathname = useRef<string | null>(null);

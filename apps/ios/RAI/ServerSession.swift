@@ -8,11 +8,12 @@ final class ServerSession {
         didSet { UserDefaults.standard.set(serverURLString, forKey: Self.storageKey) }
     }
     var apiToken: String {
-        didSet { UserDefaults.standard.set(apiToken, forKey: Self.tokenKey) }
+        didSet { Keychain.saveToken(apiToken) }
     }
     var isReachable = false
     var lastError: String?
     var reloadToken = 0
+    var hasConnectedOnce = false
     private(set) var consecutiveFailures = 0
 
     private var pollTask: Task<Void, Never>?
@@ -27,6 +28,7 @@ final class ServerSession {
 
     private static let storageKey = "rai.serverURL"
     private static let tokenKey = "rai.apiToken"
+    private static let connectedKey = "rai.hasConnectedOnce"
     private static let failureThreshold = 3
 
     init() {
@@ -39,7 +41,8 @@ final class ServerSession {
             serverURLString = ""
             #endif
         }
-        apiToken = UserDefaults.standard.string(forKey: Self.tokenKey) ?? ""
+        apiToken = Keychain.loadToken()
+        hasConnectedOnce = UserDefaults.standard.bool(forKey: Self.connectedKey)
     }
 
     var serverURL: URL? {
@@ -62,8 +65,7 @@ final class ServerSession {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.probe()
-                let delay: Duration = (self?.isReachable == true) ? .seconds(5) : .seconds(1)
-                try? await Task.sleep(for: delay)
+                try? await Task.sleep(for: self?.pollInterval ?? .seconds(1))
             }
         }
     }
@@ -117,6 +119,10 @@ final class ServerSession {
                 consecutiveFailures = 0
                 isReachable = true
                 lastError = nil
+                if !hasConnectedOnce {
+                    hasConnectedOnce = true
+                    UserDefaults.standard.set(true, forKey: Self.connectedKey)
+                }
                 if !wasReachable {
                     reload()
                 }
@@ -131,6 +137,15 @@ final class ServerSession {
                 return
             }
             markUnreachable("连不上开发服务器。确认 Mac 已运行 npm run dev:device，且 iPhone 与虚拟机在同一网段。")
+        }
+    }
+
+    private var pollInterval: Duration {
+        if isReachable { return .seconds(5) }
+        switch consecutiveFailures {
+        case 0, 1: return .seconds(1)
+        case 2: return .seconds(2)
+        default: return .seconds(5)
         }
     }
 

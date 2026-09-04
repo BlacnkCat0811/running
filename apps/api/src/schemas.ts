@@ -68,12 +68,47 @@ export const trainingZonesHistoryQuerySchema = {
   properties: { days: { type: "string", pattern: "^[0-9]{1,4}$" } }
 } as const;
 
+const mobileRaceTargetSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["date", "distance"],
+  properties: {
+    date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    distance: { type: "string", enum: ["five_k", "ten_k", "half_marathon"] },
+    targetPaceSecondsPerKm: { anyOf: [{ type: "number", minimum: 150, maximum: 900 }, { type: "null" }] }
+  }
+} as const;
+
+const mobileWeekPlanItemSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["localDate", "kind"],
+  properties: {
+    localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    kind: { type: "string", enum: ["rest", "recovery", "easy", "long_run", "tempo", "interval"] },
+    distanceKm: { anyOf: [{ type: "number", minimum: 0, maximum: 80 }, { type: "null" }] }
+  }
+} as const;
+
+export const mobileLockBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["action"],
+  properties: {
+    action: { type: "string", enum: ["lock", "relock"] }
+  }
+} as const;
+
 export const mobileGoalsBodySchema = {
   type: "object",
   additionalProperties: false,
   required: ["weeklyDistanceKm"],
   properties: {
-    weeklyDistanceKm: { type: "number", minimum: 1, maximum: 500 }
+    weeklyDistanceKm: { type: "number", minimum: 1, maximum: 500 },
+    easyDurationFloorFraction: { type: "number", minimum: 0.4, maximum: 0.95 },
+    qualitySessionCap: { type: "integer", minimum: 0, maximum: 4 },
+    raceTarget: { anyOf: [mobileRaceTargetSchema, { type: "null" }] },
+    weekPlan: { type: "array", maxItems: 14, items: mobileWeekPlanItemSchema }
   }
 } as const;
 
@@ -389,7 +424,8 @@ export const openapiDocument = {
       PredictionModelTrainRequest: predictionModelTrainBodySchema,
       DeleteDatabaseRequest: deleteBodySchema,
       RestoreBackupRequest: restoreBodySchema,
-      MobileGoalsUpdate: mobileGoalsBodySchema
+      MobileGoalsUpdate: mobileGoalsBodySchema,
+      MobileLock: mobileLockBodySchema
     }
   },
   paths: {
@@ -425,13 +461,18 @@ export const openapiDocument = {
       parameters: [{ name: "days", in: "query", schema: trainingLoadQuerySchema.properties.days }]
     }) },
     "/v1/training-zones/current": { get: operation(["Read"], "今日心率与配速分区") },
-    "/v1/mobile/today": { get: operation(["Read"], "iOS 首页聚合：今日汇总、周进度、本周每日里程与最近训练") },
+    "/v1/mobile/today": { get: operation(["Read"], "iOS 首页聚合：能力主卡、今日裁决、下一堂课、恢复拆解、跑后结论与周结构") },
     "/v1/mobile/statistics": { get: operation(["Read"], "iOS 统计页聚合：近 3 月分运动类型里程、滚动汇总与心率区间分布") },
-    "/v1/mobile/trends": { get: operation(["Read"], "iOS 趋势页聚合：12 周跑量、四周增幅、个人纪录与洞察") },
+    "/v1/mobile/trends": { get: operation(["Read"], "iOS 趋势页聚合：能力曲线、12 周跑量、四周增幅、个人纪录与洞察") },
     "/v1/mobile/goals": {
-      get: operation(["Read"], "读取 iOS 周目标"),
-      put: operation(["Workouts"], "更新 iOS 周目标", {
-        requestBody: body({ $ref: "#/components/schemas/MobileGoalsUpdate" }, "周跑量目标（公里）")
+      get: operation(["Read"], "读取 iOS 周目标、结构目标与赛事目标"),
+      put: operation(["Workouts"], "更新 iOS 周目标、结构目标与赛事目标", {
+        requestBody: body({ $ref: "#/components/schemas/MobileGoalsUpdate" }, "周跑量、轻松占比、质量课上限与赛事目标")
+      })
+    },
+    "/v1/mobile/lock": {
+      post: operation(["Workouts"], "锁定或按新裁决重锁今天的课", {
+        requestBody: body({ $ref: "#/components/schemas/MobileLock" }, "lock 或 relock")
       })
     },
     "/v1/training-zones/history": { get: operation(["Read"], "历史心率与配速分区", {

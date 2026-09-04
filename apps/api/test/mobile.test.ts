@@ -89,6 +89,13 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     assert.equal(today.week.goalProgressFraction, 0);
     assert.ok(Array.isArray(today.recentWorkouts));
     assert.ok(today.recentWorkouts.length > 0 && today.recentWorkouts.length <= 5);
+    assert.ok(["green", "yellow", "red"].includes(today.verdict.tone));
+    assert.ok(today.nextSession.title.length > 0);
+    assert.ok(today.ability.explanation.length > 0);
+    assert.equal(today.weekPlan.length, 7);
+    assert.ok(Array.isArray(today.injuryFlags));
+    assert.ok(["need_sync", "morning_open", "locked", "post_run", "rest_done"].includes(today.phase));
+    assert.equal(typeof today.lock.present, "boolean");
 
     // With a null goal there is no progress fraction either.
     const noGoal = read.mobileToday(null);
@@ -274,6 +281,9 @@ test("mobileTrends returns weeks, personal records and insights", async () => {
     assert.ok(trends.records.longestDistance !== null);
     assert.ok(Math.abs(trends.records.longestDistance!.distanceKm - 5) < 1e-9);
     assert.ok(Array.isArray(trends.insights));
+    assert.ok(Array.isArray(trends.ability));
+    assert.ok(Array.isArray(trends.currentAbility));
+    assert.equal(typeof trends.decayPoints, "number");
   } finally {
     read.close();
     rmSync(root, { recursive: true, force: true });
@@ -291,6 +301,10 @@ test("mobile goals store persists, clamps and recovers from corrupt files", () =
 
     const written = store.write({ weeklyDistanceKm: 42.5 });
     assert.equal(written.weeklyDistanceKm, 42.5);
+    assert.equal(written.easyDurationFloorFraction, 0.7);
+    assert.equal(written.qualitySessionCap, 2);
+    assert.equal(written.raceTarget, null);
+    assert.equal(written.lockedSession, null);
     assert.ok(written.updatedAt > initial.updatedAt);
     // Round-trips through a fresh store instance (simulated restart).
     const reloaded = new MobileGoalsStore(root).read();
@@ -304,6 +318,36 @@ test("mobile goals store persists, clamps and recovers from corrupt files", () =
     writeFileSync(join(root, "var", "mobile-goals.json"), "{not json", "utf8");
     const recovered = new MobileGoalsStore(root).read();
     assert.equal(recovered.weeklyDistanceKm, DEFAULT_WEEKLY_DISTANCE_KM);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("mobile goals store can lock today's session without dropping weekly distance", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-lock-"));
+  try {
+    const store = new MobileGoalsStore(root);
+    store.write({ weeklyDistanceKm: 36 });
+    const locked = store.lockSession({
+      localDate: "2026-09-03",
+      verdictTone: "yellow",
+      lockedAt: "2026-09-03T01:00:00.000Z",
+      session: {
+        kind: "easy",
+        title: "轻松跑",
+        reason: "锁定",
+        distanceKm: 8,
+        durationMinutes: 50,
+        paceSecondsPerKmLower: 330,
+        paceSecondsPerKmUpper: 390,
+        heartRateBpmLower: 120,
+        heartRateBpmUpper: 145
+      }
+    });
+    assert.equal(locked.weeklyDistanceKm, 36);
+    assert.equal(locked.lockedSession?.localDate, "2026-09-03");
+    assert.equal(locked.lockedSession?.session.kind, "easy");
+    assert.equal(new MobileGoalsStore(root).read().lockedSession?.session.title, "轻松跑");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

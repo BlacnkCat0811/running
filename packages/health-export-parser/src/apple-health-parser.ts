@@ -74,7 +74,7 @@ export interface ParseProgress {
 export interface AppleHealthParseOptions {
   fileSize: number;
   onProgress?: (progress: ParseProgress) => void;
-  incremental?: { generation: string; batchId?: string };
+  incremental?: { generation: string; batchId?: string; preserveAbsent?: boolean };
   atomic?: boolean;
 }
 
@@ -219,7 +219,12 @@ export async function parseAppleHealthXml(
   const atomic = options.atomic !== false;
   if (atomic) store.beginAtomicImport();
   const entityGeneration = options.incremental?.generation ?? "full-import";
-  if (options.incremental) store.seedImportGenerations(options.incremental.generation);
+  if (options.incremental) {
+    store.seedImportGenerations(
+      options.incremental.generation,
+      options.incremental.preserveAbsent ? { preserveAbsent: true } : undefined
+    );
+  }
   let currentRecord: RecordDraft | null = null;
   let currentWorkout: WorkoutDraft | null = null;
   let currentWorkoutEvent: CanonicalWorkoutEvent | null = null;
@@ -245,7 +250,11 @@ export async function parseAppleHealthXml(
 
     switch (name) {
       case "Me":
-        store.setProfile(attributes);
+        if (options.incremental?.preserveAbsent) {
+          store.setProfile(attributes, { merge: true });
+        } else {
+          store.setProfile(attributes);
+        }
         break;
       case "ExportDate":
         if (attributes.value) store.setManifest("health_export_date", attributes.value);
@@ -390,7 +399,12 @@ export async function parseAppleHealthXml(
         );
         const shouldWrite = !options.incremental || observation.inserted || observation.updated;
         if (shouldWrite) {
-          store.insertWorkout(workout, category, currentWorkout.attributes);
+          store.insertWorkout(
+            workout,
+            category,
+            currentWorkout.attributes,
+            options.incremental?.preserveAbsent ? { preserveAbsent: true } : undefined
+          );
           if (!options.incremental || observation.inserted) insertedWorkoutCount += 1;
           insertedWorkoutTimes.push(workout.startAt);
         }
@@ -440,24 +454,30 @@ export async function parseAppleHealthXml(
     }
     parser.close();
 
-    for (const [type, item] of recordInventory) {
-      store.upsertInventory("record", type, item.count, item.firstAt, item.lastAt, {
-        units: [...item.units].sort(),
-        sourceCategories: [...item.sourceCategories].sort()
-      });
-    }
-    for (const [type, item] of workoutInventory) {
-      store.upsertInventory("workout", type, item.count, item.firstAt, item.lastAt, {
-        sourceCategories: [...item.sourceCategories].sort()
-      });
+    if (!options.incremental?.preserveAbsent) {
+      for (const [type, item] of recordInventory) {
+        store.upsertInventory("record", type, item.count, item.firstAt, item.lastAt, {
+          units: [...item.units].sort(),
+          sourceCategories: [...item.sourceCategories].sort()
+        });
+      }
+      for (const [type, item] of workoutInventory) {
+        store.upsertInventory("workout", type, item.count, item.firstAt, item.lastAt, {
+          sourceCategories: [...item.sourceCategories].sort()
+        });
+      }
+      store.setManifest("record_count", String(recordCount));
+      store.setManifest("workout_count", String(workoutCount));
+      store.setManifest("activity_summary_count", String(activitySummaryCount));
     }
     store.setManifest("parser_contract_version", CONTRACT_VERSION);
     store.setManifest("source_xml_sha256", sourceHash.digest("hex"));
-    store.setManifest("record_count", String(recordCount));
-    store.setManifest("workout_count", String(workoutCount));
-    store.setManifest("activity_summary_count", String(activitySummaryCount));
     const finalized = options.incremental
-      ? store.finalizeImportGeneration(options.incremental.generation, options.incremental.batchId)
+      ? store.finalizeImportGeneration(
+        options.incremental.generation,
+        options.incremental.batchId,
+        options.incremental.preserveAbsent ? { preserveAbsent: true } : undefined
+      )
       : { removedRecords: 0, removedWorkouts: 0, dirtyWorkoutTimes: [] as string[] };
     if (atomic) store.commitAtomicImport();
     else store.flush();

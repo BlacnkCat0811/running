@@ -173,10 +173,28 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
+function bundleHashFromFingerprints(store: RaiDatabase): string {
+  const rows = store.database
+    .prepare("SELECT relative_path AS relativePath, sha256 FROM route_file_fingerprints")
+    .all() as unknown as Array<{ relativePath: string; sha256: string }>;
+  const hash = createHash("sha256");
+  for (const row of rows.sort((left, right) =>
+    left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0
+  )) {
+    hash.update(row.relativePath, "utf8");
+    hash.update("\0");
+    hash.update(row.sha256, "utf8");
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
 export async function importGpxRoutes(
   exportRoot: string,
-  store: RaiDatabase
+  store: RaiDatabase,
+  options?: { preserveAbsent?: boolean }
 ): Promise<GpxImportResult> {
+  const preserveAbsent = options?.preserveAbsent === true;
   const referencedTargets = new Map(
     store.routesToImport().map((target) => [
       normalizeRelativePath(target.relativePath).toLowerCase(),
@@ -184,7 +202,8 @@ export async function importGpxRoutes(
     ])
   );
   const allPaths = allGpxRelativePaths(exportRoot);
-  store.pruneOrphanRoutes(allPaths);
+  // Partial archives are not evidence that omitted GPX files were deleted.
+  if (!preserveAbsent) store.pruneOrphanRoutes(allPaths);
   let importedRouteCount = 0;
   let missingRouteCount = 0;
   let pointCount = 0;
@@ -195,11 +214,17 @@ export async function importGpxRoutes(
   for (const relativePath of allPaths) {
     const key = relativePath.toLowerCase();
     const referenced = referencedTargets.get(key);
-    const routeId = referenced?.id ?? stableId("route", ["orphan", relativePath]);
-    if (!referenced) store.ensureOrphanRoute(routeId, relativePath);
+    const routeId = referenced
+      ? referenced.id
+      : store.ensureOrphanRoute(
+          stableId("route", ["orphan", relativePath]),
+          relativePath,
+          preserveAbsent ? { preserveAbsent: true } : undefined
+        );
 
     const fullPath = safelyResolve(exportRoot, relativePath);
     if (!fullPath || !existsSync(fullPath)) {
+      if (preserveAbsent) continue;
       store.markRouteStatus(routeId, "missing");
       changedRouteIds.push(routeId);
       missingRouteCount += 1;
@@ -280,24 +305,30 @@ export async function importGpxRoutes(
     }
   }
 
-  const currentPaths = new Set(allPaths.map((path) => path.toLowerCase()));
-  const cachedPaths = store.database.prepare("SELECT relative_path AS relativePath FROM route_file_fingerprints")
-    .all() as unknown as Array<{ relativePath: string }>;
-  const deleteFingerprint = store.database.prepare("DELETE FROM route_file_fingerprints WHERE relative_path = ?");
-  for (const cached of cachedPaths) {
-    if (!currentPaths.has(cached.relativePath.toLowerCase())) deleteFingerprint.run(cached.relativePath);
-  }
+  if (!preserveAbsent) {
+    const currentPaths = new Set(allPaths.map((path) => path.toLowerCase()));
+    const cachedPaths = store.database.prepare("SELECT relative_path AS relativePath FROM route_file_fingerprints")
+      .all() as unknown as Array<{ relativePath: string }>;
+    const deleteFingerprint = store.database.prepare("DELETE FROM route_file_fingerprints WHERE relative_path = ?");
+    for (const cached of cachedPaths) {
+      if (!currentPaths.has(cached.relativePath.toLowerCase())) deleteFingerprint.run(cached.relativePath);
+    }
 
-  for (const [key, target] of referencedTargets) {
-    if (allPaths.some((path) => path.toLowerCase() === key)) continue;
-    store.markRouteStatus(target.id, "missing");
-    changedRouteIds.push(target.id);
-    missingRouteCount += 1;
+    for (const [key, target] of referencedTargets) {
+      if (allPaths.some((path) => path.toLowerCase() === key)) continue;
+      store.markRouteStatus(target.id, "missing");
+      changedRouteIds.push(target.id);
+      missingRouteCount += 1;
+    }
   }
 
   store.setManifest("gpx_file_count", String(allPaths.length));
   store.setManifest("gpx_point_count", String(pointCount));
-  store.setManifest("source_gpx_bundle_sha256", bundleHash.digest("hex"));
+  // Subset archives must hash remaining fingerprints, not only files in this ZIP.
+  store.setManifest(
+    "source_gpx_bundle_sha256",
+    preserveAbsent ? bundleHashFromFingerprints(store) : bundleHash.digest("hex")
+  );
   store.flush();
 
   return {

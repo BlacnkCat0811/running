@@ -20,6 +20,7 @@ import type {
   DataAuditResponse,
   DashboardResponse,
   DiagnosticExportResponse,
+  MobileGoalsResponse,
   MobileStatisticsResponse,
   MobileTodayResponse,
   MobileTrendsResponse,
@@ -48,6 +49,8 @@ import type {
   WorkoutZoneSummary,
   WorkoutSeriesResponse
 } from "@rai/api-contracts";
+import { assembleMobileCoach } from "./mobile-read.js";
+import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
 
 const parseJson = <T>(value: unknown, fallback: T): T => {
   if (typeof value !== "string") return fallback;
@@ -207,7 +210,10 @@ export class RaiReadStore {
     };
   }
 
-  mobileToday(goalDistanceKm: number | null): MobileTodayResponse {
+  mobileToday(
+    goalDistanceKm: number | null,
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession">
+  ): MobileTodayResponse {
     const today = mobileLocalDate();
     const weekStart = mobileWeekStart(today);
     const weekEnd = shiftMobileDate(weekStart, 6);
@@ -265,6 +271,64 @@ export class RaiReadStore {
     `).get(weekStart, weekEnd) as Record<string, unknown>;
 
     const weekDistanceKm = Number(weekRow.distance_km ?? 0);
+    const recentWorkouts = this.workoutsRepository.list("", [], 5, 0).map((item) => this.toWorkoutListItem(item)!);
+    const previousWeekStart = shiftMobileDate(weekStart, -7);
+    const previousWeekEnd = shiftMobileDate(weekStart, -1);
+    const previousWeekRow = this.database.prepare(`
+      SELECT COALESCE(SUM(distance_km), 0) AS distance_km
+      FROM active_workout_training_loads
+      WHERE local_date BETWEEN ? AND ?
+    `).get(previousWeekStart, previousWeekEnd) as Record<string, unknown>;
+    const priorFourStart = shiftMobileDate(weekStart, -56);
+    const priorFourEnd = shiftMobileDate(weekStart, -29);
+    const recentFourStart = shiftMobileDate(weekStart, -28);
+    const recentFourEnd = shiftMobileDate(weekStart, -1);
+    const volumeRows = this.database.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN local_date BETWEEN ? AND ? THEN distance_km ELSE 0 END), 0) AS recent_km,
+        COALESCE(SUM(CASE WHEN local_date BETWEEN ? AND ? THEN distance_km ELSE 0 END), 0) AS previous_km
+      FROM active_workout_training_loads
+    `).get(recentFourStart, recentFourEnd, priorFourStart, priorFourEnd) as Record<string, unknown>;
+    const previousFourKm = Number(volumeRows.previous_km ?? 0);
+    const recentFourKm = Number(volumeRows.recent_km ?? 0);
+    const fourWeekDistanceChangeFraction = previousFourKm > 0 ? (recentFourKm - previousFourKm) / previousFourKm : null;
+    const dashboard = this.dashboard();
+    const latestMetric = this.statisticsRepository.latestMetric();
+    const metricEnd = latestMetric?.localDate ?? latestDataDate ?? today;
+    const recentMetrics = this.statisticsRepository.metricsBetween(shiftMobileDate(metricEnd, -56), metricEnd);
+    const week = {
+      periodStart: weekStart,
+      periodEnd: weekEnd,
+      distanceKm: weekDistanceKm,
+      durationSeconds: Number(weekRow.duration_seconds ?? 0),
+      workoutCount: Number(weekRow.workout_count ?? 0),
+      goalDistanceKm: goalDistanceKm,
+      goalProgressFraction:
+        goalDistanceKm !== null && goalDistanceKm > 0
+          ? Math.min(1, weekDistanceKm / goalDistanceKm)
+          : null
+    };
+    const coach = assembleMobileCoach({
+      database: this.database,
+      dashboard,
+      latestMetric,
+      recentMetrics,
+      zones: this.trainingZonesCurrent(),
+      recentWorkouts,
+      week,
+      weekDaily,
+      today,
+      latestDataDate,
+      goals: {
+        easyDurationFloorFraction: goals?.easyDurationFloorFraction ?? DEFAULT_EASY_DURATION_FLOOR,
+        qualitySessionCap: goals?.qualitySessionCap ?? DEFAULT_QUALITY_SESSION_CAP,
+        raceTarget: goals?.raceTarget ?? null,
+        weekPlan: goals?.weekPlan ?? [],
+        lockedSession: goals?.lockedSession ?? null
+      },
+      fourWeekDistanceChangeFraction,
+      previousWeekDistanceKm: Number(previousWeekRow.distance_km ?? 0)
+    });
     return {
       generatedAt: new Date().toISOString(),
       timezone: "Asia/Shanghai",
@@ -280,20 +344,10 @@ export class RaiReadStore {
         energyKcal: Number(todayEnergy.energy_kcal ?? 0) > 0 ? Number(todayEnergy.energy_kcal) : null,
         workoutCount: Number(todayRow.workout_count ?? 0)
       },
-      week: {
-        periodStart: weekStart,
-        periodEnd: weekEnd,
-        distanceKm: weekDistanceKm,
-        durationSeconds: Number(weekRow.duration_seconds ?? 0),
-        workoutCount: Number(weekRow.workout_count ?? 0),
-        goalDistanceKm: goalDistanceKm,
-        goalProgressFraction:
-          goalDistanceKm !== null && goalDistanceKm > 0
-            ? Math.min(1, weekDistanceKm / goalDistanceKm)
-            : null
-      },
+      week,
       weekDaily,
-      recentWorkouts: this.workoutsRepository.list("", [], 5, 0).map((item) => this.toWorkoutListItem(item)!)
+      recentWorkouts,
+      ...coach
     };
   }
 
@@ -496,6 +550,25 @@ export class RaiReadStore {
       }
     }
 
+    const abilitySeries = this.trendsRepository.load(84);
+    const latestAbility = abilitySeries.daily.at(-1);
+    if (abilitySeries.daily.length >= 2) {
+      const start = abilitySeries.daily[0]?.trueAbility;
+      const end = latestAbility?.trueAbility;
+      if (start != null && end != null && end > start + 0.5) {
+        insights.push({
+          kind: "positive",
+          title: "真实能力在爬升",
+          detail: `近 ${abilitySeries.daily.length} 日 TA 从 ${start.toFixed(1)} 到 ${end.toFixed(1)}。`
+        });
+      } else if (latestAbility && latestAbility.decayPoints > 0) {
+        insights.push({
+          kind: "warning",
+          title: "停跑衰减中",
+          detail: `真实能力已计入 ${latestAbility.decayPoints.toFixed(1)} 点停跑衰减，与训练表现分开看。`
+        });
+      }
+    }
     return {
       generatedAt: new Date().toISOString(),
       timezone: "Asia/Shanghai",
@@ -511,7 +584,24 @@ export class RaiReadStore {
           ? { month: String(biggestMonthRow.month), distanceKm: Number(biggestMonthRow.distance_km ?? 0) }
           : null
       },
-      insights
+      insights,
+      ability: abilitySeries.daily.map((day) => ({
+        date: day.date,
+        trueAbility: day.trueAbility,
+        decayPoints: day.decayPoints,
+        growthVelocityPerWeek: day.growthVelocityPerWeek,
+        status: day.status
+      })),
+      currentAbility: abilitySeries.workouts.map((workout) => ({
+        id: workout.id,
+        date: workout.date,
+        currentAbility: workout.currentAbility,
+        confidence: workout.confidence,
+        assessmentStatus: workout.assessmentStatus,
+        distanceKm: workout.distanceKm
+      })),
+      growthVelocityPerWeek: latestAbility?.growthVelocityPerWeek ?? null,
+      decayPoints: latestAbility?.decayPoints ?? 0
     };
   }
 

@@ -446,6 +446,154 @@ export interface WorkoutSeriesResponse {
   };
 }
 
+export type MobileVerdictTone = "green" | "yellow" | "red";
+export type MobileDayPhase = "need_sync" | "morning_open" | "locked" | "post_run" | "rest_done";
+export type MobileSessionKind =
+  | "rest"
+  | "recovery"
+  | "easy"
+  | "long_run"
+  | "tempo"
+  | "interval";
+export type MobileRaceDistance = "five_k" | "ten_k" | "half_marathon";
+export type MobileStimulusMatch = "aligned" | "too_hard" | "too_easy" | "unknown";
+
+export interface MobileTrigger {
+  code: string;
+  value: number | null;
+  threshold: number | null;
+  detail: string;
+}
+
+export interface MobileAbilityCard {
+  trueAbility: number | null;
+  currentAbility: number | null;
+  changeFrom7DaysAgo: number | null;
+  growthVelocityPerWeek: number | null;
+  decayPoints: number;
+  snapshotDate: string | null;
+  explanation: string;
+}
+
+export interface MobileCalibrationCard {
+  status: "not_started" | "calibrating" | "completed";
+  eligibleSessions: number;
+  eligibleDurationMinutes: number;
+  spanDays: number;
+  highCoverageSessions: number;
+  requirements: DashboardResponse["calibration"]["requirements"];
+  message: string;
+}
+
+export interface MobileVerdict {
+  tone: MobileVerdictTone;
+  title: string;
+  reason: string;
+  triggers: MobileTrigger[];
+  stale: boolean;
+}
+
+export interface MobileNextSession {
+  kind: MobileSessionKind;
+  title: string;
+  reason: string;
+  distanceKm: number | null;
+  durationMinutes: number | null;
+  paceSecondsPerKmLower: number | null;
+  paceSecondsPerKmUpper: number | null;
+  heartRateBpmLower: number | null;
+  heartRateBpmUpper: number | null;
+}
+
+export interface MobileRecoveryBreakdown {
+  score: number | null;
+  lastNightSleepMinutes: number | null;
+  sleepBaselineMinutes: number | null;
+  morningHrvMs: number | null;
+  hrvBaselineMs: number | null;
+  restingHeartRateBpm: number | null;
+  restingHeartRateBaselineBpm: number | null;
+  note: string;
+}
+
+export interface MobilePostRunVerdict {
+  workoutId: string;
+  startedAt: string;
+  sessionType: string;
+  stimulusType: string;
+  stimulusMatch: MobileStimulusMatch;
+  indoor: boolean | null;
+  updatedTrueAbility: boolean;
+  trueAbilityDelta: number | null;
+  currentAbility: number | null;
+  trueAbilityAfter: number | null;
+  headline: string;
+  details: string[];
+}
+
+export interface MobileWeekStructure {
+  easyDurationFraction: number | null;
+  easyDurationFloorFraction: number;
+  qualitySessionCount: number;
+  qualitySessionCap: number;
+  easyHonesty: {
+    intendedEasyCount: number;
+    easyEnoughCount: number;
+    honestyFraction: number | null;
+    note: string;
+  };
+  remainingDistanceKm: number | null;
+}
+
+export interface MobileRaceTarget {
+  date: string;
+  distance: MobileRaceDistance;
+  targetPaceSecondsPerKm: number | null;
+}
+
+export interface MobileRaceCard {
+  target: MobileRaceTarget | null;
+  daysUntil: number | null;
+  taper: boolean;
+  shapeScore: number | null;
+  volumeFraction: number | null;
+  longRunFraction: number | null;
+  note: string;
+}
+
+export interface MobileInjuryFlag {
+  code: string;
+  title: string;
+  detail: string;
+}
+
+export interface MobileWeekPlanDay {
+  localDate: string;
+  kind: MobileSessionKind | "completed";
+  title: string;
+  planned: boolean;
+  completedWorkoutId: string | null;
+  distanceKm: number;
+  workoutCount: number;
+}
+
+export interface MobileLockedSession {
+  localDate: string;
+  session: MobileNextSession;
+  verdictTone: MobileVerdictTone;
+  lockedAt: string;
+}
+
+export interface MobileLockState {
+  present: boolean;
+  relockSuggested: boolean;
+  lockedAt: string | null;
+}
+
+export interface LockMobileSessionInput {
+  action: "lock" | "relock";
+}
+
 /** Aggregated payload for the iOS home page ("今天"). */
 export interface MobileTodayResponse {
   generatedAt: string;
@@ -472,6 +620,18 @@ export interface MobileTodayResponse {
   /** Monday..Sunday of the current week; missing days are zero-filled. */
   weekDaily: Array<{ localDate: string; distanceKm: number; workoutCount: number }>;
   recentWorkouts: WorkoutListItem[];
+  ability: MobileAbilityCard;
+  calibration: MobileCalibrationCard;
+  verdict: MobileVerdict;
+  nextSession: MobileNextSession;
+  recovery: MobileRecoveryBreakdown;
+  postRun: MobilePostRunVerdict | null;
+  weekStructure: MobileWeekStructure;
+  race: MobileRaceCard;
+  injuryFlags: MobileInjuryFlag[];
+  weekPlan: MobileWeekPlanDay[];
+  phase: MobileDayPhase;
+  lock: MobileLockState;
 }
 
 /** Aggregated payload for the iOS statistics page. */
@@ -519,16 +679,43 @@ export interface MobileTrendsResponse {
     biggestMonth: { month: string; distanceKm: number } | null;
   };
   insights: Array<{ kind: "positive" | "warning"; title: string; detail: string }>;
+  ability: Array<{
+    date: string;
+    trueAbility: number | null;
+    decayPoints: number;
+    growthVelocityPerWeek: number | null;
+    status: string;
+  }>;
+  currentAbility: Array<{
+    id: string;
+    date: string;
+    currentAbility: number | null;
+    confidence: number | null;
+    assessmentStatus: string;
+    distanceKm: number | null;
+  }>;
+  growthVelocityPerWeek: number | null;
+  decayPoints: number;
 }
 
 /** Weekly training goals persisted server-side for the iOS settings page. */
 export interface MobileGoalsResponse {
   weeklyDistanceKm: number;
+  easyDurationFloorFraction: number;
+  qualitySessionCap: number;
+  raceTarget: MobileRaceTarget | null;
+  weekPlan: Array<{ localDate: string; kind: MobileSessionKind; distanceKm: number | null }>;
+  lockedSession: MobileLockedSession | null;
   updatedAt: string;
 }
 
 export interface UpdateMobileGoalsInput {
   weeklyDistanceKm: number;
+  easyDurationFloorFraction?: number;
+  qualitySessionCap?: number;
+  raceTarget?: MobileRaceTarget | null;
+  weekPlan?: Array<{ localDate: string; kind: MobileSessionKind; distanceKm: number | null }>;
+  lockedSession?: MobileLockedSession | null;
 }
 
 export interface WorkoutSplit {

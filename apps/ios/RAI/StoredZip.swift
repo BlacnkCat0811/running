@@ -1,7 +1,7 @@
 import Foundation
 import zlib
 
-enum StoredZip {
+nonisolated enum StoredZip {
     static func write(files: [(name: String, url: URL)], to url: URL) throws {
         let entries = try files.map { file in
             (name: file.name, data: try Data(contentsOf: file.url, options: [.mappedIfSafe]))

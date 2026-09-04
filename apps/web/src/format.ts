@@ -58,7 +58,24 @@ export const shortDate = (value: string): string =>
     day: "2-digit"
   }).format(new Date(value));
 
+const sessionKindLabels: Record<string, string> = {
+  rest: "休息",
+  recovery: "恢复跑",
+  easy: "轻松跑",
+  long_run: "长距离",
+  tempo: "节奏跑",
+  interval: "间歇跑"
+};
+
+const raceDistanceLabels: Record<string, string> = {
+  five_k: "5 公里",
+  ten_k: "10 公里",
+  half_marathon: "半程马拉松"
+};
+
 export const sessionType = (value: string): string => sessionLabels[value] ?? value;
+export const sessionKind = (value: string): string => sessionKindLabels[value] ?? sessionType(value);
+export const raceDistance = (value: string): string => raceDistanceLabels[value] ?? value;
 export const status = (value: string | null): string => (value ? statusLabels[value] ?? value : "--");
 
 const stimulusLabels: Record<string, string> = {

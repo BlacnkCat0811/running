@@ -1,17 +1,31 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct RootView: View {
     @Environment(ServerSession.self) private var session
     @Environment(HealthKitSync.self) private var healthSync
-    @State private var showSettings = false
+    @Environment(ChromeController.self) private var chrome
+    @Environment(ServerDiscovery.self) private var discovery
 
     var body: some View {
+        @Bindable var chrome = chrome
         connectedOrSetup
-            .sheet(isPresented: $showSettings) {
+            .sheet(isPresented: $chrome.showSettings) {
                 settingsSheet
             }
-            .onAppear { session.startMonitoring() }
-            .onDisappear { session.stopMonitoring() }
+            .onAppear {
+                session.startMonitoring()
+                discovery.start()
+                healthSync.startForegroundObserver { [session, healthSync] in
+                    await healthSync.syncIfNeeded(to: session.serverURL, apiToken: session.apiToken, force: true)
+                }
+            }
+            .onDisappear {
+                session.stopMonitoring()
+                discovery.stop()
+            }
     }
 
     @ViewBuilder
@@ -33,8 +47,15 @@ struct RootView: View {
     private func connectedView(url: URL) -> some View {
         #if os(iOS)
         ZStack(alignment: .topTrailing) {
-            AppWebView(url: url, reloadToken: session.reloadToken, apiToken: session.apiToken)
-                .ignoresSafeArea()
+            AppWebView(
+                url: url,
+                reloadToken: session.reloadToken,
+                snapshot: nativeSnapshot,
+                session: session,
+                healthSync: healthSync,
+                chrome: chrome
+            )
+            .ignoresSafeArea()
             VStack(alignment: .trailing, spacing: 8) {
                 chromeButtons
                 statusBanner
@@ -44,37 +65,67 @@ struct RootView: View {
         }
         #else
         NavigationStack {
-            AppWebView(url: url, reloadToken: session.reloadToken, apiToken: session.apiToken)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle("RAI")
-                .toolbar {
-                    ToolbarItem(placement: .automatic) {
-                        Button("服务器") { showSettings = true }
-                    }
-                    ToolbarItem(placement: .automatic) {
-                        Button("刷新") { session.reload() }
-                    }
+            AppWebView(
+                url: url,
+                reloadToken: session.reloadToken,
+                snapshot: nativeSnapshot,
+                session: session,
+                healthSync: healthSync,
+                chrome: chrome
+            )
+            .ignoresSafeArea(edges: .bottom)
+            .navigationTitle("RAI")
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Button("服务器") { chrome.openServer() }
                 }
+                ToolbarItem(placement: .automatic) {
+                    Button("刷新") { session.reload() }
+                }
+            }
         }
+        #endif
+    }
+
+    private var nativeSnapshot: NativeBridgeSnapshot {
+        NativeBridgeSnapshot(
+            token: session.apiToken,
+            reachable: session.isReachable,
+            lastSyncAt: healthSync.lastSyncAtISO,
+            lastSyncMessage: healthSync.message,
+            lastSyncError: healthSync.lastError,
+            lastWorkoutCount: healthSync.lastWorkoutCount,
+            isBusy: healthSync.isBusy,
+            chromeTop: nativeChromeTop,
+            dataUpdatedGeneration: healthSync.dataUpdatedGeneration
+        )
+    }
+
+    private var nativeChromeTop: Double {
+        #if os(iOS)
+        chrome.overlayHeight
+        #else
+        0
         #endif
     }
 
     private var chromeButtons: some View {
         HStack(spacing: 12) {
             #if os(iOS)
-            Button(healthSync.isBusy ? "同步中" : "同步健康") {
-                Task {
-                    await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
-                    if healthSync.lastError == nil {
-                        session.reload()
+            if !session.hasConnectedOnce || !healthSync.hasCompletedSync {
+                Button(healthSync.isBusy ? "同步中" : "同步健康") {
+                    Task {
+                        await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
                     }
                 }
+                .disabled(healthSync.isBusy || !session.isReachable)
             }
-            .disabled(healthSync.isBusy || !session.isReachable)
             #endif
-            Button("服务器") { showSettings = true }
-            Button("刷新") { session.reload() }
-                .disabled(!session.isReachable)
+            Button("服务器") { chrome.openServer() }
+            if !session.hasConnectedOnce {
+                Button("刷新") { session.reload() }
+                    .disabled(!session.isReachable)
+            }
         }
         .font(.footnote.weight(.semibold))
         .padding(.horizontal, 12)
@@ -86,7 +137,7 @@ struct RootView: View {
     private var statusBanner: some View {
         if !session.isReachable, let error = session.lastError {
             banner(text: error, color: Color.orange) {
-                showSettings = true
+                chrome.openServer()
             }
         } else if let error = healthSync.lastError {
             banner(text: error, color: Color.red) {
@@ -123,7 +174,7 @@ struct RootView: View {
                 #endif
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("完成") { showSettings = false }
+                        Button("完成") { chrome.showSettings = false }
                     }
                 }
         }
@@ -135,6 +186,7 @@ struct RootView: View {
 
 struct SetupView: View {
     @Environment(ServerSession.self) private var session
+    @Environment(ServerDiscovery.self) private var discovery
 
     var body: some View {
         @Bindable var session = session
@@ -157,11 +209,27 @@ struct SetupView: View {
                 }
             }
 
+            if !discovery.candidates.isEmpty {
+                Section("发现的 RAI 服务") {
+                    ForEach(discovery.candidates, id: \.absoluteString) { url in
+                        Button(url.absoluteString) {
+                            session.serverURLString = url.absoluteString
+                        }
+                    }
+                }
+            }
             Section("使用") {
                 Text("1. 虚拟机运行 npm run dev:device，把打印的局域网地址填到上面。")
-                Text("2. 连上后点「同步健康」，允许读取跑步、心率和路线。")
+                Text("2. 连上后在设置里点「同步健康」，允许读取跑步、心率和路线。")
                 Text("3. 导入完成后点底部训练、统计、趋势查看结果。")
                 Text("4. 不要填 127.0.0.1。VMware 请用桥接，USB 只负责安装 App。")
+                #if os(iOS)
+                Button("打开健康权限") {
+                    if let url = URL(string: "x-apple-health://") {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                #endif
             }
         }
         .formStyle(.grouped)

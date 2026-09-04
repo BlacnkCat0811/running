@@ -24,6 +24,7 @@ interface ParsedArguments {
   jsonReport: string;
   replace: boolean;
   batchId: string | null;
+  preserveAbsent: boolean;
 }
 
 function optionValue(args: string[], name: string, fallback: string): string {
@@ -39,7 +40,7 @@ function parseArguments(argv: string[]): ParsedArguments {
   if (command !== "import" && command !== "incremental-import" && command !== "audit") {
     throw new Error(
       "Usage: data:import -- --input <export-folder> --database <sqlite> --replace\n" +
-        "   or: tsx packages/health-export-parser/src/cli.ts incremental-import --input <export-folder> --database <cloned-sqlite> [--batch-id <id>]\n" +
+        "   or: tsx packages/health-export-parser/src/cli.ts incremental-import --input <export-folder> --database <cloned-sqlite> [--batch-id <id>] [--preserve-absent]\n" +
         "   or: data:audit -- --database <sqlite> --report <markdown>"
     );
   }
@@ -54,6 +55,7 @@ function parseArguments(argv: string[]): ParsedArguments {
     ),
     replace: argv.includes("--replace")
     ,batchId: argv.includes("--batch-id") ? optionValue(argv, "--batch-id", "") : null
+    ,preserveAbsent: argv.includes("--preserve-absent")
   };
 }
 
@@ -212,7 +214,8 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       atomic: false,
       ...(incremental ? { incremental: {
         generation: stableId("import_generation", [batchId, new Date().toISOString()]),
-        batchId
+        batchId,
+        ...(args.preserveAbsent ? { preserveAbsent: true } : {})
       } } : {}),
       onProgress: ({ bytesRead, totalBytes, recordCount, workoutCount }) => {
         const percent = ((bytesRead / totalBytes) * 100).toFixed(0);
@@ -221,7 +224,11 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     });
 
     console.log("Parsing GPX routes...");
-    const gpxResult = await importGpxRoutes(args.input, store);
+    const gpxResult = await importGpxRoutes(
+      args.input,
+      store,
+      args.preserveAbsent ? { preserveAbsent: true } : undefined
+    );
 
     console.log("Building canonical running workout groups...");
     const routeDirtyTimes = (gpxResult.changedRouteIds ?? []).flatMap((routeId) => {

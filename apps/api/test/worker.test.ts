@@ -31,7 +31,12 @@ interface ImportWorkerTestSurface {
   backupDatabase(database: DatabaseSync, destination: string): Promise<void>;
   removePartialBackupFile(path: string): Promise<void>;
   preserveHistoricalState(stagingDatabase: string, previousDatabase: string): void;
-  analyzeDatasetChange(stagingDatabase: string, previousDatabase: string, batchId?: string): {
+  analyzeDatasetChange(
+    stagingDatabase: string,
+    previousDatabase: string,
+    batchId?: string,
+    preserveAbsent?: boolean
+  ): {
     mode: "unchanged" | "data-only" | "incremental" | "full";
     dirtyFromAt: string | null;
     insertedWorkouts: number;
@@ -1537,6 +1542,32 @@ for (const transition of ["missing-to-present", "present-to-missing", "value-cha
   });
 }
 
+test("preserve-absent GPX bundle hash change without fingerprint diffs does not dirty all sessions", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-preserve-route-hash-"));
+  const previousPath = join(root, "previous.sqlite");
+  const stagingPath = join(root, "staging.sqlite");
+  const previous = await seedCanonical(previousPath);
+  const staging = await seedCanonical(stagingPath);
+  previous.database.prepare(`
+    INSERT INTO import_manifest (key, value) VALUES ('source_gpx_bundle_sha256', 'old-gpx-hash')
+  `).run();
+  staging.database.prepare(`
+    INSERT INTO import_manifest (key, value) VALUES ('source_gpx_bundle_sha256', 'subset-gpx-hash')
+  `).run();
+  previous.close();
+  staging.close();
+  try {
+    const worker = new ImportWorker(join(root, "active.sqlite"), root) as unknown as ImportWorkerTestSurface;
+    const change = worker.analyzeDatasetChange(stagingPath, previousPath, undefined, true);
+    assert.equal(change.mode, "unchanged");
+    assert.equal(change.dirtyFromAt, null);
+    assert.equal(change.insertedWorkouts, 0);
+    assert.equal(change.routesUpdated, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("starts route recompute at the changed GPX workout instead of the first workout", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-route-granular-diff-"));
   const previousPath = join(root, "previous.sqlite");
@@ -1567,6 +1598,10 @@ test("starts route recompute at the changed GPX workout instead of the first wor
     assert.equal(change.mode, "incremental");
     assert.equal(change.dirtyFromAt, runDate(7));
     assert.equal(change.routesUpdated, 1);
+    const preserveAbsentChange = worker.analyzeDatasetChange(stagingPath, previousPath, undefined, true);
+    assert.equal(preserveAbsentChange.mode, "incremental");
+    assert.equal(preserveAbsentChange.dirtyFromAt, runDate(7));
+    assert.equal(preserveAbsentChange.routesUpdated, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2526,6 +2561,65 @@ test("reports the import worker as running until asynchronous terminal cleanup f
     await waitFor(() => !worker.isRunning);
   } finally {
     finishTerminalCleanup?.();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("HealthKit uploads pass --preserve-absent and directory exports do not", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-healthkit-preserve-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  mkdirSync(join(root, "export"));
+  writeFileSync(join(root, "export", "export.xml"), "<HealthData />", "utf8");
+  const active = await seedCanonical(databasePath);
+  active.close();
+  const captureCommand = async (
+    source: { kind: string; displayName: string; originalPath?: string }
+  ): Promise<string[]> => {
+    const importWorker = new ImportWorker(databasePath, root, root);
+    const worker = importWorker as unknown as ImportWorkerTestSurface;
+    let captured: string[] | null = null;
+    worker.command = async (args) => {
+      captured = args;
+      throw new Error("fixture stop after capturing import args");
+    };
+    try {
+      importWorker.create(join(root, "export"), undefined, "source-healthkit", source);
+      await waitFor(() => captured !== null && !importWorker.isRunning);
+      assert.ok(captured);
+      return captured;
+    } finally {
+      await importWorker.close();
+    }
+  };
+  try {
+    const healthKitArgs = await captureCommand({
+      kind: "upload",
+      displayName: "apple-health-healthkit.zip"
+    });
+    assert.ok(healthKitArgs.includes("incremental-import"));
+    assert.ok(healthKitArgs.includes("--preserve-absent"));
+
+    const originalNameArgs = await captureCommand({
+      kind: "upload",
+      displayName: "health.zip",
+      originalPath: join(root, "apple-health-healthkit-local.zip")
+    });
+    assert.ok(originalNameArgs.includes("--preserve-absent"));
+
+    const directoryArgs = await captureCommand({
+      kind: "directory",
+      displayName: "apple-health-healthkit.zip"
+    });
+    assert.ok(directoryArgs.includes("incremental-import"));
+    assert.equal(directoryArgs.includes("--preserve-absent"), false);
+
+    const discoveredArgs = await captureCommand({
+      kind: "discovered",
+      displayName: "apple-health-healthkit.zip"
+    });
+    assert.equal(discoveredArgs.includes("--preserve-absent"), false);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

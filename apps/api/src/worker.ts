@@ -24,6 +24,7 @@ import {
   type StagedAuditFiles,
 } from "@rai/health-export-parser";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
+import { isHealthKitUploadSource } from "./import-sources.js";
 import { RuntimeStateStore } from "./runtime-state.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 
@@ -555,7 +556,14 @@ export function predictionModelArtifactDirectory(
 
 interface MutableImportJob extends ImportJobResponse {
   inputPath: string;
+  preserveAbsent?: boolean;
   onTerminal?: (succeeded: boolean, durable: boolean) => void | Promise<void>;
+}
+
+export interface ImportWorkerSource {
+  kind?: string | null;
+  displayName?: string | null;
+  originalPath?: string | null;
 }
 
 interface ImportDatasetChange {
@@ -599,7 +607,8 @@ export class ImportWorker {
   create(
     inputPathValue: string,
     onTerminal?: (succeeded: boolean, durable: boolean) => void | Promise<void>,
-    sourceId?: string
+    sourceId?: string,
+    source?: ImportWorkerSource
   ): ImportJobResponse {
     if (this.closing) throw new Error("导入服务正在关闭");
     if (this.running) throw new Error("已有导入任务正在执行");
@@ -611,6 +620,7 @@ export class ImportWorker {
       throw new Error("目录中未找到 export.xml 或导出.xml");
     }
     const id = `web_import_${Date.now().toString(36)}`;
+    const preserveAbsent = isHealthKitUploadSource(source ?? {});
     const job: MutableImportJob = {
       id,
       status: "queued",
@@ -620,7 +630,8 @@ export class ImportWorker {
       completedAt: null,
       error: null,
       inputPath,
-      ...(sourceId === undefined ? {} : { sourceId })
+      ...(sourceId === undefined ? {} : { sourceId }),
+      ...(preserveAbsent ? { preserveAbsent: true } : {})
     };
     if (onTerminal) job.onTerminal = onTerminal;
     this.jobs.set(id, job);
@@ -730,11 +741,12 @@ export class ImportWorker {
         stagedMarkdownReport,
         "--json-report",
         stagedJsonReport,
-        ...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"])
+        ...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"]),
+        ...(currentBackupPath && job.preserveAbsent ? ["--preserve-absent"] : [])
       ]);
       this.assertNotClosing();
       const change = currentBackupPath
-        ? this.analyzeDatasetChange(stagingDatabase, currentBackupPath, job.id)
+        ? this.analyzeDatasetChange(stagingDatabase, currentBackupPath, job.id, job.preserveAbsent)
         : {
             mode: "full" as const,
             dirtyFromAt: null,
@@ -946,7 +958,12 @@ export class ImportWorker {
     } finally { database.close(); }
   }
 
-  private analyzeDatasetChange(stagingPath: string, previousPath: string, batchId?: string): ImportDatasetChange {
+  private analyzeDatasetChange(
+    stagingPath: string,
+    previousPath: string,
+    batchId?: string,
+    preserveAbsent?: boolean
+  ): ImportDatasetChange {
     const database = new DatabaseSync(stagingPath);
     applyBusyTimeout(database);
     try {
@@ -1122,7 +1139,10 @@ export class ImportWorker {
           (SELECT MIN(value) FROM route_times) AS dirtyFromAt
       `).get() as { count: number; dirtyFromAt: string | null } : { count: 0, dirtyFromAt: null };
       const hasGranularRouteChanges = routeChanges.count > 0;
-      const routesUpdated = routeFingerprintChanged
+      const ignoreUngranularPreserveAbsentRoutes =
+        Boolean(preserveAbsent) && routeFingerprintChanged && !hasGranularRouteChanges;
+      const routeChangeAffectsDirtyRange = routeFingerprintChanged && !ignoreUngranularPreserveAbsentRoutes;
+      const routesUpdated = routeChangeAffectsDirtyRange
         ? hasGranularRouteChanges ? Number(routeChanges.count) : count("SELECT COUNT(*) AS count FROM workout_routes")
         : 0;
       const dirty = database.prepare(`SELECT MIN(value) AS dirtyFromAt FROM (
@@ -1140,7 +1160,7 @@ export class ImportWorker {
               OR current.status IS NOT old.status
       )`).get() as unknown as { dirtyFromAt: string | null };
       const hasWorkoutChange = insertedWorkouts + updatedWorkouts + removedWorkouts > 0;
-      if (!hasWorkoutChange && !routeFingerprintChanged && !healthChanged && !profileChanged) {
+      if (!hasWorkoutChange && !routeChangeAffectsDirtyRange && !healthChanged && !profileChanged) {
         return {
           mode: anyHealthRecordChanged || activitySummaryChanged || inventoryChanged ||
             auditManifestChanged || importIssuesChanged
@@ -1157,7 +1177,7 @@ export class ImportWorker {
       const granularDirtyFromAt = [dirty.dirtyFromAt, routeChanges.dirtyFromAt]
         .filter((value): value is string => value !== null)
         .sort()[0] ?? null;
-      const dirtyFromAt = routeFingerprintChanged && !hasGranularRouteChanges && !dirty.dirtyFromAt
+      const dirtyFromAt = routeChangeAffectsDirtyRange && !hasGranularRouteChanges && !dirty.dirtyFromAt
         ? (database.prepare("SELECT MIN(anchor_start_at) AS value FROM training_sessions").get() as { value: string | null }).value
         : granularDirtyFromAt;
       return {
