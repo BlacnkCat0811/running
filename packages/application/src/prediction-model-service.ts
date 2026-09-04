@@ -883,26 +883,7 @@ export class PredictionModelService {
       reasons.push("artifact_path_invalid");
       return reasons;
     }
-    const relativeArtifact = relative(resolve(this.artifactRoot), artifactDirectory);
-    if (
-      relativeArtifact === "" ||
-      isAbsolute(relativeArtifact) ||
-      relativeArtifact === ".." ||
-      relativeArtifact.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
-    ) {
-      reasons.push("artifact_path_outside_root");
-    }
-    const normalizedDir = artifactDirectory.replace(/\\/g, "/").toLowerCase();
     const modelPath = resolve(artifactDirectory, "model.onnx");
-    const normalizedModel = modelPath.replace(/\\/g, "/").toLowerCase();
-    const expectedPrefix = normalizedDir.endsWith("/") ? normalizedDir : `${normalizedDir}/`;
-    if (
-      normalizedModel !== `${normalizedDir}/model.onnx` &&
-      !normalizedModel.startsWith(expectedPrefix)
-    ) {
-      reasons.push("artifact_path_escape");
-      return reasons;
-    }
     try {
       if (!existsSync(modelPath) || !statSync(modelPath).isFile()) {
         reasons.push("artifact_model_missing");
@@ -912,6 +893,11 @@ export class PredictionModelService {
       reasons.push("artifact_model_missing");
       return reasons;
     }
+    // Authoritative confinement uses realpaths: this.artifactRoot is derived from
+    // SQLite's canonicalized database path (PRAGMA database_list resolves symlinks,
+    // e.g. macOS /var -> /private/var), while a runner reports the artifact path it
+    // was given. Comparing realpaths keeps both on the same basis and avoids
+    // false positives from symlink prefixes such as /var/folders on macOS.
     try {
       const realRoot = realpathSync(this.artifactRoot);
       const realArtifact = realpathSync(artifactDirectory);
@@ -927,8 +913,20 @@ export class PredictionModelService {
         modelFromArtifact.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
       ) reasons.push("artifact_path_escape");
     } catch {
-      reasons.push("artifact_unreadable");
-      return reasons;
+      // realpath can only fail if the artifact or its root vanished between checks;
+      // fall back to lexical confinement so the gate stays fail-closed.
+      const relativeArtifact = relative(resolve(this.artifactRoot), artifactDirectory);
+      if (
+        relativeArtifact === "" || isAbsolute(relativeArtifact) || relativeArtifact === ".." ||
+        relativeArtifact.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)
+      ) reasons.push("artifact_path_outside_root");
+      const normalizedDir = artifactDirectory.replace(/\\/g, "/").toLowerCase();
+      const normalizedModel = modelPath.replace(/\\/g, "/").toLowerCase();
+      const expectedPrefix = normalizedDir.endsWith("/") ? normalizedDir : `${normalizedDir}/`;
+      if (
+        normalizedModel !== `${normalizedDir}/model.onnx` &&
+        !normalizedModel.startsWith(expectedPrefix)
+      ) reasons.push("artifact_path_escape");
     }
     try {
       const digest = createHash("sha256").update(readFileSync(modelPath)).digest("hex");

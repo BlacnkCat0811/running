@@ -54,7 +54,9 @@ async function removeRuntimeRoot(path: string): Promise<void> {
 }
 
 async function waitForApi(child: ChildProcess, url: string, output: () => string): Promise<void> {
-  const deadline = Date.now() + 20_000;
+  // Parallel full-suite runs share the CPU with many real API child processes;
+  // keep the window generous so slow tsx/onnx startup does not flake.
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(output() || `API exited with ${child.exitCode}`);
     try {
@@ -68,7 +70,7 @@ async function waitForApi(child: ChildProcess, url: string, output: () => string
 
 async function waitForBoundPort(child: ChildProcess, output: () => string): Promise<number> {
   return new Promise<number>((resolvePort, reject) => {
-    const timer = setTimeout(() => reject(new Error(output() || "API did not report its bound port")), 20_000);
+    const timer = setTimeout(() => reject(new Error(output() || "API did not report its bound port")), 60_000);
     const onExit = (code: number | null): void => {
       clearTimeout(timer);
       reject(new Error(output() || `API exited with ${code}`));

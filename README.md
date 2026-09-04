@@ -122,6 +122,14 @@ npm run test:e2e:web
 npm run test:all
 ```
 
+仓库已提供 `pre-commit` 类型检查钩子（`.githooks/`）。新克隆后执行一次以启用：
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+（完整测试门禁见 CI 或推送前手动 `npm run test:all`。）
+
 ## 启动 Web
 
 开发模式同时启动本地 API 与 Vite：
@@ -146,6 +154,8 @@ npm start
 
 打开 http://127.0.0.1:8787。API 固定监听本机地址，不开放局域网访问。
 
+> **云部署（可选）**：仓库提供腾讯云 Ubuntu 部署参考（Nginx 反代 + Bearer token + systemd，API 仍只监听本机），详见 `deploy/README-UBUNTU.md`。注意：部署到云主机意味着健康数据与路线存放到你控制的服务器，请自行评估隐私与访问控制（token 保护、备份加密、`.env` 权限）。
+
 首次启动或数据库删除后，概览、训练和趋势会显示 Apple Health 导入引导；“数据与模型”仍可提交首次导入，“设置”仍可下载已有备份。没有数据库时，重算、创建备份和删除按钮会保持禁用。
 
 设置页可以创建、下载和显式删除本地 SQLite 备份。删除数据库必须输入完整确认文字，且系统会先创建一份 `before-delete` 在线备份；该操作不会删除 `apple_health_export/` 中的 Apple Health 原始文件。创建备份前会检查可用空间，自动备份默认保留最近 10 份且总量不超过 20 GiB，并至少保留最新一份。
@@ -161,14 +171,19 @@ packages/
   api-contracts/             Web 与 API 共享的 DTO
   contracts/                 跨平台 canonical 数据契约
   health-export-parser/      Apple 导出 XML/GPX 的 Node 适配器
-  scoring/                   无平台依赖的纯 TypeScript 评分核心
+  storage-sqlite/            SQLite schema、迁移、repository 与发布锁
+  features/                  无平台依赖的 Workout Feature Vector 提取
   physiology/                VO₂max、VDOT、乳酸阈值与公式比赛预测
   prediction-inference/      CatBoost ONNX artifact 校验与 Node 生产推理
-  features/                  无平台依赖的 Workout Feature Vector 提取
+  scoring/                   无平台依赖的纯 TypeScript 评分核心
+  training-load/             训练负荷（HRR-TRIMP、EWMA 与训练状态）
+  training-zones/            训练分区与时间线
   application/               SQLite 回放、任务队列、Run 与 active 指针
 apps/
   api/                       Fastify 本地 API、重算 worker 与安全导入切换
   web/                       React / Vite 响应式 Web 产品
+  ios/                       Xcode 调试宿主（WKWebView 显示 Web；含 HealthKit 只读同步）
+deploy/                      Ubuntu 云部署参考（Nginx + Bearer token + systemd）
 docs/
   ARCHITECTURE.md             Web 优先、兼容移动端的总体架构
   PARSER_DESIGN.md            解析规则和 canonical 数据说明
@@ -185,7 +200,7 @@ var/                          本地数据库和机器可读报告，不提交
 apple_health_export/          Apple 原始导出，不提交
 ```
 
-移动端尚未创建；当前先通过 Web 端完善数据和模型体验。
+原生移动端产品尚未立项。仓库内 `apps/ios/` 是已授权的 Xcode 调试宿主（WKWebView 加载现有 Web，HealthKit 只读同步用于增量导入，详见 `apps/ios/README.md`）；数据、评分和 SQLite 始终在本机 Node API 上运行。
 
 ## 隐私
 

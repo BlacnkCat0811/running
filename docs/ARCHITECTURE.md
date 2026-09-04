@@ -269,7 +269,6 @@ research/
   tests/
 
 docs/
-  decisions/                      ADR
   ARCHITECTURE.md
   ARCHITECTURE_DEBT_MIGRATION.md
   PARSER_DESIGN.md
@@ -332,7 +331,7 @@ API schema 由 OpenAPI 描述，HTTP DTO 统一定义在 `packages/api-contracts
 
 ## 7. 原生客户端范围
 
-本仓库当前只开发浏览器 Web、本地 API 和所需共享包。HealthKit adapter、原生移动端与原生桌面端均为范围外项目；除非经过单独产品决策，不在本仓库创建相关目录、同步协议或占位实现。
+当前产品范围（以仓库根目录 `AGENTS.md` 为准）为浏览器 Web、本地 API 及所需共享包。例外：`apps/ios/` 是经产品决策授权的 Xcode 调试宿主——WKWebView 加载现有 Web，仅做 HealthKit **只读**同步（增量导出）并上传到本地 API，不在设备上重写评分核心、不做 HealthKit 写入与后台 delivery。原生 React Native / 纯 SwiftUI 移动端产品与原生桌面端仍属范围外，需单独产品决策后方可立项。
 
 ## 8. 模型和数据版本
 

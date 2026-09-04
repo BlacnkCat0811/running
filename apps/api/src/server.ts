@@ -99,6 +99,14 @@ const app = Fastify({
   logger: { level: process.env.RAI_LOG_LEVEL ?? "info" },
   ajv: { customOptions: { removeAdditional: false } }
 });
+// Local-first product: keep the SPA and API out of third-party iframes and
+// guard against content-type sniffing. frame-ancestors does not constrain any
+// resource loading, so this cannot break the app itself.
+app.addHook("onSend", async (_request, reply) => {
+  reply.header("X-Frame-Options", "DENY");
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("Content-Security-Policy", "frame-ancestors 'none'");
+});
 const parsedWebPort = Number(process.env.RAI_WEB_PORT ?? 5173);
 const webPort = Number.isFinite(parsedWebPort) && parsedWebPort > 0 ? parsedWebPort : 5173;
 const allowPrivateLanWebPort = process.env.RAI_ALLOW_LAN_DEV === "1" ? webPort : undefined;

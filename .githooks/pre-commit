@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Local guard for a repository whose CI is not wired to its remote (gitee).
+# Catches type regressions before commit; the full `npm run test:all` gate
+# still belongs to CI / a pre-push manual run.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+exec npm run typecheck

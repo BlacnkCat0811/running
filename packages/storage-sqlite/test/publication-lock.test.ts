@@ -158,7 +158,7 @@ test("publication lock recovers a stale legacy directory", () => {
   }
 });
 
-test("publication lock rejects PID reuse when the process identity differs", () => {
+test("publication lock rejects PID reuse when the process identity differs", (context) => {
   const root = mkdtempSync(join(tmpdir(), "rai-reused-pid-lock-"));
   const databasePath = join(root, "rai.sqlite");
   const lockPath = `${databasePath}.import.lock`;
@@ -166,6 +166,29 @@ test("publication lock rejects PID reuse when the process identity differs", () 
     token: "reused-pid", pid: process.pid, kind: "cli",
     startedAt: "2020-01-01T00:00:00.000Z", processIdentity: "different-process"
   }));
+  // This scenario needs the platform process-identity probe: /proc on Linux,
+  // powershell on Windows, `ps` elsewhere. When the probe is unavailable the
+  // lock implementation fail-safely treats the owner as alive (and rejects),
+  // so the reclaim path cannot be exercised; skip instead of failing.
+  const probe = ((): boolean => {
+    if (process.platform === "linux") return true;
+    if (process.platform === "win32") {
+      const result = spawnSync("powershell.exe", [
+        "-NoProfile", "-NonInteractive", "-Command",
+        "(Get-Process -Id $PID -ErrorAction Stop).StartTime.ToUniversalTime().ToString('o')"
+      ], { encoding: "utf8", windowsHide: true, timeout: 5_000 });
+      return result.status === 0 && result.stdout.trim().length > 0;
+    }
+    const result = spawnSync("ps", ["-o", "lstart=", "-p", String(process.pid)], {
+      encoding: "utf8",
+      timeout: 5_000
+    });
+    return result.status === 0 && result.stdout.trim().length > 0;
+  })();
+  if (!probe) {
+    context.skip("process identity probing is unavailable in this environment");
+    return;
+  }
   try {
     const release = acquireDatabasePublicationLock(databasePath, "api");
     assert.equal(JSON.parse(readFileSync(lockPath, "utf8")).pid, process.pid);
