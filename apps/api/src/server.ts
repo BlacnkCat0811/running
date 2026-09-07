@@ -31,7 +31,7 @@ import {
   TrainingZoneProfileValidationError,
   buildPredictionReportAsync
 } from "@rai/application";
-import { acquireDatabasePublicationLock, RaiDatabase } from "@rai/storage-sqlite";
+import { acquireDatabasePublicationLock, ModelRunActivationError, RaiDatabase, SqliteModelRunRepository } from "@rai/storage-sqlite";
 import Fastify from "fastify";
 
 import { apiErrorPayload } from "./api-error.js";
@@ -64,6 +64,7 @@ import {
   predictionQuerySchema,
   predictionModelIdParamsSchema,
   predictionModelTrainBodySchema,
+  recoveryTrendQuerySchema,
   restoreBodySchema,
   trendQuerySchema,
   trainingLoadQuerySchema,
@@ -688,8 +689,10 @@ app.get("/v1/mobile/today", async () => {
 app.get("/v1/mobile/statistics", async () => withReadStore((store) => store.mobileStatistics()));
 
 app.get("/v1/mobile/trends", async () => withReadStore((store) => store.mobileTrends()));
-app.get<{ Querystring: { days?: string } }>("/v1/recovery-trends", async (request) =>
-  withReadStore((store) => store.recoveryTrends(Math.min(Math.max(Number(request.query.days ?? 28), 1), 365)))
+app.get<{ Querystring: { days?: string } }>(
+  "/v1/recovery-trends",
+  { schema: { querystring: recoveryTrendQuerySchema } },
+  async (request) => withReadStore((store) => store.recoveryTrends(Math.min(Math.max(Number(request.query.days ?? 28), 1), 365)))
 );
 
 app.get("/v1/mobile/goals", async () => mobileGoalsStore.read());
@@ -990,44 +993,18 @@ app.post<{ Params: { id: string } }>("/v1/model-runs/:id/activate", { schema: { 
   }
   const store = await openMainDatabase();
   try {
-    const validationGateTable = store.database
-      .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_validation_gates'")
-      .get();
-    const row = store.database
-      .prepare(`
-        SELECT model.status,
-          ${validationGateTable ? "EXISTS (SELECT 1 FROM model_validation_gates gate WHERE gate.candidate_model_run_id = model.id AND gate.status = 'failed')" : "0"} AS has_failed_validation_gate,
-          EXISTS (
-            SELECT 1 FROM training_metric_runs metric
-            WHERE metric.model_run_id = model.id AND metric.status = 'succeeded'
-          ) AS has_succeeded_training_metrics
-        FROM model_runs model
-        WHERE model.id = ?
-      `)
-      .get(request.params.id) as { status: string; has_succeeded_training_metrics: number; has_failed_validation_gate: number } | undefined;
-    if (!row) return reply.code(404).send({ message: "未找到模型运行" });
-    if (row.status !== "succeeded") return reply.code(409).send({ message: "只能激活成功的模型运行" });
-    if (row.has_succeeded_training_metrics !== 1) {
-      return reply.code(409).send({ message: "该模型运行没有成功的运动统计结果，不能激活" });
-    }
-    if (row.has_failed_validation_gate === 1) {
-      return reply.code(409).send({ message: "该模型运行未通过 shadow model 门禁，不能激活" });
-    }
     store.database.exec("BEGIN IMMEDIATE");
     try {
-      store.database
-        .prepare(`
-          INSERT INTO active_model_run (singleton, model_run_id, activated_at)
-          VALUES (1, ?, ?)
-          ON CONFLICT(singleton) DO UPDATE SET model_run_id = excluded.model_run_id,
-            activated_at = excluded.activated_at
-        `)
-        .run(request.params.id, new Date().toISOString());
-      // Ability model switch invalidates residual baselines; clear active CatBoost (R3-9).
-      store.database.exec("DELETE FROM active_prediction_model");
+      new SqliteModelRunRepository(store.database).activateSucceeded(request.params.id, new Date().toISOString());
       store.database.exec("COMMIT");
     } catch (error) {
-      store.database.exec("ROLLBACK");
+      try { store.database.exec("ROLLBACK"); } catch { /* preserve the activation error */ }
+      if (error instanceof ModelRunActivationError) {
+        if (error.code === "not_found") return reply.code(404).send({ message: "未找到模型运行" });
+        if (error.code === "not_succeeded") return reply.code(409).send({ message: "只能激活成功的模型运行" });
+        if (error.code === "missing_metrics") return reply.code(409).send({ message: "该模型运行没有成功的运动统计结果，不能激活" });
+        return reply.code(409).send({ message: "该模型运行未通过 shadow model 门禁，不能激活" });
+      }
       throw error;
     }
     return { activeModelRunId: request.params.id };

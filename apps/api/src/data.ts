@@ -42,6 +42,7 @@ import type {
   TrainingStatisticsHistoryResponse,
   TrainingStatisticsOverviewResponse,
   WorkoutTrainingLoad,
+  RecoveryTrendResponse,
   TrendResponse,
   WorkoutDetailResponse,
   WorkoutMetricSeries,
@@ -66,12 +67,14 @@ const parseJson = <T>(value: unknown, fallback: T): T => {
 const paceSeconds = (duration: number, distance: number | null): number | null =>
   distance !== null && distance > 0 ? duration / distance : null;
 
-const mobileLocalDate = (): string => new Intl.DateTimeFormat("en-CA", {
+const localDateInShanghai = (value: Date): string => new Intl.DateTimeFormat("en-CA", {
   timeZone: "Asia/Shanghai",
   year: "numeric",
   month: "2-digit",
   day: "2-digit"
-}).format(new Date());
+}).format(value);
+
+const mobileLocalDate = (): string => localDateInShanghai(new Date());
 
 const shiftMobileDate = (date: string, days: number): string => {
   const value = new Date(`${date}T00:00:00Z`);
@@ -639,18 +642,26 @@ export class RaiReadStore {
     };
   }
 
-  recoveryTrends(days: number) {
-    const end = new Date();
+  recoveryTrends(days: number, now = new Date()): RecoveryTrendResponse {
+    const normalizedDays = Math.min(365, Math.max(1, Math.trunc(Number.isFinite(days) ? days : 28)));
+    const endDate = localDateInShanghai(now);
     const dates: string[] = [];
-    for (let i = Math.max(1, days) - 1; i >= 0; i -= 1) {
-      const d = new Date(end.getTime() - i * 86400000).toISOString().slice(0, 10);
-      dates.push(d);
-    }
-    return { days: dates.map((date) => {
+    for (let i = normalizedDays - 1; i >= 0; i -= 1) dates.push(shiftMobileDate(endDate, -i));
+    const points = dates.map((date) => {
       const night = this.recoveryRepository.loadCanonicalNight(date, "Asia/Shanghai");
       const hrv = this.recoveryRepository.loadHrvDay(date, "Asia/Shanghai");
       return { date, sleepMinutes: night?.asleepUnionMinutes ?? null, hrvSdnnMs: hrv?.hrvSdnnMs ?? null, hrvSampleCount: hrv?.sampleCount ?? 0, hrvConfidence: hrv?.confidence ?? "missing", sourceCategory: night?.sourceCategory ?? null };
-    }) };
+    });
+    const latestDataDate = [...points].reverse().find((point) =>
+      point.sleepMinutes !== null || point.hrvSdnnMs !== null
+    )?.date ?? null;
+    return {
+      generatedAt: now.toISOString(),
+      asOf: endDate,
+      timezone: "Asia/Shanghai",
+      latestDataDate,
+      days: points
+    };
   }
 
   workout(id: string): WorkoutDetailResponse | null {

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -318,6 +319,62 @@ test("mobile goals store persists, clamps and recovers from corrupt files", () =
     writeFileSync(join(root, "var", "mobile-goals.json"), "{not json", "utf8");
     const recovered = new MobileGoalsStore(root).read();
     assert.equal(recovered.weeklyDistanceKm, DEFAULT_WEEKLY_DISTANCE_KM);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recovery trends use the configured local calendar date at the day boundary", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-recovery-trends-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(databasePath);
+  store.close();
+  const read = new RaiReadStore(databasePath);
+  try {
+    const result = read.recoveryTrends(2, new Date("2026-09-06T23:30:00.000Z"));
+    assert.equal(result.timezone, "Asia/Shanghai");
+    assert.equal(result.asOf, "2026-09-07");
+    assert.deepEqual(result.days.map((point) => point.date), ["2026-09-06", "2026-09-07"]);
+    assert.equal(result.latestDataDate, null);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("control goals migration commits the current goal and its history together", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-goals-control-"));
+  const controlPath = join(root, "var", "rai-control.sqlite");
+  try {
+    const legacyPath = join(root, "var", "mobile-goals.json");
+    const legacy = {
+      revision: 7,
+      weeklyDistanceKm: 42,
+      easyDurationFloorFraction: 0.75,
+      qualitySessionCap: 3,
+      raceTarget: null,
+      weekPlan: [],
+      lockedSession: null,
+      updatedAt: "2026-09-06T10:00:00.000Z"
+    };
+    mkdirSync(join(root, "var"), { recursive: true });
+    writeFileSync(legacyPath, `${JSON.stringify(legacy)}\n`, "utf8");
+    const store = new MobileGoalsStore(root, controlPath);
+    try {
+      assert.equal(store.read().weeklyDistanceKm, 42);
+      const control = new DatabaseSync(controlPath);
+      try {
+        const current = control.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get() as { revision: number };
+        const history = control.prepare("SELECT COUNT(*) AS count FROM mobile_goals_history").get() as { count: number };
+        assert.equal(current.revision, 0);
+        assert.equal(history.count, 1);
+      } finally {
+        control.close();
+      }
+      assert.ok(existsSync(`${legacyPath}.migration-complete`));
+    } finally {
+      store.close();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

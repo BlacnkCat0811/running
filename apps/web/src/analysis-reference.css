@@ -275,6 +275,13 @@
   .trends-page .event-grid a:last-child { border-right: 0; }
   .trends-page .trend-dimensions-panel > div:last-child { min-height: 180px; }
   .trends-page .trend-context-panel { margin-top: 12px; }
+  .trends-page .trend-recovery-panel { margin-top: 12px; }
+  .trends-page .trend-recovery-as-of { color: var(--analysis-ink); font: 11px "SFMono-Regular", Consolas, monospace; }
+  .trends-page .trend-recovery-facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; }
+  .trends-page .trend-recovery-facts > div { min-height: 70px; padding: 15px 16px; border-right: 1px dashed var(--analysis-grid); }
+  .trends-page .trend-recovery-facts > div:last-child { border-right: 0; }
+  .trends-page .trend-recovery-facts small { display: block; color: #486452; font-size: 11px; }
+  .trends-page .trend-recovery-facts b { display: block; margin-top: 9px; font: 16px "SFMono-Regular", Consolas, monospace; }
 
   /* Physiology and race predictions */
   .predictions-page { gap: 0; padding-bottom: 16px; }

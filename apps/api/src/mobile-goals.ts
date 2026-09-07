@@ -201,7 +201,6 @@ export class MobileGoalsStore {
         };
         const backup = `${this.filePath}.migrated.bak`;
         if (!existsSync(backup)) copyFileSync(this.filePath, backup);
-        writeFileSync(`${this.filePath}.migration-complete`, `${new Date().toISOString()}\n`, "utf8");
       }
       const payload = JSON.stringify({
         weeklyDistanceKm: initial.weeklyDistanceKm,
@@ -211,8 +210,19 @@ export class MobileGoalsStore {
         weekPlan: initial.weekPlan,
         lockedSession: initial.lockedSession
       });
-      database.prepare("INSERT INTO mobile_goals (singleton, revision, payload_json, updated_at) VALUES (1, ?, ?, ?)").run(initial.revision, payload, initial.updatedAt);
-      database.prepare("INSERT INTO mobile_goals_history (revision, payload_json, changed_at) VALUES (?, ?, ?)").run(initial.revision, payload, initial.updatedAt);
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        database.prepare("INSERT INTO mobile_goals (singleton, revision, payload_json, updated_at) VALUES (1, ?, ?, ?)").run(initial.revision, payload, initial.updatedAt);
+        database.prepare("INSERT INTO mobile_goals_history (revision, payload_json, changed_at) VALUES (?, ?, ?)").run(initial.revision, payload, initial.updatedAt);
+        database.exec("COMMIT");
+      } catch (error) {
+        try { database.exec("ROLLBACK"); } catch { /* preserve the migration error */ }
+        database.close();
+        throw error;
+      }
+      if (existsSync(this.filePath)) {
+        writeFileSync(`${this.filePath}.migration-complete`, `${new Date().toISOString()}\n`, "utf8");
+      }
     }
     return database;
   }

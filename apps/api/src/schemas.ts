@@ -46,6 +46,14 @@ export const trendQuerySchema = {
   properties: { days: { type: "string", pattern: "^[0-9]{1,4}$" } }
 } as const;
 
+export const recoveryTrendQuerySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    days: { type: "string", pattern: "^(?:[1-9]|[1-9][0-9]|[12][0-9]{2}|3[0-5][0-9]|36[0-5])$" }
+  }
+} as const;
+
 export const trainingStatisticsHistoryQuerySchema = {
   type: "object",
   additionalProperties: false,

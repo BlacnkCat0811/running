@@ -74,7 +74,7 @@ PATCH  /v1/workouts/:id/override     追加覆盖 revision 并重算
 
 # 趋势与恢复
 GET    /v1/trends                    能力趋势
-GET    /v1/recovery-trends?days=N    恢复事实趋势（睡眠/HRV/RHR，默认 28 天；桌面图表待接入，移动端恢复卡走 /v1/mobile/today）
+GET    /v1/recovery-trends?days=N    恢复事实趋势（默认 28 天，允许 1–365 的整数天数；Asia/Shanghai 本地日；当前返回睡眠/HRV）
 
 # 预测与模型
 GET    /v1/predictions               比赛场景预测（只读，可带温度/湿度/爬升参数）
@@ -110,13 +110,13 @@ GET    /v1/mobile/today              今日卡 + 恢复/教练裁决 + 本周目
 GET    /v1/mobile/statistics         近 3 月 + 28 天滚动统计/环比/心率区间
 GET    /v1/mobile/trends             12 周阶梯 + 4 周增幅 + 个人纪录
 GET    /v1/mobile/goals              读取周目标
-PUT    /v1/mobile/goals              写入周目标（1–500km，文件持久化）
+PUT    /v1/mobile/goals              写入周目标（1–500km，独立控制库持久化）
 POST   /v1/mobile/lock               锁定/重新锁定今日课表
 ```
 
-查询、路径参数和写入 body 均在 Fastify 路由入口使用 JSON Schema 校验；非法分页、趋势范围、训练类型、RPE、导入确认、删除确认结构和备份文件名会在进入业务层前返回 `400`。
+查询、路径参数和写入 body 均在 Fastify 路由入口使用 JSON Schema 校验；非法分页、趋势范围、恢复趋势天数、训练类型、RPE、导入确认、删除确认结构和备份文件名会在进入业务层前返回 `400`。恢复趋势响应包含 `generatedAt`、`asOf`、`timezone`、`latestDataDate` 与按本地日排列的 `days`，缺失睡眠/HRV 保持 `null`。
 
-模型对照使用 `Training Session` 稳定身份连接两个不可变 Run，返回共同训练数、平均 CA 差、平均绝对 CA 差、平均置信度差、最终 TA 差、资格状态变化数和 CA 变化最大的训练；对照是只读操作，不会移动 `active_model_run` 指针。模型激活会先执行 `rai-shadow-gate-v1`（记录于 `model_validation_gates`），失败时 incumbent 保持不变。
+模型对照使用 `Training Session` 稳定身份连接两个不可变 Run，返回共同训练数、平均 CA 差、平均绝对 CA 差、平均置信度差、最终 TA 差、资格状态变化数和 CA 变化最大的训练；对照是只读操作，不会移动 `active_model_run` 指针。模型激活由 `SqliteModelRunRepository.activateSucceeded()` 统一执行，HTTP 只负责事务边界和错误映射；它会检查成功状态、成功的训练统计和失败的 `rai-shadow-gate-v1`，再切换 active 指针并清理 active prediction model，失败时 incumbent 保持不变。
 
 数据审计页直接聚合 SQLite canonical 层和当前 active Feature，展示健康记录时间范围、原始/canonical Workout 收敛、Workout Group 与 Training Session 数、路线资产、来源类别、Session 状态、主要 HealthKit 记录类型、心率覆盖范围、结构化缺失原因和 `import_issues`。页面不展示来源设备原名、原始对象 ID 或精确路线。
 
@@ -139,7 +139,7 @@ Web 导入（ZIP 拖入或目录导入）执行：
 
 应用壳会轮询 `/v1/runtime-status`：空闲时降低频率，导入或重算期间提高频率。用户切换页面后仍能看到任务阶段与进度；任务成功时触发统一的 active 数据刷新事件，各页面重新读取 API，不在浏览器中推演模型状态。
 
-导入任务与来源元数据持久化到 `RAI_RUNTIME_ROOT/var/runtime.sqlite`。旧 `import-jobs.json` 和来源 JSON 只在首次启动时迁移一次。服务重启时，未完成任务会被标记为 `interrupted/failed` 并提供重新提交路径，不会消失或被误报为成功。
+导入任务与来源元数据持久化到 `RAI_RUNTIME_ROOT/var/runtime.sqlite`。移动端周目标、周计划和锁课使用独立的 `RAI_RUNTIME_ROOT/var/rai-control.sqlite`，通过 `mobile_goals` 与 `mobile_goals_history` 保存 revision 和历史；旧 `mobile-goals.json` 只在首次启动时校验、备份并迁移，目标与首条历史记录在同一事务内提交，完成后才写迁移标记。旧 `import-jobs.json` 和来源 JSON 只在首次启动时迁移一次。服务重启时，未完成任务会被标记为 `interrupted/failed` 并提供重新提交路径，不会消失或被误报为成功。
 
 ## 5. 首次启动与恢复
 
@@ -154,6 +154,7 @@ Web 导入（ZIP 拖入或目录导入）执行：
 ## 6. 备份与删除
 
 - 在线备份使用 Node SQLite `backup()`，会读取主数据库及已提交的 WAL 内容，避免直接复制 `.sqlite` 时遗漏数据。
+- 当前备份接口针对业务 SQLite（`RAI_DATABASE`）；控制库和模型 artifact 尚未纳入同一备份 bundle，完整多库备份/恢复仍是后续可靠性工作，不能把业务库备份宣称为全资产归档。
 - 备份存放在 `var/backups/`，文件名只允许单个 `.sqlite` basename，下载接口拒绝路径穿越。
 - 保留策略默认 10 份 / 总量 20 GiB / 最少剩余 512 MiB（`RAI_BACKUP_MAX_COUNT`、`RAI_BACKUP_MAX_TOTAL_BYTES`、`RAI_BACKUP_MIN_FREE_BYTES` 可覆盖；生产 `rai.env.example` 预置 14 份 / 10 GiB）。
 - 导入或重算执行期间，创建备份、切换 active Run 和删除数据库都会返回 `409`。

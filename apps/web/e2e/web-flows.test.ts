@@ -632,6 +632,7 @@ desktopTest("无数据库时只开放安全的首次导入流程", async () => {
     await page.goto(`${firstRunApi.origin}/data`, {
       waitUntil: "domcontentloaded",
     });
+    await page.getByRole("heading", { name: "数据与模型" }).waitFor();
     assert.equal(await page.title(), "数据与模型 - RAI");
     assert.equal(
       await page.getByRole("button", { name: "完整重算" }).isDisabled(),

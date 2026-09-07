@@ -281,6 +281,21 @@ export interface TrendResponse {
   }>;
 }
 
+export interface RecoveryTrendResponse {
+  generatedAt: string;
+  asOf: string;
+  timezone: "Asia/Shanghai";
+  latestDataDate: string | null;
+  days: Array<{
+    date: string;
+    sleepMinutes: number | null;
+    hrvSdnnMs: number | null;
+    hrvSampleCount: number;
+    hrvConfidence: "confident" | "sparse" | "missing";
+    sourceCategory: string | null;
+  }>;
+}
+
 export interface RecomputeJobEventDto {
   id: string;
   phase: string;

@@ -9,6 +9,7 @@ import {
   openapiDocument,
   predictionModelIdParamsSchema,
   predictionModelTrainBodySchema,
+  recoveryTrendQuerySchema,
   trainingZoneProfileBodySchema,
   trainingZonesHistoryQuerySchema,
   trainingLoadQuerySchema,
@@ -176,6 +177,21 @@ test("training statistics queries constrain ranges and granularities", async () 
     assert.equal((await app.inject({ method: "GET", url: "/load?days=forever" })).statusCode, 400);
     assert.equal((await app.inject({ method: "GET", url: "/zones?days=90" })).statusCode, 200);
     assert.equal((await app.inject({ method: "GET", url: "/zones?days=all" })).statusCode, 400);
+  } finally {
+    await app.close();
+  }
+});
+
+test("recovery trend queries require a whole-day range within the supported window", async () => {
+  const app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
+  app.get("/recovery-trends", { schema: { querystring: recoveryTrendQuerySchema } }, async () => ({ ok: true }));
+  try {
+    assert.equal((await app.inject({ method: "GET", url: "/recovery-trends?days=28" })).statusCode, 200);
+    assert.equal((await app.inject({ method: "GET", url: "/recovery-trends?days=365" })).statusCode, 200);
+    assert.equal((await app.inject({ method: "GET", url: "/recovery-trends?days=0" })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: "/recovery-trends?days=1.5" })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: "/recovery-trends?days=366" })).statusCode, 400);
+    assert.equal((await app.inject({ method: "GET", url: "/recovery-trends?days=abc" })).statusCode, 400);
   } finally {
     await app.close();
   }

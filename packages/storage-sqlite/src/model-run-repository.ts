@@ -45,6 +45,15 @@ export interface ModelValidationGateResult {
   failureReasons: string[];
 }
 
+export class ModelRunActivationError extends Error {
+  constructor(
+    readonly code: "not_found" | "not_succeeded" | "missing_metrics" | "failed_gate",
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 export class SqliteModelRunRepository {
   constructor(private readonly database: DatabaseSync) {}
 
@@ -89,11 +98,14 @@ export class SqliteModelRunRepository {
   activateSucceeded(modelRunId: string, activatedAt: string): void {
     const model = this.database.prepare("SELECT status FROM model_runs WHERE id = ?")
       .get(modelRunId) as { status: string } | undefined;
-    if (model?.status !== "succeeded") throw new Error("Only succeeded model runs can become active");
+    if (!model) throw new ModelRunActivationError("not_found", "Model run was not found");
+    if (model.status !== "succeeded") {
+      throw new ModelRunActivationError("not_succeeded", "Only succeeded model runs can become active");
+    }
     const metricRun = this.database.prepare("SELECT status FROM training_metric_runs WHERE model_run_id = ?")
       .get(modelRunId) as { status: string } | undefined;
     if (metricRun?.status !== "succeeded") {
-      throw new Error("Model run requires a succeeded training metric run before activation");
+      throw new ModelRunActivationError("missing_metrics", "Model run requires a succeeded training metric run before activation");
     }
     // A candidate explicitly evaluated by the production shadow gate may not
     // bypass a failed result, including through the manual activation API.
@@ -106,7 +118,7 @@ export class SqliteModelRunRepository {
         WHERE candidate_model_run_id = ? AND status = 'failed'
         ORDER BY created_at DESC LIMIT 1
       `).get(modelRunId);
-      if (failedGate) throw new Error("Model run failed the shadow validation gate and cannot become active");
+      if (failedGate) throw new ModelRunActivationError("failed_gate", "Model run failed the shadow validation gate and cannot become active");
     }
     this.database.prepare(`
       INSERT INTO active_model_run (singleton, model_run_id, activated_at)

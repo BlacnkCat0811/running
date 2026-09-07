@@ -227,6 +227,11 @@ publication lock、数据库文件发布、model-run / recompute-job / training-
 `apps/api` 直接依赖 `@rai/storage-sqlite`；`RaiReadStore` 对 dashboard、workouts、zones、training statistics、
 series、trends、recovery facts、mobile 聚合、audit/summary、model-run、job 均走 storage 读 repository，API 层只做缓存与 HTTP DTO 组装。
 
+移动端周目标、周计划和锁课由 `apps/api/src/mobile-goals.ts` 使用独立控制库
+`RAI_CONTROL_DATABASE`（默认 `RAI_RUNTIME_ROOT/var/rai-control.sqlite`）持久化；
+`mobile_goals` 保存当前 revision，`mobile_goals_history` 保存变更历史。旧
+`mobile-goals.json` 只用于一次性迁移，不是默认生产写入路径。当前业务库备份仍不等于业务库、控制库和模型 artifact 的完整备份 bundle。
+
 
 - migrations（唯一源：`storage-sqlite`）；
 - Node SQLite repository；

@@ -701,11 +701,11 @@ card.state = phys === "recovered_phys" ? "recovered" : phys     // PR2：无 ove
 
 iOS Home 目前忽略 `data.recovery`。PR2 在 `apps/web/src/ios/Home.tsx` 的 `MorningBlocks` 增加事实卡（睡眠分钟、HRV (SDNN, ms)、RHR、state）。这不是 `App.tsx` 的 `mobileNavigation`，也不改 `<1024px` CSS。
 
-桌面 Dashboard（1440×900）增加同构“昨夜恢复事实”面板，与 CA 的 recovery 维度卡片分开，避免用户以为 0–100 CA 维就是昨夜分数。
+当前桌面 Dashboard 将恢复维度明确标为“训练内恢复维度”，不再把它展示成昨夜恢复分数；睡眠和 HRV 事实目前集中在 TrendsPage 的独立 panel，避免用户混淆 0–100 CA 维度与原始恢复事实。Dashboard 的同构昨夜事实面板仍属于后续界面扩展。
 
 ### Trends
 
-扩展 `TrendResponse`（或新 `RecoveryTrendResponse`，推荐新端点以免污染能力趋势缓存）在 28/90/180/365 天范围返回：
+设计目标是扩展 `TrendResponse`（或新 `RecoveryTrendResponse`，推荐新端点以免污染能力趋势缓存），支持 28/90/180/365 天等常用范围并返回：
 
 - 每日 main sleep minutes、28d band（median ± 0.2×median 作为参考带，不是临床区间）
 - stages JSON 下发但不画堆叠（已关闭的 OQ3）
@@ -713,7 +713,7 @@ iOS Home 目前忽略 `data.recovery`。PR2 在 `apps/web/src/ios/Home.tsx` 的 
 - 每日 RHR vs 28d band
 - 明确 `null` 日（不插值、不填 50）
 
-`TrendsPage` 在能力图**下方**新增独立 panel，图层开关与 TA/CA/volume/load 分开。`DimensionTrendChart` 的 Recovery 折线仍是 **CA 维度分**，标题改为“能力维：恢复”，以免和过夜 SDNN 混淆。
+当前 `TrendsPage` 在训练上下文图下方提供独立“近期恢复事实”panel，显示睡眠、HRV、样本数和最新事实日；它与 TA/CA 图表分开。`DimensionTrendChart` 的 Recovery 折线仍是 **CA 维度分**，不能与恢复事实中的 HRV 或睡眠分钟混淆。RHR、baseline band 和 stages 仍待后续契约扩展。
 
 不做 390px 新基线。
 
@@ -940,10 +940,10 @@ export interface RecoveryTrendResponse {
 ```
 
 ```
-GET /v1/recovery-trends?days=28|90|180|365
+GET /v1/recovery-trends?days=N
 ```
 
-JSON Schema 加在 `apps/api/src/schemas.ts`。`days` **枚举这四个 UI chip**，不要复用 `/v1/trends` 的 `trendQuerySchema`（`pattern: "^[0-9]{1,4}$"`，会放行 `days=7`）。
+当前实现的最小响应包含 `generatedAt`、`asOf`、`timezone`、`latestDataDate` 和按 `Asia/Shanghai` 本地日排列的 `days`；每个点提供 `sleepMinutes`、`hrvSdnnMs`、`hrvSampleCount`、`hrvConfidence` 和 `sourceCategory`。`days` 默认 28，允许 1–365 的整数天数；Fastify 使用 `recoveryTrendQuerySchema` 在进入业务层前拒绝小数、零值、越界和非数字输入。设计中的 RHR、baseline band 和 stages 字段仍属于后续扩展，当前接口未承诺这些字段。
 
 `PhysiologyPredictionReport.inputs.recoveryReadiness`：`number` → `number | null`（PR3b）。
 
@@ -1183,6 +1183,8 @@ class SqliteRecoveryFactsReadRepository {
 
 ## Rollout Plan
 
+> 以下步骤保留原设计的分阶段目标。PR1–PR3 的核心代码已在当前主干存在；当前恢复趋势契约和桌面事实 panel 以本节上方的“当前实现”说明为准。未完成的 RHR、baseline band、stages 及完整备份能力不能按以下目标描述视为已交付。
+
 1. **PR1 merge 后**：migrate v17；CLI import 或 `recoverDatabaseJobs` 空表回填生成夜/日。`analyzeDatasetChange` **不改**：睡眠同步仍 full（CA 继续吃新 `health_records`）。夜表是新的；旧 Feature 公式不变。
 2. **PR2**：Today/Coach **建议会变**（双源：Coach 新事实，CA 仍旧 Feature）。落地纯 `classifyPhysState`；`state` 无 overlay。3 夜窗 = `{D, D−1, D−2}`。Trends 只读夜表。
 3. **PR3a**：必须 bump `FEATURE_CONFIG_VERSION` 与 `MODEL_CONFIG_VERSION`。sleep/HRV 本就 `healthChanged` → full。新 Model Run；`active_model_run` 仅 succeeded 后切换。
@@ -1300,7 +1302,7 @@ npm run test:e2e:web   # PR2/PR3 UI
   - `packages/training-load/src/index.ts` 与测试（**只**加纯函数 `classifyPhysState` + `countNightsBelowSleepBaseline`；不改 `buildDailyTrainingMetrics`）
   - `packages/api-contracts/src/index.ts`
   - `apps/api/package.json`（增加 `@rai/training-load`）
-  - `apps/api/src/schemas.ts` / `server.ts`（`GET /v1/recovery-trends`，`days` 枚举 28|90|180|365）
+  - `apps/api/src/schemas.ts` / `server.ts`（`GET /v1/recovery-trends`，当前 `days` 为 1–365 的整数；常用 UI 范围可由前端选择）
   - `apps/api/src/data.ts`、`mobile-read.ts`、`mobile-coach.ts`（日历窗三夜计数；冻结 `wake_date === today`；`state` = 生理映射）
   - `apps/api/test/mobile-coach.test.ts`、`mobile.test.ts`、`data.test.ts`
   - `apps/web/src/pages/TrendsPage.tsx`、`pages/DashboardPage.tsx`

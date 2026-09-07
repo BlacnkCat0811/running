@@ -6,6 +6,7 @@ export {
 } from "./database-file-publisher.js";
 export {
   SqliteModelRunRepository,
+  ModelRunActivationError,
   type StoredModelRunSummary,
   type ModelValidationGateResult
 } from "./model-run-repository.js";

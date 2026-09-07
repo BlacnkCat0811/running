@@ -37,7 +37,8 @@ RAI 是一个本地优先的个人跑步能力分析项目：解析 Apple 健康
 - 训练分区（心率/配速区间）设置、每日分区与训练级分区摘要；
 - 睡眠/HRV 恢复管线（schema v17+）：`canonical_nights` / `canonical_hrv_days` 唯一事实源、
   导入时 canonicalization、workout 前已完成数据约束、个人基线（28 天中位数，不足回退 60 天）、
-  恢复权重 睡眠 35 / RHR 25 / HRV 25 / 负荷 15，`/v1/recovery-trends` 与移动端恢复卡/今日教练；
+  恢复权重 睡眠 35 / RHR 25 / HRV 25 / 负荷 15，`/v1/recovery-trends`（Asia/Shanghai 本地日，1–365 天）与移动端恢复卡/今日教练；
+- 移动端周目标、周计划与锁课使用独立控制库 `var/rai-control.sqlite` 保存 revision 和历史；旧 `mobile-goals.json` 仅用于一次性迁移并保留备份；
 - 模型激活 shadow gate `rai-shadow-gate-v1`（`model_validation_gates`）：空值率、CA 均值/P95、
   最终 TA、状态变化率、恢复饱和率等验收阈值，失败保持 incumbent 不变；
 - iOS 调试壳（`apps/ios`，Xcode/WKWebView）：HealthKit 只读增量导出 ZIP → 上传 →

@@ -1,6 +1,6 @@
 import "../pixel-layout.css";
 import "../analysis-reference.css";
-import type { TrendResponse } from "@rai/api-contracts";
+import type { RecoveryTrendResponse, TrendResponse } from "@rai/api-contracts";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -30,7 +30,9 @@ export function TrendsPage() {
     load: true,
   });
   const result = useRemote<TrendResponse>(`/v1/trends?days=${days}`);
+  const recovery = useRemote<RecoveryTrendResponse>("/v1/recovery-trends?days=28");
   const data = result.data;
+  const latestRecovery = recovery.data?.days.at(-1) ?? null;
   const caValues =
     data?.workouts
       .map((workout) => workout.currentAbility)
@@ -245,6 +247,28 @@ export function TrendsPage() {
               showLoad={layers.load}
             />
           </section>
+
+          <section className="panel trend-recovery-panel">
+            <div className="panel-heading">
+              <div>
+                <h2>近期恢复事实</h2>
+                <p>睡眠和 HRV 按本地日展示；缺失数据保持为空。</p>
+              </div>
+              <span className="trend-recovery-as-of">截至 {recovery.data?.asOf ?? "--"}</span>
+            </div>
+            {recovery.loading && !recovery.data ? (
+              <LoadingBlock label="正在读取恢复事实" />
+            ) : recovery.error ? (
+              <ErrorBlock message={recovery.error} onRetry={() => void recovery.reload()} />
+            ) : (
+              <div className="trend-recovery-facts">
+                <RecoveryFact label="最近一晚睡眠" value={formatSleepMinutes(latestRecovery?.sleepMinutes ?? null)} />
+                <RecoveryFact label="晨间 HRV" value={latestRecovery?.hrvSdnnMs == null ? "--" : `${Math.round(latestRecovery.hrvSdnnMs)} ms`} />
+                <RecoveryFact label="HRV 样本" value={latestRecovery?.hrvSampleCount ? String(latestRecovery.hrvSampleCount) : "--"} />
+                <RecoveryFact label="最新事实日" value={recovery.data?.latestDataDate ?? "--"} />
+              </div>
+            )}
+          </section>
         </>
       )}
     </div>
@@ -253,6 +277,15 @@ export function TrendsPage() {
 
 function TrendMetric({ icon, label, value, note, tone }: { icon: React.ReactNode; label: string; value: string; note: string; tone: string }) {
   return <article className={tone}><span className="trend-metric-icon" aria-hidden="true">{icon}</span><div><span>{label}</span><b>{value}</b><small>{note}</small></div></article>;
+}
+
+function RecoveryFact({ label, value }: { label: string; value: string }) {
+  return <div><small>{label}</small><b>{value}</b></div>;
+}
+
+function formatSleepMinutes(value: number | null): string {
+  if (value === null) return "--";
+  return `${Math.floor(value / 60)}h ${String(value % 60).padStart(2, "0")}m`;
 }
 
 function trendSentence(delta: number | null): string {

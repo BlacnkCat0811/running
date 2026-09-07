@@ -77,7 +77,7 @@ export function DashboardPage() {
         <CapabilityCard
           tone="pace"
           icon={<Timer size={50} />}
-          label="有氧配速"
+          label="最近训练均配"
           value={pace(latest?.averagePaceSecondsPerKm ?? null)}
           unit="/km"
           delta={
@@ -89,7 +89,7 @@ export function DashboardPage() {
         <CapabilityCard
           tone="endurance"
           icon={<Heartbeat size={50} />}
-          label="有氧耐力"
+          label="稳定性评分"
           value={score(dimensions?.stability)}
           unit="/100"
           delta="来自最近一次训练的稳定性评分"
@@ -97,7 +97,7 @@ export function DashboardPage() {
         <CapabilityCard
           tone="intensity"
           icon={<ChartBar size={50} />}
-          label="训练强度"
+          label="近 7 日负荷"
           value={score(status?.current7dLoad)}
           unit=""
           delta={
@@ -109,14 +109,14 @@ export function DashboardPage() {
         <CapabilityCard
           tone="recovery"
           icon={<Pulse size={50} />}
-          label="恢复程度"
+          label="训练内恢复维度"
           value={score(dimensions?.recovery)}
           unit="/100"
           delta={
             status?.recoveryEvidence === null ||
             status?.recoveryEvidence === undefined
-              ? "等待恢复证据"
-              : `恢复证据 ${Math.round(status.recoveryEvidence * 100)}%`
+              ? "最近训练暂无该维度"
+              : "来自最近一次训练"
           }
         />
       </section>
@@ -125,8 +125,8 @@ export function DashboardPage() {
         <article className="panel dashboard-performance-panel">
           <div className="panel-heading">
             <div>
-              <h2>近四周能力</h2>
-              <p>同一量纲查看耐力稳定性、训练负荷和配速能力。</p>
+              <h2>近四周能力与负荷</h2>
+              <p>能力评分与训练负荷分别按各自单位显示。</p>
             </div>
             <Link to="/trends" className="text-link">
               完整趋势 <ArrowRight size={15} />
@@ -134,7 +134,7 @@ export function DashboardPage() {
           </div>
           <div className="dashboard-performance-legend">
             <span className="endurance">耐力稳定性</span>
-            <span className="intensity">训练负荷</span>
+            <span className="intensity">训练负荷（独立轴）</span>
             <span className="pace">配速能力</span>
           </div>
           {trend.data ? (
@@ -225,7 +225,7 @@ function TrainingStatusPanel({ status }: { status: DailyTrainingMetric | null })
       <div className="panel-heading">
         <div>
           <h2>训练状态</h2>
-          <p>综合短期负荷、长期负荷与恢复证据。</p>
+          <p>综合短期负荷与长期负荷。</p>
         </div>
       </div>
       <div className="dashboard-status-summary">
@@ -236,7 +236,6 @@ function TrainingStatusPanel({ status }: { status: DailyTrainingMetric | null })
         <StatusFact label="短期负荷" value={status ? Math.round(status.current7dLoad) : null} note="最近 7 日" />
         <StatusFact label="长期负荷" value={status ? Math.round(status.chronicEwma * 7) : null} note="慢性 EWMA" />
         <StatusFact label="负荷比" value={status?.loadRatio ?? null} note={loadRatioNote(status?.loadRatio ?? null)} decimals={2} />
-        <StatusFact label="恢复证据" value={status?.recoveryEvidence === null || status?.recoveryEvidence === undefined ? null : status.recoveryEvidence * 100} note="可用恢复信号" suffix="%" />
       </div>
       <Link to="/statistics" className="button primary full">
         查看运动统计 <ArrowRight size={15} />

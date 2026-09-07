@@ -14,8 +14,8 @@
 
 1. **事实层**：Apple Health 原始 Record、Workout、路线与统计，不随模型变化而改写；睡眠/HRV 经 canonicalization 后的规范化夜与日也属于稳定派生事实。
 2. **派生层**：Training Session、Feature Run、Workout Feature、Model Run、Assessment、每日 Snapshot、训练指标 Run、分区摘要、恢复事实与每日 Zone Profile；每次重算新增记录。
-3. **控制层**：用户覆盖、任务队列、active Model Run / active Prediction Model、模型验证门禁与迁移历史。
-4. **导入状态层**：import batch / entity generation / 文件指纹 / checkpoint / validation（增量同步与发布控制），以及 mobile 周目标（`var/mobile-goals.json` 文件持久化，不在 SQLite）。
+3. **控制层**：用户覆盖、任务队列、active Model Run / active Prediction Model、模型验证门禁、迁移历史，以及移动端周目标、周计划和锁课。
+4. **导入状态层**：import batch / entity generation / 文件指纹 / checkpoint / validation（增量同步与发布控制）。移动端控制数据持久化在独立控制库 `var/rai-control.sqlite` 的 `mobile_goals` / `mobile_goals_history` 表中；旧 `var/mobile-goals.json` 仅作为一次性迁移来源。
 
 原始 Workout Group 的成员会因新增来源副本变化，因此它不是稳定的产品实体。`training_sessions` 才代表"同一次真实训练"，所有用户覆盖、特征和评分都引用它。
 
@@ -201,4 +201,4 @@ erDiagram
 - `canonical_nights(kind, wake_date)` / `(wake_at)`；主夜按 `(wake_date, timezone)` 唯一。
 - `model_validation_gates(candidate_model_run_id, created_at)` 等。
 
-所有时间为 UTC ISO 8601；每日 Snapshot/Zone/恢复按 `timezone_identifier` 生成展示日。JSON 在 TypeScript contract 边界校验，SQLite 只存序列化快照，以保证移动端适配器可复用相同语义。移动端周目标（`/v1/mobile/goals`）不落 SQLite，持久化于 `var/mobile-goals.json`。
+所有时间戳为 UTC ISO 8601；每日 Snapshot/Zone/恢复按 `timezone_identifier` 生成展示日。当前恢复趋势 API 固定使用 `Asia/Shanghai` 作为展示时区，并同时返回 `asOf`、`latestDataDate` 和 `timezone`，不能将服务时钟与数据最新日混为一谈。JSON 在 TypeScript contract 边界校验，SQLite 只存序列化快照，以保证移动端适配器可复用相同语义。移动端周目标通过 `/v1/mobile/goals` 读写独立控制库；旧 JSON 迁移成功后不再作为生产写入路径。

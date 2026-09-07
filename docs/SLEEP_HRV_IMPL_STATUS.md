@@ -1,5 +1,7 @@
 # 睡眠 / HRV 设计落地排查报告
 
+> 历史快照说明：本文主体记录 2026-09-04 的排查结果，原有“实际”列不随代码自动更新。2026-09-07 的当前实现校准见下节；阅读旧表格时应以该校准和现行代码为准。
+
 | 字段 | 值 |
 |---|---|
 | 排查时间 | 2026-09-04 |
@@ -14,6 +16,19 @@
 **设计文档已完成审查，当前工作树已落地 PR1 的事实层和 PR2/PR3 的兼容性改造。**
 schema 已加入 v17，canonical 表、导入挂钩、恢复 repository、Coach/趋势读取和预测 null 传播已实现；
 个人基线的完整 as-of 接入与训练状态全量切换仍需在真实数据 shadow run 后验收。
+
+## 2026-09-07 当前实现校准
+
+本次项目优化已改变以下状态。这里的“已实现”仅表示代码、契约和回归测试已具备，不代表模型科学准确性或生产部署验收已经完成。
+
+| 范围 | 当前状态 | 现行行为 |
+|---|---|---|
+| 恢复事实趋势 | 已接入桌面趋势页 | `TrendsPage` 请求 `/v1/recovery-trends?days=28`，展示近期睡眠、HRV、样本数和事实日期；当前接口不返回 RHR、基线带或睡眠阶段图层 |
+| 恢复趋势日期 | 已修正 | API 按 `Asia/Shanghai` 本地日生成窗口，并返回 `generatedAt`、`asOf`、`timezone`、`latestDataDate`；`days` 为 1–365 的整数 |
+| 恢复趋势契约 | 已共享 | `packages/api-contracts` 导出 `RecoveryTrendResponse`；缺失睡眠/HRV 保持 `null`，不补成正常值 |
+| 控制库 | 已迁移到独立 SQLite | `rai-control.sqlite` 保存 `mobile_goals` 与 `mobile_goals_history`；旧 `mobile-goals.json` 只作为一次性迁移来源，目标和历史在同一事务内提交 |
+| Model Run 激活 | 已统一入口 | HTTP 路由调用 `SqliteModelRunRepository.activateSucceeded()`；候选校验、active 切换和清理预测 active 在同一事务中完成 |
+| 尚未完成 | 保持后续项 | 控制库与业务库的完整备份 bundle、RHR/基线趋势扩展、外部标签模型回测仍未在本次优化中完成 |
 
 ---
 
