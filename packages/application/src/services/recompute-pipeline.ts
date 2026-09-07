@@ -38,6 +38,7 @@ import {
   inactivityDecay,
   MODEL_CONFIG_VERSION,
   scoreFeature,
+  sortWorkoutFeaturesChronologically,
   trueAbilityAfterInactivity,
   updateTrueAbilityFromFeatureScore,
   type PersonalBaseline
@@ -1737,9 +1738,7 @@ export class RecomputePipeline {
     features: WorkoutFeatureVector[],
     request: RecomputeRequest
   ): void {
-    const sorted = [...features].sort((left, right) =>
-      left.workoutStartAt.localeCompare(right.workoutStartAt)
-    );
+    const sorted = sortWorkoutFeaturesChronologically(features);
     const calibrationFeatures: WorkoutFeatureVector[] = [];
     for (const feature of sorted) {
       if (feature.eligibilityStatus !== "eligible") continue;

@@ -13,7 +13,7 @@ import {
   type AbilityDimension
 } from "./index.js";
 
-export const MODEL_CONFIG_VERSION = "rai-model-config-v3" as const;
+export const MODEL_CONFIG_VERSION = "rai-model-config-v4" as const;
 
 export interface RaiModelConfig {
   calibrationMinimumSessions: number;
@@ -78,6 +78,62 @@ const median = (values: number[]): number | null => {
   return sorted.length % 2 === 0 && lower !== undefined ? (lower + upper) / 2 : upper;
 };
 
+export function sortWorkoutFeaturesChronologically(
+  features: WorkoutFeatureVector[]
+): WorkoutFeatureVector[] {
+  for (const feature of features) {
+    if (!Number.isFinite(Date.parse(feature.workoutStartAt))) {
+      throw new Error("workoutStartAt must be a valid date-time");
+    }
+  }
+  return [...features].sort((left, right) => {
+    const leftMs = Date.parse(left.workoutStartAt);
+    const rightMs = Date.parse(right.workoutStartAt);
+    return leftMs - rightMs ||
+      left.trainingSessionId.localeCompare(right.trainingSessionId) ||
+      left.id.localeCompare(right.id);
+  });
+}
+
+function scoreFiniteZ(value: number, baseline: RobustDimensionBaseline, zScale: number): number {
+  if (zScale === 0) return 50;
+  const z = (value - baseline.center) / baseline.scale;
+  const scaled = zScale * z;
+  if (!Number.isFinite(scaled)) return scaled > 0 ? 100 : 0;
+  return clamp(50 + scaled, 0, 100);
+}
+
+function assertModelConfig(config: RaiModelConfig): void {
+  const scalarEntries: Array<[string, number]> = [
+    ["calibrationMinimumSessions", config.calibrationMinimumSessions],
+    ["calibrationMinimumSpanDays", config.calibrationMinimumSpanDays],
+    ["minimumAvailableWeight", config.minimumAvailableWeight],
+    ["minimumConfidenceForTrueAbility", config.minimumConfidenceForTrueAbility],
+    ["dimensionScoreZScale", config.dimensionScoreZScale]
+  ];
+  for (const [name, value] of scalarEntries) {
+    if (!Number.isFinite(value)) throw new Error(`${name} must be finite`);
+  }
+  if (config.calibrationMinimumSessions < 1 || config.calibrationMinimumSpanDays < 0) {
+    throw new Error("Calibration requirements must be non-negative, with at least one session");
+  }
+  if (config.minimumAvailableWeight < 0 || config.minimumAvailableWeight > 1) {
+    throw new Error("minimumAvailableWeight must be between 0 and 1");
+  }
+  if (config.minimumConfidenceForTrueAbility < 0 || config.minimumConfidenceForTrueAbility > 1) {
+    throw new Error("minimumConfidenceForTrueAbility must be between 0 and 1");
+  }
+  if (config.dimensionScoreZScale < 0) {
+    throw new Error("dimensionScoreZScale must be non-negative");
+  }
+  for (const dimension of ["efficiency", "pace", "cardio", "stability", "recovery"] as AbilityDimension[]) {
+    const weight = config.dimensionWeights[dimension];
+    if (!Number.isFinite(weight) || weight < 0) {
+      throw new Error(`dimensionWeights.${dimension} must be finite and non-negative`);
+    }
+  }
+}
+
 const rawSignal = (
   feature: WorkoutFeatureVector,
   dimension: AbilityDimension
@@ -122,9 +178,7 @@ export function createPersonalBaseline(
     if (baseline) dimensions[dimension] = baseline;
   }
 
-  const sorted = [...calibrationFeatures].sort((left, right) =>
-    left.workoutStartAt.localeCompare(right.workoutStartAt)
-  );
+  const sorted = sortWorkoutFeaturesChronologically(calibrationFeatures);
   const first = sorted[0];
   const last = sorted.at(-1);
   if (!first || !last) return null;
@@ -141,9 +195,7 @@ export function hasCompletedCalibration(
   config: RaiModelConfig = defaultRaiModelConfig
 ): boolean {
   if (features.length < config.calibrationMinimumSessions) return false;
-  const sorted = [...features].sort((left, right) =>
-    left.workoutStartAt.localeCompare(right.workoutStartAt)
-  );
+  const sorted = sortWorkoutFeaturesChronologically(features);
   const first = sorted[0];
   const last = sorted.at(-1);
   if (!first || !last) return false;
@@ -157,9 +209,14 @@ function scoreRawSignal(
   baseline: RobustDimensionBaseline | undefined,
   zScale: number
 ): number | null {
-  if (value === null || !baseline) return null;
-  const z = (value - baseline.center) / baseline.scale;
-  return clamp(50 + zScale * z, 0, 100);
+  if (value === null || !Number.isFinite(value) || !baseline) return null;
+  if (!Number.isFinite(baseline.center) || !Number.isFinite(baseline.scale) || baseline.scale <= 0) {
+    throw new Error("Baseline center and scale must be finite, with a positive scale");
+  }
+  if (!Number.isFinite(zScale) || zScale < 0) {
+    throw new Error("dimensionScoreZScale must be finite and non-negative");
+  }
+  return scoreFiniteZ(value, baseline, zScale);
 }
 
 function evidenceStrength(feature: WorkoutFeatureVector): number {
@@ -207,6 +264,7 @@ export function scoreFeature(
   calibrationMaturity: number,
   config: RaiModelConfig = defaultRaiModelConfig
 ): FeatureScoreResult {
+  assertModelConfig(config);
   const dimensions: AbilityDimensionScores = {
     efficiency: scoreRawSignal(
       feature.signals.efficiencyRaw,

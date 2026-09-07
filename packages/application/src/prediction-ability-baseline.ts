@@ -5,7 +5,7 @@ import { PHYSIOLOGY_MODEL_VERSION } from "@rai/physiology";
 
 // Bump when buildFormulaPredictionBase changes prediction semantics without a
 // corresponding physiology package version change.
-export const FORMULA_PREDICTION_BASE_VERSION = "rai-formula-prediction-base-v1" as const;
+export const FORMULA_PREDICTION_BASE_VERSION = "rai-formula-prediction-base-v2" as const;
 
 export function currentAbilityBaselineHash(database: DatabaseSync): string | null {
   const row = database.prepare(`

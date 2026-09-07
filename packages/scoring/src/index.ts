@@ -117,7 +117,10 @@ export function trueAbilityAfterInactivity(
   trueAbilityAtLastEvent: number,
   daysSinceEligibleRun: number
 ): number {
-  return Math.max(20, trueAbilityAtLastEvent - inactivityDecay(daysSinceEligibleRun));
+  assertFinite("trueAbilityAtLastEvent", trueAbilityAtLastEvent);
+  assertFinite("daysSinceEligibleRun", daysSinceEligibleRun);
+  const floor = trueAbilityAtLastEvent >= 20 ? 20 : 0;
+  return Math.max(floor, trueAbilityAtLastEvent - inactivityDecay(daysSinceEligibleRun));
 }
 
 export * from "./model.js";

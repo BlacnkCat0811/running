@@ -47,6 +47,7 @@ const distances: RaceDistance[] = ["five_k", "ten_k", "half_marathon"];
 
 export interface PredictionReportOptions {
   asOf?: string;
+  timezoneIdentifier?: string;
   temperatureC?: number;
   humidityPercent?: number;
   elevationGainMeters?: Partial<Record<RaceDistance, number>>;
@@ -210,7 +211,9 @@ export function buildFormulaPredictionBase(
   const performanceVdotEvidence = loadPerformanceVdotEvidence(database, asOf);
   const thresholdEvidence = loadLactateThresholdEvidence(database, asOf);
   const readiness = resolvedReadiness(loadRaceReadiness(database, asOf));
-  const recoveryReadiness = options.recoveryReadiness === undefined ? loadRecoveryReadiness(database, asOf) : options.recoveryReadiness;
+  const recoveryReadiness = options.recoveryReadiness === undefined
+    ? loadRecoveryReadiness(database, asOf, options.timezoneIdentifier ?? "Asia/Shanghai")
+    : options.recoveryReadiness;
   const scenario = resolvedScenario(options);
   const profile = loadPhysiologyProfile(database, asOf);
   const snapshot = buildPhysiologyPredictionSnapshot({
@@ -673,6 +676,7 @@ export async function buildPredictionReportAsync(
 
   const base = context.base;
   const inferenceBase = buildFormulaPredictionBase(database, generatedAt, {
+    ...(options.timezoneIdentifier === undefined ? {} : { timezoneIdentifier: options.timezoneIdentifier }),
     recoveryReadiness: base.recoveryReadiness
   });
   const inferenceScenario: PhysiologyPredictionScenario = {

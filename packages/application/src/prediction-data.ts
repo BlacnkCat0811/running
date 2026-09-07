@@ -1,7 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
-import { activeDurationSecondsSql } from "@rai/storage-sqlite";
+import {
+  activeDurationSecondsSql,
+  SqlitePredictionRecoveryReadRepository
+} from "@rai/storage-sqlite";
 
 import {
   historicalEligibilitySql,
@@ -496,69 +499,23 @@ export function loadRaceReadiness(
   ) as PredictionReadiness;
 }
 
-function metricMedian(
-  database: DatabaseSync,
-  type: string,
-  startAt: string,
-  endAt: string
-): number | null {
-  const rows = database
-    .prepare(`
-      SELECT value_numeric AS value
-      FROM health_records
-      WHERE type = ?
-        AND value_numeric IS NOT NULL
-        AND start_at >= ?
-        AND start_at < ?
-    `)
-    .all(type, startAt, endAt) as unknown as Array<{ value: number }>;
-  return median(rows.map((row) => row.value));
-}
-
 export function loadRecoveryReadiness(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  timezoneIdentifier = "Asia/Shanghai"
 ): number | null {
-  const sevenDaysAgo = new Date(Date.parse(asOf) - 7 * 86_400_000).toISOString();
-  const thirtyFiveDaysAgo = new Date(Date.parse(asOf) - 35 * 86_400_000).toISOString();
-  const recentResting = metricMedian(database, healthTypes.restingHeartRate, sevenDaysAgo, asOf);
-  const baselineResting = metricMedian(database, healthTypes.restingHeartRate, thirtyFiveDaysAgo, sevenDaysAgo);
-  const recentHrv = metricMedian(database, healthTypes.hrvSdnn, sevenDaysAgo, asOf);
-  const baselineHrv = metricMedian(database, healthTypes.hrvSdnn, thirtyFiveDaysAgo, sevenDaysAgo);
+  const readings = new SqlitePredictionRecoveryReadRepository(database)
+    .load(asOf, timezoneIdentifier);
   const scores: number[] = [];
-  try {
-    const latestNight = database.prepare(`SELECT asleep_union_minutes AS value FROM canonical_nights WHERE kind='main' AND wake_at < ? ORDER BY wake_at DESC LIMIT 1`).get(asOf) as { value?: number } | undefined;
-    const sleepBaseline = database.prepare(`SELECT AVG(asleep_union_minutes) AS value FROM canonical_nights WHERE kind='main' AND wake_at >= ? AND wake_at < ?`).get(thirtyFiveDaysAgo, sevenDaysAgo) as { value?: number } | undefined;
-    if (latestNight?.value != null && sleepBaseline?.value != null && Number(sleepBaseline.value) > 0) scores.push(clamp(Number(latestNight.value) / Number(sleepBaseline.value), 0, 1));
-  } catch {
-    // Legacy v16 databases do not have canonical sleep facts yet.
+  if (readings.latestSleepMinutes !== null && readings.baselineSleepMinutes !== null && readings.baselineSleepMinutes > 0) {
+    scores.push(clamp(readings.latestSleepMinutes / readings.baselineSleepMinutes, 0, 1));
   }
-  if (recentResting !== null && baselineResting !== null) {
-    scores.push(clamp(1 - Math.max(0, recentResting - baselineResting) / 12, 0, 1));
+  if (readings.recentRestingHeartRate !== null && readings.baselineRestingHeartRate !== null) {
+    scores.push(clamp(1 - Math.max(0, readings.recentRestingHeartRate - readings.baselineRestingHeartRate) / 12, 0, 1));
   }
-  if (recentHrv !== null && baselineHrv !== null && baselineHrv > 0) {
-    scores.push(clamp(recentHrv / baselineHrv, 0, 1));
+  if (readings.recentHrv !== null && readings.baselineHrv !== null && readings.baselineHrv > 0) {
+    scores.push(clamp(readings.recentHrv / readings.baselineHrv, 0, 1));
   }
-  const load = database
-    .prepare(`
-      SELECT
-        SUM(CASE WHEN anchor_start_at >= ? THEN
-          (julianday(anchor_end_at) - julianday(anchor_start_at)) * 1440.0 ELSE 0 END) AS recentMinutes,
-        SUM((julianday(anchor_end_at) - julianday(anchor_start_at)) * 1440.0) / 5.0 AS baselineWeeklyMinutes,
-        MAX(anchor_start_at) AS latestAt
-      FROM training_sessions
-      WHERE status = 'active'
-        AND anchor_start_at >= ?
-        AND anchor_end_at <= ?
-    `)
-    .get(sevenDaysAgo, thirtyFiveDaysAgo, asOf) as unknown as {
-      recentMinutes: number | null;
-      baselineWeeklyMinutes: number | null;
-      latestAt: string | null;
-    };
-  const recentMinutes = load.recentMinutes ?? 0;
-  const baselineWeeklyMinutes = Math.max(load.baselineWeeklyMinutes ?? 0, 30);
-  const acuteRatio = recentMinutes / baselineWeeklyMinutes;
   if (scores.length === 0) return null;
   return clamp(average(scores) ?? 0, 0, 1);
 }

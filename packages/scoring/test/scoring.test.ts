@@ -8,10 +8,16 @@ import {
   confidenceScore,
   growthResistance,
   inactivityDecay,
+  trueAbilityAfterInactivity,
   updateTrueAbility,
   weightedCurrentAbility
 } from "../src/index.js";
-import { scoreFeature, type PersonalBaseline } from "../src/model.js";
+import {
+  hasCompletedCalibration,
+  scoreFeature,
+  sortWorkoutFeaturesChronologically,
+  type PersonalBaseline
+} from "../src/model.js";
 
 const baseline: PersonalBaseline = {
   calibrationFeatureIds: ["calibration"],
@@ -94,6 +100,16 @@ test("inactivity decay starts after day fourteen", () => {
   assert.ok(inactivityDecay(61) > inactivityDecay(60));
 });
 
+test("inactivity cannot raise a low valid ability and preserves the high-score floor", () => {
+  for (const score of [0, 10, 19]) {
+    assert.equal(trueAbilityAfterInactivity(score, 0), score);
+    assert.ok(trueAbilityAfterInactivity(score, 60) <= score);
+  }
+  assert.equal(trueAbilityAfterInactivity(20, 60), 20);
+  assert.equal(trueAbilityAfterInactivity(50, 60), 48.02);
+  assert.throws(() => trueAbilityAfterInactivity(Number.NaN, 1), /finite/);
+});
+
 test("scoreFeature covers excluded and eligible main paths", () => {
   const excluded = scoreFeature(feature({ eligibilityStatus: "excluded", missingReasons: ["user_excluded"] }), baseline, 1);
   assert.equal(excluded.status, "excluded");
@@ -106,4 +122,35 @@ test("scoreFeature covers excluded and eligible main paths", () => {
   assert.ok((mature.currentAbility ?? 0) > 50);
   assert.ok(immature.confidence < mature.confidence);
   assert.ok(Math.abs(Object.values(mature.effectiveWeights).reduce((sum, weight) => sum + weight, 0) - 1) < 1e-12);
+});
+
+test("non-finite raw signals are unavailable and malformed baselines are rejected", () => {
+  const scored = scoreFeature(feature({ signals: { ...feature().signals, efficiencyRaw: Number.NaN } }), baseline, 1, {
+    ...defaultRaiModelConfig,
+    minimumAvailableWeight: 0.3
+  });
+  assert.equal(scored.dimensions.efficiency, null);
+  assert.ok(scored.currentAbility !== null && Number.isFinite(scored.currentAbility));
+  assert.throws(() => scoreFeature(feature(), {
+    ...baseline,
+    dimensions: { ...baseline.dimensions, pace: { center: 3, scale: 0 } }
+  }, 1), /positive scale/);
+  assert.throws(() => scoreFeature(feature(), baseline, 1, {
+    ...defaultRaiModelConfig,
+    dimensionScoreZScale: Number.NaN
+  }), /dimensionScoreZScale.*finite/);
+});
+
+test("calibration ordering uses absolute time and deterministic identity ties", () => {
+  const first = feature({ id: "z", trainingSessionId: "a", workoutStartAt: "2026-01-01T01:00:00+01:00" });
+  const second = feature({ id: "a", trainingSessionId: "b", workoutStartAt: "2026-01-01T00:00:00Z" });
+  const earlier = feature({ id: "early-id", trainingSessionId: "c", workoutStartAt: "2025-12-31T23:30:00Z" });
+  const ordered = sortWorkoutFeaturesChronologically([first, second, earlier]);
+  assert.deepEqual(ordered.map((item) => item.id), ["early-id", "z", "a"]);
+  assert.equal(hasCompletedCalibration([first, second], {
+    ...defaultRaiModelConfig,
+    calibrationMinimumSessions: 2,
+    calibrationMinimumSpanDays: 0
+  }), true);
+  assert.throws(() => sortWorkoutFeaturesChronologically([feature({ workoutStartAt: "invalid" })]), /valid date-time/);
 });
