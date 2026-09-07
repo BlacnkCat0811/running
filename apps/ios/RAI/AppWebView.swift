@@ -186,10 +186,10 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
         didReceive message: WKScriptMessage
     ) {
         // `add(_:name:)` delivers on the main thread; parse here so the Task only hops Sendable fields.
-        let parsed = MainActor.assumeIsolated {
+        let parsed = MainActor.assumeIsolated { () -> (action: String, full: Bool)? in
             guard message.frameInfo.isMainFrame,
                   self.isTrustedFrame(message.frameInfo.securityOrigin) else { return nil }
-            parseRaiMessage(message.body)
+            return parseRaiMessage(message.body)
         }
         Task { @MainActor in
             guard let parsed else { return }
