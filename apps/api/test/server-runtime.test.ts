@@ -764,10 +764,16 @@ test("dynamic-port startup reports readiness and workout overrides preserve serv
     });
     const cancellationText = await cancellation.text();
     assert.equal(cancellation.status, 200, cancellationText);
-    assert.deepEqual(JSON.parse(cancellationText), {
-      cancelRequested: true,
-      status: "running"
-    });
+    const cancellationResult = JSON.parse(cancellationText) as {
+      cancelRequested: boolean;
+      status: string;
+    };
+    // The worker may observe the cancellation between the request transaction
+    // and the response. Both responses describe a successful cancellation.
+    assert.ok(
+      (cancellationResult.cancelRequested && cancellationResult.status === "running") ||
+      (!cancellationResult.cancelRequested && cancellationResult.status === "cancelled")
+    );
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

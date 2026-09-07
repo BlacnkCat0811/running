@@ -5,10 +5,13 @@ import Observation
 @MainActor
 final class ServerSession {
     var serverURLString: String {
-        didSet { UserDefaults.standard.set(serverURLString, forKey: Self.storageKey) }
+        didSet {
+            UserDefaults.standard.set(serverURLString, forKey: Self.storageKey)
+            apiToken = Keychain.loadToken(for: serverURLString)
+        }
     }
     var apiToken: String {
-        didSet { Keychain.saveToken(apiToken) }
+        didSet { Keychain.saveToken(apiToken, for: serverURLString) }
     }
     var isReachable = false
     var lastError: String?
@@ -35,7 +38,7 @@ final class ServerSession {
         if let stored = UserDefaults.standard.string(forKey: Self.storageKey), !stored.isEmpty {
             serverURLString = stored
         } else {
-            #if os(macOS)
+            #if os(macOS) && DEBUG
             serverURLString = "http://127.0.0.1:5173"
             #else
             serverURLString = ""
@@ -52,6 +55,9 @@ final class ServerSession {
             return nil
         }
         guard scheme == "http" || scheme == "https", url.host != nil else { return nil }
+        #if !DEBUG
+        guard scheme == "https" else { return nil }
+        #endif
         return url
     }
 
@@ -83,13 +89,13 @@ final class ServerSession {
         guard let base = serverURL else {
             isReachable = false
             consecutiveFailures = 0
-            lastError = "填写 Mac 开发服务器地址，例如 http://192.168.x.x:5173"
+            lastError = "请填写 RAI 服务地址"
             return
         }
         #if os(iOS)
         if isLocalhostURL {
             isReachable = false
-            lastError = "手机上不要填 127.0.0.1。请填 Mac 的局域网地址，例如 http://192.168.10.75:5173"
+            lastError = "请填写手机可访问的 RAI 服务地址"
             return
         }
         #endif
@@ -136,12 +142,12 @@ final class ServerSession {
             if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
                 return
             }
-            markUnreachable("连不上开发服务器。确认 Mac 已运行 npm run dev:device，且 iPhone 与虚拟机在同一网段。")
+            markUnreachable("暂时无法连接 RAI 服务，请检查网络或服务状态")
         }
     }
 
     private var pollInterval: Duration {
-        if isReachable { return .seconds(5) }
+        if isReachable { return .seconds(30) }
         switch consecutiveFailures {
         case 0, 1: return .seconds(1)
         case 2: return .seconds(2)

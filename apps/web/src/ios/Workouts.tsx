@@ -1,5 +1,5 @@
 import type { WorkoutListItem, WorkoutListResponse } from "@rai/api-contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api.js";
 import { sessionType } from "../format.js";
@@ -61,28 +61,48 @@ export function IosWorkouts() {
   const [extra, setExtra] = useState<WorkoutListItem[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const filterVersion = useRef(0);
+  const moreController = useRef<AbortController | null>(null);
   const path = workoutsPath(type, days, status, sourceGroup, environment, 0);
   const result = useRemote<WorkoutListResponse>(path);
 
   useEffect(() => {
+    filterVersion.current += 1;
+    moreController.current?.abort();
+    moreController.current = null;
     setExtra([]);
     setLoadError(null);
   }, [path]);
 
-  const items = result.data ? [...result.data.items, ...extra] : [];
+  const items = result.data
+    ? [...new Map([...result.data.items, ...extra].map((item) => [item.id, item])).values()]
+    : [];
   const total = result.data?.total ?? 0;
   const canLoadMore = Boolean(result.data) && items.length < total;
 
   async function loadMore() {
+    const version = filterVersion.current;
+    const requestPath = workoutsPath(type, days, status, sourceGroup, environment, items.length);
+    moreController.current?.abort();
+    const controller = new AbortController();
+    moreController.current = controller;
     setLoadingMore(true);
     setLoadError(null);
     try {
       const next = await api<WorkoutListResponse>(
-        workoutsPath(type, days, status, sourceGroup, environment, items.length),
+        requestPath,
+        { signal: controller.signal },
       );
-      setExtra((current) => [...current, ...next.items]);
+      if (version !== filterVersion.current || controller.signal.aborted) return;
+      setExtra((current) => {
+        const byId = new Map(current.map((item) => [item.id, item]));
+        for (const item of next.items) byId.set(item.id, item);
+        return [...byId.values()];
+      });
     } catch (caught) {
-      setLoadError(caught instanceof Error ? caught.message : "加载失败");
+      if (!controller.signal.aborted && version === filterVersion.current) {
+        setLoadError(caught instanceof Error ? caught.message : "加载失败");
+      }
     } finally {
       setLoadingMore(false);
     }

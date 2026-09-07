@@ -95,7 +95,8 @@ export const mobileLockBodySchema = {
   additionalProperties: false,
   required: ["action"],
   properties: {
-    action: { type: "string", enum: ["lock", "relock"] }
+    action: { type: "string", enum: ["lock", "relock"] },
+    expectedRevision: { type: "string", minLength: 8, maxLength: 128 }
   }
 } as const;
 
@@ -104,6 +105,7 @@ export const mobileGoalsBodySchema = {
   additionalProperties: false,
   required: ["weeklyDistanceKm"],
   properties: {
+    expectedRevision: { type: "integer", minimum: 0 },
     weeklyDistanceKm: { type: "number", minimum: 1, maximum: 500 },
     easyDurationFloorFraction: { type: "number", minimum: 0.4, maximum: 0.95 },
     qualitySessionCap: { type: "integer", minimum: 0, maximum: 4 },

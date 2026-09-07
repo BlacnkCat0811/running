@@ -2060,6 +2060,51 @@ export class RaiDatabase {
     };
   }
 
+  removeWorkoutsBySyncIdentifiers(identifiers: readonly string[], batchId?: string): string[] {
+    const dirtyWorkoutTimes: string[] = [];
+    if (identifiers.length === 0) return dirtyWorkoutTimes;
+    this.begin();
+    try {
+      const select = this.database.prepare(`
+        SELECT id, start_at AS startAt FROM workouts
+        WHERE metadata_json LIKE ? OR raw_attributes_json LIKE ?
+      `);
+      const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");
+      const deleteGroup = this.database.prepare(`
+        DELETE FROM workout_groups WHERE id IN (
+          SELECT group_id FROM workout_group_members WHERE workout_id = ?
+        )
+      `);
+      const deleteFingerprints = this.database.prepare(`
+        DELETE FROM route_file_fingerprints WHERE route_id IN (
+          SELECT id FROM workout_routes WHERE workout_id = ?
+        )
+      `);
+      for (const identifier of identifiers) {
+        const pattern = `%${identifier}%`;
+        const rows = select.all(pattern, pattern) as unknown as Array<{ id: string; startAt: string }>;
+        for (const row of rows) {
+          dirtyWorkoutTimes.push(row.startAt);
+          if (batchId) {
+            this.database.prepare(`
+              INSERT OR REPLACE INTO import_entity_changes
+                (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
+              VALUES (?, 'workout', ?, 'removed', ?, ?)
+            `).run(batchId, row.id, row.startAt, row.id);
+          }
+          deleteGroup.run(row.id);
+          deleteFingerprints.run(row.id);
+          deleteWorkout.run(row.id);
+        }
+      }
+      this.flush();
+      return dirtyWorkoutTimes;
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+  }
+
   close(): void {
     this.flush();
     this.database.close();

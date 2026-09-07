@@ -63,7 +63,7 @@ export function IosBodyStatusCard() {
             unit="ml/kg/min"
           />
           <PhyTile
-            label="有氧配速"
+            label="最近训练平均配速"
             value={pace(latest?.averagePaceSecondsPerKm ?? null)}
             unit="/km"
             wide
@@ -147,9 +147,9 @@ export function IosPhysiologyPage() {
           <em>bpm</em>
         </div>
       </div>
-      <Card title="有氧配速">
+      <Card title="最近训练平均配速">
         <p className="ios-phy-copy">
-          最近一次有效训练的平均配速，对比近 28 天均值。日常轻松跑请看下面的分区处方。
+          最近一次有效训练的平均配速，对比近 28 天均值。它不是固定的有氧能力或轻松跑处方。
         </p>
         <div className="ios-fact-list">
           <div className="ios-fact">
@@ -168,12 +168,12 @@ export function IosPhysiologyPage() {
       </Card>
       <Card title="轻松跑区（分区处方）">
         <p className="ios-phy-copy">
-          来自训练分区快照，给日常轻松跑当区间参考，和上面的「有氧配速」不是同一个数。
+          来自训练分区快照，给日常轻松跑当区间参考，和上面的训练平均配速不是同一个数。
         </p>
         <div className="ios-fact-list">
           <div className="ios-fact">
             <small>轻松配速</small>
-            <b>{easy ? `${paceRange(easy.lowerSecondsPerKm, easy.upperSecondsPerKm)}/km` : "--"}</b>
+            <b>{easy ? displayPaceRange(easy.lowerSecondsPerKm, easy.upperSecondsPerKm) : "暂不可用"}</b>
           </div>
           <div className="ios-fact">
             <small>分区 LT 锚点</small>
@@ -207,8 +207,10 @@ export function IosPhysiologyPage() {
                 <small>乐观 / 保守</small>
                 <b>
                   {prediction.optimisticSeconds == null
-                    ? "--"
-                    : `${duration(prediction.optimisticSeconds)} / ${duration(prediction.pessimisticSeconds ?? 0)}`}
+                    ? "暂不可用"
+                    : prediction.pessimisticSeconds == null
+                      ? `${duration(prediction.optimisticSeconds)} 或更慢`
+                      : `${duration(prediction.optimisticSeconds)}–${duration(prediction.pessimisticSeconds)}`}
                 </b>
               </div>
             </div>
@@ -226,6 +228,13 @@ export function IosPhysiologyPage() {
       ) : null}
     </>
   );
+}
+
+function displayPaceRange(lower: number | null, upper: number | null): string {
+  if (lower == null && upper == null) return "暂不可用";
+  if (lower != null && upper == null) return `${pace(lower)}/km 或更慢`;
+  if (lower == null && upper != null) return `不快于 ${pace(upper)}/km`;
+  return `${pace(lower!)}/km–${pace(upper!)}/km`;
 }
 
 function ZoneCard({ profile }: { profile: DailyZoneProfile }) {

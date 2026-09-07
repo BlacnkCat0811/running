@@ -11,12 +11,13 @@ nonisolated struct HealthKitExportResult: Sendable {
     let warnings: [String]
     let maxEndDate: Date?
     let workoutAnchor: Data?
+    let deletedWorkoutIds: [String]
+    let sourceScope: String
 }
 
 nonisolated enum HealthKitExportError: LocalizedError {
     case unavailable
     case notAuthorized
-    case noRunningWorkouts
 
     var errorDescription: String? {
         switch self {
@@ -24,8 +25,6 @@ nonisolated enum HealthKitExportError: LocalizedError {
             return "这台设备没有 Apple 健康数据"
         case .notAuthorized:
             return "未获得 Apple 健康读取权限。请在 iPhone 设置 → 健康 → 数据访问与设备 中打开 RAI。"
-        case .noRunningWorkouts:
-            return "Apple 健康里没有可读取的跑步记录。请确认健康 App 中已有跑步记录，并在设置 → 健康 → 数据访问与设备中确认 RAI 已开启，然后返回 RAI 重试。"
         }
     }
 }
@@ -90,21 +89,12 @@ nonisolated enum HealthKitExport {
         let store = HKHealthStore()
         let warnings = WarningBag()
         await onProgress("正在读取跑步记录")
-        let (workouts, nextAnchor) = try await runningWorkouts(
+        let workoutBatch = try await runningWorkouts(
             store: store,
             from: startDate,
             anchorData: workoutAnchor
         )
-        if workouts.isEmpty {
-            // authorizationStatus(for:) only reports whether this app may *save*
-            // samples of the type. It does not report read authorization. Since
-            // RAI intentionally requests no write types, this status is normally
-            // .notDetermined even when the user has granted read access. Query
-            // errors are mapped to .notAuthorized in runningWorkouts instead.
-            if startDate == nil {
-                throw HealthKitExportError.noRunningWorkouts
-            }
-        }
+        let workouts = workoutBatch.added
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("rai-hk-\(UUID().uuidString)", isDirectory: true)
@@ -146,6 +136,20 @@ nonisolated enum HealthKitExport {
         try write(xml, "\n</HealthData>\n")
         try xml.synchronize()
 
+        let manifestURL = directory.appendingPathComponent("sync-manifest.json")
+        let manifest: [String: Any] = [
+            "version": 1,
+            "sourceScope": "healthkit",
+            "sourceEntityType": "HKWorkoutActivityTypeRunning",
+            "sourceIds": workouts.map(workoutSyncId),
+            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString },
+            "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"],
+            "createdAt": ISO8601DateFormatter().string(from: Date())
+        ]
+        let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
+        try manifestData.write(to: manifestURL, options: .atomic)
+        files.append(("sync-manifest.json", manifestURL))
+
         await onProgress("正在打包健康数据")
         let zipURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("apple-health-healthkit-\(UUID().uuidString).zip")
@@ -157,7 +161,9 @@ nonisolated enum HealthKitExport {
             routeCount: routeCount,
             warnings: warnings.snapshot,
             maxEndDate: workouts.map(\.endDate).max(),
-            workoutAnchor: nextAnchor
+            workoutAnchor: workoutBatch.anchor,
+            deletedWorkoutIds: workoutBatch.deleted.map { $0.uuid.uuidString },
+            sourceScope: "healthkit"
         )
     }
 
@@ -203,27 +209,19 @@ nonisolated enum HealthKitExport {
         store: HKHealthStore,
         from startDate: Date?,
         anchorData: Data?
-    ) async throws -> (workouts: [HKWorkout], anchor: Data?) {
-        if let anchorData, let stored = decodeAnchor(anchorData) {
-            do {
-                let (added, next) = try await anchoredWorkouts(store: store, anchor: stored)
-                return (added, encodeAnchor(next))
-            } catch {
-                if isAuthorizationError(error) { throw HealthKitExportError.notAuthorized }
-            }
-        }
+    ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], anchor: Data?) {
+        let stored = anchorData.flatMap(decodeAnchor)
         var predicates = [HKQuery.predicateForWorkouts(with: .running)]
-        if let startDate {
+        if stored == nil, let startDate {
             predicates.append(HKQuery.predicateForSamples(withStart: startDate, end: nil, options: .strictStartDate))
         }
         do {
-            let workouts: [HKWorkout] = try await samples(
-                type: .workoutType(),
-                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates),
-                store: store
+            let batch = try await anchoredWorkouts(
+                store: store,
+                anchor: stored,
+                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
             )
-            let (_, next) = try await anchoredWorkouts(store: store, anchor: nil)
-            return (workouts, encodeAnchor(next))
+            return (batch.added, batch.deleted, encodeAnchor(batch.next))
         } catch {
             if isAuthorizationError(error) {
                 throw HealthKitExportError.notAuthorized
@@ -686,22 +684,24 @@ nonisolated enum HealthKitExport {
 
     private static func anchoredWorkouts(
         store: HKHealthStore,
-        anchor: HKQueryAnchor?
-    ) async throws -> (added: [HKWorkout], next: HKQueryAnchor) {
+        anchor: HKQueryAnchor?,
+        predicate: NSPredicate?
+    ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor) {
         try await withCheckedThrowingContinuation { continuation in
-            let box = ResumeBox<(added: [HKWorkout], next: HKQueryAnchor)>(continuation)
+            let box = ResumeBox<(added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor)>(continuation)
             let query = HKAnchoredObjectQuery(
                 type: .workoutType(),
-                predicate: HKQuery.predicateForWorkouts(with: .running),
+                predicate: predicate,
                 anchor: anchor,
                 limit: HKObjectQueryNoLimit
-            ) { _, samples, _, newAnchor, error in
+            ) { _, samples, deletedObjects, newAnchor, error in
                 if let error {
                     box.resume(throwing: error)
                     return
                 }
                 box.resume(returning: (
                     added: (samples as? [HKWorkout]) ?? [],
+                    deleted: deletedObjects ?? [],
                     next: newAnchor ?? HKQueryAnchor(fromValue: 0)
                 ))
             }

@@ -278,7 +278,7 @@
 				INFOPLIST_FILE = RAI/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = RAI;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于在本机计算即时跑力和长期真实跑力。数据只发到你 Mac 上的本地 RAI 服务，不会上传云端。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于生成跑步分析。数据会发送到你在应用中配置的 RAI 服务；请在授权前确认服务位置、保留和删除规则。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
@@ -318,7 +318,7 @@
 				INFOPLIST_FILE = RAI/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = RAI;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于在本机计算即时跑力和长期真实跑力。数据只发到你 Mac 上的本地 RAI 服务，不会上传云端。";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于生成跑步分析。数据会发送到你在应用中配置的 RAI 服务；请在授权前确认服务位置、保留和删除规则。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";

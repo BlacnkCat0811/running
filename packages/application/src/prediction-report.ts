@@ -214,7 +214,10 @@ export function buildFormulaPredictionBase(
   const scenario = resolvedScenario(options);
   const profile = loadPhysiologyProfile(database, asOf);
   const snapshot = buildPhysiologyPredictionSnapshot({
-    evidence: [...directEvidence, ...labeledPerformance],
+    // Race/test performance is VDOT evidence, not a physiological VO2max
+    // measurement. Keep the count for provenance, but never merge the same
+    // event into the VO2max ensemble through a second derived path.
+    evidence: directEvidence,
     performanceEvidence: performanceVdotEvidence,
     thresholdEvidence,
     readiness,
@@ -223,7 +226,6 @@ export function buildFormulaPredictionBase(
     generatedAt: asOf,
     dataThroughAt: latestEvidenceAt([
       ...directEvidence,
-      ...labeledPerformance,
       ...performanceVdotEvidence,
       ...thresholdEvidence
     ])

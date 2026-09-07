@@ -121,13 +121,21 @@ export function assembleMobileCoach(args: {
     : null;
   const weekSessions = loadWeekSessions(database, week.periodStart, week.periodEnd);
   const recoveryFacts = new SqliteRecoveryFactsReadRepository(database);
-  const currentNight = recoveryFacts.loadCanonicalNight(today, "Asia/Shanghai") ?? recoveryFacts.loadCanonicalNight(shiftDate(today, -1), "Asia/Shanghai");
+  // A wake date is the ownership date of a night. Do not promote yesterday's
+  // sleep into today's recovery card when today has no sample.
+  const currentNight = recoveryFacts.loadCanonicalNight(today, "Asia/Shanghai");
   const factsBaseline = recoveryFacts.loadBaselines(new Date().toISOString(), "Asia/Shanghai");
   const currentHrv = currentNight ? recoveryFacts.loadHrvDay(currentNight.wakeDate, "Asia/Shanghai") : null;
   const sleep = { lastNight: currentNight?.asleepUnionMinutes ?? null, baseline: factsBaseline.sleepMinutes, nightsBelow: countNightsBelowSleepBaseline([0,1,2].map((offset) => recoveryFacts.loadCanonicalNight(shiftDate(currentNight?.wakeDate ?? today, -offset), "Asia/Shanghai")), factsBaseline.sleepMinutes) };
   const hrv = { current: currentHrv?.hrvSdnnMs ?? null, baseline: factsBaseline.hrvSdnnMs };
-  const rhrCurrent = recoveryFacts.loadRhrMedian(new Date(Date.now() - 36 * 3600000).toISOString(), new Date().toISOString());
+  const rhrCurrent = recoveryFacts.loadRhrMedian(shanghaiInstant(today, 0), shanghaiInstant(shiftDate(today, 1), 0));
   const rhr = { current: rhrCurrent, baseline: factsBaseline.rhrBpm };
+  const recoveryEvidenceStatus: CoachInput["recoveryEvidenceStatus"] =
+    currentNight == null
+      ? "unknown"
+      : sleep.lastNight != null && hrv.current != null && rhr.current != null
+        ? "valid"
+        : "partial";
   const physState = classifyPhysState({ sleepMinutes: sleep.lastNight, sleepBaselineMinutes: sleep.baseline, hrvSdnnMs: hrv.current, hrvBaselineMs: hrv.baseline, rhrBpm: rhr.current, rhrBaselineBpm: rhr.baseline, nightsBelowSleepBaseline: sleep.nightsBelow });
   const qualityDays = consecutiveQualityDays(weekSessions.recentByDate, args.latestDataDate ?? today);
   const asOf = `${(args.latestDataDate ?? today)}T16:00:00.000Z`;
@@ -144,6 +152,8 @@ export function assembleMobileCoach(args: {
   const input: CoachInput = {
     today,
     latestDataDate: args.latestDataDate,
+    recoveryEvidenceStatus,
+    recoveryEvidenceDate: currentNight?.wakeDate ?? null,
     calibration: dashboard.calibration.status,
     eligibleSessions: dashboard.calibration.eligibleSessions,
     trueAbility: dashboard.latestSnapshot?.trueAbility ?? null,

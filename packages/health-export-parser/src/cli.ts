@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 import { basename, dirname, resolve } from "node:path";
@@ -213,6 +213,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     const xmlResult = await parseAppleHealthXml(xmlPath, store, {
       fileSize: xmlSize,
       atomic: false,
+      deletedWorkoutIds: readSyncManifest(args.input),
       ...(incremental ? { incremental: {
         generation: stableId("import_generation", [batchId, new Date().toISOString()]),
         batchId,
@@ -343,6 +344,18 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       removeDatabaseFiles(stagingDatabase);
       releaseImportLock();
     }
+  }
+}
+
+function readSyncManifest(inputRoot: string): string[] {
+  const path = resolve(inputRoot, "sync-manifest.json");
+  if (!existsSync(path)) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: unknown; deletedSourceIds?: unknown };
+    if (parsed.version !== 1 || !Array.isArray(parsed.deletedSourceIds)) return [];
+    return parsed.deletedSourceIds.filter((value): value is string => typeof value === "string" && value.length > 0);
+  } catch {
+    throw new Error("sync-manifest.json 无法读取，拒绝将缺失内容当作删除");
   }
 }
 

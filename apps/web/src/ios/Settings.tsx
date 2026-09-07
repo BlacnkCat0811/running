@@ -65,6 +65,7 @@ export function IosSettings() {
         method: "PUT",
         body: JSON.stringify({
           weeklyDistanceKm,
+          expectedRevision: goals.data?.revision,
           easyDurationFloorFraction: floor,
           qualitySessionCap: cap,
           raceTarget: raceDate && raceDistance
@@ -104,7 +105,7 @@ export function IosSettings() {
           </button>
         ) : null}
         <small className="ios-setting-note">
-          数据在 Mac 上的 RAI 服务，手机不能离线使用.
+          数据保存在已连接的 RAI 服务。离线时可以查看已加载内容，新的同步和修改需要联网。
         </small>
       </Card>
       <Card title="健康数据">

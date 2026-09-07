@@ -92,6 +92,10 @@ export interface HealthResponse {
   status: "ok" | string;
   databaseReady: boolean;
   localOnly: boolean;
+  serverId: string;
+  athleteId: string;
+  datasetEpoch: string;
+  syncProtocolVersion: number;
   now: string;
 }
 
@@ -491,6 +495,7 @@ export interface MobileVerdict {
   reason: string;
   triggers: MobileTrigger[];
   stale: boolean;
+  reasonCodes?: string[];
 }
 
 export interface MobileNextSession {
@@ -594,6 +599,7 @@ export interface MobileLockState {
 
 export interface LockMobileSessionInput {
   action: "lock" | "relock";
+  expectedRevision?: string;
 }
 
 /** Aggregated payload for the iOS home page ("今天"). */
@@ -602,6 +608,16 @@ export interface MobileTodayResponse {
   timezone: string;
   /** Latest local_date present in the training loads; null when the store is empty. */
   latestDataDate: string | null;
+  /** The latest successful server-side data refresh, independent of training dates. */
+  lastSyncedAt: string | null;
+  /** Recovery/sample coverage is intentionally separate from training freshness. */
+  freshness: {
+    state: "unknown" | "valid" | "stale";
+    checkedAt: string | null;
+    latestTrainingDate: string | null;
+    recoveryDate: string | null;
+  };
+  recommendationRevision: string;
   today: {
     localDate: string;
     distanceKm: number;
@@ -702,6 +718,7 @@ export interface MobileTrendsResponse {
 
 /** Weekly training goals persisted server-side for the iOS settings page. */
 export interface MobileGoalsResponse {
+  revision: number;
   weeklyDistanceKm: number;
   easyDurationFloorFraction: number;
   qualitySessionCap: number;
@@ -712,6 +729,7 @@ export interface MobileGoalsResponse {
 }
 
 export interface UpdateMobileGoalsInput {
+  expectedRevision?: number;
   weeklyDistanceKm: number;
   easyDurationFloorFraction?: number;
   qualitySessionCap?: number;

@@ -90,6 +90,13 @@ struct RootView: View {
     private var nativeSnapshot: NativeBridgeSnapshot {
         NativeBridgeSnapshot(
             token: session.apiToken,
+            trustedOrigin: session.serverURL.flatMap { url in
+                var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                components?.path = ""
+                components?.query = nil
+                components?.fragment = nil
+                return components?.string
+            },
             reachable: session.isReachable,
             lastSyncAt: healthSync.lastSyncAtISO,
             lastSyncMessage: healthSync.message,
@@ -168,7 +175,7 @@ struct RootView: View {
     private var settingsSheet: some View {
         NavigationStack {
             SetupView()
-                .navigationTitle("开发服务器")
+                .navigationTitle("RAI 服务")
                 #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
                 #endif
@@ -191,8 +198,8 @@ struct SetupView: View {
     var body: some View {
         @Bindable var session = session
         Form {
-            Section("Mac 开发服务器") {
-                TextField("http://192.168.x.x:5173", text: $session.serverURLString)
+            Section("服务连接") {
+                TextField("https://rai.example.com", text: $session.serverURLString)
                     #if os(iOS)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
@@ -201,7 +208,7 @@ struct SetupView: View {
                     .submitLabel(.done)
                 SecureField("API Token（云端部署时填写）", text: $session.apiToken)
                 if session.isReachable {
-                    Label("已连接到开发服务器", systemImage: "checkmark.circle.fill")
+                    Label("已连接到 RAI 服务", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 } else if let error = session.lastError {
                     Text(error)

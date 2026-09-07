@@ -76,6 +76,8 @@ export interface AppleHealthParseOptions {
   onProgress?: (progress: ParseProgress) => void;
   incremental?: { generation: string; batchId?: string; preserveAbsent?: boolean };
   atomic?: boolean;
+  /** Explicit HealthKit deletion events. Absence never implies deletion. */
+  deletedWorkoutIds?: readonly string[];
 }
 
 function attributesOf(tag: SaxesTagPlain): Record<string, string> {
@@ -455,6 +457,8 @@ export async function parseAppleHealthXml(
     }
     parser.close();
 
+    let explicitDeletionTimes: string[] = [];
+
     if (!options.incremental?.preserveAbsent) {
       for (const [type, item] of recordInventory) {
         store.upsertInventory("record", type, item.count, item.firstAt, item.lastAt, {
@@ -482,12 +486,15 @@ export async function parseAppleHealthXml(
       : { removedRecords: 0, removedWorkouts: 0, dirtyWorkoutTimes: [] as string[] };
     if (atomic) store.commitAtomicImport();
     else store.flush();
+    if (options.deletedWorkoutIds?.length) {
+      explicitDeletionTimes = store.removeWorkoutsBySyncIdentifiers(options.deletedWorkoutIds, options.incremental?.batchId);
+    }
     return {
       recordCount, workoutCount, activitySummaryCount, issueCount,
       insertedRecordCount, insertedWorkoutCount,
       removedRecordCount: finalized.removedRecords,
       removedWorkoutCount: finalized.removedWorkouts,
-      dirtyWorkoutTimes: [...insertedWorkoutTimes, ...finalized.dirtyWorkoutTimes]
+      dirtyWorkoutTimes: [...insertedWorkoutTimes, ...explicitDeletionTimes, ...finalized.dirtyWorkoutTimes]
     };
   } catch (error) {
     if (atomic) store.rollbackAtomicImport();

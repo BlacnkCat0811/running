@@ -997,7 +997,7 @@ desktopTest("合成数据主流程可导航、筛选、检查详情和只读比�
     assert.equal(scenarioBody.inputs.scenario.elevationGainMeters.ten_k, 150);
     await page.getByText("温湿度", { exact: true }).first().waitFor();
     await page.getByRole("heading", { name: "CatBoost 预测模型" }).waitFor();
-    await page.getByText(/CatBoost 已激活|公式基线/, { exact: true }).first().waitFor();
+    await page.getByText(/CatBoost 已应用|CatBoost 已激活|模型不可用，已回退公式|模型已过期，请重新训练|样本不足|公式基线/, { exact: true }).first().waitFor();
     const invalidHumidity = await fetch(
       `${fixtureApi.origin}/v1/predictions?humidityPercent=101`,
     );

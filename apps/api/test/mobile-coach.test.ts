@@ -87,6 +87,27 @@ test("verdict is green when load and recovery allow a quality session", () => {
   assert.ok(next.kind === "tempo" || next.kind === "interval");
 });
 
+test("stale recovery evidence never opens a quality window", () => {
+  const verdict = decideVerdict({ ...base(), latestDataDate: "2026-08-01", recoveryEvidenceDate: "2026-08-01" });
+  assert.equal(verdict.tone, "yellow");
+  assert.equal(verdict.stale, true);
+  assert.ok(verdict.reasonCodes?.includes("recovery_stale"));
+  assert.notEqual(decideNextSession({ ...base(), latestDataDate: "2026-08-01", recoveryEvidenceDate: "2026-08-01" }, verdict).kind, "tempo");
+});
+
+test("missing recovery facts stay conservative", () => {
+  const verdict = decideVerdict({
+    ...base(),
+    lastNightSleepMinutes: null,
+    morningHrvMs: null,
+    restingHeartRateBpm: null,
+    recoveryEvidenceStatus: "unknown",
+    recoveryEvidenceDate: null
+  });
+  assert.equal(verdict.tone, "yellow");
+  assert.ok(verdict.reasonCodes?.includes("recovery_evidence_missing"));
+});
+
 test("high load ratio forces rest/easy", () => {
   const verdict = decideVerdict({ ...base(), loadRatio: 1.45, trainingStatus: "high_load" });
   assert.equal(verdict.tone, "red");

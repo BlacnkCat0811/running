@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 
 import type {
@@ -25,6 +26,7 @@ const SESSION_KINDS = new Set<MobileSessionKind>([
 const RACE_DISTANCES = new Set<MobileRaceDistance>(["five_k", "ten_k", "half_marathon"]);
 
 interface StoredGoals {
+  revision: number;
   weeklyDistanceKm: number;
   easyDurationFloorFraction: number;
   qualitySessionCap: number;
@@ -39,6 +41,7 @@ const clampFraction = (value: number): number => Math.min(0.95, Math.max(0.4, va
 const clampCap = (value: number): number => Math.min(4, Math.max(0, Math.round(value)));
 
 const emptyGoals = (): StoredGoals => ({
+  revision: 0,
   weeklyDistanceKm: DEFAULT_WEEKLY_DISTANCE_KM,
   easyDurationFloorFraction: DEFAULT_EASY_DURATION_FLOOR,
   qualitySessionCap: DEFAULT_QUALITY_SESSION_CAP,
@@ -51,13 +54,16 @@ const emptyGoals = (): StoredGoals => ({
 /** Weekly goals persisted at `var/mobile-goals.json`. */
 export class MobileGoalsStore {
   private readonly filePath: string;
+  private readonly controlDatabase: DatabaseSync | null;
   private cached: StoredGoals | null = null;
 
-  constructor(runtimeRoot: string) {
+  constructor(runtimeRoot: string, controlDatabasePath?: string) {
     this.filePath = join(runtimeRoot, "var", GOALS_FILE);
+    this.controlDatabase = controlDatabasePath ? this.openControlDatabase(controlDatabasePath) : null;
   }
 
   read(): MobileGoalsResponse {
+    if (this.controlDatabase) return this.toResponse(this.readControlGoals());
     if (!this.cached) {
       this.cached = existsSync(this.filePath) ? this.loadFile() : emptyGoals();
     }
@@ -68,8 +74,12 @@ export class MobileGoalsStore {
     if (!Number.isFinite(input.weeklyDistanceKm)) {
       throw new RangeError("weeklyDistanceKm must be a finite number");
     }
-    const current = existsSync(this.filePath) ? this.loadFile() : emptyGoals();
+    const current = this.readStored();
+    if (input.expectedRevision != null && input.expectedRevision !== current.revision) {
+      throw new MobileGoalsRevisionConflictError(current.revision);
+    }
     const stored: StoredGoals = {
+      revision: current.revision + 1,
       weeklyDistanceKm: clampGoal(input.weeklyDistanceKm),
       easyDurationFloorFraction:
         input.easyDurationFloorFraction == null
@@ -82,14 +92,19 @@ export class MobileGoalsStore {
       lockedSession: input.lockedSession === undefined ? current.lockedSession : normalizeLockedSession(input.lockedSession),
       updatedAt: new Date().toISOString()
     };
-    mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, `${JSON.stringify(stored, null, 2)}\n`, "utf8");
+    if (this.controlDatabase) {
+      this.writeControlGoals(stored, current.revision);
+    } else {
+      mkdirSync(dirname(this.filePath), { recursive: true });
+      writeFileSync(this.filePath, `${JSON.stringify(stored, null, 2)}\n`, "utf8");
+    }
     this.cached = stored;
     return this.toResponse(stored);
   }
 
   private toResponse(stored: StoredGoals): MobileGoalsResponse {
     return {
+      revision: stored.revision,
       weeklyDistanceKm: stored.weeklyDistanceKm,
       easyDurationFloorFraction: stored.easyDurationFloorFraction,
       qualitySessionCap: stored.qualitySessionCap,
@@ -98,6 +113,10 @@ export class MobileGoalsStore {
       lockedSession: stored.lockedSession,
       updatedAt: stored.updatedAt
     };
+  }
+
+  close(): void {
+    this.controlDatabase?.close();
   }
 
   lockSession(locked: MobileLockedSession): MobileGoalsResponse {
@@ -115,6 +134,7 @@ export class MobileGoalsStore {
       const floor = Number(parsed.easyDurationFloorFraction);
       const cap = Number(parsed.qualitySessionCap);
       return {
+        revision: Number.isInteger(parsed.revision) && Number(parsed.revision) >= 0 ? Number(parsed.revision) : 0,
         weeklyDistanceKm: clampGoal(weekly),
         easyDurationFloorFraction: Number.isFinite(floor) ? clampFraction(floor) : DEFAULT_EASY_DURATION_FLOOR,
         qualitySessionCap: Number.isFinite(cap) ? clampCap(cap) : DEFAULT_QUALITY_SESSION_CAP,
@@ -126,6 +146,117 @@ export class MobileGoalsStore {
     } catch {
       return emptyGoals();
     }
+  }
+
+  private readStored(): StoredGoals {
+    return this.controlDatabase
+      ? this.readControlGoals()
+      : (existsSync(this.filePath) ? this.loadFile() : emptyGoals());
+  }
+
+  private openControlDatabase(path: string): DatabaseSync {
+    mkdirSync(dirname(path), { recursive: true });
+    const database = new DatabaseSync(path);
+    database.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA busy_timeout = 5000;
+      CREATE TABLE IF NOT EXISTS mobile_goals (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        revision INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS mobile_goals_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        revision INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        changed_at TEXT NOT NULL
+      );
+    `);
+    const existing = database.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get();
+    if (!existing) {
+      let initial = emptyGoals();
+      if (existsSync(this.filePath)) {
+        let parsed: Partial<StoredGoals>;
+        try {
+          parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<StoredGoals>;
+        } catch (error) {
+          database.close();
+          throw new Error(`mobile-goals.json 迁移失败：文件损坏（${error instanceof Error ? error.message : "JSON 无效"}）`);
+        }
+        const weekly = Number(parsed.weeklyDistanceKm);
+        if (!Number.isFinite(weekly)) {
+          database.close();
+          throw new Error("mobile-goals.json 迁移失败：weeklyDistanceKm 无效");
+        }
+        initial = {
+          revision: 0,
+          weeklyDistanceKm: clampGoal(weekly),
+          easyDurationFloorFraction: Number.isFinite(Number(parsed.easyDurationFloorFraction)) ? clampFraction(Number(parsed.easyDurationFloorFraction)) : DEFAULT_EASY_DURATION_FLOOR,
+          qualitySessionCap: Number.isFinite(Number(parsed.qualitySessionCap)) ? clampCap(Number(parsed.qualitySessionCap)) : DEFAULT_QUALITY_SESSION_CAP,
+          raceTarget: normalizeRaceTarget(parsed.raceTarget ?? null),
+          weekPlan: normalizeWeekPlan(Array.isArray(parsed.weekPlan) ? parsed.weekPlan : []),
+          lockedSession: normalizeLockedSession(parsed.lockedSession ?? null),
+          updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString()
+        };
+        const backup = `${this.filePath}.migrated.bak`;
+        if (!existsSync(backup)) copyFileSync(this.filePath, backup);
+        writeFileSync(`${this.filePath}.migration-complete`, `${new Date().toISOString()}\n`, "utf8");
+      }
+      const payload = JSON.stringify({
+        weeklyDistanceKm: initial.weeklyDistanceKm,
+        easyDurationFloorFraction: initial.easyDurationFloorFraction,
+        qualitySessionCap: initial.qualitySessionCap,
+        raceTarget: initial.raceTarget,
+        weekPlan: initial.weekPlan,
+        lockedSession: initial.lockedSession
+      });
+      database.prepare("INSERT INTO mobile_goals (singleton, revision, payload_json, updated_at) VALUES (1, ?, ?, ?)").run(initial.revision, payload, initial.updatedAt);
+      database.prepare("INSERT INTO mobile_goals_history (revision, payload_json, changed_at) VALUES (?, ?, ?)").run(initial.revision, payload, initial.updatedAt);
+    }
+    return database;
+  }
+
+  private readControlGoals(): StoredGoals {
+    const row = this.controlDatabase?.prepare("SELECT revision, payload_json, updated_at FROM mobile_goals WHERE singleton = 1").get() as { revision: number; payload_json: string; updated_at: string } | undefined;
+    if (!row) return emptyGoals();
+    const parsed = JSON.parse(row.payload_json) as Omit<StoredGoals, "revision" | "updatedAt">;
+    return { ...parsed, revision: Number(row.revision), updatedAt: row.updated_at };
+  }
+
+  private writeControlGoals(stored: StoredGoals, expectedRevision: number): void {
+    if (!this.controlDatabase) return;
+    const payload = JSON.stringify({
+      weeklyDistanceKm: stored.weeklyDistanceKm,
+      easyDurationFloorFraction: stored.easyDurationFloorFraction,
+      qualitySessionCap: stored.qualitySessionCap,
+      raceTarget: stored.raceTarget,
+      weekPlan: stored.weekPlan,
+      lockedSession: stored.lockedSession
+    });
+    this.controlDatabase.exec("BEGIN IMMEDIATE");
+    try {
+      const result = this.controlDatabase.prepare(`
+        UPDATE mobile_goals SET revision = ?, payload_json = ?, updated_at = ?
+        WHERE singleton = 1 AND revision = ?
+      `).run(stored.revision, payload, stored.updatedAt, expectedRevision);
+      if (Number(result.changes) !== 1) {
+        this.controlDatabase.exec("ROLLBACK");
+        throw new MobileGoalsRevisionConflictError(this.readControlGoals().revision);
+      }
+      this.controlDatabase.prepare("INSERT INTO mobile_goals_history (revision, payload_json, changed_at) VALUES (?, ?, ?)").run(stored.revision, payload, stored.updatedAt);
+      this.controlDatabase.exec("COMMIT");
+    } catch (error) {
+      try { this.controlDatabase.exec("ROLLBACK"); } catch { /* preserve the original error */ }
+      throw error;
+    }
+  }
+}
+
+export class MobileGoalsRevisionConflictError extends Error {
+  readonly code = "mobile_goals_revision_conflict";
+  constructor(readonly currentRevision: number) {
+    super("训练目标已在其他页面更新，请重新加载后再保存");
   }
 }
 

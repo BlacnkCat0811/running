@@ -66,6 +66,8 @@ export interface CoachLatestWorkout {
 export interface CoachInput {
   today: string;
   latestDataDate: string | null;
+  recoveryEvidenceStatus?: "unknown" | "partial" | "valid" | "stale";
+  recoveryEvidenceDate?: string | null;
   calibration: MobileCalibrationCard["status"];
   eligibleSessions: number;
   trueAbility: number | null;
@@ -173,6 +175,13 @@ const trigger = (
 export function decideVerdict(input: CoachInput): MobileVerdict {
   const triggers: MobileTrigger[] = [];
   const stale = input.latestDataDate == null || input.latestDataDate < input.today;
+  const recoveryStatus = input.recoveryEvidenceStatus ?? (
+    input.lastNightSleepMinutes != null && input.morningHrvMs != null && input.restingHeartRateBpm != null
+      ? "valid"
+      : "unknown"
+  );
+  const recoveryDateFresh = input.recoveryEvidenceDate == null ? !stale : input.recoveryEvidenceDate === input.today;
+  const recoveryUnavailable = recoveryStatus !== "valid" || !recoveryDateFresh;
   let tone: MobileVerdict["tone"] = "yellow";
   let title = "只宜有氧";
   let reason = "默认轻松跑。数据不足时不安排质量课。";
@@ -202,6 +211,18 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     title = "只宜有氧";
     reason = "有效训练或负荷历史还不够，今天按轻松跑处理。";
     triggers.push(trigger("insufficient_data", input.eligibleSessions, 8, reason));
+  } else if (recoveryUnavailable) {
+    tone = "yellow";
+    title = "只宜有氧";
+    reason = !recoveryDateFresh || recoveryStatus === "stale"
+      ? "恢复事实已过期，先同步健康；在新证据到达前不安排质量课。"
+      : "今天的睡眠、HRV 或静息心率证据不完整，先轻松跑或休息。";
+    triggers.push(trigger(
+      !recoveryDateFresh || recoveryStatus === "stale" ? "recovery_stale" : "recovery_evidence_missing",
+      null,
+      null,
+      reason
+    ));
   } else if (highLoad) {
     tone = "red";
     title = "宜休息或轻松";
@@ -280,7 +301,8 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     reason = `${reason}（数据不是今天的，按截至 ${input.latestDataDate ?? "未知"} 的恢复估计）`;
   }
 
-  return { tone, title, reason, triggers, stale };
+  const reasonCodes = triggers.map((item) => item.code);
+  return { tone, title, reason, triggers, stale: stale || recoveryStatus === "stale", reasonCodes };
 }
 
 export function decideNextSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {

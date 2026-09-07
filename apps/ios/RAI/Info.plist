@@ -5,7 +5,7 @@
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
+		<false/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
@@ -15,11 +15,11 @@
 		<string>_rai._tcp</string>
 	</array>
 	<key>NSHealthShareUsageDescription</key>
-	<string>RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于在本机计算即时跑力和长期真实跑力。数据只发到你 Mac 上的本地 RAI 服务，不会上传云端。</string>
+	<string>RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于生成跑步分析。数据会发送到你在应用中配置的 RAI 服务；请在授权前确认服务位置、保留和删除规则。</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>RAI 不向 Apple 健康写入数据。</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>RAI 需要连接你 Mac 虚拟机上的本地开发服务器，才能在 iPhone 上调试。</string>
+	<string>RAI 需要连接你配置的 RAI 服务以同步和显示分析结果。</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

@@ -152,7 +152,7 @@ test("creates immutable feature/model runs and switches the active model", async
     const secondJob = service.runNextJob();
     assert.equal(secondJob?.id, firstOverride.jobId);
     assert.match(firstOverride.overrideId, /^workout_override_/);
-    assert.equal(secondJob?.status, "succeeded");
+    assert.equal(secondJob?.status, "succeeded", JSON.stringify(secondJob));
     const metricConfig = store.database.prepare(`
       SELECT metric.config_json AS configJson
       FROM training_metric_runs metric

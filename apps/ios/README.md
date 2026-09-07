@@ -1,6 +1,6 @@
 # RAI iOS 调试壳
 
-这是给 **iPhone 12 Pro Max / iOS 26** 用的 Xcode 调试宿主，不是独立的 HealthKit 产品。手机只显示现有 Web 界面；数据、评分和 SQLite 仍在 Mac 虚拟机里的 Node API 上运行。
+这是给 **iPhone 12 Pro Max / iOS 26** 用的 Xcode 宿主，不是独立的 HealthKit 产品。手机只显示现有 Web 界面；数据、评分和 SQLite 仍在已配置的 RAI API 服务上运行。
 
 ## 一次跑通
 
@@ -48,7 +48,7 @@
 ## 它做不到的事
 
 - 不在手机上跑 Node / SQLite，也不向 Apple 健康写入。
-- 不能离线独立使用。Mac 上的 `npm run dev:device` 停了，手机页面也就停了。
+- 新的同步和修改需要联网；已加载的首页和历史内容可在服务暂时不可用时继续查看。手机不会在离线状态下生成或确认新的训练安排。
 - 原生 SwiftUI / React Native 产品需要单独立项。
 
 ## 像素风 UI 与移动端 API 映射

@@ -1,5 +1,6 @@
 import type { MobileTodayResponse } from "@rai/api-contracts";
 import { useNavigate } from "react-router-dom";
+import { useState } from "react";
 
 import { api } from "../api.js";
 import { notifyDataUpdated } from "../events.js";
@@ -38,14 +39,14 @@ export function IosHome() {
 
       {phase === "need_sync" ? (
         <section className="ios-verdict-card yellow">
-          <span>先同步</span>
+        <span>需要同步</span>
           <strong>数据不是今天的</strong>
           <p>同步健康后再给今日裁决，避免用过期恢复开绿灯。</p>
         </section>
       ) : null}
 
       <section className="ios-ability-hero">
-        <span>真实能力 TA</span>
+        <span>长期跑力估计</span>
         <strong>{ta == null ? "--" : ta.toFixed(1)}</strong>
         <p>
           {change == null ? data.ability.explanation : `${change >= 0 ? "+" : ""}${change.toFixed(1)} · ${data.ability.explanation}`}
@@ -99,7 +100,7 @@ function MorningBlocks({
   return (
     <>
       <section className={`ios-verdict-card ${data.verdict.tone}`}>
-        <span>今日裁决</span>
+          <span>今日训练建议</span>
         <strong>{data.verdict.title}</strong>
         <p>{data.verdict.reason}</p>
       </section>
@@ -126,7 +127,7 @@ function MorningBlocks({
                 <b>
                   {session.paceSecondsPerKmLower == null
                     ? "--"
-                    : `${pace(session.paceSecondsPerKmLower)}–${pace(session.paceSecondsPerKmUpper)}`}
+                    : paceRange(session.paceSecondsPerKmLower, session.paceSecondsPerKmUpper)}
                 </b>
               </div>
               <div className="ios-fact">
@@ -142,8 +143,8 @@ function MorningBlocks({
           {emptyToday ? (
             <p className="ios-phy-copy">今天还没跑 · 本周已 {data.week.distanceKm.toFixed(1)} km</p>
           ) : null}
-          {!locked ? <LockButton onLocked={onLocked} /> : null}
-          {data.lock.relockSuggested ? <RelockButton onLocked={onLocked} /> : null}
+          {!locked ? <LockButton revision={data.recommendationRevision} onLocked={onLocked} /> : null}
+          {data.lock.relockSuggested ? <RelockButton revision={data.recommendationRevision} onLocked={onLocked} /> : null}
         </div>
       </Card>
     </>
@@ -205,44 +206,55 @@ function PostRunBlocks({
   );
 }
 
-function LockButton({ onLocked }: { onLocked: () => void }) {
+function LockButton({ revision, onLocked }: { revision: string; onLocked: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   return (
-    <button
-      type="button"
-      className="ios-save"
-      onClick={() => {
+    <>
+      <button type="button" className="ios-save" disabled={busy} onClick={() => {
+        setBusy(true);
+        setError(null);
         void api("/v1/mobile/lock", {
           method: "POST",
-          body: JSON.stringify({ action: "lock" }),
-        }).then(() => {
-          notifyDataUpdated();
-          onLocked();
-        });
-      }}
-    >
-      锁定今天
-    </button>
+          body: JSON.stringify({ action: "lock", expectedRevision: revision }),
+        }).then(() => { notifyDataUpdated(); onLocked(); })
+          .catch((caught) => setError(caught instanceof Error ? caught.message : "确认失败，请重试"))
+          .finally(() => setBusy(false));
+      }}>
+        {busy ? "确认中…" : "确认今日安排"}
+      </button>
+      {error ? <small className="ios-sync-error" role="alert">{error}</small> : null}
+    </>
   );
 }
 
-function RelockButton({ onLocked }: { onLocked: () => void }) {
+function RelockButton({ revision, onLocked }: { revision: string; onLocked: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   return (
-    <button
-      type="button"
-      className="ios-save ios-save-secondary"
-      onClick={() => {
+    <>
+      <button type="button" className="ios-save ios-save-secondary" disabled={busy} onClick={() => {
+        setBusy(true);
+        setError(null);
         void api("/v1/mobile/lock", {
           method: "POST",
-          body: JSON.stringify({ action: "relock" }),
-        }).then(() => {
-          notifyDataUpdated();
-          onLocked();
-        });
-      }}
-    >
-      恢复变差，改锁为轻松/休息
-    </button>
+          body: JSON.stringify({ action: "relock", expectedRevision: revision }),
+        }).then(() => { notifyDataUpdated(); onLocked(); })
+          .catch((caught) => setError(caught instanceof Error ? caught.message : "重新确认失败，请重试"))
+          .finally(() => setBusy(false));
+      }}>
+        {busy ? "确认中…" : "恢复变差，重新确认"}
+      </button>
+      {error ? <small className="ios-sync-error" role="alert">{error}</small> : null}
+    </>
   );
+}
+
+function paceRange(lower: number | null, upper: number | null): string {
+  if (lower == null && upper == null) return "暂不可用";
+  if (lower != null && upper == null) return `${pace(lower)}/km 或更慢`;
+  if (lower == null && upper != null) return `不快于 ${pace(upper)}/km`;
+  return `${pace(lower!)}/km–${pace(upper!)}/km`;
 }
 
 function inferPhase(data: MobileTodayResponse): MobileTodayResponse["phase"] {

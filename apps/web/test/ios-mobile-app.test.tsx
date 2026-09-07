@@ -546,11 +546,11 @@ describe("iOS mobile detail navigation", () => {
 
   it("shows aerobic pace, VO2max, recovery, lactate threshold and threshold HR on home", () => {
     renderApp("/");
-    expect(screen.getByText("真实能力 TA")).toBeTruthy();
-    expect(screen.getByText("今日裁决")).toBeTruthy();
+    expect(screen.getByText("长期跑力估计")).toBeTruthy();
+    expect(screen.getByText("今日训练建议")).toBeTruthy();
     expect(screen.getByText("只宜有氧")).toBeTruthy();
     expect(screen.getByText("下一堂课")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "锁定今天" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "确认今日安排" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "本周" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "身体指标" })).toBeTruthy();
     expect(screen.getByText("7h00min")).toBeTruthy();
@@ -560,7 +560,7 @@ describe("iOS mobile detail navigation", () => {
     renderApp("/");
     fireEvent.click(screen.getByRole("button", { name: "身体指标" }));
     expect(screen.getByRole("heading", { name: "身体指标" })).toBeTruthy();
-    expect(screen.getByText("有氧配速")).toBeTruthy();
+    expect(screen.getByText("最近训练平均配速")).toBeTruthy();
     expect(screen.getByText("轻松跑区（分区处方）")).toBeTruthy();
     expect(screen.getByText(/恢复阶段/)).toBeTruthy();
     expect(screen.getByText("快 0:14，较 28 天均值")).toBeTruthy();

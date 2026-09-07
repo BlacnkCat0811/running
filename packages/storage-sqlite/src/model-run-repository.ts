@@ -154,6 +154,14 @@ export class SqliteModelRunRepository {
       this.persistValidationGate(result);
       return result;
     }
+    const hasOverrideTable = Boolean(this.database
+      .prepare("SELECT 1 FROM sqlite_master WHERE name = 'effective_workout_overrides'")
+      .get());
+    const overrideExclusion = hasOverrideTable ? `
+        AND NOT EXISTS (
+          SELECT 1 FROM effective_workout_overrides override
+          WHERE override.training_session_id = assessment.training_session_id
+        )` : "";
     const row = (id: string) => this.database.prepare(`
       SELECT COUNT(*) AS total,
         SUM(CASE WHEN assessment_status IN ('eligible','trial') THEN 1 ELSE 0 END) AS eligible,
@@ -161,14 +169,16 @@ export class SqliteModelRunRepository {
         SUM(CASE WHEN recovery_score IS NULL THEN 1 ELSE 0 END) AS recovery_null,
         SUM(CASE WHEN recovery_score <= 0.001 OR recovery_score >= 99.999 THEN 1 ELSE 0 END) AS recovery_saturated,
         SUM(CASE WHEN current_ability IS NOT NULL AND (current_ability < 0 OR current_ability > 100) THEN 1 ELSE 0 END) AS invalid
-      FROM ability_assessments WHERE model_run_id = ?
+      FROM ability_assessments assessment
+      WHERE assessment.model_run_id = ?
+        ${overrideExclusion}
     `).get(id) as Record<string, unknown>;
     const base = row(baseId);
     const candidate = row(candidateId);
     const versions = this.database.prepare("SELECT id, model_version AS modelVersion FROM model_runs WHERE id IN (?, ?)").all(baseId, candidateId) as Array<{ id: string; modelVersion: string }>;
     const baseVersion = versions.find((v) => v.id === baseId)?.modelVersion ?? null;
     const candidateVersion = versions.find((v) => v.id === candidateId)?.modelVersion ?? null;
-    const comparison = this.compareMetrics(baseId, candidateId);
+    const comparison = this.compareMetrics(baseId, candidateId, hasOverrideTable);
     const del = (a: number, b: number): number => Math.abs(a - b) / Math.max(1, a);
     const baseTotal = Number(base.total ?? 0);
     const candTotal = Number(candidate.total ?? 0);
@@ -176,11 +186,17 @@ export class SqliteModelRunRepository {
     const candEligible = Number(candidate.eligible ?? 0);
     const baseNull = baseTotal > 0 ? Number(base.recovery_null ?? 0) / baseTotal : null;
     const candNull = candTotal > 0 ? Number(candidate.recovery_null ?? 0) / candTotal : null;
+    const comparisonOverrideExclusion = hasOverrideTable ? `
+        AND NOT EXISTS (
+          SELECT 1 FROM effective_workout_overrides override
+          WHERE override.training_session_id = b.training_session_id
+        )` : "";
     const absDeltas = (this.database.prepare(`
       SELECT ABS(c.current_ability - b.current_ability) AS d
       FROM ability_assessments b JOIN ability_assessments c ON c.training_session_id = b.training_session_id
-      WHERE b.model_run_id = ? AND c.model_run_id = ?
+        WHERE b.model_run_id = ? AND c.model_run_id = ?
         AND b.current_ability IS NOT NULL AND c.current_ability IS NOT NULL
+        ${comparisonOverrideExclusion}
       ORDER BY d
     `).all(baseId, candidateId) as Array<{ d: number }>).map((x) => Number(x.d)).filter(Number.isFinite);
     const p95 = absDeltas.length ? absDeltas[Math.min(absDeltas.length - 1, Math.floor(absDeltas.length * 0.95))] ?? null : null;
@@ -257,7 +273,7 @@ export class SqliteModelRunRepository {
     };
   }
 
-  compareMetrics(baseId: string, candidateId: string): {
+  compareMetrics(baseId: string, candidateId: string, excludeOverridden = false): {
     matchedSessions: number;
     currentAbilityMeanDelta: number | null;
     currentAbilityMeanAbsoluteDelta: number | null;
@@ -272,6 +288,11 @@ export class SqliteModelRunRepository {
       delta: number | null;
     }>;
   } {
+    const overrideExclusion = excludeOverridden ? `
+          AND NOT EXISTS (
+            SELECT 1 FROM effective_workout_overrides override
+            WHERE override.training_session_id = b.training_session_id
+          )` : "";
     const metrics = this.database
       .prepare(`
         SELECT
@@ -283,6 +304,7 @@ export class SqliteModelRunRepository {
         FROM ability_assessments b
         JOIN ability_assessments c ON c.training_session_id = b.training_session_id
         WHERE b.model_run_id = ? AND c.model_run_id = ?
+          ${overrideExclusion}
       `)
       .get(baseId, candidateId) as Record<string, unknown>;
     const finalSnapshot = (modelRunId: string): number | null => {

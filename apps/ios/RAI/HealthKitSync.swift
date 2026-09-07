@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import CryptoKit
 #if os(iOS)
 import HealthKit
 import UIKit
@@ -13,8 +14,10 @@ final class HealthKitSync {
     var lastError: String?
     var lastSyncAt: Date?
     var lastWorkoutCount: Int?
+    var phase: String = "idle"
     var dataUpdatedGeneration = 0
     private var activeToken = ""
+    private var activeScope = "unbound"
 
     var hasCompletedSync: Bool { lastSyncAt != nil }
 
@@ -29,6 +32,7 @@ final class HealthKitSync {
     private static let lastWorkoutAnchorKey = "rai.hk.workoutAnchor"
     private static let failedZipKey = "rai.hk.failedZip"
     private static let lastAutoSyncKey = "rai.hk.lastAutoSync"
+    private static let taskKey = "rai.hk.syncTask"
     /// Inclusive overlap so workouts finalized just after the previous export are not missed.
     private static let overlap: TimeInterval = 48 * 60 * 60
     private static let autoSyncInterval: TimeInterval = 15 * 60
@@ -53,16 +57,15 @@ final class HealthKitSync {
     }()
 
     init() {
-        lastSyncAt = UserDefaults.standard.object(forKey: Self.lastSyncAtKey) as? Date
-        if UserDefaults.standard.object(forKey: Self.lastWorkoutCountKey) != nil {
-            lastWorkoutCount = UserDefaults.standard.integer(forKey: Self.lastWorkoutCountKey)
-        }
+        lastSyncAt = nil
+        lastWorkoutCount = nil
     }
 
     func syncIfNeeded(to serverURL: URL?, apiToken: String = "", force: Bool = false) async {
         guard let serverURL, !isBusy else { return }
+        activeScope = Self.syncScope(for: serverURL)
         if !force {
-            let last = UserDefaults.standard.object(forKey: Self.lastAutoSyncKey) as? Date
+            let last = UserDefaults.standard.object(forKey: scopedKey(Self.lastAutoSyncKey)) as? Date
             if let last, Date().timeIntervalSince(last) < Self.autoSyncInterval { return }
         }
         await sync(to: serverURL, apiToken: apiToken)
@@ -91,12 +94,20 @@ final class HealthKitSync {
     func sync(to serverURL: URL?, apiToken: String = "", full: Bool = false) async {
         guard !isBusy else { return }
         guard let serverURL else {
-            lastError = "先连接 Mac 开发服务器"
+            lastError = "请先连接 RAI 服务"
             message = nil
             return
         }
         #if os(iOS)
         isBusy = true
+        activeScope = Self.syncScope(for: serverURL)
+        lastSyncAt = UserDefaults.standard.object(forKey: scopedKey(Self.lastSyncAtKey)) as? Date
+        if UserDefaults.standard.object(forKey: scopedKey(Self.lastWorkoutCountKey)) != nil {
+            lastWorkoutCount = UserDefaults.standard.integer(forKey: scopedKey(Self.lastWorkoutCountKey))
+        } else {
+            lastWorkoutCount = nil
+        }
+        phase = "collecting"
         activeToken = apiToken
         lastError = nil
         message = "正在请求 Apple 健康权限"
@@ -113,11 +124,48 @@ final class HealthKitSync {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
             }
         }
+        if !full, let task = loadTask(), let sourceId = task.sourceId {
+            do {
+                phase = task.phase
+                message = "正在恢复上次同步任务"
+                let inspection = try await inspect(sourceId: sourceId, on: serverURL)
+                if inspection.status == "unchanged" {
+                    await deleteUpload(sourceId: sourceId, on: serverURL)
+                    markSuccess(message: "Apple 健康数据已是最新", exportEnd: task.exportEnd, workoutCount: task.workoutCount, advanceWatermark: false, anchor: task.pendingAnchor)
+                    clearTask()
+                    return
+                }
+                let jobId: String
+                if let existing = task.jobId {
+                    jobId = existing
+                } else {
+                    let job = try await startImport(sourceId: sourceId, on: serverURL)
+                    updateTask(jobId: job.id, phase: "recomputing")
+                    jobId = job.id
+                }
+                let finished = try await waitForJob(id: jobId, on: serverURL)
+                markSuccess(
+                    message: "已从上次同步任务恢复",
+                    exportEnd: task.exportEnd,
+                    workoutCount: task.workoutCount,
+                    advanceWatermark: task.workoutCount > 0,
+                    anchor: task.pendingAnchor
+                )
+                clearTask()
+                if finished.status == "succeeded" { clearFailedZip() }
+                return
+            } catch {
+                lastError = friendlyMessage(error)
+                message = nil
+                phase = "failed"
+                return
+            }
+        }
         var zipURL: URL?
         do {
             try await HealthKitExport.requestReadAuthorization()
             if full {
-                UserDefaults.standard.removeObject(forKey: Self.lastWorkoutAnchorKey)
+                UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))
             }
             if !full, let failed = pendingFailedZip() {
                 message = "正在重试上次未完成的上传"
@@ -155,11 +203,11 @@ final class HealthKitSync {
                 clearFailedZip()
                 return
             }
-            let lastExportEnd = UserDefaults.standard.object(forKey: Self.lastExportEndKey) as? Date
+            let lastExportEnd = UserDefaults.standard.object(forKey: scopedKey(Self.lastExportEndKey)) as? Date
             let lowerBound: Date? = (full || lastExportEnd == nil)
                 ? nil
                 : lastExportEnd!.addingTimeInterval(-Self.overlap)
-            let anchor = full ? nil : UserDefaults.standard.data(forKey: Self.lastWorkoutAnchorKey)
+            let anchor = full ? nil : UserDefaults.standard.data(forKey: scopedKey(Self.lastWorkoutAnchorKey))
             let onProgress: @Sendable (String) async -> Void = { [weak self] status in
                 await MainActor.run { [weak self] in
                     self?.message = status
@@ -175,10 +223,14 @@ final class HealthKitSync {
             let persisted = try persistZip(exported.zipURL)
             zipURL = persisted
             let pendingAnchor = exported.workoutAnchor
+            phase = "uploading"
+            saveTask(SyncTaskState(target: serverURL.absoluteString, phase: "uploading", sourceId: nil, jobId: nil, payloadHash: try fileHash(persisted), pendingAnchor: pendingAnchor, exportEnd: exported.maxEndDate, workoutCount: exported.workoutCount))
             message = "正在上传 \(exported.workoutCount) 次跑步"
             let sourceId = try await withRetry {
                 try await self.upload(zipURL: persisted, to: serverURL)
             }
+            phase = "importing"
+            updateTask(sourceId: sourceId, phase: "importing")
             message = "正在检查健康数据"
             let inspection = try await withRetry {
                 try await self.inspect(sourceId: sourceId, on: serverURL)
@@ -193,10 +245,12 @@ final class HealthKitSync {
                 )
                 await deleteUpload(sourceId: sourceId, on: serverURL)
             } else {
+                phase = "recomputing"
                 message = "正在导入并计算跑力"
                 let job = try await withRetry {
                     try await self.startImport(sourceId: sourceId, on: serverURL)
                 }
+                updateTask(sourceId: sourceId, jobId: job.id, phase: "recomputing")
                 let finished = try await waitForJob(id: job.id, on: serverURL)
                 markSuccess(
                     message: importMessage(exported: exported, job: finished),
@@ -205,11 +259,14 @@ final class HealthKitSync {
                     advanceWatermark: exported.workoutCount > 0,
                     anchor: pendingAnchor
                 )
+                clearTask()
             }
         } catch is CancellationError {
+            phase = "failed"
             message = "已取消同步"
             if let zipURL { try? FileManager.default.removeItem(at: zipURL) }
         } catch {
+            phase = "failed"
             lastError = friendlyMessage(error)
             message = nil
             if let zipURL { rememberFailedZip(zipURL) }
@@ -217,7 +274,9 @@ final class HealthKitSync {
         if lastError == nil, let zipURL {
             try? FileManager.default.removeItem(at: zipURL)
             clearFailedZip()
+            clearTask()
         }
+        if lastError == nil { phase = "succeeded" }
         #else
         lastError = "读取 Apple 健康只能在 iPhone 上进行"
         #endif
@@ -233,17 +292,17 @@ final class HealthKitSync {
     private func markSuccess(message: String, exportEnd: Date?, workoutCount: Int, advanceWatermark: Bool, anchor: Data? = nil) {
         let now = Date()
         if let anchor {
-            UserDefaults.standard.set(anchor, forKey: Self.lastWorkoutAnchorKey)
+            UserDefaults.standard.set(anchor, forKey: scopedKey(Self.lastWorkoutAnchorKey))
         }
         UserDefaults.standard.set(now, forKey: Self.lastAutoSyncKey)
         if advanceWatermark, let exportEnd {
-            let current = UserDefaults.standard.object(forKey: Self.lastExportEndKey) as? Date
+            let current = UserDefaults.standard.object(forKey: scopedKey(Self.lastExportEndKey)) as? Date
             if current.map({ exportEnd > $0 }) ?? true {
-                UserDefaults.standard.set(exportEnd, forKey: Self.lastExportEndKey)
+                UserDefaults.standard.set(exportEnd, forKey: scopedKey(Self.lastExportEndKey))
             }
         }
-        UserDefaults.standard.set(now, forKey: Self.lastSyncAtKey)
-        UserDefaults.standard.set(workoutCount, forKey: Self.lastWorkoutCountKey)
+        UserDefaults.standard.set(now, forKey: scopedKey(Self.lastSyncAtKey))
+        UserDefaults.standard.set(workoutCount, forKey: scopedKey(Self.lastWorkoutCountKey))
         lastSyncAt = now
         lastWorkoutCount = workoutCount
         lastError = nil
@@ -420,7 +479,7 @@ final class HealthKitSync {
     private func persistZip(_ zipURL: URL) throws -> URL {
         let folder = (FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory)
-            .appendingPathComponent("rai-healthkit", isDirectory: true)
+            .appendingPathComponent("rai-healthkit-\(activeScope)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let durable = folder.appendingPathComponent("upload.zip")
         if FileManager.default.fileExists(atPath: durable.path) {
@@ -432,26 +491,63 @@ final class HealthKitSync {
     }
 
     private func pendingFailedZip() -> URL? {
-        guard let path = UserDefaults.standard.string(forKey: Self.failedZipKey) else { return nil }
+        guard let path = UserDefaults.standard.string(forKey: scopedKey(Self.failedZipKey)) else { return nil }
         let url = URL(fileURLWithPath: path)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     private func rememberFailedZip(_ url: URL) {
-        UserDefaults.standard.set(url.path, forKey: Self.failedZipKey)
+        UserDefaults.standard.set(url.path, forKey: scopedKey(Self.failedZipKey))
     }
 
     private func clearFailedZip() {
-        if let path = UserDefaults.standard.string(forKey: Self.failedZipKey) {
+        if let path = UserDefaults.standard.string(forKey: scopedKey(Self.failedZipKey)) {
             try? FileManager.default.removeItem(atPath: path)
         }
-        UserDefaults.standard.removeObject(forKey: Self.failedZipKey)
+        UserDefaults.standard.removeObject(forKey: scopedKey(Self.failedZipKey))
+    }
+
+    private func scopedKey(_ key: String) -> String {
+        "\(key).\(activeScope)"
+    }
+
+    private func saveTask(_ task: SyncTaskState) {
+        if let data = try? JSONEncoder().encode(task) {
+            UserDefaults.standard.set(data, forKey: scopedKey(Self.taskKey))
+        }
+    }
+
+    private func loadTask() -> SyncTaskState? {
+        guard let data = UserDefaults.standard.data(forKey: scopedKey(Self.taskKey)) else { return nil }
+        return try? JSONDecoder().decode(SyncTaskState.self, from: data)
+    }
+
+    private func updateTask(sourceId: String? = nil, jobId: String? = nil, phase: String) {
+        guard var task = loadTask() else { return }
+        task.sourceId = sourceId ?? task.sourceId
+        task.jobId = jobId ?? task.jobId
+        task.phase = phase
+        saveTask(task)
+    }
+
+    private func clearTask() {
+        UserDefaults.standard.removeObject(forKey: scopedKey(Self.taskKey))
+    }
+
+    private func fileHash(_ url: URL) throws -> String {
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func syncScope(for url: URL) -> String {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        return String(digest.prefix(24))
     }
 
     private func friendlyMessage(_ error: Error) -> String {
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {
-            return "网络中断。请确认 npm run dev:device 仍在运行，然后重试。"
+            return "网络中断。请检查 RAI 服务和网络后重试。"
         }
         if nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoSuchFileError {
             return "本地健康导出文件已丢失，请再点一次「同步健康」。"
@@ -490,6 +586,17 @@ private struct SyncHTTPError: LocalizedError {
     let message: String
     var statusCode: Int?
     var errorDescription: String? { message }
+}
+
+private struct SyncTaskState: Codable {
+    let target: String
+    var phase: String
+    var sourceId: String?
+    var jobId: String?
+    let payloadHash: String
+    let pendingAnchor: Data?
+    let exportEnd: Date?
+    let workoutCount: Int
 }
 
 nonisolated private func writeHealthKitMultipart(zipURL: URL, boundary: String, to outputURL: URL) throws {

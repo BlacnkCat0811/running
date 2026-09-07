@@ -19,6 +19,7 @@ final class ChromeController {
 
 struct NativeBridgeSnapshot: Equatable {
     var token: String = ""
+    var trustedOrigin: String? = nil
     var reachable: Bool = false
     var lastSyncAt: String? = nil
     var lastSyncMessage: String? = nil
@@ -29,6 +30,7 @@ struct NativeBridgeSnapshot: Equatable {
     var dataUpdatedGeneration: Int = 0
 
     var tokenJS: String { jsJSONString(token) }
+    var trustedOriginJS: String { jsJSONString(trustedOrigin ?? "") }
 
     var nativeObjectJS: String {
         let object: [String: Any] = [
@@ -185,6 +187,8 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
     ) {
         // `add(_:name:)` delivers on the main thread; parse here so the Task only hops Sendable fields.
         let parsed = MainActor.assumeIsolated {
+            guard message.frameInfo.isMainFrame,
+                  self.isTrustedFrame(message.frameInfo.securityOrigin) else { return nil }
             parseRaiMessage(message.body)
         }
         Task { @MainActor in
@@ -202,10 +206,7 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
             decisionHandler(.allow)
             return
         }
-        // Keep file/about and same-host navigations (including port changes,
-        // which the dev frontend uses to reach the API) inside the shell.
-        // Cross-host http(s) links open in the system browser instead.
-        if url.isFileURL || url.scheme == "about" || url.host == nil || url.host == loadedURL?.host {
+        if url.isFileURL || url.scheme == "about" || isTrustedOrigin(url) {
             decisionHandler(.allow)
             return
         }
@@ -309,6 +310,18 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
         default:
             break
         }
+    }
+
+    private func isTrustedFrame(_ origin: WKSecurityOrigin) -> Bool {
+        guard let trusted = snapshot.trustedOrigin, let expected = URL(string: trusted),
+              origin.protocol == expected.scheme, origin.host == expected.host else { return false }
+        return origin.port == (expected.port ?? (expected.scheme == "https" ? 443 : 80))
+    }
+
+    private func isTrustedOrigin(_ url: URL) -> Bool {
+        guard let trusted = snapshot.trustedOrigin, let expected = URL(string: trusted),
+              url.scheme == expected.scheme, url.host == expected.host else { return false }
+        return (url.port ?? (url.scheme == "https" ? 443 : 80)) == (expected.port ?? (expected.scheme == "https" ? 443 : 80))
     }
 
     private func reportMissingDependency(_ message: String) {
@@ -419,11 +432,19 @@ private func bridgeUserScript(_ snapshot: NativeBridgeSnapshot) -> String {
     """
     (() => {
       window.__raiToken = \(snapshot.tokenJS);
+      window.__raiTrustedOrigin = \(snapshot.trustedOriginJS);
       window.__raiNative = \(snapshot.nativeObjectJS);
       if (!window.__raiFetchWrapped) {
         window.__raiFetchWrapped = true;
         const originalFetch = window.fetch;
+        const isTrustedApi = (value) => {
+          try {
+            const url = new URL(typeof value === 'string' ? value : value.url, window.location.href);
+            return url.origin === window.__raiTrustedOrigin && url.pathname.startsWith('/v1/');
+          } catch (e) { return false; }
+        };
         window.fetch = (input, init = {}) => {
+          if (!isTrustedApi(input)) return originalFetch(input, init);
           const headers = new Headers(init.headers || {});
           if (!headers.has('authorization') && window.__raiToken) {
             headers.set('authorization', 'Bearer ' + window.__raiToken);
@@ -433,7 +454,7 @@ private func bridgeUserScript(_ snapshot: NativeBridgeSnapshot) -> String {
         const originalOpen = XMLHttpRequest.prototype.open;
         const originalSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.open = function() {
-          this.__raiAuth = true;
+          this.__raiAuth = isTrustedApi(arguments[1]);
           return originalOpen.apply(this, arguments);
         };
         XMLHttpRequest.prototype.send = function() {
@@ -468,6 +489,7 @@ private func injectNativeStatus(_ snapshot: NativeBridgeSnapshot, into webView: 
     #endif
     let source = """
     window.__raiToken = \(snapshot.tokenJS);
+    window.__raiTrustedOrigin = \(snapshot.trustedOriginJS);
     window.__raiNative = \(snapshot.nativeObjectJS);
     \(css)
     window.dispatchEvent(new Event('rai:native-status'));
@@ -488,6 +510,7 @@ private func nativeStatusChanged(_ a: NativeBridgeSnapshot, _ b: NativeBridgeSna
         || a.lastWorkoutCount != b.lastWorkoutCount
         || a.isBusy != b.isBusy
         || a.chromeTop != b.chromeTop
+        || a.trustedOrigin != b.trustedOrigin
 }
 
 nonisolated private func parseRaiMessage(_ body: Any) -> (action: String, full: Bool)? {

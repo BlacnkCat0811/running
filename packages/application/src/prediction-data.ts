@@ -214,7 +214,28 @@ export function loadPerformanceVdotEvidence(
   database: DatabaseSync,
   asOf: string
 ): PerformanceVdotEvidence[] {
-  const cutoff = new Date(Date.parse(asOf) - 730 * 86_400_000).toISOString();
+  const labeled = performanceRows(database, asOf).flatMap((row) => {
+    const label = evidenceLabel(row);
+    if (
+      label === null ||
+      label.source === "hard_workout" ||
+      row.durationSeconds < 12 * 60 ||
+      row.durationSeconds > 4 * 60 * 60 ||
+      row.distanceKm <= 0
+    ) {
+      return [];
+    }
+    const paceMinutesPerKm = row.durationSeconds / 60 / row.distanceKm;
+    if (paceMinutesPerKm < 2.5 || paceMinutesPerKm > 15) return [];
+    return [performanceVdotEvidence({
+      id: row.id,
+      observedAt: row.completedAt,
+      distanceMeters: row.distanceKm * 1_000,
+      durationSeconds: row.durationSeconds,
+      source: label.source,
+      quality: label.quality
+    })];
+  });
   const rows = database
     .prepare(`
       SELECT
@@ -245,8 +266,11 @@ export function loadPerformanceVdotEvidence(
         AND (${historicalEligibilitySql()}) <> 'excluded'
       ORDER BY session.anchor_start_at
     `)
-    .all(asOf, cutoff, asOf) as unknown as PerformanceEnvelopeRow[];
+    .all(asOf, asOf) as unknown as PerformanceEnvelopeRow[];
   return rows.flatMap((row) => {
+    // A labeled performance is already represented above. Do not turn the
+    // same event into an additional training-envelope observation.
+    if (evidenceLabel(row) !== null) return [];
     if (
       row.durationSeconds < 12 * 60 ||
       row.durationSeconds > 4 * 60 * 60 ||
@@ -275,7 +299,7 @@ export function loadPerformanceVdotEvidence(
       quality,
       conditions: parsePerformanceConditions(row.metadataJson)
     })];
-  });
+  }).concat(labeled);
 }
 
 function metadataQuantity(metadataJson: string, key: string): {

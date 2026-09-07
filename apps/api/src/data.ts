@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import {
   RaiDatabase,
@@ -225,6 +226,16 @@ export class RaiReadStore {
       SELECT MAX(local_date) AS anchor FROM active_workout_training_loads
     `).get() as Record<string, unknown> | undefined;
     const latestDataDate = anchorRow && anchorRow.anchor != null ? String(anchorRow.anchor) : null;
+    const syncRow = this.database.prepare(`
+      SELECT value FROM import_manifest WHERE key = 'import_completed_at'
+    `).get() as { value?: string } | undefined;
+    const lastSyncedAt = typeof syncRow?.value === "string" ? syncRow.value : null;
+    const recoveryRow = this.database.prepare(`
+      SELECT MAX(wake_date) AS recovery_date
+      FROM canonical_nights
+      WHERE kind = 'main' AND timezone_identifier = 'Asia/Shanghai'
+    `).get() as { recovery_date?: string } | undefined;
+    const recoveryDate = recoveryRow?.recovery_date ?? null;
 
     const todayRow = this.database.prepare(`
       SELECT
@@ -332,10 +343,30 @@ export class RaiReadStore {
       fourWeekDistanceChangeFraction,
       previousWeekDistanceKm: Number(previousWeekRow.distance_km ?? 0)
     });
+    const freshness: MobileTodayResponse["freshness"] = {
+      state: lastSyncedAt == null ? "unknown" : recoveryDate === today ? "valid" : "stale",
+      checkedAt: lastSyncedAt,
+      latestTrainingDate: latestDataDate,
+      recoveryDate
+    };
+    const recommendationRevision = createHash("sha256")
+      .update(JSON.stringify({
+        today,
+        latestDataDate,
+        recoveryDate,
+        freshness: freshness.state,
+        verdict: coach.verdict,
+        nextSession: coach.nextSession,
+        activeModel: dashboard.activeModel?.id ?? null
+      }))
+      .digest("hex");
     return {
       generatedAt: new Date().toISOString(),
       timezone: "Asia/Shanghai",
       latestDataDate,
+      lastSyncedAt,
+      freshness,
+      recommendationRevision,
       today: {
         localDate: today,
         distanceKm: Number(todayRow.distance_km ?? 0),

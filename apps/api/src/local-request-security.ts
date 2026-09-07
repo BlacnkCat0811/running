@@ -7,6 +7,8 @@ export interface LocalRequestSecurityOptions {
   apiToken?: string;
   developmentOrigins?: ReadonlySet<string>;
   allowPrivateLanWebPort?: number;
+  allowAuthenticatedRemote?: boolean;
+  trustedOrigins?: ReadonlySet<string>;
 }
 
 export function isPrivateIPv4(hostname: string): boolean {
@@ -61,6 +63,10 @@ export function isTrustedUnsafeRequest(
   origin: string | undefined,
   options: LocalRequestSecurityOptions
 ): boolean {
+  if (options.apiToken && options.allowAuthenticatedRemote && origin && options.trustedOrigins?.has(origin)) {
+    return true;
+  }
+  if (options.apiToken && options.allowAuthenticatedRemote && !origin) return true;
   if (options.apiToken && origin === undefined) return false;
   const trustedHosts = new Set([
     `127.0.0.1:${options.apiPort}`,
@@ -79,7 +85,14 @@ export function installLocalRequestSecurity(
   app.addHook("onRequest", async (request, reply) => {
     if (options.apiToken && (request.url.split("?", 1)[0] ?? "").startsWith("/v1/")) {
       const authorization = request.headers.authorization;
-      if (authorization === `Bearer ${options.apiToken}`) return;
+      if (authorization === `Bearer ${options.apiToken}`) {
+        if (options.allowAuthenticatedRemote) {
+          const origin = request.headers.origin;
+          if (!origin || options.trustedOrigins?.has(origin)) return;
+          return reply.code(403).send({ code: "untrusted_origin", message: "拒绝来自未配置来源的请求" });
+        }
+        return;
+      }
       return reply.code(401).send({ code: "unauthorized", message: "需要有效的 API Token" });
     }
     if (isTrustedUnsafeRequest(

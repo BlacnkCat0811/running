@@ -44,7 +44,7 @@ import {
   isHealthKitUploadSource
 } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
-import { MobileGoalsStore } from "./mobile-goals.js";
+import { MobileGoalsRevisionConflictError, MobileGoalsStore } from "./mobile-goals.js";
 import {
   installLocalRequestSecurity,
   isTrustedDevelopmentOrigin
@@ -78,11 +78,21 @@ import { needsFullTrainingZoneBackfill, readTrainingZoneWorkoutSetCounts } from 
 const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const runtimeRoot = resolve(process.env.RAI_RUNTIME_ROOT ?? projectRoot);
 const databasePath = resolve(process.env.RAI_DATABASE ?? resolve(projectRoot, "var/rai.sqlite"));
+const controlDatabasePath = resolve(process.env.RAI_CONTROL_DATABASE ?? resolve(runtimeRoot, "var/rai-control.sqlite"));
 const predictionArtifactRoot = resolve(runtimeRoot, "var", "model-artifacts", "prediction");
 const port = Number(process.env.RAI_API_PORT ?? 8787);
 const host = process.env.RAI_API_HOST ?? "127.0.0.1";
 const apiToken = process.env.RAI_API_TOKEN?.trim() || undefined;
 const maxImportZipBytes = Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 4 * 1024 ** 3);
+const serverId = process.env.RAI_SERVER_ID?.trim() || "local";
+const athleteId = process.env.RAI_ATHLETE_ID?.trim() || "athlete_1";
+const datasetEpoch = process.env.RAI_DATASET_EPOCH?.trim() || "default";
+const syncProtocolVersion = 1;
+const configuredOrigins = new Set((process.env.RAI_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean));
+const allowAuthenticatedRemote = process.env.RAI_ALLOW_REMOTE_TOKEN_AUTH === "1";
 if (!Number.isFinite(maxImportZipBytes) || maxImportZipBytes <= 0) {
   throw new Error("RAI_IMPORT_MAX_ZIP_BYTES must be a positive number");
 }
@@ -120,7 +130,7 @@ await app.register(cors, {
       callback(null, true);
       return;
     }
-    callback(null, isTrustedDevelopmentOrigin(origin, {
+    callback(null, configuredOrigins.has(origin) || isTrustedDevelopmentOrigin(origin, {
       apiPort: port,
       developmentOrigins,
       ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort })
@@ -157,6 +167,8 @@ const localRequestSecurityOptions = {
   apiPort: port,
   ...(apiToken ? { apiToken } : {}),
   developmentOrigins,
+  allowAuthenticatedRemote,
+  trustedOrigins: configuredOrigins,
   ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort })
 };
 installLocalRequestSecurity(app, localRequestSecurityOptions);
@@ -191,7 +203,7 @@ if (existsSync(webDist)) {
 }
 
 const readStores = new ReadStoreManager(databasePath);
-const mobileGoalsStore = new MobileGoalsStore(runtimeRoot);
+const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
 const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error));
 const importSources = createImportSourceManager(runtimeRoot, projectRoot, maxImportZipBytes);
@@ -247,6 +259,7 @@ app.addHook("onClose", async () => {
   ]);
   try {
     readStores.close();
+    mobileGoalsStore.close();
   } finally {
     try {
       const failures = results
@@ -509,10 +522,21 @@ app.get("/v1/health", async () => {
   return {
     status: databaseReady ? "ok" : "recovery_required",
     databaseReady,
-    localOnly: true,
+    localOnly: process.env.RAI_DEPLOYMENT_MODE !== "cloud",
+    serverId,
+    athleteId,
+    datasetEpoch,
+    syncProtocolVersion,
     now: new Date().toISOString()
   };
 });
+app.get("/v1/handshake", async () => ({
+  serverId,
+  athleteId,
+  datasetEpoch,
+  syncProtocolVersion,
+  apiVersion: "v1"
+}));
 app.get("/v1/openapi.json", async () => openapiDocument);
 
 app.get("/v1/dashboard", async () => withReadStore((store) => store.dashboard()));
@@ -673,19 +697,34 @@ app.get("/v1/mobile/goals", async () => mobileGoalsStore.read());
 app.put<{ Body: UpdateMobileGoalsInput }>(
   "/v1/mobile/goals",
   { schema: { body: mobileGoalsBodySchema } },
-  async (request) => mobileGoalsStore.write(request.body)
+  async (request, reply) => {
+    try {
+      return mobileGoalsStore.write(request.body);
+    } catch (error) {
+      if (error instanceof MobileGoalsRevisionConflictError) {
+        return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
+      }
+      throw error;
+    }
+  }
 );
 
 app.post<{ Body: LockMobileSessionInput }>(
   "/v1/mobile/lock",
   { schema: { body: mobileLockBodySchema } },
-  async (request) => {
+  async (request, reply) => {
     const goals = mobileGoalsStore.read();
     const ignoreLock = request.body.action === "relock";
     const snapshot = withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, {
       ...goals,
       lockedSession: ignoreLock ? null : goals.lockedSession
     }));
+    if (request.body.expectedRevision && request.body.expectedRevision !== snapshot.recommendationRevision) {
+      return reply.code(409).send({ code: "mobile_recommendation_stale", message: "今日建议已更新，请重新查看后再确认安排" });
+    }
+    if (snapshot.verdict.stale) {
+      return reply.code(409).send({ code: "mobile_recommendation_stale", message: "恢复数据不是今天的，请先同步健康后再确认安排" });
+    }
     if (request.body.action === "lock" && snapshot.lock.present) {
       return mobileGoalsStore.read();
     }
