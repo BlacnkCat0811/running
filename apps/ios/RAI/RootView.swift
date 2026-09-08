@@ -8,6 +8,9 @@ struct RootView: View {
     @Environment(HealthKitSync.self) private var healthSync
     @Environment(ChromeController.self) private var chrome
     @Environment(ServerDiscovery.self) private var discovery
+    #if os(iOS)
+    @Environment(NativeAppModel.self) private var native
+    #endif
 
     var body: some View {
         @Bindable var chrome = chrome
@@ -18,6 +21,9 @@ struct RootView: View {
             .onAppear {
                 session.startMonitoring()
                 discovery.start()
+                #if os(iOS)
+                Task { await native.bootstrap() }
+                #endif
                 healthSync.startForegroundObserver { [session, healthSync] in
                     await healthSync.syncIfNeeded(to: session.serverURL, apiToken: session.apiToken, force: true)
                 }
@@ -46,23 +52,7 @@ struct RootView: View {
     @ViewBuilder
     private func connectedView(url: URL) -> some View {
         #if os(iOS)
-        ZStack(alignment: .topTrailing) {
-            AppWebView(
-                url: url,
-                reloadToken: session.reloadToken,
-                snapshot: nativeSnapshot,
-                session: session,
-                healthSync: healthSync,
-                chrome: chrome
-            )
-            .ignoresSafeArea()
-            VStack(alignment: .trailing, spacing: 8) {
-                chromeButtons
-                statusBanner
-            }
-            .padding(.trailing, 12)
-            .safeAreaPadding(.top)
-        }
+        NativeRootView()
         #else
         NavigationStack {
             AppWebView(

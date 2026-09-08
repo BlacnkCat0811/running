@@ -3,10 +3,22 @@ import SwiftUI
 @MainActor
 final class AppModel {
     static let shared = AppModel()
-    let session = ServerSession()
-    let healthSync = HealthKitSync()
+    let session: ServerSession
+    let healthSync: HealthKitSync
     let chrome = ChromeController()
     let discovery = ServerDiscovery()
+    #if os(iOS)
+    let native: NativeAppModel
+    #endif
+
+    init() {
+        let session = ServerSession()
+        self.session = session
+        self.healthSync = HealthKitSync()
+        #if os(iOS)
+        self.native = NativeAppModel(session: session)
+        #endif
+    }
 }
 
 @main
@@ -23,6 +35,9 @@ struct RAIApp: App {
                 .environment(model.healthSync)
                 .environment(model.chrome)
                 .environment(model.discovery)
+                #if os(iOS)
+                .environment(model.native)
+                #endif
                 #if os(iOS)
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {

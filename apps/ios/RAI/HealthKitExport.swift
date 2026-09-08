@@ -10,6 +10,7 @@ nonisolated struct HealthKitExportResult: Sendable {
     let routeCount: Int
     let warnings: [String]
     let maxEndDate: Date?
+    let exportedThrough: Date
     let workoutAnchor: Data?
     let deletedWorkoutIds: [String]
     let sourceScope: String
@@ -74,6 +75,10 @@ nonisolated private final class WarningBag: @unchecked Sendable {
 }
 
 nonisolated enum HealthKitExport {
+    /// Routes can be attached after a workout is saved. Re-read a bounded
+    /// recent window on anchored syncs so late routes are discoverable.
+    private static let routeBackfillWindow: TimeInterval = 14 * 24 * 60 * 60
+
     @MainActor
     static func requestReadAuthorization() async throws {
         guard HKHealthStore.isHealthDataAvailable() else { throw HealthKitExportError.unavailable }
@@ -133,6 +138,7 @@ nonisolated enum HealthKitExport {
 
         await onProgress("正在读取心率与恢复数据")
         recordCount += try await writeGlobalRecords(store: store, from: startDate, xml: xml, warnings: warnings)
+        let exportedThrough = Date()
         try write(xml, "\n</HealthData>\n")
         try xml.synchronize()
 
@@ -161,6 +167,7 @@ nonisolated enum HealthKitExport {
             routeCount: routeCount,
             warnings: warnings.snapshot,
             maxEndDate: workouts.map(\.endDate).max(),
+            exportedThrough: exportedThrough,
             workoutAnchor: workoutBatch.anchor,
             deletedWorkoutIds: workoutBatch.deleted.map { $0.uuid.uuidString },
             sourceScope: "healthkit"
@@ -171,21 +178,21 @@ nonisolated enum HealthKitExport {
         var types: Set<HKObjectType> = [
             HKObjectType.workoutType(),
             HKSeriesType.workoutRoute(),
-            HKQuantityType(.heartRate),
-            HKQuantityType(.distanceWalkingRunning),
-            HKQuantityType(.activeEnergyBurned),
-            HKQuantityType(.stepCount),
-            HKQuantityType(.runningSpeed),
-            HKQuantityType(.runningPower),
-            HKQuantityType(.runningStrideLength),
-            HKQuantityType(.runningVerticalOscillation),
-            HKQuantityType(.runningGroundContactTime),
-            HKQuantityType(.restingHeartRate),
-            HKQuantityType(.heartRateVariabilitySDNN),
-            HKQuantityType(.vo2Max),
-            HKQuantityType(.bodyMass),
-            HKQuantityType(.respiratoryRate),
-            HKCategoryType(.sleepAnalysis)
+            HKQuantityType.quantityType(forIdentifier: .heartRate)!,
+            HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
+            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKQuantityType.quantityType(forIdentifier: .stepCount)!,
+            HKQuantityType.quantityType(forIdentifier: .runningSpeed)!,
+            HKQuantityType.quantityType(forIdentifier: .runningPower)!,
+            HKQuantityType.quantityType(forIdentifier: .runningStrideLength)!,
+            HKQuantityType.quantityType(forIdentifier: .runningVerticalOscillation)!,
+            HKQuantityType.quantityType(forIdentifier: .runningGroundContactTime)!,
+            HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!,
+            HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
+            HKQuantityType.quantityType(forIdentifier: .vo2Max)!,
+            HKQuantityType.quantityType(forIdentifier: .bodyMass)!,
+            HKQuantityType.quantityType(forIdentifier: .respiratoryRate)!,
+            HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!
         ]
         if let recovery = HKQuantityType.quantityType(forIdentifier: .heartRateRecoveryOneMinute) {
             types.insert(recovery)
@@ -221,7 +228,30 @@ nonisolated enum HealthKitExport {
                 anchor: stored,
                 predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
             )
-            return (batch.added, batch.deleted, encodeAnchor(batch.next))
+            var merged: [UUID: HKWorkout] = [:]
+            for workout in batch.added {
+                merged[workout.uuid] = workout
+            }
+            if stored != nil {
+                let backfillStart = (startDate ?? Date()).addingTimeInterval(-routeBackfillWindow)
+                let recentPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                    HKQuery.predicateForWorkouts(with: .running),
+                    HKQuery.predicateForSamples(withStart: backfillStart, end: nil, options: .strictStartDate)
+                ])
+                let recent: [HKWorkout] = try await samples(
+                    type: .workoutType(),
+                    predicate: recentPredicate,
+                    store: store
+                )
+                for workout in recent {
+                    merged[workout.uuid] = workout
+                }
+            }
+            let workouts = merged.values.sorted { left, right in
+                if left.startDate == right.startDate { return left.uuid.uuidString < right.uuid.uuidString }
+                return left.startDate < right.startDate
+            }
+            return (workouts, batch.deleted, encodeAnchor(batch.next))
         } catch {
             if isAuthorizationError(error) {
                 throw HealthKitExportError.notAuthorized
@@ -242,9 +272,10 @@ nonisolated enum HealthKitExport {
             <MetadataEntry key="HKIndoorWorkout" value="\(isIndoor(workout) ? "1" : "0")"/>
         """
         body += "    <MetadataEntry key=\"HKMetadataKeySyncIdentifier\" value=\"\(escape(workoutSyncId(workout)))\"/>\n"
+        body += "    <MetadataEntry key=\"RAIHealthKitWorkoutUUID\" value=\"\(escape(workout.uuid.uuidString))\"/>\n"
         body += metadataXML(workout)
         body += workoutEventXML(workout)
-        if let distance = statistic(workout, HKQuantityType(.distanceWalkingRunning), unit: .meter()) {
+        if let distance = statistic(workout, HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!, unit: .meter()) {
             body += statisticXML(
                 type: "HKQuantityTypeIdentifierDistanceWalkingRunning",
                 workout: workout,
@@ -252,7 +283,7 @@ nonisolated enum HealthKitExport {
                 unit: "km"
             )
         }
-        if let energy = statistic(workout, HKQuantityType(.activeEnergyBurned), unit: .kilocalorie()) {
+        if let energy = statistic(workout, HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!, unit: .kilocalorie()) {
             body += statisticXML(
                 type: "HKQuantityTypeIdentifierActiveEnergyBurned",
                 workout: workout,
@@ -306,7 +337,7 @@ nonisolated enum HealthKitExport {
     }
 
     private static func heartRateStatisticXML(_ workout: HKWorkout) -> String {
-        let type = HKQuantityType(.heartRate)
+        let type = HKQuantityType.quantityType(forIdentifier: .heartRate)!
         guard let stats = workout.statistics(for: type) else { return "" }
         let unit = HKUnit.count().unitDivided(by: .minute())
         let average = stats.averageQuantity()?.doubleValue(for: unit)
@@ -347,15 +378,15 @@ nonisolated enum HealthKitExport {
         warnings: WarningBag
     ) async throws -> Int {
         var types: [(HKQuantityType, HKUnit, String, String, String)] = [
-            (HKQuantityType(.heartRate), HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierHeartRate", "count/min", "未授权读取心率"),
-            (HKQuantityType(.distanceWalkingRunning), .meter(), "HKQuantityTypeIdentifierDistanceWalkingRunning", "m", "部分健康数据类型未授权"),
-            (HKQuantityType(.activeEnergyBurned), .kilocalorie(), "HKQuantityTypeIdentifierActiveEnergyBurned", "kcal", "部分健康数据类型未授权"),
-            (HKQuantityType(.stepCount), .count(), "HKQuantityTypeIdentifierStepCount", "count", "部分健康数据类型未授权"),
-            (HKQuantityType(.runningSpeed), HKUnit.meter().unitDivided(by: .second()), "HKQuantityTypeIdentifierRunningSpeed", "m/s", "部分健康数据类型未授权"),
-            (HKQuantityType(.runningPower), HKUnit.watt(), "HKQuantityTypeIdentifierRunningPower", "W", "部分健康数据类型未授权"),
-            (HKQuantityType(.runningStrideLength), .meter(), "HKQuantityTypeIdentifierRunningStrideLength", "m", "部分健康数据类型未授权"),
-            (HKQuantityType(.runningVerticalOscillation), HKUnit.meterUnit(with: .centi), "HKQuantityTypeIdentifierRunningVerticalOscillation", "cm", "部分健康数据类型未授权"),
-            (HKQuantityType(.runningGroundContactTime), HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierRunningGroundContactTime", "ms", "部分健康数据类型未授权")
+            (HKQuantityType.quantityType(forIdentifier: .heartRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierHeartRate", "count/min", "未授权读取心率"),
+            (HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!, .meter(), "HKQuantityTypeIdentifierDistanceWalkingRunning", "m", "部分健康数据类型未授权"),
+            (HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!, .kilocalorie(), "HKQuantityTypeIdentifierActiveEnergyBurned", "kcal", "部分健康数据类型未授权"),
+            (HKQuantityType.quantityType(forIdentifier: .stepCount)!, .count(), "HKQuantityTypeIdentifierStepCount", "count", "部分健康数据类型未授权"),
+            (HKQuantityType.quantityType(forIdentifier: .runningSpeed)!, HKUnit.meter().unitDivided(by: .second()), "HKQuantityTypeIdentifierRunningSpeed", "m/s", "部分健康数据类型未授权"),
+            (HKQuantityType.quantityType(forIdentifier: .runningPower)!, HKUnit.watt(), "HKQuantityTypeIdentifierRunningPower", "W", "部分健康数据类型未授权"),
+            (HKQuantityType.quantityType(forIdentifier: .runningStrideLength)!, .meter(), "HKQuantityTypeIdentifierRunningStrideLength", "m", "部分健康数据类型未授权"),
+            (HKQuantityType.quantityType(forIdentifier: .runningVerticalOscillation)!, HKUnit.meterUnit(with: .centi), "HKQuantityTypeIdentifierRunningVerticalOscillation", "cm", "部分健康数据类型未授权"),
+            (HKQuantityType.quantityType(forIdentifier: .runningGroundContactTime)!, HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierRunningGroundContactTime", "ms", "部分健康数据类型未授权")
         ]
         if let physicalEffort = HKQuantityType.quantityType(forIdentifier: .physicalEffort) {
             let unit = HKUnit.kilocalorie().unitDivided(by: HKUnit.hour().unitMultiplied(by: .gramUnit(with: .kilo)))
@@ -395,11 +426,11 @@ nonisolated enum HealthKitExport {
         let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
         var count = 0
         var quantities: [(HKQuantityType, HKUnit, String, String)] = [
-            (HKQuantityType(.restingHeartRate), HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierRestingHeartRate", "count/min"),
-            (HKQuantityType(.heartRateVariabilitySDNN), HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierHeartRateVariabilitySDNN", "ms"),
-            (HKQuantityType(.vo2Max), HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute())), "HKQuantityTypeIdentifierVO2Max", "mL/min·kg"),
-            (HKQuantityType(.bodyMass), .gramUnit(with: .kilo), "HKQuantityTypeIdentifierBodyMass", "kg"),
-            (HKQuantityType(.respiratoryRate), HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierRespiratoryRate", "count/min")
+            (HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierRestingHeartRate", "count/min"),
+            (HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!, HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierHeartRateVariabilitySDNN", "ms"),
+            (HKQuantityType.quantityType(forIdentifier: .vo2Max)!, HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute())), "HKQuantityTypeIdentifierVO2Max", "mL/min·kg"),
+            (HKQuantityType.quantityType(forIdentifier: .bodyMass)!, .gramUnit(with: .kilo), "HKQuantityTypeIdentifierBodyMass", "kg"),
+            (HKQuantityType.quantityType(forIdentifier: .respiratoryRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierRespiratoryRate", "count/min")
         ]
         if let wrist = HKQuantityType.quantityType(forIdentifier: .appleSleepingWristTemperature) {
             quantities.append((
@@ -431,7 +462,7 @@ nonisolated enum HealthKitExport {
             }
         }
         let sleeps: [HKCategorySample] = try await optionalSamples(
-            type: HKCategoryType(.sleepAnalysis),
+            type: HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
             predicate: predicate,
             store: store,
             warnings: warnings,

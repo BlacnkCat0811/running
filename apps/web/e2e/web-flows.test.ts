@@ -1203,7 +1203,7 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       await terminalRuntimeStatusGate;
       await route.continue();
     });
-    await new ImportSourceManager(
+    const firstRunSource = await new ImportSourceManager(
       resolve(temporaryRoot, "first-run"),
       projectRoot,
     ).registerDirectory(syntheticExport);
@@ -1283,9 +1283,10 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       .getByRole("link", { name: "查看数据审计" })
       .waitFor({ timeout: 15_000 });
     assert.equal(await page.getByRole("button", { name: "完整重算" }).isEnabled(), true);
-    assert.equal(
-      await page.evaluate(() => localStorage.getItem("rai:active-import-job")),
-      null,
+    await page.waitForFunction(
+      () => localStorage.getItem("rai:active-import-job") === null,
+      undefined,
+      { timeout: 15_000 },
     );
     await page.unroute("**/v1/runtime-status");
 
@@ -1471,15 +1472,32 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       waitUntil: "domcontentloaded",
     });
     await page.getByRole("button", { name: /synthetic-apple-health/ }).click();
-    await page.getByRole("button", { name: "开始更新" }).click();
-    await waitForImport(firstRunApi.origin, firstImportJobId);
+    const unchangedImportButton = page.getByRole("button", { name: "数据已是最新" });
+    await unchangedImportButton.waitFor();
+    assert.equal(await unchangedImportButton.isDisabled(), true);
+    const repeatedImportResponse = await fetch(`${firstRunApi.origin}/v1/import-jobs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-rai-local-request": "1",
+      },
+      body: JSON.stringify({ sourceId: firstRunSource.sourceId }),
+    });
+    const repeatedImportBody = await repeatedImportResponse.text();
+    assert.equal(repeatedImportResponse.status, 200, repeatedImportBody);
+    const repeatedImportJob = JSON.parse(repeatedImportBody) as {
+      id: string;
+      status: string;
+    };
+    assert.equal(repeatedImportJob.id, firstImportJobId);
+    assert.equal(repeatedImportJob.status, "succeeded");
     const modelsAfterUpdate = (await fetch(
       `${firstRunApi.origin}/v1/model-runs`,
     ).then((response) => response.json())) as Array<{
       id: string;
       active: boolean;
     }>;
-    // Re-importing an identical Apple Health export must not create another immutable run.
+    // A repeated submission for an unchanged source must not create another immutable run.
     assert.equal(modelsAfterUpdate.length, 2);
     assert.equal(modelsAfterUpdate.filter((model) => model.active).length, 1);
     const preservedDetail = (await fetch(

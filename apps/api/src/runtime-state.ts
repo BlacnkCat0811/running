@@ -10,6 +10,7 @@ export interface RuntimeImportSourceRow {
   inputPath: string;
   originalPath: string;
   sourceSha256: string | null;
+  idempotencyKey?: string | null;
   exportFileName: string;
   exportBytes: number;
   routeFileCount: number;
@@ -90,6 +91,7 @@ export class RuntimeStateStore {
     try {
       return db.prepare(`SELECT id, kind, display_name AS displayName, input_path AS inputPath,
         original_path AS originalPath, source_sha256 AS sourceSha256,
+        idempotency_key AS idempotencyKey,
         export_file_name AS exportFileName, export_bytes AS exportBytes,
         route_file_count AS routeFileCount, modified_at AS modifiedAt,
         created_at AS createdAt, last_used_at AS lastUsedAt
@@ -110,11 +112,12 @@ export class RuntimeStateStore {
 
   private upsertSourceIn(db: DatabaseSync, source: RuntimeImportSourceRow): void {
     db.prepare(`INSERT INTO import_sources (id, kind, display_name, input_path, original_path,
-        source_sha256, export_file_name, export_bytes, route_file_count, modified_at, created_at, last_used_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        source_sha256, idempotency_key, export_file_name, export_bytes, route_file_count, modified_at, created_at, last_used_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, display_name=excluded.display_name,
         input_path=excluded.input_path, original_path=excluded.original_path,
-        source_sha256=excluded.source_sha256, export_file_name=excluded.export_file_name,
+        source_sha256=excluded.source_sha256, idempotency_key=COALESCE(excluded.idempotency_key, import_sources.idempotency_key),
+        export_file_name=excluded.export_file_name,
         export_bytes=excluded.export_bytes, route_file_count=excluded.route_file_count,
         modified_at=excluded.modified_at,
         last_used_at=CASE
@@ -124,7 +127,7 @@ export class RuntimeStateStore {
           ELSE import_sources.last_used_at
         END`).run(
         source.id, source.kind, source.displayName, source.inputPath, source.originalPath,
-        source.sourceSha256, source.exportFileName, source.exportBytes, source.routeFileCount,
+        source.sourceSha256, source.idempotencyKey ?? null, source.exportFileName, source.exportBytes, source.routeFileCount,
         source.modifiedAt, source.createdAt, source.lastUsedAt
       );
   }
@@ -191,6 +194,7 @@ export class RuntimeStateStore {
         CREATE TABLE IF NOT EXISTS import_sources (
           id TEXT PRIMARY KEY, kind TEXT NOT NULL, display_name TEXT NOT NULL,
           input_path TEXT NOT NULL, original_path TEXT NOT NULL, source_sha256 TEXT,
+          idempotency_key TEXT UNIQUE,
           export_file_name TEXT NOT NULL, export_bytes INTEGER NOT NULL,
           route_file_count INTEGER NOT NULL, modified_at TEXT NOT NULL,
           created_at TEXT NOT NULL, last_used_at TEXT
@@ -207,6 +211,11 @@ export class RuntimeStateStore {
       const jobColumns = db.prepare("PRAGMA table_info(import_jobs)").all() as unknown as Array<{ name: string }>;
       if (!jobColumns.some(({ name }) => name === "source_id")) {
         db.exec("ALTER TABLE import_jobs ADD COLUMN source_id TEXT");
+      }
+      const sourceColumns = db.prepare("PRAGMA table_info(import_sources)").all() as unknown as Array<{ name: string }>;
+      if (!sourceColumns.some(({ name }) => name === "idempotency_key")) {
+        db.exec("ALTER TABLE import_sources ADD COLUMN idempotency_key TEXT");
+        db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_import_sources_idempotency ON import_sources(idempotency_key)");
       }
     } finally { db.close(); }
   }

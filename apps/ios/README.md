@@ -1,10 +1,10 @@
-# RAI iOS 调试壳
+# RAI 原生 iOS 应用
 
-这是给 **iPhone 12 Pro Max / iOS 26** 用的 Xcode 宿主，不是独立的 HealthKit 产品。手机只显示现有 Web 界面；数据、评分和 SQLite 仍在已配置的 RAI API 服务上运行。
+这是给 iPhone 使用的 SwiftUI 原生应用。手机不运行 Node.js、评分核心或服务端 SQLite；数据和模型结果仍由已配置的 RAI API 服务负责。旧 WKWebView 文件保留为开发期回退路径，不是原生页面的验收替代品。
 
 ## 一次跑通
 
-1. 在仓库根目录启动可被手机访问的开发服务器：
+1. 在仓库根目录启动可被手机访问的 API/Web 开发服务器：
 
    ```bash
    npm run dev:device
@@ -35,7 +35,7 @@
 
 7. 首次安装后，到 iPhone **设置 → 通用 → VPN 与设备管理**，信任这台电脑的开发者证书。
 
-8. App 里填入第 1 步打印的服务器地址。
+8. App 的“设置”中填写第 1 步打印的服务器地址和 API Token（如服务启用了 Token）。连接成功后，今日、训练、计划、分析和设置均使用原生 SwiftUI 页面。
 
 ## 这台 VMware 虚拟机要注意
 
@@ -45,15 +45,15 @@
 - Xcode 26.5 的 SDK 是 iOS 26.5。连上 iOS 26.6.1 真机后，Xcode 会从手机拷设备支持文件；若提示 Developer Disk Image 失败，在 Xcode 里等它处理完再 Run。
 - 这台虚拟机的 Xcode 需要先下载 iOS 26.5 平台（约 10.6 GB）。没有它，运行目标里不会出现 iPhone。
 
-## 它做不到的事
+## 产品边界
 
-- 不在手机上跑 Node / SQLite，也不向 Apple 健康写入。
-- 新的同步和修改需要联网；已加载的首页和历史内容可在服务暂时不可用时继续查看。手机不会在离线状态下生成或确认新的训练安排。
-- 原生 SwiftUI / React Native 产品需要单独立项。
+- 不在手机上跑 Node.js、评分核心或服务端 SQLite，也不向 Apple 健康写入。
+- 新的同步、目标修改和锁课需要联网；已加载的首页、训练和分析可在服务暂时不可用时继续查看。
+- 手机不会在离线状态下生成或确认新的训练安排，也不保证固定周期后台同步。
 
-## 像素风 UI 与移动端 API 映射
+## 原生页面与移动端 API 映射
 
-设计稿 `apps/ios/design/ios-app-design.html`（清新像素风 v3）五个页面对应的后端聚合端点，全部实现于 `apps/api`（契约类型在 `packages/api-contracts`，OpenAPI 已登记）：
+设计稿 `apps/ios/design/ios-app-design.html`（清新像素风 v3）与原生 SwiftUI 五个入口共用以下后端端点（契约类型在 `packages/api-contracts`，OpenAPI 已登记）：
 
 | 设计稿页面 | 端点 | 数据说明 |
 | --- | --- | --- |
@@ -66,3 +66,10 @@
 所有聚合窗口按 **数据最新日期（`MAX(local_date)`）** 锚定而非墙钟——Apple Health 导入滞后时，统计/趋势仍渲染完整窗口（含 28 天滚动汇总与环比）。
 
 真实库冒烟：`bash scripts/mobile-smoke.sh`（自动起 API → 校验四端点 → goals 往返与越界校验）。
+
+原生实现的契约、同步状态机、验收记录和排障说明分别见：
+
+- `docs/IOS_NATIVE_API_CONTRACT.md`
+- `docs/IOS_NATIVE_SYNC_PROTOCOL.md`
+- `docs/IOS_NATIVE_ACCEPTANCE.md`
+- `docs/IOS_NATIVE_RUNBOOK.md`

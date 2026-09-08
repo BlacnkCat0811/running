@@ -903,6 +903,71 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
   }
 });
 
+test("scopes sync batch idempotency by dataset epoch", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-sync-batch-scope-"));
+  mkdirSync(join(runtimeRoot, "var"));
+  const archive = await zipBuffer([{
+    name: "apple_health_export/export.xml",
+    body: "<HealthData><Record type=\"workout\"/></HealthData>"
+  }]);
+  let child: ChildProcess | null = null;
+
+  const start = async (epoch: string): Promise<{ url: string; output: () => string }> => {
+    child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+      cwd: projectRoot,
+      env: {
+        ...process.env,
+        RAI_RUNTIME_ROOT: runtimeRoot,
+        RAI_DATABASE: join(runtimeRoot, "var", "rai.sqlite"),
+        RAI_API_PORT: "0",
+        RAI_DATASET_EPOCH: epoch,
+        RAI_LOG_LEVEL: "silent"
+      },
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    const boundPort = await waitForBoundPort(child, () => output);
+    const url = `http://127.0.0.1:${boundPort}`;
+    await waitForApi(child, url, () => output);
+    return { url, output: () => output };
+  };
+
+  const upload = async (url: string): Promise<string> => {
+    const body = new FormData();
+    const contents = new ArrayBuffer(archive.byteLength);
+    new Uint8Array(contents).set(archive);
+    body.append("file", new Blob([contents], { type: "application/zip" }), "apple-health-healthkit.zip");
+    const response = await fetch(`${url}/v1/imports/uploads`, {
+      method: "POST",
+      headers: { "X-RAI-Sync-Batch": "same-batch" },
+      body
+    });
+    const text = await response.text();
+    assert.equal(response.status, 200, text);
+    return (JSON.parse(text) as { sourceId: string }).sourceId;
+  };
+
+  try {
+    const first = await start("epoch-one");
+    const firstSourceId = await upload(first.url);
+    assert.equal(await upload(first.url), firstSourceId);
+    if (!child) throw new Error("API child was not started");
+    const firstChild = child;
+    await stopApi(firstChild);
+    child = null;
+
+    const second = await start("epoch-two");
+    const secondSourceId = await upload(second.url);
+    assert.notEqual(secondSourceId, firstSourceId);
+  } finally {
+    if (child) await stopApi(child).catch(() => child?.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
 test("training-zone HTTP errors expose only typed client failures", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-zone-errors-"));
   const databasePath = join(runtimeRoot, "var", "rai.sqlite");

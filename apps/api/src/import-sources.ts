@@ -19,6 +19,7 @@ export interface ImportSource {
   inputPath: string;
   originalPath: string;
   sourceSha256: string | null;
+  idempotencyKey: string | null;
   exportFileName: string;
   exportBytes: number;
   routeFileCount: number;
@@ -131,6 +132,11 @@ async function hashXmlWithoutExportDate(path: string, hash: Hash): Promise<void>
   hash.update(stripExportDate(leftover));
 }
 
+async function hashRouteFile(path: string, hash: Hash): Promise<void> {
+  const stream = createReadStream(path);
+  for await (const chunk of stream) hash.update(chunk as Buffer);
+}
+
 export async function digestHealthKitExportContent(exportRoot: string): Promise<string> {
   const xmlPath = existsSync(resolve(exportRoot, "export.xml"))
     ? resolve(exportRoot, "export.xml")
@@ -145,7 +151,8 @@ export async function digestHealthKitExportContent(exportRoot: string): Promise<
       .sort((left, right) => left.localeCompare(right));
     for (const name of names) {
       const info = await stat(resolve(routeRoot, name));
-      hash.update(`\0${name}\0${info.size}`);
+      hash.update(`\0${name}\0${info.size}\0`);
+      await hashRouteFile(resolve(routeRoot, name), hash);
     }
   }
   return hash.digest("hex");
@@ -170,11 +177,26 @@ export class ImportSourceManager {
     this.limits = { ...DEFAULT_LIMITS, ...limits };
   }
 
-  async saveUpload(stream: NodeJS.ReadableStream, filename: string): Promise<ImportInspection> {
+  async saveUpload(
+    stream: NodeJS.ReadableStream,
+    filename: string,
+    idempotencyKey: string | null = null
+  ): Promise<ImportInspection> {
     if (this.uploadInProgress) {
       throw new ImportUploadBusyError("另一项 ZIP 上传正在处理，请稍后重试");
     }
+    const normalizedIdempotencyKey = idempotencyKey?.trim() || null;
     this.uploadInProgress = true;
+    try {
+      if (normalizedIdempotencyKey) {
+        const existing = (await this.readSources()).find(
+          (source) => source.idempotencyKey === normalizedIdempotencyKey
+        );
+        if (existing) {
+          await drainStream(stream);
+          return await this.inspection(existing);
+        }
+      }
     const id = `upload_${randomUUID()}`;
     const directory = resolve(this.root, id);
     const archivePath = resolve(directory, "source.zip");
@@ -227,13 +249,15 @@ export class ImportSourceManager {
         filename,
         extracted,
         archivePath,
-        hash ? hash.digest("hex") : null
+        hash ? hash.digest("hex") : null,
+        normalizedIdempotencyKey
       );
       await this.upsert(source);
       return await this.inspection(source);
     } catch (error) {
       await rm(directory, { recursive: true, force: true });
       throw error;
+    }
     } finally {
       this.uploadInProgress = false;
     }
@@ -354,7 +378,15 @@ export class ImportSourceManager {
     return removed;
   }
 
-  private async buildSource(id: string, kind: ImportSourceKind, displayName: string, searchRoot: string, originalPath: string, sha: string | null): Promise<ImportSource> {
+  private async buildSource(
+    id: string,
+    kind: ImportSourceKind,
+    displayName: string,
+    searchRoot: string,
+    originalPath: string,
+    sha: string | null,
+    idempotencyKey: string | null = null
+  ): Promise<ImportSource> {
     const inputPath = await this.findExportRoot(searchRoot, kind === "upload");
     const exportPath = existsSync(resolve(inputPath, "export.xml")) ? resolve(inputPath, "export.xml") : resolve(inputPath, "导出.xml");
     const exportInfo = await stat(exportPath);
@@ -366,7 +398,7 @@ export class ImportSourceManager {
       ? await digestHealthKitExportContent(inputPath)
       : sha;
     return {
-      id, kind, displayName, inputPath, originalPath, sourceSha256,
+      id, kind, displayName, inputPath, originalPath, sourceSha256, idempotencyKey,
       exportFileName: basename(exportPath), exportBytes: exportInfo.size, routeFileCount,
       modifiedAt: exportInfo.mtime.toISOString(), createdAt: old?.createdAt ?? new Date().toISOString(),
       lastUsedAt: old?.lastUsedAt ?? null
@@ -404,10 +436,10 @@ export class ImportSourceManager {
       ? (await this.readSources()).filter((item) => item.id !== source.id && item.sourceSha256 === source.sourceSha256 && item.lastUsedAt).sort((a, b) => (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? ""))[0]
       : undefined;
     return {
-      sourceId: source.id, status: previous ? "unchanged" : "ready", exportFileName: source.exportFileName,
+      sourceId: source.id, status: source.lastUsedAt || previous ? "unchanged" : "ready", exportFileName: source.exportFileName,
       exportBytes: source.exportBytes, exportCreatedAt: source.modifiedAt,
       sourceSha256: source.sourceSha256, routeFileCount: source.routeFileCount,
-      previousImportAt: previous?.lastUsedAt ?? source.lastUsedAt, warnings: []
+      previousImportAt: source.lastUsedAt ?? previous?.lastUsedAt ?? null, warnings: []
     };
   }
 
@@ -585,6 +617,14 @@ export class ImportSourceManager {
   private async writeSources(sources: ImportSource[]): Promise<void> {
     for (const source of sources) this.state.upsertSource(source);
   }
+}
+
+async function drainStream(stream: NodeJS.ReadableStream): Promise<void> {
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    stream.once("end", resolvePromise);
+    stream.once("error", rejectPromise);
+    (stream as NodeJS.ReadableStream & { resume(): void }).resume();
+  });
 }
 
 export function createImportSourceManager(

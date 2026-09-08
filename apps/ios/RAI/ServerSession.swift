@@ -26,7 +26,7 @@ final class ServerSession {
         configuration.timeoutIntervalForResource = 8
         configuration.waitsForConnectivity = true
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        return URLSession(configuration: configuration)
+        return RaiURLSession.make(configuration: configuration)
     }()
 
     private static let storageKey = "rai.serverURL"
@@ -35,16 +35,29 @@ final class ServerSession {
     private static let failureThreshold = 3
 
     init() {
-        if let stored = UserDefaults.standard.string(forKey: Self.storageKey), !stored.isEmpty {
-            serverURLString = stored
-        } else {
+        let storedURL = UserDefaults.standard.string(forKey: Self.storageKey) ?? ""
+        if storedURL.isEmpty {
             #if os(macOS) && DEBUG
             serverURLString = "http://127.0.0.1:5173"
             #else
             serverURLString = ""
             #endif
+            apiToken = Keychain.loadToken()
+        } else {
+            serverURLString = storedURL
+            // Tokens are stored per server so changing the configured origin
+            // cannot accidentally reuse credentials for another service.
+            let scopedToken = Keychain.loadToken(for: storedURL)
+            if scopedToken.isEmpty {
+                let legacyToken = Keychain.loadToken()
+                if !legacyToken.isEmpty {
+                    Keychain.saveToken(legacyToken, for: storedURL)
+                }
+                apiToken = legacyToken
+            } else {
+                apiToken = scopedToken
+            }
         }
-        apiToken = Keychain.loadToken()
         hasConnectedOnce = UserDefaults.standard.bool(forKey: Self.connectedKey)
     }
 

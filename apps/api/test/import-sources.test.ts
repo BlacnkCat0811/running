@@ -118,6 +118,23 @@ test("recognizes Apple Chinese export names when ZIP omits the UTF-8 flag", asyn
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("replays an upload with the same sync batch idempotently", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-source-idempotency-"));
+  const archivePath = join(root, "health.zip");
+  try {
+    await zip(archivePath, [{
+      name: "apple_health_export/export.xml",
+      body: "<HealthData><Record type=\"workout\"/></HealthData>"
+    }]);
+    const manager = new ImportSourceManager(root, root);
+    const first = await manager.saveUpload(createReadStream(archivePath), "apple-health-healthkit.zip", "batch-1");
+    const second = await manager.saveUpload(createReadStream(archivePath), "apple-health-healthkit.zip", "batch-1");
+    assert.equal(second.sourceId, first.sourceId);
+    assert.equal(second.status, "ready");
+    assert.equal((await manager.get(first.sourceId))?.idempotencyKey, "batch-1");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("rejects ZIPs exceeding configured entry limits and removes partial extraction", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-limits-"));
   const archivePath = join(root, "health.zip");

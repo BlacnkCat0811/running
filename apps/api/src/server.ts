@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { basename, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -89,6 +90,9 @@ const serverId = process.env.RAI_SERVER_ID?.trim() || "local";
 const athleteId = process.env.RAI_ATHLETE_ID?.trim() || "athlete_1";
 const datasetEpoch = process.env.RAI_DATASET_EPOCH?.trim() || "default";
 const syncProtocolVersion = 1;
+const scopeSyncBatchId = (batchId: string): string => createHash("sha256")
+  .update([serverId, athleteId, datasetEpoch, batchId].join("\0"))
+  .digest("hex");
 const configuredOrigins = new Set((process.env.RAI_ALLOWED_ORIGINS ?? "")
   .split(",")
   .map((value) => value.trim())
@@ -1051,6 +1055,8 @@ app.post<{ Body: ImportJobRequest }>(
   }
   const source = await importSources.get(sourceId);
   if (!source) return reply.code(404).send({ message: "未找到导入来源" });
+  const existing = importWorker.findBySourceId(sourceId);
+  if (existing && ["queued", "running", "succeeded"].includes(existing.status)) return existing;
   const release = takeMutationRelease(request);
   try {
     return importWorker.create(source.inputPath, async (succeeded, durable) => {
@@ -1087,21 +1093,40 @@ app.post<{ Body: ImportJobRequest }>(
 );
 
 app.post("/v1/imports/uploads", async (request, reply) => {
+  const rawBatchId = request.headers["x-rai-sync-batch"];
+  if (
+    rawBatchId !== undefined &&
+    (typeof rawBatchId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(rawBatchId))
+  ) {
+    return reply.code(400).send({ code: "invalid_sync_batch_id", message: "同步批次标识无效" });
+  }
+  const syncBatchId = typeof rawBatchId === "string" ? scopeSyncBatchId(rawBatchId) : null;
   const file = await request.file();
   if (!file) return reply.code(400).send({ message: "请选择 Apple 健康导出 ZIP" });
   if (file.mimetype !== "application/zip" && file.mimetype !== "application/x-zip-compressed" && !file.filename.toLowerCase().endsWith(".zip")) {
     return reply.code(415).send({ message: "只支持 ZIP 文件" });
   }
-  const inspection = await importSources.saveUpload(file.file, file.filename).catch((error: unknown) => {
+  const inspection = await importSources.saveUpload(
+    file.file,
+    file.filename,
+    syncBatchId
+  ).catch((error: unknown) => {
     if (file.file.truncated) throw new ImportArchiveTooLargeError("ZIP 文件超过大小限制");
     throw error;
   });
   if (file.file.truncated) {
-    await importSources.cleanupUpload(inspection.sourceId);
+    const existing = syncBatchId
+      ? await importSources.get(inspection.sourceId)
+      : null;
+    if (existing?.idempotencyKey !== syncBatchId) {
+      await importSources.cleanupUpload(inspection.sourceId);
+    }
     throw new ImportArchiveTooLargeError("ZIP 文件超过大小限制");
   }
   const source = await importSources.get(inspection.sourceId);
-  const sizeBytes = source ? (await (await import("node:fs/promises")).stat(source.originalPath)).size : inspection.exportBytes;
+  const sizeBytes = source && existsSync(source.originalPath)
+    ? (await (await import("node:fs/promises")).stat(source.originalPath)).size
+    : inspection.exportBytes;
   return {
     sourceId: inspection.sourceId,
     uploadId: inspection.sourceId,

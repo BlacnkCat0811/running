@@ -697,6 +697,14 @@ export class ImportWorker {
     return job ? this.publicJob(job) : null;
   }
 
+  findBySourceId(sourceId: string): ImportJobResponse | null {
+    const job = [...this.jobs.values()]
+      .filter((candidate) => candidate.sourceId === sourceId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .at(-1);
+    return job ? this.publicJob(job) : null;
+  }
+
   latest(): ImportJobResponse | null {
     const jobs = [...this.jobs.values()];
     const job = jobs.at(-1);
