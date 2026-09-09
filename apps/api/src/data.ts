@@ -820,7 +820,7 @@ export class RaiReadStore {
             "count/min",
             startedAt,
             endedAt,
-            sourceCategory
+            sourceName
           )
         ),
         speed: this.asMetricSeries(
@@ -829,7 +829,7 @@ export class RaiReadStore {
             "km/hr",
             startedAt,
             endedAt,
-            sourceCategory
+            sourceName
           )
         ),
         power: this.asMetricSeries(
@@ -838,7 +838,7 @@ export class RaiReadStore {
             "W",
             startedAt,
             endedAt,
-            sourceCategory
+            sourceName
           )
         ),
         cadence: this.asMetricSeries(
@@ -847,7 +847,7 @@ export class RaiReadStore {
             "spm",
             startedAt,
             endedAt,
-            sourceCategory,
+            sourceName,
             (value, row) => {
               const seconds = Math.max(
                 1,
@@ -865,7 +865,7 @@ export class RaiReadStore {
             "m",
             startedAt,
             endedAt,
-            sourceCategory
+            sourceName
           )
         ),
         verticalOscillation: this.asMetricSeries(
@@ -874,7 +874,7 @@ export class RaiReadStore {
             "cm",
             startedAt,
             endedAt,
-            sourceCategory
+            sourceName
           )
         ),
         groundContactTime: this.asMetricSeries(
@@ -883,7 +883,7 @@ export class RaiReadStore {
             "ms",
             startedAt,
             endedAt,
-            sourceCategory
+            sourceName
           )
         )
       }

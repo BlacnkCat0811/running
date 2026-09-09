@@ -87,6 +87,20 @@ test("maps active SQLite results into Web API DTOs", async () => {
       insertRecord.run(`steps_${kilometer}`, "HKQuantityTypeIdentifierStepCount", "count", 960, start, end);
       insertRecord.run(`steps_duplicate_${kilometer}`, "HKQuantityTypeIdentifierStepCount", "count", 960, start, end);
     }
+    const insertDynamicsFromSameSource = fixtureWriter.prepare(`
+      INSERT INTO health_records (
+        id, type, source_name, source_category, unit, value_numeric,
+        start_at, end_at, metadata_json, raw_attributes_json
+      ) VALUES (?, ?, 'Fixture Apple Watch', 'legacy_export', ?, ?, ?, ?, '{}', '{}')
+    `);
+    for (let index = 0; index < 5; index += 1) {
+      const start = new Date(workoutStart + index * 60_000).toISOString();
+      const end = new Date(workoutStart + (index + 1) * 60_000).toISOString();
+      insertDynamicsFromSameSource.run(`power_${index}`, "HKQuantityTypeIdentifierRunningPower", "W", 200 + index * 10, start, end);
+      insertDynamicsFromSameSource.run(`stride_${index}`, "HKQuantityTypeIdentifierRunningStrideLength", "m", 1 + index * 0.05, start, end);
+      insertDynamicsFromSameSource.run(`vertical_${index}`, "HKQuantityTypeIdentifierRunningVerticalOscillation", "cm", 8 + index * 0.1, start, end);
+      insertDynamicsFromSameSource.run(`ground_${index}`, "HKQuantityTypeIdentifierRunningGroundContactTime", "ms", 240 + index, start, end);
+    }
   } finally {
     fixtureWriter.close();
   }
@@ -121,6 +135,10 @@ test("maps active SQLite results into Web API DTOs", async () => {
     assert.equal(detail?.workout.hasRoute, false);
     assert.equal(detail?.workout.elapsedSeconds, 1800);
     assert.equal(detail?.workout.modelVersion, "rai-model-config-v4");
+    assert.equal(detail?.workout.averagePowerWatts, 220);
+    assert.equal(detail?.workout.averageStrideLengthMeters, 1.1);
+    assert.equal(detail?.workout.averageVerticalOscillationCm, 8.2);
+    assert.equal(detail?.workout.averageGroundContactTimeMs, 242);
     assert.equal(detail?.dimensions.cardio !== null, true);
     assert.ok(detail?.trainingLoad);
     assert.equal(detail?.trainingLoad?.trainingSessionId, "api_session_7");
@@ -173,6 +191,10 @@ test("maps active SQLite results into Web API DTOs", async () => {
     assert.equal(series?.series.heartRate.totalSamples, 5);
     assert.equal(series?.series.cadence.unit, "spm");
     assert.equal(series?.series.cadence.totalSamples, 5);
+    assert.equal(series?.series.power.totalSamples, 5);
+    assert.equal(series?.series.strideLength.totalSamples, 5);
+    assert.equal(series?.series.verticalOscillation.totalSamples, 5);
+    assert.equal(series?.series.groundContactTime.totalSamples, 5);
     assert.equal(series?.splits.length, 5);
     assert.equal(series?.splits[0]?.distanceMeters, 1000);
     assert.equal(series?.splits[0]?.durationSeconds, 360);

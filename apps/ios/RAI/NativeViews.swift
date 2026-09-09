@@ -1334,7 +1334,7 @@ struct WorkoutDetailView: View {
     private func splitPanel(_ splits: [WorkoutSplit]) -> some View {
         PixelPanel {
             VStack(alignment: .leading, spacing: 4) {
-                PixelSectionHeader(title: "分段", trailing: "\(splits.count) km")
+                PixelSectionHeader(title: "分段", trailing: "\(splits.count) 段")
                 if splits.isEmpty {
                     Text("没有分段数据")
                         .font(.footnote)
@@ -1342,7 +1342,7 @@ struct WorkoutDetailView: View {
                 } else {
                     ForEach(splits) { split in
                         HStack(spacing: 8) {
-                            Text("\(split.index + 1) km")
+                            Text(split.distanceMeters < 999.5 ? "尾段" : "\(split.index) km")
                                 .font(.subheadline.weight(.heavy))
                                 .frame(width: 52, alignment: .leading)
                             Spacer()

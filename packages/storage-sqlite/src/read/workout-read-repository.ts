@@ -4,6 +4,13 @@ import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoa
 
 import { nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
 
+const rawAverageMetricTypes = new Set([
+  "HKQuantityTypeIdentifierRunningPower",
+  "HKQuantityTypeIdentifierRunningStrideLength",
+  "HKQuantityTypeIdentifierRunningVerticalOscillation",
+  "HKQuantityTypeIdentifierRunningGroundContactTime"
+]);
+
 export interface StoredWorkoutOverride {
   revision: number;
   eligibilityOverride: "include" | "exclude" | null;
@@ -329,10 +336,78 @@ export class SqliteWorkoutReadRepository {
         LIMIT 1
       `)
       .get(workoutId, type) as Record<string, unknown> | undefined;
-    if (!row) return null;
-    return preference === "sum"
-      ? nullableNumber(row.sum_value) ?? nullableNumber(row.average_value)
-      : nullableNumber(row.average_value) ?? nullableNumber(row.sum_value);
+    const storedValue = row
+      ? preference === "sum"
+        ? nullableNumber(row.sum_value) ?? nullableNumber(row.average_value)
+        : nullableNumber(row.average_value) ?? nullableNumber(row.sum_value)
+      : null;
+    if (storedValue !== null && storedValue !== undefined) return storedValue;
+    // Apple Health commonly exports running dynamics as time-series Records
+    // without a matching WorkoutStatistics aggregate.
+    if (preference === "average" && rawAverageMetricTypes.has(type)) {
+      return this.averageRawMetric(workoutId, type);
+    }
+    return storedValue ?? null;
+  }
+
+  private averageRawMetric(workoutId: string, type: string): number | null {
+    const workout = this.database
+      .prepare("SELECT source_name, start_at, end_at FROM workouts WHERE id = ?")
+      .get(workoutId) as Record<string, unknown> | undefined;
+    if (
+      typeof workout?.source_name !== "string" ||
+      typeof workout.start_at !== "string" ||
+      typeof workout.end_at !== "string"
+    ) return null;
+    const workoutStartMs = Date.parse(workout.start_at);
+    const workoutEndMs = Date.parse(workout.end_at);
+    if (!Number.isFinite(workoutStartMs) || !Number.isFinite(workoutEndMs) || workoutEndMs <= workoutStartMs) {
+      return null;
+    }
+    const rows = this.database
+      .prepare(`
+        SELECT start_at, end_at, value_numeric
+        FROM (
+          SELECT DISTINCT start_at, end_at, value_numeric
+          FROM health_records
+          WHERE source_name = ?
+            AND type = ?
+            AND value_numeric IS NOT NULL
+            AND start_at < ?
+            AND (
+              start_at >= ?
+              OR (
+                julianday(end_at) > julianday(start_at)
+                AND julianday(end_at) > julianday(?)
+              )
+            )
+        )
+        ORDER BY start_at
+      `)
+      .all(workout.source_name, type, workout.end_at, workout.start_at, workout.start_at) as Record<string, unknown>[];
+    let weightedValue = 0;
+    let coveredMs = 0;
+    for (const [index, row] of rows.entries()) {
+      const sourceStartMs = Date.parse(String(row.start_at));
+      const startMs = Math.max(workoutStartMs, sourceStartMs);
+      const recordedEndMs = Date.parse(String(row.end_at));
+      const nextStartMs = Date.parse(String(rows[index + 1]?.start_at ?? workout.end_at));
+      const inferredEndMs =
+        recordedEndMs > sourceStartMs ? recordedEndMs : Math.min(nextStartMs, sourceStartMs + 30_000);
+      const endMs = Math.min(workoutEndMs, inferredEndMs);
+      const value = nullableNumber(row.value_numeric);
+      if (
+        !Number.isFinite(sourceStartMs) ||
+        !Number.isFinite(startMs) ||
+        !Number.isFinite(endMs) ||
+        value === null ||
+        endMs <= startMs
+      ) continue;
+      const durationMs = endMs - startMs;
+      weightedValue += value * durationMs;
+      coveredMs += durationMs;
+    }
+    return coveredMs > 0 ? weightedValue / coveredMs : null;
   }
 
   averageCadence(workoutId: string, durationSeconds: number): number | null {

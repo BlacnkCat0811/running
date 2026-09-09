@@ -96,7 +96,7 @@ export class SqliteSeriesReadRepository {
     fallbackUnit: string,
     startedAt: string,
     endedAt: string,
-    sourceCategory: string,
+    sourceName: string,
     transform: (value: number, row: Record<string, unknown>) => number = (value) => value,
     forceFallbackUnit = false
   ): StoredMetricSeries {
@@ -106,7 +106,7 @@ export class SqliteSeriesReadRepository {
           SELECT DISTINCT start_at, end_at, value_numeric, unit
           FROM health_records
           WHERE type = ?
-            AND source_category = ?
+            AND source_name = ?
             AND start_at >= ?
             AND start_at <= ?
             AND value_numeric IS NOT NULL
@@ -123,7 +123,7 @@ export class SqliteSeriesReadRepository {
           OR sample_number = total_samples
         ORDER BY sample_number
       `)
-      .all(type, sourceCategory, startedAt, endedAt) as Record<string, unknown>[];
+      .all(type, sourceName, startedAt, endedAt) as Record<string, unknown>[];
     return {
       unit: !forceFallbackUnit && typeof rows[0]?.first_unit === "string" ? rows[0].first_unit : fallbackUnit,
       totalSamples: Number(rows[0]?.total_samples ?? 0),
