@@ -28,6 +28,7 @@ final class NativeAppModel {
     private(set) var lastCacheUpdate: Date?
     var errorMessage: String?
     private(set) var isLoadingWorkouts = false
+    private(set) var isLoadingTrainingStatistics = false
     private(set) var isLoadingWorkout = false
     private(set) var isLoadingBodyMetrics = false
     private(set) var workoutDetailError: String?
@@ -233,6 +234,37 @@ final class NativeAppModel {
                   !Task.isCancelled else { return }
             isOffline = true
             errorMessage = friendlyMessage(error)
+        }
+    }
+
+    func refreshTrainingStatistics() async {
+        guard let baseURL = session.serverURL,
+              !isLoadingTrainingStatistics else { return }
+        let configuration = configurationID
+        let scope = cacheScope
+        let token = session.apiToken
+        isLoadingTrainingStatistics = true
+        defer {
+            if configuration == configurationID {
+                isLoadingTrainingStatistics = false
+            }
+        }
+        do {
+            let fetched = try await api.trainingStatisticsOverview(baseURL: baseURL, token: token)
+            guard configuration == configurationID,
+                  scope == cacheScope,
+                  baseURL == session.serverURL,
+                  token == session.apiToken,
+                  !Task.isCancelled else { return }
+            trainingStatistics = fetched
+            recordCache(fetched, key: "training-statistics")
+        } catch {
+            // The workout list remains usable with cached data or "--" metrics.
+            guard configuration == configurationID,
+                  scope == cacheScope,
+                  baseURL == session.serverURL,
+                  token == session.apiToken,
+                  !Task.isCancelled else { return }
         }
     }
 
@@ -466,6 +498,7 @@ final class NativeAppModel {
         workoutRequestID = UUID()
         detailRequestID = UUID()
         isLoadingWorkouts = false
+        isLoadingTrainingStatistics = false
         isLoadingWorkout = false
         isLoadingBodyMetrics = false
         workoutDetailError = nil

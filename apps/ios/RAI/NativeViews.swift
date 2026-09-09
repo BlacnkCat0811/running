@@ -78,7 +78,6 @@ struct PixelPageHeader<Trailing: View>: View {
                 Text(title)
                     .font(.system(size: 27, weight: .heavy, design: .rounded))
                     .foregroundStyle(PixelColor.ink)
-                    .shadow(color: PixelColor.ink.opacity(0.1), radius: 0, x: 2, y: 2)
             }
             Spacer(minLength: 8)
             trailing
@@ -166,7 +165,6 @@ struct TodayView: View {
                         Text(nativeNumber(data.today.distanceKm, digits: 2))
                             .font(.system(size: 38, weight: .heavy, design: .monospaced))
                             .foregroundStyle(.white)
-                            .shadow(color: PixelColor.ink.opacity(0.35), radius: 0, x: 3, y: 3)
                         Text("公里")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.white.opacity(0.85))
@@ -1030,12 +1028,18 @@ struct WorkoutsView: View {
         )
     }
 
-    private var visibleDistance: Double {
-        native.workouts.compactMap(\.distanceKm).reduce(0, +)
+    private var monthWorkoutCount: String {
+        guard let count = native.trainingStatistics?.month?.workoutCount else { return "--" }
+        return String(count)
     }
 
-    private var visibleDuration: Double {
-        native.workouts.map(\.durationSeconds).reduce(0, +)
+    private var monthDistance: String {
+        guard let meters = native.trainingStatistics?.month?.distanceMeters else { return "--" }
+        return nativeKilometers(meters / 1000)
+    }
+
+    private var monthDuration: String {
+        nativeDuration(native.trainingStatistics?.month?.durationSeconds)
     }
 
     var body: some View {
@@ -1052,9 +1056,9 @@ struct WorkoutsView: View {
                     .frame(minWidth: 520)
                 }
                 HStack(spacing: 8) {
-                    PixelMetricTile(title: "当前页次数", value: "\(native.workouts.count)", accent: PixelColor.green)
-                    PixelMetricTile(title: "当前页里程", value: nativeKilometers(visibleDistance), accent: PixelColor.coral)
-                    PixelMetricTile(title: "当前页时长", value: nativeDuration(visibleDuration), accent: PixelColor.cyan)
+                    PixelMetricTile(title: "本月次数", value: monthWorkoutCount, accent: PixelColor.green)
+                    PixelMetricTile(title: "本月里程", value: monthDistance, accent: PixelColor.coral)
+                    PixelMetricTile(title: "本月时长", value: monthDuration, accent: PixelColor.cyan)
                 }
                 if native.workouts.isEmpty && native.isLoadingWorkouts {
                     PixelLoadingState(title: "正在读取训练")
@@ -1095,9 +1099,13 @@ struct WorkoutsView: View {
         .navigationTitle("")
         .toolbar(.hidden, for: .navigationBar)
         .task {
+            if native.trainingStatistics?.month == nil { await native.refreshTrainingStatistics() }
             if native.workouts.isEmpty { await native.refreshWorkouts() }
         }
-        .refreshable { await native.refreshWorkouts() }
+        .refreshable {
+            await native.refreshTrainingStatistics()
+            await native.refreshWorkouts()
+        }
     }
 }
 

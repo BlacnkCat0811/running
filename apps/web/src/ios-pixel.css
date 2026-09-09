@@ -87,7 +87,6 @@ html[data-shell="ios"] .ios-app-header h1 {
   font-size: 26px;
   line-height: 1.15;
   letter-spacing: -0.3px;
-  text-shadow: 2px 2px 0 rgba(18, 63, 43, 0.1);
 }
 html[data-shell="ios"] .ios-app-header p {
   margin: 8px 0 0;
@@ -174,7 +173,6 @@ html[data-shell="ios"] .ios-detail-hero > strong {
   font-size: 34px;
   line-height: 1;
   letter-spacing: -1px;
-  text-shadow: 3px 3px 0 rgba(18, 63, 43, 0.35);
 }
 html[data-shell="ios"] .ios-today-hero > strong small,
 html[data-shell="ios"] .ios-week-hero-copy > strong small,
@@ -713,7 +711,6 @@ html[data-shell="ios"] .ios-trend-summary strong {
   font-size: 32px;
   font-weight: 800;
   letter-spacing: -1px;
-  text-shadow: 3px 3px 0 rgba(18, 63, 43, 0.1);
 }
 html[data-shell="ios"] .ios-trend-summary small {
   color: var(--ios-muted);

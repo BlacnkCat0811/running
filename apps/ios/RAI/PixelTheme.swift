@@ -70,12 +70,18 @@ struct PixelPanel<Content: View>: View {
         content
             .padding(PixelMetrics.panelPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(fill)
-            .overlay(
+            .background {
                 Rectangle()
-                    .stroke(tint, lineWidth: PixelMetrics.border)
-            )
-            .shadow(color: shadowColor, radius: 0, x: PixelMetrics.shadow, y: PixelMetrics.shadow)
+                    .fill(fill)
+                    .overlay(
+                        Rectangle()
+                            .stroke(tint, lineWidth: PixelMetrics.border)
+                    )
+                    // Keep the hard pixel shadow on the panel surface only.
+                    // A translucent panel fill would otherwise include its
+                    // text in the shadow mask and render it as a ghost glyph.
+                    .shadow(color: shadowColor, radius: 0, x: PixelMetrics.shadow, y: PixelMetrics.shadow)
+            }
     }
 }
 

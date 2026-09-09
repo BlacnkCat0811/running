@@ -33,7 +33,7 @@ final class SyncTaskStore {
                 payload BLOB NOT NULL
             );
             """
-        schema.withCString { sql in
+        _ = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
         }
         #if os(iOS)
@@ -69,7 +69,7 @@ final class SyncTaskStore {
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
         sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
-        data.withUnsafeBytes { buffer in
+        _ = data.withUnsafeBytes { buffer in
             sqlite3_bind_blob(statement, 3, buffer.baseAddress, Int32(data.count), SQLITE_TRANSIENT)
         }
         _ = sqlite3_step(statement)
@@ -93,7 +93,7 @@ final class SyncTaskStore {
     }
 
     private func bind(_ value: String, to statement: OpaquePointer, at index: Int32) {
-        value.withCString { pointer in
+        _ = value.withCString { pointer in
             sqlite3_bind_text(statement, index, pointer, -1, SQLITE_TRANSIENT)
         }
     }

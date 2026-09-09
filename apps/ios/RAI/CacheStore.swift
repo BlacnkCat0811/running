@@ -46,8 +46,7 @@ final class CacheStore {
     }
 
     func read<Value: Codable>(_ type: Value.Type, scope: String, key: String) -> CachedValue<Value>? {
-        guard let database,
-              let statement = prepare("SELECT cached_at, payload FROM cache_entries WHERE scope = ? AND cache_key = ?") else {
+        guard let statement = prepare("SELECT cached_at, payload FROM cache_entries WHERE scope = ? AND cache_key = ?") else {
             return nil
         }
         defer { sqlite3_finalize(statement) }
@@ -151,7 +150,7 @@ final class CacheStore {
 
     private func execute(_ sql: String) {
         guard let database else { return }
-        sql.withCString { statement in
+        _ = sql.withCString { statement in
             sqlite3_exec(database, statement, nil, nil, nil)
         }
     }
@@ -167,7 +166,7 @@ final class CacheStore {
     }
 
     private func bind(_ value: String, to statement: OpaquePointer, at index: Int32) {
-        value.withCString { pointer in
+        _ = value.withCString { pointer in
             sqlite3_bind_text(statement, index, pointer, -1, SQLITE_TRANSIENT)
         }
     }

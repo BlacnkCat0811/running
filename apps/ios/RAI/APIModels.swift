@@ -300,6 +300,11 @@ struct NativePaceBand: Codable, Identifiable {
 
 struct NativeTrainingStatisticsOverviewResponse: Codable {
     let status: NativeDailyTrainingMetric?
+    let statusConfidence: Double?
+    let week: NativeTrainingPeriodSummary?
+    let month: NativeTrainingPeriodSummary?
+    let year: NativeTrainingPeriodSummary?
+    let rolling7Days: NativeTrainingPeriodSummary?
     let rolling28Days: NativeTrainingPeriodSummary?
 }
 
@@ -309,6 +314,9 @@ struct NativeDailyTrainingMetric: Codable {
 }
 
 struct NativeTrainingPeriodSummary: Codable {
+    let distanceMeters: Double?
+    let durationSeconds: Double?
+    let workoutCount: Int?
     let averagePaceSecondsPerKm: Double?
 }
 
