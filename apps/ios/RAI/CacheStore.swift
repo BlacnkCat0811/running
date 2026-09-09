@@ -129,7 +129,8 @@ final class CacheStore {
     }
 
     static func urlScope(baseURL: URL) -> String {
-        let digest = SHA256.hash(data: Data(baseURL.absoluteString.utf8))
+        let canonical = ServerSession.canonicalURL(baseURL)
+        let digest = SHA256.hash(data: Data(canonical.absoluteString.utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 

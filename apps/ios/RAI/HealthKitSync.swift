@@ -22,6 +22,7 @@ final class HealthKitSync {
     private var activeIdentity: RaiHandshake?
     private let taskStore = SyncTaskStore()
     private let api = RaiAPIClient()
+    private var syncTask: Task<Void, Never>?
 
     var hasCompletedSync: Bool { lastSyncAt != nil }
 
@@ -77,6 +78,15 @@ final class HealthKitSync {
         await sync(to: serverURL, apiToken: apiToken)
     }
 
+    func cancelSync() {
+        syncTask?.cancel()
+        syncTask = nil
+        if isBusy {
+            phase = "cancelled"
+            message = "同步已取消"
+        }
+    }
+
     func startForegroundObserver(onChange: @escaping @MainActor () async -> Void) {
         #if os(iOS)
         onObserverChange = onChange
@@ -123,19 +133,22 @@ final class HealthKitSync {
         activeToken = apiToken
         lastError = nil
         message = "正在请求 Apple 健康权限"
+        let previousIdleTimerState = UIApplication.shared.isIdleTimerDisabled
         UIApplication.shared.isIdleTimerDisabled = true
         var backgroundTask = UIBackgroundTaskIdentifier.invalid
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "rai-health-sync") {
+            self.cancelSync()
             UIApplication.shared.endBackgroundTask(backgroundTask)
             backgroundTask = .invalid
         }
         defer {
             isBusy = false
-            UIApplication.shared.isIdleTimerDisabled = false
+            UIApplication.shared.isIdleTimerDisabled = previousIdleTimerState
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
             }
         }
+        try? Task.checkCancellation()
         let identity: RaiHandshake
         do {
             identity = try await api.handshake(baseURL: serverURL, token: apiToken)
@@ -306,12 +319,14 @@ final class HealthKitSync {
                 }
             }
             let exported = try await Task.detached(priority: .userInitiated) {
-                try await HealthKitExport.exportArchive(
+                try Task.checkCancellation()
+                return try await HealthKitExport.exportArchive(
                     from: lowerBound,
                     workoutAnchor: anchor,
                     onProgress: onProgress
                 )
             }.value
+            try Task.checkCancellation()
             exportedThrough = exported.exportedThrough
             let persisted = try persistZip(exported.zipURL)
             zipURL = persisted
@@ -748,7 +763,8 @@ final class HealthKitSync {
     }
 
     private static func urlScope(for url: URL) -> String {
-        let digest = SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+        let canonical = ServerSession.canonicalURL(url)
+        let digest = SHA256.hash(data: Data(canonical.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
         return String(digest.prefix(24))
     }
 

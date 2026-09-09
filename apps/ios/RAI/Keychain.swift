@@ -53,7 +53,8 @@ enum Keychain {
 
     private static func account(for server: String?) -> String {
         guard let server, !server.isEmpty else { return account }
-        let digest = SHA256.hash(data: Data(server.utf8)).map { String(format: "%02x", $0) }.joined()
+        let normalized = URL(string: server).map(ServerSession.canonicalURL)?.absoluteString ?? server
+        let digest = SHA256.hash(data: Data(normalized.utf8)).map { String(format: "%02x", $0) }.joined()
         return "api-token-\(digest.prefix(32))"
     }
 }

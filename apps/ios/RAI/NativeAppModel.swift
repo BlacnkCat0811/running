@@ -54,7 +54,7 @@ final class NativeAppModel {
     init(session: ServerSession, api: RaiAPIClient? = nil) {
         self.api = api ?? RaiAPIClient()
         self.session = session
-        let baseURL = session.serverURL ?? URL(string: "http://invalid")!
+        let baseURL = session.serverURL ?? URL(fileURLWithPath: "/")
         let knownHandshake = Self.loadHandshake(for: baseURL)
         self.handshake = knownHandshake
         self.cacheScope = CacheStore.scope(baseURL: baseURL, handshake: knownHandshake)

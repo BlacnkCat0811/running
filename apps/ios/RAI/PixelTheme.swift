@@ -35,12 +35,13 @@ struct PixelBackground: View {
             PixelColor.paper
             Canvas { context, size in
                 let step: CGFloat = 16
-                let dot = Path(ellipseIn: CGRect(x: 0, y: 0, width: 1.5, height: 1.5))
+                var dots = Path()
                 for x in stride(from: step / 2, through: size.width, by: step) {
                     for y in stride(from: step / 2, through: size.height, by: step) {
-                        context.fill(dot.offsetBy(dx: x, dy: y), with: .color(PixelColor.ink.opacity(0.055)))
+                        dots.addEllipse(in: CGRect(x: x, y: y, width: 1.5, height: 1.5))
                     }
                 }
+                context.fill(dots, with: .color(PixelColor.ink.opacity(0.055)))
             }
             .allowsHitTesting(false)
         }

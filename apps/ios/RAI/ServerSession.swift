@@ -71,7 +71,24 @@ final class ServerSession {
         #if !DEBUG
         guard scheme == "https" else { return nil }
         #endif
-        return url
+        return Self.canonicalURL(url)
+    }
+
+    /// One stable representation is used for Keychain and cache scoping.
+    static func canonicalURL(_ url: URL) -> URL {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let scheme = components?.scheme?.lowercased()
+        let host = components?.host?.lowercased()
+        components?.scheme = scheme
+        components?.host = host
+        if (components?.port == 80 && components?.scheme == "http") ||
+            (components?.port == 443 && components?.scheme == "https") {
+            components?.port = nil
+        }
+        components?.path = ""
+        components?.query = nil
+        components?.fragment = nil
+        return components?.url ?? url
     }
 
     var isLocalhostURL: Bool {

@@ -210,7 +210,7 @@ struct SetupView: View {
                         VStack(alignment: .leading, spacing: 11) {
                             PixelSectionHeader(title: "服务连接", trailing: session.isReachable ? "已连接" : "未连接", trailingColor: session.isReachable ? PixelColor.green : PixelColor.coral)
                             PixelField("服务器地址") {
-                                TextField("http://192.168.x.x:5173", text: Binding(
+                                TextField(serverPlaceholder, text: Binding(
                                     get: { draftURL },
                                     set: {
                                         draftURL = $0
@@ -279,6 +279,14 @@ struct SetupView: View {
         .toolbar(.hidden, for: .navigationBar)
     }
     #endif
+
+    private var serverPlaceholder: String {
+        #if DEBUG
+        return "http://192.168.x.x:5173"
+        #else
+        return "https://rai.example.com"
+        #endif
+    }
 
     private var formBody: some View {
         @Bindable var session = session

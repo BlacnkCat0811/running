@@ -298,7 +298,9 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
             if let url = URL(string: "x-apple-health://") {
                 UIApplication.shared.open(url)
             } else {
-                UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsURL)
+                }
             }
             #endif
         case "reload":
