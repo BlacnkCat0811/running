@@ -81,6 +81,7 @@ struct PixelPanel<Content: View>: View {
                     // Keep the hard pixel shadow on the panel surface only.
                     // A translucent panel fill would otherwise include its
                     // text in the shadow mask and render it as a ghost glyph.
+                    .compositingGroup()
                     .shadow(color: shadowColor, radius: 0, x: PixelMetrics.shadow, y: PixelMetrics.shadow)
             }
     }
@@ -98,12 +99,12 @@ struct PixelHeroCard<Content: View>: View {
             .padding(.horizontal, 17)
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(PixelColor.green)
-            .overlay(
+            .background {
                 Rectangle()
-                    .stroke(PixelColor.ink, lineWidth: 3)
-            )
-            .shadow(color: PixelColor.ink.opacity(0.25), radius: 0, x: 4, y: 4)
+                    .fill(PixelColor.green)
+                    .overlay(Rectangle().stroke(PixelColor.ink, lineWidth: 3))
+                    .shadow(color: PixelColor.ink.opacity(0.25), radius: 0, x: 4, y: 4)
+            }
     }
 }
 
@@ -199,7 +200,8 @@ struct PixelMetricTile: View {
         .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
         .background(fill)
         .overlay(Rectangle().stroke(PixelColor.ink.opacity(0.8), lineWidth: PixelMetrics.smallBorder))
-        .shadow(color: PixelColor.ink.opacity(0.1), radius: 0, x: 2, y: 2)
+        // Do not shadow this view: its text otherwise receives a second,
+        // offset rasterized copy and appears as overlapping glyphs.
     }
 }
 

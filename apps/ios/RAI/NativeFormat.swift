@@ -21,6 +21,15 @@ func nativeDuration(_ seconds: Double?) -> String {
     return "\(minutes)分"
 }
 
+func nativeHoursMinutes(_ minutes: Double?) -> String {
+    guard let minutes, minutes.isFinite else { return "无记录" }
+    let total = max(0, Int(minutes.rounded()))
+    let hours = total / 60
+    let remainder = total % 60
+    if hours > 0 { return "\(hours)小时\(remainder)分钟" }
+    return "\(remainder)分钟"
+}
+
 func nativePace(_ secondsPerKm: Double?) -> String {
     guard let secondsPerKm, secondsPerKm.isFinite, secondsPerKm > 0 else { return "--" }
     let total = max(0, Int(secondsPerKm.rounded()))
@@ -54,7 +63,7 @@ func nativeDate(_ value: String?) -> String {
     guard let date else { return String(value.prefix(10)) }
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "zh_CN")
-    formatter.dateFormat = "M月d日 HH:mm"
+    formatter.dateFormat = "yyyy年M月d日 HH:mm"
     return formatter.string(from: date)
 }
 
@@ -201,6 +210,8 @@ func nativeStatusName(_ value: String?) -> String {
     case "recovered": return "恢复良好"
     case "fatigued": return "需要恢复"
     case "pending": return "等待处理"
+    case "recovery": return "恢复"
+    case "recovering": return "恢复中"
     default: return value ?? "--"
     }
 }

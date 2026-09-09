@@ -75,7 +75,7 @@ struct PixelTabBar: View {
                 .fill(PixelColor.ink)
                 .frame(height: PixelMetrics.border)
         }
-        .shadow(color: PixelColor.ink.opacity(0.12), radius: 0, x: 0, y: -2)
+        // Keep navigation text crisp; a view-level shadow creates ghost labels.
     }
 }
 #endif

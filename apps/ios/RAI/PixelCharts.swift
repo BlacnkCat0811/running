@@ -23,7 +23,7 @@ struct PixelRing: View {
                     .foregroundStyle(PixelColor.ink)
                 Text(label)
                     .font(.caption2.weight(.bold))
-                    .foregroundStyle(PixelColor.muted)
+                    .foregroundStyle(PixelColor.ink)
             }
         }
         .frame(width: size, height: size)

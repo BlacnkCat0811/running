@@ -782,11 +782,11 @@ struct BodyMetricsView: View {
             VStack(alignment: .leading, spacing: 10) {
                 PixelSectionHeader(title: "恢复明细", trailing: nativeStatusName(summary.recovery.state), trailingColor: recoveryTint)
                 HStack(spacing: 8) {
-                    PixelMetricTile(title: "睡眠", value: summary.recovery.lastNightSleepMinutes.map { "\(nativeNumber($0, digits: 0)) 分" } ?? "无记录", accent: PixelColor.cyan)
+                    PixelMetricTile(title: "睡眠", value: nativeHoursMinutes(summary.recovery.lastNightSleepMinutes), accent: PixelColor.cyan)
                     PixelMetricTile(title: "HRV", value: summary.recovery.morningHrvMs.map { "\(nativeNumber($0)) ms" } ?? "无记录", accent: PixelColor.green)
                     PixelMetricTile(title: "静息心率", value: summary.recovery.restingHeartRateBpm.map { nativeNumber($0, digits: 0) } ?? "无记录", accent: PixelColor.coral)
                 }
-                bodyMetricRow("睡眠基线", value: summary.recovery.sleepBaselineMinutes.map { "\(nativeNumber($0, digits: 0)) 分" })
+                bodyMetricRow("睡眠基线", value: summary.recovery.sleepBaselineMinutes.map { nativeHoursMinutes($0) })
                 bodyMetricRow("HRV 基线", value: summary.recovery.hrvBaselineMs.map { "\(nativeNumber($0)) ms" })
                 bodyMetricRow("静息心率基线", value: summary.recovery.restingHeartRateBaselineBpm.map { "\(nativeNumber($0, digits: 0)) bpm" })
                 Text(summary.recovery.note)
@@ -1053,7 +1053,7 @@ struct WorkoutsView: View {
                         items: filters.map { (title: $0.0, value: $0.1 ?? "all") },
                         selection: selectedFilter
                     )
-                    .frame(minWidth: 520)
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 HStack(spacing: 8) {
                     PixelMetricTile(title: "本月次数", value: monthWorkoutCount, accent: PixelColor.green)
@@ -1766,7 +1766,6 @@ struct AnalysisView: View {
                         PixelInsightCard(insight: insight)
                     }
                 }
-                currentAbilityPanel(data.currentAbility)
             }
         } else {
             PixelPanel { PixelLoadingState(title: "正在读取趋势") }
