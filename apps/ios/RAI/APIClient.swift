@@ -237,7 +237,11 @@ struct RaiAPIClient {
     }
 
     private func escapedPath(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+        // Encode an identifier as one path segment. `.urlPathAllowed` includes
+        // `/`, which would let an unexpected slash change the request path.
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }
 

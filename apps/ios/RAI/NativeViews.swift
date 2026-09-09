@@ -267,7 +267,7 @@ struct TodayView: View {
                         metricCaption("增长速度", value: nativeNumber(data.ability.growthVelocityPerWeek))
                         metricCaption("衰减", value: nativeNumber(data.ability.decayPoints))
                     }
-                    .frame(width: 62, alignment: .leading)
+                    .frame(width: 86, alignment: .trailing)
                 }
                 if data.calibration.status != "ready" {
                     Text(data.calibration.message)
@@ -2147,15 +2147,17 @@ struct FlowLayout<Content: View>: View {
 }
 
 private func metricCaption(_ title: String, value: String) -> some View {
-    VStack(alignment: .leading, spacing: 3) {
+    VStack(alignment: .trailing, spacing: 3) {
         Text(title)
             .font(.caption2.weight(.bold))
             .foregroundStyle(PixelColor.muted)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         Text(value)
             .font(.caption.weight(.heavy).monospacedDigit())
             .foregroundStyle(PixelColor.ink)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 #endif
