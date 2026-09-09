@@ -6,6 +6,7 @@ import SwiftUI
 import UIKit
 
 struct NativeRootView: View {
+    @Environment(\.appSkin) private var skin
     @Environment(NativeAppModel.self) private var native
     @Environment(ServerSession.self) private var session
     @Environment(HealthKitSync.self) private var healthSync
@@ -13,24 +14,25 @@ struct NativeRootView: View {
 
     var body: some View {
         ZStack {
-            PixelBackground()
+            if skin == .technology { TechBackground() } else { PixelBackground() }
             Group {
                 switch selectedTab {
                 case .home:
-                    NavigationStack { TodayView() }
+                    NavigationStack { if skin == .technology { TechTodayView() } else { TodayView() } }
                 case .workouts:
-                    NavigationStack { WorkoutsView() }
+                    NavigationStack { if skin == .technology { TechWorkoutsView() } else { WorkoutsView() } }
                 case .statistics:
-                    NavigationStack { AnalysisView(initialMode: "statistics") }
+                    NavigationStack { if skin == .technology { TechAnalysisView(initialMode: "statistics") } else { AnalysisView(initialMode: "statistics") } }
                 case .trends:
-                    NavigationStack { AnalysisView(initialMode: "trends") }
+                    NavigationStack { if skin == .technology { TechAnalysisView(initialMode: "trends") } else { AnalysisView(initialMode: "trends") } }
                 case .settings:
-                    NavigationStack { NativeSettingsView() }
+                    NavigationStack { if skin == .technology { TechNativeSettingsView() } else { NativeSettingsView() } }
                 }
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            PixelTabBar(selection: $selectedTab)
+            if skin == .technology { TechTabBar(selection: $selectedTab) }
+            else { PixelTabBar(selection: $selectedTab) }
         }
         .task(id: session.serverURLString + "\n" + session.apiToken) {
             native.serverConfigurationChanged()
@@ -1948,6 +1950,7 @@ struct NativeSettingsView: View {
                     PixelBadge(title: session.isReachable ? "在线" : "离线", color: session.isReachable ? PixelColor.green : PixelColor.coral, fill: session.isReachable ? PixelColor.mint : PixelColor.paleCoral)
                 }
                 serverPanel(session: session)
+                AppSkinPicker()
                 healthPanel
                 cachePanel
                 versionPanel

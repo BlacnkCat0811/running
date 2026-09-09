@@ -179,6 +179,9 @@ struct RootView: View {
 }
 
 struct SetupView: View {
+    #if os(iOS)
+    @Environment(\.appSkin) private var skin
+    #endif
     @State private var draftURL = ""
     @State private var draftToken = ""
     @Environment(ServerSession.self) private var session
@@ -186,7 +189,10 @@ struct SetupView: View {
 
     var body: some View {
         #if os(iOS)
-        pixelBody
+        Group {
+            if skin == .technology { TechSetupView() }
+            else { pixelBody }
+        }
             .onAppear {
                 draftURL = session.serverURLString
                 draftToken = session.apiToken
@@ -271,6 +277,7 @@ struct SetupView: View {
                     .font(.footnote.weight(.heavy))
                     .foregroundStyle(PixelColor.cyan)
                     .frame(maxWidth: .infinity)
+                    AppSkinPicker()
                 }
                 .padding(.horizontal, PixelMetrics.pageHorizontal)
                 .padding(.vertical, PixelMetrics.pageVertical)

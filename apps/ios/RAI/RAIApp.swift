@@ -57,6 +57,7 @@ final class AppModel {
 @main
 struct RAIApp: App {
     #if os(iOS)
+    @AppStorage(AppSkin.storageKey) private var rawSkin = AppSkin.pixel.rawValue
     @Environment(\.scenePhase) private var scenePhase
     #endif
 
@@ -70,6 +71,9 @@ struct RAIApp: App {
                 .environment(model.discovery)
                 #if os(iOS)
                 .environment(model.native)
+                .environment(\.appSkin, AppSkin.resolve(rawSkin))
+                .preferredColorScheme(AppSkin.resolve(rawSkin) == .technology ? .dark : nil)
+                .tint(AppSkin.resolve(rawSkin) == .technology ? TechColor.cyan : nil)
                 #endif
                 #if os(iOS)
                 .onChange(of: scenePhase) { _, phase in
