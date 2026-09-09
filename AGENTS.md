@@ -51,6 +51,11 @@ Do not modify these areas without explicit user authorization:
 - Media-query rules below 1024px in `apps/web/src/styles.css`.
 - The 390px E2E coverage in `apps/web/e2e/web-flows.test.ts`.
 
+> 断点实况（供措辞统一，不改变冻结范围）：styles.css 中 <1024px 冻结的媒体查询为
+> `@media (max-width: 820px)`（820px 以下切底部导航 / mobile-nav-links / 紧凑列表）
+> 与 `@media (max-width: 480px)`（细节微调）；`@media (max-width: 1180px)` 段不在
+> 窄屏冻结之列，但桌面 1024–1180px 宽度依赖它，改动必须走桌面回归（e2e:web）。
+
 ## Default Verification
 
 Choose checks proportionate to the change. For ordinary Web work, use:

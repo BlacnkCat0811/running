@@ -129,7 +129,7 @@ struct PixelLineChart: View {
         }
         .frame(height: height)
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: min(labels.count, 5))) {
+            AxisMarks(values: .automatic(desiredCount: min(labels.count, 4))) {
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [2, 3]))
                     .foregroundStyle(PixelColor.grid.opacity(0.7))
                 AxisValueLabel()

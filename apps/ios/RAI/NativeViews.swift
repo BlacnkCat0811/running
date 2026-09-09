@@ -97,6 +97,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: PixelMetrics.sectionSpacing) {
                 PixelPageHeader(title: "今天") {
                     HStack(spacing: 7) {
+                        VStack(spacing: 2) {
                         PixelIconButton(systemName: "heart.text.square", accessibilityLabel: "同步健康数据", color: PixelColor.coral) {
                             Task {
                                 await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
@@ -104,10 +105,16 @@ struct TodayView: View {
                             }
                         }
                         .disabled(healthSync.isBusy || native.isOffline)
+                        Text("同步").font(.caption2.weight(.bold)).foregroundStyle(PixelColor.muted)
+                        }
+                        VStack(spacing: 2) {
                         PixelIconButton(systemName: "arrow.clockwise", accessibilityLabel: "刷新首页") {
                             Task { await native.refreshAll() }
                         }
                         .disabled(native.isRefreshing)
+                        Text("刷新").font(.caption2.weight(.bold)).foregroundStyle(PixelColor.muted)
+                        }
+                        VStack(spacing: 2) {
                         NavigationLink {
                             PlanView()
                         } label: {
@@ -120,6 +127,8 @@ struct TodayView: View {
                                 .shadow(color: PixelColor.ink.opacity(0.14), radius: 0, x: 2, y: 2)
                         }
                         .accessibilityLabel("打开训练计划")
+                        Text("计划").font(.caption2.weight(.bold)).foregroundStyle(PixelColor.muted)
+                        }
                     }
                 }
 
@@ -198,7 +207,7 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(PixelColor.paper)
         .overlay(Rectangle().stroke(PixelColor.ink, lineWidth: PixelMetrics.smallBorder))
-        .shadow(color: PixelColor.ink.opacity(0.3), radius: 0, x: 2, y: 2)
+        .shadow(color: PixelColor.ink.opacity(0.12), radius: 0, x: 1, y: 1)
     }
 
     private func activityPanel(_ data: MobileTodayResponse) -> some View {
@@ -258,6 +267,7 @@ struct TodayView: View {
                         metricCaption("增长速度", value: nativeNumber(data.ability.growthVelocityPerWeek))
                         metricCaption("衰减", value: nativeNumber(data.ability.decayPoints))
                     }
+                    .frame(width: 62, alignment: .leading)
                 }
                 if data.calibration.status != "ready" {
                     Text(data.calibration.message)
@@ -1048,13 +1058,10 @@ struct WorkoutsView: View {
                 PixelPageHeader(title: "训练") {
                     PixelBadge(title: "共 \(native.workoutTotal) 次", color: PixelColor.cyan, fill: PixelColor.paleCyan)
                 }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    PixelSegmentedControl(
-                        items: filters.map { (title: $0.0, value: $0.1 ?? "all") },
-                        selection: selectedFilter
-                    )
-                    .fixedSize(horizontal: true, vertical: false)
-                }
+                PixelSegmentedControl(
+                    items: filters.map { (title: $0.0, value: $0.1 ?? "all") },
+                    selection: selectedFilter
+                )
                 HStack(spacing: 8) {
                     PixelMetricTile(title: "本月次数", value: monthWorkoutCount, accent: PixelColor.green)
                     PixelMetricTile(title: "本月里程", value: monthDistance, accent: PixelColor.coral)
@@ -1721,6 +1728,9 @@ struct AnalysisView: View {
                 PixelPanel {
                     VStack(alignment: .leading, spacing: 10) {
                         PixelSectionHeader(title: "跑量趋势", trailing: data.distanceChangeFraction4Weeks == nil ? "数据不足" : nativeSignedPercent(data.distanceChangeFraction4Weeks), trailingColor: data.distanceChangeFraction4Weeks == nil ? PixelColor.yellow : PixelColor.green)
+                        Text("近 4 周总跑量变化")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(PixelColor.muted)
                         if let change = data.distanceChangeFraction4Weeks {
                             Text(nativeSignedPercent(change))
                                 .font(.system(size: 34, weight: .heavy, design: .monospaced))
@@ -1753,7 +1763,10 @@ struct AnalysisView: View {
                 }
                 PixelPanel {
                     VStack(alignment: .leading, spacing: 10) {
-                        PixelSectionHeader(title: "12 周跑量", trailing: "W-12 → W-1")
+                        PixelSectionHeader(title: "12 周跑量", trailing: "从旧到新")
+                        Text("每根柱代表一周；浅色表示本周尚未结束")
+                            .font(.caption2)
+                            .foregroundStyle(PixelColor.muted)
                         PixelMiniBars(
                             values: data.weeks.map(\.distanceKm),
                             labels: data.weeks.map { nativeShortWeek($0.periodStart) },
