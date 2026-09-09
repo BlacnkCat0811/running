@@ -8,6 +8,8 @@
 
 科技风的实现范围、设计映射及待执行的 Xcode 验收见 `design/TECHNOLOGY_SKIN.md`。当前实现已在 Windows 上做语法与引用检查；尚未完成 iOS SDK 编译和模拟器逐页视觉比对，不能视为已通过与设计图完全一致的验收。
 
+完整六张 4K 设计图、浏览页及生成提示词已提交在 [`design/technology-v1`](design/technology-v1/index.html)。
+
 这是给 iPhone 使用的 SwiftUI 原生应用。手机不运行 Node.js、评分核心或服务端 SQLite；数据和模型结果仍由已配置的 RAI API 服务负责。旧 WKWebView 文件保留为开发期回退路径，不是原生页面的验收替代品。
 
 ## 一次跑通
