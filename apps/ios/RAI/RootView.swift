@@ -21,9 +21,6 @@ struct RootView: View {
             .onAppear {
                 session.startMonitoring()
                 discovery.start()
-                #if os(iOS)
-                Task { await native.bootstrap() }
-                #endif
                 healthSync.startForegroundObserver { [session, healthSync] in
                     await healthSync.syncIfNeeded(to: session.serverURL, apiToken: session.apiToken, force: true)
                 }
@@ -182,19 +179,112 @@ struct RootView: View {
 }
 
 struct SetupView: View {
+    @State private var draftURL = ""
+    @State private var draftToken = ""
     @Environment(ServerSession.self) private var session
     @Environment(ServerDiscovery.self) private var discovery
 
     var body: some View {
+        #if os(iOS)
+        pixelBody
+            .onAppear {
+                draftURL = session.serverURLString
+                draftToken = session.apiToken
+            }
+        #else
+        formBody
+        #endif
+    }
+
+    #if os(iOS)
+    private var pixelBody: some View {
         @Bindable var session = session
-        Form {
+        return ZStack {
+            PixelBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: PixelMetrics.sectionSpacing) {
+                    PixelPageHeader(title: "连接 RAI") {
+                        PixelBadge(title: session.isReachable ? "在线" : "待连接", color: session.isReachable ? PixelColor.green : PixelColor.coral, fill: session.isReachable ? PixelColor.mint : PixelColor.paleCoral)
+                    }
+                    PixelPanel {
+                        VStack(alignment: .leading, spacing: 11) {
+                            PixelSectionHeader(title: "服务连接", trailing: session.isReachable ? "已连接" : "未连接", trailingColor: session.isReachable ? PixelColor.green : PixelColor.coral)
+                            PixelField("服务器地址") {
+                                TextField("http://192.168.x.x:5173", text: Binding(
+                                    get: { draftURL },
+                                    set: {
+                                        draftURL = $0
+                                        draftToken = Keychain.loadToken(for: $0)
+                                    }
+                                ))
+                                    .keyboardType(.URL)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                    .submitLabel(.done)
+                            }
+                            PixelField("API Token（云端部署时填写）") {
+                                SecureField("可选", text: $draftToken)
+                            }
+                            PixelPrimaryButton(title: "检查连接", systemName: "network", isDisabled: draftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                                session.serverURLString = draftURL
+                                session.apiToken = draftToken
+                                Task { await session.probe() }
+                            }
+                            if let error = session.lastError {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundStyle(PixelColor.coral)
+                            }
+                        }
+                    }
+                    if !discovery.candidates.isEmpty {
+                        PixelPanel(tint: PixelColor.cyan) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                PixelSectionHeader(title: "发现的 RAI 服务", trailing: "Bonjour", trailingColor: PixelColor.cyan)
+                                ForEach(discovery.candidates, id: \.absoluteString) { url in
+                                    Button(url.absoluteString) {
+                                        draftURL = url.absoluteString
+                                        draftToken = Keychain.loadToken(for: url.absoluteString)
+                                    }
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(PixelColor.cyan)
+                                }
+                            }
+                        }
+                    }
+                    PixelPanel {
+                        VStack(alignment: .leading, spacing: 7) {
+                            PixelSectionHeader(title: "使用说明")
+                            Text("1. 虚拟机运行 npm run dev:device，把打印的局域网地址填到上面。")
+                            Text("2. VMware 请使用桥接网络；不要填写 127.0.0.1。")
+                            Text("3. 连接后在首页同步 Apple 健康，数据会进入当前 RAI API。")
+                            Text("4. 手机端只展示结果，不运行 Node.js、评分核心或服务端 SQLite。")
+                        }
+                        .font(.footnote)
+                        .foregroundStyle(PixelColor.muted)
+                    }
+                    Button("打开健康权限") {
+                        if let url = URL(string: "x-apple-health://") {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                    .font(.footnote.weight(.heavy))
+                    .foregroundStyle(PixelColor.cyan)
+                    .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, PixelMetrics.pageHorizontal)
+                .padding(.vertical, PixelMetrics.pageVertical)
+            }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+    }
+    #endif
+
+    private var formBody: some View {
+        @Bindable var session = session
+        return Form {
             Section("服务连接") {
                 TextField("https://rai.example.com", text: $session.serverURLString)
-                    #if os(iOS)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    #endif
                     .submitLabel(.done)
                 SecureField("API Token（云端部署时填写）", text: $session.apiToken)
                 if session.isReachable {
@@ -220,13 +310,6 @@ struct SetupView: View {
                 Text("2. 连上后在设置里点「同步健康」，允许读取跑步、心率和路线。")
                 Text("3. 导入完成后点底部训练、统计、趋势查看结果。")
                 Text("4. 不要填 127.0.0.1。VMware 请用桥接，USB 只负责安装 App。")
-                #if os(iOS)
-                Button("打开健康权限") {
-                    if let url = URL(string: "x-apple-health://") {
-                        UIApplication.shared.open(url)
-                    }
-                }
-                #endif
             }
         }
         .formStyle(.grouped)

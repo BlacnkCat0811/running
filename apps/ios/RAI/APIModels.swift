@@ -218,6 +218,100 @@ struct MobileTodayResponse: Codable {
     let lock: MobileLockState
 }
 
+// The body metrics page reuses existing physiology, zone and training
+// statistics endpoints. These model only fields rendered by the native page.
+struct NativePredictionResponse: Codable {
+    let inputs: NativePredictionInputs
+    let snapshot: NativePredictionSnapshot
+}
+
+struct NativePredictionInputs: Codable {
+    let recoveryReadiness: Double?
+}
+
+struct NativePredictionSnapshot: Codable {
+    let vo2Max: NativeVo2MaxEstimate
+    let performanceVdot: NativeVdotEstimate
+    let lactateThreshold: NativeLactateThresholdEstimate
+    let races: [NativeRacePrediction]
+}
+
+struct NativeVo2MaxEstimate: Codable {
+    let status: String
+    let valueMlKgMin: Double?
+    let confidence: Double
+}
+
+struct NativeVdotEstimate: Codable {
+    let status: String
+    let value: Double?
+    let confidence: Double
+}
+
+struct NativeLactateThresholdEstimate: Codable {
+    let status: String
+    let paceSecondsPerKm: Double?
+    let heartRateBpm: Double?
+    let confidence: Double
+}
+
+struct NativeRacePrediction: Codable, Identifiable {
+    let distance: String
+    let predictedSeconds: Double?
+    let optimisticSeconds: Double?
+    let pessimisticSeconds: Double?
+    let readiness: Double?
+    let confidence: Double
+
+    var id: String { distance }
+}
+
+struct NativeDashboardResponse: Codable {
+    let latestWorkout: WorkoutListItem?
+}
+
+struct NativeTrainingZonesCurrentResponse: Codable {
+    let profile: NativeZoneProfile
+}
+
+struct NativeZoneProfile: Codable {
+    let restingHeartRateBpm: Double
+    let maximumHeartRateBpm: Double
+    let lactateThresholdPaceSecondsPerKm: Double?
+    let heartRateBands: [NativeHeartRateBand]
+    let paceBands: [NativePaceBand]
+}
+
+struct NativeHeartRateBand: Codable, Identifiable {
+    let zone: String
+    let lowerBpm: Double?
+    let upperBpm: Double?
+
+    var id: String { zone }
+}
+
+struct NativePaceBand: Codable, Identifiable {
+    let zone: String
+    let lowerSecondsPerKm: Double?
+    let upperSecondsPerKm: Double?
+
+    var id: String { zone }
+}
+
+struct NativeTrainingStatisticsOverviewResponse: Codable {
+    let status: NativeDailyTrainingMetric?
+    let rolling28Days: NativeTrainingPeriodSummary?
+}
+
+struct NativeDailyTrainingMetric: Codable {
+    let trainingStatus: String
+    let recoveryEvidence: Double?
+}
+
+struct NativeTrainingPeriodSummary: Codable {
+    let averagePaceSecondsPerKm: Double?
+}
+
 struct Freshness: Codable {
     let state: String
     let checkedAt: String?

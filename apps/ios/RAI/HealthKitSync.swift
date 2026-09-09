@@ -487,8 +487,8 @@ final class HealthKitSync {
         let (data, response) = try await session.data(for: request)
         if (response as? HTTPURLResponse)?.statusCode == 409,
            let active = try? await activeImport(on: serverURL),
-           active?.sourceId == sourceId {
-            return active!
+           active.sourceId == sourceId {
+            return active
         }
         try throwIfNeeded(response, data: data)
         return try JSONDecoder().decode(ImportJobResponse.self, from: data)

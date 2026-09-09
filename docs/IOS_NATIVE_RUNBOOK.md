@@ -15,7 +15,21 @@
 npm run dev:device
 ```
 
-然后打开 `apps/ios/RAI.xcodeproj`，选择 RAI scheme 和真实 iPhone，检查 Signing & Capabilities 中的 Team，执行 Build/Run。项目最低部署版本保持 iOS 17。当前文档中的命令和设备名称是运行说明，尚未在本次 Windows 环境验证。
+然后打开 `apps/ios/RAI.xcodeproj`，选择 RAI scheme 和真实 iPhone，检查 Signing & Capabilities 中的 Team，执行 Build/Run。项目最低部署版本保持 iOS 17。
+
+无签名模拟器构建可用于快速验证 SwiftUI/API 层编译：
+
+```bash
+xcodebuild -project apps/ios/RAI.xcodeproj \
+  -scheme RAI \
+  -destination 'platform=iOS Simulator,id=7A65F02F-2F9B-412B-899A-EDA4DE20B68E' \
+  -configuration Debug \
+  -derivedDataPath /tmp/rai-derived \
+  CODE_SIGNING_ALLOWED=NO build
+```
+
+2026-09-08 已在本机 Xcode 26.5 / iOS Simulator 26.5 通过该构建；真实 iPhone
+安装、签名、HealthKit 权限和路线能力仍需按下方步骤验收。
 
 ## 首次连接
 
@@ -37,4 +51,3 @@ npm run dev:device
 ## 数据位置与隐私
 
 页面缓存位于 App Support 下的 `RAI/cache.sqlite`，同步任务位于 `RAI/sync.sqlite`，凭证只在 Keychain。文件使用 iOS 数据保护。日志和诊断不得记录 Token、完整健康样本或精确路线。
-

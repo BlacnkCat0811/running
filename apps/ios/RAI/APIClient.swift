@@ -60,13 +60,13 @@ struct RaiAPIClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
 
-    init() {
+    init(session: URLSession? = nil) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
         configuration.timeoutIntervalForResource = 45
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        session = RaiURLSession.make(configuration: configuration)
+        self.session = session ?? RaiURLSession.make(configuration: configuration)
         decoder = JSONDecoder()
         encoder = JSONEncoder()
     }
@@ -89,6 +89,22 @@ struct RaiAPIClient {
 
     func goals(baseURL: URL, token: String) async throws -> MobileGoalsResponse {
         try await get(path: "/v1/mobile/goals", baseURL: baseURL, token: token)
+    }
+
+    func predictions(baseURL: URL, token: String) async throws -> NativePredictionResponse {
+        try await get(path: "/v1/predictions", baseURL: baseURL, token: token)
+    }
+
+    func dashboard(baseURL: URL, token: String) async throws -> NativeDashboardResponse {
+        try await get(path: "/v1/dashboard", baseURL: baseURL, token: token)
+    }
+
+    func trainingZonesCurrent(baseURL: URL, token: String) async throws -> NativeTrainingZonesCurrentResponse {
+        try await get(path: "/v1/training-zones/current", baseURL: baseURL, token: token)
+    }
+
+    func trainingStatisticsOverview(baseURL: URL, token: String) async throws -> NativeTrainingStatisticsOverviewResponse {
+        try await get(path: "/v1/training-statistics/overview", baseURL: baseURL, token: token)
     }
 
     func workouts(

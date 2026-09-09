@@ -53,6 +53,32 @@
 
 ## 原生页面与移动端 API 映射
 
+## 清新像素风原生 UI
+
+原生页面现已使用统一的清新像素视觉系统，代码位于：
+
+- `RAI/PixelTheme.swift`：纸白、墨绿、主绿、薄荷、青色、珊瑚和黄色令牌，以及点阵背景、卡片、指标格、按钮和分段器。
+- `RAI/PixelIcons.swift`：像素跑者和训练类型图标。
+- `RAI/PixelCharts.swift`：活动圆环、周柱图、月度柱图、阶梯趋势图。
+- `RAI/PixelTabBar.swift`：今日、训练、计划、分析、设置五入口底部导航。
+- `RAI/NativeViews.swift`：原生页面和所有业务状态的像素化呈现。
+
+页面功能保持由现有 `NativeAppModel`、`RaiAPIClient`、`CacheStore` 和
+`HealthKitSync` 提供：在线时 API 优先，离线时展示缓存；所有新增写操作仍要求
+联网，手机端不复制服务端评分或聚合逻辑。
+
+视觉改造覆盖：
+
+- 首次连接和服务发现页
+- 今日 Hero 卡、活动圆环、跑力、判断、恢复、周计划、比赛目标和最近训练
+- 训练筛选、分页、训练详情、路线、全部时序指标、分段、负荷和区间暴露
+- 周目标编辑、课程锁定、revision 冲突回退
+- 统计、12 周趋势、跑力评估、洞察和个人纪录
+- 服务连接、HealthKit 只读同步、缓存管理和版本信息
+
+像素组件同时提供文本状态和 VoiceOver 描述，不依赖颜色单独表达完成、
+过期、错误或离线状态；底部导航在开启 Reduce Motion 时关闭切换动画。
+
 设计稿 `apps/ios/design/ios-app-design.html`（清新像素风 v3）与原生 SwiftUI 五个入口共用以下后端端点（契约类型在 `packages/api-contracts`，OpenAPI 已登记）：
 
 | 设计稿页面 | 端点 | 数据说明 |
