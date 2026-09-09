@@ -24,7 +24,9 @@ func nativeDuration(_ seconds: Double?) -> String {
 func nativePace(_ secondsPerKm: Double?) -> String {
     guard let secondsPerKm, secondsPerKm.isFinite, secondsPerKm > 0 else { return "--" }
     let total = max(0, Int(secondsPerKm.rounded()))
-    return String(format: "%d' %02d\"/km", locale: Locale(identifier: "en_US_POSIX"), total / 60, total % 60)
+    // Keep the value unitless so callers can place "/km" once, either inline
+    // or in a metric tile's dedicated unit label.
+    return String(format: "%d' %02d\"", locale: Locale(identifier: "en_US_POSIX"), total / 60, total % 60)
 }
 
 func nativePercent(_ fraction: Double?, digits: Int = 0) -> String {
@@ -57,8 +59,22 @@ func nativeDate(_ value: String?) -> String {
 }
 
 func nativeDay(_ value: String) -> String {
-    guard value.count >= 5 else { return value }
-    return String(value.suffix(5)).replacingOccurrences(of: "-", with: "/")
+    guard !value.isEmpty else { return "--" }
+
+    // Trend assessment dates can be workout timestamps
+    // (for example, 2026-09-02T01:00:00.000Z), not just YYYY-MM-DD.
+    // Taking the last five characters of an ISO timestamp renders ".000Z".
+    let datePart = String(value.prefix(10))
+    let components = datePart.split(separator: "-")
+    guard components.count == 3,
+          components[0].count == 4,
+          let month = Int(components[1]),
+          let day = Int(components[2]),
+          (1...12).contains(month),
+          (1...31).contains(day) else {
+        return String(value.prefix(min(value.count, 10)))
+    }
+    return "\(month)月\(day)日"
 }
 
 func nativeWeekday(_ value: String) -> String {

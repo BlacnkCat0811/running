@@ -171,7 +171,7 @@ struct TodayView: View {
                     }
                     HStack(spacing: 7) {
                         heroMetric("时长", nativeDuration(data.today.durationSeconds))
-                        heroMetric("配速", nativePace(data.today.paceSecondsPerKm))
+                        heroMetric("配速", "\(nativePace(data.today.paceSecondsPerKm))/km")
                         heroMetric("千卡", data.today.energyKcal.map { nativeNumber($0, digits: 0) } ?? "--")
                     }
                 }
@@ -180,7 +180,7 @@ struct TodayView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("今日跑步，距离 \\(nativeKilometers(data.today.distanceKm))，时长 \\(nativeDuration(data.today.durationSeconds))，配速 \\(nativePace(data.today.paceSecondsPerKm))")
+        .accessibilityLabel("今日跑步，距离 \(nativeKilometers(data.today.distanceKm))，时长 \(nativeDuration(data.today.durationSeconds))，配速 \(nativePace(data.today.paceSecondsPerKm))/km")
     }
 
     private func heroMetric(_ title: String, _ value: String) -> some View {
@@ -509,7 +509,7 @@ struct TodayView: View {
                             .font(.caption.weight(.heavy))
                             .foregroundStyle(PixelColor.ink)
                         HStack(spacing: 8) {
-                            metricCaption("目标配速", value: nativePace(target.targetPaceSecondsPerKm))
+                            metricCaption("目标配速", value: "\(nativePace(target.targetPaceSecondsPerKm))/km")
                             metricCaption("体型分", value: nativeNumber(data.race.shapeScore))
                             metricCaption("减量", value: data.race.taper ? "是" : "否")
                         }
@@ -923,7 +923,7 @@ struct BodyMetricsView: View {
         case (nil, nil): return "暂不可用"
         case let (lower?, nil): return "\(nativePace(lower))/km 或更慢"
         case let (nil, upper?): return "不快于 \(nativePace(upper))/km"
-        case let (lower?, upper?): return "\(nativePace(lower))–\(nativePace(upper))/km"
+        case let (lower?, upper?): return "\(nativePace(lower))/km–\(nativePace(upper))/km"
         }
     }
 
@@ -1134,7 +1134,7 @@ struct WorkoutRow: View {
                 HStack(spacing: 7) {
                     Text(nativeKilometers(workout.distanceKm))
                     Text(nativeDuration(workout.durationSeconds))
-                    Text(nativePace(workout.averagePaceSecondsPerKm))
+                    Text("\(nativePace(workout.averagePaceSecondsPerKm))/km")
                 }
                 .font(.caption2.weight(.bold).monospacedDigit())
                 .foregroundStyle(PixelColor.muted)
@@ -1163,7 +1163,7 @@ struct WorkoutRow: View {
                 .frame(height: 1)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(nativeSessionName(workout.sessionType))，\(nativeDate(workout.startedAt))，\(nativeKilometers(workout.distanceKm))，\(nativePace(workout.averagePaceSecondsPerKm))")
+        .accessibilityLabel("\(nativeSessionName(workout.sessionType))，\(nativeDate(workout.startedAt))，\(nativeKilometers(workout.distanceKm))，\(nativePace(workout.averagePaceSecondsPerKm))/km")
     }
 }
 
@@ -1250,7 +1250,7 @@ struct WorkoutDetailView: View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
             PixelMetricTile(title: "距离", value: nativeKilometers(workout.distanceKm), accent: PixelColor.coral)
             PixelMetricTile(title: "时长", value: nativeDuration(workout.durationSeconds), accent: PixelColor.green)
-            PixelMetricTile(title: "配速", value: nativePace(workout.averagePaceSecondsPerKm), accent: PixelColor.cyan)
+            PixelMetricTile(title: "配速", value: "\(nativePace(workout.averagePaceSecondsPerKm))/km", accent: PixelColor.cyan)
             PixelMetricTile(title: "平均心率", value: workout.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
             PixelMetricTile(title: "步频", value: workout.averageCadenceSpm.map { "\(nativeNumber($0, digits: 0)) spm" } ?? "--")
             PixelMetricTile(title: "功率", value: workout.averagePowerWatts.map { "\(nativeNumber($0, digits: 0)) W" } ?? "--")
@@ -1354,7 +1354,7 @@ struct WorkoutDetailView: View {
                                 .font(.subheadline.weight(.heavy))
                                 .frame(width: 52, alignment: .leading)
                             Spacer()
-                            Text(nativePace(split.averagePaceSecondsPerKm))
+                            Text("\(nativePace(split.averagePaceSecondsPerKm))/km")
                             Text(split.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
                         }
                         .font(.caption.weight(.bold).monospacedDigit())
@@ -1620,7 +1620,7 @@ struct PlanView: View {
                         if let race = goals.raceTarget {
                             Text("\(race.distance) · \(nativeDay(race.date))")
                                 .font(.headline.weight(.heavy))
-                            Text(race.targetPaceSecondsPerKm.map { "目标配速：\(nativePace($0))" } ?? "未设置目标配速")
+                            Text(race.targetPaceSecondsPerKm.map { "目标配速：\(nativePace($0))/km" } ?? "未设置目标配速")
                                 .font(.footnote)
                                 .foregroundStyle(PixelColor.muted)
                         } else {
@@ -1805,7 +1805,7 @@ struct AnalysisView: View {
                         PixelSectionHeader(title: "统计摘要")
                         HStack(spacing: 8) {
                             PixelMetricTile(title: "总时长", value: nativeDuration(data.totals.durationSeconds), accent: PixelColor.green)
-                            PixelMetricTile(title: "平均配速", value: nativePace(data.totals.averagePaceSecondsPerKm), accent: PixelColor.cyan)
+                            PixelMetricTile(title: "平均配速", value: "\(nativePace(data.totals.averagePaceSecondsPerKm))/km", accent: PixelColor.cyan)
                             PixelMetricTile(title: "月数", value: "\(data.months.count)", accent: PixelColor.yellow)
                         }
                     }
@@ -1886,8 +1886,8 @@ struct AnalysisView: View {
         PixelPanel(tint: PixelColor.yellow) {
             VStack(alignment: .leading, spacing: 3) {
                 PixelSectionHeader(title: "个人纪录", trailing: "PB", trailingColor: PixelColor.yellow)
-                recordRow("最快 5 km", value: records.fastest5k.map { "\(nativePace($0.paceSecondsPerKm)) · \(nativeDate($0.startedAt))" })
-                recordRow("最快 10 km", value: records.fastest10k.map { "\(nativePace($0.paceSecondsPerKm)) · \(nativeDate($0.startedAt))" })
+                recordRow("最快 5 km", value: records.fastest5k.map { "\(nativePace($0.paceSecondsPerKm))/km · \(nativeDate($0.startedAt))" })
+                recordRow("最快 10 km", value: records.fastest10k.map { "\(nativePace($0.paceSecondsPerKm))/km · \(nativeDate($0.startedAt))" })
                 recordRow("最长距离", value: records.longestDistance.map { "\(nativeKilometers($0.distanceKm)) · \(nativeDate($0.startedAt))" })
                 recordRow("最大月跑量", value: records.biggestMonth.map { "\(nativeKilometers($0.distanceKm)) · \($0.month)" })
             }
