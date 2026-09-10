@@ -174,15 +174,13 @@ test("prediction training reports a missing active ability baseline as a conflic
   }
   store.close();
 
-  const port = 20_000 + Math.floor(Math.random() * 10_000);
-  const url = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
     env: {
       ...process.env,
       RAI_RUNTIME_ROOT: runtimeRoot,
       RAI_DATABASE: databasePath,
-      RAI_API_PORT: String(port),
+      RAI_API_PORT: "0",
       RAI_LOG_LEVEL: "silent"
     },
     windowsHide: true,
@@ -192,6 +190,7 @@ test("prediction training reports a missing active ability baseline as a conflic
   child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
     const response = await fetch(`${url}/v1/prediction-models/train`, {
       method: "POST",
@@ -243,15 +242,13 @@ test("runtime status includes persisted prediction work and restore recovers rec
   current.prepare("UPDATE prediction_model_runs SET status = 'failed' WHERE id = ?").run(restoredPredictionId);
   current.close();
 
-  const port = 20_000 + Math.floor(Math.random() * 10_000);
-  const url = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
     env: {
       ...process.env,
       RAI_RUNTIME_ROOT: runtimeRoot,
       RAI_DATABASE: databasePath,
-      RAI_API_PORT: String(port),
+      RAI_API_PORT: "0",
       RAI_LOG_LEVEL: "silent"
     },
     windowsHide: true,
@@ -262,6 +259,7 @@ test("runtime status includes persisted prediction work and restore recovers rec
   child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
 
   try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
 
     const predictionDatabase = new DatabaseSync(databasePath);
@@ -360,15 +358,13 @@ test("HTTP restore remains available when the active database is corrupt at star
   const corruptBytes = Buffer.from("not a sqlite database");
   writeFileSync(databasePath, corruptBytes);
 
-  const port = 20_000 + Math.floor(Math.random() * 10_000);
-  const url = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
     env: {
       ...process.env,
       RAI_RUNTIME_ROOT: runtimeRoot,
       RAI_DATABASE: databasePath,
-      RAI_API_PORT: String(port),
+      RAI_API_PORT: "0",
       RAI_LOG_LEVEL: "silent"
     },
     windowsHide: true,
@@ -379,6 +375,7 @@ test("HTTP restore remains available when the active database is corrupt at star
   child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
 
   try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
     const degradedHealth = await fetch(`${url}/v1/health`).then((result) => result.json()) as {
       status: string;
@@ -511,15 +508,13 @@ test("restore request fails and keeps the current database when job recovery fai
   current.prepare("UPDATE prediction_model_runs SET status = 'failed' WHERE id = ?").run(predictionId);
   current.close();
 
-  const port = 20_000 + Math.floor(Math.random() * 10_000);
-  const url = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
     env: {
       ...process.env,
       RAI_RUNTIME_ROOT: runtimeRoot,
       RAI_DATABASE: databasePath,
-      RAI_API_PORT: String(port),
+      RAI_API_PORT: "0",
       RAI_LOG_LEVEL: "silent"
     },
     windowsHide: true,
@@ -530,6 +525,7 @@ test("restore request fails and keeps the current database when job recovery fai
   child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
 
   try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
     const idleDeadline = Date.now() + 5_000;
     while (Date.now() < idleDeadline) {
@@ -567,15 +563,13 @@ test("database-backed writes cannot recreate a deleted database", async () => {
   const store = await RaiDatabase.open(databasePath);
   store.close();
 
-  const port = 20_000 + Math.floor(Math.random() * 10_000);
-  const url = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
     env: {
       ...process.env,
       RAI_RUNTIME_ROOT: runtimeRoot,
       RAI_DATABASE: databasePath,
-      RAI_API_PORT: String(port),
+      RAI_API_PORT: "0",
       RAI_LOG_LEVEL: "silent"
     },
     windowsHide: true,
@@ -586,6 +580,7 @@ test("database-backed writes cannot recreate a deleted database", async () => {
   child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
 
   try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
     const idleDeadline = Date.now() + 5_000;
     while (Date.now() < idleDeadline) {
