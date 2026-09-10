@@ -22,9 +22,5 @@
 	<string>RAI 需要连接你配置的 RAI 服务以同步和显示分析结果。</string>
 	<key>UILaunchScreen</key>
 	<dict/>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>app.rai.running.health-sync</string>
-	</array>
 </dict>
 </plist>

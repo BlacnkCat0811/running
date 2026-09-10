@@ -134,9 +134,11 @@ export function assembleMobileCoach(args: {
   const recoveryEvidenceStatus: CoachInput["recoveryEvidenceStatus"] =
     currentNight == null
       ? "unknown"
-      : sleep.lastNight != null && hrv.current != null && rhr.current != null
-        ? "valid"
-        : "partial";
+      : currentNight.wakeDate !== today
+        ? "stale"
+        : sleep.lastNight != null && hrv.current != null && rhr.current != null
+          ? "valid"
+          : "partial";
   const physState = classifyPhysState({ sleepMinutes: sleep.lastNight, sleepBaselineMinutes: sleep.baseline, hrvSdnnMs: hrv.current, hrvBaselineMs: hrv.baseline, rhrBpm: rhr.current, rhrBaselineBpm: rhr.baseline, nightsBelowSleepBaseline: sleep.nightsBelow });
   const qualityDays = consecutiveQualityDays(weekSessions.recentByDate, args.latestDataDate ?? today);
   const asOf = `${(args.latestDataDate ?? today)}T16:00:00.000Z`;

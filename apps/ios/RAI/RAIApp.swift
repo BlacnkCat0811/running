@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(iOS)
-import BackgroundTasks
-#endif
 
 @MainActor
 final class AppModel {
@@ -21,37 +18,7 @@ final class AppModel {
         #if os(iOS)
         self.native = NativeAppModel(session: session)
         #endif
-        #if os(iOS)
-        BGTaskScheduler.shared.register(forTaskWithIdentifier: "app.rai.running.health-sync", using: nil) { task in
-            guard let processingTask = task as? BGProcessingTask else {
-                task.setTaskCompleted(success: false)
-                return
-            }
-            processingTask.expirationHandler = {
-                self.healthSync.cancelSync()
-            }
-            Task { @MainActor in
-                await self.healthSync.syncIfNeeded(
-                    to: self.session.serverURL,
-                    apiToken: self.session.apiToken,
-                    force: true
-                )
-                processingTask.setTaskCompleted(success: !self.healthSync.isBusy)
-                self.scheduleHealthSync()
-            }
-        }
-        #endif
     }
-
-    #if os(iOS)
-    func scheduleHealthSync() {
-        let request = BGProcessingTaskRequest(identifier: "app.rai.running.health-sync")
-        request.requiresNetworkConnectivity = true
-        request.requiresExternalPower = false
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
-        try? BGTaskScheduler.shared.submit(request)
-    }
-    #endif
 }
 
 @main
@@ -79,7 +46,6 @@ struct RAIApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         model.discovery.start()
-                        model.scheduleHealthSync()
                         Task {
                             await model.healthSync.syncIfNeeded(
                                 to: model.session.serverURL,

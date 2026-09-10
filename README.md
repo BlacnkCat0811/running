@@ -210,7 +210,7 @@ packages/
   api-contracts/             Web、API 与移动端共享的 HTTP DTO / OpenAPI 契约
   contracts/                 跨平台 canonical 数据契约（canonical-health-v2 等版本常量）
   health-export-parser/      Apple 导出 XML/GPX 解析、canonical、睡眠/HRV canonicalization
-  scoring/                   无平台依赖的纯 TypeScript 评分核心（rai-model-config-v3）
+  scoring/                   无平台依赖的纯 TypeScript 评分核心（rai-model-config-v4）
   physiology/                VO₂max、VDOT、乳酸阈值与公式比赛预测
   prediction-inference/      CatBoost ONNX artifact 校验与 Node 生产推理
   features/                  纯 Workout Feature Vector 提取（feature-config-v8）

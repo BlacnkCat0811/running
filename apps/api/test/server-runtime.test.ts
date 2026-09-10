@@ -1037,3 +1037,52 @@ test("training-zone HTTP errors expose only typed client failures", async () => 
     await removeRuntimeRoot(runtimeRoot);
   }
 });
+
+test("mobile lock rejects historical recovery even with the current recommendation revision", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-stale-recovery-"));
+  const databasePath = join(runtimeRoot, "var", "rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  const store = await RaiDatabase.open(databasePath);
+  store.database.prepare(`INSERT INTO canonical_nights
+    (id, wake_date, timezone_identifier, kind, source_name, source_category, source_rank,
+     has_stages, sleep_onset_at, wake_at, asleep_union_minutes, stage_minutes_json, segment_count, provenance_json)
+    VALUES ('old-night', '2025-01-22', 'Asia/Shanghai', 'main', 'Watch', 'apple_watch', 1,
+      0, '2025-01-21T15:00:00Z', '2025-01-21T23:00:00Z', 480, '{}', 1, '{}')`).run();
+  store.close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot,
+    env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent" },
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const port = await waitForBoundPort(child, () => output);
+    const url = `http://127.0.0.1:${port}`;
+    await waitForApi(child, url, () => output);
+    const todayResponse = await fetch(`${url}/v1/mobile/today`);
+    assert.equal(todayResponse.status, 200);
+    const today = await todayResponse.json() as { verdict: { stale: boolean }; recommendationRevision: string };
+    assert.equal(today.verdict.stale, true);
+    for (const action of ["lock", "relock"]) {
+      const response = await fetch(`${url}/v1/mobile/lock`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, expectedRevision: today.recommendationRevision })
+      });
+      assert.equal(response.status, 409);
+      assert.deepEqual(await response.json(), {
+        code: "mobile_recommendation_stale",
+        message: "恢复数据不是今天的，请先同步健康后再确认安排"
+      });
+    }
+    const goals = await (await fetch(`${url}/v1/mobile/goals`)).json() as { lockedSession: unknown };
+    assert.equal(goals.lockedSession, null);
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});

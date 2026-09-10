@@ -9,3 +9,6 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/NativeAppModel.swift > 
 xcrun swiftc -parse-as-library apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift -o "$tmp/model-tests"
 "$tmp/model-tests"
+xcrun swiftc -parse-as-library apps/ios/RAI/Keychain.swift \
+  apps/ios/tests/KeychainRegression.swift -o "$tmp/keychain-tests"
+"$tmp/keychain-tests"

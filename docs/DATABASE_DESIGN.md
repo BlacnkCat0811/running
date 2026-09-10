@@ -3,7 +3,7 @@
 > Schema 版本：v18（`packages/storage-sqlite/src/database.ts` migrations v1–v18；v11 为历史保留占位，无 SQL）
 > Canonical contract：`canonical-health-v2`（`packages/contracts`）
 > Feature schema：`workout-feature-v3`；Feature 配置：`feature-config-v8`（`packages/features`）
-> 评分模型配置：`rai-model-config-v3`（`packages/scoring`）
+> 评分模型配置：`rai-model-config-v4`（`packages/scoring`）
 > 训练负荷配置：`training-load-config-v4`；训练分区配置：`training-zone-config-v3`
 > 运行时数据库：本地 SQLite（`var/rai.sqlite`，可由 `RAI_DATABASE` 覆盖）
 > 说明：以下列出主要表与视图；完整 SQL 与迁移内容以 `database.ts` 为唯一事实源。

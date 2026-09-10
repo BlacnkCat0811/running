@@ -11,6 +11,9 @@ enum Keychain {
     }
 
     static func loadToken(for server: String?) -> String {
+        // Retire legacy plaintext credentials, including on Keychain failures.
+        // Existing plaintext-only installations must enter their token again.
+        UserDefaults.standard.removeObject(forKey: "rai.apiToken")
         let scopedAccount = account(for: server)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -22,7 +25,7 @@ enum Keychain {
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess, let data = item as? Data, let text = String(data: data, encoding: .utf8) else {
-            return server == nil ? UserDefaults.standard.string(forKey: "rai.apiToken") ?? "" : ""
+            return ""
         }
         return text
     }

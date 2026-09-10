@@ -66,8 +66,8 @@ export interface CoachLatestWorkout {
 export interface CoachInput {
   today: string;
   latestDataDate: string | null;
-  recoveryEvidenceStatus?: "unknown" | "partial" | "valid" | "stale";
-  recoveryEvidenceDate?: string | null;
+  recoveryEvidenceStatus: "unknown" | "partial" | "valid" | "stale";
+  recoveryEvidenceDate: string | null;
   calibration: MobileCalibrationCard["status"];
   eligibleSessions: number;
   trueAbility: number | null;
@@ -174,7 +174,9 @@ const trigger = (
 
 export function decideVerdict(input: CoachInput): MobileVerdict {
   const triggers: MobileTrigger[] = [];
-  // Judge the available evidence, independently of the workout/import date.
+  // Recovery must be dated today to authorize a new session. A recent run or
+  // import cannot make historical (or undated) recovery evidence current.
+  const stale = input.recoveryEvidenceStatus === "stale" || input.recoveryEvidenceDate !== input.today;
   const recoveryUnavailable = input.lastNightSleepMinutes == null ||
     input.morningHrvMs == null || input.restingHeartRateBpm == null ||
     input.sleepBaselineMinutes == null || input.sleepBaselineMinutes <= 0 ||
@@ -272,6 +274,10 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     title = "只宜有氧";
     reason = "睡眠、HRV、静息心率或个人基线不完整，先轻松跑或休息。";
     triggers.push(trigger("recovery_evidence_missing", null, null, reason));
+  } else if (stale) {
+    tone = "yellow";
+    title = "先同步健康";
+    reason = "恢复数据不是今天的，请先同步健康后再确认安排。";
   } else if (
     (input.trainingStatus === "effective_stimulus" || input.trainingStatus === "maintaining") &&
     (input.daysSinceLastQuality ?? 99) >= 2 &&
@@ -288,8 +294,11 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     reason = "今天按轻松跑安排，把有氧底铺好。";
   }
 
+  if (stale) {
+    triggers.push(trigger("recovery_evidence_stale", null, null, "缺少当天恢复数据，请先同步健康后再确认安排。"));
+  }
   const reasonCodes = triggers.map((item) => item.code);
-  return { tone, title, reason, triggers, stale: false, reasonCodes };
+  return { tone, title, reason, triggers, stale, reasonCodes };
 }
 
 export function decideNextSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {

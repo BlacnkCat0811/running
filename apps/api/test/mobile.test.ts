@@ -97,6 +97,7 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     assert.ok(Array.isArray(today.injuryFlags));
     assert.ok(["need_sync", "morning_open", "locked", "post_run", "rest_done"].includes(today.phase));
     assert.equal(typeof today.lock.present, "boolean");
+    assert.equal(today.verdict.stale, true, "undated recovery cannot authorize locking");
 
     // With a null goal there is no progress fraction either.
     const noGoal = read.mobileToday(null);
@@ -424,12 +425,19 @@ test("mobile recovery uses the latest evidence date and its historical baseline"
     insert.run("latest-night", "2025-01-22", "2025-01-21T15:00:00Z", "2025-01-21T20:00:00Z", 300);
     const read = new RaiReadStore(databasePath);
     try {
-      const recovery = read.mobileToday(30).recovery;
+      const snapshot = read.mobileToday(30);
+      assert.equal(snapshot.verdict.stale, true);
+      const recovery = snapshot.recovery;
       assert.equal(recovery.lastNightSleepMinutes, 300);
       assert.equal(recovery.sleepBaselineMinutes, 480);
       assert.equal(recovery.state, "reduced");
       assert.match(recovery.note, /2025-01-22/);
       assert.doesNotMatch(recovery.note, /昨夜|今晨/);
+      const date = snapshot.today.localDate;
+      insert.run("today-night", date, `${date}T00:00:00+08:00`, `${date}T08:00:00+08:00`, 480);
+      const current = read.mobileToday(30);
+      assert.equal(current.latestDataDate, "2025-01-22");
+      assert.equal(current.verdict.stale, false, "current recovery is independent of the latest run date");
     } finally { read.close(); }
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });

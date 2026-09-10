@@ -17,6 +17,8 @@ import {
 const base = (): CoachInput => ({
   today: "2026-09-03",
   latestDataDate: "2026-09-03",
+  recoveryEvidenceDate: "2026-09-03",
+  recoveryEvidenceStatus: "valid",
   calibration: "completed",
   eligibleSessions: 20,
   trueAbility: 44,
@@ -87,15 +89,25 @@ test("verdict is green when load and recovery allow a quality session", () => {
   assert.ok(next.kind === "tempo" || next.kind === "interval");
 });
 
-test("historical evidence is judged by load and recovery, without a stale verdict", () => {
+test("historical recovery blocks quality and locking without hiding risk warnings", () => {
   const input = { ...base(), latestDataDate: "2026-08-01", recoveryEvidenceDate: "2026-08-01", recoveryEvidenceStatus: "stale" as const };
   const verdict = decideVerdict(input);
-  assert.equal(verdict.tone, "green");
-  assert.equal(verdict.stale, false);
-  assert.doesNotMatch(verdict.reason, /过期|不是今天/);
-  assert.ok(verdict.reasonCodes?.includes("quality_window"));
+  assert.equal(verdict.tone, "yellow");
+  assert.equal(verdict.stale, true);
+  assert.ok(verdict.reasonCodes?.includes("recovery_evidence_stale"));
+  assert.ok(!verdict.reasonCodes?.includes("quality_window"));
+  assert.ok(!["tempo", "interval"].includes(decideNextSession(input, verdict).kind));
   assert.equal(decideVerdict({ ...input, loadRatio: 1.5 }).tone, "red");
   assert.equal(decideVerdict({ ...input, nightsBelowSleepBaseline: 3 }).tone, "red");
+});
+
+test("recovery freshness follows its date, independently of training freshness", () => {
+  assert.equal(decideVerdict({ ...base(), latestDataDate: "2026-08-01" }).stale, false);
+  for (const recoveryEvidenceDate of ["2026-09-02", "2026-09-04", null]) {
+    assert.equal(decideVerdict({ ...base(), recoveryEvidenceDate }).stale, true);
+  }
+  assert.equal(decideVerdict({ ...base(), recoveryEvidenceStatus: "stale" }).stale, true);
+  assert.equal(decideVerdict({ ...base(), recoveryEvidenceStatus: "partial", morningHrvMs: null }).stale, false);
 });
 
 test("missing recovery cannot hide high load or consecutive quality warnings", () => {
@@ -115,6 +127,7 @@ test("missing recovery facts stay conservative", () => {
     recoveryEvidenceDate: null
   });
   assert.equal(verdict.tone, "yellow");
+  assert.equal(verdict.stale, true);
   assert.ok(verdict.reasonCodes?.includes("recovery_evidence_missing"));
 });
 
