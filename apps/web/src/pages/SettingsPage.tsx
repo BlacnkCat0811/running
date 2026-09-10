@@ -10,7 +10,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ApiError, api } from "../api.js";
+import { ApiError, api, readApiToken, writeApiToken } from "../api.js";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { date } from "../format.js";
 import { useRemote } from "../hooks.js";
@@ -112,6 +112,9 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [tokenDraft, setTokenDraft] = useState(() => readApiToken());
+  const [tokenSaved, setTokenSaved] = useState(() => readApiToken().length > 0);
+  const [revealToken, setRevealToken] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -160,6 +163,24 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     if (!success || busy || confirmOpen || restoreTarget || backupDeleteTarget) return;
     successRef.current?.focus();
   }, [success, busy, confirmOpen, restoreTarget, backupDeleteTarget]);
+
+  const persistApiToken = () => {
+    writeApiToken(tokenDraft);
+    const stored = readApiToken();
+    setTokenSaved(stored.length > 0);
+    setError(null);
+    setSuccess(stored ? "API 令牌已保存，正在重新读取数据。" : "API 令牌已清除。");
+    window.dispatchEvent(new Event("rai:data-updated"));
+  };
+
+  const clearApiToken = () => {
+    setTokenDraft("");
+    writeApiToken("");
+    setTokenSaved(false);
+    setError(null);
+    setSuccess("API 令牌已清除。");
+    window.dispatchEvent(new Event("rai:data-updated"));
+  };
 
   const createBackup = async () => {
     setBusy(true);
@@ -357,6 +378,53 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           </div>
           <span>Asia/Shanghai</span>
         </article>
+      </section>
+
+      <section className="panel api-token-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>API 访问令牌</h2>
+            <p>浏览器直接访问云端 API 需要令牌；iOS App 由壳自动注入，无需在此配置。</p>
+          </div>
+          <code>{tokenSaved ? "已配置" : "未配置"}</code>
+        </div>
+        <form
+          className="api-token-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            persistApiToken();
+          }}
+        >
+          <label className="field">
+            <span>Token</span>
+            <input
+              type={revealToken ? "text" : "password"}
+              value={tokenDraft}
+              onChange={(event) => setTokenDraft(event.target.value)}
+              placeholder="粘贴服务器 /etc/rai/rai.env 中的 RAI_API_TOKEN"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <small>仅保存在当前浏览器的 localStorage，不写入构建产物，也不会上传到第三方。</small>
+          </label>
+          <div className="api-token-actions">
+            <button className="button primary" type="submit" disabled={!tokenDraft.trim()}>
+              保存并重新读取
+            </button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => setRevealToken((value) => !value)}
+            >
+              {revealToken ? "隐藏" : "显示"}
+            </button>
+            {tokenSaved ? (
+              <button className="button secondary" type="button" onClick={clearApiToken}>
+                清除
+              </button>
+            ) : null}
+          </div>
+        </form>
       </section>
 
       <section className="panel database-summary">

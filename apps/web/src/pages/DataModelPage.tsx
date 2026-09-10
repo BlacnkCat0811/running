@@ -13,7 +13,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { ApiError, api } from "../api.js";
+import { ApiError, api, readApiToken } from "../api.js";
 import {
   notifyDatabaseStateChanged,
   notifyDataUpdated,
@@ -142,6 +142,8 @@ export function uploadExport(
     };
     const abort = () => request.abort();
       request.open("POST", "/v1/imports/uploads");
+    const token = readApiToken();
+    if (token) request.setRequestHeader("authorization", `Bearer ${token}`);
     request.responseType = "json";
     request.timeout = timeoutMs;
     request.upload.onprogress = (event) => {

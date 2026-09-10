@@ -795,6 +795,13 @@ code, .numeric, strong { font-family: "Cascadia Mono", "SFMono-Regular", Consola
 .prediction-model-active-note b { display: block; }
 .prediction-disclaimer { margin-bottom: 0; }
 
+/* API 访问令牌：浏览器直连云端 API 时需自行提供 Bearer 令牌。 */
+.api-token-panel .panel-heading { align-items: center; }
+.api-token-panel .panel-heading > code { color: var(--muted); font-size: 11px; }
+.api-token-form { display: grid; gap: 14px; padding: 18px 20px 20px; }
+.api-token-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.error-block a.button { text-decoration: none; }
+
 /* Desktop pixel theme. Narrow-screen compatibility remains frozen below 1024px. */
 @media (min-width: 1024px) {
   :root {
