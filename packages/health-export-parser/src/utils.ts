@@ -139,9 +139,23 @@ export function classifySource(
   return "other";
 }
 
-/** Normalize export-relative paths; lowercase so UNIQUE(relative_path) matches GPX lookups. */
+/**
+ * Normalize an export-relative path for **filesystem** access: separators only,
+ * case preserved. Archive entries carry case-sensitive names (an iOS workout
+ * route is named after the uppercased `HKWorkout.uuidString`), so the path used
+ * to touch the disk must never be lowercased — that only resolves by accident on
+ * a case-insensitive host.
+ */
+export function normalizeRelativePathForFileSystem(value: string): string {
+  return value.replaceAll("\\", "/").replace(/^\/+/, "");
+}
+
+/**
+ * Normalize export-relative paths for **identity** lookups; lowercase so
+ * `UNIQUE(relative_path)` and the GPX target map match case-insensitively.
+ */
 export function normalizeRelativePath(value: string): string {
-  return value.replaceAll("\\", "/").replace(/^\/+/, "").toLowerCase();
+  return normalizeRelativePathForFileSystem(value).toLowerCase();
 }
 
 export function distanceToKilometers(

@@ -171,6 +171,19 @@ canonical rank 依据：
 
 文件路径只能在用户指定的导出根目录内解析，拒绝 `..` 路径穿越。精确坐标只写入本地数据库，不写入审计报告或普通日志。
 
+### 7.1 路径身份与文件系统解析（两者不可混用）
+
+导出包内的相对路径有两个用途，归一化规则不同，混用会静默丢数据：
+
+| 用途 | 函数 | 规则 |
+|---|---|---|
+| 落库与匹配（`workout_routes.relative_path`、`route_file_fingerprints.relative_path`） | `normalizeRelativePath` | 分隔符归一 + 去前导 `/` + **转小写** |
+| 访问磁盘（`gpx-parser.ts` 的 `safelyResolve`） | `normalizeRelativePathForFileSystem` | 分隔符归一 + 去前导 `/`，**保留大小写** |
+
+归档条目名是大小写敏感的：iOS 侧路线文件以 `HKWorkout.uuidString`（大写）命名，而落库的路径身份是小写。用身份键去拼磁盘路径，在大小写不敏感的宿主机（macOS 开发机）上会"碰巧成功"，在大小写敏感的宿主机（Linux 生产 API）上必然 `existsSync = false`。
+
+增量归档走 `preserveAbsent`：归档未包含的路线允许缺席。但**归档自己列出、却解析不到的文件属于异常**，必须记 `UNRESOLVED_GPX_PATH` 警告并计入 `summary_json.gpx.unresolvedRouteCount`，不得静默 `continue`——否则 `workout_routes` 会永久停在 `pending`，该次跑步既无海拔也无地图（两者同源于 `route_points`）。
+
 ## 8. 独立 Record 与 Workout 的关联
 
 导出 XML 不提供与实时 HealthKit 查询相同的对象关联能力。V1 导出适配器只能使用：

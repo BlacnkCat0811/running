@@ -8,6 +8,7 @@ import { SaxesParser, type SaxesTagPlain } from "saxes";
 import { RaiDatabase } from "./database.js";
 import {
   normalizeRelativePath,
+  normalizeRelativePathForFileSystem,
   parseFiniteNumber,
   stableId
 } from "./utils.js";
@@ -29,6 +30,9 @@ export interface GpxImportResult {
   missingRouteCount: number;
   pointCount: number;
   skippedRouteCount?: number;
+  /** Files listed by the archive that could not be resolved on disk. */
+  unresolvedRouteCount?: number;
+  unresolvedRoutePaths?: string[];
   changedRouteIds?: string[];
 }
 
@@ -46,7 +50,9 @@ function localName(name: string): string {
 
 function safelyResolve(root: string, relativePath: string): string | null {
   const rootPath = resolve(root);
-  const candidate = resolve(rootPath, normalizeRelativePath(relativePath));
+  // Case must survive here: archive names are case-sensitive and this path is
+  // handed to the filesystem, not to a case-insensitive identity map.
+  const candidate = resolve(rootPath, normalizeRelativePathForFileSystem(relativePath));
   const relativeCandidate = relative(rootPath, candidate);
   if (relativeCandidate.startsWith("..") || resolve(candidate) === rootPath) return null;
   return candidate;
@@ -208,6 +214,7 @@ export async function importGpxRoutes(
   let missingRouteCount = 0;
   let pointCount = 0;
   let skippedRouteCount = 0;
+  const unresolvedRoutePaths: string[] = [];
   const changedRouteIds: string[] = [];
   const bundleHash = createHash("sha256");
 
@@ -224,7 +231,14 @@ export async function importGpxRoutes(
 
     const fullPath = safelyResolve(exportRoot, relativePath);
     if (!fullPath || !existsSync(fullPath)) {
-      if (preserveAbsent) continue;
+      if (preserveAbsent) {
+        // `absent` means "not in this partial archive". A file that the archive
+        // itself listed but that cannot be resolved on disk is NOT that case: it
+        // is an anomaly (path case, encoding, escaping). Never swallow it —
+        // record it so the route is not silently stuck at `pending` forever.
+        unresolvedRoutePaths.push(relativePath);
+        continue;
+      }
       store.markRouteStatus(routeId, "missing");
       changedRouteIds.push(routeId);
       missingRouteCount += 1;
@@ -322,8 +336,18 @@ export async function importGpxRoutes(
     }
   }
 
+  if (unresolvedRoutePaths.length > 0) {
+    store.insertIssue({
+      severity: "warning",
+      code: "UNRESOLVED_GPX_PATH",
+      objectId: null,
+      message: `${unresolvedRoutePaths.length} GPX file(s) were listed in the archive but could not be resolved on disk; the routes stay pending. First: ${unresolvedRoutePaths[0]}`
+    });
+  }
+
   store.setManifest("gpx_file_count", String(allPaths.length));
   store.setManifest("gpx_point_count", String(pointCount));
+  store.setManifest("gpx_unresolved_count", String(unresolvedRoutePaths.length));
   // Subset archives must hash remaining fingerprints, not only files in this ZIP.
   store.setManifest(
     "source_gpx_bundle_sha256",
@@ -337,6 +361,9 @@ export async function importGpxRoutes(
     missingRouteCount,
     pointCount,
     skippedRouteCount,
+    unresolvedRouteCount: unresolvedRoutePaths.length,
+    // Bounded sample; `unresolvedRouteCount` is the authoritative total.
+    unresolvedRoutePaths: unresolvedRoutePaths.slice(0, 10),
     changedRouteIds
   };
 }

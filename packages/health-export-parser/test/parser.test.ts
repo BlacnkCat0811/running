@@ -208,6 +208,12 @@ test("imports a GPX file whose on-disk name contains uppercase characters", asyn
     const result = await importGpxRoutes(root, store);
     assert.equal(result.importedRouteCount, 1);
     assert.equal(result.missingRouteCount, 0);
+    const route = store.database
+      .prepare("SELECT workout_id, point_count, file_status FROM workout_routes")
+      .get() as unknown as { workout_id: string | null; point_count: number; file_status: string };
+    assert.ok(route.workout_id);
+    assert.equal(route.file_status, "imported");
+    assert.equal(route.point_count, 1);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

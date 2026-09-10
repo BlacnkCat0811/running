@@ -592,7 +592,10 @@ nonisolated enum HealthKitExport {
     }
 
     private static func routeFileWorkoutId(_ workout: HKWorkout) -> String {
-        workout.uuid.uuidString
+        // Lowercased on purpose. The import pipeline treats route paths as
+        // case-insensitive identities, and archive entries must still resolve on
+        // case-sensitive hosts (the Linux API). `uuidString` is uppercased.
+        workout.uuid.uuidString.lowercased()
     }
 
     private static func routeLocations(_ route: HKWorkoutRoute, store: HKHealthStore) async throws -> [CLLocation] {
