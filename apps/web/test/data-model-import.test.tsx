@@ -14,6 +14,7 @@ vi.mock("../src/api.js", () => ({
     }
   },
   api: apiMock,
+  readApiToken: () => "",
 }));
 vi.mock("../src/hooks.js", () => ({ useRemote: useRemoteMock }));
 
