@@ -63,6 +63,9 @@ code, .numeric, strong { font-family: "Cascadia Mono", "SFMono-Regular", Consola
 .nav-links a.active { background: #e3ebe5; color: #174b36; font-weight: 650; }
 .local-note { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 11px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .app-content { margin-left: 240px; min-height: 100dvh; }
+.site-footer { padding: 6px 24px 40px; color: var(--muted); font-size: 12px; text-align: center; }
+.site-footer a { color: var(--muted); border-bottom: 1px solid transparent; transition: color .15s ease, border-color .15s ease; }
+.site-footer a:hover, .site-footer a:focus-visible { color: var(--ink); border-bottom-color: currentColor; }
 .page { width: min(1440px, 100%); margin: 0 auto; padding: 42px 46px 72px; }
 .page-header { margin-bottom: 28px; }
 .page-header.split { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; }

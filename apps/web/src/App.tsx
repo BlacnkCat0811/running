@@ -13,6 +13,7 @@ import {
 import { LoadingBlock } from "./components/Feedback.js";
 import { GlobalTaskStatus } from "./components/GlobalTaskStatus.js";
 import { ErrorBlock } from "./components/Feedback.js";
+import { SiteFooter } from "./components/SiteFooter.js";
 import { useRemote } from "./hooks.js";
 import {
   ArrowRight,
@@ -324,6 +325,10 @@ export function App() {
           </div>
         ) : null}
         {content}
+        {/* 备案号挂在 .app-content 内部：该容器的 margin-left / 底部留白已按断点处理，
+            放在这里无需新增媒体查询，也不会影响 <1024px 的冻结响应式区域。
+            注意保持无条件渲染——API 不可用时首页渲染 ErrorBlock，备案号同样必须可见。 */}
+        <SiteFooter />
       </main>
     </div>
   );
