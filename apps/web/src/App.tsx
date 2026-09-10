@@ -228,17 +228,40 @@ export function App() {
     location.pathname === "/data" ||
     location.pathname === "/settings" ||
     location.pathname === "/more";
-  const content = health.loading ? (
-    <div className="page">
-      <LoadingBlock label="正在检查本地数据库" />
-    </div>
-  ) : !health.data ? (
+  const databaseUnavailable = (
     <div className="page">
       <ErrorBlock
         message={health.error ?? "无法连接本地 API"}
         onRetry={() => void health.reload()}
       />
     </div>
+  );
+  const content = health.loading ? (
+    <div className="page">
+      <LoadingBlock label="正在检查本地数据库" />
+    </div>
+  ) : !health.data ? (
+    canOpenWithoutDatabase ? (
+      // 云端部署下 /v1/health 本身就需要 API 令牌。未配置令牌时 App 拿不到 health，
+      // 但必须放行 /settings，否则用户没有入口去填令牌 —— 点了链接只会原地不动。
+      <Suspense
+        fallback={
+          <div className="page">
+            <LoadingBlock />
+          </div>
+        }
+      >
+        <Routes>
+          <Route
+            path="/settings"
+            element={<SettingsPage databaseReady={false} />}
+          />
+          <Route path="*" element={databaseUnavailable} />
+        </Routes>
+      </Suspense>
+    ) : (
+      databaseUnavailable
+    )
   ) : !health.data.databaseReady && !canOpenWithoutDatabase ? (
     <FirstRunPage />
   ) : (

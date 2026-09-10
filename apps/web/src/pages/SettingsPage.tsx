@@ -12,6 +12,7 @@ import { Link } from "react-router-dom";
 
 import { ApiError, api, readApiToken, writeApiToken } from "../api.js";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
+import { notifyDataUpdated, notifyDatabaseStateChanged } from "../events.js";
 import { date } from "../format.js";
 import { useRemote } from "../hooks.js";
 import {
@@ -170,7 +171,11 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     setTokenSaved(stored.length > 0);
     setError(null);
     setSuccess(stored ? "API 令牌已保存，正在重新读取数据。" : "API 令牌已清除。");
-    window.dispatchEvent(new Event("rai:data-updated"));
+    // 两个事件缺一不可：data-updated 刷新各页数据，database-state-changed 让 App
+    // 重新检查 /v1/health —— 未配置令牌时 App 拿不到 health 会整体渲染错误块，
+    // 不重新检查的话填完令牌也出不去这个页面。
+    notifyDataUpdated();
+    notifyDatabaseStateChanged();
   };
 
   const clearApiToken = () => {
@@ -179,7 +184,8 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     setTokenSaved(false);
     setError(null);
     setSuccess("API 令牌已清除。");
-    window.dispatchEvent(new Event("rai:data-updated"));
+    notifyDataUpdated();
+    notifyDatabaseStateChanged();
   };
 
   const createBackup = async () => {
