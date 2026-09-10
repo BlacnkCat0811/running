@@ -1,0 +1,922 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project apps/ios/RAI.xcodeproj -scheme RAI -configuration Debug -sdk iphonesimulator -destination "generic/platform=iOS Simulator" -derivedDataPath /tmp/rai-tech-acceptance CODE_SIGNING_ALLOWED=NO build
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+    SDKROOT = iphonesimulator26.5
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'RAI' in project 'RAI' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/ta/running/apps/ios/RAI/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: 585dde74bdd727dbfec1e79dbefdd6ae
+Build description path: /tmp/rai-tech-acceptance/Build/Intermediates.noindex/XCBuildData/585dde74bdd727dbfec1e79dbefdd6ae.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+CreateBuildDirectory /tmp/rai-tech-acceptance/Build/Products
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    builtin-create-build-directory /tmp/rai-tech-acceptance/Build/Products
+
+CreateBuildDirectory /tmp/rai-tech-acceptance/Build/Intermediates.noindex
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    builtin-create-build-directory /tmp/rai-tech-acceptance/Build/Intermediates.noindex
+
+CreateBuildDirectory /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    builtin-create-build-directory /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator
+
+CreateBuildDirectory /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    builtin-create-build-directory /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules
+
+CreateBuildDirectory /tmp/rai-tech-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    builtin-create-build-directory /tmp/rai-tech-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator
+
+CreateBuildDirectory /tmp/rai-tech-acceptance/Build/Intermediates.noindex/ExplicitPrecompiledModules
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    builtin-create-build-directory /tmp/rai-tech-acceptance/Build/Intermediates.noindex/ExplicitPrecompiledModules
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI-a4d15807654ccd5bc00d2f3c319db38d-VFS-iphonesimulator/all-product-headers.yaml
+    cd /Users/ta/running/apps/ios/RAI.xcodeproj
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI-a4d15807654ccd5bc00d2f3c319db38d-VFS-iphonesimulator/all-product-headers.yaml
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.DependencyStaticMetadataFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.DependencyStaticMetadataFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.DependencyMetadataFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.DependencyMetadataFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.hmap (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.hmap
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-non-framework-target-headers.hmap (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-non-framework-target-headers.hmap
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibPath-normal-x86_64.txt (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibPath-normal-x86_64.txt
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibPath-normal-arm64.txt (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibPath-normal-arm64.txt
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibInstallName-normal-x86_64.txt (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibInstallName-normal-x86_64.txt
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibInstallName-normal-arm64.txt (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibInstallName-normal-arm64.txt
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_const_extract_protocols.json (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_const_extract_protocols.json
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftConstValuesFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.LinkFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.LinkFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-OutputFileMap.json (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-OutputFileMap.json
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_const_extract_protocols.json (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_const_extract_protocols.json
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftConstValuesFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.LinkFileList (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.LinkFileList
+
+WriteAuxiliaryFile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-OutputFileMap.json (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    write-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-OutputFileMap.json
+
+MkDir /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /bin/mkdir -p /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app
+
+MkDir /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/thinned (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /bin/mkdir -p /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/thinned
+
+Ld /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/__preview.dylib normal arm64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -O0 -L/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -install_name @rpath/RAI.debug.dylib -Xlinker -dead_strip -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_dependency_info.dat -o /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/__preview.dylib
+
+MkDir /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/unthinned (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /bin/mkdir -p /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/unthinned
+
+Ld /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/__preview.dylib normal x86_64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target x86_64-apple-ios17.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -O0 -L/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -install_name @rpath/RAI.debug.dylib -Xlinker -dead_strip -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_dependency_info.dat -o /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/__preview.dylib
+
+GenerateAssetSymbols /Users/ta/running/apps/ios/RAI/Assets.xcassets (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/usr/bin/actool /Users/ta/running/apps/ios/RAI/Assets.xcassets --compile /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app --output-format human-readable-text --notices --warnings --export-dependency-info /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_dependencies --output-partial-info-plist /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_generated_info.plist --app-icon AppIcon --accent-color AccentColor --compress-pngs --enable-on-demand-resources YES --development-region en --target-device iphone --minimum-deployment-target 17.0 --platform iphonesimulator --bundle-identifier app.rai.running.debug --generate-swift-asset-symbols /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.swift --generate-objc-asset-symbols /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.h --generate-asset-symbol-index /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols-Index.plist
+/* com.apple.actool.compilation-results */
+/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols-Index.plist
+/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.h
+/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.swift
+
+
+CompileAssetCatalogVariant thinned /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app /Users/ta/running/apps/ios/RAI/Assets.xcassets (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/usr/bin/actool /Users/ta/running/apps/ios/RAI/Assets.xcassets --compile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/thinned --output-format human-readable-text --notices --warnings --export-dependency-info /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_dependencies_thinned --output-partial-info-plist /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_generated_info.plist_thinned --app-icon AppIcon --accent-color AccentColor --compress-pngs --enable-on-demand-resources YES --development-region en --target-device iphone --minimum-deployment-target 17.0 --platform iphonesimulator
+/* com.apple.actool.compilation-results */
+/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_generated_info.plist_thinned
+/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/thinned/AppIcon60x60@2x.png
+/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/thinned/AppIcon76x76@2x~ipad.png
+/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/thinned/Assets.car
+
+
+CreateUniversalBinary /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/__preview.dylib normal arm64\ x86_64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo -create /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/__preview.dylib /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/__preview.dylib -output /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/__preview.dylib
+
+SwiftDriver RAI normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name RAI -Onone @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/rai-tech-acceptance/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64 -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-tech-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-Swift.h -working-directory /Users/ta/running/apps/ios -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver RAI normal arm64 com.apple.xcode.tools.swift.compiler (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name RAI -Onone @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/rai-tech-acceptance/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64 -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-tech-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/arm64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-Swift.h -working-directory /Users/ta/running/apps/ios -experimental-emit-module-separately -disable-cmo
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdarg-BG0RJR0OE27MRTTMLFZ8K0R2Z.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ptrauth-70E911CLHTP80EV9I7WKCF9V4.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_float-3D1L19CVZWB8C9KIXQE22IL9B.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_SwiftConcurrencyShims-9EUR73G9EKJJIXE2GJHUDRUFK.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdbool-9H6IK61V2DPQAGUI28PW61DHN.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SwiftShims-8O5X902WIO7WPHKBJEBBQHCQA.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ptrcheck-217NND107Q0YIEZ6SLUQQRWE0.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stddef-1YERTC3PP9LE1JDYOJT9X3OST.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/DeveloperToolsSupport-534T6QSUNBFN1HA3DOXNS2JN9.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_AvailabilityInternal-56IY10KFJ0733L72HTM59UMIR.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SwiftShims-82NNZ1S7VZ8YE33EXKFCW4H99.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_SwiftConcurrencyShims-7SHHJX038L0B9NLJDJ0WYG54J.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdbool-L6NCC713672JSPSQY01YE5F9.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ptrcheck-GQU8FRGWRC9XMD3TZRYIKI4N.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_AvailabilityInternal-9F7WHOF2OKQ9MDJRJCM9XGQWQ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_DarwinFoundation1-1EKUD3T74HUVHPVJJVM31QGVS.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_float-524B56JHU4P747LX6NBJSKJNK.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ptrauth-AVZO11B5584UMS690X2D80EIL.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdarg-1NQMR3YEN05PPGMANHMSTH61Q.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/DeveloperToolsSupport-B42Z3927I9FXXV7467DHNIIP2.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_DarwinFoundation1-35V8CQB7KDHQXF6IHN01XQBYX.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stddef-6WZUIZA8HLK9K4BF20VBRBL24.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SQLite3-4EMK3775G65RYQOZBLOIPQ61U.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_limits-4YCGX1WIG56PNZQJQWH66Y37N.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ExtensionFoundation-A0JRFU3X4VDRPUEG591POMYCF.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_DarwinFoundation2-977CTQQZ823A3YOVUX7POWWSL.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SQLite3-49KIP37SXQB08VKU5AHQPXNBK.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ExtensionFoundation-13TBT69C0IWY2PW55EXML7T77.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_DarwinFoundation2-B54NK00QVF2WKVAP8NG8C5WP6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_limits-D8LYJWOZTGXTEKIBH3E8YWDZ6.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_tgmath-9F5F7HH2GF0XXPHCN9I9UICLS.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/sys_types-ABSBXM970BUKGZIMXN0PCVP1X.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdint-ERIRNPGIDT0OOM81ICN4GBO0M.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdatomic-A4OCSRCXD9DEMN9EHGPMS8BK8.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_DarwinFoundation3-BWP3PQTYQBYUHDGOAHNL6CDT6.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/sys_types-6LHFBQJNR23YOSW0G3CAAGSBO.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_tgmath-4LAJA4MRKXMPIIIYQDXRHV9HO.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdint-3B94JDGFKIVOADD6UA1RW2M4M.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_intrinsics-ANT1ALSSYO4P1U6SBLC4VEBAH.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_DarwinFoundation3-APITE19HAYIV78T1RN19UYKEM.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_stdatomic-3434Q8WRKPBPPW5EHP5UZ6KD4.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_inttypes-2PN5TEBJ4CSEAOHUKV114LEKD.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/zlib-6KUUCFPZ5FM78VXG4UGHGBSBS.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_intrinsics-F5JJON5ZGJAZLPF7KC7QCK2GO.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Darwin-9TX42H7XOBXT3NBKELISFNMXR.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_Builtin_inttypes-6RBS9CD1N7LFU37TAEGZOVJSE.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/zlib-8HDNUDM1WCP2DQ0VE31ZGEJY7.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Darwin-NFJRHYH9DXDTBJNULAJW6372.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/simd-6CB44YMUPTE3JVZNP1GRX14IS.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/MachO-5ZJC4ZXK4UETPQVTOIZ9OT3L0.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ObjectiveC-25QHURBEXA68R1691PTQJO24E.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/MachO-1KK4PGSYWXO1U2HK97W61SRKH.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ObjectiveC-EG5E33UI6OQ8JH1G17S8K9KVK.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/os_object-EAZ1M85V61XPQD2WYJOPO97A5.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/os_workgroup-9JVNTL7O1PDGE8AU8R6PY8R5E.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/os_object-9YGL6WAL3W0RCVLD2TFGI53Y.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Dispatch-2R4U92ARPEQZF14HI5LIZZN1M.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/os_workgroup-B5030VNI7XKNVL7E6YQVLKSJ1.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/simd-9TPMCJ0IWDSPGXYXEQT01BUB9.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/dnssd-C4E12V4T7Z5IF41N3B4G2I2UR.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreFoundation-9BSTFWLI3FXU114YD31UR70M9.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/XPC-47DBHSFF7PMG71IL20UTDCDTA.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Dispatch-B37RXFDSGATXXKAWVEWJTR7UP.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/os-AAIVI0K5KV6G9W4CS8DTB7B5E.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreFoundation-B8L1N9YNDY0JMXPGX75DQWZEJ.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/XPC-3I45XN9011V3J31Q0RGLOYLL1.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/dnssd-E2HUYQQP6SCAA8ZM52DACP2EH.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CFNetwork-51627UKT9CQLEN18L13JGIEVN.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Security-EX6YWUCMYRLLLFI8M3SWLNQRW.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/os-C35N15F3S31GLKTBDOO9ST705.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreGraphics-XSBC487YI655MFD3GKXTP0AS.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Security-2JT5YFHNQSMZ5KJ1RMT6TMMNY.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreGraphics-7R7IYJYHJCYANEZW15DNZ2NVV.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CFNetwork-7GBQANLNUMD5E4MGV39CONCF3.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Spatial-ESX8PBJDQRXXVMTZLXPA3R4ZA.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreText-CRNLZ9UTJ7X7AH5VJM8ITHS65.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Foundation-B3YOKC4J8Y4ZXBHCRA7DL9U30.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Foundation-2R29GW5VNM86RIIOLHK2MBKCW.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ImageIO-C6CDAKI6A4NGGMC5Q4D23S5N.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/ImageIO-DQSZDD01ZWG6N8KLK7DATHQU0.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreText-A4YFWF67HF46KP6CZB1Z0XHAQ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Spatial-BPHQNIPB5O48LC4Z0K7IMAJHJ.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/IOSurface-6NKDK9GKXCRI9MM9QL7HJOGPT.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/RelevanceKit-2QMILI655SKMVGKBFRH2WOGXD.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/LocalAuthentication-A7YVZERR9Q1K2CZATEOY6X9WS.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UIUtilities-1O2GNSKYD7INVLD2LDBVX494M.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/OpenGLES-AHVSK0YF0Z581ZVL9MA9XE2O5.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Accessibility-9FGQOR0VQI8P5DAVXZXDYX03K.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/OSLog-EY48A2HP1YIJNYCUJHYMSX92P.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/IOSurface-A6B0GJ07KQ5Y4ZEMX0QFCAEVS.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Metal-5K3RBGD80O6VJW5A76YVSFNTD.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/OpenGLES-9TBTTFE8QQ4H27NVU9Z0FTC4W.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_LocationEssentials-DGHPUZLH893Y35TE1AKNMHQG.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/AppIntents-BWPGAXIJH4B5J5GFJB29VI9BS.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UniformTypeIdentifiers-4KYMAYNGK1IJZKM85581MYYJQ.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/DataDetection-7V42GDRAAX47D3OJU29LRMAYP.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreTransferable-7MYYEIEVE389Q4S37FD37VH1U.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreData-BJPUJY91MV0UZW732H13WT8IF.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreLocation-DLUR3091EBN0YPIBEKZTH5NE3.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreSpotlight-50MO57UPW1ZO75G9Q39DZ0TAQ.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/BackgroundTasks-DBT5E30EWJD9J5L2XT9TZNLOP.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/OSLog-EF6UMAW1DF9VLBHV567ZXWNLF.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/FileProvider-59HXX4KQYCQU9M04FDXT3GAFR.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Network-7U49B4QM1FHVBI33EE1KHXDAN.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Network-6C7M0CPIMQQ4LZDJTTAJ8OS7N.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UserNotifications-7ZOX9JOXK3FMCHHQSF4OP2LU1.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreVideo-6E7HCWBHDJR1QUS837E2K05U.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/AppIntents-E0GMPG8UFPAJ3BQJYHAIH02LV.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Symbols-8YQG5USTK34EKACUC5LKMF789.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/_LocationEssentials-24M2X0OKQL5UJOQGX331XJ4RW.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/BackgroundTasks-F4FO7S6HVNPZH0NCW4L5MWX6C.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UIUtilities-B6KIQQNBMLOHMOU9DMMG19Z4W.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreImage-D7Z31HTHYLCMALFIOL2YLV7PM.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/QuartzCore-93287BMKU9M4BHET54YULTBQE.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/LocalAuthentication-5XIAJZO6VKHKUWFVXEWNVXA4M.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UserNotifications-2X0BTNCMQEID7I05JNQKA7C8O.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreLocation-7I1K2MMXRI4EC64U0E0H9DNGS.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Symbols-4WBP01PC7YMNJI19NA5QCN9JR.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/DataDetection-CCV4X8ZTD4YCTFJ2VKKBA7JGN.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UniformTypeIdentifiers-53PCMIKHLWTLWNRPYTNQPC5QD.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/FileProvider-16T95UXRS5RVESQ0HN37MVJ95.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/RelevanceKit-B67Y9U7QK1H46DA9WB00KXWUT.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SwiftUICore-OHDZEBGOEDI23EJDAV5ZKXQP.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreTransferable-E5NQ3Z50KC23GJ1QFA3QSYYRU.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UIKit-4HXNUV21FG02L1YN7HYJLWUUW.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Metal-E4BXC274TUEOPXBJI23PVS89E.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreSpotlight-3RSF284QZ29H88PGMR22AH14I.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/HealthKit-3YJZ4HKFFNT50UBEU4OV4EJSW.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/HealthKit-A6G5UANVRAR239DJJ4U88KFTO.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreData-6SQJPNV04JEI5MCKDRHRPW5LY.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/Accessibility-8S24TORQTVYWN1D9O95W4TN3G.pcm
+
+LinkAssetCatalog /Users/ta/running/apps/ios/RAI/Assets.xcassets (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-linkAssetCatalog --thinned /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/thinned --thinned-dependencies /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_dependencies_thinned --thinned-info-plist-content /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_generated_info.plist_thinned --unthinned /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_output/unthinned --unthinned-dependencies /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_dependencies_unthinned --unthinned-info-plist-content /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_generated_info.plist_unthinned --output /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app --plist-output /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_generated_info.plist
+note: Emplaced /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/AppIcon60x60@2x.png (in target 'RAI' from project 'RAI')
+note: Emplaced /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/AppIcon76x76@2x~ipad.png (in target 'RAI' from project 'RAI')
+note: Emplaced /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Assets.car (in target 'RAI' from project 'RAI')
+
+ProcessInfoPlistFile /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Info.plist /Users/ta/running/apps/ios/RAI/Info.plist (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-infoPlistUtility /Users/ta/running/apps/ios/RAI/Info.plist -producttype com.apple.product-type.application -genpkginfo /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/assetcatalog_generated_info.plist -o /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Info.plist
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreVideo-2VKP19UBAIASLBXH2A9U0U5L1.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/CoreImage-A9RD3VZR2JGGC2OLDDCVSGRNE.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/QuartzCore-EHNFR7UYXC0MXT2H7GOD3CO3.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SwiftUICore-4LL176JCV3KKYSLA1DVGJK9XQ.pcm
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/UIKit-38VQ8MJMMMRT7AFPPI1160Q06.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SwiftUI-438SBDKASQ2GXP5EH9763AN29.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/WebKit-9NPKBTMYHBKCXH953U2D43R10.pcm
+
+SwiftExplicitDependencyGeneratePcm x86_64 /tmp/rai-tech-acceptance/ModuleCache.noindex/MapKit-6FDXQ5SJ1WYX23E46UJF96EE.pcm
+
+SwiftEmitModule normal x86_64 Emitting\ module\ for\ RAI (in target 'RAI' from project 'RAI')
+EmitSwiftModule normal x86_64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 Compiling\ PixelTheme.swift,\ RAIApp.swift,\ RootView.swift,\ ServerDiscovery.swift,\ ServerSession.swift /Users/ta/running/apps/ios/RAI/PixelTheme.swift /Users/ta/running/apps/ios/RAI/RAIApp.swift /Users/ta/running/apps/ios/RAI/RootView.swift /Users/ta/running/apps/ios/RAI/ServerDiscovery.swift /Users/ta/running/apps/ios/RAI/ServerSession.swift (in target 'RAI' from project 'RAI')
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/PixelTheme.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/RAIApp.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/RootView.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/ServerDiscovery.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/ServerSession.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 Compiling\ NativeFormat.swift,\ NativeViews.swift,\ PixelCharts.swift,\ PixelIcons.swift,\ PixelTabBar.swift /Users/ta/running/apps/ios/RAI/NativeFormat.swift /Users/ta/running/apps/ios/RAI/NativeViews.swift /Users/ta/running/apps/ios/RAI/PixelCharts.swift /Users/ta/running/apps/ios/RAI/PixelIcons.swift /Users/ta/running/apps/ios/RAI/PixelTabBar.swift (in target 'RAI' from project 'RAI')
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/NativeFormat.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/NativeViews.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/PixelCharts.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/PixelIcons.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/PixelTabBar.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 Compiling\ TechCharts.swift,\ TechFlowLayout.swift,\ TechLockSheet.swift,\ TechSetupView.swift,\ TechTheme.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechCharts.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechFlowLayout.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechLockSheet.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechSetupView.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechTheme.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechCharts.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechFlowLayout.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechLockSheet.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechSetupView.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechTheme.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 Compiling\ CacheStore.swift,\ HealthKitExport.swift,\ HealthKitSync.swift,\ Keychain.swift,\ NativeAppModel.swift /Users/ta/running/apps/ios/RAI/CacheStore.swift /Users/ta/running/apps/ios/RAI/HealthKitExport.swift /Users/ta/running/apps/ios/RAI/HealthKitSync.swift /Users/ta/running/apps/ios/RAI/Keychain.swift /Users/ta/running/apps/ios/RAI/NativeAppModel.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/CacheStore.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/HealthKitExport.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/HealthKitSync.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Keychain.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/NativeAppModel.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 Compiling\ StoredZip.swift,\ SyncHealthIntent.swift,\ SyncTaskStore.swift,\ GeneratedAssetSymbols.swift /Users/ta/running/apps/ios/RAI/StoredZip.swift /Users/ta/running/apps/ios/RAI/SyncHealthIntent.swift /Users/ta/running/apps/ios/RAI/SyncTaskStore.swift /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/StoredZip.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/SyncHealthIntent.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/SyncTaskStore.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/MapKit-ETFAXXICSOBW3CXPQTK927TL0.pcm
+
+SwiftDriverJobDiscovery normal x86_64 Emitting module for RAI (in target 'RAI' from project 'RAI')
+
+SwiftDriver\ Compilation\ Requirements RAI normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name RAI -Onone @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/rai-tech-acceptance/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64 -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-tech-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-Swift.h -working-directory /Users/ta/running/apps/ios -experimental-emit-module-separately -disable-cmo
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/SwiftUI-5D3RMLLX31VJ0031FMRZAFEWO.pcm
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/x86_64-apple-ios-simulator.swiftmodule /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftmodule (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftmodule /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/x86_64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/x86_64-apple-ios-simulator.swiftdoc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftdoc (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftdoc /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/x86_64-apple-ios-simulator.swiftdoc
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/x86_64-apple-ios-simulator.abi.json /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.abi.json (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.abi.json /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/x86_64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftsourceinfo (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftsourceinfo /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo
+
+SwiftExplicitDependencyGeneratePcm arm64 /tmp/rai-tech-acceptance/ModuleCache.noindex/WebKit-A7V39TJOHL8LMBJ1ETRPSKWHL.pcm
+
+SwiftCompile normal x86_64 Compiling\ TechViews.swift,\ AppSkin.swift,\ APIClient.swift,\ APIModels.swift,\ AppWebView.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechViews.swift /Users/ta/running/apps/ios/RAI/Skins/AppSkin.swift /Users/ta/running/apps/ios/RAI/APIClient.swift /Users/ta/running/apps/ios/RAI/APIModels.swift /Users/ta/running/apps/ios/RAI/AppWebView.swift (in target 'RAI' from project 'RAI')
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechViews.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/Skins/AppSkin.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/APIClient.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/APIModels.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/RAI/AppWebView.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ RAI (in target 'RAI' from project 'RAI')
+
+EmitSwiftModule normal arm64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftDriverJobDiscovery normal x86_64 Compiling PixelTheme.swift, RAIApp.swift, RootView.swift, ServerDiscovery.swift, ServerSession.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 Compiling\ CacheStore.swift,\ HealthKitExport.swift,\ HealthKitSync.swift,\ Keychain.swift,\ NativeAppModel.swift /Users/ta/running/apps/ios/RAI/CacheStore.swift /Users/ta/running/apps/ios/RAI/HealthKitExport.swift /Users/ta/running/apps/ios/RAI/HealthKitSync.swift /Users/ta/running/apps/ios/RAI/Keychain.swift /Users/ta/running/apps/ios/RAI/NativeAppModel.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/CacheStore.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/HealthKitExport.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/HealthKitSync.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Keychain.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/NativeAppModel.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftDriverJobDiscovery normal x86_64 Compiling TechCharts.swift, TechFlowLayout.swift, TechLockSheet.swift, TechSetupView.swift, TechTheme.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 Compiling\ TechViews.swift,\ AppSkin.swift,\ APIClient.swift,\ APIModels.swift,\ AppWebView.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechViews.swift /Users/ta/running/apps/ios/RAI/Skins/AppSkin.swift /Users/ta/running/apps/ios/RAI/APIClient.swift /Users/ta/running/apps/ios/RAI/APIModels.swift /Users/ta/running/apps/ios/RAI/AppWebView.swift (in target 'RAI' from project 'RAI')
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechViews.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Skins/AppSkin.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/APIClient.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/APIModels.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/AppWebView.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftDriverJobDiscovery normal x86_64 Compiling StoredZip.swift, SyncHealthIntent.swift, SyncTaskStore.swift, GeneratedAssetSymbols.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 Compiling\ TechCharts.swift,\ TechFlowLayout.swift,\ TechLockSheet.swift,\ TechSetupView.swift,\ TechTheme.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechCharts.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechFlowLayout.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechLockSheet.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechSetupView.swift /Users/ta/running/apps/ios/RAI/Skins/Technology/TechTheme.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechCharts.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechFlowLayout.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechLockSheet.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechSetupView.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/Skins/Technology/TechTheme.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftDriverJobDiscovery normal x86_64 Compiling CacheStore.swift, HealthKitExport.swift, HealthKitSync.swift, Keychain.swift, NativeAppModel.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 Compiling\ StoredZip.swift,\ SyncHealthIntent.swift,\ SyncTaskStore.swift,\ GeneratedAssetSymbols.swift /Users/ta/running/apps/ios/RAI/StoredZip.swift /Users/ta/running/apps/ios/RAI/SyncHealthIntent.swift /Users/ta/running/apps/ios/RAI/SyncTaskStore.swift /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/StoredZip.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/SyncHealthIntent.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/SyncTaskStore.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for RAI (in target 'RAI' from project 'RAI')
+
+SwiftDriverJobDiscovery normal x86_64 Compiling NativeFormat.swift, NativeViews.swift, PixelCharts.swift, PixelIcons.swift, PixelTabBar.swift (in target 'RAI' from project 'RAI')
+
+SwiftDriver\ Compilation\ Requirements RAI normal arm64 com.apple.xcode.tools.swift.compiler (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name RAI -Onone @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/rai-tech-acceptance/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64 -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-tech-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/arm64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-Swift.h -working-directory /Users/ta/running/apps/ios -experimental-emit-module-separately -disable-cmo
+
+SwiftCompile normal arm64 Compiling\ NativeFormat.swift,\ NativeViews.swift,\ PixelCharts.swift,\ PixelIcons.swift,\ PixelTabBar.swift /Users/ta/running/apps/ios/RAI/NativeFormat.swift /Users/ta/running/apps/ios/RAI/NativeViews.swift /Users/ta/running/apps/ios/RAI/PixelCharts.swift /Users/ta/running/apps/ios/RAI/PixelIcons.swift /Users/ta/running/apps/ios/RAI/PixelTabBar.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/NativeFormat.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/NativeViews.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/PixelCharts.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/PixelIcons.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/PixelTabBar.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftMergeGeneratedHeaders /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/RAI-Swift.h /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-Swift.h /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-Swift.h (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-swiftHeaderTool -arch arm64 /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-Swift.h -arch x86_64 /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-Swift.h -o /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/RAI-Swift.h
+
+SwiftDriverJobDiscovery normal arm64 Compiling TechCharts.swift, TechFlowLayout.swift, TechLockSheet.swift, TechSetupView.swift, TechTheme.swift (in target 'RAI' from project 'RAI')
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/arm64-apple-ios-simulator.swiftmodule /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftmodule (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftmodule /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/arm64-apple-ios-simulator.swiftmodule
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/arm64-apple-ios-simulator.swiftdoc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftdoc (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftdoc /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/arm64-apple-ios-simulator.swiftdoc
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.abi.json (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.abi.json /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftsourceinfo (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -resolve-src-symlinks -rename /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftsourceinfo /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+SwiftCompile normal arm64 Compiling\ PixelTheme.swift,\ RAIApp.swift,\ RootView.swift,\ ServerDiscovery.swift,\ ServerSession.swift /Users/ta/running/apps/ios/RAI/PixelTheme.swift /Users/ta/running/apps/ios/RAI/RAIApp.swift /Users/ta/running/apps/ios/RAI/RootView.swift /Users/ta/running/apps/ios/RAI/ServerDiscovery.swift /Users/ta/running/apps/ios/RAI/ServerSession.swift (in target 'RAI' from project 'RAI')
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/PixelTheme.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/RAIApp.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/RootView.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/ServerDiscovery.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/RAI/ServerSession.swift (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    
+
+SwiftDriverJobDiscovery normal arm64 Compiling CacheStore.swift, HealthKitExport.swift, HealthKitSync.swift, Keychain.swift, NativeAppModel.swift (in target 'RAI' from project 'RAI')
+
+SwiftDriverJobDiscovery normal arm64 Compiling StoredZip.swift, SyncHealthIntent.swift, SyncTaskStore.swift, GeneratedAssetSymbols.swift (in target 'RAI' from project 'RAI')
+
+SwiftDriverJobDiscovery normal arm64 Compiling PixelTheme.swift, RAIApp.swift, RootView.swift, ServerDiscovery.swift, ServerSession.swift (in target 'RAI' from project 'RAI')
+
+SwiftDriverJobDiscovery normal x86_64 Compiling TechViews.swift, AppSkin.swift, APIClient.swift, APIModels.swift, AppWebView.swift (in target 'RAI' from project 'RAI')
+
+SwiftDriver\ Compilation RAI normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name RAI -Onone @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/rai-tech-acceptance/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64 -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-tech-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-Swift.h -working-directory /Users/ta/running/apps/ios -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI.debug.dylib normal x86_64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target x86_64-apple-ios17.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -O0 -L/tmp/rai-tech-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -filelist /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.LinkFileList -install_name @rpath/RAI.debug.dylib -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.swiftmodule @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI-linker-args.resp -lsqlite3 -Xlinker -alias -Xlinker _main -Xlinker ___debug_main_executable_dylib_entry_point -o /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI.debug.dylib
+
+ConstructStubExecutorLinkFileList /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-ExecutorLinkFileList-normal-x86_64.txt (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    construct-stub-executor-link-file-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI.debug.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor_no_swift_entry_point.a /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor.a --output /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-ExecutorLinkFileList-normal-x86_64.txt
+note: Using stub executor library with Swift entry point. (in target 'RAI' from project 'RAI')
+
+Ld /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI normal x86_64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target x86_64-apple-ios17.0-simulator -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -O0 -L/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -Xlinker -rpath -Xlinker @executable_path -Xlinker -rpath -Xlinker @executable_path/Frameworks -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -e ___debug_blank_executor_main -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_dylib -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibPath-normal-x86_64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_instlnm -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibInstallName-normal-x86_64.txt -Xlinker -filelist -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-ExecutorLinkFileList-normal-x86_64.txt /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI.debug.dylib -o /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI
+
+SwiftDriverJobDiscovery normal arm64 Compiling NativeFormat.swift, NativeViews.swift, PixelCharts.swift, PixelIcons.swift, PixelTabBar.swift (in target 'RAI' from project 'RAI')
+
+SwiftDriverJobDiscovery normal arm64 Compiling TechViews.swift, AppSkin.swift, APIClient.swift, APIModels.swift, AppWebView.swift (in target 'RAI' from project 'RAI')
+
+SwiftDriver\ Compilation RAI normal arm64 com.apple.xcode.tools.swift.compiler (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name RAI -Onone @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -Xfrontend -serialize-debugging-options -enable-testing -index-store-path /tmp/rai-tech-acceptance/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64 -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-tech-acceptance/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-tech-acceptance/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-tech-acceptance/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-generated-files.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-own-target-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-project-headers.hmap -Xcc -I/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources/arm64 -Xcc -I/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-Swift.h -working-directory /Users/ta/running/apps/ios -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI.debug.dylib normal arm64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -dynamiclib -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -O0 -L/tmp/rai-tech-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -filelist /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.LinkFileList -install_name @rpath/RAI.debug.dylib -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @executable_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_lto.o -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.swiftmodule @/tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI-linker-args.resp -lsqlite3 -Xlinker -alias -Xlinker _main -Xlinker ___debug_main_executable_dylib_entry_point -o /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI.debug.dylib
+
+CreateUniversalBinary /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/RAI.debug.dylib normal arm64\ x86_64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo -create /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI.debug.dylib /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI.debug.dylib -output /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/RAI.debug.dylib
+
+ConstructStubExecutorLinkFileList /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-ExecutorLinkFileList-normal-arm64.txt (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    construct-stub-executor-link-file-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI.debug.dylib /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor_no_swift_entry_point.a /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libPreviewsJITStubExecutor.a --output /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-ExecutorLinkFileList-normal-arm64.txt
+note: Using stub executor library with Swift entry point. (in target 'RAI' from project 'RAI')
+
+Ld /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI normal arm64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -O0 -L/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -F/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator -Xlinker -rpath -Xlinker @executable_path -Xlinker -rpath -Xlinker @executable_path/Frameworks -rdynamic -Xlinker -no_deduplicate -Xlinker -objc_abi_version -Xlinker 2 -e ___debug_blank_executor_main -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_dylib -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibPath-normal-arm64.txt -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __debug_instlnm -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-DebugDylibInstallName-normal-arm64.txt -Xlinker -filelist -Xlinker /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI-ExecutorLinkFileList-normal-arm64.txt /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI.debug.dylib -o /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI
+
+CreateUniversalBinary /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/RAI normal arm64\ x86_64 (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo -create /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/Binary/RAI /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/Binary/RAI -output /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/RAI
+
+CopySwiftLibs /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/RAI.debug.dylib --scan-folder /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Frameworks --scan-folder /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/PlugIns --scan-folder /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/SystemExtensions --scan-folder /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Frameworks --strip-bitcode --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os --back-deploy-swift-span
+Ignoring --strip-bitcode because --sign was not passed
+
+ExtractAppIntentsMetadata (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name RAI --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk --xcode-version 17F42 --platform-family iOS --deployment-target 17.0 --bundle-identifier app.rai.running.debug --output /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app --target-triple arm64-apple-ios17.0-simulator --target-triple x86_64-apple-ios17.0-simulator --binary-file /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/RAI --dependency-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI_dependency_info.dat --dependency-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI_dependency_info.dat --stringsdata-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --stringsdata-file /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftFileList --source-file-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftFileList --metadata-file-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.DependencyMetadataFileList --static-metadata-file-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/arm64/RAI.SwiftConstValuesFileList --swift-const-vals-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/Objects-normal/x86_64/RAI.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-09-09 17:47:15.208 appintentsmetadataprocessor[63201:1958887] Starting appintentsmetadataprocessor export
+2026-09-09 17:47:15.497 appintentsmetadataprocessor[63201:1958887] Writing Metadata.appintents
+2026-09-09 17:47:15.497 appintentsmetadataprocessor[63201:1958887] Metadata root: /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Metadata.appintents
+
+AppIntentsSSUTraining (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsnltrainingprocessor --infoplist-path /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Info.plist --temp-dir-path /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/ssu --bundle-id app.rai.running.debug --product-path /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app --extracted-metadata-path /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Metadata.appintents --metadata-file-list /tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/RAI.DependencyMetadataFileList --source-file /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Info.plist --archive-ssu-assets
+2026-09-09 17:47:15.963 appintentsnltrainingprocessor[63214:1958982] Parsing options for appintentsnltrainingprocessor
+2026-09-09 17:47:15.966 appintentsnltrainingprocessor[63214:1958982] Starting AppIntents SSU YAML Generation
+2026-09-09 17:47:16.201 appintentsnltrainingprocessor[63214:1958982] Training '同步 ${+applicationName} 健康|用 ${+applicationName} 同步跑步' for en
+2026-09-09 17:47:16.201 appintentsnltrainingprocessor[63214:1958982] Training Negative Phrases '' for en
+2026-09-09 17:47:16.202 appintentsnltrainingprocessor[63214:1958982] Application name 'RAI' for en
+2026-09-09 17:47:16.485 appintentsnltrainingprocessor[63214:1958982] Generated AppIntents SSU YAML files in file:///tmp/rai-tech-acceptance/Build/Intermediates.noindex/RAI.build/Debug-iphonesimulator/RAI.build/ssu/
+2026-09-09 17:47:16.499 appintentsnltrainingprocessor[63214:1958982] Copied AppIntents SSU YAML files to file:///tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Metadata.appintents/
+Archiving all locales.
+[------------------------------------------------------------] 0% archiving en[🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢] 100% archived en[🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢🁢] 100% archived 1 locales/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Metadata.appintents/nlu
+/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app/Metadata.appintents/nlu/b49cb8c20181d7c0c4b03d79fd9c2a79.version
+
+
+RegisterExecutionPolicyException /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-RegisterExecutionPolicyException /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app
+
+Validate /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    builtin-validationUtility /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app -shallow-bundle -infoplist-subpath Info.plist
+
+Touch /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app (in target 'RAI' from project 'RAI')
+    cd /Users/ta/running/apps/ios
+    /usr/bin/touch -c /tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app
+
+** BUILD SUCCEEDED **
+

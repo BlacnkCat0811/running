@@ -174,14 +174,12 @@ const trigger = (
 
 export function decideVerdict(input: CoachInput): MobileVerdict {
   const triggers: MobileTrigger[] = [];
-  const stale = input.latestDataDate == null || input.latestDataDate < input.today;
-  const recoveryStatus = input.recoveryEvidenceStatus ?? (
-    input.lastNightSleepMinutes != null && input.morningHrvMs != null && input.restingHeartRateBpm != null
-      ? "valid"
-      : "unknown"
-  );
-  const recoveryDateFresh = input.recoveryEvidenceDate == null ? !stale : input.recoveryEvidenceDate === input.today;
-  const recoveryUnavailable = recoveryStatus !== "valid" || !recoveryDateFresh;
+  // Judge the available evidence, independently of the workout/import date.
+  const recoveryUnavailable = input.lastNightSleepMinutes == null ||
+    input.morningHrvMs == null || input.restingHeartRateBpm == null ||
+    input.sleepBaselineMinutes == null || input.sleepBaselineMinutes <= 0 ||
+    input.hrvBaselineMs == null || input.hrvBaselineMs <= 0 ||
+    input.restingHeartRateBaselineBpm == null || input.restingHeartRateBaselineBpm <= 0;
   let tone: MobileVerdict["tone"] = "yellow";
   let title = "只宜有氧";
   let reason = "默认轻松跑。数据不足时不安排质量课。";
@@ -211,18 +209,6 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     title = "只宜有氧";
     reason = "有效训练或负荷历史还不够，今天按轻松跑处理。";
     triggers.push(trigger("insufficient_data", input.eligibleSessions, 8, reason));
-  } else if (recoveryUnavailable) {
-    tone = "yellow";
-    title = "只宜有氧";
-    reason = !recoveryDateFresh || recoveryStatus === "stale"
-      ? "恢复事实已过期，先同步健康；在新证据到达前不安排质量课。"
-      : "今天的睡眠、HRV 或静息心率证据不完整，先轻松跑或休息。";
-    triggers.push(trigger(
-      !recoveryDateFresh || recoveryStatus === "stale" ? "recovery_stale" : "recovery_evidence_missing",
-      null,
-      null,
-      reason
-    ));
   } else if (highLoad) {
     tone = "red";
     title = "宜休息或轻松";
@@ -241,9 +227,9 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
   } else if (sleepRatio != null && sleepRatio < 0.75 && hrvRatio != null && hrvRatio < 0.85 && rhrUp) {
     tone = "red";
     title = "宜休息或轻松";
-    reason = "昨夜睡眠、今晨 HRV 和静息心率同时变差。";
-    triggers.push(trigger("sleep", round1(sleepRatio), 0.75, `昨夜睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
-    triggers.push(trigger("hrv", round1(hrvRatio), 0.85, `今晨 HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
+    reason = "睡眠、HRV 和静息心率同时变差。";
+    triggers.push(trigger("sleep", round1(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
+    triggers.push(trigger("hrv", round1(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
   } else if (
     (sleepRatio != null && sleepRatio < 0.75) ||
     (hrvRatio != null && hrvRatio < 0.85 && rhrUp)
@@ -252,10 +238,10 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     title = "只宜有氧";
     reason = "恢复信号偏低，先跑轻松，不要上强度。";
     if (sleepRatio != null && sleepRatio < 0.75) {
-      triggers.push(trigger("sleep", round1(sleepRatio), 0.75, `昨夜睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
+      triggers.push(trigger("sleep", round1(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
     }
     if (hrvRatio != null && hrvRatio < 0.85) {
-      triggers.push(trigger("hrv", round1(hrvRatio), 0.85, `今晨 HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
+      triggers.push(trigger("hrv", round1(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
     }
   } else if (input.consecutiveQualityDays >= 2) {
     tone = "red";
@@ -281,6 +267,11 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     title = "恢复跑";
     reason = "处于恢复阶段且停跑超过一天，先恢复跑再恢复量。";
     triggers.push(trigger("recovery_status", input.daysSinceLastRun, 2, reason));
+  } else if (recoveryUnavailable) {
+    tone = "yellow";
+    title = "只宜有氧";
+    reason = "睡眠、HRV、静息心率或个人基线不完整，先轻松跑或休息。";
+    triggers.push(trigger("recovery_evidence_missing", null, null, reason));
   } else if (
     (input.trainingStatus === "effective_stimulus" || input.trainingStatus === "maintaining") &&
     (input.daysSinceLastQuality ?? 99) >= 2 &&
@@ -297,12 +288,8 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     reason = "今天按轻松跑安排，把有氧底铺好。";
   }
 
-  if (stale) {
-    reason = `${reason}（数据不是今天的，按截至 ${input.latestDataDate ?? "未知"} 的恢复估计）`;
-  }
-
   const reasonCodes = triggers.map((item) => item.code);
-  return { tone, title, reason, triggers, stale: stale || recoveryStatus === "stale", reasonCodes };
+  return { tone, title, reason, triggers, stale: false, reasonCodes };
 }
 
 export function decideNextSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
@@ -421,20 +408,26 @@ export function buildRecovery(input: CoachInput): MobileRecoveryBreakdown {
   const parts: string[] = [];
   if (input.lastNightSleepMinutes != null && input.sleepBaselineMinutes != null) {
     const ratio = input.lastNightSleepMinutes / Math.max(1, input.sleepBaselineMinutes);
-    parts.push(`昨夜睡眠 ${Math.round(input.lastNightSleepMinutes)} 分钟，基线的 ${Math.round(ratio * 100)}%`);
+    parts.push(`睡眠 ${Math.round(input.lastNightSleepMinutes)} 分钟，基线的 ${Math.round(ratio * 100)}%`);
   } else if (input.lastNightSleepMinutes != null) {
-    parts.push(`昨夜睡眠 ${Math.round(input.lastNightSleepMinutes)} 分钟`);
+    parts.push(`睡眠 ${Math.round(input.lastNightSleepMinutes)} 分钟`);
   }
   if (input.morningHrvMs != null && input.hrvBaselineMs != null) {
     const ratio = input.morningHrvMs / Math.max(1, input.hrvBaselineMs);
-    parts.push(`今晨 HRV ${Math.round(input.morningHrvMs)} ms，基线的 ${Math.round(ratio * 100)}%`);
+    parts.push(`HRV ${Math.round(input.morningHrvMs)} ms，基线的 ${Math.round(ratio * 100)}%`);
   }
   if (input.restingHeartRateBpm != null && input.restingHeartRateBaselineBpm != null) {
     const delta = input.restingHeartRateBpm - input.restingHeartRateBaselineBpm;
     parts.push(`静息心率 ${Math.round(input.restingHeartRateBpm)}，较基线 ${delta >= 0 ? "+" : ""}${Math.round(delta)}`);
   }
+  if (input.morningHrvMs != null && input.hrvBaselineMs == null) {
+    parts.push(`HRV ${Math.round(input.morningHrvMs)} ms，个人基线尚未建立`);
+  }
+  if (input.restingHeartRateBpm != null && input.restingHeartRateBaselineBpm == null) {
+    parts.push(`静息心率 ${Math.round(input.restingHeartRateBpm)} bpm，个人基线尚未建立`);
+  }
   if (parts.length === 0) {
-    parts.push("还没有昨夜睡眠或过夜 HRV，恢复状态暂不可用。");
+    parts.push("还没有可用的恢复样本，恢复状态暂不可用。");
   }
   return {
     score: null,

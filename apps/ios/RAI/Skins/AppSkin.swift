@@ -37,6 +37,7 @@ struct AppSkinPicker: View {
                 PixelPanel { choices }
             }
         }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("appearance.picker")
     }
 

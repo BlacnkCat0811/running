@@ -409,3 +409,27 @@ test("mobile goals store can lock today's session without dropping weekly distan
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("mobile recovery uses the latest evidence date and its historical baseline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-mobile-recovery-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  try {
+    const insert = store.database.prepare(`INSERT INTO canonical_nights
+      (id, wake_date, timezone_identifier, kind, source_name, source_category, source_rank,
+       has_stages, sleep_onset_at, wake_at, asleep_union_minutes, stage_minutes_json, segment_count, provenance_json)
+      VALUES (?, ?, 'Asia/Shanghai', 'main', 'Watch', 'apple_watch', 1, 0, ?, ?, ?, '{}', 1, '{}')`);
+    insert.run("prior-night", "2025-01-21", "2025-01-20T15:00:00Z", "2025-01-20T23:00:00Z", 480);
+    insert.run("latest-night", "2025-01-22", "2025-01-21T15:00:00Z", "2025-01-21T20:00:00Z", 300);
+    const read = new RaiReadStore(databasePath);
+    try {
+      const recovery = read.mobileToday(30).recovery;
+      assert.equal(recovery.lastNightSleepMinutes, 300);
+      assert.equal(recovery.sleepBaselineMinutes, 480);
+      assert.equal(recovery.state, "reduced");
+      assert.match(recovery.note, /2025-01-22/);
+      assert.doesNotMatch(recovery.note, /昨夜|今晨/);
+    } finally { read.close(); }
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});

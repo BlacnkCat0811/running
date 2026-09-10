@@ -6,7 +6,7 @@
 
 皮肤选择通过 `@AppStorage("rai.appearance.skin")` 持久化。未设置或未知值回退到像素风。顶层通过 `EnvironmentValues.appSkin` 注入选择，保持 `AppModel.shared`、当前五入口 Tab 状态和服务对象身份不变。所有修改服务、同步、保存目标、锁定课程和清除缓存的操作仍调用原业务模型。
 
-`RAI/Skins/AppSkin.swift` 定义选择及预览卡；`Technology/TechTheme.swift` 定义独立视觉令牌和通用组件；`TechCharts.swift` 定义平滑折线、圆环、周柱图与真实月度堆叠；`TechViews.swift` 定义业务页面；`TechSetupView.swift` 和 `TechLockSheet.swift` 定义连接和锁课流程。Xcode 使用文件夹自动同步，无需手动添加源文件。
+`RAI/Skins/AppSkin.swift` 定义选择及预览卡；`Technology/TechTheme.swift` 定义独立视觉令牌和通用组件；`TechCharts.swift` 定义平滑折线、圆环、周柱图与真实月度堆叠；`TechViews.swift` 定义业务页面；`TechAbilityDetailView.swift` 定义独立跑力评估页；`TechSetupView.swift` 和 `TechLockSheet.swift` 定义连接和锁课流程。Xcode 使用文件夹自动同步，无需手动添加源文件。
 
 没有把生成图片铺在界面上。数据、文本、图表、地图和控件全部由 SwiftUI / Charts / MapKit 原生渲染，可交互并使用真实 API 数据。图片仅作为视觉参考。
 
@@ -27,14 +27,18 @@
 - 训练详情保留真实存在的速度、功率、步频、海拔、步幅、垂直振幅、触地时长等指标；不因设计图未画完而删减。
 - 同步只显示真实阶段及忙碌状态，不增加百分比计算、健康写入或后台任务。
 - 目标编辑维持原有范围：每周 1–500 km、每日 0–80 km、轻松比例 0.4–0.95、质量课 0–4 次。
-- 版本冲突继续由原模型处理和显示错误，不复制或替换服务端逻辑。确认/错误弹窗使用 iOS 系统控件，因此与图片中的自绘面板存在外观差异。
+- 版本冲突继续由原模型处理和显示错误，不复制或替换服务端逻辑。科技风确认/错误采用独立深蓝面板，像素风继续使用原系统弹窗。
 - 图中长页拆成多个手机视图，应用仍为连续滚动页面。不同数据长度、字号、设备尺寸和系统地图会影响最终排版。
 
 ## 验证记录与待办
 
 已执行：新增科技风和改动入口的 iOS 分支语法解析、科技风类型引用检查、`git diff --check`。确认 PixelTheme、PixelIcons、PixelCharts、PixelTabBar、NativeAppModel、APIClient、HealthKitSync 与改动前一致。未修改 Web 或评分逻辑，因此未运行 Web/响应式测试。
 
-当前执行环境为 Windows，无 Swift/iOS SDK。**尚未执行 Xcode 编译、模拟器运行及视觉截图比对；不能声明完全复刻验收通过。**
+2026-09-09 在 Mac 上完成 Xcode 26.5（17F42）/ iOS Simulator 26.5 Debug 编译，arm64 与 x86_64 均通过；`run-model-tests.sh` 的 10 项模型回归全部通过。构建日志未发现 `warning:` / `error:` 诊断。
+
+2026-09-10 已完成六张设计板对照、原生页面修正与 51 张截图复核；最终模拟器双架构和 iPhoneOS 未签名编译通过，10 项模型回归及 10 项原生 UI 测试全部通过。完整记录、逐页截图及验收边界见 [`visual-review/README.md`](acceptance/2026-09-09/visual-review/README.md)。不以构建成功或截图数量宣称与 AI 概念图逐像素一致。
+
+可重复的原生 UI 验收入口为 `bash apps/ios/tests/run-visual-tests.sh`：复制独立数据库、使用专用模拟器，检查页面导航、编辑取消/越界、revision 冲突、缓存确认、皮肤持久化及故障状态。所有写操作仅针对独立副本；只读故障代理用于状态截图，不转发业务写入。
 
 在已安装 iOS SDK 的 Mac 上执行：
 
@@ -54,3 +58,5 @@ bash apps/ios/tests/run-model-tests.sh
 5. 与 `apps/ios/design/technology-v1/01-*.png` 至 `06-*.png` 逐页截图比对，校准圆角、间距、字重及深色层级；检查普通和大字体下的数据标签、触控区域和 VoiceOver。
 
 设计图片及提示词已纳入仓库 `apps/ios/design/technology-v1`，打开该目录的 `index.html` 可浏览全部六张 4K 原图。这些文件仅用于设计评审，不打包进 iOS 应用。
+
+2026-09-10 继续补齐首页训练指标、真实睡眠历史、月度微曲线与科技风确认面板，详情见 [本轮校准记录](acceptance/2026-09-10-replica/README.md)。

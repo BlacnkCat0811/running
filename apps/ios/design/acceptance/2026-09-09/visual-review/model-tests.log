@@ -1,0 +1,11 @@
+PASS: late filter response cannot replace current list
+PASS: uncached failed filter does not retain another filter's rows
+PASS: failed list exits loading and reports offline
+PASS: detail failure exits spinner with retryable error
+PASS: old server response cannot publish into new server scope
+PASS: clear cache invalidates pending list response
+PASS: cancelled detail does not present a failure
+PASS: late detail cannot replace newly selected workout
+PASS: series failure keeps detail available with explicit feedback
+PASS: opening another workout clears both previous detail and series
+All model regression checks passed.

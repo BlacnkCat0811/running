@@ -111,6 +111,18 @@ struct MobileRecoveryBreakdown: Codable {
     let state: String?
     let hrvSampleCount: Int?
     let note: String
+
+    var stateLabel: String {
+        switch state {
+        case "recovered", "recovered_phys": return "恢复良好"
+        case "reduced": return "恢复不足"
+        case "depleted": return "需要休息"
+        default:
+            let hasSamples = lastNightSleepMinutes != nil || morningHrvMs != nil || restingHeartRateBpm != nil
+            return hasSamples ? "基线不足" : "暂无数据"
+        }
+    }
+
 }
 
 struct MobilePostRunVerdict: Codable {
@@ -712,4 +724,41 @@ struct MetricPoint: Codable, Identifiable {
     let value: Double
 
     var id: Double { offsetSeconds }
+}
+
+struct NativeRecoveryTrend: Decodable {
+    let days: [Day]
+    struct Day: Decodable, Identifiable {
+        let date: String
+        let sleepMinutes: Double?
+        var id: String { date }
+    }
+}
+
+/// Presentation bounds only; no on-device training/recovery scoring.
+struct HeartRateChartData {
+    let points: [MetricPoint]
+    let duration: Double
+    var maximum: Double? { points.map(\.value).max() }
+    var lowerBound: Double { min(40, floor((points.map(\.value).min() ?? 40) / 40) * 40) }
+    var upperBound: Double { max(200, ceil((maximum ?? 200) / 40) * 40) }
+    var timeTicks: [Double] {
+        let intervals: [Double] = [60, 120, 300, 600, 900, 1800, 3600]
+        let step: Double = intervals.first(where: { $0 >= duration / 5 }) ?? ceil(duration / 5 / 3600) * 3600
+        var ticks: [Double] = []
+        for tick in stride(from: 0.0, to: duration, by: step) {
+            if tick == 0 || duration - tick >= step * 0.6 { ticks.append(tick) }
+        }
+        ticks.append(duration)
+        return ticks
+    }
+    init(points: [MetricPoint], durationSeconds: Double) {
+        self.points = points.filter { $0.offsetSeconds.isFinite && $0.offsetSeconds >= 0 && $0.value.isFinite && $0.value > 0 }
+            .sorted { $0.offsetSeconds < $1.offsetSeconds }
+        duration = max(1, durationSeconds.isFinite ? durationSeconds : 0, self.points.last?.offsetSeconds ?? 0)
+    }
+    static func timeLabel(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
 }

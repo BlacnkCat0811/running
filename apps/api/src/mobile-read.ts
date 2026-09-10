@@ -121,14 +121,15 @@ export function assembleMobileCoach(args: {
     : null;
   const weekSessions = loadWeekSessions(database, week.periodStart, week.periodEnd);
   const recoveryFacts = new SqliteRecoveryFactsReadRepository(database);
-  // A wake date is the ownership date of a night. Do not promote yesterday's
-  // sleep into today's recovery card when today has no sample.
-  const currentNight = recoveryFacts.loadCanonicalNight(today, "Asia/Shanghai");
-  const factsBaseline = recoveryFacts.loadBaselines(new Date().toISOString(), "Asia/Shanghai");
+  // Keep sleep, overnight HRV and RHR on the same evidence date. Imports may
+  // lag behind the wall clock; compare that evidence with its own prior baseline.
+  const currentNight = recoveryFacts.loadRecentMainNights(today, 1, "Asia/Shanghai")[0] ?? null;
+  const recoveryDate = currentNight?.wakeDate ?? today;
+  const factsBaseline = recoveryFacts.loadBaselines(shanghaiInstant(recoveryDate, 12), "Asia/Shanghai");
   const currentHrv = currentNight ? recoveryFacts.loadHrvDay(currentNight.wakeDate, "Asia/Shanghai") : null;
   const sleep = { lastNight: currentNight?.asleepUnionMinutes ?? null, baseline: factsBaseline.sleepMinutes, nightsBelow: countNightsBelowSleepBaseline([0,1,2].map((offset) => recoveryFacts.loadCanonicalNight(shiftDate(currentNight?.wakeDate ?? today, -offset), "Asia/Shanghai")), factsBaseline.sleepMinutes) };
   const hrv = { current: currentHrv?.hrvSdnnMs ?? null, baseline: factsBaseline.hrvSdnnMs };
-  const rhrCurrent = recoveryFacts.loadRhrMedian(shanghaiInstant(today, 0), shanghaiInstant(shiftDate(today, 1), 0));
+  const rhrCurrent = recoveryFacts.loadRhrMedian(shanghaiInstant(recoveryDate, 0), shanghaiInstant(shiftDate(recoveryDate, 1), 0));
   const rhr = { current: rhrCurrent, baseline: factsBaseline.rhrBpm };
   const recoveryEvidenceStatus: CoachInput["recoveryEvidenceStatus"] =
     currentNight == null
@@ -229,6 +230,7 @@ export function assembleMobileCoach(args: {
       dashboard.calibration.requirements.sessions
     )
   };
+  const recovery = buildRecovery(input);
   const verdict = decideVerdict(input);
   const computed = decideNextSession(input, verdict);
   const nextSession = resolveLockedNextSession(computed, input.lockedSession, today);
@@ -240,7 +242,12 @@ export function assembleMobileCoach(args: {
     calibration,
     verdict,
     nextSession,
-    recovery: { ...buildRecovery(input), score: null, state: physState === "recovered_phys" ? "recovered" : physState, hrvSampleCount: currentHrv?.sampleCount ?? 0 },
+    recovery: {
+      ...recovery,
+      note: `${currentNight ? `依据 ${recoveryDate} 的恢复数据；` : ""}${recovery.note}`,
+      state: physState === "recovered_phys" ? "recovered" : physState,
+      hrvSampleCount: currentHrv?.sampleCount ?? 0
+    },
     postRun: buildPostRun(
       postRunWorkout,
       input.trueAbility,

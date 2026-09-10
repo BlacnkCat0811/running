@@ -122,7 +122,9 @@ final class ServerSession {
             lastError = "请填写 RAI 服务地址"
             return
         }
-        #if os(iOS)
+        // The Simulator shares the Mac's loopback interface. Only a physical
+        // iPhone must reject localhost as an unreachable desktop service address.
+        #if os(iOS) && !targetEnvironment(simulator)
         if isLocalhostURL {
             isReachable = false
             lastError = "请填写手机可访问的 RAI 服务地址"

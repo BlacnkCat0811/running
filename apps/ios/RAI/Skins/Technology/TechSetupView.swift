@@ -10,56 +10,68 @@ struct TechSetupView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                TechPageHeader(title: "RAI", eyebrow: "RUNNING INTELLIGENCE") { EmptyView() }
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 14) {
+                    Text("RAI").font(.system(size: 32, weight: .bold)).tracking(3).foregroundStyle(TechColor.cyan)
+                    Text("RUNNING\nRUNNING ANALYTICS").font(.system(size: 10, weight: .medium)).tracking(1.2)
+                        .foregroundStyle(TechColor.muted)
+                }.padding(.top, 8)
                 TechOrbit()
-                Text("让每一次跑步都有依据")
-                    .font(.title2.weight(.semibold)).foregroundStyle(TechColor.ink)
-                Text("连接 RAI 服务，获取你的跑步数据分析与训练建议。")
-                    .font(.subheadline).foregroundStyle(TechColor.muted)
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("让每一次跑步都有依据").font(.title2.weight(.semibold)).foregroundStyle(TechColor.ink)
+                    Text("连接 RAI 本地服务，获取专业的跑步数据分析与建议。")
+                        .font(.footnote).foregroundStyle(TechColor.muted)
+                }
                 TechPanel {
-                    VStack(alignment: .leading, spacing: 16) {
-                        TechSectionHeader(title: "RAI 服务", trailing: session.isReachable ? "已连接" : "待连接")
-                        ForEach(discovery.candidates, id: \.absoluteString) { url in
-                            Button {
-                                draftURL = url.absoluteString
-                                draftToken = Keychain.loadToken(for: draftURL)
-                            } label: {
-                                Label(url.absoluteString, systemImage: "server.rack")
-                                    .font(.footnote).foregroundStyle(TechColor.cyan)
-                                    .frame(minHeight: 44)
-                            }
-                        }
-                        TechField("服务地址") {
-                            TextField("http://192.168.1.8:5173", text: $draftURL)
-                                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                                .onChange(of: draftURL) { _, value in draftToken = Keychain.loadToken(for: value) }
-                        }
-                        TechField("访问令牌（可选）") { SecureField("可选", text: $draftToken) }
-                        if let error = session.lastError {
-                            Label(error, systemImage: "exclamationmark.circle")
-                                .font(.footnote).foregroundStyle(TechColor.coral)
+                    HStack(spacing: 12) {
+                        TechIconBox(systemName: "server.rack")
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("RAI 本地服务").font(.subheadline.weight(.semibold))
+                            Text("在同一网络下发现并连接你的 RAI 服务。")
+                                .font(.caption).foregroundStyle(TechColor.muted)
                         }
                     }
+                    ForEach(discovery.candidates, id: \.absoluteString) { url in
+                        Button {
+                            draftURL = url.absoluteString
+                            draftToken = Keychain.loadToken(for: draftURL)
+                        } label: {
+                            Label(url.absoluteString, systemImage: "server.rack")
+                                .font(.footnote).foregroundStyle(TechColor.cyan).frame(minHeight: 44)
+                        }
+                    }
+                    TechField("服务地址") {
+                        TextField("http://192.168.1.8:5173", text: $draftURL)
+                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .accessibilityIdentifier("setup.url")
+                            .onChange(of: draftURL) { _, value in draftToken = Keychain.loadToken(for: value) }
+                    }
+                    TechField("访问令牌（可选）") { SecureField("可选", text: $draftToken) }
+                    if !session.serverURLString.isEmpty, let error = session.lastError {
+                        Label(error, systemImage: "exclamationmark.circle")
+                            .font(.footnote).foregroundStyle(TechColor.coral)
+                    }
+                    TechPrimaryButton(title: "连接服务", isBusy: connecting,
+                                      isDisabled: draftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                        connecting = true
+                        session.serverURLString = draftURL
+                        session.apiToken = draftToken
+                        Task { await session.probe(); connecting = false }
+                    }
+                    Button { discovery.start() } label: {
+                        Text("重新发现").font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .overlay(Capsule().strokeBorder(TechColor.cyan.opacity(0.65), lineWidth: 1))
+                    }.buttonStyle(.plain).foregroundStyle(TechColor.cyan)
                 }
-                TechPrimaryButton(title: "连接服务", isBusy: connecting,
-                                  isDisabled: draftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                    connecting = true
-                    session.serverURLString = draftURL
-                    session.apiToken = draftToken
-                    Task { await session.probe(); connecting = false }
-                }
-                Button { discovery.start() } label: {
-                    Text("重新发现").font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .overlay(Capsule().strokeBorder(TechColor.cyan.opacity(0.65), lineWidth: 1))
-                }.buttonStyle(.plain).foregroundStyle(TechColor.cyan)
-                Label("手机与本地服务需在同一网络", systemImage: "wifi")
+                Label("手机与服务器在同一网络。", systemImage: "wifi")
                     .font(.caption).foregroundStyle(TechColor.muted).frame(maxWidth: .infinity)
-                AppSkinPicker()
+                DisclosureGroup("外观皮肤") { AppSkinPicker() }
+                    .font(.caption).tint(TechColor.muted)
             }.padding(20)
         }
-        .background(TechColor.background).toolbar(.hidden, for: .navigationBar)
+        .background(TechColor.background).foregroundStyle(TechColor.ink)
+        .toolbar(.hidden, for: .navigationBar)
         .scrollDismissesKeyboard(.interactively)
         .onAppear { draftURL = session.serverURLString; draftToken = session.apiToken }
     }

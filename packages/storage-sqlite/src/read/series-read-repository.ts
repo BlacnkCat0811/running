@@ -114,13 +114,15 @@ export class SqliteSeriesReadRepository {
           SELECT start_at, end_at, value_numeric, unit,
             ROW_NUMBER() OVER (ORDER BY start_at) AS sample_number,
             COUNT(*) OVER () AS total_samples,
-            FIRST_VALUE(unit) OVER (ORDER BY start_at) AS first_unit
+            FIRST_VALUE(unit) OVER (ORDER BY start_at) AS first_unit,
+            ROW_NUMBER() OVER (ORDER BY value_numeric DESC, start_at) AS peak_rank
           FROM deduplicated
         )
         SELECT start_at, end_at, value_numeric, unit, total_samples, first_unit
         FROM numbered
-        WHERE (sample_number - 1) % MAX(1, (total_samples + 599) / 600) = 0
+        WHERE (sample_number - 1) % MAX(1, (total_samples + 598) / 599) = 0
           OR sample_number = total_samples
+          OR peak_rank = 1
         ORDER BY sample_number
       `)
       .all(type, sourceName, startedAt, endedAt) as Record<string, unknown>[];

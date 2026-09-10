@@ -29,6 +29,9 @@ struct NativeRootView: View {
                     NavigationStack { if skin == .technology { TechNativeSettingsView() } else { NativeSettingsView() } }
                 }
             }
+            // Destinations belong to a skin. Recreate only the navigation subtree
+            // on a skin change; selectedTab and all environment services stay alive.
+            .id(skin)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if skin == .technology { TechTabBar(selection: $selectedTab) }
@@ -45,12 +48,18 @@ struct NativeRootView: View {
             }
         }
         .alert("请求未完成", isPresented: Binding(
-            get: { native.errorMessage != nil },
+            get: { skin == .pixel && native.errorMessage != nil },
             set: { if !$0 { native.errorMessage = nil } }
         )) {
             Button("知道了", role: .cancel) { native.errorMessage = nil }
         } message: {
             Text(native.errorMessage ?? "")
+        }
+        .sheet(isPresented: Binding(
+            get: { skin == .technology && native.errorMessage != nil },
+            set: { if !$0 { native.errorMessage = nil } }
+        )) {
+            TechRequestFailure(message: native.errorMessage ?? "")
         }
     }
 }
@@ -297,9 +306,6 @@ struct TodayView: View {
                             Text(data.verdict.title)
                                 .font(.headline.weight(.heavy))
                                 .foregroundStyle(PixelColor.ink)
-                            if data.verdict.stale {
-                                PixelBadge(title: "数据过期", color: PixelColor.coral, fill: PixelColor.paleCoral)
-                            }
                         }
                         Text(data.verdict.reason)
                             .font(.subheadline)
@@ -367,7 +373,7 @@ struct TodayView: View {
         let recoveryColor = data.recovery.state == "recovered" ? PixelColor.green : PixelColor.yellow
         return PixelPanel(tint: recoveryColor) {
             VStack(alignment: .leading, spacing: 11) {
-                PixelSectionHeader(title: "恢复", trailing: nativeStatusName(data.recovery.state), trailingColor: recoveryColor)
+                PixelSectionHeader(title: "恢复", trailing: data.recovery.stateLabel, trailingColor: recoveryColor)
                 HStack(spacing: 8) {
                     PixelMetricTile(title: "睡眠", value: data.recovery.lastNightSleepMinutes.map { "\(nativeNumber($0, digits: 0)) 分" } ?? "无记录", accent: PixelColor.cyan)
                     PixelMetricTile(title: "HRV", value: data.recovery.morningHrvMs.map { "\(nativeNumber($0)) ms" } ?? "无记录", accent: PixelColor.green)
@@ -1277,12 +1283,7 @@ struct WorkoutDetailView: View {
             VStack(alignment: .leading, spacing: 9) {
                 PixelSectionHeader(title: "路线", trailing: "\(route.count) 个点", trailingColor: PixelColor.cyan)
                 if route.count > 1 {
-                    Map {
-                        MapPolyline(coordinates: route.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) })
-                            .stroke(PixelColor.coral, lineWidth: 4)
-                    }
-                    .frame(height: 230)
-                    .overlay(Rectangle().stroke(PixelColor.ink, lineWidth: 2))
+                    TechRouteView(route: route)
                 } else {
                     Text("路线数据不足")
                         .font(.footnote)
@@ -1309,6 +1310,10 @@ struct WorkoutDetailView: View {
                         .font(.footnote)
                         .foregroundStyle(PixelColor.muted)
                         .frame(maxWidth: .infinity, minHeight: 120)
+                } else if selectedMetric == "heartRate" {
+                    NativeHeartRateChart(metric: metric,
+                        averageHeartRate: native.selectedWorkout?.workout.averageHeartRateBpm,
+                        durationSeconds: native.selectedWorkout?.workout.elapsedSeconds ?? 0)
                 } else {
                     Chart(metric.points) { point in
                         LineMark(

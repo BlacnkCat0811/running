@@ -1,0 +1,257 @@
+[
+  {
+    "name": "06-body-predictions",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968903.578
+  },
+  {
+    "name": "06-body-zones",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968897.037
+  },
+  {
+    "name": "01-body",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968889.331
+  },
+  {
+    "name": "01-week-daily",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968877.775
+  },
+  {
+    "name": "01-week",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968869.051
+  },
+  {
+    "name": "01-today-links",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968860.641
+  },
+  {
+    "name": "01-today-lower",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968850.765
+  },
+  {
+    "name": "01-today",
+    "test": "VisualAcceptance/test01TodayAndBody()",
+    "timestamp": 1788968842.338
+  },
+  {
+    "name": "02-detail-zones",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788969082.425
+  },
+  {
+    "name": "02-detail-load-evidence",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788969059.15
+  },
+  {
+    "name": "02-detail-load",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788969049.963
+  },
+  {
+    "name": "02-detail-quality",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788969042.373
+  },
+  {
+    "name": "02-detail-splits",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788969024.226
+  },
+  {
+    "name": "02-detail-series",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788969007.208
+  },
+  {
+    "name": "02-detail-metrics",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788968993.205
+  },
+  {
+    "name": "02-detail-route",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788968974.918
+  },
+  {
+    "name": "02-detail",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788968963.7
+  },
+  {
+    "name": "02-workouts",
+    "test": "VisualAcceptance/test02Workouts()",
+    "timestamp": 1788968940.408
+  },
+  {
+    "name": "03-plan-cancelled",
+    "test": "VisualAcceptance/test03Plan()",
+    "timestamp": 1788969154.588
+  },
+  {
+    "name": "03-plan-invalid",
+    "test": "VisualAcceptance/test03Plan()",
+    "timestamp": 1788969147.467
+  },
+  {
+    "name": "03-plan-editor",
+    "test": "VisualAcceptance/test03Plan()",
+    "timestamp": 1788969119.223
+  },
+  {
+    "name": "03-plan",
+    "test": "VisualAcceptance/test03Plan()",
+    "timestamp": 1788969112.707
+  },
+  {
+    "name": "04-records",
+    "test": "VisualAcceptance/test04Analysis()",
+    "timestamp": 1788969225.035
+  },
+  {
+    "name": "04-ability-zones",
+    "test": "VisualAcceptance/test04Analysis()",
+    "timestamp": 1788969215.481
+  },
+  {
+    "name": "04-ability",
+    "test": "VisualAcceptance/test04Analysis()",
+    "timestamp": 1788969209.078
+  },
+  {
+    "name": "04-trends-insights",
+    "test": "VisualAcceptance/test04Analysis()",
+    "timestamp": 1788969201.593
+  },
+  {
+    "name": "04-trends",
+    "test": "VisualAcceptance/test04Analysis()",
+    "timestamp": 1788969195.384
+  },
+  {
+    "name": "04-statistics-bottom",
+    "test": "VisualAcceptance/test04Analysis()",
+    "timestamp": 1788969189.404
+  },
+  {
+    "name": "04-statistics",
+    "test": "VisualAcceptance/test04Analysis()",
+    "timestamp": 1788969185.334
+  },
+  {
+    "name": "05-skin-picker",
+    "test": "VisualAcceptance/test05Settings()",
+    "timestamp": 1788969279.023
+  },
+  {
+    "name": "05-cache-confirm",
+    "test": "VisualAcceptance/test05Settings()",
+    "timestamp": 1788969271.18
+  },
+  {
+    "name": "05-cache",
+    "test": "VisualAcceptance/test05Settings()",
+    "timestamp": 1788969266.436
+  },
+  {
+    "name": "05-health-actions",
+    "test": "VisualAcceptance/test05Settings()",
+    "timestamp": 1788969260.537
+  },
+  {
+    "name": "05-health",
+    "test": "VisualAcceptance/test05Settings()",
+    "timestamp": 1788969256.305
+  },
+  {
+    "name": "05-settings",
+    "test": "VisualAcceptance/test05Settings()",
+    "timestamp": 1788969251.266
+  },
+  {
+    "name": "05-setup",
+    "test": "VisualAcceptance/test06Setup()",
+    "timestamp": 1788969316.759
+  },
+  {
+    "name": "large-settings",
+    "test": "VisualAcceptance/test07LargeText()",
+    "timestamp": 1788969377.142
+  },
+  {
+    "name": "large-statistics",
+    "test": "VisualAcceptance/test07LargeText()",
+    "timestamp": 1788969373.043
+  },
+  {
+    "name": "large-workouts",
+    "test": "VisualAcceptance/test07LargeText()",
+    "timestamp": 1788969368.848
+  },
+  {
+    "name": "large-today",
+    "test": "VisualAcceptance/test07LargeText()",
+    "timestamp": 1788969363.511
+  },
+  {
+    "name": "06-cold-loading",
+    "test": "VisualAcceptance/test08FaultStates()",
+    "timestamp": 1788969560
+  },
+  {
+    "name": "03-lock-preview-fixture",
+    "test": "VisualAcceptance/test08FaultStates()",
+    "timestamp": 1788969537.444
+  },
+  {
+    "name": "06-sync-busy",
+    "test": "VisualAcceptance/test08FaultStates()",
+    "timestamp": 1788969503.931
+  },
+  {
+    "name": "06-sync-failed",
+    "test": "VisualAcceptance/test08FaultStates()",
+    "timestamp": 1788969499.246
+  },
+  {
+    "name": "06-empty-workouts",
+    "test": "VisualAcceptance/test08FaultStates()",
+    "timestamp": 1788969488.111
+  },
+  {
+    "name": "06-offline-plan",
+    "test": "VisualAcceptance/test08FaultStates()",
+    "timestamp": 1788969459.695
+  },
+  {
+    "name": "06-offline",
+    "test": "VisualAcceptance/test08FaultStates()",
+    "timestamp": 1788969453.011
+  },
+  {
+    "name": "pixel-restored",
+    "test": "VisualAcceptance/test09AppearancePersistence()",
+    "timestamp": 1788969633.197
+  },
+  {
+    "name": "pixel-settings-before-switch",
+    "test": "VisualAcceptance/test09AppearancePersistence()",
+    "timestamp": 1788969601.267
+  },
+  {
+    "name": "03-revision-reloaded",
+    "test": "VisualAcceptance/test10RevisionConflict()",
+    "timestamp": 1788969686.598
+  },
+  {
+    "name": "03-revision-conflict",
+    "test": "VisualAcceptance/test10RevisionConflict()",
+    "timestamp": 1788969677.235
+  }
+]

@@ -55,6 +55,22 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
             precondition(condition(), name)
             print("PASS: \(name)")
         }
+        for (state, expected) in [("recovered", "恢复良好"), ("reduced", "恢复不足"), ("depleted", "需要休息"), ("unknown", "基线不足")] {
+            let json = "{\"state\":\"\(state)\",\"lastNightSleepMinutes\":420,\"note\":\"test\"}"
+            let recovery = try JSONDecoder().decode(MobileRecoveryBreakdown.self, from: Data(json.utf8))
+            check(recovery.stateLabel == expected, "recovery state \(state) is not pending")
+        }
+        let chart = HeartRateChartData(points: [
+            MetricPoint(timestamp: "", offsetSeconds: 2538, value: 176),
+            MetricPoint(timestamp: "", offsetSeconds: 0, value: 90),
+            MetricPoint(timestamp: "", offsetSeconds: 5, value: .nan),
+            MetricPoint(timestamp: "", offsetSeconds: -1, value: 200)
+        ], durationSeconds: 2538)
+        check(chart.maximum == 176 && chart.points.count == 2, "heart rate ignores invalid samples and sorts time")
+        check(chart.timeTicks == [0, 600, 1200, 1800, 2538], "heart rate time axis fits endpoint without overlap")
+        check(HeartRateChartData.timeLabel(2538) == "42:18", "heart rate uses minutes and seconds")
+        check(chart.lowerBound == 40 && chart.upperBound == 200, "heart rate matches reference scale")
+        check(HeartRateChartData(points: [], durationSeconds: 0).duration == 1, "empty heart rate has valid scale")
         func list(_ id: String) -> String {
             """
             {"items":[{"id":"\(id)","startedAt":"2026-09-08","endedAt":"2026-09-08","durationSeconds":600,"sourceCategory":"apple_health","sessionType":"easy","stimulusType":"easy","eligibilityStatus":"eligible","missingReasons":[],"qualityScore":1,"hasRoute":false}],"total":1,"limit":30,"offset":0}

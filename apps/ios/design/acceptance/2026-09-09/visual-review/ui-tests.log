@@ -1,0 +1,1275 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance -destination "platform=iOS Simulator,id=91C2D1F3-FB19-4843-B892-1A4F4AAF6D16" -derivedDataPath /tmp/rai-visual-tests -resultBundlePath /tmp/rai-technology-acceptance.xcresult CODE_SIGNING_ALLOWED=NO test
+
+Build settings from command line:
+    CODE_SIGNING_ALLOWED = NO
+
+Writing result bundle at path:
+	/tmp/rai-technology-acceptance.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'VisualAcceptance' in project 'VisualAcceptance' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /Users/ta/running/apps/ios/tests/VisualAcceptance.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+SwiftDriver VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-visual-tests/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-visual-tests/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-visual-tests/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-visual-tests/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-visual-tests/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-visual-tests/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftCompile normal arm64 Compiling\ VisualAcceptance.swift /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+SwiftCompile normal arm64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftEmitModule normal x86_64 Emitting\ module\ for\ VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftCompile normal x86_64 Compiling\ VisualAcceptance.swift /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftCompile normal x86_64 /Users/ta/running/apps/ios/tests/VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    
+
+SwiftDriverJobDiscovery normal x86_64 Compiling VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-visual-tests/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-visual-tests/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-visual-tests/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftDriverJobDiscovery normal arm64 Emitting module for VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation\ Requirements VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-visual-tests/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-visual-tests/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-visual-tests/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+SwiftDriverJobDiscovery normal x86_64 Emitting module for VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation\ Requirements VisualAcceptance normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation-Requirements -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target x86_64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-visual-tests/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-visual-tests/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-visual-tests/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/x86_64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/x86_64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance normal x86_64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target x86_64-apple-ios17.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -Os -L/tmp/rai-visual-tests/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/rai-visual-tests/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -filelist /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_lto.o -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftmodule @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance-linker-args.resp -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport -o /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance
+
+SwiftDriverJobDiscovery normal arm64 Compiling VisualAcceptance.swift (in target 'VisualAcceptance' from project 'VisualAcceptance')
+
+SwiftDriver\ Compilation VisualAcceptance normal arm64 com.apple.xcode.tools.swift.compiler (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-Swift-Compilation -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name VisualAcceptance -Onone @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList -module-alias Testing\=_Testing_Unavailable -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-bare-slash-regex -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -Xfrontend -serialize-debugging-options -index-store-path /tmp/rai-visual-tests/Index.noindex/DataStore -swift-version 5 -I /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -parse-as-library -c -j6 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /tmp/rai-visual-tests/SDKStatCaches.noindex/iphonesimulator26.5-23F73-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /tmp/rai-visual-tests/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -sdk-module-cache-path /tmp/rai-visual-tests/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule -validate-clang-modules-once -clang-build-session-file /tmp/rai-visual-tests/ModuleCache.noindex/Session.modulevalidation -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_const_extract_protocols.json -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-generated-files.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-own-target-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-all-target-headers.hmap -Xcc -iquote -Xcc /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance-project-headers.hmap -Xcc -I/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/include -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources-normal/arm64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources/arm64 -Xcc -I/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/DerivedSources -emit-objc-header -emit-objc-header-path /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-Swift.h -working-directory /Users/ta/running/apps/ios/tests -experimental-emit-module-separately -disable-cmo
+
+Ld /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance normal arm64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -Xlinker -reproducible -target arm64-apple-ios17.0-simulator -bundle -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -Os -L/tmp/rai-visual-tests/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -L/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -L/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F/tmp/rai-visual-tests/Build/Intermediates.noindex/EagerLinkingTBDs/Debug-iphonesimulator -F/tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -iframework /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -filelist /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.LinkFileList -Xlinker -rpath -Xlinker /usr/lib/swift -Xlinker -rpath -Xlinker @loader_path/Frameworks -Xlinker -dead_strip -Xlinker -object_path_lto -Xlinker /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_lto.o -Xlinker -objc_abi_version -Xlinker 2 -Xlinker -dependency_info -Xlinker /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_dependency_info.dat -fobjc-link-runtime -L/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/iphonesimulator -L/usr/lib/swift -Xlinker -add_ast_path -Xlinker /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftmodule @/tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance-linker-args.resp -Xlinker -needed_framework -Xlinker XCTest -framework XCTest -Xlinker -needed-lXCTestSwiftSupport -lXCTestSwiftSupport -o /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance
+
+Copy /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.abi.json /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.abi.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.abi.json /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/x86_64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.abi.json /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.abi.json (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.abi.json /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/arm64-apple-ios-simulator.abi.json
+
+Copy /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftsourceinfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.swiftsourceinfo /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/x86_64-apple-ios-simulator.swiftsourceinfo
+
+Copy /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftsourceinfo (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-copy -exclude .DS_Store -exclude CVS -exclude .svn -exclude .git -exclude .hg -strip-unsigned-binaries -strip-deterministic -strip-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/strip -resolve-src-symlinks -rename /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.swiftsourceinfo /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance.swiftmodule/Project/arm64-apple-ios-simulator.swiftsourceinfo
+
+CreateUniversalBinary /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance normal arm64\ x86_64 (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/lipo -create /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/Binary/VisualAcceptance /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/Binary/VisualAcceptance -output /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance
+
+ExtractAppIntentsMetadata (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/appintentsmetadataprocessor --toolchain-dir /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --module-name VisualAcceptance --sdk-root /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk --xcode-version 17F42 --platform-family iOS --deployment-target 17.0 --bundle-identifier app.rai.visual-tests --output /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest --target-triple arm64-apple-ios17.0-simulator --target-triple x86_64-apple-ios17.0-simulator --binary-file /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --dependency-file /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance_dependency_info.dat --dependency-file /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance_dependency_info.dat --stringsdata-file /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/ExtractedAppShortcutsMetadata.stringsdata --stringsdata-file /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/ExtractedAppShortcutsMetadata.stringsdata --source-file-list /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftFileList --source-file-list /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftFileList --metadata-file-list /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyMetadataFileList --static-metadata-file-list /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/VisualAcceptance.DependencyStaticMetadataFileList --swift-const-vals-list /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/arm64/VisualAcceptance.SwiftConstValuesFileList --swift-const-vals-list /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/Objects-normal/x86_64/VisualAcceptance.SwiftConstValuesFileList --compile-time-extraction --deployment-aware-processing --validate-assistant-intents --no-app-shortcuts-localization
+2026-09-09 23:46:36.089 appintentsmetadataprocessor[77930:2568482] Starting appintentsmetadataprocessor export
+2026-09-09 23:46:36.098 appintentsmetadataprocessor[77930:2568482] warning: Metadata extraction skipped. No AppIntents.framework dependency found.
+
+CopySwiftLibs /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    builtin-swiftStdLibTool --copy --verbose --scan-executable /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance --scan-folder /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --scan-folder /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/PlugIns --scan-folder /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/SystemExtensions --scan-folder /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Extensions --platform iphonesimulator --toolchain /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain --destination /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/Frameworks --strip-bitcode --scan-executable /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib/libXCTestSwiftSupport.dylib --strip-bitcode-tool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/bitcode_strip --emit-dependency-info /tmp/rai-visual-tests/Build/Intermediates.noindex/VisualAcceptance.build/Debug-iphonesimulator/VisualAcceptance.build/SwiftStdLibToolInputDependencies.dep --filter-for-swift-os
+Ignoring --strip-bitcode because --sign was not passed
+
+GenerateDSYMFile /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest.dSYM /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance (in target 'VisualAcceptance' from project 'VisualAcceptance')
+    cd /Users/ta/running/apps/ios/tests
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/dsymutil /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest/VisualAcceptance -o /tmp/rai-visual-tests/Build/Products/Debug-iphonesimulator/VisualAcceptance-Runner.app/PlugIns/VisualAcceptance.xctest.dSYM
+
+2026-09-09 23:46:48.727422+0800 VisualAcceptance-Runner[77938:2569322] [Default] Running tests...
+    t =      nans Interface orientation changed to Portrait
+Test Suite 'All tests' started at 2026-09-09 23:47:00.731.
+Test Suite 'VisualAcceptance.xctest' started at 2026-09-09 23:47:00.767.
+Test Suite 'VisualAcceptance' started at 2026-09-09 23:47:00.787.
+Test Case '-[VisualAcceptance.VisualAcceptance test01TodayAndBody]' started.
+    t =     0.03s Start Test at 2026-09-09 23:47:00.825
+    t =     0.08s Set Up
+    t =     0.09s     Open app.rai.running.debug
+    t =     0.10s         Launch app.rai.running.debug
+    t =     0.80s             Setting up automation session
+    t =     5.36s             Wait for app.rai.running.debug to idle
+    t =    12.26s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    13.31s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    13.31s             Checking existence of `"tab.设置" Button`
+    t =    13.77s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    14.85s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    14.85s             Checking existence of `"打开训练计划" Button`
+    t =    20.91s Find the Application 'app.rai.running.debug'
+    t =    21.54s Added attachment named '01-today'
+    t =    21.54s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    23.68s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    23.94s Added attachment named '01-today-accessibility'
+    t =    23.96s Swipe up Application 'app.rai.running.debug'
+    t =    23.96s     Wait for app.rai.running.debug to idle
+    t =    23.98s     Find the Application 'app.rai.running.debug'
+    t =    24.23s     Check for interrupting elements affecting "RAI" Application
+    t =    24.50s     Synthesize event
+    t =    24.98s     Wait for app.rai.running.debug to idle
+    t =    27.95s Find the Application 'app.rai.running.debug'
+    t =    29.97s Added attachment named '01-today-lower'
+    t =    29.97s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    31.72s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    31.96s Added attachment named '01-today-lower-accessibility'
+    t =    31.96s Checking existence of `"tab.设置" Button`
+    t =    32.31s Find the "tab.设置" Button
+    t =    32.74s Checking existence of `"today.week" Button`
+    t =    33.10s Find the "today.week" Button
+    t =    33.49s Get number of matches for: Descendants matching type Keyboard
+    t =    33.84s Get number of matches for: Descendants matching type Keyboard
+    t =    34.11s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    34.11s     Wait for app.rai.running.debug to idle
+    t =    34.13s     Find the Application 'app.rai.running.debug'
+    t =    34.47s     Check for interrupting elements affecting "RAI" Application
+    t =    34.73s     Synthesize event
+    t =    34.75s         Find the Application 'app.rai.running.debug'
+    t =    34.99s         Find the Application 'app.rai.running.debug'
+    t =    35.29s         Find the Application 'app.rai.running.debug'
+    t =    35.64s         Find the Application 'app.rai.running.debug'
+    t =    36.00s         Find the Application 'app.rai.running.debug'
+    t =    37.22s     Wait for app.rai.running.debug to idle
+    t =    37.60s Checking existence of `"today.week" Button`
+    t =    37.98s Find the "today.week" Button
+    t =    39.19s Find the Application 'app.rai.running.debug'
+    t =    39.84s Added attachment named '01-today-links'
+    t =    39.85s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    41.30s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    41.54s Added attachment named '01-today-links-accessibility'
+    t =    41.55s Tap "today.week" Button
+    t =    41.55s     Wait for app.rai.running.debug to idle
+    t =    41.56s     Find the "today.week" Button
+    t =    41.96s     Check for interrupting elements affecting "today.week" Button
+    t =    42.20s     Synthesize event
+    t =    42.61s     Wait for app.rai.running.debug to idle
+    t =    46.25s Checking existence of `"本周活动" NavigationBar`
+    t =    47.52s Find the Application 'app.rai.running.debug'
+    t =    48.25s Added attachment named '01-week'
+    t =    48.26s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    50.76s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    51.07s Added attachment named '01-week-accessibility'
+    t =    51.08s Swipe up Application 'app.rai.running.debug'
+    t =    51.08s     Wait for app.rai.running.debug to idle
+    t =    51.09s     Find the Application 'app.rai.running.debug'
+    t =    51.45s     Check for interrupting elements affecting "RAI" Application
+    t =    51.89s     Synthesize event
+    t =    52.35s     Wait for app.rai.running.debug to idle
+    t =    55.37s Find the Application 'app.rai.running.debug'
+    t =    56.98s Added attachment named '01-week-daily'
+    t =    56.98s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    59.20s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    59.61s Added attachment named '01-week-daily-accessibility'
+    t =    59.61s Tap Button (Element at index 0)
+    t =    59.61s     Wait for app.rai.running.debug to idle
+    t =    59.63s     Find the Button (Element at index 0)
+    t =    59.95s     Check for interrupting elements affecting "navigation.back" Button
+    t =    60.41s     Synthesize event
+    t =    60.87s     Wait for app.rai.running.debug to idle
+    t =    61.88s Checking existence of `"tab.设置" Button`
+    t =    62.13s Find the "tab.设置" Button
+    t =    62.57s Checking existence of `"today.body" Button`
+    t =    62.92s Find the "today.body" Button
+    t =    63.31s Tap "today.body" Button
+    t =    63.31s     Wait for app.rai.running.debug to idle
+    t =    63.32s     Find the "today.body" Button
+    t =    63.62s     Check for interrupting elements affecting "today.body" Button
+    t =    63.89s     Synthesize event
+    t =    64.34s     Wait for app.rai.running.debug to idle
+    t =    65.19s Waiting 45.0s for "配速分区" StaticText to exist
+    t =    66.23s     Checking `Expect predicate `existsNoRetry == 1` for object "配速分区" StaticText`
+    t =    66.23s         Checking existence of `"配速分区" StaticText`
+    t =    66.60s Checking existence of `"身体指标" NavigationBar`
+    t =    67.84s Find the Application 'app.rai.running.debug'
+    t =    68.53s Added attachment named '01-body'
+    t =    68.54s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    70.77s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    71.09s Added attachment named '01-body-accessibility'
+    t =    71.10s Swipe up Application 'app.rai.running.debug'
+    t =    71.10s     Wait for app.rai.running.debug to idle
+    t =    71.11s     Find the Application 'app.rai.running.debug'
+    t =    71.45s     Check for interrupting elements affecting "RAI" Application
+    t =    71.75s     Synthesize event
+    t =    72.24s     Wait for app.rai.running.debug to idle
+    t =    75.16s Find the Application 'app.rai.running.debug'
+    t =    76.24s Added attachment named '06-body-zones'
+    t =    76.24s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    78.70s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    79.13s Added attachment named '06-body-zones-accessibility'
+    t =    79.14s Swipe up Application 'app.rai.running.debug'
+    t =    79.14s     Wait for app.rai.running.debug to idle
+    t =    79.16s     Find the Application 'app.rai.running.debug'
+    t =    79.61s     Check for interrupting elements affecting "RAI" Application
+    t =    80.06s     Synthesize event
+    t =    80.52s     Wait for app.rai.running.debug to idle
+    t =    81.93s Find the Application 'app.rai.running.debug'
+    t =    82.78s Added attachment named '06-body-predictions'
+    t =    82.78s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    84.73s Requesting snapshot of accessibility hierarchy for app with pid 77948
+    t =    85.23s Added attachment named '06-body-predictions-accessibility'
+    t =    85.23s Tap Button (Element at index 0)
+    t =    85.23s     Wait for app.rai.running.debug to idle
+    t =    85.24s     Find the Button (Element at index 0)
+    t =    85.57s     Check for interrupting elements affecting "navigation.back" Button
+    t =    86.06s     Synthesize event
+    t =    86.49s     Wait for app.rai.running.debug to idle
+    t =    87.57s Checking existence of `"tab.今日" Button`
+    t =    87.83s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test01TodayAndBody]' passed (88.948 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test02Workouts]' started.
+    t =     0.00s Start Test at 2026-09-09 23:48:29.775
+    t =     0.05s Set Up
+    t =     0.05s     Open app.rai.running.debug
+    t =     0.05s         Launch app.rai.running.debug
+    t =     0.05s             Terminate app.rai.running.debug:77948
+    t =     1.66s             Setting up automation session
+    t =     6.14s             Wait for app.rai.running.debug to idle
+    t =    13.56s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    14.60s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    14.60s             Checking existence of `"tab.设置" Button`
+    t =    15.32s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    16.34s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    16.34s             Checking existence of `"打开训练计划" Button`
+    t =    21.54s Tap "tab.训练" Button
+    t =    21.54s     Wait for app.rai.running.debug to idle
+    t =    21.55s     Find the "tab.训练" Button
+    t =    21.74s     Check for interrupting elements affecting "tab.训练" Button
+    t =    22.03s     Synthesize event
+    t =    22.40s     Wait for app.rai.running.debug to idle
+    t =    29.88s Find the Application 'app.rai.running.debug'
+    t =    30.64s Added attachment named '02-workouts'
+    t =    30.64s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    34.52s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    35.07s Added attachment named '02-workouts-accessibility'
+    t =    35.26s Checking existence of `"tab.设置" Button`
+    t =    35.65s Find the "tab.设置" Button
+    t =    36.27s Checking existence of `"workout.training_session_2a8dd6c7af289b2d19f2353077957c77" Button`
+    t =    36.63s Find the "workout.training_session_2a8dd6c7af289b2d19f2353077957c77" Button
+    t =    37.17s Get number of matches for: Descendants matching type Keyboard
+    t =    37.49s Get number of matches for: Descendants matching type Keyboard
+    t =    37.76s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    37.76s     Wait for app.rai.running.debug to idle
+    t =    37.77s     Find the Application 'app.rai.running.debug'
+    t =    37.97s     Check for interrupting elements affecting "RAI" Application
+    t =    38.41s     Synthesize event
+    t =    38.42s         Find the Application 'app.rai.running.debug'
+    t =    38.62s         Find the Application 'app.rai.running.debug'
+    t =    39.07s         Find the Application 'app.rai.running.debug'
+    t =    39.41s         Find the Application 'app.rai.running.debug'
+    t =    39.70s         Find the Application 'app.rai.running.debug'
+    t =    41.02s     Wait for app.rai.running.debug to idle
+    t =    42.83s Checking existence of `"workout.training_session_2a8dd6c7af289b2d19f2353077957c77" Button`
+    t =    43.54s Find the "workout.training_session_2a8dd6c7af289b2d19f2353077957c77" Button
+    t =    44.45s Tap "workout.training_session_2a8dd6c7af289b2d19f2353077957c77" Button
+    t =    44.45s     Wait for app.rai.running.debug to idle
+    t =    44.47s     Find the "workout.training_session_2a8dd6c7af289b2d19f2353077957c77" Button
+    t =    45.23s     Check for interrupting elements affecting "workout.training_session_2a8dd6c7af289b2d19f2353077957c77" Button
+    t =    45.52s     Synthesize event
+    t =    45.87s     Wait for app.rai.running.debug to idle
+    t =    49.19s Waiting 45.0s for "全部训练指标" Button to exist
+    t =    50.28s     Checking `Expect predicate `existsNoRetry == 1` for object "全部训练指标" Button`
+    t =    50.28s         Checking existence of `"全部训练指标" Button`
+    t =    51.23s Checking existence of `"训练详情" NavigationBar`
+    t =    52.56s Find the Application 'app.rai.running.debug'
+    t =    53.93s Added attachment named '02-detail'
+    t =    53.93s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    57.76s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    58.22s Added attachment named '02-detail-accessibility'
+    t =    58.23s Swipe up Application 'app.rai.running.debug'
+    t =    58.23s     Wait for app.rai.running.debug to idle
+    t =    58.24s     Find the Application 'app.rai.running.debug'
+    t =    59.36s     Check for interrupting elements affecting "RAI" Application
+    t =    59.86s     Synthesize event
+    t =    60.34s     Wait for app.rai.running.debug to idle
+    t =    63.40s Find the Application 'app.rai.running.debug'
+    t =    65.15s Added attachment named '02-detail-route'
+    t =    65.15s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    68.08s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    68.59s Added attachment named '02-detail-route-accessibility'
+    t =    68.59s Checking existence of `"tab.设置" Button`
+    t =    69.21s Find the "tab.设置" Button
+    t =    69.89s Checking existence of `"全部训练指标" Button`
+    t =    70.60s Find the "全部训练指标" Button
+    t =    71.15s Get number of matches for: Descendants matching type Keyboard
+    t =    71.64s Get number of matches for: Descendants matching type Keyboard
+    t =    71.97s Press Application 'app.rai.running.debug'[0.07, 0.35] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.65] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    71.97s     Wait for app.rai.running.debug to idle
+    t =    71.98s     Find the Application 'app.rai.running.debug'
+    t =    72.43s     Check for interrupting elements affecting "RAI" Application
+    t =    72.83s     Synthesize event
+    t =    72.84s         Find the Application 'app.rai.running.debug'
+    t =    73.11s         Find the Application 'app.rai.running.debug'
+    t =    73.76s         Find the Application 'app.rai.running.debug'
+    t =    74.42s         Find the Application 'app.rai.running.debug'
+    t =    75.08s         Find the Application 'app.rai.running.debug'
+    t =    76.64s     Wait for app.rai.running.debug to idle
+    t =    78.30s Checking existence of `"全部训练指标" Button`
+    t =    79.00s Find the "全部训练指标" Button
+    t =    79.75s Tap "全部训练指标" Button
+    t =    79.75s     Wait for app.rai.running.debug to idle
+    t =    79.76s     Find the "全部训练指标" Button
+    t =    80.30s     Check for interrupting elements affecting "全部训练指标" Button
+    t =    80.81s     Synthesize event
+    t =    81.28s     Wait for app.rai.running.debug to idle
+    t =    82.16s Find the Application 'app.rai.running.debug'
+    t =    83.43s Added attachment named '02-detail-metrics'
+    t =    83.44s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    87.66s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =    88.46s Added attachment named '02-detail-metrics-accessibility'
+    t =    88.46s Checking existence of `"tab.设置" Button`
+    t =    89.21s Find the "tab.设置" Button
+    t =    89.97s Checking existence of `"全部训练指标" Button`
+    t =    90.71s Find the "全部训练指标" Button
+    t =    91.35s Tap "全部训练指标" Button
+    t =    91.35s     Wait for app.rai.running.debug to idle
+    t =    91.36s     Find the "全部训练指标" Button
+    t =    92.09s     Check for interrupting elements affecting "全部训练指标" Button
+    t =    92.54s     Synthesize event
+    t =    93.12s     Wait for app.rai.running.debug to idle
+    t =    93.20s Checking existence of `"tab.设置" Button`
+    t =    93.92s Find the "tab.设置" Button
+    t =    94.62s Checking existence of `"训练时序" StaticText`
+    t =    95.24s Find the "训练时序" StaticText
+    t =    96.54s Find the Application 'app.rai.running.debug'
+    t =    97.44s Added attachment named '02-detail-series'
+    t =    97.44s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   101.02s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   101.67s Added attachment named '02-detail-series-accessibility'
+    t =   101.67s Checking existence of `"tab.设置" Button`
+    t =   102.25s Find the "tab.设置" Button
+    t =   102.95s Checking existence of `"分段" StaticText`
+    t =   103.49s Find the "分段" StaticText
+    t =   104.26s Get number of matches for: Descendants matching type Keyboard
+    t =   104.60s Get number of matches for: Descendants matching type Keyboard
+    t =   105.22s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =   105.23s     Wait for app.rai.running.debug to idle
+    t =   105.23s     Find the Application 'app.rai.running.debug'
+    t =   105.58s     Check for interrupting elements affecting "RAI" Application
+    t =   105.91s     Synthesize event
+    t =   105.93s         Find the Application 'app.rai.running.debug'
+    t =   106.59s         Find the Application 'app.rai.running.debug'
+    t =   107.18s         Find the Application 'app.rai.running.debug'
+    t =   107.83s         Find the Application 'app.rai.running.debug'
+    t =   108.28s         Find the Application 'app.rai.running.debug'
+    t =   109.61s     Wait for app.rai.running.debug to idle
+    t =   111.39s Checking existence of `"分段" StaticText`
+    t =   112.06s Find the "分段" StaticText
+    t =   113.56s Find the Application 'app.rai.running.debug'
+    t =   114.45s Added attachment named '02-detail-splits'
+    t =   114.46s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   117.96s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   118.72s Added attachment named '02-detail-splits-accessibility'
+    t =   118.72s Checking existence of `"tab.设置" Button`
+    t =   119.60s Find the "tab.设置" Button
+    t =   120.24s Checking existence of `"质量与模型" StaticText`
+    t =   121.05s Find the "质量与模型" StaticText
+    t =   121.62s Get number of matches for: Descendants matching type Keyboard
+    t =   122.18s Get number of matches for: Descendants matching type Keyboard
+    t =   122.86s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =   122.86s     Wait for app.rai.running.debug to idle
+    t =   122.87s     Find the Application 'app.rai.running.debug'
+    t =   123.51s     Check for interrupting elements affecting "RAI" Application
+    t =   124.11s     Synthesize event
+    t =   124.12s         Find the Application 'app.rai.running.debug'
+    t =   124.71s         Find the Application 'app.rai.running.debug'
+    t =   125.31s         Find the Application 'app.rai.running.debug'
+    t =   125.77s         Find the Application 'app.rai.running.debug'
+    t =   126.32s         Find the Application 'app.rai.running.debug'
+    t =   127.90s     Wait for app.rai.running.debug to idle
+    t =   129.49s Checking existence of `"质量与模型" StaticText`
+    t =   130.33s Find the "质量与模型" StaticText
+    t =   131.84s Find the Application 'app.rai.running.debug'
+    t =   132.60s Added attachment named '02-detail-quality'
+    t =   132.60s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   135.61s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   136.04s Added attachment named '02-detail-quality-accessibility'
+    t =   136.05s Checking existence of `"tab.设置" Button`
+    t =   136.67s Find the "tab.设置" Button
+    t =   137.31s Checking existence of `"训练负荷" StaticText`
+    t =   137.76s Find the "训练负荷" StaticText
+    t =   139.23s Find the Application 'app.rai.running.debug'
+    t =   140.19s Added attachment named '02-detail-load'
+    t =   140.19s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   143.23s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   143.81s Added attachment named '02-detail-load-accessibility'
+    t =   143.81s Checking existence of `"tab.设置" Button`
+    t =   144.28s Find the "tab.设置" Button
+    t =   145.02s Checking existence of `"负荷依据" Button`
+    t =   145.63s Find the "负荷依据" Button
+    t =   146.16s Tap "负荷依据" Button
+    t =   146.16s     Wait for app.rai.running.debug to idle
+    t =   146.17s     Find the "负荷依据" Button
+    t =   146.47s     Check for interrupting elements affecting "负荷依据" Button
+    t =   146.95s     Synthesize event
+    t =   147.49s     Wait for app.rai.running.debug to idle
+    t =   148.32s Find the Application 'app.rai.running.debug'
+    t =   149.38s Added attachment named '02-detail-load-evidence'
+    t =   149.38s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   152.32s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   153.09s Added attachment named '02-detail-load-evidence-accessibility'
+    t =   153.09s Checking existence of `"tab.设置" Button`
+    t =   153.64s Find the "tab.设置" Button
+    t =   154.29s Checking existence of `"区间暴露" StaticText`
+    t =   155.04s Find the "区间暴露" StaticText
+    t =   155.79s Get number of matches for: Descendants matching type Keyboard
+    t =   156.53s Get number of matches for: Descendants matching type Keyboard
+    t =   157.15s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =   157.15s     Wait for app.rai.running.debug to idle
+    t =   157.16s     Find the Application 'app.rai.running.debug'
+    t =   157.72s     Check for interrupting elements affecting "RAI" Application
+    t =   158.41s     Synthesize event
+    t =   158.42s         Find the Application 'app.rai.running.debug'
+    t =   158.91s         Find the Application 'app.rai.running.debug'
+    t =   159.65s         Find the Application 'app.rai.running.debug'
+    t =   160.08s         Find the Application 'app.rai.running.debug'
+    t =   160.74s         Find the Application 'app.rai.running.debug'
+    t =   162.16s     Wait for app.rai.running.debug to idle
+    t =   162.84s Checking existence of `"区间暴露" StaticText`
+    t =   163.52s Find the "区间暴露" StaticText
+    t =   164.33s Get number of matches for: Descendants matching type Keyboard
+    t =   164.93s Get number of matches for: Descendants matching type Keyboard
+    t =   165.47s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =   165.47s     Wait for app.rai.running.debug to idle
+    t =   165.49s     Find the Application 'app.rai.running.debug'
+    t =   166.12s     Check for interrupting elements affecting "RAI" Application
+    t =   166.61s     Synthesize event
+    t =   166.62s         Find the Application 'app.rai.running.debug'
+    t =   167.20s         Find the Application 'app.rai.running.debug'
+    t =   167.71s         Find the Application 'app.rai.running.debug'
+    t =   168.32s         Find the Application 'app.rai.running.debug'
+    t =   169.06s         Find the Application 'app.rai.running.debug'
+    t =   170.57s     Wait for app.rai.running.debug to idle
+    t =   171.84s Find the Application 'app.rai.running.debug'
+    t =   172.65s Added attachment named '02-detail-zones'
+    t =   172.66s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   174.61s Requesting snapshot of accessibility hierarchy for app with pid 77979
+    t =   175.16s Added attachment named '02-detail-zones-accessibility'
+    t =   175.17s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test02Workouts]' passed (176.184 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test03Plan]' started.
+    t =     0.00s Start Test at 2026-09-09 23:51:25.960
+    t =     0.03s Set Up
+    t =     0.03s     Open app.rai.running.debug
+    t =     0.03s         Launch app.rai.running.debug
+    t =     0.04s             Terminate app.rai.running.debug:77979
+    t =     1.63s             Setting up automation session
+    t =     6.00s             Wait for app.rai.running.debug to idle
+    t =    13.41s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    14.42s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    14.42s             Checking existence of `"tab.设置" Button`
+    t =    15.16s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    16.16s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    16.16s             Checking existence of `"打开训练计划" Button`
+    t =    21.38s Tap "打开训练计划" Button
+    t =    21.38s     Wait for app.rai.running.debug to idle
+    t =    21.39s     Find the "打开训练计划" Button
+    t =    21.59s     Check for interrupting elements affecting "calendar" Button
+    t =    21.87s     Synthesize event
+    t =    22.32s     Wait for app.rai.running.debug to idle
+    t =    26.05s Find the Application 'app.rai.running.debug'
+    t =    26.75s Added attachment named '03-plan'
+    t =    26.75s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    28.43s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    28.72s Added attachment named '03-plan-accessibility'
+    t =    28.72s Tap "编辑周计划" Button
+    t =    28.72s     Wait for app.rai.running.debug to idle
+    t =    28.74s     Find the "编辑周计划" Button
+    t =    29.04s     Check for interrupting elements affecting "编辑周计划" Button
+    t =    29.27s     Synthesize event
+    t =    29.68s     Wait for app.rai.running.debug to idle
+    t =    32.34s Find the Application 'app.rai.running.debug'
+    t =    33.26s Added attachment named '03-plan-editor'
+    t =    33.27s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    35.60s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    36.00s Added attachment named '03-plan-editor-accessibility'
+    t =    36.00s Checking existence of `"plan.weeklyDistance" TextField`
+    t =    36.51s Tap "plan.weeklyDistance" TextField
+    t =    36.51s     Wait for app.rai.running.debug to idle
+    t =    36.52s     Find the "plan.weeklyDistance" TextField
+    t =    36.78s     Check for interrupting elements affecting "plan.weeklyDistance" TextField
+    t =    37.08s     Synthesize event
+    t =    37.48s     Wait for app.rai.running.debug to idle
+    t =    40.24s Type '501' into "plan.weeklyDistance" TextField
+    t =    40.24s     Wait for app.rai.running.debug to idle
+    t =    40.47s     Find the "plan.weeklyDistance" TextField
+    t =    41.17s     Check for interrupting elements affecting "plan.weeklyDistance" TextField
+    t =    41.65s     Synthesize event
+    t =    42.27s     Wait for app.rai.running.debug to idle
+    t =    44.03s Checking existence of `"tab.设置" Button`
+    t =    44.57s Find the "tab.设置" Button
+    t =    45.50s Checking existence of `"保存计划" Button`
+    t =    46.32s Find the "保存计划" Button
+    t =    46.80s Get number of matches for: Descendants matching type Keyboard
+    t =    47.19s Get number of matches for: Descendants matching type Keyboard
+    t =    47.56s Press Application 'app.rai.running.debug'[0.07, 0.45] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.20] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    47.56s     Wait for app.rai.running.debug to idle
+    t =    47.57s     Find the Application 'app.rai.running.debug'
+    t =    48.09s     Check for interrupting elements affecting "RAI" Application
+    t =    48.47s     Synthesize event
+    t =    48.48s         Find the Application 'app.rai.running.debug'
+    t =    48.91s         Find the Application 'app.rai.running.debug'
+    t =    49.27s         Find the Application 'app.rai.running.debug'
+    t =    49.51s         Find the Application 'app.rai.running.debug'
+    t =    49.83s         Find the Application 'app.rai.running.debug'
+    t =    51.12s     Wait for app.rai.running.debug to idle
+    t =    52.77s Checking existence of `"保存计划" Button`
+    t =    53.18s Find the "保存计划" Button
+    t =    53.73s Get number of matches for: Descendants matching type Keyboard
+    t =    54.19s Get number of matches for: Descendants matching type Keyboard
+    t =    54.63s Press Application 'app.rai.running.debug'[0.07, 0.45] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.20] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    54.63s     Wait for app.rai.running.debug to idle
+    t =    54.65s     Find the Application 'app.rai.running.debug'
+    t =    54.99s     Check for interrupting elements affecting "RAI" Application
+    t =    55.41s     Synthesize event
+    t =    55.43s         Find the Application 'app.rai.running.debug'
+    t =    55.83s         Find the Application 'app.rai.running.debug'
+    t =    56.13s         Find the Application 'app.rai.running.debug'
+    t =    56.57s         Find the Application 'app.rai.running.debug'
+    t =    56.89s         Find the Application 'app.rai.running.debug'
+    t =    58.03s     Wait for app.rai.running.debug to idle
+    t =    58.44s Checking existence of `"保存计划" Button`
+    t =    58.88s Find the "保存计划" Button
+    t =    59.51s Find the "保存计划" Button
+    t =    60.77s Find the Application 'app.rai.running.debug'
+    t =    61.51s Added attachment named '03-plan-invalid'
+    t =    61.51s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    63.87s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    64.25s Added attachment named '03-plan-invalid-accessibility'
+    t =    64.26s Tap "取消" Button
+    t =    64.26s     Wait for app.rai.running.debug to idle
+    t =    64.29s     Find the "取消" Button
+    t =    64.61s     Check for interrupting elements affecting "取消" Button
+    t =    64.94s     Synthesize event
+    t =    65.46s     Wait for app.rai.running.debug to idle
+    t =    67.07s Checking existence of `"编辑周计划" Button`
+    t =    68.03s Find the Application 'app.rai.running.debug'
+    t =    68.63s Added attachment named '03-plan-cancelled'
+    t =    68.63s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    70.72s Requesting snapshot of accessibility hierarchy for app with pid 78051
+    t =    70.94s Added attachment named '03-plan-cancelled-accessibility'
+    t =    70.95s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test03Plan]' passed (71.810 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test04Analysis]' started.
+    t =     0.00s Start Test at 2026-09-09 23:52:37.771
+    t =     0.05s Set Up
+    t =     0.05s     Open app.rai.running.debug
+    t =     0.06s         Launch app.rai.running.debug
+    t =     0.06s             Terminate app.rai.running.debug:78051
+    t =     1.77s             Setting up automation session
+    t =     6.23s             Wait for app.rai.running.debug to idle
+    t =    13.80s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    14.81s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    14.81s             Checking existence of `"tab.设置" Button`
+    t =    15.49s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    16.51s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    16.51s             Checking existence of `"打开训练计划" Button`
+    t =    21.78s Tap "tab.统计" Button
+    t =    21.78s     Wait for app.rai.running.debug to idle
+    t =    21.90s     Find the "tab.统计" Button
+    t =    22.10s     Check for interrupting elements affecting "tab.统计" Button
+    t =    22.44s     Synthesize event
+    t =    22.81s     Wait for app.rai.running.debug to idle
+    t =    27.05s Find the Application 'app.rai.running.debug'
+    t =    27.56s Added attachment named '04-statistics'
+    t =    27.57s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    28.72s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    28.84s Added attachment named '04-statistics-accessibility'
+    t =    28.85s Swipe up Application 'app.rai.running.debug'
+    t =    28.85s     Wait for app.rai.running.debug to idle
+    t =    28.86s     Find the Application 'app.rai.running.debug'
+    t =    28.97s     Check for interrupting elements affecting "RAI" Application
+    t =    29.08s     Synthesize event
+    t =    29.54s     Wait for app.rai.running.debug to idle
+    t =    30.92s Find the Application 'app.rai.running.debug'
+    t =    31.63s Added attachment named '04-statistics-bottom'
+    t =    31.64s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    33.02s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    33.16s Added attachment named '04-statistics-bottom-accessibility'
+    t =    33.16s Tap "tab.趋势" Button
+    t =    33.16s     Wait for app.rai.running.debug to idle
+    t =    33.18s     Find the "tab.趋势" Button
+    t =    33.30s     Check for interrupting elements affecting "tab.趋势" Button
+    t =    33.46s     Synthesize event
+    t =    33.84s     Wait for app.rai.running.debug to idle
+    t =    37.17s Find the Application 'app.rai.running.debug'
+    t =    37.61s Added attachment named '04-trends'
+    t =    37.62s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    38.96s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    39.10s Added attachment named '04-trends-accessibility'
+    t =    39.11s Checking existence of `"tab.设置" Button`
+    t =    39.19s Find the "tab.设置" Button
+    t =    39.37s Checking existence of `"analysis.ability" Button`
+    t =    39.49s Find the "analysis.ability" Button
+    t =    39.63s Get number of matches for: Descendants matching type Keyboard
+    t =    39.73s Get number of matches for: Descendants matching type Keyboard
+    t =    39.80s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    39.80s     Wait for app.rai.running.debug to idle
+    t =    39.82s     Find the Application 'app.rai.running.debug'
+    t =    40.01s     Check for interrupting elements affecting "RAI" Application
+    t =    40.20s     Synthesize event
+    t =    40.20s         Find the Application 'app.rai.running.debug'
+    t =    40.29s         Find the Application 'app.rai.running.debug'
+    t =    40.38s         Find the Application 'app.rai.running.debug'
+    t =    40.49s         Find the Application 'app.rai.running.debug'
+    t =    40.63s         Find the Application 'app.rai.running.debug'
+    t =    41.63s     Wait for app.rai.running.debug to idle
+    t =    42.05s Checking existence of `"analysis.ability" Button`
+    t =    42.16s Find the "analysis.ability" Button
+    t =    43.09s Find the Application 'app.rai.running.debug'
+    t =    43.82s Added attachment named '04-trends-insights'
+    t =    43.83s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    45.03s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    45.15s Added attachment named '04-trends-insights-accessibility'
+    t =    45.17s Tap "analysis.ability" Button
+    t =    45.17s     Wait for app.rai.running.debug to idle
+    t =    45.19s     Find the "analysis.ability" Button
+    t =    45.28s     Check for interrupting elements affecting "analysis.ability" Button
+    t =    45.37s     Synthesize event
+    t =    45.80s     Wait for app.rai.running.debug to idle
+    t =    50.80s Find the Application 'app.rai.running.debug'
+    t =    51.31s Added attachment named '04-ability'
+    t =    51.31s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    53.35s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    53.62s Added attachment named '04-ability-accessibility'
+    t =    53.62s Swipe up Application 'app.rai.running.debug'
+    t =    53.63s     Wait for app.rai.running.debug to idle
+    t =    53.65s     Find the Application 'app.rai.running.debug'
+    t =    53.86s     Check for interrupting elements affecting "RAI" Application
+    t =    54.13s     Synthesize event
+    t =    54.61s     Wait for app.rai.running.debug to idle
+    t =    56.52s Find the Application 'app.rai.running.debug'
+    t =    57.71s Added attachment named '04-ability-zones'
+    t =    57.72s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    59.43s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    59.66s Added attachment named '04-ability-zones-accessibility'
+    t =    59.67s Tap Button (Element at index 0)
+    t =    59.67s     Wait for app.rai.running.debug to idle
+    t =    59.69s     Find the Button (Element at index 0)
+    t =    60.01s     Check for interrupting elements affecting "navigation.back" Button
+    t =    60.30s     Synthesize event
+    t =    60.72s     Wait for app.rai.running.debug to idle
+    t =    61.74s Tap "tab.统计" Button
+    t =    61.74s     Wait for app.rai.running.debug to idle
+    t =    61.76s     Find the "tab.统计" Button
+    t =    62.15s     Check for interrupting elements affecting "tab.统计" Button
+    t =    62.46s     Synthesize event
+    t =    62.94s     Wait for app.rai.running.debug to idle
+    t =    63.31s Tap "tab.趋势" Button
+    t =    63.31s     Wait for app.rai.running.debug to idle
+    t =    63.46s     Find the "tab.趋势" Button
+    t =    63.79s     Check for interrupting elements affecting "tab.趋势" Button
+    t =    64.01s     Synthesize event
+    t =    64.49s     Wait for app.rai.running.debug to idle
+    t =    64.69s Tap "纪录" Button
+    t =    64.69s     Wait for app.rai.running.debug to idle
+    t =    64.84s     Find the "纪录" Button
+    t =    65.20s     Check for interrupting elements affecting "纪录" Button
+    t =    65.29s     Synthesize event
+    t =    65.89s     Wait for app.rai.running.debug to idle
+    t =    66.71s Find the Application 'app.rai.running.debug'
+    t =    67.27s Added attachment named '04-records'
+    t =    67.27s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    68.14s Requesting snapshot of accessibility hierarchy for app with pid 78082
+    t =    68.25s Added attachment named '04-records-accessibility'
+    t =    68.25s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test04Analysis]' passed (69.077 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test05Settings]' started.
+    t =     0.00s Start Test at 2026-09-09 23:53:46.852
+    t =     0.07s Set Up
+    t =     0.07s     Open app.rai.running.debug
+    t =     0.08s         Launch app.rai.running.debug
+    t =     0.08s             Terminate app.rai.running.debug:78082
+    t =     1.72s             Setting up automation session
+    t =     6.19s             Wait for app.rai.running.debug to idle
+    t =    13.31s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    14.31s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    14.31s             Checking existence of `"tab.设置" Button`
+    t =    14.98s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    16.01s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    16.01s             Checking existence of `"打开训练计划" Button`
+    t =    21.19s Tap "tab.设置" Button
+    t =    21.19s     Wait for app.rai.running.debug to idle
+    t =    21.20s     Find the "tab.设置" Button
+    t =    21.39s     Check for interrupting elements affecting "tab.设置" Button
+    t =    21.66s     Synthesize event
+    t =    22.03s     Wait for app.rai.running.debug to idle
+    t =    23.75s Find the Application 'app.rai.running.debug'
+    t =    24.42s Added attachment named '05-settings'
+    t =    24.42s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    26.04s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    26.15s Added attachment named '05-settings-accessibility'
+    t =    26.15s Tap Button (First Match)
+    t =    26.15s     Wait for app.rai.running.debug to idle
+    t =    26.20s     Find the Button (First Match)
+    t =    26.28s     Check for interrupting elements affecting "Apple 健康, 只读同步" Button
+    t =    26.41s     Synthesize event
+    t =    26.82s     Wait for app.rai.running.debug to idle
+    t =    28.08s Find the Application 'app.rai.running.debug'
+    t =    29.46s Added attachment named '05-health'
+    t =    29.46s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    30.60s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    30.74s Added attachment named '05-health-accessibility'
+    t =    30.75s Swipe up Application 'app.rai.running.debug'
+    t =    30.75s     Wait for app.rai.running.debug to idle
+    t =    30.76s     Find the Application 'app.rai.running.debug'
+    t =    30.89s     Check for interrupting elements affecting "RAI" Application
+    t =    30.98s     Synthesize event
+    t =    31.47s     Wait for app.rai.running.debug to idle
+    t =    32.84s Find the Application 'app.rai.running.debug'
+    t =    33.69s Added attachment named '05-health-actions'
+    t =    33.69s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    34.99s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    35.14s Added attachment named '05-health-actions-accessibility'
+    t =    35.14s Tap Button (Element at index 0)
+    t =    35.14s     Wait for app.rai.running.debug to idle
+    t =    35.15s     Find the Button (Element at index 0)
+    t =    35.26s     Check for interrupting elements affecting "navigation.back" Button
+    t =    35.41s     Synthesize event
+    t =    35.84s     Wait for app.rai.running.debug to idle
+    t =    36.83s Tap Button (First Match)
+    t =    36.83s     Wait for app.rai.running.debug to idle
+    t =    36.86s     Find the Button (First Match)
+    t =    36.94s     Check for interrupting elements affecting "本地缓存, 可离线查看" Button
+    t =    37.08s     Synthesize event
+    t =    37.48s     Wait for app.rai.running.debug to idle
+    t =    38.51s Find the Application 'app.rai.running.debug'
+    t =    39.59s Added attachment named '05-cache'
+    t =    39.59s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    40.28s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    40.45s Added attachment named '05-cache-accessibility'
+    t =    40.45s Tap "清除本机页面缓存" Button
+    t =    40.45s     Wait for app.rai.running.debug to idle
+    t =    40.48s     Find the "清除本机页面缓存" Button
+    t =    40.56s     Check for interrupting elements affecting "清除本机页面缓存" Button
+    t =    40.66s     Synthesize event
+    t =    41.08s     Wait for app.rai.running.debug to idle
+    t =    41.76s Waiting 5.0s for "清除本机缓存？" Alert to exist
+    t =    42.84s     Checking `Expect predicate `existsNoRetry == 1` for object "清除本机缓存？" Alert`
+    t =    42.84s         Checking existence of `"清除本机缓存？" Alert`
+    t =    43.76s Find the Application 'app.rai.running.debug'
+    t =    44.33s Added attachment named '05-cache-confirm'
+    t =    44.33s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    46.12s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    46.28s Added attachment named '05-cache-confirm-accessibility'
+    t =    46.29s Tap "取消" Button
+    t =    46.29s     Wait for app.rai.running.debug to idle
+    t =    46.32s     Find the "取消" Button
+    t =    46.67s     Check for interrupting elements affecting "取消" Button
+    t =    46.86s     Synthesize event
+    t =    47.31s     Wait for app.rai.running.debug to idle
+    t =    47.68s Tap Button (Element at index 0)
+    t =    47.68s     Wait for app.rai.running.debug to idle
+    t =    47.76s     Find the Button (Element at index 0)
+    t =    47.99s     Check for interrupting elements affecting "navigation.back" Button
+    t =    48.14s     Synthesize event
+    t =    48.57s     Wait for app.rai.running.debug to idle
+    t =    49.63s Tap Button (First Match)
+    t =    49.63s     Wait for app.rai.running.debug to idle
+    t =    49.64s     Find the Button (First Match)
+    t =    49.71s     Check for interrupting elements affecting "外观皮肤, 冰蓝科技 / 清新像素" Button
+    t =    49.84s     Synthesize event
+    t =    50.32s     Wait for app.rai.running.debug to idle
+    t =    51.72s Find the Application 'app.rai.running.debug'
+    t =    52.17s Added attachment named '05-skin-picker'
+    t =    52.18s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    52.83s Requesting snapshot of accessibility hierarchy for app with pid 78109
+    t =    52.96s Added attachment named '05-skin-picker-accessibility'
+    t =    52.96s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test05Settings]' passed (53.697 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test06Setup]' started.
+    t =     0.00s Start Test at 2026-09-09 23:54:40.552
+    t =     0.06s Set Up
+    t =     0.07s     Open app.rai.running.debug
+    t =     0.07s         Launch app.rai.running.debug
+    t =     0.07s             Terminate app.rai.running.debug:78109
+    t =     1.55s             Setting up automation session
+    t =     6.61s             Wait for app.rai.running.debug to idle
+    t =    14.60s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    15.62s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    15.62s             Checking existence of `"tab.设置" Button`
+    t =    16.34s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    17.35s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    17.36s             Checking existence of `"打开训练计划" Button`
+    t =    22.61s Open app.rai.running.debug
+    t =    22.61s     Launch app.rai.running.debug
+    t =    22.62s         Terminate app.rai.running.debug:78129
+    t =    24.10s         Setting up automation session
+    t =    28.72s         Wait for app.rai.running.debug to idle
+    t =    33.50s Waiting 10.0s for "setup.url" TextField to exist
+    t =    34.51s     Checking `Expect predicate `existsNoRetry == 1` for object "setup.url" TextField`
+    t =    34.51s         Checking existence of `"setup.url" TextField`
+    t =    35.56s Find the Application 'app.rai.running.debug'
+    t =    36.21s Added attachment named '05-setup'
+    t =    36.21s Requesting snapshot of accessibility hierarchy for app with pid 78139
+    t =    36.80s Requesting snapshot of accessibility hierarchy for app with pid 78139
+    t =    36.88s Added attachment named '05-setup-accessibility'
+    t =    36.88s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test06Setup]' passed (37.748 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test07LargeText]' started.
+    t =     0.00s Start Test at 2026-09-09 23:55:18.300
+    t =     0.04s Set Up
+    t =     0.04s     Open app.rai.running.debug
+    t =     0.04s         Launch app.rai.running.debug
+    t =     0.04s             Terminate app.rai.running.debug:78139
+    t =     1.46s             Setting up automation session
+    t =     6.04s             Wait for app.rai.running.debug to idle
+    t =    13.51s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    14.52s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    14.52s             Checking existence of `"tab.设置" Button`
+    t =    15.17s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    16.19s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    16.19s             Checking existence of `"打开训练计划" Button`
+    t =    21.44s Open app.rai.running.debug
+    t =    21.44s     Launch app.rai.running.debug
+    t =    21.44s         Terminate app.rai.running.debug:78149
+    t =    23.02s         Setting up automation session
+    t =    27.10s         Wait for app.rai.running.debug to idle
+    t =    35.93s Waiting 40.0s for "tab.设置" Button to exist
+    t =    36.96s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    36.96s         Checking existence of `"tab.设置" Button`
+    t =    37.57s Waiting 30.0s for "打开训练计划" Button to exist
+    t =    38.59s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    38.59s         Checking existence of `"打开训练计划" Button`
+    t =    44.61s Find the Application 'app.rai.running.debug'
+    t =    45.21s Added attachment named 'large-today'
+    t =    45.22s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    47.18s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    47.43s Added attachment named 'large-today-accessibility'
+    t =    47.43s Tap "tab.训练" Button
+    t =    47.43s     Wait for app.rai.running.debug to idle
+    t =    47.44s     Find the "tab.训练" Button
+    t =    47.65s     Check for interrupting elements affecting "tab.训练" Button
+    t =    47.88s     Synthesize event
+    t =    48.26s     Wait for app.rai.running.debug to idle
+    t =    49.94s Find the Application 'app.rai.running.debug'
+    t =    50.55s Added attachment named 'large-workouts'
+    t =    50.55s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    51.71s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    51.86s Added attachment named 'large-workouts-accessibility'
+    t =    51.86s Tap "tab.统计" Button
+    t =    51.86s     Wait for app.rai.running.debug to idle
+    t =    51.88s     Find the "tab.统计" Button
+    t =    51.98s     Check for interrupting elements affecting "tab.统计" Button
+    t =    52.09s     Synthesize event
+    t =    52.48s     Wait for app.rai.running.debug to idle
+    t =    54.28s Find the Application 'app.rai.running.debug'
+    t =    54.74s Added attachment named 'large-statistics'
+    t =    54.75s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    56.12s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    56.28s Added attachment named 'large-statistics-accessibility'
+    t =    56.28s Tap "tab.设置" Button
+    t =    56.28s     Wait for app.rai.running.debug to idle
+    t =    56.30s     Find the "tab.设置" Button
+    t =    56.46s     Check for interrupting elements affecting "tab.设置" Button
+    t =    56.57s     Synthesize event
+    t =    56.95s     Wait for app.rai.running.debug to idle
+    t =    58.23s Find the Application 'app.rai.running.debug'
+    t =    58.84s Added attachment named 'large-settings'
+    t =    58.85s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    59.99s Requesting snapshot of accessibility hierarchy for app with pid 78157
+    t =    60.11s Added attachment named 'large-settings-accessibility'
+    t =    60.11s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test07LargeText]' passed (60.788 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test08FaultStates]' started.
+    t =     0.00s Start Test at 2026-09-09 23:56:19.089
+    t =     0.05s Set Up
+    t =     0.06s     Open app.rai.running.debug
+    t =     0.08s         Launch app.rai.running.debug
+    t =     0.08s             Terminate app.rai.running.debug:78157
+    t =     2.71s             Setting up automation session
+    t =     7.45s             Wait for app.rai.running.debug to idle
+    t =    14.78s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    15.79s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    15.79s             Checking existence of `"tab.设置" Button`
+    t =    16.35s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    17.37s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    17.38s             Checking existence of `"打开训练计划" Button`
+    t =    22.61s Open app.rai.running.debug
+    t =    22.62s     Launch app.rai.running.debug
+    t =    22.62s         Terminate app.rai.running.debug:78173
+    t =    24.19s         Setting up automation session
+    t =    28.45s         Wait for app.rai.running.debug to idle
+    t =    35.79s Waiting 30.0s for "打开训练计划" Button to exist
+    t =    36.80s     Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    36.80s         Checking existence of `"打开训练计划" Button`
+    t =    47.65s Open app.rai.running.debug
+    t =    47.65s     Launch app.rai.running.debug
+    t =    47.66s         Terminate app.rai.running.debug:78181
+    t =    49.36s         Setting up automation session
+    t =    53.77s         Wait for app.rai.running.debug to idle
+    t =    70.16s Checking existence of `"知道了" Button`
+    t =    70.76s Tap "知道了" Button
+    t =    70.76s     Wait for app.rai.running.debug to idle
+    t =    70.77s     Find the "知道了" Button
+    t =    71.25s     Check for interrupting elements affecting "知道了" Button
+    t =    71.59s     Synthesize event
+    t =    71.95s     Wait for app.rai.running.debug to idle
+    t =    73.28s Find the Application 'app.rai.running.debug'
+    t =    73.92s Added attachment named '06-offline'
+    t =    73.93s Requesting snapshot of accessibility hierarchy for app with pid 78195
+    t =    76.01s Requesting snapshot of accessibility hierarchy for app with pid 78195
+    t =    76.29s Added attachment named '06-offline-accessibility'
+    t =    76.29s Tap "打开训练计划" Button
+    t =    76.29s     Wait for app.rai.running.debug to idle
+    t =    76.30s     Find the "打开训练计划" Button
+    t =    76.54s     Check for interrupting elements affecting "calendar" Button
+    t =    76.90s     Synthesize event
+    t =    77.31s     Wait for app.rai.running.debug to idle
+    t =    78.25s Find the "编辑周计划" Button
+    t =    80.01s Find the Application 'app.rai.running.debug'
+    t =    80.61s Added attachment named '06-offline-plan'
+    t =    80.61s Requesting snapshot of accessibility hierarchy for app with pid 78195
+    t =    82.16s Requesting snapshot of accessibility hierarchy for app with pid 78195
+    t =    82.40s Added attachment named '06-offline-plan-accessibility'
+    t =    82.43s Open app.rai.running.debug
+    t =    82.43s     Launch app.rai.running.debug
+    t =    82.43s         Terminate app.rai.running.debug:78195
+    t =    83.99s         Setting up automation session
+    t =    88.92s         Wait for app.rai.running.debug to idle
+    t =   104.25s Tap "tab.训练" Button
+    t =   104.25s     Wait for app.rai.running.debug to idle
+    t =   104.26s     Find the "tab.训练" Button
+    t =   104.76s     Check for interrupting elements affecting "tab.训练" Button
+    t =   105.09s     Synthesize event
+    t =   105.49s     Wait for app.rai.running.debug to idle
+    t =   106.55s Waiting 20.0s for "尚无训练记录" StaticText to exist
+    t =   107.60s     Checking `Expect predicate `existsNoRetry == 1` for object "尚无训练记录" StaticText`
+    t =   107.61s         Checking existence of `"尚无训练记录" StaticText`
+    t =   108.50s Find the Application 'app.rai.running.debug'
+    t =   109.02s Added attachment named '06-empty-workouts'
+    t =   109.03s Requesting snapshot of accessibility hierarchy for app with pid 78208
+    t =   109.84s Requesting snapshot of accessibility hierarchy for app with pid 78208
+    t =   109.94s Added attachment named '06-empty-workouts-accessibility'
+    t =   109.96s Tap "tab.设置" Button
+    t =   109.97s     Wait for app.rai.running.debug to idle
+    t =   109.99s     Find the "tab.设置" Button
+    t =   110.08s     Check for interrupting elements affecting "tab.设置" Button
+    t =   110.16s     Synthesize event
+    t =   110.60s     Wait for app.rai.running.debug to idle
+    t =   111.20s Tap Button (First Match)
+    t =   111.20s     Wait for app.rai.running.debug to idle
+    t =   111.21s     Find the Button (First Match)
+    t =   111.43s     Check for interrupting elements affecting "Apple 健康, 只读同步" Button
+    t =   111.60s     Synthesize event
+    t =   111.96s     Wait for app.rai.running.debug to idle
+    t =   112.54s Checking existence of `"tab.设置" Button`
+    t =   113.11s Find the "tab.设置" Button
+    t =   113.70s Checking existence of `"health.sync" Button`
+    t =   113.85s Find the "health.sync" Button
+    t =   113.98s Find the "health.sync" Button
+    t =   114.07s Tap "health.sync" Button
+    t =   114.07s     Wait for app.rai.running.debug to idle
+    t =   114.09s     Find the "health.sync" Button
+    t =   114.25s     Check for interrupting elements affecting "health.sync" Button
+    t =   114.36s     Synthesize event
+    t =   114.75s     Wait for app.rai.running.debug to idle
+    t =   115.00s Waiting 15.0s for "同步未完成" StaticText to exist
+    t =   116.02s     Checking `Expect predicate `existsNoRetry == 1` for object "同步未完成" StaticText`
+    t =   116.02s         Checking existence of `"同步未完成" StaticText`
+    t =   116.11s Get number of matches for: Descendants matching type Keyboard
+    t =   116.18s Get number of matches for: Descendants matching type Keyboard
+    t =   116.29s Press Application 'app.rai.running.debug'[0.07, 0.35] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.65] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =   116.29s     Wait for app.rai.running.debug to idle
+    t =   116.30s     Find the Application 'app.rai.running.debug'
+    t =   116.48s     Check for interrupting elements affecting "RAI" Application
+    t =   116.59s     Synthesize event
+    t =   116.59s         Find the Application 'app.rai.running.debug'
+    t =   116.80s         Find the Application 'app.rai.running.debug'
+    t =   116.94s         Find the Application 'app.rai.running.debug'
+    t =   117.06s         Find the Application 'app.rai.running.debug'
+    t =   117.24s         Find the Application 'app.rai.running.debug'
+    t =   118.21s     Wait for app.rai.running.debug to idle
+    t =   119.45s Find the Application 'app.rai.running.debug'
+    t =   120.16s Added attachment named '06-sync-failed'
+    t =   120.16s Requesting snapshot of accessibility hierarchy for app with pid 78208
+    t =   121.05s Requesting snapshot of accessibility hierarchy for app with pid 78208
+    t =   121.19s Added attachment named '06-sync-failed-accessibility'
+    t =   121.22s Checking existence of `"tab.设置" Button`
+    t =   121.36s Find the "tab.设置" Button
+    t =   121.49s Checking existence of `"health.sync" Button`
+    t =   121.63s Find the "health.sync" Button
+    t =   121.97s Tap "health.sync" Button
+    t =   121.97s     Wait for app.rai.running.debug to idle
+    t =   121.99s     Find the "health.sync" Button
+    t =   122.12s     Check for interrupting elements affecting "health.sync" Button
+    t =   122.27s     Synthesize event
+    t =   122.68s     Wait for app.rai.running.debug to idle
+    t =   123.54s Find the Application 'app.rai.running.debug'
+    t =   124.84s Added attachment named '06-sync-busy'
+    t =   124.84s Requesting snapshot of accessibility hierarchy for app with pid 78208
+    t =   126.59s Requesting snapshot of accessibility hierarchy for app with pid 78208
+    t =   126.82s Added attachment named '06-sync-busy-accessibility'
+    t =   126.83s Terminate app.rai.running.debug:78208
+    t =   127.87s Open app.rai.running.debug
+    t =   127.88s     Launch app.rai.running.debug
+    t =   129.31s         Setting up automation session
+    t =   134.19s         Wait for app.rai.running.debug to idle
+    t =   149.75s Tap "打开训练计划" Button
+    t =   149.75s     Wait for app.rai.running.debug to idle
+    t =   149.76s     Find the "打开训练计划" Button
+    t =   150.20s     Check for interrupting elements affecting "calendar" Button
+    t =   150.44s     Synthesize event
+    t =   150.97s     Wait for app.rai.running.debug to idle
+    t =   151.88s Checking existence of `"tab.设置" Button`
+    t =   152.90s Find the "tab.设置" Button
+    t =   153.69s Checking existence of `"锁定今日安排" Button`
+    t =   154.21s Find the "锁定今日安排" Button
+    t =   154.53s Tap "锁定今日安排" Button
+    t =   154.53s     Wait for app.rai.running.debug to idle
+    t =   154.54s     Find the "锁定今日安排" Button
+    t =   154.72s     Check for interrupting elements affecting "锁定今日安排" Button
+    t =   154.95s     Synthesize event
+    t =   155.33s     Wait for app.rai.running.debug to idle
+    t =   157.10s Find the Application 'app.rai.running.debug'
+    t =   158.36s Added attachment named '03-lock-preview-fixture'
+    t =   158.36s Requesting snapshot of accessibility hierarchy for app with pid 78227
+    t =   162.02s Requesting snapshot of accessibility hierarchy for app with pid 78227
+    t =   162.51s Added attachment named '03-lock-preview-fixture-accessibility'
+    t =   162.51s Tap "暂不锁定" Button
+    t =   162.51s     Wait for app.rai.running.debug to idle
+    t =   162.53s     Find the "暂不锁定" Button
+    t =   162.94s     Check for interrupting elements affecting "暂不锁定" Button
+    t =   163.42s     Synthesize event
+    t =   163.52s         Scroll element to visible
+    t =   163.53s         Find the "暂不锁定" Button
+    t =   164.11s         Computed hit point {214.16043613707166, 840.99065420560748} after scrolling to visible
+    t =   164.45s     Wait for app.rai.running.debug to idle
+    t =   164.93s Open app.rai.running.debug
+    t =   164.93s     Launch app.rai.running.debug
+    t =   164.93s         Terminate app.rai.running.debug:78227
+    t =   167.28s         Setting up automation session
+    t =   172.09s         Wait for app.rai.running.debug to idle
+    t =   178.05s Waiting 10.0s for "tab.设置" Button to exist
+    t =   179.12s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =   179.13s         Checking existence of `"tab.设置" Button`
+    t =   180.16s Find the Application 'app.rai.running.debug'
+    t =   180.91s Added attachment named '06-cold-loading'
+    t =   180.91s Requesting snapshot of accessibility hierarchy for app with pid 78243
+    t =   181.87s Requesting snapshot of accessibility hierarchy for app with pid 78243
+    t =   181.98s Added attachment named '06-cold-loading-accessibility'
+    t =   181.98s Terminate app.rai.running.debug:78243
+    t =   183.01s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test08FaultStates]' passed (183.505 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test09AppearancePersistence]' started.
+    t =     0.00s Start Test at 2026-09-09 23:59:22.595
+    t =     0.05s Set Up
+    t =     0.05s     Open app.rai.running.debug
+    t =     0.05s         Launch app.rai.running.debug
+    t =     0.49s             Setting up automation session
+    t =     5.00s             Wait for app.rai.running.debug to idle
+    t =    12.82s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    13.83s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    13.83s             Checking existence of `"tab.设置" Button`
+    t =    14.60s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    15.63s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    15.63s             Checking existence of `"打开训练计划" Button`
+    t =    20.83s Open app.rai.running.debug
+    t =    20.83s     Launch app.rai.running.debug
+    t =    20.83s         Terminate app.rai.running.debug:78250
+    t =    22.33s         Setting up automation session
+    t =    26.65s         Wait for app.rai.running.debug to idle
+    t =    33.49s Checking existence of `"tab.设置" Button`
+    t =    34.40s Tap "设置" Button
+    t =    34.40s     Wait for app.rai.running.debug to idle
+    t =    34.41s     Find the "设置" Button
+    t =    34.81s     Check for interrupting elements affecting "设置" Button
+    t =    35.36s     Synthesize event
+    t =    35.71s     Wait for app.rai.running.debug to idle
+    t =    37.83s Find the Application 'app.rai.running.debug'
+    t =    38.67s Added attachment named 'pixel-settings-before-switch'
+    t =    38.68s Requesting snapshot of accessibility hierarchy for app with pid 78260
+    t =    40.37s Requesting snapshot of accessibility hierarchy for app with pid 78260
+    t =    40.53s Added attachment named 'pixel-settings-before-switch-accessibility'
+    t =    40.53s Checking existence of `"tab.设置" Button`
+    t =    40.65s Find the Window (First Match)
+    t =    40.68s Checking existence of `"appearance.technology" Button`
+    t =    40.99s Find the "appearance.technology" Button
+    t =    41.19s Tap "appearance.technology" Button
+    t =    41.19s     Wait for app.rai.running.debug to idle
+    t =    41.21s     Find the "appearance.technology" Button
+    t =    41.52s     Check for interrupting elements affecting "appearance.technology" Button
+    t =    41.67s     Synthesize event
+    t =    42.08s     Wait for app.rai.running.debug to idle
+    t =    43.38s Waiting 10.0s for "tab.设置" Button to exist
+    t =    44.40s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    44.40s         Checking existence of `"tab.设置" Button`
+    t =    44.49s Find the "tab.设置" Button
+    t =    44.57s Terminate app.rai.running.debug:78260
+    t =    45.64s Open app.rai.running.debug
+    t =    45.65s     Launch app.rai.running.debug
+    t =    46.26s         Setting up automation session
+    t =    51.46s         Wait for app.rai.running.debug to idle
+    t =    59.41s Waiting 15.0s for "tab.设置" Button to exist
+    t =    60.43s     Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    60.43s         Checking existence of `"tab.设置" Button`
+    t =    61.11s Tap "tab.设置" Button
+    t =    61.12s     Wait for app.rai.running.debug to idle
+    t =    61.13s     Find the "tab.设置" Button
+    t =    61.63s     Check for interrupting elements affecting "tab.设置" Button
+    t =    61.97s     Synthesize event
+    t =    62.39s     Wait for app.rai.running.debug to idle
+    t =    63.52s Tap Button (First Match)
+    t =    63.52s     Wait for app.rai.running.debug to idle
+    t =    63.54s     Find the Button (First Match)
+    t =    63.95s     Check for interrupting elements affecting "外观皮肤, 冰蓝科技 / 清新像素" Button
+    t =    64.23s     Synthesize event
+    t =    64.66s     Wait for app.rai.running.debug to idle
+    t =    65.07s Tap "appearance.pixel" Button
+    t =    65.08s     Wait for app.rai.running.debug to idle
+    t =    65.56s     Find the "appearance.pixel" Button
+    t =    65.72s     Check for interrupting elements affecting "appearance.pixel" Button
+    t =    66.02s     Synthesize event
+    t =    66.47s     Wait for app.rai.running.debug to idle
+    t =    68.04s Checking existence of `"tab.设置" Button`
+    t =    68.71s Checking existence of `"外观皮肤" NavigationBar`
+    t =    69.03s Find the "设置" Button
+    t =    69.99s Find the Application 'app.rai.running.debug'
+    t =    70.60s Added attachment named 'pixel-restored'
+    t =    70.61s Requesting snapshot of accessibility hierarchy for app with pid 78281
+    t =    72.03s Requesting snapshot of accessibility hierarchy for app with pid 78281
+    t =    72.19s Added attachment named 'pixel-restored-accessibility'
+    t =    72.20s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test09AppearancePersistence]' passed (73.437 seconds).
+Test Case '-[VisualAcceptance.VisualAcceptance test10RevisionConflict]' started.
+    t =     0.00s Start Test at 2026-09-10 00:00:36.033
+    t =     0.03s Set Up
+    t =     0.04s     Open app.rai.running.debug
+    t =     0.04s         Launch app.rai.running.debug
+    t =     0.04s             Terminate app.rai.running.debug:78281
+    t =     1.82s             Setting up automation session
+    t =     7.28s             Wait for app.rai.running.debug to idle
+    t =    15.27s     Waiting 40.0s for "tab.设置" Button to exist
+    t =    16.29s         Checking `Expect predicate `existsNoRetry == 1` for object "tab.设置" Button`
+    t =    16.29s             Checking existence of `"tab.设置" Button`
+    t =    17.03s     Waiting 30.0s for "打开训练计划" Button to exist
+    t =    18.05s         Checking `Expect predicate `existsNoRetry == 1` for object "打开训练计划" Button`
+    t =    18.05s             Checking existence of `"打开训练计划" Button`
+    t =    23.30s Tap "打开训练计划" Button
+    t =    23.30s     Wait for app.rai.running.debug to idle
+    t =    23.31s     Find the "打开训练计划" Button
+    t =    23.48s     Check for interrupting elements affecting "calendar" Button
+    t =    23.74s     Synthesize event
+    t =    24.18s     Wait for app.rai.running.debug to idle
+    t =    24.97s Tap "编辑周计划" Button
+    t =    24.97s     Wait for app.rai.running.debug to idle
+    t =    25.50s     Find the "编辑周计划" Button
+    t =    26.06s     Check for interrupting elements affecting "编辑周计划" Button
+    t =    26.31s     Synthesize event
+    t =    26.71s     Wait for app.rai.running.debug to idle
+    t =    28.29s Checking existence of `"tab.设置" Button`
+    t =    28.95s Find the "tab.设置" Button
+    t =    29.45s Checking existence of `"保存计划" Button`
+    t =    29.92s Find the "保存计划" Button
+    t =    30.20s Get number of matches for: Descendants matching type Keyboard
+    t =    30.44s Get number of matches for: Descendants matching type Keyboard
+    t =    30.59s Press Application 'app.rai.running.debug'[0.07, 0.70] for 0.1 seconds, then drag to Application 'app.rai.running.debug'[0.07, 0.40] with velocity of 500.00 pixels per second, and then hold for 0.0 seconds 
+    t =    30.59s     Wait for app.rai.running.debug to idle
+    t =    30.60s     Find the Application 'app.rai.running.debug'
+    t =    30.85s     Check for interrupting elements affecting "RAI" Application
+    t =    31.18s     Synthesize event
+    t =    31.18s         Find the Application 'app.rai.running.debug'
+    t =    31.50s         Find the Application 'app.rai.running.debug'
+    t =    31.81s         Find the Application 'app.rai.running.debug'
+    t =    31.95s         Find the Application 'app.rai.running.debug'
+    t =    32.13s         Find the Application 'app.rai.running.debug'
+    t =    33.44s     Wait for app.rai.running.debug to idle
+    t =    33.83s Checking existence of `"保存计划" Button`
+    t =    34.28s Find the "保存计划" Button
+    t =    34.90s Tap "保存计划" Button
+    t =    34.91s     Wait for app.rai.running.debug to idle
+    t =    34.93s     Find the "保存计划" Button
+    t =    35.38s     Check for interrupting elements affecting "保存计划" Button
+    t =    35.78s     Synthesize event
+    t =    36.22s     Wait for app.rai.running.debug to idle
+    t =    36.30s Waiting 15.0s for "请求未完成" Alert to exist
+    t =    37.36s     Checking `Expect predicate `existsNoRetry == 1` for object "请求未完成" Alert`
+    t =    37.37s         Checking existence of `"请求未完成" Alert`
+    t =    39.48s Find the Application 'app.rai.running.debug'
+    t =    41.20s Added attachment named '03-revision-conflict'
+    t =    41.21s Requesting snapshot of accessibility hierarchy for app with pid 78291
+    t =    44.07s Requesting snapshot of accessibility hierarchy for app with pid 78291
+    t =    44.49s Added attachment named '03-revision-conflict-accessibility'
+    t =    44.49s Tap "知道了" Button
+    t =    44.50s     Wait for app.rai.running.debug to idle
+    t =    44.51s     Find the "知道了" Button
+    t =    45.01s     Check for interrupting elements affecting "知道了" Button
+    t =    45.46s     Synthesize event
+    t =    45.89s     Wait for app.rai.running.debug to idle
+    t =    46.55s Tap "取消" Button
+    t =    46.55s     Wait for app.rai.running.debug to idle
+    t =    46.56s     Find the "取消" Button
+    t =    47.13s     Check for interrupting elements affecting "取消" Button
+    t =    47.46s     Synthesize event
+    t =    47.91s     Wait for app.rai.running.debug to idle
+    t =    49.84s Find the Application 'app.rai.running.debug'
+    t =    50.57s Added attachment named '03-revision-reloaded'
+    t =    50.57s Requesting snapshot of accessibility hierarchy for app with pid 78291
+    t =    52.12s Requesting snapshot of accessibility hierarchy for app with pid 78291
+    t =    52.34s Added attachment named '03-revision-reloaded-accessibility'
+    t =    52.35s Tear Down
+Test Case '-[VisualAcceptance.VisualAcceptance test10RevisionConflict]' passed (52.983 seconds).
+Test Suite 'VisualAcceptance' passed at 2026-09-10 00:01:29.016.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 868.177 (868.229) seconds
+Test Suite 'VisualAcceptance.xctest' passed at 2026-09-10 00:01:29.017.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 868.177 (868.250) seconds
+Test Suite 'All tests' passed at 2026-09-10 00:01:29.018.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 868.177 (868.287) seconds
+2026-09-10 00:01:29.431 xcodebuild[77612:2567390] [MT] IDETestOperationsObserverDebug: 892.583 elapsed -- Testing started completed.
+2026-09-10 00:01:29.431 xcodebuild[77612:2567390] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-09-10 00:01:29.431 xcodebuild[77612:2567390] [MT] IDETestOperationsObserverDebug: 892.583 sec, +892.583 sec -- end
+
+Test session results, code coverage, and logs:
+	/tmp/rai-technology-acceptance.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started

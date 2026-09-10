@@ -3,11 +3,12 @@ import SwiftUI
 
 /// Ice-blue skin tokens. The legacy PixelColor palette is deliberately independent.
 enum TechColor {
-    static let background = Color(red: 9/255, green: 14/255, blue: 23/255)
-    static let paper = Color(red: 20/255, green: 30/255, blue: 45/255)
+    static let background = Color(red: 4/255, green: 12/255, blue: 20/255)
+    static let paper = Color(red: 10/255, green: 23/255, blue: 36/255)
     static let ink = Color(red: 238/255, green: 245/255, blue: 255/255)
-    static let muted = Color(red: 157/255, green: 176/255, blue: 197/255)
-    static let cyan = Color(red: 105/255, green: 228/255, blue: 242/255)
+    static let muted = Color(red: 133/255, green: 157/255, blue: 178/255)
+    static let cyan = Color(red: 12/255, green: 196/255, blue: 235/255)
+    static let blue = Color(red: 0/255, green: 174/255, blue: 239/255)
     static let green = cyan
     static let leaf = Color(red: 136/255, green: 150/255, blue: 255/255)
     static let coral = Color(red: 255/255, green: 109/255, blue: 139/255)
@@ -17,17 +18,20 @@ enum TechColor {
     static let paleCyan = cyan.opacity(0.10)
     static let paleCoral = coral.opacity(0.10)
     static let paleYellow = yellow.opacity(0.10)
-    static let energy = LinearGradient(colors: [cyan, Color(red: 0.13, green: 0.60, blue: 0.95), leaf], startPoint: .topLeading, endPoint: .bottomTrailing)
+    static let energy = LinearGradient(colors: [cyan, blue, Color(red: 0.20, green: 0.30, blue: 0.85)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    static let action = Color(red: 47/255, green: 217/255, blue: 241/255)
 }
 
 enum TechMetrics {
-    static let pageHorizontal: CGFloat = 20
-    static let pageVertical: CGFloat = 16
-    static let sectionSpacing: CGFloat = 16
-    static let panelPadding: CGFloat = 18
+    static let pageHorizontal: CGFloat = 18
+    static let pageVertical: CGFloat = 12
+    // Scroll content must clear the custom tab bar even inside a NavigationStack.
+    static let bottomClearance: CGFloat = 90
+    static let sectionSpacing: CGFloat = 8
+    static let panelPadding: CGFloat = 13
     static let border: CGFloat = 0.5
     static let smallBorder: CGFloat = 0.5
-    static let corner: CGFloat = 22
+    static let corner: CGFloat = 12
     static let shadow: CGFloat = 0
 }
 
@@ -35,6 +39,32 @@ struct TechBackground: View {
     var body: some View {
         TechColor.background.ignoresSafeArea()
     }
+}
+
+private struct TechNavigation: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarBackButtonHidden(true)
+            .toolbar(.visible, for: .navigationBar)
+            .toolbarBackground(TechColor.background, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "chevron.left").font(.system(size: 20, weight: .medium))
+                            .foregroundStyle(TechColor.ink).frame(width: 44, height: 44)
+                    }.buttonStyle(.plain).accessibilityLabel("返回").accessibilityIdentifier("navigation.back")
+                }
+            }
+    }
+}
+
+extension View {
+    func techNavigation(_ title: String) -> some View { modifier(TechNavigation(title: title)) }
 }
 
 struct TechPanel<Content: View>: View {
@@ -46,12 +76,19 @@ struct TechPanel<Content: View>: View {
         self.tint = tint; self.fill = fill; self.content = content()
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) { content }
+        VStack(alignment: .leading, spacing: 10) { content }
             .padding(TechMetrics.panelPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
-                    .fill(fill.gradient)
+                    // Color.gradient automatically lifts dark colors toward gray.
+                    // Use a controlled tint instead of washing out the design's navy layers.
+                    .fill(fill)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
+                            .fill(LinearGradient(colors: [TechColor.blue.opacity(0.045), .clear],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                    }
                     .overlay {
                         RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
                             .strokeBorder(tint.opacity(0.28), lineWidth: 0.5)
@@ -64,13 +101,13 @@ struct TechHeroCard<Content: View>: View {
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) { content }
-            .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 12) { content }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(LinearGradient(colors: [TechColor.paper, TechColor.cyan.opacity(0.07)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
+                    .fill(TechColor.paper)
                     .overlay {
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
                             .strokeBorder(TechColor.cyan.opacity(0.16), lineWidth: 0.5)
                     }
             }
@@ -113,7 +150,7 @@ struct TechPageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: title == "RAI" ? 36 : 28, weight: .bold))
+                Text(title).font(.system(size: title == "RAI" ? 32 : 24, weight: .bold))
                     .foregroundStyle(TechColor.ink)
                 if !eyebrow.isEmpty {
                     Text(eyebrow).font(.caption).foregroundStyle(TechColor.muted)
@@ -132,15 +169,19 @@ struct TechSegmentedControl<Value: Hashable>: View {
         HStack(spacing: 4) {
             ForEach(items, id: \.value) { item in
                 Button { selection = item.value } label: {
-                    Text(item.title).font(.subheadline.weight(.semibold))
+                    Text(item.title).font(.subheadline.weight(.medium))
+                        .lineLimit(1).fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(selection == item.value ? TechColor.background : TechColor.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(selection == item.value ? TechColor.cyan : .clear, in: Capsule())
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                        .background {
+                            if selection == item.value { Capsule().fill(TechColor.action) }
+                        }
+                        .frame(minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == item.value ? .isSelected : [])
             }
-        }.padding(4).background(TechColor.paper, in: Capsule())
+        }.background { Capsule().fill(TechColor.paper).frame(height: 30) }
     }
 }
 
@@ -155,8 +196,33 @@ struct TechMetricTile: View {
             Text(value).font(.system(.title3, design: .default).weight(.semibold).monospacedDigit())
                 .foregroundStyle(accent).lineLimit(1).minimumScaleFactor(0.65)
         }
-        .padding(14).frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
-        .background(fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(12).frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .background(fill, in: RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous))
+    }
+}
+
+/// Preserve every existing filter without squeezing six labels into a single width.
+struct TechFilterChips<Value: Hashable>: View {
+    let items: [(title: String, value: Value)]
+    @Binding var selection: Value
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 7) {
+                ForEach(items, id: \.value) { item in
+                    Button { selection = item.value } label: {
+                        Text(item.title).font(.subheadline.weight(.medium)).fixedSize()
+                            .foregroundStyle(selection == item.value ? TechColor.background : TechColor.muted)
+                            .padding(.horizontal, 16).frame(minHeight: 30)
+                            .background {
+                                if selection == item.value { Capsule().fill(TechColor.action) }
+                                else { Capsule().fill(TechColor.paper) }
+                            }
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .accessibilityAddTraits(selection == item.value ? .isSelected : [])
+                }
+            }
+        }
     }
 }
 
@@ -190,7 +256,10 @@ struct TechPrimaryButton: View {
             }
             .foregroundStyle(isDisabled ? TechColor.muted : TechColor.background)
             .frame(maxWidth: .infinity, minHeight: 50)
-            .background(isDisabled ? TechColor.grid : TechColor.cyan, in: Capsule())
+                .background {
+                    if isDisabled { Capsule().fill(TechColor.grid) }
+                    else { Capsule().fill(TechColor.action) }
+                }
         }.buttonStyle(.plain).disabled(isDisabled || isBusy)
     }
 }
@@ -234,8 +303,12 @@ struct TechEmptyState: View {
     var systemName = "figure.run"
     var body: some View {
         VStack(spacing: 20) {
-            Image(systemName: systemName).font(.system(size: 56, weight: .ultraLight))
-                .foregroundStyle(TechColor.energy).padding(.bottom, 12)
+            if systemName == "shoe" {
+                TechShoeIllustration()
+            } else {
+                Image(systemName: systemName).font(.system(size: 56, weight: .ultraLight))
+                    .foregroundStyle(TechColor.energy).padding(.bottom, 12)
+            }
             Text(title).font(.title3.weight(.semibold)).foregroundStyle(TechColor.ink)
             Text(message).font(.subheadline).foregroundStyle(TechColor.muted).multilineTextAlignment(.center)
         }.frame(maxWidth: .infinity, minHeight: 240).padding(20)
@@ -260,7 +333,7 @@ struct TechField<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label).font(.caption).foregroundStyle(TechColor.muted)
             content.font(.subheadline).foregroundStyle(TechColor.ink)
-                .padding(13).frame(minHeight: 48)
+                .padding(.horizontal, 12).padding(.vertical, 8).frame(minHeight: 44)
                 .background(TechColor.background.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -307,14 +380,22 @@ struct TechIconBox: View {
 struct TechOrbit: View {
     var body: some View {
         ZStack {
+            Ellipse()
+                .fill(RadialGradient(colors: [TechColor.blue.opacity(0.48), TechColor.leaf.opacity(0.16), .clear],
+                                     center: .center, startRadius: 8, endRadius: 130))
+                .frame(width: 255, height: 100).rotationEffect(.degrees(-27))
             ForEach(0..<4) { index in
                 Ellipse().stroke(TechColor.energy.opacity(0.8 - Double(index) * 0.15), lineWidth: index == 0 ? 2 : 1)
                     .frame(width: CGFloat(130 + index * 35), height: CGFloat(40 + index * 18))
                     .rotationEffect(.degrees(-27))
             }
-            Circle().fill(TechColor.energy).frame(width: 42, height: 42)
+            Ellipse().fill(TechColor.energy.opacity(0.2))
+                .overlay(Ellipse().stroke(TechColor.blue.opacity(0.65), lineWidth: 1))
+                .frame(width: 185, height: 65).rotationEffect(.degrees(-27))
+            Circle().fill(RadialGradient(colors: [TechColor.cyan, TechColor.blue], center: .topLeading,
+                                        startRadius: 1, endRadius: 38)).frame(width: 36, height: 36)
                 .shadow(color: TechColor.cyan.opacity(0.4), radius: 25)
-        }.frame(height: 180).frame(maxWidth: .infinity).accessibilityHidden(true)
+        }.frame(height: 150).frame(maxWidth: .infinity).accessibilityHidden(true)
     }
 }
 
@@ -325,20 +406,22 @@ struct TechTabBar: View {
             ForEach(NativeTab.allCases, id: \.self) { tab in
                 Button { selection = tab } label: {
                     VStack(spacing: 5) {
-                        Image(systemName: tab == .home ? "house" : tab.systemName)
-                            .font(.system(size: 21, weight: .medium)).frame(height: 24)
+                        Image(systemName: tab == .home ? (selection == tab ? "house.fill" : "house") : tab.systemName)
+                            .font(.system(size: 19, weight: .medium)).frame(height: 22)
                         Text(tab.title).font(.caption2.weight(.medium))
                     }
                     .foregroundStyle(selection == tab ? TechColor.cyan : TechColor.muted)
-                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .frame(maxWidth: .infinity, minHeight: 48)
                     .contentShape(Rectangle())
                 }.buttonStyle(.plain)
                     .accessibilityAddTraits(selection == tab ? .isSelected : [])
                     .accessibilityIdentifier("tab.\(tab.title)")
+                    .accessibilityShowsLargeContentViewer { Text(tab.title) }
             }
         }.padding(.horizontal, 12).padding(.top, 8)
             .background(TechColor.background.opacity(0.97))
             .overlay(alignment: .top) { Rectangle().fill(TechColor.grid.opacity(0.4)).frame(height: 0.5) }
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 }
 
@@ -377,4 +460,90 @@ func techMetricCaption(_ title: String, value: String) -> some View {
             .foregroundStyle(TechColor.ink).lineLimit(1).minimumScaleFactor(0.7)
     }.frame(maxWidth: .infinity, alignment: .leading)
 }
+func techStatusName(_ value: String?) -> String {
+    guard let value, value != "unknown", value != "unavailable" else { return "暂无数据" }
+    return nativeStatusName(value)
+}
+
+func techDuration(_ seconds: Double?) -> String {
+    guard let seconds, seconds.isFinite, seconds >= 0, seconds < Double(Int.max) else { return "--" }
+    let total = Int(seconds.rounded(.down))
+    if total >= 3600 { return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60) }
+    return String(format: "%d:%02d", total / 60, total % 60)
+}
+
+func techPace(_ seconds: Double?) -> String {
+    nativePace(seconds).replacingOccurrences(of: " ", with: "")
+}
+
+func techKilometers(_ kilometers: Double?) -> String {
+    guard let kilometers else { return "--" }
+    return nativeNumber(kilometers, digits: 2) + " km"
+}
+
+func techSyncPhase(_ phase: String) -> String {
+    switch phase {
+    case "collecting": return "读取健康数据"
+    case "uploading": return "上传数据"
+    case "importing": return "导入数据"
+    case "recomputing": return "更新分析"
+    case "succeeded": return "同步完成"
+    case "failed": return "同步失败"
+    case "cancelled": return "同步已取消"
+    default: return "等待同步"
+    }
+}
+
+func techPaceRange(_ lower: Double?, _ upper: Double?) -> String {
+    switch (lower, upper) {
+    case let (a?, b?): return "\(techPace(a))–\(techPace(b))/km"
+    case let (a?, nil): return "\(techPace(a))/km 或更慢"
+    case let (nil, b?): return "\(techPace(b))/km 或更快"
+    default: return "暂无配速参考"
+    }
+}
+
+func techHeartRateRange(_ lower: Double?, _ upper: Double?) -> String {
+    switch (lower, upper) {
+    case let (a?, b?): return "\(nativeNumber(a, digits: 0))–\(nativeNumber(b, digits: 0)) bpm"
+    case let (a?, nil): return "\(nativeNumber(a, digits: 0)) bpm 以上"
+    case let (nil, b?): return "\(nativeNumber(b, digits: 0)) bpm 以下"
+    default: return "暂无范围"
+    }
+}
+
+func techPaceZoneCode(_ zone: String) -> String {
+    switch zone {
+    case "easy": return "E"
+    case "marathon": return "M"
+    case "lactate_threshold": return "T"
+    case "anaerobic_endurance": return "I"
+    case "sprint": return "R"
+    default: return "—"
+    }
+}
+
+func techHeartRateZoneCode(_ zone: String) -> String {
+    switch nativeHeartRateZone(zone) {
+    case "恢复区": return "Z1"
+    case "有氧基础区": return "Z2"
+    case "有氧动力区": return "Z3"
+    case "乳酸阈值区": return "Z4"
+    case "无氧区间": return "Z5"
+    default: return "—"
+    }
+}
+
+func techRecordDate(_ value: String) -> String {
+    // Personal records span years, unlike the current week's date labels.
+    nativeDate(value).split(separator: " ").first.map(String.init) ?? "--"
+}
+
+func techHealthError(_ value: String) -> String {
+    if value.contains("com.apple.developer.healthkit") && value.contains("entitlement") {
+        return "此安装缺少 HealthKit 权限签名，请在 Xcode 配置健康能力并签名后重试。"
+    }
+    return value
+}
+
 #endif

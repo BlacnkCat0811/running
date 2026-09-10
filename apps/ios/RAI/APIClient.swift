@@ -95,6 +95,10 @@ struct RaiAPIClient {
         try await get(path: "/v1/predictions", baseURL: baseURL, token: token)
     }
 
+    func recoveryTrend(baseURL: URL, token: String) async throws -> NativeRecoveryTrend {
+        try await get(path: "/v1/recovery-trends", query: [URLQueryItem(name: "days", value: "14")], baseURL: baseURL, token: token)
+    }
+
     func dashboard(baseURL: URL, token: String) async throws -> NativeDashboardResponse {
         try await get(path: "/v1/dashboard", baseURL: baseURL, token: token)
     }
