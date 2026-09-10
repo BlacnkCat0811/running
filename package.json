@@ -32,7 +32,7 @@
     "preml:test": "npm run check:node",
     "preml:train": "npm run check:node",
     "typecheck": "tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts && npm run test -w @rai/web",
+    "test": "node --import tsx --test packages/*/test/*.test.ts apps/api/test/*.test.ts && npm run test -w @rai/web",
     "test:e2e:web": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
     "test:e2e:responsive": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
     "test:e2e": "npm run test:e2e:web && npm run test:e2e:responsive",
