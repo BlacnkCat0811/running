@@ -1,0 +1,10 @@
+// 高德 iOS SDK Key —— 本地配置模板（真实 key 不入库）
+//
+// 用法：
+//   1. 把本文件复制为同目录的 AmapKey.xcconfig
+//   2. 填入 iOS 平台 Key（https://console.amap.com/ → 应用管理 → 我的应用 → iOS Key）
+//   3. cd apps/ios && pod install
+//
+// Key 必须绑定本 App 的 Bundle ID，否则高德会拒绝服务（地图空白 / 无瓦片）。
+// AmapKey.xcconfig 已被 .gitignore 忽略；也可用环境变量 RAI_AMAP_API_KEY 覆盖。
+RAI_AMAP_API_KEY = your_amap_ios_sdk_key_here

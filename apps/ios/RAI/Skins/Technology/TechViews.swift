@@ -271,7 +271,7 @@ struct TechTodayView: View {
             TechSectionHeader(title: "恢复状态")
             HStack(spacing: 22) {
                 VStack(spacing: 8) {
-                    Image(systemName: data.recovery.state == "recovered" ? "checkmark.heart.fill" : "heart.text.square")
+                    Image(systemName: data.recovery.state == "recovered" ? "heart.fill" : "heart.text.square")
                         .font(.system(size: 30)).foregroundStyle(techToneColor(data.recovery.state ?? "unknown"))
                     Text(data.recovery.stateLabel).font(.subheadline.weight(.semibold))
                         .foregroundStyle(TechColor.ink)
@@ -1965,6 +1965,10 @@ struct TechNativeSettingsView: View {
     @State private var showingClearCache = false
     @State private var draftURL = ""
     @State private var draftToken = ""
+    /// 观察地图隐私状态，保证设置页开关与状态文案随同意/关闭实时刷新。
+    @AppStorage(MapPrivacy.storageKey) private var mapPrivacyState = MapPrivacy.State.ask.rawValue
+
+    private var mapEnabled: Bool { mapPrivacyState == MapPrivacy.State.agreed.rawValue }
 
     var body: some View {
         @Bindable var session = session
@@ -1986,6 +1990,11 @@ struct TechNativeSettingsView: View {
                 }
                 settingsLink("外观皮肤", subtitle: "冰蓝科技 / 清新像素", icon: "paintpalette", tint: TechColor.cyan) {
                     AppSkinPicker()
+                }
+                settingsLink("地图底图",
+                             subtitle: mapEnabled ? "高德已启用" : "仅离线轨迹",
+                             icon: "map", tint: TechColor.cyan) {
+                    mapPanel
                 }
                 settingsLink("本地缓存", subtitle: native.lastCacheUpdate == nil ? "无缓存" : "可离线查看", icon: "externaldrive", tint: TechColor.cyan) {
                     cachePanel
@@ -2210,6 +2219,27 @@ struct TechNativeSettingsView: View {
                 native.clearCache()
                 showingClearCache = false
             } cancel: { showingClearCache = false }
+        }
+    }
+
+    private var mapPanel: some View {
+        TechPanel(tint: TechColor.cyan) {
+            VStack(alignment: .leading, spacing: 9) {
+                TechSectionHeader(title: "高德地图底图",
+                                  trailing: mapEnabled ? "已启用" : "仅离线轨迹",
+                                  trailingColor: mapEnabled ? TechColor.green : TechColor.muted)
+                Text("训练详情底图由高德提供：显示时会向高德请求所在区域瓦片；跑步坐标只在手机上绘制，健康数据不会提供给高德。")
+                    .font(.footnote)
+                    .foregroundStyle(TechColor.muted)
+                TechPrimaryButton(title: mapEnabled ? "关闭高德底图" : "启用高德底图",
+                                  isDisabled: false) {
+                    if mapEnabled {
+                        MapPrivacy.decline()
+                    } else {
+                        MapPrivacy.resetToAsk()
+                    }
+                }
+            }
         }
     }
 

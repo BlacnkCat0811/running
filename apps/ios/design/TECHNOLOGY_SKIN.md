@@ -40,14 +40,16 @@
 
 可重复的原生 UI 验收入口为 `bash apps/ios/tests/run-visual-tests.sh`：复制独立数据库、使用专用模拟器，检查页面导航、编辑取消/越界、revision 冲突、缓存确认、皮肤持久化及故障状态。所有写操作仅针对独立副本；只读故障代理用于状态截图，不转发业务写入。
 
-在已安装 iOS SDK 的 Mac 上执行：
+在已安装 iOS SDK 的 Mac 上执行（高德 SDK 由 CocoaPods 引入，构建入口是 workspace；`Podfile` 变更后先 `cd apps/ios && pod install`）：
 
 ```sh
-xcodebuild -project apps/ios/RAI.xcodeproj -scheme RAI -configuration Debug \
+xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -configuration Debug \
   -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
 bash apps/ios/tests/run-model-tests.sh
 ```
+
+高德底图受隐私门控：未同意时科技皮肤只显示离线轨迹，不创建 `MAMapView`；同意入口在首启说明页与两套皮肤设置的「地图底图」一栏。该说明页使用系统配色而非任一皮肤配色，属刻意的跨皮肤共享组件设计。
 
 模拟器/真机验收：
 

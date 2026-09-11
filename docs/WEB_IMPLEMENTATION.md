@@ -197,4 +197,4 @@ npm run build
 npm start                  # 由 Fastify 提供 dist 静态 + API
 ```
 
-`npm run build` 使用 Vite 生成 `apps/web/dist`；`npm start` 只运行该构建产物（缺产物立即报错），并由 Fastify 提供静态页面、SPA 深链接和本地 API。公网部署时由 Nginx 托管该 dist 并仅反代 `/v1/`（见 `deploy/README-UBUNTU.md`）。iOS 壳入口：`apps/ios/RAI.xcodeproj`（真机运行步骤见 `apps/ios/README.md`）。
+`npm run build` 使用 Vite 生成 `apps/web/dist`；`npm start` 只运行该构建产物（缺产物立即报错），并由 Fastify 提供静态页面、SPA 深链接和本地 API。公网部署时由 Nginx 托管该 dist 并仅反代 `/v1/`（见 `deploy/README-UBUNTU.md`）。iOS 原生应用入口：`apps/ios/RAI.xcworkspace`（高德 SDK 以 CocoaPods 引入，需先 `pod install`；真机与验收步骤见 `apps/ios/README.md`）。

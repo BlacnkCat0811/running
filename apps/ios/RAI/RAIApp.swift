@@ -1,4 +1,8 @@
 import SwiftUI
+#if os(iOS)
+import AMapFoundationKit
+import MAMapKit
+#endif
 
 @MainActor
 final class AppModel {
@@ -12,6 +16,11 @@ final class AppModel {
     #endif
 
     init() {
+        #if os(iOS)
+        // 高德合规：只有用户同意隐私政策后才初始化高德地图与 Key（见 MapPrivacy）。
+        // MAMapKit 要求在任何 MAMapView 实例化之前完成，因此放在最早的 init 里。
+        MapPrivacy.configureIfAgreed()
+        #endif
         let session = ServerSession()
         self.session = session
         self.healthSync = HealthKitSync()
@@ -25,6 +34,7 @@ final class AppModel {
 struct RAIApp: App {
     #if os(iOS)
     @AppStorage(AppSkin.storageKey) private var rawSkin = AppSkin.pixel.rawValue
+    @AppStorage(MapPrivacy.storageKey) private var mapPrivacyState = MapPrivacy.State.ask.rawValue
     @Environment(\.scenePhase) private var scenePhase
     #endif
 
@@ -43,6 +53,15 @@ struct RAIApp: App {
                 .tint(AppSkin.resolve(rawSkin) == .technology ? TechColor.cyan : nil)
                 #endif
                 #if os(iOS)
+                .overlay {
+                    if mapPrivacyState == MapPrivacy.State.ask.rawValue {
+                        MapPrivacyConsentView(
+                            context: .firstRun,
+                            onAgree: { MapPrivacy.agree() },
+                            onDismiss: { MapPrivacy.decline() }
+                        )
+                    }
+                }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         model.discovery.start()

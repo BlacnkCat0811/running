@@ -41,7 +41,7 @@
     "dev:device": "node scripts/dev-device.mjs",
     "dev:api": "npm run dev -w @rai/api",
     "dev:web": "npm run dev -w @rai/web",
-    "open:ios": "open apps/ios/RAI.xcodeproj",
+    "open:ios": "open apps/ios/RAI.xcworkspace",
     "build": "npm run build -w @rai/web",
     "start": "npm run start -w @rai/api",
     "smoke:api": "node apps/api/test/production-runtime-smoke.mjs",

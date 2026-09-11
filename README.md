@@ -166,7 +166,7 @@ npm run dev
 
 ```powershell
 npm run dev:device     # 打印手机可访问地址，如 http://192.168.x.x:5173
-npm run open:ios       # 打开 apps/ios/RAI.xcodeproj（运行步骤见 apps/ios/README.md）
+npm run open:ios       # 打开 apps/ios/RAI.xcworkspace（先 cd apps/ios && pod install；运行步骤见 apps/ios/README.md）
 ```
 
 生产模式先构建 Web，再由 Fastify 同一进程提供页面和 API：

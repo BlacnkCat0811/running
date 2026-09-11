@@ -22,11 +22,17 @@
 
    终端会打印类似 `http://192.168.x.x:5173` 的地址。
 
-2. 打开 Xcode 工程：
+2. 安装高德依赖、配置 Key 并打开 CocoaPods workspace：
 
    ```bash
+   cd apps/ios
+   cp Configs/AmapKey.xcconfig.example Configs/AmapKey.xcconfig   # 填入自己的高德 iOS Key
+   pod install
+   cd ../..
    npm run open:ios
    ```
+
+   高德 SDK 由 CocoaPods 引入，**构建入口是 `RAI.xcworkspace`**：直接打开 `RAI.xcodeproj` 会在链接阶段失败（`ld: framework 'Pods_RAI' not found`）。`Podfile` / `Podfile.lock` 变更后需要重新 `pod install`。高德 Key 见下方「高德 Key 配置」——仓库不含明文 Key。
 
 3. 这台虚拟机的 Xcode 还缺 iOS 平台组件（现在会提示 *iOS 26.5 is not installed*）。先装：
 
@@ -46,6 +52,34 @@
 7. 首次安装后，到 iPhone **设置 → 通用 → VPN 与设备管理**，信任这台电脑的开发者证书。
 
 8. App 的“设置”中填写第 1 步打印的服务器地址和 API Token（如服务启用了 Token）。连接成功后，今日、训练、计划、分析和设置均使用原生 SwiftUI 页面。
+
+## 构建与验收
+
+命令行统一走 workspace（`pod install` 见「一次跑通」第 2 步）：
+
+```bash
+# 无签名模拟器编译
+xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -configuration Debug \
+  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  -derivedDataPath /tmp/rai-derived CODE_SIGNING_ALLOWED=NO build
+
+# 模型/Keychain/坐标转换回归（纯 Swift，不需要模拟器和 iOS SDK）
+bash apps/ios/tests/run-model-tests.sh
+
+# 坐标转换权威对拍：用高德 SDK 自带的 AMapCoordinateConvert 校验本地 GCJ02
+# （需要 Pods + 一个已启动的模拟器；不需要 Key，是纯函数）
+bash apps/ios/tests/run-coordinate-sdk-check.sh
+
+# 原生 UI 与视觉验收：复制独立数据库副本 + 专用模拟器，截图导出到 $RAI_VISUAL_OUTPUT
+bash apps/ios/tests/run-visual-tests.sh
+```
+
+- `run-visual-tests.sh` 自己构建 workspace 并把 App 装到 `RAI Technology Acceptance` 模拟器；临时验收服务只监听 8792–8794，且只写数据库副本。追加 `-only-testing:VisualAcceptance/VisualAcceptance/test02Workouts` 之类的参数可以只跑单个用例（注意 `-only-testing` 要用 `target/class/method` 三段式，写错会「Executed 0 tests」并假通过）。
+- `run-model-tests.sh` 现在跑三组：模型/API/DTO、Keychain、坐标转换（WGS-84→GCJ-02）。坐标一项的锚点值来自高德官方 SDK 实测，纯数学、零依赖，CI 也会跑。
+- `run-coordinate-sdk-check.sh` 用高德 SDK 的 `AMapCoordinateConvert(_, .GPS)` 现场对拍本地实现（实测境内差 0.02–0.6 m、境外原样），是坐标逻辑的权威复核；因为要链接 iOS 静态框架，只能在 macOS + 模拟器上跑，不进 CI。
+- 本机 CocoaPods 1.17.0 已装在 gem 目录但没有加入 PATH（`pod: command not found`）：`export PATH="$(gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/{print $2}'):$PATH"`，或 `gem install cocoapods`。`Pods/` 不入库（`.gitignore` 已忽略，`pod install` 按 `Podfile.lock` 还原）；只有 `Podfile` / `Podfile.lock` 变动时才需要重新 `pod install`。
+- 若 `xcrun` 报 `unable to find utility "simctl"`，说明命令行工具指向 CommandLineTools：`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`（或 `sudo xcode-select -s /Applications/Xcode.app`）。
+- `.github/workflows/ci.yml` 的 `ios` job 与本机命令一致：先 `pod install`，再用 workspace 构建模拟器 target，最后跑 `run-model-tests.sh`。
 
 ## 这台 VMware 虚拟机要注意
 
@@ -114,7 +148,55 @@
 
 - 训练判定根据可用负荷、恢复信号及训练结构生成，不再仅因导入日期早于今天而显示过期或替换判定。缺少恢复样本或个人基线时仍给出保守建议。
 - 恢复卡读取最近一次主睡眠所在日期的睡眠、HRV、静息心率，并使用该日期之前的个人基线；说明中保留证据日期。`recovered`、`reduced`、`depleted` 分别显示恢复良好、恢复不足、需要休息，不生成不存在的恢复分数。
-- 两套皮肤的路线默认显示原生 MapKit 底图、轨迹及起终点，支持恢复完整路线视野和切换离线轨迹。底图提供方由系统按地区决定；此实现未集成独立高德 SDK，也无需配置高德 Key。
+- 两套皮肤的路线中，科技皮肤显示高德底图 + 轨迹及起终点（见下节），像素皮肤为无底图的纯 Canvas 轨迹。两者均支持恢复完整路线视野（fit-to-route）和切换离线轨迹。
 - 心率时序采用深色卡片、青色曲线与渐变填充，显示训练平均心率、样本最大心率及分钟/秒时间轴。API 抽样保留峰值，平均心率继续使用训练汇总值。
 
 以上变更需要同时更新 API 服务和 iOS 应用；离线缓存会在下次成功刷新后更新。
+
+### 高德原生地图（CocoaPods）
+
+在 `apps/ios` 执行：
+
+```bash
+pod install
+open RAI.xcworkspace
+```
+
+请使用 CocoaPods 生成的 workspace 构建，不要直接打开 `RAI.xcodeproj`。
+
+#### 隐私门控（未同意不初始化地图 SDK）
+
+高德要求 App 在用户同意隐私政策后才能初始化 SDK（`updatePrivacyAgree(.didAgree)` 表示"用户已授权"）。因此：
+
+- 首次打开 App 会先显示一页说明（含高德隐私政策链接），可选择「同意并启用地图」或「仅使用离线轨迹」；选择记在 `UserDefaults` 的 `rai.privacy.amap.state`。
+- 只有同意后才设置 Key 并调用 `MAMapView.updatePrivacyShow/Agree`，而且必须在任何 `MAMapView` 实例化之前完成（`MapPrivacy.configureIfAgreed()` 在 `AppModel.init` 中执行）。
+- 未同意时科技皮肤的训练详情只显示离线轨迹，**不会创建 `MAMapView`**；菜单里改为「启用高德底图」入口。
+- 两套皮肤的「设置」里都有「地图底图」一栏，可随时开启或关闭（关闭后不影响离线轨迹）。
+- 说明页刻意使用系统配色，不做皮肤化：它同时服务两套皮肤。
+
+#### 高德 Key 配置（不明文入库）
+
+Key 存在本地 `Configs/AmapKey.xcconfig`（`.gitignore` 已忽略），由 `Podfile` 的 `post_install` 注入 CocoaPods 生成的 `Pods-RAI.*.xcconfig`；`RAI/Info.plist` 只写 `$(RAI_AMAP_API_KEY)`，Swift 侧从 Info.plist 读取。
+
+```bash
+cd apps/ios
+cp Configs/AmapKey.xcconfig.example Configs/AmapKey.xcconfig   # 编辑并填入 iOS 平台 Key
+pod install                                                    # 打印「已注入高德 Key 到 N 个 xcconfig」即成功
+```
+
+- 也可用环境变量覆盖（优先级更高）：`RAI_AMAP_API_KEY=xxx pod install`。
+- 没有 Key 时 `pod install` 只打印提示、构建照常成功，但高德地图不加载（瓦片空白）。
+- Key 必须绑本 App 的 Bundle ID；换 Key 或改 Bundle ID 后需重新 `pod install`。
+- 不再需要改 `Info.plist`：那里只有变量占位符。
+
+默认视野：首次加载与切换训练时，使用整条路线的边界自动 fit，并以边界中心对齐地图卡片正中心；高德会根据轨迹范围自动调整缩放级别，长距离跑步会自动缩小到能完整显示整条轨迹。菜单中的“显示完整路线”会再次执行同样的 fit。
+
+注意：`MAMapView` 实例化时 frame 为空，高德渲染器就绪前 `setVisibleMapRect` 会被静默忽略（实测停留在地图默认的市级视野，轨迹缩成几十 pt 的小团，实测截图里整张卡片只有北京全市底图）。渲染器启动期间主线程被阻塞约 1.3 s，瓦片加载回调在联网时约 2.5–4.4 s、离线时可能不来，因此 `RouteMapContainer` 以 0.2 s 间隔重试 fit，并把 `mapViewDidFinishLoadingMap` / `mapInitComplete` 作为兜底；只有 `visibleMapRect` 真正覆盖路线边界才算完成（最多 12 次）。
+
+#### 坐标系约定（WGS-84 存储 / GCJ-02 显示）
+
+- 数据库、API、离线轨迹画布全部保留 **WGS-84** 原始 GPS 坐标（Apple Watch 记录坐标系），不做任何转换。
+- 仅科技皮肤的高德底图（`TechRouteView` 的 `RouteMapContainer`）在渲染前经 `GCJ02.fromWGS84`（`RAI/CoordinateConversion.swift`）转 GCJ-02：高德底图与 `convert(_:toPointTo:)` 均以 GCJ-02 为准，直接绘制 WGS-84 会整体偏移约 300–600 m。
+- 境外坐标（中国大陆范围外）原样通过，不做转换。
+- 该算法已与 coordtransform 公开参考值锚定（差异 < 0.1 m）并抽样验证北上广深四城偏移量（479–625 m，方向与量级符合 GCJ-02 特征）。
+- 不使用高德 `MATraceManager` 轨迹纠偏：绑路会吸附/歪曲真实 GPS，与"真实轨迹"的产品定位冲突。

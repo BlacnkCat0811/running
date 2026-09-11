@@ -1,7 +1,6 @@
 #if os(iOS)
 import Charts
 import CoreLocation
-import MapKit
 import SwiftUI
 import UIKit
 
@@ -1946,6 +1945,8 @@ struct NativeSettingsView: View {
     @State private var showingClearCache = false
     @State private var draftURL = ""
     @State private var draftToken = ""
+    /// 观察地图隐私状态，保证设置页开关与状态文案随同意/关闭实时刷新。
+    @AppStorage(MapPrivacy.storageKey) private var mapPrivacyState = MapPrivacy.State.ask.rawValue
 
     var body: some View {
         @Bindable var session = session
@@ -1956,6 +1957,7 @@ struct NativeSettingsView: View {
                 }
                 serverPanel(session: session)
                 AppSkinPicker()
+                mapPanel
                 healthPanel
                 cachePanel
                 versionPanel
@@ -2118,6 +2120,37 @@ struct NativeSettingsView: View {
             }
         }
     }
+
+    private var mapPanel: some View {
+        PixelPanel(tint: PixelColor.cyan) {
+            VStack(alignment: .leading, spacing: 9) {
+                PixelSectionHeader(title: "地图底图", trailing: mapEnabled ? "高德已启用" : "仅离线轨迹",
+                                   trailingColor: mapEnabled ? PixelColor.green : PixelColor.muted)
+                Text("高德底图只在科技皮肤的训练详情显示；像素皮肤保持纯轨迹图。显示底图时会向高德请求所在区域瓦片，跑步坐标与健康数据不会发送给高德。")
+                    .font(.footnote)
+                    .foregroundStyle(PixelColor.muted)
+                Button {
+                    if mapEnabled {
+                        MapPrivacy.decline()
+                    } else {
+                        MapPrivacy.resetToAsk()
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: mapEnabled ? "map.slash" : "map")
+                        Text(mapEnabled ? "关闭高德底图" : "启用高德底图")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                    }
+                    .font(.footnote.weight(.heavy))
+                    .foregroundStyle(PixelColor.coral)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var mapEnabled: Bool { mapPrivacyState == MapPrivacy.State.agreed.rawValue }
 
     private var versionPanel: some View {
         PixelPanel(tint: PixelColor.cyan) {

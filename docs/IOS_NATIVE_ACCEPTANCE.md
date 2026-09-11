@@ -29,6 +29,10 @@ HealthKit 权限和视觉截图验收仍需在连接设备上完成。
 | HealthKit 权限、生命周期、路线和图表真机测试 | 未运行：当前环境无 iPhone |
 | 390px responsive E2E | 按仓库约束未运行 |
 
+上表的 Xcode 构建命令保留 2026-09-08 当日原始记录。2026-09-11 接入高德 SDK（CocoaPods）后，构建入口改为 workspace：`cd apps/ios && pod install`，再执行 `xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -configuration Debug -sdk iphonesimulator -derivedDataPath /tmp/rai-derived CODE_SIGNING_ALLOWED=NO build`；只打开 `RAI.xcodeproj` 会因 `Pods_RAI` 链接失败。当前构建与验收入口见 `apps/ios/README.md` 与 `docs/IOS_NATIVE_RUNBOOK.md`。
+
+同日还完成：高德 Key 改为本地 `Configs/AmapKey.xcconfig` + `$(RAI_AMAP_API_KEY)` 注入（仓库不含明文，无 Key 时构建通过但底图不加载）；新增隐私门控（未同意不初始化地图 SDK、不创建 `MAMapView`）；`run-model-tests.sh` 增加 WGS-84→GCJ-02 坐标回归，`run-coordinate-sdk-check.sh` 用高德 SDK 的 `AMapCoordinateConvert(_, .GPS)` 现场对拍（境内差 0.02–0.6 m，境外原样）。以上均为命令级验证，真机/模拟器的人工视觉验收仍未运行。
+
 P4 已补充服务端批次幂等：`X-RAI-Sync-Batch` 会在运行时 SQLite 中绑定到来源，重复上传不会创建第二个来源；同代复用和跨 `datasetEpoch` 隔离分别由 `apps/api/test/import-sources.test.ts` 与 API 运行时测试覆盖。HealthKit 增量导出还会对近期跑步做路线补查，并把 workout UUID 写入同步清单和导入元数据，用于路线晚到和来源删除场景。Swift/Xcode 和真机验证仍未运行。
 
 ## 下一轮必须补测

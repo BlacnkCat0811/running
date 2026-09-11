@@ -55,3 +55,5 @@ bash apps/ios/tests/run-model-tests.sh
 ```
 
 应用产物位于 `/tmp/rai-tech-acceptance/Build/Products/Debug-iphonesimulator/RAI.app`，临时目录可能被系统清理。
+
+2026-09-11 起高德 SDK 由 CocoaPods 引入，上面的 `-project` 命令是当日记录，现无法链接（`ld: framework 'Pods_RAI' not found`）；当前入口为 `pod install` 后的 `apps/ios/RAI.xcworkspace`（见 `apps/ios/README.md`「构建与验收」）。

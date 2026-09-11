@@ -49,7 +49,7 @@ final class VisualAcceptance: XCTestCase {
         XCTFail("Expected fully visible target: \(element)")
     }
 
-    // Drag the page gutter, not MapKit/Charts, which legitimately own pan gestures.
+    // Drag the page gutter, not the map/charts, which legitimately own pan gestures.
     func dragContent(up: Bool) {
         let startY: CGFloat = app.keyboards.count > 0 ? 0.45 : (up ? 0.70 : 0.35)
         let endY: CGFloat = app.keyboards.count > 0 ? 0.20 : (up ? 0.40 : 0.65)
@@ -97,7 +97,9 @@ final class VisualAcceptance: XCTestCase {
         XCTAssertTrue(app.buttons["全部训练指标"].waitForExistence(timeout: 45))
         XCTAssertTrue(app.navigationBars["训练详情"].exists)
         capture("02-detail")
-        app.swipeUp(); capture("02-detail-route")
+        // Scroll the page gutter: a plain swipeUp() lands on the route map, which
+        // legitimately owns pan gestures, and the fitted trace leaves the card.
+        dragContent(up: true); capture("02-detail-route")
         let metrics = app.buttons["全部训练指标"]
         scrollTo(metrics); metrics.tap(); capture("02-detail-metrics")
         // Collapse after recording the metrics so all time-series remain easy to inspect.

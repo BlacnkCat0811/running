@@ -40,3 +40,11 @@ DerivedData/
 *.xccheckout
 *.moved-aside
 
+# CocoaPods: the AMap SDK is vendored by `pod install` (apps/ios), never committed.
+# Commit Podfile, Podfile.lock and RAI.xcworkspace/contents.xcworkspacedata instead.
+apps/ios/Pods/
+
+# AMap iOS SDK key: local only, injected into the generated Pods xcconfig by the Podfile.
+# Template is committed as apps/ios/Configs/AmapKey.xcconfig.example.
+apps/ios/Configs/AmapKey.xcconfig
+

@@ -59,7 +59,9 @@ python3 apps/ios/tests/visual-state-proxy.py > "$out/state-proxy.log" 2>&1 & pro
 xcrun simctl boot "$device" 2>/dev/null || true
 xcrun simctl bootstatus "$device" -b > "$out/simulator.log"
 xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
-xcodebuild -project apps/ios/RAI.xcodeproj -scheme RAI -configuration Debug -sdk iphonesimulator \
+# Build the CocoaPods workspace: the AMap SDK arrives as a pod, so the bare
+# project fails to link (ld: framework 'Pods_RAI' not found).
+xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -configuration Debug -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath "$out/derived" CODE_SIGNING_ALLOWED=NO build > "$out/build.log" 2>&1
 xcrun simctl install "$device" "$out/derived/Build/Products/Debug-iphonesimulator/RAI.app"
 set +e

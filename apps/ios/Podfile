@@ -1,0 +1,57 @@
+source 'https://cdn.cocoapods.org/'
+
+platform :ios, '17.0'
+use_frameworks!
+
+project 'RAI.xcodeproj'
+
+target 'RAI' do
+  # 高德原生地图 SDK：提供中文地名、道路及建筑物标注。
+  pod 'AMap3DMap'
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      # AMapKit ships with an old deployment-target default.
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
+    end
+  end
+
+  installer.aggregate_targets.each do |aggregate|
+    aggregate.user_project.native_targets.each do |target|
+      target.build_configurations.each do |config|
+        # CocoaPods resource scripts write a generated file into Pods/.
+        # Xcode's script sandbox otherwise rejects that legitimate write.
+        config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
+      end
+    end
+  end
+
+  # --- 高德 Key 注入（key 本身不入库） -------------------------------------
+  # RAI/Info.plist 的 AMapApiKey 是 $(RAI_AMAP_API_KEY)，这里把真实值写进
+  # CocoaPods 生成的 xcconfig（Pods/ 已被 .gitignore 忽略，随 pod install 重建）。
+  # 读取顺序：环境变量 RAI_AMAP_API_KEY > Configs/AmapKey.xcconfig（本地文件，不入库）。
+  # 两者都缺时不报错：构建照常成功，只是地图不加载。
+  amap_key = ENV['RAI_AMAP_API_KEY'].to_s.strip
+  if amap_key.empty?
+    key_path = File.join(__dir__, 'Configs', 'AmapKey.xcconfig')
+    if File.exist?(key_path)
+      amap_key = File.read(key_path)[/^\s*RAI_AMAP_API_KEY\s*=\s*(.+?)\s*$/, 1].to_s.strip
+    end
+  end
+
+  xcconfigs = Dir[File.join(__dir__, 'Pods', 'Target Support Files', 'Pods-RAI', 'Pods-RAI.*.xcconfig')]
+  if amap_key.empty?
+    puts '[RAI] 未找到高德 Key：地图不会加载。' \
+         '把 Configs/AmapKey.xcconfig.example 复制为 Configs/AmapKey.xcconfig 并填入 key，' \
+         '或设置 RAI_AMAP_API_KEY 环境变量，然后重新 pod install。'
+  else
+    xcconfigs.each do |path|
+      text = File.read(path)
+      next if text.include?('RAI_AMAP_API_KEY')
+      File.open(path, 'a') { |file| file.puts "\nRAI_AMAP_API_KEY = #{amap_key}" }
+    end
+    puts "[RAI] 已注入高德 Key 到 #{xcconfigs.size} 个 xcconfig（值不入库）。"
+  end
+end
