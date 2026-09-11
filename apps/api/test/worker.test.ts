@@ -8,9 +8,11 @@ import test from "node:test";
 
 import { RaiApplicationService, currentAbilityBaselineHash } from "@rai/application";
 import { healthTypes } from "@rai/contracts";
+import { ImportRemovalGuardError } from "@rai/health-export-parser";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
+import { FULL_SNAPSHOT_SOURCE_SCOPE } from "../src/import-sources.js";
 import {
   ExternalPredictionModelTrainer,
   ImportWorker,
@@ -2565,12 +2567,13 @@ test("reports the import worker as running until asynchronous terminal cleanup f
   }
 });
 
-test("HealthKit uploads pass --preserve-absent and directory exports do not", async () => {
+test("imports preserve by default and only an explicit full snapshot replaces", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-healthkit-preserve-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   mkdirSync(join(root, "export"));
   writeFileSync(join(root, "export", "export.xml"), "<HealthData />", "utf8");
+  const manifestPath = join(root, "export", "sync-manifest.json");
   const active = await seedCanonical(databasePath);
   active.close();
   const captureCommand = async (
@@ -2599,6 +2602,7 @@ test("HealthKit uploads pass --preserve-absent and directory exports do not", as
     });
     assert.ok(healthKitArgs.includes("incremental-import"));
     assert.ok(healthKitArgs.includes("--preserve-absent"));
+    assert.equal(healthKitArgs.includes("--replace-absent"), false);
 
     const originalNameArgs = await captureCommand({
       kind: "upload",
@@ -2606,19 +2610,37 @@ test("HealthKit uploads pass --preserve-absent and directory exports do not", as
       originalPath: join(root, "apple-health-healthkit-local.zip")
     });
     assert.ok(originalNameArgs.includes("--preserve-absent"));
+    assert.equal(originalNameArgs.includes("--replace-absent"), false);
 
+    // Neither a directory nor a discovered export declares itself a complete
+    // snapshot, so both must import without enabling deletion.
     const directoryArgs = await captureCommand({
       kind: "directory",
       displayName: "apple-health-healthkit.zip"
     });
     assert.ok(directoryArgs.includes("incremental-import"));
-    assert.equal(directoryArgs.includes("--preserve-absent"), false);
+    assert.ok(directoryArgs.includes("--preserve-absent"));
+    assert.equal(directoryArgs.includes("--replace-absent"), false);
 
     const discoveredArgs = await captureCommand({
       kind: "discovered",
       displayName: "apple-health-healthkit.zip"
     });
-    assert.equal(discoveredArgs.includes("--preserve-absent"), false);
+    assert.ok(discoveredArgs.includes("--preserve-absent"));
+    assert.equal(discoveredArgs.includes("--replace-absent"), false);
+
+    // Only a payload that declares a complete snapshot may replace by absence.
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({ version: 1, sourceScope: FULL_SNAPSHOT_SOURCE_SCOPE }),
+      "utf8"
+    );
+    const snapshotArgs = await captureCommand({
+      kind: "upload",
+      displayName: "apple-health-healthkit.zip"
+    });
+    assert.ok(snapshotArgs.includes("--replace-absent"));
+    assert.equal(snapshotArgs.includes("--preserve-absent"), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2644,3 +2666,93 @@ test("closes a queued import before it starts and runs terminal cleanup", async 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("publishes CLI removal guard details and preserves them across restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-worker-removal-guard-"));
+  const databasePath = join(root, "rai.sqlite");
+  const input = join(root, "export");
+  mkdirSync(input);
+  writeFileSync(join(input, "export.xml"), "<HealthData />");
+  writeFileSync(join(input, "sync-manifest.json"), JSON.stringify({
+    version: 1, sourceScope: FULL_SNAPSHOT_SOURCE_SCOPE
+  }));
+  const store = await seedCanonical(databasePath);
+  for (let index = 8; index < 60; index += 1) {
+    store.database.prepare(`
+      INSERT INTO workouts (id, activity_type, source_name, source_category, start_at, end_at,
+        duration_seconds, metadata_json, raw_attributes_json)
+      VALUES (?, 'HKWorkoutActivityTypeRunning', 'Watch', 'apple_watch',
+        '2026-01-01T00:00:00Z', '2026-01-01T00:30:00Z', 1800, '{}', '{}')
+    `).run(`guard_workout_${index}`);
+  }
+  store.close();
+  const projectRoot = join(import.meta.dirname, "../../..");
+  const worker = new ImportWorker(databasePath, projectRoot, root);
+  try {
+    worker.create(input);
+    await waitFor(() => !worker.isRunning, 30_000);
+    assert.equal(worker.latest()?.status, "failed");
+    assert.match(worker.latest()?.error ?? "", /导入已中止.*60 次训练/);
+    assert.doesNotMatch(worker.latest()?.error ?? "", /rai-worker-removal-guard|Error:|cli.ts/);
+    const live = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((live.prepare("SELECT COUNT(*) AS n FROM workouts").get() as { n: number }).n, 60);
+    } finally { live.close(); }
+    const restarted = new ImportWorker(databasePath, projectRoot, root);
+    try {
+      assert.equal(restarted.latest()?.error, worker.latest()?.error);
+    } finally { await restarted.close(); }
+  } finally {
+    await worker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects malformed guard IPC without treating child text as a public error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-worker-invalid-guard-"));
+  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  try {
+    const surface = worker as unknown as ImportWorkerTestSurface;
+    await assert.rejects(surface.command(["-e", `
+      process.send({code:'import_removal_guard', preview:{workouts:'private/path'}, userMessage:'private/path'}, () => {
+        process.stderr.write('ordinary failure');
+        process.exitCode = 1;
+        process.disconnect();
+      });
+    `]), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error instanceof ImportRemovalGuardError, false);
+      assert.match(error.message, /ordinary failure/);
+      return true;
+    });
+  } finally {
+    await worker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+for (const operation of ["add", "clear", "repeat", "upgrade"] as const) {
+  test(`classifies ${operation} source tombstones without recomputing`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-worker-source-tombstones-"));
+    const previousPath = join(root, "previous.sqlite");
+    const stagingPath = join(root, "staging.sqlite");
+    const previous = await seedCanonical(previousPath);
+    const staging = await seedCanonical(stagingPath);
+    if (operation === "clear" || operation === "repeat") previous.removeWorkoutsBySyncIdentifiers(["unseen"]);
+    if (operation !== "clear") staging.removeWorkoutsBySyncIdentifiers(["unseen"]);
+    if (operation === "upgrade") previous.database.exec("DROP TABLE import_source_tombstones");
+    previous.close();
+    staging.close();
+    const worker = new ImportWorker(join(root, "active.sqlite"), root, root);
+    try {
+      const surface = worker as unknown as ImportWorkerTestSurface;
+      assert.equal(surface.analyzeDatasetChange(stagingPath, previousPath).mode,
+        operation === "repeat" ? "unchanged" : "data-only");
+    } finally {
+      await worker.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

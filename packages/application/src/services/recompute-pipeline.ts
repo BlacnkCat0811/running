@@ -127,6 +127,18 @@ interface OverrideSnapshot {
 }
 
 /**
+ * Superseded recomputation runs kept beyond the active one.
+ *
+ * Every recompute writes a new model_run / feature_run / training_metric_run
+ * and materialises the complete derived output into it, so unbounded retention
+ * grows the database as O(runs × days) and multiplies the cost of every
+ * migration that rewrites a derived table. Keeping a small recent history
+ * preserves run-to-run comparison while bounding that growth. `0` disables
+ * pruning entirely.
+ */
+export const SUPERSEDED_RUN_RETENTION = 2;
+
+/**
  * Feature extraction, training metrics/zones, and ability timeline replay.
  * Split from RaiApplicationService (ARCHITECTURE_DEBT_MIGRATION P4).
  */
@@ -2109,6 +2121,21 @@ export class RecomputePipeline {
       }
     );
     if (!completed) throw new Error("Task cancellation requested");
+    // Runs after the activation commits. Retiring superseded runs is
+    // housekeeping, so it must never be able to roll back or fail a recompute
+    // that already succeeded.
+    this.pruneSupersededRuns();
+  }
+
+  private pruneSupersededRuns(): void {
+    if (SUPERSEDED_RUN_RETENTION <= 0) return;
+    try {
+      this.store.pruneSupersededModelRuns({ keepRecent: SUPERSEDED_RUN_RETENTION });
+    } catch (error) {
+      process.stderr.write(
+        `Superseded run prune skipped: ${error instanceof Error ? error.message : String(error)}\n`
+      );
+    }
   }
 
   private throwIfCancelled(jobId: string): void {

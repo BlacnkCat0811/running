@@ -1066,7 +1066,7 @@ app.post<{ Body: ImportJobRequest }>(
           invalidateDatabaseReadiness();
         }
         if (durable && source.kind === "upload") {
-          if (succeeded && isHealthKitUploadSource(source)) {
+          if (succeeded && isHealthKitUploadSource(source, source.inputPath)) {
             await importSources.retainImportedUpload(sourceId);
           } else {
             await importSources.cleanupUpload(sourceId);

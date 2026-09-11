@@ -1283,7 +1283,7 @@ struct WorkoutDetailView: View {
             VStack(alignment: .leading, spacing: 9) {
                 PixelSectionHeader(title: "路线", trailing: "\(route.count) 个点", trailingColor: PixelColor.cyan)
                 if route.count > 1 {
-                    TechRouteView(route: route)
+                    PixelRouteView(route: route)
                 } else {
                     Text("路线数据不足")
                         .font(.footnote)
@@ -1311,7 +1311,7 @@ struct WorkoutDetailView: View {
                         .foregroundStyle(PixelColor.muted)
                         .frame(maxWidth: .infinity, minHeight: 120)
                 } else if selectedMetric == "heartRate" {
-                    NativeHeartRateChart(metric: metric,
+                    PixelHeartRateChart(metric: metric,
                         averageHeartRate: native.selectedWorkout?.workout.averageHeartRateBpm,
                         durationSeconds: native.selectedWorkout?.workout.elapsedSeconds ?? 0)
                 } else {

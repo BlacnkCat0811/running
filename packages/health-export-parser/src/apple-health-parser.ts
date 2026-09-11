@@ -13,6 +13,7 @@ import { CONTRACT_VERSION } from "@rai/contracts";
 import { SaxesParser, type SaxesTagPlain } from "saxes";
 
 import { RaiDatabase } from "./database.js";
+import { evaluateRemovalGuard, ImportRemovalGuardError } from "./import-guard.js";
 import {
   addMetadata,
   classifySource,
@@ -61,6 +62,8 @@ export interface AppleHealthParseResult {
   insertedWorkoutCount?: number;
   removedRecordCount?: number;
   removedWorkoutCount?: number;
+  /** Entities the payload carried but that stayed deleted via a tombstone. */
+  tombstonedCount?: number;
   dirtyWorkoutTimes?: string[];
 }
 
@@ -74,7 +77,17 @@ export interface ParseProgress {
 export interface AppleHealthParseOptions {
   fileSize: number;
   onProgress?: (progress: ParseProgress) => void;
-  incremental?: { generation: string; batchId?: string; preserveAbsent?: boolean };
+  incremental?: {
+    generation: string;
+    batchId?: string;
+    preserveAbsent?: boolean;
+    /**
+     * When `preserveAbsent` is false the payload is asserted to be a complete
+     * snapshot. Set this to false only to bypass the removal guard that refuses
+     * to delete a large share of the database on a partial payload.
+     */
+    guardAbsentRemoval?: boolean;
+  };
   atomic?: boolean;
   /** Explicit HealthKit deletion events. Absence never implies deletion. */
   deletedWorkoutIds?: readonly string[];
@@ -238,6 +251,8 @@ export async function parseAppleHealthXml(
   let issueCount = 0;
   let insertedRecordCount = 0;
   let insertedWorkoutCount = 0;
+  // Entities the payload still carries but that a tombstone keeps deleted.
+  let tombstonedCount = 0;
   const insertedWorkoutTimes: string[] = [];
   let bytesRead = 0;
   let lastProgressAt = 0;
@@ -341,7 +356,8 @@ export async function parseAppleHealthXml(
             options.incremental.batchId,
             contentHash
           );
-          if (observation.inserted || observation.updated) store.insertActivitySummary(attributes);
+          if (observation.tombstoned) tombstonedCount += 1;
+          else if (observation.inserted || observation.updated) store.insertActivitySummary(attributes);
         }
         activitySummaryCount += 1;
         break;
@@ -362,11 +378,13 @@ export async function parseAppleHealthXml(
           "record", record.id, entityGeneration, record.startAt,
           options.incremental?.batchId, contentHash
         );
-        const shouldWrite = !options.incremental || observation.inserted || observation.updated;
+        const shouldWrite = !observation.tombstoned
+          && (!options.incremental || observation.inserted || observation.updated);
         if (shouldWrite) {
           store.insertRecord(record, category, currentRecord.attributes);
           if (!options.incremental || observation.inserted) insertedRecordCount += 1;
         }
+        if (observation.tombstoned) tombstonedCount += 1;
         updateInventory(
           recordInventory,
           record.type,
@@ -398,9 +416,13 @@ export async function parseAppleHealthXml(
         ]);
         const observation = store.observeImportEntity(
           "workout", workout.id, entityGeneration, workout.startAt,
-          options.incremental?.batchId, contentHash
+          options.incremental?.batchId, contentHash,
+          ["HKMetadataKeySyncIdentifier", "RAIHealthKitWorkoutUUID"]
+            .map((key) => lastMetadataValue(workout.metadata, key))
+            .filter((value): value is string => Boolean(value))
         );
-        const shouldWrite = !options.incremental || observation.inserted || observation.updated;
+        const shouldWrite = !observation.tombstoned
+          && (!options.incremental || observation.inserted || observation.updated);
         if (shouldWrite) {
           store.insertWorkout(
             workout,
@@ -411,6 +433,7 @@ export async function parseAppleHealthXml(
           if (!options.incremental || observation.inserted) insertedWorkoutCount += 1;
           insertedWorkoutTimes.push(workout.startAt);
         }
+        if (observation.tombstoned) tombstonedCount += 1;
         updateInventory(
           workoutInventory,
           workout.activityType,
@@ -477,6 +500,22 @@ export async function parseAppleHealthXml(
     }
     store.setManifest("parser_contract_version", CONTRACT_VERSION);
     store.setManifest("source_xml_sha256", sourceHash.digest("hex"));
+    if (
+      options.incremental
+      && !options.incremental.preserveAbsent
+      && options.incremental.guardAbsentRemoval !== false
+    ) {
+      const preview = store.previewGenerationRemoval(options.incremental.generation);
+      const existingEntities = store.countImportableEntities();
+      const evaluation = evaluateRemovalGuard(preview, existingEntities);
+      if (evaluation.exceeded) {
+        throw new ImportRemovalGuardError(
+          preview,
+          existingEntities,
+          evaluation.allowedRemovals
+        );
+      }
+    }
     const finalized = options.incremental
       ? store.finalizeImportGeneration(
         options.incremental.generation,
@@ -494,6 +533,7 @@ export async function parseAppleHealthXml(
       insertedRecordCount, insertedWorkoutCount,
       removedRecordCount: finalized.removedRecords,
       removedWorkoutCount: finalized.removedWorkouts,
+      tombstonedCount,
       dirtyWorkoutTimes: [...insertedWorkoutTimes, ...explicitDeletionTimes, ...finalized.dirtyWorkoutTimes]
     };
   } catch (error) {

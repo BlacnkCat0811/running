@@ -25,6 +25,37 @@ export interface RaiDatabaseOpenOptions {
   createMigrationBackup?: boolean;
 }
 
+/**
+ * Read-only projection of what a non-preserving `finalizeImportGeneration`
+ * would delete. Used to refuse an import payload that silently omits data.
+ */
+export interface GenerationRemovalPreview {
+  records: number;
+  workouts: number;
+  activitySummaries: number;
+  total: number;
+}
+
+/**
+ * Outcome of pruning superseded recomputation runs. Every count is a number of
+ * rows physically removed from the database.
+ */
+export interface SupersededRunPruneResult {
+  modelRuns: number;
+  featureRuns: number;
+  trainingMetricRuns: number;
+  /** Derived rows removed across snapshots, assessments, loads, zones, checkpoints. */
+  derivedRows: number;
+  /** Jobs kept for audit but detached from the run they produced. */
+  detachedJobs: number;
+  /** Runs preserved: the active run, its ancestry, and the retention window. */
+  retainedModelRuns: number;
+  /** Retained runs reachable through the active/retained model lineage. */
+  retainedByLineage: number;
+  /** Retained runs selected by the recent-run window before lineage expansion. */
+  retainedByRecentWindow: number;
+}
+
 const nowSql = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 /** Placeholder content hash for cold-start generation seeds (not a real body hash). */
 export const SEED_CONTENT_HASH = "__seed_unknown__";
@@ -1280,6 +1311,52 @@ const migrations: readonly Migration[] = [
           ON model_validation_gates(base_model_run_id, created_at DESC);
       `);
     }
+  },
+  {
+    // Absence is not evidence of deletion: a client sync package only carries
+    // the window since its last anchor, so an entity missing from a payload
+    // may simply be outside that window. Deletion is therefore driven by an
+    // explicit tombstone, and the tombstone is durable so a later payload
+    // (a re-uploaded older archive, an anchor reset) cannot resurrect data the
+    // user removed on purpose.
+    version: 19,
+    name: "import_entity_tombstones",
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS import_entity_tombstones (
+          entity_kind TEXT NOT NULL CHECK (entity_kind IN ('record', 'workout', 'activity_summary')),
+          entity_id TEXT NOT NULL,
+          source_identifier TEXT,
+          batch_id TEXT,
+          deleted_at TEXT NOT NULL DEFAULT (${nowSql}),
+          PRIMARY KEY (entity_kind, entity_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_import_entity_tombstones_deleted_at
+          ON import_entity_tombstones(deleted_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_import_entity_tombstones_source
+          ON import_entity_tombstones(source_identifier);
+      `);
+    }
+  },
+  {
+    version: 20,
+    name: "import_source_tombstones",
+    up: (database) => {
+      database.exec(`
+        CREATE TABLE import_source_tombstones (
+          entity_kind TEXT NOT NULL CHECK (entity_kind = 'workout'),
+          source_identifier TEXT NOT NULL,
+          batch_id TEXT,
+          deleted_at TEXT NOT NULL DEFAULT (${nowSql}),
+          PRIMARY KEY (entity_kind, source_identifier)
+        );
+        INSERT INTO import_source_tombstones (entity_kind, source_identifier, deleted_at)
+          SELECT entity_kind, source_identifier, MAX(deleted_at)
+          FROM import_entity_tombstones
+          WHERE entity_kind = 'workout' AND source_identifier IS NOT NULL
+          GROUP BY entity_kind, source_identifier;
+      `);
+    }
   }
 ];
 
@@ -1913,15 +1990,123 @@ export class RaiDatabase {
     return true;
   }
 
+  /** Whether an explicit deletion tombstone exists for this entity. */
+  isEntityTombstoned(kind: "record" | "workout" | "activity_summary", id: string): boolean {
+    return this.database
+      .prepare("SELECT 1 FROM import_entity_tombstones WHERE entity_kind = ? AND entity_id = ?")
+      .get(kind, id) !== undefined;
+  }
+
+  /**
+   * Records durable deletion tombstones. Called for every entity an import
+   * removes, so a later payload cannot reintroduce it.
+   */
+  recordEntityTombstones(
+    kind: "record" | "workout" | "activity_summary",
+    ids: readonly string[],
+    options?: { batchId?: string; sourceIdentifier?: string }
+  ): number {
+    if (ids.length === 0) return 0;
+    const statement = this.database.prepare(`
+      INSERT INTO import_entity_tombstones (entity_kind, entity_id, source_identifier, batch_id, deleted_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(entity_kind, entity_id) DO UPDATE SET
+        source_identifier = COALESCE(excluded.source_identifier, import_entity_tombstones.source_identifier),
+        batch_id = excluded.batch_id,
+        deleted_at = excluded.deleted_at
+    `);
+    const deletedAt = new Date().toISOString();
+    for (const id of ids) {
+      statement.run(kind, id, options?.sourceIdentifier ?? null, options?.batchId ?? null, deletedAt);
+    }
+    return ids.length;
+  }
+
+  /** Number of durable deletion tombstones. */
+  countEntityTombstones(): number {
+    return (this.database
+      .prepare("SELECT COUNT(*) AS entityCount FROM import_entity_tombstones")
+      .get() as unknown as { entityCount: number }).entityCount;
+  }
+
+  /**
+   * Removes only tombstones that are older than the caller's explicit
+   * retention window. Callers should run this after a verified authoritative
+   * snapshot; incremental imports must retain tombstones indefinitely because
+   * an old archive can arrive at any time and otherwise resurrect deleted data.
+   */
+  pruneEntityTombstones(options: { olderThanDays: number; limit?: number }): number {
+    const days = Math.floor(options.olderThanDays);
+    if (!Number.isFinite(days) || days <= 0) throw new Error("olderThanDays must be positive");
+    const limit = options.limit === undefined ? 1000 : Math.floor(options.limit);
+    if (!Number.isFinite(limit) || limit <= 0) throw new Error("limit must be positive");
+    this.begin();
+    try {
+      const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+      const ids = this.database.prepare(`
+        SELECT entity_kind AS entityKind, entity_id AS entityId
+        FROM import_entity_tombstones
+        WHERE deleted_at < ?
+        ORDER BY deleted_at ASC
+        LIMIT ?
+      `).all(cutoff, limit) as unknown as Array<{ entityKind: string; entityId: string }>;
+      const statement = this.database.prepare(
+        "DELETE FROM import_entity_tombstones WHERE entity_kind = ? AND entity_id = ?"
+      );
+      for (const row of ids) statement.run(row.entityKind, row.entityId);
+      // Source tombstones have their own key and may outlive the entity row
+      // (for deletions received before the entity arrived).
+      this.database.prepare(`
+        DELETE FROM import_source_tombstones
+        WHERE rowid IN (
+          SELECT s.rowid FROM import_source_tombstones s
+          WHERE s.deleted_at < ? AND NOT EXISTS (
+          SELECT 1 FROM import_entity_tombstones e
+            WHERE e.entity_kind = s.entity_kind
+              AND e.source_identifier = s.source_identifier
+          )
+          ORDER BY s.deleted_at ASC
+          LIMIT ?
+        )
+      `).run(cutoff, limit);
+      this.flush();
+      return ids.length;
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+  }
+
+  /**
+   * Drops every tombstone. Only an explicitly declared complete snapshot may
+   * call this: such a payload is authoritative, so it is allowed to declare
+   * that a previously removed entity exists again.
+   */
+  clearEntityTombstones(): number {
+    const removed = this.countEntityTombstones();
+    this.database.exec("DELETE FROM import_entity_tombstones");
+    this.database.exec("DELETE FROM import_source_tombstones");
+    return removed;
+  }
+
   observeImportEntity(
     kind: "record" | "workout" | "activity_summary",
     id: string,
     generation: string,
     effectiveAt: string | null,
     batchId?: string,
-    contentHash = id
-  ): { inserted: boolean; updated: boolean } {
+    contentHash = id,
+    sourceIdentifiers: readonly string[] = []
+  ): { inserted: boolean; updated: boolean; tombstoned: boolean } {
     this.begin();
+    // A tombstoned entity stays deleted even if a payload still carries it:
+    // deletion is explicit and durable, not a function of the latest payload.
+    const sourceDeleted = sourceIdentifiers.some((identifier) => this.database.prepare(
+      "SELECT 1 FROM import_source_tombstones WHERE entity_kind = ? AND source_identifier = ?"
+    ).get(kind, identifier) !== undefined);
+    if (sourceDeleted || this.isEntityTombstoned(kind, id)) {
+      return { inserted: false, updated: false, tombstoned: true };
+    }
     const table = kind === "record" ? "health_records" : kind === "workout" ? "workouts" : "activity_summaries";
     const key = kind === "activity_summary" ? "date_components" : "id";
     const exists = this.database.prepare(`SELECT 1 FROM ${table} WHERE ${key} = ?`).get(id) !== undefined;
@@ -1951,14 +2136,20 @@ export class RaiDatabase {
         ) VALUES (?, ?, ?, ?, ?, ?)
       `).run(batchId, kind, id, exists ? "updated" : "inserted", effectiveAt, contentHash);
     }
-    return { inserted: !exists, updated };
+    return { inserted: !exists, updated, tombstoned: false };
   }
 
   seedImportGenerations(generation: string, options?: { preserveAbsent?: boolean }): void {
     this.begin();
     // These are compact projections of the current export and are rebuilt by the scan.
     // Preserve-absent payloads are incomplete, so keep the previous inventory totals.
-    if (!options?.preserveAbsent) this.database.exec("DELETE FROM entity_inventory");
+    if (!options?.preserveAbsent) {
+      this.database.exec("DELETE FROM entity_inventory");
+      // An authoritative snapshot supersedes earlier tombstones. Clearing must
+      // happen before the scan: a tombstone would otherwise keep the entity out
+      // of the payload that is supposed to restore it.
+      this.clearEntityTombstones();
+    }
     this.database.exec("DELETE FROM import_issues");
     const previous = `${generation}:previous`;
     this.database.prepare(`
@@ -1992,6 +2183,50 @@ export class RaiDatabase {
     }
   }
 
+  /**
+   * Counts the entities that a non-preserving finalize would delete, without
+   * touching any row. `preserveAbsent: false` asserts that the payload is a
+   * complete snapshot, so anything missing from it is treated as deleted. When
+   * the payload is actually partial that assertion is false, and the deletion
+   * would be silent data loss — callers guard on this preview first.
+   */
+  previewGenerationRemoval(generation: string): GenerationRemovalPreview {
+    const rows = this.database
+      .prepare(`
+        SELECT entity_kind AS entityKind, COUNT(*) AS entityCount
+        FROM import_entity_generations
+        WHERE generation <> ?
+        GROUP BY entity_kind
+      `)
+      .all(generation) as unknown as Array<{ entityKind: string; entityCount: number }>;
+    const preview: GenerationRemovalPreview = {
+      records: 0,
+      workouts: 0,
+      activitySummaries: 0,
+      total: 0
+    };
+    for (const row of rows) {
+      if (row.entityKind === "record") preview.records = row.entityCount;
+      else if (row.entityKind === "workout") preview.workouts = row.entityCount;
+      else if (row.entityKind === "activity_summary") preview.activitySummaries = row.entityCount;
+      preview.total += row.entityCount;
+    }
+    return preview;
+  }
+
+  /** Current population of entities that an import generation governs. */
+  countImportableEntities(): number {
+    const row = this.database
+      .prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM health_records)
+          + (SELECT COUNT(*) FROM workouts)
+          + (SELECT COUNT(*) FROM activity_summaries) AS entityCount
+      `)
+      .get() as unknown as { entityCount: number };
+    return row.entityCount;
+  }
+
   finalizeImportGeneration(
     generation: string,
     batchId?: string,
@@ -2006,6 +2241,9 @@ export class RaiDatabase {
         dirtyWorkoutTimes: []
       };
     }
+    // Reaching this branch means the payload declared itself a complete
+    // snapshot. `seedImportGenerations` already cleared the superseded
+    // tombstones before the scan; every entity removed here gets a fresh one.
     const stale = this.database.prepare(`
       SELECT entity_kind AS entityKind, entity_id AS entityId, effective_at AS effectiveAt
       FROM import_entity_generations
@@ -2017,6 +2255,11 @@ export class RaiDatabase {
     }>;
     const dirtyWorkoutTimes: string[] = [];
     const removed = { record: 0, workout: 0, activity_summary: 0 };
+    const removedIds: Record<"record" | "workout" | "activity_summary", string[]> = {
+      record: [],
+      workout: [],
+      activity_summary: []
+    };
     const deleteRecord = this.database.prepare("DELETE FROM health_records WHERE id = ?");
     const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");
     const deleteSummary = this.database.prepare("DELETE FROM activity_summaries WHERE date_components = ?");
@@ -2050,7 +2293,13 @@ export class RaiDatabase {
         deleteWorkout.run(row.entityId);
       } else deleteSummary.run(row.entityId);
       removed[row.entityKind] += 1;
+      removedIds[row.entityKind].push(row.entityId);
       deleteGeneration.run(row.entityKind, row.entityId);
+    }
+    // Every removal leaves a durable tombstone so a later payload cannot
+    // reintroduce the entity.
+    for (const kind of ["record", "workout", "activity_summary"] as const) {
+      this.recordEntityTombstones(kind, removedIds[kind], { ...(batchId === undefined ? {} : { batchId }) });
     }
     return {
       removedRecords: removed.record,
@@ -2060,16 +2309,47 @@ export class RaiDatabase {
     };
   }
 
+  /**
+   * Applies explicit HealthKit deletion events, matched by the sync identifier
+   * the client stores in the workout metadata. Each removed workout leaves a
+   * durable tombstone so re-uploading an older archive cannot bring it back.
+   */
   removeWorkoutsBySyncIdentifiers(identifiers: readonly string[], batchId?: string): string[] {
     const dirtyWorkoutTimes: string[] = [];
     if (identifiers.length === 0) return dirtyWorkoutTimes;
     this.begin();
     try {
+      // Match the parsed metadata values exactly. LIKE is unsafe here: a sync
+      // identifier containing '%' or '_' would become a wildcard, and a
+      // substring match could delete a different workout. Metadata values are
+      // stored as arrays, so expand only the two supported identifier keys.
       const select = this.database.prepare(`
         SELECT id, start_at AS startAt FROM workouts
-        WHERE metadata_json LIKE ? OR raw_attributes_json LIKE ?
+        WHERE EXISTS (
+          SELECT 1 FROM json_each(
+            json_extract(workouts.metadata_json, '$.HKMetadataKeySyncIdentifier')
+          ) WHERE value = ?
+        )
+        OR EXISTS (
+          SELECT 1 FROM json_each(
+            json_extract(workouts.metadata_json, '$.RAIHealthKitWorkoutUUID')
+          ) WHERE value = ?
+        )
+        OR EXISTS (
+          SELECT 1 FROM json_each(
+            json_extract(workouts.raw_attributes_json, '$.HKMetadataKeySyncIdentifier')
+          ) WHERE value = ?
+        )
+        OR EXISTS (
+          SELECT 1 FROM json_each(
+            json_extract(workouts.raw_attributes_json, '$.RAIHealthKitWorkoutUUID')
+          ) WHERE value = ?
+        )
       `);
       const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");
+      const deleteGeneration = this.database.prepare(
+        "DELETE FROM import_entity_generations WHERE entity_kind = 'workout' AND entity_id = ?"
+      );
       const deleteGroup = this.database.prepare(`
         DELETE FROM workout_groups WHERE id IN (
           SELECT group_id FROM workout_group_members WHERE workout_id = ?
@@ -2080,9 +2360,17 @@ export class RaiDatabase {
           SELECT id FROM workout_routes WHERE workout_id = ?
         )
       `);
+      const tombstoned = new Map<string, string[]>();
+      const recordSourceDeletion = this.database.prepare(`
+        INSERT INTO import_source_tombstones (entity_kind, source_identifier, batch_id)
+        VALUES ('workout', ?, ?)
+        ON CONFLICT(entity_kind, source_identifier) DO UPDATE SET
+          batch_id = excluded.batch_id, deleted_at = (${nowSql})
+      `);
       for (const identifier of identifiers) {
-        const pattern = `%${identifier}%`;
-        const rows = select.all(pattern, pattern) as unknown as Array<{ id: string; startAt: string }>;
+        // The deletion may arrive before an older archive containing the workout.
+        recordSourceDeletion.run(identifier, batchId ?? null);
+        const rows = select.all(identifier, identifier, identifier, identifier) as unknown as Array<{ id: string; startAt: string }>;
         for (const row of rows) {
           dirtyWorkoutTimes.push(row.startAt);
           if (batchId) {
@@ -2094,11 +2382,186 @@ export class RaiDatabase {
           }
           deleteGroup.run(row.id);
           deleteFingerprints.run(row.id);
+          // Leaving the ledger row behind would make the entity look like a
+          // stale-but-present entity to the removal preview.
+          deleteGeneration.run(row.id);
           deleteWorkout.run(row.id);
+          const bucket = tombstoned.get(identifier);
+          if (bucket) bucket.push(row.id);
+          else tombstoned.set(identifier, [row.id]);
         }
+      }
+      for (const [identifier, ids] of tombstoned) {
+        this.recordEntityTombstones("workout", ids, {
+          ...(batchId === undefined ? {} : { batchId }),
+          sourceIdentifier: identifier
+        });
       }
       this.flush();
       return dirtyWorkoutTimes;
+    } catch (error) {
+      this.rollback();
+      throw error;
+    }
+  }
+
+  /**
+   * Removes recomputation runs superseded by newer ones, together with every
+   * row derived from them.
+   *
+   * Each recompute writes a brand-new model_run / feature_run /
+   * training_metric_run and materialises the complete derived output again, so
+   * without pruning the database grows as O(runs × days) and every migration
+   * that rewrites a derived table pays that multiple.
+   *
+   * Retention: the active run, everything reachable from it through the parent
+   * lineage, and the `keepRecent` most recent superseded runs. Ancestry is
+   * protected because `parent_model_run_id` / `parent_feature_run_id` are
+   * `NO ACTION` (deleting an ancestor of a retained run would fail the foreign
+   * key) and because lineage is what makes a past run explainable.
+   *
+   * Refuses to run when no run is active: without a known live run there is no
+   * safe definition of "superseded", and a wrong guess deletes live data.
+   */
+  pruneSupersededModelRuns(options?: { keepRecent?: number }): SupersededRunPruneResult {
+    const keepRecent = Math.max(0, Math.floor(options?.keepRecent ?? 2));
+    const activeRow = this.database
+      .prepare("SELECT model_run_id AS modelRunId FROM active_model_run WHERE singleton = 1")
+      .get() as unknown as { modelRunId: string } | undefined;
+    const activeId = activeRow?.modelRunId;
+    if (!activeId) {
+      throw new Error("Refusing to prune recomputation runs while no run is active");
+    }
+    const runs = this.database
+      .prepare(`
+        SELECT id, parent_model_run_id AS parentId, feature_run_id AS featureRunId
+        FROM model_runs
+        ORDER BY created_at DESC, rowid DESC
+      `)
+      .all() as unknown as Array<{ id: string; parentId: string | null; featureRunId: string }>;
+    if (runs.length <= 1) {
+      return {
+        modelRuns: 0, featureRuns: 0, trainingMetricRuns: 0,
+        derivedRows: 0, detachedJobs: 0, retainedModelRuns: runs.length,
+        retainedByLineage: 0, retainedByRecentWindow: runs.length
+      };
+    }
+
+    const byId = new Map(runs.map((run) => [run.id, run]));
+    const retained = new Set<string>([activeId]);
+    let extraKept = 0;
+    for (const run of runs) {
+      if (extraKept >= keepRecent) break;
+      if (run.id === activeId) continue;
+      retained.add(run.id);
+      extraKept += 1;
+    }
+    const pending = [...retained];
+    while (pending.length > 0) {
+      const parentId = byId.get(pending.pop() as string)?.parentId;
+      if (parentId && !retained.has(parentId)) {
+        retained.add(parentId);
+        pending.push(parentId);
+      }
+    }
+
+    const doomed = runs.filter((run) => !retained.has(run.id));
+    if (doomed.length === 0) {
+      return {
+        modelRuns: 0, featureRuns: 0, trainingMetricRuns: 0,
+        derivedRows: 0, detachedJobs: 0, retainedModelRuns: retained.size,
+        retainedByLineage: retained.size - extraKept - 1,
+        retainedByRecentWindow: extraKept + 1
+      };
+    }
+    const doomedRunIds = doomed.map((run) => run.id);
+    // A feature run still referenced by a retained model run must survive: the
+    // model_runs -> feature_runs foreign key is NO ACTION.
+    const retainedFeatureRunIds = new Set(
+      runs.filter((run) => retained.has(run.id)).map((run) => run.featureRunId)
+    );
+    const candidateFeatureIds = new Set(doomed.map((run) => run.featureRunId));
+    const features = this.database.prepare(`
+      SELECT id, parent_feature_run_id AS parentId FROM feature_runs
+    `).all() as unknown as Array<{ id: string; parentId: string | null }>;
+    const featureParents = new Map(features.map((feature) => [feature.id, feature.parentId]));
+    // Feature reuse can succeed even when model replay starts from scratch.
+    // Protect ancestors of every surviving feature, including orphan runs.
+    for (const feature of features) {
+      if (!candidateFeatureIds.has(feature.id)) retainedFeatureRunIds.add(feature.id);
+    }
+    const pendingFeatures = [...retainedFeatureRunIds];
+    while (pendingFeatures.length > 0) {
+      const parentId = featureParents.get(pendingFeatures.pop() as string);
+      if (parentId && !retainedFeatureRunIds.has(parentId)) {
+        retainedFeatureRunIds.add(parentId);
+        pendingFeatures.push(parentId);
+      }
+    }
+    const doomedFeatureRunIds = [...candidateFeatureIds].filter((id) => !retainedFeatureRunIds.has(id));
+
+    const countWhereIn = (table: string, column: string, ids: readonly string[]): number => {
+      if (ids.length === 0) return 0;
+      const placeholders = ids.map(() => "?").join(",");
+      return (this.database
+        .prepare(`SELECT COUNT(*) AS rowCount FROM ${table} WHERE ${column} IN (${placeholders})`)
+        .get(...ids) as unknown as { rowCount: number }).rowCount;
+    };
+    const doomedMetricRunIds = (
+      this.database
+        .prepare(`SELECT id FROM training_metric_runs WHERE model_run_id IN (${doomedRunIds.map(() => "?").join(",")})`)
+        .all(...doomedRunIds) as unknown as Array<{ id: string }>
+    ).map((row) => row.id);
+
+    let derivedRows = 0;
+    for (const [table, column, ids] of [
+      ["ability_assessments", "model_run_id", doomedRunIds],
+      ["daily_ability_snapshots", "model_run_id", doomedRunIds],
+      ["model_checkpoints", "model_run_id", doomedRunIds],
+      ["workout_features", "feature_run_id", doomedFeatureRunIds],
+      ["workout_training_loads", "training_metric_run_id", doomedMetricRunIds],
+      ["daily_training_metrics", "training_metric_run_id", doomedMetricRunIds],
+      ["daily_zone_profiles", "training_metric_run_id", doomedMetricRunIds],
+      ["workout_zone_summaries", "training_metric_run_id", doomedMetricRunIds]
+    ] as const) {
+      derivedRows += countWhereIn(table, column, ids);
+    }
+
+    this.begin();
+    try {
+      const placeholders = (ids: readonly string[]): string => ids.map(() => "?").join(",");
+      // recompute_jobs has no ON DELETE clause, so the reference must be
+      // released before the run can go. The job itself is kept as the audit
+      // record that a recompute happened; only its link to the pruned run goes.
+      const detachedJobs = doomedRunIds.length === 0 ? 0
+        : Number(this.database
+          .prepare(`UPDATE recompute_jobs SET model_run_id = NULL WHERE model_run_id IN (${placeholders(doomedRunIds)})`)
+          .run(...doomedRunIds).changes);
+      if (doomedFeatureRunIds.length > 0) {
+        this.database
+          .prepare(`UPDATE recompute_jobs SET feature_run_id = NULL WHERE feature_run_id IN (${placeholders(doomedFeatureRunIds)})`)
+          .run(...doomedFeatureRunIds);
+      }
+      // Order matters: model_runs must go before feature_runs, because
+      // model_runs.feature_run_id is NO ACTION and would otherwise block it.
+      const modelRuns = Number(this.database
+        .prepare(`DELETE FROM model_runs WHERE id IN (${placeholders(doomedRunIds)})`)
+        .run(...doomedRunIds).changes);
+      const featureRuns = doomedFeatureRunIds.length === 0 ? 0
+        : Number(this.database
+          .prepare(`DELETE FROM feature_runs WHERE id IN (${placeholders(doomedFeatureRunIds)})`)
+          .run(...doomedFeatureRunIds).changes);
+      this.flush();
+      return {
+        modelRuns,
+        featureRuns,
+        trainingMetricRuns: doomedMetricRunIds.length,
+        derivedRows,
+        detachedJobs,
+        retainedModelRuns: retained.size,
+        retainedByLineage: retained.size - extraKept - 1,
+        retainedByRecentWindow: extraKept + 1
+      };
     } catch (error) {
       this.rollback();
       throw error;

@@ -14,6 +14,7 @@ import {
   removeFileWithRetry
 } from "./file-operations.js";
 import { importGpxRoutes } from "./gpx-parser.js";
+import { ImportRemovalGuardError } from "./import-guard.js";
 import { stableId } from "./utils.js";
 import { acquireDatabasePublicationLock, publishDatabaseFile } from "@rai/storage-sqlite";
 
@@ -25,7 +26,14 @@ interface ParsedArguments {
   jsonReport: string;
   replace: boolean;
   batchId: string | null;
-  preserveAbsent: boolean;
+  /**
+   * Whether absence from the payload may be read as deletion. Off by default:
+   * an incremental package only covers the window since its last anchor, so a
+   * missing entity is not a deleted entity. `--replace-absent` is the explicit
+   * opt-in for an authoritative full replacement.
+   */
+  replaceAbsent: boolean;
+  allowLargeRemoval: boolean;
 }
 
 function optionValue(args: string[], name: string, fallback: string): string {
@@ -41,7 +49,7 @@ function parseArguments(argv: string[]): ParsedArguments {
   if (command !== "import" && command !== "incremental-import" && command !== "audit") {
     throw new Error(
       "Usage: data:import -- --input <export-folder> --database <sqlite> --replace\n" +
-        "   or: tsx packages/health-export-parser/src/cli.ts incremental-import --input <export-folder> --database <cloned-sqlite> [--batch-id <id>] [--preserve-absent]\n" +
+        "   or: tsx packages/health-export-parser/src/cli.ts incremental-import --input <export-folder> --database <cloned-sqlite> [--batch-id <id>] [--replace-absent] [--allow-large-removal]\n" +
         "   or: data:audit -- --database <sqlite> --report <markdown>"
     );
   }
@@ -56,7 +64,12 @@ function parseArguments(argv: string[]): ParsedArguments {
     ),
     replace: argv.includes("--replace")
     ,batchId: argv.includes("--batch-id") ? optionValue(argv, "--batch-id", "") : null
-    ,preserveAbsent: argv.includes("--preserve-absent")
+    // Deletion by absence is opt-in. `--preserve-absent` is accepted as a
+    // no-op for backwards compatibility: it now names the default behaviour.
+    ,replaceAbsent: argv.includes("--replace-absent")
+    // A snapshot that omits most of the history is refused by default; this flag
+    // is the explicit opt-in for a deliberate full replacement.
+    ,allowLargeRemoval: argv.includes("--allow-large-removal")
   };
 }
 
@@ -217,7 +230,8 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       ...(incremental ? { incremental: {
         generation: stableId("import_generation", [batchId, new Date().toISOString()]),
         batchId,
-        ...(args.preserveAbsent ? { preserveAbsent: true } : {})
+        ...(!args.replaceAbsent ? { preserveAbsent: true } : {}),
+        ...(args.allowLargeRemoval ? { guardAbsentRemoval: false } : {})
       } } : {}),
       onProgress: ({ bytesRead, totalBytes, recordCount, workoutCount }) => {
         const percent = ((bytesRead / totalBytes) * 100).toFixed(0);
@@ -227,10 +241,10 @@ async function importCommand(args: ParsedArguments): Promise<void> {
 
     console.log("Parsing GPX routes...");
     const gpxResult = await importGpxRoutes(
-      args.input,
-      store,
-      args.preserveAbsent ? { preserveAbsent: true } : undefined
-    );
+    args.input,
+    store,
+    !args.replaceAbsent ? { preserveAbsent: true } : undefined
+  );
 
     console.log("Building canonical running workout groups...");
     const routeDirtyTimes = (gpxResult.changedRouteIds ?? []).flatMap((routeId) => {
@@ -347,9 +361,20 @@ async function importCommand(args: ParsedArguments): Promise<void> {
   }
 }
 
-function readSyncManifest(inputRoot: string): string[] {
-  const path = resolve(inputRoot, "sync-manifest.json");
-  if (!existsSync(path)) return [];
+export function readSyncManifest(inputRoot: string): string[] {
+  let current = resolve(inputRoot);
+  let path: string | null = null;
+  for (let depth = 0; depth <= 3; depth += 1) {
+    const candidate = resolve(current, "sync-manifest.json");
+    if (existsSync(candidate)) {
+      path = candidate;
+      break;
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (!path) return [];
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: unknown; deletedSourceIds?: unknown };
     if (parsed.version !== 1 || !Array.isArray(parsed.deletedSourceIds)) return [];
@@ -397,7 +422,27 @@ async function main(): Promise<void> {
   else await auditCommand(args);
 }
 
-main().catch((error: unknown) => {
+if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
+  main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
-});
+  if (error instanceof ImportRemovalGuardError && process.send && process.connected) {
+    let acknowledged = false;
+    const timeout = setTimeout(() => {
+      if (process.connected) process.disconnect();
+    }, 2_000);
+    process.on("message", (message: unknown) => {
+      if ((message as { type?: unknown })?.type !== "rai:removal-guard-ack") return;
+      acknowledged = true;
+      clearTimeout(timeout);
+      if (process.connected) process.disconnect();
+    });
+    process.send(error.toPayload(), (sendError) => {
+      if (sendError || acknowledged) {
+        clearTimeout(timeout);
+        if (process.connected) process.disconnect();
+      }
+    });
+  }
+  });
+}

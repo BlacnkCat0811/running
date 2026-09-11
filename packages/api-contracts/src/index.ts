@@ -345,6 +345,7 @@ export interface ImportJobResponse {
   completedAt: string | null;
   error: string | null;
   progress?: number;
+  removalGuard?: RemovalGuardDto;
   summary?: {
     importMode: "unchanged" | "incremental" | "full";
     insertedWorkouts: number;
@@ -358,6 +359,18 @@ export interface ImportJobResponse {
     durationMs: number;
     backupName: string | null;
   };
+}
+
+export interface RemovalGuardDto {
+  code: "import_removal_guard";
+  preview: {
+    records: number;
+    workouts: number;
+    activitySummaries: number;
+    total: number;
+  };
+  existingEntities: number;
+  allowedRemovals: number;
 }
 
 export interface BackupDto {

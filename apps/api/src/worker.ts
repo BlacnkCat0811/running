@@ -20,16 +20,37 @@ import {
   type PredictionModelTrainer
 } from "@rai/application";
 import {
+  ImportRemovalGuardError,
+  type RemovalGuardPayload,
   stageAuditFiles,
   type StagedAuditFiles,
 } from "@rai/health-export-parser";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
-import { isHealthKitUploadSource } from "./import-sources.js";
+import { resolvePreserveAbsent } from "./import-sources.js";
 import { RuntimeStateStore } from "./runtime-state.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 
 /** Client-visible import failure text; full diagnostics stay in server logs only. */
 export const PUBLIC_IMPORT_FAILURE_ERROR = "导入失败，请查看服务日志";
+
+/**
+ * Finds a removal-guard failure anywhere in an error chain. The guard message is
+ * authored for the operator and carries no paths or stack details, so it is the
+ * one import failure safe to return to a client verbatim.
+ */
+function findRemovalGuardError(error: unknown): ImportRemovalGuardError | null {
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === null || current === undefined || seen.has(current)) continue;
+    seen.add(current);
+    if (current instanceof ImportRemovalGuardError) return current;
+    if (current instanceof AggregateError) queue.push(...current.errors);
+    else if (current instanceof Error && current.cause !== undefined) queue.push(current.cause);
+  }
+  return null;
+}
 
 const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => {
   database.exec(`PRAGMA busy_timeout = ${milliseconds}`);
@@ -557,6 +578,7 @@ export function predictionModelArtifactDirectory(
 interface MutableImportJob extends ImportJobResponse {
   inputPath: string;
   preserveAbsent?: boolean;
+  removalGuard?: RemovalGuardPayload;
   onTerminal?: (succeeded: boolean, durable: boolean) => void | Promise<void>;
 }
 
@@ -620,7 +642,10 @@ export class ImportWorker {
       throw new Error("目录中未找到 export.xml 或导出.xml");
     }
     const id = `web_import_${Date.now().toString(36)}`;
-    const preserveAbsent = isHealthKitUploadSource(source ?? {});
+    // Absence-as-deletion is opt-in via the client's sync manifest; an archive
+    // filename is only consulted when no manifest is present.
+    const snapshot = resolvePreserveAbsent(inputPath, source ?? {});
+    const preserveAbsent = snapshot.preserveAbsent;
     const job: MutableImportJob = {
       id,
       status: "queued",
@@ -750,7 +775,12 @@ export class ImportWorker {
         "--json-report",
         stagedJsonReport,
         ...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"]),
-        ...(currentBackupPath && job.preserveAbsent ? ["--preserve-absent"] : [])
+        // Absence-as-deletion is opt-in, so the CLI needs to be told explicitly
+        // when a payload declared itself a complete snapshot. A falsy flag means
+        // "not preserving", matching how the parser reads the same option.
+        ...(currentBackupPath
+          ? [job.preserveAbsent ? "--preserve-absent" : "--replace-absent"]
+          : [])
       ]);
       this.assertNotClosing();
       const change = currentBackupPath
@@ -855,6 +885,7 @@ export class ImportWorker {
         );
       }
       terminalSucceeded = false;
+      const removalGuard = findRemovalGuardError(failure);
       publishTerminalState = () => {
         const detail = failure instanceof Error
           ? (failure.stack ?? failure.message)
@@ -864,7 +895,10 @@ export class ImportWorker {
         job.status = "failed";
         job.phase = "failed";
         job.message = "导入失败，原始导出文件未被修改";
-        job.error = PUBLIC_IMPORT_FAILURE_ERROR;
+        // The guard refusal is a deliberate safety stop, not an opaque crash, so
+        // the operator is told exactly what was about to be deleted and why.
+        job.error = removalGuard ? removalGuard.userMessage : PUBLIC_IMPORT_FAILURE_ERROR;
+        if (removalGuard) job.removalGuard = removalGuard.toPayload();
         job.completedAt = new Date().toISOString();
       };
     } finally {
@@ -1168,10 +1202,26 @@ export class ImportWorker {
               OR current.status IS NOT old.status
       )`).get() as unknown as { dirtyFromAt: string | null };
       const hasWorkoutChange = insertedWorkouts + updatedWorkouts + removedWorkouts > 0;
+      // A deletion can arrive before its entity. Publish the tombstone even if
+      // no workout or scoring input changed, and persist authoritative clears.
+      const tombstonesChanged = [
+        ["import_entity_tombstones", "entity_kind, entity_id, source_identifier"],
+        ["import_source_tombstones", "entity_kind, source_identifier"]
+      ].some(([table, columns]) => {
+        const previousExists = database.prepare(
+          "SELECT 1 FROM previous.sqlite_master WHERE type = 'table' AND name = ?"
+        ).get(table!) !== undefined;
+        if (!previousExists) return count(`SELECT COUNT(*) AS count FROM ${table}`) > 0;
+        return count(`SELECT COUNT(*) AS count FROM (
+          SELECT * FROM (SELECT ${columns} FROM ${table} EXCEPT SELECT ${columns} FROM previous.${table})
+          UNION ALL
+          SELECT * FROM (SELECT ${columns} FROM previous.${table} EXCEPT SELECT ${columns} FROM ${table})
+        )`) > 0;
+      });
       if (!hasWorkoutChange && !routeChangeAffectsDirtyRange && !healthChanged && !profileChanged) {
         return {
           mode: anyHealthRecordChanged || activitySummaryChanged || inventoryChanged ||
-            auditManifestChanged || importIssuesChanged
+            auditManifestChanged || importIssuesChanged || tombstonesChanged
             ? "data-only"
             : "unchanged",
           dirtyFromAt: null,
@@ -1869,22 +1919,31 @@ export class ImportWorker {
         cwd: this.projectRoot,
         detached: process.platform !== "win32",
         windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["ignore", "pipe", "pipe", "ipc"]
       });
       this.activeChild = child;
       if (this.closing) void terminateProcessTree(child).catch(reject);
       let errorOutput = "";
-      child.stderr.on("data", (chunk: Buffer) => {
+      let removalGuard: ImportRemovalGuardError | null = null;
+      child.on("message", (message: unknown) => {
+        if (ImportRemovalGuardError.fromPayload(message)) {
+          removalGuard = ImportRemovalGuardError.fromPayload(message) ?? removalGuard;
+          // Acknowledge receipt before the child disconnects so the guard
+          // cannot be lost between IPC delivery and the close event.
+          if (child.connected) child.send({ type: "rai:removal-guard-ack" });
+        }
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
         errorOutput = `${errorOutput}${chunk.toString()}`.slice(-4000);
       });
       child.on("error", (error) => {
         if (this.activeChild === child) this.activeChild = null;
         reject(error);
       });
-      child.on("exit", (code) => {
+      child.on("close", (code) => {
         if (this.activeChild === child) this.activeChild = null;
         if (code === 0) resolvePromise();
-        else reject(new Error(errorOutput.trim() || `导入进程退出，代码 ${String(code)}`));
+        else reject(removalGuard ?? new Error(errorOutput.trim() || `导入进程退出，代码 ${String(code)}`));
       });
     });
   }
@@ -1894,9 +1953,11 @@ export class ImportWorker {
   }
 
   private publicJob(job: MutableImportJob): ImportJobResponse {
+    const removalGuard = job.status === "failed"
+      ? ImportRemovalGuardError.fromPayload(job.removalGuard) : null;
     const publicError = job.error === null || job.error === undefined
       ? job.error
-      : PUBLIC_IMPORT_FAILURE_ERROR;
+      : removalGuard?.userMessage ?? PUBLIC_IMPORT_FAILURE_ERROR;
     return {
       id: job.id,
       ...(job.sourceId === undefined ? {} : { sourceId: job.sourceId }),

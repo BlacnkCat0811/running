@@ -140,6 +140,9 @@ private final class RouteMapContainer: UIView, MKMapViewDelegate {
             token = resetToken
             fittedRect = rect
             map.setVisibleMapRect(rect, edgePadding: UIEdgeInsets(top: 24, left: 24, bottom: 32, right: 24), animated: false)
+            // The map applies the fitted rect on the next layout pass, so redraw
+            // the trace after it settles instead of leaving the first paint empty.
+            DispatchQueue.main.async { [weak self] in self?.drawTrace() }
         }
         drawTrace()
     }
@@ -149,9 +152,11 @@ private final class RouteMapContainer: UIView, MKMapViewDelegate {
         map.frame = bounds
         if changed && !fittedRect.isNull {
             map.setVisibleMapRect(fittedRect, edgePadding: UIEdgeInsets(top: 24, left: 24, bottom: 32, right: 24), animated: false)
+            DispatchQueue.main.async { [weak self] in self?.drawTrace() }
         }
         drawTrace()
     }
+    func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) { drawTrace() }
     func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) { drawTrace() }
     func mapViewDidFinishRenderingMap(_ mapView: MKMapView, fullyRendered: Bool) { drawTrace() }
     private func drawTrace() {

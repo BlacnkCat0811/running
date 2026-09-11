@@ -1,6 +1,6 @@
 import { createHash, randomUUID, type Hash } from "node:crypto";
 import { isUtf8 } from "node:buffer";
-import { createReadStream, createWriteStream, existsSync, type Dirent } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, readFileSync, type Dirent } from "node:fs";
 import { mkdir, readdir, rm, stat, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, resolve, sep } from "node:path";
@@ -104,12 +104,116 @@ export function isHealthKitUploadFilename(name: string | null | undefined): bool
   return (name ?? "").toLowerCase().includes(HEALTHKIT_UPLOAD_FILENAME_TOKEN);
 }
 
-export function isHealthKitUploadSource(source: {
+/** `sourceScope` value a client writes when it uploads a complete snapshot. */
+export const FULL_SNAPSHOT_SOURCE_SCOPE = "apple-health-full-snapshot";
+
+export type SnapshotModeReason =
+  | "manifest-healthkit"
+  | "manifest-full-snapshot"
+  | "manifest-declared-other"
+  | "manifest-unreadable"
+  | "filename-token"
+  | "untrusted-default";
+
+export interface SyncManifestScope {
+  /** Whether a readable sync-manifest.json was found next to export.xml. */
+  declared: boolean;
+  sourceScope: string | null;
+}
+
+function findSyncManifestPath(inputPath: string): string | null {
+  let current = resolve(inputPath);
+  for (let depth = 0; depth <= 3; depth += 1) {
+    const candidate = resolve(current, "sync-manifest.json");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+/**
+ * Reads the client-declared `sourceScope` from sync-manifest.json.
+ *
+ * The manifest travels inside the archive next to export.xml, so it is
+ * available on the extracted directory. A manifest that exists but cannot be
+ * parsed is reported as undeclared-and-unreadable, which resolves to the
+ * conservative (non-deleting) branch.
+ *
+ * Explicit deletion events (`deletedSourceIds`) are read separately, inside the
+ * parser package, by the CLI that carries out the import.
+ */
+export function readSyncManifestScope(inputPath: string): SyncManifestScope {
+  const manifestPath = findSyncManifestPath(inputPath);
+  if (!manifestPath) return { declared: false, sourceScope: null };
+  try {
+    const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as {
+      version?: unknown;
+      sourceScope?: unknown;
+    };
+    // Only the versioned manifest contract may opt into destructive semantics.
+    // A hand-written or legacy manifest remains conservative.
+    if (parsed.version !== 1) return { declared: true, sourceScope: null };
+    const scope = parsed.sourceScope;
+    return {
+      declared: true,
+      sourceScope: typeof scope === "string" && scope.trim().length > 0 ? scope.trim() : null
+    };
+  } catch {
+    return { declared: true, sourceScope: null };
+  }
+}
+
+/**
+ * Decides whether an import may treat absence as deletion.
+ *
+ * `preserveAbsent: true` means "this payload is partial; a missing entity is
+ * not a deleted entity". That is the safe default and the only correct reading
+ * of a client sync package, which only carries the window since the last
+ * anchor. Deletion is permitted only when the payload *declares itself* a
+ * complete snapshot, and even then a removal guard inspects the projection.
+ *
+ * Everything else — including a recognisable archive name — resolves to the
+ * non-deleting branch. The archive filename is caller-supplied and trivially
+ * renameable; an unrecognised archive is simply unknown, and an unknown
+ * payload must never be the switch for a destructive operation.
+ */
+export function resolvePreserveAbsent(
+  inputPath: string,
+  source: ImportWorkerSourceLike
+): { preserveAbsent: boolean; reason: SnapshotModeReason } {
+  const scope = readSyncManifestScope(inputPath);
+  if (scope.declared) {
+    const declared = scope.sourceScope;
+    if (declared === null) return { preserveAbsent: true, reason: "manifest-unreadable" };
+    if (declared === FULL_SNAPSHOT_SOURCE_SCOPE) {
+      return { preserveAbsent: false, reason: "manifest-full-snapshot" };
+    }
+    if (declared === "healthkit") return { preserveAbsent: true, reason: "manifest-healthkit" };
+    return { preserveAbsent: true, reason: "manifest-declared-other" };
+  }
+  if (isHealthKitUploadSource(source)) {
+    return { preserveAbsent: true, reason: "filename-token" };
+  }
+  return { preserveAbsent: true, reason: "untrusted-default" };
+}
+
+export interface ImportWorkerSourceLike {
   kind?: string | null;
   displayName?: string | null;
   originalPath?: string | null;
-}): boolean {
+}
+
+export function isHealthKitUploadSource(
+  source: ImportWorkerSourceLike,
+  inputPath?: string
+): boolean {
   if (source.kind != null && source.kind !== "upload") return false;
+  if (inputPath) {
+    const scope = readSyncManifestScope(inputPath);
+    if (scope.declared && (scope.sourceScope === "healthkit" || scope.sourceScope === FULL_SNAPSHOT_SOURCE_SCOPE)) return true;
+  }
   return isHealthKitUploadFilename(source.displayName)
     || isHealthKitUploadFilename(source.originalPath ? basename(source.originalPath) : "");
 }
@@ -143,6 +247,24 @@ export async function digestHealthKitExportContent(exportRoot: string): Promise<
     : resolve(exportRoot, "导出.xml");
   const hash = createHash("sha256");
   await hashXmlWithoutExportDate(xmlPath, hash);
+  // Deletion-only syncs can carry exactly the same XML and routes. Include
+  // manifest semantics so upload deduplication cannot discard those events.
+  const manifestPath = findSyncManifestPath(exportRoot);
+  if (manifestPath) {
+    const raw = readFileSync(manifestPath, "utf8");
+    let content = raw;
+    try {
+      const manifest = JSON.parse(raw) as Record<string, unknown>;
+      content = JSON.stringify({
+        version: manifest.version,
+        sourceScope: manifest.sourceScope,
+        deletedSourceIds: Array.isArray(manifest.deletedSourceIds)
+          ? [...new Set(manifest.deletedSourceIds.filter((id): id is string => typeof id === "string"))].sort()
+          : []
+      });
+    } catch { /* An invalid manifest must remain distinct and fail during import. */ }
+    hash.update(`\0sync-manifest\0${content}\0`);
+  }
   const routeRoot = resolve(exportRoot, "workout-routes");
   if (existsSync(routeRoot)) {
     const names = (await readdir(routeRoot, { recursive: true }))
@@ -394,7 +516,10 @@ export class ImportSourceManager {
     let routeFileCount = 0;
     if (existsSync(routeRoot)) routeFileCount = (await readdir(routeRoot, { recursive: true })).filter((name) => extname(String(name)).toLowerCase() === ".gpx").length;
     const old = await this.get(id);
-    const sourceSha256 = kind === "upload" && isHealthKitUploadFilename(displayName)
+    // Content-hash the export for any HealthKit sync payload so that re-exports
+    // of unchanged data are recognised regardless of the archive filename.
+    const sourceSha256 = kind === "upload"
+      && isHealthKitUploadSource({ kind, displayName, originalPath }, inputPath)
       ? await digestHealthKitExportContent(inputPath)
       : sha;
     return {

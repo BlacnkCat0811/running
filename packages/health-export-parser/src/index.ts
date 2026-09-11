@@ -1,5 +1,13 @@
 export { parseAppleHealthXml } from "./apple-health-parser.js";
 export {
+  ABSENT_REMOVAL_GUARD_MAX_RATIO,
+  ABSENT_REMOVAL_GUARD_MIN_ENTITIES,
+  evaluateRemovalGuard,
+  ImportRemovalGuardError,
+  type RemovalGuardPayload,
+  type RemovalGuardEvaluation
+} from "./import-guard.js";
+export {
   buildAudit,
   renderAuditMarkdown,
   stageAuditFiles,

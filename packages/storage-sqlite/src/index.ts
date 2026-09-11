@@ -13,8 +13,10 @@ export {
 export {
   RaiDatabase,
   SEED_CONTENT_HASH,
+  type GenerationRemovalPreview,
   type RaiDatabaseOpenOptions,
-  type RouteImportTarget
+  type RouteImportTarget,
+  type SupersededRunPruneResult
 } from "./database.js";
 export {
   RecomputeJobRepository,

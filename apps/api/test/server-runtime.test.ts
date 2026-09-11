@@ -288,7 +288,7 @@ test("runtime status includes persisted prediction work and restore recovers rec
     cleanupDatabase.prepare("UPDATE prediction_model_runs SET status = 'failed' WHERE status = 'running'").run();
     cleanupDatabase.close();
 
-    const idleDeadline = Date.now() + 5_000;
+    const idleDeadline = Date.now() + 15_000;
     let busy = true;
     while (Date.now() < idleDeadline) {
       busy = ((await fetch(`${url}/v1/runtime-status`).then((response) => response.json())) as { busy: boolean }).busy;

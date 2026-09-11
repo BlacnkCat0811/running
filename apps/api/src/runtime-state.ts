@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { RemovalGuardDto } from "@rai/api-contracts";
 
 export interface RuntimeImportSourceRow {
   id: string;
@@ -31,6 +32,7 @@ export interface RuntimeImportJobRow {
   inputPath: string;
   progress?: number;
   summary?: unknown;
+  removalGuard?: RemovalGuardDto;
 }
 
 export class RuntimeStateStore {
@@ -150,16 +152,19 @@ export class RuntimeStateStore {
     const db = this.open();
     try {
       const rows = db.prepare(`SELECT id, source_id AS sourceId, status, phase, message, created_at AS createdAt,
-        completed_at AS completedAt, error, input_path AS inputPath, progress, summary_json AS summaryJson
+        completed_at AS completedAt, error, input_path AS inputPath, progress, summary_json AS summaryJson,
+        removal_guard_json AS removalGuardJson
         FROM import_jobs ORDER BY sequence_number DESC LIMIT ?`).all(limit) as unknown as Array<RuntimeImportJobRow & {
           sourceId: string | null;
           summaryJson: string | null;
+          removalGuardJson: string | null;
         }>;
-      return rows.reverse().map(({ sourceId, summaryJson, progress, ...row }) => ({
+      return rows.reverse().map(({ sourceId, summaryJson, removalGuardJson, progress, ...row }) => ({
         ...row,
         ...(sourceId === null ? {} : { sourceId }),
         ...(progress === null || progress === undefined ? {} : { progress }),
-        ...(summaryJson ? { summary: JSON.parse(summaryJson) } : {})
+        ...(summaryJson ? { summary: JSON.parse(summaryJson) } : {}),
+        ...(removalGuardJson ? { removalGuard: JSON.parse(removalGuardJson) } : {})
       }));
     } finally { db.close(); }
   }
@@ -177,12 +182,14 @@ export class RuntimeStateStore {
 
   private upsertJobIn(db: DatabaseSync, job: RuntimeImportJobRow): void {
     db.prepare(`INSERT INTO import_jobs (id, source_id, status, phase, message, created_at, completed_at,
-        error, input_path, progress, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        error, input_path, progress, summary_json, removal_guard_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id, status=excluded.status, phase=excluded.phase,
         message=excluded.message, completed_at=excluded.completed_at, error=excluded.error,
-        input_path=excluded.input_path, progress=excluded.progress, summary_json=excluded.summary_json`).run(
+        input_path=excluded.input_path, progress=excluded.progress, summary_json=excluded.summary_json,
+        removal_guard_json=excluded.removal_guard_json`).run(
         job.id, job.sourceId ?? null, job.status, job.phase, job.message, job.createdAt, job.completedAt,
-        job.error, job.inputPath, job.progress ?? null, job.summary === undefined ? null : JSON.stringify(job.summary)
+        job.error, job.inputPath, job.progress ?? null, job.summary === undefined ? null : JSON.stringify(job.summary),
+        job.removalGuard === undefined ? null : JSON.stringify(job.removalGuard)
       );
   }
 
@@ -211,6 +218,9 @@ export class RuntimeStateStore {
       const jobColumns = db.prepare("PRAGMA table_info(import_jobs)").all() as unknown as Array<{ name: string }>;
       if (!jobColumns.some(({ name }) => name === "source_id")) {
         db.exec("ALTER TABLE import_jobs ADD COLUMN source_id TEXT");
+      }
+      if (!jobColumns.some(({ name }) => name === "removal_guard_json")) {
+        db.exec("ALTER TABLE import_jobs ADD COLUMN removal_guard_json TEXT");
       }
       const sourceColumns = db.prepare("PRAGMA table_info(import_sources)").all() as unknown as Array<{ name: string }>;
       if (!sourceColumns.some(({ name }) => name === "idempotency_key")) {

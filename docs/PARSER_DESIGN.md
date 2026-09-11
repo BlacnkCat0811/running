@@ -240,3 +240,75 @@ canonical rank 依据：
 
 后续 Web 产品应把首次导入放入后台 worker，并通过任务进度 API 展示，不在 HTTP 请求生命周期中同步等待。
 
+## 12. 导入快照模式与删除守卫
+
+增量导入必须区分两种语义完全不同的载荷：
+
+- **同步包（增量）**：只覆盖自上次锚点以来的窗口。载荷里没出现的实体**不代表被删除**。
+- **完整快照（全量）**：覆盖全部历史。载荷里没出现的实体**视为已删除**。
+
+解析器用 `preserveAbsent` 表达这一区分：为真时不按缺失删除，但仍处理显式删除事件。
+
+### 12.1 判定依据（`apps/api/src/import-sources.ts`）
+
+| 优先级 | 依据 | 结果 |
+|---|---|---|
+| 1 | `sync-manifest.json` 的 `sourceScope === "healthkit"` | `preserveAbsent = true`（客户端同步包） |
+| 2 | `sourceScope === "apple-health-full-snapshot"` | `preserveAbsent = false`（显式声明全量） |
+| 3 | 其他非空 `sourceScope` | `preserveAbsent = true`（未知来源范围，保守不删） |
+| 4 | manifest 存在但无法解析 / `sourceScope` 为空 | `preserveAbsent = true`（保守不删） |
+| 5 | manifest 不存在，归档名含 `apple-health-healthkit` | `preserveAbsent = true`（向后兼容） |
+| 6 | manifest 不存在，归档名不含该标记 | `preserveAbsent = true`（`untrusted-default`：来源未知） |
+
+🔴 **删除必须由载荷显式声明，不能由缺失推断**：默认一律保留。只有 `sourceScope === "apple-health-full-snapshot"` 这一条**显式声明完整**的路径才允许按缺失删除，且仍受守卫约束。归档文件名由调用方提供且可随意重命名，因此它**不再**是任何删除分支的判据 —— 一个无法识别的归档只是"未知"，而未知不能驱动破坏性操作。
+
+CLI 的 `incremental-import` 同样默认保留：需显式传入 `--replace-absent` 才启用按缺失删除。`--preserve-absent` 保留为兼容用的空操作（它现在就是默认行为）。
+
+### 12.2 删除守卫（`packages/health-export-parser/src/import-guard.ts`）
+
+`preserveAbsent = false` 时的删除量若超过 `max(50, 现有实体数 × 5%)`，解析器抛出 `ImportRemovalGuardError` 并中止导入。守卫运行在 staging 副本上，中止即丢弃副本，线上数据不受影响。
+
+该阈值不会误伤合法的全量替换：完整快照会让每个实体重新落回当前 generation，投影删除量趋近于 0，只有**不完整的载荷**才会产生大额投影。
+
+运维侧如需强制替换，显式传入 CLI 参数 `--allow-large-removal`。守卫拒绝导入时，CLI 通过 IPC 传递结构化计数；API 验证计数后生成 `userMessage`，并持久化这些计数，使重启后仍可返回说明。其他错误继续返回通用失败提示。
+
+### 12.3 删除墓碑（migration v19，`import_entity_tombstones`）
+
+删除是**显式且持久**的，不是"最新载荷里没有"的函数。因此每次删除都会落一条墓碑：
+
+| 删除来源 | 落墓碑的位置 |
+|---|---|
+| 客户端显式删除事件（`deletedSourceIds`） | `removeWorkoutsBySyncIdentifiers` |
+| 显式全量快照按缺失删除 | `finalizeImportGeneration` |
+
+`observeImportEntity` 在写入前先查墓碑：命中则返回 `tombstoned: true`，解析器跳过该实体的写入。这防止**已删数据被旧包复活**（重传归档、客户端锚点重置）。解析结果新增 `tombstonedCount` 字段用于观测。
+
+migration v20 增加 `import_source_tombstones`：即使删除事件尚未匹配本地训练，也保存源标识。后续导入检查 `HKMetadataKeySyncIdentifier` 和 `RAIHealthKitWorkoutUUID`。上传内容哈希包含 manifest 的删除标识；仅墓碑发生变化时也发布 staging 数据库，但不重算模型，避免去重或空变更分支丢弃删除事件。
+
+**唯一例外**：显式声明的完整快照是权威基线，`seedImportGenerations` 在扫描**之前**清空全部墓碑 —— 顺序很关键，墓碑若在扫描之后才清，被它挡住的实体已经错过本次写入。这保证了"误删后可从完好归档恢复"。
+
+### 12.4 CLI 参数现状
+
+| 参数 | 作用 |
+|---|---|
+| `--batch-id <id>` | 指定批次台账 id |
+| `--replace-absent` | 显式启用按缺失删除（替代了旧的默认行为） |
+| `--allow-large-removal` | 绕过删除守卫，用于刻意全量替换 |
+| `--preserve-absent` | 兼容用空操作（默认行为即保留） |
+
+## 13. 派生层 run 保留策略
+
+每次重算都会新建 `model_runs` / `feature_runs` / `training_metric_runs`，并把**完整的派生结果重新物化一份**。若不回收，库体积按 O(runs × 天数) 增长，且每个重写派生表的 migration 都要付这个倍数。
+
+`RaiDatabase.pruneSupersededModelRuns({ keepRecent })` 回收被取代的 run：
+
+- **保留**：active run、其血缘祖先链、以及最近 `keepRecent` 个被取代的 run（`SUPERSEDED_RUN_RETENTION = 2`）。
+- **拒绝执行**：库里没有 active run 时直接抛错 —— 没有已知的存活 run 就没有"被取代"的安全定义，猜错就是删活数据。
+- **外键处理**：`recompute_jobs.model_run_id` 是 `NO ACTION`，删除前先置 NULL（job 台账保留，只释放指向已回收 run 的引用）；删除顺序必须是 `model_runs` → `feature_runs`，因为 `model_runs.feature_run_id` 也是 `NO ACTION`。
+- **血缘保护**：`parent_model_run_id` / `parent_feature_run_id` 为自引用 `NO ACTION`。两条父链独立遍历：特征复用可能成功而模型回放未复用；所有存活特征（包括未关联模型的特征运行）的祖先都必须保留。
+
+调用点在 `RecomputePipeline.activateModelRunAndCompleteJob`：**在激活事务提交之后**执行，且失败只记 stderr、不抛出 —— 清运是内务，不能回滚一次已经成功的重算。
+
+实测（2026-09-10，库副本 309.9 MB / 6 个 run）：保留 active + 最近 2 个后回收 **3 个 run / 25,437 行派生数据**，active run 的 268 条评估与 2,463 条快照零变化，`PRAGMA foreign_key_check` 为空，重复执行为幂等空操作。
+
+> 注：SQLite 删除后空间进入 freelist 而非立即归还文件，需 `VACUUM` 才收缩文件。空闲页会被下一次重算复用；祖先链仍受保护，因此实际保留量也取决于血缘长度，不能仅由 `keepRecent` 推导体积上限。

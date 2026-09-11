@@ -17,7 +17,10 @@ import {
   ImportUploadCapacityError,
   createImportSourceManager,
   digestHealthKitExportContent,
-  isHealthKitUploadSource
+  FULL_SNAPSHOT_SOURCE_SCOPE,
+  isHealthKitUploadSource,
+  readSyncManifestScope,
+  resolvePreserveAbsent
 } from "../src/import-sources.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 
@@ -585,5 +588,181 @@ test("ignores malformed legacy JSON without hiding typed source lookup errors", 
   try {
     const manager = new ImportSourceManager(root, root);
     await assert.rejects(manager.inspect("upload_missing"), ImportSourceNotFoundError);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+function manifestDirectory(root: string, name: string, manifest: string | null): string {
+  const directory = join(root, name);
+  mkdirSync(directory, { recursive: true });
+  if (manifest !== null) writeFileSync(join(directory, "sync-manifest.json"), manifest, "utf8");
+  return directory;
+}
+
+/**
+ * The archive filename is caller-supplied and trivially renameable, so it must
+ * never be the primary switch for a destructive import. A client that ships a
+ * sync manifest has declared what the payload is; that declaration wins.
+ */
+test("prefers the declared source scope over the archive filename", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-preserve-absent-"));
+  try {
+    const declared = manifestDirectory(
+      root,
+      "declared",
+      JSON.stringify({ version: 1, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [] })
+    );
+    const renamed = resolvePreserveAbsent(declared, { kind: "upload", displayName: "health.zip" });
+    assert.equal(renamed.preserveAbsent, true, "a renamed sync package must not read as a full snapshot");
+    assert.equal(renamed.reason, "manifest-healthkit");
+
+    const unknown = manifestDirectory(
+      root,
+      "unknown",
+      JSON.stringify({ version: 1, sourceScope: "garmin", sourceIds: [], deletedSourceIds: [] })
+    );
+    const otherSource = resolvePreserveAbsent(unknown, { kind: "upload", displayName: "garmin-export.zip" });
+    assert.equal(otherSource.preserveAbsent, true, "an undeclared source range defaults to non-deleting");
+    assert.equal(otherSource.reason, "manifest-declared-other");
+
+    const full = manifestDirectory(
+      root,
+      "full",
+      JSON.stringify({ version: 1, sourceScope: FULL_SNAPSHOT_SOURCE_SCOPE })
+    );
+    const fullSnapshot = resolvePreserveAbsent(full, { kind: "upload", displayName: "health.zip" });
+    assert.equal(fullSnapshot.preserveAbsent, false);
+    assert.equal(fullSnapshot.reason, "manifest-full-snapshot");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("treats an unreadable manifest as declared and stops deleting", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-preserve-absent-corrupt-"));
+  try {
+    const corrupt = manifestDirectory(root, "corrupt", "{not-json");
+    const scope = readSyncManifestScope(corrupt);
+    assert.equal(scope.declared, true);
+    assert.equal(scope.sourceScope, null);
+
+    const decision = resolvePreserveAbsent(corrupt, {
+      kind: "upload",
+      displayName: "apple-health-healthkit.zip"
+    });
+    assert.equal(decision.preserveAbsent, true, "an unreadable manifest must not enable deletion");
+    assert.equal(decision.reason, "manifest-unreadable");
+
+    const empty = manifestDirectory(root, "empty", JSON.stringify({ version: 1, sourceScope: "   " }));
+    assert.equal(resolvePreserveAbsent(empty, { kind: "upload", displayName: "x.zip" }).preserveAbsent, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("only an explicitly declared full snapshot enables deletion by absence", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-preserve-absent-fallback-"));
+  try {
+    const bare = manifestDirectory(root, "bare", null);
+    const token = resolvePreserveAbsent(bare, {
+      kind: "upload",
+      displayName: "apple-health-healthkit-abc.zip"
+    });
+    assert.equal(token.preserveAbsent, true);
+    assert.equal(token.reason, "filename-token");
+
+    const unknown = resolvePreserveAbsent(bare, { kind: "upload", displayName: "export.zip" });
+    assert.equal(
+      unknown.preserveAbsent,
+      true,
+      "an unidentified archive is unknown, and unknown must never enable deletion"
+    );
+    assert.equal(unknown.reason, "untrusted-default");
+
+    const directory = resolvePreserveAbsent(bare, { kind: "directory", displayName: "export.xml" });
+    assert.equal(directory.preserveAbsent, true, "a local directory import never declares itself a sync package");
+    assert.equal(directory.reason, "untrusted-default");
+
+    const declared = manifestDirectory(
+      root,
+      "declared",
+      JSON.stringify({ version: 1, sourceScope: FULL_SNAPSHOT_SOURCE_SCOPE })
+    );
+    const snapshot = resolvePreserveAbsent(declared, { kind: "upload", displayName: "renamed.zip" });
+    assert.equal(snapshot.preserveAbsent, false, "an explicit full-snapshot declaration may delete by absence");
+    assert.equal(snapshot.reason, "manifest-full-snapshot");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("finds a sync manifest that sits above the discovered export root", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-preserve-absent-nested-"));
+  try {
+    const outer = join(root, "archive");
+    const inner = join(outer, "apple_health_export");
+    mkdirSync(inner, { recursive: true });
+    writeFileSync(
+      join(outer, "sync-manifest.json"),
+      JSON.stringify({ version: 1, sourceScope: "healthkit" }),
+      "utf8"
+    );
+    const nested = resolvePreserveAbsent(inner, { kind: "upload", displayName: "renamed.zip" });
+    assert.equal(nested.preserveAbsent, true);
+    assert.equal(nested.reason, "manifest-healthkit");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("recognizes manifest-declared full snapshots as HealthKit uploads", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-healthkit-full-snapshot-"));
+  try {
+    writeFileSync(join(root, "sync-manifest.json"), JSON.stringify({
+      version: 1, sourceScope: FULL_SNAPSHOT_SOURCE_SCOPE
+    }), "utf8");
+    assert.equal(isHealthKitUploadSource({
+      kind: "upload", displayName: "renamed.zip"
+    }, root), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("finds manifests three parent directories above the export root", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-manifest-depth-"));
+  try {
+    const exportRoot = join(root, "a", "b", "c");
+    mkdirSync(exportRoot, { recursive: true });
+    writeFileSync(join(root, "sync-manifest.json"), JSON.stringify({
+      version: 1, sourceScope: "healthkit"
+    }), "utf8");
+    const scope = readSyncManifestScope(exportRoot);
+    assert.deepEqual(scope, { declared: true, sourceScope: "healthkit" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("includes a parent manifest in the HealthKit content digest", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-manifest-digest-depth-"));
+  try {
+    const exportRoot = join(root, "a", "b", "c");
+    mkdirSync(exportRoot, { recursive: true });
+    writeFileSync(join(exportRoot, "export.xml"), "<HealthData/>", "utf8");
+    writeFileSync(join(root, "sync-manifest.json"), JSON.stringify({
+      version: 1, sourceScope: "healthkit", deletedSourceIds: ["one"]
+    }), "utf8");
+    const first = await digestHealthKitExportContent(exportRoot);
+    writeFileSync(join(root, "sync-manifest.json"), JSON.stringify({
+      version: 1, sourceScope: "healthkit", deletedSourceIds: ["two"]
+    }), "utf8");
+    assert.notEqual(await digestHealthKitExportContent(exportRoot), first);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("HealthKit deduplication includes deletion events but ignores manifest timestamps", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-healthkit-deletion-digest-"));
+  try {
+    writeFileSync(join(root, "export.xml"), "<HealthData/>");
+    const manifest = (ids: string[], createdAt: string) => JSON.stringify({
+      version: 1, sourceScope: "healthkit", deletedSourceIds: ids, createdAt
+    });
+    const manifestPath = join(root, "sync-manifest.json");
+    writeFileSync(manifestPath, manifest([], "2026-01-01"));
+    const initial = await digestHealthKitExportContent(root);
+    writeFileSync(manifestPath, manifest(["deleted-b", "deleted-a"], "2026-01-02"));
+    const deleted = await digestHealthKitExportContent(root);
+    assert.notEqual(deleted, initial);
+    writeFileSync(manifestPath, manifest(["deleted-a", "deleted-b", "deleted-a"], "2026-01-03"));
+    assert.equal(await digestHealthKitExportContent(root), deleted);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
