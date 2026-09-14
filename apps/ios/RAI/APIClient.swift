@@ -36,6 +36,7 @@ enum RaiAPIClientError: LocalizedError {
     case invalidServerAddress
     case unauthorized
     case unavailable
+    case timedOut
     case server(code: String, message: String, status: Int)
     case decoding(String)
 
@@ -47,6 +48,8 @@ enum RaiAPIClientError: LocalizedError {
             return "API Token 无效或已过期，请在设置中更新。"
         case .unavailable:
             return "暂时无法连接 RAI 服务，请检查网络或服务状态。"
+        case .timedOut:
+            return "连接 RAI 服务超时，请确认服务正在运行且网络通畅。"
         case let .server(_, message, _):
             return message
         case let .decoding(message):
@@ -56,6 +59,14 @@ enum RaiAPIClientError: LocalizedError {
 }
 
 struct RaiAPIClient {
+    /// Client budget for `POST /v1/mobile/workout-plan/generate`.
+    ///
+    /// Must stay strictly above the server's whole-call budget
+    /// (`DEFAULT_TOTAL_BUDGET_MS`, 50 s) so "the request failed" and "no plan was
+    /// written" remain the same event. `apps/api/test/weekly-plan.test.ts` reads
+    /// this line and fails if the two ever cross.
+    static let generateTimeoutInterval: TimeInterval = 60
+
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
@@ -63,7 +74,10 @@ struct RaiAPIClient {
     init(session: URLSession? = nil) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 45
+        // Caps the whole transfer regardless of the per-request timeout, so it
+        // has to clear `generateTimeoutInterval` or URLSession would cut the
+        // generate call short anyway.
+        configuration.timeoutIntervalForResource = 75
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.session = session ?? RaiURLSession.make(configuration: configuration)
@@ -89,6 +103,36 @@ struct RaiAPIClient {
 
     func goals(baseURL: URL, token: String) async throws -> MobileGoalsResponse {
         try await get(path: "/v1/mobile/goals", baseURL: baseURL, token: token)
+    }
+
+    /// The executable week handed to the workout scheduler. Read-only, so it
+    /// never competes with the goals revision lock.
+    func workoutPlan(baseURL: URL, token: String) async throws -> MobileWorkoutPlanResponse {
+        try await get(path: "/v1/mobile/workout-plan", baseURL: baseURL, token: token)
+    }
+
+    /// Asks the server to (re)generate the weekly plan. The model may be
+    /// unavailable — the server falls back to its heuristic template and says so
+    /// in `warnings`, so this still returns a usable week.
+    ///
+    /// The server holds this request open for as long as its model budget allows
+    /// (`DEFAULT_TOTAL_BUDGET_MS` in `weekly-plan-llm.ts`, 50 s), so the client
+    /// must out-wait it: if the client gave up first, the server would still
+    /// persist a plan the runner never saw. `generateTimeoutInterval` is asserted
+    /// against that budget by `apps/api/test/weekly-plan.test.ts`.
+    func generateWeeklyPlan(
+        _ input: GenerateWeeklyPlanRequest,
+        baseURL: URL,
+        token: String
+    ) async throws -> MobileWeeklyPlanGenerationResponse {
+        try await send(
+            path: "/v1/mobile/workout-plan/generate",
+            method: "POST",
+            body: input,
+            baseURL: baseURL,
+            token: token,
+            timeout: Self.generateTimeoutInterval
+        )
     }
 
     func predictions(baseURL: URL, token: String) async throws -> NativePredictionResponse {
@@ -166,7 +210,8 @@ struct RaiAPIClient {
         method: String,
         body: T,
         baseURL: URL,
-        token: String
+        token: String,
+        timeout: TimeInterval? = nil
     ) async throws -> U {
         let bodyData: Data
         do {
@@ -174,7 +219,7 @@ struct RaiAPIClient {
         } catch {
             throw RaiAPIClientError.decoding(error.localizedDescription)
         }
-        return try await request(path: path, query: [], method: method, body: bodyData, baseURL: baseURL, token: token)
+        return try await request(path: path, query: [], method: method, body: bodyData, baseURL: baseURL, token: token, timeout: timeout)
     }
 
     private func request<T: Decodable>(
@@ -183,14 +228,15 @@ struct RaiAPIClient {
         method: String,
         body: Data?,
         baseURL: URL,
-        token: String
+        token: String,
+        timeout: TimeInterval? = nil
     ) async throws -> T {
         guard let url = endpoint(baseURL: baseURL, path: path, query: query) else {
             throw RaiAPIClientError.invalidServerAddress
         }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = method == "GET" ? 15 : 45
+        request.timeoutInterval = timeout ?? (method == "GET" ? 15 : 45)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         if let body {
             request.httpBody = body
@@ -206,6 +252,9 @@ struct RaiAPIClient {
             (data, response) = try await session.data(for: request)
         } catch is CancellationError {
             throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            // 超时与"连不上"对用户的处置方式不同，分开呈现（原先统一折叠成 .unavailable）。
+            throw RaiAPIClientError.timedOut
         } catch {
             throw RaiAPIClientError.unavailable
         }

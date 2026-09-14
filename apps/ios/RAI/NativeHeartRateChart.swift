@@ -3,34 +3,41 @@ import Charts
 import SwiftUI
 
 /// The summary average comes from the workout, not the downsampled plot.
+///
+/// 共享组件：颜色一律从环境皮肤取，不得硬编码单一皮肤视觉（见事故 18067cb）。
 struct NativeHeartRateChart: View {
     let metric: MetricSeries
     let averageHeartRate: Double?
     let durationSeconds: Double
+    @Environment(\.appSkin) private var skin
     @ScaledMetric(relativeTo: .caption) private var chartHeight: CGFloat = 170
-    private let cyan = Color(red: 0.05, green: 0.80, blue: 1)
-    private let muted = Color(red: 0.49, green: 0.59, blue: 0.68)
+    private var cyan: Color { skin == .technology ? TechColor.cyan : PixelColor.green }
+    private var muted: Color { skin == .technology ? TechColor.muted : PixelColor.muted }
+    private var ink: Color { skin == .technology ? TechColor.ink : PixelColor.ink }
+    private var cardFill: Color { skin == .technology ? TechColor.paper : PixelColor.paper }
+    private var cardCorner: CGFloat { skin == .technology ? 16 : PixelMetrics.corner }
+    private var labelAccent: Color { skin == .technology ? TechColor.violet : PixelColor.coral }
     private var data: HeartRateChartData { HeartRateChartData(points: metric.points, durationSeconds: durationSeconds) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("心率", systemImage: "heart.fill")
-                .font(.caption.weight(.semibold)).foregroundStyle(.white)
-                .labelStyle(HeartRateLabelStyle())
+                .font(.caption.weight(.semibold)).foregroundStyle(ink)
+                .labelStyle(HeartRateLabelStyle(tint: labelAccent))
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(nativeNumber(averageHeartRate, digits: 0))
                             .font(.system(size: 32, weight: .semibold)).monospacedDigit()
                         Text("bpm").font(.caption)
-                    }.foregroundStyle(.white)
+                    }.foregroundStyle(ink)
                     Text("平均心率").font(.caption2).foregroundStyle(muted)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("最大心率").font(.caption2).foregroundStyle(muted)
                     Text("\(nativeNumber(data.maximum, digits: 0)) bpm")
-                        .font(.subheadline.weight(.medium)).monospacedDigit().foregroundStyle(.white)
+                        .font(.subheadline.weight(.medium)).monospacedDigit().foregroundStyle(ink)
                 }
             }
             if data.points.isEmpty {
@@ -72,15 +79,16 @@ struct NativeHeartRateChart: View {
             }
         }
         .padding(16)
-        .background(Color(red: 0.025, green: 0.075, blue: 0.12), in: RoundedRectangle(cornerRadius: 16))
+        .background(cardFill, in: RoundedRectangle(cornerRadius: cardCorner))
         .accessibilityIdentifier("workout.heartRate.chart")
     }
 }
 
 private struct HeartRateLabelStyle: LabelStyle {
+    let tint: Color
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 5) {
-            configuration.icon.foregroundStyle(Color(red: 0.64, green: 0.40, blue: 0.53))
+            configuration.icon.foregroundStyle(tint)
             configuration.title
         }
     }

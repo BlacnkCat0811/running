@@ -148,7 +148,13 @@ final class HealthKitSync {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
             }
         }
-        try? Task.checkCancellation()
+        // 取消必须在任何网络/HealthKit 工作前生效。本函数不是 throwing，不能写 `try`；
+        // 原先的 `try? Task.checkCancellation()` 会把取消错误直接吞掉，检查形同虚设。
+        guard !Task.isCancelled else {
+            phase = "cancelled"
+            message = "同步已取消"
+            return
+        }
         let identity: RaiHandshake
         do {
             identity = try await api.handshake(baseURL: serverURL, token: apiToken)
@@ -215,7 +221,9 @@ final class HealthKitSync {
             do {
                 phase = "uploading"
                 message = "正在恢复已保存的健康数据批次"
-                let sourceId = try await withRetry {
+                // 大包上传不做自动重试：600s 超时 ×3 最坏阻塞 30 分钟，超过整个导入窗口，
+                // 也远超 iOS 后台任务的执行时限。失败时 ZIP 已持久化，下次同步会从这里恢复。
+                let sourceId = try await withRetry(attempts: 1) {
                     try await self.upload(zipURL: persisted, to: serverURL, batchId: task.payloadHash)
                 }
                 updateTask(sourceId: sourceId, phase: "importing")
@@ -274,7 +282,8 @@ final class HealthKitSync {
                 message = "正在重试上次未完成的上传"
                 zipURL = failed
                 exportedThrough = pendingFailedZipEnd()
-                let sourceId = try await withRetry {
+                // 同上：大包上传只尝试一次，避免超时 × 重试挤爆后台窗口。
+                let sourceId = try await withRetry(attempts: 1) {
                     try await self.upload(zipURL: failed, to: serverURL, batchId: try? self.fileHash(failed))
                 }
                 message = "正在检查健康数据"
@@ -348,7 +357,8 @@ final class HealthKitSync {
                 workoutCount: exported.workoutCount
             ))
             message = "正在上传 \(exported.workoutCount) 次跑步"
-            let sourceId = try await withRetry {
+            // 同上：大包上传只尝试一次。
+            let sourceId = try await withRetry(attempts: 1) {
                 try await self.upload(zipURL: persisted, to: serverURL, batchId: payloadHash)
             }
             phase = "importing"
@@ -547,6 +557,10 @@ final class HealthKitSync {
                 default:
                     try await Task.sleep(for: .seconds(2))
                 }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
+                throw CancellationError()
             } catch let error as SyncHTTPError {
                 let retryable = error.statusCode.map { status in
                     status == 429 || status >= 500
@@ -602,6 +616,11 @@ final class HealthKitSync {
             try Task.checkCancellation()
             do {
                 return try await operation()
+            } catch is CancellationError {
+                // 取消不是可重试失败：否则会退避等待后再发一次请求，用户看到"点了取消仍在跑"。
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
+                throw CancellationError()
             } catch let error as SyncHTTPError {
                 if error.statusCode.map({ (400...499).contains($0) && $0 != 429 }) == true {
                     throw error

@@ -6,6 +6,8 @@ import UIKit
 // Technology skin presentation. All business operations use the shared NativeAppModel.
 struct TechTodayView: View {
     @State private var showingLock = false
+    @State private var isSyncingPlan = false
+    @State private var planSyncMessage: String?
     @Environment(NativeAppModel.self) private var native
     @Environment(ServerSession.self) private var session
     @Environment(HealthKitSync.self) private var healthSync
@@ -51,6 +53,7 @@ struct TechTodayView: View {
                     TechTodayMetrics(workout: today.recentWorkouts.first)
                         .id(today.generatedAt)
                     recommendationPanel(today)
+                    workoutPlanPanel()
                     activityPanel(today)
                     raceSummary(today)
                     recentPanel(today)
@@ -242,6 +245,134 @@ struct TechTodayView: View {
                 }.buttonStyle(.plain).disabled(data.lock.present || data.verdict.stale || native.isOffline)
                     .opacity(data.lock.present || data.verdict.stale || native.isOffline ? 0.5 : 1)
             }
+        }
+    }
+
+    /// Mirrors the pixel skin's panel: the executable week, what will land in the
+    /// watch's Workout app, and the two separate actions around it.
+    private func workoutPlanPanel() -> some View {
+        let plan = native.workoutPlan
+        let executableCount = plan?.days.filter(\.executable).count ?? 0
+        return TechPanel {
+            VStack(alignment: .leading, spacing: 12) {
+                TechSectionHeader(
+                    title: "手表课表",
+                    trailing: plan == nil ? "未生成" : "\(executableCount) 项可上表",
+                    trailingColor: TechColor.cyan
+                )
+                if let plan, !plan.days.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(plan.days) { day in planRow(day, completedDates: native.completedWeekDates) }
+                    }
+                } else {
+                    Text("还没有本周课表。生成后即可一键同步到手表「体能训练」。")
+                        .font(.footnote)
+                        .foregroundStyle(TechColor.muted)
+                }
+                if let audit = plan?.audit {
+                    Text(
+                        audit.generatedBy == "llm"
+                            ? "由 \(audit.model ?? "大模型") 生成 · \(nativeDate(audit.generatedAt ?? ""))"
+                            : "由保守模板生成 · \(nativeDate(audit.generatedAt ?? ""))"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(TechColor.muted)
+                }
+                if let message = native.planMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(TechColor.ink)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(TechColor.paleYellow, in: RoundedRectangle(cornerRadius: 12))
+                }
+                if let message = planSyncMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(TechColor.ink)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(TechColor.mint, in: RoundedRectangle(cornerRadius: 12))
+                }
+                TechPrimaryButton(
+                    title: "一键同步到手表",
+                    systemName: "applewatch",
+                    isBusy: isSyncingPlan,
+                    isDisabled: native.isOffline || executableCount == 0
+                ) {
+                    syncPlanToWatch()
+                }
+                Button {
+                    Task { _ = await native.regenerateWeeklyPlan() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if native.isRegeneratingPlan {
+                            ProgressView().tint(TechColor.cyan).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "wand.and.stars")
+                        }
+                        Text(native.isRegeneratingPlan ? "生成中…" : "重新生成本周课表")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(TechColor.cyan)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background {
+                        Capsule().stroke(TechColor.cyan, lineWidth: 1)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(native.isRegeneratingPlan || native.isOffline)
+            }
+        }
+    }
+
+    private func planRow(_ day: MobileWorkoutPlanDay, completedDates: Set<String>) -> some View {
+        let summary = WorkoutPlanMapper.structureSummary(day.structure)
+        // Same rule as the pixel skin: a dimmed row that still prints a distance
+        // reads as work still owed. `/v1/mobile/workout-plan` keeps emitting
+        // today's prescription after the run is done, so the row has to say it.
+        let inactive = WorkoutPlanMapper.inactiveLabel(for: day, completedLocalDates: completedDates)
+        return HStack(spacing: 10) {
+            Text(nativeWeekday(day.localDate))
+                .font(.caption.weight(.semibold).monospacedDigit())
+                .frame(width: 34, alignment: .leading)
+                .foregroundStyle(TechColor.muted)
+            Text(day.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(day.kind == "rest" ? TechColor.muted : TechColor.cyan)
+            Spacer(minLength: 6)
+            if !summary.isEmpty {
+                TechBadge(title: summary, color: TechColor.cyan)
+            }
+            if let inactive {
+                TechBadge(title: inactive, color: TechColor.muted)
+            } else {
+                Text(nativeKilometers(day.distanceKm))
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(TechColor.muted)
+            }
+        }
+        .padding(.vertical, 9)
+        .padding(.horizontal, 12)
+        .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 12))
+        .opacity(day.executable ? 1 : 0.6)
+    }
+
+    private func syncPlanToWatch() {
+        guard let plan = native.workoutPlan, !isSyncingPlan else { return }
+        isSyncingPlan = true
+        planSyncMessage = nil
+        Task {
+            var outcome = await WorkoutKitBridge.sync(plan: plan)
+            if !outcome.authorized {
+                // Ask only when the user actually tries to sync, so the system
+                // prompt arrives with an obvious reason attached to it.
+                if await WorkoutKitBridge.requestAuthorization() {
+                    outcome = await WorkoutKitBridge.sync(plan: plan)
+                }
+            }
+            isSyncingPlan = false
+            planSyncMessage = outcome.summary
         }
     }
 
@@ -1505,28 +1636,38 @@ struct TechPlanView: View {
 
             }
             TechSectionHeader(title: "7 天训练安排", trailing: "本周")
-            if native.goals?.weekPlan.isEmpty != false {
-                Text("尚未保存逐日计划").font(.footnote).foregroundStyle(TechColor.muted)
+            if native.today?.weekPlan.isEmpty != false {
+                Text("尚未取到本周安排").font(.footnote).foregroundStyle(TechColor.muted)
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 5) {
-                    ForEach(native.goals?.weekPlan ?? []) { day in
+                    // The executable week, straight from `/v1/mobile/today` — the
+                    // same array the home screen draws its week card from, so the
+                    // two screens cannot name a different session for one date.
+                    // Building the chips from the *stored* plan instead read the
+                    // last saved prescription for every date: today showed a
+                    // session the recovery gate had already overruled, and a past
+                    // day showed "间歇跑 8.6 km" while the home screen showed what
+                    // was actually run. The server already resolves the three
+                    // tenses (`buildWeekPlan`), and that rule stays on the server.
+                    ForEach(native.today?.weekPlan ?? []) { day in
+                        let isToday = day.localDate == native.today?.today.localDate
                         VStack(spacing: 13) {
                             VStack(spacing: 5) {
                                 Text(nativeWeekday(day.localDate)).font(.caption2)
                                 Text(nativeDay(day.localDate)).font(.caption2)
                             }
                             .frame(maxWidth: .infinity).padding(.vertical, 10)
-                            .foregroundStyle(day.localDate == native.today?.today.localDate ? TechColor.background : TechColor.muted)
-                            .background(day.localDate == native.today?.today.localDate ? TechColor.action : TechColor.grid.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
+                            .foregroundStyle(isToday ? TechColor.background : TechColor.muted)
+                            .background(isToday ? TechColor.action : TechColor.grid.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
                             Circle().fill(techSessionColor(day.kind)).frame(width: 8, height: 8)
                             Text(nativeSessionName(day.kind)).font(.caption2)
-                            Text(day.distanceKm.map { nativeKilometers($0) } ?? "—")
+                            Text(day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "—")
                                 .font(.caption.monospacedDigit()).foregroundStyle(TechColor.muted)
                         }
                         .padding(.bottom, 14).frame(width: dayWidth)
-                        .background(day.localDate == native.today?.today.localDate ? TechColor.blue.opacity(0.17) : TechColor.paper, in: RoundedRectangle(cornerRadius: 9))
-                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(day.localDate == native.today?.today.localDate ? TechColor.cyan : .clear, lineWidth: 1))
+                        .background(isToday ? TechColor.blue.opacity(0.17) : TechColor.paper, in: RoundedRectangle(cornerRadius: 9))
+                        .overlay(RoundedRectangle(cornerRadius: 9).stroke(isToday ? TechColor.cyan : .clear, lineWidth: 1))
                     }
                 }
             }
@@ -1584,6 +1725,25 @@ struct TechPlanView: View {
         }
     }
 
+    /// The rows of the stored plan this editor may change.
+    ///
+    /// Today is not one of them, and neither is any day before it. Today's
+    /// session is decided by the coach's recovery gate, not by the stored plan —
+    /// `planOverview` above and the home screen both render the gate's answer —
+    /// so a row here would offer an edit that never takes effect. The server
+    /// marks every day before today `rest/0` for every reader, so those rows are
+    /// equally inert. Both are still round-tripped on save, so hiding them costs
+    /// no data; it is only the *editing* that would be a lie.
+    ///
+    /// When today's date is unknown — `/v1/mobile/today` failed while the goals
+    /// request succeeded — nothing is offered. The editor cannot tell which row
+    /// is the inert one, and guessing would restore exactly the edit this
+    /// property exists to withhold.
+    private var editablePlanIndexes: [Int] {
+        guard let today = native.today?.today.localDate else { return [] }
+        return weekPlan.indices.filter { weekPlan[$0].localDate > today }
+    }
+
     private var weekPlanPanel: some View {
         TechPanel {
             VStack(alignment: .leading, spacing: 8) {
@@ -1596,8 +1756,14 @@ struct TechPlanView: View {
                     Text("服务端尚未保存逐日计划")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
+                } else if editablePlanIndexes.isEmpty {
+                    Text(native.today == nil
+                        ? "未能取到今日状态，无法确定哪一天由恢复状态决定，暂不可编辑。"
+                        : "今天之前的日期由服务端置为休息，今天由恢复状态决定；本周没有可编辑的日期。")
+                        .font(.footnote)
+                        .foregroundStyle(TechColor.muted)
                 } else {
-                    ForEach(weekPlan.indices, id: \.self) { index in
+                    ForEach(editablePlanIndexes, id: \.self) { index in
                         let item = weekPlan[index]
                         HStack(spacing: 7) {
                             VStack(alignment: .leading, spacing: 4) {
@@ -1608,7 +1774,6 @@ struct TechPlanView: View {
                                 Text("休息").tag("rest")
                                 Text("恢复跑").tag("recovery")
                                 Text("轻松跑").tag("easy")
-                                Text("稳态跑").tag("steady")
                                 Text("长距离").tag("long_run")
                                 Text("节奏跑").tag("tempo")
                                 Text("间歇跑").tag("interval")
@@ -1671,9 +1836,19 @@ struct TechPlanView: View {
 
     private func save() async {
         guard !isSaving, areDistancesValid, let weekly = weeklyValue, (1...500).contains(weekly) else { return }
+        // The structure belongs to the kind and size it was generated for. The
+        // editor loads whatever the server returned, so sending it straight back
+        // after the user edits the kind or the distance would pair an old
+        // prescription with a new label; clearing it lets the server rebuild the
+        // prescription from what was actually asked for.
+        let loaded = Dictionary(uniqueKeysWithValues: (native.goals?.weekPlan ?? []).map { ($0.localDate, $0) })
         let plan = weekPlan.map { item in
             var updated = item
             updated.distanceKm = Double((distanceDrafts[item.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+            if let previous = loaded[item.localDate],
+               previous.kind != updated.kind || previous.distanceKm != updated.distanceKm {
+                updated.structure = nil
+            }
             return updated
         }
         isSaving = true

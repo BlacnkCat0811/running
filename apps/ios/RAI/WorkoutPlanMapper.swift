@@ -1,0 +1,273 @@
+import Foundation
+
+/// A workout the device can hand to the system workout scheduler.
+///
+/// Deliberately free of any WorkoutKit type: the SDK import lives in
+/// `WorkoutKitBridge` so that these mapping rules stay compilable and testable
+/// off-device. Everything the server sends is treated as untrusted input and is
+/// re-bounded here — this is the device-side half of the trust boundary.
+struct PlannedWorkout: Equatable {
+    enum Goal: Equatable {
+        case distance(meters: Double)
+        case time(seconds: Double)
+        case open
+    }
+
+    enum Alert: Equatable {
+        case pace(lower: Double?, upper: Double?)
+        case heartRate(lower: Double?, upper: Double?)
+    }
+
+    struct Step: Equatable {
+        /// `warmup` | `work` | `recovery` | `cooldown`, carried through so the
+        /// bridge can label an interval step without re-deriving intent.
+        let purpose: String
+        let goal: Goal
+        let alert: Alert?
+
+        var isRecovery: Bool { purpose == "recovery" }
+    }
+
+    struct Block: Equatable {
+        let iterations: Int
+        let steps: [Step]
+    }
+
+    let localDate: String
+    let displayName: String
+    let hour: Int
+    let minute: Int
+    let warmup: Step?
+    let blocks: [Block]
+    let cooldown: Step?
+}
+
+/// Speed bounds derived from a pace prescription. Kept separate from
+/// `PlannedWorkout` because the conversion is the error-prone part and must stay
+/// covered by the off-device regression test.
+enum PaceBounds: Equatable {
+    case range(lowerMetersPerSecond: Double, upperMetersPerSecond: Double)
+    case threshold(metersPerSecond: Double)
+}
+
+enum WorkoutPlanMapper {
+    /// Early enough that a morning runner can still see it before leaving.
+    static let defaultScheduleHour = 7
+    /// When the nominal time has already passed, schedule this far ahead instead
+    /// of silently dropping today's session.
+    static let lateFloorSeconds: TimeInterval = 60
+    static let maxBlocks = 8
+    static let maxStepsPerBlock = 12
+    static let maxIterations = 20
+    static let maxStepMeters = 100_000.0
+    static let maxStepSeconds = 14_400.0
+    static let maxAlertValue = 1_800.0
+
+    /// Days the server cannot or should not sync are dropped here: rest days,
+    /// days whose prescription failed to build, and days left with no usable
+    /// step after filtering.
+    static func plannedWorkouts(from plan: MobileWorkoutPlanResponse) -> [PlannedWorkout] {
+        plan.days.compactMap { plannedWorkout(from: $0) }
+    }
+
+    static func plannedWorkout(
+        from day: MobileWorkoutPlanDay,
+        hour: Int = WorkoutPlanMapper.defaultScheduleHour,
+        minute: Int = 0
+    ) -> PlannedWorkout? {
+        guard day.executable, day.kind != "rest", let structure = day.structure else { return nil }
+        let blocks = structure.blocks.prefix(maxBlocks).compactMap(block(from:))
+        // WorkoutKit requires at least one block, and a workout whose every step
+        // is "just run" is an empty shell rather than a prescription.
+        guard !blocks.isEmpty, blocks.contains(where: { block in block.steps.contains(where: \.hasTarget) }) else {
+            return nil
+        }
+        return PlannedWorkout(
+            localDate: day.localDate,
+            displayName: displayName(for: day),
+            hour: min(23, max(0, hour)),
+            minute: min(59, max(0, minute)),
+            warmup: structure.warmup.flatMap(step(from:)),
+            blocks: blocks,
+            cooldown: structure.cooldown.flatMap(step(from:))
+        )
+    }
+
+    /// The instant the session should appear on the watch. A nominal time that
+    /// already passed is pushed just far enough ahead that today's session stays
+    /// schedulable; a malformed date yields nil.
+    ///
+    /// Returns `DateComponents` because that is what `WorkoutScheduler.schedule`
+    /// accepts — a `Date` would have to be converted back anyway.
+    static func scheduleComponents(
+        for workout: PlannedWorkout,
+        timeZone: TimeZone,
+        now: Date
+    ) -> DateComponents? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = workout.localDate.split(separator: "-")
+        guard parts.count == 3,
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
+              (1970...9999).contains(year), (1...12).contains(month), (1...31).contains(day) else {
+            return nil
+        }
+        var components = DateComponents()
+        components.timeZone = timeZone
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = workout.hour
+        components.minute = workout.minute
+        components.second = 0
+        guard let planned = calendar.date(from: components) else { return nil }
+        guard planned <= now else { return components }
+        let rolled = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now.addingTimeInterval(lateFloorSeconds))
+        var adjusted = DateComponents()
+        adjusted.timeZone = timeZone
+        adjusted.year = rolled.year
+        adjusted.month = rolled.month
+        adjusted.day = rolled.day
+        adjusted.hour = rolled.hour
+        adjusted.minute = rolled.minute
+        adjusted.second = rolled.second
+        return adjusted
+    }
+
+    /// Converts a pace prescription into speed bounds.
+    ///
+    /// RAI stores seconds per kilometre, where a *smaller* number is faster;
+    /// WorkoutKit expects speed, so the bounds invert — the pace floor becomes
+    /// the speed ceiling. Getting this backwards would silently prescribe the
+    /// opposite intensity, which is why it lives in tested code.
+    static func paceBounds(lower: Double?, upper: Double?) -> PaceBounds? {
+        let lowerPace = boundedPace(lower)
+        let upperPace = boundedPace(upper)
+        if let lowerPace, let upperPace {
+            // The slower pace maps to the lower speed, the faster pace to the
+            // upper speed, so the resulting range is always ascending.
+            let slowest = 1_000 / max(lowerPace, upperPace)
+            let fastest = 1_000 / min(lowerPace, upperPace)
+            guard slowest > 0, fastest >= slowest else { return nil }
+            return .range(lowerMetersPerSecond: slowest, upperMetersPerSecond: fastest)
+        }
+        guard let single = lowerPace ?? upperPace else { return nil }
+        return .threshold(metersPerSecond: 1_000 / single)
+    }
+
+    /// Short human summary of a prescription, e.g. `6 × 800m` or `3 × 8分`.
+    /// Empty when there is nothing worth showing.
+    static func structureSummary(_ structure: MobileSessionStructure?) -> String {
+        guard let structure, let block = structure.blocks.first else { return "" }
+        let work = block.steps.first { $0.purpose == "work" } ?? block.steps.first
+        guard let work else { return "" }
+        let sets = max(1, block.iterations)
+        switch work.goal {
+        case let .distance(meters):
+            let text = meters >= 1_000
+                ? String(format: "%.1fkm", meters / 1_000)
+                : String(format: "%.0fm", meters)
+            return "\(sets) × \(text)"
+        case let .time(seconds):
+            let text = seconds >= 60
+                ? String(format: "%.0f分", seconds / 60)
+                : String(format: "%.0f秒", seconds)
+            return "\(sets) × \(text)"
+        case .open:
+            return "\(sets) 组"
+        }
+    }
+
+    /// Why a row of the executable week is not offered to the watch, or nil when
+    /// it is offered.
+    ///
+    /// The week panel dims the rows the watch will not receive and still prints
+    /// their distance, which left a finished day reading as «周四 轻松跑 5.0km»
+    /// at 60% opacity — the prescription that was *not* run, with nothing saying
+    /// so. The two endpoints describe that date differently on purpose (实绩 vs
+    /// 处方), and the label is what makes the difference legible.
+    ///
+    /// `completedLocalDates` comes from `/v1/mobile/today`, which is the only
+    /// side that knows the day was actually trained.
+    static func inactiveLabel(for day: MobileWorkoutPlanDay, completedLocalDates: Set<String>) -> String? {
+        if day.executable { return nil }
+        if completedLocalDates.contains(day.localDate) { return "已完成" }
+        if day.kind == "rest" { return "休息" }
+        return "不可上表"
+    }
+
+    // MARK: - Private
+
+    private static func boundedPace(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return min(86_400, value)
+    }
+
+    private static func displayName(for day: MobileWorkoutPlanDay) -> String {
+        let title = day.title.isEmpty ? "训练" : day.title
+        guard let distance = day.distanceKm, distance > 0 else { return "RAI · \(title)" }
+        return "RAI · \(title) \(String(format: "%.1f", distance))km"
+    }
+
+    private static func block(from raw: MobileIntervalBlock) -> PlannedWorkout.Block? {
+        let steps = raw.steps.prefix(maxStepsPerBlock).compactMap(step(from:))
+        guard !steps.isEmpty else { return nil }
+        return PlannedWorkout.Block(iterations: min(maxIterations, max(1, raw.iterations)), steps: steps)
+    }
+
+    private static func step(from raw: MobileWorkoutStep) -> PlannedWorkout.Step? {
+        guard let goal = goal(from: raw.goal) else { return nil }
+        return PlannedWorkout.Step(purpose: raw.purpose, goal: goal, alert: alert(from: raw.alert))
+    }
+
+    private static func goal(from raw: MobileStepGoal) -> PlannedWorkout.Goal? {
+        switch raw {
+        case let .distance(meters):
+            guard meters.isFinite, meters > 0 else { return nil }
+            return .distance(meters: min(maxStepMeters, meters))
+        case let .time(seconds):
+            guard seconds.isFinite, seconds > 0 else { return nil }
+            return .time(seconds: min(maxStepSeconds, seconds))
+        case .open:
+            return .open
+        }
+    }
+
+    /// Returns nil rather than an alert with no bound: a step whose alert
+    /// carries no target cannot be scheduled, and dropping the alert is better
+    /// than dropping the whole workout.
+    private static func alert(from raw: MobileStepAlert?) -> PlannedWorkout.Alert? {
+        guard let raw, raw.isUsable else { return nil }
+        let (lower, upper) = ordered(lower: bounded(raw.lower), upper: bounded(raw.upper))
+        guard lower != nil || upper != nil else { return nil }
+        switch raw.kind {
+        case "pace":
+            return .pace(lower: lower, upper: upper)
+        case "heart_rate":
+            return .heartRate(lower: lower, upper: upper)
+        default:
+            return nil
+        }
+    }
+
+    private static func ordered(lower: Double?, upper: Double?) -> (Double?, Double?) {
+        guard let lower, let upper, lower > upper else { return (lower, upper) }
+        return (upper, lower)
+    }
+
+    private static func bounded(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return min(maxAlertValue, value)
+    }
+}
+
+private extension PlannedWorkout.Step {
+    /// True when the goal is an actual target rather than "just run".
+    var hasTarget: Bool {
+        switch goal {
+        case let .distance(meters): return meters > 0
+        case let .time(seconds): return seconds > 0
+        case .open: return false
+        }
+    }
+}

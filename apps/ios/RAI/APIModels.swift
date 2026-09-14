@@ -88,6 +88,78 @@ struct MobileVerdict: Codable {
     let reasonCodes: [String]?
 }
 
+/// Step goal, mirroring WorkoutKit's goal model so the bridge stays a pure
+/// translation. `open` means "no target" and is not treated as a usable
+/// prescription by the mapper.
+enum MobileStepGoal: Codable, Equatable {
+    case distance(meters: Double)
+    case time(seconds: Double)
+    case open
+
+    private enum CodingKeys: String, CodingKey { case type, meters, seconds }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(String.self, forKey: .type) {
+        case "distance":
+            self = .distance(meters: try container.decode(Double.self, forKey: .meters))
+        case "time":
+            self = .time(seconds: try container.decode(Double.self, forKey: .seconds))
+        default:
+            self = .open
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .distance(meters):
+            try container.encode("distance", forKey: .type)
+            try container.encode(meters, forKey: .meters)
+        case let .time(seconds):
+            try container.encode("time", forKey: .type)
+            try container.encode(seconds, forKey: .seconds)
+        case .open:
+            try container.encode("open", forKey: .type)
+        }
+    }
+}
+
+/// At most one alert per step — the same limit WorkoutKit enforces.
+struct MobileStepAlert: Codable, Equatable {
+    let kind: String
+    let lower: Double?
+    let upper: Double?
+
+    var isUsable: Bool { lower != nil || upper != nil }
+}
+
+struct MobileWorkoutStep: Codable, Equatable {
+    let purpose: String
+    let goal: MobileStepGoal
+    let alert: MobileStepAlert?
+}
+
+struct MobileIntervalBlock: Codable, Equatable {
+    let iterations: Int
+    let steps: [MobileWorkoutStep]
+}
+
+struct MobileSessionStructure: Codable, Equatable {
+    let warmup: MobileWorkoutStep?
+    let blocks: [MobileIntervalBlock]
+    let cooldown: MobileWorkoutStep?
+}
+
+/// Who produced a stored weekly plan. Kept so a surprising week can be traced
+/// back to the model that wrote it.
+struct MobilePlanAudit: Codable, Equatable {
+    let generatedBy: String
+    let model: String?
+    let promptVersion: String?
+    let generatedAt: String?
+}
+
 struct MobileNextSession: Codable {
     let kind: String
     let title: String
@@ -98,6 +170,9 @@ struct MobileNextSession: Codable {
     let paceSecondsPerKmUpper: Double?
     let heartRateBpmLower: Double?
     let heartRateBpmUpper: Double?
+    /// Interval/step breakdown. Optional so an older server that predates the
+    /// field still decodes.
+    let structure: MobileSessionStructure?
 }
 
 struct MobileRecoveryBreakdown: Codable {
@@ -188,6 +263,7 @@ struct MobileWeekPlanDay: Codable, Identifiable {
     let completedWorkoutId: String?
     let distanceKm: Double
     let workoutCount: Int
+    let structure: MobileSessionStructure?
 
     var id: String { localDate }
 }
@@ -483,13 +559,19 @@ struct MobileGoalsResponse: Codable {
     let raceTarget: MobileRaceTarget?
     let weekPlan: [MobileGoalsPlanItem]
     let lockedSession: MobileLockedSession?
+    let weekPlanAudit: MobilePlanAudit?
     let updatedAt: String
 }
 
+/// A persisted planned day. `structure` and `reason` are carried through
+/// unchanged on save so editing the weekly distance cannot silently downgrade a
+/// generated prescription.
 struct MobileGoalsPlanItem: Codable, Identifiable {
     let localDate: String
     var kind: String
     var distanceKm: Double?
+    var structure: MobileSessionStructure?
+    var reason: String?
 
     var id: String { localDate }
 }
@@ -515,6 +597,62 @@ struct UpdateMobileGoalsRequest: Encodable {
         try container.encodeIfPresent(qualitySessionCap, forKey: .qualitySessionCap)
         try container.encodeIfPresent(raceTarget, forKey: .raceTarget)
         try container.encodeIfPresent(weekPlan, forKey: .weekPlan)
+    }
+}
+
+/// One day of the executable week handed to the WorkoutKit bridge.
+struct MobileWorkoutPlanDay: Codable, Identifiable, Equatable {
+    let localDate: String
+    let kind: String
+    let title: String
+    let reason: String
+    let distanceKm: Double?
+    let durationMinutes: Double?
+    let paceSecondsPerKmLower: Double?
+    let paceSecondsPerKmUpper: Double?
+    let heartRateBpmLower: Double?
+    let heartRateBpmUpper: Double?
+    let structure: MobileSessionStructure?
+    let source: String
+    /// False for rest days and for days whose prescription could not be built.
+    let executable: Bool
+
+    var id: String { localDate }
+}
+
+struct MobileWorkoutPlanResponse: Codable, Equatable {
+    let generatedAt: String
+    let timezone: String
+    let windowDays: Int
+    let planRevision: Int
+    let audit: MobilePlanAudit?
+    let days: [MobileWorkoutPlanDay]
+}
+
+struct MobilePlannedDay: Codable, Equatable {
+    let localDate: String
+    let kind: String
+    let distanceKm: Double?
+    let structure: MobileSessionStructure?
+    let reason: String?
+}
+
+struct MobileWeeklyPlanGenerationResponse: Codable, Equatable {
+    let generatedAt: String
+    let revision: Int
+    let audit: MobilePlanAudit
+    let days: [MobilePlannedDay]
+    let warnings: [String]
+}
+
+struct GenerateWeeklyPlanRequest: Encodable {
+    let expectedRevision: Int?
+
+    enum CodingKeys: String, CodingKey { case expectedRevision }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(expectedRevision, forKey: .expectedRevision)
     }
 }
 

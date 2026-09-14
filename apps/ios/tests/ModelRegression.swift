@@ -133,6 +133,87 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         StubProtocol.handler = { _ in (503, "{}", 0) }
         await model.loadWorkout(id: "never-cached")
         check(model.selectedWorkout == nil && model.selectedSeries == nil, "opening another workout clears both previous detail and series")
+
+        // --- executable weekly plan ------------------------------------------
+        let planJSON = """
+        {"generatedAt":"2026-09-11T01:00:00.000Z","timezone":"Asia/Shanghai","windowDays":2,"planRevision":7,
+         "audit":{"generatedBy":"llm","model":"deepseek:deepseek-chat","promptVersion":"weekly-plan-v1","generatedAt":"2026-09-11T00:30:00.000Z"},
+         "days":[
+          {"localDate":"2026-09-11","kind":"interval","title":"间歇 / VO₂","reason":"闸门放行","distanceKm":11.4,"durationMinutes":62,
+           "paceSecondsPerKmLower":240,"paceSecondsPerKmUpper":265,"heartRateBpmLower":160,"heartRateBpmUpper":172,
+           "structure":{"warmup":{"purpose":"warmup","goal":{"type":"time","seconds":600},"alert":null},
+            "blocks":[{"iterations":6,"steps":[{"purpose":"work","goal":{"type":"distance","meters":800},"alert":{"kind":"pace","lower":240,"upper":265}},
+                                              {"purpose":"recovery","goal":{"type":"time","seconds":120},"alert":null}]}],
+            "cooldown":{"purpose":"cooldown","goal":{"type":"time","seconds":600},"alert":null}},
+           "source":"llm","executable":true},
+          {"localDate":"2026-09-12","kind":"rest","title":"休息","reason":"","distanceKm":null,"durationMinutes":null,
+           "paceSecondsPerKmLower":null,"paceSecondsPerKmUpper":null,"heartRateBpmLower":null,"heartRateBpmUpper":null,
+           "structure":null,"source":"llm","executable":false}
+         ]}
+        """
+        let generationJSON = """
+        {"generatedAt":"2026-09-11T00:30:00.000Z","revision":8,
+         "audit":{"generatedBy":"llm","model":"deepseek:deepseek-chat","promptVersion":"weekly-plan-v1","generatedAt":"2026-09-11T00:30:00.000Z"},
+         "days":[{"localDate":"2026-09-11","kind":"easy","distanceKm":8,"structure":null,"reason":"轻松"}],"warnings":[]}
+        """
+        session.serverURL = URL(string: "https://rai-plan.test")
+        model.serverConfigurationChanged()
+        StubProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("/workout-plan/generate") { return (200, generationJSON, 0) }
+            if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
+            return (503, "{}", 0)
+        }
+        let planFetched = await model.refreshWorkoutPlan()
+        check(planFetched && model.workoutPlan?.days.count == 2, "the executable week is fetched and stored")
+        check(model.workoutPlan?.days.first?.structure?.blocks.first?.iterations == 6, "the session structure survives the round trip")
+        check(model.workoutPlan?.days.first?.executable == true, "an executable day is marked as such")
+        check(model.workoutPlan?.planRevision == 7, "the plan revision is carried for conflict messages")
+
+        let generated = await model.regenerateWeeklyPlan()
+        check(generated, "a plan generation reports success")
+        check(model.planMessage?.contains("大模型生成") == true, "a model-generated plan says so")
+        check(model.planMessage?.contains("deepseek:deepseek-chat") == true, "the generating model is named")
+
+        StubProtocol.handler = { _ in
+            (409, "{\"code\":\"mobile_goals_revision_conflict\",\"message\":\"训练目标已在其他页面更新\"}", 0)
+        }
+        let conflicted = await model.regenerateWeeklyPlan()
+        check(!conflicted, "a revision conflict is reported as a failure")
+        check(model.planMessage == "训练目标已在别处更新，请重新生成本周课表。", "a revision conflict tells the user to regenerate")
+
+        let fallbackJSON = """
+        {"generatedAt":"2026-09-11T00:30:00.000Z","revision":9,
+         "audit":{"generatedBy":"heuristic","model":null,"promptVersion":null,"generatedAt":"2026-09-11T00:30:00.000Z"},
+         "days":[{"localDate":"2026-09-11","kind":"easy","distanceKm":8,"structure":null,"reason":null}],
+         "warnings":["未配置 RAI_LLM_API_KEY，已回退到启发式课表"]}
+        """
+        if let fallback = try? JSONDecoder().decode(MobileWeeklyPlanGenerationResponse.self, from: Data(fallbackJSON.utf8)) {
+            let summary = NativeAppModel.generationSummary(fallback)
+            check(summary.contains("保守模板"), "a fallback plan is labelled as a fallback")
+            check(summary.contains("RAI_LLM_API_KEY"), "a fallback plan explains why it fell back")
+        } else {
+            check(false, "a fallback generation payload decodes")
+        }
+
+        // The server prepends the overwrite note, so a one-warning display would
+        // hide that stored work was replaced.
+        let overwrittenJSON = """
+        {"generatedAt":"2026-09-11T00:30:00.000Z","revision":10,
+         "audit":{"generatedBy":"llm","model":"deepseek:deepseek-chat","promptVersion":"weekly-plan-v1","generatedAt":"2026-09-11T00:30:00.000Z"},
+         "days":[{"localDate":"2026-09-11","kind":"interval","distanceKm":9,"structure":null,"reason":null}],
+         "warnings":["已覆盖 2 天既有课表（2026-09-12、2026-09-13）：原有分段与说明不再保留","未配置 RAI_LLM_API_KEY，已回退到启发式课表","第三条不该出现"]}
+        """
+        if let overwritten = try? JSONDecoder().decode(MobileWeeklyPlanGenerationResponse.self, from: Data(overwrittenJSON.utf8)) {
+            let summary = NativeAppModel.generationSummary(overwritten)
+            check(summary.contains("deepseek:deepseek-chat"), "a model plan names the model")
+            check(summary.contains("已覆盖 2 天既有课表"), "an overwrite of stored work is surfaced")
+            check(summary.contains("RAI_LLM_API_KEY"), "the reason for a fallback is still surfaced")
+            check(!summary.contains("第三条"), "the summary stays short instead of listing every warning")
+        } else {
+            check(false, "an overwrite generation payload decodes")
+        }
+
         print("All model regression checks passed.")
     }
 }

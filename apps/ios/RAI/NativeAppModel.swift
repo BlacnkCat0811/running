@@ -14,6 +14,7 @@ final class NativeAppModel {
     private(set) var statistics: MobileStatisticsResponse?
     private(set) var trends: MobileTrendsResponse?
     private(set) var goals: MobileGoalsResponse?
+    private(set) var workoutPlan: MobileWorkoutPlanResponse?
     private(set) var predictions: NativePredictionResponse?
     private(set) var dashboard: NativeDashboardResponse?
     private(set) var trainingZones: NativeTrainingZonesCurrentResponse?
@@ -34,6 +35,10 @@ final class NativeAppModel {
     private(set) var workoutDetailError: String?
     private(set) var bodyMetricsError: String?
     private(set) var isLockingSession = false
+    private(set) var isLoadingWorkoutPlan = false
+    private(set) var isRegeneratingPlan = false
+    /// Human-readable result of the last plan generation, including fallbacks.
+    var planMessage: String?
     var workoutSessionType: String? {
         didSet {
             guard oldValue != workoutSessionType else { return }
@@ -46,6 +51,15 @@ final class NativeAppModel {
     }
     private var workoutRequestID = UUID()
     private var detailRequestID = UUID()
+
+    /// Dates `/v1/mobile/today` reports as already trained.
+    ///
+    /// `/v1/mobile/workout-plan` carries those same dates as prescriptions, so
+    /// the week panel has to be told which rows are history rather than work
+    /// still owed. Shared by both skins — the rule is not a skin decision.
+    var completedWeekDates: Set<String> {
+        Set((today?.weekPlan ?? []).compactMap { $0.completedWorkoutId != nil ? $0.localDate : nil })
+    }
 
     private var configurationID = UUID()
     private var cacheScope: String
@@ -138,22 +152,31 @@ final class NativeAppModel {
                 Self.saveHandshake(identity, for: baseURL)
                 setCacheScope(baseURL: baseURL, handshake: identity)
             }
-            let fetchedToday = try await api.today(baseURL: baseURL, token: token)
+            // 这四个面板互不依赖，并发拉取（原先串行 await，任一慢请求会拖住整页刷新）。
+            // 任一失败仍然整体进入下面的离线分支，语义与串行版本一致。
+            async let pendingToday = api.today(baseURL: baseURL, token: token)
+            async let pendingStatistics = api.statistics(baseURL: baseURL, token: token)
+            async let pendingTrends = api.trends(baseURL: baseURL, token: token)
+            async let pendingGoals = api.goals(baseURL: baseURL, token: token)
+            let (fetchedToday, fetchedStatistics, fetchedTrends, fetchedGoals) = try await (
+                pendingToday, pendingStatistics, pendingTrends, pendingGoals
+            )
             guard isCurrent() else { return }
             today = fetchedToday
-            recordCache(today, key: "today")
-            let fetchedStatistics = try await api.statistics(baseURL: baseURL, token: token)
-            guard isCurrent() else { return }
+            recordCache(fetchedToday, key: "today")
             statistics = fetchedStatistics
-            recordCache(statistics, key: "statistics")
-            let fetchedTrends = try await api.trends(baseURL: baseURL, token: token)
-            guard isCurrent() else { return }
+            recordCache(fetchedStatistics, key: "statistics")
             trends = fetchedTrends
-            recordCache(trends, key: "trends")
-            let fetchedGoals = try await api.goals(baseURL: baseURL, token: token)
-            guard isCurrent() else { return }
+            recordCache(fetchedTrends, key: "trends")
             goals = fetchedGoals
-            recordCache(goals, key: "goals")
+            recordCache(fetchedGoals, key: "goals")
+            // Non-fatal: the executable week is a convenience, and a failure here
+            // must not mark the whole refresh as offline.
+            if let fetchedPlan = try? await api.workoutPlan(baseURL: baseURL, token: token) {
+                guard isCurrent() else { return }
+                workoutPlan = fetchedPlan
+                recordCache(fetchedPlan, key: workoutPlanCacheKey)
+            }
             let workoutsSucceeded = await refreshWorkouts()
             guard isCurrent() else { return }
             isOffline = !workoutsSucceeded
@@ -448,6 +471,103 @@ final class NativeAppModel {
         }
     }
 
+    /// Fetches the executable week handed to the workout scheduler. Read-only
+    /// and independent of the goals revision, so a failure here never blocks the
+    /// rest of the app — it simply leaves whatever was last shown in place.
+    @discardableResult
+    func refreshWorkoutPlan() async -> Bool {
+        guard !isLoadingWorkoutPlan, let baseURL = session.serverURL else { return false }
+        isLoadingWorkoutPlan = true
+        defer { isLoadingWorkoutPlan = false }
+        let configuration = configurationID
+        let token = session.apiToken
+        func isCurrent() -> Bool {
+            configuration == configurationID && baseURL == session.serverURL &&
+                token == session.apiToken && !Task.isCancelled
+        }
+        do {
+            let fetched = try await api.workoutPlan(baseURL: baseURL, token: token)
+            guard isCurrent() else { return false }
+            workoutPlan = fetched
+            recordCache(fetched, key: workoutPlanCacheKey)
+            return true
+        } catch {
+            guard isCurrent() else { return false }
+            if workoutPlan == nil {
+                workoutPlan = cache.read(MobileWorkoutPlanResponse.self, scope: cacheScope, key: workoutPlanCacheKey)?.value
+            }
+            return false
+        }
+    }
+
+    /// Replaces the stored week with a freshly generated one. The server falls
+    /// back to its heuristic template when the model is unavailable, so this
+    /// always leaves a usable week behind — the message says which one it was.
+    @discardableResult
+    func regenerateWeeklyPlan() async -> Bool {
+        guard !isRegeneratingPlan, let baseURL = session.serverURL else { return false }
+        isRegeneratingPlan = true
+        defer { isRegeneratingPlan = false }
+        planMessage = nil
+        let configuration = configurationID
+        let token = session.apiToken
+        func isCurrent() -> Bool {
+            configuration == configurationID && baseURL == session.serverURL &&
+                token == session.apiToken && !Task.isCancelled
+        }
+        // No loaded goals snapshot means no revision to send, which the server
+        // reads as "skip the optimistic lock". Fetch one first so a concurrent
+        // edit is caught rather than silently overwritten.
+        var revision = goals?.revision
+        if revision == nil, let latest = try? await api.goals(baseURL: baseURL, token: token), isCurrent() {
+            goals = latest
+            recordCache(latest, key: "goals")
+            revision = latest.revision
+        }
+        do {
+            let result = try await api.generateWeeklyPlan(
+                GenerateWeeklyPlanRequest(expectedRevision: revision),
+                baseURL: baseURL,
+                token: token
+            )
+            guard isCurrent() else { return false }
+            planMessage = Self.generationSummary(result)
+            // `refreshAll` already re-reads the executable week, so a separate
+            // workout-plan fetch here would only duplicate the request.
+            await refreshAll(requestHandshake: false)
+            return true
+        } catch {
+            guard isCurrent() else { return false }
+            errorMessage = friendlyMessage(error)
+            if case RaiAPIClientError.server(let code, _, _) = error, code == "mobile_goals_revision_conflict" {
+                if let latest = try? await api.goals(baseURL: baseURL, token: token), isCurrent() {
+                    goals = latest
+                    recordCache(latest, key: "goals")
+                }
+                planMessage = "训练目标已在别处更新，请重新生成本周课表。"
+            }
+            return false
+        }
+    }
+
+    /// Turns a generation result into one honest sentence, including the reason
+    /// it fell back to the deterministic template.
+    ///
+    /// Two warnings are shown, not one: the first explains where the plan came
+    /// from and the second is usually that an existing plan was overwritten —
+    /// dropping either would hide something the runner needs to know.
+    nonisolated static func generationSummary(_ result: MobileWeeklyPlanGenerationResponse) -> String {
+        let source = result.audit.generatedBy == "llm"
+            ? "大模型生成（\(result.audit.model ?? "未标注模型")）"
+            : "已回退到保守模板"
+        let quality = result.days.filter { $0.kind == "tempo" || $0.kind == "interval" }.count
+        let total = result.days.reduce(0) { $0 + ($1.distanceKm ?? 0) }
+        var text = "\(source)：\(result.days.count) 天 / 质量课 \(quality) 堂 / 合计 \(String(format: "%.1f", total)) km。"
+        let notes = result.warnings.filter { !$0.isEmpty }.prefix(2)
+        if !notes.isEmpty { text += " " + notes.joined(separator: " ") }
+        return text
+    }
+
     func clearCache() {
         configurationID = UUID()
         isLoading = false
@@ -460,22 +580,33 @@ final class NativeAppModel {
         "workouts-\(workoutSessionType ?? "all")"
     }
 
+    private var workoutPlanCacheKey: String { "workout-plan" }
+
     private func loadCachedData() {
-        today = cache.read(MobileTodayResponse.self, scope: cacheScope, key: "today")?.value
-        statistics = cache.read(MobileStatisticsResponse.self, scope: cacheScope, key: "statistics")?.value
-        trends = cache.read(MobileTrendsResponse.self, scope: cacheScope, key: "trends")?.value
-        goals = cache.read(MobileGoalsResponse.self, scope: cacheScope, key: "goals")?.value
-        predictions = cache.read(NativePredictionResponse.self, scope: cacheScope, key: "predictions")?.value
+        // 每个 key 只读一次：原先为了拿 cachedAt 又重复读了一遍，10 个 key 变成 20 次查询。
+        let cachedToday = cache.read(MobileTodayResponse.self, scope: cacheScope, key: "today")
+        let cachedStatistics = cache.read(MobileStatisticsResponse.self, scope: cacheScope, key: "statistics")
+        let cachedTrends = cache.read(MobileTrendsResponse.self, scope: cacheScope, key: "trends")
+        let cachedGoals = cache.read(MobileGoalsResponse.self, scope: cacheScope, key: "goals")
+        let cachedPredictions = cache.read(NativePredictionResponse.self, scope: cacheScope, key: "predictions")
+        let cachedZones = cache.read(NativeTrainingZonesCurrentResponse.self, scope: cacheScope, key: "training-zones")
+        today = cachedToday?.value
+        statistics = cachedStatistics?.value
+        trends = cachedTrends?.value
+        goals = cachedGoals?.value
+        workoutPlan = cache.read(MobileWorkoutPlanResponse.self, scope: cacheScope, key: workoutPlanCacheKey)?.value
+        predictions = cachedPredictions?.value
         dashboard = cache.read(NativeDashboardResponse.self, scope: cacheScope, key: "dashboard")?.value
-        trainingZones = cache.read(NativeTrainingZonesCurrentResponse.self, scope: cacheScope, key: "training-zones")?.value
+        trainingZones = cachedZones?.value
         trainingStatistics = cache.read(NativeTrainingStatisticsOverviewResponse.self, scope: cacheScope, key: "training-statistics")?.value
         loadCachedWorkouts()
+        // 缓存新鲜度：陈旧数据不隐藏，由 FreshnessBanner 显式告知用户，因此这里不设硬 TTL。
         lastCacheUpdate = [
-            cache.read(MobileTodayResponse.self, scope: cacheScope, key: "today")?.cachedAt,
-            cache.read(MobileStatisticsResponse.self, scope: cacheScope, key: "statistics")?.cachedAt,
-            cache.read(MobileTrendsResponse.self, scope: cacheScope, key: "trends")?.cachedAt
-            , cache.read(NativePredictionResponse.self, scope: cacheScope, key: "predictions")?.cachedAt
-            , cache.read(NativeTrainingZonesCurrentResponse.self, scope: cacheScope, key: "training-zones")?.cachedAt
+            cachedToday?.cachedAt,
+            cachedStatistics?.cachedAt,
+            cachedTrends?.cachedAt,
+            cachedPredictions?.cachedAt,
+            cachedZones?.cachedAt
         ].compactMap { $0 }.max()
     }
 
@@ -501,12 +632,15 @@ final class NativeAppModel {
         isLoadingTrainingStatistics = false
         isLoadingWorkout = false
         isLoadingBodyMetrics = false
+        isLoadingWorkoutPlan = false
+        isRegeneratingPlan = false
         workoutDetailError = nil
         bodyMetricsError = nil
         today = nil
         statistics = nil
         trends = nil
         goals = nil
+        workoutPlan = nil
         predictions = nil
         dashboard = nil
         trainingZones = nil

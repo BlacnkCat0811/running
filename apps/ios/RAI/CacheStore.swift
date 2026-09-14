@@ -77,9 +77,15 @@ final class CacheStore {
         bind(scope, to: statement, at: 1)
         bind(key, to: statement, at: 2)
         sqlite3_bind_double(statement, 3, cachedAt.timeIntervalSince1970)
+        var stepResult: Int32 = SQLITE_MISUSE
         payload.withUnsafeBytes { buffer in
             sqlite3_bind_blob(statement, 4, buffer.baseAddress, Int32(payload.count), nil)
-            _ = sqlite3_step(statement)
+            stepResult = sqlite3_step(statement)
+        }
+        if stepResult != SQLITE_DONE {
+            // 写缓存失败不致命（重新联网会重建），但必须可观测：
+            // 静默丢弃会让离线可用性无预警地退化，且调用方仍以为写入成功。
+            print("RAI cache write failed: step=\(stepResult) scope=\(scope) key=\(key)")
         }
         prune()
         return cachedAt

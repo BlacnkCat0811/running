@@ -13,6 +13,9 @@ enum TechColor {
     static let leaf = Color(red: 136/255, green: 150/255, blue: 255/255)
     static let coral = Color(red: 255/255, green: 109/255, blue: 139/255)
     static let yellow = Color(red: 245/255, green: 190/255, blue: 97/255)
+    /// Chart-label accent. Kept out of the view so no shared component has to
+    /// carry a single skin's colour inline (see incident 18067cb).
+    static let violet = Color(red: 0.64, green: 0.40, blue: 0.53)
     static let grid = Color(red: 42/255, green: 59/255, blue: 80/255)
     static let mint = cyan.opacity(0.09)
     static let paleCyan = cyan.opacity(0.10)

@@ -75,7 +75,10 @@ final class ServerSession {
     }
 
     /// One stable representation is used for Keychain and cache scoping.
-    static func canonicalURL(_ url: URL) -> URL {
+    ///
+    /// `nonisolated` because the Keychain helper (which is not main-actor bound)
+    /// scopes its account name with it; the conversion only reads the URL.
+    nonisolated static func canonicalURL(_ url: URL) -> URL {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         let scheme = components?.scheme?.lowercased()
         let host = components?.host?.lowercased()
