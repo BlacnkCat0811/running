@@ -53,7 +53,17 @@ export const DEFAULT_TIMEOUT_MS = 45_000;
  */
 export const DEFAULT_TOTAL_BUDGET_MS = 50_000;
 const MIN_ATTEMPT_MS = 5_000;
-const DEFAULT_MAX_TOKENS = 4096;
+/**
+ * Ceiling for a single attempt — and because a reasoning model bills its hidden
+ * tokens here too, that means the whole output budget, not just the JSON.
+ *
+ * `deepseek-flash` reported 2921 reasoning tokens plus ~1150 visible ones for a
+ * measured week. At the previous 4096 the reasoning left roughly 400 tokens for
+ * the plan, so a slightly longer deliberation truncated the JSON mid-object,
+ * `parsePlanJson` found no `days` array, and the week was silently replaced by
+ * the template. 8192 stops the visible output from competing with the reasoning.
+ */
+const DEFAULT_MAX_TOKENS = 8192;
 const MAX_RETRIES = 1;
 
 export class LlmRequestError extends Error {

@@ -132,7 +132,11 @@ export async function generateWeeklyPlan(args: {
           clampedCount: validated.clamped.length
         };
       }
-      warnings.push("模型输出未通过校验，已回退到保守模板");
+      // The validator's reasons are the only description of what the model got
+      // wrong. Dropping them left an operator with "校验失败" and no way to tell
+      // a truncated JSON from a hallucinated date.
+      const detail = validated.rejected.slice(0, 3).join("；");
+      warnings.push(`模型输出未通过校验${detail ? `（${detail}）` : ""}，已回退到保守模板`);
     } catch (error) {
       warnings.push(`模型调用失败（${error instanceof Error ? error.message : "未知错误"}），已回退到保守模板`);
     }

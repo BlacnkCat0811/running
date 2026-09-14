@@ -506,6 +506,26 @@ test("the model client sends a bearer token and retries once on server errors", 
   assert.equal(calls[0]?.auth, "Bearer sk-secret");
 });
 
+test("the output budget leaves room for the plan after a reasoning model's hidden tokens", async () => {
+  const budgets: number[] = [];
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { max_tokens?: number };
+    budgets.push(Number(body.max_tokens));
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"days":[]}' } }] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
+    { fetchImpl }
+  );
+  await client.complete({ system: "s", user: "u" });
+  // A reasoning model bills its hidden tokens against `max_tokens`. A measured
+  // week spent 2921 reasoning tokens plus roughly 1150 visible ones, so at 4096
+  // the JSON was cut off mid-object, `parsePlanJson` found no `days` array, and
+  // the whole week was silently replaced by the conservative template.
+  const budget = budgets[0] ?? 0;
+  assert.ok(budget >= 8192, `max_tokens ${budget} leaves too little room for the visible plan after reasoning`);
+});
+
 test("a 401 is not retried", async () => {
   let attempts = 0;
   const fetchImpl = (async () => {
