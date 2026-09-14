@@ -106,6 +106,17 @@ sudo systemctl daemon-reload && sudo systemctl enable --now rai-backup.timer
 
 ## 后续发布新版
 
+推荐用脚本（已把「先备份、再拉取、lockfile 变了才 npm ci」的顺序固化，
+默认 dry-run，确认后再 `--apply`）：
+
+```bash
+cd /opt/rai
+sudo bash deploy/upgrade.sh            # 预演，只打印将执行的命令
+sudo bash deploy/upgrade.sh --apply    # 执行
+```
+
+手敲等价步骤（脚本做了同样的事）：
+
 ```bash
 cd /opt/rai
 sudo -u rai git pull --ff-only origin main
