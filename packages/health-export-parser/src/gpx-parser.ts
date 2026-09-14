@@ -203,7 +203,8 @@ export async function importGpxRoutes(
   const preserveAbsent = options?.preserveAbsent === true;
   const referencedTargets = new Map(
     store.routesToImport().map((target) => [
-      normalizeRelativePath(target.relativePath).toLowerCase(),
+      // normalizeRelativePath 内部已 toLowerCase（见 utils.ts:157），无需再调一次。
+      normalizeRelativePath(target.relativePath),
       target
     ])
   );
