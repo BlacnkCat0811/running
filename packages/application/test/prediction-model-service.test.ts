@@ -473,7 +473,14 @@ test("rejects an artifact directory junction that resolves outside the configure
     const externalArtifact = writeArtifact(external, "outside");
     rmSync(result.artifactPath, { recursive: true, force: true });
     try {
-      symlinkSync(externalArtifact.artifactPath, result.artifactPath, "junction");
+      // "junction" is Windows-only. The POSIX equivalent is a directory
+      // symlink, so the escape check is exercised on macOS and Linux too
+      // instead of being skipped on every non-Windows runner.
+      symlinkSync(
+        externalArtifact.artifactPath,
+        result.artifactPath,
+        process.platform === "win32" ? "junction" : "dir"
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EPERM") {
         context.skip("junction creation is unavailable in this environment");
