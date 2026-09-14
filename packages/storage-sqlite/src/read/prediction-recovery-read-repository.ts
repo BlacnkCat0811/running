@@ -9,6 +9,13 @@ export interface PredictionRecoveryReadings {
   baselineSleepMinutes: number | null;
 }
 
+/**
+ * SQLite cannot bind identifiers, so a few statements interpolate a table or
+ * column name. Every caller passes a literal; this keeps that a requirement
+ * instead of an assumption, so a future caller passing user input fails closed.
+ */
+const SAFE_SQL_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((left, right) => left - right);
@@ -32,6 +39,7 @@ export class SqlitePredictionRecoveryReadRepository {
   }
 
   private hasColumn(table: string, name: string): boolean {
+    if (!SAFE_SQL_IDENTIFIER.test(table)) return false;
     const columns = this.database
       .prepare(`PRAGMA table_info(${table})`)
       .all() as unknown as Array<{ name: string }>;

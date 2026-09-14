@@ -1357,6 +1357,22 @@ const migrations: readonly Migration[] = [
           GROUP BY entity_kind, source_identifier;
       `);
     }
+  },
+  {
+    version: 21,
+    name: "workout_route_and_group_member_lookup_indexes",
+    up: (database) => {
+      // 训练列表的 has_route / route 过滤器是 `EXISTS (... wr.workout_id = w.id ...)` 形式，
+      // 原先只有 relative_path 的唯一索引与主键；实测 SQLite 每次执行都会临时构建
+      // AUTOMATIC PARTIAL COVERING INDEX，而是次查询明确 REPORT 为 SCAN。
+      // 显式建索引后：子查询走固定索引，workout_group_members 的按 workout_id 回溯不再全表扫。
+      database.exec(`
+        CREATE INDEX IF NOT EXISTS idx_workout_routes_workout_point_count
+          ON workout_routes(workout_id, point_count);
+        CREATE INDEX IF NOT EXISTS idx_workout_group_members_workout
+          ON workout_group_members(workout_id);
+      `);
+    }
   }
 ];
 
@@ -2107,6 +2123,8 @@ export class RaiDatabase {
     if (sourceDeleted || this.isEntityTombstoned(kind, id)) {
       return { inserted: false, updated: false, tombstoned: true };
     }
+    // Identifiers are interpolated because SQLite cannot bind them, but both
+    // values below are literals chosen by `kind`; the id itself stays bound.
     const table = kind === "record" ? "health_records" : kind === "workout" ? "workouts" : "activity_summaries";
     const key = kind === "activity_summary" ? "date_components" : "id";
     const exists = this.database.prepare(`SELECT 1 FROM ${table} WHERE ${key} = ?`).get(id) !== undefined;
