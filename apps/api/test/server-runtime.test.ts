@@ -609,6 +609,15 @@ test("database-backed writes cannot recreate a deleted database", async () => {
         headers: { "content-type": "application/json" },
         body: "{}"
       }],
+      // A metadata-only mutation: it deliberately does not take the main
+      // database lock (it writes the separate goals store), but it *reads* the
+      // main database, so an absent database must still surface as the same 409
+      // rather than as an internal error.
+      ["/v1/mobile/workout-plan/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({})
+      }],
       ["/v1/training-zones/profile", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
@@ -795,11 +804,18 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
   child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
   child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
 
-  const upload = async (bytes: Uint8Array): Promise<Response> => {
+  const upload = async (
+    bytes: Uint8Array,
+    file: { type?: string; name?: string } = {}
+  ): Promise<Response> => {
     const body = new FormData();
     const contents = new ArrayBuffer(bytes.byteLength);
     new Uint8Array(contents).set(bytes);
-    body.append("file", new Blob([contents], { type: "application/zip" }), "health.zip");
+    body.append(
+      "file",
+      new Blob([contents], { type: file.type ?? "application/zip" }),
+      file.name ?? "health.zip"
+    );
     return fetch(`${url}/v1/imports/uploads`, { method: "POST", body });
   };
   let url = "";
@@ -807,6 +823,13 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
     const boundPort = await waitForBoundPort(child, () => output);
     url = `http://127.0.0.1:${boundPort}`;
     await waitForApi(child, url, () => output);
+
+    // A non-ZIP upload has to be refused before the archive is written to disk.
+    const wrongType = await upload(Uint8Array.from([0x50, 0x4b]), {
+      type: "text/plain",
+      name: "notes.txt"
+    });
+    assert.equal(wrongType.status, 415, await wrongType.text());
 
     const oversized = await upload(new Uint8Array(128 * 1024));
     assert.equal(oversized.status, 413, await oversized.text());
@@ -1076,6 +1099,88 @@ test("mobile lock rejects historical recovery even with the current recommendati
     }
     const goals = await (await fetch(`${url}/v1/mobile/goals`)).json() as { lockedSession: unknown };
     assert.equal(goals.lockedSession, null);
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+/**
+ * The route table Fastify actually mounted, compared against the registries.
+ *
+ * `schemas.test.ts` enumerates the mountings by reading `server.ts` as text,
+ * and text cannot be made airtight: `const a = app; a.post(...)`,
+ * `(app as any).post(...)`, and a route module whose plugin argument is the
+ * idiomatic `fastify` all mount a write route without leaving a token that scan
+ * recognises. The server dumps its resolved table when `RAI_ROUTE_DUMP` is set,
+ * so the registries are compared against what was really mounted — the only
+ * spelling-independent check available, and the one that decides whether
+ * "every write route is classified" is still true.
+ */
+test("every mounted write route is classified, whatever the source looks like", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-route-dump-"));
+  const databasePath = join(runtimeRoot, "var", "rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  (await RaiDatabase.open(databasePath)).close();
+  const dumpPath = join(runtimeRoot, "routes.txt");
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      RAI_RUNTIME_ROOT: runtimeRoot,
+      RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0",
+      RAI_LOG_LEVEL: "silent",
+      RAI_ROUTE_DUMP: dumpPath
+    },
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    assert.ok(existsSync(dumpPath), "RAI_ROUTE_DUMP 应当已写出路由表：" + output.slice(-2000));
+    const mounted = JSON.parse(readFileSync(dumpPath, "utf8")) as Array<{ method: string; url: string }>;
+    assert.ok(mounted.length > 0, "路由表为空：" + output.slice(-2000));
+
+    const source = readFileSync(new URL("../src/server.ts", import.meta.url), "utf8");
+    const registry = (name: string): string[] => {
+      const block = new RegExp("const " + name + " = new Set\\(\\[([\\s\\S]*?)\\]\\)").exec(source);
+      assert.ok(block, "server.ts 必须声明 " + name);
+      return [...block[1]!.matchAll(/"([^"]+)"/g)].map((entry) => entry[1]!);
+    };
+    const registered = [
+      ...registry("metadataOnlyMutationRoutes"),
+      ...registry("databaseRequiredMutationRoutes"),
+      ...registry("lockOnlyMutationRoutes")
+    ];
+    // HEAD comes with every GET; OPTIONS is the CORS preflight (`OPTIONS *`),
+    // which no registry could ever name. Everything else is a write route.
+    const writeMounted = mounted.filter(
+      (route) => route.method !== "GET" && route.method !== "HEAD" && route.method !== "OPTIONS"
+    );
+    assert.ok(writeMounted.length > 0, "应当至少挂载一条写路由");
+    for (const route of writeMounted) {
+      assert.ok(
+        registered.includes(route.url),
+        `${route.method} ${route.url} 已挂载，却没有登记在任何写路由分类里`
+      );
+    }
+    for (const route of registered) {
+      assert.ok(
+        writeMounted.some((mountedRoute) => mountedRoute.url === route),
+        route + " 已登记但实际没有挂载"
+      );
+    }
+    // The read-only week carries no body and must stay out of every registry.
+    assert.ok(
+      mounted.some((route) => route.method === "GET" && route.url === "/v1/mobile/workout-plan"),
+      "只读的 /v1/mobile/workout-plan 必须挂载"
+    );
+    assert.ok(!registered.includes("/v1/mobile/workout-plan"), "只读周计划不应进写路由登记表");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

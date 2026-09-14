@@ -1,15 +1,32 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+/**
+ * Ask the OS for a free port instead of guessing one. A random port can collide
+ * with a parallel run and fail the smoke test for reasons that have nothing to
+ * do with the build.
+ */
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const assigned = typeof address === "object" && address !== null ? address.port : 0;
+      probe.close(() => (assigned > 0 ? resolve(assigned) : reject(new Error("no free port"))));
+    });
+  });
 
 const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-smoke-"));
 const databasePath = join(runtimeRoot, "var", "rai.sqlite");
 const apiPackage = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8"));
 if (!apiPackage.dependencies?.tsx) throw new Error("tsx must be an @rai/api production dependency");
 if (existsSync(databasePath)) throw new Error("Smoke test database path must start empty");
-const port = 18787 + Math.floor(Math.random() * 1000);
+const port = await freePort();
 const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
   cwd: fileURLToPath(new URL("../../..", import.meta.url)),
   env: {

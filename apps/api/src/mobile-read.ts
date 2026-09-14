@@ -3,8 +3,15 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   DashboardResponse,
   MobileGoalsResponse,
+  MobileNextSession,
+  MobilePlanAudit,
+  MobilePlannedDay,
+  MobilePlanSource,
   MobileRaceDistance,
+  MobileSessionKind,
   MobileTodayResponse,
+  MobileWorkoutPlanDay,
+  MobileWorkoutPlanResponse,
   TrainingZonesCurrentResponse,
   WorkoutListItem
 } from "@rai/api-contracts";
@@ -30,7 +37,9 @@ import {
   isEasySession,
   isQualitySession,
   lockState,
+  plannedDayNumbers,
   resolveLockedNextSession,
+  sessionRanges,
   type CoachInput,
   type CoachLatestWorkout,
   type CoachZonePrescription
@@ -235,7 +244,7 @@ export function assembleMobileCoach(args: {
   const recovery = buildRecovery(input);
   const verdict = decideVerdict(input);
   const computed = decideNextSession(input, verdict);
-  const nextSession = resolveLockedNextSession(computed, input.lockedSession, today);
+  const nextSession = resolveLockedNextSession(computed, input.lockedSession, today, input.zones);
   const lock = lockState(input.lockedSession, today, verdict.tone);
   const todayWorkoutCount = input.todayWorkoutCount;
   const postRunWorkout = coachWorkout && coachWorkout.localDate === today ? coachWorkout : null;
@@ -272,7 +281,7 @@ export function assembleMobileCoach(args: {
   };
 }
 
-function zonePrescription(zones: TrainingZonesCurrentResponse | null): CoachZonePrescription | null {
+export function zonePrescription(zones: TrainingZonesCurrentResponse | null): CoachZonePrescription | null {
   const profile = zones?.profile;
   if (!profile) return null;
   const easyPace = profile.paceBands.find((band) => band.zone === "easy");
@@ -293,6 +302,101 @@ function zonePrescription(zones: TrainingZonesCurrentResponse | null): CoachZone
     intervalPaceLower: intervalPace?.lowerSecondsPerKm ?? null,
     intervalPaceUpper: intervalPace?.upperSecondsPerKm ?? null
   };
+}
+
+export const WORKOUT_PLAN_WINDOW_DAYS = 7;
+
+/**
+ * Builds the executable week the device syncs into the system workout app.
+ *
+ * Today always comes from the coach (gate resolved, lock applied); later days
+ * come from the persisted weekly plan. Numbers are always re-measured from the
+ * structure — through the same helper `/v1/mobile/today` uses — so a
+ * prescription can never contradict its own distance, and the two endpoints can
+ * never contradict each other.
+ */
+export function assembleMobileWorkoutPlan(args: {
+  today: string;
+  todaySession: MobileNextSession;
+  todayCompleted: boolean;
+  storedPlan: MobilePlannedDay[];
+  zones: TrainingZonesCurrentResponse | null;
+  audit: MobilePlanAudit | null;
+  planRevision: number;
+  windowDays?: number;
+}): MobileWorkoutPlanResponse {
+  const windowDays = Math.max(1, args.windowDays ?? WORKOUT_PLAN_WINDOW_DAYS);
+  const prescription = zonePrescription(args.zones);
+  const source: MobilePlanSource = args.audit?.generatedBy ?? "heuristic";
+  const windowEnd = shiftDate(args.today, windowDays - 1);
+
+  const days: MobileWorkoutPlanDay[] = [
+    planDayFromSession(args.today, args.todaySession, prescription, source, !args.todayCompleted)
+  ];
+
+  for (const planned of args.storedPlan
+    .filter((day) => day.localDate > args.today && day.localDate <= windowEnd)
+    .sort((left, right) => left.localDate.localeCompare(right.localDate))) {
+    const numbers = plannedDayNumbers(planned.kind, planned.structure, planned.distanceKm, prescription);
+    days.push({
+      localDate: planned.localDate,
+      kind: planned.kind,
+      title: sessionTitle(planned.kind),
+      reason: planned.reason ?? "",
+      distanceKm: numbers.distanceKm,
+      durationMinutes: numbers.durationMinutes,
+      ...sessionRanges(planned.kind, prescription),
+      structure: numbers.structure,
+      source,
+      executable: numbers.structure != null && planned.kind !== "rest"
+    });
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    timezone: "Asia/Shanghai",
+    windowDays: days.length,
+    planRevision: args.planRevision,
+    audit: args.audit,
+    days
+  };
+}
+
+function planDayFromSession(
+  localDate: string,
+  session: MobileNextSession,
+  prescription: CoachZonePrescription | null,
+  source: MobilePlanSource,
+  executable: boolean
+): MobileWorkoutPlanDay {
+  const numbers = plannedDayNumbers(session.kind, session.structure, session.distanceKm, prescription);
+  return {
+    localDate,
+    kind: session.kind,
+    title: session.title,
+    reason: session.reason,
+    distanceKm: numbers.distanceKm,
+    durationMinutes: numbers.durationMinutes,
+    paceSecondsPerKmLower: session.paceSecondsPerKmLower,
+    paceSecondsPerKmUpper: session.paceSecondsPerKmUpper,
+    heartRateBpmLower: session.heartRateBpmLower,
+    heartRateBpmUpper: session.heartRateBpmUpper,
+    structure: numbers.structure,
+    source,
+    executable: executable && numbers.structure != null && session.kind !== "rest"
+  };
+}
+
+function sessionTitle(kind: MobileSessionKind): string {
+  switch (kind) {
+    case "rest": return "休息";
+    case "recovery": return "恢复跑";
+    case "easy": return "轻松跑";
+    case "long_run": return "长距离";
+    case "tempo": return "节奏 / 阈值";
+    case "interval": return "间歇 / VO₂";
+    default: return kind;
+  }
 }
 
 function loadLatestCoachWorkout(database: DatabaseSync, workout: WorkoutListItem): CoachLatestWorkout {

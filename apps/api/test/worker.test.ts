@@ -97,8 +97,11 @@ test("isolates prediction artifacts by retry attempt", () => {
   assert.throws(() => predictionModelArtifactDirectory(root, runId, 0));
 });
 
+// Windows terminates a training run by killing the whole process tree
+// (`taskkill /T`); POSIX relies on a process group instead, so this specific
+// path cannot be exercised here. Name the reason so it is not a silent skip.
 test("cancelling prediction training terminates the Windows process tree", {
-  skip: process.platform !== "win32"
+  skip: process.platform !== "win32" ? "needs Windows process-tree semantics" : false
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-training-cancel-"));
   const pidPath = join(root, "grandchild.pid");

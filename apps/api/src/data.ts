@@ -26,6 +26,7 @@ import type {
   MobileStatisticsResponse,
   MobileTodayResponse,
   MobileTrendsResponse,
+  MobileWorkoutPlanResponse,
   ModelRunComparisonResponse,
   ModelRunSummary,
   RecomputeJobDto,
@@ -52,7 +53,7 @@ import type {
   WorkoutZoneSummary,
   WorkoutSeriesResponse
 } from "@rai/api-contracts";
-import { assembleMobileCoach } from "./mobile-read.js";
+import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
 
 const parseJson = <T>(value: unknown, fallback: T): T => {
@@ -74,7 +75,7 @@ const localDateInShanghai = (value: Date): string => new Intl.DateTimeFormat("en
   day: "2-digit"
 }).format(value);
 
-const mobileLocalDate = (): string => localDateInShanghai(new Date());
+export const mobileLocalDate = (): string => localDateInShanghai(new Date());
 
 const shiftMobileDate = (date: string, days: number): string => {
   const value = new Date(`${date}T00:00:00Z`);
@@ -289,13 +290,6 @@ export class RaiReadStore {
 
     const weekDistanceKm = Number(weekRow.distance_km ?? 0);
     const recentWorkouts = this.workoutsRepository.list("", [], 5, 0).map((item) => this.toWorkoutListItem(item)!);
-    const previousWeekStart = shiftMobileDate(weekStart, -7);
-    const previousWeekEnd = shiftMobileDate(weekStart, -1);
-    const previousWeekRow = this.database.prepare(`
-      SELECT COALESCE(SUM(distance_km), 0) AS distance_km
-      FROM active_workout_training_loads
-      WHERE local_date BETWEEN ? AND ?
-    `).get(previousWeekStart, previousWeekEnd) as Record<string, unknown>;
     const priorFourStart = shiftMobileDate(weekStart, -56);
     const priorFourEnd = shiftMobileDate(weekStart, -29);
     const recentFourStart = shiftMobileDate(weekStart, -28);
@@ -344,7 +338,7 @@ export class RaiReadStore {
         lockedSession: goals?.lockedSession ?? null
       },
       fourWeekDistanceChangeFraction,
-      previousWeekDistanceKm: Number(previousWeekRow.distance_km ?? 0)
+      previousWeekDistanceKm: this.previousWeekDistanceKm(today)
     });
     const freshness: MobileTodayResponse["freshness"] = {
       state: lastSyncedAt == null ? "unknown" : recoveryDate === today ? "valid" : "stale",
@@ -386,6 +380,78 @@ export class RaiReadStore {
       recentWorkouts,
       ...coach
     };
+  }
+
+  /**
+   * Executable week for the WorkoutKit bridge. Reuses `mobileToday` so today's
+   * row always carries the gate-resolved, lock-applied prescription.
+   */
+  mobileWorkoutPlan(
+    goalDistanceKm: number | null,
+    goals?: Pick<
+      MobileGoalsResponse,
+      "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision"
+    >
+  ): MobileWorkoutPlanResponse {
+    const today = this.mobileToday(goalDistanceKm, goals);
+    return assembleMobileWorkoutPlan({
+      today: today.today.localDate,
+      todaySession: today.nextSession,
+      todayCompleted: today.today.workoutCount > 0,
+      storedPlan: goals?.weekPlan ?? [],
+      zones: this.trainingZonesCurrent(),
+      audit: goals?.weekPlanAudit ?? null,
+      planRevision: goals?.revision ?? 0
+    });
+  }
+
+  /**
+   * Same coach snapshot the today endpoint returns, plus everything the weekly
+   * plan generator needs. Reusing `mobileToday` keeps the gate rules in one
+   * place; the previous week's volume travels with it because the generator's
+   * ramp ceiling is `previous week + 30%`.
+   */
+  mobileWeeklyPlanInputs(
+    goalDistanceKm: number | null,
+    goals?: Pick<
+      MobileGoalsResponse,
+      "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision"
+    >
+  ): {
+    today: MobileTodayResponse;
+    prescription: ReturnType<typeof zonePrescription>;
+    previousWeekDistanceKm: number;
+  } {
+    const today = this.mobileToday(goalDistanceKm, goals);
+    return {
+      today,
+      prescription: zonePrescription(this.trainingZonesCurrent()),
+      previousWeekDistanceKm: this.previousWeekDistanceKm(today.today.localDate)
+    };
+  }
+
+  /**
+   * Zone prescription used to turn a stored plan day's structure back into the
+   * distance it actually amounts to. Exposed so the goals writer can re-measure
+   * a merged day with exactly the paces the read paths use.
+   */
+  mobilePlanPrescription(): ReturnType<typeof zonePrescription> {
+    return zonePrescription(this.trainingZonesCurrent());
+  }
+
+  /**
+   * Distance actually run in the seven days before the week containing `date`.
+   * Shared by the coach (volume-ramp flag) and the weekly plan generator so both
+   * read the same number.
+   */
+  private previousWeekDistanceKm(date: string): number {
+    const weekStart = mobileWeekStart(date);
+    const row = this.database.prepare(`
+      SELECT COALESCE(SUM(distance_km), 0) AS distance_km
+      FROM active_workout_training_loads
+      WHERE local_date BETWEEN ? AND ?
+    `).get(shiftMobileDate(weekStart, -7), shiftMobileDate(weekStart, -1)) as Record<string, unknown>;
+    return Number(row.distance_km ?? 0);
   }
 
   mobileStatistics(): MobileStatisticsResponse {

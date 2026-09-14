@@ -99,6 +99,15 @@ export interface HealthResponse {
   now: string;
 }
 
+/** Identity and protocol handshake. Clients use it to detect a dataset reset. */
+export interface HandshakeResponse {
+  serverId: string;
+  athleteId: string;
+  datasetEpoch: string;
+  syncProtocolVersion: number;
+  apiVersion: string;
+}
+
 export interface ModelRunSummary {
   id: string;
   featureRunId: string;
@@ -526,6 +535,56 @@ export interface MobileVerdict {
   reasonCodes?: string[];
 }
 
+export type MobileStepPurpose = "warmup" | "work" | "recovery" | "cooldown";
+
+/** Step goal. Mirrors the WorkoutKit goal model so the device layer is a pure translation. */
+export type MobileStepGoal =
+  | { type: "distance"; meters: number }
+  | { type: "time"; seconds: number }
+  | { type: "open" };
+
+/**
+ * At most one alert per step — the same limit WorkoutKit enforces, so a step
+ * can never request both pace and heart-rate feedback.
+ */
+export interface MobileStepAlert {
+  kind: "pace" | "heart_rate";
+  lower: number | null;
+  upper: number | null;
+}
+
+export interface MobileWorkoutStep {
+  purpose: MobileStepPurpose;
+  goal: MobileStepGoal;
+  alert: MobileStepAlert | null;
+}
+
+export interface MobileIntervalBlock {
+  iterations: number;
+  steps: MobileWorkoutStep[];
+}
+
+/**
+ * Structured session shape. Deliberately mirrors WorkoutKit's
+ * `CustomWorkout(warmup:blocks:cooldown:)` so that any producer (heuristic
+ * coach or LLM) can fill it and the device layer needs no mapping logic.
+ */
+export interface MobileSessionStructure {
+  warmup: MobileWorkoutStep | null;
+  blocks: MobileIntervalBlock[];
+  cooldown: MobileWorkoutStep | null;
+}
+
+/** Who produced a stored weekly plan; kept for auditability (LLM output is not reproducible). */
+export type MobilePlanSource = "llm" | "heuristic" | "manual";
+
+export interface MobilePlanAudit {
+  generatedBy: MobilePlanSource;
+  model: string | null;
+  promptVersion: string | null;
+  generatedAt: string | null;
+}
+
 export interface MobileNextSession {
   kind: MobileSessionKind;
   title: string;
@@ -536,6 +595,8 @@ export interface MobileNextSession {
   paceSecondsPerKmUpper: number | null;
   heartRateBpmLower: number | null;
   heartRateBpmUpper: number | null;
+  /** Interval/step breakdown. Null when the session is a single continuous effort. */
+  structure: MobileSessionStructure | null;
 }
 
 export interface MobileRecoveryBreakdown {
@@ -610,6 +671,59 @@ export interface MobileWeekPlanDay {
   completedWorkoutId: string | null;
   distanceKm: number;
   workoutCount: number;
+  /** Present for planned days that carry an interval/prescription breakdown. */
+  structure: MobileSessionStructure | null;
+}
+
+/**
+ * A single persisted planned day. `structure` is optional so plans written by
+ * older clients (or by hand without a breakdown) remain valid.
+ */
+export interface MobilePlannedDay {
+  localDate: string;
+  kind: MobileSessionKind;
+  distanceKm: number | null;
+  structure?: MobileSessionStructure | null;
+  /** Free-text rationale, typically supplied by the weekly plan generator. */
+  reason?: string | null;
+}
+
+/** Executable prescription for one day, as consumed by the WorkoutKit bridge. */
+export interface MobileWorkoutPlanDay {
+  localDate: string;
+  kind: MobileSessionKind;
+  title: string;
+  reason: string;
+  distanceKm: number | null;
+  durationMinutes: number | null;
+  paceSecondsPerKmLower: number | null;
+  paceSecondsPerKmUpper: number | null;
+  heartRateBpmLower: number | null;
+  heartRateBpmUpper: number | null;
+  structure: MobileSessionStructure | null;
+  source: MobilePlanSource;
+  /** False for rest days, which are intentionally not synced to the watch. */
+  executable: boolean;
+}
+
+export interface MobileWorkoutPlanResponse {
+  generatedAt: string;
+  timezone: string;
+  /** Number of days returned, starting today. */
+  windowDays: number;
+  planRevision: number;
+  audit: MobilePlanAudit | null;
+  days: MobileWorkoutPlanDay[];
+}
+
+/** Result of a weekly plan generation (model or fallback). */
+export interface MobileWeeklyPlanGenerationResponse {
+  generatedAt: string;
+  revision: number;
+  audit: MobilePlanAudit;
+  days: MobilePlannedDay[];
+  /** Rejections and clamp adjustments, surfaced for review after the fact. */
+  warnings: string[];
 }
 
 export interface MobileLockedSession {
@@ -751,8 +865,10 @@ export interface MobileGoalsResponse {
   easyDurationFloorFraction: number;
   qualitySessionCap: number;
   raceTarget: MobileRaceTarget | null;
-  weekPlan: Array<{ localDate: string; kind: MobileSessionKind; distanceKm: number | null }>;
+  weekPlan: MobilePlannedDay[];
   lockedSession: MobileLockedSession | null;
+  /** Audit trail of the last weekly plan generation. */
+  weekPlanAudit: MobilePlanAudit | null;
   updatedAt: string;
 }
 
@@ -762,8 +878,9 @@ export interface UpdateMobileGoalsInput {
   easyDurationFloorFraction?: number;
   qualitySessionCap?: number;
   raceTarget?: MobileRaceTarget | null;
-  weekPlan?: Array<{ localDate: string; kind: MobileSessionKind; distanceKm: number | null }>;
+  weekPlan?: MobilePlannedDay[];
   lockedSession?: MobileLockedSession | null;
+  weekPlanAudit?: MobilePlanAudit | null;
 }
 
 export interface WorkoutSplit {

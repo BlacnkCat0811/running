@@ -113,7 +113,14 @@ GET    /v1/mobile/trends             12 周阶梯 + 4 周增幅 + 个人纪录
 GET    /v1/mobile/goals              读取周目标
 PUT    /v1/mobile/goals              写入周目标（1–500km，独立控制库持久化）
 POST   /v1/mobile/lock               锁定/重新锁定今日课表
+GET    /v1/mobile/workout-plan       可执行周课表（今天来自闸门，其余来自持久化周计划；含分段结构）
+POST   /v1/mobile/workout-plan/generate  生成/重生成本周课表（大模型 → 校验钳制 → 回退启发式）
 ```
+
+`/v1/mobile/workout-plan` 只读，供手表侧 WorkoutKit 上表；`/generate` 是写操作，带 `expectedRevision`
+乐观锁（冲突返回 409）。`weekPlan` 的每一天带可选 `structure`（`warmup` / `blocks[].iterations` /
+`cooldown`，每步至多一个 `pace` 或 `heart_rate` 提醒）。**写 `PUT /v1/mobile/goals` 时若某天未带
+`structure`，服务端会沿用同日期同类型的既有结构**——目标编辑不会把已生成的处方降级。
 
 查询、路径参数和写入 body 均在 Fastify 路由入口使用 JSON Schema 校验；非法分页、趋势范围、恢复趋势天数、训练类型、RPE、导入确认、删除确认结构和备份文件名会在进入业务层前返回 `400`。恢复趋势响应包含 `generatedAt`、`asOf`、`timezone`、`latestDataDate` 与按本地日排列的 `days`，缺失睡眠/HRV 保持 `null`。
 

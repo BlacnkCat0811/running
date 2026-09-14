@@ -3,21 +3,29 @@ import type {
   MobileCalibrationCard,
   MobileDayPhase,
   MobileInjuryFlag,
+  MobileIntervalBlock,
   MobileLockedSession,
   MobileLockState,
   MobileNextSession,
   MobilePostRunVerdict,
+  MobilePlannedDay,
   MobileRaceCard,
   MobileRaceTarget,
   MobileRecoveryBreakdown,
   MobileSessionKind,
+  MobileSessionStructure,
+  MobileStepAlert,
+  MobileStepGoal,
   MobileStimulusMatch,
   MobileTrigger,
   MobileVerdict,
   MobileWeekPlanDay,
-  MobileWeekStructure
+  MobileWeekStructure,
+  MobileWorkoutStep
 } from "@rai/api-contracts";
 import type { TrainingStatusCode } from "@rai/contracts";
+
+import { DISTANCE_ROUNDING_KM, MAX_PLANNED_DISTANCE_KM } from "./session-structure.js";
 
 export const DEFAULT_EASY_DURATION_FLOOR = 0.7;
 export const DEFAULT_QUALITY_SESSION_CAP = 2;
@@ -116,18 +124,19 @@ export interface CoachInput {
   raceLongRunFraction: number | null;
   weekDaily: Array<{ localDate: string; distanceKm: number; workoutCount: number; workoutId: string | null }>;
   todayWorkoutCount: number;
-  storedWeekPlan: Array<{ localDate: string; kind: MobileSessionKind; distanceKm: number | null }>;
+  storedWeekPlan: MobilePlannedDay[];
   lockedSession: MobileLockedSession | null;
 }
 
-const round1 = (value: number): number => Math.round(value * 10) / 10;
+/** Rounds to the 100 m the app displays, so a stored value cannot out-precise a measured one. */
+export const roundKm = (value: number): number => Math.round(value * 10) / 10;
 
 export function abilityExplanation(input: CoachInput): string {
   if (input.calibration !== "completed") {
     return "校准中：有效训练还不够，先看趋势，不要把当前数字当成精确能力。";
   }
   if (input.decayPoints > 0) {
-    return `停跑衰减中（${round1(input.decayPoints)} 点），与训练表现导致的变化分开看。`;
+    return `停跑衰减中（${roundKm(input.decayPoints)} 点），与训练表现导致的变化分开看。`;
   }
   if (input.currentAbility != null && input.trueAbility != null) {
     const delta = input.currentAbility - input.trueAbility;
@@ -137,8 +146,8 @@ export function abilityExplanation(input: CoachInput): string {
   }
   if (input.changeFrom7DaysAgo != null && Math.abs(input.changeFrom7DaysAgo) >= 0.3) {
     return input.changeFrom7DaysAgo > 0
-      ? `近 7 日真实能力 +${round1(input.changeFrom7DaysAgo)}。`
-      : `近 7 日真实能力 ${round1(input.changeFrom7DaysAgo)}。`;
+      ? `近 7 日真实能力 +${roundKm(input.changeFrom7DaysAgo)}。`
+      : `近 7 日真实能力 ${roundKm(input.changeFrom7DaysAgo)}。`;
   }
   return "继续积累有效训练，真实能力变化会比单次发挥慢。";
 }
@@ -219,7 +228,7 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
       triggers.push(trigger("training_status", null, null, "近期负荷需要关注恢复"));
     }
     if (input.loadRatio != null && input.loadRatio > 1.3) {
-      triggers.push(trigger("load_ratio", round1(input.loadRatio), 1.3, `急性/慢性负荷比 ${round1(input.loadRatio)}`));
+      triggers.push(trigger("load_ratio", roundKm(input.loadRatio), 1.3, `急性/慢性负荷比 ${roundKm(input.loadRatio)}`));
     }
   } else if (input.nightsBelowSleepBaseline >= 3) {
     tone = "red";
@@ -230,8 +239,8 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     tone = "red";
     title = "宜休息或轻松";
     reason = "睡眠、HRV 和静息心率同时变差。";
-    triggers.push(trigger("sleep", round1(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
-    triggers.push(trigger("hrv", round1(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
+    triggers.push(trigger("sleep", roundKm(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
+    triggers.push(trigger("hrv", roundKm(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
   } else if (
     (sleepRatio != null && sleepRatio < 0.75) ||
     (hrvRatio != null && hrvRatio < 0.85 && rhrUp)
@@ -240,10 +249,10 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     title = "只宜有氧";
     reason = "恢复信号偏低，先跑轻松，不要上强度。";
     if (sleepRatio != null && sleepRatio < 0.75) {
-      triggers.push(trigger("sleep", round1(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
+      triggers.push(trigger("sleep", roundKm(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
     }
     if (hrvRatio != null && hrvRatio < 0.85) {
-      triggers.push(trigger("hrv", round1(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
+      triggers.push(trigger("hrv", roundKm(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
     }
   } else if (input.consecutiveQualityDays >= 2) {
     tone = "red";
@@ -263,7 +272,7 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     tone = "yellow";
     title = "只宜有氧";
     reason = `本周轻松时长只占 ${Math.round(easyDurationFraction * 100)}%，低于 ${Math.round(input.easyDurationFloorFraction * 100)}% 下限。`;
-    triggers.push(trigger("easy_floor", round1(easyDurationFraction), input.easyDurationFloorFraction, reason));
+    triggers.push(trigger("easy_floor", roundKm(easyDurationFraction), input.easyDurationFloorFraction, reason));
   } else if (input.trainingStatus === "recovery" && (input.daysSinceLastRun ?? 0) >= 2) {
     tone = "yellow";
     title = "恢复跑";
@@ -301,6 +310,373 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
   return { tone, title, reason, triggers, stale, reasonCodes };
 }
 
+/** Interval sessions are prescribed by distance: N repeats of 800 m. */
+export const INTERVAL_REP_METERS = 800;
+const INTERVAL_RECOVERY_SECONDS = 120;
+/** Exported so the plan validator clamps against the same rep window the coach builds from. */
+export const INTERVAL_MIN_REPS = 4;
+export const INTERVAL_MAX_REPS = 8;
+const QUALITY_WARMUP_MINUTES = 10;
+const QUALITY_COOLDOWN_MINUTES = 10;
+const EASY_WARMUP_MINUTES = 5;
+const EASY_COOLDOWN_MINUTES = 5;
+const TEMPO_BLOCK_REPS = 3;
+const TEMPO_WORK_SECONDS = 8 * 60;
+const TEMPO_RECOVERY_SECONDS = 120;
+const MIN_WORK_DISTANCE_KM = 1;
+const FALLBACK_EASY_SECONDS_PER_KM = 360;
+const FALLBACK_THRESHOLD_SECONDS_PER_KM = 270;
+const FALLBACK_INTERVAL_SECONDS_PER_KM = 240;
+
+export interface StructurePaces {
+  easySecondsPerKm: number;
+  thresholdSecondsPerKm: number;
+  intervalSecondsPerKm: number;
+}
+
+/** Pace assumptions used to convert between time goals and distance goals. */
+export function pacesFromZones(zones: CoachZonePrescription | null): StructurePaces {
+  return {
+    easySecondsPerKm: zones?.easyPaceUpper ?? zones?.easyPaceLower ?? FALLBACK_EASY_SECONDS_PER_KM,
+    thresholdSecondsPerKm: zones?.thresholdPaceUpper ?? zones?.thresholdPaceLower ?? FALLBACK_THRESHOLD_SECONDS_PER_KM,
+    intervalSecondsPerKm: zones?.intervalPaceUpper ?? zones?.intervalPaceLower ?? FALLBACK_INTERVAL_SECONDS_PER_KM
+  };
+}
+
+/** Work-step pace per session kind; warmup/recovery/cooldown always use easy pace. */
+export function workSecondsPerKm(kind: MobileSessionKind, paces: StructurePaces): number {
+  if (kind === "interval") return paces.intervalSecondsPerKm;
+  if (kind === "tempo") return paces.thresholdSecondsPerKm;
+  return paces.easySecondsPerKm;
+}
+
+function stepSecondsPerKm(step: MobileWorkoutStep, workPace: number, paces: StructurePaces): number {
+  return step.purpose === "work" ? workPace : paces.easySecondsPerKm;
+}
+
+/**
+ * Session-level ranges per kind. Single source of truth for the
+ * kind -> zone mapping; the device layer must never re-derive this.
+ */
+export function sessionRanges(
+  kind: MobileSessionKind,
+  zones: CoachZonePrescription | null
+): { paceSecondsPerKmLower: number | null; paceSecondsPerKmUpper: number | null; heartRateBpmLower: number | null; heartRateBpmUpper: number | null } {
+  if (kind === "interval") {
+    return {
+      paceSecondsPerKmLower: zones?.intervalPaceLower ?? null,
+      paceSecondsPerKmUpper: zones?.intervalPaceUpper ?? null,
+      heartRateBpmLower: zones?.thresholdHrLower ?? null,
+      heartRateBpmUpper: zones?.thresholdHrUpper ?? null
+    };
+  }
+  if (kind === "tempo") {
+    return {
+      paceSecondsPerKmLower: zones?.thresholdPaceLower ?? null,
+      paceSecondsPerKmUpper: zones?.thresholdPaceUpper ?? null,
+      heartRateBpmLower: zones?.thresholdHrLower ?? null,
+      heartRateBpmUpper: zones?.thresholdHrUpper ?? null
+    };
+  }
+  return {
+    paceSecondsPerKmLower: zones?.easyPaceLower ?? null,
+    paceSecondsPerKmUpper: zones?.easyPaceUpper ?? null,
+    heartRateBpmLower: zones?.easyHrLower ?? null,
+    heartRateBpmUpper: zones?.easyHrUpper ?? null
+  };
+}
+
+/**
+ * Authoritative measure of a structure. Shared by the generator and by the LLM
+ * output validator so both sides agree on what a plan actually amounts to.
+ */
+export function measureStructure(
+  structure: MobileSessionStructure,
+  kind: MobileSessionKind,
+  paces: StructurePaces
+): { distanceKm: number; durationSeconds: number } {
+  const workPace = workSecondsPerKm(kind, paces);
+  const steps: MobileWorkoutStep[] = [
+    ...(structure.warmup ? [structure.warmup] : []),
+    ...structure.blocks.flatMap((block) =>
+      Array.from({ length: Math.max(1, block.iterations) }, () => block.steps).flat()
+    ),
+    ...(structure.cooldown ? [structure.cooldown] : [])
+  ];
+  let distanceKm = 0;
+  let durationSeconds = 0;
+  for (const step of steps) {
+    const pace = stepSecondsPerKm(step, workPace, paces);
+    if (step.goal.type === "distance") {
+      const km = step.goal.meters / 1000;
+      distanceKm += km;
+      durationSeconds += km * pace;
+    } else if (step.goal.type === "time") {
+      durationSeconds += step.goal.seconds;
+      distanceKm += step.goal.seconds / pace;
+    }
+  }
+  return { distanceKm, durationSeconds };
+}
+
+/**
+ * Authoritative numbers for a *stored* plan day.
+ *
+ * A planned day is defined by its structure: the structure is what the watch
+ * executes and every number shown is measured from it. Two endpoints render the
+ * same stored rows — `/v1/mobile/today` and `/v1/mobile/workout-plan` — so they
+ * must derive them through this one function. Echoing a stored distance in one
+ * and measuring the structure in the other is exactly how the same day ends up
+ * with two different distances on screen.
+ *
+ * A day with no stored structure is measured too, from the structure its
+ * distance hint would build, so a hint-only day cannot disagree either.
+ */
+export function plannedDayNumbers(
+  kind: MobileSessionKind,
+  storedStructure: MobileSessionStructure | null | undefined,
+  distanceHint: number | null | undefined,
+  prescription: CoachZonePrescription | null
+): { structure: MobileSessionStructure | null; distanceKm: number | null; durationMinutes: number | null } {
+  if (kind === "rest") return { structure: null, distanceKm: null, durationMinutes: null };
+  const structure =
+    storedStructure ??
+    buildSessionStructure(kind, prescription, {
+      targetDistanceKm: distanceHint != null && distanceHint > 0 ? distanceHint : null
+    });
+  if (!structure) return { structure: null, distanceKm: null, durationMinutes: null };
+  const measured = measureStructure(structure, kind, pacesFromZones(prescription));
+  return {
+    structure,
+    distanceKm: roundKm(measured.distanceKm),
+    durationMinutes: Math.round(measured.durationSeconds / 60)
+  };
+}
+
+/** At most one alert per step (WorkoutKit limit), chosen per session kind. */
+function sessionAlert(kind: MobileSessionKind, zones: CoachZonePrescription | null): MobileStepAlert | null {
+  if (!zones) return null;
+  if (kind === "interval") {
+    return zones.intervalPaceLower == null && zones.intervalPaceUpper == null
+      ? null
+      : { kind: "pace", lower: zones.intervalPaceLower, upper: zones.intervalPaceUpper };
+  }
+  if (kind === "tempo") {
+    return zones.thresholdPaceLower == null && zones.thresholdPaceUpper == null
+      ? null
+      : { kind: "pace", lower: zones.thresholdPaceLower, upper: zones.thresholdPaceUpper };
+  }
+  if (kind === "long_run") {
+    return zones.easyHrLower == null && zones.easyHrUpper == null
+      ? null
+      : { kind: "heart_rate", lower: zones.easyHrLower, upper: zones.easyHrUpper };
+  }
+  return zones.easyPaceLower == null && zones.easyPaceUpper == null
+    ? null
+    : { kind: "pace", lower: zones.easyPaceLower, upper: zones.easyPaceUpper };
+}
+
+function easyHeartRateAlert(zones: CoachZonePrescription | null): MobileStepAlert | null {
+  if (!zones || (zones.easyHrLower == null && zones.easyHrUpper == null)) return null;
+  return { kind: "heart_rate", lower: zones.easyHrLower, upper: zones.easyHrUpper };
+}
+
+function timeStep(purpose: "warmup" | "cooldown", minutes: number, zones: CoachZonePrescription | null): MobileWorkoutStep {
+  return {
+    purpose,
+    goal: { type: "time", seconds: Math.round(minutes * 60) },
+    alert: easyHeartRateAlert(zones)
+  };
+}
+
+function workStep(goal: MobileStepGoal, alert: MobileStepAlert | null): MobileWorkoutStep {
+  return { purpose: "work", goal, alert };
+}
+
+function recoveryStep(seconds: number): MobileWorkoutStep {
+  return { purpose: "recovery", goal: { type: "time", seconds }, alert: null };
+}
+
+/** Reps grow with time since the last quality session, and are capped when fatigued. */
+export function intervalReps(input: CoachInput): number {
+  const base = INTERVAL_MIN_REPS + Math.floor(Math.max(0, input.daysSinceLastQuality ?? 0) / 5);
+  const capped = Math.min(INTERVAL_MAX_REPS, Math.max(INTERVAL_MIN_REPS, base));
+  const fatigued =
+    (input.strain != null && input.strainP90 != null && input.strain > input.strainP90) ||
+    (input.loadRatio != null && input.loadRatio > 1.5);
+  return fatigued ? INTERVAL_MIN_REPS : capped;
+}
+
+/**
+ * Builds the structured breakdown for a session. Continuous sessions are given a
+ * 5 minute warmup/cooldown and the work step is trimmed so the measured total
+ * still matches the requested target distance.
+ */
+export function buildSessionStructure(
+  kind: MobileSessionKind,
+  zones: CoachZonePrescription | null,
+  options: { targetDistanceKm?: number | null; reps?: number } = {}
+): MobileSessionStructure | null {
+  if (kind === "rest") return null;
+  const paces = pacesFromZones(zones);
+  const alert = sessionAlert(kind, zones);
+
+  if (kind === "interval") {
+    const reps = Math.max(1, Math.round(options.reps ?? INTERVAL_MIN_REPS));
+    const blocks: MobileIntervalBlock[] = [
+      {
+        iterations: reps,
+        steps: [
+          workStep({ type: "distance", meters: INTERVAL_REP_METERS }, alert),
+          recoveryStep(INTERVAL_RECOVERY_SECONDS)
+        ]
+      }
+    ];
+    return {
+      warmup: timeStep("warmup", QUALITY_WARMUP_MINUTES, zones),
+      blocks,
+      cooldown: timeStep("cooldown", QUALITY_COOLDOWN_MINUTES, zones)
+    };
+  }
+
+  if (kind === "tempo") {
+    const blocks: MobileIntervalBlock[] = [
+      {
+        iterations: TEMPO_BLOCK_REPS,
+        steps: [
+          workStep({ type: "time", seconds: TEMPO_WORK_SECONDS }, alert),
+          recoveryStep(TEMPO_RECOVERY_SECONDS)
+        ]
+      }
+    ];
+    return {
+      warmup: timeStep("warmup", QUALITY_WARMUP_MINUTES, zones),
+      blocks,
+      cooldown: timeStep("cooldown", QUALITY_COOLDOWN_MINUTES, zones)
+    };
+  }
+
+  const warmup = timeStep("warmup", EASY_WARMUP_MINUTES, zones);
+  const cooldown = timeStep("cooldown", EASY_COOLDOWN_MINUTES, zones);
+  const overhead = measureStructure({ warmup, blocks: [], cooldown }, kind, paces).distanceKm;
+  const target = options.targetDistanceKm ?? null;
+  const workKm = target == null ? null : Math.max(MIN_WORK_DISTANCE_KM, roundKm(target - overhead));
+  const goal: MobileStepGoal = workKm == null ? { type: "open" } : { type: "distance", meters: Math.round(workKm * 1000) };
+  return { warmup, blocks: [{ iterations: 1, steps: [workStep(goal, alert)] }], cooldown };
+}
+
+/**
+ * Holds a structure to the single-day distance ceiling, rebuilding it when the
+ * structure's own measurement is over.
+ *
+ * `normalizeSessionStructure` bounds every *field* a client may send: one step
+ * carries at most `MAX_STEP_METERS`, one block at most `MAX_BLOCK_ITERATIONS`
+ * repetitions. Nothing bounds the total, so a payload that satisfies all of them
+ * — a single 20-rep block of 100 km work steps — measures 2000 km. The plan
+ * validator caps what the *model* sends (`capDayDistance`); a structure arriving
+ * over `PUT /v1/mobile/goals` or `POST /v1/mobile/lock` reaches the same store,
+ * the same two plan endpoints and the same workout bridge, so it is held to the
+ * same ceiling here.
+ *
+ * Rebuilt rather than renumbered: the structure is what the watch is asked to
+ * run, so trimming the distance beside it would leave the oversized
+ * prescription in place. `null` is returned when even a rebuilt structure cannot
+ * be expressed under the ceiling — the caller then keeps the day without a
+ * structure, which keeps it off the watch instead of putting a 2000 km session
+ * on it.
+ */
+/**
+ * The single rebuild every layer performs when a structure measures over the
+ * single-day ceiling.
+ *
+ * An interval is dosed by its rep count and every other kind by its work step's
+ * target distance, and both ask for `MAX_PLANNED_DISTANCE_KM - DISTANCE_ROUNDING_KM`
+ * rather than the ceiling itself: `buildSessionStructure` rounds its work step to
+ * 100 m, so a request *at* the ceiling measures up to half a step above it.
+ *
+ * Shared rather than repeated. The plan validator and the client-facing store
+ * hold the same ceiling, and two copies of this arithmetic is exactly how their
+ * lever floors drifted apart — one bounded an interval at a literal 2 reps while
+ * the other used `INTERVAL_MIN_REPS`. One definition means the ceiling can only
+ * be changed in one place.
+ *
+ * Only the *rebuild* is shared. What a caller does with a structure that cannot
+ * be brought under the ceiling stays its own policy: the validator keeps the day
+ * (its contract is a week of days, so dropping one would change the plan's
+ * shape) while `capStructureToDayCeiling` returns `null` so the session never
+ * reaches the watch. Neither branch is reachable today — `buildSessionStructure`
+ * returns `null` only for `rest`, whose size is 0 — so the two contracts are kept
+ * distinct rather than merged.
+ */
+export function rebuildStructureUnderDayCeiling(
+  kind: MobileSessionKind,
+  zones: CoachZonePrescription | null
+): MobileSessionStructure | null {
+  if (kind === "rest") return null;
+  const cap = MAX_PLANNED_DISTANCE_KM - DISTANCE_ROUNDING_KM;
+  return buildSessionStructure(
+    kind,
+    zones,
+    kind === "interval"
+      ? {
+          reps: Math.max(
+            INTERVAL_MIN_REPS,
+            Math.min(INTERVAL_MAX_REPS, Math.round(cap / (INTERVAL_REP_METERS / 1000)))
+          )
+        }
+      : { targetDistanceKm: cap }
+  );
+}
+
+export function capStructureToDayCeiling(
+  structure: MobileSessionStructure,
+  kind: MobileSessionKind,
+  zones: CoachZonePrescription | null
+): MobileSessionStructure | null {
+  const measured = measureStructure(structure, kind, pacesFromZones(zones)).distanceKm;
+  if (measured <= MAX_PLANNED_DISTANCE_KM) return structure;
+  if (kind === "rest") return null;
+  const rebuilt = rebuildStructureUnderDayCeiling(kind, zones);
+  if (!rebuilt) return null;
+  const remeasured = measureStructure(rebuilt, kind, pacesFromZones(zones)).distanceKm;
+  // A tempo block is a fixed number of threshold reps and ignores
+  // `targetDistanceKm`, so a rebuild can come back over the ceiling. Keeping it
+  // would put the oversized prescription back on the watch, which is the one
+  // outcome this function exists to prevent.
+  return remeasured > MAX_PLANNED_DISTANCE_KM ? null : rebuilt;
+}
+
+/**
+ * Session factory. Distance and duration are derived from the structure so the
+ * displayed numbers can never contradict the prescription.
+ */
+function structuredSession(
+  kind: MobileSessionKind,
+  title: string,
+  reason: string,
+  zones: CoachZonePrescription | null,
+  paceLower: number | null,
+  paceUpper: number | null,
+  hrLower: number | null,
+  hrUpper: number | null,
+  options: { targetDistanceKm?: number | null; reps?: number } = {}
+): MobileNextSession {
+  const structure = buildSessionStructure(kind, zones, options);
+  const measured = structure ? measureStructure(structure, kind, pacesFromZones(zones)) : null;
+  return {
+    kind,
+    title,
+    reason,
+    distanceKm: measured ? roundKm(measured.distanceKm) : null,
+    durationMinutes: measured ? Math.round(measured.durationSeconds / 60) : null,
+    paceSecondsPerKmLower: paceLower,
+    paceSecondsPerKmUpper: paceUpper,
+    heartRateBpmLower: hrLower,
+    heartRateBpmUpper: hrUpper,
+    structure
+  };
+}
+
 export function decideNextSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
   const remainingKm =
     input.weeklyDistanceGoalKm == null ? null : Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
@@ -315,33 +691,33 @@ export function decideNextSession(input: CoachInput, verdict: MobileVerdict): Mo
       input.trainingStatus === "attention" ||
       input.todayWorkoutCount > 0;
     if (hardRest) {
-      return session("rest", "今天的动作：休息", verdict.reason, null, null, null, null, null, null);
+      return structuredSession("rest", "今天的动作：休息", verdict.reason, zones, null, null, null, null);
     }
-    return session(
+    return structuredSession(
       "recovery",
       "恢复跑",
       verdict.reason,
-      Math.min(8, round1(perDayKm * 0.7)),
-      40,
+      zones,
       zones?.easyPaceLower ?? null,
       zones?.easyPaceUpper ?? null,
       zones?.easyHrLower ?? null,
-      zones?.easyHrUpper ?? null
+      zones?.easyHrUpper ?? null,
+      { targetDistanceKm: Math.min(8, roundKm(perDayKm * 0.7)) }
     );
   }
 
   if (taper) {
     const cap = input.longestRun8WeekKm > 0 ? input.longestRun8WeekKm * 0.85 : 10;
-    return session(
+    return structuredSession(
       "easy",
       "减量轻松跑",
       "比赛临近：量降下来，不再拉新的最长距离。",
-      round1(Math.min(cap, perDayKm * 0.7)),
-      40,
+      zones,
       zones?.easyPaceLower ?? null,
       zones?.easyPaceUpper ?? null,
       zones?.easyHrLower ?? null,
-      zones?.easyHrUpper ?? null
+      zones?.easyHrUpper ?? null,
+      { targetDistanceKm: roundKm(Math.min(cap, perDayKm * 0.7)) }
     );
   }
 
@@ -349,68 +725,44 @@ export function decideNextSession(input: CoachInput, verdict: MobileVerdict): Mo
     const sinceQuality = input.daysSinceLastQuality;
     const kind: MobileSessionKind = sinceQuality != null && sinceQuality >= 5 ? "interval" : "tempo";
     const title = kind === "interval" ? "间歇 / VO₂" : "节奏 / 阈值";
-    return session(
+    return structuredSession(
       kind,
       title,
       verdict.reason,
-      kind === "interval" ? 8 : 10,
-      kind === "interval" ? 50 : 55,
+      zones,
       kind === "interval" ? zones?.intervalPaceLower ?? null : zones?.thresholdPaceLower ?? null,
       kind === "interval" ? zones?.intervalPaceUpper ?? null : zones?.thresholdPaceUpper ?? null,
       zones?.thresholdHrLower ?? null,
-      zones?.thresholdHrUpper ?? null
+      zones?.thresholdHrUpper ?? null,
+      kind === "interval" ? { reps: intervalReps(input) } : {}
     );
   }
 
   if (verdict.title.includes("恢复")) {
-    return session(
+    return structuredSession(
       "recovery",
       "恢复跑",
       verdict.reason,
-      Math.min(8, round1(perDayKm)),
-      40,
+      zones,
       zones?.easyPaceLower ?? null,
       zones?.easyPaceUpper ?? null,
       zones?.easyHrLower ?? null,
-      zones?.easyHrUpper ?? null
+      zones?.easyHrUpper ?? null,
+      { targetDistanceKm: Math.min(8, roundKm(perDayKm)) }
     );
   }
 
-  return session(
+  return structuredSession(
     "easy",
     "轻松跑",
     verdict.reason,
-    round1(Math.min(12, perDayKm)),
-    50,
+    zones,
     zones?.easyPaceLower ?? null,
     zones?.easyPaceUpper ?? null,
     zones?.easyHrLower ?? null,
-    zones?.easyHrUpper ?? null
+    zones?.easyHrUpper ?? null,
+    { targetDistanceKm: roundKm(Math.min(12, perDayKm)) }
   );
-}
-
-function session(
-  kind: MobileSessionKind,
-  title: string,
-  reason: string,
-  distanceKm: number | null,
-  durationMinutes: number | null,
-  paceLower: number | null,
-  paceUpper: number | null,
-  hrLower: number | null,
-  hrUpper: number | null
-): MobileNextSession {
-  return {
-    kind,
-    title,
-    reason,
-    distanceKm,
-    durationMinutes,
-    paceSecondsPerKmLower: paceLower,
-    paceSecondsPerKmUpper: paceUpper,
-    heartRateBpmLower: hrLower,
-    heartRateBpmUpper: hrUpper
-  };
 }
 
 export function buildRecovery(input: CoachInput): MobileRecoveryBreakdown {
@@ -503,7 +855,7 @@ export function buildPostRun(
     details.push(
       workout.trueAbilityDelta == null
         ? "本次更新了真实能力。"
-        : `本次${workout.trueAbilityDelta >= 0 ? "上调" : "下调"}真实能力 ${round1(Math.abs(workout.trueAbilityDelta))} 点。`
+        : `本次${workout.trueAbilityDelta >= 0 ? "上调" : "下调"}真实能力 ${roundKm(Math.abs(workout.trueAbilityDelta))} 点。`
     );
   } else {
     details.push("本次没有更新真实能力（试算、室内、低置信或已被排除）。");
@@ -592,21 +944,21 @@ export function buildInjuryFlags(input: CoachInput): MobileInjuryFlag[] {
     flags.push({
       code: "ramp_rate",
       title: "负荷爬升过快",
-      detail: `rampRate ${round1(input.rampRate)}，阈值 0.5。`
+      detail: `rampRate ${roundKm(input.rampRate)}，阈值 0.5。`
     });
   }
   if (input.loadRatio != null && input.loadRatio > 1.5) {
     flags.push({
       code: "load_ratio",
       title: "急性负荷过高",
-      detail: `急性/慢性负荷比 ${round1(input.loadRatio)}，阈值 1.5。`
+      detail: `急性/慢性负荷比 ${roundKm(input.loadRatio)}，阈值 1.5。`
     });
   }
   if (input.strain != null && input.strainP90 != null && input.strain > input.strainP90) {
     flags.push({
       code: "strain",
       title: "训练应激偏高",
-      detail: `当前应激 ${round1(input.strain)}，高于近 56 日 90 分位 ${round1(input.strainP90)}。`
+      detail: `当前应激 ${roundKm(input.strain)}，高于近 56 日 90 分位 ${roundKm(input.strainP90)}。`
     });
   }
   if (input.consecutiveQualityDays >= 2) {
@@ -624,7 +976,7 @@ export function buildInjuryFlags(input: CoachInput): MobileInjuryFlag[] {
     flags.push({
       code: "long_run_jump",
       title: "长跑突然加量",
-      detail: `最近长跑 ${round1(input.latestLongRunKm)} km，超过 8 周最长距离 20%。`
+      detail: `最近长跑 ${roundKm(input.latestLongRunKm)} km，超过 8 周最长距离 20%。`
     });
   }
   if (input.nightsBelowSleepBaseline >= 3) {
@@ -638,7 +990,7 @@ export function buildInjuryFlags(input: CoachInput): MobileInjuryFlag[] {
     flags.push({
       code: "monotony",
       title: "训练过于单调",
-      detail: `单调性 ${round1(input.monotony)}，每天刺激太像。`
+      detail: `单调性 ${roundKm(input.monotony)}，每天刺激太像。`
     });
   }
   return flags;
@@ -692,7 +1044,8 @@ export function buildWeekPlan(input: CoachInput, next: MobileNextSession): Mobil
         planned: false,
         completedWorkoutId: day.workoutId,
         distanceKm: day.distanceKm,
-        workoutCount: day.workoutCount
+        workoutCount: day.workoutCount,
+        structure: null
       };
     }
     if (day.localDate < input.today) {
@@ -703,30 +1056,45 @@ export function buildWeekPlan(input: CoachInput, next: MobileNextSession): Mobil
         planned: true,
         completedWorkoutId: null,
         distanceKm: 0,
-        workoutCount: 0
+        workoutCount: 0,
+        structure: null
       };
     }
     if (day.localDate === input.today) {
+      // Measured, like every other row: today's card and the executable week
+      // both render this day, and a locked snapshot can carry a distance that
+      // its own structure does not describe (or none at all).
+      const numbers = plannedDayNumbers(next.kind, next.structure, next.distanceKm, input.zones);
       return {
         localDate: day.localDate,
         kind: next.kind,
         title: next.title,
         planned: true,
         completedWorkoutId: null,
-        distanceKm: next.distanceKm ?? 0,
-        workoutCount: 0
+        distanceKm: numbers.distanceKm ?? 0,
+        workoutCount: 0,
+        structure: numbers.structure
       };
     }
     const saved = stored.get(day.localDate);
     if (saved) {
+      // Measured, not echoed: `/v1/mobile/workout-plan` renders the same stored
+      // day, and the two must not disagree about how far it is. Capped as well,
+      // because this store is read without a prescription — a structure written
+      // before the ceiling bound the write would otherwise reach the week card at
+      // full size.
+      const bounded =
+        saved.structure == null ? null : capStructureToDayCeiling(saved.structure, saved.kind, input.zones);
+      const numbers = plannedDayNumbers(saved.kind, bounded, saved.distanceKm, input.zones);
       return {
         localDate: day.localDate,
         kind: saved.kind,
         title: sessionTitle(saved.kind),
         planned: true,
         completedWorkoutId: null,
-        distanceKm: saved.distanceKm ?? 0,
-        workoutCount: 0
+        distanceKm: numbers.distanceKm ?? 0,
+        workoutCount: 0,
+        structure: numbers.structure
       };
     }
     return {
@@ -736,7 +1104,8 @@ export function buildWeekPlan(input: CoachInput, next: MobileNextSession): Mobil
       planned: true,
       completedWorkoutId: null,
       distanceKm: 0,
-      workoutCount: 0
+      workoutCount: 0,
+      structure: null
     };
   });
 }
@@ -744,9 +1113,40 @@ export function buildWeekPlan(input: CoachInput, next: MobileNextSession): Mobil
 export function resolveLockedNextSession(
   computed: MobileNextSession,
   locked: MobileLockedSession | null,
-  today: string
+  today: string,
+  prescription: CoachZonePrescription | null
 ): MobileNextSession {
-  if (locked && locked.localDate === today) return { ...locked.session, reason: computed.reason };
+  if (locked && locked.localDate === today) {
+    // Snapshots persisted before structured sessions existed have no `structure`
+    // — and a snapshot written with a distance but no structure would otherwise
+    // be the one number in the app that nothing measures. `/v1/mobile/today`
+    // returns this session as `nextSession`, so the lock is re-measured here
+    // rather than trusted.
+    //
+    // The reason comes from the snapshot too. Mixing a fresh rationale into a
+    // frozen session described a different workout whenever the verdict had
+    // turned since the lock; `lockState` already reports that the verdict is
+    // stale and suggests a re-lock.
+    // Capped like a stored plan day: a snapshot persisted before the ceiling
+    // bound the write would otherwise put its oversized prescription back on the
+    // watch the moment it is read.
+    const bounded =
+      locked.session.structure == null
+        ? null
+        : capStructureToDayCeiling(locked.session.structure, locked.session.kind, prescription);
+    const numbers = plannedDayNumbers(
+      locked.session.kind,
+      bounded,
+      locked.session.distanceKm,
+      prescription
+    );
+    return {
+      ...locked.session,
+      distanceKm: numbers.distanceKm,
+      durationMinutes: numbers.durationMinutes,
+      structure: numbers.structure
+    };
+  }
   return computed;
 }
 

@@ -1,18 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { MobileLockedSession, MobileNextSession, MobilePlannedDay } from "@rai/api-contracts";
+
 import {
   abilityExplanation,
   buildInjuryFlags,
   buildPostRun,
+  buildSessionStructure,
+  buildWeekPlan,
   decideDayPhase,
   decideNextSession,
   decideVerdict,
+  intervalReps,
   isQualitySession,
+  measureStructure,
+  pacesFromZones,
+  resolveLockedNextSession,
+  roundKm,
   stimulusMatch,
   type CoachInput,
   type CoachLatestWorkout
 } from "../src/mobile-coach.js";
+import { assembleMobileWorkoutPlan } from "../src/mobile-read.js";
 
 const base = (): CoachInput => ({
   today: "2026-09-03",
@@ -276,4 +286,262 @@ test("injury flags fire on volume and long-run jumps", () => {
   });
   assert.ok(flags.some((flag) => flag.code === "volume_ramp"));
   assert.ok(flags.some((flag) => flag.code === "long_run_jump"));
+});
+
+test("reported distance and duration never contradict the structured prescription", () => {
+  for (const daysSinceLastQuality of [0, 1, 3, 5, 8, 14]) {
+    const input = { ...base(), daysSinceLastQuality };
+    const next = decideNextSession(input, decideVerdict(input));
+    if (next.kind === "rest") {
+      assert.equal(next.structure, null);
+      assert.equal(next.distanceKm, null);
+      assert.equal(next.durationMinutes, null);
+      continue;
+    }
+    assert.ok(next.structure, `${next.kind} 应当带结构`);
+    const measured = measureStructure(next.structure!, next.kind, pacesFromZones(input.zones));
+    assert.ok(
+      Math.abs((next.distanceKm ?? 0) - measured.distanceKm) <= 0.5,
+      `${next.kind}: 显示 ${next.distanceKm}km 与结构反推 ${measured.distanceKm}km 不符`
+    );
+    assert.equal(next.durationMinutes, Math.round(measured.durationSeconds / 60));
+  }
+});
+
+test("interval is prescribed as distance-based 800m repeats with a fatigue cap", () => {
+  const input = { ...base(), daysSinceLastQuality: 5 };
+  const next = decideNextSession(input, decideVerdict(input));
+  assert.equal(next.kind, "interval");
+  const block = next.structure?.blocks[0];
+  assert.ok(block);
+  const workStep = block.steps[0];
+  const restStep = block.steps[1];
+  assert.ok(workStep);
+  assert.ok(restStep);
+  assert.ok(block.iterations >= 4);
+  assert.deepEqual(workStep.goal, { type: "distance", meters: 800 });
+  assert.equal(workStep.purpose, "work");
+  assert.equal(workStep.alert?.kind, "pace");
+  // one alert per step at most — recovery steps stay silent
+  assert.equal(restStep.alert, null);
+  assert.equal(restStep.purpose, "recovery");
+  assert.equal(restStep.goal.type, "time");
+
+  assert.equal(intervalReps({ ...base(), daysSinceLastQuality: 20 }), 8);
+  assert.equal(intervalReps({ ...base(), daysSinceLastQuality: 5 }), 5);
+  assert.equal(intervalReps({ ...base(), daysSinceLastQuality: 20, strain: 90, strainP90: 80 }), 4);
+  assert.equal(intervalReps({ ...base(), daysSinceLastQuality: 20, loadRatio: 1.6 }), 4);
+});
+
+test("tempo is prescribed as threshold repeats", () => {
+  const input = { ...base(), daysSinceLastQuality: 2 };
+  const next = decideNextSession(input, decideVerdict(input));
+  assert.equal(next.kind, "tempo");
+  const block = next.structure?.blocks[0];
+  assert.ok(block);
+  const workStep = block.steps[0];
+  assert.ok(workStep);
+  assert.equal(block.iterations, 3);
+  assert.deepEqual(workStep.goal, { type: "time", seconds: 480 });
+  assert.equal(workStep.alert?.kind, "pace");
+});
+
+test("easy sessions get a warmup, a single work block and a cooldown", () => {
+  const input = {
+    ...base(),
+    calibration: "calibrating" as const,
+    trainingStatus: "insufficient_data" as const
+  };
+  const next = decideNextSession(input, decideVerdict(input));
+  assert.equal(next.kind, "easy");
+  const structure = next.structure;
+  assert.ok(structure);
+  const firstBlock = structure.blocks[0];
+  assert.ok(firstBlock);
+  const workStep = firstBlock.steps[0];
+  assert.ok(workStep);
+  assert.equal(structure.warmup?.purpose, "warmup");
+  assert.equal(structure.cooldown?.purpose, "cooldown");
+  assert.equal(structure.blocks.length, 1);
+  assert.equal(firstBlock.iterations, 1);
+  assert.equal(workStep.purpose, "work");
+  assert.equal(workStep.goal.type, "distance");
+});
+
+test("rest days carry no prescription and no structure", () => {
+  const input = { ...base(), nightsBelowSleepBaseline: 3 };
+  const verdict = decideVerdict(input);
+  assert.equal(verdict.tone, "red");
+  const next = decideNextSession(input, verdict);
+  assert.equal(next.kind, "rest");
+  assert.equal(next.structure, null);
+  assert.equal(next.distanceKm, null);
+  assert.equal(next.durationMinutes, null);
+});
+
+test("missing zone profile still yields a measurable structure without alerts", () => {
+  const input = {
+    ...base(),
+    zones: null,
+    calibration: "calibrating" as const,
+    trainingStatus: "insufficient_data" as const
+  };
+  const next = decideNextSession(input, decideVerdict(input));
+  assert.equal(next.kind, "easy");
+  const structure = next.structure;
+  assert.ok(structure);
+  const firstBlock = structure.blocks[0];
+  assert.ok(firstBlock);
+  const workStep = firstBlock.steps[0];
+  assert.ok(workStep);
+  assert.equal(structure.warmup?.alert, null);
+  assert.equal(workStep.alert, null);
+  const measured = measureStructure(structure, next.kind, pacesFromZones(null));
+  assert.ok(Math.abs((next.distanceKm ?? 0) - measured.distanceKm) <= 0.5);
+  assert.ok((next.distanceKm ?? 0) > 0);
+});
+
+test("a stored plan day is measured from its structure, never from the hint beside it", () => {
+  // The goals editor used to persist its own distance next to the generated
+  // structure, so `/v1/mobile/today` rendered the typed 7 km while
+  // `/v1/mobile/workout-plan` measured the 6 × 800 m the watch would run.
+  const structure = buildSessionStructure("interval", base().zones, { reps: 6 });
+  assert.ok(structure);
+  const measured = measureStructure(structure, "interval", pacesFromZones(base().zones));
+  const stored: MobilePlannedDay = {
+    localDate: "2026-09-05",
+    kind: "interval",
+    distanceKm: 7,
+    structure
+  };
+  const input: CoachInput = {
+    ...base(),
+    storedWeekPlan: [stored],
+    weekDaily: [{ localDate: "2026-09-05", distanceKm: 0, workoutCount: 0, workoutId: null }]
+  };
+
+  const weekPlan = buildWeekPlan(input, decideNextSession(input, decideVerdict(input)));
+  const day = weekPlan.find((entry) => entry.localDate === "2026-09-05");
+  assert.ok(day);
+  assert.equal(day.distanceKm, roundKm(measured.distanceKm));
+  assert.notEqual(day.distanceKm, 7);
+  assert.deepEqual(day.structure, structure);
+});
+
+test("a plan day with no structure is measured from the one its hint builds", () => {
+  // Same rule for a hand-written row: the hint is a build request, not a value.
+  const input: CoachInput = {
+    ...base(),
+    storedWeekPlan: [{ localDate: "2026-09-05", kind: "easy", distanceKm: 12 }],
+    weekDaily: [{ localDate: "2026-09-05", distanceKm: 0, workoutCount: 0, workoutId: null }]
+  };
+  const weekPlan = buildWeekPlan(input, decideNextSession(input, decideVerdict(input)));
+  const day = weekPlan.find((entry) => entry.localDate === "2026-09-05");
+  assert.ok(day?.structure);
+  const measured = measureStructure(day.structure, day.kind as "easy", pacesFromZones(base().zones));
+  assert.equal(day.distanceKm, roundKm(measured.distanceKm));
+});
+
+test("both plan endpoints give a stored day the same distance", () => {
+  // `/v1/mobile/today` builds its week through `buildWeekPlan`;
+  // `/v1/mobile/workout-plan` builds it through `assembleMobileWorkoutPlan`.
+  // They render the same stored row, so the two must agree — the editor typed
+  // 7 km next to a 6 × 800 m structure, and only the structure is real.
+  const structure = buildSessionStructure("interval", null, { reps: 6 });
+  assert.ok(structure);
+  const storedPlan: MobilePlannedDay[] = [
+    { localDate: "2026-09-05", kind: "interval", distanceKm: 7, structure }
+  ];
+  const input: CoachInput = {
+    ...base(),
+    zones: null,
+    storedWeekPlan: storedPlan,
+    weekDaily: [{ localDate: "2026-09-05", distanceKm: 0, workoutCount: 0, workoutId: null }]
+  };
+  const todaySession: MobileNextSession = {
+    kind: "easy",
+    title: "轻松跑",
+    reason: "闸门放行",
+    distanceKm: 8,
+    durationMinutes: 50,
+    paceSecondsPerKmLower: null,
+    paceSecondsPerKmUpper: null,
+    heartRateBpmLower: null,
+    heartRateBpmUpper: null,
+    structure: buildSessionStructure("easy", null, { targetDistanceKm: 8 })
+  };
+
+  const weekPlanSide = buildWeekPlan(input, todaySession);
+  const planSide = assembleMobileWorkoutPlan({
+    today: "2026-09-03",
+    todaySession,
+    todayCompleted: false,
+    storedPlan,
+    zones: null,
+    audit: null,
+    planRevision: 0
+  });
+
+  const fromCoach = weekPlanSide.find((day) => day.localDate === "2026-09-05");
+  const fromPlan = planSide.days.find((day) => day.localDate === "2026-09-05");
+  assert.ok(fromCoach && fromPlan);
+  assert.equal(fromCoach.distanceKm, fromPlan.distanceKm);
+  assert.equal(fromCoach.distanceKm, roundKm(measureStructure(structure, "interval", pacesFromZones(null)).distanceKm));
+  assert.notEqual(fromCoach.distanceKm, 7);
+});
+
+test("a locked snapshot is re-measured, and today's card matches the executable week", () => {
+  // The lock is a frozen copy of a recommendation, and snapshots written before
+  // structured sessions existed carry a distance with no structure at all.
+  // `/v1/mobile/today` returns that copy as `nextSession` *and* renders it inside
+  // `weekPlan`, while `/v1/mobile/workout-plan` renders it as a day — three
+  // readers, one number.
+  const today = base().today;
+  const locked: MobileLockedSession = {
+    localDate: today,
+    verdictTone: "green",
+    lockedAt: new Date(0).toISOString(),
+    session: {
+      kind: "interval",
+      title: "间歇 / VO₂",
+      reason: "",
+      distanceKm: 7,
+      durationMinutes: 40,
+      paceSecondsPerKmLower: null,
+      paceSecondsPerKmUpper: null,
+      heartRateBpmLower: null,
+      heartRateBpmUpper: null,
+      structure: null
+    }
+  };
+  const input: CoachInput = {
+    ...base(),
+    zones: null,
+    lockedSession: locked,
+    weekDaily: [{ localDate: today, distanceKm: 0, workoutCount: 0, workoutId: null }]
+  };
+  const next = resolveLockedNextSession(decideNextSession(input, decideVerdict(input)), locked, today, input.zones);
+
+  const structure = buildSessionStructure("interval", null, {});
+  assert.ok(structure);
+  const measured = roundKm(measureStructure(structure, "interval", pacesFromZones(null)).distanceKm);
+  assert.ok(next.structure, "锁定快照必须被重建成可执行的结构");
+  assert.equal(next.distanceKm, measured, "锁定快照的距离必须由结构反推");
+  assert.notEqual(next.distanceKm, 7, "快照里存着的 7km 不是距离的来源");
+
+  const card = buildWeekPlan(input, next).find((day) => day.localDate === today);
+  assert.ok(card);
+  assert.equal(card.distanceKm, measured);
+  assert.equal(card.structure != null, true);
+
+  const plan = assembleMobileWorkoutPlan({
+    today,
+    todaySession: next,
+    todayCompleted: false,
+    storedPlan: [],
+    zones: null,
+    audit: null,
+    planRevision: 0
+  });
+  assert.equal(plan.days[0]?.distanceKm, measured);
 });

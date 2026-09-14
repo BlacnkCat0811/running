@@ -1,3 +1,13 @@
+import {
+  MAX_ALERT_HEART_RATE_BPM,
+  MAX_ALERT_PACE_SECONDS_PER_KM,
+  MAX_BLOCK_ITERATIONS,
+  MAX_BLOCKS,
+  MAX_PLANNED_DISTANCE_KM,
+  MAX_STEP_METERS,
+  MAX_STEP_SECONDS
+} from "./session-structure.js";
+
 const identifier = { type: "string", minLength: 1, maxLength: 160 } as const;
 
 export const identifierParamsSchema = {
@@ -87,6 +97,118 @@ const mobileRaceTargetSchema = {
   }
 } as const;
 
+/**
+ * Alert bounds depend on the alert kind: pace is seconds per kilometre and heart
+ * rate is beats per minute, so one shared ceiling would let a body-invalid heart
+ * rate through. Both ceilings mirror `session-structure.ts`, which clamps the
+ * same values again on the way into the store.
+ */
+const mobileStepAlertSchema = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: {
+        kind: { const: "pace" },
+        lower: {
+          anyOf: [
+            { type: "number", minimum: 1, maximum: MAX_ALERT_PACE_SECONDS_PER_KM },
+            { type: "null" }
+          ]
+        },
+        upper: {
+          anyOf: [
+            { type: "number", minimum: 1, maximum: MAX_ALERT_PACE_SECONDS_PER_KM },
+            { type: "null" }
+          ]
+        }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: {
+        kind: { const: "heart_rate" },
+        lower: {
+          anyOf: [{ type: "number", minimum: 1, maximum: MAX_ALERT_HEART_RATE_BPM }, { type: "null" }]
+        },
+        upper: {
+          anyOf: [{ type: "number", minimum: 1, maximum: MAX_ALERT_HEART_RATE_BPM }, { type: "null" }]
+        }
+      }
+    }
+  ]
+} as const;
+
+/**
+ * Goals are discriminated on `type`, so `meters` belongs to `distance` and
+ * `seconds` to `time` — a `time` goal carrying `meters` is rejected here rather
+ * than silently normalized away downstream.
+ */
+const mobileStepGoalSchema = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "meters"],
+      properties: {
+        type: { const: "distance" },
+        meters: { type: "number", minimum: 1, maximum: MAX_STEP_METERS }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type", "seconds"],
+      properties: {
+        type: { const: "time" },
+        seconds: { type: "number", minimum: 1, maximum: MAX_STEP_SECONDS }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["type"],
+      properties: { type: { const: "open" } }
+    }
+  ]
+} as const;
+
+const mobileWorkoutStepSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["purpose", "goal"],
+  properties: {
+    purpose: { type: "string", enum: ["warmup", "work", "recovery", "cooldown"] },
+    goal: mobileStepGoalSchema,
+    alert: { anyOf: [mobileStepAlertSchema, { type: "null" }] }
+  }
+} as const;
+
+const mobileSessionStructureSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    warmup: { anyOf: [mobileWorkoutStepSchema, { type: "null" }] },
+    blocks: {
+      type: "array",
+      maxItems: MAX_BLOCKS,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["iterations", "steps"],
+        properties: {
+          iterations: { type: "integer", minimum: 1, maximum: MAX_BLOCK_ITERATIONS },
+          steps: { type: "array", minItems: 1, maxItems: 8, items: mobileWorkoutStepSchema }
+        }
+      }
+    },
+    cooldown: { anyOf: [mobileWorkoutStepSchema, { type: "null" }] }
+  }
+} as const;
+
 const mobileWeekPlanItemSchema = {
   type: "object",
   additionalProperties: false,
@@ -94,7 +216,9 @@ const mobileWeekPlanItemSchema = {
   properties: {
     localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     kind: { type: "string", enum: ["rest", "recovery", "easy", "long_run", "tempo", "interval"] },
-    distanceKm: { anyOf: [{ type: "number", minimum: 0, maximum: 80 }, { type: "null" }] }
+    distanceKm: { anyOf: [{ type: "number", minimum: 0, maximum: MAX_PLANNED_DISTANCE_KM }, { type: "null" }] },
+    structure: { anyOf: [mobileSessionStructureSchema, { type: "null" }] },
+    reason: { anyOf: [{ type: "string", maxLength: 400 }, { type: "null" }] }
   }
 } as const;
 
@@ -105,6 +229,14 @@ export const mobileLockBodySchema = {
   properties: {
     action: { type: "string", enum: ["lock", "relock"] },
     expectedRevision: { type: "string", minLength: 8, maxLength: 128 }
+  }
+} as const;
+
+export const mobileWeeklyPlanGenerateBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    expectedRevision: { type: "integer", minimum: 0 }
   }
 } as const;
 
@@ -435,7 +567,8 @@ export const openapiDocument = {
       DeleteDatabaseRequest: deleteBodySchema,
       RestoreBackupRequest: restoreBodySchema,
       MobileGoalsUpdate: mobileGoalsBodySchema,
-      MobileLock: mobileLockBodySchema
+      MobileLock: mobileLockBodySchema,
+      MobileWeeklyPlanGenerate: mobileWeeklyPlanGenerateBodySchema
     }
   },
   paths: {
@@ -483,6 +616,22 @@ export const openapiDocument = {
     "/v1/mobile/lock": {
       post: operation(["Workouts"], "锁定或按新裁决重锁今天的课", {
         requestBody: body({ $ref: "#/components/schemas/MobileLock" }, "lock 或 relock")
+      })
+    },
+    "/v1/mobile/workout-plan": {
+      get: operation(["Read"], "iOS 可执行周课表：今日按闸门裁决，其后按已存计划逐日给出结构、距离与时长")
+    },
+    "/v1/mobile/workout-plan/generate": {
+      post: operation(["Workouts"], "生成并持久化下周课表；模型不可用时回退保守模板并在 warnings 中说明", {
+        // Every field is optional — the handler reads `expectedRevision` with a
+        // `?.` — so the body itself is not required, unlike the other writes.
+        requestBody: {
+          required: false,
+          description: "可选的期望 revision，用于并发保护",
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/MobileWeeklyPlanGenerate" } }
+          }
+        }
       })
     },
     "/v1/training-zones/history": { get: operation(["Read"], "历史心率与配速分区", {

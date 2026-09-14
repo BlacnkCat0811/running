@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,12 +9,15 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import type {
+  HandshakeResponse,
+  HealthResponse,
   ImportJobRequest,
   OverrideWorkoutInput,
   PredictionModelRun,
   RecomputeJobCancellationResponse,
   TrainPredictionModelRequest,
   LockMobileSessionInput,
+  MobileWeeklyPlanGenerationResponse,
   UpdateMobileGoalsInput,
   UpdateTrainingZoneProfileInput,
   TrainingStatisticsGranularity
@@ -36,7 +40,7 @@ import { acquireDatabasePublicationLock, ModelRunActivationError, RaiDatabase, S
 import Fastify from "fastify";
 
 import { apiErrorPayload } from "./api-error.js";
-import { RaiReadStore } from "./data.js";
+import { RaiReadStore, mobileLocalDate } from "./data.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 import {
   ImportArchiveTooLargeError,
@@ -45,7 +49,8 @@ import {
   isHealthKitUploadSource
 } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
-import { MobileGoalsRevisionConflictError, MobileGoalsStore } from "./mobile-goals.js";
+import { MobileGoalsRevisionConflictError, MobileGoalsStore, type PlanMergeOptions } from "./mobile-goals.js";
+import { generateWeeklyPlan, overwriteWarning, weeklyPlanDates } from "./weekly-plan-service.js";
 import {
   installLocalRequestSecurity,
   isTrustedDevelopmentOrigin
@@ -59,6 +64,7 @@ import {
   importSourceBodySchema,
   mobileGoalsBodySchema,
   mobileLockBodySchema,
+  mobileWeeklyPlanGenerateBodySchema,
   modelComparisonQuerySchema,
   openapiDocument,
   overrideBodySchema,
@@ -114,6 +120,22 @@ const app = Fastify({
   logger: { level: process.env.RAI_LOG_LEVEL ?? "info" },
   ajv: { customOptions: { removeAdditional: false } }
 });
+// Every route this process mounts, recorded as Fastify resolves it.
+//
+// `schemas.test.ts` has to enumerate the mountings by reading this file as text,
+// and text cannot be made airtight: `const a = app; a.post(...)`,
+// `(app as any).post(...)` and a route module whose plugin argument is the
+// idiomatic `fastify` all mount a write route with no token that scan
+// recognises. The hook is the interpreter's own answer, and it is written to
+// `RAI_ROUTE_DUMP` when that names a file — which lets the runtime test compare
+// the resolved table against the classification registries below, and doubles
+// as an ops aid (`RAI_ROUTE_DUMP=/tmp/routes.json systemctl restart rai-api`).
+// Registered before any route so nothing can be mounted before it is watching.
+const mountedRoutes: Array<{ method: string; url: string }> = [];
+app.addHook("onRoute", (routeOptions) => {
+  const methods = Array.isArray(routeOptions.method) ? routeOptions.method : [routeOptions.method];
+  for (const method of methods) mountedRoutes.push({ method, url: routeOptions.url });
+});
 // Local-first product: keep the SPA and API out of third-party iframes and
 // guard against content-type sniffing. frame-ancestors does not constrain any
 // resource loading, so this cannot break the app itself.
@@ -152,7 +174,8 @@ const metadataOnlyMutationRoutes = new Set([
   "/v1/import-sources/discover",
   "/v1/imports/uploads",
   "/v1/mobile/goals",
-  "/v1/mobile/lock"
+  "/v1/mobile/lock",
+  "/v1/mobile/workout-plan/generate"
 ]);
 const databaseRequiredMutationRoutes = new Set([
   "/v1/workouts/:id/override",
@@ -165,6 +188,27 @@ const databaseRequiredMutationRoutes = new Set([
   "/v1/jobs/:id/cancel",
   "/v1/backups",
   "/v1/database"
+]);
+/**
+ * Write routes that take the mutation lock and are allowed to run without a
+ * database.
+ *
+ * These are the routes that *create* or *repair* the store — importing, and
+ * restoring or deleting a backup — so gating them on `existsSync(databasePath)`
+ * would lock the runner out of recovery. They were previously absent from both
+ * registries, which left no way to tell a deliberate omission from a forgotten
+ * one; naming them is what lets `schemas.test.ts` require **every** write route
+ * to be classified in exactly one of the three sets.
+ *
+ * Declarative: the default branch of the `preHandler` hook below already takes
+ * the lock and skips the readiness gate, so this set does not change behaviour.
+ */
+export const lockOnlyMutationRoutes = new Set([
+  "/v1/import-jobs",
+  "/v1/imports/inspect",
+  "/v1/import-sources/:id",
+  "/v1/backups/:name",
+  "/v1/backups/:name/restore"
 ]);
 const mutationCoordinator = new MutationCoordinator();
 const mutationReleases = new WeakMap<object, () => void>();
@@ -522,7 +566,42 @@ app.addHook("onClose", async () => {
   clearInterval(zoneRefreshTimer);
 });
 
-app.get("/v1/health", async () => {
+/**
+ * Weekly plan refresh. Runs hourly so that a Monday generation which fails is
+ * retried the same day, and never regenerates once the week is already planned.
+ */
+async function ensureWeeklyPlan(): Promise<void> {
+  const today = mobileLocalDate();
+  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
+  if (weekday !== 1) return;
+  if (weeklyPlanDates(today).length === 0) return;
+  const goals = mobileGoalsStore.read();
+  if (goals.weekPlan.some((day) => day.localDate === today)) return;
+  await runWeeklyPlanGeneration(goals.revision);
+}
+
+const weeklyPlanTimer = setInterval(() => {
+  if (closing) return;
+  void ensureWeeklyPlan().catch((error) => {
+    app.log.error(error, "Weekly plan generation failed");
+  });
+}, 60 * 60_000);
+weeklyPlanTimer.unref();
+// The hourly tick alone means a service restarted on a Monday morning would not
+// plan that week until an hour later, so probe once shortly after boot too.
+const weeklyPlanKickoff = setTimeout(() => {
+  if (closing) return;
+  void ensureWeeklyPlan().catch((error) => {
+    app.log.error(error, "Weekly plan generation failed");
+  });
+}, 60_000);
+weeklyPlanKickoff.unref();
+app.addHook("onClose", async () => {
+  clearInterval(weeklyPlanTimer);
+  clearTimeout(weeklyPlanKickoff);
+});
+
+app.get("/v1/health", async (): Promise<HealthResponse> => {
   const databaseReady = databaseIsReady();
   return {
     status: databaseReady ? "ok" : "recovery_required",
@@ -535,7 +614,7 @@ app.get("/v1/health", async () => {
     now: new Date().toISOString()
   };
 });
-app.get("/v1/handshake", async () => ({
+app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   serverId,
   athleteId,
   datasetEpoch,
@@ -690,6 +769,83 @@ app.get("/v1/mobile/today", async () => {
   return withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, goals));
 });
 
+// Executable week handed to the WorkoutKit bridge. Read-only: it never mutates
+// goals, so it is deliberately absent from the mutation route registries below.
+app.get("/v1/mobile/workout-plan", async () => {
+  const goals = mobileGoalsStore.read();
+  return withReadStore((store) => store.mobileWorkoutPlan(goals.weeklyDistanceKm, goals));
+});
+
+/**
+ * Generates the next week of training and persists it into goals.weekPlan.
+ * A generation that cannot be validated falls back to the heuristic template,
+ * so this endpoint never leaves the week without a plan.
+ */
+async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<MobileWeeklyPlanGenerationResponse> {
+  const goals = mobileGoalsStore.read();
+  if (expectedRevision != null && expectedRevision !== goals.revision) {
+    throw new MobileGoalsRevisionConflictError(goals.revision);
+  }
+  const inputs = withReadStore((store) => store.mobileWeeklyPlanInputs(goals.weeklyDistanceKm, goals));
+  const result = await generateWeeklyPlan({
+    today: inputs.today,
+    goals,
+    prescription: inputs.prescription,
+    // Caps the generated week at last week's volume + 30%, so a model that
+    // ignores the prompt cannot prescribe a ramp the runner has not earned.
+    previousWeekDistanceKm: inputs.previousWeekDistanceKm
+  });
+  // An empty result means the date window itself could not be built, not that
+  // the runner should have a blank week. Writing it would erase the stored plan,
+  // so the existing week is kept and the caller is told why.
+  if (result.days.length === 0) {
+    return {
+      generatedAt: result.audit.generatedAt ?? new Date().toISOString(),
+      revision: goals.revision,
+      audit: result.audit,
+      days: [],
+      warnings: [...result.warnings, "未能算出有效的日期窗口，已保留既有课表"]
+    };
+  }
+  // Prepended, not appended: this warns that stored work is being replaced, and
+  // the model-validation notes can fill the list ahead of it otherwise.
+  const overwrite = overwriteWarning(goals.weekPlan, result.days);
+  const warnings = overwrite ? [overwrite, ...result.warnings] : result.warnings;
+  const written = mobileGoalsStore.write(
+    {
+      expectedRevision: goals.revision,
+      weeklyDistanceKm: goals.weeklyDistanceKm,
+      weekPlan: result.days,
+      weekPlanAudit: result.audit
+    },
+    // The generator already measured these days against this same prescription;
+    // re-measuring is idempotent and keeps every write on one path.
+    { prescription: inputs.prescription }
+  );
+  return {
+    generatedAt: result.audit.generatedAt ?? new Date().toISOString(),
+    revision: written.revision,
+    audit: result.audit,
+    days: result.days,
+    warnings
+  };
+}
+
+app.post<{ Body: { expectedRevision?: number } }>(
+  "/v1/mobile/workout-plan/generate",
+  { schema: { body: mobileWeeklyPlanGenerateBodySchema } },
+  async (request, reply) => {
+    try {
+      return await runWeeklyPlanGeneration(request.body?.expectedRevision);
+    } catch (error) {
+      if (error instanceof MobileGoalsRevisionConflictError) {
+        return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
+      }
+      throw error;
+    }
+  }
+);
+
 app.get("/v1/mobile/statistics", async () => withReadStore((store) => store.mobileStatistics()));
 
 app.get("/v1/mobile/trends", async () => withReadStore((store) => store.mobileTrends()));
@@ -699,14 +855,29 @@ app.get<{ Querystring: { days?: string } }>(
   async (request) => withReadStore((store) => store.recoveryTrends(Math.min(Math.max(Number(request.query.days ?? 28), 1), 365)))
 );
 
-app.get("/v1/mobile/goals", async () => mobileGoalsStore.read());
+/**
+ * The zone profile every plan response is measured against.
+ *
+ * The key is omitted — not set to `null` — when the read database is not
+ * available, which tells the goals store to echo what is stored rather than
+ * measure with paces the runner may not use.
+ */
+const planPrescription = (): PlanMergeOptions =>
+  databaseIsReady() ? { prescription: withReadStore((store) => store.mobilePlanPrescription()) } : {};
+
+app.get("/v1/mobile/goals", async () => mobileGoalsStore.read(planPrescription()));
 
 app.put<{ Body: UpdateMobileGoalsInput }>(
   "/v1/mobile/goals",
   { schema: { body: mobileGoalsBodySchema } },
   async (request, reply) => {
     try {
-      return mobileGoalsStore.write(request.body);
+      // Re-measured with the live zone prescription so a distance typed into
+      // the goals editor cannot outlive the structure it contradicts. The key
+      // is omitted — not set to null — when the read database is unavailable:
+      // there are no zones and no plan views in that state, and `null` would
+      // silently substitute the default paces for the runner's own.
+      return mobileGoalsStore.write(request.body, planPrescription());
     } catch (error) {
       if (error instanceof MobileGoalsRevisionConflictError) {
         return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
@@ -733,14 +904,17 @@ app.post<{ Body: LockMobileSessionInput }>(
       return reply.code(409).send({ code: "mobile_recommendation_stale", message: "恢复数据不是今天的，请先同步健康后再确认安排" });
     }
     if (request.body.action === "lock" && snapshot.lock.present) {
-      return mobileGoalsStore.read();
+      return mobileGoalsStore.read(planPrescription());
     }
-    return mobileGoalsStore.lockSession({
-      localDate: snapshot.today.localDate,
-      session: snapshot.nextSession,
-      verdictTone: snapshot.verdict.tone,
-      lockedAt: new Date().toISOString()
-    });
+    return mobileGoalsStore.lockSession(
+      {
+        localDate: snapshot.today.localDate,
+        session: snapshot.nextSession,
+        verdictTone: snapshot.verdict.tone,
+        lockedAt: new Date().toISOString()
+      },
+      planPrescription()
+    );
   }
 );
 
@@ -1245,6 +1419,19 @@ app.setErrorHandler((error, _request, reply) => {
   const payload = apiErrorPayload(error);
   void reply.code(payload.status).send(payload.body);
 });
+
+// The mounted route table, written only when `RAI_ROUTE_DUMP` names a file.
+//
+// Fastify is the only authority on what was actually mounted: an alias, a cast,
+// or a plugin parameter named `fastify` all mount a route without leaving a
+// token a source scan recognises. `server-runtime.test.ts` compares this dump
+// against the classification registries, so "every write route is classified"
+// is decided by the router rather than by a regex.
+const routeDumpPath = process.env.RAI_ROUTE_DUMP?.trim();
+if (routeDumpPath) {
+  await app.ready();
+  await writeFile(routeDumpPath, JSON.stringify(mountedRoutes, null, 2), "utf8");
+}
 
 await app.listen({ host, port });
 const address = app.server.address();
