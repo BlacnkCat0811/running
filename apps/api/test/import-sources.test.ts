@@ -398,7 +398,12 @@ test("extracts a high-cardinality archive with bounded path-index work", async (
   }
 });
 
-test("rejects Windows path aliases before extraction", { skip: process.platform !== "win32" }, async () => {
+// Windows strips trailing dots and spaces from file names, so `export.xml.`
+// collides with `export.xml` there but is a distinct file on POSIX. The guard
+// cannot be exercised off Windows, so say so rather than skipping silently.
+test("rejects Windows path aliases before extraction", {
+  skip: process.platform !== "win32" ? "needs Windows path-alias semantics" : false
+}, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-windows-alias-"));
   const archivePath = join(root, "health.zip");
   try {

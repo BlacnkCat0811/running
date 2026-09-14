@@ -52,6 +52,8 @@ export interface ZipLimits {
 
 export class ImportSourceNotFoundError extends Error {
   readonly statusCode = 404;
+  // 没有 code 时 apiErrorPayload 会退化成通用 "request_error"，客户端无法区分 404 语义。
+  readonly code = "import_source_not_found";
 
   constructor() {
     super("未找到导入来源");

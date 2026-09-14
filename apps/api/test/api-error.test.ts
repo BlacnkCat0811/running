@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { apiErrorPayload } from "../src/api-error.js";
+import { ImportSourceNotFoundError } from "../src/import-sources.js";
+import { MutationConflictError } from "../src/mutation-coordinator.js";
 
 test("does not infer not-found responses from internal error messages", () => {
   assert.deepEqual(apiErrorPayload(new Error("内部对象不存在：secret-row-id")), {
@@ -26,5 +28,21 @@ test("redacts explicit server errors and their internal codes", () => {
   assert.deepEqual(apiErrorPayload(error), {
     status: 503,
     body: { code: "internal_error", message: "本地服务处理请求失败" }
+  });
+});
+
+// 这两类错误原先只有 statusCode、没有 code，落到客户端只能看到笼统的
+// "request_error"，无法区分"来源不存在"与"有别的写操作在跑"。
+test("import source not-found keeps a distinguishable 404 code", () => {
+  assert.deepEqual(apiErrorPayload(new ImportSourceNotFoundError()), {
+    status: 404,
+    body: { code: "import_source_not_found", message: "未找到导入来源" }
+  });
+});
+
+test("mutation conflict keeps a distinguishable 409 code", () => {
+  assert.deepEqual(apiErrorPayload(new MutationConflictError("recompute")), {
+    status: 409,
+    body: { code: "mutation_conflict", message: "另一项写操作正在执行：recompute" }
   });
 });
