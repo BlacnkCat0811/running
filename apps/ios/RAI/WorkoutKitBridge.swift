@@ -23,17 +23,43 @@ enum WorkoutKitBridge {
         var skipped: Int
         var authorized: Bool
         var verified: Bool
+        /// True when this device cannot schedule workouts at all (Simulator, or an
+        /// iPhone with no paired Apple Watch). Kept apart from `authorized` because
+        /// the remedy differs: such a device never becomes schedulable, so telling
+        /// the runner to grant permission sends them down a dead end.
+        var deviceUnsupported = false
+        /// Scheduler authorization state as a plain string, because
+        /// `WorkoutScheduler.AuthorizationState` is a WorkoutKit type and the view
+        /// layer must not import the SDK. Carried into `summary` so a refused sync
+        /// says *what* is blocking it instead of one catch-all sentence.
+        var authorizationState: String?
 
-        static let needsAuthorization = SyncOutcome(
+        static let unsupportedDevice = SyncOutcome(
             scheduled: 0,
             attempted: 0,
             skipped: 0,
             authorized: false,
-            verified: false
+            verified: false,
+            deviceUnsupported: true
         )
 
         var summary: String {
-            if !authorized { return "需要先允许 RAI 使用体能训练计划。" }
+            if deviceUnsupported {
+                return "此设备无法把课表排到「体能训练」：需要 iPhone 已配对 Apple Watch（模拟器不支持排期）。"
+            }
+            if !authorized {
+                switch authorizationState {
+                case "denied":
+                    return "排期授权已被拒绝。健康面板里没有对应开关，需删除 App 重装，"
+                        + "或走 设置 → 通用 → 传输或还原 iPhone → 还原 → 还原位置与隐私。"
+                case "notDetermined":
+                    return "授权请求未送达，系统没有弹出授权框。"
+                case "restricted":
+                    return "系统限制了 RAI 的排期授权（屏幕使用时间/家长控制）。"
+                default:
+                    return "需要先允许 RAI 使用体能训练计划。"
+                }
+            }
             if attempted == 0 { return "本周没有可同步的训练（休息日与无效课表不会上表）。" }
             guard verified else { return "已提交 \(attempted) 项，但系统未回读确认。请在手表「体能训练」中确认。" }
             if skipped > 0 { return "已同步 \(scheduled) 项，跳过 \(skipped) 项。" }
@@ -49,10 +75,35 @@ enum WorkoutKitBridge {
         await WorkoutScheduler.shared.authorizationState == .authorized
     }
 
+    /// Flattens the scheduler's state into a string so callers keep the SDK out of
+    /// their own types. The values are matched in `SyncOutcome.summary`.
+    static func describe(_ state: WorkoutScheduler.AuthorizationState) -> String {
+        switch state {
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .notDetermined: return "notDetermined"
+        case .restricted: return "restricted"
+        @unknown default: return "unknown"
+        }
+    }
+
     /// Returns true once RAI is allowed to schedule workouts.
     @discardableResult
     static func requestAuthorization() async -> Bool {
         await WorkoutScheduler.shared.requestAuthorization() == .authorized
+    }
+
+    /// Runs the whole sync flow: try, ask once if the scheduler has not decided,
+    /// then retry.
+    ///
+    /// Kept in the bridge rather than repeated in both skin views — the ask step
+    /// must not run on a device that cannot schedule at all, and that condition
+    /// belongs next to the support check, not in the UI.
+    static func syncRequestingAuthorization(plan: MobileWorkoutPlanResponse) async -> SyncOutcome {
+        let outcome = await sync(plan: plan)
+        guard !outcome.authorized, !outcome.deviceUnsupported else { return outcome }
+        guard await requestAuthorization() else { return outcome }
+        return await sync(plan: plan)
     }
 
     /// Replaces everything RAI previously scheduled.
@@ -61,8 +112,20 @@ enum WorkoutKitBridge {
     /// the watch is worse than none — the runner would follow a session that the
     /// gate has since withdrawn.
     static func sync(plan: MobileWorkoutPlanResponse, now: Date = Date()) async -> SyncOutcome {
+        // Order matters: an unsupported device reports neither a prompt nor an
+        // authorization, so support is checked first to keep the two causes apart.
+        guard isSupported else { return .unsupportedDevice }
         let state = await WorkoutScheduler.shared.authorizationState
-        guard state == .authorized, isSupported else { return .needsAuthorization }
+        guard state == .authorized else {
+            return SyncOutcome(
+                scheduled: 0,
+                attempted: 0,
+                skipped: 0,
+                authorized: false,
+                verified: false,
+                authorizationState: describe(state)
+            )
+        }
         let timeZone = TimeZone(identifier: plan.timezone) ?? .current
         let executable = WorkoutPlanMapper.plannedWorkouts(from: plan)
         let skipped = plan.days.count - executable.count

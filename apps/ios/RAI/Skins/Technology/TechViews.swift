@@ -363,14 +363,9 @@ struct TechTodayView: View {
         isSyncingPlan = true
         planSyncMessage = nil
         Task {
-            var outcome = await WorkoutKitBridge.sync(plan: plan)
-            if !outcome.authorized {
-                // Ask only when the user actually tries to sync, so the system
-                // prompt arrives with an obvious reason attached to it.
-                if await WorkoutKitBridge.requestAuthorization() {
-                    outcome = await WorkoutKitBridge.sync(plan: plan)
-                }
-            }
+            // Permission is asked for only when the user actually tries to sync, so
+            // the system prompt arrives with an obvious reason attached to it.
+            let outcome = await WorkoutKitBridge.syncRequestingAuthorization(plan: plan)
             isSyncingPlan = false
             planSyncMessage = outcome.summary
         }
