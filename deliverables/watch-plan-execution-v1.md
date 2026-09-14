@@ -219,3 +219,111 @@
 | `npx vitest run test/ios-mobile-app.test.tsx`（apps/web） | iOS 壳渲染 + 新「分段」行 |
 
 🔴 仍需真机：`WorkoutScheduler` 授权、系统「体能训练」中是否真的出现 RAI 专区、分段与提醒是否正确。
+
+（2026-09-14 补充：真机实测反馈"点同步无弹窗、健康里 RAI 已有『体能训练』权限、**且面板里没有写入开关**"。
+面板项是**读取**侧，不构成"排期已授权"的证据。排查进展见 §8.6.1。）
+
+### 8.6 「一键同步」提示的三态拆分（2026-09-14）
+
+真机现象：点「一键同步」→ 没有系统弹窗 → 提示"需要先允许 RAI 使用体能训练计划"，同时健康 App 里
+RAI 的「体能训练」显示已授权。两个事实必须分开读：
+
+- 健康面板上那一条是 **读取** 权限：`HealthKitExport.swift:179` 把 `HKObjectType.workoutType()` 放进了
+  `readTypes`，而 `:85` 的 `toShare: []` 说明**写入侧从未被请求过**。WorkoutKit 排期走的是写入侧。
+- 原判据 `guard state == .authorized, isSupported`（`WorkoutKitBridge.swift:65`）**把「设备不支持排期」
+  与「未授权」合并成同一句话**：模拟器、或未配对 Apple Watch 的 iPhone 会永远看到"去授权"，而授权
+  再多也不会生效——这正是那句话会误导排查方向的原因。
+
+改动（`apps/ios/RAI/WorkoutKitBridge.swift` + 两个皮肤各一处）：
+
+| 位置 | 变化 |
+|---|---|
+| `SyncOutcome` | 新增 `deviceUnsupported`、`authorizationState`（字符串，维持视图层不 import WorkoutKit 的约束） |
+| `sync()` | 先 `guard isSupported` → `.unsupportedDevice`；再读 `authorizationState` 并带出具体原因 |
+| `summary` | 按 `unsupportedDevice` / `denied` / `notDetermined` / `restricted` 分流文案（不再一句话兜底） |
+| `NativeViews.swift` + `Skins/Technology/TechViews.swift` | 改为调用 `syncRequestingAuthorization(plan:)`——"试 → 问 → 重试"收进 bridge，且仅在 `!authorized && !deviceUnsupported` 时才发起授权请求 |
+
+验收：`bash apps/ios/tests/typecheck-ios.sh` → 36 文件 0 error **0 warning**（顺带确认
+`WorkoutScheduler.AuthorizationState` 确有 `.restricted` case，已显式处理）；`run-model-tests.sh` 全绿。
+真机重装后点一次同步，提示会自报属于哪一类。
+
+回滚：回退 `WorkoutKitBridge.swift` 与两处 UI 条件即可，无服务端改动、无数据迁移、无 API 契约变化。
+
+### 8.6.1 排查进展（2026-09-14 16:30）
+
+证据链按时间累积（每条都证伪一个分支）：
+
+| # | 证据 | 证伪了什么 |
+|---|---|---|
+| 1 | 真机点同步**没有系统弹窗** | "`notDetermined` 等用户点允许"——该状态下系统必然弹窗 |
+| 2 | 健康 → 数据访问与设备 → RAI **没有「体能训练 · 写入」这一项** | "用户曾点不允许"：iOS 只列出 App 请求过的类型，被拒会留下已决定的记录；没有该项 ⇒ **写入请求从未送达系统** |
+| 3 | 本地库只读副本 `source_category='apple_watch'`：`唐攀的Apple Watch`，`hardware:Watch6,2`（Series 6），`software:26.1`，最近一条 2026-08-15 | "本机没有配对 Apple Watch"——表在配对且在用，watchOS ≫ 10，满足排期前提 |
+
+三条的交集只剩一种：**写入授权请求提交失败或被系统丢弃**。最可疑的是 HealthKit **写入**说明
+（`NSHealthUpdateUsageDescription`）没有进最终 bundle —— 缺它时 HealthKit 拒绝写入请求，而
+`WorkoutScheduler.requestAuthorization()` 不抛错，"失败"就表现为无声、无弹窗、状态非 authorized，
+与"设备不支持"完全同形。
+
+故当时新增了一行临时诊断（`WorkoutKitBridge.diagnostics(state:)`），把
+`设备支持 / 授权状态 / 写入说明 / 读取说明` 四项实际情况附在提示文案第二行。
+**已于 17:25 删除**（见 §8.6.2）—— 诊断只应活在定位期间，不留在正式文案里。
+
+#### 16:36 真机诊断输出
+
+`设备支持=true 授权=notDetermined 写入说明=有 读取说明=有`
+
+逐条读：
+
+| 读数 | 结论 |
+|---|---|
+| `设备支持=true` | 证伪"Simulator／未配对 Apple Watch"分支（与上一节 #3 的库内证据一致） |
+| `写入说明=有 读取说明=有` | 证伪"`NSHealthUpdateUsageDescription` 没进 bundle"分支——两个 key 都在最终包内 |
+| `授权=notDetermined` | 系统从未就排期权限做过决定，且 `requestAuthorization()` 调用后**被静默忽略**：无弹窗、状态不变 |
+
+⚠️ 该行起初有一处**诊断盲区**（本轮已修）：`授权=` 报的是 `sync()` **调用前**读到的值；原 UI 流程在
+`requestAuthorization()` 返回 false 时保留**第一次** `sync()` 的结果，于是"问过之后是什么状态"从未被显示。
+现 `syncRequestingAuthorization(plan:)` 把两次读数一并带出（显示为 `授权=A→B`），并把"试 → 问 → 重试"
+整条流程收进 bridge，两处皮肤各只剩一行调用。
+
+下一步取决于 `→` 后面的值：`denied` ⇒ 系统抑制了弹窗（环境侧）；`notDetermined` ⇒ 请求未被真正执行，
+届时考虑改用 `HKHealthStore.requestAuthorization(toShare: [workoutType])` 自行发起——权限集不变，
+但触碰 AGENTS.md 的"不新增 HealthKit 写入"措辞，**需小唐确认后**再做。
+
+#### 17:20 后续：已恢复，但**根因未定性**
+
+小唐反馈同步已正常（未取到 `授权=A→B` 那一行，故恢复的触发点靠推断）。
+
+⚠️ **本次代码改动与功能恢复无关**，不要记成"改代码修好了"：`syncRequestingAuthorization` 与旧 UI 三行
+逻辑**功能等价**（多出的 `!deviceUnsupported` 短路在本机不生效——`设备支持=true`）。起作用的是
+**重装 App**，或重装前后的环境动作（重启 iPhone / 戴表解锁）。
+
+结论只到"**现象层已解、机制未明**"：WorkoutKit 排期授权卡死在 `notDetermined`、请求被系统静默忽略，
+**重装即复位**。将来复发，第一步仍是重装 App。
+
+仍待验收：系统「体能训练」中是否出现 RAI 专区、分段与提醒是否正确（§8.5 的真机项）。
+
+### 8.6.2 收尾：删诊断 + 修写入说明（2026-09-14 17:25）
+
+1. **删除临时诊断**：移除 `WorkoutKitBridge.diagnostics(state:)` 与 `SyncOutcome.authorizationStateAfter`；
+   `requestAuthorization()` 恢复为返回 `Bool`；`syncRequestingAuthorization(plan:)` 简化为
+   "试 → 未授权且设备支持则问一次 → 成功则重试"三行。顺带删掉因此失去消费者的
+   `SyncOutcome.needsAuthorization` 常量（`sync()` 拆分出 `unsupportedDevice` 后没人再用它）。
+   `authorizationState` **保留**：`summary` 的四态文案仍依赖它。
+2. **修复 `Info.plist` 写入说明**。原句"RAI 不向 Apple 健康写入数据。"与 WorkoutKit 需要
+   「体能训练」写入权限直接矛盾，改为：
+
+   > RAI 使用「体能训练」写入权限，把你的每周课表排期到 Apple Watch 的「体能训练」中；
+   > 不会写入或修改你的跑步记录、心率等健康数据。
+
+   只改 `RAI/Info.plist`，**未动 `project.pbxproj`** —— 16:36 的诊断已证明该 key 确实进到了最终包里
+   （`写入说明=有`），无需再补 `INFOPLIST_KEY_NSHealthUpdateUsageDescription`。
+
+验收：`plutil -lint apps/ios/RAI/Info.plist` → OK；`typecheck-ios.sh` → 36 文件 0 error 0 warning；
+`run-model-tests.sh` 全绿；源码内 `diagnostics` / `authorizationStateAfter` 零命中。
+
+回滚：文案改回原句；诊断相关函数与字段按 §8.6 / §8.6.1 的表复原。
+
+⚠️ 仍未定案：`RAI/Info.plist:22` 的 `NSHealthUpdateUsageDescription` 文案是"RAI 不向 Apple 健康写入数据。"，
+与 WorkoutKit 排期需要「体能训练」写入权限自相矛盾（该 key 可能被系统授权弹窗引用）。因涉及对外声明，
+未擅改，待小唐确认。
+
