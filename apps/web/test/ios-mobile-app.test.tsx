@@ -1,12 +1,13 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { WorkoutListItem } from "@rai/api-contracts";
+import type { MobileStepGoal, WorkoutListItem } from "@rai/api-contracts";
 
 const { useRemoteMock } = vi.hoisted(() => ({ useRemoteMock: vi.fn() }));
 vi.mock("../src/hooks.js", () => ({ useRemote: useRemoteMock }));
 
 import { IosMobileApp } from "../src/IosMobileApp.js";
+import { structureSummary } from "../src/ios/shared.js";
 
 const remote = (data: unknown, overrides: Record<string, unknown> = {}) => ({
   data,
@@ -556,6 +557,43 @@ describe("iOS mobile detail navigation", () => {
     expect(screen.getByText("7h00min")).toBeTruthy();
   });
 
+  it("shows the interval breakdown on the next-session card when the server sends a structure", () => {
+    useRemoteMock.mockImplementation((path: string) => {
+      if (path === "/v1/mobile/today") {
+        return remote({
+          ...today,
+          nextSession: {
+            ...today.nextSession,
+            kind: "interval",
+            title: "间歇 / VO₂",
+            structure: {
+              warmup: { purpose: "warmup", goal: { type: "time", seconds: 600 }, alert: null },
+              blocks: [
+                {
+                  iterations: 6,
+                  steps: [
+                    { purpose: "work", goal: { type: "distance", meters: 800 }, alert: { kind: "pace", lower: 240, upper: 265 } },
+                    { purpose: "recovery", goal: { type: "time", seconds: 120 }, alert: null }
+                  ]
+                }
+              ],
+              cooldown: { purpose: "cooldown", goal: { type: "time", seconds: 600 }, alert: null }
+            }
+          }
+        }, { dataPath: path });
+      }
+      return remote(today, { dataPath: path });
+    });
+    renderApp("/");
+    expect(screen.getByText("分段")).toBeTruthy();
+    expect(screen.getByText("6 × 800m")).toBeTruthy();
+  });
+
+  it("omits the breakdown row when the prescription has no structure", () => {
+    renderApp("/");
+    expect(screen.queryByText("分段")).toBeNull();
+  });
+
   it("opens physiology detail from the body status card", () => {
     renderApp("/");
     fireEvent.click(screen.getByRole("button", { name: "身体指标" }));
@@ -692,5 +730,42 @@ describe("iOS mobile detail navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "个人资料" }));
     expect(screen.getByRole("heading", { name: "设置" })).toBeTruthy();
     expect(screen.getByLabelText("每周跑量（km）")).toBeTruthy();
+  });
+});
+
+describe("structureSummary", () => {
+  // Mirrored by `WorkoutPlanMapper.structureSummary` in
+  // `apps/ios/RAI/WorkoutPlanMapper.swift`. The same cases are asserted in
+  // `apps/ios/tests/WorkoutPlanMapperRegression.swift`, so the two renderings of
+  // a prescription cannot drift apart without a test failing.
+  const summary = (iterations: number, goal: MobileStepGoal): string =>
+    structureSummary({
+      warmup: null,
+      blocks: [{ iterations, steps: [{ purpose: "work", goal, alert: null }] }],
+      cooldown: null
+    });
+
+  it("renders a distance prescription as reps × metres", () => {
+    expect(summary(6, { type: "distance", meters: 800 })).toBe("6 × 800m");
+  });
+
+  it("uses one decimal at kilometre scale", () => {
+    expect(summary(1, { type: "distance", meters: 5000 })).toBe("1 × 5.0km");
+  });
+
+  it("renders a timed prescription in minutes", () => {
+    expect(summary(3, { type: "time", seconds: 480 })).toBe("3 × 8分");
+  });
+
+  it("keeps sub-minute times in seconds", () => {
+    expect(summary(2, { type: "time", seconds: 45 })).toBe("2 × 45秒");
+  });
+
+  it("falls back to a set count for an open goal", () => {
+    expect(summary(4, { type: "open" })).toBe("4 组");
+  });
+
+  it("returns nothing without a structure", () => {
+    expect(structureSummary(null)).toBe("");
   });
 });

@@ -10,7 +10,7 @@ import type {
 import { Link } from "react-router-dom";
 
 import { DashboardPerformanceChart } from "../components/DashboardPerformanceChart.js";
-import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
+import { EmptyBlock, ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { StatusBadge } from "../components/StatusBadge.js";
 import { WorkoutTable } from "../components/WorkoutTable.js";
 import { pace } from "../format.js";
@@ -181,7 +181,14 @@ export function DashboardPage() {
             全部训练 <ArrowRight size={15} />
           </Link>
         </div>
-        <WorkoutTable items={data.recentWorkouts} compact />
+        {data.recentWorkouts.length > 0 ? (
+          <WorkoutTable items={data.recentWorkouts} compact />
+        ) : (
+          <EmptyBlock
+            title="还没有训练记录"
+            body="前往数据页导入 Apple Health 导出后，这里会显示最近六次跑步。"
+          />
+        )}
       </section>
     </div>
   );

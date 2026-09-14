@@ -191,8 +191,15 @@ function AppNavigation() {
   );
 }
 
+/**
+ * iOS 外壳与浏览器外壳必须分成两个组件：原先在本组件内提前 return，
+ * 会让下面的 useRemote/useRef/useEffect/useLocation 变成条件 Hook，
+ * 一旦 dataset.shell 在会话中变化就会触发 React 的 Hook 顺序崩溃。
+ */
 export function App() {
-  const isIosShell = typeof document !== "undefined" && document.documentElement.dataset.shell === "ios";
+  const isIosShell =
+    typeof document !== "undefined" &&
+    document.documentElement.dataset.shell === "ios";
   if (isIosShell) {
     return (
       <Suspense fallback={null}>
@@ -200,7 +207,12 @@ export function App() {
       </Suspense>
     );
   }
-  const health = useRemote<HealthResponse>("/v1/health", true, true, false);
+  return <BrowserApp />;
+}
+
+function BrowserApp() {
+  // 10s 超时：本地 API 挂起时也要让首屏离开"正在检查本地数据库"，落到可重试的错误态。
+  const health = useRemote<HealthResponse>("/v1/health", true, true, false, 10000);
   const mainRef = useRef<HTMLElement>(null);
   const previousPathname = useRef<string | null>(null);
   useEffect(() => {

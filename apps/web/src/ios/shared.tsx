@@ -1,4 +1,4 @@
-import type { TrainingStatusCode, WorkoutListItem } from "@rai/api-contracts";
+import type { MobileSessionStructure, TrainingStatusCode, WorkoutListItem } from "@rai/api-contracts";
 import { type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -157,6 +157,31 @@ export function paceRange(lower: number | null, upper: number | null): string {
 export function percent(value: number | null | undefined): string {
   if (value == null) return "--";
   return `${Math.round(value * 100)}%`;
+}
+
+/**
+ * One-line summary of a prescription, e.g. `6 × 800m`.
+ *
+ * Mirrors `WorkoutPlanMapper.structureSummary` in `apps/ios/RAI/WorkoutPlanMapper.swift`
+ * — the two must stay in step. Only the *display* of a prescription is derived
+ * here; the prescription itself (kind → zone, pace and heart-rate ranges) is
+ * always read from the server and never re-derived on a client.
+ */
+export function structureSummary(structure: MobileSessionStructure | null | undefined): string {
+  const block = structure?.blocks?.[0];
+  const work = block?.steps.find((step) => step.purpose === "work") ?? block?.steps[0];
+  if (!block || !work) return "";
+  const sets = Math.max(1, block.iterations);
+  const goal = work.goal;
+  if (goal.type === "distance") {
+    const text = goal.meters >= 1000 ? `${(goal.meters / 1000).toFixed(1)}km` : `${Math.round(goal.meters)}m`;
+    return `${sets} × ${text}`;
+  }
+  if (goal.type === "time") {
+    const text = goal.seconds >= 60 ? `${Math.round(goal.seconds / 60)}分` : `${Math.round(goal.seconds)}秒`;
+    return `${sets} × ${text}`;
+  }
+  return `${sets} 组`;
 }
 
 export function EmptyState({ label }: { label: string }) {

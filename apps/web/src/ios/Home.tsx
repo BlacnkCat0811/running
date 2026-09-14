@@ -7,7 +7,7 @@ import { notifyDataUpdated } from "../events.js";
 import { duration, explanation, pace, sessionKind, sleepDuration } from "../format.js";
 import { useRemote } from "../hooks.js";
 import { hasNativeBridge, postNative, useNativeStatus } from "./native.js";
-import { Card, IosLoading } from "./shared.js";
+import { Card, IosLoading, structureSummary } from "./shared.js";
 
 export function IosHome() {
   const navigate = useNavigate();
@@ -97,6 +97,7 @@ function MorningBlocks({
   onLocked: () => void;
 }) {
   const session = data.nextSession;
+  const segments = structureSummary(session.structure);
   return (
     <>
       <section className={`ios-verdict-card ${data.verdict.tone}`}>
@@ -138,6 +139,12 @@ function MorningBlocks({
                     : `${Math.round(session.heartRateBpmLower)}–${session.heartRateBpmUpper == null ? "" : Math.round(session.heartRateBpmUpper)}`}
                 </b>
               </div>
+              {segments ? (
+                <div className="ios-fact">
+                  <small>分段</small>
+                  <b>{segments}</b>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {emptyToday ? (

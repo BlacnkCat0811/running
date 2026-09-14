@@ -25,7 +25,11 @@ export function GlobalTaskStatus() {
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // 后台标签页不发起轮询，避免隐藏时仍以 1.5-7s 的节奏请求 /v1/runtime-status。
+    const isHidden = () =>
+      typeof document !== "undefined" && document.visibilityState === "hidden";
     const poll = async () => {
+      if (isHidden()) return;
       try {
         const next = await api<RuntimeStatusResponse>("/v1/runtime-status");
         if (cancelled) return;
@@ -77,10 +81,18 @@ export function GlobalTaskStatus() {
         timer = setTimeout(() => void poll(), 7000);
       }
     };
+    // 回到前台立即补一次，避免隐藏期间的状态跃迁被漏掉。
+    const onVisibilityChange = () => {
+      if (isHidden() || cancelled) return;
+      if (timer) clearTimeout(timer);
+      void poll();
+    };
     void poll();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

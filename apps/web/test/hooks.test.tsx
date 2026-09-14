@@ -80,4 +80,42 @@ describe("useRemote", () => {
     await waitFor(() => expect(result.current.data).toEqual({ page: 2 }));
     expect(result.current.dataPath).toBe("/workouts?offset=30");
   });
+
+  // fetch 没有默认超时：本地 API 挂起时首屏会永远停在"正在检查本地数据库"。
+  it("fails with a timeout message when the request never settles", async () => {
+    vi.useFakeTimers();
+    try {
+      apiMock.mockImplementation(() => new Promise(() => {}));
+      const { result } = renderHook(() =>
+        useRemote<{ ready: boolean }>("/v1/health", true, false, true, 5000),
+      );
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => { vi.advanceTimersByTime(5000); });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.data).toBeNull();
+      expect(result.current.error).toBe("请求超时（超过 5 秒）");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not time out a request that resolves in time", async () => {
+    vi.useFakeTimers();
+    try {
+      apiMock.mockResolvedValue({ ready: true });
+      const { result } = renderHook(() =>
+        useRemote<{ ready: boolean }>("/v1/health", true, false, true, 5000),
+      );
+
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { vi.advanceTimersByTime(60000); });
+
+      expect(result.current.data).toEqual({ ready: true });
+      expect(result.current.error).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

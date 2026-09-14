@@ -27,6 +27,11 @@ const chromeCandidates = [
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+  // macOS：原先只有 Windows 与 Linux 路径，导致在 Mac 上 `npm run test:e2e:web`
+  // 必然报"未找到可用于 E2E 的本机 Chrome 或 Edge"，无法本地复现 CI 结果。
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
   "/usr/bin/google-chrome",
   "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium-browser",

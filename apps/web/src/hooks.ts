@@ -7,6 +7,7 @@ export function useRemote<T>(
   enabled = true,
   backgroundRefresh = false,
   refreshOnDataUpdate = true,
+  timeoutMs: number | null = null,
 ) {
   const [data, setData] = useState<T | null>(null);
   const dataRef = useRef<T | null>(null);
@@ -55,8 +56,23 @@ export function useRemote<T>(
     setError(null);
     const controller = new AbortController();
     controllerRef.current = controller;
+    // fetch 本身没有超时：API 无响应时首屏会永久停在 loading。仅在显式配置 timeoutMs 时启用。
+    // 用竞速而不是只 abort：底层若不响应 abort 信号，光 abort 不会让 await 结束。
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const timeout =
+      timeoutMs === null
+        ? null
+        : new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => {
+              timedOut = true;
+              controller.abort();
+              reject(new Error(`请求超时（超过 ${Math.round(timeoutMs / 1000)} 秒）`));
+            }, timeoutMs);
+          });
     try {
-      const next = await api<T>(path, { signal: controller.signal });
+      const request = api<T>(path, { signal: controller.signal });
+      const next = await (timeout === null ? request : Promise.race([request, timeout]));
       if (requestId !== requestIdRef.current) return true;
       dataRef.current = next;
       setData(next);
@@ -64,13 +80,19 @@ export function useRemote<T>(
       return true;
     } catch (caught) {
       if (requestId !== requestIdRef.current) return true;
+      if (timedOut) {
+        setError(caught instanceof Error ? caught.message : "请求超时");
+        return false;
+      }
       if (controller.signal.aborted) return false;
       setError(caught instanceof Error ? caught.message : "请求失败");
       return false;
     } finally {
+      // 清掉定时器：请求先完成时超时 Promise 永远不会 reject，不会产生未处理的拒绝。
+      if (timer !== null) clearTimeout(timer);
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [backgroundRefresh, enabled, path]);
+  }, [backgroundRefresh, enabled, path, timeoutMs]);
   useEffect(() => {
     void reload();
     return () => controllerRef.current?.abort();

@@ -59,3 +59,37 @@ describe("GlobalTaskStatus prediction lifecycle", () => {
     expect(notifyDataUpdatedMock).not.toHaveBeenCalled();
   });
 });
+
+// 后台标签页原先仍以 1.5-7s 的节奏轮询，长时间挂着会持续打服务端。
+describe("GlobalTaskStatus visibility", () => {
+  const idle = { busy: false, importJob: null, recomputeJob: null, predictionModelJob: null };
+  const forceVisibility = (value: DocumentVisibilityState) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value });
+  };
+
+  afterEach(() => {
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  it("stops polling while hidden and catches up on return to the foreground", async () => {
+    vi.useFakeTimers();
+    forceVisibility("hidden");
+    apiMock.mockResolvedValue(idle);
+
+    render(<MemoryRouter><GlobalTaskStatus /></MemoryRouter>);
+    await act(async () => { await Promise.resolve(); });
+    expect(apiMock).not.toHaveBeenCalled();
+
+    // 隐藏期间推进再多时间也不应产生请求。
+    await act(async () => { vi.advanceTimersByTime(60000); });
+    expect(apiMock).not.toHaveBeenCalled();
+
+    forceVisibility("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(apiMock).toHaveBeenCalledTimes(1);
+  });
+});

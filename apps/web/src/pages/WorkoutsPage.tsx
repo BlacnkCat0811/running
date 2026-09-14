@@ -79,10 +79,12 @@ export function WorkoutsPage() {
       sanitizedParams.set(key, candidate);
   }
   if (offset > 0) sanitizedParams.set("offset", String(offset));
+  // 依赖里只能放字符串：sanitizedParams 每次渲染都是新对象，会让 effect 每帧执行。
+  const sanitizedQuery = sanitizedParams.toString();
   useEffect(() => {
-    if (searchParams.toString() !== sanitizedParams.toString())
-      setSearchParams(sanitizedParams, { replace: true });
-  }, [searchParams, sanitizedParams, setSearchParams]);
+    if (searchParams.toString() === sanitizedQuery) return;
+    setSearchParams(new URLSearchParams(sanitizedQuery), { replace: true });
+  }, [searchParams, sanitizedQuery, setSearchParams]);
   const value = (key: (typeof filterKeys)[number]) =>
     sanitizedParams.get(key) ?? "";
   const update = (key: string, nextValue: string) => {
