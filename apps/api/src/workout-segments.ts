@@ -16,19 +16,24 @@ import type { PlanHistoryRevision, PlanPushRecord } from "./mobile-goals.js";
  * Segment assembly for one run.
  *
  * The detail page used to show kilometre splits and nothing else, because the
- * only segmentation the pipeline could express was `nextBoundary = 1000`. Two
- * producers can describe what was actually run:
+ * only segmentation the pipeline could express was `nextBoundary = 1000`. Three
+ * producers can describe what was actually run, in this order of authority:
  *
- * 1. the stored weekly plan, replayed onto the measured speed track;
- * 2. the Watch's own `HKWorkoutEvent` lap/segment boundaries.
+ * 1. **the steps the Watch itself recorded** — `HKWorkoutActivity`, one per
+ *    prescription step, read back out of the workout's metadata. This is a
+ *    measurement, and it is what settles the boundaries;
+ * 2. **the stored weekly plan, replayed onto the measured speed track** — the
+ *    source of the labels and goals, and the only producer available for runs
+ *    the Watch recorded without a step layer (an older build, an import that
+ *    never carried the entry, a multisport session we decline);
+ * 3. **the Watch's own `HKWorkoutEvent` lap/segment boundaries** — the last
+ *    resort, because real exports show those events are auto-lap partitions
+ *    (see {@link resolveSegmentation}), not steps.
  *
- * The plan ranks first because the panel is titled 课表分段: what it owes the
- * reader is the prescription's steps with measured numbers. Producer 2 was
- * originally treated as the more authoritative of the two — a measurement rather
- * than a replay — but real exports do not support that reading (see
- * {@link resolveSegmentation}), so it survives only as the fallback for runs no
- * stored plan can explain. When neither is available the caller keeps the
- * kilometre splits and says why.
+ * The panel is titled 课表分段, so what it owes the reader is the
+ * prescription's steps with measured numbers. Producers 1 and 2 split that job:
+ * the measurement says *where* each step ended, the plan says *what it was*.
+ * When neither is available the caller keeps the kilometre splits and says why.
  */
 
 /** A speed-track sample reduced to what segment arithmetic needs. */
@@ -105,6 +110,82 @@ const UNPLANNED_LABEL = "自由训练";
  * would be worse than showing nothing.
  */
 const MIN_SEGMENT_MS = 5_000;
+
+/** One step the Watch recorded, on the run's own timeline. */
+export interface MeasuredStep {
+  startMs: number;
+  endMs: number;
+}
+
+/**
+ * The metadata key the iOS export writes its activity layer under.
+ *
+ * `HKWorkoutActivity` covers the whole workout for an ordinary run and gains
+ * one entry per prescription step once a structured session is on the Watch, so
+ * this entry *is* the measured step layout. The name still says `Diag` because
+ * that is what it was called when it shipped (`810acd4`) and renaming it would
+ * cost another app build; it is a contract field now.
+ */
+export const STRUCTURE_METADATA_KEY = "RAIWorkoutStructureDiagV1";
+
+const numberOf = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+/**
+ * Read the Watch's recorded steps out of a workout's metadata.
+ *
+ * Offsets in the entry are milliseconds from the workout's start, so they are
+ * re-anchored onto the caller's timeline here — no date parsing, and a session
+ * whose start drifts a fraction from the workout row still lines up.
+ *
+ * Everything about this function is "decline rather than guess": a payload that
+ * does not parse, an activity missing a field, steps that overlap, or activities
+ * of differing types (a multisport session puts different sports in one
+ * workout, and labelling them as run steps would be a lie) all return `[]`,
+ * which sends the caller to the replay it used before.
+ */
+export const measuredStepsOf = (
+  metadataJson: string | null,
+  startedAtMs: number,
+  endedAtMs: number
+): MeasuredStep[] => {
+  if (metadataJson === null) return [];
+  let payload: unknown;
+  try {
+    const metadata = JSON.parse(metadataJson) as Record<string, unknown> | null;
+    const inner = metadata?.[STRUCTURE_METADATA_KEY];
+    // The entry is a JSON string nested inside the workout's metadata object.
+    if (typeof inner !== "string") return [];
+    payload = JSON.parse(inner);
+  } catch {
+    return [];
+  }
+  const activities = (payload as { activities?: unknown } | null)?.activities;
+  if (!Array.isArray(activities)) return [];
+
+  const activityTypes = new Set<number>();
+  const steps: MeasuredStep[] = [];
+  for (const activity of activities) {
+    const record = activity as Record<string, unknown>;
+    const offsetMs = numberOf(record.startMs);
+    const durationMs = numberOf(record.durationMs);
+    const activityTypeRaw = numberOf(record.activityTypeRaw);
+    if (offsetMs === null || durationMs === null || activityTypeRaw === null) return [];
+    activityTypes.add(activityTypeRaw);
+    const startMs = startedAtMs + offsetMs;
+    const endMs = Math.min(endedAtMs, startMs + durationMs);
+    if (startMs < startedAtMs || startMs >= endedAtMs) continue;
+    if (endMs - startMs < MIN_SEGMENT_MS) continue;
+    steps.push({ startMs, endMs });
+  }
+  if (activityTypes.size > 1) return [];
+
+  steps.sort((left, right) => left.startMs - right.startMs);
+  for (let index = 1; index < steps.length; index += 1) {
+    if (steps[index]!.startMs < steps[index - 1]!.endMs) return [];
+  }
+  return steps;
+};
 
 /**
  * Turn Watch lap/segment events into ascending time boundaries.
@@ -436,38 +517,113 @@ const eventFootnote = (segments: number): string =>
   segments === 0 ? "" : `；手表另有 ${segments} 段 lap/segment 事件未参与分段`;
 
 /**
+ * Describe the measured branch's provenance, and say so when the Watch recorded
+ * a different number of steps than the plan asked for — that gap is real (the
+ * runner stopped early, or added an interval) and the reader should see it
+ * rather than have it papered over by a replay.
+ */
+const measuredNote = (
+  measured: number,
+  plan: MatchedPlanDay | null,
+  plannedSteps: number,
+  eventSegments: number
+): string => {
+  if (plan === null) {
+    return `分段由手表记录的 ${measured} 个步骤实测得到${eventFootnote(eventSegments)}`;
+  }
+  const mismatch = measured === plannedSteps ? "" : `；课表为 ${plannedSteps} 步`;
+  return `分段由手表记录的 ${measured} 个训练步骤实测得到（课表 ${plan.localDate} 第 ${
+    plan.revision
+  } 版）${mismatch}${eventFootnote(eventSegments)}`;
+};
+
+/**
  * Decide the segment boundaries for one run and describe each of them.
  *
- * Order of authority: the plan's own steps first, the Watch's lap/segment events
- * second, nothing third. Returning `[]` plus a `note` is the third case — the
- * detail page must say why there are no segments rather than quietly falling
- * back to kilometres.
+ * Order of authority: the Watch's own measured steps first, the plan's steps
+ * replayed onto the speed track second, the Watch's lap/segment events third,
+ * nothing fourth. Returning `[]` plus a `note` is the fourth case — the detail
+ * page must say why there are no segments rather than quietly falling back to
+ * kilometres.
  *
- * The plan is the skeleton because this panel is 课表分段 and the prescription's
- * steps are what it owes the reader. The Watch's `HKWorkoutEventTypeSegment`
- * events look like the more authoritative record — a measurement instead of a
- * replay — and this code used to rank them first. Real exports do not support
- * that: the events for the 2026-09-14 run are *two overlapping partitions of the
- * whole workout*, seven of ≈1 km and four of ≈1.6 km, which is what the Watch's
- * own lap settings produce, not what a prescription asks for. The prescription's
- * step boundaries (300 s and ≈1 281 s) appear nowhere in that event set. Ranking
- * the events first therefore turned a four-step session into ten rows, and
- * re-labelled the kilometre splits — already rendered under this panel — as
- * 课表 step names. They remain the fallback for runs no stored plan explains,
- * where a rough segmentation beats none.
+ * **Why the measurement leads.** The panel is 课表分段, and a measured boundary
+ * beats a replayed one whenever both exist. 2026-09-14 is the proof: the Watch's
+ * recorded steps end at 300.000 s / 1 283.456 s / 1 583.075 s against a
+ * prescription of warmup 300 s + work 2 600 m + cooldown 300 s, while the replay
+ * puts those ends at 300 s / 1 281 s / 1 581 s — right to within 2.5 s, but
+ * derived from the plan instead of from what the Watch saw, and only as good as
+ * whichever revision of the plan happens to be on file. The measurement also
+ * removes that dependency from this panel entirely.
+ *
+ * **Why the events are last.** `HKWorkoutEventTypeSegment` looks like the more
+ * authoritative record — a measurement instead of a replay — and this code used
+ * to rank it first. Real exports do not support that reading: the events for
+ * 2026-09-14 are *two overlapping partitions of the whole workout*, seven of
+ * ≈1 km and four of ≈1.6 km, which is what the Watch's own lap settings produce,
+ * not what a prescription asks for. The prescription's boundaries (300 s and
+ * ≈1 281 s) appear nowhere in that event set. Ranking the events first therefore
+ * turned a four-step session into ten rows, and re-labelled the kilometre splits
+ * — already rendered under this panel — as 课表 step names. They remain the
+ * fallback for runs no stored plan explains, where a rough segmentation beats
+ * none.
  */
 export const resolveSegmentation = (input: {
   startedAtMs: number;
   endedAtMs: number;
   events: StoredWorkoutEventInterval[];
+  /** Omit when the run carries no measured step layer (see {@link measuredStepsOf}). */
+  steps?: MeasuredStep[];
   plan: MatchedPlanDay | null;
   track: SegmentTrack;
 }): Segmentation => {
   const { startedAtMs, endedAtMs, events, plan, track } = input;
+  const steps = input.steps ?? [];
   const layout = plan ? layoutStructure(plan.structure, track, startedAtMs, endedAtMs) : null;
   const eventBoundaries = eventBoundariesOf(events, startedAtMs, endedAtMs);
   /** What the Watch's events *would* have drawn, had they been used. */
   const eventSegments = eventBoundaries.length >= 3 ? eventBoundaries.length - 1 : 0;
+
+  if (steps.length >= 2) {
+    const planned = plan ? flattenStructure(plan.structure) : [];
+    // The first measured step starts where the run starts; anchoring on
+    // `startedAtMs` keeps the head of the run inside step one even if the entry's
+    // own origin drifts by a fraction.
+    const boundaries = [startedAtMs, ...steps.slice(1).map((step) => step.startMs)];
+    const descriptors: SegmentDescriptor[] = steps.map((_step, index) => {
+      const plannedStep = planned[index];
+      // More measured steps than the plan has: the extra ones are real rows the
+      // plan cannot name. Say "第 N 步" rather than borrow a label.
+      if (plannedStep === undefined) {
+        return { label: `第 ${index + 1} 步`, purpose: "unplanned" as const, goal: null, alert: null };
+      }
+      return {
+        label: plannedStep.label,
+        purpose: plannedStep.step.purpose,
+        goal: plannedStep.step.goal,
+        alert: plannedStep.step.alert
+      };
+    });
+    const lastStep = steps[steps.length - 1]!;
+    // "结束后又跑了一段" is a real segment, not noise: emit it explicitly.
+    if (endedAtMs - lastStep.endMs >= MIN_SEGMENT_MS) {
+      boundaries.push(lastStep.endMs);
+      descriptors.push({ label: UNPLANNED_LABEL, purpose: "unplanned", goal: null, alert: null });
+    }
+    boundaries.push(endedAtMs);
+    const explained = Math.min(1, (lastStep.endMs - startedAtMs) / (endedAtMs - startedAtMs));
+    return {
+      boundaries,
+      descriptors,
+      plan: plan
+        ? planMatch(
+            plan,
+            explained,
+            steps.length < planned.length ? "手表记录的步骤少于课表步骤" : "按手表记录的步骤实测"
+          )
+        : null,
+      note: measuredNote(steps.length, plan, planned.length, eventSegments)
+    };
+  }
 
   if (layout && layout.steps.length >= 2) {
     const boundaries = layout.steps.map((step) => step.startMs);

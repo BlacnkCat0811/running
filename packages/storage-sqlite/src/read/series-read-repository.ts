@@ -447,6 +447,24 @@ export class SqliteSeriesReadRepository {
     });
   }
 
+  /**
+   * A workout's raw `metadata_json`, or `null` when the row is gone.
+   *
+   * The steps a structured workout was actually run with are **not** a table:
+   * the export carries them as one metadata entry on the workout, which is how
+   * `HKWorkout.workoutActivities` reaches the database at all. Reading that
+   * entry back here keeps this repository a data accessor — deciding what the
+   * entry means is the caller's job (`measuredStepsOf` in the API) — and
+   * promoting it to columns would buy nothing until something other than the
+   * segment panel needs per-step rows.
+   */
+  workoutMetadata(workoutId: string): string | null {
+    const row = this.database
+      .prepare("SELECT metadata_json AS metadataJson FROM workouts WHERE id = ?")
+      .get(workoutId) as { metadataJson?: unknown } | undefined;
+    return typeof row?.metadataJson === "string" ? row.metadataJson : null;
+  }
+
   workoutSplits(
     startedAt: string,
     endedAt: string,

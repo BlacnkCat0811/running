@@ -57,6 +57,7 @@ import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
 import {
   matchPlanDay,
+  measuredStepsOf,
   resolveSegmentation,
   toWorkoutSegments,
   type MatchedPlanDay,
@@ -891,13 +892,15 @@ export class RaiReadStore {
   }
 
   /**
-   * Segments for one run: the matched plan's own steps first, the Watch's
-   * lap/segment boundaries second, an explicit explanation third.
+   * Segments for one run: the Watch's measured steps first, the matched plan's
+   * steps replayed onto the speed track second, the Watch's lap/segment
+   * boundaries third, an explicit explanation fourth.
    *
-   * The kilometre split stays as a fallback, but it is no longer the only story
-   * the detail page can tell. Both producers measure against the same scaled
-   * speed track ({@link SqliteSeriesReadRepository.speedTrack}), so a
-   * plan-derived segment and an event-derived one are comparable numbers.
+   * The measurement decides *where* each step ended and the plan decides *what
+   * it was*, so the two are complements rather than rivals. Both producers
+   * measure against the same scaled speed track
+   * ({@link SqliteSeriesReadRepository.speedTrack}), so a measured step and a
+   * replayed one are comparable numbers.
    */
   private segmentRun(
     session: {
@@ -919,6 +922,14 @@ export class RaiReadStore {
       return { segments: [], plan: null, note: "这次训练的时间区间无效，无法生成分段" };
     }
     const events = this.seriesRepository.workoutEventIntervals(session.canonicalWorkoutId);
+    // The Watch's own step layer, when the export carried one. Absent for older
+    // runs and for imports that never came through the app, which is why the
+    // replay below still exists.
+    const steps = measuredStepsOf(
+      this.seriesRepository.workoutMetadata(session.canonicalWorkoutId),
+      startedAtMs,
+      endedAtMs
+    );
     const track = this.seriesRepository.speedTrack(
       session.startedAt,
       session.endedAt,
@@ -942,6 +953,7 @@ export class RaiReadStore {
       startedAtMs,
       endedAtMs,
       events,
+      steps,
       plan,
       track: { samples: track.samples, officialMeters: track.officialMeters }
     });

@@ -16,9 +16,11 @@ import { RaiDatabase } from "@rai/storage-sqlite";
 import { RaiReadStore } from "../src/data.js";
 import type { PlanHistoryRevision, PlanPushRecord } from "../src/mobile-goals.js";
 import {
+  STRUCTURE_METADATA_KEY,
   assemblePlanCandidates,
   eventBoundariesOf,
   matchPlanDay,
+  measuredStepsOf,
   resolveSegmentation,
   timeAtMeters,
   type PlanCandidateDay,
@@ -90,7 +92,10 @@ const syntheticTrack = (): SegmentTrack => ({
 });
 
 /** A workout + session + speed/HR records matching `PHASES`. */
-const seedRun = async (events: Array<{ type: string; atMs: number; durationSeconds: number }>) => {
+const seedRun = async (
+  events: Array<{ type: string; atMs: number; durationSeconds: number }>,
+  metadataJson = "{}"
+) => {
   const root = mkdtempSync(join(tmpdir(), "rai-segments-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await RaiDatabase.open(databasePath);
@@ -105,14 +110,15 @@ const seedRun = async (events: Array<{ type: string; atMs: number; durationSecon
         start_at, end_at, duration_seconds, indoor, metadata_json, raw_attributes_json,
         is_canonical
       ) VALUES (?, 'HKWorkoutActivityTypeRunning', ?, 'apple_watch', '26.6', 'Watch',
-        ?, ?, ?, 0, '{}', '{}', 1)
+        ?, ?, ?, 0, ?, '{}', 1)
     `)
     .run(
       workoutId,
       sourceName,
       new Date(RUN_START_MS).toISOString(),
       new Date(RUN_START_MS + TOTAL_SECONDS * 1000).toISOString(),
-      TOTAL_SECONDS
+      TOTAL_SECONDS,
+      metadataJson
     );
   database
     .prepare(`
@@ -316,6 +322,194 @@ test("does not let two overlapping lap partitions explode a four-step session", 
     read.close();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+/**
+ * The step layer the Watch itself recorded for that same run, copied out of
+ * `workouts.metadata_json` on 2026-09-15. Three activities against a three-step
+ * prescription: warmup `time 300 s`, work `distance 2 600 m`, cooldown
+ * `time 300 s`. The boundaries land at 300.000 s and 1 283.456 s, and the
+ * cooldown ends 0.4 s early because the workout was stopped.
+ */
+const REAL_STEP_LAYER = {
+  activityCount: 3,
+  activities: [
+    { startMs: 0, durationMs: 300_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: ["WOIntervalStepKeyPath"] },
+    { startMs: 300_000, durationMs: 983_456, activityTypeRaw: 37, locationRaw: 3, metadataKeys: ["WOIntervalStepKeyPath"] },
+    { startMs: 1_283_456, durationMs: 299_619, activityTypeRaw: 37, locationRaw: 3, metadataKeys: ["WOIntervalStepKeyPath"] }
+  ]
+};
+
+/** A workout's `metadata_json`, nested exactly as the export writes it. */
+const workoutMetadata = (payload: unknown): string =>
+  JSON.stringify({ [STRUCTURE_METADATA_KEY]: JSON.stringify(payload) });
+
+test("measures the steps the Watch recorded instead of replaying the plan", async () => {
+  const { root, databasePath, sessionId } = await seedRun(
+    REAL_WATCH_EVENTS,
+    workoutMetadata(REAL_STEP_LAYER)
+  );
+  const read = new RaiReadStore(databasePath);
+  try {
+    const series = read.workoutSeries(sessionId, [planDay()]);
+    assert.ok(series);
+    assert.equal(series.segments.length, 4);
+    // Labels and goals still come from the prescription; only the boundaries are
+    // measured. That split is the whole design.
+    assert.deepEqual(
+      series.segments.map((segment) => segment.label),
+      ["热身", "训练", "整理放松", "自由训练"]
+    );
+    assert.equal(series.segments[0]?.goalSeconds, 300);
+    assert.equal(series.segments[1]?.goalMeters, 2600);
+    // The measured ends, not the replayed ones: the plan replay puts these at
+    // 1 281 s / 1 581 s, so these three numbers are the proof it was used.
+    assert.deepEqual(
+      series.segments.map((segment) => Math.round(segment.startOffsetSeconds)),
+      [0, 300, 1283, 1583]
+    );
+    assert.deepEqual(
+      series.segments.map((segment) => Math.round(segment.durationSeconds)),
+      [300, 983, 300, 768]
+    );
+    // Same four phases, re-cut 2.5 s later: 6 m of the cooldown moves into the
+    // work step, and the free stretch loses 5 m.
+    assert.deepEqual(
+      series.segments.map((segment) => Math.round(segment.distanceMeters)),
+      [773, 2606, 774, 1898]
+    );
+    assert.match(series.segmentNote ?? "", /分段由手表记录的 3 个训练步骤实测得到/);
+    assert.match(series.segmentNote ?? "", /手表另有 10 段 lap\/segment 事件未参与分段/);
+    assert.equal(series.segmentPlan?.reason, "按手表记录的步骤实测");
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a measured step layer that disagrees with the plan wins, and says so", async () => {
+  // The runner stopped the work step at 1 100 s instead of the prescribed
+  // 2 600 m, then ran a longer cooldown. The replay would still claim 1 281 s.
+  const stoppedEarly = {
+    activityCount: 3,
+    activities: [
+      { startMs: 0, durationMs: 300_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] },
+      { startMs: 300_000, durationMs: 800_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] },
+      { startMs: 1_100_000, durationMs: 300_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] }
+    ]
+  };
+  const { root, databasePath, sessionId } = await seedRun([], workoutMetadata(stoppedEarly));
+  const read = new RaiReadStore(databasePath);
+  try {
+    const series = read.workoutSeries(sessionId, [planDay()]);
+    assert.ok(series);
+    assert.deepEqual(
+      series.segments.map((segment) => Math.round(segment.startOffsetSeconds)),
+      [0, 300, 1100, 1400]
+    );
+    assert.deepEqual(
+      series.segments.map((segment) => segment.label),
+      ["热身", "训练", "整理放松", "自由训练"]
+    );
+    assert.match(series.segmentNote ?? "", /分段由手表记录的 3 个训练步骤实测得到/);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a single whole-workout activity means no measured steps, so the replay stands", async () => {
+  // Every run carries one activity; only a structured session adds more. A run
+  // recorded without a plan must not lose its replay to a single "step".
+  const wholeRun = {
+    activityCount: 1,
+    activities: [
+      {
+        startMs: 0,
+        durationMs: TOTAL_SECONDS * 1000,
+        activityTypeRaw: 37,
+        locationRaw: 3,
+        metadataKeys: []
+      }
+    ]
+  };
+  const { root, databasePath, sessionId } = await seedRun([], workoutMetadata(wholeRun));
+  const read = new RaiReadStore(databasePath);
+  try {
+    const series = read.workoutSeries(sessionId, [planDay()]);
+    assert.ok(series);
+    assert.deepEqual(
+      series.segments.map((segment) => Math.round(segment.startOffsetSeconds)),
+      [0, 300, 1281, 1581]
+    );
+    assert.match(series.segmentNote ?? "", /课表结构/);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reads the step layer only when the metadata really carries one", () => {
+  const startedAtMs = RUN_START_MS;
+  const endedAtMs = RUN_START_MS + TOTAL_SECONDS * 1000;
+  const steps = measuredStepsOf(workoutMetadata(REAL_STEP_LAYER), startedAtMs, endedAtMs);
+  assert.deepEqual(
+    steps.map((step) => [step.startMs - startedAtMs, step.endMs - step.startMs]),
+    [
+      [0, 300_000],
+      [300_000, 983_456],
+      [1_283_456, 299_619]
+    ]
+  );
+
+  // Absent, unparsable, or a key that is not the nested JSON string we write:
+  // every one of them must decline rather than throw or invent a step.
+  assert.deepEqual(measuredStepsOf(null, startedAtMs, endedAtMs), []);
+  assert.deepEqual(measuredStepsOf("{}", startedAtMs, endedAtMs), []);
+  assert.deepEqual(measuredStepsOf("not json", startedAtMs, endedAtMs), []);
+  assert.deepEqual(
+    measuredStepsOf(JSON.stringify({ [STRUCTURE_METADATA_KEY]: { activities: [] } }), startedAtMs, endedAtMs),
+    []
+  );
+  assert.deepEqual(
+    measuredStepsOf(
+      JSON.stringify({ [STRUCTURE_METADATA_KEY]: JSON.stringify({ activities: [{ startMs: 0 }] }) }),
+      startedAtMs,
+      endedAtMs
+    ),
+    []
+  );
+
+  // A multisport workout puts different sports in one workout; labelling those
+  // as run steps would be a lie, so the whole layer is declined.
+  const multisport = {
+    activities: [
+      { startMs: 0, durationMs: 600_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] },
+      { startMs: 600_000, durationMs: 600_000, activityTypeRaw: 13, locationRaw: 3, metadataKeys: [] }
+    ]
+  };
+  assert.deepEqual(measuredStepsOf(workoutMetadata(multisport), startedAtMs, endedAtMs), []);
+
+  // Overlapping steps cannot be tiled into rows.
+  const overlapping = {
+    activities: [
+      { startMs: 0, durationMs: 600_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] },
+      { startMs: 300_000, durationMs: 600_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] }
+    ]
+  };
+  assert.deepEqual(measuredStepsOf(workoutMetadata(overlapping), startedAtMs, endedAtMs), []);
+
+  // A sliver is measurement noise, and dropping it leaves fewer than two steps,
+  // which leaves the caller on its previous path.
+  const slivers = {
+    activities: [
+      { startMs: 0, durationMs: 1_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] },
+      { startMs: 100_000, durationMs: 400_000, activityTypeRaw: 37, locationRaw: 3, metadataKeys: [] }
+    ]
+  };
+  assert.deepEqual(measuredStepsOf(workoutMetadata(slivers), startedAtMs, endedAtMs), [
+    { startMs: startedAtMs + 100_000, endMs: startedAtMs + 500_000 }
+  ]);
 });
 
 /** A stored week-plan day, as `MobileGoalsStore.planHistory` hands it over. */
