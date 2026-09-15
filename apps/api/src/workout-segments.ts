@@ -10,6 +10,8 @@ import type {
 } from "@rai/api-contracts";
 import type { StoredMeasuredSegment, StoredWorkoutEventInterval } from "@rai/storage-sqlite";
 
+import type { PlanHistoryRevision, PlanPushRecord } from "./mobile-goals.js";
+
 /**
  * Segment assembly for one run.
  *
@@ -17,14 +19,16 @@ import type { StoredMeasuredSegment, StoredWorkoutEventInterval } from "@rai/sto
  * only segmentation the pipeline could express was `nextBoundary = 1000`. Two
  * producers can describe what was actually run:
  *
- * 1. the Watch's own `HKWorkoutEvent` lap/segment boundaries — the same record
- *    the Fitness app renders as 间歇;
- * 2. the stored weekly plan, replayed onto the measured speed track.
+ * 1. the stored weekly plan, replayed onto the measured speed track;
+ * 2. the Watch's own `HKWorkoutEvent` lap/segment boundaries.
  *
- * A is authoritative when present (it is a measurement, not a replay); B is the
- * fallback that covers the "sync tomorrow's plan, run it today" habit, where the
- * run's date cannot match the plan's date. When neither is available the caller
- * keeps the kilometre splits and says why.
+ * The plan ranks first because the panel is titled 课表分段: what it owes the
+ * reader is the prescription's steps with measured numbers. Producer 2 was
+ * originally treated as the more authoritative of the two — a measurement rather
+ * than a replay — but real exports do not support that reading (see
+ * {@link resolveSegmentation}), so it survives only as the fallback for runs no
+ * stored plan can explain. When neither is available the caller keeps the
+ * kilometre splits and says why.
  */
 
 /** A speed-track sample reduced to what segment arithmetic needs. */
@@ -228,24 +232,89 @@ export const layoutStructure = (
   return { steps, truncated: steps.length < planned.length };
 };
 
-/** The plan step covering the most of `[startMs, endMs)`, if any step covers half of it. */
-const dominantStep = (
-  steps: PlannedStepLayout[],
-  startMs: number,
-  endMs: number
-): PlannedStepLayout | null => {
-  const duration = endMs - startMs;
-  if (duration <= 0) return null;
-  let best: PlannedStepLayout | null = null;
-  let bestOverlap = 0;
-  for (const step of steps) {
-    const overlap = Math.min(endMs, step.endMs) - Math.max(startMs, step.startMs);
-    if (overlap > bestOverlap) {
-      bestOverlap = overlap;
-      best = step;
+/**
+ * Build the candidate list `matchPlanDay` chooses from.
+ *
+ * Two sources, and the order they are read in *is* the precedence:
+ *
+ * 1. **push receipts** — the only record of the day the phone actually handed a
+ *    session to the Watch, which is the only thing that survives the runner's
+ *    real habit (sync tomorrow's session, run it tonight: the run's own local
+ *    date points at a rest day);
+ * 2. **plan history**, newest revision first — for everything else.
+ *
+ * A revision is one edit of the whole week, so it answers for every date it
+ * covers. That includes its **rest** days: a newer revision that replaced a
+ * session with rest means that session is no longer what the runner was asked to
+ * run, so it must not resurface from an older revision. Skipping rest days
+ * without claiming their date did exactly that — on 2026-09-14 it resurrected a
+ * stale 2.4 km easy day out of revision 3 after revisions 4–6 had turned the day
+ * into rest, and the segment panel then replayed the wrong prescription.
+ *
+ * Everything here is a *candidate*; choosing one is {@link matchPlanDay}'s job,
+ * which keeps the guess explainable instead of spread across two layers.
+ */
+export const assemblePlanCandidates = (
+  pushes: ReadonlyArray<PlanPushRecord>,
+  history: ReadonlyArray<PlanHistoryRevision>
+): PlanCandidateDay[] => {
+  const candidates: PlanCandidateDay[] = pushes.flatMap((push) =>
+    push.structure == null
+      ? []
+      : [
+          {
+            localDate: push.localDate,
+            kind: push.kind,
+            revision: push.revision,
+            matchedBy: "push_record" as const,
+            structure: push.structure,
+            distanceKm: null,
+            pushedAt: push.pushedAt
+          }
+        ]
+  );
+  /** Dates some revision has already answered for. */
+  const claimed = new Set<string>();
+  for (const revision of history) {
+    const days: PlanCandidateDay[] = [];
+    const locked = revision.lockedSession;
+    // The lock is the session the app actually told the runner to run today, so
+    // it outranks the same date in the week plan.
+    if (locked?.session.structure) {
+      days.push({
+        localDate: locked.localDate,
+        kind: locked.session.kind,
+        revision: revision.revision,
+        matchedBy: "plan_history",
+        structure: locked.session.structure,
+        distanceKm: locked.session.distanceKm,
+        pushedAt: null
+      });
+    }
+    for (const day of revision.weekPlan) {
+      if (!day.structure || day.kind === "rest") continue;
+      days.push({
+        localDate: day.localDate,
+        kind: day.kind,
+        revision: revision.revision,
+        matchedBy: "plan_history",
+        structure: day.structure,
+        distanceKm: day.distanceKm,
+        pushedAt: null
+      });
+    }
+    // Newest revision first, so the first day seen for a date is the freshest.
+    for (const day of days) {
+      if (claimed.has(day.localDate)) continue;
+      claimed.add(day.localDate);
+      candidates.push(day);
+    }
+    // Rest days contribute no candidate, but they do answer for their date.
+    for (const day of revision.weekPlan) {
+      if (!day.structure || day.kind === "rest") claimed.add(day.localDate);
     }
   }
-  return best && bestOverlap / duration >= 0.5 ? best : null;
+  return candidates;
 };
 
 const planMatch = (
@@ -356,11 +425,36 @@ export const matchPlanDay = (input: {
 };
 
 /**
+ * Say, in the note the phone renders, that the Watch recorded events this panel
+ * deliberately did not use.
+ *
+ * Without it "the panel shows the plan's steps" and "the panel shows the Watch's
+ * laps" look identical from the phone. That ambiguity is what turned one wrong
+ * sentence into a whole afternoon of looking in the wrong place.
+ */
+const eventFootnote = (segments: number): string =>
+  segments === 0 ? "" : `；手表另有 ${segments} 段 lap/segment 事件未参与分段`;
+
+/**
  * Decide the segment boundaries for one run and describe each of them.
  *
- * Order of authority: Watch events first, plan replay second, nothing third.
- * Returning `[]` plus a `note` is the third case — the detail page must say
- * why there are no segments rather than quietly falling back to kilometres.
+ * Order of authority: the plan's own steps first, the Watch's lap/segment events
+ * second, nothing third. Returning `[]` plus a `note` is the third case — the
+ * detail page must say why there are no segments rather than quietly falling
+ * back to kilometres.
+ *
+ * The plan is the skeleton because this panel is 课表分段 and the prescription's
+ * steps are what it owes the reader. The Watch's `HKWorkoutEventTypeSegment`
+ * events look like the more authoritative record — a measurement instead of a
+ * replay — and this code used to rank them first. Real exports do not support
+ * that: the events for the 2026-09-14 run are *two overlapping partitions of the
+ * whole workout*, seven of ≈1 km and four of ≈1.6 km, which is what the Watch's
+ * own lap settings produce, not what a prescription asks for. The prescription's
+ * step boundaries (300 s and ≈1 281 s) appear nowhere in that event set. Ranking
+ * the events first therefore turned a four-step session into ten rows, and
+ * re-labelled the kilometre splits — already rendered under this panel — as
+ * 课表 step names. They remain the fallback for runs no stored plan explains,
+ * where a rough segmentation beats none.
  */
 export const resolveSegmentation = (input: {
   startedAtMs: number;
@@ -371,44 +465,9 @@ export const resolveSegmentation = (input: {
 }): Segmentation => {
   const { startedAtMs, endedAtMs, events, plan, track } = input;
   const layout = plan ? layoutStructure(plan.structure, track, startedAtMs, endedAtMs) : null;
-
   const eventBoundaries = eventBoundariesOf(events, startedAtMs, endedAtMs);
-  if (eventBoundaries.length >= 3 && layout) {
-    let assigned = 0;
-    const descriptors: SegmentDescriptor[] = [];
-    for (let index = 0; index < eventBoundaries.length - 1; index += 1) {
-      const startMs = eventBoundaries[index]!;
-      const endMs = eventBoundaries[index + 1]!;
-      const step = dominantStep(layout.steps, startMs, endMs);
-      if (step) assigned += endMs - startMs;
-      descriptors.push({
-        label: step?.label ?? UNPLANNED_LABEL,
-        purpose: step?.purpose ?? "unplanned",
-        goal: step?.goal ?? null,
-        alert: step?.alert ?? null
-      });
-    }
-    const explained = (endedAtMs - startedAtMs) > 0 ? assigned / (endedAtMs - startedAtMs) : 0;
-    return {
-      boundaries: eventBoundaries,
-      descriptors,
-      plan: planMatch(plan!, explained, "手表 lap/segment 事件与课表步骤匹配"),
-      note: `分段取自手表记录的 lap/segment 事件（${eventBoundaries.length - 1} 段）`
-    };
-  }
-  if (eventBoundaries.length >= 3) {
-    return {
-      boundaries: eventBoundaries,
-      descriptors: eventBoundaries.slice(0, -1).map((_startMs, index) => ({
-        label: `第 ${index + 1} 段`,
-        purpose: "unplanned" as const,
-        goal: null,
-        alert: null
-      })),
-      plan: null,
-      note: `分段取自手表记录的 lap/segment 事件（${eventBoundaries.length - 1} 段），未匹配到课表`
-    };
-  }
+  /** What the Watch's events *would* have drawn, had they been used. */
+  const eventSegments = eventBoundaries.length >= 3 ? eventBoundaries.length - 1 : 0;
 
   if (layout && layout.steps.length >= 2) {
     const boundaries = layout.steps.map((step) => step.startMs);
@@ -434,7 +493,23 @@ export const resolveSegmentation = (input: {
         explained,
         layout.truncated ? "课表未跑完，按实测配速回放剩余步骤" : "按课表结构回放"
       ),
-      note: `分段由课表结构（${plan!.localDate} 第 ${plan!.revision} 版）回放到实测配速得到`
+      note: `分段由课表结构（${plan!.localDate} 第 ${plan!.revision} 版）回放到实测配速得到${eventFootnote(eventSegments)}`
+    };
+  }
+
+  if (eventBoundaries.length >= 3) {
+    return {
+      boundaries: eventBoundaries,
+      descriptors: eventBoundaries.slice(0, -1).map((_startMs, index) => ({
+        label: `第 ${index + 1} 段`,
+        purpose: "unplanned" as const,
+        goal: null,
+        alert: null
+      })),
+      plan: null,
+      note: `分段取自手表记录的 lap/segment 事件（${eventBoundaries.length - 1} 段），${
+        plan ? "课表步骤不足两段" : "未匹配到课表"
+      }`
     };
   }
 

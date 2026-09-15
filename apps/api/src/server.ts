@@ -52,7 +52,7 @@ import {
 } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { MobileGoalsRevisionConflictError, MobileGoalsStore, type PlanMergeOptions } from "./mobile-goals.js";
-import type { PlanCandidateDay } from "./workout-segments.js";
+import { assemblePlanCandidates, type PlanCandidateDay } from "./workout-segments.js";
 import { generateWeeklyPlan, overwriteWarning, weeklyPlanDates } from "./weekly-plan-service.js";
 import {
   installLocalRequestSecurity,
@@ -697,68 +697,16 @@ app.get<{ Params: { id: string } }>("/v1/workouts/:id", { schema: { params: iden
 /**
  * Plan days that could explain a run, for the detail page's segment panel.
  *
- * Push receipts are read first and win in the matcher: the runner syncs
- * *tomorrow's* session and runs it the same evening, so the run's own local date
- * points at a rest day and date matching alone can never identify the plan.
- * Everything here is a *candidate* — choosing one is `matchPlanDay`'s job, which
- * keeps the guess explainable instead of spread across two layers.
+ * Which days count as candidates, and the order they are read in, is
+ * `assemblePlanCandidates`' job — this only supplies what the store has. The
+ * split exists so the precedence rules (push receipt, then the newest revision
+ * that answers for a date, rest days included) can be tested as a pure function.
  */
 const PLAN_PUSH_HISTORY_DAYS = 90;
 
 const planSegmentCandidates = (): PlanCandidateDay[] => {
   const since = new Date(Date.now() - PLAN_PUSH_HISTORY_DAYS * 86_400_000).toISOString();
-  const candidates: PlanCandidateDay[] = mobileGoalsStore
-    .planPushes(since)
-    .flatMap((push) =>
-      push.structure == null
-        ? []
-        : [{
-            localDate: push.localDate,
-            kind: push.kind,
-            revision: push.revision,
-            matchedBy: "push_record" as const,
-            structure: push.structure,
-            distanceKm: null,
-            pushedAt: push.pushedAt
-          }]
-    );
-  const seen = new Set<string>();
-  for (const revision of mobileGoalsStore.planHistory()) {
-    const days: PlanCandidateDay[] = [];
-    const locked = revision.lockedSession;
-    // The lock is the session the app actually told the runner to run today, so
-    // it outranks the same date in the week plan.
-    if (locked?.session.structure) {
-      days.push({
-        localDate: locked.localDate,
-        kind: locked.session.kind,
-        revision: revision.revision,
-        matchedBy: "plan_history",
-        structure: locked.session.structure,
-        distanceKm: locked.session.distanceKm,
-        pushedAt: null
-      });
-    }
-    for (const day of revision.weekPlan) {
-      if (!day.structure || day.kind === "rest") continue;
-      days.push({
-        localDate: day.localDate,
-        kind: day.kind,
-        revision: revision.revision,
-        matchedBy: "plan_history",
-        structure: day.structure,
-        distanceKm: day.distanceKm,
-        pushedAt: null
-      });
-    }
-    // Newest revision first, so the first day seen for a date is the freshest.
-    for (const day of days) {
-      if (seen.has(day.localDate)) continue;
-      seen.add(day.localDate);
-      candidates.push(day);
-    }
-  }
-  return candidates;
+  return assemblePlanCandidates(mobileGoalsStore.planPushes(since), mobileGoalsStore.planHistory());
 };
 
 app.get<{ Params: { id: string } }>("/v1/workouts/:id/series", { schema: { params: identifierParamsSchema } }, async (request, reply) => {

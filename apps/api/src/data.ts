@@ -102,10 +102,12 @@ const mobileWeekStart = (date: string): string => {
  *
  * Empty segments are a legitimate outcome — a treadmill run has no Watch lap
  * events and may match no plan — but an unexplained blank panel reads as a bug.
+ * The plan is named first because it is now the primary producer: reaching this
+ * function with a matched plan means the plan, not the Watch, was the constraint.
  */
 const missingSegmentsNote = (eventCount: number, plan: MatchedPlanDay | null): string => {
-  if (eventCount > 0) return "手表记录的 lap/segment 事件不足两段，无法形成分段";
   if (plan !== null) return "匹配到的课表结构不足以形成分段（至少需要两个步骤）";
+  if (eventCount > 0) return "手表记录的 lap/segment 事件不足两段，无法形成分段";
   return "这次训练没有手表 lap/segment 事件，也没有可匹配的课表，只能按公里分段";
 };
 
@@ -889,8 +891,8 @@ export class RaiReadStore {
   }
 
   /**
-   * Segments for one run: the Watch's own boundaries first, the stored plan
-   * second, an explicit explanation third.
+   * Segments for one run: the matched plan's own steps first, the Watch's
+   * lap/segment boundaries second, an explicit explanation third.
    *
    * The kilometre split stays as a fallback, but it is no longer the only story
    * the detail page can tell. Both producers measure against the same scaled

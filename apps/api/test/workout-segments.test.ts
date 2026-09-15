@@ -5,11 +5,18 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-import type { MobileSessionStructure } from "@rai/api-contracts";
+import type {
+  MobileLockedSession,
+  MobilePlannedDay,
+  MobileSessionKind,
+  MobileSessionStructure
+} from "@rai/api-contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { RaiReadStore } from "../src/data.js";
+import type { PlanHistoryRevision, PlanPushRecord } from "../src/mobile-goals.js";
 import {
+  assemblePlanCandidates,
   eventBoundariesOf,
   matchPlanDay,
   resolveSegmentation,
@@ -223,7 +230,10 @@ test("replays the stored interval session onto the measured track", async () => 
   }
 });
 
-test("prefers Watch lap events and labels them from the plan", async () => {
+test("keeps the plan's steps when the Watch tiled the run with its own laps", async () => {
+  // Laps that happen to line up with the prescription. The plan still owns the
+  // skeleton: 课表分段 owes the reader the prescription's steps, and a lap set is
+  // a record of the Watch's settings, not a prescription.
   const { root, databasePath, sessionId } = await seedRun([
     { type: "HKWorkoutEventTypePause", atMs: 600_000, durationSeconds: 0 },
     { type: "HKWorkoutEventTypeLap", atMs: 0, durationSeconds: 300 },
@@ -236,7 +246,10 @@ test("prefers Watch lap events and labels them from the plan", async () => {
     const series = read.workoutSeries(sessionId, [planDay()]);
     assert.ok(series);
     assert.equal(series.segments.length, 4);
-    assert.match(series.segmentNote ?? "", /lap\/segment/);
+    assert.match(series.segmentNote ?? "", /课表结构/);
+    // The note has to say which record the panel used: from the phone, "the
+    // plan's steps" and "the Watch's laps" are otherwise indistinguishable.
+    assert.match(series.segmentNote ?? "", /手表另有 4 段 lap\/segment 事件未参与分段/);
     assert.deepEqual(
       series.segments.map((segment) => Math.round(segment.distanceMeters)),
       [773, 2600, 775, 1903]
@@ -249,6 +262,178 @@ test("prefers Watch lap events and labels them from the plan", async () => {
     read.close();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+/**
+ * The 2026-09-14 run's Watch events, verbatim from the export.
+ *
+ * Eleven `HKWorkoutEventTypeSegment` rows that are really *two overlapping
+ * partitions of the whole workout*: read each duration as "this segment ends
+ * here" and you get seven segments of ≈1 km and four of ≈1.6 km, because both
+ * of the Watch's lap settings got exported. Neither partition is the
+ * prescription — its step boundaries sit at 300 s and ≈1 281 s, and no event
+ * lands there. Ranking the events first is what showed 小唐 ten rows for a
+ * four-step session.
+ */
+const REAL_WATCH_EVENTS = [
+  { atMs: 0, durationSeconds: 380.9466 },
+  { atMs: 0, durationSeconds: 614.5473 },
+  { atMs: 381_000, durationSeconds: 379.171 },
+  { atMs: 615_000, durationSeconds: 608.7803 },
+  { atMs: 760_000, durationSeconds: 377.1247 },
+  { atMs: 1_137_000, durationSeconds: 384.0159 },
+  { atMs: 1_223_000, durationSeconds: 617.5232 },
+  { atMs: 1_521_000, durationSeconds: 392.5292 },
+  { atMs: 1_841_000, durationSeconds: 507.3994 },
+  { atMs: 1_914_000, durationSeconds: 414.3 },
+  { atMs: 2_328_000, durationSeconds: 20.1629 }
+].map((event) => ({ type: "HKWorkoutEventTypeSegment", ...event }));
+
+test("does not let two overlapping lap partitions explode a four-step session", async () => {
+  const { root, databasePath, sessionId } = await seedRun(REAL_WATCH_EVENTS);
+  const read = new RaiReadStore(databasePath);
+  try {
+    const series = read.workoutSeries(sessionId, [planDay()]);
+    assert.ok(series);
+    // The whole bug, in one number: eleven events used to mean ten rows.
+    assert.equal(series.segments.length, 4);
+    assert.deepEqual(
+      series.segments.map((segment) => segment.label),
+      ["热身", "训练", "整理放松", "自由训练"]
+    );
+    assert.deepEqual(
+      series.segments.map((segment) => Math.round(segment.distanceMeters)),
+      [773, 2600, 775, 1903]
+    );
+    assert.deepEqual(
+      series.segments.map((segment) => Math.round(segment.startOffsetSeconds)),
+      [0, 300, 1281, 1581]
+    );
+    // And the reader is told what was set aside, in the same units the panel
+    // uses: the ten rows the Watch's events would have drawn.
+    assert.match(series.segmentNote ?? "", /手表另有 10 段 lap\/segment 事件未参与分段/);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** A stored week-plan day, as `MobileGoalsStore.planHistory` hands it over. */
+const storedDay = (
+  localDate: string,
+  kind: MobileSessionKind,
+  distanceKm: number | null
+): MobilePlannedDay => ({
+  localDate,
+  kind,
+  distanceKm,
+  structure: kind === "rest" ? null : INTERVAL_STRUCTURE
+});
+
+const lockedSession = (localDate: string): MobileLockedSession => ({
+  localDate,
+  session: {
+    kind: "recovery",
+    title: "恢复跑",
+    reason: "模型不可用，按保守模板安排",
+    distanceKm: 4,
+    durationMinutes: null,
+    paceSecondsPerKmLower: null,
+    paceSecondsPerKmUpper: null,
+    heartRateBpmLower: null,
+    heartRateBpmUpper: null,
+    structure: INTERVAL_STRUCTURE
+  },
+  verdictTone: "green",
+  lockedAt: "2026-09-15T02:00:00.000Z"
+});
+
+test("a newer revision's rest day answers for its date", () => {
+  // Newest first, exactly what the store returns. Revision 6 turned 09-14 into
+  // rest; revision 3 still remembered it as a 2.4 km easy day.
+  const history: PlanHistoryRevision[] = [
+    {
+      revision: 6,
+      changedAt: "2026-09-14T08:06:40.252Z",
+      weekPlan: [storedDay("2026-09-14", "rest", null), storedDay("2026-09-15", "recovery", 4)],
+      lockedSession: null
+    },
+    {
+      revision: 3,
+      changedAt: "2026-09-14T07:17:49.709Z",
+      weekPlan: [storedDay("2026-09-14", "easy", 2.4), storedDay("2026-09-15", "rest", null)],
+      lockedSession: null
+    }
+  ];
+  const candidates = assemblePlanCandidates([], history);
+  // Revision 3's easy day is not resurrected, and revision 6's recovery day is
+  // the only thing left that can explain a Monday-evening run.
+  assert.deepEqual(
+    candidates.map((candidate) => [candidate.localDate, candidate.kind, candidate.revision]),
+    [["2026-09-15", "recovery", 6]]
+  );
+  const matched = matchPlanDay({
+    candidates,
+    startedAtMs: RUN_START_MS,
+    localDate: "2026-09-14",
+    distanceKm: 6.051
+  });
+  assert.equal(matched?.localDate, "2026-09-15");
+  assert.equal(matched?.revision, 6);
+  // The prescription the runner actually executed — warmup 300 s, work 2 600 m,
+  // cooldown 300 s — rather than the 1 000 m step of the stale revision.
+  const workStep = matched?.structure.blocks[0]?.steps[0];
+  assert.equal(workStep?.goal.type, "distance");
+  assert.equal(workStep?.goal.type === "distance" ? workStep.goal.meters : null, 2600);
+});
+
+test("reads candidates in precedence order: receipt, lock, newest revision", () => {
+  const receipt: PlanPushRecord = {
+    localDate: "2026-09-15",
+    revision: 5,
+    kind: "recovery",
+    structure: INTERVAL_STRUCTURE,
+    pushedAt: "2026-09-14T09:00:00.000Z"
+  };
+  const history: PlanHistoryRevision[] = [
+    {
+      revision: 7,
+      changedAt: "2026-09-15T02:00:00.000Z",
+      // The week plan calls today rest; the lock says otherwise. The lock is what
+      // the app told the runner to run, so it wins for that date.
+      weekPlan: [storedDay("2026-09-15", "rest", null)],
+      lockedSession: lockedSession("2026-09-15")
+    },
+    {
+      revision: 3,
+      changedAt: "2026-09-14T07:17:49.709Z",
+      weekPlan: [storedDay("2026-09-15", "easy", 2.4)],
+      lockedSession: null
+    }
+  ];
+  const candidates = assemblePlanCandidates([receipt], history);
+  // The receipt is kept verbatim — it is a record of what the Watch was handed,
+  // not a reading of the current plan.
+  assert.deepEqual(
+    candidates[0],
+    {
+      localDate: "2026-09-15",
+      kind: "recovery",
+      revision: 5,
+      matchedBy: "push_record",
+      structure: INTERVAL_STRUCTURE,
+      distanceKm: null,
+      pushedAt: "2026-09-14T09:00:00.000Z"
+    }
+  );
+  // One entry per date: the revision-7 lock claims 09-15, so neither the rest
+  // day beside it nor revision 3's easy day is added.
+  assert.deepEqual(
+    candidates.slice(1).map((candidate) => [candidate.localDate, candidate.revision]),
+    [["2026-09-15", 7]]
+  );
+  // A receipt without a structure is a bare acknowledgement and explains nothing.
+  assert.deepEqual(assemblePlanCandidates([{ ...receipt, structure: null }], []), []);
 });
 
 test("says why there are no segments instead of leaving the panel blank", async () => {
