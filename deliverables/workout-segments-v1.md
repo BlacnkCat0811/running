@@ -190,6 +190,46 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 ⇒ 若成立，「课表分段」可以从**按课表回放到实测配速的推算**升级为**实测边界**（真正的测量），
 也不再依赖课表历史。**排查方案见 `.workbuddy/memory/NOTES-mobile-plan.md` 的同名小节（L0–L3 四级）。**
 
+##### L2 已实施（2026-09-15 17:5x，commit `810acd4`）：等一次真实同步
+
+`HealthKitExport.swift` 新增一次性诊断，在 `workoutXML`（`:277`）里多发一条元数据
+`RAIWorkoutStructureDiagV1`，内容为：
+
+| 字段 | 说明 |
+|---|---|
+| `activityCount` / `activities[]` | 每个 activity 的 `uuid`、`startMs`、`durationMs`、`activityTypeRaw`、`locationRaw`、`metadataKeys`、**该 activity 自己的 `events[]`** |
+| `eventCount` / `events[]` | 顶层事件的 `type` / `typeRaw` / `startMs` / `durationMs` / `metadataKeys` |
+
+**偏移一律是相对 workout 起点的毫秒**，可以直接与处方边界（`start+300 s`、`start+≈1281 s`）比，不需要解析日期。
+载体是普通 `<MetadataEntry>` ⇒ **不需要改契约、parser、schema**，直接落进 `workouts.metadata_json`。
+
+两条设计约束（都踩过）：
+
+- 🔴 **必须门控**（`guard !events.isEmpty || !activities.isEmpty`）：该 entry 计入 workout 的 content hash
+  （`apple-health-parser.ts:413-415` 的 `stableId("workout_content", [...metadata...])`），
+  无条件发会让**全部约 274 个 workout 在下次增量导入时被标 `updated` 逐行重写**。
+- 🔴 活动身份属性在 Swift 里是 `activity.uuid`，**不是** `activity.UUID`（后者 Swift 3 已废弃；
+  `typecheck-ios.sh` 会直接报 `'UUID' has been renamed to 'uuid'`）。
+
+**判据（一发定论）**：读线上库的 `workouts.metadata_json`（命令见 `NOTES-mobile-plan.md` 同名小节，已实测能过 TAT；
+⚠️ 要**双重 `JSON.parse`**——那个 key 的值本身是一个 JSON 字符串）。
+
+| 观察 | 结论 | 后续动作 |
+|---|---|---|
+| `activityCount ≥ 2` 且某 activity 的 `events[]` 与两套链之一重合 | 两套计圈来自**两个 activity 层**，谜题闭合 | 把该 activity 的边界作为分段来源 |
+| `activityCount = 1`，且其 `startMs/durationMs` 覆盖全程 | activities 不承载步骤 | 回放仍是上限，维持现状 |
+| 任一 activity 的 `startMs` ≈ 300 000 / 1 281 000（ms） | **步骤可实测**，且 `HKWorkoutActivity` 确实是载体 | 把 activities 升级为分段主来源，摆脱课表历史依赖 |
+| 全部 `metadataKeys` 里没有 `HKMetadataKeyLapLength` | 两套链都不是 watchOS 自动计圈标注的（该 key 按文档设在 `HKWorkout` 上，`HKMetadata.h:301`） | 缩小到「活动层各自划分」这一支 |
+
+**生效前提（重要）**：诊断写进的是 **iOS 源码**，服务器 pull 到它**对手机没有任何作用**。
+必须**重新 build + 安装到手机**，再触发一次**增量同步**才会出现。
+
+增量同步会带上它，是因为 `runningWorkouts`（`:215-254`）在 `stored != nil` 时额外做了一次回填：
+`backfillStart = (startDate ?? Date()) - routeBackfillWindow`，而 `routeBackfillWindow = 14 天`（`:80`）
+⇒ 实际覆盖最近约 16 天 ⇒ **09-09 / 09-10 / 09-14 三次都在窗口内**，都会被重新读并发诊断。
+若某个更早的 workout 需要诊断，用设置页的「**重新导入全部**」（`full: true` ⇒ anchor 与 lowerBound 都清空）
+强制全量导出即可。
+
 **部署记录**：`00c0ccb → c1ecac7`（9 个提交）fast-forward → `npm run build`（`BUILD_EXIT=0`）
 → `systemctl restart rai-api`；部署前备份 `rai.manual.2026-09-15T06-33-15-371Z.f5f4fbb3.sqlite`（530 MB）。
 
