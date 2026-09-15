@@ -101,8 +101,6 @@ struct TodayView: View {
     @Environment(NativeAppModel.self) private var native
     @Environment(ServerSession.self) private var session
     @Environment(HealthKitSync.self) private var healthSync
-    @State private var isSyncingPlan = false
-    @State private var planSyncMessage: String?
 
     var body: some View {
         ScrollView {
@@ -150,9 +148,7 @@ struct TodayView: View {
                     activityPanel(today)
                     abilityPanel(today)
                     verdictPanel(today)
-                    workoutPlanPanel()
                     contextPanel(today)
-                    recentPanel(today)
                     TodayDetailLinks(data: today)
                 } else if native.isLoading {
                     PixelPanel { PixelLoadingState(title: "正在读取 RAI 服务") }
@@ -350,136 +346,6 @@ struct TodayView: View {
         }
     }
 
-    /// The executable week: what will actually appear in the watch's Workout app.
-    /// Generation and sync are deliberately separate actions — generating
-    /// rewrites the stored week, syncing only mirrors it onto the watch.
-    private func workoutPlanPanel() -> some View {
-        let plan = native.workoutPlan
-        let executableCount = plan?.days.filter(\.executable).count ?? 0
-        return PixelPanel {
-            VStack(alignment: .leading, spacing: 11) {
-                PixelSectionHeader(
-                    title: "手表课表",
-                    trailing: plan == nil ? "未生成" : "\(executableCount) 项可上表",
-                    trailingColor: PixelColor.cyan
-                )
-                if let plan, !plan.days.isEmpty {
-                    VStack(spacing: 6) {
-                        ForEach(plan.days) { day in planRow(day, completedDates: native.completedWeekDates) }
-                    }
-                } else {
-                    Text("还没有本周课表。生成后即可一键同步到手表「体能训练」。")
-                        .font(.footnote)
-                        .foregroundStyle(PixelColor.muted)
-                }
-                if let audit = plan?.audit {
-                    Text(
-                        audit.generatedBy == "llm"
-                            ? "由 \(audit.model ?? "大模型") 生成 · \(nativeDate(audit.generatedAt ?? ""))"
-                            : "由保守模板生成 · \(nativeDate(audit.generatedAt ?? ""))"
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(PixelColor.muted)
-                }
-                if let message = native.planMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(PixelColor.ink)
-                        .padding(9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(PixelColor.paleYellow)
-                        .overlay(Rectangle().stroke(PixelColor.yellow, lineWidth: 1))
-                }
-                if let message = planSyncMessage {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(PixelColor.ink)
-                        .padding(9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(PixelColor.mint)
-                        .overlay(Rectangle().stroke(PixelColor.green, lineWidth: 1))
-                }
-                PixelPrimaryButton(
-                    title: "一键同步到手表",
-                    systemName: "applewatch",
-                    isBusy: isSyncingPlan,
-                    isDisabled: native.isOffline || executableCount == 0
-                ) {
-                    syncPlanToWatch()
-                }
-                Button {
-                    Task { _ = await native.regenerateWeeklyPlan() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if native.isRegeneratingPlan {
-                            ProgressView().tint(PixelColor.green).scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "wand.and.stars")
-                        }
-                        Text(native.isRegeneratingPlan ? "生成中…" : "重新生成本周课表")
-                            .font(.caption.weight(.heavy))
-                    }
-                    .foregroundStyle(PixelColor.green)
-                    .frame(maxWidth: .infinity)
-                    .frame(minHeight: 44)
-                    .background(PixelColor.paper)
-                    .overlay(Rectangle().stroke(PixelColor.green, lineWidth: PixelMetrics.border))
-                }
-                .buttonStyle(.plain)
-                .disabled(native.isRegeneratingPlan || native.isOffline)
-            }
-        }
-    }
-
-    private func planRow(_ day: MobileWorkoutPlanDay, completedDates: Set<String>) -> some View {
-        let summary = WorkoutPlanMapper.structureSummary(day.structure)
-        // A row the watch will not receive says why, instead of showing a
-        // prescription distance under a 60% opacity that explains nothing.
-        let inactive = WorkoutPlanMapper.inactiveLabel(for: day, completedLocalDates: completedDates)
-        return HStack(spacing: 9) {
-            Text(nativeWeekday(day.localDate))
-                .font(.caption.weight(.heavy).monospacedDigit())
-                .frame(width: 34, alignment: .leading)
-                .foregroundStyle(PixelColor.ink)
-            Text(day.title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(day.kind == "rest" ? PixelColor.muted : PixelColor.green)
-            Spacer(minLength: 6)
-            if !summary.isEmpty {
-                Text(summary)
-                    .font(.caption2.weight(.bold).monospacedDigit())
-                    .foregroundStyle(PixelColor.cyan)
-            }
-            if let inactive {
-                Text(inactive)
-                    .font(.caption.weight(.heavy))
-                    .foregroundStyle(PixelColor.muted)
-            } else {
-                Text(nativeKilometers(day.distanceKm))
-                    .font(.caption.weight(.heavy).monospacedDigit())
-                    .foregroundStyle(PixelColor.muted)
-            }
-        }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 7)
-        .background(PixelColor.paper)
-        .overlay(Rectangle().stroke(PixelColor.grid, lineWidth: PixelMetrics.smallBorder))
-        .opacity(day.executable ? 1 : 0.6)
-    }
-
-    private func syncPlanToWatch() {
-        guard let plan = native.workoutPlan, !isSyncingPlan else { return }
-        isSyncingPlan = true
-        planSyncMessage = nil
-        Task {
-            // Permission is asked for only when the user actually tries to sync, so
-            // the system prompt arrives with an obvious reason attached to it.
-            let outcome = await WorkoutKitBridge.syncRequestingAuthorization(plan: plan)
-            isSyncingPlan = false
-            planSyncMessage = outcome.summary
-        }
-    }
-
     private func weekPanel(_ data: MobileTodayResponse) -> some View {
         PixelPanel {
             VStack(alignment: .leading, spacing: 11) {
@@ -554,22 +420,6 @@ struct TodayView: View {
                         .font(.caption)
                         .foregroundStyle(PixelColor.coral)
                     }
-                }
-            }
-        }
-    }
-
-    private func recentPanel(_ data: MobileTodayResponse) -> some View {
-        PixelPanel {
-            VStack(alignment: .leading, spacing: 5) {
-                PixelSectionHeader(title: "最近训练", trailing: "全部 ›")
-                ForEach(data.recentWorkouts.prefix(5)) { workout in
-                    NavigationLink {
-                        WorkoutDetailView(workoutId: workout.id)
-                    } label: {
-                        WorkoutRow(workout: workout)
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -1669,6 +1519,9 @@ struct PlanView: View {
     @State private var distanceDrafts: [String: String] = [:]
     @State private var isSaving = false
     @State private var saveMessage: String?
+    @State private var isSyncingPlan = false
+    @State private var planSyncMessage: String?
+    @State private var selectedDay: MobileWeekPlanDay?
 
     private var weeklyValue: Double? { Double(weeklyText.trimmingCharacters(in: .whitespacesAndNewlines)) }
     private var areDistancesValid: Bool {
@@ -1685,6 +1538,8 @@ struct PlanView: View {
                 PixelPageHeader(title: "计划") {
                     if let goals = native.goals { PixelBadge(title: "v\(goals.revision)", color: PixelColor.cyan, fill: PixelColor.paleCyan) }
                 }
+                weekStrip
+                watchPlanPanel
                 goalEditor
                 weekPlanPanel
                 racePanel
@@ -1705,11 +1560,194 @@ struct PlanView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .scrollDismissesKeyboard(.interactively)
+        .sheet(item: $selectedDay) { day in
+            PlanDaySheet(day: day, isToday: day.localDate == native.today?.today.localDate)
+        }
         .task {
             if native.goals == nil { await native.refreshAll() }
+            // The watch panel lives on this page now, so it must be able to fill
+            // itself even when the home screen never ran in this session.
+            if native.workoutPlan == nil { _ = await native.refreshWorkoutPlan() }
             loadDraft()
         }
         .onChange(of: native.goals?.revision) { _, _ in loadDraft() }
+    }
+
+    /// The executable week, one equal column per day.
+    ///
+    /// Straight from `/v1/mobile/today`, the same array the watch panel and the
+    /// home screen read, so the three cannot name a different session for one
+    /// date. The strip is a fixed seven columns rather than a horizontal
+    /// scroller: it *is* the whole week, and a scroller left the row short of
+    /// the panel's right edge. Tapping a column opens that day's prescription.
+    private var weekStrip: some View {
+        let days = native.today?.weekPlan ?? []
+        return PixelPanel {
+            VStack(alignment: .leading, spacing: 9) {
+                PixelSectionHeader(title: "7 天安排", trailing: "本周")
+                if days.isEmpty {
+                    Text("尚未取到本周安排")
+                        .font(.footnote)
+                        .foregroundStyle(PixelColor.muted)
+                } else {
+                    HStack(spacing: 4) {
+                        ForEach(days) { day in
+                            Button { selectedDay = day } label: { weekChip(day) }
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity)
+                                .accessibilityLabel(weekChipLabel(day))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    /// One column of the week strip. Labels shrink instead of wrapping: a
+    /// wrapped column would change the row's height for every other day.
+    private func weekChip(_ day: MobileWeekPlanDay) -> some View {
+        let isToday = day.localDate == native.today?.today.localDate
+        return VStack(spacing: 7) {
+            VStack(spacing: 2) {
+                Text(nativeWeekday(day.localDate))
+                Text(nativeDay(day.localDate))
+            }
+            .font(.caption2.weight(.heavy))
+            .lineLimit(1)
+            .minimumScaleFactor(0.55)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .foregroundStyle(isToday ? PixelColor.paper : PixelColor.muted)
+            .background(isToday ? PixelColor.green : PixelColor.grid.opacity(0.22))
+
+            Rectangle().fill(nativeSessionColor(day.kind)).frame(width: 8, height: 8)
+            Text(nativeSessionName(day.kind))
+                .font(.caption2.weight(.bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .foregroundStyle(PixelColor.ink)
+            Text(day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "—")
+                .font(.caption2.weight(.heavy).monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .foregroundStyle(PixelColor.muted)
+        }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity)
+        .background(PixelColor.paper)
+        .overlay(Rectangle().stroke(isToday ? PixelColor.green : PixelColor.grid, lineWidth: PixelMetrics.smallBorder))
+        .contentShape(Rectangle())
+    }
+
+    private func weekChipLabel(_ day: MobileWeekPlanDay) -> String {
+        let distance = day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "无距离"
+        return "\(nativeWeekday(day.localDate))\(nativeDay(day.localDate))，\(nativeSessionName(day.kind))，\(distance)，查看训练详情"
+    }
+
+    /// The executable week and the two actions around it.
+    ///
+    /// Generation and sync stay separate — generating rewrites the stored week,
+    /// syncing only mirrors it onto the watch — and both live here now that the
+    /// home screen no longer carries the watch card.
+    private var watchPlanPanel: some View {
+        let plan = native.workoutPlan
+        let executableCount = plan?.days.filter(\.executable).count ?? 0
+        return PixelPanel {
+            VStack(alignment: .leading, spacing: 11) {
+                PixelSectionHeader(
+                    title: "手表课表",
+                    trailing: plan == nil ? "未生成" : "\(executableCount) 项可上表",
+                    trailingColor: PixelColor.cyan
+                )
+                if plan == nil {
+                    Text("还没有本周课表。生成后即可一键同步到手表「体能训练」。")
+                        .font(.footnote)
+                        .foregroundStyle(PixelColor.muted)
+                } else if executableCount == 0 {
+                    Text("本周没有可上表的训练日，生成一份新的课表再同步。")
+                        .font(.footnote)
+                        .foregroundStyle(PixelColor.muted)
+                } else {
+                    Text("将把 \(executableCount) 天训练写入手表「体能训练」，已完成的日期不会重复下发。")
+                        .font(.footnote)
+                        .foregroundStyle(PixelColor.muted)
+                }
+                if let audit = plan?.audit {
+                    Text(
+                        audit.generatedBy == "llm"
+                            ? "由 \(audit.model ?? "大模型") 生成 · \(nativeDate(audit.generatedAt ?? ""))"
+                            : "由保守模板生成 · \(nativeDate(audit.generatedAt ?? ""))"
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(PixelColor.muted)
+                }
+                if let message = native.planMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(PixelColor.ink)
+                        .padding(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(PixelColor.paleYellow)
+                        .overlay(Rectangle().stroke(PixelColor.yellow, lineWidth: 1))
+                }
+                if let message = planSyncMessage {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(PixelColor.ink)
+                        .padding(9)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(PixelColor.mint)
+                        .overlay(Rectangle().stroke(PixelColor.green, lineWidth: 1))
+                }
+                PixelPrimaryButton(
+                    title: "一键同步到手表",
+                    systemName: "applewatch",
+                    isBusy: isSyncingPlan,
+                    isDisabled: native.isOffline || executableCount == 0
+                ) {
+                    syncPlanToWatch()
+                }
+                Button {
+                    Task { _ = await native.regenerateWeeklyPlan() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if native.isRegeneratingPlan {
+                            ProgressView().tint(PixelColor.green).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "wand.and.stars")
+                        }
+                        Text(native.isRegeneratingPlan ? "生成中…" : "重新生成本周课表")
+                            .font(.caption.weight(.heavy))
+                    }
+                    .foregroundStyle(PixelColor.green)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: 44)
+                    .background(PixelColor.paper)
+                    .overlay(Rectangle().stroke(PixelColor.green, lineWidth: PixelMetrics.border))
+                }
+                .buttonStyle(.plain)
+                .disabled(native.isRegeneratingPlan || native.isOffline)
+            }
+        }
+    }
+
+    private func syncPlanToWatch() {
+        guard let plan = native.workoutPlan, !isSyncingPlan else { return }
+        isSyncingPlan = true
+        planSyncMessage = nil
+        Task {
+            // Permission is asked for only when the user actually tries to sync, so
+            // the system prompt arrives with an obvious reason attached to it.
+            let outcome = await WorkoutKitBridge.syncRequestingAuthorization(plan: plan)
+            // Receipts are registered only for a sync that actually landed: the row
+            // means "the watch received this day", and a plan that never got there
+            // must not be allowed to label a later run.
+            let receipt = outcome.scheduled > 0 ? await native.recordPlanSync(plan) : nil
+            isSyncingPlan = false
+            planSyncMessage = [outcome.summary, receipt].compactMap { $0 }.joined(separator: "；")
+        }
     }
 
     private var goalEditor: some View {
@@ -1903,6 +1941,97 @@ struct PlanView: View {
         )
         saveMessage = success ? "已保存，服务端已确认。" : "保存未完成，请重新读取后再试。"
         isSaving = false
+    }
+}
+
+/// The prescription one column of the week strip opens into.
+///
+/// The strip can only carry a kind, a colour and a distance; the interval
+/// breakdown, the warmup and the pace band are what actually make the day
+/// executable, and the stored plan is the only thing that carries them.
+private struct PlanDaySheet: View {
+    let day: MobileWeekPlanDay
+    let isToday: Bool
+
+    private var statusText: String {
+        if day.completedWorkoutId != nil { return "已完成" }
+        if day.kind == "rest" { return "休息日" }
+        return isToday ? "今日安排" : "计划中"
+    }
+
+    private var statusColor: Color {
+        if day.completedWorkoutId != nil { return PixelColor.green }
+        if day.kind == "rest" { return PixelColor.muted }
+        return isToday ? PixelColor.cyan : PixelColor.ink
+    }
+
+    private var lines: [NativeStructureLine] { nativeStructureLines(day.structure) }
+
+    var body: some View {
+        ZStack {
+            PixelBackground()
+            ScrollView {
+                VStack(alignment: .leading, spacing: PixelMetrics.sectionSpacing) {
+                    PixelPanel {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .top, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("\(nativeWeekday(day.localDate)) · \(nativeDay(day.localDate))")
+                                        .font(.title3.weight(.heavy))
+                                        .foregroundStyle(PixelColor.ink)
+                                    Text(day.title.isEmpty ? nativeSessionName(day.kind) : day.title)
+                                        .font(.footnote)
+                                        .foregroundStyle(PixelColor.muted)
+                                }
+                                Spacer(minLength: 0)
+                                Rectangle().fill(nativeSessionColor(day.kind))
+                                    .frame(width: 10, height: 10)
+                                    .padding(.top, 6)
+                            }
+                            HStack(spacing: 8) {
+                                PixelMetricTile(
+                                    title: "距离",
+                                    value: day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "—",
+                                    accent: PixelColor.ink
+                                )
+                                PixelMetricTile(title: "状态", value: statusText, accent: statusColor)
+                            }
+                        }
+                    }
+                    if lines.isEmpty {
+                        PixelPanel {
+                            Text(day.kind == "rest"
+                                ? "这一天没有训练安排。"
+                                : "这一天还没有结构化处方；生成课表后，热身、主课与放松的步骤会显示在这里。")
+                                .font(.footnote)
+                                .foregroundStyle(PixelColor.muted)
+                        }
+                    } else {
+                        PixelPanel {
+                            VStack(alignment: .leading, spacing: 9) {
+                                PixelSectionHeader(title: "训练内容", trailing: "\(lines.count) 步")
+                                ForEach(lines) { line in
+                                    HStack(alignment: .top, spacing: 9) {
+                                        Text(line.title)
+                                            .font(.caption.weight(.heavy))
+                                            .foregroundStyle(PixelColor.cyan)
+                                            .frame(width: 80, alignment: .leading)
+                                            .lineLimit(2)
+                                            .minimumScaleFactor(0.7)
+                                        Text(line.detail)
+                                            .font(.caption)
+                                            .foregroundStyle(PixelColor.ink)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, PixelMetrics.pageHorizontal)
+                .padding(.vertical, PixelMetrics.pageVertical)
+            }
+        }
     }
 }
 

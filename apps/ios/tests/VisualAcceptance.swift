@@ -120,6 +120,9 @@ final class VisualAcceptance: XCTestCase {
     func test03Plan() {
         app.buttons["打开训练计划"].tap(); sleep(2)
         capture("03-plan")
+        // The week strip and the watch panel sit above the editor button now, so
+        // it no longer lands on the first screenful.
+        scrollTo(app.buttons["编辑周计划"])
         app.buttons["编辑周计划"].tap(); capture("03-plan-editor")
         let field = app.textFields["plan.weeklyDistance"]
         XCTAssertTrue(field.exists)
@@ -132,6 +135,12 @@ final class VisualAcceptance: XCTestCase {
         app.buttons["取消"].tap()
         XCTAssertTrue(app.buttons["编辑周计划"].exists)
         capture("03-plan-cancelled")
+        // Seven equal columns, each opening that day's prescription.
+        let dayChips = app.buttons.matching(NSPredicate(format: "label CONTAINS '查看训练详情'"))
+        XCTAssertGreaterThan(dayChips.count, 0, "本周至少应有一天可以点开训练详情")
+        scrollTo(dayChips.element(boundBy: 0))
+        dayChips.element(boundBy: 0).tap(); sleep(1)
+        capture("03-plan-day-detail")
     }
 
     func test04Analysis() {
@@ -261,6 +270,7 @@ final class VisualAcceptance: XCTestCase {
     @MainActor
     func test10RevisionConflict() async throws {
         app.buttons["打开训练计划"].tap()
+        scrollTo(app.buttons["编辑周计划"])
         app.buttons["编辑周计划"].tap()
         let url = URL(string: server + "/v1/mobile/goals")!
         let (body, _) = try await URLSession.shared.data(from: url)
