@@ -167,14 +167,28 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 
 `git revert <本次提交>` + `systemctl restart rai-api`（API 侧 tsx 直跑，无需 build）。无 schema、无数据变更。
 
-#### 仍未定性的 🟡（不阻塞本次修复）
+#### 仍未定性的 🟡（不阻塞本次修复）——2026-09-15 17:30 复查后的结论
 
-**一次手表训练为何导出两套计圈（1 km 与 1.6 km）**。已排除：同一 `workout_id` 只有一行、
-无第二个来源、无 `Lap` 行、`canonical_group_id` 内只有一行。判决性物证是原始 `export.xml` 的
-`<Workout>` 元素（服务器**未保留**导入原件，本机也没有导出文件）。也需考虑一个解析器嫌疑：
-`apple-health-parser.ts` **不处理 `<WorkoutActivity>` 子元素**，若导出把子活动的 `WorkoutEvent`
-嵌在 `<WorkoutActivity>` 里，会被无条件摊平进父 workout——那正好能造出"两套各自完整的划分"。
-**下次有新 export.xml 时第一件事**：`grep -c "<WorkoutActivity" export.xml`，并看 `WorkoutEvent` 的嵌套层级。
+**"一次手表训练为何导出两套计圈"。已排除的（每条都有判据）：**
+
+| 假设 | 判据 | 结论 |
+|---|---|---|
+| 库里有两条源 workout 被合并 | workout id = `hash(activityType, sourceName, syncId)`（`apple-health-parser.ts:186-194`），syncId 回落值 = `workout.uuid`（`HealthKitExport.swift:595-599`，本次数据里 `HKMetadataKeySyncIdentifier` 与 `RAIHealthKitWorkoutUUID` 同值 ⇒ 走回落）⇒ **两条 workout 必然两行**；实测各 canonical 组只有 **1 行** | ❌ 排除 |
+| 导出器把事件枚举了两遍 | `workoutEventXML` 只迭代一次 `workout.workoutEvents`（`HealthKitExport.swift:306-318`） | ❌ 排除 |
+| App 读/写了 `workoutActivities` | 全 `apps/ios` 无 `workoutActivities` / `HKWorkoutBuilder` / `HKWorkoutSession` 调用，只有 WorkoutKit **排期** | ❌ 排除 |
+| 事件来自 parser 折叠 `<WorkoutActivity>` | **前提不成立**：这份 `export.xml` 是**我们自己的 App 合成**的（`HealthKitExport.swift:263`），**根本不写 `<WorkoutActivity>`** ⇒ 该假设只适用于 Apple 健康 App 的官方导出，与本链路无关 | ❌ 排除（**上午写的"第一嫌疑"已作废**） |
+| 一套是课表步骤 | 处方步骤边界（300 s / ≈1281 s）不在 10 个候选边界点里；P7≈1 km、P4≈1.6 km 都与 3 步处方不符 | ❌ 排除 |
+
+**⇒ 结论：这 11 个事件是 `HKWorkout.workoutEvents` 的原样内容**（导出器与解析器都只是忠实搬运），
+两套重叠划分是 **HealthKit 侧的事实**，不是我们代码造的。🔴 **因此它不在我们可改的代码里，
+判决点只能在手机上读 HealthKit。**
+
+**🔴 而且复查发现一个比这个谜题更值钱的东西**：`HKWorkoutActivity` **不产生 `WorkoutEvent`** ——
+一个 activity 只有 `startDate` / `duration` / `workoutConfiguration`。而 Fitness App 能显示那 4 段
+（热身 788 m / 训练 2600 m / 整理放松 773 m / 自由训练 1.89 km ≈ 处方的 3 步 + 自由段），
+说明**步骤结构很可能就活在 `workout.workoutActivities` 里，而我们从来没有导出过它**。
+⇒ 若成立，「课表分段」可以从**按课表回放到实测配速的推算**升级为**实测边界**（真正的测量），
+也不再依赖课表历史。**排查方案见 `.workbuddy/memory/NOTES-mobile-plan.md` 的同名小节（L0–L3 四级）。**
 
 **部署记录**：`00c0ccb → c1ecac7`（9 个提交）fast-forward → `npm run build`（`BUILD_EXIT=0`）
 → `systemctl restart rai-api`；部署前备份 `rai.manual.2026-09-15T06-33-15-371Z.f5f4fbb3.sqlite`（530 MB）。
