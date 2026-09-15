@@ -230,7 +230,8 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 若某个更早的 workout 需要诊断，用设置页的「**重新导入全部**」（`full: true` ⇒ anchor 与 lowerBound 都清空）
 强制全量导出即可。
 
-**小唐要做三步**（服务器侧已就绪，`/opt/rai` HEAD = `f4ac3eb`，`apps/ios/**` 是非运行时路径 ⇒ **无需重启**）：
+**小唐要做三步**（服务器侧已就绪：`/opt/rai` 已 fast-forward 到含本节的 HEAD、工作树干净；
+`apps/ios/**` 是非运行时路径 ⇒ **无需重启**）：
 
 1. Xcode 打开 **`RAI.xcworkspace`**（不是 xcodeproj）→ 在真机上 Run（重新 build + 安装）。
 2. App 设置页点「**同步健康**」（`Settings.tsx:118`，`full: false` ⇒ 走增量，会带上诊断）。
@@ -241,9 +242,9 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 **部署记录**：`00c0ccb → c1ecac7`（9 个提交）fast-forward → `npm run build`（`BUILD_EXIT=0`）
 → `systemctl restart rai-api`；部署前备份 `rai.manual.2026-09-15T06-33-15-371Z.f5f4fbb3.sqlite`（530 MB）。
 
-**L2 那次部署（`e41379f → 810acd4 → f4ac3eb`）**：改动只有 `apps/ios/**` + `deliverables/**`（diff 实测），
+**L2 那次部署（`e41379f` → `810acd4` → 本文档所在提交）**：改动只有 `apps/ios/**` + `deliverables/**`（diff 实测），
 属**非运行时路径** ⇒ 最小动作是**只 `git pull --ff-only`**，**不 build、不 restart、不做备份**
-（不写数据、DIST 哈希不变、无新迁移）。线上核对：`HEAD=f4ac3eb`、工作树仅 `.npm/`/`.npmrc` 噪声、
+（不写数据、DIST 哈希不变、无新迁移）。线上核对：`HEAD` 与 `origin/main` 一致、工作树仅 `.npm/`/`.npmrc` 噪声、
 `/v1/health` 无 token **401** / 带 token **200** + `databaseReady:true`。
 🔴 但要讲清：**这次 deploy 对手机是 no-op** —— 见上面的「生效前提」。
 
