@@ -214,6 +214,146 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
             check(false, "an overwrite generation payload decodes")
         }
 
+        // --- plan-sync receipts follow the bridge, not the mapper -------------
+        // `recordPlanSync` must register exactly the days the bridge read back off
+        // the scheduler. Re-deriving the set from the mapper would register days
+        // the watch never received, and a later run would then be labelled with a
+        // prescription that was never handed over.
+        let receiptPlanJSON = """
+        {"generatedAt":"2026-09-11T01:00:00.000Z","timezone":"Asia/Shanghai","windowDays":2,"planRevision":7,
+         "audit":{"generatedBy":"llm","model":null,"promptVersion":null,"generatedAt":"2026-09-11T00:30:00.000Z"},
+         "days":[
+          {"localDate":"2026-09-11","kind":"easy","title":"轻松跑","reason":"","distanceKm":8,"durationMinutes":48,
+           "paceSecondsPerKmLower":330,"paceSecondsPerKmUpper":390,"heartRateBpmLower":120,"heartRateBpmUpper":150,
+           "structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":null}]}],"cooldown":null},
+           "source":"llm","executable":true},
+          {"localDate":"2026-09-12","kind":"easy","title":"轻松跑","reason":"","distanceKm":8,"durationMinutes":48,
+           "paceSecondsPerKmLower":330,"paceSecondsPerKmUpper":390,"heartRateBpmLower":120,"heartRateBpmUpper":150,
+           "structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":null}]}],"cooldown":null},
+           "source":"llm","executable":true}
+         ]}
+        """
+        final class ReceiptCounter: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value = 0
+            func bump() { lock.lock(); value += 1; lock.unlock() }
+            var count: Int { lock.lock(); defer { lock.unlock() }; return value }
+        }
+        if let receiptPlan = try? JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: Data(receiptPlanJSON.utf8)) {
+            check(receiptPlan.days.count == 2, "the receipt fixture holds two offerable days")
+            let receipts = ReceiptCounter()
+            StubProtocol.handler = { request in
+                if request.url!.path.hasSuffix("/workout-plan/synced") {
+                    receipts.bump()
+                    return (200, "{}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            _ = await model.recordPlanSync(receiptPlan, localDates: ["2026-09-12"])
+            check(receipts.count == 1, "only the day the bridge reported back is registered as a receipt")
+            _ = await model.recordPlanSync(receiptPlan, localDates: [])
+            check(receipts.count == 1, "an empty bridged set registers no receipt at all")
+            _ = await model.recordPlanSync(receiptPlan, localDates: ["2026-09-11", "2026-09-12"])
+            check(receipts.count == 3, "both bridged days are registered")
+            _ = await model.recordPlanSync(receiptPlan, localDates: ["2026-09-30"])
+            check(receipts.count == 3, "a date outside the plan registers nothing")
+        } else {
+            check(false, "the receipt fixture decodes")
+        }
+
+        // --- shared goal-editor rules ----------------------------------------
+        // Both skins validate through `NativeGoalWeekDraft`. The rules used to be
+        // duplicated byte-for-byte in each skin, which is how the 2026-09-13 fix
+        // shipped in one skin only.
+        check(NativeGoalWeekDraft.parsedDistance(" 12.5 ") == 12.5, "a padded distance parses")
+        check(NativeGoalWeekDraft.parsedDistance("") == nil, "an empty field means unset, not zero")
+        check(NativeGoalWeekDraft.parsedDistance("abc") == nil, "a non-numeric distance does not parse")
+        check(
+            NativeGoalWeekDraft.weeklyDistanceIsValid("1") && NativeGoalWeekDraft.weeklyDistanceIsValid("500"),
+            "the weekly bounds are inclusive"
+        )
+        check(
+            !NativeGoalWeekDraft.weeklyDistanceIsValid("0.9") && !NativeGoalWeekDraft.weeklyDistanceIsValid("500.1"),
+            "the weekly bounds reject just outside"
+        )
+        check(!NativeGoalWeekDraft.weeklyDistanceIsValid(""), "an empty weekly target is invalid")
+        check(
+            NativeGoalWeekDraft.dayDistanceIsValid("") && NativeGoalWeekDraft.dayDistanceIsValid("80"),
+            "a day may be unset or sit exactly on the cap"
+        )
+        check(
+            !NativeGoalWeekDraft.dayDistanceIsValid("80.1") && !NativeGoalWeekDraft.dayDistanceIsValid("-1"),
+            "a day outside 0–80 is rejected"
+        )
+        check(
+            NativeGoalWeekDraft.maxDayDistanceKm < NativeGoalWeekDraft.maxWeeklyDistanceKm,
+            "one day can never exceed the whole week"
+        )
+
+        func planStructure(_ meters: Double) -> MobileSessionStructure {
+            MobileSessionStructure(
+                warmup: nil,
+                blocks: [MobileIntervalBlock(iterations: 1, steps: [MobileWorkoutStep(purpose: "work", goal: .distance(meters: meters), alert: nil)])],
+                cooldown: nil
+            )
+        }
+        let storedGoals = [
+            MobileGoalsPlanItem(localDate: "2026-09-16", kind: "easy", distanceKm: 8, structure: planStructure(2_000), reason: nil),
+            MobileGoalsPlanItem(localDate: "2026-09-17", kind: "tempo", distanceKm: 10, structure: planStructure(3_000), reason: nil)
+        ]
+        let seeded = NativeGoalWeekDraft.drafts(from: storedGoals)
+        check(seeded["2026-09-16"] == String(8.0), "drafts seed one text field per stored day")
+        check(NativeGoalWeekDraft.parsedDistance(seeded["2026-09-16"] ?? "") == 8, "a seeded draft parses back to its distance")
+        check(
+            NativeGoalWeekDraft.drafts(from: [
+                MobileGoalsPlanItem(localDate: "2026-09-18", kind: "rest", distanceKm: nil, structure: nil, reason: nil)
+            ])["2026-09-18"] == "",
+            "a day with no distance seeds an empty field"
+        )
+        check(
+            NativeGoalWeekDraft.distancesAreValid(["2026-09-16": "8", "2026-09-17": "10"], for: storedGoals),
+            "a week of valid drafts passes"
+        )
+        check(
+            !NativeGoalWeekDraft.distancesAreValid(["2026-09-16": "81", "2026-09-17": "10"], for: storedGoals),
+            "one out-of-range draft fails the whole week"
+        )
+        check(
+            NativeGoalWeekDraft.distancesAreValid([:], for: storedGoals),
+            "a missing draft falls back to unset rather than invalid"
+        )
+
+        // The structure belongs to the kind and the size it was generated for, so
+        // it is dropped — and only dropped — when either of those moved.
+        let kindChanged = NativeGoalWeekDraft.normalized(
+            [
+                MobileGoalsPlanItem(localDate: "2026-09-16", kind: "easy", distanceKm: 8, structure: planStructure(2_000), reason: nil),
+                MobileGoalsPlanItem(localDate: "2026-09-17", kind: "easy", distanceKm: 10, structure: planStructure(3_000), reason: nil)
+            ],
+            drafts: ["2026-09-16": "8", "2026-09-17": "10"],
+            loaded: storedGoals
+        )
+        check(kindChanged[0].distanceKm == 8, "an untouched day keeps its distance")
+        check(kindChanged[0].structure != nil, "an untouched day keeps its prescription")
+        check(kindChanged[1].structure == nil, "a day whose kind changed drops the stale prescription")
+        check(kindChanged[1].distanceKm == 10, "the unchanged distance is still applied")
+
+        let resized = NativeGoalWeekDraft.normalized(
+            [MobileGoalsPlanItem(localDate: "2026-09-16", kind: "easy", distanceKm: 8, structure: planStructure(2_000), reason: nil)],
+            drafts: ["2026-09-16": "12"],
+            loaded: storedGoals
+        )
+        check(resized[0].distanceKm == 12, "a resized day takes the new distance")
+        check(resized[0].structure == nil, "a resized day drops the stale prescription")
+
+        let cleared = NativeGoalWeekDraft.normalized(
+            [MobileGoalsPlanItem(localDate: "2026-09-16", kind: "easy", distanceKm: 8, structure: planStructure(2_000), reason: nil)],
+            drafts: ["2026-09-16": ""],
+            loaded: storedGoals
+        )
+        check(cleared[0].distanceKm == nil, "clearing the field unsets the distance")
+        check(cleared[0].structure == nil, "unsetting the distance drops the stale prescription")
+
         print("All model regression checks passed.")
     }
 }

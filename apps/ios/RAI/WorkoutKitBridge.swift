@@ -33,6 +33,25 @@ enum WorkoutKitBridge {
         /// layer must not import the SDK. Carried into `summary` so a refused sync
         /// says *what* is blocking it instead of one catch-all sentence.
         var authorizationState: String?
+        /// True when the plan did not carry a usable timezone and the device's own
+        /// was used instead. Worth saying out loud: the scheduled instant, and with
+        /// it the "already passed" test, then depends on where the phone is.
+        var timeZoneFallback = false
+        /// How many days survived mapping (`plannedWorkouts`), whether or not they
+        /// could be built into a workout. Lets `summary` tell "nothing to send"
+        /// apart from "everything that was sendable failed to build".
+        var offered = 0
+        /// The local dates that were read back from the scheduler, i.e. the days
+        /// this sync can honestly claim the watch received.
+        ///
+        /// Carried out of here because nothing else can compute it: mapping,
+        /// `maxScheduledWorkoutCount` truncation and the scheduler's own
+        /// `supportsGoal`/`supportsAlert` checks all happen in this file, so a
+        /// caller re-deriving "which days went to the watch" would keep reporting
+        /// days that were dropped on the way. The receipt is what lets a later run
+        /// be matched to its prescription, so a receipt for a day the watch never
+        /// saw is worse than no receipt.
+        var scheduledLocalDates: [String] = []
 
         static let unsupportedDevice = SyncOutcome(
             scheduled: 0,
@@ -60,10 +79,24 @@ enum WorkoutKitBridge {
                     return "需要先允许 RAI 使用体能训练计划。"
                 }
             }
-            if attempted == 0 { return "本周没有可同步的训练（休息日与无效课表不会上表）。" }
+            if attempted == 0 {
+                // `attempted == 0` has two very different causes and the runner can
+                // act on only one of them: nothing was prescribed, or something was
+                // prescribed and the device could not turn it into a workout.
+                // Saying "本周没有可同步的训练" for the second reads as "you have a
+                // rest week" while the week actually held sessions.
+                guard offered > 0 else { return "本周没有可同步的训练（休息日与无效课表不会上表）。" }
+                return "本周有 \(offered) 天可上表，但没有一天能建成手表上的训练。请重新生成课表。"
+            }
             guard verified else { return "已提交 \(attempted) 项，但系统未回读确认。请在手表「体能训练」中确认。" }
             if skipped > 0 { return "已同步 \(scheduled) 项，跳过 \(skipped) 项。" }
             return "已同步 \(scheduled) 项到「体能训练」。"
+        }
+
+        /// The one line the panel shows, warnings included.
+        var report: String {
+            guard timeZoneFallback else { return summary }
+            return "\(summary)（课表未带时区，已按手机当前时区排期）"
         }
     }
 
@@ -126,22 +159,48 @@ enum WorkoutKitBridge {
                 authorizationState: describe(state)
             )
         }
-        let timeZone = TimeZone(identifier: plan.timezone) ?? .current
+        let timeZone = TimeZone(identifier: plan.timezone)
+        let resolvedTimeZone = timeZone ?? .current
         let executable = WorkoutPlanMapper.plannedWorkouts(from: plan)
         let skipped = plan.days.count - executable.count
         guard !executable.isEmpty else {
             await WorkoutScheduler.shared.removeAllWorkouts()
-            return SyncOutcome(scheduled: 0, attempted: 0, skipped: skipped, authorized: true, verified: true)
+            // Clearing is as silent as scheduling when it fails, and the failure
+            // that matters here is the opposite one: a withdrawal that did not
+            // land leaves a prescription on the watch the gate has already pulled.
+            let remaining = await WorkoutScheduler.shared.scheduledWorkouts.count
+            return SyncOutcome(
+                scheduled: 0,
+                attempted: 0,
+                skipped: skipped,
+                authorized: true,
+                verified: remaining == 0,
+                timeZoneFallback: timeZone == nil,
+                offered: 0
+            )
         }
 
         var pending: [PendingWorkout] = []
         for mapped in executable.prefix(maxScheduledWorkoutCount) {
-            guard let at = WorkoutPlanMapper.scheduleComponents(for: mapped, timeZone: timeZone, now: now),
+            guard let at = WorkoutPlanMapper.scheduleComponents(for: mapped, timeZone: resolvedTimeZone, now: now),
                   let custom = customWorkout(from: mapped) else { continue }
-            pending.append(PendingWorkout(custom: custom, plan: WorkoutPlan(.custom(custom)), at: at))
+            pending.append(PendingWorkout(
+                custom: custom,
+                plan: WorkoutPlan(.custom(custom)),
+                at: at,
+                localDate: mapped.localDate
+            ))
         }
         guard !pending.isEmpty else {
-            return SyncOutcome(scheduled: 0, attempted: 0, skipped: skipped, authorized: true, verified: false)
+            return SyncOutcome(
+                scheduled: 0,
+                attempted: 0,
+                skipped: skipped,
+                authorized: true,
+                verified: false,
+                timeZoneFallback: timeZone == nil,
+                offered: executable.count
+            )
         }
 
         await WorkoutScheduler.shared.removeAllWorkouts()
@@ -150,20 +209,30 @@ enum WorkoutKitBridge {
         }
 
         // Read back: the scheduler reports no error, so the only proof that the
-        // week actually landed is that it is now listed. `WorkoutPlan` carries a
-        // fresh UUID on every init, so identity is the wrapped workout, not the
-        // plan itself.
-        let listed = await WorkoutScheduler.shared.scheduledWorkouts
-        let confirmed = pending.filter { item in
-            listed.contains { $0.plan.workout == .custom(item.custom) }
-        }.count
-        let dropped = skipped + (executable.count - pending.count) + (pending.count - confirmed)
+        // week actually landed is that it is now listed.
+        //
+        // Matching is *consume-once* on purpose. `scheduledWorkouts` carries no
+        // date and `CustomWorkout` equality is content-only, so a week with two
+        // identical days (two «轻松跑 8.0km») would otherwise let one listed entry
+        // confirm both of them: if the other day's `schedule` silently did nothing,
+        // the sync would still report "已同步 2 项" while the watch holds one.
+        var unmatched = await WorkoutScheduler.shared.scheduledWorkouts.map(\.plan.workout)
+        var confirmed: [String] = []
+        for item in pending {
+            guard let index = unmatched.firstIndex(of: .custom(item.custom)) else { continue }
+            unmatched.remove(at: index)
+            confirmed.append(item.localDate)
+        }
+        let dropped = skipped + (executable.count - pending.count) + (pending.count - confirmed.count)
         return SyncOutcome(
-            scheduled: confirmed,
+            scheduled: confirmed.count,
             attempted: pending.count,
             skipped: dropped,
             authorized: true,
-            verified: confirmed == pending.count
+            verified: confirmed.count == pending.count,
+            timeZoneFallback: timeZone == nil,
+            offered: executable.count,
+            scheduledLocalDates: confirmed
         )
     }
 
@@ -171,6 +240,8 @@ enum WorkoutKitBridge {
         let custom: CustomWorkout
         let plan: WorkoutPlan
         let at: DateComponents
+        /// Kept for the receipt: the day this workout stands for.
+        let localDate: String
     }
 
     /// Numbers are checked by `CustomWorkout.supportsGoal` / `supportsAlert`

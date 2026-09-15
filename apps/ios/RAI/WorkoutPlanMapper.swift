@@ -61,13 +61,30 @@ enum WorkoutPlanMapper {
     static let maxIterations = 20
     static let maxStepMeters = 100_000.0
     static let maxStepSeconds = 14_400.0
-    static let maxAlertValue = 1_800.0
+    /// A pace bound slower than this is not a prescription, it is a malformed
+    /// field — and it is *dropped*, not clamped: clamping a pace changes the
+    /// intensity it asks for (a 2 000 s/km recovery jog pushed to 1 800 s/km is a
+    /// faster workout than the athlete was told to run).
+    static let maxPaceSecondsPerKm = 1_800.0
+    /// Heart rate is the opposite case: a bound above what a human can reach is
+    /// decoration rather than intent, so clamping it is lossless.
+    static let maxHeartRateBpm = 240.0
 
     /// Days the server cannot or should not sync are dropped here: rest days,
     /// days whose prescription failed to build, and days left with no usable
     /// step after filtering.
     static func plannedWorkouts(from plan: MobileWorkoutPlanResponse) -> [PlannedWorkout] {
         plan.days.compactMap { plannedWorkout(from: $0) }
+    }
+
+    /// How many days of the week the watch will actually be offered.
+    ///
+    /// The count the UI shows has to come from the same rule the bridge schedules
+    /// by, otherwise a week can read "5 项可上表" while the watch receives four —
+    /// the panel used to count the server's `executable` flag, which is a
+    /// different (looser) question than "did this day survive mapping".
+    static func schedulableCount(in plan: MobileWorkoutPlanResponse) -> Int {
+        plan.days.filter { plannedWorkout(from: $0) != nil }.count
     }
 
     static func plannedWorkout(
@@ -121,8 +138,13 @@ enum WorkoutPlanMapper {
         components.minute = workout.minute
         components.second = 0
         guard let planned = calendar.date(from: components) else { return nil }
+        // `Calendar.date(from:)` is lenient: it rolls "2026-02-30" forward into
+        // March instead of failing, which would put a session on a day nobody
+        // asked for. Read the date back and require the calendar to agree.
+        let resolved = calendar.dateComponents([.year, .month, .day], from: planned)
+        guard resolved.year == year, resolved.month == month, resolved.day == day else { return nil }
         guard planned <= now else { return components }
-        let rolled = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: now.addingTimeInterval(lateFloorSeconds))
+        let rolled = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: now.addingTimeInterval(lateFloorSeconds))
         var adjusted = DateComponents()
         adjusted.timeZone = timeZone
         adjusted.year = rolled.year
@@ -130,7 +152,10 @@ enum WorkoutPlanMapper {
         adjusted.day = rolled.day
         adjusted.hour = rolled.hour
         adjusted.minute = rolled.minute
-        adjusted.second = rolled.second
+        // Always on a whole minute, like the future path: `lateFloorSeconds` is
+        // larger than the seconds it can drop, so the result stays strictly ahead
+        // of `now` while the two paths agree on what "scheduled at" looks like.
+        adjusted.second = 0
         return adjusted
     }
 
@@ -178,22 +203,81 @@ enum WorkoutPlanMapper {
         }
     }
 
-    /// Why a row of the executable week is not offered to the watch, or nil when
-    /// it is offered.
+    /// Status word for one day of the seven-day strip (the `/today` payload).
+    ///
+    /// Both skins had their own copy of this rule — identical line for line except
+    /// for the colour each pairs it with — which is the same drift `inactiveLabel`
+    /// exists to prevent. The word is a statement about the data; only its colour
+    /// is a skin decision. Kept here, next to the other week/day judgment, so the
+    /// off-device regression can pin it.
+    static func weekStripStatus(completed: Bool, isRest: Bool, isToday: Bool) -> String {
+        if completed { return "已完成" }
+        if isRest { return "休息日" }
+        return isToday ? "今日安排" : "计划中"
+    }
+
+    /// Why a row of the week is not offered to the watch, or nil when it is.
+    ///
+    /// Every label is derived from the same predicate the bridge schedules by
+    /// (`plannedWorkout(from:)`), so a row can never be shown as offered while the
+    /// watch silently receives nothing — which is what the server's `executable`
+    /// flag on its own allowed (an executable day whose structure is missing or
+    /// whose steps all lack a target does not survive mapping).
     ///
     /// The week panel dims the rows the watch will not receive and still prints
     /// their distance, which left a finished day reading as «周四 轻松跑 5.0km»
     /// at 60% opacity — the prescription that was *not* run, with nothing saying
-    /// so. The two endpoints describe that date differently on purpose (实绩 vs
-    /// 处方), and the label is what makes the difference legible.
+    /// so. `unofferedDays` turns these labels into the panel's one line; the seven
+    /// day strip has its own vocabulary (`weekStripStatus`), because it describes
+    /// what was run rather than what was handed over.
     ///
     /// `completedLocalDates` comes from `/v1/mobile/today`, which is the only
     /// side that knows the day was actually trained.
     static func inactiveLabel(for day: MobileWorkoutPlanDay, completedLocalDates: Set<String>) -> String? {
-        if day.executable { return nil }
-        if completedLocalDates.contains(day.localDate) { return "已完成" }
-        if day.kind == "rest" { return "休息" }
-        return "不可上表"
+        switch eligibility(for: day, completedLocalDates: completedLocalDates) {
+        case .scheduled: return nil
+        case .completed: return "已完成"
+        case .rest: return "休息"
+        case .noPrescription: return "不可上表"
+        }
+    }
+
+    /// What the watch will do with one day of the week.
+    enum WatchEligibility: Equatable {
+        /// The day survives mapping and is handed to the scheduler.
+        case scheduled
+        /// `/today` says the day was trained; it is not owed any more.
+        case completed
+        case rest
+        /// The server offered the day but nothing usable came out of it.
+        case noPrescription
+    }
+
+    static func eligibility(
+        for day: MobileWorkoutPlanDay,
+        completedLocalDates: Set<String>
+    ) -> WatchEligibility {
+        if completedLocalDates.contains(day.localDate) { return .completed }
+        if plannedWorkout(from: day) != nil { return .scheduled }
+        if day.kind == "rest" { return .rest }
+        return .noPrescription
+    }
+
+    /// The days of the week the watch will *not* receive, with the reason.
+    ///
+    /// Rest days are excluded: they are the schedule, not a shortfall. What is
+    /// left is the surprising case — the server offered a training day and the
+    /// device cannot use it — and the panel says so instead of quietly showing a
+    /// smaller number than the week suggests.
+    static func unofferedDays(
+        in plan: MobileWorkoutPlanResponse,
+        completedLocalDates: Set<String>
+    ) -> [(localDate: String, reason: String)] {
+        plan.days.compactMap { day in
+            guard eligibility(for: day, completedLocalDates: completedLocalDates) == .noPrescription,
+                  let reason = inactiveLabel(for: day, completedLocalDates: completedLocalDates) else { return nil }
+            return (day.localDate, reason)
+        }
     }
 
     // MARK: - Private
@@ -238,12 +322,14 @@ enum WorkoutPlanMapper {
     /// than dropping the whole workout.
     private static func alert(from raw: MobileStepAlert?) -> PlannedWorkout.Alert? {
         guard let raw, raw.isUsable else { return nil }
-        let (lower, upper) = ordered(lower: bounded(raw.lower), upper: bounded(raw.upper))
-        guard lower != nil || upper != nil else { return nil }
         switch raw.kind {
         case "pace":
+            let (lower, upper) = ordered(lower: paceBound(raw.lower), upper: paceBound(raw.upper))
+            guard lower != nil || upper != nil else { return nil }
             return .pace(lower: lower, upper: upper)
         case "heart_rate":
+            let (lower, upper) = ordered(lower: heartRateBound(raw.lower), upper: heartRateBound(raw.upper))
+            guard lower != nil || upper != nil else { return nil }
             return .heartRate(lower: lower, upper: upper)
         default:
             return nil
@@ -255,9 +341,17 @@ enum WorkoutPlanMapper {
         return (upper, lower)
     }
 
-    private static func bounded(_ value: Double?) -> Double? {
+    /// Keeps a usable pace bound or drops it. Never clamps: see
+    /// `maxPaceSecondsPerKm`.
+    private static func paceBound(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0, value <= maxPaceSecondsPerKm else { return nil }
+        return value
+    }
+
+    /// Keeps a usable heart-rate bound, clamping an impossible ceiling.
+    private static func heartRateBound(_ value: Double?) -> Double? {
         guard let value, value.isFinite, value > 0 else { return nil }
-        return min(maxAlertValue, value)
+        return min(maxHeartRateBpm, value)
     }
 }
 

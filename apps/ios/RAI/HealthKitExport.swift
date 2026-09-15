@@ -12,13 +12,17 @@ nonisolated struct HealthKitExportResult: Sendable {
     let maxEndDate: Date?
     let exportedThrough: Date
     let workoutAnchor: Data?
-    let deletedWorkoutIds: [String]
     let sourceScope: String
 }
 
 nonisolated enum HealthKitExportError: LocalizedError {
     case unavailable
     case notAuthorized
+    /// The system has never asked the user for read access, and the request came
+    /// back without a decision. Kept apart from `notAuthorized` because the two
+    /// need different advice: one is "go flip a switch", the other is "the prompt
+    /// never reached you".
+    case authorizationUndecided
 
     var errorDescription: String? {
         switch self {
@@ -26,8 +30,25 @@ nonisolated enum HealthKitExportError: LocalizedError {
             return "这台设备没有 Apple 健康数据"
         case .notAuthorized:
             return "未获得 Apple 健康读取权限。请在 iPhone 设置 → 健康 → 数据访问与设备 中打开 RAI。"
+        case .authorizationUndecided:
+            return "系统没有给出 Apple 健康读取授权结果。请重新打开 RAI 并点一次「同步健康」；"
+                + "若仍无反应，请删除 App 重装。"
         }
     }
+}
+
+/// Whether the user has answered the read prompt at all.
+///
+/// HealthKit deliberately never tells an app whether *read* access was granted —
+/// only that the question has been asked. That is still the difference that
+/// matters here: `notDetermined` means every later query returns an empty set,
+/// which used to be exported as "0 次跑步" and reported as a successful sync.
+nonisolated enum HealthKitReadAuthorization: String, Sendable {
+    case unavailable
+    case notDetermined
+    case decided
+
+    var isUndecided: Bool { self == .notDetermined }
 }
 
 nonisolated private final class ResumeBox<T>: @unchecked Sendable {
@@ -79,10 +100,29 @@ nonisolated enum HealthKitExport {
     /// recent window on anchored syncs so late routes are discoverable.
     private static let routeBackfillWindow: TimeInterval = 14 * 24 * 60 * 60
 
+    /// Asks for read access and reports whether the system actually has an answer.
+    ///
+    /// `requestAuthorization` is the only call that can show the prompt, and it
+    /// never says whether the user answered: on a refusal it returns without an
+    /// error and every later query simply yields nothing. Asking the store for the
+    /// *request status* before and after is the only way to tell "the user has not
+    /// decided" apart from "the user decided, and there is nothing to read" —
+    /// without which an unauthorized device exports an empty archive and reports a
+    /// successful sync. This is the single entry point for that request; callers
+    /// must branch on the result rather than assume the prompt was answered.
     @MainActor
-    static func requestReadAuthorization() async throws {
-        guard HKHealthStore.isHealthDataAvailable() else { throw HealthKitExportError.unavailable }
-        try await HKHealthStore().requestAuthorization(toShare: [], read: readTypes)
+    static func readAuthorizationState(requestingIfNeeded: Bool = true) async -> HealthKitReadAuthorization {
+        guard HKHealthStore.isHealthDataAvailable() else { return .unavailable }
+        let store = HKHealthStore()
+        let before = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes)
+        if before == .shouldRequest, requestingIfNeeded {
+            try? await store.requestAuthorization(toShare: [], read: readTypes)
+        }
+        let after = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes)
+        // `.unnecessary` means the question has been answered — allowed or denied,
+        // HealthKit will not say which, and it does not have to: a decided store
+        // can read whatever it was given.
+        return after == .shouldRequest ? .notDetermined : .decided
     }
 
     static func exportArchive(
@@ -143,6 +183,11 @@ nonisolated enum HealthKitExport {
         try xml.synchronize()
 
         let manifestURL = directory.appendingPathComponent("sync-manifest.json")
+        // Deletions are named by UUID, and the importer matches that against the
+        // `RAIHealthKitWorkoutUUID` entry this exporter writes on every workout
+        // (`storage-sqlite/src/database.ts` checks both identifier keys). Naming
+        // the sync identifier instead would be no more precise and no less: the
+        // UUID can only ever match one row.
         let manifest: [String: Any] = [
             "version": 1,
             "sourceScope": "healthkit",
@@ -169,7 +214,6 @@ nonisolated enum HealthKitExport {
             maxEndDate: workouts.map(\.endDate).max(),
             exportedThrough: exportedThrough,
             workoutAnchor: workoutBatch.anchor,
-            deletedWorkoutIds: workoutBatch.deleted.map { $0.uuid.uuidString },
             sourceScope: "healthkit"
         )
     }
@@ -780,8 +824,10 @@ nonisolated enum HealthKitExport {
 
     private static func serializeMetadata(_ value: Any) -> String? {
         if let text = value as? String { return text }
+        // A Swift `Bool` bridges to `NSNumber` and is caught here, where
+        // `stringValue` already yields "1"/"0" — a later `as? Bool` would never
+        // be reached.
         if let number = value as? NSNumber { return number.stringValue }
-        if let flag = value as? Bool { return flag ? "1" : "0" }
         if let quantity = value as? HKQuantity {
             if quantity.is(compatibleWith: .degreeCelsius()) {
                 return "\(format(quantity.doubleValue(for: .degreeCelsius()))) degC"
@@ -887,8 +933,16 @@ nonisolated enum HealthKitExport {
         String(format: "%.4f", value)
     }
 
+    /// XML attribute escaping. Control characters other than tab/newline/carriage
+    /// return are illegal in XML 1.0 at any level, so a device name that happens to
+    /// carry one would make the whole document unparseable — drop them rather than
+    /// let a single stray byte fail the import.
     private static func escape(_ value: String) -> String {
-        value
+        let legal = value.unicodeScalars.filter { scalar in
+            scalar.value == 0x09 || scalar.value == 0x0A || scalar.value == 0x0D
+                || scalar.value >= 0x20
+        }
+        return String(String.UnicodeScalarView(legal))
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "<", with: "&lt;")

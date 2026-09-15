@@ -1456,14 +1456,15 @@ struct TechPlanView: View {
     @State private var isSaving = false
     @State private var saveMessage: String?
 
-    private var weeklyValue: Double? { Double(weeklyText.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    // The bounds, the parsing rule and the "clear a stale structure" rule are
+    // shared with the pixel skin through `NativeGoalWeekDraft`; none of them is a
+    // skin decision, and keeping a copy per skin is how the 2026-09-13 fix ended
+    // up in one skin only.
+    private var weeklyValue: Double? { NativeGoalWeekDraft.parsedDistance(weeklyText) }
     private var areDistancesValid: Bool {
-        weekPlan.allSatisfy { item in
-            let text = (distanceDrafts[item.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty || Double(text).map { $0.isFinite && (0...80).contains($0) } == true
-        }
+        NativeGoalWeekDraft.distancesAreValid(distanceDrafts, for: weekPlan)
     }
-    private var isWeeklyValid: Bool { weeklyValue.map { (1...500).contains($0) } ?? false }
+    private var isWeeklyValid: Bool { NativeGoalWeekDraft.weeklyDistanceIsValid(weeklyText) }
 
     var body: some View {
         ScrollView {
@@ -1631,26 +1632,42 @@ struct TechPlanView: View {
     /// only place that can rewrite the stored week or mirror it onto the watch.
     private var watchPlanPanel: some View {
         let plan = native.workoutPlan
-        let executableCount = plan?.days.filter(\.executable).count ?? 0
+        // The panel used to count the server's `executable` flag, which is a
+        // looser question than "did this day survive mapping" — a week could read
+        // "5 项可上表" while the watch received four. Counting with the bridge's
+        // own predicate keeps the sentence and the sync in agreement.
+        let schedulableCount = plan.map(WorkoutPlanMapper.schedulableCount(in:)) ?? 0
+        let unoffered = plan.map {
+            WorkoutPlanMapper.unofferedDays(in: $0, completedLocalDates: native.completedWeekDates)
+        } ?? []
         return TechPanel {
             VStack(alignment: .leading, spacing: 12) {
                 TechSectionHeader(
                     title: "手表课表",
-                    trailing: plan == nil ? "未生成" : "\(executableCount) 项可上表",
+                    trailing: plan == nil ? "未生成" : "\(schedulableCount) 项可上表",
                     trailingColor: TechColor.cyan
                 )
                 if plan == nil {
                     Text("还没有本周课表。生成后即可一键同步到手表「体能训练」。")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
-                } else if executableCount == 0 {
+                } else if schedulableCount == 0 {
                     Text("本周没有可上表的训练日，生成一份新的课表再同步。")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
                 } else {
-                    Text("将把 \(executableCount) 天训练写入手表「体能训练」，已完成的日期不会重复下发。")
+                    Text("将把 \(schedulableCount) 天训练写入手表「体能训练」，已完成的日期不会重复下发。")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
+                }
+                if !unoffered.isEmpty {
+                    // "N 项可上表" already implies something was left out; naming
+                    // which days, and why, is the only part the runner can act on.
+                    Text("以下日期不会上表：" + unoffered
+                        .map { "\(nativeDay($0.localDate)) \($0.reason)" }
+                        .joined(separator: "、"))
+                        .font(.caption)
+                        .foregroundStyle(TechColor.coral)
                 }
                 if let audit = plan?.audit {
                     Text(
@@ -1681,7 +1698,7 @@ struct TechPlanView: View {
                     title: "一键同步到手表",
                     systemName: "applewatch",
                     isBusy: isSyncingPlan,
-                    isDisabled: native.isOffline || executableCount == 0
+                    isDisabled: native.isOffline || schedulableCount == 0
                 ) {
                     syncPlanToWatch()
                 }
@@ -1717,12 +1734,14 @@ struct TechPlanView: View {
             // Permission is asked for only when the user actually tries to sync, so
             // the system prompt arrives with an obvious reason attached to it.
             let outcome = await WorkoutKitBridge.syncRequestingAuthorization(plan: plan)
-            // Receipts are registered only for a sync that actually landed: the row
-            // means "the watch received this day", and a plan that never got there
-            // must not be allowed to label a later run.
-            let receipt = outcome.scheduled > 0 ? await native.recordPlanSync(plan) : nil
+            // Receipts are registered only for the days the bridge read back off
+            // the scheduler: the row means "the watch received this day", and a
+            // plan that never got there must not be allowed to label a later run.
+            let receipt = outcome.scheduledLocalDates.isEmpty
+                ? nil
+                : await native.recordPlanSync(plan, localDates: outcome.scheduledLocalDates)
             isSyncingPlan = false
-            planSyncMessage = [outcome.summary, receipt].compactMap { $0 }.joined(separator: "；")
+            planSyncMessage = [outcome.report, receipt].compactMap { $0 }.joined(separator: "；")
         }
     }
 
@@ -1877,28 +1896,17 @@ struct TechPlanView: View {
         easyFloor = goals.easyDurationFloorFraction
         qualityCap = goals.qualitySessionCap
         weekPlan = goals.weekPlan
-        distanceDrafts = Dictionary(uniqueKeysWithValues: goals.weekPlan.map {
-            ($0.id, $0.distanceKm.map { String($0) } ?? "")
-        })
+        distanceDrafts = NativeGoalWeekDraft.drafts(from: goals.weekPlan)
     }
 
     private func save() async {
-        guard !isSaving, areDistancesValid, let weekly = weeklyValue, (1...500).contains(weekly) else { return }
-        // The structure belongs to the kind and size it was generated for. The
-        // editor loads whatever the server returned, so sending it straight back
-        // after the user edits the kind or the distance would pair an old
-        // prescription with a new label; clearing it lets the server rebuild the
-        // prescription from what was actually asked for.
-        let loaded = Dictionary(uniqueKeysWithValues: (native.goals?.weekPlan ?? []).map { ($0.localDate, $0) })
-        let plan = weekPlan.map { item in
-            var updated = item
-            updated.distanceKm = Double((distanceDrafts[item.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
-            if let previous = loaded[item.localDate],
-               previous.kind != updated.kind || previous.distanceKm != updated.distanceKm {
-                updated.structure = nil
-            }
-            return updated
-        }
+        guard !isSaving, areDistancesValid, let weekly = weeklyValue,
+              NativeGoalWeekDraft.weeklyDistanceIsValid(weeklyText) else { return }
+        let plan = NativeGoalWeekDraft.normalized(
+            weekPlan,
+            drafts: distanceDrafts,
+            loaded: native.goals?.weekPlan ?? []
+        )
         isSaving = true
         saveMessage = nil
         let success = await native.saveGoals(
@@ -1923,9 +1931,13 @@ private struct TechPlanDaySheet: View {
     let isToday: Bool
 
     private var statusText: String {
-        if day.completedWorkoutId != nil { return "已完成" }
-        if day.kind == "rest" { return "休息日" }
-        return isToday ? "今日安排" : "计划中"
+        // The word is a statement about the data, so it lives next to the mapper's
+        // other day judgments; only the colour below is a skin decision.
+        WorkoutPlanMapper.weekStripStatus(
+            completed: day.completedWorkoutId != nil,
+            isRest: day.kind == "rest",
+            isToday: isToday
+        )
     }
 
     private var statusColor: Color {

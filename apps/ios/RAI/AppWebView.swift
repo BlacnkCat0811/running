@@ -362,27 +362,32 @@ private func windowSafeAreaInsets() -> UIEdgeInsets {
     return UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0)
 }
 
-private func iosSafeAreaUserScript(chromeTop: Double) -> WKUserScript {
+/// The JS the iOS shell injects: the shell marker plus the safe-area custom
+/// properties the web layout reads.
+///
+/// One function on purpose. This snippet is injected from three places — the
+/// document-start user script, the explicit re-injection after a layout change,
+/// and the native status push — and when each carried its own copy, a property
+/// added to one of them silently went missing on the other two, which shows up as
+/// content sliding under the notch on exactly one code path.
+private func iosShellJavaScript(chromeTop: Double) -> String {
     let insets = windowSafeAreaInsets()
-    let source = """
+    return """
     document.documentElement.dataset.shell = 'ios';
     document.documentElement.style.setProperty('--rai-safe-top', '\(insets.top)px');
     document.documentElement.style.setProperty('--rai-safe-bottom', '\(insets.bottom)px');
     document.documentElement.style.setProperty('--rai-chrome-top', '\(chromeTop)px');
     """
+}
+
+private func iosSafeAreaUserScript(chromeTop: Double) -> WKUserScript {
+    let source = iosShellJavaScript(chromeTop: chromeTop)
     return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
 }
 
 @MainActor
 func injectIosSafeArea(_ webView: WKWebView, chromeTop: Double) {
-    let insets = windowSafeAreaInsets()
-    let source = """
-    document.documentElement.dataset.shell = 'ios';
-    document.documentElement.style.setProperty('--rai-safe-top', '\(insets.top)px');
-    document.documentElement.style.setProperty('--rai-safe-bottom', '\(insets.bottom)px');
-    document.documentElement.style.setProperty('--rai-chrome-top', '\(chromeTop)px');
-    """
-    webView.evaluateJavaScript(source, completionHandler: nil)
+    webView.evaluateJavaScript(iosShellJavaScript(chromeTop: chromeTop), completionHandler: nil)
 }
 #endif
 
@@ -479,13 +484,7 @@ private func injectToken(_ snapshot: NativeBridgeSnapshot, into webView: WKWebVi
 @MainActor
 private func injectNativeStatus(_ snapshot: NativeBridgeSnapshot, into webView: WKWebView) {
     #if os(iOS)
-    let insets = windowSafeAreaInsets()
-    let css = """
-    document.documentElement.dataset.shell = 'ios';
-    document.documentElement.style.setProperty('--rai-safe-top', '\(insets.top)px');
-    document.documentElement.style.setProperty('--rai-safe-bottom', '\(insets.bottom)px');
-    document.documentElement.style.setProperty('--rai-chrome-top', '\(snapshot.chromeTop)px');
-    """
+    let css = iosShellJavaScript(chromeTop: snapshot.chromeTop)
     #else
     let css = ""
     #endif

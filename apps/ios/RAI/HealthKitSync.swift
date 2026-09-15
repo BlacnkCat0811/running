@@ -177,9 +177,9 @@ final class HealthKitSync {
                 let inspection = try await inspect(sourceId: sourceId, on: serverURL)
                 if inspection.status == "unchanged" {
                     if task.exportEnd == nil { clearExportWatermark() }
-                    await deleteUpload(sourceId: sourceId, on: serverURL)
+                    let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
                     markSuccess(
-                        message: "Apple 健康数据已是最新",
+                        message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: task.exportEnd,
                         workoutCount: task.workoutCount,
                         advanceWatermark: task.exportEnd != nil,
@@ -233,14 +233,14 @@ final class HealthKitSync {
                 }
                 if inspection.status == "unchanged" {
                     if task.exportEnd == nil { clearExportWatermark() }
+                    let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
                     markSuccess(
-                        message: "Apple 健康数据已是最新",
+                        message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: task.exportEnd,
                         workoutCount: task.workoutCount,
                         advanceWatermark: task.exportEnd != nil,
                         anchor: task.pendingAnchor
                     )
-                    await deleteUpload(sourceId: sourceId, on: serverURL)
                 } else {
                     phase = "recomputing"
                     message = "正在导入并计算跑力"
@@ -274,7 +274,26 @@ final class HealthKitSync {
         var zipURL: URL?
         var exportedThrough: Date?
         do {
-            try await HealthKitExport.requestReadAuthorization()
+            // Asking is not the same as being answered. HealthKit returns without
+            // an error when the user refuses read access — later queries just yield
+            // nothing — so an empty export used to be indistinguishable from "not
+            // authorized" and was reported as a successful sync of 0 runs. Ask for
+            // the request status instead and stop with a cause the user can act on.
+            let authorization = await HealthKitExport.readAuthorizationState()
+            switch authorization {
+            case .unavailable:
+                lastError = HealthKitExportError.unavailable.localizedDescription
+                message = nil
+                phase = "failed"
+                return
+            case .notDetermined:
+                lastError = HealthKitExportError.authorizationUndecided.localizedDescription
+                message = nil
+                phase = "failed"
+                return
+            case .decided:
+                break
+            }
             if full {
                 UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))
             }
@@ -292,13 +311,14 @@ final class HealthKitSync {
                 }
                 if inspection.status == "unchanged" {
                     if exportedThrough == nil { clearExportWatermark() }
+                    let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
                     markSuccess(
-                        message: "Apple 健康数据已是最新",
+                        message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: exportedThrough,
                         workoutCount: lastWorkoutCount ?? 0,
-                        advanceWatermark: exportedThrough != nil
+                        advanceWatermark: exportedThrough != nil,
+                        recordWorkoutCount: lastWorkoutCount != nil
                     )
-                    await deleteUpload(sourceId: sourceId, on: serverURL)
                     clearFailedZip()
                     return
                 }
@@ -312,7 +332,8 @@ final class HealthKitSync {
                     message: "已从上次失败的上传恢复导入",
                     exportEnd: exportedThrough,
                     workoutCount: lastWorkoutCount ?? 0,
-                    advanceWatermark: exportedThrough != nil
+                    advanceWatermark: exportedThrough != nil,
+                    recordWorkoutCount: lastWorkoutCount != nil
                 )
                 clearFailedZip()
                 return
@@ -368,14 +389,15 @@ final class HealthKitSync {
                 try await self.inspect(sourceId: sourceId, on: serverURL)
             }
             if inspection.status == "unchanged" {
+                let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
                 markSuccess(
-                    message: latestMessage(base: "Apple 健康数据已是最新", warnings: exported.warnings),
+                    message: latestMessage(base: "Apple 健康数据已是最新", warnings: exported.warnings)
+                        + (cleaned ? "" : Self.cleanupNoteSuffix),
                     exportEnd: exported.exportedThrough,
                     workoutCount: exported.workoutCount,
                     advanceWatermark: true,
                     anchor: pendingAnchor
                 )
-                await deleteUpload(sourceId: sourceId, on: serverURL)
             } else {
                 phase = "recomputing"
                 message = "正在导入并计算跑力"
@@ -420,7 +442,14 @@ final class HealthKitSync {
         }
     }
 
-    private func markSuccess(message: String, exportEnd: Date?, workoutCount: Int, advanceWatermark: Bool, anchor: Data? = nil) {
+    private func markSuccess(
+        message: String,
+        exportEnd: Date?,
+        workoutCount: Int,
+        advanceWatermark: Bool,
+        anchor: Data? = nil,
+        recordWorkoutCount: Bool = true
+    ) {
         let now = Date()
         if let anchor {
             UserDefaults.standard.set(anchor, forKey: scopedKey(Self.lastWorkoutAnchorKey))
@@ -435,9 +464,14 @@ final class HealthKitSync {
             }
         }
         UserDefaults.standard.set(now, forKey: scopedKey(Self.lastSyncAtKey))
-        UserDefaults.standard.set(workoutCount, forKey: scopedKey(Self.lastWorkoutCountKey))
+        // Only advance a count that is actually known: a restored task carries the
+        // count of the run it is finishing, and writing the `0` stand-in for "no
+        // count available" would replace a real number with a wrong one.
+        if recordWorkoutCount {
+            UserDefaults.standard.set(workoutCount, forKey: scopedKey(Self.lastWorkoutCountKey))
+            lastWorkoutCount = workoutCount
+        }
         lastSyncAt = now
-        lastWorkoutCount = workoutCount
         lastError = nil
         self.message = message
         dataUpdatedGeneration += 1
@@ -529,12 +563,27 @@ final class HealthKitSync {
         return try JSONDecoder().decode(ImportJobResponse?.self, from: data)
     }
 
-    private func deleteUpload(sourceId: String, on serverURL: URL) async {
+    private func deleteUpload(sourceId: String, on serverURL: URL) async -> Bool {
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-sources/\(sourceId)"))
         addAuthorization(to: &request)
         request.httpMethod = "DELETE"
-        _ = try? await session.data(for: request)
+        do {
+            let (_, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            // 404 means the staging upload is already gone, which is the outcome
+            // this call wants — only an uncompromising failure is worth reporting.
+            return (200...299).contains(status) || status == 404
+        } catch {
+            // Deliberately not rethrown: the import already landed, and failing the
+            // sync over an uncollected temporary would be a worse trade. The caller
+            // says so in the message instead of dropping it on the floor.
+            return false
+        }
     }
+
+    /// Appended when the server took the import but did not confirm deleting the
+    /// staging upload. Harmless (it is reclaimed on the next sync) but not silent.
+    private static let cleanupNoteSuffix = "（服务端临时上传源未清理，下次同步会回收）"
 
     private func waitForJob(id: String, on serverURL: URL) async throws -> ImportJobResponse {
         let deadline = Date().addingTimeInterval(30 * 60)
@@ -726,10 +775,17 @@ final class HealthKitSync {
         "\(key).\(scope)"
     }
 
+    /// Writes the resume state to both homes.
+    ///
+    /// The journal is the primary one, but every write to it is a silent no-op
+    /// when it could not be opened, and `loadTask` already reads the
+    /// `UserDefaults` copy as a fallback — so writing only the journal meant a
+    /// device with an unusable journal silently lost the ability to resume an
+    /// import that was already uploaded.
     private func saveTask(_ task: SyncTaskState) {
-        if let data = try? JSONEncoder().encode(task) {
-            taskStore.save(data, scope: activeScope)
-        }
+        guard let data = try? JSONEncoder().encode(task) else { return }
+        taskStore.save(data, scope: activeScope)
+        UserDefaults.standard.set(data, forKey: scopedKey(Self.taskKey))
     }
 
     private func loadTask() -> SyncTaskState? {

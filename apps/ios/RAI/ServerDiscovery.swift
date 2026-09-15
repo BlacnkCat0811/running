@@ -54,7 +54,7 @@ final class ServerDiscovery {
                 case .ready:
                     if case .hostPort(let host, let port) = connection.currentPath?.remoteEndpoint {
                         let portNumber = port.rawValue == 0 ? 5173 : Int(port.rawValue)
-                        finish(URL(string: "http://\(host):\(portNumber)"))
+                        finish(Self.httpURL(host: "\(host)", port: portNumber))
                     } else {
                         finish(nil)
                     }
@@ -69,5 +69,21 @@ final class ServerDiscovery {
                 finish(nil)
             }
         }
+    }
+
+    /// Builds a candidate URL from a resolved host.
+    ///
+    /// Not `URL(string:)`: that returns nil for a scoped IPv6 literal such as
+    /// `fe80::1%en0`, so every IPv6-only host was silently dropped from the list.
+    /// `URLComponents` brackets and escapes the host properly.
+    ///
+    /// `nonisolated` on purpose: the caller is `NWConnection`'s state handler,
+    /// which runs outside the main actor.
+    nonisolated private static func httpURL(host: String, port: Int) -> URL? {
+        var components = URLComponents()
+        components.scheme = "http"
+        components.host = host
+        components.port = port
+        return components.url
     }
 }

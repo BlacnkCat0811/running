@@ -145,47 +145,82 @@ final class NativeAppModel {
         isRefreshing = true
         defer { if configuration == configurationID { isRefreshing = false } }
         errorMessage = nil
-        do {
-            if requestHandshake {
+        if requestHandshake {
+            // 握手是整页可用性的前置条件：拿不到身份就没有可用的数据域，这时
+            // 回退缓存是对的，因为没有任何面板拿到过新数据。
+            do {
                 let identity = try await api.handshake(baseURL: baseURL, token: token)
                 guard isCurrent() else { return }
                 Self.saveHandshake(identity, for: baseURL)
                 setCacheScope(baseURL: baseURL, handshake: identity)
+            } catch {
+                guard isCurrent() else { return }
+                isOffline = true
+                errorMessage = friendlyMessage(error)
+                loadCachedData()
+                return
             }
-            // 这四个面板互不依赖，并发拉取（原先串行 await，任一慢请求会拖住整页刷新）。
-            // 任一失败仍然整体进入下面的离线分支，语义与串行版本一致。
-            async let pendingToday = api.today(baseURL: baseURL, token: token)
-            async let pendingStatistics = api.statistics(baseURL: baseURL, token: token)
-            async let pendingTrends = api.trends(baseURL: baseURL, token: token)
-            async let pendingGoals = api.goals(baseURL: baseURL, token: token)
-            let (fetchedToday, fetchedStatistics, fetchedTrends, fetchedGoals) = try await (
-                pendingToday, pendingStatistics, pendingTrends, pendingGoals
-            )
-            guard isCurrent() else { return }
+        }
+        // 四个面板互不依赖：并发拉取，并且**逐个**容错。
+        //
+        // 原先把四个请求绑成一个元组一起 `try await`，任一失败就整体抛错 ——
+        // 「统计接口 500」会把已经拿到的今日/趋势/目标一起丢掉，再整体回退到
+        // 更旧的缓存。一次单点抖动等于整页降级，而且用户看不出是哪一项坏了。
+        // 现在失败的面板保持原值不动，成功的照常写入并落缓存。
+        async let pendingToday = api.today(baseURL: baseURL, token: token)
+        async let pendingStatistics = api.statistics(baseURL: baseURL, token: token)
+        async let pendingTrends = api.trends(baseURL: baseURL, token: token)
+        async let pendingGoals = api.goals(baseURL: baseURL, token: token)
+        let fetchedToday = try? await pendingToday
+        let fetchedStatistics = try? await pendingStatistics
+        let fetchedTrends = try? await pendingTrends
+        let fetchedGoals = try? await pendingGoals
+        guard isCurrent() else { return }
+        var failedPanels = 0
+        if let fetchedToday {
             today = fetchedToday
             recordCache(fetchedToday, key: "today")
+        } else {
+            failedPanels += 1
+        }
+        if let fetchedStatistics {
             statistics = fetchedStatistics
             recordCache(fetchedStatistics, key: "statistics")
+        } else {
+            failedPanels += 1
+        }
+        if let fetchedTrends {
             trends = fetchedTrends
             recordCache(fetchedTrends, key: "trends")
+        } else {
+            failedPanels += 1
+        }
+        if let fetchedGoals {
             goals = fetchedGoals
             recordCache(fetchedGoals, key: "goals")
-            // Non-fatal: the executable week is a convenience, and a failure here
-            // must not mark the whole refresh as offline.
-            if let fetchedPlan = try? await api.workoutPlan(baseURL: baseURL, token: token) {
-                guard isCurrent() else { return }
-                workoutPlan = fetchedPlan
-                recordCache(fetchedPlan, key: workoutPlanCacheKey)
-            }
-            let workoutsSucceeded = await refreshWorkouts()
+        } else {
+            failedPanels += 1
+        }
+        // Non-fatal: the executable week is a convenience, and a failure here
+        // must not mark the whole refresh as offline.
+        if let fetchedPlan = try? await api.workoutPlan(baseURL: baseURL, token: token) {
             guard isCurrent() else { return }
-            isOffline = !workoutsSucceeded
-            session.isReachable = workoutsSucceeded
-        } catch {
-            guard isCurrent() else { return }
-            isOffline = true
-            errorMessage = friendlyMessage(error)
-            loadCachedData()
+            workoutPlan = fetchedPlan
+            recordCache(fetchedPlan, key: workoutPlanCacheKey)
+        }
+        let workoutsSucceeded = await refreshWorkouts()
+        guard isCurrent() else { return }
+        // 离线的判据只认训练列表这个探针：它答了就说明服务是活的，此时哪怕四个
+        // 面板全挂，也应该是「这几项坏了」而不是「整页离线」。
+        isOffline = !workoutsSucceeded
+        session.isReachable = workoutsSucceeded
+        if failedPanels > 0 {
+            // 刻意不在这里 `loadCachedData()`：那会把刚刚成功的那几项也推回旧值，
+            // 等于用一次部分失败抹掉一次部分成功。首启的空态由 `bootstrap()`
+            // 的 `loadCachedData()` 兜底。
+            errorMessage = failedPanels == 4
+                ? "核心数据均未能更新，当前显示的是上次结果。"
+                : "有 \(failedPanels) 项数据未能更新，其余已刷新。"
         }
     }
 
@@ -402,7 +437,8 @@ final class NativeAppModel {
         let configuration = configurationID
         let token = session.apiToken
         func isCurrent() -> Bool {
-            configuration == configurationID && baseURL == session.serverURL && token == session.apiToken
+            configuration == configurationID && baseURL == session.serverURL &&
+                token == session.apiToken && !Task.isCancelled
         }
         do {
             let updated = try await api.updateGoals(
@@ -443,7 +479,8 @@ final class NativeAppModel {
         let configuration = configurationID
         let token = session.apiToken
         func isCurrent() -> Bool {
-            configuration == configurationID && baseURL == session.serverURL && token == session.apiToken
+            configuration == configurationID && baseURL == session.serverURL &&
+                token == session.apiToken && !Task.isCancelled
         }
         do {
             let updated = try await api.lockSession(
@@ -561,15 +598,36 @@ final class NativeAppModel {
     /// Returns the failure text for the caller to append, and never touches
     /// `errorMessage`: failing to register a receipt costs segment labels, so it
     /// must not make a sync that already landed look broken.
-    func recordPlanSync(_ plan: MobileWorkoutPlanResponse) async -> String? {
-        // The same filter the mapper applies, so the receipt set is exactly the
-        // set the watch was offered — not every day the week happens to contain.
-        let days = plan.days.filter { WorkoutPlanMapper.plannedWorkout(from: $0) != nil }
+    ///
+    /// `localDates` is the set the bridge **read back** after scheduling, not the
+    /// set the mapper believes is schedulable. Those differ: `schedule(_:at:)`
+    /// reports no error, so a day can satisfy every local check and still never
+    /// reach the watch. Re-deriving the set here would register a day the watch
+    /// never received, and the detail page would then label a later run with a
+    /// prescription that was never handed over.
+    func recordPlanSync(
+        _ plan: MobileWorkoutPlanResponse,
+        localDates: [String]
+    ) async -> String? {
+        let scheduled = Set(localDates)
+        let days = plan.days.filter { scheduled.contains($0.localDate) }
         guard !days.isEmpty else { return nil }
         guard let baseURL = session.serverURL else { return "服务器地址未配置，课表推送未登记" }
         let token = session.apiToken
+        let configuration = configurationID
+        let scope = cacheScope
+        func isCurrent() -> Bool {
+            configuration == configurationID && scope == cacheScope &&
+                baseURL == session.serverURL && token == session.apiToken && !Task.isCancelled
+        }
         var failures = 0
-        for day in days {
+        for (offset, day) in days.enumerated() {
+            guard isCurrent() else {
+                // 取消或换了服务器：剩下的日期不会再发出去，但它们同样没有登记
+                // 成功，必须计入失败，否则调用方会把整周当成已登记。
+                failures += days.count - offset
+                break
+            }
             do {
                 _ = try await api.recordPlanSync(
                     PlanSyncReceipt(
@@ -722,6 +780,77 @@ final class NativeAppModel {
     private static func saveHandshake(_ handshake: RaiHandshake, for baseURL: URL) {
         guard let data = try? JSONEncoder().encode(handshake) else { return }
         UserDefaults.standard.set(data, forKey: handshakeKey(for: baseURL))
+    }
+}
+
+/// The editing rules for the stored week plan, shared by both skins.
+///
+/// The two skins own their own view code; they do not own their own validation.
+/// Both had grown a byte-identical copy of these bounds, the distance parsing and
+/// the "clear the structure when the kind or size changed" rule — which is the
+/// same shape of drift that let a 2026-09-13 fix land in one skin only. The rules
+/// live here so the off-device regression can pin them once for both; only the
+/// presentation stays in the skin.
+enum NativeGoalWeekDraft {
+    static let minWeeklyDistanceKm: Double = 1
+    static let maxWeeklyDistanceKm: Double = 500
+    /// Above this a single day is a data-entry mistake rather than a workout.
+    static let maxDayDistanceKm: Double = 80
+
+    /// Parses a distance field. An empty field is *not* an error: it is how the
+    /// editor expresses "no distance set", which the server stores as null.
+    static func parsedDistance(_ text: String) -> Double? {
+        Double(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    static func weeklyDistanceIsValid(_ text: String) -> Bool {
+        parsedDistance(text).map {
+            $0.isFinite && (minWeeklyDistanceKm...maxWeeklyDistanceKm).contains($0)
+        } ?? false
+    }
+
+    static func dayDistanceIsValid(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        return parsedDistance(trimmed).map { $0.isFinite && (0...maxDayDistanceKm).contains($0) } == true
+    }
+
+    /// Seeds the per-day text fields from what the server returned.
+    static func drafts(from items: [MobileGoalsPlanItem]) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: items.map {
+            ($0.id, $0.distanceKm.map { String($0) } ?? "")
+        })
+    }
+
+    static func distancesAreValid(
+        _ drafts: [String: String],
+        for items: [MobileGoalsPlanItem]
+    ) -> Bool {
+        items.allSatisfy { dayDistanceIsValid(drafts[$0.id] ?? "") }
+    }
+
+    /// Applies the edited text fields onto the week before it is sent back.
+    ///
+    /// A structure belongs to the kind and the size it was generated for. The
+    /// editor loads whatever the server returned, so sending it straight back
+    /// after the user changed the kind or the distance would pair an old
+    /// prescription with a new label; clearing it lets the server rebuild the
+    /// prescription from what was actually asked for.
+    static func normalized(
+        _ items: [MobileGoalsPlanItem],
+        drafts: [String: String],
+        loaded: [MobileGoalsPlanItem]
+    ) -> [MobileGoalsPlanItem] {
+        let previous = Dictionary(uniqueKeysWithValues: loaded.map { ($0.localDate, $0) })
+        return items.map { item in
+            var updated = item
+            updated.distanceKm = parsedDistance(drafts[item.id] ?? "")
+            if let before = previous[item.localDate],
+               before.kind != updated.kind || before.distanceKm != updated.distanceKm {
+                updated.structure = nil
+            }
+            return updated
+        }
     }
 }
 #endif

@@ -339,6 +339,146 @@ import Foundation
         check(summary(iterations: 4, goal: .open) == "4 组", "an open prescription falls back to a set count")
         check(WorkoutPlanMapper.structureSummary(nil) == "", "no structure yields no summary")
 
+        // MARK: What the watch will actually be offered
+
+        // The panel prints this count. It used to count the server's `executable`
+        // flag, which asks a looser question — `flagOff` above is executable-shaped
+        // and still does not survive mapping — so a week could read "3 项可上表"
+        // while the bridge handed over two.
+        check(
+            WorkoutPlanMapper.schedulableCount(in: plan) == 2,
+            "the offered count equals the days the bridge can hand over"
+        )
+        let allUnschedulable = MobileWorkoutPlanResponse(
+            generatedAt: plan.generatedAt, timezone: plan.timezone, windowDays: plan.windowDays,
+            planRevision: plan.planRevision, audit: plan.audit, days: [plan.days[2], flagOff]
+        )
+        check(
+            WorkoutPlanMapper.schedulableCount(in: allUnschedulable) == 0,
+            "a week of rest days and broken prescriptions offers nothing"
+        )
+        // `notExecutable` is the case the two predicates disagree on: the server
+        // marks it executable and its prescription still cannot be built. Without
+        // it, a regression back to `\\.executable` would pass the check above.
+        let flagOnButBroken = MobileWorkoutPlanResponse(
+            generatedAt: plan.generatedAt, timezone: plan.timezone, windowDays: plan.windowDays,
+            planRevision: plan.planRevision, audit: plan.audit, days: [plan.days[0], notExecutable]
+        )
+        check(
+            flagOnButBroken.days.filter(\.executable).count == 2,
+            "the fixture really does contain two server-executable days"
+        )
+        check(
+            WorkoutPlanMapper.schedulableCount(in: flagOnButBroken) == 1,
+            "an executable day whose prescription was not built is not counted as offerable"
+        )
+
+        check(
+            WorkoutPlanMapper.eligibility(for: plan.days[0], completedLocalDates: []) == .scheduled,
+            "a day that survives mapping is eligible as scheduled"
+        )
+        check(
+            WorkoutPlanMapper.eligibility(for: plan.days[0], completedLocalDates: [plan.days[0].localDate]) == .completed,
+            "a trained day is eligible as completed even though it still maps"
+        )
+        check(
+            WorkoutPlanMapper.eligibility(for: plan.days[2], completedLocalDates: []) == .rest,
+            "a rest day is eligible as rest"
+        )
+        check(
+            WorkoutPlanMapper.eligibility(for: flagOff, completedLocalDates: []) == .noPrescription,
+            "a day that cannot survive mapping is eligible as no prescription"
+        )
+
+        let unoffered = WorkoutPlanMapper.unofferedDays(in: allUnschedulable, completedLocalDates: [])
+        check(unoffered.count == 1, "only the broken training day is unoffered, never the rest day")
+        check(unoffered.first?.localDate == flagOff.localDate, "the unoffered day is the broken one")
+        check(unoffered.first?.reason == "不可上表", "the unoffered day carries its reason")
+        check(
+            WorkoutPlanMapper.unofferedDays(in: plan, completedLocalDates: [plan.days[0].localDate]).isEmpty,
+            "a completed day is not reported as unoffered"
+        )
+
+        // MARK: Pace bounds are dropped, heart-rate bounds are clamped
+
+        // A pace outside the usable band is a malformed field, and clamping it
+        // would change the intensity the session asks for; a heart rate above what
+        // a human reaches is decoration, so clamping it loses nothing. Both are
+        // asserted through the same `alert` path the scheduler sees — checking
+        // `paceBounds` instead would miss the bound entirely, because that helper
+        // carries its own, far looser, 86 400 cap.
+        func dayWith(_ alert: MobileStepAlert, localDate: String = "2026-09-17") -> MobileWorkoutPlanDay {
+            MobileWorkoutPlanDay(
+                localDate: localDate, kind: "easy", title: "轻松跑", reason: "", distanceKm: 8,
+                durationMinutes: 48, paceSecondsPerKmLower: nil, paceSecondsPerKmUpper: nil,
+                heartRateBpmLower: nil, heartRateBpmUpper: nil,
+                structure: MobileSessionStructure(
+                    warmup: nil,
+                    blocks: [MobileIntervalBlock(iterations: 1, steps: [MobileWorkoutStep(purpose: "work", goal: .distance(meters: 8_000), alert: alert)])],
+                    cooldown: nil
+                ),
+                source: "llm", executable: true
+            )
+        }
+        func alert(of day: MobileWorkoutPlanDay) -> PlannedWorkout.Alert? {
+            WorkoutPlanMapper.plannedWorkout(from: day)?.blocks[0].steps[0].alert
+        }
+        check(
+            alert(of: dayWith(MobileStepAlert(kind: "pace", lower: 1_200, upper: 2_000))) == .pace(lower: 1_200, upper: nil),
+            "an impossible pace bound is dropped, the usable one is kept"
+        )
+        check(
+            alert(of: dayWith(MobileStepAlert(kind: "pace", lower: 2_000, upper: 2_400))) == nil,
+            "a pace alert with no usable bound is dropped entirely"
+        )
+        check(
+            alert(of: dayWith(MobileStepAlert(kind: "heart_rate", lower: 150, upper: 260))) == .heartRate(lower: 150, upper: 240),
+            "an impossible heart-rate ceiling is clamped to what a human reaches"
+        )
+        check(
+            alert(of: dayWith(MobileStepAlert(kind: "pace", lower: 300, upper: 320))) == .pace(lower: 300, upper: 320),
+            "a usable pace band is still passed through untouched"
+        )
+
+        // MARK: Dates the calendar has to agree with
+
+        func schedule(_ localDate: String) -> DateComponents? {
+            WorkoutPlanMapper.plannedWorkout(
+                from: dayWith(MobileStepAlert(kind: "pace", lower: 300, upper: 320), localDate: localDate)
+            ).flatMap { WorkoutPlanMapper.scheduleComponents(for: $0, timeZone: shanghai, now: dayBefore) }
+        }
+        // `Calendar.date(from:)` rolls "2026-02-30" forward into March instead of
+        // failing, which would put a session on a day nobody asked for.
+        check(schedule("2026-02-30") == nil, "a day the calendar would roll forward is refused")
+        check(schedule("2026-02-29") == nil, "a non-leap February 29 is refused")
+        check(schedule("2028-02-29")?.day == 29, "a real leap day still schedules on its own day")
+        check(schedule("2028-02-29")?.month == 2, "a real leap day stays in February")
+
+        // MARK: The strip's status word
+
+        // Both skins used to carry their own copy of these four branches; only the
+        // colour is a skin decision.
+        check(
+            WorkoutPlanMapper.weekStripStatus(completed: true, isRest: false, isToday: true) == "已完成",
+            "a completed day reads as completed"
+        )
+        check(
+            WorkoutPlanMapper.weekStripStatus(completed: true, isRest: true, isToday: true) == "已完成",
+            "completion outranks rest"
+        )
+        check(
+            WorkoutPlanMapper.weekStripStatus(completed: false, isRest: true, isToday: true) == "休息日",
+            "rest outranks today"
+        )
+        check(
+            WorkoutPlanMapper.weekStripStatus(completed: false, isRest: false, isToday: true) == "今日安排",
+            "today's session reads as today"
+        )
+        check(
+            WorkoutPlanMapper.weekStripStatus(completed: false, isRest: false, isToday: false) == "计划中",
+            "a future session reads as planned"
+        )
+
         if failures > 0 {
             print("\(failures) workout plan mapper check(s) failed.")
             exit(1)

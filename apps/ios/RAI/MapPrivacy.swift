@@ -64,7 +64,9 @@ enum MapPrivacy {
         // Configs/AmapKey.xcconfig 读取），仓库不含明文；见 apps/ios/README.md。
         let key = (Bundle.main.object(forInfoDictionaryKey: "AMapApiKey") as? String) ?? ""
         if key.isEmpty {
-            print("[RAI] 高德 Key 为空：底图不会加载（路线仍可用离线轨迹）。"
+            // NSLog, not print: this is the only signal that the basemap will be
+            // blank, and it has to survive into a release build's device log.
+            NSLog("[RAI] 高德 Key 为空：底图不会加载（路线仍可用离线轨迹）。"
                   + "请在 apps/ios/Configs/AmapKey.xcconfig 填入 Key 后重新 pod install。")
         } else {
             AMapServices.shared().apiKey = key
