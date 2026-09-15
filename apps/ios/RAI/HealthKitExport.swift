@@ -323,6 +323,13 @@ nonisolated enum HealthKitExport {
         case .resume: return "HKWorkoutEventTypeResume"
         case .motionPaused: return "HKWorkoutEventTypeMotionPaused"
         case .motionResumed: return "HKWorkoutEventTypeMotionResumed"
+        // Lap and segment are the only event types that carry a nonzero duration
+        // (HKWorkout.h), i.e. they are the Watch's own record of structured
+        // workout boundaries. Dropping them left every downstream consumer with
+        // no choice but the arithmetic kilometre split.
+        case .lap: return "HKWorkoutEventTypeLap"
+        case .marker: return "HKWorkoutEventTypeMarker"
+        case .segment: return "HKWorkoutEventTypeSegment"
         default: return nil
         }
     }

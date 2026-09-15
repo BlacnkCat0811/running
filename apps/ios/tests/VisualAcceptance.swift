@@ -105,7 +105,10 @@ final class VisualAcceptance: XCTestCase {
         // Collapse after recording the metrics so all time-series remain easy to inspect.
         scrollTo(metrics); metrics.tap()
         scrollTo(app.staticTexts["训练时序"]); capture("02-detail-series")
-        scrollTo(app.staticTexts["分段"]); capture("02-detail-splits")
+        // The segments panel answers "did I run the session I was given" and sits
+        // above the kilometre split; both are recorded.
+        scrollTo(app.staticTexts["课表分段"]); capture("02-detail-segments")
+        scrollTo(app.staticTexts["公里分段"]); capture("02-detail-splits")
         scrollTo(app.staticTexts["质量与模型"]); capture("02-detail-quality")
         scrollTo(app.staticTexts["训练负荷"]); capture("02-detail-load")
         scrollTo(app.buttons["负荷依据"]); app.buttons["负荷依据"].tap()

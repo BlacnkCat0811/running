@@ -629,6 +629,23 @@ struct MobileWorkoutPlanResponse: Codable, Equatable {
     let days: [MobileWorkoutPlanDay]
 }
 
+/// "This day was handed to the Watch", reported to the server after a sync.
+///
+/// The server has no other way to know: WorkoutKit scheduling is entirely
+/// device-side, and the runner syncs *tomorrow's* session and runs it the same
+/// evening, so the run's own date points at a rest day. The receipt is the only
+/// link between a stored plan day and the run that executed it.
+struct PlanSyncReceipt: Encodable {
+    let localDate: String
+    let kind: String
+    let revision: Int
+    let structure: MobileSessionStructure?
+}
+
+struct PlanSyncReceiptResponse: Decodable {
+    let recordedAt: String
+}
+
 struct MobilePlannedDay: Codable, Equatable {
     let localDate: String
     let kind: String
@@ -825,7 +842,72 @@ struct WorkoutSeriesResponse: Codable {
     let endedAt: String
     let sourceCategory: String
     let splits: [WorkoutSplit]
+    /// What the run was actually made of. Decoded tolerantly: an older server
+    /// build does not send these keys, and a hard failure would take the whole
+    /// detail page down over an optional panel.
+    let segments: [WorkoutSegment]
+    let segmentPlan: WorkoutSegmentPlanMatch?
+    /// Why `segments` is empty — never a silent blank panel.
+    let segmentNote: String?
     let series: WorkoutSeries
+
+    private enum CodingKeys: String, CodingKey {
+        case trainingSessionId, startedAt, endedAt, sourceCategory
+        case splits, segments, segmentPlan, segmentNote, series
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        trainingSessionId = try container.decode(String.self, forKey: .trainingSessionId)
+        startedAt = try container.decode(String.self, forKey: .startedAt)
+        endedAt = try container.decode(String.self, forKey: .endedAt)
+        sourceCategory = try container.decode(String.self, forKey: .sourceCategory)
+        splits = try container.decode([WorkoutSplit].self, forKey: .splits)
+        segments = try container.decodeIfPresent([WorkoutSegment].self, forKey: .segments) ?? []
+        segmentPlan = try container.decodeIfPresent(WorkoutSegmentPlanMatch.self, forKey: .segmentPlan)
+        segmentNote = try container.decodeIfPresent(String.self, forKey: .segmentNote)
+        series = try container.decode(WorkoutSeries.self, forKey: .series)
+    }
+}
+
+/// One executed segment: a Watch lap/segment, or a plan step replayed onto the
+/// measured track. `purpose == "unplanned"` is the stretch no step covered.
+///
+/// `purpose`/`goalType`/`alertKind` stay `String` rather than enums on purpose:
+/// a server that learns a new purpose must not break decoding on an old build.
+struct WorkoutSegment: Codable, Identifiable {
+    let index: Int
+    let label: String
+    let purpose: String
+    let goalType: String?
+    let goalMeters: Double?
+    let goalSeconds: Double?
+    let alertKind: String?
+    let alertLower: Double?
+    let alertUpper: Double?
+    let startOffsetSeconds: Double
+    let durationSeconds: Double
+    let distanceMeters: Double
+    let averagePaceSecondsPerKm: Double?
+    let averageHeartRateBpm: Double?
+    let averageCadenceSpm: Double?
+
+    var id: Int { index }
+}
+
+/// Which stored plan day a run was matched to, and how confidently.
+///
+/// Shown next to the segments because the match is a guess when it comes from a
+/// date window: presenting a guess as a measurement is the failure mode this
+/// type exists to prevent.
+struct WorkoutSegmentPlanMatch: Codable {
+    let localDate: String
+    let kind: String
+    let revision: Int
+    let matchedBy: String
+    let plannedDistanceKm: Double?
+    let explainedFraction: Double
+    let reason: String
 }
 
 struct WorkoutSplit: Codable, Identifiable {

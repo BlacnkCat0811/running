@@ -135,6 +135,26 @@ struct RaiAPIClient {
         )
     }
 
+    /// Registers that a plan day was handed to the Watch.
+    ///
+    /// Best-effort by contract: the caller reports a failure but must never let
+    /// it invalidate a sync that already landed on the watch. Losing a receipt
+    /// costs segment labels on a later detail page; losing the sync would cost
+    /// the runner the session itself.
+    func recordPlanSync(
+        _ receipt: PlanSyncReceipt,
+        baseURL: URL,
+        token: String
+    ) async throws -> PlanSyncReceiptResponse {
+        try await send(
+            path: "/v1/mobile/workout-plan/synced",
+            method: "POST",
+            body: receipt,
+            baseURL: baseURL,
+            token: token
+        )
+    }
+
     func predictions(baseURL: URL, token: String) async throws -> NativePredictionResponse {
         try await get(path: "/v1/predictions", baseURL: baseURL, token: token)
     }

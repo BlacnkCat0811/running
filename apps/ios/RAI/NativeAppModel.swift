@@ -550,6 +550,47 @@ final class NativeAppModel {
         }
     }
 
+    /// Registers the executable week with the server as "handed to the Watch".
+    ///
+    /// WorkoutKit scheduling is device-side only, so nothing else can tell the
+    /// server which prescription the watch received — and the runner syncs
+    /// *tomorrow's* session, so the run's own date cannot identify the plan.
+    /// Without this receipt the detail page can only fall back to kilometre
+    /// splits.
+    ///
+    /// Returns the failure text for the caller to append, and never touches
+    /// `errorMessage`: failing to register a receipt costs segment labels, so it
+    /// must not make a sync that already landed look broken.
+    func recordPlanSync(_ plan: MobileWorkoutPlanResponse) async -> String? {
+        // The same filter the mapper applies, so the receipt set is exactly the
+        // set the watch was offered — not every day the week happens to contain.
+        let days = plan.days.filter { WorkoutPlanMapper.plannedWorkout(from: $0) != nil }
+        guard !days.isEmpty else { return nil }
+        guard let baseURL = session.serverURL else { return "服务器地址未配置，课表推送未登记" }
+        let token = session.apiToken
+        var failures = 0
+        for day in days {
+            do {
+                _ = try await api.recordPlanSync(
+                    PlanSyncReceipt(
+                        localDate: day.localDate,
+                        kind: day.kind,
+                        revision: plan.planRevision,
+                        structure: day.structure
+                    ),
+                    baseURL: baseURL,
+                    token: token
+                )
+            } catch {
+                failures += 1
+            }
+        }
+        guard failures == 0 else {
+            return "\(failures) 天的课表推送未能在服务端登记，训练分段可能无法按课表还原"
+        }
+        return nil
+    }
+
     /// Turns a generation result into one honest sentence, including the reason
     /// it fell back to the deterministic template.
     ///

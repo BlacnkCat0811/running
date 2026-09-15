@@ -12,8 +12,13 @@ trap 'rm -rf "$tmp"' EXIT
 # 详见 typecheck-ios.sh 里同一段注释；两处必须一起加，否则 macOS 纯逻辑回归会被误判。
 swiftc_flags=(-parse-as-library -disable-sandbox)
 sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/NativeAppModel.swift > "$tmp/NativeAppModel.swift"
+# `WorkoutPlanMapper.swift` 必须一起编：`NativeAppModel.recordPlanSync` 用
+# `WorkoutPlanMapper.plannedWorkout(from:)` 复用「手表真正收到的那批日子」这个判据，
+# 少编它就会在 :566 报 "cannot find 'WorkoutPlanMapper' in scope"。
+# `typecheck-ios.sh` 是全量一起编，抓不到这种「子集缺文件」——两条通道都要跑。
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
-  "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift -o "$tmp/model-tests"
+  apps/ios/RAI/WorkoutPlanMapper.swift "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift \
+  -o "$tmp/model-tests"
 "$tmp/model-tests"
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/Keychain.swift \
   apps/ios/tests/KeychainRegression.swift -o "$tmp/keychain-tests"

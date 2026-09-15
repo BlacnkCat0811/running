@@ -1259,6 +1259,7 @@ struct TechWorkoutDetailView: View {
                     DisclosureGroup("全部训练指标") { detailMetrics(detail.workout) }
                         .font(.subheadline).tint(TechColor.cyan)
                     if let series = native.selectedSeries { seriesPanel(series) }
+                    segmentPanel(native.selectedSeries)
                     splitPanel(native.selectedSeries?.splits ?? [])
                     qualityPanel(detail)
                     if let load = detail.trainingLoad { trainingLoadPanel(load) }
@@ -1413,10 +1414,65 @@ struct TechWorkoutDetailView: View {
         }
     }
 
+    /// What the run was actually made of — the plan's own steps, or the Watch's
+    /// own lap boundaries, rather than a 1 km ruler.
+    ///
+    /// Rendered above the kilometre split because it answers "did I run the
+    /// session I was given"; the split stays as the neutral fallback. An empty
+    /// panel always explains itself — "no segments" is a fact, a blank is a bug.
+    private func segmentPanel(_ series: WorkoutSeriesResponse?) -> some View {
+        let segments = series?.segments ?? []
+        return TechPanel {
+            VStack(alignment: .leading, spacing: 4) {
+                TechSectionHeader(title: "课表分段", trailing: "\(segments.count) 段")
+                if let note = series?.segmentNote {
+                    Text(note)
+                        .font(.footnote)
+                        .foregroundStyle(TechColor.muted)
+                }
+                if let plan = series?.segmentPlan {
+                    Text("匹配 \(plan.localDate) 第 \(plan.revision) 版课表（\(nativeSessionName(plan.kind))）· 可解释 \(nativePercent(plan.explainedFraction))")
+                        .font(.caption2.weight(.bold).monospacedDigit())
+                        .foregroundStyle(TechColor.cyan)
+                }
+                if segments.isEmpty {
+                    Text("没有课表分段，可参考下方公里分段")
+                        .font(.footnote)
+                        .foregroundStyle(TechColor.muted)
+                } else {
+                    ForEach(segments) { segment in
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 8) {
+                                Text(segment.label)
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(minWidth: 64, alignment: .leading)
+                                Spacer()
+                                Text(nativeDuration(segment.durationSeconds))
+                                Text(nativeKilometers(segment.distanceMeters / 1000))
+                                Text("\(techPace(segment.averagePaceSecondsPerKm))/km")
+                                Text(segment.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
+                            }
+                            .font(.caption.weight(.bold).monospacedDigit())
+                            .foregroundStyle(TechColor.muted)
+                            HStack(spacing: 10) {
+                                Text(nativeSegmentDose(segment))
+                                if let alert = nativeSegmentAlert(segment) { Text(alert) }
+                            }
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(TechColor.cyan)
+                        }
+                        .padding(.vertical, 7)
+                        .overlay(alignment: .bottom) { Rectangle().fill(TechColor.grid).frame(height: 1) }
+                    }
+                }
+            }
+        }
+    }
+
     private func splitPanel(_ splits: [WorkoutSplit]) -> some View {
         TechPanel {
             VStack(alignment: .leading, spacing: 4) {
-                TechSectionHeader(title: "分段", trailing: "\(splits.count) 段")
+                TechSectionHeader(title: "公里分段", trailing: "\(splits.count) 段")
                 if splits.isEmpty {
                     Text("没有分段数据")
                         .font(.footnote)

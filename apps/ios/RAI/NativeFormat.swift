@@ -127,6 +127,134 @@ func nativeSessionName(_ value: String) -> String {
     }
 }
 
+/// The dose a segment asked for.
+///
+/// "无目标" is a real answer: a Watch lap and the trailing stretch no plan step
+/// covered carry no prescription, and inventing one would be a lie.
+func nativeSegmentDose(_ segment: WorkoutSegment) -> String {
+    switch segment.goalType {
+    case "distance": return segment.goalMeters.map { "目标 \(nativeNumber($0, digits: 0)) m" } ?? "目标距离"
+    case "time": return segment.goalSeconds.map { "目标 \(nativeDuration($0))" } ?? "目标时长"
+    case "open": return "自由"
+    default: return "无目标"
+    }
+}
+
+/// The alert the watch was told to enforce — the plan's intent, not the outcome.
+func nativeSegmentAlert(_ segment: WorkoutSegment) -> String? {
+    guard let kind = segment.alertKind else { return nil }
+    let unit = kind == "pace" ? "/km" : " bpm"
+    func format(_ value: Double?) -> String? {
+        guard let value else { return nil }
+        return kind == "pace" ? nativePace(value) : nativeNumber(value, digits: 0)
+    }
+    let lower = format(segment.alertLower)
+    let upper = format(segment.alertUpper)
+    if let lower, let upper { return "提醒 \(lower)–\(upper)\(unit)" }
+    if let upper { return "提醒 ≤ \(upper)\(unit)" }
+    if let lower { return "提醒 ≥ \(lower)\(unit)" }
+    return kind == "pace" ? "配速提醒" : "心率提醒"
+}
+
+/// One readable line of a structured prescription.
+///
+/// Both plan pages render the same stored week, so the breakdown a day opens
+/// into has to be produced once: two hand-written formatters would eventually
+/// describe the same session differently depending on which screen was open.
+struct NativeStructureLine: Identifiable {
+    let id: Int
+    let title: String
+    let detail: String
+}
+
+/// Flattens warmup / interval blocks / cooldown into displayable lines.
+///
+/// `nil` (or an empty structure) yields no lines rather than a fake one: rest
+/// days and days whose prescription was never built must be describable as
+/// "没有结构化处方" by the caller instead of showing an invented workout.
+func nativeStructureLines(_ structure: MobileSessionStructure?) -> [NativeStructureLine] {
+    guard let structure else { return [] }
+    var lines: [NativeStructureLine] = []
+    func append(_ title: String, _ step: MobileWorkoutStep) {
+        lines.append(NativeStructureLine(id: lines.count, title: title, detail: nativeStepDetail(step)))
+    }
+    if let warmup = structure.warmup { append("热身", warmup) }
+    for block in structure.blocks {
+        let sets = max(1, block.iterations)
+        for (index, step) in block.steps.enumerated() {
+            // Intent comes from the step, not from its position: a block may
+            // open with a recovery step, and calling that "主训练" would invert
+            // exactly the part of the prescription a runner reads first.
+            let base = step.purpose == "recovery" ? "恢复" : (index == 0 ? "主训练" : "训练")
+            append(sets > 1 ? "\(base) × \(sets)" : base, step)
+        }
+    }
+    if let cooldown = structure.cooldown { append("放松", cooldown) }
+    return lines
+}
+
+/// Goal plus intensity for one step, e.g. `800 m · 配速 4'00"–4'25"/km`.
+func nativeStepDetail(_ step: MobileWorkoutStep) -> String {
+    [nativeStepGoalText(step.goal), nativeStepAlertText(step.alert)]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+}
+
+func nativeStepGoalText(_ goal: MobileStepGoal) -> String {
+    switch goal {
+    case let .distance(meters):
+        guard meters.isFinite, meters > 0 else { return "按距离跑" }
+        return meters >= 1_000
+            ? String(format: "%.1f km", locale: Locale(identifier: "en_US_POSIX"), meters / 1_000)
+            : String(format: "%.0f m", locale: Locale(identifier: "en_US_POSIX"), meters)
+    case let .time(seconds):
+        guard seconds.isFinite, seconds > 0 else { return "按时间跑" }
+        if seconds >= 60 {
+            return String(format: "%.0f 分钟", locale: Locale(identifier: "en_US_POSIX"), seconds / 60)
+        }
+        return String(format: "%.0f 秒", locale: Locale(identifier: "en_US_POSIX"), seconds)
+    case .open:
+        return "按感觉跑"
+    }
+}
+
+/// The intensity band, or nil when the step carries none — a step with no
+/// target is legitimately "just run" and must not be padded with a fake range.
+func nativeStepAlertText(_ alert: MobileStepAlert?) -> String? {
+    guard let alert, alert.isUsable else { return nil }
+    // `nativePace` keeps a space between the minute and second marks so a caller
+    // can place "/km" once; inside a step line that space only widens the row.
+    func pace(_ seconds: Double) -> String {
+        nativePace(seconds).replacingOccurrences(of: " ", with: "")
+    }
+    switch alert.kind {
+    case "pace":
+        switch (alert.lower, alert.upper) {
+        case let (lower?, upper?):
+            return "配速 \(pace(min(lower, upper)))–\(pace(max(lower, upper)))/km"
+        case let (lower?, nil):
+            return "配速 \(pace(lower))/km 或更慢"
+        case let (nil, upper?):
+            return "配速 \(pace(upper))/km 或更快"
+        default:
+            return nil
+        }
+    case "heart_rate":
+        switch (alert.lower, alert.upper) {
+        case let (lower?, upper?):
+            return "心率 \(nativeNumber(min(lower, upper), digits: 0))–\(nativeNumber(max(lower, upper), digits: 0)) bpm"
+        case let (lower?, nil):
+            return "心率 \(nativeNumber(lower, digits: 0)) bpm 以上"
+        case let (nil, upper?):
+            return "心率 \(nativeNumber(upper, digits: 0)) bpm 以下"
+        default:
+            return nil
+        }
+    default:
+        return nil
+    }
+}
+
 func nativeStimulusName(_ value: String) -> String {
     switch value {
     case "aerobic_base": return "有氧基础"
