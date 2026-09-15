@@ -148,11 +148,40 @@ find /var/lib/rai/var -maxdepth 1 -name "rai.importing.web_import_*.sqlite.repla
 
 ---
 
-## 7. 一句话总结
+## 7. 部署记录（2026-09-15 17:47–17:54）
+
+| 步骤 | 结果 |
+|---|---|
+| 提交 | `492907f` `fix(api): reclaim displaced import rollback points`（4 文件 / +299）· `b95b404` `docs: record the online disk exhaustion and its cleanup`（2 文件 / +256） |
+| 推送 | gitee `6e77d74..b95b404`，`origin/main` 已收，无 ahead/behind |
+| 门禁 | `npm test` **EXIT=0**（node:test **599 / 595 pass / 0 fail / 4 skip** + vitest **13 文件 / 84 pass**） |
+| 部署范围 | 仅 `apps/api/**` + `deliverables/**` ⇒ **无迁移、无依赖变更、无 web 变更** |
+| 线上动作 | `git pull --ff-only`（`PULL_EXIT=0`）→ `systemctl restart rai-api`（**不需要 build**） |
+| 线上 HEAD | `b95b404`；工作树仅 `?? .npm/` `?? .npmrc` 缓存噪声（非报错） |
+| 启动 | journal 出现 `RAI local API ready`，**无迁移报错** |
+| 接口 | `/v1/health` 无 token **401** / 带 token **200** + `databaseReady:true` |
+| 站点 | `https://tpandmr.xyz/` **200**、`/settings` **200** |
+| 磁盘 | **26%**（13G / 50G）—— 比清理后的 22% 高出的部分是本次新建的备份 |
+
+**新代码在线上真被跑过，且验证了行为本身（不只是"没报错"）：**
+
+- `POST /v1/backups` → 200。该路径必经 `ensureBackupCapacity() → reclaimDisplacedDatabases()`
+  ⇒ 新代码在线上执行无异常，journal 里没有任何 reclamation 报错。
+- 🔴 **期间出现一个意外样本**：17:44（清理之后、部署之前）网页端发生了一次导入
+  （job `web_import_mu2hjmdi`，`status: succeeded`、`importMode: incremental`、271 条 workout 全部未变化）
+  —— **旧代码为一次「数据无变化」的导入照样遗留了 506 M**。这既印证缺陷在真实使用中持续发生，
+  也正好成为验证样本：
+  1. **17:52 打备份**时，该文件（8 分钟前）**未**被删除 ⇒ **24 h 保护生效**（不会误删在途/近期回滚点）；
+  2. 把它 `touch -d "2 days ago"` 后再打一发备份 ⇒ **被回收**，`find *.replaced.*` 归零
+     ⇒ **sweep 确实在删，而非空转**。
+
+---
+
+## 8. 一句话总结
 
 > 每次网页导入都会把旧库改名留一份"回滚点"，但成功提交后没人回收 —— 9 天累积 89 份、36 G，
 > 把 50 G 的盘吃到 98%。根因是 `cli.ts:116` 造回滚点、`cli.ts:348` 只把路径写进 stdout、
 > 而 `worker.ts:904-910` 从不消费它。
-> **已执行**：删除 89 个孤儿，98% → 22%。
-> **已修复**：worker 提交后回收本轮（`worker.ts:910`）+ maintenance 24 h 兜底清扫（`maintenance.ts`），
-> 守住 CLI「保留 displaced」的既有契约；3 组突变验证通过。待部署生效。
+> **已执行**：删除 89 个孤儿，98% → 22%（释放 35 G）。
+> **已修复并部署**（线上 HEAD `b95b404`）：worker 提交后回收本轮（`worker.ts:910`）+ maintenance 24 h 兜底清扫
+> （`maintenance.ts`），守住 CLI「保留 displaced」的既有契约；3 组突变验证 + 线上双向实证（保留新鲜 / 回收超期）均通过。
