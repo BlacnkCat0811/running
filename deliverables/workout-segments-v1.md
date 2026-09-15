@@ -21,10 +21,15 @@ Apple 体能训练 App 的截图也正是这四段：热身 788 m / 训练 2600 
 
 ## 2. 方案 A（真实事件）与 B（课表反推）
 
-- **A｜Apple 真实 lap/segment**：读 `workout_events` → 时间边界 → 按站内同一 speed track 测量。
-  优先级最高，因为它是**测量**而非**回放**。
-- **B｜课表结构反推**：把 `structure` 回放到实测 RunningSpeed 上。**小唐的用法决定了 B 不可省**——
+> 🔴 **2026-09-15 17:00 修订**：本节原文把 A（Apple 真实 lap/segment）排在 B 之前，理由是"A 是**测量**、
+> B 是**回放**"。**这条理由被实测证伪**，顺序已对调：B 第一、A 只作兜底。证据与处置见
+> [§4.1](#41-修正10-段是错的切分粒度选错了来源2026-09-15)。
+
+- **B｜课表结构反推**：把 `structure` 回放到实测 RunningSpeed 上。面板标题是「课表分段」，
+  它欠读者的是**处方的步骤 + 实测数字**，所以 B 是主来源。**小唐的用法还决定了 B 不可省**——
   他同步的是**明天**的课表、当天就打开跑，`按 run 本地日期匹配课表必然指向休息日`。
+- **A｜Apple 真实 lap/segment**：仅当**没有任何课表可解释这次跑步**时兜底（`第 N 段` + note），
+  因为对这批导出而言它是手表**计圈设置**的产物，不是处方的步骤。
 - 两者都拿不到时，**明示原因**（`segmentNote`），公里分段保留为兜底，不静默。
 
 ### A 的时间语义（Apple 官方文档，非推测）
@@ -58,10 +63,10 @@ Apple 体能训练 App 的截图也正是这四段：热身 788 m / 训练 2600 
 | `apps/ios/RAI/HealthKitExport.swift` | `eventTypeName` 补 `.lap/.marker/.segment` |
 | `packages/api-contracts/src/index.ts` | `WorkoutSegment` / `WorkoutSegmentPlanMatch`；`WorkoutSeriesResponse` 加 `segments` / `segmentPlan` / `segmentNote` |
 | `packages/storage-sqlite/src/read/series-read-repository.ts` | 抽出共享 `speedTrack()`（原 `workoutSplits` 的构造逻辑原样搬家）；新增 `measureSegments()` 任意边界测量、`workoutEventIntervals()`；`StoredSeriesSession` 加 `canonicalWorkoutId` |
-| `apps/api/src/workout-segments.ts`（新） | 纯逻辑：`eventBoundariesOf` / `layoutStructure` / `matchPlanDay` / `resolveSegmentation` / `toWorkoutSegments` |
+| `apps/api/src/workout-segments.ts`（新） | 纯逻辑：`eventBoundariesOf` / `layoutStructure` / `matchPlanDay` / `assemblePlanCandidates` / `resolveSegmentation` / `toWorkoutSegments` |
 | `apps/api/src/mobile-goals.ts` | 新增 `mobile_plan_pushes` 表 + `planHistory()` / `recordPlanPush()` / `planPushes()` |
-| `apps/api/src/data.ts` | `workoutSeries(id, candidates)`；`segmentRun()` 串起 A→B→明示原因 |
-| `apps/api/src/server.ts` | 候选装配 `planSegmentCandidates()`；`POST /v1/mobile/workout-plan/synced`；登记 `metadataOnlyMutationRoutes` |
+| `apps/api/src/data.ts` | `workoutSeries(id, candidates)`；`segmentRun()` 串起 B→A→明示原因 |
+| `apps/api/src/server.ts` | 候选装配 `planSegmentCandidates()`（委派给纯函数 `assemblePlanCandidates`）；`POST /v1/mobile/workout-plan/synced`；登记 `metadataOnlyMutationRoutes` |
 | `apps/api/src/schemas.ts` | `mobilePlanSyncedBodySchema` + OpenAPI 路径 |
 | `apps/web/src/pages/WorkoutDetailPage.tsx` | 新增「课表分段」面板，**置于公里分段之上**；`公里分段` 标题保留 |
 | `apps/ios/RAI/{APIModels,APIClient,NativeAppModel,NativeViews,NativeFormat}.swift`、`Skins/Technology/TechViews.swift` | 双皮肤分段面板 + 同步成功后登记回执 |
@@ -96,26 +101,80 @@ Apple 体能训练 App 的截图也正是这四段：热身 788 m / 训练 2600 
 | # | 判据 | 实测 |
 |---|---|---|
 | 1 | 新构建导出后库里是否出现 `HKWorkoutEventTypeSegment` | ✅ **33 行**（3 次结构化训练 × 11 个事件，集中在 09-09 / 09-10 / 09-14），另有 `Pause` 3 行、`Lap` **0** 行。`workout_13ba33ba21154357ec25f3ae7a621b77` 即 09-14 那次 |
-| 2 | `GET /v1/workouts/training_session_7762eea67980ce682d51e79bf5592358/series` | ✅ 200，**10 段**、`segmentPlan.matchedBy="plan_history"`、`revision=3`、`explainedFraction=0.484` |
+| 2 | `GET /v1/workouts/training_session_7762eea67980ce682d51e79bf5592358/series` | ✅ 200、`segmentPlan.matchedBy="plan_history"`；⚠️ **10 段与 `revision=3` 都是错的，见 §4.1** |
 
-⚠️ **实测是 10 段，不是本节先前写的 4 段 —— 先前那个预期是错的。** 原因值得记下来：
+⚠️ **实测是 10 段，且这 10 段是错的 —— 见 §4.1。**
 
-上表的「四段」（热身 / work / 整理放松 / 自由训练）是 **Apple 体能训练 App 的展示口径**，
-它把嵌套结构摊平了；而 HealthKit 里同一次跑步有 **11 个 `.segment` 事件**，且**互相嵌套/重叠**
-（例如 `12:42:53` 同时存在 380.9 s 与 614.5 s 两个事件）。按"事件边界"切分自然得到 10 段。
-两者不矛盾：一个是给人看的聚合，一个是原始记录。
+### 4.1 修正：「10 段」是错的，切分粒度选错了来源（2026-09-15）
 
-`explainedFraction 0.484` 正是这种错位的量化 —— 只有约 **48%** 的路程落在课表步骤内，
-其余如实标为「自由训练」，不编。实测分段：
+小唐的反馈：`课表分段显示有10段分段，正常不应该有那么多，5分钟热身，2.6km的训练，5分钟的放松，剩下的都是自由训练，讲道理应该是这样4段`。
 
-```
-热身 986m/381s  训练 616m/234s  整理放松 383m/145s  整理放松 1008m/377s
-自由训练 ×6：221/86、768/298、829/320、178/73、1005/414、57/23
-```
+**先撤回上一版结论。** 上一版把 10 段解释成「Apple App 的聚合口径 vs HealthKit 原始记录，两者不矛盾」——
+**这个解释是错的**：原始记录里根本没有课表步骤的边界，所以拿它切分不是"更细"，是"错源"。
 
-**两条 lane 都在线上验证到**：09-14 匹配上课表（出意图标签）；09-10 那次返回 10 段但
-`segmentPlan=null` + note「…未匹配到课表」、标签回落为「第 N 段」
-⇒ §2 那条「空面板必自述原因」的约束在线上成立。
+#### 根因 1：11 个事件是**两套互相重叠、各自完整覆盖全程**的计圈划分
+
+把 11 个 `HKWorkoutEventTypeSegment` 的 `duration` 当作"本段到哪结束"来还原，得到两条**自洽**的链条：
+
+| 链 | 边界（偏移 s） | 各段距离 | 判读 |
+|---|---|---|---|
+| P7（7 段） | 0 / 381 / 760 / 1137 / 1521 / 1914 / 2328 / 2348 | 986 / 999 / 1008 / 989 / 1007 / 1005 / 57 m | **每 1 km 自动计圈** |
+| P4（4 段） | 0 / 615 / 1223 / 1841 / 2348 | 1602 / 1612 / 1597 / 1240 m | **每 1.6 km 自动计圈** |
+
+两条链各自的 `duration` 加总都精确等于全程 2348.4 s ⇒ 它们不是嵌套，是**同一段跑步的两套计圈设置**。
+`eventBoundariesOf` 取两者并集 ⇒ 10 个内部边界 ⇒ 10 段。
+
+#### 根因 2：这批事件与**课表无关**（决定性证据）
+
+- 09-09、09-10 两次跑步**早于任何课表存在**（`mobile_goals_history` rev1 是 09-11 才写入），
+  它们的 11 个事件却是**同一形态** ⇒ 事件来自手表侧，不可能来自课表。
+- 课表步骤边界**不在事件集合里**：rev6 的 09-15 处方（热身 300 s / 训练 2600 m / 放松 300 s）
+  回放到实测配速，步骤边界在 **300 s** 与 **≈1281 s**；10 个候选边界点里**一个都不是**。
+- 库里 `HKWorkoutEventTypeLap` = **0 行** ⇒ 这两套计圈在导出里也标成 `Segment`，**光看类型名分不出计圈与步骤**。
+
+⇒ 把 A 排在 B 之前，等于把「每公里分段」（面板下面**本来就有**）改个名叫「课表分段」。
+
+#### 根因 3：选中的课表也是**过期的**（连带发现）
+
+`segmentPlan` 当时是 `revision=3`（09-14 easy 2.4 km，work 目标 **1000 m**），
+而小唐说的是「2.6km 的训练」——`work 2600 m` 只存在于 **rev6**（09-15 recovery 4.0 km / 09-19 easy 4.0 km）。
+
+`planSegmentCandidates` 的洞：`rest` 日在 `seen` 判重**之前**就被 `continue` 掉，于是
+**新版本把某天改成休息日时，遮蔽不了旧版本那天的课表**。rev4–6 已把 09-14 改成 rest，
+rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
+
+#### 处置
+
+| # | 改动 | 位置 |
+|---|---|---|
+| ① | 权威顺序对调：**课表步骤为骨架**，事件仅在无课表可解释时兜底；删除「事件切分 + 课表贴标签」那条 lane | `workout-segments.ts` `resolveSegmentation` |
+| ② | note 里写明被搁置的事件段数，避免"用了哪份记录"在手机上不可区分 | `workout-segments.ts` `eventFootnote` |
+| ③ | **休息日也认领日期**（认领了就不产出候选） | `assemblePlanCandidates`（从 `server.ts` 抽出为纯函数） |
+| ④ | 归因顺序调整：先判课表，再判事件 | `data.ts` `missingSegmentsNote` |
+| ⑤ | 删除因此失效的 `dominantStep` | `workout-segments.ts` |
+
+#### 验收标准
+
+| 项 | 判据 | 结果 |
+|---|---|---|
+| 回归（真实事件） | 用 09-14 真实 11 事件 + rev6 处方 ⇒ **恰好 4 段**：[热身 773 / 训练 2600 / 整理放松 775 / 自由训练 1903] m，起始偏移 [0/300/1281/1581] s，note 含「手表另有 10 段 lap/segment 事件未参与分段」 | ✅ `workout-segments.test.ts` 用例 3 |
+| 过期课表 | rev6(09-14=rest) + rev3(09-14=easy) ⇒ 候选只剩 `09-15 recovery rev6`，匹配到 `work 2600 m` | ✅ 用例 4 |
+| 优先级 | 回执 > 锁定 > 最新版本；无 structure 的回执不入候选 | ✅ 用例 5 |
+| 旧行为 | 课表步骤与 lap 对齐时仍得 4 段（不再依赖 lap） | ✅ 用例 2 |
+| 类型 / Node / Web | `npm run typecheck`；`npm test`（**api 590 pass / 0 fail / 4 skip**；**web 84 pass**） | ✅ |
+
+#### 回滚
+
+`git revert <本次提交>` + `systemctl restart rai-api`（API 侧 tsx 直跑，无需 build）。无 schema、无数据变更。
+
+#### 仍未定性的 🟡（不阻塞本次修复）
+
+**一次手表训练为何导出两套计圈（1 km 与 1.6 km）**。已排除：同一 `workout_id` 只有一行、
+无第二个来源、无 `Lap` 行、`canonical_group_id` 内只有一行。判决性物证是原始 `export.xml` 的
+`<Workout>` 元素（服务器**未保留**导入原件，本机也没有导出文件）。也需考虑一个解析器嫌疑：
+`apple-health-parser.ts` **不处理 `<WorkoutActivity>` 子元素**，若导出把子活动的 `WorkoutEvent`
+嵌在 `<WorkoutActivity>` 里，会被无条件摊平进父 workout——那正好能造出"两套各自完整的划分"。
+**下次有新 export.xml 时第一件事**：`grep -c "<WorkoutActivity" export.xml`，并看 `WorkoutEvent` 的嵌套层级。
 
 **部署记录**：`00c0ccb → c1ecac7`（9 个提交）fast-forward → `npm run build`（`BUILD_EXIT=0`）
 → `systemctl restart rai-api`；部署前备份 `rai.manual.2026-09-15T06-33-15-371Z.f5f4fbb3.sqlite`（530 MB）。
@@ -143,7 +202,12 @@ Apple 体能训练 App 的截图也正是这四段：热身 788 m / 训练 2600 
 
 ## 6. 已知取舍
 
+- **B 优先于 A 的代价**：手表自己记下的间歇结构（若真有）会被课表骨架覆盖。**判据是**：只有
+  `HKWorkoutEventTypeSegment` 落在课表步骤边界上时才算"真有"，而 09-14/09-09/09-10 三次全部落在
+  计圈点上 ⇒ 这批数据里 A 不含步骤信息。若将来遇到 A 与 B 步骤边界吻合的样本，再考虑恢复"事件优先"。
 - 相邻日匹配（规则 3）是启发式：无回执时可能给段贴上**别的日子**的标签。数字仍来自实测；`segmentPlan.reason`
   会写明「按课表结构回放」，`matchedBy` 也会透出。**根治靠回执**，即规则 1。
 - `MIN_SEGMENT_MS = 5 s`：< 5 s 的边界当噪声丢弃（HealthKit 事件时间戳本身不精确）。
 - 回执覆盖**整周可执行日**而非单日：手表上表的就是整周，跑哪一天由 36 小时窗口决定。
+- 🟡 一次训练导出两套计圈的成因仍未定性（见 §4.1 末）。**不影响分段正确性**，但会让
+  `eventBoundariesOf` 产出的段数偏多——只在无课表兜底时可见。
