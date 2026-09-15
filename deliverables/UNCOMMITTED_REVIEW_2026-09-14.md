@@ -34,7 +34,7 @@
 | 11 | ✅ | 契约必填字段只有 1 个构造点，非 TS 消费者容错解码 | `data.ts:961` 唯一构造；`APIModels.swift` 用 `decodeIfPresent` |
 | 12 | ✅ | 双皮肤无硬编码违规 | `PixelColor.` 在 `TechViews.swift` 出现 **0 次**；tech 用 `techSessionColor`/`TechColor` |
 | 13 | ✅ | 新表建在独立控制库 + `CREATE TABLE IF NOT EXISTS` ⇒ 无 migration、回滚零风险 | `mobile-goals.ts:349-359` |
-| 14 | ⚠️ 未验证 | **A 方案至今没被真机验证过**；端到端 4 段匹配、`e2e:web` 本机不可运行 | 见第五节 |
+| 14 | ✅ 已验证 | **A 方案已于 2026-09-15 14:35 补验通过**（原本"未真机验证过"）：线上库出现 33 行 `.segment` 事件，`series` 返回 **10 段** + `matchedBy="plan_history"`。⚠️ **实测 10 段 ≠ 本报告预期的 4 段** ⇒ §8.5。仍只剩 `e2e:web` 本机不可运行 | §五 / §8.5 |
 
 ---
 
@@ -386,12 +386,12 @@ Found 1 error in apps/api/src/data.ts:876
 写路径都属"自己的写"，所以它**同时断言两者**、可被两个突变分别命中 —— 这是有意的粒度
 （一条测试守一个**语义**，不是守一个方法）。
 
-**未验证项（离机做不到，必须写明，不得当作"通过"）**
+**未验证项（离机做不到，必须写明，不得当作"通过"）—— 前两项已于 2026-09-15 14:35 补验通过**
 
-| 项 | 为什么不能验证 | 怎么验 |
+| 项 | 当时为什么不能验证 | 状态 / 怎么验 |
 |---|---|---|
-| **A 方案（lap/segment 事件）** | 手机上装的是今天 16:41 的旧构建，`HealthKitExport.swift` 补 `.lap/.marker/.segment` 是 21:52 之后的事 ⇒ 那次同步的 XML 仍不含 lap/segment | 真机**重装 App + 重新同步**，再查 `workout_events` 是否出现 `HKWorkoutEventTypeSegment` |
-| **端到端 4 段匹配** | 本地控制库无 push 回执、无对应 history，且新表尚未创建 | 部署后打 `GET /v1/workouts/training_session_7762eea67980ce682d51e79bf5592358/series`，期望 `segments` 4 段、`segmentPlan.matchedBy="plan_history"` |
+| **A 方案（lap/segment 事件）** | 手机上装的是今天 16:41 的旧构建，`HealthKitExport.swift` 补 `.lap/.marker/.segment` 是 21:52 之后的事 ⇒ 那次同步的 XML 仍不含 lap/segment | ✅ **已验证**：新构建实机重装后同步，线上库出现 **33 行** `HKWorkoutEventTypeSegment`（3 次 × 11；`Lap` 为 0、`Pause` 3） |
+| **端到端匹配** | 本地控制库无 push 回执、无对应 history，且新表尚未创建 | ✅ **已验证**：`GET …/training_session_7762eea67980ce682d51e79bf5592358/series` → 200、**10 段**、`matchedBy="plan_history"`、`explainedFraction=0.484`。⚠️ **实测 10 段，不是本报告预期的 4 段**，原因见 §8.5 |
 | `npm run test:e2e:web` | 本机 `/Applications` 无 Chrome/Edge，全部用例 `hookFailed` | 在有 Chrome 的机器/CI 跑；**不得**当作本机回归门禁 |
 
 ---
@@ -523,15 +523,39 @@ deliverables/plan-page-week-v1.md
 （此处只列文件名、不引用行数：本报告自己也在被改动，引用自己的行数会自指失真。）
 旧历史完整保留在 `backup/pre-rewrite`，回滚 = `git reset --hard backup/pre-rewrite`。
 
-### 8.4 真机验证切入点（留给小唐）
+### 8.4 真机验证切入点
 
-设备侧只需盯三处，判定细节见 §五"未验证项"与 `workout-segments-v1.md:99`：
+**执行结果：2026-09-15 14:35 已执行，1 与 2 通过（3 待小唐看手机）。**
 
-1. **导出**：跑一次手表间歇课，确认导出的 `workout_events` 带 `HKWorkoutEventTypeLap`/`…Segment`
-   （`HealthKitExport.swift` 的 `eventTypeName` 已补三个 case）；
-2. **服务端**：`GET /v1/workouts/training_session_7762eea67980ce682d51e79bf5592358/series`
-   期望 `segments` 4 段、`segmentPlan.matchedBy === "plan_history"`；
-3. **计划页**：周条应渲染**七列**（`weekPlan.length === 7`），点任一列弹出该日处方，
+1. **导出** ✅ 跑完手表间歇课后同步，线上库出现 **33 行** `HKWorkoutEventTypeSegment`
+   （3 次结构化训练 × 11，集中在 09-09 / 09-10 / 09-14），另有 `Pause` 3 行、**`Lap` 0 行**。
+   即 `HealthKitExport.swift` 补的三个 case 中只有 `.segment` 在真机上出现。
+2. **服务端** ✅ `GET /v1/workouts/training_session_7762eea67980ce682d51e79bf5592358/series`
+   → 200、**10 段**（不是本节预期的 4 段 ⇒ §8.5）、`segmentPlan.matchedBy === "plan_history"`、
+   `revision=3`、`explainedFraction=0.484`。
+   另一发交叉验证：`…/training_session_a62d3c33acba9bfe1f8f47c944b4c4e0`（09-10）→ 200、10 段、
+   `segmentPlan=null` + note「…**未匹配到课表**」，标签回落「第 N 段」
+   ⇒ 「空面板必自述原因」在线上成立。
+3. **计划页** ⏳ 周条应渲染**七列**（`weekPlan.length === 7`），点任一列弹出该日处方，
    快照 `03-plan-day-detail` 能采到。
 
 ⚠️ 改 Swift 源 ≠ 真机生效：必须重新 build + 安装，否则验的是旧构建。
+
+### 8.5 🔴 实测 10 段而非 4 段：两个口径不同，不是 bug
+
+本节（以及 `workout-segments-v1.md`）先前把"对那次训练的期望段数"写成 **4 段**，源自
+**Apple 体能训练 App 的截图**（热身 788 m / 训练 2600 m / 整理放松 773 m / 自由训练 1.89 km）。
+实测拿到 **10 段**。差异的根因：
+
+- Apple App 展示的是**摊平后的聚合**（4 段）；
+- HealthKit 里同一次跑步存的是 **11 个 `.segment` 事件**，且**互相嵌套/重叠** ——
+  例如 `12:42:53` 同时存在 380.9 s 与 614.5 s 两个事件；
+- 本方案按「**事件边界**」切分（`eventBoundariesOf`：事件 start/end ∪ 课表起止，去重后按
+  `MIN_SEGMENT_MS=5 s` 过滤）⇒ 11 个事件边界化后得 10 段。
+
+两边都不错，是**不同抽象层级**。量化错位的字段就是 `explainedFraction`：**0.484**
+—— 只有约 48% 的路程落在课表步骤内，其余如实标「自由训练」。
+
+🔴 **教训**：验收判据不能照搬"另一个 App 的显示值"。段数是**切分口径的函数**，
+写期望值时必须连同口径一起写（"按 HealthKit 事件边界切分"），否则会把自己的正确实现判成失败。
+`workout-segments-v1.md` 已同步更正。
