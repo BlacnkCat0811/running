@@ -284,11 +284,11 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 ⇒ 实际覆盖最近约 16 天 ⇒ 09-09 / 09-10 / 09-14 三次全部落窗，都带上了诊断（实测 `DIAG_ROWS 3`）。
 若某个更早的 workout 需要诊断，用设置页的「**重新导入全部**」（`full: true` ⇒ anchor 与 lowerBound 都清空）。
 
-##### 下一步（待小唐确认，本次未动手）
+##### 已实施（2026-09-15，方案 A）
 
-把**实测 activity 步界提升为分段的第一优先来源**，课表回放降为第二支：
+把小唐确认的方案 A 落到代码：**实测 activity 步界提升为分段的第一优先来源**，课表回放降为第二支。
 
-| | 方案 A（建议） | 方案 B |
+| | 方案 A（已采纳实施） | 方案 B（未采纳） |
 |---|---|---|
 | 载体 | 沿用已在库里的 `RAIWorkoutStructureDiagV1` | 按 Apple 官方格式写 `<WorkoutActivity>` 子元素 + 新建 `workout_activities` 表 |
 | 改动面 | `series-read-repository.ts` 加一个读 metadata 的方法；`workout-segments.ts` 加一支；`data.ts` 接线；测试 | parser + storage + migration + 契约 + 导入链（一处漏就静默失败） |
@@ -297,16 +297,57 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 
 - **分工要讲清**：实测 activity 只给**步界**（只有时间），**标签与目标值仍来自课表**
   （热身 / 训练 `2600 m` / 整理放松）。两者不是替代关系。
-- **降级路径必须保留**：没有该字段（老数据、官方导出、web 导入）时回落到课表回放，再回落到事件兜底。
+- **降级路径保留**：没有该字段（老数据、官方导出、web 导入）时回落到课表回放，再回落到事件兜底。
 - **字段命名**：`RAIWorkoutStructureDiagV1` 名字里的 `Diag` 是历史；升格为契约字段**不改名**（改名要再装一次 App），
-  但代码注释要写明它现在是对账依据。
-- **验收标准**：`GET /v1/workouts/training_session_7762eea67980ce682d51e79bf5592358/series` 的步界
-  变为 300.000 / 1 283.456 / 1 583.075 s（距离随之微调 ±几米），note 注明「由手表记录的步骤实测得到」；
-  兜底通道 `training_session_a62d3c33acba9bfe1f8f47c944b4c4e0`（09-10，`activityCount = 1`）
-  仍是 `plan=null` +「未匹配到课表」+`第 N 段`（**无回归**）。
-- **回滚**：`git revert <commit>` + `systemctl restart rai-api`。纯 API，无 schema、无数据变更。
+  代码注释已写明它现在是对账依据。
 
-**部署记录**：`00c0ccb → c1ecac7`（9 个提交）fast-forward → `npm run build`（`BUILD_EXIT=0`）
+现在的四支顺序（`resolveSegmentation`）：**① 手表实测步界 → ② 课表回放到实测配速 → ③ lap/segment 事件兜底 → ④ 返回空 + note**。
+
+###### 🔴 首次上线未生效：读错了元数据的形状（`965cd54` → `013240d`）
+
+`965cd54` 部署完、服务重启完，端点返回的**仍是回放**（步界 `1281/1581`、`reason=按课表结构回放`）。
+服务器源码、进程、session 与 workout 都对得上，所以问题不在部署，在解析。
+
+根因：`measuredStepsOf` 找的是 `metadata[KEY]` **是字符串**，不是就 `return []`。而元数据值根本不会是裸字符串 ——
+
+- 契约：`MetadataMap = Record<string, string[]>`（`packages/contracts/src/index.ts:43`）；
+- 写入：解析器对每个 `MetadataEntry` **追加**而非覆盖（`packages/health-export-parser/src/utils.ts:91`），
+  所以只写一次的键也是**单元素数组**；
+- 库里实测：`typeof workouts.metadata_json → RAIWorkoutStructureDiagV1` = **`object`（Array）**，
+  `[0]` 才是那段 JSON 字符串。
+
+⇒ `typeof inner !== "string"` 这个判断在真实数据上**恒为真**，函数每次都从这一行提前返回空，
+**静默**跌回课表回放 —— 部署了、日志干净、没有任何报错。
+
+🟡 **真正值得记的是测试为什么没拦住**：单测 fixture 我手写成 `{[KEY]: JSON.stringify(payload)}`，
+即**把自己的假设当成契约来断言**。于是"读取端"和"fixture"互相印证，一起与数据库不一致。
+而约定其实早有测试钉着（`packages/health-export-parser/test/parser.test.ts:104`：
+`assert.deepEqual(..., { HKIndoorWorkout: ["0"] })`）—— 我没去读。
+**修法**：fixture 现在用 `const metadata: MetadataMap = {}` 构造，形状由契约类型约束，
+契约一变就 `typecheck` 失败，而不是线上静默失灵。
+
+**验收标准（2026-09-15 18:17 实测，全部命中）**：
+
+| 判据 | 期望 | 线上实测 |
+|---|---|---|
+| `segments[].startOffsetSeconds` | `[0, 300, 1283, 1583]`（实测值；回放是 `1281/1581`） | ✅ `[0,300,1283,1583]` |
+| 时长 `durationSeconds` | `[300, 983, 300, 768]` | ✅ 一致 |
+| 距离 `distanceMeters` | `[773, 2606, 774, 1898]`（同一批 4 段，边界晚 2.5 s） | ✅ 一致 |
+| `segmentPlan.reason` | 「按手表记录的步骤实测」 | ✅ 一致 |
+| `segmentNote` | 注明「N 个训练步骤实测得到」 | ✅ `分段由手表记录的 3 个训练步骤实测得到（课表 2026-09-15 第 6 版）；手表另有 10 段 lap/segment 事件未参与分段` |
+| 兜底无回归（09-10） | `plan=null` +「未匹配到课表」+`第 N 段` | ✅ 10 段、`plan=null`、note「分段取自手表记录的 lap/segment 事件（10 段），未匹配到课表」 |
+
+**回滚**：`git revert 013240d` + `systemctl restart rai-api`。纯 API，无 schema、无数据变更。
+
+**部署记录**：`965cd54 → 013240d`，改动只在 `apps/api/**` ⇒ **`git pull --ff-only` + `systemctl restart rai-api`，不 build**
+（根 `npm run build` 只构建 web）。验收三件套：`HEAD=013240d`、工作树仅 `.npm/`/`.npmrc` 噪声、
+`schema_migrations` 仍是 `1..21`（无新迁移）、`/v1/health` 无 token **401** / 带 token **200** + `databaseReady:true`。
+
+**离线门禁**：`npm run typecheck` `TC_EXIT=0`；`npm test` **603 tests / 599 pass / 0 fail / 4 skip**；`npm run build` `BUILD_EXIT=0`。
+**突变载荷**（证明新回归抓得住这个 bug）：退回按裸字符串读 → **3 个用例失败**（含两个端到端）；
+把"取最后一条"改成"取第一条" → **1 个用例失败**。
+
+**部署记录（2026-09-15 14:35，切分粒度那批）**：`00c0ccb → c1ecac7`（9 个提交）fast-forward → `npm run build`（`BUILD_EXIT=0`）
 → `systemctl restart rai-api`；部署前备份 `rai.manual.2026-09-15T06-33-15-371Z.f5f4fbb3.sqlite`（530 MB）。
 
 **L2 那次部署（`e41379f` → `810acd4` → 本文档所在提交）**：改动只有 `apps/ios/**` + `deliverables/**`（diff 实测），
@@ -319,6 +360,14 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 客户端容错解码会把「**字段不存在**」渲染成和「**字段存在但为空**」完全一样的空态，
 看起来像功能坏了。⇒ **排查顺序必须把"先查线上 HEAD"放在读代码之前**：
 `git -C /opt/rai log --oneline -1` 一行就能排除这个分支。
+
+🔴 **同一天暴露的第二个流程问题（`965cd54` 那次）**：这次 HEAD 对了、进程也重启了，**行为还是没变**。
+⇒ **"已部署"只证明代码到了，不证明代码走到了。** 判据要分两层：
+① 线上 HEAD 是不是目标提交（部署层）；② **解析层读的字段形状与库里真实形状是否一致**（数据层）。
+第 ② 层最省时的查法不是读代码，而是**把库里的真实值原样打出来**：
+`typeof` + `constructor.name` + 前 200 字符，一行就够。本次就是靠 `T object C Array` 一击命中。
+🟡 配套纪律：**写解析器的单测，fixture 必须由真实序列化路径产出（或至少被契约类型约束），
+不能手写出"我以为的形状"**——否则读取端与 fixture 互相印证，一起与数据库不一致。
 
 ---
 
