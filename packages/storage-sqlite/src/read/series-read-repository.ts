@@ -31,8 +31,46 @@ export interface StoredWorkoutSplit {
   averageCadenceSpm: number | null;
 }
 
+/**
+ * The scaled speed track every boundary-based measure shares.
+ *
+ * `samples[].meters` is already scaled so the track totals `officialMeters`;
+ * callers only need to sum the samples covered by an interval.
+ */
+export interface StoredSpeedSample {
+  startMs: number;
+  endMs: number;
+  metersPerSecond: number;
+  meters: number;
+}
+
+export interface StoredSpeedTrack {
+  samples: StoredSpeedSample[];
+  officialMeters: number;
+  scale: number;
+}
+
+/** A measured interval on the speed track. */
+export interface StoredMeasuredSegment {
+  startMs: number;
+  endMs: number;
+  durationSeconds: number;
+  distanceMeters: number;
+  averagePaceSecondsPerKm: number | null;
+  averageHeartRateBpm: number | null;
+  averageCadenceSpm: number | null;
+}
+
+/** A Watch-recorded lap/segment boundary (`duration > 0` only). */
+export interface StoredWorkoutEventInterval {
+  type: string;
+  startMs: number;
+  endMs: number;
+}
+
 export interface StoredSeriesSession {
   id: string;
+  canonicalWorkoutId: string;
   startedAt: string;
   endedAt: string;
   sourceCategory: string;
@@ -46,7 +84,8 @@ export class SqliteSeriesReadRepository {
   sessionForSeries(trainingSessionId: string): StoredSeriesSession | null {
     const session = this.database
       .prepare(`
-        SELECT ts.id, ts.anchor_start_at, ts.anchor_end_at, ts.anchor_distance_km,
+        SELECT ts.id, ts.canonical_workout_id, ts.anchor_start_at, ts.anchor_end_at,
+          ts.anchor_distance_km,
           w.source_category, w.source_name
         FROM training_sessions ts
         JOIN workouts w ON w.id = ts.canonical_workout_id
@@ -56,6 +95,7 @@ export class SqliteSeriesReadRepository {
     if (!session) return null;
     return {
       id: String(session.id),
+      canonicalWorkoutId: String(session.canonical_workout_id),
       startedAt: String(session.anchor_start_at),
       endedAt: String(session.anchor_end_at),
       sourceCategory: String(session.source_category),
@@ -215,16 +255,27 @@ export class SqliteSeriesReadRepository {
     };
   }
 
-  workoutSplits(
+  /**
+   * The scaled speed track that every boundary-based measure shares.
+   *
+   * `samples[].meters` is already scaled so the whole track totals
+   * `officialMeters`; callers only sum the samples an interval covers.
+   *
+   * Returns `null` when the run has no usable speed samples, or when the
+   * recorded track disagrees with the official distance/duration past the
+   * tolerance — in that case any boundary measure would be fiction, and the
+   * honest answer is "no segments" rather than invented ones.
+   */
+  speedTrack(
     startedAt: string,
     endedAt: string,
     sourceName: string,
     distanceKm: number | null
-  ): StoredWorkoutSplit[] {
-    if (distanceKm === null || distanceKm <= 0) return [];
+  ): StoredSpeedTrack | null {
+    if (distanceKm === null || distanceKm <= 0) return null;
     const startedMs = Date.parse(startedAt);
     const endedMs = Date.parse(endedAt);
-    if (!Number.isFinite(startedMs) || !Number.isFinite(endedMs) || endedMs <= startedMs) return [];
+    if (!Number.isFinite(startedMs) || !Number.isFinite(endedMs) || endedMs <= startedMs) return null;
 
     const rawSpeed = this.metricIntervals(
       "HKQuantityTypeIdentifierRunningSpeed",
@@ -239,43 +290,43 @@ export class SqliteSeriesReadRepository {
             : value
     ).filter((sample) => sample.value > 0 && 1000 / sample.value >= 150 && 1000 / sample.value <= 900);
     let speedCoveredUntilMs = startedMs;
-    const speed = rawSpeed.flatMap((sample) => {
+    const intervals = rawSpeed.flatMap((sample) => {
       const startMs = Math.max(sample.startMs, speedCoveredUntilMs);
       speedCoveredUntilMs = Math.max(speedCoveredUntilMs, sample.endMs);
       return sample.endMs > startMs ? [{ ...sample, startMs }] : [];
     });
-    const rawDistance = speed.reduce(
+    const rawDistance = intervals.reduce(
       (total, sample) => total + (sample.value * (sample.endMs - sample.startMs)) / 1000,
       0
     );
-    const officialDistance = distanceKm * 1000;
-    if (speed.length === 0 || rawDistance <= 0 || officialDistance < 1) return [];
+    const officialMeters = distanceKm * 1000;
+    if (intervals.length === 0 || rawDistance <= 0 || officialMeters < 1) return null;
 
     let coveredDurationMs = 0;
     let coveredUntilMs = startedMs;
-    for (const sample of speed) {
+    for (const sample of intervals) {
       const uncoveredStartMs = Math.max(coveredUntilMs, sample.startMs);
       if (sample.endMs > uncoveredStartMs) coveredDurationMs += sample.endMs - uncoveredStartMs;
       coveredUntilMs = Math.max(coveredUntilMs, sample.endMs);
     }
     const durationCoverage = coveredDurationMs / (endedMs - startedMs);
-    const distanceScale = officialDistance / rawDistance;
-    if (durationCoverage < 0.8 || distanceScale < 0.75 || distanceScale > 1.25) return [];
+    const scale = officialMeters / rawDistance;
+    if (durationCoverage < 0.8 || scale < 0.75 || scale > 1.25) return null;
 
-    const boundaries: number[] = [startedMs];
-    let accumulated = 0;
-    let nextBoundary = 1000;
-    for (const sample of speed) {
-      const sampleDistance = ((sample.value * (sample.endMs - sample.startMs)) / 1000) * distanceScale;
-      while (nextBoundary < officialDistance && accumulated + sampleDistance >= nextBoundary) {
-        const fraction = (nextBoundary - accumulated) / sampleDistance;
-        boundaries.push(sample.startMs + (sample.endMs - sample.startMs) * fraction);
-        nextBoundary += 1000;
-      }
-      accumulated += sampleDistance;
-    }
-    boundaries.push(endedMs);
+    return {
+      officialMeters,
+      scale,
+      samples: intervals.map((sample) => ({
+        startMs: sample.startMs,
+        endMs: sample.endMs,
+        metersPerSecond: sample.value,
+        meters: ((sample.value * (sample.endMs - sample.startMs)) / 1000) * scale
+      }))
+    };
+  }
 
+  /** Heart-rate and step-count intervals plus the averages derived from them. */
+  private intervalAverages(startedAt: string, endedAt: string, sourceName: string) {
     const heartRate = this.metricIntervals(
       "HKQuantityTypeIdentifierHeartRate",
       sourceName,
@@ -288,10 +339,10 @@ export class SqliteSeriesReadRepository {
       startedAt,
       endedAt
     );
-    const weightedAverage = (samples: MetricInterval[], startMs: number, endMs: number): number | null => {
+    const weightedAverage = (startMs: number, endMs: number): number | null => {
       let weighted = 0;
       let covered = 0;
-      for (const sample of samples) {
+      for (const sample of heartRate) {
         const overlap = Math.max(0, Math.min(endMs, sample.endMs) - Math.max(startMs, sample.startMs));
         weighted += sample.value * overlap;
         covered += overlap;
@@ -307,7 +358,122 @@ export class SqliteSeriesReadRepository {
       const durationSeconds = (endMs - startMs) / 1000;
       return stepCount > 0 && durationSeconds > 0 ? stepCount / (durationSeconds / 60) : null;
     };
+    return { heartRate, steps, weightedAverage, cadence };
+  }
 
+  /**
+   * Measure arbitrary ascending boundaries against the scaled speed track.
+   *
+   * This is the shared measurer behind both the kilometre split and the
+   * plan/event-derived segments — one code path keeps the two numbers
+   * comparable. Boundaries are clamped to the workout window and to each other;
+   * empty intervals are dropped. Returns `[]` when the track itself is unusable.
+   */
+  measureSegments(
+    startedAt: string,
+    endedAt: string,
+    sourceName: string,
+    distanceKm: number | null,
+    boundaries: number[]
+  ): StoredMeasuredSegment[] {
+    const track = this.speedTrack(startedAt, endedAt, sourceName, distanceKm);
+    if (!track) return [];
+    const startedMs = Date.parse(startedAt);
+    const endedMs = Date.parse(endedAt);
+    const ordered = boundaries
+      .filter((value) => Number.isFinite(value))
+      .map((value) => Math.max(startedMs, Math.min(endedMs, value)))
+      .sort((left, right) => left - right);
+
+    const metersAt = (timeMs: number): number => {
+      let meters = 0;
+      for (const sample of track.samples) {
+        if (timeMs <= sample.startMs) break;
+        meters +=
+          sample.meters * ((Math.min(timeMs, sample.endMs) - sample.startMs) / (sample.endMs - sample.startMs));
+      }
+      return meters;
+    };
+    const { weightedAverage, cadence } = this.intervalAverages(startedAt, endedAt, sourceName);
+
+    const segments: StoredMeasuredSegment[] = [];
+    for (let index = 0; index < ordered.length - 1; index += 1) {
+      const startMs = ordered[index]!;
+      const endMs = ordered[index + 1]!;
+      if (endMs <= startMs) continue;
+      const durationSeconds = (endMs - startMs) / 1000;
+      const distanceMeters = Math.max(0, metersAt(endMs) - metersAt(startMs));
+      segments.push({
+        startMs,
+        endMs,
+        durationSeconds,
+        distanceMeters,
+        averagePaceSecondsPerKm: distanceMeters > 0 ? durationSeconds / (distanceMeters / 1000) : null,
+        averageHeartRateBpm: weightedAverage(startMs, endMs),
+        averageCadenceSpm: cadence(startMs, endMs)
+      });
+    }
+    return segments;
+  }
+
+  /**
+   * The Watch's own lap / segment / marker events for a workout.
+   *
+   * `event_at` is the interval **start**; a nonzero `duration_seconds` marks a
+   * real segment — Apple's wording for `HKWorkoutEventTypeLap` is "newer lap
+   * events use the date interval to mark the start and the duration of the
+   * lap". Zero-duration lap events are the legacy form whose date marks the
+   * **end** of a lap, so they come back as zero-width boundaries (`endMs ===
+   * startMs`) and the caller tiles them.
+   *
+   * Pause / resume events are deliberately excluded: they carry no distance.
+   */
+  workoutEventIntervals(workoutId: string): StoredWorkoutEventInterval[] {
+    const rows = this.database
+      .prepare(`
+        SELECT type, event_at, duration_seconds
+        FROM workout_events
+        WHERE workout_id = ?
+        ORDER BY ordinal
+      `)
+      .all(workoutId) as Record<string, unknown>[];
+    return rows.flatMap((row) => {
+      const type = typeof row.type === "string" ? row.type : "";
+      if (!/(Lap|Segment|Marker)$/.test(type)) return [];
+      const startMs = Date.parse(String(row.event_at));
+      if (!Number.isFinite(startMs)) return [];
+      const durationSeconds = nullableNumber(row.duration_seconds) ?? 0;
+      return [{ type, startMs, endMs: startMs + (durationSeconds > 0 ? durationSeconds * 1000 : 0) }];
+    });
+  }
+
+  workoutSplits(
+    startedAt: string,
+    endedAt: string,
+    sourceName: string,
+    distanceKm: number | null
+  ): StoredWorkoutSplit[] {
+    const track = this.speedTrack(startedAt, endedAt, sourceName, distanceKm);
+    if (!track) return [];
+    const startedMs = Date.parse(startedAt);
+    const endedMs = Date.parse(endedAt);
+    const officialDistance = track.officialMeters;
+
+    const boundaries: number[] = [startedMs];
+    let accumulated = 0;
+    let nextBoundary = 1000;
+    for (const sample of track.samples) {
+      const sampleDistance = sample.meters;
+      while (nextBoundary < officialDistance && accumulated + sampleDistance >= nextBoundary) {
+        const fraction = (nextBoundary - accumulated) / sampleDistance;
+        boundaries.push(sample.startMs + (sample.endMs - sample.startMs) * fraction);
+        nextBoundary += 1000;
+      }
+      accumulated += sampleDistance;
+    }
+    boundaries.push(endedMs);
+
+    const { weightedAverage, cadence } = this.intervalAverages(startedAt, endedAt, sourceName);
     return boundaries
       .slice(0, -1)
       .map((startMs, index) => {
@@ -319,7 +485,7 @@ export class SqliteSeriesReadRepository {
           distanceMeters,
           durationSeconds,
           averagePaceSecondsPerKm: durationSeconds / (distanceMeters / 1000),
-          averageHeartRateBpm: weightedAverage(heartRate, startMs, endMs),
+          averageHeartRateBpm: weightedAverage(startMs, endMs),
           averageCadenceSpm: cadence(startMs, endMs)
         };
       })

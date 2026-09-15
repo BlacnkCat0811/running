@@ -55,9 +55,13 @@ export {
 export {
   SqliteSeriesReadRepository,
   type MetricInterval,
+  type StoredMeasuredSegment,
   type StoredMetricSeries,
   type StoredRoutePoint,
   type StoredSeriesSession,
+  type StoredSpeedSample,
+  type StoredSpeedTrack,
+  type StoredWorkoutEventInterval,
   type StoredWorkoutSplit
 } from "./read/series-read-repository.js";
 export {
