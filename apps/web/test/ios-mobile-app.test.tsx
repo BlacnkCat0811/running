@@ -504,6 +504,52 @@ function mockRemote() {
           averageHeartRateBpm: 145,
           averageCadenceSpm: 170
         }],
+        segments: [
+          {
+            index: 1,
+            label: "热身",
+            purpose: "warmup",
+            goalType: "time",
+            goalMeters: null,
+            goalSeconds: 300,
+            alertKind: "heart_rate",
+            alertLower: 146,
+            alertUpper: 160,
+            startOffsetSeconds: 0,
+            durationSeconds: 300,
+            distanceMeters: 770,
+            averagePaceSecondsPerKm: 390,
+            averageHeartRateBpm: 148,
+            averageCadenceSpm: 168
+          },
+          {
+            index: 2,
+            label: "训练",
+            purpose: "work",
+            goalType: "distance",
+            goalMeters: 2600,
+            goalSeconds: null,
+            alertKind: "pace",
+            alertLower: 423,
+            alertUpper: 380,
+            startOffsetSeconds: 300,
+            durationSeconds: 981,
+            distanceMeters: 2600,
+            averagePaceSecondsPerKm: 377,
+            averageHeartRateBpm: 162,
+            averageCadenceSpm: 172
+          }
+        ],
+        segmentPlan: {
+          localDate: "2026-09-15",
+          kind: "interval",
+          revision: 6,
+          matchedBy: "plan_history",
+          plannedDistanceKm: 4.2,
+          explainedFraction: 0.67,
+          reason: "按课表结构回放"
+        },
+        segmentNote: "分段由课表结构（2026-09-15 第 6 版）回放到实测配速得到",
         series: {
           heartRate: emptySeries,
           speed: emptySeries,
@@ -614,6 +660,12 @@ describe("iOS mobile detail navigation", () => {
     expect(screen.getByText("5.2")).toBeTruthy();
     expect(screen.getByText("平均心率")).toBeTruthy();
     expect(screen.getByText("公里分段")).toBeTruthy();
+    // The session that was actually run sits above the neutral 1 km ruler, and
+    // both must be present: one answers "did I run the plan", the other "how fast".
+    expect(screen.getByText("课表分段")).toBeTruthy();
+    // The matched-plan line is the segment panel's own content (「训练」 alone
+    // would also match the tab bar, so it cannot carry the assertion).
+    expect(screen.getByText(/匹配 2026-09-15 第 6 版课表/)).toBeTruthy();
     expect(screen.getByText("有氧基础区")).toBeTruthy();
   });
 

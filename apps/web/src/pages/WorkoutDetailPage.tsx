@@ -1,6 +1,6 @@
 import "../pixel-layout.css";
 import "../training-reference.css";
-import type { WorkoutDetailResponse, WorkoutSeriesResponse } from "@rai/api-contracts";
+import type { WorkoutDetailResponse, WorkoutSegment, WorkoutSegmentPurpose, WorkoutSeriesResponse } from "@rai/api-contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
@@ -23,6 +23,43 @@ const loadExplanationLabels: Record<string, string> = {
   load_source_session_type: "缺少心率和 RPE，使用训练类型保守估算"
 };
 const zoneColors = ["#dce8ec", "#dfeadf", "#f0e4b8", "#f4d3c9", "#efc2be"];
+const segmentPurposeLabels: Record<WorkoutSegmentPurpose, string> = {
+  warmup: "热身",
+  work: "训练",
+  recovery: "恢复",
+  cooldown: "整理放松",
+  unplanned: "自由训练"
+};
+const sessionKindLabels: Record<string, string> = {
+  rest: "休息",
+  recovery: "恢复跑",
+  easy: "轻松跑",
+  long_run: "长距离",
+  tempo: "节奏跑",
+  interval: "间歇"
+};
+
+/** The dose the step asked for; `null` when the segment came from a watch lap rather than a plan. */
+const segmentGoal = (segment: WorkoutSegment): string => {
+  if (segment.goalType === "distance" && segment.goalMeters !== null) return `${Math.round(segment.goalMeters)} m`;
+  if (segment.goalType === "time" && segment.goalSeconds !== null) return duration(segment.goalSeconds);
+  if (segment.goalType === "open") return "自由";
+  return "--";
+};
+
+/** The alert the watch was told to enforce; the plan's intent, not the measured outcome. */
+const segmentAlert = (segment: WorkoutSegment): string => {
+  if (segment.alertKind === null) return "--";
+  const unit = segment.alertKind === "pace" ? "/km" : " bpm";
+  const format = (value: number | null): string | null =>
+    value === null ? null : segment.alertKind === "pace" ? pace(value) : String(Math.round(value));
+  const lower = format(segment.alertLower);
+  const upper = format(segment.alertUpper);
+  if (lower !== null && upper !== null) return `${lower}–${upper}${unit}`;
+  if (upper !== null) return `≤ ${upper}${unit}`;
+  if (lower !== null) return `≥ ${lower}${unit}`;
+  return segment.alertKind === "pace" ? "配速提醒" : "心率提醒";
+};
 
 function ZoneDistribution({ title, coverage, items, kind }: {
   title: string;
@@ -35,6 +72,84 @@ function ZoneDistribution({ title, coverage, items, kind }: {
 
 function WorkoutSplits({ splits }: { splits: WorkoutSeriesResponse["splits"] }) {
   return <section className="panel workout-splits-panel"><div className="panel-heading"><div><h2>公里分段</h2><p>按累计距离切分；最后不足 1 公里的尾段单独列出。</p></div><code>{splits.length} 段</code></div>{splits.length === 0 ? <div className="splits-empty">没有足够的跑速数据生成公里分段</div> : <div className="splits-table-wrap"><table className="splits-table"><caption className="sr-only">公里分段</caption><thead><tr><th scope="col">分段</th><th scope="col">用时</th><th scope="col">距离</th><th scope="col">平均配速</th><th scope="col">平均心率</th><th scope="col">平均步频</th></tr></thead><tbody>{splits.map((split) => <tr key={split.index}><td><b>{split.distanceMeters < 999.5 ? "尾段" : `${split.index} km`}</b></td><td>{duration(split.durationSeconds)}</td><td>{(split.distanceMeters / 1000).toFixed(split.distanceMeters < 1000 ? 2 : 1)} km</td><td>{pace(split.averagePaceSecondsPerKm)}/km</td><td>{split.averageHeartRateBpm === null ? "--" : `${Math.round(split.averageHeartRateBpm)} bpm`}</td><td>{split.averageCadenceSpm === null ? "--" : `${Math.round(split.averageCadenceSpm)} spm`}</td></tr>)}</tbody></table></div>}</section>;
+}
+
+/**
+ * What the run was actually made of — the plan's own steps, not a 1 km ruler.
+ *
+ * Rendered above the kilometre splits because it is the answer to "did I run the
+ * session I was given"; the splits stay as the neutral fallback. An empty panel
+ * always explains itself: "no Watch lap events and no matching plan" is a fact
+ * worth showing, and a silent blank reads as a bug.
+ */
+export function WorkoutSegments({ series }: { series: WorkoutSeriesResponse }) {
+  const { segments, segmentPlan, segmentNote } = series;
+  const heading = (
+    <div className="panel-heading">
+      <div>
+        <h2>课表分段</h2>
+        <p>{segmentNote ?? "这次训练没有可用的分段信息。"}</p>
+      </div>
+      <code>{segments.length} 段</code>
+    </div>
+  );
+  if (segments.length === 0) {
+    return <section className="panel workout-segments-panel">{heading}<div className="splits-empty">{segmentNote ?? "没有可用的分段数据，请参考下方公里分段"}</div></section>;
+  }
+  return (
+    <section className="panel workout-segments-panel">
+      {heading}
+      {segmentPlan ? (
+        <div className="segment-plan-match">
+          匹配到 <b>{segmentPlan.localDate}</b> 第 {segmentPlan.revision} 版课表（{sessionKindLabels[segmentPlan.kind] ?? segmentPlan.kind}）
+          <span>{segmentPlan.reason}</span>
+          <span>可解释 {(segmentPlan.explainedFraction * 100).toFixed(0)}%</span>
+          {segmentPlan.plannedDistanceKm === null ? null : <span>计划 {segmentPlan.plannedDistanceKm.toFixed(1)} km</span>}
+        </div>
+      ) : null}
+      <div className="splits-table-wrap">
+        <table className="splits-table segments-table">
+          <caption className="sr-only">课表分段</caption>
+          <thead>
+            <tr>
+              <th scope="col">分段</th>
+              <th scope="col">目标</th>
+              <th scope="col">提醒</th>
+              <th scope="col">用时</th>
+              <th scope="col">距离</th>
+              <th scope="col">平均配速</th>
+              <th scope="col">平均心率</th>
+              <th scope="col">平均步频</th>
+            </tr>
+          </thead>
+          <tbody>
+            {segments.map((segment) => (
+              <tr key={segment.index}>
+                <td>
+                  <b>{segment.label}</b>
+                  {/* The chip is a claim about the step's *intent*, and only a matched
+                      plan can support it. Without one, every segment is tagged
+                      `unplanned`, and "自由训练" would name a session type nobody
+                      recorded — a lap is not a free run just because no plan explains
+                      it. The row's own label ("第 N 段") already says what is known. */}
+                  {segmentPlan ? (
+                    <small className={`segment-purpose purpose-${segment.purpose}`}>{segmentPurposeLabels[segment.purpose]}</small>
+                  ) : null}
+                </td>
+                <td>{segmentGoal(segment)}</td>
+                <td>{segmentAlert(segment)}</td>
+                <td>{duration(segment.durationSeconds)}</td>
+                <td>{(segment.distanceMeters / 1000).toFixed(2)} km</td>
+                <td>{segment.averagePaceSecondsPerKm === null ? "--" : `${pace(segment.averagePaceSecondsPerKm)}/km`}</td>
+                <td>{segment.averageHeartRateBpm === null ? "--" : `${Math.round(segment.averageHeartRateBpm)} bpm`}</td>
+                <td>{segment.averageCadenceSpm === null ? "--" : `${Math.round(segment.averageCadenceSpm)} spm`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 export function WorkoutDetailPage() {
@@ -129,7 +244,7 @@ export function WorkoutDetailPage() {
       {jobId ? <div className={`job-banner ${jobStatus === "succeeded" ? "completed" : jobStatus === "failed" || jobStatus === "cancelled" ? "failed" : ""}`}>{jobStatus === "succeeded" ? <CheckCircle size={20} /> : <Warning size={20} />}<span><b>{jobStatus === "succeeded" ? "新模型已激活" : jobStatus === "failed" ? "重算失败" : jobStatus === "cancelled" ? "重算已取消" : jobPollError ? "正在重新连接任务" : "重算任务进行中"}</b><small>{jobStatus === "succeeded" ? jobPollError ?? "页面已经切换到最新 active Run。" : jobStatus === "failed" || jobStatus === "cancelled" ? "旧 active Run 保持不变，可在数据与模型页查看任务详情。" : jobPollError ?? "当前页面继续展示旧 active Run，完成后自动更新。"}</small></span></div> : null}
 
       <section className="performance-strip expanded detail-reference-metrics"><article><Timer size={31} /><span>距离</span><b>{number(workout.distanceKm)} km</b></article><article><Timer size={31} /><span>用时</span><b>{duration(workout.durationSeconds)}</b></article><article><Pulse size={31} /><span>平均配速</span><b>{pace(workout.averagePaceSecondsPerKm)}/km</b></article><article><Heartbeat size={31} /><span>平均心率</span><b>{workout.averageHeartRateBpm === null ? "--" : `${Math.round(workout.averageHeartRateBpm)} bpm`}</b></article><article><Target size={31} /><span>即时能力</span><b>{number(workout.currentAbility)}</b></article><article><CheckCircle size={31} /><span>置信度</span><b>{confidenceLevel(workout.confidence)}</b></article></section>
-      {!series.loading && !series.error && series.data && series.dataPath === seriesPath ? <WorkoutSplits splits={series.data.splits} /> : null}
+      {!series.loading && !series.error && series.data && series.dataPath === seriesPath ? <><WorkoutSegments series={series.data} /><WorkoutSplits splits={series.data.splits} /></> : null}
       {data.trainingLoad ? <><section className="workout-load-band"><span><small>综合负荷</small><b>{Math.round(data.trainingLoad.breakdown.compositeLoad)}</b></span><span><small>内部负荷</small><b>{data.trainingLoad.breakdown.internalLoad === null ? "--" : Math.round(data.trainingLoad.breakdown.internalLoad)}</b></span><span><small>配速负荷</small><b>{data.trainingLoad.breakdown.paceLoad === null ? "--" : Math.round(data.trainingLoad.breakdown.paceLoad)}</b></span><span><small>距离修正</small><b>×{data.trainingLoad.breakdown.distanceFactor.toFixed(2)}</b></span><span><small>原始 HRR-TRIMP</small><b>{data.trainingLoad.breakdown.rawHrrTrimp === null ? "--" : data.trainingLoad.breakdown.rawHrrTrimp.toFixed(1)}</b></span><span><small>距离暴露</small><b>{data.trainingLoad.breakdown.distanceExposureRatio === null ? "--" : `${data.trainingLoad.breakdown.distanceExposureRatio.toFixed(2)}× P75`}</b></span><span><small>心率负荷置信</small><b>{Math.round(data.trainingLoad.breakdown.heartRateConfidence * 100)}%</b></span><span><small>配速负荷置信</small><b>{Math.round(data.trainingLoad.breakdown.paceConfidence * 100)}%</b></span></section><div className="workout-load-explanations"><span>{loadSourceLabels[data.trainingLoad.source]}</span>{data.trainingLoad.explanations.map((item) => <span key={item.code}>{loadExplanationLabels[item.code] ?? item.code}</span>)}</div></> : null}
 
       {data.zoneSummary ? <section className="panel workout-zones-panel"><div className="panel-heading"><div><h2>{stimulusType(data.zoneSummary.stimulusType)}</h2><p>{data.zoneSummary.secondaryStimulusTypes.length ? `次要刺激：${data.zoneSummary.secondaryStimulusTypes.map(stimulusType).join("、")}` : "未识别达到最低剂量的次要刺激"} · 快照 {data.zoneSummary.zoneProfileId.slice(-8)}</p></div><strong>{Math.round(data.zoneSummary.stimulusConfidence * 100)}%</strong></div><div className="workout-zone-grid"><ZoneDistribution title="心率分区" coverage={data.zoneSummary.heartRateCoverage} items={data.zoneSummary.heartRateExposure} kind="heart" /><ZoneDistribution title="配速分区" coverage={data.zoneSummary.paceCoverage} items={data.zoneSummary.paceExposure} kind="pace" /></div>{data.zoneSummary.explanationCodes.length ? <div className="zone-explanations">{data.zoneSummary.explanationCodes.map((code) => <span key={code}>{explanation(code)}</span>)}</div> : null}</section> : null}

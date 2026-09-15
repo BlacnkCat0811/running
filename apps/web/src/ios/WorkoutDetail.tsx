@@ -58,6 +58,12 @@ export function IosWorkoutDetail() {
   const load = detail.data.trainingLoad;
   const splits =
     series.data && series.dataPath === seriesPath ? series.data.splits : [];
+  const segments =
+    series.data && series.dataPath === seriesPath ? series.data.segments : [];
+  const segmentPlan =
+    series.data && series.dataPath === seriesPath ? series.data.segmentPlan : null;
+  const segmentNote =
+    series.data && series.dataPath === seriesPath ? series.data.segmentNote : null;
   const dimensions = detail.data.dimensions;
   const heartRateValues = seriesPoints(series.data?.series.heartRate.points);
   const paceValues = speedToPace(series.data?.series.speed.points);
@@ -178,6 +184,46 @@ export function IosWorkoutDetail() {
               </div>
             )}
           </div>
+        </Card>
+      ) : null}
+      {/* The session actually executed, above the neutral 1 km ruler, so the page
+          answers "did I run what I was given" before it answers "how fast". */}
+      {series.data && series.dataPath === seriesPath && (segments.length || segmentNote) ? (
+        <Card title="课表分段">
+          {segmentPlan ? (
+            <div className="ios-split-note">
+              匹配 {segmentPlan.localDate} 第 {segmentPlan.revision} 版课表 ·{" "}
+              {segmentPlan.reason}
+            </div>
+          ) : segmentNote ? (
+            <div className="ios-split-note">{segmentNote}</div>
+          ) : null}
+          {segments.length ? (
+            <>
+              <div className="ios-split-row ios-split-head">
+                <span>分段</span>
+                <span>用时</span>
+                <span>配速</span>
+                <span>心率</span>
+              </div>
+              {segments.map((segment) => (
+                <div className="ios-split-row" key={segment.index}>
+                  <b>{segment.label}</b>
+                  <span>{duration(segment.durationSeconds)}</span>
+                  <span>
+                    {segment.averagePaceSecondsPerKm == null
+                      ? "--"
+                      : pace(segment.averagePaceSecondsPerKm)}
+                  </span>
+                  <span>
+                    {segment.averageHeartRateBpm == null
+                      ? "--"
+                      : Math.round(segment.averageHeartRateBpm)}
+                  </span>
+                </div>
+              ))}
+            </>
+          ) : null}
         </Card>
       ) : null}
       {seriesError ? (

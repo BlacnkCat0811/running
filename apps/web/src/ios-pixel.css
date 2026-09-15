@@ -1000,6 +1000,13 @@ html[data-shell="ios"] .ios-split-head {
   color: var(--ios-muted);
   font-size: 10px;
 }
+html[data-shell="ios"] .ios-split-note {
+  padding: 0 0 9px;
+  border-bottom: 2px dashed rgba(18, 63, 43, 0.18);
+  color: var(--ios-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
 html[data-shell="ios"] .ios-dim-row {
   display: grid;
   grid-template-columns: 40px 1fr 36px;
