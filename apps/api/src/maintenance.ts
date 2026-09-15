@@ -80,6 +80,24 @@ const DEFAULT_BACKUP_POLICY = {
   minimumFreeBytes: 512 * 1024 ** 2
 } as const;
 
+/**
+ * `publishDatabaseFile` renames an existing database aside as
+ * `<target>.replaced.<uuid>` so that a failed publication can roll back. Once the
+ * publisher has committed, nothing will ever call rollback again, so the file is
+ * unreachable and should be reclaimed by its owner. Anything matching this
+ * pattern and older than the reclamation window is therefore a leftover - the
+ * owner was killed before its cleanup ran, or a caller never reclaimed it.
+ */
+const DISPLACED_DATABASE_PATTERN = /\.replaced\.[0-9a-fA-F-]{36}$/;
+
+/** Long enough for an operator to recover by hand, short enough to bound growth. */
+const DEFAULT_DISPLACED_DATABASE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+export interface DisplacedDatabaseReclamation {
+  removed: number;
+  reclaimedBytes: number;
+}
+
 export class DatabaseMaintenance {
   readonly backupDirectory: string;
   readonly quarantineDirectory: string;
@@ -519,6 +537,12 @@ export class DatabaseMaintenance {
   async ensureBackupCapacity(protectedNames: readonly string[] = []): Promise<void> {
     await mkdir(this.backupDirectory, { recursive: true });
     try {
+      await this.reclaimDisplacedDatabases();
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      process.stderr.write(`Displaced database reclamation failed: ${message}\n`);
+    }
+    try {
       await this.enforceBackupPolicy(protectedNames);
     } catch (error) {
       const message = error instanceof Error ? error.stack ?? error.message : String(error);
@@ -568,6 +592,60 @@ export class DatabaseMaintenance {
       totalBytes -= candidate.sizeBytes;
       count -= 1;
     }
+  }
+
+  /**
+   * Reclaims rename-aside rollback points (`<database>.replaced.<uuid>`) that can
+   * no longer serve any purpose.
+   *
+   * Nothing ever collected these: `publishDatabaseFile` moves the previous
+   * database aside so a failed publication can roll back, and once the publisher
+   * commits, the file is unreachable - but both the CLI and the import worker only
+   * removed their staging files. Every web import therefore left one full database
+   * copy behind (2026-09-15: 89 files / 36 GB, taking a 50 GB disk to 98%).
+   *
+   * Files younger than `maxAgeMs` are preserved so an in-flight publication can
+   * still roll back. Returns what it reclaimed so callers can log the effect.
+   */
+  async reclaimDisplacedDatabases(
+    maxAgeMs: number = DEFAULT_DISPLACED_DATABASE_MAX_AGE_MS
+  ): Promise<DisplacedDatabaseReclamation> {
+    const directory = dirname(this.databasePath);
+    if (!existsSync(directory)) return { removed: 0, reclaimedBytes: 0 };
+    const cutoff = Date.now() - maxAgeMs;
+    const names = (await readdir(directory)).filter((name) => DISPLACED_DATABASE_PATTERN.test(name));
+    const errors: unknown[] = [];
+    let removed = 0;
+    let reclaimedBytes = 0;
+    for (const name of names) {
+      const path = resolve(directory, name);
+      let info;
+      try {
+        info = await stat(path);
+      } catch (error) {
+        if (this.isMissingFileError(error)) continue;
+        errors.push(error);
+        continue;
+      }
+      // Never touch a directory, and never touch a publication that may still roll back.
+      if (!info.isFile() || info.mtimeMs > cutoff) continue;
+      try {
+        const sizeBytes = info.size;
+        await this.removeFileWithRetry(path);
+        for (const sidecar of [`${path}-wal`, `${path}-shm`]) {
+          if (existsSync(sidecar)) await this.removeFileWithRetry(sidecar);
+        }
+        removed += 1;
+        reclaimedBytes += sizeBytes;
+      } catch (error) {
+        if (this.isMissingFileError(error)) continue;
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) {
+      throw new AggregateError(errors, `Failed to reclaim ${errors.length} displaced database file(s)`);
+    }
+    return { removed, reclaimedBytes };
   }
 
   private checkpointDatabase(path: string): void {

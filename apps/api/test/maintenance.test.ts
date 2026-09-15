@@ -1182,3 +1182,99 @@ test("keeps a genuinely locked rollback as a visible backup after commit", {
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   }
 });
+
+test("reclaims displaced rollback points past the window while keeping fresh ones", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-displaced-"));
+  const variableDirectory = join(root, "var");
+  const databasePath = join(variableDirectory, "rai.sqlite");
+  mkdirSync(variableDirectory);
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('active');");
+  } finally {
+    database.close();
+  }
+  const staleName = "rai.sqlite.replaced.11111111-1111-4111-8111-111111111111";
+  const freshName = "rai.sqlite.replaced.22222222-2222-4222-8222-222222222222";
+  const stalePath = join(variableDirectory, staleName);
+  writeFileSync(stalePath, "stale rollback point");
+  writeFileSync(join(variableDirectory, freshName), "fresh rollback point");
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  utimesSync(stalePath, twoDaysAgo, twoDaysAgo);
+
+  try {
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    const result = await maintenance.reclaimDisplacedDatabases();
+
+    assert.equal(result.removed, 1);
+    assert.equal(result.reclaimedBytes, "stale rollback point".length);
+    assert.equal(existsSync(stalePath), false);
+    // A publication that is still in flight must be able to roll back.
+    assert.equal(existsSync(join(variableDirectory, freshName)), true);
+    assert.equal(existsSync(databasePath), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reclaims displaced rollback points during backup capacity preparation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-displaced-capacity-"));
+  const variableDirectory = join(root, "var");
+  const databasePath = join(variableDirectory, "rai.sqlite");
+  mkdirSync(variableDirectory);
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('active');");
+  } finally {
+    database.close();
+  }
+  const displaced = join(variableDirectory, "rai.sqlite.replaced.33333333-3333-4333-8333-333333333333");
+  writeFileSync(displaced, "left behind by a killed publisher");
+  const yesterday = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  utimesSync(displaced, yesterday, yesterday);
+
+  try {
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    await maintenance.ensureBackupCapacity();
+    assert.equal(existsSync(displaced), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("leaves unrelated files, directories and malformed names alone when reclaiming", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-displaced-scope-"));
+  const variableDirectory = join(root, "var");
+  const databasePath = join(variableDirectory, "rai.sqlite");
+  mkdirSync(variableDirectory);
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('active');");
+  } finally {
+    database.close();
+  }
+  // Shares the prefix but is not a rename-aside rollback point.
+  const malformed = join(variableDirectory, "rai.sqlite.replaced.not-a-uuid");
+  // Same shape as a rollback point but a directory: reclamation must not recurse into it.
+  const displacedDirectory = join(variableDirectory, "rai.sqlite.replaced.44444444-4444-4444-8444-444444444444");
+  const unrelated = join(variableDirectory, "data-audit.something.md");
+  writeFileSync(malformed, "malformed");
+  mkdirSync(displacedDirectory);
+  writeFileSync(unrelated, "unrelated");
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  utimesSync(malformed, twoDaysAgo, twoDaysAgo);
+  utimesSync(displacedDirectory, twoDaysAgo, twoDaysAgo);
+
+  try {
+    const maintenance = new DatabaseMaintenance(databasePath, root);
+    const result = await maintenance.reclaimDisplacedDatabases();
+
+    assert.equal(result.removed, 0);
+    assert.equal(existsSync(malformed), true);
+    assert.equal(existsSync(displacedDirectory), true);
+    assert.equal(existsSync(unrelated), true);
+    assert.equal(existsSync(databasePath), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

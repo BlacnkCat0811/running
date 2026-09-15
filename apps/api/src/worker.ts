@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { copyFile, mkdir, rename, rm } from "node:fs/promises";
+import { copyFile, mkdir, readdir, rename, rm } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { resolve } from "node:path";
@@ -905,6 +905,9 @@ export class ImportWorker {
       try {
         await Promise.all([
           this.removeDatabaseFiles(stagingDatabase),
+          // Only on the committed path: after a failure the displaced database may
+          // be the only usable recovery point, so it must survive for an operator.
+          ...(terminalSucceeded ? [this.reclaimDisplacedImportDatabases(stagingDatabase)] : []),
           rm(stagedMarkdownReport, { force: true }),
           rm(stagedJsonReport, { force: true }),
         ]);
@@ -1910,6 +1913,25 @@ export class ImportWorker {
     for (const candidate of [path, `${path}-shm`, `${path}-wal`]) {
       await rm(candidate, { force: true });
     }
+  }
+
+  /**
+   * Reclaims the rename-aside rollback points the CLI produced for this import
+   * (`<stagingDatabase>.replaced.<uuid>`).
+   *
+   * `packages/health-export-parser/src/cli.ts` intentionally retains the displaced
+   * database, and the worker cannot unilaterally revoke that contract. But this
+   * worker already wrote `var/backups/rai.before-web-import.<jobId>.sqlite` before
+   * the import started, so its own rollback point is redundant once the import has
+   * committed. Leaving it behind costs a full database copy per web import
+   * (2026-09-15: 89 files / 36 GB accumulated online, taking a 50 GB disk to 98%).
+   */
+  private async reclaimDisplacedImportDatabases(stagingDatabase: string): Promise<void> {
+    const directory = dirname(stagingDatabase);
+    if (!existsSync(directory)) return;
+    const prefix = `${basename(stagingDatabase)}.replaced.`;
+    const names = (await readdir(directory)).filter((name) => name.startsWith(prefix));
+    await Promise.all(names.map((name) => this.removeDatabaseFiles(resolve(directory, name))));
   }
 
   private command(args: string[]): Promise<void> {

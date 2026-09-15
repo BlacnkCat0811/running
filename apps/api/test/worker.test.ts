@@ -57,6 +57,7 @@ interface ImportWorkerTestSurface {
     discard(): void;
   };
   removeDatabaseFile(path: string): Promise<void>;
+  reclaimDisplacedImportDatabases(stagingDatabase: string): Promise<void>;
   persistJobs(): void;
   command(args: string[]): Promise<void>;
   run(job: Record<string, unknown>): Promise<void>;
@@ -2759,3 +2760,104 @@ for (const operation of ["add", "clear", "repeat", "upgrade"] as const) {
     }
   });
 }
+
+test("reclaims the displaced rollback point left behind by a committed import", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-reclaim-displaced-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let displacedPath: string | null = null;
+  let commandCount = 0;
+  worker.command = async (args) => {
+    commandCount += 1;
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    if (commandCount > 1) {
+      assert.ok(args.includes("recompute"));
+      return;
+    }
+    const staging = new DatabaseSync(stagingPath);
+    try {
+      staging.prepare(`
+        INSERT INTO health_records (
+          id, type, source_name, source_category, unit, value_numeric,
+          start_at, end_at, metadata_json, raw_attributes_json
+        ) VALUES (?, ?, 'Fixture', 'apple_watch', 'ml/kg*min', 52, ?, ?, '{}', '{}')
+      `).run("worker_reclaim_probe", healthTypes.vo2Max, runDate(1), runDate(1));
+    } finally {
+      staging.close();
+    }
+    // The CLI retains its rename-aside rollback point by contract; reclaiming it
+    // for this import is the worker's responsibility.
+    displacedPath = `${stagingPath}.replaced.77777777-7777-4777-8777-777777777777`;
+    writeFileSync(displacedPath, "pre-import database");
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_reclaim_displaced",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(job.status, "succeeded");
+    assert.equal(commandCount, 2);
+    const reclaimed = displacedPath;
+    assert.ok(reclaimed, "the fixture must have produced a displaced database");
+    assert.equal(
+      existsSync(reclaimed),
+      false,
+      "a committed import must not leave a full database copy on disk"
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("keeps the displaced rollback point when an import fails before activation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-keep-displaced-"));
+  const databasePath = join(root, "var", "rai.sqlite");
+  mkdirSync(join(root, "var"));
+  const active = await seedCanonical(databasePath);
+  active.close();
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  let displacedPath: string | null = null;
+  worker.command = async (args) => {
+    const databaseArgument = args.indexOf("--database");
+    assert.ok(databaseArgument >= 0);
+    const stagingPath = args[databaseArgument + 1];
+    assert.ok(stagingPath);
+    // A publisher killed mid-flight leaves its rollback point behind, and it may
+    // be the only usable recovery point, so the worker must not reclaim it.
+    displacedPath = `${stagingPath}.replaced.88888888-8888-4888-8888-888888888888`;
+    writeFileSync(displacedPath, "pre-import database");
+    throw new Error("import command failed");
+  };
+  const job: Record<string, unknown> = {
+    id: "web_import_keep_displaced",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
+  };
+  try {
+    await worker.run(job);
+    assert.equal(job.status, "failed");
+    const kept = displacedPath;
+    assert.ok(kept, "the fixture must have produced a displaced database");
+    assert.equal(existsSync(kept), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
