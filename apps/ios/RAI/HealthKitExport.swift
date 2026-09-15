@@ -274,6 +274,7 @@ nonisolated enum HealthKitExport {
         body += "    <MetadataEntry key=\"HKMetadataKeySyncIdentifier\" value=\"\(escape(workoutSyncId(workout)))\"/>\n"
         body += "    <MetadataEntry key=\"RAIHealthKitWorkoutUUID\" value=\"\(escape(workout.uuid.uuidString))\"/>\n"
         body += metadataXML(workout)
+        body += workoutStructureDiagnosticXML(workout)
         body += workoutEventXML(workout)
         if let distance = statistic(workout, HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!, unit: .meter()) {
             body += statisticXML(
@@ -303,6 +304,84 @@ nonisolated enum HealthKitExport {
         return body
     }
 
+    /// A one-off diagnostic for the segment panel (2026-09-15).
+    ///
+    /// The detail page's 课表分段 panel used to treat the Watch's lap/segment
+    /// events as the prescription's steps. A real run then turned out to carry
+    /// *two overlapping partitions of the whole workout* (≈1 km and ≈1.6 km),
+    /// and nothing downstream can tell which layer each partition came from:
+    /// `HKWorkout.workoutEvents` is a single flat list with no parent recorded.
+    ///
+    /// `HKWorkoutActivity` is the only API that names the layers — and, because an
+    /// activity carries no `WorkoutEvent` of its own, it is also the one place a
+    /// structured workout's *steps* could be recorded without ever appearing in
+    /// the event list. So this answers both questions at once:
+    ///
+    /// - `activities` non-empty and its boundaries near the prescription's
+    ///   steps (start+300 s, start+≈1 281 s) ⇒ the steps are measurable, and the
+    ///   panel can stop replaying the plan onto the speed track;
+    /// - `activities` empty ⇒ the steps live only inside the Fitness app, and the
+    ///   replay is the ceiling. Either answer is decisive; hence one export.
+    ///
+    /// Shipped as an ordinary `<MetadataEntry>` so it needs no contract, parser or
+    /// schema change: it lands in `workouts.metadata_json` and one query reads it.
+    /// Offsets are milliseconds from the workout's start — exact, compact, and
+    /// independent of how the XML later formats dates.
+    private static func workoutStructureDiagnosticXML(_ workout: HKWorkout) -> String {
+        let events = workout.workoutEvents ?? []
+        let activities = workout.workoutActivities
+        // Gated on the runs actually in question: the entry joins the workout's
+        // content hash, so emitting it for every workout would mark all ~274 of
+        // them updated on the next incremental import for no gain.
+        guard !events.isEmpty || !activities.isEmpty else { return "" }
+        let startedAt = workout.startDate
+        func offsetMs(_ date: Date) -> Int {
+            Int(((date.timeIntervalSince(startedAt)) * 1000).rounded())
+        }
+        func describe(_ event: HKWorkoutEvent) -> [String: Any] {
+            [
+                "type": eventTypeName(event.type) ?? "unknown",
+                "typeRaw": Int(event.type.rawValue),
+                "startMs": offsetMs(event.dateInterval.start),
+                "durationMs": Int((event.dateInterval.duration * 1000).rounded()),
+                // Keys only: an event's metadata values are arbitrary objects, and
+                // the keys are what would reveal a Watch-side lap tag (for example
+                // `HKMetadataKeyLapLength`, HKMetadata.h:301) if one is present.
+                "metadataKeys": event.metadata.map { Array($0.keys).sorted() } ?? []
+            ]
+        }
+        let activityPayload: [[String: Any]] = activities.map { activity in
+            [
+                // The activity's own identity: two overlapping lap partitions would
+                // most plausibly be two activities, and this pairs each partition
+                // with the layer that claims it.
+                "uuid": activity.uuid.uuidString,
+                "startMs": offsetMs(activity.startDate),
+                "durationMs": Int((activity.duration * 1000).rounded()),
+                "activityTypeRaw": Int(activity.workoutConfiguration.activityType.rawValue),
+                "locationRaw": Int(activity.workoutConfiguration.locationType.rawValue),
+                // Keys only: the values of an activity's metadata are arbitrary and
+                // may not survive JSON serialization, and the keys are what tell us
+                // whether watchOS labelled the step.
+                "metadataKeys": activity.metadata.map { Array($0.keys).sorted() } ?? [],
+                // Note: `HKWorkoutActivity.workoutEvents` is non-optional, unlike
+                // `HKWorkout.workoutEvents`.
+                "events": activity.workoutEvents.map(describe)
+            ]
+        }
+        let payload: [String: Any] = [
+            "activityCount": activities.count,
+            "activities": activityPayload,
+            "eventCount": events.count,
+            "events": events.map(describe)
+        ]
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+            let json = String(data: data, encoding: .utf8)
+        else { return "" }
+        return "    <MetadataEntry key=\"RAIWorkoutStructureDiagV1\" value=\"\(escape(json))\"/>\n"
+    }
+
     private static func workoutEventXML(_ workout: HKWorkout) -> String {
         var body = ""
         for event in workout.workoutEvents ?? [] {
@@ -316,6 +395,7 @@ nonisolated enum HealthKitExport {
         }
         return body
     }
+
 
     private static func eventTypeName(_ type: HKWorkoutEventType) -> String? {
         switch type {
