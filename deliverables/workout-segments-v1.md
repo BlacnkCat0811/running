@@ -167,7 +167,71 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 
 `git revert <本次提交>` + `systemctl restart rai-api`（API 侧 tsx 直跑，无需 build）。无 schema、无数据变更。
 
-#### 仍未定性的 🟡（不阻塞本次修复）——2026-09-15 17:30 复查后的结论
+#### 🟡 两套计圈 & 课表步骤可实测 —— 2026-09-15 17:45 双双判决
+
+##### 判决一（🎯 正中目标）：课表步骤**可实测**，`HKWorkoutActivity` 就是载体
+
+读线上 `workouts.metadata_json` 的 `RAIWorkoutStructureDiagV1`（读法见 `NOTES-mobile-plan.md`），
+09-14 那次跑步（`workout_13ba33ba21154357ec25f3ae7a621b77`，全程 **2 348 250 ms**）给出：
+
+| activity | 起点(ms) | 时长(ms) | 与 rev 6 处方的对照 | `activity.metadataKeys` |
+|---|---|---|---|---|
+| 1 | 0 | **300 000** | 热身 `time 300 s` ⇒ **完全一致** | `HKElevationAscended`, `WOIntervalStepKeyPath`, `WOIntervalStepSuccessful` |
+| 2 | 300 000 | 983 455 | 训练 `distance 2600 m`（时长是涌现值，不是目标） | `WOIntervalStepKeyPath`, `WOIntervalStepSuccessful` |
+| 3 | 1 283 456 | 299 619 | 整理放松 `time 300 s` ⇒ 差 **0.38 s** | `WOIntervalStepKeyPath` |
+
+- **`activityCount = 3` = 处方步骤数 3**。处方原文已从 `mobile_goals_history` rev 6 取出核对：
+  `structure = warmup(time 300s) + blocks[1×work(distance 2600m)] + cooldown(time 300s)`。
+- 边界 **300.000 s** 与 **1 283.456 s** 就是实测的步骤步界。
+- 三个 activity 都带 `WOIntervalStepKeyPath`；第 3 个**缺** `WOIntervalStepSuccessful`，
+  与它 299.619 s 略短于 300 s（收操没跑满就结束）自洽。
+- 🟡 `WOIntervalStepKeyPath` / `WOIntervalStepSuccessful` **不在公开 SDK 里**（`Platforms/` 全量搜索为空）
+  ⇒ 语义是**由名字 + 只出现在有计划那次训练上**推断的，不是文档事实。**但判决不依赖它：数字已经对齐。**
+- **横向对照**：09-09 / 09-10 两次（无课表）`activityCount = 1`、`metadataKeys = []`
+  ⇒ activity 层一直存在（iOS 16+ 的工作量模型），**课表每一步追加一个 activity**。
+
+##### 现状实现被实测背书：偏差 ≤ 2.5 s
+
+| 步界 | 现实现（课表回放） | L2 实测 | 差 |
+|---|---|---|---|
+| 热身结束 | 300 s | 300.000 s | **0** |
+| 训练结束 | 1 281 s | 1 283.456 s | 2.46 s |
+| 收操结束 | 1 581 s | 1 583.075 s | 2.08 s |
+
+⇒ 面板上那 4 段（热身 773 m / 训练 2 600 m / 整理放松 775 m / 自由训练 1 903 m）**没有错**。
+第 4 段「自由训练」= activity 覆盖不到的尾巴（1 583.075 → 2 348.25 s）—— 处方本身没有第 4 步，
+它是跑完收操后又继续跑的部分。
+
+##### 判决二：两套计圈**与课表、与 activity 层都无关**（谜题收窄，未完全闭合）
+
+11 个 `.segment` 事件是**两条各自完美铺满全程**的划分：
+
+| 链 | 事件数 | 内部边界（ms） | 各段时长（s） | 与总里程 6 051 m 的整除关系 | 判定 |
+|---|---|---|---|---|---|
+| A | 7 | 380 947 / 760 118 / 1 137 242 / 1 521 258 / 1 913 787 / 2 328 087 | 380.9 / 379.2 / 377.1 / 384.0 / 392.5 / 414.3 / 20.2 | 6.05 km ÷ **1 km** = 6.05 ⇒ 6 整圈 + 尾 ⇒ **7 事件** ✅ | **自动计圈 · 1 公里** |
+| B | 4 | 614 547 / 1 223 328 / 1 840 851 | 614.5 / 608.8 / 617.5 / 507.4 | 6.05 km ÷ **1 609.344 m** = 3.76 ⇒ 3 整圈 + 尾 ⇒ **4 事件** ✅ | **自动计圈 · 1 英里** |
+
+两条链各自精确收在 workout 终点 2 348 250 ms，段间隔规则（非手动计圈），
+且**没有任何一条链的边界落在课表步界（300 / 1 283 s）上**。
+
+**本轮新增排除（判决级）**：
+
+| 假设 | 判据 | 结论 |
+|---|---|---|
+| 两套链来自两个 activity 层 | 每个 activity 的 `events[]` = 顶层 11 个事件与该 activity 时间区间的**交集**：activity1 列 2 个（A1,B1）、activity2 列 7 个、activity3 列 3 个，逐个核对全部吻合 ⇒ **activity 层不自己划分事件** | ❌ 排除 |
+| 其中一套是课表步骤 | 课表步界 300 / 1 283 s 不在 B 的 3 个边界里；两条链都是等距自动划分 | ❌ 排除 |
+| 事件自带计圈长度标注 | 11 个事件的 `metadataKeys` **全为 `[]`**（无 `HKMetadataKeyLapLength`） | ❌ 排除 |
+| 与课表存在关联 | 09-09 / 09-10 无课表却同样 7+4 形态 | ❌ 排除 |
+
+⇒ **收窄为「手表侧同时存在公制 1 公里与英制 1 英里两套自动计圈」**，属 watchOS 配置/行为，不在我们代码里。
+
+**给小唐的一条零成本判据**（即 `NOTES-mobile-plan.md` L0 第 2 问）：看 手表 设置 → 体能训练 → **自动计圈**。
+- 显示「1 公里」⇒ 链 B（1 英里）**没有对应设置** ⇒ 存在第二个生成者（强证据）。
+- 显示「1 英里」⇒ 链 A（1 公里）没有对应设置，同理。
+
+**不建议再投入**：两套链只在「无课表兜底」时才影响段数；有课表时以步骤为骨架，已被 §4.1 的修复遮蔽。
+
+##### 附带：17:30 复查时的排除记录（保留作判据样本）
 
 **"一次手表训练为何导出两套计圈"。已排除的（每条都有判据）：**
 
@@ -183,14 +247,12 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 两套重叠划分是 **HealthKit 侧的事实**，不是我们代码造的。🔴 **因此它不在我们可改的代码里，
 判决点只能在手机上读 HealthKit。**
 
-**🔴 而且复查发现一个比这个谜题更值钱的东西**：`HKWorkoutActivity` **不产生 `WorkoutEvent`** ——
-一个 activity 只有 `startDate` / `duration` / `workoutConfiguration`。而 Fitness App 能显示那 4 段
-（热身 788 m / 训练 2600 m / 整理放松 773 m / 自由训练 1.89 km ≈ 处方的 3 步 + 自由段），
-说明**步骤结构很可能就活在 `workout.workoutActivities` 里，而我们从来没有导出过它**。
-⇒ 若成立，「课表分段」可以从**按课表回放到实测配速的推算**升级为**实测边界**（真正的测量），
-也不再依赖课表历史。**排查方案见 `.workbuddy/memory/NOTES-mobile-plan.md` 的同名小节（L0–L3 四级）。**
+**✅ 当时那条"更值钱的猜测"已被上面的判决一证实**：`HKWorkoutActivity` **不产生 `WorkoutEvent`**，
+一个 activity 只有 `startDate` / `duration` / `workoutConfiguration`；而步骤结构**确实就活在
+`workout.workoutActivities` 里**，只是我们从来没导出过它。⇒「课表分段」有条件从
+**按课表回放到实测配速的推算**升级为**实测边界**，并摆脱对课表历史的依赖。方案见本节末。
 
-##### L2 已实施（2026-09-15 17:30，commit `810acd4`）：等一次真实同步
+##### L2 的载体与实现（commit `810acd4`，保留作实现记录）
 
 `HealthKitExport.swift` 新增一次性诊断，在 `workoutXML`（`:277`）里多发一条元数据
 `RAIWorkoutStructureDiagV1`，内容为：
@@ -211,33 +273,38 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
 - 🔴 活动身份属性在 Swift 里是 `activity.uuid`，**不是** `activity.UUID`（后者 Swift 3 已废弃；
   `typecheck-ios.sh` 会直接报 `'UUID' has been renamed to 'uuid'`）。
 
-**判据（一发定论）**：读线上库的 `workouts.metadata_json`（命令见 `NOTES-mobile-plan.md` 同名小节，已实测能过 TAT；
-⚠️ 要**双重 `JSON.parse`**——那个 key 的值本身是一个 JSON 字符串）。
+**判据 → 走的是第一支**：`activityCount = 3 ≥ 2`，且某 activity 的 `startMs ≈ 300 000 / 1 283 456`
+⇒「**步骤可实测**，`HKWorkoutActivity` 是载体」。**判决一即由此得出。**
 
-| 观察 | 结论 | 后续动作 |
-|---|---|---|
-| `activityCount ≥ 2` 且某 activity 的 `events[]` 与两套链之一重合 | 两套计圈来自**两个 activity 层**，谜题闭合 | 把该 activity 的边界作为分段来源 |
-| `activityCount = 1`，且其 `startMs/durationMs` 覆盖全程 | activities 不承载步骤 | 回放仍是上限，维持现状 |
-| 任一 activity 的 `startMs` ≈ 300 000 / 1 281 000（ms） | **步骤可实测**，且 `HKWorkoutActivity` 确实是载体 | 把 activities 升级为分段主来源，摆脱课表历史依赖 |
-| 全部 `metadataKeys` 里没有 `HKMetadataKeyLapLength` | 两套链都不是 watchOS 自动计圈标注的（该 key 按文档设在 `HKWorkout` 上，`HKMetadata.h:301`） | 缩小到「活动层各自划分」这一支 |
+**生效前提（已执行完毕）**：诊断写进的是 **iOS 源码**，服务器 pull 到它**对手机没有任何作用**。
+2026-09-15 17:45 小唐已完成：Xcode 打开 `RAI.xcworkspace` → 真机 Run → App 设置页点「同步健康」。
 
-**生效前提（重要）**：诊断写进的是 **iOS 源码**，服务器 pull 到它**对手机没有任何作用**。
-必须**重新 build + 安装到手机**，再触发一次**增量同步**才会出现。
-
-增量同步会带上它，是因为 `runningWorkouts`（`:215-254`）在 `stored != nil` 时额外做了一次回填：
+增量同步能带上它，是因为 `runningWorkouts`（`:215-254`）在 `stored != nil` 时额外做了一次回填：
 `backfillStart = (startDate ?? Date()) - routeBackfillWindow`，而 `routeBackfillWindow = 14 天`（`:80`）
-⇒ 实际覆盖最近约 16 天 ⇒ **09-09 / 09-10 / 09-14 三次都在窗口内**，都会被重新读并发诊断。
-若某个更早的 workout 需要诊断，用设置页的「**重新导入全部**」（`full: true` ⇒ anchor 与 lowerBound 都清空）
-强制全量导出即可。
+⇒ 实际覆盖最近约 16 天 ⇒ 09-09 / 09-10 / 09-14 三次全部落窗，都带上了诊断（实测 `DIAG_ROWS 3`）。
+若某个更早的 workout 需要诊断，用设置页的「**重新导入全部**」（`full: true` ⇒ anchor 与 lowerBound 都清空）。
 
-**小唐要做三步**（服务器侧已就绪：`/opt/rai` 已 fast-forward 到含本节的 HEAD、工作树干净；
-`apps/ios/**` 是非运行时路径 ⇒ **无需重启**）：
+##### 下一步（待小唐确认，本次未动手）
 
-1. Xcode 打开 **`RAI.xcworkspace`**（不是 xcodeproj）→ 在真机上 Run（重新 build + 安装）。
-2. App 设置页点「**同步健康**」（`Settings.tsx:118`，`full: false` ⇒ 走增量，会带上诊断）。
-3. 告诉我一声，我读 `workouts.metadata_json` 出判决（命令已预演通过，基线 `DIAG_ROWS 0`）。
+把**实测 activity 步界提升为分段的第一优先来源**，课表回放降为第二支：
 
-判据就是上面那张表 —— 无论走哪一支都有结论，**不存在"跑完还是不知道"**。
+| | 方案 A（建议） | 方案 B |
+|---|---|---|
+| 载体 | 沿用已在库里的 `RAIWorkoutStructureDiagV1` | 按 Apple 官方格式写 `<WorkoutActivity>` 子元素 + 新建 `workout_activities` 表 |
+| 改动面 | `series-read-repository.ts` 加一个读 metadata 的方法；`workout-segments.ts` 加一支；`data.ts` 接线；测试 | parser + storage + migration + 契约 + 导入链（一处漏就静默失败） |
+| 要不要重装 App | **不用**（读的是已入库的元数据） | 要 |
+| 覆盖场景 | 单活动 + 课表分步（我们的全部场景） | 额外覆盖多活动 workout（铁三） |
+
+- **分工要讲清**：实测 activity 只给**步界**（只有时间），**标签与目标值仍来自课表**
+  （热身 / 训练 `2600 m` / 整理放松）。两者不是替代关系。
+- **降级路径必须保留**：没有该字段（老数据、官方导出、web 导入）时回落到课表回放，再回落到事件兜底。
+- **字段命名**：`RAIWorkoutStructureDiagV1` 名字里的 `Diag` 是历史；升格为契约字段**不改名**（改名要再装一次 App），
+  但代码注释要写明它现在是对账依据。
+- **验收标准**：`GET /v1/workouts/training_session_7762eea67980ce682d51e79bf5592358/series` 的步界
+  变为 300.000 / 1 283.456 / 1 583.075 s（距离随之微调 ±几米），note 注明「由手表记录的步骤实测得到」；
+  兜底通道 `training_session_a62d3c33acba9bfe1f8f47c944b4c4e0`（09-10，`activityCount = 1`）
+  仍是 `plan=null` +「未匹配到课表」+`第 N 段`（**无回归**）。
+- **回滚**：`git revert <commit>` + `systemctl restart rai-api`。纯 API，无 schema、无数据变更。
 
 **部署记录**：`00c0ccb → c1ecac7`（9 个提交）fast-forward → `npm run build`（`BUILD_EXIT=0`）
 → `systemctl restart rai-api`；部署前备份 `rai.manual.2026-09-15T06-33-15-371Z.f5f4fbb3.sqlite`（530 MB）。
@@ -278,5 +345,6 @@ rev3 的 09-14 easy 却活了下来，并在"同日优先"规则里胜出。
   会写明「按课表结构回放」，`matchedBy` 也会透出。**根治靠回执**，即规则 1。
 - `MIN_SEGMENT_MS = 5 s`：< 5 s 的边界当噪声丢弃（HealthKit 事件时间戳本身不精确）。
 - 回执覆盖**整周可执行日**而非单日：手表上表的就是整周，跑哪一天由 36 小时窗口决定。
-- 🟡 一次训练导出两套计圈的成因仍未定性（见 §4.1 末）。**不影响分段正确性**，但会让
-  `eventBoundariesOf` 产出的段数偏多——只在无课表兜底时可见。
+- 🟡 一次训练导出两套计圈的成因已收窄为「手表侧同时存在 1 公里与 1 英里两套自动计圈」
+  （见 §4.1 判决二）——**与课表、与 activity 层都无关，且不在我们代码里**。**不影响分段正确性**，
+  但会让 `eventBoundariesOf` 产出的段数偏多——只在无课表兜底时可见。
