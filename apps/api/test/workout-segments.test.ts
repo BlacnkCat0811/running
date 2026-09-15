@@ -11,6 +11,7 @@ import type {
   MobileSessionKind,
   MobileSessionStructure
 } from "@rai/api-contracts";
+import type { MetadataMap } from "@rai/contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { RaiReadStore } from "../src/data.js";
@@ -340,9 +341,23 @@ const REAL_STEP_LAYER = {
   ]
 };
 
-/** A workout's `metadata_json`, nested exactly as the export writes it. */
-const workoutMetadata = (payload: unknown): string =>
-  JSON.stringify({ [STRUCTURE_METADATA_KEY]: JSON.stringify(payload) });
+/**
+ * A workout's `metadata_json`, built the way the parser builds it.
+ *
+ * Annotating the literal as `MetadataMap` is the point, not decoration: the real
+ * value is `Record<string, string[]>`, because the parser appends on every
+ * `MetadataEntry` (`health-export-parser/src/utils.ts:91`). The first version of
+ * this fixture hand-wrote the key as a bare string — the author's guess about the
+ * shape, asserted as if it were the contract — so the reader and its fixture
+ * agreed with each other and both disagreed with the database, and the feature
+ * shipped dead (`965cd54`). Typing the literal against the contract means a
+ * change of shape breaks `typecheck` instead of breaking production.
+ */
+const workoutMetadata = (payload: unknown): string => {
+  const metadata: MetadataMap = {};
+  metadata[STRUCTURE_METADATA_KEY] = [JSON.stringify(payload)];
+  return JSON.stringify(metadata);
+};
 
 test("measures the steps the Watch recorded instead of replaying the plan", async () => {
   const { root, databasePath, sessionId } = await seedRun(
@@ -462,18 +477,48 @@ test("reads the step layer only when the metadata really carries one", () => {
     ]
   );
 
-  // Absent, unparsable, or a key that is not the nested JSON string we write:
-  // every one of them must decline rather than throw or invent a step.
+  // Both shapes the key can take are read: the one-element array the parser
+  // actually writes, and a bare string (what the first version of the reader
+  // assumed). Neither a hand-built import nor a contract change may silently
+  // kill the feature the way `965cd54` did.
+  assert.deepEqual(
+    measuredStepsOf(
+      JSON.stringify({ [STRUCTURE_METADATA_KEY]: JSON.stringify(REAL_STEP_LAYER) }),
+      startedAtMs,
+      endedAtMs
+    ),
+    steps
+  );
+
+  // A repeated key is ambiguous, so the last entry wins — the same rule
+  // `lastMetadataValue` applies everywhere else.
+  assert.deepEqual(
+    measuredStepsOf(
+      JSON.stringify({
+        [STRUCTURE_METADATA_KEY]: [JSON.stringify({ activities: [] }), JSON.stringify(REAL_STEP_LAYER)]
+      }),
+      startedAtMs,
+      endedAtMs
+    ),
+    steps
+  );
+
+  // Absent, unparsable, or a payload with no usable steps: every one of them must
+  // decline rather than throw or invent a step.
   assert.deepEqual(measuredStepsOf(null, startedAtMs, endedAtMs), []);
   assert.deepEqual(measuredStepsOf("{}", startedAtMs, endedAtMs), []);
   assert.deepEqual(measuredStepsOf("not json", startedAtMs, endedAtMs), []);
   assert.deepEqual(
-    measuredStepsOf(JSON.stringify({ [STRUCTURE_METADATA_KEY]: { activities: [] } }), startedAtMs, endedAtMs),
+    measuredStepsOf(JSON.stringify({ [STRUCTURE_METADATA_KEY]: ["not json"] }), startedAtMs, endedAtMs),
+    []
+  );
+  assert.deepEqual(
+    measuredStepsOf(JSON.stringify({ [STRUCTURE_METADATA_KEY]: [] }), startedAtMs, endedAtMs),
     []
   );
   assert.deepEqual(
     measuredStepsOf(
-      JSON.stringify({ [STRUCTURE_METADATA_KEY]: JSON.stringify({ activities: [{ startMs: 0 }] }) }),
+      JSON.stringify({ [STRUCTURE_METADATA_KEY]: [JSON.stringify({ activities: [{ startMs: 0 }] })] }),
       startedAtMs,
       endedAtMs
     ),

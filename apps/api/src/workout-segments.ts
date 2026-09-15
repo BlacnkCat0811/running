@@ -132,6 +132,35 @@ const numberOf = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
 /**
+ * Pull the raw payload out from under `STRUCTURE_METADATA_KEY`.
+ *
+ * 🔴 A metadata value is a `MetadataMap` entry, i.e. `Record<string, string[]>`
+ * (`packages/contracts/src/index.ts:43`): the parser *appends* on every
+ * `MetadataEntry` rather than overwriting (`health-export-parser/src/utils.ts:91`),
+ * so a key written once still arrives as a one-element array. The first version
+ * of this reader tested the entry with `typeof inner !== "string"`, a condition
+ * that could never hold, so it returned `[]` on every real workout and the
+ * measured path never ran in production (`965cd54`). Both shapes are accepted
+ * now; a repeated key takes its last entry, mirroring `lastMetadataValue`.
+ */
+const structurePayloadOf = (metadataJson: string): unknown => {
+  let metadata: Record<string, unknown> | null;
+  try {
+    metadata = JSON.parse(metadataJson) as Record<string, unknown> | null;
+  } catch {
+    return null;
+  }
+  const entry = metadata?.[STRUCTURE_METADATA_KEY];
+  const raw = Array.isArray(entry) ? entry[entry.length - 1] : entry;
+  if (typeof raw !== "string") return raw ?? null;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Read the Watch's recorded steps out of a workout's metadata.
  *
  * Offsets in the entry are milliseconds from the workout's start, so they are
@@ -150,16 +179,7 @@ export const measuredStepsOf = (
   endedAtMs: number
 ): MeasuredStep[] => {
   if (metadataJson === null) return [];
-  let payload: unknown;
-  try {
-    const metadata = JSON.parse(metadataJson) as Record<string, unknown> | null;
-    const inner = metadata?.[STRUCTURE_METADATA_KEY];
-    // The entry is a JSON string nested inside the workout's metadata object.
-    if (typeof inner !== "string") return [];
-    payload = JSON.parse(inner);
-  } catch {
-    return [];
-  }
+  const payload = structurePayloadOf(metadataJson);
   const activities = (payload as { activities?: unknown } | null)?.activities;
   if (!Array.isArray(activities)) return [];
 
