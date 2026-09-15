@@ -17,6 +17,8 @@ import type {
   RecomputeJobCancellationResponse,
   TrainPredictionModelRequest,
   LockMobileSessionInput,
+  MobileSessionKind,
+  MobileSessionStructure,
   MobileWeeklyPlanGenerationResponse,
   UpdateMobileGoalsInput,
   UpdateTrainingZoneProfileInput,
@@ -50,6 +52,7 @@ import {
 } from "./import-sources.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { MobileGoalsRevisionConflictError, MobileGoalsStore, type PlanMergeOptions } from "./mobile-goals.js";
+import type { PlanCandidateDay } from "./workout-segments.js";
 import { generateWeeklyPlan, overwriteWarning, weeklyPlanDates } from "./weekly-plan-service.js";
 import {
   installLocalRequestSecurity,
@@ -64,6 +67,7 @@ import {
   importSourceBodySchema,
   mobileGoalsBodySchema,
   mobileLockBodySchema,
+  mobilePlanSyncedBodySchema,
   mobileWeeklyPlanGenerateBodySchema,
   modelComparisonQuerySchema,
   openapiDocument,
@@ -175,7 +179,8 @@ const metadataOnlyMutationRoutes = new Set([
   "/v1/imports/uploads",
   "/v1/mobile/goals",
   "/v1/mobile/lock",
-  "/v1/mobile/workout-plan/generate"
+  "/v1/mobile/workout-plan/generate",
+  "/v1/mobile/workout-plan/synced"
 ]);
 const databaseRequiredMutationRoutes = new Set([
   "/v1/workouts/:id/override",
@@ -689,11 +694,94 @@ app.get<{ Params: { id: string } }>("/v1/workouts/:id", { schema: { params: iden
   return detail;
 });
 
+/**
+ * Plan days that could explain a run, for the detail page's segment panel.
+ *
+ * Push receipts are read first and win in the matcher: the runner syncs
+ * *tomorrow's* session and runs it the same evening, so the run's own local date
+ * points at a rest day and date matching alone can never identify the plan.
+ * Everything here is a *candidate* — choosing one is `matchPlanDay`'s job, which
+ * keeps the guess explainable instead of spread across two layers.
+ */
+const PLAN_PUSH_HISTORY_DAYS = 90;
+
+const planSegmentCandidates = (): PlanCandidateDay[] => {
+  const since = new Date(Date.now() - PLAN_PUSH_HISTORY_DAYS * 86_400_000).toISOString();
+  const candidates: PlanCandidateDay[] = mobileGoalsStore
+    .planPushes(since)
+    .flatMap((push) =>
+      push.structure == null
+        ? []
+        : [{
+            localDate: push.localDate,
+            kind: push.kind,
+            revision: push.revision,
+            matchedBy: "push_record" as const,
+            structure: push.structure,
+            distanceKm: null,
+            pushedAt: push.pushedAt
+          }]
+    );
+  const seen = new Set<string>();
+  for (const revision of mobileGoalsStore.planHistory()) {
+    const days: PlanCandidateDay[] = [];
+    const locked = revision.lockedSession;
+    // The lock is the session the app actually told the runner to run today, so
+    // it outranks the same date in the week plan.
+    if (locked?.session.structure) {
+      days.push({
+        localDate: locked.localDate,
+        kind: locked.session.kind,
+        revision: revision.revision,
+        matchedBy: "plan_history",
+        structure: locked.session.structure,
+        distanceKm: locked.session.distanceKm,
+        pushedAt: null
+      });
+    }
+    for (const day of revision.weekPlan) {
+      if (!day.structure || day.kind === "rest") continue;
+      days.push({
+        localDate: day.localDate,
+        kind: day.kind,
+        revision: revision.revision,
+        matchedBy: "plan_history",
+        structure: day.structure,
+        distanceKm: day.distanceKm,
+        pushedAt: null
+      });
+    }
+    // Newest revision first, so the first day seen for a date is the freshest.
+    for (const day of days) {
+      if (seen.has(day.localDate)) continue;
+      seen.add(day.localDate);
+      candidates.push(day);
+    }
+  }
+  return candidates;
+};
+
 app.get<{ Params: { id: string } }>("/v1/workouts/:id/series", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
-  const series = withReadStore((store) => store.workoutSeries(request.params.id));
+  const series = withReadStore((store) => store.workoutSeries(request.params.id, planSegmentCandidates()));
   if (!series) return reply.code(404).send({ message: "未找到该训练的时间序列" });
   return series;
 });
+
+app.post<{ Body: { localDate: string; kind: MobileSessionKind; revision?: number; structure?: MobileSessionStructure | null } }>(
+  "/v1/mobile/workout-plan/synced",
+  { schema: { body: mobilePlanSyncedBodySchema } },
+  async (request) => {
+    const pushedAt = new Date().toISOString();
+    mobileGoalsStore.recordPlanPush({
+      localDate: request.body.localDate,
+      kind: request.body.kind,
+      revision: request.body.revision ?? 0,
+      structure: request.body.structure ?? null,
+      pushedAt
+    });
+    return { recordedAt: pushedAt };
+  }
+);
 
 app.patch<{ Params: { id: string }; Body: OverrideWorkoutInput }>(
   "/v1/workouts/:id/override",

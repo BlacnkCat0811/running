@@ -1,3 +1,5 @@
+import { MOBILE_SESSION_KINDS } from "@rai/contracts";
+
 import {
   MAX_ALERT_HEART_RATE_BPM,
   MAX_ALERT_PACE_SECONDS_PER_KM,
@@ -215,7 +217,7 @@ const mobileWeekPlanItemSchema = {
   required: ["localDate", "kind"],
   properties: {
     localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
-    kind: { type: "string", enum: ["rest", "recovery", "easy", "long_run", "tempo", "interval"] },
+    kind: { type: "string", enum: [...MOBILE_SESSION_KINDS] },
     distanceKm: { anyOf: [{ type: "number", minimum: 0, maximum: MAX_PLANNED_DISTANCE_KM }, { type: "null" }] },
     structure: { anyOf: [mobileSessionStructureSchema, { type: "null" }] },
     reason: { anyOf: [{ type: "string", maxLength: 400 }, { type: "null" }] }
@@ -237,6 +239,25 @@ export const mobileWeeklyPlanGenerateBodySchema = {
   additionalProperties: false,
   properties: {
     expectedRevision: { type: "integer", minimum: 0 }
+  }
+} as const;
+
+/**
+ * Receipt for "the phone handed this plan day to the Watch".
+ *
+ * `structure` is optional because the phone may sync a day whose structure it
+ * did not receive (a manually built session); the date and kind are the parts
+ * the segment matcher actually needs.
+ */
+export const mobilePlanSyncedBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["localDate", "kind"],
+  properties: {
+    localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    kind: { type: "string", enum: [...MOBILE_SESSION_KINDS] },
+    revision: { type: "integer", minimum: 0, maximum: 1_000_000 },
+    structure: { anyOf: [mobileSessionStructureSchema, { type: "null" }] }
   }
 } as const;
 
@@ -568,7 +589,8 @@ export const openapiDocument = {
       RestoreBackupRequest: restoreBodySchema,
       MobileGoalsUpdate: mobileGoalsBodySchema,
       MobileLock: mobileLockBodySchema,
-      MobileWeeklyPlanGenerate: mobileWeeklyPlanGenerateBodySchema
+      MobileWeeklyPlanGenerate: mobileWeeklyPlanGenerateBodySchema,
+      MobilePlanSynced: mobilePlanSyncedBodySchema
     }
   },
   paths: {
@@ -632,6 +654,11 @@ export const openapiDocument = {
             "application/json": { schema: { $ref: "#/components/schemas/MobileWeeklyPlanGenerate" } }
           }
         }
+      })
+    },
+    "/v1/mobile/workout-plan/synced": {
+      post: operation(["Workouts"], "登记手机已把某天的课表推送到 Apple Watch，供训练详情按课表结构还原分段", {
+        requestBody: body({ $ref: "#/components/schemas/MobilePlanSynced" }, "被推送的课表日期、类型与结构")
       })
     },
     "/v1/training-zones/history": { get: operation(["Read"], "历史心率与配速分区", {

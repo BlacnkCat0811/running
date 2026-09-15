@@ -13,6 +13,7 @@ import type {
   MobileSessionStructure,
   UpdateMobileGoalsInput
 } from "@rai/api-contracts";
+import { MOBILE_SESSION_KINDS } from "@rai/contracts";
 
 import {
   DEFAULT_EASY_DURATION_FLOOR,
@@ -29,14 +30,8 @@ import { MAX_PLANNED_DISTANCE_KM, normalizeSessionStructure } from "./session-st
 
 export const DEFAULT_WEEKLY_DISTANCE_KM = 30;
 const GOALS_FILE = "mobile-goals.json";
-const SESSION_KINDS = new Set<MobileSessionKind>([
-  "rest",
-  "recovery",
-  "easy",
-  "long_run",
-  "tempo",
-  "interval"
-]);
+/** Derived from the shared list so this set cannot drift from the API's enum. */
+const SESSION_KINDS = new Set<MobileSessionKind>(MOBILE_SESSION_KINDS);
 const RACE_DISTANCES = new Set<MobileRaceDistance>(["five_k", "ten_k", "half_marathon"]);
 /**
  * Kinds whose structure is *sized* by a target distance.
@@ -60,6 +55,16 @@ interface StoredGoals {
   weekPlanAudit: MobilePlanAudit | null;
   updatedAt: string;
 }
+
+/**
+ * The per-call ceiling `planHistory`/`planPushes` have always applied to their
+ * `LIMIT`. The caches fill to the same number, which is what makes answering a
+ * bounded read from memory identical to running the query: `MAX_READ_ROWS` is
+ * the largest a caller can ask for, so a cache that holds that many rows always
+ * covers the request.
+ */
+const MAX_READ_ROWS = 200;
+const cappedReadLimit = (limit: number): number => Math.min(MAX_READ_ROWS, Math.max(1, Math.round(limit)));
 
 const clampGoal = (value: number): number => Math.min(500, Math.max(1, value));
 const clampFraction = (value: number): number => Math.min(0.95, Math.max(0.4, value));
@@ -96,11 +101,74 @@ export interface PlanMergeOptions {
   prescription?: CoachZonePrescription | null;
 }
 
-/** Weekly goals persisted at `var/mobile-goals.json`. */
+/** One stored plan revision, as it was written. */
+export interface PlanHistoryRevision {
+  revision: number;
+  changedAt: string;
+  weekPlan: MobilePlannedDay[];
+  lockedSession: MobileLockedSession | null;
+}
+
+/** A plan day the phone handed to the Watch, with the moment it did so. */
+export interface PlanPushRecord {
+  localDate: string;
+  revision: number;
+  kind: MobileSessionKind;
+  structure: MobileSessionStructure | null;
+  pushedAt: string;
+}
+
+/**
+ * Parsed rows of one control-database table, stamped with the database version
+ * they were read at. See `MobileGoalsStore` for what the stamp guards against.
+ */
+interface ReadCache<T> {
+  /** `PRAGMA data_version` as it stood when `rows` was read. */
+  dataVersion: number;
+  rows: T[];
+}
+
+/**
+ * Weekly goals, plan history and push receipts, persisted in the control
+ * database (`var/rai-control.sqlite`; `var/mobile-goals.json` remains only as the
+ * one-time migration source).
+ *
+ * ### The parsed read cache
+ *
+ * `planSegmentCandidates()` reads the history and push tables on **every**
+ * `GET /v1/workouts/:id/series` — that is how the detail page finds the plan a
+ * run executed. Measured on a realistically sized control database (20 goal
+ * revisions × 7 planned days, 50 receipts), the re-read plus re-parse costs
+ * **2.10 ms** of synchronous work per request against **0.020 ms** cached, on
+ * the event loop — so the parsed rows are kept between requests.
+ *
+ * Only these two append-only tables are cached. `readControlGoals()` deliberately
+ * is not: it is a single row, and `write()` is a read-modify-write on it, so
+ * answering it from memory could let a stale revision slip past the
+ * optimistic-concurrency check `MobileGoalsRevisionConflictError` exists to enforce.
+ *
+ * Nothing here expires on a timer, and two mechanisms are needed because neither
+ * covers the other — both verified against SQLite rather than assumed:
+ *
+ *   1. **this store's own commits** call {@link invalidateReadCaches}.
+ *      `PRAGMA data_version` does *not* move for them (measured: unchanged across
+ *      a commit made on the same connection), so the probe below cannot see them;
+ *   2. **any other connection's commits** are caught by {@link dataVersion}. That
+ *      is the documented and measured behaviour (2 → 3 → 4 across two foreign
+ *      commits), and it is what keeps the cache from silently outliving a writer
+ *      that is not this process — a CLI, or a second connection in a test.
+ *
+ * The probe is a pragma against the SQLite header, costing 0.020 ms — a hundredth
+ * of the read it guards, so the fast path stays fast. The arrays a reader gets
+ * back are copies, but their elements are shared with the cache: treat both as
+ * read-only.
+ */
 export class MobileGoalsStore {
   private readonly filePath: string;
   private readonly controlDatabase: DatabaseSync | null;
   private cached: StoredGoals | null = null;
+  private planHistoryCache: ReadCache<PlanHistoryRevision> | null = null;
+  private planPushCache: ReadCache<PlanPushRecord> | null = null;
 
   constructor(runtimeRoot: string, controlDatabasePath?: string) {
     this.filePath = join(runtimeRoot, "var", GOALS_FILE);
@@ -117,7 +185,7 @@ export class MobileGoalsStore {
 
   write(input: UpdateMobileGoalsInput, options?: PlanMergeOptions): MobileGoalsResponse {
     if (!Number.isFinite(input.weeklyDistanceKm)) {
-      throw new RangeError("weeklyDistanceKm must be a finite number");
+      throw new MobileGoalsInputError("weeklyDistanceKm must be a finite number");
     }
     const current = this.readStored();
     if (input.expectedRevision != null && input.expectedRevision !== current.revision) {
@@ -184,6 +252,163 @@ export class MobileGoalsStore {
     );
   }
 
+  /**
+   * The stored plan revisions, newest first.
+   *
+   * Segment reconstruction needs the plan *as it was*, not as it is: the runner
+   * syncs tomorrow's session, runs it that same evening, and by the time the run
+   * is imported the stored week may already have been regenerated for the next
+   * Monday. Only the history table keeps the revision the watch actually got.
+   */
+  planHistory(limit = 20): PlanHistoryRevision[] {
+    if (!this.controlDatabase) return [];
+    // Stamped with the version read *before* the query, so a commit that lands
+    // in between can only make the stamp look older than the rows — which costs
+    // one extra refill, never a stale hit.
+    const version = this.dataVersion();
+    if (!this.planHistoryCache || this.planHistoryCache.dataVersion !== version) {
+      this.planHistoryCache = { dataVersion: version, rows: this.readPlanHistory(MAX_READ_ROWS) };
+    }
+    return this.planHistoryCache.rows.slice(0, cappedReadLimit(limit));
+  }
+
+  /** Fills the history cache. The query is capped, so the cache always covers a bounded read. */
+  private readPlanHistory(limit: number): PlanHistoryRevision[] {
+    if (!this.controlDatabase) return [];
+    const rows = this.controlDatabase
+      .prepare("SELECT revision, payload_json, changed_at FROM mobile_goals_history ORDER BY revision DESC LIMIT ?")
+      .all(limit) as Array<{
+      revision: number;
+      payload_json: string;
+      changed_at: string;
+    }>;
+    return rows.flatMap((row) => {
+      let parsed: Partial<StoredGoals>;
+      try {
+        parsed = JSON.parse(row.payload_json) as Partial<StoredGoals>;
+      } catch {
+        return [];
+      }
+      return [
+        {
+          revision: Number(row.revision),
+          changedAt: String(row.changed_at),
+          weekPlan: normalizeWeekPlan(Array.isArray(parsed.weekPlan) ? parsed.weekPlan : [], []),
+          lockedSession: normalizeLockedSession(parsed.lockedSession ?? null)
+        }
+      ];
+    });
+  }
+
+  /**
+   * Registers that the phone handed a plan day to the Watch.
+   *
+   * This is a receipt, not a projection: the structure is stored exactly as the
+   * phone reported it. Later edits to the week must not rewrite what was
+   * executed, and the run's own date cannot identify the plan (the plan is
+   * pushed for *tomorrow*), so the receipt is the only reliable link.
+   */
+  recordPlanPush(input: PlanPushRecord): void {
+    if (!this.controlDatabase) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.localDate)) {
+      throw new MobileGoalsInputError("localDate must be YYYY-MM-DD");
+    }
+    if (!SESSION_KINDS.has(input.kind)) throw new MobileGoalsInputError("kind is not a session kind");
+    this.controlDatabase
+      .prepare(`
+        INSERT INTO mobile_plan_pushes (local_date, revision, kind, payload_json, pushed_at)
+        VALUES (?, ?, ?, ?, ?)
+      `)
+      .run(
+        input.localDate,
+        Number.isFinite(input.revision) ? Math.max(0, Math.round(input.revision)) : 0,
+        input.kind,
+        JSON.stringify({ structure: input.structure }),
+        input.pushedAt
+      );
+    this.invalidateReadCaches();
+  }
+
+  /** Push receipts at or after `sinceIso`, newest first. */
+  planPushes(sinceIso: string, limit = 50): PlanPushRecord[] {
+    if (!this.controlDatabase) return [];
+    const version = this.dataVersion();
+    if (!this.planPushCache || this.planPushCache.dataVersion !== version) {
+      this.planPushCache = { dataVersion: version, rows: this.readPlanPushes() };
+    }
+    // Filtered in memory rather than in SQL. The query's `LIMIT` applies *after*
+    // its `WHERE`, so a cache bounded to `limit` rows reproduces it only while
+    // `pushed_at` never goes backwards across inserts — the column is
+    // caller-supplied, so that is not a safe thing to build on. Keeping every
+    // receipt removes the case entirely, and the table gains about one row a day
+    // (one per plan sync), so "every receipt" stays small.
+    return this.planPushCache.rows
+      .filter((push) => push.pushedAt >= sinceIso)
+      .slice(0, cappedReadLimit(limit));
+  }
+
+  /** Fills the push cache. Every receipt is kept — see `planPushes` for why no limit. */
+  private readPlanPushes(): PlanPushRecord[] {
+    if (!this.controlDatabase) return [];
+    const rows = this.controlDatabase
+      .prepare(`
+        SELECT local_date, revision, kind, payload_json, pushed_at
+        FROM mobile_plan_pushes
+        ORDER BY pushed_at DESC
+      `)
+      .all() as Array<{
+      local_date: string;
+      revision: number;
+      kind: string;
+      payload_json: string;
+      pushed_at: string;
+    }>;
+    return rows.flatMap((row) => {
+      if (!SESSION_KINDS.has(row.kind as MobileSessionKind)) return [];
+      let parsed: { structure?: unknown };
+      try {
+        parsed = JSON.parse(row.payload_json) as { structure?: unknown };
+      } catch {
+        return [];
+      }
+      return [
+        {
+          localDate: row.local_date,
+          revision: Number(row.revision),
+          kind: row.kind as MobileSessionKind,
+          structure: normalizeSessionStructure(parsed.structure),
+          pushedAt: row.pushed_at
+        }
+      ];
+    });
+  }
+
+  /**
+   * The version of the control database as *this* connection last saw it.
+   *
+   * SQLite bumps it for every commit made by another connection and leaves it
+   * alone for this connection's own — which is exactly the split the cache needs:
+   * the probe covers foreign writers, {@link invalidateReadCaches} covers this
+   * store's writes, and neither alone would be enough.
+   */
+  private dataVersion(): number {
+    const row = this.controlDatabase?.prepare("PRAGMA data_version").get() as { data_version?: number } | undefined;
+    return Number(row?.data_version ?? 0);
+  }
+
+  /**
+   * Drops the parsed read caches; every write path that this store performs on
+   * the control database calls this, since the version probe cannot see it.
+   *
+   * Coarse on purpose: a cache miss costs the parse, and the one caller of these
+   * tables reads both of them together, so tracking which table a given write
+   * touched would buy nothing but a chance to forget one.
+   */
+  private invalidateReadCaches(): void {
+    this.planHistoryCache = null;
+    this.planPushCache = null;
+  }
+
   private loadFile(): StoredGoals {
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<StoredGoals>;
@@ -231,6 +456,16 @@ export class MobileGoalsStore {
         payload_json TEXT NOT NULL,
         changed_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS mobile_plan_pushes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        local_date TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        pushed_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_mobile_plan_pushes_pushed_at
+        ON mobile_plan_pushes(pushed_at);
     `);
     const existing = database.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get();
     if (!existing) {
@@ -284,6 +519,11 @@ export class MobileGoalsStore {
       if (existsSync(this.filePath)) {
         writeFileSync(`${this.filePath}.migration-complete`, `${new Date().toISOString()}\n`, "utf8");
       }
+      // The seed is a write too, so it follows the same rule as every other one.
+      // It cannot actually have filled a cache yet (this runs during
+      // construction), but keeping the rule exceptionless is what stops a later
+      // re-open path from leaking a revision that predates the seed.
+      this.invalidateReadCaches();
     }
     return database;
   }
@@ -331,6 +571,10 @@ export class MobileGoalsStore {
       }
       this.controlDatabase.prepare("INSERT INTO mobile_goals_history (revision, payload_json, changed_at) VALUES (?, ?, ?)").run(stored.revision, payload, stored.updatedAt);
       this.controlDatabase.exec("COMMIT");
+      // After the commit, never before: a rolled-back write must leave the cache
+      // exactly as it was, so the only reads the cache can be stale for are the
+      // committed ones it is invalidated for.
+      this.invalidateReadCaches();
     } catch (error) {
       try { this.controlDatabase.exec("ROLLBACK"); } catch { /* preserve the original error */ }
       throw error;
@@ -343,6 +587,22 @@ export class MobileGoalsRevisionConflictError extends Error {
   constructor(readonly currentRevision: number) {
     super("训练目标已在其他页面更新，请重新加载后再保存");
   }
+}
+
+/**
+ * The store was handed goals or a receipt it cannot store.
+ *
+ * This exists to carry a status. A bare `RangeError` is read by `apiErrorPayload`
+ * as "no status ⇒ 500", which answers the client with the generic
+ * `internal_error` message and nothing else — so a request would fail with no
+ * way to tell a malformed body from a broken server. The routes' JSON schemas
+ * already reject both of these shapes, which is exactly why the guard is a
+ * backstop: a backstop that reports itself as an internal fault is worse than
+ * useless the day it fires.
+ */
+export class MobileGoalsInputError extends Error {
+  readonly statusCode = 400;
+  readonly code = "invalid_mobile_goals_input";
 }
 
 function normalizeRaceTarget(value: MobileRaceTarget | null | undefined): MobileRaceTarget | null {

@@ -23,7 +23,7 @@ Web 同时包含两套 UI：
 |---|---|---|
 | 概览 | `/` | TA、7 日变化、最新 CA/TA 差、GV、校准状态、解释、四周趋势、最近训练 |
 | 训练 | `/workouts` | 模型参与、资格、环境、时间、来源、置信度、路线和类型筛选；URL 保存筛选状态 |
-| 训练详情 | `/workouts/:id` | 表现、能量、爬升、跑姿、公里路线、八类同步时间序列、五维评分、TA 更新、解释、质量与覆盖编辑 |
+| 训练详情 | `/workouts/:id` | 课表分段（实际执行的课表结构 / 手表 lap 事件，含匹配到的课表日与可解释比例）、表现、能量、爬升、跑姿、公里路线、八类同步时间序列、五维评分、TA 更新、解释、质量与覆盖编辑 |
 | 训练分区 | `/zones` | 分区设置（心率/配速）、当前分区与历史 |
 | 运动统计 | `/statistics` | 周/月/年与滚动周期统计、训练负荷与状态 |
 | 能力趋势 | `/trends` | 4 周、12 周、6 月、1 年、全部范围；TA、CA、Decay、模型点、五维趋势、跑量与负荷 |
@@ -70,7 +70,7 @@ PATCH  /v1/training-zones/profile                      分区设置（多 revisi
 # 训练与时间序列
 GET    /v1/workouts                  分页训练列表（筛选）
 GET    /v1/workouts/:id              训练详情
-GET    /v1/workouts/:id/series       训练内时间序列（确定性下采样）
+GET    /v1/workouts/:id/series       训练内时间序列（确定性下采样）+ `segments`/`segmentPlan`/`segmentNote`（课表分段）
 PATCH  /v1/workouts/:id/override     追加覆盖 revision 并重算
 
 # 趋势与恢复
@@ -115,12 +115,18 @@ PUT    /v1/mobile/goals              写入周目标（1–500km，独立控制�
 POST   /v1/mobile/lock               锁定/重新锁定今日课表
 GET    /v1/mobile/workout-plan       可执行周课表（今天来自闸门，其余来自持久化周计划；含分段结构）
 POST   /v1/mobile/workout-plan/generate  生成/重生成本周课表（大模型 → 校验钳制 → 回退启发式）
+POST   /v1/mobile/workout-plan/synced    登记"某天课表已推送到 Apple Watch"（回执；写独立控制库）
 ```
 
 `/v1/mobile/workout-plan` 只读，供手表侧 WorkoutKit 上表；`/generate` 是写操作，带 `expectedRevision`
 乐观锁（冲突返回 409）。`weekPlan` 的每一天带可选 `structure`（`warmup` / `blocks[].iterations` /
 `cooldown`，每步至多一个 `pace` 或 `heart_rate` 提醒）。**写 `PUT /v1/mobile/goals` 时若某天未带
 `structure`，服务端会沿用同日期同类型的既有结构**——目标编辑不会把已生成的处方降级。
+
+`/synced` 是**回执**：WorkoutKit 排期纯设备侧，服务端无从得知工作日历收到了哪份处方；而跑者的用法是
+「同步明天的课表 → 当天打开跑」，此时按跑步的本地日期匹配课表必然指向休息日。回执（`localDate` +
+`revision` + `structure`）是计划与实绩之间唯一的可靠链接，`GET /v1/workouts/:id/series` 用它把课表结构
+回放到实测配速上，得到 `segments`。回执只在实际同步成功（`scheduled > 0`）后写；写入失败不改变同步结果。
 
 查询、路径参数和写入 body 均在 Fastify 路由入口使用 JSON Schema 校验；非法分页、趋势范围、恢复趋势天数、训练类型、RPE、导入确认、删除确认结构和备份文件名会在进入业务层前返回 `400`。恢复趋势响应包含 `generatedAt`、`asOf`、`timezone`、`latestDataDate` 与按本地日排列的 `days`，缺失睡眠/HRV 保持 `null`。
 

@@ -4,6 +4,7 @@ import type {
   MobileSessionStructure,
   MobileWorkoutStep
 } from "@rai/api-contracts";
+import { MOBILE_SESSION_KINDS } from "@rai/contracts";
 
 import {
   buildSessionStructure,
@@ -33,14 +34,8 @@ import {
  * reported so a generation can be audited after the fact.
  */
 
-const SESSION_KINDS = new Set<MobileSessionKind>([
-  "rest",
-  "recovery",
-  "easy",
-  "long_run",
-  "tempo",
-  "interval"
-]);
+/** Derived from the shared list so a kind the API accepts cannot be rejected here. */
+const SESSION_KINDS = new Set<MobileSessionKind>(MOBILE_SESSION_KINDS);
 
 const QUALITY_KINDS = new Set<MobileSessionKind>(["tempo", "interval"]);
 const EASY_KINDS = new Set<MobileSessionKind>(["easy", "recovery"]);

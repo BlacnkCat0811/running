@@ -665,6 +665,27 @@ export const raceDistanceMeters = {
 } as const;
 
 export type RaceDistance = keyof typeof raceDistanceMeters;
+
+/**
+ * The session kinds a plan day may carry.
+ *
+ * This array is the single source of truth. The union type, the JSON Schema
+ * enum the API validates with, and the `Set` each server module checks all
+ * derive from it — they used to be four hand-written copies of the same six
+ * strings, and a kind added to one but not the others turned a request that had
+ * already passed schema validation into an unexplained 500.
+ */
+export const MOBILE_SESSION_KINDS = [
+  "rest",
+  "recovery",
+  "easy",
+  "long_run",
+  "tempo",
+  "interval"
+] as const;
+
+export type MobileSessionKind = (typeof MOBILE_SESSION_KINDS)[number];
+
 export type EstimateStatus = "available" | "insufficient_data";
 export type PredictionConfidenceLevel = "low" | "moderate" | "high";
 

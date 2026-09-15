@@ -55,6 +55,13 @@ import type {
 } from "@rai/api-contracts";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
+import {
+  matchPlanDay,
+  resolveSegmentation,
+  toWorkoutSegments,
+  type MatchedPlanDay,
+  type PlanCandidateDay
+} from "./workout-segments.js";
 
 const parseJson = <T>(value: unknown, fallback: T): T => {
   if (typeof value !== "string") return fallback;
@@ -88,6 +95,18 @@ const mobileWeekStart = (date: string): string => {
   const value = new Date(`${date}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
   return value.toISOString().slice(0, 10);
+};
+
+/**
+ * Why a run has no segments.
+ *
+ * Empty segments are a legitimate outcome — a treadmill run has no Watch lap
+ * events and may match no plan — but an unexplained blank panel reads as a bug.
+ */
+const missingSegmentsNote = (eventCount: number, plan: MatchedPlanDay | null): string => {
+  if (eventCount > 0) return "手表记录的 lap/segment 事件不足两段，无法形成分段";
+  if (plan !== null) return "匹配到的课表结构不足以形成分段（至少需要两个步骤）";
+  return "这次训练没有手表 lap/segment 事件，也没有可匹配的课表，只能按公里分段";
 };
 
 interface ZoneExposureRow {
@@ -869,16 +888,90 @@ export class RaiReadStore {
     };
   }
 
-  workoutSeries(id: string): WorkoutSeriesResponse | null {
+  /**
+   * Segments for one run: the Watch's own boundaries first, the stored plan
+   * second, an explicit explanation third.
+   *
+   * The kilometre split stays as a fallback, but it is no longer the only story
+   * the detail page can tell. Both producers measure against the same scaled
+   * speed track ({@link SqliteSeriesReadRepository.speedTrack}), so a
+   * plan-derived segment and an event-derived one are comparable numbers.
+   */
+  private segmentRun(
+    session: {
+      startedAt: string;
+      endedAt: string;
+      sourceName: string;
+      distanceKm: number | null;
+      canonicalWorkoutId: string;
+    },
+    candidates: PlanCandidateDay[]
+  ): {
+    segments: WorkoutSeriesResponse["segments"];
+    plan: WorkoutSeriesResponse["segmentPlan"];
+    note: string | null;
+  } {
+    const startedAtMs = Date.parse(session.startedAt);
+    const endedAtMs = Date.parse(session.endedAt);
+    if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs) || endedAtMs <= startedAtMs) {
+      return { segments: [], plan: null, note: "这次训练的时间区间无效，无法生成分段" };
+    }
+    const events = this.seriesRepository.workoutEventIntervals(session.canonicalWorkoutId);
+    const track = this.seriesRepository.speedTrack(
+      session.startedAt,
+      session.endedAt,
+      session.sourceName,
+      session.distanceKm
+    );
+    const plan = matchPlanDay({
+      candidates,
+      startedAtMs,
+      localDate: localDateInShanghai(new Date(startedAtMs)),
+      distanceKm: session.distanceKm
+    });
+    if (!track) {
+      return {
+        segments: [],
+        plan: null,
+        note: "缺少可用的速度序列（或与总里程偏差过大），无法重建分段，请按公里分段参考"
+      };
+    }
+    const segmentation = resolveSegmentation({
+      startedAtMs,
+      endedAtMs,
+      events,
+      plan,
+      track: { samples: track.samples, officialMeters: track.officialMeters }
+    });
+    const measured =
+      segmentation.boundaries.length < 2
+        ? []
+        : this.seriesRepository.measureSegments(
+            session.startedAt,
+            session.endedAt,
+            session.sourceName,
+            session.distanceKm,
+            segmentation.boundaries
+          );
+    const segments = toWorkoutSegments(measured, segmentation.descriptors, startedAtMs);
+    if (segments.length === 0) return { segments: [], plan: null, note: missingSegmentsNote(events.length, plan) };
+    return { segments, plan: segmentation.plan, note: segmentation.note };
+  }
+
+  workoutSeries(id: string, candidates: PlanCandidateDay[] = []): WorkoutSeriesResponse | null {
     const session = this.seriesRepository.sessionForSeries(id);
     if (!session) return null;
     const { startedAt, endedAt, sourceCategory, sourceName, distanceKm } = session;
+    const segmentation = this.segmentRun(session, candidates);
     return {
       trainingSessionId: id,
       startedAt,
       endedAt,
       sourceCategory,
       splits: this.seriesRepository.workoutSplits(startedAt, endedAt, sourceName, distanceKm),
+      segments: segmentation.segments,
+      segmentPlan: segmentation.plan,
+      segmentNote: segmentation.note,
       series: {
         heartRate: this.asMetricSeries(
           this.seriesRepository.metricSeries(

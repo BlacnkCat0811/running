@@ -7,6 +7,7 @@ export type {
   PredictionModelRun,
   PredictionModelRunStatus,
   RaceDistance,
+  MobileSessionKind,
   RaceTimePrediction,
   TrainingLoadSource,
   TrainingStatusCode,
@@ -30,6 +31,7 @@ export type {
 } from "@rai/contracts";
 
 import type {
+  MobileSessionKind,
   PredictionModelEvent,
   PredictionModelRun,
   PredictionModelRunStatus,
@@ -475,6 +477,10 @@ export interface WorkoutSeriesResponse {
   endedAt: string;
   sourceCategory: string;
   splits: WorkoutSplit[];
+  segments: WorkoutSegment[];
+  segmentPlan: WorkoutSegmentPlanMatch | null;
+  /** Why `segments` is empty, or what the match assumed — never silently blank. */
+  segmentNote: string | null;
   series: {
     heartRate: WorkoutMetricSeries;
     speed: WorkoutMetricSeries;
@@ -489,13 +495,6 @@ export interface WorkoutSeriesResponse {
 
 export type MobileVerdictTone = "green" | "yellow" | "red";
 export type MobileDayPhase = "need_sync" | "morning_open" | "locked" | "post_run" | "rest_done";
-export type MobileSessionKind =
-  | "rest"
-  | "recovery"
-  | "easy"
-  | "long_run"
-  | "tempo"
-  | "interval";
 export type MobileRaceDistance = "five_k" | "ten_k" | "half_marathon";
 export type MobileStimulusMatch = "aligned" | "too_hard" | "too_easy" | "unknown";
 
@@ -890,6 +889,50 @@ export interface WorkoutSplit {
   averagePaceSecondsPerKm: number;
   averageHeartRateBpm: number | null;
   averageCadenceSpm: number | null;
+}
+
+/**
+ * One executed segment of a run.
+ *
+ * Two producers feed this, in order of authority:
+ * 1. the Watch's own `HKWorkoutEvent` lap/segment boundaries — exactly what the
+ *    Fitness app renders as 间歇;
+ * 2. the stored weekly plan, replayed onto the measured speed track when the run
+ *    carries no event boundary.
+ *
+ * The trailing stretch no plan step covered is emitted as a single
+ * `purpose: "unplanned"` segment rather than being hidden.
+ */
+export type WorkoutSegmentPurpose = MobileStepPurpose | "unplanned";
+
+export interface WorkoutSegment {
+  index: number;
+  label: string;
+  purpose: WorkoutSegmentPurpose;
+  goalType: MobileStepGoal["type"] | null;
+  goalMeters: number | null;
+  goalSeconds: number | null;
+  alertKind: MobileStepAlert["kind"] | null;
+  alertLower: number | null;
+  alertUpper: number | null;
+  startOffsetSeconds: number;
+  durationSeconds: number;
+  distanceMeters: number;
+  averagePaceSecondsPerKm: number | null;
+  averageHeartRateBpm: number | null;
+  averageCadenceSpm: number | null;
+}
+
+/** Which stored plan day a run was matched to, and how confidently. */
+export interface WorkoutSegmentPlanMatch {
+  localDate: string;
+  kind: MobileSessionKind;
+  revision: number;
+  matchedBy: "push_record" | "plan_history";
+  plannedDistanceKm: number | null;
+  /** Share of the run's duration explained by plan steps (0–1). */
+  explainedFraction: number;
+  reason: string;
 }
 
 export interface WorkoutMetricSeries {
