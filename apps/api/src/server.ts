@@ -567,8 +567,46 @@ const zoneRefreshTimer = setInterval(() => {
   });
 }, 5 * 60_000);
 zoneRefreshTimer.unref();
+
+/**
+ * Reclaims abandoned database copies: `.replaced.` rollback points and
+ * `.importing.` staging files left by a process that was killed before its
+ * `finally` ran.
+ *
+ * `ensureBackupCapacity` already reclaims them, but only when a backup or a web
+ * import happens — so a machine that stops doing either keeps every leftover
+ * forever, each one a full copy of the database, sitting next to the live one
+ * where no retention policy looks. The reclaimer keeps anything younger than
+ * 24 h, so running it on a timer cannot race an in-flight import.
+ */
+async function sweepAbandonedDatabases(): Promise<void> {
+  try {
+    const reclaimed = await maintenance.reclaimDisplacedDatabases();
+    if (reclaimed.removed > 0) {
+      app.log.info(reclaimed, "Reclaimed abandoned database copies");
+    }
+  } catch (error) {
+    app.log.warn(error, "Abandoned database reclamation failed");
+  }
+}
+
+const abandonedDatabaseSweepTimer = setInterval(() => {
+  if (closing) return;
+  void sweepAbandonedDatabases();
+}, 24 * 60 * 60_000);
+abandonedDatabaseSweepTimer.unref();
+// A restart is exactly when a killed process's leftovers are most likely to be
+// sitting there, and making them wait a full day would be worse than the bug.
+const abandonedDatabaseSweepKickoff = setTimeout(() => {
+  if (closing) return;
+  void sweepAbandonedDatabases();
+}, 60_000);
+abandonedDatabaseSweepKickoff.unref();
+
 app.addHook("onClose", async () => {
   clearInterval(zoneRefreshTimer);
+  clearInterval(abandonedDatabaseSweepTimer);
+  clearTimeout(abandonedDatabaseSweepKickoff);
 });
 
 /**

@@ -81,14 +81,26 @@ const DEFAULT_BACKUP_POLICY = {
 } as const;
 
 /**
- * `publishDatabaseFile` renames an existing database aside as
- * `<target>.replaced.<uuid>` so that a failed publication can roll back. Once the
- * publisher has committed, nothing will ever call rollback again, so the file is
- * unreachable and should be reclaimed by its owner. Anything matching this
- * pattern and older than the reclamation window is therefore a leftover - the
- * owner was killed before its cleanup ran, or a caller never reclaimed it.
+ * Files an interrupted process leaves behind in the database directory.
+ *
+ * Two shapes matter, and both are equally permanent:
+ *
+ * * `<target>.replaced.<uuid>` — `publishDatabaseFile` renames the previous
+ *   database aside so that a failed publication can roll back. Once the
+ *   publisher has committed, nothing will ever call rollback again, so the file
+ *   is unreachable and should be reclaimed by its owner.
+ * * the staging names — `<target>.importing.<uuid>`
+ *   (`health-export-parser/src/cli.ts`) and `rai.importing.<jobId>.sqlite`
+ *   (`worker.ts`). Each is a whole-database copy removed by a `finally` block,
+ *   and a `finally` block does not run after SIGKILL, OOM or a power cut. Left
+ *   out of this pattern they are permanent, and because they sit next to the
+ *   database rather than in `var/backups/` no retention policy sees them.
+ *
+ * The age window is what keeps this safe: an import that is still running is
+ * minutes old, never a day.
  */
-const DISPLACED_DATABASE_PATTERN = /\.replaced\.[0-9a-fA-F-]{36}$/;
+const ABANDONED_DATABASE_FILE_PATTERN =
+  /\.(?:replaced\.[0-9a-fA-F-]{36}|importing\.[^/\\]+)$/;
 
 /** Long enough for an operator to recover by hand, short enough to bound growth. */
 const DEFAULT_DISPLACED_DATABASE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -514,11 +526,25 @@ export class DatabaseMaintenance {
       if (!main) throw new Error("Local RAI database does not exist");
       await rename(main.staging, main.published);
     } catch (error) {
+      const cleanupErrors: unknown[] = [];
       for (const item of staged) {
-        await this.removeFileWithRetry(item.staging).catch(() => {});
-        await this.removeFileWithRetry(item.published).catch(() => {});
+        for (const path of [item.staging, item.published]) {
+          try {
+            await this.removeFileWithRetry(path);
+          } catch (cleanupError) {
+            // A whole-database copy left behind in `var/quarantine/` is invisible
+            // to every retention policy, so a failed cleanup must not vanish
+            // along with the error that caused it.
+            cleanupErrors.push(cleanupError);
+          }
+        }
       }
-      throw error;
+      throw cleanupErrors.length > 0
+        ? new AggregateError(
+            [error, ...cleanupErrors],
+            "Quarantining the corrupt database failed and cleanup also failed"
+          )
+        : error;
     }
     const info = await stat(destination);
     return { name, sizeBytes: info.size, createdAt: info.mtime.toISOString(), restorable: false };
@@ -595,17 +621,23 @@ export class DatabaseMaintenance {
   }
 
   /**
-   * Reclaims rename-aside rollback points (`<database>.replaced.<uuid>`) that can
-   * no longer serve any purpose.
+   * Reclaims abandoned database copies: rename-aside rollback points
+   * (`<database>.replaced.<uuid>`) and staging files
+   * (`<database>.importing.<uuid>`) that can no longer serve any purpose.
    *
    * Nothing ever collected these: `publishDatabaseFile` moves the previous
    * database aside so a failed publication can roll back, and once the publisher
    * commits, the file is unreachable - but both the CLI and the import worker only
-   * removed their staging files. Every web import therefore left one full database
-   * copy behind (2026-09-15: 89 files / 36 GB, taking a 50 GB disk to 98%).
+   * removed their staging files on the happy path. Every web import therefore left
+   * one full database copy behind (89 files / 36 GB, measured 2026-09-15).
    *
-   * Files younger than `maxAgeMs` are preserved so an in-flight publication can
-   * still roll back. Returns what it reclaimed so callers can log the effect.
+   * Files younger than `maxAgeMs` are preserved so an in-flight publication or
+   * import can still roll back. Returns what it reclaimed so callers can log the
+   * effect.
+   *
+   * Driven from two places: `ensureBackupCapacity` (a backup or a web import) and a
+   * daily timer in `server.ts`, because a machine that stops importing and stops
+   * backing up would otherwise keep every leftover forever.
    */
   async reclaimDisplacedDatabases(
     maxAgeMs: number = DEFAULT_DISPLACED_DATABASE_MAX_AGE_MS
@@ -613,7 +645,7 @@ export class DatabaseMaintenance {
     const directory = dirname(this.databasePath);
     if (!existsSync(directory)) return { removed: 0, reclaimedBytes: 0 };
     const cutoff = Date.now() - maxAgeMs;
-    const names = (await readdir(directory)).filter((name) => DISPLACED_DATABASE_PATTERN.test(name));
+    const names = (await readdir(directory)).filter((name) => ABANDONED_DATABASE_FILE_PATTERN.test(name));
     const errors: unknown[] = [];
     let removed = 0;
     let reclaimedBytes = 0;

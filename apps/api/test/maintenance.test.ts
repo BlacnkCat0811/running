@@ -1183,7 +1183,7 @@ test("keeps a genuinely locked rollback as a visible backup after commit", {
   }
 });
 
-test("reclaims displaced rollback points past the window while keeping fresh ones", async () => {
+test("reclaims leftover database copies past the window while keeping in-flight ones", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-maintenance-displaced-"));
   const variableDirectory = join(root, "var");
   const databasePath = join(variableDirectory, "rai.sqlite");
@@ -1196,21 +1196,41 @@ test("reclaims displaced rollback points past the window while keeping fresh one
   }
   const staleName = "rai.sqlite.replaced.11111111-1111-4111-8111-111111111111";
   const freshName = "rai.sqlite.replaced.22222222-2222-4222-8222-222222222222";
+  // The two staging names a killed import leaves behind: the CLI's, suffixed with a
+  // uuid, and the worker's, which starts with `rai.` and still ends in `.sqlite`.
+  // They share no suffix, so a pattern tightened to fit either one would silently
+  // stop reclaiming the other.
+  const staleCliStaging = "rai.sqlite.importing.55555555-5555-4555-8555-555555555555";
+  const staleWorkerStaging = "rai.importing.66666666-6666-4666-8666-666666666666.sqlite";
+  const freshStaging = "rai.sqlite.importing.77777777-7777-4777-8777-777777777777";
+  const staleBody = "stale rollback point";
+  const staleCliBody = "stale cli staging copy";
+  const staleWorkerBody = "stale worker staging copy";
   const stalePath = join(variableDirectory, staleName);
-  writeFileSync(stalePath, "stale rollback point");
+  const staleCliPath = join(variableDirectory, staleCliStaging);
+  const staleWorkerPath = join(variableDirectory, staleWorkerStaging);
+  writeFileSync(stalePath, staleBody);
+  writeFileSync(staleCliPath, staleCliBody);
+  writeFileSync(staleWorkerPath, staleWorkerBody);
   writeFileSync(join(variableDirectory, freshName), "fresh rollback point");
+  writeFileSync(join(variableDirectory, freshStaging), "in-flight staging copy");
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
   utimesSync(stalePath, twoDaysAgo, twoDaysAgo);
+  utimesSync(staleCliPath, twoDaysAgo, twoDaysAgo);
+  utimesSync(staleWorkerPath, twoDaysAgo, twoDaysAgo);
 
   try {
     const maintenance = new DatabaseMaintenance(databasePath, root);
     const result = await maintenance.reclaimDisplacedDatabases();
 
-    assert.equal(result.removed, 1);
-    assert.equal(result.reclaimedBytes, "stale rollback point".length);
+    assert.equal(result.removed, 3);
+    assert.equal(result.reclaimedBytes, staleBody.length + staleCliBody.length + staleWorkerBody.length);
     assert.equal(existsSync(stalePath), false);
-    // A publication that is still in flight must be able to roll back.
+    assert.equal(existsSync(staleCliPath), false);
+    assert.equal(existsSync(staleWorkerPath), false);
+    // A publication or an import that is still in flight must be able to roll back.
     assert.equal(existsSync(join(variableDirectory, freshName)), true);
+    assert.equal(existsSync(join(variableDirectory, freshStaging)), true);
     assert.equal(existsSync(databasePath), true);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1255,15 +1275,23 @@ test("leaves unrelated files, directories and malformed names alone when reclaim
   }
   // Shares the prefix but is not a rename-aside rollback point.
   const malformed = join(variableDirectory, "rai.sqlite.replaced.not-a-uuid");
+  // A staging name with nothing after `importing.` is not a staging file either.
+  const truncatedStaging = join(variableDirectory, "rai.sqlite.importing");
   // Same shape as a rollback point but a directory: reclamation must not recurse into it.
   const displacedDirectory = join(variableDirectory, "rai.sqlite.replaced.44444444-4444-4444-8444-444444444444");
+  // Same, for the staging shape.
+  const stagingDirectory = join(variableDirectory, "rai.sqlite.importing.88888888-8888-4888-8888-888888888888");
   const unrelated = join(variableDirectory, "data-audit.something.md");
   writeFileSync(malformed, "malformed");
+  writeFileSync(truncatedStaging, "malformed staging");
   mkdirSync(displacedDirectory);
+  mkdirSync(stagingDirectory);
   writeFileSync(unrelated, "unrelated");
   const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
   utimesSync(malformed, twoDaysAgo, twoDaysAgo);
+  utimesSync(truncatedStaging, twoDaysAgo, twoDaysAgo);
   utimesSync(displacedDirectory, twoDaysAgo, twoDaysAgo);
+  utimesSync(stagingDirectory, twoDaysAgo, twoDaysAgo);
 
   try {
     const maintenance = new DatabaseMaintenance(databasePath, root);
@@ -1271,7 +1299,9 @@ test("leaves unrelated files, directories and malformed names alone when reclaim
 
     assert.equal(result.removed, 0);
     assert.equal(existsSync(malformed), true);
+    assert.equal(existsSync(truncatedStaging), true);
     assert.equal(existsSync(displacedDirectory), true);
+    assert.equal(existsSync(stagingDirectory), true);
     assert.equal(existsSync(unrelated), true);
     assert.equal(existsSync(databasePath), true);
   } finally {

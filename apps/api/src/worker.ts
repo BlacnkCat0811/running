@@ -1748,7 +1748,19 @@ export class ImportWorker {
         : new AggregateError(errors, "Import activation failed and required recovery actions also failed");
     } finally {
       if (committed && originalMoved) {
-        await this.removeDatabaseFileWithRetry(rollbackPath).catch(() => {});
+        // The rollback point is a full copy of the database and it lives in
+        // `var/backups/`, so leaving it behind wastes a whole database's worth of
+        // space and counts against `enforceBackupPolicy`, squeezing out real
+        // backups. A locked file (EBUSY/EPERM) is not worth failing a committed
+        // import over, but it must not be silent either.
+        try {
+          await this.removeDatabaseFileWithRetry(rollbackPath);
+        } catch (cleanupError) {
+          const message = cleanupError instanceof Error
+            ? cleanupError.stack ?? cleanupError.message
+            : String(cleanupError);
+          process.stderr.write(`Failed to remove the import rollback point after commit: ${message}\n`);
+        }
       }
     }
   }
