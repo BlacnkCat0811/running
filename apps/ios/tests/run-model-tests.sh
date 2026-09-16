@@ -31,9 +31,13 @@ xcrun swiftc "${swiftc_flags[@]}" "$tmp/CoordinateConversion.swift" \
   apps/ios/tests/CoordinateConversionRegression.swift -o "$tmp/coordinate-tests"
 "$tmp/coordinate-tests"
 # 课表映射同样是纯函数：WorkoutKit 只出现在 WorkoutKitBridge.swift，编译它需要
-# iOS SDK，所以本脚本只编译并运行 APIModels + WorkoutPlanMapper + 回归用例。
-# 含 WorkoutKit 的源码改由 `bash apps/ios/tests/typecheck-ios.sh` 用
+# iOS SDK，所以本脚本只编译并运行 APIModels + WorkoutPlanMapper + PlanReceiptMatcher
+# + 回归用例。含 WorkoutKit 的源码改由 `bash apps/ios/tests/typecheck-ios.sh` 用
 # iPhoneSimulator SDK 做类型检查。
+# `PlanReceiptMatcher.swift` 必须留在编译列表里：它决定「哪几天真的上了表」，是纯
+# Foundation，也是唯一能钉住这条规则的通道 —— 规则住在 `WorkoutKitBridge` 里时只能
+# 配合 iOS SDK 编译，于是错了也没有任何通道能发现。
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/WorkoutPlanMapper.swift \
+  apps/ios/RAI/PlanReceiptMatcher.swift \
   apps/ios/tests/WorkoutPlanMapperRegression.swift -o "$tmp/workout-plan-tests"
 "$tmp/workout-plan-tests"

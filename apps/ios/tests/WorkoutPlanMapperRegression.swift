@@ -346,7 +346,7 @@ import Foundation
         // and still does not survive mapping — so a week could read "3 项可上表"
         // while the bridge handed over two.
         check(
-            WorkoutPlanMapper.schedulableCount(in: plan) == 2,
+            WorkoutPlanMapper.schedulableCount(in: plan, now: dayBefore, completedLocalDates: []) == 2,
             "the offered count equals the days the bridge can hand over"
         )
         let allUnschedulable = MobileWorkoutPlanResponse(
@@ -354,7 +354,7 @@ import Foundation
             planRevision: plan.planRevision, audit: plan.audit, days: [plan.days[2], flagOff]
         )
         check(
-            WorkoutPlanMapper.schedulableCount(in: allUnschedulable) == 0,
+            WorkoutPlanMapper.schedulableCount(in: allUnschedulable, now: dayBefore, completedLocalDates: []) == 0,
             "a week of rest days and broken prescriptions offers nothing"
         )
         // `notExecutable` is the case the two predicates disagree on: the server
@@ -369,8 +369,177 @@ import Foundation
             "the fixture really does contain two server-executable days"
         )
         check(
-            WorkoutPlanMapper.schedulableCount(in: flagOnButBroken) == 1,
+            WorkoutPlanMapper.schedulableCount(in: flagOnButBroken, now: dayBefore, completedLocalDates: []) == 1,
             "an executable day whose prescription was not built is not counted as offerable"
+        )
+
+        // MARK: What is left of the week
+
+        func planned(localDate: String) -> PlannedWorkout {
+            PlannedWorkout(
+                localDate: localDate,
+                displayName: "RAI · 轻松跑 8.0km",
+                hour: 7,
+                minute: 0,
+                warmup: nil,
+                blocks: [
+                    PlannedWorkout.Block(
+                        iterations: 1,
+                        steps: [PlannedWorkout.Step(purpose: "work", goal: .distance(meters: 8_000), alert: nil)]
+                    )
+                ],
+                cooldown: nil
+            )
+        }
+
+        // A day that is already over is not offered to the scheduler. It cannot be
+        // trained, and — because a past slot is pushed onto `now` — it would reach the
+        // watch wearing today's date, which is the date a receipt is matched on. The
+        // panel's own sentence ("已完成的日期不会重复下发") has always promised this.
+        let partWayThroughTheWeek = calendar.date(from: DateComponents(year: 2026, month: 9, day: 12, hour: 9, minute: 0))!
+        let weekOver = calendar.date(from: DateComponents(year: 2026, month: 9, day: 20, hour: 9, minute: 0))!
+        let plannedWeek = ["2026-09-11", "2026-09-12", "2026-09-13"].map { planned(localDate: $0) }
+        check(
+            WorkoutPlanMapper.upcoming(plannedWeek, now: dayBefore, timeZone: shanghai).map(\.localDate)
+                == ["2026-09-11", "2026-09-12", "2026-09-13"],
+            "a week that has not started yet is offered in full"
+        )
+        check(
+            WorkoutPlanMapper.upcoming(plannedWeek, now: partWayThroughTheWeek, timeZone: shanghai).map(\.localDate)
+                == ["2026-09-12", "2026-09-13"],
+            "a day that is already over is dropped and the day itself is kept"
+        )
+        check(
+            WorkoutPlanMapper.upcoming(plannedWeek, now: weekOver, timeZone: shanghai).isEmpty,
+            "a week whose last day has gone offers nothing"
+        )
+        // A date this cannot read is kept, not classified: `scheduleComponents` is the
+        // one place that refuses it, and it already reports that as a counted skip.
+        check(
+            WorkoutPlanMapper.upcoming([planned(localDate: "not-a-date")], now: partWayThroughTheWeek, timeZone: shanghai).count == 1,
+            "a date that cannot be read is left for the scheduler to refuse"
+        )
+        check(
+            WorkoutPlanMapper.schedulableCount(in: plan, now: partWayThroughTheWeek, completedLocalDates: []) == 1,
+            "the panel's count drops the days of the week that are already over"
+        )
+        check(
+            WorkoutPlanMapper.schedulableCount(in: plan, now: weekOver, completedLocalDates: []) == 0,
+            "a week that is entirely over offers nothing, so the sync action is offered nothing either"
+        )
+        // The plan's own timezone decides which day "today" is: 23:30 UTC on the 11th
+        // is already 07:30 on the 12th in Shanghai, so the 11th is over by then.
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let lateUtcInShanghai = utc.date(from: DateComponents(year: 2026, month: 9, day: 11, hour: 23, minute: 30))!
+        check(
+            WorkoutPlanMapper.schedulableCount(in: plan, now: lateUtcInShanghai, completedLocalDates: []) == 1,
+            "today is read in the plan's timezone, not the device's"
+        )
+
+        // MARK: Days that are no longer owed
+
+        // "Not owed" has two causes and neither implies the other: a day can be over
+        // without having been trained, and today can already have been trained. The
+        // panel's sentence ("已完成的日期不会重复下发") has always stated the second.
+        check(
+            WorkoutPlanMapper.owed(
+                plannedWeek, now: partWayThroughTheWeek, timeZone: shanghai, completedLocalDates: ["2026-09-12"]
+            ).map(\.localDate) == ["2026-09-13"],
+            "today's own session is not owed once it has been trained"
+        )
+        check(
+            WorkoutPlanMapper.owed(
+                plannedWeek, now: dayBefore, timeZone: shanghai,
+                completedLocalDates: ["2026-09-11", "2026-09-12"]
+            ).map(\.localDate) == ["2026-09-13"],
+            "a trained day drops out while it is still ahead too"
+        )
+        check(
+            WorkoutPlanMapper.owed(
+                plannedWeek, now: partWayThroughTheWeek, timeZone: shanghai,
+                completedLocalDates: ["2026-09-12", "2026-09-13"]
+            ).isEmpty,
+            "nothing is owed when the rest of the week is over and today is done"
+        )
+        check(
+            WorkoutPlanMapper.schedulableCount(in: plan, now: dayBefore, completedLocalDates: ["2026-09-11"]) == 1,
+            "a trained day lowers the count the panel prints"
+        )
+        check(
+            WorkoutPlanMapper.schedulableCount(
+                in: plan, now: dayBefore, completedLocalDates: ["2026-09-11", "2026-09-12"]
+            ) == 0,
+            "a week that is trained drops the count to zero, so the panel offers the action disabled"
+        )
+
+        // MARK: Why the count is zero
+        //
+        // A bare count cannot be explained, and each surface used to invent its own
+        // reason. The panel told the runner to regenerate the week whenever the count
+        // was zero — including when the week was simply over or already run, which a
+        // new plan would not change — while the sync itself said "本周没有还需要上表
+        // 的训练". Both now read one classification; only the wording differs.
+
+        let wholeWeek = plannedWeek
+        // Everything run: the week is finished, not missing. Regenerating it would not
+        // put anything back on the watch, so the panel must not suggest that.
+        let allDone = WorkoutPlanMapper.weekOffer(
+            in: plan, now: dayBefore, completedLocalDates: Set(plan.days.map(\.localDate))
+        )
+        check(allDone.offered.isEmpty && allDone.isExhausted, "a fully trained week reads as finished")
+        check(
+            allDone.alreadyTrained == 2 && allDone.expired == 0,
+            "the finished week names the trained days and no expired ones"
+        )
+        // A week whose days have all passed: also nothing left to do, and also not a
+        // reason to regenerate.
+        let allPassed = WorkoutPlanMapper.weekOffer(in: plan, now: weekOver, completedLocalDates: [])
+        check(
+            allPassed.offered.isEmpty && allPassed.isExhausted,
+            "a week that is entirely over also reads as finished rather than as a bad plan"
+        )
+        // The case the old copy was written for: the server offered days and the device
+        // could not use any of them. That one *is* a shortfall, and regenerating is the
+        // right advice.
+        let nothingUsable = WorkoutPlanMapper.weekOffer(
+            in: allUnschedulable, now: dayBefore, completedLocalDates: []
+        )
+        check(
+            nothingUsable.offered.isEmpty && !nothingUsable.isExhausted && nothingUsable.skipped == 2,
+            "a week whose prescriptions all failed to build is not reported as finished"
+        )
+        check(
+            nothingUsable.emptyOfferMessage.contains("生成"),
+            "the unusable week is the one that tells the runner to regenerate"
+        )
+        // The panel's fallback for "there is no plan to classify" must be that same
+        // sentence, not a second copy of it that can drift.
+        check(
+            nothingUsable.emptyOfferMessage == WorkoutPlanMapper.WeekOffer.unusableWeekMessage,
+            "the unusable week's line is the one the panel falls back to"
+        )
+        check(
+            allDone.emptyOfferMessage.contains("已完成"),
+            "the finished week says the work is done instead of asking for a new plan"
+        )
+        check(
+            allPassed.emptyOfferMessage.contains("已过去"),
+            "the week that is over says so instead of asking for a new plan"
+        )
+        // The classification has to agree with the count the panel prints, since both
+        // now come from the same call.
+        check(
+            WorkoutPlanMapper.weekOffer(in: plan, now: partWayThroughTheWeek, completedLocalDates: [])
+                .offered.count == WorkoutPlanMapper.schedulableCount(
+                    in: plan, now: partWayThroughTheWeek, completedLocalDates: []
+                ),
+            "the classified offer and the printed count are the same set"
+        )
+        check(
+            WorkoutPlanMapper.weekOffer(in: plan, now: partWayThroughTheWeek, completedLocalDates: [])
+                .expired == 1,
+            "the expired count is what makes the printed number read below the week"
         )
 
         check(
@@ -477,6 +646,190 @@ import Foundation
         check(
             WorkoutPlanMapper.weekStripStatus(completed: false, isRest: false, isToday: false) == "计划中",
             "a future session reads as planned"
+        )
+
+        // MARK: The receipt's attribution
+
+        // A listed entry names its own day, so two days that prescribe the same
+        // workout must not share a receipt: the day whose `schedule` silently did
+        // nothing must not collect the one that landed.
+        let berlin = TimeZone(identifier: "Europe/Berlin")!
+        func at(_ year: Int, _ month: Int, _ day: Int, hour: Int = 8) -> DateComponents {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            components.hour = hour
+            return components
+        }
+        let monday = PlanReceiptMatcher.PendingDay(localDate: "2026-09-14", at: at(2026, 9, 14))
+        let tuesday = PlanReceiptMatcher.PendingDay(localDate: "2026-09-15", at: at(2026, 9, 15))
+
+        // Only Tuesday reached the watch, even though both days were scheduled
+        // from the same prescription. The receipt must name Tuesday and only
+        // Tuesday — the old content-based matcher named Monday instead.
+        check(
+            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [at(2026, 9, 15)], timeZone: berlin)
+                == ["2026-09-15"],
+            "a receipt names the day that reached the watch, not its identical twin"
+        )
+        check(
+            PlanReceiptMatcher.confirm(
+                pending: [monday, tuesday],
+                listed: [at(2026, 9, 14), at(2026, 9, 15)],
+                timeZone: berlin
+            ) == ["2026-09-14", "2026-09-15"],
+            "both days are confirmed when both reached the watch"
+        )
+        check(
+            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [at(2026, 9, 14)], timeZone: berlin)
+                == ["2026-09-14"],
+            "one listed day confirms exactly one planned day"
+        )
+
+        // A listed instant carries its own zone when the system normalises
+        // `ScheduledWorkoutPlan.date` to UTC. 23:00 UTC on the 14th is already
+        // 01:00 on the 15th in Berlin, so the receipt must name the 15th — the
+        // day it actually falls on in the plan's timezone. Comparing the raw
+        // year/month/day fields instead would name the 14th.
+        var lateUtc = at(2026, 9, 14, hour: 23)
+        lateUtc.timeZone = TimeZone(identifier: "UTC")
+        check(
+            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [lateUtc], timeZone: berlin)
+                == ["2026-09-15"],
+            "a listed instant is read as the day it falls on in the plan's timezone"
+        )
+        // The same instant expressed in the plan's own zone is the 14th.
+        var lateBerlin = at(2026, 9, 14, hour: 23)
+        lateBerlin.timeZone = berlin
+        check(
+            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [lateBerlin], timeZone: berlin)
+                == ["2026-09-14"],
+            "a listed instant in the plan's own zone keeps its day"
+        )
+
+        // Nothing to attribute: the caller then keeps its previous behaviour
+        // rather than reporting a receipt nobody can stand behind.
+        check(
+            PlanReceiptMatcher.confirm(pending: [monday], listed: [], timeZone: berlin) == nil,
+            "an empty read-back is not attributed"
+        )
+        // `Calendar.date(from:)` returns the *reference date* for empty
+        // components instead of nil, so "no date" has to be detected on the
+        // fields — otherwise this entry would read as 2001-01-01 and count as a
+        // usable date, quietly disabling the caller's fallback.
+        check(
+            PlanReceiptMatcher.confirm(pending: [monday], listed: [DateComponents()], timeZone: berlin) == nil,
+            "a listed entry with no date cannot confirm anything"
+        )
+        check(
+            PlanReceiptMatcher.confirm(
+                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09-14", at: DateComponents())],
+                listed: [at(2026, 9, 14)],
+                timeZone: berlin
+            ) == [],
+            "a planned day with no date is never confirmed"
+        )
+        // A `localDate` that cannot be read is the same case one field earlier.
+        check(
+            PlanReceiptMatcher.confirm(
+                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09", at: at(2026, 9, 14))],
+                listed: [at(2026, 9, 14)],
+                timeZone: berlin
+            ) == [],
+            "a planned day whose date cannot be read is never confirmed"
+        )
+
+        // MARK: Reviewing a week whose early days have already passed
+
+        // The scheduler pushes a slot ahead, but only inside its own day: a day that
+        // is already over keeps the date it was planned for. That is exactly what
+        // makes the date on a listed entry mean something — pushing every past day
+        // onto `now` gives Monday, Tuesday and Wednesday one identical `at`, so the
+        // receipt for whichever of them landed is handed to Monday.
+        let midWeek = calendar.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 21, minute: 30))!
+        func scheduled(_ localDate: String, now: Date = midWeek) -> DateComponents? {
+            WorkoutPlanMapper.scheduleComponents(
+                for: PlannedWorkout(
+                    localDate: localDate,
+                    displayName: "轻松跑",
+                    hour: 7,
+                    minute: 0,
+                    warmup: nil,
+                    blocks: [
+                        PlannedWorkout.Block(
+                            iterations: 1,
+                            steps: [PlannedWorkout.Step(purpose: "work", goal: .distance(meters: 8_000), alert: nil)]
+                        )
+                    ],
+                    cooldown: nil
+                ),
+                timeZone: shanghai,
+                now: now
+            )
+        }
+        func instant(_ components: DateComponents?) -> String {
+            guard let components else { return "nil" }
+            return "\(components.year!)-\(components.month!)-\(components.day!) "
+                + "\(components.hour!):\(String(format: "%02d", components.minute!))"
+        }
+        let week = ["2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17"]
+        let weekAt = week.map { scheduled($0) }
+        check(instant(weekAt[0]) == "2026-9-14 7:00", "a day that is already over keeps its own date and hour")
+        check(instant(weekAt[1]) == "2026-9-15 7:00", "so does the day before it")
+        check(instant(weekAt[2]) == "2026-9-16 21:31", "today's passed slot is still pushed ahead of now")
+        check(instant(weekAt[3]) == "2026-9-17 7:00", "a day still ahead is untouched")
+        check(Set(weekAt.map(instant)).count == week.count, "no two days of the week share one instant")
+
+        var pendingWeek: [PlanReceiptMatcher.PendingDay] = []
+        for (index, day) in week.enumerated() {
+            if let at = weekAt[index] {
+                pendingWeek.append(PlanReceiptMatcher.PendingDay(localDate: day, at: at))
+            }
+        }
+        check(pendingWeek.count == week.count, "every day of the week is still sent to the scheduler")
+        // Monday's `schedule` did nothing this time; Tuesday, Wednesday and Thursday
+        // landed. The receipt must name those three and never Monday.
+        check(
+            PlanReceiptMatcher.confirm(
+                pending: pendingWeek,
+                listed: [weekAt[1]!, weekAt[2]!, weekAt[3]!],
+                timeZone: shanghai
+            ) == ["2026-09-15", "2026-09-16", "2026-09-17"],
+            "a mid-week sync names the days that landed, never the one that did not"
+        )
+        check(
+            PlanReceiptMatcher.confirm(pending: pendingWeek, listed: weekAt.compactMap { $0 }, timeZone: shanghai)
+                == week,
+            "a week that landed in full is reported in full"
+        )
+
+        // The eligibility rule, exercised on its own: an instant that has drifted off
+        // the day it stands for is refused, and the slot it would have consumed stays
+        // available to the day the instant actually names.
+        check(
+            PlanReceiptMatcher.confirm(
+                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09-14", at: at(2026, 9, 16, hour: 21))],
+                listed: [at(2026, 9, 16, hour: 21)],
+                timeZone: berlin
+            ) == [],
+            "a day whose instant drifted off its own date is not confirmed"
+        )
+        // Between 23:59 and midnight the push really does cross into the next day.
+        // Refusing the receipt is the deliberate side of that trade: the day is
+        // reported as unconfirmed, and tomorrow's session cannot claim it instead.
+        let lastMinuteOfToday = calendar.date(
+            from: DateComponents(year: 2026, month: 9, day: 16, hour: 23, minute: 59, second: 40)
+        )!
+        let crossing = scheduled("2026-09-16", now: lastMinuteOfToday)!
+        check(instant(crossing) == "2026-9-17 0:00", "a slot pushed past midnight is dated the next day")
+        check(
+            PlanReceiptMatcher.confirm(
+                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09-16", at: crossing)],
+                listed: [crossing],
+                timeZone: shanghai
+            ) == [],
+            "a receipt that would cross midnight is refused, not reassigned"
         )
 
         if failures > 0 {

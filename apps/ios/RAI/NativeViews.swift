@@ -1657,8 +1657,21 @@ struct PlanView: View {
         // The panel used to count the server's `executable` flag, which is a
         // looser question than "did this day survive mapping" — a week could read
         // "5 项可上表" while the watch received four. Counting with the bridge's
-        // own predicate keeps the sentence and the sync in agreement.
-        let schedulableCount = plan.map(WorkoutPlanMapper.schedulableCount(in:)) ?? 0
+        // own predicate keeps the sentence and the sync in agreement, and that
+        // predicate now also leaves out the days the watch is no longer owed — over,
+        // or already trained — which the sentence below has always promised
+        // ("已完成的日期不会重复下发").
+        //
+        // Reading the offer rather than recomputing a count is what lets the zero
+        // case say *why* it is zero: a week that is finished or already run is not a
+        // shortfall, and the old copy told the runner to regenerate it anyway, while
+        // the sync itself reported "本周没有还需要上表的训练". One classification,
+        // two surfaces.
+        let now = Date()
+        let offer = plan.map {
+            WorkoutPlanMapper.weekOffer(in: $0, now: now, completedLocalDates: native.completedWeekDates)
+        }
+        let schedulableCount = offer?.offered.count ?? 0
         let unoffered = plan.map {
             WorkoutPlanMapper.unofferedDays(in: $0, completedLocalDates: native.completedWeekDates)
         } ?? []
@@ -1674,7 +1687,10 @@ struct PlanView: View {
                         .font(.footnote)
                         .foregroundStyle(PixelColor.muted)
                 } else if schedulableCount == 0 {
-                    Text("本周没有可上表的训练日，生成一份新的课表再同步。")
+                    // The fallback is the same string the classifier would return for
+                    // a week with nothing usable in it, so "no plan to ask" and "plan
+                    // with nothing to send" stay one sentence rather than two copies.
+                    Text(offer?.emptyOfferMessage ?? WorkoutPlanMapper.WeekOffer.unusableWeekMessage)
                         .font(.footnote)
                         .foregroundStyle(PixelColor.muted)
                 } else {
@@ -1757,7 +1773,10 @@ struct PlanView: View {
         Task {
             // Permission is asked for only when the user actually tries to sync, so
             // the system prompt arrives with an obvious reason attached to it.
-            let outcome = await WorkoutKitBridge.syncRequestingAuthorization(plan: plan)
+            let outcome = await WorkoutKitBridge.syncRequestingAuthorization(
+                plan: plan,
+                completedLocalDates: native.completedWeekDates
+            )
             // Receipts are registered only for the days the bridge read back off
             // the scheduler: the row means "the watch received this day", and a
             // plan that never got there must not be allowed to label a later run.

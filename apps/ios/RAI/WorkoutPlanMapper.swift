@@ -77,14 +77,140 @@ enum WorkoutPlanMapper {
         plan.days.compactMap { plannedWorkout(from: $0) }
     }
 
+    /// What one week has to offer the watch, and why the rest of it does not.
+    ///
+    /// A bare count cannot be explained, and each surface then invents its own
+    /// reason: the panel told the runner to regenerate the week whenever the count
+    /// was zero, including the case where the week was simply over or already run
+    /// — which is not a shortfall and not something a new plan would fix. The
+    /// classification therefore lives here, next to the rule that produces it, and
+    /// every surface reads the same facts and only chooses its own wording.
+    struct WeekOffer: Equatable {
+        /// The days still owed: today or later, and not already trained. This is
+        /// exactly what the bridge hands to the scheduler.
+        let offered: [PlannedWorkout]
+        /// Days the server prescribed that did not survive mapping (rest days,
+        /// broken prescriptions), counted the way the sync's `skipped` is.
+        let skipped: Int
+        /// Days that survived mapping but are already over.
+        let expired: Int
+        /// Days still ahead that `/v1/mobile/today` reports as trained.
+        let alreadyTrained: Int
+
+        /// True when the week held something sendable and none of it is still owed.
+        ///
+        /// Distinct from "nothing was prescribed": both leave `offered` empty, and
+        /// only this one means there is nothing left to do rather than nothing to
+        /// send.
+        var isExhausted: Bool {
+            offered.isEmpty && expired + alreadyTrained > 0
+        }
+
+        /// The line for a week that had nothing usable in it.
+        ///
+        /// Named rather than inlined because it is also what the panel falls back
+        /// to when there is no plan at all to classify: one string, so the two
+        /// renderings of "this week has nothing to send" cannot drift apart.
+        static let unusableWeekMessage = "本周没有可上表的训练日，生成一份新的课表再同步。"
+
+        /// The panel's line when the week offers nothing.
+        ///
+        /// Regenerating the week is advice worth giving only when the week had
+        /// nothing usable in it; when everything was run or has passed, a new plan
+        /// would not change the fact that this one is done, and saying so is the
+        /// whole point of telling the two apart.
+        var emptyOfferMessage: String {
+            isExhausted
+                ? "本周的训练都已完成或已过去，不需要再上表。"
+                : Self.unusableWeekMessage
+        }
+    }
+
+    /// The week's offer, classified.
+    static func weekOffer(
+        in plan: MobileWorkoutPlanResponse,
+        now: Date,
+        completedLocalDates: Set<String>
+    ) -> WeekOffer {
+        let executable = plannedWorkouts(from: plan)
+        let timeZone = resolvedTimeZone(for: plan)
+        let offered = owed(
+            executable,
+            now: now,
+            timeZone: timeZone,
+            completedLocalDates: completedLocalDates
+        )
+        let ahead = upcoming(executable, now: now, timeZone: timeZone)
+        return WeekOffer(
+            offered: offered,
+            skipped: plan.days.count - executable.count,
+            expired: executable.count - ahead.count,
+            alreadyTrained: ahead.count - offered.count
+        )
+    }
+
     /// How many days of the week the watch will actually be offered.
     ///
     /// The count the UI shows has to come from the same rule the bridge schedules
     /// by, otherwise a week can read "5 项可上表" while the watch receives four —
     /// the panel used to count the server's `executable` flag, which is a
-    /// different (looser) question than "did this day survive mapping".
-    static func schedulableCount(in plan: MobileWorkoutPlanResponse) -> Int {
-        plan.days.filter { plannedWorkout(from: $0) != nil }.count
+    /// different (looser) question than "did this day survive mapping". Days that
+    /// are no longer owed (over, or already trained) are not offered, so they are
+    /// not counted here either.
+    static func schedulableCount(
+        in plan: MobileWorkoutPlanResponse,
+        now: Date,
+        completedLocalDates: Set<String>
+    ) -> Int {
+        weekOffer(in: plan, now: now, completedLocalDates: completedLocalDates).offered.count
+    }
+
+    /// The plan's own timezone, or the device's when the payload carried no usable
+    /// one. One rule, so the count the panel prints and the instant the bridge
+    /// schedules cannot disagree about which day "today" is.
+    static func resolvedTimeZone(for plan: MobileWorkoutPlanResponse) -> TimeZone {
+        TimeZone(identifier: plan.timezone) ?? .current
+    }
+
+    /// The days this sync can still act on: today, and whatever is left of the week.
+    ///
+    /// A day that is already over cannot be trained, so handing it to the scheduler
+    /// would only put a prescription dated in the past on the watch — and a past slot
+    /// gets pushed onto `now` (see `scheduleComponents`), so every past day in the
+    /// week would arrive wearing *today's* date. That date is what a sync receipt is
+    /// matched on, which is how a day the watch never saw collects a receipt.
+    /// Order is preserved.
+    ///
+    /// A `localDate` this cannot read is kept rather than dropped: `scheduleComponents`
+    /// refuses it further down, which is where an unreadable date already becomes a
+    /// counted skip instead of a silent omission.
+    static func upcoming(
+        _ workouts: [PlannedWorkout],
+        now: Date,
+        timeZone: TimeZone
+    ) -> [PlannedWorkout] {
+        let today = civilDate(of: now, in: timeZone)
+        return workouts.filter { workout in
+            guard let day = civilDate(from: workout.localDate) else { return true }
+            return (day.year, day.month, day.day) >= (today.year, today.month, today.day)
+        }
+    }
+
+    /// The days the watch is still *owed*: today or later, and not already trained.
+    ///
+    /// Both exclusions are needed and neither implies the other — a day can be over
+    /// without having been trained, and today can already have been trained. This is
+    /// the rule the panel has always stated in words ("已完成的日期不会重复下发");
+    /// `completedLocalDates` comes from `/v1/mobile/today`, which is the only side
+    /// that knows a day was actually run.
+    static func owed(
+        _ workouts: [PlannedWorkout],
+        now: Date,
+        timeZone: TimeZone,
+        completedLocalDates: Set<String>
+    ) -> [PlannedWorkout] {
+        upcoming(workouts, now: now, timeZone: timeZone)
+            .filter { !completedLocalDates.contains($0.localDate) }
     }
 
     static func plannedWorkout(
@@ -111,8 +237,9 @@ enum WorkoutPlanMapper {
     }
 
     /// The instant the session should appear on the watch. A nominal time that
-    /// already passed is pushed just far enough ahead that today's session stays
-    /// schedulable; a malformed date yields nil.
+    /// already passed is pushed just far enough ahead that *today's* session stays
+    /// schedulable; a day that is already over keeps its own date and hour, and a
+    /// malformed date yields nil.
     ///
     /// Returns `DateComponents` because that is what `WorkoutScheduler.schedule`
     /// accepts — a `Date` would have to be converted back anyway.
@@ -144,6 +271,12 @@ enum WorkoutPlanMapper {
         let resolved = calendar.dateComponents([.year, .month, .day], from: planned)
         guard resolved.year == year, resolved.month == month, resolved.day == day else { return nil }
         guard planned <= now else { return components }
+        // Only a slot *on today* is pushed ahead. Rolling a day that is already over
+        // onto `now` would hand last Monday's prescription today's calendar day, and
+        // the calendar day is what a sync receipt is matched on — so every past day
+        // in the week would collapse onto one date and collect the receipt for
+        // whichever of them did land.
+        guard calendar.isDate(planned, inSameDayAs: now) else { return components }
         let rolled = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: now.addingTimeInterval(lateFloorSeconds))
         var adjusted = DateComponents()
         adjusted.timeZone = timeZone
@@ -281,6 +414,24 @@ enum WorkoutPlanMapper {
     }
 
     // MARK: - Private
+
+    /// The calendar day an instant falls on, in `timeZone`.
+    private static func civilDate(of instant: Date, in timeZone: TimeZone) -> (year: Int, month: Int, day: Int) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: instant)
+        return (parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    /// The day a `YYYY-MM-DD` string names, or nil when it names none. Read field by
+    /// field: the value is already a civil date in the plan's timezone, and putting a
+    /// `Calendar` back in the way would reintroduce a timezone it does not have.
+    private static func civilDate(from localDate: String) -> (year: Int, month: Int, day: Int)? {
+        let parts = localDate.split(separator: "-")
+        guard parts.count == 3,
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]) else { return nil }
+        return (year, month, day)
+    }
 
     private static func boundedPace(_ value: Double?) -> Double? {
         guard let value, value.isFinite, value > 0 else { return nil }
