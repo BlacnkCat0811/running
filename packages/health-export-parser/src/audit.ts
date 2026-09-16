@@ -394,6 +394,21 @@ export function buildAudit(database: DatabaseSync): DataAudit {
     database,
     "SELECT COUNT(*) AS count FROM health_records"
   );
+  // `parsedRecords` is what the *last import* parsed; `uniqueRecords` is what
+  // the table holds across *every* import. Their difference can legitimately go
+  // negative (an incremental import against an older full-snapshot table), so
+  // clamping it with `Math.max(0, …)` reported "0 duplicates" for a table that
+  // was in fact 92% duplicates. Count the redundant rows that are actually in
+  // the table: rows that collapse onto the same natural key are exactly the
+  // rows the stable-id formula can no longer distinguish.
+  const redundantRecords = scalarCount(
+    database,
+    `SELECT COALESCE(SUM(multiplicity - 1), 0) AS count FROM (
+       SELECT COUNT(*) AS multiplicity FROM health_records
+       GROUP BY type, source_name, start_at, end_at, value_text, value_numeric, unit
+       HAVING COUNT(*) > 1
+     )`
+  );
 
   return {
     generatedAt: new Date().toISOString(),
@@ -405,7 +420,7 @@ export function buildAudit(database: DatabaseSync): DataAudit {
     totals: {
       parsedRecords,
       uniqueRecords,
-      exactDuplicateRecords: Math.max(0, parsedRecords - uniqueRecords),
+      exactDuplicateRecords: redundantRecords,
       workouts: scalarCount(database, "SELECT COUNT(*) AS count FROM workouts"),
       activitySummaries: scalarCount(
         database,
@@ -517,9 +532,9 @@ export function renderAuditMarkdown(audit: DataAudit): string {
 
 | 对象 | 数量 |
 |---|---:|
-| 解析到的 Health records | ${audit.totals.parsedRecords} |
-| 稳定 ID 去重后的 Health records | ${audit.totals.uniqueRecords} |
-| 完全相同的 record 副本 | ${audit.totals.exactDuplicateRecords} |
+| 上次导入解析到的 Health records | ${audit.totals.parsedRecords} |
+| 表内 Health records 行数 | ${audit.totals.uniqueRecords} |
+| 其中冗余行（自然键重复） | ${audit.totals.exactDuplicateRecords} |
 | Workouts | ${audit.totals.workouts} |
 | Activity summaries | ${audit.totals.activitySummaries} |
 | GPX routes | ${audit.totals.routeFiles} |

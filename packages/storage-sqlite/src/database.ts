@@ -1373,6 +1373,228 @@ const migrations: readonly Migration[] = [
           ON workout_group_members(workout_id);
       `);
     }
+  },
+  {
+    version: 22,
+    name: "realign_health_record_stable_ids_and_remove_duplicates",
+    up: (database) => {
+      // The record identity formula no longer includes `device`, so a sample Apple
+      // exports once with a device attribute and once without now folds to a single
+      // id. New imports fold correctly; the rows already stored do not — they still
+      // carry the id the *old* formula produced. Two user-visible consequences:
+      //
+      //   * every duplicated pair is still two rows, so `COUNT(*)` (what the audit
+      //     and settings pages show) reads far above the number of real samples;
+      //   * since no stored id equals what the current parser computes, a full
+      //     re-export reports every one of those rows as "present here, absent
+      //     from the import", which the removal guard refuses as a mass deletion.
+      //
+      // Deleting the duplicate rows alone would not fix it: the survivor would
+      // still hold the old id and still be re-reported as absent on the next
+      // import. This migration does both — collapse each natural-key group to one
+      // row and rewrite that row's id to the formula the parser uses now.
+      // `raw_attributes_json` keeps the XML attributes verbatim, so the new id is
+      // exactly reconstructible from the stored row (the old formula reproduces
+      // every one of those rows, so the inputs are provably intact).
+      const rows = database.prepare(`
+        SELECT id, type, source_name, start_at, end_at, metadata_json,
+               raw_attributes_json, device, created_at
+        FROM health_records
+      `).all() as unknown as Array<{
+        id: string;
+        type: string;
+        source_name: string;
+        start_at: string;
+        end_at: string;
+        metadata_json: string;
+        raw_attributes_json: string;
+        device: string | null;
+        created_at: string | null;
+      }>;
+      if (rows.length === 0) return;
+
+      const parseObject = (json: string): Record<string, unknown> | null => {
+        try {
+          const parsed = JSON.parse(json) as unknown;
+          return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+            ? (parsed as Record<string, unknown>)
+            : null;
+        } catch {
+          return null;
+        }
+      };
+      // Mirrors `lastMetadataValue` (`health-export-parser/src/utils.ts`): the
+      // *last* entry of the array wins.
+      const syncIdentifierOf = (metadataJson: string): string | null => {
+        const values = parseObject(metadataJson)?.["HKMetadataKeySyncIdentifier"];
+        if (!Array.isArray(values) || values.length === 0) return null;
+        const last = values[values.length - 1];
+        return typeof last === "string" ? last : null;
+      };
+      // Mirrors `stableId` (`health-export-parser/src/utils.ts:14-20`).
+      const stableRecordId = (kind: string, parts: unknown[]): string => {
+        const hash = createHash("sha256");
+        hash.update(kind);
+        hash.update("\0");
+        hash.update(JSON.stringify(parts));
+        return `${kind}_${hash.digest("hex").slice(0, 32)}`;
+      };
+      const identityInputs = (row: (typeof rows)[number]): { syncIdentifier: string | null; attributes: Record<string, unknown> | null } => ({
+        syncIdentifier: syncIdentifierOf(row.metadata_json),
+        attributes: parseObject(row.raw_attributes_json)
+      });
+      // Two formulas, because a migration has to be able to say what a row *is*
+      // before it changes it: `current` is what the parser computes today,
+      // `legacy` is what it computed while the formula still included `device`.
+      const currentIdFor = (row: (typeof rows)[number]): string => {
+        const { syncIdentifier, attributes } = identityInputs(row);
+        if (syncIdentifier !== null) {
+          return stableRecordId("record", [row.type, row.source_name, syncIdentifier]);
+        }
+        return stableRecordId("record", [
+          row.type,
+          row.source_name,
+          row.start_at,
+          row.end_at,
+          attributes?.value ?? null,
+          attributes?.unit ?? null
+        ]);
+      };
+      const legacyIdFor = (row: (typeof rows)[number]): string => {
+        const { syncIdentifier, attributes } = identityInputs(row);
+        if (syncIdentifier !== null) {
+          return stableRecordId("record", [row.type, row.source_name, syncIdentifier]);
+        }
+        return stableRecordId("record", [
+          row.type,
+          row.source_name,
+          row.start_at,
+          row.end_at,
+          attributes?.value ?? null,
+          attributes?.unit ?? null,
+          attributes?.device ?? null
+        ]);
+      };
+
+      // Refuse to guess. A row whose id matches neither formula came from a shape
+      // this migration does not understand, and rewriting it would be a guess
+      // about someone's health data — abort the whole migration (the caller runs
+      // it inside a transaction) and let an operator look.
+      const unrecognised = rows.filter((row) => {
+        const current = currentIdFor(row);
+        return current !== row.id && legacyIdFor(row) !== row.id;
+      });
+      if (unrecognised.length > 0) {
+        throw new Error(
+          `Cannot realign health_records: ${unrecognised.length} row(s) match neither the current nor the legacy stable-id formula (first: ${unrecognised[0]!.id})`
+        );
+      }
+
+      const grouped = new Map<string, Array<(typeof rows)[number]>>();
+      for (const row of rows) {
+        const nextId = currentIdFor(row);
+        const bucket = grouped.get(nextId);
+        if (bucket) bucket.push(row);
+        else grouped.set(nextId, [row]);
+      }
+
+      // Within a natural-key group the rows are the same sample; keep the one
+      // carrying the most information, deterministically.
+      const preferKeep = (
+        candidate: (typeof rows)[number],
+        current: (typeof rows)[number]
+      ): boolean => {
+        const candidateHasDevice = candidate.device !== null && candidate.device !== "";
+        const currentHasDevice = current.device !== null && current.device !== "";
+        if (candidateHasDevice !== currentHasDevice) return candidateHasDevice;
+        if (candidate.created_at !== current.created_at) {
+          if (candidate.created_at === null) return false;
+          if (current.created_at === null) return true;
+          return candidate.created_at > current.created_at;
+        }
+        // A stable tie-break, so the outcome does not depend on row order.
+        return candidate.id < current.id;
+      };
+
+      const duplicateIds: string[] = [];
+      // Every survivor, not only the ones whose id changes: the rename pass below
+      // stages the *whole table* onto a prefix, so a row left out of this list
+      // would keep the prefix forever.
+      const survivors: Array<{ from: string; to: string }> = [];
+      for (const [nextId, bucket] of grouped) {
+        let keep = bucket[0]!;
+        for (const candidate of bucket) {
+          if (preferKeep(candidate, keep)) keep = candidate;
+        }
+        for (const row of bucket) {
+          if (row.id !== keep.id) duplicateIds.push(row.id);
+        }
+        survivors.push({ from: keep.id, to: nextId });
+      }
+
+      const needsRename = survivors.some((entry) => entry.from !== entry.to);
+      if (duplicateIds.length === 0 && !needsRename) return;
+
+      const deleteGeneration = database.prepare(
+        "DELETE FROM import_entity_generations WHERE entity_kind = 'record' AND entity_id = ?"
+      );
+      const deleteTombstone = database.prepare(
+        "DELETE FROM import_entity_tombstones WHERE entity_kind = 'record' AND entity_id = ?"
+      );
+      const deleteRecord = database.prepare("DELETE FROM health_records WHERE id = ?");
+      for (const id of duplicateIds) {
+        // The collapsed row must stop being remembered as an entity of its own,
+        // otherwise the next import sees an id it never wrote and reports it as
+        // missing.
+        deleteGeneration.run(id);
+        deleteTombstone.run(id);
+        deleteRecord.run(id);
+      }
+
+      // Renaming in place would collide whenever one row's target id is another
+      // row's current id. Move both sides onto a prefix no stable id can have —
+      // ids are `record_<hex>` — then resolve every row through one mapping
+      // table, so no intermediate state is ever ambiguous and the dependent
+      // tables move in the same statement as the row they point at.
+      //
+      // Order matters: the prefix is applied to `health_records` *after* the
+      // dependents, because the dependents are selected by membership in the
+      // record table and that membership only holds while both sides still carry
+      // the same ids.
+      if (needsRename) {
+        const PREFIX = "__realign__";
+        database.prepare(
+          `UPDATE import_entity_generations SET entity_id = '${PREFIX}' || entity_id
+            WHERE entity_kind = 'record' AND entity_id IN (SELECT id FROM health_records)`
+        ).run();
+        database.prepare(
+          `UPDATE import_entity_tombstones SET entity_id = '${PREFIX}' || entity_id
+            WHERE entity_kind = 'record' AND entity_id IN (SELECT id FROM health_records)`
+        ).run();
+        database.exec(`UPDATE health_records SET id = '${PREFIX}' || id`);
+
+        database.exec("CREATE TEMP TABLE realign_record_ids (staged TEXT PRIMARY KEY, final TEXT NOT NULL)");
+        const insertMapping = database.prepare(
+          "INSERT INTO realign_record_ids (staged, final) VALUES (?, ?)"
+        );
+        for (const { from, to } of survivors) {
+          const staged = PREFIX + from;
+          if (staged !== to) insertMapping.run(staged, to);
+        }
+        database.exec(`
+          UPDATE health_records
+             SET id = (SELECT final FROM realign_record_ids WHERE staged = health_records.id)
+           WHERE id IN (SELECT staged FROM realign_record_ids);
+          UPDATE import_entity_generations
+             SET entity_id = (SELECT final FROM realign_record_ids WHERE staged = entity_id)
+           WHERE entity_kind = 'record' AND entity_id IN (SELECT staged FROM realign_record_ids);
+          UPDATE import_entity_tombstones
+             SET entity_id = (SELECT final FROM realign_record_ids WHERE staged = entity_id)
+           WHERE entity_kind = 'record' AND entity_id IN (SELECT staged FROM realign_record_ids);
+          DROP TABLE realign_record_ids;
+        `);
+      }
+    }
   }
 ];
 
@@ -2341,28 +2563,31 @@ export class RaiDatabase {
       // identifier containing '%' or '_' would become a wildcard, and a
       // substring match could delete a different workout. Metadata values are
       // stored as arrays, so expand only the two supported identifier keys.
+      //
+      // The expansion is guarded because `json_each` raises "malformed JSON" on
+      // anything that is not well-formed JSON, and a single such row would abort
+      // the whole DELETE — a tombstone that fails loudly is indistinguishable, to
+      // the caller, from a database fault. `json_valid` is checked first and the
+      // `CASE` only evaluates the branch it selects, so a value that is not an
+      // array (or a column that is not valid JSON at all) expands to no rows
+      // instead of raising. Absent keys are NULL, which `json_each` already turns
+      // into no rows.
+      const metadataMatches = (column: string, key: string): string =>
+        `EXISTS (
+          SELECT 1 FROM json_each(
+            CASE WHEN json_valid(${column})
+                 THEN CASE WHEN json_valid(json_extract(${column}, '$.${key}'))
+                           THEN json_extract(${column}, '$.${key}')
+                           ELSE '[]' END
+                 ELSE '[]' END
+          ) WHERE value = ?
+        )`;
       const select = this.database.prepare(`
         SELECT id, start_at AS startAt FROM workouts
-        WHERE EXISTS (
-          SELECT 1 FROM json_each(
-            json_extract(workouts.metadata_json, '$.HKMetadataKeySyncIdentifier')
-          ) WHERE value = ?
-        )
-        OR EXISTS (
-          SELECT 1 FROM json_each(
-            json_extract(workouts.metadata_json, '$.RAIHealthKitWorkoutUUID')
-          ) WHERE value = ?
-        )
-        OR EXISTS (
-          SELECT 1 FROM json_each(
-            json_extract(workouts.raw_attributes_json, '$.HKMetadataKeySyncIdentifier')
-          ) WHERE value = ?
-        )
-        OR EXISTS (
-          SELECT 1 FROM json_each(
-            json_extract(workouts.raw_attributes_json, '$.RAIHealthKitWorkoutUUID')
-          ) WHERE value = ?
-        )
+        WHERE ${metadataMatches("workouts.metadata_json", "HKMetadataKeySyncIdentifier")}
+        OR ${metadataMatches("workouts.metadata_json", "RAIHealthKitWorkoutUUID")}
+        OR ${metadataMatches("workouts.raw_attributes_json", "HKMetadataKeySyncIdentifier")}
+        OR ${metadataMatches("workouts.raw_attributes_json", "RAIHealthKitWorkoutUUID")}
       `);
       const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");
       const deleteGeneration = this.database.prepare(
