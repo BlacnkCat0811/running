@@ -23,6 +23,14 @@ nonisolated enum HealthKitExportError: LocalizedError {
     /// need different advice: one is "go flip a switch", the other is "the prompt
     /// never reached you".
     case authorizationUndecided
+    /// The store could not answer whether read access was ever requested:
+    /// `statusForAuthorizationRequest` threw, or it reported
+    /// `HKAuthorizationRequestStatusUnknown`. Distinct from
+    /// `authorizationUndecided` because nothing was asked — there is no prompt to
+    /// wait for — and distinct from a decision, because an unreadable state is an
+    /// *error*, not an answer. Mapping it to "decided" is how an unauthorized
+    /// device went on to export an empty archive and report a successful sync.
+    case authorizationCheckFailed
 
     var errorDescription: String? {
         switch self {
@@ -33,6 +41,9 @@ nonisolated enum HealthKitExportError: LocalizedError {
         case .authorizationUndecided:
             return "系统没有给出 Apple 健康读取授权结果。请重新打开 RAI 并点一次「同步健康」；"
                 + "若仍无反应，请删除 App 重装。"
+        case .authorizationCheckFailed:
+            return "无法确认 Apple 健康读取授权状态（健康数据未响应）。请稍后重试；"
+                + "若反复出现，请在 iPhone 设置 → 健康 → 数据访问与设备 中确认 RAI 已获得读取权限。"
         }
     }
 }
@@ -47,6 +58,11 @@ nonisolated enum HealthKitReadAuthorization: String, Sendable {
     case unavailable
     case notDetermined
     case decided
+    /// The store could not answer the question at all: the status query threw, or
+    /// it returned `HKAuthorizationRequestStatusUnknown`. Kept apart from
+    /// `decided` because it is an error state, not an answer — the export must
+    /// not run on a state we failed to read.
+    case unknown
 
     var isUndecided: Bool { self == .notDetermined }
 }
@@ -118,11 +134,29 @@ nonisolated enum HealthKitExport {
         if before == .shouldRequest, requestingIfNeeded {
             try? await store.requestAuthorization(toShare: [], read: readTypes)
         }
-        let after = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes)
-        // `.unnecessary` means the question has been answered — allowed or denied,
-        // HealthKit will not say which, and it does not have to: a decided store
-        // can read whatever it was given.
-        return after == .shouldRequest ? .notDetermined : .decided
+        // The query throwing means nothing was learned, so it is not an answer:
+        // letting it fall through to `.decided` (as a bare `try?` plus a ternary
+        // did) sent an unreadable state straight into a full export that reported
+        // success. Fail closed on it.
+        guard let after = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes) else {
+            return .unknown
+        }
+        switch after {
+        case .shouldRequest:
+            return .notDetermined
+        case .unnecessary:
+            // `.unnecessary` means the question has been answered — allowed or
+            // denied, HealthKit will not say which, and it does not have to: a
+            // decided store can read whatever it was given.
+            return .decided
+        case .unknown:
+            // Documented as "the status could not be determined because an error
+            // occurred" (`HKDefines.h`). An error state is not a decision.
+            return .unknown
+        @unknown default:
+            // A status this build does not know is not a decision either.
+            return .unknown
+        }
     }
 
     static func exportArchive(

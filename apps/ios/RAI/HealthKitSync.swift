@@ -291,6 +291,14 @@ final class HealthKitSync {
                 message = nil
                 phase = "failed"
                 return
+            case .unknown:
+                // The store could not say whether access was ever requested. An
+                // empty export from here would be a guess dressed as a success, so
+                // stop with a cause the runner can act on instead.
+                lastError = HealthKitExportError.authorizationCheckFailed.localizedDescription
+                message = nil
+                phase = "failed"
+                return
             case .decided:
                 break
             }
@@ -391,7 +399,7 @@ final class HealthKitSync {
             if inspection.status == "unchanged" {
                 let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
                 markSuccess(
-                    message: latestMessage(base: "Apple 健康数据已是最新", warnings: exported.warnings)
+                    message: exportMessage(base: "Apple 健康数据已是最新", exported: exported)
                         + (cleaned ? "" : Self.cleanupNoteSuffix),
                     exportEnd: exported.exportedThrough,
                     workoutCount: exported.workoutCount,
@@ -495,13 +503,33 @@ final class HealthKitSync {
         } else {
             base = "已从 Apple 健康导入 \(exported.workoutCount) 次跑步"
         }
-        return latestMessage(base: base, warnings: exported.warnings)
+        return exportMessage(base: base, exported: exported)
     }
 
     private func latestMessage(base: String, warnings: [String]) -> String {
         guard !warnings.isEmpty else { return base }
         return "\(base)（\(warnings.joined(separator: "；"))）"
     }
+
+    /// The line for a finished export, with the empty case named.
+    ///
+    /// HealthKit answers a *refused* read request exactly like an authorized one
+    /// with nothing in it: no error, no warning, an empty archive. `readAuthorizationState`
+    /// can only catch the "never asked" case — once the user has answered, allowed
+    /// or refused, the status reads `.unnecessary` either way. So when the export
+    /// comes back with nothing at all, the honest move is to name the possibility
+    /// rather than report "已是最新" over data the app may never have been allowed
+    /// to see.
+    private func exportMessage(base: String, exported: HealthKitExportResult) -> String {
+        guard exported.workoutCount == 0, exported.recordCount == 0, exported.routeCount == 0 else {
+            return latestMessage(base: base, warnings: exported.warnings)
+        }
+        return latestMessage(base: base, warnings: exported.warnings + [Self.emptyExportHint])
+    }
+
+    private static let emptyExportHint =
+        "未读到任何健康数据：若你曾在权限弹窗点过「不允许」，"
+        + "请在 iPhone 设置 → 健康 → 数据访问与设备 中打开 RAI 的读取权限。"
     #endif
 
     private func upload(zipURL: URL, to serverURL: URL, batchId: String?) async throws -> String {
