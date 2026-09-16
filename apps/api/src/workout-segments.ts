@@ -192,9 +192,18 @@ export const measuredStepsOf = (
     const activityTypeRaw = numberOf(record.activityTypeRaw);
     if (offsetMs === null || durationMs === null || activityTypeRaw === null) return [];
     activityTypes.add(activityTypeRaw);
-    const startMs = startedAtMs + offsetMs;
-    const endMs = Math.min(endedAtMs, startMs + durationMs);
-    if (startMs < startedAtMs || startMs >= endedAtMs) continue;
+    // Step offsets are measured from the workout start, and the Watch can place
+    // the first step a few hundred milliseconds *before* it (the workout start
+    // comes from the first sample, the step from the activity record). Dropping
+    // such a step shifts every later step one slot left in `planned[index]`,
+    // which silently relabels "恢复" as "训练" while still producing a
+    // plausible-looking panel — a wrong answer that reads like a right one.
+    // Clamp to the workout start instead, keeping the measured duration so the
+    // step's own end boundary stays where the Watch put it.
+    const rawStartMs = startedAtMs + offsetMs;
+    if (rawStartMs >= endedAtMs) continue;
+    const startMs = Math.max(startedAtMs, rawStartMs);
+    const endMs = Math.min(endedAtMs, rawStartMs + durationMs);
     if (endMs - startMs < MIN_SEGMENT_MS) continue;
     steps.push({ startMs, endMs });
   }

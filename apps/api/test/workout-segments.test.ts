@@ -557,6 +557,50 @@ test("reads the step layer only when the metadata really carries one", () => {
   ]);
 });
 
+test("a first step timed slightly before the workout start is clamped, not dropped", async () => {
+  // The workout start is derived from the first sample; the step layer's first
+  // offset is measured from the activity record. On 2026-09-14 the two were
+  // 250 ms apart, and the old reader dropped that step for starting "before"
+  // the workout. Dropping it shifts every later step one slot left in
+  // `planned[index]`, so the recovery step at 1 283 s is labelled 训练 — a
+  // plausible-looking panel that is quietly wrong.
+  const negativeFirstOffset = {
+    activityCount: 3,
+    activities: [
+      { startMs: -250, durationMs: 300_250, activityTypeRaw: 37, locationRaw: 3, metadataKeys: ["WOIntervalStepKeyPath"] },
+      { startMs: 300_000, durationMs: 983_456, activityTypeRaw: 37, locationRaw: 3, metadataKeys: ["WOIntervalStepKeyPath"] },
+      { startMs: 1_283_456, durationMs: 299_619, activityTypeRaw: 37, locationRaw: 3, metadataKeys: ["WOIntervalStepKeyPath"] }
+    ]
+  };
+  const startedAtMs = RUN_START_MS;
+  const endedAtMs = RUN_START_MS + TOTAL_SECONDS * 1000;
+
+  // The unit-level contract: the first step survives, pinned to the workout
+  // start, and the two steps after it keep their measured boundaries.
+  assert.deepEqual(measuredStepsOf(workoutMetadata(negativeFirstOffset), startedAtMs, endedAtMs), [
+    { startMs: startedAtMs, endMs: startedAtMs + 300_000 },
+    { startMs: startedAtMs + 300_000, endMs: startedAtMs + 1_283_456 },
+    { startMs: startedAtMs + 1_283_456, endMs: startedAtMs + 1_583_075 }
+  ]);
+
+  // And end to end: all four prescribed labels come back in order, with the
+  // measured boundaries still deciding where each one ends.
+  const { root, databasePath, sessionId } = await seedRun([], workoutMetadata(negativeFirstOffset));
+  const read = new RaiReadStore(databasePath);
+  try {
+    const series = read.workoutSeries(sessionId, [planDay()]);
+    assert.ok(series);
+    assert.deepEqual(
+      series.segments.map((segment) => segment.label),
+      ["热身", "训练", "整理放松", "自由训练"]
+    );
+    assert.match(series.segmentNote ?? "", /分段由手表记录的 3 个训练步骤实测得到/);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 /** A stored week-plan day, as `MobileGoalsStore.planHistory` hands it over. */
 const storedDay = (
   localDate: string,
