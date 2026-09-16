@@ -19,6 +19,11 @@ export interface LlmConfig {
   model: string;
   apiKey: string;
   baseUrl: string;
+  /**
+   * Output budget for one attempt. Optional so existing callers keep compiling;
+   * raise it for a model that reasons harder than the default one does.
+   */
+  maxTokens?: number;
 }
 
 export interface ProviderDefaults {
@@ -68,9 +73,17 @@ const MAX_RETRIES = 1;
 
 export class LlmRequestError extends Error {
   readonly code = "llm_request_failed";
-  constructor(message: string, readonly status?: number) {
+  /**
+   * Set when the reason itself settles the retry question and the HTTP status does
+   * not. A completion cut off at `max_tokens` truncates the same way on the next
+   * attempt — the budget did not change — so retrying it only spends what is left
+   * of the caller's time. `undefined` falls back to the status rule.
+   */
+  readonly retryable: boolean | undefined;
+  constructor(message: string, readonly status?: number, retryable?: boolean) {
     super(message);
     this.name = "LlmRequestError";
+    this.retryable = retryable;
   }
 }
 
@@ -83,11 +96,17 @@ export function llmConfigFromEnv(env: Record<string, string | undefined> = proce
   if (!apiKey) return null;
   const provider = (env.RAI_LLM_PROVIDER?.trim() || DEFAULT_LLM_PROVIDER).toLowerCase();
   const defaults = PROVIDER_DEFAULTS[provider] ?? PROVIDER_DEFAULTS[DEFAULT_LLM_PROVIDER]!;
+  const requestedTokens = Number(env.RAI_LLM_MAX_TOKENS?.trim());
   return {
     provider,
     model: env.RAI_LLM_MODEL?.trim() || defaults.model,
     apiKey,
-    baseUrl: (env.RAI_LLM_BASE_URL?.trim() || defaults.baseUrl).replace(/\/+$/, "")
+    baseUrl: (env.RAI_LLM_BASE_URL?.trim() || defaults.baseUrl).replace(/\/+$/, ""),
+    // Ignore a malformed value rather than sending it upstream: `max_tokens: NaN`
+    // would be rejected by the provider with a message about the wrong thing.
+    maxTokens: Number.isFinite(requestedTokens) && requestedTokens > 0
+      ? Math.floor(requestedTokens)
+      : DEFAULT_MAX_TOKENS
   };
 }
 
@@ -98,6 +117,22 @@ function extractContent(payload: unknown): string | null {
   const first = choices[0] as { message?: { content?: unknown }; text?: unknown };
   const content = first?.message?.content ?? first?.text;
   return typeof content === "string" && content.trim().length > 0 ? content : null;
+}
+
+/**
+ * The provider's stop reason for the first choice, when it reports one.
+ *
+ * `finish_reason: "length"` means the model ran out of budget mid-JSON, and such a
+ * response must not be parsed as a plan: `parsePlanJson` finds no `days` array and
+ * the week is silently replaced by the conservative template. `null` when the
+ * provider does not say (some gateways omit it), which is "unknown", never "fine".
+ */
+function finishReasonOf(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const choices = (payload as { choices?: unknown }).choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+  const reason = (choices[0] as { finish_reason?: unknown } | undefined)?.finish_reason;
+  return typeof reason === "string" ? reason : null;
 }
 
 export function createPlanModelClient(
@@ -119,12 +154,13 @@ export function createPlanModelClient(
           { role: "user", content: request.user }
         ],
         temperature: request.temperature ?? 0.2,
-        max_tokens: request.maxTokens ?? DEFAULT_MAX_TOKENS,
+        max_tokens: request.maxTokens ?? config.maxTokens ?? DEFAULT_MAX_TOKENS,
         stream: false,
         response_format: { type: "json_object" }
       });
 
       const deadline = Date.now() + totalBudgetMs;
+      let firstError: Error | null = null;
       let lastError: Error | null = null;
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
         // A retry only happens when a whole attempt still fits in the budget;
@@ -151,22 +187,53 @@ export function createPlanModelClient(
           const payload = (await response.json()) as unknown;
           const content = extractContent(payload);
           if (!content) throw new LlmRequestError("模型响应缺少内容");
+          // A truncated response is not a short plan. Parsing it made the caller see
+          // "no days" and fall back to the template without naming the cause, so it
+          // is named here instead — and marked non-retryable: the next attempt sends
+          // the same `max_tokens`, so it truncates the same way.
+          if (finishReasonOf(payload) === "length") {
+            throw new LlmRequestError("模型输出被 token 上限截断", undefined, false);
+          }
           return content;
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
+          firstError ??= lastError;
           const retryable =
-            !(error instanceof LlmRequestError) ||
-            error.status == null ||
-            error.status >= 500 ||
-            error.status === 429;
+            error instanceof LlmRequestError && error.retryable !== undefined
+              ? error.retryable
+              : !(error instanceof LlmRequestError) ||
+                error.status == null ||
+                error.status >= 500 ||
+                error.status === 429;
           if (attempt === MAX_RETRIES || !retryable) break;
         } finally {
           clearTimeout(timer);
         }
       }
-      throw lastError instanceof LlmRequestError
-        ? lastError
-        : new LlmRequestError(lastError?.message ?? "模型请求失败");
+      const failure = reportedError(firstError, lastError);
+      throw failure instanceof LlmRequestError
+        ? failure
+        : new LlmRequestError(failure?.message ?? "模型请求失败");
     }
   };
+}
+
+/** True when our own deadline produced the error rather than the provider. */
+function isDeadlineArtifact(error: Error): boolean {
+  return error.name === "AbortError" || error.name === "TimeoutError";
+}
+
+/**
+ * Which failure to report once every attempt has failed.
+ *
+ * Usually the last one, since it is the most specific. The exception is a final
+ * attempt killed by our own deadline: a retry gets only what is left of the budget,
+ * so it is aborted mid-flight, and reporting that replaces the cause — "the output
+ * was truncated", "the service returned 500" — with "the operation was aborted",
+ * which names the symptom the caller already knows about.
+ */
+function reportedError(first: Error | null, last: Error | null): Error | null {
+  if (last === null) return first;
+  if (first === null || first === last) return last;
+  return isDeadlineArtifact(last) && !isDeadlineArtifact(first) ? first : last;
 }

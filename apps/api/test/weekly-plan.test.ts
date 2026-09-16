@@ -526,6 +526,84 @@ test("the output budget leaves room for the plan after a reasoning model's hidde
   assert.ok(budget >= 8192, `max_tokens ${budget} leaves too little room for the visible plan after reasoning`);
 });
 
+test("a response the provider truncated is rejected instead of parsed", async () => {
+  // `finish_reason: "length"` means the JSON was cut off mid-object. Parsing that
+  // string is what let `parsePlanJson` find no `days` array and quietly fall back
+  // to the template, with nothing in the log naming the truncation.
+  let attempts = 0;
+  const fetchImpl = (async () => {
+    attempts += 1;
+    return new Response(
+      JSON.stringify({ choices: [{ finish_reason: "length", message: { content: '{"days":[{"local' } }] }),
+      { status: 200 }
+    );
+  }) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
+    { fetchImpl }
+  );
+  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /截断/);
+  // Not retried: the retry would send the same `max_tokens`, so it truncates the
+  // same way while spending what is left of the caller's budget — and the abort
+  // that ends *that* attempt is what would then be reported.
+  assert.equal(attempts, 1);
+});
+
+test("a retry killed by our own deadline does not erase the cause", async () => {
+  // The first failure is the provider's; the second is our shrinking timeout. The
+  // report must name the provider's, because "the operation was aborted" describes
+  // this function's deadline, not what went wrong.
+  let attempts = 0;
+  const fetchImpl = ((_url: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((resolve, reject) => {
+      attempts += 1;
+      if (attempts === 1) {
+        resolve(new Response("upstream exploded", { status: 500 }));
+        return;
+      }
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("This operation was aborted", "AbortError"))
+      );
+    })) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
+    { fetchImpl, totalBudgetMs: 6_000, timeoutMs: 45_000 }
+  );
+  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /模型服务返回 500/);
+  assert.equal(attempts, 2);
+});
+
+test("a response the provider completed is still accepted", async () => {
+  const fetchImpl = (async () =>
+    new Response(
+      JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: '{"days":[]}' } }] }),
+      { status: 200 }
+    )) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
+    { fetchImpl }
+  );
+  assert.equal(await client.complete({ system: "s", user: "u" }), '{"days":[]}');
+});
+
+test("the output budget can be raised from the environment", async () => {
+  const budgets: number[] = [];
+  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as { max_tokens?: number };
+    budgets.push(Number(body.max_tokens));
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"days":[]}' } }] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const config = llmConfigFromEnv({ RAI_LLM_API_KEY: "sk-test", RAI_LLM_MAX_TOKENS: "16384" });
+  assert.ok(config);
+  const client = createPlanModelClient(config, { fetchImpl });
+  await client.complete({ system: "s", user: "u" });
+  assert.equal(budgets[0], 16384);
+  // A malformed value falls back to the default rather than being sent upstream
+  // as `max_tokens: NaN`, which the provider would reject over the wrong thing.
+  assert.equal(llmConfigFromEnv({ RAI_LLM_API_KEY: "sk-test", RAI_LLM_MAX_TOKENS: "abc" })?.maxTokens, 8192);
+  assert.equal(llmConfigFromEnv({ RAI_LLM_API_KEY: "sk-test" })?.maxTokens, 8192);
+});
+
 test("a 401 is not retried", async () => {
   let attempts = 0;
   const fetchImpl = (async () => {
