@@ -6,7 +6,12 @@ import type { MobilePlannedDay, MobileSessionStructure, MobileTodayResponse } fr
 
 import type { CoachZonePrescription } from "../src/mobile-coach.js";
 import { buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
-import { DEFAULT_TOTAL_BUDGET_MS, createPlanModelClient, llmConfigFromEnv } from "../src/weekly-plan-llm.js";
+import {
+  DEFAULT_TOTAL_BUDGET_MS,
+  MAX_LLM_RESPONSE_BYTES,
+  createPlanModelClient,
+  llmConfigFromEnv
+} from "../src/weekly-plan-llm.js";
 import { MAX_PLANNED_DISTANCE_KM } from "../src/session-structure.js";
 import { readStripped, sourceFiles } from "./source-scan.js";
 import {
@@ -720,6 +725,157 @@ test("the model client stops retrying once the total budget is spent", async () 
   assert.equal(attempts, 1);
 });
 
+test("short model budgets are never extended to a five-second minimum", async () => {
+  let attempts = 0;
+  const fetchImpl = ((_url: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      attempts += 1;
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("This operation was aborted", "AbortError"));
+      }, { once: true });
+    })) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
+    { fetchImpl, totalBudgetMs: 80, timeoutMs: 30 }
+  );
+  const started = performance.now();
+  await assert.rejects(() => client.complete({ system: "s", user: "u" }));
+  const elapsed = performance.now() - started;
+  assert.equal(attempts, 1);
+  assert.ok(elapsed < 1_000, `80ms budget unexpectedly took ${elapsed.toFixed(0)}ms`);
+});
+
+test("invalid model timeout configuration is rejected", () => {
+  const config = { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" };
+  assert.throws(() => createPlanModelClient(config, { timeoutMs: 0 }), /positive finite/);
+  assert.throws(() => createPlanModelClient(config, { totalBudgetMs: Number.NaN }), /positive finite/);
+  assert.throws(() => createPlanModelClient(config, { timeoutMs: Number.POSITIVE_INFINITY }), /positive finite/);
+});
+
+test("non-success model responses cancel their bodies before retrying", async () => {
+  let calls = 0;
+  let cancellations = 0;
+  const fetchImpl = (async () => {
+    calls += 1;
+    return new Response(new ReadableStream<Uint8Array>({
+      cancel() { cancellations += 1; }
+    }), { status: 503 });
+  }) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
+    { fetchImpl }
+  );
+  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /模型服务返回 503/);
+  assert.equal(calls, 2);
+  assert.equal(cancellations, 2);
+});
+
+test("model response size is enforced from streamed bytes, not content-length", async () => {
+  for (const headers of [undefined, { "content-length": "1" }]) {
+    let cancellations = 0;
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(MAX_LLM_RESPONSE_BYTES));
+          controller.enqueue(new Uint8Array(1));
+        },
+        cancel() { cancellations += 1; }
+      }), { status: 200, ...(headers ? { headers } : {}) });
+    }) as unknown as typeof fetch;
+    const client = createPlanModelClient(
+      { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
+      { fetchImpl }
+    );
+    await assert.rejects(() => client.complete({ system: "s", user: "u" }), /大小限制/);
+    assert.equal(calls, 1, "oversized responses must not be retried");
+    assert.equal(cancellations, 1);
+  }
+});
+
+test("declared oversized model responses are cancelled without reading", async () => {
+  let pulls = 0;
+  let cancellations = 0;
+  const fetchImpl = (async () => new Response(new ReadableStream<Uint8Array>({
+    pull() { pulls += 1; },
+    cancel() { cancellations += 1; }
+  }), {
+    status: 200,
+    headers: { "content-length": String(MAX_LLM_RESPONSE_BYTES + 1) }
+  })) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
+    { fetchImpl }
+  );
+  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /大小限制/);
+  assert.equal(cancellations, 1);
+  assert.ok(pulls <= 1);
+});
+
+test("normal multi-chunk model JSON is accepted and malformed JSON stays safe", async () => {
+  const encoder = new TextEncoder();
+  const content = '{"days":[],"说明":"轻松跑"}';
+  const response = encoder.encode(JSON.stringify({ choices: [{ message: { content } }] }));
+  const multibyte = encoder.encode("轻");
+  let multibyteOffset = -1;
+  for (let index = 0; index <= response.length - multibyte.length; index += 1) {
+    if (multibyte.every((byte, offset) => response[index + offset] === byte)) {
+      multibyteOffset = index;
+      break;
+    }
+  }
+  assert.ok(multibyteOffset >= 0, "fixture must contain a real UTF-8 multibyte character");
+  // Split after the first byte of “轻” so decoding each chunk independently
+  // would corrupt the payload. The client must count bytes but decode the
+  // complete body.
+  const chunks = [
+    response.slice(0, multibyteOffset + 1),
+    response.slice(multibyteOffset + 1, multibyteOffset + 2),
+    response.slice(multibyteOffset + 2)
+  ];
+  const good = createPlanModelClient(
+    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
+    {
+      fetchImpl: (async () => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(chunk);
+          controller.close();
+        }
+      }))) as unknown as typeof fetch
+    }
+  );
+  assert.equal(await good.complete({ system: "s", user: "u" }), content);
+
+  let malformedCalls = 0;
+  const malformed = createPlanModelClient(
+    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
+    {
+      fetchImpl: (async () => {
+        malformedCalls += 1;
+        return new Response("{not-json");
+      }) as unknown as typeof fetch
+    }
+  );
+  await assert.rejects(() => malformed.complete({ system: "s", user: "u" }), /有效 JSON/);
+  assert.equal(malformedCalls, 2);
+});
+
+test("a slow model response body is bounded by the attempt deadline", async () => {
+  let cancellations = 0;
+  const fetchImpl = (async () => new Response(new ReadableStream<Uint8Array>({
+    cancel() { cancellations += 1; }
+  }))) as unknown as typeof fetch;
+  const client = createPlanModelClient(
+    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
+    { fetchImpl, timeoutMs: 40, totalBudgetMs: 100 }
+  );
+  const started = performance.now();
+  await assert.rejects(() => client.complete({ system: "s", user: "u" }));
+  assert.ok(performance.now() - started < 1_000);
+  assert.equal(cancellations, 1);
+});
+
 test("a model that misreports distance is overruled by the structure it sent", () => {
   // The model claims 1 km but hands over a 6.3 km work step. The stored value
   // must come from the structure: it is persisted, shown in the app, and summed
@@ -961,17 +1117,10 @@ test("the client waits longer for a generated plan than the server spends on it"
     "generateWeeklyPlan 必须带上这个超时，否则会退回默认的 POST 超时"
   );
 
-  // The server side of the comparison has to be the number actually spent, not
-  // just the exported default: `options.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS
-  // * 2` would keep this constant unchanged while doubling the real budget past
-  // the client's. The expression is therefore pinned, and no caller may pass a
-  // budget of its own.
+  // No production caller may override the default. The timing tests above
+  // verify the actual spending behaviour instead of pinning its source
+  // expression, which previously preserved the buggy five-second floor.
   const llmSource = readStripped(new URL("../src/weekly-plan-llm.ts", import.meta.url));
-  assert.match(
-    llmSource,
-    /const totalBudgetMs = options\.totalBudgetMs \?\? DEFAULT_TOTAL_BUDGET_MS;/,
-    "实际使用的总预算必须就是 DEFAULT_TOTAL_BUDGET_MS 本身"
-  );
   // Pinning the declaration is not enough on its own: leaving it alone and
   // writing `Date.now() + totalBudgetMs * 2` at the one place the budget is
   // spent doubles the real budget while every number a reader can see stays
@@ -987,22 +1136,13 @@ test("the client waits longer for a generated plan than the server spends on it"
     4,
     "总预算在 weekly-plan-llm.ts 中只应出现四处：选项声明、默认取值、赋值与唯一使用点"
   );
-  // Pinning the deadline is not enough either: the deadline can be left exactly
-  // as written and the budget extended where it is *read* —
-  // `const remaining = deadline - Date.now() + grace;` keeps every number and
-  // every identifier count above intact while the client retries past the budget
-  // the device waited for. The three statements that spend the budget are
-  // therefore pinned verbatim, and `Date.now()` is counted, so nothing else in
-  // the file can measure time against a different horizon.
+  // The short-budget and slow-body tests above exercise the actual deadline
+  // behaviour. Keep only the single-horizon invariant here rather than pinning
+  // the formerly buggy Math.max expression as source text.
   assert.match(
     llmSource,
     /^\s*const remaining = deadline - Date\.now\(\);\s*$/m,
     "剩余预算必须就是 deadline 减当前时间，不得附加任何宽限"
-  );
-  assert.match(
-    llmSource,
-    /^\s*const attemptTimeout = Math\.max\(MIN_ATTEMPT_MS, Math\.min\(timeoutMs, remaining\)\);\s*$/m,
-    "单次尝试必须被剩余预算截断，否则最后一次请求可以超支"
   );
   assert.equal(
     (llmSource.match(/\bDate\.now\(\)/g) ?? []).length,

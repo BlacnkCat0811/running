@@ -58,6 +58,7 @@ export const DEFAULT_TIMEOUT_MS = 45_000;
  */
 export const DEFAULT_TOTAL_BUDGET_MS = 50_000;
 const MIN_ATTEMPT_MS = 5_000;
+export const MAX_LLM_RESPONSE_BYTES = 1024 * 1024;
 /**
  * Ceiling for a single attempt — and because a reasoning model bills its hidden
  * tokens here too, that means the whole output budget, not just the JSON.
@@ -135,12 +136,83 @@ function finishReasonOf(payload: unknown): string | null {
   return typeof reason === "string" ? reason : null;
 }
 
+function positiveDuration(value: number, name: string): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError(`${name} must be a positive finite number`);
+  }
+  return value;
+}
+
+function cancelBody(body: ReadableStream<Uint8Array> | null): void {
+  if (!body) return;
+  void body.cancel().catch(() => {
+    // Body cleanup is best-effort and must never replace the request error.
+  });
+}
+
+async function readResponseJson(response: Response, signal: AbortSignal): Promise<unknown> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_LLM_RESPONSE_BYTES) {
+    cancelBody(response.body);
+    throw new LlmRequestError("模型响应超过大小限制", undefined, false);
+  }
+  if (!response.body) throw new LlmRequestError("模型响应缺少正文");
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  const cancelReader = (): void => {
+    void reader.cancel().catch(() => {
+      // Cancellation must not hold the caller past its deadline.
+    });
+  };
+  try {
+    while (true) {
+      const result = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolveRead, rejectRead) => {
+        const aborted = (): void => {
+          cancelReader();
+          rejectRead(new DOMException("This operation was aborted", "AbortError"));
+        };
+        if (signal.aborted) {
+          aborted();
+          return;
+        }
+        signal.addEventListener("abort", aborted, { once: true });
+        void reader.read().then(resolveRead, rejectRead).finally(() => {
+          signal.removeEventListener("abort", aborted);
+        });
+      });
+      if (result.done) break;
+      received += result.value.byteLength;
+      if (received > MAX_LLM_RESPONSE_BYTES) {
+        cancelReader();
+        throw new LlmRequestError("模型响应超过大小限制", undefined, false);
+      }
+      chunks.push(result.value);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released/cancelled */ }
+  }
+
+  const bytes = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new LlmRequestError("模型响应不是有效 JSON");
+  }
+}
+
 export function createPlanModelClient(
   config: LlmConfig,
   options: { timeoutMs?: number; totalBudgetMs?: number; fetchImpl?: typeof fetch } = {}
 ): PlanModelClient {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const totalBudgetMs = options.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS;
+  const timeoutMs = positiveDuration(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, "attempt timeout");
+  const totalBudgetMs = positiveDuration(options.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS, "total budget");
   const doFetch = options.fetchImpl ?? fetch;
 
   return {
@@ -166,8 +238,9 @@ export function createPlanModelClient(
         // A retry only happens when a whole attempt still fits in the budget;
         // starting one that must be cut short would just return a worse error.
         const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
         if (attempt > 0 && remaining < MIN_ATTEMPT_MS) break;
-        const attemptTimeout = Math.max(MIN_ATTEMPT_MS, Math.min(timeoutMs, remaining));
+        const attemptTimeout = Math.min(timeoutMs, remaining);
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), attemptTimeout);
         try {
@@ -181,10 +254,11 @@ export function createPlanModelClient(
             signal: controller.signal
           });
           if (!response.ok) {
+            cancelBody(response.body);
             // Never echo the response body verbatim: it can contain request echoes.
             throw new LlmRequestError(`模型服务返回 ${response.status}`, response.status);
           }
-          const payload = (await response.json()) as unknown;
+          const payload = await readResponseJson(response, controller.signal);
           const content = extractContent(payload);
           if (!content) throw new LlmRequestError("模型响应缺少内容");
           // A truncated response is not a short plan. Parsing it made the caller see
