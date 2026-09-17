@@ -5,13 +5,25 @@ import SwiftUI
 struct TechFlowLayout: Layout {
     var spacing: CGFloat = 8
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? 350
-        return arrange(subviews, width: width).size
+    struct Cache {
+        var width: CGFloat?
+        var result: (size: CGSize, origins: [CGPoint], widths: [CGFloat])?
+    }
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+    func updateCache(_ cache: inout Cache, subviews: Subviews) { cache = Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        let width = max(0, proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? 350)
+        if cache.width != width || cache.result == nil {
+            cache.width = width
+            cache.result = arrange(subviews, width: width)
+        }
+        return cache.result!.size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = arrange(subviews, width: bounds.width)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        _ = sizeThatFits(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews, cache: &cache)
+        guard let result = cache.result else { return }
         for (index, point) in result.origins.enumerated() {
             subviews[index].place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
                                   proposal: ProposedViewSize(width: result.widths[index], height: nil))

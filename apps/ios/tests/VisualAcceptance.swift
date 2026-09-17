@@ -13,6 +13,7 @@ final class VisualAcceptance: XCTestCase {
 
     func launch(connected: Bool = true, large: Bool = false) {
         app.launchArguments = ["-rai.appearance.skin", "technology", "-rai.serverURL", connected ? server : "",
+                               "-rai.privacy.amap.state", "declined",
                                "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
         app.launch()
@@ -32,7 +33,7 @@ final class VisualAcceptance: XCTestCase {
         tree.name = name + "-accessibility"; tree.lifetime = .keepAlways; add(tree)
     }
 
-    func scrollTo(_ element: XCUIElement, limit: Int = 12) {
+    func scrollTo(_ element: XCUIElement, limit: Int = 30) {
         // isHittable alone includes content obscured by the custom bottom bar.
         // Center the actual target in the unobscured scrolling region before tapping.
         let bottom = app.buttons["tab.设置"].exists ? app.buttons["tab.设置"].frame.minY : app.windows.firstMatch.frame.height - 90
@@ -78,6 +79,21 @@ final class VisualAcceptance: XCTestCase {
         capture("01-body")
         app.swipeUp(); capture("06-body-zones")
         app.swipeUp(); capture("06-body-predictions")
+        back()
+        scrollTo(app.buttons["today.ability"])
+        capture("01-today-ability-card")
+        app.buttons["today.ability"].tap()
+        XCTAssertTrue(app.navigationBars["跑步能力"].waitForExistence(timeout: 45))
+        capture("07-ability")
+        // 五维分解必须真的渲染出来：标题常显，行则依赖服务端的 dimensions。
+        // 隔离库里五维非空（efficiency/pace/cardio/stability/recovery 均有值），
+        // 所以这里断言到行，能抓住"面板在、数据没接线"这类回归。
+        XCTAssertTrue(app.staticTexts["能力分析"].waitForExistence(timeout: 20))
+        // 行必须等：进入本页时 `.task` 会重新拉 `/v1/dashboard`，五维来自那次响应，
+        // 而标题是静态的、立刻就在。用 `.exists` 会在慢响应下随机变红。
+        XCTAssertTrue(app.staticTexts["效率"].waitForExistence(timeout: 20))
+        app.swipeUp(); capture("07-ability-metrics")
+        app.swipeUp(); capture("07-ability-trend")
         back()
         XCTAssertTrue(app.buttons["tab.今日"].exists)
     }
@@ -189,6 +205,90 @@ final class VisualAcceptance: XCTestCase {
         tab("统计"); capture("large-statistics")
         tab("设置"); capture("large-settings")
     }
+
+    func test11NativeBackGestureAndSafeArea() {
+        app.buttons["打开训练计划"].tap()
+        XCTAssertTrue(app.navigationBars["训练计划"].waitForExistence(timeout: 10))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
+        start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.45)))
+        XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.navigationBars["训练计划"].exists, "Native edge-back must pop the destination")
+        app.buttons["打开训练计划"].tap()
+        XCTAssertTrue(app.navigationBars["训练计划"].waitForExistence(timeout: 10))
+        capture("11-visible-back")
+        start.press(forDuration: 0.1,
+                    thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.13, dy: 0.45)),
+                    withVelocity: XCUIGestureVelocity(rawValue: 50), thenHoldForDuration: 0.4)
+        XCTAssertTrue(app.navigationBars["训练计划"].exists, "A short, slow edge gesture must be cancellable")
+        app.buttons["navigation.back"].tap()
+        XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 10))
+        scrollTo(app.buttons["today.body"])
+        let target = app.buttons["today.body"]
+        XCTAssertTrue(target.isHittable)
+        XCTAssertLessThanOrEqual(target.frame.maxY, app.buttons["tab.设置"].frame.minY,
+                                 "Last content must clear the bottom bar without manual tab-height padding")
+        capture("11-home-safe-area")
+    }
+
+    func test12LargeAbilityAndKeyboard() {
+        launch(large: true)
+        scrollTo(app.buttons["today.ability"], limit: 50)
+        app.buttons["today.ability"].tap()
+        XCTAssertTrue(app.navigationBars["跑步能力"].waitForExistence(timeout: 15))
+        capture("12-large-ability-top")
+        scrollTo(app.staticTexts["基础指标"], limit: 40)
+        capture("12-large-ability-metrics")
+        back()
+        // Restore Today at the top without depending on a huge accessibility scroll.
+        tab("训练"); tab("今日")
+        app.buttons["打开训练计划"].tap()
+        scrollTo(app.buttons["编辑周计划"], limit: 60)
+        app.buttons["编辑周计划"].tap()
+        let field = app.textFields["plan.weeklyDistance"]
+        scrollTo(field, limit: 40)
+        field.tap()
+        XCTAssertTrue(app.buttons["keyboard.done"].waitForExistence(timeout: 5))
+        capture("12-large-editor-keyboard")
+        app.buttons["keyboard.done"].tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        app.buttons["取消"].tap()
+        capture("12-large-plan")
+    }
+
+    @MainActor
+    func test13SeriesInteractionDoesNotStealScroll() async throws {
+        tab("训练")
+        let (data, _) = try await URLSession.shared.data(from: URL(string: server + "/v1/workouts?limit=100")!)
+        let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let rows = payload?["items"] as? [[String: Any]] ?? []
+        guard let id = rows.first(where: { $0["hasRoute"] as? Bool == true })?["id"] as? String else {
+            throw XCTSkip("No route-bearing workout in acceptance fixture")
+        }
+        let row = app.buttons["workout." + id]
+        scrollTo(row); row.tap()
+        XCTAssertTrue(app.buttons["全部训练指标"].waitForExistence(timeout: 45))
+        scrollTo(app.staticTexts["训练时序"])
+        scrollTo(app.buttons["workout.series.next"])
+        app.buttons["workout.series.next"].tap()
+        XCTAssertTrue(app.staticTexts["workout.series.selection"].waitForExistence(timeout: 5))
+        capture("13-series-inspection")
+        scrollTo(app.staticTexts["课表分段"])
+        XCTAssertTrue(app.staticTexts["课表分段"].isHittable)
+        capture("13-series-page-scroll")
+    }
+
+    func test14ScrollPerformanceBaseline() {
+        let options = XCTMeasureOptions()
+        options.iterationCount = 3
+        measure(metrics: [XCTClockMetric(), XCTCPUMetric(application: app),
+                          XCTMemoryMetric(application: app),
+                          XCTOSSignpostMetric.scrollDecelerationMetric], options: options) {
+            app.swipeUp()
+            app.swipeUp()
+            app.swipeDown()
+            app.swipeDown()
+        }
+    }
     @MainActor
     func test08FaultStates() async throws {
         try await proxyMode("normal")
@@ -234,6 +334,7 @@ final class VisualAcceptance: XCTestCase {
         try await proxyMode("normal")
 
         app.launchArguments = ["-rai.appearance.skin", "technology", "-rai.serverURL", "http://127.0.0.1:8794",
+                               "-rai.privacy.amap.state", "declined",
                                "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
         XCTAssertTrue(app.buttons["tab.设置"].waitForExistence(timeout: 10))
@@ -242,7 +343,10 @@ final class VisualAcceptance: XCTestCase {
     }
 
     func test09AppearancePersistence() {
-        app.launchArguments = ["-rai.serverURL", server, "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        // Omit only the skin override: privacy still needs an explicit test
+        // choice on a fresh simulator, otherwise its consent sheet blocks taps.
+        app.launchArguments = ["-rai.serverURL", server, "-rai.privacy.amap.state", "declined",
+                               "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
         let techTab = app.buttons["tab.设置"]
         if techTab.exists {
@@ -295,6 +399,7 @@ final class VisualAcceptance: XCTestCase {
 
     private func launchProxy() {
         app.launchArguments = ["-rai.appearance.skin", "technology", "-rai.serverURL", "http://127.0.0.1:8793",
+                               "-rai.privacy.amap.state", "declined",
                                "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
     }

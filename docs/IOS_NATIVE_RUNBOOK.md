@@ -50,6 +50,22 @@ xcodebuild -workspace apps/ios/RAI.xcworkspace \
 2026-09-08 已在本机 Xcode 26.5 / iOS Simulator 26.5 通过该构建；2026-09-11 接入高德 pod 后，构建入口从 `RAI.xcodeproj` 改为 `RAI.xcworkspace`（`pod install` 后同样通过）。真实 iPhone
 安装、签名、HealthKit 权限和路线能力仍需按下方步骤验收。
 
+### 模拟器验收不到健康同步
+
+上面的命令产出的是**无签名模拟器包**，因此**没有 HealthKit 能力**：项目只在 device SDK 上挂
+`CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = RAI/RAI.entitlements`，模拟器包 `codesign -d --entitlements` 为空。
+此时 HealthKit 调用直接返回
+`Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement."`，
+`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift:293`，文案见 `RAI/HealthKitExport.swift:38`），
+首页与设置页显示「同步未完成」。
+
+模拟器的 Health 库本身也是空的：`~/Library/Developer/CoreSimulator/Devices/<udid>/data/Library/Health/healthdb.sqlite`
+没有样本，`Client/` 下没有 RAI 的授权记录。所以**模拟器上点「重试同步」不会成功，这是环境限制，不是同步逻辑缺陷**。
+模拟器能验收的是失败态 UI、离线缓存和上传前后的界面状态；真实 HealthKit 读取只能在真机上验收。
+
+给模拟器包手工 `codesign --force --sign - --entitlements RAI/RAI.entitlements` 补权限也不可行：
+权限确实写进签名，但 LaunchServices 会拒绝启动（`FBProcessExit code 64 launch-failed`，POSIX 162）。
+
 ## 首次连接
 
 在原生 App 的“设置”填写 API 服务地址和 Token。连接成功后应能看到 `serverId`、`athleteId`、`datasetEpoch` 和协议版本。不要填写手机上的 `127.0.0.1`；服务端应绑定手机可达地址，并按现有策略配置 HTTPS/局域网访问。
@@ -66,6 +82,7 @@ xcodebuild -workspace apps/ios/RAI.xcworkspace \
 | 目标保存冲突 | 重新读取服务端目标，确认后再保存 |
 | 训练详情没有底图 | 先确认已同意隐私说明（设置 → 地图底图）；再确认 `pod install` 打印了「已注入高德 Key」，Key 已绑本 App Bundle ID |
 | 同步中断 | 再次打开 App，任务会从本机 `sync.sqlite` 和保留的 ZIP 恢复 |
+| 模拟器上「同步未完成」 | 预期结果：模拟器包没有 HealthKit entitlement、Health 库也没有样本（见上文「模拟器验收不到健康同步」）；到真机按「首次连接」授权后验收 |
 | 清缓存后内容消失 | 重新联网读取；服务端数据、凭证和同步任务不应被清除 |
 | `ld: framework 'Pods_RAI' not found` | 用 `RAI.xcworkspace` 构建；先 `cd apps/ios && pod install` |
 | `pod: command not found` | CocoaPods 已装但不在 PATH：`export PATH="$(gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/{print $2}'):$PATH"`，或 `gem install cocoapods` |

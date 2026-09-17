@@ -1,0 +1,227 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/../../.."
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+# 刻意**不加** `-O`：脚本里的 `check` 走 `precondition`，`-O` 下断言仍会执行
+# （实测失败同样 EXIT 132），但失败消息会被吞掉，只剩 `Illegal instruction: 4` ——
+# 排障时得重新编一遍才知道挂的是哪条。末尾打印的毫秒数只是主机微基准，不是设备帧率，
+# 也不参与任何断言，没有为它牺牲可诊断性的理由（`run-model-tests.sh` 同样不带 `-O`）。
+# `-disable-sandbox` 与 `run-model-tests.sh` / `run-session-tests.sh` 保持一致。当前编译
+# 单元里 `@Observable` 计数为 0，所以本脚本今天不带也能过；但那是巧合而不是保证 —— 一旦
+# 有人往这些文件里加 `@Observable`，触发宏插件后失败形态会是 `sandbox_apply: Operation
+# not permitted` 加满屏 `produced malformed response`，与真实错误完全无关。预置掉这个坑。
+xcrun swiftc -parse-as-library -disable-sandbox apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/VerdictPresentation.swift \
+  apps/ios/RAI/Skins/Technology/TechPlotData.swift \
+  apps/ios/RAI/Skins/Technology/TechSyncPresentation.swift \
+  apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift \
+  apps/ios/tests/TechPresentationRegression.swift -o "$tmp/tech-presentation"
+"$tmp/tech-presentation"
+python3 - <<'PY'
+import pathlib, re
+
+source = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTheme.swift").read_text()
+colors = {}
+for name, r, g, b in re.findall(
+    r"static let (\w+) = Color\(red: (\d+)/255, green: (\d+)/255, blue: (\d+)/255\)", source
+):
+    colors[name] = tuple(int(x) / 255 for x in (r, g, b))
+muted = source.split("static let muted =", 1)[1].split("static let elevated", 1)[0]
+variants = re.findall(r"UIColor\(red: ([\d.]+), green: ([\d.]+), blue: ([\d.]+), alpha: 1\)", muted)
+assert len(variants) == 2, "Both default and high-contrast muted colors must be verified"
+for index, variant in enumerate(variants):
+    colors[f"muted-{index}"] = tuple(map(float, variant))
+
+def luminance(rgb):
+    linear = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in rgb]
+    return sum(v * w for v, w in zip(linear, [0.2126, 0.7152, 0.0722]))
+
+def contrast(foreground, background):
+    high, low = sorted([luminance(foreground), luminance(background)], reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+def blend(foreground, background, alpha):
+    return tuple(alpha * top + (1 - alpha) * bottom for top, bottom in zip(foreground, background))
+
+def token(pattern, text, label):
+    """从源码里取 token 名。取不到必须报错，不能静默跳过 —— 否则源码一改写，
+    这条断言就会悄悄失效，门禁变成装饰。"""
+    match = re.search(pattern, text, re.S)
+    assert match, f"Could not locate {label}; the contrast gate must fail loudly instead of skipping"
+    return match.groups()
+
+checks = 0
+for foreground in ["ink", "cyan", "coral", "yellow", "leaf", "muted-0", "muted-1"]:
+    for background in ["background", "paper", "elevated"]:
+        ratio = contrast(colors[foreground], colors[background])
+        assert ratio >= 4.5, f"{foreground} on {background}: {ratio:.2f} < 4.5"
+        checks += 1
+
+# ---------------------------------------------------------------------------
+# 反色控件：文字压在**填充色**上，判据是"文字色 / 填充色"。
+#
+# 旧版写法是 `for fill in ["action","coral"]: (lum(fill)+.05)/(lum(background)+.05)`，
+# 消息写着 "Action label on {fill}"，算式里却既没有文字色、也没有显式排序 —— 它验证的
+# 其实是"填充色与页面底色可区分"。今天两者数值恰好相同（background 最暗、填充最亮），
+# 所以它看起来是对的；但按钮文字从 `background` 改成 `ink` 时它不会有任何反应
+# （实测 `ink` on `coral` 只有 2.45:1，on `action` 1.55:1，都该被拦下）。
+#
+# 因此这里改为从**源码**取"文字 token / 填充 token"，让断言跟着代码走。
+# ---------------------------------------------------------------------------
+primary = source.split("struct TechPrimaryButton", 1)[1].split("struct TechProgressBar", 1)[0]
+(label_token,) = token(
+    r"foregroundStyle\(isDisabled \? TechColor\.\w+ : TechColor\.(\w+)\)", primary,
+    "TechPrimaryButton label color")
+(fill_token,) = token(
+    r"else \{ Capsule\(\)\.fill\(TechColor\.(\w+)\) \}", primary,
+    "TechPrimaryButton enabled fill color")
+
+sheet = pathlib.Path("apps/ios/RAI/Skins/Technology/TechConfirmationSheet.swift").read_text()
+destructive = sheet.split("if destructive {", 1)[1].split("} else {", 1)[0]
+(destructive_label,) = token(r"foregroundStyle\(TechColor\.(\w+)\)", destructive,
+                             "destructive confirmation label color")
+(destructive_fill,) = token(r"background\(TechColor\.(\w+), in: Capsule\(\)\)", destructive,
+                            "destructive confirmation fill color")
+
+for label, foreground, fill in [
+    ("Primary button label", label_token, fill_token),
+    ("Destructive confirmation label", destructive_label, destructive_fill),
+]:
+    ratio = contrast(colors[foreground], colors[fill])
+    assert ratio >= 4.5, f"{label} ({foreground} on {fill}): {ratio:.2f} < 4.5"
+    checks += 1
+
+# 配速区间徽章：文字压在 `cyan.opacity(0.75)` 上，必须按**叠加后**的颜色算。
+# 承载面取 `paper`（本皮肤里最暗的面板底），叠加结果最暗、深色文字对比度最低，即最不利情形。
+detail = pathlib.Path("apps/ios/RAI/Skins/Technology/TechAbilityDetailView.swift").read_text()
+badge = re.search(
+    r"foregroundStyle\(TechColor\.(\w+)\)\s*\n\s*\.padding\(6\)\s*\n"
+    r"\s*\.background\(TechColor\.(\w+)\.opacity\(([\d.]+)\)",
+    detail)
+assert badge, "Could not locate the pace-zone badge; the contrast gate must fail loudly instead of skipping"
+badge_label, badge_fill, badge_alpha = badge.group(1), badge.group(2), float(badge.group(3))
+ratio = contrast(colors[badge_label], blend(colors[badge_fill], colors["paper"], badge_alpha))
+assert ratio >= 4.5, (f"Pace zone badge label ({badge_label} on {badge_fill}@{badge_alpha} "
+                      f"over paper): {ratio:.2f} < 4.5")
+checks += 1
+
+# ---------------------------------------------------------------------------
+# 「有数据、有契约、没有展示位」是这套皮肤上真实复发过的一类缺陷：改版今日页时把
+# 「训练阶段 / 比赛目标 / 最近一次训练反馈」整块删掉（`HEAD:bd1ee25` 的
+# `TechViews.swift:382-434`），5 个字段就失去入口 —— 契约还在给值、服务端还在算、
+# 像素风还在显示，而脚本、类型检查、UI 回归全绿，只是科技风用户永远看不到。
+#
+# 2026-09-17 的初版只钉了当时出事的那 5 个字段，那是"门禁宽度 < 结论宽度"：报告说的
+# 是"契约字段都有入口"，断言只守 5 个 —— 删掉 `injuryFlags` 整块照样全绿（实测）。
+# 因此这里把**全集改为从契约源码解析**，并强制「锚点 ∪ 例外 == 契约字段全集」：
+# 契约将来新增字段而没人给展示位时，这条断言会自己变红，不需要有人记得回来改清单。
+# 例外必须逐条写明理由，不允许静默漏过。
+# ---------------------------------------------------------------------------
+tech_views = pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_text()
+
+contract = pathlib.Path("packages/api-contracts/src/index.ts").read_text()
+today_interface = re.search(r"export interface MobileTodayResponse \{(.*?)\n\}", contract, re.S)
+assert today_interface, ("Could not locate MobileTodayResponse in the contract; the field "
+                         "coverage gate must fail loudly instead of skipping")
+contract_fields = re.findall(r"^\s{2}(\w+)\??:", today_interface.group(1), re.M)
+assert len(contract_fields) >= 20, (
+    f"MobileTodayResponse parsed as {len(contract_fields)} fields, which is implausibly few — "
+    "the regex stopped matching the contract, it did not shrink.")
+
+# 每个字段在科技风里的取值锚点。注意 `injuryFlags` 的锚点在**二级页**
+# （今日页「身体指标」链接 → `TechBodyMetricsView`），今日页本身不渲染它；
+# 像素风是今日页内联。这是有意的信息降级，不是缺失。
+field_anchors = {
+    "generatedAt": "today.generatedAt",
+    "latestDataDate": "today.latestDataDate",
+    "freshness": "today.freshness",
+    "today": "data.today.",
+    "week": "data.week.",
+    "weekDaily": "data.weekDaily",
+    "recentWorkouts": "today.recentWorkouts",
+    "ability": "data.ability.",
+    "calibration": "data.calibration.",
+    "verdict": "data.verdict.",
+    "nextSession": "data.nextSession",
+    "recovery": "data.recovery.",
+    "postRun": "today.postRun",
+    "weekStructure": "data.weekStructure.",
+    "race": "data.race.",
+    "injuryFlags": "summary.injuryFlags",
+    "weekPlan": "data.weekPlan",
+    "phase": "data.phase",
+    "lock": "data.lock.",
+}
+# 明确不需要展示位的字段，逐条写理由。
+metadata_only = {
+    "timezone": "时区元数据；界面统一按 Asia/Shanghai 呈现",
+    "lastSyncedAt": "同步时间戳；时效性已由 freshness 承载",
+    "recommendationRevision": "CAS 版本号，仅供写入冲突检测",
+}
+
+unaccounted = set(contract_fields) - set(field_anchors) - set(metadata_only)
+if unaccounted:
+    raise AssertionError(
+        f"MobileTodayResponse grew {sorted(unaccounted)} with no display slot and no documented "
+        "reason. Give it an anchor in TechViews.swift, or list it in metadata_only with a reason — "
+        "payload present + no display slot is the 2026-09-17 regression.")
+stale = (set(field_anchors) | set(metadata_only)) - set(contract_fields)
+assert not stale, f"field gate still lists {sorted(stale)}, which MobileTodayResponse no longer has"
+
+for field, anchor in sorted(field_anchors.items()):
+    assert anchor in tech_views, (
+        f"Technology skin stopped rendering {field} ({anchor!r} missing from TechViews.swift). "
+        "Payload present + contract present + no display slot is exactly the 2026-09-17 "
+        "regression, so this gate fails instead of passing quietly.")
+
+# 闭集枚举：契约里的每个取值都必须在两套皮肤的映射函数里出现，多一个少一个都算红。
+# 域外值会以机器码形式漏到界面上（`need_sync` / `too_hard` / `half_marathon`）。
+def mapped_cases(source, function_name):
+    """取 `func x(_ y: String) -> String` 的 switch 分支值；函数体以顶格 `}` 收尾。"""
+    found = re.search(rf"func {function_name}\(_ \w+: String\) -> String \{{(.*?)\n\}}", source, re.S)
+    assert found, f"Could not locate {function_name}; the enum gate must fail loudly instead of skipping"
+    return set(re.findall(r'case "([^"]+)": return', found.group(1)))
+
+tech_enums = pathlib.Path("apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift").read_text()
+native_format = pathlib.Path("apps/ios/RAI/NativeFormat.swift").read_text()
+
+enum_checks = 0
+for enum_name, values, mappings in [
+    ("MobileDayPhase", ["need_sync", "morning_open", "locked", "post_run", "rest_done"],
+     [("techPhaseName", tech_enums), ("nativeDayPhaseName", native_format)]),
+    ("MobileStimulusMatch", ["aligned", "too_hard", "too_easy", "unknown"],
+     [("techStimulusMatchName", tech_enums), ("nativeStimulusMatchName", native_format)]),
+    ("MobileRaceDistance", ["five_k", "ten_k", "half_marathon"],
+     [("techRaceDistanceName", tech_enums), ("nativeRaceDistanceName", native_format)]),
+]:
+    expected = set(values)
+    for function_name, source in mappings:
+        actual = mapped_cases(source, function_name)
+        assert actual == expected, (
+            f"{function_name} does not cover {enum_name}: missing {sorted(expected - actual)}, "
+            f"unexpected {sorted(actual - expected)}")
+        enum_checks += 1
+
+print(f"Technology color tokens: {checks} foreground/background pairs meet the 4.5:1 project target")
+print("Token checks do not replace rendered-view accessibility auditing.")
+print(f"Field coverage: {len(field_anchors)}/{len(contract_fields)} MobileTodayResponse fields have a "
+      f"Technology display slot and {len(metadata_only)} are metadata by design "
+      f"({', '.join(sorted(metadata_only))}); {enum_checks} closed-set enum mappings cover every "
+      f"contract value.")
+
+# 映射函数存在 ≠ 映射函数被调用：把 `nativeDayPhaseName(data.phase)` 改回直出
+# `data.phase` 时，上面的穷举断言依然全绿（函数体一个字没动），用户却重新看到
+# `morning_open`。所以再钉一层"展示层确实经过映射"。这里只断言函数被调用，不锁
+# 参数写法 —— 防的是直出回归，不是合法重构。
+for file_name, functions in [
+    ("apps/ios/RAI/NativeViews.swift", ["nativeDayPhaseName(", "nativeStimulusMatchName(", "nativeRaceDistanceName("]),
+    ("apps/ios/RAI/Skins/Technology/TechViews.swift", ["techPhaseName(", "techStimulusMatchName(", "techRaceDistanceName("]),
+]:
+    body = pathlib.Path(file_name).read_text()
+    for call in functions:
+        assert call in body, (
+            f"{file_name} no longer calls {call} — the mapping exists but the view bypasses it, "
+            "which is how contract machine codes reach the screen.")
+print("Enum mappings are wired into both skins' views, not just defined.")
+PY

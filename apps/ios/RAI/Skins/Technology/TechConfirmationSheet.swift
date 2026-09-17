@@ -2,6 +2,7 @@
 import SwiftUI
 
 struct TechConfirmationSheet: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let title: String
     let message: String
     var symbol = "exclamationmark.circle"
@@ -25,9 +26,9 @@ struct TechConfirmationSheet: View {
                     cancelButton
                     Button(action: confirm) {
                         Text(confirmTitle).font(.subheadline.weight(.semibold))
-                            .foregroundStyle(TechColor.ink).frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(TechColor.background).padding(12).frame(maxWidth: .infinity, minHeight: 44)
                             .background(TechColor.coral, in: Capsule())
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(TechPressStyle())
                 } else {
                     TechPrimaryButton(title: confirmTitle, action: confirm)
                     cancelButton
@@ -35,10 +36,10 @@ struct TechConfirmationSheet: View {
             }.padding(22)
         }
         .background(TechColor.paper)
-        .presentationDetents([.height(310), .large])
+        .presentationDetents(typeSize >= .xxxLarge ? [.large] : [.height(360), .large])
         .presentationCornerRadius(24)
-        .presentationDragIndicator(.hidden)
-        .presentationBackground(TechColor.paper)
+        .presentationDragIndicator(.visible)
+        .presentationBackground(TechColor.elevated)
         .preferredColorScheme(.dark)
         .accessibilityIdentifier("technology.confirmation")
     }
@@ -49,7 +50,7 @@ struct TechConfirmationSheet: View {
             .frame(maxWidth: .infinity, minHeight: 44)
             .background(destructive ? TechColor.grid.opacity(0.5) : .clear, in: Capsule())
             .overlay(Capsule().strokeBorder(destructive ? .clear : TechColor.cyan.opacity(0.6), lineWidth: 1))
-            .buttonStyle(.plain)
+            .buttonStyle(TechPressStyle())
     }
 }
 

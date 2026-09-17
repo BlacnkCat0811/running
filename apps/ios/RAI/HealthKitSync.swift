@@ -22,7 +22,7 @@ final class HealthKitSync {
     private var activeIdentity: RaiHandshake?
     private let taskStore = SyncTaskStore()
     private let api = RaiAPIClient()
-    private var syncTask: Task<Void, Never>?
+    private let syncOwner = HealthSyncTaskOwner()
 
     var hasCompletedSync: Bool { lastSyncAt != nil }
 
@@ -69,7 +69,7 @@ final class HealthKitSync {
     }
 
     func syncIfNeeded(to serverURL: URL?, apiToken: String = "", force: Bool = false) async {
-        guard let serverURL, !isBusy else { return }
+        guard let serverURL, !syncOwner.isRunning else { return }
         let urlScope = Self.urlScope(for: serverURL)
         if !force {
             let last = UserDefaults.standard.object(forKey: scopedKey(Self.lastAutoSyncKey, scope: urlScope)) as? Date
@@ -79,12 +79,8 @@ final class HealthKitSync {
     }
 
     func cancelSync() {
-        syncTask?.cancel()
-        syncTask = nil
-        if isBusy {
-            phase = "cancelled"
-            message = "同步已取消"
-        }
+        guard syncOwner.cancel() || isBusy else { return }
+        finishCancelled()
     }
 
     func startForegroundObserver(onChange: @escaping @MainActor () async -> Void) {
@@ -113,6 +109,13 @@ final class HealthKitSync {
     }
 
     func sync(to serverURL: URL?, apiToken: String = "", full: Bool = false) async {
+        await syncOwner.run { [weak self] in
+            guard let self else { return }
+            await self.performSync(to: serverURL, apiToken: apiToken, full: full)
+        }
+    }
+
+    private func performSync(to serverURL: URL?, apiToken: String, full: Bool) async {
         guard !isBusy else { return }
         guard let serverURL else {
             lastError = "请先连接 RAI 服务"
@@ -150,15 +153,13 @@ final class HealthKitSync {
         }
         // 取消必须在任何网络/HealthKit 工作前生效。本函数不是 throwing，不能写 `try`；
         // 原先的 `try? Task.checkCancellation()` 会把取消错误直接吞掉，检查形同虚设。
-        guard !Task.isCancelled else {
-            phase = "cancelled"
-            message = "同步已取消"
-            return
-        }
+        guard !Task.isCancelled else { finishCancelled(); return }
         let identity: RaiHandshake
         do {
             identity = try await api.handshake(baseURL: serverURL, token: apiToken)
+            try checkCancellation()
         } catch {
+            if handleCancellation(error) { return }
             lastError = friendlyMessage(error)
             message = nil
             phase = "failed"
@@ -175,10 +176,11 @@ final class HealthKitSync {
                 phase = task.phase
                 message = "正在恢复上次同步任务"
                 let inspection = try await inspect(sourceId: sourceId, on: serverURL)
+                try checkCancellation()
                 if inspection.status == "unchanged" {
                     if task.exportEnd == nil { clearExportWatermark() }
-                    let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
-                    markSuccess(
+                    let cleaned = try await deleteUpload(sourceId: sourceId, on: serverURL)
+                    try markSuccess(
                         message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: task.exportEnd,
                         workoutCount: task.workoutCount,
@@ -193,24 +195,27 @@ final class HealthKitSync {
                 if let existing = task.jobId {
                     jobId = existing
                 } else {
+                    try checkCancellation()
                     let job = try await startImport(sourceId: sourceId, on: serverURL)
+                    try checkCancellation()
                     updateTask(jobId: job.id, phase: "recomputing")
                     jobId = job.id
                 }
                 let finished = try await waitForJob(id: jobId, on: serverURL)
                 if task.exportEnd == nil { clearExportWatermark() }
-                    markSuccess(
-                        message: "已从上次同步任务恢复",
-                        exportEnd: task.exportEnd,
-                        workoutCount: task.workoutCount,
-                        advanceWatermark: task.exportEnd != nil,
-                        anchor: task.pendingAnchor
-                    )
+                try markSuccess(
+                    message: "已从上次同步任务恢复",
+                    exportEnd: task.exportEnd,
+                    workoutCount: task.workoutCount,
+                    advanceWatermark: task.exportEnd != nil,
+                    anchor: task.pendingAnchor
+                )
                 clearTask()
                 clearPersistedUpload()
                 if finished.status == "succeeded" { clearFailedZip() }
                 return
             } catch {
+                if handleCancellation(error) { return }
                 lastError = friendlyMessage(error)
                 message = nil
                 phase = "failed"
@@ -226,15 +231,17 @@ final class HealthKitSync {
                 let sourceId = try await withRetry(attempts: 1) {
                     try await self.upload(zipURL: persisted, to: serverURL, batchId: task.payloadHash)
                 }
+                try checkCancellation()
                 updateTask(sourceId: sourceId, phase: "importing")
                 message = "正在检查健康数据"
                 let inspection = try await withRetry {
                     try await self.inspect(sourceId: sourceId, on: serverURL)
                 }
+                try checkCancellation()
                 if inspection.status == "unchanged" {
                     if task.exportEnd == nil { clearExportWatermark() }
-                    let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
-                    markSuccess(
+                    let cleaned = try await deleteUpload(sourceId: sourceId, on: serverURL)
+                    try markSuccess(
                         message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: task.exportEnd,
                         workoutCount: task.workoutCount,
@@ -242,15 +249,17 @@ final class HealthKitSync {
                         anchor: task.pendingAnchor
                     )
                 } else {
+                    try checkCancellation()
                     phase = "recomputing"
                     message = "正在导入并计算跑力"
                     let job = try await withRetry {
                         try await self.startImport(sourceId: sourceId, on: serverURL)
                     }
+                    try checkCancellation()
                     updateTask(jobId: job.id, phase: "recomputing")
                     let finished = try await waitForJob(id: job.id, on: serverURL)
                     if task.exportEnd == nil { clearExportWatermark() }
-                    markSuccess(
+                    try markSuccess(
                         message: "已从保存的健康数据批次恢复导入",
                         exportEnd: task.exportEnd,
                         workoutCount: task.workoutCount,
@@ -264,6 +273,7 @@ final class HealthKitSync {
                 phase = "succeeded"
                 return
             } catch {
+                if handleCancellation(error) { return }
                 lastError = friendlyMessage(error)
                 message = nil
                 phase = "failed"
@@ -272,6 +282,7 @@ final class HealthKitSync {
             }
         }
         var zipURL: URL?
+        var transientExportURL: URL?
         var exportedThrough: Date?
         do {
             // Asking is not the same as being answered. HealthKit returns without
@@ -279,7 +290,8 @@ final class HealthKitSync {
             // nothing — so an empty export used to be indistinguishable from "not
             // authorized" and was reported as a successful sync of 0 runs. Ask for
             // the request status instead and stop with a cause the user can act on.
-            let authorization = await HealthKitExport.readAuthorizationState()
+            let authorization = try await HealthKitExport.readAuthorizationState()
+            try checkCancellation()
             switch authorization {
             case .unavailable:
                 lastError = HealthKitExportError.unavailable.localizedDescription
@@ -302,6 +314,7 @@ final class HealthKitSync {
             case .decided:
                 break
             }
+            try checkCancellation()
             if full {
                 UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))
             }
@@ -313,14 +326,16 @@ final class HealthKitSync {
                 let sourceId = try await withRetry(attempts: 1) {
                     try await self.upload(zipURL: failed, to: serverURL, batchId: try? self.fileHash(failed))
                 }
+                try checkCancellation()
                 message = "正在检查健康数据"
                 let inspection = try await withRetry {
                     try await self.inspect(sourceId: sourceId, on: serverURL)
                 }
+                try checkCancellation()
                 if inspection.status == "unchanged" {
                     if exportedThrough == nil { clearExportWatermark() }
-                    let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
-                    markSuccess(
+                    let cleaned = try await deleteUpload(sourceId: sourceId, on: serverURL)
+                    try markSuccess(
                         message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: exportedThrough,
                         workoutCount: lastWorkoutCount ?? 0,
@@ -330,13 +345,15 @@ final class HealthKitSync {
                     clearFailedZip()
                     return
                 }
+                try checkCancellation()
                 message = "正在导入并计算跑力"
                 let job = try await withRetry {
                     try await self.startImport(sourceId: sourceId, on: serverURL)
                 }
                 _ = try await waitForJob(id: job.id, on: serverURL)
+                try checkCancellation()
                 if exportedThrough == nil { clearExportWatermark() }
-                markSuccess(
+                try markSuccess(
                     message: "已从上次失败的上传恢复导入",
                     exportEnd: exportedThrough,
                     workoutCount: lastWorkoutCount ?? 0,
@@ -353,20 +370,27 @@ final class HealthKitSync {
             let anchor = full ? nil : UserDefaults.standard.data(forKey: scopedKey(Self.lastWorkoutAnchorKey))
             let onProgress: @Sendable (String) async -> Void = { [weak self] status in
                 await MainActor.run { [weak self] in
-                    self?.message = status
+                    guard let self, !Task.isCancelled, self.phase != "cancelled" else { return }
+                    self.message = status
                 }
             }
-            let exported = try await Task.detached(priority: .userInitiated) {
-                try Task.checkCancellation()
-                return try await HealthKitExport.exportArchive(
+            let exported = try await HealthSyncCancellation.runDetached(
+                priority: .userInitiated,
+                onCancelledResult: { result in
+                    try? FileManager.default.removeItem(at: result.zipURL)
+                }
+            ) {
+                try await HealthKitExport.exportArchive(
                     from: lowerBound,
                     workoutAnchor: anchor,
                     onProgress: onProgress
                 )
-            }.value
-            try Task.checkCancellation()
+            }
+            transientExportURL = exported.zipURL
+            try checkCancellation()
             exportedThrough = exported.exportedThrough
             let persisted = try persistZip(exported.zipURL)
+            transientExportURL = nil
             zipURL = persisted
             let pendingAnchor = exported.workoutAnchor
             phase = "uploading"
@@ -385,20 +409,23 @@ final class HealthKitSync {
                 exportEnd: exported.exportedThrough,
                 workoutCount: exported.workoutCount
             ))
+            try checkCancellation()
             message = "正在上传 \(exported.workoutCount) 次跑步"
             // 同上：大包上传只尝试一次。
             let sourceId = try await withRetry(attempts: 1) {
                 try await self.upload(zipURL: persisted, to: serverURL, batchId: payloadHash)
             }
+            try checkCancellation()
             phase = "importing"
             updateTask(sourceId: sourceId, phase: "importing")
             message = "正在检查健康数据"
             let inspection = try await withRetry {
                 try await self.inspect(sourceId: sourceId, on: serverURL)
             }
+            try checkCancellation()
             if inspection.status == "unchanged" {
-                let cleaned = await deleteUpload(sourceId: sourceId, on: serverURL)
-                markSuccess(
+                let cleaned = try await deleteUpload(sourceId: sourceId, on: serverURL)
+                try markSuccess(
                     message: exportMessage(base: "Apple 健康数据已是最新", exported: exported)
                         + (cleaned ? "" : Self.cleanupNoteSuffix),
                     exportEnd: exported.exportedThrough,
@@ -407,14 +434,16 @@ final class HealthKitSync {
                     anchor: pendingAnchor
                 )
             } else {
+                try checkCancellation()
                 phase = "recomputing"
                 message = "正在导入并计算跑力"
                 let job = try await withRetry {
                     try await self.startImport(sourceId: sourceId, on: serverURL)
                 }
+                try checkCancellation()
                 updateTask(sourceId: sourceId, jobId: job.id, phase: "recomputing")
                 let finished = try await waitForJob(id: job.id, on: serverURL)
-                markSuccess(
+                try markSuccess(
                     message: importMessage(exported: exported, job: finished),
                     exportEnd: exported.exportedThrough,
                     workoutCount: exported.workoutCount,
@@ -423,21 +452,22 @@ final class HealthKitSync {
                 )
                 clearTask()
             }
-        } catch is CancellationError {
-            phase = "failed"
-            message = "已取消同步"
         } catch {
+            if let transientExportURL {
+                try? FileManager.default.removeItem(at: transientExportURL)
+            }
+            if handleCancellation(error) { return }
             phase = "failed"
             lastError = friendlyMessage(error)
             message = nil
             if let zipURL { rememberFailedZip(zipURL, exportedThrough: exportedThrough) }
         }
-        if lastError == nil, phase != "failed", let zipURL {
+        if lastError == nil, phase != "failed", phase != "cancelled", let zipURL {
             try? FileManager.default.removeItem(at: zipURL)
             clearFailedZip()
             clearTask()
         }
-        if lastError == nil, phase != "failed" { phase = "succeeded" }
+        if lastError == nil, phase != "failed", phase != "cancelled" { phase = "succeeded" }
         #else
         lastError = "读取 Apple 健康只能在 iPhone 上进行"
         #endif
@@ -450,6 +480,26 @@ final class HealthKitSync {
         }
     }
 
+    private func finishCancelled() {
+        lastError = nil
+        phase = "cancelled"
+        message = "同步已取消"
+    }
+
+    private func checkCancellation() throws {
+        try HealthSyncCancellation.check(manuallyCancelled: phase == "cancelled")
+    }
+
+    @discardableResult
+    private func handleCancellation(_ error: Error) -> Bool {
+        let urlError = error as? URLError
+        guard error is CancellationError || urlError?.code == .cancelled || Task.isCancelled else {
+            return false
+        }
+        finishCancelled()
+        return true
+    }
+
     private func markSuccess(
         message: String,
         exportEnd: Date?,
@@ -457,7 +507,8 @@ final class HealthKitSync {
         advanceWatermark: Bool,
         anchor: Data? = nil,
         recordWorkoutCount: Bool = true
-    ) {
+    ) throws {
+        try checkCancellation()
         let now = Date()
         if let anchor {
             UserDefaults.standard.set(anchor, forKey: scopedKey(Self.lastWorkoutAnchorKey))
@@ -533,13 +584,15 @@ final class HealthKitSync {
     #endif
 
     private func upload(zipURL: URL, to serverURL: URL, batchId: String?) async throws -> String {
+        try checkCancellation()
         let boundary = "rai-\(UUID().uuidString)"
         let multipartURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("rai-upload-\(UUID().uuidString).multipart")
         defer { try? FileManager.default.removeItem(at: multipartURL) }
-        try await Task.detached(priority: .utility) {
+        try await HealthSyncCancellation.runDetached(priority: .utility) {
             try writeHealthKitMultipart(zipURL: zipURL, boundary: boundary, to: multipartURL)
-        }.value
+        }
+        try checkCancellation()
 
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/imports/uploads"))
         addAuthorization(to: &request)
@@ -550,58 +603,70 @@ final class HealthKitSync {
         }
         request.timeoutInterval = 600
         let (data, response) = try await session.upload(for: request, fromFile: multipartURL)
+        try checkCancellation()
         try throwIfNeeded(response, data: data)
         return try JSONDecoder().decode(UploadResponse.self, from: data).sourceId
     }
 
     private func inspect(sourceId: String, on serverURL: URL) async throws -> InspectionResponse {
+        try checkCancellation()
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/imports/inspect"))
         addAuthorization(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["sourceId": sourceId])
         let (data, response) = try await session.data(for: request)
+        try checkCancellation()
         try throwIfNeeded(response, data: data)
         return try JSONDecoder().decode(InspectionResponse.self, from: data)
     }
 
     private func startImport(sourceId: String, on serverURL: URL) async throws -> ImportJobResponse {
+        try checkCancellation()
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-jobs"))
         addAuthorization(to: &request)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(["sourceId": sourceId])
         let (data, response) = try await session.data(for: request)
-        if (response as? HTTPURLResponse)?.statusCode == 409,
-           let active = try? await activeImport(on: serverURL),
-           active.sourceId == sourceId {
-            return active
+        try checkCancellation()
+        if (response as? HTTPURLResponse)?.statusCode == 409 {
+            if let active = try await activeImport(on: serverURL), active.sourceId == sourceId {
+                return active
+            }
         }
         try throwIfNeeded(response, data: data)
         return try JSONDecoder().decode(ImportJobResponse.self, from: data)
     }
 
     private func activeImport(on serverURL: URL) async throws -> ImportJobResponse? {
+        try checkCancellation()
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-jobs/active"))
         addAuthorization(to: &request)
         request.timeoutInterval = 15
         let (data, response) = try await session.data(for: request)
+        try checkCancellation()
         try throwIfNeeded(response, data: data)
         if data.isEmpty { return nil }
         return try JSONDecoder().decode(ImportJobResponse?.self, from: data)
     }
 
-    private func deleteUpload(sourceId: String, on serverURL: URL) async -> Bool {
+    private func deleteUpload(sourceId: String, on serverURL: URL) async throws -> Bool {
+        try checkCancellation()
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-sources/\(sourceId)"))
         addAuthorization(to: &request)
         request.httpMethod = "DELETE"
         do {
             let (_, response) = try await session.data(for: request)
+            try checkCancellation()
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             // 404 means the staging upload is already gone, which is the outcome
             // this call wants — only an uncompromising failure is worth reporting.
             return (200...299).contains(status) || status == 404
         } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled || Task.isCancelled {
+                throw CancellationError()
+            }
             // Deliberately not rethrown: the import already landed, and failing the
             // sync over an uncollected temporary would be a worse trade. The caller
             // says so in the message instead of dropping it on the floor.
@@ -620,6 +685,7 @@ final class HealthKitSync {
             try Task.checkCancellation()
             do {
                 let job = try await getJob(id: id, on: serverURL)
+                try checkCancellation()
                 idleFailures = 0
                 if !job.message.isEmpty {
                     message = job.message
@@ -664,10 +730,12 @@ final class HealthKitSync {
     }
 
     private func getJob(id: String, on serverURL: URL) async throws -> ImportJobResponse {
+        try checkCancellation()
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-jobs/\(id)"))
         addAuthorization(to: &request)
         request.timeoutInterval = 15
         let (data, response) = try await session.data(for: request)
+        try checkCancellation()
         try throwIfNeeded(response, data: data)
         return try JSONDecoder().decode(ImportJobResponse.self, from: data)
     }
@@ -690,7 +758,7 @@ final class HealthKitSync {
     ) async throws -> T {
         var lastError: Error?
         for attempt in 0..<attempts {
-            try Task.checkCancellation()
+            try checkCancellation()
             do {
                 return try await operation()
             } catch is CancellationError {
@@ -938,6 +1006,7 @@ private struct SyncTaskState: Codable {
 }
 
 nonisolated private func writeHealthKitMultipart(zipURL: URL, boundary: String, to outputURL: URL) throws {
+    try Task.checkCancellation()
     FileManager.default.createFile(atPath: outputURL.path, contents: nil)
     let output = try FileHandle(forWritingTo: outputURL)
     defer { try? output.close() }
@@ -949,12 +1018,15 @@ nonisolated private func writeHealthKitMultipart(zipURL: URL, boundary: String, 
 
     """.utf8)
     try output.write(contentsOf: header)
+    try Task.checkCancellation()
     let input = try FileHandle(forReadingFrom: zipURL)
     defer { try? input.close() }
     while true {
+        try Task.checkCancellation()
         let chunk = try input.read(upToCount: 1024 * 1024) ?? Data()
         if chunk.isEmpty { break }
         try output.write(contentsOf: chunk)
     }
+    try Task.checkCancellation()
     try output.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
 }

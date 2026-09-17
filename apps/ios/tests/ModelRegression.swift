@@ -44,6 +44,54 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() { lock.lock(); stopped = true; lock.unlock() }
 }
 
+final class RequestLog: @unchecked Sendable {
+    struct Entry {
+        let host: String
+        let path: String
+        let method: String
+        let body: Data?
+    }
+
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+
+    func record(_ request: URLRequest) {
+        var body = request.httpBody
+        if body == nil, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count > 0 else { break }
+                data.append(buffer, count: count)
+            }
+            body = data
+        }
+        lock.lock()
+        entries.append(Entry(
+            host: request.url?.host ?? "",
+            path: request.url?.path ?? "",
+            method: request.httpMethod ?? "GET",
+            body: body
+        ))
+        lock.unlock()
+    }
+
+    func count(method: String, path: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.filter { $0.method == method && $0.path == path }.count
+    }
+
+    func lastBody(method: String, path: String) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.last { $0.method == method && $0.path == path }?.body
+    }
+}
+
 @main struct ModelRegression {
     @MainActor static func main() async throws {
         let config = URLSessionConfiguration.ephemeral
@@ -156,12 +204,42 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
          "audit":{"generatedBy":"llm","model":"deepseek:deepseek-chat","promptVersion":"weekly-plan-v1","generatedAt":"2026-09-11T00:30:00.000Z"},
          "days":[{"localDate":"2026-09-11","kind":"easy","distanceKm":8,"structure":null,"reason":"轻松"}],"warnings":[]}
         """
+        let goalsJSON = """
+        {"revision":12,"weeklyDistanceKm":40,"easyDurationFloorFraction":0.7,"qualitySessionCap":2,
+         "raceTarget":null,"weekPlan":[],"lockedSession":null,"weekPlanAudit":null,"updatedAt":"2026-09-11T00:00:00.000Z"}
+        """
+        let todayJSON = """
+        {"generatedAt":"2026-09-16T01:00:00.000Z","timezone":"Asia/Shanghai","latestDataDate":"2026-09-15",
+         "lastSyncedAt":"2026-09-16T00:30:00.000Z",
+         "freshness":{"state":"valid","checkedAt":"2026-09-16T00:30:00.000Z","latestTrainingDate":"2026-09-15","recoveryDate":"2026-09-16"},
+         "recommendationRevision":"recommendation-12",
+         "today":{"localDate":"2026-09-16","distanceKm":0,"durationSeconds":0,"paceSecondsPerKm":null,"energyKcal":null,"workoutCount":0},
+         "week":{"periodStart":"2026-09-14","periodEnd":"2026-09-20","distanceKm":12,"durationSeconds":4200,"workoutCount":2,"goalDistanceKm":40,"goalProgressFraction":0.3},
+         "weekDaily":[],"recentWorkouts":[],
+         "ability":{"trueAbility":44,"currentAbility":43.5,"changeFrom7DaysAgo":0.2,"growthVelocityPerWeek":0.1,"decayPoints":0,"snapshotDate":"2026-09-15","explanation":""},
+         "calibration":{"status":"completed","eligibleSessions":20,"eligibleDurationMinutes":600,"spanDays":60,"highCoverageSessions":12,
+                        "requirements":{"sessions":12,"durationMinutes":360,"spanDays":28,"highCoverageSessions":6},"message":""},
+         "verdict":{"tone":"green","title":"可以训练","reason":"恢复充分","triggers":[],"stale":false,"reasonCodes":[]},
+         "nextSession":{"kind":"easy","title":"轻松跑","reason":"闸门放行","distanceKm":8,"durationMinutes":50,
+                        "paceSecondsPerKmLower":330,"paceSecondsPerKmUpper":390,"heartRateBpmLower":130,"heartRateBpmUpper":150,"structure":null},
+         "recovery":{"score":80,"lastNightSleepMinutes":430,"sleepBaselineMinutes":430,"morningHrvMs":52,"hrvBaselineMs":52,
+                     "restingHeartRateBpm":52,"restingHeartRateBaselineBpm":53,"state":"recovered","hrvSampleCount":1,"note":""},
+         "postRun":null,
+         "weekStructure":{"easyDurationFraction":0.8,"easyDurationFloorFraction":0.7,"qualitySessionCount":0,"qualitySessionCap":2,
+                          "easyHonesty":{"intendedEasyCount":3,"easyEnoughCount":3,"honestyFraction":1,"note":""},"remainingDistanceKm":28},
+         "race":{"target":null,"daysUntil":null,"taper":false,"shapeScore":null,"volumeFraction":null,"longRunFraction":null,"note":""},
+         "injuryFlags":[],"weekPlan":[],"phase":"morning_open",
+         "lock":{"present":false,"relockSuggested":false,"lockedAt":null}}
+        """
         session.serverURL = URL(string: "https://rai-plan.test")
         model.serverConfigurationChanged()
+        let generationRequests = RequestLog()
         StubProtocol.handler = { request in
+            generationRequests.record(request)
             let path = request.url!.path
             if path.hasSuffix("/workout-plan/generate") { return (200, generationJSON, 0) }
             if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
+            if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
             return (503, "{}", 0)
         }
         let planFetched = await model.refreshWorkoutPlan()
@@ -174,6 +252,9 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         check(generated, "a plan generation reports success")
         check(model.planMessage?.contains("大模型生成") == true, "a model-generated plan says so")
         check(model.planMessage?.contains("deepseek:deepseek-chat") == true, "the generating model is named")
+        let generationBody = generationRequests.lastBody(method: "POST", path: "/v1/mobile/workout-plan/generate")
+        let generationObject = generationBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        check(generationObject?["expectedRevision"] as? Int == 12, "a generated plan posts the loaded goals revision")
 
         StubProtocol.handler = { _ in
             (409, "{\"code\":\"mobile_goals_revision_conflict\",\"message\":\"训练目标已在其他页面更新\"}", 0)
@@ -181,6 +262,127 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         let conflicted = await model.regenerateWeeklyPlan()
         check(!conflicted, "a revision conflict is reported as a failure")
         check(model.planMessage == "训练目标已在别处更新，请重新生成本周课表。", "a revision conflict tells the user to regenerate")
+
+        let failedRevisionRequests = RequestLog()
+        session.serverURL = URL(string: "https://rai-plan-goals-fail.test")
+        model.serverConfigurationChanged()
+        StubProtocol.handler = { request in
+            failedRevisionRequests.record(request)
+            return request.url!.path.hasSuffix("/goals") ? (503, "{}", 0) : (200, generationJSON, 0)
+        }
+        let missingRevision = await model.regenerateWeeklyPlan()
+        check(!missingRevision, "generation fails closed when the goals revision cannot be read")
+        check(
+            failedRevisionRequests.count(method: "POST", path: "/v1/mobile/workout-plan/generate") == 0,
+            "a failed goals read never posts an unlocked generation"
+        )
+        check(
+            model.planMessage?.contains("取消生成") == true,
+            "a failed goals read explains that generation was cancelled safely"
+        )
+
+        let cancelledGenerationRequests = RequestLog()
+        session.serverURL = URL(string: "https://rai-plan-cancel.test")
+        model.serverConfigurationChanged()
+        StubProtocol.handler = { request in
+            cancelledGenerationRequests.record(request)
+            return request.url!.path.hasSuffix("/goals") ? (200, goalsJSON, 0.15) : (200, generationJSON, 0)
+        }
+        let cancelledGeneration = Task { await model.regenerateWeeklyPlan() }
+        try await Task.sleep(for: .milliseconds(20))
+        cancelledGeneration.cancel()
+        _ = await cancelledGeneration.value
+        check(
+            cancelledGenerationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/generate") == 0,
+            "cancelling while goals load never posts generation"
+        )
+
+        let switchedGenerationRequests = RequestLog()
+        session.serverURL = URL(string: "https://rai-plan-old.test")
+        model.serverConfigurationChanged()
+        StubProtocol.handler = { request in
+            switchedGenerationRequests.record(request)
+            return request.url!.path.hasSuffix("/goals") ? (200, goalsJSON, 0.15) : (200, generationJSON, 0)
+        }
+        let oldGeneration = Task { await model.regenerateWeeklyPlan() }
+        try await Task.sleep(for: .milliseconds(20))
+        session.serverURL = URL(string: "https://rai-plan-new.test")
+        model.serverConfigurationChanged()
+        _ = await oldGeneration.value
+        check(
+            switchedGenerationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/generate") == 0,
+            "switching servers while goals load never posts to the old server"
+        )
+        check(model.planMessage == nil, "switching configurations clears the old plan message")
+
+        session.serverURL = URL(string: "https://rai-plan-loading-old.test")
+        model.serverConfigurationChanged()
+        StubProtocol.handler = { request in
+            guard request.url!.path.hasSuffix("/workout-plan") else { return (503, "{}", 0) }
+            return (200, planJSON, request.url!.host!.contains("old") ? 0.18 : 0.35)
+        }
+        let oldPlanLoad = Task { await model.refreshWorkoutPlan() }
+        try await Task.sleep(for: .milliseconds(20))
+        session.serverURL = URL(string: "https://rai-plan-loading-new.test")
+        model.serverConfigurationChanged()
+        let newPlanLoad = Task { await model.refreshWorkoutPlan() }
+        try await Task.sleep(for: .milliseconds(220))
+        _ = await oldPlanLoad.value
+        check(model.isLoadingWorkoutPlan, "an old plan response cannot stop the new configuration's plan loading")
+        _ = await newPlanLoad.value
+        check(!model.isLoadingWorkoutPlan, "the owning plan request clears its loading state")
+
+        session.serverURL = URL(string: "https://rai-generate-loading-old.test")
+        model.serverConfigurationChanged()
+        StubProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
+            if path.hasSuffix("/workout-plan/generate") {
+                return (200, generationJSON, request.url!.host!.contains("old") ? 0.18 : 0.35)
+            }
+            if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
+            if path == "/v1/workouts" { return (200, list("generation-refresh"), 0) }
+            return (503, "{}", 0)
+        }
+        let oldPlanGeneration = Task { await model.regenerateWeeklyPlan() }
+        try await Task.sleep(for: .milliseconds(20))
+        session.serverURL = URL(string: "https://rai-generate-loading-new.test")
+        model.serverConfigurationChanged()
+        let newPlanGeneration = Task { await model.regenerateWeeklyPlan() }
+        try await Task.sleep(for: .milliseconds(220))
+        _ = await oldPlanGeneration.value
+        check(model.isRegeneratingPlan, "an old generation cannot stop the new configuration's generation spinner")
+        _ = await newPlanGeneration.value
+        check(!model.isRegeneratingPlan, "the owning generation request clears its spinner")
+
+        func seedLockState() async {
+            await model.refreshAll(requestHandshake: false)
+        }
+        session.serverURL = URL(string: "https://rai-lock-loading-old.test")
+        model.serverConfigurationChanged()
+        StubProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("/lock") {
+                return (200, goalsJSON, request.url!.host!.contains("old") ? 0.18 : 0.35)
+            }
+            if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+            if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
+            if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
+            if path == "/v1/workouts" { return (200, list("lock-refresh"), 0) }
+            return (503, "{}", 0)
+        }
+        await seedLockState()
+        let oldLock = Task { await model.lockNextSession() }
+        try await Task.sleep(for: .milliseconds(20))
+        session.serverURL = URL(string: "https://rai-lock-loading-new.test")
+        model.serverConfigurationChanged()
+        await seedLockState()
+        let newLock = Task { await model.lockNextSession() }
+        try await Task.sleep(for: .milliseconds(220))
+        _ = await oldLock.value
+        check(model.isLockingSession, "an old lock response cannot stop the new configuration's lock spinner")
+        _ = await newLock.value
+        check(!model.isLockingSession, "the owning lock request clears its spinner")
 
         let fallbackJSON = """
         {"generatedAt":"2026-09-11T00:30:00.000Z","revision":9,
@@ -353,6 +555,23 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
         )
         check(cleared[0].distanceKm == nil, "clearing the field unsets the distance")
         check(cleared[0].structure == nil, "unsetting the distance drops the stale prescription")
+
+        // 校准提示判据：契约取值域是 `not_started | calibrating | completed`。
+        // 曾写成 `!= "ready"` —— 契约里没有的取值，于是对任何输入都恒为真，把
+        // "校准完成"渲染成黄色告警框（内容还是"校准完成，真实能力可以当作主参考"）。
+        // 未知取值与 `nil` 必须走"继续提示"，不许被映射到宽松分支。
+        let calibrationCases: [(String?, Bool)] = [
+            ("completed", false),
+            ("calibrating", true),
+            ("not_started", true),
+            ("ready", true),
+            ("", true),
+            (nil, true)
+        ]
+        for (status, expected) in calibrationCases {
+            check(calibrationNeedsAttention(status) == expected,
+                  "calibration '\(status ?? "nil")' needs attention == \(expected)")
+        }
 
         print("All model regression checks passed.")
     }

@@ -356,6 +356,9 @@ struct NativeRacePrediction: Codable, Identifiable {
 
 struct NativeDashboardResponse: Codable {
     let latestWorkout: WorkoutListItem?
+    /// 最近一次纳入分析的训练的五维得分。旧缓存里没有这个键时为 nil，
+    /// 页面按缺失处理，不补零。
+    let dimensions: AbilityMetricSet?
 }
 
 struct NativeTrainingZonesCurrentResponse: Codable {

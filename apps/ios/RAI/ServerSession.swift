@@ -6,12 +6,18 @@ import Observation
 final class ServerSession {
     var serverURLString: String {
         didSet {
-            UserDefaults.standard.set(serverURLString, forKey: Self.storageKey)
-            apiToken = Keychain.loadToken(for: serverURLString)
+            guard serverURLString != oldValue else { return }
+            userDefaults.set(serverURLString, forKey: Self.storageKey)
+            invalidatePendingProbes(resetConnectionState: true)
+            apiToken = loadToken(serverURLString)
         }
     }
     var apiToken: String {
-        didSet { Keychain.saveToken(apiToken, for: serverURLString) }
+        didSet {
+            guard apiToken != oldValue else { return }
+            saveToken(apiToken, serverURLString)
+            invalidatePendingProbes(resetConnectionState: true)
+        }
     }
     var isReachable = false
     var lastError: String?
@@ -20,45 +26,59 @@ final class ServerSession {
     private(set) var consecutiveFailures = 0
 
     private var pollTask: Task<Void, Never>?
-    private let session: URLSession = {
+    private let session: URLSession
+    private let userDefaults: UserDefaults
+    private let loadToken: @MainActor (String?) -> String
+    private let saveToken: @MainActor (String, String?) -> Void
+    private var probeGeneration: UInt64 = 0
+
+    private static func makeSession() -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 4
         configuration.timeoutIntervalForResource = 8
         configuration.waitsForConnectivity = true
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return RaiURLSession.make(configuration: configuration)
-    }()
+    }
 
     private static let storageKey = "rai.serverURL"
     private static let tokenKey = "rai.apiToken"
     private static let connectedKey = "rai.hasConnectedOnce"
     private static let failureThreshold = 3
 
-    init() {
-        let storedURL = UserDefaults.standard.string(forKey: Self.storageKey) ?? ""
+    init(
+        session: URLSession? = nil,
+        userDefaults: UserDefaults = .standard,
+        loadToken: @escaping @MainActor (String?) -> String = { Keychain.loadToken(for: $0) },
+        saveToken: @escaping @MainActor (String, String?) -> Void = { Keychain.saveToken($0, for: $1) }
+    ) {
+        self.session = session ?? Self.makeSession()
+        self.userDefaults = userDefaults
+        self.loadToken = loadToken
+        self.saveToken = saveToken
+
+        let storedURL = userDefaults.string(forKey: Self.storageKey) ?? ""
         if storedURL.isEmpty {
             #if os(macOS) && DEBUG
             serverURLString = "http://127.0.0.1:5173"
             #else
             serverURLString = ""
             #endif
-            apiToken = Keychain.loadToken()
+            apiToken = ""
         } else {
             serverURLString = storedURL
             // Tokens are stored per server so changing the configured origin
             // cannot accidentally reuse credentials for another service.
-            let scopedToken = Keychain.loadToken(for: storedURL)
-            if scopedToken.isEmpty {
-                let legacyToken = Keychain.loadToken()
-                if !legacyToken.isEmpty {
-                    Keychain.saveToken(legacyToken, for: storedURL)
-                }
-                apiToken = legacyToken
-            } else {
-                apiToken = scopedToken
-            }
+            //
+            // A legacy unscoped token carries no trustworthy origin metadata.
+            // In particular, the previous app may already have copied A's token,
+            // switched its stored URL to B, and only then upgraded. Treating the
+            // current stored URL as migration evidence would leak A's credential
+            // into B. Keep the legacy Keychain item untouched for manual recovery,
+            // but require the user to re-enter it before saving it into an origin.
+            apiToken = loadToken(storedURL)
         }
-        hasConnectedOnce = UserDefaults.standard.bool(forKey: Self.connectedKey)
+        hasConnectedOnce = userDefaults.bool(forKey: Self.connectedKey)
     }
 
     var serverURL: URL? {
@@ -100,6 +120,7 @@ final class ServerSession {
     }
 
     func startMonitoring() {
+        invalidatePendingProbes(resetConnectionState: false)
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -110,6 +131,7 @@ final class ServerSession {
     }
 
     func stopMonitoring() {
+        invalidatePendingProbes(resetConnectionState: false)
         pollTask?.cancel()
         pollTask = nil
     }
@@ -149,11 +171,18 @@ final class ServerSession {
         }
 
         var request = URLRequest(url: healthURL)
-        if !apiToken.isEmpty { request.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization") }
+        let requestToken = apiToken
+        let requestGeneration = probeGeneration
+        if !requestToken.isEmpty { request.setValue("Bearer \(requestToken)", forHTTPHeaderField: "Authorization") }
         request.timeoutInterval = 4
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {
             let (_, response) = try await session.data(for: request)
+            guard isCurrentProbe(
+                requestURL: healthURL,
+                requestToken: requestToken,
+                generation: requestGeneration
+            ) else { return }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             if (200...299).contains(status) {
                 let wasReachable = isReachable
@@ -162,7 +191,7 @@ final class ServerSession {
                 lastError = nil
                 if !hasConnectedOnce {
                     hasConnectedOnce = true
-                    UserDefaults.standard.set(true, forKey: Self.connectedKey)
+                    userDefaults.set(true, forKey: Self.connectedKey)
                 }
                 if !wasReachable {
                     reload()
@@ -177,8 +206,37 @@ final class ServerSession {
             if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
                 return
             }
+            guard isCurrentProbe(
+                requestURL: healthURL,
+                requestToken: requestToken,
+                generation: requestGeneration
+            ) else { return }
             markUnreachable("暂时无法连接 RAI 服务，请检查网络或服务状态")
         }
+    }
+
+    private func isCurrentProbe(requestURL: URL, requestToken: String, generation: UInt64) -> Bool {
+        guard !Task.isCancelled,
+              generation == probeGeneration,
+              requestToken == apiToken else {
+            return false
+        }
+        guard let base = serverURL,
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        components.path = "/v1/health"
+        components.query = nil
+        components.fragment = nil
+        return components.url == requestURL
+    }
+
+    private func invalidatePendingProbes(resetConnectionState: Bool) {
+        probeGeneration &+= 1
+        guard resetConnectionState else { return }
+        isReachable = false
+        consecutiveFailures = 0
+        lastError = nil
     }
 
     private var pollInterval: Duration {

@@ -72,7 +72,9 @@ struct RAIApp: App {
                             )
                         }
                     } else {
-                        model.healthSync.cancelSync()
+                        if phase == .background {
+                            model.healthSync.cancelSync()
+                        }
                         model.discovery.stop()
                     }
                 }

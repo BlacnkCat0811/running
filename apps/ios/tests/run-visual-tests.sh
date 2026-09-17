@@ -29,7 +29,14 @@ sqlite3 "${RAI_VISUAL_DATABASE:-$root/var/rai.sqlite}" ".backup '$runtime/var/ra
 RAI_RUNTIME_ROOT="$runtime" RAI_DATABASE="$runtime/var/rai.sqlite" RAI_API_PORT=8792 RAI_LOG_LEVEL=warn \
   node --import tsx apps/api/src/server.ts > "$out/api.log" 2>&1 & api_pid=$!
 ready=false
-for _ in $(seq 1 80); do
+# Startup includes validation/migration of the isolated database. A real
+# 300+ MB fixture can legitimately exceed the old 40-second startup window.
+startup_deadline=$((SECONDS + ${RAI_VISUAL_STARTUP_TIMEOUT:-300}))
+while [ "$SECONDS" -lt "$startup_deadline" ]; do
+  if ! kill -0 "$api_pid" 2>/dev/null; then
+    echo "Isolated API exited during startup; see $out/api.log" >&2
+    exit 1
+  fi
   if curl -fsS --max-time 2 http://127.0.0.1:8792/v1/health >/dev/null 2>&1; then ready=true; break; fi
   sleep 0.5
 done
@@ -62,11 +69,11 @@ xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wi
 # Build the CocoaPods workspace: the AMap SDK arrives as a pod, so the bare
 # project fails to link (ld: framework 'Pods_RAI' not found).
 xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -configuration Debug -sdk iphonesimulator \
-  -destination 'generic/platform=iOS Simulator' -derivedDataPath "$out/derived" CODE_SIGNING_ALLOWED=NO build > "$out/build.log" 2>&1
-xcrun simctl install "$device" "$out/derived/Build/Products/Debug-iphonesimulator/RAI.app"
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RAI_VISUAL_DERIVED_DATA:-$out/derived}" CODE_SIGNING_ALLOWED=NO build > "$out/build.log" 2>&1
+xcrun simctl install "$device" "${RAI_VISUAL_DERIVED_DATA:-$out/derived}/Build/Products/Debug-iphonesimulator/RAI.app"
 set +e
 xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance \
-  -destination "platform=iOS Simulator,id=$device" -derivedDataPath "$out/test-derived" \
+  -destination "platform=iOS Simulator,id=$device" -derivedDataPath "${RAI_VISUAL_TEST_DERIVED_DATA:-$out/test-derived}" \
   -resultBundlePath "$out/tests.xcresult" CODE_SIGNING_ALLOWED=NO "$@" test > "$out/ui-tests.log" 2>&1
 status=$?
 set -e

@@ -14,27 +14,20 @@ struct NativeRootView: View {
     var body: some View {
         ZStack {
             if skin == .technology { TechBackground() } else { PixelBackground() }
-            Group {
-                switch selectedTab {
-                case .home:
-                    NavigationStack { if skin == .technology { TechTodayView() } else { TodayView() } }
-                case .workouts:
-                    NavigationStack { if skin == .technology { TechWorkoutsView() } else { WorkoutsView() } }
-                case .statistics:
-                    NavigationStack { if skin == .technology { TechAnalysisView(initialMode: "statistics") } else { AnalysisView(initialMode: "statistics") } }
-                case .trends:
-                    NavigationStack { if skin == .technology { TechAnalysisView(initialMode: "trends") } else { AnalysisView(initialMode: "trends") } }
-                case .settings:
-                    NavigationStack { if skin == .technology { TechNativeSettingsView() } else { NativeSettingsView() } }
+            if skin == .technology {
+                // Reserve real layout space for chrome. A safeAreaInset outside
+                // NavigationStack did not reach its scrolling destinations and
+                // required a hard-coded 90pt spacer in every technology page.
+                VStack(spacing: 0) {
+                    navigationContent.clipped()
+                    TechTabBar(selection: $selectedTab)
                 }
+            } else {
+                navigationContent
             }
-            // Destinations belong to a skin. Recreate only the navigation subtree
-            // on a skin change; selectedTab and all environment services stay alive.
-            .id(skin)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if skin == .technology { TechTabBar(selection: $selectedTab) }
-            else { PixelTabBar(selection: $selectedTab) }
+            if skin == .pixel { PixelTabBar(selection: $selectedTab) }
         }
         .task(id: session.serverURLString + "\n" + session.apiToken) {
             native.serverConfigurationChanged()
@@ -60,6 +53,26 @@ struct NativeRootView: View {
         )) {
             TechRequestFailure(message: native.errorMessage ?? "")
         }
+    }
+
+    private var navigationContent: some View {
+        Group {
+            switch selectedTab {
+            case .home:
+                NavigationStack { if skin == .technology { TechTodayView() } else { TodayView() } }
+            case .workouts:
+                NavigationStack { if skin == .technology { TechWorkoutsView() } else { WorkoutsView() } }
+            case .statistics:
+                NavigationStack { if skin == .technology { TechAnalysisView(initialMode: "statistics") } else { AnalysisView(initialMode: "statistics") } }
+            case .trends:
+                NavigationStack { if skin == .technology { TechAnalysisView(initialMode: "trends") } else { AnalysisView(initialMode: "trends") } }
+            case .settings:
+                NavigationStack { if skin == .technology { TechNativeSettingsView() } else { NativeSettingsView() } }
+            }
+        }
+        // Destinations belong to a skin. Recreate only the navigation subtree
+        // on a skin change; selectedTab and all environment services stay alive.
+        .id(skin)
     }
 }
 
@@ -278,7 +291,7 @@ struct TodayView: View {
                     }
                     .frame(width: 86, alignment: .trailing)
                 }
-                if data.calibration.status != "ready" {
+                if calibrationNeedsAttention(data.calibration.status) {
                     Text(data.calibration.message)
                         .font(.caption)
                         .foregroundStyle(PixelColor.muted)
@@ -492,7 +505,7 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: PixelMetrics.sectionSpacing) {
             PixelPanel(tint: PixelColor.cyan) {
                 VStack(alignment: .leading, spacing: 8) {
-                    PixelSectionHeader(title: "训练阶段", trailing: data.phase, trailingColor: PixelColor.cyan)
+                    PixelSectionHeader(title: "训练阶段", trailing: nativeDayPhaseName(data.phase), trailingColor: PixelColor.cyan)
                     HStack {
                         Text(data.race.note)
                             .font(.footnote)
@@ -505,7 +518,7 @@ struct TodayView: View {
                         }
                     }
                     if let target = data.race.target {
-                        Text("比赛目标：\(target.distance) · \(nativeDay(target.date))")
+                        Text("比赛目标：\(nativeRaceDistanceName(target.distance)) · \(nativeDay(target.date))")
                             .font(.caption.weight(.heavy))
                             .foregroundStyle(PixelColor.ink)
                         HStack(spacing: 8) {
@@ -528,7 +541,7 @@ struct TodayView: View {
                         Text(postRun.headline)
                             .font(.subheadline.weight(.heavy))
                             .foregroundStyle(PixelColor.ink)
-                        Text("刺激：\(nativeStimulusName(postRun.stimulusType)) · 匹配：\(postRun.stimulusMatch)")
+                        Text("刺激：\(nativeStimulusName(postRun.stimulusType)) · 匹配：\(nativeStimulusMatchName(postRun.stimulusMatch))")
                             .font(.caption)
                             .foregroundStyle(PixelColor.muted)
                         if let delta = postRun.trueAbilityDelta {

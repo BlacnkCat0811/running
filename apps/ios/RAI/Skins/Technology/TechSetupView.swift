@@ -7,13 +7,15 @@ struct TechSetupView: View {
     @State private var draftURL = ""
     @State private var draftToken = ""
     @State private var connecting = false
+    @FocusState private var field: Field?
+    private enum Field { case url, token }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 14) {
-                    Text("RAI").font(.system(size: 32, weight: .bold)).tracking(3).foregroundStyle(TechColor.cyan)
-                    Text("RUNNING\nRUNNING ANALYTICS").font(.system(size: 10, weight: .medium)).tracking(1.2)
+                    Text("RAI").techScaledFont(32, weight: .bold).tracking(3).foregroundStyle(TechColor.cyan)
+                    Text("RUNNING\nANALYTICS").font(.caption2.weight(.medium)).tracking(1.2)
                         .foregroundStyle(TechColor.muted)
                 }.padding(.top, 8)
                 TechOrbit()
@@ -44,15 +46,22 @@ struct TechSetupView: View {
                         TextField("http://192.168.1.8:5173", text: $draftURL)
                             .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                             .accessibilityIdentifier("setup.url")
+                            .focused($field, equals: .url).submitLabel(.next)
+                            .onSubmit { field = .token }
                             .onChange(of: draftURL) { _, value in draftToken = Keychain.loadToken(for: value) }
                     }
-                    TechField("访问令牌（可选）") { SecureField("可选", text: $draftToken) }
+                    TechField("访问令牌（可选）") {
+                        SecureField("可选", text: $draftToken).focused($field, equals: .token)
+                            .submitLabel(.done).onSubmit { field = nil }
+                    }
                     if !session.serverURLString.isEmpty, let error = session.lastError {
                         Label(error, systemImage: "exclamationmark.circle")
                             .font(.footnote).foregroundStyle(TechColor.coral)
                     }
                     TechPrimaryButton(title: "连接服务", isBusy: connecting,
-                                      isDisabled: draftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                                      isDisabled: draftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                                      busyTitle: "正在检查连接…") {
+                        field = nil
                         connecting = true
                         session.serverURLString = draftURL
                         session.apiToken = draftToken
@@ -62,17 +71,17 @@ struct TechSetupView: View {
                         Text("重新发现").font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .overlay(Capsule().strokeBorder(TechColor.cyan.opacity(0.65), lineWidth: 1))
-                    }.buttonStyle(.plain).foregroundStyle(TechColor.cyan)
+                    }.buttonStyle(TechPressStyle()).foregroundStyle(TechColor.cyan)
                 }
                 Label("手机与服务器在同一网络。", systemImage: "wifi")
                     .font(.caption).foregroundStyle(TechColor.muted).frame(maxWidth: .infinity)
-                DisclosureGroup("外观皮肤") { AppSkinPicker() }
+                DisclosureGroup { AppSkinPicker() } label: { Text("外观皮肤").frame(minHeight: 44) }
                     .font(.caption).tint(TechColor.muted)
             }.padding(20)
         }
         .background(TechColor.background).foregroundStyle(TechColor.ink)
         .toolbar(.hidden, for: .navigationBar)
-        .scrollDismissesKeyboard(.interactively)
+        .modifier(TechKeyboardDismiss())
         .onAppear { draftURL = session.serverURLString; draftToken = session.apiToken }
     }
 }

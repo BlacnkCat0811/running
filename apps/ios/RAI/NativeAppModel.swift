@@ -51,6 +51,9 @@ final class NativeAppModel {
     }
     private var workoutRequestID = UUID()
     private var detailRequestID = UUID()
+    private var lockRequestID = UUID()
+    private var workoutPlanRequestID = UUID()
+    private var regeneratePlanRequestID = UUID()
 
     /// Dates `/v1/mobile/today` reports as already trained.
     ///
@@ -85,6 +88,7 @@ final class NativeAppModel {
         configurationID = UUID()
         isLoading = false
         isRefreshing = false
+        invalidatePlanOperations()
         session.isReachable = false
         guard let baseURL = session.serverURL else {
             clearPresentation()
@@ -440,6 +444,7 @@ final class NativeAppModel {
             configuration == configurationID && baseURL == session.serverURL &&
                 token == session.apiToken && !Task.isCancelled
         }
+        guard isCurrent() else { return false }
         do {
             let updated = try await api.updateGoals(
                 UpdateMobileGoalsRequest(
@@ -474,14 +479,21 @@ final class NativeAppModel {
     func lockNextSession(relock: Bool = false) async -> Bool {
         guard !isLockingSession, !isOffline,
               let baseURL = session.serverURL, let current = today else { return false }
-        isLockingSession = true
-        defer { isLockingSession = false }
+        let requestID = UUID()
+        lockRequestID = requestID
         let configuration = configurationID
         let token = session.apiToken
         func isCurrent() -> Bool {
-            configuration == configurationID && baseURL == session.serverURL &&
+            requestID == lockRequestID && configuration == configurationID && baseURL == session.serverURL &&
                 token == session.apiToken && !Task.isCancelled
         }
+        isLockingSession = true
+        defer {
+            if requestID == lockRequestID, configuration == configurationID {
+                isLockingSession = false
+            }
+        }
+        guard isCurrent() else { return false }
         do {
             let updated = try await api.lockSession(
                 LockMobileSessionRequest(action: relock ? "relock" : "lock", expectedRevision: current.recommendationRevision),
@@ -514,13 +526,19 @@ final class NativeAppModel {
     @discardableResult
     func refreshWorkoutPlan() async -> Bool {
         guard !isLoadingWorkoutPlan, let baseURL = session.serverURL else { return false }
-        isLoadingWorkoutPlan = true
-        defer { isLoadingWorkoutPlan = false }
+        let requestID = UUID()
+        workoutPlanRequestID = requestID
         let configuration = configurationID
         let token = session.apiToken
         func isCurrent() -> Bool {
-            configuration == configurationID && baseURL == session.serverURL &&
+            requestID == workoutPlanRequestID && configuration == configurationID && baseURL == session.serverURL &&
                 token == session.apiToken && !Task.isCancelled
+        }
+        isLoadingWorkoutPlan = true
+        defer {
+            if requestID == workoutPlanRequestID, configuration == configurationID {
+                isLoadingWorkoutPlan = false
+            }
         }
         do {
             let fetched = try await api.workoutPlan(baseURL: baseURL, token: token)
@@ -543,24 +561,43 @@ final class NativeAppModel {
     @discardableResult
     func regenerateWeeklyPlan() async -> Bool {
         guard !isRegeneratingPlan, let baseURL = session.serverURL else { return false }
-        isRegeneratingPlan = true
-        defer { isRegeneratingPlan = false }
-        planMessage = nil
+        let requestID = UUID()
+        regeneratePlanRequestID = requestID
         let configuration = configurationID
         let token = session.apiToken
         func isCurrent() -> Bool {
-            configuration == configurationID && baseURL == session.serverURL &&
+            requestID == regeneratePlanRequestID && configuration == configurationID && baseURL == session.serverURL &&
                 token == session.apiToken && !Task.isCancelled
         }
+        isRegeneratingPlan = true
+        defer {
+            if requestID == regeneratePlanRequestID, configuration == configurationID {
+                isRegeneratingPlan = false
+            }
+        }
+        planMessage = nil
         // No loaded goals snapshot means no revision to send, which the server
         // reads as "skip the optimistic lock". Fetch one first so a concurrent
         // edit is caught rather than silently overwritten.
-        var revision = goals?.revision
-        if revision == nil, let latest = try? await api.goals(baseURL: baseURL, token: token), isCurrent() {
-            goals = latest
-            recordCache(latest, key: "goals")
-            revision = latest.revision
+        let revision: Int
+        if let loadedRevision = goals?.revision {
+            revision = loadedRevision
+        } else {
+            do {
+                let latest = try await api.goals(baseURL: baseURL, token: token)
+                guard isCurrent() else { return false }
+                goals = latest
+                recordCache(latest, key: "goals")
+                revision = latest.revision
+            } catch {
+                guard isCurrent() else { return false }
+                let message = "未能读取训练目标版本，已取消生成以避免覆盖其他修改。请检查连接后重试。"
+                errorMessage = message
+                planMessage = message
+                return false
+            }
         }
+        guard isCurrent() else { return false }
         do {
             let result = try await api.generateWeeklyPlan(
                 GenerateWeeklyPlanRequest(expectedRevision: revision),
@@ -727,12 +764,11 @@ final class NativeAppModel {
     private func clearPresentation() {
         workoutRequestID = UUID()
         detailRequestID = UUID()
+        invalidatePlanOperations()
         isLoadingWorkouts = false
         isLoadingTrainingStatistics = false
         isLoadingWorkout = false
         isLoadingBodyMetrics = false
-        isLoadingWorkoutPlan = false
-        isRegeneratingPlan = false
         workoutDetailError = nil
         bodyMetricsError = nil
         today = nil
@@ -749,6 +785,16 @@ final class NativeAppModel {
         selectedWorkout = nil
         selectedSeries = nil
         lastCacheUpdate = nil
+    }
+
+    private func invalidatePlanOperations() {
+        lockRequestID = UUID()
+        workoutPlanRequestID = UUID()
+        regeneratePlanRequestID = UUID()
+        isLockingSession = false
+        isLoadingWorkoutPlan = false
+        isRegeneratingPlan = false
+        planMessage = nil
     }
 
     private func loadCachedWorkouts() {

@@ -267,6 +267,45 @@ func nativeStimulusName(_ value: String) -> String {
     }
 }
 
+// 下面三个映射对应**闭集**契约（TS 里的联合类型），所以穷举之后 default 只剩
+// "契约新增了枚举而这里没跟上"这一种情况 —— 兜底给中文，不把 `half_marathon`
+// 这类机器码漏到界面上。策略同 `nativeHeartRateZone` 的 default（该函数同样拒绝直出
+// 英文原值）。
+// 与 `nativeSessionName` / `nativeStimulusName` 的 default 直出不同：那两个的输入契约
+// 是开放 string，原值本身可能就是有意义的业务标签，直出不算说谎。
+// `nativeDayPhaseName` / `nativeStimulusMatchName` 的值域随
+// `MobileDayPhase` / `MobileStimulusMatch` 变化 —— 改契约枚举时同步这里，
+// `run-tech-presentation-tests.sh` 会按契约值逐个断言。
+func nativeDayPhaseName(_ value: String) -> String {
+    switch value {
+    case "need_sync": return "待同步"
+    case "morning_open": return "晨间开放"
+    case "locked": return "已锁定"
+    case "post_run": return "已训练"
+    case "rest_done": return "休息日完成"
+    default: return "未知阶段"
+    }
+}
+
+func nativeStimulusMatchName(_ value: String) -> String {
+    switch value {
+    case "aligned": return "匹配"
+    case "too_hard": return "偏强"
+    case "too_easy": return "偏弱"
+    case "unknown": return "未知"
+    default: return "未知"
+    }
+}
+
+func nativeRaceDistanceName(_ value: String) -> String {
+    switch value {
+    case "five_k": return "5 公里"
+    case "ten_k": return "10 公里"
+    case "half_marathon": return "半马"
+    default: return "距离"
+    }
+}
+
 func nativeHeartRateZone(_ value: String) -> String {
     switch nativeHeartRateZoneKey(value) {
     case "recovery": return "恢复区"
@@ -331,6 +370,8 @@ func nativeStatusName(_ value: String?) -> String {
     case "trial": return "观察中"
     case "excluded": return "已排除"
     case "completed": return "已完成"
+    case "not_started": return "尚未开始"
+    case "calibrating": return "校准中"
     case "stale": return "数据过期"
     case "valid": return "数据有效"
     case "ready": return "已校准"
@@ -345,3 +386,7 @@ func nativeStatusName(_ value: String?) -> String {
     default: return value ?? "--"
     }
 }
+
+// `calibrationNeedsAttention(_:)` 已移到 `CalibrationState.swift`：那边是纯
+// Foundation，能被 `run-model-tests.sh` 在 macOS 上编译并钉住；本文件依赖
+// `PixelColor`（iOS 专属），判据留在这里就永远进不了秒级闸门。

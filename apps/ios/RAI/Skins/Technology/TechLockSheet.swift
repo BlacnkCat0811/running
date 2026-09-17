@@ -5,6 +5,7 @@ struct TechLockSheet: View {
     @Environment(NativeAppModel.self) private var native
     @Environment(\.dismiss) private var dismiss
     @State private var failure: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         NavigationStack {
@@ -13,7 +14,7 @@ struct TechLockSheet: View {
                     if let today = native.today {
                         TechSectionHeader(title: "推荐课程")
                         TechPanel {
-                            HStack {
+                            TechAdaptiveStack {
                                 TechRunnerIcon()
                                 Text(today.nextSession.title).font(.headline)
                                 Spacer()
@@ -24,7 +25,7 @@ struct TechLockSheet: View {
                         Text(today.verdict.reason).font(.subheadline).foregroundStyle(TechColor.muted)
                         TechPanel {
                             TechSectionHeader(title: "课程目标")
-                            HStack(alignment: .top) {
+                            TechMetricGrid(minimum: 140) {
                                 techMetricCaption("目标配速", value: techPaceRange(today.nextSession.paceSecondsPerKmLower, today.nextSession.paceSecondsPerKmUpper))
                                 techMetricCaption("预计用时", value: today.nextSession.durationMinutes.map { nativeNumber($0, digits: 0) + " min" } ?? "待评估")
                             }
@@ -49,6 +50,7 @@ struct TechLockSheet: View {
                             .font(.subheadline).foregroundStyle(TechColor.cyan)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .overlay(Capsule().stroke(TechColor.cyan.opacity(0.7), lineWidth: 1))
+                            .buttonStyle(TechPressStyle()).disabled(native.isLockingSession)
                     } else {
                         TechEmptyState(title: "暂无训练建议", message: "请返回首页刷新数据。")
                     }
@@ -58,11 +60,15 @@ struct TechLockSheet: View {
             .navigationTitle("锁定课程").navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(TechColor.paper, for: .navigationBar)
             .toolbar { ToolbarItem(placement: .topBarTrailing) {
-                Button { dismiss() } label: { Image(systemName: "xmark").foregroundStyle(TechColor.muted) }
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark").foregroundStyle(TechColor.muted).frame(width: 44, height: 44)
+                }
                     .accessibilityLabel("关闭")
+                    .disabled(native.isLockingSession)
             } }
         }
-        .presentationDetents([.medium, .large]).presentationDragIndicator(.hidden)
+        .presentationDetents(typeSize >= .xxxLarge ? [.large] : [.medium, .large]).presentationDragIndicator(.visible)
+        .interactiveDismissDisabled(native.isLockingSession)
         .presentationCornerRadius(24).presentationBackground(TechColor.paper)
         .preferredColorScheme(.dark).tint(TechColor.cyan)
     }

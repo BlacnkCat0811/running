@@ -3,12 +3,22 @@ import Charts
 import SwiftUI
 
 struct TechRing: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let progress: Double
     let value: String
     let label: String
     var tint: Color = TechColor.cyan
     var size: CGFloat = 88
     var body: some View {
+        if typeSize >= .xxxLarge && (!value.isEmpty || !label.isEmpty) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(value).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(TechColor.ink)
+                Text(label).font(.caption).foregroundStyle(TechColor.muted)
+                TechProgressBar(fraction: progress, tint: tint).accessibilityHidden(true)
+            }.accessibilityElement(children: .combine)
+        } else { graphic }
+    }
+    private var graphic: some View {
         ZStack {
             Circle().stroke(TechColor.grid.opacity(0.6), lineWidth: size * 0.10)
             Circle().trim(from: 0, to: progress.isFinite ? min(max(progress, 0), 1) : 0)
@@ -57,11 +67,17 @@ struct TechInstrumentRing: View {
 }
 
 struct TechGauge: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let progress: Double
     let value: String
     let label: String
     var size: CGFloat = 82
     var body: some View {
+        if typeSize >= .xxxLarge {
+            TechMetricTile(title: label, value: value, accent: TechColor.cyan)
+        } else { graphic }
+    }
+    private var graphic: some View {
         ZStack {
             Circle().trim(from: 0, to: 0.75)
                 .stroke(TechColor.grid, style: StrokeStyle(lineWidth: 7, lineCap: .round))
@@ -76,6 +92,85 @@ struct TechGauge: View {
             }.padding(7)
         }.frame(width: size, height: size)
             .accessibilityElement(children: .ignore).accessibilityLabel("\(label) \(value)")
+    }
+}
+
+struct TechAbilityGauge: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    let progress: Double
+    var value: String
+    var caption: String
+    var size: CGFloat = 190
+    var lineWidth: CGFloat = 12
+
+    private var filled: Double { progress.isFinite ? min(max(progress, 0), 1) : 0 }
+    private var glowRadius: CGFloat { 6 }
+    private var stroke: StrokeStyle { StrokeStyle(lineWidth: lineWidth, lineCap: .round) }
+    /// Stroke is centered on the path. Inset by half the line width so the
+    /// round caps stay inside `size`; otherwise `.clipped()` shears them off.
+    private var inset: CGFloat { lineWidth / 2 }
+    private var radius: CGFloat { (size - lineWidth) / 2 }
+    private var bottomOverflow: CGFloat { inset + glowRadius }
+    private var arcHeight: CGFloat { size / 2 + bottomOverflow }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            ZStack {
+                // `trim(0...0.5)` sweeps the lower half from 3 o'clock; flipping
+                // the arc alone lifts it into the upper half without also
+                // flipping the segment ticks, which are already placed on top.
+                ZStack {
+                    Circle().trim(from: 0, to: 0.5)
+                        .stroke(TechColor.grid.opacity(0.55), style: stroke)
+                    if filled > 0 {
+                        Circle().trim(from: 0, to: 0.5 * filled)
+                            .stroke(TechColor.energy, style: stroke)
+                            .shadow(color: TechColor.blue.opacity(0.45), radius: glowRadius)
+                    }
+                }
+                .rotationEffect(.degrees(180))
+                .padding(inset)
+                ForEach([-72.0, -36, 0, 36, 72], id: \.self) { angle in
+                    Capsule().fill(TechColor.paper)
+                        .frame(width: lineWidth * 0.22, height: lineWidth * 1.24)
+                        .offset(y: -radius)
+                        .rotationEffect(.degrees(angle))
+                }
+            }
+            .frame(width: size, height: size)
+            .frame(height: arcHeight, alignment: .top)
+            .clipped()
+            .overlay(alignment: .bottom) {
+                if !typeSize.isAccessibilitySize && (!value.isEmpty || !caption.isEmpty) {
+                    VStack(spacing: 3) {
+                        if !value.isEmpty {
+                            Text(value)
+                                .font(.system(size: size * 0.2, weight: .semibold)).monospacedDigit()
+                                .foregroundStyle(TechColor.ink).lineLimit(1).minimumScaleFactor(0.55)
+                        }
+                        if !caption.isEmpty {
+                            Text(caption).font(.caption2).foregroundStyle(TechColor.muted)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                    }
+                    .padding(.bottom, bottomOverflow)
+                    .padding(.horizontal, lineWidth * 2)
+                }
+            }
+            if typeSize.isAccessibilitySize && !value.isEmpty {
+                Text(value).font(.title.weight(.semibold)).monospacedDigit().foregroundStyle(TechColor.ink)
+                Text(caption).font(.caption).foregroundStyle(TechColor.muted)
+            }
+            HStack {
+                Text("0")
+                Spacer(minLength: 0)
+                Text("100")
+            }
+            .font(.caption2).foregroundStyle(TechColor.muted)
+            .frame(width: size - lineWidth)
+        }
+        .frame(width: size)
+        .accessibilityHidden(true)
     }
 }
 
@@ -158,11 +253,14 @@ struct TechLineChart: View {
     let labels: [String]
     var tint: Color = TechColor.cyan
     var height: CGFloat = 170
-    private var lowerBound: Double { max(0, (values.min() ?? 0) - 5) }
-    private var upperBound: Double { max(lowerBound + 10, (values.max() ?? 0) + 5) }
+    private var lowerBound: Double { max(0, (values.filter(\.isFinite).min() ?? 0) - 5) }
+    private var upperBound: Double { max(lowerBound + 10, (values.filter(\.isFinite).max() ?? 0) + 5) }
     var body: some View {
+        let low = lowerBound
+        let high = upperBound
+        let displayed = TechPlotSampling.indices(values: values, limit: 240)
         Chart {
-            ForEach(values.indices, id: \.self) { index in
+            ForEach(displayed, id: \.self) { index in
                 LineMark(x: .value("周期", index), y: .value("跑力", values[index]))
                     .foregroundStyle(tint).interpolationMethod(.monotone)
                     .lineStyle(StrokeStyle(lineWidth: 2))
@@ -170,7 +268,7 @@ struct TechLineChart: View {
                     PointMark(x: .value("周期", index), y: .value("跑力", values[index]))
                         .foregroundStyle(tint).symbolSize(22)
                 }
-                AreaMark(x: .value("周期", index), yStart: .value("基线", lowerBound), yEnd: .value("跑力", values[index]))
+                AreaMark(x: .value("周期", index), yStart: .value("基线", low), yEnd: .value("跑力", values[index]))
                     .foregroundStyle(LinearGradient(colors: [tint.opacity(0.18), .clear], startPoint: .top, endPoint: .bottom))
                     .interpolationMethod(.monotone)
             }
@@ -182,7 +280,7 @@ struct TechLineChart: View {
                 }
             }
         }
-        .chartYScale(domain: lowerBound...upperBound)
+        .chartYScale(domain: low...high)
         .chartYAxis {
             AxisMarks(position: .leading) {
                 AxisGridLine().foregroundStyle(TechColor.grid.opacity(0.45))
@@ -190,6 +288,8 @@ struct TechLineChart: View {
             }
         }
         .frame(height: height * chartScale)
+        .accessibilityLabel("跑力评估趋势")
+        .accessibilityValue("\(values.count) 次评估，最低 \(nativeNumber(values.filter(\.isFinite).min()))，最高 \(nativeNumber(values.filter(\.isFinite).max()))")
     }
 }
 

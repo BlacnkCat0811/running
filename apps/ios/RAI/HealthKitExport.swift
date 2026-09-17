@@ -67,18 +67,51 @@ nonisolated enum HealthKitReadAuthorization: String, Sendable {
     var isUndecided: Bool { self == .notDetermined }
 }
 
-nonisolated private final class ResumeBox<T>: @unchecked Sendable {
+nonisolated private final class QueryContinuation<T>: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<T, Error>?
+    private var store: HKHealthStore?
+    private var query: HKQuery?
+    private var cancelled = false
 
-    init(_ continuation: CheckedContinuation<T, Error>) {
+    func set(_ continuation: CheckedContinuation<T, Error>) {
+        lock.lock()
+        guard !cancelled else {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
         self.continuation = continuation
+        lock.unlock()
+    }
+
+    func execute(_ query: HKQuery, on store: HKHealthStore) {
+        lock.lock()
+        guard !cancelled else {
+            lock.unlock()
+            return
+        }
+        self.store = store
+        self.query = query
+        lock.unlock()
+        store.execute(query)
+        // Cancellation can race in the narrow window before `execute`. In that
+        // case `cancel()` has already completed the continuation; stop once more
+        // after registration so the late-started query cannot keep running.
+        lock.lock()
+        let shouldStop = cancelled
+        lock.unlock()
+        if shouldStop {
+            store.stop(query)
+        }
     }
 
     func resume(returning value: T) {
         lock.lock()
         let item = continuation
         continuation = nil
+        store = nil
+        query = nil
         lock.unlock()
         item?.resume(returning: value)
     }
@@ -87,8 +120,26 @@ nonisolated private final class ResumeBox<T>: @unchecked Sendable {
         lock.lock()
         let item = continuation
         continuation = nil
+        store = nil
+        query = nil
         lock.unlock()
         item?.resume(throwing: error)
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let item = continuation
+        continuation = nil
+        let activeStore = store
+        let activeQuery = query
+        store = nil
+        query = nil
+        lock.unlock()
+        if let activeQuery {
+            activeStore?.stop(activeQuery)
+        }
+        item?.resume(throwing: CancellationError())
     }
 }
 
@@ -127,20 +178,39 @@ nonisolated enum HealthKitExport {
     /// successful sync. This is the single entry point for that request; callers
     /// must branch on the result rather than assume the prompt was answered.
     @MainActor
-    static func readAuthorizationState(requestingIfNeeded: Bool = true) async -> HealthKitReadAuthorization {
+    static func readAuthorizationState(requestingIfNeeded: Bool = true) async throws -> HealthKitReadAuthorization {
+        try Task.checkCancellation()
         guard HKHealthStore.isHealthDataAvailable() else { return .unavailable }
         let store = HKHealthStore()
-        let before = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes)
+        let before: HKAuthorizationRequestStatus?
+        do {
+            before = try await store.statusForAuthorizationRequest(toShare: [], read: readTypes)
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            before = nil
+        }
+        try Task.checkCancellation()
         if before == .shouldRequest, requestingIfNeeded {
-            try? await store.requestAuthorization(toShare: [], read: readTypes)
+            do {
+                try await store.requestAuthorization(toShare: [], read: readTypes)
+            } catch {
+                if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                return .unknown
+            }
+            try Task.checkCancellation()
         }
         // The query throwing means nothing was learned, so it is not an answer:
         // letting it fall through to `.decided` (as a bare `try?` plus a ternary
         // did) sent an unreadable state straight into a full export that reported
         // success. Fail closed on it.
-        guard let after = try? await store.statusForAuthorizationRequest(toShare: [], read: readTypes) else {
+        let after: HKAuthorizationRequestStatus
+        do {
+            after = try await store.statusForAuthorizationRequest(toShare: [], read: readTypes)
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
             return .unknown
         }
+        try Task.checkCancellation()
         switch after {
         case .shouldRequest:
             return .notDetermined
@@ -164,15 +234,18 @@ nonisolated enum HealthKitExport {
         workoutAnchor: Data?,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
+        try Task.checkCancellation()
         guard HKHealthStore.isHealthDataAvailable() else { throw HealthKitExportError.unavailable }
         let store = HKHealthStore()
         let warnings = WarningBag()
         await onProgress("正在读取跑步记录")
+        try Task.checkCancellation()
         let workoutBatch = try await runningWorkouts(
             store: store,
             from: startDate,
             anchorData: workoutAnchor
         )
+        try Task.checkCancellation()
         let workouts = workoutBatch.added
 
         let directory = FileManager.default.temporaryDirectory
@@ -198,6 +271,7 @@ nonisolated enum HealthKitExport {
         for (index, workout) in workouts.enumerated() {
             try Task.checkCancellation()
             await onProgress("正在读取第 \(index + 1)/\(workouts.count) 次跑步")
+            try Task.checkCancellation()
             let routeFiles = try await routeEntries(
                 for: workout,
                 store: store,
@@ -211,6 +285,7 @@ nonisolated enum HealthKitExport {
         }
 
         await onProgress("正在读取心率与恢复数据")
+        try Task.checkCancellation()
         recordCount += try await writeGlobalRecords(store: store, from: startDate, xml: xml, warnings: warnings)
         let exportedThrough = Date()
         try write(xml, "\n</HealthData>\n")
@@ -236,9 +311,16 @@ nonisolated enum HealthKitExport {
         files.append(("sync-manifest.json", manifestURL))
 
         await onProgress("正在打包健康数据")
+        try Task.checkCancellation()
         let zipURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("apple-health-healthkit-\(UUID().uuidString).zip")
-        try StoredZip.write(files: files, to: zipURL)
+        do {
+            try StoredZip.write(files: files, to: zipURL)
+            try Task.checkCancellation()
+        } catch {
+            try? FileManager.default.removeItem(at: zipURL)
+            throw error
+        }
         return HealthKitExportResult(
             zipURL: zipURL,
             workoutCount: workouts.count,
@@ -566,6 +648,7 @@ nonisolated enum HealthKitExport {
         let predicate = HKQuery.predicateForObjects(from: workout)
         var count = 0
         for (type, unit, xmlType, xmlUnit, denied) in types {
+            try Task.checkCancellation()
             let samples: [HKQuantitySample] = try await optionalSamples(
                 type: type,
                 predicate: predicate,
@@ -574,6 +657,7 @@ nonisolated enum HealthKitExport {
                 deniedMessage: denied
             )
             for sample in samples {
+                try Task.checkCancellation()
                 try write(xml, recordXML(sample, type: xmlType, unit: unit, xmlUnit: xmlUnit))
                 count += 1
             }
@@ -614,6 +698,7 @@ nonisolated enum HealthKitExport {
             ))
         }
         for (type, unit, xmlType, xmlUnit) in quantities {
+            try Task.checkCancellation()
             let samples: [HKQuantitySample] = try await optionalSamples(
                 type: type,
                 predicate: predicate,
@@ -622,6 +707,7 @@ nonisolated enum HealthKitExport {
                 deniedMessage: "部分恢复数据未授权"
             )
             for sample in samples {
+                try Task.checkCancellation()
                 try write(xml, recordXML(sample, type: xmlType, unit: unit, xmlUnit: xmlUnit))
                 count += 1
             }
@@ -634,6 +720,7 @@ nonisolated enum HealthKitExport {
             deniedMessage: "部分恢复数据未授权"
         )
         for sample in sleeps {
+            try Task.checkCancellation()
             var attrs = "type=\"HKCategoryTypeIdentifierSleepAnalysis\" sourceName=\"\(escape(sample.sourceRevision.source.name))\" sourceVersion=\"\(escape(sample.sourceRevision.version ?? "1"))\""
             if let device = deviceDescription(sample.device) {
                 attrs += " device=\"\(escape(device))\""
@@ -671,23 +758,31 @@ nonisolated enum HealthKitExport {
         predicate: NSPredicate?,
         store: HKHealthStore
     ) async throws -> [T] {
-        try await withCheckedThrowingContinuation { continuation in
-            let box = ResumeBox<[T]>(continuation)
-            let query = HKSampleQuery(
-                sampleType: type,
-                predicate: predicate,
-                limit: HKObjectQueryNoLimit,
-                sortDescriptors: type is HKWorkoutType
-                    ? [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
-                    : nil
-            ) { _, samples, error in
-                if let error {
-                    box.resume(throwing: error)
-                    return
+        let box = QueryContinuation<[T]>()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result = try await withCheckedThrowingContinuation { continuation in
+                box.set(continuation)
+                let query = HKSampleQuery(
+                    sampleType: type,
+                    predicate: predicate,
+                    limit: HKObjectQueryNoLimit,
+                    sortDescriptors: type is HKWorkoutType
+                        ? [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+                        : nil
+                ) { _, samples, error in
+                    if let error {
+                        box.resume(throwing: error)
+                        return
+                    }
+                    box.resume(returning: (samples as? [T]) ?? [])
                 }
-                box.resume(returning: (samples as? [T]) ?? [])
+                box.execute(query, on: store)
             }
-            store.execute(query)
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            box.cancel()
         }
     }
 
@@ -726,6 +821,7 @@ nonisolated enum HealthKitExport {
         try FileManager.default.createDirectory(at: routesDirectory, withIntermediateDirectories: true)
         let workoutId = routeFileWorkoutId(workout)
         for route in routes {
+            try Task.checkCancellation()
             let locations: [CLLocation]
             do {
                 locations = try await routeLocations(route, store: store)
@@ -740,6 +836,7 @@ nonisolated enum HealthKitExport {
                 throw error
             }
             guard !locations.isEmpty else { continue }
+            try Task.checkCancellation()
             let name = "workout-routes/\(workoutId)_\(entries.count + 1).gpx"
             let url = directory.appendingPathComponent(name)
             try gpx(locations).write(to: url, atomically: true, encoding: .utf8)
@@ -764,28 +861,36 @@ nonisolated enum HealthKitExport {
     }
 
     private static func routeLocations(_ route: HKWorkoutRoute, store: HKHealthStore) async throws -> [CLLocation] {
-        try await withCheckedThrowingContinuation { continuation in
-            let box = ResumeBox<[CLLocation]>(continuation)
-            let lock = NSLock()
-            var collected: [CLLocation] = []
-            let query = HKWorkoutRouteQuery(route: route) { _, locations, done, error in
-                if let error {
-                    box.resume(throwing: error)
-                    return
+        let box = QueryContinuation<[CLLocation]>()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result = try await withCheckedThrowingContinuation { continuation in
+                box.set(continuation)
+                let lock = NSLock()
+                var collected: [CLLocation] = []
+                let query = HKWorkoutRouteQuery(route: route) { _, locations, done, error in
+                    if let error {
+                        box.resume(throwing: error)
+                        return
+                    }
+                    lock.lock()
+                    if let locations { collected.append(contentsOf: locations) }
+                    let finished = done ? collected : nil
+                    lock.unlock()
+                    if let finished {
+                        box.resume(returning: finished)
+                    }
                 }
-                lock.lock()
-                if let locations { collected.append(contentsOf: locations) }
-                let finished = done ? collected : nil
-                lock.unlock()
-                if let finished {
-                    box.resume(returning: finished)
-                }
+                box.execute(query, on: store)
             }
-            store.execute(query)
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            box.cancel()
         }
     }
 
-    private static func gpx(_ locations: [CLLocation]) -> String {
+    private static func gpx(_ locations: [CLLocation]) throws -> String {
         var xml = """
         <?xml version="1.0" encoding="UTF-8"?>
         <gpx version="1.1" creator="RAI">
@@ -794,6 +899,7 @@ nonisolated enum HealthKitExport {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
         for location in locations {
+            try Task.checkCancellation()
             xml += "\n    <trkpt lat=\"\(location.coordinate.latitude)\" lon=\"\(location.coordinate.longitude)\">"
             if location.verticalAccuracy >= 0 {
                 xml += "<ele>\(location.altitude)</ele>"
@@ -888,25 +994,33 @@ nonisolated enum HealthKitExport {
         anchor: HKQueryAnchor?,
         predicate: NSPredicate?
     ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor) {
-        try await withCheckedThrowingContinuation { continuation in
-            let box = ResumeBox<(added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor)>(continuation)
-            let query = HKAnchoredObjectQuery(
-                type: .workoutType(),
-                predicate: predicate,
-                anchor: anchor,
-                limit: HKObjectQueryNoLimit
-            ) { _, samples, deletedObjects, newAnchor, error in
-                if let error {
-                    box.resume(throwing: error)
-                    return
+        let box = QueryContinuation<(added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor)>()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result = try await withCheckedThrowingContinuation { continuation in
+                box.set(continuation)
+                let query = HKAnchoredObjectQuery(
+                    type: .workoutType(),
+                    predicate: predicate,
+                    anchor: anchor,
+                    limit: HKObjectQueryNoLimit
+                ) { _, samples, deletedObjects, newAnchor, error in
+                    if let error {
+                        box.resume(throwing: error)
+                        return
+                    }
+                    box.resume(returning: (
+                        added: (samples as? [HKWorkout]) ?? [],
+                        deleted: deletedObjects ?? [],
+                        next: newAnchor ?? HKQueryAnchor(fromValue: 0)
+                    ))
                 }
-                box.resume(returning: (
-                    added: (samples as? [HKWorkout]) ?? [],
-                    deleted: deletedObjects ?? [],
-                    next: newAnchor ?? HKQueryAnchor(fromValue: 0)
-                ))
+                box.execute(query, on: store)
             }
-            store.execute(query)
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            box.cancel()
         }
     }
 

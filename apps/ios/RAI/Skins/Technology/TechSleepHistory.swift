@@ -20,7 +20,7 @@ struct TechSleepHistory: View {
                 .chartXScale(domain: days.map(\.date))
                 .chartXAxis(.hidden).chartYAxis(.hidden)
                 .frame(width: 108, height: 38)
-                Text("近 14 天 · 小时").font(.system(size: 9)).foregroundStyle(TechColor.muted)
+                Text("近 14 天 · 小时").font(.caption2).foregroundStyle(TechColor.muted)
             } else {
                 Text("暂无睡眠趋势").font(.caption2).foregroundStyle(TechColor.muted)
             }

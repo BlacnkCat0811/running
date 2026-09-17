@@ -6,9 +6,39 @@ import SwiftUI
 
 /// GPS presentation only. The trace remains available when AMap tiles/rendering
 /// are unavailable; it never presents a synthetic street map as real geography.
-struct TechRouteView: View {
+struct TechRouteView: View, Equatable {
     let route: [RoutePoint]
-    @State private var showingSystemMap = true
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.route.elementsEqual(rhs.route) {
+            $0.latitude == $1.latitude && $0.longitude == $1.longitude
+        }
+    }
+    var body: some View {
+        TechPreparedRoute(geometry: TechRouteGeometry(route: route))
+    }
+}
+
+/// Prepared once per changed route, not once for each Canvas read / map toggle.
+private struct TechRouteGeometry {
+    let coordinates: [CLLocationCoordinate2D]
+    let points: [MKMapPoint]
+    let rect: MKMapRect
+    init(route: [RoutePoint]) {
+        coordinates = route.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+            .filter { $0.latitude.isFinite && $0.longitude.isFinite && CLLocationCoordinate2DIsValid($0) }
+        points = coordinates.map(MKMapPoint.init).filter { $0.x.isFinite && $0.y.isFinite }
+        let bounds = points.reduce(MKMapRect.null) {
+            $0.union(MKMapRect(x: $1.x, y: $1.y, width: 1, height: 1))
+        }
+        rect = bounds.isNull ? .world : bounds.insetBy(dx: -max(bounds.width * 0.12, 20),
+                                                       dy: -max(bounds.height * 0.12, 20))
+    }
+}
+
+private struct TechPreparedRoute: View {
+    let geometry: TechRouteGeometry
+    // The offline trace appears immediately; tile rendering is an explicit action.
+    @State private var showingSystemMap = false
     /// One-shot signal that the next map update should fit the entire route.
     /// Reset back to false on the first consume so it doesn't refit whenever
     /// SwiftUI happens to redraw.
@@ -18,24 +48,12 @@ struct TechRouteView: View {
 
     private var mapAllowed: Bool { mapPrivacyState == MapPrivacy.State.agreed.rawValue }
 
-    private var coordinates: [CLLocationCoordinate2D] {
-        route.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
-            .filter { CLLocationCoordinate2DIsValid($0) && $0.latitude.isFinite && $0.longitude.isFinite }
-    }
-
-    private var mapPoints: [MKMapPoint] {
-        coordinates.map(MKMapPoint.init).filter { $0.x.isFinite && $0.y.isFinite }
-    }
-
-    private var mapRect: MKMapRect {
-        let rect = mapPoints.reduce(MKMapRect.null) {
-            $0.union(MKMapRect(x: $1.x, y: $1.y, width: 1, height: 1))
-        }
-        guard !rect.isNull else { return .world }
-        return rect.insetBy(dx: -max(rect.width * 0.12, 20), dy: -max(rect.height * 0.12, 20))
-    }
+    private var coordinates: [CLLocationCoordinate2D] { geometry.coordinates }
+    private var mapPoints: [MKMapPoint] { geometry.points }
+    private var mapRect: MKMapRect { geometry.rect }
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
         ZStack(alignment: .bottomLeading) {
             if mapPoints.count < 2 {
                 TechColor.background
@@ -48,10 +66,6 @@ struct TechRouteView: View {
                     }
             } else {
                 trace
-                Text(mapAllowed ? "真实 GPS 轨迹 · 无地图底图" : "真实 GPS 轨迹 · 未启用高德底图（可在设置中开启）")
-                    .font(.caption2).foregroundStyle(TechColor.muted)
-                    .padding(8).background(TechColor.background.opacity(0.9), in: Capsule())
-                    .padding(10)
             }
         }
         .frame(height: 280)
@@ -60,7 +74,7 @@ struct TechRouteView: View {
             Menu {
                 Button("轨迹图（离线可用）") { showingSystemMap = false }
                 if mapAllowed {
-                    Button("地图与轨迹") { showingSystemMap = true }
+                    Button("加载互动地图") { showingSystemMap = true }
                     Button("显示完整路线") {
                         showingSystemMap = true
                         fitRequest = true
@@ -73,6 +87,11 @@ struct TechRouteView: View {
                     .foregroundStyle(TechColor.cyan).frame(width: 44, height: 44)
                     .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 12))
             }.padding(8).accessibilityLabel("路线显示方式")
+        }
+        Text(showingSystemMap && mapAllowed ? "互动地图 · 可缩放和拖动，右上角可恢复完整路线"
+             : mapAllowed ? "真实轨迹 · 通过右上角地图按钮加载底图" : "真实轨迹 · 未启用高德底图")
+            .font(.caption).foregroundStyle(TechColor.muted)
+            .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -122,6 +141,7 @@ private struct NativeRouteMap: UIViewRepresentable {
     let coordinates: [CLLocationCoordinate2D]
     let triggerFit: Bool
     func makeUIView(context: Context) -> RouteMapContainer { RouteMapContainer() }
+    static func dismantleUIView(_ view: RouteMapContainer, coordinator: ()) { view.stop() }
     func updateUIView(_ view: RouteMapContainer, context: Context) {
         view.update(coordinates: coordinates, triggerFit: triggerFit)
     }
@@ -134,6 +154,9 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     private let end = CAShapeLayer()
     /// GCJ-02 coordinates, converted from the incoming WGS-84 route for display.
     private var coordinates: [CLLocationCoordinate2D] = []
+    private var sourceCoordinates: [CLLocationCoordinate2D] = []
+    private var drawScheduled = false
+    private var stopped = false
     /// Symmetric padding keeps the route's bounding-box center at the card's
     /// exact center while leaving room for the line and endpoint markers.
     private static let fitInsets = UIEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
@@ -184,7 +207,14 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     func update(coordinates wgsCoordinates: [CLLocationCoordinate2D], triggerFit: Bool) {
-        coordinates = wgsCoordinates.map(GCJ02.fromWGS84)
+        let changed = !sourceCoordinates.elementsEqual(wgsCoordinates) {
+            $0.latitude == $1.latitude && $0.longitude == $1.longitude
+        }
+        guard changed || triggerFit else { return }
+        if changed {
+            sourceCoordinates = wgsCoordinates
+            coordinates = wgsCoordinates.map(GCJ02.fromWGS84)
+        }
         let fitKey = Self.fitKey(for: coordinates)
         if triggerFit || fitKey != lastFitKey {
             lastFitKey = fitKey
@@ -192,6 +222,11 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         }
         fitIfNeeded()
         drawTrace()
+    }
+    func stop() {
+        stopped = true
+        needsFit = false
+        map.delegate = nil
     }
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -222,7 +257,7 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     /// downloads that never finish offline — and the fit only counts as done
     /// once the visible rect covers the route.
     private func fitIfNeeded() {
-        guard needsFit, fitAttempts < Self.maxFitAttempts else {
+        guard !stopped, needsFit, fitAttempts < Self.maxFitAttempts else {
             needsFit = false
             return
         }
@@ -258,6 +293,16 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     }
 
     private func drawTrace() {
+        guard !stopped, !drawScheduled else { return }
+        drawScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.drawScheduled = false
+            if !self.stopped { self.renderTrace() }
+        }
+    }
+
+    private func renderTrace() {
         guard bounds.width > 0, bounds.height > 0 else { return }
         let points = coordinates.map { map.convert($0, toPointTo: self) }.filter { $0.x.isFinite && $0.y.isFinite }
         let path = UIBezierPath()

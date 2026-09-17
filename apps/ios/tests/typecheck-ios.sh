@@ -61,8 +61,11 @@ final class AppModel {
 
 /// 替身：对应 apps/ios/RAI/Skins/Technology/TechRouteView.swift（唯一需要 MAMapKit
 /// 的视图，被 TechViews 的路线面板引用，所以这里只需要入口签名）。
-struct TechRouteView: View {
+struct TechRouteView: View, Equatable {
     let route: [RoutePoint]
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.route.elementsEqual(rhs.route) { $0.latitude == $1.latitude && $0.longitude == $1.longitude }
+    }
     var body: some View { EmptyView() }
 }
 #endif

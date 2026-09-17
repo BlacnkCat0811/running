@@ -16,8 +16,13 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/NativeAppModel.swift > 
 # （`MobileWorkoutPlanDay` / `MobileWorkoutPlanResponse`），少编它就会在模型回归里
 # 报 "cannot find type ... in scope"；同时映射器一旦编译不过，模型回归也不该报绿。
 # `typecheck-ios.sh` 是全量一起编，抓不到这种「子集缺文件」——两条通道都要跑。
+# `CalibrationState.swift` 必须留在编译列表里：它决定"校准完成"要不要继续挂黄色
+# 告警框，曾被写成 `!= "ready"`（契约里不存在的取值）而对任何输入恒为真。它住在
+# `NativeFormat.swift` 时因为拖进 `PixelColor`（iOS 专属）而进不了这扇闸门，于是
+# 错了也无人报警 —— 抽出来就是为了让它在这里被钉住。
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
-  apps/ios/RAI/WorkoutPlanMapper.swift "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift \
+  apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/CalibrationState.swift \
+  "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
 "$tmp/model-tests"
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/Keychain.swift \
@@ -41,3 +46,12 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/Work
   apps/ios/RAI/PlanReceiptMatcher.swift \
   apps/ios/tests/WorkoutPlanMapperRegression.swift -o "$tmp/workout-plan-tests"
 "$tmp/workout-plan-tests"
+
+bash apps/ios/tests/run-session-tests.sh
+bash apps/ios/tests/run-health-sync-tests.sh
+# `run-tech-presentation-tests.sh` 必须挂在这里，否则它只是一个"手工脚本"。
+# 实测过它的失效模式：脚本自己跑绿、突变也真红，但全仓没有任何入口
+# 会执行它 —— 新写的 `TechPlotSampling` / `TechSyncPresentation` / `verdictIconName`
+# 断言因此从不参与任何一次回归。这与 `CalibrationState.swift`、`PlanReceiptMatcher.swift`
+# 的教训同类：判据存在不等于判据被执行。挂在聚合入口里才算真的"被钉住"。
+bash apps/ios/tests/run-tech-presentation-tests.sh

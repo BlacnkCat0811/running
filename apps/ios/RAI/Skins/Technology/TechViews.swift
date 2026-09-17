@@ -7,58 +7,32 @@ import UIKit
 struct TechTodayView: View {
     @State private var showingLock = false
     @Environment(NativeAppModel.self) private var native
-    @Environment(ServerSession.self) private var session
-    @Environment(HealthKitSync.self) private var healthSync
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
                 TechPageHeader(title: "RAI", eyebrow: native.today.map { nativeDay($0.today.localDate) } ?? "RUNNING INTELLIGENCE") {
-                    HStack(spacing: 7) {
-                        VStack(spacing: 2) {
-                        TechIconButton(systemName: "arrow.trianglehead.2.clockwise.rotate.90", accessibilityLabel: "同步健康数据", color: TechColor.cyan) {
-                            Task {
-                                await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
-                                await native.refreshAll(requestHandshake: false)
-                            }
-                        }
-                        .disabled(healthSync.isBusy || native.isOffline)
-                        Text("同步").font(.caption2.weight(.bold)).foregroundStyle(TechColor.muted)
-                        }
-                        VStack(spacing: 2) {
-                        NavigationLink {
-                            TechPlanView()
-                        } label: {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(TechColor.ink)
-                                .frame(width: 44, height: 44)
-                                .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 14))
-                        }
-                        .accessibilityLabel("打开训练计划")
-                        Text("训练计划").font(.caption2.weight(.medium)).foregroundStyle(TechColor.muted)
-                        }
-                    }
+                    TechHomeActions()
                 }
+                TechSyncStatus()
 
                 if let today = native.today {
                     if native.isOffline || today.verdict.stale || today.freshness.state != "valid" {
-                        TechFreshnessBanner(today: today, isOffline: native.isOffline, cacheDate: native.lastCacheUpdate)
+                        TechFreshnessBanner(today: today, isOffline: native.isOffline, cacheDate: native.lastCacheUpdate, showsSyncAction: true)
                     }
-                    todayHero(today)
                     verdictPanel(today)
-                    recoveryPanel(today)
-                    TechTodayMetrics(workout: today.recentWorkouts.first)
-                        .id(today.generatedAt)
+                    // 像素风把「最近一次训练反馈」放在今日页的上下文面板里
+                    //（`NativeViews.swift` 的 `contextPanel`），紧接训练判定之后；科技风
+                    // 此前完全没有入口。位置对齐像素风：判定讲"今天能不能练"，赛后反馈讲
+                    // "刚那次练成什么样"，两者相邻才读得通。
+                    if let postRun = today.postRun { postRunPanel(postRun) }
                     recommendationPanel(today)
+                    todayHero(today)
+                    recoveryPanel(today)
+                    abilityCard(today)
+                    TechTodayMetrics(workout: today.recentWorkouts.first, refreshRevision: today.generatedAt)
                     activityPanel(today)
                     raceSummary(today)
                     TodayDetailLinks(data: today)
-                    DisclosureGroup("跑力、周计划与训练依据") {
-                        abilityPanel(today)
-                        planPanel(today)
-                        contextPanel(today)
-                    }.font(.subheadline).tint(TechColor.cyan)
                 } else if native.isLoading {
                     TechPanel { TechLoadingState(title: "正在读取 RAI 服务") }
                 } else {
@@ -85,14 +59,14 @@ struct TechTodayView: View {
 
     private func todayHero(_ data: MobileTodayResponse) -> some View {
         TechHeroCard {
-            HStack(alignment: .center, spacing: 20) {
+            TechAdaptiveStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(data.today.workoutCount > 0 ? "今日跑步" : "今日训练")
                         .font(.subheadline).foregroundStyle(TechColor.muted)
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Text(nativeNumber(data.today.distanceKm, digits: 2))
-                            .font(.system(size: 40, weight: .bold)).monospacedDigit()
-                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .techScaledFont(40, weight: .bold).monospacedDigit()
+                            .fixedSize(horizontal: false, vertical: true)
                         Text("km").font(.subheadline)
                     }.foregroundStyle(TechColor.ink)
                 }
@@ -101,7 +75,7 @@ struct TechTodayView: View {
                     TechInstrumentRing(progress: data.week.goalProgressFraction ?? 0, size: 112)
                 }.accessibilityLabel("本周目标进度 \(nativePercent(data.week.goalProgressFraction))")
             }
-            HStack(spacing: 12) {
+            TechMetricGrid {
                 heroMetric("时间", techDuration(data.today.durationSeconds))
                 heroMetric("平均配速", techPace(data.today.paceSecondsPerKm) + "/km")
                 heroMetric("kcal", data.today.energyKcal.map { nativeNumber($0, digits: 0) } ?? "--")
@@ -109,7 +83,7 @@ struct TechTodayView: View {
             HStack(spacing: 10) {
                 Text("本周 \(nativeNumber(data.week.distanceKm)) / \(nativeNumber(data.week.goalDistanceKm)) km")
                     .font(.caption2).foregroundStyle(TechColor.muted)
-                TechProgressBar(fraction: data.week.goalProgressFraction ?? 0)
+                TechProgressBar(fraction: data.week.goalProgressFraction)
                 Text(nativePercent(data.week.goalProgressFraction)).font(.caption2).foregroundStyle(TechColor.cyan)
             }.padding(.horizontal, 8).padding(.vertical, 6).background(TechColor.paper, in: RoundedRectangle(cornerRadius: 6))
         }
@@ -118,38 +92,64 @@ struct TechTodayView: View {
     private func heroMetric(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(value).font(.title3.weight(.semibold).monospacedDigit())
-                .foregroundStyle(TechColor.ink).lineLimit(1).minimumScaleFactor(0.65)
+                .foregroundStyle(TechColor.ink).fixedSize(horizontal: false, vertical: true)
             Text(title).font(.caption).foregroundStyle(TechColor.muted)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
+    /// 比赛目标卡。**无条件渲染**：没有目标时服务端仍给出 `race.note` 引导文案
+    /// （`mobile-coach.ts` 的 `buildRaceCard` 无目标分支：「还没有目标赛事。设一个日期和
+    /// 距离后，首页会给出倒计时和专项形态。」）。旧版整卡写在 `if let target` 里，于是
+    /// `race.note` / `race.shapeScore` / `race.taper` 三个字段在科技风没有任何入口
+    /// —— 有数据、有契约、没展示位，且当时连声明都没有。
+    ///
+    /// 距离用 `techRaceDistanceName` 而不是直出 `target.distance`：契约里它是闭集
+    /// `five_k | ten_k | half_marathon`，直出会让用户看到 `half_marathon`。
     private func raceSummary(_ data: MobileTodayResponse) -> some View {
-        if let target = data.race.target {
-            NavigationLink { TechPlanView() } label: {
-                TechPanel {
+        let target = data.race.target
+        return NavigationLink { TechPlanView() } label: {
+            TechPanel {
+                VStack(alignment: .leading, spacing: 11) {
                     HStack(spacing: 12) {
-                        Image(systemName: "trophy.fill").foregroundStyle(TechColor.cyan)
+                        Image(systemName: target == nil ? "flag.checkered" : "trophy.fill")
+                            .foregroundStyle(TechColor.cyan)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(target.distance).font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
-                            Text(nativeDay(target.date) + (data.race.daysUntil.map { "（\($0)天）" } ?? ""))
+                            Text(target.map { "\(techRaceDistanceName($0.distance)) · \(nativeDay($0.date))" }
+                                ?? "尚未设置比赛目标")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(data.race.note)
                                 .font(.caption).foregroundStyle(TechColor.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        Spacer()
+                        Spacer(minLength: 8)
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(TechColor.muted)
                     }
+                    if target != nil || data.race.shapeScore != nil {
+                        TechAdaptiveStack(spacing: 10) {
+                            if let pace = target?.targetPaceSecondsPerKm {
+                                TechMetricTile(title: "目标配速", value: techPace(pace) + "/km", accent: TechColor.cyan)
+                            }
+                            if let score = data.race.shapeScore {
+                                TechMetricTile(title: "体型分", value: nativePercent(score), accent: TechColor.green)
+                            }
+                            if target != nil {
+                                TechMetricTile(title: "减量", value: data.race.taper ? "是" : "否",
+                                               accent: data.race.taper ? TechColor.yellow : TechColor.muted)
+                            }
+                        }
+                    }
                 }
-            }.buttonStyle(.plain)
-        }
+            }
+        }.buttonStyle(TechPressStyle())
     }
 
     private func activityPanel(_ data: MobileTodayResponse) -> some View {
         TechPanel {
             TechSectionHeader(title: "本周训练结构")
-            HStack(spacing: 24) {
+            TechAdaptiveStack(spacing: 16) {
                 TechRing(progress: data.weekStructure.easyDurationFraction ?? 0,
                          value: nativePercent(data.weekStructure.easyDurationFraction), label: "轻松跑比例", size: 82)
-                Rectangle().fill(TechColor.grid.opacity(0.5)).frame(width: 1, height: 74)
                 VStack(alignment: .leading, spacing: 12) {
                     Text("质量课").font(.caption).foregroundStyle(TechColor.muted)
                     Text("\(data.weekStructure.qualitySessionCount) / \(data.weekStructure.qualitySessionCap) 次")
@@ -167,38 +167,77 @@ struct TechTodayView: View {
         }
     }
 
-    private func abilityPanel(_ data: MobileTodayResponse) -> some View {
-        TechPanel {
-            VStack(alignment: .leading, spacing: 11) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        TechSectionHeader(title: "当前跑力", trailing: techStatusName(data.calibration.status), trailingColor: TechColor.cyan)
-                        Text(nativeNumber(data.ability.trueAbility, digits: 1))
-                            .font(.system(size: 42, weight: .semibold, design: .default))
-                            .foregroundStyle(TechColor.coral)
-                        Text(data.ability.explanation)
-                            .font(.footnote)
-                            .foregroundStyle(TechColor.muted)
+    private func abilityCard(_ data: MobileTodayResponse) -> some View {
+        NavigationLink {
+            TechAbilityDetailView()
+        } label: {
+            TechPanel(tint: TechColor.cyan) {
+                TechAdaptiveStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Text("当前跑力").font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(TechColor.muted)
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(nativeNumber(data.ability.trueAbility, digits: 1))
+                                .techScaledFont(36, weight: .semibold).monospacedDigit()
+                                .foregroundStyle(TechColor.ink).fixedSize(horizontal: false, vertical: true)
+                            Text("/100").font(.caption).foregroundStyle(TechColor.muted)
+                        }
+                        HStack(spacing: 6) {
+                            Text("近 7 天").font(.caption2).foregroundStyle(TechColor.muted)
+                            Text(nativeSigned(data.ability.changeFrom7DaysAgo))
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(abilityDeltaColor(data.ability.changeFrom7DaysAgo))
+                            Text("· " + techCalibrationName(data.calibration.status))
+                                .font(.caption2).foregroundStyle(TechColor.muted)
+                        }
                     }
-                    Spacer(minLength: 10)
-                    VStack(alignment: .trailing, spacing: 7) {
-                        techMetricCaption("近 7 天", value: nativeSigned(data.ability.changeFrom7DaysAgo))
-                        techMetricCaption("增长速度", value: nativeNumber(data.ability.growthVelocityPerWeek))
-                        techMetricCaption("衰减", value: nativeNumber(data.ability.decayPoints))
-                    }
-                    .frame(width: 86, alignment: .trailing)
+                    Spacer(minLength: 0)
+                    TechAbilityGauge(
+                        progress: data.ability.trueAbility.map { min(max($0 / 100, 0), 1) } ?? 0,
+                        value: "",
+                        caption: "",
+                        size: 104,
+                        lineWidth: 9
+                    )
+                    .accessibilityHidden(true)
                 }
-                if data.calibration.status != "ready" {
+                if calibrationNeedsAttention(data.calibration.status) {
                     Text(data.calibration.message)
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(TechColor.muted)
-                        .padding(9)
+                        .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(TechColor.paleYellow)
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(TechColor.yellow, lineWidth: 1))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(TechColor.yellow, lineWidth: 1))
                 }
             }
         }
+        .buttonStyle(TechPressStyle())
+        .accessibilityIdentifier("today.ability")
+        .accessibilityLabel(abilityAccessibilityLabel(data))
+        .accessibilityHint("查看跑步能力详情")
+    }
+
+    /// 覆盖式 label 会盖掉卡内文字，所以变化、校准状态和校准说明都要在这里补齐。
+    private func abilityAccessibilityLabel(_ data: MobileTodayResponse) -> String {
+        var parts = [
+            "当前跑力 \(nativeNumber(data.ability.trueAbility, digits: 1))，满分 100",
+            "近 7 天 \(nativeSigned(data.ability.changeFrom7DaysAgo))",
+            techCalibrationName(data.calibration.status)
+        ]
+        if calibrationNeedsAttention(data.calibration.status) {
+            parts.append(data.calibration.message)
+        }
+        return parts.joined(separator: "，")
+    }
+
+    private func abilityDeltaColor(_ delta: Double?) -> Color {
+        guard let delta, delta.isFinite else { return TechColor.muted }
+        if delta > 0 { return TechColor.cyan }
+        if delta < 0 { return TechColor.coral }
+        return TechColor.muted
     }
 
     private func verdictPanel(_ data: MobileTodayResponse) -> some View {
@@ -210,25 +249,60 @@ struct TechTodayView: View {
                     Text(data.verdict.title).font(.title3.weight(.semibold)).foregroundStyle(tone)
                     Text(data.verdict.reason).font(.footnote).foregroundStyle(TechColor.muted)
                 }
-                TechInstrumentRing(progress: 0, size: 60).accessibilityHidden(true)
+                Image(systemName: verdictIconName(tone: data.verdict.tone)).font(.title2).foregroundStyle(tone).accessibilityHidden(true)
             }
             if !data.verdict.triggers.isEmpty {
-                DisclosureGroup("判定依据") {
+                DisclosureGroup {
                     ForEach(data.verdict.triggers, id: \.code) { trigger in
                         Text(trigger.detail).font(.caption).foregroundStyle(TechColor.muted)
                     }
-                }.font(.caption).tint(tone)
+                } label: { Text("判定依据").frame(minHeight: 44) }.font(.caption).tint(tone)
+            }
+        }
+    }
+
+    /// 「最近一次训练反馈」。`postRun` 只在"今天已经练过"时有值
+    /// （`mobile-coach.ts` 的 `buildPostRun` 对非今日训练返回 null），因此这里按
+    /// optional 处理，不用空态占位。
+    ///
+    /// 刺激匹配走 `techStimulusMatchName`：契约 `MobileStimulusMatch` 是闭集
+    /// `aligned | too_hard | too_easy | unknown`，直出会让用户看到 `too_hard`。
+    private func postRunPanel(_ postRun: MobilePostRunVerdict) -> some View {
+        TechPanel(tint: TechColor.coral) {
+            VStack(alignment: .leading, spacing: 9) {
+                TechSectionHeader(title: "最近一次训练反馈",
+                                  trailing: nativeSessionName(postRun.sessionType),
+                                  trailingColor: TechColor.coral)
+                Text(postRun.headline)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("刺激 \(nativeStimulusName(postRun.stimulusType)) · 匹配 \(techStimulusMatchName(postRun.stimulusMatch))")
+                    .font(.caption).foregroundStyle(TechColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let delta = postRun.trueAbilityDelta {
+                    Text("跑力变化 \(nativeSigned(delta))")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(abilityDeltaColor(delta))
+                }
+                ForEach(postRun.details, id: \.self) { detail in
+                    Text("· \(detail)")
+                        .font(.caption).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
 
     private func recommendationPanel(_ data: MobileTodayResponse) -> some View {
         TechPanel {
-            TechSectionHeader(title: "今日推荐训练")
+            // 阶段放在这里而不是别处：`MobileDayPhase` 讲的就是"今天走到哪一步"
+            // （待同步 / 晨间开放 / 已锁定 / 已训练 / 休息日完成），它决定下面这条推荐
+            // 该被怎么读。像素风把它放在上下文面板标题右侧，位置不同、信息同一份。
+            TechSectionHeader(title: "今日推荐训练", trailing: techPhaseName(data.phase))
             Label("\(data.nextSession.title) \(nativeKilometers(data.nextSession.distanceKm))", systemImage: nativeSessionSymbol(data.nextSession.kind))
                 .font(.headline).foregroundStyle(TechColor.cyan)
             Divider().overlay(TechColor.grid)
-            HStack(alignment: .center) {
+            TechAdaptiveStack {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("建议配速 " + techPaceRange(data.nextSession.paceSecondsPerKmLower, data.nextSession.paceSecondsPerKmUpper))
                     Text("预计时间 \(data.nextSession.durationMinutes.map { nativeNumber($0, digits: 0) + " 分钟" } ?? "待评估")")
@@ -238,9 +312,18 @@ struct TechTodayView: View {
                     Text(data.lock.present ? "已锁定" : "锁定安排").font(.caption.weight(.semibold))
                         .foregroundStyle(TechColor.background).padding(.horizontal, 14).frame(minHeight: 44)
                         .background(TechColor.action, in: Capsule())
-                }.buttonStyle(.plain).disabled(data.lock.present || data.verdict.stale || native.isOffline)
-                    .opacity(data.lock.present || data.verdict.stale || native.isOffline ? 0.5 : 1)
+                }.buttonStyle(TechPressStyle()).disabled(data.lock.present || data.verdict.stale || native.isOffline)
+                    .saturation(data.lock.present || data.verdict.stale || native.isOffline ? 0 : 1)
             }
+            if data.lock.present || data.verdict.stale || native.isOffline {
+                Text(data.lock.present ? "今日安排已锁定，可在训练计划中查看。" : native.isOffline ? "离线仅可查看，连接后才能锁定安排。" : "建议已过期，请先刷新再锁定。")
+                    .font(.caption).foregroundStyle(TechColor.muted)
+            }
+            NavigationLink { TechPlanView() } label: {
+                Label("查看训练计划", systemImage: "calendar")
+                    .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+            }.buttonStyle(TechPressStyle()).foregroundStyle(TechColor.cyan)
+                .accessibilityIdentifier("today.plan")
         }
     }
 
@@ -268,57 +351,15 @@ struct TechTodayView: View {
     private func recoveryPanel(_ data: MobileTodayResponse) -> some View {
         TechPanel {
             TechSectionHeader(title: "恢复状态")
-            HStack(spacing: 22) {
+            TechAdaptiveStack(spacing: 16) {
                 VStack(spacing: 8) {
                     Image(systemName: data.recovery.state == "recovered" ? "heart.fill" : "heart.text.square")
                         .font(.system(size: 30)).foregroundStyle(techToneColor(data.recovery.state ?? "unknown"))
                     Text(data.recovery.stateLabel).font(.subheadline.weight(.semibold))
                         .foregroundStyle(TechColor.ink)
                 }.frame(minWidth: 82)
-                Rectangle().fill(TechColor.grid.opacity(0.5)).frame(width: 1, height: 64)
                 Text(data.recovery.note).font(.footnote).foregroundStyle(TechColor.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func planPanel(_ data: MobileTodayResponse) -> some View {
-        TechPanel {
-            VStack(alignment: .leading, spacing: 9) {
-                TechSectionHeader(title: "本周计划", trailing: "质量课 \(data.weekStructure.qualitySessionCount)/\(data.weekStructure.qualitySessionCap)")
-                ForEach(data.weekPlan) { day in
-                    HStack(spacing: 9) {
-                        Text(nativeWeekday(day.localDate))
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                            .frame(width: 35, alignment: .leading)
-                        Image(systemName: day.completedWorkoutId == nil ? "square" : "checkmark.square.fill")
-                            .foregroundStyle(day.completedWorkoutId == nil ? TechColor.grid : TechColor.green)
-                        Text(day.title)
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(TechColor.ink)
-                            .lineLimit(1)
-                        Spacer(minLength: 4)
-                        Text(day.kind == "rest" ? "休息" : nativeKilometers(day.distanceKm))
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(day.distanceKm > 0 ? TechColor.green : TechColor.muted)
-                    }
-                    .padding(.vertical, 5)
-                    .overlay(alignment: .bottom) {
-                        Rectangle()
-                            .fill(TechColor.grid.opacity(0.55))
-                            .frame(height: 1)
-                    }
-                }
-                if !data.injuryFlags.isEmpty {
-                    ForEach(data.injuryFlags) { flag in
-                        HStack(alignment: .top, spacing: 7) {
-                            Image(systemName: "cross.case.fill")
-                            Text("\(flag.title)：\(flag.detail)")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(TechColor.coral)
-                    }
-                }
             }
         }
     }
@@ -328,7 +369,7 @@ struct TechTodayView: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
+                TechMetricGrid(minimum: 140) {
                     NavigationLink {
                         TechWeekOverviewView(data: data)
                     } label: {
@@ -340,7 +381,7 @@ struct TechTodayView: View {
                             fill: TechColor.mint
                         )
                     }
-                    .buttonStyle(.plain).accessibilityIdentifier("today.week")
+                    .buttonStyle(TechPressStyle()).accessibilityIdentifier("today.week")
 
                     NavigationLink {
                         TechBodyMetricsView(data: data)
@@ -353,7 +394,7 @@ struct TechTodayView: View {
                             fill: TechColor.paper
                         )
                     }
-                    .buttonStyle(.plain).accessibilityIdentifier("today.body")
+                    .buttonStyle(TechPressStyle()).accessibilityIdentifier("today.body")
                 }
             }
         }
@@ -376,65 +417,6 @@ struct TechTodayView: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .padding(11)
             .background(TechColor.paper, in: RoundedRectangle(cornerRadius: TechMetrics.corner))
-        }
-    }
-
-    private func contextPanel(_ data: MobileTodayResponse) -> some View {
-        VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
-            TechPanel(tint: TechColor.cyan) {
-                VStack(alignment: .leading, spacing: 8) {
-                    TechSectionHeader(title: "训练阶段", trailing: data.phase, trailingColor: TechColor.cyan)
-                    HStack {
-                        Text(data.race.note)
-                            .font(.footnote)
-                            .foregroundStyle(TechColor.muted)
-                        Spacer()
-                        if let days = data.race.daysUntil {
-                            Text(days >= 0 ? "还有 \(days) 天" : "已结束")
-                                .font(.caption.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(TechColor.cyan)
-                        }
-                    }
-                    if let target = data.race.target {
-                        Text("比赛目标：\(target.distance) · \(nativeDay(target.date))")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(TechColor.ink)
-                        HStack(spacing: 8) {
-                            techMetricCaption("目标配速", value: "\(techPace(target.targetPaceSecondsPerKm))/km")
-                            techMetricCaption("体型分", value: nativeNumber(data.race.shapeScore))
-                            techMetricCaption("减量", value: data.race.taper ? "是" : "否")
-                        }
-                    }
-                    if let remaining = data.weekStructure.remainingDistanceKm {
-                        Text("本周剩余建议：\(nativeKilometers(remaining)) · \(data.weekStructure.easyHonesty.note)")
-                            .font(.caption)
-                            .foregroundStyle(TechColor.muted)
-                    }
-                }
-            }
-            if let postRun = data.postRun {
-                TechPanel(tint: TechColor.coral, fill: TechColor.paleCoral) {
-                    VStack(alignment: .leading, spacing: 7) {
-                        TechSectionHeader(title: "最近一次训练反馈", trailing: nativeSessionName(postRun.sessionType), trailingColor: TechColor.coral)
-                        Text(postRun.headline)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(TechColor.ink)
-                        Text("刺激：\(nativeStimulusName(postRun.stimulusType)) · 匹配：\(postRun.stimulusMatch)")
-                            .font(.caption)
-                            .foregroundStyle(TechColor.muted)
-                        if let delta = postRun.trueAbilityDelta {
-                            Text("跑力变化：\(nativeSigned(delta))")
-                                .font(.caption.weight(.semibold).monospacedDigit())
-                                .foregroundStyle(delta >= 0 ? TechColor.green : TechColor.coral)
-                        }
-                        ForEach(postRun.details, id: \.self) { detail in
-                            Text("· \(detail)")
-                                .font(.caption)
-                                .foregroundStyle(TechColor.muted)
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -591,10 +573,10 @@ struct TechBodyMetricsView: View {
                 recoveryPanel
                 zonePanels
                 predictionsPanel
-                DisclosureGroup("核心能力与配速参考") {
+                DisclosureGroup {
                     coreMetricsPanel
                     pacePanel
-                }.font(.subheadline).tint(TechColor.cyan)
+                } label: { Text("核心能力与配速参考").frame(minHeight: 44) }.font(.subheadline).tint(TechColor.cyan)
 
                 if let error = native.bodyMetricsError {
                     TechPanel(tint: TechColor.yellow, fill: TechColor.paleYellow) {
@@ -719,11 +701,11 @@ struct TechBodyMetricsView: View {
                           label: "恢复状态", size: 86)
                 Text(summary.recovery.note).font(.footnote).foregroundStyle(TechColor.muted)
             }
-            DisclosureGroup("恢复基线") {
+            DisclosureGroup {
                 bodyMetricRow("睡眠基线", value: summary.recovery.sleepBaselineMinutes.map { nativeHoursMinutes($0) })
                 bodyMetricRow("HRV 基线", value: summary.recovery.hrvBaselineMs.map { "\(nativeNumber($0)) ms" })
                 bodyMetricRow("静息心率基线", value: summary.recovery.restingHeartRateBaselineBpm.map { "\(nativeNumber($0, digits: 0)) bpm" })
-            }.font(.caption).tint(TechColor.cyan)
+            } label: { Text("恢复基线").frame(minHeight: 44) }.font(.caption).tint(TechColor.cyan)
         }
     }
 
@@ -768,7 +750,7 @@ struct TechBodyMetricsView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(nativeRaceDistance(race.distance)).font(.subheadline).foregroundStyle(TechColor.muted)
                                 Text(techDuration(race.predictedSeconds)).font(.title2.weight(.semibold)).monospacedDigit()
-                                    .lineLimit(1).minimumScaleFactor(0.6)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text(racePredictionText(race)).font(.caption2).foregroundStyle(TechColor.muted)
                                 Text("准备度 " + nativePercent(race.readiness)).font(.caption).foregroundStyle(TechColor.cyan)
                             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -797,8 +779,7 @@ struct TechBodyMetricsView: View {
             Text(value)
                 .font(.system(.subheadline, design: .default).weight(.semibold))
                 .foregroundStyle(accent)
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
+                .fixedSize(horizontal: false, vertical: true)
             if let unit {
                 Text(unit)
                     .font(.caption2)
@@ -888,6 +869,7 @@ struct TechFreshnessBanner: View {
     let today: MobileTodayResponse
     let isOffline: Bool
     let cacheDate: Date?
+    var showsSyncAction = false
 
     private var tint: Color {
         if isOffline { return TechColor.cyan }
@@ -902,7 +884,7 @@ struct TechFreshnessBanner: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(tint)
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack {
+                    TechAdaptiveStack(spacing: 4) {
                         Text(isOffline ? "离线缓存" : "数据状态")
                             .font(.caption.weight(.semibold))
                         Spacer()
@@ -921,6 +903,7 @@ struct TechFreshnessBanner: View {
                 }
             }
             .foregroundStyle(TechColor.ink)
+            if showsSyncAction { TechFreshnessSyncAction() }
         }
     }
 }
@@ -975,7 +958,7 @@ struct TechWorkoutsView: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("本月总里程").font(.caption).foregroundStyle(TechColor.muted)
-                            Text(monthDistance).font(.system(size: 32, weight: .semibold)).monospacedDigit()
+                            Text(monthDistance).techScaledFont(32, weight: .semibold).monospacedDigit()
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 12) {
@@ -1020,7 +1003,7 @@ struct TechWorkoutsView: View {
                                         .padding(.horizontal, 12)
                                         .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 14))
                                 }
-                                .buttonStyle(.plain).accessibilityIdentifier("workout.\(workout.id)")
+                                .buttonStyle(TechPressStyle()).accessibilityIdentifier("workout.\(workout.id)")
                             }
                     }
                     if native.workouts.count < native.workoutTotal {
@@ -1109,7 +1092,7 @@ struct TechWorkoutDetailView: View {
                     detailHeader(detail.workout)
                     detailOverview(detail.workout)
                     if !detail.route.isEmpty { routePanel(detail.route) }
-                    DisclosureGroup("全部训练指标") { detailMetrics(detail.workout) }
+                    DisclosureGroup { detailMetrics(detail.workout) } label: { Text("全部训练指标").frame(minHeight: 44) }
                         .font(.subheadline).tint(TechColor.cyan)
                     if let series = native.selectedSeries { seriesPanel(series) }
                     segmentPanel(native.selectedSeries)
@@ -1162,12 +1145,12 @@ struct TechWorkoutDetailView: View {
     private func detailOverview(_ workout: WorkoutDetail) -> some View {
         VStack(spacing: 8) {
             TechPanel {
-                HStack {
+                TechMetricGrid(minimum: 140) {
                     overviewMetric(techKilometers(workout.distanceKm), "距离")
                     overviewMetric(techDuration(workout.durationSeconds), "时长")
                 }
             }
-            HStack(spacing: 7) {
+            TechMetricGrid {
                 TechMetricTile(title: "平均配速", value: techPace(workout.averagePaceSecondsPerKm) + "/km")
                 TechMetricTile(title: "平均心率", value: nativeNumber(workout.averageHeartRateBpm, digits: 0) + " bpm")
                 TechMetricTile(title: "能量消耗", value: nativeNumber(workout.activeEnergyKcal, digits: 0) + " kcal")
@@ -1177,14 +1160,14 @@ struct TechWorkoutDetailView: View {
 
     private func overviewMetric(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(value).font(.system(size: 32, weight: .semibold)).monospacedDigit()
-                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(value).techScaledFont(32, weight: .semibold).monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
             Text(label).font(.caption).foregroundStyle(TechColor.muted)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
     }
 
     private func detailMetrics(_ workout: WorkoutDetail) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+        TechMetricGrid(minimum: 140) {
             TechMetricTile(title: "距离", value: nativeKilometers(workout.distanceKm), accent: TechColor.cyan)
             TechMetricTile(title: "时长", value: techDuration(workout.durationSeconds), accent: TechColor.green)
             TechMetricTile(title: "配速", value: "\(techPace(workout.averagePaceSecondsPerKm))/km", accent: TechColor.cyan)
@@ -1205,7 +1188,7 @@ struct TechWorkoutDetailView: View {
             VStack(alignment: .leading, spacing: 9) {
                 TechSectionHeader(title: "路线", trailing: "\(route.count) 个点", trailingColor: TechColor.cyan)
                 if route.count > 1 {
-                    TechRouteView(route: route)
+                    TechRouteView(route: route).equatable()
                 } else {
                     Text("路线数据不足")
                         .font(.footnote)
@@ -1227,28 +1210,11 @@ struct TechWorkoutDetailView: View {
                         .foregroundStyle(TechColor.muted)
                         .frame(maxWidth: .infinity, minHeight: 120)
                 } else if selectedMetric == "heartRate" {
-                    NativeHeartRateChart(metric: metric,
+                    TechHeartRateChart(metric: metric,
                         averageHeartRate: native.selectedWorkout?.workout.averageHeartRateBpm,
-                        durationSeconds: native.selectedWorkout?.workout.elapsedSeconds ?? 0)
+                        durationSeconds: native.selectedWorkout?.workout.elapsedSeconds ?? 0).equatable()
                 } else {
-                    Chart(metric.points) { point in
-                        LineMark(
-                            x: .value("时间", point.offsetSeconds),
-                            y: .value(metric.unit, point.value)
-                        )
-                        .foregroundStyle(TechColor.green)
-                        .interpolationMethod(.monotone)
-                        AreaMark(x: .value("时间", point.offsetSeconds), y: .value(metric.unit, point.value))
-                            .foregroundStyle(LinearGradient(colors: [TechColor.cyan.opacity(0.16), .clear], startPoint: .top, endPoint: .bottom))
-                            .interpolationMethod(.monotone)
-                    }
-                    .frame(height: 190)
-                    .chartPlotStyle { plot in
-                        plot.background(TechColor.mint.opacity(0.35))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(TechColor.grid, lineWidth: 1))
-                    }
-                    .chartXAxisLabel("秒")
-                    .chartYAxisLabel(metric.unit)
+                    TechSeriesChart(metric: metric).equatable()
                 }
             }
         }
@@ -1295,7 +1261,7 @@ struct TechWorkoutDetailView: View {
                 } else {
                     ForEach(segments) { segment in
                         VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 8) {
+                            TechAdaptiveStack(spacing: 8) {
                                 Text(segment.label)
                                     .font(.subheadline.weight(.semibold))
                                     .frame(minWidth: 64, alignment: .leading)
@@ -1323,7 +1289,8 @@ struct TechWorkoutDetailView: View {
     }
 
     private func splitPanel(_ splits: [WorkoutSplit]) -> some View {
-        TechPanel {
+        let maxPace = max(splits.map(\.averagePaceSecondsPerKm).max() ?? 1, 1)
+        return TechPanel {
             VStack(alignment: .leading, spacing: 4) {
                 TechSectionHeader(title: "公里分段", trailing: "\(splits.count) 段")
                 if splits.isEmpty {
@@ -1332,11 +1299,11 @@ struct TechWorkoutDetailView: View {
                         .foregroundStyle(TechColor.muted)
                 } else {
                     ForEach(splits) { split in
-                        HStack(spacing: 8) {
+                        TechAdaptiveStack(spacing: 8) {
                             Text(split.distanceMeters < 999.5 ? "尾段" : "\(split.index) km")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(width: 52, alignment: .leading)
-                            TechProgressBar(fraction: split.averagePaceSecondsPerKm / max(splits.map(\.averagePaceSecondsPerKm).max() ?? 1, 1))
+                            TechProgressBar(fraction: split.averagePaceSecondsPerKm / maxPace)
                             Text("\(techPace(split.averagePaceSecondsPerKm))/km")
                             Text(split.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
                         }
@@ -1381,9 +1348,9 @@ struct TechWorkoutDetailView: View {
     private func trainingLoadPanel(_ load: WorkoutTrainingLoad) -> some View {
         TechPanel {
             TechSectionHeader(title: "训练负荷")
-            Text(nativeNumber(load.load)).font(.system(size: 34, weight: .semibold)).monospacedDigit()
+            Text(nativeNumber(load.load)).techScaledFont(34, weight: .semibold).monospacedDigit()
                 .foregroundStyle(TechColor.ink)
-            DisclosureGroup("负荷依据") {
+            DisclosureGroup {
                 HStack(spacing: 8) {
                     techMetricCaption("强度", value: nativeNumber(load.intensity))
                     techMetricCaption("置信度", value: nativePercent(load.confidence))
@@ -1395,7 +1362,7 @@ struct TechWorkoutDetailView: View {
                     Text(explanation.code + (explanation.value.map { " · \(nativeNumber($0))" } ?? ""))
                         .font(.caption2).foregroundStyle(TechColor.muted)
                 }
-            }.font(.caption).tint(TechColor.cyan)
+            } label: { Text("负荷依据").frame(minHeight: 44) }.font(.caption).tint(TechColor.cyan)
         }
     }
 
@@ -1467,6 +1434,7 @@ struct TechPlanView: View {
     private var isWeeklyValid: Bool { NativeGoalWeekDraft.weeklyDistanceIsValid(weeklyText) }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
                 if editing {
@@ -1498,6 +1466,7 @@ struct TechPlanView: View {
                     }
                 }
             }
+            .id("plan.top")
             .padding(.horizontal, TechMetrics.pageHorizontal)
             .padding(.top, TechMetrics.pageVertical)
             .padding(.bottom, TechMetrics.bottomClearance)
@@ -1519,7 +1488,7 @@ struct TechPlanView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .scrollDismissesKeyboard(.interactively)
+        .modifier(TechKeyboardDismiss())
         .task {
             if native.goals == nil { await native.refreshAll() }
             // The watch panel lives on this page now, so it must be able to fill
@@ -1528,23 +1497,32 @@ struct TechPlanView: View {
             loadDraft()
         }
         .onChange(of: native.goals?.revision) { _, _ in loadDraft() }
+        .onChange(of: editing) { _, _ in
+            // Switching modes changes the entire content height. Keep the first
+            // field / overview visible instead of preserving a deep old offset.
+            proxy.scrollTo("plan.top", anchor: .top)
+        }
+        }
     }
 
     private var planOverview: some View {
         VStack(alignment: .leading, spacing: 20) {
             TechHeroCard {
-                HStack(spacing: 18) {
+                TechAdaptiveStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("本周总里程").font(.subheadline).foregroundStyle(TechColor.muted)
                         Text(nativeNumber(native.goals?.weeklyDistanceKm) + " km")
-                            .font(.system(size: 34, weight: .bold)).foregroundStyle(TechColor.ink)
-                            .lineLimit(1).minimumScaleFactor(0.65)
+                            .techScaledFont(34, weight: .bold).foregroundStyle(TechColor.ink)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Spacer(minLength: 0)
-                    TechGauge(progress: native.goals?.easyDurationFloorFraction ?? 0,
-                             value: nativePercent(native.goals?.easyDurationFloorFraction), label: "轻松占比", size: 68)
-                    TechGauge(progress: Double(native.goals?.qualitySessionCap ?? 0) / 4,
-                              value: "\(native.goals?.qualitySessionCap ?? 0)", label: "质量课上限", size: 68)
+                    // Keep the two related gauges together when the mileage
+                    // moves to its own row on a smaller phone.
+                    TechAdaptiveStack(spacing: 16) {
+                        TechGauge(progress: native.goals?.easyDurationFloorFraction ?? 0,
+                                  value: nativePercent(native.goals?.easyDurationFloorFraction), label: "轻松占比", size: 68)
+                        TechGauge(progress: Double(native.goals?.qualitySessionCap ?? 0) / 4,
+                                  value: "\(native.goals?.qualitySessionCap ?? 0)", label: "质量课上限", size: 68)
+                    }
                 }
 
             }
@@ -1562,15 +1540,14 @@ struct TechPlanView: View {
                 // was actually run. The server already resolves the three
                 // tenses (`buildWeekPlan`), and that rule stays on the server.
                 //
-                // Seven equal columns, not a fixed 46pt chip inside a horizontal
-                // scroller: the strip *is* the week, so a scroller both clipped
-                // the last day and left the row short of the page's right edge.
+                // Equal-width day cards wrap with available space / Dynamic Type;
+                // every day remains reachable without tiny seven-column hit targets.
                 // Tapping a column opens that day's prescription, which is the
                 // only place the interval breakdown is spelled out.
-                HStack(spacing: 5) {
+                TechMetricGrid(minimum: 76) {
                     ForEach(native.today?.weekPlan ?? []) { day in
                         Button { selectedDay = day } label: { weekChip(day) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(TechPressStyle())
                             .frame(maxWidth: .infinity)
                             .accessibilityLabel(weekChipLabel(day))
                     }
@@ -1585,9 +1562,7 @@ struct TechPlanView: View {
         }
     }
 
-    /// One column of the week strip. Every column is the same width so the row
-    /// ends flush with the panel's right edge; the labels shrink rather than
-    /// wrap, because a wrapped column would silently change the row's height.
+    /// Equal-width day cards wrap at large sizes; labels never shrink below Dynamic Type.
     private func weekChip(_ day: MobileWeekPlanDay) -> some View {
         let isToday = day.localDate == native.today?.today.localDate
         return VStack(spacing: 11) {
@@ -1596,8 +1571,7 @@ struct TechPlanView: View {
                 Text(nativeDay(day.localDate))
             }
             .font(.caption2)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
+            .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
             .foregroundStyle(isToday ? TechColor.background : TechColor.muted)
@@ -1605,13 +1579,11 @@ struct TechPlanView: View {
             Circle().fill(techSessionColor(day.kind)).frame(width: 8, height: 8)
             Text(nativeSessionName(day.kind))
                 .font(.caption2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(TechColor.ink)
             Text(day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "—")
                 .font(.caption2.monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(TechColor.muted)
         }
         .padding(.horizontal, 2)
@@ -1736,7 +1708,7 @@ struct TechPlanView: View {
                         Capsule().stroke(TechColor.cyan, lineWidth: 1)
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TechPressStyle())
                 .disabled(native.isRegeneratingPlan || native.isOffline)
             }
         }
@@ -1851,11 +1823,11 @@ struct TechPlanView: View {
                 } else {
                     ForEach(editablePlanIndexes, id: \.self) { index in
                         let item = weekPlan[index]
-                        HStack(spacing: 7) {
+                        TechAdaptiveStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(nativeWeekday(item.localDate)).font(.caption.weight(.semibold))
                                 Text(nativeDay(item.localDate)).font(.caption2).foregroundStyle(TechColor.muted)
-                            }.frame(width: 48, alignment: .leading)
+                            }.frame(minWidth: 48, alignment: .leading)
                             Picker("训练类型", selection: $weekPlan[index].kind) {
                                 Text("休息").tag("rest")
                                 Text("恢复跑").tag("recovery")
@@ -1868,7 +1840,7 @@ struct TechPlanView: View {
                                 get: { distanceDrafts[item.id] ?? "" },
                                 set: { distanceDrafts[item.id] = $0 }
                             )).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
-                                .font(.subheadline.monospacedDigit()).frame(width: 54, height: 44)
+                                .font(.subheadline.monospacedDigit()).frame(minWidth: 70, minHeight: 44)
                                 .accessibilityLabel("\(nativeWeekday(item.localDate))距离")
                             Text("km").font(.caption).foregroundStyle(TechColor.muted)
                         }
@@ -1984,7 +1956,7 @@ private struct TechPlanDaySheet: View {
                         .frame(width: 12, height: 12)
                         .padding(.top, 7)
                 }
-                HStack(spacing: 12) {
+                TechMetricGrid(minimum: 140) {
                     TechMetricTile(title: "距离", value: day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "—")
                     TechMetricTile(title: "状态", value: statusText, accent: statusColor)
                 }
@@ -2001,13 +1973,12 @@ private struct TechPlanDaySheet: View {
                         VStack(alignment: .leading, spacing: 12) {
                             TechSectionHeader(title: "训练内容", trailing: "\(lines.count) 步")
                             ForEach(lines) { line in
-                                HStack(alignment: .top, spacing: 12) {
+                                TechAdaptiveStack(spacing: 12) {
                                     Text(line.title)
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(TechColor.cyan)
-                                        .frame(width: 80, alignment: .leading)
-                                        .lineLimit(2)
-                                        .minimumScaleFactor(0.7)
+                                        .frame(minWidth: 80, alignment: .leading)
+                                        .fixedSize(horizontal: false, vertical: true)
                                     Text(line.detail)
                                         .font(.caption)
                                         .foregroundStyle(TechColor.ink)
@@ -2057,12 +2028,12 @@ struct TechAnalysisView: View {
                         TechPanel {
                             HStack {
                                 TechIconBox(systemName: "chart.xyaxis.line")
-                                Text("跑力评估").font(.headline)
+                                Text("跑步能力").font(.headline)
                                 Spacer()
                                 Image(systemName: "chevron.right").font(.caption)
                             }.foregroundStyle(TechColor.cyan)
                         }
-                    }.buttonStyle(.plain).accessibilityIdentifier("analysis.ability")
+                    }.buttonStyle(TechPressStyle()).accessibilityIdentifier("analysis.ability")
                 }
             }
             .padding(.horizontal, TechMetrics.pageHorizontal)
@@ -2094,8 +2065,8 @@ struct TechAnalysisView: View {
                     TechSectionHeader(title: "里程变化（近 4 周）", trailing: "km", trailingColor: TechColor.muted)
                     HStack(alignment: .center, spacing: 14) {
                         Text(data.distanceChangeFraction4Weeks.map { nativeSignedPercent($0) } ?? "数据不足")
-                            .font(.system(size: 30, weight: .semibold)).monospacedDigit()
-                            .foregroundStyle(TechColor.cyan).lineLimit(1).minimumScaleFactor(0.65)
+                            .techScaledFont(30).monospacedDigit()
+                            .foregroundStyle(TechColor.cyan).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
                         VStack(alignment: .trailing, spacing: 6) {
                             if let previous = data.weeks.dropLast().last {
@@ -2120,12 +2091,12 @@ struct TechAnalysisView: View {
                         )
                     }
                 }
-                DisclosureGroup("跑力变化依据") {
+                DisclosureGroup {
                     HStack {
                         techMetricCaption("增长速度", value: nativeNumber(data.growthVelocityPerWeek))
                         techMetricCaption("衰减", value: nativeNumber(data.decayPoints))
                     }.padding(.vertical, 8)
-                }.font(.caption).tint(TechColor.muted)
+                } label: { Text("跑力变化依据").frame(minHeight: 44) }.font(.caption).tint(TechColor.muted)
                 if !data.insights.isEmpty {
                     ForEach(data.insights) { insight in
                         TechInsightCard(insight: insight)
@@ -2245,7 +2216,7 @@ struct TechAnalysisView: View {
             Image(systemName: "trophy").font(.system(size: 52, weight: .ultraLight))
                 .foregroundStyle(TechColor.energy).padding(.top, 16)
             Text("不断突破，成就更好的自己").font(.subheadline).foregroundStyle(TechColor.muted)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            TechMetricGrid(minimum: 140) {
                 recordTile("最快 5 公里", value: records.fastest5k.map { techDuration($0.paceSecondsPerKm * 5) }, date: records.fastest5k.map { techRecordDate($0.startedAt) })
                 recordTile("最快 10 公里", value: records.fastest10k.map { techDuration($0.paceSecondsPerKm * 10) }, date: records.fastest10k.map { techRecordDate($0.startedAt) })
                 recordTile("最长距离", value: records.longestDistance.map { nativeKilometers($0.distanceKm) }, date: records.longestDistance.map { techRecordDate($0.startedAt) })
@@ -2259,7 +2230,7 @@ struct TechAnalysisView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text(title).font(.subheadline).foregroundStyle(TechColor.cyan)
                 Text(value ?? "--").font(.title2.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(TechColor.ink).lineLimit(1).minimumScaleFactor(0.6)
+                    .foregroundStyle(TechColor.ink).fixedSize(horizontal: false, vertical: true)
                 Text(date ?? "暂无纪录").font(.caption).foregroundStyle(TechColor.muted)
                 if title == "最大月跑量", let months = native.statistics?.months, months.count > 1 {
                     TechSparkline(values: months.map(\.totalDistanceKm), tint: TechColor.leaf)
@@ -2341,19 +2312,8 @@ struct TechNativeSettingsView: View {
                 settingsLink("关于 RAI", subtitle: "跑步数据分析与建议", icon: "waveform.path", tint: TechColor.leaf) {
                     versionPanel
                 }
-                TechPrimaryButton(title: "同步健康数据", isBusy: healthSync.isBusy,
-                                  isDisabled: healthSync.isBusy || !session.isReachable) {
-                    Task {
-                        await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
-                        await native.refreshAll(requestHandshake: false)
-                    }
-                }
-                if let error = healthSync.lastError {
-                    TechPanel(tint: TechColor.coral, fill: TechColor.paleCoral) {
-                        Label(techHealthError(error), systemImage: "exclamationmark.circle")
-                            .font(.footnote).foregroundStyle(TechColor.coral)
-                    }
-                }
+                TechSyncAction()
+                TechSyncStatus()
             }
             .padding(.horizontal, TechMetrics.pageHorizontal)
             .padding(.top, TechMetrics.pageVertical)
@@ -2363,7 +2323,7 @@ struct TechNativeSettingsView: View {
             draftURL = session.serverURLString
             draftToken = session.apiToken
         }
-        .scrollDismissesKeyboard(.interactively)
+        .modifier(TechKeyboardDismiss())
         .background(TechColor.background)
         .foregroundStyle(TechColor.ink)
         .scrollIndicators(.hidden)
@@ -2380,6 +2340,7 @@ struct TechNativeSettingsView: View {
             }
             .background(TechColor.background).foregroundStyle(TechColor.ink)
             .techNavigation(title)
+            .modifier(TechKeyboardDismiss())
             .toolbar(.visible, for: .navigationBar)
             .toolbarBackground(TechColor.background, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -2395,7 +2356,7 @@ struct TechNativeSettingsView: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(TechColor.muted)
                 }
             }
-        }.buttonStyle(.plain)
+        }.buttonStyle(TechPressStyle())
     }
 
     private func serverPanel(session: ServerSession) -> some View {
@@ -2481,7 +2442,7 @@ struct TechNativeSettingsView: View {
             }.frame(maxWidth: .infinity).padding(.vertical, 20)
             TechPanel {
                 TechSectionHeader(title: "同步的健康数据类别")
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                TechMetricGrid(minimum: 140) {
                     healthType("跑步", icon: "figure.run", tint: TechColor.cyan)
                     healthType("心率", icon: "heart", tint: TechColor.coral)
                     healthType("路线", icon: "map", tint: TechColor.cyan)
@@ -2503,7 +2464,7 @@ struct TechNativeSettingsView: View {
                 }
                 if let message = healthSync.message { Text(message).font(.footnote).foregroundStyle(TechColor.muted) }
                 TechPrimaryButton(title: healthSync.lastError == nil ? "同步健康数据" : "重试同步", isBusy: healthSync.isBusy,
-                                  isDisabled: healthSync.isBusy || !session.isReachable) {
+                                  isDisabled: healthSync.isBusy || !session.isReachable, busyTitle: techSyncPhase(healthSync.phase)) {
                     Task {
                         await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
                         await native.refreshAll(requestHandshake: false)
@@ -2548,7 +2509,7 @@ struct TechNativeSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .overlay(Capsule().stroke(TechColor.coral.opacity(0.7), lineWidth: 1))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TechPressStyle())
             }
         }
         .sheet(isPresented: $showingClearCache) {

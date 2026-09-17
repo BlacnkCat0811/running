@@ -3,6 +3,7 @@ import zlib
 
 nonisolated enum StoredZip {
     static func write(files: [(name: String, url: URL)], to url: URL) throws {
+        try Task.checkCancellation()
         let fileManager = FileManager.default
         let temporaryURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
@@ -19,6 +20,7 @@ nonisolated enum StoredZip {
             centralEntries.reserveCapacity(files.count)
 
             for file in files {
+                try Task.checkCancellation()
                 let nameData = Data(file.name.utf8)
                 guard nameData.count <= Int(UInt16.max), offset <= UInt64(UInt32.max) else {
                     throw StoredZipError.fileTooLarge
@@ -68,6 +70,7 @@ nonisolated enum StoredZip {
             }
             let centralOffset = offset
             for entry in centralEntries {
+                try Task.checkCancellation()
                 let central = centralHeader(entry)
                 try output.write(contentsOf: central)
                 offset += UInt64(central.count)
@@ -81,10 +84,12 @@ nonisolated enum StoredZip {
                 centralSize: UInt32(centralSize),
                 centralOffset: UInt32(centralOffset)
             )
+            try Task.checkCancellation()
             try output.write(contentsOf: end)
             try output.synchronize()
             try output.close()
 
+            try Task.checkCancellation()
             if fileManager.fileExists(atPath: url.path) {
                 _ = try fileManager.replaceItemAt(url, withItemAt: temporaryURL)
             } else {
@@ -163,6 +168,7 @@ nonisolated enum StoredZip {
         var compressedSize: UInt64 = 0
 
         while let input = try source.read(upToCount: chunkSize), !input.isEmpty {
+            try Task.checkCancellation()
             uncompressedSize += UInt64(input.count)
             input.withUnsafeBytes { buffer in
                 if let baseAddress = buffer.bindMemory(to: Bytef.self).baseAddress {
@@ -177,6 +183,7 @@ nonisolated enum StoredZip {
                 stream.next_in = UnsafeMutablePointer(mutating: source)
                 stream.avail_in = uInt(sourceBuffer.count)
                 while stream.avail_in > 0 {
+                    try Task.checkCancellation()
                     var status: Int32 = Z_OK
                     let produced = outputBuffer.withUnsafeMutableBytes { destinationBuffer -> Int in
                         stream.next_out = destinationBuffer.bindMemory(to: Bytef.self).baseAddress
@@ -195,6 +202,7 @@ nonisolated enum StoredZip {
 
         var status: Int32 = Z_OK
         repeat {
+            try Task.checkCancellation()
             let produced = outputBuffer.withUnsafeMutableBytes { destinationBuffer -> Int in
                 stream.next_out = destinationBuffer.bindMemory(to: Bytef.self).baseAddress
                 stream.avail_out = uInt(destinationBuffer.count)
@@ -225,6 +233,7 @@ nonisolated enum StoredZip {
         let chunkSize = 64 * 1024
         var copied: UInt64 = 0
         while let chunk = try source.read(upToCount: chunkSize), !chunk.isEmpty {
+            try Task.checkCancellation()
             try destination.write(contentsOf: chunk)
             copied += UInt64(chunk.count)
         }
