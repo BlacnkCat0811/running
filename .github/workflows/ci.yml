@@ -35,6 +35,18 @@ jobs:
             CODE_SIGNING_ALLOWED=NO build
       - name: Run iOS model regression tests
         run: bash apps/ios/tests/run-model-tests.sh
+      - name: Compile visual acceptance UI tests
+        # 只编译、不运行。截图回归跑不了：它依赖 `var/rai.sqlite` 这份真实健康库
+        # （`.gitignore` 掉 `var/`，且含个人健康数据，不该入库），
+        # `run-visual-tests.sh` 的第一步就是 `sqlite3 .backup` 它。所以 UI 用例只能在本机跑。
+        # 但"用例编译不过"——写错 API、签名对不上、语法错——CI 必须能发现：此前这一步
+        # 完全缺失，`VisualAcceptance.swift` 写错语法时 CI 一路全绿，只有本机跑 UI 回归才暴露。
+        # `generic/platform=iOS Simulator` 不解析具体机型，避免 runner 上没有某个 iPhone 型号。
+        run: |
+          xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/visual-acceptance" \
+            CODE_SIGNING_ALLOWED=NO build-for-testing
 
   windows-runtime:
     runs-on: windows-latest
