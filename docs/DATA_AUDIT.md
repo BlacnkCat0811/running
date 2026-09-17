@@ -116,3 +116,14 @@
 - Indoor/outdoor metadata is missing for some imported sources. Unknown is kept separate from outdoor.
 - ECG CSV files and export_cda.xml are intentionally out of scope for running ability scoring.
 - No medical inference is made from heart-rate or recovery records.
+
+## 已知去重边界（2026-09-17 补记）
+
+现存审计快照有一组疑似“完整训练与子段包络重复”的记录，候选子段合计
+9.0985 km。相关历史周当前 session 合计 33.1437 km；若最终人工证实子段重复，
+净量可能为 24.0452 km。以上是候选诊断，不是已经完成的修正。
+
+本轮不自动合并、不修改 canonical/session id、不重算历史。跨源同跑去重与
+长间隔子段归并不是同一规则；简单放宽 120 秒窗口可能伤及真实多课。
+重新考虑时需验证时间包络、距离、时长和来源，并以人工确认流程承接。
+详见 `deliverables/PLAN_P0_P3_VERIFIED_EXECUTION_2026-09-17.md`。
