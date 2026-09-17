@@ -18,6 +18,7 @@ import {
   ImportWorker,
   PredictionModelWorker,
   RecomputeWorker,
+  createImportJobId,
   predictionModelWorkerRetryDelay,
   predictionModelArtifactDirectory
 } from "../src/worker.js";
@@ -62,6 +63,45 @@ interface ImportWorkerTestSurface {
   command(args: string[]): Promise<void>;
   run(job: Record<string, unknown>): Promise<void>;
 }
+
+test("failed initial import enqueue leaves no phantom job and can be retried", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-enqueue-rollback-"));
+  const inputPath = join(root, "export");
+  mkdirSync(inputPath);
+  writeFileSync(join(inputPath, "export.xml"), "<HealthData />", "utf8");
+  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  const surface = worker as unknown as ImportWorkerTestSurface;
+  const persistJobs = surface.persistJobs.bind(worker);
+  let terminalCalls = 0;
+  surface.persistJobs = () => {
+    throw new Error("fixture initial enqueue persistence failure");
+  };
+  try {
+    assert.throws(
+      () => worker.create(inputPath, () => { terminalCalls += 1; }, "source-retryable"),
+      /fixture initial enqueue persistence failure/
+    );
+    assert.equal(worker.isRunning, false);
+    assert.equal(worker.latest(), null);
+    assert.equal(worker.findBySourceId("source-retryable"), null);
+    assert.equal(terminalCalls, 0);
+
+    surface.persistJobs = persistJobs;
+    const retried = worker.create(inputPath, undefined, "source-retryable");
+    assert.equal(worker.get(retried.id)?.status, "queued");
+    assert.equal(worker.findBySourceId("source-retryable")?.id, retried.id);
+  } finally {
+    await worker.close().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("import job ids do not collide in the same millisecond", () => {
+  const now = 1_700_000_000_000;
+  const ids = Array.from({ length: 100 }, () => createImportJobId(now));
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(ids.every((id) => id.startsWith(`web_import_${now.toString(36)}_`)), true);
+});
 
 interface ExternalTrainerTestSurface {
   command(args: string[], signal?: AbortSignal): Promise<void>;
@@ -1895,6 +1935,12 @@ for (const failurePhase of ["recompute", "activate"] as const) {
       const databaseArgument = args.indexOf("--database");
       const candidatePath = args[databaseArgument + 1];
       assert.ok(candidatePath);
+      // 审计报告头部的"数据源"必须指向**主库**，而不是这条命令实际操作的暂存副本：
+      // 报告最终发布成 `docs/DATA_AUDIT.md`，若写成 `var/rai.importing.<jobId>.sqlite`，
+      // 读者会以为数字来自一个临时文件，也就无法判断它描述的是本地还是线上。
+      const sourceArgument = args.indexOf("--source-database");
+      assert.ok(sourceArgument > 0, "audit report must be told which database it describes");
+      assert.equal(args[sourceArgument + 1], databasePath);
       if (commandCount === 1) {
         const candidate = new DatabaseSync(candidatePath);
         try {

@@ -33,6 +33,17 @@ import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.
 /** Client-visible import failure text; full diagnostics stay in server logs only. */
 export const PUBLIC_IMPORT_FAILURE_ERROR = "导入失败，请查看服务日志";
 
+export class ImportJobEnqueuePersistenceError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "Failed to persist import job", { cause });
+    this.name = "ImportJobEnqueuePersistenceError";
+  }
+}
+
+export function createImportJobId(now = Date.now()): string {
+  return `web_import_${now.toString(36)}_${randomUUID()}`;
+}
+
 /**
  * Finds a removal-guard failure anywhere in an error chain. The guard message is
  * authored for the operator and carries no paths or stack details, so it is the
@@ -641,7 +652,7 @@ export class ImportWorker {
     if (!existsSync(resolve(inputPath, "export.xml")) && !existsSync(resolve(inputPath, "导出.xml"))) {
       throw new Error("目录中未找到 export.xml 或导出.xml");
     }
-    const id = `web_import_${Date.now().toString(36)}`;
+    const id = createImportJobId();
     // Absence-as-deletion is opt-in via the client's sync manifest; an archive
     // filename is only consulted when no manifest is present.
     const snapshot = resolvePreserveAbsent(inputPath, source ?? {});
@@ -660,7 +671,15 @@ export class ImportWorker {
     };
     if (onTerminal) job.onTerminal = onTerminal;
     this.jobs.set(id, job);
-    this.persistJobs();
+    try {
+      this.persistJobs();
+    } catch (error) {
+      // Persistence is the enqueue commit point. Do not publish a queued job
+      // that cannot survive a restart, and do not run terminal cleanup for work
+      // that was never successfully accepted.
+      if (this.jobs.get(id) === job) this.jobs.delete(id);
+      throw new ImportJobEnqueuePersistenceError(error);
+    }
     this.running = true;
     this.timer = setTimeout(() => {
       this.timer = null;
@@ -774,6 +793,11 @@ export class ImportWorker {
         stagedMarkdownReport,
         "--json-report",
         stagedJsonReport,
+        // 报告最终发布成 `docs/DATA_AUDIT.md`，描述的是**主库**；但 CLI 眼里只有暂存
+        // 副本（上面 `--database stagingDatabase`）。显式告诉它数据源，否则报告头部会
+        // 写 `var/rai.importing.<jobId>.sqlite` —— 读者会以为数字来自一个临时文件。
+        "--source-database",
+        this.databasePath,
         ...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"]),
         // Absence-as-deletion is opt-in, so the CLI needs to be told explicitly
         // when a payload declared itself a complete snapshot. A falsy flag means

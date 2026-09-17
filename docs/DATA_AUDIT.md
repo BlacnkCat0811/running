@@ -1,16 +1,17 @@
 # Apple 健康导出数据审计
 
-> 生成时间：2026-09-04T07:33:32.843Z  
-> 数据集版本：dataset_a319dfb9c85edd8470a918bff88d71a8  
+> 生成时间：2026-09-17T04:32:53.902Z  
+> 数据源：var/rai.sqlite  
+> 数据集版本：dataset_03e90c69d86a52330a8677744818d423  
 > 隐私：本报告只包含聚合统计，不包含原始来源名称、健康值、精确时间或路线坐标。
 
 ## 1. 数据总览
 
 | 对象 | 数量 |
 |---|---:|
-| 解析到的 Health records | 83116 |
-| 稳定 ID 去重后的 Health records | 160051 |
-| 完全相同的 record 副本 | 0 |
+| 上次导入解析到的 Health records | 83116 |
+| 表内 Health records 行数 | 83380 |
+| 其中冗余行（自然键重复） | 0 |
 | Workouts | 271 |
 | Activity summaries | 0 |
 | GPX routes | 92 |

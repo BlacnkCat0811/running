@@ -64,6 +64,10 @@ export interface DistributionSummary {
 export interface DataAudit {
   generatedAt: string;
   datasetVersion: string | null;
+  /// 这份报告描述的是**哪个库**。没有它，读者无法判断数字来自本地工作区还是线上
+  /// 生产库 —— 而两边的迁移/导入状态可以不同（`docs/DATA_AUDIT.md` 是生成型文档，
+  /// 一旦数字与生产现实不一致，读者连"该不该怀疑"都无从判断）。
+  sourceDatabase: string | null;
   privacy: string;
   totals: {
     parsedRecords: number;
@@ -285,7 +289,7 @@ function sourceTable(values: Record<string, number>): string {
     .join("\n");
 }
 
-export function buildAudit(database: DatabaseSync): DataAudit {
+export function buildAudit(database: DatabaseSync, sourceDatabase: string | null = null): DataAudit {
   const canonicalRows = loadCanonicalRunningRows(database);
   const distanceValues: number[] = [];
   const durationValues: number[] = [];
@@ -412,6 +416,7 @@ export function buildAudit(database: DatabaseSync): DataAudit {
 
   return {
     generatedAt: new Date().toISOString(),
+    sourceDatabase,
     datasetVersion: (database.prepare(
       "SELECT value FROM import_manifest WHERE key = 'dataset_version'"
     ).get() as unknown as { value: string } | undefined)?.value ?? null,
@@ -525,6 +530,7 @@ export function renderAuditMarkdown(audit: DataAudit): string {
   return `# Apple 健康导出数据审计
 
 > 生成时间：${audit.generatedAt}  
+> 数据源：${audit.sourceDatabase ?? "未标注（调用方未提供 --source-database）"}  
 > 数据集版本：${audit.datasetVersion ?? "-"}  
 > 隐私：本报告只包含聚合统计，不包含原始来源名称、健康值、精确时间或路线坐标。
 
@@ -613,9 +619,10 @@ ${audit.limitations.map((item) => `- ${item}`).join("\n")}
 export function writeAuditFiles(
   database: DatabaseSync,
   markdownPath: string,
-  jsonPath: string
+  jsonPath: string,
+  sourceDatabase: string | null = null
 ): DataAudit {
-  const staged = stageAuditFiles(database, markdownPath, jsonPath);
+  const staged = stageAuditFiles(database, markdownPath, jsonPath, sourceDatabase);
   staged.commit();
   staged.finalize();
   return staged.audit;
@@ -642,9 +649,10 @@ function writeDurableFile(path: string, contents: string): void {
 export function stageAuditFiles(
   database: DatabaseSync,
   markdownPath: string,
-  jsonPath: string
+  jsonPath: string,
+  sourceDatabase: string | null = null
 ): StagedAuditFiles {
-  const audit = buildAudit(database);
+  const audit = buildAudit(database, sourceDatabase);
   for (const path of [markdownPath, jsonPath]) {
     if (existsSync(path) && !statSync(path).isFile()) {
       throw new Error(`Audit output is not a file: ${path}`);

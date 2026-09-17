@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 
 import { parseAppleHealthXml } from "./apple-health-parser.js";
 import { stageAuditFiles, writeAuditFiles } from "./audit.js";
@@ -34,6 +34,13 @@ interface ParsedArguments {
    */
   replaceAbsent: boolean;
   allowLargeRemoval: boolean;
+  /**
+   * 审计报告头部要写"这份数字来自哪个库"。命令行独立调用时就是 `--database`，
+   * 但服务端导入走的是 `var/rai.importing.<jobId>.sqlite` 这样的**暂存副本**，
+   * 报告最终却发布到 `docs/DATA_AUDIT.md` 描述生产库 —— 所以允许调用方用
+   * `--source-database` 显式说明"这份报告描述的目标库"。
+   */
+  sourceDatabase: string | null;
 }
 
 function optionValue(args: string[], name: string, fallback: string): string {
@@ -50,7 +57,7 @@ function parseArguments(argv: string[]): ParsedArguments {
     throw new Error(
       "Usage: data:import -- --input <export-folder> --database <sqlite> --replace\n" +
         "   or: tsx packages/health-export-parser/src/cli.ts incremental-import --input <export-folder> --database <cloned-sqlite> [--batch-id <id>] [--replace-absent] [--allow-large-removal]\n" +
-        "   or: data:audit -- --database <sqlite> --report <markdown>"
+        "   or: data:audit -- --database <sqlite> --report <markdown> [--source-database <sqlite>]"
     );
   }
 
@@ -70,7 +77,26 @@ function parseArguments(argv: string[]): ParsedArguments {
     // A snapshot that omits most of the history is refused by default; this flag
     // is the explicit opt-in for a deliberate full replacement.
     ,allowLargeRemoval: argv.includes("--allow-large-removal")
+    // 审计报告头部的"数据源"行。缺省用 `--database` 相对当前工作目录的路径 ——
+    // 这样 `docs/DATA_AUDIT.md` 的读者能直接看出这组数字来自哪个库（本地工作区
+    // 还是线上生产），而不是只能猜。服务端导入另传目标库，因为 CLI 眼里只有暂存副本。
+    ,sourceDatabase: argv.includes("--source-database")
+      ? optionValue(argv, "--source-database", "")
+      : null
   };
+}
+
+/**
+ * 审计报告头部显示的"数据源"。
+ *
+ * 刻意使用相对路径：报告是仓库里的已跟踪文档，绝对路径会把本机用户名带进仓库。
+ * 目标在当前位置之外时只保留文件名并显式标注"工作区外"，读者据此就能判断
+ * "这不是我本地工作区那个库"。
+ */
+function auditSourceLabel(args: ParsedArguments): string {
+  const target = resolve(args.sourceDatabase ?? args.database);
+  const asRelative = relative(process.cwd(), target);
+  return asRelative.startsWith("..") ? `(工作区外) ${basename(target)}` : asRelative;
 }
 
 function locateHealthXml(input: string): string {
@@ -311,7 +337,8 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     const stagedAudit = stageAuditFiles(
       store.database,
       args.report,
-      args.jsonReport
+      args.jsonReport,
+      auditSourceLabel(args)
     );
 
     store.close();
@@ -395,7 +422,7 @@ async function auditCommand(args: ParsedArguments): Promise<void> {
     throw error;
   }
   try {
-    const audit = writeAuditFiles(store.database, args.report, args.jsonReport);
+    const audit = writeAuditFiles(store.database, args.report, args.jsonReport, auditSourceLabel(args));
     console.log(
       JSON.stringify(
         {
