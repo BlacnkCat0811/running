@@ -23,6 +23,12 @@ interface Migration {
 
 export interface RaiDatabaseOpenOptions {
   createMigrationBackup?: boolean;
+  /**
+   * Defaults to strict validation on every open. API request-scoped writers may
+   * opt into checking only when this open actually applies a migration, after a
+   * strict startup validation has already established the database boundary.
+   */
+  foreignKeyValidation?: "always" | "after-migration";
 }
 
 /**
@@ -1643,7 +1649,10 @@ export class RaiDatabase {
   static async open(path: string, options: RaiDatabaseOpenOptions = {}): Promise<RaiDatabase> {
     const database = new RaiDatabase(path);
     try {
-      await database.migrate(options.createMigrationBackup ?? true);
+      await database.migrate(
+        options.createMigrationBackup ?? true,
+        options.foreignKeyValidation ?? "always"
+      );
       database.prepareStatements();
       return database;
     } catch (error) {
@@ -1707,7 +1716,10 @@ export class RaiDatabase {
     await backup(this.database, destination);
   }
 
-  private async migrate(createMigrationBackup: boolean): Promise<void> {
+  private async migrate(
+    createMigrationBackup: boolean,
+    foreignKeyValidation: "always" | "after-migration"
+  ): Promise<void> {
     this.ensureMigrationTable();
     const appliedRows = this.database
       .prepare("SELECT version, name, checksum FROM schema_migrations")
@@ -1760,11 +1772,13 @@ export class RaiDatabase {
       }
     }
 
-    const foreignKeyProblems = this.database
-      .prepare("PRAGMA foreign_key_check")
-      .all() as unknown[];
-    if (foreignKeyProblems.length > 0) {
-      throw new Error("SQLite foreign key validation failed after migration");
+    if (foreignKeyValidation === "always" || pending.length > 0) {
+      const foreignKeyProblems = this.database
+        .prepare("PRAGMA foreign_key_check")
+        .all() as unknown[];
+      if (foreignKeyProblems.length > 0) {
+        throw new Error("SQLite foreign key validation failed after migration");
+      }
     }
   }
 
