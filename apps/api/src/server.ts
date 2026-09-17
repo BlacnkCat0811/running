@@ -852,7 +852,7 @@ app.get("/v1/training-zones/current", async (_request, reply) => {
 app.get("/v1/mobile/today", async () => {
   // Goals live in a plain file and do not depend on database readiness.
   const goals = mobileGoalsStore.read();
-  return withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, goals));
+  return withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, goals, mobileGoalsStore.planHistory(200)));
 });
 
 // Executable week handed to the WorkoutKit bridge. Read-only: it never mutates
@@ -872,7 +872,7 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
   if (expectedRevision != null && expectedRevision !== goals.revision) {
     throw new MobileGoalsRevisionConflictError(goals.revision);
   }
-  const inputs = withReadStore((store) => store.mobileWeeklyPlanInputs(goals.weeklyDistanceKm, goals));
+  const inputs = withReadStore((store) => store.mobileWeeklyPlanInputs(goals.weeklyDistanceKm, goals, mobileGoalsStore.planHistory(200)));
   const result = await generateWeeklyPlan({
     today: inputs.today,
     goals,

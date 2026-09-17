@@ -108,6 +108,11 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     assert.equal(typeof today.lock.present, "boolean");
     assert.equal(today.verdict.stale, true, "undated recovery cannot authorize locking");
 
+    const observed = read.mobileToday(30, undefined, []);
+    assert.equal(observed.recentPlanExecution?.length, 7);
+    assert.ok(observed.recentPlanExecution?.every((day) => day.localDate < observed.today.localDate));
+    assert.deepEqual(observed.weekPlan, today.weekPlan, "historical observations do not change today's executable plan");
+
     // With a null goal there is no progress fraction either.
     const noGoal = read.mobileToday(null);
     assert.equal(noGoal.week.goalDistanceKm, null);

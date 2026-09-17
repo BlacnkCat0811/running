@@ -53,6 +53,8 @@ import type {
   WorkoutZoneSummary,
   WorkoutSeriesResponse
 } from "@rai/api-contracts";
+import { buildPlanExecution } from "./plan-execution.js";
+import type { PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
 import {
@@ -242,7 +244,8 @@ export class RaiReadStore {
 
   mobileToday(
     goalDistanceKm: number | null,
-    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession">
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession">,
+    planHistory?: PlanHistoryRevision[]
   ): MobileTodayResponse {
     const today = mobileLocalDate();
     const weekStart = mobileWeekStart(today);
@@ -362,6 +365,12 @@ export class RaiReadStore {
       fourWeekDistanceChangeFraction,
       previousWeekDistanceKm: this.previousWeekDistanceKm(today)
     });
+    const recentPlanExecution = planHistory === undefined ? undefined : buildPlanExecution(today, planHistory,
+      this.database.prepare(`
+        SELECT local_date AS localDate, SUM(distance_km) AS distanceKm, COUNT(*) AS workoutCount
+        FROM active_workout_training_loads WHERE local_date >= ? AND local_date < ? GROUP BY local_date
+      `).all(shiftMobileDate(today, -7), today) as Array<{ localDate: string; distanceKm: number; workoutCount: number }>
+    );
     const freshness: MobileTodayResponse["freshness"] = {
       state: lastSyncedAt == null ? "unknown" : recoveryDate === today ? "valid" : "stale",
       checkedAt: lastSyncedAt,
@@ -386,6 +395,7 @@ export class RaiReadStore {
       lastSyncedAt,
       freshness,
       recommendationRevision,
+      ...(recentPlanExecution === undefined ? {} : { recentPlanExecution }),
       today: {
         localDate: today,
         distanceKm: Number(todayRow.distance_km ?? 0),
@@ -438,13 +448,14 @@ export class RaiReadStore {
     goals?: Pick<
       MobileGoalsResponse,
       "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision"
-    >
+    >,
+    planHistory?: PlanHistoryRevision[]
   ): {
     today: MobileTodayResponse;
     prescription: ReturnType<typeof zonePrescription>;
     previousWeekDistanceKm: number;
   } {
-    const today = this.mobileToday(goalDistanceKm, goals);
+    const today = this.mobileToday(goalDistanceKm, goals, planHistory);
     return {
       today,
       prescription: zonePrescription(this.trainingZonesCurrent()),

@@ -2,7 +2,7 @@ import type { MobileGoalsResponse, MobileTodayResponse } from "@rai/api-contract
 
 import type { CoachZonePrescription } from "./mobile-coach.js";
 
-export const WEEKLY_PLAN_PROMPT_VERSION = "weekly-plan-v1";
+export const WEEKLY_PLAN_PROMPT_VERSION = "weekly-plan-v2";
 
 export interface WeeklyPlanPromptArgs {
   today: MobileTodayResponse;
@@ -83,6 +83,10 @@ export function buildWeeklyPlanPrompt(args: WeeklyPlanPromptArgs): { system: str
     },
     injuryFlags: today.injuryFlags,
     race: today.race,
+    recentExecution: {
+      note: "仅为历史计划与已导入训练的观测对照；pending/unknown 不代表漏跑，距离比例不代表课型或强度完成率，不得据此补偿加量。",
+      days: today.recentPlanExecution ?? []
+    },
     recentWorkouts: today.recentWorkouts.slice(0, 5).map((workout) => ({
       startedAt: workout.startedAt,
       sessionType: workout.sessionType,

@@ -743,6 +743,18 @@ export interface LockMobileSessionInput {
   expectedRevision?: string;
 }
 
+/** Historical observations, not a completion/adherence grade. Missing imports remain pending. */
+export interface MobilePlanExecutionDay {
+  localDate: string;
+  planRevision: number | null;
+  plannedKind: MobileSessionKind | null;
+  plannedDistanceKm: number | null;
+  observedDistanceKm: number;
+  observedWorkoutCount: number;
+  distanceRatio: number | null;
+  status: "observed" | "pending" | "unknown";
+}
+
 /** Aggregated payload for the iOS home page ("今天"). */
 export interface MobileTodayResponse {
   generatedAt: string;
@@ -789,6 +801,8 @@ export interface MobileTodayResponse {
   race: MobileRaceCard;
   injuryFlags: MobileInjuryFlag[];
   weekPlan: MobileWeekPlanDay[];
+  /** Previous seven completed Asia/Shanghai days; no inferred missed days or adherence denominator. */
+  recentPlanExecution?: MobilePlanExecutionDay[];
   phase: MobileDayPhase;
   lock: MobileLockState;
 }

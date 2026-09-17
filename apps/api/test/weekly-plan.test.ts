@@ -4,6 +4,7 @@ import test from "node:test";
 
 import type { MobilePlannedDay, MobileSessionStructure, MobileTodayResponse } from "@rai/api-contracts";
 
+import { buildWeeklyPlanPrompt } from "../src/weekly-plan-prompt.js";
 import type { CoachZonePrescription } from "../src/mobile-coach.js";
 import { buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
 import {
@@ -462,7 +463,7 @@ test("a valid model response is accepted and audited", async () => {
   });
   assert.equal(result.audit.generatedBy, "llm");
   assert.equal(result.audit.model, "deepseek:deepseek-chat");
-  assert.equal(result.audit.promptVersion, "weekly-plan-v1");
+  assert.equal(result.audit.promptVersion, "weekly-plan-v2");
   assert.equal(result.days.length, 7);
   // every non-rest day is rebuilt with a real structure
   assert.equal(result.days.filter((day) => day.kind !== "rest").every((day) => day.structure != null), true);
@@ -1595,4 +1596,21 @@ test("a week below what the coach can prescribe says so instead of claiming a re
   const line = result.clamped.find((entry) => entry.includes("已缩减至"));
   assert.ok(line, "缩减过就必须留痕：" + JSON.stringify(result.clamped));
   assert.ok(line.includes("仍高于上限"), "装不进上限的周计划不得声称已合规：" + line);
+});
+
+
+test("weekly prompt includes historical observations without treating missing imports as missed runs", () => {
+  const execution = [{
+    localDate: "2026-09-06", planRevision: 1, plannedKind: "easy", plannedDistanceKm: 8,
+    observedDistanceKm: 0, observedWorkoutCount: 0, distanceRatio: null, status: "pending"
+  }];
+  const prompt = buildWeeklyPlanPrompt({
+    today: todayPayload({ recentPlanExecution: execution }),
+    goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget: null },
+    prescription: PRESCRIPTION, allowedDates: [TODAY]
+  });
+  assert.match(prompt.user, /recentExecution/);
+  assert.match(prompt.user, /pending\/unknown 不代表漏跑/);
+  assert.match(prompt.user, /不得据此补偿加量/);
+  assert.match(prompt.user, /"plannedDistanceKm": 8/);
 });
