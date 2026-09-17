@@ -286,6 +286,11 @@ export function TrainingZonesPage() {
         <span><small>有效样本</small><b>{profile.evidence.restingHeartRateDays} 日 / {profile.evidence.maximumHeartRateWorkouts} 次</b><em>静息心率 / 最高心率</em></span>
       </section>
       {lowConfidence ? <div className="zone-confidence-note"><WarningCircle size={18} /><span><b>当前训练分区为低置信试算</b><small>{confidenceNote}</small></span></div> : null}
+      <p className="zone-source-note">{profile.paceSource === "manual"
+        ? "配速分区使用手动阈配速；手动设置本身不代表实测阈值。"
+        : profile.paceSource === "fallback"
+          ? "配速分区当前使用回退估计，非实测阈值。"
+          : "自动阈配速结合 VDOT 代理与可用训练证据，并可能沿用历史锚点；不等同于实测阈值。"}</p>
       <div className="zone-tables"><ZoneTable profile={profile} kind="heart" /><ZoneTable profile={profile} kind="pace" /></div>
       <div className="zone-lower-grid">
         {history.loading ? <section className="panel"><LoadingBlock /></section> : history.error || !history.data ? <section className="panel"><ErrorBlock message={history.error ?? "没有分区历史"} /></section> : <ZoneEvidence profiles={history.data.profiles} />}
