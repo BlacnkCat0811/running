@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
 import { basename, dirname, join } from "node:path";
 
@@ -23,12 +23,25 @@ interface Migration {
 
 export interface RaiDatabaseOpenOptions {
   createMigrationBackup?: boolean;
+  migrationPolicy?: "apply" | "refuse";
   /**
    * Defaults to strict validation on every open. API request-scoped writers may
    * opt into checking only when this open actually applies a migration, after a
    * strict startup validation has already established the database boundary.
    */
   foreignKeyValidation?: "always" | "after-migration";
+}
+
+export class PendingMigrationsError extends Error {
+  readonly versions: number[];
+  readonly names: string[];
+
+  constructor(path: string, pending: Array<{ version: number; name: string }>) {
+    super(`数据库需要显式迁移（${pending.map((item) => item.version).join(", ")}）。停止 API 后执行：npm run data:migrate -- --database ${JSON.stringify(path)} --apply`);
+    this.name = "PendingMigrationsError";
+    this.versions = pending.map((item) => item.version);
+    this.names = pending.map((item) => item.name);
+  }
 }
 
 /**
@@ -1647,17 +1660,53 @@ export class RaiDatabase {
   }
 
   static async open(path: string, options: RaiDatabaseOpenOptions = {}): Promise<RaiDatabase> {
+    if (options.migrationPolicy === "refuse") {
+      const pending = RaiDatabase.pendingMigrations(path);
+      if (pending.length > 0) throw new PendingMigrationsError(path, pending);
+    }
     const database = new RaiDatabase(path);
     try {
       await database.migrate(
         options.createMigrationBackup ?? true,
-        options.foreignKeyValidation ?? "always"
+        options.foreignKeyValidation ?? "always",
+        options.migrationPolicy ?? "apply"
       );
       database.prepareStatements();
       return database;
     } catch (error) {
       database.database.close();
       throw error;
+    }
+  }
+
+  /** Inspect before opening a writer: even journal_mode=WAL can change the file. */
+  static pendingMigrations(path: string): Array<{ version: number; name: string }> {
+    const all = migrations.map(({ version, name }) => ({ version, name }));
+    if (!existsSync(path)) return all;
+    const database = new DatabaseSync(path, { readOnly: true });
+    try {
+      const table = database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'").get();
+      if (!table) return all;
+      const columns = database.prepare("PRAGMA table_info(schema_migrations)").all() as Array<{ name: string }>;
+      if (!["name", "checksum"].every((name) => columns.some((column) => column.name === name))) return all;
+      const rows = database.prepare("SELECT version, name, checksum FROM schema_migrations").all() as Array<{
+        version: number; name: string | null; checksum: string | null;
+      }>;
+      const applied = new Set<number>();
+      for (const row of rows) {
+        const migration = migrations.find((item) => item.version === row.version);
+        if (!migration) throw new Error(`Database contains unknown migration version ${row.version}`);
+        // Legacy metadata repair also belongs exclusively to the explicit CLI.
+        if (row.version === 1 && (!row.name || !row.checksum)) continue;
+        if (row.name !== migration.name) throw new Error(`Migration ${row.version} name does not match the application`);
+        if (row.checksum === migrationChecksum(migration)) applied.add(row.version);
+        else if (row.checksum !== legacyMigrationChecksum(migration)) {
+          throw new Error(`Migration ${row.version} checksum does not match the application`);
+        }
+      }
+      return all.filter((item) => !applied.has(item.version));
+    } finally {
+      database.close();
     }
   }
 
@@ -1708,6 +1757,12 @@ export class RaiDatabase {
     if (!existsSync(this.path) || !this.tableExists("workouts")) return;
     const backupDirectory = join(dirname(this.path), "backups");
     mkdirSync(backupDirectory, { recursive: true });
+    const disk = statfsSync(backupDirectory);
+    const databaseBytes = statSync(this.path).size + (existsSync(`${this.path}-wal`) ? statSync(`${this.path}-wal`).size : 0);
+    const required = Math.ceil(databaseBytes * 1.1) + 256 * 1024 ** 2;
+    if (disk.bavail * disk.bsize < required) {
+      throw new Error(`Insufficient disk space for migration backup: need at least ${required} bytes`);
+    }
     const timestamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
     const destination = join(
       backupDirectory,
@@ -1718,8 +1773,18 @@ export class RaiDatabase {
 
   private async migrate(
     createMigrationBackup: boolean,
-    foreignKeyValidation: "always" | "after-migration"
+    foreignKeyValidation: "always" | "after-migration",
+    policy: "apply" | "refuse"
   ): Promise<void> {
+    if (policy === "refuse") {
+      // Recheck the boundary; publication locks serialize cooperating processes.
+      const pending = RaiDatabase.pendingMigrations(this.path);
+      if (pending.length > 0) throw new PendingMigrationsError(this.path, pending);
+      if (foreignKeyValidation === "always" && this.database.prepare("PRAGMA foreign_key_check").all().length > 0) {
+        throw new Error("SQLite foreign key validation failed after migration");
+      }
+      return;
+    }
     this.ensureMigrationTable();
     const appliedRows = this.database
       .prepare("SELECT version, name, checksum FROM schema_migrations")
@@ -1756,6 +1821,7 @@ export class RaiDatabase {
       await this.createBackup(pending[0]?.version ?? 1);
     }
 
+    // Each migration is atomic; the entire sequence is not one transaction.
     for (const migration of pending) {
       this.database.exec("BEGIN IMMEDIATE");
       try {

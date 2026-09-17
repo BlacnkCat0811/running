@@ -38,7 +38,7 @@ import {
   TrainingZoneProfileValidationError,
   buildPredictionReportAsync
 } from "@rai/application";
-import { acquireDatabasePublicationLock, ModelRunActivationError, RaiDatabase, SqliteModelRunRepository } from "@rai/storage-sqlite";
+import { acquireDatabasePublicationLock, ModelRunActivationError, PendingMigrationsError, RaiDatabase, SqliteModelRunRepository } from "@rai/storage-sqlite";
 import Fastify from "fastify";
 
 import { apiErrorPayload } from "./api-error.js";
@@ -335,7 +335,7 @@ app.addHook("onClose", async () => {
 
 const recoverDatabaseJobs = async (recoverPredictionLeases = false): Promise<void> => {
   if (!existsSync(databasePath)) return;
-  const migrationStore = await RaiDatabase.open(databasePath);
+  const migrationStore = await RaiDatabase.open(databasePath, { migrationPolicy: "refuse" });
   try {
     new RaiApplicationService(migrationStore).recoverInterruptedJobs();
     if (recoverPredictionLeases) {
@@ -351,6 +351,10 @@ let databaseReadyAtStartup = true;
 try {
   await recoverDatabaseJobs();
 } catch (error) {
+  if (error instanceof PendingMigrationsError) {
+    app.log.fatal({ versions: error.versions, names: error.names }, error.message);
+    process.exit(78);
+  }
   databaseReadyAtStartup = false;
   app.log.error(error, "Database startup recovery failed; maintenance restore remains available");
 }
@@ -399,10 +403,11 @@ observeWorkerDatabaseError = observeMainDatabaseError;
 const openMainDatabase = async (): Promise<RaiDatabase> => {
   try {
     // Startup recovery above performs the strict whole-database validation.
-    // Request-scoped writers still run migrations/checksums and keep
+    // Request-scoped writers refuse migrations, check checksums and keep
     // foreign_keys=ON, but avoid repeating a full foreign_key_check when the
-    // schema is already current. A real pending migration still forces it.
+    // schema is already current. Pending migrations must be applied offline.
     return await RaiDatabase.open(databasePath, {
+      migrationPolicy: "refuse",
       foreignKeyValidation: databaseRecoveryRequired ? "always" : "after-migration"
     });
   } catch (error) {

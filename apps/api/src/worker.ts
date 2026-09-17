@@ -422,7 +422,7 @@ export class PredictionModelWorker {
     let leasedRunRemains = false;
     try {
       while (!this.closing && existsSync(this.databasePath)) {
-        const store = await RaiDatabase.open(this.databasePath);
+        const store = await RaiDatabase.open(this.databasePath, { migrationPolicy: "refuse" });
         let runId: string | null = null;
         let workerToken: string | null = null;
         try {
@@ -439,7 +439,7 @@ export class PredictionModelWorker {
           store.close();
         }
         if (this.closing) {
-          const shutdownStore = await RaiDatabase.open(this.databasePath);
+          const shutdownStore = await RaiDatabase.open(this.databasePath, { migrationPolicy: "refuse" });
           try {
             this.service(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
           } finally {
@@ -459,7 +459,7 @@ export class PredictionModelWorker {
   }
 
   private async execute(runId: string, workerToken: string): Promise<void> {
-    const readStore = await RaiDatabase.open(this.databasePath);
+    const readStore = await RaiDatabase.open(this.databasePath, { migrationPolicy: "refuse" });
     if (this.closing) {
       try {
         this.service(readStore).releaseLeaseForShutdown(runId, workerToken);
@@ -475,7 +475,7 @@ export class PredictionModelWorker {
     `).get(runId) as unknown as { attemptCount: number } | undefined;
     readStore.close();
     if (!run || !attempt) {
-      const shutdownStore = await RaiDatabase.open(this.databasePath);
+      const shutdownStore = await RaiDatabase.open(this.databasePath, { migrationPolicy: "refuse" });
       try {
         this.service(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
       } finally {
@@ -490,7 +490,7 @@ export class PredictionModelWorker {
     );
     await mkdir(dirname(artifactDirectory), { recursive: true });
     if (this.closing) {
-      const shutdownStore = await RaiDatabase.open(this.databasePath);
+      const shutdownStore = await RaiDatabase.open(this.databasePath, { migrationPolicy: "refuse" });
       try {
         this.service(shutdownStore).releaseLeaseForShutdown(runId, workerToken);
       } finally {
@@ -535,7 +535,7 @@ export class PredictionModelWorker {
         artifactDirectory
       }, abortController.signal);
       if (this.closing) throw new Error("prediction_training_shutdown");
-      const store = await RaiDatabase.open(this.databasePath);
+      const store = await RaiDatabase.open(this.databasePath, { migrationPolicy: "refuse" });
       try {
         const service = this.service(store);
         if (this.closing) service.releaseLeaseForShutdown(runId, workerToken);
@@ -544,7 +544,7 @@ export class PredictionModelWorker {
         store.close();
       }
     } catch (error) {
-      const store = await RaiDatabase.open(this.databasePath);
+      const store = await RaiDatabase.open(this.databasePath, { migrationPolicy: "refuse" });
       try {
         const service = this.service(store);
         if (this.closing) {

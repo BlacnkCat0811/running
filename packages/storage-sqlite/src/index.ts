@@ -12,6 +12,7 @@ export {
 } from "./model-run-repository.js";
 export {
   RaiDatabase,
+  PendingMigrationsError,
   SEED_CONTENT_HASH,
   type GenerationRemovalPreview,
   type RaiDatabaseOpenOptions,

@@ -59,7 +59,9 @@
     "ml:check": "node research/scripts/python-env.mjs --check",
     "ml:install": "npm run ml:bootstrap",
     "ml:test": "node research/scripts/python-env.mjs --pytest",
-    "ml:train": "node research/scripts/python-env.mjs --train"
+    "ml:train": "node research/scripts/python-env.mjs --train",
+    "predata:migrate": "npm run check:node",
+    "data:migrate": "tsx packages/storage-sqlite/src/migrate-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
