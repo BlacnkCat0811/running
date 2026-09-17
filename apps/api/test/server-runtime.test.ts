@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -88,6 +89,20 @@ async function waitForBoundPort(child: ChildProcess, output: () => string): Prom
       }
     });
   });
+}
+
+async function within<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function stopApi(child: ChildProcess): Promise<void> {
@@ -652,6 +667,167 @@ test("database-backed writes cannot recreate a deleted database", async () => {
     }
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+test("startup foreign-key failure cannot be bypassed by the request hot-open policy", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-fk-recovery-boundary-"));
+  const databasePath = join(runtimeRoot, "var", "rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  (await RaiDatabase.open(databasePath)).close();
+  const damaged = new DatabaseSync(databasePath);
+  try {
+    damaged.exec("PRAGMA foreign_keys = OFF");
+    damaged.prepare(`
+      INSERT INTO workout_statistics (workout_id, ordinal, type)
+      VALUES ('missing-workout', 1, 'fixture')
+    `).run();
+  } finally {
+    damaged.close();
+  }
+
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      RAI_RUNTIME_ROOT: runtimeRoot,
+      RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0",
+      RAI_LOG_LEVEL: "silent"
+    },
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    const health = await fetch(`${url}/v1/health`).then((response) => response.json()) as {
+      databaseReady: boolean;
+      status: string;
+    };
+    assert.equal(health.databaseReady, false);
+    assert.equal(health.status, "recovery_required");
+
+    const write = await fetch(`${url}/v1/model-runs`, { method: "POST" });
+    assert.equal(write.status, 500);
+    const verify = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((verify.prepare(`
+        SELECT COUNT(*) AS count FROM workout_statistics WHERE workout_id = 'missing-workout'
+      `).get() as { count: number }).count, 1);
+      assert.equal((verify.prepare(`
+        SELECT COUNT(*) AS count FROM recompute_jobs
+      `).get() as { count: number }).count, 0);
+    } finally {
+      verify.close();
+    }
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+test("weekly plan generation gate is wired to the route without holding the global mutation lock", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-weekly-plan-gate-"));
+  const databasePath = join(runtimeRoot, "var", "rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  (await RaiDatabase.open(databasePath)).close();
+
+  let upstreamCalls = 0;
+  let releaseFirst: (() => void) | undefined;
+  let firstResponse: ServerResponse | undefined;
+  let notifyFirstCalled: (() => void) | undefined;
+  const firstCalled = new Promise<void>((resolveCalled) => {
+    notifyFirstCalled = resolveCalled;
+  });
+  const completionPayload = JSON.stringify({
+    choices: [{ finish_reason: "stop", message: { content: "{\"days\":[]}" } }]
+  });
+  const upstream = createServer((request, response) => {
+    request.resume();
+    upstreamCalls += 1;
+    response.setHeader("content-type", "application/json");
+    if (upstreamCalls === 1) {
+      firstResponse = response;
+      releaseFirst = () => response.end(completionPayload);
+      notifyFirstCalled?.();
+      return;
+    }
+    response.end(completionPayload);
+  });
+  await new Promise<void>((resolveListen) => upstream.listen(0, "127.0.0.1", resolveListen));
+  const upstreamAddress = upstream.address();
+  assert.ok(upstreamAddress && typeof upstreamAddress !== "string");
+
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env,
+      RAI_RUNTIME_ROOT: runtimeRoot,
+      RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0",
+      RAI_LOG_LEVEL: "silent",
+      RAI_LLM_API_KEY: "fixture-key",
+      RAI_LLM_PROVIDER: "fixture",
+      RAI_LLM_MODEL: "fixture-model",
+      RAI_LLM_BASE_URL: `http://127.0.0.1:${upstreamAddress.port}`
+    },
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    const generate = (): Promise<Response> => fetch(`${url}/v1/mobile/workout-plan/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+
+    const first = generate();
+    await within(firstCalled, 5_000, "weekly plan generation did not call the fixture upstream");
+    const busyStarted = performance.now();
+    const busy = await generate();
+    assert.equal(busy.status, 409);
+    assert.ok(performance.now() - busyStarted < 1_000, "busy generation should fail fast");
+    assert.deepEqual(await busy.json(), {
+      code: "weekly_plan_generation_busy",
+      message: "课表正在生成，请稍后重试"
+    });
+    assert.equal(upstreamCalls, 1);
+
+    const edit = await fetch(`${url}/v1/mobile/goals`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 0, weeklyDistanceKm: 35 })
+    });
+    assert.equal(edit.status, 200, await edit.text());
+
+    assert.ok(firstResponse);
+    releaseFirst?.();
+    const firstResult = await first;
+    assert.equal(firstResult.status, 409, await firstResult.text());
+    const goals = await fetch(`${url}/v1/mobile/goals`).then((response) => response.json()) as {
+      revision: number;
+      weeklyDistanceKm: number;
+    };
+    assert.equal(goals.revision, 1);
+    assert.equal(goals.weeklyDistanceKm, 35);
+
+    const afterRelease = await generate();
+    assert.equal(afterRelease.status, 200, await afterRelease.text());
+    assert.equal(upstreamCalls, 2);
+  } finally {
+    releaseFirst?.();
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await new Promise<void>((resolveClose) => upstream.close(() => resolveClose()));
     await removeRuntimeRoot(runtimeRoot);
   }
 });

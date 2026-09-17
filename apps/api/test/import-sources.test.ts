@@ -105,6 +105,79 @@ test("stale source discovery does not erase a newer last-used timestamp", async 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("point source operations do not scan or rewrite the complete source table", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-source-point-ops-"));
+  const exportRoot = join(root, "export");
+  mkdirSync(exportRoot);
+  writeFileSync(join(exportRoot, "export.xml"), "<HealthData/>");
+  try {
+    const manager = new ImportSourceManager(root, root);
+    const inspection = await manager.registerDirectory(exportRoot);
+    const surface = manager as unknown as {
+      state: RuntimeStateStore;
+    };
+    surface.state.sources = () => {
+      throw new Error("full source scan must not be used");
+    };
+    assert.equal((await manager.get(inspection.sourceId))?.id, inspection.sourceId);
+    await manager.markUsed(inspection.sourceId);
+    assert.ok((await manager.get(inspection.sourceId))?.lastUsedAt);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("marking one source cannot resurrect another deleted source", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-source-atomic-mark-"));
+  const firstRoot = join(root, "first");
+  const secondRoot = join(root, "second");
+  mkdirSync(firstRoot);
+  mkdirSync(secondRoot);
+  writeFileSync(join(firstRoot, "export.xml"), "<HealthData first=\"true\"/>");
+  writeFileSync(join(secondRoot, "export.xml"), "<HealthData second=\"true\"/>");
+  try {
+    const manager = new ImportSourceManager(root, root);
+    const first = await manager.registerDirectory(firstRoot);
+    const second = await manager.registerDirectory(secondRoot);
+    const surface = manager as unknown as { state: RuntimeStateStore };
+    const markSourceUsed = surface.state.markSourceUsed.bind(surface.state);
+    surface.state.markSourceUsed = (id, usedAt) => {
+      surface.state.deleteSource(second.sourceId);
+      markSourceUsed(id, usedAt);
+    };
+    await manager.markUsed(first.sourceId);
+    assert.ok((await manager.get(first.sourceId))?.lastUsedAt);
+    assert.equal(await manager.get(second.sourceId), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("source use timestamps are monotonic and deleted rows are not recreated", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-runtime-source-used-at-"));
+  try {
+    const state = new RuntimeStateStore(root);
+    const source = {
+      id: "source-a",
+      kind: "directory",
+      displayName: "A",
+      inputPath: "/tmp/a",
+      originalPath: "/tmp/a",
+      sourceSha256: "sha-a",
+      idempotencyKey: "batch-a",
+      exportFileName: "export.xml",
+      exportBytes: 1,
+      routeFileCount: 0,
+      modifiedAt: "2026-09-16T00:00:00.000Z",
+      createdAt: "2026-09-16T00:00:00.000Z",
+      lastUsedAt: "2026-09-16T02:00:00.000Z"
+    };
+    state.upsertSource(source);
+    state.markSourceUsed(source.id, "2026-09-16T01:00:00.000Z");
+    assert.equal(state.source(source.id)?.lastUsedAt, "2026-09-16T02:00:00.000Z");
+    assert.equal(state.sourceByIdempotencyKey("batch-a")?.id, source.id);
+    state.deleteSource(source.id);
+    state.markSourceUsed(source.id, "2026-09-16T03:00:00.000Z");
+    assert.equal(state.source(source.id), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("recognizes Apple Chinese export names when ZIP omits the UTF-8 flag", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-source-encoding-"));
   const archivePath = join(root, "health.zip");

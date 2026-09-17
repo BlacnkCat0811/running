@@ -313,9 +313,7 @@ export class ImportSourceManager {
     this.uploadInProgress = true;
     try {
       if (normalizedIdempotencyKey) {
-        const existing = (await this.readSources()).find(
-          (source) => source.idempotencyKey === normalizedIdempotencyKey
-        );
+        const existing = this.state.sourceByIdempotencyKey(normalizedIdempotencyKey) as ImportSource | null;
         if (existing) {
           await drainStream(stream);
           return await this.inspection(existing);
@@ -402,7 +400,7 @@ export class ImportSourceManager {
   }
 
   async get(id: string): Promise<ImportSource | null> {
-    return (await this.readSources()).find((source) => source.id === id) ?? null;
+    return this.state.source(id) as ImportSource | null;
   }
 
   async recent(): Promise<ImportSource[]> {
@@ -413,11 +411,7 @@ export class ImportSourceManager {
   }
 
   async markUsed(id: string): Promise<void> {
-    const sources = await this.readSources();
-    const source = sources.find((item) => item.id === id);
-    if (!source) return;
-    source.lastUsedAt = new Date().toISOString();
-    await this.writeSources(sources);
+    this.state.markSourceUsed(id, new Date().toISOString());
   }
 
   async retainImportedUpload(id: string): Promise<void> {
@@ -560,7 +554,7 @@ export class ImportSourceManager {
 
   private async inspection(source: ImportSource): Promise<ImportInspection> {
     const previous = source.sourceSha256
-      ? (await this.readSources()).filter((item) => item.id !== source.id && item.sourceSha256 === source.sourceSha256 && item.lastUsedAt).sort((a, b) => (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? ""))[0]
+      ? this.state.mostRecentlyUsedSourceBySha(source.sourceSha256, source.id) as ImportSource | null
       : undefined;
     return {
       sourceId: source.id, status: source.lastUsedAt || previous ? "unchanged" : "ready", exportFileName: source.exportFileName,
@@ -741,9 +735,6 @@ export class ImportSourceManager {
     return total;
   }
 
-  private async writeSources(sources: ImportSource[]): Promise<void> {
-    for (const source of sources) this.state.upsertSource(source);
-  }
 }
 
 async function drainStream(stream: NodeJS.ReadableStream): Promise<void> {

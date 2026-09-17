@@ -88,6 +88,40 @@ export class RuntimeStateStore {
     return this.withCorruptionRecovery(() => this.readSources());
   }
 
+  source(id: string): RuntimeImportSourceRow | null {
+    return this.withCorruptionRecovery(() => this.readSource(
+      "WHERE id = ?",
+      [id]
+    ));
+  }
+
+  sourceByIdempotencyKey(idempotencyKey: string): RuntimeImportSourceRow | null {
+    return this.withCorruptionRecovery(() => this.readSource(
+      "WHERE idempotency_key = ?",
+      [idempotencyKey]
+    ));
+  }
+
+  mostRecentlyUsedSourceBySha(sourceSha256: string, excludingId: string): RuntimeImportSourceRow | null {
+    return this.withCorruptionRecovery(() => this.readSource(
+      "WHERE source_sha256 = ? AND id <> ? AND last_used_at IS NOT NULL ORDER BY last_used_at DESC LIMIT 1",
+      [sourceSha256, excludingId]
+    ));
+  }
+
+  private readSource(whereClause: string, parameters: string[]): RuntimeImportSourceRow | null {
+    const db = this.open();
+    try {
+      return (db.prepare(`SELECT id, kind, display_name AS displayName, input_path AS inputPath,
+        original_path AS originalPath, source_sha256 AS sourceSha256,
+        idempotency_key AS idempotencyKey,
+        export_file_name AS exportFileName, export_bytes AS exportBytes,
+        route_file_count AS routeFileCount, modified_at AS modifiedAt,
+        created_at AS createdAt, last_used_at AS lastUsedAt
+        FROM import_sources ${whereClause}`).get(...parameters) as unknown as RuntimeImportSourceRow | undefined) ?? null;
+    } finally { db.close(); }
+  }
+
   private readSources(): RuntimeImportSourceRow[] {
     const db = this.open();
     try {
@@ -136,6 +170,20 @@ export class RuntimeStateStore {
 
   deleteSource(id: string): void {
     this.withCorruptionRecovery(() => this.removeSource(id));
+  }
+
+  markSourceUsed(id: string, usedAt: string): void {
+    this.withCorruptionRecovery(() => this.updateSourceUsedAt(id, usedAt));
+  }
+
+  private updateSourceUsedAt(id: string, usedAt: string): void {
+    const db = this.open();
+    try {
+      db.prepare(`UPDATE import_sources SET last_used_at = CASE
+        WHEN last_used_at IS NULL OR last_used_at < ? THEN ?
+        ELSE last_used_at
+      END WHERE id = ?`).run(usedAt, usedAt, id);
+    } finally { db.close(); }
   }
 
   private removeSource(id: string): void {

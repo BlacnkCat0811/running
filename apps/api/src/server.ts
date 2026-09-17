@@ -59,6 +59,7 @@ import {
   isTrustedDevelopmentOrigin
 } from "./local-request-security.js";
 import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js";
+import { TryAcquireGate } from "./try-acquire-gate.js";
 import {
   backupParamsSchema,
   deleteBodySchema,
@@ -84,7 +85,12 @@ import {
   trainingStatisticsHistoryQuerySchema,
   workoutListQuerySchema
 } from "./schemas.js";
-import { ImportWorker, PredictionModelWorker, RecomputeWorker } from "./worker.js";
+import {
+  ImportJobEnqueuePersistenceError,
+  ImportWorker,
+  PredictionModelWorker,
+  RecomputeWorker
+} from "./worker.js";
 import { needsFullTrainingZoneBackfill, readTrainingZoneWorkoutSetCounts } from "./training-zone-backfill.js";
 
 const projectRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -392,7 +398,13 @@ observeWorkerDatabaseError = observeMainDatabaseError;
 
 const openMainDatabase = async (): Promise<RaiDatabase> => {
   try {
-    return await RaiDatabase.open(databasePath);
+    // Startup recovery above performs the strict whole-database validation.
+    // Request-scoped writers still run migrations/checksums and keep
+    // foreign_keys=ON, but avoid repeating a full foreign_key_check when the
+    // schema is already current. A real pending migration still forces it.
+    return await RaiDatabase.open(databasePath, {
+      foreignKeyValidation: databaseRecoveryRequired ? "always" : "after-migration"
+    });
   } catch (error) {
     observeMainDatabaseError(error);
     throw error;
@@ -905,10 +917,19 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
   };
 }
 
+const weeklyPlanGenerationGate = new TryAcquireGate();
+
 app.post<{ Body: { expectedRevision?: number } }>(
   "/v1/mobile/workout-plan/generate",
   { schema: { body: mobileWeeklyPlanGenerateBodySchema } },
   async (request, reply) => {
+    const release = weeklyPlanGenerationGate.tryAcquire();
+    if (!release) {
+      return reply.code(409).send({
+        code: "weekly_plan_generation_busy",
+        message: "课表正在生成，请稍后重试"
+      });
+    }
     try {
       return await runWeeklyPlanGeneration(request.body?.expectedRevision);
     } catch (error) {
@@ -916,6 +937,8 @@ app.post<{ Body: { expectedRevision?: number } }>(
         return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
       }
       throw error;
+    } finally {
+      release();
     }
   }
 );
@@ -1329,7 +1352,9 @@ app.post<{ Body: ImportJobRequest }>(
       originalPath: source.originalPath
     });
   } catch (error) {
-    if (source.kind === "upload") {
+    // A failed enqueue was never accepted. Keep the inspected upload so the
+    // same source can be retried after runtime-state storage recovers.
+    if (source.kind === "upload" && !(error instanceof ImportJobEnqueuePersistenceError)) {
       await importSources.cleanupUpload(sourceId).catch((cleanupError) => {
         app.log.warn(cleanupError, "Failed to clean upload after import job creation failed");
       });
