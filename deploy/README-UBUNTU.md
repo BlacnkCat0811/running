@@ -68,7 +68,7 @@ curl -fsSI https://api.example.com/settings
 ## 数据目录与自动备份
 
 - 数据目录：`/var/lib/rai`（`RAI_RUNTIME_ROOT`），主库 `/var/lib/rai/var/rai.sqlite`；
-  运行时状态 `/var/lib/rai/var/runtime.sqlite`；备份 `/var/lib/rai/backups/`；
+  运行时状态 `/var/lib/rai/var/runtime.sqlite`；备份 `/var/lib/rai/var/backups/`；
   导入与报告 `/var/lib/rai/imports/`、`/var/lib/rai/reports/`。
 - 应用自带一致性备份：`POST /v1/backups`（node:sqlite `backup()`），保留策略由
   `RAI_BACKUP_MAX_COUNT` / `RAI_BACKUP_MAX_TOTAL_BYTES` / `RAI_BACKUP_MIN_FREE_BYTES`
@@ -136,3 +136,28 @@ sudo systemctl restart rai-api
   `RAI-IP-CA.mobileconfig`）站点，备案通过后再改回域名。
 - 重大变更前建议先在腾讯云控制台打快照；云快照配额有限时，优先依赖上面的
   40 分钟应用级备份。
+
+
+## 显式数据库迁移（2026-09-17 起）
+
+API 与后台 worker 不再自动迁移主库。API 启动发现待迁移版本或待修复的旧迁移元数据时退出 **78**；缺失主库仍保留首次导入/维护入口。默认 `data:migrate` 仅只读预演，必须指定目标库。
+
+```bash
+cd /opt/rai
+sudo -u rai npm run data:migrate -- --database /var/lib/rai/var/rai.sqlite
+# 先通过既有 POST /v1/backups 完成在线一致性备份，再停服：
+sudo systemctl stop rai-api
+sudo -u rai npm run data:migrate -- --database /var/lib/rai/var/rai.sqlite --apply
+# 成功后解除可能已触发的启动频率限制，并启动：
+sudo systemctl reset-failed rai-api
+sudo systemctl start rai-api
+curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOKEN"
+```
+
+健康响应必须同时包含 `status: "ok"` 和 `databaseReady: true`，HTTP 200/服务 active 不足以证明就绪。CLI 与 API 共用 publication lock；不要在 API 运行时执行 `--apply`，不要手工删除活进程锁。
+
+发布脚本可显式加入 `--apply --migrate --database /var/lib/rai/var/rai.sqlite`：在线备份、更新代码和构建完成后，停服、迁移、重启并检查真实就绪；迁移失败保持停止。不加 `--migrate` 不会自动升级库。首次引入本变更时应先更新部署机脚本，再执行该选项。
+
+同时更新 systemd unit（保留本机已有的必要定制）：`[Unit]` 段的 `StartLimitIntervalSec=300`、`StartLimitBurst=3`，以及 `[Service]` 段的 `RestartPreventExitStatus=78`，然后 `sudo systemctl daemon-reload`。仅改仓库文件不会更新已安装的 unit。
+
+迁移按**单个版本**事务提交，不是全序列事务；失败后不要假设已恢复到最初版本。自动迁移备份位于 `dirname(database)/backups`；维护 API 备份位于 `RAI_RUNTIME_ROOT/var/backups`（默认两者相同，自定义数据库路径时可能不同）。空间预检只是最低备份空间门槛，不保证迁移峰值空间足够。恢复到旧 schema 后必须同时匹配旧版应用，或重新显式迁移；不能用新 API 的拒绝策略直接启动旧库。

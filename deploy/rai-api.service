@@ -2,6 +2,8 @@
 Description=RAI running intelligence API
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -12,6 +14,7 @@ EnvironmentFile=/etc/rai/rai.env
 ExecStart=/usr/bin/npm run start
 Restart=on-failure
 RestartSec=5
+RestartPreventExitStatus=78
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

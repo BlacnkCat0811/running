@@ -8,7 +8,8 @@
 # 默认 **dry-run**：只打印将要执行的命令。确认无误后加 --apply 真正执行。
 #
 #   sudo bash deploy/upgrade.sh            # 预演
-#   sudo bash deploy/upgrade.sh --apply    # 执行
+#   sudo bash deploy/upgrade.sh --apply    # 执行（不自动迁移）
+#   sudo bash deploy/upgrade.sh --apply --migrate --database /var/lib/rai/var/rai.sqlite
 #
 set -euo pipefail
 
@@ -20,13 +21,22 @@ RUN_USER=${RAI_RUN_USER:-rai}
 HEALTH_URL=${RAI_HEALTH_URL:-http://127.0.0.1:8787/v1/health}
 
 APPLY=0
-for arg in "$@"; do
-  case "$arg" in
-    --apply) APPLY=1 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
-    *) echo "未知参数：$arg（只支持 --apply）" >&2; exit 2 ;;
+MIGRATE=0
+DATABASE=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --apply) APPLY=1; shift ;;
+    --migrate) MIGRATE=1; shift ;;
+    --database) [ "$#" -ge 2 ] || { echo "--database 需要绝对路径" >&2; exit 2; }; DATABASE=$2; shift 2 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    *) echo "未知参数：$1" >&2; exit 2 ;;
   esac
 done
+if [ "$MIGRATE" -eq 1 ]; then
+  case "$DATABASE" in /*) ;; *) echo "--migrate 必须同时指定 --database 绝对路径（与 rai.env 一致）" >&2; exit 2 ;; esac
+elif [ -n "$DATABASE" ]; then
+  echo "--database 仅与 --migrate 一起使用" >&2; exit 2
+fi
 
 say() { printf '%s\n' "$*"; }
 run() {
@@ -101,13 +111,38 @@ fi
 # --- 4. 重建前端产物（Nginx 直接读 dist）--------------------------------------
 as_user npm --prefix "$APP_DIR" run build
 
+# 显式授权后才停服迁移。失败时保持停止，不重启一个半迁移的数据库。
+if [ "$MIGRATE" -eq 1 ]; then
+  run systemctl stop "$SERVICE"
+  as_user npm --prefix "$APP_DIR" run data:migrate -- --database "$DATABASE" --apply
+  run systemctl reset-failed "$SERVICE"
+fi
+
 # --- 5. 重启并验证 -----------------------------------------------------------
 run systemctl restart "$SERVICE"
 
 if [ "$APPLY" -eq 1 ]; then
-  unauthenticated=$(curl -sS -o /dev/null -w '%{http_code}' "$HEALTH_URL" || true)
-  authenticated=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $api_token" "$HEALTH_URL" || true)
-  say "GET /v1/health  无令牌=$unauthenticated（期望 401）  带令牌=$authenticated（期望 200）"
+  health_body=$(mktemp)
+  trap 'rm -f "$health_body"' EXIT
+  ready=0
+  # HTTP 200 alone is insufficient: the API deliberately serves maintenance in recovery_required.
+  for attempt in $(seq 1 30); do
+    authenticated=$(curl --max-time 2 -sS -o "$health_body" -w '%{http_code}' -H "Authorization: Bearer $api_token" "$HEALTH_URL" || true)
+    if [ "$authenticated" = "200" ] && node -e '
+      const fs = require("node:fs");
+      try { const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        process.exit(value.status === "ok" && value.databaseReady === true ? 0 : 1);
+      } catch { process.exit(1); }
+    ' "$health_body"; then ready=1; break; fi
+    sleep 1
+  done
+  if [ "$ready" -ne 1 ]; then
+    echo "错误：API 未真实就绪；检查 journalctl。待迁移库需停服并显式执行 data:migrate（不能仅凭 active/HTTP 200 判成功）。" >&2
+    exit 1
+  fi
+  unauthenticated=$(curl --max-time 2 -sS -o /dev/null -w '%{http_code}' "$HEALTH_URL" || true)
+  [ "$unauthenticated" = "401" ] || { echo "错误：无令牌健康检查应为 401，实际 $unauthenticated" >&2; exit 1; }
+  say "GET /v1/health 已认证且 status=ok、databaseReady=true；无令牌=401"
   say "HEAD=$after_head"
   say "schema_migrations 最新 version："
   sudo -u "$RUN_USER" node -e '
@@ -119,7 +154,7 @@ if [ "$APPLY" -eq 1 ]; then
     db.close();
   ' 2>/dev/null || say "  （无法读取 schema_migrations，请手动核对）"
 else
-  say "[dry-run] 验证：GET /v1/health 无令牌应 401、带令牌应 200；并核对 schema_migrations"
+  say "[dry-run] 验证：GET /v1/health 无令牌应 401、带令牌须 status=ok 且 databaseReady=true；并核对 schema_migrations"
 fi
 
 say "完成。"
