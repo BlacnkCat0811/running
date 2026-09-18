@@ -225,6 +225,7 @@ test("replays the stored interval session onto the measured track", async () => 
     assert.equal(series.segmentPlan?.localDate, "2026-09-15");
     assert.equal(series.segmentPlan?.matchedBy, "plan_history");
     assert.ok(Math.abs((series.segmentPlan?.explainedFraction ?? 0) - 1581 / TOTAL_SECONDS) < 0.01);
+    assert.equal(series.hasMeasuredWorkoutSteps, false, "Plan replay does not prove structured execution");
     assert.match(series.segmentNote ?? "", /课表结构/);
     // The kilometre split is untouched: both stories stay available.
     assert.deepEqual(
@@ -253,6 +254,7 @@ test("keeps the plan's steps when the Watch tiled the run with its own laps", as
     const series = read.workoutSeries(sessionId, [planDay()]);
     assert.ok(series);
     assert.equal(series.segments.length, 4);
+    assert.equal(series.hasMeasuredWorkoutSteps, false, "Plan replay does not prove structured execution");
     assert.match(series.segmentNote ?? "", /课表结构/);
     // The note has to say which record the panel used: from the phone, "the
     // plan's steps" and "the Watch's laps" are otherwise indistinguishable.
@@ -393,6 +395,7 @@ test("measures the steps the Watch recorded instead of replaying the plan", asyn
       series.segments.map((segment) => Math.round(segment.distanceMeters)),
       [773, 2606, 774, 1898]
     );
+    assert.equal(series.hasMeasuredWorkoutSteps, true);
     assert.match(series.segmentNote ?? "", /分段由手表记录的 3 个训练步骤实测得到/);
     assert.match(series.segmentNote ?? "", /手表另有 10 段 lap\/segment 事件未参与分段/);
     assert.equal(series.segmentPlan?.reason, "按手表记录的步骤实测");
@@ -426,6 +429,7 @@ test("a measured step layer that disagrees with the plan wins, and says so", asy
       series.segments.map((segment) => segment.label),
       ["热身", "训练", "整理放松", "自由训练"]
     );
+    assert.equal(series.hasMeasuredWorkoutSteps, true);
     assert.match(series.segmentNote ?? "", /分段由手表记录的 3 个训练步骤实测得到/);
   } finally {
     read.close();
@@ -457,6 +461,7 @@ test("a single whole-workout activity means no measured steps, so the replay sta
       series.segments.map((segment) => Math.round(segment.startOffsetSeconds)),
       [0, 300, 1281, 1581]
     );
+    assert.equal(series.hasMeasuredWorkoutSteps, false, "Plan replay does not prove structured execution");
     assert.match(series.segmentNote ?? "", /课表结构/);
   } finally {
     read.close();
@@ -594,6 +599,7 @@ test("a first step timed slightly before the workout start is clamped, not dropp
       series.segments.map((segment) => segment.label),
       ["热身", "训练", "整理放松", "自由训练"]
     );
+    assert.equal(series.hasMeasuredWorkoutSteps, true);
     assert.match(series.segmentNote ?? "", /分段由手表记录的 3 个训练步骤实测得到/);
   } finally {
     read.close();
@@ -725,6 +731,7 @@ test("says why there are no segments instead of leaving the panel blank", async 
   try {
     const series = read.workoutSeries(sessionId, []);
     assert.ok(series);
+    assert.equal(series.hasMeasuredWorkoutSteps, false);
     assert.deepEqual(series.segments, []);
     assert.equal(series.segmentPlan, null);
     assert.match(series.segmentNote ?? "", /没有手表 lap\/segment 事件/);

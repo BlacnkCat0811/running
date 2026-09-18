@@ -481,6 +481,8 @@ export interface WorkoutSeriesResponse {
   segmentPlan: WorkoutSegmentPlanMatch | null;
   /** Why `segments` is empty, or what the match assumed — never silently blank. */
   segmentNote: string | null;
+  /** True only for recorded structured workout steps, not inferred plan replay or manual laps. */
+  hasMeasuredWorkoutSteps?: boolean;
   series: {
     heartRate: WorkoutMetricSeries;
     speed: WorkoutMetricSeries;

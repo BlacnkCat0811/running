@@ -926,11 +926,12 @@ export class RaiReadStore {
     segments: WorkoutSeriesResponse["segments"];
     plan: WorkoutSeriesResponse["segmentPlan"];
     note: string | null;
+    hasMeasuredWorkoutSteps: boolean;
   } {
     const startedAtMs = Date.parse(session.startedAt);
     const endedAtMs = Date.parse(session.endedAt);
     if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs) || endedAtMs <= startedAtMs) {
-      return { segments: [], plan: null, note: "这次训练的时间区间无效，无法生成分段" };
+      return { segments: [], plan: null, hasMeasuredWorkoutSteps: false, note: "这次训练的时间区间无效，无法生成分段" };
     }
     const events = this.seriesRepository.workoutEventIntervals(session.canonicalWorkoutId);
     // The Watch's own step layer, when the export carried one. Absent for older
@@ -957,6 +958,7 @@ export class RaiReadStore {
       return {
         segments: [],
         plan: null,
+        hasMeasuredWorkoutSteps: false,
         note: "缺少可用的速度序列（或与总里程偏差过大），无法重建分段，请按公里分段参考"
       };
     }
@@ -979,8 +981,8 @@ export class RaiReadStore {
             segmentation.boundaries
           );
     const segments = toWorkoutSegments(measured, segmentation.descriptors, startedAtMs);
-    if (segments.length === 0) return { segments: [], plan: null, note: missingSegmentsNote(events.length, plan) };
-    return { segments, plan: segmentation.plan, note: segmentation.note };
+    if (segments.length === 0) return { segments: [], plan: null, hasMeasuredWorkoutSteps: false, note: missingSegmentsNote(events.length, plan) };
+    return { segments, plan: segmentation.plan, note: segmentation.note, hasMeasuredWorkoutSteps: steps.length >= 2 };
   }
 
   workoutSeries(id: string, candidates: PlanCandidateDay[] = []): WorkoutSeriesResponse | null {
@@ -997,6 +999,7 @@ export class RaiReadStore {
       segments: segmentation.segments,
       segmentPlan: segmentation.plan,
       segmentNote: segmentation.note,
+      hasMeasuredWorkoutSteps: segmentation.hasMeasuredWorkoutSteps,
       series: {
         heartRate: this.asMetricSeries(
           this.seriesRepository.metricSeries(
