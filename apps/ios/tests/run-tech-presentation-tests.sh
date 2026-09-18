@@ -120,9 +120,14 @@ checks += 1
 # ---------------------------------------------------------------------------
 tech_views = pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_text()
 
+# Weekly/body navigation lives beside sync, not at the bottom of Today.
+home_actions = pathlib.Path("apps/ios/RAI/Skins/Technology/TechSyncStatus.swift").read_text()
+assert 'id: "today.week"' in home_actions and 'id: "today.body"' in home_actions
+assert "TodayDetailLinks" not in tech_views
+
 # Today redesign: keep the three real measurements and a distinct linear ability visual.
 today_widgets = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTodayRecovery.swift").read_text()
-recovery_panel = tech_views.split("private func recoveryPanel", 1)[1].split("private struct TodayDetailLinks", 1)[0]
+recovery_panel = tech_views.split("private func recoveryPanel", 1)[1].split("struct TechZoneDistributionPanel", 1)[0]
 ability_card = tech_views.split("private func abilityCard", 1)[1].split("private func abilityAccessibilityLabel", 1)[0]
 assert "data.recovery.stateLabel" in recovery_panel
 assert "TechTodayRecoveryMetrics(recovery: data.recovery)" in recovery_panel

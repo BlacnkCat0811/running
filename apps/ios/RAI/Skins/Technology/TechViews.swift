@@ -27,7 +27,6 @@ struct TechTodayView: View {
                     abilityCard(today)
                     TechTodayMetrics(workout: today.recentWorkouts.first, refreshRevision: today.generatedAt)
                     raceSummary(today)
-                    TodayDetailLinks(data: today)
                 } else if native.isLoading {
                     TechPanel { TechLoadingState(title: "正在读取 RAI 服务") }
                 } else {
@@ -406,61 +405,6 @@ struct TechTodayView: View {
         }
     }
 
-    private struct TodayDetailLinks: View {
-        let data: MobileTodayResponse
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                TechMetricGrid(minimum: 140) {
-                    NavigationLink {
-                        TechWeekOverviewView(data: data)
-                    } label: {
-                        detailLink(
-                            title: "本周活动",
-                            subtitle: "\(data.week.workoutCount) 次 · \(nativeKilometers(data.week.distanceKm))",
-                            systemName: "calendar",
-                            tint: TechColor.green,
-                            fill: TechColor.mint
-                        )
-                    }
-                    .buttonStyle(TechPressStyle()).accessibilityIdentifier("today.week")
-
-                    NavigationLink {
-                        TechBodyMetricsView(data: data)
-                    } label: {
-                        detailLink(
-                            title: "身体指标",
-                            subtitle: data.recovery.state == "recovered" ? "状态良好" : techStatusName(data.recovery.state),
-                            systemName: "heart",
-                            tint: TechColor.cyan,
-                            fill: TechColor.paper
-                        )
-                    }
-                    .buttonStyle(TechPressStyle()).accessibilityIdentifier("today.body")
-                }
-            }
-        }
-
-        private func detailLink(
-            title: String,
-            subtitle: String,
-            systemName: String,
-            tint: Color,
-            fill: Color
-        ) -> some View {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
-                    Text(subtitle).font(.caption2).foregroundStyle(TechColor.muted).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: systemName).font(.system(size: 19, weight: .regular)).foregroundStyle(tint)
-            }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .padding(11)
-            .background(TechColor.paper, in: RoundedRectangle(cornerRadius: TechMetrics.corner))
-        }
-    }
 }
 
 struct TechWeekOverviewView: View {

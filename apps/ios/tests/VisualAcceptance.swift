@@ -67,15 +67,15 @@ final class VisualAcceptance: XCTestCase {
 
     func test01TodayAndBody() {
         capture("01-today")
-        app.swipeUp(); capture("01-today-lower")
-        scrollTo(app.buttons["today.week"])
+        XCTAssertTrue(app.buttons["today.week"].isHittable)
+        XCTAssertTrue(app.buttons["today.body"].isHittable)
         capture("01-today-links")
         app.buttons["today.week"].tap(); sleep(2)
         XCTAssertTrue(app.navigationBars["本周活动"].exists)
         capture("01-week")
         app.swipeUp(); capture("01-week-daily")
         back()
-        scrollTo(app.buttons["today.body"])
+        XCTAssertTrue(app.buttons["today.body"].isHittable)
         app.buttons["today.body"].tap()
         XCTAssertTrue(app.staticTexts["配速分区"].waitForExistence(timeout: 45))
         XCTAssertTrue(app.navigationBars["身体指标"].exists)

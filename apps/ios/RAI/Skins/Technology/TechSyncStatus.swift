@@ -8,7 +8,7 @@ struct TechHomeActions: View {
     @Environment(NativeAppModel.self) private var native
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 8) {
             VStack(spacing: 4) {
                 Button {
                     Task {
@@ -28,6 +28,14 @@ struct TechHomeActions: View {
                 .accessibilityValue(sync.isBusy ? techSyncPhase(sync.phase) : !session.isReachable ? "服务未连接" : "就绪")
                 Text(sync.isBusy ? "同步中" : "同步").font(.caption2).foregroundStyle(TechColor.muted)
             }
+            if let today = native.today {
+                homeLink("本周活动", symbol: "chart.bar.xaxis", id: "today.week") {
+                    TechWeekOverviewView(data: today)
+                }
+                homeLink("身体指标", symbol: "heart", id: "today.body") {
+                    TechBodyMetricsView(data: today)
+                }
+            }
             VStack(spacing: 4) {
                 NavigationLink { TechPlanView() } label: {
                     Image(systemName: "calendar").font(.system(size: 19, weight: .medium))
@@ -38,6 +46,21 @@ struct TechHomeActions: View {
             }
         }
     }
+
+    private func homeLink<Destination: View>(_ title: String, symbol: String, id: String,
+                                             @ViewBuilder destination: () -> Destination) -> some View {
+        VStack(spacing: 4) {
+            NavigationLink(destination: destination) {
+                Image(systemName: symbol).font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(TechColor.ink).frame(width: 44, height: 44)
+                    .background(TechColor.paper, in: RoundedRectangle(cornerRadius: TechMetrics.corner))
+            }
+            .buttonStyle(TechPressStyle()).accessibilityLabel("打开" + title)
+            .accessibilityIdentifier(id)
+            Text(title).font(.caption2).foregroundStyle(TechColor.muted)
+        }
+    }
+
 }
 
 struct TechSyncAction: View {
