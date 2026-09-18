@@ -50,7 +50,7 @@ private struct TechPreparedSeriesChart: View {
 
     private var selected: MetricPoint? {
         guard let selectedTime else { return nil }
-        return data.points.min { abs($0.offsetSeconds - selectedTime) < abs($1.offsetSeconds - selectedTime) }
+        return data.points.min { abs($0.offsetSeconds / 60 - selectedTime) < abs($1.offsetSeconds / 60 - selectedTime) }
     }
 
     var body: some View {
@@ -60,22 +60,22 @@ private struct TechPreparedSeriesChart: View {
             } else {
                 Chart {
                     ForEach(data.points) { point in
-                        LineMark(x: .value("时间", point.offsetSeconds), y: .value(unit, point.value))
+                        LineMark(x: .value("时间 (min)", point.offsetSeconds / 60), y: .value(unit, point.value))
                             .foregroundStyle(TechColor.cyan).interpolationMethod(.linear)
                         if data.points.count == 1 {
-                            PointMark(x: .value("时间", point.offsetSeconds), y: .value(unit, point.value))
+                            PointMark(x: .value("时间 (min)", point.offsetSeconds / 60), y: .value(unit, point.value))
                                 .foregroundStyle(TechColor.cyan)
                         }
                     }
                     if let selected {
-                        RuleMark(x: .value("选中时间", selected.offsetSeconds))
+                        RuleMark(x: .value("选中时间 (min)", selected.offsetSeconds / 60))
                             .foregroundStyle(TechColor.muted).lineStyle(StrokeStyle(lineWidth: 1, dash: [4]))
-                        PointMark(x: .value("时间", selected.offsetSeconds), y: .value(unit, selected.value))
+                        PointMark(x: .value("时间 (min)", selected.offsetSeconds / 60), y: .value(unit, selected.value))
                             .foregroundStyle(TechColor.ink)
                     }
                 }
-                .chartXScale(domain: 0...max(1, durationSeconds.isFinite ? durationSeconds : 0,
-                                           data.points.last?.offsetSeconds ?? 0))
+                .chartXScale(domain: 0...max(1.0 / 60, durationSeconds.isFinite ? durationSeconds / 60 : 0,
+                                           (data.points.last?.offsetSeconds ?? 0) / 60))
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: typeSize.isAccessibilitySize ? 2 : 4)) {
                         AxisValueLabel().foregroundStyle(TechColor.muted)
@@ -88,7 +88,7 @@ private struct TechPreparedSeriesChart: View {
                         AxisGridLine().foregroundStyle(TechColor.grid)
                     }
                 }
-                .chartXAxisLabel("秒").chartYAxisLabel(unit)
+                .chartXAxisLabel("min").chartYAxisLabel(unit)
                 .frame(height: height)
                 .chartOverlay { proxy in
                     GeometryReader { geometry in
@@ -107,7 +107,7 @@ private struct TechPreparedSeriesChart: View {
                 .accessibilityIdentifier(chartIdentifier)
 
                 if let selected {
-                    Text("\(techDuration(selected.offsetSeconds)) · \(nativeNumber(selected.value)) \(unit)")
+                    Text("\(nativeNumber(selected.offsetSeconds / 60, digits: 1) + " min") · \(nativeNumber(selected.value)) \(unit)")
                         .font(.subheadline.monospacedDigit()).foregroundStyle(TechColor.ink)
                         .accessibilityIdentifier("workout.series.selection")
                 }
@@ -132,7 +132,7 @@ private struct TechPreparedSeriesChart: View {
         guard !data.points.isEmpty else { return }
         let current = selected.flatMap { point in data.points.firstIndex { $0.offsetSeconds == point.offsetSeconds } }
         let index = current.map { min(max($0 + direction, 0), data.points.count - 1) } ?? 0
-        selectedTime = data.points[index].offsetSeconds
+        selectedTime = data.points[index].offsetSeconds / 60
     }
 }
 #endif
