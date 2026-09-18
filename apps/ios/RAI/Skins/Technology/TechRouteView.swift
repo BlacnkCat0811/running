@@ -37,8 +37,8 @@ private struct TechRouteGeometry {
 
 private struct TechPreparedRoute: View {
     let geometry: TechRouteGeometry
-    // The offline trace appears immediately; tile rendering is an explicit action.
-    @State private var showingSystemMap = false
+    // Default to the interactive map only after privacy consent; keep offline trace available.
+    @State private var showingSystemMap = true
     /// One-shot signal that the next map update should fit the entire route.
     /// Reset back to false on the first consume so it doesn't refit whenever
     /// SwiftUI happens to redraw.
