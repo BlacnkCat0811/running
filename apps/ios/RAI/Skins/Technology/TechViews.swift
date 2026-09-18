@@ -1095,7 +1095,9 @@ struct TechWorkoutDetailView: View {
                     DisclosureGroup { detailMetrics(detail.workout) } label: { Text("全部训练指标").frame(minHeight: 44) }
                         .font(.subheadline).tint(TechColor.cyan)
                     if let series = native.selectedSeries { seriesPanel(series) }
-                    segmentPanel(native.selectedSeries)
+                    if let series = native.selectedSeries, series.showsPlanSegments {
+                        segmentPanel(series)
+                    }
                     splitPanel(native.selectedSeries?.splits ?? [])
                     qualityPanel(detail)
                     if let load = detail.trainingLoad { trainingLoadPanel(load) }
@@ -1233,12 +1235,9 @@ struct TechWorkoutDetailView: View {
         }
     }
 
-    /// What the run was actually made of — the plan's own steps, or the Watch's
-    /// own lap boundaries, rather than a 1 km ruler.
-    ///
-    /// Rendered above the kilometre split because it answers "did I run the
-    /// session I was given"; the split stays as the neutral fallback. An empty
-    /// panel always explains itself — "no segments" is a fact, a blank is a bug.
+    /// Recorded structured-workout steps, shown above the kilometre splits.
+    /// Manual laps and inferred plan replay do not qualify; the caller requires
+    /// measured-step provenance and nonempty segments from the API.
     private func segmentPanel(_ series: WorkoutSeriesResponse?) -> some View {
         let segments = series?.segments ?? []
         return TechPanel {

@@ -8,6 +8,25 @@ struct TechPresentationRegression {
             precondition(condition(), message)
             checks += 1
         }
+        // Old servers and inferred plan replays must not expose a plan-execution panel.
+        let emptyMetric: [String: Any] = ["unit": "bpm", "totalSamples": 0, "points": []]
+        let metrics = Dictionary(uniqueKeysWithValues:
+            ["heartRate", "speed", "power", "cadence", "elevation", "strideLength", "verticalOscillation", "groundContactTime"]
+                .map { ($0, emptyMetric) })
+        let segment: [String: Any] = ["index": 1, "label": "训练", "purpose": "work",
+                                    "startOffsetSeconds": 0, "durationSeconds": 60, "distanceMeters": 200]
+        var payload: [String: Any] = ["trainingSessionId": "test", "startedAt": "2026-09-18", "endedAt": "2026-09-18",
+                                      "sourceCategory": "apple_health", "splits": [], "segments": [segment], "series": metrics]
+        func decodeSeries() -> WorkoutSeriesResponse {
+            try! JSONDecoder().decode(WorkoutSeriesResponse.self, from: JSONSerialization.data(withJSONObject: payload))
+        }
+        check(!decodeSeries().showsPlanSegments, "Legacy server has no structured-execution evidence")
+        payload["hasMeasuredWorkoutSteps"] = false
+        check(!decodeSeries().showsPlanSegments, "Replay/manual laps are not plan execution")
+        payload["hasMeasuredWorkoutSteps"] = true
+        check(decodeSeries().showsPlanSegments, "Measured workout steps show plan segments")
+        payload["segments"] = []
+        check(!decodeSeries().showsPlanSegments, "No empty plan panel")
         check(TechSyncPresentation.resolve(phase: "cancelled", isBusy: false, hasError: false, hasSyncDate: true) == .cancelled,
               "Previous success cannot mask cancellation")
         check(TechSyncPresentation.resolve(phase: "cancelled", isBusy: true, hasError: false, hasSyncDate: false) == .cancelled,

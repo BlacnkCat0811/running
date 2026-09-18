@@ -852,11 +852,14 @@ struct WorkoutSeriesResponse: Codable {
     let segmentPlan: WorkoutSegmentPlanMatch?
     /// Why `segments` is empty — never a silent blank panel.
     let segmentNote: String?
+    /// Absent on older APIs: hide inferred/unknown segments rather than claim plan execution.
+    let hasMeasuredWorkoutSteps: Bool?
+    var showsPlanSegments: Bool { hasMeasuredWorkoutSteps == true && !segments.isEmpty }
     let series: WorkoutSeries
 
     private enum CodingKeys: String, CodingKey {
         case trainingSessionId, startedAt, endedAt, sourceCategory
-        case splits, segments, segmentPlan, segmentNote, series
+        case splits, segments, segmentPlan, segmentNote, hasMeasuredWorkoutSteps, series
     }
 
     init(from decoder: Decoder) throws {
@@ -869,6 +872,7 @@ struct WorkoutSeriesResponse: Codable {
         segments = try container.decodeIfPresent([WorkoutSegment].self, forKey: .segments) ?? []
         segmentPlan = try container.decodeIfPresent(WorkoutSegmentPlanMatch.self, forKey: .segmentPlan)
         segmentNote = try container.decodeIfPresent(String.self, forKey: .segmentNote)
+        hasMeasuredWorkoutSteps = try container.decodeIfPresent(Bool.self, forKey: .hasMeasuredWorkoutSteps)
         series = try container.decode(WorkoutSeries.self, forKey: .series)
     }
 }
