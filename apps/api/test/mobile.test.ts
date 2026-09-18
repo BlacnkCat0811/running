@@ -1237,3 +1237,38 @@ test("a structure built for the new kind is trusted even when the stored kind di
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("race goals create, edit and clear survive control database reopen without replacing weekly plans", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-race-goals-"));
+  const controlPath = join(root, "var", "control.sqlite");
+  let store = new MobileGoalsStore(root, controlPath);
+  try {
+    const original = store.write({ weeklyDistanceKm: 42, easyDurationFloorFraction: 0.75,
+      qualitySessionCap: 3, weekPlan: [{ localDate: "2026-12-01", kind: "easy", distanceKm: 8 }] });
+    const target = { date: "2026-12-06", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
+    const created = store.write({ weeklyDistanceKm: 42, expectedRevision: original.revision, raceTarget: target });
+    store.close();
+    store = new MobileGoalsStore(root, controlPath);
+    assert.deepEqual(store.read().raceTarget, target);
+    assert.deepEqual(store.read().weekPlan, original.weekPlan);
+    assert.equal(store.read().easyDurationFloorFraction, 0.75);
+    assert.equal(store.read().qualitySessionCap, 3);
+    assert.throws(() => store.write({ weeklyDistanceKm: 42, expectedRevision: original.revision, raceTarget: null }));
+    assert.deepEqual(store.read().raceTarget, target);
+    const editedTarget = { date: "2027-01-10", distance: "ten_k" as const, targetPaceSecondsPerKm: null };
+    const edited = store.write({ weeklyDistanceKm: 42, expectedRevision: created.revision, raceTarget: editedTarget });
+    store.close();
+    store = new MobileGoalsStore(root, controlPath);
+    assert.deepEqual(store.read().raceTarget, editedTarget);
+    store.write({ weeklyDistanceKm: 42, expectedRevision: edited.revision, raceTarget: null });
+    store.close();
+    store = new MobileGoalsStore(root, controlPath);
+    assert.equal(store.read().raceTarget, null);
+    assert.deepEqual(store.read().weekPlan, original.weekPlan);
+    assert.equal(store.read().weeklyDistanceKm, 42);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

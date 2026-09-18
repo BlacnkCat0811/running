@@ -561,70 +561,36 @@ test("the week editor offers neither today — nor a day already gone — as an 
   assert.ok(checked.length >= 1, `今日页/计划页应当有可编辑的周计划行，实际找到 ${checked.length} 处`);
 });
 
-test("the plan editor cannot offer a session kind the API rejects", () => {
-  // The goals editor listed 稳态跑 / `steady`, which `mobileWeekPlanItemSchema`
-  // has never accepted — picking it made the save fail with HTTP 400. The editor
-  // and the wire contract have no other link, so they are compared here.
-  const accepted = mobileGoalsBodySchema.properties.weekPlan.items.properties.kind.enum as readonly string[];
-  const editors = swiftSources();
-  assert.ok(editors.length > 0, "apps/ios/RAI 下应当能找到 Swift 源文件");
-  let pickers = 0;
-  for (const file of editors) {
+test("native session and race pickers exactly match their API contracts", () => {
+  const sessionKinds = mobileGoalsBodySchema.properties.weekPlan.items.properties.kind.enum;
+  const raceDistances = mobileGoalsBodySchema.properties.raceTarget.anyOf[0].properties.distance.enum;
+  let sessionPickers = 0;
+  let racePickers = 0;
+  for (const file of swiftSources()) {
     const source = stripComments(readFileSync(file, "utf8"));
-    // Any `.tag("<literal>")` participates, whatever the view builder and
-    // whatever the literal's shape. A pattern that only accepted
-    // `Text("..").tag("lower_case")` would quietly skip a picker written over
-    // several lines — and a value the API has never heard of, say `Steady`,
-    // instead of failing on it.
-    const offered = [...source.matchAll(/\.tag\(\s*"([^"]*)"\s*\)/g)].map((match) => match[1]!);
     const name = file.slice(file.indexOf("RAI/"));
-    // Every picker is checked on its own, not the file as a whole: a picker whose
-    // options come from a variable — `ForEach(kinds) { … .tag($0) }` — parses to
-    // nothing, and one literal picker elsewhere in the same file used to keep the
-    // floor below green while the data-driven one offered whatever it liked.
     for (const picker of source.matchAll(/(?:^|[^A-Za-z0-9_])Picker\s*\(/g)) {
-      // Skip the argument list before looking for the content block. `Picker(
-      // selection: Binding(get: { … }, set: { … })) { … }` puts a closure inside
-      // the arguments, and the first `{` after the call belongs to *that*
-      // closure — so the tags were read out of an empty block and any selector
-      // written that way was invisible to this scan.
+      // Parse each picker independently; DatePicker and argument closures are not options.
       const paren = picker.index + picker[0].length - 1;
       const close = skipBalanced(source, paren);
-      if (close < 0) continue;
+      assert.ok(close >= 0, name + " 的 Picker 参数无法解析");
+      const args = source.slice(paren, close);
+      const isRace = args.includes('"比赛距离"');
+      assert.ok(isRace || args.includes('"训练类型"'), name + " 出现未登记的 Picker，请补充对应 API 契约扫描");
+      const accepted = isRace ? raceDistances : sessionKinds;
       const open = source.indexOf("{", close);
-      if (open < 0) continue;
+      assert.ok(open >= 0, name + " 的 Picker 缺少选项块");
+      const offered: string[] = [];
       for (const tag of balancedBlock(source, open).matchAll(/\.tag\(\s*([^)]*)\)/g)) {
         const value = tag[1]!.trim();
-        assert.ok(
-          /^"[^"]*"$/.test(value),
-          name + " 的选择器出现非字面量 tag(" + value + ")，本次扫描看不到它提供的选项；请改为字面量，或扩展本测试的扫描方式"
-        );
+        assert.ok(/^"[^"]*"$/.test(value), name + " 的 tag 必须是可验证的字面量：" + value);
+        offered.push(value.slice(1, -1));
       }
+      assert.deepEqual([...offered].sort(), [...accepted].sort(), name + " 的选项必须与 API 契约一致");
+      if (isRace) racePickers += 1;
+      else sessionPickers += 1;
     }
-    if (offered.length === 0) {
-      // Skipping is what lets a selector drift: a `Picker` built from a variable
-      // parses to nothing, and the remaining files keep the `pickers` floor green.
-      assert.ok(
-        !/(?:^|[^A-Za-z0-9_])Picker\s*\(/.test(source),
-        name + " 含 Picker 却解析不出任何 .tag 字面量，请扩展本测试的扫描方式再改选择器"
-      );
-      continue;
-    }
-    pickers += 1;
-    for (const kind of offered) {
-      assert.ok(
-        accepted.includes(kind),
-        name + " 提供的 " + kind + " 不在服务端接受的范围 " + accepted.join("/") + " 内"
-      );
-    }
-    assert.deepEqual(
-      [...offered].sort(),
-      [...accepted].sort(),
-      name + " 的训练类型选项应与服务端一致（既不缺也不多）"
-    );
   }
-  // One skin ships a picker, and it is the only one left: the pixel skin was
-  // deleted on 2026-09-18. The floor is what stops a deleted or renamed picker
-  // from passing vacuously — bump it when another skin gains one.
-  assert.ok(pickers >= 1, "应当有一个训练类型选择器，实际扫描到 " + pickers + " 个");
+  assert.ok(sessionPickers >= 1, "必须保留训练类型选择器");
+  assert.ok(racePickers >= 1, "必须保留比赛距离选择器");
 });
