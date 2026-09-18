@@ -160,13 +160,18 @@ func nativeSegmentDose(_ segment: WorkoutSegment) -> String {
 /// The alert the watch was told to enforce — the plan's intent, not the outcome.
 func nativeSegmentAlert(_ segment: WorkoutSegment) -> String? {
     guard let kind = segment.alertKind else { return nil }
+    if kind == "pace", [segment.alertLower, segment.alertUpper].contains(where: { value in
+        guard let value else { return false }
+        return !value.isFinite || value < 120 || value > WorkoutPlanMapper.maxPaceSecondsPerKm
+    }) { return "配速目标异常" }
     let unit = kind == "pace" ? "/km" : " bpm"
     func format(_ value: Double?) -> String? {
         guard let value else { return nil }
         return kind == "pace" ? nativePace(value) : nativeNumber(value, digits: 0)
     }
-    let lower = format(segment.alertLower)
-    let upper = format(segment.alertUpper)
+    let bounds = [segment.alertLower, segment.alertUpper].compactMap { $0 }.sorted()
+    let lower = format(bounds.count == 2 ? bounds.first : segment.alertLower)
+    let upper = format(bounds.count == 2 ? bounds.last : segment.alertUpper)
     if let lower, let upper { return "提醒 \(lower)–\(upper)\(unit)" }
     if let upper { return "提醒 ≤ \(upper)\(unit)" }
     if let lower { return "提醒 ≥ \(lower)\(unit)" }

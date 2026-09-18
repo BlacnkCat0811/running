@@ -44,6 +44,7 @@ export const MAX_PLANNED_DISTANCE_KM = 80;
 export const DISTANCE_ROUNDING_KM = 0.1;
 
 function finiteOrNull(value: unknown): number | null {
+  if (value == null || typeof value === "boolean" || (typeof value === "string" && value.trim() === "")) return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -56,9 +57,15 @@ function normalizeAlert(value: unknown): MobileStepAlert | null {
   const limit = kind === "pace" ? MAX_ALERT_PACE_SECONDS_PER_KM : MAX_ALERT_HEART_RATE_BPM;
   const clamp = (input: unknown, min: number): number | null => {
     const parsed = finiteOrNull(input);
-    if (parsed == null) return null;
+    if (parsed == null || parsed <= 0) return null;
     return Math.min(limit, Math.max(min, Math.round(parsed)));
   };
+  // Reject corrupt pace ranges instead of turning a missing/invalid edge into
+  // a sprint prescription. Do not invent a replacement target.
+  if (kind === "pace" && [raw.lower, raw.upper].some((value) => {
+    const parsed = finiteOrNull(value);
+    return parsed != null && (parsed < 120 || parsed > limit);
+  })) return null;
   let lower = clamp(raw.lower, 1);
   let upper = clamp(raw.upper, 1);
   if (lower != null && upper != null && lower > upper) {

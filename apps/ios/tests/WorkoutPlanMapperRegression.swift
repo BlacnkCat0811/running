@@ -250,6 +250,9 @@ import Foundation
             "swapped alert bounds are put back in order"
         )
         check(WorkoutPlanMapper.paceBounds(lower: nil, upper: nil) == nil, "no pace bound yields no alert")
+        check(WorkoutPlanMapper.paceBounds(lower: 1, upper: 423) == nil, "corrupt one-second pace must never reach Watch")
+        check(WorkoutPlanMapper.paceBounds(lower: 60, upper: 423) == nil, "corrupt one-minute pace must never reach Watch")
+        check(WorkoutPlanMapper.paceBounds(lower: 423, upper: 380) == .range(lowerMetersPerSecond: 1_000.0 / 423, upperMetersPerSecond: 1_000.0 / 380), "September 14 target stays 6:20 to 7:03 per km")
 
         // MARK: Pace to speed inversion
 

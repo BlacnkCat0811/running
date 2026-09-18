@@ -299,6 +299,10 @@ enum WorkoutPlanMapper {
     /// the speed ceiling. Getting this backwards would silently prescribe the
     /// opposite intensity, which is why it lives in tested code.
     static func paceBounds(lower: Double?, upper: Double?) -> PaceBounds? {
+        guard ![lower, upper].contains(where: { value in
+            guard let value else { return false }
+            return !value.isFinite || value < 120
+        }) else { return nil }
         let lowerPace = boundedPace(lower)
         let upperPace = boundedPace(upper)
         if let lowerPace, let upperPace {
@@ -475,6 +479,10 @@ enum WorkoutPlanMapper {
         guard let raw, raw.isUsable else { return nil }
         switch raw.kind {
         case "pace":
+            guard ![raw.lower, raw.upper].contains(where: { value in
+                guard let value else { return false }
+                return !value.isFinite || value < 120
+            }) else { return nil }
             let (lower, upper) = ordered(lower: paceBound(raw.lower), upper: paceBound(raw.upper))
             guard lower != nil || upper != nil else { return nil }
             return .pace(lower: lower, upper: upper)

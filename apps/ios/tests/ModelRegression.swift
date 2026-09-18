@@ -103,6 +103,14 @@ final class RequestLog: @unchecked Sendable {
             precondition(condition(), name)
             print("PASS: \(name)")
         }
+        func segment(lower: Double, upper: Double) -> WorkoutSegment {
+            WorkoutSegment(index: 2, label: "训练", purpose: "work", goalType: "distance", goalMeters: 2600,
+                           goalSeconds: nil, alertKind: "pace", alertLower: lower, alertUpper: upper,
+                           startOffsetSeconds: 300, durationSeconds: 981, distanceMeters: 2600,
+                           averagePaceSecondsPerKm: 377, averageHeartRateBpm: 162, averageCadenceSpm: nil)
+        }
+        check(nativeSegmentAlert(segment(lower: 423, upper: 380)) == "提醒 \(nativePace(380))–\(nativePace(423))/km", "September 14 pace display orders fast to slow")
+        check(nativeSegmentAlert(segment(lower: 1, upper: 423)) == "配速目标异常", "historical corrupt target is not displayed as a valid range")
         check(NativeRaceGoalDraft.isValidPace(""), "blank target pace is optional")
         check(NativeRaceGoalDraft.paceSeconds("5:30") == 330, "race pace converts minutes and seconds")
         check(NativeRaceGoalDraft.paceSeconds("2:30") == 150 && NativeRaceGoalDraft.paceSeconds("15:00") == 900, "race pace includes API boundaries")
