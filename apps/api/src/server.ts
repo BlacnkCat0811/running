@@ -114,6 +114,17 @@ const configuredOrigins = new Set((process.env.RAI_ALLOWED_ORIGINS ?? "")
   .map((value) => value.trim())
   .filter(Boolean));
 const allowAuthenticatedRemote = process.env.RAI_ALLOW_REMOTE_TOKEN_AUTH === "1";
+/**
+ * Hosts allowed to read the public routes below without a token.
+ *
+ * Empty by default, which keeps the token gate on everything: opening the Web
+ * SPA to anonymous browsers is a deployment decision, not a code default.
+ * Nginx forwards `Host: tpandmr.xyz` (no port), so that is the spelling to use.
+ */
+const publicReadHosts = new Set((process.env.RAI_PUBLIC_HOSTS ?? "")
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean));
 if (!Number.isFinite(maxImportZipBytes) || maxImportZipBytes <= 0) {
   throw new Error("RAI_IMPORT_MAX_ZIP_BYTES must be a positive number");
 }
@@ -178,6 +189,76 @@ await app.register(multipart, {
   limits: { files: 1, fileSize: maxImportZipBytes }
 });
 const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+/**
+ * Read routes an unauthenticated browser may call, once the request arrives on
+ * a host named in `RAI_PUBLIC_HOSTS`.
+ *
+ * The Web SPA is meant to open without a token and render every view; the API
+ * keeps the write surface shut. Two entries here are load-bearing rather than
+ * incidental: `/v1/health` decides whether pages render at all, and
+ * `/v1/runtime-status` is polled by `GlobalTaskStatus` from every page — leave
+ * it out and the whole app grows a "reconnecting" banner instead of showing
+ * data.
+ *
+ * Deliberately absent, and each for a reason that would not survive a review
+ * that only asked "is it a GET?":
+ *   GET /v1/backups/:name        streams the raw SQLite file — the entire dataset
+ *   GET /v1/import-sources/*     returns ImportSource.inputPath / .originalPath,
+ *                                which is a map of the server's filesystem
+ *   GET /v1/diagnostics          server-side job, model and issue internals
+ *   GET /v1/openapi.json         the full route table
+ *   GET /v1/backups              backup inventory
+ *   GET /v1/import-jobs/*        import pipeline state
+ *   GET /v1/jobs, /v1/jobs/:id   recompute job events
+ *
+ * Read routes that stay token-gated are named in `tokenRequiredReadRoutes`
+ * below; `server-runtime.test.ts` fails if a mounted `/v1/` GET appears in
+ * neither set, so a new read route has to be classified on purpose instead of
+ * inheriting whichever default the author did not think about.
+ */
+const publicReadRoutes = new Set([
+  "/v1/health",
+  "/v1/handshake",
+  "/v1/dashboard",
+  "/v1/data-summary",
+  "/v1/data-audit",
+  "/v1/runtime-status",
+  "/v1/workouts",
+  "/v1/workouts/:id",
+  "/v1/workouts/:id/series",
+  "/v1/trends",
+  "/v1/recovery-trends",
+  "/v1/training-statistics/overview",
+  "/v1/training-statistics/history",
+  "/v1/training-statistics/load",
+  "/v1/training-zones/current",
+  "/v1/training-zones/history",
+  "/v1/predictions",
+  "/v1/prediction-models",
+  "/v1/prediction-models/:id",
+  "/v1/model-runs",
+  "/v1/model-runs/compare",
+  "/v1/mobile/today",
+  "/v1/mobile/workout-plan",
+  "/v1/mobile/statistics",
+  "/v1/mobile/trends",
+  "/v1/mobile/goals"
+]);
+/**
+ * Read routes that keep requiring the token. See the comment above.
+ */
+const tokenRequiredReadRoutes = new Set([
+  "/v1/openapi.json",
+  "/v1/diagnostics",
+  "/v1/backups",
+  "/v1/backups/:name",
+  "/v1/import-sources/recent",
+  "/v1/import-jobs/active",
+  "/v1/import-jobs/latest",
+  "/v1/import-jobs/:id",
+  "/v1/jobs",
+  "/v1/jobs/:id"
+]);
 // Upload streams and discover are long/IO-only; they must not hold the mutation lock.
 // Import job start still acquires the coordinator for the job lifecycle.
 const metadataOnlyMutationRoutes = new Set([
@@ -229,7 +310,11 @@ const localRequestSecurityOptions = {
   developmentOrigins,
   allowAuthenticatedRemote,
   trustedOrigins: configuredOrigins,
-  ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort })
+  ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort }),
+  // Both halves are needed for anonymous reads to work at all, so they travel
+  // together: routes without hosts passes nothing through, hosts without routes
+  // match no path.
+  ...(publicReadHosts.size > 0 ? { publicReadRoutes, publicReadHosts } : {})
 };
 installLocalRequestSecurity(app, localRequestSecurityOptions);
 app.addHook("preHandler", async (request, reply) => {
@@ -1544,6 +1629,16 @@ if (!address || typeof address === "string") {
 }
 localRequestSecurityOptions.apiPort = address.port;
 if (process.send) process.send({ type: "rai:ready", port: address.port });
+// Logged so "the config is live" is answerable from the journal instead of
+// inferred from a 200: an unset RAI_PUBLIC_HOSTS means every /v1 route still
+// demands the token, which is indistinguishable from a working anonymous read
+// if you only look at the browser.
+app.log.info(
+  { publicReadHosts: [...publicReadHosts], publicReadRoutes: publicReadRoutes.size, tokenRequiredReadRoutes: tokenRequiredReadRoutes.size },
+  publicReadHosts.size > 0
+    ? "Anonymous read enabled for the listed hosts; writes still require the token"
+    : "Anonymous read disabled: every /v1 route requires the token"
+);
 let shutdownPromise: Promise<void> | null = null;
 const shutdown = (signal: NodeJS.Signals | "IPC"): Promise<void> => {
   if (shutdownPromise) return shutdownPromise;

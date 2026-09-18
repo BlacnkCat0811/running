@@ -1357,6 +1357,49 @@ test("every mounted write route is classified, whatever the source looks like", 
       "只读的 /v1/mobile/workout-plan 必须挂载"
     );
     assert.ok(!registered.includes("/v1/mobile/workout-plan"), "只读周计划不应进写路由登记表");
+
+    // Every mounted `/v1/` read route must be classified as public or
+    // token-gated. Without this, a new GET route silently inherits "needs the
+    // token" — fine — but a typo in `publicReadRoutes` widens nothing and
+    // nothing notices either, and the failure mode that actually hurts (a
+    // route added to the public set that was never meant to be public) has no
+    // second reader.
+    const publicRead = registry("publicReadRoutes");
+    const tokenRequiredRead = registry("tokenRequiredReadRoutes");
+    assert.ok(publicRead.length > 0, "server.ts 必须声明 publicReadRoutes");
+    assert.ok(tokenRequiredRead.length > 0, "server.ts 必须声明 tokenRequiredReadRoutes");
+    for (const url of publicRead) {
+      assert.ok(
+        !tokenRequiredRead.includes(url),
+        url + " 同时出现在 publicReadRoutes 与 tokenRequiredReadRoutes 里"
+      );
+      // Sharing a path with a write route is legal and expected — `/v1/model-runs`
+      // reads the list and creates a run, `/v1/mobile/goals` reads and replaces
+      // the goals — because the hook dispatches on the method: the GET opens,
+      // the POST/PUT still needs the token. What must hold is that the path is
+      // really mounted as a read; `local-request-security.test.ts` covers the
+      // write half of the same path.
+      assert.ok(
+        mounted.some((route) => route.method === "GET" && route.url === url),
+        url + " 已登记为公开只读，实际却没有挂载成 GET 路由"
+      );
+    }
+    for (const url of tokenRequiredRead) {
+      assert.ok(
+        mounted.some((route) => route.method === "GET" && route.url === url),
+        url + " 已登记为需要令牌，实际却没有挂载成 GET 路由"
+      );
+    }
+    const mountedReads = mounted
+      .filter((route) => route.method === "GET" && route.url.startsWith("/v1/"))
+      .map((route) => route.url);
+    assert.ok(mountedReads.length > 0, "应当至少挂载一条 /v1/ 读路由");
+    for (const url of mountedReads) {
+      assert.ok(
+        publicRead.includes(url) || tokenRequiredRead.includes(url),
+        `GET ${url} 已挂载，却没有登记在 publicReadRoutes 或 tokenRequiredReadRoutes 里：新增读路由必须显式分类`
+      );
+    }
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

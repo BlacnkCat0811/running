@@ -133,7 +133,9 @@ test("LAN development origin stays rejected without the opt-in", async () => {
 
 // The five tests above all run without `apiToken` and use non-`/v1/` paths, so
 // they exercise the origin rules only. The token branch below is the sole access
-// control for every data route, and nothing covered it before.
+// control for every data route, and nothing covered it before. Anonymous reads
+// are covered separately, further down, and are off unless a public host list
+// is supplied.
 test("the API token gates every /v1/ route and nothing else", async () => {
   const app = Fastify();
   installLocalRequestSecurity(app, { apiPort: 8787, apiToken: "s3cret" });
@@ -181,6 +183,77 @@ test("the API token gates every /v1/ route and nothing else", async () => {
     assert.equal((await app.inject({
       method: "GET", url: "/outside", headers: { ...local, origin: "http://localhost:8787" }
     })).statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("anonymous reads open only for the listed routes on the listed hosts", async () => {
+  const app = Fastify();
+  installLocalRequestSecurity(app, {
+    apiPort: 8787,
+    apiToken: "s3cret",
+    publicReadRoutes: new Set(["/v1/dashboard", "/v1/jobs/:id"]),
+    publicReadHosts: new Set(["rai.example"])
+  });
+  app.get("/v1/dashboard", async () => ({ ok: true }));
+  app.get("/v1/jobs/:id", async () => ({ ok: true }));
+  app.get("/v1/backups", async () => ({ ok: true }));
+  app.post("/v1/dashboard", async () => ({ ok: true }));
+  // The Host Nginx forwards for a public read, and the Host it forwards when the
+  // request came in on some other name entirely (a scanner, or a DNS-rebinding
+  // page resolving its own hostname to this address).
+  const publicHost = { host: "rai.example" };
+  const otherHost = { host: "attacker.example" };
+  try {
+    assert.equal((await app.inject({ method: "GET", url: "/v1/dashboard", headers: publicHost })).statusCode, 200);
+    // `:param` routes are matched by the router, so the listed pattern — not the
+    // concrete URL — is what the allow-list is compared against.
+    assert.equal((await app.inject({ method: "GET", url: "/v1/jobs/job-1", headers: publicHost })).statusCode, 200);
+
+    // A listed host does not open an unlisted route.
+    const unlisted = await app.inject({ method: "GET", url: "/v1/backups", headers: publicHost });
+    assert.equal(unlisted.statusCode, 401);
+    assert.equal(unlisted.json().code, "unauthorized");
+
+    // An unlisted host does not open a listed route. This is the check that
+    // would be lost by simply deleting the Host rule instead of narrowing it.
+    assert.equal((await app.inject({ method: "GET", url: "/v1/dashboard", headers: otherHost })).statusCode, 401);
+    assert.equal((await app.inject({ method: "GET", url: "/v1/dashboard" })).statusCode, 401);
+
+    // A write on a publicly readable path is still a write.
+    assert.equal((await app.inject({ method: "POST", url: "/v1/dashboard", headers: publicHost })).statusCode, 401);
+
+    // And the token keeps working everywhere, including on the public route.
+    assert.equal((await app.inject({
+      method: "GET", url: "/v1/dashboard", headers: { ...publicHost, authorization: "Bearer s3cret" }
+    })).statusCode, 200);
+    assert.equal((await app.inject({
+      method: "POST", url: "/v1/dashboard", headers: { ...publicHost, authorization: "Bearer s3cret" }
+    })).statusCode, 200);
+  } finally {
+    await app.close();
+  }
+});
+
+test("without a public host list nothing is readable without a token", async () => {
+  // The code default. A deployment that forgets `RAI_PUBLIC_HOSTS` must fail
+  // closed rather than fall through to the origin rules, which would otherwise
+  // accept a request whose Host happens to be a loopback name.
+  const app = Fastify();
+  installLocalRequestSecurity(app, {
+    apiPort: 8787,
+    apiToken: "s3cret",
+    publicReadRoutes: new Set(["/v1/dashboard"])
+  });
+  app.get("/v1/dashboard", async () => ({ ok: true }));
+  try {
+    assert.equal((await app.inject({
+      method: "GET", url: "/v1/dashboard", headers: { host: "rai.example" }
+    })).statusCode, 401);
+    assert.equal((await app.inject({
+      method: "GET", url: "/v1/dashboard", headers: { host: "localhost:8787" }
+    })).statusCode, 401);
   } finally {
     await app.close();
   }
