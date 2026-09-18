@@ -109,13 +109,15 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     "/v1/dashboard",
     databaseReady,
   );
-  const backups = useRemote<BackupDto[]>("/v1/backups");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState(() => readApiToken());
   const [tokenSaved, setTokenSaved] = useState(() => readApiToken().length > 0);
   const [revealToken, setRevealToken] = useState(false);
+  // 匿名只读模式下浏览器没有令牌，/v1/backups 必然 401；没有令牌就不发这个请求，
+  // 免得设置页在"本来就看不了备份"的情况下挂一个红色错误块。
+  const backups = useRemote<BackupDto[]>("/v1/backups", tokenSaved);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -390,7 +392,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
         <div className="panel-heading">
           <div>
             <h2>API 访问令牌</h2>
-            <p>浏览器直接访问云端 API 需要令牌；iOS App 由壳自动注入，无需在此配置。</p>
+            <p>浏览数据无需令牌；保存、导入、删除等修改操作需要令牌。iOS App 由壳自动注入，无需在此配置。</p>
           </div>
           <code>{tokenSaved ? "已配置" : "未配置"}</code>
         </div>
@@ -555,7 +557,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
             ))}
           </div>
         ) : (
-          <p className="empty-inline">还没有本地备份。</p>
+          <p className="empty-inline">{tokenSaved ? "还没有本地备份。" : "配置令牌后可查看、下载与恢复备份。"}</p>
         )}
       </section>
 
