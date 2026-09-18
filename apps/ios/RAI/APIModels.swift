@@ -435,6 +435,22 @@ struct WeekSummary: Codable {
     let workoutCount: Int
     let goalDistanceKm: Double?
     let goalProgressFraction: Double?
+    let averageSpeedKmPerHour: Double?
+    let averagePaceSecondsPerKm: Double?
+    let averageHeartRateBpm: Double?
+    let heartRateZones: [HeartRateZoneSummary]?
+    let paceZones: [HeartRateZoneSummary]?
+
+    /// nil arrays mean an older API/cache, while [] means a successful empty aggregation.
+    var hasWeeklyActivityStatistics: Bool {
+        heartRateZones != nil && paceZones != nil
+    }
+
+    var remainingDistanceKm: Double? {
+        guard let goalDistanceKm, goalDistanceKm.isFinite, goalDistanceKm > 0,
+              distanceKm.isFinite else { return nil }
+        return max(0, goalDistanceKm - distanceKm)
+    }
 }
 
 struct WeekDailyPoint: Codable, Identifiable {

@@ -9,11 +9,13 @@ struct TechRing: View {
     let label: String
     var tint: Color = TechColor.cyan
     var size: CGFloat = 88
+    var detail: String? = nil
     var body: some View {
         if typeSize >= .xxxLarge && (!value.isEmpty || !label.isEmpty) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(value).font(.title2.weight(.semibold)).monospacedDigit().foregroundStyle(TechColor.ink)
                 Text(label).font(.caption).foregroundStyle(TechColor.muted)
+                if let detail { Text(detail).font(.caption).foregroundStyle(TechColor.cyan) }
                 TechProgressBar(fraction: progress, tint: tint).accessibilityHidden(true)
             }.accessibilityElement(children: .combine)
         } else { graphic }
@@ -29,9 +31,13 @@ struct TechRing: View {
                 Text(value).font(.system(.title3, design: .default).weight(.semibold).monospacedDigit())
                     .foregroundStyle(TechColor.ink).lineLimit(1).minimumScaleFactor(0.6)
                 Text(label).font(.caption2).foregroundStyle(TechColor.muted)
+                if let detail {
+                    Text(detail).font(.caption2).monospacedDigit().foregroundStyle(TechColor.cyan)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
             }.padding(10)
         }.frame(width: size, height: size)
-            .accessibilityElement(children: .ignore).accessibilityLabel("\(label) \(value)")
+            .accessibilityElement(children: .ignore).accessibilityLabel("\(label) \(value)" + (detail.map { "，" + $0 } ?? ""))
     }
 }
 

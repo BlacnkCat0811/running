@@ -124,6 +124,17 @@ tech_views = pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_
 home_actions = pathlib.Path("apps/ios/RAI/Skins/Technology/TechSyncStatus.swift").read_text()
 assert 'id: "today.week"' in home_actions and 'id: "today.body"' in home_actions
 assert "TodayDetailLinks" not in tech_views
+week_view = tech_views.split("struct TechWeekOverviewView", 1)[1].split("struct TechBodyMetricsView", 1)[0]
+assert 'title: "本周计划"' not in week_view
+for field in ["averageSpeedKmPerHour", "averagePaceSecondsPerKm", "averageHeartRateBpm", "heartRateZones", "paceZones"]:
+    assert f"data.week.{field}" in week_view, f"Weekly metric not rendered: {field}"
+assert week_view.count("TechZoneDistributionPanel(") == 2
+assert "native.today ?? initialData" in week_view, "Week detail must observe refreshed data instead of a navigation snapshot"
+assert ".task { await native.refreshAll(requestHandshake: false) }" in week_view
+assert ".refreshable { await native.refreshAll() }" in week_view
+assert "data.week.hasWeeklyActivityStatistics" in week_view, "Missing API fields must not be shown as empty distributions"
+assert "detail: remainingDistanceLabel" in week_view
+assert "data.week.remainingDistanceKm" in week_view
 
 # Today redesign: keep the three real measurements and a distinct linear ability visual.
 today_widgets = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTodayRecovery.swift").read_text()
@@ -171,7 +182,7 @@ field_anchors = {
     "weekStructure": "data.weekStructure.",
     "race": "data.race.",
     "injuryFlags": "summary.injuryFlags",
-    "weekPlan": "data.weekPlan",
+    "weekPlan": "ForEach(native.today?.weekPlan ?? [])",  # 用户移除本周活动内课表，计划页继续承载
     "recentPlanExecution": "data.recentPlanExecution",
     "phase": "data.phase",
     "lock": "data.lock.",

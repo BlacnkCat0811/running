@@ -404,11 +404,89 @@ struct TechTodayView: View {
             TechTodayRecoveryMetrics(recovery: data.recovery)
         }
     }
+}
 
+struct TechZoneDistributionPanel: View {
+    let title: String
+    let period: String
+    let zones: [HeartRateZoneSummary]
+    var isPace = false
+
+    private func zoneName(_ zone: String) -> String {
+        guard isPace else { return nativeHeartRateZone(zone) }
+        switch zone {
+        case "easy": return "轻松区"
+        case "marathon": return "马拉松区"
+        case "lactate_threshold": return "阈值区"
+        case "anaerobic_endurance": return "无氧耐力区"
+        case "sprint": return "冲刺区"
+        default: return "未分类"
+        }
+    }
+
+    private func zoneColor(_ zone: String) -> Color {
+        guard isPace else { return techHeartRateZoneColor(zone) }
+        switch zone {
+        case "easy": return TechColor.cyan
+        case "marathon": return TechColor.green
+        case "lactate_threshold": return TechColor.yellow
+        case "anaerobic_endurance": return TechColor.blue
+        case "sprint": return TechColor.coral
+        default: return TechColor.muted
+        }
+    }
+
+    var body: some View {
+        TechPanel {
+            VStack(alignment: .leading, spacing: 9) {
+                TechSectionHeader(title: title, trailing: period)
+                if zones.isEmpty {
+                    Text(isPace ? "没有满足覆盖率要求的配速数据" : "没有满足覆盖率要求的心率数据")
+                        .font(.footnote)
+                        .foregroundStyle(TechColor.muted)
+                } else {
+                    HStack(spacing: 16) {
+                        Chart(zones) { zone in
+                            SectorMark(angle: .value("时长", zone.durationSeconds), innerRadius: .ratio(0.78), angularInset: 2)
+                                .foregroundStyle(zoneColor(zone.zone))
+                        }
+                        .chartBackground { _ in
+                            VStack(spacing: 5) {
+                                Text("总时长").font(.caption2).foregroundStyle(TechColor.muted)
+                                Text(techDuration(zones.reduce(0) { $0 + $1.durationSeconds }))
+                                    .font(.caption.weight(.semibold)).foregroundStyle(TechColor.ink)
+                            }
+                        }.frame(width: 110, height: 110)
+                        VStack(spacing: 10) {
+                            ForEach(zones) { zone in
+                                HStack(spacing: 6) {
+                                    Circle().fill(zoneColor(zone.zone)).frame(width: 6, height: 6)
+                                    Text(zoneName(zone.zone)).font(.caption2)
+                                    Spacer(minLength: 2)
+                                    Text(nativePercent(zone.fraction)).font(.caption.monospacedDigit())
+                                }.foregroundStyle(TechColor.muted)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 struct TechWeekOverviewView: View {
-    let data: MobileTodayResponse
+    @Environment(NativeAppModel.self) private var native
+    private let initialData: MobileTodayResponse
+
+    init(data: MobileTodayResponse) {
+        initialData = data
+    }
+
+    private var data: MobileTodayResponse { native.today ?? initialData }
+
+    private var remainingDistanceLabel: String {
+        data.week.remainingDistanceKm.map { "剩余 \(nativeKilometers($0))" } ?? "未设置周目标"
+    }
 
     var body: some View {
         ScrollView {
@@ -423,7 +501,8 @@ struct TechWeekOverviewView: View {
                 TechPanel {
                     HStack(spacing: 24) {
                         TechRing(progress: data.week.goalProgressFraction ?? 0,
-                                 value: nativeNumber(data.week.distanceKm), label: "km", size: 124)
+                                 value: nativeKilometers(data.week.distanceKm), label: "已完成", size: 144,
+                                 detail: remainingDistanceLabel)
                         VStack(alignment: .leading, spacing: 14) {
                             Text("周进度").font(.subheadline).foregroundStyle(TechColor.muted)
                             Text(nativePercent(data.week.goalProgressFraction))
@@ -447,6 +526,30 @@ struct TechWeekOverviewView: View {
                     TechMetricTile(title: "本周总时长", value: techDuration(data.week.durationSeconds))
                     TechMetricTile(title: "本周跑步次数", value: "\(data.week.workoutCount) 次")
                 }
+                if native.isRefreshing {
+                    ProgressView("正在更新本周统计").font(.caption).tint(TechColor.cyan)
+                }
+                if let error = native.errorMessage {
+                    Text(error).font(.caption).foregroundStyle(TechColor.yellow)
+                }
+                if !data.week.hasWeeklyActivityStatistics {
+                    TechPanel {
+                        Label("本周统计尚未更新", systemImage: "arrow.clockwise")
+                            .font(.subheadline.weight(.semibold))
+                        Text(native.isOffline
+                             ? "当前显示旧缓存。连接服务后下拉刷新，即可读取本周统计。"
+                             : "当前接口或缓存尚未包含新增周统计。请更新并重启手机连接的 API 服务，再下拉刷新；仅重新安装 iOS App 不会更新服务端。")
+                            .font(.caption).foregroundStyle(TechColor.muted)
+                    }
+                } else {
+                    TechMetricGrid(minimum: 140) {
+                        TechMetricTile(title: "平均速度", value: data.week.averageSpeedKmPerHour.map { nativeNumber($0) + " km/h" } ?? "暂无有效数据")
+                        TechMetricTile(title: "平均配速", value: data.week.averagePaceSecondsPerKm.map { techPace($0) + "/km" } ?? "暂无有效数据")
+                        TechMetricTile(title: "平均心率", value: data.week.averageHeartRateBpm.map { nativeNumber($0, digits: 0) + " bpm" } ?? "暂无心率记录")
+                    }
+                }
+                Text("本周全部跑步汇总；平均心率按有记录的跑步时长加权。区间占比按有效区间时长计算。")
+                    .font(.caption2).foregroundStyle(TechColor.muted)
                 TechPanel {
                     TechSectionHeader(title: "每日明细", trailing: "公里 / 次数")
                     ForEach(data.weekDaily) { day in
@@ -483,31 +586,13 @@ struct TechWeekOverviewView: View {
                     }
                 }
 
-                TechPanel {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TechSectionHeader(title: "本周计划", trailing: "完成情况")
-                        ForEach(data.weekPlan) { day in
-                            HStack(spacing: 9) {
-                                Image(systemName: day.completedWorkoutId == nil ? "square" : "checkmark.square.fill")
-                                    .foregroundStyle(day.completedWorkoutId == nil ? TechColor.grid : TechColor.green)
-                                Text(nativeWeekday(day.localDate))
-                                    .font(.caption.weight(.semibold))
-                                    .frame(width: 35, alignment: .leading)
-                                Text(day.title)
-                                    .font(.subheadline.weight(.bold))
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(day.kind == "rest" ? "休息" : nativeKilometers(day.distanceKm))
-                                    .font(.caption.weight(.semibold).monospacedDigit())
-                                    .foregroundStyle(day.distanceKm > 0 ? TechColor.green : TechColor.muted)
-                            }
-                            .padding(.vertical, 6)
-                            .overlay(alignment: .bottom) {
-                                Rectangle().fill(TechColor.grid.opacity(0.55)).frame(height: 1)
-                            }
-                        }
-                    }
+                if data.week.hasWeeklyActivityStatistics {
+                    TechZoneDistributionPanel(title: "心率区间分布", period: "本周总活动",
+                                              zones: data.week.heartRateZones ?? [])
+                    TechZoneDistributionPanel(title: "配速区间分布", period: "本周总活动",
+                                              zones: data.week.paceZones ?? [], isPace: true)
                 }
+
             }
             .padding(.horizontal, TechMetrics.pageHorizontal)
             .padding(.vertical, TechMetrics.pageVertical)
@@ -516,6 +601,8 @@ struct TechWeekOverviewView: View {
         .background(TechColor.background)
         .foregroundStyle(TechColor.ink)
         .scrollIndicators(.hidden)
+        .task { await native.refreshAll(requestHandshake: false) }
+        .refreshable { await native.refreshAll() }
         .techNavigation("本周活动")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -2160,40 +2247,7 @@ struct TechAnalysisView: View {
     }
 
     private func heartRatePanel(_ zones: [HeartRateZoneSummary]) -> some View {
-        TechPanel {
-            VStack(alignment: .leading, spacing: 9) {
-                TechSectionHeader(title: "心率区间分布", trailing: "近 28 天")
-                if zones.isEmpty {
-                    Text("没有满足覆盖率要求的心率数据")
-                        .font(.footnote)
-                        .foregroundStyle(TechColor.muted)
-                } else {
-                    HStack(spacing: 16) {
-                        Chart(zones) { zone in
-                            SectorMark(angle: .value("时长", zone.durationSeconds), innerRadius: .ratio(0.78), angularInset: 2)
-                                .foregroundStyle(techHeartRateZoneColor(zone.zone))
-                        }
-                        .chartBackground { _ in
-                            VStack(spacing: 5) {
-                                Text("总时长").font(.caption2).foregroundStyle(TechColor.muted)
-                                Text(techDuration(zones.reduce(0) { $0 + $1.durationSeconds }))
-                                    .font(.caption.weight(.semibold)).foregroundStyle(TechColor.ink)
-                            }
-                        }.frame(width: 110, height: 110)
-                        VStack(spacing: 10) {
-                            ForEach(zones) { zone in
-                                HStack(spacing: 6) {
-                                    Circle().fill(techHeartRateZoneColor(zone.zone)).frame(width: 6, height: 6)
-                                    Text(nativeHeartRateZone(zone.zone)).font(.caption2)
-                                    Spacer(minLength: 2)
-                                    Text(nativePercent(zone.fraction)).font(.caption.monospacedDigit())
-                                }.foregroundStyle(TechColor.muted)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        TechZoneDistributionPanel(title: "心率区间分布", period: "近 28 天", zones: zones)
     }
 
     private func recordsPanel(_ records: PersonalRecords) -> some View {

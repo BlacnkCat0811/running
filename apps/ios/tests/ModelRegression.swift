@@ -103,6 +103,31 @@ final class RequestLog: @unchecked Sendable {
             precondition(condition(), name)
             print("PASS: \(name)")
         }
+        let legacyWeekJSON = """
+        {"periodStart":"2026-09-14","periodEnd":"2026-09-20","distanceKm":11.1,
+         "durationSeconds":3600,"workoutCount":2,"goalDistanceKm":30,"goalProgressFraction":0.37}
+        """
+        let oldWeek = try JSONDecoder().decode(WeekSummary.self, from: Data(legacyWeekJSON.utf8))
+        check(!oldWeek.hasWeeklyActivityStatistics, "old API/cache is not mistaken for empty weekly statistics")
+        check(abs((oldWeek.remainingDistanceKm ?? 0) - 18.9) < 0.0001, "weekly ring shows 18.9 km remaining after 11.1 of 30 km")
+        let emptyWeekJSON = legacyWeekJSON.replacingOccurrences(of: "}", with: ",\"heartRateZones\":[],\"paceZones\":[]}")
+        let emptyWeek = try JSONDecoder().decode(WeekSummary.self, from: Data(emptyWeekJSON.utf8))
+        check(emptyWeek.hasWeeklyActivityStatistics, "new API empty zones remain a valid no-data result")
+        let fullWeekJSON = legacyWeekJSON.replacingOccurrences(of: "}", with: """
+        ,"averageSpeedKmPerHour":11.1,"averagePaceSecondsPerKm":324.324,"averageHeartRateBpm":145,
+        "heartRateZones":[{"zone":"aerobic_base","durationSeconds":3000,"fraction":1}],
+        "paceZones":[{"zone":"easy","durationSeconds":3600,"fraction":1}]}
+        """)
+        let fullWeek = try JSONDecoder().decode(WeekSummary.self, from: Data(fullWeekJSON.utf8))
+        check(fullWeek.hasWeeklyActivityStatistics && fullWeek.averageSpeedKmPerHour == 11.1 &&
+              fullWeek.averagePaceSecondsPerKm == 324.324 && fullWeek.averageHeartRateBpm == 145 &&
+              fullWeek.heartRateZones?.first?.durationSeconds == 3000 && fullWeek.paceZones?.first?.durationSeconds == 3600,
+              "native decoder preserves all five weekly statistics from the API")
+        for (goal, remaining) in [("10", Optional(0.0)), ("null", nil), ("0", nil)] {
+            let json = legacyWeekJSON.replacingOccurrences(of: "\"goalDistanceKm\":30", with: "\"goalDistanceKm\":\(goal)")
+            let week = try JSONDecoder().decode(WeekSummary.self, from: Data(json.utf8))
+            check(week.remainingDistanceKm == remaining, "remaining distance handles exceeded or absent goal \(goal)")
+        }
         for (state, expected) in [("recovered", "恢复良好"), ("reduced", "恢复不足"), ("depleted", "需要休息"), ("unknown", "基线不足")] {
             let json = "{\"state\":\"\(state)\",\"lastNightSleepMinutes\":420,\"note\":\"test\"}"
             let recovery = try JSONDecoder().decode(MobileRecoveryBreakdown.self, from: Data(json.utf8))
