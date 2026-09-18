@@ -1,12 +1,15 @@
 # RAI 原生 iOS 应用
 
-## 外观皮肤
+## 界面视觉
 
-在 **设置 → 外观皮肤** 中切换「清新像素」和「冰蓝科技」，选择立即生效并保存在本机，重新启动仍保留。已有安装和首次安装默认继续使用清新像素。
+原生端只有一套视觉：**冰蓝科技**（`RAI/Skins/Technology`，深色底 + 青蓝强调色 + 圆角卡片 + 自适应重排）。设置里的「外观皮肤」一栏、皮肤选择器，以及像素主题（`PixelTheme` / `PixelIcons` / `PixelCharts` / `PixelTabBar`）与像素页面已于 **2026-09-18 整体删除**。
 
-科技风位于 `RAI/Skins/Technology`，使用独立的颜色、卡片、图表、导航及页面布局，复用现有 `NativeAppModel` 和 API。切换不修改服务配置、健康同步、训练记录或目标。原 Pixel 主题、图标和图表文件保持不变。
+- 页面实现在 `RAI/Skins/Technology/TechViews.swift`；颜色与尺寸令牌在 `TechTheme.swift`，颜色只准从令牌层取，不内联色值。
+- `RAI/NativeViews.swift` 只剩根壳：`NativeTab` 五入口 + `NativeRootView`（底栏 + 页面分流）。
+- 启动即固定深色（`.preferredColorScheme(.dark)`）与青蓝强调色。旧安装残留的 `rai.appearance.skin` 键不再被读取，**不需要迁移**；数据、服务配置、健康同步与训练记录都不受影响。
+- 所有操作仍复用既有 `NativeAppModel` 和 API，不修改服务配置、健康同步、训练记录或目标。
 
-科技风的实现范围、设计映射及验收进度见 `design/TECHNOLOGY_SKIN.md`。2026-09-10 已完成 Xcode 模拟器及真机 SDK 编译、科技皮肤视觉修正、51 张原生截图复查和 10 项 UI 回归；构建、UI 回归结果及与设计图的必要差异见 [`验收记录`](design/acceptance/2026-09-09/visual-review/README.md)。不将 AI 设计图中的示例数字、失真文字或虚构图表当作产品数据。
+实现范围、设计映射及验收进度见 `design/TECHNOLOGY_SKIN.md`。2026-09-10 已完成 Xcode 模拟器及真机 SDK 编译、视觉修正、51 张原生截图复查和 10 项 UI 回归；构建、UI 回归结果及与设计图的必要差异见 [`验收记录`](design/acceptance/2026-09-09/visual-review/README.md)。不将 AI 设计图中的示例数字、失真文字或虚构图表当作产品数据。
 
 完整六张 4K 设计图、浏览页及生成提示词已提交在 [`design/technology-v1`](design/technology-v1/index.html)。
 
@@ -75,7 +78,7 @@ bash apps/ios/tests/run-visual-tests.sh
 ```
 
 - `run-visual-tests.sh` 自己构建 workspace 并把 App 装到 `RAI Technology Acceptance` 模拟器；临时验收服务只监听 8792–8794，且只写数据库副本。追加 `-only-testing:VisualAcceptance/VisualAcceptance/test02Workouts` 之类的参数可以只跑单个用例（注意 `-only-testing` 要用 `target/class/method` 三段式，写错会「Executed 0 tests」并假通过）。
-- `run-model-tests.sh` 现在跑七组：模型/API/DTO、Keychain、坐标转换（WGS-84→GCJ-02）、课表映射与回执匹配、ServerSession、健康同步取消、科技风展示逻辑（峰谷抽样 / 同步状态优先级 / 判定图标 / 颜色对比度 / 契约字段覆盖 / 闭集枚举接线）。这些都是纯逻辑或纯数学、零依赖，CI 也会跑。其中「契约字段覆盖」会解析 `MobileTodayResponse` 的字段全集，要求每个字段都有展示锚点或写明例外的理由 —— 契约加字段而无人展示时会自己变红。
+- `run-model-tests.sh` 现在跑七组：模型/API/DTO（含 `NativeFormat.swift` 的格式化函数，2026-09-18 起纳入）、Keychain、坐标转换（WGS-84→GCJ-02）、课表映射与回执匹配、ServerSession、健康同步取消、展示逻辑（峰谷抽样 / 同步状态优先级 / 判定图标 / 颜色对比度 / 契约字段覆盖 / 闭集枚举接线）。这些都是纯逻辑或纯数学、零依赖，CI 也会跑。其中「契约字段覆盖」会解析 `MobileTodayResponse` 的字段全集，要求每个字段都有展示锚点或写明例外的理由 —— 契约加字段而无人展示时会自己变红（2026-09-18 现状：`recentPlanExecution` 尚无展示位，该断言因此是红的，属既有缺口、未被绕过，见 `design/TECHNOLOGY_SKIN.md`）。
 - `run-coordinate-sdk-check.sh` 用高德 SDK 的 `AMapCoordinateConvert(_, .GPS)` 现场对拍本地实现（实测境内差 0.02–0.6 m、境外原样），是坐标逻辑的权威复核；因为要链接 iOS 静态框架，只能在 macOS + 模拟器上跑，不进 CI。
 - 本机 CocoaPods 1.17.0 已装在 gem 目录但没有加入 PATH（`pod: command not found`）：`export PATH="$(gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/{print $2}'):$PATH"`，或 `gem install cocoapods`。`Pods/` 不入库（`.gitignore` 已忽略，`pod install` 按 `Podfile.lock` 还原）；只有 `Podfile` / `Podfile.lock` 变动时才需要重新 `pod install`。
 - 若 `xcrun` 报 `unable to find utility "simctl"`，说明命令行工具指向 CommandLineTools：`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`（或 `sudo xcode-select -s /Applications/Xcode.app`）。
@@ -96,23 +99,19 @@ bash apps/ios/tests/run-visual-tests.sh
 - 新的同步、目标修改和锁课需要联网；已加载的首页、训练和分析可在服务暂时不可用时继续查看。
 - 手机不会在离线状态下生成或确认新的训练安排。健康同步仅在前台执行，不注册或调度后台同步任务。
 
-## 原生页面与移动端 API 映射
+## 原生 UI 结构与移动端 API 映射
 
-## 清新像素风原生 UI
-
-原生页面现已使用统一的清新像素视觉系统，代码位于：
-
-- `RAI/PixelTheme.swift`：纸白、墨绿、主绿、薄荷、青色、珊瑚和黄色令牌，以及点阵背景、卡片、指标格、按钮和分段器。
-- `RAI/PixelIcons.swift`：像素跑者和训练类型图标。
-- `RAI/PixelCharts.swift`：活动圆环、周柱图、月度柱图、阶梯趋势图。
-- `RAI/PixelTabBar.swift`：今日、训练、计划、分析、设置五入口底部导航。
-- `RAI/NativeViews.swift`：原生页面和所有业务状态的像素化呈现。
+- `RAI/Skins/Technology/TechTheme.swift`：颜色/尺寸令牌，以及背景、面板、徽标、分段器、按钮、进度条、指标格、空态、底栏等基础组件。
+- `RAI/Skins/Technology/TechViews.swift`：今日、训练列表与训练行、训练详情、训练计划、分析与设置五个入口的页面实现。
+- `RAI/Skins/Technology/` 其余文件：图表（`TechCharts` / `TechSeriesChart` / `TechPlotData`）、路线（`TechRouteView`）、睡眠与恢复（`TechSleepHistory` / `TechTodayRecovery`）、同步呈现（`TechSyncStatus` / `TechSyncPresentation`）、闭集枚举映射（`TechEnumPresentation`）、布局与返回手势等。
+- `RAI/NativeViews.swift`：只有 `NativeTab`（五入口模型）与 `NativeRootView`（底栏 + 入口分流）。
+- `RAI/NativeFormat.swift`：数值、单位、日期与会话名的共享格式化，纯 Foundation（不 import SwiftUI），因此同时进 `run-model-tests.sh` 的秒级门禁。
 
 页面功能保持由现有 `NativeAppModel`、`RaiAPIClient`、`CacheStore` 和
 `HealthKitSync` 提供：在线时 API 优先，离线时展示缓存；所有新增写操作仍要求
 联网，手机端不复制服务端评分或聚合逻辑。
 
-视觉改造覆盖：
+覆盖范围：
 
 - 首次连接和服务发现页
 - 今日 Hero 卡、活动圆环、跑力、判断、恢复、周计划、比赛目标和最近训练
@@ -121,10 +120,12 @@ bash apps/ios/tests/run-visual-tests.sh
 - 统计、12 周趋势、跑力评估、洞察和个人纪录
 - 服务连接、HealthKit 只读同步、缓存管理和版本信息
 
-像素组件同时提供文本状态和 VoiceOver 描述，不依赖颜色单独表达完成、
-过期、错误或离线状态；底部导航在开启 Reduce Motion 时关闭切换动画。
+组件同时提供文本状态和 VoiceOver 描述，不依赖颜色单独表达完成、
+过期、错误或离线状态。
 
-设计稿 `apps/ios/design/ios-app-design.html`（清新像素风 v3）与原生 SwiftUI 五个入口共用以下后端端点（契约类型在 `packages/api-contracts`，OpenAPI 已登记）：
+端点是共享的：`apps/ios/design/ios-app-design.html`（清新像素风 v3）现在是 **Web iOS 壳界面**
+（`?raiShell=ios`）的设计参考，与原生 App 的视觉无关；原生五个入口与该壳共用以下后端端点（契约类型在
+`packages/api-contracts`，OpenAPI 已登记）：
 
 | 设计稿页面 | 端点 | 数据说明 |
 | --- | --- | --- |
@@ -149,7 +150,7 @@ bash apps/ios/tests/run-visual-tests.sh
 
 - 训练判定根据可用负荷、恢复信号及训练结构生成，不再仅因导入日期早于今天而显示过期或替换判定。缺少恢复样本或个人基线时仍给出保守建议。
 - 恢复卡读取最近一次主睡眠所在日期的睡眠、HRV、静息心率，并使用该日期之前的个人基线；说明中保留证据日期。`recovered`、`reduced`、`depleted` 分别显示恢复良好、恢复不足、需要休息，不生成不存在的恢复分数。
-- 两套皮肤的路线中，科技皮肤显示高德底图 + 轨迹及起终点（见下节），像素皮肤为无底图的纯 Canvas 轨迹。两者均支持恢复完整路线视野（fit-to-route）和切换离线轨迹。
+- 训练详情路线（`TechRouteView`）默认画无底图的纯 Canvas 轨迹；同意地图隐私后可切换为高德底图 + 轨迹及起终点（见下节）。两种视图都支持恢复完整路线视野（fit-to-route）。
 - 心率时序采用深色卡片、青色曲线与渐变填充，显示训练平均心率、样本最大心率及分钟/秒时间轴。API 抽样保留峰值，平均心率继续使用训练汇总值。
 
 以上变更需要同时更新 API 服务和 iOS 应用；离线缓存会在下次成功刷新后更新。
@@ -171,9 +172,9 @@ open RAI.xcworkspace
 
 - 首次打开 App 会先显示一页说明（含高德隐私政策链接），可选择「同意并启用地图」或「仅使用离线轨迹」；选择记在 `UserDefaults` 的 `rai.privacy.amap.state`。
 - 只有同意后才设置 Key 并调用 `MAMapView.updatePrivacyShow/Agree`，而且必须在任何 `MAMapView` 实例化之前完成（`MapPrivacy.configureIfAgreed()` 在 `AppModel.init` 中执行）。
-- 未同意时科技皮肤的训练详情只显示离线轨迹，**不会创建 `MAMapView`**；菜单里改为「启用高德底图」入口。
-- 两套皮肤的「设置」里都有「地图底图」一栏，可随时开启或关闭（关闭后不影响离线轨迹）。
-- 说明页刻意使用系统配色，不做皮肤化：它同时服务两套皮肤。
+- 未同意时训练详情只显示离线轨迹，**不会创建 `MAMapView`**；菜单里改为「启用高德底图」入口。
+- 「设置」里有「地图底图」一栏，可随时开启或关闭（关闭后不影响离线轨迹）。
+- 说明页刻意使用系统配色，不做皮肤化：它挂在 App 根部，与页面视觉解耦，改版页面时不应该被迫同步改它。
 
 #### 高德 Key 配置（不明文入库）
 
@@ -197,7 +198,7 @@ pod install                                                    # 打印「已注
 #### 坐标系约定（WGS-84 存储 / GCJ-02 显示）
 
 - 数据库、API、离线轨迹画布全部保留 **WGS-84** 原始 GPS 坐标（Apple Watch 记录坐标系），不做任何转换。
-- 仅科技皮肤的高德底图（`TechRouteView` 的 `RouteMapContainer`）在渲染前经 `GCJ02.fromWGS84`（`RAI/CoordinateConversion.swift`）转 GCJ-02：高德底图与 `convert(_:toPointTo:)` 均以 GCJ-02 为准，直接绘制 WGS-84 会整体偏移约 300–600 m。
+- 高德底图（`TechRouteView` 的 `RouteMapContainer`）在渲染前经 `GCJ02.fromWGS84`（`RAI/CoordinateConversion.swift`）转 GCJ-02：高德底图与 `convert(_:toPointTo:)` 均以 GCJ-02 为准，直接绘制 WGS-84 会整体偏移约 300–600 m。
 - 境外坐标（中国大陆范围外）原样通过，不做转换。
 - 该算法已与 coordtransform 公开参考值锚定（差异 < 0.1 m）并抽样验证北上广深四城偏移量（479–625 m，方向与量级符合 GCJ-02 特征）。
 - 不使用高德 `MATraceManager` 轨迹纠偏：绑路会吸附/歪曲真实 GPS，与"真实轨迹"的产品定位冲突。

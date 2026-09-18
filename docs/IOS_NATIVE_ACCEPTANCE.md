@@ -4,6 +4,13 @@
 Xcode 26.5 / iOS Simulator 26.5 完成无签名 Debug 构建；真实 iPhone、
 HealthKit 权限和视觉截图验收仍需在连接设备上完成。
 
+> 🔴 **后续变更（2026-09-18）**：本表是 2026-09-08 的状态快照，未回溯改写。
+> 其中 P2 / P3 / P6 引用的 `PixelTheme.swift`、`PixelTabBar.swift`、`PixelCharts.swift`
+> 及 `NativeViews.swift` 里的像素页面已全部删除，原生端收敛为冰蓝科技一套视觉、
+> 不再有皮肤切换；`NativeViews.swift` 现在只剩 `NativeTab` + `NativeRootView`。
+> 迁移范围与验证见 `apps/ios/README.md`「界面视觉」与
+> `apps/ios/design/TECHNOLOGY_SKIN.md` 末节。
+
 ## 代码与接口检查
 
 | 阶段 | 场景 | 结果 | 证据/备注 |

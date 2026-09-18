@@ -26,7 +26,7 @@
 
 选择 React Native 的主要原因不是 UI 复用，而是 iOS 可直接复用已经验证过的 TypeScript 特征和评分核心。HealthKit 读取通过小型原生 Swift module 完成。
 
-> 现状注记（2026-09）：完整 RN / SwiftUI 产品尚未立项。为验证 HealthKit 增量同步与真机体验，先行交付 `apps/ios` Xcode 调试壳——WKWebView 直接加载 Web（含像素风 iOS 界面），原生 Swift 只负责 HealthKit 只读导出 ZIP 并上传到 API；TypeScript 特征/评分核心完全复用，不在设备上重复实现。
+> 现状注记（2026-09）：完整 RN 产品尚未立项。为验证 HealthKit 增量同步与真机体验，先行交付 `apps/ios`——生产路径是 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅只读导出 ZIP 并上传到 API；WKWebView 壳（直接加载 Web 的像素风 iOS 界面，`?raiShell=ios`）保留为开发期回退路径。TypeScript 特征/评分核心完全复用，不在设备上重复实现。
 
 如果未来坚持使用纯 SwiftUI，则不能直接复用 TypeScript 实现。仍可复用 canonical contract、模型配置和黄金测试向量，但需要实现一个 Swift scorer。不存在同时满足“纯 SwiftUI、完全离线、零重复实现”的技术方案；这一取舍应在开始移动端前明确。
 
@@ -343,7 +343,7 @@ API schema 由 OpenAPI 描述，HTTP DTO 统一定义在 `packages/api-contracts
 
 ## 7. 原生客户端范围
 
-当前产品范围（以仓库根目录 `AGENTS.md` 为准）为浏览器 Web、本地 API 及所需共享包。例外：`apps/ios/` 是经产品决策授权的 Xcode 调试宿主——WKWebView 加载现有 Web（像素风 iOS 界面），仅做 HealthKit **只读**同步（增量导出 ZIP）并上传到本地 API，不在设备上重写评分核心、不做 HealthKit 写入与后台 delivery；配套的 `/v1/mobile/*` 聚合端点与周目标（`GET/PUT /v1/mobile/goals`）随 Web 产品一同交付。原生 React Native / 纯 SwiftUI 移动端产品与原生桌面端仍属范围外，需单独产品决策后方可立项。
+当前产品范围（以仓库根目录 `AGENTS.md` 为准）为浏览器 Web、本地 API 及所需共享包。例外：`apps/ios/` 是经产品决策授权的本地 Xcode 宿主——生产路径为 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅做**只读**同步（增量导出 ZIP）并上传到本地 API，不在设备上重写评分核心、不做 HealthKit 写入与后台 delivery；此前的 WKWebView 壳（加载现有 Web 的像素风 iOS 界面，`?raiShell=ios`）保留为开发期回退路径。配套的 `/v1/mobile/*` 聚合端点与周目标（`GET/PUT /v1/mobile/goals`）随 Web 产品一同交付。原生 React Native / 纯 SwiftUI 移动端产品与原生桌面端仍属范围外，需单独产品决策后方可立项。
 
 ## 8. 模型和数据版本
 

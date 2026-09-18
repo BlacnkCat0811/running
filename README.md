@@ -1,9 +1,9 @@
 # RAI Running Ability Intelligence
 
 RAI 是一个本地优先的个人跑步能力分析项目：解析 Apple 健康导出（XML/GPX/HealthKit ZIP），
-建立可复现的数据分析层，在 Web 端验证评分模型，并通过 iOS 调试壳（WKWebView + HealthKit
-只读同步）在 iPhone 上使用同一套 TypeScript 评分核心与像素风界面。桌面 Web、本地 API、
-共享 TypeScript 包与 `apps/ios` 调试壳构成当前交付范围（边界见 `AGENTS.md`）。
+建立可复现的数据分析层，在 Web 端验证评分模型，并通过 iOS 应用（SwiftUI 原生界面 +
+HealthKit 只读同步）在 iPhone 上使用同一套 TypeScript 评分核心。桌面 Web、本地 API、
+共享 TypeScript 包与 `apps/ios` 构成当前交付范围（边界见 `AGENTS.md`）。
 
 ## 当前已完成
 
@@ -41,9 +41,9 @@ RAI 是一个本地优先的个人跑步能力分析项目：解析 Apple 健康
 - 移动端周目标、周计划与锁课使用独立控制库 `var/rai-control.sqlite` 保存 revision 和历史；旧 `mobile-goals.json` 仅用于一次性迁移并保留备份；
 - 模型激活 shadow gate `rai-shadow-gate-v1`（`model_validation_gates`）：空值率、CA 均值/P95、
   最终 TA、状态变化率、恢复饱和率等验收阈值，失败保持 incumbent 不变；
-- iOS 调试壳（`apps/ios`，Xcode/WKWebView）：HealthKit 只读增量导出 ZIP → 上传 →
-  服务端导入，配合清新像素风界面与 `/v1/mobile/today|statistics|trends|goals|lock`
-  移动端聚合 API（窗口按数据最新日期锚定）；
+- iOS 应用（`apps/ios`，SwiftUI 原生界面 + HealthKit 只读同步）：增量导出 ZIP → 上传 →
+  服务端导入，界面为冰蓝科技单一视觉（2026-09-18 起），配合
+  `/v1/mobile/today|statistics|trends|goals|lock` 移动端聚合 API（窗口按数据最新日期锚定）；
 - 公网生产部署（Nginx 托管静态 + `/v1` 透传 Bearer + systemd 定时一致性备份）。
 
 真实健康数据和生成的 SQLite 已由 `.gitignore` 排除。
@@ -221,7 +221,7 @@ packages/
 apps/
   api/                       Fastify 本地 API、移动端聚合、重算 worker 与安全导入切换
   web/                       React / Vite Web（桌面工作台 + iOS 壳像素界面）
-  ios/                       Xcode 调试壳：WKWebView + HealthKit 只读增量同步
+  ios/                       原生 iOS 应用：SwiftUI 界面 + HealthKit 只读增量同步
 scripts/                     版本/构建检查、局域网调试（dev-device）、移动端冒烟等
 research/                    CatBoost 训练与 ONNX 导出（Python，仅研究用）
 deploy/                      Nginx / systemd / env 模板与 Ubuntu 部署说明
