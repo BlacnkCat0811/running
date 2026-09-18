@@ -46,7 +46,10 @@ xcrun swiftc "${swiftc_flags[@]}" "$tmp/CoordinateConversion.swift" \
 # `PlanReceiptMatcher.swift` 必须留在编译列表里：它决定「哪几天真的上了表」，是纯
 # Foundation，也是唯一能钉住这条规则的通道 —— 规则住在 `WorkoutKitBridge` 里时只能
 # 配合 iOS SDK 编译，于是错了也没有任何通道能发现。
-xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/WorkoutPlanMapper.swift \
+# Run mapping regressions with the app's default actor isolation, not just the
+# host compiler default, so direct isolated-function transforms stay covered.
+xcrun swiftc "${swiftc_flags[@]}" -swift-version 5 -default-isolation MainActor \
+  apps/ios/RAI/APIModels.swift apps/ios/RAI/WorkoutPlanMapper.swift \
   apps/ios/RAI/PlanReceiptMatcher.swift \
   apps/ios/tests/WorkoutPlanMapperRegression.swift -o "$tmp/workout-plan-tests"
 "$tmp/workout-plan-tests"

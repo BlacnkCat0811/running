@@ -113,7 +113,10 @@ echo "类型检查 ${#keep[@]} 个文件（已跳过 $((${#files[@]} - ${#keep[@
 # and every macro expansion reports "produced malformed response". macOS 与 iOS
 # 目标同样受影响（实测 2026-09-13）；关掉这层包装后 36 文件 0 error。
 set +e
+# Match the app target: checking only the compiler's nonisolated default misses
+# actor-isolation diagnostics that appear in Xcode builds.
 output=$(xcrun -sdk iphonesimulator swiftc -typecheck -disable-sandbox \
+  -swift-version 5 -default-isolation MainActor \
   -target x86_64-apple-ios17.0-simulator \
   "${keep[@]}" "$tmp/SandboxStubs.swift" 2>&1)
 status=$?

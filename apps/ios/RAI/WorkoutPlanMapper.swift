@@ -219,7 +219,10 @@ enum WorkoutPlanMapper {
         minute: Int = 0
     ) -> PlannedWorkout? {
         guard day.executable, day.kind != "rest", let structure = day.structure else { return nil }
-        let blocks = structure.blocks.prefix(maxBlocks).compactMap(block(from:))
+        // Keep calls inside closures inheriting this context's actor isolation.
+        // Passing an isolated method directly as a transform can lose that
+        // isolation under the app's default MainActor build setting.
+        let blocks = structure.blocks.prefix(maxBlocks).compactMap { block(from: $0) }
         // WorkoutKit requires at least one block, and a workout whose every step
         // is "just run" is an empty shell rather than a prescription.
         guard !blocks.isEmpty, blocks.contains(where: { block in block.steps.contains(where: \.hasTarget) }) else {
@@ -230,9 +233,9 @@ enum WorkoutPlanMapper {
             displayName: displayName(for: day),
             hour: min(23, max(0, hour)),
             minute: min(59, max(0, minute)),
-            warmup: structure.warmup.flatMap(step(from:)),
+            warmup: structure.warmup.flatMap { step(from: $0) },
             blocks: blocks,
-            cooldown: structure.cooldown.flatMap(step(from:))
+            cooldown: structure.cooldown.flatMap { step(from: $0) }
         )
     }
 
@@ -449,7 +452,7 @@ enum WorkoutPlanMapper {
     }
 
     private static func block(from raw: MobileIntervalBlock) -> PlannedWorkout.Block? {
-        let steps = raw.steps.prefix(maxStepsPerBlock).compactMap(step(from:))
+        let steps = raw.steps.prefix(maxStepsPerBlock).compactMap { step(from: $0) }
         guard !steps.isEmpty else { return nil }
         return PlannedWorkout.Block(iterations: min(maxIterations, max(1, raw.iterations)), steps: steps)
     }
