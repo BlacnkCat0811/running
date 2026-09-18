@@ -129,10 +129,12 @@ final class VisualAcceptance: XCTestCase {
         // Collapse after recording the metrics so all time-series remain easy to inspect.
         scrollTo(metrics); metrics.tap()
         scrollTo(app.staticTexts["训练时序"]); capture("02-detail-series")
-        // The segments panel answers "did I run the session I was given" and sits
-        // above the kilometre split; both are recorded.
-        scrollTo(app.staticTexts["课表分段"]); capture("02-detail-segments")
-        scrollTo(app.staticTexts["公里分段"]); capture("02-detail-splits")
+        let (seriesData, _) = try await URLSession.shared.data(from: URL(string: server + "/v1/workouts/" + id + "/series")!)
+        let series = try JSONSerialization.jsonObject(with: seriesData) as? [String: Any]
+        let hasSteps = series?["hasMeasuredWorkoutSteps"] as? Bool == true && !(series?["segments"] as? [[String: Any]] ?? []).isEmpty
+        scrollTo(app.staticTexts[hasSteps ? "课表分段" : "公里分段"])
+        XCTAssertFalse(app.staticTexts[hasSteps ? "公里分段" : "课表分段"].exists)
+        capture("02-detail-segments")
         scrollTo(app.staticTexts["质量与模型"]); capture("02-detail-quality")
         scrollTo(app.staticTexts["训练负荷"]); capture("02-detail-load")
         scrollTo(app.buttons["负荷依据"]); app.buttons["负荷依据"].tap()
@@ -278,8 +280,8 @@ final class VisualAcceptance: XCTestCase {
         app.buttons["workout.series.next"].tap()
         XCTAssertTrue(app.staticTexts["workout.series.selection"].waitForExistence(timeout: 5))
         capture("13-series-inspection")
-        scrollTo(app.staticTexts["课表分段"])
-        XCTAssertTrue(app.staticTexts["课表分段"].isHittable)
+        scrollTo(app.staticTexts["质量与模型"])
+        XCTAssertTrue(app.staticTexts["质量与模型"].isHittable)
         capture("13-series-page-scroll")
     }
 

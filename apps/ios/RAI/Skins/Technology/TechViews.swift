@@ -1170,8 +1170,9 @@ struct TechWorkoutDetailView: View {
                     if let series = native.selectedSeries { seriesPanel(series) }
                     if let series = native.selectedSeries, series.showsPlanSegments {
                         segmentPanel(series)
+                    } else {
+                        splitPanel(native.selectedSeries?.splits ?? [])
                     }
-                    splitPanel(native.selectedSeries?.splits ?? [])
                     qualityPanel(detail)
                     if let load = detail.trainingLoad { trainingLoadPanel(load) }
                     if let zones = detail.zoneSummary { zonePanel(zones) }
@@ -1308,56 +1309,61 @@ struct TechWorkoutDetailView: View {
         }
     }
 
-    /// Recorded structured-workout steps, shown above the kilometre splits.
-    /// Manual laps and inferred plan replay do not qualify; the caller requires
-    /// measured-step provenance and nonempty segments from the API.
-    private func segmentPanel(_ series: WorkoutSeriesResponse?) -> some View {
-        let segments = series?.segments ?? []
-        return TechPanel {
-            VStack(alignment: .leading, spacing: 4) {
-                TechSectionHeader(title: "课表分段", trailing: "\(segments.count) 段")
-                if let note = series?.segmentNote {
-                    Text(note)
-                        .font(.footnote)
-                        .foregroundStyle(TechColor.muted)
-                }
-                if let plan = series?.segmentPlan {
-                    Text("匹配 \(plan.localDate) 第 \(plan.revision) 版课表（\(nativeSessionName(plan.kind))）· 可解释 \(nativePercent(plan.explainedFraction))")
-                        .font(.caption2.weight(.bold).monospacedDigit())
-                        .foregroundStyle(TechColor.cyan)
-                }
-                if segments.isEmpty {
-                    Text("没有课表分段，可参考下方公里分段")
-                        .font(.footnote)
-                        .foregroundStyle(TechColor.muted)
-                } else {
-                    ForEach(segments) { segment in
-                        VStack(alignment: .leading, spacing: 2) {
-                            TechAdaptiveStack(spacing: 8) {
-                                Text(segment.label)
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(minWidth: 64, alignment: .leading)
-                                Spacer()
-                                Text(nativeDuration(segment.durationSeconds))
-                                Text(nativeKilometers(segment.distanceMeters / 1000))
-                                Text("\(techPace(segment.averagePaceSecondsPerKm))/km")
-                                Text(segment.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
-                            }
-                            .font(.caption.weight(.bold).monospacedDigit())
-                            .foregroundStyle(TechColor.muted)
-                            HStack(spacing: 10) {
-                                Text(nativeSegmentDose(segment))
-                                if let alert = nativeSegmentAlert(segment) { Text(alert) }
-                            }
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(TechColor.cyan)
-                        }
-                        .padding(.vertical, 7)
-                        .overlay(alignment: .bottom) { Rectangle().fill(TechColor.grid).frame(height: 1) }
+    private func segmentPanel(_ series: WorkoutSeriesResponse) -> some View {
+        let segments = series.segments
+        return VStack(alignment: .leading, spacing: 12) {
+            TechSectionHeader(title: "课表分段", trailing: "\(segments.count) 段")
+            ForEach(segments) { segment in
+                TechPanel(tint: segmentTint(segment.purpose).opacity(0.5)) {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(String(format: "%02d", segment.index))
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(segmentTint(segment.purpose))
+                        Text(segment.label).font(.headline).foregroundStyle(TechColor.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(nativeSegmentDose(segment))
+                        if let alert = nativeSegmentAlert(segment) { Text(alert) }
+                    }
+                    .font(.caption).foregroundStyle(segmentTint(segment.purpose))
+                    .fixedSize(horizontal: false, vertical: true)
+                    LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 12) {
+                        segmentMetric("实际距离", value: nativeKilometers(segment.distanceMeters / 1000))
+                        segmentMetric("用时", value: nativeDuration(segment.durationSeconds))
+                        segmentMetric("平均配速", value: "\(techPace(segment.averagePaceSecondsPerKm))/km")
+                        segmentMetric("平均心率", value: segment.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
                     }
                 }
             }
+            if series.segmentPlan != nil || series.segmentNote != nil {
+                DisclosureGroup("分段来源") {
+                    if let note = series.segmentNote { Text(note) }
+                    if let plan = series.segmentPlan {
+                        Text("匹配 \(plan.localDate) 第 \(plan.revision) 版课表（\(nativeSessionName(plan.kind))）· 可解释 \(nativePercent(plan.explainedFraction))")
+                    }
+                }
+                .font(.caption).foregroundStyle(TechColor.muted).tint(TechColor.cyan)
+            }
         }
+    }
+
+    private func segmentTint(_ purpose: String) -> Color {
+        switch purpose {
+        case "warmup": return TechColor.yellow
+        case "work": return TechColor.cyan
+        case "recovery", "cooldown": return TechColor.green
+        default: return TechColor.muted
+        }
+    }
+
+    private func segmentMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption2).foregroundStyle(TechColor.muted)
+            Text(value).font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(TechColor.ink).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func splitPanel(_ splits: [WorkoutSplit]) -> some View {

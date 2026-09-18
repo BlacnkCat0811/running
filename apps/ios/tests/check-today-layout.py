@@ -24,6 +24,7 @@ print("Today layout checks passed (order, paired summaries, sync visibility, rec
 
 assert views.count('.frame(height: typeSize >= .xxxLarge ? nil : 112, alignment: .topLeading)') == 2
 assert 'if let series = native.selectedSeries, series.showsPlanSegments' in views
+assert 'segmentPanel(series)\n                    } else {\n                        splitPanel(native.selectedSeries?.splits ?? [])' in views, "Plan steps and kilometer splits are mutually exclusive"
 chart = (root / "TechSeriesChart.swift").read_text()
 assert '.chartXAxisLabel("min")' in chart and '.chartXAxisLabel("秒")' not in chart
 assert 'point.offsetSeconds / 60' in chart and 'selected.offsetSeconds / 60' in chart
