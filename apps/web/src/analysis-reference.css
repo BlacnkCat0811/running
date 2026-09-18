@@ -80,6 +80,17 @@
   .zones-page .zone-profile-strip { display: none; }
   .zones-page .zone-confidence-note { margin: 0; border-radius: 0; }
   .zones-page .zone-confidence-note { display: none; }
+  /* Kept visible, unlike the confidence note and the profile strip: this layer hides both of
+     those, so this line is the only remaining caveat that the pace zones are not measured
+     thresholds. Style it to match the rest of the layer instead of dropping it. */
+  .zones-page .zone-source-note {
+    margin: 0 0 8px;
+    padding: 5px 9px;
+    border-left: 3px solid var(--analysis-line);
+    background: #f1f7f1;
+    font-size: 11px;
+    line-height: 1.5;
+  }
 
   .zones-page .zone-tables {
     display: grid;

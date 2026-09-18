@@ -659,7 +659,8 @@
   /* Fidelity pass: preserve the reference hierarchy on every desktop page. */
   .zones-page .zone-profile-strip { display: none; }
   .zones-page .zone-tables { margin-top: 0; }
-  .zones-page .zone-confidence-note + .zone-tables { margin-top: 12px; }
+  .zones-page .zone-confidence-note + .zone-tables,
+  .zones-page .zone-source-note + .zone-tables { margin-top: 12px; }
   .zones-page .zone-table-panel { padding-bottom: 8px; }
   .zones-page .zone-table-panel .panel-heading p { display: none; }
   .zones-page .zone-table {
