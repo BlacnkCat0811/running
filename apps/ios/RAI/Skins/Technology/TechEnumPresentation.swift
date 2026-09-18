@@ -10,7 +10,8 @@
 /// （`MobileDayPhase` / `MobileStimulusMatch` / `MobileRaceDistance`），所以这里不直出
 /// 原始契约值：把 `need_sync`、`too_hard`、`half_marathon` 原样打到界面上，不是"保留
 /// 细节"，是展示层没跟上契约。出现域外值意味着契约新增了枚举而这里没改，落「未知…」
-/// 比落机器码更早暴露问题（像素风对应的 `native*Name` 走另一套策略：default 直出原值）。
+/// 比落机器码更早暴露问题。（2026-09-18 删除像素皮肤后这里成了唯一的展示映射；
+/// 契约改枚举时只需同步本文件，闸门会逐值断言。）
 
 /// `MobileDayPhase` = need_sync | morning_open | locked | post_run | rest_done
 func techPhaseName(_ phase: String) -> String {

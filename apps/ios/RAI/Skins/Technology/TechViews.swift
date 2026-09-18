@@ -2337,9 +2337,6 @@ struct TechNativeSettingsView: View {
                     Label("上次同步 \(nativeDate(ISO8601DateFormatter().string(from: date)))", systemImage: "clock")
                         .font(.caption).foregroundStyle(TechColor.muted).padding(.horizontal, 4)
                 }
-                settingsLink("外观皮肤", subtitle: "冰蓝科技 / 清新像素", icon: "paintpalette", tint: TechColor.cyan) {
-                    AppSkinPicker()
-                }
                 settingsLink("地图底图",
                              subtitle: mapEnabled ? "高德已启用" : "仅离线轨迹",
                              icon: "map", tint: TechColor.cyan) {

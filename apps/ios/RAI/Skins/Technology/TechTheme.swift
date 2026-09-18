@@ -2,7 +2,8 @@
 import SwiftUI
 import UIKit
 
-/// Ice-blue skin tokens. The legacy PixelColor palette is deliberately independent.
+/// Ice-blue skin tokens. 2026-09-18 删除像素皮肤后，这是原生端唯一的配色令牌层：
+/// 共享组件只准从这里取色，不得内联色值（同事故 18067cb 的教训）。
 enum TechColor {
     static let background = Color(red: 4/255, green: 12/255, blue: 20/255)
     static let paper = Color(red: 10/255, green: 23/255, blue: 36/255)

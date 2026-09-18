@@ -33,7 +33,6 @@ final class AppModel {
 @main
 struct RAIApp: App {
     #if os(iOS)
-    @AppStorage(AppSkin.storageKey) private var rawSkin = AppSkin.pixel.rawValue
     @AppStorage(MapPrivacy.storageKey) private var mapPrivacyState = MapPrivacy.State.ask.rawValue
     @Environment(\.scenePhase) private var scenePhase
     #endif
@@ -48,9 +47,10 @@ struct RAIApp: App {
                 .environment(model.discovery)
                 #if os(iOS)
                 .environment(model.native)
-                .environment(\.appSkin, AppSkin.resolve(rawSkin))
-                .preferredColorScheme(AppSkin.resolve(rawSkin) == .technology ? .dark : nil)
-                .tint(AppSkin.resolve(rawSkin) == .technology ? TechColor.cyan : nil)
+                // 2026-09-18 起原生端只有冰蓝科技一套视觉：配色与强调色固定，
+                // 不再从 `rai.appearance.skin` 读取（存量键留着不影响，无人读它）。
+                .preferredColorScheme(.dark)
+                .tint(TechColor.cyan)
                 #endif
                 #if os(iOS)
                 .overlay {

@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 func nativeKilometers(_ value: Double?) -> String {
     guard let value, value.isFinite else { return "--" }
@@ -124,6 +123,24 @@ func nativeSessionName(_ value: String) -> String {
     case "rest": return "休息"
     case "completed": return "已完成"
     default: return value.isEmpty ? "未知训练" : value
+    }
+}
+
+/// SF Symbol for a session type.
+///
+/// 只返回符号名，按皮肤无关的方式表达训练类型；`TechIconBox` 决定它的颜色与底。
+/// 2026-09-18 从 `PixelIcons.swift` 迁来 —— 那个文件整体属像素皮肤，已删除。
+func nativeSessionSymbol(_ value: String, indoor: Bool = false) -> String {
+    if indoor { return "figure.run.circle.fill" }
+    switch value {
+    case "easy", "recovery": return "figure.run"
+    case "steady": return "figure.walk.motion"
+    case "tempo": return "speedometer"
+    case "interval": return "bolt.fill"
+    case "long_run": return "figure.run.circle"
+    case "race": return "flag.fill"
+    case "rest": return "bed.double.fill"
+    default: return "figure.run"
     }
 }
 
@@ -267,45 +284,15 @@ func nativeStimulusName(_ value: String) -> String {
     }
 }
 
-// 下面三个映射对应**闭集**契约（TS 里的联合类型），所以穷举之后 default 只剩
-// "契约新增了枚举而这里没跟上"这一种情况 —— 兜底给中文，不把 `half_marathon`
-// 这类机器码漏到界面上。策略同 `nativeHeartRateZone` 的 default（该函数同样拒绝直出
-// 英文原值）。
+// 闭集契约（TS 里的联合类型）的展示映射现在只住在科技皮肤：
+// `techPhaseName` / `techStimulusMatchName` / `techRaceDistanceName`
+// （`Skins/Technology/TechEnumPresentation.swift`），由
+// `run-tech-presentation-tests.sh` 对着契约逐值断言。原生像素皮肤那三份副本随皮肤
+// 一并删除（2026-09-18）。
 // 与 `nativeSessionName` / `nativeStimulusName` 的 default 直出不同：那两个的输入契约
-// 是开放 string，原值本身可能就是有意义的业务标签，直出不算说谎。
-// `nativeDayPhaseName` / `nativeStimulusMatchName` 的值域随
-// `MobileDayPhase` / `MobileStimulusMatch` 变化 —— 改契约枚举时同步这里，
-// `run-tech-presentation-tests.sh` 会按契约值逐个断言。
-func nativeDayPhaseName(_ value: String) -> String {
-    switch value {
-    case "need_sync": return "待同步"
-    case "morning_open": return "晨间开放"
-    case "locked": return "已锁定"
-    case "post_run": return "已训练"
-    case "rest_done": return "休息日完成"
-    default: return "未知阶段"
-    }
-}
-
-func nativeStimulusMatchName(_ value: String) -> String {
-    switch value {
-    case "aligned": return "匹配"
-    case "too_hard": return "偏强"
-    case "too_easy": return "偏弱"
-    case "unknown": return "未知"
-    default: return "未知"
-    }
-}
-
-func nativeRaceDistanceName(_ value: String) -> String {
-    switch value {
-    case "five_k": return "5 公里"
-    case "ten_k": return "10 公里"
-    case "half_marathon": return "半马"
-    default: return "距离"
-    }
-}
-
+// 是开放 string，原值本身可能就是有意义的业务标签，直出不算说谎；闭集映射必须穷举，
+// 否则 `half_marathon` 这类机器码会漏到界面上。策略同 `nativeHeartRateZone` 的 default
+// （该函数同样拒绝直出英文原值）。
 func nativeHeartRateZone(_ value: String) -> String {
     switch nativeHeartRateZoneKey(value) {
     case "recovery": return "恢复区"
@@ -316,17 +303,6 @@ func nativeHeartRateZone(_ value: String) -> String {
     default:
         // API 重建或升级期间可能返回新的非标准值，避免把英文原值直接展示给用户。
         return value.range(of: #"[A-Za-z]"#, options: .regularExpression) != nil ? "心率区间" : value
-    }
-}
-
-func nativeHeartRateZoneColor(_ value: String) -> Color {
-    switch nativeHeartRateZoneKey(value) {
-    case "anaerobic": return PixelColor.coral
-    case "lactate_threshold": return PixelColor.yellow
-    case "aerobic_power": return PixelColor.green
-    case "aerobic_base": return PixelColor.leaf
-    case "recovery": return PixelColor.grid
-    default: return PixelColor.grid
     }
 }
 
@@ -354,16 +330,6 @@ private func nativeHeartRateZoneKey(_ value: String) -> String {
     }
 }
 
-func nativeToneColor(_ tone: String) -> Color {
-    switch tone {
-    case "green", "positive", "recovered", "ready": return PixelColor.green
-    case "red", "warning", "stale", "injury": return PixelColor.coral
-    case "blue", "info": return PixelColor.cyan
-    case "yellow", "caution", "insufficient": return PixelColor.yellow
-    default: return PixelColor.yellow
-    }
-}
-
 func nativeStatusName(_ value: String?) -> String {
     switch value {
     case "eligible": return "纳入分析"
@@ -388,5 +354,7 @@ func nativeStatusName(_ value: String?) -> String {
 }
 
 // `calibrationNeedsAttention(_:)` 已移到 `CalibrationState.swift`：那边是纯
-// Foundation，能被 `run-model-tests.sh` 在 macOS 上编译并钉住；本文件依赖
+// Foundation，能被 `run-model-tests.sh` 在 macOS 上编译并钉住；本文件当时依赖
 // `PixelColor`（iOS 专属），判据留在这里就永远进不了秒级闸门。
+// 2026-09-18 删除像素皮肤后本文件已无 iOS 专属依赖（不再 `import SwiftUI`），
+// 因此**本文件自身**也进了同一扇闸门 —— 见 `run-model-tests.sh` 的编译列表。

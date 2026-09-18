@@ -1,7 +1,4 @@
 import SwiftUI
-#if os(iOS)
-import UIKit
-#endif
 
 struct RootView: View {
     @Environment(ServerSession.self) private var session
@@ -179,119 +176,17 @@ struct RootView: View {
 }
 
 struct SetupView: View {
-    #if os(iOS)
-    @Environment(\.appSkin) private var skin
-    #endif
-    @State private var draftURL = ""
-    @State private var draftToken = ""
     @Environment(ServerSession.self) private var session
     @Environment(ServerDiscovery.self) private var discovery
 
     var body: some View {
         #if os(iOS)
-        Group {
-            if skin == .technology { TechSetupView() }
-            else { pixelBody }
-        }
-            .onAppear {
-                draftURL = session.serverURLString
-                draftToken = session.apiToken
-            }
+        // 2026-09-18 起原生端只有冰蓝科技一套视觉，首次连接页固定走 TechSetupView。
+        // 像素皮肤的 `pixelBody`、`serverPlaceholder` 与两个草稿状态一并删除：
+        // `TechSetupView` 自己管草稿，外层再存一份只会是一份没人读的副本。
+        TechSetupView()
         #else
         formBody
-        #endif
-    }
-
-    #if os(iOS)
-    private var pixelBody: some View {
-        @Bindable var session = session
-        return ZStack {
-            PixelBackground()
-            ScrollView {
-                VStack(alignment: .leading, spacing: PixelMetrics.sectionSpacing) {
-                    PixelPageHeader(title: "连接 RAI") {
-                        PixelBadge(title: session.isReachable ? "在线" : "待连接", color: session.isReachable ? PixelColor.green : PixelColor.coral, fill: session.isReachable ? PixelColor.mint : PixelColor.paleCoral)
-                    }
-                    PixelPanel {
-                        VStack(alignment: .leading, spacing: 11) {
-                            PixelSectionHeader(title: "服务连接", trailing: session.isReachable ? "已连接" : "未连接", trailingColor: session.isReachable ? PixelColor.green : PixelColor.coral)
-                            PixelField("服务器地址") {
-                                TextField(serverPlaceholder, text: Binding(
-                                    get: { draftURL },
-                                    set: {
-                                        draftURL = $0
-                                        draftToken = Keychain.loadToken(for: $0)
-                                    }
-                                ))
-                                    .keyboardType(.URL)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .submitLabel(.done)
-                            }
-                            PixelField("API Token（云端部署时填写）") {
-                                SecureField("可选", text: $draftToken)
-                            }
-                            PixelPrimaryButton(title: "检查连接", systemName: "network", isDisabled: draftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                                session.serverURLString = draftURL
-                                session.apiToken = draftToken
-                                Task { await session.probe() }
-                            }
-                            if let error = session.lastError {
-                                Text(error)
-                                    .font(.caption)
-                                    .foregroundStyle(PixelColor.coral)
-                            }
-                        }
-                    }
-                    if !discovery.candidates.isEmpty {
-                        PixelPanel(tint: PixelColor.cyan) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                PixelSectionHeader(title: "发现的 RAI 服务", trailing: "Bonjour", trailingColor: PixelColor.cyan)
-                                ForEach(discovery.candidates, id: \.absoluteString) { url in
-                                    Button(url.absoluteString) {
-                                        draftURL = url.absoluteString
-                                        draftToken = Keychain.loadToken(for: url.absoluteString)
-                                    }
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(PixelColor.cyan)
-                                }
-                            }
-                        }
-                    }
-                    PixelPanel {
-                        VStack(alignment: .leading, spacing: 7) {
-                            PixelSectionHeader(title: "使用说明")
-                            Text("1. 虚拟机运行 npm run dev:device，把打印的局域网地址填到上面。")
-                            Text("2. VMware 请使用桥接网络；不要填写 127.0.0.1。")
-                            Text("3. 连接后在首页同步 Apple 健康，数据会进入当前 RAI API。")
-                            Text("4. 手机端只展示结果，不运行 Node.js、评分核心或服务端 SQLite。")
-                        }
-                        .font(.footnote)
-                        .foregroundStyle(PixelColor.muted)
-                    }
-                    Button("打开健康权限") {
-                        if let url = URL(string: "x-apple-health://") {
-                            UIApplication.shared.open(url)
-                        }
-                    }
-                    .font(.footnote.weight(.heavy))
-                    .foregroundStyle(PixelColor.cyan)
-                    .frame(maxWidth: .infinity)
-                    AppSkinPicker()
-                }
-                .padding(.horizontal, PixelMetrics.pageHorizontal)
-                .padding(.vertical, PixelMetrics.pageVertical)
-            }
-        }
-        .toolbar(.hidden, for: .navigationBar)
-    }
-    #endif
-
-    private var serverPlaceholder: String {
-        #if DEBUG
-        return "http://192.168.x.x:5173"
-        #else
-        return "https://rai.example.com"
         #endif
     }
 

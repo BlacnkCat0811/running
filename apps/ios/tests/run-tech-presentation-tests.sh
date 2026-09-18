@@ -110,7 +110,7 @@ checks += 1
 # 「有数据、有契约、没有展示位」是这套皮肤上真实复发过的一类缺陷：改版今日页时把
 # 「训练阶段 / 比赛目标 / 最近一次训练反馈」整块删掉（`HEAD:bd1ee25` 的
 # `TechViews.swift:382-434`），5 个字段就失去入口 —— 契约还在给值、服务端还在算、
-# 像素风还在显示，而脚本、类型检查、UI 回归全绿，只是科技风用户永远看不到。
+# 界面上却没入口，而脚本、类型检查、UI 回归全绿。
 #
 # 2026-09-17 的初版只钉了当时出事的那 5 个字段，那是"门禁宽度 < 结论宽度"：报告说的
 # 是"契约字段都有入口"，断言只守 5 个 —— 删掉 `injuryFlags` 整块照样全绿（实测）。
@@ -146,9 +146,9 @@ assert len(contract_fields) >= 20, (
     f"MobileTodayResponse parsed as {len(contract_fields)} fields, which is implausibly few — "
     "the regex stopped matching the contract, it did not shrink.")
 
-# 每个字段在科技风里的取值锚点。注意 `injuryFlags` 的锚点在**二级页**
-# （今日页「身体指标」链接 → `TechBodyMetricsView`），今日页本身不渲染它；
-# 像素风是今日页内联。这是有意的信息降级，不是缺失。
+# 每个字段的取值锚点。注意 `injuryFlags` 的锚点在**二级页**
+# （今日页「身体指标」链接 → `TechBodyMetricsView`），今日页本身不渲染它。
+# 这是有意的信息降级，不是缺失。
 field_anchors = {
     "generatedAt": "today.generatedAt",
     "latestDataDate": "today.latestDataDate",
@@ -193,7 +193,7 @@ for field, anchor in sorted(field_anchors.items()):
         "Payload present + contract present + no display slot is exactly the 2026-09-17 "
         "regression, so this gate fails instead of passing quietly.")
 
-# 闭集枚举：契约里的每个取值都必须在两套皮肤的映射函数里出现，多一个少一个都算红。
+# 闭集枚举：契约里的每个取值都必须在展示映射里出现，多一个少一个都算红。
 # 域外值会以机器码形式漏到界面上（`need_sync` / `too_hard` / `half_marathon`）。
 def mapped_cases(source, function_name):
     """取 `func x(_ y: String) -> String` 的 switch 分支值；函数体以顶格 `}` 收尾。"""
@@ -202,16 +202,15 @@ def mapped_cases(source, function_name):
     return set(re.findall(r'case "([^"]+)": return', found.group(1)))
 
 tech_enums = pathlib.Path("apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift").read_text()
-native_format = pathlib.Path("apps/ios/RAI/NativeFormat.swift").read_text()
 
 enum_checks = 0
 for enum_name, values, mappings in [
     ("MobileDayPhase", ["need_sync", "morning_open", "locked", "post_run", "rest_done"],
-     [("techPhaseName", tech_enums), ("nativeDayPhaseName", native_format)]),
+     [("techPhaseName", tech_enums)]),
     ("MobileStimulusMatch", ["aligned", "too_hard", "too_easy", "unknown"],
-     [("techStimulusMatchName", tech_enums), ("nativeStimulusMatchName", native_format)]),
+     [("techStimulusMatchName", tech_enums)]),
     ("MobileRaceDistance", ["five_k", "ten_k", "half_marathon"],
-     [("techRaceDistanceName", tech_enums), ("nativeRaceDistanceName", native_format)]),
+     [("techRaceDistanceName", tech_enums)]),
 ]:
     expected = set(values)
     for function_name, source in mappings:
@@ -228,12 +227,11 @@ print(f"Field coverage: {len(field_anchors)}/{len(contract_fields)} MobileTodayR
       f"({', '.join(sorted(metadata_only))}); {enum_checks} closed-set enum mappings cover every "
       f"contract value.")
 
-# 映射函数存在 ≠ 映射函数被调用：把 `nativeDayPhaseName(data.phase)` 改回直出
+# 映射函数存在 ≠ 映射函数被调用：把 `techPhaseName(data.phase)` 改回直出
 # `data.phase` 时，上面的穷举断言依然全绿（函数体一个字没动），用户却重新看到
 # `morning_open`。所以再钉一层"展示层确实经过映射"。这里只断言函数被调用，不锁
 # 参数写法 —— 防的是直出回归，不是合法重构。
 for file_name, functions in [
-    ("apps/ios/RAI/NativeViews.swift", ["nativeDayPhaseName(", "nativeStimulusMatchName(", "nativeRaceDistanceName("]),
     ("apps/ios/RAI/Skins/Technology/TechViews.swift", ["techPhaseName(", "techStimulusMatchName(", "techRaceDistanceName("]),
 ]:
     body = pathlib.Path(file_name).read_text()
@@ -241,5 +239,5 @@ for file_name, functions in [
         assert call in body, (
             f"{file_name} no longer calls {call} — the mapping exists but the view bypasses it, "
             "which is how contract machine codes reach the screen.")
-print("Enum mappings are wired into both skins' views, not just defined.")
+print("Enum mappings are wired into the view, not just defined.")
 PY

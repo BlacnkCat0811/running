@@ -2,14 +2,18 @@
 # 沙箱内可用的 iOS 层类型检查。
 #
 # 为什么需要它：本机没有 CocoaPods（`pod` 不存在），`apps/ios/Pods` 不入库，因此
-# xcodebuild 与完整 target 编译都跑不起来。但高德 SDK 只被 4 个文件直接依赖，
-# 其余 Swift 源码可以配一个替身模块用 `swiftc -typecheck` 真实检查——两个皮肤的
-# 视图文件（NativeViews.swift / TechViews.swift）都在覆盖范围内，这是它们唯一
-# 能被验证的通道。
+# xcodebuild 与完整 target 编译都跑不起来。但高德 SDK 只被 3 个文件直接依赖，
+# 其余 Swift 源码可以配一个替身模块用 `swiftc -typecheck` 真实检查——原生页面
+# （`NativeViews.swift` 的根壳与 `Skins/Technology/TechViews.swift`）都在覆盖范围内，
+# 这是它们唯一能被验证的通道。
 #
-# 覆盖率：apps/ios/RAI/** 除下列 4 个文件外的全部源码。
-#   MapPrivacy.swift / MapPrivacyConsentView.swift / RAIApp.swift / TechRouteView.swift
-# 这 4 个文件只依赖高德 SDK，改动它们时必须在装有 Pods 的机器上编译。
+# 覆盖率：apps/ios/RAI/** 除下列 3 个文件外的全部源码。
+#   MapPrivacy.swift / RAIApp.swift / TechRouteView.swift
+# 这 3 个文件依赖高德 SDK（AMapFoundationKit / MAMapKit），改动它们时必须在装有
+# Pods 的机器上编译。
+# `MapPrivacyConsentView.swift` 曾与它们一起排除，但它其实不依赖高德 SDK（只用
+# `MapPrivacy` 的静态接口），2026-09-18 删除像素皮肤时顺手纳入覆盖 —— 那一次它改过
+# 用户可见文案，而"改过的文件不在门禁里"正是这轮要消灭的那类缺口。
 #
 # 用法：bash apps/ios/tests/typecheck-ios.sh
 set -euo pipefail
@@ -85,7 +89,7 @@ fi
 keep=()
 for file in "${files[@]}"; do
   case "$file" in
-    *MapPrivacy.swift|*MapPrivacyConsentView.swift|*RAIApp.swift|*TechRouteView.swift) continue ;;
+    *MapPrivacy.swift|*RAIApp.swift|*TechRouteView.swift) continue ;;
   esac
   keep+=("$file")
 done

@@ -20,8 +20,12 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/NativeAppModel.swift > 
 # 告警框，曾被写成 `!= "ready"`（契约里不存在的取值）而对任何输入恒为真。它住在
 # `NativeFormat.swift` 时因为拖进 `PixelColor`（iOS 专属）而进不了这扇闸门，于是
 # 错了也无人报警 —— 抽出来就是为了让它在这里被钉住。
+# `NativeFormat.swift` 自 2026-09-18 起也进这扇闸门：删除像素皮肤后它已无 iOS 专属
+# 依赖（不再 import SwiftUI、不再引用 PixelColor），而它是页面数值/单位/日期的唯一
+# 归一化点 —— 编不过或改坏了，整机展示全错，没有理由让它在闸门外。
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
-  apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/CalibrationState.swift \
+  apps/ios/RAI/NativeFormat.swift apps/ios/RAI/WorkoutPlanMapper.swift \
+  apps/ios/RAI/CalibrationState.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
 "$tmp/model-tests"

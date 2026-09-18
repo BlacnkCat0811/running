@@ -9,12 +9,11 @@ import Foundation
 /// 为什么必须是白名单：项目规则是「未知一律归未知/拒绝，不许归通过」。此前的实现
 /// 是一份手写的「坏值」名单（`red`/`warning`/`stale`/`injury`/`yellow`/`caution`/
 /// `insufficient`），名单**外**的取值会被渲染成对勾 —— 一个未知 tone 因此会显示成
-/// 「一切正常」。名单还和 `techToneColor` 各存一份、需要一起维护。改成白名单后既与
-/// 像素风 `NativeViews.swift`（`tone == "green" ? checkmark : exclamation`）同判据，
-/// 也让「新增一个域外 tone」的默认行为变成失败关闭。
+/// 「一切正常」。名单还和 `techToneColor` 各存一份、需要一起维护。改成白名单后
+/// 「新增一个域外 tone」的默认行为变成失败关闭。
 ///
 /// 这个文件刻意保持纯 Foundation：它要进 `run-model-tests.sh` 的本地快闸门，
-/// 就不能拖进 SwiftUI/`PixelColor`（`NativeFormat.swift` 正是因此进不去）。
+/// 就不能拖进 SwiftUI。
 func verdictIconName(tone: String) -> String {
     tone == "green" ? "checkmark.shield" : "exclamationmark.shield"
 }

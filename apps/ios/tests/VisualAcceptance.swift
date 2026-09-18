@@ -2,6 +2,9 @@ import XCTest
 
 /// UI-only harness. Install RAI separately and run an isolated API on port 8792.
 /// It never writes to a production API, imports Health data, or changes scoring.
+///
+/// 2026-09-18：原生端只剩一套视觉（冰蓝科技），因此不再传 `-rai.appearance.skin`，
+/// 也没有皮肤切换用例（原 `test09AppearancePersistence` 随像素皮肤一起删除）。
 final class VisualAcceptance: XCTestCase {
     let app = XCUIApplication(bundleIdentifier: "app.rai.running.debug")
     let server = "http://127.0.0.1:8792"
@@ -12,7 +15,7 @@ final class VisualAcceptance: XCTestCase {
     }
 
     func launch(connected: Bool = true, large: Bool = false) {
-        app.launchArguments = ["-rai.appearance.skin", "technology", "-rai.serverURL", connected ? server : "",
+        app.launchArguments = ["-rai.serverURL", connected ? server : "",
                                "-rai.privacy.amap.state", "declined",
                                "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         if large { app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
@@ -187,8 +190,6 @@ final class VisualAcceptance: XCTestCase {
         capture("05-cache-confirm")
         app.buttons["取消"].tap()
         back()
-        app.buttons.matching(NSPredicate(format: "label CONTAINS '外观皮肤'")).firstMatch.tap()
-        capture("05-skin-picker")
     }
 
     func test06Setup() {
@@ -333,42 +334,13 @@ final class VisualAcceptance: XCTestCase {
         app.buttons["暂不锁定"].tap()
         try await proxyMode("normal")
 
-        app.launchArguments = ["-rai.appearance.skin", "technology", "-rai.serverURL", "http://127.0.0.1:8794",
+        app.launchArguments = ["-rai.serverURL", "http://127.0.0.1:8794",
                                "-rai.privacy.amap.state", "declined",
                                "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
         XCTAssertTrue(app.buttons["tab.设置"].waitForExistence(timeout: 10))
         capture("06-cold-loading")
         app.terminate()
-    }
-
-    func test09AppearancePersistence() {
-        // Omit only the skin override: privacy still needs an explicit test
-        // choice on a fresh simulator, otherwise its consent sheet blocks taps.
-        app.launchArguments = ["-rai.serverURL", server, "-rai.privacy.amap.state", "declined",
-                               "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
-        app.launch()
-        let techTab = app.buttons["tab.设置"]
-        if techTab.exists {
-            techTab.tap()
-            app.buttons.matching(NSPredicate(format: "label CONTAINS '外观皮肤'")).firstMatch.tap()
-        } else {
-            app.buttons["设置"].tap()
-        }
-        capture("pixel-settings-before-switch")
-        scrollTo(app.buttons["appearance.technology"])
-        app.buttons["appearance.technology"].tap()
-        XCTAssertTrue(app.buttons["tab.设置"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["tab.设置"].isSelected)
-        app.terminate(); app.launch()
-        XCTAssertTrue(app.buttons["tab.设置"].waitForExistence(timeout: 15))
-        tab("设置")
-        app.buttons.matching(NSPredicate(format: "label CONTAINS '外观皮肤'")).firstMatch.tap()
-        app.buttons["appearance.pixel"].tap()
-        XCTAssertFalse(app.buttons["tab.设置"].exists)
-        XCTAssertFalse(app.navigationBars["外观皮肤"].exists)
-        XCTAssertTrue(app.buttons["设置"].isSelected)
-        capture("pixel-restored")
     }
 
     @MainActor
@@ -398,7 +370,7 @@ final class VisualAcceptance: XCTestCase {
     }
 
     private func launchProxy() {
-        app.launchArguments = ["-rai.appearance.skin", "technology", "-rai.serverURL", "http://127.0.0.1:8793",
+        app.launchArguments = ["-rai.serverURL", "http://127.0.0.1:8793",
                                "-rai.privacy.amap.state", "declined",
                                "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()

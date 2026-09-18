@@ -75,8 +75,6 @@ struct TechSetupView: View {
                 }
                 Label("手机与服务器在同一网络。", systemImage: "wifi")
                     .font(.caption).foregroundStyle(TechColor.muted).frame(maxWidth: .infinity)
-                DisclosureGroup { AppSkinPicker() } label: { Text("外观皮肤").frame(minHeight: 44) }
-                    .font(.caption).tint(TechColor.muted)
             }.padding(20)
         }
         .background(TechColor.background).foregroundStyle(TechColor.ink)

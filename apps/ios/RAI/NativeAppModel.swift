@@ -59,7 +59,7 @@ final class NativeAppModel {
     ///
     /// `/v1/mobile/workout-plan` carries those same dates as prescriptions, so
     /// the week panel has to be told which rows are history rather than work
-    /// still owed. Shared by both skins — the rule is not a skin decision.
+    /// still owed. Not a view decision — the rule lives here, not in a skin.
     var completedWeekDates: Set<String> {
         Set((today?.weekPlan ?? []).compactMap { $0.completedWorkoutId != nil ? $0.localDate : nil })
     }
@@ -736,7 +736,7 @@ final class NativeAppModel {
         trainingZones = cachedZones?.value
         trainingStatistics = cache.read(NativeTrainingStatisticsOverviewResponse.self, scope: cacheScope, key: "training-statistics")?.value
         loadCachedWorkouts()
-        // 缓存新鲜度：陈旧数据不隐藏，由 FreshnessBanner 显式告知用户，因此这里不设硬 TTL。
+        // 缓存新鲜度：陈旧数据不隐藏，由 TechFreshnessBanner 显式告知用户，因此这里不设硬 TTL。
         lastCacheUpdate = [
             cachedToday?.cachedAt,
             cachedStatistics?.cachedAt,
@@ -829,14 +829,14 @@ final class NativeAppModel {
     }
 }
 
-/// The editing rules for the stored week plan, shared by both skins.
+/// The editing rules for the stored week plan, kept outside any skin.
 ///
-/// The two skins own their own view code; they do not own their own validation.
-/// Both had grown a byte-identical copy of these bounds, the distance parsing and
-/// the "clear the structure when the kind or size changed" rule — which is the
-/// same shape of drift that let a 2026-09-13 fix land in one skin only. The rules
-/// live here so the off-device regression can pin them once for both; only the
-/// presentation stays in the skin.
+/// A skin owns its view code; it does not own its validation. The two skins that
+/// existed until 2026-09-18 had grown a byte-identical copy of these bounds, the
+/// distance parsing and the "clear the structure when the kind or size changed"
+/// rule — which is the same shape of drift that let a 2026-09-13 fix land in one
+/// skin only. The rules live here so the off-device regression can pin them
+/// once; only the presentation stays in the view layer.
 enum NativeGoalWeekDraft {
     static let minWeeklyDistanceKm: Double = 1
     static let maxWeeklyDistanceKm: Double = 500

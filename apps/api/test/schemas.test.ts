@@ -499,11 +499,11 @@ test("a request that changes data is a route the router can see", () => {
   assert.ok(scanned > 0, "src/ 下应当能解析出 GET 处理器，否则本测试空过");
 });
 
-test("neither skin offers today — or a day already gone — as an editable row", () => {
+test("the week editor offers neither today — nor a day already gone — as an editable row", () => {
   // Today's session is decided by the coach's recovery gate, not by the stored
   // plan, and the server marks every *past* day `rest/0` for every reader. A row
   // for either date shows a prescription the app never displays and takes an
-  // edit that never lands. Both skins build their own week editor and nothing in
+  // edit that never lands. The week editor builds its own rows and nothing in
   // the type system connects them to that rule.
   //
   // The rule is asserted on the *set the row loop walks*, not on a name: a
@@ -555,7 +555,10 @@ test("neither skin offers today — or a day already gone — as an editable row
       checked.push(`${name}:inline`);
     }
   }
-  assert.ok(checked.length >= 2, `两个皮肤都应当有可编辑的周计划行，实际找到 ${checked.length} 处`);
+  // One skin ships a week editor. The floor is what stops a deleted or renamed
+  // row loop from passing vacuously — it is 1 since the pixel skin was removed
+  // on 2026-09-18, and 2 before that.
+  assert.ok(checked.length >= 1, `今日页/计划页应当有可编辑的周计划行，实际找到 ${checked.length} 处`);
 });
 
 test("the plan editor cannot offer a session kind the API rejects", () => {
@@ -620,7 +623,8 @@ test("the plan editor cannot offer a session kind the API rejects", () => {
       name + " 的训练类型选项应与服务端一致（既不缺也不多）"
     );
   }
-  // Two skins ship a picker. The floor is what stops a deleted or renamed
-  // picker from passing vacuously — bump it when a third skin gains one.
-  assert.ok(pickers >= 2, "两个皮肤各应有一个训练类型选择器，实际扫描到 " + pickers + " 个");
+  // One skin ships a picker, and it is the only one left: the pixel skin was
+  // deleted on 2026-09-18. The floor is what stops a deleted or renamed picker
+  // from passing vacuously — bump it when another skin gains one.
+  assert.ok(pickers >= 1, "应当有一个训练类型选择器，实际扫描到 " + pickers + " 个");
 });
