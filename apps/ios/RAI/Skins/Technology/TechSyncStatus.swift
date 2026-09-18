@@ -85,14 +85,16 @@ struct TechFreshnessSyncAction: View {
 }
 
 struct TechSyncStatus: View {
+    var showsHistory = true
     @Environment(HealthKitSync.self) private var sync
     private var state: TechSyncPresentation {
         .resolve(phase: sync.phase, isBusy: sync.isBusy, hasError: sync.lastError != nil,
                  hasSyncDate: sync.lastSyncAt != nil)
     }
     var body: some View {
-        if state != .hidden {
-            TechPanel(tint: state == .failed ? TechColor.coral : state == .cancelled ? TechColor.yellow : TechColor.cyan) {
+        if state != .hidden && (showsHistory || state == .busy || state == .failed || state == .cancelled) {
+            TechPanel(tint: state == .failed ? TechColor.coral : state == .cancelled ? TechColor.yellow : TechColor.success,
+                      fill: state == .succeeded ? TechColor.success.opacity(0.09) : TechColor.paper) {
                 if state == .cancelled {
                     Label("同步已取消", systemImage: "pause.circle")
                         .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.yellow)
@@ -116,12 +118,21 @@ struct TechSyncStatus: View {
                             .font(.footnote).foregroundStyle(TechColor.muted)
                     } label: { Text("原因与处理方法").frame(minHeight: 44) }.font(.caption).tint(TechColor.muted)
                 } else if let date = sync.lastSyncAt {
-                    Label(state == .succeeded ? "健康同步完成" : "上次健康同步", systemImage: "checkmark.circle")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.cyan)
-                    Text(date, format: .dateTime.year().month().day().hour().minute())
-                        .font(.caption).foregroundStyle(TechColor.muted)
-                    if state == .succeeded, let message = sync.message, !message.isEmpty {
-                        Text(message).font(.caption).foregroundStyle(TechColor.muted)
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 28, weight: .medium)).foregroundStyle(TechColor.success)
+                            .shadow(color: TechColor.success.opacity(0.18), radius: 8)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(state == .succeeded ? "健康同步完成" : "上次健康同步")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
+                            Text(date, format: .dateTime.year().month().day().hour().minute())
+                                .font(.caption).foregroundStyle(TechColor.muted)
+                            if state == .succeeded, let message = sync.message, !message.isEmpty {
+                                Text(message).font(.caption).foregroundStyle(TechColor.muted)
+                            }
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
             }

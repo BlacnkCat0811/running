@@ -18,7 +18,11 @@ enum TechColor {
     static let green = cyan
     static let leaf = Color(red: 136/255, green: 150/255, blue: 255/255)
     static let coral = Color(red: 255/255, green: 109/255, blue: 139/255)
-    static let yellow = Color(red: 245/255, green: 190/255, blue: 97/255)
+    static let yellow = Color(red: 255/255, green: 214/255, blue: 92/255)
+    static let success = Color(red: 50/255, green: 232/255, blue: 192/255)
+    static let dusk = Color(red: 111/255, green: 102/255, blue: 159/255)
+    static let horizon = Color(red: 220/255, green: 162/255, blue: 149/255)
+    static let landscape = Color(red: 25/255, green: 62/255, blue: 113/255)
     /// Chart-label accent. Kept out of the view so no shared component has to
     /// carry a single skin's colour inline (see incident 18067cb).
     static let violet = Color(red: 0.84, green: 0.62, blue: 0.78)
@@ -41,7 +45,7 @@ enum TechMetrics {
     static let panelPadding: CGFloat = 16
     static let border: CGFloat = 0.5
     static let smallBorder: CGFloat = 0.5
-    static let corner: CGFloat = 12
+    static let corner: CGFloat = 16
     static let shadow: CGFloat = 0
 }
 
@@ -101,10 +105,11 @@ struct TechPanel<Content: View>: View {
                 RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
                     // Color.gradient automatically lifts dark colors toward gray.
                     // Use a controlled tint instead of washing out the design's navy layers.
-                    .fill(fill)
+                    .fill(LinearGradient(colors: [fill, fill, TechColor.background.opacity(0.85)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
                     .overlay {
                         RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
-                            .strokeBorder(tint.opacity(contrast == .increased ? 1 : 0.48),
+                            .strokeBorder(tint.opacity(contrast == .increased ? 1 : 0.72),
                                           lineWidth: contrast == .increased ? 1 : TechMetrics.border)
                     }
             }
@@ -119,7 +124,8 @@ struct TechHeroCard<Content: View>: View {
             .padding(TechMetrics.panelPadding).frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
-                    .fill(TechColor.elevated)
+                    .fill(LinearGradient(colors: [TechColor.elevated, TechColor.paper, TechColor.background],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
                     .overlay {
                         RoundedRectangle(cornerRadius: TechMetrics.corner, style: .continuous)
                             .strokeBorder(TechColor.cyan.opacity(0.16), lineWidth: 0.5)
@@ -461,7 +467,8 @@ struct TechTabBar: View {
                 Button { selection = tab } label: {
                     VStack(spacing: 5) {
                         Image(systemName: tab == .home ? (selection == tab ? "house.fill" : "house") : tab.systemName)
-                            .font(.system(size: 19, weight: .medium)).frame(height: 22)
+                            .font(.system(size: 22, weight: .semibold)).frame(height: 25)
+                            .shadow(color: selection == tab ? TechColor.cyan.opacity(0.35) : .clear, radius: 7)
                         Text(tab.title).font(.caption2.weight(.medium))
                     }
                     .foregroundStyle(selection == tab ? TechColor.cyan : TechColor.muted)

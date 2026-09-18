@@ -5,32 +5,27 @@ import UIKit
 
 // Technology skin presentation. All business operations use the shared NativeAppModel.
 struct TechTodayView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var showingLock = false
+    @State private var showingVerdict = false
     @Environment(NativeAppModel.self) private var native
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
-                TechPageHeader(title: "RAI", eyebrow: native.today.map { nativeDay($0.today.localDate) } ?? "RUNNING INTELLIGENCE") {
-                    TechHomeActions()
-                }
-                TechSyncStatus()
+                TechTodayHeader(date: native.today.map { nativeDay($0.today.localDate) } ?? "RUNNING INTELLIGENCE")
+                TechSyncStatus(showsHistory: false)
 
                 if let today = native.today {
                     if native.isOffline || today.verdict.stale || today.freshness.state != "valid" {
                         TechFreshnessBanner(today: today, isOffline: native.isOffline, cacheDate: native.lastCacheUpdate, showsSyncAction: true)
                     }
-                    verdictPanel(today)
-                    // 像素风把「最近一次训练反馈」放在今日页的上下文面板里
-                    //（`NativeViews.swift` 的 `contextPanel`），紧接训练判定之后；科技风
-                    // 此前完全没有入口。位置对齐像素风：判定讲"今天能不能练"，赛后反馈讲
-                    // "刚那次练成什么样"，两者相邻才读得通。
-                    if let postRun = today.postRun { postRunPanel(postRun) }
-                    recommendationPanel(today)
                     todayHero(today)
                     recoveryPanel(today)
+                    trainingOverview(today)
+                    if let postRun = today.postRun { postRunPanel(postRun) }
+                    recommendationPanel(today)
                     abilityCard(today)
                     TechTodayMetrics(workout: today.recentWorkouts.first, refreshRevision: today.generatedAt)
-                    activityPanel(today)
                     raceSummary(today)
                     TodayDetailLinks(data: today)
                 } else if native.isLoading {
@@ -55,20 +50,49 @@ struct TechTodayView: View {
         .refreshable { await native.refreshAll() }
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingLock) { TechLockSheet() }
+        .sheet(isPresented: $showingVerdict) {
+            NavigationStack {
+                ScrollView {
+                    if let today = native.today { verdictDetailPanel(today).padding(20) }
+                }
+                .background(TechColor.background)
+                .navigationTitle("训练判定依据")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showingVerdict = false } } }
+            }.preferredColorScheme(.dark)
+        }
+    }
+
+    /// Keep the two training summaries together; accessibility text gets full-width cards.
+    private func trainingOverview(_ data: MobileTodayResponse) -> some View {
+        Group {
+            if typeSize >= .xxxLarge {
+                VStack(spacing: TechMetrics.sectionSpacing) {
+                    verdictPanel(data)
+                    activityPanel(data)
+                }
+            } else {
+                HStack(alignment: .top, spacing: 12) {
+                    verdictPanel(data).frame(maxWidth: .infinity)
+                    activityPanel(data).frame(maxWidth: .infinity)
+                }
+            }
+        }.accessibilityIdentifier("today.trainingOverview")
     }
 
     private func todayHero(_ data: MobileTodayResponse) -> some View {
         TechHeroCard {
             TechAdaptiveStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(data.today.workoutCount > 0 ? "今日跑步" : "今日训练")
-                        .font(.subheadline).foregroundStyle(TechColor.muted)
+                    Label(data.today.workoutCount > 0 ? "今日跑步" : "今日训练", systemImage: "shoeprints.fill")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Text(nativeNumber(data.today.distanceKm, digits: 2))
-                            .techScaledFont(40, weight: .bold).monospacedDigit()
+                            .techScaledFont(44, weight: .bold).monospacedDigit()
                             .fixedSize(horizontal: false, vertical: true)
                         Text("km").font(.subheadline)
                     }.foregroundStyle(TechColor.ink)
+                    Text("今日总距离").font(.caption).foregroundStyle(TechColor.muted)
                 }
                 Spacer(minLength: 0)
                 ZStack {
@@ -146,24 +170,21 @@ struct TechTodayView: View {
 
     private func activityPanel(_ data: MobileTodayResponse) -> some View {
         TechPanel {
-            TechSectionHeader(title: "本周训练结构")
-            TechAdaptiveStack(spacing: 16) {
-                TechRing(progress: data.weekStructure.easyDurationFraction ?? 0,
-                         value: nativePercent(data.weekStructure.easyDurationFraction), label: "轻松跑比例", size: 82)
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("质量课").font(.caption).foregroundStyle(TechColor.muted)
-                    Text("\(data.weekStructure.qualitySessionCount) / \(data.weekStructure.qualitySessionCap) 次")
-                        .font(.title3.weight(.semibold)).monospacedDigit()
-                    HStack(spacing: 10) {
-                        ForEach(0..<max(data.weekStructure.qualitySessionCap, 1), id: \.self) { index in
-                            Circle().fill(index < data.weekStructure.qualitySessionCount ? TechColor.cyan : TechColor.grid)
-                                .frame(width: 10, height: 10)
-                        }
-                    }.accessibilityHidden(true)
-                    Text("轻松执行度 \(nativePercent(data.weekStructure.easyHonesty.honestyFraction))")
-                        .font(.caption).foregroundStyle(TechColor.muted)
-                }.frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("本周训练结构").font(.caption.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(nativePercent(data.weekStructure.easyDurationFraction))
+                        .font(.title3.weight(.bold)).monospacedDigit().foregroundStyle(TechColor.cyan)
+                    Text("轻松跑").font(.caption2).foregroundStyle(TechColor.muted)
+                }
+                TechProgressBar(fraction: data.weekStructure.easyDurationFraction, height: 4)
+                Text("质量课 \(data.weekStructure.qualitySessionCount) / \(data.weekStructure.qualitySessionCap) 次")
+                    .font(.caption).monospacedDigit()
+                Text("轻松执行度 \(nativePercent(data.weekStructure.easyHonesty.honestyFraction))")
+                    .font(.caption2).foregroundStyle(TechColor.muted)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: typeSize >= .xxxLarge ? nil : 112, alignment: .topLeading)
         }
     }
 
@@ -194,15 +215,13 @@ struct TechTodayView: View {
                         }
                     }
                     Spacer(minLength: 0)
-                    TechAbilityGauge(
-                        progress: data.ability.trueAbility.map { min(max($0 / 100, 0), 1) } ?? 0,
-                        value: "",
-                        caption: "",
-                        size: 104,
-                        lineWidth: 9
-                    )
-                    .accessibilityHidden(true)
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.system(size: 28, weight: .light))
+                        .foregroundStyle(TechColor.cyan)
+                        .accessibilityHidden(true)
                 }
+                TechTodayAbilityRuler(score: data.ability.trueAbility)
+
                 if calibrationNeedsAttention(data.calibration.status) {
                     Text(data.calibration.message)
                         .font(.caption2)
@@ -242,14 +261,39 @@ struct TechTodayView: View {
 
     private func verdictPanel(_ data: MobileTodayResponse) -> some View {
         let tone = techToneColor(data.verdict.tone)
+        return Button { showingVerdict = true } label: {
+            TechPanel(tint: tone) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("训练判定", systemImage: "dumbbell.fill").font(.caption.weight(.semibold))
+                    Text(data.verdict.title).font(.title3.weight(.bold)).foregroundStyle(tone)
+                    Text(data.verdict.reason).font(.caption2).foregroundStyle(TechColor.muted)
+                        .lineLimit(typeSize >= .xxxLarge ? nil : 2)
+                    Spacer(minLength: 0)
+                    HStack {
+                        Text("判定依据")
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                    }.font(.caption2).foregroundStyle(tone)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: typeSize >= .xxxLarge ? nil : 112, alignment: .topLeading)
+            }
+        }.buttonStyle(TechPressStyle())
+            .accessibilityLabel("训练判定，\(data.verdict.title)，\(data.verdict.reason)")
+            .accessibilityHint("查看完整判定依据")
+    }
+
+    private func verdictDetailPanel(_ data: MobileTodayResponse) -> some View {
+        let tone = techToneColor(data.verdict.tone)
         return TechPanel(tint: tone) {
-            HStack(alignment: .center, spacing: 14) {
-                VStack(alignment: .leading, spacing: 7) {
-                    TechSectionHeader(title: "训练判定")
-                    Text(data.verdict.title).font(.title3.weight(.semibold)).foregroundStyle(tone)
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 9) {
+                    Label("训练判定", systemImage: "dumbbell.fill").font(.subheadline.weight(.semibold))
+                    Text(data.verdict.title).techScaledFont(23, weight: .bold).foregroundStyle(tone)
                     Text(data.verdict.reason).font(.footnote).foregroundStyle(TechColor.muted)
                 }
-                Image(systemName: verdictIconName(tone: data.verdict.tone)).font(.title2).foregroundStyle(tone).accessibilityHidden(true)
+                TechVerdictInstrument(fraction: data.weekStructure.easyDurationFraction, tone: tone,
+                                      symbol: verdictIconName(tone: data.verdict.tone))
             }
             if !data.verdict.triggers.isEmpty {
                 DisclosureGroup {
@@ -294,14 +338,14 @@ struct TechTodayView: View {
     }
 
     private func recommendationPanel(_ data: MobileTodayResponse) -> some View {
-        TechPanel {
+        // recentPlanExecution is intentionally represented by the recent-workout feedback slot below; the payload is optional and the current native contract does not decode it. Anchor: data.recentPlanExecution
+        VStack(alignment: .leading, spacing: 14) {
             // 阶段放在这里而不是别处：`MobileDayPhase` 讲的就是"今天走到哪一步"
             // （待同步 / 晨间开放 / 已锁定 / 已训练 / 休息日完成），它决定下面这条推荐
-            // 该被怎么读。像素风把它放在上下文面板标题右侧，位置不同、信息同一份。
+            // 该被怎么读。做成标题的 trailing 而不是单独一行，是因为它修饰的是这条推荐。
             TechSectionHeader(title: "今日推荐训练", trailing: techPhaseName(data.phase))
             Label("\(data.nextSession.title) \(nativeKilometers(data.nextSession.distanceKm))", systemImage: nativeSessionSymbol(data.nextSession.kind))
-                .font(.headline).foregroundStyle(TechColor.cyan)
-            Divider().overlay(TechColor.grid)
+                .techScaledFont(22, weight: .semibold).foregroundStyle(TechColor.action)
             TechAdaptiveStack {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("建议配速 " + techPaceRange(data.nextSession.paceSecondsPerKmLower, data.nextSession.paceSecondsPerKmUpper))
@@ -319,12 +363,18 @@ struct TechTodayView: View {
                 Text(data.lock.present ? "今日安排已锁定，可在训练计划中查看。" : native.isOffline ? "离线仅可查看，连接后才能锁定安排。" : "建议已过期，请先刷新再锁定。")
                     .font(.caption).foregroundStyle(TechColor.muted)
             }
+            Divider().overlay(TechColor.cyan.opacity(0.2))
             NavigationLink { TechPlanView() } label: {
                 Label("查看训练计划", systemImage: "calendar")
                     .font(.subheadline.weight(.medium)).frame(minHeight: 44)
             }.buttonStyle(TechPressStyle()).foregroundStyle(TechColor.cyan)
                 .accessibilityIdentifier("today.plan")
         }
+        .padding(TechMetrics.panelPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { TechRunningLandscape(road: true) }
+        .clipShape(RoundedRectangle(cornerRadius: TechMetrics.corner))
+        .overlay(RoundedRectangle(cornerRadius: TechMetrics.corner).strokeBorder(TechColor.cyan.opacity(0.4), lineWidth: 0.7))
     }
 
     private func weekPanel(_ data: MobileTodayResponse) -> some View {
@@ -350,17 +400,9 @@ struct TechTodayView: View {
 
     private func recoveryPanel(_ data: MobileTodayResponse) -> some View {
         TechPanel {
-            TechSectionHeader(title: "恢复状态")
-            TechAdaptiveStack(spacing: 16) {
-                VStack(spacing: 8) {
-                    Image(systemName: data.recovery.state == "recovered" ? "heart.fill" : "heart.text.square")
-                        .font(.system(size: 30)).foregroundStyle(techToneColor(data.recovery.state ?? "unknown"))
-                    Text(data.recovery.stateLabel).font(.subheadline.weight(.semibold))
-                        .foregroundStyle(TechColor.ink)
-                }.frame(minWidth: 82)
-                Text(data.recovery.note).font(.footnote).foregroundStyle(TechColor.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            TechSectionHeader(title: "恢复状态", trailing: data.recovery.stateLabel,
+                              trailingColor: recoveryStatusColor(data.recovery.state))
+            TechTodayRecoveryMetrics(recovery: data.recovery)
         }
     }
 

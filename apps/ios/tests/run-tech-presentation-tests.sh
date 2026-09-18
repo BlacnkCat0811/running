@@ -120,6 +120,23 @@ checks += 1
 # ---------------------------------------------------------------------------
 tech_views = pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_text()
 
+# Today redesign: keep the three real measurements and a distinct linear ability visual.
+today_widgets = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTodayRecovery.swift").read_text()
+recovery_panel = tech_views.split("private func recoveryPanel", 1)[1].split("private struct TodayDetailLinks", 1)[0]
+ability_card = tech_views.split("private func abilityCard", 1)[1].split("private func abilityAccessibilityLabel", 1)[0]
+assert "data.recovery.stateLabel" in recovery_panel
+assert "TechTodayRecoveryMetrics(recovery: data.recovery)" in recovery_panel
+assert "data.recovery.note" not in recovery_panel, "Compact recovery must not restore the tall evidence paragraph"
+for field in ["lastNightSleepMinutes", "restingHeartRateBpm", "morningHrvMs"]:
+    assert f"recovery.{field}" in today_widgets, f"Recovery measurement lost: {field}"
+assert "Baseline" not in today_widgets, "Recovery no longer displays baseline comparisons"
+assert "isAccessibilitySize" in today_widgets, "Large text must not be squeezed into three columns"
+assert "TechTodayAbilityRuler(score: data.ability.trueAbility)" in ability_card
+assert '"chart.bar.xaxis"' in ability_card
+assert "TechAbilityGauge(" not in ability_card and "TechInstrumentRing(" not in ability_card
+assert "score.isFinite" in today_widgets and "if let fraction" in today_widgets
+print("Today compact recovery / linear ability presentation checks passed")
+
 contract = pathlib.Path("packages/api-contracts/src/index.ts").read_text()
 today_interface = re.search(r"export interface MobileTodayResponse \{(.*?)\n\}", contract, re.S)
 assert today_interface, ("Could not locate MobileTodayResponse in the contract; the field "
@@ -150,6 +167,7 @@ field_anchors = {
     "race": "data.race.",
     "injuryFlags": "summary.injuryFlags",
     "weekPlan": "data.weekPlan",
+    "recentPlanExecution": "data.recentPlanExecution",
     "phase": "data.phase",
     "lock": "data.lock.",
 }

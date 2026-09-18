@@ -42,21 +42,17 @@ struct TechInstrumentRing: View {
     var body: some View {
         ZStack {
             Circle().stroke(TechColor.blue.opacity(0.13), lineWidth: 1)
-            ForEach(0..<24, id: \.self) { tick in
-                Capsule().fill(TechColor.blue.opacity(tick % 3 == 0 ? 0.5 : 0.16))
-                    .frame(width: 2, height: tick % 3 == 0 ? 5 : 3)
-                    .offset(y: -size * 0.47).rotationEffect(.degrees(Double(tick) * 15))
-            }
-            Circle().stroke(TechColor.blue.opacity(0.08), lineWidth: size * 0.16)
-                .frame(width: size * 0.78, height: size * 0.78)
-            TechRing(progress: progress, value: "", label: "", size: size * 0.78)
-                .shadow(color: TechColor.blue.opacity(0.5), radius: 5)
-            // Instrument accents are decorative, not extra progress or fabricated readings.
-            ForEach(0..<8, id: \.self) { tick in
-                Circle().fill(tick.isMultiple(of: 2) ? TechColor.cyan.opacity(0.7) : TechColor.blue.opacity(0.35))
-                    .frame(width: size * 0.027, height: size * 0.027)
-                    .offset(y: -size * 0.39).rotationEffect(.degrees(Double(tick) * 45))
-            }
+            Circle().stroke(TechColor.success.opacity(0.07), lineWidth: size * 0.17)
+                .frame(width: size * 0.80, height: size * 0.80)
+            Circle().stroke(TechColor.grid.opacity(0.6), lineWidth: size * 0.085)
+                .frame(width: size * 0.80, height: size * 0.80)
+            Circle().trim(from: 0, to: progress.isFinite ? min(max(progress, 0), 1) : 0)
+                .stroke(AngularGradient(colors: [TechColor.cyan, TechColor.success, TechColor.yellow],
+                                        center: .center, startAngle: .degrees(0), endAngle: .degrees(360)),
+                        style: StrokeStyle(lineWidth: size * 0.085, lineCap: .round))
+                .frame(width: size * 0.80, height: size * 0.80)
+                .rotationEffect(.degrees(-90))
+                .shadow(color: TechColor.success.opacity(0.28), radius: 5)
             Circle().fill(TechColor.background)
                 .frame(width: size * 0.51, height: size * 0.51)
             Circle().stroke(TechColor.cyan.opacity(0.22), lineWidth: 1)

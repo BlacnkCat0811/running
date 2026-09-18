@@ -76,4 +76,99 @@ struct TechSparkline: View {
         }.frame(height: 30).accessibilityHidden(true)
     }
 }
+
+/// Local vector scenery: decorative, offline, and independent of health data.
+struct TechRunningLandscape: View {
+    var road = false
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(colors: [TechColor.landscape, TechColor.dusk, TechColor.horizon],
+                               startPoint: .top, endPoint: .bottomTrailing)
+                Canvas { context, size in
+                    func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                        CGPoint(x: x * size.width, y: y * size.height)
+                    }
+                    for layer in 0..<3 {
+                        let offset = CGFloat(layer) * 0.10
+                        let ridge = Path { p in
+                            p.move(to: point(0, 0.65 + offset))
+                            p.addLines([point(0.18, 0.51 + offset), point(0.32, 0.60 + offset),
+                                        point(0.51, 0.36 + offset), point(0.70, 0.64 + offset),
+                                        point(0.84, 0.54 + offset), point(1, 0.40 + offset), point(1, 1), point(0, 1)])
+                            p.closeSubpath()
+                        }
+                        context.fill(ridge, with: .color(TechColor.background.opacity(0.30 + Double(layer) * 0.22)))
+                    }
+                    if road {
+                        let track = Path { p in
+                            p.move(to: point(0.42, 1))
+                            p.addCurve(to: point(0.91, 0.53), control1: point(0.66, 0.69), control2: point(0.94, 0.78))
+                            p.addCurve(to: point(0.80, 1), control1: point(0.96, 0.80), control2: point(0.79, 0.82))
+                            p.closeSubpath()
+                        }
+                        context.fill(track, with: .color(TechColor.landscape))
+                        context.stroke(track, with: .color(TechColor.cyan.opacity(0.35)), lineWidth: 1)
+                    }
+                }
+                Image(systemName: "figure.run")
+                    .font(.system(size: road ? 26 : 32, weight: .medium))
+                    .foregroundStyle(TechColor.background.opacity(0.85))
+                    .position(x: geometry.size.width * 0.76, y: geometry.size.height * 0.73)
+                LinearGradient(colors: [TechColor.background.opacity(0.98), TechColor.background.opacity(0.75), .clear],
+                               startPoint: .leading, endPoint: .trailing)
+                LinearGradient(colors: [.clear, TechColor.background.opacity(0.6)], startPoint: .top, endPoint: .bottom)
+            }
+        }.clipped().allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+struct TechTodayHeader: View {
+    let date: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TechAdaptiveStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "mountain.2.fill").foregroundStyle(TechColor.energy)
+                            .font(.system(size: 28, weight: .bold)).accessibilityHidden(true)
+                        Text("RAI").techScaledFont(34, weight: .bold).accessibilityAddTraits(.isHeader)
+                    }
+                    Text(date).font(.caption).foregroundStyle(TechColor.muted)
+                }
+                Spacer(minLength: 0)
+                TechHomeActions()
+            }
+            Text("坚持，让更好的你发生 💙").font(.caption).foregroundStyle(TechColor.muted)
+        }
+        .padding(.vertical, 8)
+        .background { TechRunningLandscape().padding(.horizontal, -TechMetrics.pageHorizontal).padding(.top, -25) }
+    }
+}
+
+/// The arc is the measured easy-running fraction, never a synthetic readiness score.
+struct TechVerdictInstrument: View {
+    let fraction: Double?
+    let tone: Color
+    let symbol: String
+    var body: some View {
+        ZStack {
+            Circle().stroke(TechColor.grid.opacity(0.65), lineWidth: 9)
+            if let fraction, fraction.isFinite {
+                Circle().trim(from: 0, to: min(max(fraction, 0), 1))
+                    .stroke(LinearGradient(colors: [tone, tone.opacity(0.65)], startPoint: .top, endPoint: .bottom),
+                            style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            VStack(spacing: 5) {
+                Image(systemName: symbol).font(.system(size: 25, weight: .medium)).foregroundStyle(tone)
+                Text(nativePercent(fraction)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                Text("轻松跑占比").font(.system(size: 10)).foregroundStyle(TechColor.muted)
+            }
+        }.frame(width: 104, height: 104).padding(5)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("本周轻松跑时长占比 \(nativePercent(fraction))")
+    }
+}
+
 #endif
