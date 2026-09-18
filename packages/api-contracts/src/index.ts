@@ -789,6 +789,13 @@ export interface MobileTodayResponse {
     workoutCount: number;
     goalDistanceKm: number | null;
     goalProgressFraction: number | null;
+    /** Running-only averages; heart rate is weighted by recorded workout duration. */
+    averageSpeedKmPerHour?: number | null;
+    averagePaceSecondsPerKm?: number | null;
+    averageHeartRateBpm?: number | null;
+    heartRateZones?: Array<{ zone: string; durationSeconds: number; fraction: number }>;
+    paceZones?: Array<{ zone: string; durationSeconds: number; fraction: number }>;
+
   };
   /** Monday..Sunday of the current week; missing days are zero-filled. */
   weekDaily: Array<{ localDate: string; distanceKm: number; workoutCount: number }>;

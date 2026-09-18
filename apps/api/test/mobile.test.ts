@@ -175,6 +175,68 @@ test("mobileToday aggregates today distance, energy and pace from active loads",
   }
 });
 
+test("mobile week averages cover all runs and distributions exclude other weeks and low coverage", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-week-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit"
+  }).format(new Date());
+  const rows = store.database.prepare("SELECT training_session_id FROM active_workout_training_loads ORDER BY local_date")
+    .all() as Array<{ training_session_id: string }>;
+  assert.ok(rows.length > 5);
+  store.database.prepare(`UPDATE workout_training_loads SET local_date = ?, distance_km = 5,
+    duration_seconds = 1800, average_heart_rate_bpm = 140`).run(today);
+  const update = store.database.prepare(`UPDATE workout_training_loads SET distance_km = ?,
+    duration_seconds = ?, average_heart_rate_bpm = ? WHERE training_session_id = ?`);
+  update.run(10, 3600, 160, rows[0]!.training_session_id);
+  update.run(5, 1800, null, rows[1]!.training_session_id);
+  store.database.prepare(`UPDATE workout_zone_summaries SET heart_rate_coverage = 1, pace_coverage = 1,
+    heart_rate_exposure_json = ?, pace_exposure_json = ?`).run(
+      JSON.stringify([{ zone: "z2", durationSeconds: 1200 }]),
+      JSON.stringify([{ zone: "easy", durationSeconds: 900 }, { zone: "marathon", durationSeconds: 300 }]));
+  store.database.prepare(`UPDATE workout_zone_summaries SET heart_rate_coverage = 0.1
+    WHERE training_session_id = ?`).run(rows[0]!.training_session_id);
+  store.database.prepare(`UPDATE workout_training_loads SET local_date = '2020-01-01'
+    WHERE training_session_id = ?`).run(rows.at(-1)!.training_session_id);
+  store.close();
+  const read = new RaiReadStore(databasePath);
+  try {
+    const week = read.mobileToday(40).week;
+    const count = rows.length - 1;
+    assert.equal(week.averageSpeedKmPerHour, 10);
+    assert.equal(week.averagePaceSecondsPerKm, 360);
+    assert.equal(week.averageHeartRateBpm, (160 * 3600 + (count - 2) * 140 * 1800) / (count * 1800));
+    assert.deepEqual(week.heartRateZones, [{ zone: "z2", durationSeconds: (count - 1) * 1200, fraction: 1 }]);
+    assert.deepEqual(week.paceZones, [
+      { zone: "easy", durationSeconds: count * 900, fraction: 0.75 },
+      { zone: "marathon", durationSeconds: count * 300, fraction: 0.25 }
+    ]);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("mobile week without current runs has missing averages rather than zero", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-week-empty-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  store.close();
+  const read = new RaiReadStore(databasePath);
+  try {
+    const week = read.mobileToday(40).week;
+    assert.equal(week.averageSpeedKmPerHour, null);
+    assert.equal(week.averagePaceSecondsPerKm, null);
+    assert.equal(week.averageHeartRateBpm, null);
+    assert.deepEqual(week.heartRateZones, []);
+    assert.deepEqual(week.paceZones, []);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("mobileStatistics returns month buckets, totals and zone distribution shape", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-mobile-"));
   const databasePath = join(root, "rai.sqlite");

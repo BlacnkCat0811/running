@@ -332,7 +332,45 @@ export class RaiReadStore {
     const latestMetric = this.statisticsRepository.latestMetric();
     const metricEnd = latestMetric?.localDate ?? latestDataDate ?? today;
     const recentMetrics = this.statisticsRepository.metricsBetween(shiftMobileDate(metricEnd, -56), metricEnd);
+    // Aggregate the entire calendar week, never the five recent-workout previews.
+    const running = this.database.prepare(`
+      SELECT SUM(load.distance_km) AS distance, SUM(load.duration_seconds) AS duration,
+        SUM(CASE WHEN load.average_heart_rate_bpm > 0 THEN load.average_heart_rate_bpm * load.duration_seconds ELSE 0 END) AS hr_weighted,
+        SUM(CASE WHEN load.average_heart_rate_bpm > 0 THEN load.duration_seconds ELSE 0 END) AS hr_duration
+      FROM active_workout_training_loads load
+      JOIN training_sessions ts ON ts.id = load.training_session_id
+      WHERE load.local_date BETWEEN ? AND ? AND ts.activity_type LIKE '%Running%'
+    `).get(weekStart, weekEnd) as Record<string, number | null>;
+    const exposures = this.database.prepare(`
+      SELECT zs.* FROM active_workout_zone_summaries zs
+      JOIN active_workout_training_loads load ON load.training_session_id = zs.training_session_id
+      WHERE load.local_date BETWEEN ? AND ?
+    `).all(weekStart, weekEnd) as Array<Record<string, unknown>>;
+    const weekZones = (kind: "heart_rate" | "pace") => {
+      const totals = new Map<string, number>();
+      for (const row of exposures) {
+        // Same evidence threshold as the statistics page, independently per metric.
+        if (Number(row[`${kind}_coverage`]) < 0.3) continue;
+        for (const exposure of parseJson<ZoneExposureRow[]>(row[`${kind}_exposure_json`], [])) {
+          if (!exposure || typeof exposure.zone !== "string") continue;
+          const seconds = Number(exposure.durationSeconds);
+          if (!Number.isFinite(seconds) || seconds <= 0) continue;
+          totals.set(exposure.zone, (totals.get(exposure.zone) ?? 0) + seconds);
+        }
+      }
+      const total = [...totals.values()].reduce((sum, seconds) => sum + seconds, 0);
+      return [...totals].map(([zone, durationSeconds]) => ({ zone, durationSeconds, fraction: durationSeconds / total }))
+        .sort((a, b) => b.durationSeconds - a.durationSeconds);
+    };
     const week = {
+      averageSpeedKmPerHour: Number(running.duration) > 0 && Number(running.distance) > 0
+        ? Number(running.distance) * 3600 / Number(running.duration) : null,
+      averagePaceSecondsPerKm: Number(running.duration) > 0 && Number(running.distance) > 0
+        ? Number(running.duration) / Number(running.distance) : null,
+      averageHeartRateBpm: Number(running.hr_duration) > 0
+        ? Number(running.hr_weighted) / Number(running.hr_duration) : null,
+      heartRateZones: weekZones("heart_rate"),
+      paceZones: weekZones("pace"),
       periodStart: weekStart,
       periodEnd: weekEnd,
       distanceKm: weekDistanceKm,
