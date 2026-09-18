@@ -358,3 +358,27 @@ func nativeStatusName(_ value: String?) -> String {
 // `PixelColor`（iOS 专属），判据留在这里就永远进不了秒级闸门。
 // 2026-09-18 删除像素皮肤后本文件已无 iOS 专属依赖（不再 `import SwiftUI`），
 // 因此**本文件自身**也进了同一扇闸门 —— 见 `run-model-tests.sh` 的编译列表。
+
+/// A blank pace is intentional; malformed/out-of-range values must never become nil silently.
+enum NativeRaceGoalDraft {
+    static func paceSeconds(_ text: String) -> Double? {
+        let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[1].count == 2,
+              parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy({ $0.isASCII && $0.isNumber }) }),
+              let minutes = Double(parts[0]), let seconds = Double(parts[1]), seconds < 60 else { return nil }
+        let value = minutes * 60 + seconds
+        return (150...900).contains(value) ? value : nil
+    }
+
+    static func isValidPace(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || paceSeconds(text) != nil
+    }
+
+    static var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }
+}

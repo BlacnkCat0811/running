@@ -434,7 +434,32 @@ final class NativeAppModel {
         qualitySessionCap: Int,
         weekPlan: [MobileGoalsPlanItem]
     ) async -> Bool {
-        guard let baseURL = session.serverURL, let current = goals else {
+        guard let current = goals else { return false }
+        return await persistGoals(UpdateMobileGoalsRequest(
+            expectedRevision: current.revision,
+            weeklyDistanceKm: weeklyDistanceKm,
+            easyDurationFloorFraction: easyDurationFloorFraction,
+            qualitySessionCap: qualitySessionCap,
+            raceTarget: current.raceTarget,
+            weekPlan: weekPlan
+        ))
+    }
+
+    /// Only changes the race target; omitted weekly-plan fields remain untouched.
+    func saveRaceTarget(_ target: MobileRaceTarget?, expectedRevision: Int) async -> Bool {
+        guard let current = goals else { return false }
+        return await persistGoals(UpdateMobileGoalsRequest(
+            expectedRevision: expectedRevision,
+            weeklyDistanceKm: current.weeklyDistanceKm,
+            easyDurationFloorFraction: nil,
+            qualitySessionCap: nil,
+            raceTarget: target,
+            weekPlan: nil
+        ))
+    }
+
+    private func persistGoals(_ request: UpdateMobileGoalsRequest) async -> Bool {
+        guard !isOffline, let baseURL = session.serverURL else {
             errorMessage = "请先连接 RAI 服务。"
             return false
         }
@@ -447,14 +472,7 @@ final class NativeAppModel {
         guard isCurrent() else { return false }
         do {
             let updated = try await api.updateGoals(
-                UpdateMobileGoalsRequest(
-                    expectedRevision: current.revision,
-                    weeklyDistanceKm: weeklyDistanceKm,
-                    easyDurationFloorFraction: easyDurationFloorFraction,
-                    qualitySessionCap: qualitySessionCap,
-                    raceTarget: current.raceTarget,
-                    weekPlan: weekPlan
-                ),
+                request,
                 baseURL: baseURL,
                 token: token
             )

@@ -614,7 +614,8 @@ struct UpdateMobileGoalsRequest: Encodable {
         try container.encode(weeklyDistanceKm, forKey: .weeklyDistanceKm)
         try container.encodeIfPresent(easyDurationFloorFraction, forKey: .easyDurationFloorFraction)
         try container.encodeIfPresent(qualitySessionCap, forKey: .qualitySessionCap)
-        try container.encodeIfPresent(raceTarget, forKey: .raceTarget)
+        // Explicit null clears the persisted race; omission would preserve it.
+        try container.encode(raceTarget, forKey: .raceTarget)
         try container.encodeIfPresent(weekPlan, forKey: .weekPlan)
     }
 }

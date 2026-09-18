@@ -53,7 +53,7 @@
 |---|---|
 | `MobileTodayResponse.phase` | 「今日推荐训练」标题右侧（`techPhaseName`） |
 | `race.note` | 比赛目标卡副标题 |
-| `race.shapeScore`（体型分） | 比赛目标卡指标格，按百分比渲染 |
+| `race.shapeScore`（赛事准备度；原误标体型分） | 比赛目标卡指标格，按百分比渲染 |
 | `race.taper`（减量） | 比赛目标卡指标格 |
 | `postRun`（最近一次训练反馈） | 训练判定卡下方的独立面板 |
 

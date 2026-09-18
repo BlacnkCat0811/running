@@ -103,6 +103,24 @@ final class RequestLog: @unchecked Sendable {
             precondition(condition(), name)
             print("PASS: \(name)")
         }
+        check(NativeRaceGoalDraft.isValidPace(""), "blank target pace is optional")
+        check(NativeRaceGoalDraft.paceSeconds("5:30") == 330, "race pace converts minutes and seconds")
+        check(NativeRaceGoalDraft.paceSeconds("2:30") == 150 && NativeRaceGoalDraft.paceSeconds("15:00") == 900, "race pace includes API boundaries")
+        for invalid in ["2:29", "15:01", "5:60", "5:3", "abc", "-5:30", "5.5:30"] {
+            check(!NativeRaceGoalDraft.isValidPace(invalid), "invalid race pace rejected: \(invalid)")
+        }
+        let race = MobileRaceTarget(date: "2026-12-06", distance: "half_marathon", targetPaceSecondsPerKm: 330)
+        for target in [race, nil] as [MobileRaceTarget?] {
+            let request = UpdateMobileGoalsRequest(expectedRevision: 12, weeklyDistanceKm: 40,
+                easyDurationFloorFraction: nil, qualitySessionCap: nil, raceTarget: target, weekPlan: nil)
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as! [String: Any]
+            check(object["weekPlan"] == nil, "race-only save does not replace weekly plan")
+            if target == nil {
+                check(object["raceTarget"] is NSNull, "clear emits explicit null instead of omitting race target")
+            } else {
+                check((object["raceTarget"] as? [String: Any])?["targetPaceSecondsPerKm"] as? Double == 330, "race target is encoded for persistence")
+            }
+        }
         let legacyWeekJSON = """
         {"periodStart":"2026-09-14","periodEnd":"2026-09-20","distanceKm":11.1,
          "durationSeconds":3600,"workoutCount":2,"goalDistanceKm":30,"goalProgressFraction":0.37}
@@ -256,6 +274,45 @@ final class RequestLog: @unchecked Sendable {
          "injuryFlags":[],"weekPlan":[],"phase":"morning_open",
          "lock":{"present":false,"relockSuggested":false,"lockedAt":null}}
         """
+        // Race editor uses the real API client/model, including refresh and conflict recovery.
+        let raceModel = NativeAppModel(session: ServerSession(), api: api)
+        let raceRequests = RequestLog()
+        func raceHandler(_ goals: String, putStatus: Int = 200) {
+            StubProtocol.handler = { request in
+                raceRequests.record(request)
+                let path = request.url!.path
+                if path.hasSuffix("/goals") {
+                    if request.httpMethod == "PUT" && putStatus != 200 {
+                        return (putStatus, "{\"code\":\"mobile_goals_revision_conflict\",\"message\":\"目标已更新\"}", 0)
+                    }
+                    return (200, goals, 0)
+                }
+                if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+                if path.hasSuffix("/workouts") { return (200, fastList, 0) }
+                return (503, "{}", 0)
+            }
+        }
+        raceHandler(goalsJSON)
+        await raceModel.refreshAll(requestHandshake: false)
+        let savedRaceJSON = goalsJSON.replacingOccurrences(of: "\"revision\":12", with: "\"revision\":13")
+            .replacingOccurrences(of: "\"raceTarget\":null", with: "\"raceTarget\":{\"date\":\"2026-12-06\",\"distance\":\"half_marathon\",\"targetPaceSecondsPerKm\":330}")
+        raceHandler(savedRaceJSON)
+        let raceSaved = await raceModel.saveRaceTarget(race, expectedRevision: 12)
+        check(raceSaved && raceModel.goals?.raceTarget == race, "race save updates model after server acknowledgement and refresh")
+        let raceBody = try JSONSerialization.jsonObject(with: raceRequests.lastBody(method: "PUT", path: "/v1/mobile/goals")!) as! [String: Any]
+        check(raceBody["expectedRevision"] as? Int == 12 && raceBody["weekPlan"] == nil, "race save carries editor revision without replacing the plan")
+        raceHandler(savedRaceJSON, putStatus: 409)
+        let raceConflict = await raceModel.saveRaceTarget(nil, expectedRevision: 12)
+        check(!raceConflict && raceModel.goals?.raceTarget == race, "race conflict preserves persisted target and reports failure")
+        raceHandler(savedRaceJSON, putStatus: 503)
+        let raceFailed = await raceModel.saveRaceTarget(nil, expectedRevision: 13)
+        check(!raceFailed && raceModel.goals?.raceTarget == race, "failed clear does not optimistically erase the target")
+        raceHandler(goalsJSON.replacingOccurrences(of: "\"revision\":12", with: "\"revision\":14"))
+        let raceCleared = await raceModel.saveRaceTarget(nil, expectedRevision: 13)
+        check(raceCleared && raceModel.goals?.raceTarget == nil, "race clear refreshes to persisted empty state")
+        let clearBody = try JSONSerialization.jsonObject(with: raceRequests.lastBody(method: "PUT", path: "/v1/mobile/goals")!) as! [String: Any]
+        check(clearBody["raceTarget"] is NSNull, "real clear request sends explicit JSON null")
+
         session.serverURL = URL(string: "https://rai-plan.test")
         model.serverConfigurationChanged()
         let generationRequests = RequestLog()

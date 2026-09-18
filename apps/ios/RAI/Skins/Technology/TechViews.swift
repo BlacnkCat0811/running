@@ -121,8 +121,8 @@ struct TechTodayView: View {
     }
 
     /// 比赛目标卡。**无条件渲染**：没有目标时服务端仍给出 `race.note` 引导文案
-    /// （`mobile-coach.ts` 的 `buildRaceCard` 无目标分支：「还没有目标赛事。设一个日期和
-    /// 距离后，首页会给出倒计时和专项形态。」）。旧版整卡写在 `if let target` 里，于是
+    /// （`mobile-coach.ts` 的 `buildRaceCard` 无目标分支给出设置入口和默认距离）。
+    /// 旧版整卡写在 `if let target` 里，于是
     /// `race.note` / `race.shapeScore` / `race.taper` 三个字段在科技风没有任何入口
     /// —— 有数据、有契约、没展示位，且当时连声明都没有。
     ///
@@ -154,7 +154,7 @@ struct TechTodayView: View {
                                 TechMetricTile(title: "目标配速", value: techPace(pace) + "/km", accent: TechColor.cyan)
                             }
                             if let score = data.race.shapeScore {
-                                TechMetricTile(title: "体型分", value: nativePercent(score), accent: TechColor.green)
+                                TechMetricTile(title: target == nil ? "10 公里准备度（默认）" : "赛事准备度", value: nativePercent(score), accent: TechColor.green)
                             }
                             if target != nil {
                                 TechMetricTile(title: "减量", value: data.race.taper ? "是" : "否",
@@ -1483,6 +1483,7 @@ struct TechWorkoutDetailView: View {
 struct TechPlanView: View {
     @State private var editing = false
     @State private var showingLock = false
+    @State private var raceEditor: RaceGoalEditorContext?
     @State private var isSyncingPlan = false
     @State private var planSyncMessage: String?
     @State private var selectedDay: MobileWeekPlanDay?
@@ -1548,6 +1549,7 @@ struct TechPlanView: View {
         .scrollIndicators(.hidden)
         .techNavigation(editing ? "编辑周计划" : "训练计划")
         .sheet(isPresented: $showingLock) { TechLockSheet() }
+        .sheet(item: $raceEditor) { context in TechRaceGoalEditor(context: context) }
         .sheet(item: $selectedDay) { day in
             TechPlanDaySheet(day: day, isToday: day.localDate == native.today?.today.localDate)
         }
@@ -1929,9 +1931,9 @@ struct TechPlanView: View {
             if let goals = native.goals {
                 TechPanel(tint: TechColor.cyan, fill: .clear) {
                     VStack(alignment: .leading, spacing: 8) {
-                        TechSectionHeader(title: "比赛目标", trailing: goals.lockedSession == nil ? "未锁定" : "已锁定", trailingColor: TechColor.cyan)
+                        TechSectionHeader(title: "比赛目标", trailing: goals.raceTarget == nil ? "未设置" : "已设置", trailingColor: TechColor.cyan)
                         if let race = goals.raceTarget {
-                            Text("\(race.distance) · \(nativeDay(race.date))")
+                            Text("\(techRaceDistanceName(race.distance)) · \(race.date)")
                                 .font(.headline.weight(.semibold))
                             Text(race.targetPaceSecondsPerKm.map { "目标配速：\(techPace($0))/km" } ?? "未设置目标配速")
                                 .font(.footnote)
@@ -1941,6 +1943,13 @@ struct TechPlanView: View {
                                 .font(.footnote)
                                 .foregroundStyle(TechColor.muted)
                         }
+                        Text("赛事准备度根据近 8 周跑量、长距离、频率、专项训练次数和训练时效计算，不是体型评分，也不是目标成绩达成概率。")
+                            .font(.caption).foregroundStyle(TechColor.muted)
+                        Button(goals.raceTarget == nil ? "设置比赛目标" : "编辑比赛目标") {
+                            raceEditor = RaceGoalEditorContext(goals: goals)
+                        }
+                        .disabled(native.isOffline || editing)
+                        .accessibilityIdentifier("race-goal-edit")
                         if let locked = goals.lockedSession {
                             Text("锁定课程：\(locked.session.title) · \(nativeDate(locked.lockedAt))")
                                 .font(.caption)
