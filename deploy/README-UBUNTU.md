@@ -52,14 +52,36 @@ sudo certbot --nginx --redirect -d api.example.com
 
 把示例中的 `api.example.com` 换成已解析到服务器公网 IP 的域名。若暂时没有域名，可用 HTTP 公网 IP 做连通性测试；正式导入 HealthKit 数据前必须切换 HTTPS。
 
-不要把 API Token 放入 Web build 环境变量：那会把 Token 发布到 JavaScript。iOS 调试壳（WKWebView）在服务器设置中填写 HTTPS 地址与同一个 Token，由壳把 Token 注入页面与 HealthKit 同步请求；桌面浏览器直接打开站点能加载页面，但 `/v1/` 请求因没有 Token 会返回 401（符合预期，正式使用以 iOS 壳为主）。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
+不要把 API Token 放入 Web build 环境变量：那会把 Token 发布到 JavaScript。iOS 调试壳（WKWebView）在服务器设置中填写 HTTPS 地址与同一个 Token，由壳把 Token 注入页面与 HealthKit 同步请求。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
+
+### 浏览器匿名只读（可选）
+
+默认（`RAI_PUBLIC_HOSTS` 留空）每个 `/v1` 请求都要 Token，桌面浏览器打开站点能加载页面但数据请求返回 401。若希望**浏览器不配置令牌就能看数据**，在 `/etc/rai/rai.env` 里设：
+
+```bash
+RAI_PUBLIC_HOSTS=api.example.com
+```
+
+效果与边界：
+
+- **公开**：`server.ts` 里 `publicReadRoutes` 列举的读接口 —— 训练列表与详情、GPS 轨迹序列、趋势、统计、训练分区、预测、移动端课表等。前端所有展示页因此无需令牌即可渲染。
+- **仍需 Token**：所有写请求（`POST/PUT/PATCH/DELETE`），以及 `GET /v1/backups/:name`（直接下载整个 SQLite 库）、`GET /v1/import-sources/*`（返回服务器文件系统路径）、`GET /v1/diagnostics`、`GET /v1/openapi.json`、`GET /v1/jobs*`、`GET /v1/import-jobs*`。
+- Host 白名单与只读白名单**同时生效**：伪造其它 Host 的匿名读仍返回 401，DNS-rebinding 防护不退化。
+- 🔴 这是**隐私降级**：轨迹序列含起终点坐标，等价于公开常跑路线与居住区域。仅在你能接受「知道域名的人都能看到这些数据」时开启。
+- 配套限速在 `deploy/nginx-rai.conf` 的 `limit_req_zone`（5 r/s + burst 100），读接口公开后它是防批量抓取与流量包超额的第一道闸，不要单独关掉。
 
 ## 验证
 
 ```bash
 sudo systemctl status rai-api --no-pager
 sudo journalctl -u rai-api -n 100 --no-pager
+# 启动日志会打印匿名只读是否开启（"Anonymous read enabled/disabled"），
+# 这是判断 RAI_PUBLIC_HOSTS 是否真的生效的唯一可靠方式。
 curl -fsS https://api.example.com/v1/health -H "Authorization: Bearer $TOKEN"
+# 匿名只读开启后（无 Authorization 头）：
+curl -fsS https://api.example.com/v1/health          # 期望 200
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/backups   # 期望 401
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: attacker.example' https://api.example.com/v1/health  # 期望 401
 # SPA 与深链接
 curl -fsSI https://api.example.com/
 curl -fsSI https://api.example.com/settings
