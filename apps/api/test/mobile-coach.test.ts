@@ -7,6 +7,7 @@ import {
   abilityExplanation,
   buildInjuryFlags,
   buildPostRun,
+  buildRaceCard,
   buildSessionStructure,
   buildWeekPlan,
   decideDayPhase,
@@ -544,4 +545,26 @@ test("a locked snapshot is re-measured, and today's card matches the executable 
     planRevision: 0
   });
   assert.equal(plan.days[0]?.distanceKm, measured);
+});
+
+
+test("race card explains default distance and refreshes countdown and taper from the target", () => {
+  const empty = buildRaceCard(base());
+  assert.equal(empty.target, null);
+  assert.equal(empty.daysUntil, null);
+  assert.equal(empty.taper, false);
+  assert.match(empty.note, /默认按 10 公里/);
+  const target = { date: "2026-09-10", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
+  const near = buildRaceCard({ ...base(), raceTarget: target });
+  assert.deepEqual(near.target, target);
+  assert.equal(near.daysUntil, 7);
+  assert.equal(near.taper, true);
+  const far = buildRaceCard({ ...base(), raceTarget: { ...target, date: "2026-12-06" } });
+  assert.equal(far.taper, false);
+  assert.match(far.note, /赛事准备度 60%/);
+  assert.doesNotMatch(far.note, /体型|专项形态/);
+  const expired = buildRaceCard({ ...base(), raceTarget: { ...target, date: "2026-09-01" } });
+  assert.equal(expired.daysUntil, -2);
+  assert.equal(expired.taper, false);
+  assert.match(expired.note, /已过期/);
 });

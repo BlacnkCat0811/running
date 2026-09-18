@@ -1006,21 +1006,21 @@ export function buildRaceCard(input: CoachInput): MobileRaceCard {
       shapeScore: input.raceShapeScore,
       volumeFraction: input.raceVolumeFraction,
       longRunFraction: input.raceLongRunFraction,
-      note: "还没有目标赛事。设一个日期和距离后，首页会给出倒计时和专项形态。"
+      note: "还没有目标赛事，请在计划页设置比赛日期和距离。当前准备度默认按 10 公里计算。"
     };
   }
   const days = daysUntil(input.today, target.date);
   const taper = days != null && days >= 0 && days <= 14;
   const distanceLabel = target.distance === "five_k" ? "5 公里" : target.distance === "ten_k" ? "10 公里" : "半程马拉松";
-  let note = days == null
+  let note = days == null || days < 0
     ? `${distanceLabel}目标已过期。`
     : `距 ${distanceLabel} 还有 ${days} 天。`;
   if (input.raceShapeScore != null && input.raceShapeScore < 0.55) {
-    note += " 专项形态还不够：缺的是这条距离的周量和长课，不是再加 VO₂。";
+    note += " 赛事准备度还不足：缺的是这条距离的周量和长课，不是再加 VO₂。";
   } else if (taper) {
     note += " 进入减量：量降 20–40%，不再拉新的最长距离。";
   } else if (input.raceShapeScore != null) {
-    note += ` 专项形态 ${Math.round(input.raceShapeScore * 100)}%。能力够不等于这条距离练够。`;
+    note += ` 赛事准备度 ${Math.round(input.raceShapeScore * 100)}%。能力够不等于这条距离练够。`;
   }
   return {
     target,
