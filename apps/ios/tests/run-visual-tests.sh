@@ -68,13 +68,32 @@ xcrun simctl bootstatus "$device" -b > "$out/simulator.log"
 xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
 # Build the CocoaPods workspace: the AMap SDK arrives as a pod, so the bare
 # project fails to link (ld: framework 'Pods_RAI' not found).
+#
+# `RAI_XCODEBUILD_SWIFT_FLAGS` 默认留空：普通本机 / CI 构建应保留 swift-driver 自己的
+# 沙箱。只有当这条脚本跑在**会拒绝嵌套沙箱**的外层环境里（WorkBuddy 等加固沙箱）才需要
+# `-disable-sandbox` —— 否则 swift-driver 把 `swift-plugin-server`（宏插件宿主）包进
+# `sandbox-exec`，插件直接死掉，每个 `@Observable` 都报 `produced malformed response`，
+# 再级联几十条假的 `no exact matches in call to initializer`，看起来像满屏源码错误。
+# 用法：`RAI_XCODEBUILD_SWIFT_FLAGS=-disable-sandbox bash apps/ios/tests/run-visual-tests.sh`
+# 判据：加了之后 `grep -c 'produced malformed response' <out>/build.log` 应从 >0 变成 0。
+# ⚠️ `$(inherited)` 必须是字面量（xcodebuild 的 build setting 引用），故用单引号转义；
+#    整个 `KEY=VALUE` 必须作为**一个** argv 传进去，所以走数组而不是字符串拼接。
+swift_flag_args=()
+if [ -n "${RAI_XCODEBUILD_SWIFT_FLAGS:-}" ]; then
+  swift_flag_args+=("OTHER_SWIFT_FLAGS=\$(inherited) $RAI_XCODEBUILD_SWIFT_FLAGS")
+fi
+# ⚠️ bash 3.2（macOS 自带）+ `set -u` 下，空数组的 `"${arr[@]}"` 会抛 unbound variable
+# ⇒ 必须用 `${arr[@]+"${arr[@]}"}` 这个惯用法，不能直接展开。
 xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI -configuration Debug -sdk iphonesimulator \
-  -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RAI_VISUAL_DERIVED_DATA:-$out/derived}" CODE_SIGNING_ALLOWED=NO build > "$out/build.log" 2>&1
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath "${RAI_VISUAL_DERIVED_DATA:-$out/derived}" \
+  CODE_SIGNING_ALLOWED=NO ${swift_flag_args[@]+"${swift_flag_args[@]}"} \
+  build > "$out/build.log" 2>&1
 xcrun simctl install "$device" "${RAI_VISUAL_DERIVED_DATA:-$out/derived}/Build/Products/Debug-iphonesimulator/RAI.app"
 set +e
 xcodebuild -project apps/ios/tests/VisualAcceptance.xcodeproj -scheme VisualAcceptance \
   -destination "platform=iOS Simulator,id=$device" -derivedDataPath "${RAI_VISUAL_TEST_DERIVED_DATA:-$out/test-derived}" \
-  -resultBundlePath "$out/tests.xcresult" CODE_SIGNING_ALLOWED=NO "$@" test > "$out/ui-tests.log" 2>&1
+  -resultBundlePath "$out/tests.xcresult" CODE_SIGNING_ALLOWED=NO \
+  ${swift_flag_args[@]+"${swift_flag_args[@]}"} "$@" test > "$out/ui-tests.log" 2>&1
 status=$?
 set -e
 xcrun xcresulttool export attachments --path "$out/tests.xcresult" --output-path "$out/attachments"
