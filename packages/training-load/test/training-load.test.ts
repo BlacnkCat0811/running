@@ -9,7 +9,9 @@ import {
   buildCalendarPeriodSummary,
   buildRollingPeriodSummary,
   calculateWorkoutTrainingLoad,
+  classifyPhysState,
   classifyTrainingStatus,
+  countNightsBelowSleepBaseline,
   heartRateReserve,
   latestAcuteChronicLoadRatio,
   localDateInTimeZone,
@@ -292,4 +294,47 @@ test("builds deterministic adjacent rolling summaries", () => {
   const summary = buildRollingPeriodSummary([recent, previous], "2026-07-10", 7);
   assert.equal(summary.distanceMeters, 6000);
   assert.equal(summary.comparison?.distanceChangeFraction, 1);
+});
+
+const phys = (overrides: Partial<Parameters<typeof classifyPhysState>[0]> = {}) => classifyPhysState({
+  sleepMinutes: null, sleepBaselineMinutes: null,
+  hrvSdnnMs: null, hrvBaselineMs: null,
+  rhrBpm: null, rhrBaselineBpm: null,
+  nightsBelowSleepBaseline: 0,
+  ...overrides
+});
+
+test("physiological state never falls back to a negative verdict", () => {
+  // No comparable evidence at all is unknown.
+  assert.equal(phys(), "unknown");
+  // Partial coverage that matches no named rule is insufficient evidence, not
+  // "reduced": 0.80 of baseline sleep with no usable HRV/RHR has no defined
+  // physiological meaning, so the classifier must not invent one.
+  assert.equal(phys({ sleepMinutes: 344, sleepBaselineMinutes: 430 }), "unknown");
+  assert.equal(phys({ hrvSdnnMs: 46, hrvBaselineMs: 52 }), "unknown");
+  // A resting heart rate at or barely above baseline is not evidence either.
+  assert.equal(phys({ rhrBpm: 54, rhrBaselineBpm: 53 }), "unknown");
+});
+
+test("physiological state keeps every named rule it had", () => {
+  assert.equal(phys({ sleepMinutes: 300, sleepBaselineMinutes: 430 }), "reduced");
+  assert.equal(phys({ hrvSdnnMs: 40, hrvBaselineMs: 52, rhrBpm: 56, rhrBaselineBpm: 53 }), "reduced");
+  assert.equal(phys({ sleepMinutes: 300, sleepBaselineMinutes: 430, hrvSdnnMs: 40, hrvBaselineMs: 52, rhrBpm: 56, rhrBaselineBpm: 53 }), "depleted");
+  assert.equal(phys({ sleepMinutes: 400, sleepBaselineMinutes: 430 }), "recovered_phys");
+  assert.equal(phys({ hrvSdnnMs: 50, hrvBaselineMs: 52, rhrBpm: 52, rhrBaselineBpm: 53 }), "recovered_phys");
+  // Three low nights stay a depleted signal regardless of the ratios.
+  assert.equal(phys({ sleepMinutes: 400, sleepBaselineMinutes: 430, nightsBelowSleepBaseline: 3 }), "depleted");
+});
+
+test("low-night streak counts only recorded nights in its own window", () => {
+  const night = (minutes: number | null) => ({ asleepUnionMinutes: minutes });
+  assert.equal(countNightsBelowSleepBaseline([night(300), night(300), night(300)], 430), 3);
+  // A gap day carries no reading: it neither extends the streak nor counts as a
+  // low night. 0.8 x baseline is the boundary and exactly at it is not low.
+  assert.equal(countNightsBelowSleepBaseline([night(300), null, night(300)], 430), 2);
+  assert.equal(countNightsBelowSleepBaseline([night(344), night(343.9), night(400)], 430), 1);
+  assert.equal(countNightsBelowSleepBaseline([null, null, null], 430), 0);
+  // Without a usable baseline there is no streak to report.
+  assert.equal(countNightsBelowSleepBaseline([night(300), night(300), night(300)], null), 0);
+  assert.equal(countNightsBelowSleepBaseline([night(300), night(300), night(300)], 0), 0);
 });

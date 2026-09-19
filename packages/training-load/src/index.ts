@@ -31,13 +31,19 @@ export function classifyPhysState(input: {
   const sleepRatio = input.sleepMinutes != null && input.sleepBaselineMinutes != null && input.sleepBaselineMinutes > 0 ? input.sleepMinutes / input.sleepBaselineMinutes : null;
   const hrvRatio = input.hrvSdnnMs != null && input.hrvBaselineMs != null && input.hrvBaselineMs > 0 ? input.hrvSdnnMs / input.hrvBaselineMs : null;
   const rhrRatio = input.rhrBpm != null && input.rhrBaselineBpm != null && input.rhrBaselineBpm > 0 ? input.rhrBpm / input.rhrBaselineBpm : null;
+  // No comparable evidence at all is not a negative finding.
   if (sleepRatio == null && hrvRatio == null && rhrRatio == null) return "unknown";
   if (input.nightsBelowSleepBaseline >= 3) return "depleted";
   const rhrUp = rhrRatio != null && rhrRatio > 1.03;
   if (sleepRatio != null && sleepRatio < 0.75 && hrvRatio != null && hrvRatio < 0.85 && rhrUp) return "depleted";
   if ((sleepRatio != null && sleepRatio < 0.75) || (hrvRatio != null && hrvRatio < 0.85 && rhrUp)) return "reduced";
   if ((sleepRatio != null && sleepRatio >= 0.9) || (hrvRatio != null && hrvRatio >= 0.9) || (rhrRatio != null && rhrRatio <= 1)) return "recovered_phys";
-  return "reduced";
+  // Neither a named positive nor a named negative rule matched. Falling back to
+  // "reduced" here turned partial coverage into a negative physiological verdict:
+  // a night at 0.80 of baseline with no baseline-comparable HRV/RHR reported as
+  // "recovery insufficient". Missing/partial evidence only removes grounds for a
+  // judgement; it never adds evidence against the athlete.
+  return "unknown";
 }
 
 export interface HeartRateSample { heartRate: number; durationSeconds: number; startOffsetSeconds?: number }
