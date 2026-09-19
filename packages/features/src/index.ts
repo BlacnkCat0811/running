@@ -1,3 +1,4 @@
+import { SpeedWindows } from "./speed-windows.js";
 import {
   assertWorkoutFeatureVector,
   type EligibilityStatus,
@@ -161,7 +162,7 @@ interface SessionTypeEvidence {
   elapsedDurationSeconds: number;
   distanceKm: number | null;
   speedCv: number | null;
-  speedSamples: TimedSeriesSample[];
+  speedWindows: SpeedWindows;
   heartRateReserveFraction: number | null;
   confirmedRace: boolean;
 }
@@ -176,49 +177,13 @@ function percentile(values: number[], fraction: number): number | null {
   return (sorted[lower] ?? 0) * (1 - weight) + (sorted[upper] ?? 0) * weight;
 }
 
-function summarizeSpeedWindow(
-  samples: TimedSeriesSample[],
-  start: number,
-  end: number
-): { weightedValue: number; coveredSeconds: number } {
-  const overlaps = samples.flatMap((sample) => {
-    const overlapStart = Math.max(start, sample.startOffsetSeconds);
-    const overlapEnd = Math.min(end, sample.startOffsetSeconds + sample.durationSeconds);
-    return overlapEnd > overlapStart
-      ? [{ start: overlapStart, end: overlapEnd, value: sample.value }]
-      : [];
-  });
-  const boundaries = [...new Set(overlaps.flatMap((overlap) => [overlap.start, overlap.end]))]
-    .sort((left, right) => left - right);
-  let weightedValue = 0;
-  let coveredSeconds = 0;
-  for (let index = 1; index < boundaries.length; index += 1) {
-    const segmentStart = boundaries[index - 1] ?? start;
-    const segmentEnd = boundaries[index] ?? segmentStart;
-    const active = overlaps.filter(
-      (overlap) => overlap.start < segmentEnd && overlap.end > segmentStart
-    );
-    if (active.length === 0) continue;
-    const segmentSeconds = segmentEnd - segmentStart;
-    const segmentValue = active.reduce((sum, overlap) => sum + overlap.value, 0) / active.length;
-    weightedValue += segmentValue * segmentSeconds;
-    coveredSeconds += segmentSeconds;
-  }
-  return { weightedValue, coveredSeconds };
-}
-
 function smoothedSpeedCoefficientOfVariation(
-  samples: TimedSeriesSample[],
+  windows: SpeedWindows,
   activeDurationSeconds: number,
   elapsedDurationSeconds: number,
   minimumCoverage: number
 ): number | null {
-  const valid = samples.filter((sample) =>
-    Number.isFinite(sample.value) && sample.value > 0 &&
-    Number.isFinite(sample.startOffsetSeconds) && sample.startOffsetSeconds >= 0 &&
-    Number.isFinite(sample.durationSeconds) && sample.durationSeconds > 0
-  );
-  if (valid.length === 0 || activeDurationSeconds <= 0) return null;
+  if (windows.empty || activeDurationSeconds <= 0) return null;
 
   const values: number[] = [];
   let totalCoveredSeconds = 0;
@@ -227,8 +192,7 @@ function smoothedSpeedCoefficientOfVariation(
     start + SPEED_STABILITY_WINDOW_SECONDS <= elapsedDurationSeconds;
     start += SPEED_STABILITY_WINDOW_SECONDS
   ) {
-    const { weightedValue, coveredSeconds } = summarizeSpeedWindow(
-      valid,
+    const { weightedValue, coveredSeconds } = windows.summarize(
       start,
       start + SPEED_STABILITY_WINDOW_SECONDS
     );
@@ -245,24 +209,19 @@ function smoothedSpeedCoefficientOfVariation(
 }
 
 function hasRepeatedIntervalStructure(
-  samples: TimedSeriesSample[],
+  windows: SpeedWindows,
   activeDurationSeconds: number,
   elapsedDurationSeconds: number,
   minimumCoverage: number
 ): boolean {
   const binSeconds = 30;
-  const valid = samples.filter((sample) =>
-    Number.isFinite(sample.value) && sample.value > 0 &&
-    Number.isFinite(sample.startOffsetSeconds) && sample.startOffsetSeconds >= 0 &&
-    Number.isFinite(sample.durationSeconds) && sample.durationSeconds > 0
-  );
-  if (valid.length === 0) return false;
+  if (windows.empty) return false;
 
   const duration = Math.max(0, elapsedDurationSeconds);
   const bins: Array<number | null> = [];
   let totalCoveredSeconds = 0;
   for (let start = 0; start + binSeconds <= duration; start += binSeconds) {
-    const { weightedValue, coveredSeconds } = summarizeSpeedWindow(valid, start, start + binSeconds);
+    const { weightedValue, coveredSeconds } = windows.summarize(start, start + binSeconds);
     totalCoveredSeconds += coveredSeconds;
     bins.push(coveredSeconds >= binSeconds * 0.6 ? weightedValue / coveredSeconds : null);
   }
@@ -315,7 +274,7 @@ function automaticSessionType(
     evidence.speedCv !== null &&
     evidence.speedCv >= config.intervalSpeedCvThreshold &&
     hasRepeatedIntervalStructure(
-      evidence.speedSamples,
+      evidence.speedWindows,
       evidence.durationSeconds,
       evidence.elapsedDurationSeconds,
       config.minimumIntervalSpeedCoverage
@@ -516,9 +475,10 @@ export function extractWorkoutFeatureVector(
     (source.distanceKm !== null && source.durationSeconds > 0
       ? (source.distanceKm * 1000) / source.durationSeconds
       : null);
+  const speedWindows = new SpeedWindows(source.speedSamples ?? []);
   const speedCoefficientOfVariation =
     smoothedSpeedCoefficientOfVariation(
-      source.speedSamples ?? [],
+      speedWindows,
       source.durationSeconds,
       Math.max(
         source.durationSeconds,
@@ -555,7 +515,7 @@ export function extractWorkoutFeatureVector(
       : source.durationSeconds,
     distanceKm: source.distanceKm,
     speedCv: speedCoefficientOfVariation,
-    speedSamples: source.speedSamples ?? [],
+    speedWindows,
     heartRateReserveFraction: hrr,
     confirmedRace: source.override?.performanceProtocol === "half_marathon_race" ||
       source.override?.performanceProtocol === "other_race"
