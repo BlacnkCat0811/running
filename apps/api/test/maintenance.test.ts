@@ -1144,7 +1144,12 @@ test("keeps the candidate active when moving the original rollback back fails", 
 });
 
 test("keeps a genuinely locked rollback as a visible backup after commit", {
+  // 只有 Windows 会真的锁住一个被打开的库文件：POSIX 下 rename 一个仍被打开的
+  // 文件是合法的，于是"回滚重命名失败"这个分支根本无法在本机复现。这不是环境
+  // 噪音，而是被测行为本身不可用——所以写明理由而不是留一个裸布尔值。
   skip: process.platform !== "win32"
+    ? "Windows-only: POSIX can rename an open database, so the locked-rollback path cannot be reproduced here"
+    : false
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-maintenance-locked-rollback-"));
   const databasePath = join(root, "rai.sqlite");
