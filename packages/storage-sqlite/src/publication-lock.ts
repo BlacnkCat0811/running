@@ -12,12 +12,25 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-interface PublicationLockOwner {
+export interface PublicationLockOwner {
   token: string;
   pid: number;
   kind: "api" | "cli";
   startedAt: string;
   processIdentity?: string | null;
+}
+
+/**
+ * The platform lookups the liveness rule depends on: Linux reads `/proc`, Windows shells
+ * out to powershell, everything else runs `ps`. Injecting them is what makes the rule
+ * testable — a hardened sandbox denies all three (`operation not permitted: ps`), so the
+ * *identity* branch below had no execution path on macOS at all: the integration case
+ * could only skip. A probe that cannot read returns `null`, which the rule must read as
+ * "cannot prove the owner is gone" — i.e. keep refusing, never reclaim on a guess.
+ */
+export interface ProcessProbe {
+  identity(pid: number): string | null;
+  startedAt(pid: number): number | null;
 }
 
 interface ExistingPublicationLock {
@@ -62,6 +75,16 @@ function currentProcessIdentity(): string | null {
   return cachedCurrentProcessIdentity;
 }
 
+/** The production probe. `processIsAlive` defaults to it; tests inject their own. */
+const platformProbe: ProcessProbe = {
+  identity(pid: number) {
+    // Own identity is cached: every acquisition writes it into the owner record, and the
+    // probe shells out, so an uncached call would pay for it on each acquisition.
+    return pid === process.pid ? currentProcessIdentity() : readProcessIdentity(pid);
+  },
+  startedAt: readProcessStartedAt
+};
+
 function readProcessStartedAt(pid: number): number | null {
   try {
     if (pid === process.pid) return Date.now() - process.uptime() * 1000;
@@ -84,7 +107,14 @@ function readProcessStartedAt(pid: number): number | null {
   }
 }
 
-function processIsAlive(owner: Partial<PublicationLockOwner>): boolean {
+/**
+ * The whole "reclaim or refuse" rule for an existing lock. Exported so it can be pinned
+ * with an injected probe on every platform, not only where `/proc` or `ps` happens to work.
+ */
+export function processIsAlive(
+  owner: Partial<PublicationLockOwner>,
+  probe: ProcessProbe = platformProbe
+): boolean {
   const pid = owner.pid;
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -93,12 +123,12 @@ function processIsAlive(owner: Partial<PublicationLockOwner>): boolean {
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
   if (owner.processIdentity) {
-    const currentIdentity = pid === process.pid ? currentProcessIdentity() : readProcessIdentity(pid);
+    const currentIdentity = probe.identity(pid);
     return currentIdentity === null || currentIdentity === owner.processIdentity;
   }
   if (typeof owner.startedAt === "string") {
     const recordedAt = Date.parse(owner.startedAt);
-    const processStartedAt = readProcessStartedAt(pid);
+    const processStartedAt = probe.startedAt(pid);
     if (Number.isFinite(recordedAt) && processStartedAt !== null && processStartedAt > recordedAt + 2_000) {
       return false;
     }

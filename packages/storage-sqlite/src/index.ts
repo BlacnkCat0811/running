@@ -1,4 +1,9 @@
-export { acquireDatabasePublicationLock } from "./publication-lock.js";
+export {
+  acquireDatabasePublicationLock,
+  processIsAlive,
+  type ProcessProbe,
+  type PublicationLockOwner
+} from "./publication-lock.js";
 export {
   publishDatabaseFile,
   type DatabaseFilePublication,

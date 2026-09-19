@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-import { acquireDatabasePublicationLock } from "../src/index.js";
+import { acquireDatabasePublicationLock, processIsAlive, type ProcessProbe } from "../src/index.js";
 
 test("publication lock owns its lifecycle and rejects a live owner", () => {
   const root = mkdtempSync(join(tmpdir(), "rai-publication-lock-"));
@@ -213,4 +213,55 @@ test("publication lock detects PID reuse for a legacy owner from startedAt", () 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// The three cases below pin `processIsAlive` — the whole "reclaim or refuse" decision —
+// with an injected probe. They exist because the two integration cases above can only
+// reach the *identity* branch where the platform probe works (`/proc`, powershell, `ps`),
+// and a hardened sandbox denies all three; there, the case above skips and the identity
+// branch had no execution path at all. The consequence is concrete: the API holds this
+// lock for its entire lifetime (`server.ts` acquires it at startup and releases it on
+// exit), which is exactly what stops a CLI import from running against a database the API
+// is already using — so declaring a live owner "stale" would let an import rewrite rows
+// under a serving API, including mid-restore. That rule is worth pinning everywhere, not
+// only where the probe happens to answer.
+function probeOf(identity: string | null, startedAt: number | null = null): ProcessProbe {
+  return { identity: () => identity, startedAt: () => startedAt };
+}
+
+test("publication lock reclaims a reused PID only when the identity proves it", () => {
+  const owner = { pid: process.pid, processIdentity: "macos:Mon Sep 15 10:00:00 2025" };
+  assert.equal(processIsAlive(owner, probeOf("macos:Mon Sep 15 10:00:00 2025")), true,
+    "an unchanged identity means the recorded owner is still the running process");
+  assert.equal(processIsAlive(owner, probeOf("macos:Tue Sep 16 09:00:00 2025")), false,
+    "a different identity means the PID was reused and the lock may be reclaimed");
+  assert.equal(processIsAlive(owner, probeOf(null)), true,
+    "a probe that cannot read is not evidence the owner is gone, so refuse");
+});
+
+test("publication lock falls back to startedAt only when no identity was recorded", () => {
+  const recordedAt = Date.parse("2025-09-15T10:00:00.000Z");
+  const owner = { pid: process.pid, startedAt: "2025-09-15T10:00:00.000Z" };
+  assert.equal(processIsAlive(owner, probeOf("linux:irrelevant", recordedAt + 60_000)), false,
+    "a process that started a minute later cannot be the recorded owner");
+  assert.equal(processIsAlive(owner, probeOf("linux:irrelevant", recordedAt + 1_000)), true,
+    "a start time inside the 2s skew window is not evidence of reuse");
+  assert.equal(processIsAlive(owner, probeOf("linux:irrelevant", recordedAt - 60_000)), true,
+    "an earlier start time still matches the recorded owner");
+  assert.equal(processIsAlive(owner, probeOf("linux:irrelevant", null)), true,
+    "without a start time the owner cannot be proven gone, so refuse");
+  assert.equal(processIsAlive(
+    { pid: process.pid, startedAt: "2025-09-15T10:00:00.000Z", processIdentity: "macos:x" },
+    probeOf("macos:x", recordedAt + 60_000)
+  ), true, "a recorded identity decides the question; startedAt must not override it");
+});
+
+test("publication lock refuses a malformed owner and treats EPERM as alive", () => {
+  const probe = probeOf(null);
+  assert.equal(processIsAlive({}, probe), false, "a missing pid cannot be reclaimed");
+  assert.equal(processIsAlive({ pid: 0 }, probe), false);
+  assert.equal(processIsAlive({ pid: -1 }, probe), false);
+  assert.equal(processIsAlive({ pid: 1.5 }, probe), false, "a non-integer pid is not a process");
+  assert.equal(processIsAlive({ pid: 1 }, probe), true,
+    "EPERM means the process exists but is not ours — still alive");
 });
