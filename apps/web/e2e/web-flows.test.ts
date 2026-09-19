@@ -180,7 +180,7 @@ async function importSyntheticFixture(api: RunningApi, sourceId: string): Promis
     },
     body: JSON.stringify({ sourceId }),
   });
-  assert.equal(response.status, 200, await response.text());
+  assert.equal(response.status, 202, await response.text());
   await waitForImport(api.origin);
 }
 
