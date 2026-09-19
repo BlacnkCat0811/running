@@ -53,6 +53,22 @@ final class VisualAcceptance: XCTestCase {
         XCTFail("Expected fully visible target: \(element)")
     }
 
+    /// Scroll until the page stops moving. `scrollTo` returns as soon as its target is
+    /// centred, which is not the same as the bottom of the content — and the claim under
+    /// test ("the last card clears the bottom bar") only means anything at the real bottom.
+    func scrollToBottom(_ anchor: XCUIElement, limit: Int = 30) {
+        var previous = CGFloat.greatestFiniteMagnitude
+        for _ in 0..<limit {
+            dragContent(up: true)
+            guard anchor.exists else { continue }
+            let current = anchor.frame.minY
+            if abs(current - previous) < 0.5 { return }
+            previous = current
+        }
+        capture("bottom-never-settled")
+        XCTFail("The page kept moving after \(limit) drags; the bottom never settled")
+    }
+
     // Drag the page gutter, not the map/charts, which legitimately own pan gestures.
     func dragContent(up: Bool) {
         let startY: CGFloat = app.keyboards.count > 0 ? 0.45 : (up ? 0.70 : 0.35)
@@ -230,11 +246,26 @@ final class VisualAcceptance: XCTestCase {
         XCTAssertTrue(app.navigationBars["训练计划"].exists, "A short, slow edge gesture must be cancellable")
         app.buttons["navigation.back"].tap()
         XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 10))
-        scrollTo(app.buttons["today.body"])
-        let target = app.buttons["today.body"]
-        XCTAssertTrue(target.isHittable)
-        XCTAssertLessThanOrEqual(target.frame.maxY, app.buttons["tab.设置"].frame.minY,
-                                 "Last content must clear the bottom bar without manual tab-height padding")
+        // `15e8126` moved the weekly/body entries into the header and updated
+        // `test01TodayAndBody` for it, but missed this call. `scrollTo` only returns once
+        // the target's midY is in [115, bottom-25), and a header entry sits at ~93 no
+        // matter how far the page scrolls — so the loop ran to its limit and failed on
+        // every run since. Reaching them no longer needs scrolling, so hittability is
+        // the whole check.
+        XCTAssertTrue(app.buttons["today.body"].isHittable)
+        // The claim is that the LAST content on 今日 clears the bottom bar. `raceSummary`
+        // is that content and now carries `today.race`, so the assertion can name it
+        // instead of a mid-page stand-in. Scrolling until the page stops moving — not
+        // `scrollTo`, which returns once its target is merely centred — is what makes this
+        // a bottom-of-page claim: the moment `TechTabBar` stops reserving layout space and
+        // overlays the content instead, the last card sits under the bar and this is the
+        // assertion that goes red.
+        let lastCard = app.buttons["today.race"]
+        XCTAssertTrue(lastCard.waitForExistence(timeout: 10))
+        scrollToBottom(lastCard)
+        XCTAssertLessThanOrEqual(lastCard.frame.maxY,
+                                 app.buttons["tab.设置"].frame.minY,
+                                 "The last card on 今日 must clear the bottom bar")
         capture("11-home-safe-area")
     }
 
