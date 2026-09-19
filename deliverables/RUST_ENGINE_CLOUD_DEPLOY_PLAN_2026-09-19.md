@@ -239,10 +239,302 @@ node -e "const f='/etc/rai/rai.env';const s=require('fs').readFileSync(f,'utf8')
 | 4 | 🟡 `rust:build` 不支持 `--target` | `scripts/rust-worker.mjs:21` | 若要走 musl 路线，需给脚本加 target 透传 |
 | 5 | 🟡 压峰值 env 会覆盖 `Cargo.toml` 发布配置 | `docs/RUST_DATA_ENGINE.md:67`、skill `rai-deploy` | 明确"压峰值产物 ≠ 仓库声明配置"，并在部署记录里写明用了哪个档 |
 
+**本轮已修**（未提交，待小唐审查）：
+
+- #1 已修：`docs/RUST_DATA_ENGINE.md` 的启用示例改为 `/opt/rai-native/rai-data-worker`；
+  `deploy/rai.env.example:16` 的注释补上"必须与 `RAI_IMPORT_ENGINE=rust` 同批写入"的警告与失败后果。
+  注：本轮实测证明云机上 OOM 未发生，走的是仓库声明的正式发布档，**未使用压峰值档**（#5 的隐患未触发）。
+- #3 已修：`docs/RUST_DATA_ENGINE.md` 构建小节明确写出"`ci.yml` 是 GitHub Actions、远端只有 gitee ⇒ 这套 CI 从不运行"，
+  并把"不能引用 CI 结果当证据"写进判据。
+- #2 已修一半：云端构建与验证的完整步骤已写进 `docs/RUST_DATA_ENGINE.md` 的
+  「云服务器就地构建实录」；`deploy/README-*.md` 仍未并入，留待下次改动时一并处理。
+
 ---
 
-## 六、待拍板
+## 六、拍板结论（已定，2026-09-19）
 
-1. **这批未提交改动怎么提交**（我按主题分组提交 / 你先审查 / 你自己提交）？
-2. **Rust 二进制走哪条路**（本机 musl 先试 / 直接云机就地编译 / 暂不做）？
-3. **是否与重构同批启用 Rust**（我建议：不同批 —— 先部署重构，观察一轮真实导入后再上 Rust）？
+| # | 问题 | 结论 |
+|---|---|---|
+| 1 | 未提交改动怎么提交 | ✅ 小唐已审查并授权代提交：按 5 组主题切分为 6 个 commit，已推 gitee（`06d22d5..6aca9e0`） |
+| 2 | Rust 二进制走哪条路 | ⏩ 先试路线 A（本机 musl），**本机 `brew install zig` 被沙箱拦截后改判为路线 B（云机就地编译）** |
+| 3 | 是否与重构同批启用 Rust | ✅ **不同批**。本次只把二进制就位，`RAI_IMPORT_ENGINE` 不动 |
+
+---
+
+## 七、执行实录（2026-09-19 晚，路线 B 已完成）
+
+### 7.1 已完成动作
+
+| 步骤 | 动作 | 证据 |
+|---|---|---|
+| 前置 | 源码 `git archive origin/main` 导出到 `/opt/rai-native/src` | 不触碰 `/opt/rai` 工作区，其 HEAD 仍为 `06d22d5` |
+| 前置 | `POST /v1/backups` 备份主库 | `rai.manual.2026-09-19T03-38-25-833Z.013e352e.sqlite`，530,530,304 B |
+| 前置 | `systemctl stop rai-api` | 编译期间必须停服，unit 的 `MemoryMax` 管不到 shell 里的 cargo |
+| 工具链 | rustup 经 `rsproxy.cn` 镜像安装 | cargo/rustc **1.98.1**，装在 `/opt/rai-native/{rustup,cargo}` |
+| 依赖 | `CARGO_HOME/config.toml` 配 rsproxy sparse registry | 直连 crates.io 时 `Downloaded` 停在 **41** 个包后零进展 |
+| 构建 | `CARGO_BUILD_JOBS=1 cargo build --release --locked --workspace` | **1m19s，`CARGO_EXIT=0`** |
+| 产物 | `install -m 0755 … /opt/rai-native/rai-data-worker` | 2,618,904 B，ELF x86-64 PIE，stripped |
+| 验证 | `--version` + 真实 `health` operation + spool 只读回读 | 见 7.2 |
+| 恢复 | `systemctl start rai-api` + 健康检查 | `status=ok`、`databaseReady=true` |
+
+### 7.2 验证证据（两条链，缺一不算过）
+
+```text
+$ /opt/rai-native/rai-data-worker --version
+{"protocol":1,"engine":"rust","version":"0.1.0"}
+   ↑ 与 TS 侧 native-worker.ts:9/10 的 NATIVE_PROTOCOL=1 / NATIVE_VERSION="0.1.0" 逐字段对齐
+
+$ /opt/rai-native/rai-data-worker --operation health --input smoke.xml --output /tmp/smoke-spool.sqlite
+{"rows":2,"inputBytes":470,"sha256":"ec234d32…","protocol":1,"engine":"rust",
+ "version":"0.1.0","operation":"health","durationMs":0.632891,"peakRssKiB":4352}
+EXIT=0
+
+# node:sqlite 只读打开产物 spool，确认写链真的落地
+units=2   agg=0
+```
+
+`ldd` 输出只有 `libgcc_s` / `libm` / `libc`，**没有 `libsqlite3`** ——
+`rusqlite` 的 `bundled` 特性已把 SQLite 静态链进二进制。
+就地编译让 libc ABI 与运行机完全一致，musl 路线要解决的 glibc 版本问题在此不存在。
+
+### 7.3 🔴 两个原计划没料到的坑
+
+| 坑 | 现象 | 处置 |
+|---|---|---|
+| **crates.io 全链不可用** | `Updating crates.io index` 能过，但 `Downloaded` 到 41 个包后完全停住（20 s 内 cache 目录 0 MB 增长） | 必须给 `CARGO_HOME` 配 rsproxy sparse registry；配后 25 s 内即进入 `Compiling` |
+| **预期 OOM 没有发生** | 担心 `rusqlite bundled` + `lto="thin"` + `codegen-units=1` 打爆 2 GiB | 实测峰值远低于 700 MiB、swap 未用 ⇒ **不需要**压峰值配置，走的是仓库声明的正式发布档（`lto=thin`+`cgu=1`），这一点比原方案更有利 |
+
+### 7.4 🔴 启用时最容易踩的坑（本次刻意未执行）
+
+`nativeBinary()` 的默认值是相对**仓库根**的 `target/release/rai-data-worker`。
+在云机上实测解析结果为：
+
+```text
+/opt/rai/target/release/rai-data-worker     ← 该目录不存在（ls: No such file or directory）
+```
+
+而产物刻意装在 `/opt/rai-native/rai-data-worker`（仓库外，避免被下次部署覆盖）。
+⇒ **只设 `RAI_IMPORT_ENGINE=rust` + `RAI_RUST_FALLBACK=none` 而不设 `RAI_RUST_BINARY`，
+`server.ts` 会在模块顶层抛错，API 直接起不来**；既不是回退到 TS，也不是 exit 78。
+
+### 7.5 当前线上状态
+
+| 项 | 值 |
+|---|---|
+| `/opt/rai` HEAD | `06d22d5`（**未更新**，本轮 6 个 commit 未部署） |
+| `rai-api` | `active`，健康检查 `status=ok` / `databaseReady=true` |
+| 导入引擎 | `RAI_IMPORT_ENGINE` 未设置 ⇒ 实际跑 **typescript** |
+| 启动日志 | `publicReadRoutes:26, tokenRequiredReadRoutes:10` |
+| Rust 二进制 | 已就位并验证：`/opt/rai-native/rai-data-worker`，**未启用** |
+| 磁盘 | 50 G 用 16 G；`/opt/rai-native` 占 869 MiB（工具链 664 M + 构建缓存） |
+
+⚠️ 上表 `publicReadRoutes:26 / tokenRequiredReadRoutes:10` 是**线上旧代码**的值。
+仓库已推的 6 个 commit 里含路由分类调整，部署后这个判据会变——
+下次部署请以新代码的启动日志实际输出为准，不要拿 26/10 当"部署没生效"的判据。
+
+### 7.6 下一步（待小唐拍板）
+
+1. **部署这 6 个 commit**（普通 `pull` + `restart`；`database.ts` 未改 ⇒ 无 schema 迁移）。
+2. **双引擎对照**：`npm run data:benchmark --engine typescript,rust` 在真实数据副本上跑，`fallback=none`，
+   要求 `parity.checked=true && parity.complete=true`。
+3. 对照通过后再改 `/etc/rai/rai.env` 启用（三个变量同批写入）。
+
+---
+
+## 八、部署与启用实录（2026-09-19 13:00，已完成）
+
+### 8.1 部署前判据（实测，非推断）
+
+| 判据 | 实测 | 结论 |
+|---|---|---|
+| `package-lock.json` diff | 空 | 不需要 `npm ci` |
+| `package.json` diff | 只新增 scripts（`rust:build` 等） | 无依赖变化 |
+| `database.ts` diff | 空 | 无 schema 迁移 |
+| `apps/web/src/**` diff | 空（只改了 `e2e/web-flows.test.ts`） | **不需要 build** |
+| 迁移闸门 dry-run | `"pending": []`、`version: 22` | 可直接 restart |
+
+### 8.2 🔴 部署前发现的重大问题：线上 unit 与仓库不一致
+
+`deploy/rai-api.service` 的安装位置是 `/etc/systemd/system/`，**不在 `/opt/rai` 里**
+⇒ `git pull` **永远不会更新它**，仓库改了 unit 也不会自动生效。
+
+| 项 | 线上实际（本次动手前） | 仓库 |
+|---|---|---|
+| `ExecStart` | `/usr/bin/npm run start` | `/usr/bin/node --import tsx apps/api/src/server.ts` |
+| `MemoryMax` / `MemoryHigh` / `MemorySwapMax` | **infinity** | 1400M / 1100M / 512M |
+| `CPUQuotaPerSecUSec` | **infinity** | 150% |
+| `KillMode` | `control-group`（默认） | `mixed` |
+| `UMask` / `TasksMax` / `LimitNOFILE` | 0022 / 2224 / 65536（默认） | 0077 / 128 / 16384 |
+| `TimeoutStopUSec` | `1min 30s`（**systemd 默认值**） | 120s |
+| `ExecStartPre` | 无 | 两条 check |
+| `OOMPolicy=stop` | `stop`（默认值，巧合相同） | `stop` |
+
+⇒ 此前记录的"线上 unit 与仓库逐行一致""线上已有 1400M cgroup 预算"**均为误记**：
+那些值来自**仓库文件**，被当成了线上实测。属「把文档当实测」的同一家族 ——
+这次骗人的不是脚本也不是 workflow，是**配置文件**。
+
+⇒ 处置：`cp -a` 备份到 `/root/rai-api.service.bak.20260919` → `install -m 0644` → `daemon-reload`，
+并用 `systemctl show` 逐项确认生效值（`MemoryMax=1468006400`、`CPUQuotaPerSecUSec=1.5s`、
+`KillMode=mixed`、`UMask=0077`、`TasksMax=128`、`LimitNOFILE=16384`）。
+
+### 8.3 执行顺序（刻意分两次 restart 以分离归因）
+
+1. `pull`：`06d22d5` → `6aca9e0`
+2. 迁移闸门 dry-run → `"pending": []`
+3. 安装新 unit + `daemon-reload`
+4. **restart #1**（引擎仍是 typescript）⇒ 单独验证 unit 变更：`active`、`NRestarts=0`、
+   启动日志路由计数 `publicReadRoutes:26, tokenRequiredReadRoutes:12`（新判据命中）
+5. 备份 env → 追加 4 个变量 → **restart #2** ⇒ `active`、`NRestarts=0`
+
+### 8.4 启用后的验证判据（"API 起来了"是不够的）
+
+🔴 `server.ts:107` 的启动期强校验**只在 `fallback === "none"` 时**才检查二进制是否存在。
+用 `fallback=typescript` 时它**完全不校验** ⇒ API 能启动只能说明 env 取值合法，
+**无法区分引擎是 rust 还是 typescript**；启动日志也不打印引擎。
+⇒ 唯一可靠判据是读运行中进程的实际环境：
+
+```text
+$ tr '\0' '\n' < /proc/$(systemctl show -p MainPID --value rai-api)/environ | grep -E '^RAI_(IMPORT|RUST)'
+RAI_IMPORT_ENGINE=rust
+RAI_IMPORT_VALIDATION_MODE=shadow
+RAI_RUST_FALLBACK=typescript
+RAI_RUST_BINARY=/opt/rai-native/rai-data-worker
+```
+
+同时补了一条**此前漏掉的**验证：根能跑 ≠ 服务身份能跑
+⇒ `sudo -u rai /opt/rai-native/rai-data-worker --version` → `RAI_EXEC=0`。
+
+### 8.5 `RAI_RUST_FALLBACK` 取值：经用户拍板用 `typescript`
+
+| Rust 失败原因 | `fallback=none` | `fallback=typescript` |
+|---|---|---|
+| `unavailable` | `waiting_engine` 排队 | 回退 TS 参考解析器 |
+| `unsupported_xml` | 🔴 任务直接 **`failed`** | 回退 TS 参考解析器 |
+| `invalid_xml` / `resource_limit` | `failed` | `failed`（**不回退**，正确） |
+
+依据：`native-worker.ts:173` 的回退名单 = `unavailable` / `unsupported_xml`，
+且要求 `operation !== "apply-records"`（**应用任何解码行之前**，故不会产生半 Rust 半 TS 数据）；
+而 `import-worker.ts:573` 的 `waitForEngine` 名单 = `unavailable` / `invalid_protocol`。
+两个名单**不重合** ⇒ `unsupported_xml` 在 `none` 下**不进排队而是直接失败**。
+由于"非 ASCII 标签名 / 带实体定义的 DTD / 非标准 GPX 日期"是文档明确预告会发生的情况，
+生产用 `none` 等于把"导入中断"的概率留给真实数据。
+`deploy/rai.env.example` 与 `docs/RUST_DATA_ENGINE.md` 的默认值已相应修正为 `typescript`。
+
+### 8.6 收尾状态
+
+| 项 | 值 |
+|---|---|
+| 线上 HEAD | `6aca9e0` |
+| `rai-api` | `active`、`NRestarts=0`、`ExecMainStatus=0` |
+| 健康检查 | `status=ok`、`databaseReady=true` |
+| cgroup（实测落到进程） | `Memory: 76.2M (high 1.0G / max 1.3G / swap max 512.0M)`，`Tasks: 19 (limit 128)` |
+| 导入引擎 | **rust**，回退 `typescript`，验证 `shadow` |
+| 回滚素材 | unit → `/root/rai-api.service.bak.20260919`；env → `/root/rai.env.bak.20260919`；库 → `rai.manual.2026-09-19T03-38-25…` |
+
+### 8.7 ✅ 真实验证已完成（2026-09-19 14:09，由手机同步触发）
+
+启用后 8 分钟，小唐从手机点了同步。任务 `web_import_mu7zmg4z_2b919db4-…` 结果：
+
+**任务级判据（`GET /v1/import-jobs/latest`）**
+
+```json
+{ "status": "succeeded", "phase": "completed", "error": null,
+  "executionEngine": { "name": "rust", "fallback": "typescript", "version": "0.1.0" },
+  "native": {
+    "health":        { "rustCalls": 1, "typescriptFallbacks": 0, "wallMs": 252.5, "peakRssKiB": 21820 },
+    "apply-records": { "rustCalls": 1, "typescriptFallbacks": 0, "wallMs": 338.8, "peakRssKiB": 31120 },
+    "aggregate":     { "rustCalls": 1, "typescriptFallbacks": 0, "wallMs":  15.8, "peakRssKiB": 15544 }
+  },
+  "summary": { "importMode": "incremental", "insertedWorkouts": 0, "updatedWorkouts": 3,
+               "removedWorkouts": 0, "unchangedWorkouts": 269,
+               "featuresReused": 268, "featuresRecomputed": 4, "durationMs": 67149 } }
+```
+
+⇒ **三个 Rust operation 全部真跑通，`typescriptFallbacks` 三次都是 0** ——
+真实导出里没有触发任何回退，说明数据全是 Rust 支持的标准形式。
+
+**影子对照的证据链**
+
+| 判据 | 值 | 含义 |
+|---|---|---|
+| `validationMode` | `shadow` | 对照开关是开的 |
+| `computeStagesMs.shadowValidation` | **18,318 ms** | 非 0 ⇒ 参考路径**真的跑了**，不是跳过 |
+| 任务 status | `succeeded` | `recompute-pipeline.ts:273` 的抛错分支**未触发** ⇒ 两边结果一致 |
+
+**数据完整性**
+
+`issues: []`；`workouts` 275 不变；`health_records` 113876 → **113877**；
+`0 新增 + 3 更新 + 269 未变 = 272 = trainingSessions` 自洽。Rust 子进程完成后**无残留**。
+
+**阶段耗时（首次拿到真实分布）**
+
+`parseImport` 26.5s · `recompute` 31.4s（内含 shadow 18.3s）· `activation` 4.3s ·
+`backup` 1.9s · `stagingCopy` 1.8s · 合计 67.1s。重算进程峰值 RSS ≈ 300 MiB。
+
+### 8.7b ⚠️ 仍未做的一件事（与上条互补，不是替代）
+
+- **离线 `data:benchmark` 双引擎对照**：云机 `/var/lib/rai/var/imports` 为空，
+  该工具缺 `--input` ⇒ `parity.checked` / `parity.complete` 仍是**未通过**。
+  它与运行时 shadow **互补而非替代**：shadow 只判**一致性**（已过），
+  benchmark 才产出**双引擎性能对比数字**（未得）。
+- ⇒ 想要性能数字，仍需把真实导出放到云机（或在本地对同一份备份）跑一次。
+
+### 8.7c ⚠️ 容量观察（新，值得记住）
+
+本次导入期间整个 unit 的 cgroup 峰值 **`peak: 1.0G`**，已贴到 `MemoryHigh=1100M` 软限；
+`MemoryMax=1400M` **未触及**、无 OOM、无重启、`Tasks 20/128`。
+⇒ 增量导入下余量约 300M。**将来做多月份的一次性全量导入前，应重新评估这个预算**——
+`parseImport` 解析的是完整导出，所以峰值主要由数据规模决定。
+
+### 8.8 回滚（任一条都是一次 restart）
+
+```bash
+# 关引擎
+sed -i 's/^RAI_IMPORT_ENGINE=rust/RAI_IMPORT_ENGINE=typescript/' /etc/rai/rai.env && systemctl restart rai-api
+# 回滚 unit
+install -m 0644 /root/rai-api.service.bak.20260919 /etc/systemd/system/rai-api.service
+systemctl daemon-reload && systemctl restart rai-api
+# 回滚 env
+cp -a /root/rai.env.bak.20260919 /etc/rai/rai.env && systemctl restart rai-api
+# 回滚代码
+sudo -u rai git -C /opt/rai reset --hard 06d22d5 && systemctl restart rai-api
+```
+
+### 8.10 变更：关闭影子对照（14:16，用户决策）
+
+指令原文：`不要开影子对照。直接用rust`。
+
+| 项 | 前 | 后 |
+|---|---|---|
+| `RAI_IMPORT_VALIDATION_MODE` | `shadow` | **`off`** |
+| `RAI_IMPORT_ENGINE` / `RAI_RUST_FALLBACK` / `RAI_RUST_BINARY` | rust / typescript / `/opt/rai-native/rai-data-worker` | **不变** |
+
+执行与验证：
+
+- 改前确认 `GET /v1/import-jobs/active` → `null`（确保重启不会打断任务）
+- 备份到 `/root/rai.env.bak.before-shadowoff.20260919`
+- `sed -i` 替换后核验 `off=1` / `shadow=0`（确认无残留旧行）
+- `systemctl restart rai-api` ⇒ `active`、`NRestarts=0`、`ExecMainStatus=0`
+- 🔴 `/proc/<MainPID>/environ` 确认 `RAI_IMPORT_VALIDATION_MODE=off`（不看配置文件的"应该"，看进程实际环境）
+- 健康检查 `status=ok` / `databaseReady=true`
+
+**这个交换的代价（必须记下来）：**
+
+换回约 **27% 耗时**（18.3s / 67.1s）。失去的是 **「Rust 与 TS 投影一致」的自动校验**。
+⇒ §8.7 那次验证成为**历史证据**，今后不再自动产生。关掉后剩下的保护只有三层：
+
+1. 候选库机制（Rust 仍只写私有候选库，验证通过才发布）
+2. `native-worker.ts:145-163` 的**协议级校验**（行数 / sha256 / metadata 自洽）
+3. `fallback=typescript`（`unsupported_xml` / `unavailable` 回退）
+
+⚠️ **协议级校验只能证明"Rust 报的行数 = 它写进候选库的行数"，不能证明语义正确**。
+例如原生爬升聚合少算某一段，关掉 shadow 后**没有任何自动机制会报警**。
+⇒ `GET /v1/data-summary` 的 `issues: []` 与 `counts` 变化，从"附加核对"升为**主要防线**，
+每次导入后值得扫一眼。
+
+📌 仓库模板 `deploy/rai.env.example` **保持 `RAI_IMPORT_VALIDATION_MODE=shadow`**：
+它被 `apps/api/test/deploy-cloud.test.ts:21` 整行精确匹配钉住，且作为模板应保留更安全的默认。
+⇒ 仓库模板（`shadow`）与线上覆盖值（`off`）**有意不一致**，这是设计允许的（只改线上不破测试）。
+
+📌 **建议**：下次做多月份的一次性全量导入时，临时把 `shadow` 开回来跑一轮，
+确认全量路径下投影仍一致，再关回去。
