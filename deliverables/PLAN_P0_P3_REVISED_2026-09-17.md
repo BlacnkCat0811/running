@@ -334,7 +334,7 @@ const jobId = this.enqueueFullRecompute();
 | 1 | 线上 `MAX(version)` 与 `health_records` 行数 | SSH 只读 node 片段（§3.1 上线序列第 0 步） |
 | 2 | `systemctl show rai-api -p TimeoutStopUSec` | SSH |
 | 3 | 备份实际落点（`/var/lib/rai/var/backups/` vs `/var/lib/rai/backups/`） | SSH `ls` |
-| 4 | `POST /v1/database/restore` 的实际语义（整库替换还是回填？是否停机？） | **需补验**——文档未覆盖，且它是"最终后悔药" |
+| 4 | ~~`POST /v1/database/restore`~~ 的实际语义（整库替换还是回填？是否停机？） | ✅ **已结案（2026-09-19，读码 + 只读线上核验）**。⚠️ **该路径不存在** —— 恢复入口是 `POST /v1/backups/:name/restore`（`server.ts:1513-1533`，实现在 `maintenance.restoreBackup`，`maintenance.ts:257`）。语义：**整库文件级替换**（staging 复制 → `validateRaiDatabaseIdentity` + `quick_check` + `foreign_key_check` → 当前库 move-aside 回滚文件 → 换入），**候选备份会被显式迁移到当前 schema**；**服务进程不停**，但替换窗口内数据库被关闭（route 传 `beforeReplace = () => recoverDatabaseJobs(true)`，之后 `invalidateDatabaseReadiness()` 并重排 workers）；替换前自动落一份 `before-restore` 安全备份（当前库不可读时改为 quarantine 保留原始字节）。请求体必须是 `{"confirmation":"恢复此备份"}`，有任务在跑时 409。线上核验方式：`GET /v1/health` = 200 + `databaseReady:true`，且**当前部署世代（`fda35e8` 及其后）的 `server.ts` 含该路由** |
 | 5 | `packages/features` 是否在 `tsconfig.pure.json` 白名单 | ✅ **已确认在**（读配置） |
 | 6 | `enqueueFullRecompute` 是否对同一时刻去重（决定 P2-A 改判可行性） | ✅ **已结案：完全不去重** —— `service.ts:62→212→recompute-job-repository.ts:20-29` 是**纯 INSERT**，无 `WHERE NOT EXISTS`/upsert/唯一索引；`claimNext():38-63` 逐条 FIFO ⇒ 连存 5 次 RPE = **串行跑 5 遍全量重算**。⇒ P2-A **维持推迟**，且若要解冻，**前置条件是先给存储层加去重/合并语义**（独立改动） |
 
