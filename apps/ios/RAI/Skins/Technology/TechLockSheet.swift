@@ -30,9 +30,11 @@ struct TechLockSheet: View {
                                 techMetricCaption("预计用时", value: today.nextSession.durationMinutes.map { nativeNumber($0, digits: 0) + " min" } ?? "待评估")
                             }
                         }
-                        if today.verdict.stale {
-                            Label("建议已过期，请刷新后再锁定", systemImage: "clock.badge.exclamationmark")
-                                .foregroundStyle(TechColor.yellow)
+                        // 只有真正失败的刷新才挡住锁定。没有今天的恢复记录不再是理由：
+                        // 那是缺一份监测信息，不是"建议过期"。
+                        if today.sync.status == "failed" {
+                            Label("上次同步未完成，请重新同步后再锁定", systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(TechColor.coral)
                         }
                         if let failure {
                             Label(failure, systemImage: "exclamationmark.circle")
@@ -40,7 +42,7 @@ struct TechLockSheet: View {
                         }
                         TechPrimaryButton(title: today.lock.present ? "今日安排已锁定" : "锁定课程",
                                           systemName: "lock", isBusy: native.isLockingSession,
-                                          isDisabled: native.isOffline || today.verdict.stale || today.lock.present) {
+                                          isDisabled: native.isOffline || today.sync.status == "failed" || today.lock.present) {
                             Task {
                                 if await native.lockNextSession() { dismiss() }
                                 else { failure = native.errorMessage ?? "锁定未完成，请刷新后重试。" }

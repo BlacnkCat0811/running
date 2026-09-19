@@ -52,6 +52,27 @@ const todayPayload = (overrides: Record<string, unknown> = {}): MobileTodayRespo
     timezone: "Asia/Shanghai",
     latestDataDate: "2026-09-06",
     lastSyncedAt: "2026-09-07T00:30:00.000Z",
+    sync: { status: "ok", lastAttemptAt: "2026-09-07T00:20:00.000Z", lastSuccessAt: "2026-09-07T00:30:00.000Z", error: null },
+    coverage: {
+      latestTrainingDate: "2026-09-06",
+      latestHealthSampleAt: "2026-09-07T00:20:00.000Z",
+      sleep: { state: "current", latestDate: "2026-09-07" },
+      hrv: { state: "current", latestDate: "2026-09-07" },
+      restingHeartRate: { state: "current", latestDate: "2026-09-07" }
+    },
+    recoveryAssessment: {
+      targetDate: "2026-09-07",
+      coverage: "complete",
+      assessment: "no_low_signal",
+      reasonCodes: ["no_low_signal"],
+      lastObservationDate: "2026-09-07"
+    },
+    recommendation: {
+      basis: "training_load_and_plan",
+      recoveryAdjustment: "none",
+      uncertaintyReasons: [],
+      reasonCodes: ["training_load_and_plan"]
+    },
     freshness: { state: "valid", checkedAt: "2026-09-07T00:30:00.000Z", latestTrainingDate: "2026-09-06", recoveryDate: "2026-09-07" },
     recommendationRevision: "rev-1",
     today: { localDate: TODAY, distanceKm: 0, durationSeconds: 0, paceSecondsPerKm: null, energyKcal: null, workoutCount: 0 },

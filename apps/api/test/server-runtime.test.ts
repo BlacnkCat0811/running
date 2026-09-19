@@ -1332,7 +1332,13 @@ test("training-zone HTTP errors expose only typed client failures", async () => 
   }
 });
 
-test("mobile lock rejects historical recovery even with the current recommendation revision", async () => {
+/**
+ * A night the runner did not wear the watch used to block locking outright, which
+ * turned an ordinary coverage gap into "you cannot plan tomorrow's session". The
+ * gate now asks the question it always meant to ask — did the refresh fail — so
+ * missing recovery only removes the recovery input.
+ */
+test("mobile lock confirms a session when today has no recovery record", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-stale-recovery-"));
   const databasePath = join(runtimeRoot, "var", "rai.sqlite");
   mkdirSync(join(runtimeRoot, "var"));
@@ -1359,22 +1365,45 @@ test("mobile lock rejects historical recovery even with the current recommendati
     await waitForApi(child, url, () => output);
     const todayResponse = await fetch(`${url}/v1/mobile/today`);
     assert.equal(todayResponse.status, 200);
-    const today = await todayResponse.json() as { verdict: { stale: boolean }; recommendationRevision: string };
-    assert.equal(today.verdict.stale, true);
-    for (const action of ["lock", "relock"]) {
-      const response = await fetch(`${url}/v1/mobile/lock`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, expectedRevision: today.recommendationRevision })
-      });
-      assert.equal(response.status, 409);
-      assert.deepEqual(await response.json(), {
-        code: "mobile_recommendation_stale",
-        message: "恢复数据不是今天的，请先同步健康后再确认安排"
-      });
-    }
-    const goals = await (await fetch(`${url}/v1/mobile/goals`)).json() as { lockedSession: unknown };
-    assert.equal(goals.lockedSession, null);
+    const today = await todayResponse.json() as {
+      verdict: { stale: boolean };
+      sync: { status: string; lastSuccessAt: string | null };
+      coverage: { sleep: { state: string; latestDate: string | null } };
+      recoveryAssessment: { coverage: string; assessment: string };
+      today: { localDate: string };
+      recommendationRevision: string;
+    };
+    assert.equal(today.verdict.stale, true, "历史恢复仍然不得授权质量课");
+    assert.equal(today.recoveryAssessment.coverage, "none");
+    assert.equal(today.recoveryAssessment.assessment, "not_assessed");
+    assert.equal(today.coverage.sleep.state, "historical", "更早的夜是可展示的参考，不是缺数据");
+    assert.equal(today.coverage.sleep.latestDate, "2025-01-22");
+    assert.equal(today.sync.status, "never", "没有任何刷新记录");
+    assert.equal(today.sync.lastSuccessAt, null);
+
+    const locked = await fetch(`${url}/v1/mobile/lock`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "lock", expectedRevision: today.recommendationRevision })
+    });
+    assert.equal(locked.status, 200, await locked.text());
+    const afterLock = await (await fetch(`${url}/v1/mobile/goals`)).json() as {
+      lockedSession: { localDate: string } | null;
+    };
+    assert.equal(afterLock.lockedSession?.localDate, today.today.localDate);
+
+    // The stale-revision gate itself is untouched: an out-of-date revision is still
+    // refused, so narrowing the refresh gate did not remove the conflict check.
+    const conflicted = await fetch(`${url}/v1/mobile/lock`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "lock", expectedRevision: "not-the-current-revision" })
+    });
+    assert.equal(conflicted.status, 409);
+    assert.deepEqual(await conflicted.json(), {
+      code: "mobile_recommendation_stale",
+      message: "今日建议已更新，请重新查看后再确认安排"
+    });
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

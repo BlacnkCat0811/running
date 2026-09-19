@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { RaiReadStore } from "./data.js";
+import type { MobileRefreshOutcome } from "./mobile-sync.js";
 
 /** Default wait for read leases to drain before database file replacement. */
 export const BEGIN_REPLACE_TIMEOUT_MS = 20_000;
@@ -33,7 +34,16 @@ export class ReadStoreManager {
   private replacing = false;
   private readonly idleWaiters = new Set<() => void>();
 
-  constructor(private readonly databasePath: string) {}
+  /**
+   * @param refreshOutcome The import worker's own record of the newest refresh.
+   *   Read lazily so the store sees the current attempt rather than whatever was
+   *   known when the pool was created, and optional so a caller with no worker
+   *   still gets an honest `never`/`ok` reading instead of a guess.
+   */
+  constructor(
+    private readonly databasePath: string,
+    private readonly refreshOutcome: () => MobileRefreshOutcome | null = () => null
+  ) {}
 
   get isReplacing(): boolean {
     return this.replacing;
@@ -46,7 +56,7 @@ export class ReadStoreManager {
         this.closeStore();
         throw new DatabaseNotReadyError();
       }
-      this.store ??= new RaiReadStore(this.databasePath);
+      this.store ??= new RaiReadStore(this.databasePath, this.refreshOutcome);
       return callback(this.store);
     } finally {
       this.release();

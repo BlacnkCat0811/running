@@ -11,6 +11,7 @@ import type {
   MobilePlannedDay,
   MobileRaceCard,
   MobileRaceTarget,
+  MobileRecommendation,
   MobileRecoveryBreakdown,
   MobileSessionKind,
   MobileSessionStructure,
@@ -181,32 +182,111 @@ const trigger = (
   detail: string
 ): MobileTrigger => ({ code, value, threshold, detail });
 
-export function decideVerdict(input: CoachInput): MobileVerdict {
+/** Named so the verdict gates and the published assessment can never use different numbers. */
+export const RECOVERY_SLEEP_RATIO_THRESHOLD = 0.75;
+export const RECOVERY_HRV_RATIO_THRESHOLD = 0.85;
+export const RECOVERY_RHR_RATIO_THRESHOLD = 1.03;
+export const RECOVERY_SLEEP_STREAK_THRESHOLD = 3;
+
+const ratioValue = (current: number | null, baseline: number | null): number | null =>
+  current != null && baseline != null && baseline > 0 ? current / baseline : null;
+
+/**
+ * What today's recovery evidence supports.
+ *
+ * Coverage answers "could today be assessed at all" and `assessment` answers
+ * "what does it say". They are separate on purpose: a gap in coverage is not a
+ * negative assessment, and complete coverage is not a positive one. Every
+ * consumer reads this one function — the verdict gates below and the
+ * `recoveryAssessment` field the device renders — so what the app explains can
+ * never disagree with what the coach actually did.
+ */
+export interface RecoveryAssessment {
+  /** `none` means nothing was assessable today, not that today looks bad. */
+  coverage: "none" | "partial" | "complete";
+  assessment: "not_assessed" | "no_low_signal" | "low_signal" | "multiple_low_signals";
+  reasonCodes: string[];
+  sleepRatio: number | null;
+  hrvRatio: number | null;
+  sleepLow: boolean;
+  hrvLow: boolean;
+  restingHeartRateUp: boolean;
+  sleepStreak: boolean;
+}
+
+export function assessRecovery(input: CoachInput): RecoveryAssessment {
+  const sleepRatio = ratioValue(input.lastNightSleepMinutes, input.sleepBaselineMinutes);
+  const hrvRatio = ratioValue(input.morningHrvMs, input.hrvBaselineMs);
+  const restingHeartRateUp =
+    input.restingHeartRateBpm != null &&
+    input.restingHeartRateBaselineBpm != null &&
+    input.restingHeartRateBpm > input.restingHeartRateBaselineBpm * RECOVERY_RHR_RATIO_THRESHOLD;
+  const sleepLow = sleepRatio != null && sleepRatio < RECOVERY_SLEEP_RATIO_THRESHOLD;
+  const hrvLow = hrvRatio != null && hrvRatio < RECOVERY_HRV_RATIO_THRESHOLD;
+  const sleepStreak = input.nightsBelowSleepBaseline >= RECOVERY_SLEEP_STREAK_THRESHOLD;
+  // A night is today's evidence only when it woke up today. An older night is a
+  // reference the app may show, never an input to today's arrangement.
+  const datedToday =
+    input.recoveryEvidenceDate === input.today &&
+    input.recoveryEvidenceStatus !== "stale" &&
+    input.recoveryEvidenceStatus !== "unknown";
+  // A reading only counts when its own baseline exists: a value with nothing to
+  // compare it against explains nothing, and must not inflate coverage.
+  const measured =
+    Number(input.lastNightSleepMinutes != null && ratioValue(input.lastNightSleepMinutes, input.sleepBaselineMinutes) != null) +
+    Number(input.morningHrvMs != null && ratioValue(input.morningHrvMs, input.hrvBaselineMs) != null) +
+    Number(input.restingHeartRateBpm != null && ratioValue(input.restingHeartRateBpm, input.restingHeartRateBaselineBpm) != null);
+  const coverage: RecoveryAssessment["coverage"] =
+    !datedToday || measured === 0 ? "none" : measured === 3 ? "complete" : "partial";
+
+  const assessment: RecoveryAssessment["assessment"] =
+    coverage === "none"
+      ? "not_assessed"
+      : sleepStreak || (sleepLow && hrvLow && restingHeartRateUp)
+        ? "multiple_low_signals"
+        : sleepLow || (hrvLow && restingHeartRateUp)
+          ? "low_signal"
+          : "no_low_signal";
+
+  const reasonCodes: string[] =
+    assessment === "not_assessed"
+      ? ["not_assessed"]
+      : assessment === "no_low_signal"
+        ? ["no_low_signal"]
+        : sleepStreak
+          ? ["sleep_streak"]
+          : [
+              ...(sleepLow ? ["sleep"] : []),
+              ...(hrvLow ? ["hrv"] : []),
+              ...(restingHeartRateUp ? ["resting_heart_rate"] : [])
+            ];
+
+  return { coverage, assessment, reasonCodes, sleepRatio, hrvRatio, sleepLow, hrvLow, restingHeartRateUp, sleepStreak };
+}
+
+export function decideVerdict(input: CoachInput, assessed?: RecoveryAssessment): MobileVerdict {
   const triggers: MobileTrigger[] = [];
-  // Recovery must be dated today to authorize a new session. A recent run or
-  // import cannot make historical (or undated) recovery evidence current.
-  const stale = input.recoveryEvidenceStatus === "stale" || input.recoveryEvidenceDate !== input.today;
-  const recoveryUnavailable = input.lastNightSleepMinutes == null ||
-    input.morningHrvMs == null || input.restingHeartRateBpm == null ||
-    input.sleepBaselineMinutes == null || input.sleepBaselineMinutes <= 0 ||
-    input.hrvBaselineMs == null || input.hrvBaselineMs <= 0 ||
-    input.restingHeartRateBaselineBpm == null || input.restingHeartRateBaselineBpm <= 0;
+  // Recovery may only modify TODAY's arrangement when its evidence belongs to
+  // today. A recent run or import cannot make historical (or undated) recovery
+  // evidence current, and a missing night is a coverage gap — never negative
+  // evidence against the athlete.
+  //
+  // Read off `assessRecovery` rather than recomputed here: the same assessment
+  // is published as `recoveryAssessment`, and two copies of "what did recovery
+  // say" is exactly how the app ends up explaining a decision the coach did not
+  // make. The caller may hand in an assessment it already holds.
+  const recovery = assessed ?? assessRecovery(input);
+  const currentRecovery = recovery.coverage !== "none";
+  const stale = !currentRecovery;
+  const recoveryComplete = recovery.coverage === "complete";
+  // Narrowed once: the branch conditions are boolean, but the trigger values
+  // need the ratio itself.
+  const sleepLowRatio = recovery.sleepLow ? recovery.sleepRatio : null;
+  const hrvLowRatio = recovery.hrvLow ? recovery.hrvRatio : null;
   let tone: MobileVerdict["tone"] = "yellow";
   let title = "只宜有氧";
   let reason = "默认轻松跑。数据不足时不安排质量课。";
 
-  const sleepRatio =
-    input.lastNightSleepMinutes != null && input.sleepBaselineMinutes != null && input.sleepBaselineMinutes > 0
-      ? input.lastNightSleepMinutes / input.sleepBaselineMinutes
-      : null;
-  const hrvRatio =
-    input.morningHrvMs != null && input.hrvBaselineMs != null && input.hrvBaselineMs > 0
-      ? input.morningHrvMs / input.hrvBaselineMs
-      : null;
-  const rhrUp =
-    input.restingHeartRateBpm != null &&
-    input.restingHeartRateBaselineBpm != null &&
-    input.restingHeartRateBpm > input.restingHeartRateBaselineBpm * 1.03;
   const taper = isTaper(input);
   const highLoad =
     input.trainingStatus === "attention" ||
@@ -230,29 +310,26 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     if (input.loadRatio != null && input.loadRatio > 1.3) {
       triggers.push(trigger("load_ratio", roundKm(input.loadRatio), 1.3, `急性/慢性负荷比 ${roundKm(input.loadRatio)}`));
     }
-  } else if (input.nightsBelowSleepBaseline >= 3) {
+  } else if (currentRecovery && recovery.sleepStreak) {
     tone = "red";
     title = "宜休息";
     reason = "连续三夜睡眠低于基线，今天休息。";
-    triggers.push(trigger("sleep_streak", input.nightsBelowSleepBaseline, 3, reason));
-  } else if (sleepRatio != null && sleepRatio < 0.75 && hrvRatio != null && hrvRatio < 0.85 && rhrUp) {
+    triggers.push(trigger("sleep_streak", input.nightsBelowSleepBaseline, RECOVERY_SLEEP_STREAK_THRESHOLD, reason));
+  } else if (currentRecovery && sleepLowRatio != null && hrvLowRatio != null && recovery.restingHeartRateUp) {
     tone = "red";
     title = "宜休息或轻松";
     reason = "睡眠、HRV 和静息心率同时变差。";
-    triggers.push(trigger("sleep", roundKm(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
-    triggers.push(trigger("hrv", roundKm(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
-  } else if (
-    (sleepRatio != null && sleepRatio < 0.75) ||
-    (hrvRatio != null && hrvRatio < 0.85 && rhrUp)
-  ) {
+    triggers.push(trigger("sleep", roundKm(sleepLowRatio), RECOVERY_SLEEP_RATIO_THRESHOLD, `睡眠为基线的 ${Math.round(sleepLowRatio * 100)}%`));
+    triggers.push(trigger("hrv", roundKm(hrvLowRatio), RECOVERY_HRV_RATIO_THRESHOLD, `HRV 为基线的 ${Math.round(hrvLowRatio * 100)}%`));
+  } else if (currentRecovery && (sleepLowRatio != null || (hrvLowRatio != null && recovery.restingHeartRateUp))) {
     tone = "yellow";
     title = "只宜有氧";
     reason = "恢复信号偏低，先跑轻松，不要上强度。";
-    if (sleepRatio != null && sleepRatio < 0.75) {
-      triggers.push(trigger("sleep", roundKm(sleepRatio), 0.75, `睡眠为基线的 ${Math.round(sleepRatio * 100)}%`));
+    if (sleepLowRatio != null) {
+      triggers.push(trigger("sleep", roundKm(sleepLowRatio), RECOVERY_SLEEP_RATIO_THRESHOLD, `睡眠为基线的 ${Math.round(sleepLowRatio * 100)}%`));
     }
-    if (hrvRatio != null && hrvRatio < 0.85) {
-      triggers.push(trigger("hrv", roundKm(hrvRatio), 0.85, `HRV 为基线的 ${Math.round(hrvRatio * 100)}%`));
+    if (hrvLowRatio != null) {
+      triggers.push(trigger("hrv", roundKm(hrvLowRatio), RECOVERY_HRV_RATIO_THRESHOLD, `HRV 为基线的 ${Math.round(hrvLowRatio * 100)}%`));
     }
   } else if (input.consecutiveQualityDays >= 2) {
     tone = "red";
@@ -278,24 +355,23 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     title = "恢复跑";
     reason = "处于恢复阶段且停跑超过一天，先恢复跑再恢复量。";
     triggers.push(trigger("recovery_status", input.daysSinceLastRun, 2, reason));
-  } else if (recoveryUnavailable) {
-    tone = "yellow";
-    title = "只宜有氧";
-    reason = "睡眠、HRV、静息心率或个人基线不完整，先轻松跑或休息。";
-    triggers.push(trigger("recovery_evidence_missing", null, null, reason));
-  } else if (stale) {
-    tone = "yellow";
-    title = "先同步健康";
-    reason = "恢复数据不是今天的，请先同步健康后再确认安排。";
   } else if (
     (input.trainingStatus === "effective_stimulus" || input.trainingStatus === "maintaining") &&
     (input.daysSinceLastQuality ?? 99) >= 2 &&
     input.weekQualityCount < input.qualitySessionCap &&
     (easyDurationFraction == null || easyDurationFraction >= input.easyDurationFloorFraction)
   ) {
+    // The base arrangement is decided by load, plan and quality spacing alone.
+    // Recovery can only veto it, in the branches above: a missing or partial
+    // recovery record neither cancels nor downgrades it — it merely removes the
+    // recovery input, and the wording must not claim recovery approved anything.
     tone = "green";
     title = "可质量课";
-    reason = "负荷与恢复允许一次质量刺激。";
+    reason = !currentRecovery
+      ? "按近期训练负荷与计划安排；未结合今日恢复监测。"
+      : recoveryComplete
+        ? "负荷与恢复允许一次质量刺激。"
+        : "按近期训练负荷与计划安排；今日恢复证据不完整，未参与判断。";
     triggers.push(trigger("quality_window", input.daysSinceLastQuality, 2, reason));
   } else {
     tone = "yellow";
@@ -303,11 +379,73 @@ export function decideVerdict(input: CoachInput): MobileVerdict {
     reason = "今天按轻松跑安排，把有氧底铺好。";
   }
 
-  if (stale) {
-    triggers.push(trigger("recovery_evidence_stale", null, null, "缺少当天恢复数据，请先同步健康后再确认安排。"));
+  if (!currentRecovery) {
+    triggers.push(trigger("recovery_evidence_absent", null, null, "今日无可用恢复记录，本次安排未结合今日恢复监测，也未据此降级。"));
+  } else if (!recoveryComplete) {
+    triggers.push(trigger("recovery_evidence_partial", null, null, "今日恢复指标或个人基线不完整，仅部分证据参与判断。"));
   }
   const reasonCodes = triggers.map((item) => item.code);
   return { tone, title, reason, triggers, stale, reasonCodes };
+}
+
+/**
+ * Why today's arrangement reads the way it does.
+ *
+ * Derived from the verdict's own reason codes rather than re-derived from the
+ * inputs: the branch that fired *is* the decision, and re-testing its conditions
+ * here is how an explanation drifts away from what was decided.
+ *
+ * `recoveryAdjustment` is the axis the device needs. `no_evidence` means recovery
+ * was not consulted — neither an approval nor a downgrade — and it is the only
+ * reading of "we have no recovery data" that is not a judgement about the runner.
+ */
+export function buildRecommendation(
+  input: CoachInput,
+  recovery: RecoveryAssessment,
+  verdict: MobileVerdict
+): MobileRecommendation {
+  const codes = verdict.reasonCodes ?? [];
+  const basis: MobileRecommendation["basis"] =
+    codes.includes("insufficient_data")
+      ? "insufficient_training_history"
+      : codes.includes("training_status") || codes.includes("load_ratio")
+        ? "high_load"
+        : "training_load_and_plan";
+  // Every recovery branch pushes at least one of these codes and they all run
+  // before the load-shape branches, so seeing one means recovery set the tone.
+  const recoveryDecided = codes.includes("sleep_streak") || codes.includes("sleep") || codes.includes("hrv");
+  const recoveryAdjustment: MobileRecommendation["recoveryAdjustment"] = recoveryDecided
+    ? "veto"
+    : recovery.coverage === "none"
+      ? "no_evidence"
+      : "none";
+
+  const uncertaintyReasons: string[] = [];
+  if (recovery.coverage === "partial") {
+    uncertaintyReasons.push("今日恢复证据不完整，只有部分指标参与判断。");
+  }
+  if (input.latestDataDate == null) {
+    uncertaintyReasons.push("还没有导入训练数据。");
+  } else if (input.latestDataDate < input.today) {
+    uncertaintyReasons.push(`训练数据截至 ${input.latestDataDate}，尚未包含今天。`);
+  }
+  if (input.calibration !== "completed") {
+    uncertaintyReasons.push("能力校准尚未完成，当前能力值先看趋势。");
+  }
+  if (input.trainingStatus === "insufficient_data") {
+    uncertaintyReasons.push("负荷历史不足，训练状态未参与判断。");
+  }
+
+  return {
+    basis,
+    recoveryAdjustment,
+    uncertaintyReasons,
+    reasonCodes: [
+      basis,
+      ...(recoveryAdjustment === "no_evidence" ? ["recovery_not_consulted"] : []),
+      ...(recoveryAdjustment === "veto" ? ["recovery_downgraded"] : [])
+    ]
+  };
 }
 
 /** Interval sessions are prescribed by distance: N repeats of 800 m. */

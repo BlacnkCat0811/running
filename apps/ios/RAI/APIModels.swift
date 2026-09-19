@@ -281,11 +281,62 @@ struct MobileLockState: Codable {
     let lockedAt: String?
 }
 
+/// 服务端刷新的结果。与训练/恢复日期无关：一次导入没有带来任何新记录仍然是 `ok`，
+/// 也不会因为当晚没戴表而变成"过期"。
+struct MobileSyncStatus: Codable {
+    let status: String
+    let lastAttemptAt: String?
+    let lastSuccessAt: String?
+    let error: String?
+}
+
+/// 某个指标在目标日期上有没有记录。`historical` 是真实存在但属于更早一天的数据：
+/// 可以当参考展示，绝不是今天的读数。
+struct MobileCoverageMetric: Codable {
+    let state: String
+    let latestDate: String?
+}
+
+/// 逐指标的记录覆盖。`latestHealthSampleAt` 是"数据流走到哪了"，与"该测的测了没"分开。
+struct MobileCoverage: Codable {
+    let latestTrainingDate: String?
+    let latestHealthSampleAt: String?
+    let sleep: MobileCoverageMetric
+    let hrv: MobileCoverageMetric
+    let restingHeartRate: MobileCoverageMetric
+}
+
+/// 今天的恢复证据支持什么。`coverage` 说"能不能评"，`assessment` 说"评出来是什么"：
+/// 覆盖不足是缺测，不是差评。
+struct MobileRecoveryAssessment: Codable {
+    let targetDate: String?
+    let coverage: String
+    let assessment: String
+    let reasonCodes: [String]
+    let lastObservationDate: String?
+}
+
+/// 今天这条建议是怎么来的。`recoveryAdjustment` 区分"没查"与"查了并否决"——
+/// 两者都不是对跑者的批准。
+struct MobileRecommendation: Codable {
+    let basis: String
+    let recoveryAdjustment: String
+    let uncertaintyReasons: [String]
+    let reasonCodes: [String]
+}
+
 struct MobileTodayResponse: Codable {
     let generatedAt: String
     let timezone: String
     let latestDataDate: String?
     let lastSyncedAt: String?
+    let sync: MobileSyncStatus
+    let coverage: MobileCoverage
+    let recoveryAssessment: MobileRecoveryAssessment
+    let recommendation: MobileRecommendation
+    /// 契约里已标 `@deprecated`。客户端不再用它表达任何时效性判断：它曾经用
+    /// "有没有今晚的夜"回答"数据新不新"，于是普通的缺测被显示成"数据过期"。
+    /// 仍保留解码，是为了让尚未更新的旧版本还能读完整份载荷。
     let freshness: Freshness
     let recommendationRevision: String
     let today: TodaySummary

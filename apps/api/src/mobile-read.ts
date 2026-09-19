@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type {
   DashboardResponse,
+  MobileCoverage,
   MobileGoalsResponse,
   MobileNextSession,
   MobilePlanAudit,
@@ -21,10 +22,12 @@ import { classifyPhysState, countNightsBelowSleepBaseline } from "@rai/training-
 import { loadRaceReadiness } from "@rai/application";
 
 import {
+  assessRecovery,
   buildAbilityCard,
   buildInjuryFlags,
   buildPostRun,
   buildRaceCard,
+  buildRecommendation,
   buildRecovery,
   buildWeekPlan,
   buildWeekStructure,
@@ -91,6 +94,24 @@ const RACE_TARGETS: Record<MobileRaceDistance, { weeklyDistanceKm: number; longe
   half_marathon: { weeklyDistanceKm: 35, longestRunKm: 18 }
 };
 
+/**
+ * Says which night a recovery breakdown describes.
+ *
+ * A night that woke today is today's evidence. An older one is a reference the
+ * app may still show, and prefixing it with "依据 X 的恢复数据" read as if X were
+ * today's reading — the same mistake the sync status used to make by treating a
+ * missing night as an expired dataset. An unassessable day adds no warning.
+ */
+const recoveryNote = (
+  note: string,
+  coverage: "none" | "partial" | "complete",
+  latestNightDate: string | null
+): string => {
+  if (coverage !== "none") return latestNightDate ? `依据 ${latestNightDate} 的恢复数据；${note}` : note;
+  if (latestNightDate) return `最近一次恢复记录是 ${latestNightDate}，未参与今日安排；${note}`;
+  return note;
+};
+
 export function assembleMobileCoach(args: {
   database: DatabaseSync;
   dashboard: DashboardResponse;
@@ -106,6 +127,8 @@ export function assembleMobileCoach(args: {
     MobileGoalsResponse,
     "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession"
   >;
+  /** Per-metric record coverage, so the assessment can report the newest observation that exists. */
+  coverage: MobileCoverage;
   fourWeekDistanceChangeFraction: number | null;
   previousWeekDistanceKm: number;
 }): Pick<
@@ -115,6 +138,8 @@ export function assembleMobileCoach(args: {
   | "verdict"
   | "nextSession"
   | "recovery"
+  | "recoveryAssessment"
+  | "recommendation"
   | "postRun"
   | "weekStructure"
   | "race"
@@ -134,16 +159,33 @@ export function assembleMobileCoach(args: {
   // lag behind the wall clock; compare that evidence with its own prior baseline.
   const currentNight = recoveryFacts.loadRecentMainNights(today, 1, "Asia/Shanghai")[0] ?? null;
   const recoveryDate = currentNight?.wakeDate ?? today;
+  // Only a night that woke up today describes today. An older-but-recent night is
+  // still reported as the historical reference (`recoveryDate`), but it must not
+  // populate today's readings: `lastNightSleepMinutes` cannot carry a value from
+  // an earlier night, and HRV/RHR are read from that night's own window.
+  const nightIsToday = currentNight?.wakeDate === today;
   const factsBaseline = recoveryFacts.loadBaselines(shanghaiInstant(recoveryDate, 12), "Asia/Shanghai");
-  const currentHrv = currentNight ? recoveryFacts.loadHrvDay(currentNight.wakeDate, "Asia/Shanghai") : null;
-  const sleep = { lastNight: currentNight?.asleepUnionMinutes ?? null, baseline: factsBaseline.sleepMinutes, nightsBelow: countNightsBelowSleepBaseline([0,1,2].map((offset) => recoveryFacts.loadCanonicalNight(shiftDate(currentNight?.wakeDate ?? today, -offset), "Asia/Shanghai")), factsBaseline.sleepMinutes) };
+  const currentHrv = nightIsToday && currentNight ? recoveryFacts.loadHrvDay(currentNight.wakeDate, "Asia/Shanghai") : null;
+  // The "three low nights" streak is anchored to today's calendar rather than to
+  // the newest recorded night. Anchoring it to the newest night skipped gap days
+  // silently, so three low nights spread over weeks were counted as one streak.
+  const sleep = {
+    lastNight: nightIsToday && currentNight ? currentNight.asleepUnionMinutes ?? null : null,
+    baseline: factsBaseline.sleepMinutes,
+    nightsBelow: countNightsBelowSleepBaseline(
+      [0, 1, 2].map((offset) => recoveryFacts.loadCanonicalNight(shiftDate(today, -offset), "Asia/Shanghai")),
+      factsBaseline.sleepMinutes
+    )
+  };
   const hrv = { current: currentHrv?.hrvSdnnMs ?? null, baseline: factsBaseline.hrvSdnnMs };
-  const rhrCurrent = recoveryFacts.loadRhrMedian(shanghaiInstant(recoveryDate, 0), shanghaiInstant(shiftDate(recoveryDate, 1), 0));
+  const rhrCurrent = nightIsToday
+    ? recoveryFacts.loadRhrMedian(shanghaiInstant(today, 0), shanghaiInstant(shiftDate(today, 1), 0))
+    : null;
   const rhr = { current: rhrCurrent, baseline: factsBaseline.rhrBpm };
   const recoveryEvidenceStatus: CoachInput["recoveryEvidenceStatus"] =
     currentNight == null
       ? "unknown"
-      : currentNight.wakeDate !== today
+      : !nightIsToday
         ? "stale"
         : sleep.lastNight != null && hrv.current != null && rhr.current != null
           ? "valid"
@@ -241,24 +283,42 @@ export function assembleMobileCoach(args: {
       dashboard.calibration.requirements.sessions
     )
   };
-  const recovery = buildRecovery(input);
-  const verdict = decideVerdict(input);
+  const recoveryBreakdown = buildRecovery(input);
+  // One assessment, two consumers: the verdict gates read it, and it is published
+  // as `recoveryAssessment`. Computing it twice is how "what the app explains"
+  // and "what the coach decided" drift apart.
+  const assessment = assessRecovery(input);
+  const verdict = decideVerdict(input, assessment);
   const computed = decideNextSession(input, verdict);
   const nextSession = resolveLockedNextSession(computed, input.lockedSession, today, input.zones);
   const lock = lockState(input.lockedSession, today, verdict.tone);
   const todayWorkoutCount = input.todayWorkoutCount;
   const postRunWorkout = coachWorkout && coachWorkout.localDate === today ? coachWorkout : null;
+  // The newest recovery observation that exists, even when it is not today's.
+  const observationDates = [
+    args.coverage.sleep.latestDate,
+    args.coverage.hrv.latestDate,
+    args.coverage.restingHeartRate.latestDate
+  ].filter((value): value is string => value != null);
   return {
     ability: buildAbilityCard(input),
     calibration,
     verdict,
     nextSession,
     recovery: {
-      ...recovery,
-      note: `${currentNight ? `依据 ${recoveryDate} 的恢复数据；` : ""}${recovery.note}`,
+      ...recoveryBreakdown,
+      note: recoveryNote(recoveryBreakdown.note, assessment.coverage, currentNight?.wakeDate ?? null),
       state: physState === "recovered_phys" ? "recovered" : physState,
       hrvSampleCount: currentHrv?.sampleCount ?? 0
     },
+    recoveryAssessment: {
+      targetDate: assessment.coverage === "none" ? null : today,
+      coverage: assessment.coverage,
+      assessment: assessment.assessment,
+      reasonCodes: assessment.reasonCodes,
+      lastObservationDate: observationDates.length === 0 ? null : observationDates.sort().at(-1)!
+    },
+    recommendation: buildRecommendation(input, assessment, verdict),
     postRun: buildPostRun(
       postRunWorkout,
       input.trueAbility,

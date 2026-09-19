@@ -800,6 +800,76 @@ export interface MobilePlanExecutionDay {
   status: "observed" | "pending" | "unknown";
 }
 
+/**
+ * Outcome of the server-side data refresh. Deliberately independent of training
+ * and recovery dates: an import that completed with zero new records is still
+ * `ok`, and a refresh is never "stale" because the runner did not wear a watch.
+ */
+export interface MobileSyncStatus {
+  /**
+   * `never` until a refresh has completed. `failed` only when the newest
+   * completed refresh failed and no later import has been published — an
+   * in-flight or cancelled import is not a failure.
+   */
+  status: "never" | "ok" | "failed";
+  /** When the newest attempt started, whatever its outcome. */
+  lastAttemptAt: string | null;
+  /** When the newest refresh completed. */
+  lastSuccessAt: string | null;
+  /** Carried only when `status === "failed"`; never a substitute for the status. */
+  error: string | null;
+}
+
+/**
+ * Record coverage for the target date, per metric. `historical` means records
+ * exist but belong to an earlier date, so they are a reference and never today's
+ * reading. `latestDate` is the newest record for that metric whatever its state.
+ *
+ * Coverage is about the record, not the reading: a night dated today can still
+ * carry no usable sleep minutes, and that gap belongs to
+ * `MobileRecoveryAssessment`, not here.
+ */
+export interface MobileCoverageMetric {
+  state: "none" | "historical" | "current";
+  latestDate: string | null;
+}
+
+export interface MobileCoverage {
+  latestTrainingDate: string | null;
+  /** Newest raw HealthKit sample of any type — the feed's freshness, not per-metric completeness. */
+  latestHealthSampleAt: string | null;
+  sleep: MobileCoverageMetric;
+  hrv: MobileCoverageMetric;
+  restingHeartRate: MobileCoverageMetric;
+}
+
+/**
+ * What the recovery evidence supports for the target date. Coverage answers "did
+ * we measure", assessment answers "what does it say" — a gap in coverage is not
+ * a negative assessment, and complete coverage is not a positive one.
+ */
+export interface MobileRecoveryAssessment {
+  /** The date being assessed; null when nothing was assessable at all. */
+  targetDate: string | null;
+  coverage: "none" | "partial" | "complete";
+  assessment: "not_assessed" | "no_low_signal" | "low_signal" | "multiple_low_signals";
+  reasonCodes: string[];
+  /** Newest recovery observation that exists, even when it is not today's. */
+  lastObservationDate: string | null;
+}
+
+/**
+ * How today's recommendation was derived, so a client can explain it without
+ * guessing. `recoveryAdjustment` is `no_evidence` when recovery was simply not
+ * consulted — that is neither an approval nor a downgrade.
+ */
+export interface MobileRecommendation {
+  basis: "training_load_and_plan" | "insufficient_training_history" | "high_load";
+  recoveryAdjustment: "none" | "veto" | "no_evidence";
+  uncertaintyReasons: string[];
+  reasonCodes: string[];
+}
+
 /** Aggregated payload for the iOS home page ("今天"). */
 export interface MobileTodayResponse {
   generatedAt: string;
@@ -808,7 +878,22 @@ export interface MobileTodayResponse {
   latestDataDate: string | null;
   /** The latest successful server-side data refresh, independent of training dates. */
   lastSyncedAt: string | null;
-  /** Recovery/sample coverage is intentionally separate from training freshness. */
+  /** A completed refresh with zero new records is still a successful sync. */
+  sync: MobileSyncStatus;
+  /** What records exist, per metric — answers "did we measure", not "how is he". */
+  coverage: MobileCoverage;
+  /** What today's recovery evidence supports — answers "what does it say", not "did we measure". */
+  recoveryAssessment: MobileRecoveryAssessment;
+  /** Why today's recommendation reads the way it does, and whether recovery was consulted. */
+  recommendation: MobileRecommendation;
+  /**
+   * @deprecated Transitional flag, now derived from `sync`. It used to answer
+   * "is there a main night dated today", which reported an ordinary coverage gap
+   * as an expired dataset and let a historical night decide today's verdict.
+   * Prefer `sync` for the refresh outcome, `coverage` for per-metric records and
+   * `recoveryAssessment` for what the evidence supports. Kept only so a client
+   * that has not shipped yet keeps decoding.
+   */
   freshness: {
     state: "unknown" | "valid" | "stale";
     checkedAt: string | null;

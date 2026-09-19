@@ -5,9 +5,11 @@ import type { MobileLockedSession, MobileNextSession, MobilePlannedDay } from "@
 
 import {
   abilityExplanation,
+  assessRecovery,
   buildInjuryFlags,
   buildPostRun,
   buildRaceCard,
+  buildRecommendation,
   buildSessionStructure,
   buildWeekPlan,
   decideDayPhase,
@@ -100,16 +102,34 @@ test("verdict is green when load and recovery allow a quality session", () => {
   assert.ok(next.kind === "tempo" || next.kind === "interval");
 });
 
-test("historical recovery blocks quality and locking without hiding risk warnings", () => {
+test("historical recovery no longer vetoes today's base arrangement", () => {
   const input = { ...base(), latestDataDate: "2026-08-01", recoveryEvidenceDate: "2026-08-01", recoveryEvidenceStatus: "stale" as const };
   const verdict = decideVerdict(input);
-  assert.equal(verdict.tone, "yellow");
+  // The base arrangement comes from load, plan and quality spacing. An older
+  // night is a coverage gap: it neither cancels the session nor gets presented
+  // as today's reading.
+  assert.equal(verdict.tone, "green");
   assert.equal(verdict.stale, true);
-  assert.ok(verdict.reasonCodes?.includes("recovery_evidence_stale"));
-  assert.ok(!verdict.reasonCodes?.includes("quality_window"));
-  assert.ok(!["tempo", "interval"].includes(decideNextSession(input, verdict).kind));
+  assert.ok(verdict.reasonCodes?.includes("recovery_evidence_absent"));
+  assert.ok(!verdict.reasonCodes?.includes("recovery_evidence_missing"));
+  assert.ok(verdict.reasonCodes?.includes("quality_window"));
+  assert.match(verdict.reason, /未结合今日恢复监测/);
+  // Yesterday's low-sleep streak must not become today's streak.
+  assert.equal(decideVerdict({ ...input, nightsBelowSleepBaseline: 3 }).tone, "green");
+  // Recovery-independent warnings still fire.
   assert.equal(decideVerdict({ ...input, loadRatio: 1.5 }).tone, "red");
-  assert.equal(decideVerdict({ ...input, nightsBelowSleepBaseline: 3 }).tone, "red");
+  assert.equal(decideVerdict({ ...input, consecutiveQualityDays: 2 }).tone, "red");
+});
+
+test("yesterday's poor recovery is not inherited by today", () => {
+  const poor = { lastNightSleepMinutes: 260, morningHrvMs: 30, restingHeartRateBpm: 58 };
+  // The same numbers are a negative finding when they belong to today ...
+  assert.equal(decideVerdict({ ...base(), ...poor }).tone, "red");
+  // ... and must not decide today once the evidence belongs to an earlier night.
+  const yesterday = decideVerdict({ ...base(), ...poor, recoveryEvidenceDate: "2026-09-02", recoveryEvidenceStatus: "stale" as const });
+  assert.equal(yesterday.tone, "green");
+  assert.equal(yesterday.stale, true);
+  assert.ok(yesterday.reasonCodes?.includes("recovery_evidence_absent"));
 });
 
 test("recovery freshness follows its date, independently of training freshness", () => {
@@ -125,10 +145,14 @@ test("missing recovery cannot hide high load or consecutive quality warnings", (
   const input = { ...base(), morningHrvMs: null };
   assert.equal(decideVerdict({ ...input, loadRatio: 1.5 }).tone, "red");
   assert.equal(decideVerdict({ ...input, consecutiveQualityDays: 2 }).tone, "red");
-  assert.equal(decideVerdict({ ...base(), hrvBaselineMs: null }).tone, "yellow");
+  // A missing personal baseline is insufficient evidence, not a negative finding.
+  const noBaseline = decideVerdict({ ...base(), hrvBaselineMs: null });
+  assert.equal(noBaseline.tone, "green");
+  assert.ok(noBaseline.reasonCodes?.includes("recovery_evidence_partial"));
+  assert.ok(!noBaseline.reasonCodes?.includes("recovery_evidence_missing"));
 });
 
-test("missing recovery facts stay conservative", () => {
+test("missing recovery records remove an input instead of adding a warning", () => {
   const verdict = decideVerdict({
     ...base(),
     lastNightSleepMinutes: null,
@@ -137,9 +161,11 @@ test("missing recovery facts stay conservative", () => {
     recoveryEvidenceStatus: "unknown",
     recoveryEvidenceDate: null
   });
-  assert.equal(verdict.tone, "yellow");
+  assert.equal(verdict.tone, "green");
   assert.equal(verdict.stale, true);
-  assert.ok(verdict.reasonCodes?.includes("recovery_evidence_missing"));
+  assert.ok(verdict.reasonCodes?.includes("recovery_evidence_absent"));
+  assert.ok(verdict.reasonCodes?.includes("quality_window"));
+  assert.match(verdict.reason, /未结合今日恢复监测/);
 });
 
 test("high load ratio forces rest/easy", () => {
@@ -567,4 +593,144 @@ test("race card explains default distance and refreshes countdown and taper from
   assert.equal(expired.daysUntil, -2);
   assert.equal(expired.taper, false);
   assert.match(expired.note, /已过期/);
+});
+
+// ── 恢复覆盖与评估 ─────────────────────────────────────────────
+// The published assessment and the verdict gates read one function, so these
+// assertions cover both what the app explains and what the coach decided.
+
+const poorNight = {
+  lastNightSleepMinutes: 300,
+  sleepBaselineMinutes: 430,
+  morningHrvMs: 40,
+  hrvBaselineMs: 52,
+  restingHeartRateBpm: 58,
+  restingHeartRateBaselineBpm: 53
+};
+
+test("a missing night is not assessed and never reads as a low signal", () => {
+  const missing = {
+    ...base(),
+    recoveryEvidenceDate: null,
+    recoveryEvidenceStatus: "unknown" as const,
+    lastNightSleepMinutes: null,
+    morningHrvMs: null,
+    restingHeartRateBpm: null
+  };
+  const assessment = assessRecovery(missing);
+  assert.equal(assessment.coverage, "none");
+  assert.equal(assessment.assessment, "not_assessed");
+  assert.deepEqual(assessment.reasonCodes, ["not_assessed"]);
+
+  const verdict = decideVerdict(missing, assessment);
+  assert.equal(verdict.stale, true);
+  assert.ok(verdict.triggers.some((item) => item.code === "recovery_evidence_absent"));
+  assert.ok(
+    verdict.triggers.every((item) => item.code !== "sleep" && item.code !== "sleep_streak" && item.code !== "hrv"),
+    "缺测只移除输入，不得变成一条负面证据"
+  );
+  assert.equal(buildRecommendation(missing, assessment, verdict).recoveryAdjustment, "no_evidence");
+});
+
+test("the same poor numbers stop vetoing once they belong to yesterday", () => {
+  const today = base();
+  const inherited = { ...today, ...poorNight };
+  assert.equal(assessRecovery(inherited).assessment, "multiple_low_signals");
+  const inheritedVerdict = decideVerdict(inherited);
+  assert.equal(inheritedVerdict.tone, "red");
+  const inheritedAssessment = assessRecovery(inherited);
+  assert.equal(
+    buildRecommendation(inherited, inheritedAssessment, inheritedVerdict).recoveryAdjustment,
+    "veto",
+    "决定今天安排的是恢复本身"
+  );
+
+  const yesterday = {
+    ...today,
+    ...poorNight,
+    recoveryEvidenceDate: "2026-09-02",
+    recoveryEvidenceStatus: "stale" as const
+  };
+  const assessment = assessRecovery(yesterday);
+  assert.equal(assessment.coverage, "none", "归属昨天就不是今天的证据");
+  assert.equal(assessment.assessment, "not_assessed");
+  const verdict = decideVerdict(yesterday, assessment);
+  assert.equal(verdict.tone, "green", "负荷与计划允许质量课");
+  const recommendation = buildRecommendation(yesterday, assessment, verdict);
+  assert.equal(recommendation.recoveryAdjustment, "no_evidence", "缺测既不是批准也不是降级");
+  assert.equal(recommendation.basis, "training_load_and_plan");
+});
+
+test("coverage needs a comparable baseline, and a partial day says so", () => {
+  const noBaseline = { ...base(), sleepBaselineMinutes: null, hrvBaselineMs: null, restingHeartRateBaselineBpm: null };
+  const assessment = assessRecovery(noBaseline);
+  assert.equal(assessment.coverage, "none", "有读数但没有可比基线，判断不了");
+  assert.equal(assessment.assessment, "not_assessed");
+  // A reading nothing can be compared against is not "consulted but incomplete":
+  // it is not consulted at all, and the wording has to say so.
+  assert.ok(
+    decideVerdict(noBaseline, assessment).triggers.some((item) => item.code === "recovery_evidence_absent"),
+    "比不了的读数不得被说成恢复证据不完整"
+  );
+  assert.ok(
+    !decideVerdict(noBaseline, assessment).triggers.some((item) => item.code === "recovery_evidence_partial")
+  );
+
+  const partialInput = { ...base(), hrvBaselineMs: null };
+  const partialAssessment = assessRecovery(partialInput);
+  assert.equal(partialAssessment.coverage, "partial");
+  assert.equal(partialAssessment.assessment, "no_low_signal");
+  assert.equal(assessRecovery(base()).coverage, "complete");
+
+  const partialVerdict = decideVerdict(partialInput, partialAssessment);
+  assert.equal(partialVerdict.tone, "green", "缺一项不等于有风险");
+  const recommendation = buildRecommendation(partialInput, partialAssessment, partialVerdict);
+  assert.equal(recommendation.recoveryAdjustment, "none", "被查过并且没有否决，就是 none");
+  assert.ok(recommendation.uncertaintyReasons.some((reason) => reason.includes("恢复证据不完整")));
+});
+
+test("the recommendation names its basis and separates a veto from missing evidence", () => {
+  const input = base();
+  const assessment = assessRecovery(input);
+  const verdict = decideVerdict(input, assessment);
+  const green = buildRecommendation(input, assessment, verdict);
+  assert.equal(green.basis, "training_load_and_plan");
+  assert.equal(green.recoveryAdjustment, "none");
+  assert.deepEqual(green.reasonCodes, ["training_load_and_plan"]);
+
+  const overloaded = { ...input, loadRatio: 1.6 };
+  assert.equal(
+    buildRecommendation(overloaded, assessRecovery(overloaded), decideVerdict(overloaded)).basis,
+    "high_load"
+  );
+
+  const thin = { ...input, latestDataDate: null };
+  const thinRecommendation = buildRecommendation(thin, assessRecovery(thin), decideVerdict(thin));
+  assert.ok(thinRecommendation.uncertaintyReasons.some((reason) => reason.includes("还没有导入训练数据")));
+  assert.ok(!thinRecommendation.reasonCodes.includes("recovery_downgraded"));
+
+  const vetoed = { ...input, ...poorNight };
+  const vetoAssessment = assessRecovery(vetoed);
+  const veto = buildRecommendation(vetoed, vetoAssessment, decideVerdict(vetoed, vetoAssessment));
+  assert.equal(veto.recoveryAdjustment, "veto");
+  assert.ok(veto.reasonCodes.includes("recovery_downgraded"));
+});
+
+test("the night that woke today is the one the verdict reads", () => {
+  // Same values, different evidence date: the verdict must follow the date, not
+  // the numbers, and only the today-dated night may permit `complete` coverage.
+  const single = { ...base(), lastNightSleepMinutes: 300 };
+  assert.equal(assessRecovery(single).assessment, "low_signal", "一夜偏低只降级，不直接停练");
+  assert.equal(decideVerdict(single).tone, "yellow");
+  assert.equal(decideVerdict(single).title, "只宜有氧");
+
+  const streak = { ...base(), nightsBelowSleepBaseline: 3, lastNightSleepMinutes: 300 };
+  assert.equal(assessRecovery(streak).assessment, "multiple_low_signals");
+  assert.deepEqual(assessRecovery(streak).reasonCodes, ["sleep_streak"], "连续低睡眠优先于单夜读数");
+  assert.equal(decideVerdict(streak).tone, "red");
+
+  // An HRV dip alone does not veto: it needs the elevated resting heart rate too.
+  const hrvOnly = { ...base(), morningHrvMs: 40 };
+  assert.equal(assessRecovery(hrvOnly).assessment, "no_low_signal");
+  assert.equal(decideVerdict(hrvOnly).tone, "green");
 });

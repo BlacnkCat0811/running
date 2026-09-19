@@ -45,8 +45,10 @@ export function buildWeeklyPlanPrompt(args: WeeklyPlanPromptArgs): { system: str
     timezone: today.timezone,
     allowedDates: args.allowedDates,
     dataFreshness: {
-      latestDataDate: today.latestDataDate,
-      state: today.freshness.state
+      latestTrainingDate: today.coverage.latestTrainingDate,
+      latestHealthSampleAt: today.coverage.latestHealthSampleAt,
+      lastRefreshAt: today.sync.lastSuccessAt,
+      lastRefreshStatus: today.sync.status
     },
     weeklyGoal: {
       weeklyDistanceKm: goals.weeklyDistanceKm,
@@ -67,6 +69,12 @@ export function buildWeeklyPlanPrompt(args: WeeklyPlanPromptArgs): { system: str
     },
     recovery: {
       score: today.recovery.score,
+      // The assessment, not a freshness flag: the model must be able to tell "no
+      // recovery record for today" (a coverage gap, no bearing on load) from "the
+      // recovery record reads poorly" (a reason to hold volume).
+      assessmentCoverage: today.recoveryAssessment.coverage,
+      assessment: today.recoveryAssessment.assessment,
+      lastObservationDate: today.recoveryAssessment.lastObservationDate,
       lastNightSleepMinutes: today.recovery.lastNightSleepMinutes,
       sleepBaselineMinutes: today.recovery.sleepBaselineMinutes,
       morningHrvMs: today.recovery.morningHrvMs,

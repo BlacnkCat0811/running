@@ -22,6 +22,8 @@ import type {
   DataAuditResponse,
   DashboardResponse,
   DiagnosticExportResponse,
+  MobileCoverage,
+  MobileCoverageMetric,
   MobileGoalsResponse,
   MobileStatisticsResponse,
   MobileTodayResponse,
@@ -54,6 +56,7 @@ import type {
   WorkoutSeriesResponse
 } from "@rai/api-contracts";
 import { buildPlanExecution } from "./plan-execution.js";
+import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
 import type { PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
@@ -101,6 +104,22 @@ const mobileWeekStart = (date: string): string => {
 };
 
 /**
+ * Per-metric record coverage for one date.
+ *
+ * `historical` is a first-class state, not a degraded `current`: a night that
+ * woke yesterday is real data the app may show as a reference, and only the
+ * absence of any record at all is `none`.
+ */
+const coverageMetric = (latestDate: string | null, today: string): MobileCoverageMetric => ({
+  state: latestDate == null ? "none" : latestDate === today ? "current" : "historical",
+  latestDate
+});
+
+/** Shanghai local date of a stored ISO instant, or null when it is not a parseable instant. */
+const coverageDate = (iso: string | null): string | null =>
+  iso == null || Number.isNaN(Date.parse(iso)) ? null : localDateInShanghai(new Date(iso));
+
+/**
  * Why a run has no segments.
  *
  * Empty segments are a legitimate outcome — a treadmill run has no Watch lap
@@ -134,7 +153,19 @@ export class RaiReadStore {
   private cacheVersion = -1;
   private readonly cache = new Map<string, unknown>();
 
-  constructor(private readonly path: string) {
+  constructor(
+    private readonly path: string,
+    /**
+     * The import worker's view of the newest refresh.
+     *
+     * The data database can only record refreshes that *completed*: an import
+     * writes into a staging copy that becomes visible only on publication, so a
+     * failed attempt is rolled back and leaves no trace behind it. `failed`
+     * therefore cannot be answered from here, and a store without a worker
+     * honestly reports `never`/`ok` instead of guessing.
+     */
+    private readonly refreshOutcome: () => MobileRefreshOutcome | null = () => null
+  ) {
     this.database = RaiDatabase.openReadonly(path);
     this.modelRunsRepository = new SqliteModelRunRepository(this.database);
     this.jobsRepository = new RecomputeJobRepository(this.database);
@@ -265,6 +296,19 @@ export class RaiReadStore {
       WHERE kind = 'main' AND timezone_identifier = 'Asia/Shanghai'
     `).get() as { recovery_date?: string } | undefined;
     const recoveryDate = recoveryRow?.recovery_date ?? null;
+    // What records exist per metric, and how far the feed itself has advanced.
+    // Kept apart from what the evidence says: the runner not wearing a watch on
+    // a given night is a coverage fact, never a recovery verdict, and the newest
+    // sample of any type is what separates "the feed stopped" from "there was
+    // nothing new to measure".
+    const coverage: MobileCoverage = {
+      latestTrainingDate: latestDataDate,
+      latestHealthSampleAt: this.recoveryRepository.latestHealthSampleAt(),
+      sleep: coverageMetric(recoveryDate, today),
+      hrv: coverageMetric(this.recoveryRepository.latestHrvDate("Asia/Shanghai"), today),
+      restingHeartRate: coverageMetric(coverageDate(this.recoveryRepository.latestRestingHeartRateAt()), today)
+    };
+    const sync = mobileSyncStatus(lastSyncedAt, this.refreshOutcome());
 
     const todayRow = this.database.prepare(`
       SELECT
@@ -400,6 +444,7 @@ export class RaiReadStore {
         weekPlan: goals?.weekPlan ?? [],
         lockedSession: goals?.lockedSession ?? null
       },
+      coverage,
       fourWeekDistanceChangeFraction,
       previousWeekDistanceKm: this.previousWeekDistanceKm(today)
     });
@@ -409,18 +454,29 @@ export class RaiReadStore {
         FROM active_workout_training_loads WHERE local_date >= ? AND local_date < ? GROUP BY local_date
       `).all(shiftMobileDate(today, -7), today) as Array<{ localDate: string; distanceKm: number; workoutCount: number }>
     );
+    // Kept for clients that have not shipped the `sync`/`coverage` reads yet, and
+    // now derived from the refresh outcome alone. It used to answer "is there a
+    // main night dated today", which reported an ordinary coverage gap — a night
+    // the runner did not wear the watch — as an expired dataset, and let a
+    // historical night decide today's arrangement. It says nothing about how
+    // fresh the data is; that is what `coverage` is for.
     const freshness: MobileTodayResponse["freshness"] = {
-      state: lastSyncedAt == null ? "unknown" : recoveryDate === today ? "valid" : "stale",
+      state: sync.status === "never" ? "unknown" : sync.status === "failed" ? "stale" : "valid",
       checkedAt: lastSyncedAt,
       latestTrainingDate: latestDataDate,
       recoveryDate
     };
+    // Bound to the decision inputs and the rule version, not to every clock that
+    // moves beside them: a revision that flipped with a sync heartbeat would make
+    // the lock the runner is about to confirm stale for no reason. The recovery
+    // terms are the assessment's own output, so the hash changes exactly when the
+    // recovery judgement behind the recommendation changes.
     const recommendationRevision = createHash("sha256")
       .update(JSON.stringify({
         today,
         latestDataDate,
-        recoveryDate,
-        freshness: freshness.state,
+        recoveryCoverage: coach.recoveryAssessment.coverage,
+        recoveryAssessment: coach.recoveryAssessment.assessment,
         verdict: coach.verdict,
         nextSession: coach.nextSession,
         activeModel: dashboard.activeModel?.id ?? null
@@ -431,6 +487,8 @@ export class RaiReadStore {
       timezone: "Asia/Shanghai",
       latestDataDate,
       lastSyncedAt,
+      sync,
+      coverage,
       freshness,
       recommendationRevision,
       ...(recentPlanExecution === undefined ? {} : { recentPlanExecution }),

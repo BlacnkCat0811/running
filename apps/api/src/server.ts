@@ -52,6 +52,7 @@ import {
 } from "./local-request-security.js";
 import { DatabaseMaintenance, backupPolicyFromEnvironment } from "./maintenance.js";
 import { MobileGoalsRevisionConflictError, MobileGoalsStore, type PlanMergeOptions } from "./mobile-goals.js";
+import { mobileLockRejection, mobileRefreshOutcome } from "./mobile-sync.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js";
 import { registerCommandRoutes } from "./routes/command-routes.js";
@@ -377,7 +378,10 @@ if (existsSync(webDist)) {
   await app.register(fastifyStatic, { root: webDist, prefix: "/", wildcard: false });
 }
 
-const readStores = new ReadStoreManager(databasePath);
+// Both annotated: `readStores` asks the import worker for the newest refresh and
+// the worker asks the store pool to drain before it swaps the database file, so
+// inference would chase its own tail through the two initializers.
+const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
 const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error), taskAdmission.owner("recompute"));
@@ -385,7 +389,7 @@ const importSources = createImportSourceManager(runtimeRoot, projectRoot, maxImp
 await importSources.cleanupAbandonedUploads().catch((error) => {
   app.log.warn(error, "Failed to clean abandoned import uploads during startup");
 });
-const importWorker = new ImportWorker(
+const importWorker: ImportWorker = new ImportWorker(
   databasePath,
   projectRoot,
   runtimeRoot,
@@ -1153,12 +1157,12 @@ app.post<{ Body: LockMobileSessionInput }>(
       ...goals,
       lockedSession: ignoreLock ? null : goals.lockedSession
     }));
-    if (request.body.expectedRevision && request.body.expectedRevision !== snapshot.recommendationRevision) {
-      return reply.code(409).send({ code: "mobile_recommendation_stale", message: "今日建议已更新，请重新查看后再确认安排" });
-    }
-    if (snapshot.verdict.stale) {
-      return reply.code(409).send({ code: "mobile_recommendation_stale", message: "恢复数据不是今天的，请先同步健康后再确认安排" });
-    }
+    const rejection = mobileLockRejection({
+      syncStatus: snapshot.sync.status,
+      recommendationRevision: snapshot.recommendationRevision,
+      expectedRevision: request.body.expectedRevision
+    });
+    if (rejection) return reply.code(409).send(rejection);
     if (request.body.action === "lock" && snapshot.lock.present) {
       return mobileGoalsStore.read(planPrescription());
     }

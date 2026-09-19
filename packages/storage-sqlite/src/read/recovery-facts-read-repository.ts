@@ -49,6 +49,42 @@ export class SqliteRecoveryFactsReadRepository {
     return { id: String(row.id), localDate: String(row.local_date), timezoneIdentifier: String(row.timezone_identifier), nightId: String(row.night_id), hrvSdnnMs: row.hrv_sdnn_ms as number | null, sampleCount: Number(row.sample_count), confidence: row.confidence as StoredCanonicalHrvDay["confidence"], windowStartAt: row.window_start_at as string | null, windowEndAt: row.window_end_at as string | null, sourceName: row.source_name as string | null, provenance: JSON.parse(String(row.provenance_json ?? "{}")) };
   }
 
+  /**
+   * Newest main-night wake date, regardless of which date the caller asked
+   * about. `loadCanonicalNight` answers "is there a night for this date"; this
+   * answers "how far back is the newest one", which is what separates a coverage
+   * gap from a stop in the feed.
+   */
+  latestMainNightDate(timezoneIdentifier: string): string | null {
+    const row = this.database.prepare("SELECT MAX(wake_date) AS value FROM canonical_nights WHERE kind = 'main' AND timezone_identifier = ?").get(timezoneIdentifier) as { value?: string | null } | undefined;
+    return row?.value ?? null;
+  }
+
+  /** Newest overnight-HRV local date. */
+  latestHrvDate(timezoneIdentifier: string): string | null {
+    const row = this.database.prepare("SELECT MAX(local_date) AS value FROM canonical_hrv_days WHERE timezone_identifier = ?").get(timezoneIdentifier) as { value?: string | null } | undefined;
+    return row?.value ?? null;
+  }
+
+  /** Newest resting-heart-rate sample instant, as an ISO timestamp. */
+  latestRestingHeartRateAt(): string | null {
+    const row = this.database.prepare("SELECT MAX(start_at) AS value FROM health_records WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate' AND value_numeric IS NOT NULL").get() as { value?: string | null } | undefined;
+    return row?.value ?? null;
+  }
+
+  /**
+   * Newest raw HealthKit sample instant of any type, as an ISO timestamp.
+   *
+   * A full scan by design: `idx_health_records_type_time` leads with `type`, so
+   * nothing can answer a time-maximum across all types. This is the one number
+   * that separates "the feed stopped" from "there was nothing to measure", and
+   * the store holds ~10^5 rows, so the scan is milliseconds.
+   */
+  latestHealthSampleAt(): string | null {
+    const row = this.database.prepare("SELECT MAX(start_at) AS value FROM health_records").get() as { value?: string | null } | undefined;
+    return row?.value ?? null;
+  }
+
   loadRhrMedian(fromIso: string, toIso: string): number | null {
     const rows = this.database.prepare("SELECT source_category AS sourceCategory, value_numeric AS value FROM health_records WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate' AND start_at >= ? AND start_at < ? AND value_numeric IS NOT NULL ORDER BY start_at").all(fromIso, toIso) as unknown as Array<{ sourceCategory: string; value: number }>;
     const watch = rows.filter((r) => r.sourceCategory === "apple_watch"); const selected = watch.length ? watch : rows;

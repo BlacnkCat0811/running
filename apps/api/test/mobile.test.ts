@@ -106,7 +106,10 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     assert.ok(Array.isArray(today.injuryFlags));
     assert.ok(["need_sync", "morning_open", "locked", "post_run", "rest_done"].includes(today.phase));
     assert.equal(typeof today.lock.present, "boolean");
-    assert.equal(today.verdict.stale, true, "undated recovery cannot authorize locking");
+    // `verdict.stale` no longer gates `POST /v1/mobile/lock` (a missing night must not
+    // block confirming an arrangement). What it still carries is the safety rule that
+    // undated recovery cannot authorize a quality session.
+    assert.equal(today.verdict.stale, true, "undated recovery cannot authorize a quality session");
 
     const observed = read.mobileToday(30, undefined, []);
     assert.equal(observed.recentPlanExecution?.length, 7);
@@ -117,6 +120,27 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     const noGoal = read.mobileToday(null);
     assert.equal(noGoal.week.goalDistanceKm, null);
     assert.equal(noGoal.week.goalProgressFraction, null);
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the top-level data date and the coverage date cannot drift apart", async () => {
+  // `MobileTodayResponse` carries the newest training date twice: at the top level
+  // (predating the coverage block) and as `coverage.latestTrainingDate`. Both consumers
+  // are live — the iOS disclosure line reads the top-level one while the coverage panel
+  // reads the nested one — so if a future edit derives them from different sources the
+  // page would print two different "数据截至" dates and nothing else would notice.
+  const root = mkdtempSync(join(tmpdir(), "rai-mobile-date-invariant-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  store.close();
+  const read = new RaiReadStore(databasePath);
+  try {
+    const today = read.mobileToday(30);
+    assert.equal(today.latestDataDate, "2025-01-22");
+    assert.equal(today.coverage.latestTrainingDate, today.latestDataDate);
   } finally {
     read.close();
     rmSync(root, { recursive: true, force: true });
@@ -624,10 +648,16 @@ test("a goals edit keeps the generated structure and its distance unless the ses
 });
 
 
-test("mobile recovery uses the latest evidence date and its historical baseline", async () => {
+test("mobile recovery reports a historical night as a reference, never as today's reading", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-mobile-recovery-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await seed(databasePath);
+  // A published refresh exists, so the data status has something to reflect. The
+  // assertions below exist to prove it reflects the refresh and not the night.
+  store.database.prepare("INSERT INTO import_manifest (key, value) VALUES (?, ?)").run(
+    "import_completed_at",
+    "2026-09-19T06:10:06.000Z"
+  );
   try {
     const insert = store.database.prepare(`INSERT INTO canonical_nights
       (id, wake_date, timezone_identifier, kind, source_name, source_category, source_rank,
@@ -638,18 +668,48 @@ test("mobile recovery uses the latest evidence date and its historical baseline"
     const read = new RaiReadStore(databasePath);
     try {
       const snapshot = read.mobileToday(30);
+      // The newest recorded night is older than today. It stays reachable as the
+      // historical reference (note + freshness.recoveryDate) but must never be
+      // served as today's sleep/HRV/RHR.
       assert.equal(snapshot.verdict.stale, true);
       const recovery = snapshot.recovery;
-      assert.equal(recovery.lastNightSleepMinutes, 300);
-      assert.equal(recovery.sleepBaselineMinutes, 480);
-      assert.equal(recovery.state, "reduced");
+      assert.equal(recovery.lastNightSleepMinutes, null, "更早一晚的睡眠不得充当今天的读数");
+      assert.equal(recovery.state, "unknown");
+      assert.equal(snapshot.freshness.recoveryDate, "2025-01-22");
       assert.match(recovery.note, /2025-01-22/);
       assert.doesNotMatch(recovery.note, /昨夜|今晨/);
+      // A night that woke yesterday is a reference, not a verdict: coverage says so
+      // and the assessment refuses to grade a day it could not measure.
+      assert.equal(snapshot.coverage.sleep.state, "historical");
+      assert.equal(snapshot.coverage.sleep.latestDate, "2025-01-22");
+      assert.equal(snapshot.recoveryAssessment.coverage, "none");
+      assert.equal(snapshot.recoveryAssessment.assessment, "not_assessed");
+      assert.deepEqual(snapshot.recoveryAssessment.reasonCodes, ["not_assessed"]);
+      assert.equal(snapshot.recommendation.recoveryAdjustment, "no_evidence", "缺测既不是批准也不是降级");
+      assert.equal(snapshot.sync.status, "ok", "刷新成功与有没有恢复记录无关");
+      assert.equal(snapshot.sync.lastSuccessAt, "2026-09-19T06:10:06.000Z");
+      const freshnessWithoutNight = snapshot.freshness.state;
+      // A night that woke up today is today's reading, independent of the latest run.
       const date = snapshot.today.localDate;
+      const baselineNight = new Date(Date.parse(`${date}T00:00:00Z`) - 3 * 86_400_000).toISOString().slice(0, 10);
+      insert.run("baseline-night", baselineNight, `${baselineNight}T15:00:00Z`, `${baselineNight}T23:00:00Z`, 400);
       insert.run("today-night", date, `${date}T00:00:00+08:00`, `${date}T08:00:00+08:00`, 480);
       const current = read.mobileToday(30);
       assert.equal(current.latestDataDate, "2025-01-22");
       assert.equal(current.verdict.stale, false, "current recovery is independent of the latest run date");
+      assert.equal(current.recovery.lastNightSleepMinutes, 480, "今天的夜才进今天的读数");
+      assert.equal(current.coverage.sleep.state, "current");
+      assert.equal(
+        current.recoveryAssessment.coverage,
+        "partial",
+        "有读数且能对比才算覆盖：睡眠可用，HRV 与静息心率缺失"
+      );
+      assert.equal(current.recoveryAssessment.assessment, "no_low_signal");
+      assert.equal(
+        current.freshness.state,
+        freshnessWithoutNight,
+        "数据状态只反映刷新结果，不再由睡眠日期决定"
+      );
     } finally { read.close(); }
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });

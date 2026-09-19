@@ -36,7 +36,7 @@
 
 `PUT /v1/mobile/goals` 必须带 `weeklyDistanceKm`，并在已有目标上带 `expectedRevision`。客户端发送服务端允许的当前编辑字段（周目标、轻松训练下限、质量课上限、比赛目标和逐日计划）；锁课由 `POST /v1/mobile/lock` 专门维护，不随目标保存请求发送。服务端以 revision 做并发检查；`409 mobile_goals_revision_conflict` 时重新读取后提示用户，不静默覆盖。
 
-`POST /v1/mobile/lock` 带 `action: lock|relock` 和当前 `recommendationRevision`。服务端拒绝过期建议或过期恢复数据；锁课只允许联网执行。
+`POST /v1/mobile/lock` 带 `action: lock|relock` 和当前 `recommendationRevision`。服务端只拒绝两种情形：上次健康同步失败（`409 mobile_refresh_failed`），或建议版本已过期（`409 mobile_recommendation_stale`）。**今天没有恢复记录不是拒绝理由** —— 没戴表是普通的覆盖缺口，不应阻止锁课；锁课只允许联网执行。
 
 健康同步上传在 `POST /v1/imports/uploads` 带 `X-RAI-Sync-Batch` 请求头。该标识绑定当前服务实例的持久化同步批次；同一标识重复上传返回原来源，不重新创建来源。客户端只使用 SHA-256 批次值，服务端拒绝格式异常的标识。
 

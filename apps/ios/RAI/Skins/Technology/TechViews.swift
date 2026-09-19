@@ -16,7 +16,7 @@ struct TechTodayView: View {
                 TechSyncStatus(showsHistory: false)
 
                 if let today = native.today {
-                    if native.isOffline || today.verdict.stale || today.freshness.state != "valid" {
+                    if native.isOffline || today.sync.status != "ok" || today.recoveryAssessment.coverage == "none" {
                         TechFreshnessBanner(today: today, isOffline: native.isOffline, cacheDate: native.lastCacheUpdate, showsSyncAction: true)
                     }
                     todayHero(today)
@@ -165,6 +165,11 @@ struct TechTodayView: View {
                 }
             }
         }.buttonStyle(TechPressStyle())
+            // 这是今日页的**最后一块内容**（`TechTodayView.body` 里最后一个子视图），
+            // 所以它也是"页面底部有没有被底栏压住"这条断言的唯一合格锚点。
+            // 不给它标识符时，UI 用例只能退而求其次地断言某个中间元素，
+            // 那样即使底栏改成覆盖式布局、真正的内容被压在栏下，用例也不会报红。
+            .accessibilityIdentifier("today.race")
     }
 
     private func activityPanel(_ data: MobileTodayResponse) -> some View {
@@ -355,12 +360,24 @@ struct TechTodayView: View {
                     Text(data.lock.present ? "已锁定" : "锁定安排").font(.caption.weight(.semibold))
                         .foregroundStyle(TechColor.background).padding(.horizontal, 14).frame(minHeight: 44)
                         .background(TechColor.action, in: Capsule())
-                }.buttonStyle(TechPressStyle()).disabled(data.lock.present || data.verdict.stale || native.isOffline)
-                    .saturation(data.lock.present || data.verdict.stale || native.isOffline ? 0 : 1)
+                }.buttonStyle(TechPressStyle()).disabled(lockDisabled(data))
+                    .saturation(lockDisabled(data) ? 0 : 1)
             }
-            if data.lock.present || data.verdict.stale || native.isOffline {
-                Text(data.lock.present ? "今日安排已锁定，可在训练计划中查看。" : native.isOffline ? "离线仅可查看，连接后才能锁定安排。" : "建议已过期，请先刷新再锁定。")
+            if let note = lockNote(data) {
+                Text(note)
                     .font(.caption).foregroundStyle(TechColor.muted)
+            }
+            // 这条安排是怎么来的，以及恢复监测有没有参与。放在建议下面而不是标题里，
+            // 是因为它解释的是这条建议本身——"未结合今日恢复"既不是批准也不是降级。
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(techRecommendationBasisName(data.recommendation.basis)) · \(techRecoveryAdjustmentName(data.recommendation.recoveryAdjustment))")
+                    .font(.caption.weight(.medium)).foregroundStyle(TechColor.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(data.recommendation.uncertaintyReasons, id: \.self) { reason in
+                    Text("· \(reason)")
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Divider().overlay(TechColor.cyan.opacity(0.2))
             NavigationLink { TechPlanView() } label: {
@@ -374,6 +391,21 @@ struct TechTodayView: View {
         .background { TechRunningLandscape(road: true) }
         .clipShape(RoundedRectangle(cornerRadius: TechMetrics.corner))
         .overlay(RoundedRectangle(cornerRadius: TechMetrics.corner).strokeBorder(TechColor.cyan.opacity(0.4), lineWidth: 0.7))
+    }
+
+    /// 锁定只被两件事挡住：安排已锁，或上一次刷新真的失败了。
+    ///
+    /// 「今天没有恢复记录」曾经也挡在这里，等于把一个没戴表的夜晚变成"你不能确认
+    /// 明天的课"。缺测只减少一份判断依据，不剥夺确认安排的能力。
+    private func lockDisabled(_ data: MobileTodayResponse) -> Bool {
+        data.lock.present || data.sync.status == "failed" || native.isOffline
+    }
+
+    private func lockNote(_ data: MobileTodayResponse) -> String? {
+        if data.lock.present { return "今日安排已锁定，可在训练计划中查看。" }
+        if data.sync.status == "failed" { return "上次健康同步未完成，请重新同步后再锁定。" }
+        if native.isOffline { return "离线仅可查看，连接后才能锁定安排。" }
+        return nil
     }
 
     private func weekPanel(_ data: MobileTodayResponse) -> some View {
@@ -622,7 +654,7 @@ struct TechBodyMetricsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
-                if summary.verdict.stale || native.isOffline {
+                if native.isOffline || summary.sync.status != "ok" || summary.recoveryAssessment.coverage == "none" {
                     TechFreshnessBanner(today: summary, isOffline: native.isOffline, cacheDate: native.lastCacheUpdate)
                 }
                 TechSectionHeader(title: "身体状态")
@@ -938,6 +970,11 @@ struct TechBodyMetricsView: View {
     }
 }
 
+/// 数据状态横幅。
+///
+/// 它现在回答两个互不替代的问题：刷新有没有跑成（`sync`），以及各项记录走到哪
+/// 一天了（`coverage`）。旧的写法把「今晚有没有夜」当成「数据新不新」，于是没戴表
+/// 的夜晚被显示成"数据过期"——那是一个越界的判断，横幅不该做。
 struct TechFreshnessBanner: View {
     let today: MobileTodayResponse
     let isOffline: Bool
@@ -946,14 +983,42 @@ struct TechFreshnessBanner: View {
 
     private var tint: Color {
         if isOffline { return TechColor.cyan }
-        if today.freshness.state == "stale" || today.verdict.stale { return TechColor.yellow }
+        if today.sync.status == "failed" { return TechColor.coral }
+        if today.sync.status == "never" { return TechColor.yellow }
         return TechColor.green
+    }
+
+    private var symbol: String {
+        if isOffline { return "wifi.slash" }
+        if today.sync.status == "failed" { return "exclamationmark.triangle" }
+        if today.sync.status == "never" { return "clock.badge.exclamationmark" }
+        return "antenna.radiowaves.left.and.right"
+    }
+
+    /// 一句话说清"数据到哪了"。缺测只陈述事实，不评价跑者。
+    private var explanation: String {
+        if isOffline { return "显示的是上次缓存的结果。" }
+        switch today.sync.status {
+        case "failed": return "上次同步健康数据失败，请重新同步。"
+        case "never": return "还没有完成过一次健康数据同步。"
+        default: break
+        }
+        switch today.recoveryAssessment.coverage {
+        case "none":
+            return today.recoveryAssessment.lastObservationDate
+                .map { "今天没有恢复监测记录；最近一次是 \(nativeDay($0))，未参与今日安排。" }
+                ?? "今天没有恢复监测记录，本次安排未结合恢复数据。"
+        case "partial":
+            return "今天的恢复监测不完整，只有部分指标参与了判断。"
+        default:
+            return "训练与恢复数据均可用于今天的判断。"
+        }
     }
 
     var body: some View {
         TechPanel(tint: tint, fill: tint.opacity(0.08), shadowColor: tint.opacity(0.15)) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: isOffline ? "wifi.slash" : today.freshness.state == "stale" ? "clock.badge.exclamationmark" : "antenna.radiowaves.left.and.right")
+                Image(systemName: symbol)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(tint)
                 VStack(alignment: .leading, spacing: 4) {
@@ -961,16 +1026,25 @@ struct TechFreshnessBanner: View {
                         Text(isOffline ? "离线缓存" : "数据状态")
                             .font(.caption.weight(.semibold))
                         Spacer()
-                        Text(techStatusName(today.freshness.state))
+                        Text(techSyncStatusName(today.sync.status))
                             .font(.caption2.weight(.semibold))
                     }
+                    Text(explanation)
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                     DisclosureGroup {
                         Text("结果生成于 \(nativeDate(today.generatedAt))")
+                        // 训练数据日期取契约顶层字段 `latestDataDate`；`coverage.latestTrainingDate`
+                        // 是同一个值，不再重复渲染（覆盖明细里已有它的兄弟项）。
+                        Text("训练数据截至 \(nativeDay(today.latestDataDate ?? "未知"))")
+                        Text("最近健康样本 \(nativeDate(today.coverage.latestHealthSampleAt).isEmpty ? "暂无" : nativeDate(today.coverage.latestHealthSampleAt))")
+                        Text("睡眠记录 \(techCoverageStateName(today.coverage.sleep.state))· 夜间 HRV \(techCoverageStateName(today.coverage.hrv.state))· 静息心率 \(techCoverageStateName(today.coverage.restingHeartRate.state))")
+                        Text("今日恢复监测 \(techRecoveryCoverageName(today.recoveryAssessment.coverage))· \(techRecoveryAssessmentName(today.recoveryAssessment.assessment))")
                         if let cacheDate {
                             Text("缓存更新于 \(nativeDate(ISO8601DateFormatter().string(from: cacheDate)))")
                         }
                     } label: {
-                        Text("健康数据截至 \(nativeDay(today.latestDataDate ?? "未知"))")
+                        Text("数据覆盖明细")
                     }
                     .font(.caption2).foregroundStyle(TechColor.muted).tint(tint)
                 }
@@ -1531,7 +1605,7 @@ struct TechPlanView: View {
                         loadDraft()
                         editing = true
                     }
-                    if let today = native.today, !today.lock.present, !today.verdict.stale {
+                    if let today = native.today, !today.lock.present, today.sync.status != "failed" {
                         TechPrimaryButton(title: "锁定今日安排", systemName: "lock", isDisabled: native.isOffline) {
                             showingLock = true
                         }

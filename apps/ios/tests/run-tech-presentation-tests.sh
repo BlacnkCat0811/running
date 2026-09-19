@@ -168,7 +168,6 @@ assert len(contract_fields) >= 20, (
 field_anchors = {
     "generatedAt": "today.generatedAt",
     "latestDataDate": "today.latestDataDate",
-    "freshness": "today.freshness",
     "today": "data.today.",
     "week": "data.week.",
     "weekDaily": "data.weekDaily",
@@ -186,12 +185,24 @@ field_anchors = {
     "recentPlanExecution": "data.recentPlanExecution",
     "phase": "data.phase",
     "lock": "data.lock.",
+    # 2026-09-19：时效语义拆成四件事，界面各自有落点 —— 刷新结果（`sync`）与
+    # 逐指标记录覆盖（`coverage`）在 `TechFreshnessBanner`，恢复评估与建议依据
+    # 在同一横幅的披露区与推荐面板。三者的锚点必须分开列，否则「横幅还挂着」会让
+    # 某一路退化（例如建议退回直出机器码）也全绿。
+    "sync": "today.sync.",
+    "coverage": "today.coverage.",
+    "recoveryAssessment": "today.recoveryAssessment.",
+    "recommendation": "data.recommendation.",
 }
 # 明确不需要展示位的字段，逐条写理由。
 metadata_only = {
     "timezone": "时区元数据；界面统一按 Asia/Shanghai 呈现",
-    "lastSyncedAt": "同步时间戳；时效性已由 freshness 承载",
+    "lastSyncedAt": "同步时间戳；刷新结果已由 sync.status/lastSuccessAt 承载（横幅披露区渲染的是 sync 那一路）",
     "recommendationRevision": "CAS 版本号，仅供写入冲突检测",
+    # 刻意移出展示位，不是遗漏：它把「今晚有没有夜」当成「数据新不新」，于是一个
+    # 没戴表的普通夜晚被显示成"数据过期"，还让历史夜参与今天的判断。契约里它已标
+    # `@deprecated`，iOS 也已停止渲染 —— 保留解码只为尚未升级的旧客户端。
+    "freshness": "已废弃：语义拆分为 sync / coverage / recoveryAssessment；界面刻意不再渲染",
 }
 
 unaccounted = set(contract_fields) - set(field_anchors) - set(metadata_only)
@@ -202,6 +213,27 @@ if unaccounted:
         "payload present + no display slot is the 2026-09-17 regression.")
 stale = (set(field_anchors) | set(metadata_only)) - set(contract_fields)
 assert not stale, f"field gate still lists {sorted(stale)}, which MobileTodayResponse no longer has"
+
+# ---------------------------------------------------------------------------
+# 方向断言：`freshness` 不得重新回到展示层。
+#
+# 上面的两个集合检查只保证「契约字段都有交代」，它们**允许**把 `freshness` 从
+# `metadata_only` 挪进 `field_anchors` —— 迁完两边依然配平，门禁照样绿。可这个字段
+# 之所以被挪出去，是因为它把「今晚有没有戴表」当成「数据新不新」，于是一个普通的
+# 覆盖缺口被渲染成「数据过期」。那是 2026-09-19 整轮改动要拆掉的东西，而"删掉一个
+# 展示位"恰好是最容易被后人顺手回退的一类改动（它看起来只是少了一行）。
+#
+# 因此这里钉死方向：视图层不得再引用 `.freshness`。要把它加回来，必须显式删掉本条
+# 并说明为什么「数据过期」的语义应当恢复 —— 正是这个动作会让人读到上面这段历史。
+# 注意范围只到视图：`APIModels.swift` 仍解码该字段（旧客户端兼容），不在此列。
+# ---------------------------------------------------------------------------
+resurrected = re.search(r"\.freshness\b", tech_views)
+assert not resurrected, (
+    "TechViews.swift reads `.freshness` again. That field is deprecated because it reported an "
+    "ordinary coverage gap (a night without a watch) as an expired dataset — the exact judgement "
+    "this round removed. Use `sync` for the refresh outcome, `coverage` for per-metric records and "
+    "`recoveryAssessment` for what the evidence supports. If the old semantics really must come "
+    f"back, delete this assertion and say why. First match: {resurrected.group(0)!r}")
 
 for field, anchor in sorted(field_anchors.items()):
     assert anchor in tech_views, (
@@ -227,6 +259,24 @@ for enum_name, values, mappings in [
      [("techStimulusMatchName", tech_enums)]),
     ("MobileRaceDistance", ["five_k", "ten_k", "half_marathon"],
      [("techRaceDistanceName", tech_enums)]),
+    # 2026-09-19 新增的四组状态枚举。它们最容易被"偷懒复用" —— 例如把 sync.status
+    # 直接塞进 `nativeStatusName`（那边的 `stale` 是"数据过期"，而这边要表达的是
+    # "刷新有没有跑成"），或把 recoveryAssessment.coverage 当成 verdict 的语气。
+    # 因此逐组穷举，多一个少一个都红。
+    ("MobileSyncStatus", ["never", "ok", "failed"],
+     [("techSyncStatusName", tech_enums)]),
+    ("MobileCoverageMetric", ["none", "historical", "current"],
+     [("techCoverageStateName", tech_enums)]),
+    ("MobileRecoveryAssessment.coverage", ["none", "partial", "complete"],
+     [("techRecoveryCoverageName", tech_enums)]),
+    ("MobileRecoveryAssessment.assessment",
+     ["not_assessed", "no_low_signal", "low_signal", "multiple_low_signals"],
+     [("techRecoveryAssessmentName", tech_enums)]),
+    ("MobileRecommendation.basis",
+     ["training_load_and_plan", "insufficient_training_history", "high_load"],
+     [("techRecommendationBasisName", tech_enums)]),
+    ("MobileRecommendation.recoveryAdjustment", ["none", "veto", "no_evidence"],
+     [("techRecoveryAdjustmentName", tech_enums)]),
 ]:
     expected = set(values)
     for function_name, source in mappings:
@@ -248,7 +298,10 @@ print(f"Field coverage: {len(field_anchors)}/{len(contract_fields)} MobileTodayR
 # `morning_open`。所以再钉一层"展示层确实经过映射"。这里只断言函数被调用，不锁
 # 参数写法 —— 防的是直出回归，不是合法重构。
 for file_name, functions in [
-    ("apps/ios/RAI/Skins/Technology/TechViews.swift", ["techPhaseName(", "techStimulusMatchName(", "techRaceDistanceName("]),
+    ("apps/ios/RAI/Skins/Technology/TechViews.swift",
+     ["techPhaseName(", "techStimulusMatchName(", "techRaceDistanceName(",
+      "techSyncStatusName(", "techCoverageStateName(", "techRecoveryCoverageName(",
+      "techRecoveryAssessmentName(", "techRecommendationBasisName(", "techRecoveryAdjustmentName("]),
 ]:
     body = pathlib.Path(file_name).read_text()
     for call in functions:

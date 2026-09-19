@@ -45,3 +45,70 @@ func techRaceDistanceName(_ value: String) -> String {
     default: return "距离"
     }
 }
+
+/// `MobileSyncStatus.status` = never | ok | failed
+///
+/// 与「睡眠日期」无关的刷新结果。刻意不复用 `nativeStatusName(_:)`：那边的
+/// `stale` 映射是"数据过期"，而这里要表达的恰恰是"刷新有没有跑成"，
+/// 两者混淆正是这一轮要修掉的缺陷。
+func techSyncStatusName(_ value: String) -> String {
+    switch value {
+    case "never": return "尚未同步"
+    case "ok": return "正常"
+    case "failed": return "同步失败"
+    default: return "未知同步状态"
+    }
+}
+
+/// `MobileCoverageMetric.state` = none | historical | current
+func techCoverageStateName(_ value: String) -> String {
+    switch value {
+    case "none": return "无记录"
+    case "historical": return "更早的记录"
+    case "current": return "已记录"
+    default: return "未知覆盖"
+    }
+}
+
+/// `MobileRecoveryAssessment.coverage` = none | partial | complete
+func techRecoveryCoverageName(_ value: String) -> String {
+    switch value {
+    case "none": return "未监测"
+    case "partial": return "部分监测"
+    case "complete": return "已监测"
+    default: return "未知覆盖"
+    }
+}
+
+/// `MobileRecoveryAssessment.assessment` = not_assessed | no_low_signal |
+/// low_signal | multiple_low_signals
+func techRecoveryAssessmentName(_ value: String) -> String {
+    switch value {
+    case "not_assessed": return "未评估"
+    case "no_low_signal": return "未见异常"
+    case "low_signal": return "恢复信号偏低"
+    case "multiple_low_signals": return "多项恢复信号偏低"
+    default: return "未知评估"
+    }
+}
+
+/// `MobileRecommendation.basis` = training_load_and_plan |
+/// insufficient_training_history | high_load
+func techRecommendationBasisName(_ value: String) -> String {
+    switch value {
+    case "training_load_and_plan": return "依据负荷与课表"
+    case "insufficient_training_history": return "训练历史不足"
+    case "high_load": return "负荷偏高"
+    default: return "未知依据"
+    }
+}
+
+/// `MobileRecommendation.recoveryAdjustment` = none | veto | no_evidence
+func techRecoveryAdjustmentName(_ value: String) -> String {
+    switch value {
+    case "none": return "已结合今日恢复"
+    case "veto": return "今日恢复已否决强度"
+    case "no_evidence": return "未结合今日恢复"
+    default: return "未知恢复处理"
+    }
+}
