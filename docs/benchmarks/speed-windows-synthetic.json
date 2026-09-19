@@ -1,0 +1,28 @@
+{
+  "scope": "Synthetic speed-window kernel only; not end-to-end import or N100 measurement",
+  "node": "v22.23.2",
+  "platform": "darwin x64",
+  "cpu": "AMD Ryzen 5 3600X 6-Core Processor             ",
+  "samples": 36000,
+  "windows": 180,
+  "exactEquality": true,
+  "referenceMedianMs": 242.0606580000001,
+  "optimizedMedianMs": 28.598325000000045,
+  "speedup": 8.464155086005901,
+  "runsMs": {
+    "reference": [
+      233.800519,
+      239.52950699999985,
+      248.61583399999995,
+      251.21274500000004,
+      242.0606580000001
+    ],
+    "optimized": [
+      28.598325000000045,
+      29.84507899999994,
+      34.62814299999991,
+      26.32246199999986,
+      28.338535999999976
+    ]
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "scenario": "synthetic 10000 heart-rate records + 1 workout; empty schema baseline",
+  "containsPrivateHealthData": false,
+  "platform": "darwin",
+  "arch": "x64",
+  "node": "v22.23.2",
+  "evaluatedAt": "2026-09-18T17:18:30.812Z",
+  "parity": {
+    "checked": true,
+    "complete": true,
+    "mismatches": []
+  },
+  "metrics": {
+    "typescript": {
+      "trials": 4,
+      "medianTotalMs": 4882.5,
+      "medianParseImportMs": 3594.6523220000017
+    },
+    "rust": {
+      "trials": 4,
+      "medianTotalMs": 3301.5,
+      "medianParseImportMs": 2010.0338365000002
+    }
+  },
+  "trials": [
+    {
+      "engine": "typescript",
+      "configuredValidation": "shadow",
+      "actualValidation": "not-run",
+      "trial": 1,
+      "status": "succeeded",
+      "totalMs": 5039,
+      "parseImportMs": 3629.492577,
+      "native": {}
+    },
+    {
+      "engine": "rust",
+      "configuredValidation": "shadow",
+      "actualValidation": "not-run",
+      "trial": 1,
+      "status": "succeeded",
+      "totalMs": 3302,
+      "parseImportMs": 2005.436471,
+      "native": {
+        "health": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 121.009974,
+          "peakRssKiB": 4580
+        },
+        "apply-records": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 968.85645,
+          "peakRssKiB": 9564
+        },
+        "aggregate": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 19.420068000000015,
+          "peakRssKiB": 2136
+        }
+      }
+    },
+    {
+      "engine": "typescript",
+      "configuredValidation": "off",
+      "actualValidation": "not-run",
+      "trial": 1,
+      "status": "succeeded",
+      "totalMs": 4836,
+      "parseImportMs": 3570.4554580000004,
+      "native": {}
+    },
+    {
+      "engine": "rust",
+      "configuredValidation": "off",
+      "actualValidation": "not-run",
+      "trial": 1,
+      "status": "succeeded",
+      "totalMs": 3301,
+      "parseImportMs": 2018.3511330000001,
+      "native": {
+        "health": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 119.94460800000002,
+          "peakRssKiB": 4564
+        },
+        "apply-records": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 988.8124359999999,
+          "peakRssKiB": 9568
+        },
+        "aggregate": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 17.338175000000035,
+          "peakRssKiB": 2072
+        }
+      }
+    },
+    {
+      "engine": "rust",
+      "configuredValidation": "off",
+      "actualValidation": "not-run",
+      "trial": 2,
+      "status": "succeeded",
+      "totalMs": 3280,
+      "parseImportMs": 1995.2027280000002,
+      "native": {
+        "health": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 115.86429900000002,
+          "peakRssKiB": 4568
+        },
+        "apply-records": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 995.5315220000001,
+          "peakRssKiB": 9464
+        },
+        "aggregate": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 19.03902999999997,
+          "peakRssKiB": 2072
+        }
+      }
+    },
+    {
+      "engine": "typescript",
+      "configuredValidation": "off",
+      "actualValidation": "not-run",
+      "trial": 2,
+      "status": "succeeded",
+      "totalMs": 4856,
+      "parseImportMs": 3561.2352680000004,
+      "native": {}
+    },
+    {
+      "engine": "rust",
+      "configuredValidation": "shadow",
+      "actualValidation": "not-run",
+      "trial": 2,
+      "status": "succeeded",
+      "totalMs": 3346,
+      "parseImportMs": 2014.6312020000005,
+      "native": {
+        "health": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 121.69132200000001,
+          "peakRssKiB": 4504
+        },
+        "apply-records": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 977.2442950000001,
+          "peakRssKiB": 9568
+        },
+        "aggregate": {
+          "rustCalls": 1,
+          "typescriptFallbacks": 0,
+          "wallMs": 25.57768599999997,
+          "peakRssKiB": 2072
+        }
+      }
+    },
+    {
+      "engine": "typescript",
+      "configuredValidation": "shadow",
+      "actualValidation": "not-run",
+      "trial": 2,
+      "status": "succeeded",
+      "totalMs": 4909,
+      "parseImportMs": 3618.849186000003,
+      "native": {}
+    }
+  ],
+  "limitations": [
+    "Not measured on N100 or cloud hardware",
+    "Warm filesystem caches; small sample",
+    "full recompute: extra incremental shadow validation not triggered",
+    "Implementation comparison includes prepared-statement reuse and batching, not a pure language comparison"
+  ]
+}

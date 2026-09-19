@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import type { RecomputePlan } from "@rai/health-export-parser";
+import { importEngine, nativeFallback, nativeElevationGains, NATIVE_VERSION } from "@rai/health-export-parser";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { RaiApplicationService } from "./service.js";
@@ -28,9 +29,15 @@ async function main(): Promise<void> {
   const timezoneIdentifier = optionValue(args, "--timezone", "Asia/Shanghai");
   const dirtyFromAt = optionValue(args, "--dirty-from", "");
   const validationMode = args.includes("--shadow-validate") ? "shadow" as const : "off" as const;
+  const elevationGains = await nativeElevationGains(databasePath, {
+    spoolRoot: resolve(optionValue(args, "--native-spool-root", dirname(databasePath))),
+    engine: importEngine(optionValue(args, "--engine", "typescript")),
+    fallback: nativeFallback(optionValue(args, "--native-fallback", "none")),
+    version: optionValue(args, "--native-version", NATIVE_VERSION)
+  });
   const store = await RaiDatabase.open(databasePath);
   try {
-    const service = new RaiApplicationService(store);
+    const service = new RaiApplicationService(store, "owned", elevationGains);
     const incrementalPlan: RecomputePlan | null = dirtyFromAt
       ? {
           mode: "partial",
