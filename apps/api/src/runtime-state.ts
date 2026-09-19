@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { RemovalGuardDto } from "@rai/api-contracts";
+import type { ImportExecutionEngine, ImportJobPerformance, RemovalGuardDto } from "@rai/api-contracts";
 
 export interface RuntimeImportSourceRow {
   id: string;
@@ -12,6 +12,7 @@ export interface RuntimeImportSourceRow {
   originalPath: string;
   sourceSha256: string | null;
   idempotencyKey?: string | null;
+  archiveSha256?: string | null;
   exportFileName: string;
   exportBytes: number;
   routeFileCount: number;
@@ -32,7 +33,10 @@ export interface RuntimeImportJobRow {
   inputPath: string;
   progress?: number;
   summary?: unknown;
+  performance?: ImportJobPerformance;
   removalGuard?: RemovalGuardDto;
+  preserveAbsent?: boolean;
+  queue?: { scope: string; attempts: number; finalized: boolean; cancelRequested?: boolean; engine?: ImportExecutionEngine };
 }
 
 export class RuntimeStateStore {
@@ -114,7 +118,7 @@ export class RuntimeStateStore {
     try {
       return (db.prepare(`SELECT id, kind, display_name AS displayName, input_path AS inputPath,
         original_path AS originalPath, source_sha256 AS sourceSha256,
-        idempotency_key AS idempotencyKey,
+        idempotency_key AS idempotencyKey, archive_sha256 AS archiveSha256,
         export_file_name AS exportFileName, export_bytes AS exportBytes,
         route_file_count AS routeFileCount, modified_at AS modifiedAt,
         created_at AS createdAt, last_used_at AS lastUsedAt
@@ -127,7 +131,7 @@ export class RuntimeStateStore {
     try {
       return db.prepare(`SELECT id, kind, display_name AS displayName, input_path AS inputPath,
         original_path AS originalPath, source_sha256 AS sourceSha256,
-        idempotency_key AS idempotencyKey,
+        idempotency_key AS idempotencyKey, archive_sha256 AS archiveSha256,
         export_file_name AS exportFileName, export_bytes AS exportBytes,
         route_file_count AS routeFileCount, modified_at AS modifiedAt,
         created_at AS createdAt, last_used_at AS lastUsedAt
@@ -148,11 +152,12 @@ export class RuntimeStateStore {
 
   private upsertSourceIn(db: DatabaseSync, source: RuntimeImportSourceRow): void {
     db.prepare(`INSERT INTO import_sources (id, kind, display_name, input_path, original_path,
-        source_sha256, idempotency_key, export_file_name, export_bytes, route_file_count, modified_at, created_at, last_used_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        source_sha256, idempotency_key, export_file_name, export_bytes, route_file_count, modified_at, created_at, last_used_at, archive_sha256)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, display_name=excluded.display_name,
         input_path=excluded.input_path, original_path=excluded.original_path,
         source_sha256=excluded.source_sha256, idempotency_key=COALESCE(excluded.idempotency_key, import_sources.idempotency_key),
+        archive_sha256=COALESCE(excluded.archive_sha256, import_sources.archive_sha256),
         export_file_name=excluded.export_file_name,
         export_bytes=excluded.export_bytes, route_file_count=excluded.route_file_count,
         modified_at=excluded.modified_at,
@@ -164,7 +169,7 @@ export class RuntimeStateStore {
         END`).run(
         source.id, source.kind, source.displayName, source.inputPath, source.originalPath,
         source.sourceSha256, source.idempotencyKey ?? null, source.exportFileName, source.exportBytes, source.routeFileCount,
-        source.modifiedAt, source.createdAt, source.lastUsedAt
+        source.modifiedAt, source.createdAt, source.lastUsedAt, source.archiveSha256 ?? null
       );
   }
 
@@ -196,22 +201,36 @@ export class RuntimeStateStore {
     return this.withCorruptionRecovery(() => this.readJobs(limit));
   }
 
-  private readJobs(limit: number): RuntimeImportJobRow[] {
+  latestJobForSource(sourceId: string): RuntimeImportJobRow | null {
+    return this.withCorruptionRecovery(() => this.readJobs(1, sourceId).at(-1) ?? null);
+  }
+
+  job(id: string): RuntimeImportJobRow | null {
+    return this.withCorruptionRecovery(() => this.readJobs(1, undefined, id).at(-1) ?? null);
+  }
+
+  private readJobs(limit: number, sourceId?: string, id?: string): RuntimeImportJobRow[] {
     const db = this.open();
     try {
       const rows = db.prepare(`SELECT id, source_id AS sourceId, status, phase, message, created_at AS createdAt,
         completed_at AS completedAt, error, input_path AS inputPath, progress, summary_json AS summaryJson,
-        removal_guard_json AS removalGuardJson
-        FROM import_jobs ORDER BY sequence_number DESC LIMIT ?`).all(limit) as unknown as Array<RuntimeImportJobRow & {
+        removal_guard_json AS removalGuardJson, performance_json AS performanceJson, execution_json AS executionJson
+        FROM import_jobs ${id !== undefined ? "WHERE id = ?" : sourceId === undefined ? `WHERE status IN ('queued', 'running') OR json_extract(execution_json, '$.queue.finalized') = 0 OR sequence_number IN
+          (SELECT sequence_number FROM import_jobs ORDER BY sequence_number DESC LIMIT ?)
+        ORDER BY sequence_number DESC` : "WHERE source_id = ? ORDER BY sequence_number DESC LIMIT 1"}`).all(id ?? sourceId ?? limit) as unknown as Array<RuntimeImportJobRow & {
           sourceId: string | null;
           summaryJson: string | null;
           removalGuardJson: string | null;
+          performanceJson: string | null;
+          executionJson: string | null;
         }>;
-      return rows.reverse().map(({ sourceId, summaryJson, removalGuardJson, progress, ...row }) => ({
+      return rows.reverse().map(({ sourceId, summaryJson, removalGuardJson, performanceJson, executionJson, progress, ...row }) => ({
         ...row,
         ...(sourceId === null ? {} : { sourceId }),
         ...(progress === null || progress === undefined ? {} : { progress }),
         ...(summaryJson ? { summary: JSON.parse(summaryJson) } : {}),
+        ...(performanceJson ? { performance: JSON.parse(performanceJson) } : {}),
+        ...(executionJson ? JSON.parse(executionJson) as Pick<RuntimeImportJobRow, "queue" | "preserveAbsent"> : {}),
         ...(removalGuardJson ? { removalGuard: JSON.parse(removalGuardJson) } : {})
       }));
     } finally { db.close(); }
@@ -219,6 +238,22 @@ export class RuntimeStateStore {
 
   upsertJob(job: RuntimeImportJobRow): void {
     this.withCorruptionRecovery(() => this.writeJob(job));
+  }
+
+  /** A final acknowledgement must not leave a stale committed publication intent. */
+  finalizeImportJob(job: RuntimeImportJobRow): void {
+    const db = this.open();
+    try {
+      db.exec("PRAGMA synchronous=FULL; BEGIN IMMEDIATE");
+      try {
+        this.upsertJobIn(db, job);
+        db.prepare("DELETE FROM import_publications WHERE id = ?").run(job.id);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    } finally { db.close(); }
   }
 
   private writeJob(job: RuntimeImportJobRow): void {
@@ -230,14 +265,18 @@ export class RuntimeStateStore {
 
   private upsertJobIn(db: DatabaseSync, job: RuntimeImportJobRow): void {
     db.prepare(`INSERT INTO import_jobs (id, source_id, status, phase, message, created_at, completed_at,
-        error, input_path, progress, summary_json, removal_guard_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        error, input_path, progress, summary_json, removal_guard_json, performance_json, execution_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET source_id=excluded.source_id, status=excluded.status, phase=excluded.phase,
         message=excluded.message, completed_at=excluded.completed_at, error=excluded.error,
         input_path=excluded.input_path, progress=excluded.progress, summary_json=excluded.summary_json,
-        removal_guard_json=excluded.removal_guard_json`).run(
+        removal_guard_json=excluded.removal_guard_json, performance_json=excluded.performance_json,
+        execution_json=excluded.execution_json`).run(
         job.id, job.sourceId ?? null, job.status, job.phase, job.message, job.createdAt, job.completedAt,
         job.error, job.inputPath, job.progress ?? null, job.summary === undefined ? null : JSON.stringify(job.summary),
-        job.removalGuard === undefined ? null : JSON.stringify(job.removalGuard)
+        job.removalGuard === undefined ? null : JSON.stringify(job.removalGuard),
+        job.performance === undefined ? null : JSON.stringify(job.performance),
+        JSON.stringify({ ...(job.preserveAbsent === undefined ? {} : { preserveAbsent: job.preserveAbsent }),
+          ...(job.queue === undefined ? {} : { queue: job.queue }) })
       );
   }
 
@@ -270,7 +309,17 @@ export class RuntimeStateStore {
       if (!jobColumns.some(({ name }) => name === "removal_guard_json")) {
         db.exec("ALTER TABLE import_jobs ADD COLUMN removal_guard_json TEXT");
       }
+      if (!jobColumns.some(({ name }) => name === "performance_json")) {
+        db.exec("ALTER TABLE import_jobs ADD COLUMN performance_json TEXT");
+      }
+      if (!jobColumns.some(({ name }) => name === "execution_json")) {
+        db.exec("ALTER TABLE import_jobs ADD COLUMN execution_json TEXT");
+      }
+      db.exec("CREATE INDEX IF NOT EXISTS idx_import_jobs_source ON import_jobs(source_id, sequence_number DESC)");
       const sourceColumns = db.prepare("PRAGMA table_info(import_sources)").all() as unknown as Array<{ name: string }>;
+      if (!sourceColumns.some(({ name }) => name === "archive_sha256")) {
+        db.exec("ALTER TABLE import_sources ADD COLUMN archive_sha256 TEXT");
+      }
       if (!sourceColumns.some(({ name }) => name === "idempotency_key")) {
         db.exec("ALTER TABLE import_sources ADD COLUMN idempotency_key TEXT");
         db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_import_sources_idempotency ON import_sources(idempotency_key)");

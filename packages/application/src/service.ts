@@ -48,11 +48,11 @@ export class RaiApplicationService {
   private readonly sessions: SqliteTrainingSessionRepository;
   private readonly pipeline: RecomputePipeline;
 
-  constructor(private readonly store: RaiDatabase) {
+  constructor(private readonly store: RaiDatabase, private readonly transactionMode: "owned" | "savepoint" = "owned", elevationGains?: ReadonlyMap<string, number | null>) {
     this.jobs = new RecomputeJobRepository(store.database);
     this.modelRuns = new SqliteModelRunRepository(store.database);
     this.sessions = new SqliteTrainingSessionRepository(store.database);
-    this.pipeline = new RecomputePipeline(store, this.jobs, this.modelRuns, this.sessions);
+    this.pipeline = new RecomputePipeline(store, this.jobs, this.modelRuns, this.sessions, elevationGains);
   }
 
   get database(): DatabaseSync {
@@ -104,7 +104,7 @@ export class RaiApplicationService {
       input.restingHeartRate.valueBpm !== null && input.maximumHeartRate.valueBpm !== null &&
       input.maximumHeartRate.valueBpm - input.restingHeartRate.valueBpm < 30
     ) throw new TrainingZoneProfileValidationError("Maximum heart rate must be at least 30 bpm above resting heart rate");
-    this.database.exec("BEGIN IMMEDIATE");
+    this.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_app_mutation");
     try {
       const row = this.database.prepare("SELECT COALESCE(MAX(revision), 0) AS revision FROM training_zone_profile_settings")
         .get() as unknown as { revision: number };
@@ -127,7 +127,7 @@ export class RaiApplicationService {
         input.lactateThresholdPace.mode, input.lactateThresholdPace.valueSecondsPerKm,
         createdAt
       );
-      this.database.exec("COMMIT");
+      this.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_app_mutation");
       return {
         revision,
         effectiveFromLocalDate,
@@ -137,7 +137,7 @@ export class RaiApplicationService {
         createdAt
       };
     } catch (error) {
-      this.database.exec("ROLLBACK");
+      this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RELEASE rai_app_mutation");
       throw error;
     }
   }
@@ -146,7 +146,7 @@ export class RaiApplicationService {
     if (input.rpe !== null && (!Number.isInteger(input.rpe) || input.rpe < 1 || input.rpe > 10)) {
       throw new Error("RPE must be an integer from 1 through 10");
     }
-    this.database.exec("BEGIN IMMEDIATE");
+    this.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_app_mutation");
     try {
       if (!this.sessions.exists(input.trainingSessionId)) {
         throw new WorkoutNotFoundError(input.trainingSessionId);
@@ -178,10 +178,10 @@ export class RaiApplicationService {
           input.note
         );
       const jobId = this.enqueueFullRecompute();
-      this.database.exec("COMMIT");
+      this.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_app_mutation");
       return { overrideId, jobId };
     } catch (error) {
-      this.database.exec("ROLLBACK");
+      this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RELEASE rai_app_mutation");
       throw error;
     }
   }

@@ -346,7 +346,45 @@ export interface ImportJobRequest {
   sourceId: string;
 }
 
+export interface ImportExecutionEngine {
+  name: "typescript" | "rust";
+  version: string;
+  fallback: "none" | "typescript";
+}
+export type CommandKind = "workout_override" | "training_zones" | "recompute" |
+  "prediction_training" | "activate_model" | "activate_prediction";
+
+export interface CommandRequest {
+  idempotencyKey: string;
+  kind: CommandKind;
+  payload: Record<string, unknown>;
+}
+
+export interface CommandResponse {
+  id: string;
+  kind: CommandKind;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  createdAt: string;
+  completedAt: string | null;
+  result?: unknown;
+  error?: { code: string; message: string };
+}
+
+export type ImportStage = "backup" | "stagingCopy" | "parseImport" | "changeAnalysis" |
+  "recompute" | "activation" | "cleanup";
+
+export interface ImportJobPerformance {
+  /** Extra full replay comparison only; the model activation gate stays enabled. */
+  validationMode: "shadow" | "off" | "not-run";
+  totalMs: number;
+  stagesMs: Partial<Record<ImportStage, number>>;
+  computeStagesMs?: Record<string, number>;
+  computeProcessMaxRssKiB?: number;
+  native?: Record<string, { rustCalls: number; typescriptFallbacks: number; wallMs: number; peakRssKiB: number }>;
+}
+
 export interface ImportJobResponse {
+  executionEngine?: ImportExecutionEngine;
   id: string;
   sourceId?: string;
   status: JobStatus;
@@ -356,8 +394,13 @@ export interface ImportJobResponse {
   completedAt: string | null;
   error: string | null;
   progress?: number;
+  queuePosition?: number;
+  waitingReason?: "writer_busy";
+  /** Optional for compatibility with persisted jobs from older versions. */
+  performance?: ImportJobPerformance;
   removalGuard?: RemovalGuardDto;
   summary?: {
+    recomputeReasons?: string[];
     importMode: "unchanged" | "incremental" | "full";
     insertedWorkouts: number;
     updatedWorkouts: number;

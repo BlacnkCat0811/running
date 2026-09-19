@@ -13,8 +13,72 @@ import { acquireDatabasePublicationLock, RaiDatabase } from "@rai/storage-sqlite
 import yazl from "yazl";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
+import { ImportPublicationJournal, readImportReceipt, writeImportReceipt } from "../src/import-publication.js";
+import { RuntimeStateStore } from "../src/runtime-state.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
+
+test("restore and deletion reject a committed import whose acknowledgement is still pending", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-pending-publication-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  const state = new RuntimeStateStore(runtimeRoot);
+  const store = await RaiDatabase.open(databasePath);
+  store.close();
+  const backup = await new DatabaseMaintenance(databasePath, runtimeRoot).createBackup("before-import");
+  const summary = {
+    importMode: "full" as const, insertedWorkouts: 0, updatedWorkouts: 0, removedWorkouts: 0,
+    unchangedWorkouts: 0, routesUpdated: 0, featuresReused: 0, featuresRecomputed: 0,
+    modelReplayFrom: null, durationMs: 0, backupName: backup.name
+  };
+  writeImportReceipt(databasePath, "pending-ack", summary);
+  const journal = new ImportPublicationJournal(databasePath, runtimeRoot);
+  journal.prepare("pending-ack", join(runtimeRoot, "var/backups/rai.import-rollback.fixture.sqlite"), true);
+  journal.commit("pending-ack");
+  state.upsertJob({
+    id: "pending-ack", status: "succeeded", phase: "completed", message: "",
+    createdAt: new Date().toISOString(), completedAt: new Date().toISOString(),
+    error: null, inputPath: runtimeRoot,
+    queue: { scope: JSON.stringify(["local", "athlete_1", "default"]), attempts: 1, finalized: false }
+  });
+  const runtime = new DatabaseSync(state.path);
+  runtime.exec(`CREATE TRIGGER fail_publication_ack BEFORE DELETE ON import_publications
+    BEGIN SELECT RAISE(ABORT, 'fixture acknowledgement unavailable'); END`);
+  runtime.close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot,
+    env: {
+      ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "",
+      RAI_SERVER_ID: "local", RAI_ATHLETE_ID: "athlete_1", RAI_DATASET_EPOCH: "default"
+    },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    for (const [method, path, confirmation, message] of [
+      ["POST", `/v1/backups/${backup.name}/restore`, "恢复此备份", "任务执行期间不能恢复数据库"],
+      ["DELETE", "/v1/database", "删除我的 RAI 数据", "任务执行期间不能删除数据库"]
+    ] as const) {
+      const response = await fetch(`${url}${path}`, {
+        method, headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirmation })
+      });
+      const body = await response.json() as { message: string };
+      assert.equal(response.status, 409, JSON.stringify(body));
+      assert.equal(body.message, message, "maintenance guard, not transient writer contention, must reject");
+    }
+    assert.equal(state.job("pending-ack")?.queue?.finalized, false);
+    assert.equal(journal.has("pending-ack"), true);
+    assert.deepEqual(readImportReceipt(databasePath, "pending-ack"), summary);
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
 
 async function zipBuffer(entries: Array<{ name: string; body: string }>): Promise<Buffer> {
   const archive = new yazl.ZipFile();
@@ -915,6 +979,9 @@ test("dynamic-port startup reports readiness and workout overrides preserve serv
 
     const database = new DatabaseSync(databasePath, { readOnly: true });
     try {
+      // Match production readonly connections while the scheduled worker opens
+      // its SQLite connection; an immediate schema read can race that handoff.
+      database.exec("PRAGMA busy_timeout = 5000");
       const persistedOverride = database.prepare(
         "SELECT id FROM workout_overrides WHERE training_session_id = ?"
       ).get("session_override_fixture") as { id: string };
@@ -1044,15 +1111,44 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
     }]));
     assert.equal(failedImportUpload.status, 200, await failedImportUpload.clone().text());
     const { sourceId } = await failedImportUpload.json() as { sourceId: string };
+    const otherUpload = await upload(await zipBuffer([{
+      name: "apple_health_export/export.xml",
+      body: "<HealthData/>"
+    }]));
+    assert.equal(otherUpload.status, 200, await otherUpload.clone().text());
+    const otherSource = await otherUpload.json() as { sourceId: string };
     const created = await fetch(`${url}/v1/import-jobs`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sourceId })
     });
-    assert.equal(created.status, 200, await created.clone().text());
+    assert.equal(created.status, 202, await created.clone().text());
     const createdJob = await created.json() as { id: string; sourceId?: string };
     const importJobId = createdJob.id;
     assert.equal(createdJob.sourceId, sourceId);
+    const repeated = await fetch(`${url}/v1/import-jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceId })
+    });
+    assert.equal(repeated.status, 200, await repeated.clone().text());
+    assert.equal((await repeated.json() as { id: string }).id, importJobId);
+    const competing = await fetch(`${url}/v1/import-jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceId: otherSource.sourceId })
+    });
+    assert.equal(competing.status, 202, await competing.clone().text());
+    const queued = await competing.json() as { id: string; status: string };
+    assert.equal(queued.status, "queued");
+    const cancelled = await fetch(`${url}/v1/import-jobs/${queued.id}/cancel`, { method: "POST" });
+    assert.equal(cancelled.status, 200, await cancelled.clone().text());
+    const inspectedDuringImport = await fetch(`${url}/v1/imports/inspect`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceId })
+    });
+    assert.equal(inspectedDuringImport.status, 200, await inspectedDuringImport.clone().text());
     let failedJob: { status: string } | null = null;
     const terminalDeadline = Date.now() + 15_000;
     while (Date.now() < terminalDeadline) {
@@ -1063,10 +1159,14 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
     assert.equal(failedJob?.status, "failed");
+    const failedTiming = await fetch(`${url}/v1/import-jobs/${importJobId}`)
+      .then((response) => response.json()) as { performance: { totalMs: number; stagesMs: { parseImport: number } } };
+    assert.ok(failedTiming.performance.totalMs >= 0);
+    assert.ok(failedTiming.performance.stagesMs.parseImport >= 0, "failed parser still records its duration");
     const latestJob = await fetch(`${url}/v1/import-jobs/latest`);
     assert.equal(latestJob.status, 200, await latestJob.clone().text());
     assert.deepEqual(await latestJob.json(), {
-      ...(await fetch(`${url}/v1/import-jobs/${importJobId}`).then((response) => response.json()) as object)
+      ...(await fetch(`${url}/v1/import-jobs/${queued.id}`).then((response) => response.json()) as object)
     });
     assert.equal(await fetch(`${url}/v1/import-jobs/active`).then((response) => response.json()), null);
     // The failed import releases its mutation slot slightly after the job

@@ -12,6 +12,7 @@ import { ImportRemovalGuardError } from "@rai/health-export-parser";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
+import type { ImportJobPerformance } from "@rai/api-contracts";
 import { FULL_SNAPSHOT_SOURCE_SCOPE } from "../src/import-sources.js";
 import {
   ExternalPredictionModelTrainer,
@@ -1372,13 +1373,14 @@ for (const [beforeStatus, afterStatus] of [
   });
 }
 
-test("recomputes and activates a training session that becomes ambiguous", async () => {
+for (const validationMode of ["shadow", "off"] as const) {
+test(`recomputes and activates a training session that becomes ambiguous (${validationMode})`, async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-session-status-run-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   const active = await seedCanonical(databasePath);
   active.close();
-  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  const worker = new ImportWorker(databasePath, root, root, undefined, undefined, undefined, validationMode) as unknown as ImportWorkerTestSurface;
   let commandCount = 0;
   worker.command = async (args) => {
     commandCount += 1;
@@ -1409,6 +1411,7 @@ test("recomputes and activates a training session that becomes ambiguous", async
     }
     assert.equal(commandCount, 2, "a training-session status change must invoke exactly one recompute");
     assert.ok(args.includes("recompute"));
+    assert.equal(args.includes("--shadow-validate"), validationMode === "shadow");
     const dirtyFromArgument = args.indexOf("--dirty-from");
     assert.ok(dirtyFromArgument >= 0);
     assert.equal(args[dirtyFromArgument + 1], runDate(0));
@@ -1427,6 +1430,12 @@ test("recomputes and activates a training session that becomes ambiguous", async
     await worker.run(job);
     assert.equal(job.status, "succeeded", String(job.error ?? ""));
     assert.equal(commandCount, 2);
+    const timing = job.performance as ImportJobPerformance;
+    assert.equal(timing.validationMode, validationMode);
+    for (const stage of ["backup", "stagingCopy", "parseImport", "changeAnalysis", "recompute", "activation", "cleanup"] as const) {
+      assert.ok(timing.stagesMs[stage]! >= 0, `missing ${stage} duration`);
+    }
+    assert.ok(timing.totalMs >= Object.values(timing.stagesMs).reduce((sum, value) => sum + value, 0));
     assert.equal((job.summary as {
       importMode: string;
       updatedWorkouts: number;
@@ -1450,6 +1459,7 @@ test("recomputes and activates a training session that becomes ambiguous", async
     rmSync(root, { recursive: true, force: true });
   }
 });
+}
 
 for (const field of [
   "HKCharacteristicTypeIdentifierDateOfBirth",
@@ -2321,6 +2331,12 @@ test("activates data-only health changes without running model recompute", async
     assert.equal(commandCount, 1);
     assert.equal(importWorker.get(created.id)?.status, "succeeded");
     assert.equal(importWorker.get(created.id)?.summary?.importMode, "incremental");
+    const timing = importWorker.get(created.id)?.performance;
+    assert.equal(timing?.validationMode, "not-run");
+    assert.equal(timing?.stagesMs.recompute, undefined, "data-only imports skip recompute entirely");
+    const reopened = new ImportWorker(databasePath, root, root);
+    assert.deepEqual(reopened.get(created.id)?.performance, timing, "timings survive service restart");
+    await reopened.close();
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
       assert.equal((activated.prepare(`

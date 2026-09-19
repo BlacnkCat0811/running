@@ -15,10 +15,12 @@ import {
 } from "./file-operations.js";
 import { importGpxRoutes } from "./gpx-parser.js";
 import { ImportRemovalGuardError } from "./import-guard.js";
+import { importEngine, nativeFallback, NATIVE_VERSION, type NativeOptions } from "./native-worker.js";
 import { stableId } from "./utils.js";
 import { acquireDatabasePublicationLock, publishDatabaseFile } from "@rai/storage-sqlite";
 
 interface ParsedArguments {
+  native: NativeOptions;
   command: "import" | "incremental-import" | "audit";
   input: string;
   database: string;
@@ -62,6 +64,12 @@ function parseArguments(argv: string[]): ParsedArguments {
   }
 
   return {
+    native: {
+      spoolRoot: resolve(optionValue(argv, "--native-spool-root", dirname(resolve(optionValue(argv, "--database", "var/rai.sqlite"))))),
+      engine: importEngine(optionValue(argv, "--engine", process.env.RAI_IMPORT_ENGINE ?? "typescript")),
+      fallback: nativeFallback(optionValue(argv, "--native-fallback", process.env.RAI_RUST_FALLBACK ?? "none")),
+      version: optionValue(argv, "--native-version", NATIVE_VERSION)
+    },
     command,
     input: resolve(optionValue(argv, "--input", "apple_health_export")),
     database: resolve(optionValue(argv, "--database", "var/rai.sqlite")),
@@ -250,6 +258,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
 
     console.log(`Parsing Apple Health XML (${Math.round(xmlSize / 1024 / 1024)} MiB)...`);
     const xmlResult = await parseAppleHealthXml(xmlPath, store, {
+      native: { ...args.native, stagingDatabase },
       fileSize: xmlSize,
       atomic: false,
       deletedWorkoutIds: readSyncManifest(args.input),
@@ -269,7 +278,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     const gpxResult = await importGpxRoutes(
     args.input,
     store,
-    !args.replaceAbsent ? { preserveAbsent: true } : undefined
+    { ...(!args.replaceAbsent ? { preserveAbsent: true } : {}), native: args.native }
   );
 
     console.log("Building canonical running workout groups...");

@@ -23,4 +23,16 @@ export class MutationCoordinator {
       this.activeOperation = null;
     };
   }
+
+  /** Legacy synchronous routes tolerate short worker hand-offs, not long jobs. */
+  async acquireWhenAvailable(operation: string, timeoutMs = 2_000): Promise<() => void> {
+    const deadline = performance.now() + timeoutMs;
+    for (;;) {
+      try { return this.acquire(operation); }
+      catch (error) {
+        if (!(error instanceof MutationConflictError) || performance.now() >= deadline) throw error;
+        await new Promise((done) => setTimeout(done, 25));
+      }
+    }
+  }
 }

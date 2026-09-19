@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream, existsSync, readFileSync, type Dir
 import { mkdir, readdir, rm, stat, statfs } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, extname, resolve, sep } from "node:path";
-import { Transform } from "node:stream";
+import { Transform, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import yauzl, { type Entry, type ZipFile } from "yauzl";
@@ -20,6 +20,7 @@ export interface ImportSource {
   originalPath: string;
   sourceSha256: string | null;
   idempotencyKey: string | null;
+  archiveSha256?: string | null;
   exportFileName: string;
   exportBytes: number;
   routeFileCount: number;
@@ -29,6 +30,7 @@ export interface ImportSource {
 }
 
 export interface ImportInspection {
+  timings?: { receiveMs: number; extractMs: number; inspectMs: number; archiveBytes: number };
   sourceId: string;
   status: "ready" | "unchanged";
   exportFileName: string;
@@ -58,6 +60,12 @@ export class ImportSourceNotFoundError extends Error {
   constructor() {
     super("未找到导入来源");
   }
+}
+
+export class ImportBatchConflictError extends Error {
+  readonly code = "sync_batch_content_mismatch";
+  readonly statusCode = 409;
+  constructor() { super("同一同步批次对应了不同内容，或旧批次无法验证；请保留原文件并重新同步"); }
 }
 
 export class ImportArchiveValidationError extends Error {
@@ -315,7 +323,10 @@ export class ImportSourceManager {
       if (normalizedIdempotencyKey) {
         const existing = this.state.sourceByIdempotencyKey(normalizedIdempotencyKey) as ImportSource | null;
         if (existing) {
-          await drainStream(stream);
+          const received = await digestStream(stream, this.limits.maxArchiveBytes);
+          const expected = existing.archiveSha256 ??
+            (existsSync(existing.originalPath) ? await digestStream(createReadStream(existing.originalPath), this.limits.maxArchiveBytes) : null);
+          if (received !== expected) throw new ImportBatchConflictError();
           return await this.inspection(existing);
         }
       }
@@ -336,7 +347,8 @@ export class ImportSourceManager {
       }
       await mkdir(directory, { recursive: true });
       const healthKitUpload = isHealthKitUploadFilename(filename);
-      const hash = healthKitUpload ? null : createHash("sha256");
+      const hash = createHash("sha256");
+      const receiveStarted = performance.now();
       let bytes = 0;
       stream.once("limit", () => {
         (stream as NodeJS.ReadableStream & { destroy(error: Error): void })
@@ -354,6 +366,7 @@ export class ImportSourceManager {
         hash?.update(chunk);
       });
       await pipeline(stream, createWriteStream(archivePath, { flags: "wx" }));
+      const receiveMs = performance.now() - receiveStarted;
       await this.assertZipMagic(archivePath);
       const extracted = resolve(directory, "extracted");
       const extractionBudget = Math.min(
@@ -364,18 +377,24 @@ export class ImportSourceManager {
       if (extractionBudget < 0) {
         throw new ImportUploadCapacityError("解压空间不足，请清理旧上传或释放磁盘空间");
       }
+      const extractStarted = performance.now();
       await this.extractZip(archivePath, extracted, extractionBudget);
+      const extractMs = performance.now() - extractStarted;
+      const inspectStarted = performance.now();
       const source = await this.buildSource(
         id,
         "upload",
         filename,
         extracted,
         archivePath,
-        hash ? hash.digest("hex") : null,
+        null,
         normalizedIdempotencyKey
       );
+      source.archiveSha256 = hash.digest("hex");
+      if (!isHealthKitUploadSource(source, source.inputPath)) source.sourceSha256 = source.archiveSha256;
       await this.upsert(source);
-      return await this.inspection(source);
+      const inspection = await this.inspection(source);
+      return { ...inspection, timings: { receiveMs, extractMs, inspectMs: performance.now() - inspectStarted, archiveBytes: bytes } };
     } catch (error) {
       await rm(directory, { recursive: true, force: true });
       throw error;
@@ -468,7 +487,7 @@ export class ImportSourceManager {
     await mkdir(this.root, { recursive: true });
     const activeInputs = new Set(
       [...this.state.jobs(20)
-        .filter((job) => ["queued", "running"].includes(job.status))
+        .filter((job) => ["queued", "running"].includes(job.status) || (job.queue && !job.queue.finalized))
         .map((job) => resolve(job.inputPath)), ...additionalActiveInputPaths.map((path) => resolve(path))]
     );
     const sources = await this.readSources();
@@ -737,12 +756,18 @@ export class ImportSourceManager {
 
 }
 
-async function drainStream(stream: NodeJS.ReadableStream): Promise<void> {
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    stream.once("end", resolvePromise);
-    stream.once("error", rejectPromise);
-    (stream as NodeJS.ReadableStream & { resume(): void }).resume();
-  });
+async function digestStream(stream: NodeJS.ReadableStream, maximum: number): Promise<string> {
+  const hash = createHash("sha256");
+  let bytes = 0;
+  await pipeline(stream, new Writable({
+    write(chunk: Buffer, _encoding, callback) {
+      bytes += chunk.length;
+      if (bytes > maximum) return callback(new ImportArchiveTooLargeError("ZIP 文件超过大小限制"));
+      hash.update(chunk);
+      callback();
+    }
+  }));
+  return hash.digest("hex");
 }
 
 export function createImportSourceManager(

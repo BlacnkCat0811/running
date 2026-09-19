@@ -10,6 +10,7 @@ import yazl from "yazl";
 
 import {
   ImportArchiveTooLargeError,
+  ImportBatchConflictError,
   ImportArchiveValidationError,
   ImportSourceManager,
   ImportSourceNotFoundError,
@@ -208,6 +209,9 @@ test("replays an upload with the same sync batch idempotently", async () => {
     assert.equal(second.sourceId, first.sourceId);
     assert.equal(second.status, "ready");
     assert.equal((await manager.get(first.sourceId))?.idempotencyKey, "batch-1");
+    await zip(join(root, "other.zip"), [{ name: "apple_health_export/export.xml", body: "<HealthData different=\"true\"/>" }]);
+    await assert.rejects(manager.saveUpload(createReadStream(join(root, "other.zip")), "apple-health-healthkit.zip", "batch-1"), ImportBatchConflictError);
+    assert.equal((await manager.get(first.sourceId))?.id, first.sourceId);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

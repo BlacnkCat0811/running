@@ -403,6 +403,36 @@ export const importSourceBodySchema = {
   }
 } as const;
 
+export const commandBodySchema = {
+  type: "object", additionalProperties: false,
+  required: ["idempotencyKey", "kind", "payload"],
+  properties: {
+    idempotencyKey: { type: "string", minLength: 8, maxLength: 128, pattern: "^[A-Za-z0-9._-]+$" },
+    kind: { type: "string", enum: ["workout_override", "training_zones", "recompute", "prediction_training", "activate_model", "activate_prediction"] },
+    payload: { type: "object" }
+  },
+  allOf: [
+    { if: { properties: { kind: { const: "workout_override" } } }, then: { properties: { payload: {
+      ...overrideBodySchema, required: [...overrideBodySchema.required, "trainingSessionId"],
+      properties: { ...overrideBodySchema.properties, trainingSessionId: identifier }
+    } } } },
+    { if: { properties: { kind: { const: "training_zones" } } }, then: { properties: { payload: trainingZoneProfileBodySchema } } },
+    { if: { properties: { kind: { const: "prediction_training" } } }, then: { properties: { payload: predictionModelTrainBodySchema } } },
+    { if: { properties: { kind: { const: "recompute" } } }, then: { properties: { payload: { type: "object", additionalProperties: false, properties: {} } } } },
+    { if: { properties: { kind: { enum: ["activate_model", "activate_prediction"] } } }, then: { properties: { payload: {
+      type: "object", additionalProperties: false, required: ["id"], properties: { id: identifier }
+    } } } }
+  ]
+} as const;
+
+const commandResponseSchema = {
+  type: "object", required: ["id", "kind", "status", "createdAt", "completedAt"],
+  properties: {
+    id: { type: "string" }, kind: { type: "string" }, status: { type: "string" },
+    createdAt: { type: "string" }, completedAt: { type: ["string", "null"] },
+    result: {}, error: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } }
+  }
+};
 export const importJobBodySchema = {
   ...importSourceBodySchema
 } as const;
@@ -439,6 +469,7 @@ const importJobSummarySchema = {
     "routesUpdated", "featuresReused", "featuresRecomputed", "modelReplayFrom", "durationMs", "backupName"
   ],
   properties: {
+    recomputeReasons: { type: "array", items: { type: "string" } },
     importMode: { type: "string", enum: ["unchanged", "incremental", "full"] },
     insertedWorkouts: { type: "integer" },
     updatedWorkouts: { type: "integer" },
@@ -457,6 +488,10 @@ const importJobResponseSchema = {
   additionalProperties: false,
   required: ["id", "status", "phase", "message", "createdAt", "completedAt", "error"],
   properties: {
+    executionEngine: {
+      type: "object", required: ["name", "version", "fallback"],
+      properties: { name: { type: "string", enum: ["typescript", "rust"] }, version: { type: "string" }, fallback: { type: "string", enum: ["none", "typescript"] } }
+    },
     id: { type: "string" },
     sourceId: { type: "string" },
     status: { type: "string" },
@@ -466,6 +501,33 @@ const importJobResponseSchema = {
     completedAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
     error: { anyOf: [{ type: "string" }, { type: "null" }] },
     progress: { type: "number", minimum: 0, maximum: 1 },
+    queuePosition: { type: "integer", minimum: 1 },
+    waitingReason: { type: "string", enum: ["writer_busy"] },
+    performance: {
+      type: "object",
+      additionalProperties: false,
+      required: ["validationMode", "totalMs", "stagesMs"],
+      properties: {
+        validationMode: { type: "string", enum: ["shadow", "off", "not-run"] },
+        totalMs: { type: "number", minimum: 0 },
+        computeStagesMs: { type: "object", additionalProperties: { type: "number", minimum: 0 } },
+        computeProcessMaxRssKiB: { type: "number", minimum: 0 },
+        native: { type: "object", additionalProperties: {
+          type: "object", properties: {
+            rustCalls: { type: "integer", minimum: 0 }, typescriptFallbacks: { type: "integer", minimum: 0 },
+            wallMs: { type: "number", minimum: 0 }, peakRssKiB: { type: "number", minimum: 0 }
+          }
+        } },
+        stagesMs: {
+          type: "object",
+          additionalProperties: false,
+          properties: Object.fromEntries(
+            ["backup", "stagingCopy", "parseImport", "changeAnalysis", "recompute", "activation", "cleanup"]
+              .map((stage) => [stage, { type: "number", minimum: 0 }])
+          )
+        }
+      }
+    },
     summary: importJobSummarySchema
   }
 } as const;
@@ -594,6 +656,12 @@ export const openapiDocument = {
     }
   },
   paths: {
+    "/v1/performance": { get: operation(["Jobs"], "进程性能与调度状态", {
+      responses: { ...responses("进程性能与调度状态"), "200": jsonResponse("进程性能", {
+        type: "object", required: ["uptimeMs", "requests", "admission"],
+        properties: { uptimeMs: { type: "number" }, requests: { type: "integer" }, admission: { type: "object" } }
+      }) }
+    }) },
     "/v1/openapi.json": { get: operation(["Read"], "OpenAPI 3.1 契约") },
     "/v1/health": { get: operation(["Read"], "本地服务健康状态") },
     "/v1/dashboard": { get: operation(["Read"], "概览数据") },
@@ -699,12 +767,27 @@ export const openapiDocument = {
     }) },
     "/v1/model-runs/{id}/activate": { post: operation(["Jobs"], "激活成功的历史模型运行", { parameters: pathId }) },
     "/v1/jobs": { get: operation(["Jobs"], "重算任务历史") },
+    "/v1/commands": { post: operation(["Jobs"], "提交异步写操作", {
+      requestBody: body(commandBodySchema, "客户端生成的幂等键与待执行操作"),
+      responses: { ...responses("提交异步写操作"), "200": jsonResponse("已有任务", commandResponseSchema),
+        "202": jsonResponse("已持久化排队", commandResponseSchema), "429": errorResponse }
+    }) },
+    "/v1/commands/{id}": { get: operation(["Jobs"], "查询异步写操作", {
+      parameters: pathId, responses: { ...responses("查询异步写操作"), "200": jsonResponse("任务状态", commandResponseSchema) }
+    }) },
+    "/v1/commands/{id}/cancel": { post: operation(["Jobs"], "取消尚未执行的写操作", { parameters: pathId }) },
     "/v1/jobs/{id}": { get: operation(["Jobs"], "任务与阶段事件", { parameters: pathId }) },
     "/v1/jobs/{id}/cancel": { post: operation(["Jobs"], "请求取消任务", { parameters: pathId }) },
     "/v1/import-jobs": { post: operation(["Jobs"], "从已检查的 Apple Health 来源导入", {
+      responses: {
+        ...responses("从已检查的 Apple Health 来源导入"),
+        "202": jsonResponse("已持久化排队", { $ref: "#/components/schemas/ImportJobResponse" }),
+        "429": errorResponse
+      },
       requestBody: body({ $ref: "#/components/schemas/ImportJobRequest" }, "已预检的导入来源标识")
     }) },
     "/v1/import-jobs/{id}": { get: operation(["Jobs"], "导入任务状态", { parameters: pathId }) },
+    "/v1/import-jobs/{id}/cancel": { post: operation(["Jobs"], "取消等待或执行中的导入任务", { parameters: pathId }) },
     "/v1/import-jobs/active": { get: operation(["Jobs"], "当前运行中的导入任务") },
     "/v1/import-jobs/latest": { get: operation(["Jobs"], "最近的导入任务") },
     "/v1/imports/uploads": { post: operation(["Jobs"], "流式上传并安全解压 Apple Health ZIP", {

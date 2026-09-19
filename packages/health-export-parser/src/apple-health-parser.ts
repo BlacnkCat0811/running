@@ -14,6 +14,8 @@ import { SaxesParser, type SaxesTagPlain } from "saxes";
 
 import { RaiDatabase } from "./database.js";
 import { evaluateRemovalGuard, ImportRemovalGuardError } from "./import-guard.js";
+import { prepareNative, type NativeOptions } from "./native-worker.js";
+import { NativeRecordWriter } from "./native-record-writer.js";
 import {
   addMetadata,
   classifySource,
@@ -76,6 +78,7 @@ export interface ParseProgress {
 
 export interface AppleHealthParseOptions {
   fileSize: number;
+  native?: NativeOptions;
   onProgress?: (progress: ParseProgress) => void;
   incremental?: {
     generation: string;
@@ -232,9 +235,16 @@ export async function parseAppleHealthXml(
   store: RaiDatabase,
   options: AppleHealthParseOptions
 ): Promise<AppleHealthParseResult> {
+  // The native worker writes only a disposable spool before the import transaction starts.
+  const native = await prepareNative("health", xmlPath, options.native ?? {});
+  let nativeRecords: NativeRecordWriter | undefined;
+  try {
   const atomic = options.atomic !== false;
   if (atomic) store.beginAtomicImport();
   const entityGeneration = options.incremental?.generation ?? "full-import";
+  if (native && options.atomic === false && options.native?.stagingDatabase) {
+    nativeRecords = new NativeRecordWriter(native.directory, entityGeneration, options.incremental?.batchId, Boolean(options.incremental));
+  }
   if (options.incremental) {
     store.seedImportGenerations(
       options.incremental.generation,
@@ -262,9 +272,9 @@ export async function parseAppleHealthXml(
 
   const parser = new SaxesParser({ xmlns: false });
 
-  parser.on("opentag", (tag) => {
+  const openTag = (tag: { name: string; attributes: Record<string, string> }) => {
     const name = localName(tag.name);
-    const attributes = attributesOf(tag);
+    const attributes = tag.attributes;
 
     switch (name) {
       case "Me":
@@ -362,9 +372,9 @@ export async function parseAppleHealthXml(
         activitySummaryCount += 1;
         break;
     }
-  });
+  };
 
-  parser.on("closetag", (tag) => {
+  const closeTag = (tag: { name: string }) => {
     const name = localName(tag.name);
 
     if (name === "WorkoutEvent") {
@@ -374,6 +384,9 @@ export async function parseAppleHealthXml(
       if (record) {
         const category = classifySource(record.sourceName, record.device, record.metadata);
         const contentHash = stableId("record_content", [currentRecord.attributes, currentRecord.metadata]);
+        if (nativeRecords) {
+          nativeRecords.capture(record, category, currentRecord.attributes, contentHash);
+        } else {
         const observation = store.observeImportEntity(
           "record", record.id, entityGeneration, record.startAt,
           options.incremental?.batchId, contentHash
@@ -385,6 +398,7 @@ export async function parseAppleHealthXml(
           if (!options.incremental || observation.inserted) insertedRecordCount += 1;
         }
         if (observation.tombstoned) tombstonedCount += 1;
+        }
         updateInventory(
           recordInventory,
           record.type,
@@ -455,32 +469,61 @@ export async function parseAppleHealthXml(
       currentWorkoutEvent = null;
       currentRoute = null;
     }
-  });
+  };
 
+  parser.on("opentag", (tag) => openTag({ name: tag.name, attributes: attributesOf(tag) }));
+  parser.on("closetag", closeTag);
   parser.on("error", (error) => {
     throw error;
   });
 
   try {
-    const stream = createReadStream(xmlPath, { encoding: "utf8" });
-    for await (const chunk of stream) {
-      const text = String(chunk);
-      sourceHash.update(text, "utf8");
-      bytesRead += Buffer.byteLength(text, "utf8");
-      parser.write(text);
-      if (options.onProgress && bytesRead - lastProgressAt >= 16 * 1024 * 1024) {
-        lastProgressAt = bytesRead;
-        options.onProgress({
-          bytesRead,
-          totalBytes: options.fileSize,
-          recordCount,
-          workoutCount
-        });
+    if (native) {
+        for (const row of native.database.prepare("SELECT kind, payload FROM xml_units ORDER BY sequence").iterate() as Iterable<{ kind: string; payload: string }>) {
+          const value = JSON.parse(row.payload);
+          if (row.kind === "record") {
+            // Keep JavaScript normalization/JSON.stringify as the single identity
+            // contract. Native parsing never guesses equivalent cross-language IDs.
+            currentRecord = { attributes: attributesOf({ attributes: value.attributes } as SaxesTagPlain), metadata: {} };
+            for (const entry of value.metadata as Array<{ key?: string; value?: string }>) {
+              addMetadata(currentRecord.metadata, entry.key, entry.value);
+            }
+            closeTag({ name: "Record" });
+          } else {
+            for (const [kind, name, attributes] of value as Array<[string, string, Record<string, string>]>) {
+              if (kind === "open") openTag({ name, attributes: attributesOf({ attributes } as SaxesTagPlain) });
+              else closeTag({ name });
+            }
+          }
+        }
+        options.onProgress?.({ bytesRead: native.result.inputBytes!, totalBytes: options.fileSize, recordCount, workoutCount });
+    } else {
+      const stream = createReadStream(xmlPath, { encoding: "utf8" });
+      for await (const chunk of stream) {
+        const text = String(chunk);
+        sourceHash.update(text, "utf8");
+        bytesRead += Buffer.byteLength(text, "utf8");
+        parser.write(text);
+        if (options.onProgress && bytesRead - lastProgressAt >= 16 * 1024 * 1024) {
+          lastProgressAt = bytesRead;
+          options.onProgress({
+            bytesRead,
+            totalBytes: options.fileSize,
+            recordCount,
+            workoutCount
+          });
+        }
       }
+      parser.close();
     }
-    parser.close();
 
     let explicitDeletionTimes: string[] = [];
+
+    if (nativeRecords) {
+      const written = await nativeRecords.apply(store, options.native!);
+      insertedRecordCount += written.inserted;
+      tombstonedCount += written.tombstoned;
+    }
 
     if (!options.incremental?.preserveAbsent) {
       for (const [type, item] of recordInventory) {
@@ -499,7 +542,7 @@ export async function parseAppleHealthXml(
       store.setManifest("activity_summary_count", String(activitySummaryCount));
     }
     store.setManifest("parser_contract_version", CONTRACT_VERSION);
-    store.setManifest("source_xml_sha256", sourceHash.digest("hex"));
+    store.setManifest("source_xml_sha256", native?.result.sha256 ?? sourceHash.digest("hex"));
     if (
       options.incremental
       && !options.incremental.preserveAbsent
@@ -543,4 +586,5 @@ export async function parseAppleHealthXml(
   }
 
   return { recordCount, workoutCount, activitySummaryCount, issueCount };
+  } finally { nativeRecords?.close(); await native?.dispose(); }
 }

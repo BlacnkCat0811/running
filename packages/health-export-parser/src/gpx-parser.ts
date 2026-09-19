@@ -6,6 +6,7 @@ import type { RoutePoint } from "@rai/contracts";
 import { SaxesParser, type SaxesTagPlain } from "saxes";
 
 import { RaiDatabase } from "./database.js";
+import { prepareNative, NativeWorkerError, type NativeOptions } from "./native-worker.js";
 import {
   normalizeRelativePath,
   normalizeRelativePathForFileSystem,
@@ -60,8 +61,23 @@ function safelyResolve(root: string, relativePath: string): string | null {
 
 async function parseGpxFile(
   path: string,
-  onPoints: (points: RoutePoint[]) => void
+  onPoints: (points: RoutePoint[]) => void,
+  nativeOptions: NativeOptions = {}
 ): Promise<{ pointCount: number; sha256: string }> {
+  const native = await prepareNative("gpx", path, nativeOptions);
+  if (native) {
+    try {
+      let batch: RoutePoint[] = [];
+      for (const point of native.database.prepare(`SELECT sequence, timestamp, latitude, longitude,
+        elevationMeters, speedMetersPerSecond, courseDegrees, horizontalAccuracyMeters, verticalAccuracyMeters
+        FROM gpx_points ORDER BY sequence`).iterate() as unknown as Iterable<RoutePoint>) {
+        batch.push(point);
+        if (batch.length === 1000) { onPoints(batch); batch = []; }
+      }
+      if (batch.length) onPoints(batch);
+      return { pointCount: native.result.rows, sha256: native.result.sha256! };
+    } finally { await native.dispose(); }
+  }
   let points: RoutePoint[] = [];
   let pointCount = 0;
   const sourceHash = createHash("sha256");
@@ -198,7 +214,7 @@ function bundleHashFromFingerprints(store: RaiDatabase): string {
 export async function importGpxRoutes(
   exportRoot: string,
   store: RaiDatabase,
-  options?: { preserveAbsent?: boolean }
+  options?: { preserveAbsent?: boolean; native?: NativeOptions }
 ): Promise<GpxImportResult> {
   const preserveAbsent = options?.preserveAbsent === true;
   const referencedTargets = new Map(
@@ -286,7 +302,8 @@ export async function importGpxRoutes(
       store.beginRoutePointReplacement(routeId);
       const { pointCount: importedPoints, sha256 } = await parseGpxFile(
         fullPath,
-        (points) => store.appendRoutePoints(routeId, points)
+        (points) => store.appendRoutePoints(routeId, points),
+        options?.native
       );
       bundleHash.update(relativePath, "utf8");
       bundleHash.update("\0");
@@ -306,6 +323,7 @@ export async function importGpxRoutes(
       changedRouteIds.push(routeId);
       pointCount += importedPoints;
     } catch (error) {
+      if (error instanceof NativeWorkerError && error.code !== "invalid_xml") throw error;
       store.markRouteStatus(routeId, "invalid");
       store.database.prepare(
         "DELETE FROM route_file_fingerprints WHERE relative_path = ?"

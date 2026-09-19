@@ -78,6 +78,8 @@ test("OpenAPI operations declare responses and write contracts", () => {
   assert.ok("sourceId" in importJobSchema.properties);
   assert.ok("progress" in importJobSchema.properties);
   assert.ok("summary" in importJobSchema.properties);
+  assert.ok("performance" in importJobSchema.properties);
+  assert.deepEqual(importJobSchema.properties.performance.required, ["validationMode", "totalMs", "stagesMs"]);
   const latestImportSchema = openapiDocument.paths["/v1/import-jobs/latest"].get.responses["200"]
     .content["application/json"].schema as { anyOf: Array<{ $ref?: string }> };
   assert.equal(latestImportSchema.anyOf[0]?.$ref, "#/components/schemas/ImportJobResponse");
@@ -332,47 +334,17 @@ test("every registered mutation route is documented in OpenAPI", () => {
     assert.ok(documented in openapiDocument.paths, documented + " 已注册写路由但未出现在 openapiDocument.paths");
   }
 
-  // The other direction, and the reason `lockOnlyMutationRoutes` exists: the two
-  // original sets only ever covered the routes somebody remembered to add, so a
-  // brand-new write route could be mounted, undocumented and unclassified while
-  // every assertion above still passed. Enumerating the registrations makes the
-  // omission itself the failure.
-  const declared = [...source.matchAll(new RegExp(ROUTER + "\\.(post|put|patch|delete)(?:<[^<>]*>)?\\(\\s*\"([^\"]+)\"", "g"))]
-    .map((match) => match[2]!);
-  assert.ok(declared.length > 0, "server.ts 应当至少注册一条写路由");
-  // A regex over source cannot enumerate every way Fastify accepts a route, so
-  // the guarantee is closed the other way: every *mounting token* must produce
-  // exactly one parsed route. `app.route({...})` (spaces included),
-  // `app["post"](...)`, a template path, a nested generic, a commented-out
-  // handler — each breaks the equality. Extend the pattern above when this
-  // fires; do not delete the check.
-  const mountingTokens =
-    source.match(new RegExp(
-      ROUTER + "\\s*\\.\\s*(?:post|put|patch|delete)\\b|" +
-      ROUTER + "\\s*\\.\\s*route\\b|" +
-      ROUTER + "\\s*\\[\\s*[\"'`]\\w+[\"'`]\\s*\\]\\s*\\(",
-      "g"
-    )) ?? [];
-  assert.equal(
-    mountingTokens.length,
-    declared.length,
-    `server.ts 有 ${mountingTokens.length} 处写路由挂载，却只解析出 ${declared.length} 条：出现了本测试枚举不到的写法`
-  );
-  // Routes mounted anywhere else would be invisible to every assertion above,
-  // and the app already uses `app.register` for plugins. The scan is recursive
-  // because a route module would arrive as `src/routes/foo.ts`, not as a sibling,
-  // and comments are dropped so documentation cannot trip it.
-  const mountingPattern = new RegExp(
-    ROUTER + "\\s*\\.\\s*(?:post|put|patch|delete|route)\\b|" +
-    ROUTER + "\\s*\\[\\s*[\"'`]\\w+[\"'`]\\s*\\]\\s*\\("
-  );
+  // Enumerate every mounted route module, not only the bootstrap file.
+  const declared: string[] = [];
   for (const file of sourceFiles(new URL("../src/", import.meta.url))) {
-    if (file.endsWith("/server.ts")) continue;
-    assert.ok(
-      !mountingPattern.test(stripComments(readFileSync(file, "utf8"))),
-      file.slice(file.indexOf("src/")) + " 也挂载了写路由，本测试枚举不到它"
-    );
+    const text = stripComments(readFileSync(file, "utf8"));
+    const routes = [...text.matchAll(new RegExp(ROUTER + "\\.(post|put|patch|delete)(?:<[^<>]*>)?\\(\\s*\"([^\"]+)\"", "g"))]
+      .map((match) => match[2]!);
+    const tokens = text.match(new RegExp(ROUTER + "\\s*\\.\\s*(?:post|put|patch|delete|route)\\b|" + ROUTER + "\\s*\\[\\s*[\"'`]\\w+[\"'`]\\s*\\]\\s*\\(", "g")) ?? [];
+    assert.equal(tokens.length, routes.length, `${file}: unparsed route registration`);
+    declared.push(...routes);
   }
+  assert.ok(declared.length > 0);
   const sets = { metadataOnly, databaseRequired, lockOnly };
   for (const url of declared) {
     const owners = Object.entries(sets).filter(([, urls]) => urls.includes(url)).map(([name]) => name);

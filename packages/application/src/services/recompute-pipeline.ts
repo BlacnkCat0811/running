@@ -1,4 +1,6 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import { RecomputeProgressGate } from "./recompute-progress.js";
+import { BoundedCache } from "./bounded-cache.js";
 
 import {
   CONTRACT_VERSION,
@@ -143,13 +145,17 @@ export const SUPERSEDED_RUN_RETENTION = 2;
  * Split from RaiApplicationService (ARCHITECTURE_DEBT_MIGRATION P4).
  */
 export class RecomputePipeline {
+  private allowNativeAggregates = true;
+  private readonly recordCache = new BoundedCache<RecordRow[]>(16, 20_000);
+  private readonly progressGate = new RecomputeProgressGate();
   private healthRecordHasUnitColumn: boolean | null = null;
 
   constructor(
     private readonly store: RaiDatabase,
     private readonly jobs: RecomputeJobRepository,
     private readonly modelRuns: SqliteModelRunRepository,
-    private readonly sessions: SqliteTrainingSessionRepository
+    private readonly sessions: SqliteTrainingSessionRepository,
+    private readonly nativeElevationGains?: ReadonlyMap<string, number | null>
   ) {}
 
   get database(): DatabaseSync {
@@ -167,6 +173,7 @@ export class RecomputePipeline {
   }
 
   runFullRecompute(job: RecomputeJob): void {
+    this.recordCache.clear();
     const request = this.parseRequest(job.request);
     // Capture the incumbent before writing a candidate. The incumbent remains
     // active until the candidate has passed the shadow gate.
@@ -182,7 +189,7 @@ export class RecomputePipeline {
 
     let features: WorkoutFeatureVector[];
     try {
-      features = this.extractFeatures(job.id, featureRun, request, overrideSnapshot);
+      features = this.measureCompute(job.id, "features", () => this.extractFeatures(job.id, featureRun, request, overrideSnapshot));
       this.finishFeatureRun(featureRun.id, "succeeded", null);
     } catch (error) {
       this.finishFeatureRun(featureRun.id, this.isCancellationError(error) ? "cancelled" : "failed", error);
@@ -195,13 +202,18 @@ export class RecomputePipeline {
     const metricRunId = this.createTrainingMetricRun(modelRun.id, request, overrideSnapshot.ids);
     try {
       this.updateJobProgress(job.id, "training_metrics", 0, features.length, "Calculating training load");
-      this.replayTrainingMetrics(job.id, metricRunId, features, request, overrideSnapshot);
+      this.measureCompute(job.id, "trainingMetrics", () => this.replayTrainingMetrics(job.id, metricRunId, features, request, overrideSnapshot));
       this.finishTrainingMetricRun(metricRunId, "succeeded", null);
       this.updateJobProgress(job.id, "model_replay", 0, features.length, "Replaying ability timeline");
-      this.replayModel(job.id, modelRun, features, request);
+      this.measureCompute(job.id, "modelReplay", () => this.replayModel(job.id, modelRun, features, request));
       this.finishModelRun(modelRun.id, "succeeded", null);
       if (request.validationMode === "shadow" && request.incrementalPlan) {
-        this.runShadowValidation(job.id, modelRun, request, overrideSnapshot);
+        // The independent reference must not reuse reads from the candidate.
+        this.recordCache.clear();
+        this.allowNativeAggregates = false;
+        try {
+          this.measureCompute(job.id, "shadowValidation", () => this.runShadowValidation(job.id, modelRun, request, overrideSnapshot));
+        } finally { this.allowNativeAggregates = true; }
       }
       // Version-to-version comparison is mandatory whenever an incumbent
       // exists. `validationMode` only controls the additional incremental
@@ -322,6 +334,7 @@ export class RecomputePipeline {
   }
 
   runSnapshotRefresh(job: RecomputeJob): void {
+    this.recordCache.clear();
     const request = this.parseRequest(job.request);
     this.throwIfCancelled(job.id);
     const active = this.database
@@ -630,6 +643,17 @@ export class RecomputePipeline {
     workoutEndAt: string,
     type: string
   ): RecordRow[] {
+    const key = JSON.stringify([sourceName, workoutStartAt, workoutEndAt, type]);
+    const cached = this.recordCache.get(key);
+    if (cached !== undefined) return cached;
+    const records = this.queryRecordSeries(sourceName, workoutStartAt, workoutEndAt, type);
+    this.recordCache.set(key, records, records.length);
+    return records;
+  }
+
+  private queryRecordSeries(
+    sourceName: string, workoutStartAt: string, workoutEndAt: string, type: string
+  ): RecordRow[] {
     const unitSelect = this.hasHealthRecordUnitColumn() ? ", unit" : "";
     const exact = this.database
       .prepare(`
@@ -832,6 +856,9 @@ export class RecomputePipeline {
   }
 
   private loadElevationGain(workoutId: string): number | null {
+    if (this.allowNativeAggregates && this.nativeElevationGains?.has(workoutId)) {
+      return this.nativeElevationGains.get(workoutId) ?? null;
+    }
     const rows = this.database.prepare(`
       SELECT point.elevation_meters AS elevation
       FROM workout_routes route
@@ -940,7 +967,7 @@ export class RecomputePipeline {
     overrideSnapshot: OverrideSnapshot
   ): WorkoutFeatureVector[] {
     const allSessions = this.loadSessions(request.evaluatedAt);
-    const reuse = this.reuseFeaturePrefix(featureRun, request);
+    const reuse = this.reuseFeaturePrefix(featureRun, request, overrideSnapshot);
     const sessions = reuse === null
       ? allSessions
       : allSessions.filter((session) => session.workoutStartAt >= reuse.dirtyFromAt);
@@ -1007,22 +1034,26 @@ export class RecomputePipeline {
 
   private reuseFeaturePrefix(
     featureRun: FeatureRun,
-    request: RecomputeRequest
+    request: RecomputeRequest,
+    overrideSnapshot: OverrideSnapshot
   ): { count: number; dirtyFromAt: string } | null {
     const dirtyFromAt = request.incrementalPlan?.dirtyFromAt;
     if (!dirtyFromAt) return null;
     const parent = this.database.prepare(`
       SELECT feature.id, feature.feature_config_hash AS configHash,
              feature.feature_schema_version AS schemaVersion,
-             feature.canonical_contract_version AS contractVersion
+             feature.canonical_contract_version AS contractVersion,
+             metric.timezone_identifier AS timezone, metric.config_json AS metricConfig
       FROM active_model_run active
       JOIN model_runs model ON model.id = active.model_run_id AND model.status = 'succeeded'
       JOIN feature_runs feature ON feature.id = model.feature_run_id AND feature.status = 'succeeded'
+      JOIN training_metric_runs metric ON metric.model_run_id = model.id AND metric.status = 'succeeded'
       WHERE active.singleton = 1
-    `).get() as unknown as { id: string; configHash: string; schemaVersion: string; contractVersion: string } | undefined;
+    `).get() as unknown as { id: string; configHash: string; schemaVersion: string; contractVersion: string; timezone: string; metricConfig: string } | undefined;
     const contract = this.manifestValue("parser_contract_version") ?? CONTRACT_VERSION;
     if (!parent || parent.configHash !== configHash(request.featureConfig) ||
-        parent.schemaVersion !== FEATURE_SCHEMA_VERSION || parent.contractVersion !== contract) return null;
+        parent.schemaVersion !== FEATURE_SCHEMA_VERSION || parent.contractVersion !== contract ||
+        parent.timezone !== request.timezoneIdentifier) return null;
 
     const rows = this.database.prepare(`
       SELECT feature.*
@@ -1033,6 +1064,19 @@ export class RecomputePipeline {
         AND workout.start_at <= ? AND workout.end_at <= ?
       ORDER BY feature.workout_start_at, feature.id
     `).all(parent.id, dirtyFromAt, request.evaluatedAt, request.evaluatedAt) as unknown as Array<Record<string, unknown>>;
+    const expected = this.loadSessions(request.evaluatedAt).filter((session) => session.workoutStartAt < dirtyFromAt);
+    const bySession = new Map(rows.map((row) => [String(row.training_session_id), row]));
+    const oldOverrideIds = parseJson<{ overrideSnapshotIds?: unknown } | null>(parent.metricConfig, null)?.overrideSnapshotIds;
+    if (!Array.isArray(oldOverrideIds) || oldOverrideIds.some((id) => typeof id !== "string")) return null;
+    const oldOverrides = this.database.prepare(`SELECT id,training_session_id AS sessionId FROM workout_overrides
+      WHERE id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(oldOverrideIds)) as { id: string; sessionId: string }[];
+    if (oldOverrides.length !== new Set(oldOverrideIds).size) return null;
+    const previousOverrides = new Map(oldOverrides.map((override) => [override.sessionId, override.id]));
+    if (rows.length !== expected.length || expected.some((session) => {
+      const row = bySession.get(session.trainingSessionId);
+      return !row || row.canonical_workout_id !== session.canonicalWorkoutId || row.workout_start_at !== session.workoutStartAt ||
+        (previousOverrides.get(session.trainingSessionId) ?? null) !== (overrideSnapshot.byTrainingSessionId.get(session.trainingSessionId)?.id ?? null);
+    })) return null;
     const insert = this.database.prepare(`
       INSERT INTO workout_features (
         id, feature_run_id, training_session_id, canonical_workout_id, workout_start_at,
@@ -1308,7 +1352,7 @@ export class RecomputePipeline {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const loads: WorkoutTrainingLoad[] = [];
-    const priorDistances: Array<{ observedAt: string; distanceMeters: number }> = [];
+    const priorDistances: Array<{ observedAt: number; distanceMeters: number }> = [];
     for (const [index, feature] of features.entries()) {
       this.throwIfCancelled(jobId);
       const session = sessions.get(feature.trainingSessionId);
@@ -1350,7 +1394,7 @@ export class RecomputePipeline {
       });
       const cutoff = Date.parse(feature.workoutStartAt) - 90 * 86_400_000;
       const distanceValues = priorDistances
-        .filter((item) => Date.parse(item.observedAt) >= cutoff)
+        .filter((item) => item.observedAt >= cutoff)
         .map((item) => item.distanceMeters);
       const distanceReferenceMeters = distanceValues.length >= 5 ? percentile(distanceValues, 0.75) : null;
       const breakdown = calculateCompositeTrainingLoad({
@@ -1448,7 +1492,7 @@ export class RecomputePipeline {
         loads.push(load);
       }
       if (!excluded && distanceMeters !== null && distanceMeters > 0) {
-        priorDistances.push({ observedAt: feature.workoutStartAt, distanceMeters });
+        priorDistances.push({ observedAt: Date.parse(feature.workoutStartAt), distanceMeters });
       }
       this.updateJobProgress(jobId, "training_metrics", index + 1, features.length, "Training load calculated");
     }
@@ -1648,6 +1692,11 @@ export class RecomputePipeline {
   ): ReplayResume | null {
     const dirtyFromAt = request.incrementalPlan?.dirtyFromAt;
     if (!dirtyFromAt || dirtyFromAt <= baseline.calibrationEndAt) return null;
+    // A complete feature-prefix copy is a prerequisite for assessment reuse.
+    // Newly eligible historical workouts or a timezone change invalidate it.
+    const currentFeatureRun = this.database.prepare("SELECT parent_feature_run_id AS parent FROM feature_runs WHERE id=?")
+      .get(modelRun.featureRunId) as { parent: string | null } | undefined;
+    if (!currentFeatureRun?.parent) return null;
     const expectedModelHash = configHash({ version: MODEL_CONFIG_VERSION, config: request.modelConfig });
     const expectedFeatureHash = configHash(request.featureConfig);
     const row = this.database.prepare(`
@@ -1675,6 +1724,11 @@ export class RecomputePipeline {
     if (!row || row.sequenceNumber >= features.length || configHash(parseJson(row.stateJson, {})) !== row.stateHash) {
       return null;
     }
+    const prefix = this.database.prepare(`SELECT training_session_id AS sessionId FROM ability_assessments
+      WHERE model_run_id=? AND sequence_number<=? ORDER BY sequence_number`)
+      .all(row.parentModelRunId, row.sequenceNumber) as { sessionId: string }[];
+    if (prefix.length !== row.sequenceNumber + 1 ||
+        prefix.some((item, index) => features[index]?.trainingSessionId !== item.sessionId)) return null;
     const state = parseJson<ModelCheckpointState | null>(row.stateJson, null);
     if (!state?.baseline || !Number.isFinite(state.trueAbility) || !Number.isFinite(state.eligibleWorkoutCount)) {
       return null;
@@ -2153,7 +2207,22 @@ export class RecomputePipeline {
     total: number,
     message: string
   ): void {
+    if (!this.progressGate.shouldPublish(jobId, phase, current, total)) return;
     this.jobs.updateProgress(jobId, phase, current, total, message);
+  }
+
+  private measureCompute<T>(jobId: string, stage: string, operation: () => T): T {
+    const started = performance.now();
+    try { return operation(); }
+    finally {
+      const metrics = {
+        stage, durationMs: performance.now() - started,
+        processMaxRssKiB: process.resourceUsage().maxRSS,
+        recordCacheHits: this.recordCache.hits, recordCacheMisses: this.recordCache.misses
+      };
+      this.jobs.logEvent(jobId, "performance", 0, 0, JSON.stringify(metrics));
+      if (process.send && process.connected) process.send({ type: "rai:compute-performance", ...metrics }, () => {});
+    }
   }
 
   private completeJob(

@@ -224,7 +224,8 @@ export class PredictionModelService {
 
   constructor(
     private readonly store: PredictionModelStore,
-    artifactRoot?: string
+    artifactRoot?: string,
+    private readonly transactionMode: "owned" | "savepoint" = "owned"
   ) {
     const main = store.database.prepare("PRAGMA database_list").all()
       .find((row) => (row as { name?: unknown }).name === "main") as { file?: unknown } | undefined;
@@ -283,7 +284,7 @@ export class PredictionModelService {
     if (abilityBaselineHash === null) {
       throw new PredictionAbilityBaselineUnavailableError();
     }
-    this.store.database.exec("BEGIN IMMEDIATE");
+    this.store.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_prediction_mutation");
     try {
       const existing = this.store.database.prepare(`
         SELECT id, training_data_through_at AS trainingDataThroughAt
@@ -294,7 +295,7 @@ export class PredictionModelService {
       `).get() as unknown as { id: string; trainingDataThroughAt: string } | undefined;
       if (existing) {
         if (input.asOf === undefined || existing.trainingDataThroughAt === asOf) {
-          this.store.database.exec("COMMIT");
+          this.store.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_prediction_mutation");
           return existing.id;
         }
         throw new PredictionTrainingInProgressError(existing.id);
@@ -327,9 +328,9 @@ export class PredictionModelService {
         now
       );
       this.insertEvent(id, "queued", 0, 5, "CatBoost 训练任务已排队", now);
-      this.store.database.exec("COMMIT");
+      this.store.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_prediction_mutation");
     } catch (error) {
-      this.store.database.exec("ROLLBACK");
+      this.store.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_prediction_mutation; RELEASE rai_prediction_mutation");
       throw error;
     }
     return id;
@@ -748,7 +749,7 @@ export class PredictionModelService {
       }
     }
     const now = new Date().toISOString();
-    this.store.database.exec("BEGIN IMMEDIATE");
+    this.store.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_prediction_mutation");
     try {
       this.store.database.prepare(`
         INSERT INTO active_prediction_model (singleton, prediction_model_run_id, activated_at)
@@ -761,9 +762,9 @@ export class PredictionModelService {
         UPDATE prediction_model_runs SET activated_at = ? WHERE id = ?
       `).run(now, id);
       this.insertEvent(id, "activated", 5, 5, "已回滚并激活该历史预测模型", now);
-      this.store.database.exec("COMMIT");
+      this.store.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_prediction_mutation");
     } catch (error) {
-      this.store.database.exec("ROLLBACK");
+      this.store.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_prediction_mutation; RELEASE rai_prediction_mutation");
       throw error;
     }
     return this.get(id)!;
