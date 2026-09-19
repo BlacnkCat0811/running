@@ -1,8 +1,13 @@
 # Ubuntu 部署
 
+当前方案：**2 核 2GB 云服务器单机部署，不迁移 N100，不使用 FRP**。
+资源预算、已有服务器切换、完整备份及低内存发布步骤见
+[`README-CLOUD-2C2G.md`](README-CLOUD-2C2G.md)。已有服务器优先按该页操作，
+不要用示例环境文件覆盖现有 Token、身份标识或路径。
+
 应用只监听 `127.0.0.1:8787`（`RAI_API_HOST` / `RAI_API_PORT` 可覆盖），由 Nginx 提供 HTTPS 并托管静态 Web。SQLite、上传文件、运行时状态和备份放在 `/var/lib/rai`，不要把该目录放到 Web 根目录或共享盘。
 
-本页描述与线上生产（2026-09）一致的 v2 拓扑：
+本页描述目标拓扑（不代表已核实或修改你的线上状态）：
 
 - Nginx 直接托管 `apps/web/dist`（SPA，`try_files` 回退到 `index.html`）；
 - 仅 `location /v1/` 反代到 `127.0.0.1:8787`，**透传客户端自己的 Bearer Token**；
@@ -37,8 +42,13 @@ sudo sed -i "s#^RAI_API_TOKEN=.*#RAI_API_TOKEN=$TOKEN#" /etc/rai/rai.env
 # 检查所有路径与限额变量符合本机预期后，编辑 /etc/rai/rai.env：
 sudoedit /etc/rai/rai.env
 
+# 新站点：先获得证书，再启用引用证书的 HTTPS 配置。
+# standalone 需要暂时占用 80 端口；已有站点不要重复运行此首次安装步骤。
+sudo systemctl stop nginx
+sudo certbot certonly --standalone -d api.example.com
 sudo install -m 644 deploy/rai-api.service /etc/systemd/system/rai-api.service
 sudo sed "s#rai.example.com#api.example.com#g" deploy/nginx-rai.conf \
+  | sed 's/# ssl_certificate /ssl_certificate /; s/# ssl_certificate_key /ssl_certificate_key /' \
   | sudo tee /etc/nginx/sites-available/rai >/dev/null
 sudo chmod 600 /etc/nginx/sites-available/rai
 sudo ln -sf /etc/nginx/sites-available/rai /etc/nginx/sites-enabled/rai
@@ -46,8 +56,11 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo systemctl daemon-reload
 sudo systemctl enable --now rai-api
 sudo nginx -t && sudo systemctl restart nginx
-# 证书签发前确保域名已解析到本机公网 IP、安全组开放 80
-sudo certbot --nginx --redirect -d api.example.com
+# 改为 Nginx 插件进行后续续期，并测试续期流程。
+# 若系统自带 Certbot 不支持 reconfigure，先按 Certbot 官方方式升级；
+# 不要忽略失败后继续依赖会与运行中 Nginx 抢占 80 端口的 standalone 续期。
+sudo certbot reconfigure --cert-name api.example.com --nginx
+sudo certbot renew --dry-run
 ```
 
 把示例中的 `api.example.com` 换成已解析到服务器公网 IP 的域名。若暂时没有域名，可用 HTTP 公网 IP 做连通性测试；正式导入 HealthKit 数据前必须切换 HTTPS。
@@ -137,7 +150,8 @@ sudo bash deploy/upgrade.sh            # 预演，只打印将执行的命令
 sudo bash deploy/upgrade.sh --apply    # 执行
 ```
 
-手敲等价步骤（脚本做了同样的事）：
+以下旧式构建命令本身**不包含备份或低内存停服保护**，
+2C2G 当前部署应使用 `README-CLOUD-2C2G.md` 的完整维护流程：
 
 ```bash
 cd /opt/rai

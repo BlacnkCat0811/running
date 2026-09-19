@@ -11,16 +11,30 @@ User=rai
 Group=rai
 WorkingDirectory=/opt/rai
 EnvironmentFile=/etc/rai/rai.env
-ExecStart=/usr/bin/npm run start
+ExecStartPre=/usr/bin/node scripts/check-node-version.mjs
+ExecStartPre=/usr/bin/node scripts/check-web-build.mjs
+# Supervise Node directly: preserve exit 78 and deliver SIGTERM to the API.
+ExecStart=/usr/bin/node --import tsx apps/api/src/server.ts
 Restart=on-failure
 RestartSec=5
 RestartPreventExitStatus=78
+TimeoutStopSec=120
+KillMode=mixed
+OOMPolicy=stop
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/rai
-LimitNOFILE=65536
+UMask=0077
+LimitNOFILE=16384
+# Starting limits for a dedicated 2 vCPU / 2 GiB cloud host.
+# Aggregate API + workers + trainer, NOT per-process memory allowances.
+MemoryHigh=1100M
+MemoryMax=1400M
+MemorySwapMax=512M
+CPUQuota=150%
+TasksMax=128
 
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,39 @@
+[Unit]
+Description=RAI home compute service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=rai
+Group=rai
+WorkingDirectory=/opt/rai
+EnvironmentFile=/etc/rai/rai.env
+ExecStartPre=/usr/bin/node scripts/check-node-version.mjs
+ExecStartPre=/usr/bin/node scripts/check-web-build.mjs
+# Run Node directly so exit 78 and SIGTERM reach the supervised API process.
+ExecStart=/usr/bin/node --import tsx apps/api/src/server.ts
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=78
+TimeoutStopSec=120
+KillMode=mixed
+OOMPolicy=stop
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/rai
+UMask=0077
+LimitNOFILE=16384
+# Starting profile ONLY for a VM with at least 6 GiB RAM and 4 vCPU.
+# Counts API + import subprocess + recompute threads + prediction trainer together.
+MemoryHigh=3G
+MemoryMax=4G
+CPUQuota=200%
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target

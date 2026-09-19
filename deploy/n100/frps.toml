@@ -1,0 +1,14 @@
+# Cloud only. Install as /etc/frp/frps.toml, mode 0640 root:frp.
+bindAddr = "0.0.0.0"
+bindPort = 7000
+proxyBindAddr = "127.0.0.1"
+allowPorts = [{ single = 18787 }]
+auth.method = "token"
+auth.token = "REPLACE_WITH_A_UNIQUE_RANDOM_FRP_TOKEN"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+transport.tls.force = true
+transport.tls.certFile = "/etc/frp/tls/server.crt"
+transport.tls.keyFile = "/etc/frp/tls/server.key"
+log.to = "console"
+log.level = "warn"
+# No dashboard, HTTP virtual host, QUIC, or KCP listener.

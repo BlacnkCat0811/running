@@ -1,0 +1,22 @@
+# Home VM only; frpc and API must share a network namespace.
+serverAddr = "frp.example.com"
+serverPort = 7000
+loginFailExit = false
+auth.method = "token"
+auth.token = "REPLACE_WITH_A_UNIQUE_RANDOM_FRP_TOKEN"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+transport.protocol = "tcp"
+transport.tls.enable = true
+transport.tls.trustedCaFile = "/etc/frp/tls/ca.crt"
+transport.tls.serverName = "frp.example.com"
+log.to = "console"
+log.level = "warn"
+
+[[proxies]]
+name = "rai-home"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8787
+remotePort = 18787
+# ZIP is already compressed; do not spend CPU compressing it again.
+transport.useCompression = false
