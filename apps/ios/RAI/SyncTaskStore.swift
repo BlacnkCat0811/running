@@ -10,10 +10,17 @@ final class SyncTaskStore {
     /// a sync that cannot record its progress loses its ability to resume.
     private(set) var isAvailable = false
 
-    init() {
+    convenience init() {
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let directory = applicationSupport.appendingPathComponent("RAI", isDirectory: true)
+        self.init(directory: directory)
+    }
+
+    /// 指定目录的构造器；`directory` 可注入的理由与 `CacheStore.init(fileURL:)` 相同：
+    /// 这一层此前只被 `typecheck-ios.sh` 检查过类型、从未被执行（连替身都没有），
+    /// 于是「续传日志到底存不存得住、scope 之间会不会串」没有任何通道能验证。
+    init(directory: URL) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("sync.sqlite")
         let result = url.path.withCString { path in

@@ -13,12 +13,20 @@ final class CacheStore {
     private var database: OpaquePointer?
     private let fileURL: URL
 
-    init() {
+    convenience init() {
         let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let directory = applicationSupport.appendingPathComponent("RAI", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        fileURL = directory.appendingPathComponent("cache.sqlite")
+        self.init(fileURL: directory.appendingPathComponent("cache.sqlite"))
+    }
+
+    /// 指定路径的构造器。`fileURL` 可注入是为了让**真实现**的规则（命名空间隔离、
+    /// 淘汰策略）能在临时文件上被执行 —— 在此之前这两个文件只被类型检查过，从未运行：
+    /// `ModelRegression.swift` 里那份 `CacheStore` 替身把 `scope` 退化成字符串拼接、
+    /// 读写走内存字典，于是少算 `datasetEpoch` 或漏掉 `athleteId` 都能全绿。
+    init(fileURL: URL) {
+        self.fileURL = fileURL
         openDatabase(at: fileURL)
         execute("""
             PRAGMA journal_mode = WAL;
@@ -102,7 +110,10 @@ final class CacheStore {
         execute("DELETE FROM cache_entries")
     }
 
-    private func prune(maxEntries: Int = 240, maxBytes: Int = 100 * 1024 * 1024) {
+    /// 淘汰策略：按 `cached_at` 从最旧开始删，直到条目数与总字节数都回到上限以内。
+    /// 刻意不是 `private`：上限是参数化的，而它是"缓存会不会无界增长"的唯一判据 ——
+    /// 拿小上限直接调它，才能在几毫秒里验证「先删最旧」与「两个上限都生效」。
+    func prune(maxEntries: Int = 240, maxBytes: Int = 100 * 1024 * 1024) {
         guard let database else { return }
         while true {
             guard let countStatement = prepare("SELECT COUNT(*), COALESCE(SUM(length(payload)), 0) FROM cache_entries") else { return }

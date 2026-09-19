@@ -56,9 +56,19 @@ xcrun swiftc "${swiftc_flags[@]}" -swift-version 5 -default-isolation MainActor 
 
 bash apps/ios/tests/run-session-tests.sh
 bash apps/ios/tests/run-health-sync-tests.sh
+# `CacheStore` / `SyncTaskStore` 的生产实现回归。这两个文件此前只被类型检查过：
+# `ModelRegression.swift` 里有一份 `CacheStore` 替身，于是"缓存命名空间由什么决定"
+# 这条规则从来没被真实现跑过。替身隔离本身没错，错的是把替身的绿灯当成真实现的判据。
+bash apps/ios/tests/run-store-tests.sh
 # `run-tech-presentation-tests.sh` 必须挂在这里，否则它只是一个"手工脚本"。
 # 实测过它的失效模式：脚本自己跑绿、突变也真红，但全仓没有任何入口
 # 会执行它 —— 新写的 `TechPlotSampling` / `TechSyncPresentation` / `verdictIconName`
 # 断言因此从不参与任何一次回归。这与 `CalibrationState.swift`、`PlanReceiptMatcher.swift`
 # 的教训同类：判据存在不等于判据被执行。挂在聚合入口里才算真的"被钉住"。
 bash apps/ios/tests/run-tech-presentation-tests.sh
+# `check-today-layout.py` 曾是一支孤儿脚本：断言写得对、手工跑也真绿，但全仓没有任何
+# 入口会执行它（`grep -rn check-today-layout apps packages docs` 只在它自己里命中）。
+# 它钉的是今日页的组合顺序、`TechTodayHealthTiles` 已移除、`showsHistory` 的告警条件、
+# 紧凑卡片高度、分钟轴替代秒轴、地图同意开关默认值 —— 全是"改错了肉眼也看不出来"的
+# 版式判据，正是最需要执行者的那一类。挂在聚合入口里才算真的被钉住。
+python3 apps/ios/tests/check-today-layout.py
