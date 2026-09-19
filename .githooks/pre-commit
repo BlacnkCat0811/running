@@ -4,4 +4,17 @@
 # still belongs to CI / a pre-push manual run.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-exec npm run typecheck
+
+npm run typecheck
+
+# iOS 判据（typecheck-ios.sh + run-model-tests.sh）此前没有任何自动入口，
+# 只有人记得的时候才会被跑 —— 2026-09-19 的 test11 回归就是这么进主干的。
+# 触发面刻意收窄到 `apps/ios/`：iOS 门禁要真编译全部 Swift 源码，秒级变分钟级，
+# 而绝大多数提交动的是 TS。
+#
+# 这里不做环境判断：`npm run test:ios` 自己会发现"非 macOS / 没有 Xcode"，
+# 打印「本次没有检查任何 iOS 源码」并跳过。把判断放一处，避免两边的条件漂移。
+if git diff --cached --name-only --diff-filter=ACMR -- apps/ios | grep -q .; then
+  echo "pre-commit: apps/ios/ 有改动，跑 iOS 门禁"
+  npm run test:ios
+fi

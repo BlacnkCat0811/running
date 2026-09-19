@@ -50,6 +50,31 @@ xcodebuild -workspace apps/ios/RAI.xcworkspace \
 2026-09-08 已在本机 Xcode 26.5 / iOS Simulator 26.5 通过该构建；2026-09-11 接入高德 pod 后，构建入口从 `RAI.xcodeproj` 改为 `RAI.xcworkspace`（`pod install` 后同样通过）。真实 iPhone
 安装、签名、HealthKit 权限和路线能力仍需按下方步骤验收。
 
+### 验证入口
+
+改完原生端源码，先跑**自动门禁**，再谈截图：
+
+```bash
+npm run test:ios
+```
+
+它等价于 `apps/ios/tests/run-ios-gates.sh`：`typecheck-ios.sh`（除 3 个高德依赖文件外的全部
+`RAI/**` 源码做真实类型检查）+ `run-model-tests.sh`（纯逻辑回归聚合：模型/DTO、Keychain、
+坐标转换、课表映射、会话探测、健康同步取消、缓存与续传日志、Tech 展示层与对比度、
+今日页版式）。非 macOS 或没装 Xcode 时它会**显式跳过并打印"本次没有检查任何 iOS 源码"**，
+不假装通过。`.githooks/pre-commit` 在 `apps/ios/` 有改动时自动跑它。
+
+下面两条**不在**自动门禁里，需要模拟器或 Pods，属手工验收：
+
+| 脚本 | 额外前置 | 用途 |
+|---|---|---|
+| `run-visual-tests.sh` | 已启动的模拟器 + `var/rai.sqlite`（`var/` 不入库） | 真机观感/交互截图验收（`-only-testing:…` 可只跑单个用例） |
+| `run-coordinate-sdk-check.sh` | `apps/ios/Pods`（先 `pod install`）+ 已启动模拟器 | 用高德 SDK 对拍本地 GCJ02 转换 |
+
+在**会拒绝嵌套沙箱**的外层环境（如加固沙箱）里跑 `run-visual-tests.sh`，要额外传
+`RAI_XCODEBUILD_SWIFT_FLAGS=-disable-sandbox`，否则宏插件起不来、每个 `@Observable` 都报
+`produced malformed response`，看起来像一屏源码错误。
+
 ### 模拟器验收不到健康同步
 
 上面的命令产出的是**无签名模拟器包**，因此**没有 HealthKit 能力**：项目只在 device SDK 上挂
@@ -78,7 +103,8 @@ xcodebuild -workspace apps/ios/RAI.xcworkspace \
 | --- | --- |
 | 401 | 更新 Token；不要反复自动重试 |
 | 无法连接 | 确认桥接网络、服务监听地址、手机与主机路由和证书 |
-| 页面可见但数据过期 | 查看“健康数据截至”和“结果生成于”，重新同步 HealthKit |
+| 页面可见但数据过期 | 展开首页「数据状态」横幅的「数据覆盖明细」，分别看三件事：**同步状态**（`sync.status`：`正常`/`尚未同步`/`同步失败`）、**训练数据截至**（`latestDataDate`）、**最近健康样本**（`coverage.latestHealthSampleAt`）。只有 `同步失败` 才需要重新同步 HealthKit；「尚未同步」表示这台设备还没跑成过一次刷新 |
+| 横幅写「今天没有恢复监测记录」 | 预期结果，不是故障：没戴表的夜晚属于**覆盖缺口**，只减少一份判断依据，不构成负面判断，也不再阻断锁定安排。要让今天纳入恢复数据，同步一次含昨夜记录的 Apple Health 导出即可 |
 | 目标保存冲突 | 重新读取服务端目标，确认后再保存 |
 | 训练详情没有底图 | 先确认已同意隐私说明（设置 → 地图底图）；再确认 `pod install` 打印了「已注入高德 Key」，Key 已绑本 App Bundle ID |
 | 同步中断 | 再次打开 App，任务会从本机 `sync.sqlite` 和保留的 ZIP 恢复 |

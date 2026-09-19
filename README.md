@@ -141,15 +141,25 @@ npm run build
 npm run test:e2e:web
 ```
 
-`test:e2e:web` 使用本机 Chrome/Edge 验证 1440 x 900 桌面流程。冻结的 390px 兼容覆盖保留在
-`npm run test:e2e:responsive`，仅在明确修改响应式代码时运行；`npm run test:e2e` 会顺序运行
-两者。移动端聚合端点可用真实库冒烟：`bash scripts/mobile-smoke.sh`。
+改动 `apps/ios` 下任何文件后必须再跑 iOS 门禁（类型检查全部 iOS 源码 + 纯逻辑回归聚合）：
 
-一次执行类型检查、单元/集成测试、模型训练测试、Web 构建和桌面浏览器 E2E：
+```powershell
+npm run test:ios
+```
+
+非 macOS / 没装 Xcode 的机器上它会**显式跳过**并打印"本次没有检查任何 iOS 源码"，
+不会假装通过；`.githooks/pre-commit` 在 `apps/ios/` 有改动时自动调用它。需要模拟器的
+截图验收（`apps/ios/tests/run-visual-tests.sh`）不在此列，属手工步骤。
+
+一次执行类型检查、单元/集成测试、iOS 门禁、模型训练测试、Web 构建和桌面浏览器 E2E：
 
 ```powershell
 npm run test:all
 ```
+
+`test:e2e:web` 使用本机 Chrome/Edge 验证 1440 x 900 桌面流程。冻结的 390px 兼容覆盖保留在
+`npm run test:e2e:responsive`，仅在明确修改响应式代码时运行；`npm run test:e2e` 会顺序运行
+两者。移动端聚合端点可用真实库冒烟：`bash scripts/mobile-smoke.sh`。
 
 ## 启动 Web / iOS 壳
 

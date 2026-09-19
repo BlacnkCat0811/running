@@ -69,3 +69,13 @@ Do not run `npm run test:e2e:responsive` or the full `npm run test:e2e` unless
 the user explicitly requests responsive coverage or the task directly changes
 frozen responsive code.
 
+For iOS work under `apps/ios`, use:
+
+- `npm run test:ios` — type-checks every iOS source and runs the pure-logic
+  regressions. On a host without Xcode it skips loudly ("no iOS source was
+  checked") instead of passing quietly. The pre-commit hook runs it whenever
+  paths under `apps/ios/` are staged.
+- Simulator-bound acceptance (`apps/ios/tests/run-visual-tests.sh`) and the AMap
+  coordinate cross-check stay manual; they need a booted Simulator and, for the
+  former, `var/rai.sqlite`.
+
