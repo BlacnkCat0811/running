@@ -10,7 +10,78 @@ struct HealthSyncCancellationRegression {
         try await taskOwnerEnforcesSingleFlight()
         try await storedZipCancellationDoesNotPublishArchive()
         try cancellationGateBlocksPostCancelSideEffects()
+        try await mutationConflictsWaitAndResume()
+        try await mutationWaitHonorsCancellationAndTimeout()
+        try pollingPolicy()
         print("Health sync cancellation regression tests passed")
+    }
+
+    private static func pollingPolicy() throws {
+        try require(HealthSyncPolling.delay(elapsed: .zero) == .seconds(2), "initial polling should be quick")
+        try require(HealthSyncPolling.delay(elapsed: .seconds(29)) == .seconds(2), "early polling boundary")
+        try require(HealthSyncPolling.delay(elapsed: .seconds(30)) == .seconds(5), "long jobs should poll less")
+        try require(HealthSyncPolling.delay(elapsed: .seconds(1800)) == .seconds(5), "slow polling remains bounded")
+        for status in [nil, 400, 401, 403, 404, 409] as [Int?] {
+            try require(!HealthSyncPolling.shouldRetryHTTP(statusCode: status), "terminal failure was retried")
+        }
+        for status in [429, 500, 502, 503] {
+            try require(HealthSyncPolling.shouldRetryHTTP(statusCode: status), "transient failure was not retried")
+        }
+    }
+
+    @MainActor
+    private static func mutationConflictsWaitAndResume() async throws {
+        var attempts = 0
+        var waits = 0
+        let value = try await HealthSyncMutationRetry.run(
+            delay: .milliseconds(1),
+            isConflict: { $0 is MutationBusy },
+            onWait: { waits += 1 }
+        ) {
+            attempts += 1
+            if attempts < 3 { throw MutationBusy() }
+            return 42
+        }
+        try require(value == 42 && attempts == 3 && waits == 2, "busy import did not resume")
+        attempts = 0
+        do {
+            let _: Int = try await HealthSyncMutationRetry.run(
+                isConflict: { $0 is MutationBusy }, onWait: {}
+            ) {
+                attempts += 1
+                throw RegressionFailure("validation error")
+            }
+            throw RegressionFailure("validation error was swallowed")
+        } catch let error as RegressionFailure {
+            try require(error.description == "validation error" && attempts == 1, "non-conflict was retried")
+        }
+    }
+
+    @MainActor
+    private static func mutationWaitHonorsCancellationAndTimeout() async throws {
+        var attempts = 0
+        let waiting = LockedFlag()
+        let task = Task { @MainActor in
+            let _: Int = try await HealthSyncMutationRetry.run(
+                isConflict: { $0 is MutationBusy }, onWait: { waiting.set() }
+            ) {
+                attempts += 1
+                throw MutationBusy()
+            }
+        }
+        while !waiting.value { try await Task.sleep(for: .milliseconds(1)) }
+        task.cancel()
+        do {
+            try await task.value
+            throw RegressionFailure("cancelled mutation wait completed")
+        } catch is CancellationError {}
+        try require(attempts == 1, "mutation was submitted again after cancellation")
+        do {
+            let _: Int = try await HealthSyncMutationRetry.run(
+                timeout: .zero, isConflict: { $0 is MutationBusy }, onWait: {}
+            ) { throw MutationBusy() }
+            throw RegressionFailure("expired mutation wait completed")
+        } catch is MutationBusy {}
     }
 
     private static func parentCancellationStopsDetachedWorker() async throws {
@@ -205,3 +276,5 @@ private struct RegressionFailure: Error, CustomStringConvertible {
     let description: String
     init(_ description: String) { self.description = description }
 }
+
+private struct MutationBusy: Error {}

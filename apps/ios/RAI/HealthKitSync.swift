@@ -622,6 +622,17 @@ final class HealthKitSync {
     }
 
     private func startImport(sourceId: String, on serverURL: URL) async throws -> ImportJobResponse {
+        try await HealthSyncMutationRetry.run(
+            isConflict: { error in
+                guard let error = error as? SyncHTTPError else { return false }
+                return error.statusCode == 409 && error.code == "mutation_conflict"
+            },
+            onWait: { self.message = "服务端正在处理上一项任务，完成后将自动继续同步" },
+            operation: { try await self.submitImport(sourceId: sourceId, on: serverURL) }
+        )
+    }
+
+    private func submitImport(sourceId: String, on serverURL: URL) async throws -> ImportJobResponse {
         try checkCancellation()
         var request = URLRequest(url: endpoint(serverURL, path: "/v1/import-jobs"))
         addAuthorization(to: &request)
@@ -679,9 +690,10 @@ final class HealthKitSync {
     private static let cleanupNoteSuffix = "（服务端临时上传源未清理，下次同步会回收）"
 
     private func waitForJob(id: String, on serverURL: URL) async throws -> ImportJobResponse {
-        let deadline = Date().addingTimeInterval(30 * 60)
+        let started = ContinuousClock.now
+        let deadline = started.advanced(by: .seconds(30 * 60))
         var idleFailures = 0
-        while Date() < deadline {
+        while ContinuousClock.now < deadline {
             try Task.checkCancellation()
             do {
                 let job = try await getJob(id: id, on: serverURL)
@@ -698,16 +710,14 @@ final class HealthKitSync {
                 case "failed", "cancelled", "interrupted":
                     throw SyncHTTPError(message: job.error ?? "导入失败")
                 default:
-                    try await Task.sleep(for: .seconds(2))
+                    try await Task.sleep(for: HealthSyncPolling.delay(elapsed: started.duration(to: .now)))
                 }
             } catch is CancellationError {
                 throw CancellationError()
             } catch let error as URLError where error.code == .cancelled {
                 throw CancellationError()
             } catch let error as SyncHTTPError {
-                let retryable = error.statusCode.map { status in
-                    status == 429 || status >= 500
-                } ?? true
+                let retryable = HealthSyncPolling.shouldRetryHTTP(statusCode: error.statusCode)
                 if !retryable {
                     throw error
                 }
@@ -786,7 +796,7 @@ final class HealthKitSync {
         guard (200...299).contains(status) else {
             if let payload = try? JSONDecoder().decode(APIErrorMessage.self, from: data),
                let message = payload.message, !message.isEmpty {
-                throw SyncHTTPError(message: message, statusCode: status)
+                throw SyncHTTPError(message: message, statusCode: status, code: payload.code)
             }
             throw SyncHTTPError(message: "服务器返回 HTTP \(status)", statusCode: status)
         }
@@ -982,11 +992,13 @@ private struct ImportJobSummary: Decodable {
 
 private struct APIErrorMessage: Decodable {
     let message: String?
+    let code: String?
 }
 
 private struct SyncHTTPError: LocalizedError {
     let message: String
     var statusCode: Int?
+    var code: String?
     var errorDescription: String? { message }
 }
 
