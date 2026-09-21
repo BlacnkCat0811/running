@@ -36,12 +36,44 @@ export function normalizeAppleDate(value: string | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+/**
+ * Constructing `Intl.DateTimeFormat` is expensive (per-instance ICU setup) and both
+ * helpers below are called inside tight loops — once per sleep segment and four times
+ * per calendar day. The timezone and the requested field set are constant for the
+ * lifetime of the process, so a per-key cache removes the redundant work while
+ * producing byte-identical output.
+ *
+ * The key carries the field set as well as the timezone: the two callers ask for
+ * different fields and must not share an entry.
+ */
+export type LocalCalendarFieldSet = "day" | "dateTime";
+
+const localCalendarFieldOptions: Record<LocalCalendarFieldSet, Intl.DateTimeFormatOptions> = {
+  day: { year: "numeric", month: "2-digit", day: "2-digit" },
+  dateTime: { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }
+};
+
+const localCalendarFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function localCalendarFormatter(timezone: string, fields: LocalCalendarFieldSet): Intl.DateTimeFormat {
+  const key = `${fields}\u0000${timezone}`;
+  const cached = localCalendarFormatters.get(key);
+  if (cached) return cached;
+  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, ...localCalendarFieldOptions[fields] });
+  localCalendarFormatters.set(key, formatter);
+  return formatter;
+}
+
+function formatLocalCalendar(instant: number, timezone: string, fields: LocalCalendarFieldSet): Record<string, string> {
+  const parts = localCalendarFormatter(timezone, fields).formatToParts(new Date(instant));
+  return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+}
+
 /** Return the calendar date in an IANA timezone for an instant. */
 export function localDateAt(instantOrIso: number | string, timezone = "Asia/Shanghai"): string {
   const instant = typeof instantOrIso === "string" ? Date.parse(instantOrIso) : instantOrIso;
   if (!Number.isFinite(instant)) throw new Error(`Invalid instant: ${instantOrIso}`);
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(instant));
-  const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+  const values = formatLocalCalendar(instant, timezone, "day");
   return `${values.year}-${values.month}-${values.day}`;
 }
 
@@ -51,10 +83,12 @@ export function localDateTimeAt(value: string, timezone = "Asia/Shanghai"): stri
   if (!match) throw new Error(`Invalid local date-time: ${value}`);
   const target = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] ?? "00"}`;
   const naive = Date.parse(`${target}Z`);
+  // Deliberate linear probe: it resolves ambiguous DST wall-clock times to the *later*
+  // instant. Do not replace it with a closed-form offset calculation — that changes the
+  // semantic for DST roll-back hours and is a behaviour change, not an optimisation.
   for (let offset = -16 * 60; offset <= 16 * 60; offset += 15) {
     const candidate = naive - offset * 60_000;
-    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date(candidate));
-    const values = Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    const values = formatLocalCalendar(candidate, timezone, "dateTime");
     const hour = values.hour === "24" ? "00" : values.hour;
     if (`${values.year}-${values.month}-${values.day}T${hour}:${values.minute}:${values.second}` === target) return new Date(candidate).toISOString();
   }
