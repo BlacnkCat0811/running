@@ -55,6 +55,21 @@ describe("SettingsPage database preservation", () => {
 
   afterEach(cleanup);
 
+  // 匿名只读形态下浏览器没有令牌，SettingsPage 就不该去请求 /v1/backups：云端会回
+  // 401，而一个"本来就看不到备份"的页面挂个红色错误块看起来像站点坏了（a7e39e2）。
+  // useRemote 的第二个参数就是这个开关。注意恢复入口的可见性由真实 useRemote 决定，
+  // 在这一层被 mock 掉了，所以那部分只能由 E2E 用例 9 负责。
+  it("does not request backups before a token is stored", () => {
+    renderSettings();
+
+    const backupCall = useRemoteMock.mock.calls.find(
+      ([path]) => path === "/v1/backups",
+    );
+    expect(backupCall?.[1]).toBe(false);
+    // 列表为空时也不能说成"还没有本地备份"——那会把"看不到"说成"没有"。
+    expect(screen.getByText("配置令牌后可查看、下载与恢复备份。")).toBeTruthy();
+  });
+
   it("identifies a readable database preservation as a recoverable backup", async () => {
     apiMock.mockResolvedValue({
       deleted: true,

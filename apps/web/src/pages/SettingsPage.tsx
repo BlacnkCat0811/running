@@ -742,6 +742,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
             <label className="field">
               <span>恢复确认文字</span>
               <input
+                id="restore-confirmation"
                 autoFocus
                 disabled={busy}
                 value={restoreConfirmation}

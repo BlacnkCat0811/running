@@ -1518,7 +1518,11 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     await page.getByLabel("确认文字").fill("删除我的 RAI 数据");
     await page.route("**/v1/database", async (route) => {
       await route.fulfill({
-        status: 500,
+        // 422 而非 500：SettingsPage 把 5xx 视为"结果不确定"，会额外发一次
+        // GET /v1/health 做二次确认（SettingsPage.tsx:36-37、255-274），
+        // 那条路径的提示文案与是否出现都不确定。这里要测的是"明确的失败提示 +
+        // 焦点落到 alert"，所以用一个确定性失败的 4xx。
+        status: 422,
         contentType: "application/json",
         body: JSON.stringify({ message: "删除测试失败" }),
       });
@@ -1526,9 +1530,15 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     await page.getByRole("button", { name: "确认删除" }).click();
     const deleteDialogError = page.getByRole("alert").filter({ hasText: "删除测试失败" });
     await deleteDialogError.waitFor();
-    assert.equal(await deleteDialogError.evaluate((element) => element === document.activeElement), true);
+    // SettingsPage 在异步失败的 catch 里用 requestAnimationFrame 落焦点（:276），
+    // 一次性 evaluate 会与它竞速；这里显式等待焦点真正到达该 alert。
+    await page.waitForFunction(
+      () => document.activeElement?.id === "delete-database-error",
+      undefined,
+      { timeout: 5_000 },
+    );
     assert.equal(await page.getByRole("dialog", { name: "确认删除本地数据库" }).isVisible(), true);
-    consumeExpectedHttpFailures(runtimeErrors, 500, "/v1/database");
+    consumeExpectedHttpFailures(runtimeErrors, 422, "/v1/database");
     await page.getByRole("button", { name: "确认删除" }).click();
     await page
       .getByText(/本地数据库已删除；可恢复的删除前备份/)
@@ -1542,6 +1552,13 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       (response) => response.json(),
     )) as unknown[];
     assert.ok(backups.length >= 1);
+    // SettingsPage 只在 localStorage 里有令牌时才请求 /v1/backups（:116、:120），
+    // 否则整段备份列表不渲染、连"恢复"按钮都不存在。E2E 用的是全新 browser
+    // context，localStorage 为空，所以恢复流程必须先显式写入令牌——这就是桌面
+    // 浏览器配置令牌后的真实形态（也是 iOS 壳注入令牌后进入设置页的形态）。
+    await page.evaluate(() =>
+      localStorage.setItem("rai.web.apiToken", "e2e-local-token"),
+    );
     await page.goto(firstRunApi.origin, { waitUntil: "domcontentloaded" });
     await page
       .getByRole("heading", {
@@ -1553,28 +1570,37 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     await restoreTrigger.click();
     const restoreButton = page.getByRole("button", { name: "确认恢复" });
     const restoreInput = page.getByLabel("恢复确认文字");
-    assert.equal(
-      await restoreInput.evaluate(
-        (element) => element === document.activeElement,
-      ),
-      true,
+    // 对话框由 useDialogFocus 的 effect 落焦点，是异步的；等它真正落到输入框。
+    await page.waitForFunction(
+      () => document.activeElement?.id === "restore-confirmation",
+      undefined,
+      { timeout: 5_000 },
     );
     await page.keyboard.press("Escape");
     await page
       .getByRole("dialog", { name: "恢复本地数据库备份" })
       .waitFor({ state: "hidden" });
-    assert.equal(
-      await restoreTrigger.evaluate(
-        (element) => element === document.activeElement,
-      ),
-      true,
+    // 关闭后焦点应回到触发按钮；同样是异步恢复，不能一次性求值。
+    await page.waitForFunction(
+      () => {
+        const active = document.activeElement;
+        return (
+          active instanceof HTMLButtonElement &&
+          active.textContent?.trim() === "恢复"
+        );
+      },
+      undefined,
+      { timeout: 5_000 },
     );
     await restoreTrigger.click();
     assert.equal(await restoreButton.isDisabled(), true);
     await restoreInput.fill("恢复此备份");
     await page.route("**/v1/backups/*/restore", async (route) => {
       await route.fulfill({
-        status: 500,
+        // 同删除流程：5xx 会被当成"结果不确定"而多走一次 /v1/health 二次确认
+        // （SettingsPage.tsx:305-334），那条分支的提示文案不确定。用 4xx 测
+        // "明确失败提示 + 焦点落到 alert"。
+        status: 422,
         contentType: "application/json",
         body: JSON.stringify({ message: "恢复测试失败" }),
       });
@@ -1582,9 +1608,13 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     await restoreButton.click();
     const restoreDialogError = page.getByRole("alert").filter({ hasText: "恢复测试失败" });
     await restoreDialogError.waitFor();
-    assert.equal(await restoreDialogError.evaluate((element) => element === document.activeElement), true);
+    await page.waitForFunction(
+      () => document.activeElement?.id === "restore-database-error",
+      undefined,
+      { timeout: 5_000 },
+    );
     assert.equal(await page.getByRole("dialog", { name: "恢复本地数据库备份" }).isVisible(), true);
-    consumeExpectedHttpFailures(runtimeErrors, 500, /\/v1\/backups\/[^/]+\/restore$/);
+    consumeExpectedHttpFailures(runtimeErrors, 422, /\/v1\/backups\/[^/]+\/restore$/);
     await restoreButton.click();
     await page.getByText(/已恢复备份/).waitFor({ timeout: 30_000 });
     await page.waitForFunction(async () => {
