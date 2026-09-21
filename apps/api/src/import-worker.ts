@@ -112,6 +112,52 @@ export function parseComputeStageMessage(message: unknown): {
   };
 }
 
+/**
+ * `rai:native-engine` 的 operation 名格式：小写字母开头，后接小写字母/数字/连字符。
+ *
+ * 🔴 这里曾经是一份**硬编码白名单**（`["health","gpx","aggregate","apply-records"]`）——
+ * 它与上面 `computeStagesMs` 那次是**同一个坑的下一处**：Rust 侧新增一个 operation 时，
+ * 发送端（`packages/health-export-parser/src/native-worker.ts` 的 `NATIVE_OPERATIONS`）、
+ * Rust 二进制、CLI 都得改，而这份白名单是**唯一改了也不报错**的一处 ——
+ * 新 operation 的 `rustCalls` / `wallMs` / `peakRssKiB` 会被静默吃掉，
+ * `performance.native` 里就是没有它，`/v1/data-summary` 的 `issues` 也照旧是 `[]`。
+ *
+ * 而 `native` 的契约本身就是**开放字典**（`packages/api-contracts/src/index.ts` 的
+ * `Record<string, { rustCalls; typescriptFallbacks; wallMs; peakRssKiB }>` +
+ * `apps/api/src/schemas.ts` 的 `additionalProperties: {...}`）—— 白名单与契约不一致。
+ * 改成格式校验：去掉「每加一个 operation 就要改两处」的隐藏耦合，同时仍限制子进程
+ * 不能往 `performance_json` 里注入任意键。
+ *
+ * ⚠️ 紧邻的 `rai:native-failure` 那份 `["unavailable","invalid_protocol"]` **不属此类**：
+ * 它是**语义判定表**（哪些 code 意味着"引擎不可用、必须拦住回退"），改它会改变行为，
+ * 所以刻意保留为显式判定，不做格式校验。
+ */
+export const NATIVE_OPERATION_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+
+/** 解析一条 `rai:native-engine` 消息；不合法返回 `null`。导出以便单测。 */
+export function parseNativeEngineMessage(message: unknown): {
+  operation: string;
+  actual: "rust" | "typescript";
+  durationMs: number;
+  peakRssKiB: number | null;
+} | null {
+  if (typeof message !== "object" || message === null) return null;
+  const payload = message as { type?: unknown; operation?: unknown; actual?: unknown; durationMs?: unknown; peakRssKiB?: unknown };
+  if (payload.type !== "rai:native-engine") return null;
+  if (typeof payload.operation !== "string" || !NATIVE_OPERATION_NAME_PATTERN.test(payload.operation)) return null;
+  if (payload.actual !== "rust" && payload.actual !== "typescript") return null;
+  if (typeof payload.durationMs !== "number" || !Number.isFinite(payload.durationMs) || payload.durationMs < 0) return null;
+  // 与 `parseComputeStageMessage` 对齐：单个可选字段非法只降级成"没上报"，不整条丢弃。
+  return {
+    operation: payload.operation,
+    actual: payload.actual,
+    durationMs: payload.durationMs,
+    peakRssKiB: typeof payload.peakRssKiB === "number" && Number.isFinite(payload.peakRssKiB) && payload.peakRssKiB >= 0
+      ? payload.peakRssKiB
+      : null
+  };
+}
+
 export interface ImportQueueOptions {
   engine?: ImportExecutionEngine;
   scope: string;
@@ -1561,16 +1607,18 @@ export class ImportWorker {
       let removalGuard: ImportRemovalGuardError | null = null;
       child.on("message", (message: unknown) => {
         if (typeof message === "object" && message !== null) {
-          const item = message as { type?: string; code?: string; operation?: string; actual?: string; durationMs?: number; peakRssKiB?: number };
-          if (item.type === "rai:native-failure" && ["unavailable", "invalid_protocol"].includes(item.code ?? "")) this.nativeFailure = item.code!;
-          if (item.type === "rai:native-engine" && ["health", "gpx", "aggregate", "apply-records"].includes(item.operation ?? "") &&
-              ["rust", "typescript"].includes(item.actual ?? "") && typeof item.durationMs === "number" &&
-              Number.isFinite(item.durationMs) && item.durationMs >= 0) {
-            const previous = this.nativeStats[item.operation!] ?? { rustCalls: 0, typescriptFallbacks: 0, wallMs: 0, peakRssKiB: 0 };
-            if (item.actual === "rust") previous.rustCalls++; else previous.typescriptFallbacks++;
-            previous.wallMs += item.durationMs;
-            if (typeof item.peakRssKiB === "number" && Number.isFinite(item.peakRssKiB)) previous.peakRssKiB = Math.max(previous.peakRssKiB, item.peakRssKiB);
-            this.nativeStats[item.operation!] = previous;
+          const failure = message as { type?: unknown; code?: unknown };
+          // 刻意保留的**语义判定表**（不是过滤名单）：哪些 code 意味着"引擎不可用、必须拦住回退"。
+          if (failure.type === "rai:native-failure" && typeof failure.code === "string" &&
+              ["unavailable", "invalid_protocol"].includes(failure.code)) this.nativeFailure = failure.code;
+          // 白名单已移除：operation 名走格式校验（见 `parseNativeEngineMessage` 的文档）。
+          const nativeMetric = parseNativeEngineMessage(message);
+          if (nativeMetric) {
+            const previous = this.nativeStats[nativeMetric.operation] ?? { rustCalls: 0, typescriptFallbacks: 0, wallMs: 0, peakRssKiB: 0 };
+            if (nativeMetric.actual === "rust") previous.rustCalls++; else previous.typescriptFallbacks++;
+            previous.wallMs += nativeMetric.durationMs;
+            if (nativeMetric.peakRssKiB !== null) previous.peakRssKiB = Math.max(previous.peakRssKiB, nativeMetric.peakRssKiB);
+            this.nativeStats[nativeMetric.operation] = previous;
           }
         }
         // 白名单已移除：stage 名走格式校验（见 `parseComputeStageMessage` 的文档）。

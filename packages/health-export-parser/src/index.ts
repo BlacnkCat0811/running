@@ -1,7 +1,8 @@
 export { parseAppleHealthXml } from "./apple-health-parser.js";
 export {
   prepareNative, nativeElevationGains, importEngine, nativeFallback, nativeBinary, NativeWorkerError,
-  NATIVE_PROTOCOL, NATIVE_VERSION, type ImportEngine, type NativeOptions, type NativeMetrics
+  NATIVE_PROTOCOL, NATIVE_VERSION, NATIVE_OPERATIONS,
+  type ImportEngine, type NativeOptions, type NativeMetrics, type NativeOperation
 } from "./native-worker.js";
 export {
   ABSENT_REMOVAL_GUARD_MAX_RATIO,

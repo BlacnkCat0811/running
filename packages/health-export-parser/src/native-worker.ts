@@ -26,8 +26,22 @@ export interface NativeOptions {
   purpose?: "replay";
   permit?: string;
 }
+/**
+ * `rai:native-engine` 上报的 operation 全集 —— **发送端**的权威声明（编译期类型 + 运行期清单）。
+ *
+ * 🔴 接收端（`apps/api/src/import-worker.ts`）**不再持有同一份名单**：那边走
+ * `NATIVE_OPERATION_NAME_PATTERN` 格式校验。这是 2026-09-21 修掉的第五形态耦合 ——
+ * 与 `computeStagesMs` 的 7 个埋点在接收端被硬编码白名单静默吃掉是同一个坑。
+ *
+ * 本数组只被两处消费：下面的 `NativeOperation` 类型，以及
+ * `apps/api/test/import-worker-native-engine-metric.test.ts` 的跨端兼容断言
+ * （保证「这里新加一个 operation 时接收端一定认得」）。
+ */
+export const NATIVE_OPERATIONS = ["health", "gpx", "aggregate", "apply-records"] as const;
+export type NativeOperation = (typeof NATIVE_OPERATIONS)[number];
+
 export interface NativeMetrics {
-  operation: "health" | "gpx" | "aggregate" | "apply-records";
+  operation: NativeOperation;
   requested: ImportEngine;
   actual: ImportEngine;
   durationMs: number;
