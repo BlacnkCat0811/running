@@ -388,3 +388,89 @@ cd /opt/rai && git revert --no-edit <探针提交> <埋点提交> && sudo system
 `8a12b6b`** —— `69a419c` 是后来推的**纯文档**提交、从未 pull 到线上。按 skill 的硬要求
 「`<线上HEAD>` 必须实测」重算后结论不变（两者都全 0），**但那是巧合**：`69a419c` 只改
 `deliverables/`，恰好不改变闸门结论。若它改的是 `crates/` 或 `deploy/`，我这次就会**漏掉一个闸门**。
+
+## 12. 首次真机读数 + 一个「修了发送端、没修接收端」的 bug（2026-09-21 20:24 CST 导入）
+
+### 12.1 读数：批次 4 收益可复现，P1 收益兑现
+
+小唐于 20:24 重新同步 ⇒ 任务 `14243`（`web_import_mub7vnq6_08de5d4f-…`，`succeeded`，
+`4 updated / 0 inserted / 0 removed / 268 unchanged`，与 09:34 那次同类）。
+
+| 阶段 | 07:56（基线） | 09:34（批次 4 后） | **12:24（P0/P1 后）** | 判读 |
+| :--- | ---: | ---: | ---: | :--- |
+| `totalMs` | 66,417 | 52,556 | **46,497** | |
+| `backup` | 15,832 | 4,489 | **21,479** | ⚠️ 冷态 `quick_check` 这次落在 `backup`（见 §12.4） |
+| `stagingCopy` | 1,746 | 1,717 | 1,793 | 三次几乎恒定 ⇒ 磁盘 IO 不是变量 |
+| `parseImport` | 11,900 | 27,935 | 10,716 | 尾部这次是热的 |
+| `recompute` | 13,003 | 10,663 | **10,621** | ✅ 批次 4 收益**可复现**（见下） |
+| `activation` | 22,881 | 6,715 | **756** | ✅ **P1 兑现：−5,959 ms / −89%** |
+| `cleanup` | 10 | 11 | 22 | |
+
+**① 批次 4 的 `recompute` 收益不再是单样本。** 新代码的**两个**样本是 10,663 / 10,621 ms，
+而旧代码 5 个样本是 12,717–13,003 ms ⇒ 两批之间没有重叠，−18% 稳定成立。
+
+**② `activation` 6,715 → 756 ms 是 P1 的直接结果**（去掉了 `installDatabase` 之前那次
+`isReadableDatabase` 全库扫描）。⚠️ **这一项仍是单样本**：`backup` 同期从 4,489 涨到 21,479，
+说明本次的冷态运气落在 `backup` 段而不是 `activation` 段 ⇒ 方向明确，但按纪律 8
+**必须等下次再复看一次**才能定论。
+
+### 12.2 🔴 新问题：P0 的 7 个新埋点**一个都没出现**
+
+`computeStagesMs` 里仍只有老的 8 个段名。排除法：
+- 线上代码确实到位 —— `git rev-parse` = `7df51c6`，且 `grep -c validate_installed packages/health-export-parser/src/cli.ts` **= 1**；
+- 任务创建于 `12:24:02Z`，晚于 API 重启（`12:20:03Z`）4 分钟，且 CLI 是**每次导入新 spawn** 的（`import-worker.ts` 用 `process.execPath --import tsx <cli.ts>`，直接吃源码）；
+- `data-summary.issues` = `[]`、导入本身 `succeeded` ⇒ **没有任何报错**。
+
+**根因**：`apps/api/src/import-worker.ts` 的 IPC 接收端有一份**硬编码 stage 白名单**：
+
+```ts
+if (payload.type === "rai:compute-performance" &&
+    ["features", "trainingMetrics", "modelReplay",
+      "parse_health_xml", "import_gpx_routes", "canonicalize_workouts",
+      "canonicalize_nights", "stage_audit_files"].includes(payload.stage ?? "") && …)
+```
+
+我改了**发送端**（`cli.ts` 的 7 个 `timedStage`），没改**接收端** ⇒ 7 个埋点全部被**静默丢弃**。
+
+这与契约层的声明冲突：`packages/api-contracts/src/index.ts:381` 是 `Record<string, number>`、
+`apps/api/src/schemas.ts:513` 是 `additionalProperties: { type: "number" }` —— **开放字典**。
+
+⚠️ **真正的问题不是"没人知道"，而是"知道过一次、却没升级成纪律"**：
+`deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` 的 `:214` **明明白白贴了这段白名单**、
+`:222` 还写了操作步骤「删 `shadowValidation`、加上述 5 个名字」—— 说明 09-20 那次**是同步改了接收端的**。
+但紧接着 `:218` 又写「**没有白名单**」（那句指的是 schema/契约层），**前后措辞互相消解**。
+结果这份耦合被记成了一次性的「一行改动」，而不是「**每次新增埋点都必须同步的接收端清单**」。
+本文档 §10.5 的验收判据也因此建立在一个错误前提上。
+
+### 12.3 修复
+
+`import-worker.ts`：白名单 → **格式校验**，并把解析抽成可单测的纯函数。
+
+```ts
+export const COMPUTE_STAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
+export function parseComputeStageMessage(message: unknown): { stage; durationMs; processMaxRssKiB } | null
+```
+
+- 去掉「每加一个埋点就要改两处」的隐藏耦合（契约本来就是开放字典）；
+- 仍拒绝非法键：数字/下划线开头、含 `-`/`.`/空格、超长（>48）⇒ 子进程不能往
+  `performance_json` 里注入任意键。
+
+### 12.4 门禁与突变验证
+
+| 项 | 结果 |
+| :--- | :--- |
+| `npm run typecheck` | **EXIT=0** |
+| 新增 `apps/api/test/import-worker-compute-stage.test.ts` | **7 / 7 pass** |
+| 全量 node | **767 tests / 764 pass / 0 fail / 3 skip**，EXIT=0（上一次记录 759/756/0/3） |
+| 突变 A | 把正则临时改回**白名单形态** ⇒ 用例 2/3（「新段名必须被接受」）**变红** ✓，用例 1（旧 8 段仍被接受）保持绿 ✓ ⇒ 测试真的能检出这个 bug |
+| 突变 B | 测试先抓出**实现自身**的缺陷：`processMaxRssKiB = -5` 未被拒（`durationMs` 有非负校验而它没有）⇒ 已补齐 |
+
+### 12.5 这次的教训
+
+**跨进程消息的"两端"必须同时改；宽容的接收方 = 静默失效。**
+验收判据不能是"发送端有没有这段代码"，而必须是**"接收端有没有把它记下来"**——
+这次的 7 个埋点在发送端、契约、`schemas.ts` 三处都完全合规，只有一处硬编码把它们吃掉。
+
+⚠️ 同类耦合还剩一处：`import-worker.ts` 的 `nativeStats` 仍有一份
+`["health", "gpx", "aggregate", "apply-records"]`（Rust 引擎操作名）白名单。
+本次未新增操作 ⇒ **未动**，但已登记为「下一处同类耦合」。

@@ -215,7 +215,15 @@ if (payload.type === "rai:compute-performance" &&
   this.computeStagesMs[payload.stage!] = (this.computeStagesMs[payload.stage!] ?? 0) + payload.durationMs;
 ```
 
-而 `computeStagesMs` 是**自由字典**（`api-contracts:380` → `Record<string, number>`；`schemas.ts:514` → `additionalProperties: {type:"number"}`），**没有白名单**。
+而 `computeStagesMs` 的**契约层**是自由字典（`api-contracts:380` → `Record<string, number>`；`schemas.ts:514` → `additionalProperties: {type:"number"}`），schema 层没有白名单。
+
+> 🔴 **2026-09-21 勘误**：上面这句当时被读成「整条链路都没有白名单」，**但实现层是有的** ——
+> 就是本节上面引用的 `import-worker.ts` 里那个 `includes([...])`（`:222` 也如实写了要改它）。
+> 后果：2026-09-21 在 `cli.ts` 新增 7 个 `timedStage` 时**只改了发送端**，7 个埋点被
+> **静默丢弃**（`computeStagesMs` 里一个都没出现、且零报错）。当日已把白名单换成格式校验
+> （`COMPUTE_STAGE_NAME_PATTERN` + `parseComputeStageMessage`），详见
+> `IMPORT_STAGE_ATTRIBUTION_2026-09-21.md` §12。
+> **教训**：契约层"开放"≠ 链路上"开放"；验收判据要看**接收端有没有把它记下来**。
 
 ⇒ 做法极简：
 1. `packages/health-export-parser/src/cli.ts` 在 5 个子步骤外层计时，并发 `process.send({type:"rai:compute-performance", stage:"<名>", durationMs})`。子步骤点位（`cli.ts:260-351`）：`parse_health_xml` / `import_gpx_routes` / `canonicalize_workouts` / `canonicalize_nights` / `stage_audit_files`
