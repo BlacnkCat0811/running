@@ -357,3 +357,34 @@ cd /opt/rai && git revert --no-edit <探针提交> <埋点提交> && sudo system
 - **`maintenance.ts` 的 `restoreBackup`**：本文初稿把它当成「备份校验」（P3），
   实为**手动恢复**路径才走 —— 每次备份省 12 s 的收益描述**不成立**，撤回该建议。
 - `apps/web/src/format.ts` 的前端时区口径（批次 4 顺延项）。
+
+---
+
+## 11. 部署实录（2026-09-21 20:19–20:21 CST）
+
+线上 **`8a12b6b → 577ae0e`**（3 个提交：`47d4e37` 探针模块 / `b3ff82a` 接入 + 埋点 / `577ae0e` 文档）。
+
+| 项目 | 实测 |
+| :--- | :--- |
+| 闸门核对（基准 = **实测** HEAD `8a12b6b`） | `crates` **0** / `apps/web` **0** / `package*.json` **0** / `deploy/` **0** / `database.ts` **0** ⇒ 最小部署（不重编译 Rust、不装依赖、不构建 web、无迁移） |
+| 部署前备份 | `rai.manual.2026-09-21T12-19-39-501Z.fcc8c06d.sqlite`（530,530,304 B），部署后**确认仍在** ✓ |
+| 迁移闸门 | `version 22` + **`pending: []`** + counts `workouts 275 / route_points 110840 / health_records 114162` |
+| unit | `INSTALLED_EQ_REPO true` / `HAS_EXIT78 true` |
+| **停机** | 20:20:03 停 → 20:20:08 `Server listening` ≈ **5 s** |
+| 服务 | `active` / `NRestarts=0` / 无迁移报错 / 启动日志 `publicReadHosts:["tpandmr.xyz","101.33.202.40"]` **26/12** |
+| 引擎 | `/proc/<MainPID>/environ`：`RAI_IMPORT_ENGINE=rust` + `RAI_RUST_FALLBACK=typescript` + `RAI_RUST_BINARY=/opt/rai-native/rai-data-worker`；**死配置 `RAI_IMPORT_VALIDATION_MODE` 计数 0** |
+| **CLI 可加载性** | `node --import tsx packages/health-export-parser/src/cli.ts` 抛 **usage**（而非 import 错误）⇒ 含新探针 import 的模块图能加载。**这条专门防**「CLI 只在下一次导入才被 spawn，坏了要等到那时才发现」 |
+| 契约测试 | **8 tests / 8 pass / 0 skipped**（`NT_EXIT=0`）⇒ 二进制与 TS 契约对齐，B1 在线 |
+| 端点 | 匿名 `/v1/health` **200**（`status:"ok"` + `databaseReady:true`）、`/v1/data-summary` **200** + **`issues: []`** |
+| **云机真机探针实测** | 506 MB 真库副本上 **4 ms**，判据正确（129524 × 4096 = 530,530,304，`schemaObjects 152`）；对照 `quick_check` 热 **1050 ms** / 冷 **12108 ms** |
+| 收尾 | 无 Rust 子进程残留 / 磁盘 **34%**（32 G 可用）/ 备份 **14 份 7.0 G** 稳态 / `var/backups` 侧车 **0**（先 `cp` 到 `/tmp` 再测，避开了"只读打开备份就地生成 `-shm`/`-wal`"那个坑） |
+
+🔴 **收益尚未兑现（预期之内，不是回退）**：部署后读到 `importJob.createdAt` 仍是
+`2026-09-21T09:34:00.764Z`（批次 4 那次导入），`computeStagesMs` 里**新段 0 / 7** ⇒ 这是
+「上一版代码」的快照。**判据**：等**下一次真实导入**，那时应看到 7 个新段名出现，且
+`validate_installed` 接近 0 ms（`activate_staging` 也应显著缩短）。
+
+🔴 **本次又命中同一个坑，记下来**：我最初用 `69a419c..HEAD` 算闸门范围，而**实测线上 HEAD 是
+`8a12b6b`** —— `69a419c` 是后来推的**纯文档**提交、从未 pull 到线上。按 skill 的硬要求
+「`<线上HEAD>` 必须实测」重算后结论不变（两者都全 0），**但那是巧合**：`69a419c` 只改
+`deliverables/`，恰好不改变闸门结论。若它改的是 `crates/` 或 `deploy/`，我这次就会**漏掉一个闸门**。
