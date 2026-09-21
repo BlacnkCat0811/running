@@ -614,3 +614,53 @@ await this.backupDatabase(currentDatabase, stagingBackupPath);   // ← 读全�
 | 收益可量化 | ✅ 已实测 11.7 s | 护栏价值，无法用数据证明当下必要 |
 
 ⇒ 判断：**先做 13.3**（拿走已发生、已实测的 11.7 s），批次 2 等真正出现"任务反复重放"的证据再排。
+
+---
+
+## 14. §13.3 实施与验证（2026-09-21 晚）
+
+改动面很小：`apps/api/src/import-worker.ts`（`createCurrentBackup` 重排 + 两个私有辅助方法）
+与 `apps/api/test/worker.test.ts`（+2 用例）。
+
+### 14.1 顺序重排
+
+| 步骤 | 旧顺序 | **新顺序** |
+| :--- | :--- | :--- |
+| 1 | `isReadableDatabase` → **冷** `quick_check`（~12 s） | `ensureBackupCapacity` |
+| 2 | `ensureBackupCapacity` | `backupDatabase` → `.partial-<uuid>`（顺序读全库，**顺手把页缓存读热**） |
+| 3 | `backupDatabase` → `.partial-<uuid>` | `isReadableDatabase` → **热** `quick_check`（~0.26 s） |
+| 4 | `rename` 发布 | `rename` 发布 |
+
+### 14.2 四个不变量
+
+| # | 不变量 | 怎么保住的 |
+| :--- | :--- | :--- |
+| 1 | **校验强度不变** | 用的还是同一个 `PRAGMA quick_check`，一个字没改，只换了跑的位置。**不是**换成结构探针 |
+| 2 | **发布闸门不变** | `quick_check` 未通过时 `stagingBackupPath` **直接丢弃**，绝不 `rename` 成正式名（原来也是先写 partial、再发布） |
+| 3 | **损坏路径不变** | 仍 `onDatabaseError` → `preserveCorruptDatabase` → 返回 `null`（调用方因此退回 `--replace` 全量导入） |
+| 4 | **备份失败语义不变** | 新增的是「能读吗」这一步**分流**：能读 ⇒ 环境故障（盘满 / 权限 / EIO），清残片后**原样上抛**；不能读 ⇒ 备份失败本就是预期结果，改走隔离 |
+
+### 14.3 突变验证（两条断言互不重叠）
+
+| 用例 | 断言 | 突变 | 结果 |
+| :--- | :--- | :--- | :--- |
+| `reads the whole database for the backup before running the integrity check` | `events === ["backup","quick_check"]`（用 stub 记录真实调用次序） | 把顺序倒回旧实现（提前调一次 `isReadableDatabase` 但**不改行为**） | **只它变红** ✅ |
+| `never publishes a safety backup from a database that fails its integrity check after the copy` | 校验失败 ⇒ 返回 `null`、`rai.before-web-import.<jobId>.sqlite` **不存在**、`var/backups` 无残片、quarantine 恰 1 个 | 保留校验调用但**不据其结果决定是否发布** | **只它变红** ✅ |
+
+两次突变的红点互不重叠 ⇒ 每一条都钉住一个真实不变量，不是恒红、也不是靠编译错误变红。
+
+### 14.4 门禁
+
+| 门 | 读数 |
+| :--- | :--- |
+| `npm run typecheck` | ✅ 0 错 |
+| node 全量 | **769 / 766 pass / 0 fail / 3 skip**（基线 767；+2 = 本次两条新用例） |
+| web vitest（单跑） | **13 文件 / 85 tests 全过** |
+
+### 14.5 一个已登记的行为差异（不影响正确性）
+
+`ensureBackupCapacity()` 从「校验之后」挪到了「`backup` 之前」—— 写备份前必须腾空间，位置上没有别的选择。
+它内部是 `reclaimDisplacedDatabases()`（只删匹配 `ABANDONED_DATABASE_FILE_PATTERN` 且**超过 `maxAgeMs`** 的孤儿副本）
++ `enforceBackupPolicy()`，**现在主库损坏时也会跑一次**。已确认在飞的暂存库受 `maxAgeMs` 保护、不会被误删；
+实际效果是"多一次回收孤儿副本的机会"（`maintenance.ts:642` 的注释写明它本来就可以从多处驱动）。
+
