@@ -75,6 +75,43 @@ interface MutableImportJob extends ImportJobResponse {
   queue?: { scope: string; attempts: number; finalized: boolean; cancelRequested?: boolean; engine?: ImportExecutionEngine };
 }
 
+/**
+ * `rai:compute-performance` 的 stage 名格式：字母开头，后接字母/数字/下划线。
+ *
+ * 🔴 这里曾经是一份**硬编码白名单**（`features` / `trainingMetrics` / `modelReplay` /
+ * `parse_health_xml` / `import_gpx_routes` / `canonicalize_workouts` / `canonicalize_nights` /
+ * `stage_audit_files`）。2026-09-21 在 `packages/health-export-parser/src/cli.ts` 里新增了
+ * 7 个 `timedStage` 埋点后，线上 `computeStagesMs` **一个都没出现、且零报错** ——
+ * 发送端改了、接收端白名单没改，新埋点被静默丢弃。
+ *
+ * 而 `computeStagesMs` 的契约本身就是**开放字典**（`packages/api-contracts/src/index.ts`
+ * 的 `Record<string, number>` + `apps/api/src/schemas.ts` 的
+ * `additionalProperties: { type: "number" }`）—— 白名单与契约不一致。
+ * 改成格式校验：去掉「每加一个埋点就要改两处」的隐藏耦合，同时仍限制子进程
+ * 不能往 `performance_json` 里注入任意键。
+ */
+export const COMPUTE_STAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
+
+/** 解析一条 `rai:compute-performance` 消息；不合法返回 `null`。导出以便单测。 */
+export function parseComputeStageMessage(message: unknown): {
+  stage: string;
+  durationMs: number;
+  processMaxRssKiB: number | null;
+} | null {
+  if (typeof message !== "object" || message === null) return null;
+  const payload = message as { type?: unknown; stage?: unknown; durationMs?: unknown; processMaxRssKiB?: unknown };
+  if (payload.type !== "rai:compute-performance") return null;
+  if (typeof payload.stage !== "string" || !COMPUTE_STAGE_NAME_PATTERN.test(payload.stage)) return null;
+  if (typeof payload.durationMs !== "number" || !Number.isFinite(payload.durationMs) || payload.durationMs < 0) return null;
+  return {
+    stage: payload.stage,
+    durationMs: payload.durationMs,
+    processMaxRssKiB: typeof payload.processMaxRssKiB === "number" && Number.isFinite(payload.processMaxRssKiB) && payload.processMaxRssKiB >= 0
+      ? payload.processMaxRssKiB
+      : null
+  };
+}
+
 export interface ImportQueueOptions {
   engine?: ImportExecutionEngine;
   scope: string;
@@ -1486,17 +1523,12 @@ export class ImportWorker {
             this.nativeStats[item.operation!] = previous;
           }
         }
-        if (typeof message === "object" && message !== null) {
-          const payload = message as { type?: string; stage?: string; durationMs?: number; processMaxRssKiB?: number };
-          if (payload.type === "rai:compute-performance" &&
-              ["features", "trainingMetrics", "modelReplay",
-                "parse_health_xml", "import_gpx_routes", "canonicalize_workouts",
-                "canonicalize_nights", "stage_audit_files"].includes(payload.stage ?? "") &&
-              typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0) {
-            this.computeStagesMs[payload.stage!] = (this.computeStagesMs[payload.stage!] ?? 0) + payload.durationMs;
-            if (typeof payload.processMaxRssKiB === "number" && Number.isFinite(payload.processMaxRssKiB)) {
-              this.computeProcessMaxRssKiB = Math.max(this.computeProcessMaxRssKiB, payload.processMaxRssKiB);
-            }
+        // 白名单已移除：stage 名走格式校验（见 `parseComputeStageMessage` 的文档）。
+        const computeStage = parseComputeStageMessage(message);
+        if (computeStage) {
+          this.computeStagesMs[computeStage.stage] = (this.computeStagesMs[computeStage.stage] ?? 0) + computeStage.durationMs;
+          if (computeStage.processMaxRssKiB !== null) {
+            this.computeProcessMaxRssKiB = Math.max(this.computeProcessMaxRssKiB, computeStage.processMaxRssKiB);
           }
         }
         if (ImportRemovalGuardError.fromPayload(message)) {
