@@ -784,29 +784,41 @@ export class ImportWorker {
       undefined,
       backupPolicyFromEnvironment()
     );
-    if (!this.isReadableDatabase(this.databasePath)) {
-      this.onDatabaseError(new Error("Main database is corrupt or failed its integrity check"));
-      await maintenance.preserveCorruptDatabase(`before-web-import-${jobId}-corrupt`);
-      return null;
-    }
+    // 🔴 顺序：`ensureBackupCapacity` → `backup` → `quick_check`。
+    // `backup()` 会按页顺序把这份 506 MB 的库读一遍，页缓存因此变热，紧随其后的
+    // `PRAGMA quick_check` 就从**冷态**掉到**热态**（云机真机受控实测，drop_caches 造冷：
+    // qc 冷 11,993 ms / 顺序读全库 1,201 ms / 随后 qc 热 260 ms）。
+    // 旧顺序是「先 qc 再 backup」，等于让这次唯一的全库扫描白付冷态的钱。
+    // 先例见 `maintenance.ts:213-217`（`deleteDatabase` 同样是先 `createBackup`、失败才判可读性）。
+    // 🔴 判定精度**没有**放宽：用的还是同一个 `quick_check`，只是挪到备份之后跑；
+    // 发布时机也不变 —— 它没通过时 `stagingBackupPath` 直接丢弃，绝不 rename 成正式名。
     await maintenance.ensureBackupCapacity();
     const backupPath = resolve(backupDirectory, `rai.before-web-import.${jobId}.sqlite`);
     const stagingBackupPath = `${backupPath}.partial-${randomUUID()}`;
     const currentDatabase = new DatabaseSync(this.databasePath, { readOnly: true });
     try {
-      await this.backupDatabase(currentDatabase, stagingBackupPath);
-      await rename(stagingBackupPath, backupPath);
-    } catch (error) {
       try {
-        await this.cleanupPartialBackup(stagingBackupPath);
-      } catch (cleanupError) {
-        if (error && typeof error === "object") {
-          try {
-            (error as { cleanupError?: unknown }).cleanupError = cleanupError;
-          } catch { /* Preserve the original backup error even when it is immutable. */ }
+        await this.backupDatabase(currentDatabase, stagingBackupPath);
+      } catch (error) {
+        // 备份失败之后才知道「是不是主库坏了」：能读 ⇒ 失败来自环境（盘满 / 权限 / EIO），
+        // 清掉残片后原样上抛；不能读 ⇒ 备份失败是预期结果，改走隔离。
+        if (this.isReadableDatabase(this.databasePath)) {
+          await this.attachCleanupFailure(stagingBackupPath, error);
+          throw error;
         }
+        return await this.quarantineCorruptDatabase(jobId, maintenance, stagingBackupPath);
       }
-      throw error;
+      // 副本已写完但尚未发布。主库真损坏时（坏页没被 `backup()` 读到，例如落在 freelist），
+      // 由这一步拦下：丢弃刚写好的副本、改走隔离，正式备份名从此不会出现。
+      if (!this.isReadableDatabase(this.databasePath)) {
+        return await this.quarantineCorruptDatabase(jobId, maintenance, stagingBackupPath);
+      }
+      try {
+        await rename(stagingBackupPath, backupPath);
+      } catch (error) {
+        await this.attachCleanupFailure(stagingBackupPath, error);
+        throw error;
+      }
     } finally {
       currentDatabase.close();
     }
@@ -821,6 +833,44 @@ export class ImportWorker {
 
   private async backupDatabase(database: DatabaseSync, destination: string): Promise<void> {
     await backup(database, destination);
+  }
+
+  /**
+   * 主库确认损坏时统一走这条路：丢掉这次写了一半或刚写好的备份副本、上报一次数据库错误、
+   * 再把损坏的主库整体保留到 `var/quarantine/`。
+   * 返回 `null` 让调用方退回「全新导入」分支（不做增量同步，CLI 走 `--replace`）。
+   */
+  private async quarantineCorruptDatabase(
+    jobId: string,
+    maintenance: DatabaseMaintenance,
+    partialBackupPath: string
+  ): Promise<null> {
+    try {
+      await this.cleanupPartialBackup(partialBackupPath);
+    } catch (cleanupError) {
+      // 清不掉残片不能挡住隔离 —— 隔离才是这条路径的目的。残片不以 `.sqlite` 结尾，
+      // 不会被任何保留策略当成正式备份，所以这里降级成一行 stderr 即可。
+      const message = cleanupError instanceof Error ? cleanupError.stack ?? cleanupError.message : String(cleanupError);
+      process.stderr.write(`Discarding the partial import backup of a corrupt database failed: ${message}\n`);
+    }
+    this.onDatabaseError(new Error("Main database is corrupt or failed its integrity check"));
+    await maintenance.preserveCorruptDatabase(`before-web-import-${jobId}-corrupt`);
+    return null;
+  }
+
+  /**
+   * 备份失败时清掉残片，并把清理错误挂到原始错误上 —— 主因始终是备份失败本身。
+   */
+  private async attachCleanupFailure(path: string, error: unknown): Promise<void> {
+    try {
+      await this.cleanupPartialBackup(path);
+    } catch (cleanupError) {
+      if (error && typeof error === "object") {
+        try {
+          (error as { cleanupError?: unknown }).cleanupError = cleanupError;
+        } catch { /* Preserve the original backup error even when it is immutable. */ }
+      }
+    }
   }
 
   private async cleanupPartialBackup(path: string): Promise<void> {

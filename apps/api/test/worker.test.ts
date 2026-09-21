@@ -33,6 +33,7 @@ interface ImportWorkerTestSurface {
   ): Promise<void>;
   createCurrentBackup(jobId: string): Promise<string | null>;
   backupDatabase(database: DatabaseSync, destination: string): Promise<void>;
+  isReadableDatabase(path: string): boolean;
   removePartialBackupFile(path: string): Promise<void>;
   preserveHistoricalState(stagingDatabase: string, previousDatabase: string): void;
   analyzeDatasetChange(
@@ -929,6 +930,68 @@ test("preserves the backup error when partial cleanup remains locked", async () 
     assert.equal(cleanupAttempts, 5);
     assert.equal(readdirSync(backupDirectory).length, 1);
     assert.match(readdirSync(backupDirectory)[0] ?? "", /^rai\.before-web-import\.persistent-cleanup\.sqlite\.partial-/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reads the whole database for the backup before running the integrity check", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-backup-order-"));
+  const databasePath = join(root, "rai.sqlite");
+  marker(databasePath, "current-database");
+  const worker = new ImportWorker(databasePath, root) as unknown as ImportWorkerTestSurface;
+  const events: string[] = [];
+  const backupDatabase = worker.backupDatabase.bind(worker);
+  const isReadableDatabase = worker.isReadableDatabase.bind(worker);
+  worker.backupDatabase = async (database, destination) => {
+    events.push("backup");
+    await backupDatabase(database, destination);
+  };
+  worker.isReadableDatabase = (path) => {
+    events.push("quick_check");
+    return isReadableDatabase(path);
+  };
+  const backupPath = join(root, "var", "backups", "rai.before-web-import.backup-order.sqlite");
+  try {
+    assert.equal(await worker.createCurrentBackup("backup-order"), backupPath);
+    // `backup()` 必须先跑完：它按页顺序把整库读一遍，页缓存因此变热，紧随其后的
+    // `PRAGMA quick_check` 才是热态（云机真机受控实测：冷 11,993 ms → 热 260 ms）。
+    // 顺序一旦调回「先校验再备份」，这条断言立刻变红。
+    assert.deepEqual(events, ["backup", "quick_check"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("never publishes a safety backup from a database that fails its integrity check after the copy", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-backup-after-copy-"));
+  const databasePath = join(root, "rai.sqlite");
+  marker(databasePath, "current-database");
+  const observedErrors: unknown[] = [];
+  const worker = new ImportWorker(
+    databasePath,
+    root,
+    root,
+    undefined,
+    undefined,
+    (error) => { observedErrors.push(error); }
+  ) as unknown as ImportWorkerTestSurface;
+  // 关键场景：`backup()` 成功（坏页没被读到，例如落在 freelist），但完整性校验不通过。
+  // 那份刚写好的副本**绝不能**以 `rai.before-web-import.<jobId>.sqlite` 的名字留下来 ——
+  // 备份列表会把它当成可回滚点，而它抄的是一份损坏的主库。
+  worker.isReadableDatabase = () => false;
+  const backupDirectory = join(root, "var", "backups");
+  const backupPath = join(backupDirectory, "rai.before-web-import.corrupt-after-copy.sqlite");
+  try {
+    assert.equal(await worker.createCurrentBackup("corrupt-after-copy"), null);
+    assert.equal(existsSync(backupPath), false);
+    assert.deepEqual(readdirSync(backupDirectory), []);
+    assert.equal(observedErrors.length, 1);
+    assert.match(String(observedErrors[0]), /database.*corrupt/i);
+    assert.equal(
+      readdirSync(join(root, "var", "quarantine")).filter((name) => name.endsWith(".sqlite")).length,
+      1
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
