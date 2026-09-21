@@ -10,6 +10,11 @@ export {
   type DatabaseFilePublisherOptions
 } from "./database-file-publisher.js";
 export {
+  isStructurallyReadable,
+  probeDatabaseStructure,
+  type DatabaseStructureReport
+} from "./database-structure-probe.js";
+export {
   SqliteModelRunRepository,
   ModelRunActivationError,
   type StoredModelRunSummary,
