@@ -10,7 +10,7 @@ import type {
   WorkoutZoneSummary,
   TrainingLoadBreakdown
 } from "@rai/contracts";
-import type { PhysState } from "@rai/contracts";
+import { localCalendarFormatter, type PhysState } from "@rai/contracts";
 
 export { type PhysState } from "@rai/contracts";
 
@@ -326,7 +326,7 @@ export function latestAcuteChronicLoadRatio(
 export function localDateInTimeZone(instant: string | Date, timeZone = "Asia/Shanghai"): string {
   const date = typeof instant === "string" ? new Date(instant) : instant;
   if (!Number.isFinite(date.getTime())) throw new Error("instant must be a valid date");
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+  const parts = localCalendarFormatter(timeZone, "day").formatToParts(date);
   const get = (type: string): string => parts.find(part => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }

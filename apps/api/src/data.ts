@@ -15,6 +15,7 @@ import {
   SqliteRecoveryFactsReadRepository,
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
+import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
 
 import type {
   AbilityMetricSet,
@@ -81,12 +82,7 @@ const parseJson = <T>(value: unknown, fallback: T): T => {
 const paceSeconds = (duration: number, distance: number | null): number | null =>
   distance !== null && distance > 0 ? duration / distance : null;
 
-const localDateInShanghai = (value: Date): string => new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Asia/Shanghai",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit"
-}).format(value);
+const localDateInShanghai = (value: Date): string => localCalendarFormatter(DATABASE_TIMEZONE, "day").format(value);
 
 export const mobileLocalDate = (): string => localDateInShanghai(new Date());
 

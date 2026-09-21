@@ -37,63 +37,19 @@ export function normalizeAppleDate(value: string | undefined): string | null {
 }
 
 /**
- * Constructing `Intl.DateTimeFormat` is expensive (per-instance ICU setup) and both
- * helpers below are called inside tight loops — once per sleep segment and four times
- * per calendar day. The timezone and the requested field set are constant for the
- * lifetime of the process, so a per-key cache removes the redundant work while
- * producing byte-identical output.
+ * Calendar-date helpers in the database timezone.
  *
- * The key carries the field set as well as the timezone: the two callers ask for
- * different fields and must not share an entry.
+ * The implementation now lives in `@rai/contracts` (`src/timezone.ts`): the same memoised
+ * `Intl.DateTimeFormat` lookup is needed by `@rai/application`, `@rai/storage-sqlite`,
+ * `@rai/training-load`, `@rai/training-zones` and the API, and `storage-sqlite` /
+ * `training-load` do not depend on each other, so no leaf package can host it.
+ *
+ * Re-exported here so this package's public API — and its byte-identical output,
+ * including the deliberate linear DST probe — is unchanged. The original measurement
+ * that motivated the cache (21,301 ms -> 2,416 ms on `canonicalizeNights`) still holds:
+ * this package reaches the same cache instance through `@rai/contracts`.
  */
-export type LocalCalendarFieldSet = "day" | "dateTime";
-
-const localCalendarFieldOptions: Record<LocalCalendarFieldSet, Intl.DateTimeFormatOptions> = {
-  day: { year: "numeric", month: "2-digit", day: "2-digit" },
-  dateTime: { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }
-};
-
-const localCalendarFormatters = new Map<string, Intl.DateTimeFormat>();
-
-function localCalendarFormatter(timezone: string, fields: LocalCalendarFieldSet): Intl.DateTimeFormat {
-  const key = `${fields}\u0000${timezone}`;
-  const cached = localCalendarFormatters.get(key);
-  if (cached) return cached;
-  const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, ...localCalendarFieldOptions[fields] });
-  localCalendarFormatters.set(key, formatter);
-  return formatter;
-}
-
-function formatLocalCalendar(instant: number, timezone: string, fields: LocalCalendarFieldSet): Record<string, string> {
-  const parts = localCalendarFormatter(timezone, fields).formatToParts(new Date(instant));
-  return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
-}
-
-/** Return the calendar date in an IANA timezone for an instant. */
-export function localDateAt(instantOrIso: number | string, timezone = "Asia/Shanghai"): string {
-  const instant = typeof instantOrIso === "string" ? Date.parse(instantOrIso) : instantOrIso;
-  if (!Number.isFinite(instant)) throw new Error(`Invalid instant: ${instantOrIso}`);
-  const values = formatLocalCalendar(instant, timezone, "day");
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-/** Resolve a local wall-clock timestamp to an instant, including DST transitions. */
-export function localDateTimeAt(value: string, timezone = "Asia/Shanghai"): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
-  if (!match) throw new Error(`Invalid local date-time: ${value}`);
-  const target = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6] ?? "00"}`;
-  const naive = Date.parse(`${target}Z`);
-  // Deliberate linear probe: it resolves ambiguous DST wall-clock times to the *later*
-  // instant. Do not replace it with a closed-form offset calculation — that changes the
-  // semantic for DST roll-back hours and is a behaviour change, not an optimisation.
-  for (let offset = -16 * 60; offset <= 16 * 60; offset += 15) {
-    const candidate = naive - offset * 60_000;
-    const values = formatLocalCalendar(candidate, timezone, "dateTime");
-    const hour = values.hour === "24" ? "00" : values.hour;
-    if (`${values.year}-${values.month}-${values.day}T${hour}:${values.minute}:${values.second}` === target) return new Date(candidate).toISOString();
-  }
-  throw new Error(`Local date-time does not exist in ${timezone}: ${value}`);
-}
+export { localDateAt, localDateTimeAt } from "@rai/contracts";
 
 export function durationToSeconds(
   value: string | undefined,

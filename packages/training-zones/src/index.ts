@@ -19,6 +19,7 @@ import {
   TRIMP_EXPONENT_MALE,
   trimpMinuteLoad
 } from "@rai/training-load";
+import { localCalendarFormatter } from "@rai/contracts";
 
 export interface TimedMetricSample {
   value: number;
@@ -107,12 +108,7 @@ function median(values: number[]): number | null {
 function localDate(value: string, timezoneIdentifier: string): string {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezoneIdentifier,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(date);
+  const parts = localCalendarFormatter(timezoneIdentifier, "day").formatToParts(date);
   const get = (type: string): string => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }

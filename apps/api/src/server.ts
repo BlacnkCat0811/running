@@ -42,6 +42,7 @@ import Fastify from "fastify";
 
 import { apiErrorPayload } from "./api-error.js";
 import { CommandQueue, applyMutationCommand } from "./command-queue.js";
+import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
 import { RaiReadStore, mobileLocalDate } from "./data.js";
 import { createImportSourceManager } from "./import-sources.js";
 import { finalizeImportSource } from "./import-source-finalization.js";
@@ -628,12 +629,7 @@ const publicPredictionRun = (run: PredictionModelRun): PredictionModelRun => ({
   artifactPath: run.artifactPath ? basename(run.artifactPath) : null
 });
 
-const localToday = (): string => new Intl.DateTimeFormat("en-CA", {
-  timeZone: "Asia/Shanghai",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit"
-}).format(new Date());
+const localToday = (): string => localCalendarFormatter(DATABASE_TIMEZONE, "day").format(new Date());
 
 const checkTrainingZoneBackfill = async (): Promise<void> => {
   if (closing || taskAdmission.isBlocked) return;

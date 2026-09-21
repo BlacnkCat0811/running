@@ -16,7 +16,7 @@ import type {
   TrainingZonesCurrentResponse,
   WorkoutListItem
 } from "@rai/api-contracts";
-import { healthTypes, type DailyTrainingMetric } from "@rai/contracts";
+import { DATABASE_TIMEZONE, healthTypes, localCalendarFormatter, type DailyTrainingMetric } from "@rai/contracts";
 import { SqliteRecoveryFactsReadRepository } from "@rai/storage-sqlite";
 import { classifyPhysState, countNightsBelowSleepBaseline } from "@rai/training-load";
 import { loadRaceReadiness } from "@rai/application";
@@ -624,12 +624,7 @@ function loadSleepWindow(database: DatabaseSync, today: string): {
   for (const row of rows) {
     if (!row.valueText?.includes("Asleep")) continue;
     const minutes = Math.max(0, (Date.parse(row.endAt) - Date.parse(row.startAt)) / 60_000);
-    const night = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Shanghai",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit"
-    }).format(new Date(Date.parse(row.startAt) + 6 * 3600_000));
+    const night = localCalendarFormatter(DATABASE_TIMEZONE, "day").format(new Date(Date.parse(row.startAt) + 6 * 3600_000));
     byNight.set(night, (byNight.get(night) ?? 0) + minutes);
   }
   const lastNight = byNight.get(today) ?? byNight.get(shiftDate(today, -1)) ?? null;

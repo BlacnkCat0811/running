@@ -1,3 +1,10 @@
+// Timezone: the single source of truth for the database timezone plus the shared
+// memoised `Intl.DateTimeFormat` cache. Re-exported here so every package reaches it
+// through `@rai/contracts` — contracts is the only package all others depend on
+// (`storage-sqlite` and `training-load` do not depend on each other, so neither can
+// host a helper the other needs).
+export * from "./timezone.js";
+
 export const CONTRACT_VERSION = "canonical-health-v2" as const;
 
 export const healthTypes = {

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { localCalendarFormatter } from "@rai/contracts";
 
 export const appNow = (): string => new Date().toISOString();
 
@@ -25,12 +26,7 @@ export function parseJson<T>(value: string | null | undefined, fallback: T): T {
 }
 
 export function localDateAt(instant: string, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date(instant));
+  const parts = localCalendarFormatter(timezone, "day").formatToParts(new Date(instant));
   const read = (type: Intl.DateTimeFormatPartTypes): string =>
     parts.find((part) => part.type === type)?.value ?? "00";
   return `${read("year")}-${read("month")}-${read("day")}`;
