@@ -18,7 +18,11 @@ import { importGpxRoutes } from "./gpx-parser.js";
 import { ImportRemovalGuardError } from "./import-guard.js";
 import { importEngine, nativeFallback, NATIVE_VERSION, type NativeOptions } from "./native-worker.js";
 import { stableId } from "./utils.js";
-import { acquireDatabasePublicationLock, publishDatabaseFile } from "@rai/storage-sqlite";
+import {
+  acquireDatabasePublicationLock,
+  probeDatabaseStructure,
+  publishDatabaseFile
+} from "@rai/storage-sqlite";
 
 /**
  * Reports a health-export sub-stage duration over the CLI's IPC channel.
@@ -188,12 +192,19 @@ async function activateStagingDatabase(
         }
       },
       moveFile: moveFileWithRetry,
-      validateInstalled: () => {
-        const installed = new DatabaseSync(target, { readOnly: true });
-        try {
-          return (installed.prepare("PRAGMA quick_check").get() as { quick_check?: string }).quick_check === "ok";
-        } finally { installed.close(); }
-      }
+      // 这里原本跑 `PRAGMA quick_check`：一次 506 MB 的全库扫描，真机冷态实测 12.1 s
+      // （热态 0.25 s，48×），而它就落在 `parseImport` 没有任何埋点的尾部。
+      // 换成结构探针的依据见 `@rai/storage-sqlite` 的 `probeDatabaseStructure` 文档：
+      // ① 交付的库是本进程刚写完的，发布后再全库扫描属于重复校验；
+      // ② 发布闸门（`import-worker.ts` 的 `activateDatabase`）仍保留一次 quick_check
+      //    兜底 —— 页内损坏会在那里被拦下并触发回滚。
+      validateInstalled: () => timedStage("validate_installed", () => {
+        const report = probeDatabaseStructure(target);
+        if (!report.readable) {
+          process.stderr.write(`Installed database failed the structure probe: ${report.reason}\n`);
+        }
+        return report.readable;
+      })
     });
   } catch (error) {
     if (hadTarget && existsSync(displaced)) {
@@ -230,19 +241,24 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     throw new Error(`Incremental import requires a cloned active database: ${args.database}`);
   }
   mkdirSync(dirname(args.database), { recursive: true });
-  const xmlPath = locateHealthXml(args.input);
+  const xmlPath = await timedStage("locate_health_xml", () => locateHealthXml(args.input));
   const xmlSize = statSync(xmlPath).size;
   const releaseImportLock = acquireImportLock(args.database);
   let stagingDatabase: string;
   try {
-    stagingDatabase = await prepareStagingDatabase(args.database, incremental);
+    // 增量导入先复制整份库（506 MB 实测 1.6–2.1 s）。这一段此前完全没有埋点，
+    // 是「`parseImport` 涨幅全在埋点之外」的另一半原因。
+    stagingDatabase = await timedStage(
+      "prepare_staging_copy",
+      () => prepareStagingDatabase(args.database, incremental)
+    );
   } catch (error) {
     releaseImportLock();
     throw error;
   }
   let store: RaiDatabase;
   try {
-    store = await RaiDatabase.open(stagingDatabase);
+    store = await timedStage("open_staging_store", () => RaiDatabase.open(stagingDatabase));
   } catch (error) {
     removeDatabaseFiles(stagingDatabase);
     releaseImportLock();
@@ -374,13 +390,20 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       auditSourceLabel(args)
     ));
 
-    store.close();
+    await timedStage("close_store", () => store.close());
     storeClosed = true;
     try {
-      activation = await activateStagingDatabase(stagingDatabase, args.database);
+      // 这一段（含 `validateInstalled` 的发布后校验）此前完全没有埋点 —— 冷态下
+      // page cache 被挤出后，它单独能占掉十几秒，全部计在 `parseImport` 头上。
+      activation = await timedStage(
+        "activate_staging",
+        () => activateStagingDatabase(stagingDatabase, args.database)
+      );
       activated = true;
-      stagedAudit.commit();
-      stagedAudit.finalize();
+      await timedStage("commit_audit_files", () => {
+        stagedAudit.commit();
+        stagedAudit.finalize();
+      });
     } catch (error) {
       stagedAudit.discard();
       if (activation) {

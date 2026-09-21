@@ -17,6 +17,7 @@ import {
   type StagedAuditFiles,
   NATIVE_VERSION,
 } from "@rai/health-export-parser";
+import { isStructurallyReadable } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
@@ -1193,7 +1194,12 @@ export class ImportWorker {
     }
 
     const originalExisted = existsSync(this.databasePath);
-    const originalReadable = originalExisted && this.isReadableDatabase(this.databasePath);
+    // 这里原本是 `isReadableDatabase`（一次 506 MB 的全库 `PRAGMA quick_check`，真机冷态
+    // 实测 12.1 s）。而在同一轮导入的 `createCurrentBackup` 里，对这份主库已经跑过一次；
+    // 且它的结果只用来决定「要不要 checkpoint」与回滚路径判断，不需要逐页校验。
+    // 发布后的那道强校验（`installDatabase` 之后的 `isReadableDatabase`）保持不动，
+    // 页内损坏仍会在那里被拦下并触发回滚。
+    const originalReadable = originalExisted && isStructurallyReadable(this.databasePath);
     if (originalExisted && !originalReadable) {
       this.onDatabaseError(new Error("Main database is corrupt or failed its integrity check"));
     }
