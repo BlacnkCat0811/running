@@ -664,3 +664,51 @@ await this.backupDatabase(currentDatabase, stagingBackupPath);   // ← 读全�
 + `enforceBackupPolicy()`，**现在主库损坏时也会跑一次**。已确认在飞的暂存库受 `maxAgeMs` 保护、不会被误删；
 实际效果是"多一次回收孤儿副本的机会"（`maintenance.ts:642` 的注释写明它本来就可以从多处驱动）。
 
+### 14.6 部署实录（2026-09-21 22:11 CST）
+
+线上 HEAD `1a72207` → **`48c9ede`**。部署范围只有 `apps/api/src` + `apps/api/test` + `deliverables/`
+⇒ **`pull` + `restart`，无 build、无迁移、无 Rust 重编译**。
+
+| 项 | 读数 |
+| :--- | :--- |
+| 迁移闸门（restart 前） | `version: 22` / **`pending: []`**；counts workouts 276 / route_points 113870 / health_records 122369 |
+| 部署前备份 | `rai.manual.2026-09-21T14-11-01-674Z.46ebdc68.sqlite`（530,530,304 B）；部署后**回头确认仍在** ✅ |
+| unit 一致性 | `INSTALLED_EQ_REPO true` / `HAS_EXIT78 true`（本批未改 `deploy/`，无需同步） |
+| 停机 | 22:11:33 停 → 22:11:36 `Server listening` ⇒ **约 3 s** |
+| 重启后状态 | `active` / `NRestarts=0` / `MainPID=2530529` |
+| 启动日志 | `RAI local API ready`；**无迁移报错**；`publicReadHosts:["tpandmr.xyz","101.33.202.40"]` / `publicReadRoutes:26` / `tokenRequiredReadRoutes:12` |
+| **引擎生效**（读运行进程的 `/proc/2530529/environ`） | `RAI_IMPORT_ENGINE=rust` + `RAI_RUST_FALLBACK=typescript` + `RAI_RUST_BINARY=/opt/rai-native/rai-data-worker` |
+| 端点 | 匿名 `https://tpandmr.xyz/v1/health` **200** + `status:"ok"` + `databaseReady:true`；本机 `127.0.0.1` 匿名 **401**（Host 不在白名单，**符合预期**）；`/v1/data-summary` → **`issues: []`**，counts 与迁移闸门一致 |
+
+### 14.7 🔴 部署后受控实测：A/B 直接量出收益（云机真机、506 MB、`drop_caches` 造冷）
+
+单测只证明「顺序对了」，**证明不了「这个顺序值 12 s」** —— 而这两者之间的间隔正是本次改动的全部赌注。
+所以在云机上拿真库的**只读副本**做了新旧顺序的 A/B：同一份 506 MB 数据，每轮都先 `drop_caches` 清页缓存。
+
+| 顺序 | `quick_check` | `backup` | 合计 |
+| :--- | ---: | ---: | ---: |
+| **旧**（qc → backup） | **12,835 ms**（冷） | 1,569 ms | **14,405 ms** |
+| **新**（backup → qc） | **276 ms**（热） | 1,808 ms | **2,083 ms** |
+| **差** | **46.5×** | +239 ms | **−12,322 ms（−85.5%）** |
+
+**两条「产物没变坏」的附带证据**：
+
+| 判据 | 读数 |
+| :--- | :--- |
+| 两个顺序各自产出的备份文件 | MD5 **完全相同**（`97befe0be5dc1c70abaf5e5ad10f62f4`），同为 530,530,304 B |
+| 新顺序产物的完整性 | `PRAGMA quick_check` → **`ok`** |
+
+⇒ **收益兑现，且备份产物逐字节不变**。`backup()` 那 +239 ms 落在噪声里（占总量 1.7%）。
+实测的 12,322 ms 与 §13.3 的预估模型（12 s 冷 qc − 0.26 s 热 qc ≈ 11.7 s）**误差 5%**
+⇒ 那套「冷态是 I/O 等待、热态只剩 CPU」的机理判断成立，不是巧合。
+
+### 14.8 还没拿到的最后一个读数：**下一次真实导入的 `stagesMs.backup`**
+
+部署完成时读到的 `importJob` 是 **`2026-09-21T13:42:13Z`（CST 21:42）** —— 本次部署**之前**的快照
+（那次 `stagesMs.backup` = 3,075 ms，恰好是热态）。按既有纪律这个数字**不能**用来判本次改动。
+最终判据是小唐下一次上传 Apple Health 导出后，该次导入的 `stagesMs.backup` 是否落进 **5 s** 以内
+（对照 §13.2 的 热 3,075 ms / 冷 21,479 ms）。
+
+**回滚**（若判据未兑现）：`git revert 48c9ede`（或 `b1bb84a`）+ `systemctl restart rai-api`，单文件、无迁移。
+
+
