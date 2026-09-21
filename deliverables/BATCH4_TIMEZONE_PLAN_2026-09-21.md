@@ -200,3 +200,84 @@ export function localDateTimeAt(value: string, timezone = DATABASE_TIMEZONE): st
 
 - `apps/web/src/format.ts:55/:64` —— 待前端时区口径（(a) 或另议）确定后再动；
   `timezone-convergence.test.ts` 已**显式排除** `apps/web/src` 并注明原因，避免它变成假绿。
+
+---
+
+## 9. ✅ 部署实录（2026-09-21 17:15 CST）
+
+线上 `7d5298b` → **`5a44413`**（4 个 commit：本方案 + 提交 A + 提交 B + 文档回填）。
+
+### 闸门核对（决定动作）
+
+`git diff --name-only 7d5298b..HEAD` 全量 27 文件，按目录归类：
+
+| 路径 | 命中 | 结论 |
+| :--- | ---: | :--- |
+| `crates/**` | **0** | 🔴 **闸门 0 不触发** ⇒ 不重编译 Rust 二进制 |
+| `apps/web/**` | **0** | 跳过 web 构建 |
+| `package*.json` | **0** | 跳过 `npm ci` |
+| `deploy/**` | **0** | 无需同步 unit / env / nginx |
+| 新增迁移 | **0** | 预期 `pending: []` |
+
+⇒ **最小部署 = `git pull` + `systemctl restart rai-api`。**
+
+### 实测
+
+| 步骤 | 结果 |
+| :--- | :--- |
+| 部署前空闲确认 | `busy:false`、`pgrep` 无 `health-export-parser` / `rai-data-worker` |
+| 备份 | `rai.manual.2026-09-21T09-15-07-998Z.babdf99e.sqlite`（530,530,304 B）；部署后**确认仍在** |
+| 迁移 dry-run | `version 22` / **`pending: []`** / `health_records 114159`、`route_points 110840` |
+| unit | `INSTALLED_EQ_REPO true` / `HAS_EXIT78 true` / `HAS_STARTLIMIT true` |
+| pull | `5a44413`；工作树只剩 `?? .npm/` `?? .npmrc` |
+| 重启 | `17:15:34` 停 → `17:15:36` listening ⇒ **停机 ≈2 s**；`ACTIVE=active`、`NRestarts=0`、`RAI local API ready` |
+| 启动日志 | `publicReadRoutes:26` / `tokenRequiredReadRoutes:12` / `publicReadHosts:["tpandmr.xyz","101.33.202.40"]` |
+| 服务验收 | 匿名 `/v1/health` **200**（`status:ok` + `databaseReady:true`）；`/v1/data-summary` 200 且 **`issues: []`**；`/`·`/settings` 200 |
+| 引擎 | 进程 environ `RAI_IMPORT_ENGINE=rust` + `RAI_RUST_FALLBACK=typescript` + `RAI_RUST_BINARY=/opt/rai-native/rai-data-worker`，**无 `RAI_IMPORT_VALIDATION_MODE`** |
+| 收尾 | 无 `rai-data-worker` 残留；磁盘 34%；备份 14 份 / 7.0 G |
+
+🔴 **`crates/**` 零改动仍跑了 Rust 契约测试**（判据是 `0 skipped`，不是 `8 pass`）：
+
+```sh
+cd /opt/rai && RAI_REQUIRE_RUST_TESTS=1 RAI_RUST_BINARY=/opt/rai-native/rai-data-worker \
+  timeout 240 node --import tsx --test packages/health-export-parser/test/native-worker.test.ts
+# → 8 tests / 8 pass / 0 fail / 0 skipped / NT_EXIT=0
+```
+
+⇒ 线上二进制与 TS 契约对齐，**B1 在线**。
+
+### 🔴 本方案原定的验收里漏了一处：逐字节比对**不覆盖 API 读路径**
+
+§8 的逐字节比对跑的是 `data:recompute` 管线，而本批另改了**三处 API 读路径**的内联 formatter
+（`apps/api/src/data.ts:85`、`mobile-read.ts:627`、`server.ts:631`）——管线比对**证明不了**它们的等价性。
+补两步：
+
+① **静态**：`localCalendarFieldOptions.day` = `{ year:"numeric", month:"2-digit", day:"2-digit" }` + locale `en-CA`
+（`timezone.ts:52`），与被替换的三处内联写法**逐字段完全相同** ⇒ 输出字节一致。
+
+② **动态**（真端点，专门防 off-by-one）：
+
+| 端点字段 | 实测 |
+| :--- | :--- |
+| `/v1/mobile/today` → `timezone` | `Asia/Shanghai` |
+| `coverage.sleep.latestDate` / `.hrv.latestDate` / `.restingHeartRate.latestDate` | 均 `2026-09-21` |
+| `freshness.recoveryDate` / `recoveryAssessment.targetDate` / `.lastObservationDate` | 均 `2026-09-21` |
+| `/v1/trends?days=5` → `endDate` | `2026-09-21`（= CST 当天） |
+
+⇒ **无日期漂移。**
+
+### 性能收益尚未兑现（需下一次真实导入）
+
+`runtime-status` 的 `performance` 是**"最近一次导入"的快照**，此刻仍指向 `7d5298b` 那版代码跑出的
+`importJob.createdAt = 2026-09-21T07:56:15Z`。**部署前基线**：
+
+| 阶段 | `7d5298b` |
+| :--- | ---: |
+| `totalMs` | 66416.7 |
+| `parseImport` | 11899.6 |
+| **`recompute`** | **13002.7** ← 本批目标 |
+| `activation` | 22880.7 |
+| `backup` | 15831.7 |
+
+⚠️ §8 记的 `52.7 s → 33.2 s` 是**本机**副产品，**不可外推**。线上收益必须等下次真实导入后的
+`importJob.performance.stagesMs.recompute` 与上表对比。
