@@ -144,23 +144,23 @@ install -m 0755 target/release/rai-data-worker /opt/rai-native/rai-data-worker
 
 ```text
 RAI_IMPORT_ENGINE=typescript
-RAI_IMPORT_VALIDATION_MODE=shadow
 RAI_RUST_FALLBACK=none
 ```
 
-副本对照通过后，在 `/etc/rai/rai.env` 设置下面 4 行 —— **必须同批写入，缺一不可**：
+在生产启用 Rust 数据引擎时，在 `/etc/rai/rai.env` 设置下面 3 行 —— **必须同批写入，缺一不可**：
 
 ```text
 RAI_IMPORT_ENGINE=rust
-RAI_IMPORT_VALIDATION_MODE=shadow
 RAI_RUST_FALLBACK=typescript
 RAI_RUST_BINARY=/opt/rai-native/rai-data-worker
 ```
 
-⚠️ **线上当前实际值是 `RAI_IMPORT_VALIDATION_MODE=off`**（2026-09-19 14:16 用户决策，
-代价数据见「已测到的结果及其限制」）。本配方与 `deploy/rai.env.example` 保留 `shadow` 作为**推荐默认** ——
-该行被 `apps/api/test/deploy-cloud.test.ts:21` 整行钉住，且它是更安全的姿态。
-⇒ 仓库模板（`shadow`）与线上覆盖值（`off`）**有意不一致**，这是允许的；改模板才需同步改测试。
+> **决策记录（2026-09-20，小唐）**：`RAI_IMPORT_VALIDATION_MODE` **已彻底移除**。
+> 影子对照（跑第二遍完整重算再与候选比对）不再存在——`runShadowValidation` / `compareRunOutputs`
+> 已从代码删除，**没有"临时开回"这个选项了**。
+> 删掉的只是"额外跑一遍"；**模型激活的版本闸门不受影响，始终启用**（那是另一套机制，其错误文案
+> 从 `Shadow model gate failed` 改为 `Model-version gate failed`，以免继续被混为一谈）。
+> 替代防线见 `deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` §3。
 
 🔴 **生产用 `RAI_RUST_FALLBACK=typescript`，不要照抄上面「默认」块里的 `none`。**
 回退条件是有界的（`native-worker.ts:173`）：只在 `unavailable` 或 `unsupported_xml`
@@ -213,6 +213,53 @@ root 能跑不代表 `rai` 能跑，这能消掉"目录不可进入 / 属主不�
 带实体定义的 DTD、非标准 GPX 日期等可能需要显式参考路径。
 普通 Apple Health 的无实体 DTD 支持。非法 GPX 仍使用既有 `INVALID_GPX` 策略，
 但执行器崩溃或资源不足不能被伪装成“坏路线”而静默丢数据。
+
+## 运行时写路径不变量（B1–B5）
+
+影子对照删除后，写路径的自动防线由五项不变量承担（设计依据见
+`deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` §3）。四项在
+`packages/health-export-parser/src/native-record-writer.ts`，全部只读派生、不改契约：
+
+| # | 断言 | 违反时 |
+|---|---|---|
+| **B1** | Rust 回传 `canonicalDigest` = `sha256("{序号}|{id}|{content_hash}\n")` 逐行折叠；TS 侧 `capture()` 同一公式累计。序号 1-based 两侧都无空洞（**不用 `sequence`**，Rust 的 SELECT 不取它） | 抛错，导入失败 |
+| **B2** | `import_entity_generations`（`entity_kind='record'`，本 generation）行数 **不得多于** `observed − tombstoned`；且 `inserted`/`tombstoned` 不得大于 `observed`。刻意用不等式：同一 id 重复出现时合法地产生更少行（`apple-health-parser.ts`） | 写 `import_issues` 的 `invariant.b2.*`，**不阻断** |
+| **B3** | **仅增量批次**：原地重跑一次 `apply-records`（重跑前重新签发 permit）：`observed` 与摘要必须与首遍一致、`import_entity_changes` 增量为 0、`inserted` 必须为 0。`--replace` **不跑**（理由见下） | 抛错，导入失败 |
+| **B4** | 从 canonical 中转**取尾部** 64 行、按 id 去重后逐列比对候选库实际落盘的行（13 列含 `metadata_json` / `raw_attributes_json`），并校验 generation 台账行存在 | 抛错，导入失败 |
+| **B5** | `importEquivalence`：① 排序键改按**主键**（原字母序列名对 `health_records` 首排 `created_at`，**同值行的顺序未定义** ⇒ 数据相同的两侧也可能 hash 不同；主键打头使顺序成为全序）——**这是正确性修复，不是提速**；② 域清单补 `import_entity_changes` / `route_file_fingerprints` | 离线工具，不参与导入 |
+
+🔴 **B3 只在增量批次运行（2026-09-21 更正）**：`--replace` 下 B3 **没有信号可给**，而重放会**重写全部行**：
+① `tombstoned` 是读取侧计数，两遍必然相同；② `inserted` 计的是 worker **写**了多少行，而 `--replace` 下
+worker 对每行都重写（`if !incremental || !exists || updated`）⇒ 第二遍合法地等于全行数；
+③ 无 batch id 时 Rust 侧 `if let Some(batch)` **根本不写 change 台账** ⇒ 增量为 `0 === 0`。
+⇒ 剩下的 `observed` 与摘要都是**输入侧**性质，B1 已经证过。原注释称台账增量是 "mode-independent assertion"，
+**该说法不成立**。实测（探针）：`--replace` 只有一遍 `apply`，增量批次为 `first` + `replay` 两遍。
+
+⚠️ **B5 的耗时变化曾被误记为一次提速（2026-09-21 更正）**：早期注释与方案文档写的是
+"实测 21.7 s → 3.0 s（约 6×）"。**该数字不成立** —— 受控探针（本机 324 MB 库、预热缓存、3 轮中位数、
+隔离排序键单一变量）得 OLD（字母序列名）**5,790 ms** → NEW（主键优先）**6,919 ms**，即**慢约 19%**。
+"21.7 s" 来自**冷缓存首跑**（实测 21,708 ms），"3.0 s" 冷热条件下都不出现 ⇒ 是跨条件拼接的结果。
+分表：`route_points`(204k 行) **−20%（唯一改善）**；`import_entity_changes` **+82%**；
+`import_entity_generations` **+101%**。**根因**：`ORDER BY` 以主键（有索引的列）打头，SQLite 于是选择该索引，
+但索引的次级序与完整 `ORDER BY` 不匹配 ⇒ 执行计划变成「索引扫描 + 回表 + 排序」，比「全表扫描 + 排序」更贵。
+叠加域清单 20 → 22（多两张 ~83k 行表，约 +1.9 s）后，**工具整体比改动前更慢，不是更快**。
+⇒ 判据：**删除或校验"性能声称"必须与功能改动分开测，且必须同条件对照**（同一缓存状态、同一域清单）。
+
+🔴 **两条"看着可以简化、实则会把正常导入判死"的约束**，改 B3/B4 前必须读：
+
+- **B3 不得断言 `tombstoned === 0`。** `tombstoned` 是**读取侧**计数：被墓碑的行两遍都会被跳过，值必然相同。
+  断言为 0 会在"载荷重新引入一条曾被删除的记录"这个**合法输入**上失败。只有 `inserted`（真正写入的行数）才承载幂等语义。
+- **B4 必须取尾部并按 id 去重，且不得改用头部采样。** 记录 id 由
+  `[type, sourceName, startAt, endAt, value, unit]` 派生，**刻意不含 `device`**
+  （`apple-health-parser.ts:191`：Apple 会把同一采样分别"带 device / 不带 device"导出两次）⇒ 同一 id 在一个中转里
+  可以出现多次，而 upsert 保留**最后一次**。取头部（或保留重复行）会拿被覆盖的旧行去比对，报出
+  `<id>.device` 假分歧并**让导入失败**。窗口取尾部时，晚于窗口起点的出现必然仍在窗口内，故 `DESC` 顺序下
+  某 id 首次出现即其**全局最后一次写入**。回归用例：
+  `packages/health-export-parser/test/native-worker.test.ts` 的
+  "a record id carried twice keeps the last occurrence…"。
+
+B1 对**旧二进制**是**容忍**的（缺 `canonicalDigest` 不报错，只写一条 `invariant.b1.digest_unavailable` 警告）：
+把部署顺序错误变成导入中断是更坏的选择。**摘要存在但格式非法**（非 64 位小写 hex）仍按协议违规处理。
 
 ## 资源与协议
 
@@ -307,14 +354,21 @@ Rust 子进程峰值 RSS 只有 15–31 MiB（流式解码 + 只写候选库的�
 真实导入的阶段分布：`parseImport` 26.5s、`recompute` 31.4s（内含 shadow 18.3s）、
 `activation` 4.3s、`backup` 1.9s、`stagingCopy` 1.8s。重算进程峰值 RSS 约 300 MiB。
 
-🔴 **已于 2026-09-19 14:16 关闭（`RAI_IMPORT_VALIDATION_MODE=off`），换回那 27% 耗时。**
-必须说清这个交换的代价：**上表那次"Rust 与 TS 投影一致"的验证是历史证据，今后不会再自动产生。**
-关掉后剩下的保护只有：候选库机制（Rust 仍只写私有候选库）、`native-worker.ts:145-163` 的协议级校验
-（行数 / sha256 / metadata 自洽）、以及 `fallback=typescript`。
-⚠️ **协议级校验只能证明"Rust 报的行数等于它写进候选库的行数"，不能证明语义正确** ——
-比如原生爬升聚合少算某一段，关掉 shadow 后**没有任何自动机制会报警**。
-⇒ 因此 `GET /v1/data-summary` 的 `issues: []` 与 `counts` 变化，从一个"附加核对"变成了**主要防线**，值得每次导入后扫一眼。
-⇒ 建议：**下次做多月份一次性全量导入时临时开回 `shadow` 跑一轮**，确认全量路径下投影仍一致。
+🔴 **2026-09-20 决策：影子对照已从代码中彻底删除**（比 09-19 14:16 的 `off` 配置更彻底）。
+该变量、`runShadowValidation`、`compareRunOutputs` 均已不存在 ⇒ **"临时开回 shadow"已不可执行**。
+**这个交换的代价必须说清**：上表那次"Rust 与 TS 投影一致"的验证是**历史证据**，今后不会再自动产生。
+删除后剩下的保护只有：候选库机制（Rust 仍只写私有候选库）、协议级校验、以及 `fallback=typescript`。
+
+⚠️ **协议级校验有一个必须知道的空洞：它不覆盖 `apply-records`。**
+`crates/rai-data-worker/src/main.rs` 对该 operation 返回 `rows: 0`；而 `native-worker.ts:161-163`
+比对的是 spool 里的 `route_aggregates`——`apply-records` 写的是 `--staging-database` 指定的候选库，
+**从不写那张表** ⇒ 比较退化成 `0 === 0`，**恒真**。
+即：**真正改数据的那个 operation，今天没有任何内容级或行数级的断言。**
+（行数 / sha256 / metadata 自洽只覆盖 `health`、`gpx` 两条只读解码路径。）
+
+⇒ 因此 `GET /v1/data-summary` 的 `issues: []` 与 `counts` 变化，是当前**主要防线**，值得每次导入后扫一眼。
+⇒ 写路径的自动化不变量（输入流摘要 / 输出守恒 / 幂等重放 / 抽样重派生）见
+`deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` §3，按该文 §5 的批次上线。
 
 ## 本地交付检查
 

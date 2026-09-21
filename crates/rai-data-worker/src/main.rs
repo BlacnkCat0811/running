@@ -546,9 +546,17 @@ fn apply_records(input: &Path, target: &Path, permit: &str) -> Result<Value> {
         let mut tombstoned = 0u64;
         let mut observed = 0u64;
         let mut since_commit = 0u32;
+        // B1 (runtime invariant): digest of the inputs exactly as this loop READS
+        // them, updated before any tombstone/upsert decision. The TS side
+        // (`NativeRecordWriter.capture()`) folds the same sequence over every row it
+        // wrote into `canonical_records`; a mismatch means this process did not
+        // consume the canonical rows the parent produced (skipped/duplicated/reordered).
+        let mut digest = Sha256::new();
         while let Some(row) = rows.next()? {
             observed += 1;
             let id: String = row.get(0)?;
+            let hash: String = row.get(14)?;
+            digest.update(format!("{}|{}|{}\n", observed, id, hash).as_bytes());
             if tombstone.exists([&id])? {
                 tombstoned += 1;
                 continue;
@@ -556,7 +564,6 @@ fn apply_records(input: &Path, target: &Path, permit: &str) -> Result<Value> {
             let exists = existing.exists([&id])?;
             use rusqlite::OptionalExtension;
             let previous: Option<String> = old_hash.query_row([&id], |r| r.get(0)).optional()?;
-            let hash: String = row.get(14)?;
             let at: String = row.get(9)?;
             let updated = exists
                 && previous
@@ -596,7 +603,8 @@ fn apply_records(input: &Path, target: &Path, permit: &str) -> Result<Value> {
             [],
         )?;
         Ok(
-            json!({"rows":0,"insertedRecords":inserted,"tombstonedRecords":tombstoned,"observedRecords":observed}),
+            json!({"rows":0,"insertedRecords":inserted,"tombstonedRecords":tombstoned,
+                "observedRecords":observed,"canonicalDigest":format!("{:x}", digest.finalize())}),
         )
     })();
     match operation {

@@ -18,6 +18,12 @@ export interface NativeOptions {
   signal?: AbortSignal;
   /** Set only by the import CLI for its isolated candidate, never the active DB. */
   stagingDatabase?: string;
+  /**
+   * `"replay"` marks the B3 idempotence re-run. It is deliberately excluded from the
+   * `rai:native-engine` metrics so the reported `rustCalls` / `wallMs` keep describing
+   * the real import rather than an internal self-check that doubles the call count.
+   */
+  purpose?: "replay";
   permit?: string;
 }
 export interface NativeMetrics {
@@ -42,6 +48,8 @@ interface NativeResult {
   insertedRecords?: number;
   tombstonedRecords?: number;
   observedRecords?: number;
+  /** B1: sha256 over `"{n}|{id}|{content_hash}\n"` for every canonical row READ. */
+  canonicalDigest?: string;
 }
 
 export function importEngine(value = process.env.RAI_IMPORT_ENGINE ?? "typescript"): ImportEngine {
@@ -153,6 +161,14 @@ export async function prepareNative(
     }
     if (operation === "apply-records" && [result.insertedRecords, result.tombstonedRecords, result.observedRecords]
       .some((value) => !Number.isSafeInteger(value) || value! < 0)) throw new NativeWorkerError("invalid_protocol");
+    // B1: `canonicalDigest` is deliberately absent-tolerant. A worker built before the
+    // invariant existed must NOT brick the import queue — that would turn a
+    // deploy-order mistake into an outage. The parent records the missing digest as an
+    // issue instead. A digest that is PRESENT but malformed is a protocol violation.
+    if (operation === "apply-records" && result.canonicalDigest !== undefined
+      && !/^[a-f0-9]{64}$/.test(result.canonicalDigest)) {
+      throw new NativeWorkerError("invalid_protocol");
+    }
     spool = new NativeSpool(directory, result);
     const metadata = spool.database.prepare("SELECT payload FROM worker_metadata WHERE id=1").get() as { payload: string } | undefined;
     if (!metadata || JSON.stringify(JSON.parse(metadata.payload)) !== JSON.stringify(result)) {
@@ -161,8 +177,10 @@ export async function prepareNative(
     const table = operation === "health" ? "xml_units" : operation === "gpx" ? "gpx_points" : "route_aggregates";
     const count = spool.database.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
     if (count.n !== result.rows) throw new NativeWorkerError("invalid_protocol");
-    report({ operation, requested: "rust", actual: "rust", version: result.version,
-      durationMs: performance.now() - started, peakRssKiB: result.peakRssKiB });
+    if (options.purpose !== "replay") {
+      report({ operation, requested: "rust", actual: "rust", version: result.version,
+        durationMs: performance.now() - started, peakRssKiB: result.peakRssKiB });
+    }
     return spool;
   } catch (error) {
     if (spool) spool.database.close();

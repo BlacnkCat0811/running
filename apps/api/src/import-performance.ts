@@ -1,18 +1,5 @@
 import type { ImportJobPerformance, ImportStage } from "@rai/api-contracts";
 
-export type ImportValidationMode = "shadow" | "off";
-
-/** Never silently disable validation because of a typo in production config. */
-export function importValidationModeFromEnvironment(
-  env: NodeJS.ProcessEnv = process.env
-): ImportValidationMode {
-  const value = env.RAI_IMPORT_VALIDATION_MODE?.trim() || "shadow";
-  if (value !== "shadow" && value !== "off") {
-    throw new Error("RAI_IMPORT_VALIDATION_MODE must be shadow or off");
-  }
-  return value;
-}
-
 /** Monotonic wall time, including child execution; never includes health data. */
 export class ImportPerformanceTracker {
   private readonly startedAt: number;

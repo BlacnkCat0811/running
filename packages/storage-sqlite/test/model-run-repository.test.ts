@@ -155,7 +155,7 @@ test("activates only succeeded model runs with a succeeded training metric run",
   }
 });
 
-test("persists a failed shadow gate and rejects activation without replacing incumbent", () => {
+test("persists a failed model-version gate and rejects activation without replacing incumbent", () => {
   const database = createDatabase();
   try {
     insertModelRun(database, "base", "succeeded");
@@ -178,7 +178,7 @@ test("persists a failed shadow gate and rejects activation without replacing inc
     const gate = repository.evaluateValidationGate("candidate", "base");
     assert.equal(gate.status, "failed");
     assert.ok(gate.failureReasons.includes("current_ability_mean_absolute_delta"));
-    assert.throws(() => repository.activateSucceeded("candidate", "2026-07-17T10:07:00.000Z"), /shadow validation gate/);
+    assert.throws(() => repository.activateSucceeded("candidate", "2026-07-17T10:07:00.000Z"), /model-version gate/);
     assert.equal(repository.activeSummary()?.id, "base");
   } finally {
     database.close();

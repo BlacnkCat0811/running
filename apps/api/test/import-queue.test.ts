@@ -23,7 +23,7 @@ function fixture() {
   const mutations = new MutationCoordinator();
   const scheduler = new TaskAdmissionScheduler(mutations);
   const state = new RuntimeStateStore(root);
-  const worker = () => new ImportWorker(join(root, "rai.sqlite"), root, root, undefined, undefined, undefined, "shadow", {
+  const worker = () => new ImportWorker(join(root, "rai.sqlite"), root, root, undefined, undefined, undefined, {
     scope: "fixture", maxPending: 2, admission: scheduler.owner("import")
   });
   return { root, input, mutations, state, worker };
@@ -93,7 +93,7 @@ test("running work restarts at safe boundary, but a different dataset scope is n
     assert.equal(resumed.get("interrupted")?.status, "queued");
     assert.equal(f.state.jobs().find((job) => job.id === "interrupted")?.preserveAbsent, true);
     await resumed.close();
-    const other = new ImportWorker(join(f.root, "rai.sqlite"), f.root, f.root, undefined, undefined, undefined, "shadow", {
+    const other = new ImportWorker(join(f.root, "rai.sqlite"), f.root, f.root, undefined, undefined, undefined, {
       scope: "other-dataset", admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
     });
     assert.equal(other.get("interrupted")?.status, "failed");

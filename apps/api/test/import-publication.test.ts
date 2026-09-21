@@ -45,7 +45,7 @@ for (const committed of [false, true]) {
       recovered.recover();
       assert.equal(Boolean(readImportReceipt(main, "job")), committed);
       if (committed) {
-        const worker = new ImportWorker(main, root, root, undefined, undefined, undefined, "shadow", {
+        const worker = new ImportWorker(main, root, root, undefined, undefined, undefined, {
           scope: "fixture", admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
         });
         assert.equal(worker.get("job")?.status, "succeeded");
@@ -150,7 +150,7 @@ test("committed imports remain pending through failed cleanup and restart until 
   });
   let attempts = 0;
   const create = (fail: boolean) => new ImportWorker(main, root, root,
-    undefined, undefined, undefined, "shadow", {
+    undefined, undefined, undefined, {
       scope: "fixture", admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import"),
       onTerminal: async () => {
         attempts++;

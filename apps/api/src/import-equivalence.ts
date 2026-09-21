@@ -12,6 +12,17 @@ export function importEquivalence(path: string): Record<string, { rows: number; 
     import_entity_generations: ["generation"],
     import_entity_tombstones: ["batch_id", "deleted_at"],
     import_source_tombstones: ["batch_id", "deleted_at"],
+    // The change ledger is what the downstream recompute plan reads, so a comparison
+    // that omits it cannot see a whole class of divergence. `batch_id` is ignored
+    // because it changes on every import by construction.
+    import_entity_changes: ["batch_id"],
+    // Verified against the live 325 MB database (45 tables): the other uncovered tables
+    // are either recompute/model output, user overrides (`workout_overrides`), or batch
+    // provenance (`import_batches` / `import_batch_files` / `import_issues`). This one is
+    // an import product written by the GPX path (`route_id` is a JS-generated stable id)
+    // and pruned by `pruneOrphanRoutes`, so it belongs in the comparison. `imported_at` is
+    // wall-clock.
+    route_file_fingerprints: ["imported_at"],
     canonical_nights: ["created_at", "updated_at"],
     canonical_hrv_days: ["created_at", "updated_at"],
     active_ability_assessments: volatile, active_daily_ability_snapshots: volatile,
@@ -21,13 +32,34 @@ export function importEquivalence(path: string): Record<string, { rows: number; 
   try {
     const results: Record<string, { rows: number; sha256: string }> = {};
     for (const [table, ignored] of Object.entries(domains)) {
-      const columns = (db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[])
-        .map((row) => row.name).filter((name) => !ignored.includes(name)).sort();
+      const info = db.prepare(`PRAGMA table_info("${table}")`).all() as { name: string; pk: number }[];
+      const columns = info.map((row) => row.name).filter((name) => !ignored.includes(name));
       if (!columns.length) continue;
-      const select = columns.map((name) => `"${name.replaceAll('"', '""')}"`).join(",");
+      const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
+      const select = columns.map(quote).join(",");
+      // Order by the table's primary key first, then by the remaining selected columns.
+      // The previous code sorted column NAMES alphabetically, which led with a
+      // non-unique column for wide tables (`health_records` opened on `created_at`)
+      // and left row order undefined whenever those values tied — two engines holding
+      // identical data could then hash differently. Leading with the primary key makes
+      // the order total. That is the reason for this change.
+      //
+      // It is a CORRECTNESS fix, NOT a speed-up. Measured on the local 324 MB database
+      // (warm cache, 3-round median), the new ORDER BY is ~19% SLOWER overall
+      // (5,790 ms -> 6,919 ms): leading with an indexed column makes SQLite choose that
+      // index, whose secondary order does not match the full ORDER BY, so the plan
+      // becomes index scan + row lookups + sort instead of a plain scan + sort.
+      // `route_points` does improve (~-20%), but `import_entity_changes` regresses ~+82%
+      // and `import_entity_generations` ~+101%. The domain list also gained two ~83k-row
+      // tables, so the tool as a whole is slower than before, not faster.
+      // NOTE: this changes every hash, so previously recorded baselines are void.
+      const orderBy = [
+        ...info.filter((row) => row.pk > 0).sort((a, b) => a.pk - b.pk).map((row) => row.name),
+        ...columns
+      ].map(quote).join(",");
       const hash = createHash("sha256");
       let rows = 0;
-      for (const row of db.prepare(`SELECT ${select} FROM "${table}" ORDER BY ${select}`).iterate()) {
+      for (const row of db.prepare(`SELECT ${select} FROM "${table}" ORDER BY ${orderBy}`).iterate()) {
         hash.update(JSON.stringify(row)); hash.update("\n"); rows++;
       }
       results[table] = { rows, sha256: hash.digest("hex") };

@@ -28,7 +28,6 @@ async function main(): Promise<void> {
   const evaluatedAt = optionValue(args, "--evaluated-at", new Date().toISOString());
   const timezoneIdentifier = optionValue(args, "--timezone", "Asia/Shanghai");
   const dirtyFromAt = optionValue(args, "--dirty-from", "");
-  const validationMode = args.includes("--shadow-validate") ? "shadow" as const : "off" as const;
   const elevationGains = await nativeElevationGains(databasePath, {
     spoolRoot: resolve(optionValue(args, "--native-spool-root", dirname(databasePath))),
     engine: importEngine(optionValue(args, "--engine", "typescript")),
@@ -48,8 +47,8 @@ async function main(): Promise<void> {
       : null;
     const jobId = command === "recompute"
       ? incrementalPlan
-        ? service.enqueueIncrementalRecompute(incrementalPlan, { evaluatedAt, timezoneIdentifier, validationMode })
-        : service.enqueueFullRecompute({ evaluatedAt, timezoneIdentifier, validationMode })
+        ? service.enqueueIncrementalRecompute(incrementalPlan, { evaluatedAt, timezoneIdentifier })
+        : service.enqueueFullRecompute({ evaluatedAt, timezoneIdentifier })
       : service.enqueueSnapshotRefresh({ evaluatedAt, timezoneIdentifier });
     if (jobId === null) throw new Error("Incremental recompute unexpectedly produced no task");
     const completed = service.runNextJob();

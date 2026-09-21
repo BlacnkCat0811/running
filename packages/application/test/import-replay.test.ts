@@ -133,8 +133,7 @@ test("imports a small Health fixture and replays features, CA/TA, and daily snap
       reasons: ["workout_or_route_change"]
     }, {
       evaluatedAt: "2026-01-25T04:00:00.000Z",
-      timezoneIdentifier: "Asia/Shanghai",
-      validationMode: "shadow"
+      timezoneIdentifier: "Asia/Shanghai"
     });
     assert.ok(checkpointJobId);
     assert.equal(service.runNextJob()?.status, "succeeded");
@@ -149,40 +148,10 @@ test("imports a small Health fixture and replays features, CA/TA, and daily snap
     assert.ok(checkpointRun.parentId);
     assert.equal(checkpointRun.reusedAssessments, 6);
     assert.equal(checkpointRun.reusedFeatures, 6);
-    const validation = store.database.prepare(`
-      SELECT status, hashes_json AS hashesJson FROM recompute_validations WHERE job_id = ?
-    `).get(checkpointJobId) as unknown as { status: string; hashesJson: string };
-    assert.equal(validation.status, "matched");
-    assert.deepEqual(Object.keys(JSON.parse(validation.hashesJson)).sort(), [
-      "assessments", "dailyTrainingMetrics", "dailyZoneProfiles", "features", "snapshots",
-      "workoutTrainingLoads", "workoutZoneSummaries"
-    ]);
-
-    const activeBeforeMismatch = store.database.prepare(
-      "SELECT model_run_id AS id FROM active_model_run WHERE singleton = 1"
-    ).get() as unknown as { id: string };
-    store.database.prepare(`
-      UPDATE ability_assessments SET confidence = confidence + 0.01
-      WHERE model_run_id = ? AND sequence_number = 0
-    `).run(activeBeforeMismatch.id);
-    store.setManifest("dataset_version", "dataset_shadow_mismatch_fixture");
-    store.flush();
-    const mismatchJobId = service.enqueueIncrementalRecompute({
-      mode: "partial", dirtySessionIds: [], dirtyFromAt: "2026-01-18T00:00:00.000Z",
-      reasons: ["workout_or_route_change"]
-    }, {
-      evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai",
-      validationMode: "shadow"
-    });
-    assert.ok(mismatchJobId);
-    const mismatchJob = service.runNextJob();
-    assert.equal(mismatchJob?.status, "failed");
-    assert.equal((store.database.prepare(
-      "SELECT model_run_id AS id FROM active_model_run WHERE singleton = 1"
-    ).get() as unknown as { id: string }).id, activeBeforeMismatch.id);
-    assert.equal((store.database.prepare(
-      "SELECT status FROM recompute_validations WHERE job_id = ?"
-    ).get(mismatchJobId) as unknown as { status: string }).status, "mismatched");
+    // (2026-09-20) The candidate/reference ("shadow") replay comparison was removed
+    // by decision, so the `recompute_validations` matched/mismatched scenarios that
+    // used to live here no longer describe reachable behaviour. The checkpoint reuse
+    // assertions above are kept: they cover feature/model reuse, not the comparison.
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

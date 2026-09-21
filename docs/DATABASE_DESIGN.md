@@ -165,7 +165,7 @@ erDiagram
 - `import_entity_generations`：按实体类型的 generation（增量同步 XML）；
 - `route_file_fingerprints`：GPX 文件指纹（增量更新路线）；
 - `model_checkpoints`：兼容 checkpoint（增量回放起点）；
-- `recompute_validations`：局部结果与独立完整回放的 hash 对照，不一致时拒绝切换 active 数据库。
+- `recompute_validations`：**已废弃（2026-09-20）**。原用途是"局部结果与独立完整回放的 hash 对照，不一致时拒绝切换 active 数据库"；该对照机制已从代码删除，表**保留仅为兼容历史迁移且恒为空**。写入路径的替代防线是运行时不变量 B1–B5，见 `docs/RUST_DATA_ENGINE.md`。
 
 ## 8. Active 视图
 

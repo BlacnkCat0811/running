@@ -16,7 +16,7 @@ import {
   type StagedAuditFiles,
   NATIVE_VERSION,
 } from "@rai/health-export-parser";
-import { ImportPerformanceTracker, type ImportValidationMode } from "./import-performance.js";
+import { ImportPerformanceTracker } from "./import-performance.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 import { RuntimeStateStore } from "./runtime-state.js";
@@ -121,7 +121,6 @@ export class ImportWorker {
     private readonly beforeActivate: () => void | Promise<void> = () => {},
     private readonly afterActivate: () => void | Promise<void> = () => {},
     private readonly onDatabaseError: (error: unknown) => void = () => {},
-    private readonly validationMode: ImportValidationMode = "shadow",
     private readonly queueOptions?: ImportQueueOptions,
     private readonly recomputeEvaluatedAt?: string,
     private readonly executionEngine: ImportExecutionEngine = { name: "typescript", version: NATIVE_VERSION, fallback: "none" }
@@ -478,7 +477,6 @@ export class ImportWorker {
         job.message = "导入完成，正在重算 RAI 时间线";
         this.persistJobs();
         const incremental = change.mode === "incremental" && change.dirtyFromAt;
-        timing.validationMode = incremental ? this.validationMode : "not-run";
         await timing.measure("recompute", () => this.command([
           "--import",
           "tsx",
@@ -490,9 +488,7 @@ export class ImportWorker {
           "--timezone",
           "Asia/Shanghai",
           ...(this.recomputeEvaluatedAt ? ["--evaluated-at", this.recomputeEvaluatedAt] : []),
-          ...(incremental
-            ? ["--dirty-from", incremental, ...(this.validationMode === "shadow" ? ["--shadow-validate"] : [])]
-            : [])
+          ...(incremental ? ["--dirty-from", incremental] : [])
         ]));
         this.assertNotClosing();
         featureSummary = this.latestFeatureRunSummary(stagingDatabase);
@@ -1486,7 +1482,9 @@ export class ImportWorker {
         if (typeof message === "object" && message !== null) {
           const payload = message as { type?: string; stage?: string; durationMs?: number; processMaxRssKiB?: number };
           if (payload.type === "rai:compute-performance" &&
-              ["features", "trainingMetrics", "modelReplay", "shadowValidation"].includes(payload.stage ?? "") &&
+              ["features", "trainingMetrics", "modelReplay",
+                "parse_health_xml", "import_gpx_routes", "canonicalize_workouts",
+                "canonicalize_nights", "stage_audit_files"].includes(payload.stage ?? "") &&
               typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) && payload.durationMs >= 0) {
             this.computeStagesMs[payload.stage!] = (this.computeStagesMs[payload.stage!] ?? 0) + payload.durationMs;
             if (typeof payload.processMaxRssKiB === "number" && Number.isFinite(payload.processMaxRssKiB)) {

@@ -233,7 +233,6 @@ export function defaultRequest(options: RecomputeOptions = {}): RecomputeRequest
     evaluatedAt: normalizeInstant(options.evaluatedAt ?? appNow(), "evaluatedAt"),
     timezoneIdentifier: options.timezoneIdentifier ?? "Asia/Shanghai",
     featureConfig: options.featureConfig ?? defaultFeatureConfig,
-    modelConfig: options.modelConfig ?? defaultRaiModelConfig,
-    validationMode: options.validationMode ?? "off"
+    modelConfig: options.modelConfig ?? defaultRaiModelConfig
   };
 }

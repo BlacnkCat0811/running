@@ -129,7 +129,7 @@ test("home deployment templates keep private bind addresses and safe defaults", 
   assert.match(read("frpc.toml"), /transport\.tls\.trustedCaFile/);
   assert.match(read("frpc.toml"), /transport\.useCompression = false/);
   assert.match(read("rai.env.example"), /^RAI_PUBLIC_HOSTS=$/m);
-  assert.match(read("rai.env.example"), /^RAI_IMPORT_VALIDATION_MODE=shadow$/m);
+  assert.doesNotMatch(read("rai.env.example"), /RAI_IMPORT_VALIDATION_MODE/);
   assert.match(read("nginx-rai.conf"), /proxy_set_header Authorization \$http_authorization/);
   assert.match(read("nginx-rai.conf"), /proxy_request_buffering off/);
   assert.match(read("rai-api.service"), /ExecStart=\/usr\/bin\/node --import tsx/);

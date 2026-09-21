@@ -133,13 +133,11 @@ for (const value of cases) {
     const store = await RaiDatabase.open(path);
     try {
       const service = new RaiApplicationService(store);
-      const id = service.enqueueIncrementalRecompute({
+      service.enqueueIncrementalRecompute({
         mode: "partial", dirtySessionIds: [], dirtyFromAt: plan.dirtyFromAt!, reasons: plan.recomputeReasons ?? []
-      }, { evaluatedAt, timezoneIdentifier: "Asia/Shanghai", validationMode: "shadow" });
+      }, { evaluatedAt, timezoneIdentifier: "Asia/Shanghai" });
       const completed = service.runNextJob();
       assert.equal(completed?.status, "succeeded", JSON.stringify(completed));
-      const validation = store.database.prepare("SELECT status FROM recompute_validations WHERE job_id=?").get(id!) as { status: string };
-      assert.equal(validation.status, "matched");
       const feature = store.database.prepare(`SELECT feature.reused_feature_count AS reused, feature.recomputed_feature_count AS recomputed
         FROM active_model_run active JOIN model_runs model ON model.id=active.model_run_id
         JOIN feature_runs feature ON feature.id=model.feature_run_id`).get() as { reused: number; recomputed: number };
@@ -213,15 +211,10 @@ test("timezone changes prevent reuse of a feature prefix calculated for another 
   const store = await RaiDatabase.open(path);
   try {
     const service = new RaiApplicationService(store);
-    const id = service.enqueueIncrementalRecompute({
+    service.enqueueIncrementalRecompute({
       mode: "partial", dirtySessionIds: [], dirtyFromAt: plan.dirtyFromAt!, reasons: ["timezone-test"]
-    }, { evaluatedAt, timezoneIdentifier: "UTC", validationMode: "shadow" });
+    }, { evaluatedAt, timezoneIdentifier: "UTC" });
     service.runNextJob();
-    // A version-to-version quality gate may reject a timezone change; the
-    // independent candidate/reference comparison must nevertheless match.
-    const validation = store.database.prepare("SELECT status FROM recompute_validations WHERE job_id=?")
-      .get(id!) as { status: string } | undefined;
-    assert.equal(validation?.status, "matched");
     const runs = store.database.prepare("SELECT reused_feature_count AS reused FROM feature_runs WHERE dataset_version=?")
       .all("timezone-change") as { reused: number }[];
     assert.ok(runs.length > 0);

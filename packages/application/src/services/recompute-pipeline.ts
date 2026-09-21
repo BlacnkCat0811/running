@@ -207,21 +207,17 @@ export class RecomputePipeline {
       this.updateJobProgress(job.id, "model_replay", 0, features.length, "Replaying ability timeline");
       this.measureCompute(job.id, "modelReplay", () => this.replayModel(job.id, modelRun, features, request));
       this.finishModelRun(modelRun.id, "succeeded", null);
-      if (request.validationMode === "shadow" && request.incrementalPlan) {
-        // The independent reference must not reuse reads from the candidate.
-        this.recordCache.clear();
-        this.allowNativeAggregates = false;
-        try {
-          this.measureCompute(job.id, "shadowValidation", () => this.runShadowValidation(job.id, modelRun, request, overrideSnapshot));
-        } finally { this.allowNativeAggregates = true; }
-      }
-      // Version-to-version comparison is mandatory whenever an incumbent
-      // exists. `validationMode` only controls the additional incremental
-      // replay check above; it must not provide a way around the gate.
+      // NOTE(2026-09-20): the shadow full-replay comparison was removed by decision
+      // (deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md). The two fields
+      // it used to toggle here are now inert:
+      //   - `recordCache` is only cleared by the caller;
+      //   - `allowNativeAggregates` is permanently true (see its declaration).
+      // Model-version comparison is mandatory whenever an incumbent exists; the
+      // removed validation mode never provided a way around the gate below.
       if (incumbentModelRunId) {
         const gate = this.modelRuns.evaluateValidationGate(modelRun.id, incumbentModelRunId);
         if (gate.status === "failed") {
-          throw new Error(`Shadow model gate failed: ${gate.failureReasons.join(", ")}`);
+          throw new Error(`Model-version gate failed: ${gate.failureReasons.join(", ")}`);
         }
       }
       this.activateModelRunAndCompleteJob(job.id, modelRun.id, features.length);
@@ -234,103 +230,6 @@ export class RecomputePipeline {
       this.finishModelRun(modelRun.id, this.isCancellationError(error) ? "cancelled" : "failed", error);
       throw error;
     }
-  }
-
-  private runShadowValidation(
-    jobId: string,
-    candidate: ModelRun,
-    request: RecomputeRequest,
-    overrideSnapshot: OverrideSnapshot
-  ): void {
-    const datasetVersion = this.manifestValue("dataset_version") ?? "dataset_unknown";
-    const fullRequest: RecomputeRequest = { ...request, validationMode: "off" };
-    delete fullRequest.incrementalPlan;
-    this.updateJobProgress(jobId, "shadow_validation", 0, 4, "Building full replay reference");
-    const featureRun = this.createFeatureRun(datasetVersion, fullRequest.featureConfig);
-    let reference: ModelRun | null = null;
-    let metricRunId: string | null = null;
-    try {
-      const features = this.extractFeatures(jobId, featureRun, fullRequest, overrideSnapshot);
-      this.finishFeatureRun(featureRun.id, "succeeded", null);
-      reference = this.createModelRun(datasetVersion, featureRun.id, fullRequest);
-      metricRunId = this.createTrainingMetricRun(reference.id, fullRequest, overrideSnapshot.ids);
-      this.replayTrainingMetrics(jobId, metricRunId, features, fullRequest, overrideSnapshot);
-      this.finishTrainingMetricRun(metricRunId, "succeeded", null);
-      this.replayModel(jobId, reference, features, fullRequest);
-      this.finishModelRun(reference.id, "succeeded", null);
-      const comparison = this.compareRunOutputs(candidate.id, reference.id);
-      this.database.prepare(`
-        INSERT INTO recompute_validations (
-          id, job_id, candidate_model_run_id, reference_model_run_id,
-          mode, status, hashes_json, mismatch_json
-        ) VALUES (?, ?, ?, ?, 'shadow', ?, ?, ?)
-      `).run(
-        opaqueId("recompute_validation"), jobId, candidate.id, reference.id,
-        comparison.mismatches.length === 0 ? "matched" : "mismatched",
-        JSON.stringify(comparison.hashes),
-        comparison.mismatches.length === 0 ? null : JSON.stringify(comparison.mismatches)
-      );
-      if (comparison.mismatches.length > 0) {
-        throw new Error(`Shadow recompute mismatch: ${comparison.mismatches.join(", ")}`);
-      }
-      this.updateJobProgress(jobId, "shadow_validation", 4, 4, "Incremental replay matches full replay");
-    } catch (error) {
-      this.finishFeatureRun(featureRun.id, "failed", error);
-      if (metricRunId) this.finishTrainingMetricRun(metricRunId, "failed", error);
-      if (reference) this.finishModelRun(reference.id, "failed", error);
-      throw error;
-    }
-  }
-
-  private compareRunOutputs(candidateModelRunId: string, referenceModelRunId: string): {
-    hashes: Record<string, { candidate: string; reference: string }>;
-    mismatches: string[];
-  } {
-    const domains = {
-      features: {
-        sql: `SELECT feature.* FROM workout_features feature JOIN model_runs model ON model.feature_run_id = feature.feature_run_id WHERE model.id = ? ORDER BY feature.workout_start_at, feature.training_session_id`,
-        ignored: new Set(["id", "feature_run_id", "computed_at"])
-      },
-      assessments: {
-        sql: `SELECT * FROM ability_assessments WHERE model_run_id = ? ORDER BY sequence_number`,
-        ignored: new Set(["id", "model_run_id", "feature_id"])
-      },
-      snapshots: {
-        sql: `SELECT * FROM daily_ability_snapshots WHERE model_run_id = ? ORDER BY local_date`,
-        ignored: new Set(["id", "model_run_id", "last_assessment_id", "computed_at"])
-      },
-      workoutTrainingLoads: {
-        sql: `SELECT load.* FROM workout_training_loads load JOIN training_metric_runs run ON run.id = load.training_metric_run_id WHERE run.model_run_id = ? ORDER BY load.local_date, load.training_session_id`,
-        ignored: new Set(["id", "training_metric_run_id", "feature_id", "zone_profile_id", "computed_at"])
-      },
-      dailyTrainingMetrics: {
-        sql: `SELECT metric.* FROM daily_training_metrics metric JOIN training_metric_runs run ON run.id = metric.training_metric_run_id WHERE run.model_run_id = ? ORDER BY metric.local_date`,
-        ignored: new Set(["id", "training_metric_run_id", "computed_at"])
-      },
-      dailyZoneProfiles: {
-        sql: `SELECT profile.* FROM daily_zone_profiles profile JOIN training_metric_runs run ON run.id = profile.training_metric_run_id WHERE run.model_run_id = ? ORDER BY profile.local_date`,
-        ignored: new Set(["id", "training_metric_run_id", "created_at"])
-      },
-      workoutZoneSummaries: {
-        sql: `SELECT summary.* FROM workout_zone_summaries summary JOIN training_metric_runs run ON run.id = summary.training_metric_run_id WHERE run.model_run_id = ? ORDER BY summary.training_session_id`,
-        ignored: new Set(["id", "training_metric_run_id", "feature_id", "zone_profile_id", "computed_at"])
-      }
-    };
-    const hashes: Record<string, { candidate: string; reference: string }> = {};
-    const mismatches: string[] = [];
-    for (const [name, domain] of Object.entries(domains)) {
-      const hash = (modelRunId: string): string => {
-        const rows = this.database.prepare(domain.sql).all(modelRunId) as unknown as Array<Record<string, unknown>>;
-        return configHash(rows.map((row) => Object.fromEntries(
-          Object.entries(row).filter(([key]) => !domain.ignored.has(key))
-        )));
-      };
-      const candidateHash = hash(candidateModelRunId);
-      const referenceHash = hash(referenceModelRunId);
-      hashes[name] = { candidate: candidateHash, reference: referenceHash };
-      if (candidateHash !== referenceHash) mismatches.push(name);
-    }
-    return { hashes, mismatches };
   }
 
   runSnapshotRefresh(job: RecomputeJob): void {
@@ -396,7 +295,9 @@ export class RecomputePipeline {
         typeof parsed.timezoneIdentifier === "string" ? parsed.timezoneIdentifier : "Asia/Shanghai",
       featureConfig: { ...defaultFeatureConfig, ...(parsed.featureConfig ?? {}) },
       modelConfig: { ...defaultRaiModelConfig, ...(parsed.modelConfig ?? {}) }
-      ,validationMode: parsed.validationMode === "shadow" ? "shadow" : "off"
+      // (2026-09-20) `validationMode` is deliberately not read back: historical
+      // job.request records still carry the key, and the shadow replay it selected
+      // no longer exists. Ignoring it keeps old jobs replayable.
       ,...(parsed.incrementalPlan?.mode === "partial" && typeof parsed.incrementalPlan.dirtyFromAt === "string"
         ? {
             incrementalPlan: {

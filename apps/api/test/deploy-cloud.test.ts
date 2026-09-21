@@ -15,10 +15,10 @@ test("default cloud service budgets the entire worker group for a 2GiB host", ()
   assert.doesNotMatch(unit, /ExecStart=.*npm|MemoryMax=4G/);
 });
 
-test("cloud configuration preserves authentication, shadow validation and bounded heaps", () => {
+test("cloud configuration preserves authentication, engine selection and bounded heaps", () => {
   const env = read("rai.env.example");
   for (const setting of [
-    "RAI_API_HOST=127.0.0.1", "RAI_PUBLIC_HOSTS=", "RAI_IMPORT_VALIDATION_MODE=shadow",
+    "RAI_API_HOST=127.0.0.1", "RAI_PUBLIC_HOSTS=",
     "RAI_IMPORT_ENGINE=typescript", "NODE_OPTIONS=--max-old-space-size=512",
     "RAI_ALLOW_REMOTE_TOKEN_AUTH=1", "OMP_NUM_THREADS=1", "OPENBLAS_NUM_THREADS=1",
     "MKL_NUM_THREADS=1", "NUMEXPR_NUM_THREADS=1"

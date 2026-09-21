@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
-test("benchmark is opt-in and restores the same isolated baseline for both modes", async () => {
+test("benchmark is opt-in and restores the same isolated baseline for the engine", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-benchmark-test-"));
   const main = join(root, "baseline.sqlite"), input = join(root, "export"), output = join(root, "report.json");
   mkdirSync(input);
@@ -31,12 +31,14 @@ test("benchmark is opt-in and restores the same isolated baseline for both modes
     assert.equal(executed.status, 0, executed.stderr);
     const report = JSON.parse(readFileSync(output, "utf8")) as {
       evaluatedAt: string;
-      results: Array<{ mode: string; job: { status: string; summary: { insertedWorkouts: number } } }>;
+      results: Array<{ engine: string; job: { status: string; summary: { insertedWorkouts: number } } }>;
     };
     assert.ok(report.evaluatedAt);
-    assert.deepEqual(report.results.map((item) => item.mode), ["shadow", "off"]);
-    assert.deepEqual(report.results.map((item) => item.job.status), ["succeeded", "succeeded"]);
-    assert.deepEqual(report.results.map((item) => item.job.summary.insertedWorkouts), [1, 1]);
+    // Validation modes were removed on 2026-09-20, so a single `--runs 1` trial now
+    // produces exactly one result per requested engine rather than one per mode.
+    assert.deepEqual(report.results.map((item) => item.engine), ["typescript"]);
+    assert.deepEqual(report.results.map((item) => item.job.status), ["succeeded"]);
+    assert.deepEqual(report.results.map((item) => item.job.summary.insertedWorkouts), [1]);
     if (process.platform !== "win32") assert.equal(statSync(output).mode & 0o777, 0o600);
     const baseline = new DatabaseSync(main, { readOnly: true });
     try {

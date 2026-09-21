@@ -69,6 +69,10 @@ export class RecomputeWorker {
     this.scheduled = false;
     this.running = true;
     try {
+      // Spawning a worker thread re-registers `tsx` from scratch: ~2.5 s measured on
+      // this machine. The admission lock is held for all of it, so an idle drain makes
+      // every write route answer `mutation_conflict` instead of its real status.
+      if (!this.hasPendingJob()) return;
       this.recoverInterruptedJobs();
       while (!this.closing && existsSync(this.databasePath)) {
         const ran = await this.runOneInWorkerThread();
@@ -105,6 +109,12 @@ export class RecomputeWorker {
     }
   }
 
+  /** True when a queued or claimed task exists; an idle drain must not spawn a thread. */
+  private hasPendingJob(): boolean {
+    if (!existsSync(this.databasePath)) return false;
+    return this.withJobRepository((jobs) => jobs.hasPending());
+  }
+
   private recoverInterruptedJobs(): void {
     if (!existsSync(this.databasePath)) return;
     this.withJobRepository((jobs) => {
@@ -118,11 +128,11 @@ export class RecomputeWorker {
     });
   }
 
-  private withJobRepository(action: (jobs: RecomputeJobRepository) => void): void {
+  private withJobRepository<T>(action: (jobs: RecomputeJobRepository) => T): T {
     const database = new DatabaseSync(this.databasePath);
     applyBusyTimeout(database, 2_000);
     try {
-      action(new RecomputeJobRepository(database));
+      return action(new RecomputeJobRepository(database));
     } finally {
       database.close();
     }

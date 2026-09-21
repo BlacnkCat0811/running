@@ -43,7 +43,6 @@ import Fastify from "fastify";
 import { apiErrorPayload } from "./api-error.js";
 import { CommandQueue, applyMutationCommand } from "./command-queue.js";
 import { RaiReadStore, mobileLocalDate } from "./data.js";
-import { importValidationModeFromEnvironment } from "./import-performance.js";
 import { createImportSourceManager } from "./import-sources.js";
 import { finalizeImportSource } from "./import-source-finalization.js";
 import {
@@ -103,7 +102,6 @@ const port = Number(process.env.RAI_API_PORT ?? 8787);
 const host = process.env.RAI_API_HOST ?? "127.0.0.1";
 const apiToken = process.env.RAI_API_TOKEN?.trim() || undefined;
 const maxImportZipBytes = Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 4 * 1024 ** 3);
-const importValidationMode = importValidationModeFromEnvironment();
 const importExecutionEngine = { name: importEngine(), fallback: nativeFallback(), version: NATIVE_VERSION };
 if (importExecutionEngine.name === "rust" && importExecutionEngine.fallback === "none" && !existsSync(nativeBinary())) {
   throw new Error("Rust worker is missing. Run npm run rust:build or configure RAI_RUST_BINARY before enabling Rust.");
@@ -396,7 +394,6 @@ const importWorker: ImportWorker = new ImportWorker(
   () => readStores.beginReplace(),
   () => readStores.endReplace(),
   (error) => observeWorkerDatabaseError(error),
-  importValidationMode,
   {
     scope: JSON.stringify([serverId, athleteId, datasetEpoch]),
     admission: taskAdmission.owner("import"),
@@ -1441,7 +1438,7 @@ app.post<{ Params: { id: string } }>("/v1/model-runs/:id/activate", { schema: { 
         if (error.code === "not_found") return reply.code(404).send({ message: "未找到模型运行" });
         if (error.code === "not_succeeded") return reply.code(409).send({ message: "只能激活成功的模型运行" });
         if (error.code === "missing_metrics") return reply.code(409).send({ message: "该模型运行没有成功的运动统计结果，不能激活" });
-        return reply.code(409).send({ message: "该模型运行未通过 shadow model 门禁，不能激活" });
+        return reply.code(409).send({ message: "该模型运行未通过模型版本门禁，不能激活" });
       }
       throw error;
     }

@@ -30,7 +30,7 @@ test("real queued imports parse, analyze off-thread, shadow-check, publish recei
     }));
     return directory;
   };
-  const make = () => new ImportWorker(main, project, root, undefined, undefined, undefined, "shadow", {
+  const make = () => new ImportWorker(main, project, root, undefined, undefined, undefined, {
     scope: "fixture", admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
   });
   const wait = async () => {
@@ -50,9 +50,9 @@ test("real queued imports parse, analyze off-thread, shadow-check, publish recei
     await wait();
     const result = worker.get(second.id)!;
     assert.equal(result.status, "succeeded", JSON.stringify(result));
-    assert.equal(result.performance?.validationMode, "shadow");
+    assert.equal(result.performance?.validationMode, "not-run");
     assert.ok(result.performance?.stagesMs.changeAnalysis! > 0);
-    assert.ok(result.performance?.computeStagesMs?.shadowValidation! > 0);
+    assert.ok(result.performance?.computeStagesMs?.parse_health_xml! > 0);
     assert.ok(readImportReceipt(main, second.id));
     const db = new DatabaseSync(main, { readOnly: true });
     try {

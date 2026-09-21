@@ -25,13 +25,24 @@ test("API exits 78 on pending migrations without changing the main database", as
     let output = "";
     child.stdout.on("data", (chunk) => { output += chunk; });
     child.stderr.on("data", (chunk) => { output += chunk; });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 15_000);
+    // Booting this child pays for the whole `tsx` module graph. Under a parallel
+    // full-suite run that can exceed 15 s and the SIGKILL below would then surface
+    // as a bare `null !== 78`. The sibling server-runtime suite already budgets 60 s.
+    const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
     try {
-      const code = await new Promise<number | null>((resolve, reject) => {
+      const { code, signal } = await new Promise<{
+        code: number | null;
+        signal: NodeJS.Signals | null;
+      }>((resolve, reject) => {
         child.once("error", reject);
-        child.once("exit", resolve);
+        child.once("exit", (exitCode, exitSignal) => resolve({ code: exitCode, signal: exitSignal }));
       });
-      assert.equal(code, 78, output);
+      assert.equal(
+        code,
+        78,
+        `API must exit 78 while migrations are pending; got code=${String(code)} `
+          + `signal=${String(signal)}\n${output}`
+      );
       assert.match(output, /data:migrate/);
       assert.match(output, /22/);
       assert.equal(hash(), before);

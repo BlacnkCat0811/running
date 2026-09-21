@@ -29,7 +29,7 @@ test("accepted Rust jobs keep their engine across restart and run the actual nat
   const mutations = new MutationCoordinator(), scheduler = new TaskAdmissionScheduler(mutations);
   const release = mutations.acquire("fixture");
   const create = (name: "rust" | "typescript") => new ImportWorker(
-    join(root, "main.sqlite"), resolve(import.meta.dirname, "../../.."), root, undefined, undefined, undefined, "shadow", {
+    join(root, "main.sqlite"), resolve(import.meta.dirname, "../../.."), root, undefined, undefined, undefined, {
       scope: "fixture", admission: scheduler.owner("import"), engine: { name, version: NATIVE_VERSION, fallback: "none" }
     }
   );
@@ -67,8 +67,8 @@ test("accepted Rust jobs keep their engine across restart and run the actual nat
     }
     const nextResult = worker.get(next.id)!;
     assert.equal(nextResult.status, "succeeded", JSON.stringify(nextResult));
-    assert.equal(nextResult.performance?.validationMode, "shadow");
-    assert.ok(nextResult.performance?.computeStagesMs?.shadowValidation! > 0);
+    assert.equal(nextResult.performance?.validationMode, "not-run");
+    assert.ok(nextResult.performance?.computeStagesMs?.parse_health_xml! > 0);
     assert.equal(nextResult.performance?.native?.aggregate?.rustCalls, 1);
   } finally { release(); await worker.close(); rmSync(root, { recursive: true, force: true }); }
 });
@@ -79,7 +79,7 @@ test("abandoned native spool cleanup preserves pending attempts and unrelated di
   writeFileSync(join(input, "export.xml"), "<HealthData/>");
   const mutations = new MutationCoordinator();
   const release = mutations.acquire("fixture");
-  const worker = new ImportWorker(join(root, "main.sqlite"), root, root, undefined, undefined, undefined, "shadow", {
+  const worker = new ImportWorker(join(root, "main.sqlite"), root, root, undefined, undefined, undefined, {
     scope: "fixture", admission: new TaskAdmissionScheduler(mutations).owner("import")
   });
   try {
@@ -101,7 +101,7 @@ test("engine mismatch retains the queued source rather than silently switching e
   const input = join(root, "export"); mkdirSync(input);
   writeFileSync(join(input, "export.xml"), "<HealthData/>");
   const worker = new ImportWorker(join(root, "main.sqlite"), resolve(import.meta.dirname, "../../.."), root,
-    undefined, undefined, undefined, "shadow", {
+    undefined, undefined, undefined, {
       scope: "fixture", admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import"),
       engine: { name: "rust", version: "incompatible", fallback: "none" }
     });

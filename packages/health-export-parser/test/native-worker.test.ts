@@ -10,6 +10,7 @@ import { importGpxRoutes } from "../src/gpx-parser.js";
 import { RaiDatabase } from "../src/database.js";
 import { canonicalizeRunningWorkouts } from "../src/canonicalize.js";
 import { prepareNative, nativeBinary, nativeElevationGains } from "../src/native-worker.js";
+import { NativeRecordWriter } from "../src/native-record-writer.js";
 
 const available = existsSync(nativeBinary());
 if (process.env.RAI_REQUIRE_RUST_TESTS === "1" && !available) throw new Error("Rust verification requires the compiled release worker");
@@ -176,4 +177,55 @@ test("native aggregate matches elevation spike filtering and leaves ambiguous mu
     const ambiguous = await nativeElevationGains(path, { engine: "rust", spoolRoot: root });
     assert.equal(ambiguous!.has(String(route.workout_id)), false, "ambiguous route ordering must use TS");
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a record id carried twice keeps the last occurrence and does not trip the write sample check", { skip: !available }, async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-rust-duplicate-id-"));
+  const databasePath = join(root, "duplicate.sqlite.importing.00000000-0000-0000-0000-000000000002");
+  const store = await RaiDatabase.open(databasePath);
+  try {
+    // `device` is stored but deliberately excluded from the record id
+    // (`apple-health-parser.ts:191`: Apple exports the same sample with and without it), so
+    // these two elements collapse onto ONE id carrying two different content hashes. The
+    // worker's upsert keeps the last one. B4 may only compare against that final write, so
+    // this fails if the sample is taken from the head of the spool or keeps repeated ids.
+    const path = join(root, "duplicate.xml");
+    writeFileSync(path, `<?xml version="1.0" encoding="UTF-8"?>
+<h:HealthData xmlns:h="fixture">
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min" device="with-device"
+  startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:00:05 +0800" value="120"/>
+ <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min"
+  startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:00:05 +0800" value="120"/>
+</h:HealthData>`);
+    const result = await parseAppleHealthXml(path, store, { fileSize: statSync(path).size, atomic: false,
+      native: { engine: "rust", spoolRoot: root, stagingDatabase: databasePath } });
+    assert.equal(result.recordCount, 2, "both elements are parsed");
+    const rows = store.database.prepare("SELECT id, device FROM health_records").all() as
+      Array<{ id: string; device: string | null }>;
+    assert.equal(rows.length, 1, "one identity means one row");
+    assert.equal(rows[0]!.device, null, "the surviving row is the last occurrence, not the first");
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("B4 records an inactive content check instead of passing when the candidate holds no sampled row", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-b4-empty-sample-"));
+  const store = await RaiDatabase.open(join(root, "candidate.sqlite"));
+  const writer = new NativeRecordWriter(root, "fixture-generation", undefined, false);
+  try {
+    // The canonical spool holds one row and the candidate holds none, so the sample has
+    // nothing to compare against. Without the `compared === 0` guard the loop reports no
+    // divergence and the check silently "passes" having looked at zero rows.
+    writer.capture({
+      id: "record_b4_fixture", type: "HKQuantityTypeIdentifierHeartRate", sourceName: "Apple Watch",
+      sourceVersion: "1", device: null, unit: "count/min", numericValue: 120, textValue: null,
+      startAt: "2026-01-01T00:00:00.000Z", endAt: "2026-01-01T00:00:05.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z", metadata: {}
+    }, "apple_watch", {}, "hash_b4_fixture");
+    (writer as unknown as { db: { exec(sql: string): void } }).db.exec("COMMIT");
+    writer.close();
+    (writer as unknown as { assertSampleMatches(store: RaiDatabase): void }).assertSampleMatches(store);
+    const issue = store.database.prepare("SELECT code FROM import_issues WHERE code = ?")
+      .get("invariant.b4.no_rows_compared") as { code: string } | undefined;
+    assert.ok(issue, "a sample that compared zero rows must not look like a passed check");
+  } finally { writer.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
 });

@@ -35,6 +35,13 @@ export class RecomputeJobRepository {
     return row ? this.map(row) : null;
   }
 
+  /** True when a queued or claimed task exists; callers use it to skip idle work. */
+  hasPending(): boolean {
+    return Boolean(this.database.prepare(
+      "SELECT 1 FROM recompute_jobs WHERE status IN ('queued', 'running') LIMIT 1"
+    ).get());
+  }
+
   claimNext(): RecomputeJob | null {
     this.database.exec("BEGIN IMMEDIATE");
     try {

@@ -107,7 +107,7 @@ export class SqliteModelRunRepository {
     if (metricRun?.status !== "succeeded") {
       throw new ModelRunActivationError("missing_metrics", "Model run requires a succeeded training metric run before activation");
     }
-    // A candidate explicitly evaluated by the production shadow gate may not
+    // A candidate explicitly evaluated by the production model-version gate may not
     // bypass a failed result, including through the manual activation API.
     const hasGateTable = this.database
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_validation_gates'")
@@ -118,7 +118,7 @@ export class SqliteModelRunRepository {
         WHERE candidate_model_run_id = ? AND status = 'failed'
         ORDER BY created_at DESC LIMIT 1
       `).get(modelRunId);
-      if (failedGate) throw new ModelRunActivationError("failed_gate", "Model run failed the shadow validation gate and cannot become active");
+      if (failedGate) throw new ModelRunActivationError("failed_gate", "Model run failed the model-version gate and cannot become active");
     }
     this.database.prepare(`
       INSERT INTO active_model_run (singleton, model_run_id, activated_at)

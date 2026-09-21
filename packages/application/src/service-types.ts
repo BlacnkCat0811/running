@@ -61,7 +61,6 @@ export interface RecomputeRequest {
   featureConfig: FeatureConfig;
   modelConfig: RaiModelConfig;
   incrementalPlan?: RecomputePlan;
-  validationMode: "off" | "shadow";
 }
 
 export interface RecomputeOptions {
@@ -69,7 +68,6 @@ export interface RecomputeOptions {
   timezoneIdentifier?: string;
   featureConfig?: FeatureConfig;
   modelConfig?: RaiModelConfig;
-  validationMode?: "off" | "shadow";
 }
 
 export const MODEL_CHECKPOINT_VERSION = "rai-model-checkpoint-v1";

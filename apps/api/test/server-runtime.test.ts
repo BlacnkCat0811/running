@@ -190,7 +190,11 @@ async function stopApi(child: ChildProcess): Promise<void> {
     });
   };
   try {
-    if (child.connected) child.send("rai:shutdown");
+    // Fire-and-forget: `connected` can flip between the check and the send, and with
+    // no callback that failure is emitted as an 'error' event on the child, which no
+    // listener would catch. Passing a callback routes it here instead; the shutdown
+    // signal is advisory and the SIGTERM/SIGKILL path below still applies.
+    if (child.connected) child.send("rai:shutdown", () => {});
     else child.kill("SIGTERM");
   } catch {
     child.kill("SIGTERM");

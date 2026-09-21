@@ -19,6 +19,29 @@ import { importEngine, nativeFallback, NATIVE_VERSION, type NativeOptions } from
 import { stableId } from "./utils.js";
 import { acquireDatabasePublicationLock, publishDatabaseFile } from "@rai/storage-sqlite";
 
+/**
+ * Reports a health-export sub-stage duration over the CLI's IPC channel.
+ *
+ * `ImportPerformanceTracker` in the API owns the coarse `parseImport` bucket;
+ * these finer names land in `Job.performance.computeStagesMs`, whose schema is an
+ * open number dictionary — so this adds observation without a contract change.
+ * Timings are wall-clock and include child execution; they never carry health data.
+ */
+function reportStage(stage: string, durationMs: number): void {
+  if (process.send && process.connected) {
+    process.send({ type: "rai:compute-performance", stage, durationMs }, () => {});
+  }
+}
+
+async function timedStage<T>(stage: string, operation: () => T | Promise<T>): Promise<T> {
+  const start = performance.now();
+  try {
+    return await operation();
+  } finally {
+    reportStage(stage, Math.max(0, performance.now() - start));
+  }
+}
+
 interface ParsedArguments {
   native: NativeOptions;
   command: "import" | "incremental-import" | "audit";
@@ -257,7 +280,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     store.flush();
 
     console.log(`Parsing Apple Health XML (${Math.round(xmlSize / 1024 / 1024)} MiB)...`);
-    const xmlResult = await parseAppleHealthXml(xmlPath, store, {
+    const xmlResult = await timedStage("parse_health_xml", () => parseAppleHealthXml(xmlPath, store, {
       native: { ...args.native, stagingDatabase },
       fileSize: xmlSize,
       atomic: false,
@@ -272,14 +295,14 @@ async function importCommand(args: ParsedArguments): Promise<void> {
         const percent = ((bytesRead / totalBytes) * 100).toFixed(0);
         console.log(`  ${percent}% | records=${recordCount} workouts=${workoutCount}`);
       }
-    });
+    }));
 
     console.log("Parsing GPX routes...");
-    const gpxResult = await importGpxRoutes(
-    args.input,
-    store,
-    { ...(!args.replaceAbsent ? { preserveAbsent: true } : {}), native: args.native }
-  );
+    const gpxResult = await timedStage("import_gpx_routes", () => importGpxRoutes(
+      args.input,
+      store,
+      { ...(!args.replaceAbsent ? { preserveAbsent: true } : {}), native: args.native }
+    ));
 
     console.log("Building canonical running workout groups...");
     const routeDirtyTimes = (gpxResult.changedRouteIds ?? []).flatMap((routeId) => {
@@ -290,11 +313,11 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       return row ? [row.startAt] : [];
     });
     const dirtyWorkoutTimes = [...(xmlResult.dirtyWorkoutTimes ?? []), ...routeDirtyTimes];
-    const canonicalResult = canonicalizeRunningWorkouts(
+    const canonicalResult = await timedStage("canonicalize_workouts", () => canonicalizeRunningWorkouts(
       store.database,
       incremental ? { dirtyWorkoutTimes } : undefined
-    );
-    const nightlyResult = canonicalizeNights(store.database, "Asia/Shanghai");
+    ));
+    const nightlyResult = await timedStage("canonicalize_nights", () => canonicalizeNights(store.database, "Asia/Shanghai"));
 
     const fingerprints = store.database
       .prepare(
@@ -343,12 +366,12 @@ async function importCommand(args: ParsedArguments): Promise<void> {
         ) VALUES (?, ?, 'completed', 1, 1, 'Apple Health import completed')
       `)
       .run(stableId("recompute_job_event", [importJobId, "completed"]), importJobId);
-    const stagedAudit = stageAuditFiles(
+    const stagedAudit = await timedStage("stage_audit_files", () => stageAuditFiles(
       store.database,
       args.report,
       args.jsonReport,
       auditSourceLabel(args)
-    );
+    ));
 
     store.close();
     storeClosed = true;

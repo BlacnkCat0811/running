@@ -278,6 +278,12 @@ test("recompute worker wakeups while draining are not dropped", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-recompute-wakeup-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await RaiDatabase.open(databasePath);
+  // An empty queue is now short-circuited before any thread spawn, so the "while
+  // draining" window this test exercises only exists when a job is claimable.
+  store.database.prepare(`
+    INSERT INTO recompute_jobs (id, job_type, status, request_json, progress_phase)
+    VALUES ('recompute_job_wakeup_fixture', 'full_recompute', 'queued', '{}', 'queued')
+  `).run();
   store.close();
   const worker = new RecomputeWorker(databasePath);
   const surface = worker as unknown as RecomputeWorkerTestSurface;
@@ -1373,14 +1379,13 @@ for (const [beforeStatus, afterStatus] of [
   });
 }
 
-for (const validationMode of ["shadow", "off"] as const) {
-test(`recomputes and activates a training session that becomes ambiguous (${validationMode})`, async () => {
+test("recomputes and activates a training session that becomes ambiguous (off)", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-session-status-run-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   const active = await seedCanonical(databasePath);
   active.close();
-  const worker = new ImportWorker(databasePath, root, root, undefined, undefined, undefined, validationMode) as unknown as ImportWorkerTestSurface;
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
   let commandCount = 0;
   worker.command = async (args) => {
     commandCount += 1;
@@ -1411,7 +1416,7 @@ test(`recomputes and activates a training session that becomes ambiguous (${vali
     }
     assert.equal(commandCount, 2, "a training-session status change must invoke exactly one recompute");
     assert.ok(args.includes("recompute"));
-    assert.equal(args.includes("--shadow-validate"), validationMode === "shadow");
+    assert.equal(args.includes("--shadow-validate"), false, "the removed shadow flag must never be passed");
     const dirtyFromArgument = args.indexOf("--dirty-from");
     assert.ok(dirtyFromArgument >= 0);
     assert.equal(args[dirtyFromArgument + 1], runDate(0));
@@ -1431,7 +1436,7 @@ test(`recomputes and activates a training session that becomes ambiguous (${vali
     assert.equal(job.status, "succeeded", String(job.error ?? ""));
     assert.equal(commandCount, 2);
     const timing = job.performance as ImportJobPerformance;
-    assert.equal(timing.validationMode, validationMode);
+    assert.equal(timing.validationMode, "not-run");
     for (const stage of ["backup", "stagingCopy", "parseImport", "changeAnalysis", "recompute", "activation", "cleanup"] as const) {
       assert.ok(timing.stagesMs[stage]! >= 0, `missing ${stage} duration`);
     }
@@ -1459,7 +1464,6 @@ test(`recomputes and activates a training session that becomes ambiguous (${vali
     rmSync(root, { recursive: true, force: true });
   }
 });
-}
 
 for (const field of [
   "HKCharacteristicTypeIdentifierDateOfBirth",

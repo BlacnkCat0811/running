@@ -38,7 +38,7 @@ async function fixture(beforeFinalize: () => Promise<void> = async () => {}) {
   const sourceMutations = new MutationCoordinator();
   const releaseWriter = mutations.acquire("fixture writer");
   const worker: ImportWorker = new ImportWorker(join(root, "main.sqlite"), root, root,
-    undefined, undefined, undefined, "shadow", {
+    undefined, undefined, undefined, {
       scope: "fixture", admission: new TaskAdmissionScheduler(mutations).owner("import"),
       onTerminal: async (job, succeeded, durable) => {
         await beforeFinalize();

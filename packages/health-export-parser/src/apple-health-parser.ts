@@ -28,6 +28,49 @@ import {
   stableId
 } from "./utils.js";
 
+/**
+ * B2 (runtime invariant, see docs/RUST_DATA_ENGINE.md): the record generation table
+ * must not claim more rows than the worker itself reported writing.
+ *
+ * Deliberately an inequality. `apply_records` writes the current generation for every
+ * non-tombstoned row it reads, but `import_entity_generations` is keyed by
+ * `(entity_kind, entity_id)`, so a canonical payload that carries the same record id
+ * twice legitimately yields fewer rows than `observed - tombstoned`. An equality check
+ * would fire on real exports; "more rows than were written" cannot happen by accident.
+ *
+ * Reported as an issue rather than thrown: issues are the importer's triage channel
+ * (`GET /v1/data-summary`), so this stays visible in production without failing an
+ * otherwise usable import.
+ */
+function assertGenerationConservation(
+  store: RaiDatabase,
+  generation: string,
+  written: { observed: number; tombstoned: number; inserted: number }
+): void {
+  const reported = written.observed - written.tombstoned;
+  const row = store.database.prepare(
+    "SELECT COUNT(*) AS n FROM import_entity_generations WHERE entity_kind = 'record' AND generation = ?"
+  ).get(generation) as { n: number };
+  if (row.n > reported) {
+    store.insertIssue({
+      severity: "error",
+      code: "invariant.b2.generation_overcount",
+      objectId: null,
+      message: `record generation ${generation} holds ${row.n} rows but the worker reported writing `
+        + `${reported} (observed=${written.observed}, tombstoned=${written.tombstoned})`
+    });
+  }
+  if (written.inserted > written.observed || written.tombstoned > written.observed) {
+    store.insertIssue({
+      severity: "error",
+      code: "invariant.b2.counter_bounds",
+      objectId: null,
+      message: `record counters exceed observed rows: inserted=${written.inserted} `
+        + `tombstoned=${written.tombstoned} observed=${written.observed}`
+    });
+  }
+}
+
 interface RecordDraft {
   attributes: Record<string, string>;
   metadata: MetadataMap;
@@ -523,6 +566,7 @@ export async function parseAppleHealthXml(
       const written = await nativeRecords.apply(store, options.native!);
       insertedRecordCount += written.inserted;
       tombstonedCount += written.tombstoned;
+      assertGenerationConservation(store, entityGeneration, written);
     }
 
     if (!options.incremental?.preserveAbsent) {

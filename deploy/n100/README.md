@@ -52,15 +52,14 @@ iOS / desktop → HTTPS 云 Nginx → 127.0.0.1:18787 frps
 - 每个完成/失败导入任务都有可选的 `performance`：
   `totalMs` 和 `stagesMs.{backup,stagingCopy,parseImport,changeAnalysis,recompute,activation,cleanup}`。
   老任务无此字段仍兼容。计时使用单调时钟，失败阶段也计时并持久化。
-  `parseImport` 包括解析器子进程启动、XML 导入和报告生成；
-  `recompute` 包含计算子进程及其可选完整对照。尚未拆成逐个算法的 CPU 时间。
+  `parseImport` 包括解析器子进程启动、XML 导入和报告生成，并已拆出 5 个子阶段
+  （`parse_health_xml` / `import_gpx_routes` / `canonicalize_workouts` / `canonicalize_nights` /
+  `stage_audit_files`），见 `computeStagesMs`；`recompute` 包含计算子进程。
   **不包括上传/解压/inspect、排队、终态回调耗时**，不能称为手机端端到端耗时。
-- `RAI_IMPORT_VALIDATION_MODE=shadow|off`：
-  - 默认 `shadow`：保留增量与全量重放对照。
-  - `off`：显式跳过额外完整重放，可缩短日常增量同步，风险是少一道等价性检查。
-  - **两者都保留模型激活质量门禁**（`rai-shadow-gate-v1`）、删除保护、数据库发布保护。
-  - 初次导入/全量重算/无需重算任务不会执行该额外对照，记录 `not-run`。
-  - 拼错配置会拒绝启动，不会悄悄关闭校验。
+- （2026-09-20 移除）`RAI_IMPORT_VALIDATION_MODE` **已不存在**：影子对照（增量与全量重放比对）
+  已从代码删除，再配置它不会有任何效果。**模型激活质量门禁**（`rai-shadow-gate-v1`）、删除保护、
+  数据库发布保护**不受影响，仍始终生效**。替代防线见
+  `deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` §3。
 
 ### 不做的“优化”
 
@@ -224,10 +223,12 @@ sha256sum -c SHA256SUMS
 | 磁盘与网络 | `df -h`、系统 I/O 与网络统计 |
 | 正确性 | 训练数、删除/修改、特征结果、模型门禁、iOS 恢复游标 |
 
-先使用 shadow 验证一轮实际增量。若确认额外全量重放占主要成本、愿意接受少一道等价性检查，
-手动设置 `RAI_IMPORT_VALIDATION_MODE=off` 并重启。发生算法/解析器/配置升级、历史数据更正、
-结果异常时切回 shadow。普通完整重算不等于验证增量是否等价。
-这里**没有自动每周 shadow 任务**；日后若需要应设计在隔离副本上跑对照，不与在线写库竞争。
+（2026-09-20）影子对照已从代码删除，上面这套"先开 shadow 验证一轮 / 异常时切回 shadow"的操作
+**不再可执行**。日常增量的正确性现在依赖两类信号：① `GET /v1/data-summary` 的 `issues` 与 `counts`；
+② 导入任务里的运行时不变量结果（见
+`deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` §3）。
+发生算法/解析器/配置升级或历史数据更正时，应在**隔离副本**上验证，不与在线写库竞争。
+普通完整重算不等于验证增量是否等价 —— 这一点没有变。
 
 验收要求：重复 source 不产生重复任务；其他主库写入仍有保护；
 数据/门禁结果与基线一致；小批同步无 OOM；家里离线时批次不会被误报成功；

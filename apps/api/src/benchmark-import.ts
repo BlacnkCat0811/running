@@ -25,7 +25,7 @@ if (!database || !input || !output || !Number.isInteger(runs) || runs < 1 || run
 if (!existsSync(database) || !existsSync(input)) throw new Error("Baseline database and export directory must exist");
 if (existsSync(output)) throw new Error("Output already exists; refusing to overwrite");
 if (!args.includes("--execute")) {
-  console.log(JSON.stringify({ dryRun: true, runsPerMode: runs, engines, modes: ["shadow", "off"],
+  console.log(JSON.stringify({ dryRun: true, runsPerEngine: runs, engines,
     note: "One consistent readonly baseline snapshot, restored before EVERY trial. No live activation. Add --execute to run." }, null, 2));
 } else {
   const root = await mkdtemp(join(option("--work-dir") ?? process.env.RAI_RUNTIME_ROOT ?? tmpdir(), "rai-import-benchmark-"));
@@ -40,16 +40,15 @@ if (!args.includes("--execute")) {
   try {
     try { await backup(source, baseline); } finally { source.close(); }
     const evaluatedAt = new Date().toISOString();
-    const results: Array<{ engine: string; mode: string; trial: number; job: ImportJobResponse; equivalence: ReturnType<typeof importEquivalence> }> = [];
+    const results: Array<{ engine: string; trial: number; job: ImportJobResponse; equivalence: ReturnType<typeof importEquivalence> }> = [];
     for (let trial = 1; trial <= runs; trial++) {
-      // Alternate order to reduce systematic warm-cache bias between modes.
-      for (const mode of trial % 2 ? ["shadow", "off"] as const : ["off", "shadow"] as const) {
-        for (const engine of trial % 2 ? engines : [...engines].reverse()) {
+      // Alternate engine order to reduce systematic warm-cache bias.
+      for (const engine of trial % 2 ? engines : [...engines].reverse()) {
         if (cancelled) throw new Error("Benchmark cancelled");
         const runtime = await mkdtemp(join(root, "trial-"));
         const isolated = join(runtime, "rai.sqlite");
         await copyFile(baseline, isolated);
-        worker = new ImportWorker(isolated, projectRoot, runtime, undefined, undefined, undefined, mode, undefined, evaluatedAt, {
+        worker = new ImportWorker(isolated, projectRoot, runtime, undefined, undefined, undefined, undefined, evaluatedAt, {
           name: engine, version: NATIVE_VERSION, fallback: "none"
         });
         const job = worker.create(resolve(input));
@@ -59,16 +58,15 @@ if (!args.includes("--execute")) {
           await new Promise((done) => setTimeout(done, 200));
         }
         const finished = worker.get(job.id)!;
-        results.push({ engine, mode, trial, job: finished, equivalence: importEquivalence(isolated) });
+        results.push({ engine, trial, job: finished, equivalence: importEquivalence(isolated) });
         await worker.close(); worker = undefined;
-      }
       }
     }
     const reference = results.find((item) => item.engine === "typescript" && item.job.status === "succeeded");
     const successfulRust = results.filter((item) => item.engine === "rust" && item.job.status === "succeeded").length;
     const mismatches = reference ? results.filter((item) =>
       item.job.status === "succeeded" && JSON.stringify(item.equivalence) !== JSON.stringify(reference.equivalence)
-    ).map(({ engine, mode, trial }) => ({ engine, mode, trial })) : [];
+    ).map(({ engine, trial }) => ({ engine, trial })) : [];
     await writeFile(resolve(output), JSON.stringify({
       schemaVersion: 1, createdAt: new Date().toISOString(), evaluatedAt,
       node: process.version, platform: process.platform, arch: process.arch,
