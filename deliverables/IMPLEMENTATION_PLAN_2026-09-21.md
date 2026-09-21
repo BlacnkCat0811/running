@@ -373,7 +373,8 @@ OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一形�
    ↓
 批次 3  OPT-7 控制库备份束        ⏸ 需演练环境
    ↓
-批次 4  OPT-9a 时区入口收敛       ⏸ 需先定 (a)/(b)；**已并入 7 处 formatter 漏网**（本批仅登记，见上方新增范围）
+批次 4  OPT-9a 时区入口收敛       ✅ **已完成**（口径 b）→ `a4131d2` + `5e5df96`（已合并推送）；
+   ↓                                逐字节比对零业务差异，详见 `BATCH4_TIMEZONE_PLAN_2026-09-21.md` §8
    ↓
 批次 5  OPT-4 / OPT-10 断言 / OPT-11（待授权）
 ```

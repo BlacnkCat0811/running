@@ -142,3 +142,61 @@ export function localDateTimeAt(value: string, timezone = DATABASE_TIMEZONE): st
 | ③ | 提交 A 与提交 B 是否按本文拆成两个提交 | **拆** —— 各自独立验收：A 看性能、B 看零行为变化 |
 
 批①②③后我即开工（顺序：提交 A → 门禁 → 提交 B → 逐字节比对 → 门禁）。
+
+---
+
+## 8. ✅ 实施结果（2026-09-21）
+
+| 步骤 | 提交 | 判据 |
+| :--- | :--- | :--- |
+| 方案文档 | `7850fb3` | — |
+| 提交 A：共享 formatter + 单一时区常量 | `a4131d2` | 11 文件；typecheck 0；node **751 / 748 / 0 / 3** |
+| 提交 B：33 处字面量收敛 | `5e5df96` | 19 文件；typecheck 0；node **751 / 748 / 0 / 3**；web **13 文件 / 85 tests** |
+
+分支 `land/batch4-timezone` 已 ff 合并进 `main` 并推送（`7d5298b → 5e5df96`）。
+
+### 🔴 实施中发现的两个原方案没写到的点
+
+1. **`= DATABASE_TIMEZONE` 与 `= "Asia/Shanghai"` 的类型推断不同。**
+   默认参数写**字面量**时 TS 宽化为 `string`；写 `as const` **常量则不宽化**，参数类型被窄化成
+   `"Asia/Shanghai"`，于是所有传 `"UTC"` 的既有调用点（`service.test.ts` 5 处）一起报 `TS2345`。
+   **修复：给这 7 个参数显式标 `: string`，恢复原语义。** 这正是原作者不用常量的原因。
+2. **`recompute_job_events` 不能进逐字节比对。**
+   它的行数是**按时间节流**的（进度上报）⇒ 两次重算耗时不同则事件数不同（实测 75 vs 51，
+   跨度 52.7 s vs 33.2 s）；历史 job 的事件数分毫不差（810 × 4）。
+
+### 验收：逐字节比对（方法 + 结果）
+
+方法：同一份本机真实库（325 MB）复制两份 → **用 `git checkout` 切分支**（**不用 `git worktree`**：
+`node_modules/@rai/*` 是**相对**软链，干净 worktree 仍会指向脏工作区）→ 在 `main` 与本分支各跑一次
+`npm run data:recompute -- --database <副本> --evaluated-at 2026-09-21T00:00:00.000Z --timezone Asia/Shanghai`
+→ 对 45 张表逐表哈希 + 对差异表**逐列诊断**。
+
+| 结果 | 数量 | 说明 |
+| :--- | ---: | :--- |
+| 字节完全相同 | **30 / 45** | 含 `canonical_nights`、`canonical_hrv_days`、`health_records`、`workouts`、`training_sessions` 等 |
+| 行数相同、内容有差异 | 14 | 差异列**全部**是 `id` / `*_run_id` / `*_id` / `created_at` / `started_at` / `completed_at` / `state_json`（内含 UUID） |
+| 行数不同 | 1 | `recompute_job_events`（时间节流，见上） |
+
+⇒ 🔴 **零业务差异**：没有任何一个业务值列发生变化。
+
+### 突变验证（四条断言都真的会红）
+
+| 突变 | 结果 |
+| :--- | :--- |
+| 禁用 formatter 缓存 | `localCalendarFormatter memoises` 变红 |
+| 键退化为只按时区（丢掉字段集） | `memoises` 变红 **且** `keep the pre-optimisation output` 也变红 |
+| 把 `ISO_UTC_OFFSET` 改成 `"+09:00"` | `offset constants agree` 变红 |
+| 在 `cli.ts` 塞一处裸字面量 | 收敛守卫变红，**精确报出 `packages/application/src/cli.ts:2`** |
+
+### 副产品（单次样本，**不可外推**）
+
+本机 recompute 的事件跨度 **52.7 s → 33.2 s**：`@rai/application` 的 `localDateAt` 同样在高频构造
+`Intl.DateTimeFormat`，提交 A 的共享缓存顺带覆盖了重算路径。
+⚠️ 这是**本机数字**（AMD 黑苹果的 `Intl.DateTimeFormat` 构造是正常值的 5–10 倍），
+线上收益必须看部署后的 `importJob.performance.stagesMs.recompute`。
+
+### 未做（按口径 (b) 顺延）
+
+- `apps/web/src/format.ts:55/:64` —— 待前端时区口径（(a) 或另议）确定后再动；
+  `timezone-convergence.test.ts` 已**显式排除** `apps/web/src` 并注明原因，避免它变成假绿。
