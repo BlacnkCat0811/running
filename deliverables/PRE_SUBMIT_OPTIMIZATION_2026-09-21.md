@@ -74,20 +74,24 @@ import-source-finalization     2 / 1
 
 ---
 
-## 2. 🔴 待定：提交信息语言与仓库惯例不一致
+## 2. ✅ 已定：提交信息语言 —— 接受中文，规范已同步
 
-| 项 | 现状 |
+小唐 2026-09-21 批复：**中英文均可**。按 **(b)** 处理。
+
+| 项 | 处置 |
 | :--- | :--- |
-| 仓库惯例 | **英文** conventional commits（近 148 条里仅 21 条含中文；`41c2490` 及其前 20 条全英文） |
-| 本分支 | **7 个全中文** |
-| 我的规范文件 | `~/.workbuddy/skills/rai-commit-push/SKILL.md` §3 明确写 "message 用**英文** conventional commits（与仓库历史一致）" |
+| 本分支 | **保留 7 条中文 message**，不重写历史 ⇒ 树仍逐字节不变 |
+| 仓库惯例 | 英文为主（近 148 条里仅 21 条含中文），但"与历史一致"本身不是目标 |
+| 规范文件 | ✅ 已改 `~/.workbuddy/skills/rai-commit-push/SKILL.md` §3：明确**中英文皆可** |
 
-⇒ 二选一：**(a)** 改英文（再重写一次消息，树不变）；**(b)** 接受中文并**更新规范文件**（否则下次还会不一致）。
-我倾向 (b) 并把差异写进规范 —— 中文 message 在 `git log` 里读起来更快，而"与历史一致"本身不是目标。
+⇒ 之所以必须动规范：本项之所以成为"待定"，根源是 `SKILL.md` 单方面规定英文。
+只改提交、不改规范，下次仍会撞同一个不一致。
 
 ---
 
-## 3. 🟡 代码层同类漏网：另有 7 处「每次调用/每轮循环新建 `Intl` formatter」
+## 3. ✅ 已定：7 处同类漏网 ⇒ 并入批次 4，本批**不动代码**
+
+OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一模式在生产代码里还剩：
 
 OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一模式在生产代码里还剩：
 
@@ -102,12 +106,20 @@ OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一模�
 | `packages/training-load/src/index.ts:329` / `packages/training-zones/src/index.ts:110` | 包内多次 | 待测 | 未知 |
 
 ⚠️ **如实说明**：除前端渲染与 `/v1/mobile/today` 外，其余都是**毫秒级**，**不是性能救火**，单独立项不值。
-✅ **建议**：抽一个共享的 `timezone formatter` 工具（键 = 字段集 + 时区，即 OPT-1 已验证的形态），
-**与批次 4（OPT-9a 时区入口收敛）同批**做一次收敛 —— 而不是逐个打补丁。这同时为 OPT-9 铺好入口。
+✅ **已采纳（小唐 2026-09-21 批复）**：抽一个共享的 `timezone formatter` 工具（键 = 字段集 + 时区，
+即 OPT-1 已验证的形态），**与批次 4（OPT-9a 时区入口收敛）同批**收敛 —— 不逐个打补丁。
+
+**本批的处置 = 只登记、不改代码**：
+
+- 上表已写入 `IMPLEMENTATION_PLAN_2026-09-21.md` 的**批次 4 范围**。
+- 理由：批次 4 的前置决策「(a) 前端一起统一 / (b) 只收敛后端」尚未定，
+  而表中 `apps/web/src/format.ts:53/:62` 两处**正好压在该决策的分界线上** ——
+  先单独改它，会被 (a)/(b) 的选择再推翻一次，等于白做。
+- ⇒ 本批**不动这 7 处**；OPT-1 的既有收益（云机真机省 18.9 s/次导入）不受影响。
 
 ---
 
-## 4. 🔴 部署前必须处理：线上有一条**死配置**
+## 4. ✅ 已授权：部署时清理线上**死配置**（并新增一条更隐蔽的闸门）
 
 线上 `/etc/rai/rai.env`（Sep 19 14:16 写入）**仍含 `RAI_IMPORT_VALIDATION_MODE`**，
 而本批代码已**彻底删除**读取它的通路（`importValidationModeFromEnvironment` 不存在）。
@@ -117,7 +129,21 @@ OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一模�
 | 运行 | **无害**（无"未知变量即报错"校验），该变量现在是 no-op |
 | 运维 | 🔴 **误导**：看到它还在会以为影子对照仍开着 —— 这是"配置写了 ≠ 生效"的**第四形态**（配置文件还在，读它的代码没了） |
 
-⇒ 部署时顺手清理该行（连同注释），让配置文件与代码一致。
+⇒ **已授权**：部署时顺手清理该行（连同注释），让配置文件与代码一致。
+
+### 🔴 闸门 0（本次最易漏、后果最静默）：Rust 二进制必须重编译
+
+本批改了 `crates/rai-data-worker/src/main.rs`（+10/−2）：给 `apply-records` 新增 `canonicalDigest`
+输出（`main.rs:551`、`:607`），TS 侧 `native-record-writer.ts` 用它跑 **B1 运行时写路径不变量**。
+
+| 关键事实 | 证据 |
+| :--- | :--- |
+| TS 对缺失该字段**显式容忍** | `native-worker.ts:164` "deliberately absent-tolerant"；`native-record-writer.ts:91` "Older worker binary: B1 cannot run" |
+| 后果 | **只部署 TS、不换二进制 ⇒ 线上不报任何错**，但 B1 静默不生效，仅在 `GET /v1/data-summary` 的 `issues` 留一条 |
+| 线上正跑 Rust | `RAI_IMPORT_ENGINE=rust` + `RAI_RUST_BINARY=/opt/rai-native/rai-data-worker` |
+
+⇒ 判据：**「TS 部署了」≠「引擎换了」** —— 比死配置更隐蔽（死配置至少摆在那里）。
+必须 `git archive origin/main` 重导 `/opt/rai-native/src` → 停 API → `rust:build` → 替换二进制 → 验 `--version` 与真实 operation。
 
 **部署前其余闸门**
 1. 迁移 dry-run：`sudo -u rai npm run data:migrate -- --database /var/lib/rai/var/rai.sqlite` 必须报 `"pending": []`
@@ -150,12 +176,13 @@ OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一模�
 
 ---
 
-## 7. 我的判断
+## 7. 我的判断与最终处置
 
-| 优先级 | 事项 | 理由 |
+| 优先级 | 事项 | 处置 |
 | :--- | :--- | :--- |
 | 🔴 已做 | 重写为 7 个可编译可测的节点 | `bisect` 可用性是硬红线，实测已破 |
-| 🔴 必做 | 部署时清掉线上 `RAI_IMPORT_VALIDATION_MODE` | 死配置会误导后续排查 |
-| 🟡 建议 | 定第 2 节的提交语言口径（改英文或改规范，二者必居其一） | 否则下次仍不一致 |
-| 🟡 建议 | 第 3 节的 formatter 统一并入批次 4 | 避免逐个打补丁；顺手为 OPT-9 铺路 |
-| ⚪ 可选 | 第 5 节两条门禁脚本瑕疵 | 低风险，但会让"一条命令跑门禁"长期不可靠 |
+| 🔴 必做 | 清掉线上 `RAI_IMPORT_VALIDATION_MODE` | ✅ 小唐已授权 ⇒ 本次部署执行 |
+| 🔴 **新增** | **重编译 Rust 二进制**（第 4 节闸门 0） | 不换二进制则 B1 静默失效，**且不报错** —— 见第 4 节 |
+| ✅ 已闭环 | 提交语言口径（第 2 节） | 小唐批复中英文皆可 ⇒ 保留中文 + 改规范文件 |
+| ✅ 已闭环 | formatter 统一（第 3 节） | 小唐批复并入批次 4 ⇒ 本批只登记、不改代码 |
+| ⚪ 未做（可选） | 第 5 节两条门禁脚本瑕疵 | 低风险，但会让"一条命令跑门禁"长期不可靠 |
