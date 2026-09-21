@@ -711,4 +711,120 @@ await this.backupDatabase(currentDatabase, stagingBackupPath);   // ← 读全�
 
 **回滚**（若判据未兑现）：`git revert 48c9ede`（或 `b1bb84a`）+ `systemctl restart rai-api`，单文件、无迁移。
 
+---
+
+## 15. 第五形态耦合的**最后一处**也修掉了：`nativeStats` 白名单（2026-09-21 23:0x）
+
+### 15.1 问题
+
+`apps/api/src/import-worker.ts:1566`（改动前行号）与 §12 那处是**同一个形状**：
+
+```ts
+if (item.type === "rai:native-engine" && ["health", "gpx", "aggregate", "apply-records"].includes(item.operation ?? "") && …
+```
+
+这是一份**接收端硬编码白名单**，而 `native` 的契约本身就是开放字典：
+
+| 层 | 位置 | 形态 |
+| --- | --- | --- |
+| 契约 | `packages/api-contracts/src/index.ts:383` | `native?: Record<string, { rustCalls; typescriptFallbacks; wallMs; peakRssKiB }>` —— **开放** |
+| 响应 schema | `apps/api/src/schemas.ts:515-520` | `additionalProperties: { type: "object", … }` —— **开放** |
+| 接收端 | `apps/api/src/import-worker.ts:1566` | `[…4 个名字].includes(operation)` —— **封闭** ❌ |
+
+⇒ Rust 侧新增一个 operation 时，**唯一不会报错**的一处就是这张表：新 operation 的
+`rustCalls` / `wallMs` / `peakRssKiB` 会被静默吃掉，`performance.native` 里就是没有它，
+而 `/v1/data-summary` 的 `issues` 照旧是 `[]`（与 §12.2 完全同构）。
+
+**本次并没有新增 operation** ⇒ 修的是「下一次会踩的坑」，不是当前的故障。
+
+### 15.2 改法（与 §12.3 同款：白名单 → 格式校验）
+
+1. **发送端**（`packages/health-export-parser/src/native-worker.ts:29-41`）把原来的字面量联合类型
+   提升为可运行的权威清单，并从 `index.ts` 导出：
+
+   ```ts
+   export const NATIVE_OPERATIONS = ["health", "gpx", "aggregate", "apply-records"] as const;
+   export type NativeOperation = (typeof NATIVE_OPERATIONS)[number];
+   ```
+
+   编译期约束**一点没松**（`NativeMetrics["operation"]` 仍是这 4 个之一）。
+2. **接收端**（`apps/api/src/import-worker.ts:135-159`）删掉数组白名单，换成
+   `NATIVE_OPERATION_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/` + 纯函数 `parseNativeEngineMessage()`。
+   ⇒ **「加一个 operation 要改两处」的隐藏耦合消失**，但子进程仍不能往 `performance_json`
+   里注入任意键（`__proto__` / 空格 / 点 / 大小写混写 / 33 字符以上全部被拒）。
+3. 顺带收紧一处：`rai:native-failure` 的 `item.code` 原来靠 `item.code ?? ""` 与一个
+   `item.code!` 断言，现改为 `typeof failure.code === "string"` 守卫后再赋值（去掉 `!`）。
+
+**字段语义逐条对齐 `parseComputeStageMessage`**：`actual` 只认 `rust` / `typescript`；
+`durationMs` 必须有限非负（否则**整条消息丢弃**）；`peakRssKiB` 非法时**只降级为 `null`**
+（消息本身仍被接受），与 `processMaxRssKiB` 同款。
+
+### 15.3 🔴 刻意**不**改的一处：`rai:native-failure` 的判定表
+
+`import-worker.ts:1613` 的 `["unavailable", "invalid_protocol"]` **留着不动**，并且加了注释说明：
+它是**语义判定表**（哪些 code 意味着"引擎不可用、必须拦住回退"），与
+`packages/health-export-parser/src/native-worker.ts` 里那份（`unavailable` / `unsupported_xml`）
+**刻意不同**（见 `NOTES-engineering.md` 的「回退名单不重合」条）。
+改它会**改变行为**，所以它不该被"格式校验化"——判别规则是：
+**丢掉一条数据 = 要修；决定一个动作 = 要显式改。**
+
+### 15.4 回归断言与突变验证（三次突变，红点三个互不重叠）
+
+新增 `apps/api/test/import-worker-native-engine-metric.test.ts`（**8 例**）：
+
+| # | 断言 | 它钉住什么 |
+| --- | --- | --- |
+| 1 | 遍历 `NATIVE_OPERATIONS`，接收端**每个都认得** | **跨端耦合**：发送端声明了新 operation 而接收端不认识时立刻红 |
+| 2 | 一个接收端**从未见过的合法** operation（`route-prune` 等）被接受 | §12.2 那个事故的等价场景本体 |
+| 3 | `actual` 只认 `rust` / `typescript` | 枚举不被放宽 |
+| 4 | 非法名字被拒（空 / 大写 / 下划线 / 数字开头 / 带点 / 带空格 / 33 字符 / `__proto__`） | 注入面没被放开 |
+| 5-8 | `durationMs` 有限非负 · `type` 不匹配被拒 · `peakRssKiB` 降级为 `null` · 额外字段不影响解析 | 与 `parseComputeStageMessage` 语义一致 |
+
+| 突变 | 改什么 | 变红的是 | 结论 |
+| --- | --- | --- | --- |
+| A | 把格式校验还原成旧的 4 名字白名单 | **只有 #2** | #2 真正钉住"新 operation 不被静默丢弃" |
+| B | 把格式校验放宽成 `/^.*$/` | **只有 #4** | #4 真正钉住"注入面" |
+| C | 把发送端清单里的 `apply-records` 改成 `apply_records` | **只有 #1** | #1 不是恒真，跨端断言有效 |
+
+⇒ 三条断言各自钉住**一个**不变量，三处突变红点互不重叠（排除了「恒红」与「一次突变全红」的假证据）。
+
+### 15.5 门禁
+
+| 项 | 读数 | 对照 |
+| --- | --- | --- |
+| `npm run typecheck` | **0 错**（`tsconfig.pure.json` + `tsconfig.json`） | 与基线一致 |
+| node 全量 | **777 / 774 pass / 0 fail / 3 skip** | 基线 769 ⇒ **+8**（= 新文件 8 例），fail 与 skip 均未变 |
+| web vitest 单跑 | **13 文件 / 85 项**全过 | 与本批前一致 |
+
+### 15.6 还没拿到的那个读数（未变）
+
+线上最新导入仍是 **`2026-09-21T13:42:13Z`（CST 21:42）**，即 §14.6 部署（22:11 CST）**之前**的快照。
+§14.8 的判据（下一次真实导入的 `stagesMs.backup` 是否 ≤ 5 s）**仍未拿到** —— 见 §16。
+
+---
+
+## 16. 「我现在该做什么」
+
+**只有一件事需要你做，而且它不可替代：再上传一次 Apple Health 导出。**
+
+理由：§13.3 的收益（云机 A/B 实测 **−12,322 ms**）目前只有**受控实测**证据，缺**真实导入**读数。
+线上最新那次导入（CST 21:42）发生在部署（22:11）**之前**，按纪律不能用来判本次改动。
+而 `stagesMs.backup` 这个读数**只能由一次真实导入产生** —— 我无法从服务器侧制造（造一次就是
+一次真导入，会动你线上的库，代价不对称）。
+
+到 23:07 为止，线上三项状态确认无异常：`cdd4034` 在位、`NRestarts=0`、
+启动时间 `22:11:33 CST`（即 §14.6 那次，之后没再重启过）。
+
+**判据**（拿到读数后我按这个判）：
+
+| 结果 | 结论 | 动作 |
+| --- | --- | --- |
+| `stagesMs.backup` ≤ **5 s** | 收益兑现 | 无（对照 §13.2：热 3,075 ms / 冷 21,479 ms） |
+| 仍在 12 s 上下 | `backup()` 没把页缓存读热 | `git revert 48c9ede` + `restart`，并改写结论为"该路径不适用此优化" |
+
+⇒ **你现在只需要上传；剩下我接。** 上传完说一声"同步好了"，我读线上数据出结论。
+
+（另：`nativeStats` 白名单本次已修，但那处**本来就没坏**——本次没有新增 operation，
+所以它不影响这次读数，纯属预防。）
+
 
