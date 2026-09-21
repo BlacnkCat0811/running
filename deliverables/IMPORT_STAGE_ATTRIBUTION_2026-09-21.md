@@ -500,3 +500,117 @@ export function parseComputeStageMessage(message: unknown): { stage; durationMs;
 🔴 **7 个新段名此刻仍未出现在 `computeStagesMs` 里**（仍 8 段、`createdAt = 12:24:02.526Z`）——
 这是**上一版代码的快照**，不是修复失败。判据：**下一次真实导入**后应看到 **15 段**（8 + 7），
 且 `validate_installed` 接近 0 ms、`activate_staging` 把此前"不可见"的尾部十几秒变成可读数字。
+
+---
+
+## 13. 收益兑现 + 下一步：把 `quick_check` 挪到「读热之后」（2026-09-21 21:42 CST 导入）
+
+### 13.1 §12.6 预先写下的三条判据，同时被满足
+
+小唐 2026-09-21 21:42（CST）的这次导入（`web_import_mubao71m…`，`createdAt 13:42:13.162Z`，
+`durationMs 26,216`）是**接收端修复上线后的第一次真实导入**：
+
+| 判据（§12.6 写下） | 本次实测 | 结论 |
+| :--- | :--- | :--- |
+| `computeStagesMs` 应从 8 段变 **15 段** | **15 段全齐** | ✅ 白名单修复生效 |
+| `validate_installed` 应接近 0 ms | **1.29 ms** | ✅ **P1 直接兑现**（该位置原本是 12.1 s 的冷 `quick_check`） |
+| `activate_staging` 应把"不可见"的尾部变成可读数字 | **16.38 ms** | ✅ §5 的观测缺口闭合 |
+
+| 阶段 | ms | 计算段 | ms |
+| :--- | ---: | :--- | ---: |
+| `recompute` | 11,592 | `trainingMetrics` | 9,097 |
+| `parseImport` | 7,799 | `parse_health_xml` | 3,176 |
+| `backup` | 3,075 | `canonicalize_nights` | 2,243 |
+| `stagingCopy` | 1,556 | `prepare_staging_copy` | 1,597 |
+| `changeAnalysis` | 771 | `features` | 1,530 |
+| `activation` | 531 | `stage_audit_files` | 180 |
+| `cleanup` | 18 | `modelReplay` | 419 |
+| **`totalMs`** | **26,216** | 其余 8 段 | `open_staging_store` 92 / `import_gpx_routes` 70 / `close_store` 31.5 / `activate_staging` 16.4 / `canonicalize_workouts` 11.4 / **`validate_installed` 1.29** / `commit_audit_files` 0.22 / `locate_health_xml` 0.07 |
+
+`parseImport` 现在**可解释**：7,799 ms = 12 段埋点合计 7,420 ms + 非埋点 379 ms
+（§3 里那个"20001 ms 完全不可解释"消失了）。Rust 四个 operation 均 `rustCalls=1 / typescriptFallbacks=0`。
+
+### 13.2 四次导入对照：那道「冷 `quick_check` 税」只是换了落点
+
+| 导入（UTC） | `backup` | `parseImport` | `activation` | 冷税落在 | `totalMs` |
+| :--- | ---: | ---: | ---: | :--- | ---: |
+| 09-21 07:56 | 15,832 | 11,900 | **22,881** | `activation` | 66,417 |
+| 09-21 09:34 | 4,489 | **27,935** | 6,715 | `parseImport` 尾部 | 52,556 |
+| 09-21 12:24 | **21,479** | 10,716 | 756 | `backup` | 46,497 |
+| **09-21 13:42** | 3,075 | 7,799 | 531 | **无处**（cache 恰好是热的） | **26,216** |
+
+⇒ P1 砍掉了 `parseImport` 尾部与 `activation` 两处后，**只剩 `backup` 一处还在付这笔税**，
+而它是**当前唯一还能差出十几秒的单项**：热 3,075 ms / 冷 21,479 ms，**同一代码、同一数据，差 18.4 s**。
+
+### 13.3 🔴 下一步（建议，未执行）：让 `quick_check` 跑在「读热之后」
+
+**机理**：`PRAGMA quick_check` 逐页解析 B-tree 与索引一致性，冷态下每页都要从磁盘取
+（真机三次实测 **11,851 / 11,993 / 12,108 ms**，高度一致）；而**顺序读一遍全库只要 1.2 s**。
+
+`apps/api/src/import-worker.ts:787-798` 的顺序恰好是反的：
+
+```ts
+if (!this.isReadableDatabase(this.databasePath)) { … }          // ← 冷：~12 s（cache 已被 parseImport 冲掉）
+await maintenance.ensureBackupCapacity();
+await this.backupDatabase(currentDatabase, stagingBackupPath);   // ← 读全库，但为时已晚：~1.2 s
+```
+
+**受控实测（云机真机、506 MB、`drop_caches` 造冷、只读副本）**：
+
+| 步骤 | 耗时 |
+| :--- | ---: |
+| 冷 `quick_check` | **11,993 ms** |
+| 之后顺序读全库（≈ `backup` 的读） | **1,201 ms** |
+| 再 `quick_check`（紧随读全库之后） | **260 ms** |
+| **现行顺序合计**（qc 冷 + backup） | **13,194 ms** |
+| **拟改顺序合计**（backup + qc 热） | **1,461 ms** |
+| **差** | **11,733 ms** |
+
+⇒ 1.2 s 的顺序读，把 `quick_check` 从 12.0 s 压到 0.26 s（**46×**）。
+**同一份校验、同一个强度、不换裁判**，只是换成「读热了再判」。
+
+**⑵ 这不是发明新语义 —— 生产代码已有先例**：`apps/api/src/maintenance.ts:213-217`（`deleteDatabase`）
+就是「先 `createBackup`，**失败才** `isReadableDatabase` 诊断；不可读则 `preserveCorruptDatabase`」。
+
+**⑶ 安全性**：备份本就先写 `.partial-<uuid>`、校验通过才 `rename`（`import-worker.ts:794`）
+⇒ 顺序调整**不会**产出未经验证的正式备份；损坏路径多花的只是那 1.2 s 的 partial 写入（罕见）。
+
+**⑷ 验收**
+| # | 判据 | 方法 |
+| :--- | :--- | :--- |
+| 1 | 冷态下 `backup` 段 ≤ 5 s | 部署后读下一次导入的 `stagesMs.backup`（当前冷 21.5 s / 热 3.1 s） |
+| 2 | **校验强度不变** | 突变验证：人为让 `isReadableDatabase` 返回 false ⇒ 仍走 `preserveCorruptDatabase` 且**不产出正式备份** |
+| 3 | 正常路径无行为变化 | 连续两次导入的 `importJob.summary` 逐字段一致 |
+| 4 | 门禁 | `typecheck` + 全量 node 测试 |
+
+**⑸ 回滚**：单文件、无迁移 ⇒ `git revert` + 重启。
+
+### 13.4 🟡 次选：消除 CLI 内部那次重复的全库复制（约 1.6 s + 506 MB 写）
+
+同一次导入里出现了**两条**复制 staging 的埋点：
+
+| 埋点 | ms | 代码 |
+| :--- | ---: | :--- |
+| `stagingCopy` | 1,556 | `import-worker.ts:438` —— 把刚做的备份 `copyFile` 成 `stagingDatabase` |
+| `prepare_staging_copy` | 1,597 | `cli.ts:151-163` —— CLI 又把 `stagingDatabase` 复制成 `stagingDatabase.importing.<uuid>` |
+
+两次的**输入内容相同**（都是主库副本）⇒ 一次导入实际做了 **3 份 506 MB 全库复制**，第 3 份是纯浪费。
+它还会**加重 `backup` 段的冷态**（多写 506 MB 去挤 page cache）。
+⚠️ 修它需要设计（CLI 的 `prepareStagingDatabase` 是"不弄脏调用方给的库"的封装，不能直接删）——
+要么加显式开关，要么让 API 把它自己要用的路径直接传给 CLI。**不是一行改**。
+
+### 13.5 ⚪ 更远：`trainingMetrics` 9,097 ms（占 `totalMs` 35%）
+
+批次 4 已把它从 11,724 降到 9,097（−22%）。剩余部分属"评分内核/心率配速聚合"，
+按既定原则**要有性能证据才推进**，先侦察再谈。
+
+### 13.6 为什么建议**先做 13.3、而不是**排期里的批次 2（队列护栏）
+
+| 维度 | 13.3（`backup` 顺序） | 批次 2（OPT-5+6 队列护栏） |
+| :--- | :--- | :--- |
+| 痛点是否已发生 | ✅ **每次导入都在付**（12–18 s，已四次实测） | ❌ **线上 135 条导入任务全部 `succeeded`，零失败**（本日实测） |
+| 风险 | 低（单文件、语句重排、有既有先例） | 🔴 高（**v23 单向门** + 需停服窗口 + 回滚脚本须先演练） |
+| 可逆性 | `git revert` | 只能还原迁移前备份 |
+| 收益可量化 | ✅ 已实测 11.7 s | 护栏价值，无法用数据证明当下必要 |
+
+⇒ 判断：**先做 13.3**（拿走已发生、已实测的 11.7 s），批次 2 等真正出现"任务反复重放"的证据再排。
