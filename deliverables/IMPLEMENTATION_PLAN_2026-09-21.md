@@ -375,10 +375,12 @@ OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一形�
 **门禁实况（批次 0 + 1 之后，本机）**：`npm run typecheck` **exit 0**；node 侧 **747 tests / 744 pass / 0 fail / 3 skip**；解析器包 **61/61**；桌面 E2E **不稳定**（5 样本得到 1 fail 与 3 fail 两种结果，全部由用例 9 引起，见第 4 章）。
 
 ✅ **最小可交付（批次 0 + 批次 1）已完成**，且风险确实最低：单文件 + 一个新测试文件，输出在**真实生产数据上哈希一致**。
-🔴 **2026-09-21 小唐已授权推进**：`land/2026-09-21` 快进合并进 `main` 并推送，随后按 `rai-deploy` 流程部署
-（本批无迁移，期望 dry-run `"pending": []`）。
-🔴 **闸门 0 见 `PRE_SUBMIT_OPTIMIZATION_2026-09-21.md` §4**：本批改了 `crates/rai-data-worker/src/main.rs`，
-⇒ **Rust 二进制必须同步重编译**，否则 B1 静默失效、且不报任何错（TS 侧显式容忍缺失字段）。
+✅ **2026-09-21 已合并、已推送、已部署**：`main` = `c2d1709`（与 origin 同步），**线上 HEAD = `c2d1709`**、服务 `active`。
+迁移 dry-run `pending: []`；**Rust 二进制已同步重编译**（增量 **9.70 s**，Rust 契约测试 **8/8 且 0 skipped**）；
+线上死配置 `RAI_IMPORT_VALIDATION_MODE` 已清理；停机 64 s。
+⇒ 部署实录见 `PRE_SUBMIT_OPTIMIZATION_2026-09-21.md` §8。
+🔴 **唯一尚未兑现的判据**：OPT-1 的线上收益要看**下一次真实导入**——当前 `importJob.performance` 仍是 08:36 的旧快照
+（`totalMs 49164`），期望下次 `parseImport` ≈31.0 s → ≈12 s。
 📌 **用例 9 的 3 个根因已修复**（令牌门控 / 500 误入"结果不确定"路径 / rAF 焦点竞态），E2E 3 样本全绿，
 耗时 3 m 25 s → **85.9 s**；剩余是该用例本身的全栈体量，建议后续拆小。
 

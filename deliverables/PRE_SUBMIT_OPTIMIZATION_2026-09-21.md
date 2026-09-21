@@ -186,3 +186,46 @@ OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一模�
 | ✅ 已闭环 | 提交语言口径（第 2 节） | 小唐批复中英文皆可 ⇒ 保留中文 + 改规范文件 |
 | ✅ 已闭环 | formatter 统一（第 3 节） | 小唐批复并入批次 4 ⇒ 本批只登记、不改代码 |
 | ⚪ 未做（可选） | 第 5 节两条门禁脚本瑕疵 | 低风险，但会让"一条命令跑门禁"长期不可靠 |
+
+---
+
+## 8. 部署实录（2026-09-21 13:28–13:31 CST）
+
+| 步骤 | 结果 |
+| :--- | :--- |
+| 部署前备份 | ✅ `POST /v1/backups` → `rai.manual.2026-09-21T05-28-00-209Z.523bd47d.sqlite`（530,530,304 B） |
+| 迁移闸门 | ✅ dry-run `version: 22` / **`pending: []`** |
+| unit 一致性 | ✅ `INSTALLED_EQ_REPO true`、`HAS_EXIT78 true` ⇒ 无需同步 unit |
+| 代码 | ✅ `41c2490 → c2d1709`（`pull --ff-only`，9 个提交） |
+| web 构建 | ✅ `BUILD_EXIT=0`，9.89 s，主 chunk `index-Cdh36bXb.js` |
+| **闸门 0：Rust 二进制** | ✅ **增量编译仅 9.70 s**，替换 `/opt/rai-native/rai-data-worker`（2,620,312 B） |
+| 二进制两级验证 | ✅ root 与服务身份 `--version` 均 `{"protocol":1,"engine":"rust","version":"0.1.0"}`；`ldd` 无 `libsqlite3` |
+| **Rust 契约测试** | ✅ **8 tests / 8 pass / 0 fail / 0 skipped**（`RAI_REQUIRE_RUST_TESTS=1` ⇒ 真跑而非跳过） |
+| 死配置清理 | ✅ 删 `RAI_IMPORT_VALIDATION_MODE=off` 并留注释；权限仍 `600 root:root` |
+| 服务 | ✅ `active`、`NRestarts=0`、`RAI local API ready`；**停机 64 s**（13:29:15 → 13:30:19） |
+| 进程环境（硬判据） | ✅ `RAI_IMPORT_ENGINE=rust` / `RAI_RUST_FALLBACK=typescript` / `RAI_RUST_BINARY=…`；**`RAI_IMPORT_VALIDATION_MODE` 已从实际生效环境消失** |
+| 运行态 | ✅ 匿名 `/v1/health` 200 + `databaseReady:true`；`/v1/data-summary` **`issues: []`** |
+| 产物 | ✅ `INDEX_CHUNK index-Cdh36bXb.js` 与 build 输出一致 |
+| 收尾 | ✅ `pgrep -c rai-data-worker` = 0；cgroup 峰值 151.8M；磁盘 34% |
+
+### 🔴 一个**尚未兑现**的判据：OPT-1 的线上收益现在还看不到
+
+最近一次导入仍是 **08:36:51 CST**（`importJob.durationMs 49164`、`executionEngine.version 0.1.0`），
+**早于本次部署** ⇒ `/v1/runtime-status` 里的 `performance` 是**旧快照**，不能用它判 OPT-1 是否生效。
+
+真正的判据要等**下一次真实导入**：期望 `parseImport` 从 ≈31.0 s 落到 ≈12 s、`totalMs` 从 49.2 s 落到 ≈30 s。
+
+⇒ 下次导入后核对 **`importJob.performance.stagesMs`**（⚠️ `executionEngine` 与 `performance` 都在 **`importJob` 下**，
+不在 `runtime-status` 顶层 —— 本次实测顶层 keys 只有 `databaseReady,busy,recomputeJob,importJob,taskAdmission,predictionModelJob`）。
+
+### 闸门 0 的验证手段（可复用，比 `--version` 强）
+
+```bash
+cd /opt/rai && RAI_REQUIRE_RUST_TESTS=1 RAI_RUST_BINARY=/opt/rai-native/rai-data-worker \
+  timeout 240 node --import tsx --test packages/health-export-parser/test/native-worker.test.ts
+```
+
+判据是 **`0 skipped`**：`native-worker.test.ts:15-16` 的 `skip: !available` 会让二进制缺失时**静默全跳**，
+只看到 "8 pass" 而忽略 skipped 就会把"根本没跑"读成"全绿"。
+本次 8/8 真跑，其中含 B1（digest 折叠序列两侧一致）与 B4 用例 ⇒ **直接证明新二进制与 TS 契约对齐**，
+比"跑一次 `--version` + 一次 `health` operation"的证据强度高一档。
