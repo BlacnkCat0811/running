@@ -1,3 +1,4 @@
+import { DATABASE_TIMEZONE } from "@rai/contracts";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -317,7 +318,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       store.database,
       incremental ? { dirtyWorkoutTimes } : undefined
     ));
-    const nightlyResult = await timedStage("canonicalize_nights", () => canonicalizeNights(store.database, "Asia/Shanghai"));
+    const nightlyResult = await timedStage("canonicalize_nights", () => canonicalizeNights(store.database, DATABASE_TIMEZONE));
 
     const fingerprints = store.database
       .prepare(

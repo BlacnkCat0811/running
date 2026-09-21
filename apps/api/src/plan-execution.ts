@@ -1,4 +1,5 @@
 import type { MobilePlanExecutionDay } from "@rai/api-contracts";
+import { ISO_UTC_OFFSET } from "@rai/contracts";
 import type { PlanHistoryRevision } from "./mobile-goals.js";
 
 /** Read-time observations only. An import timestamp is not proof of complete day coverage. */
@@ -16,7 +17,7 @@ export function buildPlanExecution(
     const localDate = date.toISOString().slice(0, 10);
     // Freeze at local midnight: later edits must not rewrite yesterday's obligations.
     // Same-day plans are deliberately not inferred until receipt-level reconciliation exists.
-    const boundary = Date.parse(`${localDate}T00:00:00+08:00`);
+    const boundary = Date.parse(`${localDate}T00:00:00${ISO_UTC_OFFSET}`);
     const revision = revisions.find((item) => Date.parse(item.changedAt) < boundary);
     const planned = revision?.weekPlan.find((day) => day.localDate === localDate);
     const observed = byDate.get(localDate);

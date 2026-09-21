@@ -301,7 +301,7 @@ export class RaiReadStore {
       latestTrainingDate: latestDataDate,
       latestHealthSampleAt: this.recoveryRepository.latestHealthSampleAt(),
       sleep: coverageMetric(recoveryDate, today),
-      hrv: coverageMetric(this.recoveryRepository.latestHrvDate("Asia/Shanghai"), today),
+      hrv: coverageMetric(this.recoveryRepository.latestHrvDate(DATABASE_TIMEZONE), today),
       restingHeartRate: coverageMetric(coverageDate(this.recoveryRepository.latestRestingHeartRateAt()), today)
     };
     const sync = mobileSyncStatus(lastSyncedAt, this.refreshOutcome());
@@ -480,7 +480,7 @@ export class RaiReadStore {
       .digest("hex");
     return {
       generatedAt: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      timezone: DATABASE_TIMEZONE,
       latestDataDate,
       lastSyncedAt,
       sync,
@@ -648,7 +648,7 @@ export class RaiReadStore {
     const previousKm = Number(rollingRows.previous_km ?? 0);
     return {
       generatedAt: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      timezone: DATABASE_TIMEZONE,
       months: monthRows.map((row) => ({
         month: String(row.month),
         runningDistanceKm: Number(row.running_km ?? 0),
@@ -799,7 +799,7 @@ export class RaiReadStore {
     }
     return {
       generatedAt: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      timezone: DATABASE_TIMEZONE,
       weeks,
       distanceChangeFraction4Weeks,
       records: {
@@ -839,8 +839,8 @@ export class RaiReadStore {
     const dates: string[] = [];
     for (let i = normalizedDays - 1; i >= 0; i -= 1) dates.push(shiftMobileDate(endDate, -i));
     const points = dates.map((date) => {
-      const night = this.recoveryRepository.loadCanonicalNight(date, "Asia/Shanghai");
-      const hrv = this.recoveryRepository.loadHrvDay(date, "Asia/Shanghai");
+      const night = this.recoveryRepository.loadCanonicalNight(date, DATABASE_TIMEZONE);
+      const hrv = this.recoveryRepository.loadHrvDay(date, DATABASE_TIMEZONE);
       return { date, sleepMinutes: night?.asleepUnionMinutes ?? null, hrvSdnnMs: hrv?.hrvSdnnMs ?? null, hrvSampleCount: hrv?.sampleCount ?? 0, hrvConfidence: hrv?.confidence ?? "missing", sourceCategory: night?.sourceCategory ?? null };
     });
     const latestDataDate = [...points].reverse().find((point) =>
@@ -849,7 +849,7 @@ export class RaiReadStore {
     return {
       generatedAt: now.toISOString(),
       asOf: endDate,
-      timezone: "Asia/Shanghai",
+      timezone: DATABASE_TIMEZONE,
       latestDataDate,
       days: points
     };
@@ -958,7 +958,7 @@ export class RaiReadStore {
     const overview = this.statisticsRepository.overview();
     return {
       generatedAt: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      timezone: DATABASE_TIMEZONE,
       status: overview.status,
       statusConfidence: overview.rolling7Days.loadConfidence,
       week: overview.week,
@@ -975,7 +975,7 @@ export class RaiReadStore {
   ): TrainingStatisticsHistoryResponse {
     return {
       generatedAt: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      timezone: DATABASE_TIMEZONE,
       granularity,
       periods: this.statisticsRepository.history(granularity, limit)
     };
@@ -984,11 +984,11 @@ export class RaiReadStore {
   trainingLoadTimeline(days: number): TrainingLoadTimelineResponse {
     const timeline = this.statisticsRepository.loadTimeline(days);
     if (!timeline) {
-      return { generatedAt: new Date().toISOString(), timezone: "Asia/Shanghai", days: [], components: [] };
+      return { generatedAt: new Date().toISOString(), timezone: DATABASE_TIMEZONE, days: [], components: [] };
     }
     return {
       generatedAt: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      timezone: DATABASE_TIMEZONE,
       days: timeline.days,
       components: timeline.components
     };

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
+import { DATABASE_TIMEZONE, healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
 import {
   activeDurationSecondsSql,
   SqlitePredictionRecoveryReadRepository
@@ -502,7 +502,7 @@ export function loadRaceReadiness(
 export function loadRecoveryReadiness(
   database: DatabaseSync,
   asOf: string,
-  timezoneIdentifier = "Asia/Shanghai"
+  timezoneIdentifier: string = DATABASE_TIMEZONE
 ): number | null {
   const readings = new SqlitePredictionRecoveryReadRepository(database)
     .load(asOf, timezoneIdentifier);

@@ -1,3 +1,4 @@
+import { DATABASE_TIMEZONE } from "@rai/contracts";
 import type { NumericSeriesSummary } from "@rai/features";
 import { defaultFeatureConfig } from "@rai/features";
 import { defaultRaiModelConfig } from "@rai/scoring";
@@ -231,7 +232,7 @@ export function fallbackStatisticSummary(
 export function defaultRequest(options: RecomputeOptions = {}): RecomputeRequest {
   return {
     evaluatedAt: normalizeInstant(options.evaluatedAt ?? appNow(), "evaluatedAt"),
-    timezoneIdentifier: options.timezoneIdentifier ?? "Asia/Shanghai",
+    timezoneIdentifier: options.timezoneIdentifier ?? DATABASE_TIMEZONE,
     featureConfig: options.featureConfig ?? defaultFeatureConfig,
     modelConfig: options.modelConfig ?? defaultRaiModelConfig
   };

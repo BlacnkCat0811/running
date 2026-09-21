@@ -684,13 +684,13 @@ const checkTrainingZoneBackfill = async (): Promise<void> => {
       })) {
         service.enqueueFullRecompute({
           evaluatedAt: new Date().toISOString(),
-          timezoneIdentifier: "Asia/Shanghai"
+          timezoneIdentifier: DATABASE_TIMEZONE
         });
         queued = true;
       } else if (counts.latest_profile_date === null || counts.latest_profile_date < localToday()) {
         service.enqueueSnapshotRefresh({
           evaluatedAt: new Date().toISOString(),
-          timezoneIdentifier: "Asia/Shanghai"
+          timezoneIdentifier: DATABASE_TIMEZONE
         });
         queued = true;
       }
@@ -1409,7 +1409,7 @@ app.post("/v1/model-runs", async (_request, reply) => {
   try {
     const jobId = new RaiApplicationService(store).enqueueFullRecompute({
       evaluatedAt: new Date().toISOString(),
-      timezoneIdentifier: "Asia/Shanghai"
+      timezoneIdentifier: DATABASE_TIMEZONE
     });
     recomputeWorker.schedule();
     return { jobId };

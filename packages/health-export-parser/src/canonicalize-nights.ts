@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { healthTypes } from "@rai/contracts";
+import { DATABASE_TIMEZONE, healthTypes } from "@rai/contracts";
 
 import { localDateAt, localDateTimeAt, stableId } from "./utils.js";
 
@@ -145,7 +145,7 @@ function buildNight(wakeDate: string, timezone: string, kind: CanonicalNightKind
 
 export interface CanonicalizationNightsResult { mainCount: number; napCount: number; hrvCount: number; rejectedInBedOnly: number; timezoneIdentifier: string }
 
-export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier = "Asia/Shanghai"): CanonicalizationNightsResult {
+export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: string = DATABASE_TIMEZONE): CanonicalizationNightsResult {
   const all = loadSegments(database);
   database.exec("BEGIN IMMEDIATE");
   try {

@@ -16,7 +16,7 @@ import type {
   TrainingZonesCurrentResponse,
   WorkoutListItem
 } from "@rai/api-contracts";
-import { DATABASE_TIMEZONE, healthTypes, localCalendarFormatter, type DailyTrainingMetric } from "@rai/contracts";
+import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, healthTypes, localCalendarFormatter, type DailyTrainingMetric } from "@rai/contracts";
 import { SqliteRecoveryFactsReadRepository } from "@rai/storage-sqlite";
 import { classifyPhysState, countNightsBelowSleepBaseline } from "@rai/training-load";
 import { loadRaceReadiness } from "@rai/application";
@@ -80,7 +80,7 @@ const percentile = (values: number[], p: number): number | null => {
 };
 
 const shanghaiInstant = (date: string, hour: number): string =>
-  new Date(`${date}T${String(hour).padStart(2, "0")}:00:00+08:00`).toISOString();
+  new Date(`${date}T${String(hour).padStart(2, "0")}:00:00${ISO_UTC_OFFSET}`).toISOString();
 
 const shiftDate = (date: string, days: number): string => {
   const value = new Date(`${date}T00:00:00Z`);
@@ -157,15 +157,15 @@ export function assembleMobileCoach(args: {
   const recoveryFacts = new SqliteRecoveryFactsReadRepository(database);
   // Keep sleep, overnight HRV and RHR on the same evidence date. Imports may
   // lag behind the wall clock; compare that evidence with its own prior baseline.
-  const currentNight = recoveryFacts.loadRecentMainNights(today, 1, "Asia/Shanghai")[0] ?? null;
+  const currentNight = recoveryFacts.loadRecentMainNights(today, 1, DATABASE_TIMEZONE)[0] ?? null;
   const recoveryDate = currentNight?.wakeDate ?? today;
   // Only a night that woke up today describes today. An older-but-recent night is
   // still reported as the historical reference (`recoveryDate`), but it must not
   // populate today's readings: `lastNightSleepMinutes` cannot carry a value from
   // an earlier night, and HRV/RHR are read from that night's own window.
   const nightIsToday = currentNight?.wakeDate === today;
-  const factsBaseline = recoveryFacts.loadBaselines(shanghaiInstant(recoveryDate, 12), "Asia/Shanghai");
-  const currentHrv = nightIsToday && currentNight ? recoveryFacts.loadHrvDay(currentNight.wakeDate, "Asia/Shanghai") : null;
+  const factsBaseline = recoveryFacts.loadBaselines(shanghaiInstant(recoveryDate, 12), DATABASE_TIMEZONE);
+  const currentHrv = nightIsToday && currentNight ? recoveryFacts.loadHrvDay(currentNight.wakeDate, DATABASE_TIMEZONE) : null;
   // The "three low nights" streak is anchored to today's calendar rather than to
   // the newest recorded night. Anchoring it to the newest night skipped gap days
   // silently, so three low nights spread over weeks were counted as one streak.
@@ -173,7 +173,7 @@ export function assembleMobileCoach(args: {
     lastNight: nightIsToday && currentNight ? currentNight.asleepUnionMinutes ?? null : null,
     baseline: factsBaseline.sleepMinutes,
     nightsBelow: countNightsBelowSleepBaseline(
-      [0, 1, 2].map((offset) => recoveryFacts.loadCanonicalNight(shiftDate(today, -offset), "Asia/Shanghai")),
+      [0, 1, 2].map((offset) => recoveryFacts.loadCanonicalNight(shiftDate(today, -offset), DATABASE_TIMEZONE)),
       factsBaseline.sleepMinutes
     )
   };
@@ -414,7 +414,7 @@ export function assembleMobileWorkoutPlan(args: {
 
   return {
     generatedAt: new Date().toISOString(),
-    timezone: "Asia/Shanghai",
+    timezone: DATABASE_TIMEZONE,
     windowDays: days.length,
     planRevision: args.planRevision,
     audit: args.audit,

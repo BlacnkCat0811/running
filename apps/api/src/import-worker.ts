@@ -1,3 +1,4 @@
+import { DATABASE_TIMEZONE } from "@rai/contracts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
@@ -486,7 +487,7 @@ export class ImportWorker {
           stagingDatabase,
           ...engineArgs,
           "--timezone",
-          "Asia/Shanghai",
+          DATABASE_TIMEZONE,
           ...(this.recomputeEvaluatedAt ? ["--evaluated-at", this.recomputeEvaluatedAt] : []),
           ...(incremental ? ["--dirty-from", incremental] : [])
         ]));

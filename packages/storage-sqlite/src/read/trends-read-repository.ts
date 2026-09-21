@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { SQL_UTC_OFFSET_MODIFIER } from "@rai/contracts";
 import { nullableNumber } from "./read-utils.js";
 
 export interface StoredTrendDaily {
@@ -103,7 +104,7 @@ export class SqliteTrendsReadRepository {
         FROM model_runs mr
         LEFT JOIN active_model_run amr ON amr.model_run_id = mr.id
         WHERE mr.status = 'succeeded'
-          AND (amr.model_run_id IS NOT NULL OR ? IS NULL OR date(mr.evaluated_at, '+8 hours') >= ?)
+          AND (amr.model_run_id IS NOT NULL OR ? IS NULL OR date(mr.evaluated_at, '${SQL_UTC_OFFSET_MODIFIER}') >= ?)
         ORDER BY mr.evaluated_at
       `)
       .all(start, start) as Record<string, unknown>[];

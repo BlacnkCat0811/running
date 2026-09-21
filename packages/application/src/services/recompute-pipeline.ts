@@ -3,6 +3,7 @@ import { RecomputeProgressGate } from "./recompute-progress.js";
 import { BoundedCache } from "./bounded-cache.js";
 
 import {
+  DATABASE_TIMEZONE,
   CONTRACT_VERSION,
   FEATURE_SCHEMA_VERSION,
   type AbilityAssessment,
@@ -292,7 +293,7 @@ export class RecomputePipeline {
         "evaluatedAt"
       ),
       timezoneIdentifier:
-        typeof parsed.timezoneIdentifier === "string" ? parsed.timezoneIdentifier : "Asia/Shanghai",
+        typeof parsed.timezoneIdentifier === "string" ? parsed.timezoneIdentifier : DATABASE_TIMEZONE,
       featureConfig: { ...defaultFeatureConfig, ...(parsed.featureConfig ?? {}) },
       modelConfig: { ...defaultRaiModelConfig, ...(parsed.modelConfig ?? {}) }
       // (2026-09-20) `validationMode` is deliberately not read back: historical
@@ -780,7 +781,7 @@ export class RecomputePipeline {
     return gain;
   }
 
-  private buildFeatureSource(row: SessionRow, override: WorkoutOverride | null, timezoneIdentifier = "Asia/Shanghai"): WorkoutFeatureSource {
+  private buildFeatureSource(row: SessionRow, override: WorkoutOverride | null, timezoneIdentifier: string = DATABASE_TIMEZONE): WorkoutFeatureSource {
     const heartRecords = this.loadRecordSeries(
       row.sourceName,
       row.workoutStartAt,

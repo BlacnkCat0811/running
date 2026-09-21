@@ -1,4 +1,4 @@
-import { localCalendarFormatter, type TrainingStatisticsGranularity } from "@rai/contracts";
+import { DATABASE_TIMEZONE, localCalendarFormatter, type TrainingStatisticsGranularity } from "@rai/contracts";
 
 export function periodStart(date: string, granularity: TrainingStatisticsGranularity): string {
   const parsed = new Date(`${date}T00:00:00Z`);
@@ -33,6 +33,6 @@ export function previousPeriod(start: string, granularity: TrainingStatisticsGra
   return value.toISOString().slice(0, 10);
 }
 
-export function localDateInTimezone(timeZone = "Asia/Shanghai"): string {
+export function localDateInTimezone(timeZone: string = DATABASE_TIMEZONE): string {
   return localCalendarFormatter(timeZone, "day").format(new Date());
 }

@@ -10,7 +10,7 @@ import type {
   WorkoutZoneSummary,
   TrainingLoadBreakdown
 } from "@rai/contracts";
-import { localCalendarFormatter, type PhysState } from "@rai/contracts";
+import { DATABASE_TIMEZONE, localCalendarFormatter, type PhysState } from "@rai/contracts";
 
 export { type PhysState } from "@rai/contracts";
 
@@ -323,7 +323,7 @@ export function latestAcuteChronicLoadRatio(
   return round(acute / chronic);
 }
 
-export function localDateInTimeZone(instant: string | Date, timeZone = "Asia/Shanghai"): string {
+export function localDateInTimeZone(instant: string | Date, timeZone: string = DATABASE_TIMEZONE): string {
   const date = typeof instant === "string" ? new Date(instant) : instant;
   if (!Number.isFinite(date.getTime())) throw new Error("instant must be a valid date");
   const parts = localCalendarFormatter(timeZone, "day").formatToParts(date);

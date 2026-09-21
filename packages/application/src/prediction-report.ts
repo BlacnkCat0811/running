@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import {
+import { DATABASE_TIMEZONE,
   CATBOOST_PREDICTION_MODEL_VERSION,
   PREDICTION_CORRECTION_CAP_FRACTION,
   PHYSIOLOGY_REPORT_VERSION,
@@ -212,7 +212,7 @@ export function buildFormulaPredictionBase(
   const thresholdEvidence = loadLactateThresholdEvidence(database, asOf);
   const readiness = resolvedReadiness(loadRaceReadiness(database, asOf));
   const recoveryReadiness = options.recoveryReadiness === undefined
-    ? loadRecoveryReadiness(database, asOf, options.timezoneIdentifier ?? "Asia/Shanghai")
+    ? loadRecoveryReadiness(database, asOf, options.timezoneIdentifier ?? DATABASE_TIMEZONE)
     : options.recoveryReadiness;
   const scenario = resolvedScenario(options);
   const profile = loadPhysiologyProfile(database, asOf);

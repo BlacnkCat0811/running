@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import {
+import { DATABASE_TIMEZONE,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
   predictionResidualFeatureNames,
@@ -208,7 +208,7 @@ export function loadAcuteChronicLoadRatio(
   `).all(asOf) as unknown as ActiveTrainingLoadRow[];
   if (rows.length === 0) return null;
 
-  const timezoneIdentifier = rows.at(-1)?.timezoneIdentifier ?? "Asia/Shanghai";
+  const timezoneIdentifier = rows.at(-1)?.timezoneIdentifier ?? DATABASE_TIMEZONE;
   const throughDate = localDateInTimeZone(asOf, timezoneIdentifier);
   const loads = rows.map((row) => ({
     trainingSessionId: row.trainingSessionId,

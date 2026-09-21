@@ -1,3 +1,4 @@
+import { DATABASE_TIMEZONE } from "@rai/contracts";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -26,7 +27,7 @@ async function main(): Promise<void> {
   const databasePath = resolve(optionValue(args, "--database", "var/rai.sqlite"));
   if (!existsSync(databasePath)) throw new Error(`Database not found: ${databasePath}`);
   const evaluatedAt = optionValue(args, "--evaluated-at", new Date().toISOString());
-  const timezoneIdentifier = optionValue(args, "--timezone", "Asia/Shanghai");
+  const timezoneIdentifier = optionValue(args, "--timezone", DATABASE_TIMEZONE);
   const dirtyFromAt = optionValue(args, "--dirty-from", "");
   const elevationGains = await nativeElevationGains(databasePath, {
     spoolRoot: resolve(optionValue(args, "--native-spool-root", dirname(databasePath))),

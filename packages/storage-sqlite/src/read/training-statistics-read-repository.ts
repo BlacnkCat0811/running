@@ -1,3 +1,4 @@
+import { DATABASE_TIMEZONE } from "@rai/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
 import type {
@@ -80,7 +81,7 @@ export class SqliteTrainingStatisticsReadRepository {
     };
   }
 
-  overview(timezone = "Asia/Shanghai"): {
+  overview(timezone: string = DATABASE_TIMEZONE): {
     status: DailyTrainingMetric | null;
     asOf: string;
     week: TrainingPeriodSummary;

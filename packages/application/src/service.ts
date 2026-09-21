@@ -1,3 +1,4 @@
+import { DATABASE_TIMEZONE } from "@rai/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
 import type {
@@ -84,7 +85,7 @@ export class RaiApplicationService {
 
   appendTrainingZoneProfileSettings(
     input: UpdateTrainingZoneProfileInput,
-    timezoneIdentifier = "Asia/Shanghai"
+    timezoneIdentifier: string = DATABASE_TIMEZONE
   ): TrainingZoneProfileSettings {
     const validateManual = (mode: "auto" | "manual", value: number | null, low: number, high: number, name: string): void => {
       if (mode === "manual") {
