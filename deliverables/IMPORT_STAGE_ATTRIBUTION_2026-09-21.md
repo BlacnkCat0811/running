@@ -474,3 +474,29 @@ export function parseComputeStageMessage(message: unknown): { stage; durationMs;
 ⚠️ 同类耦合还剩一处：`import-worker.ts` 的 `nativeStats` 仍有一份
 `["health", "gpx", "aggregate", "apply-records"]`（Rust 引擎操作名）白名单。
 本次未新增操作 ⇒ **未动**，但已登记为「下一处同类耦合」。
+
+### 12.6 部署实录（2026-09-21 21:25 CST）
+
+线上 `7df51c6 → f6b27aa`。本批 4 个文件，其中**运行时只有** `apps/api/src/import-worker.ts`
+（`apps/api/test/**` 服务器不跑，两个 `deliverables/` 是文档）。
+
+| 项 | 实测 |
+| :--- | :--- |
+| 闸门 | `crates` **0** / `apps/web` **0** / `package*.json` **0** / `deploy` **0** / 迁移 **0** ⇒ 最小部署；`merge-base --is-ancestor` 确认可快进 |
+| 部署前备份 | `rai.manual.2026-09-21T13-25-08-385Z.06a41a68.sqlite`（530,530,304 B），部署后**确认仍在** ✓ |
+| 迁移闸门 | `version 22` + **`pending: []`**（`workouts 275 / route_points 110840 / health_records 114162`） |
+| unit | `INSTALLED_EQ_REPO true` / `HAS_EXIT78 true` |
+| **停机** | 21:25:26 停 → 21:25:28 `Server listening` ≈ **2 s**（不重编译 Rust、不装依赖、不构建 web） |
+| 服务 | `active` / `NRestarts=0` / `publicReadHosts 26/12`（线上基准值）/ `RAI local API ready` / 无迁移报错 |
+| 引擎 | `RAI_IMPORT_ENGINE=rust` + `RAI_RUST_FALLBACK=typescript` + `RAI_RUST_BINARY=/opt/rai-native/rai-data-worker`；**死配置计数 0** |
+| **修复生效的当场判据** | 云机上直接 import **线上源码** `apps/api/src/import-worker.ts` 调 `parseComputeStageMessage`：**接受 10/10**（7 个新段名 + `parse_health_xml`/`trainingMetrics`/`modelReplay`）、**拒绝 5/5**（`9x`/`_x`/`a-b`/空串/49 字符）⇒ `VERDICT PASS` |
+| 端点 | 匿名 `/v1/health` **200**（`status:"ok"` + `databaseReady:true`）、`/v1/data-summary` **200** + **`issues: []`**、`/` 与 `/settings` **200** |
+| 收尾 | 临时脚本已删 / 无 Rust 子进程残留 / 磁盘 **34%** / 备份 **14 份 7.0 G** / `var/backups` 侧车 **0** |
+
+🔴 **本批未跑 Rust 契约测试**（上一批跑过 8/8、0 skipped）：`crates/**` 零改动、二进制未重建，
+而该测试覆盖的是 CLI↔二进制的契约，与本次改动的接收逻辑无关。⇒ **不是"忘了"，是不触发**；
+但要说出来，别让"没跑"被读成"跑绿了"。
+
+🔴 **7 个新段名此刻仍未出现在 `computeStagesMs` 里**（仍 8 段、`createdAt = 12:24:02.526Z`）——
+这是**上一版代码的快照**，不是修复失败。判据：**下一次真实导入**后应看到 **15 段**（8 + 7），
+且 `validate_installed` 接近 0 ms、`activate_staging` 把此前"不可见"的尾部十几秒变成可读数字。
