@@ -248,6 +248,12 @@ OPT-1 只修了 `packages/health-export-parser/src/utils.ts` 一处。同一形�
 
 **需你决策 ④**：第一步选 (a) 前端一起统一，还是 (b) 只收敛后端。
 
+✅ **2026-09-21 小唐批复：(b) 只收敛后端。** 实施方案见 `BATCH4_TIMEZONE_PLAN_2026-09-21.md`：
+实测后端 **41** / 前端 **5** 处；共享落点建议 `@rai/contracts/src/timezone.ts`；拆两个提交（A 纯性能 / B 零行为变化）；
+4 条红线；最硬验收 = 逐字节比对。
+🔴 该文档同时纠正了本页 3 处偏差：`plan-execution.ts` 实在 **`apps/api/src/`**（`packages/application/src/` 下无此文件）；
+`data.ts:296` 是**等值比较**而非 `date()` 修饰符（参数化安全）；三处"偏移"修法互不相同、不能一起改。
+
 ---
 
 ### 批次 5：OPT-4 / OPT-10 / OPT-11
