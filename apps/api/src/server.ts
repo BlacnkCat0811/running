@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
-import fastifyStatic from "@fastify/static";
+import { registerWebAssets } from "./web-assets.js";
 import type {
   HandshakeResponse,
   HealthResponse,
@@ -374,7 +374,7 @@ app.addHook("onError", async (request) => releaseMutation(request));
 installMutationLifetime(app, releaseMutation);
 const webDist = resolve(projectRoot, "apps/web/dist");
 if (existsSync(webDist)) {
-  await app.register(fastifyStatic, { root: webDist, prefix: "/", wildcard: false });
+  await registerWebAssets(app, webDist);
 }
 
 // Both annotated: `readStores` asks the import worker for the newest refresh and
@@ -1539,10 +1539,6 @@ app.delete<{ Body: { confirmation: string } }>("/v1/database", { schema: { body:
     ? { deleted: true, preservation: { kind: "quarantine" as const, snapshot: backupInfo } }
     : { deleted: true, preservation: { kind: "backup" as const, backup: backupInfo } };
 });
-
-if (existsSync(webDist)) {
-  app.get("/*", async (_request, reply) => reply.sendFile("index.html"));
-}
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);

@@ -34,3 +34,12 @@ test("cloud deployment uses generic cold backups and retains the old entry point
   assert.match(read("backup-runtime.sh"), /apply=false/);
   assert.match(read("n100/backup-runtime.sh"), /exec bash .*backup-runtime\.sh/);
 });
+
+
+test("direct static hosting never falls back to arbitrary dist files", () => {
+  const nginx = read("nginx-rai.conf").split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
+  assert.doesNotMatch(nginx, /try_files \$uri \$uri\//);
+  assert.match(nginx, /location = \/index\.html \{ disable_symlinks on; try_files \/index\.html =404;/);
+  assert.match(nginx, /location \/ \{ return 404; \}/);
+  assert.match(nginx, /disable_symlinks on;\s+try_files \$uri =404;/);
+});

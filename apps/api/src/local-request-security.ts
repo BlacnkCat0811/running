@@ -139,7 +139,10 @@ export function installLocalRequestSecurity(
   options: LocalRequestSecurityOptions
 ): void {
   app.addHook("onRequest", async (request, reply) => {
-    if (options.apiToken && (request.url.split("?", 1)[0] ?? "").startsWith("/v1/")) {
+    if (options.apiToken && (
+      request.routeOptions.url?.startsWith("/v1/") ||
+      (request.url.split("?", 1)[0] ?? "").startsWith("/v1/")
+    )) {
       const authorization = request.headers.authorization;
       if (authorization === `Bearer ${options.apiToken}`) {
         if (options.allowAuthenticatedRemote) {
