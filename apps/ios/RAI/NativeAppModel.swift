@@ -823,7 +823,11 @@ final class NativeAppModel {
 
     private func recordCache<Value: Codable>(_ value: Value?, key: String) {
         guard let value else { return }
-        lastCacheUpdate = cache.write(value, scope: cacheScope, key: key)
+        if let writtenAt = cache.write(value, scope: cacheScope, key: key) {
+            lastCacheUpdate = writtenAt
+        } else {
+            errorMessage = "数据已读取，但离线缓存未能保存。请检查设备存储空间。"
+        }
     }
 
     private func friendlyMessage(_ error: Error) -> String {

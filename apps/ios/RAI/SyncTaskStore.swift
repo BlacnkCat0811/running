@@ -4,6 +4,7 @@ import SQLite3
 @MainActor
 final class SyncTaskStore {
     private var database: OpaquePointer?
+    private(set) var lastError: String?
 
     /// False when the journal could not be opened, in which case every read and
     /// write below is a no-op. Callers must not treat that as "no task saved":
@@ -88,59 +89,66 @@ final class SyncTaskStore {
         guard let statement = prepare("SELECT payload FROM sync_tasks WHERE scope = ?") else { return nil }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
-        guard sqlite3_step(statement) == SQLITE_ROW,
-              let pointer = sqlite3_column_blob(statement, 0) else { return nil }
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return nil }
+        guard result == SQLITE_ROW else { fail("read"); return nil }
         let length = Int(sqlite3_column_bytes(statement, 0))
+        if length == 0 { return Data() }
+        guard let pointer = sqlite3_column_blob(statement, 0) else { fail("read payload"); return nil }
         return Data(bytes: pointer, count: length)
     }
 
-    func save(_ data: Data, scope: String) {
+    @discardableResult
+    func save(_ data: Data, scope: String) -> Bool {
         guard let statement = prepare("""
             INSERT INTO sync_tasks(scope, updated_at, payload)
             VALUES (?, ?, ?)
             ON CONFLICT(scope) DO UPDATE SET
                 updated_at = excluded.updated_at,
                 payload = excluded.payload
-            """) else { return }
+            """) else { return false }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
         sqlite3_bind_double(statement, 2, Date().timeIntervalSince1970)
-        _ = data.withUnsafeBytes { buffer in
-            sqlite3_bind_blob(statement, 3, buffer.baseAddress, Int32(data.count), SQLITE_TRANSIENT)
+        guard data.count <= Int(Int32.max) else { fail("payload too large"); return false }
+        let bound = data.withUnsafeBytes { buffer in
+            sqlite3_bind_blob(statement, 3, buffer.baseAddress, Int32(data.count), SQLiteSupport.transient)
         }
+        guard bound == SQLITE_OK, lastError == nil else { fail("bind"); return false }
         let step = sqlite3_step(statement)
         if step != SQLITE_DONE {
-            Self.report("save failed (sqlite \(step))", at: "scope \(scope)")
+            fail("save")
         }
+        return step == SQLITE_DONE
     }
 
-    func clear(scope: String) {
-        guard let statement = prepare("DELETE FROM sync_tasks WHERE scope = ?") else { return }
+    @discardableResult
+    func clear(scope: String) -> Bool {
+        guard let statement = prepare("DELETE FROM sync_tasks WHERE scope = ?") else { return false }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
         let step = sqlite3_step(statement)
         if step != SQLITE_DONE {
-            Self.report("clear failed (sqlite \(step))", at: "scope \(scope)")
+            fail("clear")
         }
+        return step == SQLITE_DONE
+    }
+
+    private func fail(_ operation: String) {
+        lastError = "同步进度未能保存或读取，请检查设备存储空间后重试。"
+        SQLiteSupport.report("sync journal \(operation)", database: database)
     }
 
     private func prepare(_ sql: String) -> OpaquePointer? {
-        guard let database else { return nil }
-        var statement: OpaquePointer?
-        let result = sql.withCString { value in
-            sqlite3_prepare_v2(database, value, -1, &statement, nil)
+        lastError = nil
+        guard let statement = SQLiteSupport.prepare(sql, database: database) else {
+            fail("prepare")
+            return nil
         }
-        guard result == SQLITE_OK else { return nil }
         return statement
     }
 
     private func bind(_ value: String, to statement: OpaquePointer, at index: Int32) {
-        _ = value.withCString { pointer in
-            sqlite3_bind_text(statement, index, pointer, -1, SQLITE_TRANSIENT)
-        }
-    }
-
-    private var SQLITE_TRANSIENT: sqlite3_destructor_type {
-        unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        if !SQLiteSupport.bind(value, to: statement, at: index) { fail("bind") }
     }
 }

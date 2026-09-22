@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 
 // `ServerSession` 的生产默认值需要的两个符号（本回归只调用它的 `canonicalURL`，是个
 // nonisolated static，所以这两个替身不该被触达）。触发即失败，而不是悄悄去读真 Keychain。
@@ -86,7 +87,7 @@ struct StoreRegression {
         let writtenAt = cache.write(["hello": "world"], scope: "s1", key: "k1")
         let stored = cache.read([String: String].self, scope: "s1", key: "k1")
         check(stored?.value == ["hello": "world"], "a written value reads back")
-        check(abs((stored?.cachedAt.timeIntervalSince(writtenAt) ?? 999)) < 5,
+        check(abs((stored?.cachedAt.timeIntervalSince(writtenAt!) ?? 999)) < 5,
               "a read reports when the value was written")
         check(cache.read([String: String].self, scope: "s2", key: "k1") == nil,
               "the same key under another scope is a miss, not the other scope's value")
@@ -124,7 +125,8 @@ struct StoreRegression {
 
         // 开不出库时不允许崩、也不允许假装写成功。
         let brokenCache = CacheStore(fileURL: URL(fileURLWithPath: "/dev/null/not-a-directory/cache.sqlite"))
-        _ = brokenCache.write(["a": "b"], scope: "s", key: "k")
+        check(brokenCache.write(["a": "b"], scope: "s", key: "k") == nil,
+              "a failed cache write must not advance freshness")
         check(brokenCache.read([String: String].self, scope: "s", key: "k") == nil,
               "a cache that cannot open reports a miss instead of crashing")
 
@@ -143,9 +145,22 @@ struct StoreRegression {
         check(journal.load(scope: "s1") == nil, "clear(scope:) forgets that scope")
         check(journal.load(scope: "s2") == Data([7]), "clear(scope:) leaves other scopes alone")
 
+        // Inject real SQLite write failures after a successful open: availability
+        // alone cannot prove that a later update or clear was durable.
+        var control: OpaquePointer?
+        let journalPath = root.appendingPathComponent("sync/sync.sqlite").path
+        precondition(sqlite3_open(journalPath, &control) == SQLITE_OK)
+        precondition(sqlite3_exec(control, "CREATE TRIGGER fail_update BEFORE UPDATE ON sync_tasks BEGIN SELECT RAISE(ABORT, 'fixture'); END; CREATE TRIGGER fail_delete BEFORE DELETE ON sync_tasks BEGIN SELECT RAISE(ABORT, 'fixture'); END;", nil, nil, nil) == SQLITE_OK)
+        check(!journal.save(Data([8]), scope: "s2"), "a rejected update reports failure")
+        check(journal.lastError != nil, "journal write failure has an actionable state")
+        check(journal.load(scope: "s2") == Data([7]), "a rejected update retains the last durable task")
+        check(!journal.clear(scope: "s2"), "a rejected clear reports failure")
+        check(journal.load(scope: "s2") == Data([7]), "a rejected clear retains the resume state")
+        sqlite3_close(control)
+
         let brokenJournal = SyncTaskStore(directory: URL(fileURLWithPath: "/dev/null/not-a-directory"))
         check(!brokenJournal.isAvailable, "a journal that cannot open reports itself unavailable")
-        brokenJournal.save(Data([1]), scope: "s1")
+        check(!brokenJournal.save(Data([1]), scope: "s1"), "an unavailable journal rejects writes")
         check(brokenJournal.load(scope: "s1") == nil, "an unavailable journal never pretends a save happened")
         brokenJournal.clear(scope: "s1")
         check(brokenJournal.load(scope: "s1") == nil, "clearing an unavailable journal is a no-op, not a crash")

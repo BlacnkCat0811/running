@@ -171,6 +171,15 @@ final class HealthKitSync {
         if UserDefaults.standard.object(forKey: scopedKey(Self.lastWorkoutCountKey)) != nil {
             lastWorkoutCount = UserDefaults.standard.integer(forKey: scopedKey(Self.lastWorkoutCountKey))
         }
+        // A failed journal read is not an empty queue. Do not overwrite an
+        // unresolved batch (or advance its anchor) while storage is unavailable.
+        _ = loadTask()
+        if let journalError = taskStore.lastError {
+            lastError = journalError
+            phase = "failed"
+            message = nil
+            return
+        }
         if !full, let task = loadTask(), let sourceId = task.sourceId {
             do {
                 phase = task.phase
@@ -187,7 +196,7 @@ final class HealthKitSync {
                         advanceWatermark: task.exportEnd != nil,
                         anchor: task.pendingAnchor
                     )
-                    clearTask()
+                    guard clearTask() else { return }
                     clearPersistedUpload()
                     return
                 }
@@ -198,7 +207,7 @@ final class HealthKitSync {
                     try checkCancellation()
                     let job = try await startImport(sourceId: sourceId, on: serverURL)
                     try checkCancellation()
-                    updateTask(jobId: job.id, phase: "recomputing")
+                    try updateTask(jobId: job.id, phase: "recomputing")
                     jobId = job.id
                 }
                 let finished = try await waitForJob(id: jobId, on: serverURL)
@@ -210,7 +219,7 @@ final class HealthKitSync {
                     advanceWatermark: task.exportEnd != nil,
                     anchor: task.pendingAnchor
                 )
-                clearTask()
+                guard clearTask() else { return }
                 clearPersistedUpload()
                 if finished.status == "succeeded" { clearFailedZip() }
                 return
@@ -229,7 +238,7 @@ final class HealthKitSync {
                 // 这个 task 不可能恢复了，先清掉它。留着它的后果不是"下次说不定能成"，
                 // 而是下一次同步仍会从上面那句 `inspect(sourceId:)` 进来、拿到同一个 404：
                 // 2026-09-22 线上实测，此后 nginx 日志里**再没有出现过任何 uploads**。
-                clearTask()
+                guard clearTask() else { return }
                 if httpError?.code == HealthSyncResumePolicy.terminalJobCode {
                     // 任务已经跑完并明确失败：把错误如实报出去。失败若是确定性的，
                     // 在这次点击里再悄悄跑一遍导入只是白跑一次；下一次同步从干净状态开始。
@@ -256,7 +265,7 @@ final class HealthKitSync {
                     try await self.upload(zipURL: persisted, to: serverURL, batchId: task.payloadHash)
                 }
                 try checkCancellation()
-                updateTask(sourceId: sourceId, phase: "importing")
+                try updateTask(sourceId: sourceId, phase: "importing")
                 message = "正在检查健康数据"
                 let inspection = try await withRetry {
                     try await self.inspect(sourceId: sourceId, on: serverURL)
@@ -280,7 +289,7 @@ final class HealthKitSync {
                         try await self.startImport(sourceId: sourceId, on: serverURL)
                     }
                     try checkCancellation()
-                    updateTask(jobId: job.id, phase: "recomputing")
+                    try updateTask(jobId: job.id, phase: "recomputing")
                     let finished = try await waitForJob(id: job.id, on: serverURL)
                     if task.exportEnd == nil { clearExportWatermark() }
                     try markSuccess(
@@ -292,7 +301,7 @@ final class HealthKitSync {
                     )
                     if finished.status == "succeeded" { clearFailedZip() }
                 }
-                clearTask()
+                guard clearTask() else { return }
                 clearPersistedUpload()
                 phase = "succeeded"
                 return
@@ -419,7 +428,7 @@ final class HealthKitSync {
             let pendingAnchor = exported.workoutAnchor
             phase = "uploading"
             let payloadHash = try fileHash(persisted)
-            saveTask(SyncTaskState(
+            try saveTask(SyncTaskState(
                 target: serverURL.absoluteString,
                 serverId: identity.serverId,
                 athleteId: identity.athleteId,
@@ -441,7 +450,7 @@ final class HealthKitSync {
             }
             try checkCancellation()
             phase = "importing"
-            updateTask(sourceId: sourceId, phase: "importing")
+            try updateTask(sourceId: sourceId, phase: "importing")
             message = "正在检查健康数据"
             let inspection = try await withRetry {
                 try await self.inspect(sourceId: sourceId, on: serverURL)
@@ -465,7 +474,7 @@ final class HealthKitSync {
                     try await self.startImport(sourceId: sourceId, on: serverURL)
                 }
                 try checkCancellation()
-                updateTask(sourceId: sourceId, jobId: job.id, phase: "recomputing")
+                try updateTask(sourceId: sourceId, jobId: job.id, phase: "recomputing")
                 let finished = try await waitForJob(id: job.id, on: serverURL)
                 try markSuccess(
                     message: importMessage(exported: exported, job: finished),
@@ -474,7 +483,7 @@ final class HealthKitSync {
                     advanceWatermark: true,
                     anchor: pendingAnchor
                 )
-                clearTask()
+                guard clearTask() else { return }
             }
         } catch {
             if let transientExportURL {
@@ -489,7 +498,7 @@ final class HealthKitSync {
         if lastError == nil, phase != "failed", phase != "cancelled", let zipURL {
             try? FileManager.default.removeItem(at: zipURL)
             clearFailedZip()
-            clearTask()
+            guard clearTask() else { return }
         }
         if lastError == nil, phase != "failed", phase != "cancelled" { phase = "succeeded" }
         #else
@@ -907,31 +916,28 @@ final class HealthKitSync {
         "\(key).\(scope)"
     }
 
-    /// Writes the resume state to both homes.
-    ///
-    /// The journal is the primary one, but every write to it is a silent no-op
-    /// when it could not be opened, and `loadTask` already reads the
-    /// `UserDefaults` copy as a fallback — so writing only the journal meant a
-    /// device with an unusable journal silently lost the ability to resume an
-    /// import that was already uploaded.
-    private func saveTask(_ task: SyncTaskState) {
-        guard let data = try? JSONEncoder().encode(task) else { return }
-        taskStore.save(data, scope: activeScope)
-        UserDefaults.standard.set(data, forKey: scopedKey(Self.taskKey))
+    /// The SQLite journal is authoritative. Legacy UserDefaults data is read
+    /// only for migration; a failed write must not advance a network operation.
+    private func saveTask(_ task: SyncTaskState) throws {
+        let data = try JSONEncoder().encode(task)
+        guard taskStore.save(data, scope: activeScope) else {
+            throw SyncHTTPError(message: taskStore.lastError ?? "同步进度未能保存")
+        }
+        UserDefaults.standard.removeObject(forKey: scopedKey(Self.taskKey))
     }
 
     private func loadTask() -> SyncTaskState? {
         let decoder = JSONDecoder()
+        let journal = taskStore.load(scope: activeScope)
+        guard taskStore.lastError == nil else { return nil }
         let candidates: [Data] = [
-            taskStore.load(scope: activeScope),
+            journal,
             UserDefaults.standard.data(forKey: scopedKey(Self.taskKey, scope: activeScope)),
             activeServerURL.flatMap { UserDefaults.standard.data(forKey: scopedKey(Self.taskKey, scope: Self.urlScope(for: $0))) }
         ].compactMap { $0 }
         for data in candidates {
             guard let task = try? decoder.decode(SyncTaskState.self, from: data), isCurrentTask(task) else { continue }
-            if taskStore.load(scope: activeScope) == nil {
-                taskStore.save(data, scope: activeScope)
-            }
+            if journal == nil && !taskStore.save(data, scope: activeScope) { return nil }
             return task
         }
         return nil
@@ -946,22 +952,28 @@ final class HealthKitSync {
         return true
     }
 
-    private func updateTask(sourceId: String? = nil, jobId: String? = nil, phase: String) {
-        guard var task = loadTask() else { return }
+    private func updateTask(sourceId: String? = nil, jobId: String? = nil, phase: String) throws {
+        guard var task = loadTask() else { throw SyncHTTPError(message: "同步进度无法读取，已停止本次操作") }
         task.sourceId = sourceId ?? task.sourceId
         task.jobId = jobId ?? task.jobId
         task.phase = phase
-        saveTask(task)
+        try saveTask(task)
     }
 
-    private func clearTask() {
-        taskStore.clear(scope: activeScope)
+    @discardableResult
+    private func clearTask() -> Bool {
+        guard taskStore.clear(scope: activeScope) else {
+            lastError = taskStore.lastError ?? "同步进度未能清理，下次连接将重新确认"
+            phase = "failed"
+            return false
+        }
         UserDefaults.standard.removeObject(forKey: scopedKey(Self.taskKey))
         if let activeServerURL {
             UserDefaults.standard.removeObject(
                 forKey: scopedKey(Self.taskKey, scope: Self.urlScope(for: activeServerURL))
             )
         }
+        return true
     }
 
     private func fileHash(_ url: URL) throws -> String {

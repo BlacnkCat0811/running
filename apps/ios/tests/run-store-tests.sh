@@ -32,6 +32,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/ServerSession.swift \
   "$tmp/CacheStore.swift" \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/SQLiteSupport.swift \
   apps/ios/tests/StoreRegression.swift \
   -o "$tmp/store-tests"
 "$tmp/store-tests"

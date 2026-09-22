@@ -69,7 +69,7 @@ final class CacheStore {
         return CachedValue(value: value, cachedAt: cachedAt)
     }
 
-    func write<Value: Codable>(_ value: Value, scope: String, key: String) -> Date {
+    func write<Value: Codable>(_ value: Value, scope: String, key: String) -> Date? {
         let cachedAt = Date()
         guard let payload = try? JSONEncoder().encode(value),
               let statement = prepare("""
@@ -79,7 +79,8 @@ final class CacheStore {
                     cached_at = excluded.cached_at,
                     payload = excluded.payload
                 """) else {
-            return cachedAt
+            SQLiteSupport.report("cache encode/prepare", database: database)
+            return nil
         }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
@@ -93,7 +94,8 @@ final class CacheStore {
         if stepResult != SQLITE_DONE {
             // 写缓存失败不致命（重新联网会重建），但必须可观测：
             // 静默丢弃会让离线可用性无预警地退化，且调用方仍以为写入成功。
-            print("RAI cache write failed: step=\(stepResult) scope=\(scope) key=\(key)")
+            SQLiteSupport.report("cache write", database: database)
+            return nil
         }
         prune()
         return cachedAt
@@ -103,7 +105,7 @@ final class CacheStore {
         guard let statement = prepare("DELETE FROM cache_entries WHERE scope = ?") else { return }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
-        _ = sqlite3_step(statement)
+        if sqlite3_step(statement) != SQLITE_DONE { SQLiteSupport.report("cache delete", database: database) }
     }
 
     func clearAll() {
@@ -127,7 +129,7 @@ final class CacheStore {
                     SELECT rowid FROM cache_entries ORDER BY cached_at ASC, rowid ASC LIMIT 1
                 )
                 """) else { return }
-            _ = sqlite3_step(statement)
+            if sqlite3_step(statement) != SQLITE_DONE { SQLiteSupport.report("cache delete", database: database) }
             let removed = sqlite3_changes(database)
             sqlite3_finalize(statement)
             if removed == 0 { return }
@@ -167,30 +169,21 @@ final class CacheStore {
     }
 
     private func execute(_ sql: String) {
-        guard let database else { return }
-        _ = sql.withCString { statement in
-            sqlite3_exec(database, statement, nil, nil, nil)
+        if !SQLiteSupport.execute(sql, database: database) {
+            SQLiteSupport.report("cache execute", database: database)
         }
     }
 
     private func prepare(_ sql: String) -> OpaquePointer? {
-        guard let database else { return nil }
-        var statement: OpaquePointer?
-        let result = sql.withCString { value in
-            sqlite3_prepare_v2(database, value, -1, &statement, nil)
-        }
-        guard result == SQLITE_OK else { return nil }
+        let statement = SQLiteSupport.prepare(sql, database: database)
+        if statement == nil { SQLiteSupport.report("cache prepare", database: database) }
         return statement
     }
 
     private func bind(_ value: String, to statement: OpaquePointer, at index: Int32) {
-        _ = value.withCString { pointer in
-            sqlite3_bind_text(statement, index, pointer, -1, SQLITE_TRANSIENT)
+        if !SQLiteSupport.bind(value, to: statement, at: index) {
+            SQLiteSupport.report("cache bind", database: database)
         }
-    }
-
-    private var SQLITE_TRANSIENT: sqlite3_destructor_type {
-        unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     }
 }
 #endif

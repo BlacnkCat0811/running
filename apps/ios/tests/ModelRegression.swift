@@ -18,7 +18,7 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
         guard let data = entries[scope + key], let value = try? JSONDecoder().decode(type, from: data) else { return nil }
         return CachedValue(value: value, cachedAt: Date())
     }
-    func write<V: Codable>(_ value: V, scope: String, key: String) -> Date {
+    func write<V: Codable>(_ value: V, scope: String, key: String) -> Date? {
         entries[scope + key] = try? JSONEncoder().encode(value)
         return Date()
     }
