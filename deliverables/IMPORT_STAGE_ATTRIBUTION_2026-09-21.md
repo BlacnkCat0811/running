@@ -951,6 +951,13 @@ stagesMs.backup = ensureBackupCapacity + backup()【读 506 MB + 写 530 MB】 +
 
 ## 18. §17.6 的「方案 A」：**实施前先被自己的实测证否**，改做真正的冗余（2026-09-22 CST）
 
+> 🔴🔴 **本节与 §19 所述改动已于同日（2026-09-22）全部回滚 —— 读结论请直接跳到 §20。**
+> `85350a2` / `34cf9e3` 被 `d8ca84b` / `5ab6c14` 反向提交撤销，线上已退回 `49f393f` 的代码状态。
+> **原因是它踩到了一条我没查到的既有不变量**（`native-record-writer.ts:249`：
+> 原生记录写入要求暂存库路径形如 `….importing.<36位uuid>`）。
+> §18/§19 保留原样，因为它们记录了**真实的测量与推理过程**（方案 A 的证否、缺陷的定性方法、突变验证），
+> 这些结论仍然有效；**只有"落地这个优化"这一条被否**。教训写在 §20。
+
 ### 18.1 起因
 
 小唐批准「用你推荐的 a 方案推进实施」（= §17.6 表里的 A）。我在动代码前先算了一遍 I/O 总量。
@@ -1096,6 +1103,38 @@ CLI 的两层语义（复制 + 原子发布）在服务端场景下**两层都�
 `prepare_staging_copy` 段应从 `computeStagesMs` 里**消失**（该段整段不再执行），`TOTAL` 预期 −1.5 s 左右。
 按 §17.4 的纪律，判据写成**「同条件下旧/新对比」**，不写绝对阈值。
 
+### 18.12 🔴 上线后补的**两样本基线**（2026-09-22，直接从 `runtime.sqlite` 取全量 `computeStagesMs`）
+
+§18.11 写"−1.5 s 左右"时我只有一个样本。取第二个样本后可以**把判据精确化**，同时暴露了
+一个此前没看到的大头。
+
+| `computeStagesMs` 段 | 09-21 23:18（新码） | 09-21 13:42（旧码） | 备注 |
+| --- | ---: | ---: | --- |
+| **`trainingMetrics`** | **9,262** | **9,097** | 🔴 **纯计算、两次几乎相同 ⇒ 确定性成本** |
+| `parse_health_xml` | 2,799 | 3,176 | 原生 XML 解码 |
+| `canonicalize_nights` | 2,254 | 2,243 | ✅ OPT-1 已收敛（云机原 21.3 s） |
+| **`prepare_staging_copy`** | **1,605** | **1,597** | ✅ **本轮改动要消掉的就是它** |
+| `features` | 322 | 1,530 | 波动大 |
+| `modelReplay` | 378 | 419 | — |
+| `stage_audit_files` | 169 | 180 | — |
+| `open_staging_store` | 98 | 92 | — |
+| `import_gpx_routes` | 17 | 70 | — |
+| `activate_staging` | 16 | 16 | — |
+| `canonicalize_workouts` | 12 | 11 | — |
+| `validate_installed` | 1.24 | 1.29 | 结构探针（已登记降级，见 §10–§11） |
+| `close_store` / `commit_audit_files` / `locate_health_xml` | 25 / 0.2 / 0.07 | 32 / 0.22 / 0.07 | — |
+
+**两样本基线把本轮判据收紧为**：`prepare_staging_copy` **1,597 / 1,605 ms**
+⇒ **预期收益 −1.60 s（−4.6%）**，而不是"−1.5 s 左右"。
+判据：下一次真实导入的 `computeStagesMs` 里**该键消失**（不是变小）；`TOTAL` 从
+34,678 降到约 **33.1 s**（同一次导入的其它条件不变时）。
+
+🔴 **同时暴露的更大一项**：`trainingMetrics` **9,262 ms = 整个导入的 26.7%、`recompute` 的 88.5%**，
+且两次样本几乎相同（9,097 / 9,262）—— 与 `backup` 段那种"冷热双峰"完全不同，
+是**确定性计算**。它是现在**唯一既大、又有确定证据、又可能有方案**的项
+（`backup` 段更大，但 §17.6 的三个候选方案：A 已证否、B 属"看起来变快"、C 是已登记降级 ⇒ **无可行方案**）。
+⇒ 下一步的取证方向写进 `NOTES-engineering.md` 的「复算阶段」条。
+
 ---
 
 ## 19. 实施过程中发现并修掉一个**真缺陷**：新标志必须与那次 `copyFile` 同条件（2026-09-22 CST）
@@ -1212,5 +1251,97 @@ function requireExistingStagingDatabase(path: string): string {
 3. 🔴 **新增"条件性开关"时，先找它描述的那条路径的前提条件，然后把开关钉在同一个条件上**；
    再在**收方**加一道"承诺不成立就报错"。发送方收窄 + 接收方校验，两侧都要有回归断言。
 4. 🟡 **测守卫用例时，先确认"没有更早的同类守卫会先命中"** —— 否则测到的是旧守卫（本轮第一版即如此）。
+
+---
+
+## 20. 🔴 上线即破：`--database-is-staging` 踩到既有不变量，当日回滚（2026-09-22 CST）
+
+### 20.1 现场
+
+小唐上报：**「同步显示 未找到导入来源」**。此时距部署（08:46）13 分钟。
+
+线上日志还原出完整链路（08:57:57 那一次）：
+
+| 请求 | 状态 |
+| --- | --- |
+| `POST /v1/imports/uploads` | **200** |
+| `POST /v1/imports/inspect` | **200** |
+| `POST /v1/import-jobs` | **202**（任务已创建） |
+| `GET /v1/import-jobs/<id>` | 200 → 之后该任务 `status: failed` |
+| 之后每 ~2 s 一次 `POST /v1/imports/inspect` | 🔴 **404**（客户端在重试） |
+
+⇒ **用户看到的那句话是级联现象**：导入失败后来源被清掉，客户端拿着旧 `sourceId` 重试
+`inspect` ⇒ `ImportSourceNotFoundError`（`import-sources.ts:61`，文案"未找到导入来源"）。
+**不是 `inspect` 本身坏了。**
+
+### 20.2 真因：一条我事先不知道的既有不变量
+
+失败任务的 `computeStagesMs` 只走到 `parse_health_xml` 就断了，且 `prepare_staging_copy` **不在**里
+（＝就地模式生效）。CLI 的 stderr：
+
+```
+Native record writes require a CLI-owned staging database
+```
+
+对应 `packages/health-export-parser/src/native-record-writer.ts:245-251`：
+
+```ts
+const target = options.stagingDatabase;
+const main = (store.database.prepare("PRAGMA database_list").all()…).find(r => r.name === "main")?.file;
+const canonicalTarget = target ? realpathSync(target) : null;
+if (!canonicalTarget || !main || canonicalTarget !== realpathSync(main)
+    || !/\.importing\.[a-f0-9-]{36}$/.test(canonicalTarget)) {
+  throw new Error("Native record writes require a CLI-owned staging database");
+}
+```
+
+它同时要求两件事：① 写入目标是这个 store 的 **main** 库；② 路径结尾匹配 **`.importing.<36位uuid>`**。
+
+| 路径 | 结尾 | 守卫 |
+| --- | --- | --- |
+| 旧（CLI 自建）：`…raidb.sqlite.importing.<uuid36>` | `.importing.<uuid36>` | ✅ 过 |
+| **我改的就地**：worker 的 `var/rai.importing.<jobId>.sqlite`，而 `jobId = web_import_mubyt7ir_<uuid>` | `.importing.web_import_mubyt7ir_<uuid>` | 🔴 **不过** |
+
+⇒ **这条优化在设计上就与该不变量冲突**，不是实现小错。该守卫是"原生写路径"的真防线
+（防把记录写进非一次性副本），**为了 1.6 s 去放宽它是不划算的交易** ⇒ 判定：**方案作废**。
+
+### 20.3 为什么两套测试全绿却线上必死（覆盖率洞）
+
+| 测试 | 为什么抓不到 |
+| --- | --- |
+| `cli-atomic.test.ts`（我新加的 3 条） | 不带 `--engine rust` ⇒ **根本不经过** `native-record-writer`（生产是 `RAI_IMPORT_ENGINE=rust`） |
+| `native-import-worker.test.ts`（唯一跑 Rust 的） | 增量那段的 fixture **只有 `<Workout>`、没有 `<Record>`** ⇒ `this.count === 0` ⇒ 在 `native-record-writer.ts:244` **早退**，守卫从未被评估 |
+
+⇒ 两个洞叠加。**根因不是"测试写少了"，而是"fixture 与生产的变量没对齐"。**
+
+### 20.4 已做（当日）
+
+1. **回滚**：`git revert` 两个代码提交 ⇒ `d8ca84b` / `5ab6c14`，推送后线上 pull + restart。
+   **等价性判据**：`git diff 49f393f HEAD -- apps packages` **为空** ⇒ 代码路径与改动前逐字节一致。
+2. **补 fixture（并证明它是真守卫）**：给 `native-import-worker.test.ts` 的增量负载加一条
+   `<Record>`，并加断言 `native["apply-records"].rustCalls === 1` 锁住该前置条件。
+
+   | 树 | 结果 |
+   | --- | --- |
+   | 回滚后的 HEAD | ✅ 绿 |
+   | 破态 `5b14d2f`（worktree + `RAI_RUST_BINARY` 固定同一二进制） | 🔴 红，**报出与线上完全相同的那句话** |
+
+   ⇒ 这条补充**是**能抓住该缺陷的守卫，不是装饰。
+3. **数据无损**：失败任务的 `message` = "导入失败，原始导出文件未被修改"；主库 `importCompletedAt`
+   仍是 `2026-09-21T15:19:04Z`、counts 与 `issues: []` 均未变 ⇒ **没走到 `activateDatabase`，主库未被触碰**。
+
+### 20.5 教训（已进 `NOTES-engineering.md` 与 `rai-deploy`）
+
+1. 🔴 **"在线上代码上跑仓库测试"会给假绿** —— 它绿的是"这个 fixture 的绿"，不是"这条路径的绿"。
+   部署后取证前先问：**「这个 fixture 与生产那次运行差几个变量？」**（引擎 / fallback / 增量还是全量 /
+   负载是否含被守卫检查的数据 / 环境变量）。
+2. 🔴 **守卫若位于早退之后，fixture 必须先满足它的前置条件** —— 否则该守卫对整个测试套件**不可见**。
+3. 🔴 **加"条件性开关"之前，要 grep 到这条路径上所有会拒绝它的守卫**（不只是"更早的守卫"）：
+   本轮我查了 CLI 内部，**没查它调用的下游模块**（`native-record-writer`）。
+   ⇒ 判据：`grep -rn "options.stagingDatabase\|stagingDatabase" packages/*/src` 找全部消费者。
+4. 🟢 **失败任务的 `computeStagesMs` 是"死在哪一段"的探针**：它只到 `parse_health_xml`、
+   且缺 `prepare_staging_copy`，两秒钟就把范围锁到了我改的那段。
+5. 🟢 **用户报的文案 ≠ 故障点**：'未找到导入来源' 指向 `inspect`，真因在上游的导入失败。
+   先按日志把**请求序列**还原出来，再判断哪一环坏了。
 
 
