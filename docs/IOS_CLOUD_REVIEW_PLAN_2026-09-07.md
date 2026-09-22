@@ -167,7 +167,7 @@
 2. 使用 idle → collecting → uploading → importing → recomputing → succeeded/failed 状态机；错误能指出失败阶段。
 3. 重启或回到前台先恢复已有 job 查询，服务器已成功则补提交游标；响应丢失不重新创建逻辑任务。
 4. 区分 401（重新认证）、409（状态冲突）、429/5xx（退避）、断网（等待恢复），避免用户看到“请运行 Mac 开发服务器”。
-5. 先支持前台同步与返回前台续接；当前有限后台执行时间不能当作可靠后台同步承诺。HealthKit 持续后台 delivery 留待单独立项。
+5. 先支持前台同步与返回前台续接；当前有限后台执行时间不能当作可靠后台同步承诺。HealthKit 持续后台 delivery 已于 2026-09-22 单独立项并落地（三机制：background delivery 唤醒 + `BGProcessingTask` 承载 + background URLSession 搬运，见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`），但**仍不承诺固定周期**——iOS 的调度是请求不是定时。验收判据是「不丢批次、不重复导入」，不是完成率或时延。
 6. ZIP 设置文件保护、排除系统备份、按期限清理；成功任务删除临时敏感文件，失败保留可恢复任务和必要文件。
 
 验收：上传后杀 App、服务器计算中杀 App、短时断网、服务重启后续接不重复训练、不跳过游标。

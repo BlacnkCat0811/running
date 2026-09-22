@@ -159,11 +159,15 @@ iOS `Home.tsx` 拉取了 `/v1/mobile/today`，**完全不渲染 `data.recovery`*
 
 ### Non-Goals
 
-- 独立移动产品、HealthKit 写入、background delivery、RMSSD / beat-to-beat（`HKHeartbeatSeries`）作为 V1。
+- 独立移动产品、HealthKit 写入、RMSSD / beat-to-beat（`HKHeartbeatSeries`）作为 V1。
 - WHOOP / Garmin Body Battery / Bevel 式不透明 0–100 Recovery；Apple Sleep 习惯分（50/30/20）当 readiness。
 - 把 `InBed` 当睡眠时长；跨源 Watch+iPhone 相加。
 - 绝对 8 小时 / 100 ms 作为分数。
 - Intraday Body Battery。
+
+> 关于 background delivery：它已于 2026-09-22 从本节移出并授权启用，但**只用于健康同步的唤醒**，
+> 不是本设计的数据来源 —— 睡眠/HRV 的读取范围、保留策略与去标识化要求都不因它改变
+> （依据见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`）。
 - 用户可配置时区 UI（V1 只参数化，默认仍 `Asia/Shanghai`；本项目不做 Settings IANA 选择器）。
 - 改 frozen responsive：`mobileNavigation`、`.mobile-nav-links`、`<1024px` media queries、390px E2E。
 - 把睡眠/HRV 叠到 TA/CA 曲线上。
@@ -1164,7 +1168,7 @@ class SqliteRecoveryFactsReadRepository {
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | 睡眠/HRV 是高敏健康数据 | 不离开本机；API 仍 bind `127.0.0.1`；`/v1/diagnostics` 已剥离时间序列（`docs/WEB_IMPLEMENTATION.md` §6），新表同样不得进入脱敏诊断默认集                       |
 | 医疗推断           | 文案禁止诊断/伤病概率；Settings 既有免责声明保持；新 UI 标注“相对你的 28 天中位数，不是临床 HRV”                                                                  |
-| iOS HealthKit  | 只读；不申请 write、不 background delivery；不在设备上重写 scoring                                                                            |
+| iOS HealthKit  | 只读；不申请 write；不在设备上重写 scoring。background delivery 仅用于同步唤醒，不改变读取范围与保留策略                                                            |
 | 来源指纹           | `canonical_nights.source_name` 存设备名（与 `health_records` 同级）。Web 审计页继续不展示原名（现有 Data Audit 约定）；Trends 只展示类别（Watch / iPhone / 其他） |
 | 跨用户            | 单用户库，无 authz 变化                                                                                                               |
 

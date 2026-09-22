@@ -343,7 +343,7 @@ API schema 由 OpenAPI 描述，HTTP DTO 统一定义在 `packages/api-contracts
 
 ## 7. 原生客户端范围
 
-当前产品范围（以仓库根目录 `AGENTS.md` 为准）为浏览器 Web、本地 API 及所需共享包。例外：`apps/ios/` 是经产品决策授权的本地 Xcode 宿主——生产路径为 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅做**只读**同步（增量导出 ZIP）并上传到本地 API，不在设备上重写评分核心、不做 HealthKit 写入与后台 delivery；此前的 WKWebView 壳（加载现有 Web 的像素风 iOS 界面，`?raiShell=ios`）保留为开发期回退路径。配套的 `/v1/mobile/*` 聚合端点与周目标（`GET/PUT /v1/mobile/goals`）随 Web 产品一同交付。原生 React Native / 纯 SwiftUI 移动端产品与原生桌面端仍属范围外，需单独产品决策后方可立项。
+当前产品范围（以仓库根目录 `AGENTS.md` 为准）为浏览器 Web、本地 API 及所需共享包。例外：`apps/ios/` 是经产品决策授权的本地 Xcode 宿主——生产路径为 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅做**只读**同步（增量导出 ZIP）并上传到本地 API，不在设备上重写评分核心、不做 HealthKit 写入；三项后台机制（HealthKit background delivery 唤醒、`BGProcessingTask` 承载、带 identifier 的 background URLSession 搬运）已按 2026-09-22 决策启用，判据与验收见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`；此前的 WKWebView 壳（加载现有 Web 的像素风 iOS 界面，`?raiShell=ios`）保留为开发期回退路径。配套的 `/v1/mobile/*` 聚合端点与周目标（`GET/PUT /v1/mobile/goals`）随 Web 产品一同交付。原生 React Native / 纯 SwiftUI 移动端产品与原生桌面端仍属范围外，需单独产品决策后方可立项。
 
 ## 8. 模型和数据版本
 

@@ -17,8 +17,11 @@ development fallback until native acceptance is complete. HealthKit read-only
 sync is authorized: the iOS app may request Apple Health read permission,
 export running-related samples to the existing Apple Health ZIP/XML import
 pipeline, and upload them to the local API. Do not rewrite the TypeScript
-scoring core on device, and do not add HealthKit write, background delivery,
-or a standalone Watch/macOS/mobile product unless the user explicitly asks.
+scoring core on device, and do not add HealthKit write, or a standalone
+Watch/macOS/mobile product unless the user explicitly asks. HealthKit
+background delivery, BGProcessingTask, and a background URLSession are
+authorized for the iOS health sync pipeline (2026-09-22 product decision); any
+further background mechanism still requires explicit user request.
 
 ## Supported Web Viewport
 

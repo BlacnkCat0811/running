@@ -8,6 +8,10 @@
 
 本审计以 Web 产品边界为准：浏览器不能直接读取 HealthKit，因此数据入口是用户从 iPhone 健康 App 导出的本机目录。iOS HealthKit 授权、后台 delivery 和 App Store 发布不属于 Web 交付。
 
+> 划界括注（2026-09-22 补，**不改写上面这句历史结论**）：上面那句是 2026-07-10 当时的口径。iOS 侧的
+> HealthKit 授权与后台 delivery 已于 2026-09-22 单独立项并落地（`docs/IOS_NATIVE_SYNC_PROTOCOL.md`），
+> 但它们仍不属于 Web 交付 —— 本审计的 Web 边界与全部结论不因这次立项而改变。
+
 ## 1. 功能闭环
 
 | 范围 | 当前证据 | 结论 |
