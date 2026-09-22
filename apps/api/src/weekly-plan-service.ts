@@ -145,6 +145,7 @@ export async function generateWeeklyPlan(args: {
   }
 
   const days = buildFallbackWeekPlan({
+    easyDurationFloorFraction: args.goals.easyDurationFloorFraction,
     allowedDates,
     prescription: args.prescription,
     weeklyDistanceKm: args.goals.weeklyDistanceKm,

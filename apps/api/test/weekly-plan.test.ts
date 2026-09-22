@@ -350,7 +350,11 @@ test("fallback plan covers the whole window and stays conservative", () => {
     injuryFlagCodes: []
   });
   assert.deepEqual(days.map((day) => day.localDate), dates);
-  assert.equal(days.filter((day) => day.kind === "interval" || day.kind === "tempo").length, 2);
+  assert.ok(days.filter((day) => day.kind === "interval" || day.kind === "tempo").length <= 2);
+  const measured = days.map((day) => ({ day, seconds: day.structure
+    ? measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)).durationSeconds : 0 }));
+  assert.ok(measured.filter(({ day }) => ["easy", "recovery"].includes(day.kind)).reduce((sum, row) => sum + row.seconds, 0)
+    / measured.reduce((sum, row) => sum + row.seconds, 0) >= 0.7);
   assert.equal(days.every((day) => day.structure != null), true);
 
   const blocked = buildFallbackWeekPlan({
@@ -1634,4 +1638,22 @@ test("weekly prompt includes historical observations without treating missing im
   assert.match(prompt.user, /pending\/unknown 不代表漏跑/);
   assert.match(prompt.user, /不得据此补偿加量/);
   assert.match(prompt.user, /"plannedDistanceKm": 8/);
+});
+
+test("fallback plans enforce the same easy-duration floor at every volume budget", () => {
+  for (const prescription of [null, PRESCRIPTION]) for (const weeklyDistanceKm of [1, 5, 15, 20, 30, 40, 80]) {
+    for (const floor of [0.5, 0.7, 0.9, 1]) {
+      const days = buildFallbackWeekPlan({ allowedDates: weeklyPlanDates("2026-09-21"), prescription,
+        weeklyDistanceKm, qualitySessionCap: 2, easyDurationFloorFraction: floor, injuryFlagCodes: [] });
+      let total = 0, easy = 0;
+      for (const day of days) {
+        if (!day.structure) continue;
+        const duration = measureStructure(day.structure, day.kind, pacesFromZones(prescription)).durationSeconds;
+        total += duration;
+        if (["easy", "recovery"].includes(day.kind)) easy += duration;
+      }
+      assert.ok(total === 0 || easy / total >= floor, JSON.stringify({ weeklyDistanceKm, floor, days }));
+      assert.ok(days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= weeklyDistanceKm + 1e-6);
+    }
+  }
 });

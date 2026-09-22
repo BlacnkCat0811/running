@@ -713,6 +713,7 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
  * budget.
  */
 export function buildFallbackWeekPlan(args: {
+  easyDurationFloorFraction?: number;
   allowedDates: string[];
   prescription: CoachZonePrescription | null;
   weeklyDistanceKm: number;
@@ -888,6 +889,12 @@ export function buildFallbackWeekPlan(args: {
     });
     plan = assemble(trimToCeiling(targets));
     if (weekTotal(plan) <= ceiling + 1e-6) break;
+  }
+  const fraction = easyDurationFraction(plan, args.prescription);
+  if (cap > 0 && fraction !== null && fraction < (args.easyDurationFloorFraction ?? 0.7)) {
+    // Rebuild the entire budget with fewer quality sessions: replacing only a
+    // label would leave the old hard structure, and demotion can increase size.
+    return buildFallbackWeekPlan({ ...args, qualitySessionCap: cap - 1 });
   }
   return plan;
 }
