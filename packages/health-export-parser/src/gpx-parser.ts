@@ -1,4 +1,4 @@
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
+import { createReadStream, existsSync, lstatSync, readdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { relative, resolve } from "node:path";
 
@@ -182,11 +182,19 @@ async function parseGpxFile(
 
 function allGpxRelativePaths(exportRoot: string): string[] {
   const routeFolder = resolve(exportRoot, "workout-routes");
-  if (!existsSync(routeFolder)) return [];
-  return readdirSync(routeFolder, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".gpx"))
-    .map((entry) => `workout-routes/${entry.name}`.replaceAll("\\", "/").replace(/^\/+/, ""))
-    .sort();
+  if (!existsSync(routeFolder) || !lstatSync(routeFolder).isDirectory()) return [];
+  const paths: string[] = [];
+  const pending = ["workout-routes"];
+  while (pending.length) {
+    const directory = pending.pop()!;
+    for (const entry of readdirSync(resolve(exportRoot, directory), { withFileTypes: true })) {
+      const path = `${directory}/${entry.name}`;
+      // Never follow symlinks in CLI-discovered exports either.
+      if (entry.isDirectory()) pending.push(path);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".gpx")) paths.push(path);
+    }
+  }
+  return paths.sort();
 }
 
 async function hashFile(path: string): Promise<string> {

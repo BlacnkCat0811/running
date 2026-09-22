@@ -92,3 +92,20 @@ test("imports a route whose archived path case differs from the XML reference", 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("nested routes are imported and not pruned as missing on the next import", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-gpx-nested-"));
+  const xmlPath = writeExport(root, "year/Route.GPX");
+  mkdirSync(join(root, "workout-routes/year"));
+  writeFileSync(join(root, "workout-routes/year/Route.GPX"), gpxWithElevation);
+  const store = await RaiDatabase.open(join(root, "rai.sqlite"));
+  try {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+    for (const preserveAbsent of [true, false]) {
+      const result = await importGpxRoutes(root, store, { preserveAbsent });
+      assert.equal(result.routeFileCount, 1);
+      assert.equal(result.pointCount, 2);
+      assert.equal(result.missingRouteCount, 0);
+    }
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
