@@ -30,6 +30,21 @@ import { terminateProcessTree, waitForShutdown } from "./worker-process.js";
 /** Client-visible import failure text; full diagnostics stay in server logs only. */
 export const PUBLIC_IMPORT_FAILURE_ERROR = "导入失败，请查看服务日志";
 
+/**
+ * `createCurrentBackup` 的"拷贝 + 全库校验"合计超过这个时长时，把内部分解写一行到服务日志。
+ *
+ * 这两个子项是这一段里的两个**独立**成本项：`backup()`（读 506 MB + 写 530 MB 备份）与
+ * `PRAGMA quick_check`（506 MB 全库扫描，云机真机冷 12.1 s / 热 0.25 s，48×）。
+ * ⚠️ 它们与 `stagesMs.backup` 不是严格相等：那个数包着**整个** `createCurrentBackup`
+ * （`ensureBackupCapacity`、打开只读库、`rename`、`enforceBackupPolicy` 的杂项都在内），
+ * 所以本判据是"量级代理"，不是恒等式。代价：若某天慢在杂项而非这两项，这行日志不会出现。
+ *
+ * 2026-09-21 那次线上导入的 `stagesMs.backup` = 13,759 ms —— 单看总量分不出是哪一项：
+ * 空闲复现只要 2.6 s，而**同一次**导入里紧跟其后的 `stagingCopy` 仅 1.5 s，说明当时磁盘
+ * 并不慢。导入是低频事件，慢的时候留一行，下次直接读日志即可定性。
+ */
+export const SLOW_BACKUP_STAGE_THRESHOLD_MS = 5_000;
+
 export class ImportJobEnqueuePersistenceError extends Error {
   constructor(cause: unknown) {
     super(cause instanceof Error ? cause.message : "Failed to persist import job", { cause });
@@ -509,6 +524,15 @@ export class ImportWorker {
         "--source-database",
         this.databasePath,
         ...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"]),
+        // 就地改动的声明**只能**和那次 `copyFile` 同条件出现（见上面 `if (currentBackupPath)`）。
+        // 增量分支：`--database` 是 worker 刚复制好的 scratch 副本，声明后 CLI 就地改它，
+        // 省掉一次 506 MB 的整库复制 + 原子发布（实测 1.6 s，`stagesMs` 的 `prepare_staging_copy`）。
+        // 🔴 全量分支（`--replace`）**绝不能**带这个标志：那条路径上 worker 先把
+        // `stagingDatabase` 删掉（`removeDatabaseFiles`），而重建它的 `copyFile` 受
+        // `currentBackupPath` 守卫、根本不会跑 —— `--database` 这时是一个**不存在**的路径，
+        // CLI 必须按默认语义在 `<target>.importing.<uuid>` 新建、解析、再发布回来。
+        // 少了这个守卫，全量导入会直接失败（`native-import-worker.test.ts` 抓到的就是这一条）。
+        ...(currentBackupPath ? ["--database-is-staging"] : []),
         // Absence-as-deletion is opt-in, so the CLI needs to be told explicitly
         // when a payload declared itself a complete snapshot. A falsy flag means
         // "not preserving", matching how the parser reads the same option.
@@ -842,9 +866,20 @@ export class ImportWorker {
     const backupPath = resolve(backupDirectory, `rai.before-web-import.${jobId}.sqlite`);
     const stagingBackupPath = `${backupPath}.partial-${randomUUID()}`;
     const currentDatabase = new DatabaseSync(this.databasePath, { readOnly: true });
+    // 这两个数只服务于慢路径诊断（见 `SLOW_BACKUP_STAGE_THRESHOLD_MS`）：它们与
+    // `stagesMs.backup` 不是严格相等 —— 那个数包着**整个** `createCurrentBackup`
+    // （`ensureBackupCapacity`、打开只读库、`rename`、`enforceBackupPolicy` 的杂项都在内），
+    // 但成本量级上只有拷贝与全库校验两项，拆开才能分清那十几秒花在哪一边。
+    let copyMs = 0;
+    let verifyMs = 0;
     try {
       try {
-        await this.backupDatabase(currentDatabase, stagingBackupPath);
+        const copyStartedAt = performance.now();
+        try {
+          await this.backupDatabase(currentDatabase, stagingBackupPath);
+        } finally {
+          copyMs = performance.now() - copyStartedAt;
+        }
       } catch (error) {
         // 备份失败之后才知道「是不是主库坏了」：能读 ⇒ 失败来自环境（盘满 / 权限 / EIO），
         // 清掉残片后原样上抛；不能读 ⇒ 备份失败是预期结果，改走隔离。
@@ -856,8 +891,17 @@ export class ImportWorker {
       }
       // 副本已写完但尚未发布。主库真损坏时（坏页没被 `backup()` 读到，例如落在 freelist），
       // 由这一步拦下：丢弃刚写好的副本、改走隔离，正式备份名从此不会出现。
-      if (!this.isReadableDatabase(this.databasePath)) {
+      const verifyStartedAt = performance.now();
+      const readable = this.isReadableDatabase(this.databasePath);
+      verifyMs = performance.now() - verifyStartedAt;
+      if (!readable) {
         return await this.quarantineCorruptDatabase(jobId, maintenance, stagingBackupPath);
+      }
+      if (copyMs + verifyMs >= SLOW_BACKUP_STAGE_THRESHOLD_MS) {
+        process.stderr.write(
+          `Import backup stage slow for job ${jobId}: ` +
+          `copy ${Math.round(copyMs)} ms + quick_check ${Math.round(verifyMs)} ms\n`
+        );
       }
       try {
         await rename(stagingBackupPath, backupPath);
