@@ -947,4 +947,270 @@ stagesMs.backup = ensureBackupCapacity + backup()【读 506 MB + 写 530 MB】 +
 - `runtime.sqlite` 里有 `import_jobs.performance_json` 全量历史 ⇒ 需要"多次采样"时先查它，别只读 `runtime-status` 的最新一条。
 - 跑完必须清理：本轮探针在 `/tmp` 用了 **7.4 GB**（根分区 17 G → 23 G），删完回到 16 G。
 
+---
+
+## 18. §17.6 的「方案 A」：**实施前先被自己的实测证否**，改做真正的冗余（2026-09-22 CST）
+
+### 18.1 起因
+
+小唐批准「用你推荐的 a 方案推进实施」（= §17.6 表里的 A）。我在动代码前先算了一遍 I/O 总量。
+
+### 18.2 🔴 算术：A **不减少**总 I/O，只是搬家
+
+回写窗口内现行顺序的 I/O：
+
+| 步骤 | 读 | 写 |
+| --- | ---: | ---: |
+| `backup()`（活库 → 安全备份） | 506 MB | 530 MB |
+| `copyFile`（安全备份 → 暂存） | 530 MB | 530 MB |
+| **合计** | **≈ 1.04 GB** | **≈ 1.06 GB** |
+
+A 把 `backup()` 挪到窗口外，但**它省掉的只有"窗口内"三个字**：`backup()` 读的 506 MB + 写的 530 MB 一份没少，
+只是挪到了 `activateDatabase` 之前。
+
+而且 A 还要求「`stagingCopy` 改成直接从**活库**复制」——**这一步在 WAL 下必须用 backup API，不能用 `copyFile`**
+（见 18.5 的本机实测）。backup API 比 `copyFile` 慢 2.3 倍 ⇒ **省下的窗口时间被吃回去。**
+
+**结论：A 是"看起来变快"**（把成本挪到不测量的地方），必须诚实标注 —— 和 §17.6 表里我给 B 标的同一个毛病，
+我给自己推荐的 A 犯了同样的错。
+
+### 18.3 云机受控实测：A 反而**慢 89 ms**
+
+条件：云机真机、506 MB **只读副本**、每轮 `drop_caches` 造冷、**并发 4 GB `dd` 写**复现回写窗口。
+
+| 步骤 | 空闲 (ms) | 并发 (ms) |
+| --- | ---: | ---: |
+| `backup()`（backup API） | 2,329 | **8,030** |
+| `copyFile` 530 MB | — | **4,524** |
+| **V0**（现况）= `backup` + `copyFile` | — | **12,554** |
+| **SEED** = backup API 活库 → 暂存 | — | **10,314** |
+| **A 总计** = SEED + `backup`(空闲) | — | **12,643** |
+
+⇒ **12,643 vs 12,554，A 慢 89 ms。方案 A 被证否。**
+
+### 18.4 🔴 同时纠正 §17.6 的一个错误定性
+
+§17.6 我把 `backup` 段 13,759 ms 归因为「撞在上传回写尾巴上」。**这个定性站不住**：
+**同一次**导入里，紧跟其后的 `stagingCopy` 只有 **1,505 ms** —— 如果磁盘当时被回写拖住，
+两次同样量级的读写不可能一次 13.8 s、一次 1.5 s。⇒ 磁盘当时是正常的。
+
+`backup` 段的真实机理**仍未定性**（已排除项见 §17.6）。n=1、单次分不出 ⇒ 改为**加诊断埋点**（见 18.6 ③）。
+
+### 18.5 A 的一个前提被本机实验打掉：`copyFile` 复制 WAL 活库**绝对不安全**
+
+第一次实验我中途调了 `wal_checkpoint(PASSIVE)`，把 WAL 刷干净了，于是 `copyFile` 的副本"看起来"是对的
+—— **那是一次假验证**。重做（`wal_autocheckpoint=0`，全程不 checkpoint）：
+
+| 手法 | 结果 |
+| --- | --- |
+| `copyFile` 主库（主库文件仅 4 KB、WAL 1 MB） | 🔴 `no such table: marker`（表还在 WAL 里） |
+| backup API | ✅ 200/200 行、`quick_check: ok` |
+| 只读 `ATTACH … mode=ro` | ✅ 能看到并发写入（201 行） |
+
+⇒ 「seed 从活库产出」**只能走 backup API**，这就是 18.2 里 A 收益被吃光的根据。
+
+### 18.6 🟢 真正可证的冗余：CLI 把 worker 刚造好的暂存库**又整库复制了一遍**
+
+放弃 A 之后，从**线上完整分阶段读数**（job `web_import_mube49jo…`，`TOTAL 34,678 ms`）往下看：
+
+| 阶段 | ms | 占比 |
+| --- | ---: | ---: |
+| `backup` | 13,759 | 39.7% |
+| `recompute` | 10,459 | 30.2% |
+| `parseImport` | 7,379 | 21.3% |
+| **`stagingCopy`** | **1,505** | 4.3% |
+| `activation` | 490 | 1.4% |
+| `changeAnalysis` | 280 | 0.8% |
+| `cleanup` | 37 | 0.1% |
+
+`stagesMs` 是固定七元组，看不到 `computeStagesMs` 里的细目（同一次最大项 `trainingMetrics` = 9,262 ms）。
+读 `cli.ts` 才看见：**`stagingCopy` 与 `prepare_staging_copy` 是同一份库被复制了两次。**
+
+- `apps/api/src/import-worker.ts` 的 `stagingCopy`：把主库复制成 `var/rai.importing.<jobId>.sqlite`（**worker 造暂存库**）
+- `packages/health-export-parser/src/cli.ts:262-272` 的 `prepare_staging_copy`：CLI 拿到 `--database`（**就是上面那份暂存库**）
+  后，按默认语义"这可能属于用户的生产库"，**又**用 backup API 整库复制成 `--database.importing.<uuid>`（实测 1,605 ms，
+  另一份样本 `stagingCopy 1,745` 同量级），改完再 `publishDatabaseFile` 原子换回来 —— 而**它的产物 CLI 用完就删**。
+
+CLI 的两层语义（复制 + 原子发布）在服务端场景下**两层都冗余**：worker 已经复制过一次，
+且 worker 收尾靠的是 `activateDatabase`（把这份改好的库装到主库位），本来就不需要 CLI 再发布一次。
+
+### 18.7 改法：`--database-is-staging`
+
+`cli.ts` 四处 + `import-worker.ts` 两处：
+
+| # | 位置 | 改动 |
+| --- | --- | --- |
+| ① | `cli.ts` `ParsedArguments` | 新增 `databaseIsStaging: boolean` |
+| ② | `cli.ts` 参数解析 | `,databaseIsStaging: argv.includes("--database-is-staging")` |
+| ③ | `cli.ts:289`（J1） | `stagingDatabase = args.databaseIsStaging ? requireExistingStagingDatabase(args.database) : await timedStage("prepare_staging_copy", …)` |
+| ④ | `cli.ts:420`（J2） | `activation = args.databaseIsStaging ? { displacedDatabase: null, rollback: async () => {} } : await timedStage("activate_staging", …)` |
+| ⑤ | `cli.ts:467` | **保护成品**：`if (stagingDatabase !== args.database) removeDatabaseFiles(stagingDatabase)` |
+| ⑥ | `import-worker.ts:526-535` | 给 CLI 传 `--database-is-staging`，**且必须与那次 `copyFile` 同条件**（`currentBackupPath`）。无条件传递是本轮踩过的坑，详见 §19 |
+| ⑦ | `import-worker.ts:33-42 / 861-895` | 新增 `SLOW_BACKUP_STAGE_THRESHOLD_MS = 5_000` + `createCurrentBackup` 慢路径诊断（拆出 `copyMs` / `verifyMs`，超阈值写一行 stderr） |
+
+🔴 **③ 与 ④ 必须成对**：只跳过复制不跳过发布 ⇒ 数据被写进 uuid 副本、既不发布又被 `finally` 删掉
+⇒ `--database` 留成**空库**（静默丢数据）。**⑤ 是这条路径唯一的保护**。三个不变量都由 18.9 的用例守着。
+
+### 18.8 语义等价性论证（为什么可以就地改）
+
+1. **安全备份已在原位完成于导入前** —— `createCurrentBackup` 在 worker 起 CLI **之前**跑，不动。
+2. **`--source-database` 只喂审计报告头部标签**，CLI 全程只读主库（`cli.ts:119`）。
+3. **`analyzeDatasetChange` 的输入不含 `--database`** —— 基线仍指向 `currentBackupPath`（`import-dataset-analysis.ts:25`
+   的 `ATTACH DATABASE ? AS previous`）。
+4. **发布原子性由 worker 的 `activateDatabase` 承担**（它先备份主库、再把改好的库装到主库位；
+   失败由 `removeDatabaseFiles` 收尾）。
+5. **CLI 锁文件只是进程互斥**，不编码"文件身份"，就地持有与复制副本持有等价（`acquireImportLock`）。
+6. **`displacedDatabase` 无消费方**（`DISK_CAPACITY_AUDIT_2026-09-15.md:49`）⇒ 置 `null` 无副作用。
+
+### 18.9 突变验证：**两个红点互不重叠**
+
+新增两条用例（`packages/health-export-parser/test/cli-atomic.test.ts`）：#5
+`in-place staging writes the finished database into --database itself`；
+#6 `in-place staging leaves no whole-database copy or publish residue`。原 4 条不传新标志、走旧路径，仍全绿。
+
+| 突变 | 内容 | 期望红点 | 实测 |
+| --- | --- | --- | --- |
+| **A** | J1 + J2 同时走旧路径 | 只有 #6 | ✅ 只有 #6 红 |
+| **B** | 去掉 ⑤ 的 `if (stagingDatabase !== args.database)` 保护 | 只有 #5 | ✅ 只有 #5 红（`0 !== 1` @ `:242`，即成品被删、`summaries.count` 归零） |
+
+🔴 **副产物（有价值的发现）**：突变 A 第一次**只改了 J1**（漏了 J2），红点落在 **#5** 而非 #6 —— 与预期相反。
+手动复现查明：`"displacedDatabase": null`、目录无 `replaced`/`importing.<uuid>` ⇒
+**数据被写进 uuid 副本、既不发布又被 `finally` 删掉，`--database` 留成空库**。
+这正是 18.7 那条「③④ 必须成对」的实证，而 **#5 恰好抓到了它**。补齐 `MUTATION-A2` 后红点归位。
+
+### 18.10 门禁（本机，全绿）
+
+| 门禁 | 读数 |
+| --- | --- |
+| `npm run typecheck` | **EXIT=0**（`tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json`） |
+| node 全量（`packages/*/test/*.test.ts apps/api/test/*.test.ts`） | **781 例 / 778 pass / 0 fail / 3 skip** |
+| `cli-atomic.test.ts` | **7/7 pass** |
+| web 单跑（`npm run test -w @rai/web`） | **EXIT=0 / 13 文件 / 85 tests** |
+
+⚠️ 记忆里的旧基线「node 767」**已过期**，别再拿它比总数（跨次比较 tests 总数无意义）。
+本轮起点实测 **779 / 775 pass / 1 fail**，收尾 **781 / 778 pass / 0 fail**：
+`+2` = 新增两条用例；`−1 fail` = §19 修掉的那个缺陷。
+
+### 18.11 待验（下一个读数）
+
+`prepare_staging_copy` 段应从 `computeStagesMs` 里**消失**（该段整段不再执行），`TOTAL` 预期 −1.5 s 左右。
+按 §17.4 的纪律，判据写成**「同条件下旧/新对比」**，不写绝对阈值。
+
+---
+
+## 19. 实施过程中发现并修掉一个**真缺陷**：新标志必须与那次 `copyFile` 同条件（2026-09-22 CST）
+
+### 19.1 现象
+
+§18.7 那个标志第一次是**无条件**传给 CLI 的。改完后跑 node 全量：
+
+```
+not ok 250 - accepted Rust jobs keep their engine across restart and run the actual native decoder
+# tests 779 / pass 775 / fail 1
+```
+
+作业 JSON 里 `stagesMs = { backup: 0.29, parseImport: 1,346.7, cleanup: 10.5 }` —— `parseImport` 抛出，
+`computeStagesMs` 只走到 `parse_html_xml`，`native.health.rustCalls = 1`。报错出口是
+`import-worker.ts:1689` 的 `Rust data worker: invalid_protocol`。
+
+⚠️ 这个表象（Rust 协议错）**很容易被误判成"本地原生二进制过期"**：本机二进制建于
+**2026-09-20 21:20**，而 `crates/` 在 **2026-09-21 12:58**（`1de8e8b`）、
+`native-worker.ts` 在 **2026-09-21 23:07**（`92afe29`）都改过 —— 时间线"完全对得上"。
+**但它不是原因。**
+
+### 19.2 定性：干净 worktree 对照，**不能靠推理**
+
+按纪律 8 做受控对照。`git worktree add --detach /tmp/rai-clean HEAD` 后，
+🔴 **`node_modules/@rai/*` 是相对软链**（`../../packages/…`），只软链 `node_modules` 会让干净树的
+`@rai/*` 仍指向脏工作区 —— 必须给 `@rai/*` 单独建**绝对**软链指向 `/tmp/rai-clean`（已校验 13 条全部 resolve 到干净树）。
+
+另一个关键点：`nativeBinary()` 认 **`RAI_RUST_BINARY`** 环境变量，所以干净树能**复用同一个二进制**，
+把变量固定成"只有源码不同"：
+
+| 树 | 运行方式 | 结果 |
+| --- | --- | --- |
+| **干净**（HEAD `945cccc`，无本轮改动） | `RAI_RUST_BINARY=<同一个二进制> node --test apps/api/test/native-import-worker.test.ts` | **3/3 绿** |
+| **脏**（含本轮改动） | 同文件、隔离跑 | **1 fail** |
+
+⇒ **同一二进制、只差源码 ⇒ 是本轮改动引入的。** 那条"二进制过期"的推理作废。
+
+### 19.3 机理
+
+read `cli.ts` 的 `prepareStagingDatabase` 才看清：
+
+```ts
+async function prepareStagingDatabase(target: string, incremental: boolean): Promise<string> {
+  const staging = `${target}.importing.${randomUUID()}`;   // ← 全量导入返回的是**尚未存在**的新路径
+  removeDatabaseFiles(staging);
+  if (!incremental) return staging;
+  ...backup(target → staging)
+}
+```
+
+所以 HEAD 下 `stagingDatabase !== args.database` **恒真**。而 worker 侧：
+
+```ts
+await this.removeDatabaseFiles(stagingDatabase);            // ← 先删
+currentBackupPath = await timing.measure("backup", …);
+if (currentBackupPath) {                                     // ← 重建只在这个守卫内
+  await timing.measure("stagingCopy", () => copyFile(backupPath, stagingDatabase));
+}
+```
+
+⇒ **全量导入（`--replace`，主库不存在 ⇒ 无备份）分支上，`--database` 是一个"还没被创建"的路径**。
+HEAD 下 CLI 会在 `<target>.importing.<uuid>` 新建、解析、再发布到 `--database`；
+带上我的标志后就变成"就地改 `--database` 本身"——**改一个不存在的东西**。
+
+触发面：该测试第一条用例正是"全新临时库 ⇒ 全量导入"，所以它稳定命中；
+真实场景对应**首次导入**（`main.sqlite` 还不存在时）。
+
+### 19.4 修法一：标志收进那次 `copyFile` 的同一条件
+
+```ts
+...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"]),
+...
+...(currentBackupPath ? ["--database-is-staging"] : []),
+```
+
+这与 §18.7 的「③④ 必须成对」是**同一类错误的两面**：都在讲"这个标志描述的是一条**有前提**的路径"。
+
+### 19.5 修法二：CLI 侧新增守卫，把"静默丢数据"变成"大声报错"
+
+```ts
+function requireExistingStagingDatabase(path: string): string {
+  if (!existsSync(path)) {
+    throw new Error(`--database-is-staging was declared but no staging database exists at ${path}`);
+  }
+  return path;
+}
+```
+
+就地模式下**没有原子发布**（J2 跳过了），若路径本是空的，结果就是"用一份空库顶掉调用方指定的目标库" ——
+静默数据丢失。这道守卫让它变成非 0 退出。调用端已按 19.4 收窄，这层是给**未来新增的调用方**兜底。
+
+🟢 **一个有价值的旁证**：跑守卫用例时发现——**增量分支本来就有守卫**（`cli.ts:277`
+`Incremental import requires a cloned active database: …`），所以它先命中、而不是我的新守卫。
+这反过来证明：新守卫只在**全量分支**起作用，而**全量分支正是当时坏掉的那条**。
+⇒ 守卫用例必须用 `import --replace` 形态，用 `incremental-import` 是**测不到**的（第一版就是这么写错的）。
+
+### 19.6 两条回归断言（都**不依赖**原生二进制，因此对所有人可跑）
+
+| 断言 | 位置 | 突变 | 实测红点 |
+| --- | --- | --- | --- |
+| `declares --database-is-staging only on the incremental branch` | `apps/api/test/worker.test.ts` | **C**：`…? ["--database-is-staging"] : ["--database-is-staging"]`（改回无条件） | 红 @ `worker.test.ts:2829`，`expected false / actual true` |
+| `in-place staging refuses a --database that does not exist yet` | `packages/health-export-parser/test/cli-atomic.test.ts`（#7） | **D**：`if (false as boolean)` 替掉存在性检查 | 红 @ `cli-atomic.test.ts:305`，`承诺不成立时必须以非 0 退出` |
+
+断言 C 的写法（捕获 CLI 参数）沿用 `worker.test.ts` 里已有的 `captureCommand` 夹具；
+断言 D 复用 `runInPlaceStagingImport(…, "full")` —— 为此把该 runner 参数化成 `mode: "incremental" | "full"`。
+
+### 19.7 教训（值得进分册的）
+
+1. 🔴 **"某失败是不是我改出来的"要用「干净树 + 隔离单跑 + 固定外部依赖」三件套**。
+   本轮若只做"全量对照"或只做"看时间线推理"，都会得出**错误结论**（"二进制过期，与我无关"）。
+2. 🔴 **信号指向的方向可能是"最像的那个既有坑"**：`invalid_protocol` 的第一反应是"二进制过期"（第四形态），
+   而真因是"参数契约的前提被破坏"。**表象的类别不代表根因的类别。**
+3. 🔴 **新增"条件性开关"时，先找它描述的那条路径的前提条件，然后把开关钉在同一个条件上**；
+   再在**收方**加一道"承诺不成立就报错"。发送方收窄 + 接收方校验，两侧都要有回归断言。
+4. 🟡 **测守卫用例时，先确认"没有更早的同类守卫会先命中"** —— 否则测到的是旧守卫（本轮第一版即如此）。
+
 
