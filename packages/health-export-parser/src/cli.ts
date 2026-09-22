@@ -71,18 +71,6 @@ interface ParsedArguments {
    * `--source-database` 显式说明"这份报告描述的目标库"。
    */
   sourceDatabase: string | null;
-  /**
-   * 调用方声明 `--database` 已经是"本次导入专用的 scratch 副本"。
-   *
-   * web 导入 worker 传进来的就是它自己复制好的 `var/rai.importing.<jobId>.sqlite`，
-   * 而 CLI 的默认语义是"面向可能属于用户的生产库"——先用 `backup()` 整库复制出
-   * `--database.importing.<uuid>`，改完再用 `publishDatabaseFile` 原子换回去。
-   * 在服务端场景下这两步纯属冗余：worker 已经复制过一次，而且它收尾靠的是
-   * "把 CLI 改好的这份库装到主库位"（`import-worker.ts` 的 `activateDatabase`），
-   * 本来就不需要 CLI 再发布一次。一次 506 MB 的复制实测 1.6 s（`stagesMs` 的
-   * `prepare_staging_copy`），而它的产物 CLI 用完就删。
-   */
-  databaseIsStaging: boolean;
 }
 
 function optionValue(args: string[], name: string, fallback: string): string {
@@ -131,8 +119,6 @@ function parseArguments(argv: string[]): ParsedArguments {
     ,sourceDatabase: argv.includes("--source-database")
       ? optionValue(argv, "--source-database", "")
       : null
-    // 声明 `--database` 已是 scratch 副本，跳过"整库复制 + 原子发布"两步。
-    ,databaseIsStaging: argv.includes("--database-is-staging")
   };
 }
 
@@ -160,28 +146,6 @@ function removeDatabaseFiles(path: string): void {
   for (const candidate of [path, `${path}-shm`, `${path}-wal`]) {
     if (existsSync(candidate)) rmSync(candidate);
   }
-}
-
-/**
- * `--database-is-staging` 是一个**承诺**："这个路径上已经有一份本次导入专用的 scratch 副本"。
- *
- * 承诺不成立时必须立刻失败，不能宽容解析：就地改动模式下 CLI 把导入结果写在 `--database`
- * 这个路径上、并**跳过原子发布**（没有"候选库 → 目标库"那一步）。若该路径本是空的，
- * 结果就是"用一份新库顶掉调用方指定的目标库" —— 静默的数据丢失。
- *
- * 这条守卫的由来：该标志最初被**无条件**传给 CLI，于是全量导入（`--replace`）分支也带上了它；
- * 而那条路径上 `--database` 是调用方**期望 CLI 新建**的路径。缺陷当时由
- * `apps/api/test/native-import-worker.test.ts` 抓到（需要 Rust 二进制才能复现）。
- * 调用端已改为与那次 `copyFile` 同条件传递（见 `import-worker.ts`），这里再加一道，
- * 让"未来新增的调用方"踩坑时得到的是**报错**而不是**丢数据**。
- */
-function requireExistingStagingDatabase(path: string): string {
-  if (!existsSync(path)) {
-    throw new Error(
-      `--database-is-staging was declared but no staging database exists at ${path}`
-    );
-  }
-  return path;
 }
 
 async function prepareStagingDatabase(target: string, incremental: boolean): Promise<string> {
@@ -284,15 +248,10 @@ async function importCommand(args: ParsedArguments): Promise<void> {
   try {
     // 增量导入先复制整份库（506 MB 实测 1.6–2.1 s）。这一段此前完全没有埋点，
     // 是「`parseImport` 涨幅全在埋点之外」的另一半原因。
-    // `--database-is-staging` 时整段跳过：调用方给的已经是本次导入专用的 scratch
-    // 副本，就地改它既安全又省掉这一整份复制（该段因此也不出现在 `stagesMs` 里）。
-    // 承诺不成立时 `requireExistingStagingDatabase` 直接抛错，绝不"就地新建"。
-    stagingDatabase = args.databaseIsStaging
-      ? requireExistingStagingDatabase(args.database)
-      : await timedStage(
-        "prepare_staging_copy",
-        () => prepareStagingDatabase(args.database, incremental)
-      );
+    stagingDatabase = await timedStage(
+      "prepare_staging_copy",
+      () => prepareStagingDatabase(args.database, incremental)
+    );
   } catch (error) {
     releaseImportLock();
     throw error;
@@ -436,16 +395,10 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     try {
       // 这一段（含 `validateInstalled` 的发布后校验）此前完全没有埋点 —— 冷态下
       // page cache 被挤出后，它单独能占掉十几秒，全部计在 `parseImport` 头上。
-      // 就地改动时没有"候选库 → 目标库"这一步：库本来就在目标路径上，再走
-      // `publishDatabaseFile` 等于把文件搬给它自己。此时没有可回滚对象，`rollback`
-      // 是空操作——真正的发布点是 worker 的 `activateDatabase`（它会先备份主库、
-      // 再把这份改好的库装到主库位），失败时由 worker 的 `removeDatabaseFiles` 收尾。
-      activation = args.databaseIsStaging
-        ? { displacedDatabase: null, rollback: async () => {} }
-        : await timedStage(
-          "activate_staging",
-          () => activateStagingDatabase(stagingDatabase, args.database)
-        );
+      activation = await timedStage(
+        "activate_staging",
+        () => activateStagingDatabase(stagingDatabase, args.database)
+      );
       activated = true;
       await timedStage("commit_audit_files", () => {
         stagedAudit.commit();
@@ -485,9 +438,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     try {
       if (!storeClosed) store.close();
     } finally {
-      // 就地改动时 `stagingDatabase === args.database` 正是调用方要的成品 ——
-      // 删掉它等于把这次导入的结果扔掉（worker 还要拿这份库去换主库）。
-      if (stagingDatabase !== args.database) removeDatabaseFiles(stagingDatabase);
+      removeDatabaseFiles(stagingDatabase);
       releaseImportLock();
     }
   }
