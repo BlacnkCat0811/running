@@ -34,6 +34,17 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Run iOS gates (typecheck + pure-logic regressions)
+        # 本仓库远端是 gitee，本 workflow 目前**不会**对远端触发；真正的执行入口是
+        # `.githooks/pre-commit`（`apps/ios/` 有改动时跑 `npm run test:ios`）。
+        # 这一步是给"将来把仓库镜像到 GitHub"准备的，判据本身与本机完全同一条命令。
+        #
+        # `run-ios-gates.sh` 自带 macOS / Xcode 检测：不满足时**显式跳过并退出 0**
+        # （打印「本次没有检查任何 iOS 源码」），所以这步不会因为 runner 差异静默变绿。
+        # runner 上的 Xcode 路径不一定在 /Applications/Xcode.app，按 `xcode-select -p` 传进去。
+        run: |
+          export DEVELOPER_DIR="$(xcode-select -p)"
+          bash apps/ios/tests/run-ios-gates.sh
       - name: Cache CocoaPods
         # The AMap pod is a large binary download; the cache key follows Podfile.lock.
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
