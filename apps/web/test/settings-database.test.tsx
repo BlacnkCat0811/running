@@ -19,6 +19,8 @@ vi.mock("../src/api.js", () => ({
 }));
 vi.mock("../src/hooks.js", () => ({ useRemote: useRemoteMock }));
 
+import { ApiError } from "../src/api.js";
+
 import { SettingsPage } from "../src/pages/SettingsPage.js";
 
 const reloadBackups = vi.fn().mockResolvedValue(true);
@@ -68,6 +70,15 @@ describe("SettingsPage database preservation", () => {
     expect(backupCall?.[1]).toBe(false);
     // 列表为空时也不能说成"还没有本地备份"——那会把"看不到"说成"没有"。
     expect(screen.getByText("配置令牌后可查看、下载与恢复备份。")).toBeTruthy();
+  });
+
+  it("focuses an asynchronously committed deletion error without an animation-frame race", async () => {
+    apiMock.mockRejectedValue(new ApiError("删除测试失败", 422, {}));
+    renderSettings();
+    await confirmDatabaseDeletion();
+    const error = await screen.findByText("删除测试失败");
+    await waitFor(() => expect(document.activeElement).toBe(error));
+    expect(error.id).toBe("delete-database-error");
   });
 
   it("identifies a readable database preservation as a recoverable backup", async () => {

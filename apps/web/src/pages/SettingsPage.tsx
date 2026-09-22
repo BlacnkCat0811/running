@@ -167,6 +167,18 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     successRef.current?.focus();
   }, [success, busy, confirmOpen, restoreTarget, backupDeleteTarget]);
 
+  // Focus only after React has committed the error element and enabled the
+  // dialog again; requestAnimationFrame can run before a concurrent render.
+  useEffect(() => {
+    if (!busy && deleteError && confirmOpen) deleteErrorRef.current?.focus();
+  }, [busy, deleteError, confirmOpen]);
+  useEffect(() => {
+    if (!busy && restoreError && restoreTarget) restoreErrorRef.current?.focus();
+  }, [busy, restoreError, restoreTarget]);
+  useEffect(() => {
+    if (!busy && backupDeleteError && backupDeleteTarget) backupDeleteErrorRef.current?.focus();
+  }, [busy, backupDeleteError, backupDeleteTarget]);
+
   const persistApiToken = () => {
     writeApiToken(tokenDraft);
     const stored = readApiToken();
@@ -224,7 +236,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
       await backups.reload();
     } catch (caught) {
       setBackupDeleteError(caught instanceof Error ? caught.message : "无法删除备份");
-      requestAnimationFrame(() => backupDeleteErrorRef.current?.focus());
     } finally {
       setBusy(false);
     }
@@ -260,7 +271,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           setDeleteError(
             `无法确认删除结果：${healthError instanceof Error ? healthError.message : "无法读取数据库状态"}`,
           );
-          requestAnimationFrame(() => deleteErrorRef.current?.focus());
           return;
         }
         window.dispatchEvent(new Event("rai:database-state-changed"));
@@ -273,7 +283,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
         }
       }
       setDeleteError(caught instanceof Error ? caught.message : "无法删除本地数据库");
-      requestAnimationFrame(() => deleteErrorRef.current?.focus());
     } finally {
       setBusy(false);
     }
@@ -310,7 +319,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           setRestoreError(
             `无法确认恢复结果：${healthError instanceof Error ? healthError.message : "无法读取数据库状态"}`,
           );
-          requestAnimationFrame(() => restoreErrorRef.current?.focus());
           return;
         }
         window.dispatchEvent(new Event("rai:database-state-changed"));
@@ -327,12 +335,10 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           setRestoreError("数据库当前可用，但无法确认是否已切换到所选备份；页面状态已刷新，请核对数据后再操作。");
           window.dispatchEvent(new Event("rai:data-updated"));
           void backups.reload();
-          requestAnimationFrame(() => restoreErrorRef.current?.focus());
           return;
         }
       }
       setRestoreError(caught instanceof Error ? caught.message : "无法恢复备份");
-      requestAnimationFrame(() => restoreErrorRef.current?.focus());
     } finally {
       setBusy(false);
     }
