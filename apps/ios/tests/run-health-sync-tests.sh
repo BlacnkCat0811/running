@@ -16,3 +16,11 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   -lz \
   -o "$tmp/health-sync-cancellation-tests"
 "$tmp/health-sync-cancellation-tests"
+
+# 恢复分支的判据单独一个可执行：一个模块只能有一个 `@main`，所以共用源码、分开编译。
+# 它是 2026-09-22 线上「未找到导入来源」死锁的回归（详见该测试文件头部）。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/HealthSyncCancellation.swift \
+  apps/ios/tests/HealthSyncResumeRegression.swift \
+  -o "$tmp/health-sync-resume-tests"
+"$tmp/health-sync-resume-tests"

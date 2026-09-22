@@ -11,6 +11,39 @@ nonisolated enum HealthSyncPolling {
     }
 }
 
+/// 「恢复上次同步任务」这条路走不通时，那个持久化的 task 该怎么处置。
+///
+/// 之所以要有这条判据：`inspect` 收到 404 时若把 task 留着，App 就**再也不会重新上传**。
+/// 任务失败时服务端会就地删除那份暂存上传
+/// （`apps/api/src/import-source-finalization.ts:35-39` → `cleanupUpload` → `deleteSource`），
+/// 而 task 里的 `sourceId` 仍指向它 ⇒ 每次同步都从同一个入口进来、拿到同一个 404、
+/// 再原样退出。2026-09-22 线上实际发生：此后 nginx 日志里**再没有出现过任何
+/// `POST /v1/imports/uploads`**，只有 `POST /v1/imports/inspect` 的 404 反复。
+///
+/// ⚠️ `SyncHTTPError` 是 `HealthKitSync.swift` 里的 `private struct`，所以这里只收
+/// 拆出来的两个字段；判据是纯函数，回归测试直接钉住（`HealthSyncResumeRegression.swift`）。
+nonisolated enum HealthSyncResumePolicy {
+    enum Disposition: Equatable {
+        /// 这个 task 已经不可能恢复：清掉它，别再拿同一个 `sourceId` / `jobId` 重试。
+        case abandonTask
+        /// 瞬时失败（网络 / 5xx / 鉴权 / 409 冲突）：保留 task，下次再试。
+        case keepTask
+    }
+
+    /// 服务端明确回答「没有这个暂存上传」。
+    static let sourceGoneStatusCode = 404
+
+    /// `waitForJob` 观察到任务已进入终结态（`failed` / `cancelled` / `interrupted`）。
+    /// 终结的任务不会自己变好，拿同一个 `jobId` 再等只是重放同一个错误。
+    static let terminalJobCode = "import_job_failed"
+
+    static func disposition(statusCode: Int?, errorCode: String?) -> Disposition {
+        if statusCode == sourceGoneStatusCode { return .abandonTask }
+        if errorCode == terminalJobCode { return .abandonTask }
+        return .keepTask
+    }
+}
+
 /// Wait only for a known mutation conflict, without blocking the main actor or
 /// retrying validation/authentication errors. The caller retains its saved batch.
 @MainActor

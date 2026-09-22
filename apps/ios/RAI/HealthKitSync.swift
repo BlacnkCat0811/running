@@ -216,10 +216,34 @@ final class HealthKitSync {
                 return
             } catch {
                 if handleCancellation(error) { return }
-                lastError = friendlyMessage(error)
+                let httpError = error as? SyncHTTPError
+                if HealthSyncResumePolicy.disposition(
+                    statusCode: httpError?.statusCode,
+                    errorCode: httpError?.code
+                ) == .keepTask {
+                    lastError = friendlyMessage(error)
+                    message = nil
+                    phase = "failed"
+                    return
+                }
+                // 这个 task 不可能恢复了，先清掉它。留着它的后果不是"下次说不定能成"，
+                // 而是下一次同步仍会从上面那句 `inspect(sourceId:)` 进来、拿到同一个 404：
+                // 2026-09-22 线上实测，此后 nginx 日志里**再没有出现过任何 uploads**。
+                clearTask()
+                if httpError?.code == HealthSyncResumePolicy.terminalJobCode {
+                    // 任务已经跑完并明确失败：把错误如实报出去。失败若是确定性的，
+                    // 在这次点击里再悄悄跑一遍导入只是白跑一次；下一次同步从干净状态开始。
+                    lastError = friendlyMessage(error)
+                    message = nil
+                    phase = "failed"
+                    return
+                }
+                // 服务端已经没有这份暂存上传了（`sourceId` 已失效，且没有终结的任务挡路）：
+                // 除了重新走一遍没有别的路，所以当场继续，而不是把这次点击留成一个错误提示
+                // —— 「同步健康」按钮 / 前台自动同步都会立刻再撞同一个 404。
+                // 落到下面时 `loadTask()` 已经是 nil，两个恢复分支都会自己跳过。
+                phase = "collecting"
                 message = nil
-                phase = "failed"
-                return
             }
         }
         if !full, let task = loadTask(), task.sourceId == nil, let persisted = pendingTaskZip(task) {
@@ -708,7 +732,9 @@ final class HealthKitSync {
                 case "succeeded":
                     return job
                 case "failed", "cancelled", "interrupted":
-                    throw SyncHTTPError(message: job.error ?? "导入失败")
+                    // 带上 code 再抛：恢复分支要靠它把「任务已终结」与「瞬时读不到」分开 ——
+                    // 终结的任务拿同一个 jobId 再等只是重放同一个错误，那个 task 必须被放弃。
+                    throw SyncHTTPError(message: job.error ?? "导入失败", code: HealthSyncResumePolicy.terminalJobCode)
                 default:
                     try await Task.sleep(for: HealthSyncPolling.delay(elapsed: started.duration(to: .now)))
                 }
