@@ -85,6 +85,12 @@ enum RaiStartup {
         }
         if !registered {
             RaiStartup.report("BGTaskScheduler.register returned false for \(RaiBackgroundSync.taskIdentifier)")
+        } else {
+            // 真机验收 V1 的判据。补这一行的理由：成功路径此前**完全静默**，于是
+            // 「注册成功了」与「这段代码根本没跑到」在控制台里长得一模一样 ——
+            // 而下面那个 `enableBackgroundDelivery` 同族的做法（失败才说话）在这里不成立，
+            // 因为注册没有别的观察面。
+            RaiStartup.report("BGTaskScheduler.register ok for \(RaiBackgroundSync.taskIdentifier)")
         }
     }
 
@@ -107,6 +113,10 @@ enum RaiStartup {
         request.earliestBeginDate = Date().addingTimeInterval(delay)
         do {
             try BGTaskScheduler.shared.submit(request)
+            // `delay=0` 是「切后台时排的那一次」，`delay=900` 是「后台跑完自己重排的那一次」
+            // （`BackgroundRunPolicy.resubmitDelay`）。两者必须能在控制台里分开 ——
+            // 「请求是一次性的」这件事的可见后果就是"这一行只出现在切后台那一刻"。
+            RaiStartup.report("BGTaskScheduler.submit ok (delay=\(Int(delay))s)")
         } catch {
             RaiStartup.report("BGTaskScheduler.submit failed: \(String(describing: error))")
         }
@@ -121,9 +131,16 @@ enum RaiStartup {
         // 系统收走时间 ≠ 用户取消。必须走 lifecycle：写 `"cancelled"` 会让下一次同步的
         // `checkCancellation()` 把系统的决定当成用户意图，从此永久卡死。
         task.expirationHandler = {
+            // 真机验收 V3 的判据。⚠️ 这个闭包由系统在**任意线程**上调用，所以里面只能碰
+            // `nonisolated` 的东西 —— `report` 正是（它只调 `NSLog`，不读任何状态）。
+            RaiStartup.report("BGProcessingTask expiration fired")
             Task { @MainActor in healthSync.suspendForLifecycle() }
         }
         Task { @MainActor in
+            // 真机验收 V2 的判据：这是「系统真的把 BGTask 派发下来了」的唯一直接证据。
+            // 没有它时，「系统没派发」与「派发了但这一轮什么都没做」在服务端看完全一样
+            // （都没有请求），§11.3 那张归因表就无从判起。
+            RaiStartup.report("BGProcessingTask launched (\(RaiBackgroundSync.taskIdentifier))")
             await healthSync.runBackgroundPass(to: session.serverURL, apiToken: session.apiToken)
             // 🔴 重排必须发生在 `setTaskCompleted` **之前**：这一轮很可能做不完
             // （服务端 job 还在算），而 `BGTaskScheduler` 的请求是**一次性**的、

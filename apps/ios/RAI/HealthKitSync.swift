@@ -417,6 +417,9 @@ final class HealthKitSync {
             hasBackgroundUploadTask: systemUploadInFlight(payloadHash: task?.payloadHash),
             wantsFreshSync: wantsFresh
         )
+        // 后台一轮「被派发了但什么都没做」与「压根没被派发」在服务端看是同一件事（都没有请求）。
+        // 这一行把它们分开，也是排查活锁（每轮唤醒都落在 `.awaitSystemUpload`）的唯一入口。
+        Self.report("background pass: action=\(String(describing: action))")
         switch action {
         case .nothingToDo, .awaitSystemUpload:
             // `.nothingToDo`：没有待办 ⇒ 立刻收工，报成功。

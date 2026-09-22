@@ -776,6 +776,38 @@ for required in ("BackgroundSyncPolicy.swift", "BackgroundSyncPolicyRegression.s
         "run-health-sync-tests.sh does not compile/run %s" % required,
     )
 
+# --- 11. 验收判据的载体自己也要有守卫 ---------------------------------------------
+# 为什么要有这一节（2026-09-22 实测的直接原因）：V2/V3 的判据是「控制台里出现某一行」，
+# 而在补这几行日志之前，成功路径**完全静默** —— 于是「机制没被调度」与「调度了但这一轮
+# 什么都没做」在服务端看是同一件事（都没有请求），§11.3 那张归因表根本无从判起。
+# ⇒ 这几行日志**就是判据本身**。没有守卫的话，谁顺手删掉一行，V2/V3 就静悄悄变回不可判，
+#   而门禁、类型检查、回归会照旧全绿（同族教训："我加了门禁" ≠ "门禁盖住了每一条"）。
+# 用 `without_comment_lines`：源码与本文件的注释里逐字提到了这些字符串，
+# 拿整段文本判会恒绿（该助手的说明里写着这个坑）。
+delegate_code = without_comment_lines(app_delegate)
+sync_code = without_comment_lines(sync)
+for literal, carrier, why in (
+    (
+        'RaiStartup.report("BGProcessingTask launched',
+        delegate_code,
+        "V2「系统真的把 BGTask 派发下来了」的唯一直接证据",
+    ),
+    (
+        'RaiStartup.report("BGProcessingTask expiration fired',
+        delegate_code,
+        "V3「系统收走额度时不许写 cancelled」的触发点判据",
+    ),
+    (
+        'Self.report("background pass: action=',
+        sync_code,
+        "区分「没被派发」与「派发了但空转」的唯一入口",
+    ),
+):
+    check(
+        literal in carrier,
+        "%s 这行日志不见了 —— 它是%s的载体，删掉它会让那条真机验收静默变成不可判" % (literal, why),
+    )
+
 if failures:
     for item in failures:
         print("FAIL: %s" % item)

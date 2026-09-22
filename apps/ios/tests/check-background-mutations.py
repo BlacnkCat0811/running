@@ -694,6 +694,16 @@ MUTATIONS = [
         PY_GATE,
         "does not compile/run BackgroundSyncPolicy.swift",
     ),
+    (
+        "判据载体: 删掉 V2 的派发日志 => 那条真机验收静默变回不可判",
+        lambda: edit(
+            APP_DELEGATE,
+            '            RaiStartup.report("BGProcessingTask launched (\\(RaiBackgroundSync.taskIdentifier))")\n',
+            "",
+        ),
+        PY_GATE,
+        "BGProcessingTask launched",
+    ),
 ]
 
 # 负向对照：一个**真正的编译错误**。它必须被分成 COMPILE-ERROR 而不是 RED，
