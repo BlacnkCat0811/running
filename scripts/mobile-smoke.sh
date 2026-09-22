@@ -38,13 +38,9 @@ fi
 echo "health: $(cat var/smoke-health.json)"
 
 pass=0; fail=0
-check() { # name file js_expr_over_d
+check() { # name JSON_file predicate_name
   local name="$1" file="$2"
-  if node -e "
-    const d = require('./$file');
-    const ok = eval(process.argv[1]);
-    process.exit(ok ? 0 : 1);
-  " "$3" 2>/dev/null; then
+  if node scripts/mobile-smoke-check.mjs "$file" "$3" 2>/dev/null; then
     echo "PASS: $name"; pass=$((pass+1))
   else
     echo "FAIL: $name"; fail=$((fail+1))
@@ -54,27 +50,27 @@ check() { # name file js_expr_over_d
 echo "== GET /v1/mobile/today =="
 curl -s "$BASE/v1/mobile/today" -o var/smoke-today.json
 node -e "const d=require('./var/smoke-today.json'); console.log('today:', JSON.stringify({date:d.today.localDate, km:d.today.distanceKm, pace:d.today.paceSecondsPerKm, kcal:d.today.energyKcal, count:d.today.workoutCount})); console.log('week:', JSON.stringify({km:d.week.distanceKm, goal:d.week.goalDistanceKm, progress:d.week.goalProgressFraction})); console.log('weekDaily days:', d.weekDaily.length, 'recent:', d.recentWorkouts.length)"
-check "today.distanceKm is number" var/smoke-today.json "d.today.distanceKm >= 0"
-check "today.weekDaily length 7" var/smoke-today.json "d.weekDaily.length === 7"
-check "today.recentWorkouts <= 5" var/smoke-today.json "d.recentWorkouts.length <= 5"
-check "today.verdict tone" var/smoke-today.json "['green','yellow','red'].includes(d.verdict.tone)"
-check "today.nextSession title" var/smoke-today.json "typeof d.nextSession.title === 'string' && d.nextSession.title.length > 0"
-check "today.weekPlan length 7" var/smoke-today.json "Array.isArray(d.weekPlan) && d.weekPlan.length === 7"
-check "today.phase" var/smoke-today.json "['need_sync','morning_open','locked','post_run','rest_done'].includes(d.phase)"
+check "today.distanceKm is number" var/smoke-today.json "today-distance"
+check "today.weekDaily length 7" var/smoke-today.json "week-daily"
+check "today.recentWorkouts <= 5" var/smoke-today.json "recent-workouts"
+check "today.verdict tone" var/smoke-today.json "verdict"
+check "today.nextSession title" var/smoke-today.json "session-title"
+check "today.weekPlan length 7" var/smoke-today.json "week-plan"
+check "today.phase" var/smoke-today.json "phase"
 
 echo "== GET /v1/mobile/statistics =="
 curl -s "$BASE/v1/mobile/statistics" -o var/smoke-stats.json
 node -e "const d=require('./var/smoke-stats.json'); console.log('months:', d.months.map(m=>m.month+':'+m.totalDistanceKm.toFixed(1)+'km('+(m.runningDistanceKm|0)+'r/'+(m.cyclingDistanceKm|0)+'c)').join(' | ')); console.log('totals:', JSON.stringify({km:d.totals.distanceKm.toFixed(1), pace:d.totals.averagePaceSecondsPerKm, delta:d.totals.distanceChangeFraction})); console.log('hrZones:', d.heartRateZones.map(z=>z.zone+':'+(z.fraction*100).toFixed(0)+'%').join(' | '))"
-check "statistics.months <= 3" var/smoke-stats.json "d.months.length <= 3"
-check "statistics.months oldest first" var/smoke-stats.json "d.months.length < 2 || d.months[0].month < d.months[d.months.length - 1].month"
-check "statistics.totals.distanceKm >= 0" var/smoke-stats.json "d.totals.distanceKm >= 0"
+check "statistics.months <= 3" var/smoke-stats.json "months-count"
+check "statistics.months oldest first" var/smoke-stats.json "months-order"
+check "statistics.totals.distanceKm >= 0" var/smoke-stats.json "total-distance"
 
 echo "== GET /v1/mobile/trends =="
 curl -s "$BASE/v1/mobile/trends" -o var/smoke-trends.json
 node -e "const d=require('./var/smoke-trends.json'); console.log('weeks:', d.weeks.length, 'last4:', d.weeks.slice(-4).map(w=>w.distanceKm.toFixed(1)).join('/')); console.log('ramp4w:', d.distanceChangeFraction4Weeks); console.log('records:', JSON.stringify({f5:d.records.fastest5k, longest:d.records.longestDistance && d.records.longestDistance.distanceKm, month:d.records.biggestMonth})); console.log('insights:', d.insights.map(i=>i.kind+':'+i.title).join(' | '))"
-check "trends.weeks is 12 consecutive ISO weeks" var/smoke-trends.json "d.weeks.length === 12 && d.weeks.every((w,i)=> i===0 || (Date.parse(w.periodStart)-Date.parse(d.weeks[i-1].periodStart)===7*864e5))"
-check "trends.records object" var/smoke-trends.json "typeof d.records === 'object' && d.records !== null"
-check "trends.ability series" var/smoke-trends.json "Array.isArray(d.ability)"
+check "trends.weeks is 12 consecutive ISO weeks" var/smoke-trends.json "weeks"
+check "trends.records object" var/smoke-trends.json "records"
+check "trends.ability series" var/smoke-trends.json "ability"
 
 echo "== GET/PUT /v1/mobile/goals =="
 curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-before.json
