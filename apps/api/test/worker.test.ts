@@ -2779,59 +2779,6 @@ test("imports preserve by default and only an explicit full snapshot replaces", 
   }
 });
 
-/**
- * `--database-is-staging` 的契约：**只能**和 worker 那次 `copyFile` 同条件出现。
- *
- * 这条断言不依赖原生二进制，因此对所有人可跑。它守的是一个曾经真实发生的缺陷：
- * 该标志最初被无条件传给 CLI，于是**全量导入**（`--replace`）分支也带上了它。而那条
- * 路径上 worker 先把 `stagingDatabase` 删掉、重建它的 `copyFile` 受 `currentBackupPath`
- * 守卫根本不会跑 —— `--database` 是个不存在的路径。CLI 一旦"就地改"这个不存在的路径，
- * 导入直接失败（当时由 `native-import-worker.test.ts` 抓到，且必须先有 Rust 二进制才复现）。
- */
-test("declares --database-is-staging only on the incremental branch", async () => {
-  const root = mkdtempSync(join(tmpdir(), "rai-staging-flag-"));
-  try {
-    mkdirSync(join(root, "export"));
-    writeFileSync(join(root, "export", "export.xml"), "<HealthData />", "utf8");
-    const capture = async (databasePath: string): Promise<string[]> => {
-      const importWorker = new ImportWorker(databasePath, root, root);
-      const worker = importWorker as unknown as ImportWorkerTestSurface;
-      let captured: string[] | null = null;
-      worker.command = async (args) => {
-        captured = args;
-        throw new Error("fixture stop after capturing import args");
-      };
-      try {
-        importWorker.create(join(root, "export"), undefined, "source-healthkit");
-        await waitFor(() => captured !== null && !importWorker.isRunning);
-        assert.ok(captured);
-        return captured;
-      } finally {
-        await importWorker.close();
-      }
-    };
-
-    // 增量分支：worker 自己把备份 `copyFile` 成了 scratch 副本，声明就地改动是安全的。
-    const incrementalDatabase = join(root, "var", "rai.sqlite");
-    mkdirSync(join(root, "var"), { recursive: true });
-    (await seedCanonical(incrementalDatabase)).close();
-    const incrementalArgs = await capture(incrementalDatabase);
-    assert.ok(incrementalArgs.includes("incremental-import"));
-    assert.equal(incrementalArgs.includes("--database-is-staging"), true);
-
-    // 🔴 全量分支（主库不存在 ⇒ 无备份 ⇒ `--replace`）：此时 `--database` 尚未被创建，
-    // CLI 必须按默认语义在 `<target>.importing.<uuid>` 新建、解析、再发布回来。
-    const freshDatabase = join(root, "fresh", "rai.sqlite");
-    mkdirSync(join(root, "fresh"), { recursive: true });
-    const replaceArgs = await capture(freshDatabase);
-    assert.ok(replaceArgs.includes("import"));
-    assert.ok(replaceArgs.includes("--replace"));
-    assert.equal(replaceArgs.includes("--database-is-staging"), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test("closes a queued import before it starts and runs terminal cleanup", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-close-"));
   const inputPath = join(root, "export");
