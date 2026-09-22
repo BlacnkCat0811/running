@@ -21,6 +21,7 @@ interface WorkoutCandidate {
 
 interface ExistingTrainingSession {
   id: string;
+  canonicalWorkoutId: string | null;
   activityType: string;
   anchorStartAt: string;
   anchorEndAt: string;
@@ -220,6 +221,7 @@ function loadExistingTrainingSessions(database: DatabaseSync): ExistingTrainingS
         anchor_start_at AS anchorStartAt,
         anchor_end_at AS anchorEndAt,
         anchor_distance_km AS anchorDistanceKm,
+        canonical_workout_id AS canonicalWorkoutId,
         status
       FROM training_sessions
       WHERE activity_type = ? AND status IN ('active', 'ambiguous', 'inactive')
@@ -365,7 +367,16 @@ export function canonicalizeRunningWorkouts(
         canonical.distanceValue,
         canonical.distanceUnit
       );
-      const matches = existingSessions.filter(
+      // Stable source identity survives corrections to distance/time. Geometry
+      // is only a fallback for matching a genuinely new source observation.
+      const memberIds = new Set(members.map((member) => member.id));
+      const identityMatches = existingSessions.filter((session) =>
+        !usedExistingSessionIds.has(session.id) && (
+          session.id === stableId("training_session", [groupId]) ||
+          (session.canonicalWorkoutId !== null && memberIds.has(session.canonicalWorkoutId))
+        )
+      );
+      const matches = identityMatches.length > 0 ? identityMatches : existingSessions.filter(
         (session) =>
           !usedExistingSessionIds.has(session.id) &&
           matchesExistingTrainingSession(canonical, session)
