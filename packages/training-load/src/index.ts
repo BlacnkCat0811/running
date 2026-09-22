@@ -117,13 +117,28 @@ function uniqueHeartRateTimeline(samples: HeartRateSample[], durationSeconds: nu
     const end = clamp(requestedEnd, 0, durationSeconds);
     return end > start ? [{ sample, index, start, end }] : [];
   });
-  const boundaries = [...new Set(intervals.flatMap((item) => [item.start, item.end]))].sort((a, b) => a - b);
+  const events = intervals.flatMap((item) => [
+    { time: item.start, item, start: true }, { time: item.end, item, start: false }
+  ]).sort((a, b) => a.time - b.time);
+  const active: typeof intervals = [];
   const result: HeartRateSample[] = [];
-  for (let index = 0; index + 1 < boundaries.length; index += 1) {
-    const start = boundaries[index]!;
-    const end = boundaries[index + 1]!;
-    const active = intervals.filter((item) => item.start < end && item.end > start);
-    if (active.length === 0) continue;
+  for (let cursor = 0; cursor < events.length;) {
+    const start = events[cursor]!.time;
+    do {
+      const event = events[cursor++]!;
+      let left = 0, right = active.length;
+      while (left < right) {
+        const middle = (left + right) >>> 1;
+        if (active[middle]!.index < event.item.index) left = middle + 1;
+        else right = middle;
+      }
+      if (event.start) active.splice(left, 0, event.item);
+      else active.splice(left, 1);
+    } while (cursor < events.length && events[cursor]!.time === start);
+    const end = events[cursor]?.time;
+    if (end === undefined || active.length === 0) continue;
+    // Preserve input-order floating point addition for overlapping samples.
+    // Non-overlapping streams now visit each value once rather than scan all N.
     result.push({
       heartRate: active.reduce((sum, item) => sum + item.sample.heartRate, 0) / active.length,
       durationSeconds: end - start,
@@ -154,7 +169,7 @@ export function calculateWorkoutTrainingLoad(input: WorkoutLoadInput): WorkoutTr
   let confidence: number;
   const validHrr = (hr: number): number | null => finite(input.restingHeartRate) && finite(input.observedMaxHeartRate)
     ? heartRateReserve(hr, input.restingHeartRate, input.observedMaxHeartRate) : null;
-  const samples = uniqueHeartRateTimeline(input.heartRateSamples ?? [], input.durationSeconds)
+  const samples = uniqueHeartRateTimeline(input.loadBreakdown ? [] : input.heartRateSamples ?? [], input.durationSeconds)
     .map(sample => ({ ...sample, hrr: validHrr(sample.heartRate) }))
     .filter((sample): sample is HeartRateSample & { hrr: number } => sample.hrr !== null && finite(sample.durationSeconds) && sample.durationSeconds > 0);
   const sampleCoverage = samples.reduce((sum, sample) => sum + sample.durationSeconds, 0) / input.durationSeconds;

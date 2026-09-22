@@ -338,3 +338,14 @@ test("low-night streak counts only recorded nights in its own window", () => {
   assert.equal(countNightsBelowSleepBaseline([night(300), night(300), night(300)], null), 0);
   assert.equal(countNightsBelowSleepBaseline([night(300), night(300), night(300)], 0), 0);
 });
+
+test("dense non-overlapping heart-rate streams remain bounded and preserve load", () => {
+  const count = 100_000;
+  const result = calculateWorkoutTrainingLoad({ trainingSessionId: "dense", localDate: "2026-09-21",
+    durationSeconds: count, restingHeartRate: 60, observedMaxHeartRate: 180,
+    heartRateSamples: Array.from({ length: count }, (_, i) => ({ heartRate: 120, durationSeconds: 1, startOffsetSeconds: i })) });
+  assert.ok(result);
+  assert.equal(result.source, "heart_rate_series");
+  assert.equal(result.intensity, 0.5);
+  assert.ok(Math.abs(result.load - count / 60 * trimpMinuteLoad(0.5)) < 1e-5);
+});
