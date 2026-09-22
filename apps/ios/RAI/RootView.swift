@@ -18,9 +18,8 @@ struct RootView: View {
             .onAppear {
                 session.startMonitoring()
                 discovery.start()
-                healthSync.startForegroundObserver { [session, healthSync] in
-                    await healthSync.syncIfNeeded(to: session.serverURL, apiToken: session.apiToken, force: true)
-                }
+                // 健康观察者**不在这里注册**：它必须早于任何 UI（后台唤醒时视图根本不会出现），
+                // 入口在 `AppDelegate.didFinishLaunching` → `RaiStartup.registerSyncEntryPoints`。
             }
             .onDisappear {
                 session.stopMonitoring()

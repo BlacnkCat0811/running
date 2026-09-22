@@ -33,6 +33,10 @@ final class AppModel {
 @main
 struct RAIApp: App {
     #if os(iOS)
+    /// 启动期入口。HealthKit 观察者必须**早于任何 UI** 注册（后台唤醒时视图不会出现），
+    /// 所以它挂在 `didFinishLaunching` 而不是 `RootView.onAppear`。
+    /// 逻辑本身全在 `AppDelegate.swift` 里 —— 本文件被 `typecheck-ios.sh` 排除。
+    @UIApplicationDelegateAdaptor(RaiAppDelegate.self) private var appDelegate
     @AppStorage(MapPrivacy.storageKey) private var mapPrivacyState = MapPrivacy.State.ask.rawValue
     @Environment(\.scenePhase) private var scenePhase
     #endif
@@ -73,7 +77,10 @@ struct RAIApp: App {
                         }
                     } else {
                         if phase == .background {
-                            model.healthSync.cancelSync()
+                            // 不在这里取消：切后台中止的是"App 拥有的执行时间"，不是用户的意图。
+                            // 由 `handleEnterBackground()` 按 `HealthSyncLifecycle` 判据决定
+                            // 是让在飞的工作跑完、还是收手保存为可续接。
+                            model.healthSync.handleEnterBackground()
                         }
                         model.discovery.stop()
                     }

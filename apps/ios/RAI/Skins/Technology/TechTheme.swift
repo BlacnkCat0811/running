@@ -564,7 +564,13 @@ func techKilometers(_ kilometers: Double?) -> String {
 func techSyncPhase(_ phase: String) -> String {
     switch phase {
     case "collecting": return "读取健康数据"
+    // `exported` = ZIP 已落盘、还没开始传。不给它名分就会落到 `default` 的"等待同步"，
+    // 而那一刻恰恰是"本地有一份数据等着发出去"—— 用户能做的事和"等待"完全不同。
+    case "exported": return "已准备数据"
     case "uploading": return "上传数据"
+    // `uploaded` = 服务端已收下、导入还没发起。与 `importing` 分开写，是因为它意味着
+    // "再等一会儿就要开始算"，而不是"正在算"。
+    case "uploaded": return "已上传，等待导入"
     case "importing": return "导入数据"
     case "recomputing": return "更新分析"
     case "succeeded": return "同步完成"

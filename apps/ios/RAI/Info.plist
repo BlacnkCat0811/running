@@ -4,6 +4,10 @@
 <dict>
 	<key>AMapApiKey</key>
 	<string>$(RAI_AMAP_API_KEY)</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>app.rai.running.health-sync</string>
+	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
@@ -22,6 +26,11 @@
 	<string>RAI 使用「体能训练」写入权限，把你的每周课表排期到 Apple Watch 的「体能训练」中；不会写入或修改你的跑步记录、心率等健康数据。</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>RAI 需要连接你配置的 RAI 服务以同步和显示分析结果。</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>healthkit</string>
+		<string>processing</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

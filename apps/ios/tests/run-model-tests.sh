@@ -72,3 +72,7 @@ bash apps/ios/tests/run-tech-presentation-tests.sh
 # 紧凑卡片高度、分钟轴替代秒轴、地图同意开关默认值 —— 全是"改错了肉眼也看不出来"的
 # 版式判据，正是最需要执行者的那一类。挂在聚合入口里才算真的被钉住。
 python3 apps/ios/tests/check-today-layout.py
+# 后台同步能力的结构门禁。`HealthKitSync.swift` 不被任何回归脚本编译，类型检查又看不见
+# "切后台时到底调了谁"；这个脚本钉的是「生命周期中止不得冒充用户取消」「expiration handler
+# 必须走 suspendForLifecycle」这类改错了照样编译通过的事实，并顺手断言自己没变成孤儿。
+python3 apps/ios/tests/check-background-capabilities.py

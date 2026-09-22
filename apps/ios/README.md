@@ -97,7 +97,24 @@ bash apps/ios/tests/run-visual-tests.sh
 
 - 不在手机上跑 Node.js、评分核心或服务端 SQLite，也不向 Apple 健康写入。
 - 新的同步、目标修改和锁课需要联网；已加载的首页、训练和分析可在服务暂时不可用时继续查看。
-- 手机不会在离线状态下生成或确认新的训练安排。健康同步仅在前台执行，不注册或调度后台同步任务。
+- 手机不会在离线状态下生成或确认新的训练安排。
+- 健康同步**在前台与后台都可运行**：前台以 `HealthKitSync` 的 Task 为主体；后台由 HealthKit
+  background delivery 唤醒、`BGProcessingTask`（identifier `app.rai.running.health-sync`）承载导出与
+  导入提交、带 identifier 的 background URLSession（`…health-sync.upload`）承载上传字节。
+  服务端没有推送，后台预算内取不到终态时保留 `jobId`，下次唤醒续接。
+- 但**切到后台不等于取消同步**：App 自己拥有的短步骤（HealthKit 导出、打包、上传、核对、发起导入）
+  会在系统给的短暂续期额度内跑完；「等服务端出结果」（`jobId` 已落盘、服务端没有推送机制）则立刻收手。
+  两种情况下进度都会落盘为「可续接」，下次唤醒（前台或后台）从那里接着跑。
+  已经在系统手上的传输（背景 URLSession）**一根手指都不许碰** —— 连 `inspect` 都不做。
+- `upload → 核对 → 发起导入` 是**一个原子单元**，必须在同一次唤醒内走完；只有「拿着 `jobId` 等终态」
+  允许跨会话（依据见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md` 的状态机章）。
+- 批次产物落在 `Application Support/rai-healthkit-<scope>/upload-<payloadHash>.{zip,multipart}`，
+  按 `payloadHash` 命名 —— 这样「这份文件属于哪一批」由文件名本身回答，恢复时不必对几个 GB 的包重算哈希。
+  失败时**刻意不删**：它就是「下次接着传」那条记录。`payloadHash` 同时是 `X-RAI-Sync-Batch` 幂等键。
+- 「下次接着传」只有一条判据（`SyncAtomicUnit.nextStep`，按 `jobId` / `sourceId` / 本地文件推导），
+  不再有第二套「失败 ZIP 记录在 UserDefaults 里」的机制。
+- HealthKit 观察者在 `didFinishLaunching` 注册（`RaiStartup.registerSyncEntryPoints`），**不在视图层** ——
+  后台唤醒时视图不会出现，挂在 `onAppear` 上等于没有观察者。
 
 ## 原生 UI 结构与移动端 API 映射
 

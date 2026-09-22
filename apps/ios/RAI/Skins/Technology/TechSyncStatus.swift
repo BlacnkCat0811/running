@@ -112,11 +112,22 @@ struct TechSyncStatus: View {
     @Environment(HealthKitSync.self) private var sync
     private var state: TechSyncPresentation {
         .resolve(phase: sync.phase, isBusy: sync.isBusy, hasError: sync.lastError != nil,
-                 hasSyncDate: sync.lastSyncAt != nil)
+                 hasSyncDate: sync.lastSyncAt != nil, hasPendingTask: sync.hasPendingTask)
+    }
+    /// 面板边框色。抽出来是因为档位从三档变成四档 —— 再套一层三元表达式，
+    /// 颜色选错在深色底上根本看不出来。
+    private var panelTint: Color {
+        switch state {
+        case .failed: return TechColor.coral
+        case .cancelled: return TechColor.yellow
+        case .pending: return TechColor.cyan
+        default: return TechColor.success
+        }
     }
     var body: some View {
-        if state != .hidden && (showsHistory || state == .busy || state == .failed || state == .cancelled) {
-            TechPanel(tint: state == .failed ? TechColor.coral : state == .cancelled ? TechColor.yellow : TechColor.success,
+        if state != .hidden
+            && (showsHistory || state == .busy || state == .failed || state == .cancelled || state == .pending) {
+            TechPanel(tint: panelTint,
                       fill: state == .succeeded ? TechColor.success.opacity(0.09) : TechColor.paper) {
                 if state == .cancelled {
                     Label("同步已取消", systemImage: "pause.circle")
@@ -124,6 +135,14 @@ struct TechSyncStatus: View {
                     Text("取消不会撤销已完成的数据导入，可在任务结束后重新同步。")
                         .font(.caption).foregroundStyle(TechColor.muted)
                     TechSyncAction(title: "重新同步", compact: true)
+                } else if state == .pending {
+                    // 有一条**没走完**的进度留在磁盘上。刻意不写成失败：用户不需要做任何事，
+                    // 下一次同步会从本地已落盘的那一批接着走，不必重读 HealthKit。
+                    Label(techSyncPhase(sync.phase), systemImage: "arrow.down.circle.dotted")
+                        .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.cyan)
+                    Text("上次同步未走完，数据已保存在本机；下次连接会接着完成，不必重新读取健康数据。")
+                        .font(.caption).foregroundStyle(TechColor.muted)
+                    TechSyncAction(title: "继续同步", compact: true)
                 } else if state == .busy {
                     Label(techSyncPhase(sync.phase), systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
                         .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.cyan)

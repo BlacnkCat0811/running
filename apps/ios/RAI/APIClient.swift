@@ -1,5 +1,40 @@
 import Foundation
 
+/// 跨源重定向的**唯一**判据，前台与后台上传两条 `URLSession` 共用。
+///
+/// 为什么必须抽出来：`URLSessionTaskDelegate` 是 `URLSession` 的单值属性 —— 一个会话只能有一个
+/// delegate，所以前台（`RaiRedirectGuard`）与后台上传（`RaiBackgroundUploadSession`）不可能共用
+/// 同一个类。但两边**必须**用同一条判据：一条放松、另一条收紧，等于"这次上传走了哪条路径"
+/// 决定了它安不安全，而那个问题没有任何人能一眼回答。
+///
+/// `nonisolated`：后台上传的 delegate 回调跑在 `URLSession` 自己的队列上，那里读不到
+/// MainActor 隔离的东西（默认隔离下，没标注的类型就是 MainActor 的）。纯函数，不碰状态。
+nonisolated enum RaiSameOrigin {
+    /// 重定向的**来源**与**去向**是否同源（scheme + host + 有效端口）。
+    ///
+    /// 端口缺失时按 scheme 补默认端口（`https` ⇒ 443，其余 ⇒ 80）：`URL.port` 对
+    /// `https://a.example/x` 返回 `nil` 而不是 `443`，不补就会把
+    /// `https://a.example/x` → `https://a.example:443/y` 判成跨源 —— 一次**假阴性**，
+    /// 代价是拒绝一次合法重定向，同步从此卡在 3xx 上。
+    ///
+    /// 任一侧读不出 scheme / host（相对 URL、非法 URL）一律判**不同源**：
+    /// 这条路径上的默认答案必须是"拒绝"。
+    static func allowsRedirection(from source: URL?, to destination: URL?) -> Bool {
+        guard let source = origin(for: source), let destination = origin(for: destination) else {
+            return false
+        }
+        return source == destination
+    }
+
+    static func origin(for url: URL?) -> String? {
+        guard let url,
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased() else { return nil }
+        let port = url.port ?? (scheme == "https" ? 443 : 80)
+        return "\(scheme)://\(host):\(port)"
+    }
+}
+
 final class RaiRedirectGuard: NSObject, URLSessionTaskDelegate {
     func urlSession(
         _ session: URLSession,
@@ -8,21 +43,12 @@ final class RaiRedirectGuard: NSObject, URLSessionTaskDelegate {
         newRequest request: URLRequest,
         completionHandler: @Sendable @escaping (URLRequest?) -> Void
     ) {
-        guard let source = origin(for: task.originalRequest?.url),
-              let destination = origin(for: request.url),
-              source == destination else {
-            completionHandler(nil)
-            return
-        }
-        completionHandler(request)
-    }
-
-    private func origin(for url: URL?) -> String? {
-        guard let url,
-              let scheme = url.scheme?.lowercased(),
-              let host = url.host?.lowercased() else { return nil }
-        let port = url.port ?? (scheme == "https" ? 443 : 80)
-        return "\(scheme)://\(host):\(port)"
+        // 判据住在 `RaiSameOrigin`（职责与"为什么不能直接共用本类"见它的说明）。
+        completionHandler(
+            RaiSameOrigin.allowsRedirection(from: task.originalRequest?.url, to: request.url)
+                ? request
+                : nil
+        )
     }
 }
 

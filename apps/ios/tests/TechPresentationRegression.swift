@@ -41,6 +41,33 @@ struct TechPresentationRegression {
               "Completed sync is clearly reported")
         check(TechSyncPresentation.resolve(phase: "idle", isBusy: false, hasError: false, hasSyncDate: false) == .hidden,
               "No operation does not fabricate status")
+        // 「磁盘上还有一批没走完」必须压过历史。不加 `hasPendingTask` 时的可见后果：
+        // 一次生命周期中断之后 `phase` 已回到 `idle`，而 `lastSyncAt` 是上次成功的时间，
+        // 界面读起来像一切正常，实际却卡着一批没发出去的数据。
+        check(TechSyncPresentation.resolve(phase: "idle", isBusy: false, hasError: false,
+                                           hasSyncDate: true, hasPendingTask: true) == .pending,
+              "A pending batch must not be reported as a previous success")
+        check(TechSyncPresentation.resolve(phase: "exported", isBusy: false, hasError: false,
+                                           hasSyncDate: true, hasPendingTask: true) == .pending,
+              "A batch on disk with no upload in flight is pending, not history")
+        check(TechSyncPresentation.resolve(phase: "uploaded", isBusy: false, hasError: false,
+                                           hasSyncDate: true, hasPendingTask: true) == .pending,
+              "A batch the server already holds is still pending until the import is started")
+        // 优先级：中止 > 进行中 > 失败 > 有待办。反了会把"明确失败"降级成"不用管"，
+        // 或把"正在跑"说成"卡住了"。
+        check(TechSyncPresentation.resolve(phase: "cancelled", isBusy: false, hasError: false,
+                                           hasSyncDate: true, hasPendingTask: true) == .cancelled,
+              "Cancellation outranks a pending batch")
+        check(TechSyncPresentation.resolve(phase: "uploading", isBusy: true, hasError: false,
+                                           hasSyncDate: true, hasPendingTask: true) == .busy,
+              "Running outranks a pending batch")
+        check(TechSyncPresentation.resolve(phase: "failed", isBusy: false, hasError: false,
+                                           hasSyncDate: true, hasPendingTask: true) == .failed,
+              "A named failure outranks a pending batch")
+        // 反向：`hasPendingTask == false` 时旧行为一个字都不许变（默认参数就是为此存在的）。
+        check(TechSyncPresentation.resolve(phase: "idle", isBusy: false, hasError: false,
+                                           hasSyncDate: true, hasPendingTask: false) == .previousSuccess,
+              "Without a pending batch the history label is unchanged")
         check(TechPlotSampling.indices(values: []).isEmpty, "Empty is not a fabricated zero")
         check(TechPlotSampling.indices(values: [3]) == [0], "Single value is retained")
         check(TechPlotSampling.indices(values: [.nan, 2, .infinity, -3]) == [1, 3], "Non-finite samples are excluded")

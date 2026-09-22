@@ -308,5 +308,32 @@ for file_name, functions in [
         assert call in body, (
             f"{file_name} no longer calls {call} — the mapping exists but the view bypasses it, "
             "which is how contract machine codes reach the screen.")
+# 阶段展示映射必须覆盖闭集里的每个取值。
+# ---------------------------------------------------------------------------
+# `techSyncPhase` 有 `default: return "等待同步"`，所以新增一个阶段（P1 加了 `exported` /
+# `uploaded`）**编译通过、回归全绿**，用户却会看到"等待同步"—— 而那一刻磁盘上明明有一批
+# 数据在等。闭集在 `SyncPhase.swift`，文案在 `TechTheme.swift`，两者必须逐个配平。
+# 这条同时是「阶段闭集只有一个来源」的展示侧对账：那边删一个取值，这里也会红。
+sync_phase_source = pathlib.Path("apps/ios/RAI/SyncPhase.swift").read_text()
+enum_body = re.search(r"enum SyncPhase: String, CaseIterable, Sendable \{(.*?)\n\}", sync_phase_source, re.S)
+assert enum_body, ("Could not locate the SyncPhase enum; the phase-label gate must fail loudly "
+                   "instead of skipping")
+sync_phases = set(re.findall(r"^\s*case ([a-z][A-Za-z0-9_]*)\s*$", enum_body.group(1), re.M))
+assert len(sync_phases) >= 8, f"SyncPhase parsed as only {sorted(sync_phases)}"
+theme_source = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTheme.swift").read_text()
+label_block = re.search(r"func techSyncPhase\(_ phase: String\) -> String \{(.*?)\n\}", theme_source, re.S)
+assert label_block, "Could not locate techSyncPhase; the phase-label gate must fail loudly instead of skipping"
+labelled = set(re.findall(r'case "([^"]+)": return', label_block.group(1)))
+# `idle` 是"没有进度"这一态，由 `default` 的"等待同步"承载，是唯一允许没有显式分支的取值。
+unlabelled = sync_phases - labelled - {"idle"}
+assert not unlabelled, (
+    f"techSyncPhase has no label for {sorted(unlabelled)}; they fall through to the default "
+    '"等待同步", which is wrong for a batch that is sitting on disk waiting to go out.')
+stale = labelled - sync_phases
+assert not stale, (
+    f"techSyncPhase labels {sorted(stale)}, which SyncPhase no longer produces — "
+    "a label for a phase that cannot occur is dead text that reads like coverage.")
 print("Enum mappings are wired into the view, not just defined.")
+print(f"Phase labels: {len(sync_phases)} SyncPhase values, {len(labelled)} explicit labels "
+      "(idle falls through to the default by design).")
 PY
