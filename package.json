@@ -76,15 +76,16 @@
     "@types/node": "^22.0.0",
     "concurrently": "^9.2.0",
     "playwright-core": "^1.61.1",
-    "tsx": "^4.20.0",
+    "tsx": "4.23.0",
     "typescript": "^5.8.0"
   },
   "engines": {
     "node": ">=22.12.0 <23"
   },
   "overrides": {
-    "onnxruntime-node": {
-      "adm-zip": "0.6.0"
+    "adm-zip": "0.6.1",
+    "tsx": {
+      "esbuild": "0.28.1"
     }
   }
 }

@@ -8,6 +8,6 @@
   },
   "dependencies": {
     "@rai/contracts": "*",
-    "onnxruntime-node": "^1.22.0"
+    "onnxruntime-node": "1.22.0"
   }
 }
