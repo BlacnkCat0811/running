@@ -4,6 +4,9 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 
+import { ClientRequestError } from "./api-error.js";
+import { RestoreJournal, RestoreRecoveryRequiredError, type RestoreIntent } from "./restore-journal.js";
+
 import type { BackupDto } from "@rai/api-contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
@@ -111,6 +114,7 @@ export interface DisplacedDatabaseReclamation {
 }
 
 export class DatabaseMaintenance {
+  private readonly restoreJournal: RestoreJournal;
   readonly backupDirectory: string;
   readonly quarantineDirectory: string;
 
@@ -124,8 +128,46 @@ export class DatabaseMaintenance {
     private readonly moveFile: (source: string, destination: string) => Promise<void> = rename,
     private readonly backupPolicy: BackupPolicyOptions = {}
   ) {
+    this.restoreJournal = new RestoreJournal(databasePath, projectRoot);
     this.backupDirectory = resolve(projectRoot, "var/backups");
     this.quarantineDirectory = resolve(projectRoot, "var/quarantine");
+  }
+
+  private async syncFile(path: string): Promise<void> {
+    const handle = await open(path, "r");
+    try { await handle.sync(); } finally { await handle.close(); }
+  }
+
+  private async syncDirectory(path: string): Promise<void> {
+    // Windows does not support opening directories through fs.open.
+    if (process.platform === "win32") return;
+    await this.syncFile(path);
+  }
+
+  /** Must run under the publication lock, before opening any read store/worker. */
+  async recoverInterruptedRestore(): Promise<void> {
+    const intent = this.restoreJournal.read();
+    if (!intent) return;
+    if (intent.phase === "committed") {
+      if (!this.isReadableDatabase(this.databasePath)) {
+        throw new RestoreRecoveryRequiredError("Committed restore database is unreadable");
+      }
+    } else if (intent.snapshot) {
+      // Copy from an immutable snapshot. If recovery itself is killed, the same
+      // intent can be replayed without consuming its only rollback point.
+      const failures = await this.restoreDeletedDatabase(intent.snapshot, intent.snapshotIsQuarantine);
+      if (failures.length) throw new RestoreRecoveryRequiredError("Interrupted restore could not be recovered", { cause: failures[0] });
+    } else {
+      for (const suffix of ["-shm", "-wal", ""]) await this.removeFileWithRetry(`${this.databasePath}${suffix}`);
+    }
+    await this.syncDirectory(dirname(this.databasePath));
+    this.restoreJournal.clear();
+    for (const suffix of ["-shm", "-wal", ""]) await this.removeFileWithRetry(`${intent.staging}${suffix}`);
+  }
+
+  private protectedRestoreSnapshot(): string[] {
+    const snapshot = this.restoreJournal.read()?.snapshot;
+    return snapshot ? [basename(snapshot)] : [];
   }
 
   async createBackup(reason = "manual", additionalProtectedNames: readonly string[] = []): Promise<BackupDto> {
@@ -184,7 +226,7 @@ export class DatabaseMaintenance {
   }
 
   async backupStream(name: string) {
-    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new Error("备份文件名无效");
+    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new ClientRequestError("invalid_backup_name", "备份文件名无效", 400);
     const path = resolve(this.backupDirectory, name);
     try {
       // Opening first removes the exists/open race. On Windows the handle also
@@ -192,15 +234,18 @@ export class DatabaseMaintenance {
       const handle = await open(path, "r");
       return handle.createReadStream();
     } catch (error) {
-      if (this.isMissingFileError(error)) throw new Error("备份文件不存在");
+      if (this.isMissingFileError(error)) throw new ClientRequestError("backup_not_found", "备份文件不存在", 404);
       throw error;
     }
   }
 
   async deleteBackup(name: string): Promise<BackupDto> {
-    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new Error("备份文件名无效");
-    const backupInfo = await this.describe(name).catch(() => null);
-    if (!backupInfo) throw new Error("备份文件不存在");
+    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new ClientRequestError("invalid_backup_name", "备份文件名无效", 400);
+    if (this.protectedRestoreSnapshot().includes(name)) throw new ClientRequestError("backup_in_use", "备份正在用于恢复", 409);
+    const backupInfo = await this.describe(name).catch((error: unknown) => {
+      if (this.isMissingFileError(error)) throw new ClientRequestError("backup_not_found", "备份文件不存在", 404);
+      throw error;
+    });
     await this.removeFileWithRetry(resolve(this.backupDirectory, name));
     return backupInfo;
   }
@@ -258,10 +303,12 @@ export class DatabaseMaintenance {
     name: string,
     beforeCommit: () => void | Promise<void> = () => {}
   ): Promise<{ restored: BackupDto; safetyBackup: BackupDto | null }> {
-    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new Error("备份文件名无效");
+    if (name !== basename(name) || !name.endsWith(".sqlite")) throw new ClientRequestError("invalid_backup_name", "备份文件名无效", 400);
+    if (this.restoreJournal.read()) throw new RestoreRecoveryRequiredError("A previous restore needs startup recovery");
     const source = resolve(this.backupDirectory, name);
-    if (!existsSync(source)) throw new Error("备份文件不存在");
+    if (!existsSync(source)) throw new ClientRequestError("backup_not_found", "备份文件不存在", 404);
     let safetyBackup: BackupDto | null = null;
+    let intent: RestoreIntent | null = null;
     const staging = `${this.databasePath}.restoring.${randomUUID()}`;
     const rollback = resolve(this.backupDirectory, `rai.restore-rollback.${randomUUID()}.sqlite`);
     try {
@@ -295,6 +342,7 @@ export class DatabaseMaintenance {
         try {
           safetyBackup = await this.createBackup("before-restore", [name]);
         } catch (error) {
+          if (this.isReadableDatabase(this.databasePath)) throw error;
           const message = error instanceof Error ? error.stack ?? error.message : String(error);
           process.stderr.write(`Restore safety backup failed; the replacement gate will preserve corrupt bytes in quarantine: ${message}\n`);
         }
@@ -313,6 +361,25 @@ export class DatabaseMaintenance {
       let originalMutationStarted = false;
       let committed = false;
       try {
+        if (originalExisted && !originalReadable) {
+          const snapshot = await this.preserveCorruptDatabase("before-restore-corrupt");
+          corruptSnapshotPath = resolve(this.quarantineDirectory, snapshot.name);
+        }
+        intent = {
+          target: resolve(this.databasePath), staging: resolve(staging),
+          snapshot: corruptSnapshotPath ?? (safetyBackup ? resolve(this.backupDirectory, safetyBackup.name) : null),
+          snapshotIsQuarantine: corruptSnapshotPath !== null, phase: "prepared"
+        };
+        if (originalExisted && !intent.snapshot) throw new Error("Restore requires a durable original snapshot");
+        if (intent.snapshot) {
+          for (const suffix of ["", "-wal", "-shm"]) {
+            if (existsSync(`${intent.snapshot}${suffix}`)) await this.syncFile(`${intent.snapshot}${suffix}`);
+          }
+          await this.syncDirectory(dirname(intent.snapshot));
+        }
+        await this.syncFile(staging);
+        this.restoreJournal.write(intent);
+        await this.syncDirectory(dirname(this.databasePath));
         if (originalExisted) {
           if (originalReadable) {
             const current = new DatabaseSync(this.databasePath);
@@ -327,8 +394,6 @@ export class DatabaseMaintenance {
             await this.moveFileWithRetry(this.databasePath, rollback);
             originalMoved = true;
           } else {
-            const snapshot = await this.preserveCorruptDatabase("before-restore-corrupt");
-            corruptSnapshotPath = resolve(this.quarantineDirectory, snapshot.name);
             originalMutationStarted = true;
             await this.removeFileWithRetry(`${this.databasePath}-shm`);
             await this.removeFileWithRetry(`${this.databasePath}-wal`);
@@ -338,9 +403,14 @@ export class DatabaseMaintenance {
         await this.removeFileWithRetry(`${this.databasePath}-shm`);
         await this.removeFileWithRetry(`${this.databasePath}-wal`);
         await this.installReplacementWithRetry(staging, this.databasePath);
+        this.restoreJournal.write({ ...intent, phase: "installed" });
         await beforeCommit();
+        this.checkpointDatabase(this.databasePath);
+        await this.syncFile(this.databasePath);
+        await this.syncDirectory(dirname(this.databasePath));
         await this.releaseReplaceGate();
         replaceGateEntered = false;
+        this.restoreJournal.write({ ...intent, phase: "committed" });
         committed = true;
       } catch (error) {
         const errors: unknown[] = [error];
@@ -378,15 +448,18 @@ export class DatabaseMaintenance {
             errors.push(releaseError);
           }
         }
-        throw errors.length === 1
-          ? error
-          : new AggregateError(errors, "Database restore failed and required recovery actions also failed");
+        if (errors.length === 1 && intent) this.restoreJournal.clear();
+        if (this.restoreJournal.read()) {
+          throw new RestoreRecoveryRequiredError("Database restore needs startup recovery", { cause: new AggregateError(errors) });
+        }
+        throw errors.length === 1 ? error : new AggregateError(errors, "Database restore failed and required recovery actions also failed");
       } finally {
         if (committed && originalMoved) {
           // Cleanup is post-commit. A locked rollback remains a visible, valid backup.
           await this.removeFileWithRetry(rollback).catch(() => {});
         }
       }
+      this.restoreJournal.clear();
       return { restored: await this.describe(name), safetyBackup };
     } catch (error) {
       const cleanupErrors: unknown[] = [];
@@ -444,10 +517,12 @@ export class DatabaseMaintenance {
     const errors: unknown[] = [];
     const staging = `${this.databasePath}.delete-rollback.${randomUUID()}`;
     try {
+      // Validate the copy before touching the active file, including on replay.
+      await copyFile(backupPath, staging);
+      if (!this.isReadableDatabase(staging)) throw new Error("Safety backup is unreadable");
       for (const candidate of [`${this.databasePath}-shm`, `${this.databasePath}-wal`, this.databasePath]) {
         await this.removeFileWithRetry(candidate);
       }
-      await copyFile(backupPath, staging);
       await this.moveFileWithRetry(staging, this.databasePath);
       if (!this.isReadableDatabase(this.databasePath)) {
         throw new Error("Safety backup did not restore a readable active database");
@@ -579,7 +654,7 @@ export class DatabaseMaintenance {
     let backups = await this.listBackups();
     let filesystem = await statfs(this.backupDirectory);
     let availableBytes = filesystem.bavail * filesystem.bsize;
-    const protectedSet = new Set(protectedNames);
+    const protectedSet = new Set([...protectedNames, ...this.protectedRestoreSnapshot()]);
     const removalErrors: unknown[] = [];
     for (const candidate of [...backups].reverse()) {
       if (availableBytes >= requiredBytes || backups.length <= 1) break;
@@ -606,7 +681,7 @@ export class DatabaseMaintenance {
   async enforceBackupPolicy(protectedNames: string | readonly string[]): Promise<void> {
     const policy = this.resolvedBackupPolicy();
     const protectedSet = new Set(
-      typeof protectedNames === "string" ? [protectedNames] : protectedNames
+      [...(typeof protectedNames === "string" ? [protectedNames] : protectedNames), ...this.protectedRestoreSnapshot()]
     );
     const backups = await this.listBackups();
     let totalBytes = backups.reduce((sum, item) => sum + item.sizeBytes, 0);

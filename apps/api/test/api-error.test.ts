@@ -46,3 +46,11 @@ test("mutation conflict keeps a distinguishable 409 code", () => {
     body: { code: "mutation_conflict", message: "另一项写操作正在执行：recompute" }
   });
 });
+
+test("invalid error statuses are redacted as internal errors", () => {
+  for (const statusCode of [NaN, Infinity, -1, 200, 399, 600, 404.5, "404"]) {
+    assert.deepEqual(apiErrorPayload(Object.assign(new Error("secret"), { statusCode })), {
+      status: 500, body: { code: "internal_error", message: "本地服务处理请求失败" }
+    });
+  }
+});

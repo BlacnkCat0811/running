@@ -1,3 +1,11 @@
+/** Stable maintenance errors; internal exceptions remain redacted by apiErrorPayload. */
+export class ClientRequestError extends Error {
+  constructor(readonly code: string, message: string, readonly statusCode: 400 | 404 | 409) {
+    super(message);
+    this.name = "ClientRequestError";
+  }
+}
+
 export interface ApiErrorPayload {
   status: number;
   body: {
@@ -10,7 +18,8 @@ export function apiErrorPayload(error: unknown): ApiErrorPayload {
   const message = error instanceof Error ? error.message : String(error);
   const providedStatus = (error as { statusCode?: unknown } | null)?.statusCode;
   const providedCode = (error as { code?: unknown } | null)?.code;
-  const status = typeof providedStatus === "number" ? providedStatus : 500;
+  const status = typeof providedStatus === "number" && Number.isInteger(providedStatus) &&
+    providedStatus >= 400 && providedStatus <= 599 ? providedStatus : 500;
   return {
     status,
     body: {

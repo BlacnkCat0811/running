@@ -40,6 +40,7 @@ import {
 import { ModelRunActivationError, PendingMigrationsError, RaiDatabase, SqliteModelRunRepository, acquireDatabasePublicationLock } from "@rai/storage-sqlite";
 import Fastify from "fastify";
 
+import { RestoreRecoveryRequiredError } from "./restore-journal.js";
 import { apiErrorPayload } from "./api-error.js";
 import { CommandQueue, applyMutationCommand } from "./command-queue.js";
 import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
@@ -380,6 +381,8 @@ if (existsSync(webDist)) {
 // Both annotated: `readStores` asks the import worker for the newest refresh and
 // the worker asks the store pool to drain before it swaps the database file, so
 // inference would chase its own tail through the two initializers.
+// Recovery runs before workers can open the main database or schedule writes.
+await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedRestore();
 const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
@@ -1485,15 +1488,10 @@ app.post("/v1/backups", async (_request, reply) => {
 });
 
 app.get<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
-  try {
-    const stream = await maintenance.backupStream(request.params.name);
-    reply.header("content-type", "application/x-sqlite3");
-    reply.header("content-disposition", `attachment; filename="${request.params.name}"`);
-    return reply.send(stream);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "备份文件无效";
-    return reply.code(message.includes("无效") ? 400 : 404).send({ message });
-  }
+  const stream = await maintenance.backupStream(request.params.name);
+  reply.header("content-type", "application/x-sqlite3");
+  reply.header("content-disposition", `attachment; filename="${request.params.name}"`);
+  return reply.send(stream);
 });
 
 app.delete<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
@@ -1542,6 +1540,11 @@ app.delete<{ Body: { confirmation: string } }>("/v1/database", { schema: { body:
 
 app.setErrorHandler((error, _request, reply) => {
   app.log.error(error);
+  if (error instanceof RestoreRecoveryRequiredError) {
+    databaseRecoveryRequired = true;
+    invalidateDatabaseReadiness();
+    taskAdmission.blockUntilRestart(error.code);
+  }
   const payload = apiErrorPayload(error);
   if (payload.status === 429) reply.header("Retry-After", "5");
   void reply.code(payload.status).send(payload.body);
