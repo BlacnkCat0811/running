@@ -21,3 +21,20 @@ test("downsampled series retains a peak between regular sample positions", () =>
     assert.ok(series.points.length <= 601);
   } finally { database.close(); }
 });
+
+test("routes with independent sequence counters are read in chronological order", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec(`CREATE TABLE workout_routes(id TEXT, workout_id TEXT, start_at TEXT);
+      CREATE TABLE route_points(route_id TEXT, sequence INTEGER, latitude REAL, longitude REAL, elevation_meters REAL, speed_mps REAL, timestamp TEXT);
+      INSERT INTO workout_routes VALUES ('z','w','2026-01-01T00:00:00Z'),('a','w','2026-01-01T00:02:00Z');
+      INSERT INTO route_points VALUES
+      ('z',0,1,1,10,3,'2026-01-01T00:00:00Z'),('z',1,2,2,11,3,'2026-01-01T00:01:00Z'),
+      ('a',0,3,3,12,3,'2026-01-01T00:02:00Z'),('a',1,4,4,13,3,'2026-01-01T00:03:00Z');
+      CREATE TABLE training_sessions(id TEXT, canonical_workout_id TEXT, anchor_start_at TEXT);
+      INSERT INTO training_sessions VALUES ('s','w','2026-01-01T00:00:00Z');`);
+    const repo = new SqliteSeriesReadRepository(db);
+    assert.deepEqual(repo.routePoints("w").map((point) => point.latitude), [1, 2, 3, 4]);
+    assert.deepEqual(repo.routeElevationSeries("s").points.map((point) => point.offsetSeconds), [0, 60, 120, 180]);
+  } finally { db.close(); }
+});

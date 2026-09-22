@@ -109,7 +109,7 @@ export class SqliteSeriesReadRepository {
       .prepare(`
         WITH numbered AS (
           SELECT rp.latitude, rp.longitude, rp.elevation_meters, rp.speed_mps, rp.timestamp,
-            ROW_NUMBER() OVER (ORDER BY rp.sequence) AS sample_number,
+            ROW_NUMBER() OVER (ORDER BY COALESCE(wr.start_at, rp.timestamp), wr.id, rp.sequence) AS sample_number,
             COUNT(*) OVER () AS total_samples
           FROM workout_routes wr
           JOIN route_points rp ON rp.route_id = wr.id
@@ -227,7 +227,7 @@ export class SqliteSeriesReadRepository {
       .prepare(`
         WITH numbered AS (
           SELECT ts.anchor_start_at, rp.timestamp, rp.elevation_meters,
-            ROW_NUMBER() OVER (ORDER BY rp.sequence) AS sample_number,
+            ROW_NUMBER() OVER (ORDER BY COALESCE(wr.start_at, rp.timestamp), wr.id, rp.sequence) AS sample_number,
             COUNT(*) OVER () AS total_samples
           FROM training_sessions ts
           JOIN workout_routes wr ON wr.workout_id = ts.canonical_workout_id
