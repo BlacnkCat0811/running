@@ -56,7 +56,15 @@ test("accepted Rust jobs keep their engine across restart and run the actual nat
     await worker.close();
     worker = create("rust");
     const second = join(root, "second"); mkdirSync(second);
-    writeFileSync(join(second, "export.xml"), `<HealthData><Workout workoutActivityType="HKWorkoutActivityTypeRunning"
+    // 🔴 这条 `<Record>` 是**必需的**，不是装饰：增量导入必须真的写健康记录，
+    // 才能走到 `native-record-writer` 的那条守卫（它位于 `if (this.count === 0) return`
+    // 之后，见 `native-record-writer.ts:244-251`）。此前这个 fixture 只有 `<Workout>`，
+    // 于是 `count === 0` 早退、守卫**从未被评估** —— 2026-09-22 的 `--database-is-staging`
+    // 缺陷正是从这个洞里漏到线上的（见 `deliverables/IMPORT_STAGE_ATTRIBUTION_2026-09-21.md` §20）。
+    writeFileSync(join(second, "export.xml"), `<HealthData>
+    <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min" value="142"
+      startDate="2026-01-03 08:00:00 +0800" endDate="2026-01-03 08:00:05 +0800"/>
+    <Workout workoutActivityType="HKWorkoutActivityTypeRunning"
       sourceName="Apple Watch" duration="30" durationUnit="min" totalDistance="5" totalDistanceUnit="km"
       startDate="2026-01-03 08:00:00 +0800" endDate="2026-01-03 08:30:00 +0800"/></HealthData>`);
     const next = worker.create(second, undefined, "source-second");
@@ -69,6 +77,9 @@ test("accepted Rust jobs keep their engine across restart and run the actual nat
     assert.equal(nextResult.status, "succeeded", JSON.stringify(nextResult));
     assert.equal(nextResult.performance?.validationMode, "not-run");
     assert.ok(nextResult.performance?.computeStagesMs?.parse_health_xml! > 0);
+    // 断言"增量这轮确实写了记录"—— 它是上面那条守卫的**前置条件**，锁住它，
+    // 未来谁把这条 `<Record>` 删掉都会立刻红，而不是让守卫静默失守。
+    assert.equal(nextResult.performance?.native?.["apply-records"]?.rustCalls, 1);
     assert.equal(nextResult.performance?.native?.aggregate?.rustCalls, 1);
   } finally { release(); await worker.close(); rmSync(root, { recursive: true, force: true }); }
 });
