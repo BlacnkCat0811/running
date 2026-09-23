@@ -110,18 +110,28 @@ export function analyzeDatasetChange(
         SELECT entity_kind, entity_type, item_count, first_at, last_at, details_json FROM entity_inventory
       )
     )`) > 0;
+    // Deliberately *not* `dataset_version`. It is a derived value
+    // (`cli.ts` sets it to `stableId("dataset", fingerprints)` over
+    // `source_xml_sha256` / `source_gpx_bundle_sha256`), and `source_xml_sha256`
+    // is the sha256 of the whole `export.xml` — including `<ExportDate>`, the wall
+    // clock the exporter stamps on every export. So `dataset_version` moves on
+    // every sync of a dataset that did not change by a single row, and comparing
+    // it here forced the verdict from `unchanged` onto `data-only`: the worker then
+    // still copies the whole database, re-parses, and swaps the main file, which is
+    // exactly the work `unchanged` exists to skip.
+    //
+    // Losing the comparison costs nothing, because every fact it could stand in
+    // for is already compared directly and by a field with its own meaning:
+    // route changes via `source_gpx_bundle_sha256` below, workout/record/profile
+    // changes via their own table diffs, and the row count via `record_count` here.
     const auditManifestChanged = count(`SELECT COUNT(*) AS count FROM (
-      SELECT key, value FROM (
-        SELECT key, value FROM import_manifest WHERE key IN ('dataset_version', 'record_count')
-        EXCEPT
-        SELECT key, value FROM previous.import_manifest WHERE key IN ('dataset_version', 'record_count')
-      )
+      SELECT key, value FROM import_manifest WHERE key IN ('record_count')
+      EXCEPT
+      SELECT key, value FROM previous.import_manifest WHERE key IN ('record_count')
       UNION ALL
-      SELECT key, value FROM (
-        SELECT key, value FROM previous.import_manifest WHERE key IN ('dataset_version', 'record_count')
-        EXCEPT
-        SELECT key, value FROM import_manifest WHERE key IN ('dataset_version', 'record_count')
-      )
+      SELECT key, value FROM previous.import_manifest WHERE key IN ('record_count')
+      EXCEPT
+      SELECT key, value FROM import_manifest WHERE key IN ('record_count')
     )`) > 0;
     const importIssuesChanged = count(`SELECT COUNT(*) AS count FROM (
       SELECT severity, code, object_id, message, occurrence_count FROM (
