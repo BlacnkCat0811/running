@@ -1626,10 +1626,72 @@ const migrations: readonly Migration[] = [
   }
 ];
 
-function migrationChecksum(migration: Migration): string {
+/**
+ * 已应用迁移的**权威**校验和。
+ *
+ * 🔴 为什么不从 `up.toString()` 现算：那会把「构建工具当前的行为」变成持久化数据的一部分。
+ * 2026-09-23 实测：`tsx`(esbuild) 下 `up.toString()` = `x=>{return x+1}`（注释/缩进/空白全被剥离）
+ * ⇒ 给历史迁移的 `up` **加注释**不会改 checksum；而换成 `node file.ts`（Node 原生类型剥离，
+ * 保留注释）⇒ **全部迁移集体失配、含线上在内的所有库立刻打不开**（实测抛
+ * `Migration 1 checksum does not match the application`）。报错文本还会把根因误导到
+ * 「有人偷改迁移」方向。
+ *
+ * ⇒ 冻结值取自**现存库实际写入的值**，运行时判定与执行通道彻底解耦。
+ * 2026-09-23 实测：本地与线上 22 个值逐条一致（摘要
+ * `1fa2cd288444a24709c7fdb969a20e249789460e7cdb32dbc71f0d9c702b97c2`）⇒ 冻结不影响既有库。
+ *
+ * 两个配套门禁在 `test/migration-policy.test.ts`：
+ *  1. `every migration has a frozen checksum` —— 新增迁移必须补冻结值；
+ *  2. `frozen checksums match the transpiled source` —— 保留「改历史迁移的 up 会被发现」的能力。
+ *     ⚠️ 它**同时**会在「TS 执行通道被换掉」时变红：那一刻**不要**更新冻结值（那会让既有库失配），
+ *     应先恢复 `tsx` 通道；确需换通道时，必须先规划一次 checksum 重写迁移。
+ */
+export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
+  1: "baf1c3f4b3d28323dac869d9ef20ae638c019a43b0eded150c4d451beff604ba",
+  2: "cfde382f225f19db61bf62214e30d20d7c1328d9b021045e5d7c8c1d47536aec",
+  3: "35eca610e3e088e532e2ccc69caa29025f95202ba3fd6b62d24818dda6fedebd",
+  4: "ee90dbbc80895447b3a6d1f930235d0b171d6c72d52cae6c0bce97ada3117201",
+  5: "6c61fd684d56ee017652146baff897cf0fa088d3e2298bba40d3a3a50e2ea63c",
+  6: "d3047cef61b7c881c91e544b45481821e24a28e06565e7a405700c506ba9a967",
+  7: "f3463b906255087dc6e0b4262d8cb2d74644b8df55fd640039cc4ad3df6bb8ab",
+  8: "1911d926926c4093a13b9702f27bff4f035791bdebba6e9d2b524f5c9ee24835",
+  9: "ec74d9cf68e5a7d2c8b17161137e13d91de0256405bc9af794739df57f91cb8f",
+  10: "8dec586f996ce049397fc64c4a32d8fb148d5b68b3be30b138da2275d8c55adb",
+  11: "288aa8753506a0993eb74d8ffe3ec60371c51639306554362b03a919860734fc",
+  12: "1fb39afc708979ee6edd6ad9395df64abfe32a4f2befc0c498f07dbee1f6c8d7",
+  13: "4fd2f65ab5393261a0c954a6e78ea7095ccf8882cb050cfa6b0ea0a02c8cd648",
+  14: "1f1811289df897e5f2eb38cbb696ff0a2a1ef46a6e7513c18ea7bcdb96f7ac4b",
+  15: "329267b1a2666e24b5c1b286708f07e8ea57052078f09ef71b309e2d7c0595c3",
+  16: "923ca207cd836b5af2640771307e099fc27be649855f0c63df394ca200ca57c7",
+  17: "4d4262948d8ec405d5ff9f29f4b99d3f0e095c613401d62265c43565090b43c7",
+  18: "e67a637540d505110ae93381aa8e284b1dd90f19904091e7d2b13ea9e81d8bc3",
+  19: "faea882f61acb6a3fabda39f1ed3a7630eb318333a2956cba471b334e75aa49e",
+  20: "31ecbc8732ceccbf503236adde2441c87b016ce407593e435337a696966c4869",
+  21: "7631d0dabe8faed8f3e7294b9aa3794f700970a597797bc9939398dfa41e2df7",
+  22: "4401a26ed8579f23a19d0b585123072564127deec47dd1899f6a8cc57d59ac58"
+};
+
+/** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
+export const MIGRATION_VERSIONS: readonly number[] = migrations.map((migration) => migration.version);
+
+function checksumOfTranspiledSource(migration: Migration): string {
   return createHash("sha256")
     .update(`${migration.version}:${migration.name}:${migration.up.toString()}`)
     .digest("hex");
+}
+
+/**
+ * 按**当前执行通道**下的转译产物现算，仅供测试期的等价断言使用 ——
+ * 运行时判定永远走 `FROZEN_MIGRATION_CHECKSUMS`。
+ */
+export function transpiledChecksumFor(version: number): string | null {
+  const migration = migrations.find((item) => item.version === version);
+  return migration ? checksumOfTranspiledSource(migration) : null;
+}
+
+/** 期望校验和：已冻结的用冻结值（跨执行通道稳定），未冻结的新迁移才现算。 */
+function migrationChecksum(migration: Migration): string {
+  return FROZEN_MIGRATION_CHECKSUMS[migration.version] ?? checksumOfTranspiledSource(migration);
 }
 
 function legacyMigrationChecksum(migration: Migration): string {
