@@ -33,6 +33,9 @@ r"""后台同步判据的**突变验证**（`npm run test:ios:mutation`）。
 """
 from __future__ import annotations
 
+import datetime
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -65,11 +68,16 @@ HEALTH_SYNC_RUNNER = "apps/ios/tests/run-health-sync-tests.sh"
 BG_POLICY = "apps/ios/RAI/BackgroundSyncPolicy.swift"
 UPLOAD_SESSION = "apps/ios/RAI/BackgroundUploadSession.swift"
 API_CLIENT = "apps/ios/RAI/APIClient.swift"
+SYNC_STATE_PLAN = "apps/ios/RAI/SyncStateCommitPlan.swift"
+SYNC_TASK_STORE = "apps/ios/RAI/SyncTaskStore.swift"
+ROUTE_SYNC_MACHINE = "apps/ios/RAI/RouteSyncStateMachine.swift"
+STORE_RUNNER = "apps/ios/tests/run-store-tests.sh"
 # 🔴 凡是被突变**改到**的文件都必须在这里。少一个的失效方式是致命的：`restore()` 会静默跳过它
 # （那个"跳过"是为信号处理器的窗口留的），于是改坏的源码留在工作区、下一轮的基线检查才炸。
 SOURCES = [
     LIFECYCLE, SYNC, SYNC_PHASE, APP, APP_DELEGATE, ROOT_VIEW, TECH_THEME, TECH_PRESENTATION, MODEL_RUNNER,
     HEALTH_SYNC_RUNNER, BG_POLICY, UPLOAD_SESSION, API_CLIENT, HEALTH_EXPORT,
+    SYNC_STATE_PLAN, SYNC_TASK_STORE, ROUTE_SYNC_MACHINE, STORE_RUNNER,
 ]
 
 SWIFT_GATE = "bash apps/ios/tests/run-health-sync-tests.sh"
@@ -160,12 +168,21 @@ def install_signal_handlers() -> None:
         signal.signal(signum, handler)
 
 
+# 本轮**已经**被 `edit()` 改写过的文件，由 main 在每次 `apply()` 前清空。
+# 存在的唯一理由是让 JSON 摘要能写明"这条突变炸的是哪个文件" ——
+# 光有突变名的话，跨轮 diff 看到"某条从 RED 变成 STILL-GREEN"时还得回去读源码才知道碰的是哪儿。
+_edited: list[str] = []
+
+
 def edit(rel: str, old: str, new: str) -> None:
     path = ROOT / rel
     text = path.read_text(encoding="utf-8")
     hits = text.count(old)
     if hits != 1:
         raise SystemExit("[%s] pattern occurs %d times, expected exactly 1:\n%s" % (rel, hits, old))
+    # 记在精确性检查**之后**：模式过期时这条突变根本没被施加，不该声称它改过谁。
+    if rel not in _edited:
+        _edited.append(rel)
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
@@ -778,6 +795,220 @@ MUTATIONS = [
         EXPORT_GATE,
         "every judgement below would be vacuous",
     ),
+    # --- 2026-09-23：§14「成功收尾的单事务提交」+ §10k 孤儿守卫 + §15 判据下限 --------------
+    # 这 8 条的名字都带 `[本轮新增]` 前缀，便于 `RAI_MUTATION_ONLY=本轮新增` 单独复跑。
+    (
+        "[本轮新增] 判据非空转: 把 clearTask 的声明改名 => `tail_after` 的锚点必须显式报失败，"
+        "而不是把整片源码当成函数体（旧门禁在这里是**静默绿**）",
+        lambda: edit(SYNC, "private func clearTask()", "private func clearTaskRenamed()"),
+        PY_GATE,
+        "clearTask(): anchor",
+    ),
+    (
+        "[本轮新增] 判据非空转: 把 performSync 的声明改名 => 依赖它的判据必须显式报失败"
+        "（旧形态是整条判据被跳过，总数少一而输出里没有 FAIL:）",
+        lambda: edit(SYNC, "private func performSync(", "private func performSyncRenamed("),
+        PY_GATE,
+        "performSync(: anchor",
+    ),
+    (
+        "[本轮新增] 判据: full 重新导入不再 forgetState => loadCommittedState 会把老锚读回来，"
+        "界面说「全部重导」而实际只取增量",
+        lambda: edit(SYNC, "taskStore.forgetState(scope: activeScope)", "// forgetState removed"),
+        PY_GATE,
+        "clears the legacy anchor key but not the committed state row",
+    ),
+    (
+        "[本轮新增] 判据: 提交前回读断言整段删掉 => 静默失败的写入会留下旧锚 + 没有任务行，还报成功",
+        lambda: edit(
+            SYNC_TASK_STORE,
+            "        guard readBackMatches(scope: scope, before: before, anchor: anchor, watermark: watermark) else {\n"
+            '            lastError = "同步水位写入后无法读回一致的值，本次提交已回滚。"\n'
+            "            return false\n"
+            "        }\n",
+            "        // read-back assertion removed by mutation\n",
+        ),
+        PY_GATE,
+        "no longer reads its own write back before COMMIT",
+    ),
+    (
+        "[本轮新增] 判据: 把 `removed == 1` 改成恒真的 `>= 0` => 只数 `sqlite3_changes(` 调用次数"
+        "看不出来（实测过：那条旧判据照样绿）",
+        lambda: edit(
+            SYNC_TASK_STORE,
+            "guard removed == 1 else {",
+            "guard removed >= 0 else {",
+        ),
+        PY_GATE,
+        "no longer requires exactly one removed row",
+    ),
+    (
+        "[本轮新增] 判据: 回读断言改成比「请求的水位」而不是单调值 => 合法的一次向前提交被判成失败回滚",
+        lambda: edit(
+            SYNC_TASK_STORE,
+            "let expected = before?.exportEnd.map { max($0, requested) } ?? requested",
+            "let expected = requested",
+        ),
+        PY_GATE,
+        "requested value instead of the monotonic one",
+    ),
+    (
+        "[本轮新增] 回归: mayCommit 恒真 => 阻塞态会推进 anchor。**结构门禁在这里是绿的**"
+        "（它只钉调用顺序），红的必须是可跑的那条回归",
+        lambda: edit(SYNC_STATE_PLAN, "SyncPhase.mayAdvanceAnchor(phase)", "true"),
+        SWIFT_GATE,
+        "mayCommit disagrees with isBlocked",
+    ),
+    (
+        "[本轮新增] 反孤儿: 从 run-health-sync-tests.sh 摘掉 SyncStateCommitRegression => "
+        "文件还在、门禁全绿，而那一组不变式再没人执行",
+        # ⚠️ 必须替换**不带扩展名**的那一段：判据用的是子串匹配（`required in runner`），
+        # 改成 `…Regression.swift.disabled` 照样含 `.swift` 子串 ⇒ 那条突变根本无效（实测过，绿）。
+        lambda: edit(
+            HEALTH_SYNC_RUNNER,
+            "SyncStateCommitRegression",
+            "SyncStateCommitRegressionDisabled",
+        ),
+        PY_GATE,
+        "does not compile/run SyncStateCommitRegression.swift",
+    ),
+    # --- 2026-09-23 第二批：Workout 伴生 Route 状态机（按 workout 定频） --------------------
+    # 名字统一带 `[本轮新增2]` 前缀，便于 `RAI_MUTATION_ONLY=本轮新增2` 单独复跑。
+    #
+    # 这一批挑的都是"**收益归零**"或"**数据静默丢在服务端之外**"两类失效 —— 它们都不会报错、
+    # 不会崩、也大多不会让现有回归变红，只会让这次改造白做，或者少一批轨迹。
+    (
+        "[本轮新增2] 判据: 每 workout 循环里去掉 shouldQuery 过滤（写成 `if true`）=> 14 天全量"
+        "回填复活、降频收益归零，而这一切在别处看不到任何异常",
+        lambda: edit(
+            HEALTH_EXPORT,
+            "            if RouteSyncStateMachine.shouldQuery(\n"
+            "                existing: previous,\n"
+            "                now: routeNow,\n"
+            "                isForceManualRescan: routeForceRescan\n"
+            "            ) {\n",
+            "            if true {\n",
+        ),
+        PY_GATE,
+        "no longer consults the state machine",
+    ),
+    (
+        "[本轮新增2] 判据: 把降频记忆挪到 commitSuccess **之前** => 一次从未交付的同步也会被记成"
+        "「这条轨迹已经稳定」，之后一路降到 settled，而 settled 只有人工重扫能唤醒",
+        lambda: edit(
+            SYNC,
+            "        guard taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) else {",
+            "        _ = taskStore.upsertRouteStates(Array(routeStates.values))\n"
+            "        guard taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) else {",
+        ),
+        PY_GATE,
+        "the route memory is flushed BEFORE the watermark commit",
+    ),
+    (
+        "[本轮新增2] 判据: manifest 的 sourceScope 改成 full-snapshot => 服务端对省略的 GPX "
+        "从「不在这一份增量里」变成「已被删除」，跳过一条 route 就等于把它删掉",
+        lambda: edit(HEALTH_EXPORT, '"sourceScope": "healthkit",', '"sourceScope": "full-snapshot",'),
+        PY_GATE,
+        "no longer declares sourceScope healthkit",
+    ),
+    (
+        "[本轮新增2] 判据: 导出前不再读伴生状态快照 => 每个 workout 都被当成首查，整个改动静默失效",
+        lambda: edit(
+            SYNC,
+            "let routeStates = taskStore.loadRouteStates()",
+            "let routeStates: [String: RouteSyncRecord] = [:]",
+        ),
+        PY_GATE,
+        "no longer loads the route state snapshot",
+    ),
+    (
+        "[本轮新增2] 判据: routeForceRescan 不再接 `full` => `settled` 的路线没有任何唤醒通道，"
+        "而「重新导入全部」会继续跳过它自己承诺要重做的那些 workout",
+        lambda: edit(SYNC, "routeForceRescan: full,", "routeForceRescan: false,"),
+        PY_GATE,
+        "the manual-rescan flag is not wired to `full`",
+    ),
+    (
+        "[本轮新增2] 判据: 删掉批量写的事务内回读断言 => 「我写进去了」又只是一句假设",
+        lambda: edit(
+            SYNC_TASK_STORE,
+            "        let written = loadRouteStates(uuids: records.map(\\.workoutUUID))\n",
+            "        let written: [String: RouteSyncRecord] = [:]\n",
+        ),
+        PY_GATE,
+        "pre-COMMIT read-back assertion is gone from the route state batch",
+    ),
+    (
+        "[本轮新增2] 回归: 跳过的那一轮也把 lastCheckedAt 盖上「现在」=> 12 小时的节流窗口被一轮轮"
+        "往后推，而「这一次没读」被记成了「查过、而且没变化」",
+        lambda: edit(
+            ROUTE_SYNC_MACHINE,
+            "            return Decision(shouldQuery: needsQuery, nextState: existing)",
+            "            var carried = existing\n"
+            "            carried.lastCheckedAt = now\n"
+            "            return Decision(shouldQuery: needsQuery, nextState: carried)",
+        ),
+        SWIFT_GATE,
+        "a skipped round carries the record over byte for byte",
+    ),
+    (
+        "[本轮新增2] 回归: cooling 的 12 小时节流改成恒真 => 冷却期每次同步都查，降频收益全部作废",
+        lambda: edit(
+            ROUTE_SYNC_MACHINE,
+            "return now.timeIntervalSince(existing.lastCheckedAt) >= coolingInterval",
+            "return true",
+        ),
+        SWIFT_GATE,
+        "just under 12h the cooling route is skipped",
+    ),
+    (
+        "[本轮新增2] 回归: 批量写不再 BEGIN IMMEDIATE => 半批落盘成为可能。**它红在第一条断言上**"
+        "（`upsertRouteStates` 直接返回 false）而不是「回滚」那一条，这一点本身值得记：没有事务时"
+        "`COMMIT` 会自己报「no transaction is active」，于是这次写入**报失败、行却已经落下** —— "
+        "正是这个形态让「我以为没写」和「其实写了」分不开（本仓 2026-09-23 实测）",
+        lambda: edit(
+            SYNC_TASK_STORE,
+            'guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {\n'
+            '            fail("route state begin"); return false\n'
+            "        }",
+            'guard SQLiteSupport.execute("SELECT 1", database: database) else {\n'
+            '            fail("route state begin"); return false\n'
+            "        }",
+        ),
+        SWIFT_GATE,
+        "a batch of three distinct workouts writes in one transaction",
+    ),
+    (
+        "[本轮新增2] 反孤儿: 从 run-health-sync-tests.sh 摘掉 RouteSyncStatePersistenceRegression "
+        "=> 文件还在、门禁全绿，而「跨进程记得住 / 单事务 / NULL 与空串分得开」再没人执行",
+        # 同上一批的教训：判据是子串匹配，改成 `….swift.disabled` 照样含 `.swift` ⇒ 突变无效。
+        lambda: edit(
+            HEALTH_SYNC_RUNNER,
+            "RouteSyncStatePersistenceRegression",
+            "RouteSyncStatePersistenceRegressionDisabled",
+        ),
+        PY_GATE,
+        "does not compile/run RouteSyncStatePersistenceRegression.swift",
+    ),
+    (
+        "[本轮新增2] 反孤儿: 从 run-health-sync-tests.sh 摘掉 RouteSyncStateMachineTests => "
+        "四态判据（含「跳过不产生稳定证据」那条不变式）再没人执行",
+        lambda: edit(
+            HEALTH_SYNC_RUNNER,
+            "RouteSyncStateMachineTests",
+            "RouteSyncStateMachineTestsDisabled",
+        ),
+        PY_GATE,
+        "does not compile/run RouteSyncStateMachineTests.swift",
+    ),
+    (
+        "[本轮新增2] 判据: 从 run-store-tests.sh 摘掉 RouteSyncState.swift => 那个编译单元会炸在"
+        "「cannot find type 'RouteSyncRecord' in scope」上，而**全量类型检查照样绿**"
+        "（本轮实测踩过两次，所以这条判据是被真实故障逼出来的）",
+        lambda: edit(STORE_RUNNER, "  apps/ios/RAI/RouteSyncState.swift \\\n", ""),
+        PY_GATE,
+        "run-store-tests.sh compiles SyncTaskStore.swift without RouteSyncState.swift",
+    ),
 ]
 
 # 负向对照：一个**真正的编译错误**。它必须被分成 COMPILE-ERROR 而不是 RED，
@@ -793,6 +1024,39 @@ NEGATIVE_CONTROL = (
 )
 
 
+def source_digests() -> list[dict[str, str]]:
+    """`SOURCES` 的**跑前**字节摘要，取自 `var/mutation-backup/`，供 JSON 摘要跨轮 diff。
+
+    取备份、不取工作区：整轮运行期间工作区是脏的（正在被突变改写），只有备份代表
+    "这一轮开始时源码长什么样"。下一轮把这些摘要和自己比，就能发现
+    "某个受管文件在两次运行之间被动过" —— 那是所有判据结论的前提条件。
+    """
+    out: list[dict[str, str]] = []
+    for rel in SOURCES:
+        candidate = backup_dir / Path(rel).name
+        out.append({
+            "path": rel,
+            "sha256": hashlib.sha256(candidate.read_bytes()).hexdigest() if candidate.exists() else None,
+        })
+    return out
+
+
+def emit_json(path: Path, payload: dict[str, object]) -> None:
+    """把机器可读摘要写到 `path`（路径由 `RAI_MUTATION_JSON` 指定）。
+
+    为什么要有它：`deliverables/` 需要一份**可 diff** 的回归锚点。日志是给人看的
+    （几千行、含 tail 片段），JSON 是给下一轮比的 —— 少了它，"这次和上次哪里不一样"
+    只能靠肉眼逐行比日志。
+    `indent=2` / 不排序键 / 末尾换行：让 diff 逐行可读、且不出现"只有换行差异"的噪音。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=False) + "\n",
+        encoding="utf-8",
+    )
+    print("json summary written: %s" % path)
+
+
 def print_tail(out: str) -> None:
     for line in [l for l in out.strip().splitlines() if l.strip()][-8:]:
         print("        " + line)
@@ -802,6 +1066,55 @@ def main() -> int:
     failures: list[str] = []
     selector = os.environ.get("RAI_MUTATION_ONLY", "").strip()
     selected = [m for m in MUTATIONS if selector in m[0]] if selector else list(MUTATIONS)
+
+    raw_json = os.environ.get("RAI_MUTATION_JSON", "").strip()
+    json_target: Path | None = None
+    if raw_json:
+        candidate = Path(raw_json)
+        json_target = candidate if candidate.is_absolute() else (ROOT / candidate)
+
+    records: list[dict[str, object]] = []
+    control: dict[str, object] | None = None
+    baseline: dict[str, object] = {"exit": None, "green": False}
+    restored: dict[str, object] = {"exit": None, "green": False}
+    pristine: list[dict[str, str]] = []
+
+    def emit() -> None:
+        """写机器可读摘要。
+
+        `partial` 与 `filter` 必须显式出现在产物里：分段跑的命令行与全套**一模一样**，
+        只有输出末尾一行措辞不同。若 JSON 里不带这个字段，一份 `RAI_MUTATION_ONLY` 的产物
+        与全套产物在机器眼里毫无区别 —— 那正是"分段跑被读成全套通过"的复发路径。
+        """
+        if json_target is None:
+            return
+        # 分布覆盖**每一条跑过的条目**（含负向对照），这样它与日志里 `verdict=` 的行数
+        # 逐一对得上；否则"74 mutations"和 75 行 verdict 会被读成互相矛盾。
+        distribution: dict[str, int] = {}
+        for entry in records + ([control] if control is not None else []):
+            key = str(entry.get("verdict"))
+            distribution[key] = distribution.get(key, 0) + 1
+        emit_json(json_target, {
+            "schema": "rai.mutation-summary/1",
+            "generated_at": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "harness": "apps/ios/tests/check-background-mutations.py",
+            "command": "RAI_MUTATION_JSON=%s python3 apps/ios/tests/check-background-mutations.py"
+                       % (raw_json,),
+            "filter": selector or None,
+            "partial": bool(selector),
+            "baseline": baseline,
+            "restored": restored,
+            "totals": {
+                "mutations_defined": len(MUTATIONS),
+                "mutations_selected": len(selected),
+                "failed": len(failures),
+                "verdict_distribution": distribution,
+            },
+            "mutations": records,
+            "negative_control": control,
+            "sources": pristine,
+            "failures": failures,
+        })
 
     recover_leftover_backup()
     install_signal_handlers()
@@ -814,62 +1127,87 @@ def main() -> int:
     for rel in SOURCES:
         shutil.copy2(ROOT / rel, backup_dir / Path(rel).name)
     marker.write_text("sources under mutation; delete only after restoring\n", encoding="utf-8")
+    pristine = source_digests()
 
     try:
         code, out = run(CLEAN)
+        baseline = {"exit": code, "green": code == 0}
         print("baseline: exit=%d %s" % (code, "GREEN" if code == 0 else "NOT GREEN"))
         if code != 0:
             print_tail(out)
+            emit()
             return 1
         if selector:
             print("selected: %d of %d mutations (RAI_MUTATION_ONLY=%r)" % (len(selected), len(MUTATIONS), selector))
         print()
 
-        for name, apply, gate, needle in selected:
+        for index, (name, apply, gate, needle) in enumerate(selected, start=1):
             restore()
+            # 记录壳先建好再 `append`：`base` 是可变字典，随后就地更新即可同步进 records。
+            base: dict[str, object] = {
+                "index": index, "name": name, "target": [], "gate": gate,
+                "verdict": None, "exit": None, "assertion_hit": None, "ok": False,
+                "expected_assertion": needle,
+            }
+            records.append(base)
+            _edited.clear()
             # 锚点过期（源码改过、模式不再唯一）**不能**让整个 harness 停下来：
             # 那会把"这一条没验到"伪装成"后面都没问题"。记成失败并继续。
             try:
                 apply()
             except SystemExit as error:
+                base["note"] = "stale pattern: this judge was never exercised"
                 print("  BAD " + name)
                 print("        mutation pattern is stale, so this judge was never exercised")
                 print_tail(str(error))
                 failures.append(name + " (stale pattern)")
                 continue
+            base["target"] = list(_edited)
             code, out = run(gate)
             verdict = classify(code, out)
             hit = needle in out
             ok = verdict == "RED" and hit
+            base.update({"verdict": verdict, "exit": code, "assertion_hit": hit, "ok": ok})
             print(("  OK  " if ok else "  BAD ") + name)
             print("        exit=%d verdict=%s assertion_hit=%s" % (code, verdict, hit))
             if not ok:
                 failures.append(name)
                 print_tail(out)
 
-        name, apply, gate = NEGATIVE_CONTROL
+        nc_name, nc_apply, nc_gate = NEGATIVE_CONTROL
         restore()
+        control = {
+            "name": nc_name, "target": [], "gate": nc_gate, "verdict": None,
+            "exit": None, "resolved_by": None, "ok": False, "expected_verdict": "COMPILE-ERROR",
+        }
+        _edited.clear()
         try:
-            apply()
+            nc_apply()
         except SystemExit as error:
             # 分类器没被验证过这件事必须**显式记成失败**，而不是静默跳过 ——
             # 静默跳过会让"排除了突变其实是编译错误"这个结论失去依据。
-            print("  BAD " + name)
+            control["note"] = "stale pattern: the classifier was never exercised"
+            control["resolved_by"] = "stale-pattern"
+            print("  BAD " + nc_name)
             print_tail(str(error))
-            failures.append(name + " (stale pattern)")
+            failures.append(nc_name + " (stale pattern)")
             code, out = 0, ""
         else:
-            code, out = run(gate)
+            control["target"] = list(_edited)
+            control["resolved_by"] = "ran"
+            code, out = run(nc_gate)
         verdict = classify(code, out)
         ok = verdict == "COMPILE-ERROR"
-        print(("  OK  " if ok else "  BAD ") + name)
+        control.update({"verdict": verdict, "exit": code, "ok": ok})
+        print(("  OK  " if ok else "  BAD ") + nc_name)
         print("        exit=%d verdict=%s" % (code, verdict))
         if not ok:
-            failures.append(name)
+            failures.append(nc_name)
             print_tail(out)
 
         restore()
         code, out = run(CLEAN)
+        restored = {"exit": code, "green": code == 0}
         print()
         print("restored: exit=%d %s" % (code, "GREEN" if code == 0 else "NOT GREEN"))
         if code != 0:
@@ -885,6 +1223,7 @@ def main() -> int:
               % (selector, len(selected), len(MUTATIONS), len(failures)))
     else:
         print("mutation check: %d mutations, %d failed" % (len(MUTATIONS), len(failures)))
+    emit()
     return 1 if failures else 0
 
 

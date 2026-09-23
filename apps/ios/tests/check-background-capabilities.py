@@ -38,6 +38,52 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def tail_after(text: str, anchor: str, label: str) -> str:
+    """`text` 里 `anchor` 之后的部分，并**要求锚点命中且恰好一次**。
+
+    为什么必须有这个守卫（2026-09-23 实测的直接原因）：本文件原先一律写
+    `text.split(anchor)[-1]`。锚点一旦因为改名 / 改签名而命中不到，`split` 返回单元素
+    列表，`[-1]` 就**退化成整个文件**（后面再 `.split("\\n    private func ")[0]` 得到的是
+    文件头，约 5300 字符）—— 于是 `check("..." in body)` 变成对文件头做子串匹配。
+
+    实测：把 `HealthKitSync.swift` 里的 `clearTask` 做**行为等价改名**（连定义带 11 处
+    调用点），`clear_body` 从 547 字符退化成文件头，而 `hasPendingTask = false` 在
+    `HealthKitSync.swift:46` 的属性声明里也出现 ⇒ 该判据恒真，门禁照旧打印
+    `Background capability checks: 162 checks, 0 failed`（退出码 0）。**静默跳过比没有判据
+    更糟**，所以这里一律"取不到锚点就报失败"，与 `check-export-determinism.py` 里
+    `check(body is not None, "could not parse the body of ...")` 是同一条纪律。
+
+    返回值在锚点异常时是空串：下游 `check("x" in body)` 会一并变红。红得多一点是有意的 ——
+    宁可吵，也不要静默。
+    """
+    hits = text.count(anchor)
+    if hits != 1:
+        check(
+            False,
+            "%s: anchor %r matched %d time(s), need exactly 1 — a renamed/reshaped declaration "
+            "would otherwise degrade this slice to the whole file and the judgement below would "
+            "become vacuously true" % (label, anchor, hits),
+        )
+        return ""
+    return text.split(anchor)[1]
+
+
+def ordered(text: str, first: str, second: str, why: str) -> None:
+    """断言 `first` 在 `second` **之前**出现，且两个符号都必须存在。
+
+    为什么不能写成 `if a in text and b in text: check(index...)`：那个形态下，任一符号
+    被改名/删除，整条判据会被**静默跳过且不产生 `FAIL:` 行** —— 判据总数从 162 掉到 161，
+    而门禁仍然报 0 failed（2026-09-23 实测：`performSync` / `uploadToSystem` /
+    `handleEventsForBackgroundURLSession` 三处改名都会这样）。顺序判据的价值全在"谁在前"，
+    而"两个符号都没有"这件事本身就该是红的。
+    """
+    missing = [name for name in (first, second) if name not in text]
+    if missing:
+        check(False, "%s: %s never appears — the ordering judgement below cannot be made" % (why, missing))
+        return
+    check(text.index(first) < text.index(second), why)
+
+
 def phase_literals(text: str):
     """`HealthKitSync` 实际写进 phase 的**裸字符串**（赋值式与实参式两种写法）。
 
@@ -116,7 +162,22 @@ check(
 #     所以判据也变了：不再配平"两份清单"，而是**要求另外两份不复存在**。
 enum_body = re.search(r"enum SyncPhase: String, CaseIterable, Sendable \{(.*?)\n\}", phase_src, re.S)
 check(enum_body is not None, "could not parse the SyncPhase enum body")
-declared = set(re.findall(r"^\s*case ([a-z][A-Za-z0-9_]*)\s*$", enum_body.group(1) if enum_body else "", re.M))
+# 🔴 必须同时收下**带显式 rawValue** 的 case（`case deferredProtectedData = "deferred_protected_data"`）。
+# 原先的正则要求 `case <name>` 之后直接是行尾，于是这类 case 被**静默漏掉** —— 而漏掉的后果不是
+# "少收一个"，是 3b/3c 会反过来把合法引用报成 unknown、或者让闭集缺项而误判。
+#
+# 而且是**两份口径**，不是一份：
+#   - `declared`         = case **名**，给 `SyncPhase.<member>` 那种写法用（3b）；
+#   - `declared_values`  = **落盘值**，给 `switch phase` 与展示层的 `case "..."` 用（3c）。
+# 此前"case 名 == rawValue"恰好成立，所以一份够用；V2.1 的两个阻塞阶段改用蛇形 rawValue
+# 之后，混用会让判据**假红**（或更糟：为了消红而把闭集改坏）。
+declared_pairs = re.findall(
+    r"^\s*case ([a-z][A-Za-z0-9_]*)\s*(?:=\s*\"([^\"]*)\")?\s*$",
+    enum_body.group(1) if enum_body else "",
+    re.M,
+)
+declared = {name for name, _ in declared_pairs}
+declared_values = {raw or name for name, raw in declared_pairs}
 check(bool(declared), "SyncPhase declares no cases")
 
 check(
@@ -149,10 +210,14 @@ if declared:
 switch_block = re.search(r"switch phase \{(.*?)\n        \}", lifecycle, re.S)
 check(switch_block is not None, "could not parse the phase switch inside enterBackground")
 if switch_block is not None:
-    switch_cases = set(re.findall(r'"([^"]*)"', switch_block.group(1)))
+    # ⚠️ 必须剥掉注释：`switch phase` 块里的说明逐字提到了阶段名（"非终态一律 keepWorking" 这类），
+    # 整段抓会把中文短语也当成阶段 —— 而那是**假红**，假红的门禁和恒绿的一样糟。
+    # 口径用 `declared_values`（落盘值）：`switch phase` 比的是字符串，不是 case 名。
+    switch_cases = set(re.findall(r'"([^"]*)"', without_comment_lines(switch_block.group(1))))
     check(
-        switch_cases <= declared,
-        "HealthSyncLifecycle switches on phases outside the closed set: %s" % sorted(switch_cases - declared),
+        switch_cases <= declared_values,
+        "HealthSyncLifecycle switches on phases outside the closed set: %s"
+        % sorted(switch_cases - declared_values),
     )
 
 # --- 3d. D1 的落点：`uploaded` 与 `importing` 必须由**字段**分流 --------------
@@ -190,7 +255,11 @@ check(
 #     `/tmp` 会被系统清理，而"续传"的全部前提就是"字节还在"。更直接的后果：
 #     `defer { removeItem }` 与"把上传交给系统"天然互斥 —— 函数一返回文件就没了。
 #     切片用相邻的函数声明做锚点，而不是数花括号：后者只要有人加一层嵌套就静默截断。
-upload_body = sync.split("private func upload(zipURL: URL, to serverURL: URL, payloadHash: String)")[-1]
+upload_body = tail_after(
+    sync,
+    "private func upload(zipURL: URL, to serverURL: URL, payloadHash: String)",
+    "upload()",
+)
 upload_body = upload_body.split("\n    private func ")[0]
 # 判据从 `session.upload(` 换成 `uploadToSystem(`：P2-4 之后字节交给的是**系统**（background
 # URLSession），前台那条 `.ephemeral` 通道只剩非 iOS 的回退分支（第 10f 节单独钉住）。
@@ -360,12 +429,25 @@ check(
     sync.count("hasPendingTask = true") == 1 and "hasPendingTask = true" in sync,
     "hasPendingTask is not set exactly once (it belongs in saveTask, the moment progress exists)",
 )
+#     计数必须按**行首赋值**算：属性声明 `private(set) var hasPendingTask = false`（:46）里
+#     逐字含有同一个字符串。原先这里写 `sync.count("hasPendingTask = false") >= 1`，
+#     于是这条判据被**声明**满足 —— 把 `clearTask` 里那行真正清标记的赋值删掉也照样绿。
+#     清点必须是**日志清空点**的个数：`clearTask()`（解不开的进度）、`markSuccess()`
+#     （V2.1 §4.2 之后的单事务提交）。多一处就等于界面可以凭空说"没有待办了"。
+clear_assignments = [
+    line
+    for line in sync.splitlines()
+    if re.match(r"\s*hasPendingTask = false\s*$", line)
+]
 check(
-    sync.count("hasPendingTask = false") >= 1,
-    "hasPendingTask is never cleared",
+    len(clear_assignments) == 2,
+    "hasPendingTask is cleared in %d places, need exactly 2 (clearTask + markSuccess; the "
+    "declaration at the top of the type does not count): the flag is the only thing telling the UI "
+    "apart from 'the journal is empty', so another writer would let the two drift"
+    % len(clear_assignments),
 )
-save_body = sync.split("private func saveTask(")[-1].split("\n    private func ")[0]
-clear_body = sync.split("private func clearTask()")[-1].split("\n    private func ")[0]
+save_body = tail_after(sync, "private func saveTask(", "saveTask()").split("\n    private func ")[0]
+clear_body = tail_after(sync, "private func clearTask()", "clearTask()").split("\n    private func ")[0]
 check("hasPendingTask = true" in save_body, "saveTask does not record that a batch is pending")
 check("hasPendingTask = false" in clear_body, "clearTask does not clear the pending flag")
 
@@ -536,7 +618,7 @@ check(
 )
 
 # 9e. 注册必须在 `didFinishLaunching` 返回**之前**完成，且**不能挪进 `Task { }`**。
-launch_body = app_delegate.split("didFinishLaunchingWithOptions")[-1].split("\n    }\n")[0]
+launch_body = tail_after(app_delegate, "didFinishLaunchingWithOptions", "didFinishLaunchingWithOptions").split("\n    }\n")[0]
 check(
     "RaiStartup.registerBackgroundTasks()" in launch_body,
     "didFinishLaunchingWithOptions does not call RaiStartup.registerBackgroundTasks()",
@@ -611,7 +693,11 @@ for key in ("INFOPLIST_KEY_UIBackgroundModes", "INFOPLIST_KEY_BGTaskSchedulerPer
 upload_session = read(RAI / "BackgroundUploadSession.swift")
 
 # 10a. multipart 是续传的全部依据，函数返回不得删它。
-reconcile_body = sync.split("private func upload(zipURL: URL, to serverURL: URL, payloadHash: String)")[-1]
+reconcile_body = tail_after(
+    sync,
+    "private func upload(zipURL: URL, to serverURL: URL, payloadHash: String)",
+    "upload() (reconcile)",
+)
 reconcile_body = reconcile_body.split("\n    private func ")[0]
 check(
     "removeItem" not in reconcile_body,
@@ -648,7 +734,9 @@ check(
 )
 # 切片以 `// MARK:` 收尾，不用"下一个函数声明"：`abandonWaiting` 之后紧跟的是 MARK 段，
 # 用函数声明当锚点会一路吃到文件末尾，于是这条判据实际上在看整个文件（宽松到失去意义）。
-abandon_body = upload_session.split("private func abandonWaiting(identifier: Int)")[-1].split("\n    // MARK:")[0]
+abandon_body = tail_after(
+    upload_session, "private func abandonWaiting(identifier: Int)", "abandonWaiting(identifier:)"
+).split("\n    // MARK:")[0]
 check(
     "cancel(" not in abandon_body,
     "abandonWaiting cancels the URLSessionTask; a lifecycle stop must stop *waiting*, not stop the transfer "
@@ -676,9 +764,10 @@ check(
 )
 
 # 10f. 前台那条 `.ephemeral` 通道只许留在一个地方：`uploadToSystem` 的非 iOS 分支。
+upload_to_system_body = tail_after(sync, "private func uploadToSystem(", "uploadToSystem(")
 check(
     sync.count("session.upload(for: request, fromFile:") == 1
-    and "session.upload(for: request, fromFile:" in sync.split("private func uploadToSystem(")[-1],
+    and "session.upload(for: request, fromFile:" in upload_to_system_body,
     "HealthKitSync still uploads through the ephemeral foreground session somewhere other than the "
     "non-iOS fallback — that transfer dies the moment the process is suspended",
 )
@@ -688,7 +777,7 @@ check(
 )
 
 # 10g. 三个调用点必须都在"推导下一步做什么"之前，且顺序不许颠倒。
-perform_body = sync.split("private func performSync(")[-1].split("\n    private func ")[0]
+perform_body = tail_after(sync, "private func performSync(", "performSync(").split("\n    private func ")[0]
 check(
     "await reconcileSystemUploads(" in perform_body,
     "performSync never reconciles the system's uploads — it would then re-send bytes the system is still "
@@ -698,18 +787,19 @@ check(
 # 门禁崩掉会让"这一条判据红了"变成"整个脚本没跑完"，后面所有检查一条都不执行 ——
 # 而且崩溃的输出里没有 `FAIL:` 行，突变验证的 `assertion_hit` 于是永远为假。
 # （这个形态是 2026-09-22 跑 `[P2-4]` 分段突变时被一条真突变暴露出来的。）
-if "reconcileSystemUploads(" in perform_body and "SyncAtomicUnit.nextStep(" in perform_body:
-    check(
-        perform_body.index("reconcileSystemUploads(") < perform_body.index("SyncAtomicUnit.nextStep("),
-        "performSync reconciles *after* deriving the next step: the derivation would see `.upload` while "
-        "the system still owns those bytes",
-    )
-background_pass = sync.split("func runBackgroundPass(")[-1].split("\n    private func ")[0]
+ordered(
+    perform_body,
+    "reconcileSystemUploads(",
+    "SyncAtomicUnit.nextStep(",
+    "performSync reconciles *after* deriving the next step: the derivation would see `.upload` while "
+    "the system still owns those bytes",
+)
+background_pass = tail_after(sync, "func runBackgroundPass(", "runBackgroundPass(").split("\n    private func ")[0]
 check(
     "hasBackgroundUploadTask: systemUploadInFlight(" in background_pass,
     "runBackgroundPass no longer feeds the real 'system owns these bytes' signal into BackgroundRunPolicy",
 )
-enter_background = sync.split("func handleEnterBackground()")[-1].split("\n    func ")[0]
+enter_background = tail_after(sync, "func handleEnterBackground()", "handleEnterBackground()").split("\n    func ")[0]
 check(
     "hasUploadTask:" in enter_background,
     "handleEnterBackground does not tell HealthSyncLifecycle whether the system owns the bytes",
@@ -725,13 +815,13 @@ check(
     "try updateTask(phase: .uploading, uploadState: .inFlight)" in sync,
     "upload() does not record 'these bytes are about to belong to the system' before handing them over",
 )
-if "try updateTask(phase: .uploading, uploadState: .inFlight)" in sync and "try await uploadToSystem(" in sync:
-    check(
-        sync.index("try updateTask(phase: .uploading, uploadState: .inFlight)")
-        < sync.index("try await uploadToSystem("),
-        "upload() hands the bytes over before recording that they are in flight — a kill in that window "
-        "means the next wake re-sends them",
-    )
+ordered(
+    sync,
+    "try updateTask(phase: .uploading, uploadState: .inFlight)",
+    "try await uploadToSystem(",
+    "upload() hands the bytes over before recording that they are in flight — a kill in that window "
+    "means the next wake re-sends them",
+)
 
 # 10i. 跨源重定向只能有一条判据：两条 URLSession 各写一份，等于"走了哪条路径"决定安不安全。
 check(
@@ -749,10 +839,16 @@ check(
     "RaiAppDelegate does not implement handleEventsForBackgroundURLSession; upload events would go unhandled "
     "and the system would reduce how often it dispatches them",
 )
-handle_events = app_delegate.split("handleEventsForBackgroundURLSession identifier: String,")[-1].split("\n    /// ")[0]
+handle_events = tail_after(
+    app_delegate,
+    "handleEventsForBackgroundURLSession identifier: String,",
+    "handleEventsForBackgroundURLSession",
+).split("\n    /// ")[0]
 # 早退分支（identifier 不对）**必须自己**回调：那条路不会建 session，所以 `urlSessionDidFinishEvents`
 # 永远不会被调到 —— 把 completion 留在手里等于系统永远收不到回执。
-unknown_branch = handle_events.split("guard identifier ==")[-1].split("return\n")[0]
+unknown_branch = tail_after(handle_events, "guard identifier ==", "the unknown-identifier branch").split(
+    "return\n"
+)[0]
 check(
     "completionHandler()" in unknown_branch,
     "the unknown-identifier branch of handleEventsForBackgroundURLSession returns without calling "
@@ -763,17 +859,33 @@ check(
     "handleEventsForBackgroundURLSession does not hand the completion to the session, so "
     "urlSessionDidFinishEvents would never fire it",
 )
-if "storeSystemCompletion(" in handle_events and "makeSession()" in handle_events:
-    check(
-        handle_events.index("makeSession()") < handle_events.index("storeSystemCompletion("),
-        "the system completion is stored before the session exists — completion events would have no delegate",
-    )
+ordered(
+    handle_events,
+    "makeSession()",
+    "storeSystemCompletion(",
+    "the system completion is stored before the session exists — completion events would have no delegate",
+)
 
 # 10k. 门禁自己不许变成孤儿（这已经是本仓第三次同一个形态）。
-for required in ("BackgroundSyncPolicy.swift", "BackgroundSyncPolicyRegression.swift"):
+# ⚠️ 2026-09-23 补：原先这份名单只有 P2 那两个文件，而后来新增的两个回归文件
+# （`HealthSyncBlockedRecoveryRegression` / `SyncStateCommitRegression`）**不在里面** ——
+# 也就是说"把新回归从 runner 里摘掉"是静默的：文件还在、门禁全绿、那一组不变式再没人执行。
+# 判据是"被 runner 编译并执行"，所以名单必须跟着新增的回归文件一起长。
+for required in (
+    "BackgroundSyncPolicy.swift",
+    "BackgroundSyncPolicyRegression.swift",
+    "HealthSyncBlockedRecoveryRegression.swift",
+    "SyncStateCommitRegression.swift",
+    # 2026-09-23 补（按 workout 定频）：这两条同样是"文件在、门禁全绿、那一组判据却没人执行"
+    # 的形态。`RouteSyncStateMachineTests` 守的是四态判据本身，`RouteSyncStatePersistenceRegression`
+    # 守的是它唯一的住处（真库上的单事务批量写）。
+    "RouteSyncStateMachineTests.swift",
+    "RouteSyncStatePersistenceRegression.swift",
+):
     check(
         required in runner,
-        "run-health-sync-tests.sh does not compile/run %s" % required,
+        "run-health-sync-tests.sh does not compile/run %s — a regression file that exists but is "
+        "never executed is the purest form of a silent pass" % required,
     )
 
 # --- 11. 验收判据的载体自己也要有守卫 ---------------------------------------------
@@ -807,6 +919,572 @@ for literal, carrier, why in (
         literal in carrier,
         "%s 这行日志不见了 —— 它是%s的载体，删掉它会让那条真机验收静默变成不可判" % (literal, why),
     )
+
+# --- 12. 锁屏 / 凭证阻塞（V2.1 规范 §3.3 与 §3.4）-----------------------------
+#     这一节的失效方式**全部**是静默的，而且会互相掩护：
+#       - 没有 `isProtectedDataAvailable` 预检查 ⇒ 要等第一次查询失败才发现，而更早的
+#         `readAuthorizationState()` 在锁屏时返回 `.unknown`，于是先落一个 `failed`
+#         （一次正常锁屏被报成"同步失败"，且解锁后不会自己恢复）；
+#       - 没有解锁恢复 ⇒ `deferred_protected_data` 是个**死状态**：解锁后什么都不会发生；
+#       - 有恢复但没有判据 ⇒ 每次解锁都白读一次 HealthKit（整个流程里最贵的一步）；
+#       - 兜底 catch 覆盖更具体的结论 ⇒ 上面三条一起白做（阻塞态被抹成 `failed`）；
+#       - 401 落进默认的 `keepForNextWake` ⇒ 后台每次唤醒撞一次同样的 401，永远好不了。
+#     ⚠️ 判据一律看**代码行**（`sync_code` / `delegate_code`）：本次改动的注释里逐字写满了
+#     这些符号名，拿整段文本判会恒绿 —— 恒绿的门禁和没有门禁一样糟（`without_comment_lines`）。
+
+# 12a. 两个阻塞阶段的 rawValue 必须与 §3.1 状态机表逐字一致（蛇形），并收进 `SyncPhase.blocked`。
+enum_text = enum_body.group(1) if enum_body else ""
+for swift_case, raw in (
+    ("deferredProtectedData", "deferred_protected_data"),
+    ("authRequired", "auth_required"),
+):
+    check(
+        re.search(r"case\s+%s\s*=\s*\"%s\"" % (swift_case, raw), enum_text) is not None,
+        'SyncPhase does not declare `case %s = "%s"`; the blocked phase set is incomplete'
+        % (swift_case, raw),
+    )
+check(
+    re.search(r"static let blocked: Set<SyncPhase> = \[\.deferredProtectedData, \.authRequired\]", phase_src)
+    is not None,
+    "SyncPhase.blocked is no longer exactly the two blocked phases — a second definition of "
+    "'what counts as blocked' has appeared, which is how this repository's worst defects start",
+)
+check(
+    re.search(r"static func mayAdvanceAnchor", phase_src) is not None,
+    "SyncPhase.mayAdvanceAnchor is gone; nothing then expresses 'a blocked sync must never "
+    "advance the anchor' (§3.4 bans exactly that)",
+)
+check(
+    "mayAdvanceAnchor" in read(RAI / "HealthSyncBlockedRecovery.swift"),
+    "HealthSyncBlockedRecovery no longer forwards mayAdvanceAnchor — the invariant would lose "
+    "its executor (HealthKitSync.swift is compiled by no regression)",
+)
+
+# 12b. 锁屏预检查：判据只有一个来源，且必须真的被用上。
+check(
+    "private static var isProtectedDataAvailable" in sync_code,
+    "HealthKitSync has no single `isProtectedDataAvailable` source; the pre-check and the "
+    "background skip could then disagree about what 'locked' means",
+)
+check(
+    "UIApplication.shared.isProtectedDataAvailable" in sync_code,
+    "nothing reads UIApplication.isProtectedDataAvailable — a locked device burns a whole "
+    "HealthKit attempt before failing",
+)
+check(
+    "if !Self.isProtectedDataAvailable" in sync_code,
+    "HealthKitSync never acts on isProtectedDataAvailable; the lock-screen pre-check is gone",
+)
+check(
+    'Self.report("background pass: skipped, waiting on an external condition' in sync_code,
+    "runBackgroundPass no longer skips a blocked phase; a locked device and a stale credential "
+    "would each get a doomed attempt every 15 minutes",
+)
+
+# 12c. 解锁恢复链路：缺任何一环，`deferred_protected_data` 就是死状态。
+check(
+    "protectedDataDidBecomeAvailableNotification" in delegate_code,
+    "nothing observes protectedDataDidBecomeAvailable; a sync stopped by the lock screen would "
+    "never resume on its own (§3.1's deferred_protected_data -> queued edge would be dead)",
+)
+check(
+    "RaiStartup.observeProtectedDataAvailability()" in delegate_code,
+    "observeProtectedDataAvailability is never called, so the observer is never installed",
+)
+check(
+    "HealthSyncBlockedRecovery.shouldResume(" in delegate_code,
+    "the unlock handler does not consult HealthSyncBlockedRecovery.shouldResume; every unlock "
+    "would then trigger a sync and re-read HealthKit",
+)
+
+# 12d. 两个阻塞阶段都必须有**写入点**。声明了却没人写 = 这条路径不可达（回归也测不到）。
+for reason in (".protectedData", ".credential"):
+    check(
+        "HealthSyncBlockedRecovery.phase(for: %s)" % reason in sync_code,
+        "HealthKitSync never records the blocked phase for %s; that state exists in the enum but "
+        "nothing produces it, so the whole path is unreachable" % reason,
+    )
+
+# 12e. 🔴 兜底 catch 不许覆盖更具体的结论（本仓复发最多的形态：兜底吃掉特例）。
+check(
+    ".databaseLocked" in sync_code,
+    "HealthKitSync does not recognise HealthKitExportError.databaseLocked; the catch-all would "
+    "overwrite the lock-screen conclusion with `failed`",
+)
+check(
+    "SyncCredentialRequiredError" in sync_code,
+    "HealthKitSync does not recognise SyncCredentialRequiredError; a 401 would be reported as `failed`",
+)
+check(
+    "SyncUploadRecovery.isCredentialFailure(" in sync_code,
+    "uploadWithRecovery no longer asks whether the failure was a credential failure; a 401 would "
+    "fall through to keepForNextWake and be retried on every single wake",
+)
+
+# 12f. 「哪个错误算锁屏」必须走 `HKError.Code`，不许硬编码码元 ——
+#      写死数字的失效方式是静默的，而且症状恰好是"又把它当成空数据了"（§3.4 点名禁止的形态）。
+health_export = read(RAI / "HealthKitExport.swift")
+check(
+    "HKError.Code.errorDatabaseInaccessible" in health_export,
+    "HealthKitExport does not compare against HKError.Code.errorDatabaseInaccessible; a hardcoded "
+    "code would silently stop matching and the export would treat 'locked' as 'no data'",
+)
+check(
+    "case databaseLocked" in health_export,
+    "HealthKitExportError has no databaseLocked case, so callers cannot tell 'cannot read right "
+    "now' apart from 'the data is broken'",
+)
+
+# 12g. 凭证失败的状态码必须与 §3.3 一致，且**不许**并进"确定性拒绝"那一组
+#      （并进去会 abandonBatch 删掉一份完好的批次，用户修好凭证还得重读 HealthKit）。
+credential_block = re.search(r"credentialFailureStatuses[^=]*=\s*\[(.*?)\]", phase_src, re.S)
+check(credential_block is not None, "SyncPhase.swift no longer declares credentialFailureStatuses")
+if credential_block is not None:
+    credential_codes = set(re.findall(r"\d+", credential_block.group(1)))
+    check(
+        credential_codes == {"401", "403"},
+        "SyncUploadRecovery.credentialFailureStatuses is %s; §3.3 pins 401/403 as the 'the channel "
+        "is broken, the bytes are fine' failures" % sorted(credential_codes),
+    )
+    rejection_block = re.search(r"contentRejectionStatuses[^=]*=\s*\[(.*?)\]", phase_src, re.S)
+    if rejection_block is not None:
+        check(
+            not credential_codes & set(re.findall(r"\d+", rejection_block.group(1))),
+            "the credential failures are also listed as content rejections — a perfectly valid "
+            "batch would be deleted on a 401",
+        )
+
+# 12h. 阻塞判据自己要有执行者（本仓第三次同一个形态：判据写在没有执行者的文件里）。
+check(
+    "HealthSyncBlockedRecovery.swift" in runner,
+    "run-health-sync-tests.sh does not compile HealthSyncBlockedRecovery.swift — its judgements "
+    "would then never be executed by any regression",
+)
+check(
+    "HealthSyncBlockedRecoveryRegression.swift" in runner,
+    "run-health-sync-tests.sh does not run HealthSyncBlockedRecoveryRegression.swift",
+)
+
+# --- 13. 门禁自己：判据的**载体**也要有守卫 ------------------------------------
+# 为什么单列一节（2026-09-23 实测）：这一节修的不是"某条判据写错了"，而是"判据会静默消失"。
+# 载体坏了，内容判据写得再好也读不到 —— 这正是本仓那条原始纪律的翻版：
+# **静默跳过的门禁比没有门禁更糟**。
+
+# 13a. 判据总数的下限断言在**文件末尾** —— 它必须跑在全部判据之后，否则数的是中间态。
+
+# 13b. 门禁自己不许再出现"锚点不命中就退化成整文件"的写法。
+#      `tail_after()` / `ordered()` 存在之后，任何 `<变量>.split(<字面量>)` 的**赋值**形态都是
+#      回归 —— 它在锚点改名时会安静地把整份文件当成函数体。
+own_source = Path(__file__).read_text(encoding="utf-8")
+#      注意判据只抓**危险形态**：`= <变量>.split(<字面量>)[-1]`（取最后一段 = 不命中时退化成
+#      整份文件）。`tail_after(...).split("\n    private func ")[0]` 那种"在已守卫的切片里再切
+#      到下一个声明"是安全的，不能一起禁掉。
+check(
+    re.search(r"=\s*\w+\.split\([^\n]*\)\[-1\]", own_source) is None,
+    "check-background-capabilities.py slices a body with `= <var>.split(<literal>)[-1]` again — "
+    "when that literal stops matching, the slice silently becomes the whole file and every "
+    "judgement made on it becomes vacuously true (use tail_after/ordered)",
+)
+for helper in ("def tail_after(", "def ordered("):
+    check(helper in own_source, "check-background-capabilities.py lost its %s helper" % helper.strip("def ()"))
+
+# --- 14. 「成功收尾」的单事务提交（V2.1 §2 原则 3「单状态源真相」） --------------
+# 这一节钉的是**写入路径**：`SyncPhase.mayAdvanceAnchor` 此前零生产调用点（只有定义、
+# 一次转发、一条自比式回归），而 anchor 写入点是一条无条件的 `UserDefaults.set`。
+# 判据（`SyncStateCommitPlan.mayCommit`）与落盘（`SyncTaskStore.commitSuccess`）分居两个
+# 文件是对的，但"判据有没有挂在写入点上"只能在调用侧钉住 —— 也就是这里。
+
+store_src = read(RAI / "SyncTaskStore.swift")
+plan_src = read(RAI / "SyncStateCommitPlan.swift")
+
+# 14a. anchor 不许再直接写进 `UserDefaults`：它是两套真相的来源。
+check(
+    re.search(r"UserDefaults\.standard\.set\(\s*(anchor|exportEnd|lastExportEnd)", sync) is None,
+    "HealthKitSync still writes the anchor / export watermark straight into UserDefaults — "
+    "that is the two-sources-of-truth shape §4.2 exists to remove",
+)
+# 反方向也要钉：老键必须**只被删**、且在提交成功之后删 —— 迁移期回退读的正是它们。
+check(
+    sync.count("removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))") == 2
+    and sync.count("removeObject(forKey: scopedKey(Self.lastExportEndKey))") == 1,
+    "the legacy UserDefaults keys must be removed in exactly the two migration points "
+    "(full re-import + a successful commit); found %d anchor / %d watermark removals"
+    % (
+        sync.count("removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))"),
+        sync.count("removeObject(forKey: scopedKey(Self.lastExportEndKey))"),
+    ),
+)
+
+# 14b. 唯一的读取点。锚/水位的读者必须都走 `loadCommittedState()` —— 漏改一处就静默分裂。
+check(
+    "UserDefaults.standard.data(forKey: scopedKey(Self.lastWorkoutAnchorKey))" in sync
+    and sync.count("UserDefaults.standard.data(forKey: scopedKey(Self.lastWorkoutAnchorKey))") == 1,
+    "the legacy anchor must be read in exactly one place (loadCommittedState's migration fallback)",
+)
+check(
+    sync.count("loadCommittedState()") >= 2,
+    "loadCommittedState() is defined but never consulted — the anchor/watermark readers "
+    "would then still be reading UserDefaults directly",
+)
+
+# 14c. anchor 的写入必须被不变式守卫：`mayCommit` 的判断要出现在提交之前。
+#      ⚠️ 这一条只钉**顺序**，不钉**语义** —— 结构门禁读不出"`mayCommit` 返回什么"。
+#      语义的执行者是可跑的回归 `SyncStateCommitRegression.swift`（对 `SyncPhase.allCases`
+#      逐条比 `mayCommit` 与 `isBlocked`）。2026-09-23 实测：把 `mayCommit` 的转发改成 `true`，
+#      本门禁**照样绿**，而回归报
+#      `Precondition failed: mayCommit disagrees with isBlocked at deferred_protected_data`。
+#      ⇒ 两条都要有：少任何一条都留下一个"静默通过"的方向。
+commit_body = tail_after(sync, "private func markSuccess(", "markSuccess(").split("\n    private func ")[0]
+ordered(
+    commit_body,
+    "SyncStateCommitPlan.mayCommit(",
+    "taskStore.commitSuccess(",
+    "markSuccess writes the committed state before checking `mayCommit` — a blocked sync "
+    "(locked screen / waiting for credentials) would then advance the export watermark and the "
+    "data it never read would never be exported again",
+)
+check(
+    "phase = SyncPhase.failed.rawValue" in commit_body,
+    "markSuccess refuses a blocked commit without recording a failure state — the refusal would "
+    "then be indistinguishable from 'nothing happened'",
+)
+
+# 14d. 水位只能由那一个事务写。`INSERT INTO sync_state` 只许出现一次（提交的 UPSERT），
+#      且必须在 `BEGIN IMMEDIATE` 与 `COMMIT` 之间 —— 而它住在 `upsertState()` 里，
+#      所以判据要分两层钉：调用方先开事务，被调方**不许自己再开一个**。
+check(
+    store_src.count("INSERT INTO sync_state") == 1,
+    "SyncTaskStore writes sync_state from %d places; it must be exactly one (the commit's UPSERT) — "
+    "a second writer reintroduces the two-step split" % store_src.count("INSERT INTO sync_state"),
+)
+commit_store = tail_after(store_src, "func commitSuccess(", "SyncTaskStore.commitSuccess").split(
+    "\n    private func "
+)[0]
+upsert_store = tail_after(store_src, "private func upsertState(", "SyncTaskStore.upsertState").split(
+    "\n    private func "
+)[0]
+ordered(
+    commit_store,
+    "BEGIN IMMEDIATE",
+    "upsertState(",
+    "commitSuccess writes the watermark before BEGIN IMMEDIATE — it would then be a separate "
+    "transaction from the task-row delete, which is exactly the window §4.2 removes",
+)
+ordered(
+    commit_store,
+    "upsertState(",
+    '"COMMIT"',
+    "the watermark write is not committed inside the same function that deleted the task row",
+)
+check(
+    "INSERT INTO sync_state" in upsert_store,
+    "the only sync_state write no longer lives in upsertState() — this judgement would then be "
+    "guarding the wrong function",
+)
+check(
+    "BEGIN" not in upsert_store and "COMMIT" not in upsert_store,
+    "upsertState() opens or commits its own transaction — the watermark write must inherit the "
+    "caller's transaction, otherwise it is a separate commit again",
+)
+check(
+    "readBackMatches(" in commit_store,
+    "commitSuccess no longer reads its own write back before COMMIT — a silently ignored write "
+    "would leave a stale anchor with no task row and still report success",
+)
+check(
+    store_src.count("sqlite3_changes(") >= 2,
+    "commitSuccess no longer verifies `sqlite3_changes()` — an UPSERT that touched 0 rows and a "
+    "DELETE that removed 0 rows both look like success otherwise",
+)
+# 14d-2. 只数**调用次数**是不够的：`guard removed >= 0` 这种恒真比较同样"调用了 `changes()`"，
+#        却把"删掉 0 行"重新变回成功。
+#        🔴 2026-09-23 实测：把 `removed == 1` 改成 `removed >= 0`，上面那条判据**照样绿**
+#        （185 checks / 0 failed）—— 所以判据必须落在**比较值**上，而不是函数名上。
+check(
+    re.search(r"guard removed == 1 else", commit_store) is not None,
+    "the task-row DELETE in commitSuccess no longer requires exactly one removed row — a commit "
+    "that deleted nothing would read as success and the watermark would advance with no task row",
+)
+check(
+    re.search(r"guard touched == 1 else", upsert_store) is not None,
+    "upsertState no longer requires exactly one touched row — `sqlite3_changes()` is still called, "
+    "so a presence-only judgement cannot see this weakening",
+)
+
+# 14f. 回读断言比的是**应该写成的值**，不是"请求的值"。后者会把单调 no-op 判成写入失败：
+#      请求一个更早的水位时正确结果是"提交成功、值停在更晚的那个"，拿请求值去比会让一次
+#      本该成功的同步报错回滚，下次唤醒再重导一遍。
+read_back = tail_after(store_src, "private func readBackMatches(", "SyncTaskStore.readBackMatches")
+check(
+    "guard written.workoutAnchor == expectedAnchor else" in read_back,
+    "readBackMatches no longer compares the anchor it just read back against the expected value — "
+    "a silently ignored anchor write would then pass the in-transaction assertion",
+)
+check(
+    "max($0, requested)" in read_back,
+    "readBackMatches compares the watermark against the requested value instead of the monotonic "
+    "one — a legitimate `.advance` to an earlier date then looks like a failed write and rolls back",
+)
+
+# 14e. 「重新导入全部」必须把**两处**都清掉。只清老键 ⇒ `loadCommittedState` 会把锚读回来。
+full_block = re.search(r"if full \{(.*?)\n            \}", sync, re.S)
+check(full_block is not None, "could not find the `if full` re-import block in performSync")
+if full_block is not None:
+    check(
+        "forgetState(" in full_block.group(1),
+        "a full re-import clears the legacy anchor key but not the committed state row — "
+        "loadCommittedState would read the old anchor straight back and the sync would keep "
+        "taking only the delta while the UI claims everything was re-imported",
+    )
+
+# 14f. `clearExportWatermark()` 必须已经并进提交。留着它就还有"清空了水位、任务行没动"的窗口。
+#      必须先剥注释行：本节的说明与 `markSuccess` 的文件注释里逐字写着这个名字。
+check(
+    "clearExportWatermark()" not in without_comment_lines(sync),
+    "HealthKitSync still calls clearExportWatermark() separately from the commit — the watermark "
+    "and the task row would then be written by two different steps again",
+)
+
+# 14g. §4.4 的 14 天回填窗口：数值可以改，但**必须只有一个定义、且被回填分支引用**。
+#      此前 `routeBackfillWindow` 在任何测试/门禁/突变里都不出现 ⇒ 改成 30 天不会红。
+#
+#      ⚠️ 2026-09-23 语义变更（按 workout 定频）：这个窗口的作用从"**查询**哪些 workout 的
+#      轨迹"收窄成"**发现**哪些 workout"。也就是说它现在只决定"这一轮把哪些 workout 放进
+#      候选集"，真正的查询由 `RouteSyncStateMachine.shouldQuery` 逐个决定（见 14h）。
+#      窗口本身**必须保留**：一条很久以前跑完、状态早已 `settled` 的老 workout 一旦滑出窗口，
+#      这一轮就根本不会看到它，于是"它到底还稳不稳定"永远无从复核；留着窗口＝每轮都复核一遍
+#      "这批老的还是不是 settled"，而复核本身不再花任何 HealthKit 查询。
+window_defs = re.findall(r"let routeBackfillWindow: TimeInterval = ([^\n]+)", health_export)
+check(
+    len(window_defs) == 1,
+    "the route backfill window is defined %d times; it must be one constant so the window's "
+    "meaning has a single home" % len(window_defs),
+)
+if len(window_defs) == 1:
+    check(
+        "routeBackfillWindow" in health_export.split("let routeBackfillWindow")[1],
+        "routeBackfillWindow is defined but never referenced — the backfill would silently "
+        "stop happening while the constant still reads as if it were in force",
+    )
+check(
+    "routeBackfillWindow" in health_export.split("if stored != nil")[-1],
+    "the anchored-sync backfill branch no longer uses routeBackfillWindow; the window would then "
+    "be hardcoded somewhere else and this judgement would stop covering it",
+)
+
+# 14h. Workout 伴生 Route 状态机（按 workout 定频，取代固定 14 天全量回填）。
+#
+#      这一节判的全是"改错了照样编译通过、肉眼也看不出来"的形状。它们每一条的失效都不会报错、
+#      不会崩、回归也可能全绿，只会让**收益归零**或让**数据静默丢在服务端之外**：
+#        · 状态被塞进 `UserDefaults` / 一个 JSON 文件 / 内存单例 ⇒ 又回到"两套真相"；
+#        · 循环里忘了用 `shouldQuery` 过滤 ⇒ 降频收益归零，而门禁与回归全绿；
+#        · 记忆在**水位提交之前**落盘 ⇒ 一次从未交付的同步也被记成"这条轨迹已经稳定"，
+#          之后一路降到 `settled`，而 `settled` 只有人工重扫能唤醒 ⇒ 服务端永远收不到它；
+#        · manifest 不再声明 healthkit ⇒ 省略 GPX 从"保留"变成"删除"。
+#
+#      这台机器自身的判据在 `RouteSyncStateMachineTests.swift`（35 条）与
+#      `RouteSyncStatePersistenceRegression.swift`（35 条）；本节只判**接线**。
+route_state_src = read(RAI / "RouteSyncState.swift")
+route_machine_src = read(RAI / "RouteSyncStateMachine.swift")
+store_src = read(RAI / "SyncTaskStore.swift")
+
+check(
+    "CREATE TABLE IF NOT EXISTS sync_route_state" in store_src,
+    "sync_route_state is not created in the sync journal — a memory column that does not exist "
+    "would have to live somewhere else (UserDefaults / a JSON file / an in-memory singleton), "
+    "which is precisely the two-sources-of-truth shape the watermark was moved out of",
+)
+check(
+    "CREATE INDEX IF NOT EXISTS idx_route_status_cooling" in store_src,
+    "the cooling-throttle index is gone — nothing then pins the (route_status, last_checked_at) "
+    "shape that the throttled lookup assumes, and the query degrades to a full scan",
+)
+check(
+    "UserDefaults" not in route_state_src and "UserDefaults" not in route_machine_src,
+    "the route state types or the state machine mention UserDefaults — the down-frequency memory "
+    "must have exactly one home (the sync journal), not a second one outside it",
+)
+check(
+    "func loadRouteStates(" in store_src,
+    "the sync journal no longer exposes loadRouteStates — the pipeline could not read the memory "
+    "back at all, so every workout would look like a first observation forever",
+)
+check(
+    "func upsertRouteStates(" in store_src,
+    "the sync journal no longer exposes upsertRouteStates — nothing would ever record what the "
+    "state machine decided",
+)
+check(
+    "route_hash TEXT" in store_src,
+    "route_hash changed column type or vanished. If it became a BLOB, the bind must move INSIDE "
+    "the withUnsafeBytes closure (ADR-004 补充 B): binding a baseAddress that escaped its scope "
+    "writes indeterminate content, which surfaces as an in-transaction read-back mismatch and a "
+    "rolled-back commit — not as a crash",
+)
+
+# 单事务批量写：三件护栏必须都在写入路径上（与 `commitSuccess` 同源）。
+upsert_body = tail_after(store_src, "func upsertRouteStates(", "upsertRouteStates(")
+upsert_body = upsert_body.split("\n    private func ")[0]
+check(
+    "BEGIN IMMEDIATE" in upsert_body,
+    "the route state batch is no longer wrapped in BEGIN IMMEDIATE — a half-written batch makes "
+    "the route set of the next payload depend on where the previous write stopped",
+)
+check(
+    "ROLLBACK" in upsert_body,
+    "the route state batch has no rollback path — a failed row would leave the earlier rows of "
+    "the same batch committed",
+)
+check(
+    "sqlite3_changes(" in upsert_body,
+    "the per-row changes() check is gone from the route state batch — an UPSERT that touches zero "
+    "rows reads exactly like success",
+)
+check(
+    "loadRouteStates(uuids:" in upsert_body,
+    "the pre-COMMIT read-back assertion is gone from the route state batch — 'I wrote it' would "
+    "again be an assumption rather than something the transaction verified",
+)
+
+# 管线：真的在用状态机过滤，而且**先判后查**。
+route_loop = tail_after(
+    health_export,
+    "for (index, workout) in workouts.enumerated() {",
+    "the per-workout route loop",
+)
+route_loop_end = 'await onProgress("正在读取心率与恢复数据")'
+if route_loop_end in route_loop:
+    route_loop = without_comment_lines(route_loop.split(route_loop_end)[0])
+else:
+    check(
+        False,
+        "the per-workout loop is no longer followed by the global-records progress step — the "
+        "slice below would then be bigger than the loop itself and the judgements against it "
+        "could pass vacuously",
+    )
+    route_loop = ""
+
+check(
+    "RouteSyncStateMachine.shouldQuery(" in route_loop,
+    "the per-workout loop no longer consults the state machine — the 14-day backfill is "
+    "unconditional again, every route is re-read on every sync, and no gate notices",
+)
+ordered(
+    route_loop,
+    "RouteSyncStateMachine.shouldQuery(",
+    "routeEntries(",
+    "the route query happens BEFORE the state machine is consulted — the filter has to decide "
+    "first, otherwise the saving is exactly zero while every gate stays green",
+)
+check(
+    "fetch.observation" in route_loop,
+    "the observation returned by routeEntries is dropped on the floor — the state machine would "
+    "never learn what it saw, so stable_check_count could never advance and nothing would ever "
+    "slow down",
+)
+check(
+    "RouteSyncStateMachine.decide(" in route_loop,
+    "the loop queries routes but never asks the machine what the new state should be — the memory "
+    "would stay frozen at its first value",
+)
+check(
+    route_loop.count("routeDecisions[") == 1,
+    "the loop records the decided state in %d places; there must be exactly one, so that the "
+    "skip branch provably writes nothing" % route_loop.count("routeDecisions["),
+)
+check(
+    "routeFiles = []" in route_loop,
+    "the skip branch no longer explicitly produces no route files — it would fall through with "
+    "whatever routeFiles held, i.e. either a stale value or a compile error",
+)
+
+# 省略 GPX 的**安全性前提**：manifest 必须声明 healthkit scope。
+check(
+    '"sourceScope": "healthkit"' in health_export,
+    "the export manifest no longer declares sourceScope healthkit. That declaration is the ONLY "
+    "reason the server reads an omitted GPX as 'not part of this partial archive' instead of as a "
+    "deletion (resolvePreserveAbsent → preserveAbsent: true, import-sources.ts:203). Without it, "
+    "skipping a route now DELETES its points on the server",
+)
+
+# 接线：导出前取快照（导出跑在脱离主线程的上下文里，碰不了 @MainActor 的 store）。
+check(
+    "taskStore.loadRouteStates()" in sync,
+    "performSync no longer loads the route state snapshot — the export would see an empty memory "
+    "and treat every workout as a first observation (safe, but the whole change is inert)",
+)
+ordered(
+    sync,
+    "let routeStates = taskStore.loadRouteStates()",
+    "HealthKitExport.exportArchive(",
+    "the route state snapshot is taken after the export is launched — the export body runs "
+    "detached (HealthSyncCancellation.runDetached) and cannot reach the @MainActor store, so the "
+    "snapshot has to exist before it starts",
+)
+check(
+    "routeForceRescan: full" in sync,
+    "the manual-rescan flag is not wired to `full`: `settled` routes would then have no wake-up "
+    "path at all, and '重新导入全部' would keep silently skipping the very routes it promises to redo",
+)
+check(
+    without_comment_lines(sync).count("routeStates: exported.routeStates") == 2,
+    "only %d of the two success branches hand the observations to markSuccess — the branch that "
+    "does not would drop the memory for every workout it processed"
+    % without_comment_lines(sync).count("routeStates: exported.routeStates"),
+)
+
+# 🔴 顺序判据：记忆只能写在**水位提交之后**。
+ordered(
+    commit_body,
+    "taskStore.commitSuccess(",
+    "taskStore.upsertRouteStates(",
+    "the route memory is flushed BEFORE the watermark commit. A sync that never delivered its "
+    "payload would then be recorded as 'this route is stable'; it walks down to settled, and "
+    "settled is only woken by a manual rescan — so the server can never receive that route. "
+    "Flushing after the commit can only ever cost one extra query next round",
+)
+
+# 14i. 交叉依赖：凡编译 `SyncTaskStore.swift` 的编译单元，都必须同时编 `RouteSyncState.swift`。
+#
+#      为什么把它钉成判据：2026-09-23 本轮实测踩了**两次**。`SyncTaskStore` 新增对
+#      `RouteSyncRecord` / `RouteSyncStatus` 的依赖之后，每个编译它的单元都各自需要那个文件；
+#      而 `typecheck-ios.sh` 是**全量一起编译**的，所以"少列一个文件"这件事在类型检查里
+#      完全看不出来 —— 它只在真跑 iOS 门禁时以
+#      `cannot find type 'RouteSyncRecord' in scope` 的形式炸。
+#      本仓已经有一份同形态的教训（`CalibrationState.swift` / `PlanReceiptMatcher.swift`：
+#      "判据存在 ≠ 判据被执行"），所以这里用**扫描**代替"记得改三处"。
+for script in sorted(TESTS.glob("*.sh")):
+    script_body = read(script)
+    if "SyncTaskStore.swift" not in script_body:
+        continue
+    check(
+        "RouteSyncState.swift" in script_body,
+        "%s compiles SyncTaskStore.swift without RouteSyncState.swift — the compile unit would "
+        "fail with \"cannot find type 'RouteSyncRecord' in scope\", while the full-file type check "
+        "stays green because it compiles every source at once" % script.name,
+    )
+
+
+# --- 15. 判据总数的下限（**必须放在全部判据之后**） -----------------------------
+# 为什么单列并且必须在末尾：它数的是"这一轮到底执行了多少条判据"，放在中间只会数到中间态。
+# 2026-09-23 实测三个反例（把声明改名，行为完全不变）：
+#   `performSync` / `uploadToSystem` / `handleEventsForBackgroundURLSession`
+# ⇒ 原来的 `if <两个锚点都在>: check(...)` 会让整条判据被**跳过**，
+#   总数从 162 掉到 161，而输出里**没有一行 `FAIL:`**、退出码照样 0。
+# `ordered()` / `tail_after()` 已经把那种情形变成显式失败；本行再兜一层：
+# 新增判据不必改它，只有"判据被吃掉"才会红。
+# 注意：打印出来的总数会比消息里的那个数**大 1** —— `check()` 的参数在调用前求值，
+# 所以消息里的 `checks` 还不含这一条本身。`MIN_CHECKS` 因此是**零容忍**（少一条就红）。
+# ⚠️ 已知锋利边缘：`client_codes` / `UPLOAD_CONTRACT` 这类"内容派生"的循环会随源码增减而变，
+# 所以**有意删掉一个状态码**也会踩到它。那时正确的动作是把 MIN_CHECKS 往下调一格，
+# 而不是把这条判据删掉。
+# 2026-09-23 再补（按 workout 定频）：+26 条（§14h 的 22 条 + §14i 的 2 条 + §10k 名单新增的 2 条）。
+MIN_CHECKS = 216
+check(
+    checks >= MIN_CHECKS,
+    "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "
+    "matching, so the slice or the branch that carries them degraded)" % (checks, MIN_CHECKS),
+)
 
 if failures:
     for item in failures:
