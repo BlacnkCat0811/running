@@ -34,6 +34,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json",
     "test": "node --import tsx --test packages/*/test/*.test.ts apps/api/test/*.test.ts; node_status=$?; npm run test -w @rai/web; web_status=$?; test $node_status -eq 0 -a $web_status -eq 0",
     "test:ios": "bash apps/ios/tests/run-ios-gates.sh",
+    "test:ios:live": "python3 apps/ios/tests/check-export-determinism-live.py",
     "test:ios:mutation": "python3 apps/ios/tests/check-background-mutations.py",
     "test:e2e:web": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
     "test:e2e:responsive": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",

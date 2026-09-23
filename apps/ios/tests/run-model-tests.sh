@@ -76,3 +76,10 @@ python3 apps/ios/tests/check-today-layout.py
 # "切后台时到底调了谁"；这个脚本钉的是「生命周期中止不得冒充用户取消」「expiration handler
 # 必须走 suspendForLifecycle」这类改错了照样编译通过的事实，并顺手断言自己没变成孤儿。
 python3 apps/ios/tests/check-background-capabilities.py
+# 导出确定性的结构门禁。`HealthKitExport.swift` 同样不被任何回归脚本编译（整个文件被
+# `#if os(iOS)` + `import HealthKit` 锁死，helper 全是 private static），于是"跑两遍断言
+# 字节相同"在本机走不通。它钉的是三条**改错了照样编译通过、肉眼也看不出来**的确定性事实：
+# `<MetadataEntry>` 必须按键排序（否则同一次跑步被反复判 updated）、样本查询必须显式排序
+# （否则 export.xml 字节抖动，`source_sha256` 永不重复）、manifest 不许带墙钟
+# （否则上传幂等键每次都变）。它顺手断言自己没变成孤儿。
+python3 apps/ios/tests/check-export-determinism.py

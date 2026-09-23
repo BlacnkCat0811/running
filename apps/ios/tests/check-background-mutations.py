@@ -57,6 +57,7 @@ SYNC_PHASE = "apps/ios/RAI/SyncPhase.swift"
 APP = "apps/ios/RAI/RAIApp.swift"
 APP_DELEGATE = "apps/ios/RAI/AppDelegate.swift"
 ROOT_VIEW = "apps/ios/RAI/RootView.swift"
+HEALTH_EXPORT = "apps/ios/RAI/HealthKitExport.swift"
 TECH_THEME = "apps/ios/RAI/Skins/Technology/TechTheme.swift"
 TECH_PRESENTATION = "apps/ios/RAI/Skins/Technology/TechSyncPresentation.swift"
 MODEL_RUNNER = "apps/ios/tests/run-model-tests.sh"
@@ -68,13 +69,14 @@ API_CLIENT = "apps/ios/RAI/APIClient.swift"
 # （那个"跳过"是为信号处理器的窗口留的），于是改坏的源码留在工作区、下一轮的基线检查才炸。
 SOURCES = [
     LIFECYCLE, SYNC, SYNC_PHASE, APP, APP_DELEGATE, ROOT_VIEW, TECH_THEME, TECH_PRESENTATION, MODEL_RUNNER,
-    HEALTH_SYNC_RUNNER, BG_POLICY, UPLOAD_SESSION, API_CLIENT,
+    HEALTH_SYNC_RUNNER, BG_POLICY, UPLOAD_SESSION, API_CLIENT, HEALTH_EXPORT,
 ]
 
 SWIFT_GATE = "bash apps/ios/tests/run-health-sync-tests.sh"
 PRESENTATION_GATE = "bash apps/ios/tests/run-tech-presentation-tests.sh"
 PY_GATE = "python3 apps/ios/tests/check-background-capabilities.py"
-CLEAN = SWIFT_GATE + " && " + PY_GATE + " && " + PRESENTATION_GATE
+EXPORT_GATE = "python3 apps/ios/tests/check-export-determinism.py"
+CLEAN = SWIFT_GATE + " && " + PY_GATE + " && " + EXPORT_GATE + " && " + PRESENTATION_GATE
 
 # 精确到"编译器报的错"。**不能**写成 `"error:" in out` —— 运行时断言失败打的是
 # `Fatal error: Error raised at top level: …`，那样会把正确的变红误判成编译错误。
@@ -703,6 +705,78 @@ MUTATIONS = [
         ),
         PY_GATE,
         "BGProcessingTask launched",
+    ),
+    # ---- 导出确定性（`HealthKitExport.swift`）--------------------------------
+    # 名字统一带 `[export]` 前缀：分段跑靠它筛（`RAI_MUTATION_ONLY='[export]'`）。
+    # 这四条对应 `check-export-determinism.py` 的四组判据，一条只能打破一条：
+    # 每条都还原成**真实的旧写法**（而不是随便删一行），否则验到的是"门禁会红"，
+    # 而不是"这个缺陷会被抓住"。
+    (
+        "[export] 结构门禁: <MetadataEntry> 改回遍历 Dictionary => 行序随进程变、content hash 变",
+        lambda: edit(
+            HEALTH_EXPORT,
+            "        for key in metadata.keys.sorted() {\n"
+            "            if skip.contains(key) { continue }\n"
+            "            guard let value = metadata[key] else { continue }\n",
+            "        for (key, value) in metadata {\n"
+            "            if skip.contains(key) { continue }\n",
+        ),
+        EXPORT_GATE,
+        "does not iterate metadata.keys.sorted()",
+    ),
+    (
+        "[export] 结构门禁: 样本查询改回只排 workout => export.xml 字节抖动，source_sha256 永不重复",
+        lambda: edit(
+            HEALTH_EXPORT,
+            "                    sortDescriptors: [\n"
+            "                        NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true),\n"
+            "                        NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)\n"
+            "                    ]\n",
+            "                    sortDescriptors: type is HKWorkoutType\n"
+            "                        ? [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]\n"
+            "                        : nil\n",
+        ),
+        EXPORT_GATE,
+        "still sorts only workouts",
+    ),
+    (
+        "[export] 结构门禁: manifest 重新带上 createdAt => Zip 字节每次不同、幂等键每次都换",
+        lambda: edit(
+            HEALTH_EXPORT,
+            '            "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"]\n',
+            '            "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"],\n'
+            '            "createdAt": ISO8601DateFormatter().string(from: Date())\n',
+        ),
+        EXPORT_GATE,
+        'still carries a "createdAt" key',
+    ),
+    (
+        "[export] 结构门禁: manifest 的 deletedSourceIds 去掉排序 => 查询返回序漏进 ZIP",
+        lambda: edit(
+            HEALTH_EXPORT,
+            '            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString }.sorted(),\n',
+            '            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString },\n',
+        ),
+        EXPORT_GATE,
+        "is written unsorted",
+    ),
+    (
+        "[export] 反孤儿: 从 run-model-tests.sh 摘掉导出确定性门禁",
+        lambda: edit(
+            MODEL_RUNNER,
+            "python3 apps/ios/tests/check-export-determinism.py",
+            "true # gate removed",
+        ),
+        EXPORT_GATE,
+        "would be an orphan gate",
+    ),
+    (
+        "[export] 判据非空转: 把 metadataXML 改名 => 门禁必须报「判据变成空转」，而不是静默变绿",
+        # 这条不是回归，是**门禁自身的有效性**：判据里那些"不得出现 X"的形状断言，
+        # 一旦锚点函数被改名就会变成"什么都没检查"的绿灯。必须让它红在那条显式断言上。
+        lambda: edit(HEALTH_EXPORT, "func metadataXML(", "func metadataXMLLines("),
+        EXPORT_GATE,
+        "every judgement below would be vacuous",
     ),
 ]
 

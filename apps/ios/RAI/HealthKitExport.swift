@@ -297,14 +297,33 @@ nonisolated enum HealthKitExport {
         // (`storage-sqlite/src/database.ts` checks both identifier keys). Naming
         // the sync identifier instead would be no more precise and no less: the
         // UUID can only ever match one row.
+        //
+        // 🔴 This manifest deliberately carries **no wall-clock timestamp**. It
+        // used to hold `createdAt: ISO8601DateFormatter().string(from: Date())`,
+        // which is a fresh value on every export: the archive bytes could never
+        // repeat, so `payloadHash` — the idempotency key the uploader sends —
+        // differed every time and the server created a brand-new import source
+        // for each sync instead of recognising the batch it had already seen.
+        // Nothing reads the field: the content digest takes only
+        // `version` / `sourceScope` / `deletedSourceIds`
+        // (`import-sources.ts:268-274`) and the offline CLI reads only
+        // `version` / `deletedSourceIds` (`health-export-parser/src/cli.ts:462-464`).
+        // A human asking "when was this produced" has `<ExportDate>` in
+        // `export.xml`, which the server strips before hashing anyway.
         let manifest: [String: Any] = [
             "version": 1,
             "sourceScope": "healthkit",
             "sourceEntityType": "HKWorkoutActivityTypeRunning",
             "sourceIds": workouts.map(workoutSyncId),
-            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString },
-            "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"],
-            "createdAt": ISO8601DateFormatter().string(from: Date())
+            // Sorted: `HKAnchoredObjectQuery` does not promise an order for
+            // `deletedObjects`, and this array is written verbatim into the ZIP.
+            // Nothing downstream reads the order — the server keeps neither the
+            // manifest nor its list, it only digests `deletedSourceIds` after
+            // de-duplicating and sorting it (`import-sources.ts:268-274`) — but an
+            // unstable array still changes the archive bytes and therefore the
+            // upload hash.
+            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString }.sorted(),
+            "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"]
         ]
         let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
         try manifestData.write(to: manifestURL, options: .atomic)
@@ -767,9 +786,24 @@ nonisolated enum HealthKitExport {
                     sampleType: type,
                     predicate: predicate,
                     limit: HKObjectQueryNoLimit,
-                    sortDescriptors: type is HKWorkoutType
-                        ? [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
-                        : nil
+                    // 🔴 Every query is sorted, not just the workout one. The
+                    // records this returns are written to `export.xml` in the
+                    // order HealthKit hands them over, and an unsorted query
+                    // ("unspecified" per the HKSampleQuery docs) is free to
+                    // differ between calls. The parsed row set is identical, so
+                    // no hash changes — but the **file bytes** do, and
+                    // `source_sha256` is a digest of those bytes
+                    // (`import-sources.ts` `digestHealthKitExportContent`), so
+                    // upload deduplication never sees two identical exports and
+                    // the server can never answer `unchanged`.
+                    //
+                    // `endDate` is only a tie-break: the parser keys rows by id
+                    // and never by position, so this can only reorder, never
+                    // drop or merge.
+                    sortDescriptors: [
+                        NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true),
+                        NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+                    ]
                 ) { _, samples, error in
                     if let error {
                         box.resume(throwing: error)
@@ -954,8 +988,23 @@ nonisolated enum HealthKitExport {
         guard let metadata = workout.metadata else { return "" }
         var body = ""
         let skip = Set([HKMetadataKeyIndoorWorkout, HKMetadataKeySyncIdentifier])
-        for (key, value) in metadata {
+        // 🔴 Sorted key order is load-bearing, not cosmetic. A Swift `Dictionary`
+        // has no stable iteration order, so `for (key, value) in metadata`
+        // reshuffles these lines between processes. The lines decide the order in
+        // which the parser first sees each key (`addMetadata` creates the array on
+        // first sight), i.e. the key order of `workouts.metadata_json` — and that
+        // whole object is fed to `stableId("workout_content", …)`. Same run, same
+        // data, new `<MetadataEntry>` order ⇒ new content hash ⇒ the incremental
+        // importer reports every workout with two or more surviving keys as
+        // `updated`, and the model is replayed from the start of the window.
+        // That is the "已更新 N 次跑步" symptom on a day with no new runs.
+        //
+        // Sorting changes no meaning: `addMetadata` / `lastMetadataValue` /
+        // `metadataBoolean` all look a value up **by key**, and a Dictionary holds
+        // each key once, so only the line order changes.
+        for key in metadata.keys.sorted() {
             if skip.contains(key) { continue }
+            guard let value = metadata[key] else { continue }
             guard let serialized = serializeMetadata(value) else { continue }
             body += "    <MetadataEntry key=\"\(escape(key))\" value=\"\(escape(serialized))\"/>\n"
         }

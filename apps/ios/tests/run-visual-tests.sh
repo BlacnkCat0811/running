@@ -13,6 +13,12 @@ if [ -z "$device" ]; then
   echo 'Create a dedicated Simulator named RAI Technology Acceptance, or set RAI_VISUAL_DEVICE.' >&2; exit 1
 fi
 out="${RAI_VISUAL_OUTPUT:-/tmp/rai-visual-$(date +%Y%m%d-%H%M%S)}"
+# P0 的真执行门禁，挂在构建之前：结构门禁（check-export-determinism.py）只读源码
+# 形状，这一条才真的在模拟器里编译并运行 `HealthKitExport.metadataXML`，跨进程比较
+# 输出字节。这里用同一个专用模拟器，所以顺带覆盖了"这台机器跑得动"。
+# ⚠️ 它**不需要** var/rai.sqlite —— 必须放在下面的数据库备份之前，否则缺夹具的机器
+# 会在备份那一步退出，这条永远跑不到。
+python3 apps/ios/tests/check-export-determinism-live.py
 mkdir -p "$out"
 runtime=$(mktemp -d /tmp/rai-visual-runtime.XXXXXX)
 api_pid=""; proxy_pid=""
