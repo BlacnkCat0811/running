@@ -1,4 +1,4 @@
-import { DATABASE_TIMEZONE } from "@rai/contracts";
+import { CONTRACT_VERSION, DATABASE_TIMEZONE } from "@rai/contracts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
@@ -7,6 +7,12 @@ import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { analyzeDatasetChange, type ImportDatasetChange } from "./import-dataset-analysis.js";
+import {
+  computeImportPayloadSha256,
+  readDatabaseImportIdentity,
+  readDatasetVersion,
+  writeImportPayloadAnchor
+} from "./import-payload-identity.js";
 
 import type { ImportExecutionEngine, ImportJobResponse, ImportJobPerformance } from "@rai/api-contracts";
 import { currentAbilityBaselineHash } from "@rai/application";
@@ -73,6 +79,21 @@ interface MutableImportJob extends ImportJobResponse {
   removalGuard?: RemovalGuardPayload;
   onTerminal?: (succeeded: boolean, durable: boolean) => void | Promise<void>;
   queue?: { scope: string; attempts: number; finalized: boolean; cancelRequested?: boolean; engine?: ImportExecutionEngine };
+}
+
+/**
+ * A pre-flight hit: the payload is provably the one behind the current database,
+ * so applying it again cannot change anything.
+ *
+ * `unchangedWorkouts` is read from the database rather than measured by a diff —
+ * a no-op import leaves every existing session exactly as it is, so the database's
+ * own count *is* the number of unchanged sessions. Reporting `0` there would be a
+ * different (and false) claim: "this database has no sessions".
+ */
+interface PayloadPreflight {
+  sha256: string;
+  datasetVersion: string;
+  unchangedWorkouts: number;
 }
 
 /**
@@ -475,6 +496,45 @@ export class ImportWorker {
         };
         return;
       }
+      // 🔴 载荷级早退必须在**备份之前**。下面的 `backup` → `stagingCopy` →
+      // `parseImport` → `changeAnalysis` 是 O(主库) 的：线上 506 MB 的库，
+      // 即使最终判定 `unchanged`（不换主库、不重算），这四步也已经全跑过一遍。
+      // 判据只读**载荷**（大小与库无关），所以这一条命中时可以把整条链路整段跳过。
+      // 判据的安全边界见 `import-payload-identity.ts` 的模块注释：锚点绑定
+      // `dataset_version`，任何后续导入都会让它失效。
+      let payloadSha256: string | null = null;
+      const preflight = await timing.measure("changeAnalysis", async () => {
+        const result = await this.detectUnchangedPayload(job, engine.name);
+        if (result) payloadSha256 = result.sha256;
+        return result;
+      });
+      this.assertNotClosing();
+      if (preflight) {
+        job.phase = "activate"; // terminal decision is now irreversible, including no-op imports
+        terminalSucceeded = true;
+        publishTerminalState = () => {
+          job.status = "succeeded";
+          job.phase = "completed";
+          job.message = "导出文件与上次已导入的内容完全一致，未重新解析";
+          job.completedAt = new Date().toISOString();
+          job.summary = {
+            recomputeReasons: ["payload_identity_unchanged"],
+            importMode: "unchanged",
+            insertedWorkouts: 0,
+            updatedWorkouts: 0,
+            removedWorkouts: 0,
+            unchangedWorkouts: preflight.unchangedWorkouts,
+            routesUpdated: 0,
+            featuresReused: 0,
+            featuresRecomputed: 0,
+            modelReplayFrom: null,
+            durationMs: Date.now() - startedAtMs,
+            // 这一条路径根本没有生成备份，所以这里恒为 null，不是"备份失败"。
+            backupName: null
+          };
+        };
+        return;
+      }
       await this.removeDatabaseFiles(stagingDatabase);
       this.assertNotClosing();
       currentBackupPath = await timing.measure("backup", () => this.createCurrentBackup(job.id));
@@ -552,6 +612,16 @@ export class ImportWorker {
             backupName: currentBackupPath ? currentBackupPath.split(/[\\/]/).at(-1) ?? null : null
           };
         };
+        // 这条链路刚刚证明了"把这份载荷应用到主库上不写任何一行"，所以这份载荷的身份
+        // 对**主库**是一个有效锚点 —— 即使暂存副本会被丢弃，也把锚点刷新掉。
+        //
+        // 不刷新会出现"永久失效"：载荷内容其实没变、但组合上下文变了（解析契约版本升级、
+        // 执行的引擎切换）时，判据永远不相等，而判词又一直是 `unchanged`（走不到激活路径），
+        // 锚点就再也写不回去了。刷新的风险面很小 —— `unchanged` 判词本来就被当成权威结论
+        // （暂存库当场丢弃），这里只是把这个已有结论缓存下来。
+        // 这也是一处新增的**主库写入**：单行 upsert，尽力而为，失败只记日志。
+        payloadSha256 ??= await this.payloadSha256(job, engine.name);
+        this.recordPayloadAnchor(this.databasePath, payloadSha256);
         return;
       }
       let featureSummary = { reused: 0, recomputed: 0 };
@@ -596,6 +666,10 @@ export class ImportWorker {
           backupName: currentBackupPath ? basename(currentBackupPath) : null
         });
       }
+      // 把"这份库是由哪个载荷产生的"写进**暂存库**，让它随激活一起落地：
+      // 锚点不可能先于它所描述的数据出现，激活失败回滚时也随库一起消失。
+      payloadSha256 ??= await this.payloadSha256(job, engine.name);
+      this.recordPayloadAnchor(stagingDatabase, payloadSha256);
       auditPublication = await timing.measure("activation", () => this.stageAuditReports(
         stagingDatabase,
         finalMarkdownReport,
@@ -796,6 +870,92 @@ export class ImportWorker {
 
   private analyzeDatasetChange(stagingPath: string, previousPath: string, batchId?: string, preserveAbsent?: boolean): ImportDatasetChange {
     return analyzeDatasetChange(stagingPath, previousPath, batchId, preserveAbsent);
+  }
+
+  /**
+   * Payload identity of an import's input, or `null` when it cannot be computed.
+   *
+   * A payload that cannot be read is *not* a pre-flight failure: the import itself
+   * will report the real problem with a proper message. Failing here would turn an
+   * optimisation into a new way to fail an import.
+   */
+  private async payloadSha256(job: MutableImportJob, engine: string): Promise<string | null> {
+    try {
+      return await computeImportPayloadSha256(job.inputPath, {
+        preserveAbsent: job.preserveAbsent === true,
+        contractVersion: CONTRACT_VERSION,
+        engine
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Payload identity unavailable for ${job.id}: ${message}\n`);
+      return null;
+    }
+  }
+
+  /**
+   * Decides whether this import can be answered without touching the database's
+   * bulk. Returns `null` — always the safe answer — unless every one of the
+   * following holds:
+   *
+   * 1. The payload does not declare absence-as-deletion. A deleting payload
+   *    (complete snapshot) that is replayed after *another* source imported would
+   *    remove that other source's rows, so identical bytes are not a no-op.
+   * 2. The database carries an anchor, and the `dataset_version` it carries now is
+   *    still the one the anchor was recorded against. This is what catches "another
+   *    import happened in between" — including a deletion-only sync that removed a
+   *    row this payload still carries and would therefore resurrect.
+   * 3. The payload's identity equals the anchor's.
+   *
+   * Note on `createCurrentBackup`: that step also runs `PRAGMA quick_check`, and a
+   * hit here skips it. That is deliberate, not an oversight — the check exists to
+   * gate a *write* ("do not build a new database on top of a corrupt one"), and this
+   * path performs no write and produces no backup. A real import still runs it, and
+   * a structurally unreadable database fails step 2 and takes the full path anyway.
+   */
+  private async detectUnchangedPayload(
+    job: MutableImportJob,
+    engine: string
+  ): Promise<PayloadPreflight | null> {
+    if (job.preserveAbsent !== true) return null;
+    const identity = readDatabaseImportIdentity(this.databasePath);
+    if (!identity?.anchor || identity.datasetVersion === null) return null;
+    if (identity.datasetVersion !== identity.anchor.datasetVersion) return null;
+    const sha256 = await this.payloadSha256(job, engine);
+    if (sha256 === null || sha256 !== identity.anchor.sha256) return null;
+    return {
+      sha256,
+      datasetVersion: identity.datasetVersion,
+      unchangedWorkouts: this.countTrainingSessions()
+    };
+  }
+
+  /** Sessions in the live database; `0` when it cannot be read, never a thrown error. */
+  private countTrainingSessions(): number {
+    try {
+      return this.countRows(this.databasePath, "training_sessions");
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Records the payload identity for the database that is about to become live.
+   *
+   * Best-effort by design: the anchor is an optimisation, so a failure to write it
+   * must not fail an import that has already succeeded. It is logged rather than
+   * swallowed so that a persistently failing anchor stays visible.
+   */
+  private recordPayloadAnchor(databasePath: string, sha256: string | null): void {
+    if (sha256 === null) return;
+    const datasetVersion = readDatasetVersion(databasePath);
+    if (datasetVersion === null) return;
+    try {
+      writeImportPayloadAnchor(databasePath, { sha256, datasetVersion });
+    } catch (error) {
+      const message = error instanceof Error ? error.stack ?? error.message : String(error);
+      process.stderr.write(`Recording the payload anchor failed: ${message}\n`);
+    }
   }
 
   private analyzeInThread(staging: string, previous: string, job: MutableImportJob): Promise<ImportDatasetChange> {
