@@ -35,6 +35,65 @@ export interface GpxImportResult {
   unresolvedRouteCount?: number;
   unresolvedRoutePaths?: string[];
   changedRouteIds?: string[];
+  /** Files refused by the per-route quotas below (V2.1 §5.2). */
+  oversizedRouteCount?: number;
+}
+
+/**
+ * 单条路线的字节上限（V2.1 §5.2 的「单 GPX > 20 MB ⇒ 413」）。
+ *
+ * 规范给的 20 MB 不采用，理由是可核对的量级：本仓自己生成的 GPX 每点约 213 B
+ * （`apps/ios/RAI/HealthKitExport.swift` 的 `gpx(_:points:)` 逐点写 8 个字段，无抽稀），
+ * 而一份 24 小时越野（Apple 的路线点按 1 Hz 计约 86,400 点）≈ 18.4 MB —— **正好压在
+ * 20 MB 线上**。取 64 MiB = 最坏合法值的 3.5 倍。
+ *
+ * 为什么阈值必须远高于合法上限：超限的处置（见 `importGpxRoutes` 的配额分支）会让
+ * **该次跑步拿不到轨迹与海拔** —— 而它不可归因（用户看到的是"这次跑步没有轨迹"）。
+ * 所以这条配额能成立的前提不是"处置得巧"，而是"合法数据碰不到"。
+ */
+export const MAX_GPX_ROUTE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * 单条路线的点数上限（V2.1 §5.2 的「> 50,000 点 ⇒ 422」）。
+ *
+ * 规范给的 50,000 不采用：50,000 点 @1 Hz = 13.9 小时，会把 24 小时越野（≈86,400 点）判死。
+ * 取 300,000（≈83 小时），同时**刻意低于字节上限能容纳的点数**
+ * （64 MiB ÷ 213 B ≈ 315,000）—— 这样两个上限不会互相矛盾：对典型文件先触发的是点数上限，
+ * 而字节上限挡住的是"每点字段更啰嗦"的形态。若点数上限高于字节上限能容纳的点数，
+ * 它就是一个永远不会生效的摆设。
+ */
+export const MAX_GPX_ROUTE_POINTS = 300_000;
+
+/**
+ * 整个导入批次的点数上限。
+ *
+ * 🔴 **它不拒绝任何路线，只记一条 issue。** 规范要求「整批 > 200,000 点 ⇒ 422」，
+ * 那个数字在本仓会把**唯一的重建路径**打死：「重新导入全部」（`full`）会导出
+ * **全部**跑步及其全部路线（`HealthKitSync.swift` 的 `if full` ⇒ anchor 置空 ⇒
+ * `runningWorkouts` 无日期谓词 ⇒ 全量），一个三年每周 3 小时的用户 ≈ 168 万点，
+ * 超 200,000 达 8 倍以上。整包被拒 ⇒ 用户再也无法重建，且每次重试都会被拒。
+ *
+ * 取 2,000 万点 ≈ 4.3 GB 的路线数据 ≈ 累计跑量 5,500 小时，落在
+ * `DEFAULT_LIMITS.maxExtractedBytes`（12 GiB，`import-sources.ts`）之下 ——
+ * 也就是说它是**异常观测**，不是配额闸门。
+ */
+export const MAX_GPX_BATCH_POINTS = 20_000_000;
+
+/** 配额超限。与"这份文件坏了"是两件事，调用方必须分开处置。 */
+export class GpxQuotaExceededError extends Error {
+  constructor(
+    readonly kind: "bytes" | "points",
+    readonly observed: number,
+    readonly limit: number,
+    readonly routePath: string
+  ) {
+    super(
+      kind === "bytes"
+        ? `GPX 文件 ${routePath} 有 ${observed} 字节，超过单条路线上限 ${limit} 字节`
+        : `GPX 文件 ${routePath} 有 ${observed} 个轨迹点，超过单条路线上限 ${limit} 点`
+    );
+    this.name = "GpxQuotaExceededError";
+  }
 }
 
 function attributesOf(tag: SaxesTagPlain): Record<string, string> {
@@ -64,6 +123,16 @@ async function parseGpxFile(
   onPoints: (points: RoutePoint[]) => void,
   nativeOptions: NativeOptions = {}
 ): Promise<{ pointCount: number; sha256: string }> {
+  // 点数配额在这里执行（而不是在文件大小上）：点数才是库膨胀与推荐器成本的来源，
+  // 而"文件多大"只是个代理。计数在**回调前**做 —— 一旦超限就抛，之后的点一个都不入库。
+  let emitted = 0;
+  const guardedOnPoints = (batch: RoutePoint[]): void => {
+    emitted += batch.length;
+    if (emitted > MAX_GPX_ROUTE_POINTS) {
+      throw new GpxQuotaExceededError("points", emitted, MAX_GPX_ROUTE_POINTS, path);
+    }
+    onPoints(batch);
+  };
   const native = await prepareNative("gpx", path, nativeOptions);
   if (native) {
     try {
@@ -72,9 +141,9 @@ async function parseGpxFile(
         elevationMeters, speedMetersPerSecond, courseDegrees, horizontalAccuracyMeters, verticalAccuracyMeters
         FROM gpx_points ORDER BY sequence`).iterate() as unknown as Iterable<RoutePoint>) {
         batch.push(point);
-        if (batch.length === 1000) { onPoints(batch); batch = []; }
+        if (batch.length === 1000) { guardedOnPoints(batch); batch = []; }
       }
-      if (batch.length) onPoints(batch);
+      if (batch.length) guardedOnPoints(batch);
       return { pointCount: native.result.rows, sha256: native.result.sha256! };
     } finally { await native.dispose(); }
   }
@@ -158,7 +227,7 @@ async function parseGpxFile(
         });
         pointCount += 1;
         if (points.length >= 1_000) {
-          onPoints(points);
+          guardedOnPoints(points);
           points = [];
         }
       }
@@ -176,7 +245,7 @@ async function parseGpxFile(
     parser.write(text);
   }
   parser.close();
-  if (points.length > 0) onPoints(points);
+  if (points.length > 0) guardedOnPoints(points);
   return { pointCount, sha256: sourceHash.digest("hex") };
 }
 
@@ -239,6 +308,7 @@ export async function importGpxRoutes(
   let missingRouteCount = 0;
   let pointCount = 0;
   let skippedRouteCount = 0;
+  let oversizedRouteCount = 0;
   const unresolvedRoutePaths: string[] = [];
   const changedRouteIds: string[] = [];
   const bundleHash = createHash("sha256");
@@ -272,6 +342,19 @@ export async function importGpxRoutes(
 
     try {
       const stat = statSync(fullPath);
+      // 字节配额在 `beginRoutePointReplacement` **之前**判：那条调用会先 `DELETE FROM
+      // route_points` 并把状态打成 `pending`。先判就能做到"这个文件我们一个字节都不动"，
+      // 而不是"先清空、再说超限"。
+      if (stat.size > MAX_GPX_ROUTE_BYTES) {
+        oversizedRouteCount += 1;
+        store.insertIssue({
+          severity: "warning",
+          code: "GPX_ROUTE_TOO_LARGE",
+          objectId: routeId,
+          message: new GpxQuotaExceededError("bytes", stat.size, MAX_GPX_ROUTE_BYTES, relativePath).message
+        });
+        continue;
+      }
       const cached = store.database.prepare(`
         SELECT fingerprint.size_bytes AS sizeBytes,
                fingerprint.modified_at_ms AS modifiedAtMs,
@@ -332,6 +415,34 @@ export async function importGpxRoutes(
       pointCount += importedPoints;
     } catch (error) {
       if (error instanceof NativeWorkerError && error.code !== "invalid_xml") throw error;
+      // 🔴 配额超限**不是**「这个文件坏了」，两者必须分开处置。
+      //
+      // 走 `invalid` 会做什么（实测读码）：`markRouteStatus(id, "invalid")` 先
+      // `DELETE FROM route_points`、再把 `point_count` 归零；而 `recompute-pipeline.ts:751`
+      // 的汇总只认 `file_status = 'imported'` ⇒ 该次跑步的**轨迹与高程增益静默消失**。
+      // 用户看到的不是"同步失败"，而是"这次跑步没有轨迹"—— 不可归因、看起来像数据本身缺失。
+      //
+      // `pending` 是诚实的："我们知道这个文件，但我们没有导入它"。两个状态的**下游成本
+      // 其实一样**（都留不下轨迹），差别只在语义与可归因性：`invalid` 断言"文件是坏的"
+      // 是**假话**，而假话会让下一个人去修解析器。指纹同样删掉 ⇒ 下次导入会重试。
+      //
+      // 这一段成立的前提是阈值远高于合法上限（见 MAX_GPX_ROUTE_POINTS 的注释）：
+      // 配额能成立靠的是"合法数据碰不到"，不是"处置得巧"。
+      if (error instanceof GpxQuotaExceededError) {
+        oversizedRouteCount += 1;
+        store.markRouteStatus(routeId, "pending");
+        store.database.prepare(
+          "DELETE FROM route_file_fingerprints WHERE relative_path = ?"
+        ).run(relativePath);
+        changedRouteIds.push(routeId);
+        store.insertIssue({
+          severity: "warning",
+          code: "GPX_ROUTE_TOO_MANY_POINTS",
+          objectId: routeId,
+          message: error.message
+        });
+        continue;
+      }
       store.markRouteStatus(routeId, "invalid");
       store.database.prepare(
         "DELETE FROM route_file_fingerprints WHERE relative_path = ?"
@@ -372,6 +483,20 @@ export async function importGpxRoutes(
     });
   }
 
+  // 批次级**只观测、不拒绝**。理由见 `MAX_GPX_BATCH_POINTS`：这一层的绝对上限会把
+  // 「重新导入全部」这条唯一的重建路径打死，而那条路径正是用户在数据出错时的退路。
+  // 它在这里的价值是让 `manifest.gpx_point_count` 第一次有消费者：
+  // 此前那个值只有写方（下方 `setManifest`）、没有任何读方，于是"这一批到底有多大"
+  // 在事后完全不可查。
+  if (pointCount > MAX_GPX_BATCH_POINTS) {
+    store.insertIssue({
+      severity: "warning",
+      code: "GPX_BATCH_POINT_BUDGET_EXCEEDED",
+      objectId: null,
+      message: `本批次共 ${pointCount} 个轨迹点，超过异常阈值 ${MAX_GPX_BATCH_POINTS}；已按原样导入（不作拒绝），仅登记以便事后核查`
+    });
+  }
+
   store.setManifest("gpx_file_count", String(allPaths.length));
   store.setManifest("gpx_point_count", String(pointCount));
   store.setManifest("gpx_unresolved_count", String(unresolvedRoutePaths.length));
@@ -391,6 +516,7 @@ export async function importGpxRoutes(
     unresolvedRouteCount: unresolvedRoutePaths.length,
     // Bounded sample; `unresolvedRouteCount` is the authoritative total.
     unresolvedRoutePaths: unresolvedRoutePaths.slice(0, 10),
-    changedRouteIds
+    changedRouteIds,
+    oversizedRouteCount
   };
 }
