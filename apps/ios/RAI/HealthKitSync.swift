@@ -89,6 +89,23 @@ final class HealthKitSync {
     /// boundary 同样由 `payloadHash` 派生 ⇒ **重建 multipart 会得到字节完全一致的产物**，
     /// 于是"重传"与"重建后再传"在服务端看来是同一批，幂等键也就能生效。
     static func multipartBoundary(for payloadHash: String) -> String { "rai-\(payloadHash.prefix(32))" }
+
+    /// 🔴 设备此刻**能不能**读 HealthKit。
+    ///
+    /// 锁屏（或开机后尚未首次解锁）时 HealthKit 数据库被硬件级加密锁死，**任何**读取都会被拒。
+    /// 抽成一个属性、而不是在两个调用点各写一遍 `UIApplication.shared.isProtectedDataAvailable`：
+    /// 这条判据有两处要用（`performSync` 的预检查、`runBackgroundPass` 的后台早退），
+    /// 写两遍就有两份语义 —— 而"什么算读不到"恰恰是文档 §3.4 要求**只有一份**的定义。
+    ///
+    /// 非 iOS 平台没有这个 API，按"可读"处理（那边的导出路径本来也走不通，见 `#else` 分支）。
+    private static var isProtectedDataAvailable: Bool {
+        #if os(iOS)
+        return UIApplication.shared.isProtectedDataAvailable
+        #else
+        return true
+        #endif
+    }
+
     #if os(iOS)
     private var observerStore: HKHealthStore?
     private var observers: [HKObserverQuery] = []
@@ -219,7 +236,16 @@ final class HealthKitSync {
     func syncIfNeeded(to serverURL: URL?, apiToken: String = "", force: Bool = false) async {
         guard let serverURL, !syncOwner.isRunning else { return }
         let urlScope = Self.urlScope(for: serverURL)
-        if !force {
+        // 🔴 卡在阻塞态时，节流不该挡住恢复（文档 §3.3 / §3.4）。
+        // 那 15 分钟是给**新的投递**用的，而这两个阶段等的是一个**外部条件** ——
+        // 条件刚满足（用户刚解锁 / 刚重新登录）就被节流挡下，等于让用户白等一轮，
+        // 而界面上仍然写着"等解锁 / 等登录"。
+        //
+        // 判据必须读**盘上**那份自述：进程重启之后内存 `phase` 回到 `idle`，
+        // 而"卡在等凭证"这件事只留在 `sync_tasks` 那一行里。
+        let persistedPhase = loadTask()?.resolvedPhase
+        let isBlocked = persistedPhase?.isBlocked ?? SyncPhase.migrate(phase).isBlocked
+        if !force, !isBlocked {
             let last = UserDefaults.standard.object(forKey: scopedKey(Self.lastAutoSyncKey, scope: urlScope)) as? Date
             if let last, Date().timeIntervalSince(last) < Self.autoSyncInterval { return }
         }
@@ -398,6 +424,21 @@ final class HealthKitSync {
         let task = loadTask()
         hasPendingTask = task != nil
         guard let serverURL else { return }
+        // 🔴 卡在阻塞态（等解锁 / 等凭证）时，后台这一轮**什么都不做**（文档 §3.3 / §3.4）。
+        //
+        // 为什么需要这一道：`BackgroundRunPolicy.action` 只看"盘上还有没有没走完的批次"，
+        // 于是锁屏时它会派一次注定读不到 HealthKit 的导出、等凭证时它会派一次注定 401 的上传。
+        // 两次都会"正常失败"，然后因为批次还在而**再排下一轮** —— 每 15 分钟一次的活锁，
+        // 代价是反复白读 HealthKit（整个流程里最贵的一步）。
+        //
+        // ⚠️ 早退**不**影响重排（`RaiStartup.runBackgroundTask` 里的 `shouldResubmit` 照旧）：
+        // 唤醒这两个阶段的是外部条件，但"谁来发现条件已经满足"只能靠重排 —— 解锁通知在
+        // App 已被系统杀掉时是收不到的。
+        let persistedPhase = task?.resolvedPhase ?? SyncPhase.migrate(phase)
+        if persistedPhase.isBlocked {
+            Self.report("background pass: skipped, waiting on an external condition (\(persistedPhase.rawValue))")
+            return
+        }
         // 🔴 先问系统，再信盘上那一行。`task.uploadState == .inFlight` 只是"我方曾经把它交出去过"
         // 的记录 —— 它**不会**因为系统传完（或进程被杀）而改变，所以拿它当判据时，每一轮唤醒都会
         // 说"字节归系统"（`.awaitSystemUpload` ⇒ 什么都不做），而 `shouldResubmit` 又因为
@@ -479,6 +520,25 @@ final class HealthKitSync {
         // 取消必须在任何网络/HealthKit 工作前生效。本函数不是 throwing，不能写 `try`；
         // 原先的 `try? Task.checkCancellation()` 会把取消错误直接吞掉，检查形同虚设。
         guard !Task.isCancelled else { finishCancelled(); return }
+        // 🔴 锁屏预检查（文档 §3.4）。设备锁屏、或开机后尚未首次解锁时，HealthKit 数据库被
+        // 硬件级加密锁死 —— 这里在动 HealthKit（以及握手）**之前**就拦下来，落一个可续接的
+        // 阻塞态，而不是等第一次查询失败再报错。
+        //
+        // 为什么不能只靠 `HealthKitExport` 抛错兜底：那条路要到第一次查询才生效，而更早的
+        // `readAuthorizationState()` 在锁屏时同样读不到状态（返回 `.unknown`），于是这里会先
+        // 落一个 `failed` —— 用户看到一次"同步失败"，而解锁之后什么都不会自己发生。
+        //
+        // 位置刻意选在 `defer` 之后（`isBusy` 与续期额度都会被正确释放），也刻意在握手之前
+        // （锁屏时那次握手没有任何用处，代价却是一次完整的网络往返）。
+        if !Self.isProtectedDataAvailable {
+            phase = HealthSyncBlockedRecovery.phase(for: .protectedData).rawValue
+            message = HealthKitExportError.databaseLocked.localizedDescription
+            lastError = nil
+            // 记下"有事没做完"：`phase` 只活在进程内，而锁屏期间系统随时可能把 App 杀掉；
+            // 磁盘上这份意图位是进程重启之后**唯一**还记得"该同步、但没同步成"的东西。
+            recordBackgroundIntent()
+            return
+        }
         let identity: RaiHandshake
         do {
             identity = try await api.handshake(baseURL: serverURL, token: apiToken)
@@ -544,17 +604,22 @@ final class HealthKitSync {
                 let inspection = try await inspect(sourceId: sourceId, on: serverURL)
                 try checkCancellation()
                 if inspection.status == "unchanged" {
-                    if restored.exportEnd == nil { clearExportWatermark() }
                     let cleaned = try await deleteUpload(sourceId: sourceId, on: serverURL)
+                    // ⚠️ 顺序有讲究：**先删本地产物，再提交**。反过来的话（提交成功、
+                    // 进程在删文件前被杀）会留下"没有任务行、却有一份多 GB 的 ZIP/multipart"
+                    // 的孤儿 —— 而本仓没有任何 GC 会回收它（`removeTaskArtifacts` 之外
+                    // 只有 `removeAllTaskArtifacts`，其唯一调用点在 payload 解不开时）。
+                    // 现在这个顺序被杀只会留下"行还在、字节没了"，由 `SyncAtomicUnit`
+                    // 的字段推导回到 `.export` 重导一次：多花时间，不丢数据、不漏磁盘。
+                    removeTaskArtifacts(payloadHash: restored.payloadHash)
                     try markSuccess(
                         message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: restored.exportEnd,
                         workoutCount: restored.workoutCount,
                         advanceWatermark: restored.exportEnd != nil,
+                        clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor
                     )
-                    guard clearTask() else { return }
-                    removeTaskArtifacts(payloadHash: restored.payloadHash)
                     return
                 }
                 let jobId: String
@@ -570,16 +635,15 @@ final class HealthKitSync {
                 // `waitForJob` 只在 `succeeded` 时返回，其余终态都抛错 ⇒ 走到下一行就是成功，
                 // 返回值本身没有别的用途（旧代码拿它去清 failedZip 记录，那套机制已删除）。
                 _ = try await waitForJob(id: jobId, on: serverURL)
-                if restored.exportEnd == nil { clearExportWatermark() }
+                removeTaskArtifacts(payloadHash: restored.payloadHash)
                 try markSuccess(
                     message: "已从上次同步任务恢复",
                     exportEnd: restored.exportEnd,
                     workoutCount: restored.workoutCount,
                     advanceWatermark: restored.exportEnd != nil,
+                    clearWatermark: restored.exportEnd == nil,
                     anchor: restored.pendingAnchor
                 )
-                guard clearTask() else { return }
-                removeTaskArtifacts(payloadHash: restored.payloadHash)
                 return
             } catch {
                 if handleCancellation(error) { return }
@@ -637,13 +701,14 @@ final class HealthKitSync {
                 }
                 try checkCancellation()
                 if inspection.status == "unchanged" {
-                    if restored.exportEnd == nil { clearExportWatermark() }
                     let cleaned = try await deleteUpload(sourceId: sourceId, on: serverURL)
+                    removeTaskArtifacts(payloadHash: restored.payloadHash)
                     try markSuccess(
                         message: "Apple 健康数据已是最新" + (cleaned ? "" : Self.cleanupNoteSuffix),
                         exportEnd: restored.exportEnd,
                         workoutCount: restored.workoutCount,
                         advanceWatermark: restored.exportEnd != nil,
+                        clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor
                     )
                 } else {
@@ -656,18 +721,16 @@ final class HealthKitSync {
                     try checkCancellation()
                     try updateTask(jobId: job.id, phase: .importing)
                     _ = try await waitForJob(id: job.id, on: serverURL)
-                    if restored.exportEnd == nil { clearExportWatermark() }
+                    removeTaskArtifacts(payloadHash: restored.payloadHash)
                     try markSuccess(
                         message: "已从保存的健康数据批次恢复导入",
                         exportEnd: restored.exportEnd,
                         workoutCount: restored.workoutCount,
                         advanceWatermark: restored.exportEnd != nil,
+                        clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor
                     )
                 }
-                guard clearTask() else { return }
-                removeTaskArtifacts(payloadHash: restored.payloadHash)
-                phase = SyncPhase.succeeded.rawValue
                 return
             } catch {
                 if handleCancellation(error) { return }
@@ -717,6 +780,11 @@ final class HealthKitSync {
             }
             try checkCancellation()
             if full {
+                // 🔴 「重新导入全部」= 忘掉已提交的锚，从零重取。水位搬进 `sync_state` 之后
+                // **两处都要清**：只清老键的话，`loadCommittedState` 会从 `sync_state` 把锚
+                // 读回来，于是"全量重导"只做了前半程 —— 下一次同步又按老锚只取增量，
+                // 而界面已经宣称"重新导入了全部"。漏掉哪一处都是**静默**的。
+                taskStore.forgetState(scope: activeScope)
                 UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))
             }
             // 🔴 这里原先还有第三个恢复分支：「UserDefaults 里记着一个失败 ZIP ⇒ 直接重传它」。
@@ -726,11 +794,21 @@ final class HealthKitSync {
             // （`SyncTaskState` 的说明里已经写明这是不安全的形状）。
             // 现在是单一机制：失败时进度留在 `sync_tasks` 里（phase 停在 `exported` /
             // `uploaded`），下次由 `SyncAtomicUnit.nextStep` 从同一份本地产物接着走。
-            let lastExportEnd = UserDefaults.standard.object(forKey: scopedKey(Self.lastExportEndKey)) as? Date
+            // 锚与导出水位都从 `loadCommittedState()` 一处取 —— 这是**唯一**的读取点。
+            // 改造前它们各自直接读 `UserDefaults`（这里三处 + `markSuccess` 一写），
+            // 而"两套真相"的全部代价都来自读取点分散：漏改一处就静默分裂。
+            let committed = loadCommittedState()
+            let lastExportEnd = committed?.exportEnd
             let lowerBound: Date? = (full || lastExportEnd == nil)
                 ? nil
                 : lastExportEnd!.addingTimeInterval(-Self.overlap)
-            let anchor = full ? nil : UserDefaults.standard.data(forKey: scopedKey(Self.lastWorkoutAnchorKey))
+            let anchor = full ? nil : committed?.workoutAnchor
+            // 伴生 Route 状态必须在**导出开始之前**整批读出来：导出跑在脱离主线程的上下文里
+            // （`HealthSyncCancellation.runDetached`），那里碰不了 `@MainActor` 的 `taskStore`。
+            // 表很小（每 workout 一行），整表读比"导出中发现一个 uuid 再跨 actor 回来查"更省。
+            // 读失败（`isAvailable == false`）时是空字典 ⇒ 每个 workout 都按首查处理，
+            // 方向安全：多查一次，不会漏读轨迹。
+            let routeStates = taskStore.loadRouteStates()
             let onProgress: @Sendable (String) async -> Void = { [weak self] status in
                 await MainActor.run { [weak self] in
                     // 任何来源的中止一旦发生就不再发布晚到的进度：原因分类只影响 phase 怎么写，
@@ -748,6 +826,10 @@ final class HealthKitSync {
                 try await HealthKitExport.exportArchive(
                     from: lowerBound,
                     workoutAnchor: anchor,
+                    routeStates: routeStates,
+                    // 人工重扫 = `full`（"重新导入全部"）：所有 workout 的状态复位成 `active`，
+                    // 于是这一轮每个都重查一次。它是 `settled` 唯一的唤醒通道。
+                    routeForceRescan: full,
                     onProgress: onProgress
                 )
             }
@@ -801,13 +883,18 @@ final class HealthKitSync {
             try checkCancellation()
             if inspection.status == "unchanged" {
                 let cleaned = try await deleteUpload(sourceId: sourceId, on: serverURL)
+                // 先删本地产物、再提交。反过来的话，提交成功而进程死在删文件之前，
+                // 留下的就是"没有任务行、却有一份多 GB 的 ZIP"的孤儿（本仓没有回收它的人）。
+                // 现在这个顺序被杀只会退回 `.export` 重导一次：多花时间，不丢数据、不漏磁盘。
+                removeTaskArtifacts(payloadHash: payloadHash)
                 try markSuccess(
                     message: exportMessage(base: "Apple 健康数据已是最新", exported: exported)
                         + (cleaned ? "" : Self.cleanupNoteSuffix),
                     exportEnd: exported.exportedThrough,
                     workoutCount: exported.workoutCount,
                     advanceWatermark: true,
-                    anchor: pendingAnchor
+                    anchor: pendingAnchor,
+                    routeStates: exported.routeStates
                 )
             } else {
                 try checkCancellation()
@@ -819,12 +906,14 @@ final class HealthKitSync {
                 try checkCancellation()
                 try updateTask(sourceId: sourceId, jobId: job.id, phase: .importing)
                 let finished = try await waitForJob(id: job.id, on: serverURL)
+                removeTaskArtifacts(payloadHash: payloadHash)
                 try markSuccess(
                     message: importMessage(exported: exported, job: finished),
                     exportEnd: exported.exportedThrough,
                     workoutCount: exported.workoutCount,
                     advanceWatermark: true,
-                    anchor: pendingAnchor
+                    anchor: pendingAnchor,
+                    routeStates: exported.routeStates
                 )
             }
         } catch {
@@ -832,6 +921,23 @@ final class HealthKitSync {
                 try? FileManager.default.removeItem(at: transientExportURL)
             }
             if handleCancellation(error) { return }
+            // 🔴 **兜底 catch 不许覆盖更具体的结论。** 这一段此前无条件写 `failed`，于是
+            // "锁屏"与"等凭证"这两个**非失败**结论会被抹掉 —— 而它们各自都有正确的落点
+            // （阻塞态）与各自的恢复路径（解锁通知 / 前台重新拿到凭证）。
+            // 判据顺序也重要：先判阻塞，再落 `failed`。
+            if let exportError = error as? HealthKitExportError, exportError == .databaseLocked {
+                // 预检查通过之后设备才被锁上 —— 锁屏可以发生在任意两次 await 之间。
+                phase = HealthSyncBlockedRecovery.phase(for: .protectedData).rawValue
+                message = HealthKitExportError.databaseLocked.localizedDescription
+                lastError = nil
+                recordBackgroundIntent()
+                return
+            }
+            if error is SyncCredentialRequiredError {
+                // `uploadWithRecovery` 已经落好了 `auth_required` 与文案（它知道当时是哪个
+                // 响应、盘上哪一批），这里只负责**不要**把它覆盖成失败。
+                return
+            }
             phase = SyncPhase.failed.rawValue
             lastError = friendlyMessage(error)
             message = nil
@@ -839,8 +945,10 @@ final class HealthKitSync {
             // 就够了（phase 停在 `exported` 或 `uploaded`，下次由 `SyncAtomicUnit` 接着走）。
             // 确定性坏批次连本地产物都已被 `uploadWithRecovery` 删掉，下一次从新导出开始。
         }
-        // 收尾只此一处，两个成功分支（`inspect` 说 `unchanged`、导入成功）共用：
-        // 清本地产物 → 清进度 → 落 `succeeded`。
+        // 收尾兜底。正常情况下两个成功分支已经在 `markSuccess` 里**一次事务**把
+        // 「水位前进 + 任务行清空」做完了（`SyncTaskStore.commitSuccess`），所以到这里的
+        // `clearTask()` 是删 0 行的幂等调用。留着它的理由是"将来有人加一条不抛错、也没走
+        // `markSuccess` 的提前返回"——那种形态下盘上会留着一行，界面会一直说"还卡着一批"。
         //
         // ⚠️ 清本地产物**只能在成功路径上发生**。中止路径（`handleCancellation` 返回 true）
         // 在这之前就已经 `return` 了，所以这里多出来的 phase 判断是第二道锁：
@@ -892,27 +1000,77 @@ final class HealthKitSync {
         return true
     }
 
+    /// 成功收尾：**一次事务**把「水位前进/清空 + 任务行清空」落下去，然后才更新展示字段。
+    ///
+    /// 与改造前的区别（V2.1 规范 §2 原则 3「单状态源真相」）：
+    ///   - anchor 与导出水位此前写在 `UserDefaults`、任务行写在 `sync_tasks`（SQLite）⇒
+    ///     「这次同步已提交」被拆成**跨两个存储的两步写**；
+    ///   - `clearExportWatermark()` 与 `markSuccess(advanceWatermark:)` 此前是一对调用
+    ///     （四个恢复分支各一次），中间又是一条崩溃窗口；
+    ///   - 现在两者都进 `SyncTaskStore.commitSuccess` 的同一个事务，"清空"用
+    ///     `clearWatermark:` 表达，不再有独立的第二次调用。
+    ///
+    /// 🔴 提交前先过 `SyncStateCommitPlan.mayCommit` —— **阻塞态绝不推进 anchor**。
+    /// 这条不变式此前在 `SyncPhase` 里定义、在 `HealthSyncBlockedRecovery` 里转发、在回归里
+    /// 自比，却**没有任何生产调用点**：真正拦住它的是 `performSync` 里两处提前 `return`，
+    /// 而那两处是"锁屏/等凭证该怎么办"的副产品，不是"anchor 该怎么写"的判据。
+    /// 挂到这里之后，它才第一次出现在 anchor 的写入路径上。
+    /// - Parameter routeStates: 本轮实际查询过的 workout 的伴生 Route 状态（键 = workout uuid）。
+    ///   默认空 —— 只有**从导出一路走到底**的那两条分支有得传（`SyncAtomicUnit` 的续传分支
+    ///   是接着一份已经落盘的本地产物走，没有本轮导出，也就没有新的观测）。
     private func markSuccess(
         message: String,
         exportEnd: Date?,
         workoutCount: Int,
         advanceWatermark: Bool,
+        clearWatermark: Bool = false,
         anchor: Data? = nil,
-        recordWorkoutCount: Bool = true
+        recordWorkoutCount: Bool = true,
+        routeStates: [String: RouteSyncRecord] = [:]
     ) throws {
         try checkCancellation()
-        let now = Date()
-        if let anchor {
-            UserDefaults.standard.set(anchor, forKey: scopedKey(Self.lastWorkoutAnchorKey))
+        guard SyncStateCommitPlan.mayCommit(phase: SyncPhase.migrate(phase)) else {
+            // 走到这里说明调用点漏了阻塞态的前置返回 —— 而它的后果是**永久丢数据**
+            // （把"这次没读到"记成"数据没有变化"，那段健康数据从此不再进入任何一次导出）。
+            // 宁可让本次同步失败，也不许把 anchor 推上去。
+            phase = SyncPhase.failed.rawValue
+            lastError = "同步正在等待设备解锁或等待重新登录，本次不推进导出水位。"
+            throw SyncHTTPError(message: lastError ?? "同步处于阻塞状态")
         }
+        let watermark = SyncStateCommitPlan.watermark(
+            advance: advanceWatermark,
+            clear: clearWatermark,
+            exportEnd: exportEnd
+        )
+        guard taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) else {
+            throw SyncHTTPError(message: taskStore.lastError ?? "同步进度未能保存")
+        }
+        // 🔴 「降频记忆」只能在**这次同步已经被判定成功之后**落盘，而且必须排在
+        // `commitSuccess` 之后。反过来的话会出现一个不可自愈的窗口：状态机把某个 workout
+        // 记成"已稳定、可以少查"，而这一批数据**从未真正交付到服务端**（上传失败、导入失败、
+        // 或进程在导入中途被杀）。之后它一路降到 `settled`，而 `settled` 只有人工重扫能唤醒
+        // ⇒ 服务端永远收不到这条轨迹，界面却一直显示同步成功。
+        // 反过来（提交成功、记忆没写上）只损失一次"下次再多查一遍"，且下一轮会自己补上。
+        //
+        // 写失败**不**让本次同步变红：durable 的部分（水位 + 进度）已经提交，这里失败的后果
+        // 只是"下一轮重查一次"。但也不静默——`upsertRouteStates` 会把原因推进
+        // `taskStore.lastError`，并由 `SQLiteSupport.report` 打出带错误码的日志。
+        if !routeStates.isEmpty, !taskStore.upsertRouteStates(Array(routeStates.values)) {
+            NSLog("[RAI] route state flush after commit failed: %@", taskStore.lastError ?? "unknown")
+        }
+        // `hasPendingTask` 只在**真的清掉了那一行**之后才翻 —— 它现在与 `clearTask()` 同为
+        // 日志清空点，两处是判据要求的全部（多一处就等于界面可以凭空说"没有待办了"）。
+        hasPendingTask = false
+        // 老键只在**提交成功之后**删：迁移期回退读的正是它们，先删就等于把回退路径拆掉。
+        // 老键存在与否同时是"这一 scope 还没迁移"的判据（见 `loadCommittedState`）。
+        UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))
+        UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastExportEndKey))
+        let now = Date()
+        // 下面这三个键**刻意留在 `UserDefaults`**：它们丢了都无害（只影响展示与 15 分钟节流），
+        // 而搬进来会顺带改掉它们的 scope 语义 —— `lastAutoSyncKey` 用的是 `urlScope`
+        // （去端口去 path/query），其余用 `activeScope`，统一 key 会**静默**改掉节流窗口。
         if let activeServerURL {
             UserDefaults.standard.set(now, forKey: scopedKey(Self.lastAutoSyncKey, scope: Self.urlScope(for: activeServerURL)))
-        }
-        if advanceWatermark, let exportEnd {
-            let current = UserDefaults.standard.object(forKey: scopedKey(Self.lastExportEndKey)) as? Date
-            if current.map({ exportEnd > $0 }) ?? true {
-                UserDefaults.standard.set(exportEnd, forKey: scopedKey(Self.lastExportEndKey))
-            }
         }
         UserDefaults.standard.set(now, forKey: scopedKey(Self.lastSyncAtKey))
         // Only advance a count that is actually known: a restored task carries the
@@ -926,6 +1084,7 @@ final class HealthKitSync {
         lastError = nil
         self.message = message
         dataUpdatedGeneration += 1
+        phase = SyncPhase.succeeded.rawValue
     }
 
     #if os(iOS)
@@ -964,6 +1123,11 @@ final class HealthKitSync {
     /// rather than report "已是最新" over data the app may never have been allowed
     /// to see.
     private func exportMessage(base: String, exported: HealthKitExportResult) -> String {
+        // `routeCount` 自 T1（按 workout 定频）起语义为「本轮**实际查询到**的 workout 数」，
+        // 不再等于「窗口内有轨迹的 workout 数」；降频后它必然偏小，但这**不是 bug**。
+        // 此处只把三者当成「这一轮有没有读到任何东西」的判据（任一非 0 即非空导出），
+        // 所以偏小的值不会误报。⚠️ 将来若要展示「导出了几条轨迹」，**不要**直接读这个字段
+        // —— 它会给出一个偏小的数且不报错。详见 `HealthKitExportResult.routeCount` 的声明注释。
         guard exported.workoutCount == 0, exported.recordCount == 0, exported.routeCount == 0 else {
             return latestMessage(base: base, warnings: exported.warnings)
         }
@@ -993,6 +1157,21 @@ final class HealthKitSync {
                 throw CancellationError()
             }
             let httpError = error as? SyncHTTPError
+            // 🔴 凭证失效**先判**（文档 §3.3）：它既不该删批次（字节完好），也不该在后台
+            // 无限重试（每次唤醒撞同一个 401）。落 `auth_required` 之后，唤醒它的是
+            // "前台拿到有效凭证"，而不是时间。
+            if SyncUploadRecovery.isCredentialFailure(statusCode: httpError?.statusCode) {
+                phase = HealthSyncBlockedRecovery.phase(for: .credential).rawValue
+                message = "登录状态已失效，请重新登录后继续同步"
+                lastError = nil
+                // 盘上那份任务的自述也要跟着改：只改内存变量的话，进程被杀之后"卡在等凭证"
+                // 就没了痕迹，下次唤醒除了再撞一次 401 无事可做。
+                // ⚠️ `SyncAtomicUnit.nextStep` 只看**字段**（`hasZip` / `hasMultipart`），
+                // 所以盘上这个 phase 不改变恢复分支走哪条路 —— 它只是把"为什么停在这里"
+                // 如实记下来（给界面与排查用），这也是文档要求"可持久表达的阻塞态"的落点。
+                try? updateTask(phase: .authRequired)
+                throw SyncCredentialRequiredError()
+            }
             let action = SyncUploadRecovery.disposition(
                 statusCode: httpError?.statusCode,
                 errorCode: httpError?.code
@@ -1393,8 +1572,29 @@ final class HealthKitSync {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    private func clearExportWatermark() {
-        UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastExportEndKey))
+    /// 已提交的水位（anchor + 导出水位）。**这是唯一的读取点**，锚与水位的所有读者都走它。
+    ///
+    /// 真相在 `sync_state`（与任务进度同库同事务）；老 `UserDefaults` 键**只在迁移期**兜底。
+    /// 回退判据是"这一 scope 在 `sync_state` 里**还没有行**"，不是"字段是不是空" ——
+    /// `anchor` 与 `export_end` 各自都可以合法地是空值（`.keep` / `.clear`），
+    /// 拿"值是不是空"当迁移判据，会把一次合法的"清空水位"误读成"还没迁移"从而把老值读回来。
+    ///
+    /// 「`sync_state` 有行 ⇒ 老键已被删」这条不变式由**写方**保证：`markSuccess` 在提交成功后
+    /// 才删老键，`full` 那条路同时 `forgetState` + 删老键。两处都做全，迁移期就不存在
+    /// "两边都有值且不一致"的第三态。
+    ///
+    /// ⚠️ 读失败（`lastError != nil`）时返回 nil，与 `loadTask` 同一口径：日志读不出来时宁可
+    /// 退化成"没有水位"（多做一次全量导出），也不要拿一个来路不明的值去推进。
+    private func loadCommittedState() -> SyncTaskStore.CommittedState? {
+        let committed = taskStore.loadState(scope: activeScope)
+        guard taskStore.lastError == nil else { return nil }
+        if let committed { return committed }
+        var legacy = SyncTaskStore.CommittedState()
+        legacy.workoutAnchor = UserDefaults.standard.data(forKey: scopedKey(Self.lastWorkoutAnchorKey))
+        legacy.exportEnd = UserDefaults.standard.object(forKey: scopedKey(Self.lastExportEndKey)) as? Date
+        // 两个都没有 ⇒ 返回 nil，与"没有这一行"等价（否则一次全量导出会被 `full` 的判据
+        // 之外的分支当成"水位存在但为空"，走向另一条路）。
+        return legacy == SyncTaskStore.CommittedState() ? nil : legacy
     }
 
     private func scopedKey(_ key: String) -> String {

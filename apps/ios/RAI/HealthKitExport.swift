@@ -1,5 +1,6 @@
 #if os(iOS)
 import CoreLocation
+import CryptoKit
 import Foundation
 import HealthKit
 
@@ -7,15 +8,38 @@ nonisolated struct HealthKitExportResult: Sendable {
     let zipURL: URL
     let workoutCount: Int
     let recordCount: Int
+    /// 本轮**装进载荷**的 route 文件数。
+    ///
+    /// ⚠️ 语义漂移：自 T1（按 workout 定频）起，本字段为「**本轮实际查询到的 workout 数**」，
+    /// 不再等于「窗口内有轨迹的 workout 数」。两者在降频后**必然不同**（跳过的 workout
+    /// 即使有轨迹也不再计入），且这个差值**没有任何报错**。
+    ///
+    /// 当前唯一消费点 `HealthKitSync.exportMessage` 只用它做「是不是一份什么都没读到的空导出」
+    /// 的三个判据之一（另外两个是 `workoutCount` / `recordCount`，任一非 0 即不误判），
+    /// 所以如今它变小不会把用户引向错误的提示 —— 它**不是 bug**。
+    ///
+    /// 🔴 真正的风险在未来：若有人加 UI 想展示「今天导出了几条轨迹」，直接读本字段会得到一个
+    /// **偏小**的数 —— 不抛错、不触发告警，只是静静地错。真要展示这一项，必须换用
+    /// 「窗口内有轨迹的 workout 数」的口径另算，不要复用本字段。
+    ///
+    /// 字段名保留不动：改名会波及门禁与测试，而这里只是文档债。
     let routeCount: Int
     let warnings: [String]
     let maxEndDate: Date?
     let exportedThrough: Date
     let workoutAnchor: Data?
     let sourceScope: String
+    /// 本轮**实际查询过**的 workout 的伴生 Route 状态（键 = 小写化的 workout uuid）。
+    ///
+    /// 只装"相对传入的 `routeStates` 发生了变化"的那些。被跳过的 workout 不在里面 ——
+    /// 它的状态一个字都没改，写回去也只是把同样的值再写一遍。
+    ///
+    /// 它**不由导出侧落盘**：导出跑在脱离主线程的上下文里，而 `SyncTaskStore` 是
+    /// `@MainActor`。回传成值、由主线程侧在一次成功收尾里写下去。
+    let routeStates: [String: RouteSyncRecord]
 }
 
-nonisolated enum HealthKitExportError: LocalizedError {
+nonisolated enum HealthKitExportError: LocalizedError, Equatable {
     case unavailable
     case notAuthorized
     /// The system has never asked the user for read access, and the request came
@@ -31,6 +55,13 @@ nonisolated enum HealthKitExportError: LocalizedError {
     /// *error*, not an answer. Mapping it to "decided" is how an unauthorized
     /// device went on to export an empty archive and report a successful sync.
     case authorizationCheckFailed
+    /// 设备锁屏、或开机后尚未首次解锁：健康数据库被硬件级加密锁住，**任何**读取都会被拒。
+    ///
+    /// 单独立一个 case，而不是让它落进 `error.localizedDescription` 的兜底 —— 那条路的可见后果是
+    /// 界面上出现一段系统英文错误，而调用方也无从判断"这是暂时读不到"还是"真的坏了"。
+    /// 两者的正确处置完全相反（解锁后自动重跑 vs. 报失败并让用户去处理），
+    /// 文档 §3.4 要求这两条路彻底分开，理由见 `HealthSyncBlockedRecovery`。
+    case databaseLocked
 
     var errorDescription: String? {
         switch self {
@@ -44,6 +75,10 @@ nonisolated enum HealthKitExportError: LocalizedError {
         case .authorizationCheckFailed:
             return "无法确认 Apple 健康读取授权状态（健康数据未响应）。请稍后重试；"
                 + "若反复出现，请在 iPhone 设置 → 健康 → 数据访问与设备 中确认 RAI 已获得读取权限。"
+        case .databaseLocked:
+            // 用户不需要做任何事，所以文案刻意不含"请重试"之外的动作项 ——
+            // 设备一解锁就会自动继续（见 `RaiStartup.observeProtectedDataAvailability`）。
+            return "设备已锁定，暂时无法读取 Apple 健康数据。解锁后将自动继续同步。"
         }
     }
 }
@@ -229,15 +264,27 @@ nonisolated enum HealthKitExport {
         }
     }
 
+    /// - Parameters:
+    ///   - routeStates: 导出**开始前**从 `SyncTaskStore.sync_route_state` 整批读出的伴生状态，
+    ///     键是小写化的 workout uuid。传空字典等于"没有任何记忆"，于是每个 workout 都会被
+    ///     当作首查（安全方向：多查一次，不会漏）。
+    ///   - routeForceRescan: 人工重扫（"重新导入全部"）。所有 workout 的状态复位成
+    ///     `.active` 且稳定性清零，于是这一轮**每个** workout 都会重查一次。
     static func exportArchive(
         from startDate: Date?,
         workoutAnchor: Data?,
+        routeStates: [String: RouteSyncRecord] = [:],
+        routeForceRescan: Bool = false,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
         try Task.checkCancellation()
         guard HKHealthStore.isHealthDataAvailable() else { throw HealthKitExportError.unavailable }
         let store = HKHealthStore()
         let warnings = WarningBag()
+        // 整批共用一个"现在"。逐 workout 取 `Date()` 会让同一份载荷里的判定基准随时间爬，
+        // 而 `lastCheckedAt` 会被写回盘上 ⇒ 快照的语义就不再是"这一次看到了什么"。
+        let routeNow = Date()
+        var routeDecisions: [String: RouteSyncRecord] = [:]
         await onProgress("正在读取跑步记录")
         try Task.checkCancellation()
         let workoutBatch = try await runningWorkouts(
@@ -272,12 +319,44 @@ nonisolated enum HealthKitExport {
             try Task.checkCancellation()
             await onProgress("正在读取第 \(index + 1)/\(workouts.count) 次跑步")
             try Task.checkCancellation()
-            let routeFiles = try await routeEntries(
-                for: workout,
-                store: store,
-                directory: directory,
-                warnings: warnings
-            )
+            // 状态的键必须与 GPX 文件名**同源**（都走 `routeFileWorkoutId` ⇒ 小写化）。
+            // 导入侧把 route 路径当大小写不敏感的身份，而这条状态是"这条路线的轨迹查过没有"
+            // 的记忆 —— 两边写法不一致，记忆就永远命中不了自己的行，表现为"从来没生效过"。
+            let routeKey = routeFileWorkoutId(workout)
+            let previous = routeStates[routeKey]
+                ?? RouteSyncStateMachine.baseline(workoutUUID: routeKey, workoutEndDate: workout.endDate)
+            let routeFiles: [(name: String, url: URL)]
+            if RouteSyncStateMachine.shouldQuery(
+                existing: previous,
+                now: routeNow,
+                isForceManualRescan: routeForceRescan
+            ) {
+                let fetch = try await routeEntries(
+                    for: workout,
+                    store: store,
+                    directory: directory,
+                    warnings: warnings
+                )
+                routeFiles = fetch.entries
+                routeDecisions[routeKey] = RouteSyncStateMachine.decide(
+                    existing: previous,
+                    observation: fetch.observation,
+                    now: routeNow,
+                    isForceManualRescan: routeForceRescan
+                ).nextState
+            } else {
+                // 跳过：这一轮既不产出任何 route 文件，也不改动状态一个字。
+                //
+                // 🔴 省略文件是**安全**的，前提是载荷的 manifest 声明了
+                // `sourceScope: "healthkit"`（本文件 `:326` 就写着它）⇒ 服务端
+                // `resolvePreserveAbsent` 判成 `preserveAbsent: true`
+                // （`import-sources.ts:203`），于是 `gpx-parser.ts` 里**所有**"缺席即删除"
+                // 的分支（`:306` 的 `pruneOrphanRoutes`、`:328-341` 的 `missing`、
+                // `:460-475` 的 `referencedTargets` 清扫）整段不跑，已有的 `route_points`
+                // 一个字节都不动。这条前提一旦不成立（例如哪天改成导出全量快照），
+                // 这里的省略就会变成"把服务端的轨迹删掉"。
+                routeFiles = []
+            }
             routeCount += routeFiles.count
             files.append(contentsOf: routeFiles)
             try write(xml, workoutXML(workout, routeNames: routeFiles.map(\.name)))
@@ -349,7 +428,8 @@ nonisolated enum HealthKitExport {
             maxEndDate: workouts.map(\.endDate).max(),
             exportedThrough: exportedThrough,
             workoutAnchor: workoutBatch.anchor,
-            sourceScope: "healthkit"
+            sourceScope: "healthkit",
+            routeStates: routeDecisions
         )
     }
 
@@ -434,6 +514,18 @@ nonisolated enum HealthKitExport {
         } catch {
             if isAuthorizationError(error) {
                 throw HealthKitExportError.notAuthorized
+            }
+            // 🔴 锁屏是**暂时**条件，不是"这一批数据坏了"。
+            //
+            // 这里是"绝不把锁屏当成空数据"的**第二道**锁（第一道是 `HealthKitSync.performSync`
+            // 进函数时的 `isProtectedDataAvailable` 预检查，挡的是"进来时就已经锁着"）；
+            // 这里挡的是"检查通过之后、查询途中设备被锁上"——锁屏可以发生在任意两次 await 之间，
+            // 所以两道都需要，而不是二选一。
+            //
+            // 注意 `optionalSamples` 只吞 `isAuthorizationError` 与 `isNoDataError`，
+            // 而锁屏错误的码与这两个都不同 ⇒ 它一定会抛到这里，不会被静默降级成"空结果"。
+            if isDatabaseInaccessible(error) {
+                throw HealthKitExportError.databaseLocked
             }
             throw error
         }
@@ -837,12 +929,21 @@ nonisolated enum HealthKitExport {
         return "\n          <Record \(attrs)/>"
     }
 
+    /// 一个 workout 的 route 产物：写进载荷的 GPX 条目，以及这一轮的**观测摘要**。
+    ///
+    /// 观测摘要**不是**从文件名或磁盘反推的，而是在生成 GPX 的那一次顺手算出来的 ——
+    /// 反推等于把"轨迹有没有变"这条判据架在"文件还在不在"上，而文件的生命周期只到本次导出结束。
+    struct RouteFetch {
+        let entries: [(name: String, url: URL)]
+        let observation: RouteObservation
+    }
+
     private static func routeEntries(
         for workout: HKWorkout,
         store: HKHealthStore,
         directory: URL,
         warnings: WarningBag
-    ) async throws -> [(name: String, url: URL)] {
+    ) async throws -> RouteFetch {
         let routes: [HKWorkoutRoute] = try await optionalSamples(
             type: HKSeriesType.workoutRoute(),
             predicate: HKQuery.predicateForObjects(from: workout),
@@ -854,6 +955,8 @@ nonisolated enum HealthKitExport {
         let routesDirectory = directory.appendingPathComponent("workout-routes", isDirectory: true)
         try FileManager.default.createDirectory(at: routesDirectory, withIntermediateDirectories: true)
         let workoutId = routeFileWorkoutId(workout)
+        var digest = SHA256()
+        var pointTotal = 0
         for route in routes {
             try Task.checkCancellation()
             let locations: [CLLocation]
@@ -871,14 +974,23 @@ nonisolated enum HealthKitExport {
             }
             guard !locations.isEmpty else { continue }
             try Task.checkCancellation()
+            let document = try gpx(locations)
             let name = "workout-routes/\(workoutId)_\(entries.count + 1).gpx"
             let url = directory.appendingPathComponent(name)
-            try gpx(locations).write(to: url, atomically: true, encoding: .utf8)
+            try document.write(to: url, atomically: true, encoding: .utf8)
             if FileManager.default.fileExists(atPath: url.path) {
                 entries.append((name: name, url: url))
+                pointTotal += locations.count
+                digest.update(data: Data(document.utf8))
             }
         }
-        return entries
+        // 没有任何条目 ⇒ 观测是"0 个点、没有摘要"。摘要用 `nil` 而不是空 SHA256 的十六进制：
+        // 后者是一个"看起来像内容摘要"的值，会让"没有轨迹"和"有一段空轨迹"变成两回事。
+        let observation = RouteObservation(
+            pointCount: entries.isEmpty ? 0 : pointTotal,
+            routeHash: entries.isEmpty ? nil : digest.finalize().map { String(format: "%02x", $0) }.joined()
+        )
+        return RouteFetch(entries: entries, observation: observation)
     }
 
     private static func workoutSyncId(_ workout: HKWorkout) -> String {
@@ -1110,6 +1222,23 @@ nonisolated enum HealthKitExport {
         let nsError = error as NSError
         guard nsError.domain == HKError.errorDomain else { return false }
         return nsError.code == HKError.Code.errorNoData.rawValue
+    }
+
+    /// 设备锁屏 / 开机后未首次解锁时，HealthKit 会以这个错误拒绝**任何**读取。
+    ///
+    /// 为什么必须与 `isNoDataError` 分开识别（两者的码相邻，很容易顺手合并）：
+    ///   - `errorNoData` 的意思是"查询到了，库里就是没有" ⇒ 当成空结果是**对的**；
+    ///   - `errorDatabaseInaccessible` 的意思是"现在读不到" ⇒ 当成空结果是
+    ///     **把一段真实存在的数据永久跳过**：客户端会据此推进 anchor，而下次查询从
+    ///     新水位起步，那段数据再也不会出现在任何一次导出里。
+    ///
+    /// 文档 §3.4 点名禁止的正是后一条：「绝对严禁视为空数据 (0 Workouts) 推进 Anchor!」
+    /// 判据用 `HKError.Code` 而不是硬编码数字：写死 12 会在 SDK 调整枚举时静默失效，
+    /// 而这类失效的表现恰好是"又把它当成空数据了"。
+    private static func isDatabaseInaccessible(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == HKError.errorDomain else { return false }
+        return nsError.code == HKError.Code.errorDatabaseInaccessible.rawValue
     }
 
     private static let dateLock = NSLock()

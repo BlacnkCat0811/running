@@ -60,6 +60,49 @@ enum RaiStartup {
         }
     }
 
+    /// 设备解锁时，把"因为锁屏而停下的同步"重新推一次（文档 §3.4）。
+    ///
+    /// 为什么需要这条链路：`performSync` 的预检查在锁屏时会**立刻返回**（那是正确的 ——
+    /// 硬读 HealthKit 只会拿到 `errorDatabaseInaccessible`），但这样一来"解锁之后自动继续"
+    /// 就没人负责了。没有它，用户解锁后要等到下一次 HealthKit 投递、或者自己手动点一次；
+    /// 而文档 §3.1 的状态机里 `deferred_protected_data → queued` 那条边要求的正是"设备解锁恢复"。
+    ///
+    /// 🔴 判据住在 `HealthSyncBlockedRecovery.shouldResume`（纯函数、有执行者），这里只做接线。
+    /// 它保证"不在阻塞态时收到解锁通知"**不会**触发同步 —— 否则每次解锁都会白读一次 HealthKit，
+    /// 而那正是整个流程里最贵的一步（也是节流策略存在的全部理由）。
+    ///
+    /// 只注册一次（`didFinishLaunching` 调一次）。重复注册会让每次解锁触发多轮同步，
+    /// 而症状只是"解锁后同步了两次"，看不出是谁干的。
+    @MainActor
+    static func observeProtectedDataAvailability() {
+        _ = NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            // 闭包实际跑在 main queue 上，但类型系统看不到这个事实（block 的参数类型不带隔离），
+            // 所以照 `runBackgroundTask` 的写法先跳回 MainActor 再碰状态。
+            Task { @MainActor in
+                let model = AppModel.shared
+                let healthSync = model.healthSync
+                let session = model.session
+                guard HealthSyncBlockedRecovery.shouldResume(
+                    phase: SyncPhase.migrate(healthSync.phase),
+                    isProtectedDataAvailable: true,
+                    hasCredential: session.serverURL != nil
+                ) else { return }
+                RaiStartup.report("protected data became available; resuming the blocked sync")
+                await healthSync.syncIfNeeded(
+                    to: session.serverURL,
+                    apiToken: session.apiToken,
+                    // 跳过节流：这一轮不是"新的投递"，而是**补上一次没做成的**。
+                    // 走 `force: false` 会被 15 分钟窗口挡下，而那个窗口对"等解锁"毫无意义。
+                    force: true
+                )
+            }
+        }
+    }
+
     /// 注册 `BGProcessingTask`。
     ///
     /// 🔴 **必须在 `didFinishLaunching` 返回之前调用完，而且不能挪进 `Task { }`。**
@@ -180,6 +223,8 @@ final class RaiAppDelegate: NSObject, UIApplicationDelegate {
         Task { @MainActor in
             let model = AppModel.shared
             RaiStartup.registerSyncEntryPoints(healthSync: model.healthSync, session: model.session)
+            // 锁屏恢复链路（文档 §3.4）与观察者注册同属"启动期入口"，也必须只有一次。
+            RaiStartup.observeProtectedDataAvailability()
         }
         return true
     }

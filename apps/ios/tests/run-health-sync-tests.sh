@@ -64,3 +64,59 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/tests/BackgroundSyncPolicyRegression.swift \
   -o "$tmp/background-sync-policy-tests"
 "$tmp/background-sync-policy-tests"
+
+# 锁屏 / 凭证阻塞（V2.1 规范 §3.3 / §3.4）：两个新阶段的落点、恢复判据，以及
+# 「阻塞态绝不推进 anchor」这条不变式 —— 破了它不是报错，而是**静默丢数据**：
+# 客户端会把"这一次没读到"当成"数据没有变化"从而推进水位，那段健康数据从此再也导不出来。
+# `HealthSyncLifecycle.swift` 一起编：阻塞态经生命周期中止之后该保留还是降级，判据跨两个文件。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/SyncPhase.swift \
+  apps/ios/RAI/HealthSyncLifecycle.swift \
+  apps/ios/RAI/HealthSyncBlockedRecovery.swift \
+  apps/ios/tests/HealthSyncBlockedRecoveryRegression.swift \
+  -o "$tmp/health-sync-blocked-recovery-tests"
+"$tmp/health-sync-blocked-recovery-tests"
+
+# 成功收尾那条路（V2.1 规范 §2 原则 3「单状态源真相」）：`SyncStateCommitPlan` 的三态析出、
+# `mayAdvanceAnchor` 的**生产执行点**，以及 `SyncTaskStore.commitSuccess` 单事务的三个护栏。
+#
+# 这两件事必须放一起编：判据（plan）与落盘（store）分家时，"阻塞态绝不推进 anchor" 会退化成
+# 一句话而没有写入路径上的执行者 —— 那正是本次修复前的形态。
+# `SyncTaskStore` + `SQLiteSupport` 只依赖 Foundation + SQLite3，所以这里跑的是**真库**，
+# 不是替身（与 `run-store-tests.sh` 同一手法：`SyncTaskStore(directory:)` 支持注入目录）。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/SyncPhase.swift \
+  apps/ios/RAI/SyncStateCommitPlan.swift \
+  apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/SQLiteSupport.swift \
+  apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/tests/SyncStateCommitRegression.swift \
+  -o "$tmp/sync-state-commit-tests"
+"$tmp/sync-state-commit-tests"
+
+# Workout 伴生 Route 的**定频判据**（取代固定 14 天全量回填）：四态闭集、稳定性计数、
+# 人工重扫复位，以及那条最危险的不变式 —— "跳过一轮"绝不能产生稳定证据。
+#
+# 它单独一个可执行、且**只**编译纯 Foundation 的三个文件，是刻意的：这台机器的全部价值
+# 来自"无副作用"，一旦它能碰到 HealthKit 或数据库，判据就只能靠真机复现了。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/RAI/RouteSyncStateMachine.swift \
+  apps/ios/tests/RouteSyncStateMachineTests.swift \
+  -o "$tmp/route-sync-state-machine-tests"
+"$tmp/route-sync-state-machine-tests"
+
+# 上面那批判据的**落盘**一侧：`sync_route_state` 是真库上的单事务批量写。
+# 为什么不能只测"函数返回了什么"：这张表是降频记忆的唯一住处（不许落 `UserDefaults`、
+# 不许落 JSON、不许落内存单例），所以"跨进程还记得住""NULL 与空串分得开""半批写失败会整批
+# 回滚"这三件事，只有在一个真库文件上跑才算数。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/SyncPhase.swift \
+  apps/ios/RAI/SyncStateCommitPlan.swift \
+  apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/SQLiteSupport.swift \
+  apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/RAI/RouteSyncStateMachine.swift \
+  apps/ios/tests/RouteSyncStatePersistenceRegression.swift \
+  -o "$tmp/route-sync-state-persistence-tests"
+"$tmp/route-sync-state-persistence-tests"

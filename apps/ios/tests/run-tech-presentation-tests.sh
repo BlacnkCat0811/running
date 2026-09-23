@@ -318,7 +318,17 @@ sync_phase_source = pathlib.Path("apps/ios/RAI/SyncPhase.swift").read_text()
 enum_body = re.search(r"enum SyncPhase: String, CaseIterable, Sendable \{(.*?)\n\}", sync_phase_source, re.S)
 assert enum_body, ("Could not locate the SyncPhase enum; the phase-label gate must fail loudly "
                    "instead of skipping")
-sync_phases = set(re.findall(r"^\s*case ([a-z][A-Za-z0-9_]*)\s*$", enum_body.group(1), re.M))
+# 🔴 这里收的是**落盘值**（`rawValue`），不是 case 名 —— 展示层 `techSyncPhase` 的
+# `case "..."` 比对的也是落盘值（`HealthKitSync` 写进 `phase` 的那个字符串）。
+# V2.1 的两个阻塞阶段用了蛇形 rawValue（`deferred_protected_data` / `auth_required`，
+# 与状态机文档逐字对齐），于是"case 名 == rawValue"这个此前**恰好**成立的前提不再成立：
+# 只抓 case 名会让这两个取值同时被判成"没有标签"（unlabelled）与"标签是死的"（stale），
+# 而两条都是假红 —— 假红的门禁和恒绿的门禁一样糟。
+declared_cases = re.findall(
+    r"^\s*case ([a-z][A-Za-z0-9_]*)\s*(?:=\s*\"([^\"]*)\")?\s*$", enum_body.group(1), re.M
+)
+# 没有显式 rawValue 的取值，按 Swift 规则其 rawValue 就等于 case 名。
+sync_phases = {raw or name for name, raw in declared_cases}
 assert len(sync_phases) >= 8, f"SyncPhase parsed as only {sorted(sync_phases)}"
 theme_source = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTheme.swift").read_text()
 label_block = re.search(r"func techSyncPhase\(_ phase: String\) -> String \{(.*?)\n\}", theme_source, re.S)

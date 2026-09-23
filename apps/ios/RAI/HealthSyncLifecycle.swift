@@ -88,6 +88,15 @@ nonisolated enum HealthSyncLifecycle {
         switch phase {
         case "collecting", "exported", "uploading", "uploaded", "importing", "recomputing":
             return .keepWorking
+        case "deferred_protected_data", "auth_required":
+            // 阻塞态**没有**在飞的工作：它们在等一个外部条件（用户解锁 / 有效凭证），
+            // 而续期额度对"等待"毫无意义。
+            //
+            // 显式列出而不是落进 `default`：`default` 会让将来新增的阶段**静默继承**
+            // "没事可做"，而那个判断未必成立 —— 本次 `deferred_protected_data` /
+            // `auth_required` 恰好就是不成立的那两个（回归 `noInFlightWorkIsReportedAsNothing`
+            // 原本断言"非终态一律 keepWorking"，正是靠这两行才继续成立）。
+            return .doNothing
         default:
             return .doNothing
         }

@@ -575,6 +575,10 @@ func techSyncPhase(_ phase: String) -> String {
     case "recomputing": return "更新分析"
     case "succeeded": return "同步完成"
     case "failed": return "同步失败"
+    // 两个阻塞态（V2.1 §3.3 / §3.4）刻意不复用"同步失败"：用户什么都没做错，
+    // 而它们各自都有一句可执行的话 —— 解锁会自己继续，凭证要人去处理。
+    case "deferred_protected_data": return "等待设备解锁"
+    case "auth_required": return "等待重新登录"
     case "cancelled": return "同步已取消"
     default: return "等待同步"
     }

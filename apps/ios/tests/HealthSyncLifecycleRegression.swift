@@ -133,6 +133,11 @@ struct HealthSyncLifecycleRegression {
     private static func noInFlightWorkIsReportedAsNothing() throws {
         let inFlight = HealthSyncLifecycle.persistedPhases
             .filter { !HealthSyncLifecycle.terminalPhases.contains($0) }
+            // 🔴 阻塞态（等解锁 / 等凭证）**不是**在飞的工作：它们在等一个外部条件，
+            // 续期额度对它们毫无意义。排除它们 —— 否则"非终态一律 keepWorking"这条断言
+            // 会把正确的"没事可做"报成缺陷，而正确的处置被改成 `.keepWorking` 之后，
+            // "等解锁"就会被当成"正在跑"记着。它们的落点由 `blockedPhasesHaveNoInFlightWork` 单独钉。
+            .filter { !SyncPhase.migrate($0).isBlocked }
         // 阶段清单本身也要被钉住：谁把某个在飞阶段挪进终态集合，这里先红。
         try require(inFlight.count >= 6, "too few non-terminal phases to cover the contract")
         for phase in inFlight {

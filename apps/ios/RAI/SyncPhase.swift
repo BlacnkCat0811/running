@@ -30,6 +30,28 @@ nonisolated enum SyncPhase: String, CaseIterable, Sendable {
     /// 客户端不再写入它 —— 语义与 `importing` 完全相同，留着两种写法只会制造
     /// "同一件事两个值"的恢复分支。`migrate` 会把它归一到 `.importing`。
     case recomputing
+
+    /// 🔴 设备锁屏、或开机后尚未首次解锁：HealthKit 数据库被硬件级加密锁死，**读不到任何东西**。
+    ///
+    /// 为什么不复用 `failed`（这是这个取值存在的全部理由）：锁屏是**暂时的**外部条件，
+    /// 解锁后同一份工作可以原样重跑；而 `failed` 会做两件错事 ——
+    ///   1. 界面对用户说"同步失败"，可用户什么都没做错，而且解锁后不会自动恢复；
+    ///   2. 更要命的是它把下一个改动的思路引向"这次没读到数据"⇒ 顺手当成 0 条记录处理。
+    /// 文档 §3.4 的原文是「绝对严禁视为空数据 (0 Workouts) 推进 Anchor!」
+    ///
+    /// rawValue 用蛇形是为了与文档 §3.1 的状态机表逐字对齐；其余取值恰好都是单词，
+    /// 所以此前看不出这个差别。⚠️ 带显式 rawValue 的 `case` 会让结构门禁那句按行抓
+    /// `case <name>` 的正则漏掉它 —— 门禁侧已同步放宽（`check-background-capabilities.py`）。
+    case deferredProtectedData = "deferred_protected_data"
+
+    /// 批次凭证失效（HTTP 401/403）：这一批的**字节完好**，缺的只是通道。
+    ///
+    /// 与 `SyncUploadRecovery` 的纪律一致：**不确定性的拒绝要留着批次，确定性的拒绝才删批次**。
+    /// 401 属于前者（换到有效凭证后，同一份字节用同一个 batchId 重传就能幂等命中）。
+    /// 单独立一个阶段还多一层收益：文档 §3.3 要求后台**不得**对 401 自动无限重试，
+    /// 而"当前卡在等凭证"这件事必须能被持久表达，否则下次唤醒除了再撞一次 401 无事可做。
+    case authRequired = "auth_required"
+
     case succeeded
     case failed
     case cancelled
@@ -43,7 +65,31 @@ nonisolated enum SyncPhase: String, CaseIterable, Sendable {
     /// 一个只为迁移而存在的取值会被误判成"没人写、可以删"。
     static let legacyOnly: Set<SyncPhase> = [.recomputing]
 
+    /// 不是终态、但**手里没有任何在飞的工作**：正在等一个外部条件（解锁／有效凭证）。
+    ///
+    /// 为什么单列成一组：这两个阶段是**唯一**值得被"外部事件"主动叫醒的 ——
+    ///   - `deferredProtectedData` 由 `protectedDataDidBecomeAvailable`（用户解锁）唤醒；
+    ///   - `authRequired` 由"回到前台且凭证已就绪"唤醒。
+    /// 其余阶段要么已经结束，要么本来就在跑（在跑的那个不需要谁再来叫一次），
+    /// 把它们一并叫醒只会换来一次白读 HealthKit 的导出。
+    ///
+    /// ⚠️ 它**不是** `terminal`：这两个阶段都允许跨会话续接，而且必须能被恢复动作改写。
+    static let blocked: Set<SyncPhase> = [.deferredProtectedData, .authRequired]
+
     var isTerminal: Bool { Self.terminal.contains(self) }
+
+    var isBlocked: Bool { Self.blocked.contains(self) }
+
+    /// 🔴 **不变式：处于阻塞阶段时，客户端绝不允许把 candidate anchor 提交成 committed anchor。**
+    ///
+    /// 文档 §3.4 的原话是「绝对严禁视为空数据 (0 Workouts) 推进 Anchor!」—— 这两个阶段的
+    /// 共同点正是"这一次**没读到**数据"（锁屏）与"这一次**没送达**数据"（401），
+    /// 而两者都**不是**"数据没有变化"的证据。把"没读到"当成"没有变化"，等于把那段
+    /// 还没导出的健康数据**永久**跳过：下次查询从 committed anchor 起步，它们再也不会被看见。
+    ///
+    /// 判据写成派生函数而不是一条注释，是为了让它在**可执行**的回归里被断言
+    /// （`HealthSyncBlockedRecoveryRegression`）—— `HealthKitSync.swift` 不被任何回归编译。
+    static func mayAdvanceAnchor(_ phase: SyncPhase) -> Bool { !blocked.contains(phase) }
 
     /// 这个阶段的任务**允许跨会话**续接。
     ///
@@ -173,6 +219,29 @@ nonisolated enum SyncUploadRecovery {
     /// "你这个请求本身不对"，同样的请求重发不会有别的结果；413 是包超过 4 GiB
     /// （`DEFAULT_LIMITS.maxArchiveBytes`，`import-sources.ts:99`）。
     static let contentRejectionStatuses: Set<Int> = [400, 409, 413, 415]
+
+    /// **凭证**失效的状态码：这一批的字节没问题，缺的只是通道（文档 §3.3）。
+    ///
+    /// 为什么必须单列成第三类，而不是并进上面任何一个集合：
+    ///   - 并进 `contentRejectionCodes` ⇒ 会 `abandonBatch` **删掉一份完全有效的批次**，
+    ///     用户修好凭证之后还得重读一次 HealthKit（整个流程里最贵的一步）；
+    ///   - 留在默认的 `.keepForNextWake` ⇒ 后台每次唤醒都撞一次同样的 401，永远好不了，
+    ///     而这正是文档 §3.3 点名禁止的「自动无限重试」。
+    ///
+    /// 正确处置是第三种：**保留批次、落 `auth_required`、等前台拿到有效凭证再重传**
+    /// （同一个 `batchId` 重传，服务端按归档字节幂等命中同一条来源）。
+    ///
+    /// ⚠️ 这两个码刻意**不**进 `contentRejectionCodes` / `contentRejectionStatuses`，
+    /// 所以 `check-background-capabilities.py` 第 8 节那套"集合里每个字面量都要在服务端源码里
+    /// 找得到出处"的核对不覆盖它们：那里核对的是**服务端自造的判定码**，
+    /// 而 401/403 是 HTTP 标准码，由 `local-request-security.ts` 的鉴权 hook 产出。
+    static let credentialFailureStatuses: Set<Int> = [401, 403]
+
+    /// 这个失败是不是"在等凭证"。
+    static func isCredentialFailure(statusCode: Int?) -> Bool {
+        guard let statusCode else { return false }
+        return credentialFailureStatuses.contains(statusCode)
+    }
 
     static func disposition(statusCode: Int?, errorCode: String?) -> Action {
         // ① "现在不行"最先判：靠 code 与 429 两个入口（服务端实际用的是 429）。
