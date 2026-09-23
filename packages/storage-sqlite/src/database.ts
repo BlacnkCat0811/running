@@ -1451,6 +1451,15 @@ const migrations: readonly Migration[] = [
         return typeof last === "string" ? last : null;
       };
       // Mirrors `stableId` (`health-export-parser/src/utils.ts:14-20`).
+      //
+      // Plain `JSON.stringify` on purpose: the parser's formula now canonicalises
+      // **object keys** before hashing, but every `parts` array this migration
+      // builds is a flat list of primitives, on which canonicalisation is the
+      // identity — so adding it here would be dead code that merely suggests the
+      // two shapes differ. Do not "sync" the two implementations without first
+      // checking that the parts are still primitives; if one of them ever passes
+      // an object, that is the moment this copy has to grow the same step (and
+      // the moment the migration would have to realign the resulting ids).
       const stableRecordId = (kind: string, parts: unknown[]): string => {
         const hash = createHash("sha256");
         hash.update(kind);

@@ -11,11 +11,52 @@ export type SourceCategory =
   | "manual"
   | "other";
 
+/**
+ * Serialises a value with **object keys in sorted order** and **array order
+ * preserved**.
+ *
+ * `JSON.stringify` emits an object's keys in insertion order, so two values that
+ * are equal *as data* hash differently when they were built in a different key
+ * order. That is not hypothetical here: the HealthKit exporter writes
+ * `<MetadataEntry>` lines from a Swift `Dictionary`, which has no stable
+ * iteration order, and the parser creates a `MetadataMap` key on first sight of
+ * each line (`addMetadata`). The key order of the resulting object therefore
+ * varied between two exports of the *same* unchanged workout, which changed
+ * `stableId("workout_content", …)` — and a changed content hash means
+ * `observeImportEntity` reports the workout as `updated`, so the incremental
+ * importer replayed the model over the whole window on every sync.
+ *
+ * Arrays keep their order on purpose: an array here is a sequence, not a set.
+ * `metadata[key]` holds one entry per `<MetadataEntry>` line for that key, and
+ * `lastMetadataValue` deliberately takes the last one. Sorting arrays would
+ * change what the data means.
+ *
+ * Only *plain* objects are reordered. Anything else (`Date`, `Map`, class
+ * instances) is passed through untouched so `JSON.stringify` still applies its
+ * own `toJSON` handling rather than this function flattening it to `{}`.
+ */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value === null || typeof value !== "object") return value;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const source = value as Record<string, unknown>;
+  const ordered: Record<string, unknown> = {};
+  for (const key of Object.keys(source).sort()) ordered[key] = canonicalize(source[key]);
+  return ordered;
+}
+
 export function stableId(kind: string, parts: unknown[]): string {
   const hash = createHash("sha256");
   hash.update(kind);
   hash.update("\0");
-  hash.update(JSON.stringify(parts));
+  // `canonicalize` sorts object keys only, so every caller that passes a flat
+  // list of primitives — which is all of the real primary keys: record, workout,
+  // route, training_session, canonical_night, workout_group and the job ids —
+  // hashes byte-for-byte as before and **no persisted id is regenerated**. Only
+  // the two content hashes (`record_content`, `workout_content`), which embed
+  // attribute/metadata objects, take new values — once.
+  hash.update(JSON.stringify(canonicalize(parts)));
   return `${kind}_${hash.digest("hex").slice(0, 32)}`;
 }
 
