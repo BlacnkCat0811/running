@@ -10,6 +10,15 @@ background `URLSession`（字节搬运）——都已在 `apps/ios/RAI/` 里接�
 唯一已确定改变的是"切到后台"不再等于"用户取消"。HealthKit 导出仍复用
 `HealthKitExport.swift` 的 ZIP/XML 管道。
 
+> **2026-09-23 增补**：V2.1 规范里属于**数据正确性**的后两项也已落地 —— anchor / 导出水位收口进
+> `sync_state` 的**单事务**提交（§2 原则 3），服务端 GPX 字节 / 点数 / 批次点数三级配额（§5.2）。
+> 逐条对照与证据见文末「V2.1 规范对照」及 `deliverables/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`。
+>
+> **2026-09-23 再增补**：§3.5 的 **Route 自适应降频**（UNKNOWN → ACTIVE → COOLING → SETTLED）
+> 落地为逐 workout 的伴生状态机，固定 14 天全量重扫退役为"候选集"。见下文「按 workout 定频」
+> 与 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
+> ⚠️ 该报告的收益一栏按**真实时间滑窗**算是 −49%（1 次/天同步），不是稳态值乘天数 —— 别引用错的数。
+
 ## 状态机
 
 **会话边界**是这套状态机的第一等概念：`upload → inspect → startImport` 三步
@@ -33,6 +42,20 @@ background `URLSession`（字节搬运）——都已在 `apps/ios/RAI/` 里接�
 
 本机 `sync.sqlite` 的 `sync_tasks` 表按服务作用域保存当前任务 JSON。旧版本写入 `UserDefaults` 的任务会在首次读取时迁移。页面缓存使用独立的 `cache.sqlite`，清页面缓存不会清除同步任务。
 
+同库还有一张 `sync_state` 表（`scope` 主键 / `workout_anchor` / `export_end` / `updated_at`），存**已提交的** anchor 与导出水位。
+两张表在成功收尾时由**同一个事务**写入（`SyncTaskStore.commitSuccess`）。为什么非要在同一事务里：两份状态是
+"这次同步已提交"的两半，拆开就存在「任务行删成功、水位写失败」这个窗口 —— 结果是**旧 anchor + 没有任务 + 界面报成功**
+⇒ 每次同步重导同一段；而导出里带 `<ExportDate>`（墙钟）⇒ `payloadHash` 每次都变 ⇒ 服务端**每次新建一份导入来源**。
+用户在这一路上看不到任何异常。此外：
+
+- 事务内**先读旧值再写**，然后在 `COMMIT` 之前**回读断言**（比对"应该写成的值"，`.advance` 是单调取大）；
+  断言放在提交前而不是提交后 —— 提交后失败会把一份**已经入库**的数据报成"同步失败"，而同一屏的"上次同步：刚刚"刚被写好。
+- `DELETE FROM sync_tasks` 要校验 `sqlite3_changes() == 1`：删 0 行在原地是**静默**的（旧的 `clear(scope:)` 只判
+  `sqlite3_step == SQLITE_DONE`），于是"我以为提交了"可以是假的。
+- 提交前还要过 `SyncStateCommitPlan.mayCommit`（= `SyncPhase.mayAdvanceAnchor`）：**阻塞态绝不推进 anchor**。
+- `scope` 从未提交过时**没有行**（不是"两个字段都是空"）—— 迁移期正是靠这个区分退回读老 `UserDefaults` 键；
+  「重新导入全部」用 `forgetState` 删**整行**，并**同时**删掉老键，否则回退路径会把刚忘掉的锚读回来。
+
 当前任务数据包含：目标 URL、阶段、source ID、job ID、批次校验值、待确认 HealthKit anchor、导出结束时间和跑步数量；P1 另加 `schemaVersion` 与一组**只存文件名**的产物字段
 （`zipFileName` / `multipartFileName` / `multipartBoundary` / `uploadState` …）。
 🔴 `uploadTaskId` 这个键**目前没有任何写入点**：判据用的是 `RaiBackgroundUploadSession` 内部按
@@ -40,6 +63,37 @@ identifier 索引的两张表（`waiters` / `descriptions`），把它当"字节
 于是每次唤醒都重传一遍。结构门禁会拦下这类读取。
 任务在上传前创建，在 source/job ID 变化后立即更新；批次校验值（`payloadHash`）同时作为
 `X-RAI-Sync-Batch` 幂等标识传给服务端。服务端重复收到同一标识时返回原来源；服务端成功前不会推进普通导出水位。
+
+### 按 workout 定频：Route 伴生状态机
+
+同库还有第三张表 `sync_route_state`（主键 `workout_uuid`，小写化，口径同 `HealthKitExport.routeFileWorkoutId`），
+存**每条 workout 的路线查询记忆**。它是"降频记忆"，和 `sync_state` 一样必须与任务同库 ——
+**不许落 `UserDefaults`、不许落独立 JSON、不许落内存单例**（门禁判 `UserDefaults` 零出现）。
+
+为什么状态的主键必须是 workout uuid：**HealthKit 没有 route anchor**。`HKAnchoredObjectQuery` 只作用于
+sample 类型，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源（先 `HKQuery.predicateForObjects(from:)`
+找到它，再 `HKWorkoutRouteQuery` 逐点取回）。把它当成独立 anchor 去伪造一个，等于凭空发明 API。
+所以这是 **Workout-Scoped Companion State**，不是 `routeAnchor`。
+
+四态闭集 `unknown` / `active`（24 h，按 **workout 年龄**而非"距上次查询"）/ `cooling`
+（查询节流 12 h，按 `lastCheckedAt`）/ `settled`（`> 3 d` 后永不查询）。判据在
+`RouteSyncStateMachine`（纯函数、无副作用、可 100% 单测），落盘在
+`SyncTaskStore.loadRouteStates` / `upsertRouteStates`（`BEGIN IMMEDIATE` 单事务 + 逐行
+`sqlite3_changes() == 1` + 提交**前**回读断言，与 `commitSuccess` 同源）。
+
+🔴 两条不变式，各自都有独立回归 + 突变验证：
+
+1. **「跳过一轮」绝不改动任何状态**（`lastCheckedAt` 不动、`stableCheckCount` 不加）。
+   破了它不是报错，是**静默丢数据**：一条刚变更过的轨迹会被当成"又一次确认稳定"，
+   直接降到 `settled`，而 `settled` 只有人工重扫能唤醒 ⇒ 服务端永远收不到它。
+   这与 `ADR-004` 决策二「没读到 ≠ 没变化」是同一条不变式在客户端的另一处落点。
+2. **降频记忆只在 `commitSuccess` 之后落盘**（`HealthKitSync.markSuccess`）。
+   反方向会造出**不可自愈**的窗口：状态机记成"已稳定、可以少查"，而这一批数据从未真正交付
+   （上传失败 / 导入失败 / 进程被杀），之后一路降到 `settled`。现在这个方向最坏只是"下一轮多查一次"。
+   记忆写失败**不**让本次同步变红（durable 的部分已经提交），但**不静默**：推 `taskStore.lastError` + `NSLog`。
+
+`RouteSyncStateMachine.decide` 的输出契约是 `Decision { shouldQuery, nextState }`；
+`shouldQuery == false` 时 `nextState` **原样携带**，这条由一条对全部状态成立的遍历断言守。
 
 ## 字节归谁：唯一判据是「本进程还在等它的结局吗」
 
@@ -80,6 +134,21 @@ identifier 索引的两张表（`waiters` / `descriptions`），把它当"字节
 | `uploading` | multipart 已就绪，传输在途 | 否 |
 | `uploaded` | 服务端已收下这一批（`sourceId` 已落盘），`inspect`/`startImport` 未完成 | 否 |
 | `importing` | `jobId` 已落盘，等服务端终态 | **是** |
+| `deferred_protected_data` | 设备锁屏 / 开机后未首次解锁，健康数据库硬件加密不可读（V2.1 §3.4） | 取决于盘上任务 |
+| `auth_required` | 批次凭证失效（401/403），本地批次完好（V2.1 §3.3） | 取决于盘上任务 |
+
+**两个阻塞态**（`SyncPhase.blocked`）不是终态、也**不是**在飞的工作 —— 它们在等一个外部条件。
+两条硬约束：
+
+1. 🔴 **阻塞态绝不推进 anchor。** "这次没读到"（锁屏）与"这次没送达"（401）都**不是**
+   "数据没有变化"的证据；把前者当成后者，那段健康数据会被**永久**跳过（下次查询从新水位起步，
+   它再也不会出现在任何一次导出里）。判据是 `SyncPhase.mayAdvanceAnchor`，由
+   `HealthSyncBlockedRecoveryRegression` 执行，结构门禁钉住它的存在。
+2. **落点与恢复判据只有一份**（`HealthSyncBlockedRecovery`）：`deferred_protected_data` 由
+   `protectedDataDidBecomeAvailable`（用户解锁）唤醒，`auth_required` 由"回到前台且凭证已就绪"唤醒。
+   唤醒这两个阶段的是**外部条件而不是时间** —— 所以后台一轮（`runBackgroundPass`）遇到阻塞态
+   直接早退（否则每 15 分钟派一次注定失败的导出/上传），而 `syncIfNeeded` 的 15 分钟节流
+   对阻塞态**不生效**（条件刚满足就被节流挡下等于白等一轮）。
 
 ⚠️ P2-4 之后 `uploading` 这一行要读准：**传输本身**可以跨会话（字节归系统），但这一阶段属于
 **原子单元**、其中的"拿到 `sourceId`"跨不了会话 —— 重启后系统手上那次传输的结局拿不回来
@@ -102,8 +171,13 @@ v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态�
 - 上传、检查、创建导入任务使用最多三次退避重试。**上传本身只尝试一次**（600s 超时 ×3 最坏阻塞
   30 分钟，超过整个导入窗口），唯一例外是服务端说"现在不行"（429 `import_upload_busy`）——
   那会退避一次后用**同一个 batchId** 重试。
-- `401`、不兼容协议和坏数据立即停止。
-- 任务有 source ID 时先查询并恢复已有 source/job，不重新产生业务记录；创建导入任务遇到已有活动任务时先读取活动任务并按 source ID 接续。
+- `401`/`403` 立即停止并落 `auth_required`：本地批次**完好**，缺的只是通道，所以**不删产物**、
+  也**不在后台自动重试**（每次唤醒撞同一个 401，永远好不了）。等前台拿到有效凭证后用**同一个
+  `batchId`** 重传 —— 服务端按归档字节幂等命中同一条来源。不兼容协议和坏数据立即停止。
+- 上传失败分三态，判据在 `SyncUploadRecovery`（每个错误码都能在服务端源码里找到出处，
+  结构门禁会做跨仓核对）：瞬时失败保留批次同 batchId 重传；并发占用退避重试；**服务端确定性拒绝
+  的批次永不重传**（连本地产物一起作废）。凭证失败（401/403）是**第四态**、刻意不并进上面三态
+  —— 并进"确定性拒绝"会删掉一份有效批次，并进默认的"保留等下次"又会在后台无限空转。
 - 导入任务轮询最长 30 分钟；短暂轮询失败会重新连接，连续失败后**保留 jobId 与任务**，
   等下次唤醒续接（服务端没有推送机制，后台空转轮询零收益）。
 - 本地产物（`Application Support/rai-healthkit-<scope>/upload-<payloadHash>.{zip,multipart}`）
@@ -113,21 +187,80 @@ v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态�
   不代表系统不再搬这批字节（生命周期中止会把等待者摘掉而让传输继续）。
 - 启动/发起上传之前先盘点系统手上的传输（"字节归谁"一节）：**没人在等结局的**一律取消，
   由这一轮用盘上的字节重传，避免两份同样的字节同时打向服务端。
-- 上传失败分三态，判据在 `SyncUploadRecovery`（每个错误码都能在服务端源码里找到出处，
-  结构门禁会做跨仓核对）：瞬时失败保留批次同 batchId 重传；并发占用退避重试；**服务端确定性拒绝
-  的批次永不重传**（连本地产物一起作废）。其余 4xx（鉴权/路由）保留批次 —— 修好通道后重传比
-  重新导出一次便宜。
+- 任务有 source ID 时先查询并恢复已有 source/job，不重新产生业务记录；创建导入任务遇到已有活动任务时先读取活动任务并按 source ID 接续。
 - 同步成功后才清除本地产物与任务。**失败时任务被刻意留着**：它就是"下次接着传"那条记录，
   `SyncAtomicUnit` 下次会从同一份产物、同一个 batchId 继续。
 - 每个服务地址使用独立作用域；切换服务不会复用游标、任务或失败上传。
 
 ## HealthKit 规则
 
-跑步 anchor 与时间窗口采用重叠补查；每次 anchored 增量同步还会回读最近 14 天的跑步，用于发现训练保存后才到达的路线。恢复、HRV、静息心率即使没有新增跑步也随窗口导出。部分读取权限或没有样本会形成空/部分结果，不解释为远程删除。删除事件由 HealthKit 导出清单携带，服务端使用导入元数据中的 workout UUID 负责来源失效处理。
+跑步 anchor 与时间窗口采用重叠补查；每次 anchored 增量同步还会回读最近 14 天的跑步，用于发现训练保存后才到达的路线。**这条 14 天窗口现在只决定"候选集"**——真正的路线查询由逐 workout 的伴生状态机决定（见上文「按 workout 定频」），所以"在窗口里"不再等于"每次同步都重拉轨迹"。恢复、HRV、静息心率即使没有新增跑步也随窗口导出。部分读取权限或没有样本会形成空/部分结果，不解释为远程删除。删除事件由 HealthKit 导出清单携带，服务端使用导入元数据中的 workout UUID 负责来源失效处理。
+
+🔴 **锁屏（Protected Data）是两道锁，不是一道。** 设备锁屏、或开机后尚未首次解锁时，HealthKit
+数据库被硬件级加密锁死，**任何**读取都会被拒（`HKError.errorDatabaseInaccessible`）：
+
+1. 进 `performSync` 时先查 `UIApplication.isProtectedDataAvailable`，锁着就**不去读**，直接落
+   `deferred_protected_data`。这道预检查刻意排在握手与 `readAuthorizationState()` **之前** ——
+   后者在锁屏时同样读不到状态、会返回 `.unknown`，排在它后面就会被先落成 `failed`
+   （一次正常锁屏被报成"同步失败"，且解锁后不会自己恢复）；
+2. 检查通过之后设备仍可能在查询途中被锁上，所以 `HealthKitExport.runningWorkouts` 另外把
+   `errorDatabaseInaccessible` 映射成 `HealthKitExportError.databaseLocked`。两道锁挡的是两件事，
+   不是二选一。
+
+⚠️ 这一条**不是**"能不能读到"的优化，而是"会不会丢数据"的护栏：`errorDatabaseInaccessible`
+与 `errorNoData` 的码相邻，而后者确实该被当成"空结果"。因此 `optionalSamples` 只吞
+`errorNoData` 与鉴权错误，锁屏错误一律抛出到调用方 —— 一旦有人把两者合并，"锁屏"就会变成
+"这份数据是空的"，Anchor 随之推进，那段数据永久跳过。
 
 ## 尚待完成
 
 服务端目前已经有上传、预检、导入任务和 job 查询接口；批次幂等由运行时状态库中的 `idempotency_key` 和活动/历史 job 查询保证。服务端成功确认复用已持久化的 job 终态，v1 不要求额外游标确认端点。自动化异常矩阵和真实设备上的生命周期中断、路线晚到、删除传播及大历史内存测试仍未运行。
+
+### V2.1 规范（`RAI HealthKit 后台可靠同步系统 V2.1`）对照：已完成的 / 仍未做的 / 有意不照做的
+
+以下每一项都已在 `deliverables/RAI_HK_BACKGROUND_V21_GAP_2026-09-23.md` 里给了差距矩阵与优先级；
+2026-09-23 那一轮的逐条结论、证据与回滚方式见 `deliverables/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`；
+Route 定频那一项见 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
+
+- 🟡 **`beginBackgroundTask` 仍包裹整个 `performSync`**（`HealthKitSync.swift:506-519`）。
+  V2.1 §Phase 0 明确要求移除它，本仓的结构门禁 `check-background-capabilities.py:320-331` 又**要求它存在**
+  （`len(background_task_lines) >= 1`）。**已定案：零行为变更、只把口径写清楚**，理由三条：
+  ① 移除它会让"用户点同步后立刻切后台"**没有任何收尾窗口**（BGTask 是"择机"而非"立刻"）；
+  ② 现有 `expirationHandler` 已正确走 `suspendForLifecycle()`（`HealthKitSync.swift:507-511`），
+  即**规范想防的"系统到期被当成用户取消"这件事已经不存在**；
+  ③ 拿不出"移除后更好"的可证伪判据 ⇒ 不做。这条记为**有意偏离**，不再当待办。
+- ✅ **anchor / 导出水位已收口到 SQLite 单事务**（V2.1 §2 原则 3，2026-09-23 完成）：
+  `sync_state` 表 + `SyncTaskStore.commitSuccess` 的单事务（详见上文「状态机」后的说明与文末验收）。
+  仍未落地的是规范 §2.1 的 `sync_transactions` **严格表结构**与 candidate/committed **双列**形式 ——
+  现状用"单列 + 提交前回读断言 + `changes()` 校验"拿到同一保证（取舍与失败方向见新报告 §1）。
+  `lastSyncAt` / `lastWorkoutCount` / `lastAutoSync` 三个键**有意留在 `UserDefaults`**：丢了无害，
+  且它们按 scope 分键的语义与"已提交水位"不同，搬进表会静默改掉语义。
+- ✅ **Route 自适应降频已落地**（V2.1 §3.5 的 UNKNOWN → ACTIVE → COOLING → SETTLED，2026-09-23 完成）：
+  14 天窗口降级为**候选集**，查询由 `RouteSyncStateMachine`（纯函数）逐 workout 决定，
+  状态存在 `SyncTaskStore.sqlite` 的 `sync_route_state`（**不是** `UserDefaults`，也不叫 `routeAnchor` ——
+  HealthKit 没有 route anchor，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源，所以状态只能挂在 workout 的 uuid 上）。
+  阈值：`active` 24 h（按 **workout 年龄**）/ `cooling` 查询节流 12 h / `settled` 3 天后永久休眠；
+  `settled` 的唯一唤醒通道是"重新导入全部"（`routeForceRescan`）。
+  🔴 **两条不变式**：① 「跳过一轮」绝不改动状态（否则"没读到"会被记成"没变化"，一条刚变更的轨迹
+  可能直接降到 `settled` 而永不再查）；② 降频记忆只在 `commitSuccess` **之后**落盘
+  （反过来会造出"记成已稳定、数据却从未交付"的不可自愈窗口）。
+  两者都有独立回归 + 突变验证（门禁 §14h）。详见 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
+  🟡 **两项如实说明**：① 收益按真实时间滑窗算是 **−49%**（1 次/天同步、14 天累计），
+  不是"稳态省 90% × 14 天"——显著的是**单次同步**（20 → 稳态 0–3 条 `HKWorkoutRouteQuery`）；
+  ② 被跳过的 route 不进载荷 ⇒ `digestHealthKitExportContent` 的内容摘要会变 ⇒ 服务端"未变化"
+  早退锚点在「`cooling` 且同步间隔 < 12 h」这个交叉窗口里可能落空。**治本要改服务端摘要口径，属独立决策。**
+  省略 GPX **不等于删除**，前提是 manifest 声明 `sourceScope: "healthkit"`
+  （`resolvePreserveAbsent` → `preserveAbsent: true`）——这条前提已被门禁判据钉住。
+- ✅ **服务端已有 GPX 字节 / 点数 / 批次点数三级配额**（V2.1 §5.2，2026-09-23 完成）：
+  单文件 **64 MiB** / 单 workout **300,000 点** / 整批 **20,000,000 点**。
+  ⚠️ 后两项**有意不照抄**规范的 50,000 与 200,000：50,000 点 ≈ 13.9 小时轨迹（一次 24 h 超马必被误杀，
+  `gpx-quota.test.ts` 里那条 86,400 点的轨迹就是**必须被接受**的合法反例）；200,000 点/批会让
+  "重新导入全部"这条唯一的重建路径**永久打不开**（三年用户 ≈ 1.68 M 点，8.4× 超限）。数字推导见新报告 §2。
+  ZIP slip 防御、实际字节计量、压缩比与条目数上限此前已**超出**规范要求。
+- **Silent Push（§3.2 第三优先级）未实现**。规范自述它只是"加速器"，缺失不影响最终一致性
+  （第一优先级前台拉取 + 第二优先级 BGTask 已覆盖）。
+- **`errorDatabaseInaccessible` 与 `errorNoData` 的辨别尚无真机证据**：模拟器无法锁屏，这条路径
+  只能靠真机验收（见 `deliverables/IOS_SYNC_DEVICE_CHECKLIST_2026-09-22.md`）。
 
 🔴 **后台三机制的真机验收是一个独立验收项，完成前不得把静态审查或模拟器构建写成"后台可用"。**
 可执行清单见 **`deliverables/IOS_SYNC_DEVICE_CHECKLIST_2026-09-22.md`**（= 方案 §11.0–11.4 + 落地后新增的
