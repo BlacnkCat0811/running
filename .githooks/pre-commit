@@ -18,3 +18,14 @@ if git diff --cached --name-only --diff-filter=ACMR -- apps/ios | grep -q .; the
   echo "pre-commit: apps/ios/ 有改动，跑 iOS 门禁"
   npm run test:ios
 fi
+
+# 迁移冻结校验和（`packages/storage-sqlite/src/database.ts`）的门禁：每个迁移都有冻结值、
+# 冻结值仍等于转译产物、且运行与迁移都走 tsx。前两条钉的是「历史迁移没被改」，第三条钉的是
+# 「TS 执行通道没被换」——后者一旦发生，含线上在内的**所有既有库立刻打不开**
+# （2026-09-23 实测：换 `node --experimental-strip-types` ⇒ 抛 `Migration 1 checksum does not
+# match the application`）。全量 `npm test` 依然属于手动/CICD 那一档，这里只付该文件约 40s。
+# 触发面照上面的 iOS 段收窄到 `packages/storage-sqlite/`：绝大多数提交动的是别处。
+if git diff --cached --name-only --diff-filter=ACMR -- packages/storage-sqlite | grep -q .; then
+  echo "pre-commit: packages/storage-sqlite/ 有改动，跑迁移门禁"
+  node --import tsx --test packages/storage-sqlite/test/migration-policy.test.ts
+fi
