@@ -94,6 +94,17 @@
 
 ### 2.4 明说的残差风险
 
+- 🔴 **`CONTRACT_VERSION` 是这条捷径唯一的人工闸门。** 锚点绑定的四件事里，载荷、删除语义、
+  引擎都能自己变，唯独"**派生算法**变了"这件事**载荷本身看不出来**。具体：`stableId` 的对象
+  键规范化（`health-export-parser/src/utils.ts` 的 `canonicalize`）会重写全库 `record_content` /
+  `workout_content`，而载荷一个字节都没变 ⇒ `dataset_version` 也没变 ⇒ 锚点照样命中 ⇒
+  **新算法永远进不了库**。
+  ⇒ **任何改动 `stableId`、内容哈希输入或解析规范化的改动，必须同时 bump
+  `packages/contracts/src/index.ts:8` 的 `CONTRACT_VERSION`**（它已折进组合摘要）。
+  代价是一次完整导入；忘掉的代价是一次静默无操作。该约束已写进
+  `import-payload-identity.ts` 的模块注释。
+  （这不是假想：本轮工作区里恰好就有一次这样的变更 —— `canonicalize` 键序规范化 ——
+  只是锚点当时尚未存在，才没有踩到。）
 - **主库被带外改写**（手写 SQL、只恢复了部分表）而不改 `dataset_version`：守卫看不见。
   正常的整库恢复**不在此列**——恢复会把锚点一起带回当时，两个值自洽，判据仍然成立。
 - **载荷目录在导入过程中被改动**：锚点摘要算在导入**之前**。但这条路径本来就不支持——
