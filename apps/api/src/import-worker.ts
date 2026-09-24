@@ -18,6 +18,7 @@ import type { ImportExecutionEngine, ImportJobResponse, ImportJobPerformance } f
 import { currentAbilityBaselineHash } from "@rai/application";
 import {
   ImportRemovalGuardError,
+  identityAlgorithmFingerprint,
   stageAuditFiles,
   type RemovalGuardPayload,
   type StagedAuditFiles,
@@ -504,7 +505,7 @@ export class ImportWorker {
       // `dataset_version`，任何后续导入都会让它失效。
       let payloadSha256: string | null = null;
       const preflight = await timing.measure("changeAnalysis", async () => {
-        const result = await this.detectUnchangedPayload(job, engine.name);
+        const result = await this.detectUnchangedPayload(job, engine);
         if (result) payloadSha256 = result.sha256;
         return result;
       });
@@ -620,7 +621,7 @@ export class ImportWorker {
         // 锚点就再也写不回去了。刷新的风险面很小 —— `unchanged` 判词本来就被当成权威结论
         // （暂存库当场丢弃），这里只是把这个已有结论缓存下来。
         // 这也是一处新增的**主库写入**：单行 upsert，尽力而为，失败只记日志。
-        payloadSha256 ??= await this.payloadSha256(job, engine.name);
+        payloadSha256 ??= await this.payloadSha256(job, engine);
         this.recordPayloadAnchor(this.databasePath, payloadSha256);
         return;
       }
@@ -668,7 +669,7 @@ export class ImportWorker {
       }
       // 把"这份库是由哪个载荷产生的"写进**暂存库**，让它随激活一起落地：
       // 锚点不可能先于它所描述的数据出现，激活失败回滚时也随库一起消失。
-      payloadSha256 ??= await this.payloadSha256(job, engine.name);
+      payloadSha256 ??= await this.payloadSha256(job, engine);
       this.recordPayloadAnchor(stagingDatabase, payloadSha256);
       auditPublication = await timing.measure("activation", () => this.stageAuditReports(
         stagingDatabase,
@@ -879,12 +880,19 @@ export class ImportWorker {
    * will report the real problem with a proper message. Failing here would turn an
    * optimisation into a new way to fail an import.
    */
-  private async payloadSha256(job: MutableImportJob, engine: string): Promise<string | null> {
+  private async payloadSha256(job: MutableImportJob, engine: ImportExecutionEngine): Promise<string | null> {
     try {
       return await computeImportPayloadSha256(job.inputPath, {
         preserveAbsent: job.preserveAbsent === true,
         contractVersion: CONTRACT_VERSION,
-        engine
+        // `<name>@<version>`: the engine decides what gets written, so an upgraded
+        // native binary must move the digest even though its *name* did not.
+        engine: `${engine.name}@${engine.version}`,
+        // Folding the identity algorithm in makes "the derived ids would come out
+        // different now" self-correcting: the anchor misses by itself and the full
+        // path runs. Without this the anchor keeps hitting and the new algorithm
+        // never reaches the database.
+        identityAlgorithm: identityAlgorithmFingerprint()
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -915,7 +923,7 @@ export class ImportWorker {
    */
   private async detectUnchangedPayload(
     job: MutableImportJob,
-    engine: string
+    engine: ImportExecutionEngine
   ): Promise<PayloadPreflight | null> {
     if (job.preserveAbsent !== true) return null;
     const identity = readDatabaseImportIdentity(this.databasePath);

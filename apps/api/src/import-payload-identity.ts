@@ -37,21 +37,26 @@ import { digestHealthKitExportContent } from "./import-sources.js";
  * semantics, and the execution engine, because each of those changes what the
  * same payload would write.
  *
- * ## 🔴 The one thing the anchor cannot notice by itself
+ * ## What the anchor still cannot notice by itself
  *
- * `contractVersion` is the *manual* half of this guard, and it is the only thing
- * standing between a hit and a change that the payload cannot show: an
- * algorithm change that alters the ids or content hashes *derived from* the same
- * rows. `stableId` is the live example — canonicalising its object keys rewrote
- * `record_content` / `workout_content` for every row while leaving the payload
- * bytes (and therefore `dataset_version`) untouched.
+ * A change that the payload cannot show — one that alters the ids or content
+ * hashes *derived from* the same rows. `stableId` is the live example:
+ * canonicalising its object keys rewrote `record_content` / `workout_content`
+ * for every row while leaving the payload bytes (and therefore
+ * `dataset_version`) untouched.
  *
- * Should such a change land without bumping `CONTRACT_VERSION`, an existing
- * anchor keeps matching, the payload short-circuits, and the new algorithm never
- * reaches the database it was supposed to rewrite. So: **any change to `stableId`,
- * the content-hash inputs, or the parser's normalisation must bump
- * `CONTRACT_VERSION`** (`packages/contracts/src/index.ts`). Bumping it costs one
- * full import; forgetting it costs a silent no-op.
+ * Two mechanisms now cover that, and they cover different halves:
+ *
+ *  1. `identityAlgorithm` folds `identityAlgorithmFingerprint()` into this
+ *     digest, so an algorithm change invalidates the anchor **by itself** and
+ *     costs one full import — which is exactly what it should cost. Nothing has
+ *     to be remembered. See `identity-algorithm.ts` in
+ *     `@rai/health-export-parser`.
+ *  2. `CONTRACT_VERSION` stays the *manual* half, for a change to what the
+ *     payload **means** (parsing or normalisation rules) that leaves every
+ *     derived id where it was. No function can compute that one, so it remains a
+ *     human decision — but the algorithm half is no longer silent about it: the
+ *     sentinel in `identity-algorithm.test.ts` fails and names both.
  */
 
 /** `import_manifest` key holding the identity of the payload behind the database. */
@@ -79,8 +84,25 @@ export interface ImportPayloadContext {
   preserveAbsent: boolean;
   /** `CONTRACT_VERSION` of the parser that would apply the payload. */
   contractVersion: string;
-  /** Execution engine name (`typescript` / `rust`); it changes what gets written. */
+  /**
+   * Execution engine as `<name>@<version>` (`typescript@0.1.0`, `rust@0.1.0`).
+   *
+   * The version is not decoration: the engine decides *what gets written*, so a
+   * native binary upgrade that leaves `name` alone must still move this digest.
+   * Folding in the bare name is what would let an upgraded worker re-apply its
+   * old results with the anchor still matching.
+   */
   engine: string;
+  /**
+   * `identityAlgorithmFingerprint()` of the parser that would apply this payload.
+   *
+   * Folding it in is what makes "the algorithm changed while the payload bytes
+   * did not" self-correcting: the anchor misses, the full path runs, and the new
+   * algorithm reaches the database. Optional so a caller with no algorithm to
+   * report (a fixture, an older embedder) hashes exactly as it did before this
+   * field existed.
+   */
+  identityAlgorithm?: string;
 }
 
 export interface DatabaseImportIdentity {
@@ -96,7 +118,7 @@ export interface DatabaseImportIdentity {
  * without a database or a payload directory.
  */
 export function importPayloadSha256(contentSha256: string, context: ImportPayloadContext): string {
-  return createHash("sha256")
+  const hash = createHash("sha256")
     .update("rai.import-payload.v1\0")
     .update(context.contractVersion)
     .update("\0")
@@ -104,8 +126,13 @@ export function importPayloadSha256(contentSha256: string, context: ImportPayloa
     .update("\0")
     .update(context.engine)
     .update("\0")
-    .update(contentSha256)
-    .digest("hex");
+    .update(contentSha256);
+  // Appended rather than interleaved, so a context without an `identityAlgorithm`
+  // hashes exactly as it did before the field existed. Only a caller that
+  // actually reports an algorithm moves its digest — which is the point: an
+  // algorithm change must invalidate the anchor by itself, not be remembered.
+  if (context.identityAlgorithm) hash.update("\0").update(context.identityAlgorithm);
+  return hash.digest("hex");
 }
 
 /**

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { CONTRACT_VERSION } from "@rai/contracts";
+import { identityAlgorithmFingerprint } from "@rai/health-export-parser";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import {
@@ -25,12 +27,12 @@ import { ImportWorker } from "../src/worker.js";
  */
 
 interface PreflightSurface {
-  executionEngine: { name: string };
+  executionEngine: { name: string; version: string; fallback: "none" | "typescript" };
   run(job: Record<string, unknown>): Promise<void>;
   command(args: string[]): Promise<void>;
   detectUnchangedPayload(
     job: Record<string, unknown>,
-    engine: string
+    engine: { name: string; version: string; fallback: "none" | "typescript" }
   ): Promise<{ sha256: string; datasetVersion: string; unchangedWorkouts: number } | null>;
 }
 
@@ -128,10 +130,53 @@ test("payload identity moves with every input that changes what an import writes
     "parser contract version"
   );
   assert.notEqual(
-    importPayloadSha256("content-a", { ...BASE_CONTEXT, engine: "rust" }),
+    importPayloadSha256("content-a", { ...BASE_CONTEXT, engine: "rust@0.1.0" }),
     baseline,
     "execution engine"
   );
+  // The engine's *version* is part of the engine input, not decoration: a native
+  // binary upgrade writes different rows under the same `name`, so it must move
+  // the digest on its own.
+  assert.notEqual(
+    importPayloadSha256("content-a", { ...BASE_CONTEXT, engine: "rust@0.2.0" }),
+    importPayloadSha256("content-a", { ...BASE_CONTEXT, engine: "rust@0.1.0" }),
+    "execution engine version"
+  );
+  // The identity algorithm is the input a payload cannot show: identical bytes can
+  // derive different ids. `import-worker` always folds the fingerprint in, so an
+  // algorithm change invalidates the anchor by itself instead of being skipped.
+  assert.notEqual(
+    importPayloadSha256("content-a", { ...BASE_CONTEXT, identityAlgorithm: "f".repeat(64) }),
+    baseline,
+    "identity algorithm"
+  );
+  // ...and the field must be purely additive: a context that omits it reproduces
+  // the pre-field digest byte-for-byte, so its existence cannot re-key a fixture or
+  // an older embedder. Recomputed with the original formula rather than compared
+  // against `baseline` (which would be the same call and prove nothing).
+  const preFieldDigest = createHash("sha256")
+    .update("rai.import-payload.v1\0")
+    .update(BASE_CONTEXT.contractVersion)
+    .update("\0")
+    .update(BASE_CONTEXT.preserveAbsent ? "preserve" : "replace")
+    .update("\0")
+    .update(BASE_CONTEXT.engine)
+    .update("\0")
+    .update("content-a")
+    .digest("hex");
+  assert.equal(
+    importPayloadSha256("content-a", BASE_CONTEXT),
+    preFieldDigest,
+    "an absent identity algorithm must not move the digest"
+  );
+  assert.notEqual(
+    importPayloadSha256("content-a", { ...BASE_CONTEXT, identityAlgorithm: identityAlgorithmFingerprint() }),
+    preFieldDigest,
+    "the value production passes must move the digest"
+  );
+  // The value production actually passes is the frozen fingerprint; assert it is a
+  // real digest rather than an empty string that would silently disable the guard.
+  assert.match(identityAlgorithmFingerprint(), /^[0-9a-f]{64}$/);
 });
 
 test("payload content digest ignores the exporter wall clock but notices real data", async () => {
@@ -206,7 +251,8 @@ test("an import records the payload anchor and the next identical sync skips the
     const expected = await computeImportPayloadSha256(inputPath, {
       preserveAbsent: true,
       contractVersion: CONTRACT_VERSION,
-      engine: worker.executionEngine.name
+      engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
+      identityAlgorithm: identityAlgorithmFingerprint()
     });
 
     let commandCount = 0;
@@ -266,12 +312,13 @@ test("a payload that declares absence-as-deletion never short-circuits", async (
       sha256: await computeImportPayloadSha256(inputPath, {
         preserveAbsent: false,
         contractVersion: CONTRACT_VERSION,
-        engine: worker.executionEngine.name
+        engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
+        identityAlgorithm: identityAlgorithmFingerprint()
       }),
       datasetVersion: "preflight_fixture"
     });
     assert.equal(
-      await worker.detectUnchangedPayload(queuedJob(inputPath, false), worker.executionEngine.name),
+      await worker.detectUnchangedPayload(queuedJob(inputPath, false), worker.executionEngine),
       null
     );
 
@@ -282,13 +329,14 @@ test("a payload that declares absence-as-deletion never short-circuits", async (
       sha256: await computeImportPayloadSha256(inputPath, {
         preserveAbsent: true,
         contractVersion: CONTRACT_VERSION,
-        engine: worker.executionEngine.name
+        engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
+        identityAlgorithm: identityAlgorithmFingerprint()
       }),
       datasetVersion: "preflight_fixture"
     });
     const hit = await worker.detectUnchangedPayload(
       queuedJob(inputPath, true),
-      worker.executionEngine.name
+      worker.executionEngine
     );
     assert.ok(hit, "the non-deleting payload must short-circuit");
     assert.equal(hit.datasetVersion, "preflight_fixture");
@@ -308,11 +356,12 @@ test("a database that moved since the anchor was recorded disables the short-cir
     const expected = await computeImportPayloadSha256(inputPath, {
       preserveAbsent: true,
       contractVersion: CONTRACT_VERSION,
-      engine: worker.executionEngine.name
+      engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
+      identityAlgorithm: identityAlgorithmFingerprint()
     });
     const module = await import("../src/import-payload-identity.js");
     module.writeImportPayloadAnchor(databasePath, { sha256: expected, datasetVersion: "preflight_fixture" });
-    assert.ok(await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine.name));
+    assert.ok(await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine));
 
     // Another import landed in between. `dataset_version` is what makes that
     // visible; without this guard a deletion-only sync would be silently undone by
@@ -325,7 +374,7 @@ test("a database that moved since the anchor was recorded disables the short-cir
     }
     assert.ok(readDatabaseImportIdentity(databasePath));
     assert.equal(
-      await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine.name),
+      await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine),
       null
     );
   } finally {
@@ -368,7 +417,7 @@ test("an unreadable payload disables the short-circuit instead of failing the im
     const module = await import("../src/import-payload-identity.js");
     module.writeImportPayloadAnchor(databasePath, { sha256: "abc", datasetVersion: "preflight_fixture" });
     assert.equal(
-      await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine.name),
+      await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine),
       null
     );
     // And the import still proceeds down the normal path rather than failing.
@@ -415,7 +464,8 @@ test("the recorded anchor survives a real activation into the live database", as
       sha256: await computeImportPayloadSha256(inputPath, {
         preserveAbsent: true,
         contractVersion: CONTRACT_VERSION,
-        engine: worker.executionEngine.name
+        engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
+        identityAlgorithm: identityAlgorithmFingerprint()
       }),
       datasetVersion: "preflight_fixture"
     });

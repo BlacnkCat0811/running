@@ -51,3 +51,8 @@ export {
   type ImportEntityKind,
   type RecomputePlan
 } from "./incremental.js";
+export {
+  FROZEN_IDENTITY_ALGORITHM,
+  IDENTITY_ALGORITHM_PROBES,
+  identityAlgorithmFingerprint
+} from "./identity-algorithm.js";
