@@ -27,7 +27,7 @@
 ### 背景
 
 成功收尾要一次做两件事：把 anchor / 导出水位写进 `sync_state`，并删掉 `sync_tasks` 里的任务行。
-写入路径是 `SyncTaskStore.commitSuccess`（`apps/ios/RAI/SyncTaskStore.swift:219-258`）：
+写入路径是 `SyncTaskStore.commitSuccess`（`apps/ios/RAI/SyncTaskStore.swift:371-416`）：
 
 ```text
 BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELETE sync_tasks + changes()==1 → COMMIT
@@ -214,7 +214,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 
 ### 推导依据（每条都可核对）
 
-1. **每点约 213 字节**：`HealthKitExport.swift:950-973` 的 `gpx(_ locations:)`
+1. **每点约 213 字节**：`HealthKitExport.swift:1039-1062` 的 `gpx(_ locations:)`
    逐点**无抽稀**地写 `trkpt` + `ele` + `time` + `speed` + `course` + `hAcc` + `vAcc`
    （`lat`/`lon` 在 `trkpt` 属性里）⇒ 8 个字段。
 2. **24 小时百公里越野 ≈ 86,400 点 ≈ 18.4 MB**（按 1 Hz 采样）。
@@ -264,7 +264,7 @@ let bound = anchor.withUnsafeBytes { buffer in
 guard bound == SQLITE_OK else { fail("state anchor bind"); return false }
 ```
 
-落点：`apps/ios/RAI/SyncTaskStore.swift:280-291`（`upsertState`）。
+落点：`apps/ios/RAI/SyncTaskStore.swift:419-467`（`upsertState`）。
 
 ### 为什么这条必须单独记一笔
 

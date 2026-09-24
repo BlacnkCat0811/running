@@ -230,11 +230,12 @@ v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态�
 2026-09-23 那一轮的逐条结论、证据与回滚方式见 `deliverables/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`；
 Route 定频那一项见 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
 
-- 🟡 **`beginBackgroundTask` 仍包裹整个 `performSync`**（`HealthKitSync.swift:506-519`）。
+- 🟡 **`beginBackgroundTask` 仍包裹整个 `performSync`**（`HealthKitSync.swift:717-726`；
+  `performSync` 本体自 `:689` 起）。
   V2.1 §Phase 0 明确要求移除它，本仓的结构门禁 `check-background-capabilities.py:320-331` 又**要求它存在**
   （`len(background_task_lines) >= 1`）。**已定案：零行为变更、只把口径写清楚**，理由三条：
   ① 移除它会让"用户点同步后立刻切后台"**没有任何收尾窗口**（BGTask 是"择机"而非"立刻"）；
-  ② 现有 `expirationHandler` 已正确走 `suspendForLifecycle()`（`HealthKitSync.swift:507-511`），
+  ② 现有 `expirationHandler` 已正确走 `suspendForLifecycle()`（`HealthKitSync.swift:718-726`，收尾调用在 `:721`），
   即**规范想防的"系统到期被当成用户取消"这件事已经不存在**；
   ③ 拿不出"移除后更好"的可证伪判据 ⇒ 不做。这条记为**有意偏离**，不再当待办。
 - ✅ **anchor / 导出水位已收口到 SQLite 单事务**（V2.1 §2 原则 3，2026-09-23 完成）：

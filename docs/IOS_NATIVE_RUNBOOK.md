@@ -81,7 +81,8 @@ npm run test:ios
 `CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = RAI/RAI.entitlements`，模拟器包 `codesign -d --entitlements` 为空。
 此时 HealthKit 调用直接返回
 `Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement."`，
-`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift:293`，文案见 `RAI/HealthKitExport.swift:38`），
+`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift:1003-1026` 的
+`readAuthorizationState()` 四分支，文案见 `RAI/HealthKitExport.swift:42` 的 `HealthKitExportError`），
 首页与设置页显示「同步未完成」。
 
 模拟器的 Health 库本身也是空的：`~/Library/Developer/CoreSimulator/Devices/<udid>/data/Library/Health/healthdb.sqlite`
