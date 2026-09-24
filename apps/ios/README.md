@@ -11,7 +11,7 @@
 
 实现范围、设计映射及验收进度见 `design/TECHNOLOGY_SKIN.md`。2026-09-10 已完成 Xcode 模拟器及真机 SDK 编译、视觉修正、51 张原生截图复查和 10 项 UI 回归；构建、UI 回归结果及与设计图的必要差异见 [`验收记录`](design/acceptance/2026-09-09/visual-review/README.md)。不将 AI 设计图中的示例数字、失真文字或虚构图表当作产品数据。
 
-完整六张 4K 设计图、浏览页及生成提示词已提交在 [`design/technology-v1`](design/technology-v1/index.html)。
+六张 4K 设计图与浏览页已于 2026-09-24 移出仓库（原因与位置见 [`design/technology-v1/README.md`](design/technology-v1/README.md) 的「仓库体积」）；生成提示词仍在 `design/technology-v1/prompts.jsonl`。
 
 这是给 iPhone 使用的 SwiftUI 原生应用。手机不运行 Node.js、评分核心或服务端 SQLite；数据和模型结果仍由已配置的 RAI API 服务负责。旧 WKWebView 文件保留为开发期回退路径，不是原生页面的验收替代品。
 

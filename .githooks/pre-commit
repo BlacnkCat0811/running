@@ -5,6 +5,12 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
+# 仓库体积闸门：单个已跟踪文件不得超过 1.5 MB。触发面**刻意不收窄** —— 大文件可以从任何
+# 目录进来，而上一轮正是「在一个目录里清掉、又在另一个新目录复发」（27 MB 的 4K 设计板）。
+# 这条是路径无关的字节上限，每次提交都跑（毫秒级）。为什么用字节上限而不是 `.gitignore`
+# 模式（会静默拦掉验收截图），见 scripts/check-blob-size.mjs 头注释。
+node scripts/check-blob-size.mjs
+
 npm run typecheck
 
 # iOS 判据（typecheck-ios.sh + run-model-tests.sh）此前没有任何自动入口，
