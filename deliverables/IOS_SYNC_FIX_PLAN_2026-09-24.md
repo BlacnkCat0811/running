@@ -51,4 +51,23 @@ Sol 完成主要结构修改后交回未完成版本；主代理补齐编译调�
 - 最终结构门禁：235 项通过。
 - 定向突变 `[本轮新增2]`：12/77 条，0 失败；编译错误负向对照正确，源码恢复后回绿。这是部分验证，并非全量突变验收。
 
-现有 Timer 的两条 actor 隔离警告保留；没有修改其预算机制。未运行真机、模拟器或浏览器 E2E。所有改动留在工作区，未提交或部署。
+现有 Timer 的两条 actor 隔离警告保留；没有修改其预算机制。未运行真机、模拟器或浏览器 E2E。
+**☝️ 本节时点**：改动当时仍在工作区、未提交或部署 —— 后续状态见文末「状态更新」。
+
+## 状态更新（2026-09-24 18:30）
+
+本轮改动已**提交并部署**。本节数字以最终提交为准，上文各项为当轮读数。
+
+- **提交**：`e2e4110`（fix(ios)：`apps/ios` 23 文件 + `package.json`）/ `6824f6f`（docs(ios)）/ `9ff2211`（docs(deliverables)），
+  已推 gitee（`b34d95c..9ff2211`）。
+- **部署**：线上 `tpandmr.xyz` 已 `b34d95c → 9ff2211` 快进。本批路径**全是非运行时**（`apps/ios/**`、`docs/**`、
+  `deliverables/**`，以及 `package.json` 仅新增一个 script）⇒ **未 build、未 restart**；验收：迁移闸门 `pending: []`、
+  带 token `/v1/health` 200 且 `databaseReady:true`、匿名 `/v1/data-summary` 200 / `issues: []`。
+- **门禁（最终态实跑）**：`npm test` **822 / 818 pass / 0 fail / 4 skip，EXIT=0**（上文 819+3 是当轮读数）；
+  `npm run test:ios` **EXIT=0**，其中后台结构门禁 **252 checks / 0 failed**（上文 235 是当轮读数）。
+- **4 项遗留的最终态判定**（上文未列，证据见 `LEGACY_ITEMS_VERIFICATION_2026-09-24.md`）：
+  第 2、3、4 项**已修**；第 1 项（`handleEnterBackground` 未接恢复）**部分闭合** ——
+  它结构性无法自救（该函数拿不到 serverURL），但重排的真实入口是
+  `RaiAppDelegate.applicationDidEnterBackground` 按 `session.serverURL` 现读探针，
+  故原报的"切后台不重排"不成立，残留只是展示层在窄窗口可能偏低。
+- **仍未验收**（口径与上文一致）：真机后台验收；全量 77 条突变未重跑。
