@@ -55,7 +55,9 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 
 ### 可证伪性（这条不是"写着好看"）
 
-- **回归**：`apps/ios/tests/SyncStateCommitRegression.swift`（53 条），包含
+- **回归**：`apps/ios/tests/SyncStateCommitRegression.swift`（57 条）与
+  `apps/ios/tests/RouteSyncStatePersistenceRegression.swift`（39 条）；
+  2026-09-24 追加的第 3b / 第 11 节按职责分别住在这两处（水位在提交回归、route 在落盘回归），包含
   注入 `CREATE TRIGGER … BEFORE UPDATE ON sync_state` 与 `… BEFORE DELETE ON sync_tasks` 的**强制失败**用例，
   验证失败路径确实整段回滚、且不留下半份状态。
 - **结构门禁**：`apps/ios/tests/check-background-capabilities.py` §14
@@ -278,13 +280,83 @@ guard bound == SQLITE_OK else { fail("state anchor bind"); return false }
 
 ---
 
+## 补充 C：`Date` ↔ REAL 列**不是双射** —— 落盘前必须吸附到不动点
+
+*（2026-09-24 追加。这是决策一那道回读断言的**第二次**收获，第一次是补充 B。）*
+
+### 症状（真机报出，本机已复现）
+
+同步时用户看到：**「同步水位写入后无法读回一致的值，本次提交已回滚。」**
+
+它不是偶发：`HealthKitExport.swift:369` 的 `let exportedThrough = Date()` 带完整小数秒，
+而 `sync_state.export_end` 是 REAL 列，写入走 `timeIntervalSince1970`、读回走
+`Date(timeIntervalSince1970:)` —— 这两步合起来**不是恒等映射**。
+
+`Date` 内部存 `timeIntervalSinceReferenceDate`，与列里的 `timeIntervalSince1970` 差常量
+978307200。对 2026 年的时间戳二者之比 ≈ 1.8（< 2），加法那一步落在 Sterbenz 引理的邻居
+情形上：结果的 ulp（2⁻²¹）是原值网格（2⁻²³）的 2 倍 ⇒ **原值最低位为 1 的时间戳会被舍掉一位**。
+
+本机逐 ulp 扫 200,000 个真实时间戳的实测：
+
+| 形状 | 往返有损 |
+| :--- | :--- |
+| 逐 ulp 扫描 | **100,000 / 200,000**（恰好一半） |
+| 整秒时间戳 | **0 / 200,000** |
+| `Date()` 的当前值 | 有损 |
+
+⇒ 回读断言拿**原始 Date** 去比读回来的 Date，约一半概率判不等 ⇒ 一次**完全成功的**提交被
+整段回滚（决策一让异常方向只剩"这次没提交上"，所以它没有写坏数据，但用户就是同步不了）。
+route 一侧同因：`HealthKitExport.swift:286` 的 `routeNow = Date()` 同样带小数秒。
+
+### 🔴 为什么两层门禁此前都看不见它
+
+`SyncStateCommitRegression.swift` 的 fixture 是 `Date(timeIntervalSince1970: 1_700_000_000)`
+与 `1_800_000_000` —— **整秒**，而整秒的往返有损率是 0/200000 ⇒ 那批回归**永远绿**。
+这是「跑绿 ≠ 断言有效」的教科书形态：**fixture 的值落在守卫的盲区里**。
+
+### 决定
+
+**写入前把时间点吸附到该映射的不动点**（`Date.canonicalForREAL`），写与回读断言**共用同一个值**：
+
+- `commitSuccess` 入口：`let watermark = requested.storedInREAL`
+- `upsertRouteStates`：对每条 record 的两个时间字段做同样处理，**且比较用的也是规范化后的
+  record**（只规范化绑定值是没用的 —— 断言比的是整个 `RouteSyncRecord`）
+
+代价：时间点被吸附到约 1e-7 秒的网格上。对"上次导出到哪儿 / 上次查过没有"这两个语义无关紧要。
+
+### 可证伪性
+
+- **回归**：`SyncStateCommitRegression.swift` 第 3b 节。fixture 取 `1_790_000_000` 的
+  `base + 1 ulp`（**确定有损**），并**把前置条件也写成断言**
+  （`the lossy fixture must actually lose a bit in the REAL round trip`）——
+  这个 fixture 哪天变回无损，那几条会立刻红，而不是静默空转。
+- **结构门禁**：`check-background-capabilities.py` §14h-2 钉的是**写入路径的调用点**
+  （`requested.storedInREAL` / `canonicalForREAL`），不是只钉函数定义 ——
+  删掉调用点、定义还在，故障照样回来。
+- **突变**：`check-background-mutations.py` 两条（拿掉 `storedInREAL` / 拿掉 route 的
+  `canonicalForREAL`），期望红在**可跑回归**上。
+
+### ❌ 不要这样改
+
+- 不要改回"拿原始 Date 直接比"（哪怕理由是"`Date` 的 `==` 更直观"）。
+- 不要用"放宽断言"绕过（例如只比 `abs(a-b) < 1e-6`）—— 那会把"写入被静默忽略"与"写对了但
+  最低位不同"混成同一种东西，决策一这道闸门就废了。
+- 新增 REAL 时间列时不要另起一套比较 —— 落盘的时间点都必须过 `canonicalForREAL`。
+
+### 与补充 B 的关系
+
+两条是**同一个探针的两次收获**：补充 B 是"写进去的内容不确定"，补充 C 是"写进去的内容确定，
+但**读回来的不是它**"。两条都只在**同事务内回读**这一处才会暴露 —— 这再一次说明决策一不是装饰。
+
+---
+
 ## 这些不变式由什么守住（三层，缺一不可）
 
 | 层 | 载体 | 挡的是 |
 | :--- | :--- | :--- |
-| **结构门禁** | `apps/ios/tests/check-background-capabilities.py`（191 checks / 0 failed） | "改错了照样编译通过"的形状问题：调用顺序、比较值、判据载体是否还在 |
-| **可跑回归** | `SyncStateCommitRegression.swift`（53 条）、`BackgroundSyncPolicyRegression`、`gpx-quota.test.ts`（4 条） | **语义**：锚点改名挡不住的那些（例如 `mayCommit` 被改成恒真） |
-| **突变验证** | `apps/ios/tests/check-background-mutations.py`（62 条） | 上面两层的**断言有效性**本身：跑绿只说明"没红"，不说明"改坏了会红" |
+| **结构门禁** | `apps/ios/tests/check-background-capabilities.py`（220 checks / 0 failed） | "改错了照样编译通过"的形状问题：调用顺序、比较值、判据载体是否还在 |
+| **可跑回归** | `SyncStateCommitRegression.swift`（57 条）、`RouteSyncStatePersistenceRegression.swift`（39 条）、`BackgroundSyncPolicyRegression`、`gpx-quota.test.ts`（4 条） | **语义**：锚点改名挡不住的那些（例如 `mayCommit` 被改成恒真） |
+| **突变验证** | `apps/ios/tests/check-background-mutations.py`（76 条） | 上面两层的**断言有效性**本身：跑绿只说明"没红"，不说明"改坏了会红" |
 
 ⚠️ 已知的效力边界：**结构门禁只钉调用顺序，钉不了语义**。
 实测：把 `SyncStateCommitPlan.mayCommit` 改成恒返回 `true`，
@@ -304,3 +376,33 @@ guard bound == SQLITE_OK else { fail("state anchor bind"); return false }
 - **决策四**：`BackgroundSyncPolicy` 的"有任务行即不重新导出"不再成立（例如引入了多批次并行上传）。
 
 四条都要求同一个动作：**先写出"改完之后哪个场景从错变对"的判据，再去动代码。**
+
+
+## 2026-09-24 补充：后台恢复与 scope 隔离
+
+- 离线握手仅恢复候选身份，任务执行以在线握手为准；两者复用原有 64 位 URL 哈希缓存键。
+- 轨迹状态键为 `(scope, workout_uuid)`。旧表没有可信归属，事务迁移只清除降频记忆，保留任务与水位；版本标记防止重复清除。
+- 意图按代次确认，确认必须排在任务保存/成功提交之后。失败不确认，晚到通知不被旧代次吞掉。
+- 纯策略断言不代替接线验证：真实 UserDefaults、SQLite 失败与旧库升级回归，以及结构门禁共同覆盖本次修复。
+
+## 2026-09-24 补充（第二轮）：待办判定必须按目标读取
+
+- **"这个目标还有没有事要做"是一个按 URL 现读的问题**，答案只能来自只读探针
+  （`probePendingWork`），不能来自 `HealthKitSync` 上的展示标志 —— 后者属于最后一次写它的那个目标，
+  而单飞闸门拒绝的一轮从未写过任何标志。探针的判定是**三值**：有任务 / 确认空 / 不知道。
+  "不知道"（读盘失败、或库里有行但归属无法确定）既不许当成"没有待办"（会静默丢批次），
+  也不该被当成"有待办"永久重排 —— 因此身份未知时以"整库是否有任何任务行"作旁证。
+- **调度与完成回执共用同一个输入**：一个目标的待办快照。`reportedSuccess` 只在
+  "确认空且没有挂着的通知/恢复请求"时为真；其余（含不知道）一律报失败。
+- **意图与恢复请求是两个成因、两个存储槽**：合成一个槽会让一批旧 scope 的导出顺手确认掉
+  "新 scope 还没有批次"这条依据。两者的观察点都在**导出起点**，只有真正重新读 HealthKit 的那条路
+  才有资格认领通知；续传路径不得吃掉它之后到达的通知。
+- **"有旧任务就合成一条新数据意图"是错的**：旧任务本身就是重试依据，而合成出来的意图既无人可确认
+  （续传分支不认领），又会让后续多跑一次全量导出。
+- **受控重开**：日志打开/迁移失败不再等于"这个进程的续传能力作废"。重开是安全的，因为失败的迁移
+  已经回滚、版本标记幂等、且重开不删除任何文件。只读探针不重开；取得单飞所有权后、读取任务前
+  每次执行最多重开一次，失败按 `unknown` 保留重排依据。
+- **权威身份统一发布**：Native 页面连接、刷新及 HealthKit 同步都先为变化后的目标 scope 持久化
+  恢复请求，再更新原有握手缓存。请求带代次，只有目标 scope 的新导出落盘才能确认。
+- 依赖"两条回调谁先跑"（`applicationDidEnterBackground` 与 SwiftUI `scenePhase`）的写法一律不可接受：
+  两者之间没有先后保证。

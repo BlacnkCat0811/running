@@ -4,7 +4,9 @@
 三项机制——HealthKit background delivery（唤醒触发器）、`BGProcessingTask`（主载荷）、带 identifier 的
 background `URLSession`（字节搬运）——都已在 `apps/ios/RAI/` 里接线，静态判据由
 `tests/check-background-capabilities.py` 与 `BackgroundSyncPolicyRegression` 钉住
-（判据有效性由 `npm run test:ios:mutation` 逐条突变验证）。
+（判据有效性由 `npm run test:ios:mutation` 逐条突变验证；
+日常改动用 `npm run test:ios:mutation:scope` 按改动范围裁剪 —— 它只看改动文件落在哪个门禁的输入里，
+**不是**验收手段，产物带 `partial: true`）。
 🔴 **但"代码走到了"不等于"在真机上被调度了"**：真机验收是一个**独立验收项**，完成前不得把
 静态审查或模拟器构建写成"后台可用"（判据见文末）。在那之前，前台行为与 P1 完全一致；
 唯一已确定改变的是"切到后台"不再等于"用户取消"。HealthKit 导出仍复用
@@ -50,6 +52,12 @@ background `URLSession`（字节搬运）——都已在 `apps/ios/RAI/` 里接�
 
 - 事务内**先读旧值再写**，然后在 `COMMIT` 之前**回读断言**（比对"应该写成的值"，`.advance` 是单调取大）；
   断言放在提交前而不是提交后 —— 提交后失败会把一份**已经入库**的数据报成"同步失败"，而同一屏的"上次同步：刚刚"刚被写好。
+- 🔴 落盘 REAL 时间列之前，先把时间点吸附到该映射的**不动点**（`Date.canonicalForREAL`）：
+  `Date` ↔ `timeIntervalSince1970` **不是双射**（实测逐 ulp 扫 200,000 个真实时间戳，**恰好一半有损**），
+  而 `exportedThrough` / `routeNow` 都是带小数秒的 `Date()` ⇒ 回读断言会按约一半的概率把一次
+  **完全成功的**提交判成失败并整段回滚，用户看到「同步水位写入后无法读回一致的值」。
+  写与断言必须**共用同一个规范化后的值**；`sync_route_state` 那一侧还要连**参与比较的 record** 一起规范化。
+  详见 `docs/adr/ADR-004-healthkit-sync-invariants.md` 补充 C。
 - `DELETE FROM sync_tasks` 要校验 `sqlite3_changes() == 1`：删 0 行在原地是**静默**的（旧的 `clear(scope:)` 只判
   `sqlite3_step == SQLITE_DONE`），于是"我以为提交了"可以是假的。
 - 提交前还要过 `SyncStateCommitPlan.mayCommit`（= `SyncPhase.mayAdvanceAnchor`）：**阻塞态绝不推进 anchor**。
@@ -66,7 +74,7 @@ identifier 索引的两张表（`waiters` / `descriptions`），把它当"字节
 
 ### 按 workout 定频：Route 伴生状态机
 
-同库还有第三张表 `sync_route_state`（主键 `workout_uuid`，小写化，口径同 `HealthKitExport.routeFileWorkoutId`），
+同库还有第三张表 `sync_route_state`（复合主键 `(scope, workout_uuid)`，UUID 小写化，口径同 `HealthKitExport.routeFileWorkoutId`），
 存**每条 workout 的路线查询记忆**。它是"降频记忆"，和 `sync_state` 一样必须与任务同库 ——
 **不许落 `UserDefaults`、不许落独立 JSON、不许落内存单例**（门禁判 `UserDefaults` 零出现）。
 
@@ -285,3 +293,52 @@ P2-4 另有三条只能上真机才能定的东西，已列进 §11：
 3. 生命周期中止期间的**重传冗余**实际发生率（"字节归谁"一节末段）。量它的口径是：
    同一次数据变化在 nginx 上出现了几个 `POST /v1/imports/uploads`，以及服务端的
    `import_upload_busy`（429）出现了几次 —— 后者若为 0，说明我们确实只让一份字节在传。
+
+
+### 2026-09-24：冷启动恢复、轨迹隔离与意图交接
+
+后台读取任务前，在单飞所有权内从既有 `rai.handshake.<64位URL哈希>` 恢复 URL、离线身份和同步 scope。
+离线身份只决定是否启动工作；真正执行仍以在线握手为准，并更新同一缓存。健康数据通知显式携带目标 URL，
+不依赖本进程曾经前台同步。日志读取失败保守保留待办，不能当成空队列。
+
+轨迹降频记忆按同步 scope 隔离（含 serverId、athleteId、datasetEpoch）。`sync.sqlite` 的 `user_version=2`
+迁移在事务中重建旧轨迹表，丢弃无法确定归属的降频记忆；任务与水位保留。重复打开不再清除新表。
+
+后台意图采用代次，在本批任务可靠落盘或同步提交成功后才确认。握手/导出/写盘失败和生命周期中断不确认。
+新通知写入的新代次不被旧批次确认；续传时已存在的新数据意图保留给后续导出。
+生产存储器和交接协调器由 `HealthSyncBackgroundRecoveryRegression` 执行，scope/迁移由真实 SQLite 回归执行。
+
+真机仍需验证冷启动实际续传、新 scope GPX 交付，以及看门狗在 BGProcessingTask 下的预算读数；本机门禁不替代真机验收。
+
+### 2026-09-24（第二轮）：按目标读取的待办快照、恢复请求与受控重开
+
+**待办快照（只读探针）**。判据是 `HealthKitSync.probePendingWork(for:)`：按**目标 URL** 现读，
+返回 `HealthSyncBackgroundRecovery.PendingWork`，其中 `verdict` 有三值 ——
+`pending`（该目标盘上有任务行）/ `empty`（确认空：身份已知且两个候选 scope 都没有行，
+或身份未知但整库无行）/ `unknown`（读盘失败，或库里有行却都无法归属到本目标）。
+`.unknown` **不许**当成"没有待办"：调度（`shouldResubmit`）把三值里除 `empty` 以外的都算"还有事"，
+回执（`reportedSuccess`）只在 `empty` 且没有挂着的意图/恢复请求时才报成功。
+`BGProcessingTask` 的重排与完成回执、`applicationDidEnterBackground` 的重排、观察者的投递决策
+一律用快照，**不用** `HealthKitSync.hasPendingTask` 那个展示标志（原先给调度用的
+`hasBackgroundIntent` / `hasBackgroundIntent(for:)` 访问器随本轮删除，因为"这个目标有没有意图"
+现在只能由快照回答）—— 展示标志属于最后一次写它们的那个目标，而单飞闸门拒绝的一轮什么都没碰过。
+探针只读：不改 `active*`、不重开或迁移数据库、不删文件；数据库不可用时返回 `unknown`。
+`loadTask()` 不能当探针：它认 `activeScope`，且会把老 `UserDefaults` 候选补写回 `sync_tasks`。
+
+**意图的成因与观察点**。意图分两类、分开存：`healthData`（HealthKit 真实投递）与
+`scopeRecovery`（在线握手确认权威 scope 变了 ⇒ 新 scope 还没批次）。二者不共用一个槽，
+否则一次旧 scope 的成功会顺手确认掉新 scope 的重试依据。
+取消"有旧任务就合成新数据意图"：旧任务本身就是重试依据，合成出来的通知永远等不到确认（确认点只在导出起点），
+最终变成一次多余的全量导出。人工取消**不再**丢弃意图/恢复请求（中止的是这一趟，不是那条通知）。
+两个成因的观察点都在**导出起点**（`observeBackgroundIntentsForExportStart`）：只有"这一次导出真的开始了"
+才能说"它覆盖了那条通知"，代次比对排掉导出期间新到的通知；`inspect` 续接与重传已落盘 ZIP 两条
+恢复分支不重新读 HealthKit，因此不可能替通知背书。前台与后台共用这一处与同一个确认函数。
+`HealthSyncIdentityPublisher.publish` 是 Native 页面连接、刷新与 HealthKit 同步的统一在线身份发布入口：
+它先比较旧、新 sync scope，并在变化时将目标 scope 与代次写成恢复请求，再写既有握手缓存键。
+旧 scope 的完成或旧代次不能清除新 scope 的请求；只有新 scope 导出后的任务落盘或成功提交才能确认。
+反过来的崩溃窗口里新身份已发布、盘上什么都没记，下一轮纯后台冷启动会静默 `nothingToDo`。
+
+**受控重开**。`SyncTaskStore` 打开或迁移失败时不再只能靠重启 App 摆脱：`reopenIfUnavailable()`
+在单飞接纳后的执行入口、任何任务读取之前最多重试一次打开；失败保留待办，探针报告 `unknown`。
+重开安全的前提是迁移失败已 `ROLLBACK`、`PRAGMA user_version` 幂等、
+且**不删任何文件**（打不开就是打不开，不做"删库重来"）。
