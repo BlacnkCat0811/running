@@ -1631,10 +1631,27 @@ const migrations: readonly Migration[] = [
  *
  * 🔴 为什么不从 `up.toString()` 现算：那会把「构建工具当前的行为」变成持久化数据的一部分。
  * 2026-09-23 实测：`tsx`(esbuild) 下 `up.toString()` = `x=>{return x+1}`（注释/缩进/空白全被剥离）
- * ⇒ 给历史迁移的 `up` **加注释**不会改 checksum；而换成 `node file.ts`（Node 原生类型剥离，
- * 保留注释）⇒ **全部迁移集体失配、含线上在内的所有库立刻打不开**（实测抛
- * `Migration 1 checksum does not match the application`）。报错文本还会把根因误导到
- * 「有人偷改迁移」方向。
+ * ⇒ 给历史迁移的 `up` **加注释**不会改 checksum；而换成保留注释的执行通道
+ * （`node --experimental-strip-types`）⇒ 现算值**集体漂移**（22/22）。
+ *
+ * ⚠️ 但**现算值不参与运行时判定** —— 见下面 `migrationChecksum()` 取本表优先。
+ * 所以「换通道 ⇒ 既有库打不开」是 `342ae38` **冻结之前**的行为。2026-09-24 在干净 worktree
+ * 上四组对照实测（同一份真库副本，只换代码 / 通道）：
+ *
+ *   | 代码 | 通道 | 现算值漂移 | `open(既有库, refuse)` |
+ *   |---|---|---|---|
+ *   | 当前 | `node --import tsx` | 0/22 | **OK** |
+ *   | 当前 | `--experimental-strip-types` | 22/22 | **OK** |
+ *   | `342ae38^` | `node --import tsx` | —（尚无本表） | OK |
+ *   | `342ae38^` | `--experimental-strip-types` | —（尚无本表） | **THREW `Migration 1 checksum does not match the application`** |
+ *
+ * ⇒ **该故障模式已被这次冻结消除。** 注释若仍声称「换通道 ⇒ 所有库打不开」，会把人推向
+ * **真正危险的方向**：按门禁报错去「修复」它，也就是把冻结值改成新通道的转译产物。
+ * 既有库行里存的是**旧**冻结值，改表即让它们全部失配 —— 那才是唯一能让既有库打不开的动作。
+ *
+ * 附带事实：即便真去换通道，本应用也先**起不来** —— `apps/api/src` 实测有 **82 处** `.js` 相对导入
+ * （27 个文件：`./x.js` 76 处 + `../x.js` 6 处），原生类型剥离不做 `.js`→`.ts` 重写，
+ * 错误会出现在模块解析阶段、早于任何 checksum 判定。
  *
  * ⇒ 冻结值取自**现存库实际写入的值**，运行时判定与执行通道彻底解耦。
  * 2026-09-23 实测：本地与线上 22 个值逐条一致（摘要
@@ -1642,9 +1659,12 @@ const migrations: readonly Migration[] = [
  *
  * 两个配套门禁在 `test/migration-policy.test.ts`：
  *  1. `every migration has a frozen checksum` —— 新增迁移必须补冻结值；
- *  2. `frozen checksums match the transpiled source` —— 保留「改历史迁移的 up 会被发现」的能力。
- *     ⚠️ 它**同时**会在「TS 执行通道被换掉」时变红：那一刻**不要**更新冻结值（那会让既有库失配），
- *     应先恢复 `tsx` 通道；确需换通道时，必须先规划一次 checksum 重写迁移。
+ *  2. `frozen checksums still match the transpiled source` —— 保留「改历史迁移的 `up` 会被发现」
+ *     的能力（在 tsx 下，加注释**不会**让它变红）。它变红时按此顺序诊断：
+ *       a) 先看某个历史迁移的 `up` 是否被改过 —— 这是它真正要守的东西；
+ *       b) 再看 TS 执行通道是否被换掉（`production runs through tsx` 那条会同时红）。
+ *     ⚠️ 两种情形都**不要**把本表更新成新值；通道被换就先恢复 `tsx`。确需换通道时，
+ *     必须先规划一次 checksum 重写迁移，而不是就地把表改掉。
  */
 export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   1: "baf1c3f4b3d28323dac869d9ef20ae638c019a43b0eded150c4d451beff604ba",

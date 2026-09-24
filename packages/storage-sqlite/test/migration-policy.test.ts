@@ -112,9 +112,17 @@ test("migration CLI dry-run, explicit apply, idempotence and publication lock", 
 /**
  * 冻结校验和钉的是 `tsx`(esbuild) 转译产物的**形态**，不是源码文本。
  * ⇒ 「运行与迁移都走 tsx」是既有守卫的**前置条件** —— 按本仓纪律（守卫的前置条件本身也要有断言）
- * 在此钉住它。2026-09-23 实测：换成 `node --experimental-strip-types` 后 `up.toString()`
- * 保留注释与格式 ⇒ 抛 `Migration 1 checksum does not match the application`，
- * **所有既有库（含线上）打不开**，且报错文本会把根因误导到「有人偷改迁移」方向。
+ * 在此钉住它。
+ *
+ * 2026-09-24 四组对照实测（干净 worktree + 真库副本）：换成 `node --experimental-strip-types`
+ * 后 `up.toString()` 保留注释与格式 ⇒ `transpiledChecksumFor()` 的 **22/22 现算值漂移**、
+ * 下面 `frozen checksums still match` 那条**变红**；但运行时的
+ * `RaiDatabase.open(既有库, { migrationPolicy: "refuse" })` 在两条通道下**都是 OK**
+ * （判定走 `FROZEN_MIGRATION_CHECKSUMS`）。「换通道 ⇒ 库打不开」只出现在 `342ae38` **冻结之前**，
+ * 已在其父版本上复现、并在当前代码上确认不再发生。
+ *
+ * 🔴 所以本条变红**不要**去更新冻结表 —— 那才是唯一能让既有库失配的动作。先恢复 tsx 通道。
+ * 另：真要换通道，本应用会先因 `apps/api/src` 的 **82 处** `.js` 相对导入（`./x.js` 76 + `../x.js` 6）而起不来。
  */
 test("production runs and migrates through tsx, the channel frozen checksums are pinned to", () => {
   const rootPackage = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8"));
