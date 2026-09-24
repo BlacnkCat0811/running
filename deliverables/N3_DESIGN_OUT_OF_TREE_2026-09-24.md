@@ -16,6 +16,8 @@
 | 为什么"压缩"不够 | PNG 已是 DEFLATE，二次压缩收益≈0（`git gc` 结束后 `size-pack` 仅 3.19 MiB，说明**大头全在松散对象里**：**73.76 MiB**） |
 | 为什么"加 `.gitignore` 规则"不够 | 🔴 **根因不是规则太窄**——逐版本扫 `.gitignore` 全部 8 个历史提交，**从未出现过任何 `*.png`／`design`／`images` 规则**。上轮做的是一次**一次性人工清理**，没留下任何自动入口 ⇒ 换目录自然复发 |
 | 采用的路径 | ① 外置备份（sha256 逐个校验）→ ② 改写全部引用 → ③ `git rm` → ④ **`git filter-repo --invert-paths` 重写全历史** → ⑤ 强推 |
+| **结果（实测）** | 全新 `clone` **77 MB → 33 MB（-57%）**；`.git` 本地 **77 MB → 32 MB**；历史中设计图 **6 → 0**；提交数 **239 不变**；`git fsck --full` **零输出** |
+| 🔴 过程中的坑 | filter-repo 报"完成"**不等于**对象真没了。第一次清理后 `in-pack` 仍是 **3659**（可达只有 3647）⇒ 差额 12 个对象 = 27.34 MiB 全都还在。根因是一个**残留 linked worktree 的 stale index cache-tree**（详见 §四点五）——`git worktree prune` 一行解决 |
 | 防复发 | 新增**路径无关**的体积闸门 `scripts/check-blob-size.mjs`，挂在 `.githooks/pre-commit` **首段**（触发面**刻意不收窄**：每次提交都跑，毫秒级） |
 
 ---
@@ -114,13 +116,141 @@ visual-review/index.html：<img> 标签总数 = 49      ← 验收证据一张�
 | `HEAD` 最大 blob | **4.81 MB**（`01-today-body.png`） |
 | 目标路径历史对象 | **22 条**（涉及 **2 个提交**：`255a7d8`、`590f58b`） |
 
-### 4.2 重写命令与结果
+### 4.2 重写命令
+
+🔴 **不能用 `--path apps/ios/design/technology-v1 --invert-paths`**（整目录）——那会连
+`README.md` 与 `prompts.jsonl` 一起从历史里删掉，而这两个文件我们**明确要保留**。
+必须逐个点名：
+
+```bash
+git filter-repo --force --invert-paths \
+  --path apps/ios/design/technology-v1/01-today-body.png \
+  --path apps/ios/design/technology-v1/02-workouts.png \
+  --path apps/ios/design/technology-v1/03-plan.png \
+  --path apps/ios/design/technology-v1/04-analysis.png \
+  --path apps/ios/design/technology-v1/05-settings-sync.png \
+  --path apps/ios/design/technology-v1/06-states-body-detail.png \
+  --path apps/ios/design/technology-v1/index.html
+```
+
+（`--force` 是必需的：filter-repo 默认只接受"新 clone"。）
+
+### 4.3 先在副本上试跑（不碰真库）
 
 ```
-git filter-repo --path apps/ios/design/technology-v1 --invert-paths --force
+git clone --mirror /Users/ta/Documents/rai-git-mirror-2026-09-24 /tmp/rai-rewrite-test
+/tmp/frvenv/bin/git-filter-repo --force --invert-paths --path … （同上）
 ```
 
-> ⏳ 结果栏在重写执行后回填（见本文件末尾「重写后回填」）。
+| 副本指标 | 试跑前 | 试跑后 |
+|---|---|---|
+| 体积 | 77 M | **31.63 MiB** |
+| 提交数 | 239 | **239** |
+| `technology-v1` 下的 `.png` | 6 | **0** |
+| tip 树里该目录 | 9 项 | **`README.md` + `prompts.jsonl`** |
+
+⇒ 参数正确、结果可预期，才动真库。
+
+### 4.4 真库重写结果
+
+`HEAD` = **`09f9ffb`** —— 与副本试跑**完全一致**（重写是确定性的，可作互校证据）。
+
+| 指标 | 重写前 | 重写后 |
+|---|---|---|
+| `.git` | 77 MB | **32 MB** |
+| 松散对象 | 73.76 MiB（2808） | **0** |
+| `size-pack` | 58.97 MiB | **31.7 MiB** |
+| in-pack 对象数 | 3659 | **3647**（= 可达对象数，一个不多） |
+| 历史中 `technology-v1` 的 `.png` | 6 | **0** |
+| 提交数（`--all`） | 239 | **239** |
+| `git fsck --full` | — | **无任何输出** |
+
+**SHA 映射（旧 → 新）**：
+
+| 旧 | 新 | 提交 |
+|---|---|---|
+| `7e05285` | `950462a` | pre-commit 迁移冻结门禁（基线） |
+| `342ae38` | `31c58ea` | 迁移校验和冻结 |
+| `41a2e61` | `9e1cf13` | **N-3 设计板出库 + 体积闸门** |
+| `a65293b` | `83ec794` | **N-1 注释订正** |
+| `dbe2951` | `378cb66` | **N-2 身份算法闸门** |
+| `d2a7f0d` | `09f9ffb` | **docs：三份修复报告** |
+
+### 4.5 远端与全新 clone 验收（决定性证据）
+
+```
+git push --force -u origin main
+  → + 7e05285...09f9ffb main -> main (forced update)
+
+git clone https://gitee.com/tpandmr/running.git /tmp/rai-fresh-clone
+```
+
+| 指标 | 重写前 | 重写后 |
+|---|---|---|
+| 全新 clone 的 `.git` | **77 MB** | **33 MB** |
+| `size-pack` | — | **33,101 KB** |
+| 历史中 `technology-v1` 的 `.png` | 6 | **0** |
+| `cat-file -t d28cee4d`（4.81 MB 那张） | blob | **`fatal: Not a valid object name`** |
+| 提交数（`main`） | 215（重写前同数） | **215** |
+| `HEAD` | — | `09f9ffb` ✔ 与本地一致 |
+
+⇒ **降 44 MB（-57%）**。其中设计板本体 **27.24 MB**，其余是那 22 个历史对象在多个分支上的重复副本与打包开销。
+（新 clone 3596 个对象 < 本地 3647，差额是**只存在于本地**的 `backup/*`、`land/*` 分支——它们**没有**被推送到远端。）
+
+---
+
+## 四点五、🔴 清理未生效的真相：残留 linked worktree 的 stale cache-tree
+
+**这一步比重写本身更值得记录。**
+
+filter-repo 报"Completely finished"，`git log` 也正确 —— 但 `git count-objects` 显示
+**in-pack 3659**，而 `git rev-list --objects --all` 只有 **3647**。
+差额 **12 个不可达对象 ≈ 27.34 MiB**，正是那 7 个文件 + 5 个旧树 —— **目标没达成**。
+
+### 试过的、全部无效的清理手段
+
+| 命令 | 结果 |
+|---|---|
+| `git repack -a -d -f` | in-pack 仍 3659 |
+| `git repack -A -d` + `git prune --expire=now` | 仍 3659 |
+| `git repack -a -d --no-keep-unreachable` | 仍 3659 |
+| `git -c gc.cruftPacks=false gc --prune=now` | 仍 3659 |
+| `git repack -a -d --cruft` | 仍 3659 |
+| `git reflog expire --expire=now --all`（reflog 本来就已 0 条） | 无变化 |
+
+`git repack -h` 给出线索：`-k, --[no-]keep-unreachable   with -a, repack unreachable objects`
+⇒ `-a` 家族**默认就会把不可达对象一起重打包**，所以从"打包策略"这一侧怎么调都没用。
+
+### 真正的根因（`git fsck` 一句话点破）
+
+```
+error: 840267aaa101ad88483eecfb267b8f48eb22203b:
+       invalid sha1 pointer in cache-tree of .git/worktrees/rai-n2/index
+```
+
+🔴 **`.git/worktrees/rai-n2/` 是本次会话早先建的 linked worktree**（工作目录 `/private/tmp/rai-n2`
+**早已不存在**，记录还在，被 git 标为 `prunable`）。
+
+- filter-repo **重写了这个 worktree 的 `HEAD`**（`950462a`，与重写后一致）；
+- 但**没有重写它 `index` 里的 `cache-tree`** —— 那个陈旧 cache-tree 仍指着重写前的根树 `840267a`；
+- 而 **git 的 gc/repack 会把 linked worktree 的 index 也当作可达性根** ⇒ 旧根树 + 6 张图被一路保活。
+
+### 修法（一行）
+
+```bash
+git worktree prune      # Removing worktrees/rai-n2: gitdir file points to non-existent location
+```
+
+⇒ 立刻 `git fsck --full` **零输出**，in-pack 从 3659 掉到 **3647**，`.git` 从 59 MB 掉到 **32 MB**。
+
+### 为什么副本试跑是干净的
+
+`git clone --mirror` 出来的副本**没有 worktree 记录**，所以同一个 filter-repo 在副本上
+一次就干净。⇒ **"副本上干净"不能替代"真库上干净"**，两者差的就是这类**仓库外挂状态**
+（linked worktree / reflog / `.keep` pack / 伪 ref）。
+
+> 📌 这条已写进项目记忆：**"filter-repo 跑完 ≠ 对象真没了"**，判据必须是
+> `in-pack == rev-list --objects --all 的对象数`，不是"命令退出码为 0"。
 
 ---
 
@@ -128,12 +258,16 @@ git filter-repo --path apps/ios/design/technology-v1 --invert-paths --force
 
 | | |
 |---|---|
-| **验收标准** | ① 新 `clone` 体积真降 ≈27 MB；② `git log --all --objects -- apps/ios/design/technology-v1` 在**所有 ref** 上归零；③ `git cat-file` 任一历史提交的该路径 ⇒ 不存在；④ 工作树 `git status` 干净、`npm test` 全绿；⑤ 备份目录 6 张 PNG sha256 可校验 |
-| **回滚** | 🟡 **仅靠备份**。`git revert` **无效**（历史已被重写，没有"上一步"）。回滚动作 = 从 `/Users/ta/Documents/rai-design-archive-technology-v1/` 重新拷回并提交（**新的 SHA，旧 SHA 回不来**） |
-| **不可逆风险** | 🔴 **全部提交 SHA 改变**；既有 clone 与远端分支失配，需强推 + 其他人重新 clone；4 个本地 `backup/pre-rewrite-*` 分支也会被改写。**此路径已由用户显式确认。** |
+| **验收标准** | ① 全新 `clone` 体积真降（实测 **77 MB → 33 MB**）；② `git rev-list --all --objects` 中 `technology-v1` 的 `.png` **归零**；③ `git cat-file -t <blob>` ⇒ not a valid object；④ 工作树干净、`git fsck --full` **零输出**、`in-pack == rev-list --objects --all` 计数；⑤ 提交数不变（239 / main 215）；⑥ 备份目录 6 张 PNG sha256 可校验 |
+| **回滚** | 🟡 **仅靠备份**。`git revert` **无效**（历史已被重写，没有"上一步"）。回滚动作 = 从 `/Users/ta/Documents/rai-design-archive-technology-v1/`（设计图）或 `/Users/ta/Documents/rai-git-mirror-2026-09-24`（重写前完整镜像，含 `.git`）恢复，**但旧 SHA 回不来** |
+| **不可逆风险** | 🔴 **全部提交 SHA 改变**；既有 clone 与远端失配，需强推 + 其他人重新 clone；4 个本地 `backup/pre-rewrite-*` 分支也被改写（已在重写后逐一确认仍可解析）。**此路径已由用户显式确认。** |
 
 ---
 
-## 六、重写后回填
+## 六、补充：删除 `index.html` 的理由
 
-> ⏳ 待执行。
+`index.html`（3.5 KB）本身不是体积问题，但它**整个文件就是那 6 张图的浏览页**（`<img>` 全指向
+`technology-v1/*.png`）。图出库后它已无对象可指向 ⇒ 与图同批出库，引用改由
+`acceptance/2026-09-09/visual-review/index.html` 的说明段落承担。
+仓库外的归档里同时保留了它（`~/Documents/rai-design-archive-technology-v1/index.html`）。
+
