@@ -20,6 +20,18 @@ final class HealthKitSync {
     private var activeScope = "unbound"
     private var activeServerURL: URL?
     private var activeIdentity: RaiHandshake?
+    /// 本次**导出起点**观察到的健康数据通知代次。
+    ///
+    /// 观察点必须在这里，不能放在"后台一轮的开头"：后台一轮完全可能是在**续传一份已经存在
+    /// 的 ZIP**（那条分支不重新读 HealthKit），而通知说的是"有这次导出里没有的数据"。
+    /// 按一轮的开头确认，等于让一份**早于通知生成**的字节去认领那条通知 —— 那批数据从此
+    /// 没人导（要等下一次真实投递或用户手动点）。
+    /// 只有"这一次导出真的开始了"才能说"它覆盖了这条通知"；代次比对
+    /// （`shouldAcknowledgeIntent`）负责排掉导出期间又新到的那一条。
+    private var backgroundIntentInFlight: HealthSyncBackgroundRecovery.IntentObservation?
+    /// 本次导出起点观察到的**恢复请求**代次。成因与通知不同（见 `IntentCause`），
+    /// 必须分开确认：合成一个槽会让"旧 scope 的导出"顺手删掉"新 scope 还没有批次"这条依据。
+    private var backgroundRecoveryInFlight: HealthSyncScopeRecoveryStore.Observation?
     private let taskStore = SyncTaskStore()
     private let api = RaiAPIClient()
     private let syncOwner = HealthSyncTaskOwner()
@@ -69,6 +81,14 @@ final class HealthKitSync {
     /// **新的**投递；这个记的是"有一条已经到达但我还没处理的变更"。混用一个键的后果是
     /// 后者会被前者的写入时机（`markSuccess`）意外清掉。
     private static let backgroundIntentKey = "rai.hk.backgroundIntent"
+    /// 「在线握手确认权威 scope 变了，新 scope 还没有批次」的恢复请求位。
+    ///
+    /// 与 `backgroundIntentKey` 分开存是刻意的：合成一个槽之后，一批**旧 scope** 的导出
+    /// 成功就会顺手确认掉它，于是新 scope 再也没人重开（现象是后台静默 `nothingToDo`）。
+    /// 它同时解决一个崩溃窗口：确认 scope 变了之后，若"登记依据"晚于"发布新身份缓存"，
+    /// 进程死在中间就会留下"新身份已发布、盘上却什么都没记"——下一轮纯后台冷启动按新 scope
+    /// 读不到任何东西，于是**静默地什么都不做**。
+    private static let backgroundRecoveryKey = "rai.hk.backgroundRecovery"
     private static let taskKey = "rai.hk.syncTask"
     /// Inclusive overlap so workouts finalized just after the previous export are not missed.
     private static let overlap: TimeInterval = 48 * 60 * 60
@@ -76,6 +96,14 @@ final class HealthKitSync {
     /// 老 payload 时代唯一用过的 ZIP 文件名。新代码按 `upload-<payloadHash>` 命名，
     /// 这个名字只为**读老 payload** 留着。
     private static let legacyZipName = "upload.zip"
+
+    private var backgroundIntentStore: HealthSyncBackgroundIntentStore {
+        HealthSyncBackgroundIntentStore(baseKey: Self.backgroundIntentKey)
+    }
+
+    private var backgroundRecoveryStore: HealthSyncScopeRecoveryStore {
+        HealthSyncScopeRecoveryStore(baseKey: Self.backgroundRecoveryKey)
+    }
 
     /// 批次产物一律**按 `payloadHash` 确定性命名**。
     ///
@@ -126,6 +154,11 @@ final class HealthKitSync {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return RaiURLSession.make(configuration: configuration)
     }()
+
+    /// 后台额度看门狗的安全余量（秒）：剩余后台时间低于该值就主动收尾，
+    /// 抢在系统 expiration handler（约 30s 临近到期才回调）与 OOM 收杀之前。
+    /// 见 `performSync` 里的 `budgetWatchdog`。
+    private static let backgroundTimeSafetyMargin: TimeInterval = 5
 
     // MARK: 由系统搬运字节的那条路（P2-4）
 
@@ -234,25 +267,34 @@ final class HealthKitSync {
     }
 
     func syncIfNeeded(to serverURL: URL?, apiToken: String = "", force: Bool = false) async {
-        guard let serverURL, !syncOwner.isRunning else { return }
-        let urlScope = Self.urlScope(for: serverURL)
-        // 🔴 卡在阻塞态时，节流不该挡住恢复（文档 §3.3 / §3.4）。
-        // 那 15 分钟是给**新的投递**用的，而这两个阶段等的是一个**外部条件** ——
-        // 条件刚满足（用户刚解锁 / 刚重新登录）就被节流挡下，等于让用户白等一轮，
-        // 而界面上仍然写着"等解锁 / 等登录"。
-        //
-        // 判据必须读**盘上**那份自述：进程重启之后内存 `phase` 回到 `idle`，
-        // 而"卡在等凭证"这件事只留在 `sync_tasks` 那一行里。
-        let persistedPhase = loadTask()?.resolvedPhase
-        let isBlocked = persistedPhase?.isBlocked ?? SyncPhase.migrate(phase).isBlocked
-        if !force, !isBlocked {
-            let last = UserDefaults.standard.object(forKey: scopedKey(Self.lastAutoSyncKey, scope: urlScope)) as? Date
-            if let last, Date().timeIntervalSince(last) < Self.autoSyncInterval { return }
+        guard let serverURL else { return }
+        // 恢复上下文与读盘都放进单飞所有权里：若另一 server URL 的前台/后台同步已经在跑，
+        // `run` 会在碰任何 active* 字段之前拒绝本轮，避免跨服务端覆盖活动上下文。
+        _ = await syncOwner.run { [weak self] in
+            guard let self else { return }
+            guard self.prepareJournalForExecution() else { return }
+            self.restoreBackgroundContext(for: serverURL)
+            let urlScope = Self.urlScope(for: serverURL)
+            // 🔴 卡在阻塞态时，节流不该挡住恢复（文档 §3.3 / §3.4）。
+            // 判据必须读**盘上**那份自述：进程重启后内存 phase 回到 idle，阻塞态只在任务行里。
+            let persistedPhase = self.loadTask()?.resolvedPhase
+            let isBlocked = persistedPhase?.isBlocked ?? SyncPhase.migrate(self.phase).isBlocked
+            if !force, !isBlocked {
+                let key = self.scopedKey(Self.lastAutoSyncKey, scope: urlScope)
+                let last = UserDefaults.standard.object(forKey: key) as? Date
+                if let last, Date().timeIntervalSince(last) < Self.autoSyncInterval { return }
+            }
+            await self.performSync(to: serverURL, apiToken: apiToken, full: false)
         }
-        await sync(to: serverURL, apiToken: apiToken)
     }
 
     /// 用户主动取消（同步按钮 / App Intent）。**这是唯一会产出 `phase == "cancelled"` 的路径。**
+    ///
+    /// 🔴 **这里不再丢弃意图位。** 旧版本丢的是"本轮预先登记"的那一代，而那一代当时由
+    /// `performBackgroundPass` **凭空合成**（有旧任务就当作有新数据）。合成被删掉之后
+    /// （见 `performBackgroundPass`），这里剩下的就只有**真实投递**的通知 —— 而人工取消
+    /// 中止的是"这一趟"，不是"这条通知所代表的变更"。把它删掉，那批健康数据就只能等下一次
+    /// 投递或用户手动点同步；保留它只是让下一轮后台重试一次（代价远小于"静默丢一次变更"）。
     func cancelSync() {
         guard syncOwner.cancel() || isBusy else { return }
         cancelCause = .manual
@@ -273,19 +315,29 @@ final class HealthKitSync {
     ///
     /// 刻意不在这里做任何网络或 HealthKit 工作：切后台的处理必须在几十毫秒内返回。
     func handleEnterBackground() {
-        // 刷新"磁盘上还有没有没走完的批次"必须放在 `isBusy` 守卫**之前**：
+        // 🔴 刷新"磁盘上还有没有没走完的批次"必须放在 `isBusy` 守卫**之前**：
         // 需要它更新的正是"在飞的工作刚被中断"这个时刻，而那一刻 `isBusy` 可能已经归 false。
-        let task = loadTask()
-        hasPendingTask = task != nil
+        //
+        // 两个来源，刻意分开取：
+        //   - **探针**按本次会话的服务端现读（不认 `activeScope`、不补写迁移数据）。
+        //     这里用 `loadTask()` 是错的：切后台这一刻 `activeScope` 可能还指向用户**刚刚切走**
+        //     的那个服务端，于是界面会拿 A 的结论去说 B 有没有待办。
+        //     `.unknown`（读盘失败 / 归属不明）算"有" —— 那正是"界面显示一切正常、磁盘上却
+        //     卡着一批"的由来。
+        //   - **在飞的那一趟**用它自己的上下文（`active*` 就是那次同步写下的），不能被用户刚
+        //     切换到的服务端覆盖；否则下面的 `hasUploadTask` 会去问另一批的 `payloadHash`。
+        let pending = activeServerURL.flatMap { probePendingWork(for: $0) }
+        let inFlightTask: SyncTaskState? = isBusy ? loadTask() : nil
+        hasPendingTask = inFlightTask != nil || (pending?.hasUnfinishedWork ?? false)
         guard isBusy else { return }
         switch HealthSyncLifecycle.enterBackground(
             phase: phase,
             isBusy: isBusy,
-            hasJobId: task?.jobId != nil,
+            hasJobId: inFlightTask?.jobId != nil,
             // 字节归系统时（background URLSession 还在搬这一批）⇒ 一根手指都不许碰，
             // 连 `stopResumable` 都不能落 —— 中止的是"等结果"，不是"搬字节"
             // （两条路的区别见 `RaiBackgroundUploadSession.abandonWaiting`）。
-            hasUploadTask: systemUploadInFlight(payloadHash: task?.payloadHash)
+            hasUploadTask: systemUploadInFlight(payloadHash: inFlightTask?.payloadHash)
         ) {
         case .doNothing:
             break
@@ -386,6 +438,7 @@ final class HealthKitSync {
     func sync(to serverURL: URL?, apiToken: String = "", full: Bool = false) async -> Bool {
         await syncOwner.run { [weak self] in
             guard let self else { return }
+            guard self.prepareJournalForExecution() else { return }
             await self.performSync(to: serverURL, apiToken: apiToken, full: full)
         }
     }
@@ -395,23 +448,103 @@ final class HealthKitSync {
     /// 为什么不能只靠 `submit`：`applicationDidEnterBackground` 每次切后台都会 submit 一次
     /// （请求是一次性的），而"切后台"不等于"数据变了"。没有这个意图位，一个**过期的**待发请求
     /// 在数据没变时落到 BGTask 上会变成一次白读 HealthKit 的全量导出 —— 那是最贵的一步。
-    func recordBackgroundIntent() {
-        guard let url = activeServerURL else { return }
-        UserDefaults.standard.set(Date(), forKey: scopedKey(Self.backgroundIntentKey, scope: Self.urlScope(for: url)))
+    func recordBackgroundIntent(for serverURL: URL? = nil) {
+        guard let url = serverURL ?? activeServerURL else { return }
+        backgroundIntentStore.record(scope: Self.urlScope(for: url))
     }
 
-    /// 读并**清掉**意图位。叫 `consume` 是因为它只能被用一次：同一次数据变化不该让两轮后台都跑。
-    private func consumeBackgroundIntent(scope: String) -> Bool {
-        let key = scopedKey(Self.backgroundIntentKey, scope: scope)
-        guard UserDefaults.standard.object(forKey: key) != nil else { return false }
-        UserDefaults.standard.removeObject(forKey: key)
-        return true
+    private func backgroundIntentObservation(for serverURL: URL) -> HealthSyncBackgroundRecovery.IntentObservation? {
+        backgroundIntentStore.observe(scope: Self.urlScope(for: serverURL))
     }
 
-    /// 磁盘上是否记着"有新数据待同步"。给 `BackgroundRunPolicy.shouldResubmit` 用。
-    var hasBackgroundIntent: Bool {
-        guard let url = activeServerURL else { return false }
-        return UserDefaults.standard.object(forKey: scopedKey(Self.backgroundIntentKey, scope: Self.urlScope(for: url))) != nil
+    private func backgroundRecoveryObservation(for serverURL: URL) -> HealthSyncScopeRecoveryStore.Observation? {
+        backgroundRecoveryStore.observe(urlScope: Self.urlScope(for: serverURL), targetScope: activeScope)
+    }
+
+    /// 🔴 记下**导出起点**观察到的两个代次。前台与后台共用这一处 ⇒ 确认逻辑也就只有一份。
+    ///
+    /// 为什么必须在这一刻而不是"本轮开始时"：`performSync` 有两条**不重新读 HealthKit** 的
+    /// 恢复分支（`inspect` 续接、重传已落盘的 ZIP）。它们用的是**早于通知**生成的字节，
+    /// 没有资格替那条通知背书。把它们的位置当作观察点，那批新数据就再也没人导。
+    private func observeBackgroundIntentsForExportStart(for serverURL: URL) {
+        backgroundIntentInFlight = backgroundIntentObservation(for: serverURL)
+        backgroundRecoveryInFlight = backgroundRecoveryObservation(for: serverURL)
+    }
+
+    private func clearBackgroundIntentObservations() {
+        backgroundIntentInFlight = nil
+        backgroundRecoveryInFlight = nil
+    }
+
+    /// 只确认导出起点看到的那一代；期间新到的 HealthKit 通知会写入新 UUID，必须留下。
+    /// 两个成因**分别**确认：合在一起确认会让一次旧 scope 的成功顺手删掉另一条依据。
+    private func acknowledgeBackgroundIntent(
+        checkpoint: HealthSyncBackgroundRecovery.DurableCheckpoint
+    ) {
+        _ = backgroundIntentStore.acknowledge(backgroundIntentInFlight, checkpoint: checkpoint)
+        _ = backgroundRecoveryStore.acknowledge(
+            backgroundRecoveryInFlight, targetScope: activeScope, checkpoint: checkpoint
+        )
+    }
+
+    /// 🔴 **只读**待办探针：按**目标 URL** 现读一份盘上快照。
+    ///
+    /// 它只回答一个问题：「**这个服务端**在盘上还有没有没走完的活儿，或者一条待处理的通知」。
+    /// 调度（要不要再排一轮）与完成回执（报成功还是失败）都必须由它决定，不能用 `HealthKitSync`
+    /// 上的展示标志 —— 那些标志属于**最后一次**写它的那次同步，而"用户刚切换服务端"与
+    /// "单飞闸门拒绝了这一轮"这两个时刻，标志描述的恰恰不是同一件事。
+    ///
+    /// 为什么不能直接拿 `loadTask()` 当探针（三条，每条都是可见缺陷）：
+    ///   1. 它认的是 `activeScope`，而不是"这个 URL" —— 切服务端之后那属于另一次同步；
+    ///   2. 它会把老的 `UserDefaults` 候选**补写**回 `sync_tasks`——探针不许有副作用；
+    ///   3. 它把"读不出来"记成 `taskDecodeError`，而调用方据此把它当成"没有任务"。
+    ///
+    /// 不改 `active*`、不迁移旧任务、不重开数据库、不删任何文件、不碰系统上传。
+    ///
+    /// - Returns: 快照；`serverURL == nil` 时返回 `nil`（没有目标就没有"这个目标有没有活儿"）。
+    func probePendingWork(for serverURL: URL?) -> HealthSyncBackgroundRecovery.PendingWork? {
+        guard let serverURL else { return nil }
+        #if os(iOS)
+        let identity = CacheStore.loadHandshake(baseURL: serverURL)
+        #else
+        let identity: RaiHandshake? = nil
+        #endif
+        let urlScope = Self.urlScope(for: serverURL)
+        let authoritativeScope = identity.map { Self.syncScope(for: serverURL, identity: $0) }
+        // 两个候选 scope 都要看，顺序是"权威在前"：`syncScope` 上是本次身份的行；URL scope 上是
+        // 「还没握过手 / 老版本」留下的行（`loadTask()` 的 UserDefaults 回退正是为它们写的）。
+        var scopedTaskFound = false
+        var readFailed = false
+        for scope in [authoritativeScope, urlScope].compactMap({ $0 }) where !scopedTaskFound && !readFailed {
+            switch taskStore.hasTask(scope: scope) {
+            case .some(true): scopedTaskFound = true
+            case .some(false): break
+            case .none: readFailed = true
+            }
+        }
+        // 库里"有没有归属不明的行"只在身份未知时才需要问：身份已知时本目标的结论已经确定，
+        // 别的 scope 上那一行不属于它（与 `loadTask()` / `taskMatches` 的口径一致）。
+        var storesAnyTask = false
+        if !readFailed && !scopedTaskFound {
+            switch taskStore.hasAnyTask() {
+            case .some(true): storesAnyTask = true
+            case .some(false): storesAnyTask = false
+            case .none: readFailed = true
+            }
+        }
+        return HealthSyncBackgroundRecovery.PendingWork(
+            serverURL: serverURL.absoluteString,
+            urlScope: urlScope,
+            scope: authoritativeScope ?? urlScope,
+            verdict: HealthSyncBackgroundRecovery.pendingWorkVerdict(
+                identityKnown: identity != nil,
+                scopedTaskFound: scopedTaskFound,
+                storesAnyTask: storesAnyTask,
+                readFailed: readFailed
+            ),
+            hasIntent: backgroundIntentStore.hasIntent(scope: urlScope),
+            hasRecoveryRequest: backgroundRecoveryStore.hasRequest(urlScope: urlScope)
+        )
     }
 
     /// 后台一轮（由 `BGProcessingTask` 驱动）。判据全部来自纯函数，这里只做接线。
@@ -420,10 +553,57 @@ final class HealthKitSync {
     ///   1. 先读盘上的任务行 —— `hasPendingTask` 的真实来源（它同时决定报给系统的成败）。
     ///   2. `BackgroundRunPolicy.action` 决定这一轮推进哪一段。**一次后台运行只推进一个批次**。
     ///   3. 只有 `.startFreshSync` 才允许重新导出，而它要求**盘上没有任务行**（见该函数说明）。
-    func runBackgroundPass(to serverURL: URL?, apiToken: String) async {
+    ///
+    /// 🔴 **返回值是本轮收工时按本次目标现读的快照**（`probePendingWork`）。调用方的重排与
+    /// 完成回执必须用它，不能用 `HealthKitSync` 上的展示标志：单飞闸门拒绝掉的那一轮
+    /// 一个字段都没碰过，而那些标志属于另一次同步。
+    @discardableResult
+    func runBackgroundPass(
+        to serverURL: URL?,
+        apiToken: String
+    ) async -> HealthSyncBackgroundRecovery.PendingWork? {
+        guard let serverURL else { return nil }
+        // 与 `syncIfNeeded` 一样，先取得单飞所有权，再恢复/覆盖 active*。若前台正在同步另一
+        // server URL，本轮会在任何上下文字段变化之前被拒绝。
+        let accepted = await syncOwner.run { [weak self] in
+            guard let self else { return }
+            guard self.prepareJournalForExecution() else { return }
+            await self.performBackgroundPass(to: serverURL, apiToken: apiToken)
+        }
+        if !accepted {
+            // 🔴 被拒绝**不等于**"没事可做"。前台的另一个目标正握着所有权 ⇒ 本轮没改过任何
+            // 字段，而 `hasPendingTask` 描述的是那个目标。拿它报成败就是拿别人的结论给自己打分
+            // —— 而单飞被拒正是"报了成功、系统照样派活、每次都撞同一个闸门"那条活锁的来源。
+            Self.report("background pass: single-flight gate rejected this round; reading this target's own snapshot")
+        }
+        return probePendingWork(for: serverURL)
+    }
+
+    /// Called once at each accepted single-flight entry, before any task read.
+    /// An unavailable journal is retried once; a failure leaves its rows and
+    /// intent untouched, and the read-only probe reports `.unknown`.
+    private func prepareJournalForExecution() -> Bool {
+        guard taskStore.reopenIfUnavailable() else {
+            hasPendingTask = true
+            lastError = taskStore.lastError ?? "同步进度数据库暂不可用，请稍后重试。"
+            message = nil
+            phase = SyncPhase.failed.rawValue
+            return false
+        }
+        return true
+    }
+
+    private func performBackgroundPass(to serverURL: URL, apiToken: String) async {
+        restoreBackgroundContext(for: serverURL)
         let task = loadTask()
+        if taskStore.lastError != nil {
+            // 读取失败不是“没有任务”：保留待办/失败状态，避免向 BGTask 报一个空队列成功。
+            hasPendingTask = true
+            lastError = taskStore.lastError
+            phase = SyncPhase.failed.rawValue
+            return
+        }
         hasPendingTask = task != nil
-        guard let serverURL else { return }
         // 🔴 卡在阻塞态（等解锁 / 等凭证）时，后台这一轮**什么都不做**（文档 §3.3 / §3.4）。
         //
         // 为什么需要这一道：`BackgroundRunPolicy.action` 只看"盘上还有没有没走完的批次"，
@@ -444,10 +624,29 @@ final class HealthKitSync {
         // 说"字节归系统"（`.awaitSystemUpload` ⇒ 什么都不做），而 `shouldResubmit` 又因为
         // "盘上有任务"一直为真 ⇒ 系统持续派活、持续空转。那是**活锁**，不是保守。
         // 盘点顺带会把盘上那句已经不成立的自述改回来（`clearStaleUploadState`）。
-        await reconcileSystemUploads(task)
-        // 意图位只在"盘上什么都没有"时才有意义：有任务行时下一步由字段推导，用户意图插不上手。
-        // `&&` 的短路在这里是有意的 —— 不去消费一个这次用不上的意图。
-        let wantsFresh = task == nil && consumeBackgroundIntent(scope: Self.urlScope(for: serverURL))
+        // 离线握手只用于恢复/闸门：这里不改任务、不碰系统上传；真正盘点在 performSync 的
+        // 在线握手之后执行。否则陈旧 dataset epoch 会让旧 scope 的行被当成权威任务来改写。
+        //
+        // 🔴 意图只在**盘上没有任务行**时驱动一轮全新的同步。
+        //
+        // 旧版本在这里"有任务却没有意图"时**凭空合成**一条新数据意图（`recordBackgroundIntent`）。
+        // 它已被删掉，两个方向都错：
+        //   - 旧任务本身就是重试依据（`SyncAtomicUnit` 从盘上那份字节接着走），不需要伪造一条
+        //     "有新数据"的通知；
+        //   - 合成出来的意图代表一条**不存在**的投递，而它的确认点只在**导出起点**
+        //     （`observeBackgroundIntentsForExportStart`）⇒ 下一轮若走的是续传分支，它永远
+        //     不会被确认，反而会在批次走完之后把一轮"续传"变成一次**多余的导出**
+        //     （白读 HealthKit，整个流程里最贵的一步）。
+        //
+        // "scope 变了、新 scope 还没有批次"那一类依据**不在这里登记**：它由在线握手确认
+        // （见 `performSync` 里的 `recordBackgroundRecoveryRequest`），因为只有握手才知道
+        // 权威身份。已有的意图/恢复请求也不在这里消费 —— 确认点只有一个，就在导出起点。
+        //
+        // 两个成因一起决定 `wantsFreshSync`（都表示"这个目标需要跑一轮"），而**有没有任务行**
+        // 决定跑的是哪一段：有任务行 ⇒ `runAtomicUnit` / `resumeJob`。
+        let hasNotification = backgroundIntentObservation(for: serverURL) != nil
+        let hasRecoveryRequest = backgroundRecoveryStore.hasRequest(urlScope: Self.urlScope(for: serverURL))
+        let wantsFresh = task == nil && (hasNotification || hasRecoveryRequest)
         let action = BackgroundRunPolicy.action(
             hasTask: task != nil,
             jobId: task?.jobId,
@@ -467,11 +666,24 @@ final class HealthKitSync {
             // `.awaitSystemUpload`：字节归系统 ⇒ 一根手指都不许碰，连 `inspect` 都不做。
             return
         case .runAtomicUnit, .resumeJob, .startFreshSync:
-            await sync(to: serverURL, apiToken: apiToken)
+            // 观察点不在这里：通知只在**导出起点**被认领（`performSync` 里那条
+            // `observeBackgroundIntentsForExportStart`）。放在这里等于让两条"不重新读 HealthKit"
+            // 的恢复分支替通知背书 —— 它们用的是早于通知生成的字节。
+            await performSync(to: serverURL, apiToken: apiToken, full: false)
         }
+        // 握手失败时 `performSync` 会把 activeScope 暂时退回 URL scope。恢复离线候选上下文，
+        // 让旧任务仍能驱动重排；握手成功时 activeIdentity 非空，绝不覆盖权威 scope。
+        if activeIdentity == nil { restoreBackgroundContext(for: serverURL) }
         // 收工前重读一次：`performSync` 可能已经把任务清掉（`clearTask`）或新建了一个。
         // 用调用前的快照去报成败会在"这一轮正好做完了"时把成功报成失败。
-        hasPendingTask = loadTask() != nil
+        let remainingTask = loadTask()
+        if taskStore.lastError != nil {
+            hasPendingTask = true
+            lastError = taskStore.lastError
+            phase = SyncPhase.failed.rawValue
+        } else {
+            hasPendingTask = remainingTask != nil
+        }
     }
 
     private func performSync(to serverURL: URL?, apiToken: String, full: Bool) async {
@@ -507,14 +719,43 @@ final class HealthKitSync {
             // 系统收回时间 ≠ 用户取消。这里必须走 lifecycle：写 "cancelled" 会让下一次同步的
             // `checkCancellation()` 把系统的决定当成用户意图，从此永久卡死。
             self.suspendForLifecycle()
-            UIApplication.shared.endBackgroundTask(backgroundTask)
-            backgroundTask = .invalid
+            if backgroundTask != .invalid {
+                UIApplication.shared.endBackgroundTask(backgroundTask)
+                backgroundTask = .invalid
+            }
+        }
+        // 🔴 主动看门狗（2026-09-24，OOM 崩溃溯源）：系统的 expiration handler 在"临近到期"
+        // 才被调用，内存吃紧时可能已经来不及，等于把 30 秒红线交给系统回调的准时性。
+        // 这里每秒盯一次剩余后台额度，一旦进入安全余量就走同一条 lifecycle 收尾 ——
+        // endBackgroundTask 从"指望系统准时"变成"自己盯表"。前台时额度不消耗
+        // （backgroundTimeRemaining 为 .greatestFiniteMagnitude），对 GB 级前台导出零影响。
+        let budgetWatchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            // Timer is scheduled from this @MainActor method on the main run loop,
+            // but its @Sendable callback does not inherit actor isolation.
+            MainActor.assumeIsolated {
+                guard UIApplication.shared.applicationState != .active,
+                      backgroundTask != .invalid,
+                      UIApplication.shared.backgroundTimeRemaining < Self.backgroundTimeSafetyMargin
+                else { return }
+                self.suspendForLifecycle()
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                    backgroundTask = .invalid
+                }
+            }
         }
         defer {
+            budgetWatchdog.invalidate()
             isBusy = false
+            // 意图的两个观察槽只对**本次同步**有效。放在这里而不是某个成功分支：它必须覆盖
+            // 所有出口（早退、抛错、取消），否则一次残留会让**下一次**同步的 `saveTask` /
+            // `markSuccess` 去确认一条本轮根本没看到的通知。
+            clearBackgroundIntentObservations()
             UIApplication.shared.isIdleTimerDisabled = previousIdleTimerState
             if backgroundTask != .invalid {
                 UIApplication.shared.endBackgroundTask(backgroundTask)
+                // 收尾后立刻归位：防止迟到的 expiration handler 对同一个 id 二次 end。
+                backgroundTask = .invalid
             }
         }
         // 取消必须在任何网络/HealthKit 工作前生效。本函数不是 throwing，不能写 `try`；
@@ -550,7 +791,11 @@ final class HealthKitSync {
             phase = SyncPhase.failed.rawValue
             return
         }
-        activeScope = Self.syncScope(for: serverURL, identity: identity)
+        let authoritativeScope = Self.syncScope(for: serverURL, identity: identity)
+        #if os(iOS)
+        HealthSyncIdentityPublisher.publish(identity, baseURL: serverURL)
+        #endif
+        activeScope = authoritativeScope
         activeIdentity = identity
         lastSyncAt = UserDefaults.standard.object(forKey: scopedKey(Self.lastSyncAtKey)) as? Date
         if UserDefaults.standard.object(forKey: scopedKey(Self.lastWorkoutCountKey)) != nil {
@@ -560,6 +805,7 @@ final class HealthKitSync {
         // unresolved batch (or advance its anchor) while storage is unavailable.
         _ = loadTask()
         if let journalError = taskStore.lastError {
+            hasPendingTask = true
             lastError = journalError
             phase = SyncPhase.failed.rawValue
             message = nil
@@ -808,7 +1054,7 @@ final class HealthKitSync {
             // 表很小（每 workout 一行），整表读比"导出中发现一个 uuid 再跨 actor 回来查"更省。
             // 读失败（`isAvailable == false`）时是空字典 ⇒ 每个 workout 都按首查处理，
             // 方向安全：多查一次，不会漏读轨迹。
-            let routeStates = taskStore.loadRouteStates()
+            let routeStates = taskStore.loadRouteStates(scope: activeScope)
             let onProgress: @Sendable (String) async -> Void = { [weak self] status in
                 await MainActor.run { [weak self] in
                     // 任何来源的中止一旦发生就不再发布晚到的进度：原因分类只影响 phase 怎么写，
@@ -817,6 +1063,15 @@ final class HealthKitSync {
                     self.message = status
                 }
             }
+            // 🔴 **导出起点**：就在这里认领意图与恢复请求。
+            //
+            // 只有"这一次导出真的开始了"才能说"它覆盖了那条通知"，而代次比对
+            // （`shouldAcknowledgeIntent`）负责排掉导出期间又新到的那一条 —— 那条必须留到下一轮。
+            // 放在这里而不是"后台一轮的开头"，是因为上面那两条恢复分支（`inspect` 续接、
+            // 重传已落盘的 ZIP）**不重新读 HealthKit**：拿它们的位置当观察点，会让一批早于
+            // 通知生成的字节去认领那条通知，那批新数据从此没人导。
+            // 前台与后台都经过这里 ⇒ 确认逻辑只有一份。
+            observeBackgroundIntentsForExportStart(for: serverURL)
             let exported = try await HealthSyncCancellation.runDetached(
                 priority: .userInitiated,
                 onCancelledResult: { result in
@@ -1042,7 +1297,12 @@ final class HealthKitSync {
             clear: clearWatermark,
             exportEnd: exportEnd
         )
-        guard taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) else {
+        let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(
+            checkpoint: .syncCommitted,
+            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) },
+            acknowledge: { acknowledgeBackgroundIntent(checkpoint: $0) }
+        )
+        guard committed else {
             throw SyncHTTPError(message: taskStore.lastError ?? "同步进度未能保存")
         }
         // 🔴 「降频记忆」只能在**这次同步已经被判定成功之后**落盘，而且必须排在
@@ -1055,7 +1315,7 @@ final class HealthKitSync {
         // 写失败**不**让本次同步变红：durable 的部分（水位 + 进度）已经提交，这里失败的后果
         // 只是"下一轮重查一次"。但也不静默——`upsertRouteStates` 会把原因推进
         // `taskStore.lastError`，并由 `SQLiteSupport.report` 打出带错误码的日志。
-        if !routeStates.isEmpty, !taskStore.upsertRouteStates(Array(routeStates.values)) {
+        if !routeStates.isEmpty, !taskStore.upsertRouteStates(Array(routeStates.values), scope: activeScope) {
             NSLog("[RAI] route state flush after commit failed: %@", taskStore.lastError ?? "unknown")
         }
         // `hasPendingTask` 只在**真的清掉了那一行**之后才翻 —— 它现在与 `clearTask()` 同为
@@ -1609,7 +1869,12 @@ final class HealthKitSync {
     /// only for migration; a failed write must not advance a network operation.
     private func saveTask(_ task: SyncTaskState) throws {
         let data = try JSONEncoder().encode(task)
-        guard taskStore.save(data, scope: activeScope) else {
+        let saved = HealthSyncBackgroundRecovery.persistThenAcknowledge(
+            checkpoint: .taskPersisted,
+            persist: { taskStore.save(data, scope: activeScope) },
+            acknowledge: { acknowledgeBackgroundIntent(checkpoint: $0) }
+        )
+        guard saved else {
             throw SyncHTTPError(message: taskStore.lastError ?? "同步进度未能保存")
         }
         UserDefaults.standard.removeObject(forKey: scopedKey(Self.taskKey))
@@ -1657,12 +1922,31 @@ final class HealthKitSync {
     }
 
     private func isCurrentTask(_ task: SyncTaskState) -> Bool {
-        guard task.target == activeServerURL?.absoluteString else { return false }
-        if let serverId = task.serverId, serverId != activeIdentity?.serverId { return false }
-        if let athleteId = task.athleteId, athleteId != activeIdentity?.athleteId { return false }
-        if let datasetEpoch = task.datasetEpoch, datasetEpoch != activeIdentity?.datasetEpoch { return false }
-        if let protocolVersion = task.protocolVersion, protocolVersion != activeIdentity?.syncProtocolVersion { return false }
-        return true
+        guard let activeServerURL else { return false }
+        let context = HealthSyncBackgroundRecovery.Context(
+            serverURL: activeServerURL.absoluteString,
+            urlScope: Self.urlScope(for: activeServerURL),
+            activeScope: activeScope,
+            identity: activeIdentity.map {
+                .init(
+                    serverId: $0.serverId,
+                    athleteId: $0.athleteId,
+                    datasetEpoch: $0.datasetEpoch,
+                    protocolVersion: $0.syncProtocolVersion,
+                    syncScope: activeScope
+                )
+            }
+        )
+        return HealthSyncBackgroundRecovery.taskMatches(
+            .init(
+                target: task.target,
+                serverId: task.serverId,
+                athleteId: task.athleteId,
+                datasetEpoch: task.datasetEpoch,
+                protocolVersion: task.protocolVersion
+            ),
+            context: context
+        )
     }
 
     /// 进度写入的**唯一**入口。
@@ -1712,9 +1996,36 @@ final class HealthKitSync {
     }
 
     private static func syncScope(for url: URL, identity: RaiHandshake) -> String {
-        let value = [url.absoluteString, identity.serverId, identity.athleteId, identity.datasetEpoch].joined(separator: "|")
-        let digest = SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
-        return String(digest.prefix(24))
+        HealthSyncIdentityPublisher.syncScope(for: url, identity: identity)
+    }
+
+    /// 用 Native 缓存里已有的离线握手恢复后台候选上下文。
+    ///
+    /// 这里不发网络请求，也不把离线身份当权威：`performSync` 开头仍回到 URL scope，并在真实
+    /// handshake 成功后刷新 `activeScope`。它只让冷启动在决策前能看见正确 scope 下的任务。
+    private func restoreBackgroundContext(for serverURL: URL) {
+        #if os(iOS)
+        let identity = CacheStore.loadHandshake(baseURL: serverURL)
+        #else
+        let identity: RaiHandshake? = nil
+        #endif
+        let recoveredIdentity = identity.map {
+            HealthSyncBackgroundRecovery.Identity(
+                serverId: $0.serverId,
+                athleteId: $0.athleteId,
+                datasetEpoch: $0.datasetEpoch,
+                protocolVersion: $0.syncProtocolVersion,
+                syncScope: Self.syncScope(for: serverURL, identity: $0)
+            )
+        }
+        guard let context = HealthSyncBackgroundRecovery.context(
+            serverURL: serverURL.absoluteString,
+            urlScope: Self.urlScope(for: serverURL),
+            identity: recoveredIdentity
+        ) else { return }
+        activeServerURL = serverURL
+        activeIdentity = identity
+        activeScope = context.activeScope
     }
 
     private func friendlyMessage(_ error: Error) -> String {

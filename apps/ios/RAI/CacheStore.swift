@@ -153,6 +153,28 @@ final class CacheStore {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    /// 离线握手与缓存必须共用**同一份** URL scope 实现。
+    ///
+    /// 这里刻意使用完整 64 位 digest；HealthKit 自己的历史键使用 24 位前缀，两者是不同的
+    /// 兼容性域，不能因为算法看起来相似就互相替换。
+    static func handshakeStorageKey(baseURL: URL) -> String {
+        "rai.handshake.\(urlScope(baseURL: baseURL))"
+    }
+
+    static func loadHandshake(baseURL: URL, userDefaults: UserDefaults = .standard) -> RaiHandshake? {
+        guard let data = userDefaults.data(forKey: handshakeStorageKey(baseURL: baseURL)) else { return nil }
+        return try? JSONDecoder().decode(RaiHandshake.self, from: data)
+    }
+
+    static func saveHandshake(
+        _ handshake: RaiHandshake,
+        baseURL: URL,
+        userDefaults: UserDefaults = .standard
+    ) {
+        guard let data = try? JSONEncoder().encode(handshake) else { return }
+        userDefaults.set(data, forKey: handshakeStorageKey(baseURL: baseURL))
+    }
+
     private func openDatabase(at url: URL) {
         let result = url.path.withCString { path in
             sqlite3_open_v2(

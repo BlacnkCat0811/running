@@ -26,6 +26,7 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/NativeAppModel.swift > 
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
   apps/ios/RAI/NativeFormat.swift apps/ios/RAI/WorkoutPlanMapper.swift \
   apps/ios/RAI/CalibrationState.swift \
+  apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
 "$tmp/model-tests"

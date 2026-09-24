@@ -70,8 +70,72 @@ struct StoreRegression {
         check(variant(epoch: "epoch-b") != identityScope, "a new dataset epoch must not read the previous epoch's cache")
         check(variant(url: "http://192.168.1.11:8790") != identityScope,
               "a different server address must not share a cache namespace")
+        let suite = "rai-handshake-review-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let legacyKey = "rai.handshake.\(CacheStore.urlScope(baseURL: base))"
+        defaults.set(try JSONEncoder().encode(handshake()), forKey: legacyKey)
+        check(CacheStore.loadHandshake(baseURL: base, userDefaults: defaults)?.datasetEpoch == "epoch-a",
+              "background recovery reads the existing full-digest handshake key")
+        CacheStore.saveHandshake(handshake(epoch: "epoch-b"), baseURL: base, userDefaults: defaults)
+        check(CacheStore.loadHandshake(baseURL: base, userDefaults: defaults)?.datasetEpoch == "epoch-b",
+              "the authoritative handshake replaces the cached epoch")
         check(CacheStore.scope(baseURL: base, handshake: nil) != identityScope,
               "a missing handshake must not collide with a known identity")
+
+        // The same publisher is called by Native connect/refresh and HealthKit sync.
+        // Inject the real cache's isolated suite so a crash between request and
+        // handshake publication can be reproduced without touching app defaults.
+        let recovery = HealthSyncScopeRecoveryStore(userDefaults: defaults, baseKey: "rai.hk.backgroundRecovery")
+        let urlScope = HealthSyncIdentityPublisher.urlScope(for: base)
+        let newIdentity = handshake(epoch: "epoch-c")
+        let newScope = HealthSyncIdentityPublisher.syncScope(for: base, identity: newIdentity)
+        check(HealthSyncIdentityPublisher.syncScope(for: base, identity: handshake(epoch: "epoch-b")) != newScope,
+              "the recovery scope includes the dataset epoch")
+        HealthSyncIdentityPublisher.publish(newIdentity, baseURL: base, userDefaults: defaults,
+            load: { CacheStore.loadHandshake(baseURL: $0, userDefaults: defaults) },
+            save: { value, url in
+                check(recovery.observe(urlScope: urlScope, targetScope: newScope) != nil,
+                      "a recovery request is persisted before the new handshake is cached")
+                CacheStore.saveHandshake(value, baseURL: url, userDefaults: defaults)
+            })
+        check(CacheStore.loadHandshake(baseURL: base, userDefaults: defaults)?.datasetEpoch == "epoch-c",
+              "the existing handshake cache key receives the new identity")
+        let observedRecovery = recovery.observe(urlScope: urlScope, targetScope: newScope)
+        check(observedRecovery != nil, "a failed HealthKit handshake leaves the Native-published request")
+        check(!recovery.acknowledge(observedRecovery, targetScope: "old-scope", checkpoint: .taskPersisted),
+              "an old scope's successful export cannot clear the new scope's request")
+        check(recovery.hasRequest(urlScope: urlScope), "the new scope request survives the old batch")
+        HealthSyncIdentityPublisher.publish(newIdentity, baseURL: base, userDefaults: defaults,
+            load: { CacheStore.loadHandshake(baseURL: $0, userDefaults: defaults) },
+            save: { CacheStore.saveHandshake($0, baseURL: $1, userDefaults: defaults) })
+        check(recovery.observe(urlScope: urlScope, targetScope: newScope) == observedRecovery,
+              "publishing the same identity again does not request another export")
+        recovery.record(urlScope: urlScope, targetScope: newScope)
+        check(!recovery.acknowledge(observedRecovery, targetScope: newScope, checkpoint: .taskPersisted),
+              "a newer recovery generation survives an earlier export")
+        let latestRecovery = recovery.observe(urlScope: urlScope, targetScope: newScope)
+        check(recovery.acknowledge(latestRecovery, targetScope: newScope, checkpoint: .taskPersisted),
+              "only the new scope's persisted export acknowledges its current request")
+        check(!recovery.hasRequest(urlScope: urlScope), "the completed recovery is cleared")
+
+        let interruptedBase = URL(string: "http://interrupted.example:8790")!
+        let interruptedURLScope = HealthSyncIdentityPublisher.urlScope(for: interruptedBase)
+        let interruptedScope = HealthSyncIdentityPublisher.syncScope(for: interruptedBase, identity: newIdentity)
+        CacheStore.saveHandshake(handshake(), baseURL: interruptedBase, userDefaults: defaults)
+        HealthSyncIdentityPublisher.publish(newIdentity, baseURL: interruptedBase, userDefaults: defaults,
+            load: { CacheStore.loadHandshake(baseURL: $0, userDefaults: defaults) },
+            save: { _, _ in }) // simulate process termination before cache publication
+        let afterRestart = HealthSyncScopeRecoveryStore(userDefaults: defaults, baseKey: "rai.hk.backgroundRecovery")
+        check(afterRestart.observe(urlScope: interruptedURLScope, targetScope: interruptedScope) != nil,
+              "after interruption before cache publication, a new store sees the durable request")
+        check(CacheStore.loadHandshake(baseURL: interruptedBase, userDefaults: defaults)?.datasetEpoch == "epoch-a",
+              "the interrupted publication still exposes the old offline identity")
+        HealthSyncIdentityPublisher.publish(newIdentity, baseURL: interruptedBase, userDefaults: defaults,
+            load: { CacheStore.loadHandshake(baseURL: $0, userDefaults: defaults) },
+            save: { CacheStore.saveHandshake($0, baseURL: $1, userDefaults: defaults) })
+        check(afterRestart.observe(urlScope: interruptedURLScope, targetScope: interruptedScope) != nil,
+              "retrying publication after restart retains a recoverable new scope request")
 
         // ---- CacheStore.urlScope：只认规范化之后的地址身份，与书写形式无关。
         //      它决定「握手应答缓存」这类键，写错就会在换端口/换大小写后读到旧服务器的应答。
@@ -164,6 +228,37 @@ struct StoreRegression {
         check(brokenJournal.load(scope: "s1") == nil, "an unavailable journal never pretends a save happened")
         brokenJournal.clear(scope: "s1")
         check(brokenJournal.load(scope: "s1") == nil, "clearing an unavailable journal is a no-op, not a crash")
+
+        // Genuine SQLite migration lock: a v1 journal contains a pending task
+        // and committed watermark. The same failed store must recover in place.
+        let migrationDirectory = root.appendingPathComponent("migration")
+        try FileManager.default.createDirectory(at: migrationDirectory, withIntermediateDirectories: true)
+        let migrationPath = migrationDirectory.appendingPathComponent("sync.sqlite").path
+        var lockConnection: OpaquePointer?
+        precondition(sqlite3_open(migrationPath, &lockConnection) == SQLITE_OK)
+        let fixtureSQL = """
+            PRAGMA journal_mode = WAL;
+            PRAGMA user_version = 1;
+            CREATE TABLE sync_tasks (scope TEXT PRIMARY KEY, updated_at REAL NOT NULL, payload BLOB NOT NULL);
+            CREATE TABLE sync_state (scope TEXT PRIMARY KEY, workout_anchor BLOB, export_end REAL, updated_at REAL NOT NULL);
+            CREATE TABLE sync_route_state (workout_uuid TEXT PRIMARY KEY);
+            INSERT INTO sync_tasks VALUES ('locked-scope', 1, x'010203');
+            INSERT INTO sync_state VALUES ('locked-scope', x'0405', 42, 1);
+            """
+        precondition(sqlite3_exec(lockConnection, fixtureSQL, nil, nil, nil) == SQLITE_OK)
+        precondition(sqlite3_exec(lockConnection, "BEGIN EXCLUSIVE", nil, nil, nil) == SQLITE_OK)
+        let migrating = SyncTaskStore(directory: migrationDirectory)
+        check(!migrating.isAvailable, "a real SQLite migration lock makes the journal unavailable")
+        check(migrating.hasTask(scope: "locked-scope") == nil,
+              "an unavailable read returns unknown and does not migrate schema")
+        precondition(sqlite3_exec(lockConnection, "ROLLBACK", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(lockConnection)
+        check(migrating.reopenIfUnavailable(), "the same store reopens after the migration lock is released")
+        check(migrating.load(scope: "locked-scope") == Data([1, 2, 3]),
+              "reopening preserves the pending task bytes")
+        check(migrating.loadState(scope: "locked-scope")?.workoutAnchor == Data([4, 5])
+              && migrating.loadState(scope: "locked-scope")?.exportEnd == Date(timeIntervalSince1970: 42),
+              "reopening preserves the committed anchor and watermark")
 
         print("\(checks) store regression checks passed")
     }

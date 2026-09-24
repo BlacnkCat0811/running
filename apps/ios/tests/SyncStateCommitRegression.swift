@@ -124,6 +124,50 @@ struct SyncStateCommitRegression {
         check(state?.exportEnd == nil, "a keep leaves the export end alone")
         check(state?.workoutAnchor == anchorB, "a keep leaves the anchor alone")
 
+        // ---- 3b. 🔴 2026-09-24 真机故障的回归：**不能逐位往返 REAL 的 Date**。
+        //      `sync_state.export_end` 与 `sync_route_state` 的两个时间列都是 REAL，而 `Date`
+        //      内部存 `timeIntervalSinceReferenceDate`，与列里的 `timeIntervalSince1970` 差
+        //      常量 978307200 —— 这个映射**不是双射**：对 2026 年的时间戳，结果与常量之比
+        //      ≈ 1.8（< 2），加法落在 Sterbenz 引理的邻居情形上，结果的 ulp 被放大到原值网格
+        //      的 2 倍 ⇒ 原值最低位为 1 的时间戳**会被舍掉一位**。
+        //      实测（本机逐 ulp 扫 200,000 个真实时间戳）：**恰好一半有损**；整秒时间戳
+        //      0/200000 有损 —— 这正是本文件此前全绿却看不见故障的原因：`1_700_000_000`
+        //      这类 fixture 全落在无损区。典型的「fixture 的值让守卫不可见」。
+        //      生产路径上 `HealthKitExport` 的 `exportedThrough = Date()` 与 route 的
+        //      `routeNow = Date()` 都带完整小数秒 ⇒ 回读断言拿**原始 Date** 去比读回来的
+        //      Date，约一半概率判不等 ⇒ 一次完全成功的提交被整段回滚，用户看到
+        //      「同步水位写入后无法读回一致的值」。
+        let realUlp = Double(sign: .plus, exponent: -23, significand: 1)  // 2^-23
+        let basis = Date(timeIntervalSince1970: 1_790_000_000).timeIntervalSinceReferenceDate
+        let lossy = Date(timeIntervalSinceReferenceDate: basis + realUlp)
+        // 前置条件本身也要断言：这个 fixture 哪天变回无损，下面几条就全成了空转。
+        check(
+            Date(timeIntervalSince1970: lossy.timeIntervalSince1970) != lossy,
+            "the lossy fixture must actually lose a bit in the REAL round trip"
+        )
+        check(
+            Date(timeIntervalSince1970: lossy.canonicalForREAL.timeIntervalSince1970)
+                == lossy.canonicalForREAL,
+            "canonicalForREAL must land on a fixed point of the round trip"
+        )
+
+        saveTask(20, scope: "lossy")
+        check(
+            store.commitSuccess(scope: "lossy", anchor: nil, watermark: .advance(lossy)),
+            "a watermark that cannot survive the REAL round trip still commits"
+        )
+        check(
+            store.loadState(scope: "lossy")?.exportEnd == lossy.canonicalForREAL,
+            "the committed watermark reads back at the canonical value"
+        )
+
+        // route 一侧的同类用例刻意**不在这里**，而在
+        // `RouteSyncStatePersistenceRegression.swift` 的**末尾**：那才是 `sync_route_state`
+        // 的落盘主场，且它必须排在那个文件既有的
+        // `a batch of three distinct workouts writes in one transaction` **之后** ——
+        // 突变「批量写不再 BEGIN IMMEDIATE」期望红在那一条上。放在它前面会让本用例先撞上，
+        // 于是那条突变的 `assertion_hit` 变假（2026-09-24 实测踩过一次：`assertion_hit=False`）。
+
         // 🔴 护栏②：**没有任务行**时提交必须失败，而不是安静地只写水位。
         //      它是"我以为提交了"的唯一出口 —— 少了这一条，任务行删成功、水位写失败那一路
         //      会让界面报成功、而每次同步重导同一段。

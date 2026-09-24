@@ -303,7 +303,14 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     }
 
     private func renderTrace() {
-        guard bounds.width > 0, bounds.height > 0 else { return }
+        // 🔴 防御性守卫（2026-09-24，OOM 崩溃溯源）：`map` 以零 frame 创建（见
+        // fitIfNeeded 注释），真实 frame 要等 layoutSubviews；`update(coordinates:)`
+        // 经 drawTrace 到达这里时布局可能还没跑。对一个零尺寸的 view 做
+        // `convert(_:toPointTo:)` 会把退化矩阵交给系统（控制台可见
+        // "Conversion error! {{0, 926}, {428, 0}}"，全屏宽、高度 0），严禁放行。
+        // 调用方就是 update() 的这条路径：updateUIView 先于首帧布局到达。
+        guard bounds.width > 0, bounds.height > 0,
+              map.frame.width > 0, map.frame.height > 0 else { return }
         let points = coordinates.map { map.convert($0, toPointTo: self) }.filter { $0.x.isFinite && $0.y.isFinite }
         let path = UIBezierPath()
         if let first = points.first {

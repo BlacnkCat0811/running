@@ -52,3 +52,59 @@ nonisolated enum SyncStateCommitPlan {
         return .keep
     }
 }
+
+/// 落盘时间的规范化。
+///
+/// 🔴 为什么必须有这一步（2026-09-24 真机故障的根因）：
+///
+/// `sync_state.export_end` 与 `sync_route_state` 的两个时间列都是 REAL，写入走
+/// `Date.timeIntervalSince1970`、读回走 `Date(timeIntervalSince1970:)`。而 `Date` 内部
+/// 存的是 `timeIntervalSinceReferenceDate`，两者差常量 978307200 —— 这个映射**不是双射**：
+/// 对 2026 年的时间戳，结果与常量之比 ≈ 1.8（< 2），加法那一步落在 Sterbenz 引理的邻居
+/// 情形上，结果的 ulp 会被放大到原值网格的 2 倍，于是原值最低位为 1 的那些时间戳
+/// **会被舍掉一位**。读回来的 `Date` 因此与写进去的那个不是同一个值。
+///
+/// 实测（本机 Xcode 26.5 / Swift，逐 ulp 扫 200,000 个真实时间戳）：
+///   - 往返有损：**100000 / 200000**（恰好一半）
+///   - 整秒时间戳：**0 / 200000**（无损）
+///   - `Date()` 的当前值：**有损**
+///
+/// 后果：`HealthKitExport` 的 `exportedThrough = Date()` 与 route 的 `routeNow = Date()`
+/// 都带完整小数秒 ⇒ `readBackMatches` 拿**原始 Date** 去比读回来的 Date，约一半概率判为
+/// 不等 ⇒ 一次完全成功的提交被整段回滚，用户看到「同步水位写入后无法读回一致的值」。
+/// 而现有回归的 fixture 恰好是整数秒（`1_700_000_000`）⇒ 它**永远绿**。这正是
+/// 「跑绿 ≠ 断言有效」的形态：fixture 的值落在无损区，守卫对它完全不可见。
+///
+/// 修法：写入前把时间点吸附到该映射的**不动点**上。此后
+/// `Date(timeIntervalSince1970: y).timeIntervalSince1970 == y` 恒成立，
+/// 写入值与回读值逐位相等。代价是时间点被吸附到约 1e-7 秒的网格上 ——
+/// 对"上次导出到哪儿 / 上次查过没有"这两个语义都无关紧要。
+nonisolated extension Date {
+    /// 把时间点吸附到「REAL 列能逐位往返」的那一个值上。
+    var canonicalForREAL: Date {
+        // 正常时间戳（与常量之比 < 2）一次即到不动点；多迭代两次是给 `.distantPast`
+        // 这类极端值兜底 —— 那里 |r| / |C| ≈ 64，Sterbenz 的前提不成立，第一次投影
+        // 未必已经稳定。迭代上限刻意写死：这个函数在写入路径上，不能有无界循环。
+        var value = self
+        for _ in 0..<3 {
+            let roundTripped = Date(timeIntervalSince1970: value.timeIntervalSince1970)
+            if roundTripped == value { return value }
+            value = roundTripped
+        }
+        return value
+    }
+}
+
+nonisolated extension SyncWatermarkUpdate {
+    /// 让 `.advance` 的时间点先过一遍 `Date.canonicalForREAL`。
+    ///
+    /// 必须在**写入之前、且只发生一次**：`upsertState` 绑定的 `?3` 与 `readBackMatches`
+    /// 算出的期望值必须来自同一个数，否则两侧仍会在最后一位上分叉 ——
+    /// 而"两侧独立算一次、指望它们恰好一致"正是这次故障的形状。
+    var storedInREAL: SyncWatermarkUpdate {
+        switch self {
+        case .keep, .clear: return self
+        case .advance(let end): return .advance(end.canonicalForREAL)
+        }
+    }
+}

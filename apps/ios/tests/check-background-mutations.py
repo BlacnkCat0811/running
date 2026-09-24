@@ -22,6 +22,18 @@ r"""后台同步判据的**突变验证**（`npm run test:ios:mutation`）。
 它**不是**验收手段（验收必须全量跑），只是为了在加一条新突变时不必等全套 ——
 但此时基线检查与"还原后回绿"检查仍然会跑，所以"当前仓库是绿的"这个前提不会被跳过。
 
+🔴 **按改动范围裁剪：`RAI_MUTATION_FOR`。** 全量一轮十分钟，而其中绝大多数突变跟你这次改的文件
+毫无关系。用法：`RAI_MUTATION_FOR=git`（取当前工作区改动）或 `RAI_MUTATION_FOR=<路径>[,<路径>]`。
+
+它的粒度是**门禁的输入面**，不是"按名字抽样"：改动文件落在某个门禁读/编译的文件里 ⇒ 该门禁
+名下的**全部**突变都要跑。**不能**按"突变改了哪个文件"（`target`）求交集 —— 新断言会让**指向别的
+文件**的突变 `assertion_hit=False`。2026-09-24 真实踩过：route 的有损用例进了水位那个编译单元，
+于是"批量写不再 BEGIN IMMEDIATE"那条变成红在**别人的**断言上。
+门禁输入面是**现场算的**（bash 门禁静态解析它点名的仓库内文件；python 门禁用 audit hook 抓它实际
+`open` 了哪些仓库内文件），**不存手写表** —— 手写表会漂移，而漂移就是静默漏跑。
+它同样**不是**验收手段：产物带 `partial: true`、结论行措辞与全量不同；选中 0 条时**绝不**宣称
+"判据有效性已被验证"。
+
 🔴 **被 SIGTERM / SIGKILL 打断会留下改坏的源码。** 这不是假想：本脚本在 2026-09-22 的一次
 前台运行里被 SIGTERM 掉，`finally` 来不及跑，于是 `BackgroundSyncPolicy.swift` 里带着一条
 突变留在工作区；下一次运行的基线检查才把它暴露出来。所以备份不再是临时目录：
@@ -38,6 +50,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import shutil
 import signal
 import subprocess
@@ -66,6 +79,8 @@ TECH_PRESENTATION = "apps/ios/RAI/Skins/Technology/TechSyncPresentation.swift"
 MODEL_RUNNER = "apps/ios/tests/run-model-tests.sh"
 HEALTH_SYNC_RUNNER = "apps/ios/tests/run-health-sync-tests.sh"
 BG_POLICY = "apps/ios/RAI/BackgroundSyncPolicy.swift"
+RECOVERY = "apps/ios/RAI/HealthSyncBackgroundRecovery.swift"
+IDENTITY_PUBLISHER = "apps/ios/RAI/HealthSyncIdentityPublisher.swift"
 UPLOAD_SESSION = "apps/ios/RAI/BackgroundUploadSession.swift"
 API_CLIENT = "apps/ios/RAI/APIClient.swift"
 SYNC_STATE_PLAN = "apps/ios/RAI/SyncStateCommitPlan.swift"
@@ -76,7 +91,7 @@ STORE_RUNNER = "apps/ios/tests/run-store-tests.sh"
 # （那个"跳过"是为信号处理器的窗口留的），于是改坏的源码留在工作区、下一轮的基线检查才炸。
 SOURCES = [
     LIFECYCLE, SYNC, SYNC_PHASE, APP, APP_DELEGATE, ROOT_VIEW, TECH_THEME, TECH_PRESENTATION, MODEL_RUNNER,
-    HEALTH_SYNC_RUNNER, BG_POLICY, UPLOAD_SESSION, API_CLIENT, HEALTH_EXPORT,
+    HEALTH_SYNC_RUNNER, BG_POLICY, RECOVERY, IDENTITY_PUBLISHER, UPLOAD_SESSION, API_CLIENT, HEALTH_EXPORT,
     SYNC_STATE_PLAN, SYNC_TASK_STORE, ROUTE_SYNC_MACHINE, STORE_RUNNER,
 ]
 
@@ -113,6 +128,154 @@ ASSERTION_RE = re.compile(
     r"|^Traceback \(most recent call last\):",
     re.M,
 )
+
+# ---------------------------------------------------------------- 门禁输入面
+# 突变是**按门禁**分组的（每条突变指定一个 gate），所以"改动范围"必须换算成门禁集合。
+# 换算的媒介 = 每个门禁会读取/编译的**仓库内文件**集合。这个集合**现场算**，不手写：
+# bash 门禁静态解析它点名的仓库内路径；python 门禁（`check-*.py`）用 audit hook 抓它真正
+# `open` 了哪些仓库内文件。手写表的失效方式是静默的（新加一个输入、表没更新 ⇒ 漏跑）。
+MUTATION_GATES = [SWIFT_GATE, PRESENTATION_GATE, PY_GATE, EXPORT_GATE]
+
+# 只认仓库内的路径字面量。门禁脚本**注释**里提到的路径也算输入 —— 那是刻意的保守方向：
+# 多算只会多跑几条，少算会让"改坏的判据没被验到"。
+REPO_PATH_RE = re.compile(
+    r"\b(?:apps|packages|scripts|deploy|research)/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+"
+)
+
+
+def normalize_path(raw: str) -> str | None:
+    """把 `raw` 归一到仓库相对路径；不在仓库内（或已不可解析）时返回 None。"""
+    candidate = Path(raw)
+    absolute = candidate if candidate.is_absolute() else ROOT / candidate
+    try:
+        return str(absolute.resolve().relative_to(ROOT))
+    except (ValueError, OSError):
+        return None
+
+
+def in_scope(candidate: str, changed: list[str]) -> bool:
+    """`candidate`（一个门禁输入文件）是否落在改动范围内。
+
+    **目录条目按前缀算**，不能只做相等比较：`git status` 对"整目录未跟踪"只报目录名
+    （`?? apps/ios/newdir/`），而门禁输入是**文件**路径 ⇒ 相等比较恒为假 ⇒ 那条改动被静默
+    漏掉。用户也可能直接传一个目录。多算只会多跑几条，少算会让"没验到"伪装成"没事"。
+    """
+    for entry in changed:
+        if entry in (".", ""):
+            return True
+        if candidate == entry or candidate.startswith(entry.rstrip("/") + "/"):
+            return True
+    return False
+
+
+def scope_changed_paths(raw: str) -> list[str]:
+    """解析 `RAI_MUTATION_FOR`。`git` = 取当前工作区的全部改动（含未跟踪）。"""
+    if raw.strip() == "git":
+        # `-uall`：未跟踪的**目录**默认只报目录名，展开成文件才谈得上"改的是哪个文件"。
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "-uall"], cwd=ROOT, capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise SystemExit("git status --porcelain -uall failed:\n%s" % result.stderr)
+        entries = []
+        for line in result.stdout.splitlines():
+            path = line[3:].strip() if len(line) > 3 else ""
+            if " -> " in path:
+                # 重命名：`R  old -> new`。**两侧都要** —— 门禁读的是新路径，
+                # 但旧路径从门禁输入里消失本身也会改变门禁的行为。
+                old, path = path.split(" -> ", 1)
+                if old.strip():
+                    entries.append(old.strip().strip('"'))
+            if path:
+                entries.append(path.strip('"'))
+    else:
+        entries = [item.strip() for item in re.split(r"[,\n]", raw) if item.strip()]
+
+    resolved: list[str] = []
+    for entry in entries:
+        normalized = normalize_path(entry)
+        if normalized is None:
+            print("scope: ignoring %r (not inside the repository)" % entry)
+            continue
+        if normalized not in resolved:
+            resolved.append(normalized)
+    return sorted(resolved)
+
+
+def python_gate_opens(script: str) -> set[str]:
+    """跑一次 `script`，返回它 `open` 过的**仓库内**文件集合。
+
+    必须另起进程：`sys.addaudithook` 只能累加、不能卸载，同进程里探第二个门禁会被前一个污染。
+    环境里清掉 `RAI_MUTATION*` 是为了**杜绝递归** —— 子进程不会再去做一次范围裁剪。
+    """
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("RAI_MUTATION")}
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--dump-gate-inputs", script],
+        cwd=ROOT, capture_output=True, text=True, env=environment,
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "could not determine the inputs of %s (exit=%d):\n%s"
+            % (script, result.returncode, result.stderr[-2000:])
+        )
+    # 取**最后一行**：万一将来有东西漏进 stdout，也不能让一行噪声把裁剪静默变成"0 条命中"。
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        raise SystemExit("no input list came back from %s" % script)
+    return set(json.loads(lines[-1]))
+
+
+def gate_inputs(gate: str) -> set[str]:
+    """一个门禁会读取/编译的仓库内文件集合（含门禁脚本自身）。"""
+    found: set[str] = set()
+    for command in gate.split("&&"):
+        tokens = command.split()
+        if not tokens:
+            continue
+        script = tokens[-1]
+        if not (ROOT / script).exists():
+            raise SystemExit("gate script not found while scoping: %s" % script)
+        found.add(script)
+        if script.endswith(".py"):
+            found |= python_gate_opens(script)
+        else:
+            found |= set(REPO_PATH_RE.findall((ROOT / script).read_text(encoding="utf-8")))
+    return found
+
+
+def dump_gate_inputs(script: str) -> int:
+    """`--dump-gate-inputs <脚本>`：`python_gate_opens()` 的子进程入口。"""
+    opened: list[str] = []
+
+    def hook(event: str, args: tuple) -> None:
+        if event != "open" or not args:
+            return
+        candidate = args[0]
+        if isinstance(candidate, (str, bytes, os.PathLike)):
+            opened.append(os.fspath(candidate))
+
+    sys.addaudithook(hook)
+    sys.argv = [script]
+    # 门禁自己的 stdout 必须**吞掉**：它是给人看的报告（`… checks, 0 failed`），
+    # 与这里的 JSON 混在一条流里会让调用方解析到人的报告上去。stderr 不吞，失败时还能看。
+    real_stdout = sys.stdout
+    sys.stdout = open(os.devnull, "w")
+    try:
+        runpy.run_path(str(ROOT / script), run_name="__main__")
+    except SystemExit:
+        pass
+    finally:
+        sys.stdout.close()
+        sys.stdout = real_stdout
+
+    relative: set[str] = set()
+    for raw in opened:
+        normalized = normalize_path(raw)
+        if normalized is not None:
+            relative.add(normalized)
+    print(json.dumps(sorted(relative)))
+    return 0
+
 
 backup_dir: Path = ROOT / "var" / "mutation-backup"
 marker = backup_dir / "IN-PROGRESS"
@@ -246,14 +409,33 @@ MUTATIONS = [
         "still calls cancelSync()",
     ),
     (
-        "结构门禁: 后台额度到期改回 cancelSync()",
+        "结构门禁: 后台额度到期改回 cancelSync()（2026-09-24 锚点随防御性配对更新："
+        "expiration handler 现在带 `backgroundTask != .invalid` 守卫，且看门狗里有同形代码，"
+        "锚点必须带上 handler 独有的注释行才唯一）",
         lambda: edit(
             SYNC,
-            "            self.suspendForLifecycle()\n            UIApplication.shared.endBackgroundTask(backgroundTask)",
-            "            self.cancelSync()\n            UIApplication.shared.endBackgroundTask(backgroundTask)",
+            "            // `checkCancellation()` 把系统的决定当成用户意图，从此永久卡死。\n"
+            "            self.suspendForLifecycle()\n"
+            "            if backgroundTask != .invalid {\n"
+            "                UIApplication.shared.endBackgroundTask(backgroundTask)",
+            "            // `checkCancellation()` 把系统的决定当成用户意图，从此永久卡死。\n"
+            "            self.cancelSync()\n"
+            "            if backgroundTask != .invalid {\n"
+            "                UIApplication.shared.endBackgroundTask(backgroundTask)",
         ),
         PY_GATE,
         "expiration handler still calls cancelSync()",
+    ),
+    (
+        "结构门禁: 看门狗不再盯表（额度阈值改成永假）=> endBackgroundTask 的时机重新"
+        "交给系统回调的准时性（2026-09-24 OOM 溯源新增，判据见 capabilities 5b）",
+        lambda: edit(
+            SYNC,
+            "                  UIApplication.shared.backgroundTimeRemaining < Self.backgroundTimeSafetyMargin",
+            "                  UIApplication.shared.backgroundTimeRemaining < -1",
+        ),
+        PY_GATE,
+        "the background-time watchdog margin is declared but never used",
     ),
     (
         '结构门禁: 写一个裸 phase 字符串 "starting"',
@@ -410,7 +592,7 @@ MUTATIONS = [
             "        UserDefaults.standard.removeObject(forKey: scopedKey(Self.taskKey))\n",
         ),
         PY_GATE,
-        "is not set exactly once",
+        "must be set at saveTask and the three journal-read failure paths",
     ),
     # ---- P1 · 展示层：「卡着一批」不得被显示成「上次成功」 ----
     (
@@ -508,10 +690,10 @@ MUTATIONS = [
         "[P2] 判据: reportedSuccess 改问「跑没跑起来」=> 单飞被拒也报成功",
         lambda: edit(
             BG_POLICY,
-            "    static func reportedSuccess(hasPendingTask: Bool) -> Bool {\n"
-            "        !hasPendingTask\n"
+            "    static func reportedSuccess(_ pending: HealthSyncBackgroundRecovery.PendingWork) -> Bool {\n"
+            "        pending.reportsSuccess\n"
             "    }",
-            "    static func reportedSuccess(hasPendingTask: Bool) -> Bool {\n"
+            "    static func reportedSuccess(_ pending: HealthSyncBackgroundRecovery.PendingWork) -> Bool {\n"
             "        true\n"
             "    }",
         ),
@@ -522,11 +704,80 @@ MUTATIONS = [
         "[P2] 判据: 请求是一次性的，却不自己重排 => 后台跑一次之后再没人管",
         lambda: edit(
             BG_POLICY,
-            "        hasPendingTask || hasFreshIntent\n",
+            "        pending.needsAnotherRound\n",
             "        false\n",
         ),
         SWIFT_GATE,
         "did not schedule the next background run",
+    ),
+    # ---- 冷启动恢复第二轮（2026-09-24）：调度与回执一律走"按目标读到的快照" ----
+    # 全部是"改错了照样编译通过、肉眼也看不出来"的形态，所以每一条都要有自己的执行者。
+    (
+        "[P1] 判据: 探针顺手绑定 active* => 「看一眼」把会话改绑到那个目标",
+        lambda: edit(
+            SYNC,
+            "        let urlScope = Self.urlScope(for: serverURL)\n"
+            "        let authoritativeScope = identity.map { Self.syncScope(for: serverURL, identity: $0) }\n",
+            "        let urlScope = Self.urlScope(for: serverURL)\n"
+            "        activeScope = urlScope\n"
+            "        let authoritativeScope = identity.map { Self.syncScope(for: serverURL, identity: $0) }\n",
+        ),
+        PY_GATE,
+        "probePendingWork assigns an active* field",
+    ),
+    (
+        "[P1] 判据: 又合成了「有新数据」的意图 => 续传走完之后多导一次全量",
+        lambda: edit(
+            SYNC,
+            "        let hasNotification = backgroundIntentObservation(for: serverURL) != nil\n",
+            "        if task != nil, backgroundIntentObservation(for: serverURL) == nil {\n"
+            "            recordBackgroundIntent(for: serverURL)\n"
+            "        }\n"
+            "        let hasNotification = backgroundIntentObservation(for: serverURL) != nil\n",
+        ),
+        PY_GATE,
+        "performBackgroundPass synthesizes a new-data intent again",
+    ),
+    (
+        "[P1] 判据: 探针重开数据库 => 单飞拒绝时仍执行迁移",
+        lambda: edit(
+            SYNC,
+            "        guard let serverURL else { return nil }\n        #if os(iOS)\n",
+            "        guard let serverURL else { return nil }\n        _ = taskStore.reopenIfUnavailable()\n        #if os(iOS)\n",
+        ),
+        PY_GATE,
+        "probePendingWork writes, clears or deletes something",
+    ),
+    (
+        "[P1] 判据: 身份缓存先发布 => 中断后新 scope 丢失恢复依据",
+        lambda: edit(
+            IDENTITY_PUBLISHER,
+            "        let nextScope = syncScope(for: baseURL, identity: identity)\n",
+            "        let nextScope = syncScope(for: baseURL, identity: identity)\n"
+            "        save(identity, baseURL)\n",
+        ),
+        PY_GATE,
+        "recovery must be persisted before the shared handshake is published",
+    ),
+    (
+        "[P1] 判据: 后台一轮不把快照交出去 => 回执只能用别的目标的展示标志",
+        lambda: edit(
+            SYNC,
+            "        return probePendingWork(for: serverURL)\n",
+            "        return nil\n",
+        ),
+        PY_GATE,
+        "does not hand its caller a target-bound snapshot",
+    ),
+    (
+        "[P1] 判据: 读盘失败被当成「确认空」=> 盘上那一批再也没人管",
+        lambda: edit(
+            RECOVERY,
+            "        if readFailed { return .unknown }\n",
+            "        if readFailed { return .empty }\n",
+        ),
+        SWIFT_GATE,
+        "a read failure outranks a found row",
     ),
     (
         "[P2] 判据: BGTask identifier 改了但 Info.plist 没跟着改 => 静默注册不上",
@@ -853,6 +1104,29 @@ MUTATIONS = [
         "requested value instead of the monotonic one",
     ),
     (
+        "[本轮新增3] 🔴 回归: 取消水位落盘前的 REAL 规范化（拿掉 `storedInREAL`）=> "
+        "一次**完全成功的**提交被自己的回读断言判失败并整段回滚 —— 2026-09-24 真机故障的形状。"
+        "注意结构门禁也会红（它钉了调用点），这里要的是**可跑的回归**也红得起",
+        lambda: edit(
+            SYNC_TASK_STORE,
+            "let watermark = requested.storedInREAL",
+            "let watermark = requested",
+        ),
+        SWIFT_GATE,
+        "a watermark that cannot survive the REAL round trip still commits",
+    ),
+    (
+        "[本轮新增3] 🔴 回归: 取消 route 状态落盘前的 REAL 规范化 => 整批 route 状态被回读断言"
+        "判失败（同一根因的另一半：`routeNow = Date()` 一样带小数秒）",
+        lambda: edit(
+            SYNC_TASK_STORE,
+            "                workoutEndDate: record.workoutEndDate.canonicalForREAL,",
+            "                workoutEndDate: record.workoutEndDate,",
+        ),
+        SWIFT_GATE,
+        "a route state whose dates cannot survive the REAL round trip still commits",
+    ),
+    (
         "[本轮新增] 回归: mayCommit 恒真 => 阻塞态会推进 anchor。**结构门禁在这里是绿的**"
         "（它只钉调用顺序），红的必须是可跑的那条回归",
         lambda: edit(SYNC_STATE_PLAN, "SyncPhase.mayAdvanceAnchor(phase)", "true"),
@@ -897,9 +1171,9 @@ MUTATIONS = [
         "「这条轨迹已经稳定」，之后一路降到 settled，而 settled 只有人工重扫能唤醒",
         lambda: edit(
             SYNC,
-            "        guard taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) else {",
-            "        _ = taskStore.upsertRouteStates(Array(routeStates.values))\n"
-            "        guard taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) else {",
+            "        let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(",
+            "        _ = taskStore.upsertRouteStates(Array(routeStates.values), scope: activeScope)\n"
+            "        let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(",
         ),
         PY_GATE,
         "the route memory is flushed BEFORE the watermark commit",
@@ -915,7 +1189,7 @@ MUTATIONS = [
         "[本轮新增2] 判据: 导出前不再读伴生状态快照 => 每个 workout 都被当成首查，整个改动静默失效",
         lambda: edit(
             SYNC,
-            "let routeStates = taskStore.loadRouteStates()",
+            "let routeStates = taskStore.loadRouteStates(scope: activeScope)",
             "let routeStates: [String: RouteSyncRecord] = [:]",
         ),
         PY_GATE,
@@ -932,7 +1206,7 @@ MUTATIONS = [
         "[本轮新增2] 判据: 删掉批量写的事务内回读断言 => 「我写进去了」又只是一句假设",
         lambda: edit(
             SYNC_TASK_STORE,
-            "        let written = loadRouteStates(uuids: records.map(\\.workoutUUID))\n",
+            "        let written = loadRouteStates(scope: scope, uuids: records.map(\\.workoutUUID))\n",
             "        let written: [String: RouteSyncRecord] = [:]\n",
         ),
         PY_GATE,
@@ -1065,7 +1339,32 @@ def print_tail(out: str) -> None:
 def main() -> int:
     failures: list[str] = []
     selector = os.environ.get("RAI_MUTATION_ONLY", "").strip()
-    selected = [m for m in MUTATIONS if selector in m[0]] if selector else list(MUTATIONS)
+    raw_scope = os.environ.get("RAI_MUTATION_FOR", "").strip()
+    changed = scope_changed_paths(raw_scope) if raw_scope else []
+    if raw_scope and not changed:
+        # 「范围是空的」绝不能变成"全跳过、然后退出 0" —— 那是一条静默的假绿。
+        print("RAI_MUTATION_FOR=%r resolved to no file inside the repository; refusing to scope"
+              % raw_scope)
+        return 1
+    scope_gates: list[str] = []
+    if raw_scope:
+        print("scope: %d changed file(s): %s" % (len(changed), ", ".join(changed)))
+        # 取**并集**，不是按 `target` 求交集：改动文件落在这个门禁的输入里，该门禁名下的
+        # **全部**突变都可能被它改变判定，必须一起跑。
+        scope_gates = [
+            gate for gate in MUTATION_GATES
+            if any(in_scope(entry, changed) for entry in gate_inputs(gate))
+        ]
+        for gate in scope_gates:
+            print("scope:     %s" % gate)
+        if not scope_gates:
+            print("scope: none of the %d mutation gates reads any of these files"
+                  % len(MUTATION_GATES))
+    selected = [
+        mutation for mutation in MUTATIONS
+        if (not selector or selector in mutation[0])
+        and (not raw_scope or mutation[2] in scope_gates)
+    ]
 
     raw_json = os.environ.get("RAI_MUTATION_JSON", "").strip()
     json_target: Path | None = None
@@ -1085,6 +1384,8 @@ def main() -> int:
         `partial` 与 `filter` 必须显式出现在产物里：分段跑的命令行与全套**一模一样**，
         只有输出末尾一行措辞不同。若 JSON 里不带这个字段，一份 `RAI_MUTATION_ONLY` 的产物
         与全套产物在机器眼里毫无区别 —— 那正是"分段跑被读成全套通过"的复发路径。
+        按改动裁剪（`RAI_MUTATION_FOR`）走的是同一条纪律：`partial` 必须由它**一并**置位，
+        另加 `scope` 记下"这次凭什么只跑了这些条"（改了哪些文件、命中哪些门禁）。
         """
         if json_target is None:
             return
@@ -1101,7 +1402,8 @@ def main() -> int:
             "command": "RAI_MUTATION_JSON=%s python3 apps/ios/tests/check-background-mutations.py"
                        % (raw_json,),
             "filter": selector or None,
-            "partial": bool(selector),
+            "scope": ({"changed": changed, "gates": scope_gates} if raw_scope else None),
+            "partial": bool(selector or raw_scope),
             "baseline": baseline,
             "restored": restored,
             "totals": {
@@ -1116,12 +1418,26 @@ def main() -> int:
             "failures": failures,
         })
 
+    def partial_label() -> str:
+        """裁剪/分段跑时结论行里那串限定语。两处出口共用，措辞不许分叉。"""
+        return ", ".join(
+            item for item in (
+                "filter=%r" % selector if selector else "",
+                "scope=%d changed file(s)" % len(changed) if raw_scope else "",
+            ) if item
+        )
+
     recover_leftover_backup()
     install_signal_handlers()
 
+    # 「过滤器拼错了」与「这次改动确实与这些判据无关」是两件事，退出码必须分开：
+    # 前者是用户错误（1）；后者不是失败，但也**不是通过** —— 它会跑基线、然后明说"什么都没验"。
+    scope_empty = False
     if not selected:
-        print("no mutation matched RAI_MUTATION_ONLY=%r; nothing to do" % selector)
-        return 1
+        if not raw_scope or selector:
+            print("no mutation matched RAI_MUTATION_ONLY=%r; nothing to do" % selector)
+            return 1
+        scope_empty = True
 
     backup_dir.mkdir(parents=True, exist_ok=True)
     for rel in SOURCES:
@@ -1139,6 +1455,24 @@ def main() -> int:
             return 1
         if selector:
             print("selected: %d of %d mutations (RAI_MUTATION_ONLY=%r)" % (len(selected), len(MUTATIONS), selector))
+        if raw_scope:
+            print("selected: %d of %d mutations (scope: %d changed file(s) fell into %d gate(s))"
+                  % (len(selected), len(MUTATIONS), len(changed), len(scope_gates)))
+
+        if scope_empty:
+            # 基线照跑（"当前仓库是绿的"这个前提不能被跳过），但没有任何突变会被施加，
+            # 所以负向对照与"还原后回绿"都没有对象 —— 不跑，也不假装跑过。
+            print()
+            print("NO MUTATION TOUCHES THE CHANGED FILES — nothing was verified in this run.")
+            print("  This does not say the judges still catch regressions; it only says these")
+            print("  changes cannot have invalidated any of the %d mutations." % len(MUTATIONS))
+            restored = {"exit": None, "green": False, "skipped": "no mutation was applied"}
+            print()
+            print("mutation check (PARTIAL, %s): 0 of %d mutations, 0 failed"
+                  % (partial_label(), len(MUTATIONS)))
+            print("  ^^^ 这一行不是「通过」：本次一条突变都没施加，判据有效性未被验证。")
+            emit()
+            return 0
         print()
 
         for index, (name, apply, gate, needle) in enumerate(selected, start=1):
@@ -1217,10 +1551,11 @@ def main() -> int:
         finish()
 
     print()
-    if selector:
+    if selector or raw_scope:
         # 用**不同的措辞**报结论：分段跑的输出绝不能被读成"全套通过"。
-        print("mutation check (PARTIAL, filter=%r): %d of %d mutations, %d failed"
-              % (selector, len(selected), len(MUTATIONS), len(failures)))
+        scope_note = partial_label()
+        print("mutation check (PARTIAL, %s): %d of %d mutations, %d failed"
+              % (scope_note, len(selected), len(MUTATIONS), len(failures)))
     else:
         print("mutation check: %d mutations, %d failed" % (len(MUTATIONS), len(failures)))
     emit()
@@ -1228,4 +1563,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--dump-gate-inputs":
+        sys.exit(dump_gate_inputs(sys.argv[2]))
     sys.exit(main())

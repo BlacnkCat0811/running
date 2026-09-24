@@ -34,6 +34,8 @@ struct RouteSyncStatePersistenceRegression {
 
         let store = SyncTaskStore(directory: root)
         check(store.isAvailable, "a writable directory yields an available journal")
+        let scopeA = "sync-scope-a"
+        let scopeB = "sync-scope-b"
 
         let t0 = Date(timeIntervalSince1970: 1_700_000_000)
         let end = Date(timeIntervalSince1970: 1_699_000_000)
@@ -58,18 +60,18 @@ struct RouteSyncStatePersistenceRegression {
         }
 
         // ---- 1. 空表与空批。
-        check(store.loadRouteStates().isEmpty, "a fresh journal has no route state rows")
-        check(store.loadRouteStates(uuids: ["whatever"]).isEmpty, "an unobserved workout reads back as absent")
-        check(store.upsertRouteStates([]), "an empty batch succeeds without opening a transaction")
-        check(store.loadRouteStates().isEmpty, "an empty batch writes nothing")
+        check(store.loadRouteStates(scope: scopeA).isEmpty, "a fresh journal has no route state rows")
+        check(store.loadRouteStates(scope: scopeA, uuids: ["whatever"]).isEmpty, "an unobserved workout reads back as absent")
+        check(store.upsertRouteStates([], scope: scopeA), "an empty batch succeeds without opening a transaction")
+        check(store.loadRouteStates(scope: scopeA).isEmpty, "an empty batch writes nothing")
 
         // ---- 2. 往返逐字段相等。`Date` 走 REAL 列、`route_hash` 走 TEXT 列（可 NULL）。
         let a = record("aaaaaaaa-0000-0000-0000-000000000001", .active, points: 1234, hash: "deadbeef", checked: t0, stable: 1)
         let b = record("bbbbbbbb-0000-0000-0000-000000000002", .cooling, points: 0, hash: nil, checked: t0, stable: 2)
         let c = record("cccccccc-0000-0000-0000-000000000003", .settled, points: 987654, hash: String(repeating: "ab", count: 32), checked: t0, stable: 9)
         let batch = [a, b, c]
-        check(store.upsertRouteStates(batch), "a batch of three distinct workouts writes in one transaction")
-        let loaded = store.loadRouteStates()
+        check(store.upsertRouteStates(batch, scope: scopeA), "a batch of three distinct workouts writes in one transaction")
+        let loaded = store.loadRouteStates(scope: scopeA)
         check(loaded.count == batch.count, "the whole batch reads back")
         for want in batch {
             check(loaded[want.workoutUUID] == want, "every column round-trips for \(want.workoutUUID)")
@@ -84,20 +86,20 @@ struct RouteSyncStatePersistenceRegression {
         )
 
         // ---- 3. 定点读，以及"空筛选 ≠ 读全部"。
-        check(store.loadRouteStates(uuids: [a.workoutUUID]).count == 1, "a targeted read returns only the asked-for row")
+        check(store.loadRouteStates(scope: scopeA, uuids: [a.workoutUUID]).count == 1, "a targeted read returns only the asked-for row")
         check(
-            store.loadRouteStates(uuids: [a.workoutUUID])[a.workoutUUID] == a,
+            store.loadRouteStates(scope: scopeA, uuids: [a.workoutUUID])[a.workoutUUID] == a,
             "the targeted read returns the same record as the full read"
         )
         check(
-            store.loadRouteStates(uuids: []).isEmpty,
+            store.loadRouteStates(scope: scopeA, uuids: []).isEmpty,
             "an empty filter reads nothing — it must not silently degrade into a full scan"
         )
 
         // ---- 4. 真落盘：换一个 store 实例（新连接）仍然读得到。
         let reopened = SyncTaskStore(directory: root)
         check(reopened.isAvailable, "the journal reopens")
-        check(reopened.loadRouteStates() == loaded, "route state survives a reopen instead of living in memory")
+        check(reopened.loadRouteStates(scope: scopeA) == loaded, "route state survives a reopen instead of living in memory")
 
         // ---- 5. UPSERT 覆盖同一主键，而不是撞主键失败、也不是插入第二行。
         var changed = a
@@ -106,9 +108,9 @@ struct RouteSyncStatePersistenceRegression {
         changed.pointCount = 999
         changed.lastCheckedAt = t0.addingTimeInterval(3600)
         changed.routeHash = "after"
-        check(store.upsertRouteStates([changed]), "a second write for the same workout succeeds")
-        check(store.loadRouteStates()[a.workoutUUID] == changed, "the second write updates in place")
-        check(store.loadRouteStates().count == batch.count, "the second write does not add a row")
+        check(store.upsertRouteStates([changed], scope: scopeA), "a second write for the same workout succeeds")
+        check(store.loadRouteStates(scope: scopeA)[a.workoutUUID] == changed, "the second write updates in place")
+        check(store.loadRouteStates(scope: scopeA).count == batch.count, "the second write does not add a row")
 
         // ---- 6. 分块边界：跨过 `routeStateChunkSize`（400）必须仍然一个不少。
         //      它不是性能测试，是"`IN (?,?,…)` 的变量数上限"这条约束的守卫：
@@ -117,8 +119,8 @@ struct RouteSyncStatePersistenceRegression {
         let many = (0..<401).map { index in
             record(String(format: "chunk-%04d", index), .cooling, points: index, hash: "h\(index)", checked: t0, stable: index)
         }
-        check(store.upsertRouteStates(many), "a batch larger than the chunk size writes in one transaction")
-        let chunked = store.loadRouteStates(uuids: many.map(\.workoutUUID))
+        check(store.upsertRouteStates(many, scope: scopeA), "a batch larger than the chunk size writes in one transaction")
+        let chunked = store.loadRouteStates(scope: scopeA, uuids: many.map(\.workoutUUID))
         check(chunked.count == many.count, "every row of an over-chunk-size batch reads back")
         check(
             many.allSatisfy { chunked[$0.workoutUUID] == $0 },
@@ -145,14 +147,14 @@ struct RouteSyncStatePersistenceRegression {
         }
         let freshUUID = "dddddddd-0000-0000-0000-000000000004"
         let doomed = [record(freshUUID, .active), changed]
-        check(!store.upsertRouteStates(doomed), "a batch whose second row cannot be written fails")
+        check(!store.upsertRouteStates(doomed, scope: scopeA), "a batch whose second row cannot be written fails")
         check(store.lastError != nil, "the failed batch leaves an actionable error")
         check(
-            store.loadRouteStates(uuids: [freshUUID])[freshUUID] == nil,
+            store.loadRouteStates(scope: scopeA, uuids: [freshUUID])[freshUUID] == nil,
             "the first row of the failed batch is rolled back too — the batch really is one transaction"
         )
         check(
-            store.loadRouteStates()[a.workoutUUID] == changed,
+            store.loadRouteStates(scope: scopeA)[a.workoutUUID] == changed,
             "the failed batch leaves the earlier committed value alone"
         )
         sqlite3_exec(control, "DROP TRIGGER reject_route_state_update", nil, nil, nil)
@@ -165,7 +167,7 @@ struct RouteSyncStatePersistenceRegression {
             "UPDATE sync_route_state SET route_status = 'not-a-real-status' WHERE workout_uuid = '\(c.workoutUUID)'",
             nil, nil, nil
         )
-        let afterCorruption = store.loadRouteStates()
+        let afterCorruption = store.loadRouteStates(scope: scopeA)
         check(afterCorruption[c.workoutUUID] == nil, "a row whose status is outside the closed set is withheld")
         check(
             afterCorruption[a.workoutUUID] == changed,
@@ -188,18 +190,100 @@ struct RouteSyncStatePersistenceRegression {
             "committing without a pending task row still fails loudly"
         )
         check(
-            store.loadRouteStates()[a.workoutUUID] == changed,
+            store.loadRouteStates(scope: scopeA)[a.workoutUUID] == changed,
             "a failed watermark commit leaves route state untouched"
         )
 
         // ---- 10. 不可用的日志：不许假装写成功，也不许假装读到了空集合（两者都是"猜"）。
         let broken = SyncTaskStore(directory: URL(fileURLWithPath: "/dev/null/not-a-directory"))
         check(!broken.isAvailable, "a journal that cannot open reports itself unavailable")
-        check(broken.loadRouteStates().isEmpty, "an unavailable journal reports no memory instead of inventing one")
+        check(broken.loadRouteStates(scope: scopeA).isEmpty, "an unavailable journal reports no memory instead of inventing one")
         check(
-            !broken.upsertRouteStates([record(freshUUID, .active)]),
+            !broken.upsertRouteStates([record(freshUUID, .active)], scope: scopeA),
             "an unavailable journal rejects a route state write"
         )
+
+        // ---- 11. 🔴 2026-09-24 真机故障的回归：**不能逐位往返 REAL 的 Date**。
+        //      两个时间列都是 REAL，而 `Date` 内部存 `timeIntervalSinceReferenceDate`，与列里的
+        //      `timeIntervalSince1970` 差常量 978307200 —— 这个映射**不是双射**：对 2026 年的时间戳
+        //      二者之比 ≈ 1.8（< 2），加法那一步结果的 ulp 是原值网格的 2 倍，于是原值最低位为 1
+        //      的时间戳**会被舍掉一位**。实测逐 ulp 扫 200,000 个真实时间戳：**恰好一半有损**；
+        //      整秒时间戳 0/200000 有损 —— 所以上面第 2 节那批 `1_700_000_000` 的 fixture
+        //      永远绿，而生产路径上 `HealthKitExport.swift:286` 的 `routeNow = Date()` 带完整小数秒。
+        //      症状：下面那句 `written[...] == record`（比整个 `RouteSyncRecord`）按约一半的概率
+        //      判不等 ⇒ 整批回滚，用户看到「路线同步状态写入后无法读回一致的值」。
+        //
+        //      ⚠️ 本节必须留在**文件末尾**：突变「批量写不再 BEGIN IMMEDIATE」期望红在第 71 行的
+        //      `a batch of three distinct workouts writes in one transaction` 上；把本节挪到它
+        //      前面会让本用例先撞上，那条突变的 `assertion_hit` 就变假了（2026-09-24 实测踩过）。
+        let realUlp = Double(sign: .plus, exponent: -23, significand: 1)  // 2^-23
+        let basis = Date(timeIntervalSince1970: 1_790_000_000).timeIntervalSinceReferenceDate
+        let lossy = Date(timeIntervalSinceReferenceDate: basis + realUlp)
+        // 前置条件本身也要断言：这个 fixture 哪天变回无损，下面两条就全成了空转。
+        check(
+            Date(timeIntervalSince1970: lossy.timeIntervalSince1970) != lossy,
+            "the lossy fixture must actually lose a bit in the REAL round trip"
+        )
+        check(
+            Date(timeIntervalSince1970: lossy.canonicalForREAL.timeIntervalSince1970)
+                == lossy.canonicalForREAL,
+            "canonicalForREAL must land on a fixed point of the round trip"
+        )
+        check(
+            store.upsertRouteStates([
+                RouteSyncRecord(
+                    workoutUUID: "lossy-workout",
+                    workoutEndDate: lossy,
+                    status: .active,
+                    pointCount: 17,
+                    routeHash: "cafe",
+                    lastCheckedAt: lossy,
+                    stableCheckCount: 2
+                )
+            ], scope: scopeA),
+            "a route state whose dates cannot survive the REAL round trip still commits"
+        )
+        check(
+            store.loadRouteStates(scope: scopeA, uuids: ["lossy-workout"])["lossy-workout"]
+                == RouteSyncRecord(
+                    workoutUUID: "lossy-workout",
+                    workoutEndDate: lossy.canonicalForREAL,
+                    status: .active,
+                    pointCount: 17,
+                    routeHash: "cafe",
+                    lastCheckedAt: lossy.canonicalForREAL,
+                    stableCheckCount: 2
+                ),
+            "the committed route state reads back at the canonical value"
+        )
+
+        // A different server/epoch must query the same workout again.
+        check(store.loadRouteStates(scope: scopeB).isEmpty, "a new scope inherits no settled routes")
+        check(store.loadRouteStates(scope: scopeB, uuids: [a.workoutUUID]).isEmpty, "targeted reads also isolate scopes")
+        check(store.upsertRouteStates([a], scope: scopeB), "the same UUID can be stored in a second scope")
+        check(store.loadRouteStates(scope: scopeA)[a.workoutUUID] == changed, "writing B leaves A untouched")
+        check(store.loadRouteStates(scope: scopeB)[a.workoutUUID] == a, "B keeps its own observation")
+
+        let legacyRoot = root.appendingPathComponent("legacy")
+        try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
+        var legacyDB: OpaquePointer?
+        precondition(sqlite3_open(legacyRoot.appendingPathComponent("sync.sqlite").path, &legacyDB) == SQLITE_OK)
+        precondition(sqlite3_exec(legacyDB, """
+            CREATE TABLE sync_route_state (workout_uuid TEXT PRIMARY KEY, workout_end_date REAL NOT NULL,
+              route_status TEXT NOT NULL, point_count INTEGER NOT NULL, route_hash TEXT,
+              last_checked_at REAL NOT NULL, stable_check_count INTEGER NOT NULL);
+            INSERT INTO sync_route_state VALUES ('old', 1700000000, 'settled', 42, 'old-hash', 1700000000, 3);
+            CREATE TABLE sync_tasks (scope TEXT PRIMARY KEY, updated_at REAL NOT NULL, payload BLOB NOT NULL);
+            INSERT INTO sync_tasks VALUES ('old-scope', 1700000000, X'0102');
+            """, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(legacyDB)
+        let upgraded = SyncTaskStore(directory: legacyRoot)
+        check(upgraded.isAvailable, "an installed legacy schema upgrades successfully")
+        check(upgraded.loadRouteStates(scope: scopeA).isEmpty, "unowned legacy memory is discarded")
+        check(upgraded.load(scope: "old-scope") == Data([1, 2]), "migration preserves pending task bytes")
+        check(upgraded.upsertRouteStates([a], scope: scopeA), "upgraded schema accepts scoped records")
+        let upgradedAgain = SyncTaskStore(directory: legacyRoot)
+        check(upgradedAgain.loadRouteStates(scope: scopeA)[a.workoutUUID] == a, "reopening never repeats the destructive migration")
 
         print("\(checks) route state persistence regression checks passed")
     }

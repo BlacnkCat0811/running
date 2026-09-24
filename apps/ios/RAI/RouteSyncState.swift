@@ -22,7 +22,7 @@ nonisolated enum RouteSyncStatus: String, Codable, Sendable, CaseIterable {
 /// `HKAnchoredObjectQuery` 只作用于 sample 类型，而 `HKWorkoutRoute` 是**附着在 `HKWorkout` 上的
 /// 衍生资源**（要先用 `HKQuery.predicateForObjects(from: workout)` 找到它，再用
 /// `HKWorkoutRouteQuery` 逐点取回）。把 route 当成独立 anchor 去伪造一个，等于凭空发明 API；
-/// 所以这条状态的**主键只能是 workout uuid**。
+/// 因此每个同步 scope 内以 workout UUID 标识状态；持久化复合主键为 (scope, workout_uuid)。
 nonisolated struct RouteSyncRecord: Equatable, Sendable {
     /// 小写化的 `HKWorkout.uuid.uuidString`。
     ///

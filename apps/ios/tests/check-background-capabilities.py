@@ -330,6 +330,20 @@ if background_task_lines:
         "the background-task expiration handler still calls cancelSync()",
     )
 
+# --- 5b. 后台额度主动看门狗（2026-09-24 OOM 溯源新增）-----------------------
+# expiration handler 只在"临近到期"才被系统回调，内存吃紧时可能来不及；
+# 看门狗每秒盯剩余额度、低于安全余量就主动收尾。判据用出现次数：`backgroundTimeSafetyMargin`
+# 声明 + 使用至少各一次，把"常量还在但没人拿它盯表"和"整块被删"都挡住；
+# `budgetWatchdog` 在则保证 defer 里的 invalidate 接线没被摘。
+check(
+    sync.count("backgroundTimeSafetyMargin") >= 2,
+    "the background-time watchdog margin is declared but never used (or missing)",
+)
+check(
+    "budgetWatchdog" in sync,
+    "the background-time watchdog is missing from HealthKitSync.swift",
+)
+
 # --- 6. resumablePhase 自身不得吐出 "cancelled" ----------------------------
 body = re.search(
     r"static func resumablePhase\(for interrupted: String\) -> String \{(.*?)\n    \}",
@@ -426,8 +440,9 @@ if observer_body is not None:
 #     `hasPendingTask` 是展示层区分"上次成功"与"还卡着一批"的唯一依据。它一旦与
 #     `sync_tasks` 的真实内容漂移，界面就会在某一天开始撒谎，而类型检查和回归都不会响。
 check(
-    sync.count("hasPendingTask = true") == 1 and "hasPendingTask = true" in sync,
-    "hasPendingTask is not set exactly once (it belongs in saveTask, the moment progress exists)",
+    sync.count("hasPendingTask = true") == 5 and "if taskStore.lastError != nil" in sync and "if let journalError = taskStore.lastError" in sync
+    and "guard taskStore.reopenIfUnavailable() else" in sync,
+    "hasPendingTask must be set at saveTask, journal-read failures and failed database preparation",
 )
 #     计数必须按**行首赋值**算：属性声明 `private(set) var hasPendingTask = false`（:46）里
 #     逐字含有同一个字符串。原先这里写 `sync.count("hasPendingTask = false") >= 1`，
@@ -480,6 +495,23 @@ check(
 check(
     "check-background-mutations.py" not in aggregate,
     "the mutation harness must not be wired into run-model-tests.sh: it rewrites sources and takes minutes",
+)
+
+# `RAI_MUTATION_FOR`（按改动范围裁剪）同样**成对**钉住 —— 它的失效方式是"静默的假绿"：
+# 一次裁剪跑的产物若不带 `partial`，或者"选中 0 条"时不吭声，都会被读成"判据有效性已通过"。
+# 三条都钉**源码锚点**（本文件既有手法）。宁可它脆一点，也不要它在没人注意时失效。
+mutation_harness = read(TESTS / "check-background-mutations.py")
+check(
+    "RAI_MUTATION_FOR" in mutation_harness,
+    "the mutation harness lost its scope filter (RAI_MUTATION_FOR) — every run silently goes full again",
+)
+check(
+    '"partial": bool(selector or raw_scope)' in mutation_harness,
+    "a scoped mutation run no longer marks its summary partial: the product would read as a full pass",
+)
+check(
+    "NO MUTATION TOUCHES THE CHANGED FILES" in mutation_harness,
+    "an empty scope must announce itself loudly; silence here reads as 'nothing to worry about'",
 )
 
 # --- 8. 客户端的上传失败码必须能在服务端源码里找到出处 ---------------------
@@ -645,10 +677,17 @@ check(
     "BGTaskScheduler.submit is wrapped in try? — a rejected submit would leave no trace",
 )
 
-# 9g. 报给系统的成败必须来自纯判据，不许写死。
+# 9g. 报给系统的成败必须来自纯判据，不许写死；而且判据的输入必须是**这一轮按目标读到的快照**，
+#     不是 `HealthKitSync` 上的展示标志（那个标志属于最后一次写它的那次同步）。
 check(
-    "reportedSuccess(hasPendingTask:" in app_delegate,
+    "BackgroundRunPolicy.reportedSuccess" in app_delegate,
     "setTaskCompleted(success:) is not decided by BackgroundRunPolicy.reportedSuccess",
+)
+check(
+    "healthSync.hasPendingTask" not in without_comment_lines(app_delegate),
+    "AppDelegate derives scheduling/receipt from the global display flag again — that flag belongs to "
+    "whichever target wrote it last, so a single-flight-rejected round would be scored with someone "
+    "else's result (and a run that could not read the journal would be reported as success)",
 )
 check(
     re.search(r"setTaskCompleted\(success:\s*(true|false)\s*\)", app_delegate) is None,
@@ -794,7 +833,7 @@ ordered(
     "performSync reconciles *after* deriving the next step: the derivation would see `.upload` while "
     "the system still owns those bytes",
 )
-background_pass = tail_after(sync, "func runBackgroundPass(", "runBackgroundPass(").split("\n    private func ")[0]
+background_pass = tail_after(sync, "private func performBackgroundPass(", "performBackgroundPass(").split("\n    private func ")[0]
 check(
     "hasBackgroundUploadTask: systemUploadInFlight(" in background_pass,
     "runBackgroundPass no longer feeds the real 'system owns these bytes' signal into BackgroundRunPolicy",
@@ -803,6 +842,49 @@ enter_background = tail_after(sync, "func handleEnterBackground()", "handleEnter
 check(
     "hasUploadTask:" in enter_background,
     "handleEnterBackground does not tell HealthSyncLifecycle whether the system owns the bytes",
+)
+# 10g-bis. 🔴 切后台时的"还有没有待办"必须来自**按目标现读的探针**，不能来自 `loadTask()`
+#          —— 后者的判据是内存里的 `activeScope`，而切后台这一刻它可能还指向用户刚刚切走的
+#          那个服务端（或者压根没绑定过）。
+#          ⚠️ 这里**不**禁止 `loadTask()` 出现在本函数里：在飞那一趟的 `hasJobId` /
+#          `hasUploadTask` 必须用它**自己**的上下文（同一函数里另取一个变量），禁掉会把
+#          "正在传的这一批"判成"别的批"。所以判据是"标志必须由探针的结论赋值"。
+check(
+    "probePendingWork(for:" in enter_background,
+    "handleEnterBackground asks the active context instead of probing the target: a switch of server "
+    "URL would make the pending flag describe the previous target",
+)
+check(
+    "pending?.hasUnfinishedWork" in enter_background,
+    "handleEnterBackground no longer derives the pending flag from the probe snapshot — `.unknown` "
+    "(read failure / unattributable row) would be reported as 'nothing pending'",
+)
+# 10g-ter. 🔴 探针本身必须是**只读**的：不改 `active*`、不迁移旧任务、不写/清日志行。
+#          它一旦有副作用，"冷启动时看一眼"就会顺手改掉会话绑定。
+probe_body = tail_after(sync, "func probePendingWork(", "probePendingWork(").split("\n    func ")[0]
+check(
+    re.search(r"\bactive(Scope|ServerURL|Identity|Token)\s*=", without_comment_lines(probe_body)) is None,
+    "probePendingWork assigns an active* field — probing a target's pending work must not rebind the "
+    "session to it",
+)
+check(
+    "loadTask()" not in without_comment_lines(probe_body),
+    "probePendingWork goes through loadTask(), which silently back-fills migrated task rows",
+)
+check(
+    ".save(" not in without_comment_lines(probe_body)
+    and "clearTask()" not in without_comment_lines(probe_body)
+    and "removeTaskArtifacts" not in without_comment_lines(probe_body)
+    and "reopenIfUnavailable()" not in without_comment_lines(probe_body),
+    "probePendingWork writes, clears or deletes something — it is supposed to be a read-only snapshot",
+)
+# 10g-quater. 🔴 取消"有旧任务就合成新数据意图"。旧任务本身就是重试依据，而合成出来的意图
+#             永远等不到确认（确认点只在导出起点），最终会变成一次多余的全量导出。
+check(
+    "recordBackgroundIntent" not in without_comment_lines(background_pass),
+    "performBackgroundPass synthesizes a new-data intent again: an old task row is already the retry "
+    "basis, and a synthesized intent can never be acknowledged by a resuming round, so it later turns "
+    "into an extra export",
 )
 
 # 10h. 🔴 `uploadTaskId` 目前**没有**写入点，谁把它当判据谁就会拿到恒假 ⇒ 每轮唤醒都重传一遍。
@@ -1341,9 +1423,39 @@ check(
     "rows reads exactly like success",
 )
 check(
-    "loadRouteStates(uuids:" in upsert_body,
+    "loadRouteStates(scope: scope, uuids:" in upsert_body,
     "the pre-COMMIT read-back assertion is gone from the route state batch — 'I wrote it' would "
     "again be an assumption rather than something the transaction verified",
+)
+
+# 14h-2. 🔴 落盘前必须把时间点吸附到「REAL 列能逐位往返」的那一个值上。
+#
+#  2026-09-24 真机故障：`Date` 内部存 `timeIntervalSinceReferenceDate`，列里存
+#  `timeIntervalSince1970`，两者差常量 978307200 —— 这个映射**不是双射**。实测逐 ulp 扫
+#  200,000 个真实时间戳，**恰好一半在往返后丢了最低位**（整秒时间戳 0/200000 有损，
+#  这也正是那批回归此前全绿的原因）。生产路径上 `exportedThrough = Date()` 与
+#  `routeNow = Date()` 都带完整小数秒 ⇒ 回读断言拿**原始 Date** 去比读回来的 Date，
+#  约一半概率判不等 ⇒ 一次完全成功的提交被整段回滚，用户看到
+#  「同步水位写入后无法读回一致的值」。
+#
+#  判据必须钉在**写入路径的调用点**上：只在 `canonicalForREAL` 的定义处断言（"函数存在"）
+#  是不够的 —— 把调用点删掉，定义还在，故障照样回来。
+check(
+    "requested.storedInREAL" in commit_store,
+    "commitSuccess no longer canonicalizes the watermark before writing it — a Date that cannot "
+    "survive the REAL round trip then fails its own in-transaction read-back and rolls the whole "
+    "commit back, surfacing to the user as 「同步水位写入后无法读回一致的值」",
+)
+check(
+    "canonicalForREAL" in upsert_body,
+    "upsertRouteStates no longer canonicalizes the route timestamps — its read-back assertion "
+    "compares whole RouteSyncRecord values, so one Date() that loses a bit in the REAL round trip "
+    "fails the entire batch",
+)
+check(
+    "var canonicalForREAL: Date" in store_src or "var canonicalForREAL: Date" in plan_src,
+    "Date.canonicalForREAL is gone — the REAL round trip is not a bijection (measured: half of "
+    "200,000 real timestamps lose a bit), so both read-back assertions depend on it",
 )
 
 # 管线：真的在用状态机过滤，而且**先判后查**。
@@ -1409,13 +1521,13 @@ check(
 
 # 接线：导出前取快照（导出跑在脱离主线程的上下文里，碰不了 @MainActor 的 store）。
 check(
-    "taskStore.loadRouteStates()" in sync,
+    "taskStore.loadRouteStates(scope: activeScope)" in sync,
     "performSync no longer loads the route state snapshot — the export would see an empty memory "
     "and treat every workout as a first observation (safe, but the whole change is inert)",
 )
 ordered(
     sync,
-    "let routeStates = taskStore.loadRouteStates()",
+    "let routeStates = taskStore.loadRouteStates(scope: activeScope)",
     "HealthKitExport.exportArchive(",
     "the route state snapshot is taken after the export is launched — the export body runs "
     "detached (HealthSyncCancellation.runDetached) and cannot reach the @MainActor store, so the "
@@ -1479,7 +1591,109 @@ for script in sorted(TESTS.glob("*.sh")):
 # 所以**有意删掉一个状态码**也会踩到它。那时正确的动作是把 MIN_CHECKS 往下调一格，
 # 而不是把这条判据删掉。
 # 2026-09-23 再补（按 workout 定频）：+26 条（§14h 的 22 条 + §14i 的 2 条 + §10k 名单新增的 2 条）。
-MIN_CHECKS = 216
+# 2026-09-24 再补：+3 条（`RAI_MUTATION_FOR` 范围裁剪的成对守卫，见 §7）。
+# ⚠️ 本次实测打印 223 条，而旧值 216 是在打印 220 时定下的 ⇒ 它一直留着 3 条余量，
+# **不是**上面说的零容忍。按"打印总数 − 1"收到 222，让新加的 3 条也落进地板里。
+# Cold launch recovery and durable intent handoff must remain wired to production.
+ordered(background_pass, "restoreBackgroundContext(for: serverURL)", "let task = loadTask()",
+        "background task lookup must follow offline identity restoration")
+check("syncOwner.run" in tail_after(sync, "func runBackgroundPass(", "runBackgroundPass").split("\n    private func ")[0],
+      "background recovery must acquire single-flight ownership before touching context")
+check("consumeBackgroundIntent" not in without_comment_lines(sync),
+      "background startup must not consume its intent before durable handoff")
+check("CacheStore.loadHandshake(baseURL: serverURL)" in sync,
+      "background recovery must use the existing shared handshake cache")
+publisher_src = read(RAI / "HealthSyncIdentityPublisher.swift")
+model_src = read(RAI / "NativeAppModel.swift")
+check("HealthSyncIdentityPublisher.publish(identity, baseURL: serverURL)" in sync
+      and model_src.count("HealthSyncIdentityPublisher.publish(identity, baseURL: baseURL)") == 2,
+      "all three online handshake paths must share identity publication")
+ordered(publisher_src, ".record(urlScope:", "save(identity, baseURL)",
+        "recovery must be persisted before the shared handshake is published")
+check("HealthSyncBackgroundRecovery.persistThenAcknowledge(" in save_body,
+      "task persistence must use the tested durable intent handoff")
+check("HealthSyncBackgroundRecovery.persistThenAcknowledge(" in commit_body,
+      "sync commit must use the tested durable intent handoff")
+check("PRIMARY KEY (scope, workout_uuid)" in store_src,
+      "route memory must be keyed by both scope and workout UUID")
+check("PRAGMA user_version = 2" in store_src and "ALTER TABLE sync_route_state RENAME" in store_src,
+      "installed route schemas need an explicit versioned migration")
+check("taskStore.upsertRouteStates(Array(routeStates.values), scope: activeScope)" in commit_body,
+      "route observations must be saved under the active authoritative scope")
+
+# --- 15b. 冷启动恢复的第二轮（2026-09-24）：调度与回执一律走"按目标读到的快照" ----------
+# 这一节的失效方式全是**静默**的：标志与目标错配时没有任何报错，只是某一天起"后台跑过一次
+# 之后再没人管"，或者反过来"每 15 分钟空转一次"。
+#
+# 15b-1. `applicationDidEnterBackground` 必须自己读快照，不能依赖 SwiftUI 的 `scenePhase`
+#        回调先跑（两者之间没有先后保证）。
+enter_background_delegate = tail_after(
+    app_delegate, "func applicationDidEnterBackground(", "applicationDidEnterBackground"
+)
+check(
+    "probePendingWork(for:" in enter_background_delegate
+    and "BackgroundRunPolicy.shouldResubmit(" in enter_background_delegate,
+    "applicationDidEnterBackground no longer probes this session's target before resubmitting — it "
+    "would depend on a callback that has no ordering guarantee with it",
+)
+# 15b-2. 后台一轮的返回值必须带出快照，且回执用的是它（不是展示标志）。
+run_pass_body = tail_after(sync, "func runBackgroundPass(", "runBackgroundPass").split("\n    private func ")[0]
+check(
+    "-> HealthSyncBackgroundRecovery.PendingWork?" in run_pass_body
+    and "probePendingWork(for: serverURL)" in run_pass_body,
+    "runBackgroundPass does not hand its caller a target-bound snapshot, so the receipt has to fall "
+    "back to the global display flag (which describes another target)",
+)
+check(
+    "pending.map(BackgroundRunPolicy.reportedSuccess)" in app_delegate
+    or "BackgroundRunPolicy.reportedSuccess(pending)" in app_delegate,
+    "the completion receipt does not come from the round's own snapshot",
+)
+# 15b-3. 🔴 统一发布入口必须**先于**发布新身份缓存落盘恢复请求。
+#        反过来的崩溃窗口：新身份已发布、盘上什么都没记 ⇒ 下一轮纯后台冷启动按新 scope
+#        既读不到任务行也读不到意图，于是静默 `nothingToDo`，新 scope 直到用户手动点同步才有批次。
+check("HealthSyncIdentityPublisher.publish(identity, baseURL: serverURL)" in perform_body,
+      "online HealthKit sync must publish through the shared recovery-aware entry")
+check(
+    "observeBackgroundIntentsForExportStart(for: serverURL)" in perform_body,
+    "performSync no longer claims intents at the export start; a resuming round (which does not re-read "
+    "HealthKit) would have to claim them, eating notifications that arrived after those bytes",
+)
+ordered(
+    perform_body,
+    "observeBackgroundIntentsForExportStart(for: serverURL)",
+    "HealthKitExport.exportArchive(",
+    "the intent observation point is not at the export start",
+)
+check(
+    "clearBackgroundIntentObservations()" in sync,
+    "the per-sync intent observations are never cleared, so a later sync's saveTask/commit could "
+    "acknowledge a notification it never saw",
+)
+# 15b-4. 重开必须只在单飞接纳之后、读任务之前发生。
+check(
+    "taskStore.reopenIfUnavailable()" in sync and "func reopenIfUnavailable()" in store_src
+    and "reopenIfUnavailable()" not in without_comment_lines(probe_body)
+    and "guard self.prepareJournalForExecution() else { return }" in run_pass_body,
+    "database reopen must happen under single-flight ownership, never inside the read-only probe",
+)
+# 15b-5. 跨文件编译单元配对（与 §14i 同一形态）：`BackgroundSyncPolicy` 的判据入参是
+#        `HealthSyncBackgroundRecovery.PendingWork`，少编那个文件只在**真跑**门禁时以
+#        `cannot find type ... in scope` 炸，而全量类型检查看不出来。
+for script in sorted(TESTS.glob("*.sh")):
+    script_body = read(script)
+    if "BackgroundSyncPolicy.swift" not in script_body:
+        continue
+    check(
+        "HealthSyncBackgroundRecovery.swift" in script_body,
+        "%s compiles BackgroundSyncPolicy.swift without HealthSyncBackgroundRecovery.swift — the "
+        "snapshot type used by reportedSuccess/shouldResubmit would be out of scope, while the "
+        "full-file type check stays green because it compiles every source at once" % script.name,
+    )
+# 2026-09-24 再补（冷启动恢复第二轮：按目标读取的待办快照）：+28 条（§10g-bis/ter/quater
+# 的 6 条、§15b-1..5 的 8 条，以及 §15b-5 的编译单元配对循环按脚本数展开的 14 条）。
+# ⚠️ 本次实测打印 **251** 条 ⇒ 按"打印总数 − 1"把地板收到 **250**（零容忍）。
+MIN_CHECKS = 250
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "

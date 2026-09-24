@@ -120,7 +120,7 @@ final class NativeAppModel {
         do {
             let identity = try await api.handshake(baseURL: baseURL, token: token)
             guard isCurrent() else { return }
-            Self.saveHandshake(identity, for: baseURL)
+            HealthSyncIdentityPublisher.publish(identity, baseURL: baseURL)
             setCacheScope(baseURL: baseURL, handshake: identity)
             session.isReachable = true
             session.lastError = nil
@@ -155,7 +155,7 @@ final class NativeAppModel {
             do {
                 let identity = try await api.handshake(baseURL: baseURL, token: token)
                 guard isCurrent() else { return }
-                Self.saveHandshake(identity, for: baseURL)
+                HealthSyncIdentityPublisher.publish(identity, baseURL: baseURL)
                 setCacheScope(baseURL: baseURL, handshake: identity)
             } catch {
                 guard isCurrent() else { return }
@@ -836,19 +836,10 @@ final class NativeAppModel {
         return "请求失败，请检查 RAI 服务和网络。"
     }
 
-    private static func handshakeKey(for baseURL: URL) -> String {
-        "rai.handshake.\(CacheStore.urlScope(baseURL: baseURL))"
-    }
-
     private static func loadHandshake(for baseURL: URL) -> RaiHandshake? {
-        guard let data = UserDefaults.standard.data(forKey: handshakeKey(for: baseURL)) else { return nil }
-        return try? JSONDecoder().decode(RaiHandshake.self, from: data)
+        CacheStore.loadHandshake(baseURL: baseURL)
     }
 
-    private static func saveHandshake(_ handshake: RaiHandshake, for baseURL: URL) {
-        guard let data = try? JSONEncoder().encode(handshake) else { return }
-        UserDefaults.standard.set(data, forKey: handshakeKey(for: baseURL))
-    }
 }
 
 /// The editing rules for the stored week plan, kept outside any skin.

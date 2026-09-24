@@ -31,6 +31,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/APIModels.swift \
   apps/ios/RAI/ServerSession.swift \
   "$tmp/CacheStore.swift" \
+  apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \

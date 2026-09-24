@@ -33,11 +33,15 @@ enum RaiStartup {
     static func registerSyncEntryPoints(healthSync: HealthKitSync, session: ServerSession) {
         healthSync.startObservingHealthChanges { [weak healthSync, weak session] in
             guard let healthSync, let session else { return }
+            // 按**本次会话的服务端**现读，不用全局展示标志：那个标志属于最后一次写它的那次同步，
+            // 而这里问的是"这个目标有没有事要做"。读不出来时按"有"处理（`?? true`）—— 两个判错
+            // 方向分别是多跑一轮（代价是一次导出）与少跑一轮（等下一次投递），保守的那侧是不漏。
+            let pending = healthSync.probePendingWork(for: session.serverURL)
             switch SyncDeliveryPolicy.decide(
                 isForeground: UIApplication.shared.applicationState == .active,
                 isBound: session.serverURL != nil,
                 isSyncRunning: healthSync.isBusy,
-                hasPendingTask: healthSync.hasPendingTask,
+                hasPendingTask: pending?.hasUnfinishedWork ?? true,
                 lastSyncAt: healthSync.lastSyncAt,
                 now: Date()
             ) {
@@ -52,7 +56,7 @@ enum RaiStartup {
             case .deferToBackground:
                 // 记下意图再 submit：`submit` 本身不携带"为什么"，而一个过期的待发请求
                 // 落到 BGTask 上时，只有这个意图位能告诉它"这次真的有新数据"。
-                healthSync.recordBackgroundIntent()
+                healthSync.recordBackgroundIntent(for: session.serverURL)
                 submitBackgroundRun()
             case .ignore:
                 break
@@ -184,20 +188,25 @@ enum RaiStartup {
             // 没有它时，「系统没派发」与「派发了但这一轮什么都没做」在服务端看完全一样
             // （都没有请求），§11.3 那张归因表就无从判起。
             RaiStartup.report("BGProcessingTask launched (\(RaiBackgroundSync.taskIdentifier))")
-            await healthSync.runBackgroundPass(to: session.serverURL, apiToken: session.apiToken)
+            // 🔴 这一轮的**重排与完成回执**都用它自己按目标读到的快照（返回值），不用
+            // `healthSync.hasPendingTask` 那个展示标志：单飞闸门拒绝掉的那一轮一个字段都没碰过，
+            // 而那个标志属于另一次同步（"用别人的结论给自己打分"的形态见
+            // `BackgroundRunPolicy.reportedSuccess` 的说明）。
+            let pending = await healthSync.runBackgroundPass(
+                to: session.serverURL,
+                apiToken: session.apiToken
+            )
             // 🔴 重排必须发生在 `setTaskCompleted` **之前**：这一轮很可能做不完
             // （服务端 job 还在算），而 `BGTaskScheduler` 的请求是**一次性**的、
             // 系统不会自动重试。漏掉这一步的可见后果是"后台跑过一次，之后再没人管"，
             // 直到用户下次手动打开 App —— 那等于三机制白装。
-            let hasPendingTask = healthSync.hasPendingTask
-            let hasFreshIntent = healthSync.hasBackgroundIntent
-            if BackgroundRunPolicy.shouldResubmit(hasPendingTask: hasPendingTask, hasFreshIntent: hasFreshIntent) {
+            if let pending, BackgroundRunPolicy.shouldResubmit(pending) {
                 submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
             }
-            // 报成功与否看"盘上还有没有没走完的批次"，**不看**"这一轮跑没跑起来"：
-            // 单飞闸门拒绝掉的那一次什么都没做，报成功会让系统持续派活去撞同一个闸门。
-            // 判据与理由见 `BackgroundRunPolicy.reportedSuccess`。
-            task.setTaskCompleted(success: BackgroundRunPolicy.reportedSuccess(hasPendingTask: hasPendingTask))
+            // 报成功与否看"收工时盘上还有没有没走完的工作"，**不看**"这一轮跑没跑起来"。
+            // 快照为 `nil`（压根没绑定服务端 ⇒ 构造不出来）时保守报**失败**：宁可让系统遥测
+            // 记一次"没做完"，也不要凭空报成功。
+            task.setTaskCompleted(success: pending.map(BackgroundRunPolicy.reportedSuccess) ?? false)
         }
     }
 
@@ -275,13 +284,16 @@ final class RaiAppDelegate: NSObject, UIApplicationDelegate {
     /// 只在**确实有事可做**时排（`BackgroundRunPolicy.shouldResubmit`）：没有待办也没有
     /// 意图时排一次，只会换来若干分钟后的空跑 —— 而空跑本身有代价（`runBackgroundPass`
     /// 要读盘，冷启动一次 App）。
+    ///
+    /// 🔴 **自己读快照，不依赖任何"先跑过的回调"。** 本方法与 SwiftUI 的 `scenePhase` 变化
+    /// （那条路上跑 `HealthKitSync.handleEnterBackground()`）之间**没有先后保证**；
+    /// 依赖它就意味着"另一条路还没跑 ⇒ 这里读到的是上一轮的值"，于是重排按一份过期的
+    /// 待办清单决定要不要排。探针是只读的现读，谁先谁后都对。
     func applicationDidEnterBackground(_ application: UIApplication) {
         Task { @MainActor in
-            let healthSync = AppModel.shared.healthSync
-            guard BackgroundRunPolicy.shouldResubmit(
-                hasPendingTask: healthSync.hasPendingTask,
-                hasFreshIntent: healthSync.hasBackgroundIntent
-            ) else { return }
+            let model = AppModel.shared
+            guard let pending = model.healthSync.probePendingWork(for: model.session.serverURL),
+                  BackgroundRunPolicy.shouldResubmit(pending) else { return }
             RaiStartup.submitBackgroundRun()
         }
     }

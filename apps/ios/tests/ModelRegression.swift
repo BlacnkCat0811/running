@@ -10,6 +10,9 @@ import Foundation
 struct CachedValue<Value> { let value: Value; let cachedAt: Date }
 @MainActor final class CacheStore {
     private var entries: [String: Data] = [:]
+    private static var handshakes: [String: RaiHandshake] = [:]
+    static func loadHandshake(baseURL: URL) -> RaiHandshake? { handshakes[baseURL.absoluteString] }
+    static func saveHandshake(_ value: RaiHandshake, baseURL: URL) { handshakes[baseURL.absoluteString] = value }
     static func urlScope(baseURL: URL) -> String { baseURL.absoluteString }
     static func scope(baseURL: URL, handshake: RaiHandshake?) -> String {
         baseURL.absoluteString + (handshake?.datasetEpoch ?? "")

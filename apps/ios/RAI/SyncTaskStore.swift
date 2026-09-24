@@ -3,7 +3,10 @@ import SQLite3
 
 @MainActor
 final class SyncTaskStore {
+    private static let schemaVersion = 2
     private var database: OpaquePointer?
+    /// 受控重开需要它：`open()` 可能被调用不止一次（见 `reopenIfUnavailable()`）。
+    private let directory: URL
     private(set) var lastError: String?
 
     /// False when the journal could not be opened, in which case every read and
@@ -22,6 +25,22 @@ final class SyncTaskStore {
     /// 这一层此前只被 `typecheck-ios.sh` 检查过类型、从未被执行（连替身都没有），
     /// 于是「续传日志到底存不存得住、scope 之间会不会串」没有任何通道能验证。
     init(directory: URL) {
+        self.directory = directory
+        open()
+    }
+
+    /// 打开（或重新打开）日志库。**这是唯一会碰 `database` 的地方。**
+    ///
+    /// 从 `init` 里抽出来的理由只有一个：失败之后必须有一条回来的路（`reopenIfUnavailable()`）。
+    /// 抽之前，"打开失败"与"迁移失败"都把连接关掉、`isAvailable = false`，而**每个读/写都是
+    /// 静默 no-op** —— 于是一次瞬时故障（应用支持目录尚未就绪、WAL 锁竞争、磁盘暂时写满）
+    /// 会把整个进程的续传能力判死，直到 App 重启。而 `HealthKitSync` 的 `taskStore` 是
+    /// `let`：进程内没有任何地方能换一个新的实例。
+    private func open() {
+        isAvailable = false
+        lastError = nil
+        if let database { sqlite3_close(database) }
+        database = nil
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("sync.sqlite")
         let result = url.path.withCString { path in
@@ -52,31 +71,18 @@ final class SyncTaskStore {
                 export_end REAL,
                 updated_at REAL NOT NULL
             );
-            -- Workout 伴生 Route 状态。主键是 workout uuid（小写，口径同
-            -- `HealthKitExport.routeFileWorkoutId`）：HealthKit **没有** route anchor，
-            -- `HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源，所以这条状态只能挂在
-            -- workout 身上。它不是"续传进度"而是"降频记忆"，因此和 `sync_state` 一样必须
-            -- 与任务同库 —— 单状态源真相（V2.1 §2 原则 3）。
-            CREATE TABLE IF NOT EXISTS sync_route_state (
-                workout_uuid TEXT PRIMARY KEY,
-                workout_end_date REAL NOT NULL,
-                route_status TEXT NOT NULL,
-                point_count INTEGER NOT NULL,
-                route_hash TEXT,
-                last_checked_at REAL NOT NULL,
-                stable_check_count INTEGER NOT NULL
-            );
-            -- `cooling` 的节流判据是"距上次实际查询够久了没"，按 (状态, 上次查询时间) 建索引
-            -- 让"这批里哪些该跳过"是一次索引扫描而不是全表扫。表本身很小，但这一条把
-            -- 查询形状固化下来，避免以后有人在 SQL 里做函数运算把索引写废。
-            CREATE INDEX IF NOT EXISTS idx_route_status_cooling
-                ON sync_route_state(route_status, last_checked_at);
             """
         let execResult = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
         }
         guard execResult == SQLITE_OK else {
             Self.report("schema failed (sqlite \(execResult))", at: url.path)
+            if let database { sqlite3_close(database) }
+            database = nil
+            return
+        }
+        guard migrateRouteStateSchema() else {
+            Self.report("route schema migration failed", at: url.path)
             if let database { sqlite3_close(database) }
             database = nil
             return
@@ -94,6 +100,96 @@ final class SyncTaskStore {
             )
         }
         #endif
+    }
+
+    /// 不可用时再试一次打开（**受控重开**）。
+    ///
+    /// 为什么"受控"而不是"每次用之前都开"：`open()` 会跑一句多语句 `sqlite3_exec`（schema）
+    /// 与一次迁移判定，它不是免费的；而可用状态下这条路只剩一次布尔读。
+    ///
+    /// 为什么重开是安全的：
+    ///   - 迁移里的失败**已经 `ROLLBACK` 过**（`migrateRouteStateSchema` 的 `defer`）⇒ 盘上
+    ///     要么是旧 schema、要么是新 schema，不存在半份；重开只是把同一条幂等判定再跑一次。
+    ///   - `PRAGMA user_version` 是幂等标记 ⇒ 已升级的库不会被升第二次。
+    ///   - 这里**不删任何文件**。打不开就是打不开：不做"删库重来"（那会丢掉盘上那批进度，
+    ///     而进度正是续传的全部依据）。
+    ///
+    /// - Returns: 重开之后是否可用。失败时 `lastError` 已写明原因。
+    @discardableResult
+    func reopenIfUnavailable() -> Bool {
+        guard !isAvailable else { return true }
+        open()
+        return isAvailable
+    }
+
+    /// `sync_route_state` 在 v1 只有 `workout_uuid` 主键。不能靠新的 CREATE TABLE IF NOT EXISTS
+    /// 修复已安装设备，因为 SQLite 会保留旧表。v2 使用 `(scope, workout_uuid)`，旧行不归属于
+    /// 任意新 scope，迁移时安全丢弃（下一次每个 workout 都会按 UNKNOWN 首查）。
+    ///
+    /// 用 `PRAGMA user_version` 做一次性、幂等标记；旧表先改名再创建，避免在同一事务中把旧行
+    /// 误归到当前 scope。旧 index 也显式删除，防止改名表留下同名 index 阻塞新建。
+    private func migrateRouteStateSchema() -> Bool {
+        guard let database else { return false }
+        guard let versionStatement = SQLiteSupport.prepare("PRAGMA user_version", database: database) else {
+            return false
+        }
+        let version = sqlite3_step(versionStatement) == SQLITE_ROW
+            ? Int(sqlite3_column_int64(versionStatement, 0)) : 0
+        sqlite3_finalize(versionStatement)
+        if version >= Self.schemaVersion {
+            return ensureRouteStateSchema(database: database)
+        }
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+
+        var hasRouteTable = false
+        var hasScopeColumn = false
+        if let statement = SQLiteSupport.prepare("PRAGMA table_info(sync_route_state)", database: database) {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                hasRouteTable = true
+                if let pointer = sqlite3_column_text(statement, 1), String(cString: pointer) == "scope" {
+                    hasScopeColumn = true
+                }
+            }
+            sqlite3_finalize(statement)
+        }
+        if hasRouteTable && !hasScopeColumn {
+            guard SQLiteSupport.execute(
+                "DROP INDEX IF EXISTS idx_route_status_cooling; "
+                    + "ALTER TABLE sync_route_state RENAME TO sync_route_state_legacy",
+                database: database
+            ) else { return false }
+            // 旧行故意不 INSERT SELECT：它们没有可信 scope，归属未知只能触发一次安全重查。
+            guard SQLiteSupport.execute("DROP TABLE sync_route_state_legacy", database: database) else {
+                return false
+            }
+        }
+        guard ensureRouteStateSchema(database: database) else { return false }
+        guard SQLiteSupport.execute("PRAGMA user_version = 2", database: database) else { return false }
+        guard SQLiteSupport.execute("COMMIT", database: database) else { return false }
+        committed = true
+        return true
+    }
+
+    private func ensureRouteStateSchema(database: OpaquePointer) -> Bool {
+        SQLiteSupport.execute("""
+            CREATE TABLE IF NOT EXISTS sync_route_state (
+                scope TEXT NOT NULL,
+                workout_uuid TEXT NOT NULL,
+                workout_end_date REAL NOT NULL,
+                route_status TEXT NOT NULL,
+                point_count INTEGER NOT NULL,
+                route_hash TEXT,
+                last_checked_at REAL NOT NULL,
+                stable_check_count INTEGER NOT NULL,
+                PRIMARY KEY (scope, workout_uuid)
+            );
+            CREATE INDEX IF NOT EXISTS idx_route_status_cooling
+                ON sync_route_state(scope, route_status, last_checked_at);
+            """, database: database)
     }
 
     /// Logs a failure that has no user-facing surface. `NSLog` rather than `print`
@@ -121,6 +217,43 @@ final class SyncTaskStore {
         if length == 0 { return Data() }
         guard let pointer = sqlite3_column_blob(statement, 0) else { fail("read payload"); return nil }
         return Data(bytes: pointer, count: length)
+    }
+
+    /// 只读：这一 scope 上**有没有**任务行。
+    ///
+    /// 与 `load(scope:)` 的区别不是省一次解码，而是**失败可表达**：`load` 返回 `nil` 时
+    /// "没有行"与"读不出来"是同一种形状，而调用方（`probePendingWork`）必须能把它们分开
+    /// —— 前者允许说"没有待办"，后者只能报"不知道"。
+    ///
+    /// - Returns: `true` / `false` 是确定结论；`nil` 表示读取失败（`lastError` 已写明）。
+    func hasTask(scope: String) -> Bool? {
+        guard let statement = prepare("SELECT 1 FROM sync_tasks WHERE scope = ?") else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        guard lastError == nil else { return nil }
+        let result = sqlite3_step(statement)
+        if result == SQLITE_ROW { return true }
+        if result == SQLITE_DONE { return false }
+        fail("probe")
+        return nil
+    }
+
+    /// 只读：库里**存在任何**任务行（不区分 scope）。
+    ///
+    /// 存在的理由只有一个：**身份未知时**（没有离线握手）探针只知道 URL scope，按它读不到行
+    /// 并不能推出"盘上没有待办" —— 那一行可能正躺在某个 `syncScope` 下等着续传。这条查询
+    /// 就是"到底有没有归属不明的批次"的唯一旁证，而少了它，探针在身份未知时只能永远报
+    /// "不知道"，那会把重排变成每 15 分钟一次、永不停歇的空转。
+    ///
+    /// - Returns: `true` / `false` 是确定结论；`nil` 表示读取失败。
+    func hasAnyTask() -> Bool? {
+        guard let statement = prepare("SELECT 1 FROM sync_tasks LIMIT 1") else { return nil }
+        defer { sqlite3_finalize(statement) }
+        let result = sqlite3_step(statement)
+        if result == SQLITE_ROW { return true }
+        if result == SQLITE_DONE { return false }
+        fail("probe any")
+        return nil
     }
 
     @discardableResult
@@ -235,9 +368,15 @@ final class SyncTaskStore {
     ///
     /// - Parameter anchor: `nil` 表示**保留**已提交的 anchor（不是"写成空"）。
     @discardableResult
-    func commitSuccess(scope: String, anchor: Data?, watermark: SyncWatermarkUpdate) -> Bool {
+    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate) -> Bool {
         guard isAvailable, let database else { fail("commit"); return false }
         lastError = nil
+        // 🔴 写入前先把时间点吸附到 REAL 列能逐位往返的那一个值上（`Date.canonicalForREAL`）。
+        //    少了这一步，`upsertState` 绑定的 `?3` 与 `readBackMatches` 里的期望值会在
+        //    最低位上分叉 —— 实测约一半的 `Date()` 往返有损，症状是一次**完全成功的**提交
+        //    被判为失败并整段回滚，报「同步水位写入后无法读回一致的值」。
+        //    必须在进入时规范化且只做一次：写与回读断言共用同一个数，两侧才同源。
+        let watermark = requested.storedInREAL
         guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
             fail("begin"); return false
         }
@@ -344,16 +483,57 @@ final class SyncTaskStore {
         }
         // `anchor: nil` 的意思是"保留"，所以它必须等于旧值（旧值可能本来就没有）。
         let expectedAnchor = anchor ?? before?.workoutAnchor
-        guard written.workoutAnchor == expectedAnchor else { return false }
+        guard written.workoutAnchor == expectedAnchor else {
+            // 不留白：这条断言此前失败时只在 `lastError` 里留一句话，日志里分不清是哪一侧
+            // 不匹配（2026-09-24 的真机故障就因此只能靠读源码推）。只在失败路径打，内容是长度。
+            NSLog(
+                "[RAI] anchor read-back mismatch: written=%d bytes expected=%d bytes",
+                written.workoutAnchor?.count ?? -1,
+                expectedAnchor?.count ?? -1
+            )
+            return false
+        }
         switch watermark {
         case .keep:
-            return written.exportEnd == before?.exportEnd
+            guard written.exportEnd == before?.exportEnd else {
+                reportWatermarkMismatch("keep", written: written.exportEnd, expected: before?.exportEnd)
+                return false
+            }
+            return true
         case .clear:
-            return written.exportEnd == nil
+            guard written.exportEnd == nil else {
+                reportWatermarkMismatch("clear", written: written.exportEnd, expected: nil)
+                return false
+            }
+            return true
         case .advance(let requested):
             let expected = before?.exportEnd.map { max($0, requested) } ?? requested
-            return written.exportEnd == expected
+            guard written.exportEnd == expected else {
+                reportWatermarkMismatch("advance", written: written.exportEnd, expected: expected)
+                return false
+            }
+            return true
         }
+    }
+
+    /// 水位回读不一致时的**具名**诊断：哪一侧、差多少。
+    ///
+    /// 为什么可以打具体数值：这里是失败路径，且时间是水位而不是健康数据 ——
+    /// `SQLiteSupport.report` 的"Codes only"口径是为了不把健康数据路径漏进 release 日志，
+    /// 而 `%.17g` 打出来的十七位有效数字正是"是不是被 REAL 往返舍掉了最低位"的唯一判据。
+    /// 缺了它，这条断言只能给出「无法读回一致的值」这样一句无从下手的话。
+    private func reportWatermarkMismatch(_ mode: String, written: Date?, expected: Date?) {
+        // 打 `timeIntervalSinceReferenceDate` 而**不是** `timeIntervalSince1970`：
+        // `Date` 内部存的就是前者，而"被 REAL 往返舍掉一位"这件事恰好只在这个口径上可见。
+        // 2026-09-24 实测：两个不相等的 Date 可以有**逐位相同**的 `timeIntervalSince1970`
+        // （都是 1790000000）—— 用后者打日志只会得到 "written=1790000000 expected=1790000000"
+        // 这种什么都没说的输出，正好把这次要查的东西藏起来。
+        NSLog(
+            "[RAI] watermark read-back mismatch (%@): written=%.17g expected=%.17g",
+            mode,
+            written?.timeIntervalSinceReferenceDate ?? .nan,
+            expected?.timeIntervalSinceReferenceDate ?? .nan
+        )
     }
 
     // MARK: - Workout 伴生 Route 状态（按 workout 定频，替代固定 14 天全量回填）
@@ -370,7 +550,7 @@ final class SyncTaskStore {
     ///   所以状态必须在导出**开始前**整批取出来。表很小（每 workout 一行，量级 = 累计跑步
     ///   次数），整表读比"导出中发现一个 uuid 再回头查一次库"更省，也少一层跨 actor 往返。
     ///   传具体 uuid 则只读这一批（回归与定点核对用）。
-    func loadRouteStates(uuids: [String]? = nil) -> [String: RouteSyncRecord] {
+    func loadRouteStates(scope: String, uuids: [String]? = nil) -> [String: RouteSyncRecord] {
         guard isAvailable else { return [:] }
         let columns = """
             SELECT workout_uuid, workout_end_date, route_status, point_count, \
@@ -378,8 +558,9 @@ final class SyncTaskStore {
             """
         var result: [String: RouteSyncRecord] = [:]
         guard let uuids else {
-            guard let statement = prepare(columns) else { return [:] }
+            guard let statement = prepare("\(columns) WHERE scope = ?") else { return [:] }
             defer { sqlite3_finalize(statement) }
+            bind(scope, to: statement, at: 1)
             readRouteStates(into: &result, from: statement)
             return result
         }
@@ -389,10 +570,11 @@ final class SyncTaskStore {
             let chunk = Array(uuids[offset..<min(offset + Self.routeStateChunkSize, uuids.count)])
             offset += chunk.count
             let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ", ")
-            guard let statement = prepare("\(columns) WHERE workout_uuid IN (\(placeholders))") else { continue }
+            guard let statement = prepare("\(columns) WHERE scope = ? AND workout_uuid IN (\(placeholders))") else { continue }
             defer { sqlite3_finalize(statement) }
             var bound = true
-            for (index, uuid) in chunk.enumerated() where !SQLiteSupport.bind(uuid, to: statement, at: Int32(index + 1)) {
+            guard SQLiteSupport.bind(scope, to: statement, at: 1) else { continue }
+            for (index, uuid) in chunk.enumerated() where !SQLiteSupport.bind(uuid, to: statement, at: Int32(index + 2)) {
                 bound = false
                 break
             }
@@ -448,10 +630,31 @@ final class SyncTaskStore {
     /// 三条护栏与 `commitSuccess` 同源（ADR-004 决策一）：单事务、**提交前**回读断言、
     /// `changes()` 逐行校验。
     @discardableResult
-    func upsertRouteStates(_ records: [RouteSyncRecord]) -> Bool {
+    func upsertRouteStates(_ specified: [RouteSyncRecord], scope: String) -> Bool {
         guard isAvailable, let database else { fail("route state upsert"); return false }
-        guard !records.isEmpty else { return true }
+        guard !specified.isEmpty else { return true }
         lastError = nil
+        // 🔴 与 `commitSuccess` 同源的一步：两个时间列都是 REAL，而 `Date` ↔
+        //    `timeIntervalSince1970` 的往返**不是双射**（实测约一半有损，见
+        //    `Date.canonicalForREAL`）。这两个字段的来源都是 `Date()`
+        //    （`HealthKitExport` 的 `routeNow`），所以下面那句 `written[...] == record`
+        //    会按约一半的概率把一次成功的写入判成失败并回滚 ——
+        //    这正是报「路线同步状态写入后无法读回一致的值」的那条路径。
+        //    注意规范化必须落在 `records` 本身而不是只落在绑定上：比较用的是 `record`，
+        //    只把绑定的值吸附掉，比较就会拿原始值去比盘上的规范值，照样不相等。
+        //    `workoutUUID` / `workoutEndDate` 是 `let`，所以只能显式重建；重建时**每个字段
+        //    都点名**，将来加字段会编译报错，而不是静默把新字段丢掉。
+        let records = specified.map { record in
+            RouteSyncRecord(
+                workoutUUID: record.workoutUUID,
+                workoutEndDate: record.workoutEndDate.canonicalForREAL,
+                status: record.status,
+                pointCount: record.pointCount,
+                routeHash: record.routeHash,
+                lastCheckedAt: record.lastCheckedAt.canonicalForREAL,
+                stableCheckCount: record.stableCheckCount
+            )
+        }
         guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
             fail("route state begin"); return false
         }
@@ -461,10 +664,10 @@ final class SyncTaskStore {
         }
         guard let statement = prepare("""
             INSERT INTO sync_route_state(
-                workout_uuid, workout_end_date, route_status, point_count,
+                scope, workout_uuid, workout_end_date, route_status, point_count,
                 route_hash, last_checked_at, stable_check_count
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(workout_uuid) DO UPDATE SET
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            ON CONFLICT(scope, workout_uuid) DO UPDATE SET
                 workout_end_date = excluded.workout_end_date,
                 route_status = excluded.route_status,
                 point_count = excluded.point_count,
@@ -476,34 +679,37 @@ final class SyncTaskStore {
         for record in records {
             sqlite3_reset(statement)
             sqlite3_clear_bindings(statement)
-            guard SQLiteSupport.bind(record.workoutUUID, to: statement, at: 1) else {
+            guard SQLiteSupport.bind(scope, to: statement, at: 1) else {
                 fail("route state bind"); return false
             }
-            guard sqlite3_bind_double(statement, 2, record.workoutEndDate.timeIntervalSince1970) == SQLITE_OK else {
+            guard SQLiteSupport.bind(record.workoutUUID, to: statement, at: 2) else {
                 fail("route state bind"); return false
             }
-            guard SQLiteSupport.bind(record.status.rawValue, to: statement, at: 3) else {
+            guard sqlite3_bind_double(statement, 3, record.workoutEndDate.timeIntervalSince1970) == SQLITE_OK else {
                 fail("route state bind"); return false
             }
-            guard sqlite3_bind_int64(statement, 4, Int64(record.pointCount)) == SQLITE_OK else {
+            guard SQLiteSupport.bind(record.status.rawValue, to: statement, at: 4) else {
+                fail("route state bind"); return false
+            }
+            guard sqlite3_bind_int64(statement, 5, Int64(record.pointCount)) == SQLITE_OK else {
                 fail("route state bind"); return false
             }
             // `route_hash` 是 TEXT 而不是 BLOB，所以绑定走 `withCString` + `transient`
             // （由 SQLite 立刻复制）。若哪天改成 BLOB，就必须回到 ADR-004「补充 B」那条：
             // `sqlite3_bind_blob` 要在 `withUnsafeBytes` 闭包**内部**调用。
             if let hash = record.routeHash {
-                guard SQLiteSupport.bind(hash, to: statement, at: 5) else {
+                guard SQLiteSupport.bind(hash, to: statement, at: 6) else {
                     fail("route state bind"); return false
                 }
             } else {
-                guard sqlite3_bind_null(statement, 5) == SQLITE_OK else {
+                guard sqlite3_bind_null(statement, 6) == SQLITE_OK else {
                     fail("route state bind"); return false
                 }
             }
-            guard sqlite3_bind_double(statement, 6, record.lastCheckedAt.timeIntervalSince1970) == SQLITE_OK else {
+            guard sqlite3_bind_double(statement, 7, record.lastCheckedAt.timeIntervalSince1970) == SQLITE_OK else {
                 fail("route state bind"); return false
             }
-            guard sqlite3_bind_int64(statement, 7, Int64(record.stableCheckCount)) == SQLITE_OK else {
+            guard sqlite3_bind_int64(statement, 8, Int64(record.stableCheckCount)) == SQLITE_OK else {
                 fail("route state bind"); return false
             }
             guard sqlite3_step(statement) == SQLITE_DONE else { fail("route state upsert"); return false }
@@ -514,16 +720,22 @@ final class SyncTaskStore {
                 return false
             }
         }
-        let written = loadRouteStates(uuids: records.map(\.workoutUUID))
+        let written = loadRouteStates(scope: scope, uuids: records.map(\.workoutUUID))
         guard lastError == nil else { return false }
         for record in records {
-            // `RouteSyncRecord` 是 `Equatable`，两个 `Date` 在这里用**严格 `==`**。
-            // 这不是想当然：`Date` 经 REAL 列往返（`timeIntervalSince1970` ↔
-            // `timeIntervalSinceReferenceDate`，两边差常量 978307200）之所以位精确，是因为
-            // 两个操作数量级之比 < 2，减法满足 Sterbenz 引理因而**精确**，绝对值更大的
-            // 加法回程也就复现出原来那一位 double。实测 200,000 组（含小数秒、含
-            // `.distantPast`）0 组有损。哪天把时间戳改成别的编码（例如秒×1000 存 INTEGER），
-            // 这条推理作废，需要重测。
+            // `RouteSyncRecord` 是 `Equatable`，两个 `Date` 在这里用**严格 `==`** ——
+            // 所以上面必须先把两个时间字段规范化（见 `Date.canonicalForREAL`）。
+            //
+            // 🔴 2026-09-24 订正：这里原本写着"`Date` 经 REAL 列往返之所以位精确，是因为两个
+            // 操作数数量级之比 < 2、减法满足 Sterbenz 引理"，并附"实测 200,000 组（含小数秒、
+            // 含 `.distantPast`）0 组有损"。那次实测**没错，但外推错了**：被测的是 HealthKit 的
+            // `workout.endDate`，而它几乎总是**整秒** —— 整秒的往返有损率确实就是 0/200000
+            // （本次复测一致）。可值一旦带小数秒（`Date()` / `exportedThrough` / `routeNow`
+            // 都是），这条推理就不成立：加法那一步结果的 ulp 是原值网格的 2 倍，
+            // **恰好一半的位模式会被舍掉**（本次逐 ulp 扫 200,000 个时间戳实测 100,000 有损）。
+            // ⇒ **"整秒无损"不能外推成"Date 无损"**。
+            //
+            // 哪天把时间戳改成别的编码（例如秒×1000 存 INTEGER），这两条推理一起作废，需要重测。
             guard written[record.workoutUUID] == record else {
                 lastError = "路线同步状态写入后无法读回一致的值，本次提交已回滚。"
                 SQLiteSupport.report("route state read-back mismatch", database: database)

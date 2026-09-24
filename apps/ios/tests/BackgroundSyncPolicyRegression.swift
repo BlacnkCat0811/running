@@ -18,8 +18,9 @@ import Foundation
 ///   8. 软预算留出持久化余量；
 ///   9. 两个 identifier 的字面量被钉住（它们会被复制进 `Info.plist`，改名不会报错，只会
 ///      注册不上）；
-///  10. 报给系统的成败看"盘上还有没有没走完的批次"，**不是**"这一轮跑没跑起来"；
-///  11. 请求是一次性的 ⇒ `shouldResubmit` 必须自己把没做完的活儿再排一次；
+///  10. 报给系统的成败看"**按目标现读的快照**里还有没有没走完的工作"，**不是**"这一轮跑没跑起来"，
+///      也不是"上一次同步写下的展示标志"（后者属于别的目标）；
+///  11. 请求是一次性的 ⇒ `shouldResubmit` 必须自己把没做完的活儿再排一次（快照说"不知道"时也算）；
 ///  12. 🔴 系统重挂起来的传输**只在本进程正在等它时**才留（判据不是"它属于哪一批"——
 ///      上一个进程那次上传的结局拿不回来，留着一个仍在跑的上传只是多一倍重复流量）。
 ///
@@ -31,6 +32,23 @@ import Foundation
 @main
 struct BackgroundSyncPolicyRegression {
     private static let now = Date(timeIntervalSince1970: 1_780_000_000)
+
+    /// 构造一份**按目标读到的**待办快照。字段值除了 `verdict` 与两个成因位以外都不参与判据，
+    /// 所以钉死成常量即可。
+    private static func pending(
+        verdict: HealthSyncBackgroundRecovery.PendingWork.Verdict,
+        hasIntent: Bool = false,
+        hasRecoveryRequest: Bool = false
+    ) -> HealthSyncBackgroundRecovery.PendingWork {
+        HealthSyncBackgroundRecovery.PendingWork(
+            serverURL: "http://127.0.0.1:8787",
+            urlScope: "urlscope0000000000000000",
+            scope: "syncscope000000000000000",
+            verdict: verdict,
+            hasIntent: hasIntent,
+            hasRecoveryRequest: hasRecoveryRequest
+        )
+    }
 
     static func main() throws {
         try deliveryIsIgnoredWhenUnboundOrAlreadyRunning()
@@ -334,18 +352,34 @@ struct BackgroundSyncPolicyRegression {
         )
     }
 
-    /// 契约 12：报给系统的成败看"盘上还有没有没走完的批次"，**不是**"这一轮跑没跑起来"。
+    /// 契约 12：报给系统的成败看"收工时盘上还有没有没走完的工作"，**不是**"这一轮跑没跑起来"。
     ///
     /// 单飞闸门拒绝掉的那一次如果报成功，系统会认为这个 App 的后台预算够用，
     /// 于是以后照常派活 —— 而每次派活都撞在同一个闸门上。
+    ///
+    /// 🔴 **判据的输入是一份按目标现读的快照**（`PendingWork`），不是 `HealthKitSync` 上的
+    /// 展示标志。多出来的那两个"非任务"成因（读不出来 ⇒ `.unknown`、以及挂着的通知/恢复请求）
+    /// 都是**不许报成功**的：报成功之后没人会再派活，而盘上那一批或那条通知就再也没人管。
     private static func successIsReportedFromTheRemainingWork() throws {
         try require(
-            BackgroundRunPolicy.reportedSuccess(hasPendingTask: false) == true,
+            BackgroundRunPolicy.reportedSuccess(pending(verdict: .empty)) == true,
             "a clean run was reported as a failure"
         )
         try require(
-            BackgroundRunPolicy.reportedSuccess(hasPendingTask: true) == false,
+            BackgroundRunPolicy.reportedSuccess(pending(verdict: .pending)) == false,
             "a run that left an unfinished batch reported success"
+        )
+        try require(
+            BackgroundRunPolicy.reportedSuccess(pending(verdict: .unknown)) == false,
+            "a run that could not read the journal reported success — the batch on disk is now nobody's"
+        )
+        try require(
+            BackgroundRunPolicy.reportedSuccess(pending(verdict: .empty, hasIntent: true)) == false,
+            "a run that left an unclaimed notification reported success"
+        )
+        try require(
+            BackgroundRunPolicy.reportedSuccess(pending(verdict: .empty, hasRecoveryRequest: true)) == false,
+            "a run that left a scope recovery request reported success — the new scope stays empty"
         )
     }
 
@@ -355,15 +389,23 @@ struct BackgroundSyncPolicyRegression {
     /// 直到用户下次手动打开 App。
     private static func unfinishedWorkResubmitsItself() throws {
         try require(
-            BackgroundRunPolicy.shouldResubmit(hasPendingTask: true, hasFreshIntent: false),
+            BackgroundRunPolicy.shouldResubmit(pending(verdict: .pending)),
             "an unfinished batch did not schedule the next background run"
         )
         try require(
-            BackgroundRunPolicy.shouldResubmit(hasPendingTask: false, hasFreshIntent: true),
+            BackgroundRunPolicy.shouldResubmit(pending(verdict: .empty, hasIntent: true)),
             "a recorded intent did not schedule a background run"
         )
         try require(
-            BackgroundRunPolicy.shouldResubmit(hasPendingTask: false, hasFreshIntent: false) == false,
+            BackgroundRunPolicy.shouldResubmit(pending(verdict: .empty, hasRecoveryRequest: true)),
+            "a scope recovery request did not schedule a background run"
+        )
+        try require(
+            BackgroundRunPolicy.shouldResubmit(pending(verdict: .unknown)),
+            "an unreadable journal did not schedule another attempt"
+        )
+        try require(
+            BackgroundRunPolicy.shouldResubmit(pending(verdict: .empty)) == false,
             "a run with nothing left scheduled itself again"
         )
         // 重排的最小延迟必须为正 —— 否则刚因 5xx/断网失败就会立刻被再派一次，重放同一个错误。

@@ -36,6 +36,7 @@
     "test:ios": "bash apps/ios/tests/run-ios-gates.sh",
     "test:ios:live": "python3 apps/ios/tests/check-export-determinism-live.py",
     "test:ios:mutation": "python3 apps/ios/tests/check-background-mutations.py",
+    "test:ios:mutation:scope": "RAI_MUTATION_FOR=git python3 apps/ios/tests/check-background-mutations.py",
     "test:e2e:web": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
     "test:e2e:responsive": "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
     "test:e2e": "npm run test:e2e:web && npm run test:e2e:responsive",

@@ -155,7 +155,7 @@ nonisolated enum BackgroundRunPolicy {
 
     /// 这一轮该向系统报"成功"还是"失败"。
     ///
-    /// 判据是**收工时盘上还有没有未走完的批次**，不是"这一轮跑没跑起来"。
+    /// 判据是**收工时盘上还有没有未走完的工作**，不是"这一轮跑没跑起来"。
     ///
     /// 为什么不能用"跑没跑起来"：`HealthSyncTaskOwner` 以 `task == nil` 单飞，与前台同步
     /// 撞车时这一轮会被**静默拒绝**。那一刻报成功等于对系统撒谎 —— 系统据此认为这个 App
@@ -164,8 +164,14 @@ nonisolated enum BackgroundRunPolicy {
     /// 反过来说，"批次还在（例如服务端 job 还在算）"报 `false` 也不吃亏：
     /// `BGTaskScheduler` **不会因为 `false` 自动重试**，这个值只进系统遥测。
     /// 真正决定"还会不会再跑一次"的是 `shouldResubmit`。
-    static func reportedSuccess(hasPendingTask: Bool) -> Bool {
-        !hasPendingTask
+    ///
+    /// 🔴 **入参是快照，不是全局标志。** `HealthKitSync.hasPendingTask` 是展示层的字段，
+    /// 它属于**最后一次**写它的那次同步；而单飞被拒的一轮恰恰什么都没碰过。用全局标志回答
+    /// "这一轮该报什么"就是拿别人的结论给自己打分。快照还必须能表达第三种答案
+    /// （`PendingWork.Verdict.unknown`）—— 读盘失败或归属不明时它**不许**报成功，
+    /// 否则盘上那一批就再也没人管了。
+    static func reportedSuccess(_ pending: HealthSyncBackgroundRecovery.PendingWork) -> Bool {
+        pending.reportsSuccess
     }
 
     /// 收工时要不要再排一次后台执行。
@@ -174,8 +180,10 @@ nonisolated enum BackgroundRunPolicy {
     /// 所以"这一轮没做完"必须由我们自己再 `submit` 一次，否则剩下的活儿要等到用户下次
     /// 打开 App —— 那等于三机制白装。同一 identifier 只保留一个待发请求，重复 submit
     /// 不会堆积，所以"切后台时也 submit 一次"是安全的。
-    static func shouldResubmit(hasPendingTask: Bool, hasFreshIntent: Bool) -> Bool {
-        hasPendingTask || hasFreshIntent
+    ///
+    /// 入参同样是**按目标读到的快照**，理由与 `reportedSuccess` 相同。
+    static func shouldResubmit(_ pending: HealthSyncBackgroundRecovery.PendingWork) -> Bool {
+        pending.needsAnotherRound
     }
 
     /// 下一次后台执行请求的 `earliestBeginDate` 相对现在的最小延迟（秒）。

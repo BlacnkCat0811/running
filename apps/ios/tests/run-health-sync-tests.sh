@@ -56,14 +56,38 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 "$tmp/sync-task-migration-tests"
 
 # 后台三机制的纯策略（P2-1）：投递唤醒该不该跑、BGProcessingTask 该推进哪一步。
-# 这两件事的调用点在 `AppDelegate.swift` / `RAIApp.swift`，而**这两个文件都不进类型检查**
-# （`typecheck-ios.sh:92` 排除清单）⇒ 判据留在调用点等于无人执行，必须住在这里。
-# 只依赖 Foundation，所以够格进这个可执行。
+# 这两件事的调用点在 `AppDelegate.swift` / `RAIApp.swift`。
+# ⚠️ 覆盖范围（2026-09-24 实测修正，别再照抄旧说法）：`typecheck-ios.sh:92` 的排除清单是
+# `MapPrivacy.swift / RAIApp.swift / TechRouteView.swift` 这三个 —— **`AppDelegate.swift` 不在其中**，
+# 它会真被类型检查（实测：往它末尾插一句类型错误的代码，`typecheck-ios.sh` 立刻以
+# `AppDelegate.swift:303:… error:` 退出 1）。但 `typecheck-ios.sh` 只做类型检查、不跑任何断言，
+# 而 `RAIApp.swift` 连类型检查都进不去 ⇒ 判据仍然必须有执行者，不能只留在调用点。
+#
+# ⚠️ `HealthSyncBackgroundRecovery.swift` 必须一起编：`reportedSuccess` / `shouldResubmit`
+# 的入参是那份**按目标读到的待办快照**（`PendingWork`）。少编它，这个单元会在真跑门禁时以
+# `cannot find type 'HealthSyncBackgroundRecovery' in scope` 炸掉 —— 而 `typecheck-ios.sh`
+# 是全量一起编的，"少列一个文件"在那里完全看不出来（同 capabilities §14i 的教训）。
 xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/BackgroundSyncPolicy.swift \
+  apps/ios/RAI/HealthSyncBackgroundRecovery.swift \
   apps/ios/tests/BackgroundSyncPolicyRegression.swift \
   -o "$tmp/background-sync-policy-tests"
 "$tmp/background-sync-policy-tests"
+
+# 后台冷启动的恢复/意图确认时序。生产接线在 `HealthKitSync.swift`，但 URL/HealthKit/UIKit
+# 依赖使它不能进入纯逻辑可执行；因此“陈旧 epoch 不接纳”“失败不消费”“任务落盘才消费”
+# 与“导出期间新通知不被旧代次吞掉”必须在这个无副作用核心里执行。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/SyncPhase.swift \
+  apps/ios/RAI/SyncStateCommitPlan.swift \
+  apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/SQLiteSupport.swift \
+  apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/RAI/HealthSyncBackgroundRecovery.swift \
+  apps/ios/tests/HealthSyncBackgroundRecoveryRegression.swift \
+  -lsqlite3 \
+  -o "$tmp/health-sync-background-recovery-tests"
+"$tmp/health-sync-background-recovery-tests"
 
 # 锁屏 / 凭证阻塞（V2.1 规范 §3.3 / §3.4）：两个新阶段的落点、恢复判据，以及
 # 「阻塞态绝不推进 anchor」这条不变式 —— 破了它不是报错，而是**静默丢数据**：
