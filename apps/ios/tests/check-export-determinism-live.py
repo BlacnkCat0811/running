@@ -167,7 +167,13 @@ def build(source_text: str, work: Path) -> Path:
             "-target", TARGET,
             "-parse-as-library",
             "-swift-version", "5",
-            str(ZIP_SOURCE), str(module),
+            # HealthKitExport.swift uses RouteSyncStateMachine/RouteObservation, and
+            # that machine needs RouteSyncState's `.settled`/`.cooling` cases.
+            # Both sources must stay listed here or the probe stops compiling.
+            str(ZIP_SOURCE),
+            str(REPO / "apps/ios/RAI/RouteSyncState.swift"),
+            str(REPO / "apps/ios/RAI/RouteSyncStateMachine.swift"),
+            str(module),
             "-o", str(binary),
             "-lz",
         ]
