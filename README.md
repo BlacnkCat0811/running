@@ -124,6 +124,12 @@ npm run data:predict -- --as-of 2026-07-11T00:00:00+08:00
 npm run data:prediction-eval -- --as-of 2026-07-11T00:00:00+08:00
 ```
 
+运行当前公式预测链路的 walk-forward 评估：
+
+```powershell
+npm run data:prediction-walk-forward -- --as-of 2026-07-11T00:00:00+08:00
+```
+
 在没有新跑步时追加当天的停跑衰减快照：
 
 ```powershell

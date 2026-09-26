@@ -26,6 +26,7 @@ const guidanceLabels: Record<PhysiologyGuidanceCode, string> = {
   direct_vo2_evidence_missing: "缺少 Apple Health VO₂max 直接记录，上限主要依赖训练表现。",
   standard_test_missing: "还没有确认的测试跑或比赛，成绩预测保持低置信。",
   threshold_segments_missing: "缺少稳定的阈值片段，乳酸阈值仍以先验为主。",
+  race_readiness_missing: "缺少专项训练证据，准备度未建模，预测使用保守默认值。",
   prediction_confidence_low: "证据有限，请把区间而不是单点作为主要参考。",
 };
 

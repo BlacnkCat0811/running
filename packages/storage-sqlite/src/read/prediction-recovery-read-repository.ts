@@ -7,6 +7,15 @@ export interface PredictionRecoveryReadings {
   baselineHrv: number | null;
   latestSleepMinutes: number | null;
   baselineSleepMinutes: number | null;
+  provenance: PredictionRecoveryProvenance;
+}
+
+export interface PredictionRecoveryProvenance {
+  hrvSource: "canonical" | "raw_compat" | "none";
+  sleepSource: "canonical" | "none";
+  source: "canonical" | "raw_compat" | "mixed" | "none";
+  coverage: "full" | "partial" | "none";
+  latestObservedAt: string | null;
 }
 
 /**
@@ -69,6 +78,25 @@ export class SqlitePredictionRecoveryReadRepository {
     return median(rows
       .map((row) => Number(row.value))
       .filter((value) => Number.isFinite(value)));
+  }
+
+  private rawMetricLatestAt(type: string, startAt: string, endAt: string): string | null {
+    const hasCompletion = this.hasColumn("health_records", "end_at");
+    const completionFilter = hasCompletion ? "AND end_at < ?" : "";
+    const row = this.database
+      .prepare(`
+        SELECT MAX(start_at) AS latestAt
+        FROM health_records
+        WHERE type = ?
+          AND value_numeric IS NOT NULL
+          AND start_at >= ?
+          AND start_at < ?
+          ${completionFilter}
+      `)
+      .get(...(hasCompletion
+        ? [type, startAt, endAt, endAt]
+        : [type, startAt, endAt])) as { latestAt?: string } | undefined;
+    return typeof row?.latestAt === "string" ? row.latestAt : null;
   }
 
   load(asOfIso: string, timezoneIdentifier: string): PredictionRecoveryReadings {
@@ -148,13 +176,70 @@ export class SqlitePredictionRecoveryReadRepository {
         : Number(baseline.value);
     }
 
+    const hasCanonicalNights = this.hasTable("canonical_nights");
+    const hrvLatestAt = hasCanonicalHrv
+      ? (this.database.prepare(`
+          SELECT MAX(window_end_at) AS latestAt
+          FROM canonical_hrv_days
+          WHERE timezone_identifier = ?
+            AND confidence <> 'missing'
+            AND hrv_sdnn_ms IS NOT NULL
+            AND window_end_at IS NOT NULL
+            AND window_end_at >= ?
+            AND window_end_at < ?
+        `).get(timezoneIdentifier, thirtyFiveDaysAgo, effectiveAsOf) as { latestAt?: string } | undefined)?.latestAt ?? null
+      : this.rawMetricLatestAt("HKQuantityTypeIdentifierHeartRateVariabilitySDNN", thirtyFiveDaysAgo, effectiveAsOf);
+    const sleepLatestAt = hasCanonicalNights
+      ? (this.database.prepare(`
+          SELECT MAX(wake_at) AS latestAt
+          FROM canonical_nights
+          WHERE kind = 'main'
+            AND timezone_identifier = ?
+            AND wake_at IS NOT NULL
+            AND asleep_union_minutes IS NOT NULL
+            AND wake_at >= ?
+            AND wake_at < ?
+        `).get(timezoneIdentifier, thirtyFiveDaysAgo, effectiveAsOf) as { latestAt?: string } | undefined)?.latestAt ?? null
+      : null;
+    const latestObservedAt = [
+      this.rawMetricLatestAt("HKQuantityTypeIdentifierRestingHeartRate", thirtyFiveDaysAgo, effectiveAsOf),
+      hrvLatestAt,
+      sleepLatestAt
+    ].filter((value): value is string => value !== null).sort().at(-1) ?? null;
+    const availableComponents = [
+      recentRestingHeartRate !== null && baselineRestingHeartRate !== null,
+      recentHrv !== null && baselineHrv !== null,
+      latestSleepMinutes !== null && baselineSleepMinutes !== null
+    ].filter(Boolean).length;
+    const contributesRestingHeartRate = recentRestingHeartRate !== null && baselineRestingHeartRate !== null;
+    const contributesHrv = recentHrv !== null && baselineHrv !== null;
+    const contributesSleep = latestSleepMinutes !== null && baselineSleepMinutes !== null;
+    const contributesCanonical = contributesSleep || (contributesHrv && hasCanonicalHrv);
+    const contributesRaw = contributesRestingHeartRate || (contributesHrv && !hasCanonicalHrv);
     return {
       recentRestingHeartRate,
       baselineRestingHeartRate,
       recentHrv,
       baselineHrv,
       latestSleepMinutes,
-      baselineSleepMinutes
+      baselineSleepMinutes,
+      provenance: {
+        hrvSource: hasCanonicalHrv
+          ? (recentHrv === null && baselineHrv === null ? "none" : "canonical")
+          : (recentHrv === null && baselineHrv === null ? "none" : "raw_compat"),
+        sleepSource: hasCanonicalNights && (latestSleepMinutes !== null || baselineSleepMinutes !== null)
+          ? "canonical"
+          : "none",
+        source: availableComponents === 0
+          ? "none"
+          : contributesCanonical && contributesRaw
+            ? "mixed"
+            : contributesRaw
+              ? "raw_compat"
+              : "canonical",
+        coverage: availableComponents === 0 ? "none" : availableComponents === 3 ? "full" : "partial",
+        latestObservedAt
+      }
     };
   }
 }

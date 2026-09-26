@@ -6,7 +6,8 @@ import {
   loadLactateThresholdEvidence,
   loadLabeledRaceOutcomes,
   loadPerformanceVdotEvidence,
-  loadRaceReadiness
+  loadRaceReadiness,
+  loadRaceReadinessEvidence
 } from "../src/prediction-data.js";
 import {
   buildPredictionReport,
@@ -176,6 +177,31 @@ test("distance-specific readiness is bounded and stricter for longer races", () 
     assert.ok((readiness.five_k ?? 0) > (readiness.ten_k ?? 0));
     assert.ok((readiness.ten_k ?? 0) > (readiness.half_marathon ?? 0));
     assert.ok(Object.values(readiness).every((value) => value >= 0 && value <= 1));
+  } finally {
+    database.close();
+  }
+});
+
+test("ordinary training contributes to the performance envelope within the as-of window", () => {
+  const database = fixtureDatabase();
+  try {
+    const evidence = loadPerformanceVdotEvidence(database, "2026-01-11T00:00:00.000Z");
+    assert.equal(evidence.length, 1);
+    assert.equal(evidence[0]?.source, "training_envelope");
+  } finally {
+    database.close();
+  }
+});
+
+test("missing race training is represented as insufficient data instead of zero readiness", () => {
+  const database = fixtureDatabase();
+  try {
+    database.prepare("DELETE FROM training_sessions").run();
+    const evidence = loadRaceReadinessEvidence(database, "2026-01-11T00:00:00.000Z");
+    assert.deepEqual(evidence.values, {});
+    assert.equal(evidence.status, "insufficient_data");
+    assert.equal(evidence.evidenceCount, 0);
+    assert.equal(loadRaceReadiness(database, "2026-01-11T00:00:00.000Z").five_k, undefined);
   } finally {
     database.close();
   }
@@ -357,6 +383,9 @@ test("builds a reusable scenario prediction report without reading future eviden
     assert.equal(report.inputs.directVo2Evidence, 1);
     assert.equal(report.inputs.scenario.temperatureC, 30);
     assert.equal(report.inputs.scenario.elevationGainMeters.ten_k, 150);
+    assert.equal(report.explainability?.schemaVersion, "prediction-explainability-v1");
+    assert.equal(report.explainability?.readiness.five_k.status, "available");
+    assert.equal(report.explainability?.recovery.coverage, "none");
     assert.ok((report.snapshot.vo2Max.valueMlKgMin ?? 0) < 50);
     const tenK = report.snapshot.races.find((race) => race.distance === "ten_k");
     assert.equal(tenK?.status, "available");

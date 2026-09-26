@@ -828,12 +828,35 @@ export type PhysiologyGuidanceCode =
   | "direct_vo2_evidence_missing"
   | "standard_test_missing"
   | "threshold_segments_missing"
+  | "race_readiness_missing"
   | "prediction_confidence_low";
 
 export interface PhysiologyPredictionScenario {
   temperatureC: number | null;
   humidityPercent: number | null;
   elevationGainMeters: Record<RaceDistance, number | null>;
+}
+
+export interface PredictionRecoveryExplainability {
+  readiness: number | null;
+  status: "available" | "insufficient_data" | "compat_fallback";
+  source: "canonical" | "raw_compat" | "mixed" | "none";
+  asOf: string;
+  latestObservedAt: string | null;
+  coverage: "full" | "partial" | "none";
+}
+
+export interface PredictionReadinessExplainability {
+  value: number | null;
+  status: "available" | "insufficient_data";
+  evidenceCount: number;
+  dataThroughAt: string | null;
+}
+
+export interface PredictionExplainability {
+  schemaVersion: "prediction-explainability-v1";
+  recovery: PredictionRecoveryExplainability;
+  readiness: Record<RaceDistance, PredictionReadinessExplainability>;
 }
 
 export interface PredictionEnhancementSelection {
@@ -877,7 +900,7 @@ export interface PhysiologyPredictionReport {
     lactateThresholdSegments: number;
     performanceVdotEvidence: number;
     labeledRaceOutcomes: number;
-    readiness: Record<RaceDistance, number>;
+    readiness: Record<RaceDistance, number | null>;
     recoveryReadiness: number | null;
     scenario: PhysiologyPredictionScenario;
     profile: {
@@ -887,6 +910,7 @@ export interface PhysiologyPredictionReport {
   };
   modelSelection: PredictionEnhancementSelection;
   guidanceCodes: PhysiologyGuidanceCode[];
+  explainability?: PredictionExplainability;
   snapshot: PhysiologyPredictionSnapshot;
 }
 

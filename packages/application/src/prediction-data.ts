@@ -4,6 +4,7 @@ import { DATABASE_TIMEZONE, healthTypes, raceDistanceMeters, type RaceDistance }
 import {
   activeDurationSecondsSql,
   SqlitePredictionRecoveryReadRepository
+  , type PredictionRecoveryProvenance
 } from "@rai/storage-sqlite";
 
 import {
@@ -58,6 +59,20 @@ interface PerformanceEnvelopeRow extends PerformanceRow {
   sourceConfidence: number;
   eligibilityStatus: string;
   metadataJson: string;
+}
+
+export const PERFORMANCE_ENVELOPE_WINDOW_DAYS = 56;
+
+export interface RaceReadinessEvidence {
+  values: PredictionReadiness;
+  status: "available" | "insufficient_data";
+  evidenceCount: number;
+  dataThroughAt: string | null;
+}
+
+export interface RecoveryReadinessEvidence {
+  value: number | null;
+  provenance: PredictionRecoveryProvenance;
 }
 
 interface SeriesRow {
@@ -269,7 +284,15 @@ export function loadPerformanceVdotEvidence(
         AND (${historicalEligibilitySql()}) <> 'excluded'
       ORDER BY session.anchor_start_at
     `)
-    .all(asOf, asOf) as unknown as PerformanceEnvelopeRow[];
+    // historicalOverrideJoin contributes the first placeholder, followed by
+    // the explicit training window and its as-of upper bound. node:sqlite
+    // silently treats a missing binding as NULL, so keep all three bindings
+    // adjacent to this query.
+    .all(
+      asOf,
+      new Date(Date.parse(asOf) - PERFORMANCE_ENVELOPE_WINDOW_DAYS * 86_400_000).toISOString(),
+      asOf
+    ) as unknown as PerformanceEnvelopeRow[];
   return rows.flatMap((row) => {
     // A labeled performance is already represented above. Do not turn the
     // same event into an additional training-envelope observation.
@@ -438,6 +461,13 @@ export function loadRaceReadiness(
   database: DatabaseSync,
   asOf: string
 ): PredictionReadiness {
+  return loadRaceReadinessEvidence(database, asOf).values;
+}
+
+export function loadRaceReadinessEvidence(
+  database: DatabaseSync,
+  asOf: string
+): RaceReadinessEvidence {
   const cutoff = new Date(Date.parse(asOf) - 56 * 86_400_000).toISOString();
   const rows = database
     .prepare(`
@@ -470,7 +500,12 @@ export function loadRaceReadiness(
     return pace >= 2.5 && pace <= 15;
   });
   if (usable.length === 0) {
-    return { five_k: 0, ten_k: 0, half_marathon: 0 };
+    return {
+      values: {},
+      status: "insufficient_data",
+      evidenceCount: 0,
+      dataThroughAt: null
+    };
   }
   const weeklyDistanceKm = usable.reduce((sum, row) => sum + row.distanceKm, 0) / 8;
   const runsPerWeek = usable.length / 8;
@@ -478,7 +513,7 @@ export function loadRaceReadiness(
   const latestAt = usable.at(-1)?.observedAt ?? cutoff;
   const daysSinceRun = Math.max(0, daysBetween(latestAt, asOf));
   const recencyScore = Math.exp(-Math.max(0, daysSinceRun - 3) / 14);
-  return Object.fromEntries(
+  const values = Object.fromEntries(
     (Object.keys(readinessTargets) as RaceDistance[]).map((distance) => {
       const target = readinessTargets[distance];
       const volume = clamp(weeklyDistanceKm / target.weeklyDistanceKm, 0, 1);
@@ -497,6 +532,12 @@ export function loadRaceReadiness(
       return [distance, clamp(score, 0, 1)];
     })
   ) as PredictionReadiness;
+  return {
+    values,
+    status: "available",
+    evidenceCount: usable.length,
+    dataThroughAt: latestAt
+  };
 }
 
 export function loadRecoveryReadiness(
@@ -504,6 +545,14 @@ export function loadRecoveryReadiness(
   asOf: string,
   timezoneIdentifier: string = DATABASE_TIMEZONE
 ): number | null {
+  return loadRecoveryReadinessEvidence(database, asOf, timezoneIdentifier).value;
+}
+
+export function loadRecoveryReadinessEvidence(
+  database: DatabaseSync,
+  asOf: string,
+  timezoneIdentifier: string = DATABASE_TIMEZONE
+): RecoveryReadinessEvidence {
   const readings = new SqlitePredictionRecoveryReadRepository(database)
     .load(asOf, timezoneIdentifier);
   const scores: number[] = [];
@@ -516,8 +565,10 @@ export function loadRecoveryReadiness(
   if (readings.recentHrv !== null && readings.baselineHrv !== null && readings.baselineHrv > 0) {
     scores.push(clamp(readings.recentHrv / readings.baselineHrv, 0, 1));
   }
-  if (scores.length === 0) return null;
-  return clamp(average(scores) ?? 0, 0, 1);
+  return {
+    value: scores.length === 0 ? null : clamp(average(scores) ?? 0, 0, 1),
+    provenance: readings.provenance
+  };
 }
 
 function targetDistance(distanceMeters: number): RaceDistance | null {

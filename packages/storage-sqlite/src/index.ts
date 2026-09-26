@@ -88,5 +88,6 @@ export {
 export { SqliteRecoveryFactsReadRepository, type StoredCanonicalNight, type StoredCanonicalHrvDay } from "./read/recovery-facts-read-repository.js";
 export {
   SqlitePredictionRecoveryReadRepository,
-  type PredictionRecoveryReadings
+  type PredictionRecoveryReadings,
+  type PredictionRecoveryProvenance
 } from "./read/prediction-recovery-read-repository.js";

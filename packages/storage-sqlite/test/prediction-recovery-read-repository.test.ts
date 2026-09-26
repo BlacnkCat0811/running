@@ -93,6 +93,27 @@ test("uses raw HRV only for legacy databases without canonical HRV facts", () =>
   }
 });
 
+test("marks raw resting heart rate as raw compatibility provenance", () => {
+  const database = new DatabaseSync(":memory:");
+  try {
+    healthRecords(database);
+    insertHealth(database, "rhr-recent", "HKQuantityTypeIdentifierRestingHeartRate", 58, "2026-01-29T00:00:00Z");
+    insertHealth(database, "rhr-base", "HKQuantityTypeIdentifierRestingHeartRate", 52, "2026-01-15T00:00:00Z");
+    const readings = new SqlitePredictionRecoveryReadRepository(database).load(asOf, "UTC");
+    assert.equal(readings.recentRestingHeartRate, 58);
+    assert.equal(readings.baselineRestingHeartRate, 52);
+    assert.deepEqual(readings.provenance, {
+      hrvSource: "none",
+      sleepSource: "none",
+      source: "raw_compat",
+      coverage: "partial",
+      latestObservedAt: "2026-01-29T00:00:00Z"
+    });
+  } finally {
+    database.close();
+  }
+});
+
 test("does not fall back to raw HRV when canonical facts exist but are empty", () => {
   const database = new DatabaseSync(":memory:");
   try {

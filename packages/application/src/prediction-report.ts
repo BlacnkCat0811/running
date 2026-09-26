@@ -10,6 +10,7 @@ import { DATABASE_TIMEZONE,
   type PhysiologyPredictionReport,
   type PhysiologyPredictionScenario,
   type PredictionEnhancementSelection,
+  type PredictionExplainability,
   type PredictionModelEvaluationMetrics,
   type RaceDistance,
   type RaceTimePrediction,
@@ -38,8 +39,8 @@ import {
   loadLabeledRaceOutcomes,
   loadPerformanceVdotEvidence,
   loadPhysiologyProfile,
-  loadRaceReadiness,
-  loadRecoveryReadiness
+  loadRaceReadinessEvidence,
+  loadRecoveryReadinessEvidence
 } from "./prediction-data.js";
 import { currentAbilityBaselineHash } from "./prediction-ability-baseline.js";
 
@@ -85,8 +86,18 @@ export interface FormulaPredictionBase {
   labeledPerformanceCount: number;
   thresholdEvidenceCount: number;
   performanceVdotEvidenceCount: number;
-  readiness: Record<RaceDistance, number>;
+  readiness: Record<RaceDistance, number | null>;
+  readinessStatus: "available" | "insufficient_data";
+  readinessEvidenceCount: number;
+  readinessDataThroughAt: string | null;
   recoveryReadiness: number | null;
+    recoveryProvenance: {
+      hrvSource: "canonical" | "raw_compat" | "none";
+      sleepSource: "canonical" | "none";
+      source: "canonical" | "raw_compat" | "mixed" | "none";
+      coverage: "full" | "partial" | "none";
+    latestObservedAt: string | null;
+  };
   profile: {
     restingHeartRateBpm: number | null;
     observedMaximumHeartRateBpm: number | null;
@@ -144,11 +155,11 @@ function assertRange(
   }
 }
 
-function resolvedReadiness(readiness: PredictionReadiness): Record<RaceDistance, number> {
+function resolvedReadiness(readiness: PredictionReadiness): Record<RaceDistance, number | null> {
   return {
-    five_k: readiness.five_k ?? 0,
-    ten_k: readiness.ten_k ?? 0,
-    half_marathon: readiness.half_marathon ?? 0
+    five_k: readiness.five_k ?? null,
+    ten_k: readiness.ten_k ?? null,
+    half_marathon: readiness.half_marathon ?? null
   };
 }
 
@@ -210,10 +221,22 @@ export function buildFormulaPredictionBase(
   const labeledPerformance = loadLabeledPerformanceEvidence(database, asOf);
   const performanceVdotEvidence = loadPerformanceVdotEvidence(database, asOf);
   const thresholdEvidence = loadLactateThresholdEvidence(database, asOf);
-  const readiness = resolvedReadiness(loadRaceReadiness(database, asOf));
-  const recoveryReadiness = options.recoveryReadiness === undefined
-    ? loadRecoveryReadiness(database, asOf, options.timezoneIdentifier ?? DATABASE_TIMEZONE)
-    : options.recoveryReadiness;
+  const readinessEvidence = loadRaceReadinessEvidence(database, asOf);
+  const modelReadiness = readinessEvidence.values;
+  const readiness = resolvedReadiness(modelReadiness);
+  const recoveryEvidence = options.recoveryReadiness === undefined
+    ? loadRecoveryReadinessEvidence(database, asOf, options.timezoneIdentifier ?? DATABASE_TIMEZONE)
+    : {
+        value: options.recoveryReadiness,
+        provenance: {
+          hrvSource: "none" as const,
+          sleepSource: "none" as const,
+          source: "none" as const,
+          coverage: "none" as const,
+          latestObservedAt: null
+        }
+      };
+  const recoveryReadiness = recoveryEvidence.value;
   const scenario = resolvedScenario(options);
   const profile = loadPhysiologyProfile(database, asOf);
   const snapshot = buildPhysiologyPredictionSnapshot({
@@ -223,7 +246,7 @@ export function buildFormulaPredictionBase(
     evidence: directEvidence,
     performanceEvidence: performanceVdotEvidence,
     thresholdEvidence,
-    readiness,
+    readiness: modelReadiness,
     conditions: predictionConditions(scenario, recoveryReadiness),
     profile,
     generatedAt: asOf,
@@ -239,7 +262,11 @@ export function buildFormulaPredictionBase(
     thresholdEvidenceCount: thresholdEvidence.length,
     performanceVdotEvidenceCount: performanceVdotEvidence.length,
     readiness,
+    readinessStatus: readinessEvidence.status,
+    readinessEvidenceCount: readinessEvidence.evidenceCount,
+    readinessDataThroughAt: readinessEvidence.dataThroughAt,
     recoveryReadiness,
+    recoveryProvenance: recoveryEvidence.provenance,
     profile,
     snapshot
   };
@@ -569,6 +596,9 @@ function buildPredictionReportContext(
   if (base.directEvidenceCount === 0) guidanceCodes.push("direct_vo2_evidence_missing");
   if (evaluation.labeledOutcomeCount === 0) guidanceCodes.push("standard_test_missing");
   if (base.thresholdEvidenceCount === 0) guidanceCodes.push("threshold_segments_missing");
+  if (base.readinessStatus === "insufficient_data") {
+    guidanceCodes.push("race_readiness_missing");
+  }
   const availableRaces = enhanced.snapshot.races.filter((race) => race.status === "available");
   if (
     enhanced.snapshot.performanceVdot.confidenceLevel === "low" ||
@@ -592,6 +622,32 @@ function buildPredictionReportContext(
     },
     modelSelection: enhanced.selection,
     guidanceCodes,
+    explainability: {
+      schemaVersion: "prediction-explainability-v1",
+      recovery: {
+        readiness: base.recoveryReadiness,
+        status: base.recoveryProvenance.source === "raw_compat" || base.recoveryProvenance.source === "mixed"
+          ? "compat_fallback"
+          : base.recoveryReadiness === null
+            ? "insufficient_data"
+            : "available",
+        source: base.recoveryProvenance.source,
+        asOf: generatedAt,
+        latestObservedAt: base.recoveryProvenance.latestObservedAt,
+        coverage: base.recoveryProvenance.coverage
+      },
+      readiness: Object.fromEntries(
+        (Object.keys(base.readiness) as RaceDistance[]).map((distance) => [
+          distance,
+          {
+            value: base.readiness[distance],
+            status: base.readinessStatus,
+            evidenceCount: base.readinessEvidenceCount,
+            dataThroughAt: base.readinessDataThroughAt
+          }
+        ])
+      ) as PredictionExplainability["readiness"]
+    },
     snapshot: enhanced.snapshot
   } };
 }
