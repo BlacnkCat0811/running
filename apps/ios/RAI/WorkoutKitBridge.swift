@@ -161,14 +161,15 @@ enum WorkoutKitBridge {
     /// Kept in the bridge rather than repeated in both skin views — the ask step
     /// must not run on a device that cannot schedule at all, and that condition
     /// belongs next to the support check, not in the UI.
-    static func syncRequestingAuthorization(
+    @MainActor static func syncRequestingAuthorization(
         plan: MobileWorkoutPlanResponse,
-        completedLocalDates: Set<String>
+        completedLocalDates: Set<String>,
+        isCurrent: @escaping @MainActor () -> Bool = { true }
     ) async -> SyncOutcome {
-        let outcome = await sync(plan: plan, completedLocalDates: completedLocalDates)
+        let outcome = await sync(plan: plan, completedLocalDates: completedLocalDates, isCurrent: isCurrent)
         guard !outcome.authorized, !outcome.deviceUnsupported else { return outcome }
-        guard await requestAuthorization() else { return outcome }
-        return await sync(plan: plan, completedLocalDates: completedLocalDates)
+        guard isCurrent(), await requestAuthorization(), isCurrent() else { return outcome }
+        return await sync(plan: plan, completedLocalDates: completedLocalDates, isCurrent: isCurrent)
     }
 
     /// Replaces everything RAI previously scheduled.
@@ -176,10 +177,11 @@ enum WorkoutKitBridge {
     /// Refreshing means the week may have changed, and a stale prescription on
     /// the watch is worse than none — the runner would follow a session that the
     /// gate has since withdrawn.
-    static func sync(
+    @MainActor static func sync(
         plan: MobileWorkoutPlanResponse,
         now: Date = Date(),
-        completedLocalDates: Set<String>
+        completedLocalDates: Set<String>,
+        isCurrent: @escaping @MainActor () -> Bool = { true }
     ) async -> SyncOutcome {
         // Order matters: an unsupported device reports neither a prompt nor an
         // authorization, so support is checked first to keep the two causes apart.
@@ -216,18 +218,21 @@ enum WorkoutKitBridge {
         let skipped = offer.skipped
         let expired = offer.expired
         let alreadyTrained = offer.alreadyTrained
+        let cancelled = SyncOutcome(scheduled: 0, attempted: 0, skipped: skipped, authorized: true, verified: false)
+        guard isCurrent() else { return cancelled }
         guard !offered.isEmpty else {
             await WorkoutScheduler.shared.removeAllWorkouts()
             // Clearing is as silent as scheduling when it fails, and the failure
             // that matters here is the opposite one: a withdrawal that did not
             // land leaves a prescription on the watch the gate has already pulled.
             let remaining = await WorkoutScheduler.shared.scheduledWorkouts.count
+            let current = isCurrent()
             return SyncOutcome(
                 scheduled: 0,
                 attempted: 0,
                 skipped: skipped,
                 authorized: true,
-                verified: remaining == 0,
+                verified: remaining == 0 && current,
                 timeZoneFallback: timeZone == nil,
                 offered: 0,
                 expired: expired,
@@ -260,10 +265,13 @@ enum WorkoutKitBridge {
             )
         }
 
+        guard isCurrent() else { return cancelled }
         await WorkoutScheduler.shared.removeAllWorkouts()
         for item in pending {
+            guard isCurrent() else { return cancelled }
             await WorkoutScheduler.shared.schedule(item.plan, at: item.at)
         }
+        guard isCurrent() else { return cancelled }
 
         // Read back: the scheduler reports no error, so the only proof that the
         // week actually landed is that it is now listed.

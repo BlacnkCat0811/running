@@ -7,6 +7,7 @@ import {
   abilityExplanation,
   assessRecovery,
   buildInjuryFlags,
+  buildRecovery,
   buildPostRun,
   buildRaceCard,
   buildRecommendation,
@@ -100,6 +101,17 @@ test("verdict is green when load and recovery allow a quality session", () => {
   assert.equal(verdict.tone, "green");
   const next = decideNextSession(base(), verdict);
   assert.ok(next.kind === "tempo" || next.kind === "interval");
+});
+
+test("recovery display score is current-day only and uses available comparable components", () => {
+  const current = buildRecovery(base());
+  assert.equal(current.score, 98);
+  const partial = buildRecovery({ ...base(), morningHrvMs: null });
+  assert.equal(partial.score, 99);
+  const stale = buildRecovery({ ...base(), recoveryEvidenceDate: "2026-09-02", recoveryEvidenceStatus: "stale" });
+  assert.equal(stale.score, null);
+  const noBaseline = buildRecovery({ ...base(), sleepBaselineMinutes: null, hrvBaselineMs: null, restingHeartRateBaselineBpm: null });
+  assert.equal(noBaseline.score, null);
 });
 
 test("historical recovery no longer vetoes today's base arrangement", () => {
@@ -733,4 +745,20 @@ test("the night that woke today is the one the verdict reads", () => {
   const hrvOnly = { ...base(), morningHrvMs: 40 };
   assert.equal(assessRecovery(hrvOnly).assessment, "no_low_signal");
   assert.equal(decideVerdict(hrvOnly).tone, "green");
+});
+
+test("stored rest and long-run days drive today; red gates still veto training", () => {
+  const input = base();
+  input.raceTarget = null;
+  input.storedWeekPlan = [{ localDate: input.today, kind: "rest", distanceKm: null }];
+  const green = { tone: "green" as const, title: "可训练", reason: "符合训练条件", triggers: [], stale: false };
+  assert.equal(decideNextSession(input, green).kind, "rest");
+  input.storedWeekPlan = [{ localDate: input.today, kind: "long_run", distanceKm: 12 }];
+  const planned = decideNextSession(input, green);
+  assert.equal(planned.kind, "long_run");
+  assert.ok(Math.abs((planned.distanceKm ?? 0) - 12) < 0.2);
+  input.nightsBelowSleepBaseline = 3;
+  assert.equal(decideNextSession(input, { ...green, tone: "red" }).kind, "rest");
+  input.raceTarget = { date: input.today, distance: "ten_k", targetPaceSecondsPerKm: 300 };
+  assert.equal(decideNextSession(input, green).kind, "rest");
 });

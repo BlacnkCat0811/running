@@ -365,6 +365,12 @@ test("every registered mutation route is documented in OpenAPI", () => {
     "requestBody" in openapiDocument.paths["/v1/mobile/workout-plan/generate"].post,
     "generate 路由必须声明 requestBody"
   );
+  const previewOperation = openapiDocument.paths["/v1/mobile/workout-plan/preview"].post;
+  assert.ok("requestBody" in previewOperation);
+  const previewSchema = (previewOperation.requestBody as {
+    content: { "application/json": { schema: { required?: string[] } } }
+  }).content["application/json"].schema;
+  assert.deepEqual(previewSchema.required, ["expectedRevision"]);
 });
 
 test("a request that changes data is a route the router can see", () => {
@@ -548,8 +554,9 @@ test("native session and race pickers exactly match their API contracts", () => 
       assert.ok(close >= 0, name + " 的 Picker 参数无法解析");
       const args = source.slice(paren, close);
       const isRace = args.includes('"比赛距离"');
-      assert.ok(isRace || args.includes('"训练类型"'), name + " 出现未登记的 Picker，请补充对应 API 契约扫描");
-      const accepted = isRace ? raceDistances : sessionKinds;
+      const isInputMode = args.includes('"目标输入方式"');
+      assert.ok(isRace || isInputMode || args.includes('"训练类型"'), name + " 出现未登记的 Picker，请补充对应 API 契约扫描");
+      const accepted = isInputMode ? ["pace", "finish"] : isRace ? raceDistances : sessionKinds;
       const open = source.indexOf("{", close);
       assert.ok(open >= 0, name + " 的 Picker 缺少选项块");
       const offered: string[] = [];
@@ -560,7 +567,7 @@ test("native session and race pickers exactly match their API contracts", () => 
       }
       assert.deepEqual([...offered].sort(), [...accepted].sort(), name + " 的选项必须与 API 契约一致");
       if (isRace) racePickers += 1;
-      else sessionPickers += 1;
+      else if (!isInputMode) sessionPickers += 1;
     }
   }
   assert.ok(sessionPickers >= 1, "必须保留训练类型选择器");

@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { applyRacePlanPolicy } from "./weekly-plan-validate.js";
 import type {
   DashboardResponse,
   MobileCoverage,
@@ -292,6 +293,11 @@ export function assembleMobileCoach(args: {
   const computed = decideNextSession(input, verdict);
   const nextSession = resolveLockedNextSession(computed, input.lockedSession, today, input.zones);
   const lock = lockState(input.lockedSession, today, verdict.tone);
+  lock.candidate = computed;
+  const planned = input.storedWeekPlan.find(day => day.localDate === today) ?? null;
+  const prescriptionKey = (session: MobileNextSession) => JSON.stringify([session.kind, session.distanceKm, session.structure,
+    session.paceSecondsPerKmLower, session.paceSecondsPerKmUpper, session.heartRateBpmLower, session.heartRateBpmUpper]);
+  if (lock.present && prescriptionKey(computed) !== prescriptionKey(nextSession)) lock.relockSuggested = true;
   const todayWorkoutCount = input.todayWorkoutCount;
   const postRunWorkout = coachWorkout && coachWorkout.localDate === today ? coachWorkout : null;
   // The newest recovery observation that exists, even when it is not today's.
@@ -318,7 +324,12 @@ export function assembleMobileCoach(args: {
       reasonCodes: assessment.reasonCodes,
       lastObservationDate: observationDates.length === 0 ? null : observationDates.sort().at(-1)!
     },
-    recommendation: buildRecommendation(input, assessment, verdict),
+    recommendation: {
+      ...buildRecommendation(input, assessment, verdict),
+      plannedKind: planned?.kind ?? null,
+      effectiveKind: nextSession.kind,
+      adjustmentReason: recommendationAdjustmentReason(planned, computed)
+    },
     postRun: buildPostRun(
       postRunWorkout,
       input.trueAbility,
@@ -339,6 +350,16 @@ export function assembleMobileCoach(args: {
     }),
     lock
   };
+}
+
+export function recommendationAdjustmentReason(
+  planned: MobilePlannedDay | null,
+  computed: MobileNextSession
+): string | null {
+  if (planned === null) return computed.reason;
+  const plannedKey = JSON.stringify([planned.kind, planned.distanceKm, planned.structure ?? null]);
+  const computedKey = JSON.stringify([computed.kind, computed.distanceKm, computed.structure]);
+  return plannedKey === computedKey ? null : computed.reason;
 }
 
 export function zonePrescription(zones: TrainingZonesCurrentResponse | null): CoachZonePrescription | null {
@@ -376,6 +397,9 @@ export const WORKOUT_PLAN_WINDOW_DAYS = 7;
  * never contradict each other.
  */
 export function assembleMobileWorkoutPlan(args: {
+  raceTarget?: import("@rai/api-contracts").MobileRaceTarget | null;
+  weeklyDistanceKm?: number;
+  relockSuggested?: boolean;
   today: string;
   todaySession: MobileNextSession;
   todayCompleted: boolean;
@@ -391,10 +415,10 @@ export function assembleMobileWorkoutPlan(args: {
   const windowEnd = shiftDate(args.today, windowDays - 1);
 
   const days: MobileWorkoutPlanDay[] = [
-    planDayFromSession(args.today, args.todaySession, prescription, source, !args.todayCompleted)
+    planDayFromSession(args.today, args.todaySession, prescription, source, !args.todayCompleted && !args.relockSuggested)
   ];
 
-  for (const planned of args.storedPlan
+  for (const planned of applyRacePlanPolicy(args.storedPlan, args.raceTarget, args.weeklyDistanceKm ?? 30, prescription)
     .filter((day) => day.localDate > args.today && day.localDate <= windowEnd)
     .sort((left, right) => left.localDate.localeCompare(right.localDate))) {
     const numbers = plannedDayNumbers(planned.kind, planned.structure, planned.distanceKm, prescription);
@@ -412,7 +436,19 @@ export function assembleMobileWorkoutPlan(args: {
     });
   }
 
+  // Keep the export window explicit; missing dates are not hidden or invented training.
+  for (let offset = 1; offset < windowDays; offset++) {
+    const localDate = shiftDate(args.today, offset);
+    if (!days.some(day => day.localDate === localDate)) days.push({
+      localDate, kind: "rest", title: "未生成", reason: "尚无课表，不安排训练。", distanceKm: null, durationMinutes: null,
+      paceSecondsPerKmLower: null, paceSecondsPerKmUpper: null, heartRateBpmLower: null, heartRateBpmUpper: null,
+      structure: null, source, executable: false
+    });
+  }
+  days.sort((a, b) => a.localDate.localeCompare(b.localDate));
   return {
+    windowStart: args.today,
+    windowEnd,
     generatedAt: new Date().toISOString(),
     timezone: DATABASE_TIMEZONE,
     windowDays: days.length,

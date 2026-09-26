@@ -60,6 +60,7 @@ import { buildPlanExecution } from "./plan-execution.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
 import type { PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
+import { constrainUpcomingPlan } from "./weekly-plan-service.js";
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
 import {
   matchPlanDay,
@@ -475,10 +476,12 @@ export class RaiReadStore {
         recoveryAssessment: coach.recoveryAssessment.assessment,
         verdict: coach.verdict,
         nextSession: coach.nextSession,
+        candidate: coach.lock.candidate,
+        planRevision: (goals as { revision?: number } | undefined)?.revision ?? 0,
         activeModel: dashboard.activeModel?.id ?? null
       }))
       .digest("hex");
-    return {
+    const result: MobileTodayResponse = {
       generatedAt: new Date().toISOString(),
       timezone: DATABASE_TIMEZONE,
       latestDataDate,
@@ -502,8 +505,17 @@ export class RaiReadStore {
       week,
       weekDaily,
       recentWorkouts,
-      ...coach
+      ...coach,
+      recommendation: { ...coach.recommendation, planRevision: (goals as { revision?: number } | undefined)?.revision ?? 0 }
     };
+    const effective = this.executableMobilePlan(result, goalDistanceKm, goals);
+    result.weekPlan = result.weekPlan.map(day => {
+      if (day.localDate <= today) return day;
+      const prescribed = effective.days.find(item => item.localDate === day.localDate);
+      if (!prescribed) return day;
+      return { ...day, kind: prescribed.kind, title: prescribed.title, distanceKm: prescribed.distanceKm ?? 0, structure: prescribed.structure };
+    });
+    return result;
   }
 
   /**
@@ -518,12 +530,32 @@ export class RaiReadStore {
     >
   ): MobileWorkoutPlanResponse {
     const today = this.mobileToday(goalDistanceKm, goals);
+    return this.executableMobilePlan(today, goalDistanceKm, goals);
+  }
+
+  private executableMobilePlan(
+    today: MobileTodayResponse,
+    goalDistanceKm: number | null,
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession"> &
+      Partial<Pick<MobileGoalsResponse, "weekPlanAudit" | "revision">>
+  ): MobileWorkoutPlanResponse {
+    const currentZones = this.trainingZonesCurrent();
+    const executablePlan = constrainUpcomingPlan(goals?.weekPlan ?? [], {
+      // Today's actual/effective session is reserved; export never replaces a lock.
+      today: { ...today, lock: { ...today.lock, present: true } },
+      goals: { weeklyDistanceKm: goalDistanceKm ?? 30, easyDurationFloorFraction: today.weekStructure.easyDurationFloorFraction,
+        qualitySessionCap: today.weekStructure.qualitySessionCap, raceTarget: goals?.raceTarget ?? null },
+      prescription: zonePrescription(currentZones), previousWeekDistanceKm: this.previousWeekDistanceKm(today.today.localDate)
+    });
     return assembleMobileWorkoutPlan({
       today: today.today.localDate,
       todaySession: today.nextSession,
       todayCompleted: today.today.workoutCount > 0,
-      storedPlan: goals?.weekPlan ?? [],
-      zones: this.trainingZonesCurrent(),
+      relockSuggested: today.lock.relockSuggested,
+      raceTarget: goals?.raceTarget ?? null,
+      weeklyDistanceKm: goalDistanceKm ?? 30,
+      storedPlan: executablePlan,
+      zones: currentZones,
       audit: goals?.weekPlanAudit ?? null,
       planRevision: goals?.revision ?? 0
     });

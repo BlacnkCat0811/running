@@ -1,10 +1,12 @@
 import type {
   MobilePlannedDay,
+  MobileRaceTarget,
   MobileSessionKind,
   MobileSessionStructure,
   MobileWorkoutStep
 } from "@rai/api-contracts";
 import { MOBILE_SESSION_KINDS } from "@rai/contracts";
+import { racePlanPhase, taperDayCeiling } from "./race-plan-policy.js";
 
 import {
   buildSessionStructure,
@@ -101,6 +103,7 @@ export function weeklyPlanVolumeCeiling(
 }
 
 export interface WeeklyPlanValidationArgs {
+  raceTarget?: MobileRaceTarget | null;
   raw: string;
   allowedDates: string[];
   prescription: CoachZonePrescription | null;
@@ -513,6 +516,7 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
   }
 
   days.sort((left, right) => left.localDate.localeCompare(right.localDate));
+  days = applyRacePlanPolicy(days, args.raceTarget, args.weeklyDistanceKm, args.prescription, clamped);
 
   // --- intensity containment ------------------------------------------------
   const blocking = args.injuryFlagCodes.filter((code) => QUALITY_BLOCKING_FLAGS.has(code));
@@ -698,6 +702,33 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
   }
 
   return { days, rejected, clamped };
+}
+
+/** Shared by generation, manual validation and legacy-plan export. Idempotent. */
+export function applyRacePlanPolicy(
+  days: MobilePlannedDay[], target: MobileRaceTarget | null | undefined,
+  weeklyDistanceKm: number, prescription: CoachZonePrescription | null, warnings: string[] = []
+): MobilePlannedDay[] {
+  return days.map(day => {
+    const phase = racePlanPhase(day.localDate, target);
+    if (phase === "race_day" && day.kind !== "rest") {
+      warnings.push(`${day.localDate} 比赛日不追加训练，已留白`);
+      return { ...day, kind: "rest", distanceKm: null, structure: null, reason: "比赛日留白；不等于比赛已完成。" };
+    }
+    if (phase !== "taper" || day.kind === "rest") return day;
+    const ceiling = taperDayCeiling(weeklyDistanceKm);
+    const measured = day.structure ? measureStructure(day.structure, day.kind, pacesFromZones(prescription)).distanceKm : day.distanceKm ?? 0;
+    if ((day.kind === "easy" || day.kind === "recovery") && measured <= ceiling + 0.05) return day;
+    const structure = buildSessionStructure("easy", prescription, { targetDistanceKm: Math.min(measured || ceiling, ceiling) });
+    const distanceKm = structure ? roundKm(measureStructure(structure, "easy", pacesFromZones(prescription)).distanceKm) : null;
+    // A budget below the structure's minimum cannot be made safe by relabeling it.
+    if (distanceKm != null && distanceKm > ceiling + 0.1) {
+      warnings.push(`${day.localDate} 减量预算不足以支撑完整课表，改为休息`);
+      return { ...day, kind: "rest", distanceKm: null, structure: null, reason: "赛前减量，保留恢复。" };
+    }
+    warnings.push(`${day.localDate} 赛前减量，改为轻松跑并限制距离`);
+    return { ...day, kind: "easy", structure, distanceKm, reason: "赛前两周减量；不增加强度或最长距离。" };
+  });
 }
 
 /**

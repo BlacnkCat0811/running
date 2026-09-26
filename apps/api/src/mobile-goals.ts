@@ -27,6 +27,7 @@ import {
   type CoachZonePrescription
 } from "./mobile-coach.js";
 import { MAX_PLANNED_DISTANCE_KM, normalizeSessionStructure } from "./session-structure.js";
+import { isValidLocalDate } from "./local-date.js";
 
 export const DEFAULT_WEEKLY_DISTANCE_KM = 30;
 const GOALS_FILE = "mobile-goals.json";
@@ -99,6 +100,8 @@ const emptyGoals = (): StoredGoals => ({
  */
 export interface PlanMergeOptions {
   prescription?: CoachZonePrescription | null;
+  /** Runs on the measured candidate before any durable write. */
+  validate?: (candidate: MobileGoalsResponse) => MobileGoalsResponse | void;
 }
 
 /** One stored plan revision, as it was written. */
@@ -187,6 +190,10 @@ export class MobileGoalsStore {
     if (!Number.isFinite(input.weeklyDistanceKm)) {
       throw new MobileGoalsInputError("weeklyDistanceKm must be a finite number");
     }
+    if (input.raceTarget !== undefined && input.raceTarget !== null &&
+        !isValidLocalDate(input.raceTarget.date)) {
+      throw new MobileGoalsInputError("raceTarget.date must be a real YYYY-MM-DD date");
+    }
     const current = this.readStored();
     if (input.expectedRevision != null && input.expectedRevision !== current.revision) {
       throw new MobileGoalsRevisionConflictError(current.revision);
@@ -212,6 +219,8 @@ export class MobileGoalsStore {
       weekPlanAudit: input.weekPlanAudit === undefined ? current.weekPlanAudit : normalizePlanAudit(input.weekPlanAudit),
       updatedAt: new Date().toISOString()
     };
+    const validated = options?.validate?.(this.toResponse(stored, options));
+    if (validated) stored.weekPlan = validated.weekPlan;
     if (this.controlDatabase) {
       this.writeControlGoals(stored, current.revision);
     } else {
@@ -607,7 +616,7 @@ export class MobileGoalsInputError extends Error {
 
 function normalizeRaceTarget(value: MobileRaceTarget | null | undefined): MobileRaceTarget | null {
   if (!value || typeof value !== "object") return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value.date)) return null;
+  if (!isValidLocalDate(value.date)) return null;
   if (!RACE_DISTANCES.has(value.distance)) return null;
   const pace = value.targetPaceSecondsPerKm;
   return {

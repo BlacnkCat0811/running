@@ -242,6 +242,15 @@ export const mobileWeeklyPlanGenerateBodySchema = {
   }
 } as const;
 
+export const mobileWeeklyPlanPreviewBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["expectedRevision"],
+  properties: {
+    expectedRevision: { type: "integer", minimum: 0 }
+  }
+} as const;
+
 /**
  * Receipt for "the phone handed this plan day to the Watch".
  *
@@ -722,6 +731,20 @@ export const openapiDocument = {
             "application/json": { schema: { $ref: "#/components/schemas/MobileWeeklyPlanGenerate" } }
           }
         }
+      })
+    },
+    "/v1/mobile/workout-plan/preview": {
+      post: operation(["Workouts"], "生成未来七日候选课表；不保存、不推送手表，15 分钟过期", {
+        requestBody: body({ type: "object", additionalProperties: false, required: ["expectedRevision"], properties: {
+          expectedRevision: { type: "integer", minimum: 0 }
+        } }, "当前目标 revision")
+      })
+    },
+    "/v1/mobile/workout-plan/confirm": {
+      post: operation(["Workouts"], "确认预览；校验目标版本与训练数据快照，支持重复确认幂等", {
+        requestBody: body({ type: "object", additionalProperties: false, required: ["candidateId", "expectedRevision"], properties: {
+          candidateId: { type: "string", minLength: 1, maxLength: 80 }, expectedRevision: { type: "integer", minimum: 0 }
+        } }, "候选标识及预览基准 revision")
       })
     },
     "/v1/mobile/workout-plan/synced": {

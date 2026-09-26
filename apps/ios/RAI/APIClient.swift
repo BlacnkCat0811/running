@@ -161,6 +161,15 @@ struct RaiAPIClient {
         )
     }
 
+    func previewWeeklyPlan(_ input: GenerateWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanPreview {
+        try await send(path: "/v1/mobile/workout-plan/preview", method: "POST", body: input,
+                       baseURL: baseURL, token: token, timeout: Self.generateTimeoutInterval)
+    }
+
+    func confirmWeeklyPlan(_ input: ConfirmWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanGenerationResponse {
+        try await send(path: "/v1/mobile/workout-plan/confirm", method: "POST", body: input, baseURL: baseURL, token: token)
+    }
+
     /// Registers that a plan day was handed to the Watch.
     ///
     /// Best-effort by contract: the caller reports a failure but must never let

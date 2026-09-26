@@ -209,6 +209,7 @@ struct TechAbilityDetailView: View {
             TechPanel {
                 VStack(alignment: .leading, spacing: 9) {
                     TechSectionHeader(title: "成绩预测", trailing: "区间参考", trailingColor: TechColor.muted)
+                    predictionLoadStateBanner
                     ForEach(races) { race in
                         TechAdaptiveStack(spacing: 8) {
                             Text(techRaceDistanceName(race.distance))
@@ -223,6 +224,10 @@ struct TechAbilityDetailView: View {
                                     .font(.caption2.monospacedDigit()).foregroundStyle(TechColor.muted)
                                 Text("准备度 " + nativePercent(race.readiness))
                                     .font(.caption2).foregroundStyle(TechColor.cyan)
+                                if let fatigue = race.fatigueAdjustmentSeconds {
+                                    Text("疲劳修正 \(nativeDuration(fatigue))")
+                                        .font(.caption2).foregroundStyle(TechColor.muted)
+                                }
                             }
                         }
                         .padding(.vertical, 6)
@@ -231,6 +236,22 @@ struct TechAbilityDetailView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var predictionLoadStateBanner: some View {
+        switch native.predictionLoadState {
+        case .current:
+            EmptyView()
+        case let .stale(_, message), let .unavailable(message):
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(TechColor.yellow)
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(TechColor.muted)
             }
         }
     }

@@ -1657,3 +1657,17 @@ test("fallback plans enforce the same easy-duration floor at every volume budget
     }
   }
 });
+
+test("fallback respects race day and completed natural-week volume across Sunday", async () => {
+  const today = todayPayload({
+    today: { localDate: "2026-09-25", workoutCount: 0 },
+    week: { periodStart: "2026-09-21", periodEnd: "2026-09-27", distanceKm: 40 },
+    weekStructure: { qualitySessionCount: 2 }
+  });
+  const result = await generateWeeklyPlan({ today, goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: { date: "2026-09-27", distance: "half_marathon", targetPaceSecondsPerKm: 330 } }, prescription: PRESCRIPTION, client: null });
+  assert.equal(result.days.length, 7);
+  assert.equal(result.days[0]!.localDate, "2026-09-25");
+  assert.equal(result.days.at(-1)!.localDate, "2026-10-01");
+  assert.ok(result.days.filter(day => day.localDate <= "2026-09-27").every(day => day.kind === "rest"));
+  assert.ok(result.days.filter(day => day.localDate > "2026-09-27").reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 40 * 1.05);
+});

@@ -1538,3 +1538,62 @@ test("every mounted write route is classified, whatever the source looks like", 
     await removeRuntimeRoot(runtimeRoot);
   }
 });
+
+test("plan preview/confirm HTTP flow is non-mutating, idempotent and revision safe", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-plan-preview-http-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  const database = await RaiDatabase.open(databasePath);
+  database.close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath, RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "", RAI_LLM_API_KEY: "" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    const getGoals = async () => await fetch(`${url}/v1/mobile/goals`).then(response => response.json()) as import("@rai/api-contracts").MobileGoalsResponse;
+    const post = (path: string, body: object, method = "POST") => fetch(`${url}/v1/mobile/${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const initial = await getGoals();
+    const missingRevision = await post("workout-plan/preview", {});
+    assert.equal(missingRevision.status, 400, await missingRevision.text());
+    const response = await post("workout-plan/preview", { expectedRevision: initial.revision });
+    assert.equal(response.status, 200);
+    const preview = await response.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
+    assert.ok(preview.candidateId);
+    assert.equal((await getGoals()).revision, initial.revision, "preview must not write");
+    const confirmBody = { candidateId: preview.candidateId, expectedRevision: preview.revision };
+    const confirmed = await post("workout-plan/confirm", confirmBody);
+    assert.equal(confirmed.status, 200, await confirmed.text());
+    const committed = await getGoals();
+    assert.equal(committed.revision, initial.revision + 1);
+    assert.equal((await post("workout-plan/confirm", confirmBody)).status, 200);
+    assert.equal((await getGoals()).revision, committed.revision, "lost acknowledgement retry is not another write");
+    const stale = await (await post("workout-plan/preview", { expectedRevision: committed.revision })).json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
+    const today = await fetch(`${url}/v1/mobile/today`).then(response => response.json()) as import("@rai/api-contracts").MobileTodayResponse;
+    const edit = await post("goals", { expectedRevision: committed.revision, weeklyDistanceKm: committed.weeklyDistanceKm, raceTarget: { date: today.today.localDate, distance: "ten_k", targetPaceSecondsPerKm: 330 } }, "PUT");
+    assert.equal(edit.status, 200, await edit.text());
+    const changed = await getGoals();
+    assert.equal((await post("workout-plan/confirm", { candidateId: stale.candidateId, expectedRevision: stale.revision })).status, 409);
+    assert.equal((await getGoals()).revision, changed.revision);
+    const invalid = await post("goals", { expectedRevision: changed.revision, weeklyDistanceKm: 10, qualitySessionCap: 0, weekPlan: [{ localDate: today.today.localDate, kind: "tempo", distanceKm: 10 }] }, "PUT");
+    assert.equal(invalid.status, 200, await invalid.text());
+    const safelyRewritten = await getGoals();
+    assert.equal(safelyRewritten.revision, changed.revision + 1);
+    assert.equal(safelyRewritten.weekPlan[0]?.kind, "rest", "race-day manual edits are rewritten to rest");
+    for (const action of ["lock", "relock"]) {
+      const current = await fetch(`${url}/v1/mobile/today`).then(response => response.json()) as import("@rai/api-contracts").MobileTodayResponse;
+      const locked = await post("lock", { action, expectedRevision: current.recommendationRevision });
+      assert.equal(locked.status, 200, await locked.text());
+    }
+    const plan = await fetch(`${url}/v1/mobile/workout-plan`).then(response => response.json()) as import("@rai/api-contracts").MobileWorkoutPlanResponse;
+    assert.equal(plan.days.length, 7);
+    assert.equal(plan.days[0]!.executable, false, "race day never adds another workout");
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});

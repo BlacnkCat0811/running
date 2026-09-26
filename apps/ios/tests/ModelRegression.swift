@@ -115,6 +115,11 @@ final class RequestLog: @unchecked Sendable {
         check(nativeSegmentAlert(segment(lower: 423, upper: 380)) == "提醒 \(nativePace(380))–\(nativePace(423))/km", "September 14 pace display orders fast to slow")
         check(nativeSegmentAlert(segment(lower: 1, upper: 423)) == "配速目标异常", "historical corrupt target is not displayed as a valid range")
         check(NativeRaceGoalDraft.isValidPace(""), "blank target pace is optional")
+        check(NativeRaceGoalDraft.finishSeconds("1:45:00") == 6300, "finish time parses hours minutes seconds")
+        check(NativeRaceGoalDraft.finishSeconds("50:00") == 3000, "finish time parses minutes seconds")
+        check(NativeRaceGoalDraft.finishSeconds("1:60:00") == nil && NativeRaceGoalDraft.finishSeconds("1:5:00") == nil, "invalid finish time is rejected")
+        check(NativeRaceGoalDraft.finishText(pace: 300, distance: "ten_k") == "0:50:00", "ten-kilometer finish time matches pace")
+        check(abs(NativeRaceGoalDraft.kilometers("half_marathon") * 300 - 6329.25) < 0.001, "half-marathon conversion uses full distance")
         check(NativeRaceGoalDraft.paceSeconds("5:30") == 330, "race pace converts minutes and seconds")
         check(NativeRaceGoalDraft.paceSeconds("2:30") == 150 && NativeRaceGoalDraft.paceSeconds("15:00") == 900, "race pace includes API boundaries")
         for invalid in ["2:29", "15:01", "5:60", "5:3", "abc", "-5:30", "5.5:30"] {
@@ -157,11 +162,42 @@ final class RequestLog: @unchecked Sendable {
             let week = try JSONDecoder().decode(WeekSummary.self, from: Data(json.utf8))
             check(week.remainingDistanceKm == remaining, "remaining distance handles exceeded or absent goal \(goal)")
         }
-        for (state, expected) in [("recovered", "恢复良好"), ("reduced", "恢复不足"), ("depleted", "需要休息"), ("unknown", "基线不足")] {
+        for (state, expected) in [("recovered", "恢复良好"), ("reduced", "恢复不足"), ("depleted", "需要休息"), ("unknown", "未识别状态")] {
             let json = "{\"state\":\"\(state)\",\"lastNightSleepMinutes\":420,\"note\":\"test\"}"
             let recovery = try JSONDecoder().decode(MobileRecoveryBreakdown.self, from: Data(json.utf8))
             check(recovery.stateLabel == expected, "recovery state \(state) is not pending")
         }
+        let predictionJSON = """
+        {
+          "reportVersion":"rai-physiology-report-v2",
+          "generatedAt":"2026-09-25T00:00:00.000Z",
+          "inputs":{"recoveryReadiness":0.8,"readiness":{"five_k":null}},
+          "guidanceCodes":["race_readiness_missing"],
+          "explainability":{
+            "schemaVersion":"prediction-explainability-v1",
+            "recovery":{"readiness":0.8,"status":"available","source":"canonical","asOf":"2026-09-25T00:00:00.000Z","latestObservedAt":"2026-09-24T00:00:00.000Z","coverage":"partial"},
+            "readiness":{"five_k":{"value":null,"status":"insufficient_data","evidenceCount":0,"dataThroughAt":null}}
+          },
+          "snapshot":{
+            "schemaVersion":"physiology-prediction-v1",
+            "modelVersion":"physiology-v1",
+            "generatedAt":"2026-09-25T00:00:00.000Z",
+            "dataThroughAt":"2026-09-24T00:00:00.000Z",
+            "vo2Max":{"status":"available","valueMlKgMin":50,"confidence":0.8},
+            "performanceVdot":{"status":"available","value":48,"confidence":0.7},
+            "lactateThreshold":{"status":"available","paceSecondsPerKm":300,"heartRateBpm":165,"confidence":0.6},
+            "races":[{"distance":"five_k","predictedSeconds":1200,"optimisticSeconds":1150,"pessimisticSeconds":1260,"fatigueAdjustmentSeconds":12,"readiness":null,"confidence":0.6,"method":"daniels_vdot_conditions_v3","evidenceCodes":["fatigue_adjustment"]}]
+          }
+        }
+        """
+        let decodedPrediction = try JSONDecoder().decode(
+            NativePredictionResponse.self,
+            from: Data(predictionJSON.utf8)
+        )
+        check(decodedPrediction.snapshot.races.first?.fatigueAdjustmentSeconds == 12, "prediction DTO preserves fatigue adjustment")
+        check(decodedPrediction.explainability?.recovery?.source == "canonical", "prediction DTO preserves recovery provenance")
+        let hasNoReadinessValue = decodedPrediction.inputs.readiness?.values.compactMap { $0 }.isEmpty ?? true
+        check(hasNoReadinessValue, "prediction DTO preserves missing readiness")
         let chart = HeartRateChartData(points: [
             MetricPoint(timestamp: "", offsetSeconds: 2538, value: 176),
             MetricPoint(timestamp: "", offsetSeconds: 0, value: 90),
@@ -333,13 +369,54 @@ final class RequestLog: @unchecked Sendable {
         let clearBody = try JSONSerialization.jsonObject(with: raceRequests.lastBody(method: "PUT", path: "/v1/mobile/goals")!) as! [String: Any]
         check(clearBody["raceTarget"] is NSNull, "real clear request sends explicit JSON null")
 
+        let previewBase = try JSONSerialization.jsonObject(with: Data(generationJSON.utf8)) as! [String: Any]
+        var previewObject = previewBase
+        previewObject["candidateId"] = "preview-test"
+        previewObject["expiresAt"] = "2099-01-01T00:00:00Z"
+        previewObject["revision"] = 12
+        previewObject["replacedDates"] = ["2026-09-12"]
+        previewObject["windowStart"] = "2026-09-11"
+        previewObject["windowEnd"] = "2026-09-17"
+        let previewJSON = String(data: try JSONSerialization.data(withJSONObject: previewObject), encoding: .utf8)!
+
+        // Regression: an older full refresh must not undo an acknowledged save.
+        do {
+            let concurrentModel = NativeAppModel(session: ServerSession(), api: api)
+            raceHandler(goalsJSON)
+            await concurrentModel.refreshAll(requestHandshake: false)
+            let auditRequests = RequestLog()
+            StubProtocol.handler = { request in
+                auditRequests.record(request)
+                let path = request.url!.path
+                if path.hasSuffix("/goals") {
+                    return request.httpMethod == "PUT"
+                        ? (200, savedRaceJSON, 0)
+                        : (200, goalsJSON, 0.30)
+                }
+                if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+                if path.hasSuffix("/workouts") { return (200, fastList, 0) }
+                return (503, "{}", 0)
+            }
+            let olderRefresh = Task { await concurrentModel.refreshAll(requestHandshake: false) }
+            for _ in 0..<100 {
+                if auditRequests.count(method: "GET", path: "/v1/mobile/goals") > 0 { break }
+                try await Task.sleep(for: .milliseconds(2))
+            }
+            let acknowledged = await concurrentModel.saveRaceTarget(race, expectedRevision: 12)
+            let immediatelyAfterSave = concurrentModel.goals?.revision ?? -1
+            await olderRefresh.value
+            print("AUDIT stale-refresh: saveAcknowledged=\(acknowledged), immediatelyAfterSaveRevision=\(immediatelyAfterSave), finalRevision=\(concurrentModel.goals?.revision ?? -1), raceDisappeared=\(concurrentModel.goals?.raceTarget == nil)")
+            check(acknowledged && immediatelyAfterSave == 13 && concurrentModel.goals?.revision == 13 && concurrentModel.goals?.raceTarget == race,
+                  "older GET cannot overwrite acknowledged PUT or clear the race target")
+        }
+
         session.serverURL = URL(string: "https://rai-plan.test")
         model.serverConfigurationChanged()
         let generationRequests = RequestLog()
         StubProtocol.handler = { request in
             generationRequests.record(request)
             let path = request.url!.path
-            if path.hasSuffix("/workout-plan/generate") { return (200, generationJSON, 0) }
+            if path.hasSuffix("/workout-plan/preview") { return (200, previewJSON, 0) }
             if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
             if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
             return (503, "{}", 0)
@@ -352,11 +429,51 @@ final class RequestLog: @unchecked Sendable {
 
         let generated = await model.regenerateWeeklyPlan()
         check(generated, "a plan generation reports success")
-        check(model.planMessage?.contains("大模型生成") == true, "a model-generated plan says so")
-        check(model.planMessage?.contains("deepseek:deepseek-chat") == true, "the generating model is named")
-        let generationBody = generationRequests.lastBody(method: "POST", path: "/v1/mobile/workout-plan/generate")
+        check(model.planPreview?.audit.generatedBy == "llm", "preview exposes generation provenance")
+        check(model.planPreview?.audit.model == "deepseek:deepseek-chat", "preview names the generating model")
+        let generationBody = generationRequests.lastBody(method: "POST", path: "/v1/mobile/workout-plan/preview")
         let generationObject = generationBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         check(generationObject?["expectedRevision"] as? Int == 12, "a generated plan posts the loaded goals revision")
+        check(generationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/confirm") == 0, "preview never confirms implicitly")
+        let candidate = model.planPreview!
+        let confirmedJSON = generationJSON.replacingOccurrences(of: "\"revision\":8", with: "\"revision\":13")
+        StubProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("/confirm") { return (200, confirmedJSON, 0) }
+            if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
+            if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+            if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
+            return (503, "{}", 0)
+        }
+        let offlineConfirm = await model.confirmPlanPreview(candidate)
+        check(!offlineConfirm && model.planPreview?.candidateId == candidate.candidateId, "offline confirmation is rejected without discarding the preview")
+        _ = await model.refreshPlanState()
+        let confirmedWithStaleReads = await model.confirmPlanPreview(candidate)
+        check(confirmedWithStaleReads && model.planPreview == nil, "confirmation acknowledgement survives stale follow-up reads")
+        check(model.planMessage?.contains("已保存，但显示未刷新") == true, "partial refresh is not reported as failed persistence")
+        let staleRefresh = await model.refreshPlanState()
+        check(!staleRefresh, "old read revision cannot satisfy acknowledged confirmation revision")
+        StubProtocol.handler = { request in
+            let path = request.url!.path
+            if path.hasSuffix("/goals") { return (200, goalsJSON.replacingOccurrences(of: "\"revision\":12", with: "\"revision\":13"), 0) }
+            if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+            if path.hasSuffix("/workout-plan") { return (200, planJSON.replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":13"), 0) }
+            return (503, "{}", 0)
+        }
+        let latestPlanRefreshed = await model.refreshPlanState()
+        check(latestPlanRefreshed && model.goals?.revision == 13 && model.workoutPlan?.planRevision == 13, "matching acknowledged revision refreshes every dependent plan surface")
+        let verifiedWatchPlan = model.workoutPlan!
+        model.recordWatchAcknowledgement(plan: verifiedWatchPlan)
+        check(!model.watchNeedsUpdate, "a verified matching watch plan is current")
+        var watchObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(verifiedWatchPlan)) as! [String: Any]
+        watchObject["generatedAt"] = "2099-01-01T00:00:00Z"
+        let reloadedWatchPlan = try JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: JSONSerialization.data(withJSONObject: watchObject))
+        check(!model.watchPlanNeedsUpdate(reloadedWatchPlan), "read timestamps alone do not dirty device scheduling")
+        var watchDays = watchObject["days"] as! [[String: Any]]
+        watchDays[0]["executable"] = false
+        watchObject["days"] = watchDays
+        let gatedWatchPlan = try JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: JSONSerialization.data(withJSONObject: watchObject))
+        check(model.watchPlanNeedsUpdate(gatedWatchPlan), "same goals revision with a newly vetoed prescription needs device update")
 
         StubProtocol.handler = { _ in
             (409, "{\"code\":\"mobile_goals_revision_conflict\",\"message\":\"训练目标已在其他页面更新\"}", 0)
@@ -375,7 +492,7 @@ final class RequestLog: @unchecked Sendable {
         let missingRevision = await model.regenerateWeeklyPlan()
         check(!missingRevision, "generation fails closed when the goals revision cannot be read")
         check(
-            failedRevisionRequests.count(method: "POST", path: "/v1/mobile/workout-plan/generate") == 0,
+            failedRevisionRequests.count(method: "POST", path: "/v1/mobile/workout-plan/preview") == 0,
             "a failed goals read never posts an unlocked generation"
         )
         check(
@@ -395,7 +512,7 @@ final class RequestLog: @unchecked Sendable {
         cancelledGeneration.cancel()
         _ = await cancelledGeneration.value
         check(
-            cancelledGenerationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/generate") == 0,
+            cancelledGenerationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/preview") == 0,
             "cancelling while goals load never posts generation"
         )
 
@@ -412,7 +529,7 @@ final class RequestLog: @unchecked Sendable {
         model.serverConfigurationChanged()
         _ = await oldGeneration.value
         check(
-            switchedGenerationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/generate") == 0,
+            switchedGenerationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/preview") == 0,
             "switching servers while goals load never posts to the old server"
         )
         check(model.planMessage == nil, "switching configurations clears the old plan message")
@@ -439,8 +556,8 @@ final class RequestLog: @unchecked Sendable {
         StubProtocol.handler = { request in
             let path = request.url!.path
             if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
-            if path.hasSuffix("/workout-plan/generate") {
-                return (200, generationJSON, request.url!.host!.contains("old") ? 0.18 : 0.35)
+            if path.hasSuffix("/workout-plan/preview") {
+                return (200, previewJSON, request.url!.host!.contains("old") ? 0.18 : 0.35)
             }
             if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
             if path == "/v1/workouts" { return (200, list("generation-refresh"), 0) }

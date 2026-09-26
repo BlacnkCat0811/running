@@ -816,6 +816,47 @@ function structuredSession(
 }
 
 export function decideNextSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
+  const resolved = decidePlannedSession(input, verdict);
+  if (resolved.kind === "rest" || input.weeklyDistanceGoalKm == null) return resolved;
+  const remaining = Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
+  if ((resolved.distanceKm ?? 0) <= remaining + 0.05) return resolved;
+  if (remaining <= 0) return structuredSession("rest", "本周预算已完成", "已导入跑量达到周目标，不再追加训练。", input.zones, null, null, null, null);
+  const structure = buildSessionStructure("easy", input.zones, { targetDistanceKm: remaining });
+  const numbers = plannedDayNumbers("easy", structure, remaining, input.zones);
+  if ((numbers.distanceKm ?? 0) > remaining + 0.05) return structuredSession("rest", "保留恢复", "剩余跑量不足以安排完整课表，不追加训练。", input.zones, null, null, null, null);
+  return { ...resolved, ...numbers, kind: "easy", title: "预算内轻松跑", reason: "按本自然周剩余跑量缩减今日处方。",
+    paceSecondsPerKmLower: input.zones?.easyPaceLower ?? null, paceSecondsPerKmUpper: input.zones?.easyPaceUpper ?? null,
+    heartRateBpmLower: input.zones?.easyHrLower ?? null, heartRateBpmUpper: input.zones?.easyHrUpper ?? null };
+}
+
+function decidePlannedSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
+  const planned = input.storedWeekPlan.find(day => day.localDate === input.today);
+  // An explicit rest is never upgraded because the runner looks ready.
+  if (planned?.kind === "rest" || input.raceTarget?.date === input.today) {
+    return structuredSession("rest", input.raceTarget?.date === input.today ? "比赛日留白" : "计划休息",
+      input.raceTarget?.date === input.today ? "比赛当天不追加训练；是否参赛及比赛完成以实际记录为准。" : (planned?.reason ?? "遵循已保存的休息安排。"),
+      input.zones, null, null, null, null);
+  }
+  const fallback = decideUnplannedSession(input, verdict);
+  if (!planned || verdict.tone === "red") return fallback;
+  const quality = planned.kind === "tempo" || planned.kind === "interval";
+  if (quality && verdict.tone !== "green") return { ...fallback, reason: `原计划为${sessionTitle(planned.kind)}；${fallback.reason}` };
+  if (isTaper(input)) {
+    if (planned.kind === "long_run" || quality || (planned.distanceKm ?? 0) > (fallback.distanceKm ?? 0)) return fallback;
+  }
+  const numbers = plannedDayNumbers(planned.kind, planned.structure, planned.distanceKm, input.zones);
+  const easy = !quality;
+  return {
+    kind: planned.kind, title: sessionTitle(planned.kind), reason: planned.reason ?? "遵循已保存课表；实时恢复与负荷门控仍然生效。",
+    ...numbers,
+    paceSecondsPerKmLower: easy ? input.zones?.easyPaceLower ?? null : planned.kind === "interval" ? input.zones?.intervalPaceLower ?? null : input.zones?.thresholdPaceLower ?? null,
+    paceSecondsPerKmUpper: easy ? input.zones?.easyPaceUpper ?? null : planned.kind === "interval" ? input.zones?.intervalPaceUpper ?? null : input.zones?.thresholdPaceUpper ?? null,
+    heartRateBpmLower: easy ? input.zones?.easyHrLower ?? null : input.zones?.thresholdHrLower ?? null,
+    heartRateBpmUpper: easy ? input.zones?.easyHrUpper ?? null : input.zones?.thresholdHrUpper ?? null
+  };
+}
+
+function decideUnplannedSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
   const remainingKm =
     input.weeklyDistanceGoalKm == null ? null : Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
   const remainingDays = Math.max(1, daysInclusive(input.today, weekEnd(input.today)));
@@ -928,8 +969,25 @@ export function buildRecovery(input: CoachInput): MobileRecoveryBreakdown {
   if (parts.length === 0) {
     parts.push("还没有可用的恢复样本，恢复状态暂不可用。");
   }
+  const components = [
+    input.lastNightSleepMinutes != null && input.sleepBaselineMinutes != null
+      ? Math.min(1, Math.max(0, input.lastNightSleepMinutes / Math.max(1, input.sleepBaselineMinutes)))
+      : null,
+    input.morningHrvMs != null && input.hrvBaselineMs != null && input.hrvBaselineMs > 0
+      ? Math.min(1, Math.max(0, input.morningHrvMs / input.hrvBaselineMs))
+      : null,
+    input.restingHeartRateBpm != null && input.restingHeartRateBaselineBpm != null
+      ? Math.min(1, Math.max(0, 1 - Math.max(0, input.restingHeartRateBpm - input.restingHeartRateBaselineBpm) / 12))
+      : null
+  ].filter((value): value is number => value !== null);
+  const score = input.recoveryEvidenceDate === input.today &&
+    input.recoveryEvidenceStatus !== "stale" &&
+    input.recoveryEvidenceStatus !== "unknown" &&
+    components.length > 0
+    ? Math.round(components.reduce((sum, value) => sum + value, 0) / components.length * 100)
+    : null;
   return {
-    score: null,
+    score,
     lastNightSleepMinutes: input.lastNightSleepMinutes,
     sleepBaselineMinutes: input.sleepBaselineMinutes,
     morningHrvMs: input.morningHrvMs,

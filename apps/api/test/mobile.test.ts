@@ -17,7 +17,7 @@ import type {
 import { RaiReadStore } from "../src/data.js";
 import { DEFAULT_WEEKLY_DISTANCE_KM, MobileGoalsStore } from "../src/mobile-goals.js";
 import { buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
-import { assembleMobileWorkoutPlan, zonePrescription } from "../src/mobile-read.js";
+import { assembleMobileWorkoutPlan, recommendationAdjustmentReason, zonePrescription } from "../src/mobile-read.js";
 import { MAX_PLANNED_DISTANCE_KM } from "../src/session-structure.js";
 
 const runDate = (index: number): string =>
@@ -425,6 +425,44 @@ test("mobile goals store persists, clamps and recovers from corrupt files", () =
   }
 });
 
+test("race goals reject impossible calendar dates instead of normalizing them", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-invalid-race-date-"));
+  try {
+    const store = new MobileGoalsStore(root);
+    assert.throws(
+      () => store.write({
+        weeklyDistanceKm: 30,
+        raceTarget: { date: "2026-02-31", distance: "ten_k", targetPaceSecondsPerKm: null }
+      }),
+      /real YYYY-MM-DD date/
+    );
+    assert.equal(store.read().raceTarget, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("recommendation explainability reports same-kind distance adjustments", () => {
+  const planned = { localDate: "2026-09-25", kind: "easy" as const, distanceKm: 10, structure: null };
+  const computed: MobileNextSession = {
+    kind: "easy",
+    title: "预算内轻松跑",
+    reason: "按本自然周剩余跑量缩减今日处方。",
+    distanceKm: 5,
+    durationMinutes: 30,
+    paceSecondsPerKmLower: null,
+    paceSecondsPerKmUpper: null,
+    heartRateBpmLower: null,
+    heartRateBpmUpper: null,
+    structure: null
+  };
+  assert.equal(recommendationAdjustmentReason(planned, computed), computed.reason);
+  assert.equal(
+    recommendationAdjustmentReason(planned, { ...computed, distanceKm: 10 }),
+    null
+  );
+});
+
 test("recovery trends use the configured local calendar date at the day boundary", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-recovery-trends-"));
   const databasePath = join(root, "rai.sqlite");
@@ -769,8 +807,11 @@ test("workout plan covers today plus the rest of the window", () => {
   assert.equal(plan.planRevision, 7);
   assert.equal(plan.audit?.generatedBy, "llm");
   // 2026-09-10 falls outside the 7 day window starting 09-03
-  assert.deepEqual(plan.days.map((day) => day.localDate), ["2026-09-03", "2026-09-04", "2026-09-05"]);
-  assert.equal(plan.windowDays, 3);
+  assert.deepEqual(plan.days.map((day) => day.localDate), ["2026-09-03", "2026-09-04", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-08", "2026-09-09"]);
+  assert.equal(plan.windowDays, 7);
+  assert.equal(plan.windowStart, "2026-09-03");
+  assert.equal(plan.windowEnd, "2026-09-09");
+  assert.ok(plan.days.slice(3).every(day => day.kind === "rest" && !day.executable && day.structure === null));
   assert.equal(plan.days.every((day) => day.source === "llm"), true);
 });
 
@@ -786,6 +827,11 @@ test("workout plan re-measures every day from its own structure", () => {
   });
 
   for (const day of plan.days) {
+    if (day.title === "未生成") {
+      assert.equal(day.executable, false);
+      assert.equal(day.structure, null);
+      continue;
+    }
     assert.ok(day.structure, `${day.localDate} 应当有结构`);
     assert.equal(day.executable, true);
     assert.ok((day.distanceKm ?? 0) > 0);

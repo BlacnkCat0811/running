@@ -12,22 +12,27 @@ struct TechLockSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let today = native.today {
+                        let session = today.lock.relockSuggested ? today.lock.candidate ?? today.nextSession : today.nextSession
                         TechSectionHeader(title: "推荐课程")
                         TechPanel {
                             TechAdaptiveStack {
                                 TechRunnerIcon()
-                                Text(today.nextSession.title).font(.headline)
+                                Text(session.title).font(.headline)
                                 Spacer()
-                                Text(nativeKilometers(today.nextSession.distanceKm)).font(.headline.monospacedDigit())
+                                Text(nativeKilometers(session.distanceKm)).font(.headline.monospacedDigit())
                             }
                         }
                         TechSectionHeader(title: "推荐原因")
-                        Text(today.verdict.reason).font(.subheadline).foregroundStyle(TechColor.muted)
+                        Text(session.reason).font(.subheadline).foregroundStyle(TechColor.muted)
+                        if today.lock.relockSuggested {
+                            Text("原锁定：\(today.nextSession.title) → 新建议：\(session.title)。确认后请重新同步手表。")
+                                .font(.footnote).foregroundStyle(TechColor.coral)
+                        }
                         TechPanel {
                             TechSectionHeader(title: "课程目标")
                             TechMetricGrid(minimum: 140) {
-                                techMetricCaption("目标配速", value: techPaceRange(today.nextSession.paceSecondsPerKmLower, today.nextSession.paceSecondsPerKmUpper))
-                                techMetricCaption("预计用时", value: today.nextSession.durationMinutes.map { nativeNumber($0, digits: 0) + " min" } ?? "待评估")
+                                techMetricCaption("目标配速", value: techPaceRange(session.paceSecondsPerKmLower, session.paceSecondsPerKmUpper))
+                                techMetricCaption("预计用时", value: session.durationMinutes.map { nativeNumber($0, digits: 0) + " min" } ?? "待评估")
                             }
                         }
                         // 只有真正失败的刷新才挡住锁定。没有今天的恢复记录不再是理由：
@@ -40,11 +45,11 @@ struct TechLockSheet: View {
                             Label(failure, systemImage: "exclamationmark.circle")
                                 .font(.footnote).foregroundStyle(TechColor.coral)
                         }
-                        TechPrimaryButton(title: today.lock.present ? "今日安排已锁定" : "锁定课程",
+                        TechPrimaryButton(title: today.lock.relockSuggested ? "按最新建议重新锁定" : today.lock.present ? "今日安排已锁定" : "锁定课程",
                                           systemName: "lock", isBusy: native.isLockingSession,
-                                          isDisabled: native.isOffline || today.sync.status == "failed" || today.lock.present) {
+                                          isDisabled: native.isOffline || today.sync.status == "failed" || (today.lock.present && !today.lock.relockSuggested) || native.isPlanBusy) {
                             Task {
-                                if await native.lockNextSession() { dismiss() }
+                                if await native.lockNextSession(relock: today.lock.relockSuggested) { dismiss() }
                                 else { failure = native.errorMessage ?? "锁定未完成，请刷新后重试。" }
                             }
                         }

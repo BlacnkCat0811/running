@@ -3,7 +3,7 @@ import type { MobileGoalsResponse, MobilePlanAudit, MobilePlannedDay, MobileToda
 import type { CoachZonePrescription } from "./mobile-coach.js";
 import { createPlanModelClient, llmConfigFromEnv, type PlanModelClient } from "./weekly-plan-llm.js";
 import { buildWeeklyPlanPrompt, WEEKLY_PLAN_DAYS, WEEKLY_PLAN_PROMPT_VERSION } from "./weekly-plan-prompt.js";
-import { buildFallbackWeekPlan, validateWeeklyPlan } from "./weekly-plan-validate.js";
+import { applyRacePlanPolicy, buildFallbackWeekPlan, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
 
 export interface WeeklyPlanGenerationResult {
   days: MobilePlannedDay[];
@@ -25,6 +25,16 @@ export function weeklyPlanDates(today: string, days: number = WEEKLY_PLAN_DAYS):
 }
 
 const structureKey = (day: MobilePlannedDay): string => (day.structure ? JSON.stringify(day.structure) : "");
+
+/** Historical prescriptions are retained in the revision journal, not accumulated forever in the editor. */
+export function mergePlanWindow(previous: MobilePlannedDay[], next: MobilePlannedDay[], today: string): MobilePlannedDay[] {
+  const monday = new Date(`${today}T00:00:00Z`);
+  monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+  const start = monday.toISOString().slice(0, 10);
+  const replacementDates = new Set(next.map(day => day.localDate));
+  return [...previous.filter(day => day.localDate >= start && !replacementDates.has(day.localDate)), ...next]
+    .sort((a, b) => a.localDate.localeCompare(b.localDate));
+}
 
 /**
  * Dates whose stored prescription a fresh plan would replace.
@@ -80,6 +90,7 @@ export async function generateWeeklyPlan(args: {
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const warnings: string[] = [];
   const injuryFlagCodes = args.today.injuryFlags.map((flag) => flag.code);
+  const finish = (proposed: MobilePlannedDay[]) => constrainUpcomingPlan(proposed, args, warnings);
 
   const client =
     args.client === undefined
@@ -110,6 +121,7 @@ export async function generateWeeklyPlan(args: {
       const raw = await client.complete(prompt);
       const validated = validateWeeklyPlan({
         raw,
+        raceTarget: args.goals.raceTarget,
         allowedDates,
         prescription: args.prescription,
         weeklyDistanceKm: args.goals.weeklyDistanceKm,
@@ -120,7 +132,7 @@ export async function generateWeeklyPlan(args: {
       });
       if (validated.days.length > 0) {
         return {
-          days: validated.days,
+          days: finish(validated.days),
           audit: {
             generatedBy: "llm",
             model: `${client.provider}:${client.model}`,
@@ -156,10 +168,39 @@ export async function generateWeeklyPlan(args: {
     previousWeekDistanceKm: args.previousWeekDistanceKm ?? null
   });
   return {
-    days,
+    days: finish(applyRacePlanPolicy(days, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings)),
     audit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt },
     warnings,
     rejectedCount: 0,
     clampedCount: 0
   };
+}
+
+export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
+  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm">,
+  warnings: string[] = []): MobilePlannedDay[] {
+  const allowedDates = weeklyPlanDates(args.today.today.localDate);
+  const injuryFlagCodes = args.today.injuryFlags.map(flag => flag.code);
+
+    const safe = applyRacePlanPolicy(proposed, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings);
+    const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
+      { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
+    const groups = [complete.filter(day => day.localDate <= args.today.week.periodEnd), complete.filter(day => day.localDate > args.today.week.periodEnd)];
+    return groups.flatMap((days, index) => {
+      if (!days.length) return [];
+      const protectedToday = index === 0 && (args.today.today.workoutCount > 0 || args.today.lock.present);
+      const adjustable = days.filter(day => !(protectedToday && day.localDate === args.today.today.localDate));
+      const reserved = protectedToday && args.today.today.workoutCount === 0 ? args.today.nextSession.distanceKm ?? 0 : 0;
+      const remainingKm = Math.max(0, weeklyPlanVolumeCeiling(args.goals.weeklyDistanceKm, index === 0 ? args.previousWeekDistanceKm : null) - (index === 0 ? args.today.week.distanceKm + reserved : 0));
+      if (remainingKm <= 0) {
+        warnings.push("自然周剩余预算已用完，未完成日期不再追加训练。");
+        return adjustable.map(day => ({ ...day, kind: "rest" as const, distanceKm: null, structure: null, reason: "本自然周预算已用完。" }));
+      }
+      const result = validateWeeklyPlan({ raw: JSON.stringify({ days: adjustable }), allowedDates, prescription: args.prescription,
+        weeklyDistanceKm: remainingKm, qualitySessionCap: Math.max(0, args.goals.qualitySessionCap - (index === 0 ? args.today.weekStructure.qualitySessionCount : 0)),
+        easyDurationFloorFraction: args.goals.easyDurationFloorFraction, injuryFlagCodes });
+      warnings.push(...result.rejected, ...result.clamped);
+      return result.days;
+    });
+
 }

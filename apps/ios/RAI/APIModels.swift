@@ -192,6 +192,7 @@ struct MobileRecoveryBreakdown: Codable {
         case "recovered", "recovered_phys": return "恢复良好"
         case "reduced": return "恢复不足"
         case "depleted": return "需要休息"
+        case .some: return "未识别状态"
         default:
             let hasSamples = lastNightSleepMinutes != nil || morningHrvMs != nil || restingHeartRateBpm != nil
             return hasSamples ? "基线不足" : "暂无数据"
@@ -276,6 +277,7 @@ struct MobileLockedSession: Codable {
 }
 
 struct MobileLockState: Codable {
+    var candidate: MobileNextSession? = nil
     let present: Bool
     let relockSuggested: Bool
     let lockedAt: String?
@@ -319,6 +321,10 @@ struct MobileRecoveryAssessment: Codable {
 /// 今天这条建议是怎么来的。`recoveryAdjustment` 区分"没查"与"查了并否决"——
 /// 两者都不是对跑者的批准。
 struct MobileRecommendation: Codable {
+    var planRevision: Int? = nil
+    var plannedKind: String? = nil
+    var effectiveKind: String? = nil
+    var adjustmentReason: String? = nil
     let basis: String
     let recoveryAdjustment: String
     let uncertaintyReasons: [String]
@@ -326,6 +332,7 @@ struct MobileRecommendation: Codable {
 }
 
 struct MobileTodayResponse: Codable {
+    var recentPlanExecution: [MobilePlanExecutionDay]? = nil
     let generatedAt: String
     let timezone: String
     let latestDataDate: String?
@@ -360,19 +367,35 @@ struct MobileTodayResponse: Codable {
 // The body metrics page reuses existing physiology, zone and training
 // statistics endpoints. These model only fields rendered by the native page.
 struct NativePredictionResponse: Codable {
+    let reportVersion: String?
+    let generatedAt: String?
     let inputs: NativePredictionInputs
+    let modelSelection: NativePredictionModelSelection?
+    let guidanceCodes: [String]?
     let snapshot: NativePredictionSnapshot
+    let explainability: NativePredictionExplainability?
 }
 
 struct NativePredictionInputs: Codable {
     let recoveryReadiness: Double?
+    let directVo2Evidence: Int?
+    let labeledPerformanceEvidence: Int?
+    let lactateThresholdSegments: Int?
+    let performanceVdotEvidence: Int?
+    let labeledRaceOutcomes: Int?
+    let readiness: [String: Double?]?
 }
 
 struct NativePredictionSnapshot: Codable {
+    let schemaVersion: String?
+    let modelVersion: String?
+    let generatedAt: String?
+    let dataThroughAt: String?
     let vo2Max: NativeVo2MaxEstimate
     let performanceVdot: NativeVdotEstimate
     let lactateThreshold: NativeLactateThresholdEstimate
     let races: [NativeRacePrediction]
+    let disclaimer: String?
 }
 
 struct NativeVo2MaxEstimate: Codable {
@@ -399,10 +422,78 @@ struct NativeRacePrediction: Codable, Identifiable {
     let predictedSeconds: Double?
     let optimisticSeconds: Double?
     let pessimisticSeconds: Double?
+    let potentialSeconds: Double?
+    let readinessAdjustmentSeconds: Double?
+    let environmentAdjustmentSeconds: Double?
+    let elevationAdjustmentSeconds: Double?
+    let fatigueAdjustmentSeconds: Double?
     let readiness: Double?
     let confidence: Double
+    let confidenceLevel: String?
+    let method: String?
+    let evidenceCodes: [String]?
 
     var id: String { distance }
+}
+
+struct NativePredictionModelSelection: Codable {
+    let biasCalibration: NativePredictionBiasCalibration?
+    let machineLearning: NativePredictionMachineLearning?
+}
+
+struct NativePredictionBiasCalibration: Codable {
+    let status: String?
+    let historicalOutcomeCount: Int?
+    let eligibleOutcomeCountByDistance: [String: Int]?
+    let appliedDistances: [String]?
+}
+
+struct NativePredictionMachineLearning: Codable {
+    let status: String?
+    let modelVersion: String?
+    let trainedExampleCount: Int?
+    let evaluatedOutcomeCount: Int?
+    let meanAbsoluteErrorImprovement: Double?
+    let activeModelRunId: String?
+    let activeModelVersion: String?
+    let featureSchemaVersion: String?
+    let artifactSha256: String?
+    let activatedAt: String?
+}
+
+struct NativePredictionExplainability: Codable {
+    let schemaVersion: String?
+    let recovery: NativeRecoveryExplainability?
+    let readiness: [String: NativeReadinessExplainability]?
+}
+
+struct NativeRecoveryExplainability: Codable {
+    let readiness: Double?
+    let status: String?
+    let source: String?
+    let asOf: String?
+    let latestObservedAt: String?
+    let coverage: String?
+}
+
+struct NativeReadinessExplainability: Codable {
+    let value: Double?
+    let status: String?
+    let evidenceCount: Int?
+    let dataThroughAt: String?
+}
+
+enum PredictionLoadState: Equatable {
+    case current(generatedAt: String?, dataThroughAt: String?)
+    case stale(lastSuccessAt: Date?, message: String)
+    case unavailable(message: String)
+}
+
+enum NativeRecoveryState: Equatable {
+    case recovered
+    case reduced
+    case depleted
+    case unknown(raw: String?)
 }
 
 struct NativeDashboardResponse: Codable {
@@ -731,6 +822,38 @@ struct MobileWeeklyPlanGenerationResponse: Codable, Equatable {
     let audit: MobilePlanAudit
     let days: [MobilePlannedDay]
     let warnings: [String]
+}
+
+struct MobilePlanExecutionDay: Codable, Identifiable {
+    let localDate: String
+    let planRevision: Int?
+    let plannedKind: String?
+    let plannedDistanceKm: Double?
+    let observedDistanceKm: Double
+    let observedWorkoutCount: Int
+    let distanceRatio: Double?
+    let status: String
+    var id: String { localDate }
+}
+
+struct MobileWeeklyPlanPreview: Codable, Identifiable {
+    var previousDays: [MobilePlannedDay]? = nil
+    let candidateId: String
+    let expiresAt: String
+    let revision: Int
+    let generatedAt: String
+    let audit: MobilePlanAudit
+    let days: [MobilePlannedDay]
+    let warnings: [String]
+    let replacedDates: [String]
+    let windowStart: String
+    let windowEnd: String
+    var id: String { candidateId }
+}
+
+struct ConfirmWeeklyPlanRequest: Encodable {
+    let candidateId: String
+    let expectedRevision: Int
 }
 
 struct GenerateWeeklyPlanRequest: Encodable {

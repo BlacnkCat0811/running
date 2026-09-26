@@ -119,6 +119,8 @@ checks += 1
 # 例外必须逐条写明理由，不允许静默漏过。
 # ---------------------------------------------------------------------------
 tech_views = pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_text()
+tech_views += pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanView.swift").read_text()
+tech_views = re.sub(r"/\*.*?\*/|//[^\n]*", "", tech_views, flags=re.S)
 
 # Weekly/body navigation lives beside sync, not at the bottom of Today.
 home_actions = pathlib.Path("apps/ios/RAI/Skins/Technology/TechSyncStatus.swift").read_text()
@@ -182,7 +184,7 @@ field_anchors = {
     "race": "data.race.",
     "injuryFlags": "summary.injuryFlags",
     "weekPlan": "ForEach(native.today?.weekPlan ?? [])",  # 用户移除本周活动内课表，计划页继续承载
-    "recentPlanExecution": "data.recentPlanExecution",
+    "recentPlanExecution": "native.today?.recentPlanExecution",
     "phase": "data.phase",
     "lock": "data.lock.",
     # 2026-09-19：时效语义拆成四件事，界面各自有落点 —— 刷新结果（`sync`）与

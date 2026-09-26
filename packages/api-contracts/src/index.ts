@@ -2,6 +2,9 @@ export type {
   PhysiologyPredictionReport as PredictionResponse,
   PhysiologyPredictionScenario as PredictionScenario,
   PhysiologyGuidanceCode,
+  PredictionExplainability,
+  PredictionReadinessExplainability,
+  PredictionRecoveryExplainability,
   PredictionEnhancementSelection,
   PredictionModelEvent,
   PredictionModelRun,
@@ -751,6 +754,8 @@ export interface MobileWorkoutPlanDay {
 }
 
 export interface MobileWorkoutPlanResponse {
+  windowStart?: string;
+  windowEnd?: string;
   generatedAt: string;
   timezone: string;
   /** Number of days returned, starting today. */
@@ -770,6 +775,15 @@ export interface MobileWeeklyPlanGenerationResponse {
   warnings: string[];
 }
 
+export interface MobileWeeklyPlanPreviewResponse extends MobileWeeklyPlanGenerationResponse {
+  previousDays?: MobilePlannedDay[];
+  candidateId: string;
+  expiresAt: string;
+  replacedDates: string[];
+  windowStart: string;
+  windowEnd: string;
+}
+
 export interface MobileLockedSession {
   localDate: string;
   session: MobileNextSession;
@@ -778,6 +792,7 @@ export interface MobileLockedSession {
 }
 
 export interface MobileLockState {
+  candidate?: MobileNextSession;
   present: boolean;
   relockSuggested: boolean;
   lockedAt: string | null;
@@ -864,6 +879,10 @@ export interface MobileRecoveryAssessment {
  * consulted — that is neither an approval nor a downgrade.
  */
 export interface MobileRecommendation {
+  planRevision?: number;
+  plannedKind?: MobileSessionKind | null;
+  effectiveKind?: MobileSessionKind;
+  adjustmentReason?: string | null;
   basis: "training_load_and_plan" | "insufficient_training_history" | "high_load";
   recoveryAdjustment: "none" | "veto" | "no_evidence";
   uncertaintyReasons: string[];

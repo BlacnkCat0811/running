@@ -366,6 +366,26 @@ func nativeStatusName(_ value: String?) -> String {
 
 /// A blank pace is intentional; malformed/out-of-range values must never become nil silently.
 enum NativeRaceGoalDraft {
+    static func kilometers(_ distance: String) -> Double {
+        switch distance { case "five_k": return 5; case "half_marathon": return 21.0975; default: return 10 }
+    }
+
+    static func finishSeconds(_ text: String) -> Double? {
+        let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":", omittingEmptySubsequences: false)
+        guard (2...3).contains(parts.count), parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
+              let last = Int(parts.last!), last < 60 else { return nil }
+        let values = parts.compactMap { Int($0) }
+        guard values.count == parts.count, values.allSatisfy({ $0 <= 999 }), parts.dropFirst().allSatisfy({ $0.count == 2 }),
+              parts.count == 2 || values[1] < 60 else { return nil }
+        let total = values.reduce(0) { $0 * 60 + $1 }
+        return total > 0 ? Double(total) : nil
+    }
+
+    static func finishText(pace: Double?, distance: String) -> String {
+        guard let pace, pace.isFinite, pace > 0 else { return "" }
+        let seconds = Int((pace * kilometers(distance)).rounded())
+        return String(format: "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
+    }
     static func paceSeconds(_ text: String) -> Double? {
         let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count == 2, parts[1].count == 2,
