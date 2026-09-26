@@ -1,0 +1,110 @@
+{
+  "databasePath": "/Users/ta/running/var/rai.sqlite",
+  "asOf": "2026-09-25T00:00:00.000Z",
+  "status": "insufficient_labeled_outcomes",
+  "evaluation": {
+    "reportVersion": "rai-prediction-walk-forward-v2",
+    "asOf": "2026-09-25T00:00:00.000Z",
+    "status": "insufficient_labeled_outcomes",
+    "labeledOutcomeCount": 0,
+    "evaluatedOutcomeCount": 0,
+    "calibrationAppliedCount": 0,
+    "rawMetrics": {
+      "sampleCount": 0,
+      "meanAbsoluteErrorSeconds": null,
+      "rootMeanSquaredErrorSeconds": null,
+      "meanAbsolutePercentageError": null,
+      "meanSignedErrorSeconds": null,
+      "intervalCoverage": null
+    },
+    "calibratedMetrics": {
+      "sampleCount": 0,
+      "meanAbsoluteErrorSeconds": null,
+      "rootMeanSquaredErrorSeconds": null,
+      "meanAbsolutePercentageError": null,
+      "meanSignedErrorSeconds": null,
+      "intervalCoverage": null
+    },
+    "machineLearningCandidate": {
+      "status": "insufficient_walk_forward_samples",
+      "trainedExampleCount": 0,
+      "evaluatedOutcomeCount": 0,
+      "meanAbsoluteErrorImprovement": null,
+      "regressesAnyDistanceByMoreThan5Percent": false,
+      "baselineMetrics": {
+        "sampleCount": 0,
+        "meanAbsoluteErrorSeconds": null,
+        "rootMeanSquaredErrorSeconds": null,
+        "meanAbsolutePercentageError": null,
+        "meanSignedErrorSeconds": null,
+        "intervalCoverage": null
+      },
+      "candidateMetrics": {
+        "sampleCount": 0,
+        "meanAbsoluteErrorSeconds": null,
+        "rootMeanSquaredErrorSeconds": null,
+        "meanAbsolutePercentageError": null,
+        "meanSignedErrorSeconds": null,
+        "intervalCoverage": null
+      }
+    },
+    "byDistance": {
+      "five_k": {
+        "raw": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "calibrated": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        }
+      },
+      "ten_k": {
+        "raw": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "calibrated": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        }
+      },
+      "half_marathon": {
+        "raw": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "calibrated": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        }
+      }
+    },
+    "rawErrors": [],
+    "calibratedErrors": []
+  }
+}
