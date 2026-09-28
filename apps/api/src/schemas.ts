@@ -1,3 +1,4 @@
+import { workoutExportQuerySchema } from "./workout-summary-export.js";
 import { MOBILE_SESSION_KINDS } from "@rai/contracts";
 
 import {
@@ -32,6 +33,7 @@ export const workoutListQuerySchema = {
   type: "object",
   additionalProperties: false,
   properties: {
+    localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     limit: { type: "string", pattern: "^[0-9]{1,3}$" },
     offset: { type: "string", pattern: "^[0-9]{1,9}$" },
     status: { type: "string", enum: ["eligible", "trial", "excluded"] },
@@ -369,6 +371,7 @@ export const overrideBodySchema = {
   additionalProperties: false,
   required: ["eligibilityOverride", "statisticsParticipation", "sessionType", "performanceProtocol", "rpe", "conditionTags", "note"],
   properties: {
+    expectedRevision: { type: "integer", minimum: 0 },
     eligibilityOverride: { anyOf: [{ type: "string", enum: ["include", "exclude"] }, { type: "null" }] },
     statisticsParticipation: { anyOf: [{ type: "string", enum: ["include", "exclude"] }, { type: "null" }] },
     sessionType: {
@@ -678,6 +681,9 @@ export const openapiDocument = {
     "/v1/data-audit": { get: operation(["Read"], "导入、canonical 与特征质量审计") },
     "/v1/diagnostics": { get: operation(["Maintenance"], "导出移除路线与健康时序的本地诊断 JSON") },
     "/v1/runtime-status": { get: operation(["Jobs"], "全局导入与重算状态") },
+    "/v1/exports/workout-summary": { get: operation(["Workouts"], "鉴权训练摘要 CSV（JSON 封装，无路线、备注或健康原始值）", {
+      parameters: Object.entries(workoutExportQuerySchema.properties).map(([name, schema]) => ({ name, in: "query", required: true, schema }))
+    }) },
     "/v1/workouts": { get: operation(["Workouts"], "分页训练列表", {
       parameters: Object.entries(workoutListQuerySchema.properties).map(([name, schema]) => ({
         name, in: "query", required: false, schema
@@ -724,6 +730,7 @@ export const openapiDocument = {
       post: operation(["Workouts"], "生成并持久化下周课表；模型不可用时回退保守模板并在 warnings 中说明", {
         // Every field is optional — the handler reads `expectedRevision` with a
         // `?.` — so the body itself is not required, unlike the other writes.
+        deprecated: true,
         requestBody: {
           required: false,
           description: "可选的期望 revision，用于并发保护",

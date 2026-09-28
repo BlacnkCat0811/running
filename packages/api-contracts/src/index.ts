@@ -336,6 +336,8 @@ export interface RecomputeJobDto {
 }
 
 export interface OverrideWorkoutInput {
+  /** Required by current clients; omission is legacy compatibility only. */
+  expectedRevision?: number;
   eligibilityOverride: "include" | "exclude" | null;
   statisticsParticipation: "include" | "exclude" | null;
   sessionType: "easy" | "steady" | "tempo" | "interval" | "long_run" | "race" | "recovery" | "unknown" | null;
@@ -1134,4 +1136,13 @@ export interface DiagnosticExportResponse {
   jobs: RecomputeJobDto[];
   issues: Array<{ severity: string; code: string; count: number }>;
   exclusionReasons: Array<{ reason: string; count: number }>;
+}
+
+/** Explicit allowlist: no coordinates, health samples, notes, identifiers or model internals. */
+export interface WorkoutSummaryExportResponse {
+  from: string;
+  through: string;
+  timezone: string;
+  count: number;
+  csv: string;
 }

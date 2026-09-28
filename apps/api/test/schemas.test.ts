@@ -9,6 +9,7 @@ import {
   importSourceBodySchema,
   mobileGoalsBodySchema,
   openapiDocument,
+  overrideBodySchema,
   predictionModelIdParamsSchema,
   predictionModelTrainBodySchema,
   recoveryTrendQuerySchema,
@@ -553,6 +554,29 @@ test("native session and race pickers exactly match their API contracts", () => 
       const close = skipBalanced(source, paren);
       assert.ok(close >= 0, name + " 的 Picker 参数无法解析");
       const args = source.slice(paren, close);
+      // Local reminder hours are not an API enum. Still pin the offered quiet-hour range.
+      if (name.endsWith("TechTrainingReminderView.swift") && args.includes('"提醒时间"')) {
+        assert.match(balancedBlock(source, source.indexOf("{", close)), /ForEach\(7\.\.\.21/);
+        continue;
+      }
+      if (name.endsWith("TechWorkoutFeedbackView.swift")) {
+        const options = balancedBlock(source, source.indexOf("{", close));
+        if (args.includes('"训练类型"')) {
+          const kinds = /ForEach\(\[([^\]]+)\]/.exec(options)?.[1];
+          assert.ok(kinds, "feedback session picker must offer the contract list");
+          const actual = [...kinds.matchAll(/"([^"]+)"/g)].map(match => match[1]).sort();
+          assert.deepEqual(actual, [...overrideBodySchema.properties.sessionType.anyOf[0].enum].sort());
+          assert.match(options, /String\?\.none/);
+          assert.match(options, /tag\(Optional\(\$0\)\)/);
+        } else {
+          assert.ok(args.includes("title, selection: selection"), "unexpected feedback picker");
+          const values = [...options.matchAll(/tag\(Optional\("([^"]+)"\)\)/g)].map(match => match[1]).sort();
+          assert.deepEqual(values, [...overrideBodySchema.properties.eligibilityOverride.anyOf[0].enum].sort());
+          assert.deepEqual(values, [...overrideBodySchema.properties.statisticsParticipation.anyOf[0].enum].sort());
+          assert.match(options, /String\?\.none/);
+        }
+        continue;
+      }
       const isRace = args.includes('"比赛距离"');
       const isInputMode = args.includes('"目标输入方式"');
       assert.ok(isRace || isInputMode || args.includes('"训练类型"'), name + " 出现未登记的 Picker，请补充对应 API 契约扫描");

@@ -166,11 +166,11 @@ import Foundation
             "a rest day says rest"
         )
         check(
-            WorkoutPlanMapper.inactiveLabel(for: flagOff, completedLocalDates: [flagOff.localDate]) == "已完成",
+            WorkoutPlanMapper.inactiveLabel(for: flagOff, completedLocalDates: [flagOff.localDate]) == "已记录训练",
             "a day already trained says so instead of showing a stale prescription"
         )
         check(
-            WorkoutPlanMapper.inactiveLabel(for: plan.days[2], completedLocalDates: [plan.days[2].localDate]) == "已完成",
+            WorkoutPlanMapper.inactiveLabel(for: plan.days[2], completedLocalDates: [plan.days[2].localDate]) == "已记录训练",
             "trained wins over rest when a stored day is both"
         )
 
@@ -398,7 +398,7 @@ import Foundation
         // A day that is already over is not offered to the scheduler. It cannot be
         // trained, and — because a past slot is pushed onto `now` — it would reach the
         // watch wearing today's date, which is the date a receipt is matched on. The
-        // panel's own sentence ("已完成的日期不会重复下发") has always promised this.
+        // panel's own sentence ("已记录训练的日期不会重复下发") has always promised this.
         let partWayThroughTheWeek = calendar.date(from: DateComponents(year: 2026, month: 9, day: 12, hour: 9, minute: 0))!
         let weekOver = calendar.date(from: DateComponents(year: 2026, month: 9, day: 20, hour: 9, minute: 0))!
         let plannedWeek = ["2026-09-11", "2026-09-12", "2026-09-13"].map { planned(localDate: $0) }
@@ -444,7 +444,7 @@ import Foundation
 
         // "Not owed" has two causes and neither implies the other: a day can be over
         // without having been trained, and today can already have been trained. The
-        // panel's sentence ("已完成的日期不会重复下发") has always stated the second.
+        // panel's sentence ("已记录训练的日期不会重复下发") has always stated the second.
         check(
             WorkoutPlanMapper.owed(
                 plannedWeek, now: partWayThroughTheWeek, timeZone: shanghai, completedLocalDates: ["2026-09-12"]
@@ -523,7 +523,7 @@ import Foundation
             "the unusable week's line is the one the panel falls back to"
         )
         check(
-            allDone.emptyOfferMessage.contains("已完成"),
+            allDone.emptyOfferMessage.contains("已记录训练"),
             "the finished week says the work is done instead of asking for a new plan"
         )
         check(
@@ -631,11 +631,11 @@ import Foundation
         // Both skins used to carry their own copy of these four branches; only the
         // colour is a skin decision.
         check(
-            WorkoutPlanMapper.weekStripStatus(completed: true, isRest: false, isToday: true) == "已完成",
+            WorkoutPlanMapper.weekStripStatus(completed: true, isRest: false, isToday: true) == "已记录训练",
             "a completed day reads as completed"
         )
         check(
-            WorkoutPlanMapper.weekStripStatus(completed: true, isRest: true, isToday: true) == "已完成",
+            WorkoutPlanMapper.weekStripStatus(completed: true, isRest: true, isToday: true) == "已记录训练",
             "completion outranks rest"
         )
         check(

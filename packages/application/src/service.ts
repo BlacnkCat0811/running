@@ -19,6 +19,7 @@ import {
 import { appNow, opaqueId } from "./utils.js";
 import {
   WorkoutNotFoundError,
+  WorkoutOverrideRevisionConflictError,
   TrainingZoneProfileValidationError,
   TrainingZoneProfileRevisionConflictError,
   type AppendWorkoutOverrideInput,
@@ -32,6 +33,7 @@ import { addDays, localDateAt } from "./utils.js";
 
 export {
   WorkoutNotFoundError,
+  WorkoutOverrideRevisionConflictError,
   TrainingZoneProfileValidationError,
   TrainingZoneProfileRevisionConflictError,
   type AppendWorkoutOverrideInput,
@@ -158,6 +160,9 @@ export class RaiApplicationService {
           "SELECT COALESCE(MAX(revision), 0) + 1 AS revision FROM workout_overrides WHERE training_session_id = ?"
         )
         .get(input.trainingSessionId) as unknown as { revision: number };
+      if (input.expectedRevision !== undefined && input.expectedRevision !== Number(revisionRow.revision) - 1) {
+        throw new WorkoutOverrideRevisionConflictError();
+      }
       const overrideId = opaqueId("workout_override");
       this.database
         .prepare(`

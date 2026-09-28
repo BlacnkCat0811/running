@@ -6,18 +6,34 @@ struct TechHomeActions: View {
     @Environment(HealthKitSync.self) private var sync
     @Environment(ServerSession.self) private var session
     @Environment(NativeAppModel.self) private var native
+    @State private var userSyncBusy = false
+    @State private var userSyncResult: String?
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             VStack(spacing: 4) {
                 Button {
                     Task {
+                        let configuration = native.feedbackScope + session.apiToken
+                        userSyncBusy = true
+                        userSyncResult = nil
                         await sync.sync(to: session.serverURL, apiToken: session.apiToken)
                         await native.refreshAll(requestHandshake: false)
+                        userSyncBusy = false
+                        guard configuration == native.feedbackScope + session.apiToken else { return }
+                        if sync.phase == "succeeded", sync.lastError == nil, !sync.hasPendingTask {
+                            userSyncResult = "健康数据检查完成。"
+                        } else if sync.phase == "cancelled" {
+                            userSyncResult = "已取消同步。"
+                        } else {
+                            userSyncResult = "更新尚未完成，可在设置查看状态。"
+                        }
+                        try? await Task.sleep(for: .seconds(4))
+                        userSyncResult = nil
                     }
                 } label: {
                     Group {
-                        if sync.isBusy { ProgressView().tint(TechColor.cyan) }
+                        if userSyncBusy { ProgressView().tint(TechColor.cyan) }
                         else { Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90").font(.system(size: 19, weight: .medium)) }
                     }
                     .foregroundStyle(TechColor.cyan).frame(width: 44, height: 44)
@@ -26,8 +42,9 @@ struct TechHomeActions: View {
                 .buttonStyle(TechPressStyle()).disabled(sync.isBusy || !session.isReachable)
                 .accessibilityLabel("同步健康数据")
                 .accessibilityValue(sync.isBusy ? techSyncPhase(sync.phase) : !session.isReachable ? "服务未连接" : "就绪")
-                Text(sync.isBusy ? "同步中" : "同步").font(.caption2).foregroundStyle(TechColor.muted)
+                Text(userSyncBusy ? "同步中" : "同步").font(.caption2).foregroundStyle(TechColor.muted)
             }
+            if let userSyncResult { Text(userSyncResult).font(.caption2).foregroundStyle(TechColor.muted).accessibilityIdentifier("sync.actionResult") }
             if let today = native.today {
                 homeLink("本周活动", symbol: "chart.bar.xaxis", id: "today.week") {
                     TechWeekOverviewView(data: today)
@@ -109,6 +126,7 @@ struct TechFreshnessSyncAction: View {
 
 struct TechSyncStatus: View {
     var showsHistory = true
+    var showsActions = true
     @Environment(HealthKitSync.self) private var sync
     private var state: TechSyncPresentation {
         .resolve(phase: sync.phase, isBusy: sync.isBusy, hasError: sync.lastError != nil,
@@ -160,7 +178,7 @@ struct TechSyncStatus: View {
                         .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.yellow)
                     Text("取消不会撤销已完成的数据导入，可在任务结束后重新同步。")
                         .font(.caption).foregroundStyle(TechColor.muted)
-                    TechSyncAction(title: "重新同步", compact: true)
+                    if showsActions { TechSyncAction(title: "重新同步", compact: true) }
                 } else if state == .pending {
                     // 有一条**没走完**的进度留在磁盘上。刻意不写成失败：用户不需要做任何事，
                     // 下一次同步会从本地已落盘的那一批接着走，不必重读 HealthKit。
@@ -173,7 +191,7 @@ struct TechSyncStatus: View {
                         .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.cyan)
                     Text(pendingDetail)
                         .font(.caption).foregroundStyle(TechColor.muted)
-                    TechSyncAction(title: "继续同步", compact: true)
+                    if showsActions { TechSyncAction(title: "继续同步", compact: true) }
                 } else if state == .busy {
                     Label(techSyncPhase(sync.phase), systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
                         .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.cyan)

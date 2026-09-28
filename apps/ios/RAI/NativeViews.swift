@@ -42,6 +42,7 @@ struct NativeRootView: View {
     @Environment(NativeAppModel.self) private var native
     @Environment(ServerSession.self) private var session
     @Environment(HealthKitSync.self) private var healthSync
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab: NativeTab = .home
 
     var body: some View {
@@ -59,18 +60,23 @@ struct NativeRootView: View {
             native.serverConfigurationChanged()
             await native.bootstrap()
         }
+        .task(id: reminderSnapshot) {
+            guard scenePhase == .active else { return }
+            await TrainingReminders.shared.reconcile(scope: native.feedbackScope, plan: native.workoutPlan,
+                completed: native.completedWeekDates, available: native.canConfirmToday)
+        }
         .onChange(of: healthSync.dataUpdatedGeneration) { _, _ in
             Task {
                 await native.refreshAll()
                 await native.refreshBodyMetrics()
             }
         }
-        .sheet(isPresented: Binding(
-            get: { native.errorMessage != nil },
-            set: { if !$0 { native.errorMessage = nil } }
-        )) {
-            TechRequestFailure(message: native.errorMessage ?? "")
-        }
+
+    }
+
+    private var reminderSnapshot: String {
+        let plan = native.workoutPlan.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        return native.feedbackScope + plan + native.completedWeekDates.sorted().joined() + String(native.canConfirmToday) + String(describing: scenePhase)
     }
 
     private var navigationContent: some View {

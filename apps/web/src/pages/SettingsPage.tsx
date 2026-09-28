@@ -1,4 +1,5 @@
 import "../pixel-layout.css";
+import { WorkoutSummaryExport } from "../components/WorkoutSummaryExport.js";
 import "../data-reference.css";
 import type {
   BackupDto,
@@ -394,6 +395,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
         </article>
       </section>
 
+      <WorkoutSummaryExport />
       <section className="panel api-token-panel">
         <div className="panel-heading">
           <div>

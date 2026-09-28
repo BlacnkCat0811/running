@@ -1597,3 +1597,39 @@ test("plan preview/confirm HTTP flow is non-mutating, idempotent and revision sa
     await removeRuntimeRoot(runtimeRoot);
   }
 });
+
+test("summary export requires token even on a public host and validates its range before reading", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-export-auth-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  const store = await RaiDatabase.open(databasePath); store.close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "export-test-token", RAI_PUBLIC_HOSTS: "127.0.0.1" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    const path = "/v1/exports/workout-summary?from=2026-09-01&through=2026-09-28";
+    assert.equal((await fetch(`${url}/v1/health`)).status, 200);
+    assert.equal((await fetch(url + path)).status, 401);
+    const response = await fetch(url + path, { headers: { authorization: "Bearer export-test-token" } });
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const body = await response.json() as { count: number; csv: string };
+    assert.equal(body.count, 0); assert.ok(body.csv.includes("训练开始时间"));
+    const invalid = await fetch(`${url}/v1/exports/workout-summary?from=2026-02-29&through=2026-03-01`, { headers: { authorization: "Bearer export-test-token" } });
+    assert.equal(invalid.status, 400);
+    const invalidDay = await fetch(`${url}/v1/workouts?localDate=2026-02-29`, { headers: { authorization: "Bearer export-test-token" } });
+    assert.equal(invalidDay.status, 400);
+    const problem = await invalidDay.json() as { code: string; message: string };
+    assert.equal(problem.code, "invalid_workout_date");
+    assert.ok(!problem.message.includes("导出"));
+    const validDay = await fetch(`${url}/v1/workouts?localDate=2026-09-28`, { headers: { authorization: "Bearer export-test-token" } });
+    assert.equal(validDay.status, 200);
+    assert.equal((await validDay.json() as { total: number }).total, 0);
+  } finally { await stopApi(child).catch(() => child.kill("SIGKILL")); await removeRuntimeRoot(runtimeRoot); }
+});

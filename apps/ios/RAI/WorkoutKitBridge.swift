@@ -49,7 +49,7 @@ enum WorkoutKitBridge {
         var expired = 0
         /// Days still ahead that `/v1/mobile/today` already reports as trained. Also
         /// not a shortfall — and re-sending one is what the panel's own sentence
-        /// ("已完成的日期不会重复下发") promises will not happen.
+        /// ("已记录训练的日期不会重复下发") promises will not happen.
         var alreadyTrained = 0
         /// The local dates that were read back from the scheduler, i.e. the days
         /// this sync can honestly claim the watch received.
@@ -105,8 +105,8 @@ enum WorkoutKitBridge {
             guard verified else {
                 return "已提交 \(attempted) 项，但系统未回读确认\(notOwedNote)。请在手表「体能训练」中确认。"
             }
-            if skipped > 0 { return "已同步 \(scheduled) 项，跳过 \(skipped) 项。" + notOwedNote }
-            return "已同步 \(scheduled) 项到「体能训练」。" + notOwedNote
+            if skipped > 0 { return "系统日程已核验 \(scheduled) 项，跳过 \(skipped) 项。请在手表上确认可见。" + notOwedNote }
+            return "系统训练日程已核验 \(scheduled) 项；请在手表「体能训练」中确认可见。" + notOwedNote
         }
 
         /// Days of the week that were prescribed but are not owed any more.
@@ -117,7 +117,7 @@ enum WorkoutKitBridge {
         private var notOwedNote: String {
             var reasons: [String] = []
             if expired > 0 { reasons.append("\(expired) 天已过去") }
-            if alreadyTrained > 0 { reasons.append("\(alreadyTrained) 天已完成") }
+            if alreadyTrained > 0 { reasons.append("\(alreadyTrained) 天已记录训练") }
             guard !reasons.isEmpty else { return "" }
             return "（" + reasons.joined(separator: "、") + "，不再排期）"
         }

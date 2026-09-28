@@ -108,3 +108,34 @@ test("an operation failure rolls back both business writes and its receipt", asy
     } finally { db.close(); }
   } finally { await queue.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test("feedback CAS is checked at execution, conflicts do not mutate, receipt replay bypasses only its own CAS", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-feedback-cas-"));
+  const main = join(root, "main.sqlite");
+  const store = await RaiDatabase.open(main);
+  store.database.exec(`
+    INSERT INTO workouts (id, activity_type, source_name, source_category, start_at, end_at, duration_seconds, metadata_json, raw_attributes_json)
+    VALUES ('workout_fixture', 'HKWorkoutActivityTypeRunning', 'fixture', 'apple_watch',
+      '2026-01-01T00:00:00Z','2026-01-01T00:30:00Z',1800,'{}','{}');
+    INSERT INTO training_sessions (id,activity_type,anchor_start_at,anchor_end_at,canonical_workout_id,status)
+    VALUES ('session_fixture','HKWorkoutActivityTypeRunning','2026-01-01T00:00:00Z','2026-01-01T00:30:00Z','workout_fixture','active');
+  `);
+  store.close();
+  const queue = new CommandQueue(root, "fixture", new TaskAdmissionScheduler(new MutationCoordinator()).owner("commands"), async command =>
+    applyMutationCommand(main, join(root, "artifacts"), command));
+  try {
+    const one = queue.enqueue({ idempotencyKey: "feedback-first", kind: "workout_override", payload: { ...override, expectedRevision: 0 } });
+    const stale = queue.enqueue({ idempotencyKey: "feedback-stale", kind: "workout_override", payload: { ...override, expectedRevision: 0, rpe: 9 } });
+    await waitFor(() => queue.get(stale.id)?.status === "failed");
+    assert.equal(queue.get(one.id)?.status, "succeeded");
+    assert.equal(queue.get(stale.id)?.error?.code, "workout_override_revision_conflict");
+    assert.deepEqual(await applyMutationCommand(main, join(root, "artifacts"), one), queue.get(one.id)?.result);
+    const db = new DatabaseSync(main);
+    try {
+      const rows = db.prepare("SELECT revision,rpe,note FROM workout_overrides").all();
+      assert.equal(rows.length, 1); assert.equal(rows[0]?.rpe, 5);
+    } finally { db.close(); }
+    const next = queue.enqueue({ idempotencyKey: "feedback-next", kind: "workout_override", payload: { ...override, expectedRevision: 1, rpe: null, note: null } });
+    await waitFor(() => queue.get(next.id)?.status === "succeeded");
+  } finally { await queue.close(); rmSync(root, { recursive: true, force: true }); }
+});

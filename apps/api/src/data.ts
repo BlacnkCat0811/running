@@ -257,6 +257,8 @@ export class RaiReadStore {
     participation?: string;
     environment?: string;
     days?: number;
+    startedFrom?: string;
+    startedBefore?: string;
     sourceGroup?: string;
     confidence?: string;
     route?: string;
@@ -268,6 +270,19 @@ export class RaiReadStore {
       limit: query.limit,
       offset: query.offset
     };
+  }
+
+  /** A single read transaction keeps export rows and their count on one active snapshot. */
+  workoutExportSnapshot(query: Parameters<RaiReadStore["workouts"]>[0]): WorkoutListResponse {
+    this.database.exec("BEGIN DEFERRED");
+    try {
+      const result = this.workouts(query);
+      this.database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   mobileToday(

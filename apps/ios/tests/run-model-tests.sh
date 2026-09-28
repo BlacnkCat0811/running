@@ -25,11 +25,12 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/NativeAppModel.swift > 
 # 归一化点 —— 编不过或改坏了，整机展示全错，没有理由让它在闸门外。
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIClient.swift \
   apps/ios/RAI/NativeFormat.swift apps/ios/RAI/WorkoutPlanMapper.swift \
-  apps/ios/RAI/CalibrationState.swift \
+  apps/ios/RAI/CalibrationState.swift apps/ios/RAI/UserDataNoticePolicy.swift \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \
   "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
 "$tmp/model-tests"
+bash apps/ios/tests/run-user-experience-tests.sh
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/Keychain.swift \
   apps/ios/tests/KeychainRegression.swift -o "$tmp/keychain-tests"
 "$tmp/keychain-tests"

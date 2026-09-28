@@ -149,8 +149,5 @@ export class ReadStoreManager {
     this.closeStore();
   }
 
-  invalidate(): void {
-    this.store?.invalidateCache();
-  }
 
 }

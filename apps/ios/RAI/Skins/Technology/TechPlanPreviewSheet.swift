@@ -11,7 +11,7 @@ struct TechPlanPreviewSheet: View {
         NavigationStack {
             List {
                 Section("未来七日 · \(preview.windowStart)–\(preview.windowEnd)") {
-                    Text("基于计划 v\(preview.revision)。仅确认后保存；不会自动发送到手表。已完成及已锁定的今天保持不变。")
+                    Text("基于计划 v\(preview.revision)。仅确认后保存；不会自动发送到手表。已记录训练及已锁定的今天保持不变。")
                     Text("替换日期：" + (preview.replacedDates.isEmpty ? "无既有处方被替换" : preview.replacedDates.joined(separator: "、")))
                         .font(.footnote)
                     Text("预览有效至 \(nativeDate(preview.expiresAt))")
@@ -75,8 +75,12 @@ struct TechPlanExecutionPanel: View {
                             .font(.footnote.weight(.semibold))
                         Text("计划 \(nativeKilometers(day.plannedDistanceKm)) · 已导入 \(nativeKilometers(day.observedDistanceKm)) · \(day.observedWorkoutCount) 次")
                             .font(.caption)
-                        Text(day.status == "observed" ? "已观测" : day.status == "pending" ? "等待训练数据，暂不判断" : "缺少计划快照，无法比较")
+                        Text(day.status == "observed" ? "已记录训练" : day.status == "pending" ? "等待训练数据，暂不判断" : "缺少计划快照，无法比较")
                             .font(.caption).foregroundStyle(TechColor.muted)
+                        NavigationLink("查看当天训练") { TechDayWorkoutsView(localDate: day.localDate) }
+                        if day.status != "observed" {
+                            NavigationLink("检查数据与同步") { TechDataSyncDetailView() }
+                        }
                     }
                 }
             }
@@ -89,7 +93,7 @@ struct TechExecutablePlanDay: View {
     var body: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
-                Text(day.executable ? "可同步" : "不下发：休息、未生成、已完成或待重新确认")
+                Text(day.executable ? "可同步" : "不下发：休息、未生成、已记录训练或待重新确认")
                 if !day.reason.isEmpty { Text(day.reason) }
                 Text("来源：\(day.source == "llm" ? "模型生成并经规则复核" : "规则模板 / 手工计划")")
                 ForEach(nativeStructureLines(day.structure)) { line in

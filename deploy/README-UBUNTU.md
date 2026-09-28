@@ -197,3 +197,15 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 同时更新 systemd unit（保留本机已有的必要定制）：`[Unit]` 段的 `StartLimitIntervalSec=300`、`StartLimitBurst=3`，以及 `[Service]` 段的 `RestartPreventExitStatus=78`，然后 `sudo systemctl daemon-reload`。仅改仓库文件不会更新已安装的 unit。
 
 迁移按**单个版本**事务提交，不是全序列事务；失败后不要假设已恢复到最初版本。自动迁移备份位于 `dirname(database)/backups`；维护 API 备份位于 `RAI_RUNTIME_ROOT/var/backups`（默认两者相同，自定义数据库路径时可能不同）。空间预检只是最低备份空间门槛，不保证迁移峰值空间足够。恢复到旧 schema 后必须同时匹配旧版应用，或重新显式迁移；不能用新 API 的拒绝策略直接启动旧库。
+
+## 用户体验版本的发布核验（2026-09-28）
+
+先发布兼容 API，再发布 Web/iOS；本次用户体验改动不新增数据库迁移。摘要导出接口 `/v1/exports/workout-summary` 即使在公开 Host 下也要求配置并携带 `RAI_API_TOKEN`，不要为解决导出失败扩大匿名读取权限。
+
+可在服务器运行 `bash deploy/check-runtime-readonly.sh` 收集只读运行证据；脚本不重启服务、不迁移、不输出令牌。它不能代替 TLS 检查、实际任务引擎核验或完整运行时恢复演练。环境变量只证明配置意图，备份文件存在也不证明能够完整恢复。
+
+如果 `RAI_PUBLIC_HOSTS` 非空，仍需单独核实健康数据和路线的匿名可见性。这轮本地代码交付没有登录服务器修改既有配置；完整发布/设备验收清单见 `deliverables/USER_EXPERIENCE_IMPLEMENTATION_2026-09-28.md`。
+
+### 运维脚本的执行边界（2026-09-28 审计修订）
+
+`deploy/check-runtime-readonly.sh` 是明确保留的**人工运维入口**，不进入自动生产门禁，也不由客户端、API 启动或部署脚本自动执行。发布负责人应在目标 Linux/systemd 服务器上运行 `bash deploy/check-runtime-readonly.sh` 并归档输出；非 Linux 环境退出 2 表示“未核验”，不是通过。自动测试仅验证脚本语法和非 Linux 的拒绝路径，不能替代生产运行、TLS/实际引擎检查或恢复演练。

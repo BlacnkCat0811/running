@@ -86,7 +86,15 @@ export interface ReplayResume {
   state: ModelCheckpointState;
 }
 
+export class WorkoutOverrideRevisionConflictError extends Error {
+  readonly statusCode = 409;
+  readonly code = "workout_override_revision_conflict";
+  constructor() { super("训练反馈已在别处更新，你的输入仍保留，请读取最新记录后再提交"); }
+}
+
 export interface AppendWorkoutOverrideInput {
+  /** Optional only for the legacy-client compatibility window. */
+  expectedRevision?: number;
   trainingSessionId: string;
   eligibilityOverride: "include" | "exclude" | null;
   statisticsParticipation?: "include" | "exclude" | null;

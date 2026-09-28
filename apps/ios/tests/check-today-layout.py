@@ -9,7 +9,13 @@ positions = [body.index(call) for call in ordered]
 assert positions == sorted(positions), "Today/recovery must lead the training cards"
 assert "TechTodayHealthTiles" not in views
 assert "TechTodayHealthTiles" not in (root / "TechIllustrations.swift").read_text()
-assert "TechSyncStatus(showsHistory: false)" in body
+assert "TechSyncStatus(" not in body, "Background sync must not add a home status card"
+assert "TechFreshnessBanner(" not in body, "Diagnostic timestamps belong in details, not home"
+assert "TechDataSyncDetailView" in views, "Health settings must link to details"
+assert "UserDataNoticePolicy.recommendationNotice" in views
+assert "!native.canConfirmToday" in views, "Stale suggestions cannot be confirmed"
+native_root = (root.parents[1] / "NativeViews.swift").read_text()
+assert "TechRequestFailure(" not in native_root, "Background refresh failure must not present a modal"
 row = views[views.index("private func trainingOverview"):views.index("private func todayHero")]
 assert "HStack(alignment: .top" in row
 assert "typeSize >= .xxxLarge" in row and "VStack" in row

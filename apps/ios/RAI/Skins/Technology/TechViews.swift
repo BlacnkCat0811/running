@@ -13,12 +13,8 @@ struct TechTodayView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
                 TechTodayHeader(date: native.today.map { nativeDay($0.today.localDate) } ?? "RUNNING INTELLIGENCE")
-                TechSyncStatus(showsHistory: false)
 
                 if let today = native.today {
-                    if native.isOffline || today.sync.status != "ok" || today.recoveryAssessment.coverage == "none" {
-                        TechFreshnessBanner(today: today, isOffline: native.isOffline, cacheDate: native.lastCacheUpdate, showsSyncAction: true)
-                    }
                     todayHero(today)
                     recoveryPanel(today)
                     trainingOverview(today)
@@ -33,9 +29,11 @@ struct TechTodayView: View {
                     TechPanel(tint: TechColor.cyan) {
                         TechEmptyState(
                             title: "尚未连接 RAI 服务",
-                            message: "请在设置中填写手机可访问的服务地址。",
+                            message: native.errorMessage ?? "请在设置中连接服务并读取 Apple 健康数据。",
                             systemName: "server.rack"
                         )
+                        NavigationLink("检查连接") { TechNativeSettingsView() }
+                        Button("重新读取") { Task { await native.refreshAll() } }
                     }
                 }
             }
@@ -332,6 +330,7 @@ struct TechTodayView: View {
                         .font(.caption.weight(.semibold).monospacedDigit())
                         .foregroundStyle(abilityDeltaColor(delta))
                 }
+                NavigationLink("记录感受 / 查看训练") { TechWorkoutDetailView(workoutId: postRun.workoutId) }
                 ForEach(postRun.details, id: \.self) { detail in
                     Text("· \(detail)")
                         .font(.caption).foregroundStyle(TechColor.muted)
@@ -346,7 +345,13 @@ struct TechTodayView: View {
             // 阶段放在这里而不是别处：`MobileDayPhase` 讲的就是"今天走到哪一步"
             // （待同步 / 晨间开放 / 已锁定 / 已训练 / 休息日完成），它决定下面这条推荐
             // 该被怎么读。做成标题的 trailing 而不是单独一行，是因为它修饰的是这条推荐。
-            TechSectionHeader(title: "今日推荐训练", trailing: techPhaseName(data.phase))
+            TechSectionHeader(title: native.canConfirmToday ? "今日推荐训练" : "训练建议参考", trailing: techPhaseName(data.phase))
+            if let notice = UserDataNoticePolicy.recommendationNotice(
+                currentDay: UserDataNoticePolicy.isCurrentDay(data.today.localDate, timezone: data.timezone),
+                available: native.isTodayAvailable) {
+                Text(notice).font(.caption).foregroundStyle(TechColor.muted)
+                Button("刷新建议") { Task { await native.refreshAll() } }
+            }
             if let planned = data.recommendation.plannedKind,
                planned != data.recommendation.effectiveKind {
                 Text("原计划：\(nativeSessionName(planned)) → 当前：\(data.nextSession.title)")
@@ -405,10 +410,11 @@ struct TechTodayView: View {
     /// 「今天没有恢复记录」曾经也挡在这里，等于把一个没戴表的夜晚变成"你不能确认
     /// 明天的课"。缺测只减少一份判断依据，不剥夺确认安排的能力。
     private func lockDisabled(_ data: MobileTodayResponse) -> Bool {
-        (data.lock.present && !data.lock.relockSuggested) || data.sync.status == "failed" || native.isOffline || native.isPlanBusy
+        (data.lock.present && !data.lock.relockSuggested) || data.sync.status == "failed" || native.isOffline || !native.canConfirmToday || native.isPlanBusy
     }
 
     private func lockNote(_ data: MobileTodayResponse) -> String? {
+        if !native.canConfirmToday { return "当前建议仅供参考，连接并刷新后才能确认。" }
         if data.lock.relockSuggested { return "今日判断已变化，请查看最新建议并重新确认；手表课表也需要更新。" }
         if data.lock.present { return "今日安排已锁定，可在训练计划中查看。" }
         if data.sync.status == "failed" { return "上次健康同步未完成，请重新同步后再锁定。" }
@@ -866,6 +872,7 @@ struct TechBodyMetricsView: View {
                                 Text(techDuration(race.predictedSeconds)).font(.title2.weight(.semibold)).monospacedDigit()
                                     .fixedSize(horizontal: false, vertical: true)
                                 Text(racePredictionText(race)).font(.caption2).foregroundStyle(TechColor.muted)
+                                Text("可信度 " + nativePercent(race.confidence)).font(.caption2).foregroundStyle(TechColor.muted)
                                 Text("准备度 " + nativePercent(race.readiness)).font(.caption).foregroundStyle(TechColor.cyan)
                                 if let fatigue = race.fatigueAdjustmentSeconds {
                                     Text("疲劳修正 \(nativeDuration(fatigue))")
@@ -1066,7 +1073,7 @@ struct TechFreshnessBanner: View {
                         Text("结果生成于 \(nativeDate(today.generatedAt))")
                         // 训练数据日期取契约顶层字段 `latestDataDate`；`coverage.latestTrainingDate`
                         // 是同一个值，不再重复渲染（覆盖明细里已有它的兄弟项）。
-                        Text("训练数据截至 \(nativeDay(today.latestDataDate ?? "未知"))")
+                        Text("最近已导入训练 \(nativeDay(today.latestDataDate ?? "未知"))")
                         Text("最近健康样本 \(nativeDate(today.coverage.latestHealthSampleAt).isEmpty ? "暂无" : nativeDate(today.coverage.latestHealthSampleAt))")
                         Text("睡眠记录 \(techCoverageStateName(today.coverage.sleep.state))· 夜间 HRV \(techCoverageStateName(today.coverage.hrv.state))· 静息心率 \(techCoverageStateName(today.coverage.restingHeartRate.state))")
                         Text("今日恢复监测 \(techRecoveryCoverageName(today.recoveryAssessment.coverage))· \(techRecoveryAssessmentName(today.recoveryAssessment.assessment))")
@@ -1127,6 +1134,10 @@ struct TechWorkoutsView: View {
                 TechPageHeader(title: "训练", eyebrow: "KEEP GOING") {
                     TechBadge(title: "共 \(native.workoutTotal) 次", color: TechColor.cyan, fill: TechColor.paleCyan)
                 }
+                if let error = native.workoutListError {
+                    Text(error).font(.footnote).foregroundStyle(TechColor.coral)
+                }
+                NavigationLink("找不到刚完成的训练？") { TechDataSyncDetailView() }
                 TechFilterChips(
                     items: filters.map { (title: $0.0, value: $0.1 ?? "all") },
                     selection: selectedFilter
@@ -1247,6 +1258,7 @@ struct TechWorkoutDetailView: View {
     @Environment(NativeAppModel.self) private var native
     let workoutId: String
     @State private var selectedMetric = "heartRate"
+    @State private var feedbackDetail: WorkoutDetailResponse?
 
     private let metricItems = [
         ("心率", "heartRate"),
@@ -1268,6 +1280,11 @@ struct TechWorkoutDetailView: View {
                     }
                     detailHeader(detail.workout)
                     detailOverview(detail.workout)
+                    Button("记录感受 / 编辑训练") { feedbackDetail = detail }
+                        .frame(minHeight: 44).accessibilityIdentifier("workout.feedback")
+                    ShareLink(item: "训练摘要：\(nativeSessionName(detail.workout.sessionType)) · \(nativeKilometers(detail.workout.distanceKm)) · \(techDuration(detail.workout.durationSeconds))") {
+                        Label("分享无路线摘要", systemImage: "square.and.arrow.up")
+                    }
                     if !detail.route.isEmpty { routePanel(detail.route) }
                     DisclosureGroup { detailMetrics(detail.workout) } label: { Text("全部训练指标").frame(minHeight: 44) }
                         .font(.subheadline).tint(TechColor.cyan)
@@ -1306,6 +1323,7 @@ struct TechWorkoutDetailView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(TechColor.background, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .sheet(item: $feedbackDetail) { TechWorkoutFeedbackView(detail: $0) }
         .task(id: workoutId) { await native.loadWorkout(id: workoutId) }
         .refreshable { await native.loadWorkout(id: workoutId) }
     }
@@ -1864,12 +1882,16 @@ struct TechNativeSettingsView: View {
                     cachePanel
                     versionPanel
                 }
+                settingsLink("训练提醒", subtitle: "可选 · 默认关闭", icon: "bell", tint: TechColor.cyan) {
+                    TechTrainingReminderView()
+                }
+                settingsLink("导出训练摘要", subtitle: "不含路线与健康原始数据", icon: "square.and.arrow.up", tint: TechColor.cyan) {
+                    TechWorkoutExportView()
+                }
                 TechSectionHeader(title: "应用信息")
                 settingsLink("关于 RAI", subtitle: "跑步数据分析与建议", icon: "waveform.path", tint: TechColor.leaf) {
                     versionPanel
                 }
-                TechSyncAction()
-                TechSyncStatus()
             }
             .padding(.horizontal, TechMetrics.pageHorizontal)
             .padding(.top, TechMetrics.pageVertical)
@@ -2032,8 +2054,9 @@ struct TechNativeSettingsView: View {
                     }
                 }.accessibilityIdentifier("health.sync")
             }
+            NavigationLink("数据与同步详情") { TechDataSyncDetailView() }
             TechPanel(fill: TechColor.blue.opacity(0.08)) {
-                Label("同步时保持应用打开，避免同步中断。", systemImage: "info.circle")
+                Label("后台会尝试继续同步，也可在此查看进度。", systemImage: "info.circle")
                     .font(.footnote).foregroundStyle(TechColor.muted)
             }
             Button("打开健康权限") {

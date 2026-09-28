@@ -47,7 +47,7 @@ struct TechLockSheet: View {
                         }
                         TechPrimaryButton(title: today.lock.relockSuggested ? "按最新建议重新锁定" : today.lock.present ? "今日安排已锁定" : "锁定课程",
                                           systemName: "lock", isBusy: native.isLockingSession,
-                                          isDisabled: native.isOffline || today.sync.status == "failed" || (today.lock.present && !today.lock.relockSuggested) || native.isPlanBusy) {
+                                          isDisabled: native.isOffline || !native.canConfirmToday || today.sync.status == "failed" || (today.lock.present && !today.lock.relockSuggested) || native.isPlanBusy) {
                             Task {
                                 if await native.lockNextSession(relock: today.lock.relockSuggested) { dismiss() }
                                 else { failure = native.errorMessage ?? "锁定未完成，请刷新后重试。" }

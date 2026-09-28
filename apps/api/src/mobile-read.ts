@@ -18,7 +18,7 @@ import type {
   TrainingZonesCurrentResponse,
   WorkoutListItem
 } from "@rai/api-contracts";
-import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, healthTypes, localCalendarFormatter, type DailyTrainingMetric } from "@rai/contracts";
+import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, type DailyTrainingMetric } from "@rai/contracts";
 import { SqliteRecoveryFactsReadRepository } from "@rai/storage-sqlite";
 import { classifyPhysState, countNightsBelowSleepBaseline } from "@rai/training-load";
 import { loadRaceReadiness } from "@rai/application";
@@ -62,16 +62,6 @@ const parseJson = <T>(value: unknown, fallback: T): T => {
   } catch {
     return fallback;
   }
-};
-
-const median = (values: number[]): number | null => {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((left, right) => left - right);
-  const mid = Math.floor(sorted.length / 2);
-  const value = sorted.length % 2 === 0
-    ? ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
-    : sorted[mid];
-  return value ?? null;
 };
 
 const percentile = (values: number[], p: number): number | null => {
@@ -639,65 +629,6 @@ function consecutiveQualityDays(
     else streakAlive = false;
   }
   return { consecutive, daysSinceLastRun, daysSinceLastQuality };
-}
-
-function loadSleepWindow(database: DatabaseSync, today: string): {
-  lastNight: number | null;
-  baseline: number | null;
-  nightsBelow: number;
-} {
-  const start = shanghaiInstant(shiftDate(today, -28), 18);
-  const end = shanghaiInstant(today, 14);
-  const rows = database.prepare(`
-    SELECT start_at AS startAt, end_at AS endAt, value_text AS valueText
-    FROM health_records
-    WHERE type = ? AND start_at >= ? AND start_at < ?
-  `).all(healthTypes.sleepAnalysis, start, end) as unknown as Array<{
-    startAt: string;
-    endAt: string;
-    valueText: string | null;
-  }>;
-  const byNight = new Map<string, number>();
-  for (const row of rows) {
-    if (!row.valueText?.includes("Asleep")) continue;
-    const minutes = Math.max(0, (Date.parse(row.endAt) - Date.parse(row.startAt)) / 60_000);
-    const night = localCalendarFormatter(DATABASE_TIMEZONE, "day").format(new Date(Date.parse(row.startAt) + 6 * 3600_000));
-    byNight.set(night, (byNight.get(night) ?? 0) + minutes);
-  }
-  const lastNight = byNight.get(today) ?? byNight.get(shiftDate(today, -1)) ?? null;
-  const baselineValues = [...byNight.entries()]
-    .filter(([date]) => date !== today)
-    .map(([, minutes]) => minutes);
-  const baseline = median(baselineValues);
-  const recentNights = [0, 1, 2].map((offset) => byNight.get(shiftDate(today, -offset)));
-  const nightsBelow = recentNights.filter(
-    (value) => value != null && baseline != null && value < baseline * 0.8
-  ).length;
-  return { lastNight, baseline, nightsBelow };
-}
-
-function loadMetricWindow(
-  database: DatabaseSync,
-  type: string,
-  today: string,
-  startHour: number,
-  endHour: number
-): { current: number | null; baseline: number | null } {
-  const currentStart = shanghaiInstant(today, startHour);
-  const currentEnd = shanghaiInstant(today, endHour);
-  const baselineStart = shanghaiInstant(shiftDate(today, -28), 0);
-  const current = median(metricValues(database, type, currentStart, currentEnd));
-  const baseline = median(metricValues(database, type, baselineStart, currentStart));
-  return { current, baseline };
-}
-
-function metricValues(database: DatabaseSync, type: string, start: string, end: string): number[] {
-  const rows = database.prepare(`
-    SELECT value_numeric AS value
-    FROM health_records
-    WHERE type = ? AND value_numeric IS NOT NULL AND start_at >= ? AND start_at < ?
-  `).all(type, start, end) as unknown as Array<{ value: number }>;
-  return rows.map((row) => row.value).filter((value) => Number.isFinite(value));
 }
 
 function nullable(value: unknown): number | null {

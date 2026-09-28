@@ -1099,10 +1099,10 @@ test("a demoted quality session stores a rounded, re-measured distance", () => {
 });
 
 test("the client waits longer for a generated plan than the server spends on it", () => {
-  // The generate endpoint holds the request open for the model, so "the request
-  // failed" and "no plan was written" are only the same event while the client
-  // budget stays above the server's. The two numbers live in different languages
-  // and nothing else would notice them crossing.
+  // Preview waits for model generation but never persists the business plan.
+  // Keep enough client budget to receive the candidate or fallback. Timeout
+  // ordering cannot establish whether a separate mutating request committed.
+  // These budgets live in different languages, so check both declarations.
   const raw = readFileSync(new URL("../../ios/RAI/APIClient.swift", import.meta.url), "utf8");
   // Comments stripped the way the Swift reader would: a comment that merely
   // mentions the constant must not be able to stand in for the real argument.
@@ -1139,8 +1139,8 @@ test("the client waits longer for a generated plan than the server spends on it"
   );
   assert.match(
     source,
-    /^\s*timeout:\s*Self\.generateTimeoutInterval\s*$/m,
-    "generateWeeklyPlan 必须带上这个超时，否则会退回默认的 POST 超时"
+    /func previewWeeklyPlan[\s\S]*?path: "\/v1\/mobile\/workout-plan\/preview"[\s\S]*?timeout:\s*Self\.generateTimeoutInterval/,
+    "previewWeeklyPlan 必须带上这个超时，否则会退回默认的 POST 超时"
   );
 
   // No production caller may override the default. The timing tests above

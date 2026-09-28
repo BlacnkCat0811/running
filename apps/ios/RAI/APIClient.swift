@@ -71,7 +71,7 @@ enum RaiAPIClientError: LocalizedError {
         case .invalidServerAddress:
             return "服务器地址无效，请检查地址和协议。"
         case .unauthorized:
-            return "API Token 无效或已过期，请在设置中更新。"
+            return "服务连接已失效，请在设置中重新连接。"
         case .unavailable:
             return "暂时无法连接 RAI 服务，请检查网络或服务状态。"
         case .timedOut:
@@ -85,12 +85,12 @@ enum RaiAPIClientError: LocalizedError {
 }
 
 struct RaiAPIClient {
-    /// Client budget for `POST /v1/mobile/workout-plan/generate`.
+    /// Client budget for plan preview (and the legacy generation budget guard).
     ///
-    /// Must stay strictly above the server's whole-call budget
-    /// (`DEFAULT_TOTAL_BUDGET_MS`, 50 s) so "the request failed" and "no plan was
-    /// written" remain the same event. `apps/api/test/weekly-plan.test.ts` reads
-    /// this line and fails if the two ever cross.
+    /// Must out-wait the server model budget (50 s) to receive a preview or
+    /// fallback. Preview does not persist the business plan: confirm does.
+    /// A timeout on a mutating request is NOT evidence that nothing was saved.
+    /// The cross-language budget regression keeps this greater than the server's.
     static let generateTimeoutInterval: TimeInterval = 60
 
     private let session: URLSession
@@ -135,30 +135,6 @@ struct RaiAPIClient {
     /// never competes with the goals revision lock.
     func workoutPlan(baseURL: URL, token: String) async throws -> MobileWorkoutPlanResponse {
         try await get(path: "/v1/mobile/workout-plan", baseURL: baseURL, token: token)
-    }
-
-    /// Asks the server to (re)generate the weekly plan. The model may be
-    /// unavailable — the server falls back to its heuristic template and says so
-    /// in `warnings`, so this still returns a usable week.
-    ///
-    /// The server holds this request open for as long as its model budget allows
-    /// (`DEFAULT_TOTAL_BUDGET_MS` in `weekly-plan-llm.ts`, 50 s), so the client
-    /// must out-wait it: if the client gave up first, the server would still
-    /// persist a plan the runner never saw. `generateTimeoutInterval` is asserted
-    /// against that budget by `apps/api/test/weekly-plan.test.ts`.
-    func generateWeeklyPlan(
-        _ input: GenerateWeeklyPlanRequest,
-        baseURL: URL,
-        token: String
-    ) async throws -> MobileWeeklyPlanGenerationResponse {
-        try await send(
-            path: "/v1/mobile/workout-plan/generate",
-            method: "POST",
-            body: input,
-            baseURL: baseURL,
-            token: token,
-            timeout: Self.generateTimeoutInterval
-        )
     }
 
     func previewWeeklyPlan(_ input: GenerateWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanPreview {
@@ -215,12 +191,14 @@ struct RaiAPIClient {
         token: String,
         limit: Int,
         offset: Int,
-        sessionType: String?
+        sessionType: String?,
+        localDate: String? = nil
     ) async throws -> WorkoutListResponse {
         var query: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset))
         ]
+        if let localDate { query.append(URLQueryItem(name: "localDate", value: localDate)) }
         if let sessionType {
             query.append(URLQueryItem(name: "sessionType", value: sessionType))
         }
@@ -249,6 +227,20 @@ struct RaiAPIClient {
         token: String
     ) async throws -> MobileGoalsResponse {
         try await send(path: "/v1/mobile/lock", method: "POST", body: input, baseURL: baseURL, token: token)
+    }
+
+    func submitFeedback(_ command: NativeFeedbackCommand, baseURL: URL, token: String) async throws -> NativeCommandResponse {
+        try await send(path: "/v1/commands", method: "POST", body: command, baseURL: baseURL, token: token)
+    }
+    func command(id: String, baseURL: URL, token: String) async throws -> NativeCommandResponse {
+        try await get(path: "/v1/commands/\(escapedPath(id))", baseURL: baseURL, token: token)
+    }
+    func job(id: String, baseURL: URL, token: String) async throws -> NativeJobStatus {
+        try await get(path: "/v1/jobs/\(escapedPath(id))", baseURL: baseURL, token: token)
+    }
+
+    func exportWorkouts(from: String, through: String, baseURL: URL, token: String) async throws -> NativeWorkoutExport {
+        try await get(path: "/v1/exports/workout-summary", query: [URLQueryItem(name: "from", value: from), URLQueryItem(name: "through", value: through)], baseURL: baseURL, token: token)
     }
 
     private func get<T: Decodable>(

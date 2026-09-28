@@ -39,6 +39,7 @@ export class CommandCapacityError extends Error {
 
 function commandError(error: unknown): { code: string; message: string } {
   const messages: Record<string, string> = {
+    workout_override_revision_conflict: "训练反馈已在别处更新，你的输入仍保留，请读取最新记录后再提交",
     workout_not_found: "训练已不存在，请刷新列表",
     training_zone_profile_revision_conflict: "训练分区设置已更新，请刷新后重新提交",
     invalid_training_zone_profile: "训练分区设置无效",

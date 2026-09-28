@@ -209,6 +209,8 @@ struct TechAbilityDetailView: View {
             TechPanel {
                 VStack(alignment: .leading, spacing: 9) {
                     TechSectionHeader(title: "成绩预测", trailing: "区间参考", trailingColor: TechColor.muted)
+                    Text("预测不是目标成绩，也不代表比赛承诺。区间和可信度均来自服务端，缺失时不作估计。")
+                        .font(.caption).foregroundStyle(TechColor.muted)
                     predictionLoadStateBanner
                     ForEach(races) { race in
                         TechAdaptiveStack(spacing: 8) {
@@ -222,6 +224,8 @@ struct TechAbilityDetailView: View {
                             VStack(alignment: .trailing, spacing: 3) {
                                 Text(techRaceRange(race))
                                     .font(.caption2.monospacedDigit()).foregroundStyle(TechColor.muted)
+                                Text("可信度 " + nativePercent(race.confidence))
+                                    .font(.caption2).foregroundStyle(TechColor.muted)
                                 Text("准备度 " + nativePercent(race.readiness))
                                     .font(.caption2).foregroundStyle(TechColor.cyan)
                                 if let fatigue = race.fatigueAdjustmentSeconds {

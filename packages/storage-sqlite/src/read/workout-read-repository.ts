@@ -32,6 +32,8 @@ export interface WorkoutListFilterQuery {
   participation?: string;
   environment?: string;
   days?: number;
+  startedFrom?: string;
+  startedBefore?: string;
   sourceGroup?: string;
   confidence?: string;
   route?: string;
@@ -124,6 +126,8 @@ export class SqliteWorkoutReadRepository {
   buildListFilter(query: Omit<WorkoutListFilterQuery, "limit" | "offset">): WorkoutListSqlFilter {
     const clauses: string[] = [];
     const params: Array<string | number> = [];
+    if (query.startedFrom) { clauses.push("julianday(f.workout_start_at) >= julianday(?)"); params.push(query.startedFrom); }
+    if (query.startedBefore) { clauses.push("julianday(f.workout_start_at) < julianday(?)"); params.push(query.startedBefore); }
     if (query.status) {
       clauses.push("f.eligibility_status = ?");
       params.push(query.status);

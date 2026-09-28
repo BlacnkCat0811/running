@@ -58,6 +58,9 @@ struct TechPlanView: View {
                         TechPlanExecutionPanel(days: days)
                     }
                 }
+                if let today = native.today {
+                    NavigationLink("成绩预测与依据") { TechBodyMetricsView(data: today) }
+                }
                 racePanel
                 if !editing {
                     TechPrimaryButton(title: "编辑周计划", isDisabled: native.goals == nil || native.isOffline || native.isPlanBusy) {
@@ -65,7 +68,7 @@ struct TechPlanView: View {
                         editing = true
                     }
                     if let today = native.today, !today.lock.present || today.lock.relockSuggested, today.sync.status != "failed" {
-                        TechPrimaryButton(title: today.lock.relockSuggested ? "重新确认今日安排" : "锁定今日安排", systemName: "lock", isDisabled: native.isOffline || native.isPlanBusy) {
+                        TechPrimaryButton(title: today.lock.relockSuggested ? "重新确认今日安排" : "锁定今日安排", systemName: "lock", isDisabled: native.isOffline || !native.canConfirmToday || native.isPlanBusy) {
                             showingLock = true
                         }
                     }
@@ -233,7 +236,7 @@ struct TechPlanView: View {
         // own predicate keeps the sentence and the sync in agreement, and that
         // predicate now also leaves out the days the watch is no longer owed — over,
         // or already trained — which the sentence below has always promised
-        // ("已完成的日期不会重复下发").
+        // ("已记录训练的日期不会重复下发").
         //
         // Reading the offer rather than recomputing a count is what lets the zero
         // case say *why* it is zero: a week that is finished or already run is not a
@@ -267,7 +270,7 @@ struct TechPlanView: View {
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
                 } else {
-                    Text("将把 \(schedulableCount) 天训练写入手表「体能训练」，已完成的日期不会重复下发。")
+                    Text("将把 \(schedulableCount) 天训练写入手表「体能训练」，已记录训练的日期不会重复下发。")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
                 }
@@ -385,7 +388,7 @@ struct TechPlanView: View {
                         TechExecutablePlanDay(day: day)
                     }
                 }
-                Text("已保存 v\(native.goals?.revision ?? 0) · " + (native.lastWatchRevision.map { "本次会话已核验手表 v\($0)" } ?? "本次会话尚未核验手表版本"))
+                Text("已保存 v\(native.goals?.revision ?? 0) · " + (native.lastWatchRevision.map { "本次会话已核验系统日程 v\($0)" } ?? "本次会话尚未核验系统日程"))
                     .font(.caption).foregroundStyle(TechColor.muted)
                 if native.watchNeedsUpdate {
                     Text("计划版本或有效处方已变化，请重新同步手表。").font(.caption).foregroundStyle(TechColor.coral)
@@ -685,7 +688,7 @@ private struct TechPlanDaySheet: View {
                     }
                 }
                 if let workoutId = day.completedWorkoutId {
-                    NavigationLink("查看已完成训练") { TechWorkoutDetailView(workoutId: workoutId) }
+                    NavigationLink("查看已记录训练") { TechWorkoutDetailView(workoutId: workoutId) }
                         .font(.footnote.weight(.semibold)).foregroundStyle(TechColor.cyan)
                 }
             }

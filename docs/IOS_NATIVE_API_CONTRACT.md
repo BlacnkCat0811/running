@@ -50,3 +50,29 @@
 - 解码失败映射为协议不兼容，保留诊断上下文。
 
 新增字段优先兼容扩展。Swift DTO 不复制 TypeScript 评分、恢复或预测逻辑；未知枚举按字符串保留，页面使用默认标签。
+
+## 2026-09-28 增量契约：反馈与脱敏导出
+
+### 训练反馈
+
+复用 `POST /v1/commands`，`kind: "workout_override"`，payload 为完整训练覆盖字段与 `trainingSessionId`，新版客户端另传 `expectedRevision`（尚无覆盖时为 0）。服务端在真正执行事务中检查当前 revision，不只在入队时检查。
+
+- 202/queued/running 不是保存成功；查询 `GET /v1/commands/:id` 的终态。
+- `workout_override_revision_conflict` 表示另一端已修改，必须读取新版本并由用户决定，不静默覆盖。
+- 重试同次操作使用原 idempotencyKey，保留所有未编辑字段。清空 RPE/备注时发送显式 null。
+- succeeded 表示反馈保存；`result.jobId` 指向后续分析任务，分析失败不撤销反馈保存事实。
+- 旧 `PATCH /v1/workouts/:id/override` 同样支持 expectedRevision。为了旧版兼容暂不强制，不能因此宣称旧客户端也具有冲突保护。
+
+### 按日查看训练
+
+`GET /v1/workouts?localDate=YYYY-MM-DD&limit=30&offset=0`，日期按 Asia/Shanghai 自然日解释，包含该日起点、不包含次日起点。返回既有分页 DTO，不从无记录推断漏课。
+
+### 摘要导出
+
+`GET /v1/exports/workout-summary?from=YYYY-MM-DD&through=YYYY-MM-DD`：需配置且携带 Bearer Token，公开 Host 也不允许匿名使用。
+
+返回 `{ from, through, timezone, count, csv }`；有效范围最多 366 日、最多 2000 条，否则明确返回 400。CSV 仅包含已分析训练的开始时间、类型、距离、时长、配速；无路线、备注、健康原始值或内部 ID。结束日完整包含。响应禁止缓存，用户必须先预览再显式导出。
+
+### 旧周计划生成接口
+
+原生已不再定义直接 `generate` 客户端方法，使用 preview/confirm 两阶段。服务端旧接口为兼容保留并标记 deprecated，不再作为新客户端集成入口。

@@ -119,6 +119,12 @@ test("maps active SQLite results into Web API DTOs", async () => {
     const workouts = read.workouts({ limit: 3, offset: 0 });
     assert.equal(workouts.total, 8);
     assert.equal(workouts.items.length, 3);
+    const exportDay = read.workoutExportSnapshot({ limit: 2001, offset: 0,
+      startedFrom: "2025-01-22T00:00:00+08:00", startedBefore: "2025-01-23T00:00:00+08:00" });
+    assert.equal(exportDay.total, 1);
+    assert.equal(exportDay.items[0]?.id, "api_session_7");
+    assert.equal(read.workoutExportSnapshot({ limit: 2001, offset: 0,
+      startedFrom: "2025-01-23T00:00:00+08:00", startedBefore: "2025-01-24T00:00:00+08:00" }).total, 0);
     assert.ok(workouts.items.every((item) => typeof item.stimulusType === "string"));
     const stimulusFiltered = read.workouts({
       limit: 10,

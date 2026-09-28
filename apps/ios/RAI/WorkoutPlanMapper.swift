@@ -121,7 +121,7 @@ enum WorkoutPlanMapper {
         /// whole point of telling the two apart.
         var emptyOfferMessage: String {
             isExhausted
-                ? "本周的训练都已完成或已过去，不需要再上表。"
+                ? "本周日期均已记录训练或已过去，不需要再上表。"
                 : Self.unusableWeekMessage
         }
     }
@@ -200,7 +200,7 @@ enum WorkoutPlanMapper {
     ///
     /// Both exclusions are needed and neither implies the other — a day can be over
     /// without having been trained, and today can already have been trained. This is
-    /// the rule the panel has always stated in words ("已完成的日期不会重复下发");
+    /// the rule the panel has always stated in words ("已记录训练的日期不会重复下发");
     /// `completedLocalDates` comes from `/v1/mobile/today`, which is the only side
     /// that knows a day was actually run.
     static func owed(
@@ -351,7 +351,7 @@ enum WorkoutPlanMapper {
     /// is a skin decision. Kept here, next to the other week/day judgment, so the
     /// off-device regression can pin it.
     static func weekStripStatus(completed: Bool, isRest: Bool, isToday: Bool) -> String {
-        if completed { return "已完成" }
+        if completed { return "已记录训练" }
         if isRest { return "休息日" }
         return isToday ? "今日安排" : "计划中"
     }
@@ -376,7 +376,7 @@ enum WorkoutPlanMapper {
     static func inactiveLabel(for day: MobileWorkoutPlanDay, completedLocalDates: Set<String>) -> String? {
         switch eligibility(for: day, completedLocalDates: completedLocalDates) {
         case .scheduled: return nil
-        case .completed: return "已完成"
+        case .completed: return "已记录训练"
         case .rest: return "休息"
         case .noPrescription: return "不可上表"
         }

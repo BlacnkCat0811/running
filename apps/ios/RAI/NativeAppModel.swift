@@ -7,6 +7,7 @@ import Observation
 final class NativeAppModel {
     let session: ServerSession
     private let api: RaiAPIClient
+    private let now: () -> Date
     private let cache = CacheStore()
 
     private(set) var handshake: RaiHandshake?
@@ -26,9 +27,15 @@ final class NativeAppModel {
     private(set) var isLoading = false
     private(set) var isRefreshing = false
     private(set) var isOffline = false
+    private(set) var isTodayAvailable = false
+    var canConfirmToday: Bool {
+        guard let today else { return false }
+        return isTodayAvailable && UserDataNoticePolicy.isCurrentDay(today.today.localDate, timezone: today.timezone, now: now())
+    }
     private(set) var lastCacheUpdate: Date?
     var errorMessage: String?
     private(set) var isLoadingWorkouts = false
+    private(set) var workoutListError: String?
     private(set) var isLoadingTrainingStatistics = false
     private(set) var isLoadingWorkout = false
     private(set) var isLoadingBodyMetrics = false
@@ -94,7 +101,8 @@ final class NativeAppModel {
     private var cacheScope: String
     private let workoutPageSize = 30
 
-    init(session: ServerSession, api: RaiAPIClient? = nil) {
+    init(session: ServerSession, api: RaiAPIClient? = nil, now: @escaping () -> Date = Date.init) {
+        self.now = now
         self.api = api ?? RaiAPIClient()
         self.session = session
         let baseURL = session.serverURL ?? URL(fileURLWithPath: "/")
@@ -112,6 +120,7 @@ final class NativeAppModel {
 
     func serverConfigurationChanged() {
         configurationID = UUID()
+        isTodayAvailable = false
         isLoading = false
         isRefreshing = false
         invalidatePlanOperations()
@@ -201,6 +210,7 @@ final class NativeAppModel {
             } catch {
                 guard isCurrent() else { return }
                 isOffline = true
+                isTodayAvailable = false
                 errorMessage = friendlyMessage(error)
                 loadCachedData()
                 return
@@ -225,9 +235,11 @@ final class NativeAppModel {
         let snapshotIsCurrent = (fetchedGoals?.revision ?? -1) >= max(minimumPlanRevision, goals?.revision ?? -1) &&
             (fetchedToday?.recommendation.planRevision == nil || fetchedToday?.recommendation.planRevision == fetchedGoals?.revision)
         if let fetchedToday, snapshotIsCurrent {
+            isTodayAvailable = true
             today = fetchedToday
             recordCache(fetchedToday, key: "today")
         } else {
+            isTodayAvailable = false
             failedPanels += 1
         }
         if let fetchedStatistics {
@@ -258,10 +270,11 @@ final class NativeAppModel {
         }
         let workoutsSucceeded = await refreshWorkouts()
         guard isCurrent() else { return }
-        // 离线的判据只认训练列表这个探针：它答了就说明服务是活的，此时哪怕四个
-        // 面板全挂，也应该是「这几项坏了」而不是「整页离线」。
-        isOffline = !workoutsSucceeded
-        session.isReachable = workoutsSucceeded
+        // Any successful panel proves service reachability. Recommendation freshness is
+        // tracked separately, so a list-only failure cannot invalidate every panel.
+        let anySucceeded = workoutsSucceeded || fetchedToday != nil || fetchedStatistics != nil || fetchedTrends != nil || fetchedGoals != nil
+        isOffline = !anySucceeded
+        session.isReachable = anySucceeded
         if failedPanels > 0 {
             // 刻意不在这里 `loadCachedData()`：那会把刚刚成功的那几项也推回旧值，
             // 等于用一次部分失败抹掉一次部分成功。首启的空态由 `bootstrap()`
@@ -281,6 +294,7 @@ final class NativeAppModel {
         let token = session.apiToken
         let filter = workoutSessionType
         let key = workoutsCacheKey
+        workoutListError = nil
         isLoadingWorkouts = true
         defer { if workoutRequestID == requestID { isLoadingWorkouts = false } }
         do {
@@ -300,7 +314,8 @@ final class NativeAppModel {
                   baseURL == session.serverURL, token == session.apiToken,
                   !Task.isCancelled else { return false }
             isOffline = true
-            errorMessage = friendlyMessage(error)
+            workoutListError = friendlyMessage(error)
+            errorMessage = workoutListError
             loadCachedWorkouts()
             return false
         }
@@ -317,6 +332,7 @@ final class NativeAppModel {
         let key = workoutsCacheKey
         let filter = workoutSessionType
         let nextOffset = workouts.count
+        workoutListError = nil
         isLoadingWorkouts = true
         defer { if workoutRequestID == requestID { isLoadingWorkouts = false } }
         do {
@@ -339,7 +355,8 @@ final class NativeAppModel {
                   baseURL == session.serverURL, token == session.apiToken,
                   !Task.isCancelled else { return }
             isOffline = true
-            errorMessage = friendlyMessage(error)
+            workoutListError = friendlyMessage(error)
+            errorMessage = workoutListError
         }
     }
 
@@ -561,7 +578,7 @@ final class NativeAppModel {
     }
 
     func lockNextSession(relock: Bool = false) async -> Bool {
-        guard !isPlanBusy, !isOffline,
+        guard !isPlanBusy, !isOffline, canConfirmToday,
               let baseURL = session.serverURL, let current = today else { return false }
         let requestID = UUID()
         lockRequestID = requestID
@@ -637,9 +654,9 @@ final class NativeAppModel {
         }
     }
 
-    /// Replaces the stored week with a freshly generated one. The server falls
-    /// back to its heuristic template when the model is unavailable, so this
-    /// always leaves a usable week behind — the message says which one it was.
+    /// Requests a preview, optionally generated by the server's fallback template.
+    /// Only confirmPlanPreview persists it; creating or cancelling a preview
+    /// leaves the runner's stored week unchanged.
     @discardableResult
     func regenerateWeeklyPlan() async -> Bool {
         guard !isPlanBusy, let baseURL = session.serverURL else { return false }
@@ -692,6 +709,7 @@ final class NativeAppModel {
         } catch {
             guard isCurrent() else { return false }
             errorMessage = friendlyMessage(error)
+            planMessage = friendlyMessage(error)
             if case RaiAPIClientError.server(let code, _, _) = error, code == "mobile_goals_revision_conflict" {
                 if let latest = try? await api.goals(baseURL: baseURL, token: token), isCurrent() {
                     acceptGoals(latest)
@@ -850,6 +868,7 @@ final class NativeAppModel {
 
     func clearCache() {
         configurationID = UUID()
+        isTodayAvailable = false
         isLoading = false
         isRefreshing = false
         cache.clear(scope: cacheScope)
@@ -863,6 +882,7 @@ final class NativeAppModel {
     private var workoutPlanCacheKey: String { "workout-plan" }
 
     private func loadCachedData() {
+        isTodayAvailable = false
         // 每个 key 只读一次：原先为了拿 cachedAt 又重复读了一遍，10 个 key 变成 20 次查询。
         let cachedToday = cache.read(MobileTodayResponse.self, scope: cacheScope, key: "today")
         let cachedStatistics = cache.read(MobileStatisticsResponse.self, scope: cacheScope, key: "statistics")
@@ -930,7 +950,9 @@ final class NativeAppModel {
         isLoadingWorkout = false
         isLoadingBodyMetrics = false
         workoutDetailError = nil
+        workoutListError = nil
         bodyMetricsError = nil
+        isTodayAvailable = false
         today = nil
         statistics = nil
         trends = nil
@@ -1012,8 +1034,11 @@ final class NativeAppModel {
         let coherent = newGoals?.revision == goals?.revision && (newGoals?.revision ?? -1) >= minimumPlanRevision &&
             (newToday?.recommendation.planRevision == nil || newToday?.recommendation.planRevision == newGoals?.revision)
         if let newToday, coherent {
+            isTodayAvailable = true
             today = newToday
             recordCache(newToday, key: "today")
+        } else {
+            isTodayAvailable = false
         }
         if let newPlan, newPlan.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) {
             workoutPlan = newPlan
@@ -1049,6 +1074,80 @@ final class NativeAppModel {
             }
         } else {
             errorMessage = "数据已读取，但离线缓存未能保存。请检查设备存储空间。"
+        }
+    }
+
+    var feedbackScope: String { cacheScope }
+    /// Ephemeral UI ownership, never persisted as a preferences/cache key.
+    var feedbackSessionID: String { configurationID.uuidString + cacheScope + session.apiToken }
+    private var feedbackBusy = false
+
+    func pendingFeedback(for id: String) -> NativeFeedbackCommand? {
+        cache.read(NativeFeedbackPending.self, scope: cacheScope, key: "feedback.pending." + id)?.value.command
+    }
+
+    /// Online submissions only; the journal retains the SAME command on a lost reply.
+    /// A cache eviction is still safe: expectedRevision prevents a second append.
+    func saveFeedback(_ input: NativeWorkoutFeedbackInput) async -> NativeFeedbackOutcome {
+        guard !feedbackBusy, !isOffline, let baseURL = session.serverURL else {
+            return .pending("连接后才能保存；你的输入仍保留。")
+        }
+        let scope = cacheScope
+        let token = session.apiToken
+        let configuration = configurationID
+        func isCurrent() -> Bool { scope == cacheScope && configuration == configurationID && token == session.apiToken && !Task.isCancelled }
+        let key = "feedback.pending." + input.trainingSessionId
+        let retained = pendingFeedback(for: input.trainingSessionId)
+        let command = retained ?? NativeFeedbackCommand(idempotencyKey: UUID().uuidString, payload: input)
+        guard cache.write(NativeFeedbackPending(command: command), scope: scope, key: key) != nil else {
+            return .failed("无法安全保留本次操作，请检查设备空间后重试。尚未提交。")
+        }
+        feedbackBusy = true
+        defer { feedbackBusy = false }
+        do {
+            var response: NativeCommandResponse
+            do {
+                response = try await api.submitFeedback(command, baseURL: baseURL, token: token)
+            } catch {
+                // A rejected enqueue has no business effect; allow correcting the draft.
+                if retained == nil, isCurrent(), case let RaiAPIClientError.server(_, _, status) = error, (400..<500).contains(status) {
+                    _ = cache.write(NativeFeedbackPending(command: nil), scope: scope, key: key)
+                    return .failed(friendlyMessage(error))
+                }
+                if retained == nil, isCurrent(), case RaiAPIClientError.unauthorized = error {
+                    _ = cache.write(NativeFeedbackPending(command: nil), scope: scope, key: key)
+                    return .failed(friendlyMessage(error))
+                }
+                throw error
+            }
+            guard isCurrent() else { return .pending("连接已切换，原操作结果将在原连接中查询。") }
+            for _ in 0..<20 {
+                if response.status != "queued" && response.status != "running" { break }
+                try await Task.sleep(for: .milliseconds(500))
+                guard isCurrent() else { return .pending("请回到原连接查看保存结果。") }
+                response = try await api.command(id: response.id, baseURL: baseURL, token: token)
+                guard isCurrent() else { return .pending("请回到原连接查看保存结果。") }
+            }
+            if response.status == "succeeded" {
+                _ = cache.write(NativeFeedbackPending(command: nil), scope: scope, key: key)
+                var message = "反馈已保存；分析稍后更新。"
+                if let jobId = response.result?.jobId, let job = try? await api.job(id: jobId, baseURL: baseURL, token: token) {
+                    if job.status == "succeeded" { message = "反馈已保存，分析已更新。" }
+                    else if job.status == "failed" { message = "反馈已保存，但分析更新未完成；请稍后检查。" }
+                }
+                guard isCurrent() else { return .saved("反馈已保存到原连接。") }
+                await loadWorkout(id: input.trainingSessionId)
+                guard isCurrent() else { return .saved("反馈已保存到原连接。") }
+                await refreshAll()
+                return .saved(message)
+            }
+            if response.status == "failed" || response.status == "cancelled" {
+                _ = cache.write(NativeFeedbackPending(command: nil), scope: scope, key: key)
+                return .failed(response.error?.message ?? "保存未完成，输入仍保留。")
+            }
+            return .pending("正在保存，请稍后点击检查结果；不必重复填写。")
+        } catch {
+            return .pending("暂未确认保存结果：" + friendlyMessage(error) + " 重试会查询同一次操作。")
         }
     }
 

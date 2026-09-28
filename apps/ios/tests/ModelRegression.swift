@@ -101,7 +101,8 @@ final class RequestLog: @unchecked Sendable {
         config.protocolClasses = [StubProtocol.self]
         let api = RaiAPIClient(session: URLSession(configuration: config))
         let session = ServerSession()
-        let model = NativeAppModel(session: session, api: api)
+        var modelNow = ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")!
+        let model = NativeAppModel(session: session, api: api, now: { modelNow })
         func check(_ condition: @autoclosure () -> Bool, _ name: String) {
             precondition(condition(), name)
             print("PASS: \(name)")
@@ -591,6 +592,12 @@ final class RequestLog: @unchecked Sendable {
             return (503, "{}", 0)
         }
         await seedLockState()
+        check(model.canConfirmToday, "fixture business date is confirmable under the injected clock")
+        modelNow = ISO8601DateFormatter().date(from: "2026-09-16T16:30:00Z")!
+        check(!model.canConfirmToday, "crossing Shanghai midnight revokes confirmation without changing the payload")
+        let staleLockAccepted = await model.lockNextSession()
+        check(!staleLockAccepted, "model rejects a previous-day recommendation")
+        modelNow = ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")!
         let oldLock = Task { await model.lockNextSession() }
         try await Task.sleep(for: .milliseconds(20))
         session.serverURL = URL(string: "https://rai-lock-loading-new.test")
@@ -791,6 +798,46 @@ final class RequestLog: @unchecked Sendable {
             check(calibrationNeedsAttention(status) == expected,
                   "calibration '\(status ?? "nil")' needs attention == \(expected)")
         }
+
+        // Feedback uses the real HTTP client and model. Lost acknowledgements retain the key and payload.
+        let feedbackModel = NativeAppModel(session: ServerSession(), api: api)
+        let feedbackInput = try JSONDecoder().decode(NativeWorkoutFeedbackInput.self, from: Data("""
+        {"trainingSessionId":"feedback-run","expectedRevision":0,"eligibilityOverride":"exclude","statisticsParticipation":"include",
+         "sessionType":"race","performanceProtocol":"five_k_time_trial","rpe":7,"conditionTags":["hot"],"note":"draft"}
+        """.utf8))
+        let feedbackLog = RequestLog()
+        StubProtocol.handler = { request in
+            feedbackLog.record(request)
+            return (503, "{}", 0)
+        }
+        if case .pending = await feedbackModel.saveFeedback(feedbackInput) {} else { preconditionFailure("lost reply must be pending") }
+        let retained = feedbackModel.pendingFeedback(for: "feedback-run")
+        check(retained != nil, "lost feedback reply retains durable command")
+        let firstPayload = try JSONDecoder().decode(NativeFeedbackCommand.self, from: feedbackLog.lastBody(method: "POST", path: "/v1/commands")!)
+        check(firstPayload.payload == feedbackInput, "feedback preserves all override fields")
+        StubProtocol.handler = { request in
+            feedbackLog.record(request)
+            if request.url!.path == "/v1/commands" {
+                return (200, "{\"id\":\"cmd-feedback\",\"status\":\"succeeded\",\"result\":{\"overrideId\":\"override-1\",\"jobId\":\"job-feedback\"}}", 0)
+            }
+            if request.url!.path == "/v1/jobs/job-feedback" { return (200, "{\"status\":\"failed\"}", 0) }
+            return (503, "{}", 0)
+        }
+        if case .saved(let text) = await feedbackModel.saveFeedback(feedbackInput) {
+            check(text.contains("反馈已保存") && text.contains("分析更新未完成"), "analysis failure cannot turn saved feedback into unsaved")
+        } else { preconditionFailure("receipt success must be saved") }
+        let retried = try JSONDecoder().decode(NativeFeedbackCommand.self, from: feedbackLog.lastBody(method: "POST", path: "/v1/commands")!)
+        check(retried.idempotencyKey == firstPayload.idempotencyKey, "uncertain feedback retries reuse the same key")
+        check(feedbackModel.pendingFeedback(for: "feedback-run") == nil, "successful feedback clears pending command")
+
+        let rejectedModel = NativeAppModel(session: ServerSession(), api: api)
+        StubProtocol.handler = { _ in (400, "{\"code\":\"request_error\",\"message\":\"invalid feedback\"}", 0) }
+        if case .failed = await rejectedModel.saveFeedback(feedbackInput) {} else { preconditionFailure("rejected enqueue must unlock editing") }
+        check(rejectedModel.pendingFeedback(for: "feedback-run") == nil, "rejected enqueue does not pin the form forever")
+        StubProtocol.handler = { _ in (200, "{\"id\":\"cmd-feedback\",\"status\":\"failed\",\"error\":{\"code\":\"workout_override_revision_conflict\",\"message\":\"训练反馈已在别处更新\"}}", 0) }
+        if case .failed(let text) = await rejectedModel.saveFeedback(feedbackInput) {
+            check(text.contains("别处更新"), "feedback conflict is actionable and preserves draft")
+        } else { preconditionFailure("CAS conflict cannot succeed") }
 
         print("All model regression checks passed.")
     }

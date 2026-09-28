@@ -42,12 +42,13 @@ export const DEFAULT_TIMEOUT_MS = 45_000;
 /**
  * Hard ceiling for the whole call, retries included.
  *
- * The generate endpoint waits on this request, so the caller's own timeout has
- * to clear this budget: if the client gave up first, the server would carry on
- * and persist a plan nobody saw. Staying under the client budget keeps "the
- * request failed" and "no plan was written" the same event.
+ * Preview waits for model generation. Its caller must out-wait the model
+ * budget to receive the candidate or fallback rather than abandon useful work.
+ * Preview never saves the business plan; persistence requires explicit confirm.
+ * A transport timeout is not proof that a mutating request did not commit
+ * (including the legacy generate endpoint).
  *
- * The only client of `POST /v1/mobile/workout-plan/generate` is the iOS app,
+ * The native client calls `POST /v1/mobile/workout-plan/preview` (non-mutating),
  * and its budget is `RaiAPIClient.generateTimeoutInterval` (60 s in
  * `apps/ios/RAI/APIClient.swift`). That is deliberately *not* the generic POST
  * default: a structured week is a long completion, so the server keeps a full

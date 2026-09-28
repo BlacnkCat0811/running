@@ -1,3 +1,5 @@
+import { workoutExportQuerySchema, workoutSummaryExport } from "./workout-summary-export.js";
+import { workoutDateWindow } from "./workout-date-window.js";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
@@ -257,6 +259,7 @@ const publicReadRoutes = new Set([
  * Read routes that keep requiring the token. See the comment above.
  */
 const tokenRequiredReadRoutes = new Set([
+  "/v1/exports/workout-summary",
   "/v1/performance",
   "/v1/commands/:id",
   "/v1/openapi.json",
@@ -881,12 +884,13 @@ app.get("/v1/runtime-status", async () => {
   };
 });
 
-app.get<{ Querystring: { limit?: string; offset?: string; status?: string; sessionType?: string; stimulusType?: string; participation?: string; environment?: string; days?: string; sourceGroup?: string; confidence?: string; route?: string } }>(
+app.get<{ Querystring: { localDate?: string; limit?: string; offset?: string; status?: string; sessionType?: string; stimulusType?: string; participation?: string; environment?: string; days?: string; sourceGroup?: string; confidence?: string; route?: string } }>(
   "/v1/workouts",
   { schema: { querystring: workoutListQuerySchema } },
   async (request) =>
     withReadStore((store) =>
       store.workouts({
+        ...(request.query.localDate ? workoutDateWindow(request.query.localDate, request.query.localDate) : {}),
         limit: Math.min(Math.max(Number(request.query.limit ?? 30), 1), 100),
         offset: Math.max(Number(request.query.offset ?? 0), 0),
         ...(request.query.status ? { status: request.query.status } : {}),
@@ -901,6 +905,16 @@ app.get<{ Querystring: { limit?: string; offset?: string; status?: string; sessi
       })
     )
 );
+
+// Never part of anonymous public reads, even when the public dashboard is enabled.
+app.get<{ Querystring: { from: string; through: string } }>("/v1/exports/workout-summary",
+  { schema: { querystring: workoutExportQuerySchema } }, async (request, reply) => {
+    if (!apiToken || request.headers.authorization !== `Bearer ${apiToken}`) {
+      return reply.code(401).send({ code: "export_auth_required", message: "请配置访问令牌并连接后导出" });
+    }
+    reply.header("Cache-Control", "no-store");
+    return withReadStore(store => workoutSummaryExport(request.query.from, request.query.through, query => store.workoutExportSnapshot(query)));
+  });
 
 app.get<{ Params: { id: string } }>("/v1/workouts/:id", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
   const detail = withReadStore((store) => store.workout(request.params.id));
@@ -966,6 +980,7 @@ app.patch<{ Params: { id: string }; Body: OverrideWorkoutInput }>(
       const service = new RaiApplicationService(store);
       const { overrideId, jobId } = service.appendWorkoutOverride({
         trainingSessionId: request.params.id,
+        ...(request.body.expectedRevision !== undefined ? { expectedRevision: request.body.expectedRevision } : {}),
         eligibilityOverride: request.body.eligibilityOverride,
         statisticsParticipation: request.body.statisticsParticipation,
         sessionType: request.body.sessionType,
@@ -1151,6 +1166,7 @@ app.post<{ Body: { candidateId: string; expectedRevision: number } }>("/v1/mobil
 
 app.post<{ Body: { expectedRevision?: number } }>(
   "/v1/mobile/workout-plan/generate",
+  // Legacy compatibility only; current clients use preview + confirm.
   { schema: { body: mobileWeeklyPlanGenerateBodySchema } },
   async (request, reply) => {
     const release = weeklyPlanGenerationGate.tryAcquire();
@@ -1161,6 +1177,7 @@ app.post<{ Body: { expectedRevision?: number } }>(
       });
     }
     try {
+      reply.header("Deprecation", "@1790553600");
       return await runWeeklyPlanGeneration(request.body?.expectedRevision);
     } catch (error) {
       if (error instanceof PlanPreviewError) return reply.code(409).send({ code: error.code, message: error.message });

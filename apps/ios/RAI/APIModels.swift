@@ -880,7 +880,8 @@ struct LockMobileSessionRequest: Encodable {
     }
 }
 
-struct WorkoutDetailResponse: Codable {
+struct WorkoutDetailResponse: Codable, Identifiable {
+    var id: String { workout.id }
     let workout: WorkoutDetail
     let dimensions: AbilityMetricSet
     let route: [RoutePoint]
@@ -1179,4 +1180,77 @@ struct HeartRateChartData {
         let total = Int(seconds.rounded())
         return String(format: "%d:%02d", total / 60, total % 60)
     }
+}
+
+struct NativeWorkoutFeedbackInput: Codable, Equatable {
+    var trainingSessionId: String
+    var expectedRevision: Int
+    var eligibilityOverride: String?
+    var statisticsParticipation: String?
+    var sessionType: String?
+    var performanceProtocol: String?
+    var rpe: Int?
+    var conditionTags: [String]
+    var note: String?
+
+    init(detail: WorkoutDetailResponse) {
+        trainingSessionId = detail.workout.id
+        expectedRevision = detail.override?.revision ?? 0
+        eligibilityOverride = detail.override?.eligibilityOverride
+        statisticsParticipation = detail.override?.statisticsParticipation
+        sessionType = detail.override?.sessionType
+        performanceProtocol = detail.override?.performanceProtocol
+        rpe = detail.override?.rpe.map(Int.init)
+        conditionTags = detail.override?.conditionTags ?? []
+        note = detail.override?.note
+    }
+    // Encode null explicitly: the override contract is a full snapshot, not a patch.
+    enum CodingKeys: String, CodingKey {
+        case trainingSessionId, expectedRevision, eligibilityOverride, statisticsParticipation,
+             sessionType, performanceProtocol, rpe, conditionTags, note
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(trainingSessionId, forKey: .trainingSessionId)
+        try c.encode(expectedRevision, forKey: .expectedRevision)
+        try c.encode(eligibilityOverride, forKey: .eligibilityOverride)
+        try c.encode(statisticsParticipation, forKey: .statisticsParticipation)
+        try c.encode(sessionType, forKey: .sessionType)
+        try c.encode(performanceProtocol, forKey: .performanceProtocol)
+        try c.encode(rpe, forKey: .rpe)
+        try c.encode(conditionTags, forKey: .conditionTags)
+        try c.encode(note, forKey: .note)
+    }
+}
+struct NativeFeedbackCommand: Codable {
+    let idempotencyKey: String
+    var kind = "workout_override"
+    let payload: NativeWorkoutFeedbackInput
+}
+struct NativeFeedbackPending: Codable {
+    var command: NativeFeedbackCommand?
+}
+struct NativeCommandResponse: Codable {
+    let id: String
+    let status: String
+    let result: NativeFeedbackResult?
+    let error: RaiAPIError?
+}
+struct NativeFeedbackResult: Codable {
+    let overrideId: String
+    let jobId: String?
+}
+struct NativeJobStatus: Codable { let status: String }
+enum NativeFeedbackOutcome {
+    case saved(String)
+    case pending(String)
+    case failed(String)
+}
+
+struct NativeWorkoutExport: Codable {
+    let from: String
+    let through: String
+    let timezone: String
+    let count: Int
+    let csv: String
 }

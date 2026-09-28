@@ -1390,7 +1390,7 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     await page.getByLabel("RPE").fill("6");
     await page.getByLabel("状态标签").fill("E2E，状态良好");
     await page.getByLabel("备注").fill("合成数据写入流程验收");
-    await page.route("**/v1/workouts/*/override", async (route) => {
+    await page.route("**/v1/commands", async (route) => {
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 500));
       await route.fulfill({
         status: 500,
@@ -1409,8 +1409,18 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     await page.keyboard.press("Escape");
     assert.equal(await page.getByRole("dialog", { name: "编辑训练覆盖" }).isVisible(), true);
     await page.getByRole("alert").filter({ hasText: "覆盖保存测试失败" }).waitFor();
-    consumeExpectedHttpFailures(runtimeErrors, 500, /\/v1\/workouts\/[^/]+\/override$/);
+    consumeExpectedHttpFailures(runtimeErrors, 500, /\/v1\/commands$/);
+    assert.equal(await page.getByLabel("备注").isEnabled(), false, "uncertain submissions keep their payload frozen");
+    await page.route("**/v1/commands", async route => {
+      await route.fulfill({ status: 400, contentType: "application/json",
+        body: JSON.stringify({ message: "反馈参数校验拒绝" }) });
+    }, { times: 1 });
+    await page.getByRole("button", { name: "检查保存结果" }).click();
+    await page.getByRole("alert").filter({ hasText: "本次请求被拒绝" }).waitFor();
+    consumeExpectedHttpFailures(runtimeErrors, 400, /\/v1\/commands$/);
     assert.equal(await page.getByLabel("备注").isEnabled(), true);
+    assert.equal(await page.getByLabel("备注").inputValue(), "合成数据写入流程验收");
+    await page.getByLabel("备注").fill("校验拒绝后修正并保存");
     await page.getByRole("button", { name: "保存并重算" }).click();
     await page
       .getByText("新模型已激活", { exact: true })
@@ -1511,7 +1521,7 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       override: { rpe: number; note: string } | null;
     };
     assert.equal(preservedDetail.override?.rpe, 6);
-    assert.equal(preservedDetail.override?.note, "合成数据写入流程验收");
+    assert.equal(preservedDetail.override?.note, "校验拒绝后修正并保存");
 
     await page.getByRole("link", { name: "设置", exact: true }).click();
     await page.getByRole("button", { name: "删除数据库" }).click();
