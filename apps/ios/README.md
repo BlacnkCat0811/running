@@ -13,7 +13,7 @@
 
 六张 4K 设计图与浏览页已于 2026-09-24 移出仓库（原因与位置见 [`design/technology-v1/README.md`](design/technology-v1/README.md) 的「仓库体积」）；生成提示词仍在 `design/technology-v1/prompts.jsonl`。
 
-这是给 iPhone 使用的 SwiftUI 原生应用。手机不运行 Node.js、评分核心或服务端 SQLite；数据和模型结果仍由已配置的 RAI API 服务负责。旧 WKWebView 文件保留为开发期回退路径，不是原生页面的验收替代品。
+这是给 iPhone 使用的 SwiftUI 原生应用。手机不运行 Node.js、评分核心或服务端 SQLite；数据和模型结果仍由已配置的 RAI API 服务负责。iOS 构建已完全走原生页面（`RootView.swift` 的 iOS 分支进入 `NativeRootView`），`AppWebView.swift` 只剩非 iOS 分支，不再是 iOS 侧的回退路径。
 
 ## 一次跑通
 
@@ -78,12 +78,12 @@ bash apps/ios/tests/run-visual-tests.sh
 ```
 
 - `run-visual-tests.sh` 自己构建 workspace 并把 App 装到 `RAI Technology Acceptance` 模拟器；临时验收服务只监听 8792–8794，且只写数据库副本。追加 `-only-testing:VisualAcceptance/VisualAcceptance/test02Workouts` 之类的参数可以只跑单个用例（注意 `-only-testing` 要用 `target/class/method` 三段式，写错会「Executed 0 tests」并假通过）。
-- `run-model-tests.sh` 现在跑七组：模型/API/DTO（含 `NativeFormat.swift` 的格式化函数，2026-09-18 起纳入）、Keychain、坐标转换（WGS-84→GCJ-02）、课表映射与回执匹配、ServerSession、健康同步取消、展示逻辑（峰谷抽样 / 同步状态优先级 / 判定图标 / 颜色对比度 / 契约字段覆盖 / 闭集枚举接线）。这些都是纯逻辑或纯数学、零依赖，CI 也会跑。其中「契约字段覆盖」会解析 `MobileTodayResponse` 的字段全集，要求每个字段都有展示锚点或写明例外的理由 —— 契约加字段而无人展示时会自己变红（2026-09-18 现状：`recentPlanExecution` 尚无展示位，该断言因此是红的，属既有缺口、未被绕过，见 `design/TECHNOLOGY_SKIN.md`）。
+- `run-model-tests.sh` 现在跑七组：模型/API/DTO（含 `NativeFormat.swift` 的格式化函数，2026-09-18 起纳入）、Keychain、坐标转换（WGS-84→GCJ-02）、课表映射与回执匹配、ServerSession、健康同步取消、展示逻辑（峰谷抽样 / 同步状态优先级 / 判定图标 / 颜色对比度 / 契约字段覆盖 / 闭集枚举接线）。这些都是纯逻辑或纯数学、零依赖，CI 也会跑。其中「契约字段覆盖」会解析 `MobileTodayResponse` 的字段全集，要求每个字段都有展示锚点或写明例外的理由 —— 契约加字段而无人展示时会自己变红（2026-09-28 实跑：**23/27 有展示锚点、4 个元数据例外**（`freshness` / `lastSyncedAt` / `recommendationRevision` / `timezone`），`recentPlanExecution` 已补展示位（`TechPlanView.swift:57-59`），脚本 `EXIT=0`）。
 - `run-coordinate-sdk-check.sh` 用高德 SDK 的 `AMapCoordinateConvert(_, .GPS)` 现场对拍本地实现（实测境内差 0.02–0.6 m、境外原样），是坐标逻辑的权威复核；因为要链接 iOS 静态框架，只能在 macOS + 模拟器上跑，不进 CI。
 - 本机 CocoaPods 1.17.0 已装在 gem 目录但没有加入 PATH（`pod: command not found`）：`export PATH="$(gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/{print $2}'):$PATH"`，或 `gem install cocoapods`。`Pods/` 不入库（`.gitignore` 已忽略，`pod install` 按 `Podfile.lock` 还原）；只有 `Podfile` / `Podfile.lock` 变动时才需要重新 `pod install`。
 - 若 `xcrun` 报 `unable to find utility "simctl"`，说明命令行工具指向 CommandLineTools：`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`（或 `sudo xcode-select -s /Applications/Xcode.app`）。
 - `.github/workflows/ci.yml` 的 `ios` job：先 `pod install`，再用 workspace 构建模拟器 target，跑 `run-model-tests.sh`，最后用 `build-for-testing` **只编译** UI 用例。不运行的原因不是懒：`run-visual-tests.sh` 的第一步是 `sqlite3 .backup var/rai.sqlite`，而 `var/` 在 `.gitignore` 里（真实健康库，含个人数据），CI 上根本没有那份夹具。「用例编译不过」（写错 API、签名对不上、语法错）这类问题交给 CI 抓；实际截图回归与用例断言仍然只在有库的本机跑。
-- **模拟器构建没有 HealthKit 能力**：`RAI.xcodeproj` 只对 device SDK 挂 `CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = RAI/RAI.entitlements`，模拟器包签名为空，HealthKit 返回 `Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement."`；`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift:293`），所以模拟器上点「重试同步」必然显示「同步未完成」，模拟器 Health 库也没有样本和 RAI 授权记录。健康同步、权限与真机路线能力只能在真机上验收，细节见 [`docs/IOS_NATIVE_RUNBOOK.md`](../../docs/IOS_NATIVE_RUNBOOK.md)。
+- **模拟器构建没有 HealthKit 能力**：`RAI.xcodeproj` 只对 device SDK 挂 `CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = RAI/RAI.entitlements`，模拟器包签名为空，HealthKit 返回 `Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement."`；`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift:1003-1026`），所以模拟器上点「重试同步」必然显示「同步未完成」，模拟器 Health 库也没有样本和 RAI 授权记录。健康同步、权限与真机路线能力只能在真机上验收，细节见 [`docs/IOS_NATIVE_RUNBOOK.md`](../../docs/IOS_NATIVE_RUNBOOK.md)。
 
 ## 这台 VMware 虚拟机要注意
 

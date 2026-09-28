@@ -233,7 +233,7 @@ packages/
   training-load/             训练负荷、训练状态与生理状态分类（training-load-config-v4）
   training-zones/            训练分区与时间线
   application/               SQLite 回放、任务队列、Run 与 active 指针、预测/分析 CLI
-  storage-sqlite/            schema/migrations（v1–v18）、repository、恢复事实、发布与备份
+  storage-sqlite/            schema/migrations（v1–v22）、repository、恢复事实、发布与备份
 apps/
   api/                       Fastify 本地 API、移动端聚合、重算 worker 与安全导入切换
   web/                       React / Vite Web（桌面工作台 + iOS 壳像素界面）
@@ -252,7 +252,7 @@ var/                          本地数据库、运行时状态与机器可读�
 apple_health_export/          Apple 原始导出，不提交
 ```
 
-iOS 调试壳说明与设计稿→API 映射见 `apps/ios/README.md` 与
+iOS 应用说明与设计稿→API 映射见 `apps/ios/README.md` 与
 `apps/ios/design/ios-app-design.html`。
 
 ## 隐私

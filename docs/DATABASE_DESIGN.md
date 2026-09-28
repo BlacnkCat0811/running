@@ -1,6 +1,6 @@
 # RAI 数据库设计
 
-> Schema 版本：v18（`packages/storage-sqlite/src/database.ts` migrations v1–v18；v11 为历史保留占位，无 SQL）
+> Schema 版本：v22（`packages/storage-sqlite/src/database.ts` migrations v1–v22；v11 为历史保留占位，无 SQL）
 > Canonical contract：`canonical-health-v2`（`packages/contracts`）
 > Feature schema：`workout-feature-v3`；Feature 配置：`feature-config-v8`（`packages/features`）
 > 评分模型配置：`rai-model-config-v4`（`packages/scoring`）

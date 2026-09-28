@@ -13,7 +13,7 @@ RAI 是单用户、本地优先的个人运动分析产品：
 Web 同时包含两套 UI：
 
 - **桌面 Web**（`src/App.tsx` + `src/pages/*`）：完整数据与模型工作台，默认路由。
-- **iOS 壳像素界面**（`src/IosMobileApp.tsx` + `src/ios/*`）：在 URL 带 `?raiShell=ios` 或 `data-shell=ios` 时启用（iOS 调试壳 WKWebView 加载即此界面）；清新像素风，与 `apps/ios/design/ios-app-design.html` 设计稿对应。
+- **iOS 壳像素界面**（`src/IosMobileApp.tsx` + `src/ios/*`）：在 URL 带 `?raiShell=ios` 时启用（`src/main.tsx:9` 据此把 `data-shell="ios"` 挂到 `<html>`）；清新像素风，与 `apps/ios/design/ios-app-design.html` 设计稿对应。**这只是 Web 侧的历史界面**：iOS 应用自 2026-09-18 起为 SwiftUI 原生（`apps/ios/RAI/RootView.swift:47-48`），不再以 WKWebView 加载它。
 
 ## 2. 页面
 

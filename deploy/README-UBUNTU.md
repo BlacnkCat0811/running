@@ -65,7 +65,7 @@ sudo certbot renew --dry-run
 
 把示例中的 `api.example.com` 换成已解析到服务器公网 IP 的域名。若暂时没有域名，可用 HTTP 公网 IP 做连通性测试；正式导入 HealthKit 数据前必须切换 HTTPS。
 
-不要把 API Token 放入 Web build 环境变量：那会把 Token 发布到 JavaScript。iOS 调试壳（WKWebView）在服务器设置中填写 HTTPS 地址与同一个 Token，由壳把 Token 注入页面与 HealthKit 同步请求。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
+不要把 API Token 放入 Web build 环境变量：那会把 Token 发布到 JavaScript。iOS 应用在首次连接页（`apps/ios/RAI/Skins/Technology/TechSetupView.swift:45-56` 的「服务地址」与「访问令牌」）填写 HTTPS 地址与同一个 Token，Token 存 Keychain，只由 App 自身的请求携带（含 HealthKit 同步请求），不注入任何页面。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
 
 ### 浏览器匿名只读（可选）
 

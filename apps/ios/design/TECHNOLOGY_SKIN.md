@@ -47,7 +47,9 @@
 
 改版今日页时移除了旧的「训练阶段 / 比赛目标 / 最近一次训练反馈」上下文面板（`HEAD:bd1ee25` 的 `TechViews.swift:382-434`），下列 5 个载荷字段因此一度**在界面上没有任何展示位**（当时像素风还在显示，所以更难被发现），且连声明都没有。2026-09-17 全部补回。这类缺陷的形态是"契约在给值、服务端在算、就是没人渲染，而所有门禁全绿"，靠人复查看不住 —— 因此同日在 `run-tech-presentation-tests.sh` 里加了一组字段覆盖断言。该断言**不手写字段清单**（初版只守这 5 个，等于"门禁宽度 < 结论宽度"：删掉 `injuryFlags` 整块照样全绿），而是从 `packages/api-contracts` 解析 `MobileTodayResponse` 的字段全集，强制「展示锚点 ∪ 显式例外 == 契约全集」：契约将来新增字段而无人给展示位时会自动变红。
 
-🔴 **该断言当前是红的**：契约在 `7427d7d feat(api): surface recent plan execution to today and the coach` 里新增了 `recentPlanExecution`，但没有任何展示位（`apps/ios` 与 `apps/web/src` 全仓 grep 零命中），该提交也没有同步门禁清单。这是**既有缺口、不是本次删除像素皮肤引入的**（`HEAD` 版本复算同样只剩 `recentPlanExecution` 未覆盖），门禁没有被绕过，也没有被塞进 `metadata_only` 蒙混 —— 修法是给它一个展示位，属于产品决策，单独处理。当前计数：**19/23 有锚点，3 个元数据例外**（`timezone` / `lastSyncedAt` / `recommendationRevision`，逐条在脚本里写明了理由），差的那 1 个就是 `recentPlanExecution`。
+🟢 **该缺口已于 2026-09-28 闭合**（历史记录保留如下）：契约在 `7427d7d feat(api): surface recent plan execution to today and the coach` 里新增了 `recentPlanExecution`，一度没有任何展示位，该提交也没有同步门禁清单；当时是**既有缺口、不是删除像素皮肤引入的**（`HEAD` 版本复算同样只剩 `recentPlanExecution` 未覆盖），门禁没有被绕过，也没有被塞进 `metadata_only` 蒙混。后续补上了展示位：`TechPlanView.swift:57-59` 渲染 `TechPlanExecutionPanel`（定义在 `TechPlanPreviewSheet.swift:64-85`），门禁把它列为 `field_anchors`（`run-tech-presentation-tests.sh:187`）。
+
+当前计数（2026-09-28 实跑，`EXIT=0`）：**23/27 有锚点，4 个元数据例外**（`freshness` / `lastSyncedAt` / `recommendationRevision` / `timezone`，逐条在脚本里写明了理由），无未覆盖字段。
 
 | 字段 | 现状展示位 |
 |---|---|
@@ -125,7 +127,7 @@ UI 验收在全新模拟器上需要先回答高德首启隐私门控，否则�
 科技皮肤整体优化（视觉令牌、自适应重排、同步反馈、返回手势、图表抽样与交互、路线与布局渲染）已完成实现与模拟器验收：
 
 - `bash apps/ios/tests/typecheck-ios.sh`：47 文件类型检查通过（`VerdictPresentation.swift` 由 45 增至 46，`TechEnumPresentation.swift` 再增至 47；该脚本按 glob 自动纳入新文件，无需手工登记）。
-- `bash apps/ios/tests/run-tech-presentation-tests.sh`：41 条展示逻辑断言 + 24 组颜色对比度检查 + 两组源码级覆盖检查通过。第一组是**契约驱动**的字段覆盖（从 `MobileTodayResponse` 解析全集，要求「锚点 ∪ 显式例外 == 全集」，当前 19/22 有锚点、3 个元数据例外；手写清单会随契约增长而静默变窄，实测删掉 `injuryFlags` 整块在新断言下 `EXIT=1`），第二组是「6 个闭集枚举映射覆盖全部契约值且展示层确实调用过它们」。两组都从源码取事实，取不到就报错而不是跳过。该脚本已挂在 `run-model-tests.sh` 里（不再需要手工发现），并刻意不加 `-O`——`-O` 下 `precondition` 仍会失败但断言名被吞成 `Illegal instruction: 4`，排障时无法定位。
+- `bash apps/ios/tests/run-tech-presentation-tests.sh`：41 条展示逻辑断言 + 24 组颜色对比度检查 + 两组源码级覆盖检查通过（**展示断言条数随代码增长，不是常量**：2026-09-28 实跑为 **52** 条；24 组颜色对与两组覆盖检查不变）。第一组是**契约驱动**的字段覆盖（从 `MobileTodayResponse` 解析全集，要求「锚点 ∪ 显式例外 == 全集」，当前 23/27 有锚点、4 个元数据例外；手写清单会随契约增长而静默变窄，实测删掉 `injuryFlags` 整块在新断言下 `EXIT=1`），第二组是「6 个闭集枚举映射覆盖全部契约值且展示层确实调用过它们」。两组都从源码取事实，取不到就报错而不是跳过。该脚本已挂在 `run-model-tests.sh` 里（不再需要手工发现），并刻意不加 `-O`——`-O` 下 `precondition` 仍会失败但断言名被吞成 `Illegal instruction: 4`，排障时无法定位。
 - `bash apps/ios/tests/run-model-tests.sh`：七组纯逻辑回归全过 —— 模型、Keychain、坐标转换、课表映射与回执匹配、ServerSession、健康同步取消、科技风展示逻辑（含上面两组源码级覆盖检查）。
 - `bash apps/ios/tests/run-visual-tests.sh`：**补完 5 个字段展示位后重跑，14/14 全部通过（0 failures / 0 unexpected，25m18s）**，证据归档在 [字段覆盖验收记录](acceptance/2026-09-17-field-coverage/README.md) —— 其中 `01-today-links.png` 直接拍到无目标态下的新比赛目标卡。此前一轮（同日 08:58）为 13/14，`test06Setup` 因测试运行器 `unexpected exit`（非断言失败）单独复跑通过；iPhone SE 3 与 iPhone 17 Pro Max 专项批次全部通过。像素皮肤用例（`pixel-settings-before-switch`、`pixel-restored`）当时继续通过，确认切换回归无色差/布局回归（这两个用例已于 2026-09-18 随像素皮肤删除，见下节）。
 
@@ -137,7 +139,7 @@ UI 验收在全新模拟器上需要先回答高德首启隐私门控，否则�
 - 恢复不足使用琥珀色，需要休息使用珊瑚色；缺值显示「无记录」，辅助功能大字号切为纵向布局。
 - 当前跑力使用 0–100 横向刻度及当前值定位点，替换首页半圆仪表；右侧改为 `chart.bar.xaxis` 小型分析图标，不复用今日训练的跑步圆环。跑力详情页半圆图、入口、校准提示及近七天变化保持不变。
 - 新组件：`RAI/Skins/Technology/TechTodayRecovery.swift`。仅修改今日页；像素皮肤于同日被整体删除（见下节），Web 不变。
-- 验证：iOS 48 文件类型检查通过（删除像素皮肤前；删除后为 43 文件通过）；新增紧凑恢复/横向跑力源码展示检查通过；现有 41 项展示逻辑检查通过。整体展示及模型回归脚本仍受已有 `recentPlanExecution` 契约展示覆盖缺口影响，未绕过门禁。
+- 验证：iOS 48 文件类型检查通过（删除像素皮肤前；删除后为 43 文件通过）；新增紧凑恢复/横向跑力源码展示检查通过；当时现有 41 项展示逻辑检查通过（2026-09-28 实跑为 52 项）。整体展示及模型回归脚本当时仍受 `recentPlanExecution` 契约展示覆盖缺口影响（该缺口已于 2026-09-28 闭合），未绕过门禁。
 - Xcode Debug Simulator 完整构建通过（含 arm64 / x86_64）；当前无已启动模拟器，本轮未执行 UI 截图验收。
 
 ### 2026-09-18 移除像素皮肤（原生端收敛为单皮肤）
@@ -150,5 +152,5 @@ UI 验收在全新模拟器上需要先回答高德首启隐私门控，否则�
 - **共享层清理**：`NativeFormat.swift` 删掉只服务像素页的 5 个函数（`nativeHeartRateZoneColor` / `nativeToneColor` / `nativeDayPhaseName` / `nativeStimulusMatchName` / `nativeRaceDistanceName`）。删完后它不再 `import SwiftUI`、不再引用 `PixelColor`，**成为纯 Foundation**，因此被 `run-model-tests.sh` 纳入编译列表 —— 此前它正因为拖进 `PixelColor` 而进不了那扇秒级闸门（`CalibrationState.swift` 的注释记录了这段历史）。
 - **UI 入口变化（用户可见）**：设置页与首次连接页的「外观皮肤」一栏、皮肤选择器、以及皮肤切换用的系统 alert 全部移除。旧安装残留的 `rai.appearance.skin` 键不再被读取，**不需要迁移**；曾经选过冰蓝科技的安装行为不变。启动外观从"跟随系统"变为固定深色。
 - **刻意没动的东西**：Web 的 iOS 壳像素界面（`apps/web/src/ios/*`、`ios-pixel.css`）与 `apps/ios/design/ios-app-design.html` 设计稿仍在用，不属本次范围；`MapPrivacy` 隐私门控页仍走系统配色。
-- 验证：`bash apps/ios/tests/typecheck-ios.sh` 43 文件通过（删除 6 个文件后，glob 自动收敛）；`bash apps/ios/tests/run-model-tests.sh` 七组通过至既有的 `recentPlanExecution` 字段覆盖断点（该断点先于本次改动存在，见上文字段小节），其余断言全绿；`MapPrivacyConsentView.swift` 用户可见文案曾引用像素皮肤，一并改写后**同时纳入** typecheck 覆盖（它本不依赖高德 SDK，原先被排除）。`run-tech-presentation-tests.sh` 的闭集枚举断言改为单皮肤（3 个 `tech*` 映射 + 视图调用点），像素侧副本与对应断言随皮肤删除。
+- 验证：`bash apps/ios/tests/typecheck-ios.sh` 43 文件通过（删除 6 个文件后，glob 自动收敛）；`bash apps/ios/tests/run-model-tests.sh` 七组通过（当时 `recentPlanExecution` 字段覆盖断点仍在，该断点先于本次改动存在、已于 2026-09-28 闭合，见上文字段小节），其余断言全绿；`MapPrivacyConsentView.swift` 用户可见文案曾引用像素皮肤，一并改写后**同时纳入** typecheck 覆盖（它本不依赖高德 SDK，原先被排除）。`run-tech-presentation-tests.sh` 的闭集枚举断言改为单皮肤（3 个 `tech*` 映射 + 视图调用点），像素侧副本与对应断言随皮肤删除。
 - UI 截图回归未在本轮执行（需要已启动的模拟器 + 验收库）：`VisualAcceptance` 删除了 `test09AppearancePersistence`，`test05Settings` 去掉外观入口步骤，启动参数不再传 `-rai.appearance.skin`。

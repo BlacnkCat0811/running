@@ -1,6 +1,6 @@
 # RAI 项目架构
 
-> 当前实施范围：浏览器 Web、localhost API、共享 TypeScript 包，以及经产品决策落地的 iOS 调试壳（`apps/ios`：WKWebView + HealthKit 只读增量同步）与配套移动端聚合 API。文中 React Native / 纯 SwiftUI 移动端产品内容仍为未来适配方向，不属于当前开发或验收范围；范围以仓库根目录 `AGENTS.md` 为准。
+> 当前实施范围：浏览器 Web、localhost API、共享 TypeScript 包，以及经产品决策落地的 iOS 原生应用（`apps/ios`：SwiftUI 界面 + HealthKit 只读增量同步）与配套移动端聚合 API。文中未立项的独立移动端产品（例如 React Native 方案）仍属未来适配方向，不属于当前开发或验收范围；范围以仓库根目录 `AGENTS.md` 为准。
 
 ## 1. 架构目标
 
@@ -19,14 +19,14 @@
 
 - Web：React + Vite；
 - 本地 API：Fastify；
-- 移动端：React Native / Expo custom dev client；
+- 移动端：`apps/ios` SwiftUI 原生应用（复用 TypeScript 特征与评分核心）；React Native / Expo 方案未立项；
 - 生产评分与特征工程：纯 TypeScript packages；
 - 存储：SQLite repository adapter；
 - 研究：Python 只读 canonical SQLite 或脱敏 feature export。
 
-选择 React Native 的主要原因不是 UI 复用，而是 iOS 可直接复用已经验证过的 TypeScript 特征和评分核心。HealthKit 读取通过小型原生 Swift module 完成。
+选择这条路线的主要原因不是 UI 复用，而是 iOS 可直接复用已经验证过的 TypeScript 特征和评分核心。HealthKit 读取通过小型原生 Swift module 完成。
 
-> 现状注记（2026-09）：完整 RN 产品尚未立项。为验证 HealthKit 增量同步与真机体验，先行交付 `apps/ios`——生产路径是 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅只读导出 ZIP 并上传到 API；WKWebView 壳（直接加载 Web 的像素风 iOS 界面，`?raiShell=ios`）保留为开发期回退路径。TypeScript 特征/评分核心完全复用，不在设备上重复实现。
+> 现状注记（2026-09-28）：**已是既成事实，不再是「未来方向」**。`apps/ios` 的生产路径是 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅只读导出 ZIP 并上传到 API，TypeScript 特征/评分核心完全复用、不在设备上重复实现。iOS 构建**已无 WKWebView 回退路径**（`RootView.swift:46-70` 的 iOS 分支进入 `NativeRootView`，`AppWebView.swift` 只剩非 iOS 分支）；Web 侧的 iOS 壳界面（`apps/web/src/ios/*`，`?raiShell=ios`）属于 Web 产品，与原生 App 无关。React Native 方案始终未立项。
 
 如果未来坚持使用纯 SwiftUI，则不能直接复用 TypeScript 实现。仍可复用 canonical contract、模型配置和黄金测试向量，但需要实现一个 Swift scorer。不存在同时满足“纯 SwiftUI、完全离线、零重复实现”的技术方案；这一取舍应在开始移动端前明确。
 
@@ -57,12 +57,12 @@ Python research
 flowchart TB
     subgraph Sources["数据来源"]
         Export["Apple Health 导出\nXML + GPX\n桌面 / Web 导入"]
-        HealthKit["Apple HealthKit\niOS 调试壳（现状）"]
+        HealthKit["Apple HealthKit\niOS 原生应用（现状）"]
     end
 
     subgraph Adapters["输入适配层"]
         ExportParser["health-export-parser\n流式 XML / GPX 解析"]
-        HealthKitAdapter["iOS 调试壳 HealthKitExport\n增量导出 ZIP"]
+        HealthKitAdapter["iOS HealthKitExport\n增量导出 ZIP"]
     end
 
     subgraph Domain["跨平台领域层：纯 TypeScript"]
@@ -79,7 +79,7 @@ flowchart TB
         DatasetVersion["Dataset / Feature / Model Version\n可复现重算"]
     end
 
-    subgraph WebNow["当前：Web 产品（桌面工作台 + iOS 壳像素界面）"]
+    subgraph WebNow["当前：Web 产品（桌面工作台 + Web iOS 壳界面）"]
         Worker["Import / Recompute Worker"]
         Api["Fastify Local API\n127.0.0.1"]
         Web["React + Vite Dashboard"]
@@ -87,7 +87,7 @@ flowchart TB
 
     subgraph MobileLater["未来：iPhone App"]
         MobileRepo["Mobile SQLite Adapter"]
-        MobileApp["React Native UI\nExpo Custom Dev Client"]
+        MobileApp["独立移动端 UI\n（未立项）"]
     end
 
     subgraph Research["离线研究与模型治理"]
@@ -127,7 +127,7 @@ flowchart TB
     class Repository,DatasetVersion,Analysis privacy;
 ```
 
-图中的实线表示产品运行时数据流；`HealthKitAdapter -.-> ExportParser` 的虚线表示 iOS 壳导出 ZIP 复用现有导入管线；其余虚线只允许脱敏后的研究数据离开 SQLite。`contracts`、`features`、`scoring` 和 `training-load` 不依赖 Web、Node、SQLite 或 UI，因此是 Web 与移动端共用的稳定边界。
+图中的实线表示产品运行时数据流；`HealthKitAdapter -.-> ExportParser` 的虚线表示 iOS 应用导出 ZIP 复用现有导入管线；其余虚线只允许脱敏后的研究数据离开 SQLite。`contracts`、`features`、`scoring` 和 `training-load` 不依赖 Web、Node、SQLite 或 UI，因此是 Web 与移动端共用的稳定边界。
 
 ## 4. 分层
 
@@ -144,8 +144,8 @@ flowchart TB
 实现：
 
 - `health-export-parser`：当前 XML/GPX（含睡眠/HRV canonicalization）；
-- `apps/ios` 调试壳 `HealthKitExport`：HealthKit 只读增量导出为 ZIP，复用现有导入管线（现状）；
-- 未来第三方 API 也必须作为独立 adapter；原生 React Native / SwiftUI 的 HealthKit adapter 产品仍属范围外。
+- `apps/ios` 的 `HealthKitExport`：HealthKit 只读增量导出为 ZIP，复用现有导入管线（现状）；
+- 未来第三方 API 也必须作为独立 adapter；未立项的独立移动端产品仍属范围外。
 
 ### 4.2 Canonical domain
 
@@ -233,6 +233,8 @@ series、trends、recovery facts、mobile 聚合、audit/summary、model-run、j
 `mobile-goals.json` 只用于一次性迁移，不是默认生产写入路径。当前业务库备份仍不等于业务库、控制库和模型 artifact 的完整备份 bundle。
 
 
+基础设施层还包含（均落在 `apps/api` 或 `packages/storage-sqlite`）：
+
 - migrations（唯一源：`storage-sqlite`）；
 - Node SQLite repository；
 - Web import job state；
@@ -247,7 +249,7 @@ series、trends、recovery facts、mobile 聚合、audit/summary、model-run、j
 - `apps/web`：React / Vite，只依赖 `packages/api-contracts` 中的 HTTP DTO；
 - 页面不自己计算分数。
 
-当前产品范围包含浏览器 Web、本地 API、其共享包，以及经授权的 `apps/ios` 调试壳与移动端聚合 API。原生 React Native / SwiftUI 移动端产品和原生桌面端仍不属于本仓库当前范围（详见 §7 与根 `AGENTS.md`）。
+当前产品范围包含浏览器 Web、本地 API、其共享包，以及经授权的 `apps/ios` SwiftUI 原生应用与移动端聚合 API。未立项的独立移动端产品与原生桌面端仍不属于本仓库当前范围（详见 §7 与根 `AGENTS.md`）。
 
 ## 5. 当前目录与演进目标
 
@@ -256,8 +258,8 @@ apps/
   api/
     src/                           Fastify、读取模型、移动端聚合、后台 worker
   web/
-    src/                           React 页面（桌面 + iOS 壳像素 UI）、组件与 HTTP client
-  ios/                             Xcode 调试壳（WKWebView + HealthKit 只读增量同步）
+    src/                           React 页面（桌面 + Web iOS 壳像素 UI）、组件与 HTTP client
+  ios/                             SwiftUI 原生应用（HealthKit 只读增量同步 + 周计划下发到手表）
 
 packages/
   contracts/                      领域 contract
@@ -341,9 +343,9 @@ API schema 由 OpenAPI 描述，HTTP DTO 统一定义在 `packages/api-contracts
 - 不维护自己的日期/单位转换；
 - 不将原始路线发往第三方地图服务。
 
-## 7. 原生客户端范围
+## 7. iOS 原生客户端范围
 
-当前产品范围（以仓库根目录 `AGENTS.md` 为准）为浏览器 Web、本地 API 及所需共享包。例外：`apps/ios/` 是经产品决策授权的本地 Xcode 宿主——生产路径为 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅做**只读**同步（增量导出 ZIP）并上传到本地 API，不在设备上重写评分核心、不做 HealthKit 写入；三项后台机制（HealthKit background delivery 唤醒、`BGProcessingTask` 承载、带 identifier 的 background URLSession 搬运）已按 2026-09-22 决策启用，判据与验收见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`；此前的 WKWebView 壳（加载现有 Web 的像素风 iOS 界面，`?raiShell=ios`）保留为开发期回退路径。配套的 `/v1/mobile/*` 聚合端点与周目标（`GET/PUT /v1/mobile/goals`）随 Web 产品一同交付。原生 React Native / 纯 SwiftUI 移动端产品与原生桌面端仍属范围外，需单独产品决策后方可立项。
+当前产品范围（以仓库根目录 `AGENTS.md` 为准）为浏览器 Web、本地 API 及所需共享包。例外：`apps/ios/` 是经产品决策授权的本地 Xcode 宿主——生产路径为 SwiftUI 原生界面（`RAI/Skins/Technology`，2026-09-18 起为唯一视觉），HealthKit 仅做**只读**同步（增量导出 ZIP）并上传到本地 API，不在设备上重写评分核心、不做 HealthKit 写入；三项后台机制（HealthKit background delivery 唤醒、`BGProcessingTask` 承载、带 identifier 的 background URLSession 搬运）已按 2026-09-22 决策启用，判据与验收见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`。配套的 `/v1/mobile/*` 聚合端点与周目标（`GET/PUT /v1/mobile/goals`）随 Web 产品一同交付。周计划另经 WorkoutKit 下发到 Apple Watch 的系统体能训练调度（`WorkoutKitBridge.swift`），该路径同样不写 HealthKit。iOS 构建已无 WKWebView 回退路径：`RootView.swift:46-70` 的 iOS 分支进入 `NativeRootView`，`AppWebView.swift` 只保留在非 iOS 分支；Web 侧的 iOS 壳界面（`apps/web/src/ios/*`，`?raiShell=ios`）属于 Web 产品，不替代原生页面的验收。未立项的独立移动端产品与原生桌面端仍属范围外，需单独产品决策后方可立项。
 
 ## 8. 模型和数据版本
 
@@ -402,7 +404,7 @@ calculated_at
 | Golden replay | 完整输入到历史 TA 时间线 |
 | API contract | OpenAPI 与 client 一致 |
 | Web E2E | 导入、筛选、详情、模型切换 |
-| Future mobile integration | 未来独立立项后验证真机 HealthKit 增量和删除；不属于当前 Web 验收 |
+| 真机 HealthKit 集成 | 真机增量与删除验收，判据见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`；不在 Web 验收范围 |
 
 ## 12. 近期实施顺序
 
@@ -413,8 +415,8 @@ calculated_at
 5. 创建 Fastify API。
 6. 创建 React Web 的数据审计和跑步详情页。
 7. 完善模型并冻结 beta contract。
-8. 再创建 React Native iOS 工程与 HealthKit adapter。
+8. 再创建移动端工程与 HealthKit adapter。
 
-> 状态注记（2026-09）：第 1–7 项已完成；第 8 项的先行版本为 `apps/ios` Xcode 调试壳（WKWebView + HealthKit 只读同步，配合 `/v1/mobile/*` 聚合 API），React Native / 纯 SwiftUI 独立产品仍需单独产品决策。
+> 状态注记（2026-09-28）：第 1–8 项均已完成。第 8 项以 `apps/ios` SwiftUI 原生应用落地（HealthKit 只读同步 + `/v1/mobile/*` 聚合 API + WorkoutKit 周计划下发）；React Native 方案未采用。
 
 该顺序保留 Web 快速迭代优势，同时避免移动端过早绑定仍在变化的数据语义。
