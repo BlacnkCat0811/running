@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "check:node": "node scripts/check-node-version.mjs",
+    "check:doc-refs": "node scripts/check-doc-line-refs.mjs",
     "preinstall": "node scripts/check-node-version.mjs",
     "pretypecheck": "node scripts/check-node-version.mjs",
     "pretest": "node scripts/check-node-version.mjs",
