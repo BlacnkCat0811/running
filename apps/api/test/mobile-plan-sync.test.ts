@@ -26,10 +26,12 @@ import { mobileGoalsBodySchema, mobilePlanSyncedBodySchema } from "../src/schema
 const withStore = <T>(run: (fixture: { store: MobileGoalsStore; root: string; controlPath: string }) => T): T => {
   const root = mkdtempSync(join(tmpdir(), "rai-plan-sync-"));
   const controlPath = join(root, "var", "rai-control.sqlite");
+  const store = new MobileGoalsStore(root, controlPath);
   try {
-    return run({ store: new MobileGoalsStore(root, controlPath), root, controlPath });
+    return run({ store, root, controlPath });
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    store.close();
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 };
 
@@ -131,10 +133,14 @@ test("a receipt round-trips, stays newest-first, and survives a reopen", () => {
     // Receipts must outlive the process: they are the only record of what the
     // watch was handed, and the run is imported later.
     const reopened = new MobileGoalsStore(root, controlPath);
-    assert.deepEqual(reopened.planPushes("2026-09-01T00:00:00.000Z").map((push) => push.localDate), [
-      "2026-09-16",
-      "2026-09-15"
-    ]);
+    try {
+      assert.deepEqual(reopened.planPushes("2026-09-01T00:00:00.000Z").map((push) => push.localDate), [
+        "2026-09-16",
+        "2026-09-15"
+      ]);
+    } finally {
+      reopened.close();
+    }
   });
 });
 

@@ -6,6 +6,9 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 const script = resolve("deploy/backup-runtime.sh");
+const canRunBash = spawnSync("bash", ["-c", "true"], { stdio: "ignore" }).status === 0;
+const bashTest = (name: string, fn: () => void | Promise<void>) =>
+  test(name, { skip: !canRunBash ? "bash is required for deploy script tests" : false }, fn);
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "rai-n100-backup-"));
@@ -64,7 +67,7 @@ function fixture() {
   };
 }
 
-test("whole-runtime backup defaults dry-run and rejects output inside runtime", () => {
+bashTest("whole-runtime backup defaults dry-run and rejects output inside runtime", () => {
   const f = fixture();
   try {
     const result = f.run([]);
@@ -79,7 +82,7 @@ test("whole-runtime backup defaults dry-run and rejects output inside runtime", 
 });
 
 for (const state of ["active", "inactive"]) {
-  test(`whole-runtime backup includes control/artifacts and restores ${state} service state`, () => {
+  bashTest(`whole-runtime backup includes control/artifacts and restores ${state} service state`, () => {
     const f = fixture();
     try {
       writeFileSync(f.state, state);
@@ -102,7 +105,7 @@ for (const state of ["active", "inactive"]) {
   });
 }
 
-test("failed backup removes partial output and restarts previously active service", () => {
+bashTest("failed backup removes partial output and restarts previously active service", () => {
   const f = fixture();
   try {
     const result = f.run(["--apply"], { TEST_FAIL_TAR: "1" });
@@ -112,7 +115,7 @@ test("failed backup removes partial output and restarts previously active servic
   } finally { f.close(); }
 });
 
-test("backup reports service restart failure even when the archive was created", () => {
+bashTest("backup reports service restart failure even when the archive was created", () => {
   const f = fixture();
   try {
     const result = f.run(["--apply"], { TEST_FAIL_START: "1" });

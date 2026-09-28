@@ -934,12 +934,17 @@ test("a goals row written before weekPlanAudit existed still reads back as null"
       );
     database.close();
 
-    const goals = new MobileGoalsStore(root, controlPath).read();
-    assert.equal(goals.weekPlanAudit, null, "缺少审计字段时必须读出 null，而不是 undefined");
-    assert.equal(goals.weekPlan[0]?.distanceKm, 8);
-    assert.equal(goals.weekPlan[0]?.structure, undefined);
+    const store = new MobileGoalsStore(root, controlPath);
+    try {
+      const goals = store.read();
+      assert.equal(goals.weekPlanAudit, null, "缺少审计字段时必须读出 null，而不是 undefined");
+      assert.equal(goals.weekPlan[0]?.distanceKm, 8);
+      assert.equal(goals.weekPlan[0]?.structure, undefined);
+    } finally {
+      store.close();
+    }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });
 

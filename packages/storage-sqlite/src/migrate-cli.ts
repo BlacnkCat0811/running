@@ -7,7 +7,9 @@ import { acquireDatabasePublicationLock } from "./publication-lock.js";
 
 try {
   const { values } = parseArgs({ options: {
-    database: { type: "string" }, apply: { type: "boolean", default: false }
+    database: { type: "string" }, apply: { type: "boolean", default: false },
+    backup: { type: "boolean", default: true },
+    "no-backup": { type: "boolean", default: false }
   } });
   // Require an explicit target so an environment/cwd mistake cannot migrate the wrong database.
   if (!values.database) throw new Error("Usage: npm run data:migrate -- --database PATH [--apply]");
@@ -34,7 +36,10 @@ try {
     try {
       const started = performance.now();
       const before = inspect();
-      const store = await RaiDatabase.open(path, { migrationPolicy: "apply" });
+      const store = await RaiDatabase.open(path, {
+        migrationPolicy: "apply",
+        createMigrationBackup: values["no-backup"] ? false : (values.backup ?? true)
+      });
       try {
         const violations = store.database.prepare("PRAGMA foreign_key_check").all();
         if (violations.length) throw new Error(`foreign_key_check: ${violations.length} violations`);

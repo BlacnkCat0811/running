@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const read = (file: string) => readFileSync(`deploy/${file}`, "utf8");
+const read = (file: string) => readFileSync(`deploy/${file}`, "utf8").replace(/\r\n/g, "\n");
 
 test("default cloud service budgets the entire worker group for a 2GiB host", () => {
   const unit = read("rai-api.service");

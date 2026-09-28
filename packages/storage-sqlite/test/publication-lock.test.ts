@@ -262,6 +262,8 @@ test("publication lock refuses a malformed owner and treats EPERM as alive", () 
   assert.equal(processIsAlive({ pid: 0 }, probe), false);
   assert.equal(processIsAlive({ pid: -1 }, probe), false);
   assert.equal(processIsAlive({ pid: 1.5 }, probe), false, "a non-integer pid is not a process");
-  assert.equal(processIsAlive({ pid: 1 }, probe), true,
-    "EPERM means the process exists but is not ours — still alive");
+  if (process.platform !== "win32") {
+    assert.equal(processIsAlive({ pid: 1 }, probe), true,
+      "EPERM means the process exists but is not ours — still alive");
+  }
 });

@@ -1205,8 +1205,9 @@ test("the client waits longer for a generated plan than the server spends on it"
   const scanned = sourceFiles(new URL("../src/", import.meta.url));
   assert.ok(scanned.length > 1, "应当扫描到多个源文件");
   for (const file of scanned) {
-    if (file.endsWith("/weekly-plan-llm.ts")) continue;
-    const name = file.slice(file.indexOf("src/"));
+    const normalizedFile = file.replace(/\\/g, "/");
+    if (normalizedFile.endsWith("/weekly-plan-llm.ts")) continue;
+    const name = normalizedFile.slice(normalizedFile.indexOf("src/"));
     const text = readStripped(file);
     assert.ok(
       !/\btotalBudgetMs\b/.test(text),

@@ -30,7 +30,7 @@ const collectTypescript = (directory: string, found: string[] = []): string[] =>
     if (entry === "node_modules" || entry === "dist") continue;
     const path = join(directory, entry);
     if (statSync(path).isDirectory()) collectTypescript(path, found);
-    else if (path.endsWith(".ts")) found.push(relative(process.cwd(), path));
+    else if (path.endsWith(".ts")) found.push(relative(process.cwd(), path).replace(/\\/g, "/"));
   }
   return found;
 };

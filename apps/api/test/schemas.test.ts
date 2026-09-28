@@ -494,7 +494,8 @@ test("the week editor offers neither today — nor a day already gone — as an 
   const checked: string[] = [];
   for (const file of swiftSources()) {
     const source = readStripped(file);
-    const name = file.slice(file.indexOf("RAI/"));
+    const normalizedFile = file.replace(/\\/g, "/");
+    const name = normalizedFile.slice(normalizedFile.indexOf("RAI/"));
     for (const loop of source.matchAll(/ForEach\s*\(/g)) {
       const open = source.indexOf("{", loop.index + loop[0].length);
       if (open < 0) continue;
@@ -547,7 +548,8 @@ test("native session and race pickers exactly match their API contracts", () => 
   let racePickers = 0;
   for (const file of swiftSources()) {
     const source = stripComments(readFileSync(file, "utf8"));
-    const name = file.slice(file.indexOf("RAI/"));
+    const normalizedFile = file.replace(/\\/g, "/");
+    const name = normalizedFile.slice(normalizedFile.indexOf("RAI/"));
     for (const picker of source.matchAll(/(?:^|[^A-Za-z0-9_])Picker\s*\(/g)) {
       // Parse each picker independently; DatePicker and argument closures are not options.
       const paren = picker.index + picker[0].length - 1;

@@ -85,7 +85,7 @@ try {
   } catch (error) {
     shutdownError = error;
   } finally {
-    rmSync(runtimeRoot, { recursive: true, force: true });
+    rmSync(runtimeRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
   if (shutdownError) throw shutdownError;
 }

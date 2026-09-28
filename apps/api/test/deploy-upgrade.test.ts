@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+const canRunBash = spawnSync("bash", ["-c", "true"], { stdio: "ignore" }).status === 0;
+const bashTest = (name: string, fn: () => void | Promise<void>) =>
+  test(name, { skip: !canRunBash ? "bash is required for deploy script tests" : false }, fn);
+
 function scenario(options: { failMigration?: boolean; recovery?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "rai-upgrade-test-"));
   const bin = join(root, "bin");
@@ -57,20 +61,20 @@ fi`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test("explicit upgrade migration runs between service stop and restart", () => {
+bashTest("explicit upgrade migration runs between service stop and restart", () => {
   const result = scenario();
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.commands, /backup[\s\S]*systemctl stop rai-test[\s\S]*data:migrate[\s\S]*systemctl reset-failed rai-test[\s\S]*systemctl restart rai-test/);
 });
 
-test("failed migration leaves the service stopped", () => {
+bashTest("failed migration leaves the service stopped", () => {
   const result = scenario({ failMigration: true });
   assert.equal(result.status, 17, result.stderr);
   assert.match(result.commands, /systemctl stop rai-test/);
   assert.doesNotMatch(result.commands, /systemctl restart|systemctl reset-failed/);
 });
 
-test("upgrade rejects HTTP 200 maintenance state", () => {
+bashTest("upgrade rejects HTTP 200 maintenance state", () => {
   const result = scenario({ recovery: true });
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, /未真实就绪/);

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 import { basename, dirname, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { parseAppleHealthXml } from "./apple-health-parser.js";
 import { stageAuditFiles, writeAuditFiles } from "./audit.js";
@@ -505,7 +506,7 @@ async function main(): Promise<void> {
   else await auditCommand(args);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

@@ -135,7 +135,16 @@ export class DatabaseMaintenance {
 
   private async syncFile(path: string): Promise<void> {
     const handle = await open(path, "r");
-    try { await handle.sync(); } finally { await handle.close(); }
+    try {
+      await handle.sync();
+    } catch (error) {
+      if (process.platform === "win32" && (error as NodeJS.ErrnoException).code === "EPERM") {
+        return;
+      }
+      throw error;
+    } finally {
+      await handle.close();
+    }
   }
 
   private async syncDirectory(path: string): Promise<void> {
