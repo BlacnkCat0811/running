@@ -348,4 +348,48 @@ assert not stale, (
 print("Enum mappings are wired into the view, not just defined.")
 print(f"Phase labels: {len(sync_phases)} SyncPhase values, {len(labelled)} explicit labels "
       "(idle falls through to the default by design).")
+
+# ---------------------------------------------------------------------------
+# 未来七日预览是一次**未经确认的提议**：在用户点「确认替换」之前，打开它不得产生任何写入。
+#
+# 2026-09-26 新增 `TechPlanPreviewSheet.swift` 时，`tech_views` 的锚点清单同步补了
+# `TechPlanView.swift`，但**这张 sheet 本身零断言**（全仓只有定义点与 `TechPlanView.swift:93`
+# 的调用点）——「预览不隐式确认」「替换提示有两态」「过期候选提示存在」三条行为全靠读码成立。
+#
+# 预览恰好是那种"坏了也看不出来"的入口：谁在这里加一个
+# `.task { await native.confirmPlanPreview(preview) }`，用户**只是打开看一眼**
+# 就会覆盖掉自己整周的课表 —— 而本脚本、类型检查、UI 回归全绿。
+# 因此这里按「确认只能由显式按钮触发」的形态钉死，而不是断言"文件里有没有 confirm 二字"
+# （那只会在合法重命名时变红，是真红里的假红）。
+# ---------------------------------------------------------------------------
+preview_sheet_path = "apps/ios/RAI/Skins/Technology/TechPlanPreviewSheet.swift"
+preview_sheet = re.sub(r"/\*.*?\*/|//[^\n]*", "", pathlib.Path(preview_sheet_path).read_text(), flags=re.S)
+
+# 1) 预览不得隐式落库。
+for auto in [".task", ".onAppear", ".onChange"]:
+    assert auto not in preview_sheet, (
+        f"{preview_sheet_path} gained {auto}. The preview is only a proposal until the runner taps "
+        "确认替换; an automatic lifecycle hook here would save a plan nobody agreed to.")
+confirm_calls = preview_sheet.count("confirmPlanPreview(")
+assert confirm_calls == 1, (
+    f"{preview_sheet_path} calls confirmPlanPreview {confirm_calls} times; exactly one is expected, "
+    "inside the explicit 确认替换 toolbar button.")
+assert re.search(r'Button\([^)]*"确认替换"\)\s*\{\s*Task\s*\{', preview_sheet), (
+    "Could not locate the 确认替换 button that starts the confirm Task; the preview gate must fail "
+    "loudly instead of skipping.")
+assert "preview.revision != native.goals?.revision" in preview_sheet, (
+    "The stale-preview guard disappeared. The confirm button must stay disabled once the goals "
+    "revision moved on, otherwise a stale candidate overwrites the current plan.")
+
+# 2) 两态提示必须都在：替换日期（空 / 非空）与既有处方（有 / 无）。
+for anchor, label in [
+    ("replacedDates.isEmpty", "replaced-date empty branch"),
+    ("preview.replacedDates.joined(separator:", "replaced-date non-empty branch"),
+    ("preview.previousDays?.first(where:", "previous-prescription lookup"),
+    ('Text("原计划：未安排")', "previous-prescription fallback"),
+]:
+    assert anchor in preview_sheet, (
+        f"{preview_sheet_path} lost the {label}. A one-sided branch silently hides either "
+        "'nothing was replaced' or the replaced dates themselves.")
+print("Plan preview gate: confirm-only, with both replaced-date and previous-prescription branches present.")
 PY

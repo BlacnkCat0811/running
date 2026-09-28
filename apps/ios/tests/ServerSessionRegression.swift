@@ -7,7 +7,7 @@ enum Keychain {
         preconditionFailure("ServerSession regression touched the real/default Keychain path")
     }
 
-    static func saveToken(_ token: String, for server: String?) {
+    static func saveToken(_ token: String, for server: String?) -> Bool {
         preconditionFailure("ServerSession regression touched the real/default Keychain path")
     }
 }
@@ -32,15 +32,28 @@ final class CredentialStore: @unchecked Sendable {
         return values[server ?? ""] ?? ""
     }
 
-    func save(_ token: String, for server: String?) {
+    /// `true` models a Keychain whose `SecItemAdd` is rejected — a locked device,
+    /// a full keychain, or a managed configuration. The write is dropped, which is
+    /// exactly the failure `Keychain.saveToken` must stop reporting as success.
+    private var rejectsWrites = false
+
+    func rejectWrites() {
         lock.lock()
         defer { lock.unlock() }
+        rejectsWrites = true
+    }
+
+    func save(_ token: String, for server: String?) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if rejectsWrites { return false }
         let key = server ?? ""
         if token.isEmpty {
             values.removeValue(forKey: key)
         } else {
             values[key] = token
         }
+        return true
     }
 }
 
@@ -343,6 +356,26 @@ struct ServerSessionRegression {
                   "current storedURL alone is never accepted as migration evidence")
             check(credentials.load(nil) == "legacy-without-origin",
                   "declining unsafe migration does not delete the only credential")
+        }
+
+        // 钥匙串写入失败必须留下可见的痕迹，且不能被随后成功的探针抹掉。
+        do {
+            let (session, _, credentials) = makeSession()
+            credentials.rejectWrites()
+            session.apiToken = "unpersisted"
+            check(session.credentialStorageError != nil,
+                  "a rejected keychain write must be surfaced, not reported as success")
+            // 探针成功会清 `lastError`：凭证存储失败不能跟着一起消失，否则
+            // "看起来成功、实际没存上"这件事又变回不可见。
+            ProbeURLProtocol.setHandler { _ in .http(204) }
+            await session.probe()
+            check(session.lastError == nil, "a successful probe clears the connectivity error")
+            check(session.credentialStorageError != nil,
+                  "a successful probe must not clear the credential storage error")
+            // 清空 token 本来就不需要落盘，不该继续报错。
+            session.apiToken = ""
+            check(session.credentialStorageError == nil,
+                  "clearing the token is not a storage failure")
         }
 
         if failures > 0 {

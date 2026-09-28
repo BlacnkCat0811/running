@@ -15,10 +15,23 @@ final class ServerSession {
     var apiToken: String {
         didSet {
             guard apiToken != oldValue else { return }
-            saveToken(apiToken, serverURLString)
+            // 写入失败不能静默：`apiToken` 这一秒在内存里是可用的，重启后就没了。
+            // ⚠️ `saveToken` 必须**无条件**调用：清空 token 也走这条路径，而删掉钥匙串
+            // 条目正是靠它。写成 `apiToken.isEmpty || saveToken(...)` 会短路掉删除，
+            // 于是"清空"只清了内存，重启后旧 token 又回来了（既有回归会抓到这条）。
+            let persisted = saveToken(apiToken, serverURLString)
+            credentialStorageError = (persisted || apiToken.isEmpty)
+                ? nil
+                : "凭证未能保存到钥匙串；本次会话可用，但重启后需要重新输入。"
             invalidatePendingProbes(resetConnectionState: true)
         }
     }
+    /// 钥匙串写入失败时留给界面的说明；保存成功或清空 token 后为 `nil`。
+    ///
+    /// 必须与 `lastError` 分开：轮询探针在每次探测成功时都会把 `lastError` 清成 `nil`
+    /// （`probe()` 的 2xx 分支），凭证存储失败在那里留不住 —— 而这恰恰是一次
+    /// "看起来成功、实际没存上"的失败，正是需要被看见的那一类。
+    private(set) var credentialStorageError: String?
     var isReachable = false
     var lastError: String?
     var reloadToken = 0
@@ -29,7 +42,7 @@ final class ServerSession {
     private let session: URLSession
     private let userDefaults: UserDefaults
     private let loadToken: @MainActor (String?) -> String
-    private let saveToken: @MainActor (String, String?) -> Void
+    private let saveToken: @MainActor (String, String?) -> Bool
     private var probeGeneration: UInt64 = 0
 
     private static func makeSession() -> URLSession {
@@ -50,7 +63,7 @@ final class ServerSession {
         session: URLSession? = nil,
         userDefaults: UserDefaults = .standard,
         loadToken: @escaping @MainActor (String?) -> String = { Keychain.loadToken(for: $0) },
-        saveToken: @escaping @MainActor (String, String?) -> Void = { Keychain.saveToken($0, for: $1) }
+        saveToken: @escaping @MainActor (String, String?) -> Bool = { Keychain.saveToken($0, for: $1) }
     ) {
         self.session = session ?? Self.makeSession()
         self.userDefaults = userDefaults

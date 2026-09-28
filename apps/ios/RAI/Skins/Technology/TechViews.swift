@@ -1960,6 +1960,11 @@ struct TechNativeSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(TechColor.coral)
                 }
+                if let storageError = session.credentialStorageError {
+                    Text(storageError)
+                        .font(.caption)
+                        .foregroundStyle(TechColor.coral)
+                }
                 if !discovery.candidates.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("发现的 RAI 服务")

@@ -22,7 +22,8 @@ func SecItemCopyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<C
     return copyStatus
 }
 func SecItemDelete(_ query: CFDictionary) -> OSStatus { errSecSuccess }
-func SecItemAdd(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus { errSecSuccess }
+var addStatus = errSecSuccess
+func SecItemAdd(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus { addStatus }
 
 @main struct KeychainRegression {
     static func main() {
@@ -44,7 +45,20 @@ func SecItemAdd(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?
             UserDefaults.standard.plaintext = "legacy-secret"
             precondition(Keychain.loadToken(for: server).isEmpty)
             precondition(UserDefaults.standard.plaintext == nil)
+
+            // 写入失败必须能被调用方看见。`saveToken` 过去返回 `Void` 并丢弃
+            // `SecItemAdd` 的 `OSStatus`，于是钥匙串被拒（钥匙串满 / 设备恢复中 /
+            // 托管配置）时调用方一律当成"存上了"，用户下次启动才发现要重新输入，
+            // 且没有任何日志能解释 —— 这正是本仓「失败态被映射到宽松分支」的 iOS 样本。
+            addStatus = errSecSuccess
+            precondition(Keychain.saveToken("fresh-token", for: server), "a successful add must report success")
+            addStatus = errSecDuplicateItem
+            precondition(!Keychain.saveToken("fresh-token", for: server), "a rejected add must not report success")
+            // 清空 token 不需要落盘，所以即使 add 会失败也不算写入失败。
+            addStatus = errSecDuplicateItem
+            precondition(Keychain.saveToken("", for: server), "clearing the token is not a storage failure")
+            addStatus = errSecSuccess
         }
-        print("PASS: scoped and legacy Keychain reads clear plaintext and fail closed on missing, locked, denied or invalid credentials")
+        print("PASS: scoped and legacy Keychain reads clear plaintext and fail closed on missing, locked, denied or invalid credentials; a rejected write is reported to the caller instead of looking like success")
     }
 }

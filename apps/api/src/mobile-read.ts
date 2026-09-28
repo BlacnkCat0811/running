@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { applyRacePlanPolicy } from "./weekly-plan-validate.js";
+import { DEFAULT_WEEKLY_DISTANCE_KM } from "./mobile-goals.js";
 import type {
   DashboardResponse,
   MobileCoverage,
@@ -418,7 +419,7 @@ export function assembleMobileWorkoutPlan(args: {
     planDayFromSession(args.today, args.todaySession, prescription, source, !args.todayCompleted && !args.relockSuggested)
   ];
 
-  for (const planned of applyRacePlanPolicy(args.storedPlan, args.raceTarget, args.weeklyDistanceKm ?? 30, prescription)
+  for (const planned of applyRacePlanPolicy(args.storedPlan, args.raceTarget, args.weeklyDistanceKm ?? DEFAULT_WEEKLY_DISTANCE_KM, prescription)
     .filter((day) => day.localDate > args.today && day.localDate <= windowEnd)
     .sort((left, right) => left.localDate.localeCompare(right.localDate))) {
     const numbers = plannedDayNumbers(planned.kind, planned.structure, planned.distanceKm, prescription);

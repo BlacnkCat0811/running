@@ -8,7 +8,7 @@ enum Keychain {
         preconditionFailure("StoreRegression touched the real Keychain path")
     }
 
-    static func saveToken(_ token: String, for server: String?) {
+    static func saveToken(_ token: String, for server: String?) -> Bool {
         preconditionFailure("StoreRegression touched the real Keychain path")
     }
 }

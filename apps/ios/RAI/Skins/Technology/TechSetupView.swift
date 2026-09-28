@@ -58,6 +58,10 @@ struct TechSetupView: View {
                         Label(error, systemImage: "exclamationmark.circle")
                             .font(.footnote).foregroundStyle(TechColor.coral)
                     }
+                    if let storageError = session.credentialStorageError {
+                        Label(storageError, systemImage: "key.slash")
+                            .font(.footnote).foregroundStyle(TechColor.coral)
+                    }
                     TechPrimaryButton(title: "连接服务", isBusy: connecting,
                                       isDisabled: draftURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                                       busyTitle: "正在检查连接…") {

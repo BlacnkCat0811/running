@@ -54,8 +54,14 @@ base='http://127.0.0.1:8792'
 g=json.load(urllib.request.urlopen(base+'/v1/mobile/goals'))
 t=json.load(urllib.request.urlopen(base+'/v1/mobile/today'))
 if not g['weekPlan']:
+    # 只回填**今天及以后**。`validateManualPlan` 的 frozen() 判定把"过去日期 / 今天已完成或
+    # 已锁定"视为不可改写（`apps/api/src/manual-plan-policy.ts:9-14`），而 `/v1/mobile/today`
+    # 的 weekPlan 覆盖整个自然周（含已过去的日子）⇒ 整周原样回填必然
+    # 422 `plan_policy_violation`，脚本在夹具这一步就死，后面整条模拟器验收链（构建、
+    # 截图、跨进程字节比对）全跑不到。服务端拒绝改写历史日期是对的，过时的是这个夹具。
     value={'expectedRevision':g['revision'],'weeklyDistanceKm':g['weeklyDistanceKm'],
-           'weekPlan':[{k:d[k] for k in ('localDate','kind','distanceKm')} for d in t['weekPlan']]}
+           'weekPlan':[{k:d[k] for k in ('localDate','kind','distanceKm')} for d in t['weekPlan']
+                       if d['localDate'] >= t['today']['localDate']]}
     req=urllib.request.Request(base+'/v1/mobile/goals', data=json.dumps(value).encode(), method='PUT',
                               headers={'Content-Type':'application/json'})
     urllib.request.urlopen(req).close()

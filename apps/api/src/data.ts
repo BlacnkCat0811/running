@@ -58,7 +58,7 @@ import type {
 } from "@rai/api-contracts";
 import { buildPlanExecution } from "./plan-execution.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
-import type { PlanHistoryRevision } from "./mobile-goals.js";
+import { DEFAULT_WEEKLY_DISTANCE_KM, type PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { constrainUpcomingPlan } from "./weekly-plan-service.js";
 import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
@@ -275,6 +275,28 @@ export class RaiReadStore {
     goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession">,
     planHistory?: PlanHistoryRevision[]
   ): MobileTodayResponse {
+    return this.mobileTodayWithExecutablePlan(goalDistanceKm, goals, planHistory).today;
+  }
+
+  /**
+   * `mobileToday` 与它内部那次 `executableMobilePlan` 的**同一次**计算结果。
+   *
+   * 必须一起返回，而不是让调用方再算一遍：`executableMobilePlan` 只从 `today` 读
+   * today / week / nextSession / lock / weekStructure / injuryFlags，**从不读
+   * `today.weekPlan`**；而 `mobileToday` 会在算完之后把 `result.weekPlan` 就地改写成
+   * 执行版。于是"先算一次用于改写，再为 `workout-plan` 重算一次"里的第二次调用，拿到的是
+   * **同一个对象、但 `weekPlan` 已被换过**的输入 —— 两次结果必然相同，第二次纯属重复
+   * （实测 1.5ms/次，占该端点 118ms 的 ~1.3%）。
+   *
+   * 单独看性能这不足以成为改动理由；真正的理由是它把"第二次调用看到的输入"变成了一件
+   * 只在偶然中成立的事（`executableMobilePlan` 一旦开始读 `weekPlan`，第二次就会去读
+   * 自己上一轮的输出）。让同一次结果显式传出去，比让它被重算更安全。
+   */
+  private mobileTodayWithExecutablePlan(
+    goalDistanceKm: number | null,
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession">,
+    planHistory?: PlanHistoryRevision[]
+  ): { today: MobileTodayResponse; effective: MobileWorkoutPlanResponse } {
     const today = mobileLocalDate();
     const weekStart = mobileWeekStart(today);
     const weekEnd = shiftMobileDate(weekStart, 6);
@@ -515,12 +537,13 @@ export class RaiReadStore {
       if (!prescribed) return day;
       return { ...day, kind: prescribed.kind, title: prescribed.title, distanceKm: prescribed.distanceKm ?? 0, structure: prescribed.structure };
     });
-    return result;
+    return { today: result, effective };
   }
 
   /**
    * Executable week for the WorkoutKit bridge. Reuses `mobileToday` so today's
-   * row always carries the gate-resolved, lock-applied prescription.
+   * row always carries the gate-resolved, lock-applied prescription — and reuses
+   * the very same `executableMobilePlan` result instead of recomputing it.
    */
   mobileWorkoutPlan(
     goalDistanceKm: number | null,
@@ -529,8 +552,7 @@ export class RaiReadStore {
       "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision"
     >
   ): MobileWorkoutPlanResponse {
-    const today = this.mobileToday(goalDistanceKm, goals);
-    return this.executableMobilePlan(today, goalDistanceKm, goals);
+    return this.mobileTodayWithExecutablePlan(goalDistanceKm, goals).effective;
   }
 
   private executableMobilePlan(
@@ -543,7 +565,7 @@ export class RaiReadStore {
     const executablePlan = constrainUpcomingPlan(goals?.weekPlan ?? [], {
       // Today's actual/effective session is reserved; export never replaces a lock.
       today: { ...today, lock: { ...today.lock, present: true } },
-      goals: { weeklyDistanceKm: goalDistanceKm ?? 30, easyDurationFloorFraction: today.weekStructure.easyDurationFloorFraction,
+      goals: { weeklyDistanceKm: goalDistanceKm ?? DEFAULT_WEEKLY_DISTANCE_KM, easyDurationFloorFraction: today.weekStructure.easyDurationFloorFraction,
         qualitySessionCap: today.weekStructure.qualitySessionCap, raceTarget: goals?.raceTarget ?? null },
       prescription: zonePrescription(currentZones), previousWeekDistanceKm: this.previousWeekDistanceKm(today.today.localDate)
     });
@@ -553,7 +575,7 @@ export class RaiReadStore {
       todayCompleted: today.today.workoutCount > 0,
       relockSuggested: today.lock.relockSuggested,
       raceTarget: goals?.raceTarget ?? null,
-      weeklyDistanceKm: goalDistanceKm ?? 30,
+      weeklyDistanceKm: goalDistanceKm ?? DEFAULT_WEEKLY_DISTANCE_KM,
       storedPlan: executablePlan,
       zones: currentZones,
       audit: goals?.weekPlanAudit ?? null,
