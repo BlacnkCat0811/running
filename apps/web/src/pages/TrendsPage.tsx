@@ -4,6 +4,7 @@ import type { RecoveryTrendResponse, TrendResponse } from "@rai/api-contracts";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import { HistoricalModelReview } from "../components/HistoricalModelReview.js";
 import { AbilityChart } from "../components/AbilityChart.js";
 import {
   DimensionTrendChart,
@@ -65,6 +66,7 @@ export function TrendsPage() {
     latest?.trueAbility !== undefined &&
     first?.trueAbility !== null &&
     first?.trueAbility !== undefined
+      && latest.baselineEpochId === first.baselineEpochId
       ? latest.trueAbility - first.trueAbility
       : null;
 
@@ -74,7 +76,7 @@ export function TrendsPage() {
         <div className="trends-title-block">
           <ChartLine size={38} />
           <div>
-            <h1>能力趋势</h1>
+            <h1>能力趋势</h1><p>长期能力按当前参考基线展示。基线更新属于模型标尺变化，不代表更新当天体能突变；不同 epoch 不直接计算涨跌。</p>
             <p>观察真实跑力、即时能力、成长速度和数据稳定性。</p>
           </div>
         </div>
@@ -201,6 +203,7 @@ export function TrendsPage() {
             </article>
           </section>
 
+          <HistoricalModelReview runs={data.modelRuns}/>
           <section className="trends-reference-lower">
             <article className="panel trend-events">
               <div className="panel-heading">

@@ -63,9 +63,9 @@ export function AbilityChart({ trend, height = 300, showTa = true, showCa = true
   const navigate = useNavigate();
   const location = useLocation();
   const openWorkout = (id: string) => void navigate(`/workouts/${id}`, { state: { from: `${location.pathname}${location.search}` } });
-  const data: ChartDatum[] = trend.daily.map((point) => ({
+  const data: ChartDatum[] = trend.daily.map((point,index) => ({
     date: point.date,
-    ta: point.trueAbility,
+    ta: index>0 && point.baselineEpochId !== trend.daily[index-1]?.baselineEpochId ? null : point.trueAbility,
     ca: null,
     confidence: null,
     decay: point.decayPoints
@@ -96,7 +96,7 @@ export function AbilityChart({ trend, height = 300, showTa = true, showCa = true
           <Tooltip content={<AbilityTooltip />} />
           {decayRanges.map((range) => <ReferenceArea key={`${range.start}-${range.end}`} x1={range.start} x2={range.end} fill="#d99a3d" fillOpacity={0.12} strokeOpacity={0} />)}
           {trend.modelRuns.map((run) => <ReferenceLine key={run.id} x={run.date.slice(0, 10)} stroke="#89938c" strokeDasharray="3 4" label={{ value: run.active ? "当前模型" : "模型运行", position: "insideTopRight", fontSize: 9, fill: "#6d786f" }} />)}
-          {showTa ? <Line type="monotone" dataKey="ta" name="真实跑力 TA" stroke="#1f6d4c" strokeWidth={2.2} dot={false} connectNulls /> : null}
+          {showTa ? <Line type="monotone" dataKey="ta" name="真实跑力 TA" stroke="#1f6d4c" strokeWidth={2.2} dot={false} connectNulls={false} /> : null}
           {showCa ? <Scatter data={caData} dataKey="ca" name="即时能力 CA" shape={<CaDot onActivate={openWorkout} />} fill="#d86a53" cursor="pointer" /> : null}
         </ComposedChart>
       </ResponsiveContainer>

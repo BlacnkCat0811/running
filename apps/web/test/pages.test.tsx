@@ -85,6 +85,11 @@ describe("page data presentation", () => {
         }
       },
       guidanceCodes: ["prediction_confidence_low"],
+      labelFunnel: {
+        sessionCount: 268, confirmedCount: 0, usableOutcomeCount: 0,
+        evaluatedOutcomeCount: 0, primaryRejections: { not_confirmed: 268 },
+        accuracyStatus: "not_evaluable"
+      },
       snapshot: {
         modelVersion: "rai-test-v1",
         vo2Max: { valueMlKgMin: 45, confidence: 0.6 },
@@ -112,6 +117,10 @@ describe("page data presentation", () => {
     expect(screen.getByText("20:00 至 22:00")).toBeTruthy();
     expect(screen.getByText("机器学习推理失败，本距离已回退到公式基线。")).toBeTruthy();
     expect(screen.getByText(/请把区间而不是单一点值作为主要参考/)).toBeTruthy();
+    expect(screen.getByText("参考区间（非 P80/P90 保证）")).toBeTruthy();
+    expect(screen.getByText("尚无合格标签，不能证明预测准确率或激活精度增强。")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "查看训练并确认已有结果" }).getAttribute("href")).toBe("/workouts");
+    expect(screen.getByText("未确认标准测试或比赛：268")).toBeTruthy();
   });
 
   it("does not show a cached workout preview while a different path is loading", () => {

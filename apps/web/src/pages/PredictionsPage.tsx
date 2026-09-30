@@ -42,6 +42,21 @@ const distanceKilometers: Record<RaceDistance, number> = {
   half_marathon: 21.0975
 };
 
+function labelRejectionText(code: string): string {
+  const labels: Record<string, string> = {
+    inactive_session: "已删除或非活动训练",
+    not_completed: "训练尚未完成",
+    not_confirmed: "未确认标准测试或比赛",
+    user_excluded: "用户已排除",
+    threshold_only_protocol: "仅用于阈值估计，不作为比赛成绩标签",
+    distance_missing: "距离缺失或无效",
+    unsupported_distance: "距离不符合当前比赛预测范围",
+    protocol_distance_mismatch: "所选测试协议与实际距离不匹配",
+    duration_or_pace_out_of_range: "时长或配速不满足标签质量要求"
+  };
+  return labels[code] ?? code;
+}
+
 const guidanceLabels: Record<PhysiologyGuidanceCode, string> = {
   direct_vo2_evidence_missing: "缺少 Apple Health VO₂max 直接记录，生理上限估计主要依赖训练表现。",
   standard_test_missing: "还没有用户确认的标准测试跑或比赛结果，成绩预测保持低置信。",
@@ -106,7 +121,7 @@ function RaceCard({ prediction }: { prediction: RaceTimePrediction }) {
       </article>
     );
   }
-  const readiness = Math.round((prediction.readiness ?? 0) * 100);
+  const readiness = prediction.readiness === null ? null : Math.round(prediction.readiness * 100);
   const distanceKm = distanceKilometers[prediction.distance];
   const potentialValue =
     prediction.potentialSeconds === null ? "--" : duration(prediction.potentialSeconds);
@@ -119,14 +134,22 @@ function RaceCard({ prediction }: { prediction: RaceTimePrediction }) {
       <header><h2>{label}</h2></header>
       <PredictionMetric icon="timer" label="生理潜力" value={potentialValue} detail={potentialDetail} />
       <PredictionMetric icon="medal" label="当前能力" value={duration(prediction.predictedSeconds)} detail={`相当配速 ${pace(prediction.predictedSeconds / distanceKm)} /km`} />
-      <PredictionMetric icon="clipboard" label="专项准备度" value={`${readiness}%`} detail={readiness >= 70 ? "良好" : readiness >= 60 ? "中等" : "待提升"} progress={readiness} />
+      <PredictionMetric icon="clipboard" label="专项准备度" value={readiness === null ? "--" : `${readiness}%`} detail={readiness === null ? "证据不足，不等于准备度低" : "训练暴露规则估计，未实证校准"} {...(readiness === null ? {} : { progress: readiness })} />
       <footer className="race-prediction-meta">
         <dl>
           <div><dt>方法</dt><dd>{predictionMethod(prediction.method)}</dd></div>
-          <div><dt>置信度</dt><dd>{Math.round(prediction.confidence * 100)}%</dd></div>
-          <div><dt>合理区间</dt><dd>{prediction.optimisticSeconds === null ? "--" : duration(prediction.optimisticSeconds)} 至 {prediction.pessimisticSeconds === null ? "--" : duration(prediction.pessimisticSeconds)}</dd></div>
+          <div><dt>证据可靠性（规则估计）</dt><dd>{Math.round(prediction.confidence * 100)}%</dd></div>
+          <div><dt>参考区间（非 P80/P90 保证）</dt><dd>{prediction.optimisticSeconds === null ? "--" : duration(prediction.optimisticSeconds)} 至 {prediction.pessimisticSeconds === null ? "--" : duration(prediction.pessimisticSeconds)}</dd></div>
         </dl>
-        {prediction.machineLearningFallbackReason === null ? null : <p className="prediction-fallback-note">{fallbackLabels[prediction.machineLearningFallbackReason]}</p>}
+        {prediction.intervalEvidence?.status === "empirically_evaluated" && prediction.intervalEvidence.p80 ? <p>
+          经验区间（目标覆盖 80%）：{duration(prediction.intervalEvidence.p80.lowerSeconds)} 至 {duration(prediction.intervalEvidence.p80.upperSeconds)}。
+          独立验证 {prediction.intervalEvidence.evaluationSamples} 场，实际覆盖 {number((prediction.intervalEvidence.coverageP80??0)*100,1)}%；不保证单场结果。
+        </p> : null}
+        {prediction.machineLearningFallbackReason === null ? null : <p className="prediction-fallback-note">{
+          prediction.machineLearningPolicyReason === "calibration_unavailable" ? "模型尚未通过独立区间校准，继续使用公式基线。"
+            : prediction.machineLearningPolicyReason === "ridge_not_validated" ? "模型缺少有效的简单模型对照验证，继续使用公式基线。"
+              : fallbackLabels[prediction.machineLearningFallbackReason]
+        }</p>}
       </footer>
     </article>
   );
@@ -146,7 +169,7 @@ function MarathonCard() {
 export function PredictionsPage() {
   const [draft, setDraft] = useState<ScenarioDraft>(emptyScenario);
   const [query, setQuery] = useState("");
-  const path = useMemo(() => `/v1/predictions${query}`, [query]);
+  const path = useMemo(() => `/v1/predictions${query || "?mode=current_prepared"}`, [query]);
   const report = useRemote<PredictionResponse>(path);
 
   const update = (key: keyof ScenarioDraft, value: string) => {
@@ -157,6 +180,10 @@ export function PredictionsPage() {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(draft)) {
       if (value.trim() !== "") params.set(key, value.trim());
+    }
+    if (params.size > 0) {
+      params.set("mode","race_day_scenario");
+      params.set("targetDate",new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Shanghai",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date()));
     }
     const next = params.size === 0 ? "" : `?${params.toString()}`;
     if (next === query) void report.reload();
@@ -212,7 +239,7 @@ export function PredictionsPage() {
           <span className="overview-icon heart"><Heartbeat size={40} weight="fill" /></span><div><span>阈值心率</span><strong>{snapshot.lactateThreshold.heartRateBpm === null ? "--" : Math.round(snapshot.lactateThreshold.heartRateBpm)}<small>bpm</small></strong><p><b>当前模型快照</b></p></div>
         </article>
         <article>
-          <span className="overview-icon battery"><ShieldCheck size={39} /></span><div><span>恢复准备度</span><strong>{recoveryScore == null ? "--" : <>{recoveryScore}<small>%</small></>}</strong><p><b>{recoveryScore == null ? "数据不足，已省略疲劳修正" : "基于当前恢复输入"}</b></p></div>
+          <span className="overview-icon battery"><ShieldCheck size={39} /></span><div><span>恢复准备度</span><strong>{recoveryScore == null ? "--" : <>{recoveryScore}<small>%</small></>}</strong><p><b>{recoveryScore == null ? "数据不足，已省略疲劳修正" : "近期背景规则估计，非医学评估"}</b></p></div>
         </article>
       </section>
 
@@ -220,6 +247,21 @@ export function PredictionsPage() {
         {snapshot.races.map((prediction) => <RaceCard key={prediction.distance} prediction={prediction} />)}
         <MarathonCard />
       </section>
+
+      {data.labelFunnel ? <section className="panel" aria-label="标签评估进度">
+        <h2>标签与验证进度</h2>
+        <p>训练 {data.labelFunnel.sessionCount} 次 → 已确认 {data.labelFunnel.confirmedCount} 次 → 合格比赛结果 {data.labelFunnel.usableOutcomeCount} 次 → 可回放评估 {data.labelFunnel.evaluatedOutcomeCount} 次。</p>
+        <p>{data.labelFunnel.accuracyStatus === "not_evaluable"
+          ? "尚无合格标签，不能证明预测准确率或激活精度增强。"
+          : "已有标签不代表通过发布门槛；仍需分距离、独立留出和区间验证。"}</p>
+        <p>请在已有训练详情的“标准测试 / 比赛”中确认真实结果。无需为凑标签增加训练或频繁进行全力测试。</p>
+        <Link to="/workouts">查看训练并确认已有结果</Link>
+        {Object.keys(data.labelFunnel.primaryRejections).length ? <details>
+          <summary>未进入评估的原因</summary>
+          <ul>{Object.entries(data.labelFunnel.primaryRejections).map(([code, count]) =>
+            <li key={code}>{labelRejectionText(code)}：{count}</li>)}</ul>
+        </details> : null}
+      </section> : null}
 
       <section className="panel scenario-panel">
         <div className="panel-heading"><div><h2>比赛场景</h2><p>调整温湿度和赛道爬升，仅重新计算预测，不修改历史数据或 CA/TA。</p></div></div>
@@ -248,7 +290,7 @@ export function PredictionsPage() {
             <div className="readiness-score">
               <span><b>{recoveryScore == null ? "--" : <>{recoveryScore}<small>%</small></>}</b></span>
               <strong>恢复准备度</strong>
-              <small>来自 API 恢复输入</small>
+              <small>近期背景规则估计，未实证校准</small>
             </div>
           </div>
         </article>

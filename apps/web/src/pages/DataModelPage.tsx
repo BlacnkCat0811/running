@@ -976,9 +976,16 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
                 <Database size={18} />
                 <span>
                   <b>{model.modelVersion}</b>
-                  <small>
+                  <small
+                    title={
+                      model.engineVersion === null || model.engineVersion === undefined
+                        ? "该模型运行写入时还没有引擎版本列，无法回填；不要拿当前引擎版本当作它的引擎"
+                        : `产出该运行的引擎：${model.engineVersion}`
+                    }
+                  >
                     {date(model.createdAt, true)} · {model.assessmentCount} 评分
                     · {model.snapshotCount} 日快照
+                    · 引擎 {model.engineVersion ?? "未知"}
                   </small>
                 </span>
                 <code>{model.modelConfigHash.slice(0, 10)}</code>
