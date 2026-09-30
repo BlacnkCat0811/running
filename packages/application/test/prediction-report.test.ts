@@ -5,6 +5,7 @@ import type { RaceTimePrediction } from "@rai/contracts";
 
 import {
   adjustPredictionWithCatBoost,
+  excludeCatBoostCorrectedDistances,
   historicalValuesAvailableAt
 } from "../src/prediction-report.js";
 
@@ -63,5 +64,45 @@ test("T01: a label or example that arrives later is invisible to an earlier as-o
   assert.deepEqual(
     historicalValuesAvailableAt(values, "2026-01-03T00:00:00.000Z"),
     ["late", "ready", "overlapping"]
+  );
+});
+
+/**
+ * §16.1 **P05** / §12.1：一个距离只能有一个点修正 policy，不许 bias 与 CatBoost 各修一次。
+ *
+ * 这条规则此前只以一行内联 filter 的形式存在于 `buildPredictionReport` 内 ——
+ * 而那条路径要开库、要有一个已激活的 CatBoost 模型才走得到，所以独立审计（2026-09-30）
+ * 判定它是"实现存在、测试不存在"。现在规则被提成纯函数，这里把它钉住。
+ */
+test("P05: a CatBoost-corrected distance is dropped from the bias-calibration list", () => {
+  const race = (distance: RaceTimePrediction["distance"], method: string) =>
+    ({ distance, method }) as unknown as RaceTimePrediction;
+
+  // CatBoost 修了半马 ⇒ 半马必须从 bias 名单里消失，10K 不受影响。
+  assert.deepEqual(
+    excludeCatBoostCorrectedDistances(
+      ["five_k", "ten_k", "half_marathon"],
+      [race("five_k", "daniels_vdot_conditions_v3"), race("ten_k", "daniels_vdot_conditions_v3"),
+       race("half_marathon", "catboost_residual_v6")]
+    ),
+    ["five_k", "ten_k"]
+  );
+
+  // 没有距离用 CatBoost ⇒ 名单原样保留（不是"一律清空"）。
+  assert.deepEqual(
+    excludeCatBoostCorrectedDistances(
+      ["five_k", "half_marathon"],
+      [race("five_k", "daniels_vdot_conditions_v3"), race("half_marathon", "race-residual-ridge-v1")]
+    ),
+    ["five_k", "half_marathon"]
+  );
+
+  // 名单里有但这一轮没有该距离的预测 ⇒ 没有证据说它被修正过，保留（保守方向）。
+  assert.deepEqual(excludeCatBoostCorrectedDistances(["ten_k"], []), ["ten_k"]);
+
+  // 全部被 CatBoost 修正 ⇒ 结果为空，而不是留下一个会二次修正的条目。
+  assert.deepEqual(
+    excludeCatBoostCorrectedDistances(["five_k"], [race("five_k", "catboost_residual_v6")]),
+    []
   );
 });

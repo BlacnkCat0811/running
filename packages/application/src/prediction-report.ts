@@ -814,6 +814,26 @@ function buildPredictionReportContext(
   } };
 }
 
+/**
+ * §12.1 / §16.1 **P05**：一个距离**只能有一个**点修正 policy。
+ *
+ * 这一条此前只以一行内联 `filter` 的形式存在于 `buildPredictionReport` 里，
+ * 而那个函数要开库、要有一个已激活的 CatBoost 模型才走得到 —— 于是 2026-09-30 的独立审计
+ * 给出的是"实现存在、**测试不存在**"：没有任何用例碰过这个排他过滤。
+ * 把规则提成纯函数，它就变成一个**能被单独钉住**的判据，而不是"某条我们跑不到的路径上的一行"。
+ *
+ * 语义：CatBoost 生效的距离，必须从 bias 校准的已应用名单里移除 ——
+ * 否则同一个距离会被 bias 与 CatBoost 各修一次，正是 §12.1 禁止的"三次修正"。
+ */
+export function excludeCatBoostCorrectedDistances(
+  appliedDistances: readonly RaceDistance[],
+  races: readonly RaceTimePrediction[]
+): RaceDistance[] {
+  return appliedDistances.filter(
+    (distance) => races.find((race) => race.distance === distance)?.method !== "catboost_residual_v6"
+  );
+}
+
 export function buildPredictionReport(
   database: DatabaseSync,
   options: PredictionReportOptions = {}
@@ -895,8 +915,9 @@ async function buildPredictionReportAsyncInternal(
       ...formulaReport.modelSelection,
       biasCalibration: {
         ...formulaReport.modelSelection.biasCalibration,
-        appliedDistances: formulaReport.modelSelection.biasCalibration.appliedDistances.filter(
-          (distance) => races.find((race) => race.distance === distance)?.method !== "catboost_residual_v6"
+        appliedDistances: excludeCatBoostCorrectedDistances(
+          formulaReport.modelSelection.biasCalibration.appliedDistances,
+          races
         )
       },
       machineLearning: { ...baseSelection(), status }
