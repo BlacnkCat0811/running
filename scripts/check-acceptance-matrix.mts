@@ -27,21 +27,20 @@ const planPath = join(root, "deliverables", "RAI_ALGORITHM_V2_OPTIMIZATION_2026-
  * 未经 ID 引用、但**有意**如此的条目。每条都必须写明"哪一半有测试 / 缺的是哪一半"，
  * 而不是一句"暂未覆盖"—— 后者会让这个清单变成掩盖缺口的垃圾桶。
  */
-const KNOWN_GAPS: Record<string, string> = {
-  // F08 于 2026-09-30 从本表移出：它对检测器一侧已被引用（见
-  // packages/features/test/speed-plausibility.test.ts 与
-  // deliverables/SPEED_PLAUSIBILITY_INVENTORY.json），剩下未接线的「门控效果」
-  // 属于 §17.3 的待回放事项，记在状态文档而不是这里 —— 声明过期必须删，
-  // 否则缺口清单会变成装饰。
-  // P02 于 2026-09-30 从本表移出：§5.5 责任账本现在记录每一步的 object/owner/inputHash，
-  // 并由 @rai/model-eval 的 assertPredictionCorrectionLedger 断言
-  // 「同一 (kind, object, inputHash) 至多应用一次」与「历史去偏差不得出现在 potentialSeconds 之后」。
-  // 8 条专测 + 在 P03 的整链路用例里就地生效。
-  // 保留的诚实边界：目前只有一个层（N0 identity + performanceVdotEvidence），
-  // 所以"两层各去一次"是构造出来的，不是线上可复现的 —— 但账本的职责正是**阻止**它，
-  // 而阻止这一点是可断言的。N2 落地后应再加一条"两个真实 owner"的用例。
-  P04: "race-evidence 的**单次预算**有测试（durability.test.ts 拒绝同一比赛的第二次全额声明），但「Preparation 与 Durability 使用同源信息时不重复扣罚」需要 durability 数值罚分**启用后**才有可断言的路径；当前 penalty 按设计是关闭的。"
-};
+// 2026-09-30：本表已空。§16.1 的 54 条全部由按 ID 引用的测试覆盖（cited 54 / gap 0 / missing 0）。
+// 空表是有意的：缺口声明只在**确实缺**的时候存在；一旦被引用就必须删掉，
+// 否则它会从"当前缺口"退化成"历史存档"。
+//
+// 两条已经移出的记录留在这里，因为它们各自带着一条**仍然有效的边界**：
+//   F08 — 检测器已引用（packages/features/test/speed-plausibility.test.ts 与
+//         deliverables/SPEED_PLAUSIBILITY_INVENTORY.json）；但"门控效果"仍属 §17.3 待回放，
+//         所以 F08 作为验收项的被引用**不等于**正向异常门控已经上线。
+//   P02 — §5.5 责任账本记录 object/owner/inputHash，断言"同一 (kind, object, inputHash)
+//         至多应用一次"与"历史去偏差不得出现在 potentialSeconds 之后"。
+//         边界：目前只有一个层（N0 identity + performanceVdotEvidence），
+//         所以"两层各去一次"是构造出来的，不是线上可复现的；N2 落地后应再加一条
+//         "两个真实 owner"的用例。
+const KNOWN_GAPS: Record<string, string> = {};
 
 function collectTestFiles(directory: string, found: string[] = []): string[] {
   for (const entry of readdirSync(directory)) {

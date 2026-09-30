@@ -128,3 +128,80 @@ test("P02: non-finite endpoints are refused before any arithmetic", () => {
     /must be finite/
   );
 });
+
+/**
+ * §16.1 **P04**：Preparation + Durability 使用同源信息时不重复扣罚。
+ *
+ * §8.2 把两者定义为**不同职责**（Preparation = 训练暴露；Durability = 长持续运动后
+ * 表现是否维持），§8.5 D3 要求二者重复时"合并/替换对应项，而不是继续叠加 penalty"。
+ * 判据因此是**证据身份**：durability 若声明与 preparation 相同的 inputHash，
+ * 它就不是独立证据，而是把同一份暴露又罚了一次。
+ */
+
+const prepAndDurability = (
+  durabilityInputHash: string,
+  preparationInputHash = "exposure-56d"
+): PredictionCorrectionLedger => ({
+  distance: "half_marathon",
+  potentialSeconds: 1200,
+  predictedSeconds: 1185,
+  steps: [
+    {
+      kind: "preparation", object: null, ownerVersion: "rai-durability-v1.0.0",
+      inputHash: preparationInputHash, applied: true,
+      beforeSeconds: 1200, afterSeconds: 1195, reasonCodes: ["preparation_prior"]
+    },
+    {
+      kind: "durability", object: null, ownerVersion: "rai-durability-v1.0.0",
+      inputHash: durabilityInputHash, applied: true,
+      beforeSeconds: 1195, afterSeconds: 1185, reasonCodes: ["late_run_stability"]
+    }
+  ]
+});
+
+test("P04: durability may adjust on top of preparation when it brings independent evidence", () => {
+  assert.doesNotThrow(() => assertPredictionCorrectionLedger(prepAndDurability("late-run-stability-8w")));
+});
+
+test("P04: durability re-using the preparation evidence is the same penalty twice", () => {
+  assert.throws(
+    () => assertPredictionCorrectionLedger(prepAndDurability("exposure-56d")),
+    /consumes the same evidence as the preparation step/
+  );
+  // 报错必须点名两个 owner，否则读的人不知道该改哪一侧。
+  assert.throws(
+    () => assertPredictionCorrectionLedger(prepAndDurability("exposure-56d")),
+    /rai-durability-v1\.0\.0/
+  );
+});
+
+test("P04: only *applied* steps count — a recorded-but-unapplied durability step is harmless", () => {
+  const steps = prepAndDurability("exposure-56d").steps.map((entry) =>
+    entry.kind === "durability" ? { ...entry, applied: false, afterSeconds: entry.beforeSeconds } : entry
+  );
+  assert.doesNotThrow(() => assertPredictionCorrectionLedger({
+    distance: "half_marathon", potentialSeconds: 1200, predictedSeconds: 1195, steps
+  }));
+});
+
+test("P04: a durability step that declares no evidence identity cannot collide", () => {
+  // inputHash=null 表示"不声明证据身份"。它不会与 preparation 撞车，
+  // 但也因此**不受**规则 4 保护 —— 这是声明身份的价值所在。
+  assert.doesNotThrow(() => assertPredictionCorrectionLedger(prepAndDurability(null as unknown as string)));
+});
+
+test("P04: two durability steps on the same evidence are still caught by rule 2", () => {
+  const base = prepAndDurability("late-run-stability-8w");
+  assert.throws(
+    () => assertPredictionCorrectionLedger({
+      ...base,
+      predictedSeconds: 1175,
+      steps: [...base.steps, {
+        kind: "durability", object: null, ownerVersion: "second-owner",
+        inputHash: "late-run-stability-8w", applied: true,
+        beforeSeconds: 1185, afterSeconds: 1175, reasonCodes: ["duplicate"]
+      }]
+    }),
+    /already applied by rai-durability-v1\.0\.0, now again by second-owner/
+  );
+});

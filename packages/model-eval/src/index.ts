@@ -22,7 +22,7 @@ export const MODEL_EVAL_VERSION = "rai-model-eval-v1" as const;
 export type CorrectionObject = "historical_evidence" | "target_scenario" | null;
 
 export interface PredictionCorrectionStep {
-  kind: "preparation" | "environment" | "elevation" | "acute_readiness" | "catboost";
+  kind: "preparation" | "durability" | "environment" | "elevation" | "acute_readiness" | "catboost";
   object: CorrectionObject;
   /** 是谁做的这一步。同一步责任重复出现时，owner 会不同 —— 那正是要抓的形状。 */
   ownerVersion: string;
@@ -99,6 +99,28 @@ export function assertPredictionCorrectionLedger(ledger: PredictionCorrectionLed
         `${where}: step ${step.kind} de-biases historical evidence after potentialSeconds was formed ` +
           `(owner ${step.ownerVersion}). potentialSeconds is by definition post-normalisation; ` +
           `applying it here means the same historical penalty was removed twice (§5.5)`
+      );
+    }
+  }
+
+  // 规则 4（§8.2 / §8.5 D3 / P04）：Preparation 与 Durability 是**两个不同职责**，
+  // 但它们不能吃同一份证据。若 durability 声明了与 preparation 相同的 inputHash，
+  // 说明它不是"后段表现是否维持"的独立证据，而是把同一份训练暴露又罚了一次 ——
+  // 那正是本方案要求"合并/替换对应项，而不是继续叠加 penalty"的形状。
+  const preparationEvidence = new Map<string, string>();
+  for (const step of ledger.steps) {
+    if (step.applied && step.kind === "preparation" && step.inputHash !== null) {
+      preparationEvidence.set(step.inputHash, step.ownerVersion);
+    }
+  }
+  for (const step of ledger.steps) {
+    if (!step.applied || step.kind !== "durability" || step.inputHash === null) continue;
+    const preparationOwner = preparationEvidence.get(step.inputHash);
+    if (preparationOwner !== undefined) {
+      throw new Error(
+        `${where}: durability step (owner ${step.ownerVersion}) consumes the same evidence as the ` +
+          `preparation step (owner ${preparationOwner}); that penalises one piece of training exposure twice. ` +
+          `Durability must bring independent post-fatigue performance evidence, or the two must be merged (§8.2)`
       );
     }
   }

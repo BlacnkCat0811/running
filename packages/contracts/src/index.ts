@@ -1016,7 +1016,7 @@ export interface PhysiologyPredictionReport {
     corrections: Array<{
       distance: RaceDistance;
       steps: Array<{
-        kind: "preparation" | "environment" | "elevation" | "acute_readiness" | "catboost";
+        kind: "preparation" | "durability" | "environment" | "elevation" | "acute_readiness" | "catboost";
         /**
          * §5.5：这一步作用于哪个对象。`target_scenario` 是"未来比赛情景"，
          * `historical_evidence` 是"过去表现去偏差"。后者**不得**以 applied=true 出现在
