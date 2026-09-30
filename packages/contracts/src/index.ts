@@ -1017,7 +1017,20 @@ export interface PhysiologyPredictionReport {
       distance: RaceDistance;
       steps: Array<{
         kind: "preparation" | "environment" | "elevation" | "acute_readiness" | "catboost";
+        /**
+         * §5.5：这一步作用于哪个对象。`target_scenario` 是"未来比赛情景"，
+         * `historical_evidence` 是"过去表现去偏差"。后者**不得**以 applied=true 出现在
+         * 这条链上 —— `potentialSeconds` 的定义已经是历史归一化之后（见 @rai/model-eval 的账本断言）。
+         * `null` 表示该 kind 不区分对象。
+         */
+        object: "historical_evidence" | "target_scenario" | null;
+        /** 谁做的这一步。同一步责任被两个 owner 各做一次时要靠它说清是谁。 */
+        ownerVersion: string;
+        /** 这一步去的是哪份证据。同一份证据被去两次 ⇒ §5.5 违规。无法声明时为 null。 */
+        inputHash: string | null;
+        applied: boolean;
         beforeSeconds: number; afterSeconds: number;
+        reasonCodes: string[];
       }>;
     }>;
   };

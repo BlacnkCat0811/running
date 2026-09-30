@@ -4,7 +4,8 @@ import type { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import {
   MODEL_EVAL_VERSION, fitEmpiricalIntervals, evaluateIntervalArtifact,
-  compareResidualChallengers, predictionMetrics, type EvaluationCase
+  compareResidualChallengers, predictionMetrics, assertPredictionCorrectionLedger,
+  type EvaluationCase
 } from "@rai/model-eval";
 
 import { DATABASE_TIMEZONE,
@@ -13,6 +14,7 @@ import { DATABASE_TIMEZONE,
   PHYSIOLOGY_REPORT_VERSION,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
   assertPhysiologyPredictionSnapshot,
+  canonicalSemanticJson,
   type PhysiologyGuidanceCode,
   type PhysiologyPredictionReport,
   type PhysiologyPredictionScenario,
@@ -726,12 +728,35 @@ function buildPredictionReportContext(
             ["elevation", race.elevationAdjustmentSeconds],
             ["acute_readiness", race.fatigueAdjustmentSeconds]
           ] as const;
+          // §5.5 责任账本：环境与爬升作用的是**目标比赛情景**这个对象，不是历史证据。
+          // 目标情景就是本函数里的 `scenario`（environment/elevation 两步消费它），
+          // 所以 inputHash 可以是真的 —— 同一份情景被去两次时，规则 2 抓得住。
+          const scenarioHash = createHash("sha256")
+            .update(canonicalSemanticJson(scenario))
+            .digest("hex");
           const steps = adjustments.map(([kind, adjustment]) => {
             const beforeSeconds = seconds;
             seconds += adjustment ?? 0;
-            return { kind, beforeSeconds, afterSeconds: seconds };
+            const applied = (adjustment ?? 0) !== 0;
+            return {
+              kind,
+              object: kind === "environment" || kind === "elevation" ? ("target_scenario" as const) : null,
+              ownerVersion: PHYSIOLOGY_MODEL_VERSION,
+              inputHash: kind === "environment" || kind === "elevation" ? scenarioHash : null,
+              applied,
+              beforeSeconds,
+              afterSeconds: seconds,
+              // 零步必须说明为什么，否则"应用了什么也没改"这一步无法与"漏了一整类修正"区分。
+              reasonCodes: applied ? [`${kind}_adjustment_applied`] : [`${kind}_adjustment_not_needed`]
+            };
           });
           if (Math.abs(seconds - race.predictedSeconds) > 1e-6) throw new Error("Prediction correction ledger mismatch");
+          assertPredictionCorrectionLedger({
+            distance: race.distance,
+            potentialSeconds: race.potentialSeconds,
+            predictedSeconds: race.predictedSeconds,
+            steps
+          });
           return [{ distance: race.distance, steps }];
         })
       }
@@ -840,8 +865,31 @@ async function buildPredictionReportAsyncInternal(
       corrections:formulaReport.predictionPolicy.corrections.map((row)=>{
         const race=races.find((r)=>r.distance===row.distance);
         const before=row.steps.at(-1)?.afterSeconds;
-        return race?.method==="catboost_residual_v6" && race.predictedSeconds!==null && before!==undefined
-          ? {...row,steps:[...row.steps,{kind:"catboost" as const,beforeSeconds:before,afterSeconds:race.predictedSeconds}]}:row;
+        if (race?.method!=="catboost_residual_v6" || race.predictedSeconds===null || before===undefined) return row;
+        // §12.1 / P05：这是**唯一**的点修正（不叠 bias/Ridge/CatBoost）。
+        // 它同样要进 §5.5 的责任账本：声明 owner 与所消费的模型身份，
+        // 并在追加后重新走一遍账本断言 —— 不这么做，追加的这一步会绕过校验。
+        const changed = Math.abs(race.predictedSeconds - before) > 1e-6;
+        const steps = [...row.steps, {
+          kind: "catboost" as const,
+          object: null,
+          ownerVersion: CATBOOST_PREDICTION_MODEL_VERSION,
+          inputHash: formulaReport.modelSelection.machineLearning.artifactSha256,
+          applied: changed,
+          beforeSeconds: before,
+          afterSeconds: race.predictedSeconds,
+          reasonCodes: [changed ? "catboost_point_correction_applied" : "catboost_point_correction_identity"]
+        }];
+        const potentialSeconds = row.steps[0]?.beforeSeconds;
+        if (potentialSeconds !== undefined) {
+          assertPredictionCorrectionLedger({
+            distance: row.distance,
+            potentialSeconds,
+            predictedSeconds: race.predictedSeconds,
+            steps
+          });
+        }
+        return {...row, steps};
       })}}:{}),
     modelSelection: {
       ...formulaReport.modelSelection,

@@ -34,7 +34,7 @@
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
 | **只读工具链全量实跑** | 8 个已文档化的 CLI/脚本，逐一实跑 | **全部 exit=0**（见下） |
-| §16.1 验收矩阵 | `npm run check:acceptance-matrix` | **54 条 / cited 51 / declared-gap 3 / missing 0** |
+| §16.1 验收矩阵 | `npm run check:acceptance-matrix` | **54 条 / cited 53 / declared-gap 1 / missing 0** |
 | 包边界 | `npm run check:package-boundaries` | **15 个包 / 30 条 src 边 / 禁线 4 条 → 通过** |
 | 速度合理性盘点 | `npm run data:speed-plausibility` | **11835 样本 / 0 越界**（只读，exit 0） |
 
@@ -66,19 +66,21 @@
 | 状态 | 含义 | 数量 |
 |---|---|---|
 | `cited` | 测试里按 ID 引用（机械可查 `\bID\b`） | **51** |
-| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **3** |
+| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **1**（仅 P04） |
 | `missing` | 既未引用也未声明 | **0**（非 0 即失败，退出码 1） |
 
 本轮把 30 条**本来就已被测试覆盖、只是没按 ID 引用**的用例补上了引用
 （沿用仓库既有的 `D03:` / `L04:` 前缀约定），19 → 49。
 
-`KNOWN_GAPS` 的 5 条（每条都写明了"哪一半有测试、缺的是哪一半"，不允许空泛写"待补"）：
+`KNOWN_GAPS` 的 **1** 条（每条都写明"哪一半有测试、缺的是哪一半"，不允许空泛写"待补"）：
 
 | ID | 缺的是什么 |
 |---|---|
-| **F08** | 快速下坡/速度尖峰。检测器已落地并有 8 条用例，**检测率盘点已实测**（11835 样本 / 0 越界，见 §五-3）；仍未接线进学习门控 —— 那一步 §17.3 要求回放 |
-| **P02** | 环境去偏差的单层行为有测试；「同一历史环境被两层各去一次」的 ledger 断言没有 —— 当前只有 N0 identity adapter，没有第二层 |
 | **P04** | race-evidence 单次预算有测试；「Preparation 与 Durability 不重复扣罚」要等 durability 数值罚分启用后才有可断言的路径 |
+
+> **F08 / P02 已分别于批次 34 / 35 关闭**：F08 的检测器与检测率盘点见 §五-3；
+> P02 的环境责任账本见 §五-10。检查脚本自己的**过期声明守卫**两次逼我删掉已经过时的缺口声明
+> —— 缺口清单只能记"现在缺什么"，不能变成历史存档。
 
 
 > **F02 已于批次 28 关闭**：新增一条用例在**同一对事实源**上同时断言两半
@@ -130,7 +132,7 @@
 
 ---
 
-## 五、本状态文档新增的九条可执行结论
+## 五、本状态文档新增的十条可执行结论
 
 ### 1. 负向学习的瓶颈已定位到**可靠性门槛**（不是可比性、不是 K）
 
@@ -365,6 +367,40 @@ D 未列边）；往白名单塞一条不存在的边 ⇒ 报"已不存在，请
 > **一个必须记下来的自伤**：这个检查的第一版用了过宽的正则 `/@rai\/api/` 来识别"app 依赖"，
 > 而 `@rai/api-contracts` 是**合法的契约包** —— 于是它报了 **57 处假阳性**。
 > 假阳性比漏报更能毁掉一个门禁：它逼人把检查关掉。修正后只剩 1 处真阳性。
+
+### 10. ✅ P02：环境责任账本从"能重建"升级到"能认出重复"
+
+§5.5 允许"过去热天去偏差 + 未来热天加情景"（**两个不同对象**），
+禁止"同一历史热惩罚被 adapter 与 `performanceVdotEvidence` 各去一次"。
+
+实测：现行账本已经能验证 `after − before` 逐项重建最终成绩，但它**不记录每一步作用于什么证据**。
+于是最危险的那种重复恰好漏网 —— 若某个 owner 把热惩罚折进 `potentialSeconds`（账本起点**之前**），
+链式重建照样成立、断言照样通过，而惩罚已经扣了两次。
+
+现在 `PredictionCorrectionStep` 声明 `object` / `ownerVersion` / `inputHash` / `applied` / `reasonCodes`，
+由 `@rai/model-eval` 的 `assertPredictionCorrectionLedger` 断言三条规则：
+
+| 规则 | 内容 |
+|---|---|
+| 1 重建 | applied 步骤按序叠加必须精确得到 `predictedSeconds`；每个 applied 步骤边界必须有限；**零变化且无理由的 applied 步骤**被拒（否则"什么都没改"与"漏了一整类修正"无法区分） |
+| 2 不重复责任 | 同一 `(kind, object, inputHash)` 至多一个 `applied: true`，报错时**点名两个 owner** |
+| 3 历史去偏差不得出现在 potential 之后 | `potentialSeconds` 的定义就是历史归一化之后；该步以 `applied: true` 出现在这条链上即判违规 |
+
+`inputHash` 在真实路径上**不是占位符**：environment/elevation 两步消费的就是
+`report` 的目标情景，所以取它的语义 hash —— 同一份情景被去两次时规则 2 抓得住。
+
+**两处接线**，且第二处追加步骤后会**重新走一遍断言**（否则追加的那一步会绕过校验）：
+主链在 `buildPredictionReportContext`，CatBoost 点修正在 `withSelection`。
+
+**突变验证（含一次自我纠正）**：把 environment 步的 `object` 改成 `historical_evidence`。
+第一次只跑了 `prediction-report.test.ts` ⇒ **3 passed / 0 failed**，看起来像"断言没牙"。
+按批次 25 的纪律先怀疑"路径没走到"，改跑整个 `packages/application/test` ⇒
+**`not ok 558 - P03: V2 prediction modes ... reconstructible correction ledger` 转红**。
+即：**是文件选错了，不是断言无效** —— 这条规则的就地验证落在 P03 的整链路用例里。
+
+**保留的诚实边界**：目前只有一个层（N0 identity + `performanceVdotEvidence`），
+所以"两层各去一次"是**构造出来的**，不是线上可复现的。账本的职责正是**阻止**它，
+而"阻止"这一点是可断言的；N2 落地后应再加一条"两个真实 owner"的用例。
 
 ---
 

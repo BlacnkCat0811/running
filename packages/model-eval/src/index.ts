@@ -2,6 +2,108 @@ import { canonicalSemanticJson, type RaceDistance } from "@rai/contracts";
 
 export const MODEL_EVAL_VERSION = "rai-model-eval-v1" as const;
 
+// -----------------------------------------------------------------------------
+// §5.5 / P02 环境责任账本：阻止**同一历史环境被去偏差两次**
+//
+// §5.5 允许"过去热天去偏差 + 未来热天加情景"，因为那是两个**不同对象**；
+// 它禁止的是"同一历史热惩罚被 adapter 与 performanceVdotEvidence 各去一次"。
+//
+// 实测（2026-09-30）：现行账本已经能验证 `after−before` 逐项重建最终结果
+// （`prediction-report.ts` 里的 "Prediction correction ledger mismatch"），
+// 但它**不记录每一步作用于什么证据**。于是最危险的那种重复恰恰漏网：
+// 若 adapter 把热惩罚折进 `potentialSeconds`（账本起点之前），
+// 链式重建照样成立、断言照样通过，而惩罚已经扣了两次。
+//
+// 所以这里补两件事：每一步声明 `object`（作用于哪个对象）与 `inputHash`（去的是哪份证据），
+// 然后断言两条规则 —— 见 `assertPredictionCorrectionLedger`。
+// -----------------------------------------------------------------------------
+
+/** 一步修正作用于哪个对象。`null` 表示该 kind 不区分对象。 */
+export type CorrectionObject = "historical_evidence" | "target_scenario" | null;
+
+export interface PredictionCorrectionStep {
+  kind: "preparation" | "environment" | "elevation" | "acute_readiness" | "catboost";
+  object: CorrectionObject;
+  /** 是谁做的这一步。同一步责任重复出现时，owner 会不同 —— 那正是要抓的形状。 */
+  ownerVersion: string;
+  /** 这一步去的是哪份证据。同一份证据被两个 owner 各去一次 ⇒ 违规。 */
+  inputHash: string | null;
+  applied: boolean;
+  beforeSeconds: number;
+  afterSeconds: number;
+  reasonCodes: string[];
+}
+
+export interface PredictionCorrectionLedger {
+  distance: RaceDistance;
+  potentialSeconds: number;
+  predictedSeconds: number;
+  steps: readonly PredictionCorrectionStep[];
+}
+
+/**
+ * §11.6 的 `after−before` 重建 + §5.5 的"一次修正一项责任"。
+ *
+ * 规则：
+ * 1. **重建**：把 `applied` 的步骤按序叠加到 `potentialSeconds`，必须精确得到 `predictedSeconds`。
+ * 2. **不重复责任**：同一 `(kind, object, inputHash)` 至多一个 `applied: true`。
+ * 3. **历史去偏差不得出现在潜在能力之后**：`potentialSeconds` 的定义就是"历史证据已归一化之后"的
+ *    中性能力，所以 `object = historical_evidence` 的步骤出现在这条链上，意味着历史惩罚
+ *    已经被上游扣过一次 —— 这正是 §5.5 禁止的重复。它必须记为 `applied: false` 的说明性记录。
+ */
+export function assertPredictionCorrectionLedger(ledger: PredictionCorrectionLedger): void {
+  const where = `correction ledger (${ledger.distance})`;
+  if (!Number.isFinite(ledger.potentialSeconds) || !Number.isFinite(ledger.predictedSeconds)) {
+    throw new Error(`${where}: potentialSeconds and predictedSeconds must be finite`);
+  }
+
+  // 规则 1：重建。
+  let reconstructed = ledger.potentialSeconds;
+  for (const step of ledger.steps) {
+    if (!Number.isFinite(step.beforeSeconds) || !Number.isFinite(step.afterSeconds)) {
+      throw new Error(`${where}: step ${step.kind} has a non-finite boundary`);
+    }
+    if (step.applied) reconstructed += step.afterSeconds - step.beforeSeconds;
+  }
+  if (Math.abs(reconstructed - ledger.predictedSeconds) > 1e-6) {
+    throw new Error(
+      `${where}: applied steps rebuild ${reconstructed} but predictedSeconds is ${ledger.predictedSeconds}`
+    );
+  }
+  // 每个 applied 步骤自己的 before/after 也必须自洽，否则"重建"可能靠两个错误互相抵消。
+  for (const step of ledger.steps) {
+    if (step.applied && step.afterSeconds - step.beforeSeconds === 0 && step.reasonCodes.length === 0) {
+      throw new Error(`${where}: applied step ${step.kind} changes nothing and gives no reason`);
+    }
+  }
+
+  // 规则 2：同一份证据、同一个对象，至多被去一次。
+  const seen = new Map<string, string>();
+  for (const step of ledger.steps) {
+    if (!step.applied) continue;
+    const key = `${step.kind}|${step.object ?? "-"}|${step.inputHash ?? "-"}`;
+    const previous = seen.get(key);
+    if (previous !== undefined) {
+      throw new Error(
+        `${where}: ${step.kind} on ${step.object ?? "-"} already applied by ${previous}, ` +
+          `now again by ${step.ownerVersion} (§5.5 一次修正一项责任)`
+      );
+    }
+    seen.set(key, step.ownerVersion);
+  }
+
+  // 规则 3：历史去偏差不能出现在潜在能力之后的链上。
+  for (const step of ledger.steps) {
+    if (step.applied && step.object === "historical_evidence") {
+      throw new Error(
+        `${where}: step ${step.kind} de-biases historical evidence after potentialSeconds was formed ` +
+          `(owner ${step.ownerVersion}). potentialSeconds is by definition post-normalisation; ` +
+          `applying it here means the same historical penalty was removed twice (§5.5)`
+      );
+    }
+  }
+}
+
 export interface EvaluationCase {
   eventId: string;
   distance: RaceDistance;
