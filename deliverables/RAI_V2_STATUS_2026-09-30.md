@@ -16,7 +16,8 @@
 
 ## 一、一句话结论
 
-方案主干（P0/P1 的工程边界）**已实施并逐条有测试**；§16.1 的验收矩阵改为**可执行判据**：54 条中 49 条按 ID 被引用、5 条在检查脚本里逐条声明缺哪一半、0 条既未引用也未声明（§三）。
+方案主干（P0/P1 的工程边界）**已实施并逐条有测试**；§16.1 的验收矩阵改为**可执行判据**：54 条中 51 条按 ID 被引用、3 条在检查脚本里逐条声明缺哪一半、0 条既未引用也未声明（§三）。
+§18.5 的最终验收条件逐条走查见 §九：**8 条工程条全部满足**，4 条精度条**全部 `not_evaluable`**（0 标签）。
 剩余的不是"还没写"，而是三类**不能靠写代码解决**的事：**被真实标签阻塞**、**被天气数据阻塞**、
 **需要新增政策且必须先回放**。精度增强（ML、经验区间、Durability 数值、耐久罚分）**全部未激活**，
 且**不应**在没有独立标签的情况下激活。
@@ -418,3 +419,49 @@ D 未列边）；往白名单塞一条不存在的边 ⇒ 报"已不存在，请
 **需要新政策（必须先回放）**
 
 9. F08 的速度合理性检测器：先做**检测率盘点**（报告而不猜测），再决定是否成为门控。
+
+---
+
+## 九、§18.5 最终验收条件逐条走查
+
+方案的收尾条件分三块：**8 条工程发布条件**、**R1 新增合同闭合**、**4 条精度增强条件**。
+本节逐条给出**证据**，而不是结论；每条证据都落到 §16.1 的用例 ID 上 ——
+那些 ID 的"确有测试"由 `npm run check:acceptance-matrix` 机械保证（§三），
+所以这张表不会随代码漂移而悄悄失真。
+
+### 9.1 工程发布条件（§18.5 第 1–8 条）—— **8/8 满足**
+
+| # | 条件 | 证据（§16.1 ID → 落点） | 判定 |
+|---|---|---|---|
+| 1 | Fitness 恢复隔离全链路成立，缺失不被错误学习 | **F01** 从**原始事实装配入口**跑（不是只构造 feature 再调 scoring），外加 **F02** 跨域组合、**F05** 展示收缩不产生负学习、**F07** 无需数值修正也能下调、**R03** 有值无基线不算可比证据 | ✅ |
+| 2 | 历史/可得时间、baseline epoch、模型/config/schema 一致 | `ModelLineageV2` 十五字段（`domain-snapshot-narrowing.test.ts` 15 例）；**S03** 旧 checkpoint + 新 config/schema 拒绝复用；v24 迁移测试；`MODEL_VERSION_REPLAY_2026-09-30.json` 带 `featureSnapshotSha256` + `repoRevision` | ✅ |
+| 3 | 新旧合同兼容、无 checkpoint 跨版本复用 | **S03**；`MODEL_CHECKPOINT_VERSION` 由 v1→v2 正是为了让缺 `pendingNegativeIds` 的旧 checkpoint **无法**被恢复成新形状（理由写在 `service-types.ts` 的字段注释里） | ✅ |
+| 4 | Load/Zone 既有数值主线在未改政策时一致 | **L01** "load vector passes compositeLoad through untouched（§9.6 golden parity）"、**L02/L03/L04**、**Z01** 手工生效日期、**Z03** 短暂分歧不算持续冲突 | ✅ |
+| 5 | Prediction 无重复 correction，未知状态如实表达 | **P05** 只允许**一个** point correction policy（不叠 bias/Ridge/CatBoost）、**I01** 区间嵌套且独立评估、**I02** 无校准时只保留 heuristic 范围 | ✅ |
+| 6 | Coach 不重算底层规则，理由与动作一致 | **C01** 换语言后 action/tone/codes 不变（`mobile-coach-snapshot-parity.test.ts`）、`readiness-delegation.test.ts` 断言 wrapper 只是别名而不是第二份阈值 | ✅ |
+| 7 | 发布原子性、generation 校验、失败回退、旧工件保留经过测试 | **S01** 失败/过期/变更快照被拒且旧结果可读、**S04** prune 不删活跃与回滚依赖、**S02** 跨标尺走 transition gate 而不填伪值 | ✅ |
+| 8 | 性能报告真实测量，不引用跨条件拼接的"提速" | 项目里**恰好有一次这类错误并已被更正**：`SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` 的 B5 原以"实测 **21.7 s → 3.0 s**（约 6×）"为改动理由，2026-09-21 被受控探针推翻 —— 预热缓存、3 轮中位数、单一变量下是 **5,790 ms → 6,919 ms（慢约 19%）**；"21.7 s"出自冷首跑、"3.0 s"冷热都不出现，**正是跨条件拼接**。该行同时记下"工具整体比改动前更慢"。`docs/BACKEND_REFACTOR_IMPLEMENTATION.md` 亦明确"未在云服务器/N100 上部署；尚无真实用户数据的提速比例" | ✅ |
+
+### 9.2 R1 新增合同闭合 —— **6/6 满足**
+
+| 合同 | 证据 | 判定 |
+|---|---|---|
+| Readiness state 级 heuristic 标记 | **R06**：旧恢复阈值命中任意 state 时 `stateEvidence` 仍为 `heuristic_rules` / `not_empirically_validated`，且消费端保留 | ✅ |
+| confidence null 传播 | **F14**（`modelConfidence=null` 但规则因子有效 ⇒ E 有值、overall=null）、**F15**（null / 0 / NaN 三种情形分别处理，无默认填补） | ✅ |
+| 分桶配置与双向接受率报告 | **F12**（稀疏桶双向都不可学）、**F11**（消融报告契约）、**F13**（分层接受率与检测延迟入契约） | ✅ |
+| rebase 用户解释 | **B03**（检查不等于自动切换，理由/样本/epoch 可追溯）；曲线分段与"两侧不可直接比较"文案见 `AbilityChart.tsx` | ✅ |
+| 标签漏斗 | **T03**（不合格/重复/更正/撤销都对得上账、理由可见） | ✅ |
+| 区间产品文案 | 两个**不同界面**各有断言，不是一句话覆盖两个面：`apps/web/test/pages.test.tsx` 在 **PredictionsPage** 上断言"参考区间（**非 P80/P90 保证**）"、"请把区间而不是单一点值作为主要参考"、"尚无合格标签，不能证明预测准确率或激活精度增强"；`historical-model-review.test.tsx` 检查**禁用措辞**（医学阈值/确诊/保证性结论）并以 **R06** 断言保存的 readiness 状态保留 heuristic 标签 | ✅ |
+
+### 9.3 精度增强条件（§18.5 第 9–12 条）—— **4/4 `not_evaluable`**
+
+| # | 条件 | 现状 | 判定 |
+|---|---|---|---|
+| 9 | 充分且无泄漏的已标记结果；目标距离逐项达标 | `labeledOutcomeCount = 0`（284 条 workout / 0 条已确认比赛或标准测试） | ❌ **`not_evaluable`** |
+| 10 | CatBoost 同时优于适用基线和 Ridge，并满足既有强门槛 | `prediction_model_runs = 0`；无训练记录 | ❌ **`not_evaluable`** |
+| 11 | 区间独立校准、独立测试、coverage/width/样本同时合格 | 无 calibration artifact；四份产物的 `notEvaluable` 均列出该项 | ❌ **`not_evaluable`** |
+| 12 | 样本不足时保持未激活，报告完整原因 | **这一条已经满足**：`prediction-eval-cli` 报 `no_active_catboost_model`；`accuracyStatus` 处处为 `not_evaluable` 且**必带原因**（§15.8 envelope 的判据） | ✅ |
+
+> **本节与 §一 的关系**：§一 说"精度增强全部未激活且不应激活"，正是第 9–12 条的直接后果。
+> 工程条满足**不**蕴含精度条满足 —— 这两件事在本文档里始终分开陈述，这也是方案开头
+> "不以 P0 测试通过宣称 P2 精度达标"的执行形态。
