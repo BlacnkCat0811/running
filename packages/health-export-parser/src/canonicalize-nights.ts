@@ -153,12 +153,76 @@ function buildNight(wakeDate: string, timezone: string, kind: CanonicalNightKind
 
 export interface CanonicalizationNightsResult { mainCount: number; napCount: number; hrvCount: number; rejectedInBedOnly: number; timezoneIdentifier: string }
 
+/**
+ * §15.3「事实可得时间」/ 证据可追溯：`computed_at` **就是到达时间**。
+ *
+ * `packages/application/src/model-v2-snapshots.ts` 读的是 `computed_at AS availableAt`，
+ * 而 readiness 只在 `availableAt <= asOf` 时承认一条事实可得。可是本函数是
+ * 全量 `DELETE` + 重建，两条 INSERT 都**不带** `computed_at`（该列有 `DEFAULT now`），
+ * 于是**每次导入都把全部历史行的到达时间改写成"现在"**。
+ * 后果不是"少一点精度"：`asOf` 落在 D 当天时，所有行的到达时间都晚于 D，
+ * readiness 对**每一个历史日**都返回 `not_assessed`。
+ *
+ * 这条提示语本来就在函数自己的注释里写着 —— 原话是
+ * "Canonical computed_at is known. Raw source-created time is never treated as ingestion time."
+ * 全量重建恰好把那个"known"抹掉了。
+ *
+ * 判据是**内容**，不是 id 在不在：
+ *   · id 已存在且**事实列**逐字未变 → 保留原到达时间（这条事实当年就到了）
+ *   · 新增行，或事实列变了        → 到达时间就是现在（新值确实是现在到的）
+ * 只按 id 保留会把"被更正过的旧事实"伪装成"当时就知道"，那是往未来泄漏的方向错。
+ * `provenance_json`（内含 algorithmVersion）**不**参与比较：算法换版重新推导出同一个事实，
+ * 并没有让这条事实晚到；产出它的版本另有 provenance 记录。
+ */
+const ARRIVAL_FACT_COLUMNS: Record<string, readonly string[]> = {
+  canonical_nights: [
+    "wake_date", "timezone_identifier", "kind", "source_name", "source_category", "source_rank",
+    "has_stages", "sleep_onset_at", "wake_at", "asleep_union_minutes", "in_bed_union_minutes",
+    "awake_minutes", "stage_minutes_json", "segment_count"
+  ],
+  canonical_hrv_days: [
+    "local_date", "timezone_identifier", "night_id", "hrv_sdnn_ms", "sample_count", "confidence",
+    "window_start_at", "window_end_at", "source_name"
+  ]
+};
+
+/** `quote()` 让每个值自定界（NULL / 数字 / 带转义的字符串），所以拼接无需再加分隔符也不会歧义。 */
+function arrivalFingerprint(table: string, prefix: string): string {
+  return ARRIVAL_FACT_COLUMNS[table]!.map((column) => `quote(${prefix}${column})`).join("||");
+}
+
+/**
+ * 在 DELETE 之前把 (id, 到达时间, 事实指纹) 存进临时表；重建后再按指纹相同的行还原到达时间。
+ * 两步都必须在同一个事务里，否则中途失败会留下"到达时间已丢"的状态。
+ */
+function preserveArrivalTime(database: DatabaseSync, table: string, phase: "snapshot" | "restore"): void {
+  const staging = `_prior_arrival_${table}`;
+  if (phase === "snapshot") {
+    database.exec(`CREATE TEMP TABLE ${staging} AS SELECT id, computed_at, ${arrivalFingerprint(table, "")} AS fingerprint FROM ${table}`);
+    return;
+  }
+  const current = arrivalFingerprint(table, "c.");
+  database.exec(`WITH current AS (SELECT c.id AS id, ${current} AS fingerprint FROM ${table} AS c)
+    UPDATE ${table} SET computed_at = (
+      SELECT p.computed_at FROM ${staging} p JOIN current c ON c.id = p.id
+       WHERE p.fingerprint = c.fingerprint AND c.id = ${table}.id)
+    WHERE id IN (SELECT p.id FROM ${staging} p JOIN current c ON c.id = p.id WHERE p.fingerprint = c.fingerprint)`);
+  database.exec(`DROP TABLE ${staging}`);
+}
+
 export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: string = DATABASE_TIMEZONE): CanonicalizationNightsResult {
   const all = loadSegments(database);
   database.exec("BEGIN IMMEDIATE");
   try {
+    preserveArrivalTime(database, "canonical_nights", "snapshot");
+    preserveArrivalTime(database, "canonical_hrv_days", "snapshot");
     database.exec("DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;");
-    if (all.length === 0) { database.exec("COMMIT"); return { mainCount: 0, napCount: 0, hrvCount: 0, rejectedInBedOnly: 0, timezoneIdentifier }; }
+    if (all.length === 0) {
+      preserveArrivalTime(database, "canonical_nights", "restore");
+      preserveArrivalTime(database, "canonical_hrv_days", "restore");
+      database.exec("COMMIT");
+      return { mainCount: 0, napCount: 0, hrvCount: 0, rejectedInBedOnly: 0, timezoneIdentifier };
+    }
     // 日期范围必须同时看段的**结束**时刻，不能只看开始。
     // 一夜的 InBed/Asleep 段通常开始于**前一晚**（约 22:00 local）。只要这一夜里
     // **有任何一段**开始于本地午夜之后，v1 的范围就已经覆盖它的 wake date；
@@ -242,6 +306,9 @@ export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: s
       }
       date = addLocalDays(date, 1);
     }
+    // 全部行插入完之后再还原到达时间：事实未变的行拿回原值，新增/改动的行保持 now。
+    preserveArrivalTime(database, "canonical_nights", "restore");
+    preserveArrivalTime(database, "canonical_hrv_days", "restore");
     database.exec("COMMIT");
     return { mainCount, napCount, hrvCount, rejectedInBedOnly: rejected, timezoneIdentifier };
   } catch (error) { database.exec("ROLLBACK"); throw error; }

@@ -744,3 +744,56 @@ var/rai.sqlite  SHA-256  BC3B117B…F14C  →  BC3B117B…F14C   （完全相同
   `decision.tone` **逐字等于** `verdict.tone`、`action` 是已声明取值或刻意的 `null`、
   每个 reason 都带 `plan_disposition_*`、`inputSnapshotIds` 里没有空串。
 - `coach-decision-v2.test.ts`：11 条，含扫描查出的两处矛盾的回归。
+
+---
+
+## 十三、到达时间被重建抹掉：机制已定位并修复（§15.3）
+
+### 13.1 缺陷本身
+
+`canonicalize-nights.ts` 重建两张 canonical 表时是
+`DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;` +
+重新插入，而**两条 INSERT 都不带 `computed_at`**（列有 `DEFAULT now`）。
+偏偏 `model-v2-snapshots.ts` 读的就是 **`computed_at AS availableAt`**，
+readiness 只在 `availableAt <= asOf` 时承认事实可得 ——
+所以每次重建都把全部行的到达时间盖成"现在"。
+
+这不是"少一点精度"：**同一份事实、同一个 `asOf`，答案会因为一次重建而改变。**
+函数自己的注释原本就写着 "Canonical computed_at is known. Raw source-created time is never
+treated as ingestion time." —— 全量重建恰好把那个 "known" 抹掉了。
+
+### 13.2 两条**实测限定**（独立探针在修复前的修订上复现，20/20 断言）
+
+这两条是独立子智能体跑出来的，它们收窄了症状的措辞，必须照写：
+
+1. **退化成 `coverage:"none"/state:"not_assessed"` 需要 RHR 通道同时不可得。**
+   带上 RHR 与 `import_manifest` 时（更接近真实库）可观测的是 `complete → partial`、
+   sleep/hrv 的 value 变 null，而 **state 字符串仍然是 `no_low_signal`**。
+   **结论没变、证据基础悄悄减半** —— 这比字符串变差更难被发现。
+2. **触发点不是"第二次导入"。** **第一次**重建就已经把 `now` 盖在属于过去的行上，
+   所以对历史库做一次全新重建就会丢掉全部历史日。
+   修复只能保住**本来就存在**的到达时间；它**不能**、也不该把后来的事实说成早就到了。
+
+### 13.3 修复：按**内容**保留，而不是按 id
+
+- 重建前把 `(id, computed_at, 事实列指纹)` 存进临时表；插入完成后，
+  **事实列逐字未变**的行还原原到达时间；**新增或事实改变**的行保持 `now`。
+- 指纹用 `quote()` 逐列拼接（每个值自定界，无歧义），**排除 `provenance_json`**：
+  算法换版重新推导出同一个事实，并没有让这条事实晚到；产出它的版本另有 provenance 记录。
+- 为什么不用"id 还在就保留"：那会把**被更正过的旧事实**伪装成"当时就知道"，
+  是往未来泄漏的反方向错。独立探针验证了这个方向：把某夜的 HRV 样本 2 → 3 之后，
+  未变的 night 行保住原值，而变了的 hrv 行拿到新戳并转为 `hrv_unavailable_at_assessment`。
+
+### 13.4 验证与**边界**
+
+| 项 | 结果 |
+|---|---|
+| 行 id 是否稳定 | ✅ 稳定（内容派生），两次重建的 id 列表与"排除 `computed_at` 的内容指纹"逐字节相同 |
+| 自测（本批新增） | `canonicalize-nights-range.test.ts` +2（未变保留 / 改正刷新）、`arrival-time-preservation.test.ts` +1（端到端） |
+| 独立复现 | 修复前的修订上 REPRODUCED；打补丁后同一探针 20/20 通过 |
+| 全量门禁 | node 1133 / 1115 pass / 0 fail |
+
+⚠️ **必须写明的边界**：本工作区的 `var/rai.sqlite` 里 canonical 表是 **0 行**（schema 22，从未回填），
+所以这个修复**在本库上没有任何可观测效果**，效果全部由合成用例钉住。
+另外 RHR 的可得性走的是 `import_manifest.import_completed_at` —— 一个**每次导入覆盖的全局标量**，
+不在本次修复范围内，它是同一族问题的另一条通道。
