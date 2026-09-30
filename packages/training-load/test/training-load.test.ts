@@ -10,6 +10,7 @@ import {
   acuteLoadExcess,
   aggregateTrainingPeriod,
   assessLoad,
+  assessLoadV2,
   buildDailyTrainingMetrics,
   buildLoadVectorV2,
   buildCalendarPeriodSummary,
@@ -620,4 +621,38 @@ test("mechanical load stays null until a mapping is validated", () => {
   assert.ok(vector.reasonCodes.includes("mechanical_load_not_modeled"));
   // The raw exposure is still there — §9.2 asks to show distance and climb as they are.
   assert.equal(vector.distanceMeters, 12_000);
+});
+
+test("L04: an unobserved prehistory is never filled with zero load", () => {
+  const days = buildDailyTrainingMetrics(
+    [historicalLoad("a", "2026-06-01", 120), historicalLoad("b", "2026-06-08", 120)],
+    "2026-06-09"
+  );
+
+  // 序列从**第一次观测到的训练日**开始：未知前史是"不存在"，不是"负荷 0 的休息日"。
+  assert.equal(days[0]?.localDate, "2026-06-01");
+  assert.equal(days.some((day) => day.localDate < "2026-06-01"), false);
+  // 两个 EWMA 都从这次观测播种。若把未知前史补 0，chronic 会被稀释成约 120 × α(28 日半衰期) ≈ 3.2，
+  // 低于 minimumChronicLoad=5 ⇒ ACWR 永远算不出来，界面会长期显示"低负荷"，而事实是"不知道"。
+  assert.equal(days[0]?.acuteEwma, 120);
+  assert.equal(days[0]?.chronicEwma, 120);
+
+  // 未知前史下这一天只能说"历史不足"，不能说"正常"。
+  const assessment = assessLoadV2({
+    historyDays: 1,
+    workoutCount: 1,
+    acuteEwma: days[0]!.acuteEwma,
+    chronicEwma: days[0]!.chronicEwma,
+    loadRatio: days[0]!.loadRatio,
+    rampRate: days[0]!.rampRate,
+    strain: days[0]!.strain,
+    strainP90: null,
+    daysSinceLastRun: 0
+  });
+  assert.equal(assessment.risk, "unknown");
+  assert.equal(assessment.basis, "insufficient_history");
+
+  // 对照：**观测到的**休息日确实按 0 计入并让 EWMA 衰减 —— 补零只允许发生在有观测的地方。
+  assert.equal(days[1]?.load, 0);
+  assert.ok(days[1]!.chronicEwma < days[0]!.chronicEwma);
 });
