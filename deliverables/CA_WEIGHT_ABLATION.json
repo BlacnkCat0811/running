@@ -1,4 +1,43 @@
 {
+  "envelopeVersion": "rai-eval-report-envelope-v1",
+  "generatedBy": "scripts/ablation-ca-weights.mts",
+  "generatedAt": "2026-09-30T06:24:36.523Z",
+  "databasePath": "D:\\running\\var\\rai.sqlite",
+  "repoRevision": "5ee0fac62aa813a92897437c0a454c8c8a183321",
+  "reproduceCommand": "npm run data:ablation-ca-weights -- --database var/rai.sqlite --out deliverables/CA_WEIGHT_ABLATION.json",
+  "accuracyStatus": "not_evaluable",
+  "accuracyReason": "no labeled race/test outcomes in this database; see the walk-forward report",
+  "gates": [
+    {
+      "name": "ca_weight_ablation_report_contract",
+      "status": "passed",
+      "reason": null
+    },
+    {
+      "name": "negative_learning_never_accepted",
+      "status": "failed",
+      "reason": "每个候选的负向接受数都是 0；按 §6.9-7 不得用'更保守'作为永久解释"
+    },
+    {
+      "name": "release_blockers",
+      "status": "not_evaluable",
+      "reason": "阻断项由 negativeLearningReleaseBlockers 逐条给出，其结论依赖尚未冻结的 §6.9-6 预注册"
+    }
+  ],
+  "notEvaluable": [
+    {
+      "item": "accuracyComparison",
+      "reason": "本地 labeledOutcomeCount = 0"
+    },
+    {
+      "item": "normalizedCorrelations",
+      "reason": "stored_v3_features_have_no_normalized_signals"
+    },
+    {
+      "item": "negativeGatePreregistration",
+      "reason": "§6.9-6 的最少机会数/可接受检测延迟/最大误判下降率均未冻结"
+    }
+  ],
   "reportVersion": "rai-ca-weight-ablation-v1",
   "stratumCensus": [
     {
@@ -74,10 +113,8 @@
       ]
     }
   ],
-  "generatedAt": "2026-09-30T04:07:01.472Z",
   "modelConfigVersion": "rai-model-config-v12",
   "comparabilityHistoryMode": "legacy",
-  "databasePath": "D:\\running\\var\\rai.sqlite",
   "featureRunId": "feature_run_e69a1113-417f-46b2-8e31-8f488456b668",
   "featureCount": 257,
   "labeledOutcomeCount": 0,

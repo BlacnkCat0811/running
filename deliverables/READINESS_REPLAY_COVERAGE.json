@@ -1,8 +1,30 @@
 {
+  "envelopeVersion": "rai-eval-report-envelope-v1",
   "generatedBy": "scripts/readiness-replay-coverage.mts",
-  "generatedAt": "2026-09-30T04:50:39.583Z",
-  "repoRevision": "aefd59dfc20438bfd7ceba6700c80df8d2a623f1",
+  "generatedAt": "2026-09-30T06:24:38.316Z",
   "databasePath": ".\\var\\rai.sqlite",
+  "repoRevision": "5ee0fac62aa813a92897437c0a454c8c8a183321",
+  "reproduceCommand": "node --import tsx scripts/readiness-replay-coverage.mts --database var/rai.sqlite --out .\\deliverables\\READINESS_REPLAY_COVERAGE.json",
+  "accuracyStatus": "not_evaluable",
+  "accuracyReason": "两条分支共用同一个生产规则函数，只差到达时间假设；泄漏率衡量的是可用性口径的影响，不是模型精度。",
+  "gates": [
+    {
+      "name": "leakage_rate_evaluated",
+      "status": "not_evaluable",
+      "reason": "只有 1 个可比日；n<2 的比例不携带信息（leakageStatus=single_comparable_day）"
+    },
+    {
+      "name": "as_known_then_replay",
+      "status": "not_evaluable",
+      "reason": "302 天有读数但到达时间不可考，不能充当 as_known_then 证据"
+    }
+  ],
+  "notEvaluable": [
+    {
+      "item": "leakageRate",
+      "reason": "只有 1 个可比日：比率不携带信息，按 null 报告而不是 0。"
+    }
+  ],
   "schemaVersion": 22,
   "assessmentMomentConvention": "每天以其本地日的最后一毫秒为 asOf（评估该日结束时已知什么）",
   "replayMode": "event_time_reconstruction",
@@ -55,7 +77,6 @@
     "state": "no_low_signal",
     "days": 1
   },
-  "accuracyStatus": "not_evaluable",
   "note": "两条分支共用同一个生产规则函数，只差到达时间假设；泄漏率衡量的是可用性口径的影响，不是模型精度。本报告与 as_known_then 认证无关：这些历史记录缺少可靠的记录级到达时间。",
   "cases": [
     {

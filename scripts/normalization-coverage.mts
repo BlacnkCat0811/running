@@ -7,6 +7,7 @@
 // 这个脚本的产出决定了 §5.4 的 N1/N2/N3 到底能不能推进，所以它**不猜**：
 // 每个数字都来自真实库的一次扫描，用到的解析器与 adapter 都是运行时那一份。
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -14,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 // 复用生产解析器与 adapter：另写一套解析会让报告与运行时静默分叉。
 import { parsePerformanceConditions } from "@rai/application";
+import { assertUnifiedEvaluationReport, evaluationReportEnvelope } from "@rai/model-eval";
 import {
   NORMALIZATION_ADAPTER_VERSION,
   NORMALIZATION_POLICY_VERSION,
@@ -34,6 +36,15 @@ const readArg = (name: string, fallback: string): string => {
 
 const databasePath = resolve(root, readArg("--database", "var/rai.sqlite"));
 const outPath = resolve(root, readArg("--out", "deliverables/NORMALIZATION_COVERAGE.json"));
+
+// §15.8-1：产物必须能说出自己出自哪个提交。取不到就写 null（"不知道"），不编。
+const repoRevision = (() => {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+})();
 
 if (!existsSync(databasePath)) {
   process.stderr.write(`database not found: ${databasePath}\n`);
@@ -106,8 +117,40 @@ const rate = (value: number, total: number): number | null => (total === 0 ? nul
 const notReference = canonicalWorkouts - statusCounts.not_needed;
 
 const report = {
+  // §15.8 的公共部分由 envelope 统一提供。
+  ...evaluationReportEnvelope({
+    generatedBy: "scripts/normalization-coverage.mts",
+    databasePath,
+    repoRevision,
+    reproduceCommand: "node --import tsx scripts/normalization-coverage.mts --database var/rai.sqlite --out deliverables/NORMALIZATION_COVERAGE.json",
+    accuracyStatus: "not_evaluable",
+    accuracyReason:
+      "这是环境字段的可得率盘点，不是归一化修正的精度评估；N3 校准需要更多同条件样本。",
+    gates: [
+      {
+        name: "identity_adapter_never_claims_normalisation",
+        // N0 的核心承诺：没证据时不谎报"已归一化"。
+        status: statusCounts.applied === 0 ? "passed" : "not_evaluable",
+        reason: statusCounts.applied === 0
+          ? null
+          : `有 ${statusCounts.applied} 条被标为 applied；N0 只应产出 not_needed/unavailable/out_of_domain`
+      },
+      {
+        name: "comparability_wired_into_learning",
+        status: notReference === 0 ? "passed" : "failed",
+        reason:
+          `若把 comparability 接进学习门控，${notReference}/${canonicalWorkouts} 条会低于门槛`
+      }
+    ],
+    notEvaluable: [
+      { item: "fitted_normalisation_adapter", reason: "只有 identity adapter（N0）；N3 需要更多同条件样本" },
+      {
+        item: "normalizedCorrelations",
+        reason: "stored V3 特征不含 normalized 信号，无法给出 raw 与 normalized 的相关性对比"
+      }
+    ]
+  }),
   reportVersion: "rai-normalization-coverage-v1",
-  generatedAt: new Date().toISOString(),
   adapterVersion: NORMALIZATION_ADAPTER_VERSION,
   policyVersion: NORMALIZATION_POLICY_VERSION,
   modelConfigVersion: MODEL_CONFIG_VERSION,
@@ -157,6 +200,7 @@ const report = {
 };
 
 mkdirSync(dirname(outPath), { recursive: true });
+assertUnifiedEvaluationReport(report);
 writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 process.stderr.write(`\nWrote ${outPath}\n`);

@@ -40,6 +40,13 @@
 | `PREPARATION_MIGRATION_GOLDEN.json` | 专项准备度迁移 golden | 未声明 | — |
 
 > 这些是**派生数据**，不是结论。引用时必须同时给出生成脚本与数据口径。
+>
+> 🔒 **四份产物现在都带 §15.8 envelope**（ai-eval-report-envelope-v1）：epoRevision、
+> databasePath、generatedBy、eproduceCommand、gates（passed/failed/not_evaluable 三态）、
+> 
+otEvaluable（未评估项**及原因**）。生成端调 valuationReportEnvelope(...) 组装、
+> 写盘前用 ssertUnifiedEvaluationReport(...) 自检，所以溯源信息不可能被悄悄丢掉。
+> 没有它之前：epoRevision 只有三份有、eproduce 只有一份有。
 
 > **2026-09-30 已完成的整理**：此前有 5 份 JSON 描述的是**另一台主机（macOS）**的库。
 > 其中两份**本工作区其实可以复现** —— 我上一版把 `PHASE0_BASELINE.json` 误标为"生成器不可用"，

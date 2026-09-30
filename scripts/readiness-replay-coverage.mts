@@ -19,6 +19,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { buildReadinessReplayCoverage } from "@rai/application";
+import { assertUnifiedEvaluationReport, evaluationReportEnvelope } from "@rai/model-eval";
 import { DATABASE_TIMEZONE } from "@rai/contracts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -54,15 +55,47 @@ try {
   const schemaVersion = handle.prepare("SELECT MAX(version) AS v FROM schema_migrations").get() as
     { v: number | null } | undefined;
   report = {
-    generatedBy: "scripts/readiness-replay-coverage.mts",
-    generatedAt: new Date().toISOString(),
-    repoRevision,
-    databasePath: databasePath.replace(root, "."),
+    // §15.8 的公共部分由 envelope 统一提供，不再各自手写。
+    ...evaluationReportEnvelope({
+      generatedBy: "scripts/readiness-replay-coverage.mts",
+      databasePath: databasePath.replace(root, "."),
+      repoRevision,
+      reproduceCommand: `node --import tsx scripts/readiness-replay-coverage.mts --database var/rai.sqlite --out ${outPath.replace(root, ".")}`,
+      accuracyStatus: "not_evaluable",
+      accuracyReason:
+        "两条分支共用同一个生产规则函数，只差到达时间假设；泄漏率衡量的是可用性口径的影响，不是模型精度。",
+      gates: [
+        {
+          name: "leakage_rate_evaluated",
+          status: coverage.comparableDays >= 2 ? "passed" : "not_evaluable",
+          reason: coverage.comparableDays >= 2
+            ? null
+            : `只有 ${coverage.comparableDays} 个可比日；n<2 的比例不携带信息（leakageStatus=${coverage.leakageStatus}）`
+        },
+        {
+          name: "as_known_then_replay",
+          status: coverage.asKnownThenBlockedDays === 0 ? "passed" : "not_evaluable",
+          reason: coverage.asKnownThenBlockedDays === 0
+            ? null
+            : `${coverage.asKnownThenBlockedDays} 天有读数但到达时间不可考，不能充当 as_known_then 证据`
+        }
+      ],
+      // §15.8-5：统计不可用项及原因。分母为 0 时该率=null，而不是 0。
+      notEvaluable: [
+        ...(coverage.leakageRate === null
+          ? [{ item: "leakageRate", reason: coverage.leakageRateInterpretation }]
+          : []),
+        ...(coverage.assessableDays === 0
+          ? [{ item: "assessable_days", reason: "没有任何一天能按真实到达时间形成评估" }]
+          : [])
+      ]
+    }),
     schemaVersion: schemaVersion?.v ?? null,
     assessmentMomentConvention: "每天以其本地日的最后一毫秒为 asOf（评估该日结束时已知什么）",
     replayMode: "event_time_reconstruction",
     ...coverage
   };
+  assertUnifiedEvaluationReport(report);
 } finally {
   handle.close();
 }

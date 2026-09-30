@@ -1,8 +1,39 @@
 {
+  "envelopeVersion": "rai-eval-report-envelope-v1",
   "generatedBy": "scripts/baseline-rebase-review.mts",
-  "generatedAt": "2026-09-30T05:31:48.549Z",
-  "repoRevision": "c046e5aaf8fd9b49cba8c308f56b99914247f18b",
+  "generatedAt": "2026-09-30T06:24:38.790Z",
   "databasePath": ".\\var\\rai.sqlite",
+  "repoRevision": "5ee0fac62aa813a92897437c0a454c8c8a183321",
+  "reproduceCommand": "npm run data:baseline-rebase-review -- --database var/rai.sqlite --out deliverables/BASELINE_REBASE_REVIEW.json",
+  "accuracyStatus": "not_evaluable",
+  "accuracyReason": "rebase 检查的六个输入里有两个（lastReviewedAt、precedingSaturatedReviews）没有持久化；填默认值会得到一个确定但任意的结论。",
+  "gates": [
+    {
+      "name": "rebase_review_verdict",
+      "status": "not_evaluable",
+      "reason": "review 历史未持久化：precedingSaturatedReviews 直接决定 candidate_requested 还是 keep_epoch"
+    },
+    {
+      "name": "saturation_trigger",
+      "status": "failed",
+      "reason": "saturatedFraction=0.1111111111111111 vs 阈值 0.2"
+    },
+    {
+      "name": "minimum_independent_sessions",
+      "status": "failed",
+      "reason": "9 次独立训练 vs 政策要求 12"
+    }
+  ],
+  "notEvaluable": [
+    {
+      "item": "review.status",
+      "reason": "review_history_not_persisted（见 gates[0]）"
+    },
+    {
+      "item": "epoch.epochId",
+      "reason": "该 schema 没有 baseline_epoch_id 列；不编 hash 冒充"
+    }
+  ],
   "schemaVersion": 22,
   "reportVersion": "rai-baseline-rebase-review-v1",
   "asOf": "2026-07-20T02:51:58.706Z",

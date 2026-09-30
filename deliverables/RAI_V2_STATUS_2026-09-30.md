@@ -28,7 +28,7 @@
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck`（现覆盖 `packages/`、`apps/`、**`scripts/`**） | **0** |
-| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1090 tests / 1072 pass / 0 fail / 18 skipped** |
+| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1097 tests / 1079 pass / 0 fail / 18 skipped** |
 | web 侧全量 | `npm run test -w @rai/web` | **18 文件 / 111 tests / 0 fail** |
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
@@ -126,7 +126,7 @@
 
 ---
 
-## 五、本状态文档新增的七条可执行结论
+## 五、本状态文档新增的八条可执行结论
 
 ### 1. 负向学习的瓶颈已定位到**可靠性门槛**（不是可比性、不是 K）
 
@@ -283,6 +283,31 @@ review not_evaluable / review_history_not_persisted
 🔴 **这条实测改变了优先级**：三个门里已经有两个**按实测数据**给出"保持当前 epoch"
 （饱和未触发 0.111 < 0.2；独立训练 9 < 12）。所以"缺 review 历史"**目前不是阻塞项** ——
 补一张 review 历史表不会改变今天的结果。这比"文档说要持久化就去持久化"省一次无谓的迁移。
+
+### 8. ✅ §15.8 的统一报告从"约定"变成"条件"
+
+§15.8 规定"每个版本比较产物至少包括"八项。实测（2026-09-30）此前只有最新那份
+（跨版本回放）带得起全部信息：`repoRevision` 只在三份里有、`reproduce` 只有一份有、
+gate 状态只有一份有、`notEvaluable` 只有一份有 —— 也就是说，**一份产物可以把溯源信息
+整个丢掉，而没有任何检查会转红**。
+
+现在 `@rai/model-eval` 提供 `evaluationReportEnvelope` + `assertUnifiedEvaluationReport`
+（`rai-eval-report-envelope-v1`），四份产物全部改为经它组装并**在写盘前自检**：
+
+| 产物 | gates | notEvaluable |
+|---|---|---|
+| `CA_WEIGHT_ABLATION.json` | 3（含 `negative_learning_never_accepted=failed`） | 3 |
+| `READINESS_REPLAY_COVERAGE.json` | 2（两项均 `not_evaluable`，各带原因） | 1 |
+| `BASELINE_REBASE_REVIEW.json` | 3（`saturation_trigger=failed`、`minimum_independent_sessions=failed`） | 2 |
+| `NORMALIZATION_COVERAGE.json` | 2（`comparability_wired_into_learning=failed`） | 2 |
+
+检查范围**刻意只收在机器可核对的公共部分**：谁生成的、描述哪份库、哪个提交、怎么复现、
+gate 三态、未评估项及原因。指标形状因领域而异（Fitness 比 CA/TA，Readiness 比裁决，
+预测比秒数），强行统一只会逼出空字段。
+
+两条判据值得单独记：**`repoRevision` 允许 null 但必须显式出现**（"少一个键"与
+"当时确实不知道"是两件事）；**`status: not_evaluable` 的 gate 必须写原因** ——
+不写，读的人会以为它没必要评估。`not_evaluable` 是正式状态，不是自动通过或失败。
 
 ---
 

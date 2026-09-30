@@ -19,6 +19,7 @@
 //   node --import tsx scripts/ablation-ca-weights.mts \
 //     [--database var/rai.sqlite] [--out deliverables/CA_WEIGHT_ABLATION.json]
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -45,7 +46,12 @@ import {
 import { localDateInTimeZone } from "@rai/training-load";
 import { DATABASE_TIMEZONE } from "@rai/contracts";
 import { buildLabelFunnel } from "@rai/application";
-import { assertCaWeightAblationReport, negativeLearningReleaseBlockers } from "@rai/model-eval";
+import {
+  assertCaWeightAblationReport,
+  assertUnifiedEvaluationReport,
+  evaluationReportEnvelope,
+  negativeLearningReleaseBlockers
+} from "@rai/model-eval";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -588,12 +594,52 @@ const stratumCensus = [...new Set(sorted.map((item) => sessionStratum(item.sessi
 });
 
 const report = {
+  // §15.8 的公共部分由 envelope 统一提供（repo SHA / 库 / 复现命令 / gate 三态 / 未评估项）。
+  ...evaluationReportEnvelope({
+    generatedBy: "scripts/ablation-ca-weights.mts",
+    databasePath,
+    repoRevision: (() => {
+      try {
+        return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+      } catch {
+        return null;
+      }
+    })(),
+    reproduceCommand: "npm run data:ablation-ca-weights -- --database var/rai.sqlite --out deliverables/CA_WEIGHT_ABLATION.json",
+    accuracyStatus: "not_evaluable",
+    accuracyReason: labelFunnel.usableOutcomeCount === 0
+      ? "no labeled race/test outcomes in this database; see the walk-forward report"
+      : "this is a behavioural ablation, not an independent external-label accuracy evaluation",
+    gates: [
+      {
+        name: "ca_weight_ablation_report_contract",
+        status: "passed",
+        reason: null
+      },
+      {
+        name: "negative_learning_never_accepted",
+        // §6.9-7：有充分合格负机会却长期 0 接受必须阻断发布。
+        status: outcomes.some((outcome) => outcome.acceptance.negativeAccepted > 0) ? "passed" : "failed",
+        reason: outcomes.some((outcome) => outcome.acceptance.negativeAccepted > 0)
+          ? null
+          : "每个候选的负向接受数都是 0；按 §6.9-7 不得用'更保守'作为永久解释"
+      },
+      {
+        name: "release_blockers",
+        status: "not_evaluable",
+        reason: "阻断项由 negativeLearningReleaseBlockers 逐条给出，其结论依赖尚未冻结的 §6.9-6 预注册"
+      }
+    ],
+    notEvaluable: [
+      { item: "accuracyComparison", reason: "本地 labeledOutcomeCount = 0" },
+      { item: "normalizedCorrelations", reason: "stored_v3_features_have_no_normalized_signals" },
+      { item: "negativeGatePreregistration", reason: "§6.9-6 的最少机会数/可接受检测延迟/最大误判下降率均未冻结" }
+    ]
+  }),
   reportVersion: "rai-ca-weight-ablation-v1",
   stratumCensus,
-  generatedAt: new Date().toISOString(),
   modelConfigVersion: MODEL_CONFIG_VERSION,
   comparabilityHistoryMode,
-  databasePath,
   featureRunId,
   featureCount: sorted.length,
   labeledOutcomeCount: labelFunnel.usableOutcomeCount,
@@ -649,6 +695,7 @@ mkdirSync(dirname(outPath), { recursive: true });
 // §6.1 把这份报告作为发布条件。生成端先自检一次：报告缺项时**不要**写出一份
 // 看起来完整、评审时才发现少东西的文件 —— 那样报告又会静静地腐烂一次。
 assertCaWeightAblationReport(report);
+assertUnifiedEvaluationReport(report);
 writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 process.stderr.write(`\nWrote ${outPath}\n`);

@@ -386,6 +386,127 @@ export function negativeLearningReleaseBlockers(
 
 const ABLATION_REPORT_VERSION = "rai-ca-weight-ablation-v1";
 
+// -----------------------------------------------------------------------------
+// §15.8 统一报告 envelope
+//
+// §15.8 规定"每个版本比较产物至少包括"八项。实测（2026-09-30）：只有最新那份
+// （跨版本回放）带得起全部信息 —— `repoRevision` 只在三份里有、`reproduce` 只有一份有、
+// gate 状态只有一份有、`notEvaluable` 只有一份有。也就是 §15.8 此前是**约定**而不是**条件**：
+// 一份产物可以把溯源信息整个丢掉，而没有任何检查会转红。
+//
+// 这里把它变成可执行条件。刻意只要求**机器可核对**的那几项：版本矩阵、cohort 定义、
+// 差异分布的形状因领域而异（Fitness 比 CA/TA，Readiness 比裁决，预测比秒数），
+// 强行统一只会逼出空字段。所以分两层：
+//
+//   必需（本函数检查）：谁生成的、描述哪份库、哪个提交、怎么复现、gate 三态、未评估项及原因
+//   领域自有（不检查）：指标本身的形状
+// -----------------------------------------------------------------------------
+
+export const EVALUATION_REPORT_ENVELOPE_VERSION = "rai-eval-report-envelope-v1" as const;
+
+/** §15.8-6：每个 gate 只有这三种状态；"未评估"是正式状态，不是自动通过或失败。 */
+export type EvaluationGateStatus = "passed" | "failed" | "not_evaluable";
+
+export interface EvaluationGate {
+  name: string;
+  status: EvaluationGateStatus;
+  /** status 为 not_evaluable 时必须说明为什么评估不了。 */
+  reason?: string | null;
+}
+
+/** 组装 §15.8 要求的公共部分。生成端调它而不是各自手写 —— 手写正是漂移的来源。 */
+export function evaluationReportEnvelope(input: {
+  generatedBy: string;
+  databasePath: string;
+  repoRevision: string | null;
+  reproduceCommand: string;
+  accuracyStatus: EvaluationGateStatus;
+  accuracyReason: string | null;
+  gates?: readonly EvaluationGate[];
+  notEvaluable?: ReadonlyArray<{ item: string; reason: string }>;
+  generatedAt?: string;
+}) {
+  return {
+    envelopeVersion: EVALUATION_REPORT_ENVELOPE_VERSION,
+    generatedBy: input.generatedBy,
+    generatedAt: input.generatedAt ?? new Date().toISOString(),
+    databasePath: input.databasePath,
+    repoRevision: input.repoRevision,
+    reproduceCommand: input.reproduceCommand,
+    accuracyStatus: input.accuracyStatus,
+    accuracyReason: input.accuracyReason,
+    gates: [...(input.gates ?? [])],
+    notEvaluable: [...(input.notEvaluable ?? [])]
+  };
+}
+
+function asEnvelopeRecord(name: string, value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Evaluation report: ${name} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function requireEnvelopeText(name: string, value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`Evaluation report: ${name} is required (§15.8)`);
+  }
+  return value;
+}
+
+/**
+ * §15.8 公共部分校验。领域专属指标不在这里检查 —— 见上面的说明。
+ *
+ * `repoRevision` 允许为 null（例如在非 git 目录下生成），但**必须显式出现**：
+ * "少一个键"与"当时确实不知道"是两件事，前者是漏写，后者是事实。
+ */
+export function assertUnifiedEvaluationReport(report: unknown): void {
+  const root = asEnvelopeRecord("report", report);
+  if (root.envelopeVersion !== EVALUATION_REPORT_ENVELOPE_VERSION) {
+    throw new Error(`Evaluation report: unsupported envelopeVersion ${String(root.envelopeVersion)}`);
+  }
+  // §15.8-1：谁生成的、描述哪份库、哪个提交。
+  requireEnvelopeText("generatedBy", root.generatedBy);
+  requireEnvelopeText("generatedAt", root.generatedAt);
+  requireEnvelopeText("databasePath", root.databasePath);
+  if (root.repoRevision !== null) requireEnvelopeText("repoRevision", root.repoRevision);
+  // §15.8-8：复现命令。没有它，产物只能被相信，不能被核对。
+  requireEnvelopeText("reproduceCommand", root.reproduceCommand);
+
+  // §15.8-7：发布建议。"未评估"是正式状态，必须能表达，且不得含糊。
+  const accuracy = root.accuracyStatus;
+  if (accuracy !== "passed" && accuracy !== "failed" && accuracy !== "not_evaluable") {
+    throw new Error("Evaluation report: accuracyStatus must be passed, failed or not_evaluable (§15.8-7)");
+  }
+  if (accuracy === "not_evaluable") {
+    requireEnvelopeText("accuracyReason", root.accuracyReason);
+  } else if (root.accuracyReason !== null && typeof root.accuracyReason !== "string") {
+    throw new Error("Evaluation report: accuracyReason must be a string or null");
+  }
+
+  // §15.8-6：每个 gate 的 passed/failed/not_evaluable 状态。
+  if (!Array.isArray(root.gates)) throw new Error("Evaluation report: gates must be an array (§15.8-6)");
+  for (const entry of root.gates) {
+    const gate = asEnvelopeRecord("gate", entry);
+    const name = requireEnvelopeText("gate.name", gate.name);
+    if (gate.status !== "passed" && gate.status !== "failed" && gate.status !== "not_evaluable") {
+      throw new Error(`Evaluation report: gate ${name} status must be passed, failed or not_evaluable`);
+    }
+    // 一个"未评估"的 gate 不写原因，读的人会以为它没必要评估。
+    if (gate.status === "not_evaluable") requireEnvelopeText(`gate ${name} reason`, gate.reason);
+  }
+
+  // §15.8-5：统计不可用项及原因。
+  if (!Array.isArray(root.notEvaluable)) {
+    throw new Error("Evaluation report: notEvaluable must be an array (§15.8-5)");
+  }
+  for (const entry of root.notEvaluable) {
+    const item = asEnvelopeRecord("notEvaluable entry", entry);
+    requireEnvelopeText("notEvaluable.item", item.item);
+    requireEnvelopeText("notEvaluable.reason", item.reason);
+  }
+}
+
 /** §6.1 要求比较的候选数下限：A、B、去 Pace、去 Efficiency、去 Stability（外加旧对照）。 */
 const MINIMUM_ABLATION_CANDIDATES = 5;
 
