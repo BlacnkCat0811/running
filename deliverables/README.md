@@ -34,6 +34,7 @@
 | `CA_WEIGHT_ABLATION.json` | `npm run data:ablation-ca-weights` | `D:\running\var\rai.sqlite` | ✅ |
 | `READINESS_REPLAY_COVERAGE.json` | `npm run data:readiness-replay-coverage` | `D:\running\var\rai.sqlite` | ✅ |
 | `NORMALIZATION_COVERAGE.json` | `scripts/normalization-coverage.mts` | `D:\running\var\rai.sqlite` | ✅ |
+| `BASELINE_REBASE_REVIEW.json` | `npm run data:baseline-rebase-review` | `D:\running\var\rai.sqlite` | ✅ |
 | `MODEL_VERSION_REPLAY_2026-09-29.json` | `scripts/model-version-replay.mts` | 🔴 **另一台主机（macOS）** | ✅ 脚本可跑，需重新生成才是本库 |
 | `RAI_V2_ABLATION_2026-09-29.json` | 09-29 会话的消融台账 | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
 | `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` | bounded comparability 候选离线评估（**未启用**） | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |

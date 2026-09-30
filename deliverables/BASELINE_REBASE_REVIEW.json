@@ -1,0 +1,100 @@
+{
+  "generatedBy": "scripts/baseline-rebase-review.mts",
+  "generatedAt": "2026-09-30T05:31:48.549Z",
+  "repoRevision": "c046e5aaf8fd9b49cba8c308f56b99914247f18b",
+  "databasePath": ".\\var\\rai.sqlite",
+  "schemaVersion": 22,
+  "reportVersion": "rai-baseline-rebase-review-v1",
+  "asOf": "2026-07-20T02:51:58.706Z",
+  "asOfSource": "active_run_evaluated_at",
+  "policy": {
+    "reviewEveryDays": 28,
+    "minimumEpochDays": 90,
+    "minimumIndependentSessions": 12,
+    "saturationFraction": 0.2,
+    "consecutiveReviews": 2,
+    "policyVersion": "rai-baseline-policy-v2"
+  },
+  "epoch": {
+    "epochId": null,
+    "epochIds": [],
+    "epochIdStatus": "not_available_at_this_schema",
+    "startedAt": "2024-07-13T12:41:18.000Z",
+    "startedAtSource": "checkpoint.state.baseline.calibrationEndAt",
+    "modelRunId": "model_run_44b76668-176f-4979-a2e4-e00f077f328e",
+    "checkpointVersion": "rai-model-checkpoint-v1",
+    "checkpointThroughAt": "2026-07-19T12:24:01.000Z",
+    "calibrationFeatureCount": 6,
+    "eligibleWorkoutCount": 132,
+    "trueAbility": 46.31283096453923
+  },
+  "window": {
+    "fromAt": "2026-06-22T02:51:58.706Z",
+    "toAt": "2026-07-20T02:51:58.706Z",
+    "windowDays": 28,
+    "windowSource": "policy.reviewEveryDays"
+  },
+  "evidence": {
+    "eligibleAssessments": 9,
+    "independentSessions": 9,
+    "distinctDays": 7,
+    "minimumIndependentSessions": 12,
+    "meetsMinimumIndependentSessions": false
+  },
+  "saturation": {
+    "status": "measured",
+    "definition": "各有效维度在窗口内合格证据中落到 0 或 100 的比例，取最大值（§6.4 的\"一个有效维度\"）",
+    "threshold": 0.2,
+    "saturatedFraction": 0.1111111111111111,
+    "triggerMet": false,
+    "perDimension": [
+      {
+        "dimension": "efficiency",
+        "effectiveEvidence": 9,
+        "saturatedEvidence": 0,
+        "fraction": 0
+      },
+      {
+        "dimension": "pace",
+        "effectiveEvidence": 9,
+        "saturatedEvidence": 0,
+        "fraction": 0
+      },
+      {
+        "dimension": "cardio",
+        "effectiveEvidence": 0,
+        "saturatedEvidence": 0,
+        "fraction": null
+      },
+      {
+        "dimension": "stability",
+        "effectiveEvidence": 9,
+        "saturatedEvidence": 0,
+        "fraction": 0
+      },
+      {
+        "dimension": "recovery",
+        "effectiveEvidence": 9,
+        "saturatedEvidence": 1,
+        "fraction": 0.1111111111111111
+      }
+    ]
+  },
+  "reviewHistory": {
+    "lastReviewedAt": null,
+    "precedingSaturatedReviews": null,
+    "status": "not_persisted",
+    "gatedBranches": [
+      "lastReviewedAt 为 null 时 `not_due`（每 28 天最多一次）永不成立",
+      "precedingSaturatedReviews 决定 `candidate_requested` 还是 `keep_epoch`（需 >= consecutiveReviews）"
+    ]
+  },
+  "review": {
+    "status": "not_evaluable",
+    "reason": "review_history_not_persisted",
+    "autoRebase": false,
+    "note": "本报告不调用 `reviewBaselineRebase`：它的六个输入里有两个没有持久化，而这两个直接决定结论。用默认值补齐会得到一个**确定但任意**的答案，把\"缺状态\"伪装成\"检查结论\"。",
+    "unblockRequirement": "需要持久化 review 历史（上次检查时间、连续饱和次数）后，本报告才能给出 review.status ∈ {not_due, epoch_cooldown, insufficient_evidence, keep_epoch, candidate_requested}。"
+  },
+  "note": "只读盘点：`saturation` 与 `evidence` 是实测事实，`review` 是明确不可评估。§6.4 的触发数字仍是候选政策，不是本项目已校准的生理常数。"
+}

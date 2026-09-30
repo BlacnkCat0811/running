@@ -87,6 +87,8 @@
     "data:readiness-replay-coverage": "tsx scripts/readiness-replay-coverage.mts",
     "predata:backfill-canonical-nights": "npm run check:node",
     "data:backfill-canonical-nights": "tsx scripts/backfill-canonical-nights.mts",
+    "predata:baseline-rebase-review": "npm run check:node",
+    "data:baseline-rebase-review": "tsx scripts/baseline-rebase-review.mts",
     "data:model-replay": "tsx packages/application/src/model-replay-cli.ts",
     "predata:model-replay": "npm run check:node"
   },

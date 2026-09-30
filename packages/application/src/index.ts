@@ -26,3 +26,8 @@ export {
   type ReadinessReplayCoverageOptions
 } from "./readiness-replay-coverage.js";
 export { backfillCanonicalNights, type CanonicalNightsBackfillResult } from "./backfill-canonical-nights.js";
+export {
+  buildBaselineRebaseReview,
+  BASELINE_REBASE_REVIEW_VERSION,
+  type BaselineRebaseReviewOptions
+} from "./baseline-rebase-review.js";

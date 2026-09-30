@@ -28,7 +28,7 @@
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck`（现覆盖 `packages/`、`apps/`、**`scripts/`**） | **0** |
-| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1081 tests / 1063 pass / 0 fail / 18 skipped** |
+| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1086 tests / 1068 pass / 0 fail / 18 skipped** |
 | web 侧全量 | `npm run test -w @rai/web` | **18 文件 / 111 tests / 0 fail** |
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
@@ -39,7 +39,8 @@
 > CA 均值 |Δ| 3.47、最终 TA |Δ| 1.61）· `ablation` 1286 ms（6 候选、**6 个发布阻断**）·
 > `normalization-coverage` 481 ms · `readiness-replay-coverage` 1826 ms ·
 > `backfill-canonical-nights`（dry-run）436 ms · `model-v2 --action inspect` 411 ms ·
-> `prediction-eval` 286 ms（`no_active_catboost_model`）。
+> `prediction-eval` 286 ms（`no_active_catboost_model`）· `baseline-rebase-review`
+> （`review.status = not_evaluable`，见 §五-7）。
 > 这一步的用途是抓"工具悄悄坏掉"：批次 19 的消融脚本曾经自 `017bf95` 起完全无法运行，
 > 而没有任何门禁会因此转红。
 
@@ -71,7 +72,7 @@
 | 2 | 工程/配置版本落库分离、lineage | ✅ | v24 迁移 + `engine_version` 读端 + API/界面；`ModelLineageV2` 十五个字段齐全 |
 | 3 | transition gate v2 + bundle 原子发布 | ✅ | 三态 gate、release bundle、拒绝留痕、回滚语义，均有测试 |
 | 4 | assembler freshness 统一 | 🟡 | 到达时间（`latestAvailableAt` / `availabilityUnknown`）已成为可见事实；`as_known_then` 的**裁决**留给第一个真正按该模式回放的调用方 |
-| 5 | rebase 发布流程与 epoch 分段曲线 | 🟡 | CLI `rebase` + 检查策略 + 曲线分段 + "两侧不可直接比较"文案已具备；**`effectiveAt` / `rebaseReason` 未落库**（`rebaseReason` 需要 review 状态持久化才不算造字段） |
+| 5 | rebase 发布流程与 epoch 分段曲线 | 🟡 | CLI `rebase` + 检查策略 + 曲线分段 + "两侧不可直接比较"文案已具备；本批给 `reviewBaselineRebase` 补了只读 runner（§五-7），结论 `not_evaluable`（review 历史未持久化，且**当前两个实测门已给出 keep_epoch**）；**`effectiveAt` / `rebaseReason` 仍未落库** |
 | 6 | 环境 adapter 生产统一 | 🟡 **覆盖率已实测，仍不足以校准** | 本工作区库（`NORMALIZATION_COVERAGE.json`，257 条 canonical workout）：**温度 8.6%（22）、湿度 8.6%（22）、爬升 61.9%（159）**。N1（复用既有条件惩罚）已在 physiology 落地；状态枚举**不再退化**（`out_of_domain 16`、`not_needed 1`）。但把 comparability 接进学习门控会让 **256/257** 低于门槛，所以 §5.1 的警告仍成立；N3 校准需要更多同条件样本，且 §18.4 禁止自动接入天气服务 |
 | 7 | 快照贯穿实际 API | 🟡 | fitness / load / readiness 三域已窄化且有真实消费方；durability / zones 等有消费方再做（不做投机抽象） |
 | 8 | Ridge/CatBoost 同样本三方竞争 | ✅ | Python 产 `challengers.json` → TS 导入器 → 既有 `compareResidualChallengers`；缺列按"不能凭缺席获胜"处理 |
@@ -81,7 +82,7 @@
 
 ---
 
-## 五、本状态文档新增的六条可执行结论
+## 五、本状态文档新增的七条可执行结论
 
 ### 1. 负向学习的瓶颈已定位到**可靠性门槛**（不是可比性、不是 K）
 
@@ -202,6 +203,30 @@ canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不�
   的 macOS 时点快照 —— 结构上防止同一类误读复发。
 - 方案主干（`RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md`）**不改**：它是一份注明日期与
   核验提交的文档，记录 macOS 基线是合法的。要防的是"把它的数字当成本工作区的现状"。
+
+### 7. 🟡 §6.4 的 rebase 检查**没有生产调用方**，且它的结论目前**不可评估**
+
+`reviewBaselineRebase` 有实现、有单测，但仓库里唯一的引用是它自己的测试文件 ——
+检查政策（每 28 天最多一次 / 冷却 90 天 / 饱和触发）从未在真实数据上跑过。
+这与批次 19 的消融脚本、批次 24 之前的 `replayReadinessRulings` 是同一类问题。
+
+新增只读 runner（`npm run data:baseline-rebase-review`）后，本机实测：
+
+```text
+epoch 起点 2024-07-13（checkpoint baseline.calibrationEndAt）· checkpoint v1 · eligibleWorkoutCount 132
+窗口 2026-06-22 .. 2026-07-20（28 天，取自政策）· eligible 9 / 独立训练 9 / 覆盖 7 天
+饱和 saturatedFraction 0.111（只有 recovery 维度 1/9）· 阈值 0.2 ⇒ 未触发
+review not_evaluable / review_history_not_persisted
+```
+
+`reviewBaselineRebase` 的六个输入里，`lastReviewedAt` 与 `precedingSaturatedReviews`
+**没有持久化**。**不用默认值补上**：后者直接决定 `candidate_requested` 还是 `keep_epoch`
+（填 0 ⇒ 永远 keep_epoch；填 1 ⇒ 只要这次饱和就请求候选），
+两个都是确定但任意的答案，会把"缺状态"伪装成"检查结论"。
+
+🔴 **这条实测改变了优先级**：三个门里已经有两个**按实测数据**给出"保持当前 epoch"
+（饱和未触发 0.111 < 0.2；独立训练 9 < 12）。所以"缺 review 历史"**目前不是阻塞项** ——
+补一张 review 历史表不会改变今天的结果。这比"文档说要持久化就去持久化"省一次无谓的迁移。
 
 ---
 
