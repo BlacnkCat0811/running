@@ -612,6 +612,25 @@ export function scoreFeature(
 const DIRECTION_FACTOR_APPLIED = 1;
 const DIRECTION_FACTOR_NOT_APPLIED = 0;
 
+/**
+ * §6.9：更新被拒的**唯一原因**。门控本身只此一处实现，这个枚举只是把它已经做出的
+ * 决定如实说出来 —— 报表据此统计拒绝原因，不必（也不许）自己重写阈值。
+ *
+ * `awaiting_negative_confirmation` 与其它几项刻意分开：它是"证据够了但还差一次确认"，
+ * 不是"这次训练不够格"。把两者混成一个 `rejected`，就无法回答 §6.9-7 要问的
+ * "到底卡在哪一道门槛上"。
+ */
+export type TrueAbilityUpdateRefusal =
+  | "not_eligible"
+  | "no_learning_target"
+  | "no_evidence_strength"
+  | "reliability_missing"
+  | "reliability_below_learning_minimum"
+  | "comparability_missing"
+  | "comparability_below_learning_minimum"
+  | "awaiting_negative_confirmation"
+  | "unchanged_after_update";
+
 export function updateTrueAbilityFromFeatureScore(
   currentTrueAbility: number,
   eligibleWorkoutCount: number,
@@ -629,31 +648,32 @@ export function updateTrueAbilityFromFeatureScore(
    * `negativeConfirmationCount`.
    */
   pendingNegativeConfirmations: number;
+  /** `null` = 本次更新被应用。否则说明是哪一道门把它挡下（或只是还没凑够确认）。 */
+  refusalReason: TrueAbilityUpdateRefusal | null;
 } {
   const reliability = score.confidenceV2.evidenceReliability;
   const comparability = score.confidenceV2.comparability;
-  if (
-    score.status !== "eligible" ||
-    score.learningObservation === null ||
-    score.evidenceStrength === null ||
-    // §6.9 learning gate. It reads rule-based reliability, never `overall`, and it
-    // is a different number on a different scale from the legacy display threshold
-    // `minimumConfidenceForTrueAbility` used above.
-    reliability === null ||
-    reliability < config.minimumEvidenceReliabilityForLearning ||
-    comparability === null ||
-    comparability < config.minimumComparabilityForLearning
-  ) {
-    return {
-      nextTrueAbility: currentTrueAbility,
-      directionFactor: DIRECTION_FACTOR_NOT_APPLIED,
-      growthResistance: 1,
-      updated: false,
-      // A workout we could not judge is not evidence of improvement, so it neither
-      // advances nor breaks the run. Only an actual observation does.
-      pendingNegativeConfirmations
-    };
-  }
+  // The refusal order below mirrors the original single boolean exactly: every branch
+  // returns the same values it did before, only with a reason attached.
+  const refuse = (reason: TrueAbilityUpdateRefusal, pending = pendingNegativeConfirmations) => ({
+    nextTrueAbility: currentTrueAbility,
+    directionFactor: DIRECTION_FACTOR_NOT_APPLIED,
+    growthResistance: 1,
+    updated: false,
+    pendingNegativeConfirmations: pending,
+    refusalReason: reason
+  });
+  if (score.status !== "eligible") return refuse("not_eligible");
+  // §6.6: the learning target, not the display estimate.
+  if (score.learningObservation === null) return refuse("no_learning_target");
+  if (score.evidenceStrength === null) return refuse("no_evidence_strength");
+  // §6.9 learning gate. It reads rule-based reliability, never `overall`, and it
+  // is a different number on a different scale from the legacy display threshold
+  // `minimumConfidenceForTrueAbility` used above.
+  if (reliability === null) return refuse("reliability_missing");
+  if (reliability < config.minimumEvidenceReliabilityForLearning) return refuse("reliability_below_learning_minimum");
+  if (comparability === null) return refuse("comparability_missing");
+  if (comparability < config.minimumComparabilityForLearning) return refuse("comparability_below_learning_minimum");
   // The learning target, not the display estimate: a workout we could only partly
   // see must not be learned as a decline just because the display value was
   // shrunk toward 50 (§6.6).
@@ -676,7 +696,8 @@ export function updateTrueAbilityFromFeatureScore(
         directionFactor: DIRECTION_FACTOR_NOT_APPLIED,
         growthResistance: resistance,
         updated: false,
-        pendingNegativeConfirmations: confirmations
+        pendingNegativeConfirmations: confirmations,
+        refusalReason: "awaiting_negative_confirmation"
       };
     }
   }
@@ -695,6 +716,7 @@ export function updateTrueAbilityFromFeatureScore(
     updated: nextTrueAbility !== currentTrueAbility,
     // Applied, so the run starts over — including for a positive, which is evidence
     // that contradicts a decline.
-    pendingNegativeConfirmations: 0
+    pendingNegativeConfirmations: 0,
+    refusalReason: nextTrueAbility === currentTrueAbility ? "unchanged_after_update" : null
   };
 }

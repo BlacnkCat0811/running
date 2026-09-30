@@ -206,6 +206,7 @@ const stratumHistoryByIndex = comparabilityHistoryMode === "bounded"
   ? adaptiveBaselines.map((item) => item.history) : buildLegacyStratumHistory(sorted);
 
 interface CandidateOutcome {
+  gate: GateThresholds;
   acceptanceByGroup: Record<string, {
     opportunitiesPositive: number; opportunitiesNegative: number;
     acceptedPositive: number; acceptedNegative: number; unscorable: number;
@@ -234,11 +235,38 @@ interface CandidateOutcome {
     firstNegativeAcceptanceAtAttempt: number | null;
     negativeOpportunitiesToFirstAcceptance: number | null;
   };
+  /**
+   * §6.9-7 要求"复查/放宽非必要门槛"，所以报告必须能回答卡在哪一道门上。
+   * 键是门控自己给出的归因（`applied` 表示已应用），不是本脚本重算的阈值判断。
+   * `negativeOnly` 只统计负向候选的归因 —— 那才是 §6.9 关心的那一侧。
+   */
+  refusalReasons: Record<string, number>;
+  negativeRefusalReasons: Record<string, number>;
   effectiveWeights: Record<string, number> | null;
 }
 
-function runCandidate(name: string, dimensionWeights: RaiModelConfig["dimensionWeights"]): CandidateOutcome {
-  const config: RaiModelConfig = { ...defaultRaiModelConfig, dimensionWeights, comparabilityHistoryMode };
+/**
+ * §6.9-5 的候选 grid 维度。**一次只改一个因素**，其余保持现行值 ——
+ * 同时改三个就再也说不清是哪一道门槛造成的差异。
+ */
+interface GateThresholds {
+  minimumEvidenceReliabilityForLearning: number;
+  minimumComparabilityForLearning: number;
+  negativeConfirmationCount: number;
+}
+
+const CURRENT_GATE: GateThresholds = {
+  minimumEvidenceReliabilityForLearning: defaultRaiModelConfig.minimumEvidenceReliabilityForLearning,
+  minimumComparabilityForLearning: defaultRaiModelConfig.minimumComparabilityForLearning,
+  negativeConfirmationCount: defaultRaiModelConfig.negativeConfirmationCount
+};
+
+function runCandidate(
+  name: string,
+  dimensionWeights: RaiModelConfig["dimensionWeights"],
+  gate: GateThresholds = CURRENT_GATE
+): CandidateOutcome {
+  const config: RaiModelConfig = { ...defaultRaiModelConfig, ...gate, dimensionWeights, comparabilityHistoryMode };
 
   // Same calibration-prefix rule as `replayModel`.
   const calibrationFeatures: WorkoutFeatureVector[] = [];
@@ -281,6 +309,8 @@ function runCandidate(name: string, dimensionWeights: RaiModelConfig["dimensionW
   let firstNegativeAcceptanceAtAttempt: number | null = null;
   let negativeOpportunitiesToFirstAcceptance: number | null = null;
   let effectiveWeights: Record<string, number> | null = null;
+  const refusalReasons: Record<string, number> = {};
+  const negativeRefusalReasons: Record<string, number> = {};
   let lastEligibleDate: string | null = null;
   let lastEligibleAbility = 50;
   const acceptanceByGroup: CandidateOutcome["acceptanceByGroup"] = {};
@@ -338,6 +368,13 @@ function runCandidate(name: string, dimensionWeights: RaiModelConfig["dimensionW
     );
     pendingNegativeConfirmations = update.pendingNegativeConfirmations;
     trueAbility = update.nextTrueAbility;
+    // 归因直接取门控自己的结论；`applied` 是"没有拒绝"，不是一种拒绝原因。
+    const refusalKey = update.refusalReason ?? "applied";
+    refusalReasons[refusalKey] = (refusalReasons[refusalKey] ?? 0) + 1;
+    const observationIsNegative = learning !== null && learning < before;
+    if (observationIsNegative) {
+      negativeRefusalReasons[refusalKey] = (negativeRefusalReasons[refusalKey] ?? 0) + 1;
+    }
     const groupKeys = [
       `stratum:${score.stratum}`,
       `session:${feature.sessionType}`,
@@ -388,6 +425,11 @@ function runCandidate(name: string, dimensionWeights: RaiModelConfig["dimensionW
   const sortedAbilities = [...abilities].sort((a, b) => a - b);
   const saturated = abilities.filter((value) => value <= 0.001 || value >= 99.999).length;
   return {
+    gate: {
+      minimumEvidenceReliabilityForLearning: config.minimumEvidenceReliabilityForLearning,
+      minimumComparabilityForLearning: config.minimumComparabilityForLearning,
+      negativeConfirmationCount: config.negativeConfirmationCount
+    },
     acceptanceByGroup,
     candidate: name,
     dimensionWeights,
@@ -426,10 +468,53 @@ function runCandidate(name: string, dimensionWeights: RaiModelConfig["dimensionW
       firstNegativeAcceptanceAtAttempt
     },
     effectiveWeights
+    ,refusalReasons
+    ,negativeRefusalReasons
   };
 }
 
 const outcomes = Object.entries(CANDIDATES).map(([name, weights]) => runCandidate(name, weights));
+
+// ---------------------------------------------------------------------------
+// §6.9-5 负向门控候选 grid。一次只改一个因素，其余保持现行值；
+// 权重固定为 §6.1 的控制组 v2a，这样两侧都只有一个变量。
+// ---------------------------------------------------------------------------
+const GRID_WEIGHTING = CANDIDATES.v2a!;
+const gridCells: Array<{ factor: keyof GateThresholds; value: number; gate: GateThresholds }> = [
+  ...[0.6, 0.7, 0.75].map((value) => ({
+    factor: "minimumEvidenceReliabilityForLearning" as const, value,
+    gate: { ...CURRENT_GATE, minimumEvidenceReliabilityForLearning: value }
+  })),
+  ...[0.8, 0.85, 0.9].map((value) => ({
+    factor: "minimumComparabilityForLearning" as const, value,
+    gate: { ...CURRENT_GATE, minimumComparabilityForLearning: value }
+  })),
+  ...[1, 2, 3].map((value) => ({
+    factor: "negativeConfirmationCount" as const, value,
+    gate: { ...CURRENT_GATE, negativeConfirmationCount: value }
+  }))
+];
+const negativeGateGrid = gridCells.map((cell) => {
+  const outcome = runCandidate(`grid:${cell.factor}=${cell.value}`, GRID_WEIGHTING, cell.gate);
+  return {
+    factor: cell.factor,
+    value: cell.value,
+    isCurrentPolicy: outcome.gate.minimumEvidenceReliabilityForLearning === CURRENT_GATE.minimumEvidenceReliabilityForLearning
+      && outcome.gate.minimumComparabilityForLearning === CURRENT_GATE.minimumComparabilityForLearning
+      && outcome.gate.negativeConfirmationCount === CURRENT_GATE.negativeConfirmationCount,
+    negativeOpportunities: outcome.acceptance.negativeCandidates,
+    negativeAccepted: outcome.acceptance.negativeAccepted,
+    // 机会为 0 时给 null 而不是 0：0 会被读成"一次都没接受"。
+    negativeAcceptanceRate: outcome.acceptance.negativeCandidates === 0
+      ? null : outcome.acceptance.negativeAccepted / outcome.acceptance.negativeCandidates,
+    negativeOpportunitiesToFirstAcceptance: outcome.acceptance.negativeOpportunitiesToFirstAcceptance,
+    // §6.9-8：放宽后必须重新验证正向一侧。"只看负向变好"正是它禁止的做法。
+    positiveOpportunities: outcome.acceptance.positiveCandidates,
+    positiveAccepted: outcome.acceptance.positiveAccepted,
+    finalTrueAbility: outcome.trueAbility.final,
+    negativeRefusalReasons: outcome.negativeRefusalReasons
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Raw-signal redundancy. Feature-level, independent of the weights, which is why
@@ -527,6 +612,13 @@ const report = {
   }))),
   negativeLearningNote:
     "§6.9-7：never_accepted 即'有合格负机会却一次都没接受'，按文档必须阻断该门控版本发布并复查/放宽非必要门槛；“更保守”不是永久解释。no_opportunity 是独立状态，不等于通过。",
+  negativeGateGrid,
+  negativeGatePreregistration: {
+    status: "not_configured" as const,
+    note:
+      "§6.9-6 要求在评估前配置每组最少机会数、可接受检测延迟与最大误判下降率。这三项尚未冻结，所以本 grid 只描述权衡，**不给出“该用哪个值”的结论**；§6.9-5 也明确 grid 值是回放实验值，不是上线默认值。",
+    recommendation: "not_evaluable" as const
+  },
   limitation:
     "Uses stored pre-V2 features, not a new V4 extraction. Replays production inactivity decay and eligible-session counting. v1_current is only a V1-weight control under the current engine, NOT an executable replay of the old engine. Environment is unavailable in these stored features.",
   candidateNotes: [

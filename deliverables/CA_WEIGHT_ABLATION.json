@@ -74,7 +74,7 @@
       ]
     }
   ],
-  "generatedAt": "2026-09-30T03:49:24.896Z",
+  "generatedAt": "2026-09-30T03:58:13.754Z",
   "modelConfigVersion": "rai-model-config-v12",
   "comparabilityHistoryMode": "legacy",
   "databasePath": "D:\\running\\var\\rai.sqlite",
@@ -154,6 +154,177 @@
     }
   ],
   "negativeLearningNote": "§6.9-7：never_accepted 即'有合格负机会却一次都没接受'，按文档必须阻断该门控版本发布并复查/放宽非必要门槛；“更保守”不是永久解释。no_opportunity 是独立状态，不等于通过。",
+  "negativeGateGrid": [
+    {
+      "factor": "minimumEvidenceReliabilityForLearning",
+      "value": 0.6,
+      "isCurrentPolicy": false,
+      "negativeOpportunities": 46,
+      "negativeAccepted": 8,
+      "negativeAcceptanceRate": 0.17391304347826086,
+      "negativeOpportunitiesToFirstAcceptance": 3,
+      "positiveOpportunities": 115,
+      "positiveAccepted": 86,
+      "finalTrueAbility": 47.73184861457123,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 1,
+        "awaiting_negative_confirmation": 31,
+        "applied": 8,
+        "not_eligible": 4,
+        "comparability_below_learning_minimum": 2
+      }
+    },
+    {
+      "factor": "minimumEvidenceReliabilityForLearning",
+      "value": 0.7,
+      "isCurrentPolicy": false,
+      "negativeOpportunities": 43,
+      "negativeAccepted": 7,
+      "negativeAcceptanceRate": 0.16279069767441862,
+      "negativeOpportunitiesToFirstAcceptance": 6,
+      "positiveOpportunities": 118,
+      "positiveAccepted": 85,
+      "finalTrueAbility": 47.63381357412646,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 4,
+        "awaiting_negative_confirmation": 27,
+        "applied": 7,
+        "not_eligible": 3,
+        "comparability_below_learning_minimum": 2
+      }
+    },
+    {
+      "factor": "minimumEvidenceReliabilityForLearning",
+      "value": 0.75,
+      "isCurrentPolicy": true,
+      "negativeOpportunities": 26,
+      "negativeAccepted": 0,
+      "negativeAcceptanceRate": 0,
+      "negativeOpportunitiesToFirstAcceptance": null,
+      "positiveOpportunities": 135,
+      "positiveAccepted": 32,
+      "finalTrueAbility": 44.704621794210475,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
+      }
+    },
+    {
+      "factor": "minimumComparabilityForLearning",
+      "value": 0.8,
+      "isCurrentPolicy": false,
+      "negativeOpportunities": 26,
+      "negativeAccepted": 0,
+      "negativeAcceptanceRate": 0,
+      "negativeOpportunitiesToFirstAcceptance": null,
+      "positiveOpportunities": 135,
+      "positiveAccepted": 33,
+      "finalTrueAbility": 44.787286022606175,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "awaiting_negative_confirmation": 4,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 1
+      }
+    },
+    {
+      "factor": "minimumComparabilityForLearning",
+      "value": 0.85,
+      "isCurrentPolicy": false,
+      "negativeOpportunities": 26,
+      "negativeAccepted": 0,
+      "negativeAcceptanceRate": 0,
+      "negativeOpportunitiesToFirstAcceptance": null,
+      "positiveOpportunities": 135,
+      "positiveAccepted": 32,
+      "finalTrueAbility": 44.704621794210475,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
+      }
+    },
+    {
+      "factor": "minimumComparabilityForLearning",
+      "value": 0.9,
+      "isCurrentPolicy": true,
+      "negativeOpportunities": 26,
+      "negativeAccepted": 0,
+      "negativeAcceptanceRate": 0,
+      "negativeOpportunitiesToFirstAcceptance": null,
+      "positiveOpportunities": 135,
+      "positiveAccepted": 32,
+      "finalTrueAbility": 44.704621794210475,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
+      }
+    },
+    {
+      "factor": "negativeConfirmationCount",
+      "value": 1,
+      "isCurrentPolicy": false,
+      "negativeOpportunities": 26,
+      "negativeAccepted": 3,
+      "negativeAcceptanceRate": 0.11538461538461539,
+      "negativeOpportunitiesToFirstAcceptance": 7,
+      "positiveOpportunities": 135,
+      "positiveAccepted": 32,
+      "finalTrueAbility": 44.44656986810518,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "applied": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
+      }
+    },
+    {
+      "factor": "negativeConfirmationCount",
+      "value": 2,
+      "isCurrentPolicy": true,
+      "negativeOpportunities": 26,
+      "negativeAccepted": 0,
+      "negativeAcceptanceRate": 0,
+      "negativeOpportunitiesToFirstAcceptance": null,
+      "positiveOpportunities": 135,
+      "positiveAccepted": 32,
+      "finalTrueAbility": 44.704621794210475,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
+      }
+    },
+    {
+      "factor": "negativeConfirmationCount",
+      "value": 3,
+      "isCurrentPolicy": false,
+      "negativeOpportunities": 26,
+      "negativeAccepted": 0,
+      "negativeAcceptanceRate": 0,
+      "negativeOpportunitiesToFirstAcceptance": null,
+      "positiveOpportunities": 135,
+      "positiveAccepted": 32,
+      "finalTrueAbility": 44.704621794210475,
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
+      }
+    }
+  ],
+  "negativeGatePreregistration": {
+    "status": "not_configured",
+    "note": "§6.9-6 要求在评估前配置每组最少机会数、可接受检测延迟与最大误判下降率。这三项尚未冻结，所以本 grid 只描述权衡，**不给出“该用哪个值”的结论**；§6.9-5 也明确 grid 值是回放实验值，不是上线默认值。",
+    "recommendation": "not_evaluable"
+  },
   "limitation": "Uses stored pre-V2 features, not a new V4 extraction. Replays production inactivity decay and eligible-session counting. v1_current is only a V1-weight control under the current engine, NOT an executable replay of the old engine. Environment is unavailable in these stored features.",
   "candidateNotes": [
     "The comparabilityHistoryMode field declares whether this is the incumbent history policy or the bounded candidate. v11 uses fractional weight coverage. This is not the earlier v9/v10 single-factor experiment. Acceptance denominators change as TA changes; compare counts as well as rates.",
@@ -163,6 +334,11 @@
   ],
   "outcomes": [
     {
+      "gate": {
+        "minimumEvidenceReliabilityForLearning": 0.75,
+        "minimumComparabilityForLearning": 0.9,
+        "negativeConfirmationCount": 2
+      },
       "acceptanceByGroup": {
         "stratum:threshold_sustained": {
           "opportunitiesPositive": 18,
@@ -310,9 +486,27 @@
         "pace": 0.3125,
         "stability": 0.1875,
         "recovery": 0.125
+      },
+      "refusalReasons": {
+        "reliability_below_learning_minimum": 94,
+        "not_eligible": 29,
+        "applied": 32,
+        "awaiting_negative_confirmation": 3,
+        "comparability_below_learning_minimum": 3
+      },
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 33,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 4,
+        "comparability_below_learning_minimum": 2
       }
     },
     {
+      "gate": {
+        "minimumEvidenceReliabilityForLearning": 0.75,
+        "minimumComparabilityForLearning": 0.9,
+        "negativeConfirmationCount": 2
+      },
       "acceptanceByGroup": {
         "stratum:threshold_sustained": {
           "opportunitiesPositive": 19,
@@ -459,9 +653,27 @@
         "efficiency": 0.428571,
         "pace": 0.357143,
         "stability": 0.214286
+      },
+      "refusalReasons": {
+        "reliability_below_learning_minimum": 94,
+        "not_eligible": 29,
+        "applied": 32,
+        "awaiting_negative_confirmation": 3,
+        "comparability_below_learning_minimum": 3
+      },
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 20,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
       }
     },
     {
+      "gate": {
+        "minimumEvidenceReliabilityForLearning": 0.75,
+        "minimumComparabilityForLearning": 0.9,
+        "negativeConfirmationCount": 2
+      },
       "acceptanceByGroup": {
         "stratum:threshold_sustained": {
           "opportunitiesPositive": 19,
@@ -608,9 +820,27 @@
         "efficiency": 0.45,
         "pace": 0.35,
         "stability": 0.2
+      },
+      "refusalReasons": {
+        "reliability_below_learning_minimum": 94,
+        "not_eligible": 29,
+        "applied": 32,
+        "awaiting_negative_confirmation": 3,
+        "comparability_below_learning_minimum": 3
+      },
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 19,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
       }
     },
     {
+      "gate": {
+        "minimumEvidenceReliabilityForLearning": 0.75,
+        "minimumComparabilityForLearning": 0.9,
+        "negativeConfirmationCount": 2
+      },
       "acceptanceByGroup": {
         "stratum:threshold_sustained": {
           "opportunitiesPositive": 17,
@@ -756,9 +986,27 @@
       "effectiveWeights": {
         "efficiency": 0.666667,
         "stability": 0.333333
+      },
+      "refusalReasons": {
+        "reliability_below_learning_minimum": 94,
+        "not_eligible": 29,
+        "applied": 31,
+        "awaiting_negative_confirmation": 4,
+        "comparability_below_learning_minimum": 3
+      },
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 21,
+        "awaiting_negative_confirmation": 4,
+        "not_eligible": 1,
+        "comparability_below_learning_minimum": 2
       }
     },
     {
+      "gate": {
+        "minimumEvidenceReliabilityForLearning": 0.75,
+        "minimumComparabilityForLearning": 0.9,
+        "negativeConfirmationCount": 2
+      },
       "acceptanceByGroup": {
         "stratum:threshold_sustained": {
           "opportunitiesPositive": 20,
@@ -904,9 +1152,27 @@
       "effectiveWeights": {
         "pace": 0.625,
         "stability": 0.375
+      },
+      "refusalReasons": {
+        "reliability_below_learning_minimum": 94,
+        "not_eligible": 29,
+        "applied": 34,
+        "comparability_below_learning_minimum": 3,
+        "awaiting_negative_confirmation": 1
+      },
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 46,
+        "not_eligible": 10,
+        "comparability_below_learning_minimum": 2,
+        "awaiting_negative_confirmation": 1
       }
     },
     {
+      "gate": {
+        "minimumEvidenceReliabilityForLearning": 0.75,
+        "minimumComparabilityForLearning": 0.9,
+        "negativeConfirmationCount": 2
+      },
       "acceptanceByGroup": {
         "stratum:threshold_sustained": {
           "opportunitiesPositive": 20,
@@ -1052,6 +1318,18 @@
       "effectiveWeights": {
         "efficiency": 0.545455,
         "pace": 0.454545
+      },
+      "refusalReasons": {
+        "reliability_below_learning_minimum": 94,
+        "not_eligible": 29,
+        "applied": 32,
+        "awaiting_negative_confirmation": 3,
+        "comparability_below_learning_minimum": 3
+      },
+      "negativeRefusalReasons": {
+        "reliability_below_learning_minimum": 17,
+        "awaiting_negative_confirmation": 3,
+        "not_eligible": 1
       }
     }
   ],
