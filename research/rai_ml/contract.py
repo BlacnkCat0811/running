@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Final, Iterable
 
-FEATURE_SCHEMA_VERSION: Final = "race-residual-feature-v3"
+FEATURE_SCHEMA_VERSION: Final = "race-residual-feature-v4"
 DISTANCES: Final = ("five_k", "ten_k", "half_marathon")
 ISO_INSTANT_PATTERN: Final = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$"

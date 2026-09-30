@@ -46,7 +46,7 @@ class TrainingError(RuntimeError):
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    model_version: str = "race-residual-catboost-v3"
+    model_version: str = "race-residual-catboost-v4"
     minimum_labels: int = 50
     minimum_labels_per_distance: int = 8
     initial_training_size: int = 12
@@ -116,6 +116,34 @@ def _fit(samples: Sequence[TrainingSample]):
     model = CatBoostRegressor(**CATBOOST_PARAMETERS)
     model.fit(_matrix(samples), _targets(samples))
     return model
+
+
+def _ridge_features(samples: Sequence[TrainingSample]) -> np.ndarray:
+    # Same seven-column simple challenger as physiology/ridge.ts. Missing values
+    # have explicit historical defaults; fit statistics use training rows only.
+    rows = []
+    for sample in samples:
+        f = sample.features
+        value = lambda key, fallback: fallback if f.get(key) is None else float(f[key])
+        rows.append([value("logPredictedSeconds", math.log(sample.baseline_predicted_seconds)),
+            value("readiness", 0.5), value("conditionAdjustmentFraction", 0),
+            value("performanceVdot", 40), value("vo2Gap", 0),
+            float(sample.distance == "ten_k"), float(sample.distance == "half_marathon")])
+    return np.asarray(rows, dtype=np.float64)
+
+
+def _ridge_predict(training: Sequence[TrainingSample], test: Sequence[TrainingSample]) -> np.ndarray:
+    if len(training) < 12:
+        raise TrainingError("Ridge challenger requires twelve independent training labels")
+    x = _ridge_features(training)
+    means = x.mean(axis=0)
+    scales = np.maximum(x.std(axis=0), 1e-6)
+    design = np.column_stack([np.ones(len(x)), (x - means) / scales])
+    penalty = np.eye(design.shape[1]) * 2.0
+    penalty[0, 0] = 0
+    target = np.asarray([row.target_log_residual for row in training], dtype=np.float64)
+    coefficients = np.linalg.solve(design.T @ design + penalty, design.T @ target)
+    return np.column_stack([np.ones(len(test)), (_ridge_features(test) - means) / scales]) @ coefficients
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -232,6 +260,7 @@ def _walk_forward(
             continue
         model = _fit(training_samples)
         raw = float(np.asarray(model.predict(_matrix([sample]))).reshape(-1)[0])
+        ridge_raw = float(_ridge_predict(training_samples, [sample])[0]) if len(training_samples) >= 12 else None
         baseline_row = _baseline_prediction(sample)
         candidate_row = _adjusted_prediction(sample, raw, config.correction_cap_fraction)
         baseline.append(baseline_row)
@@ -244,6 +273,7 @@ def _walk_forward(
                 "actualSeconds": sample.actual_seconds,
                 "baselinePredictedSeconds": sample.baseline_predicted_seconds,
                 "candidatePredictedSeconds": candidate_row.predicted_seconds,
+                "ridgePredictedSeconds": None if ridge_raw is None else _adjusted_prediction(sample, ridge_raw, config.correction_cap_fraction).predicted_seconds,
                 "rawTargetLogResidual": raw,
                 "trainingLabelCount": len(training_samples),
                 "trainingDataThroughAt": max(
@@ -604,8 +634,24 @@ def train_and_export(
         release_accepted, release_reasons, release_gate = _release_gate(
             release_baseline, release_candidate, holdout, config
         )
-        accepted = algorithm_accepted and release_accepted
-        rejection_reasons = algorithm_reasons + release_reasons
+        ridge_raw = _ridge_predict(training, holdout)
+        release_ridge = [_adjusted_prediction(sample, float(raw), config.correction_cap_fraction)
+            for sample, raw in zip(holdout, ridge_raw, strict=True)]
+        ridge_accepted, ridge_reasons, ridge_gate = _release_gate(release_ridge, release_candidate, holdout, config)
+        # Inner walk-forward must beat the same simple model, not only Daniels.
+        paired = {sample.sample_id: sample for sample in training}
+        walk_ridge = [PredictionResult(distance=paired[row["sampleId"]].distance,
+            actual_seconds=paired[row["sampleId"]].actual_seconds,
+            predicted_seconds=row["ridgePredictedSeconds"], optimistic_seconds=None, pessimistic_seconds=None)
+            for row in predictions]
+        walk_ridge_mae = regression_metrics(walk_ridge).meanAbsoluteErrorSeconds
+        walk_model_mae = candidate_metrics.meanAbsoluteErrorSeconds
+        walk_ridge_improvement = None if walk_ridge_mae in (None, 0) or walk_model_mae is None else 1 - walk_model_mae / walk_ridge_mae
+        walk_ridge_accepted = walk_ridge_improvement is not None and walk_ridge_improvement >= config.minimum_mae_improvement
+        accepted = algorithm_accepted and release_accepted and ridge_accepted and walk_ridge_accepted
+        rejection_reasons = algorithm_reasons + release_reasons + ["ridge:" + reason for reason in ridge_reasons]
+        if not walk_ridge_accepted:
+            rejection_reasons.append("ridge:walk_forward_improvement_below_threshold")
         model_path = temporary / "model.onnx"
         input_name, output_name = _export_onnx(release_model, model_path)
         model_sha256 = _sha256(model_path)
@@ -628,6 +674,14 @@ def train_and_export(
             },
             "activationGate": gate,
             "releaseHoldout": release_gate,
+            "ridgeChallenger": {
+                "version": "race-residual-ridge-v1", "status": "passed" if ridge_accepted and walk_ridge_accepted else "failed",
+                "walkForwardImprovement": walk_ridge_improvement,
+                "releaseHoldout": ridge_gate,
+                "trainingSampleIds": [row.sample_id for row in training],
+                "holdoutSampleIds": [row.sample_id for row in holdout],
+                "predictions": [row.predicted_seconds for row in release_ridge],
+            },
             "publishedArtifact": {
                 "fitStrategy": "training_partition_only",
                 "generalizationMetricsSource": "temporal_release_holdout",

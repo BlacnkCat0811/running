@@ -226,11 +226,14 @@ packages/
   api-contracts/             Web、API 与移动端共享的 HTTP DTO / OpenAPI 契约
   contracts/                 跨平台 canonical 数据契约（canonical-health-v2 等版本常量）
   health-export-parser/      Apple 导出 XML/GPX 解析、canonical、睡眠/HRV canonicalization
-  scoring/                   无平台依赖的纯 TypeScript 评分核心（rai-model-config-v4）
+  scoring/                   无平台依赖的纯 TypeScript 评分核心（rai-model-config-v12）
   physiology/                VO₂max、VDOT、乳酸阈值与公式比赛预测
   prediction-inference/      CatBoost ONNX artifact 校验与 Node 生产推理
-  features/                  纯 Workout Feature Vector 提取（feature-config-v8）
-  training-load/             训练负荷、训练状态与生理状态分类（training-load-config-v4）
+  features/                  纯 Workout Feature Vector 提取（feature-config-v11）
+  readiness/                 当日恢复的唯一规则源（rai-readiness-v1.0.0）
+  normalization/             §5 环境归一化 adapter 契约与条件账本（rai-normalization-identity-v1）
+  durability/                §8 专项准备度与耐久证据，分开存、不合成单一分数（rai-durability-v1.0.0）
+  training-load/             训练负荷、训练状态与生理状态分类（training-load-config-v5）
   training-zones/            训练分区与时间线
   application/               SQLite 回放、任务队列、Run 与 active 指针、预测/分析 CLI
   storage-sqlite/            schema/migrations（v1–v22）、repository、恢复事实、发布与备份

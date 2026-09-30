@@ -86,7 +86,7 @@ def test_feature_schema_hash_includes_acwr_semantics():
         "through asOf"
     )
     assert feature_schema_sha256() == (
-        "bea6a4ffaec363ab1e78639935c643d8f7310db4d16ce7a6934a5fae2c463a6b"
+        "462e213399e199f268ce1122eeae924db6d55c4dbc0795c643394d22f0366aa7"
     )
 
 

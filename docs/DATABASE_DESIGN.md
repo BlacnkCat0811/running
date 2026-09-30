@@ -1,10 +1,12 @@
 # RAI 数据库设计
 
-> Schema 版本：v22（`packages/storage-sqlite/src/database.ts` migrations v1–v22；v11 为历史保留占位，无 SQL）
+> **下列版本为 2026-09-30 实测值**（这类"当前值"必须有日期口径，否则它就是过期的同义词）。
+> Schema 版本：v24（`packages/storage-sqlite/src/database.ts` migrations v1–v24；v11 为历史保留占位，无 SQL）
 > Canonical contract：`canonical-health-v2`（`packages/contracts`）
-> Feature schema：`workout-feature-v3`；Feature 配置：`feature-config-v8`（`packages/features`）
-> 评分模型配置：`rai-model-config-v4`（`packages/scoring`）
-> 训练负荷配置：`training-load-config-v4`；训练分区配置：`training-zone-config-v3`
+> Feature schema：`workout-feature-v4`；Feature 配置：`feature-config-v11`（`packages/features`；
+>   `legacy-v3/` 下另有 v3 提取器与 `feature-config-v8`，那是兼容通道，不是当前值）
+> 评分模型配置：`rai-model-config-v12`（`packages/scoring`）
+> 训练负荷配置：`training-load-config-v5`；训练分区配置：`training-zone-config-v4`
 > 运行时数据库：本地 SQLite（`var/rai.sqlite`，可由 `RAI_DATABASE` 覆盖）
 > 说明：以下列出主要表与视图；完整 SQL 与迁移内容以 `database.ts` 为唯一事实源。
 

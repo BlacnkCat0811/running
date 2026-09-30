@@ -68,8 +68,12 @@ def test_real_catboost_walk_forward_and_onnx_export_are_deterministic(tmp_path):
         generated_at=generated_at,
         input_file_sha256=input_hash,
     )
-    assert first.status == "accepted"
-    assert second.status == "accepted"
+    # This synthetic constant-residual cohort is solved by the simple Ridge
+    # challenger. Deterministic export does not justify activating a more complex model.
+    assert first.status == "rejected"
+    assert first.evaluation["ridgeChallenger"]["status"] == "failed"
+    assert any(reason.startswith("ridge:") for reason in first.evaluation["rejectionReasons"])
+    assert second.status == first.status
     assert first.manifest["modelSha256"] == second.manifest["modelSha256"]
     assert first.manifest["artifactFiles"] == second.manifest["artifactFiles"]
     assert first.manifest["inputFileSha256"] == input_hash

@@ -5,6 +5,7 @@
 | 作者   | TBD                                                                                     |
 | 日期   | 2026-09-04                                                                              |
 | 状态   | Implemented in `881578b`; canonical facts and recovery integrations active               |
+| 时间口径 | 本文是 **2026-09-04 的设计快照**（含当时的 `directionFactor` 代码片段），不随代码更新。文中的 `directionFactor`（`recovery < 40 → 0.25`、否则 `0.4`）此后已被两次移除：恢复分支于 Phase 1，剩余基础折扣于 `rai-model-config-v10`。当前行为以 `packages/scoring` 为准。 |
 | 产品范围 | 浏览器 Web（`apps/web`）+ 本地 API + 共享包；iOS 仅为 WKWebView 只读 HealthKit 导出壳                     |
 | 主视口  | 1440 × 900；不改 frozen responsive 区域                                                      |
 | 验收依据 | `AGENTS.md`、`README.md`、`docs/WEB_IMPLEMENTATION.md`（归档 PRD `RAI_PRD_V1.0.md` 不是当前验收依据） |
