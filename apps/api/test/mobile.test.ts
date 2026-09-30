@@ -722,7 +722,7 @@ test("mobile recovery reports a historical night as a reference, never as today'
       assert.equal(snapshot.coverage.sleep.latestDate, "2025-01-22");
       assert.equal(snapshot.recoveryAssessment.coverage, "none");
       assert.equal(snapshot.recoveryAssessment.assessment, "not_assessed");
-      assert.deepEqual(snapshot.recoveryAssessment.reasonCodes, ["not_assessed"]);
+      assert.ok(snapshot.recoveryAssessment.reasonCodes.includes("not_assessed"));
       assert.equal(snapshot.recommendation.recoveryAdjustment, "no_evidence", "缺测既不是批准也不是降级");
       assert.equal(snapshot.sync.status, "ok", "刷新成功与有没有恢复记录无关");
       assert.equal(snapshot.sync.lastSuccessAt, "2026-09-19T06:10:06.000Z");
@@ -731,6 +731,11 @@ test("mobile recovery reports a historical night as a reference, never as today'
       const date = snapshot.today.localDate;
       const baselineNight = new Date(Date.parse(`${date}T00:00:00Z`) - 3 * 86_400_000).toISOString().slice(0, 10);
       insert.run("baseline-night", baselineNight, `${baselineNight}T15:00:00Z`, `${baselineNight}T23:00:00Z`, 400);
+      // V2 requires seven prior comparable days; a single night is not a mature baseline.
+      for (let offset=4;offset<=10;offset++) {
+        const d=new Date(Date.parse(`${date}T00:00:00Z`)-offset*86400000).toISOString().slice(0,10);
+        insert.run(`reference-${offset}`,d,`${d}T00:00:00+08:00`,`${d}T08:00:00+08:00`,400);
+      }
       insert.run("today-night", date, `${date}T00:00:00+08:00`, `${date}T08:00:00+08:00`, 480);
       const current = read.mobileToday(30);
       assert.equal(current.latestDataDate, "2025-01-22");

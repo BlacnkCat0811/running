@@ -128,8 +128,10 @@ test("historical recovery no longer vetoes today's base arrangement", () => {
   assert.match(verdict.reason, /未结合今日恢复监测/);
   // Yesterday's low-sleep streak must not become today's streak.
   assert.equal(decideVerdict({ ...input, nightsBelowSleepBaseline: 3 }).tone, "green");
-  // Recovery-independent warnings still fire.
-  assert.equal(decideVerdict({ ...input, loadRatio: 1.5 }).tone, "red");
+  // Recovery-independent warnings still fire. Since §9.5 the load verdict comes from the single
+  // classification, so the row states the status the builder would emit for this ratio
+  // (`loadRatio > 1.3` ⇒ `high_load`) instead of an inconsistent hand-built pair.
+  assert.equal(decideVerdict({ ...input, loadRatio: 1.5, trainingStatus: "high_load" }).tone, "red");
   assert.equal(decideVerdict({ ...input, consecutiveQualityDays: 2 }).tone, "red");
 });
 
@@ -155,7 +157,8 @@ test("recovery freshness follows its date, independently of training freshness",
 
 test("missing recovery cannot hide high load or consecutive quality warnings", () => {
   const input = { ...base(), morningHrvMs: null };
-  assert.equal(decideVerdict({ ...input, loadRatio: 1.5 }).tone, "red");
+  // §9.5: the ratio no longer votes on its own; a real row with this ratio carries `high_load`.
+  assert.equal(decideVerdict({ ...input, loadRatio: 1.5, trainingStatus: "high_load" }).tone, "red");
   assert.equal(decideVerdict({ ...input, consecutiveQualityDays: 2 }).tone, "red");
   // A missing personal baseline is insufficient evidence, not a negative finding.
   const noBaseline = decideVerdict({ ...base(), hrvBaselineMs: null });
@@ -710,7 +713,8 @@ test("the recommendation names its basis and separates a veto from missing evide
   assert.equal(green.recoveryAdjustment, "none");
   assert.deepEqual(green.reasonCodes, ["training_load_and_plan"]);
 
-  const overloaded = { ...input, loadRatio: 1.6 };
+  // §9.5: a ratio above 1.5 is `attention` in the single classification, so the row says so.
+  const overloaded = { ...input, loadRatio: 1.6, trainingStatus: "attention" as const };
   assert.equal(
     buildRecommendation(overloaded, assessRecovery(overloaded), decideVerdict(overloaded)).basis,
     "high_load"

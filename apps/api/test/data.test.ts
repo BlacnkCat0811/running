@@ -140,12 +140,12 @@ test("maps active SQLite results into Web API DTOs", async () => {
     assert.equal(detail?.workout.distanceKm, 5);
     assert.equal(detail?.workout.hasRoute, false);
     assert.equal(detail?.workout.elapsedSeconds, 1800);
-    assert.equal(detail?.workout.modelVersion, "rai-model-config-v4");
+    assert.equal(detail?.workout.modelVersion, "rai-model-config-v12");
     assert.equal(detail?.workout.averagePowerWatts, 220);
     assert.equal(detail?.workout.averageStrideLengthMeters, 1.1);
     assert.equal(detail?.workout.averageVerticalOscillationCm, 8.2);
     assert.equal(detail?.workout.averageGroundContactTimeMs, 242);
-    assert.equal(detail?.dimensions.cardio !== null, true);
+    assert.equal(detail?.dimensions.cardio, null);
     assert.ok(detail?.trainingLoad);
     assert.equal(detail?.trainingLoad?.trainingSessionId, "api_session_7");
     assert.ok((detail?.trainingLoad?.load ?? 0) > 0);

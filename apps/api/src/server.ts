@@ -17,6 +17,7 @@ import type {
   MobileSessionKind,
   MobileSessionStructure,
   MobileWeeklyPlanGenerationResponse,
+  ModelSnapshotsResponse,
   OverrideWorkoutInput,
   PredictionModelRun,
   RecomputeJobCancellationResponse,
@@ -39,7 +40,7 @@ import {
   TrainingZoneProfileValidationError,
   buildPredictionReportAsync
 } from "@rai/application";
-import { ModelRunActivationError, PendingMigrationsError, RaiDatabase, SqliteModelRunRepository, acquireDatabasePublicationLock } from "@rai/storage-sqlite";
+import { ModelRunActivationError, PendingMigrationsError, SqliteModelReleaseRepository, RaiDatabase, SqliteModelRunRepository, acquireDatabasePublicationLock, recordModelReleaseRefusal } from "@rai/storage-sqlite";
 import Fastify from "fastify";
 
 import { RestoreRecoveryRequiredError } from "./restore-journal.js";
@@ -248,6 +249,7 @@ const publicReadRoutes = new Set([
   "/v1/prediction-models",
   "/v1/prediction-models/:id",
   "/v1/model-runs",
+  "/v1/model-snapshots",
   "/v1/model-runs/compare",
   "/v1/mobile/today",
   "/v1/mobile/workout-plan",
@@ -1301,6 +1303,8 @@ app.patch<{ Body: UpdateTrainingZoneProfileInput }>(
 );
 
 interface PredictionQuery {
+  mode?: "neutral_potential" | "current_prepared" | "race_day_scenario";
+  targetDate?: string;
   temperatureC?: number;
   humidityPercent?: number;
   elevationGain5k?: number;
@@ -1324,6 +1328,8 @@ app.get<{ Querystring: PredictionQuery }>(
         : { half_marathon: request.query.elevationGainHalfMarathon })
     };
     return withReadDatabaseAsync((database) => buildPredictionReportAsync(database, {
+      ...(request.query.mode === undefined ? {} : { mode: request.query.mode }),
+      ...(request.query.targetDate === undefined ? {} : { targetDate: request.query.targetDate }),
       ...(request.query.temperatureC === undefined
         ? {}
         : { temperatureC: request.query.temperatureC }),
@@ -1334,6 +1340,26 @@ app.get<{ Querystring: PredictionQuery }>(
     }));
   }
 );
+
+app.get<{Querystring:{runId?:string}}>("/v1/model-snapshots", {
+  schema:{querystring:{type:"object",additionalProperties:false,properties:{runId:{type:"string",minLength:1,maxLength:200,pattern:"^[A-Za-z0-9_-]+$"}}}}
+}, async (request) => withReadDatabase((database): ModelSnapshotsResponse => {
+  const active=database.prepare("SELECT model_run_id AS id FROM active_model_run WHERE singleton=1").get()?.id;
+  const runId=request.query.runId??active;
+  if(typeof runId!=="string")return {status:"not_published",runId:null,snapshots:[]};
+  const model=database.prepare(`SELECT m.status AS status,m.evaluated_at AS asOf,f.feature_schema_version AS schema FROM model_runs m
+    JOIN feature_runs f ON f.id=m.feature_run_id WHERE m.id=?`).get(runId) as
+    {status:string;asOf:string;schema:string}|undefined;
+  if(!model)return {status:"not_found",runId,snapshots:[]};
+  if(model.schema!=="workout-feature-v4")return {status:"legacy",runId,active:runId===active,asOf:model.asOf,snapshots:[{
+    domain:"fitness",key:"summary",asOf:model.asOf,payload:{
+      assessments:database.prepare("SELECT * FROM ability_assessments WHERE model_run_id=? ORDER BY sequence_number").all(runId),
+      daily:database.prepare("SELECT local_date,true_ability,snapshot_status FROM daily_ability_snapshots WHERE model_run_id=? ORDER BY local_date").all(runId)
+    }
+  }]};
+  const snapshots=new SqliteModelReleaseRepository(database).snapshots(runId);
+  return {status:model.status==="succeeded"?"available":"candidate",runId,active:runId===active,asOf:model.asOf,snapshots};
+}));
 
 app.get("/v1/prediction-models", async () => {
   if (!databaseIsReady()) throw new DatabaseNotReadyError();
@@ -1526,10 +1552,17 @@ app.post<{ Params: { id: string } }>("/v1/model-runs/:id/activate", { schema: { 
       store.database.exec("COMMIT");
     } catch (error) {
       try { store.database.exec("ROLLBACK"); } catch { /* preserve the activation error */ }
+      // 审计行必须在 ROLLBACK **之后**写：仓库里的写会被这次回滚（以及外层事务）一起撤掉。
+      if (error instanceof ModelRunActivationError && error.refusal) {
+        recordModelReleaseRefusal(store.database, {
+          modelRunId: request.params.id, ...error.refusal, detectedAt: new Date().toISOString()
+        });
+      }
       if (error instanceof ModelRunActivationError) {
         if (error.code === "not_found") return reply.code(404).send({ message: "未找到模型运行" });
         if (error.code === "not_succeeded") return reply.code(409).send({ message: "只能激活成功的模型运行" });
         if (error.code === "missing_metrics") return reply.code(409).send({ message: "该模型运行没有成功的运动统计结果，不能激活" });
+        if (error.code === "release_gate") return reply.code(409).send({ message: `该模型运行未通过 V2 发布校验：${error.message}` });
         return reply.code(409).send({ message: "该模型运行未通过模型版本门禁，不能激活" });
       }
       throw error;

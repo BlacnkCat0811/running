@@ -1264,6 +1264,7 @@ export class RaiReadStore {
       featureCount: summary.featureCount,
       assessmentCount: summary.assessmentCount,
       snapshotCount: summary.snapshotCount,
+      engineVersion: summary.engineVersion,
       active: summary.active
     });
     const comparison = this.modelRunsRepository.compareMetrics(baseId, candidateId);

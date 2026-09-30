@@ -1,4 +1,7 @@
+import { loadDatedReadiness } from "@rai/application";
+import { decideVerdictFromSnapshots } from "./mobile-coach.js";
 import type { DatabaseSync } from "node:sqlite";
+import { readinessStateEvidence } from "@rai/readiness";
 
 import { applyRacePlanPolicy } from "./weekly-plan-validate.js";
 import { DEFAULT_WEEKLY_DISTANCE_KM } from "./mobile-goals.js";
@@ -131,6 +134,7 @@ export function assembleMobileCoach(args: {
   | "nextSession"
   | "recovery"
   | "recoveryAssessment"
+  | "readinessSnapshot"
   | "recommendation"
   | "postRun"
   | "weekStructure"
@@ -275,12 +279,31 @@ export function assembleMobileCoach(args: {
       dashboard.calibration.requirements.sessions
     )
   };
-  const recoveryBreakdown = buildRecovery(input);
   // One assessment, two consumers: the verdict gates read it, and it is published
   // as `recoveryAssessment`. Computing it twice is how "what the app explains"
   // and "what the coach decided" drift apart.
-  const assessment = assessRecovery(input);
-  const verdict = decideVerdict(input, assessment);
+  const v4 = database.prepare(`SELECT f.feature_schema_version AS schema FROM active_model_run a
+    JOIN model_runs m ON m.id=a.model_run_id JOIN feature_runs f ON f.id=m.feature_run_id`).get()?.schema === "workout-feature-v4";
+  const now = new Date().toISOString();
+  const dated = v4 ? loadDatedReadiness(database, now, DATABASE_TIMEZONE) : null;
+  if (dated) {
+    // Presentation and decision consume the same eligible observations. A future,
+    // stale or unknown-arrival reading may remain in history, never today's card.
+    input.lastNightSleepMinutes = dated.signals.sleep.value;
+    input.sleepBaselineMinutes = dated.signals.sleep.baseline;
+    input.morningHrvMs = dated.signals.hrv.value;
+    input.hrvBaselineMs = dated.signals.hrv.baseline;
+    input.restingHeartRateBpm = dated.signals.rhr.value;
+    input.restingHeartRateBaselineBpm = dated.signals.rhr.baseline;
+    input.nightsBelowSleepBaseline = dated.sleepStreak ? 3 : 0;
+  }
+  const recoveryBreakdown = buildRecovery(input);
+  const assessment = dated ? {
+    coverage:dated.coverage,assessment:dated.assessment,reasonCodes:dated.reasonCodes,
+    sleepRatio:dated.signals.sleep.ratio,hrvRatio:dated.signals.hrv.ratio,
+    sleepLow:dated.signals.sleep.low,hrvLow:dated.signals.hrv.low,restingHeartRateUp:dated.signals.rhr.low,sleepStreak:dated.sleepStreak
+  } : assessRecovery(input);
+  const verdict = dated ? decideVerdictFromSnapshots(input,dated) : decideVerdict(input, assessment);
   const computed = decideNextSession(input, verdict);
   const nextSession = resolveLockedNextSession(computed, input.lockedSession, today, input.zones);
   const lock = lockState(input.lockedSession, today, verdict.tone);
@@ -298,6 +321,7 @@ export function assembleMobileCoach(args: {
     args.coverage.restingHeartRate.latestDate
   ].filter((value): value is string => value != null);
   return {
+    ...(dated ? { readinessSnapshot: dated } : {}),
     ability: buildAbilityCard(input),
     calibration,
     verdict,
@@ -305,10 +329,15 @@ export function assembleMobileCoach(args: {
     recovery: {
       ...recoveryBreakdown,
       note: recoveryNote(recoveryBreakdown.note, assessment.coverage, currentNight?.wakeDate ?? null),
-      state: physState === "recovered_phys" ? "recovered" : physState,
+      state: dated
+        ? dated.state === "strained" ? "depleted" : dated.state === "caution" ? "reduced"
+          : dated.coverage === "complete" && dated.state === "no_low_signal" ? "recovered" : "unknown"
+        : physState === "recovered_phys" ? "recovered" : physState,
       hrvSampleCount: currentHrv?.sampleCount ?? 0
     },
     recoveryAssessment: {
+      stateEvidence: readinessStateEvidence(),
+      intendedUse: "training_guidance_not_diagnosis",
       targetDate: assessment.coverage === "none" ? null : today,
       coverage: assessment.coverage,
       assessment: assessment.assessment,

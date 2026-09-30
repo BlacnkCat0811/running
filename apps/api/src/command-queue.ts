@@ -5,7 +5,7 @@ import {
   RaiApplicationService, PredictionModelService,
   type AppendWorkoutOverrideInput
 } from "@rai/application";
-import { RaiDatabase, SqliteModelRunRepository } from "@rai/storage-sqlite";
+import { ModelRunActivationError, RaiDatabase, SqliteModelRunRepository, recordModelReleaseRefusal } from "@rai/storage-sqlite";
 import type { CommandRequest, CommandResponse, UpdateTrainingZoneProfileInput } from "@rai/api-contracts";
 import type { TaskAdmission } from "./task-admission.js";
 import { RuntimeStateStore } from "./runtime-state.js";
@@ -217,6 +217,12 @@ export async function applyMutationCommand(
       return result;
     } catch (error) {
       try { db.exec("ROLLBACK"); } catch { /* preserve original error */ }
+      // 与 HTTP 路由同理：审计行在 ROLLBACK 之后写，否则会被事务一起撤掉。
+      if (error instanceof ModelRunActivationError && error.refusal) {
+        recordModelReleaseRefusal(db, {
+          modelRunId: String(command.payload.id), ...error.refusal, detectedAt: new Date().toISOString()
+        });
+      }
       throw error;
     }
   } finally { store.close(); }

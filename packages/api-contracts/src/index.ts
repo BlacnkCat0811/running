@@ -33,6 +33,16 @@ export type {
   UpdateTrainingZoneProfileInput
 } from "@rai/contracts";
 
+// 域快照的窄化读取：信封（`ModelSnapshotEntry.payload`）是 `unknown`，消费方（含 web）
+// 必须走这一组函数，而不是自己断言 payload 形状 —— 否则会去读产出端没写过的字段。
+export {
+  readFitnessSnapshot,
+  readLoadSnapshot,
+  type FitnessSnapshot,
+  type FitnessSnapshotDailyPoint,
+  type LoadSnapshot
+} from "@rai/contracts";
+
 import type {
   MobileSessionKind,
   PredictionModelEvent,
@@ -126,6 +136,12 @@ export interface ModelRunSummary {
   featureCount: number | null;
   assessmentCount: number;
   snapshotCount: number;
+  /**
+   * 产出这个运行所用的**引擎**版本。`modelVersion` 是**配置**版本，两者此前被混为一谈。
+   * `null` 表示未知（v24 之前落库的行）——消费方必须显示为未知，
+   * **不得**回退成当前引擎版本。
+   */
+  engineVersion: string | null;
   active: boolean;
 }
 
@@ -136,6 +152,47 @@ export interface AbilityMetricSet {
   stability: number | null;
   recovery: number | null;
 }
+
+/** Domains a published V2 release seals a snapshot for. */
+export type ModelSnapshotDomain = "fitness" | "readiness" | "durability" | "load" | "zones";
+
+/**
+ * One sealed domain snapshot as served by `/v1/model-snapshots`.
+ *
+ * `payload` is deliberately `unknown`: every domain stores a different shape
+ * (`fitness` carries `{lineage, assessments, daily}`, `load` carries `{lineage, days}`,
+ * `durability` carries an array of per-distance snapshots, ...) and a legacy run stores
+ * an entirely different `{assessments, daily}`. Declaring one narrow payload shape here
+ * would be a contract lie that lets consumers read fields that the producing branch never
+ * wrote — exactly the cross-boundary drift this envelope exists to prevent. Narrow the
+ * payload against the producing writer, not against this type.
+ */
+export interface ModelSnapshotEntry {
+  domain: ModelSnapshotDomain | string;
+  key: string;
+  asOf: string;
+  payload: unknown;
+}
+
+interface ModelSnapshotRunIdentity {
+  runId: string | null;
+  snapshots: ModelSnapshotEntry[];
+}
+
+/**
+ * Response of `/v1/model-snapshots`.
+ *
+ * `status` is a refusal code as much as a state, and the branches are not
+ * interchangeable: `not_published` has no run at all, `not_found` names a run that does
+ * not exist, and `legacy` means the run predates the V2 release bundle so its snapshot is
+ * a compatibility read rather than sealed evidence. Consumers that need V2 evidence must
+ * check for `available`/`candidate` instead of testing `snapshots.length`.
+ */
+export type ModelSnapshotsResponse =
+  | ({ status: "not_published"; runId: null } & ModelSnapshotRunIdentity)
+  | ({ status: "not_found" } & ModelSnapshotRunIdentity)
+  | ({ status: "legacy"; runId: string; active: boolean; asOf: string } & ModelSnapshotRunIdentity)
+  | ({ status: "available" | "candidate"; runId: string; active: boolean; asOf: string } & ModelSnapshotRunIdentity);
 
 export interface WorkoutListItem {
   id: string;
@@ -265,6 +322,7 @@ export interface TrendResponse {
   endDate: string | null;
   daily: Array<{
     date: string;
+    baselineEpochId?: string | null;
     trueAbility: number | null;
     decayPoints: number;
     growthVelocityPerWeek: number | null;
@@ -866,6 +924,9 @@ export interface MobileCoverage {
  * a negative assessment, and complete coverage is not a positive one.
  */
 export interface MobileRecoveryAssessment {
+  /** Additive for legacy clients; current server always supplies the heuristic evidence marker. */
+  stateEvidence?: import("@rai/contracts").ReadinessStateEvidence;
+  intendedUse?: "training_guidance_not_diagnosis";
   /** The date being assessed; null when nothing was assessable at all. */
   targetDate: string | null;
   coverage: "none" | "partial" | "complete";
@@ -893,6 +954,8 @@ export interface MobileRecommendation {
 
 /** Aggregated payload for the iOS home page ("今天"). */
 export interface MobileTodayResponse {
+  /** Strict dated V2 result; legacy clients may keep reading the compatible assessment. */
+  readinessSnapshot?: import("@rai/contracts").ReadinessAssessmentResult;
   generatedAt: string;
   timezone: string;
   /** Latest local_date present in the training loads; null when the store is empty. */

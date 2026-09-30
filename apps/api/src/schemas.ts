@@ -324,7 +324,16 @@ export const trainingZoneProfileBodySchema = {
 export const predictionQuerySchema = {
   type: "object",
   additionalProperties: false,
+  allOf: [
+    {
+      if: { required: ["mode"], properties: { mode: { const: "race_day_scenario" } } },
+      then: { required: ["targetDate"] },
+      else: { not: { required: ["targetDate"] } }
+    }
+  ],
   properties: {
+    mode: { type: "string", enum: ["neutral_potential", "current_prepared", "race_day_scenario"] },
+    targetDate: { type: "string", format: "date" },
     temperatureC: { type: "number", minimum: -40, maximum: 60 },
     humidityPercent: { type: "number", minimum: 0, maximum: 100 },
     elevationGain5k: { type: "number", minimum: 0, maximum: 10000 },
@@ -765,6 +774,7 @@ export const openapiDocument = {
     "/v1/training-zones/profile": { patch: operation(["Workouts"], "更新心率与配速分区设置", {
       requestBody: body({ $ref: "#/components/schemas/TrainingZoneProfileUpdate" }, "完整设置与当前 revision")
     }) },
+    "/v1/model-snapshots": { get: operation(["Read"], "当前或历史模型发布快照", {parameters:[{name:"runId",in:"query",required:false,schema:{type:"string",maxLength:200}}]}) },
     "/v1/predictions": { get: operation(["Read"], "VO₂max、乳酸阈值与比赛成绩预测", {
       parameters: Object.entries(predictionQuerySchema.properties).map(([name, schema]) => ({ name, in: "query", schema }))
     }) },

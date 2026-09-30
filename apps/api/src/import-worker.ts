@@ -1122,6 +1122,12 @@ export class ImportWorker {
         (database.prepare("PRAGMA previous.table_info(prediction_model_runs)").all() as Array<{ name: string }>)
           .map((column) => column.name)
       );
+      // v24 的列：`previous` 可能是 v23 及更早的库，直接引用新列会 SQL 报错，
+      // 所以先按旧列集拷贝，再在源库确实有该列时回填（加法式，不改既有语句）。
+      const previousSnapshotHasEpoch = new Set(
+        (database.prepare("PRAGMA previous.table_info(daily_ability_snapshots)").all() as Array<{ name: string }>)
+          .map((column) => column.name)
+      ).has("baseline_epoch_id");
       database.exec(`
         INSERT OR IGNORE INTO feature_runs
         SELECT * FROM previous.feature_runs;
@@ -1213,6 +1219,18 @@ export class ImportWorker {
           SELECT 1 FROM model_runs current_model
           WHERE current_model.id = historical.model_run_id
         );
+
+        ${previousSnapshotHasEpoch ? `
+        UPDATE daily_ability_snapshots SET baseline_epoch_id = (
+          SELECT historical.baseline_epoch_id FROM previous.daily_ability_snapshots historical
+          WHERE historical.id = daily_ability_snapshots.id
+        )
+        WHERE baseline_epoch_id IS NULL
+          AND EXISTS (
+            SELECT 1 FROM previous.daily_ability_snapshots historical
+            WHERE historical.id = daily_ability_snapshots.id
+              AND historical.baseline_epoch_id IS NOT NULL
+          );` : ""}
 
         INSERT OR IGNORE INTO training_metric_runs
         SELECT historical.*

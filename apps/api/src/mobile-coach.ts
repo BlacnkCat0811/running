@@ -25,6 +25,13 @@ import type {
   MobileWorkoutStep
 } from "@rai/api-contracts";
 import type { TrainingStatusCode } from "@rai/contracts";
+import {
+  READINESS_HRV_RATIO_THRESHOLD,
+  READINESS_RHR_RATIO_THRESHOLD,
+  READINESS_SLEEP_RATIO_THRESHOLD,
+  READINESS_SLEEP_STREAK_THRESHOLD,
+  assessReadiness
+} from "@rai/readiness";
 
 import { DISTANCE_ROUNDING_KM, MAX_PLANNED_DISTANCE_KM } from "./session-structure.js";
 
@@ -182,14 +189,15 @@ const trigger = (
   detail: string
 ): MobileTrigger => ({ code, value, threshold, detail });
 
-/** Named so the verdict gates and the published assessment can never use different numbers. */
-export const RECOVERY_SLEEP_RATIO_THRESHOLD = 0.75;
-export const RECOVERY_HRV_RATIO_THRESHOLD = 0.85;
-export const RECOVERY_RHR_RATIO_THRESHOLD = 1.03;
-export const RECOVERY_SLEEP_STREAK_THRESHOLD = 3;
-
-const ratioValue = (current: number | null, baseline: number | null): number | null =>
-  current != null && baseline != null && baseline > 0 ? current / baseline : null;
+/**
+ * Aliases of the readiness domain rules, kept so existing importers keep
+ * working. They are aliases on purpose: a second literal here would be exactly
+ * the duplicated threshold the recovery-isolation design removes.
+ */
+export const RECOVERY_SLEEP_RATIO_THRESHOLD = READINESS_SLEEP_RATIO_THRESHOLD;
+export const RECOVERY_HRV_RATIO_THRESHOLD = READINESS_HRV_RATIO_THRESHOLD;
+export const RECOVERY_RHR_RATIO_THRESHOLD = READINESS_RHR_RATIO_THRESHOLD;
+export const RECOVERY_SLEEP_STREAK_THRESHOLD = READINESS_SLEEP_STREAK_THRESHOLD;
 
 /**
  * What today's recovery evidence supports.
@@ -214,54 +222,44 @@ export interface RecoveryAssessment {
   sleepStreak: boolean;
 }
 
+/**
+ * API-compatible wrapper over the readiness domain rules.
+ *
+ * Deliberately thin: the thresholds, the freshness rule and the assessment logic
+ * live in `@rai/readiness`, and this function must not grow a second copy of any
+ * of them. `RecoveryAssessment` keeps its shape so the mobile payload is
+ * unchanged, and every consumer still reads exactly one assessment.
+ *
+ * `asOf`/`localDate` are only carried through for the snapshot shape; the
+ * mobile payload does not expose them, so the coach's local date is enough here.
+ */
 export function assessRecovery(input: CoachInput): RecoveryAssessment {
-  const sleepRatio = ratioValue(input.lastNightSleepMinutes, input.sleepBaselineMinutes);
-  const hrvRatio = ratioValue(input.morningHrvMs, input.hrvBaselineMs);
-  const restingHeartRateUp =
-    input.restingHeartRateBpm != null &&
-    input.restingHeartRateBaselineBpm != null &&
-    input.restingHeartRateBpm > input.restingHeartRateBaselineBpm * RECOVERY_RHR_RATIO_THRESHOLD;
-  const sleepLow = sleepRatio != null && sleepRatio < RECOVERY_SLEEP_RATIO_THRESHOLD;
-  const hrvLow = hrvRatio != null && hrvRatio < RECOVERY_HRV_RATIO_THRESHOLD;
-  const sleepStreak = input.nightsBelowSleepBaseline >= RECOVERY_SLEEP_STREAK_THRESHOLD;
-  // A night is today's evidence only when it woke up today. An older night is a
-  // reference the app may show, never an input to today's arrangement.
-  const datedToday =
-    input.recoveryEvidenceDate === input.today &&
-    input.recoveryEvidenceStatus !== "stale" &&
-    input.recoveryEvidenceStatus !== "unknown";
-  // A reading only counts when its own baseline exists: a value with nothing to
-  // compare it against explains nothing, and must not inflate coverage.
-  const measured =
-    Number(input.lastNightSleepMinutes != null && ratioValue(input.lastNightSleepMinutes, input.sleepBaselineMinutes) != null) +
-    Number(input.morningHrvMs != null && ratioValue(input.morningHrvMs, input.hrvBaselineMs) != null) +
-    Number(input.restingHeartRateBpm != null && ratioValue(input.restingHeartRateBpm, input.restingHeartRateBaselineBpm) != null);
-  const coverage: RecoveryAssessment["coverage"] =
-    !datedToday || measured === 0 ? "none" : measured === 3 ? "complete" : "partial";
-
-  const assessment: RecoveryAssessment["assessment"] =
-    coverage === "none"
-      ? "not_assessed"
-      : sleepStreak || (sleepLow && hrvLow && restingHeartRateUp)
-        ? "multiple_low_signals"
-        : sleepLow || (hrvLow && restingHeartRateUp)
-          ? "low_signal"
-          : "no_low_signal";
-
-  const reasonCodes: string[] =
-    assessment === "not_assessed"
-      ? ["not_assessed"]
-      : assessment === "no_low_signal"
-        ? ["no_low_signal"]
-        : sleepStreak
-          ? ["sleep_streak"]
-          : [
-              ...(sleepLow ? ["sleep"] : []),
-              ...(hrvLow ? ["hrv"] : []),
-              ...(restingHeartRateUp ? ["resting_heart_rate"] : [])
-            ];
-
-  return { coverage, assessment, reasonCodes, sleepRatio, hrvRatio, sleepLow, hrvLow, restingHeartRateUp, sleepStreak };
+  const readiness = assessReadiness({
+    asOf: input.today,
+    localDate: input.today,
+    evidenceLocalDate: input.recoveryEvidenceDate,
+    evidenceStatus: input.recoveryEvidenceStatus,
+    sleepMinutes: input.lastNightSleepMinutes,
+    sleepBaselineMinutes: input.sleepBaselineMinutes,
+    nightsBelowSleepBaseline: input.nightsBelowSleepBaseline,
+    hrvMs: input.morningHrvMs,
+    hrvBaselineMs: input.hrvBaselineMs,
+    restingHeartRateBpm: input.restingHeartRateBpm,
+    restingHeartRateBaselineBpm: input.restingHeartRateBaselineBpm,
+    observedAt: null,
+    availableAt: null
+  });
+  return {
+    coverage: readiness.coverage,
+    assessment: readiness.assessment,
+    reasonCodes: readiness.reasonCodes,
+    sleepRatio: readiness.signals.sleep.ratio,
+    hrvRatio: readiness.signals.hrv.ratio,
+    sleepLow: readiness.signals.sleep.low,
+    hrvLow: readiness.signals.hrv.low,
+    restingHeartRateUp: readiness.signals.rhr.low,
+    sleepStreak: readiness.sleepStreak
+  };
 }
 
 export function decideVerdict(input: CoachInput, assessed?: RecoveryAssessment): MobileVerdict {
@@ -288,10 +286,13 @@ export function decideVerdict(input: CoachInput, assessed?: RecoveryAssessment):
   let reason = "默认轻松跑。数据不足时不安排质量课。";
 
   const taper = isTaper(input);
-  const highLoad =
-    input.trainingStatus === "attention" ||
-    input.trainingStatus === "high_load" ||
-    (input.loadRatio != null && input.loadRatio > 1.3);
+  // §9.5: the load verdict comes from the single classification, not from a second ACWR test.
+  // The removed `loadRatio > 1.3` clause could not change the outcome for any row produced by
+  // `buildDailyTrainingMetrics`: a ratio above 1.3 makes `classifyTrainingStatus` return
+  // `high_load` before any nominal branch, and the gate-closed case is `insufficient_data`,
+  // which is handled by the branch above. So this is a deduplication, not a behaviour change —
+  // pinned by the sweep test in `@rai/training-load`.
+  const highLoad = input.trainingStatus === "attention" || input.trainingStatus === "high_load";
   const easyDurationFraction =
     input.weekDurationSeconds > 0 ? input.weekEasyDurationSeconds / input.weekDurationSeconds : null;
 
@@ -1414,4 +1415,19 @@ function weekEnd(today: string): string {
   const mondayOffset = (value.getUTCDay() + 6) % 7;
   value.setUTCDate(value.getUTCDate() - mondayOffset + 6);
   return value.toISOString().slice(0, 10);
+}
+
+/** V2 decision entry: recovery readings are not part of the decision contract. */
+export function decideVerdictFromSnapshots(context: Omit<CoachInput,
+  "lastNightSleepMinutes"|"sleepBaselineMinutes"|"morningHrvMs"|"hrvBaselineMs"|
+  "restingHeartRateBpm"|"restingHeartRateBaselineBpm"|"nightsBelowSleepBaseline"|
+  "recoveryEvidenceDate"|"recoveryEvidenceStatus">,
+  readiness: import("@rai/contracts").ReadinessAssessmentResult): MobileVerdict {
+  const assessment:RecoveryAssessment={coverage:readiness.coverage,assessment:readiness.assessment,
+    reasonCodes:readiness.reasonCodes,sleepRatio:readiness.signals.sleep.ratio,hrvRatio:readiness.signals.hrv.ratio,
+    sleepLow:readiness.signals.sleep.low,hrvLow:readiness.signals.hrv.low,
+    restingHeartRateUp:readiness.signals.rhr.low,sleepStreak:readiness.sleepStreak};
+  return decideVerdict({...context,lastNightSleepMinutes:null,sleepBaselineMinutes:null,morningHrvMs:null,hrvBaselineMs:null,
+    restingHeartRateBpm:null,restingHeartRateBaselineBpm:null,nightsBelowSleepBaseline:0,
+    recoveryEvidenceDate:readiness.localDate,recoveryEvidenceStatus:readiness.coverage==="none"?"unknown":"valid"},assessment);
 }
