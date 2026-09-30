@@ -1,0 +1,483 @@
+{
+  "verificationDate": "2026-09-28",
+  "timezone": "Asia/Shanghai",
+  "repository": "/Users/ta/running",
+  "commit": "62b4a97d8f3e04949b52c1715dc3a5ec660bc95c",
+  "document": "/Users/ta/running/deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md",
+  "documentSha256": "b8267e04f4a82f092b48490f8a837eb8dd29fbb1aa33a1986e604b9d421aacec",
+  "scope": "Documentation and current implementation verification only; no V2 model implementation or accuracy certification.",
+  "runtime": "v22.23.2",
+  "databaseInspection": {
+    "mode": "read-only",
+    "productionDatabaseInspected": false,
+    "aggregateResults": {
+      "schema": {
+        "query": "SELECT max(version) AS version FROM schema_migrations",
+        "rows": [
+          [
+            22
+          ]
+        ]
+      },
+      "trainingSessions": {
+        "query": "SELECT status,count(*) AS count,min(anchor_start_at),max(anchor_end_at) FROM training_sessions GROUP BY status",
+        "rows": [
+          [
+            "active",
+            268,
+            "2019-12-13T12:48:07.000Z",
+            "2026-08-25T13:03:14.000Z"
+          ]
+        ]
+      },
+      "activeFitness": {
+        "query": "SELECT m.model_version,m.evaluated_at,m.status,f.feature_schema_version FROM active_model_run a JOIN model_runs m ON m.id=a.model_run_id JOIN feature_runs f ON f.id=m.feature_run_id",
+        "rows": [
+          [
+            "rai-model-config-v3",
+            "2026-09-04T08:53:46.059Z",
+            "succeeded",
+            "workout-feature-v3"
+          ]
+        ]
+      },
+      "predictionRunCount": {
+        "query": "SELECT count(*) FROM prediction_model_runs",
+        "rows": [
+          [
+            0
+          ]
+        ]
+      },
+      "activePredictionCount": {
+        "query": "SELECT count(*) FROM active_prediction_model",
+        "rows": [
+          [
+            0
+          ]
+        ]
+      }
+    }
+  },
+  "walkForward": {
+    "command": "node --import tsx packages/application/src/prediction-walk-forward-cli.ts --database /Users/ta/running/var/rai.sqlite --as-of 2026-09-28T00:00:00.000Z",
+    "result": {
+      "databasePath": "/Users/ta/running/var/rai.sqlite",
+      "asOf": "2026-09-28T00:00:00.000Z",
+      "status": "insufficient_labeled_outcomes",
+      "evaluation": {
+        "reportVersion": "rai-prediction-walk-forward-v2",
+        "asOf": "2026-09-28T00:00:00.000Z",
+        "status": "insufficient_labeled_outcomes",
+        "labeledOutcomeCount": 0,
+        "evaluatedOutcomeCount": 0,
+        "calibrationAppliedCount": 0,
+        "rawMetrics": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "calibratedMetrics": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "machineLearningCandidate": {
+          "status": "insufficient_walk_forward_samples",
+          "trainedExampleCount": 0,
+          "evaluatedOutcomeCount": 0,
+          "meanAbsoluteErrorImprovement": null,
+          "regressesAnyDistanceByMoreThan5Percent": false,
+          "baselineMetrics": {
+            "sampleCount": 0,
+            "meanAbsoluteErrorSeconds": null,
+            "rootMeanSquaredErrorSeconds": null,
+            "meanAbsolutePercentageError": null,
+            "meanSignedErrorSeconds": null,
+            "intervalCoverage": null
+          },
+          "candidateMetrics": {
+            "sampleCount": 0,
+            "meanAbsoluteErrorSeconds": null,
+            "rootMeanSquaredErrorSeconds": null,
+            "meanAbsolutePercentageError": null,
+            "meanSignedErrorSeconds": null,
+            "intervalCoverage": null
+          }
+        },
+        "byDistance": {
+          "five_k": {
+            "raw": {
+              "sampleCount": 0,
+              "meanAbsoluteErrorSeconds": null,
+              "rootMeanSquaredErrorSeconds": null,
+              "meanAbsolutePercentageError": null,
+              "meanSignedErrorSeconds": null,
+              "intervalCoverage": null
+            },
+            "calibrated": {
+              "sampleCount": 0,
+              "meanAbsoluteErrorSeconds": null,
+              "rootMeanSquaredErrorSeconds": null,
+              "meanAbsolutePercentageError": null,
+              "meanSignedErrorSeconds": null,
+              "intervalCoverage": null
+            }
+          },
+          "ten_k": {
+            "raw": {
+              "sampleCount": 0,
+              "meanAbsoluteErrorSeconds": null,
+              "rootMeanSquaredErrorSeconds": null,
+              "meanAbsolutePercentageError": null,
+              "meanSignedErrorSeconds": null,
+              "intervalCoverage": null
+            },
+            "calibrated": {
+              "sampleCount": 0,
+              "meanAbsoluteErrorSeconds": null,
+              "rootMeanSquaredErrorSeconds": null,
+              "meanAbsolutePercentageError": null,
+              "meanSignedErrorSeconds": null,
+              "intervalCoverage": null
+            }
+          },
+          "half_marathon": {
+            "raw": {
+              "sampleCount": 0,
+              "meanAbsoluteErrorSeconds": null,
+              "rootMeanSquaredErrorSeconds": null,
+              "meanAbsolutePercentageError": null,
+              "meanSignedErrorSeconds": null,
+              "intervalCoverage": null
+            },
+            "calibrated": {
+              "sampleCount": 0,
+              "meanAbsoluteErrorSeconds": null,
+              "rootMeanSquaredErrorSeconds": null,
+              "meanAbsolutePercentageError": null,
+              "meanSignedErrorSeconds": null,
+              "intervalCoverage": null
+            }
+          }
+        },
+        "rawErrors": [],
+        "calibratedErrors": []
+      }
+    }
+  },
+  "targetedTests": {
+    "command": "node --import tsx --test packages/scoring/test/scoring.test.ts packages/features/test/features.test.ts packages/physiology/test/physiology.test.ts packages/training-load/test/training-load.test.ts packages/training-zones/test/training-zones.test.ts packages/prediction-inference/test/prediction-inference.test.ts packages/application/test/prediction-feature-schema.test.ts packages/application/test/prediction-walk-forward-cli.test.ts apps/api/test/mobile-coach.test.ts",
+    "counts": {
+      "tests": 141,
+      "pass": 141,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0
+    },
+    "logSha256": "ddd64a0942e69a778a27300439a2014bfa20e8128eb28c6649631f85a08f67cd"
+  },
+  "notRun": [
+    "full npm test",
+    "typecheck",
+    "Web build",
+    "Web E2E",
+    "responsive E2E",
+    "Python ML tests or training",
+    "iOS tests or simulator",
+    "migration",
+    "recompute",
+    "model activation"
+  ],
+  "sourceLineAnchors": [
+    {
+      "path": "/Users/ta/running/packages/scoring/src/model.ts",
+      "line": 27,
+      "text": "export const defaultRaiModelConfig: RaiModelConfig = {",
+      "sourceSha256": "f72072a6a56e50c29b99588844e4ff5b9836d1fe835f522a248ec0531d60ee0b"
+    },
+    {
+      "path": "/Users/ta/running/packages/scoring/src/index.ts",
+      "line": 81,
+      "text": "export function baseLearningRate(eligibleWorkoutCount: number): number {",
+      "sourceSha256": "ec4ac39431abc512e65fcfe487ff39f55e4ac33efa03d09ced82a88d042712e9"
+    },
+    {
+      "path": "/Users/ta/running/packages/application/src/services/recompute-pipeline.ts",
+      "line": 1710,
+      "text": "const calibrationFeatures: WorkoutFeatureVector[] = [];",
+      "sourceSha256": "06a842e8993f611d093ee27bfb6ecbc5bc9006415edf7ec2c885385570a1f7b9"
+    },
+    {
+      "path": "/Users/ta/running/packages/scoring/src/model.ts",
+      "line": 167,
+      "text": "export function createPersonalBaseline(",
+      "sourceSha256": "f72072a6a56e50c29b99588844e4ff5b9836d1fe835f522a248ec0531d60ee0b"
+    },
+    {
+      "path": "/Users/ta/running/packages/scoring/src/model.ts",
+      "line": 387,
+      "text": "export function updateTrueAbilityFromFeatureScore(",
+      "sourceSha256": "f72072a6a56e50c29b99588844e4ff5b9836d1fe835f522a248ec0531d60ee0b"
+    },
+    {
+      "path": "/Users/ta/running/packages/scoring/src/index.ts",
+      "line": 107,
+      "text": "export function inactivityDecay(daysSinceEligibleRun: number): number {",
+      "sourceSha256": "ec4ac39431abc512e65fcfe487ff39f55e4ac33efa03d09ced82a88d042712e9"
+    },
+    {
+      "path": "/Users/ta/running/packages/features/src/index.ts",
+      "line": 36,
+      "text": "export const defaultFeatureConfig: FeatureConfig = {",
+      "sourceSha256": "c17ed8369206650697ea971238ad8ff5bb51c9d639c0f156278dc269ae01b841"
+    },
+    {
+      "path": "/Users/ta/running/packages/features/src/index.ts",
+      "line": 410,
+      "text": "export function calculateRecoveryParts(source: WorkoutFeatureSource): {",
+      "sourceSha256": "c17ed8369206650697ea971238ad8ff5bb51c9d639c0f156278dc269ae01b841"
+    },
+    {
+      "path": "/Users/ta/running/packages/features/src/index.ts",
+      "line": 460,
+      "text": "export function extractWorkoutFeatureVector(",
+      "sourceSha256": "c17ed8369206650697ea971238ad8ff5bb51c9d639c0f156278dc269ae01b841"
+    },
+    {
+      "path": "/Users/ta/running/apps/api/src/mobile-coach.ts",
+      "line": 186,
+      "text": "export const RECOVERY_SLEEP_RATIO_THRESHOLD = 0.75;",
+      "sourceSha256": "6308db2143e00f8ec9d4d450b24cf91dafc35502edf02b8d7d568d53dfbbbc24"
+    },
+    {
+      "path": "/Users/ta/running/apps/api/src/mobile-coach.ts",
+      "line": 217,
+      "text": "export function assessRecovery(input: CoachInput): RecoveryAssessment {",
+      "sourceSha256": "6308db2143e00f8ec9d4d450b24cf91dafc35502edf02b8d7d568d53dfbbbc24"
+    },
+    {
+      "path": "/Users/ta/running/apps/api/src/mobile-coach.ts",
+      "line": 267,
+      "text": "export function decideVerdict(input: CoachInput, assessed?: RecoveryAssessment): MobileVerdict {",
+      "sourceSha256": "6308db2143e00f8ec9d4d450b24cf91dafc35502edf02b8d7d568d53dfbbbc24"
+    },
+    {
+      "path": "/Users/ta/running/packages/training-load/src/index.ts",
+      "line": 25,
+      "text": "export function classifyPhysState(input: {",
+      "sourceSha256": "546ca8298511b05823aa1282e5c0ab355e93e5cb8d6d5c9d5dee9939c400eee9"
+    },
+    {
+      "path": "/Users/ta/running/packages/training-load/src/index.ts",
+      "line": 264,
+      "text": "export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughDate: string, physEvidence: DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {",
+      "sourceSha256": "546ca8298511b05823aa1282e5c0ab355e93e5cb8d6d5c9d5dee9939c400eee9"
+    },
+    {
+      "path": "/Users/ta/running/packages/training-zones/src/index.ts",
+      "line": 178,
+      "text": "export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZoneProfile {",
+      "sourceSha256": "18ab85cc9e6be31669548bfc39e2797139e62654ae8984d2458f4fd02e54a4f9"
+    },
+    {
+      "path": "/Users/ta/running/packages/training-zones/src/index.ts",
+      "line": 637,
+      "text": "export function calculateCompositeTrainingLoad(input: CompositeLoadInput): TrainingLoadBreakdown {",
+      "sourceSha256": "18ab85cc9e6be31669548bfc39e2797139e62654ae8984d2458f4fd02e54a4f9"
+    },
+    {
+      "path": "/Users/ta/running/packages/physiology/src/index.ts",
+      "line": 309,
+      "text": "export function performanceVdotEvidence(input: {",
+      "sourceSha256": "c88006cf9e047bd03d8c87896adc5499d6a2741db050b3f082516439feaa470f"
+    },
+    {
+      "path": "/Users/ta/running/packages/physiology/src/index.ts",
+      "line": 684,
+      "text": "export function estimateLactateThresholdFromEvidence(",
+      "sourceSha256": "c88006cf9e047bd03d8c87896adc5499d6a2741db050b3f082516439feaa470f"
+    },
+    {
+      "path": "/Users/ta/running/packages/physiology/src/index.ts",
+      "line": 819,
+      "text": "export function predictRaceTimes(",
+      "sourceSha256": "c88006cf9e047bd03d8c87896adc5499d6a2741db050b3f082516439feaa470f"
+    },
+    {
+      "path": "/Users/ta/running/packages/physiology/src/index.ts",
+      "line": 1093,
+      "text": "export function calibrateRacePrediction(",
+      "sourceSha256": "c88006cf9e047bd03d8c87896adc5499d6a2741db050b3f082516439feaa470f"
+    },
+    {
+      "path": "/Users/ta/running/packages/application/src/prediction-data.ts",
+      "line": 467,
+      "text": "export function loadRaceReadinessEvidence(",
+      "sourceSha256": "86fecdd8182b1c136fae4628a7c29681849a5496d217cf5d1a08c322c238ad32"
+    },
+    {
+      "path": "/Users/ta/running/packages/application/src/prediction-data.ts",
+      "line": 551,
+      "text": "export function loadRecoveryReadinessEvidence(",
+      "sourceSha256": "86fecdd8182b1c136fae4628a7c29681849a5496d217cf5d1a08c322c238ad32"
+    },
+    {
+      "path": "/Users/ta/running/packages/application/src/prediction-model-service.ts",
+      "line": 36,
+      "text": "export const MINIMUM_PREDICTION_LABELS = 50;",
+      "sourceSha256": "56c6d994f028487b18d19c38a43977d6f23b42d8d21f315d956d49fb0861c2f0"
+    },
+    {
+      "path": "/Users/ta/running/packages/contracts/src/index.ts",
+      "line": 938,
+      "text": "export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION =",
+      "sourceSha256": "2bb8b094af2839817e2e128dc9f831cc6b4f896be9a5540356a9065e7945f015"
+    },
+    {
+      "path": "/Users/ta/running/packages/storage-sqlite/src/database.ts",
+      "line": 1397,
+      "text": "version: 22,",
+      "sourceSha256": "b08c60d9ab6d9b6df46fa0bbf9b386b972f5e788fd221d78dd2758e00dc435e2"
+    },
+    {
+      "path": "/Users/ta/running/packages/storage-sqlite/src/model-run-repository.ts",
+      "line": 139,
+      "text": "evaluateValidationGate(candidateId: string, baseId: string | null): ModelValidationGateResult {",
+      "sourceSha256": "39d87ae4281a7d1599e8ca049a250c590a5a39d8f68d0d38268a9d264e33cbcc"
+    },
+    {
+      "path": "/Users/ta/running/packages/application/src/services/recompute-pipeline.ts",
+      "line": 211,
+      "text": "// NOTE(2026-09-20): the shadow full-replay comparison was removed by decision",
+      "sourceSha256": "06a842e8993f611d093ee27bfb6ecbc5bc9006415edf7ec2c885385570a1f7b9"
+    }
+  ],
+  "documentChecks": {
+    "sequentialMainSections": 19,
+    "appendices": 4,
+    "fencesBalanced": true,
+    "sourceReferenceErrors": [],
+    "uniqueAcceptanceCaseIds": 54,
+    "reviewItemsSpecified": 8
+  },
+  "limitations": [
+    "Local database is not production.",
+    "No eligible labeled race outcomes; all accuracy metrics are unavailable.",
+    "V2 thresholds and formulas in this document are proposals, not calibrated results."
+  ],
+  "documentationRevision": {
+    "revision": "R1",
+    "date": "2026-09-28",
+    "previousDocumentSha256": "028676af8f8ce230111f2c0b518372f13eede0b2a153e3a048bcc97469f166ba",
+    "reviewCoverage": {
+      "2": {
+        "section": "7.4 / 7.5",
+        "required": [
+          "stateEvidence",
+          "not_empirically_validated",
+          "heuristic_compatibility",
+          "training_guidance_not_diagnosis"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      },
+      "3": {
+        "section": "6.1",
+        "required": [
+          "去 Pace",
+          "去 Efficiency",
+          "去 Stability",
+          "Pearson/Spearman",
+          "不代表 A 的统计效果优于 B"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      },
+      "4": {
+        "section": "6.2",
+        "required": [
+          "maximumStrata: 5",
+          "allowCrossStratumFallback: false",
+          "minimumIndependentSessions",
+          "minimumSpanDays"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      },
+      "5": {
+        "section": "6.4",
+        "required": [
+          "每 28 天",
+          "90 天",
+          "旧视图仍可查看",
+          "不跨 epoch",
+          "回顾性重估"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      },
+      "6": {
+        "section": "6.9",
+        "required": [
+          "candidateObservation",
+          "positiveAcceptanceRate",
+          "negativeAcceptanceRate",
+          "最大检测延迟",
+          "不得用“目标接受率”强行制造"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      },
+      "7": {
+        "section": "6.7",
+        "required": [
+          "evidenceReliability: number | null",
+          "overall: number | null",
+          "modelConfidence ?? 1",
+          "不算 log(0)"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      },
+      "8": {
+        "section": "12.9",
+        "required": [
+          "empirical_target_not_individual_guarantee",
+          "heuristicRange",
+          "empiricalCoverage",
+          "domainMatch"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      },
+      "9": {
+        "section": "15.7 / 17.1",
+        "required": [
+          "Phase 0 的 P0 交付",
+          "OverrideDrawer.tsx",
+          "real_label_smoke=not_evaluable",
+          "标签漏斗"
+        ],
+        "documentationStatus": "specified_not_implemented_or_empirically_validated"
+      }
+    },
+    "additionalSourcesVerified": [
+      {
+        "path": "/Users/ta/running/apps/web/src/components/OverrideDrawer.tsx",
+        "symbol": "performanceProtocol",
+        "sourceSha256": "7af891d073a4405003f559b70481b5a2ffefb60a94228368e33147f418395367"
+      },
+      {
+        "path": "/Users/ta/running/apps/api/src/schemas.ts",
+        "symbol": "performanceProtocol",
+        "sourceSha256": "1194c6a174bfb6e9ed6919d9be143a5cd41925aa62a2c382057ccb0e20b8dbbd"
+      }
+    ],
+    "baselineTestEvidenceReused": true,
+    "testsRerun": false,
+    "databaseRequeried": false,
+    "modelTrainingOrActivationPerformed": false,
+    "newParametersEmpiricallyValidated": false,
+    "note": "Only documentation and verification metadata updated. Prior 141 passing tests and zero-label replay remain initial-draft evidence, not validation of R1 proposals."
+  }
+}

@@ -1,0 +1,1547 @@
+{
+  "databasePath": "/Users/ta/running/var/rai.sqlite",
+  "asOf": "2026-09-29T06:00:00.000Z",
+  "status": "insufficient_labeled_outcomes",
+  "evaluation": {
+    "reportVersion": "rai-prediction-walk-forward-v2",
+    "asOf": "2026-09-29T06:00:00.000Z",
+    "status": "insufficient_labeled_outcomes",
+    "labeledOutcomeCount": 0,
+    "evaluatedOutcomeCount": 0,
+    "calibrationAppliedCount": 0,
+    "rawMetrics": {
+      "sampleCount": 0,
+      "meanAbsoluteErrorSeconds": null,
+      "rootMeanSquaredErrorSeconds": null,
+      "meanAbsolutePercentageError": null,
+      "meanSignedErrorSeconds": null,
+      "intervalCoverage": null
+    },
+    "calibratedMetrics": {
+      "sampleCount": 0,
+      "meanAbsoluteErrorSeconds": null,
+      "rootMeanSquaredErrorSeconds": null,
+      "meanAbsolutePercentageError": null,
+      "meanSignedErrorSeconds": null,
+      "intervalCoverage": null
+    },
+    "machineLearningCandidate": {
+      "status": "insufficient_walk_forward_samples",
+      "trainedExampleCount": 0,
+      "evaluatedOutcomeCount": 0,
+      "meanAbsoluteErrorImprovement": null,
+      "regressesAnyDistanceByMoreThan5Percent": false,
+      "baselineMetrics": {
+        "sampleCount": 0,
+        "meanAbsoluteErrorSeconds": null,
+        "rootMeanSquaredErrorSeconds": null,
+        "meanAbsolutePercentageError": null,
+        "meanSignedErrorSeconds": null,
+        "intervalCoverage": null
+      },
+      "candidateMetrics": {
+        "sampleCount": 0,
+        "meanAbsoluteErrorSeconds": null,
+        "rootMeanSquaredErrorSeconds": null,
+        "meanAbsolutePercentageError": null,
+        "meanSignedErrorSeconds": null,
+        "intervalCoverage": null
+      }
+    },
+    "byDistance": {
+      "five_k": {
+        "raw": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "calibrated": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        }
+      },
+      "ten_k": {
+        "raw": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "calibrated": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        }
+      },
+      "half_marathon": {
+        "raw": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        },
+        "calibrated": {
+          "sampleCount": 0,
+          "meanAbsoluteErrorSeconds": null,
+          "rootMeanSquaredErrorSeconds": null,
+          "meanAbsolutePercentageError": null,
+          "meanSignedErrorSeconds": null,
+          "intervalCoverage": null
+        }
+      }
+    },
+    "rawErrors": [],
+    "calibratedErrors": [],
+    "modelEvaluation": {
+      "version": "rai-model-eval-v1",
+      "replayMode": "event_time_reconstruction",
+      "availabilityUnknown": true,
+      "availabilityNote": "Legacy fact arrival times are not completely reconstructible; this is not as-known-then certification.",
+      "baselineMetrics": {
+        "sampleCount": 0,
+        "mae": null,
+        "mape": null,
+        "bias": null,
+        "medianAbsoluteError": null
+      },
+      "ridgeComparison": {
+        "baseline": {
+          "sampleCount": 0,
+          "mae": null,
+          "mape": null,
+          "bias": null,
+          "medianAbsoluteError": null
+        },
+        "ridge": {
+          "sampleCount": 0,
+          "mae": null,
+          "mape": null,
+          "bias": null,
+          "medianAbsoluteError": null
+        }
+      },
+      "challengerGate": {
+        "status": "not_evaluable",
+        "blocksActivation": true,
+        "reasonCodes": [
+          "missing_challenger_predictions"
+        ]
+      },
+      "calibration": [
+        {
+          "distance": "five_k",
+          "policyStatus": "heuristic_candidate_not_activated",
+          "calibrationCount": 0,
+          "testCount": 0,
+          "embargoExcludedCount": 0,
+          "artifactHash": null,
+          "evaluation": null,
+          "status": "not_evaluable"
+        },
+        {
+          "distance": "ten_k",
+          "policyStatus": "heuristic_candidate_not_activated",
+          "calibrationCount": 0,
+          "testCount": 0,
+          "embargoExcludedCount": 0,
+          "artifactHash": null,
+          "evaluation": null,
+          "status": "not_evaluable"
+        },
+        {
+          "distance": "half_marathon",
+          "policyStatus": "heuristic_candidate_not_activated",
+          "calibrationCount": 0,
+          "testCount": 0,
+          "embargoExcludedCount": 0,
+          "artifactHash": null,
+          "evaluation": null,
+          "status": "not_evaluable"
+        }
+      ]
+    },
+    "labelFunnel": {
+      "version": "race-label-funnel-v1",
+      "asOf": "2026-09-29T06:00:00.000Z",
+      "sessionCount": 268,
+      "confirmedCount": 0,
+      "usableOutcomeCount": 0,
+      "evaluatedOutcomeCount": 0,
+      "rejectedCount": 268,
+      "primaryRejections": {
+        "not_confirmed": 268
+      },
+      "byDistance": {
+        "five_k": {
+          "usable": 0,
+          "evaluated": 0
+        },
+        "ten_k": {
+          "usable": 0,
+          "evaluated": 0
+        },
+        "half_marathon": {
+          "usable": 0,
+          "evaluated": 0
+        }
+      },
+      "decisions": [
+        {
+          "trainingSessionId": "training_session_62b728dd9303e0d9d69ecd2769a2b02a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_dfa6c9debe8ec3bc6dde1bf0e6143352",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b36be771ad399cfb3ccc5f6184dd0d62",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c53be12ce1c76e63f6c70408034eedeb",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_03ba5893f5ff29eb85e9b67418cee025",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_281a2952f6cfa6ef96cefaff02e7a539",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5b184e67b4de87fdcc9611aed71fc74e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c8f7368c86d24184c78661da68a10a0f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5b7e289a8c96f936f315f37559533c9d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0463f32e831850b5053c40c359c7f320",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_34d2895d3fbb4605c025391be048e128",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_1abe577f934cbd3dd558181d28991d02",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_49cffab44dcac39ec43f105136416ff4",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_9f2409483e309ad2c553a6a79b10777f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_91055de35a23c740fb13513c63a4204c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b7d132d98d4ee518b976e278155f0e0d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_67c3b29397ab6a02b66733f8b3dbcbe8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_019122ab97a80bd3ce96b4dd898909b8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_337b62442c753ceba4e8093ba85447ab",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ebe15cdcaa045f89ffcdd75d4f48b809",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7ebedeb083f77c283bc13a95895cf382",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_761a3cae2d0c20d7ff2e36813b9999c2",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_55d98f96bd1ca189c36db7133529b4c7",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2c7b719107b0cb60692dbc9b2b312b57",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6b37497119fcb7dc30b40f73f6721f83",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_553269c0bb71004e49d478a47f952e71",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_56c99fe7548ff14c90c6797e68b729e9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_22b973bb883ddd486ede5348702521dd",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_95d6491142ee9a7a5ed9cfd2ac8de059",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8fc8498f56ff4d87c4722d14d714918b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_4e35573142b8e78dd1955190bc967c41",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_87a602d9fb601f03506d118d90d5ab23",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6443968491a9c4ee66153a4750c88399",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_574b9e1dc9123c7f1964069b21905b07",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b4321cb642e59d65d2b0ee7664ebc484",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_eba4dffbb3d3200d97db37bb6aacada6",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_d2833553ea89ea158b5f50a5bbcdea65",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5e379451caa85086eb1d69f32ce32afa",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f15abd507f684d27ec890ef637af3b56",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_40acbf0eeab4a4460c2300771c73c312",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c38a1ac96c436035000b7a1a048409f1",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6749680b230d9212fd8a0fac5f606c60",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_1ec1da135aba245cfb222798439a9550",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_9f0ba32752628161ef01c4864986e6f6",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2b5140a335d0dc2327b9be9beb10379a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_488505bbe1b8fdaa5f4596d631988551",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f8e99fc350a6a02c6418c30038a3cc6e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e5254b65abd91f9fb8f2a9e337300abd",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_bbee72ab32d8ab7296ea2085b358ceae",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_12d35de636e60103eb2873a17e542604",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ee5fbbe0f36da7f24ef9206d40ba2f1a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5776b5540385111b586611a1e79e2c8f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_11997fa3eb88cd5f8a82e631e713d3a5",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_72522434fa1960a4013c72e3f2e5ac76",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_943a0829dd9f4356824610750f37d3ec",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_78b1a452d888f7867adb6e19414b5f7e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_71e252198265e94da840e7f04405ef19",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c550287311941c54c4ef071c9dbd3895",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_07b79b52d62fd16410c1955344715167",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a23e7f9bb4d9abad9a1308d0c0dd35dd",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_70dabfadd0d540fadf0c8c41adfc9869",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_bd5f379b82faf94613969b60ebe4c3af",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_819f2ba7615bfa433f1d4ec09cf7cd22",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_58052d027ca2872e8328345c610f75f8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_68b7e56d20a7801f89fe3046e1001258",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_927c211bbb42715a625c8c0070479f36",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_de89fc7978f30766dfb07cd22067a118",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2bab76aebf085fae2009632410a0f9dd",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_784642755e4b5b8db297a8848007de2b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ac94ead18b4f2b88dc0b0cf99b92b94b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e77c77019c18cc09231a7059aa352c99",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0282d30025e28b93e34bd52846a3cd3f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_fa513cdaeb19dc6d2cf6ee930f5bc587",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_fb8ddc42bf4669b3edea74ba6c4243d6",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_be294ca1d8ad14aa7e678c953b4c2763",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f270699e7e13b92addd810138018abfc",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6aff32add82a2247f6a883aee994a25b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_007e3e32197fcc963fcd9bdf7f9de557",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e238bb9d1d9c1f8f6ed0418db5e169a9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_48c60c49bb2904bf39990e02ac1afbec",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c3a9dc633673a6015824966b70718617",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_32379efefc5fced5cc0d99a6521185b3",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f7350928b73ab792f8e8b6f3276bdd99",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6e0ac93a7dc0cc56638ae39a881c8970",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_188ba179d51115021faef523603077d9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f048f1d9bcf630667685d95e9c6a6eb7",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_81f85c48a6bcd42160c17bf9e31d1fbc",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_d7c173c9e0552ddbbef214476d084fba",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_fd49fbfecaa9d2c05cda63cf802f595a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_509a81828498fec80e9f2b41bb274bb9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_85253109678f03059ed1614c4270449c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c30ebcd88a2c1a910b8ec339e5b1d803",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_57150d109cf00ce80a8e2922ee387c29",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_3d27ced74cfe376b1e6ae1f6b849436d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ff0bb5420f1f4d6146c0387faffb3924",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0196510a99b0c5cd8c7e1d90ac0f18db",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b11bf862ca6de918cd36b790a5ed33ef",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8d70ccc6667c7d3e2d28d3747b97cf07",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8157cd7f0098f8e0137be41173e45209",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7a25d0da32fdc07adacb000c59272677",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_457238b037694988a1d0d0fd6df2a2d5",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_d0d5a0f20b6f005888cdd9a172fdec19",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e64edb8e0360b1414b7f766388a16f47",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_268b50dc21eeaef8f3d32ed993650edd",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ba0c44421ca85774ceb1a6f32aecf3a8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_14e23915ea3ce4948f0e14665dabccd0",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5db03f27d57e770d6abd051635104b5a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_15bd2156fdcb8a844d352e940f828cce",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8906ee37c9f62dcf9013eac0f42545d4",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_96cd0d72a5d4492d19055addfd55c270",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_79bd4fbc06813e3014dcfc22c6bb82cd",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_48a1444be3706405f02ebd268818c359",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_1715538585b98dbc5fcb815ac43d2460",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a5ee21c4d1af540643673aac7743dba5",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7744b10298640363e358d63098306b16",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c2738433d3d6cbbe92954235c05c26dc",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8266798a69dba9029a3e3fb1c9d4a8db",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f40e50b47976ff63868a73ae32fad134",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_df02265330524f639ad4a67a2e6b7770",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5fe30e73337cee5a79fa7a7d7a804bde",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_cb39bc4c7ca83bae8339d4443304734f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a94d1daf99d9bdbccef12deaeaaffd6e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8e67e1ab8ebeffa5a96efab32b6ab624",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_096ab8bbdbe80fc908dbad63f36b53bc",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b39c3532ff68ad1f576522867c423a6e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ea295e079d59cddfd7dbc2758948ff8b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_1c546826f899c2a086eb8eafaf7f52e0",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_28c4b95c3c85f45f4c495aa18edf8134",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_fb6e3795a9e9d540ead98565c177dbfb",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a3c7614111f7cb568decad058b7317ae",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a8a15a1ce7a9f2b64e49234f25c23797",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_350b66c28aaad2df3711c0d0d1faa88a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_264f1b559ec9bc69f294ca6214356dcf",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_edf3c8adb7d90d91afedc59efe4a6869",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c30e17c419dc438ff95d9e23ad0231d4",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6b8a99ec55bf75835b9aac98969ec06c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7deb751fdf39d96ccd22b75558462f62",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0d7681bd49c919025b7b0fad997f71bc",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_4c6e70990e033b6986b404277c3c69af",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ef7bce2d14a023c099ca252ff6e42e7b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0af5efb6378fc0eb54520c1095d8966a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ed7c6402982b35bb5449af396aadf65d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_03a96fa02a233a2c2247c74a29bbe342",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_51f782e5dcb717c6778e986756e85a21",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6852f42c6382c281eacf2487501e2379",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ccf3ee2b240268300bbbc309fabf27cf",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e94cd962d02e6e70d4d89337160fad46",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_3b0fb9e05f66bffda3f03155c2dd586e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8522a85cec78aa2b08d55556cdb9ebe3",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_bcca76a49d7d81ddfafa8a6cfa558095",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2e433c4b9374e00f1ba8a60d87be70ba",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a8aed812760cd034513dd09c778736eb",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5b40ccb66876719ef4e1e2438b991ed7",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c9062168270d0563daa31489cf053133",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2e4b40bb2e234f23540357a6721b171a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f91ce9afe7997de5a47ad6a71b39b55b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_41e1a5a40cb53471ab509f75ea4ba78b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_408fb08569b3855fb2aed0939740f42d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7bb76d3654ac0042374136c8f76a6170",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_bca23f01771da313ebfc3bf7f5982c15",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6dcbfb024099b761294337aa2774edae",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c3457785afad53c20aa4640981b3336d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c5dcc6042259025f9189b80204350a59",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b630b260fe8c35b2d48a3083cca28219",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8caa388f097835d4628669acc8f706d5",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7593fb405e62e7d2c3e2ac51c42915fe",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_24aaaf95902cb2b62f00162a68acec6b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_5733395f3211ff4a218742f10c530911",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7bb76584f70a71fffa4d5e6d87e12dca",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c9e3f369e041b3c075db56fb535d3e7e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_9e130183f4278f233e06fd708e463be9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_da7a43a1cb71064bc107c0967db25643",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_056acd18f5487f4c6875cc76ce54a886",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c3d07870be2cd1f49631a378ea52492e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_25a6777874e70bb90466db7dd404a097",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_05bd48d0ad46122291c9fe777a6ca4c8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_38c23ac93ce829d73317f3cf5a16e313",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_1336f8dd73ba31405deb31d4fcc9afc8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_868ad4ae3b490fad116da3081644f04a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_21106eb7cf5e2727c8658b835a0d27a9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_17b1b16b267ecad246ab617a7fc5cc7d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_490f4fe77b8b24f2a0c4f3fd702a673c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a2984a0844e18691161311d898302de1",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_423f10536a40e7090dff8223f5ab1304",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_d441c00c50034ee0f0d0cc5adbd49eba",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_9a95e2a3144909ec3bac7716697ba9eb",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_92b3f63f81add8fa547b1a0b345da3af",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2a12f2b9748fdc45b10c53299cab7a61",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_60e5736739e526e3614d2a029a03f576",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_eb6e5a9b4a8dd6ed77025e0e0a9f3930",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_544c0994a04f06c1f6eeaba5b2e6311e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_30dfde3098aa385ad63cebaf0aa1e80b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_eb0ff3fbc72eac14b722a82788ebb639",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_4efea092e408eac7b3b901d2fae287fe",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f389db686c5011c01f3a2419b0f1a7ac",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0d64e80d18cc717f7175f587e6577c66",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_44ce3c624384c095ebc5fa5c163beab3",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b9e7149ff6dc2a8dca4606545285e797",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_31273f5d504a33b1b00363441c2467a8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_1b8cb7f2aeb5f1d87e36778c7603a042",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_9f1bf9652d98dadb735baaa9252d3ca2",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a5ef6af5c58b029342097b09fe19f2a3",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_22cede14b74c3255e7120b086d1b030f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e272a6d5fcd89c40cb4262ee64d24b9d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_1abd92615019e645108b435e11ca9ef5",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ea31b0c465d030190c209c26ae36c4db",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_dc7a6958e99f99ba66c8868582bd2cba",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_4b2119d141d2ebcdee90f89dc12b0a5d",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_8b2e1f20372b4a6ec339174c25f08026",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_4d1f14fbe285543eb00b4e120217fdad",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_03557be745f6946eb1c1e8b27ce3cfc9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_64ad331b577a40f819936a668f60e5ff",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_70c8a1031656b91fd6e470793cc6c84c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a9bd708ab5c6b51d7bf461e0fdf6a964",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_852a28c065f1acf667343b4df7105d39",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_bd7df60ba52e76bba82f1f180d221f67",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_185f10a08cc3de165b0e8cf1e1f32881",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_25b82c9d2a64cfb01db69215083d54e8",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0cd52ab0ad0b823c6b86e066799a3652",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_14945d02614068660d1d83fb075d9831",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_974a56bd0115e149b3fd7696643d2dd5",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_907bd7e6d8955f1d9608ba267bd48fbf",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a11089dacbbd5ee11d5e091efa675845",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_81eb35966de43514e2c187b37748a2ef",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_f4372b2acb6737f69f1debd24349723b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0de855a0b362df1f013381f5f19a542c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_dc71a81e1a1da03afc94a54397eda6af",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b7161afb1d1a3746165d8d9ab7ee2816",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_3fa48b4010696c4f5278a0a6a9c6cda1",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_08274bb36fb0275464cf74f965c163f3",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_193911fc251d9384dc867a00ffd5722c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_cc6cfa59786beb44f5abf9f457f296e0",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0fd10a6dd2df6318cab239489430d26f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_89453b43c0a5aab8eb1a5a8889e86f17",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_d7f5844a6eb0f24f2f8132bc9550febc",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_af503c0c8e1b6fc6354a358103be8cbb",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7e98e755fc2beb90da875f348fa94595",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b69907df093c8fc2d2226fb9077204cb",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_a31c829eb888a5db75456e195bd6d6c7",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e3a6d32b102068d828ad6f3ed5c6838c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_adfe9434bd6e74fd0694bac9af407c61",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_0cad14e145c6a4d02881cbe4f1c73e22",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_bc99f14b94b899ab8e6bf32facfbdb1b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_07f0049cc34d6fea20ceb61466cfb938",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7563f6ed9d025d9fae2db1e027d4c4fd",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_23dc3de067af6ed3864997b6b9b45c3a",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_536118e37e0b93e74f7cbf00358732a9",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c238dc48170882a9ac24501ec22e418e",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c9aef38eb3c1990aeaccb2d89a9c865c",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_ddc9272e729a9a6b3a18421e836372df",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_19c49aa2c185f8bbf78d0109936dd43b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7f62675c59d47b808d9d199857081726",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_e6acc493e79b68f34b9558e84ed52663",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2c9842f85fcfe97a7a7348c15710e0e4",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_cf155f9a1370a326e7401f663025b3a1",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2c6b9a38c8f42af5da147d0e3e81198b",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7df6f9a23bf379427105485b98c127bf",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_7bbf12bb42ae684bb10c1b7f1e0e4c75",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6c7fafcedb512ac6d3c7c63b71d550e4",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_042db17f373c6e3cb11a5a7f5e27cfd2",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_6fa5f3f9320178b227a9649f7cf99ceb",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_2a8dd6c7af289b2d19f2353077957c77",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_3c6de1b59c17c19dd0b9454c39975af4",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_76345c0d02a1851b78941cbfe9e6f401",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_dfe509620a95320f3802bf6071ce8bf6",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_482f425b3742a748cd12a6400bce4e22",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_b8150233963486f584bd7b0ee43ec46f",
+          "revision": null,
+          "reason": "not_confirmed"
+        },
+        {
+          "trainingSessionId": "training_session_c2f3de08a177395bcfb6c039818c72bb",
+          "revision": null,
+          "reason": "not_confirmed"
+        }
+      ],
+      "accuracyStatus": "not_evaluable"
+    }
+  }
+}

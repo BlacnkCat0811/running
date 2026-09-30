@@ -1,0 +1,428 @@
+{
+  "reportVersion": "rai-ca-weight-ablation-v1",
+  "stratumCensus": [
+    {
+      "stratum": "steady_aerobic",
+      "workouts": 243,
+      "eligibleWorkouts": 23,
+      "maximumIndependentSessions": 242,
+      "maximumSpanDays": 2447,
+      "comparableRate": 0.9711934156378601,
+      "refusalReasons": [
+        {
+          "reason": "insufficient_span_days",
+          "count": 7
+        },
+        {
+          "reason": "insufficient_independent_sessions",
+          "count": 6
+        }
+      ]
+    },
+    {
+      "stratum": "recovery_unknown",
+      "workouts": 3,
+      "eligibleWorkouts": 1,
+      "maximumIndependentSessions": 2,
+      "maximumSpanDays": 2170.1,
+      "comparableRate": 0,
+      "refusalReasons": [
+        {
+          "reason": "insufficient_independent_sessions",
+          "count": 3
+        },
+        {
+          "reason": "insufficient_span_days",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "stratum": "threshold_sustained",
+      "workouts": 21,
+      "eligibleWorkouts": 20,
+      "maximumIndependentSessions": 20,
+      "maximumSpanDays": 765,
+      "comparableRate": 0.7142857142857143,
+      "refusalReasons": [
+        {
+          "reason": "insufficient_independent_sessions",
+          "count": 6
+        },
+        {
+          "reason": "insufficient_span_days",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "stratum": "interval",
+      "workouts": 1,
+      "eligibleWorkouts": 1,
+      "maximumIndependentSessions": 0,
+      "maximumSpanDays": 0,
+      "comparableRate": 0,
+      "refusalReasons": [
+        {
+          "reason": "insufficient_independent_sessions",
+          "count": 1
+        },
+        {
+          "reason": "insufficient_span_days",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "generatedAt": "2026-09-29T02:03:30.945Z",
+  "modelConfigVersion": "rai-model-config-v10",
+  "databasePath": "/Users/ta/running/var/rai.sqlite",
+  "featureRunId": "feature_run_1f07836f-2e60-46bd-9910-94253777188f",
+  "featureCount": 268,
+  "accuracyComparison": "not_evaluable",
+  "accuracyComparisonReason": "no labeled race/test outcomes in this database; see the walk-forward report",
+  "limitation": "replay omits inactivity decay (identical across candidates) and uses the stored pre-V2 feature snapshot",
+  "candidateNotes": [
+    "v10 removed the direction factor from the alpha composition entirely (the last 0.4 on a negative residual; the recovery-conditioned 0.25 went earlier). Negative learning is now damped only by the K-consecutive confirmation count. This report is the single-factor evaluation the doc requires for that 2.5x change: compare acceptance.negativeOpportunitiesToFirstAcceptance and trueAbility across the v9 and v10 runs, and note that with zero labelled outcomes locally the question 'is faster negative learning better' stays not_evaluable — only the mechanical effect is measured.",
+    "drop_efficiency is a weight-floor artifact, not an ability finding: dropping efficiency leaves pace + stability at 0.5 of the configured 0.875, below the 0.65 minimumAvailableWeight floor, so every attempted workout becomes trial and no CA is produced.",
+    "acceptance denominators are the independent candidate opportunities taken before the gates decide. Every gate is implemented and applied: §6.7 evidence reliability, §6.2 stratum comparability, and the §6.9 K-consecutive negative confirmation. A high rate therefore means the gates rarely bind on this data, not that they are missing. A negative candidate counted as accepted is one whose update was actually applied — a residual deferred by the confirmation count is not acceptance.",
+    "the per-stratum breakdown is reported in stratumCensus. A per-device correlation breakdown is not, because the feature contract carries no device dimension."
+  ],
+  "outcomes": [
+    {
+      "candidate": "v1_current",
+      "dimensionWeights": {
+        "efficiency": 0.375,
+        "pace": 0.3125,
+        "cardio": 0,
+        "stability": 0.1875,
+        "recovery": 0.125
+      },
+      "calibrationSessions": 6,
+      "attempted": 156,
+      "eligible": 39,
+      "trial": 117,
+      "calibrating": 94,
+      "excluded": 18,
+      "scorableRate": 0.25,
+      "currentAbility": {
+        "mean": 53.863299890638096,
+        "stdev": 7.630321312153992,
+        "p05": 39.352195800188355,
+        "p50": 52.64017594681729,
+        "p95": 65.57866668544668,
+        "saturationRate": 0
+      },
+      "trueAbility": {
+        "final": 53.324664256056245,
+        "updated": 18,
+        "meanAbsoluteDelta": 0.6197556252547641,
+        "maxAbsoluteDelta": 1.3059842786262195
+      },
+      "dimensionCoverage": {
+        "mean": 0.967948717948718,
+        "fullCoverageRate": 0.7435897435897436
+      },
+      "acceptance": {
+        "positiveCandidates": 14,
+        "positiveAccepted": 12,
+        "negativeCandidates": 15,
+        "negativeAccepted": 6,
+        "noLearningTarget": 10,
+        "negativeOpportunitiesToFirstAcceptance": 4,
+        "firstNegativeAcceptanceAtAttempt": 109
+      },
+      "effectiveWeights": {
+        "efficiency": 0.375,
+        "pace": 0.3125,
+        "stability": 0.1875,
+        "recovery": 0.125
+      }
+    },
+    {
+      "candidate": "v2a",
+      "dimensionWeights": {
+        "efficiency": 0.375,
+        "pace": 0.3125,
+        "cardio": 0,
+        "stability": 0.1875,
+        "recovery": 0
+      },
+      "calibrationSessions": 6,
+      "attempted": 156,
+      "eligible": 39,
+      "trial": 117,
+      "calibrating": 94,
+      "excluded": 18,
+      "scorableRate": 0.25,
+      "currentAbility": {
+        "mean": 53.50230186517808,
+        "stdev": 8.65213619945006,
+        "p05": 37.980507330640265,
+        "p50": 51.24817065162429,
+        "p95": 65.65203500848193,
+        "saturationRate": 0
+      },
+      "trueAbility": {
+        "final": 53.99290208515099,
+        "updated": 23,
+        "meanAbsoluteDelta": 0.5355792980936606,
+        "maxAbsoluteDelta": 1.2354438384242457
+      },
+      "dimensionCoverage": {
+        "mean": 1,
+        "fullCoverageRate": 1
+      },
+      "acceptance": {
+        "positiveCandidates": 16,
+        "positiveAccepted": 14,
+        "negativeCandidates": 23,
+        "negativeAccepted": 9,
+        "noLearningTarget": 0,
+        "negativeOpportunitiesToFirstAcceptance": 4,
+        "firstNegativeAcceptanceAtAttempt": 106
+      },
+      "effectiveWeights": {
+        "efficiency": 0.428571,
+        "pace": 0.357143,
+        "stability": 0.214286
+      }
+    },
+    {
+      "candidate": "v2b",
+      "dimensionWeights": {
+        "efficiency": 0.45,
+        "pace": 0.35,
+        "cardio": 0,
+        "stability": 0.2,
+        "recovery": 0
+      },
+      "calibrationSessions": 6,
+      "attempted": 156,
+      "eligible": 39,
+      "trial": 117,
+      "calibrating": 94,
+      "excluded": 18,
+      "scorableRate": 0.25,
+      "currentAbility": {
+        "mean": 53.61796776015569,
+        "stdev": 8.752280732643573,
+        "p05": 37.93875087718776,
+        "p50": 51.58605485662562,
+        "p95": 66.0984237901172,
+        "saturationRate": 0
+      },
+      "trueAbility": {
+        "final": 54.114236982131565,
+        "updated": 23,
+        "meanAbsoluteDelta": 0.5402941496927001,
+        "maxAbsoluteDelta": 1.2354438384242457
+      },
+      "dimensionCoverage": {
+        "mean": 1,
+        "fullCoverageRate": 1
+      },
+      "acceptance": {
+        "positiveCandidates": 16,
+        "positiveAccepted": 14,
+        "negativeCandidates": 23,
+        "negativeAccepted": 9,
+        "noLearningTarget": 0,
+        "negativeOpportunitiesToFirstAcceptance": 4,
+        "firstNegativeAcceptanceAtAttempt": 106
+      },
+      "effectiveWeights": {
+        "efficiency": 0.45,
+        "pace": 0.35,
+        "stability": 0.2
+      }
+    },
+    {
+      "candidate": "drop_pace",
+      "dimensionWeights": {
+        "efficiency": 0.375,
+        "pace": 0,
+        "cardio": 0,
+        "stability": 0.1875,
+        "recovery": 0.125
+      },
+      "calibrationSessions": 6,
+      "attempted": 156,
+      "eligible": 29,
+      "trial": 127,
+      "calibrating": 94,
+      "excluded": 18,
+      "scorableRate": 0.1858974358974359,
+      "currentAbility": {
+        "mean": 54.39862384599032,
+        "stdev": 8.530801974882564,
+        "p05": 40.92446942950362,
+        "p50": 53.75646344041168,
+        "p95": 64.9219381297344,
+        "saturationRate": 0
+      },
+      "trueAbility": {
+        "final": 53.211484209132685,
+        "updated": 18,
+        "meanAbsoluteDelta": 0.633281188463382,
+        "maxAbsoluteDelta": 1.3059842786262195
+      },
+      "dimensionCoverage": {
+        "mean": 1,
+        "fullCoverageRate": 1
+      },
+      "acceptance": {
+        "positiveCandidates": 14,
+        "positiveAccepted": 12,
+        "negativeCandidates": 15,
+        "negativeAccepted": 6,
+        "noLearningTarget": 0,
+        "negativeOpportunitiesToFirstAcceptance": 4,
+        "firstNegativeAcceptanceAtAttempt": 109
+      },
+      "effectiveWeights": {
+        "efficiency": 0.545455,
+        "stability": 0.272727,
+        "recovery": 0.181818
+      }
+    },
+    {
+      "candidate": "drop_efficiency",
+      "dimensionWeights": {
+        "efficiency": 0,
+        "pace": 0.3125,
+        "cardio": 0,
+        "stability": 0.1875,
+        "recovery": 0.125
+      },
+      "calibrationSessions": 6,
+      "attempted": 156,
+      "eligible": 0,
+      "trial": 156,
+      "calibrating": 94,
+      "excluded": 18,
+      "scorableRate": 0,
+      "currentAbility": {
+        "mean": null,
+        "stdev": null,
+        "p05": null,
+        "p50": null,
+        "p95": null,
+        "saturationRate": null
+      },
+      "trueAbility": {
+        "final": 50,
+        "updated": 0,
+        "meanAbsoluteDelta": null,
+        "maxAbsoluteDelta": null
+      },
+      "dimensionCoverage": {
+        "mean": null,
+        "fullCoverageRate": null
+      },
+      "acceptance": {
+        "positiveCandidates": 0,
+        "positiveAccepted": 0,
+        "negativeCandidates": 0,
+        "negativeAccepted": 0,
+        "noLearningTarget": 0,
+        "negativeOpportunitiesToFirstAcceptance": null,
+        "firstNegativeAcceptanceAtAttempt": null
+      },
+      "effectiveWeights": null
+    },
+    {
+      "candidate": "drop_stability",
+      "dimensionWeights": {
+        "efficiency": 0.375,
+        "pace": 0.3125,
+        "cardio": 0,
+        "stability": 0,
+        "recovery": 0.125
+      },
+      "calibrationSessions": 6,
+      "attempted": 156,
+      "eligible": 39,
+      "trial": 117,
+      "calibrating": 94,
+      "excluded": 18,
+      "scorableRate": 0.25,
+      "currentAbility": {
+        "mean": 55.04199583774667,
+        "stdev": 8.240213410712832,
+        "p05": 43.39121591473629,
+        "p50": 55.50620679349783,
+        "p95": 70.39286694070407,
+        "saturationRate": 0
+      },
+      "trueAbility": {
+        "final": 55.117791259679734,
+        "updated": 18,
+        "meanAbsoluteDelta": 0.5794988693299032,
+        "maxAbsoluteDelta": 1.3059842786262195
+      },
+      "dimensionCoverage": {
+        "mean": 0.9605522682445761,
+        "fullCoverageRate": 0.7435897435897436
+      },
+      "acceptance": {
+        "positiveCandidates": 16,
+        "positiveAccepted": 13,
+        "negativeCandidates": 13,
+        "negativeAccepted": 5,
+        "noLearningTarget": 10,
+        "negativeOpportunitiesToFirstAcceptance": 3,
+        "firstNegativeAcceptanceAtAttempt": 109
+      },
+      "effectiveWeights": {
+        "efficiency": 0.461538,
+        "pace": 0.384615,
+        "recovery": 0.153846
+      }
+    }
+  ],
+  "correlations": [
+    {
+      "left": "efficiency",
+      "right": "pace",
+      "samples": 45,
+      "pearson": 0.7367058050753358,
+      "spearman": 0.7764163372859025
+    },
+    {
+      "left": "efficiency",
+      "right": "stability",
+      "samples": 45,
+      "pearson": 0.0638858121877119,
+      "spearman": 0.17061923583662714
+    },
+    {
+      "left": "efficiency",
+      "right": "recovery",
+      "samples": 33,
+      "pearson": -0.022243476113858098,
+      "spearman": 0.04359881549705373
+    },
+    {
+      "left": "pace",
+      "right": "stability",
+      "samples": 45,
+      "pearson": 0.1674373463572225,
+      "spearman": 0.15046113306982872
+    },
+    {
+      "left": "pace",
+      "right": "recovery",
+      "samples": 33,
+      "pearson": 0.01677734842191504,
+      "spearman": 0.11302154478851621
+    },
+    {
+      "left": "stability",
+      "right": "recovery",
+      "samples": 33,
+      "pearson": -0.010870262163956562,
+      "spearman": -0.17372451098056793
+    }
+  ]
+}

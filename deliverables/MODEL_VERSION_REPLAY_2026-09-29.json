@@ -1,0 +1,148 @@
+{
+  "version": "rai-version-replay-report-v1",
+  "generatedBy": "scripts/model-version-replay.mts",
+  "replayMode": "event_time_reconstruction",
+  "accuracyStatus": "not_evaluable",
+  "accuracyNote": "Same-input engine comparison. Stored V3 rows carry no decoupling/environment evidence and the local library has no confirmed race/test labels, so this cannot certify accuracy.",
+  "scope": "Scoring-engine comparison (CA/TA) over ONE frozen stored-feature snapshot. Feature extraction and environment normalization are held fixed because the stored rows predate V4, so this is not a feature-version replay.",
+  "source": {
+    "databasePath": "var/rai.sqlite",
+    "featureRunId": "feature_run_1f07836f-2e60-46bd-9910-94253777188f",
+    "repoRevision": "62b4a97d8f3e04949b52c1715dc3a5ec660bc95c",
+    "schemaVersion": 22,
+    "activeModelRunId": "model_run_00a5cc10-5975-413d-b691-0a20ed675710",
+    "timezoneIdentifier": "Asia/Shanghai",
+    "featureSnapshotSha256": "44d7b917686c323cf4e6161bdc6bc630fc6fa4573cd19d312fb8cd9af1741b15"
+  },
+  "versionMatrix": {
+    "scoringEngine": "rai-v2.0.0",
+    "frozenBaselineEngine": "rai-v1.0.0-dev@62b4a97",
+    "modelConfigVersion": "rai-model-config-v12",
+    "featureConfigVersion": "feature-config-v11",
+    "physiologyModelVersion": "rai-physiology-v1.8.0",
+    "modelEvalVersion": "rai-model-eval-v1",
+    "comparabilityHistoryMode": "legacy"
+  },
+  "cohort": {
+    "storedFeatures": 268,
+    "eligible": 45,
+    "trial": 205,
+    "excluded": 18,
+    "legacySchemaRows": 268,
+    "legacyReadsMarked": 268,
+    "v1CalibrationCount": 6,
+    "v2CalibrationCount": 6
+  },
+  "engines": {
+    "v1": {
+      "version": "rai-v1.0.0-dev@62b4a97",
+      "updates": 39,
+      "finalTrueAbility": 46.11821870392091,
+      "caObservations": 39,
+      "taObservations": 156,
+      "statusCounts": {
+        "calibrating": 94,
+        "excluded": 18,
+        "eligible": 39,
+        "trial": 117
+      }
+    },
+    "v2": {
+      "version": "rai-v2.0.0",
+      "updates": 31,
+      "finalTrueAbility": 44.6877718105379,
+      "caObservations": 39,
+      "taObservations": 156,
+      "statusCounts": {
+        "calibrating": 94,
+        "excluded": 18,
+        "eligible": 39,
+        "trial": 117
+      }
+    }
+  },
+  "divergence": {
+    "sessionsCompared": 268,
+    "caComparableSessions": 39,
+    "coverageDelta": {
+      "ca": 0,
+      "ta": 0
+    },
+    "caAbsoluteDelta": {
+      "count": 39,
+      "mean": 1.1111838670313023,
+      "p50": 0.77151765238699,
+      "p95": 3.6512949651618456,
+      "max": 3.7001220010590075
+    },
+    "trueAbilityAbsoluteDelta": {
+      "count": 156,
+      "mean": 1.3234392628026046,
+      "p50": 1.4589577694973244,
+      "p95": 1.8415613929096395,
+      "max": 2.114863423448618
+    },
+    "finalTrueAbilityAbsoluteDelta": 1.4304468933830066,
+    "statusChanged": 0,
+    "statusChangeRate": 0,
+    "byStratum": {
+      "steady_aerobic": {
+        "sessions": 243,
+        "caComparable": 20,
+        "statusChanged": 0,
+        "caMeanAbsoluteDelta": 0.9245711868783986
+      },
+      "recovery_unknown": {
+        "sessions": 3,
+        "caComparable": 1,
+        "statusChanged": 0,
+        "caMeanAbsoluteDelta": 0
+      },
+      "threshold_sustained": {
+        "sessions": 21,
+        "caComparable": 17,
+        "statusChanged": 0,
+        "caMeanAbsoluteDelta": 1.4221083616052363
+      },
+      "interval": {
+        "sessions": 1,
+        "caComparable": 1,
+        "statusChanged": 0,
+        "caMeanAbsoluteDelta": 0.668904929363805
+      }
+    }
+  },
+  "releaseGate": {
+    "name": "rai-shadow-gate-v1",
+    "thresholds": {
+      "caMeanAbsoluteDelta": 8,
+      "caP95AbsoluteDelta": 15,
+      "finalTrueAbilityAbsoluteDelta": 10,
+      "statusChangeRate": 0.1
+    },
+    "caMeanAbsoluteDelta": {
+      "value": 1.1111838670313023,
+      "passed": true
+    },
+    "caP95AbsoluteDelta": {
+      "value": 3.6512949651618456,
+      "passed": true
+    },
+    "finalTrueAbilityAbsoluteDelta": {
+      "value": 1.4304468933830066,
+      "passed": true
+    },
+    "statusChangeRate": {
+      "value": 0,
+      "passed": true
+    },
+    "note": "Gate acceptance is a release condition, not an accuracy claim. A not_evaluable accuracy status above still blocks any precision activation."
+  },
+  "notEvaluable": [
+    "external_label_accuracy",
+    "interval_calibration",
+    "negative_acceptance_truthfulness",
+    "as_known_then_replay (stored rows have no arrival ledger)"
+  ],
+  "reproduce": "node --import tsx scripts/model-version-replay.mts --database var/rai.sqlite --out deliverables/MODEL_VERSION_REPLAY_2026-09-29.json"
+}
