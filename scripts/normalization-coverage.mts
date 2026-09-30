@@ -52,7 +52,7 @@ const canonicalWorkouts = scalar("SELECT COUNT(*) c FROM workouts WHERE is_canon
 
 const metadataRows = database
   .prepare("SELECT id, metadata_json FROM workouts WHERE is_canonical = 1")
-  .all() as ReadonlyArray<{ id: string; metadata_json: string | null }>;
+  .all() as unknown as ReadonlyArray<{ id: string; metadata_json: string | null }>;
 
 const fieldPresent = { temperatureC: 0, humidityPercent: 0, elevationGainMeters: 0 };
 const statusCounts: Record<NormalizationStatus, number> = {

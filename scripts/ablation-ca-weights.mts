@@ -70,10 +70,13 @@ const CANDIDATES: Record<string, RaiModelConfig["dimensionWeights"]> = {
 
 const databasePath = resolve(root, readArg("--database", "var/rai.sqlite"));
 const outPath = resolve(root, readArg("--out", "deliverables/CA_WEIGHT_ABLATION.json"));
-const comparabilityHistoryMode = readArg("--comparability-history", defaultRaiModelConfig.comparabilityHistoryMode);
-if (comparabilityHistoryMode !== "legacy" && comparabilityHistoryMode !== "bounded") {
+const requestedHistoryMode = readArg("--comparability-history", defaultRaiModelConfig.comparabilityHistoryMode);
+if (requestedHistoryMode !== "legacy" && requestedHistoryMode !== "bounded") {
   throw new Error("--comparability-history must be legacy or bounded");
 }
+// 显式标注而不是靠模块级 const 的收窄：`runCandidate` 是函数声明，
+// TypeScript 不会把模块作用域的收窄带进它的函数体。
+const comparabilityHistoryMode: RaiModelConfig["comparabilityHistoryMode"] = requestedHistoryMode;
 if (!existsSync(databasePath)) {
   process.stderr.write(`Database not found: ${databasePath}\n`);
   process.exit(1);
@@ -220,7 +223,17 @@ interface CandidateOutcome {
   /** §6.5/§6.6: how much of the configured evidence the scored workouts carried. */
   dimensionCoverage: { mean: number | null; fullCoverageRate: number | null };
   trueAbility: { final: number; updated: number; meanAbsoluteDelta: number | null; maxAbsoluteDelta: number | null };
-  acceptance: { positiveCandidates: number; positiveAccepted: number; negativeCandidates: number; negativeAccepted: number; noLearningTarget: number };
+  acceptance: {
+    positiveCandidates: number; positiveAccepted: number;
+    negativeCandidates: number; negativeAccepted: number; noLearningTarget: number;
+    /**
+     * §6.9：首次接受负向学习花了多少次尝试/多少次负机会。
+     * `null` = 本次回放里**从未**接受过负向学习 —— 这是"检测延迟"这一指标本身，
+     * 不是缺数据，所以它必须出现在类型里（此前它被返回却没有被声明）。
+     */
+    firstNegativeAcceptanceAtAttempt: number | null;
+    negativeOpportunitiesToFirstAcceptance: number | null;
+  };
   effectiveWeights: Record<string, number> | null;
 }
 
