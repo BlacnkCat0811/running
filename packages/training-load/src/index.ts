@@ -10,7 +10,8 @@ import type {
   WorkoutZoneSummary,
   TrainingLoadBreakdown
 } from "@rai/contracts";
-import { DATABASE_TIMEZONE, localCalendarFormatter, type PhysState } from "@rai/contracts";
+import { DATABASE_TIMEZONE, highIntensityHeartRateZones, localCalendarFormatter, type PhysState } from "@rai/contracts";
+import { classifyReadinessPhysState } from "@rai/readiness";
 
 export { type PhysState } from "@rai/contracts";
 
@@ -28,22 +29,7 @@ export function classifyPhysState(input: {
   rhrBpm: number | null; rhrBaselineBpm: number | null;
   nightsBelowSleepBaseline: number;
 }): PhysState {
-  const sleepRatio = input.sleepMinutes != null && input.sleepBaselineMinutes != null && input.sleepBaselineMinutes > 0 ? input.sleepMinutes / input.sleepBaselineMinutes : null;
-  const hrvRatio = input.hrvSdnnMs != null && input.hrvBaselineMs != null && input.hrvBaselineMs > 0 ? input.hrvSdnnMs / input.hrvBaselineMs : null;
-  const rhrRatio = input.rhrBpm != null && input.rhrBaselineBpm != null && input.rhrBaselineBpm > 0 ? input.rhrBpm / input.rhrBaselineBpm : null;
-  // No comparable evidence at all is not a negative finding.
-  if (sleepRatio == null && hrvRatio == null && rhrRatio == null) return "unknown";
-  if (input.nightsBelowSleepBaseline >= 3) return "depleted";
-  const rhrUp = rhrRatio != null && rhrRatio > 1.03;
-  if (sleepRatio != null && sleepRatio < 0.75 && hrvRatio != null && hrvRatio < 0.85 && rhrUp) return "depleted";
-  if ((sleepRatio != null && sleepRatio < 0.75) || (hrvRatio != null && hrvRatio < 0.85 && rhrUp)) return "reduced";
-  if ((sleepRatio != null && sleepRatio >= 0.9) || (hrvRatio != null && hrvRatio >= 0.9) || (rhrRatio != null && rhrRatio <= 1)) return "recovered_phys";
-  // Neither a named positive nor a named negative rule matched. Falling back to
-  // "reduced" here turned partial coverage into a negative physiological verdict:
-  // a night at 0.80 of baseline with no baseline-comparable HRV/RHR reported as
-  // "recovery insufficient". Missing/partial evidence only removes grounds for a
-  // judgement; it never adds evidence against the athlete.
-  return "unknown";
+  return classifyReadinessPhysState(input);
 }
 
 export interface HeartRateSample { heartRate: number; durationSeconds: number; startOffsetSeconds?: number }
@@ -261,6 +247,215 @@ export function classifyTrainingStatus(input: {
   return { status: "maintaining", explanations: [explanation("load_maintaining", input.loadRatio, null)] };
 }
 
+/**
+ * §9.4 `RecoveryDebt` 的正确命名。
+ *
+ * `max(0, ATL − CTL)` 是可以算的，但它的**单位仍是日 EWMA 负荷**，而且只是 ATL/CTL 的派生量：
+ * 它不是睡眠债、不是真实生理恢复债、也不是新的独立证据。内部一律叫 `acuteLoadExcess`，
+ * UI 文案写"短期负荷高于长期负荷"；若某处仍沿用 `RecoveryDebt`，必须同时注明这是**负荷代理**。
+ */
+export function acuteLoadExcess(acuteEwma: number | null, chronicEwma: number | null): number | null {
+  if (!finite(acuteEwma) || !finite(chronicEwma)) return null;
+  return Math.max(0, acuteEwma - chronicEwma);
+}
+
+/** §9.5：把**数值指标**与**行动分类**分开。 */
+export type LoadRisk = "unknown" | "nominal" | "high";
+
+/**
+ * 某次 `LoadAssessment` 的**唯一**依据。
+ *
+ * §9.4 明确"不得与 ATL、ACWR 三次分别投票提高风险"，所以这里是**单值**而不是一组布尔 ——
+ * 想投三票在类型上就做不到。映射关系见 `LOAD_RISK_BASIS`。
+ */
+export type LoadRiskBasis =
+  | "insufficient_history"
+  | "acwr"
+  | "ramp_rate"
+  | "phys_state"
+  | "strain_vs_p90"
+  | "load_recovery"
+  | "effective_range"
+  | "maintaining";
+
+/**
+ * `classifyTrainingStatus` 可能返回的每个 explanation code 到依据的映射。
+ * 有测试断言这张表**覆盖全部 code** —— 将来新增一条分支却忘记登记，测试先红，
+ * 而不是悄悄落到 `maintaining`（那会把"没识别"说得像"正常"）。
+ */
+export const LOAD_RISK_BASIS: Record<string, LoadRiskBasis> = {
+  insufficient_training_history: "insufficient_history",
+  load_ratio_attention: "acwr",
+  load_ratio_high: "acwr",
+  ramp_rate_attention: "ramp_rate",
+  depleted_phys_with_load: "phys_state",
+  strain_above_personal_p90: "strain_vs_p90",
+  seven_days_without_run: "load_recovery",
+  load_ratio_recovery: "load_recovery",
+  effective_load_range: "effective_range",
+  load_maintaining: "maintaining"
+};
+
+export interface LoadAssessmentInput {
+  historyDays: number;
+  workoutCount: number;
+  acuteEwma: number | null;
+  chronicEwma: number;
+  loadRatio: number | null;
+  rampRate: number;
+  physState?: PhysState | undefined;
+  strain: number | null;
+  strainP90: number | null;
+  daysSinceLastRun: number;
+}
+
+export interface LoadAssessment {
+  risk: LoadRisk;
+  basis: LoadRiskBasis;
+  /** 数值指标 —— 供展示与解释，**不参与投票**。 */
+  indicators: {
+    acuteEwma: number | null;
+    chronicEwma: number;
+    acwr: number | null;
+    acuteLoadExcess: number | null;
+    rampRate: number;
+    strain: number | null;
+    strainP90: number | null;
+  };
+  explanations: TrainingStatusExplanation[];
+}
+
+/**
+ * §9.5：把数值指标与行动分类分开的**唯一**入口。
+ *
+ * 🔴 本版**不重新分类**：`risk` 与 `basis` 都是对 `classifyTrainingStatus` 现有判定的 1:1 映射，
+ * 阈值一个没动、一条分支没加。§9.5 第 5 条要求"所有决策阈值先从现有规则兼容迁移，
+ * 再在离线报告中比较变更影响" —— 把"孤立的 ACWR 升高是否该只判 `elevated` 而非 `high`"
+ * 这类政策留给一次带测量的变更，不塞进本次迁移。
+ */
+export function assessLoad(
+  input: LoadAssessmentInput,
+  config = defaultDailyMetricConfig
+): LoadAssessment {
+  const classified = classifyTrainingStatus(
+    {
+      historyDays: input.historyDays,
+      workoutCount: input.workoutCount,
+      chronicEwma: input.chronicEwma,
+      loadRatio: input.loadRatio,
+      rampRate: input.rampRate,
+      recoveryEvidence: null,
+      physState: input.physState,
+      strain: input.strain,
+      strainP90: input.strainP90,
+      daysSinceLastRun: input.daysSinceLastRun
+    },
+    config
+  );
+  const code = classified.explanations[0]?.code ?? "load_maintaining";
+  const risk: LoadRisk =
+    classified.status === "insufficient_data"
+      ? "unknown"
+      : classified.status === "attention" || classified.status === "high_load"
+        ? "high"
+        : "nominal";
+  return {
+    risk,
+    basis: LOAD_RISK_BASIS[code] ?? "maintaining",
+    indicators: {
+      acuteEwma: finite(input.acuteEwma) ? input.acuteEwma : null,
+      chronicEwma: input.chronicEwma,
+      acwr: input.loadRatio,
+      acuteLoadExcess: acuteLoadExcess(input.acuteEwma, input.chronicEwma),
+      rampRate: input.rampRate,
+      strain: input.strain,
+      strainP90: input.strainP90
+    },
+    explanations: classified.explanations
+  };
+}
+
+/**
+ * §9.2 `LoadVectorV2`：现有 `TrainingLoadBreakdown` 的**扩展**，不是替代品。
+ *
+ * 三条硬约束（都写成断言）：
+ * - `compositeLoad` **原样透传**，不重算 ⇒ "只增向量"阶段保持 golden parity（§9.6）；
+ * - **没有第二个 totalLoad**：距离、心率负荷、配速负荷不得再被任意加权成一个新总数；
+ * - 机械负荷在**没有经过验证的映射**时一律 `null`，只展示距离/爬升原始暴露。
+ */
+export const LOAD_VECTOR_V2_VERSION = "rai-load-vector-v2" as const;
+
+export interface LoadVectorV2 {
+  rawHrrTrimp: number | null;
+  internalLoad: number | null;
+  paceLoad: number | null;
+  compositeLoad: number;
+  /** 时间量，不是"另一种 TRIMP"。 */
+  activeDurationMinutes: number;
+  distanceMeters: number | null;
+  elevationGainMeters: number | null;
+  highIntensityMinutes: number | null;
+  mechanicalLoad: number | null;
+  mechanicalModelVersion: string | null;
+  /** §9.2「`highIntensityMinutes` 要注明分区体系」：null 表示该值不可用。 */
+  highIntensityZoneSystem: string | null;
+  /** §9.2「可用覆盖」：说明为什么某个分量是 null。 */
+  reasonCodes: string[];
+  source: string;
+  confidence: number;
+}
+
+/**
+ * 高档分钟数要求的心率覆盖下限。低于它**宁可为 `null`**，也不把部分覆盖外推成整段
+ * （§9.6：partial HR coverage 不能复制整段时长使负荷翻倍）。
+ */
+export const HIGH_INTENSITY_MINIMUM_HEART_RATE_COVERAGE = 0.5;
+
+/** 供 §9.2 的 `mechanicalModelVersion` 使用：目前没有经过验证的机械负荷映射。 */
+export const MECHANICAL_LOAD_MODEL_VERSION: string | null = null;
+
+export function buildLoadVectorV2(input: {
+  load: WorkoutTrainingLoad;
+  zoneSummary?: Pick<WorkoutZoneSummary, "zoneProfileId" | "heartRateCoverage" | "heartRateExposure"> | null;
+}): LoadVectorV2 {
+  const { load } = input;
+  const breakdown = load.breakdown;
+  const zoneSummary = input.zoneSummary ?? null;
+  const reasonCodes: string[] = ["mechanical_load_not_modeled"];
+
+  let highIntensityMinutes: number | null = null;
+  let highIntensityZoneSystem: string | null = null;
+  if (zoneSummary === null) {
+    reasonCodes.push("zone_summary_absent");
+  } else if (!finite(zoneSummary.heartRateCoverage) || zoneSummary.heartRateCoverage < HIGH_INTENSITY_MINIMUM_HEART_RATE_COVERAGE) {
+    reasonCodes.push("heart_rate_coverage_below_threshold");
+  } else {
+    const seconds = zoneSummary.heartRateExposure
+      .filter((item) => (highIntensityHeartRateZones as readonly string[]).includes(item.zone))
+      .reduce((sum, item) => sum + item.durationSeconds, 0);
+    highIntensityMinutes = seconds / 60;
+    highIntensityZoneSystem = zoneSummary.zoneProfileId;
+  }
+
+  return {
+    rawHrrTrimp: breakdown.rawHrrTrimp,
+    internalLoad: breakdown.internalLoad,
+    paceLoad: breakdown.paceLoad,
+    // Passed through untouched: the vector adds exposure, it does not re-derive the load.
+    compositeLoad: load.load,
+    activeDurationMinutes: load.durationSeconds / 60,
+    distanceMeters: load.distanceMeters,
+    elevationGainMeters: load.elevationGainMeters,
+    highIntensityMinutes,
+    mechanicalLoad: null,
+    mechanicalModelVersion: MECHANICAL_LOAD_MODEL_VERSION,
+    highIntensityZoneSystem,
+    reasonCodes,
+    source: load.source,
+    confidence: load.confidence
+  };
+}
+
 export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughDate: string, physEvidence: DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
   if (loads.length === 0) return [];
   const sorted = [...loads].sort((a, b) => a.localDate.localeCompare(b.localDate));
@@ -400,4 +595,35 @@ export function buildRollingPeriodSummary(loads: WorkoutTrainingLoad[], asOfDate
     asOfDate,
     loads.filter(item => item.localDate >= previousStart && item.localDate <= previousEnd)
   );
+}
+
+/** V2: ACWR is context, never an independent high-risk vote. */
+export function assessLoadV2(input: LoadAssessmentInput): LoadAssessment {
+  const observed = assessLoad(input);
+  if (observed.risk === "unknown") return observed;
+  const independent = assessLoad({ ...input, loadRatio: 1 });
+  return {
+    ...independent, indicators: observed.indicators,
+    explanations: [...independent.explanations,
+      ...(input.loadRatio !== null && input.loadRatio > 1.3
+        ? [{ code: "acwr_reference_only", value: input.loadRatio, threshold: 1.3 }] : [])]
+  };
+}
+
+export function buildDailyTrainingMetricsV2(loads: WorkoutTrainingLoad[], throughDate: string,
+  physEvidence: DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
+  const days = buildDailyTrainingMetrics(loads, throughDate, physEvidence, config);
+  let workouts = 0, lastRun = -1;
+  return days.map((day,index)=>{
+    workouts += day.workoutCount;
+    if (day.workoutCount > 0) lastRun = index;
+    const strainValues=days.slice(Math.max(0,index-56),index).flatMap((row)=>row.strain===null?[]:[row.strain]);
+    const assessment=assessLoadV2({historyDays:index+1,workoutCount:workouts,acuteEwma:day.acuteEwma,
+      chronicEwma:day.chronicEwma,loadRatio:day.loadRatio,rampRate:day.rampRate,strain:day.strain,
+      strainP90:index>=55?percentile(strainValues,0.9):null,
+      daysSinceLastRun:lastRun<0?index+1:index-lastRun,physState:physEvidence.find((row)=>row.localDate===day.localDate)?.physState});
+    return {...day,trainingStatus:assessment.risk==="unknown"?"insufficient_data":assessment.risk==="high"?"attention":
+      day.trainingStatus==="attention"||day.trainingStatus==="high_load"?"maintaining":day.trainingStatus,
+      statusExplanations:assessment.explanations};
+  });
 }

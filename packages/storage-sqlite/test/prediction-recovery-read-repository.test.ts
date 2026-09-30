@@ -107,7 +107,11 @@ test("marks raw resting heart rate as raw compatibility provenance", () => {
       sleepSource: "none",
       source: "raw_compat",
       coverage: "partial",
-      latestObservedAt: "2026-01-29T00:00:00Z"
+      latestObservedAt: "2026-01-29T00:00:00Z",
+      // 这个 fixture 的 health_records **没有 created_at 列** ⇒ 到达时间未知。
+      // "不知道它什么时候到达"必须表达成 availabilityUnknown，而不是 null 之后当"已可用"。
+      latestAvailableAt: null,
+      availabilityUnknown: true
     });
   } finally {
     database.close();
@@ -137,6 +141,39 @@ test("propagates malformed canonical queries", () => {
       () => new SqlitePredictionRecoveryReadRepository(database).load(asOf, "UTC"),
       /no such column: hrv_sdnn_ms/
     );
+  } finally {
+    database.close();
+  }
+});
+
+test("keeps arrival time separate from observation time, so a record that arrives after asOf is visible", () => {
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(`
+      CREATE TABLE health_records (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        value_numeric REAL,
+        start_at TEXT NOT NULL,
+        end_at TEXT NOT NULL,
+        created_at TEXT
+      );
+    `);
+    // 观测时间在 asOf 之前（1 月 29 日的心率），但**导入时间**在 asOf 之后（2 月 5 日才进系统）。
+    // 这正是 §7.3 的泄漏形态：只看观测时间会把它当成"当时已知道"的证据。
+    insertHealth(database, "rhr-recent", "HKQuantityTypeIdentifierRestingHeartRate", 58, "2026-01-29T00:00:00Z");
+    insertHealth(database, "rhr-base", "HKQuantityTypeIdentifierRestingHeartRate", 52, "2026-01-15T00:00:00Z");
+    database.prepare("UPDATE health_records SET created_at = '2026-02-05T00:00:00Z' WHERE id = 'rhr-recent'").run();
+    database.prepare("UPDATE health_records SET created_at = '2026-01-20T00:00:00Z' WHERE id = 'rhr-base'").run();
+
+    const readings = new SqlitePredictionRecoveryReadRepository(database).load(asOf, "UTC");
+    assert.equal(readings.recentRestingHeartRate, 58, "数值不受影响：到达时间只是元数据");
+    assert.equal(readings.provenance.latestObservedAt, "2026-01-29T00:00:00Z");
+    assert.equal(readings.provenance.latestAvailableAt, "2026-02-05T00:00:00Z",
+      "到达时间必须如实取到导入时间，而不是复述观测时间");
+    assert.ok(readings.provenance.latestAvailableAt! > asOf,
+      "这条记录在 asOf 时尚未到达 —— 只有把两个维度分开才看得见");
+    assert.equal(readings.provenance.availabilityUnknown, false, "到达时间齐全就不该标成未知");
   } finally {
     database.close();
   }

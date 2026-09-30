@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { WorkoutTrainingLoad } from "@rai/contracts";
+import type { HeartRateZone, WorkoutTrainingLoad } from "@rai/contracts";
 
 import {
+  HIGH_INTENSITY_MINIMUM_HEART_RATE_COVERAGE,
+  LOAD_RISK_BASIS,
+  LOAD_VECTOR_V2_VERSION,
+  acuteLoadExcess,
   aggregateTrainingPeriod,
+  assessLoad,
   buildDailyTrainingMetrics,
+  buildLoadVectorV2,
   buildCalendarPeriodSummary,
   buildRollingPeriodSummary,
   calculateWorkoutTrainingLoad,
@@ -348,4 +354,270 @@ test("dense non-overlapping heart-rate streams remain bounded and preserve load"
   assert.equal(result.source, "heart_rate_series");
   assert.equal(result.intensity, 0.5);
   assert.ok(Math.abs(result.load - count / 60 * trimpMinuteLoad(0.5)) < 1e-5);
+});
+
+// -----------------------------------------------------------------------------
+// §9.4 / §9.5 负荷命名与"把数值指标与行动分类分开"
+// -----------------------------------------------------------------------------
+
+test("acuteLoadExcess is a derived load proxy, and says so by refusing to invent a value", () => {
+  assert.equal(acuteLoadExcess(120, 90), 30);
+  // Below chronic there is no excess — and it is 0, not a negative "recovery credit".
+  assert.equal(acuteLoadExcess(80, 90), 0);
+  assert.equal(acuteLoadExcess(90, 90), 0);
+  // Unknown inputs stay unknown: 0 would read as "measured, and no excess".
+  assert.equal(acuteLoadExcess(null, 90), null);
+  assert.equal(acuteLoadExcess(90, null), null);
+  assert.equal(acuteLoadExcess(Number.NaN, 90), null);
+});
+
+test("the risk-basis table covers every code the classifier can emit", () => {
+  // Frozen contract: if `classifyTrainingStatus` grows a branch, its code has to be registered
+  // here — otherwise `assessLoad` would silently fall through to `maintaining`, which reports
+  // "nothing to see" for a signal nobody mapped.
+  assert.deepEqual(Object.keys(LOAD_RISK_BASIS).sort(), [
+    "depleted_phys_with_load",
+    "effective_load_range",
+    "insufficient_training_history",
+    "load_maintaining",
+    "load_ratio_attention",
+    "load_ratio_high",
+    "load_ratio_recovery",
+    "ramp_rate_attention",
+    "seven_days_without_run",
+    "strain_above_personal_p90"
+  ]);
+  // And the declared list must be exactly what the classifier emits.
+  const emitted = new Set<string>();
+  const base = { historyDays: 30, workoutCount: 10, chronicEwma: 60, acuteEwma: 70, recoveryEvidence: null, rampRate: 0, strain: null, strainP90: null, daysSinceLastRun: 1 };
+  for (const probe of [
+    { ...base, loadRatio: null },
+    { ...base, loadRatio: 2 },
+    { ...base, loadRatio: 1.4, rampRate: 0.9 },
+    { ...base, loadRatio: 1.2, physState: "depleted" as const },
+    { ...base, loadRatio: 1.4, strain: 999, strainP90: 500 },
+    { ...base, loadRatio: 1.2, daysSinceLastRun: 9 },
+    { ...base, loadRatio: 0.5 },
+    { ...base, loadRatio: 1.1 },
+    { ...base, loadRatio: 1.35 },
+    { ...base, loadRatio: 1.05 }
+  ]) {
+    for (const explanation of classifyTrainingStatus(probe).explanations) emitted.add(explanation.code);
+  }
+  for (const code of emitted) {
+    assert.ok(code in LOAD_RISK_BASIS, `classifier emitted ${code}, which has no risk basis`);
+  }
+});
+
+test("assessLoad separates the indicators from the classification", () => {
+  const base = { historyDays: 30, workoutCount: 10, chronicEwma: 60, acuteEwma: 130, rampRate: 0, strain: null, strainP90: null, daysSinceLastRun: 1 };
+  const unknown = assessLoad({ ...base, loadRatio: null, historyDays: 3 });
+  assert.equal(unknown.risk, "unknown");
+  assert.equal(unknown.basis, "insufficient_history");
+  assert.equal(unknown.indicators.acwr, null);
+
+  const high = assessLoad({ ...base, loadRatio: 2 });
+  assert.equal(high.risk, "high");
+  assert.equal(high.basis, "acwr");
+  // Indicators are reported alongside, and they are the raw numbers — not re-weighted votes.
+  assert.equal(high.indicators.acwr, 2);
+  assert.equal(high.indicators.acuteLoadExcess, 70);
+
+  const nominal = assessLoad({ ...base, loadRatio: 1.05 });
+  assert.equal(nominal.risk, "nominal");
+  assert.equal(nominal.basis, "effective_range");
+});
+
+test("assessLoad exposes exactly one basis, so three signals cannot each vote", () => {
+  // §9.4 forbids ATL, ACWR and the excess voting separately. The shape enforces it: `basis` is a
+  // single value, and the risk follows the classifier's first match — later signals cannot add
+  // a second vote even when their thresholds are also breached.
+  const base = { historyDays: 30, workoutCount: 10, chronicEwma: 60, acuteEwma: 130, loadRatio: 2, rampRate: 5, strain: 999, strainP90: 1, daysSinceLastRun: 1 };
+  const both = assessLoad({ ...base, physState: "depleted" as const });
+  assert.equal(both.basis, "acwr", "the first breach names the basis and nothing else votes");
+  assert.equal(assessLoad({ ...base, rampRate: 5, strain: null, strainP90: null }).basis, "acwr");
+  // Changing only a non-basis signal must not change the risk.
+  assert.equal(both.risk, assessLoad({ ...base, rampRate: 0, strain: null, strainP90: null }).risk);
+});
+
+test("the retired Coach clause never changed a builder-produced verdict", () => {
+  // §9.5 removed `loadRatio > 1.3` from the Coach verdict. That is only safe if, for rows the
+  // builder actually produces, the clause never disagreed with the status. Sweep several load
+  // shapes and prove it — including that the clause DOES fire somewhere, so the sweep is not
+  // vacuous.
+  const day = (index: number) => new Date(Date.UTC(2026, 0, 1) + index * 86_400_000).toISOString().slice(0, 10);
+  const patterns: Record<string, (index: number, total: number) => number> = {
+    steady: () => 180,
+    late_ramp_3x: (index, total) => (index <= total - 7 ? 60 : 180),
+    late_spike_10x: (index, total) => (index <= total - 5 ? 30 : 300),
+    sawtooth: (index) => (index % 2 ? 0 : 220),
+    single_huge: (index, total) => (index === total - 1 ? 900 : 40),
+    declining: (index, total) => Math.round(300 * (1 - index / total) + 20),
+    stop_for_a_week: (index, total) => (index <= total - 7 ? 300 : 0)
+  };
+  let clauseTrue = 0;
+  let clauseWouldChange = 0;
+  for (const pattern of Object.values(patterns)) {
+    const loads: WorkoutTrainingLoad[] = [];
+    for (let index = 0; index < 60; index += 1) {
+      const load = pattern(index, 60);
+      if (load <= 0) continue;
+      loads.push({
+        trainingSessionId: `s${index}`,
+        localDate: day(index),
+        distanceMeters: 10_000,
+        durationSeconds: 3600,
+        load,
+        intensity: 0.8,
+        source: "composite",
+        confidence: 0.9,
+        rpe: 7,
+        sessionType: "steady",
+        averageHeartRate: 150,
+        elevationGainMeters: null,
+        stimulusType: "aerobic_base",
+        breakdown: {
+          rawHrrTrimp: load,
+          internalLoad: load,
+          paceLoad: null,
+          distanceReferenceMeters: null,
+          distanceExposureRatio: null,
+          distanceFactor: 1,
+          compositeLoad: load,
+          compositeIntensity: 0.8,
+          heartRateConfidence: 0.9,
+          paceConfidence: 0
+        },
+        explanations: []
+      });
+    }
+    for (const metric of buildDailyTrainingMetrics(loads, day(59))) {
+      if (metric.trainingStatus === "insufficient_data") continue;
+      const statusHigh = metric.trainingStatus === "attention" || metric.trainingStatus === "high_load";
+      const clause = metric.loadRatio !== null && metric.loadRatio > 1.3;
+      if (clause) clauseTrue += 1;
+      if (clause && !statusHigh) clauseWouldChange += 1;
+    }
+  }
+  assert.ok(clauseTrue > 0, "the sweep must exercise rows where the clause is true, or it proves nothing");
+  assert.equal(clauseWouldChange, 0, "the clause could change a builder-produced verdict");
+});
+
+// -----------------------------------------------------------------------------
+// §9.2 LoadVectorV2：只增向量，不动 compositeLoad
+// -----------------------------------------------------------------------------
+
+function vectorFixture(overrides: Partial<Parameters<typeof buildLoadVectorV2>[0]> = {}) {
+  const load = calculateWorkoutTrainingLoad({
+    trainingSessionId: "session-1",
+    localDate: "2026-03-01",
+    durationSeconds: 3600,
+    distanceMeters: 12_000,
+    averageHeartRate: 150,
+    restingHeartRate: 50,
+    observedMaxHeartRate: 190,
+    sessionType: "steady",
+    sourceConfidence: 1
+  })!;
+  return { load, ...overrides };
+}
+
+const zoneExposure = (entries: Array<[HeartRateZone, number]>) =>
+  entries.map(([zone, durationSeconds]) => ({
+    zone,
+    durationSeconds,
+    distanceMeters: 0,
+    fraction: durationSeconds / 3600
+  }));
+
+test("the load vector passes compositeLoad through untouched (§9.6 golden parity)", () => {
+  const { load } = vectorFixture();
+  const vector = buildLoadVectorV2({ load });
+  assert.equal(vector.compositeLoad, load.load);
+  assert.equal(vector.compositeLoad, load.breakdown.compositeLoad);
+  assert.equal(vector.rawHrrTrimp, load.breakdown.rawHrrTrimp);
+  assert.equal(vector.internalLoad, load.breakdown.internalLoad);
+  assert.equal(vector.paceLoad, load.breakdown.paceLoad);
+  assert.equal(vector.source, load.source);
+  assert.equal(vector.confidence, load.confidence);
+});
+
+test("the load vector never grows a second total", () => {
+  // §9.2: distance, heart-rate load and pace load must not be re-weighted into another total.
+  // Freezing the key set is what makes that structural: adding `totalLoad` means editing this list.
+  const vector = buildLoadVectorV2(vectorFixture());
+  assert.deepEqual(Object.keys(vector).sort(), [
+    "activeDurationMinutes",
+    "compositeLoad",
+    "confidence",
+    "distanceMeters",
+    "elevationGainMeters",
+    "highIntensityMinutes",
+    "highIntensityZoneSystem",
+    "internalLoad",
+    "mechanicalLoad",
+    "mechanicalModelVersion",
+    "paceLoad",
+    "rawHrrTrimp",
+    "reasonCodes",
+    "source"
+  ]);
+  assert.equal(LOAD_VECTOR_V2_VERSION, "rai-load-vector-v2");
+});
+
+test("activeDurationMinutes is a duration, not another TRIMP", () => {
+  const { load } = vectorFixture();
+  const vector = buildLoadVectorV2({ load });
+  assert.equal(vector.activeDurationMinutes, 60);
+  // 60 minutes at maximal intensity is 60 * trimpMinuteLoad(1) TRIMP, not 60.
+  assert.notEqual(vector.activeDurationMinutes, 60 * trimpMinuteLoad(1));
+});
+
+test("high intensity minutes come from the shared zone set, or are withheld", () => {
+  const { load } = vectorFixture();
+  // 900s of threshold + 300s of anaerobic = 20 minutes. `aerobic_power` is deliberately not
+  // high intensity, and it is the zone that exists only on the heart-rate ladder.
+  const withZones = buildLoadVectorV2({
+    load,
+    zoneSummary: {
+      zoneProfileId: "profile-1",
+      heartRateCoverage: 0.9,
+      heartRateExposure: zoneExposure([
+        ["aerobic_base", 1200],
+        ["aerobic_power", 1200],
+        ["lactate_threshold", 900],
+        ["anaerobic", 300]
+      ])
+    }
+  });
+  assert.equal(withZones.highIntensityMinutes, 20);
+  assert.equal(withZones.highIntensityZoneSystem, "profile-1");
+  assert.ok(!withZones.reasonCodes.includes("heart_rate_coverage_below_threshold"));
+
+  // No zone summary at all: withheld, with the reason recorded.
+  const withoutZones = buildLoadVectorV2({ load });
+  assert.equal(withoutZones.highIntensityMinutes, null);
+  assert.equal(withoutZones.highIntensityZoneSystem, null);
+  assert.ok(withoutZones.reasonCodes.includes("zone_summary_absent"));
+
+  // Partial coverage is not extrapolated to the whole session (§9.6).
+  const thin = buildLoadVectorV2({
+    load,
+    zoneSummary: {
+      zoneProfileId: "profile-1",
+      heartRateCoverage: HIGH_INTENSITY_MINIMUM_HEART_RATE_COVERAGE - 0.01,
+      heartRateExposure: zoneExposure([["lactate_threshold", 900]])
+    }
+  });
+  assert.equal(thin.highIntensityMinutes, null);
+  assert.ok(thin.reasonCodes.includes("heart_rate_coverage_below_threshold"));
+});
+
+test("mechanical load stays null until a mapping is validated", () => {
+  const vector = buildLoadVectorV2(vectorFixture());
+  assert.equal(vector.mechanicalLoad, null);
+  assert.equal(vector.mechanicalModelVersion, null);
+  assert.ok(vector.reasonCodes.includes("mechanical_load_not_modeled"));
+  // The raw exposure is still there — §9.2 asks to show distance and climb as they are.
+  assert.equal(vector.distanceMeters, 12_000);
 });

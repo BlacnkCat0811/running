@@ -11,8 +11,11 @@ import type {
   TrainingZoneProfileSettings,
   WorkoutZoneSummary,
   ZoneExposure,
+  ZoneAgreement,
+  ZoneCoherence,
   ZoneValueSource
 } from "@rai/contracts";
+import { highIntensityHeartRateZones } from "@rai/contracts";
 import {
   RPE_INTENSITY,
   SESSION_TYPE_INTENSITY,
@@ -36,6 +39,7 @@ export interface MaximumHeartRateEvidence {
   sourceConfidence: number;
 }
 export interface ThresholdPaceCandidate {
+  evidenceSource?: "observed" | "inferred" | "fallback";
   paceSecondsPerKm: number;
   confidence: number;
   evidenceCount: number;
@@ -252,6 +256,15 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
     candidate?.evidenceCount ?? 0
   );
   if (candidate && finite(candidate.paceSecondsPerKm) && candidate.paceSecondsPerKm >= 150 && candidate.paceSecondsPerKm <= 900) {
+    // §10.5：新阈值证据**只影响之后的 profile**。调用方（`recompute-pipeline`）已经把证据
+    // 按 `observedAt < effectiveAt` 过滤，但那是**调用方的**纪律；这里补上证明：
+    // 一旦候选的证据游标落在 profile 生效时刻或之后，就是"用本次训练推高 threshold"的闭环，
+    // 必须立刻失败而不是静默采纳。
+    if (candidate.dataThroughAt !== null && Date.parse(candidate.dataThroughAt) >= Date.parse(input.effectiveAt)) {
+      throw new Error(
+        `threshold pace evidence (${candidate.dataThroughAt}) is not before the profile effective moment (${input.effectiveAt})`
+      );
+    }
     const hasNewEvidence = previous === null ||
       (candidate.dataThroughAt !== null && (thresholdDataThroughAt === null ||
         Date.parse(candidate.dataThroughAt) > Date.parse(thresholdDataThroughAt))) ||
@@ -330,6 +343,14 @@ export function buildDailyZoneProfile(input: BuildZoneProfileInput): DailyZonePr
       upperSecondsPerKm: band.upperSecondsPerKm === null ? null : round(band.upperSecondsPerKm)
     })),
     evidence: {
+      valueSources: {
+        restingHeartRate: restingSource,
+        maximumHeartRate: maximumSource,
+        thresholdPace: paceSource,
+        thresholdEvidence: paceSource === "manual" ? "manual"
+          : paceSource === "automatic" ? candidate?.evidenceSource ?? "inferred"
+            : previous?.evidence.valueSources?.thresholdEvidence ?? "fallback"
+      },
       restingHeartRateDays: restingDays,
       maximumHeartRateWorkouts: validPeaks.length,
       // This is an evaluated-evidence cursor, so temporary candidate loss or
@@ -497,6 +518,177 @@ function stimulusScore(
   };
 }
 
+// -----------------------------------------------------------------------------
+// §10.4 HR / Pace coherence
+// -----------------------------------------------------------------------------
+
+export const ZONE_COHERENCE_POLICY_VERSION = "rai-zone-coherence-v1";
+
+/**
+ * 共享**生理努力档**。两套分区并不同构 —— `aerobic_power` 只在 HR 一侧存在，
+ * `anaerobic_endurance` / `sprint` 只在 Pace 一侧存在。
+ *
+ * 🔴 §10.4 明令："**不能把各自数组下标相减当『冲突分』**"。下面这张表就是那句禁令的实现：
+ * 比较前先把两侧映射到同一个生理阶梯，再用**显式语义映射**判断是否对齐。
+ */
+const heartZoneEffort: Record<HeartRateZone, number> = {
+  recovery: 0,
+  aerobic_base: 1,
+  aerobic_power: 2,
+  lactate_threshold: 3,
+  anaerobic: 5
+};
+const paceZoneEffort: Record<PaceZone, number> = {
+  easy: 0,
+  marathon: 2,
+  lactate_threshold: 3,
+  anaerobic_endurance: 4,
+  sprint: 5
+};
+
+/** 每个 HR 档**可接受**的 Pace 努力档。显式列举，不靠下标距离。 */
+const acceptedPaceEffortForHeartZone: Record<HeartRateZone, readonly number[]> = {
+  recovery: [0],
+  aerobic_base: [0, 2],
+  aerobic_power: [2],
+  lactate_threshold: [2, 3],
+  anaerobic: [4, 5]
+};
+
+export interface ZoneCoherenceConfig {
+  /** 双来源同时有分区的时长占比低于它 ⇒ `insufficient`。 */
+  readonly minimumPairedCoverage: number;
+  /** 短于这么久的分歧不算"持续冲突"（§10.4：间歇中的 HR 滞后不应成为常态冲突）。 */
+  readonly minimumSustainedSeconds: number;
+  /** 方向判定用的努力档容差。 */
+  readonly effortTolerance: number;
+}
+
+export const defaultZoneCoherenceConfig: ZoneCoherenceConfig = {
+  minimumPairedCoverage: 0.5,
+  minimumSustainedSeconds: 90,
+  effortTolerance: 1
+};
+
+export interface ZoneCoherenceSegment<TZone extends string> {
+  startOffsetSeconds: number;
+  durationSeconds: number;
+  zone: TZone;
+}
+
+type SegmentDirection = "pace_high" | "hr_high";
+
+/**
+ * §10.4：把数值指标（配对覆盖、持续冲突秒数）与行动分类（`agreement`）分开的**唯一**入口。
+ *
+ * 配对覆盖率是**真实配对**：把两条时间线按边界扫一遍，只统计"两侧都落到某个分区"的时长，
+ * 不拿 `min(心率覆盖, 配速覆盖)` 冒充 —— 那会把"两条线各覆盖一半但互不重叠"算成满配对。
+ */
+export function assessZoneCoherence(input: {
+  durationSeconds: number;
+  heartRateSegments: readonly ZoneCoherenceSegment<HeartRateZone>[];
+  paceSegments: readonly ZoneCoherenceSegment<PaceZone>[];
+  config?: ZoneCoherenceConfig;
+}): ZoneCoherence {
+  const config = input.config ?? defaultZoneCoherenceConfig;
+  if (!Number.isFinite(config.minimumPairedCoverage) || config.minimumPairedCoverage < 0 || config.minimumPairedCoverage > 1) {
+    throw new Error("minimumPairedCoverage must be within [0, 1]");
+  }
+  if (!Number.isFinite(config.minimumSustainedSeconds) || config.minimumSustainedSeconds < 0) {
+    throw new Error("minimumSustainedSeconds must not be negative");
+  }
+  if (!Number.isFinite(config.effortTolerance) || config.effortTolerance < 0) {
+    throw new Error("effortTolerance must not be negative");
+  }
+
+  const duration = Math.max(0, input.durationSeconds);
+  const base = { comparisonPolicyVersion: ZONE_COHERENCE_POLICY_VERSION };
+
+  const boundaries = new Set<number>([0, duration]);
+  for (const segment of [...input.heartRateSegments, ...input.paceSegments]) {
+    const start = clamp(segment.startOffsetSeconds, 0, duration);
+    const end = clamp(segment.startOffsetSeconds + segment.durationSeconds, 0, duration);
+    if (end > start) {
+      boundaries.add(start);
+      boundaries.add(end);
+    }
+  }
+  const edges = [...boundaries].sort((left, right) => left - right);
+
+  const covering = <TZone extends string>(
+    segments: readonly ZoneCoherenceSegment<TZone>[],
+    at: number
+  ): TZone | null => {
+    for (const segment of segments) {
+      if (segment.startOffsetSeconds <= at && at < segment.startOffsetSeconds + segment.durationSeconds) {
+        return segment.zone;
+      }
+    }
+    return null;
+  };
+
+  let pairedSeconds = 0;
+  let sustainedConflictSeconds = 0;
+  const directionSeconds: Record<SegmentDirection, number> = { pace_high: 0, hr_high: 0 };
+  let runSeconds = 0;
+  const runDirections: SegmentDirection[] = [];
+
+  const flushRun = (): void => {
+    if (runSeconds >= config.minimumSustainedSeconds && runSeconds > 0) {
+      sustainedConflictSeconds += runSeconds;
+      for (const direction of runDirections) directionSeconds[direction] += 1;
+    }
+    runSeconds = 0;
+    runDirections.length = 0;
+  };
+
+  for (let index = 0; index < edges.length - 1; index += 1) {
+    const start = edges[index]!;
+    const end = edges[index + 1]!;
+    const seconds = end - start;
+    if (seconds <= 0) continue;
+    const heartZone = covering(input.heartRateSegments, start);
+    const paceZone = covering(input.paceSegments, start);
+    if (heartZone === null || paceZone === null) {
+      flushRun();
+      continue;
+    }
+    pairedSeconds += seconds;
+    const heartEffort = heartZoneEffort[heartZone];
+    const paceEffort = paceZoneEffort[paceZone];
+    if (acceptedPaceEffortForHeartZone[heartZone].includes(paceEffort)) {
+      flushRun();
+      continue;
+    }
+    // Not aligned: the shared effort ladder says which side reads harder.
+    const direction: SegmentDirection =
+      paceEffort - heartEffort > config.effortTolerance ? "pace_high" : "hr_high";
+    runSeconds += seconds;
+    runDirections.push(direction);
+  }
+  flushRun();
+
+  const pairedCoverage = duration > 0 ? clamp(pairedSeconds / duration) : 0;
+  const reasonCodes: string[] = [];
+  if (pairedCoverage < config.minimumPairedCoverage) {
+    reasonCodes.push("paired_coverage_below_threshold");
+    return { ...base, agreement: "insufficient", pairedCoverage: round(pairedCoverage), sustainedConflictSeconds: 0, reasonCodes };
+  }
+  if (sustainedConflictSeconds === 0) {
+    reasonCodes.push("no_sustained_conflict");
+    return { ...base, agreement: "aligned", pairedCoverage: round(pairedCoverage), sustainedConflictSeconds: 0, reasonCodes };
+  }
+  const agreement: SegmentDirection = directionSeconds.pace_high >= directionSeconds.hr_high ? "pace_high" : "hr_high";
+  reasonCodes.push("sustained_conflict_detected", agreement === "pace_high" ? "pace_leads_hr" : "hr_leads_pace");
+  return {
+    ...base,
+    agreement,
+    pairedCoverage: round(pairedCoverage),
+    sustainedConflictSeconds: round(sustainedConflictSeconds),
+    reasonCodes
+  };
+}
+
 export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZoneSummary {
   const duration = Math.max(0, input.durationSeconds);
   const timelineDuration = Math.max(duration, input.elapsedDurationSeconds ?? duration);
@@ -553,7 +745,7 @@ export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZon
   const paceCoverage = duration > 0 ? clamp(paceCovered / duration) : 0;
   const hrConfidence = Math.min(averageOnlyHeart ? 0.4 : 1, input.sourceConfidence * Math.min(1, heartCoverage / 0.7) * input.profile.heartRateConfidence);
   const paceConfidence = Math.min(averageOnlyPace ? 0.4 : 1, input.sourceConfidence * Math.min(1, paceCoverage / 0.7) * input.profile.paceConfidence);
-  const highHeart = exposureSeconds(normalizedHeart, "lactate_threshold", "anaerobic");
+  const highHeart = exposureSeconds(normalizedHeart, ...highIntensityHeartRateZones);
   const recoverySeconds = exposureSeconds(normalizedHeart, "recovery");
   const aerobicSeconds = Math.max(
     exposureSeconds(normalizedHeart, "aerobic_base"),
@@ -609,6 +801,25 @@ export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZon
   const conflictFraction = duration > 0 ? Math.min(dominantHeart.seconds, dominantPace.seconds) / duration : 0;
   const conflict = heartCoverage >= 0.5 && paceCoverage >= 0.5 && conflictFraction > 0.3 && Math.abs(dominantHeart.index - dominantPace.index) >= 2;
   if (conflict) explanationCodes.push("heart_rate_pace_conflict");
+  // §10.4：显式语义映射版本，与上面那条下标相减的 `conflict` **并存但尚未统一**。
+  // 切换 `conflict` 会改 `stimulusConfidence`（−0.2）与 `explanationCodes` ⇒ 属对外数值变更，
+  // 必须走"先迁移、再离线比较"。本字段让那次比较有据可依，也让消费方现在就能读语义版本。
+  const zoneCoherence = assessZoneCoherence({
+    durationSeconds: duration,
+    heartRateSegments: heartSamples.flatMap((sample) => {
+      const zone = heartRateZoneFor(sample.value, input.profile);
+      return zone === null
+        ? []
+        : [{ startOffsetSeconds: sample.startOffsetSeconds, durationSeconds: sample.durationSeconds, zone }];
+    }),
+    paceSegments: speedSamples.flatMap((sample) => {
+      if (sample.value <= 0) return [];
+      const zone = paceZoneFor(1000 / sample.value, input.profile);
+      return zone === null
+        ? []
+        : [{ startOffsetSeconds: sample.startOffsetSeconds, durationSeconds: sample.durationSeconds, zone }];
+    })
+  });
   if (usedFallback) explanationCodes.push("stimulus_low_confidence");
   if (!primary) explanationCodes.push("stimulus_unclassified");
   const stimulusConfidence = primary
@@ -625,7 +836,8 @@ export function analyzeWorkoutZones(input: AnalyzeWorkoutZonesInput): WorkoutZon
     heartRateExposure: normalizedHeart,
     paceExposure: normalizedPace,
     stimulusScores: scores,
-    explanationCodes
+    explanationCodes,
+    zoneCoherence
   };
 }
 

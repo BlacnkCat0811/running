@@ -70,7 +70,7 @@ export interface RecomputeOptions {
   modelConfig?: RaiModelConfig;
 }
 
-export const MODEL_CHECKPOINT_VERSION = "rai-model-checkpoint-v1";
+export const MODEL_CHECKPOINT_VERSION = "rai-model-checkpoint-v2";
 
 export interface ModelCheckpointState {
   baseline: PersonalBaseline;
@@ -78,6 +78,16 @@ export interface ModelCheckpointState {
   lastEligibleLocalDate: string | null;
   lastEligibleTrueAbility: number;
   eligibleWorkoutCount: number;
+  /**
+   * Stable ids of the consecutive qualified negative observations not yet strong
+   * enough to move true ability (§6.9). Persisted because the count has to survive
+   * a checkpoint resume — without it a replayed prefix could confirm a decline the
+   * live run had not, or vice versa.
+   *
+   * Bumping `MODEL_CHECKPOINT_VERSION` is what keeps v1 checkpoints, which have no
+   * such field, from being restored into this shape.
+   */
+  pendingNegativeIds: string[];
 }
 
 export interface ReplayResume {

@@ -14,10 +14,20 @@ import {
 } from "../src/index.js";
 import {
   hasCompletedCalibration,
-  scoreFeature,
+  scoreFeature as scoreFeatureWithHistory,
   sortWorkoutFeaturesChronologically,
   type PersonalBaseline
 } from "../src/model.js";
+
+// §6.2 stratum sufficiency has its own test file. These cases are about weights,
+// confidence and alpha, so they state a mature history up front.
+const SUFFICIENT_HISTORY: Parameters<typeof scoreFeatureWithHistory>[3] = { independentSessions: 24, spanDays: 90 };
+const scoreFeature = (
+  feature: WorkoutFeatureVector,
+  baseline: PersonalBaseline,
+  maturity: number,
+  config?: Parameters<typeof scoreFeatureWithHistory>[4]
+) => scoreFeatureWithHistory(feature, baseline, maturity, SUFFICIENT_HISTORY, config);
 
 const baseline: PersonalBaseline = {
   calibrationFeatureIds: ["calibration"],
@@ -50,12 +60,22 @@ const feature = (overrides: Partial<WorkoutFeatureVector> = {}): WorkoutFeatureV
   ...overrides
 });
 
-test("keeps the distance-like Cardio proxy out of V1 current ability weights", () => {
+test("keeps the distance-like Cardio proxy and recovery out of current ability weights", () => {
   assert.equal(defaultRaiModelConfig.dimensionWeights.cardio, 0);
-  assert.equal(
-    Object.values(defaultRaiModelConfig.dimensionWeights).reduce((total, weight) => total + weight, 0),
-    1
-  );
+  assert.equal(defaultRaiModelConfig.dimensionWeights.recovery, 0);
+
+  // The configured literals keep their V1 sizes and therefore no longer sum to 1.
+  // What current ability actually uses is renormalised over the dimensions that
+  // remain, and *that* set is the one that has to sum to 1. Asserting the used
+  // weights rather than the raw config is what makes this test describe the model.
+  const score = scoreFeature(feature(), baseline, 1);
+  assert.deepEqual(Object.keys(score.effectiveWeights).sort(), ["efficiency", "pace", "stability"]);
+  const total = Object.values(score.effectiveWeights).reduce((sum, weight) => sum + (weight ?? 0), 0);
+  assert.ok(Math.abs(total - 1) < 1e-12, `effective weights sum to ${total}`);
+  // V2-A control group: 3/7, 5/14, 3/14.
+  assert.ok(Math.abs((score.effectiveWeights.efficiency ?? 0) - 3 / 7) < 1e-12);
+  assert.ok(Math.abs((score.effectiveWeights.pace ?? 0) - 5 / 14) < 1e-12);
+  assert.ok(Math.abs((score.effectiveWeights.stability ?? 0) - 3 / 14) < 1e-12);
 });
 
 test("renormalizes available dimension weights", () => {
@@ -85,9 +105,8 @@ test("a single workout residual is capped", () => {
   const common = {
     trueAbility: 50,
     eligibleWorkoutCount: 1,
-    confidence: 1,
-    evidenceStrength: 1,
-    directionFactor: 1
+    evidenceReliability: 1,
+    evidenceStrength: 1
   };
   const capped = updateTrueAbility({ ...common, currentAbility: 100 });
   const exactlyTwelve = updateTrueAbility({ ...common, currentAbility: 62 });

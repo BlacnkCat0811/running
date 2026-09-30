@@ -76,7 +76,11 @@
     "ml:test": "node research/scripts/python-env.mjs --pytest",
     "ml:train": "node research/scripts/python-env.mjs --train",
     "predata:migrate": "npm run check:node",
-    "data:migrate": "tsx packages/storage-sqlite/src/migrate-cli.ts"
+    "data:migrate": "tsx packages/storage-sqlite/src/migrate-cli.ts",
+    "predata:model-v2": "npm run check:node",
+    "data:model-v2": "tsx packages/application/src/model-v2-cli.ts",
+    "data:model-replay": "tsx packages/application/src/model-replay-cli.ts",
+    "predata:model-replay": "npm run check:node"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

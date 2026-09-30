@@ -184,3 +184,21 @@ test("persists a failed model-version gate and rejects activation without replac
     database.close();
   }
 });
+
+test("engineVersion stays unknown when the column is absent, instead of falling back to the current engine", () => {
+  // 手工建的 `model_runs` 没有 v24 的 `engine_version` 列 —— 这正是"v24 之前写入的行"的形态。
+  const database = createDatabase();
+  try {
+    database.prepare(`INSERT INTO model_runs
+      (id, feature_run_id, dataset_version, model_version, model_config_hash, evaluated_at, status, summary_json)
+      VALUES ('pre-v24','feature','dataset','rai-model-config-v12','hash','2026-07-17T10:00:00.000Z','succeeded','{}')`).run();
+    const [summary] = new SqliteModelRunRepository(database).listSummaries();
+    assert.equal(summary?.id, "pre-v24");
+    // 期望值写死成 null，不引用任何版本常量：一旦有人加 `?? MODEL_CONFIG_VERSION` 兜底，
+    // 就会把"未知"伪装成"确定"，而这条断言必须立刻红。
+    assert.equal(summary?.engineVersion, null,
+      "缺列时必须映射为 null（未知）；用当前引擎版本兜底等于伪造事实");
+  } finally {
+    database.close();
+  }
+});

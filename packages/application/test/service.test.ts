@@ -861,3 +861,33 @@ test("cancelling snapshot refresh after writing snapshots keeps the job cancelle
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("V2 lineage uses a stable epoch and explicit rebase preserves the previous immutable release", async () => {
+  const root=mkdtempSync(join(tmpdir(),'rai-epoch-'));
+  const store=await seedDatabase(join(root,'db.sqlite'));
+  try {
+    const record=store.database.prepare(`INSERT INTO health_records
+      (id,type,source_name,source_category,unit,value_numeric,start_at,end_at,metadata_json,raw_attributes_json)
+      VALUES (?,'HKQuantityTypeIdentifierHeartRate','Fixture Apple Watch','apple_watch','count/min',150,?,?,'{}','{}')`);
+    for(let run=0;run<8;run++)for(let n=0;n<12;n++){
+      const start=Date.parse(dateForRun(run))+n*150000;
+      record.run(`r-${run}-${n}`,new Date(start).toISOString(),new Date(start+150000).toISOString());
+    }
+    const service=new RaiApplicationService(store),at=dateForRun(9);
+    const execute=(modelConfig?:import('@rai/scoring').RaiModelConfig)=>{
+      service.enqueueFullRecompute({evaluatedAt:at,timezoneIdentifier:'UTC',...(modelConfig?{modelConfig}:{})});
+      const job=service.runNextJob();assert.equal(job?.status,'succeeded',JSON.stringify(job));return job!.modelRunId!;
+    };
+    const first=execute();
+    const lineage=(id:string)=>JSON.parse(String(store.database.prepare('SELECT lineage_json AS json FROM model_v2_runs WHERE model_run_id=?').get(id)?.json));
+    const initial=lineage(first);assert.equal(typeof initial.baselineEpochId,'string');assert.equal(typeof initial.calibrationCohortHash,'string');
+    const firstSnapshot=store.database.prepare("SELECT payload_json AS json FROM model_domain_snapshots WHERE model_run_id=? AND domain='fitness'").get(first)?.json;
+    const second=execute();assert.equal(lineage(second).baselineEpochId,initial.baselineEpochId);
+    const {defaultRaiModelConfig}=await import('@rai/scoring');
+    const third=execute({...defaultRaiModelConfig,baselineReferenceStartAt:dateForRun(1)});
+    assert.notEqual(lineage(third).baselineEpochId,initial.baselineEpochId);
+    const release=store.database.prepare('SELECT evaluation_json AS json,status FROM model_release_bundles WHERE model_run_id=?').get(third)!;
+    assert.equal(release.status,'passed');assert.equal(JSON.parse(String(release.json)).rebase.referenceStartAt,dateForRun(1));
+    assert.equal(store.database.prepare("SELECT payload_json AS json FROM model_domain_snapshots WHERE model_run_id=? AND domain='fitness'").get(first)?.json,firstSnapshot);
+  } finally {store.close();rmSync(root,{recursive:true,force:true});}
+});

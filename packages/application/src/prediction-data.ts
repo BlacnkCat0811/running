@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { legacyRecoveryBackground } from "@rai/readiness";
 
 import { DATABASE_TIMEZONE, healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
 import {
@@ -12,6 +13,7 @@ import {
   historicalOverrideJoin,
   historicalQualitySql
 } from "./prediction-historical-features.js";
+import { assessPreparation } from "@rai/durability";
 import {
   performanceEvidence,
   performanceVdotEvidence,
@@ -41,6 +43,7 @@ interface PerformanceRow {
   rpe: number | null;
   conditionTagsJson: string;
   overrideCreatedAt: string;
+  eligibilityOverride?: string | null;
 }
 
 interface ThresholdSessionRow {
@@ -102,9 +105,10 @@ function median(values: number[]): number | null {
   return sorted.length % 2 === 0 && lower !== undefined ? (lower + upper) / 2 : upper;
 }
 
-function daysBetween(earlier: string, later: string): number {
-  return (Date.parse(later) - Date.parse(earlier)) / 86_400_000;
-}
+// 本文件原先的 `daysBetween` 已随 §8.1 迁移删除。它的语义是**未取整的毫秒差**
+// （`(Date.parse(later) - Date.parse(earlier)) / 86_400_000`），与 `@rai/contracts` 里那个
+// 按日实现**不同** —— 后者会把完整时间戳拼成 `...T00:00:00Z` 而解析成 NaN。
+// 等价实现现在只有一处：`@rai/durability` 的 `fractionalDaysBetween`。
 
 function conditionTags(json: string): string[] {
   try {
@@ -172,6 +176,7 @@ function performanceRows(database: DatabaseSync, asOf: string): PerformanceRow[]
         override.rpe,
         override.condition_tags_json AS conditionTagsJson
         , override.created_at AS overrideCreatedAt
+        , override.eligibility_override AS eligibilityOverride
       FROM training_sessions session
       ${historicalOverrideJoin("JOIN")}
       WHERE session.status = 'active'
@@ -415,47 +420,9 @@ export function loadPhysiologyProfile(
   };
 }
 
-interface ReadinessTarget {
-  weeklyDistanceKm: number;
-  longestRunKm: number;
-  runsPerWeek: number;
-  exposureDistanceKm: number;
-  exposureCount: number;
-  weights: {
-    volume: number;
-    longRun: number;
-    frequency: number;
-    exposure: number;
-    recency: number;
-  };
-}
+// §8.1：目标值只有一处定义（`@rai/durability` 的 `PREPARATION_TARGETS`）。
+// 原先这里的 `readinessTargets` 副本已删除 —— 保留两份会让"改了一边"变成静默分叉。
 
-const readinessTargets: Record<RaceDistance, ReadinessTarget> = {
-  five_k: {
-    weeklyDistanceKm: 15,
-    longestRunKm: 8,
-    runsPerWeek: 2.5,
-    exposureDistanceKm: 3,
-    exposureCount: 2,
-    weights: { volume: 0.25, longRun: 0.2, frequency: 0.25, exposure: 0.15, recency: 0.15 }
-  },
-  ten_k: {
-    weeklyDistanceKm: 25,
-    longestRunKm: 12,
-    runsPerWeek: 3,
-    exposureDistanceKm: 6,
-    exposureCount: 2,
-    weights: { volume: 0.3, longRun: 0.25, frequency: 0.2, exposure: 0.1, recency: 0.15 }
-  },
-  half_marathon: {
-    weeklyDistanceKm: 35,
-    longestRunKm: 18,
-    runsPerWeek: 3.5,
-    exposureDistanceKm: 12,
-    exposureCount: 2,
-    weights: { volume: 0.35, longRun: 0.35, frequency: 0.15, exposure: 0.05, recency: 0.1 }
-  }
-};
 
 export function loadRaceReadiness(
   database: DatabaseSync,
@@ -499,7 +466,18 @@ export function loadRaceReadinessEvidence(
     const pace = row.durationSeconds / 60 / row.distanceKm;
     return pace >= 2.5 && pace <= 15;
   });
-  if (usable.length === 0) {
+  // §8.1：算术收敛到 `@rai/durability` 一处（Preparation 语义），本函数只负责取数与映射。
+  // `usable` 保持 SQL 的 `ORDER BY anchor_start_at` 顺序 —— `assessPreparation` 的"最早/最近"
+  // 都依赖这个顺序，重新排序会改变 recency 与 historyCoverageDays。
+  const assessment = assessPreparation(
+    usable.map((row) => ({
+      observedAt: row.observedAt,
+      distanceKm: row.distanceKm,
+      durationSeconds: row.durationSeconds
+    })),
+    asOf
+  );
+  if (assessment.status === "insufficient_data") {
     return {
       values: {},
       status: "insufficient_data",
@@ -507,36 +485,11 @@ export function loadRaceReadinessEvidence(
       dataThroughAt: null
     };
   }
-  const weeklyDistanceKm = usable.reduce((sum, row) => sum + row.distanceKm, 0) / 8;
-  const runsPerWeek = usable.length / 8;
-  const longestRunKm = Math.max(...usable.map((row) => row.distanceKm));
-  const latestAt = usable.at(-1)?.observedAt ?? cutoff;
-  const daysSinceRun = Math.max(0, daysBetween(latestAt, asOf));
-  const recencyScore = Math.exp(-Math.max(0, daysSinceRun - 3) / 14);
-  const values = Object.fromEntries(
-    (Object.keys(readinessTargets) as RaceDistance[]).map((distance) => {
-      const target = readinessTargets[distance];
-      const volume = clamp(weeklyDistanceKm / target.weeklyDistanceKm, 0, 1);
-      const longRun = clamp(longestRunKm / target.longestRunKm, 0, 1);
-      const frequency = clamp(runsPerWeek / target.runsPerWeek, 0, 1);
-      const exposures = usable.filter(
-        (row) => row.distanceKm >= target.exposureDistanceKm
-      ).length;
-      const exposure = clamp(exposures / target.exposureCount, 0, 1);
-      const score =
-        target.weights.volume * volume +
-        target.weights.longRun * longRun +
-        target.weights.frequency * frequency +
-        target.weights.exposure * exposure +
-        target.weights.recency * recencyScore;
-      return [distance, clamp(score, 0, 1)];
-    })
-  ) as PredictionReadiness;
   return {
-    values,
+    values: assessment.values as PredictionReadiness,
     status: "available",
-    evidenceCount: usable.length,
-    dataThroughAt: latestAt
+    evidenceCount: assessment.evidenceCount,
+    dataThroughAt: assessment.latestTrainingAt
   };
 }
 
@@ -555,18 +508,12 @@ export function loadRecoveryReadinessEvidence(
 ): RecoveryReadinessEvidence {
   const readings = new SqlitePredictionRecoveryReadRepository(database)
     .load(asOf, timezoneIdentifier);
-  const scores: number[] = [];
-  if (readings.latestSleepMinutes !== null && readings.baselineSleepMinutes !== null && readings.baselineSleepMinutes > 0) {
-    scores.push(clamp(readings.latestSleepMinutes / readings.baselineSleepMinutes, 0, 1));
-  }
-  if (readings.recentRestingHeartRate !== null && readings.baselineRestingHeartRate !== null) {
-    scores.push(clamp(1 - Math.max(0, readings.recentRestingHeartRate - readings.baselineRestingHeartRate) / 12, 0, 1));
-  }
-  if (readings.recentHrv !== null && readings.baselineHrv !== null && readings.baselineHrv > 0) {
-    scores.push(clamp(readings.recentHrv / readings.baselineHrv, 0, 1));
-  }
   return {
-    value: scores.length === 0 ? null : clamp(average(scores) ?? 0, 0, 1),
+    value: legacyRecoveryBackground({
+      sleepMinutes: readings.latestSleepMinutes, sleepBaselineMinutes: readings.baselineSleepMinutes,
+      rhrBpm: readings.recentRestingHeartRate, rhrBaselineBpm: readings.baselineRestingHeartRate,
+      hrvMs: readings.recentHrv, hrvBaselineMs: readings.baselineHrv
+    }),
     provenance: readings.provenance
   };
 }
@@ -817,11 +764,14 @@ export function loadLabeledRaceOutcomes(
   asOf: string
 ): LabeledRaceOutcome[] {
   return performanceRows(database, asOf).flatMap((row) => {
+    if (row.eligibilityOverride === "exclude") return [];
     if (row.performanceProtocol === "thirty_min_threshold") return [];
     const label = evidenceLabel(row);
     if (label === null || label.source === "hard_workout") return [];
     const distance = targetDistance(row.distanceKm * 1_000);
     if (distance === null) return [];
+    const protocolDistance = protocolTargetDistance(row.performanceProtocol);
+    if (protocolDistance !== null && distance !== protocolDistance) return [];
     const paceMinutesPerKm = row.durationSeconds / 60 / row.distanceKm;
     if (
       row.durationSeconds < 12 * 60 ||
@@ -843,4 +793,109 @@ export function loadLabeledRaceOutcomes(
       labelSource: label.source
     }];
   });
+}
+
+function protocolTargetDistance(protocol: string | null): RaceDistance | null {
+  if (protocol === "five_k_time_trial") return "five_k";
+  if (protocol === "ten_k_time_trial") return "ten_k";
+  if (protocol === "half_marathon_race") return "half_marathon";
+  return null;
+}
+
+export interface LabelFunnelReport {
+  version: "race-label-funnel-v1";
+  asOf: string;
+  sessionCount: number;
+  confirmedCount: number;
+  usableOutcomeCount: number;
+  evaluatedOutcomeCount: number;
+  rejectedCount: number;
+  /** Mutually exclusive: all sessions = usable + rejected. */
+  primaryRejections: Record<string, number>;
+  byDistance: Record<RaceDistance, { usable: number; evaluated: number }>;
+  decisions: Array<{ trainingSessionId: string; revision: number | null; reason: string }>;
+  accuracyStatus: "not_evaluable" | "requires_release_evaluation";
+}
+
+/**
+ * Uses the exact outcome loader used for training and evaluation. This diagnostic
+ * does not create labels, count superseded revisions, or reinterpret old labels
+ * as if they were available before the user confirmed them.
+ */
+export function buildLabelFunnel(
+  database: DatabaseSync,
+  asOf: string,
+  evaluatedByDistance: Partial<Record<RaceDistance, number>> = {}
+): LabelFunnelReport {
+  if (!Number.isFinite(Date.parse(asOf))) throw new Error("asOf must be a valid instant");
+  const instant = new Date(asOf).toISOString();
+  const outcomes = loadLabeledRaceOutcomes(database, instant);
+  const accepted = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
+  const rows = database.prepare(`
+    SELECT session.id, session.status, session.anchor_start_at AS observedAt,
+      session.anchor_end_at AS completedAt, session.anchor_distance_km AS distanceKm,
+      ${activeDurationSecondsSql("session")} AS durationSeconds,
+      override.session_type AS sessionType,
+      ${performanceProtocolExpression(database)} AS performanceProtocol,
+      override.rpe, override.condition_tags_json AS conditionTagsJson,
+      override.created_at AS overrideCreatedAt, override.revision,
+      override.eligibility_override AS eligibilityOverride
+    FROM training_sessions session
+    ${historicalOverrideJoin("LEFT JOIN")}
+    WHERE julianday(session.anchor_start_at) <= julianday(?)
+    ORDER BY session.anchor_start_at, session.id
+  `).all(instant, instant) as unknown as Array<PerformanceRow & {
+    status: string; revision: number | null;
+  }>;
+  const primaryRejections: Record<string, number> = {};
+  const byDistance: LabelFunnelReport["byDistance"] = {
+    five_k: { usable: 0, evaluated: evaluatedByDistance.five_k ?? 0 },
+    ten_k: { usable: 0, evaluated: evaluatedByDistance.ten_k ?? 0 },
+    half_marathon: { usable: 0, evaluated: evaluatedByDistance.half_marathon ?? 0 }
+  };
+  let confirmedCount = 0;
+  const decisions = rows.map((row) => {
+    const label = evidenceLabel(row);
+    const confirmed = row.performanceProtocol !== null ||
+      (label !== null && label.source !== "hard_workout");
+    if (confirmed) confirmedCount++;
+    const outcome = accepted.get(row.id);
+    let reason: string;
+    if (outcome) {
+      reason = "usable";
+      byDistance[outcome.distance].usable++;
+    } else if (row.status !== "active") reason = "inactive_session";
+    else if (Date.parse(row.completedAt) > Date.parse(instant)) reason = "not_completed";
+    else if (!confirmed) reason = "not_confirmed";
+    else if (row.eligibilityOverride === "exclude") reason = "user_excluded";
+    else if (row.performanceProtocol === "thirty_min_threshold") reason = "threshold_only_protocol";
+    else if (!Number.isFinite(row.distanceKm) || row.distanceKm <= 0) reason = "distance_missing";
+    else {
+      const distance = targetDistance(row.distanceKm * 1_000);
+      const protocolDistance = protocolTargetDistance(row.performanceProtocol);
+      if (distance === null) reason = "unsupported_distance";
+      else if (protocolDistance !== null && protocolDistance !== distance) reason = "protocol_distance_mismatch";
+      else reason = "duration_or_pace_out_of_range";
+    }
+    if (reason !== "usable") primaryRejections[reason] = (primaryRejections[reason] ?? 0) + 1;
+    return { trainingSessionId: row.id, revision: row.revision, reason };
+  });
+  for (const value of Object.values(byDistance)) {
+    if (!Number.isInteger(value.evaluated) || value.evaluated < 0 || value.evaluated > value.usable) {
+      throw new Error("Evaluated label counts must be non-negative integers no greater than usable labels");
+    }
+  }
+  return {
+    version: "race-label-funnel-v1",
+    asOf: instant,
+    sessionCount: rows.length,
+    confirmedCount,
+    usableOutcomeCount: outcomes.length,
+    evaluatedOutcomeCount: Object.values(byDistance).reduce((n, item) => n + item.evaluated, 0),
+    rejectedCount: decisions.filter((item) => item.reason !== "usable").length,
+    primaryRejections,
+    byDistance,
+    decisions,
+    accuracyStatus: outcomes.length === 0 ? "not_evaluable" : "requires_release_evaluation"
+  };
 }

@@ -1,3 +1,7 @@
+import { currentAbilityBaselineHash } from "../src/prediction-ability-baseline.js";
+import { fitEmpiricalIntervals, INTERVAL_RELEASE_POLICY, type EvaluationCase } from "@rai/model-eval";
+import { SqliteCalibrationRepository } from "@rai/storage-sqlite";
+import { catBoostCalibrationKey } from "../src/prediction-policy.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -185,8 +189,24 @@ function successfulResult(root: string, label = "test-run"): PredictionModelTrai
     artifactPath: artifact.artifactPath,
     artifactSha256: artifact.artifactSha256,
     evaluationStatus: "accepted",
+    ridgeComparison:{status:"passed",walkForwardImprovement:0.1,releaseImprovement:0.1,bootstrapLower:0.02},
     rejectionReasons: []
   };
+}
+
+const activationClock=()=>"2026-09-29T00:00:00.000Z";
+function approveIntervals(store:RaiDatabase,result:PredictionModelTrainingResult):void {
+  const baseline=currentAbilityBaselineHash(store.database)!;
+  for(const distance of ["five_k","ten_k","half_marathon"] as const){
+    const rows=(prefix:string,month:string):EvaluationCase[]=>Array.from({length:24},(_,i)=>({
+      eventId:`${prefix}-${distance}-${i}`,distance,predictedAt:`2026-${month}-${String(i+1).padStart(2,"0")}T00:00:00Z`,
+      outcomeAt:`2026-${month}-${String(i+1).padStart(2,"0")}T01:00:00Z`,availableAt:`2026-${month}-${String(i+1).padStart(2,"0")}T02:00:00Z`,
+      actualSeconds:prefix==="cal"?1000*Math.exp(-0.1+i*0.2/23):1000,predictedSeconds:1000
+    }));
+    const artifact=fitEmpiricalIntervals({predictorVersion:catBoostCalibrationKey(result.artifactSha256),distance,
+      calibration:rows("cal","08"),asOf:"2026-09-25T00:00:00Z",policy:INTERVAL_RELEASE_POLICY})!;
+    new SqliteCalibrationRepository(store.database).save(artifact,baseline,rows("test","09"),"2026-09-25T00:00:00Z");
+  }
 }
 
 test("rejects CatBoost training before enough real labeled outcomes exist", async () => {
@@ -317,17 +337,23 @@ test("does not serve an active residual model for a different formula baseline",
   }
 });
 
-test("passes offline gates and atomically activates a completed CatBoost run", async () => {
+test("point validation waits for independent intervals before atomic CatBoost activation", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
   try {
-    const service = new PredictionModelService(store);
+    const service = new PredictionModelService(store,undefined,"owned",activationClock);
     const runId = service.enqueue({ asOf });
     assert.equal(service.get(runId)?.status, "queued");
     assert.equal(service.claimNext()?.id, runId);
     assert.equal(service.get(runId)?.status, "running");
 
-    const completed = service.completeAndActivate(runId, successfulResult(root));
+    const result=successfulResult(root);
+    const staged=service.completeAndActivate(runId,result);
+    assert.equal(staged.status,"succeeded");assert.equal(staged.active,false);
+    assert.equal(service.events(runId).at(-1)?.phase,"awaiting_calibration");
+    assert.throws(()=>service.activate(runId),/independent_interval_not_validated/);
+    approveIntervals(store,result);
+    const completed=service.activate(runId);
     assert.equal(completed.status, "succeeded");
     assert.equal(completed.active, true);
     assert.equal(completed.metrics?.maeImprovement, 0.1);
@@ -367,10 +393,11 @@ test("preserves a runner-rejected result without loading ONNX or replacing the a
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
   try {
-    const service = new PredictionModelService(store);
+    const service = new PredictionModelService(store,undefined,"owned",activationClock);
     const acceptedId = service.enqueue({ asOf });
     service.claimNext();
-    service.completeAndActivate(acceptedId, successfulResult(root, "accepted"));
+    const acceptedResult=successfulResult(root,"accepted");
+    service.completeAndActivate(acceptedId,acceptedResult);approveIntervals(store,acceptedResult);service.activate(acceptedId);
 
     const rejectedId = service.enqueue({ asOf });
     service.claimNext();
@@ -568,7 +595,7 @@ test("preserves stored model versions and refuses to activate incompatible histo
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-activation-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
   try {
-    const service = new PredictionModelService(store);
+    const service = new PredictionModelService(store,undefined,"owned",activationClock);
     const historicalId = service.enqueue({ asOf });
     service.claimNext();
     service.completeAndActivate(historicalId, successfulResult(root, "historical"));
@@ -576,7 +603,8 @@ test("preserves stored model versions and refuses to activate incompatible histo
 
     const currentId = service.enqueue({ asOf });
     service.claimNext();
-    service.completeAndActivate(currentId, successfulResult(root, "current"));
+    const currentResult=successfulResult(root,"current");
+    service.completeAndActivate(currentId,currentResult);approveIntervals(store,currentResult);service.activate(currentId);
 
     const assertActivationRejected = (
       column: "model_version" | "feature_schema_version" | "feature_schema_hash",

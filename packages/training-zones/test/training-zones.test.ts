@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ZONE_COHERENCE_POLICY_VERSION,
   analyzeWorkoutZones,
+  assessZoneCoherence,
   buildDailyZoneProfile,
   calculateCompositeTrainingLoad,
   heartRateZoneFor,
@@ -646,4 +648,205 @@ test("RPE and session fallbacks use Banister intensity and target confidences", 
     heartRateSamples: [], speedSamples: [], rpe: 7, sourceConfidence: 0.5
   });
   assert.equal(lowSource.heartRateConfidence, 0.325);
+});
+
+// -----------------------------------------------------------------------------
+// §10.5 防止分区反馈闭环
+// -----------------------------------------------------------------------------
+
+test("threshold evidence from the profile's own moment or later is refused", () => {
+  // §10.5: "新阈值证据只影响之后的 profile". Feeding this workout's own result into the profile
+  // that judged it would lower the load, and the load would then shape the next prediction.
+  // The pipeline already filters by `observedAt < effectiveAt`; this asserts the builder can
+  // prove it rather than trusting the caller.
+  const effectiveAt = baseInput.effectiveAt as string;
+  assert.throws(
+    () =>
+      buildDailyZoneProfile({
+        ...baseInput,
+        thresholdPace: { paceSecondsPerKm: 300, confidence: 0.8, evidenceCount: 3, dataThroughAt: effectiveAt }
+      } as never),
+    /not before the profile effective moment/
+  );
+  assert.throws(
+    () =>
+      buildDailyZoneProfile({
+        ...baseInput,
+        thresholdPace: {
+          paceSecondsPerKm: 300,
+          confidence: 0.8,
+          evidenceCount: 3,
+          dataThroughAt: new Date(Date.parse(effectiveAt) + 3_600_000).toISOString()
+        }
+      } as never),
+    /not before the profile effective moment/
+  );
+
+  // One second before is fine, and is what the pipeline actually produces.
+  const accepted = buildDailyZoneProfile({
+    ...baseInput,
+    thresholdPace: {
+      paceSecondsPerKm: 300,
+      confidence: 0.8,
+      evidenceCount: 3,
+      dataThroughAt: new Date(Date.parse(effectiveAt) - 1000).toISOString()
+    }
+  } as never);
+  assert.equal(accepted.lactateThresholdPaceSecondsPerKm, 300);
+});
+
+test("resting and maximum heart-rate evidence at or after the effective moment is excluded", () => {
+  // The same §10.5 window, for the other two inputs. `buildDailyZoneProfile` filters both by
+  // `effectiveAt` itself, so this pin does not depend on the caller.
+  const effectiveAt = baseInput.effectiveAt as string;
+  const before = new Date(Date.parse(effectiveAt) - 86_400_000).toISOString();
+  const at = effectiveAt;
+  const after = new Date(Date.parse(effectiveAt) + 86_400_000).toISOString();
+
+  const build = (outlierAt: string) => {
+    const days = Array.from({ length: 8 }, (_unused, index) => ({
+      valueBpm: 50,
+      observedAt: new Date(Date.parse(effectiveAt) - (index + 1) * 86_400_000).toISOString()
+    }));
+    return buildDailyZoneProfile({
+      ...baseInput,
+      previousProfile: null,
+      // A later, very different reading must not be able to join the window…
+      restingHeartRates: [...days, { valueBpm: 70, observedAt: outlierAt }],
+      // …and the peak dated at/after the effective moment must not either.
+      maximumHeartRates: [{ peakBpm: 200, observedAt: before, coverage: 1, sourceConfidence: 1 }]
+    } as never);
+  };
+
+  const baseline = build(at);
+  // 8 pre-window days at 50 bpm are what the profile is built from.
+  assert.equal(baseline.restingHeartRateBpm, 50);
+  assert.equal(baseline.maximumHeartRateBpm, 200);
+  // A 70 bpm reading dated exactly at, or after, the effective moment changes nothing.
+  assert.deepEqual(build(after), baseline);
+
+  // A peak dated at the effective moment is excluded by the window, so it cannot raise the max.
+  const withLatePeak = buildDailyZoneProfile({
+    ...baseInput,
+    previousProfile: null,
+    restingHeartRates: Array.from({ length: 8 }, (_unused, index) => ({
+      valueBpm: 50,
+      observedAt: new Date(Date.parse(effectiveAt) - (index + 1) * 86_400_000).toISOString()
+    })),
+    maximumHeartRates: [
+      { peakBpm: 180, observedAt: before, coverage: 1, sourceConfidence: 1 },
+      { peakBpm: 220, observedAt: at, coverage: 1, sourceConfidence: 1 }
+    ]
+  } as never);
+  assert.equal(withLatePeak.maximumHeartRateBpm, 180);
+});
+
+// -----------------------------------------------------------------------------
+// §10.4 HR / Pace coherence：显式语义映射，不是下标相减
+// -----------------------------------------------------------------------------
+
+const heartSegments = (zone: string, seconds: number) => [{ startOffsetSeconds: 0, durationSeconds: seconds, zone }];
+const paceSegments = (zone: string, seconds: number) => [{ startOffsetSeconds: 0, durationSeconds: seconds, zone }];
+
+/** The legacy rule from `analyzeWorkoutZones`, reproduced here as the thing to beat. */
+const legacyConflict = (heartIndex: number, paceIndex: number): boolean => Math.abs(heartIndex - paceIndex) >= 2;
+
+test("coherence compares semantics, and the legacy index rule gets this case wrong", () => {
+  // `aerobic_base` (heart index 1) with `lactate_threshold` pace (pace index 2).
+  // The legacy rule subtracts indices: |1 - 2| = 1 < 2 ⇒ "no conflict".
+  // Semantically it is an easy heart rate at threshold pace — the classic cardiac-drift or
+  // sensor signal, and exactly what §10.4 says index subtraction cannot express.
+  assert.equal(legacyConflict(1, 2), false, "the legacy rule claims these agree");
+
+  const coherence = assessZoneCoherence({
+    durationSeconds: 1200,
+    heartRateSegments: heartSegments("aerobic_base", 1200) as never,
+    paceSegments: paceSegments("lactate_threshold", 1200) as never
+  });
+  assert.equal(coherence.agreement, "pace_high");
+  assert.equal(coherence.sustainedConflictSeconds, 1200);
+  assert.ok(coherence.reasonCodes.includes("pace_leads_hr"));
+  assert.equal(coherence.comparisonPolicyVersion, ZONE_COHERENCE_POLICY_VERSION);
+});
+
+test("the two ladders are not isomorphic, so same-named zones must still align", () => {
+  // HR `lactate_threshold` is index 3, pace `lactate_threshold` is index 2 — the same meaning,
+  // a different index. A rule keyed on indices would call this a near-miss; the mapping does not.
+  assert.equal(legacyConflict(3, 2), false);
+  const coherence = assessZoneCoherence({
+    durationSeconds: 900,
+    heartRateSegments: heartSegments("lactate_threshold", 900) as never,
+    paceSegments: paceSegments("lactate_threshold", 900) as never
+  });
+  assert.equal(coherence.agreement, "aligned");
+  assert.equal(coherence.sustainedConflictSeconds, 0);
+  assert.deepEqual(coherence.reasonCodes, ["no_sustained_conflict"]);
+});
+
+test("paired coverage is real pairing, not the smaller of the two coverages", () => {
+  // Heart covers the first half, pace the second half. Both ratios are 0.5, so taking
+  // `min(heart, pace)` would clear a 0.5 threshold and report a confident answer from two
+  // sources that never overlap.
+  const duration = 1800;
+  const paired = assessZoneCoherence({
+    durationSeconds: duration,
+    heartRateSegments: [
+      { startOffsetSeconds: 0, durationSeconds: 900, zone: "aerobic_base" }
+    ] as never,
+    paceSegments: [
+      { startOffsetSeconds: 900, durationSeconds: 900, zone: "marathon" }
+    ] as never
+  });
+  assert.equal(paired.pairedCoverage, 0);
+  assert.equal(paired.agreement, "insufficient");
+  assert.ok(paired.reasonCodes.includes("paired_coverage_below_threshold"));
+
+  // A real overlap is measured as an overlap.
+  const overlapping = assessZoneCoherence({
+    durationSeconds: duration,
+    heartRateSegments: [
+      { startOffsetSeconds: 0, durationSeconds: 1800, zone: "aerobic_base" }
+    ] as never,
+    paceSegments: [
+      { startOffsetSeconds: 900, durationSeconds: 900, zone: "marathon" }
+    ] as never
+  });
+  assert.equal(overlapping.pairedCoverage, 0.5);
+  assert.equal(overlapping.agreement, "aligned");
+});
+
+test("a brief divergence is not a standing conflict", () => {
+  // §10.4: heart rate lags during intervals and must not be read as a permanent conflict.
+  const brief = assessZoneCoherence({
+    durationSeconds: 600,
+    heartRateSegments: [
+      { startOffsetSeconds: 0, durationSeconds: 300, zone: "aerobic_base" },
+      { startOffsetSeconds: 300, durationSeconds: 30, zone: "recovery" },
+      { startOffsetSeconds: 330, durationSeconds: 270, zone: "aerobic_base" }
+    ] as never,
+    paceSegments: paceSegments("marathon", 600) as never
+  });
+  assert.equal(brief.sustainedConflictSeconds, 0, "a 30s lag must not become a conflict");
+  assert.equal(brief.agreement, "aligned");
+
+  // The same divergence held long enough does count.
+  const sustained = assessZoneCoherence({
+    durationSeconds: 600,
+    heartRateSegments: [
+      { startOffsetSeconds: 0, durationSeconds: 300, zone: "aerobic_base" },
+      { startOffsetSeconds: 300, durationSeconds: 180, zone: "recovery" },
+      { startOffsetSeconds: 480, durationSeconds: 120, zone: "aerobic_base" }
+    ] as never,
+    paceSegments: paceSegments("marathon", 600) as never
+  });
+  assert.equal(sustained.sustainedConflictSeconds, 180);
+  // Heart says `recovery`, pace says `marathon`: the pace side reads harder, so `pace_high`.
+  assert.equal(sustained.agreement, "pace_high");
+});
+
+test("coherence rejects a config it cannot use", () => {
+  const segments = { heartRateSegments: heartSegments("recovery", 600) as never, paceSegments: paceSegments("easy", 600) as never };
+  assert.throws(() => assessZoneCoherence({ durationSeconds: 600, ...segments, config: { minimumPairedCoverage: 1.5, minimumSustainedSeconds: 90, effortTolerance: 1 } }));
+  assert.throws(() => assessZoneCoherence({ durationSeconds: 600, ...segments, config: { minimumPairedCoverage: 0.5, minimumSustainedSeconds: -1, effortTolerance: 1 } }));
+  assert.throws(() => assessZoneCoherence({ durationSeconds: 600, ...segments, config: { minimumPairedCoverage: 0.5, minimumSustainedSeconds: 90, effortTolerance: -1 } }));
 });

@@ -9,7 +9,7 @@ import {
   type WorkoutOverride
 } from "@rai/contracts";
 
-export const FEATURE_CONFIG_VERSION = "feature-config-v8" as const;
+export const FEATURE_CONFIG_VERSION = "feature-config-v11" as const;
 
 const SPEED_STABILITY_WINDOW_SECONDS = 60;
 
@@ -102,7 +102,22 @@ export interface WorkoutFeatureSource {
   speed: NumericSeriesSummary;
   speedSamples?: TimedSeriesSample[];
   heartRate: NumericSeriesSummary;
+  heartRateSamples?: TimedSeriesSample[];
+  environment?: { temperatureC: number | null; humidityPercent: number | null; elevationGainMeters: number | null };
   restingHeartRate: number | null;
+  /**
+   * Long-term resting-heart-rate reference used for intensity inference.
+   *
+   * Deliberately separate from `restingHeartRate`, which is today's as-of
+   * recovery observation: letting that one drive heart-rate reserve would let a
+   * single poor night change the workout's session type, and through the session
+   * type the evidence strength that Fitness learning is scaled by. This field is
+   * the 28/60-day personal median instead.
+   *
+   * Required rather than optional so a caller cannot silently fall back to
+   * today's value and reopen the channel.
+   */
+  restingHeartRateReference: number | null;
   hrvSdnn: number | null;
   sleepDurationMinutes: number | null;
   recentLoadMinutes: number | null;
@@ -111,6 +126,8 @@ export interface WorkoutFeatureSource {
   observedMaximumHeartRate: number | null;
   override: WorkoutOverride | null;
 }
+
+export * from "./v4.js";
 
 const RECOVERY_WEIGHTS = {
   sleep: 0.35,
@@ -490,12 +507,12 @@ export function extractWorkoutFeatureVector(
   const averageHeartRate = source.heartRate.average;
   const hrr =
     averageHeartRate !== null &&
-    source.restingHeartRate !== null &&
+    source.restingHeartRateReference !== null &&
     source.observedMaximumHeartRate !== null &&
-    source.observedMaximumHeartRate > source.restingHeartRate
+    source.observedMaximumHeartRate > source.restingHeartRateReference
       ? clamp(
-          (averageHeartRate - source.restingHeartRate) /
-            (source.observedMaximumHeartRate - source.restingHeartRate),
+          (averageHeartRate - source.restingHeartRateReference) /
+            (source.observedMaximumHeartRate - source.restingHeartRateReference),
           0,
           1.1
         )
@@ -582,3 +599,5 @@ export function extractWorkoutFeatureVector(
   assertWorkoutFeatureVector(feature);
   return feature;
 }
+
+export { extractWorkoutFeatureVector as extractLegacyWorkoutFeatureVectorV3, defaultFeatureConfig as legacyFeatureConfigV3 } from "./legacy-v3/index.js";

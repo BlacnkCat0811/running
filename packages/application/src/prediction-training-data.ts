@@ -334,7 +334,7 @@ export function buildRaceResidualTrainingDataset(
   for (const outcome of outcomes) {
     // Apple workout weather and accumulated elevation are result metadata. Without
     // an independently timestamped pre-race scenario they are unavailable here.
-    const base = buildFormulaPredictionBase(database, outcome.observedAt, {});
+    const base = buildFormulaPredictionBase(database, outcome.observedAt, { mode: "current_prepared" });
     const prediction = base.snapshot.races.find((race) => race.distance === outcome.distance);
     if (!prediction || prediction.status !== "available" || prediction.predictedSeconds === null) {
       continue;

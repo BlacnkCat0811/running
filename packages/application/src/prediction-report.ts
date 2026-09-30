@@ -1,4 +1,11 @@
+import { predictionPolicyKey, catBoostCalibrationKey } from "./prediction-policy.js";
+import { SqliteCalibrationRepository } from "@rai/storage-sqlite";
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
+import {
+  MODEL_EVAL_VERSION, fitEmpiricalIntervals, evaluateIntervalArtifact,
+  compareResidualChallengers, predictionMetrics, type EvaluationCase
+} from "@rai/model-eval";
 
 import { DATABASE_TIMEZONE,
   CATBOOST_PREDICTION_MODEL_VERSION,
@@ -29,7 +36,8 @@ import {
   fitRaceResidualRidge,
   type PredictionReadiness,
   type RaceMlTrainingExample,
-  type RacePredictionConditions
+  type RacePredictionConditions,
+  PHYSIOLOGY_MODEL_VERSION
 } from "@rai/physiology";
 
 import {
@@ -40,13 +48,17 @@ import {
   loadPerformanceVdotEvidence,
   loadPhysiologyProfile,
   loadRaceReadinessEvidence,
-  loadRecoveryReadinessEvidence
+  loadRecoveryReadinessEvidence,
+  buildLabelFunnel,
+  type LabelFunnelReport
 } from "./prediction-data.js";
 import { currentAbilityBaselineHash } from "./prediction-ability-baseline.js";
 
 const distances: RaceDistance[] = ["five_k", "ten_k", "half_marathon"];
 
 export interface PredictionReportOptions {
+  mode?: "neutral_potential" | "current_prepared" | "race_day_scenario";
+  targetDate?: string;
   asOf?: string;
   timezoneIdentifier?: string;
   temperatureC?: number;
@@ -79,6 +91,8 @@ export interface PredictionEvaluationReport {
   }>;
   rawErrors: RacePredictionError[];
   calibratedErrors: RacePredictionError[];
+  labelFunnel: LabelFunnelReport;
+  modelEvaluation: ReturnType<typeof buildModelEvaluation>;
 }
 
 export interface FormulaPredictionBase {
@@ -106,6 +120,8 @@ export interface FormulaPredictionBase {
 }
 
 interface HistoricalEvaluation {
+  baselineCases: EvaluationCase[];
+  ridgeCases: EvaluationCase[];
   labeledOutcomeCount: number;
   rawErrors: RacePredictionError[];
   calibratedErrors: RacePredictionError[];
@@ -193,6 +209,19 @@ function predictionConditions(
 }
 
 function validateOptions(options: PredictionReportOptions): void {
+  if (options.mode !== undefined &&
+      !["neutral_potential", "current_prepared", "race_day_scenario"].includes(options.mode)) {
+    throw new Error("Unsupported prediction mode");
+  }
+  if (options.mode === "race_day_scenario") {
+    if (!options.targetDate || !/^\d{4}-\d{2}-\d{2}$/.test(options.targetDate) ||
+        !Number.isFinite(Date.parse(`${options.targetDate}T00:00:00Z`)) ||
+        new Date(`${options.targetDate}T00:00:00Z`).toISOString().slice(0, 10) !== options.targetDate) {
+      throw new Error("race_day_scenario requires a valid targetDate");
+    }
+  } else if (options.targetDate !== undefined) {
+    throw new Error("targetDate is only valid for race_day_scenario");
+  }
   assertRange("temperatureC", options.temperatureC, -40, 60);
   assertRange("humidityPercent", options.humidityPercent, 0, 100);
   assertRange("recoveryReadiness", options.recoveryReadiness, 0, 1);
@@ -222,7 +251,9 @@ export function buildFormulaPredictionBase(
   const performanceVdotEvidence = loadPerformanceVdotEvidence(database, asOf);
   const thresholdEvidence = loadLactateThresholdEvidence(database, asOf);
   const readinessEvidence = loadRaceReadinessEvidence(database, asOf);
-  const modelReadiness = readinessEvidence.values;
+  const modelReadiness: PredictionReadiness = options.mode === "neutral_potential"
+    ? { five_k: 1, ten_k: 1, half_marathon: 1 }
+    : readinessEvidence.values;
   const readiness = resolvedReadiness(modelReadiness);
   const recoveryEvidence = options.recoveryReadiness === undefined
     ? loadRecoveryReadinessEvidence(database, asOf, options.timezoneIdentifier ?? DATABASE_TIMEZONE)
@@ -236,8 +267,11 @@ export function buildFormulaPredictionBase(
           latestObservedAt: null
         }
       };
-  const recoveryReadiness = recoveryEvidence.value;
-  const scenario = resolvedScenario(options);
+  // V2 never silently applies today's recent background to a future race.
+  // Only an explicit race-day scenario may provide a recovery assumption.
+  const recoveryReadiness = options.mode === undefined ? recoveryEvidence.value
+    : options.mode === "race_day_scenario" ? options.recoveryReadiness ?? null : null;
+  const scenario = resolvedScenario(options.mode !== undefined && options.mode !== "race_day_scenario" ? {} : options);
   const profile = loadPhysiologyProfile(database, asOf);
   const snapshot = buildPhysiologyPredictionSnapshot({
     // Race/test performance is VDOT evidence, not a physiological VO2max
@@ -281,6 +315,8 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
   const mlExamples: RaceMlTrainingExample[] = [];
   const historicalRawErrors: Array<AvailableHistoricalValue<RacePredictionError>> = [];
   const historicalMlExamples: Array<AvailableHistoricalValue<RaceMlTrainingExample>> = [];
+  const baselineCases: EvaluationCase[] = [];
+  const ridgeCases: EvaluationCase[] = [];
 
   for (const outcome of outcomes) {
     const base = buildFormulaPredictionBase(database, outcome.observedAt, {});
@@ -302,8 +338,16 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
       outcome.observedAt
     );
     const priorMlModel = fitRaceResidualRidge(availableMlExamples);
+    const observedCase: EvaluationCase = {
+      eventId: outcome.id, distance: outcome.distance,
+      predictedAt: outcome.observedAt, outcomeAt: outcome.completedAt,
+      availableAt: outcome.labelAvailableAt, actualSeconds: outcome.actualSeconds,
+      predictedSeconds: prediction.predictedSeconds
+    };
+    baselineCases.push(observedCase);
     if (priorMlModel !== null) {
       const mlPrediction = applyRaceResidualRidge(prediction, priorMlModel, mlFeatures);
+      ridgeCases.push({ ...observedCase, predictedSeconds: mlPrediction.predictedSeconds! });
       mlBaselineErrors.push(evaluateRacePrediction(
         prediction,
         outcome.actualSeconds,
@@ -371,6 +415,8 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
     mlImprovement >= 0.03 &&
     !mlRegressesDistance;
   return {
+    baselineCases,
+    ridgeCases,
     labeledOutcomeCount: outcomes.length,
     rawErrors,
     calibratedErrors,
@@ -380,6 +426,58 @@ function historicalEvaluation(database: DatabaseSync, asOf: string): HistoricalE
     mlImprovement,
     mlRegressesDistance,
     recommendMlActivation
+  };
+}
+
+function buildModelEvaluation(evaluation: HistoricalEvaluation, asOf: string) {
+  const ridgeIds = new Set(evaluation.ridgeCases.map((row) => row.eventId));
+  const matchedBaseline = evaluation.baselineCases.filter((row) => ridgeIds.has(row.eventId));
+  const calibration = distances.map((distance) => {
+    const ordered = evaluation.baselineCases.filter((row) => row.distance === distance)
+      .sort((a, b) => Date.parse(a.predictedAt) - Date.parse(b.predictedAt) || a.eventId.localeCompare(b.eventId));
+    // Preregistered engineering candidate; no calibration/test event overlap.
+    const calibrationCases = ordered.slice(0, Math.floor(ordered.length / 2));
+    const through = Math.max(-Infinity, ...calibrationCases.map((row) => Date.parse(row.availableAt)));
+    const testCases = ordered.slice(calibrationCases.length)
+      .filter((row) => Date.parse(row.predictedAt) > through + 86_400_000);
+    const artifact = fitEmpiricalIntervals({
+      predictorVersion: PHYSIOLOGY_MODEL_VERSION,
+      distance, calibration: calibrationCases, asOf,
+      policy: {
+        minimumCalibrationSamples: 24, minimumTestSamples: 24,
+        minimumCoverage: { p80: 0.75, p90: 0.85 },
+        maximumMeanRelativeWidth: 0.5
+      }
+    });
+    return {
+      distance,
+      policyStatus: "heuristic_candidate_not_activated" as const,
+      calibrationCount: calibrationCases.length,
+      testCount: testCases.length,
+      embargoExcludedCount: ordered.length - calibrationCases.length - testCases.length,
+      artifactHash: artifact === null ? null : createHash("sha256").update(artifact.cohortDescriptor).digest("hex"),
+      evaluation: artifact === null ? null : evaluateIntervalArtifact(artifact, testCases, asOf),
+      status: artifact === null ? "not_evaluable" as const : "evaluated_candidate" as const
+    };
+  });
+  return {
+    version: MODEL_EVAL_VERSION,
+    replayMode: "event_time_reconstruction" as const,
+    availabilityUnknown: true,
+    availabilityNote: "Legacy fact arrival times are not completely reconstructible; this is not as-known-then certification.",
+    baselineMetrics: predictionMetrics(evaluation.baselineCases, asOf),
+    ridgeComparison: {
+      baseline: predictionMetrics(matchedBaseline, asOf),
+      ridge: predictionMetrics(evaluation.ridgeCases, asOf)
+    },
+    challengerGate: compareResidualChallengers({
+      baseline: matchedBaseline, ridge: evaluation.ridgeCases,
+      // A current active model is not a historical out-of-sample challenger.
+      // Only a validated training runner may supply those predictions.
+      catboost: [], asOf, minimumSamples: 6,
+      minimumImprovement: 0.05, maximumDistanceRegression: 0.05
+    }),
+    calibration
   };
 }
 
@@ -588,10 +686,12 @@ function buildPredictionReportContext(
 ): PredictionReportContext {
   validateOptions(options);
   const generatedAt = isoDate(options.asOf);
-  const scenario = resolvedScenario(options);
+  const scenario = resolvedScenario(options.mode !== undefined && options.mode !== "race_day_scenario" ? {} : options);
   const base = buildFormulaPredictionBase(database, generatedAt, options);
   const evaluation = runtimePredictionEvaluation(database, generatedAt);
-  const enhanced = enhanceCurrentPrediction(base, evaluation, generatedAt);
+  const enhanced = enhanceCurrentPrediction(base, options.mode === undefined ? evaluation : {
+    labeledOutcomeCount: evaluation.labeledOutcomeCount, rawErrors: []
+  }, generatedAt);
   const guidanceCodes: PhysiologyGuidanceCode[] = [];
   if (base.directEvidenceCount === 0) guidanceCodes.push("direct_vo2_evidence_missing");
   if (evaluation.labeledOutcomeCount === 0) guidanceCodes.push("standard_test_missing");
@@ -606,7 +706,44 @@ function buildPredictionReportContext(
   ) {
     guidanceCodes.push("prediction_confidence_low");
   }
+  const labelFunnel = buildLabelFunnel(database, generatedAt, Object.fromEntries(
+    distances.map((distance) => [distance, evaluation.rawErrors.filter((row) => row.distance === distance).length])
+  ));
   return { base, report: {
+    ...(options.mode === undefined ? {} : {
+      predictionPolicy: {
+        version: "rai-prediction-policy-v2" as const,
+        mode: options.mode,
+        targetDate: options.targetDate ?? null,
+        pointCorrection: "none" as const,
+        intervalStatus: "insufficient_calibration" as const,
+        corrections: enhanced.snapshot.races.flatMap((race) => {
+          if (race.potentialSeconds === null || race.predictedSeconds === null) return [];
+          let seconds = race.potentialSeconds;
+          const adjustments = [
+            ["preparation", race.readinessAdjustmentSeconds],
+            ["environment", race.environmentAdjustmentSeconds],
+            ["elevation", race.elevationAdjustmentSeconds],
+            ["acute_readiness", race.fatigueAdjustmentSeconds]
+          ] as const;
+          const steps = adjustments.map(([kind, adjustment]) => {
+            const beforeSeconds = seconds;
+            seconds += adjustment ?? 0;
+            return { kind, beforeSeconds, afterSeconds: seconds };
+          });
+          if (Math.abs(seconds - race.predictedSeconds) > 1e-6) throw new Error("Prediction correction ledger mismatch");
+          return [{ distance: race.distance, steps }];
+        })
+      }
+    }),
+    labelFunnel: {
+      sessionCount: labelFunnel.sessionCount,
+      confirmedCount: labelFunnel.confirmedCount,
+      usableOutcomeCount: labelFunnel.usableOutcomeCount,
+      evaluatedOutcomeCount: labelFunnel.evaluatedOutcomeCount,
+      primaryRejections: labelFunnel.primaryRejections,
+      accuracyStatus: labelFunnel.accuracyStatus
+    },
     reportVersion: PHYSIOLOGY_REPORT_VERSION,
     generatedAt,
     inputs: {
@@ -659,7 +796,7 @@ export function buildPredictionReport(
   return buildPredictionReportContext(database, options).report;
 }
 
-export async function buildPredictionReportAsync(
+async function buildPredictionReportAsyncInternal(
   database: DatabaseSync,
   options: PredictionReportOptions = {}
 ): Promise<PhysiologyPredictionReport> {
@@ -667,6 +804,14 @@ export async function buildPredictionReportAsync(
   const initialBaselineHash = active === null ? null : currentAbilityBaselineHash(database);
   const context = buildPredictionReportContext(database, options);
   const formulaReport = context.report;
+  // Old residual artifacts and bias errors target the legacy policy. They must
+  // not silently correct the new scenario semantics, even when a model is active.
+  if (options.mode !== "current_prepared") {
+    if (!activePredictionModel(database)) return formulaReport;
+    return {...formulaReport, modelSelection:{...formulaReport.modelSelection,
+      machineLearning:{...formulaReport.modelSelection.machineLearning,status:"inference_unavailable"}},
+      snapshot:{...formulaReport.snapshot,races:formulaReport.snapshot.races.map((row)=>({...row,machineLearningFallbackReason:"feature_schema_mismatch" as const}))}};
+  }
   if (active === null) return formulaReport;
 
   const metrics = parseJson<PredictionModelEvaluationMetrics | null>(active.metricsJson, null);
@@ -690,6 +835,14 @@ export async function buildPredictionReportAsync(
     status: PredictionEnhancementSelection["machineLearning"]["status"] = "active"
   ): PhysiologyPredictionReport => ({
     ...formulaReport,
+    ...(formulaReport.predictionPolicy ? {predictionPolicy:{...formulaReport.predictionPolicy,
+      pointCorrection:races.some((r)=>r.method==="catboost_residual_v6")?"catboost" as const:"none" as const,
+      corrections:formulaReport.predictionPolicy.corrections.map((row)=>{
+        const race=races.find((r)=>r.distance===row.distance);
+        const before=row.steps.at(-1)?.afterSeconds;
+        return race?.method==="catboost_residual_v6" && race.predictedSeconds!==null && before!==undefined
+          ? {...row,steps:[...row.steps,{kind:"catboost" as const,beforeSeconds:before,afterSeconds:race.predictedSeconds}]}:row;
+      })}}:{}),
     modelSelection: {
       ...formulaReport.modelSelection,
       biasCalibration: {
@@ -722,6 +875,21 @@ export async function buildPredictionReportAsync(
     })), "inference_unavailable");
   }
 
+  // A restored database can contain an old active pointer. Publication and
+  // inference independently require the current Ridge + interval proof.
+  const ridge=metrics?.ridgeComparison;
+  const ridgeValid=ridge?.status==="passed" && [ridge.walkForwardImprovement,ridge.releaseImprovement,ridge.bootstrapLower]
+    .every(Number.isFinite) && ridge.walkForwardImprovement>=0.05 && ridge.releaseImprovement>=0.05 && ridge.bootstrapLower>0;
+  const intervals=new SqliteCalibrationRepository(database);
+  const intervalsValid=initialBaselineHash!==null && distances.every(distance=>
+    intervals.select(catBoostCalibrationKey(active.artifactSha256),initialBaselineHash!,distance,generatedAt,1)!==null);
+  if(!ridgeValid||!intervalsValid){
+    return withSelection(formulaReport.snapshot.races.map(prediction=>({...prediction,
+      machineLearningFallbackReason:prediction.status==="available"?"feature_schema_mismatch" as const:null,
+      machineLearningPolicyReason:!ridgeValid?"ridge_not_validated" as const:"calibration_unavailable" as const
+    })),"inference_unavailable");
+  }
+
   if (currentAbilityBaselineHash(database) !== initialBaselineHash) {
     return withSelection(formulaReport.snapshot.races.map((prediction) => ({
       ...prediction,
@@ -733,7 +901,7 @@ export async function buildPredictionReportAsync(
   const base = context.base;
   const inferenceBase = buildFormulaPredictionBase(database, generatedAt, {
     ...(options.timezoneIdentifier === undefined ? {} : { timezoneIdentifier: options.timezoneIdentifier }),
-    recoveryReadiness: base.recoveryReadiness
+    recoveryReadiness: base.recoveryReadiness, mode: "current_prepared"
   });
   const inferenceScenario: PhysiologyPredictionScenario = {
     temperatureC: null,
@@ -881,6 +1049,38 @@ export function buildPredictionEvaluationReport(
       ])
     ) as PredictionEvaluationReport["byDistance"],
     rawErrors: evaluation.rawErrors,
-    calibratedErrors: evaluation.calibratedErrors
+    calibratedErrors: evaluation.calibratedErrors,
+    modelEvaluation: buildModelEvaluation(evaluation, asOf),
+    labelFunnel: buildLabelFunnel(database, asOf, Object.fromEntries(
+      distances.map((distance) => [
+        distance, evaluation.rawErrors.filter((error) => error.distance === distance).length
+      ])
+    ))
   };
+}
+
+function attachCalibratedIntervals(database:DatabaseSync, report:PhysiologyPredictionReport, options:PredictionReportOptions):PhysiologyPredictionReport {
+  const baselineHash=database.prepare("SELECT 1 FROM sqlite_master WHERE name='feature_runs'").get() ? currentAbilityBaselineHash(database) : null;
+  const repository=new SqliteCalibrationRepository(database);
+  const races=report.snapshot.races.map((prediction)=>{
+    const predictorKey=predictionPolicyKey(options.mode??"legacy",prediction.method,prediction.method==="catboost_residual_v6"?report.modelSelection.machineLearning.artifactSha256:null,report.inputs.scenario);
+    const selected=baselineHash && prediction.predictedSeconds!==null
+      ? repository.select(predictorKey,baselineHash,prediction.distance,report.generatedAt,prediction.predictedSeconds):null;
+    return {...prediction,intervalEvidence:{predictorKey,
+      status:selected?"empirically_evaluated" as const:"insufficient_calibration" as const,
+      artifactId:selected?.artifactId??null,p50Seconds:selected?.bounds.p50Seconds??null,
+      p80:selected?.bounds.p80??null,p90:selected?.bounds.p90??null,
+      coverageP80:selected?.evaluation.p80.empiricalCoverage??null,coverageP90:selected?.evaluation.p90.empiricalCoverage??null,
+      coverageIntervalP80:selected?.evaluation.p80.coverageConfidenceInterval??null,
+      coverageIntervalP90:selected?.evaluation.p90.coverageConfidenceInterval??null,
+      evaluationSamples:selected?.evaluation.p80.evaluationSampleCount??0,
+      coverageClaim:"empirical_target_not_individual_guarantee" as const}};
+  });
+  const calibrated=races.filter((r)=>r.intervalEvidence.status==="empirically_evaluated").length;
+  return {...report,...(report.predictionPolicy?{predictionPolicy:{...report.predictionPolicy,
+    intervalStatus:calibrated===0?"insufficient_calibration" as const:calibrated===races.filter((r)=>r.status==="available").length?"empirically_evaluated" as const:"partially_calibrated" as const}}:{}),
+    snapshot:{...report.snapshot,races}};
+}
+export async function buildPredictionReportAsync(database:DatabaseSync,options:PredictionReportOptions={}):Promise<PhysiologyPredictionReport> {
+  return attachCalibratedIntervals(database,await buildPredictionReportAsyncInternal(database,options),options);
 }

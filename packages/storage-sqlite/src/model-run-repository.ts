@@ -1,6 +1,35 @@
+import { randomUUID } from "node:crypto";
+import { SqliteModelReleaseRepository } from "./model-release-repository.js";
 import type { DatabaseSync } from "node:sqlite";
 
 import { MODEL_RUN_SUMMARY_SELECT } from "./sql/fragments.js";
+
+/** 发布/激活被拒的阶段，与 `model_release_refusals.stage` 的 CHECK 一一对应（只列已接线的）。 */
+export type ModelReleaseRefusalStage = "release_gate";
+
+/**
+ * 把一次"拒绝发布/激活"落成可查的审计行（v24，§15.8）。
+ *
+ * 此前拒绝只体现在一次 HTTP 响应里：进程退出、日志轮转之后就查不到"当时为什么被拒"。
+ * 表不存在时**静默跳过**（v24 之前的库/手工 fixture），而不是让激活路径因此失败 ——
+ * 审计是附加证据，不该成为新的失败源。
+ */
+export function recordModelReleaseRefusal(
+  database: DatabaseSync,
+  input: {
+    modelRunId: string; stage: ModelReleaseRefusalStage;
+    reasonCodes: readonly string[]; detail: string; detectedAt: string;
+  }
+): void {
+  const hasTable = database
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'model_release_refusals'")
+    .get();
+  if (!hasTable) return;
+  database.prepare(`INSERT INTO model_release_refusals
+    (id, model_run_id, stage, reason_codes_json, detail, detected_at)
+    VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(randomUUID(), input.modelRunId, input.stage, JSON.stringify([...input.reasonCodes]), input.detail, input.detectedAt);
+}
 
 export interface StoredModelRunSummary {
   id: string;
@@ -15,6 +44,8 @@ export interface StoredModelRunSummary {
   featureCount: number | null;
   assessmentCount: number;
   snapshotCount: number;
+  /** 引擎版本（v24 起落库）。`null` = 未知（v24 之前的行），**不是**"等于当前引擎"。 */
+  engineVersion: string | null;
   active: boolean;
 }
 
@@ -47,8 +78,13 @@ export interface ModelValidationGateResult {
 
 export class ModelRunActivationError extends Error {
   constructor(
-    readonly code: "not_found" | "not_succeeded" | "missing_metrics" | "failed_gate",
-    message: string
+    readonly code: "not_found" | "not_succeeded" | "missing_metrics" | "failed_gate" | "release_gate",
+    message: string,
+    /**
+     * 发布被拒时的审计载荷（v24）。**不在仓库里落库**：激活总在调用方的事务里，
+     * 在这里写会被调用方的 ROLLBACK 一起回滚掉 ⇒ 必须由持有事务的一方在回滚之后写。
+     */
+    readonly refusal?: { stage: ModelReleaseRefusalStage; reasonCodes: readonly string[]; detail: string }
   ) {
     super(message);
   }
@@ -96,6 +132,38 @@ export class SqliteModelRunRepository {
   }
 
   activateSucceeded(modelRunId: string, activatedAt: string): void {
+    this.database.exec("SAVEPOINT rai_model_activation");
+    try {
+      const schema = this.database.prepare("SELECT 1 FROM sqlite_master WHERE name='feature_runs'").get() ? this.database.prepare(`SELECT f.feature_schema_version AS schema FROM model_runs m
+        JOIN feature_runs f ON f.id=m.feature_run_id WHERE m.id=?`).get(modelRunId)?.schema : null;
+      if (schema === "workout-feature-v4") {
+        const releases = new SqliteModelReleaseRepository(this.database);
+        // Switching back to an already published release is a rollback: the incumbent is
+        // expected to differ, and the bundle's own activated_at is the audit trail that
+        // authorizes it. Forward publication still faces the full incumbent check.
+        try {
+          releases.verifyAndPoint(modelRunId, activatedAt, releases.isPublished(modelRunId));
+        } catch (error) {
+          // A publication refusal is a client-actionable state, not an internal fault:
+          // surface it as such instead of letting it become an opaque 500.
+          if (error instanceof ModelRunActivationError) throw error;
+          const detail = error instanceof Error ? error.message : "V2 release verification failed";
+          throw new ModelRunActivationError("release_gate", detail, {
+            stage: "release_gate", reasonCodes: ["release_verification_failed"], detail
+          });
+        }
+      } else if (this.database.prepare("SELECT 1 FROM sqlite_master WHERE name='active_model_release'").get()) {
+        this.database.exec("DELETE FROM active_model_release");
+      }
+      this.activateValidated(modelRunId, activatedAt);
+      this.database.exec("RELEASE rai_model_activation");
+    } catch (error) {
+      this.database.exec("ROLLBACK TO rai_model_activation; RELEASE rai_model_activation");
+      throw error;
+    }
+  }
+
+  private activateValidated(modelRunId: string, activatedAt: string): void {
     const model = this.database.prepare("SELECT status FROM model_runs WHERE id = ?")
       .get(modelRunId) as { status: string } | undefined;
     if (!model) throw new ModelRunActivationError("not_found", "Model run was not found");
@@ -136,7 +204,7 @@ export class SqliteModelRunRepository {
   }
 
   /** Compare a candidate replay with the currently active model and persist an auditable gate result. */
-  evaluateValidationGate(candidateId: string, baseId: string | null): ModelValidationGateResult {
+  evaluateValidationGate(candidateId: string, baseId: string | null, persist = true): ModelValidationGateResult {
     const gateVersion = "rai-shadow-gate-v1";
     const thresholds = {
       maxRecoveryNullRateDelta: 0.1,
@@ -163,7 +231,7 @@ export class SqliteModelRunRepository {
         thresholds,
         failureReasons: []
       };
-      this.persistValidationGate(result);
+      if (persist) this.persistValidationGate(result);
       return result;
     }
     const hasOverrideTable = Boolean(this.database
@@ -244,7 +312,7 @@ export class SqliteModelRunRepository {
       candidateModelRunId: candidateId, baseModelRunId: baseId, gateVersion,
       status: failureReasons.length ? "failed" : "passed", metrics, thresholds, failureReasons
     };
-    this.persistValidationGate(result);
+    if (persist) this.persistValidationGate(result);
     return result;
   }
 
@@ -393,6 +461,9 @@ export function mapModelRunSummary(row: Record<string, unknown>): StoredModelRun
     featureCount,
     assessmentCount: Number(row.assessment_count ?? 0),
     snapshotCount: Number(row.snapshot_count ?? 0),
+    // v24 之前写入的行没有这一列（列本身也是 v24 才加的）⇒ unknown，**不得**用当前
+    // `MODEL_CONFIG_VERSION` 兜底：那正是 §14.4 要消灭的「引擎版本与配置版本混用」。
+    engineVersion: typeof row.engine_version === "string" ? row.engine_version : null,
     active: Number(row.active) === 1
   };
 }

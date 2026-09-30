@@ -1,3 +1,5 @@
+import { SqliteCalibrationRepository } from "@rai/storage-sqlite";
+import { catBoostCalibrationKey } from "./prediction-policy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
@@ -149,6 +151,7 @@ export class PredictionModelActivationCompatibilityError extends Error {
       "model_version_mismatch" |
       "feature_schema_version_mismatch" |
       "feature_schema_hash_mismatch" |
+      "ridge_challenger_missing" |
       "ability_baseline_mismatch"
     >
   ) {
@@ -225,7 +228,8 @@ export class PredictionModelService {
   constructor(
     private readonly store: PredictionModelStore,
     artifactRoot?: string,
-    private readonly transactionMode: "owned" | "savepoint" = "owned"
+    private readonly transactionMode: "owned" | "savepoint" = "owned",
+    private readonly clock:()=>string = ()=>new Date().toISOString()
   ) {
     const main = store.database.prepare("PRAGMA database_list").all()
       .find((row) => (row as { name?: unknown }).name === "main") as { file?: unknown } | undefined;
@@ -259,7 +263,7 @@ export class PredictionModelService {
 
   enqueue(input: EnqueuePredictionTrainingInput): string {
     const id = `prediction_model_${randomUUID()}`;
-    const now = new Date().toISOString();
+    const now = this.clock();
     const asOf = input.asOf ?? now;
     if (!isIsoDate(asOf)) {
       throw new PredictionTrainingInputError("asOf must be a valid timezone-qualified ISO 8601 timestamp");
@@ -340,7 +344,7 @@ export class PredictionModelService {
     if (workerToken.length < 8 || workerToken.length > 200) {
       throw new Error("workerToken 长度无效");
     }
-    const now = new Date().toISOString();
+    const now = this.clock();
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
       const queued = this.store.database.prepare(`
@@ -387,7 +391,7 @@ export class PredictionModelService {
       UPDATE prediction_model_runs
       SET heartbeat_at = ?
       WHERE id = ? AND worker_token = ? AND status IN ('running', 'validating')
-    `).run(new Date().toISOString(), id, workerToken);
+    `).run(this.clock(), id, workerToken);
     return Number(result.changes) === 1;
   }
 
@@ -501,7 +505,7 @@ export class PredictionModelService {
   }
 
   requestCancellation(id: string): PredictionCancellationResult {
-    const now = new Date().toISOString();
+    const now = this.clock();
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
       const row = this.store.database.prepare(`
@@ -543,7 +547,7 @@ export class PredictionModelService {
   }
 
   markCancelled(id: string, workerToken?: string): void {
-    const now = new Date().toISOString();
+    const now = this.clock();
     const changed = this.store.database.prepare(`
       UPDATE prediction_model_runs
       SET status = 'cancelled', cancel_requested = 1, completed_at = ?,
@@ -557,7 +561,7 @@ export class PredictionModelService {
   }
 
   releaseLeaseForShutdown(id: string, workerToken: string): void {
-    const now = new Date().toISOString();
+    const now = this.clock();
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
       const row = this.store.database.prepare(`
@@ -606,7 +610,7 @@ export class PredictionModelService {
       return this.get(id)!;
     }
 
-    const validatingAt = new Date().toISOString();
+    const validatingAt = this.clock();
     const validating = this.store.database.prepare(`
       UPDATE prediction_model_runs SET status = 'validating', heartbeat_at = ?
       WHERE id = ? AND status = 'running' AND cancel_requested = 0
@@ -622,7 +626,7 @@ export class PredictionModelService {
     this.insertEvent(id, "validation", 4, 5, "正在验证 walk-forward 指标与 ONNX 一致性", validatingAt);
 
     const rejectionReasons = this.validateTrainingResult(result);
-    const now = new Date().toISOString();
+    const now = this.clock();
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
       const latest = this.store.database.prepare(`
@@ -655,7 +659,11 @@ export class PredictionModelService {
       ) {
         rejectionReasons.push("ability_baseline_mismatch");
       }
+      // Legacy method name: point-validation success can remain an inactive
+      // candidate. All supported distances must have independent calibrated
+      // intervals before the publication pointer is changed.
       const accepted = rejectionReasons.length === 0;
+      const calibrated = accepted && this.intervalActivationReasons(result.artifactSha256,current.abilityBaselineHash,now).length === 0;
       const updated = this.store.database.prepare(`
         UPDATE prediction_model_runs
         SET feature_schema_hash = ?, training_data_hash = ?, label_count = ?,
@@ -671,19 +679,19 @@ export class PredictionModelService {
         result.labelCount,
         JSON.stringify(result.labelCountByDistance),
         result.holdoutPredictionCount,
-        JSON.stringify(result.metrics),
+        JSON.stringify({...result.metrics,...(result.ridgeComparison?{ridgeComparison:result.ridgeComparison}:{})}),
         JSON.stringify(result.supportedDistances),
         result.artifactPath,
         result.artifactSha256,
         accepted ? "succeeded" : "rejected",
         accepted ? null : JSON.stringify({ code: "activation_gate_failed", reasons: rejectionReasons }),
         now,
-        accepted ? 1 : 0,
+        calibrated ? 1 : 0,
         now,
         id
       );
       if (Number(updated.changes) !== 1) throw new Error("预测模型完成状态更新失败");
-      if (accepted) {
+      if (calibrated) {
         this.store.database.prepare(`
           INSERT INTO active_prediction_model (
             singleton, prediction_model_run_id, activated_at
@@ -693,6 +701,8 @@ export class PredictionModelService {
             activated_at = excluded.activated_at
         `).run(id, now);
         this.insertEvent(id, "activated", 5, 5, "离线门槛通过，CatBoost 已直接激活", now);
+      } else if (accepted) {
+        this.insertEvent(id,"awaiting_calibration",5,5,"点预测验证完成；等待独立 P80/P90 区间校准，模型尚未激活",now);
       } else {
         this.insertEvent(id, "rejected", 5, 5, "离线门槛未通过，公式基线保持激活", now);
       }
@@ -705,7 +715,7 @@ export class PredictionModelService {
   }
 
   fail(id: string, error: unknown, workerToken?: string): void {
-    const now = new Date().toISOString();
+    const now = this.clock();
     const rawMessage = error instanceof Error ? error.message : String(error);
     const publicMessage = sanitizeClientFacingError(rawMessage);
     const failure = error instanceof Error
@@ -738,6 +748,8 @@ export class PredictionModelService {
     if (compatibilityReasons.length > 0) {
       throw new PredictionModelActivationCompatibilityError(compatibilityReasons);
     }
+    const intervalReasons=this.intervalActivationReasons(run.artifactSha256,run.abilityBaselineHash,this.clock());
+    if(intervalReasons.length)throw new Error(`预测模型区间校准门槛未通过：${intervalReasons.join(", ")}`);
     if (run.active) return run;
     if (run.artifactPath) {
       const artifactReasons = this.validateArtifactBoundary(
@@ -748,7 +760,7 @@ export class PredictionModelService {
         throw new Error(`历史预测模型 artifact 校验失败：${artifactReasons.join(", ")}`);
       }
     }
-    const now = new Date().toISOString();
+    const now = this.clock();
     this.store.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_prediction_mutation");
     try {
       this.store.database.prepare(`
@@ -808,6 +820,12 @@ export class PredictionModelService {
         }
       }
       return reasons;
+    }
+    const ridge = result.ridgeComparison;
+    if (!ridge || ridge.status !== "passed" ||
+      ![ridge.walkForwardImprovement,ridge.releaseImprovement,ridge.bootstrapLower].every(finite) ||
+      ridge.walkForwardImprovement < MINIMUM_MAE_IMPROVEMENT || ridge.releaseImprovement < MINIMUM_MAE_IMPROVEMENT || ridge.bootstrapLower <= 0) {
+      reasons.push("ridge_challenger_not_passed");
     }
     if ((result.rejectionReasons ?? []).length > 0) {
       reasons.push("evaluation_rejection_reasons_present");
@@ -940,6 +958,13 @@ export class PredictionModelService {
     return reasons;
   }
 
+  private intervalActivationReasons(artifactSha:string|null,baselineHash:string|null,asOf:string):string[] {
+    if(!artifactSha||!baselineHash)return ["calibration_identity_missing"];
+    const repository=new SqliteCalibrationRepository(this.store.database);
+    return distances.flatMap(distance=>repository.select(catBoostCalibrationKey(artifactSha),baselineHash,distance,asOf,1)
+      ? [] : [`${distance}_independent_interval_not_validated`]);
+  }
+
   private validMetrics(metrics: PredictionModelEvaluationMetrics): boolean {
     const topLevel = [
       metrics.baselineMaeSeconds,
@@ -970,6 +995,12 @@ export class PredictionModelService {
     run: PredictionModelRun
   ): PredictionModelActivationCompatibilityError["reasons"] {
     const reasons: PredictionModelActivationCompatibilityError["reasons"] = [];
+    const ridge=run.metrics?.ridgeComparison;
+    if(run.modelVersion===CATBOOST_PREDICTION_MODEL_VERSION && (!ridge||ridge.status!=="passed"||
+      ![ridge.walkForwardImprovement,ridge.releaseImprovement,ridge.bootstrapLower].every(finite)||
+      ridge.walkForwardImprovement<MINIMUM_MAE_IMPROVEMENT||ridge.releaseImprovement<MINIMUM_MAE_IMPROVEMENT||ridge.bootstrapLower<=0)) {
+      reasons.push("ridge_challenger_missing");
+    }
     if (run.modelVersion !== CATBOOST_PREDICTION_MODEL_VERSION) {
       reasons.push("model_version_mismatch");
     }
@@ -996,7 +1027,7 @@ export class PredictionModelService {
     progressCurrent: number,
     progressTotal: number,
     message: string,
-    createdAt = new Date().toISOString()
+    createdAt = this.clock()
   ): void {
     this.store.database.prepare(`
       INSERT INTO prediction_model_events (

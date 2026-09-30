@@ -101,7 +101,12 @@ test("migration CLI dry-run, explicit apply, idempotence and publication lock", 
     assert.equal(backups.length, 1);
     const backup = new DatabaseSync(join(root, "backups", backups[0]!), { readOnly: true });
     try {
-      assert.equal(backup.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version, 21);
+      // 备份是"升级前"的快照。这一轮删掉的是 22（不是最高版本），所以备份里已应用的
+      // 最高版本 = 最高迁移版本。写死数字会在每次新增迁移时过期 ⇒ 从常量推导。
+      assert.equal(
+        backup.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version,
+        Math.max(...MIGRATION_VERSIONS)
+      );
     } finally { backup.close(); }
     const second = run("--apply");
     assert.equal(second.status, 0, second.stderr);

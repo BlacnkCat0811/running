@@ -4,6 +4,7 @@ import { SQL_UTC_OFFSET_MODIFIER } from "@rai/contracts";
 import { nullableNumber } from "./read-utils.js";
 
 export interface StoredTrendDaily {
+  baselineEpochId?: string | null;
   date: string;
   trueAbility: number | null;
   decayPoints: number;
@@ -64,9 +65,13 @@ export class SqliteTrendsReadRepository {
     if (startDate) startDate.setUTCDate(startDate.getUTCDate() - Math.max(days - 1, 0));
     const start = startDate?.toISOString().slice(0, 10) ?? null;
 
+    const hasEpoch = Boolean(this.database.prepare("SELECT 1 FROM sqlite_master WHERE name='ability_assessments'").get()) &&
+      (this.database.prepare("PRAGMA table_info(active_daily_ability_snapshots)").all() as Array<{name:string}>).some((c)=>c.name==="last_assessment_id");
+    const epochSql = hasEpoch ? "(SELECT json_extract(a.explanation_json,'$.baselineEpochId') FROM ability_assessments a WHERE a.id=active_daily_ability_snapshots.last_assessment_id)" : "NULL";
     const daily = this.database
       .prepare(`
-        SELECT local_date, true_ability, decay_points, growth_velocity_per_week, snapshot_status
+        SELECT local_date, true_ability, decay_points, growth_velocity_per_week, snapshot_status,
+          ${epochSql} AS baseline_epoch_id
         FROM active_daily_ability_snapshots
         WHERE (? IS NULL OR local_date >= ?)
         ORDER BY local_date
@@ -115,6 +120,7 @@ export class SqliteTrendsReadRepository {
       daily: daily.map((row) => ({
         date: String(row.local_date),
         trueAbility: nullableNumber(row.true_ability),
+        baselineEpochId: typeof row.baseline_epoch_id === "string" ? row.baseline_epoch_id : null,
         decayPoints: Number(row.decay_points ?? 0),
         growthVelocityPerWeek: nullableNumber(row.growth_velocity_per_week),
         status: String(row.snapshot_status)

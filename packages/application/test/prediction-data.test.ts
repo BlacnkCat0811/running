@@ -150,6 +150,37 @@ function fixtureDatabase(): DatabaseSync {
   return database;
 }
 
+test("V2 prediction modes isolate recovery and give an exactly reconstructible correction ledger", async () => {
+  const db = fixtureDatabase();
+  try {
+    db.prepare(`INSERT INTO health_records
+      (id,type,source_name,source_category,unit,value_numeric,start_at)
+      VALUES ('vo2','HKQuantityTypeIdentifierVO2Max','Watch','apple_watch','ml/kg*min',50,'2026-01-09T00:00:00.000Z')`).run();
+    const options = { asOf: "2026-01-11T00:00:00.000Z", mode: "current_prepared" as const };
+    const low = buildPredictionReport(db, { ...options, recoveryReadiness: 0 });
+    const high = buildPredictionReport(db, { ...options, recoveryReadiness: 1 });
+    assert.deepEqual(low.snapshot.races, high.snapshot.races);
+    assert.ok(low.snapshot.races.some((row) => row.predictedSeconds !== null));
+    for (const race of low.snapshot.races) {
+      if (race.predictedSeconds === null) continue;
+      const ledger = low.predictionPolicy!.corrections.find((row) => row.distance === race.distance)!;
+      assert.ok(Math.abs(ledger.steps.at(-1)!.afterSeconds - race.predictedSeconds) < 1e-6);
+      assert.equal(race.fatigueAdjustmentSeconds, 0);
+      assert.equal(race.calibrationAdjustmentSeconds, 0);
+    }
+    const neutral = buildPredictionReport(db, { ...options, mode: "neutral_potential", temperatureC: 35 });
+    for (const race of neutral.snapshot.races) assert.equal(race.potentialSeconds, race.predictedSeconds);
+    const future = await buildPredictionReportAsync(db, {
+      ...options, mode: "race_day_scenario", targetDate: "2026-06-01", temperatureC: 35
+    });
+    assert.equal(future.inputs.recoveryReadiness, null);
+    assert.equal(future.predictionPolicy?.pointCorrection, "none");
+    assert.equal(future.predictionPolicy?.intervalStatus, "insufficient_calibration");
+    assert.ok(future.snapshot.races.some((row) => (row.environmentAdjustmentSeconds ?? 0) > 0));
+    assert.throws(() => buildPredictionReport(db, { ...options, mode: "race_day_scenario" }), /targetDate/);
+  } finally { db.close(); }
+});
+
 test("extracts a stable high-intensity 20-minute threshold segment without future leakage", () => {
   const database = fixtureDatabase();
   try {

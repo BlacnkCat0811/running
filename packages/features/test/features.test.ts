@@ -44,6 +44,7 @@ function source(overrides: Partial<WorkoutFeatureSource> = {}): WorkoutFeatureSo
       coefficientOfVariation: 0.06
     },
     restingHeartRate: 50,
+    restingHeartRateReference: 50,
     hrvSdnn: 50,
     sleepDurationMinutes: 420,
     recentLoadMinutes: 180,
@@ -367,6 +368,7 @@ test("does not mistake aerobic progression and short surges for intervals", () =
     speedSamples,
     heartRate: { ...source().heartRate, average: 165 },
     restingHeartRate: 70,
+    restingHeartRateReference: 70,
     observedMaximumHeartRate: 201
   }));
   assert.equal(feature.sessionType, "steady");
@@ -421,6 +423,7 @@ test("does not infer intervals from sparse speed islands", () => {
     speedSamples,
     heartRate: { ...source().heartRate, average: 165 },
     restingHeartRate: 70,
+    restingHeartRateReference: 70,
     observedMaximumHeartRate: 201
   }));
   assert.equal(feature.sessionType, "steady");
@@ -440,6 +443,7 @@ test("recognizes repeated intervals after a workout pause", () => {
     speedSamples,
     heartRate: { ...source().heartRate, average: 165 },
     restingHeartRate: 70,
+    restingHeartRateReference: 70,
     observedMaximumHeartRate: 201
   }));
 
@@ -460,6 +464,7 @@ test("defaults interval speed coverage for feature configs created before the se
     speedSamples,
     heartRate: { ...source().heartRate, average: 165 },
     restingHeartRate: 70,
+    restingHeartRateReference: 70,
     observedMaximumHeartRate: 201
   }), legacyConfig);
 

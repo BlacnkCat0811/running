@@ -30,9 +30,9 @@ test("rejects invalid residual outputs and correction limits", () => {
 test("validates the immutable CatBoost artifact manifest contract", () => {
   const hash = "a".repeat(64);
   const manifest = {
-    modelVersion: "race-residual-catboost-v3",
+    modelVersion: "race-residual-catboost-v4",
     algorithm: "catboost",
-    featureSchemaVersion: "race-residual-feature-v3",
+    featureSchemaVersion: "race-residual-feature-v4",
     featureSchemaHash: PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
     trainingDataHash: hash,
     modelSha256: hash,
@@ -84,8 +84,8 @@ test("installed native ONNX runtime loads and executes the production feature sh
     const hash = createHash("sha256").update(bytes).digest("hex");
     await writeFile(join(directory, "model.onnx"), bytes);
     await writeFile(join(directory, "manifest.json"), JSON.stringify({
-      modelVersion: "race-residual-catboost-v3", algorithm: "catboost",
-      featureSchemaVersion: "race-residual-feature-v3",
+      modelVersion: "race-residual-catboost-v4", algorithm: "catboost",
+      featureSchemaVersion: "race-residual-feature-v4",
       featureSchemaHash: PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
       trainingDataHash: "a".repeat(64), modelSha256: hash, labelCount: 51,
       supportedDistances: ["five_k", "ten_k", "half_marathon"],

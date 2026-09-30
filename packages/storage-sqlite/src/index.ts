@@ -4,6 +4,7 @@ export {
   type ProcessProbe,
   type PublicationLockOwner
 } from "./publication-lock.js";
+export { SqliteModelReleaseRepository, semanticHash, REQUIRED_MODEL_DOMAINS } from "./model-release-repository.js";
 export {
   publishDatabaseFile,
   type DatabaseFilePublication,
@@ -17,9 +18,23 @@ export {
 export {
   SqliteModelRunRepository,
   ModelRunActivationError,
+  recordModelReleaseRefusal,
+  type ModelReleaseRefusalStage,
   type StoredModelRunSummary,
   type ModelValidationGateResult
 } from "./model-run-repository.js";
+export {
+  MODEL_TRANSITION_GATE_VERSION,
+  MODEL_TRANSITION_GATE_THRESHOLDS_V2,
+  evaluateModelTransitionGateV2,
+  type ModelTransitionGateInput,
+  type ModelTransitionGateResultV2,
+  type ModelTransitionGateStatus,
+  type ModelTransitionGateThresholdsV2,
+  type ModelTransitionKind,
+  type ModelTransitionMetricsV2,
+  type ModelTransitionSchemaContext
+} from "./model-transition-gate.js";
 export {
   RaiDatabase,
   PendingMigrationsError,
@@ -91,3 +106,5 @@ export {
   type PredictionRecoveryReadings,
   type PredictionRecoveryProvenance
 } from "./read/prediction-recovery-read-repository.js";
+
+export { SqliteCalibrationRepository } from "./calibration-repository.js";

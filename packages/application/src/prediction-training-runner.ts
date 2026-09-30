@@ -67,6 +67,11 @@ interface RegressionMetricsJson {
 }
 
 interface EvaluationJson {
+  ridgeChallenger?: {
+    version:string;status:string;walkForwardImprovement:number|null;
+    trainingSampleIds:string[];holdoutSampleIds:string[];
+    releaseHoldout: {meanAbsoluteErrorImprovement:number|null;maeImprovementBootstrap95:{lower:number|null};distanceMaeRegression:Record<string,number|null>};
+  };
   status: "accepted" | "rejected";
   rejectionReasons: string[];
   walkForward: {
@@ -472,6 +477,18 @@ function assertArtifactContract(
   if (stableJson(evaluation.activationGate.thresholds) !== stableJson(expectedThresholds)) {
     throw new Error("Python 与 TypeScript activation gate 门槛不一致");
   }
+  if (evaluation.status === "accepted") {
+    const ridge=evaluation.ridgeChallenger;
+    if (!ridge || ![ridge.walkForwardImprovement,ridge.releaseHoldout.meanAbsoluteErrorImprovement,ridge.releaseHoldout.maeImprovementBootstrap95.lower].every((v)=>typeof v === "number" && Number.isFinite(v)) || ridge.version !== "race-residual-ridge-v1" || ridge.status !== "passed" ||
+      stableJson(ridge.trainingSampleIds) !== stableJson(evaluation.releaseSplit.trainingSampleIds) ||
+      stableJson(ridge.holdoutSampleIds) !== stableJson(evaluation.releaseSplit.holdoutSampleIds) ||
+      ridge.walkForwardImprovement === null || ridge.walkForwardImprovement < MINIMUM_MAE_IMPROVEMENT ||
+      ridge.releaseHoldout.meanAbsoluteErrorImprovement === null || ridge.releaseHoldout.meanAbsoluteErrorImprovement < MINIMUM_MAE_IMPROVEMENT ||
+      ridge.releaseHoldout.maeImprovementBootstrap95.lower === null || ridge.releaseHoldout.maeImprovementBootstrap95.lower <= 0 ||
+      distances.some((d) => (ridge.releaseHoldout.distanceMaeRegression[d] ?? Infinity) > MAXIMUM_DISTANCE_MAE_REGRESSION)) {
+      throw new Error("CatBoost must beat the same-event Ridge challenger on walk-forward and independent release holdout");
+    }
+  }
   const expectedReleaseThresholds: EvaluationJson["releaseHoldout"]["thresholds"] = {
     minimumHoldout: MINIMUM_HOLDOUT_PREDICTIONS,
     minimumHoldoutPerDistance: MINIMUM_HOLDOUTS_PER_DISTANCE,
@@ -718,7 +735,12 @@ async function main(): Promise<void> {
       assertReleaseMetricParity(nodeMetrics, evaluation.releaseHoldout);
     });
 
+    const ridge = evaluation.ridgeChallenger;
     const result: PredictionModelTrainingResult = {
+      ...(ridge?.status === "passed" ? {ridgeComparison:{status:"passed" as const,
+        walkForwardImprovement:finiteNumber("ridge walk-forward improvement",ridge.walkForwardImprovement),
+        releaseImprovement:finiteNumber("ridge release improvement",ridge.releaseHoldout.meanAbsoluteErrorImprovement),
+        bootstrapLower:finiteNumber("ridge bootstrap lower",ridge.releaseHoldout.maeImprovementBootstrap95.lower)}}:{}),
       featureSchemaHash: manifest.featureSchemaHash,
       trainingDataHash: manifest.trainingDataHash,
       labelCount: evaluation.releaseSplit.trainingCount,

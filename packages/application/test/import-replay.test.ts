@@ -94,7 +94,7 @@ test("imports a small Health fixture and replays features, CA/TA, and daily snap
     assert.ok(Number.isFinite(scored.currentAbility));
     assert.ok(Number.isFinite(scored.trueAbilityBefore));
     assert.ok(Number.isFinite(scored.trueAbilityAfter));
-    assert.ok(Number.isFinite(scored.cardioScore));
+    assert.equal(scored.cardioScore, null);
     assert.equal(Object.hasOwn(JSON.parse(scored.effectiveWeightsJson), "cardio"), false);
 
     store.setManifest("dataset_version", "dataset_incremental_fixture");

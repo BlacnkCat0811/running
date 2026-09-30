@@ -8,13 +8,17 @@
   },
   "dependencies": {
     "@rai/contracts": "*",
+    "@rai/durability": "*",
     "@rai/features": "*",
     "@rai/health-export-parser": "*",
     "@rai/storage-sqlite": "*",
     "@rai/physiology": "*",
     "@rai/prediction-inference": "*",
     "@rai/scoring": "*",
-    "@rai/training-load": "*"
-    ,"@rai/training-zones": "*"
+    "@rai/readiness": "*",
+    "@rai/model-eval": "*",
+    "@rai/training-load": "*",
+    "@rai/training-zones": "*",
+    "@rai/normalization": "*"
   }
 }

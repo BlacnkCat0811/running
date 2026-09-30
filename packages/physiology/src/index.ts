@@ -14,7 +14,7 @@ import {
   type Vo2MaxEstimate
 } from "@rai/contracts";
 
-export const PHYSIOLOGY_MODEL_VERSION = "rai-physiology-v1.7.0" as const;
+export const PHYSIOLOGY_MODEL_VERSION = "rai-physiology-v1.8.0" as const;
 
 export type Vo2EvidenceSource =
   | "apple_health"
@@ -315,10 +315,9 @@ export function performanceVdotEvidence(input: {
   quality: number;
   conditions?: PerformanceConditions;
 }): PerformanceVdotEvidence {
-  const penalty = performanceConditionPenaltyFraction(
-    input.distanceMeters,
-    input.conditions ?? {}
-  );
+  const normalized = createPhysiologyNormalizationAdapter().normalize({distanceMeters:input.distanceMeters,
+    durationSeconds:input.durationSeconds,conditions:input.conditions??{}});
+  const penalty = {total:normalized.legacyPartialPenalty};
   return {
     id: input.id,
     observedAt: input.observedAt,
@@ -690,7 +689,6 @@ export function estimateLactateThresholdFromEvidence(
 ): LactateThresholdEstimate {
   const prior = estimateLactateThreshold(vo2Max, profile, config);
   if (!Number.isFinite(Date.parse(asOf))) throw new Error("asOf must be an ISO date");
-  if (prior.status !== "available" || prior.paceSecondsPerKm === null) return prior;
   const codes = new Set<PhysiologyEvidenceCode>(prior.evidenceCodes);
   const usable = evidence.flatMap((item) => {
     const ageDays = daysBetween(item.observedAt, asOf);
@@ -719,6 +717,46 @@ export function estimateLactateThresholdFromEvidence(
   if (usable.length === 0) {
     codes.add("threshold_segments_missing");
     return { ...prior, evidenceCodes: [...codes] };
+  }
+
+  if (prior.status !== "available" || prior.paceSecondsPerKm === null) {
+    // Without an aerobic prior only a deliberate, high-quality threshold test
+    // may stand alone. Ordinary sustained training is not a threshold test.
+    const observed = usable.filter((item) =>
+      item.source === "threshold_test" && item.quality >= 0.8 && item.durationSeconds >= 20 * 60
+    );
+    if (!observed.length) return { ...prior, evidenceCodes: ["threshold_segments_missing"] };
+    const pace = robustWeightedValue(observed.map((item) => ({
+      value: item.paceSecondsPerKm, weight: item.weight
+    })), 0.18);
+    const hr = observed.filter((item) => item.heartRateBpm !== null &&
+      Number.isFinite(item.heartRateBpm) && item.heartRateBpm >= 80 && item.heartRateBpm <= 230);
+    const heart = hr.length ? robustWeightedValue(hr.map((item) => ({
+      value: item.heartRateBpm!, weight: item.weight
+    })), 0.12) : null;
+    const weight = observed.reduce((sum, item) => sum + item.weight, 0);
+    // Evidence reliability, not empirical diagnostic probability.
+    const confidence = clamp(0.35 + 0.35 * (1 - Math.exp(-weight / 2)), 0, 0.7);
+    return {
+      status: "available",
+      paceSecondsPerKm: pace.value,
+      paceRangeSecondsPerKm: {
+        lower: Math.max(150, pace.value - Math.max(8, pace.spread * 1.25)),
+        upper: Math.min(900, pace.value + Math.max(8, pace.spread * 1.25))
+      },
+      heartRateBpm: heart?.value ?? null,
+      heartRateRangeBpm: heart === null ? null : {
+        lower: Math.max(80, heart.value - Math.max(4, heart.spread * 1.25)),
+        upper: Math.min(230, heart.value + Math.max(4, heart.spread * 1.25))
+      },
+      confidence, confidenceLevel: confidenceLevel(confidence),
+      evidenceCount: observed.length,
+      latestEvidenceAt: observed.map((item) => item.observedAt)
+        .sort((a, b) => Date.parse(b) - Date.parse(a))[0]!,
+      method: "observed_threshold_v3",
+      evidenceCodes: ["threshold_test_segment",
+        ...(heart === null ? ["heart_rate_inputs_missing" as const] : [])]
+    };
   }
 
   const paceItems = [
@@ -1155,3 +1193,23 @@ export function calibrateRacePrediction(
 }
 
 export * from "./ridge.js";
+
+/** Versioned condition adapter, reusing the exact historical penalty owner. */
+export function createPhysiologyNormalizationAdapter() {
+  return {
+    version: `${PHYSIOLOGY_MODEL_VERSION}:conditions-v1`,
+    normalize(input: {distanceMeters:number;durationSeconds:number;conditions:PerformanceConditions}) {
+      assertPositiveFinite("distanceMeters",input.distanceMeters);assertPositiveFinite("durationSeconds",input.durationSeconds);
+      const c=input.conditions;
+      const known=c.temperatureC!=null && c.humidityPercent!=null && c.elevationGainMeters!=null;
+      const penalty=performanceConditionPenaltyFraction(input.distanceMeters,c);
+      return {version:`${PHYSIOLOGY_MODEL_VERSION}:conditions-v1`,
+        status:!known?"unavailable" as const:penalty.total===0?"not_needed" as const:"applied" as const,
+        normalizedSeconds:known?input.durationSeconds/(1+penalty.total):null,
+        correctionFraction:known?penalty.total:null,
+        rawComparableFallback:known?null:input.durationSeconds,
+        // Existing partial-input evidence normalisation is explicit, not counted a second time.
+        legacyPartialPenalty:penalty.total};
+    }
+  };
+}

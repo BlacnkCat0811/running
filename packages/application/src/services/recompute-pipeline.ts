@@ -1,3 +1,8 @@
+import { physStateFromReadiness } from "@rai/readiness";
+import { identityNormalizationConfigHash } from "@rai/normalization";
+import { readinessForRun, loadDatedReadiness } from "../model-v2-snapshots.js";
+import { DURABILITY_MODEL_VERSION, PREPARATION_TARGETS, PREPARATION_WINDOW_DAYS, assessPreparation, assessDurability, buildDurabilitySnapshot } from "@rai/durability";
+import type { ModelLineageV2, WorkoutFeaturePayloadV4 } from "@rai/contracts";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { RecomputeProgressGate } from "./recompute-progress.js";
 import { BoundedCache } from "./bounded-cache.js";
@@ -16,39 +21,49 @@ import {
   type PerformanceProtocol,
   type RecomputeJob,
   type RunStatus,
+  type SessionStratum,
   type SessionType,
+  type StratumHistory,
   type TrainingZoneProfileSettings,
   type WorkoutFeatureVector,
   type WorkoutOverride,
   type WorkoutZoneSummary
 } from "@rai/contracts";
 import {
+  FEATURE_CONFIG_VERSION,
   defaultFeatureConfig,
   extractWorkoutFeatureVector,
+  extractWorkoutFeatureVectorV4, projectFeatureV4, encodeFeaturePayloadV4, decodeStoredFeature,
   type FeatureConfig,
   type WorkoutFeatureSource
 } from "@rai/features";
 import {
   RaiDatabase,
-  SqliteModelRunRepository,
+  SqliteModelRunRepository, SqliteModelReleaseRepository, semanticHash, evaluateModelTransitionGateV2,
   RecomputeJobRepository,
   SqliteTrainingSessionRepository
 } from "@rai/storage-sqlite";
 import {
+  buildAdaptiveBaselineTimeline,
+  buildLegacyStratumHistory,
+  defaultAdaptiveBaselinePolicy,
+  BASELINE_POLICY_VERSION,
   createPersonalBaseline,
   defaultRaiModelConfig,
   hasCompletedCalibration,
   inactivityDecay,
-  MODEL_CONFIG_VERSION,
+  MODEL_CONFIG_VERSION, SCORING_MODEL_VERSION,
   scoreFeature,
+  sessionStratum,
   sortWorkoutFeaturesChronologically,
   trueAbilityAfterInactivity,
   updateTrueAbilityFromFeatureScore,
   type PersonalBaseline
 } from "@rai/scoring";
 import {
-  buildDailyTrainingMetrics,
-  calculateWorkoutTrainingLoad,
+  buildDailyTrainingMetricsV2 as buildDailyTrainingMetrics,
+  buildDailyTrainingMetrics as buildLegacyDailyTrainingMetrics,
+  calculateWorkoutTrainingLoad, buildLoadVectorV2,
   classifyPhysState,
   defaultDailyMetricConfig,
   type DailyPhysEvidence,
@@ -74,7 +89,7 @@ import {
   loadDirectVo2Evidence,
   loadLabeledPerformanceEvidence,
   loadLactateThresholdEvidence,
-  loadPerformanceVdotEvidence
+  loadPerformanceVdotEvidence, parsePerformanceConditions
 } from "../prediction-data.js";
 
 import {
@@ -147,6 +162,7 @@ export const SUPERSEDED_RUN_RETENTION = 2;
  */
 export class RecomputePipeline {
   private allowNativeAggregates = true;
+  private recoveryIsolationHolds = true;
   private readonly recordCache = new BoundedCache<RecordRow[]>(16, 20_000);
   private readonly progressGate = new RecomputeProgressGate();
   private healthRecordHasUnitColumn: boolean | null = null;
@@ -175,6 +191,7 @@ export class RecomputePipeline {
 
   runFullRecompute(job: RecomputeJob): void {
     this.recordCache.clear();
+    this.recoveryIsolationHolds = true;
     const request = this.parseRequest(job.request);
     // Capture the incumbent before writing a candidate. The incumbent remains
     // active until the candidate has passed the shadow gate.
@@ -201,26 +218,77 @@ export class RecomputePipeline {
     const modelRun = this.createModelRun(datasetVersion, featureRun.id, request);
     this.setJobRunIds(job.id, featureRun.id, modelRun.id);
     const metricRunId = this.createTrainingMetricRun(modelRun.id, request, overrideSnapshot.ids);
+    const lineage: ModelLineageV2 = {
+      sourceRunId: modelRun.id, datasetVersion, factsSnapshotHash: semanticHash({datasetVersion,asOf:request.evaluatedAt,sessions:features.map((f)=>({session:f.trainingSessionId,at:f.workoutStartAt}))}),
+      overrideSnapshotHash: semanticHash(overrideSnapshot.ids), modelVersion: SCORING_MODEL_VERSION,
+      configVersion: MODEL_CONFIG_VERSION, configHash: modelRun.modelConfigHash, featureSchemaVersion: FEATURE_SCHEMA_VERSION,
+      calibrationCohortHash:null, baselineEpochId:null, normalizationVersion:"rai-normalization-identity-v1", normalizationConfigHash:identityNormalizationConfigHash(),
+      timezoneIdentifier:request.timezoneIdentifier,asOf:request.evaluatedAt,dataThroughAt:features.at(-1)?.workoutStartAt??null
+    };
     try {
       this.updateJobProgress(job.id, "training_metrics", 0, features.length, "Calculating training load");
       this.measureCompute(job.id, "trainingMetrics", () => this.replayTrainingMetrics(job.id, metricRunId, features, request, overrideSnapshot));
       this.finishTrainingMetricRun(metricRunId, "succeeded", null);
       this.updateJobProgress(job.id, "model_replay", 0, features.length, "Replaying ability timeline");
       this.measureCompute(job.id, "modelReplay", () => this.replayModel(job.id, modelRun, features, request));
-      this.finishModelRun(modelRun.id, "succeeded", null);
-      // NOTE(2026-09-20): the shadow full-replay comparison was removed by decision
-      // (deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md). The two fields
-      // it used to toggle here are now inert:
-      //   - `recordCache` is only cleared by the caller;
-      //   - `allowNativeAggregates` is permanently true (see its declaration).
-      // Model-version comparison is mandatory whenever an incumbent exists; the
-      // removed validation mode never provided a way around the gate below.
-      if (incumbentModelRunId) {
-        const gate = this.modelRuns.evaluateValidationGate(modelRun.id, incumbentModelRunId);
-        if (gate.status === "failed") {
-          throw new Error(`Model-version gate failed: ${gate.failureReasons.join(", ")}`);
-        }
+      const summary = this.database.prepare("SELECT summary_json AS json FROM model_runs WHERE id=?").get(modelRun.id)?.json;
+      const reference = typeof summary === "string" ? (JSON.parse(summary) as {baseline:PersonalBaseline|null}).baseline : null;
+      lineage.baselineEpochId = this.fitnessEpochId(reference, features, request, modelRun);
+      lineage.calibrationCohortHash = reference ? semanticHash(sortWorkoutFeaturesChronologically(features)
+        .filter((f)=>reference.calibrationFeatureIds.includes(f.id)).map((f)=>({sessionId:f.trainingSessionId,at:f.workoutStartAt}))) : null;
+      // D5：逐日快照先于 epoch 计算落地，所以这里回填而不是重排序。NULL 表示"该行写下时
+      // 还不知道标尺"，读端必须把它当未知，不得当成"与当前 epoch 相同"。
+      if (lineage.baselineEpochId !== null) {
+        this.database.prepare(`UPDATE daily_ability_snapshots SET baseline_epoch_id = ?
+          WHERE model_run_id = ? AND baseline_epoch_id IS NULL`)
+          .run(lineage.baselineEpochId, modelRun.id);
       }
+      new SqliteModelReleaseRepository(this.database).recordLineage(modelRun.id, SCORING_MODEL_VERSION, MODEL_CONFIG_VERSION, lineage);
+      this.finishModelRun(modelRun.id, "succeeded", null);
+      const releases = new SqliteModelReleaseRepository(this.database);
+      this.sealDomainSnapshots(modelRun, metricRunId, features, request, lineage);
+      const legacy = this.modelRuns.evaluateValidationGate(modelRun.id, incumbentModelRunId, false);
+      const baseSchema = incumbentModelRunId ? this.database.prepare(`SELECT f.feature_schema_version AS schema
+        FROM model_runs m JOIN feature_runs f ON f.id=m.feature_run_id WHERE m.id=?`).get(incumbentModelRunId)?.schema : null;
+      const previousLineage = incumbentModelRunId ? this.database.prepare("SELECT lineage_json AS json FROM model_v2_runs WHERE model_run_id=?").get(incumbentModelRunId)?.json : null;
+      const previousEpoch = typeof previousLineage === "string" ? (JSON.parse(previousLineage) as ModelLineageV2).baselineEpochId : null;
+      const explicitRebase = request.modelConfig.baselineReferenceStartAt !== undefined && reference !== null &&
+        previousEpoch !== null && previousEpoch !== lineage.baselineEpochId;
+      // Recalibration intentionally marks the earlier period as calibrating in the
+      // new coordinate system. Do not confuse that planned relabeling with lost
+      // source eligibility; post-calibration statuses still face the normal gate.
+      let rebaseMetrics: { matchedSessions:number; eligibleSessionDelta:number; assessmentStatusChangeRate:number } | null = null;
+      if (explicitRebase && incumbentModelRunId) {
+        const matched = this.database.prepare(`SELECT COUNT(*) AS n,
+          SUM(CASE WHEN b.assessment_status<>c.assessment_status THEN 1 ELSE 0 END) AS changed
+          FROM ability_assessments b JOIN ability_assessments c ON b.training_session_id=c.training_session_id
+          JOIN workout_features f ON f.id=c.feature_id
+          WHERE b.model_run_id=? AND c.model_run_id=? AND julianday(f.workout_start_at)>julianday(?)`)
+          .get(incumbentModelRunId,modelRun.id,reference.calibrationEndAt) as {n:number;changed:number|null};
+        const eligible = (id:string):number => Number(this.database.prepare(`SELECT COUNT(*) AS n
+          FROM model_runs m JOIN workout_features f ON f.feature_run_id=m.feature_run_id
+          WHERE m.id=? AND f.eligibility_status IN ('eligible','trial')`).get(id)?.n??0);
+        const oldCount=eligible(incumbentModelRunId),newCount=eligible(modelRun.id);
+        rebaseMetrics={matchedSessions:matched.n,eligibleSessionDelta:Math.abs(oldCount-newCount)/Math.max(1,oldCount),
+          assessmentStatusChangeRate:matched.n?Number(matched.changed??0)/matched.n:0};
+      }
+      const gate = incumbentModelRunId ? evaluateModelTransitionGateV2({
+        candidateModelRunId:modelRun.id, baseModelRunId:incumbentModelRunId,
+        schema:{baseModelVersion:legacy.metrics.baseModelVersion??null,candidateModelVersion:MODEL_CONFIG_VERSION,
+          baseFeatureSchemaVersion:typeof baseSchema === "string" ? baseSchema : null,candidateFeatureSchemaVersion:FEATURE_SCHEMA_VERSION,
+          baseScaleId:previousEpoch,candidateScaleId:lineage.baselineEpochId},
+        metrics:{...legacy.metrics,assessmentStatusChangeRate:legacy.metrics.assessmentStatusChangeRate??0,
+          ...(rebaseMetrics??{}),
+          readinessOutputCoverage:Number(releases.snapshots(modelRun.id).some((row)=>row.domain==="readiness")),recoveryIsolationHolds:this.recoveryIsolationHolds}
+      }) : {
+        gateVersion:"rai-bootstrap-invariants-v1", status:this.recoveryIsolationHolds ? "passed" as const : "failed" as const,
+        blocksActivation:!this.recoveryIsolationHolds, failureReasons:this.recoveryIsolationHolds?[]:["recovery_isolation_violated"]
+      };
+      releases.recordEvaluation({runId:modelRun.id,baseRunId:incumbentModelRunId,datasetVersion,
+        status:gate.status,report:{...gate,rebase:explicitRebase?{
+          referenceStartAt:request.modelConfig.baselineReferenceStartAt!,calibrationEndAt:reference.calibrationEndAt,
+          previousEpoch,candidateEpoch:lineage.baselineEpochId,fullHistoryMetrics:legacy.metrics}:null},createdAt:request.evaluatedAt});
+      if (gate.blocksActivation) throw new Error(`Model-version gate failed: ${gate.failureReasons.join(", ") || "not_evaluable"}`);
       this.activateModelRunAndCompleteJob(job.id, modelRun.id, features.length);
     } catch (error) {
       this.finishTrainingMetricRun(
@@ -259,8 +327,10 @@ export class RecomputePipeline {
       .prepare("SELECT id FROM training_metric_runs WHERE model_run_id = ? AND status = 'succeeded'")
       .get(active.modelRunId) as unknown as { id: string } | undefined;
     if (metricRun) {
+      const isV4=this.database.prepare(`SELECT f.feature_schema_version AS schema FROM model_runs m
+        JOIN feature_runs f ON f.id=m.feature_run_id WHERE m.id=?`).get(active.modelRunId)?.schema==="workout-feature-v4";
       const featureRunId = this.modelRuns.featureRunId(active.modelRunId);
-      if (featureRunId) {
+      if (featureRunId && isV4) {
         this.buildAndPersistZoneProfiles(
           metricRun.id,
           this.loadFeatureRunVectors(featureRunId),
@@ -276,8 +346,8 @@ export class RecomputePipeline {
         .get(metricRun.id) as unknown as { localDate: string | null };
       if (existingThrough.localDate === null || existingThrough.localDate < throughDate) {
         const startDate = loads[0]?.localDate ?? throughDate;
-        const physEvidence = this.loadDailyPhysEvidence(startDate, throughDate, request.timezoneIdentifier, request.evaluatedAt);
-        const daily = buildDailyTrainingMetrics(loads, throughDate, physEvidence);
+        const physEvidence = (isV4 ? this.loadDailyPhysEvidence.bind(this) : this.loadLegacyDailyPhysEvidence.bind(this))(startDate, throughDate, request.timezoneIdentifier, request.evaluatedAt);
+        const daily = (isV4 ? buildDailyTrainingMetrics : buildLegacyDailyTrainingMetrics)(loads, throughDate, physEvidence);
         this.persistDailyTrainingMetrics(metricRun.id, daily, request, true);
       }
     }
@@ -334,7 +404,7 @@ export class RecomputePipeline {
         canonicalContractVersion,
         FEATURE_SCHEMA_VERSION,
         JSON.stringify(config),
-        configHash(config),
+        configHash({ version: FEATURE_CONFIG_VERSION, config }),
         createdAt,
         createdAt
       );
@@ -344,7 +414,7 @@ export class RecomputePipeline {
       canonicalContractVersion,
       featureSchemaVersion: FEATURE_SCHEMA_VERSION,
       featureConfig: config as unknown as Record<string, unknown>,
-      featureConfigHash: configHash(config),
+      featureConfigHash: configHash({ version: FEATURE_CONFIG_VERSION, config }),
       status: "running",
       createdAt,
       startedAt: createdAt,
@@ -375,13 +445,13 @@ export class RecomputePipeline {
     const id = opaqueId("model_run");
     const createdAt = appNow();
     const config = request.modelConfig;
-    const hash = configHash({ version: MODEL_CONFIG_VERSION, config });
+    const hash = configHash({ version: MODEL_CONFIG_VERSION, engineVersion: SCORING_MODEL_VERSION, config });
     this.database
       .prepare(`
         INSERT INTO model_runs (
           id, feature_run_id, dataset_version, model_version, model_config_json,
-          model_config_hash, evaluated_at, status, created_at, started_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
+          model_config_hash, evaluated_at, status, created_at, started_at, engine_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)
       `)
       .run(
         id,
@@ -392,7 +462,9 @@ export class RecomputePipeline {
         hash,
         request.evaluatedAt,
         createdAt,
-        createdAt
+        createdAt,
+        // 引擎版本此前只作为 configHash 的输入存在，无法单独查询（§14.4）。历史行保持 NULL。
+        SCORING_MODEL_VERSION
       );
     return {
       id,
@@ -630,8 +702,9 @@ export class RecomputePipeline {
       ? this.database.prepare(`
           SELECT hrv_sdnn_ms AS value, confidence
           FROM canonical_hrv_days WHERE night_id = ? AND hrv_sdnn_ms IS NOT NULL
+            AND window_end_at IS NOT NULL AND window_end_at < ?
           ORDER BY computed_at DESC LIMIT 1
-        `).get(recentNight.id) as unknown as { value: number; confidence: string } | undefined
+        `).get(recentNight.id, workoutStartAt) as unknown as { value: number; confidence: string } | undefined
       : undefined;
     const rhrRows = this.database.prepare(`
       SELECT source_category AS sourceCategory, value_numeric AS value
@@ -657,7 +730,7 @@ export class RecomputePipeline {
         return (this.database.prepare(`SELECT hrv_sdnn_ms AS value FROM canonical_hrv_days WHERE timezone_identifier=? AND local_date >= ? AND local_date < ? AND confidence <> 'missing' AND window_end_at < ? AND hrv_sdnn_ms IS NOT NULL`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number }>).map((row) => Number(row.value));
       }
       if (table === "rhr") {
-        const rows = this.database.prepare(`SELECT source_category AS sourceCategory, value_numeric AS value, start_at AS startAt FROM health_records WHERE type=? AND value_numeric IS NOT NULL AND source_category IN ('apple_watch', 'connect') AND start_at >= ? AND start_at < ?`).all(restingHeartRateType, localDateStartAt(fromDate, timezoneIdentifier), workoutStartAt) as Array<{ sourceCategory: string; value: number; startAt: string }>;
+        const rows = this.database.prepare(`SELECT source_category AS sourceCategory, value_numeric AS value, start_at AS startAt FROM health_records WHERE type=? AND value_numeric IS NOT NULL AND source_category IN ('apple_watch', 'connect') AND start_at >= ? AND start_at < ? AND end_at < ?`).all(restingHeartRateType, localDateStartAt(fromDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier)) as Array<{ sourceCategory: string; value: number; startAt: string }>;
         // Apply Watch-first/Connect fallback independently for each local day.
         const byDate = new Map<string, Array<{ sourceCategory: string; value: number }>>();
         for (const row of rows) {
@@ -668,7 +741,8 @@ export class RecomputePipeline {
         }
         return [...byDate.values()].flatMap((dayRows) => {
           const watch = dayRows.filter((row) => row.sourceCategory === "apple_watch");
-          return (watch.length ? watch : dayRows).map((row) => Number(row.value));
+          const value = medianValue((watch.length ? watch : dayRows).map((row) => Number(row.value)));
+          return value === null ? [] : [value];
         });
       }
       const rows = this.database.prepare(`SELECT workout.start_at AS startAt, workout.duration_seconds AS durationSeconds FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at < ?`).all(runningType, workoutStartAt) as Array<{ startAt: string; durationSeconds: number }>;
@@ -846,10 +920,17 @@ export class RecomputePipeline {
         durationSeconds: interval.durationSeconds
       })),
       heartRate,
+      heartRateSamples: weightedRecordIntervals(heartRecords, row.workoutStartAt, row.workoutEndAt, (value) => value).map((interval) => ({
+        value: interval.value, startOffsetSeconds: Math.max(0,(interval.startMs-Date.parse(row.workoutStartAt))/1000),durationSeconds:interval.durationSeconds
+      })),
+      environment: parsePerformanceConditions(String(this.database.prepare("SELECT metadata_json FROM workouts WHERE id=?").get(row.canonicalWorkoutId)?.metadata_json ?? "{}")),
       ...(() => {
         const recovery = this.loadPersonalRecovery(row.workoutStartAt, timezoneIdentifier);
         return {
           restingHeartRate: recovery.restingHeartRate,
+          // Prior-day reference only. Missing history must not reopen the
+          // recovery -> HRR -> session type -> Fitness channel.
+          restingHeartRateReference: recovery.baseline.restingHeartRateBpm,
           hrvSdnn: recovery.hrvSdnn,
           sleepDurationMinutes: recovery.sleepDurationMinutes,
           recentLoadMinutes: recovery.recentLoadMinutes,
@@ -890,17 +971,14 @@ export class RecomputePipeline {
         featureRunId: featureRun.id,
         trainingSessionId: session.trainingSessionId
       });
-      const feature = extractWorkoutFeatureVector(
-        featureId,
-        featureRun.id,
-        this.buildFeatureSource(
-          session,
-          overrideSnapshot.byTrainingSessionId.get(session.trainingSessionId) ?? null,
-          request.timezoneIdentifier
-        ),
-        request.featureConfig,
-        request.evaluatedAt
-      );
+      const source = this.buildFeatureSource(session, overrideSnapshot.byTrainingSessionId.get(session.trainingSessionId) ?? null, request.timezoneIdentifier);
+      const v4 = extractWorkoutFeatureVectorV4(featureId, featureRun.id, source, request.featureConfig, request.evaluatedAt);
+      const feature = projectFeatureV4(v4);
+      // Small pure counterfactual, not a second full recomputation/shadow system.
+      const counterfactual = projectFeatureV4(extractWorkoutFeatureVectorV4(featureId, featureRun.id, {
+        ...source, restingHeartRate: 99, hrvSdnn: 1, sleepDurationMinutes: 1, recentLoadMinutes: 9999
+      }, request.featureConfig, request.evaluatedAt));
+      this.recoveryIsolationHolds &&= semanticHash(feature) === semanticHash(counterfactual);
       insert.run(
         feature.id,
         feature.featureRunId,
@@ -921,8 +999,8 @@ export class RecomputePipeline {
         feature.eligibilityStatus,
         feature.qualityScore,
         JSON.stringify(feature.missingReasons),
-        JSON.stringify(feature.signals),
-        JSON.stringify(feature.provenance),
+        encodeFeaturePayloadV4(v4.payload),
+        JSON.stringify(v4.provenance),
         feature.computedAt
       );
       features.push(feature);
@@ -953,7 +1031,7 @@ export class RecomputePipeline {
       WHERE active.singleton = 1
     `).get() as unknown as { id: string; configHash: string; schemaVersion: string; contractVersion: string; timezone: string; metricConfig: string } | undefined;
     const contract = this.manifestValue("parser_contract_version") ?? CONTRACT_VERSION;
-    if (!parent || parent.configHash !== configHash(request.featureConfig) ||
+    if (!parent || parent.configHash !== configHash({ version: FEATURE_CONFIG_VERSION, config: request.featureConfig }) ||
         parent.schemaVersion !== FEATURE_SCHEMA_VERSION || parent.contractVersion !== contract ||
         parent.timezone !== request.timezoneIdentifier) return null;
 
@@ -1009,7 +1087,7 @@ export class RecomputePipeline {
     const rows = this.database.prepare(`
       SELECT * FROM workout_features WHERE feature_run_id = ? ORDER BY workout_start_at, id
     `).all(featureRunId) as unknown as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
+    return rows.map((row) => decodeStoredFeature(String(row.features_json), {
       id: String(row.id), featureRunId: String(row.feature_run_id), trainingSessionId: String(row.training_session_id),
       canonicalWorkoutId: String(row.canonical_workout_id), workoutStartAt: String(row.workout_start_at),
       durationSeconds: Number(row.duration_seconds), distanceKm: asNullableNumber(row.distance_km),
@@ -1171,7 +1249,9 @@ export class RecomputePipeline {
         previousProfile: previous,
         settings: activeSettings
       });
-      const eligibleVo2 = [...directVo2, ...labeledPerformance].filter((item) => item.observedAt < effectiveAt);
+      // Race performance already feeds Performance VDOT; it is not a second
+      // direct VO2 measurement in the threshold/profile path.
+      const eligibleVo2 = directVo2.filter((item) => Date.parse(item.observedAt) < Date.parse(effectiveAt));
       const vo2 = estimateVo2Max(eligibleVo2, effectiveAt);
       const performance = estimatePerformanceVdot(
         vo2,
@@ -1192,6 +1272,7 @@ export class RecomputePipeline {
             paceSecondsPerKm: threshold.paceSecondsPerKm,
             confidence: threshold.confidence,
             evidenceCount: threshold.evidenceCount,
+            evidenceSource: threshold.method === "observed_threshold_v3" ? "observed" : "inferred",
             dataThroughAt: threshold.latestEvidenceAt
           }
         : null;
@@ -1337,6 +1418,10 @@ export class RecomputePipeline {
         loadBreakdown: breakdown
       });
       if (load) {
+        const modelId = String(this.database.prepare("SELECT model_run_id FROM training_metric_runs WHERE id=?").get(metricRunId)?.model_run_id);
+        new SqliteModelReleaseRepository(this.database).putSnapshot(modelId,"load_vector",feature.trainingSessionId,feature.workoutStartAt,
+          buildLoadVectorV2({load,zoneSummary}));
+        new SqliteModelReleaseRepository(this.database).putSnapshot(modelId,"zone_coherence",feature.trainingSessionId,feature.workoutStartAt,zoneSummary);
         insertZoneSummary.run(
           deterministicId("workout_zone_summary", { metricRunId, trainingSessionId: feature.trainingSessionId }),
           metricRunId, feature.trainingSessionId, feature.id, zoneProfile.id,
@@ -1498,6 +1583,16 @@ export class RecomputePipeline {
    * null and is retained only as a compatibility column.
    */
   private loadDailyPhysEvidence(startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {
+    const result:DailyPhysEvidence[]=[];
+    for(let date=startDate;date<=throughDate;date=addDays(date,1)){
+      const end=Date.parse(localDateStartAt(addDays(date,1),timezoneIdentifier))-1;
+      const asOf=new Date(Math.min(end,Date.parse(asOfAt))).toISOString();
+      result.push({localDate:date,physState:physStateFromReadiness(loadDatedReadiness(this.database,asOf,timezoneIdentifier))});
+    }
+    return result;
+  }
+
+  private loadLegacyDailyPhysEvidence(startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {
     if (throughDate < startDate) return [];
     const baselineStart = addDays(startDate, -60);
     const nightRows = this.database.prepare(`
@@ -1599,7 +1694,7 @@ export class RecomputePipeline {
     const currentFeatureRun = this.database.prepare("SELECT parent_feature_run_id AS parent FROM feature_runs WHERE id=?")
       .get(modelRun.featureRunId) as { parent: string | null } | undefined;
     if (!currentFeatureRun?.parent) return null;
-    const expectedModelHash = configHash({ version: MODEL_CONFIG_VERSION, config: request.modelConfig });
+    const expectedModelHash = configHash({ version: MODEL_CONFIG_VERSION, engineVersion: SCORING_MODEL_VERSION, config: request.modelConfig });
     const expectedFeatureHash = configHash(request.featureConfig);
     const row = this.database.prepare(`
       SELECT checkpoint.model_run_id AS parentModelRunId,
@@ -1633,6 +1728,13 @@ export class RecomputePipeline {
         prefix.some((item, index) => features[index]?.trainingSessionId !== item.sessionId)) return null;
     const state = parseJson<ModelCheckpointState | null>(row.stateJson, null);
     if (!state?.baseline || !Number.isFinite(state.trueAbility) || !Number.isFinite(state.eligibleWorkoutCount)) {
+      return null;
+    }
+    // The confirmation buffer has to be reconstructible, not defaulted: resuming
+    // with an empty buffer would let a replayed prefix confirm a decline the live
+    // run had not, and vice versa.
+    if (!Array.isArray(state.pendingNegativeIds) ||
+        state.pendingNegativeIds.some((id) => typeof id !== "string")) {
       return null;
     }
     this.database.prepare(`
@@ -1710,6 +1812,7 @@ export class RecomputePipeline {
     const calibrationFeatures: WorkoutFeatureVector[] = [];
     for (const feature of sorted) {
       if (feature.eligibilityStatus !== "eligible") continue;
+      if (request.modelConfig.baselineReferenceStartAt && Date.parse(feature.workoutStartAt)<Date.parse(request.modelConfig.baselineReferenceStartAt)) continue;
       calibrationFeatures.push(feature);
       if (hasCompletedCalibration(calibrationFeatures, request.modelConfig)) break;
     }
@@ -1744,9 +1847,23 @@ export class RecomputePipeline {
     let lastEligibleLocalDate: string | null = resume?.state.lastEligibleLocalDate ?? null;
     let lastEligibleTrueAbility = resume?.state.lastEligibleTrueAbility ?? 50;
     let eligibleWorkoutCount = resume?.state.eligibleWorkoutCount ?? 0;
+    // §6.9 confirmation buffer. Carried in the checkpoint on purpose: a resumed
+    // replay must not silently re-count or lose an unconfirmed decline.
+    let pendingNegativeIds: string[] = [...(resume?.state.pendingNegativeIds ?? [])];
     let lastCheckpointMonth: string | null = resume
       ? localDateAt(sorted[resume.throughSequence]?.workoutStartAt ?? "", request.timezoneIdentifier).slice(0, 7)
       : null;
+
+    // Same bounded evidence window in full replay, checkpoint resume and offline reports.
+    const adaptiveBaselines = buildAdaptiveBaselineTimeline(sorted, {
+      ...defaultAdaptiveBaselinePolicy,
+      minimumIndependentSessions: request.modelConfig.comparabilityPolicy.minimumIndependentSessions,
+      minimumSpanDays: request.modelConfig.comparabilityPolicy.minimumSpanDays
+    });
+    const stratumHistoryByIndex = request.modelConfig.comparabilityHistoryMode === "bounded"
+      ? adaptiveBaselines.map((value) => value.history)
+      : buildLegacyStratumHistory(sorted);
+    const baselineEpochId = this.fitnessEpochId(baseline, features, request, modelRun);
 
     for (const [index, feature] of sorted.entries()) {
       if (resume && index <= resume.throughSequence) continue;
@@ -1784,17 +1901,34 @@ export class RecomputePipeline {
           );
         }
         const calibrationMaturity = clamp((eligibleWorkoutCount + 1) / 12, 0.25, 1);
-        const score = scoreFeature(feature, baseline, calibrationMaturity, request.modelConfig);
+        const score = scoreFeature(
+          feature,
+          baseline,
+          calibrationMaturity,
+          stratumHistoryByIndex[index] ?? null,
+          request.modelConfig
+        );
         const update = updateTrueAbilityFromFeatureScore(
           trueAbility,
           eligibleWorkoutCount,
           score,
-          request.modelConfig
+          request.modelConfig,
+          pendingNegativeIds.length
         );
-        const explanationCodes = [...score.explanationCodes];
-        if (score.currentAbility !== null && score.currentAbility < trueAbility && update.directionFactor === 0.25) {
-          explanationCodes.push("fatigue_protected_negative_update");
+        // Keep the ids in step with the count the scoring layer reported: it either
+        // advanced by one (this feature), or reset to zero (applied, or contradicted
+        // by a positive). A non-qualifying workout leaves it untouched.
+        if (update.pendingNegativeConfirmations === pendingNegativeIds.length + 1) {
+          pendingNegativeIds = [...pendingNegativeIds, feature.id];
+        } else if (update.pendingNegativeConfirmations === 0) {
+          pendingNegativeIds = [];
         }
+        const explanationCodes = [...score.explanationCodes];
+        // `fatigue_protected_negative_update` is deliberately no longer emitted:
+        // the direction factor is no longer conditioned on the recovery score, so
+        // nothing here can be "protected by fatigue" any more. The value and its
+        // UI label are kept in contracts/web because historical assessments still
+        // contain it and must keep rendering.
         const nextTrueAbility = update.nextTrueAbility;
         assessment = {
           id: assessmentId,
@@ -1820,7 +1954,14 @@ export class RecomputePipeline {
           explanation: {
             featureEligibility: feature.eligibilityStatus,
             missingReasons: feature.missingReasons,
-            baselineCalibrationEndAt: baseline.calibrationEndAt
+            baselineCalibrationEndAt: baseline.calibrationEndAt,
+            baselineEpochId,
+            baselinePolicyVersion: BASELINE_POLICY_VERSION,
+            comparabilityHistoryMode: request.modelConfig.comparabilityHistoryMode,
+            adaptiveBaseline: adaptiveBaselines[index] ?? null,
+            confidenceV2: score.confidenceV2,
+            stratumComparability: score.stratumComparability,
+            learningObservation: score.learningObservation
           },
           assessedAt: feature.workoutStartAt
         };
@@ -1849,7 +1990,8 @@ export class RecomputePipeline {
             trueAbility,
             lastEligibleLocalDate,
             lastEligibleTrueAbility,
-            eligibleWorkoutCount
+            eligibleWorkoutCount,
+            pendingNegativeIds
           });
         }
         lastCheckpointMonth = month;
@@ -1875,6 +2017,50 @@ export class RecomputePipeline {
         }),
         modelRun.id
       );
+  }
+
+  private fitnessEpochId(baseline:PersonalBaseline|null, features:WorkoutFeatureVector[], request:RecomputeRequest, model:ModelRun):string|null {
+    if (!baseline) return null;
+    return semanticHash({policy:BASELINE_POLICY_VERSION,
+      calibrationSessions:sortWorkoutFeaturesChronologically(features).filter((f)=>baseline.calibrationFeatureIds.includes(f.id))
+        .map((f)=>({trainingSessionId:f.trainingSessionId,workoutStartAt:f.workoutStartAt})),
+      // Learning-rate/confidence/history changes do not change score coordinates.
+      // Including their config hash here would incorrectly waive regression gates.
+      scaleConfig:{weights:request.modelConfig.dimensionWeights,zScale:request.modelConfig.dimensionScoreZScale},
+      featureConfigVersion:FEATURE_CONFIG_VERSION,timezone:request.timezoneIdentifier,
+      dimensions:{efficiency:baseline.dimensions.efficiency??null,pace:baseline.dimensions.pace??null,stability:baseline.dimensions.stability??null}});
+  }
+
+  private sealDomainSnapshots(model: ModelRun, metricRunId: string, features: WorkoutFeatureVector[], request: RecomputeRequest, lineage: ModelLineageV2): void {
+    const releases = new SqliteModelReleaseRepository(this.database);
+    const asOf=request.evaluatedAt;
+    const put=(domain:string,payload:unknown)=>releases.putSnapshot(model.id,domain,"summary",asOf,payload);
+    const assessments=this.database.prepare("SELECT * FROM ability_assessments WHERE model_run_id=? ORDER BY sequence_number").all(model.id);
+    put("fitness",{lineage,assessments,daily:this.database.prepare("SELECT local_date,true_ability,snapshot_status FROM daily_ability_snapshots WHERE model_run_id=? ORDER BY local_date").all(model.id)});
+    put("readiness",readinessForRun(this.database,lineage));
+    put("load",{lineage:{...lineage,modelVersion:"rai-training-load-v2.0.0",configVersion:TRAINING_LOAD_CONFIG_VERSION,configHash:semanticHash({config:defaultDailyMetricConfig,version:TRAINING_LOAD_CONFIG_VERSION}),baselineEpochId:null,calibrationCohortHash:null},days:this.database.prepare("SELECT * FROM daily_training_metrics WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
+    put("zones",{lineage:{...lineage,modelVersion:"rai-training-zones-v2.0.0",configVersion:TRAINING_ZONE_CONFIG_VERSION,configHash:semanticHash({version:TRAINING_ZONE_CONFIG_VERSION,physiology:"rai-physiology-v1.8.0"}),baselineEpochId:null,calibrationCohortHash:null},profiles:this.database.prepare("SELECT * FROM daily_zone_profiles WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
+    const cutoff=Date.parse(asOf)-56*86400000;
+    const preparation=assessPreparation(features.filter((f)=>f.eligibilityStatus!=="excluded" && (f.distanceKm??0)>0 && Date.parse(f.workoutStartAt)>=cutoff)
+      .map((f)=>({observedAt:f.workoutStartAt,distanceKm:f.distanceKm!,durationSeconds:f.durationSeconds})),asOf);
+    const lateRuns=features.flatMap((feature)=>{
+      const payload=feature.provenance.featurePayloadV4 as WorkoutFeaturePayloadV4|undefined;
+      if(!payload||feature.eligibilityStatus!=="eligible"||Date.parse(feature.workoutStartAt)<cutoff||
+        !["easy","steady","long_run"].includes(feature.sessionType)||feature.durationSeconds<75*60||
+        payload.execution.aerobicDecouplingPct===null)return [];
+      return [{trainingSessionId:feature.trainingSessionId,asOf:feature.workoutStartAt,
+        rawDecouplingPct:payload.execution.aerobicDecouplingPct,pairedCoverage:payload.execution.pairedCoverage,
+        normalizationStatus:payload.normalization.status}];
+    });
+    const comparableCount=lateRuns.filter((row)=>row.normalizationStatus==="not_needed"||row.normalizationStatus==="applied").length;
+    const durability=assessDurability({lateRunStability:null,matchedPerformanceEvidence:null,lateRunEvidenceCount:comparableCount,evidenceTargetCount:2});
+    const domainLineage={...lineage,modelVersion:DURABILITY_MODEL_VERSION,configVersion:"rai-preparation-config-v1",
+      configHash:semanticHash({targets:PREPARATION_TARGETS,windowDays:PREPARATION_WINDOW_DAYS,penalty:"disabled_until_calibrated"}),baselineEpochId:null,calibrationCohortHash:null};
+    put("durability",["five_k","ten_k","half_marathon"].map((distance)=>({
+      ...buildDurabilitySnapshot({distance:distance as "five_k"|"ten_k"|"half_marathon",preparation,durability,lineage:domainLineage}),
+      rawLateRunEvidence:lateRuns,validationStatus:"not_empirically_calibrated"
+    })));
+
   }
 
   private createCalibrationAssessment(
@@ -2086,6 +2272,7 @@ export class RecomputePipeline {
   private pruneSupersededRuns(): void {
     if (SUPERSEDED_RUN_RETENTION <= 0) return;
     try {
+      new SqliteModelReleaseRepository(this.database).retireOldReleases(SUPERSEDED_RUN_RETENTION);
       this.store.pruneSupersededModelRuns({ keepRecent: SUPERSEDED_RUN_RETENTION });
     } catch (error) {
       process.stderr.write(
