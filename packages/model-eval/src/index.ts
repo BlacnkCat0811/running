@@ -465,6 +465,43 @@ export function assertCaWeightAblationReport(report: unknown): void {
     if (typeof outcome.refusalReasons !== "object" || outcome.refusalReasons === null) {
       throw new Error("Ablation report: outcome.refusalReasons is required");
     }
+    // §6.9：接受率必须**分层**报告（课型 / comparisonStratum / normalization.status /
+    // 环境覆盖 / 设备来源）。一个总分会让"只在某一课型里 0 接受"看不出来，
+    // 而那正是 §6.9-7 要复査的情形。
+    const byGroup = asRecord("outcome.acceptanceByGroup", outcome.acceptanceByGroup);
+    const groupKeys = Object.keys(byGroup);
+    if (groupKeys.length === 0) {
+      throw new Error("Ablation report: outcome.acceptanceByGroup must not be empty (§6.9)");
+    }
+    // 轴必须存在，而不是"这次碰巧有一组"。至少要有课型与 comparisonStratum 两轴 ——
+    // 只报一个轴等于把分层退化成总量。
+    for (const axis of ["session:", "stratum:"] as const) {
+      if (!groupKeys.some((key) => key.startsWith(axis))) {
+        throw new Error(`Ablation report: outcome.acceptanceByGroup is missing the ${axis} axis (§6.9)`);
+      }
+    }
+    for (const [key, value] of Object.entries(byGroup)) {
+      const group = asRecord(`outcome.acceptanceByGroup.${key}`, value);
+      // 机会数与接受数都要在，才能算出率；分母为 0 时必须**看得见**是 0，
+      // 而不是让这一组消失（§6.9："分母为 0 则该率=null，并报告 0 次机会"）。
+      for (const field of ["opportunitiesPositive", "opportunitiesNegative", "acceptedPositive", "acceptedNegative"] as const) {
+        assertCount(`outcome.acceptanceByGroup.${key}.${field}`, group[field]);
+      }
+      if ((group.acceptedPositive as number) > (group.opportunitiesPositive as number) ||
+          (group.acceptedNegative as number) > (group.opportunitiesNegative as number)) {
+        throw new Error(`Ablation report: ${key} accepted more than it had opportunities for`);
+      }
+    }
+    // §6.9-1：必须能报出**首次有效负学习**所需的训练次数。没有负向接受时 null 是对的
+    // （确实没有"首次"），但一旦接受过，延迟就必须存在 —— 否则"接受了多少"与
+    // "多久才接受"会被拆开，而后者才是 §6.9-7 判检测延迟的依据。
+    const latency = acceptance.negativeOpportunitiesToFirstAcceptance;
+    const firstAt = acceptance.firstNegativeAcceptanceAtAttempt;
+    if (latency !== null) assertCount("outcome.acceptance.negativeOpportunitiesToFirstAcceptance", latency);
+    if (firstAt !== null) assertCount("outcome.acceptance.firstNegativeAcceptanceAtAttempt", firstAt);
+    if ((acceptance.negativeAccepted as number) > 0 && (latency === null || firstAt === null)) {
+      throw new Error("Ablation report: a negative acceptance must report its detection latency (§6.9-1)");
+    }
   }
 
   if (!Array.isArray(root.correlations)) throw new Error("Ablation report: correlations are required");

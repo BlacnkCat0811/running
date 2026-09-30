@@ -28,7 +28,7 @@
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck`（现覆盖 `packages/`、`apps/`、**`scripts/`**） | **0** |
-| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1086 tests / 1068 pass / 0 fail / 18 skipped** |
+| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1090 tests / 1072 pass / 0 fail / 18 skipped** |
 | web 侧全量 | `npm run test -w @rai/web` | **18 文件 / 111 tests / 0 fail** |
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
@@ -61,8 +61,8 @@
 
 | 状态 | 含义 | 数量 |
 |---|---|---|
-| `cited` | 测试里按 ID 引用（机械可查 `\bID\b`） | **50** |
-| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **4** |
+| `cited` | 测试里按 ID 引用（机械可查 `\bID\b`） | **51** |
+| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **3** |
 | `missing` | 既未引用也未声明 | **0**（非 0 即失败，退出码 1） |
 
 本轮把 30 条**本来就已被测试覆盖、只是没按 ID 引用**的用例补上了引用
@@ -75,7 +75,7 @@
 | **F08** | 快速下坡/速度尖峰。**没有覆盖**，且是刻意的：要挡住它需要**新增检测器政策**，阈值必须先独立回放（见 §五-3） |
 | **P02** | 环境去偏差的单层行为有测试；「同一历史环境被两层各去一次」的 ledger 断言没有 —— 当前只有 N0 identity adapter，没有第二层 |
 | **P04** | race-evidence 单次预算有测试；「Preparation 与 Durability 不重复扣罚」要等 durability 数值罚分启用后才有可断言的路径 |
-| **F13** | 「缺天气不冻结负学习」有测试；「报分层接受率/检测延迟」由消融**报告**承担，不是测试 |
+
 
 > **F02 已于批次 28 关闭**：新增一条用例在**同一对事实源**上同时断言两半
 > （`packages/application/test/recovery-isolation-e2e.test.ts` 的
@@ -84,6 +84,15 @@
 > 该夹具只给静息心率基线，而**单独一个升高的 RHR 按设计就是 `no_low_signal`**
 > （`classifyRecoveryFlags` 要求 `sleepLow || (hrvLow && rhrUp)`），
 > 所以用例用 `amend` 缝单独补了睡眠基线 —— 否则夹具根本产生不了降阶，测试会"因为错误的理由通过"。
+
+> **F13 已于批次 29 关闭**：「报分层接受率/延迟」这一半此前只存在于**产物**里而没有进入**契约** ——
+> `acceptanceByGroup`（按 `stratum:` / `session:` / `source:` / `environment:` 四轴分层）
+> 与 `negativeOpportunitiesToFirstAcceptance` 本来就在 `CA_WEIGHT_ABLATION.json` 里，
+> 但 `assertCaWeightAblationReport` 不要求它们，**删掉也不会有任何检查转红**。
+> 现在契约要求：每个候选必须有非空的 `acceptanceByGroup`、必须含 `session:` 与 `stratum:` 两轴
+> （只报一个轴等于把分层退化成总量）、每组必须带机会数与接受数（分母为 0 要**看得见**是 0）、
+> 接受数不得超过机会数，且**一旦接受过负向学习就必须报出检测延迟**。
+> 「不因 `unavailable` 一律冻结」那一半仍由 `environment-does-not-freeze-learning.test.ts` 覆盖。
 
 历史逐条对照表见 `archive/RAI_V2_BATCH18_ACCEPTANCE_MATRIX_2026-09-30.md`（其总数口径已过时，
 结论仍有效，但请以本节的可执行判据为准）。

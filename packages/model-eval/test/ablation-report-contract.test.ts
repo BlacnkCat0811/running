@@ -11,14 +11,24 @@ import { assertCaWeightAblationReport } from "../src/index.js";
  * 而 deliverables 里那份产物是更早的快照 —— 谁都没发现。所以生成端现在先自检。
  */
 
+/** §6.9：接受率按轴分层。至少要有课型与 comparisonStratum 两轴。 */
+const acceptanceByGroup = () => ({
+  "stratum:steady_aerobic": { opportunitiesPositive: 3, opportunitiesNegative: 1, acceptedPositive: 2, acceptedNegative: 0, unscorable: 0 },
+  "session:easy": { opportunitiesPositive: 3, opportunitiesNegative: 1, acceptedPositive: 2, acceptedNegative: 0, unscorable: 0 }
+});
+
 const candidate = (name: string) => ({
   candidate: name,
   dimensionWeights: { efficiency: 0.375, pace: 0.3125, cardio: 0, stability: 0.1875, recovery: 0 },
   scorableRate: 1,
   refusalReasons: { applied: 1 },
+  acceptanceByGroup: acceptanceByGroup(),
   currentAbility: { mean: 50, saturationRate: 0 },
   trueAbility: { meanAbsoluteDelta: 1.2 },
-  acceptance: { positiveCandidates: 3, positiveAccepted: 2, negativeCandidates: 1, negativeAccepted: 0 }
+  acceptance: {
+    positiveCandidates: 3, positiveAccepted: 2, negativeCandidates: 1, negativeAccepted: 0,
+    negativeOpportunitiesToFirstAcceptance: null, firstNegativeAcceptanceAtAttempt: null
+  }
 });
 
 const validReport = (overrides: Record<string, unknown> = {}) => ({
@@ -116,4 +126,74 @@ test("malformed numbers are rejected rather than reported as a plausible rate", 
   assert.throws(() => assertCaWeightAblationReport(validReport({ outcomes })), /scorableRate must be a finite number/);
   assert.throws(() => assertCaWeightAblationReport(validReport({ featureCount: -1 })), /non-negative integer/);
   assert.throws(() => assertCaWeightAblationReport(validReport({ reportVersion: "v0" })), /unsupported reportVersion/);
+});
+
+// -----------------------------------------------------------------------------
+// §6.9 的分层接受率与检测延迟。
+//
+// 产物里本来就有这两样，但**契约没要求**：它们可以悄悄消失而没有任何检查转红。
+// 而 §6.9-7 恰恰要靠"某一课型/分桶长期 0 接受"来判定，一个总分看不出来。
+// -----------------------------------------------------------------------------
+
+test("F13: acceptance must be reported per stratum and per session type, not as one total", () => {
+  const withoutGroups = [candidate("v2a"), candidate("v2b"), candidate("a"), candidate("b"), candidate("c")];
+  delete (withoutGroups[0] as Record<string, unknown>).acceptanceByGroup;
+  assert.throws(
+    () => assertCaWeightAblationReport(validReport({ outcomes: withoutGroups })),
+    /acceptanceByGroup must be an object/
+  );
+
+  // 只报一个轴等于把分层退化成总量。
+  const stratumOnly = [candidate("v2a"), candidate("v2b"), candidate("a"), candidate("b"), candidate("c")];
+  (stratumOnly[0] as Record<string, unknown>).acceptanceByGroup = {
+    "stratum:steady_aerobic": { opportunitiesPositive: 3, opportunitiesNegative: 1, acceptedPositive: 2, acceptedNegative: 0 }
+  };
+  assert.throws(
+    () => assertCaWeightAblationReport(validReport({ outcomes: stratumOnly })),
+    /missing the session: axis/
+  );
+
+  // 分母为 0 必须看得见是 0，而不是让这一组消失。
+  const missingCounts = [candidate("v2a"), candidate("v2b"), candidate("a"), candidate("b"), candidate("c")];
+  (missingCounts[0] as Record<string, unknown>).acceptanceByGroup = {
+    ...acceptanceByGroup(),
+    "stratum:interval": { opportunitiesPositive: 0, opportunitiesNegative: 0, acceptedPositive: 0 }
+  };
+  assert.throws(
+    () => assertCaWeightAblationReport(validReport({ outcomes: missingCounts })),
+    /acceptedNegative must be a non-negative integer/
+  );
+});
+
+test("F13: a group cannot accept more than it had opportunities for", () => {
+  const outcomes = [candidate("v2a"), candidate("v2b"), candidate("a"), candidate("b"), candidate("c")];
+  (outcomes[0] as Record<string, unknown>).acceptanceByGroup = {
+    ...acceptanceByGroup(),
+    "stratum:interval": { opportunitiesPositive: 1, opportunitiesNegative: 0, acceptedPositive: 4, acceptedNegative: 0 }
+  };
+  assert.throws(
+    () => assertCaWeightAblationReport(validReport({ outcomes })),
+    /accepted more than it had opportunities for/
+  );
+});
+
+test("F13: a negative acceptance must report how long the gate took to allow it", () => {
+  // §6.9-1：报出的不能只是"接受了多少"，还要有"多久才接受"。
+  const accepted = [candidate("v2a"), candidate("v2b"), candidate("a"), candidate("b"), candidate("c")];
+  (accepted[0] as Record<string, unknown>).acceptance = {
+    positiveCandidates: 3, positiveAccepted: 2, negativeCandidates: 5, negativeAccepted: 2,
+    negativeOpportunitiesToFirstAcceptance: null, firstNegativeAcceptanceAtAttempt: null
+  };
+  assert.throws(
+    () => assertCaWeightAblationReport(validReport({ outcomes: accepted })),
+    /must report its detection latency/
+  );
+
+  // 没有负向接受时 null 是对的：确实没有"首次"，不该为了好看编一个数。
+  const neverAccepted = [candidate("v2a"), candidate("v2b"), candidate("a"), candidate("b"), candidate("c")];
+  (neverAccepted[0] as Record<string, unknown>).acceptance = {
+    positiveCandidates: 3, positiveAccepted: 2, negativeCandidates: 5, negativeAccepted: 0,
+    negativeOpportunitiesToFirstAcceptance: null, firstNegativeAcceptanceAtAttempt: null
+  };
+  assert.doesNotThrow(() => assertCaWeightAblationReport(validReport({ outcomes: neverAccepted })));
 });
