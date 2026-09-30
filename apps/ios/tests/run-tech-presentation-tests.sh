@@ -201,6 +201,13 @@ metadata_only = {
     "timezone": "时区元数据；界面统一按 Asia/Shanghai 呈现",
     "lastSyncedAt": "同步时间戳；刷新结果已由 sync.status/lastSuccessAt 承载（横幅披露区渲染的是 sync 那一路）",
     "recommendationRevision": "CAS 版本号，仅供写入冲突检测",
+    # 严格日期合同的**完整**评估结果（V2），不是展示层摘要。首页渲染的是由它派生的
+    # 紧凑 `recoveryAssessment`（四态互不替代：sync / coverage / recoveryAssessment /
+    # recommendation，各自回答不同问题）；把它整份铺到首页会让首页同时出现两套恢复说法。
+    # 它随 payload 发出是为了**服务端验收与工具核对**（能逐信号看到 observedAt/availableAt/
+    # reasonCodes），iOS 目前刻意不消费 —— 已核实 `grep readinessSnapshot apps/ios` 为空。
+    # 要改成展示位，请连同"首页应该展示哪一套恢复说法"一起决定，别只加一行锚点。
+    "readinessSnapshot": "严格 V2 完整评估结果：证据层，首页展示的是派生的 recoveryAssessment 摘要",
     # 刻意移出展示位，不是遗漏：它把「今晚有没有夜」当成「数据新不新」，于是一个
     # 没戴表的普通夜晚被显示成"数据过期"，还让历史夜参与今天的判断。契约里它已标
     # `@deprecated`，iOS 也已停止渲染 —— 保留解码只为尚未升级的旧客户端。

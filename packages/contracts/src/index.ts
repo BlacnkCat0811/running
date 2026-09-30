@@ -129,7 +129,8 @@ export interface ImportIssue {
   message: string;
 }
 
-export const FEATURE_SCHEMA_VERSION = "workout-feature-v3" as const;
+export const FEATURE_SCHEMA_VERSION = "workout-feature-v4" as const;
+export const LEGACY_FEATURE_SCHEMA_VERSION = "workout-feature-v3" as const;
 
 export const sessionTypes = [
   "unknown",
@@ -161,6 +162,17 @@ export const paceZones = [
   "sprint"
 ] as const;
 export type PaceZone = (typeof paceZones)[number];
+
+/**
+ * HR zones counted as "high intensity" for `LoadVectorV2.highIntensityMinutes` (§9.2).
+ *
+ * Single definition on purpose: this set was previously an inline literal inside
+ * `analyzeWorkoutZones` (`highHeart`), and a second copy in the load vector would let the two
+ * drift without anything failing. The two ladders are **not** structurally isomorphic
+ * (`aerobic_power` exists only on the heart-rate side), so a set of names is the only safe
+ * shared representation — see the §10.4 coherence policy for why indices must not be compared.
+ */
+export const highIntensityHeartRateZones = ["lactate_threshold", "anaerobic"] as const satisfies readonly HeartRateZone[];
 
 export const stimulusTypes = [
   "recovery",
@@ -210,6 +222,12 @@ export interface DailyZoneProfile {
     restingHeartRateDays: number;
     maximumHeartRateWorkouts: number;
     thresholdEvidenceCount: number;
+    valueSources?: {
+      restingHeartRate: ZoneValueSource;
+      maximumHeartRate: ZoneValueSource;
+      thresholdPace: ZoneValueSource;
+      thresholdEvidence: "observed" | "inferred" | "fallback" | "manual";
+    };
   };
   createdAt: string;
 }
@@ -229,6 +247,25 @@ export interface StimulusScore {
   confidence: number;
 }
 
+export type ZoneAgreement = "aligned" | "pace_high" | "hr_high" | "insufficient";
+
+/**
+ * §10.4 HR/Pace 双来源一致性。
+ *
+ * 🔴 HR zone 与 Pace zone **并不同构**（`aerobic_power` 只在 HR 一侧，`anaerobic_endurance` /
+ * `sprint` 只在 Pace 一侧），所以实现里先映射到共享生理努力档，再用**显式语义映射**判断对齐 ——
+ * **不得把各自数组下标相减当冲突分**。
+ */
+export interface ZoneCoherence {
+  agreement: ZoneAgreement;
+  comparisonPolicyVersion: string;
+  /** **真实配对**覆盖率：两侧同时落到某个分区的时长占比，不是 `min(两侧覆盖率)`。 */
+  pairedCoverage: number;
+  /** 达到最小持续时长的分歧秒数合计；短暂 HR 滞后不计入。 */
+  sustainedConflictSeconds: number;
+  reasonCodes: string[];
+}
+
 export interface WorkoutZoneSummary {
   trainingSessionId: string;
   zoneProfileId: string;
@@ -241,6 +278,17 @@ export interface WorkoutZoneSummary {
   paceExposure: Array<ZoneExposure<PaceZone>>;
   stimulusScores: StimulusScore[];
   explanationCodes: string[];
+  /**
+   * §10.4 HR/Pace 双来源一致性。与 `explanationCodes` 里的 `heart_rate_pace_conflict` 并存：
+   * 后者是旧的下标相减判据（会改 `stimulusConfidence`），本字段是显式语义映射的版本，
+   * **两者尚未统一** —— 切换需要一次带前后对照的变更。
+   *
+   * ⚠️ **可选**：内存计算路径（`analyzeWorkoutZones`）总会给出它；但
+   * `active_workout_zone_summaries` 是**按列存取**的，把它落库需要新增列（Phase 5 §14），
+   * 所以从库里重建的 summary 目前取不到。消费方必须把**缺失**当作"未计算"，
+   * 不能当作 `aligned` —— 与 §5.3「缺数据不得谎报已归一化」同一条原则。
+   */
+  zoneCoherence?: ZoneCoherence;
 }
 
 export interface TrainingLoadBreakdown {
@@ -284,8 +332,8 @@ export interface UpdateTrainingZoneProfileInput {
   lactateThresholdPace: { mode: "auto" | "manual"; valueSecondsPerKm: number | null };
 }
 
-export const TRAINING_ZONE_CONFIG_VERSION = "training-zone-config-v3" as const;
-export const TRAINING_LOAD_CONFIG_VERSION = "training-load-config-v4" as const;
+export const TRAINING_ZONE_CONFIG_VERSION = "training-zone-config-v4" as const;
+export const TRAINING_LOAD_CONFIG_VERSION = "training-load-config-v5" as const;
 
 export type TrainingLoadSource =
   | "composite"
@@ -445,7 +493,9 @@ export const missingReasonCodes = [
   "source_not_comparable",
   "session_ambiguous",
   "user_excluded",
-  "recovery_data_missing"
+  "recovery_data_missing",
+  /** §3.3: read from a frozen V3 payload, so V4-only evidence is unavailable, not measured. */
+  "unavailable_in_legacy_feature"
 ] as const;
 
 export type MissingReasonCode = (typeof missingReasonCodes)[number];
@@ -521,6 +571,49 @@ export interface WorkoutFeatureVector {
   computedAt: string;
 }
 
+/** Frozen legacy in-memory projection, used only at existing scoring/read boundaries. */
+export type WorkoutFeatureVectorV3 = WorkoutFeatureVector;
+
+export interface WorkoutFeaturePayloadV4 {
+  schemaVersion: "workout-feature-v4";
+  raw: {
+    efficiencyRaw: number | null;
+    paceRawMetersPerSecond: number | null;
+    stabilityRaw: number | null;
+    heartRateReserveFraction: number | null;
+    heartRateCoefficientOfVariation: number | null;
+    speedCoefficientOfVariation: number | null;
+  };
+  normalized: {
+    speedMetersPerSecond: number | null;
+    efficiencySpeedPerBpm: number | null;
+  };
+  normalization: {
+    adapterVersion: string; configHash: string; sourceContextHash: string;
+    status: "applied" | "not_needed" | "unavailable" | "out_of_domain";
+    correctionFraction: number | null;
+    comparability: number; reasonCodes: string[];
+  };
+  execution: {
+    pacingConsistency: number | null;
+    heartRateConsistency: number | null;
+    aerobicDecouplingPct: number | null;
+    pairedCoverage: number;
+    intervalExecutionQuality: number | null;
+  };
+  evidenceFlags: string[];
+}
+
+export interface WorkoutFeatureVectorV4 extends Omit<WorkoutFeatureVector, "signals" | "provenance"> {
+  payload: WorkoutFeaturePayloadV4;
+  provenance: {
+    featureConfigVersion: string;
+    sourceCategory: string;
+    workoutEndAt: string;
+    observedMaximumHeartRate: number | null;
+  };
+}
+
 export interface FeatureRun {
   id: string;
   datasetVersion: string;
@@ -564,6 +657,13 @@ export interface AbilityAssessment {
   confidenceFactors: ConfidenceFactors;
   workoutContribution: number | null;
   evidenceStrength: number | null;
+  /**
+   * Written by the persistence layer, not by the alpha composition. Since
+   * `rai-model-config-v10` the §6.9 alpha formula has no direction factor, so an
+   * applied step stores `1` (the identity) and a step that was not applied stores
+   * `0`. Rows written before v10 may hold `0.4` or `0.25`; the two spans are not
+   * comparable, and after v10 the column duplicates `updatedTrueAbility`.
+   */
   directionFactor: number | null;
   growthResistance: number | null;
   trueAbilityBefore: number | null;
@@ -773,11 +873,26 @@ export interface LactateThresholdEstimate {
   confidenceLevel: PredictionConfidenceLevel;
   evidenceCount: number;
   latestEvidenceAt: string | null;
-  method: "vdot_one_hour_proxy_v1" | "multi_evidence_threshold_v2";
+  method: "vdot_one_hour_proxy_v1" | "multi_evidence_threshold_v2" | "observed_threshold_v3";
   evidenceCodes: PhysiologyEvidenceCode[];
 }
 
 export interface RaceTimePrediction {
+  machineLearningPolicyReason?: "calibration_unavailable" | "ridge_not_validated";
+  intervalEvidence?: {
+    predictorKey: string;
+    status: "insufficient_calibration" | "empirically_evaluated";
+    artifactId: string | null;
+    p50Seconds: number | null;
+    p80: { lowerSeconds:number; upperSeconds:number } | null;
+    p90: { lowerSeconds:number; upperSeconds:number } | null;
+    coverageP80: number | null;
+    coverageP90: number | null;
+    coverageIntervalP80?: {lower:number;upper:number}|null;
+    coverageIntervalP90?: {lower:number;upper:number}|null;
+    evaluationSamples: number;
+    coverageClaim: "empirical_target_not_individual_guarantee";
+  };
   distance: RaceDistance;
   distanceMeters: number;
   status: EstimateStatus;
@@ -877,7 +992,7 @@ export interface PredictionEnhancementSelection {
       | "race-residual-ridge-v1"
       | "race-residual-catboost-v1"
       | "race-residual-catboost-v2"
-      | "race-residual-catboost-v3"
+      | "race-residual-catboost-v4"
       | null;
     trainedExampleCount: number;
     evaluatedOutcomeCount: number;
@@ -892,6 +1007,28 @@ export interface PredictionEnhancementSelection {
 }
 
 export interface PhysiologyPredictionReport {
+  predictionPolicy?: {
+    version: "rai-prediction-policy-v2";
+    mode: "neutral_potential" | "current_prepared" | "race_day_scenario";
+    targetDate: string | null;
+    pointCorrection: "none" | "catboost";
+    intervalStatus: "insufficient_calibration" | "empirically_evaluated" | "partially_calibrated";
+    corrections: Array<{
+      distance: RaceDistance;
+      steps: Array<{
+        kind: "preparation" | "environment" | "elevation" | "acute_readiness" | "catboost";
+        beforeSeconds: number; afterSeconds: number;
+      }>;
+    }>;
+  };
+  labelFunnel?: {
+    sessionCount: number;
+    confirmedCount: number;
+    usableOutcomeCount: number;
+    evaluatedOutcomeCount: number;
+    primaryRejections: Record<string, number>;
+    accuracyStatus: "not_evaluable" | "requires_release_evaluation";
+  };
   reportVersion: typeof PHYSIOLOGY_REPORT_VERSION;
   generatedAt: string;
   inputs: {
@@ -936,7 +1073,7 @@ export interface RacePredictionMetrics {
 }
 
 export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION =
-  "race-residual-feature-v3" as const;
+  "race-residual-feature-v4" as const;
 export const predictionResidualFeatureNames = [
   "logPredictedSeconds", "readiness", "conditionAdjustmentFraction",
   "performanceVdot", "vo2Max", "vo2Gap", "lactateThresholdPaceSecondsPerKm",
@@ -973,9 +1110,9 @@ export const predictionResidualFeatureSchema = {
   outputShape: ["N", 1]
 } as const;
 export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH =
-  "bea6a4ffaec363ab1e78639935c643d8f7310db4d16ce7a6934a5fae2c463a6b" as const;
+  "462e213399e199f268ce1122eeae924db6d55c4dbc0795c643394d22f0366aa7" as const;
 export const CATBOOST_PREDICTION_MODEL_VERSION =
-  "race-residual-catboost-v3" as const;
+  "race-residual-catboost-v4" as const;
 export const PREDICTION_CORRECTION_CAP_FRACTION = 0.12 as const;
 
 export const predictionModelRunStatuses = [
@@ -999,6 +1136,7 @@ export interface PredictionModelDistanceMetrics {
 }
 
 export interface PredictionModelEvaluationMetrics {
+  ridgeComparison?: { status:"passed"|"failed"; walkForwardImprovement:number; releaseImprovement:number; bootstrapLower:number };
   baselineMaeSeconds: number;
   modelMaeSeconds: number;
   maeImprovement: number;
@@ -1055,6 +1193,7 @@ export interface PredictionModelTrainingRequest {
 }
 
 export interface PredictionModelTrainingResult {
+  ridgeComparison?: { status:"passed"|"failed"; walkForwardImprovement:number; releaseImprovement:number; bootstrapLower:number };
   featureSchemaHash: string;
   trainingDataHash: string;
   labelCount: number;
@@ -1155,4 +1294,386 @@ export function assertPhysiologyPredictionSnapshot(
     snapshot.lactateThreshold.paceRangeSecondsPerKm?.lower ?? null,
     snapshot.lactateThreshold.paceRangeSecondsPerKm?.upper ?? null
   ]);
+}
+
+// -----------------------------------------------------------------------------
+// V2 model lineage and replay envelope.
+//
+// Additive only: nothing above this marker changes meaning. The V2 optimisations
+// are designed in `deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md`
+// (§3.2 lineage, §15.2 replay, §15.7 labels). These types fix the vocabulary the
+// later phases attach to; having the vocabulary is not the same as having a
+// replayable run.
+// -----------------------------------------------------------------------------
+
+export const MODEL_LINEAGE_SCHEMA_VERSION = "model-lineage-v2" as const;
+
+/**
+ * Everything needed to answer "which model, over which facts, produced this
+ * number" without re-deriving it from the database.
+ */
+export interface ModelLineageV2 {
+  sourceRunId: string;
+  datasetVersion: string;
+  factsSnapshotHash: string;
+  overrideSnapshotHash: string;
+  modelVersion: string;
+  featureSchemaVersion: string;
+  configVersion: string;
+  configHash: string;
+  /**
+   * `null` when no calibration cohort exists. Never a placeholder hash: a fake
+   * hash reads as "this run was calibrated".
+   */
+  calibrationCohortHash: string | null;
+  baselineEpochId: string | null;
+  normalizationVersion: string | null;
+  normalizationConfigHash: string | null;
+  /** Business timezone the run was computed in; never inferred from the host. */
+  timezoneIdentifier: string;
+  /** When the calculation ran. Not interchangeable with `dataThroughAt`. */
+  asOf: string;
+  /** Newest fact actually used. `null` when the extent is genuinely unknown. */
+  dataThroughAt: string | null;
+}
+
+/**
+ * `event_time_reconstruction` rebuilds past performance from what we hold today;
+ * `as_known_then` additionally requires the facts and the labels to have reached
+ * the system before `asOf`. Only the latter can evidence live prediction quality.
+ */
+export type ReplayModeV2 = "event_time_reconstruction" | "as_known_then";
+
+/**
+ * The part of a replay case that makes it auditable. Payload bundles (canonical
+ * facts, overrides, race scenarios) keep their existing types until the V4
+ * contracts land; the envelope is what Phase 0 fixes.
+ */
+export interface ReplayDescriptorV2 {
+  caseId: string;
+  asOf: string;
+  timezoneIdentifier: string;
+  replayMode: ReplayModeV2;
+  factsSnapshotHash: string;
+  overrideSnapshotHash: string;
+  /**
+   * True when fact arrival times are only partially known. Such a case may be
+   * reconstructed at event time but must not be presented as `as_known_then`.
+   */
+  availabilityUnknown: boolean;
+}
+
+export type LabelAvailabilityV2 =
+  /** Arrival time is known and usable for `as_known_then`. */
+  | "available"
+  /** The result exists, but when the system learned it is not recoverable. */
+  | "availabilityUnknown"
+  /** Not yet a usable label. */
+  | "not_available";
+
+/**
+ * One confirmed performance result. Labels are evaluation inputs only — they
+ * must never be fed into the model that produced the prediction being scored.
+ */
+export interface OutcomeLabelV2 {
+  trainingSessionId: string;
+  distance: RaceDistance;
+  protocol: string;
+  /** When the performance actually happened. */
+  outcomeAt: string;
+  /** max(completion, the moment the label became usable); drives leakage checks. */
+  availableAt: string;
+  availability: LabelAvailabilityV2;
+  /** Bumped on every correction, so a replay can pin the revision it saw. */
+  revision: number;
+  /** Set when the result was withdrawn or superseded; excluded from cohorts. */
+  excludedReason: string | null;
+}
+
+// Re-exported from the end of the file on purpose: placing this near the top
+// shifts every subsequent line and silently invalidates the `file:line`
+// references that dated deliverables point at (`npm run check:doc-refs`
+// reports them as "锚在空行"). Appending keeps the whole existing numbering.
+export * from "./semantic-json.js";
+
+// -----------------------------------------------------------------------------
+// Session comparability strata (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §6.2).
+//
+// A workout may only be compared against workouts of the same kind. Comparing a
+// tempo run against recovery jogs is what turns "the training plan changed" into
+// "the athlete declined". The first version deliberately stops at five explainable
+// strata instead of a sparse cross-product of weather, device and terrain.
+// -----------------------------------------------------------------------------
+
+export const SESSION_STRATA = [
+  "steady_aerobic",
+  "threshold_sustained",
+  "race_protocol",
+  "interval",
+  "recovery_unknown"
+] as const;
+
+export type SessionStratum = (typeof SESSION_STRATA)[number];
+
+export const COMPARABILITY_POLICY_VERSION = "rai-comparability-policy-v1" as const;
+
+/** Independent training history inside one stratum, as of the workout being scored. */
+export interface StratumHistory {
+  /**
+   * Distinct training sessions in this stratum *before* the current one. Multiple
+   * windows of one session never count more than once.
+   */
+  independentSessions: number;
+  /** Calendar span those sessions cover, in days. */
+  spanDays: number;
+}
+
+export interface ComparabilityPolicy {
+  allowedStrata: SessionStratum[];
+  /**
+   * Hard ceiling on the stratum count. Config parsing must reject anything above
+   * it — a documented limit that the parser does not enforce is not a limit.
+   */
+  maximumStrata: number;
+  minimumIndependentSessions: number;
+  minimumSpanDays: number;
+  /** Always false in this version: an insufficient bucket is never widened. */
+  allowCrossStratumFallback: false;
+  insufficientPolicy: "not_comparable";
+}
+
+export type StratumComparabilityStatus = "comparable" | "not_comparable" | "not_assessed";
+
+export interface StratumComparability {
+  status: StratumComparabilityStatus;
+  stratum: SessionStratum;
+  independentSessions: number | null;
+  spanDays: number | null;
+  reasonCodes: string[];
+}
+
+// -----------------------------------------------------------------------------
+// Confidence V2 (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §6.7).
+//
+// Rule-based evidence reliability is kept strictly apart from `modelConfidence` /
+// `overall`. The first is a deterministic function of how good the evidence is;
+// the second requires a joint calibration artifact with a declared target and an
+// independent holdout. In this version both are always null, and that null is the
+// product contract — not a gap for a front end to fill with a default.
+// -----------------------------------------------------------------------------
+
+export const CONFIDENCE_AGGREGATION_POLICY_VERSION = "rai-confidence-aggregation-v1" as const;
+
+export type ConfidenceEvidenceStatus = "available" | "insufficient_evidence";
+
+export type ConfidenceOverallStatus =
+  | "not_calibrated"
+  | "available"
+  | "insufficient_evidence"
+  | "out_of_domain";
+
+/**
+ * Weights of the rule factors inside the reliability geometric mean. Each must be
+ * positive and they must sum to 1. The `source` signal deliberately has no weight
+ * of its own: it is already inside `dataConfidence`, and counting it twice is the
+ * double-discount this design removes.
+ */
+export interface ConfidenceWeightsV2 {
+  data: number;
+  comparability: number;
+  maturity: number;
+}
+
+export interface ConfidenceV2 {
+  dataConfidence: number | null;
+  comparability: number | null;
+  maturity: number | null;
+  /** Coverage of the *scoring policy*. Not a multiplier inside the reliability. */
+  evidenceCoverage: number;
+  evidenceReliability: number | null;
+  evidenceStatus: ConfidenceEvidenceStatus;
+  modelConfidence: number | null;
+  overall: number | null;
+  overallStatus: ConfidenceOverallStatus;
+  aggregationPolicyVersion: typeof CONFIDENCE_AGGREGATION_POLICY_VERSION;
+  calibrationArtifactId: string | null;
+  calibrationTarget: string | null;
+}
+
+// -----------------------------------------------------------------------------
+// Readiness V1 contract (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §7.4).
+//
+// Additive only. `assessment` is deliberately kept separate from `state`:
+// `assessment` is what the evidence says, `state` is the training-facing mapping
+// of it, and `coverage === "none"` is a gap in evidence rather than a negative
+// finding. `no_low_signal` is not named `ready` for the same reason — not having
+// observed a low signal, especially on one signal only, is not the same as being
+// fully recovered.
+//
+// Every `state` in this first version is a heuristic. `stateEvidence` carries
+// that fact to every consumer so the API, the Coach explanation and the UI cannot
+// present it as a validated medical threshold.
+// -----------------------------------------------------------------------------
+
+export const READINESS_MODEL_VERSION = "rai-readiness-v1.0.0" as const;
+export const READINESS_RULE_SET_VERSION = "rai-readiness-ruleset-v1" as const;
+
+export type ReadinessCoverage = "none" | "partial" | "complete";
+
+export type ReadinessAssessment =
+  | "not_assessed"
+  | "no_low_signal"
+  | "low_signal"
+  | "multiple_low_signals";
+
+export type ReadinessState = "not_assessed" | "no_low_signal" | "caution" | "strained";
+
+export type ReadinessSignalName = "sleep" | "hrv" | "rhr";
+
+export type ReadinessSignalQuality = "adequate" | "sparse" | "missing";
+
+export interface ReadinessSignal {
+  availabilitySource?: "canonical_computation" | "dataset_publication_upper_bound" | "unknown";
+  name: ReadinessSignalName;
+  /** Today's observation. `null` means not measured, never "normal". */
+  value: number | null;
+  /** Personal reference the value is compared against. */
+  baseline: number | null;
+  /** value / baseline. `null` when either side is missing or non-positive. */
+  ratio: number | null;
+  /** True when this signal alone met its low/raised rule. */
+  low: boolean;
+  quality: ReadinessSignalQuality;
+  observedAt: string | null;
+  /** When the system learned the reading; drives freshness, not the value. */
+  availableAt: string | null;
+  /** Local date the reading belongs to. */
+  evidenceLocalDate: string | null;
+}
+
+export interface ReadinessStateEvidence {
+  method: "heuristic_rules";
+  /**
+   * `not_empirically_validated` until a report against a declared target and an
+   * independent holdout exists. Passing compatibility tests only proves the new
+   * rules match the old ones — it is not validation.
+   */
+  validationStatus: "not_empirically_validated" | "validated_for_declared_target";
+  ruleSetVersion: string;
+  validationTarget: string | null;
+  validationReportId: string | null;
+}
+
+/**
+ * `score` stays null while `scoreStatus === "not_calibrated"`: the first version
+ * drives Coach from `state`, and turning the heuristic ratios into a 0-100 number
+ * would present them as something they are not.
+ */
+export interface ReadinessAssessmentResult {
+  modelVersion: typeof READINESS_MODEL_VERSION;
+  asOf: string;
+  localDate: string;
+  coverage: ReadinessCoverage;
+  assessment: ReadinessAssessment;
+  state: ReadinessState;
+  stateEvidence: ReadinessStateEvidence;
+  intendedUse: "training_guidance_not_diagnosis";
+  score: number | null;
+  scoreStatus: "not_calibrated" | "available";
+  signals: Record<ReadinessSignalName, ReadinessSignal>;
+  /**
+   * Whether the sleep baseline streak rule fired. Exposed rather than recomputed
+   * by callers: the threshold lives with the rules, and a wrapper that re-derives
+   * it would be the second copy the design forbids.
+   */
+  sleepStreak: boolean;
+  reasonCodes: string[];
+}
+
+/** The same result with the provenance envelope attached at assembly time. */
+export interface ReadinessSnapshot extends ReadinessAssessmentResult {
+  lineage: ModelLineageV2;
+}
+
+// ---------------------------------------------------------------------------
+// 域快照的窄化读取（sealed domain snapshots）
+//
+// 为什么要有这一组函数：信封层（`ModelSnapshotEntry.payload`）刻意是 `unknown`，
+// 因为各域存的东西完全不同 —— `fitness` 存 `{lineage, assessments, daily}`、
+// `load` 存 `{lineage, days}`、`durability` 存的是**数组**。消费方若自己断言一个形状，
+// 就会去读产出端**根本没写过**的字段（而 TypeScript 不会拦，因为源头是 unknown）。
+//
+// 所以窄化只做一次，放在双方共享的契约层：**必需字段缺失 ⇒ 返回 null**，
+// 绝不用 `undefined` 冒充"没有值"。
+// ---------------------------------------------------------------------------
+
+export interface FitnessSnapshotDailyPoint {
+  localDate: string;
+  trueAbility: number | null;
+  status: string;
+}
+
+/**
+ * 已封存的 `fitness` 域快照。
+ * V2 写入 `{lineage, assessments, daily}`；legacy 分支写 `{assessments, daily}`（**没有** lineage）。
+ */
+export interface FitnessSnapshot {
+  /** `null` = 该运行没有可用的 epoch（legacy 写入，或当时无法确定）——不是"等于当前 epoch"。 */
+  baselineEpochId: string | null;
+  daily: FitnessSnapshotDailyPoint[];
+}
+
+/** 已封存的 `load` 域快照。V2 写入 `{lineage, days}`。 */
+export interface LoadSnapshot {
+  baselineEpochId: string | null;
+  /** 行是 `daily_training_metrics` 的投影；这里只承诺"是一组行"，不假装逐列类型化。 */
+  days: Array<Record<string, unknown>>;
+}
+
+function snapshotBaselineEpochId(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const lineage = (payload as { lineage?: unknown }).lineage;
+  if (typeof lineage !== "object" || lineage === null) return null;
+  const epoch = (lineage as { baselineEpochId?: unknown }).baselineEpochId;
+  return typeof epoch === "string" && epoch !== "" ? epoch : null;
+}
+
+function snapshotRows(payload: unknown, key: "daily" | "days"): unknown[] | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const rows = (payload as Record<string, unknown>)[key];
+  return Array.isArray(rows) ? rows : null;
+}
+
+/** `fitness` 窄化：`daily` 不是数组、或无一行带可用的 `local_date` ⇒ `null`。 */
+export function readFitnessSnapshot(payload: unknown): FitnessSnapshot | null {
+  const rows = snapshotRows(payload, "daily");
+  if (rows === null) return null;
+  const daily: FitnessSnapshotDailyPoint[] = [];
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) continue;
+    const source = row as Record<string, unknown>;
+    // 必需字段缺失就跳过这一行，而不是把 undefined 读成"没有值"。
+    if (typeof source.local_date !== "string" || source.local_date === "") continue;
+    daily.push({
+      localDate: source.local_date,
+      trueAbility: typeof source.true_ability === "number" && Number.isFinite(source.true_ability)
+        ? source.true_ability
+        : null,
+      status: typeof source.snapshot_status === "string" ? source.snapshot_status : "unknown"
+    });
+  }
+  if (daily.length === 0) return null;
+  return { baselineEpochId: snapshotBaselineEpochId(payload), daily };
+}
+
+/**
+ * `load` 窄化。
+ * 刻意**不**接受 `daily` 这个键：把 fitness 的字段名当成通用的，正是这层要挡住的那类错误。
+ */
+export function readLoadSnapshot(payload: unknown): LoadSnapshot | null {
+  const rows = snapshotRows(payload, "days");
+  if (rows === null) return null;
+  const days = rows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null);
+  if (days.length === 0) return null;
+  return { baselineEpochId: snapshotBaselineEpochId(payload), days };
 }

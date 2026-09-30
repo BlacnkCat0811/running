@@ -8,8 +8,12 @@
   "include": [
     "packages/contracts/src/**/*.ts",
     "packages/api-contracts/src/**/*.ts",
+    "packages/durability/src/**/*.ts",
     "packages/features/src/**/*.ts",
+    "packages/normalization/src/**/*.ts",
+    "packages/model-eval/src/**/*.ts",
     "packages/physiology/src/**/*.ts",
+    "packages/readiness/src/**/*.ts",
     "packages/scoring/src/**/*.ts",
     "packages/training-load/src/**/*.ts",
     "packages/training-zones/src/**/*.ts"
