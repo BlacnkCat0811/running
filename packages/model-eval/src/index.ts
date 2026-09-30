@@ -528,6 +528,87 @@ const ABLATION_REPORT_VERSION = "rai-ca-weight-ablation-v1";
 
 export const EVALUATION_REPORT_ENVELOPE_VERSION = "rai-eval-report-envelope-v1" as const;
 
+/**
+ * §18.5-8 / §15.5 的 Engineering 行：**「性能报告真实测量，不引用跨条件拼接的提速」**。
+ *
+ * 这条一直是 §18.5 八条里**唯一没有任何可执行判据**的一条 —— 它此前只靠人把一句诚实的更正
+ * 写进 markdown。项目里真的发生过一次：`SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` 的 B5
+ * 原以"实测 21.7 s → 3.0 s（约 6×）"为改动理由，后来被受控探针推翻 ——
+ * "21.7 s"出自**冷首跑**、"3.0 s"**冷热都不出现**，受控条件下实际是 5,790 ms → 6,919 ms（**更慢**）。
+ *
+ * 下面这套契约把那类错误变成**结构上无法声明**的东西：要比两个数，就必须**两边**都声明
+ * 各自的测量条件；条件不等（缓存状态、重复次数、环境）就不是同一个量，不能相除。
+ *
+ * 注意它能做什么、不能做什么：它**不能**证明数字是真的（那要靠人去测），
+ * 它只能保证**没有声明条件、或拿不同条件的两个数拼出来的"提速"根本写不出来**。
+ */
+export interface PerformanceMeasurement {
+  /** 测的是什么（命令、阶段或函数）。 */
+  subject: string;
+  /** 缓存状态。**一次冷首跑与一次热跑不是同一个量**。 */
+  cacheState: "cold" | "warm";
+  /** 重复次数。1 次是"观测"，不是"测量" —— 没有离散度就无法判断差异是否超出噪声。 */
+  rounds: number;
+  /** 机器/数据规模的描述；换机器换数据集的两次测量不可比。 */
+  environment: string;
+}
+
+export interface PerformanceComparison {
+  /** 对照侧（旧版本/旧实现）。 */
+  baseline: PerformanceMeasurement;
+  /** 候选侧（新版本/新实现）。 */
+  candidate: PerformanceMeasurement;
+  /** 唯一被改变的变量。若两边条件已相同，这里仍要写清"改了什么"，否则读不出结论归属。 */
+  isolatedVariable: string;
+  /** §15.4-11：看过结论后调参再复用同一份测量，等于用同一次数据证明两次。 */
+  claim: "measured_under_stated_conditions";
+}
+
+/**
+ * 校验一次性能对比是否可声明。**条件不等即抛**，不给"看起来差不多"留解释空间。
+ *
+ * 单独导出而不是塞进 `assertUnifiedEvaluationReport`：产物里没做性能对比时不该被迫造一个。
+ */
+export function assertPerformanceComparisonIsComparable(comparison: PerformanceComparison): void {
+  const side = (name: string, m: PerformanceMeasurement): void => {
+    if (!m.subject.trim()) throw new Error(`Performance comparison: ${name}.subject is required`);
+    if (!m.environment.trim()) throw new Error(`Performance comparison: ${name}.environment is required`);
+    if (m.rounds < 2) {
+      throw new Error(
+        `Performance comparison: ${name}.rounds is ${m.rounds}; a single run is an observation, not a measurement (§18.5-8)`
+      );
+    }
+    if (m.cacheState !== "cold" && m.cacheState !== "warm") {
+      throw new Error(`Performance comparison: ${name}.cacheState must be cold or warm`);
+    }
+  };
+  side("baseline", comparison.baseline);
+  side("candidate", comparison.candidate);
+
+  if (!comparison.isolatedVariable.trim()) {
+    throw new Error("Performance comparison: isolatedVariable is required — without it the difference has no owner");
+  }
+  if (comparison.claim !== "measured_under_stated_conditions") {
+    throw new Error("Performance comparison: claim must be measured_under_stated_conditions");
+  }
+
+  // 逐项比"这两次测量是不是同一个量"。B5 的错误正是死在这里：
+  // 冷首跑 1 次 vs 热跑（次数还说不清）—— cacheState 与 rounds 都对不上。
+  const dims: Array<[string, string, string]> = [
+    ["cacheState", comparison.baseline.cacheState, comparison.candidate.cacheState],
+    ["environment", comparison.baseline.environment, comparison.candidate.environment],
+    ["rounds", String(comparison.baseline.rounds), String(comparison.candidate.rounds)]
+  ];
+  for (const [dimension, left, right] of dims) {
+    if (left !== right) {
+      throw new Error(
+        `Performance comparison: ${dimension} differs (baseline ${left} vs candidate ${right}); ` +
+        "a ratio between two different conditions is cross-condition stitching, not a speedup (§18.5-8)"
+      );
+    }
+  }
+}
+
 /** §15.8-6：每个 gate 只有这三种状态；"未评估"是正式状态，不是自动通过或失败。 */
 export type EvaluationGateStatus = "passed" | "failed" | "not_evaluable";
 

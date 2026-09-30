@@ -2,10 +2,68 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertPerformanceComparisonIsComparable,
   assertUnifiedEvaluationReport,
   evaluationReportEnvelope,
   EVALUATION_REPORT_ENVELOPE_VERSION
 } from "../src/index.js";
+
+/**
+ * §18.5-8 / §15.5 Engineering 行：「性能报告真实测量，不引用跨条件拼接的提速」。
+ *
+ * 这条曾经是 §18.5 八条里唯一没有任何可执行判据的一条。下面这组用例把它变成结构约束，
+ * 而且**第一条用例就是项目里真实发生过的那次错误**（SHADOW_REMOVAL_RUNTIME_INVARIANTS 的 B5）：
+ * 拿"冷首跑 21.7 s"与"3.0 s"相除得到"约 6× 提速"，受控条件下实际更慢。
+ */
+const warm = { subject: "import", cacheState: "warm" as const, rounds: 3, environment: "324MB local DB / N100" };
+
+test("§18.5-8: the B5 mistake (cold first run vs a warm run) cannot be declared", () => {
+  assert.throws(
+    () => assertPerformanceComparisonIsComparable({
+      baseline: { ...warm, cacheState: "cold", rounds: 1 },   // "21.7 s"：冷首跑，且只跑了一次
+      candidate: warm,                                        // "3.0 s"：说不清条件的那次
+      isolatedVariable: "primary key ordering",
+      claim: "measured_under_stated_conditions"
+    }),
+    /rounds is 1; a single run is an observation, not a measurement/
+  );
+});
+
+test("§18.5-8: a single round is an observation, not a measurement", () => {
+  assert.throws(
+    () => assertPerformanceComparisonIsComparable({
+      baseline: { ...warm, rounds: 1 }, candidate: warm,
+      isolatedVariable: "sort key", claim: "measured_under_stated_conditions"
+    }),
+    /observation, not a measurement/
+  );
+});
+
+test("§18.5-8: each condition dimension is checked on its own", () => {
+  const base = { baseline: warm, candidate: warm, isolatedVariable: "sort key", claim: "measured_under_stated_conditions" as const };
+  assert.throws(() => assertPerformanceComparisonIsComparable({ ...base, candidate: { ...warm, cacheState: "cold" } }), /cacheState differs/);
+  assert.throws(() => assertPerformanceComparisonIsComparable({ ...base, candidate: { ...warm, environment: "another machine" } }), /environment differs/);
+  assert.throws(() => assertPerformanceComparisonIsComparable({ ...base, candidate: { ...warm, rounds: 5 } }), /rounds differs/);
+  // 空 subject / environment 也是漏写，不是"不知道"。
+  assert.throws(() => assertPerformanceComparisonIsComparable({ ...base, baseline: { ...warm, subject: "  " } }), /subject is required/);
+  assert.throws(() => assertPerformanceComparisonIsComparable({ ...base, baseline: { ...warm, environment: "" } }), /environment is required/);
+});
+
+test("§18.5-8: a difference with no named owner cannot be claimed", () => {
+  assert.throws(
+    () => assertPerformanceComparisonIsComparable({
+      baseline: warm, candidate: warm, isolatedVariable: " ", claim: "measured_under_stated_conditions"
+    }),
+    /isolatedVariable is required/
+  );
+});
+
+test("§18.5-8: a genuine same-condition comparison is allowed", () => {
+  assert.doesNotThrow(() => assertPerformanceComparisonIsComparable({
+    baseline: warm, candidate: { ...warm, subject: "import (new)" },
+    isolatedVariable: "sort key only", claim: "measured_under_stated_conditions"
+  }));
+});
 
 /**
  * §15.8 规定"每个版本比较产物至少包括"八项。实测这份合同此前只是**约定**：
