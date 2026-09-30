@@ -18,7 +18,7 @@
 
 方案主干（P0/P1 的工程边界）**已实施并逐条有测试**；§16.1 的验收矩阵改为**可执行判据**：**54 条全部按 ID 被引用，缺口声明清零**（§三）。三条独立只读审计（§十）收窄了本文档的若干说法，其中两条是**它自己发现的真实缺陷**，已修并加了回归用例。
 §18.5 的最终验收条件逐条走查见 §九。🔴 **该节原写"8 条工程条全部满足"，2026-09-30 的独立审计推翻了它**：
-实际是 **6 条明确成立**（1/2/4/5/6/7，其中 5 与 7 已在本批补上缺失的测试）、**1 条偏弱**（3：只在代码层成立，行为层被 §十五 的实测证伪了一半）、**1 条（8）根本没有可执行判据**。
+实际是 **7 条明确成立**（1–7；其中 5 与 7 补上了缺失的测试，1 还发现了原先没写进证据的**运行时闸门**）、**1 条（8）根本没有可执行判据**。条件 3 我中途一度误判为"只成立一半"，是**测量错位**（改了 checkpoint 版本却去观察特征复用），已在 §15.5 订正。
 已按审计结论改写 §九。4 条精度条仍是 `not_evaluable`（0 标签）。
 剩余的不是"还没写"，而是三类**不能靠写代码解决**的事：**被真实标签阻塞**、**被天气数据阻塞**、
 **需要新增政策且必须先回放**。精度增强（ML、经验区间、Durability 数值、耐久罚分）**全部未激活**，
@@ -494,16 +494,16 @@ D 未列边）；往白名单塞一条不存在的边 ⇒ 报"已不存在，请
 那些 ID 的"确有测试"由 `npm run check:acceptance-matrix` 机械保证（§三），
 所以这张表不会随代码漂移而悄悄失真。
 
-### 9.1 工程发布条件（§18.5 第 1–8 条）—— 🔴 **订正为「6 明确 / 1 偏弱 / 1 无判据」**
+### 9.1 工程发布条件（§18.5 第 1–8 条）—— 🔴 **订正为「7 明确 / 1 无判据」**
 
 > **本节原写"8/8 满足"，是错的。** 2026-09-30 的独立审计逐条复核后推翻了这个结论，
 > 下表按审计结果改写。三条订正的共同原因是同一个：**"代码里实现了"被当成了"有东西在守"**。
 
 | # | 条件 | 审计结论 | 依据 / 缺口 |
 |---|---|---|---|
-| 1 | Fitness 恢复隔离全链路成立 | ✅ **成立** | `recovery-isolation-e2e.test.ts` 从**原始事实装配入口**跑（注入 health_records/workouts/training_sessions，经 pipeline 私有 seam），不是手搓 feature；两个变体的 `restingHeartRateReference` 都是 50、HRR 分数相同 ⇒ 课型相同。配 F02/F05/F07 |
+| 1 | Fitness 恢复隔离全链路成立 | ✅ **成立（且有运行时闸门，比用例更强）** | `recompute-pipeline.ts:977-981` 每次抽特征都跑**反事实**（把 RHR/HRV/睡眠/近期负荷换成极端值重算）并比较 `semanticHash`，结果进 `rai-bootstrap-invariants-v1` gate，`blocksActivation` 为真时 `:291` **抛错** —— 即这条不变量不只"当时被测过"，而是**每次重算都必须成立，违反会阻断激活**。另有 `recovery-isolation-e2e.test.ts` 从**原始事实装配入口**跑（注入 health_records/workouts/training_sessions，经 pipeline 私有 seam），不是手搓 feature；两个变体的 `restingHeartRateReference` 都是 50、HRR 分数相同 ⇒ 课型相同。配 F02/F05/F07 |
 | 2 | 历史/可得时间、epoch、config/schema 一致 | ✅ **成立** | `packages/readiness/src/index.ts:265-281` 三段时序硬校验（`observed ≤ asOf ∧ arrived ≤ asOf ∧ arrived ≥ observed`）+ localDate 匹配，否则该信号不可得；epoch 由 `service.test.ts:865` 钉住（同一 epoch 稳定、rebase 后改变、旧快照逐字节不变）。⚠️ 附带订正：`ModelLineageV2` 确有 15 个字段，但 `domain-snapshot-narrowing.test.ts` 的 15 例测的是**载荷窄化**，不是逐字段谱系 —— 原表把两个 15 说成对应关系，属于巧合而非证据 |
-| 3 | 新旧合同兼容、无 checkpoint 跨版本复用 | 🟡 **只在代码层成立，行为层未被证明（见 §十五）** | `recompute-pipeline.ts:1708` 确实要求 `checkpoint_version = ?` 等六个相等条件；`:1736-1739` 在 `pendingNegativeIds` 缺失时返回 null（拒绝而非补默认）。**但我去补测试时把它证伪了一半**：把所有 checkpoint 版本号改写成 v1（且断言改写已落库）之后，`feature_runs.parent_feature_run_id` 照样被填、`reused = 5` —— 该闸门管得住**模型状态**那条链，管不住 **S03 用例实际测量的特征前缀**那条链。加上 `grep rai-model-checkpoint-v1` 全仓 0 命中（没有测试构造过真正由旧版本写下的 checkpoint），这一条不能声称已验证 |
+| 3 | 新旧合同兼容、无 checkpoint 跨版本复用 | ✅ **成立（模型状态那半只由代码守）** | **两层各有自己的版本闸**：① 模型状态复用由 `recompute-pipeline.ts:1708` 的六个相等条件管（`checkpoint_version`/`model_version`/`model_config_hash`/`feature_schema_version`/`feature_config_hash`/`timezone`），`:1736-1739` 在 `pendingNegativeIds` 缺失时返回 null（拒绝而非补默认）；② **特征**前缀复用由 `reuseFeaturePrefix`（`:1015+`）自己的特征层版本管（`FEATURE_CONFIG_VERSION`+config、`FEATURE_SCHEMA_VERSION`、`parser_contract_version`、timezone，任一不等即整段重算）—— 特征复用本来就该由特征版本决定，不是 checkpoint 版本。S03 钉住了②的 config 一半。**唯一仍窄的缺口**：`grep rai-model-checkpoint-v1` 全仓 0 命中，没有测试构造过真正由旧版本写下的 checkpoint，所以①只有代码证据（详见 §15.5，我中途一度误判为"未被证明"） |
 | 4 | Load/Zone 数值主线一致 | ✅ **成立** | **L01** golden parity（`:537-543`）并钉住具体数值（`load.load === 78`、距离修正后 86.25）；**L02/L04** mechanical 保持 null、未观测前史不补零；**Z01** 生效日期、**Z03** 30 s 滞后不构成冲突 |
 | 5 | Prediction 无重复 correction | ✅ **成立（本批补齐了缺的那一半）** | 排他过滤原本只是 `buildPredictionReport` 里的一行内联 `filter` —— 那条路径要开库、要有已激活的 CatBoost 才走得到，所以审计判定"实现存在、测试不存在"。已把规则提成纯函数 `excludeCatBoostCorrectedDistances` 并加 4 条断言钉住：CatBoost 修过的距离必须从 bias 名单移除、没有 CatBoost 时名单原样保留、名单里有但本轮没有该距离预测时**保守保留**、全被修正时结果为空。突变验证：`!==` 改 `===` ⇒ 该用例转红 |
 | 6 | Coach 不重算、理由与动作一致 | ✅ **成立** | `mobile-coach.ts:202-205` 四个恢复阈值是 `READINESS_*` 的**别名**而非字面量；`:1489-1501` 只做翻译后委派；`coach-decision-v2.test.ts` 的换文案 `deepEqual` 断言比"action/tone/codes 不变"更强 |
@@ -864,7 +864,7 @@ treated as ingestion time." —— 全量重建恰好把那个 "known" 抹掉了
 
 ---
 
-## 十五、条件 3 的"跨版本复用结构上不可能"**没有被证明** —— 一次失败的测试尝试查出来的
+## 十五、条件 3：一次失败的测试尝试 → 我的推断被订正 → 结论是**代码是对的**（见 §15.5）
 
 ### 15.1 我原本接受的推断
 
@@ -911,3 +911,58 @@ treated as ingestion time." —— 全量重建恰好把那个 "known" 抹掉了
 
 这条记在这里而不是就地"修好"，是因为要回答的是设计问题：
 **特征前缀复用是否也应该按 checkpoint/engine 版本设闸**？那不是本轮能定的。
+
+### 15.5 ✅ **结论订正（同日）**：条件 3 其实是**对的**，错的是我上面那段推断
+
+我继续追下去，找到了 `reuseFeaturePrefix`（`recompute-pipeline.ts:1015+`）真正的闸门。
+它**确实按版本设闸**，只不过用的是**特征层**的版本，而不是 model checkpoint 的版本：
+
+```text
+parent.configHash    !== configHash({version: FEATURE_CONFIG_VERSION, config: request.featureConfig})
+parent.schemaVersion !== FEATURE_SCHEMA_VERSION
+parent.contractVersion !== (manifest 的 parser_contract_version ?? CONTRACT_VERSION)
+parent.timezone      !== request.timezoneIdentifier
+→ 任一不等即 return null（整段重算，不复用）
+```
+
+**这才是正确的分层**：特征前缀复用是**特征**的复用，就该由特征 schema/config/contract 决定；
+`checkpoint_version` 管的是**模型状态**（TA/baseline）的复用（`:1708`）。两者是两件事，
+各自有自己的版本闸。所以：
+
+| §十五 上文的两句话 | 订正后 |
+|---|---|
+| "该版本闸门管不住特征前缀那条链" | 字面为真，但**推论错了**：那个闸门本来就不是管这条链的 |
+| "'跨版本不复用'未被证明" | **不成立**。两层各自的版本闸都在代码里，S03 钉住了特征 config 那一半 |
+
+**为什么我那次改写版本号的实验会得出误导性的结果**：我改的是 `checkpoint_version`，
+它只影响**模型状态**复用这条链，而我去观察的是 `parent_feature_run_id`（**特征**复用那条链）。
+两个观察对象错配，于是"没看到变化"被读成了"闸门不存在"。这是个测量错位，不是代码缺陷。
+
+**仍然成立的**只有一点，而且它很窄：`grep rai-model-checkpoint-v1` 全仓 0 命中 ——
+没有测试构造过**真正由旧版本写下**的 checkpoint，所以模型状态那条链的版本拒绝只有代码证据。
+§9.1 条件 3 的判定据此回到 **✅ 成立（模型状态那半只由代码守）**。
+
+### 15.6 🔎 顺带发现（原审计与我都没提到）：恢复隔离在生产路径上**有运行时闸门**
+
+`recompute-pipeline.ts:977-981` 每次抽特征时都会跑一个**反事实**：
+把 `restingHeartRate: 99, hrvSdnn: 1, sleepDurationMinutes: 1, recentLoadMinutes: 9999`
+代进去重算一遍，然后比较两次的 `semanticHash`：
+
+```ts
+this.recoveryIsolationHolds &&= semanticHash(feature) === semanticHash(counterfactual);
+```
+
+而这个布尔值直接进 gate（`:284-286`）：
+
+```text
+gateVersion: "rai-bootstrap-invariants-v1"
+status: recoveryIsolationHolds ? "passed" : "failed"
+blocksActivation: !recoveryIsolationHolds
+failureReasons: ["recovery_isolation_violated"]
+```
+
+并且 `:291` 在 `blocksActivation` 时**抛错**。也就是说 §2.3 不变量 1（严格恢复隔离）
+不只是用例里的断言：**它在每次重算时被实际检查，违反会阻断模型激活**。
+
+这比 §9.1 条件 1 原先列的"有端到端测试"更强一层 —— 测试证明它当时成立，
+这个 gate 让它在**以后每次运行**都必须成立。已补进条件 1 的证据栏。
