@@ -1,10 +1,10 @@
 {
   "reportVersion": "rai-normalization-coverage-v1",
-  "generatedAt": "2026-09-29T03:13:17.739Z",
+  "generatedAt": "2026-09-30T05:08:59.154Z",
   "adapterVersion": "rai-normalization-identity-v1",
   "policyVersion": "rai-normalization-policy-v1",
-  "modelConfigVersion": "rai-model-config-v10",
-  "databasePath": "/Users/ta/running/var/rai.sqlite",
+  "modelConfigVersion": "rai-model-config-v12",
+  "databasePath": "D:\\running\\var\\rai.sqlite",
   "policySnapshot": {
     "referenceTemperatureC": {
       "min": 5,
@@ -20,55 +20,71 @@
     "comparabilityUnavailable": 0.8,
     "comparabilityOutOfDomain": 0.7
   },
-  "canonicalWorkouts": 268,
+  "canonicalWorkouts": 257,
   "fieldAvailability": {
     "source": "workouts.metadata_json，经 @rai/application 的 parsePerformanceConditions 解析",
     "temperatureC": {
-      "present": 0,
-      "rate": 0
+      "present": 22,
+      "rate": 0.08560311284046693
     },
     "humidityPercent": {
-      "present": 0,
-      "rate": 0
+      "present": 22,
+      "rate": 0.08560311284046693
     },
     "elevationGainMeters": {
-      "present": 1,
-      "rate": 0.0037313432835820895
+      "present": 159,
+      "rate": 0.6186770428015564
     },
     "indoorFlagged": {
       "present": 1,
-      "rate": 0.0037313432835820895
+      "rate": 0.0038910505836575876
     }
   },
   "contextStatus": {
     "applied": 0,
-    "not_needed": 0,
-    "unavailable": 268,
-    "out_of_domain": 0,
-    "notReference": 268,
-    "notReferenceRate": 1
+    "not_needed": 1,
+    "unavailable": 240,
+    "out_of_domain": 16,
+    "notReference": 256,
+    "notReferenceRate": 0.9961089494163424
   },
   "reasonHistogram": [
     {
       "reason": "temperature_missing",
-      "count": 268
+      "count": 235
     },
     {
       "reason": "humidity_missing",
-      "count": 268
+      "count": 235
     },
     {
       "reason": "elevation_missing",
-      "count": 267
+      "count": 98
+    },
+    {
+      "reason": "humidity_out_of_reference_domain",
+      "count": 15
+    },
+    {
+      "reason": "temperature_out_of_reference_domain",
+      "count": 8
+    },
+    {
+      "reason": "elevation_out_of_reference_domain",
+      "count": 4
+    },
+    {
+      "reason": "reference_conditions",
+      "count": 1
     }
   ],
   "routeAvailability": {
-    "workoutsWithRoute": 46,
-    "workoutsWithRouteRate": 0.17164179104477612,
-    "routePoints": 204284,
-    "routePointElevationPresent": 199842,
-    "routePointElevationRate": 0.9782557615868105,
-    "routePointSpeedPresent": 204284,
+    "workoutsWithRoute": 43,
+    "workoutsWithRouteRate": 0.16731517509727625,
+    "routePoints": 102313,
+    "routePointElevationPresent": 102313,
+    "routePointElevationRate": 1,
+    "routePointSpeedPresent": 102313,
     "routePointSpeedRate": 1
   },
   "conditionLedger": [
@@ -99,8 +115,8 @@
     "minimumComparabilityForLearning": 0.9,
     "comparabilityUnavailable": 0.8,
     "comparabilityOutOfDomain": 0.7,
-    "workoutsBelowGateIfWired": 268,
-    "workoutsBelowGateIfWiredRate": 1
+    "workoutsBelowGateIfWired": 256,
+    "workoutsBelowGateIfWiredRate": 0.9961089494163424
   },
   "notes": [
     "本报告只做观测与记账，不改变任何数值，也不接入评分路径（§5.4 的 N0）。",

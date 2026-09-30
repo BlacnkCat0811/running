@@ -7,6 +7,10 @@
 
 > **口径声明**：本文区分三件此前被混为一谈的事 —— **代码里有什么 / 库里已经算过什么 / 线上真正激活了什么**。
 > 本文只确认前两项；不查询线上环境，不推断线上用户状态。所有"通过"都指**工程门槛**，不是精度验收。
+>
+> 🔴 **本工作区的数据库与方案 §1.5 记录的数据库不是同一份**（见 §五-6）。方案 §1.5 的
+> "268 条 session / active `rai-model-config-v3` / 2026-09-04 激活"是 **macOS 主机**上的快照；
+> 本文所有数字都来自 `D:\running\var\rai.sqlite` 的**实测**。
 
 ---
 
@@ -28,6 +32,16 @@
 | web 侧全量 | `npm run test -w @rai/web` | **18 文件 / 111 tests / 0 fail** |
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
+| **只读工具链全量实跑** | 8 个已文档化的 CLI/脚本，逐一实跑 | **全部 exit=0**（见下） |
+
+> **工具链实跑（2026-09-30，均只读）**：
+> `walk-forward` 2004 ms · `model-version-replay` 643 ms（gate `rai-shadow-gate-v1` 通过：
+> CA 均值 |Δ| 3.47、最终 TA |Δ| 1.61）· `ablation` 1286 ms（6 候选、**6 个发布阻断**）·
+> `normalization-coverage` 481 ms · `readiness-replay-coverage` 1826 ms ·
+> `backfill-canonical-nights`（dry-run）436 ms · `model-v2 --action inspect` 411 ms ·
+> `prediction-eval` 286 ms（`no_active_catboost_model`）。
+> 这一步的用途是抓"工具悄悄坏掉"：批次 19 的消融脚本曾经自 `017bf95` 起完全无法运行，
+> 而没有任何门禁会因此转红。
 
 > **计数口径**：node 侧必须用**带引号的 glob**交给 node 自己展开。
 > 直接 `npm run test` 在本机（Windows/cmd）只跑到 498 条 —— 那是脚本壳差异，不是回归。
@@ -53,21 +67,21 @@
 
 | # | 项 | 状态 | 依据 / 阻塞原因 |
 |---|---|---|---|
-| 1 | V4 特征全链路 | 🟡 **代码已就绪，真实库未重建** | `recompute-pipeline` 已走 `extractWorkoutFeatureVectorV4` + `encodeFeaturePayloadV4`；本机 268 条仍是 V3 存量。重建属于部署动作（迁移闸门见 §六） |
+| 1 | V4 特征全链路 | 🟡 **代码已就绪，真实库未重建** | `recompute-pipeline` 已走 `extractWorkoutFeatureVectorV4` + `encodeFeaturePayloadV4`；本工作区的 `feature_runs` 仍是 v1×7 / v2×5 / **v3×12**，257 条 canonical workout 未重建为 V4。重建属于部署动作（迁移闸门见 §六） |
 | 2 | 工程/配置版本落库分离、lineage | ✅ | v24 迁移 + `engine_version` 读端 + API/界面；`ModelLineageV2` 十五个字段齐全 |
 | 3 | transition gate v2 + bundle 原子发布 | ✅ | 三态 gate、release bundle、拒绝留痕、回滚语义，均有测试 |
 | 4 | assembler freshness 统一 | 🟡 | 到达时间（`latestAvailableAt` / `availabilityUnknown`）已成为可见事实；`as_known_then` 的**裁决**留给第一个真正按该模式回放的调用方 |
 | 5 | rebase 发布流程与 epoch 分段曲线 | 🟡 | CLI `rebase` + 检查策略 + 曲线分段 + "两侧不可直接比较"文案已具备；**`effectiveAt` / `rebaseReason` 未落库**（`rebaseReason` 需要 review 状态持久化才不算造字段） |
-| 6 | 环境 adapter 生产统一 | 🔴 **被数据阻塞** | `NORMALIZATION_COVERAGE.json`：温度 **0%**、湿度 **0%** 可得率（268 条）。N1（复用既有条件惩罚）已在 physiology 落地；N3 无法校准，且 §18.4 禁止自动接入天气服务 |
+| 6 | 环境 adapter 生产统一 | 🟡 **覆盖率已实测，仍不足以校准** | 本工作区库（`NORMALIZATION_COVERAGE.json`，257 条 canonical workout）：**温度 8.6%（22）、湿度 8.6%（22）、爬升 61.9%（159）**。N1（复用既有条件惩罚）已在 physiology 落地；状态枚举**不再退化**（`out_of_domain 16`、`not_needed 1`）。但把 comparability 接进学习门控会让 **256/257** 低于门槛，所以 §5.1 的警告仍成立；N3 校准需要更多同条件样本，且 §18.4 禁止自动接入天气服务 |
 | 7 | 快照贯穿实际 API | 🟡 | fitness / load / readiness 三域已窄化且有真实消费方；durability / zones 等有消费方再做（不做投机抽象） |
 | 8 | Ridge/CatBoost 同样本三方竞争 | ✅ | Python 产 `challengers.json` → TS 导入器 → 既有 `compareResidualChallengers`；缺列按"不能凭缺席获胜"处理 |
 | 9 | 区间 calibration 持久化与选择器 | ✅ | 只差"独立标签到位后跑一次真校准" |
-| 10 | 跨领域 replay | 🟡 | Fitness（冻结 V1 引擎 vs 当前 V2）、Readiness、Load 三个域均有入口，且各自只差一个**被声明的假设**；Coach 未做（决策层，无有效对照支） |
-| 11 | 候选参数实证与真实退步验收 | ❌ **被真实标签阻塞** | 本机 `labeledOutcomeCount = 0`（268 条训练 / 0 条已确认比赛或标准测试），`real_label_smoke = not_evaluable` |
+| 10 | 跨领域 replay | 🟡 | Fitness（冻结 V1 引擎 vs 当前 V2）、Readiness 两个域有**可跑的 runner**；Load 有纯回放模块但**没有库侧事实装配器**（缺它就必须再写一套 SQL→域映射，正是"两套口径"的开端）；Coach 未做（决策层，无有效对照支） |
+| 11 | 候选参数实证与真实退步验收 | ❌ **被真实标签阻塞** | 本工作区 `labeledOutcomeCount = 0`（284 条 workout / 257 条 canonical / 0 条已确认比赛或标准测试），`real_label_smoke = not_evaluable` |
 
 ---
 
-## 五、本状态文档新增的五条可执行结论
+## 五、本状态文档新增的六条可执行结论
 
 ### 1. 负向学习的瓶颈已定位到**可靠性门槛**（不是可比性、不是 K）
 
@@ -158,6 +172,37 @@ canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不�
 > 本轮第一次突变因 PowerShell 替换静默失效而得到"全绿"，若据此断言
 > "这些断言没有牙齿"就会得出与事实相反的结论。
 
+### 6. 🔴 方案 §1.5 记录的是**另一台主机的库**，与本文的数字系统性不同
+
+本次对 `D:\running\var\rai.sqlite` 做**只读**实测（文件 mtime 仍是 2026-09-28 16:29，未被任何操作写过）：
+
+| 项目 | 方案 §1.5（macOS） | 本工作区实测 | 结论 |
+|---|---|---|---|
+| migration 最大版本 | 22 | **22** | ✅ 一致 |
+| canonical workout 数 | 268 | **257** | 🔴 不同 |
+| active run 的 `model_version` | `rai-model-config-v3` | **`rai-model-config-v2`** | 🔴 不同 |
+| active run 的 `evaluated_at` | `2026-09-04T08:53:46.059Z` | **`2026-07-20T02:51:58.706Z`** | 🔴 不同 |
+| active 特征契约 | `workout-feature-v3` | `feature_runs` = v1×7 / v2×5 / **v3×12** | 🟡 同代不同批 |
+| `prediction_model_runs` | 0 | **0** | ✅ 一致 |
+| 恢复事实（夜/HRV） | 未记录 | **canonical 各 0 行**（原始睡眠 5222 / HRV 684） | §五-4 |
+| 天气字段可得率 | 温度 0% | **温度 8.6% / 湿度 8.6% / 爬升 61.9%** | 🔴 不同 |
+
+**这不是"两台机器数据略有差异"，而是曾经拿另一台机器的产物当本工作区的事实**：
+`deliverables/NORMALIZATION_COVERAGE.json` 与 `PHASE0_BASELINE.json` 等四份 JSON 的
+`databasePath` 写的是 `/Users/ta/running/var/rai.sqlite`。批次 24 之前，
+"环境 adapter 被 0% 天气可得率阻塞"这个结论就是从那份**别的库**的报告里读出来的；
+本库的真实类似结论应当改为"8.6% 温度/湿度、61.9% 爬升，仍不足以校准"。
+
+**已做的处置**：
+
+- 用本工作区的库**重新生成** `NORMALIZATION_COVERAGE.json`（`databasePath` 现在写的是
+  `D:\running\var\rai.sqlite`）；`CA_WEIGHT_ABLATION.json` 与 `READINESS_REPLAY_COVERAGE.json`
+  本来就是在本库生成的。
+- `deliverables/README.md` 的产物表新增 **`databasePath` 一列**，标出四份**不可在本工作区复现**
+  的 macOS 时点快照 —— 结构上防止同一类误读复发。
+- 方案主干（`RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md`）**不改**：它是一份注明日期与
+  核验提交的文档，记录 macOS 基线是合法的。要防的是"把它的数字当成本工作区的现状"。
+
 ---
 
 ## 六、未执行的动作（明确列出，避免被读成"已完成"）
@@ -188,15 +233,14 @@ canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不�
 
 ### 机器可读产物（可由脚本重跑）
 
-| 文件 | 生成命令 |
-|---|---|
-| `CA_WEIGHT_ABLATION.json` | `npm run data:ablation-ca-weights -- --database var/rai.sqlite --out deliverables/CA_WEIGHT_ABLATION.json` |
-| `READINESS_REPLAY_COVERAGE.json` | `npm run data:readiness-replay-coverage -- --database var/rai.sqlite --out deliverables/READINESS_REPLAY_COVERAGE.json` |
-| `MODEL_VERSION_REPLAY_2026-09-29.json` | `node --import tsx scripts/model-version-replay.mts --database var/rai.sqlite` |
-| `NORMALIZATION_COVERAGE.json` | `node --import tsx scripts/normalization-coverage.mts --database var/rai.sqlite` |
-| `RAI_V2_ABLATION_2026-09-29.json` / `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` | 09-29 的消融台账与 bounded 候选离线评估（**候选未启用**） |
-| `RAI_V2_EVALUATION_2026-09-29.json` | 统一评估报告（含 `not_evaluable` 明细） |
-| `PHASE0_BASELINE.json` / `PREPARATION_MIGRATION_GOLDEN.json` | 阶段 0 证据基线 / 专项准备度迁移 golden |
+| 文件 | 生成命令 | `databasePath` |
+|---|---|---|
+| `CA_WEIGHT_ABLATION.json` | `npm run data:ablation-ca-weights -- --database var/rai.sqlite --out deliverables/CA_WEIGHT_ABLATION.json` | `D:\running\var\rai.sqlite` |
+| `READINESS_REPLAY_COVERAGE.json` | `npm run data:readiness-replay-coverage -- --database var/rai.sqlite --out deliverables/READINESS_REPLAY_COVERAGE.json` | `D:\running\var\rai.sqlite` |
+| `NORMALIZATION_COVERAGE.json` | `node --import tsx scripts/normalization-coverage.mts --database var/rai.sqlite --out deliverables/NORMALIZATION_COVERAGE.json` | `D:\running\var\rai.sqlite` |
+| `MODEL_VERSION_REPLAY_2026-09-29.json` | `node --import tsx scripts/model-version-replay.mts --database var/rai.sqlite` | 🔴 **另一台主机（macOS）**；脚本可跑，需重新生成才是本库 |
+| `RAI_V2_ABLATION_2026-09-29.json` / `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` / `RAI_V2_EVALUATION_2026-09-29.json` / `PHASE0_BASELINE.json` | 09-28/09-29 会话产出 | 🔴 **另一台主机（macOS）**，生成器不可用 |
+| `PREPARATION_MIGRATION_GOLDEN.json` | 专项准备度迁移 golden | 未声明 |
 
 > 引用这些产物时**必须同时给出生成脚本与数据口径**。它们是派生数据，不是结论。
 
@@ -223,7 +267,7 @@ canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不�
 
 **被数据阻塞（等条件，不等代码）**
 
-5. 环境 adapter N3：等天气字段可得率从 0% 起变化。
+5. 环境 adapter N3：本库温度/湿度可得率 **8.6%**、爬升 **61.9%**（不是 0%）。要校准仍需更多同条件样本，且须独立回放后才可接入。
 6. 区间校准 / CatBoost 激活 / Durability 数值：等 ≥24 条独立、无泄漏、用户确认的比赛或标准测试结果。
    标签闭环的**软件部分**已完成并有测试（`label-funnel.test.ts`），缺的是**真实结果本身**。
 7. **Readiness 的实证验收**：本机 769 天里只有 1 天可判定（见 §五-4）。

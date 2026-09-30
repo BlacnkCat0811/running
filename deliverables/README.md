@@ -22,18 +22,29 @@
 
 ## 二、机器可读产物（可由脚本重跑复现）
 
-| 文件 | 生成脚本 / 口径 |
-|---|---|
-| `RAI_V2_ABLATION_2026-09-29.json` | CA 维度权重消融台账 |
-| `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` | bounded comparability 候选离线评估（**未启用**） |
-| `RAI_V2_EVALUATION_2026-09-29.json` | 统一评估报告（含 not_evaluable 明细） |
-| `CA_WEIGHT_ABLATION.json` | `scripts/ablation-ca-weights.mts` |
-| `MODEL_VERSION_REPLAY_2026-09-29.json` | `scripts/model-version-replay.mts`（冻结 V1 引擎 vs 当前 V2 引擎） |
-| `NORMALIZATION_COVERAGE.json` | `scripts/normalization-coverage.mts` |
-| `PHASE0_BASELINE.json` | 阶段 0 证据基线 |
-| `PREPARATION_MIGRATION_GOLDEN.json` | 专项准备度迁移 golden |
+> ⚠️ **必须写明"这份产物描述的是哪个数据库"。** 派生数据只有挂在具体库上才有意义：
+> 同一个脚本在不同库上会给出不同数字。2026-09-30 实测发现 `NORMALIZATION_COVERAGE.json`
+> 原本由 **macOS 主机**产出（`databasePath: /Users/ta/running/var/rai.sqlite`），
+> 其"天气可得率 0%"被当成本工作区的事实引用；在本工作区的库上真实值是
+> **温度/湿度 8.6%、爬升 61.9%**。数字错了整整一类结论。
+> 新增/更新产物时，`databasePath` 一栏必须填**产出它的那份库**。
+
+| 文件 | 生成脚本 / 口径 | `databasePath` | 可在此工作区复现 |
+|---|---|---|---|
+| `CA_WEIGHT_ABLATION.json` | `npm run data:ablation-ca-weights` | `D:\running\var\rai.sqlite` | ✅ |
+| `READINESS_REPLAY_COVERAGE.json` | `npm run data:readiness-replay-coverage` | `D:\running\var\rai.sqlite` | ✅ |
+| `NORMALIZATION_COVERAGE.json` | `scripts/normalization-coverage.mts` | `D:\running\var\rai.sqlite` | ✅ |
+| `MODEL_VERSION_REPLAY_2026-09-29.json` | `scripts/model-version-replay.mts` | 🔴 **另一台主机（macOS）** | ✅ 脚本可跑，需重新生成才是本库 |
+| `RAI_V2_ABLATION_2026-09-29.json` | 09-29 会话的消融台账 | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
+| `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` | bounded comparability 候选离线评估（**未启用**） | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
+| `RAI_V2_EVALUATION_2026-09-29.json` | 统一评估报告（含 not_evaluable 明细） | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
+| `PHASE0_BASELINE.json` | 阶段 0 证据基线 | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
+| `PREPARATION_MIGRATION_GOLDEN.json` | 专项准备度迁移 golden | 未声明 | — |
 
 > 这些是**派生数据**，不是结论。引用时必须同时给出生成脚本与数据口径。
+> 标 🔴 的四份是**另一台主机上的时点快照**：它们的数字描述的是那台机器的库，
+> 不能当作本工作区（或线上）的事实。要引用本库的数字，请用上面的命令重新生成。
+> 是否把它们移入 `archive/` 属于一次单独的整理（会牵动多处引用），尚未执行。
 
 ## 三、仍有效的参考（非时点快照）
 
