@@ -40,7 +40,12 @@ const planPath = join(root, "deliverables", "RAI_ALGORITHM_V2_OPTIMIZATION_2026-
 //         边界：目前只有一个层（N0 identity + performanceVdotEvidence），
 //         所以"两层各去一次"是构造出来的，不是线上可复现的；N2 落地后应再加一条
 //         "两个真实 owner"的用例。
-const KNOWN_GAPS: Record<string, string> = {};
+const KNOWN_GAPS: Record<string, string> = {
+  // 2026-09-30 修正检查口径（只认测试标题）之后暴露出来的**真实缺口**。
+  // 在这之前它被"某处字符串里出现过 T02"假性覆盖 —— 见 citedIdsIn 的注释。
+  T02: "**只有一半有覆盖**：「删除后不得复活」在导入层有测试（health-export-parser 的 tombstone/删除守卫），但 §16.1 要求的「**重放后所有下游去除该事实的影响**」没有任何用例：现有回放用例（load-replay-v2 / model-replay-v2）都是「加事实」方向，没有一条走「删训练 → 重放 → 断言 rolling exposure / 模型标签 / checkpoint 状态里都不再出现它」。需要 recompute 管线的夹具才能钉住，尚未写。",
+  // F01 / T01 已在本批补上标题（断言本来就存在，只是标题没带 ID）。
+};
 
 function collectTestFiles(directory: string, found: string[] = []): string[] {
   for (const entry of readdirSync(directory)) {
@@ -73,12 +78,37 @@ const sources = ["packages", "apps"]
   .flatMap((directory) => collectTestFiles(directory))
   .map((file) => ({ file, text: readFileSync(file, "utf8") }));
 
+/**
+ * 只认**测试标题**里的 ID。
+ *
+ * 🔴 第一版是 `new RegExp("\\b" + id + "\\b").test(fileText)` —— 在整个文件正文里找，
+ * 于是**注释**和**任何字符串字面量**都算"被引用"。2026-09-30 的独立审计抓到了后果：
+ *
+ * - `T01` / `T02` 的"引用"全部来自 `${localDate}T02:00:00.000Z` 这类时间戳模板 ——
+ *   `}` 与 `T` 之间是词边界，所以 `\bT02\b` 命中；而写成 `2026-07-10T02:00:00Z`
+ *   （`0` 与 `T` 之间不是边界）就不会命中。两个 ID 因此凭空"被覆盖"。
+ * - `F01` 只有注释提到它。
+ *
+ * 也就是说那份 `cited 54` 只证明"某个 ID 在某处出现过"，不证明"有断言在守它"。
+ * 现在只从 `test(...)` / `it(...)` 的标题字符串里取 ID：标题里没有，就不算引用。
+ * 标题里没有但断言确实存在的用例，**正确做法是给标题补上 ID**，而不是把检查放松回去。
+ */
+function citedIdsIn(text: string): Set<string> {
+  const titles: string[] = [];
+  for (const match of text.matchAll(/(?:^|[\s;{}])(?:test|it)\s*\(\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g)) {
+    titles.push(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+  return new Set(titles.join("\n").match(/\b[A-Z]\d{2}\b/g) ?? []);
+}
+
+const citedSet = new Set<string>();
+for (const source of sources) for (const id of citedIdsIn(source.text)) citedSet.add(id);
+
 const cited: string[] = [];
 const declared: string[] = [];
 const missing: string[] = [];
 for (const id of ids) {
-  const pattern = new RegExp(`\\b${id}\\b`);
-  if (sources.some((source) => pattern.test(source.text))) cited.push(id);
+  if (citedSet.has(id)) cited.push(id);
   else if (id in KNOWN_GAPS) declared.push(id);
   else missing.push(id);
 }

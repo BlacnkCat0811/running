@@ -179,7 +179,7 @@ async function buildSource(
   }
 }
 
-test("changing only recovery facts leaves ability, session type and learning untouched", async () => {
+test("F01: changing only recovery facts leaves ability, session type and learning untouched", async () => {
   const rested = await buildSource(RESTED);
   const poor = await buildSource(POORLY_RECOVERED);
 

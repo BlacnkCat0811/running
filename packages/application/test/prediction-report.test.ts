@@ -47,7 +47,10 @@ test("P05: rejects an invalid production correction before changing a prediction
   assert.throws(() => adjustPredictionWithCatBoost(prediction, 0.3));
 });
 
-test("historical evaluation exposes labels only after their availability time", () => {
+test("T01: a label or example that arrives later is invisible to an earlier as-of", () => {
+  // §16.1 T01「迟到标签/override → 不进入此前 as-known-then 预测」。
+  // 这是那条规则在**可见性**这一层的判据：历史标签与残差样本都经同一个过滤器，
+  // 只有 availableAt <= asOf 的才进入当次预测的证据集。
   const values = [
     { availableAt: "2026-01-03T00:00:00.000Z", value: "late" },
     { availableAt: "2026-01-01T12:00:00.000Z", value: "ready" },

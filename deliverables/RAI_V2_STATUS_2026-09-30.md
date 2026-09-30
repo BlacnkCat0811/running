@@ -17,7 +17,9 @@
 ## 一、一句话结论
 
 方案主干（P0/P1 的工程边界）**已实施并逐条有测试**；§16.1 的验收矩阵改为**可执行判据**：**54 条全部按 ID 被引用，缺口声明清零**（§三）。三条独立只读审计（§十）收窄了本文档的若干说法，其中两条是**它自己发现的真实缺陷**，已修并加了回归用例。
-§18.5 的最终验收条件逐条走查见 §九：**8 条工程条全部满足**，4 条精度条**全部 `not_evaluable`**（0 标签）。
+§18.5 的最终验收条件逐条走查见 §九。🔴 **该节原写"8 条工程条全部满足"，2026-09-30 的独立审计推翻了它**：
+实际是 **5 条明确成立（1/2/3/4/6）、2 条偏弱（5/7：代码里实现了但**没有测试**在守）、1 条（8）根本没有可执行判据**。
+已按审计结论改写 §九。4 条精度条仍是 `not_evaluable`（0 标签）。
 剩余的不是"还没写"，而是三类**不能靠写代码解决**的事：**被真实标签阻塞**、**被天气数据阻塞**、
 **需要新增政策且必须先回放**。精度增强（ML、经验区间、Durability 数值、耐久罚分）**全部未激活**，
 且**不应**在没有独立标签的情况下激活。
@@ -34,7 +36,7 @@
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 2 / 漂移 99 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的源码演进） |
 | **只读工具链全量实跑** | 7 个可直接跑的 CLI/脚本，逐一实跑 | **全部 exit=0，且 `var/rai.sqlite` 逐字节未变**（见下） |
-| §16.1 验收矩阵 | `npm run check:acceptance-matrix` | **54 条 / cited 54 / declared-gap 0 / missing 0** |
+| §16.1 验收矩阵 | `npm run check:acceptance-matrix`（**只认测试标题**，见 §十四） | **54 条 / cited 53 / declared-gap 1（T02）/ missing 0** |
 | 包边界 | `npm run check:package-boundaries` | **15 个包 / 30 条 src 边 / 禁线 4 条 → 通过** |
 | 速度合理性盘点 | `npm run data:speed-plausibility` | **11835 样本 / 0 越界**（只读，exit 0） |
 
@@ -492,18 +494,26 @@ D 未列边）；往白名单塞一条不存在的边 ⇒ 报"已不存在，请
 那些 ID 的"确有测试"由 `npm run check:acceptance-matrix` 机械保证（§三），
 所以这张表不会随代码漂移而悄悄失真。
 
-### 9.1 工程发布条件（§18.5 第 1–8 条）—— **8/8 满足**
+### 9.1 工程发布条件（§18.5 第 1–8 条）—— 🔴 **订正为「5 明确 / 2 偏弱 / 1 无判据」**
 
-| # | 条件 | 证据（§16.1 ID → 落点） | 判定 |
+> **本节原写"8/8 满足"，是错的。** 2026-09-30 的独立审计逐条复核后推翻了这个结论，
+> 下表按审计结果改写。三条订正的共同原因是同一个：**"代码里实现了"被当成了"有东西在守"**。
+
+| # | 条件 | 审计结论 | 依据 / 缺口 |
 |---|---|---|---|
-| 1 | Fitness 恢复隔离全链路成立，缺失不被错误学习 | **F01** 从**原始事实装配入口**跑（不是只构造 feature 再调 scoring），外加 **F02** 跨域组合、**F05** 展示收缩不产生负学习、**F07** 无需数值修正也能下调、**R03** 有值无基线不算可比证据 | ✅ |
-| 2 | 历史/可得时间、baseline epoch、模型/config/schema 一致 | `ModelLineageV2` 十五字段（`domain-snapshot-narrowing.test.ts` 15 例）；**S03** 旧 checkpoint + 新 config/schema 拒绝复用；v24 迁移测试；`MODEL_VERSION_REPLAY_2026-09-30.json` 带 `featureSnapshotSha256` + `repoRevision` | ✅ |
-| 3 | 新旧合同兼容、无 checkpoint 跨版本复用 | **S03**；`MODEL_CHECKPOINT_VERSION` 由 v1→v2 正是为了让缺 `pendingNegativeIds` 的旧 checkpoint **无法**被恢复成新形状（理由写在 `service-types.ts` 的字段注释里） | ✅ |
-| 4 | Load/Zone 既有数值主线在未改政策时一致 | **L01** "load vector passes compositeLoad through untouched（§9.6 golden parity）"、**L02/L03/L04**、**Z01** 手工生效日期、**Z03** 短暂分歧不算持续冲突 | ✅ |
-| 5 | Prediction 无重复 correction，未知状态如实表达 | **P05** 只允许**一个** point correction policy（不叠 bias/Ridge/CatBoost）、**I01** 区间嵌套且独立评估、**I02** 无校准时只保留 heuristic 范围 | ✅ |
-| 6 | Coach 不重算底层规则，理由与动作一致 | **C01** 换语言后 action/tone/codes 不变（`mobile-coach-snapshot-parity.test.ts`）、`readiness-delegation.test.ts` 断言 wrapper 只是别名而不是第二份阈值 | ✅ |
-| 7 | 发布原子性、generation 校验、失败回退、旧工件保留经过测试 | **S01** 失败/过期/变更快照被拒且旧结果可读、**S04** prune 不删活跃与回滚依赖、**S02** 跨标尺走 transition gate 而不填伪值 | ✅ |
-| 8 | 性能报告真实测量，不引用跨条件拼接的"提速" | 项目里**恰好有一次这类错误并已被更正**：`SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md` 的 B5 原以"实测 **21.7 s → 3.0 s**（约 6×）"为改动理由，2026-09-21 被受控探针推翻 —— 预热缓存、3 轮中位数、单一变量下是 **5,790 ms → 6,919 ms（慢约 19%）**；"21.7 s"出自冷首跑、"3.0 s"冷热都不出现，**正是跨条件拼接**。该行同时记下"工具整体比改动前更慢"。`docs/BACKEND_REFACTOR_IMPLEMENTATION.md` 亦明确"未在云服务器/N100 上部署；尚无真实用户数据的提速比例" | ✅ |
+| 1 | Fitness 恢复隔离全链路成立 | ✅ **成立** | `recovery-isolation-e2e.test.ts` 从**原始事实装配入口**跑（注入 health_records/workouts/training_sessions，经 pipeline 私有 seam），不是手搓 feature；两个变体的 `restingHeartRateReference` 都是 50、HRR 分数相同 ⇒ 课型相同。配 F02/F05/F07 |
+| 2 | 历史/可得时间、epoch、config/schema 一致 | ✅ **成立** | `packages/readiness/src/index.ts:265-281` 三段时序硬校验（`observed ≤ asOf ∧ arrived ≤ asOf ∧ arrived ≥ observed`）+ localDate 匹配，否则该信号不可得；epoch 由 `service.test.ts:865` 钉住（同一 epoch 稳定、rebase 后改变、旧快照逐字节不变）。⚠️ 附带订正：`ModelLineageV2` 确有 15 个字段，但 `domain-snapshot-narrowing.test.ts` 的 15 例测的是**载荷窄化**，不是逐字段谱系 —— 原表把两个 15 说成对应关系，属于巧合而非证据 |
+| 3 | 新旧合同兼容、无 checkpoint 跨版本复用 | ✅ **成立（但只由代码守，没有测试）** | `recompute-pipeline.ts:1708` 要求 `checkpoint_version = ?` 等六个相等条件，v1 行**结构上无法**满足；`:1736-1739` 在 `pendingNegativeIds` 缺失时返回 null（拒绝而非补默认）。缺口：`grep rai-model-checkpoint-v1` 全仓 **0 命中** —— 没有测试真的构造过 v1 checkpoint |
+| 4 | Load/Zone 数值主线一致 | ✅ **成立** | **L01** golden parity（`:537-543`）并钉住具体数值（`load.load === 78`、距离修正后 86.25）；**L02/L04** mechanical 保持 null、未观测前史不补零；**Z01** 生效日期、**Z03** 30 s 滞后不构成冲突 |
+| 5 | Prediction 无重复 correction | 🟡 **偏弱：实现存在，测试不存在** | 排他过滤确实在 `prediction-report.ts:896-901`（把已做 bias 校准的距离从 `appliedDistances` 里剔除）；账本规则 2/3 也真的会抛。但 **P05 的两条用例只测 CatBoost 算术与入参拒绝，没有一条碰这个排他过滤**；`prediction-data.test.ts:177` 只断言某个夹具的 `pointCorrection === "none"` |
+| 6 | Coach 不重算、理由与动作一致 | ✅ **成立** | `mobile-coach.ts:202-205` 四个恢复阈值是 `READINESS_*` 的**别名**而非字面量；`:1489-1501` 只做翻译后委派；`coach-decision-v2.test.ts` 的换文案 `deepEqual` 断言比"action/tone/codes 不变"更强 |
+| 7 | 发布原子性、回退、旧工件保留 | 🟡 **偏弱：回滚依赖保留未被任何测试驱动** | 原子性与失败回退**有**测试（`model-release-v2.test.ts`：注入失败后指针仍在 `a`、候选 `activated_at` 为 NULL；未通过的 gate 拒绝激活；封存快照不可变；数据集变化后拒绝回滚），单个 SAVEPOINT 包住两次指针更新。缺口：**没有任何 prune 用例会写入 `model_release_bundles`** —— `database.ts:2872-2874` 的"bundle 引用 ⇒ 保留"循环实现了但**从未被执行过**，而本节原写的"S04 不删回滚依赖"正是它 |
+| 8 | 性能报告真实测量 | 🔴 **没有任何可执行判据** | B5 那一行**确有其事且结论正确**（"21.7 s → 3.0 s"被受控探针推翻：预热缓存、3 轮中位数、单一变量下 **5,790 ms → 6,919 ms，慢约 19%**；"21.7 s"出自冷首跑、"3.0 s"冷热都不出现 ⇒ 跨条件拼接；且工具整体更慢）。但这条**只靠人把一句诚实的更正写进 markdown**：全仓唯一命中"提速"族的文本就是那一行，§16.1 里没有对应 ID，矩阵检查结构性无法在它上面转红 |
+
+**共同教训（写进 §十四）**：三条订正都是"实现 ≠ 有守卫"。而它之所以此前看不出来，是因为
+**矩阵检查把"文件正文里出现过这个 ID"当成"被引用"** —— 注释和时间戳模板都能满足它。
+该口径已收紧为只认测试标题，收紧后立刻机械地暴露出 F01/T01/T02 三条（其中 F01/T01 断言本就存在、
+只是标题没带 ID，已补；T02 是真实缺口，已如实声明）。
 
 ### 9.2 R1 新增合同闭合 —— **6/6 满足**
 
@@ -814,3 +824,40 @@ treated as ingestion time." —— 全量重建恰好把那个 "known" 抹掉了
 所以这里的诚实结论是：**这一条是设计级缺口（缺 record-level ingest ledger），不是可以就地打的补丁。**
 它的可观测后果是 RHR 通道在历史 `asOf` 上一律不可得，而这**恰好**是保守方向 ——
 宁可说"那时还不知道"，也不谎称"那时已经知道"。
+
+---
+
+## 十四、验收矩阵检查的**口径缺陷**：它把"出现过"当成了"被引用"
+
+### 14.1 缺陷与后果
+
+`check-acceptance-matrix.mts` 第一版判"被引用"用的是
+`new RegExp("\\b" + id + "\\b").test(整个测试文件正文)` —— 于是在**注释**里、
+在**任何字符串字面量**里出现过一次就算数。独立审计（§十）抓到了它的直接后果：
+
+- `T01` / `T02` 的"引用"**全部**来自 `${localDate}T02:00:00.000Z` 这类时间戳模板：
+  `}` 与 `T` 之间是词边界，所以 `\bT02\b` 命中；而写成 `2026-07-10T02:00:00Z`
+  （`0` 与 `T` 之间不是边界）反而不命中。**两个 ID 因此凭空"被覆盖"**，其中一个（T02）
+  其实一条断言都没有。
+- `F01` 只有注释提到它。
+
+也就是说本报此前反复引用的那句"那些 ID 的『确有测试』由 `check:acceptance-matrix` 机械保证"，
+**保证的只是"某个 ID 在某处出现过"**。这正是 §9.1 里条件 5 能读成"满足"而排他过滤无人守的原因。
+
+### 14.2 修法：只认**测试标题**
+
+现在从 `test(...)` / `it(...)` 的标题字符串里取 ID；标题里没有就不算引用。
+收紧后**立刻机械地**暴露出三条，与审计的手工抽样完全一致：
+
+| ID | 收紧后的处置 |
+|---|---|
+| **F01** | 断言本来就存在且是真的端到端（从原始事实装配入口跑），**只是标题没带 ID** ⇒ 补标题。**不放松检查口径** |
+| **T01** | 同上：`historicalValuesAvailableAt` 的可见性判据就是 T01 要求的"迟到标签不进入更早的 as-of"，断言真实 ⇒ 补标题并让它明确写"label" |
+| **T02** | **真实缺口**：导入层有"删除后不得复活"的守卫，但 §16.1 要求的"**重放后所有下游去除该事实的影响**"没有任何用例。如实写进 `KNOWN_GAPS`（连同"哪一半有、哪一半没有"），不拿相邻用例顶替 |
+
+收紧后计数：**54 条 / cited 53 / declared-gap 1（T02）/ missing 0**。
+
+> **这条教训比数字重要**：一个门禁如果判据比它声称的松，它就会把"没人守"读成"有人守"。
+> 同类问题在本会话已出现多次（"路径存在"≠"路径是文件"、"能报错"≠"报对了错"、
+> "implemented"≠"tested"）。**收紧判据时不要顺手把暴露出来的东西补成绿的** ——
+> F01/T01 该补标题就补标题，T02 该认缺口就认缺口。
