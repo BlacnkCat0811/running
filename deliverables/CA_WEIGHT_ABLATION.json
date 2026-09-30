@@ -3,11 +3,11 @@
   "stratumCensus": [
     {
       "stratum": "steady_aerobic",
-      "workouts": 243,
-      "eligibleWorkouts": 23,
-      "maximumIndependentSessions": 242,
-      "maximumSpanDays": 2447,
-      "comparableRate": 0.9711934156378601,
+      "workouts": 207,
+      "eligibleWorkouts": 109,
+      "maximumIndependentSessions": 206,
+      "maximumSpanDays": 2410,
+      "comparableRate": 0.966183574879227,
       "refusalReasons": [
         {
           "reason": "insufficient_span_days",
@@ -21,15 +21,15 @@
     },
     {
       "stratum": "recovery_unknown",
-      "workouts": 3,
-      "eligibleWorkouts": 1,
-      "maximumIndependentSessions": 2,
+      "workouts": 14,
+      "eligibleWorkouts": 3,
+      "maximumIndependentSessions": 13,
       "maximumSpanDays": 2170.1,
-      "comparableRate": 0,
+      "comparableRate": 0.5714285714285714,
       "refusalReasons": [
         {
           "reason": "insufficient_independent_sessions",
-          "count": 3
+          "count": 6
         },
         {
           "reason": "insufficient_span_days",
@@ -39,11 +39,11 @@
     },
     {
       "stratum": "threshold_sustained",
-      "workouts": 21,
-      "eligibleWorkouts": 20,
-      "maximumIndependentSessions": 20,
-      "maximumSpanDays": 765,
-      "comparableRate": 0.7142857142857143,
+      "workouts": 35,
+      "eligibleWorkouts": 25,
+      "maximumIndependentSessions": 34,
+      "maximumSpanDays": 762,
+      "comparableRate": 0.8285714285714286,
       "refusalReasons": [
         {
           "reason": "insufficient_independent_sessions",
@@ -51,7 +51,7 @@
         },
         {
           "reason": "insufficient_span_days",
-          "count": 2
+          "count": 6
         }
       ]
     },
@@ -74,22 +74,195 @@
       ]
     }
   ],
-  "generatedAt": "2026-09-29T02:03:30.945Z",
-  "modelConfigVersion": "rai-model-config-v10",
-  "databasePath": "/Users/ta/running/var/rai.sqlite",
-  "featureRunId": "feature_run_1f07836f-2e60-46bd-9910-94253777188f",
-  "featureCount": 268,
+  "generatedAt": "2026-09-30T03:43:15.254Z",
+  "modelConfigVersion": "rai-model-config-v12",
+  "comparabilityHistoryMode": "legacy",
+  "databasePath": "D:\\running\\var\\rai.sqlite",
+  "featureRunId": "feature_run_e69a1113-417f-46b2-8e31-8f488456b668",
+  "featureCount": 257,
+  "labeledOutcomeCount": 0,
   "accuracyComparison": "not_evaluable",
   "accuracyComparisonReason": "no labeled race/test outcomes in this database; see the walk-forward report",
-  "limitation": "replay omits inactivity decay (identical across candidates) and uses the stored pre-V2 feature snapshot",
+  "findings": [
+    {
+      "candidate": "v1_current",
+      "status": "never_accepted",
+      "negativeOpportunities": 42,
+      "negativeAccepted": 0
+    },
+    {
+      "candidate": "v2a",
+      "status": "never_accepted",
+      "negativeOpportunities": 26,
+      "negativeAccepted": 0
+    },
+    {
+      "candidate": "v2b",
+      "status": "never_accepted",
+      "negativeOpportunities": 25,
+      "negativeAccepted": 0
+    },
+    {
+      "candidate": "drop_pace",
+      "status": "never_accepted",
+      "negativeOpportunities": 28,
+      "negativeAccepted": 0
+    },
+    {
+      "candidate": "drop_efficiency",
+      "status": "never_accepted",
+      "negativeOpportunities": 59,
+      "negativeAccepted": 0
+    },
+    {
+      "candidate": "drop_stability",
+      "status": "never_accepted",
+      "negativeOpportunities": 21,
+      "negativeAccepted": 0
+    }
+  ],
+  "releaseBlockers": [
+    {
+      "candidate": "v1_current",
+      "code": "negative_learning_never_accepted",
+      "negativeOpportunities": 42
+    },
+    {
+      "candidate": "v2a",
+      "code": "negative_learning_never_accepted",
+      "negativeOpportunities": 26
+    },
+    {
+      "candidate": "v2b",
+      "code": "negative_learning_never_accepted",
+      "negativeOpportunities": 25
+    },
+    {
+      "candidate": "drop_pace",
+      "code": "negative_learning_never_accepted",
+      "negativeOpportunities": 28
+    },
+    {
+      "candidate": "drop_efficiency",
+      "code": "negative_learning_never_accepted",
+      "negativeOpportunities": 59
+    },
+    {
+      "candidate": "drop_stability",
+      "code": "negative_learning_never_accepted",
+      "negativeOpportunities": 21
+    }
+  ],
+  "negativeLearningNote": "§6.9-7：never_accepted 即'有合格负机会却一次都没接受'，按文档必须阻断该门控版本发布并复查/放宽非必要门槛；“更保守”不是永久解释。no_opportunity 是独立状态，不等于通过。",
+  "limitation": "Uses stored pre-V2 features, not a new V4 extraction. Replays production inactivity decay and eligible-session counting. v1_current is only a V1-weight control under the current engine, NOT an executable replay of the old engine. Environment is unavailable in these stored features.",
   "candidateNotes": [
-    "v10 removed the direction factor from the alpha composition entirely (the last 0.4 on a negative residual; the recovery-conditioned 0.25 went earlier). Negative learning is now damped only by the K-consecutive confirmation count. This report is the single-factor evaluation the doc requires for that 2.5x change: compare acceptance.negativeOpportunitiesToFirstAcceptance and trueAbility across the v9 and v10 runs, and note that with zero labelled outcomes locally the question 'is faster negative learning better' stays not_evaluable — only the mechanical effect is measured.",
-    "drop_efficiency is a weight-floor artifact, not an ability finding: dropping efficiency leaves pace + stability at 0.5 of the configured 0.875, below the 0.65 minimumAvailableWeight floor, so every attempted workout becomes trial and no CA is produced.",
+    "The comparabilityHistoryMode field declares whether this is the incumbent history policy or the bounded candidate. v11 uses fractional weight coverage. This is not the earlier v9/v10 single-factor experiment. Acceptance denominators change as TA changes; compare counts as well as rates.",
+    "Ablations remove one Fitness dimension without reintroducing Recovery. minimumAvailableWeight is a fraction of configured weights, so deleting a dimension does not make an otherwise complete candidate fail just because its unnormalised weights sum to less than 0.65.",
     "acceptance denominators are the independent candidate opportunities taken before the gates decide. Every gate is implemented and applied: §6.7 evidence reliability, §6.2 stratum comparability, and the §6.9 K-consecutive negative confirmation. A high rate therefore means the gates rarely bind on this data, not that they are missing. A negative candidate counted as accepted is one whose update was actually applied — a residual deferred by the confirmation count is not acceptance.",
-    "the per-stratum breakdown is reported in stratumCensus. A per-device correlation breakdown is not, because the feature contract carries no device dimension."
+    "In bounded mode the per-stratum census uses eligible independent sessions inside the 28/42-day window; legacy mode intentionally preserves the incumbent cumulative history policy. acceptanceByGroup reports opportunity counts by stratum, session and source category. Weather remains explicitly unavailable; these counts do not prove real decline-detection accuracy."
   ],
   "outcomes": [
     {
+      "acceptanceByGroup": {
+        "stratum:threshold_sustained": {
+          "opportunitiesPositive": 18,
+          "opportunitiesNegative": 6,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:tempo": {
+          "opportunitiesPositive": 18,
+          "opportunitiesNegative": 6,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:connect": {
+          "opportunitiesPositive": 88,
+          "opportunitiesNegative": 37,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "environment:unavailable_in_stored_v3_features": {
+          "opportunitiesPositive": 119,
+          "opportunitiesNegative": 42,
+          "acceptedPositive": 32,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:steady_aerobic": {
+          "opportunitiesPositive": 97,
+          "opportunitiesNegative": 32,
+          "acceptedPositive": 22,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:easy": {
+          "opportunitiesPositive": 63,
+          "opportunitiesNegative": 22,
+          "acceptedPositive": 7,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:steady": {
+          "opportunitiesPositive": 31,
+          "opportunitiesNegative": 7,
+          "acceptedPositive": 13,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:long_run": {
+          "opportunitiesPositive": 3,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:apple_watch": {
+          "opportunitiesPositive": 31,
+          "opportunitiesNegative": 4,
+          "acceptedPositive": 30,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:recovery_unknown": {
+          "opportunitiesPositive": 4,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:recovery": {
+          "opportunitiesPositive": 4,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:other": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        }
+      },
       "candidate": "v1_current",
       "dimensionWeights": {
         "efficiency": 0.375,
@@ -99,38 +272,38 @@
         "recovery": 0.125
       },
       "calibrationSessions": 6,
-      "attempted": 156,
-      "eligible": 39,
-      "trial": 117,
-      "calibrating": 94,
+      "attempted": 161,
+      "eligible": 161,
+      "trial": 0,
+      "calibrating": 78,
       "excluded": 18,
-      "scorableRate": 0.25,
+      "scorableRate": 1,
       "currentAbility": {
-        "mean": 53.863299890638096,
-        "stdev": 7.630321312153992,
-        "p05": 39.352195800188355,
-        "p50": 52.64017594681729,
-        "p95": 65.57866668544668,
+        "mean": 53.255138021156284,
+        "stdev": 7.031646073274168,
+        "p05": 42.569475578598464,
+        "p50": 53.35055680599605,
+        "p95": 63.92316784023009,
         "saturationRate": 0
       },
       "trueAbility": {
-        "final": 53.324664256056245,
-        "updated": 18,
-        "meanAbsoluteDelta": 0.6197556252547641,
-        "maxAbsoluteDelta": 1.3059842786262195
+        "final": 43.087550925767005,
+        "updated": 32,
+        "meanAbsoluteDelta": 0.2914859664302192,
+        "maxAbsoluteDelta": 0.5575217098104801
       },
       "dimensionCoverage": {
-        "mean": 0.967948717948718,
-        "fullCoverageRate": 0.7435897435897436
+        "mean": 1,
+        "fullCoverageRate": 1
       },
       "acceptance": {
-        "positiveCandidates": 14,
-        "positiveAccepted": 12,
-        "negativeCandidates": 15,
-        "negativeAccepted": 6,
-        "noLearningTarget": 10,
-        "negativeOpportunitiesToFirstAcceptance": 4,
-        "firstNegativeAcceptanceAtAttempt": 109
+        "positiveCandidates": 119,
+        "positiveAccepted": 32,
+        "negativeCandidates": 42,
+        "negativeAccepted": 0,
+        "noLearningTarget": 0,
+        "negativeOpportunitiesToFirstAcceptance": null,
+        "firstNegativeAcceptanceAtAttempt": null
       },
       "effectiveWeights": {
         "efficiency": 0.375,
@@ -140,6 +313,106 @@
       }
     },
     {
+      "acceptanceByGroup": {
+        "stratum:threshold_sustained": {
+          "opportunitiesPositive": 19,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:tempo": {
+          "opportunitiesPositive": 19,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:connect": {
+          "opportunitiesPositive": 104,
+          "opportunitiesNegative": 21,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "environment:unavailable_in_stored_v3_features": {
+          "opportunitiesPositive": 135,
+          "opportunitiesNegative": 26,
+          "acceptedPositive": 32,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:steady_aerobic": {
+          "opportunitiesPositive": 110,
+          "opportunitiesNegative": 19,
+          "acceptedPositive": 22,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:easy": {
+          "opportunitiesPositive": 75,
+          "opportunitiesNegative": 10,
+          "acceptedPositive": 7,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:steady": {
+          "opportunitiesPositive": 32,
+          "opportunitiesNegative": 6,
+          "acceptedPositive": 13,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:long_run": {
+          "opportunitiesPositive": 3,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:apple_watch": {
+          "opportunitiesPositive": 31,
+          "opportunitiesNegative": 4,
+          "acceptedPositive": 30,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:recovery_unknown": {
+          "opportunitiesPositive": 6,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:recovery": {
+          "opportunitiesPositive": 6,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:other": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        }
+      },
       "candidate": "v2a",
       "dimensionWeights": {
         "efficiency": 0.375,
@@ -149,38 +422,38 @@
         "recovery": 0
       },
       "calibrationSessions": 6,
-      "attempted": 156,
-      "eligible": 39,
-      "trial": 117,
-      "calibrating": 94,
+      "attempted": 161,
+      "eligible": 161,
+      "trial": 0,
+      "calibrating": 78,
       "excluded": 18,
-      "scorableRate": 0.25,
+      "scorableRate": 1,
       "currentAbility": {
-        "mean": 53.50230186517808,
-        "stdev": 8.65213619945006,
-        "p05": 37.980507330640265,
-        "p50": 51.24817065162429,
-        "p95": 65.65203500848193,
+        "mean": 56.586315002682056,
+        "stdev": 7.781655571975838,
+        "p05": 43.6187034816612,
+        "p50": 56.9263705583156,
+        "p95": 67.73757459646652,
         "saturationRate": 0
       },
       "trueAbility": {
-        "final": 53.99290208515099,
-        "updated": 23,
-        "meanAbsoluteDelta": 0.5355792980936606,
-        "maxAbsoluteDelta": 1.2354438384242457
+        "final": 44.704621794210475,
+        "updated": 32,
+        "meanAbsoluteDelta": 0.3420194310690776,
+        "maxAbsoluteDelta": 0.6261540540099517
       },
       "dimensionCoverage": {
         "mean": 1,
         "fullCoverageRate": 1
       },
       "acceptance": {
-        "positiveCandidates": 16,
-        "positiveAccepted": 14,
-        "negativeCandidates": 23,
-        "negativeAccepted": 9,
+        "positiveCandidates": 135,
+        "positiveAccepted": 32,
+        "negativeCandidates": 26,
+        "negativeAccepted": 0,
         "noLearningTarget": 0,
-        "negativeOpportunitiesToFirstAcceptance": 4,
-        "firstNegativeAcceptanceAtAttempt": 106
+        "negativeOpportunitiesToFirstAcceptance": null,
+        "firstNegativeAcceptanceAtAttempt": null
       },
       "effectiveWeights": {
         "efficiency": 0.428571,
@@ -189,6 +462,106 @@
       }
     },
     {
+      "acceptanceByGroup": {
+        "stratum:threshold_sustained": {
+          "opportunitiesPositive": 19,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:tempo": {
+          "opportunitiesPositive": 19,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:connect": {
+          "opportunitiesPositive": 105,
+          "opportunitiesNegative": 20,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "environment:unavailable_in_stored_v3_features": {
+          "opportunitiesPositive": 136,
+          "opportunitiesNegative": 25,
+          "acceptedPositive": 32,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:steady_aerobic": {
+          "opportunitiesPositive": 111,
+          "opportunitiesNegative": 18,
+          "acceptedPositive": 22,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:easy": {
+          "opportunitiesPositive": 75,
+          "opportunitiesNegative": 10,
+          "acceptedPositive": 7,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:steady": {
+          "opportunitiesPositive": 33,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 13,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:long_run": {
+          "opportunitiesPositive": 3,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:apple_watch": {
+          "opportunitiesPositive": 31,
+          "opportunitiesNegative": 4,
+          "acceptedPositive": 30,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:recovery_unknown": {
+          "opportunitiesPositive": 6,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:recovery": {
+          "opportunitiesPositive": 6,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:other": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        }
+      },
       "candidate": "v2b",
       "dimensionWeights": {
         "efficiency": 0.45,
@@ -198,38 +571,38 @@
         "recovery": 0
       },
       "calibrationSessions": 6,
-      "attempted": 156,
-      "eligible": 39,
-      "trial": 117,
-      "calibrating": 94,
+      "attempted": 161,
+      "eligible": 161,
+      "trial": 0,
+      "calibrating": 78,
       "excluded": 18,
-      "scorableRate": 0.25,
+      "scorableRate": 1,
       "currentAbility": {
-        "mean": 53.61796776015569,
-        "stdev": 8.752280732643573,
-        "p05": 37.93875087718776,
-        "p50": 51.58605485662562,
-        "p95": 66.0984237901172,
+        "mean": 56.90272518868308,
+        "stdev": 8.018330933779339,
+        "p05": 43.52738218973978,
+        "p50": 57.49152482687204,
+        "p95": 69.1296611918554,
         "saturationRate": 0
       },
       "trueAbility": {
-        "final": 54.114236982131565,
-        "updated": 23,
-        "meanAbsoluteDelta": 0.5402941496927001,
-        "maxAbsoluteDelta": 1.2354438384242457
+        "final": 44.72954624453256,
+        "updated": 32,
+        "meanAbsoluteDelta": 0.3427983201416427,
+        "maxAbsoluteDelta": 0.611906526294625
       },
       "dimensionCoverage": {
         "mean": 1,
         "fullCoverageRate": 1
       },
       "acceptance": {
-        "positiveCandidates": 16,
-        "positiveAccepted": 14,
-        "negativeCandidates": 23,
-        "negativeAccepted": 9,
+        "positiveCandidates": 136,
+        "positiveAccepted": 32,
+        "negativeCandidates": 25,
+        "negativeAccepted": 0,
         "noLearningTarget": 0,
-        "negativeOpportunitiesToFirstAcceptance": 4,
-        "firstNegativeAcceptanceAtAttempt": 106
+        "negativeOpportunitiesToFirstAcceptance": null,
+        "firstNegativeAcceptanceAtAttempt": null
       },
       "effectiveWeights": {
         "efficiency": 0.45,
@@ -238,146 +611,447 @@
       }
     },
     {
+      "acceptanceByGroup": {
+        "stratum:threshold_sustained": {
+          "opportunitiesPositive": 17,
+          "opportunitiesNegative": 7,
+          "acceptedPositive": 9,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:tempo": {
+          "opportunitiesPositive": 17,
+          "opportunitiesNegative": 7,
+          "acceptedPositive": 9,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:connect": {
+          "opportunitiesPositive": 103,
+          "opportunitiesNegative": 22,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "environment:unavailable_in_stored_v3_features": {
+          "opportunitiesPositive": 133,
+          "opportunitiesNegative": 28,
+          "acceptedPositive": 31,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:steady_aerobic": {
+          "opportunitiesPositive": 110,
+          "opportunitiesNegative": 19,
+          "acceptedPositive": 22,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:easy": {
+          "opportunitiesPositive": 75,
+          "opportunitiesNegative": 10,
+          "acceptedPositive": 7,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:steady": {
+          "opportunitiesPositive": 32,
+          "opportunitiesNegative": 6,
+          "acceptedPositive": 13,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:long_run": {
+          "opportunitiesPositive": 3,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:apple_watch": {
+          "opportunitiesPositive": 30,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 29,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:recovery_unknown": {
+          "opportunitiesPositive": 6,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:recovery": {
+          "opportunitiesPositive": 6,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:other": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        }
+      },
       "candidate": "drop_pace",
       "dimensionWeights": {
         "efficiency": 0.375,
         "pace": 0,
         "cardio": 0,
         "stability": 0.1875,
-        "recovery": 0.125
+        "recovery": 0
       },
       "calibrationSessions": 6,
-      "attempted": 156,
-      "eligible": 29,
-      "trial": 127,
-      "calibrating": 94,
+      "attempted": 161,
+      "eligible": 161,
+      "trial": 0,
+      "calibrating": 78,
       "excluded": 18,
-      "scorableRate": 0.1858974358974359,
+      "scorableRate": 1,
       "currentAbility": {
-        "mean": 54.39862384599032,
-        "stdev": 8.530801974882564,
-        "p05": 40.92446942950362,
-        "p50": 53.75646344041168,
-        "p95": 64.9219381297344,
+        "mean": 57.3330312176305,
+        "stdev": 9.107266568302732,
+        "p05": 42.16233401302173,
+        "p50": 57.73014947104129,
+        "p95": 70.3433119045159,
         "saturationRate": 0
       },
       "trueAbility": {
-        "final": 53.211484209132685,
-        "updated": 18,
-        "meanAbsoluteDelta": 0.633281188463382,
-        "maxAbsoluteDelta": 1.3059842786262195
+        "final": 44.49976674396859,
+        "updated": 31,
+        "meanAbsoluteDelta": 0.3464440885151162,
+        "maxAbsoluteDelta": 0.8730823916176647
       },
       "dimensionCoverage": {
         "mean": 1,
         "fullCoverageRate": 1
       },
       "acceptance": {
-        "positiveCandidates": 14,
-        "positiveAccepted": 12,
-        "negativeCandidates": 15,
-        "negativeAccepted": 6,
+        "positiveCandidates": 133,
+        "positiveAccepted": 31,
+        "negativeCandidates": 28,
+        "negativeAccepted": 0,
         "noLearningTarget": 0,
-        "negativeOpportunitiesToFirstAcceptance": 4,
-        "firstNegativeAcceptanceAtAttempt": 109
+        "negativeOpportunitiesToFirstAcceptance": null,
+        "firstNegativeAcceptanceAtAttempt": null
       },
       "effectiveWeights": {
-        "efficiency": 0.545455,
-        "stability": 0.272727,
-        "recovery": 0.181818
+        "efficiency": 0.666667,
+        "stability": 0.333333
       }
     },
     {
+      "acceptanceByGroup": {
+        "stratum:threshold_sustained": {
+          "opportunitiesPositive": 20,
+          "opportunitiesNegative": 4,
+          "acceptedPositive": 11,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:tempo": {
+          "opportunitiesPositive": 20,
+          "opportunitiesNegative": 4,
+          "acceptedPositive": 11,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:connect": {
+          "opportunitiesPositive": 69,
+          "opportunitiesNegative": 56,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "environment:unavailable_in_stored_v3_features": {
+          "opportunitiesPositive": 102,
+          "opportunitiesNegative": 59,
+          "acceptedPositive": 34,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:steady_aerobic": {
+          "opportunitiesPositive": 81,
+          "opportunitiesNegative": 48,
+          "acceptedPositive": 23,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:easy": {
+          "opportunitiesPositive": 45,
+          "opportunitiesNegative": 40,
+          "acceptedPositive": 7,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:steady": {
+          "opportunitiesPositive": 33,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 14,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:long_run": {
+          "opportunitiesPositive": 3,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:apple_watch": {
+          "opportunitiesPositive": 32,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 31,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:recovery_unknown": {
+          "opportunitiesPositive": 1,
+          "opportunitiesNegative": 6,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:recovery": {
+          "opportunitiesPositive": 1,
+          "opportunitiesNegative": 6,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:interval": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:other": {
+          "opportunitiesPositive": 1,
+          "opportunitiesNegative": 0,
+          "acceptedPositive": 1,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        }
+      },
       "candidate": "drop_efficiency",
       "dimensionWeights": {
         "efficiency": 0,
         "pace": 0.3125,
         "cardio": 0,
         "stability": 0.1875,
-        "recovery": 0.125
+        "recovery": 0
       },
       "calibrationSessions": 6,
-      "attempted": 156,
-      "eligible": 0,
-      "trial": 156,
-      "calibrating": 94,
+      "attempted": 161,
+      "eligible": 161,
+      "trial": 0,
+      "calibrating": 78,
       "excluded": 18,
-      "scorableRate": 0,
+      "scorableRate": 1,
       "currentAbility": {
-        "mean": null,
-        "stdev": null,
-        "p05": null,
-        "p50": null,
-        "p95": null,
-        "saturationRate": null
+        "mean": 51.50413991593981,
+        "stdev": 5.638945347121543,
+        "p05": 42.865069976347726,
+        "p50": 51.82557158490411,
+        "p95": 59.20014659657655,
+        "saturationRate": 0
       },
       "trueAbility": {
-        "final": 50,
-        "updated": 0,
-        "meanAbsoluteDelta": null,
-        "maxAbsoluteDelta": null
+        "final": 44.455501756128065,
+        "updated": 34,
+        "meanAbsoluteDelta": 0.3145735810625904,
+        "maxAbsoluteDelta": 0.7287492178163077
       },
       "dimensionCoverage": {
-        "mean": null,
-        "fullCoverageRate": null
+        "mean": 1,
+        "fullCoverageRate": 1
       },
       "acceptance": {
-        "positiveCandidates": 0,
-        "positiveAccepted": 0,
-        "negativeCandidates": 0,
+        "positiveCandidates": 102,
+        "positiveAccepted": 34,
+        "negativeCandidates": 59,
         "negativeAccepted": 0,
         "noLearningTarget": 0,
         "negativeOpportunitiesToFirstAcceptance": null,
         "firstNegativeAcceptanceAtAttempt": null
       },
-      "effectiveWeights": null
+      "effectiveWeights": {
+        "pace": 0.625,
+        "stability": 0.375
+      }
     },
     {
+      "acceptanceByGroup": {
+        "stratum:threshold_sustained": {
+          "opportunitiesPositive": 20,
+          "opportunitiesNegative": 4,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:tempo": {
+          "opportunitiesPositive": 20,
+          "opportunitiesNegative": 4,
+          "acceptedPositive": 10,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:connect": {
+          "opportunitiesPositive": 107,
+          "opportunitiesNegative": 18,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "environment:unavailable_in_stored_v3_features": {
+          "opportunitiesPositive": 140,
+          "opportunitiesNegative": 21,
+          "acceptedPositive": 32,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:steady_aerobic": {
+          "opportunitiesPositive": 112,
+          "opportunitiesNegative": 17,
+          "acceptedPositive": 22,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:easy": {
+          "opportunitiesPositive": 76,
+          "opportunitiesNegative": 9,
+          "acceptedPositive": 7,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:steady": {
+          "opportunitiesPositive": 33,
+          "opportunitiesNegative": 5,
+          "acceptedPositive": 13,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:long_run": {
+          "opportunitiesPositive": 3,
+          "opportunitiesNegative": 3,
+          "acceptedPositive": 2,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:apple_watch": {
+          "opportunitiesPositive": 33,
+          "opportunitiesNegative": 2,
+          "acceptedPositive": 30,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:recovery_unknown": {
+          "opportunitiesPositive": 7,
+          "opportunitiesNegative": 0,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:recovery": {
+          "opportunitiesPositive": 7,
+          "opportunitiesNegative": 0,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "stratum:interval": {
+          "opportunitiesPositive": 1,
+          "opportunitiesNegative": 0,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "session:interval": {
+          "opportunitiesPositive": 1,
+          "opportunitiesNegative": 0,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        },
+        "source:other": {
+          "opportunitiesPositive": 0,
+          "opportunitiesNegative": 1,
+          "acceptedPositive": 0,
+          "acceptedNegative": 0,
+          "unscorable": 0
+        }
+      },
       "candidate": "drop_stability",
       "dimensionWeights": {
         "efficiency": 0.375,
         "pace": 0.3125,
         "cardio": 0,
         "stability": 0,
-        "recovery": 0.125
+        "recovery": 0
       },
       "calibrationSessions": 6,
-      "attempted": 156,
-      "eligible": 39,
-      "trial": 117,
-      "calibrating": 94,
+      "attempted": 161,
+      "eligible": 161,
+      "trial": 0,
+      "calibrating": 78,
       "excluded": 18,
-      "scorableRate": 0.25,
+      "scorableRate": 1,
       "currentAbility": {
-        "mean": 55.04199583774667,
-        "stdev": 8.240213410712832,
-        "p05": 43.39121591473629,
-        "p50": 55.50620679349783,
-        "p95": 70.39286694070407,
+        "mean": 59.671492708082205,
+        "stdev": 10.246792348561245,
+        "p05": 42.80254867746632,
+        "p50": 59.38867216238093,
+        "p95": 75.37337491361315,
         "saturationRate": 0
       },
       "trueAbility": {
-        "final": 55.117791259679734,
-        "updated": 18,
-        "meanAbsoluteDelta": 0.5794988693299032,
-        "maxAbsoluteDelta": 1.3059842786262195
+        "final": 44.84519389839057,
+        "updated": 32,
+        "meanAbsoluteDelta": 0.34641230932470557,
+        "maxAbsoluteDelta": 0.5501211395778327
       },
       "dimensionCoverage": {
-        "mean": 0.9605522682445761,
-        "fullCoverageRate": 0.7435897435897436
+        "mean": 1,
+        "fullCoverageRate": 1
       },
       "acceptance": {
-        "positiveCandidates": 16,
-        "positiveAccepted": 13,
-        "negativeCandidates": 13,
-        "negativeAccepted": 5,
-        "noLearningTarget": 10,
-        "negativeOpportunitiesToFirstAcceptance": 3,
-        "firstNegativeAcceptanceAtAttempt": 109
+        "positiveCandidates": 140,
+        "positiveAccepted": 32,
+        "negativeCandidates": 21,
+        "negativeAccepted": 0,
+        "noLearningTarget": 0,
+        "negativeOpportunitiesToFirstAcceptance": null,
+        "firstNegativeAcceptanceAtAttempt": null
       },
       "effectiveWeights": {
-        "efficiency": 0.461538,
-        "pace": 0.384615,
-        "recovery": 0.153846
+        "efficiency": 0.545455,
+        "pace": 0.454545
       }
     }
   ],
@@ -385,44 +1059,238 @@
     {
       "left": "efficiency",
       "right": "pace",
-      "samples": 45,
-      "pearson": 0.7367058050753358,
-      "spearman": 0.7764163372859025
+      "samples": 138,
+      "pearson": 0.7937137674619467,
+      "spearman": 0.8055613268826386
     },
     {
       "left": "efficiency",
       "right": "stability",
-      "samples": 45,
-      "pearson": 0.0638858121877119,
-      "spearman": 0.17061923583662714
+      "samples": 138,
+      "pearson": -0.18132821758956055,
+      "spearman": -0.12415151978702661
     },
     {
       "left": "efficiency",
       "right": "recovery",
-      "samples": 33,
-      "pearson": -0.022243476113858098,
-      "spearman": 0.04359881549705373
+      "samples": 138,
+      "pearson": -0.17109115516007029,
+      "spearman": -0.209007770752108
     },
     {
       "left": "pace",
       "right": "stability",
-      "samples": 45,
-      "pearson": 0.1674373463572225,
-      "spearman": 0.15046113306982872
+      "samples": 138,
+      "pearson": -0.04020235173320381,
+      "spearman": 0.02448691633808155
     },
     {
       "left": "pace",
       "right": "recovery",
-      "samples": 33,
-      "pearson": 0.01677734842191504,
-      "spearman": 0.11302154478851621
+      "samples": 138,
+      "pearson": -0.06613991597204882,
+      "spearman": -0.11317420434562163
     },
     {
       "left": "stability",
       "right": "recovery",
-      "samples": 33,
-      "pearson": -0.010870262163956562,
-      "spearman": -0.17372451098056793
+      "samples": 138,
+      "pearson": 0.1468614182825388,
+      "spearman": 0.09421251927853559
     }
-  ]
+  ],
+  "correlationsByStratum": [
+    {
+      "stratum": "steady_aerobic",
+      "pairs": [
+        {
+          "left": "efficiency",
+          "right": "pace",
+          "samples": 109,
+          "pearson": 0.8658122427798299,
+          "spearman": 0.8569548697989064
+        },
+        {
+          "left": "efficiency",
+          "right": "stability",
+          "samples": 109,
+          "pearson": -0.1855450184732373,
+          "spearman": -0.1059679362431656
+        },
+        {
+          "left": "efficiency",
+          "right": "recovery",
+          "samples": 109,
+          "pearson": -0.20302183514306751,
+          "spearman": -0.2569739991064238
+        },
+        {
+          "left": "pace",
+          "right": "stability",
+          "samples": 109,
+          "pearson": -0.0916557172023202,
+          "spearman": 0.006384950421647669
+        },
+        {
+          "left": "pace",
+          "right": "recovery",
+          "samples": 109,
+          "pearson": -0.14773244098085192,
+          "spearman": -0.19708599084009623
+        },
+        {
+          "left": "stability",
+          "right": "recovery",
+          "samples": 109,
+          "pearson": 0.1392598118301127,
+          "spearman": 0.10130224562682554
+        }
+      ]
+    },
+    {
+      "stratum": "recovery_unknown",
+      "pairs": [
+        {
+          "left": "efficiency",
+          "right": "pace",
+          "samples": 3,
+          "pearson": 0.9991167378933066,
+          "spearman": 1
+        },
+        {
+          "left": "efficiency",
+          "right": "stability",
+          "samples": 3,
+          "pearson": 0.006153927000606656,
+          "spearman": 0.5
+        },
+        {
+          "left": "efficiency",
+          "right": "recovery",
+          "samples": 3,
+          "pearson": 0.3647166969073503,
+          "spearman": 0.5
+        },
+        {
+          "left": "pace",
+          "right": "stability",
+          "samples": 3,
+          "pearson": -0.035871470348874716,
+          "spearman": 0.5
+        },
+        {
+          "left": "pace",
+          "right": "recovery",
+          "samples": 3,
+          "pearson": 0.3252682501922788,
+          "spearman": 0.5
+        },
+        {
+          "left": "stability",
+          "right": "recovery",
+          "samples": 3,
+          "pearson": 0.9333453462165208,
+          "spearman": 1
+        }
+      ]
+    },
+    {
+      "stratum": "threshold_sustained",
+      "pairs": [
+        {
+          "left": "efficiency",
+          "right": "pace",
+          "samples": 25,
+          "pearson": 0.7744985475757742,
+          "spearman": 0.79
+        },
+        {
+          "left": "efficiency",
+          "right": "stability",
+          "samples": 25,
+          "pearson": -0.3582527478143569,
+          "spearman": -0.36230769230769233
+        },
+        {
+          "left": "efficiency",
+          "right": "recovery",
+          "samples": 25,
+          "pearson": 0.3073912050813442,
+          "spearman": 0.25384615384615383
+        },
+        {
+          "left": "pace",
+          "right": "stability",
+          "samples": 25,
+          "pearson": -0.07380393698089165,
+          "spearman": -0.01769230769230769
+        },
+        {
+          "left": "pace",
+          "right": "recovery",
+          "samples": 25,
+          "pearson": 0.17524951103654732,
+          "spearman": 0.19923076923076924
+        },
+        {
+          "left": "stability",
+          "right": "recovery",
+          "samples": 25,
+          "pearson": 0.011248400217971286,
+          "spearman": 0.021538461538461538
+        }
+      ]
+    },
+    {
+      "stratum": "interval",
+      "pairs": [
+        {
+          "left": "efficiency",
+          "right": "pace",
+          "samples": 1,
+          "pearson": null,
+          "spearman": null
+        },
+        {
+          "left": "efficiency",
+          "right": "stability",
+          "samples": 1,
+          "pearson": null,
+          "spearman": null
+        },
+        {
+          "left": "efficiency",
+          "right": "recovery",
+          "samples": 1,
+          "pearson": null,
+          "spearman": null
+        },
+        {
+          "left": "pace",
+          "right": "stability",
+          "samples": 1,
+          "pearson": null,
+          "spearman": null
+        },
+        {
+          "left": "pace",
+          "right": "recovery",
+          "samples": 1,
+          "pearson": null,
+          "spearman": null
+        },
+        {
+          "left": "stability",
+          "right": "recovery",
+          "samples": 1,
+          "pearson": null,
+          "spearman": null
+        }
+      ]
+    }
+  ],
+  "normalizedCorrelations": {
+    "status": "not_evaluable",
+    "reason": "stored_v3_features_have_no_normalized_signals"
+  }
 }

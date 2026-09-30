@@ -81,6 +81,8 @@
     "data:migrate": "tsx packages/storage-sqlite/src/migrate-cli.ts",
     "predata:model-v2": "npm run check:node",
     "data:model-v2": "tsx packages/application/src/model-v2-cli.ts",
+    "predata:ablation-ca-weights": "npm run check:node",
+    "data:ablation-ca-weights": "tsx scripts/ablation-ca-weights.mts",
     "data:model-replay": "tsx packages/application/src/model-replay-cli.ts",
     "predata:model-replay": "npm run check:node"
   },

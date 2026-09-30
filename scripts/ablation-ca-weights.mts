@@ -1,4 +1,3 @@
-import { decodeStoredFeature } from "@rai/features";
 #!/usr/bin/env node
 // CA dimension-weight ablation for the V2-A change
 // (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §6.1).
@@ -25,6 +24,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
+import { decodeStoredFeature } from "@rai/features";
 import type { SessionStratum, StratumHistory, WorkoutFeatureVector } from "@rai/contracts";
 import {
   MODEL_CONFIG_VERSION,
@@ -45,6 +45,7 @@ import {
 import { localDateInTimeZone } from "@rai/training-load";
 import { DATABASE_TIMEZONE } from "@rai/contracts";
 import { buildLabelFunnel } from "@rai/application";
+import { negativeLearningReleaseBlockers } from "@rai/model-eval";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -504,6 +505,15 @@ const report = {
   accuracyComparisonReason: labelFunnel.usableOutcomeCount === 0
     ? "no labeled race/test outcomes in this database; see the walk-forward report"
     : "this is a behavioural ablation, not an independent external-label accuracy evaluation",
+  // §6.9-7: "有充分合格负机会却长期 0 接受" 必须阻断该门控版本发布。
+  // 判据与措辞都来自文档，没有另编一个"负接受率下限"。
+  ...negativeLearningReleaseBlockers(outcomes.map((outcome) => ({
+    candidate: outcome.candidate,
+    negativeOpportunities: outcome.acceptance.negativeCandidates,
+    negativeAccepted: outcome.acceptance.negativeAccepted
+  }))),
+  negativeLearningNote:
+    "§6.9-7：never_accepted 即'有合格负机会却一次都没接受'，按文档必须阻断该门控版本发布并复查/放宽非必要门槛；“更保守”不是永久解释。no_opportunity 是独立状态，不等于通过。",
   limitation:
     "Uses stored pre-V2 features, not a new V4 extraction. Replays production inactivity decay and eligible-session counting. v1_current is only a V1-weight control under the current engine, NOT an executable replay of the old engine. Environment is unavailable in these stored features.",
   candidateNotes: [

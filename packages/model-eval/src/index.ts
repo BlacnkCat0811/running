@@ -299,3 +299,74 @@ export function compareResidualChallengers(input: {
 }
 
 export * from "./replay.js";
+
+// -----------------------------------------------------------------------------
+// §6.9-7：负向学习的发布阻断判据
+//
+// 文档对这个风险的措辞是"**有充分合格负机会却长期 0 接受**，必须阻止该门控版本发布并复查"，
+// 并明确"不能用'更保守'作为永久解释"。
+//
+// 这里刻意**不引入任何"负接受率必须大于 X%"的阈值**：§6.9-6 说得很清楚 ——
+// 分布还未知时不要捏造一个全局门槛。所以判据只用文档自己的措辞：
+// **机会数 > 0 且接受数 = 0**。可见性上也不把"没有机会"当成"通过"：
+// 没有机会是一种独立状态，报告必须能把它与"有机会但从不接受"区分开。
+// -----------------------------------------------------------------------------
+
+export interface NegativeLearningCensusEntry {
+  candidate: string;
+  negativeOpportunities: number;
+  negativeAccepted: number;
+}
+
+export type NegativeLearningStatus = "no_opportunity" | "never_accepted" | "accepted";
+
+export interface NegativeLearningFinding {
+  candidate: string;
+  status: NegativeLearningStatus;
+  negativeOpportunities: number;
+  negativeAccepted: number;
+}
+
+export interface NegativeLearningReleaseBlocker {
+  candidate: string;
+  code: "negative_learning_never_accepted";
+  negativeOpportunities: number;
+}
+
+/**
+ * 逐候选举报负向学习状态，并把"有机会却从不接受"的候选列为发布阻断项。
+ * 抛错优先于猜测：负数的机会数说明上游统计已经坏了。
+ */
+export function negativeLearningReleaseBlockers(
+  candidates: readonly NegativeLearningCensusEntry[]
+): { findings: NegativeLearningFinding[]; releaseBlockers: NegativeLearningReleaseBlocker[] } {
+  const findings: NegativeLearningFinding[] = [];
+  const releaseBlockers: NegativeLearningReleaseBlocker[] = [];
+  for (const entry of candidates) {
+    if (!entry.candidate) throw new Error("negative learning census requires a candidate name");
+    for (const [name, value] of [["negativeOpportunities", entry.negativeOpportunities], ["negativeAccepted", entry.negativeAccepted]] as const) {
+      if (!Number.isInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer`);
+    }
+    if (entry.negativeAccepted > entry.negativeOpportunities) {
+      throw new Error("accepted negatives cannot exceed negative opportunities");
+    }
+    const status: NegativeLearningStatus =
+      entry.negativeOpportunities === 0 ? "no_opportunity"
+        : entry.negativeAccepted === 0 ? "never_accepted"
+          : "accepted";
+    findings.push({
+      candidate: entry.candidate,
+      status,
+      negativeOpportunities: entry.negativeOpportunities,
+      negativeAccepted: entry.negativeAccepted
+    });
+    if (status === "never_accepted") {
+      releaseBlockers.push({
+        candidate: entry.candidate,
+        code: "negative_learning_never_accepted",
+        negativeOpportunities: entry.negativeOpportunities
+      });
+    }
+  }
+  return { findings, releaseBlockers };
+}
