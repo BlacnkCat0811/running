@@ -370,3 +370,123 @@ export function negativeLearningReleaseBlockers(
   }
   return { findings, releaseBlockers };
 }
+
+// -----------------------------------------------------------------------------
+// §6.1：CA 权重消融报告的**发布条件**校验
+//
+// §6.1 说这份报告"不能留成可选 TODO —— 缺少上述工程报告则该权重 PR 不满足验收"。
+// 但"必须包含什么"此前只写在文档里，评审时靠人记；而这份报告的工具确实曾经
+// 因为一行 import 被插到 `#!` 之前而**完全跑不起来**，谁都没发现。
+//
+// 所以把要求写成可执行校验：
+//  - 报告必须自证**哪些做不到**（normalized 相关性、精度排名），而不是留空；
+//  - 无标签时精度排名只能是 `not_evaluable`（§6.1-5：不拿 V1 分数当"真值"）；
+//  - 预注册未冻结时不得给出"该用哪个阈值"的结论（§6.9-6）。
+// -----------------------------------------------------------------------------
+
+const ABLATION_REPORT_VERSION = "rai-ca-weight-ablation-v1";
+
+/** §6.1 要求比较的候选数下限：A、B、去 Pace、去 Efficiency、去 Stability（外加旧对照）。 */
+const MINIMUM_ABLATION_CANDIDATES = 5;
+
+function assertFiniteOrNull(name: string, value: unknown): void {
+  if (value === null) return;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Ablation report: ${name} must be a finite number or null`);
+  }
+}
+
+function assertCount(name: string, value: unknown): void {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Ablation report: ${name} must be a non-negative integer`);
+  }
+}
+
+function asRecord(name: string, value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Ablation report: ${name} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+export function assertCaWeightAblationReport(report: unknown): void {
+  const root = asRecord("report", report);
+  if (root.reportVersion !== ABLATION_REPORT_VERSION) {
+    throw new Error(`Ablation report: unsupported reportVersion ${String(root.reportVersion)}`);
+  }
+  for (const key of ["modelConfigVersion", "featureRunId", "comparabilityHistoryMode"] as const) {
+    if (typeof root[key] !== "string" || root[key] === "") {
+      throw new Error(`Ablation report: ${key} is required`);
+    }
+  }
+  if (root.comparabilityHistoryMode !== "legacy" && root.comparabilityHistoryMode !== "bounded") {
+    throw new Error("Ablation report: comparabilityHistoryMode must be legacy or bounded");
+  }
+  assertCount("featureCount", root.featureCount);
+  assertCount("labeledOutcomeCount", root.labeledOutcomeCount);
+
+  // 精度排名：无标签时必须明确不可评估。把"没有标签"写成别的值，
+  // 就等于在没有任何外部结果的情况下给出精度结论。
+  if (root.accuracyComparison !== "not_evaluable" && root.accuracyComparison !== "evaluated") {
+    throw new Error("Ablation report: accuracyComparison must be not_evaluable or evaluated");
+  }
+  if (root.labeledOutcomeCount === 0 && root.accuracyComparison !== "not_evaluable") {
+    throw new Error("Ablation report: accuracy cannot be claimed without labeled outcomes");
+  }
+  if (typeof root.accuracyComparisonReason !== "string" || root.accuracyComparisonReason === "") {
+    throw new Error("Ablation report: accuracyComparisonReason is required");
+  }
+
+  if (!Array.isArray(root.outcomes) || root.outcomes.length < MINIMUM_ABLATION_CANDIDATES) {
+    throw new Error(`Ablation report: at least ${MINIMUM_ABLATION_CANDIDATES} candidates must be compared`);
+  }
+  const candidates = new Set<string>();
+  for (const entry of root.outcomes) {
+    const outcome = asRecord("outcome", entry);
+    if (typeof outcome.candidate !== "string" || outcome.candidate === "") {
+      throw new Error("Ablation report: every candidate needs a name");
+    }
+    if (candidates.has(outcome.candidate)) {
+      throw new Error(`Ablation report: duplicate candidate ${outcome.candidate}`);
+    }
+    candidates.add(outcome.candidate);
+    asRecord("outcome.dimensionWeights", outcome.dimensionWeights);
+    // §6.1-3：既要数值差异，也要 coverage —— 缺一个就无法判断"是不是靠丢样本变好的"。
+    assertFiniteOrNull("outcome.scorableRate", outcome.scorableRate);
+    const ability = asRecord("outcome.currentAbility", outcome.currentAbility);
+    assertFiniteOrNull("outcome.currentAbility.saturationRate", ability.saturationRate);
+    const trueAbility = asRecord("outcome.trueAbility", outcome.trueAbility);
+    assertFiniteOrNull("outcome.trueAbility.meanAbsoluteDelta", trueAbility.meanAbsoluteDelta);
+    const acceptance = asRecord("outcome.acceptance", outcome.acceptance);
+    for (const key of ["positiveCandidates", "positiveAccepted", "negativeCandidates", "negativeAccepted"] as const) {
+      assertCount(`outcome.acceptance.${key}`, acceptance[key]);
+    }
+    // §6.9-7 的复查前提：报告必须能说出卡在哪道门。
+    if (typeof outcome.refusalReasons !== "object" || outcome.refusalReasons === null) {
+      throw new Error("Ablation report: outcome.refusalReasons is required");
+    }
+  }
+
+  if (!Array.isArray(root.correlations)) throw new Error("Ablation report: correlations are required");
+  if (!Array.isArray(root.correlationsByStratum)) {
+    throw new Error("Ablation report: correlationsByStratum are required (§6.1-2)");
+  }
+  if (!Array.isArray(root.stratumCensus)) throw new Error("Ablation report: stratumCensus is required (§6.2)");
+  // §6.1-2 要求 raw 与 normalized **分别**报告；做不到时必须写明原因而不是留空。
+  const normalized = asRecord("normalizedCorrelations", root.normalizedCorrelations);
+  if (typeof normalized.status !== "string" || normalized.status === "") {
+    throw new Error("Ablation report: normalizedCorrelations.status is required");
+  }
+  if (normalized.status === "not_evaluable" && (typeof normalized.reason !== "string" || normalized.reason === "")) {
+    throw new Error("Ablation report: an unevaluated section must state its reason");
+  }
+
+  if (!Array.isArray(root.findings) || !Array.isArray(root.releaseBlockers)) {
+    throw new Error("Ablation report: negative-learning findings and releaseBlockers are required");
+  }
+  // §6.9-6：预注册未冻结时不得替用户挑阈值。
+  const preregistration = asRecord("negativeGatePreregistration", root.negativeGatePreregistration);
+  if (preregistration.status === "not_configured" && preregistration.recommendation !== "not_evaluable") {
+    throw new Error("Ablation report: an unfrozen pre-registration cannot produce a recommendation");
+  }
+}

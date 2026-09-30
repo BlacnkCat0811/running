@@ -45,7 +45,7 @@ import {
 import { localDateInTimeZone } from "@rai/training-load";
 import { DATABASE_TIMEZONE } from "@rai/contracts";
 import { buildLabelFunnel } from "@rai/application";
-import { negativeLearningReleaseBlockers } from "@rai/model-eval";
+import { assertCaWeightAblationReport, negativeLearningReleaseBlockers } from "@rai/model-eval";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -646,6 +646,9 @@ const report = {
 };
 
 mkdirSync(dirname(outPath), { recursive: true });
+// §6.1 把这份报告作为发布条件。生成端先自检一次：报告缺项时**不要**写出一份
+// 看起来完整、评审时才发现少东西的文件 —— 那样报告又会静静地腐烂一次。
+assertCaWeightAblationReport(report);
 writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 process.stderr.write(`\nWrote ${outPath}\n`);
