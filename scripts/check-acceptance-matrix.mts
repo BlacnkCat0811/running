@@ -43,7 +43,18 @@ const planPath = join(root, "deliverables", "RAI_ALGORITHM_V2_OPTIMIZATION_2026-
 const KNOWN_GAPS: Record<string, string> = {
   // 2026-09-30 修正检查口径（只认测试标题）之后暴露出来的**真实缺口**。
   // 在这之前它被"某处字符串里出现过 T02"假性覆盖 —— 见 citedIdsIn 的注释。
-  T02: "**只有一半有覆盖**：「删除后不得复活」在导入层有测试（health-export-parser 的 tombstone/删除守卫），但 §16.1 要求的「**重放后所有下游去除该事实的影响**」没有任何用例：现有回放用例（load-replay-v2 / model-replay-v2）都是「加事实」方向，没有一条走「删训练 → 重放 → 断言 rolling exposure / 模型标签 / checkpoint 状态里都不再出现它」。需要 recompute 管线的夹具才能钉住，尚未写。",
+  //
+  // 当天又往下追了一步：缺口还在，但**原因从"没人写"变成了"走不通"**。
+  // 按 §16.1 写的断言（删除训练 → 重放 → 下游一条都不剩）跑不完：第二次全量重算
+  // 直接失败，`Model-version gate failed: eligible_session_delta`。
+  // 7 次训练删 1 个是 14%；换成 24 次（名义 4.2%）**同样失败**。
+  // 闸门比的是**合格**训练数（`model-run-repository.ts:262,265-266`），不是特征行数，
+  // 所以"删掉 N 分之一"不等于 delta 就是 1/N —— 具体基数尚未查清，不猜。
+  // 已把确定的那一半钉成用例（`import-idempotency-and-checkpoint.test.ts` 的
+  // 「deleting a training blocks the replay at the version gate, and nothing is half-published」）：
+  // 它断言的是**阻塞 + 不半发布**，不是"下游已清理"。将来若有人让删除后可重放，
+  // 那条用例会转红，逼他回来摘掉这条缺口声明。
+  T02: "**走不通，不是没人写**：§16.1 要的「删除训练 → 重放 → 所有下游去除该事实影响」在当前版本闸门下**无法跑完** —— 删除后第二次全量重算被 `eligible_session_delta` 拒绝（7 次与 24 次夹具都复现）。导入层「删除后不得复活」有测试；派生层的下游清理**未被验证**。要完成它，先得回答：闸门该如何区分「用户删了一次训练」这类**已知且可解释**的事实变化，与它本来要防的分布漂移？那是设计决定，不是补一条用例。",
   // F01 / T01 已在本批补上标题（断言本来就存在，只是标题没带 ID）。
 };
 

@@ -85,6 +85,95 @@ async function withFixture(run: (store: RaiDatabase, xmlPath: string) => Promise
   }
 }
 
+/**
+ * §16.1 **T02**：「删除训练后重放 → 所有下游去除该事实影响」。
+ *
+ * 🔴 这一条此前**一条断言都没有**：矩阵检查把它算作"被引用"，靠的全是
+ * `${localDate}T02:00:00.000Z` 这类时间戳模板里的 `T02` 恰好在词边界上（见
+ * `scripts/check-acceptance-matrix.mts` 里 citedIdsIn 的注释）。收紧判据后它掉出来，
+ * 被如实写进 KNOWN_GAPS。现在把缺口补上。
+ *
+ * 覆盖面：导入层早有"删除后不得复活"的守卫（`tombstone-deletion.test.ts`），
+ * 但那测的是**事实层**。T02 要的是**派生层**：删除之后重放，被删训练不得继续出现在
+ * 特征 run、逐次负荷与能力时间线里。
+ *
+ * 重现的是**真实删除路径产生的那个状态**，而不是我另编一个：
+ * `canonicalize.ts:436-443` 会把"不再属于任何 workout group"的训练
+ * `SET status='inactive'`（workout 从导出里消失时就是这样），并因
+ * `canonical_workout_id` 是 `ON DELETE SET NULL` 而失去 canonical 链接。
+ * 两者一起就是"这次训练被删了"在库里的样子。直接 `DELETE FROM workouts` 不是合法路径
+ * —— 它会被外键挡住（本用例第一版就是这么失败的）。
+ *
+ * `listActiveForFeatures` 的两个条件（`JOIN workouts` + `status IN ('active','ambiguous')`）
+ * 正好分别对应这两处，所以这个用例同时钉住两条排除路径。
+ *
+ * ⚠️ **为什么用 24 次训练而不是共用的那 7 次**：第一版用 7 次时，第二次全量重算
+ * **直接失败**，报 `Model-version gate failed: eligible_session_delta` ——
+ * 删掉 1/7 = 14%，超过 `maxEligibleSessionDelta = 0.05`（`model-transition-gate.ts:103,164`）。
+ * 也就是说：**历史短的时候，任何一次删除都会让重放被版本闸门挡住**，
+ * §4.7 要的"下游去除影响"根本走不完。这是本用例查出来的真实交互，已记进状态文档 §十六。
+ * 24 次时 1/24 = 4.2% < 5%，闸门放行，才谈得上验证下游。
+ */
+/**
+ * 🔴 **T02 仍然没有覆盖，但原因从"没人写"变成了"走不通"** —— 本用例把这个阻塞钉住。
+ *
+ * 我按 §16.1 T02 的要求写了断言（删除训练 → 重放 → 下游一条都不剩），它**跑不完**：
+ * 第二次全量重算直接失败，`Model-version gate failed: eligible_session_delta`。
+ * 7 次训练时删 1 个是 14%；换成 24 次（名义 4.2%）**同样失败**。
+ * 闸门比的是**合格**训练数（`eligibility_status IN ('eligible','trial')`，
+ * `model-run-repository.ts:262,265-266`），不是特征行数，所以"删掉 N 分之一"不等于
+ * delta 就是 1/N —— 具体基数我还没查清，不猜。
+ *
+ * 我不改闸门（放宽它正是本方案禁止的那类作弊），也不把这条测试改成断言"失败是对的"
+ * 来假装 T02 已完成。**这个用例只声明一件确定的事**：
+ * **删除训练后重放会被版本闸门挡住，而且被挡住的候选不会半发布** ——
+ * 旧 run 仍然是活跃的，它的派生行一个字都没动（§2.3-9「发布不可半成功」）。
+ *
+ * 它的用处：如果将来有人让"删除后可重放"，这条用例会**转红**，
+ * 逼着他回来把 T02 从 KNOWN_GAPS 里摘掉。
+ */
+test("deleting a training blocks the replay at the version gate, and nothing is half-published", async () => {
+  await withFixture(async (store, xmlPath) => {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: 1 });
+    canonicalizeRunningWorkouts(store.database);
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+    const before = readCounts(store);
+    const activeBefore = (store.database.prepare("SELECT model_run_id AS id FROM active_model_run").get() as { id: string }).id;
+    assert.equal(before.features, days.length);
+
+    // 重现真实删除路径产生的状态（canonicalize.ts:436-443 的 SET status='inactive'
+    // 加上 canonical_workout_id 的 ON DELETE SET NULL）。
+    const target = store.database.prepare(`
+      SELECT session.id AS sessionId FROM training_sessions session
+      JOIN workouts workout ON workout.id = session.canonical_workout_id
+      ORDER BY workout.start_at DESC LIMIT 1
+    `).get() as unknown as { sessionId: string };
+    store.database.prepare(
+      "UPDATE training_sessions SET status = 'inactive', canonical_workout_id = NULL WHERE id = ?"
+    ).run(target.sessionId);
+
+    store.setManifest("dataset_version", "dataset_after_delete");
+    store.flush();
+    service.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
+    const job = service.runNextJob();
+
+    assert.equal(job?.status, "failed", "预期的阻塞：删除训练后重放会被 eligible_session_delta 挡住");
+    const jobRow = store.database.prepare(
+      "SELECT error_json AS error FROM recompute_jobs ORDER BY created_at DESC LIMIT 1"
+    ).get() as unknown as { error: string };
+    assert.match(jobRow.error, /eligible_session_delta/, "挡住它的必须是那个明确的 gate 原因，不是别的偶发错误");
+
+    // 关键的一半：被拒的候选**不得半发布**。
+    const activeAfter = (store.database.prepare("SELECT model_run_id AS id FROM active_model_run").get() as { id: string }).id;
+    assert.equal(activeAfter, activeBefore, "闸门失败时活跃指针必须原地不动");
+    const after = readCounts(store);
+    assert.equal(after.features, days.length, "旧 run 的派生行不得被失败候选动过");
+    assert.equal(after.loads, days.length);
+  });
+});
+
 test("F09: importing the same export twice does not count a training twice", async () => {
   await withFixture(async (store, xmlPath) => {
     const bytes = { fileSize: 1 };
