@@ -83,6 +83,10 @@
     "data:model-v2": "tsx packages/application/src/model-v2-cli.ts",
     "predata:ablation-ca-weights": "npm run check:node",
     "data:ablation-ca-weights": "tsx scripts/ablation-ca-weights.mts",
+    "predata:readiness-replay-coverage": "npm run check:node",
+    "data:readiness-replay-coverage": "tsx scripts/readiness-replay-coverage.mts",
+    "predata:backfill-canonical-nights": "npm run check:node",
+    "data:backfill-canonical-nights": "tsx scripts/backfill-canonical-nights.mts",
     "data:model-replay": "tsx packages/application/src/model-replay-cli.ts",
     "predata:model-replay": "npm run check:node"
   },

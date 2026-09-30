@@ -1,11 +1,28 @@
 import { semanticHash } from "@rai/storage-sqlite";
 import type { DatabaseSync } from "node:sqlite";
-import { READINESS_MODEL_VERSION, READINESS_RULE_SET_VERSION, healthTypes, type ModelLineageV2 } from "@rai/contracts";
+import { READINESS_MODEL_VERSION, READINESS_RULE_SET_VERSION, healthTypes, type ModelLineageV2, type ReadinessSignalName } from "@rai/contracts";
 import { READINESS_SLEEP_RATIO_THRESHOLD, READINESS_HRV_RATIO_THRESHOLD, READINESS_RHR_RATIO_THRESHOLD, READINESS_SLEEP_STREAK_THRESHOLD, assessDatedReadiness, withReadinessLineage, type DatedRecoverySignal } from "@rai/readiness";
 import { localDateAt, localDateStartAt, addDays, median } from "./utils.js";
 
+/**
+ * 装配一天的全部恢复**事实**，不做任何判定。
+ *
+ * §4.1 的原则是"先解决证据接口，再增加公式"：判定只有 `assessDatedReadiness` 一处，
+ * 而"事实从哪来、到达时间怎么算"只有这里一处。回放器需要的是**事实**而不是结论
+ * （`replayReadinessRulings` 要拿同一批事实跑两支到达时间假设），所以必须把它单独暴露出来 ——
+ * 否则回放器只能自己再写一遍这些 SQL，而那正是"两套恢复口径"的开端。
+ *
+ * `loadDatedReadiness` = `assessDatedReadiness(loadDatedRecoveryFacts(...))`，逐位等价。
+ */
+export interface DatedReadinessFacts {
+  asOf: string;
+  localDate: string;
+  signals: Record<ReadinessSignalName, DatedRecoverySignal>;
+  nights: DatedRecoverySignal[];
+}
+
 /** Canonical computed_at is known. Raw source-created time is never treated as ingestion time. */
-export function loadDatedReadiness(database: DatabaseSync, asOf: string, timezone: string) {
+export function loadDatedRecoveryFacts(database: DatabaseSync, asOf: string, timezone: string): DatedReadinessFacts {
   // A completed publication is a conservative upper bound, not a fabricated
   // record-level arrival time. It cannot make an older observed date "today".
   const publication = database.prepare("SELECT value FROM import_manifest WHERE key='import_completed_at'").get()?.value;
@@ -45,11 +62,15 @@ export function loadDatedReadiness(database: DatabaseSync, asOf: string, timezon
     value:row?.value??null, baseline, observedAt:row?.observedAt??null, availableAt:row?.availableAt??null, localDate:row?.date??null,
     availabilitySource: row?.availableAt ? "canonical_computation" : "unknown"
   });
-  return assessDatedReadiness({asOf, localDate:date, signals:{
+  return {asOf, localDate: date, signals:{
     sleep:signal(nightRows.find((n)=>n.date===date),sleepBase), hrv:signal(hrv,hrvBase),
     rhr:{...signal(rhr?{...rhr,date,availableAt:publicationAt}:undefined,rhrBase),
       availabilitySource:publicationAt ? "dataset_publication_upper_bound" : "unknown"}
-  },nights:nightRows.map((row)=>signal(row,sleepBase))});
+  },nights:nightRows.map((row)=>signal(row,sleepBase))};
+}
+
+export function loadDatedReadiness(database: DatabaseSync, asOf: string, timezone: string) {
+  return assessDatedReadiness(loadDatedRecoveryFacts(database, asOf, timezone));
 }
 
 export function readinessForRun(db: DatabaseSync, lineage: ModelLineageV2) {

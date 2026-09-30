@@ -14,7 +14,15 @@ export {
 } from "./prediction-data.js";
 export { RecomputePipeline } from "./services/recompute-pipeline.js";
 
-export { loadDatedReadiness } from "./model-v2-snapshots.js";
+export { loadDatedReadiness, loadDatedRecoveryFacts, type DatedReadinessFacts } from "./model-v2-snapshots.js";
 
 export { replayFitnessVersions, type ModelReplayInput } from "./model-replay-v2.js";
 export { replayReadinessRulings, type ReadinessReplayFacts } from "./readiness-replay-v2.js";
+export { replayLoadRulings, type LoadReplayFacts, type LoadReplayFact } from "./load-replay-v2.js";
+export {
+  buildReadinessReplayCoverage,
+  assessmentInstantForLocalDate,
+  READINESS_REPLAY_COVERAGE_VERSION,
+  type ReadinessReplayCoverageOptions
+} from "./readiness-replay-coverage.js";
+export { backfillCanonicalNights, type CanonicalNightsBackfillResult } from "./backfill-canonical-nights.js";

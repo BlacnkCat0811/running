@@ -24,7 +24,7 @@
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck`（现覆盖 `packages/`、`apps/`、**`scripts/`**） | **0** |
-| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1068 tests / 1050 pass / 0 fail / 18 skipped** |
+| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1077 tests / 1059 pass / 0 fail / 18 skipped** |
 | web 侧全量 | `npm run test -w @rai/web` | **18 文件 / 111 tests / 0 fail** |
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
@@ -67,7 +67,7 @@
 
 ---
 
-## 五、本状态文档新增的三条可执行结论
+## 五、本状态文档新增的五条可执行结论
 
 ### 1. 负向学习的瓶颈已定位到**可靠性门槛**（不是可比性、不是 K）
 
@@ -108,6 +108,40 @@ confirmationCount 1 / 2（现行）/ 3  3/26 / 0/26 / 0/26  7 / 从未 / 从未
 其阈值需要独立回放（§6.9-8 要求放宽/收紧都不得绕过硬质量闸门，且必须重新验证两侧）。
 **本方案不为它编一个未经验证的阈值。**
 
+### 4. 🔴 Readiness 在本机库上**一天都判不了**，而且原因是结构性的（2026-09-30 新增）
+
+新增 `deliverables/READINESS_REPLAY_COVERAGE.json`（`npm run data:readiness-replay-coverage`，只读）
+给出这个指标的第一个真实数字：
+
+```text
+窗口 2024-06-12 .. 2026-07-20（769 天）
+coverage        none 768 / partial 1 / complete 0
+assessableDays  1        （严格支真正能判定的只有 1 天）
+leakageStatus   single_comparable_day ⇒ leakageRate = null（**不是 0**）
+asKnownThenBlockedDays  302   （有读数却无法考据到达时间）
+```
+
+两个**互不相干**的原因，都已在代码里定位：
+
+1. **`canonical_nights` / `canonical_hrv_days` 各 0 行**，而原始睡眠段有 5222 行、HRV 有 684 行。
+   设计文档（`SLEEP_HRV_DESIGN.md` v17 迁移策略）写明的启动期空表回填
+   **从未接线** —— 仓库里 `canonicalizeNights` 只被 import CLI 调用。
+   本批补上 `npm run data:backfill-canonical-nights`（默认预览，`--apply` 才写）。
+   **注意**：回填在真实库副本上已验证（2.65 s → 170 主夜 + 5 午睡 + 170 HRV 日），
+   但**不会**让历史日变得可判定 —— 回填行的 `computed_at` 是现在，
+   历史某天当时既没有读数也没有基线。**它能修的是未来，不能追溯历史。**
+2. **静息心率的到达时间只有"数据集发布上界"**（本机为 2026-07-20 的一次性导入），
+   晚于几乎所有观测日 ⇒ 302 天有读数但到达时间不可考。
+
+⇒ 结论：**§7 的 Readiness 在本机基线上不可验收**，且这不是模型问题，是数据到达时间与
+canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不可用。
+
+### 5. 🟡 `canonicalizeNights` 的末夜边界（已定位，未修）
+
+日期范围由每个睡眠段的**开始**时刻决定（`dates = all.map(s => localDateAt(s.start, tz))`），
+而一夜的 InBed 段开始于**前一晚** ⇒ **最后一夜永远不会被访问**。
+合成夹具（3 夜 → 2 主夜）与真实库都可复现。修它属于 import 行为变更，需单独决策。
+
 ---
 
 ## 六、未执行的动作（明确列出，避免被读成"已完成"）
@@ -115,11 +149,14 @@ confirmationCount 1 / 2（现行）/ 3  3/26 / 0/26 / 0/26  7 / 从未 / 从未
 | 动作 | 为什么没做 |
 |---|---|
 | 本地库迁移到 v24 | 本机仍是 schema 22；属于部署动作，需停止 API + 一致备份 + `data:migrate --apply`。代码与迁移测试已就绪 |
-| 全量 V4 重算 | 同上；且会改变 active run |
+| **执行 `data:backfill-canonical-nights --apply`** | 会写 `canonical_nights` / `canonical_hrv_days`（本机 0 → 175 行）。已在**副本**上验证可行，但改的是用户库，留给用户决定 |
+| **把空表回填接进 API 启动路径** | 设计文档要求接线，但那条路径的失败语义是 `databaseRecoveryRequired`（整个 API 拒绝就绪）。对一次可重试的回填来说代价过高，需单独决策 |
+| 全量 V4 重算 | 会改变 active run；属部署动作 |
 | 模型训练 / 激活 / 校准 | 标签为 0；ML 与经验区间**必须保持未激活** |
 | 线上部署 | 超出本方案范围 |
 | 接入天气服务 | §5.2 第 3 条要求另批 provider/缓存/隐私/成本；§18.4 明确不做 |
-| 任何阈值调整 | §6.9-6 的预注册未冻结 |
+| 任何阈值调整（含 §6.9 门控） | §6.9-6 的预注册未冻结；`labeledOutcomeCount = 0` ⇒ 最大误判下降率无法测量 |
+| 修 `canonicalizeNights` 末夜边界 | 属 import 行为变更；须单独评估对既有夜表的影响 |
 
 ---
 
@@ -139,6 +176,7 @@ confirmationCount 1 / 2（现行）/ 3  3/26 / 0/26 / 0/26  7 / 从未 / 从未
 | 文件 | 生成命令 |
 |---|---|
 | `CA_WEIGHT_ABLATION.json` | `npm run data:ablation-ca-weights -- --database var/rai.sqlite --out deliverables/CA_WEIGHT_ABLATION.json` |
+| `READINESS_REPLAY_COVERAGE.json` | `npm run data:readiness-replay-coverage -- --database var/rai.sqlite --out deliverables/READINESS_REPLAY_COVERAGE.json` |
 | `MODEL_VERSION_REPLAY_2026-09-29.json` | `node --import tsx scripts/model-version-replay.mts --database var/rai.sqlite` |
 | `NORMALIZATION_COVERAGE.json` | `node --import tsx scripts/normalization-coverage.mts --database var/rai.sqlite` |
 | `RAI_V2_ABLATION_2026-09-29.json` / `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` | 09-29 的消融台账与 bounded 候选离线评估（**候选未启用**） |
@@ -157,23 +195,29 @@ confirmationCount 1 / 2（现行）/ 3  3/26 / 0/26 / 0/26  7 / 从未 / 从未
 
 **可立即推进（无阻塞）**
 
-1. §6.4 的 `effectiveAt` / `rebaseReason`：需要先把 rebase review 状态（上次检查时间、连续饱和次数）持久化，
+1. **决定是否执行 `data:backfill-canonical-nights --apply`**，以及是否按设计文档把空表回填
+   接进 `recoverDatabaseJobs`。两者都已在副本上验证可行；差别只在失败语义
+   （接线后回填失败 ⇒ `databaseRecoveryRequired`，整个 API 拒绝就绪）。
+2. §6.4 的 `effectiveAt` / `rebaseReason`：需要先把 rebase review 状态（上次检查时间、连续饱和次数）持久化，
    否则 `rebaseReason` 只能是一个编出来的枚举值。
-2. §13.3 的 `CoachDecisionV2` 版本化输出：需要先把 `tone + next session` 到 `action` 的映射设计清楚，
+3. §13.3 的 `CoachDecisionV2` 版本化输出：需要先把 `tone + next session` 到 `action` 的映射设计清楚，
    并保证它是**同一个决策**的兼容映射，而不是第二套裁决。
-3. 跨领域 replay 的 Load/Readiness 入口接入日常评估报告（入口已在，缺的是例行调用）。
+4. 修 `canonicalizeNights` 的末夜边界（已定位到行）：属 import 行为变更，需评估对既有夜表的影响。
 
 **被数据阻塞（等条件，不等代码）**
 
-4. 环境 adapter N3：等天气字段可得率从 0% 起变化。
-5. 区间校准 / CatBoost 激活 / Durability 数值：等 ≥24 条独立、无泄漏、用户确认的比赛或标准测试结果。
+5. 环境 adapter N3：等天气字段可得率从 0% 起变化。
+6. 区间校准 / CatBoost 激活 / Durability 数值：等 ≥24 条独立、无泄漏、用户确认的比赛或标准测试结果。
    标签闭环的**软件部分**已完成并有测试（`label-funnel.test.ts`），缺的是**真实结果本身**。
+7. **Readiness 的实证验收**：本机 769 天里只有 1 天可判定（见 §五-4）。
+   要让 Readiness 可验收，需要**增量导入**（产生真实的记录级到达时间），
+   而不是再补一个一次性回填。
 
 **被授权阻塞**
 
-6. 本地库迁移 + 全量 V4 重算 + bundle 发布（§17.6 Phase 5）：需要停止 API、一致备份、并承担一次
+8. 本地库迁移 + 全量 V4 重算 + bundle 发布（§17.6 Phase 5）：需要停止 API、一致备份、并承担一次
    active run 切换；应在单独一轮中按迁移闸门执行。
 
 **需要新政策（必须先回放）**
 
-7. F08 的速度合理性检测器：先做**检测率盘点**（报告而不猜测），再决定是否成为门控。
+9. F08 的速度合理性检测器：先做**检测率盘点**（报告而不猜测），再决定是否成为门控。
