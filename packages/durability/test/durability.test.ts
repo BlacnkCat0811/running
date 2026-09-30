@@ -388,3 +388,31 @@ test("malformed race-evidence entries are rejected", () => {
   );
   assert.equal(RACE_EVIDENCE_CHANNELS.length, 3);
 });
+
+test("D03: a slower late run never becomes an endurance-decline conclusion", () => {
+  // §16.1 D03：地形不同导致后段变慢时，只能**降低可比性**，不能给"耐力下降"的结论。
+  // 本包没有地形/可比性输入，所以它**做不到**把后段变慢解释成耐力 —— 这条测试钉的正是
+  // 这个"做不到"：同一暴露量下，好与差的后段表现给出**同一种结论形状**。
+  const assess = (lateRunStability: number | null) => assessDurability({
+    lateRunStability,
+    matchedPerformanceEvidence: null,
+    lateRunEvidenceCount: 2,
+    evidenceTargetCount: 2
+  });
+  const fast = assess(0.95);
+  const slow = assess(0.2);
+
+  // 1) 两者都没有分数：没有校准就不给数值，"慢"不等于"耐力下降"。
+  assert.equal(fast.durabilityScore, null);
+  assert.equal(slow.durabilityScore, null);
+  // 2) 证据等级只由暴露量决定，后段快慢不得改变它 —— 否则一次爬坡长跑就会降级。
+  assert.equal(slow.evidenceLevel, fast.evidenceLevel);
+  // 3) 理由码里不能出现任何"下降/退化"的断言。
+  assert.deepEqual(slow.reasonCodes, fast.reasonCodes);
+  assert.ok(slow.reasonCodes.includes("penalty_withheld_pending_calibration"));
+  assert.equal(slow.reasonCodes.some((code) => /decline|decreas|degrad|endurance_loss/.test(code)), false);
+  // 4) 原始观测仍然如实保留，供人看；只是没有任何东西把它换算成结论。
+  assert.equal(slow.components.lateRunStability, 0.2);
+  // 5) 越界值抛错而不是被夹到合法区间 —— 夹一下就会变成一个"看起来正常"的观测。
+  assert.throws(() => assess(-0.1));
+});
