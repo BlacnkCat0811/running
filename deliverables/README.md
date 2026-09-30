@@ -35,17 +35,30 @@
 | `READINESS_REPLAY_COVERAGE.json` | `npm run data:readiness-replay-coverage` | `D:\running\var\rai.sqlite` | ✅ |
 | `NORMALIZATION_COVERAGE.json` | `scripts/normalization-coverage.mts` | `D:\running\var\rai.sqlite` | ✅ |
 | `BASELINE_REBASE_REVIEW.json` | `npm run data:baseline-rebase-review` | `D:\running\var\rai.sqlite` | ✅ |
-| `MODEL_VERSION_REPLAY_2026-09-29.json` | `scripts/model-version-replay.mts` | 🔴 **另一台主机（macOS）** | ✅ 脚本可跑，需重新生成才是本库 |
-| `RAI_V2_ABLATION_2026-09-29.json` | 09-29 会话的消融台账 | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
-| `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` | bounded comparability 候选离线评估（**未启用**） | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
-| `RAI_V2_EVALUATION_2026-09-29.json` | 统一评估报告（含 not_evaluable 明细） | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
-| `PHASE0_BASELINE.json` | 阶段 0 证据基线 | 🔴 **另一台主机（macOS）** | ❌ 生成器不可用 |
+| `MODEL_VERSION_REPLAY_2026-09-30.json` | `scripts/model-version-replay.mts` | `var\rai.sqlite` | ✅ |
+| `PHASE0_BASELINE.json` | `scripts/snapshot-phase0-baseline.mts` | `D:\running\var\rai.sqlite` | ✅ |
 | `PREPARATION_MIGRATION_GOLDEN.json` | 专项准备度迁移 golden | 未声明 | — |
 
 > 这些是**派生数据**，不是结论。引用时必须同时给出生成脚本与数据口径。
-> 标 🔴 的四份是**另一台主机上的时点快照**：它们的数字描述的是那台机器的库，
-> 不能当作本工作区（或线上）的事实。要引用本库的数字，请用上面的命令重新生成。
-> 是否把它们移入 `archive/` 属于一次单独的整理（会牵动多处引用），尚未执行。
+
+> **2026-09-30 已完成的整理**：此前有 5 份 JSON 描述的是**另一台主机（macOS）**的库。
+> 其中两份**本工作区其实可以复现** —— 我上一版把 `PHASE0_BASELINE.json` 误标为"生成器不可用"，
+> 而 `scripts/snapshot-phase0-baseline.mts` 一直存在。这两份已在本库重新生成，
+> `databasePath` 现在指向本工作区。
+> 另外三份（`RAI_V2_ABLATION_2026-09-29.json`、`RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json`、
+> `RAI_V2_EVALUATION_2026-09-29.json`）**确实没有生成器**（已核对 `scripts/` 与全部源码），
+> 且描述的是那台机器的库，因此移入 `archive/` —— 它们只能回答"当时发生了什么"，
+> 不能回答"现在是什么状态"。旧版 `MODEL_VERSION_REPLAY_2026-09-29.json` 同时移入 `archive/`。
+
+> 两份基线产物的实测差异（**同一个脚本**、两台主机），这次是产物与产物之间的直接对照：
+
+| 字段 | macOS 版（现在 `archive/`） | 本工作区重生成 |
+|---|---|---|
+| `database.path` | `/Users/ta/running/var/rai.sqlite` | `D:\running\var\rai.sqlite` |
+| `activeTrainingSessions` | **268** | **257** |
+| `modelRuns` | **6** | **24** |
+| `activeModelRun` | **`rai-model-config-v3`** | **`rai-model-config-v2`** |
+| `schemaMigrationMax` / `predictionModelRuns` / `activeFeatureSchema` / `labelOverrides` | 22 / 0 / `workout-feature-v3` / 0 | 同左（一致） |
 
 ## 三、仍有效的参考（非时点快照）
 

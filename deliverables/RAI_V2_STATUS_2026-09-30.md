@@ -233,18 +233,30 @@ canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不�
 | 天气字段可得率 | 温度 0% | **温度 8.6% / 湿度 8.6% / 爬升 61.9%** | 🔴 不同 |
 
 **这不是"两台机器数据略有差异"，而是曾经拿另一台机器的产物当本工作区的事实**：
-`deliverables/NORMALIZATION_COVERAGE.json` 与 `PHASE0_BASELINE.json` 等四份 JSON 的
-`databasePath` 写的是 `/Users/ta/running/var/rai.sqlite`。批次 24 之前，
+多份 JSON 的 `databasePath` 写的是 `/Users/ta/running/var/rai.sqlite`。批次 24 之前，
 "环境 adapter 被 0% 天气可得率阻塞"这个结论就是从那份**别的库**的报告里读出来的；
 本库的真实类似结论应当改为"8.6% 温度/湿度、61.9% 爬升，仍不足以校准"。
 
-**已做的处置**：
+**已做的处置（批次 30 完成收尾）**：
 
-- 用本工作区的库**重新生成** `NORMALIZATION_COVERAGE.json`（`databasePath` 现在写的是
-  `D:\running\var\rai.sqlite`）；`CA_WEIGHT_ABLATION.json` 与 `READINESS_REPLAY_COVERAGE.json`
-  本来就是在本库生成的。
-- `deliverables/README.md` 的产物表新增 **`databasePath` 一列**，标出四份**不可在本工作区复现**
-  的 macOS 时点快照 —— 结构上防止同一类误读复发。
+- 用本工作区的库**重新生成**全部**可复现**的产物：`NORMALIZATION_COVERAGE.json`、
+  `PHASE0_BASELINE.json`、`MODEL_VERSION_REPLAY_2026-09-30.json`；`CA_WEIGHT_ABLATION.json`、
+  `READINESS_REPLAY_COVERAGE.json`、`BASELINE_REBASE_REVIEW.json` 本来就是在本库生成的。
+- 🔴 **订正我自己的上一版 README**：它把 `PHASE0_BASELINE.json` 标为"生成器不可用"，
+  而 `scripts/snapshot-phase0-baseline.mts` **一直存在**。是核实不足，不是真的没有工具。
+- 四份**确实没有生成器**的（已核对 `scripts/` 与全部源码）移入 `archive/`：
+  `RAI_V2_ABLATION_2026-09-29.json`、`RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json`、
+  `RAI_V2_EVALUATION_2026-09-29.json`、`MODEL_VERSION_REPLAY_2026-09-29.json`。
+  它们只能回答"当时发生了什么"。
+- 两份**同脚本**基线产物的直接对照（这是比读文档更硬的证据）：
+
+| 字段 | macOS 版（已入 `archive/`） | 本工作区重生成 |
+|---|---|---|
+| `database.path` | `/Users/ta/running/var/rai.sqlite` | `D:\running\var\rai.sqlite` |
+| `activeTrainingSessions` | **268** | **257** |
+| `modelRuns` | **6** | **24** |
+| `activeModelRun` | **`rai-model-config-v3`** | **`rai-model-config-v2`** |
+
 - 方案主干（`RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md`）**不改**：它是一份注明日期与
   核验提交的文档，记录 macOS 基线是合法的。要防的是"把它的数字当成本工作区的现状"。
 
@@ -307,8 +319,10 @@ review not_evaluable / review_history_not_persisted
 | `CA_WEIGHT_ABLATION.json` | `npm run data:ablation-ca-weights -- --database var/rai.sqlite --out deliverables/CA_WEIGHT_ABLATION.json` | `D:\running\var\rai.sqlite` |
 | `READINESS_REPLAY_COVERAGE.json` | `npm run data:readiness-replay-coverage -- --database var/rai.sqlite --out deliverables/READINESS_REPLAY_COVERAGE.json` | `D:\running\var\rai.sqlite` |
 | `NORMALIZATION_COVERAGE.json` | `node --import tsx scripts/normalization-coverage.mts --database var/rai.sqlite --out deliverables/NORMALIZATION_COVERAGE.json` | `D:\running\var\rai.sqlite` |
-| `MODEL_VERSION_REPLAY_2026-09-29.json` | `node --import tsx scripts/model-version-replay.mts --database var/rai.sqlite` | 🔴 **另一台主机（macOS）**；脚本可跑，需重新生成才是本库 |
-| `RAI_V2_ABLATION_2026-09-29.json` / `RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json` / `RAI_V2_EVALUATION_2026-09-29.json` / `PHASE0_BASELINE.json` | 09-28/09-29 会话产出 | 🔴 **另一台主机（macOS）**，生成器不可用 |
+| `MODEL_VERSION_REPLAY_2026-09-30.json` | `node --import tsx scripts/model-version-replay.mts --database var/rai.sqlite --out deliverables/MODEL_VERSION_REPLAY_2026-09-30.json` | `var\rai.sqlite`（**本工作区**） |
+| `PHASE0_BASELINE.json` | `node --import tsx scripts/snapshot-phase0-baseline.mts --database var/rai.sqlite --out deliverables/PHASE0_BASELINE.json` | `D:\running\var\rai.sqlite`（**本工作区**） |
+| `BASELINE_REBASE_REVIEW.json` | `npm run data:baseline-rebase-review -- --database var/rai.sqlite --out deliverables/BASELINE_REBASE_REVIEW.json` | `D:\running\var\rai.sqlite` |
+| `archive/RAI_V2_ABLATION_2026-09-29.json` 等四份 | 09-28/09-29 会话产出（**无生成器**，已核对 `scripts/` 与全部源码） | 🔴 另一台主机（macOS）的库，**只作历史，不代表本工作区** |
 | `PREPARATION_MIGRATION_GOLDEN.json` | 专项准备度迁移 golden | 未声明 |
 
 > 引用这些产物时**必须同时给出生成脚本与数据口径**。它们是派生数据，不是结论。

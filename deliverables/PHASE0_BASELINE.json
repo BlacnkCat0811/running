@@ -1,43 +1,32 @@
 {
   "snapshotVersion": "rai-phase0-baseline-v1",
-  "generatedAt": "2026-09-28T10:24:59.448Z",
-  "commit": "62b4a97d8f3e04949b52c1715dc3a5ec660bc95c",
-  "commitSubject": "fix(platform): 修复 Windows 跨平台路径分隔符、句柄释放与 CLI 兼容性",
+  "generatedAt": "2026-09-30T06:08:26.746Z",
+  "commit": "f4d808807a9159052499dc74b877b3eee8db9617",
+  "commitSubject": "feat(model-eval): F13 关闭 —— 分层接受率与检测延迟从\"产物里有\"变成\"契约要求\"",
   "workingTree": {
-    "dirty": true,
-    "entries": [
-      "M packages/contracts/src/index.ts",
-      " M packages/storage-sqlite/src/index.ts",
-      "?? deliverables/PHASE0_BASELINE.json",
-      "?? deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md",
-      "?? deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.verification.json",
-      "?? packages/contracts/src/semantic-json.ts",
-      "?? packages/contracts/test/semantic-json.test.ts",
-      "?? packages/storage-sqlite/src/model-transition-gate.ts",
-      "?? packages/storage-sqlite/test/model-transition-gate.test.ts",
-      "?? scripts/snapshot-phase0-baseline.mts"
-    ]
+    "dirty": false,
+    "entries": []
   },
   "versions": {
     "contract": "canonical-health-v2",
-    "featureSchema": "workout-feature-v3",
-    "featureConfig": "feature-config-v8",
-    "modelConfig": "rai-model-config-v4",
-    "scoringEngine": "rai-v1.0.0-dev",
-    "physiology": "rai-physiology-v1.7.0",
-    "predictionResidualFeatureSchema": "race-residual-feature-v3",
-    "catboostPredictionModel": "race-residual-catboost-v3",
-    "trainingLoadConfig": "training-load-config-v4",
-    "trainingZoneConfig": "training-zone-config-v3"
+    "featureSchema": "workout-feature-v4",
+    "featureConfig": "feature-config-v11",
+    "modelConfig": "rai-model-config-v12",
+    "scoringEngine": "rai-v2.0.0",
+    "physiology": "rai-physiology-v1.8.0",
+    "predictionResidualFeatureSchema": "race-residual-feature-v4",
+    "catboostPredictionModel": "race-residual-catboost-v4",
+    "trainingLoadConfig": "training-load-config-v5",
+    "trainingZoneConfig": "training-zone-config-v4"
   },
   "scoring": {
-    "modelConfigHash": "63e272dacaed3dc9804bea35cb64d0455cabe6c398545dd63aa71f58557ccb26",
+    "modelConfigHash": "fdf20e1183d481feac0fc554e587f5ebb4a2431de68390234c5b218756bfdef4",
     "dimensionWeights": {
       "efficiency": 0.375,
       "pace": 0.3125,
       "cardio": 0,
       "stability": 0.1875,
-      "recovery": 0.125
+      "recovery": 0
     },
     "calibrationMinimumSessions": 6,
     "calibrationMinimumSpanDays": 14,
@@ -45,13 +34,13 @@
     "minimumConfidenceForTrueAbility": 0.6
   },
   "database": {
-    "path": "/Users/ta/running/var/rai.sqlite",
+    "path": "D:\\running\\var\\rai.sqlite",
     "present": true,
     "schemaMigrationMax": 22,
-    "activeTrainingSessions": 268,
-    "modelRuns": 6,
+    "activeTrainingSessions": 257,
+    "modelRuns": 24,
     "predictionModelRuns": 0,
-    "activeModelRun": "rai-model-config-v3",
+    "activeModelRun": "rai-model-config-v2",
     "activeFeatureSchema": "workout-feature-v3",
     "labelOverrides": 0
   }
