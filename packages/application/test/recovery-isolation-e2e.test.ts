@@ -7,11 +7,17 @@ import test from "node:test";
 
 import { healthTypes, type WorkoutFeatureVector } from "@rai/contracts";
 import { extractWorkoutFeatureVector, type WorkoutFeatureSource } from "@rai/features";
+import { assessReadiness } from "@rai/readiness";
 import {
   scoreFeature as scoreFeatureWithHistory,
   updateTrueAbilityFromFeatureScore,
   type PersonalBaseline
 } from "@rai/scoring";
+
+// The app owns the readiness -> verdict mapping, so the cross-domain composition is
+// asserted against it rather than against a re-derivation. Same precedent as
+// `metadata-order-determinism.test.ts` importing `analyzeDatasetChange`.
+import { decideVerdictFromSnapshots } from "../../../apps/api/src/mobile-coach.js";
 
 // §6.2 stratum sufficiency is covered by its own test file; this fixture is about
 // recovery isolation, so it states a mature history up front.
@@ -217,6 +223,166 @@ test("changing only recovery facts leaves ability, session type and learning unt
       updateTrueAbilityFromFeatureScore(trueAbility, 30, restedScore)
     );
   }
+});
+
+// -----------------------------------------------------------------------------
+// F02: the cross-domain composition.
+//
+// F01 above proves "recovery moves, Fitness does not". That alone is only half of
+// §16.1 F02, which requires the *same* recovery change to (a) downgrade the Coach
+// and (b) leave Fitness untouched. Two separate tests — one for each half — do not
+// establish that: they could each be describing a different fact change.
+//
+// So this test drives one fixture through both domains and asserts both halves on
+// the same two sources. `decideVerdictFromSnapshots` is imported from the app for
+// the same reason `metadata-order-determinism.test.ts` imports `analyzeDatasetChange`:
+// the behaviour under test lives there, and re-deriving it here would test a copy.
+//
+// This fixture happens to give only resting heart rate a usable baseline
+// (`validDays.rhr = 26`, sleep/hrv = 0), which is also R03's shape: a reading with
+// no baseline is not comparable evidence. Sleep and HRV therefore contribute
+// presence but not comparison, and the difference between the two variants is
+// carried by RHR alone — 50/50 = 1.00 (not raised) versus 62/50 = 1.24 (> 1.03).
+// -----------------------------------------------------------------------------
+
+function readinessInputFor(source: WorkoutFeatureSource): Parameters<typeof assessReadiness>[0] {
+  return {
+    asOf: EVALUATED_AT,
+    localDate: "2026-03-01",
+    evidenceLocalDate: "2026-03-01",
+    evidenceStatus: "valid",
+    sleepMinutes: source.sleepDurationMinutes,
+    sleepBaselineMinutes: source.recoveryBaseline?.sleepMinutes ?? null,
+    nightsBelowSleepBaseline: 0,
+    hrvMs: source.hrvSdnn,
+    hrvBaselineMs: source.recoveryBaseline?.hrvSdnnMs ?? null,
+    restingHeartRateBpm: source.restingHeartRate,
+    restingHeartRateBaselineBpm: source.recoveryBaseline?.restingHeartRateBpm ?? null,
+    observedAt: EVALUATED_AT,
+    availableAt: EVALUATED_AT
+  };
+}
+
+/** Every field except the recovery readings, which V2 deliberately removes. */
+const COACH_CONTEXT: Parameters<typeof decideVerdictFromSnapshots>[0] = {
+  today: "2026-03-01",
+  latestDataDate: "2026-03-01",
+  calibration: "completed",
+  eligibleSessions: 20,
+  trueAbility: 44,
+  currentAbility: 43.5,
+  changeFrom7DaysAgo: 0.2,
+  growthVelocityPerWeek: 0.1,
+  decayPoints: 0,
+  snapshotDate: "2026-03-01",
+  explanationCodes: [],
+  trainingStatus: "effective_stimulus",
+  loadRatio: 1.05,
+  rampRate: 0.1,
+  strain: 40,
+  strainP90: 80,
+  monotony: 1.2,
+  recoveryEvidence: 0.7,
+  consecutiveQualityDays: 0,
+  daysSinceLastRun: 1,
+  daysSinceLastQuality: 3,
+  weekDistanceKm: 18,
+  weekDurationSeconds: 7200,
+  weekEasyDurationSeconds: 5400,
+  weekQualityCount: 0,
+  weeklyDistanceGoalKm: 40,
+  easyDurationFloorFraction: 0.5,
+  qualitySessionCap: 2,
+  fourWeekDistanceChangeFraction: 0.1,
+  previousWeekDistanceKm: 20,
+  currentWeekDistanceKm: 18,
+  longestRun8WeekKm: 16,
+  latestLongRunKm: 14,
+  intendedEasyCount: 3,
+  easyEnoughCount: 3,
+  latestWorkout: null,
+  todayWorkoutCount: 0,
+  storedWeekPlan: [],
+  lockedSession: null,
+  zones: {
+    easyPaceLower: 330, easyPaceUpper: 390, easyHrLower: 120, easyHrUpper: 145,
+    thresholdPaceLower: 270, thresholdPaceUpper: 300, thresholdHrLower: 160, thresholdHrUpper: 172,
+    intervalPaceLower: 240, intervalPaceUpper: 265
+  },
+  raceTarget: null,
+  raceShapeScore: 0.6,
+  raceVolumeFraction: 0.7,
+  raceLongRunFraction: 0.8,
+  weekDaily: []
+};
+
+const TONE_RANK: Record<string, number> = { green: 0, yellow: 1, red: 2 };
+
+test("F02: the same recovery change downgrades the coach and leaves ability untouched", async () => {
+  // The shared fixture gives only resting heart rate a usable baseline, and a lone
+  // raised RHR is deliberately `no_low_signal` (`classifyRecoveryFlags` needs
+  // `sleepLow || (hrvLow && rhrUp)`). So F02 uses the `amend` seam to give sleep a
+  // baseline of its own — without it the fixture could not produce a downgrade at
+  // all, and the test would pass for the wrong reason.
+  const addSleepBaseline = (database: DatabaseSync): void => {
+    const insert = database.prepare(`
+      INSERT INTO canonical_nights
+        (id, wake_date, timezone_identifier, kind, source_name, source_category, source_rank,
+         has_stages, sleep_onset_at, wake_at, asleep_union_minutes, stage_minutes_json,
+         segment_count, provenance_json, computed_at)
+      VALUES (?, ?, ?, 'main', ?, 'apple_watch', 1, 0, ?, ?, 430, '{}', 1, '{}', ?)
+    `);
+    for (let day = 20; day <= 27; day += 1) {
+      const wakeDate = `2026-02-${day}`;
+      const wakeAt = Date.parse(`${wakeDate}T04:00:00.000Z`); // 12:00 Asia/Shanghai
+      insert.run(`n-base-${day}`, wakeDate, TIMEZONE, SOURCE_NAME, iso(wakeAt - 7 * 3_600_000), iso(wakeAt), EVALUATED_AT);
+    }
+  };
+  const rested = await buildSource(RESTED, REFERENCE_DAYS, addSleepBaseline);
+  const poor = await buildSource(POORLY_RECOVERED, REFERENCE_DAYS, addSleepBaseline);
+
+  // ---- half 1: Fitness must not move (same law F01 states, asserted here on the
+  // same two sources the readiness half uses below).
+  const restedScore = scoreFeature(extractWorkoutFeatureVector("f", "run", rested, undefined, EVALUATED_AT), FIXED_BASELINE, 1);
+  const poorScore = scoreFeature(extractWorkoutFeatureVector("f", "run", poor, undefined, EVALUATED_AT), FIXED_BASELINE, 1);
+  assert.equal(poorScore.status, "eligible");
+  assert.equal(poorScore.currentAbility, restedScore.currentAbility);
+  assert.equal(poorScore.confidence, restedScore.confidence);
+  assert.deepEqual(
+    updateTrueAbilityFromFeatureScore(70, 30, poorScore),
+    updateTrueAbilityFromFeatureScore(70, 30, restedScore)
+  );
+
+  // ---- half 2: Readiness must move, and only in the documented direction.
+  const restedReadiness = assessReadiness(readinessInputFor(rested));
+  const poorReadiness = assessReadiness(readinessInputFor(poor));
+  assert.equal(restedReadiness.assessment, "no_low_signal");
+  assert.equal(restedReadiness.state, "no_low_signal");
+  assert.equal(poorReadiness.assessment, "low_signal");
+  assert.equal(poorReadiness.signals.rhr.low, true);
+  assert.equal(poorReadiness.state, "caution", "one raised RHR is caution, not strained");
+  assert.notEqual(poorReadiness.state, restedReadiness.state);
+
+  // A reading without a baseline is present but not comparable (R03's shape).
+  assert.equal(restedReadiness.coverage, "partial");
+  assert.equal(poorReadiness.coverage, "partial");
+
+  // ---- composition: the coach consumes the same two snapshots.
+  const restedVerdict = decideVerdictFromSnapshots({ ...COACH_CONTEXT }, restedReadiness);
+  const poorVerdict = decideVerdictFromSnapshots({ ...COACH_CONTEXT }, poorReadiness);
+  assert.equal(restedVerdict.tone, "green", "the control must be green, or 'downgrade' is untestable");
+  assert.ok(
+    TONE_RANK[poorVerdict.tone]! > TONE_RANK[restedVerdict.tone]!,
+    `expected a downgrade, got ${restedVerdict.tone} -> ${poorVerdict.tone}`
+  );
+  // The reason must name the recovery channel, not some other one. Which signal
+  // fires first is the rule set's business (here `sleep`, since a short night is
+  // checked before a raised RHR), so the assertion is on the channel, not the code.
+  const recoveryCodes = ["sleep", "hrv", "resting_heart_rate", "sleep_streak"];
+  assert.ok(
+    poorVerdict.reasonCodes?.some((code) => recoveryCodes.includes(code)) ?? false,
+    `expected a recovery reason code, got ${JSON.stringify(poorVerdict.reasonCodes)}`
+  );
 });
 
 test("the recovery facts really do reach the feature source", async () => {

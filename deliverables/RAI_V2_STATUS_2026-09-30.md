@@ -61,8 +61,8 @@
 
 | 状态 | 含义 | 数量 |
 |---|---|---|
-| `cited` | 测试里按 ID 引用（机械可查 `\bID\b`） | **49** |
-| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **5** |
+| `cited` | 测试里按 ID 引用（机械可查 `\bID\b`） | **50** |
+| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **4** |
 | `missing` | 既未引用也未声明 | **0**（非 0 即失败，退出码 1） |
 
 本轮把 30 条**本来就已被测试覆盖、只是没按 ID 引用**的用例补上了引用
@@ -73,10 +73,17 @@
 | ID | 缺的是什么 |
 |---|---|
 | **F08** | 快速下坡/速度尖峰。**没有覆盖**，且是刻意的：要挡住它需要**新增检测器政策**，阈值必须先独立回放（见 §五-3） |
-| **F02** | 「Fitness 不变」与「Readiness→Coach 降阶」各有测试，但**没有一条同时断言两半** |
 | **P02** | 环境去偏差的单层行为有测试；「同一历史环境被两层各去一次」的 ledger 断言没有 —— 当前只有 N0 identity adapter，没有第二层 |
 | **P04** | race-evidence 单次预算有测试；「Preparation 与 Durability 不重复扣罚」要等 durability 数值罚分启用后才有可断言的路径 |
 | **F13** | 「缺天气不冻结负学习」有测试；「报分层接受率/检测延迟」由消融**报告**承担，不是测试 |
+
+> **F02 已于批次 28 关闭**：新增一条用例在**同一对事实源**上同时断言两半
+> （`packages/application/test/recovery-isolation-e2e.test.ts` 的
+> `F02: the same recovery change downgrades the coach and leaves ability untouched`），
+> 而不是把两条各测一半的用例拼起来当作覆盖。它同时暴露了共享夹具的一个性质：
+> 该夹具只给静息心率基线，而**单独一个升高的 RHR 按设计就是 `no_low_signal`**
+> （`classifyRecoveryFlags` 要求 `sleepLow || (hrvLow && rhrUp)`），
+> 所以用例用 `amend` 缝单独补了睡眠基线 —— 否则夹具根本产生不了降阶，测试会"因为错误的理由通过"。
 
 历史逐条对照表见 `archive/RAI_V2_BATCH18_ACCEPTANCE_MATRIX_2026-09-30.md`（其总数口径已过时，
 结论仍有效，但请以本节的可执行判据为准）。
