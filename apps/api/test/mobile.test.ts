@@ -100,6 +100,20 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     assert.ok(Array.isArray(today.recentWorkouts));
     assert.ok(today.recentWorkouts.length > 0 && today.recentWorkouts.length <= 5);
     assert.ok(["green", "yellow", "red"].includes(today.verdict.tone));
+    // §13.3：版本化决策输出必须随 payload 一起发出，且与 legacy 投影**同源**。
+    // 断言三件事：字段在、tone 逐字等于 verdict、action 是已声明取值或刻意的 null。
+    assert.ok(today.decision, "the versioned decision must be on the payload");
+    assert.equal(today.decision.version, "rai-coach-v2.0.0");
+    assert.equal(today.decision.tone, today.verdict.tone, "tone must come from the same verdict");
+    assert.ok(
+      today.decision.action === null
+      || ["keep_plan", "reduce_intensity", "reduce_duration", "easy_only", "rest", "collect_evidence"]
+        .includes(today.decision.action),
+      `undeclared action: ${String(today.decision.action)}`
+    );
+    assert.ok(today.decision.reasons.some((reason) => reason.code.startsWith("plan_disposition_")));
+    // 快照身份只放真实存在的类别：readiness 缺席时它不出现，而不是填空串。
+    for (const id of today.decision.inputSnapshotIds) assert.notEqual(id.trim(), "");
     assert.ok(today.nextSession.title.length > 0);
     assert.ok(today.ability.explanation.length > 0);
     assert.equal(today.weekPlan.length, 7);

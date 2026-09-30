@@ -208,6 +208,14 @@ metadata_only = {
     # reasonCodes），iOS 目前刻意不消费 —— 已核实 `grep readinessSnapshot apps/ios` 为空。
     # 要改成展示位，请连同"首页应该展示哪一套恢复说法"一起决定，别只加一行锚点。
     "readinessSnapshot": "严格 V2 完整评估结果：证据层，首页展示的是派生的 recoveryAssessment 摘要",
+    # 2026-09-30 §13.3：与 verdict/nextSession 是**同一次决策的两个投影**，不是第二套算法。
+    # tone 来自同一个 verdict，action 来自决策自己报告的分支（CoachPlanDisposition），
+    # 所以首页已有的 verdict/nextSession 就是它的展示位 —— 再铺一遍会让同一个决定出现两种说法。
+    # 它随 payload 发出是为了**服务端验收与工具核对**：`action` 这个"计划被怎么处理"的
+    # 结构化标签在 verdict 里没有等价物（verdict 只有 tone + 文案），而它正是
+    # "计划被保留/降阶/预算钳制"这类问题唯一可机读的答案。要改成展示位，
+    # 请连同"首页该显示哪一套动作标签"一起决定。
+    "decision": "版本化决策输出（rai-coach-v2.0.0）：verdict/nextSession 的机读投影，展示位是它们本身",
     # 刻意移出展示位，不是遗漏：它把「今晚有没有夜」当成「数据新不新」，于是一个
     # 没戴表的普通夜晚被显示成"数据过期"，还让历史夜参与今天的判断。契约里它已标
     # `@deprecated`，iOS 也已停止渲染 —— 保留解码只为尚未升级的旧客户端。

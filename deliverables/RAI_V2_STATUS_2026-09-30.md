@@ -718,19 +718,29 @@ var/rai.sqlite  SHA-256  BC3B117B…F14C  →  BC3B117B…F14C   （完全相同
 文件**编译不过**（`cannot be used as a value`）。是并发的只读审计先报出来的。
 同一族的问题在本会话已出现第四次（静默替换、静默丢参、静默丢导入）。
 
-### 12.3 还没有接线的部分（明确列出）
+### 12.3 接线已完成，两个硬约束都按它们**自己提供的方式**满足
 
-`projectCoachDecisionV2` 目前**没有生产调用方**：`MobileTodayResponse` 上没有 `decision` 字段。
-不接线不是遗漏，而是两个**已确认的**硬约束：
+`projectCoachDecisionV2` 现在是生产路径的一部分：`mobile-read.ts:307` 用
+`decideNextSessionDecision` 同时取回处方与分支，`:334` 把投影放进 coach payload，
+`data.ts:545` 的 `...coach` 把它带进响应，`MobileTodayResponse` 上是 `decision?: CoachDecisionV2`。
 
-1. **iOS 字段覆盖门**：`apps/ios/tests/run-tech-presentation-tests.sh:158-224` 会解析
-   `MobileTodayResponse` 的每个字段，凡是既没有展示锚点、又没有写明 `metadata_only` 理由的
-   **直接让 `npm run test:ios` 失败**。加一个顶层字段必须先把它登记进那份清单。
-2. **`recommendationRevision` 哈希**：`apps/api/src/data.ts:508-520` 对
-   `{..., verdict, nextSession, ...}` 取 SHA-256。往 `MobileVerdict`/`MobileNextSession`
-   **内部**加任何不稳定字段 ⇒ 每次 `POST /v1/mobile/lock` 都会 409 `mobile_recommendation_stale`。
-   （本设计把新字段放在 `MobileVerdict` **之外**，正是为了不碰这个哈希。）
+上一版本文档说"还没有接线"，并列了两个硬约束。两个都不是绕过，而是按它们**各自的机制**满足的：
 
-3. ⚠️ **`npm run test:ios` 在本机跑不了**：它需要 Linux/WSL，本机未安装。
-   所以 iOS 门在此主机上是**未验证**状态，不是"通过"。已确认 `MobileTodayResponse`
-   的字段集合未被本次改动触碰（`decision` 在其中零命中），因此那道门的**输入**没变。
+| 约束 | 处置 |
+|---|---|
+| **iOS 字段覆盖门**（`run-tech-presentation-tests.sh:158-224`）：解析 `MobileTodayResponse` 每个字段，没有展示锚点又没写 `metadata_only` 理由就失败 | 在 `metadata_only` 里登记 `decision` 并写明理由：它的展示位**就是** `verdict`/`nextSession`（同一次决策的两个投影），再铺一遍会让同一个决定出现两种说法。这正是该门为"证据层字段"准备的通道，与 `readinessSnapshot` 同类 |
+| **`recommendationRevision` 哈希**（`data.ts:508-520`）：对 `{..., verdict, nextSession, ...}` 取 SHA-256，往里面加不稳定字段会让每个 lock 变陈旧 | 新字段放在 `MobileVerdict`/`MobileNextSession` **之外**，**不进**那份哈希。`server-runtime.test.ts` 的 lock 往返用例（17/17）确认没有引入 409 |
+
+**关于 `test:ios` 的可验证性（重要）**：该门需要 Linux/WSL，本机没有，所以
+`npm run test:ios` 在这里**跑不起来**。为了不让这条约束因为环境而失去看护，
+我把那道门里的 Python 判据**照原样**在这台机器上跑了一遍（读的是同一份契约与同一份脚本表）：
+契约 29 个字段 = 展示锚点 23 + `metadata_only` 6，**unaccounted 0、stale 0、`decision` 已登记**，PASS。
+这是一次性核对而不是新增一个镜像检查 —— 不把同一条规则实现第二遍，
+否则以后有人会去改镜像而不是改门。
+
+### 12.4 本轮新增的验证
+
+- `mobile.test.ts`：真实 payload 上断言 `decision.version === "rai-coach-v2.0.0"`、
+  `decision.tone` **逐字等于** `verdict.tone`、`action` 是已声明取值或刻意的 `null`、
+  每个 reason 都带 `plan_disposition_*`、`inputSnapshotIds` 里没有空串。
+- `coach-decision-v2.test.ts`：11 条，含扫描查出的两处矛盾的回归。

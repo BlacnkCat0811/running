@@ -1016,6 +1016,15 @@ export interface MobileRecommendation {
 export interface MobileTodayResponse {
   /** Strict dated V2 result; legacy clients may keep reading the compatible assessment. */
   readinessSnapshot?: import("@rai/contracts").ReadinessAssessmentResult;
+  /**
+   * §13.3 的版本化决策输出。**与 `verdict`/`nextSession` 是同一次决策的两个投影**：
+   * tone 直接来自同一个 verdict，action 来自决策自己报告的分支。
+   *
+   * 刻意**不**进入 `recommendationRevision` 的哈希：那份哈希吃的是
+   * verdict/nextSession/candidate，往它里面加字段会让每个已确认的 lock 变陈旧。
+   * iOS 也不消费它（见 run-tech-presentation-tests.sh 的 metadata_only 理由）。
+   */
+  decision?: CoachDecisionV2;
   generatedAt: string;
   timezone: string;
   /** Latest local_date present in the training loads; null when the store is empty. */

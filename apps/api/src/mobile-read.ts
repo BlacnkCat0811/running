@@ -39,6 +39,8 @@ import {
   calibrationMessage,
   decideDayPhase,
   decideNextSession,
+  decideNextSessionDecision,
+  projectCoachDecisionV2,
   decideVerdict,
   DEFAULT_EASY_DURATION_FLOOR,
   DEFAULT_QUALITY_SESSION_CAP,
@@ -132,6 +134,7 @@ export function assembleMobileCoach(args: {
   | "calibration"
   | "verdict"
   | "nextSession"
+  | "decision"
   | "recovery"
   | "recoveryAssessment"
   | "readinessSnapshot"
@@ -304,7 +307,9 @@ export function assembleMobileCoach(args: {
     sleepLow:dated.signals.sleep.low,hrvLow:dated.signals.hrv.low,restingHeartRateUp:dated.signals.rhr.low,sleepStreak:dated.sleepStreak
   } : assessRecovery(input);
   const verdict = dated ? decideVerdictFromSnapshots(input,dated) : decideVerdict(input, assessment);
-  const computed = decideNextSession(input, verdict);
+  // §13.3：处方与**它走了哪条分支**一起取回来 —— disposition 由决策自己报告，
+  // 版本化输出据此投影，不去比较课型倒推（见 projectCoachDecisionV2 的说明）。
+  const { session: computed, disposition } = decideNextSessionDecision(input, verdict);
   const nextSession = resolveLockedNextSession(computed, input.lockedSession, today, input.zones);
   const lock = lockState(input.lockedSession, today, verdict.tone);
   lock.candidate = computed;
@@ -326,6 +331,16 @@ export function assembleMobileCoach(args: {
     calibration,
     verdict,
     nextSession,
+    // §13.3：同一次决策的版本化投影。**旧字段一个没动** —— tone 与 verdict 同源，
+    // action 来自 disposition，所以这不是第二套算法，也不进入 recommendationRevision
+    // 的哈希（那份哈希只吃 verdict/nextSession/candidate）。
+    decision: projectCoachDecisionV2({
+      context: input,
+      verdict,
+      disposition,
+      sessionKind: computed.kind,
+      readiness: dated
+    }),
     recovery: {
       ...recoveryBreakdown,
       note: recoveryNote(recoveryBreakdown.note, assessment.coverage, currentNight?.wakeDate ?? null),
