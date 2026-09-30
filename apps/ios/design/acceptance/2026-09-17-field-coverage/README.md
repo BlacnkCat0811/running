@@ -1,6 +1,6 @@
 # UI 回归验收：科技风字段覆盖（2026-09-17）
 
-本目录是 `deliverables/FIELD_COVERAGE_2026-09-17.md` 那轮改动之后的 UI 回归证据。
+本目录是 `deliverables/archive/FIELD_COVERAGE_2026-09-17.md` 那轮改动之后的 UI 回归证据。
 改动内容：科技风向今日页补回 5 个曾丢失字段的展示位（`phase` / `race.note` / `race.shapeScore` / `race.taper` / `postRun`），
 两皮肤的闭集枚举改为经映射函数输出（不再直出 `need_sync` / `half_marathon` 这类机器码）。
 

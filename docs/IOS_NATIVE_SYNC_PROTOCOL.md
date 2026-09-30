@@ -14,11 +14,11 @@ background `URLSession`（字节搬运）——都已在 `apps/ios/RAI/` 里接�
 
 > **2026-09-23 增补**：V2.1 规范里属于**数据正确性**的后两项也已落地 —— anchor / 导出水位收口进
 > `sync_state` 的**单事务**提交（§2 原则 3），服务端 GPX 字节 / 点数 / 批次点数三级配额（§5.2）。
-> 逐条对照与证据见文末「V2.1 规范对照」及 `deliverables/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`。
+> 逐条对照与证据见文末「V2.1 规范对照」及 `deliverables/archive/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`。
 >
 > **2026-09-23 再增补**：§3.5 的 **Route 自适应降频**（UNKNOWN → ACTIVE → COOLING → SETTLED）
 > 落地为逐 workout 的伴生状态机，固定 14 天全量重扫退役为"候选集"。见下文「按 workout 定频」
-> 与 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
+> 与 `deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
 > ⚠️ 该报告的收益一栏按**真实时间滑窗**算是 −49%（1 次/天同步），不是稳态值乘天数 —— 别引用错的数。
 
 ## 状态机
@@ -226,9 +226,9 @@ v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态�
 
 ### V2.1 规范（`RAI HealthKit 后台可靠同步系统 V2.1`）对照：已完成的 / 仍未做的 / 有意不照做的
 
-以下每一项都已在 `deliverables/RAI_HK_BACKGROUND_V21_GAP_2026-09-23.md` 里给了差距矩阵与优先级；
-2026-09-23 那一轮的逐条结论、证据与回滚方式见 `deliverables/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`；
-Route 定频那一项见 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
+以下每一项都已在 `deliverables/archive/RAI_HK_BACKGROUND_V21_GAP_2026-09-23.md` 里给了差距矩阵与优先级；
+2026-09-23 那一轮的逐条结论、证据与回滚方式见 `deliverables/archive/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`；
+Route 定频那一项见 `deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
 
 - 🟡 **`beginBackgroundTask` 仍包裹整个 `performSync`**（`HealthKitSync.swift:717-726`；
   `performSync` 本体自 `:689` 起）。
@@ -253,7 +253,7 @@ Route 定频那一项见 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-2
   🔴 **两条不变式**：① 「跳过一轮」绝不改动状态（否则"没读到"会被记成"没变化"，一条刚变更的轨迹
   可能直接降到 `settled` 而永不再查）；② 降频记忆只在 `commitSuccess` **之后**落盘
   （反过来会造出"记成已稳定、数据却从未交付"的不可自愈窗口）。
-  两者都有独立回归 + 突变验证（门禁 §14h）。详见 `deliverables/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
+  两者都有独立回归 + 突变验证（门禁 §14h）。详见 `deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
   🟡 **两项如实说明**：① 收益按真实时间滑窗算是 **−49%**（1 次/天同步、14 天累计），
   不是"稳态省 90% × 14 天"——显著的是**单次同步**（20 → 稳态 0–3 条 `HKWorkoutRouteQuery`）；
   ② 被跳过的 route 不进载荷 ⇒ `digestHealthKitExportContent` 的内容摘要会变 ⇒ 服务端"未变化"

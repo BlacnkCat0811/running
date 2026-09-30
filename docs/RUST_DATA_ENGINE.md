@@ -383,11 +383,11 @@ Rust 子进程峰值 RSS 只有 15–31 MiB（流式解码 + 只写候选库的�
 - Linux/macOS 原生 CI 任务已配置，但远端 CI 尚未在本次本地执行中运行。
 - 桌面浏览器 E2E 仍受本机缺少 Chrome/Edge 阻塞；不能宣称浏览器端到端验收通过。
 - 云服务器侧的构建与验证结果另见「云服务器就地构建实录」与
-  `deliverables/RUST_ENGINE_CLOUD_DEPLOY_PLAN_2026-09-19.md`。
+  `deliverables/archive/RUST_ENGINE_CLOUD_DEPLOY_PLAN_2026-09-19.md`。
 - **2026-09-21 更新（推翻上一条的"受阻塞"结论）**：本机已可运行桌面浏览器 E2E
   （`/Applications/Google Chrome.app` **153.0.8010.53**；macOS 路径在 `89faa89` 已补入 `web-flows.test.ts:32`，
   但直到本日才真正装上 Chrome）。`npm run test:e2e:web` 实测
   **11 tests / 10 pass / 0 fail / 1 skip**（skip 是 390px 冻结用例按 `npm_lifecycle_event` 互斥的设计行为）。
-  用例 9 的多点失败已定位并修复（3 个独立根因），见 `deliverables/E2E_CASE9_ROOT_CAUSE_2026-09-21.md`。
+  用例 9 的多点失败已定位并修复（3 个独立根因），见 `deliverables/archive/E2E_CASE9_ROOT_CAUSE_2026-09-21.md`。
   ⚠️ 该命令是 `npm run build && node --import tsx --test …`，**含构建**：Playwright 访问的是
   `apps/web/dist` 的已构建产物（页面由 API 进程托管），改了 `apps/web/src` 却跳过 build 就会用旧产物验证新源码。

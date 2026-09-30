@@ -2,7 +2,7 @@
 
 - **状态**：已接受（Accepted）· **封板日期**：2026-09-23
 - **范围**：`apps/ios/RAI/` 的 HealthKit 同步写入路径 + `packages/health-export-parser/` 的 GPX 配额
-- **来源**：多智能体讨论 + 红队质询后的实施轮，报告见 `deliverables/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`
+- **来源**：多智能体讨论 + 红队质询后的实施轮，报告见 `deliverables/archive/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`
 - **依据规范**：《RAI HealthKit 后台可靠同步系统 V2.1 架构设计与实施规范》
 
 > ### 🛑 如果你觉得下面某一条"写错了、像个 Bug"——先读这里

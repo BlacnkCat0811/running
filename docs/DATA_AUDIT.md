@@ -126,4 +126,4 @@
 本轮不自动合并、不修改 canonical/session id、不重算历史。跨源同跑去重与
 长间隔子段归并不是同一规则；简单放宽 120 秒窗口可能伤及真实多课。
 重新考虑时需验证时间包络、距离、时长和来源，并以人工确认流程承接。
-详见 `deliverables/PLAN_P0_P3_VERIFIED_EXECUTION_2026-09-17.md`。
+详见 `deliverables/archive/PLAN_P0_P3_VERIFIED_EXECUTION_2026-09-17.md`。

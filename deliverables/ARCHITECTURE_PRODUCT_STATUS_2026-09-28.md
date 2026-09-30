@@ -44,7 +44,7 @@ receipt-level reconciliation exists"*（`plan-execution.ts:19`）。这是一个
 | # | 文档说法                                                                                    | 代码事实                                                                | 证据                                                                                                                   |
 | - | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | 1 | `ARCHITECTURE.md` 称 iOS 是「WKWebView + HealthKit 只读增量同步」的调试壳；移动端技术栈写 React Native / Expo | 生产路径是 **SwiftUI 原生**（冰蓝科技唯一视觉，2026-09-18 起）；WKWebView 仅存在于非 iOS 分支  | `docs/ARCHITECTURE.md:3,29,260,346` vs `apps/ios/RAI/RootView.swift:46-70`、`apps/ios/README.md:5-10`                 |
-| 2 | schema 写 v1–v18                                                                         | 实际 **v1–v22**（v11 为历史占位）                                                 | `docs/DATABASE_DESIGN.md:3`、`README.md:236` vs `packages/storage-sqlite/src/database.ts:89,1397`；冻结校验和表 `:1669-1692` |
+| 2 | schema 写 v1–v18                                                                         | 实际 **v1–v22**（v11 为历史占位）                                                 | `docs/DATABASE_DESIGN.md:3`、`README.md:239` vs `packages/storage-sqlite/src/database.ts:89,1397`；冻结校验和表 `:1669-1692` |
 | 3 | `apps/ios/README.md` 称 `recentPlanExecution`「尚无展示位，该断言因此是红的」                            | **已有展示位且门禁配平**：`TechPlanView.swift:57-59` 渲染；门禁把它列在 `field_anchors` | `apps/ios/README.md:81` vs `apps/ios/tests/run-tech-presentation-tests.sh:187` ✅**亲验**                               |
 | 4 | 同文档称 UI 门禁有「3 个元数据例外」                                                                   | 实际 **4 个**（2026-09-19 起含 `freshness`）                               | `apps/ios/tests/run-tech-presentation-tests.sh:200-208` ✅**亲验**                                                      |
 | 5 | 同文档称 HealthKit 授权 fail-closed 在 `HealthKitSync.swift:293`                               | 该行现为「不丢弃意图位」注释；fail-closed 实际在 `:1003-1026`                         | `apps/ios/README.md:86` vs `apps/ios/RAI/HealthKitSync.swift:293,1003-1026`                                          |
@@ -230,7 +230,7 @@ iPhone / 浏览器
 |---|---|
 | 2C2G 腾讯云单机；域名 `tpandmr.xyz` | `deploy/README-UBUNTU.md:3`；`deploy/README-CLOUD-2C2G.md:6-15` |
 | Node 只监听本机；Nginx 提供 HTTPS + 静态 Web | `deploy/README-UBUNTU.md:8` |
-| **N100 迁移方案已作废、从未执行** | `deliverables/N100_MIGRATION_PLAN_2026-09-19.md:3-15`（状态字段明写「已作废」） |
+| **N100 迁移方案已作废、从未执行** | `deliverables/archive/N100_MIGRATION_PLAN_2026-09-19.md:3-15`（状态字段明写「已作废」） |
 | Rust 只做解码+写候选库，不做发布/幂等/鉴权 | `docs/RUST_DATA_ENGINE.md:8-17` |
 
 ### 2.2 中枢层能力矩阵
@@ -380,11 +380,14 @@ packages/contracts ← 所有包都依赖它，它不依赖任何包
 |---|---|---|---|
 | `CONTRACT_VERSION` | `canonical-health-v2` | `contracts/src/index.ts:8` | 🔴 **导入早退锚点的唯一人工闸门**：改解析语义不 bump ⇒ 锚点继续命中、新算法**静默进不了库** |
 | `FEATURE_SCHEMA_VERSION` | `workout-feature-v3` | `contracts/src/index.ts:132` | 列布局/校验变化 |
-| `FEATURE_CONFIG_VERSION` | `feature-config-v8` | `features/src/index.ts:12` | 公式变化必须 bump（`configHash` 挡前缀复用） |
-| `MODEL_CONFIG_VERSION` | `rai-model-config-v4` | `scoring/src/model.ts:16` | 折进 `modelConfigHash`，决定 Model Run 可否复用 |
-| `TRAINING_LOAD_CONFIG_VERSION` | `training-load-config-v4` | `contracts/src/index.ts:288` | 决定训练指标是否重建 |
-| `TRAINING_ZONE_CONFIG_VERSION` | `training-zone-config-v3` | `contracts/src/index.ts:287` | 写进 zone run 的 `zoneVersion` |
+| `FEATURE_CONFIG_VERSION` | `feature-config-v9` | `features/src/index.ts:12` | 公式变化必须 bump；`recompute-pipeline.ts` 的前缀复用守卫现在把**版本号也折进** `featureConfigHash` |
+| `MODEL_CONFIG_VERSION` | `rai-model-config-v10` | `scoring/src/model.ts:27` | 折进 `modelConfigHash`，决定 Model Run 可否复用；v6 `minimumLearningCoverage`、v7 §6.7 置信权重与 §6.9 门控、v8 §6.9 负向确认次数（`MODEL_CHECKPOINT_VERSION` → `rai-model-checkpoint-v2`）、v9 §6.2 课型可比分层、v10 §6.9 移除 α 式中的 directionFactor |
+| `TRAINING_LOAD_CONFIG_VERSION` | `training-load-config-v4` | `contracts/src/index.ts:329` | 决定训练指标是否重建 |
+| `TRAINING_ZONE_CONFIG_VERSION` | `training-zone-config-v3` | `contracts/src/index.ts:328` | 写进 zone run 的 `zoneVersion` |
 | `PHYSIOLOGY_MODEL_VERSION` | `rai-physiology-v1.7.0` | `physiology/src/index.ts:17` | 预测口径 |
+| `NORMALIZATION_ADAPTER_VERSION` | `rai-normalization-identity-v1` | `normalization/src/index.ts:18` | §5 环境归一化 adapter 身份；折进 `NormalizationTrace.configHash`。**N0 仍是 identity：不施加修正、未接入任何路径** |
+| `NORMALIZATION_POLICY_VERSION` | `rai-normalization-policy-v1` | `normalization/src/index.ts:19` | §5.3 契约/账本政策版本；与 adapter 身份分开，便于"只改政策不改实现"时仍让谱系失效 |
+| `DURABILITY_MODEL_VERSION` | `rai-durability-v1.0.0` | `durability/src/index.ts:14` | §8 Preparation + Durability 快照版本。**`PREPARATION_TARGETS`（`durability/src/index.ts:61`）是目标值唯一来源**，`application` 的副本已删除；`ability_assessments` 之外无落库 |
 
 > ⚠️ `FEATURE_SCHEMA_VERSION`（结构）与 `FEATURE_CONFIG_VERSION`（公式）是**两个层级**，不可混用。
 
@@ -440,9 +443,9 @@ packages/contracts ← 所有包都依赖它，它不依赖任何包
 
 | 单一源 | 定义 | 多消费方 |
 |---|---|---|
-| `assessRecovery()` | `mobile-coach.ts:217` | ① `decideVerdict` 闸门 ② 对外的 `recoveryAssessment` 字段（`mobile-read.ts:288-293` 注释「One assessment, two consumers」） |
-| `decideVerdict(input, assessed?)` | `mobile-coach.ts:267` | 接受已算好的评估，禁止二次计算（`:274-278`） |
-| `MOBILE_SESSION_KINDS` | `contracts/src/index.ts:676-685` | 类型 union / JSON Schema / 各处 `Set` 全部派生（曾有四份手写副本） |
+| `assessRecovery()` | `mobile-coach.ts:236` | ① `decideVerdict` 闸门 ② 对外的 `recoveryAssessment` 字段（`mobile-read.ts:288-293` 注释「One assessment, two consumers」）。V2 Phase 1 起改为对 `@rai/readiness` 的薄委托，阈值与判定逻辑不再驻留本文件 |
+| `decideVerdict(input, assessed?)` | `mobile-coach.ts:265` | 接受已算好的评估，禁止二次计算（`:272-276`） |
+| `MOBILE_SESSION_KINDS` | `contracts/src/index.ts:733-742` | 类型 union / JSON Schema / 各处 `Set` 全部派生（曾有四份手写副本） |
 | 时区 | `contracts/src/timezone.ts` | 全部包（`Intl.DateTimeFormat` 记忆化） |
 
 > **为什么这条重要**：同一语义在两处计算 ⇒ 接口字段与决策闸门漂移，用户看到「App 的解释」与
@@ -536,7 +539,7 @@ packages/contracts ← 所有包都依赖它，它不依赖任何包
 | # | 待修文档 | 修什么 |
 |---|---|---|
 | 1 | `docs/ARCHITECTURE.md` | iOS 描述改为 SwiftUI 原生；删除 React Native 现状口吻；§7 范围段重写 |
-| 2 | `docs/DATABASE_DESIGN.md:3` + `README.md:236` | v1–v18 → v1–v22 |
+| 2 | `docs/DATABASE_DESIGN.md:3` + `README.md:239` | v1–v18 → v1–v22 |
 | 3 | `apps/ios/README.md:81` | 删「recentPlanExecution 无展示位 / 断言是红的」 |
 | 4 | `apps/ios/README.md:86` | fail-closed 行号 `293` → `1003-1026` |
 | 5 | `apps/ios/README.md:16` | 删「WKWebView 保留为回退路径」（iOS 已无该分支） |
@@ -553,7 +556,7 @@ packages/contracts ← 所有包都依赖它，它不依赖任何包
 | # | 文件（改动量） | 改了什么 | 判据 |
 |---|---|---|---|
 | 1 | `docs/ARCHITECTURE.md`（+21 −19） | iOS 描述改 SwiftUI 原生；删 React Native 现状口吻；mermaid 的 `MobileApp` / `HealthKit` / `HealthKitAdapter` / `WebNow` 节点、§5 目录树、§7 范围段、§11 测试表、§12 实施顺序同步对齐 | 反向 grep：`调试壳` **零命中**；`React Native` 仅剩「未立项」语境 |
-| 2 | `docs/DATABASE_DESIGN.md:3`、`README.md:236` | v1–v18 → **v1–v22** | 对齐 `packages/storage-sqlite/src/database.ts` 迁移表 |
+| 2 | `docs/DATABASE_DESIGN.md:3`、`README.md:239` | v1–v18 → **v1–v22** | 对齐 `packages/storage-sqlite/src/database.ts` 迁移表 |
 | 3 | `apps/ios/README.md:81` | 删「断言是红的 / `recentPlanExecution` 无展示位」，改为实跑值 `23/27 有锚点、4 个元数据例外`，并补 `TechPlanView.swift:57-59` 与 `EXIT=0` | 门禁实跑复现 |
 | 4 | `apps/ios/README.md:86` | fail-closed 行号 `HealthKitSync.swift:293` → **`:1003-1026`** | 实读源码 |
 | 5 | `apps/ios/README.md:16` | 删「WKWebView 保留为回退路径」 | `RootView.swift:47-48`：iOS 分支无回退路径 |
@@ -565,7 +568,7 @@ packages/contracts ← 所有包都依赖它，它不依赖任何包
 | 文件 | 改了什么 | 判据 |
 |---|---|---|
 | `docs/ARCHITECTURE.md:90,261` | mermaid `MobileApp["React Native UI / Expo Custom Dev Client"]` → `独立移动端 UI（未立项）`；目录树 `桌面 + iOS 壳像素 UI` → `桌面 + Web iOS 壳像素 UI` | 反向 grep |
-| `README.md:255` | `iOS 调试壳说明与设计稿→API 映射见` → `iOS 应用说明…` | 反向 grep |
+| `README.md:258` | `iOS 调试壳说明与设计稿→API 映射见` → `iOS 应用说明…` | 反向 grep |
 | `docs/WEB_IMPLEMENTATION.md:16` | 删「（iOS 调试壳 WKWebView 加载即此界面）」；改为 `?raiShell=ios`（`apps/web/src/main.tsx:9`）并注明**这是 Web 侧历史界面** | 反向 grep + `RootView.swift:47-48` |
 | `deploy/README-UBUNTU.md:68` | 删「由壳把 Token 注入页面」；改为 iOS **首次连接页**（`TechSetupView.swift:45-56` 的「服务地址」/「访问令牌」）填写地址与 Token，Token 存 Keychain | 实读源码（`TechSetupView.swift:39,51,54`） |
 | `deploy/nginx-rai.conf:6,8-9` | 注释里同样删掉「WKWebView 调试壳」与「WKWebView 无法处理 Basic Auth」；改述为 iOS 原生应用直接请求 `/v1`。**仅注释，零行为影响** | 回读确认 |

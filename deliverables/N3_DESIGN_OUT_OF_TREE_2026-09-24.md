@@ -1,7 +1,7 @@
 # N-3 设计图出库 + 历史重写 · 执行与验证报告
 
 > **日期**：2026-09-24
-> **来源**：`deliverables/PROJECT_AUDIT_2026-09-23.md` §四 N-3
+> **来源**：`deliverables/archive/PROJECT_AUDIT_2026-09-23.md` §四 N-3
 > **性质**：🔴 **不可逆**（重写全部提交）。用户经确认选择 **「出库并清历史」**（最彻底方案）。
 > **远端**：`origin = https://gitee.com/tpandmr/running.git`
 
@@ -64,7 +64,7 @@ visual-review/index.html：<img> 标签总数 = 49      ← 验收证据一张�
 ```
 
 全仓残留引用只剩**两类，且都是正确的**：
-- 两份**历史审计文档**（`docs/PROJECT_HEALTH_AUDIT_2026-09-10.md:63`、`deliverables/PROJECT_AUDIT_2026-09-12.md:141`）——它们是**当时状态的快照**，本就该保留原样；
+- 两份**历史审计文档**（`docs/PROJECT_HEALTH_AUDIT_2026-09-10.md:63`、`deliverables/archive/PROJECT_AUDIT_2026-09-12.md:141`）——它们是**当时状态的快照**，本就该保留原样；
 - 两个 README 的**说明性引用**（指向"已移出"的事实本身）。
 
 ### 步骤 3 · 出库

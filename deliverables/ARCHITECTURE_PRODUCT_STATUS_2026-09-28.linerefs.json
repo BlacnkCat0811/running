@@ -424,17 +424,17 @@
       "text": "struct TechTodayView: View {"
     },
     "UNCOMMITTED_REVIEW_2026-09-14.md:143": {
-      "path": "deliverables/UNCOMMITTED_REVIEW_2026-09-14.md",
+      "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-14.md",
       "line": 143,
       "text": "1. **单一真相源**：`packages/contracts/src/index.ts:678` 新增 `MOBILE_SESSION_KINDS`（运行时常量），"
     },
     "UNCOMMITTED_REVIEW_2026-09-14.md:26": {
-      "path": "deliverables/UNCOMMITTED_REVIEW_2026-09-14.md",
+      "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-14.md",
       "line": 26,
       "text": "| 3 | ✅ 已修 | **`kind` 集合原有 5 份手工副本**（报告初版写 4 份，低估）；且 `recordPlanPush` 的 `RangeError` 被判 **500** 且原因被吞 | 副本逐值比对当时相同但会漂移；`"
     },
     "UNCOMMITTED_REVIEW_2026-09-21.md:111": {
-      "path": "deliverables/UNCOMMITTED_REVIEW_2026-09-21.md",
+      "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-21.md",
       "line": 111,
       "text": "🔴 **不要连带改错**：`model-run-repository.ts:140` 的 `gateVersion = \"rai-shadow-gate-v1\"` 是**持久化版本标识**（写进 `model_validation_gat"
     },
@@ -623,8 +623,8 @@
       "line": 89,
       "text": "version: 1,"
     },
-    "deliverables/N100_MIGRATION_PLAN_2026-09-19.md:3-15": {
-      "path": "deliverables/N100_MIGRATION_PLAN_2026-09-19.md",
+    "deliverables/archive/N100_MIGRATION_PLAN_2026-09-19.md:3-15": {
+      "path": "deliverables/archive/N100_MIGRATION_PLAN_2026-09-19.md",
       "line": 3,
       "text": "> ## ⛔ 已作废（2026-09-19 09:48）"
     },
