@@ -28,7 +28,11 @@ const planPath = join(root, "deliverables", "RAI_ALGORITHM_V2_OPTIMIZATION_2026-
  * 而不是一句"暂未覆盖"—— 后者会让这个清单变成掩盖缺口的垃圾桶。
  */
 const KNOWN_GAPS: Record<string, string> = {
-  F08: "**没有覆盖**，且是刻意的：现行政策下正向一侧同样被强门控（见状态文档 §五-3），要挡住 GPS 速度尖峰需要**新增检测器政策**，其阈值必须先独立回放。本方案不为它编一个未经验证的阈值。",
+  // F08 于 2026-09-30 从本表移出：它对检测器一侧已被引用（见
+  // packages/features/test/speed-plausibility.test.ts 与
+  // deliverables/SPEED_PLAUSIBILITY_INVENTORY.json），剩下未接线的「门控效果」
+  // 属于 §17.3 的待回放事项，记在状态文档而不是这里 —— 声明过期必须删，
+  // 否则缺口清单会变成装饰。
   P02: "环境去偏差的**单层**行为有测试（physiology.test.ts 的热湿/爬坡归一化），但「同一历史环境被 adapter 与 performanceVdotEvidence 各去一次」的 ledger 断言**没有**：当前只有 N0 identity adapter，没有第二层可重复去偏差的路径。等 N1/N2 落地后再补。",
   P04: "race-evidence 的**单次预算**有测试（durability.test.ts 拒绝同一比赛的第二次全额声明），但「Preparation 与 Durability 使用同源信息时不重复扣罚」需要 durability 数值罚分**启用后**才有可断言的路径；当前 penalty 按设计是关闭的。"
 };

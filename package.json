@@ -92,6 +92,8 @@
     "predata:acceptance-matrix": "npm run check:node",
     "check:acceptance-matrix": "tsx scripts/check-acceptance-matrix.mts",
     "check:package-boundaries": "node scripts/check-package-boundaries.mjs",
+    "predata:speed-plausibility": "npm run check:node",
+    "data:speed-plausibility": "tsx scripts/speed-plausibility-inventory.mts",
     "data:model-replay": "tsx packages/application/src/model-replay-cli.ts",
     "predata:model-replay": "npm run check:node"
   },

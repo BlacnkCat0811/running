@@ -128,6 +128,8 @@ export interface WorkoutFeatureSource {
 }
 
 export * from "./v4.js";
+// §6.9 / F08：正向异常**检测器**（只报告，不门控）。见该模块头部说明为什么阈值不是新参数。
+export * from "./speed-plausibility.js";
 
 const RECOVERY_WEIGHTS = {
   sleep: 0.35,

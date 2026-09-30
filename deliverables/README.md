@@ -37,6 +37,7 @@
 | `BASELINE_REBASE_REVIEW.json` | `npm run data:baseline-rebase-review` | `D:\running\var\rai.sqlite` | ✅ |
 | `MODEL_VERSION_REPLAY_2026-09-30.json` | `scripts/model-version-replay.mts` | `var\rai.sqlite` | ✅ |
 | `PHASE0_BASELINE.json` | `scripts/snapshot-phase0-baseline.mts` | `D:\running\var\rai.sqlite` | ✅ |
+| `SPEED_PLAUSIBILITY_INVENTORY.json` | `npm run data:speed-plausibility` | `D:\running\var\rai.sqlite` | ✅ |
 | `PREPARATION_MIGRATION_GOLDEN.json` | 专项准备度迁移 golden | 未声明 | — |
 
 > 这些是**派生数据**，不是结论。引用时必须同时给出生成脚本与数据口径。

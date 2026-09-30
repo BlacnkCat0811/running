@@ -13,6 +13,10 @@ export {
   parsePerformanceConditions
 } from "./prediction-data.js";
 export { RecomputePipeline } from "./services/recompute-pipeline.js";
+// §6.9 / F08: the speed inventory must normalise units with the *same* converter the pipeline
+// uses. Exporting it keeps a read-only report from growing a second unit convention that would
+// disagree with the runtime (the unit column is not homogeneous: this DB holds both km/hr and m/s).
+export { convertSpeedToMetersPerSecond } from "./recompute-helpers.js";
 
 export { loadDatedReadiness, loadDatedRecoveryFacts, type DatedReadinessFacts } from "./model-v2-snapshots.js";
 
