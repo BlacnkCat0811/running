@@ -7,10 +7,12 @@ import pytest
 from rai_ml.contract import BASE_FEATURE_NAMES, FEATURE_NAMES, TrainingSample
 from rai_ml.metrics import PredictionResult
 from rai_ml.pipeline import (
+    CHALLENGERS_VERSION,
     TrainingConfig,
     TrainingError,
     _adjusted_prediction,
     _bootstrap_improvement_interval,
+    _challenger_document,
     _event_key,
     _gate,
     _release_split,
@@ -291,3 +293,76 @@ def test_temporal_bootstrap_does_not_double_count_equivalent_timezone_events():
     assert effective_blocks == 3
     assert lower is None
     assert upper is None
+
+
+def _challenger_rows(count: int = 3):
+    samples = [sample(index) for index in range(count)]
+    baseline = [prediction("five_k", 1100, 1000) for _ in samples]
+    ridge = [prediction("five_k", 1100, 1080) for _ in samples]
+    catboost = [prediction("five_k", 1100, 1050) for _ in samples]
+    return samples, baseline, ridge, catboost
+
+
+def test_challenger_document_keeps_three_columns_on_the_same_cases():
+    samples, baseline, ridge, catboost = _challenger_rows()
+    document = _challenger_document(
+        predictor_version="race-residual-catboost-v4",
+        as_of="2026-02-01T00:00:00Z",
+        partition="release_holdout",
+        samples=samples,
+        baseline=baseline,
+        ridge=ridge,
+        catboost=catboost,
+    )
+    assert document["challengersVersion"] == CHALLENGERS_VERSION
+    assert document["partition"] == "release_holdout"
+    assert document["caseCount"] == 3
+    assert document["incompletePredictionColumns"] == []
+    assert [case["eventId"] for case in document["cases"]] == [
+        "sample-000",
+        "sample-001",
+        "sample-002",
+    ]
+    # 时间字段必须逐位复制：TS 侧按 eventId 与三个时间字段做逐位比对。
+    for case, original in zip(document["cases"], samples, strict=True):
+        assert case["predictedAt"] == original.observed_at
+        assert case["outcomeAt"] == original.completed_at
+        assert case["availableAt"] == original.label_available_at
+        assert case["actualSeconds"] == original.actual_seconds
+        assert case["distance"] == original.distance
+    assert [case["baselinePredictedSeconds"] for case in document["cases"]] == [1000, 1000, 1000]
+    assert [case["ridgePredictedSeconds"] for case in document["cases"]] == [1080, 1080, 1080]
+    assert [case["catboostPredictedSeconds"] for case in document["cases"]] == [1050, 1050, 1050]
+
+
+def test_challenger_document_refuses_misaligned_columns():
+    samples, baseline, ridge, catboost = _challenger_rows()
+    with pytest.raises(TrainingError):
+        _challenger_document(
+            predictor_version="race-residual-catboost-v4",
+            as_of="2026-02-01T00:00:00Z",
+            partition="release_holdout",
+            samples=samples,
+            baseline=baseline,
+            ridge=ridge[:1],
+            catboost=catboost,
+        )
+
+
+def test_challenger_document_records_a_missing_column_as_null_not_as_a_penalty():
+    samples, baseline, ridge, catboost = _challenger_rows()
+    ridge = [PredictionResult("five_k", 1100, None, None, None), *ridge[1:]]
+    document = _challenger_document(
+        predictor_version="race-residual-catboost-v4",
+        as_of="2026-02-01T00:00:00Z",
+        partition="release_holdout",
+        samples=samples,
+        baseline=baseline,
+        ridge=ridge,
+        catboost=catboost,
+    )
+    assert document["incompletePredictionColumns"] == ["ridgePredictedSeconds"]
+    missing = next(case for case in document["cases"] if case["eventId"] == "sample-000")
+    # 缺列既不是 0（会被当成完美预测），也不是 inf（会被当成无限差）。
+    assert missing["ridgePredictedSeconds"] is None
+    assert document["caseCount"] == 3

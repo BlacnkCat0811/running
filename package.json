@@ -70,6 +70,8 @@
     "data:prune-tombstones": "tsx packages/health-export-parser/src/prune-tombstones-cli.ts",
     "predata:prune-tombstones": "npm run check:node",
     "data:prediction-eval": "tsx packages/application/src/prediction-eval-cli.ts",
+    "predata:prediction-challengers": "npm run check:node",
+    "data:prediction-challengers": "tsx packages/application/src/prediction-challengers-cli.ts",
     "ml:bootstrap": "node research/scripts/python-env.mjs --bootstrap",
     "ml:check": "node research/scripts/python-env.mjs --check",
     "ml:install": "npm run ml:bootstrap",

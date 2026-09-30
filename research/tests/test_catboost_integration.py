@@ -82,7 +82,7 @@ def test_real_catboost_walk_forward_and_onnx_export_are_deterministic(tmp_path):
     assert first.manifest["correctionCapFraction"] == 0.12
     assert first.manifest["onnxParity"]["passed"] is True
     assert first.manifest["onnxParity"]["maximumAbsoluteError"] < 1e-6
-    for name in ("model.onnx", "manifest.json", "feature-schema.json", "evaluation.json", "onnx-golden.json"):
+    for name in ("model.onnx", "manifest.json", "feature-schema.json", "evaluation.json", "onnx-golden.json", "challengers.json"):
         assert (tmp_path / "first" / name).is_file()
     model_hash = hashlib.sha256((tmp_path / "first" / "model.onnx").read_bytes()).hexdigest()
     assert model_hash == first.manifest["modelSha256"]
@@ -103,3 +103,13 @@ def test_real_catboost_walk_forward_and_onnx_export_are_deterministic(tmp_path):
         "generalizationMetricsSource": "temporal_release_holdout",
         "numericParityFixture": "onnx-golden.json",
     }
+    challengers = json.loads((tmp_path / "first" / "challengers.json").read_text("utf-8"))
+    assert challengers["challengersVersion"] == "rai-residual-challengers-v1"
+    assert challengers["partition"] == "release_holdout"
+    assert challengers["caseCount"] == evaluation["releaseSplit"]["holdoutCount"]
+    assert challengers["incompletePredictionColumns"] == []
+    # 三方比较的前提是"同一批样本"：挑战者表的事件集必须与发布留出集逐位一致。
+    assert sorted(case["eventId"] for case in challengers["cases"]) == sorted(
+        evaluation["releaseSplit"]["holdoutSampleIds"]
+    )
+    assert evaluation["challengers"]["file"] == "challengers.json"

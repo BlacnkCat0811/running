@@ -182,6 +182,71 @@ def _metrics_by_distance(rows: Sequence[PredictionResult]) -> dict[str, Any]:
     }
 
 
+CHALLENGERS_VERSION: Final[str] = "rai-residual-challengers-v1"
+RIDGE_MODEL_VERSION: Final[str] = "race-residual-ridge-v1"
+
+CHALLENGER_PREDICTION_COLUMNS: Final[tuple[str, ...]] = (
+    "baselinePredictedSeconds",
+    "ridgePredictedSeconds",
+    "catboostPredictedSeconds",
+)
+
+
+def _challenger_document(
+    *,
+    predictor_version: str,
+    as_of: str,
+    partition: str,
+    samples: Sequence[TrainingSample],
+    baseline: Sequence[PredictionResult],
+    ridge: Sequence[PredictionResult],
+    catboost: Sequence[PredictionResult],
+) -> dict[str, Any]:
+    """导出**同一份样本表**，供 TypeScript 侧做同样本三方对比（§12.3 / D8）。
+
+    三列预测必须逐事件对齐：TS 侧 ``compareResidualChallengers`` 的硬前提就是
+    "同一批 case、同一 as-of、时间字段逐位相同"，错位的表会在那边直接抛错。
+    与其让一份错位的表流到评估端再被发现，不如在生成端就断言列长相等。
+
+    缺失的挑战者列写成 ``null``：既不是"无限差"，也不是 0。门槛逻辑**不在本文件**，
+    由 TS 侧既有的"缺一列即 not_evaluable"规则处理；这里只如实记录哪几列不完整。
+    """
+    if not (len(samples) == len(baseline) == len(ridge) == len(catboost)):
+        raise TrainingError("challenger columns must cover exactly the same events")
+    cases: list[dict[str, Any]] = [
+        {
+            "eventId": sample.sample_id,
+            "distance": sample.distance,
+            "predictedAt": sample.observed_at,
+            "outcomeAt": sample.completed_at,
+            "availableAt": sample.label_available_at,
+            "actualSeconds": sample.actual_seconds,
+            "baselinePredictedSeconds": baseline_row.predicted_seconds,
+            "ridgePredictedSeconds": ridge_row.predicted_seconds,
+            "catboostPredictedSeconds": catboost_row.predicted_seconds,
+        }
+        for sample, baseline_row, ridge_row, catboost_row in zip(
+            samples, baseline, ridge, catboost, strict=True
+        )
+    ]
+    cases.sort(key=lambda case: (case["predictedAt"], case["eventId"]))
+    incomplete = sorted(
+        column
+        for column in CHALLENGER_PREDICTION_COLUMNS
+        if any(case[column] is None for case in cases)
+    )
+    return {
+        "challengersVersion": CHALLENGERS_VERSION,
+        "predictorVersion": predictor_version,
+        "ridgeVersion": RIDGE_MODEL_VERSION,
+        "asOf": as_of,
+        "partition": partition,
+        "caseCount": len(cases),
+        "incompletePredictionColumns": incomplete,
+        "cases": cases,
+    }
+
+
 def _release_split(
     samples: Sequence[TrainingSample], config: TrainingConfig
 ) -> tuple[list[TrainingSample], list[TrainingSample], dict[str, Any]]:
@@ -698,6 +763,25 @@ def train_and_export(
         schema = feature_schema_document()
         schema["featureSchemaHash"] = feature_schema_sha256()
         _write_json(temporary / "feature-schema.json", schema)
+        # §12.3: 三方比较必须发生在**同一批样本**上。这里把 baseline/ridge/catboost
+        # 三列写进同一份表，TS 侧不再自己拼装候选预测，也不在 Python 里重写门槛。
+        challengers = _challenger_document(
+            predictor_version=config.model_version,
+            as_of=training_data_through_at,
+            partition="release_holdout",
+            samples=holdout,
+            baseline=release_baseline,
+            ridge=release_ridge,
+            catboost=release_candidate,
+        )
+        _write_json(temporary / "challengers.json", challengers)
+        evaluation["challengers"] = {
+            "version": CHALLENGERS_VERSION,
+            "file": "challengers.json",
+            "partition": "release_holdout",
+            "caseCount": challengers["caseCount"],
+            "incompletePredictionColumns": challengers["incompletePredictionColumns"],
+        }
         _write_json(temporary / "evaluation.json", evaluation)
         timestamp = generated_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         manifest = {
@@ -742,6 +826,7 @@ def train_and_export(
                 "feature-schema.json": _sha256(temporary / "feature-schema.json"),
                 "evaluation.json": _sha256(temporary / "evaluation.json"),
                 "onnx-golden.json": _sha256(temporary / "onnx-golden.json"),
+                "challengers.json": _sha256(temporary / "challengers.json"),
             },
         }
         _write_json(temporary / "manifest.json", manifest)

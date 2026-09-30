@@ -1677,3 +1677,179 @@ export function readLoadSnapshot(payload: unknown): LoadSnapshot | null {
   if (days.length === 0) return null;
   return { baselineEpochId: snapshotBaselineEpochId(payload), days };
 }
+
+/**
+ * 已封存的 `readiness` 域快照。V2 写入 `ReadinessAssessmentResult & {lineage}`。
+ *
+ * `stateEvidence` 是**必需**字段，不是可选装饰：§7.4 要求启发式/验证标签随数字一起到达
+ * 每个消费方（API、Coach 解释、界面）。读端把它当可选项丢掉，就等于让未经验证的阈值
+ * 在别处装成已验证的医学阈值。
+ */
+export interface ReadinessSnapshotView {
+  /** `null` = 该运行没有可用的 epoch —— 不是"等于当前 epoch"。 */
+  baselineEpochId: string | null;
+  asOf: string;
+  localDate: string;
+  coverage: ReadinessCoverage;
+  /** 证据说了什么。与 `state`（面向训练的映射）刻意分开：缺口不是阴性发现。 */
+  assessment: ReadinessAssessment;
+  state: ReadinessState;
+  stateEvidence: ReadinessStateEvidence;
+  /** `score: null` + `scoreStatus: "not_calibrated"` 是契约定义的合法状态，不是缺值。 */
+  score: number | null;
+  scoreStatus: "not_calibrated" | "available";
+  /** 三个通道**缺一不可**：少一个通道不是"更小的快照"，而是不可比的另一份快照。 */
+  signals: Record<ReadinessSignalName, ReadinessSignal>;
+  /**
+   * 睡眠基线连续不足是否触发。由规则自身产出，读端**不重算** —— 重算就是设计禁止的第二份阈值。
+   */
+  sleepStreak: boolean;
+  /**
+   * 解释层只格式化/翻译这些码，不重新执行阈值分支（§13.3）。
+   * 空数组合法（确实没有可说的理由），但**键必须存在**：缺席是畸形 payload。
+   */
+  reasonCodes: string[];
+  /**
+   * 顶层 freshness。产出端把观测/到达时间记在各信号上，所以这里只有 payload 真写过才带出；
+   * 缺席一律 `null`，**不**用 `asOf` 冒充"就是今天的"。
+   */
+  availableAt: string | null;
+  observedAt: string | null;
+  evidenceLocalDate: string | null;
+}
+
+const READINESS_COVERAGES = ["none", "partial", "complete"] as const;
+const READINESS_ASSESSMENTS = ["not_assessed", "no_low_signal", "low_signal", "multiple_low_signals"] as const;
+const READINESS_STATES = ["not_assessed", "no_low_signal", "caution", "strained"] as const;
+const READINESS_SCORE_STATUSES = ["not_calibrated", "available"] as const;
+const READINESS_SIGNAL_QUALITIES = ["adequate", "sparse", "missing"] as const;
+const READINESS_VALIDATION_STATUSES = ["not_empirically_validated", "validated_for_declared_target"] as const;
+const READINESS_AVAILABILITY_SOURCES = ["canonical_computation", "dataset_publication_upper_bound", "unknown"] as const;
+
+/** 枚举成员判定：不做大小写/前缀兜底 —— 不认识就是"这不是一份 readiness 快照"。 */
+function snapshotMember<T extends string>(allowed: readonly T[], value: unknown): value is T {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value);
+}
+
+/** 可选字符串：只有非空字符串才带走；缺席、空串、非字符串一律 `null`。 */
+function snapshotString(value: unknown): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+/** 可选数值：非有限（NaN / ±Infinity）归一到 `null`，不让它漏进 JSON 与图表。 */
+function snapshotNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** 必需数值：`null` 合法（契约里的"没有值"）；缺席或非有限返回 `undefined`，表示畸形。 */
+function snapshotStrictNumber(value: unknown): number | null | undefined {
+  if (value === null) return null;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function snapshotStateEvidence(value: unknown): ReadinessStateEvidence | null {
+  if (typeof value !== "object" || value === null) return null;
+  const source = value as Record<string, unknown>;
+  const method = source.method;
+  if (method !== "heuristic_rules") return null;
+  const validationStatus = source.validationStatus;
+  if (!snapshotMember(READINESS_VALIDATION_STATUSES, validationStatus)) return null;
+  const ruleSetVersion = snapshotString(source.ruleSetVersion);
+  if (ruleSetVersion === null) return null;
+  return {
+    method,
+    validationStatus,
+    ruleSetVersion,
+    validationTarget: snapshotString(source.validationTarget),
+    validationReportId: snapshotString(source.validationReportId)
+  };
+}
+
+function snapshotReadinessSignal(value: unknown, name: ReadinessSignalName): ReadinessSignal | null {
+  if (typeof value !== "object" || value === null) return null;
+  const source = value as Record<string, unknown>;
+  // `name` 必须等于它所在的键：否则消费方取 `signals.sleep`，拿到的是另一条通道。
+  if (source.name !== name) return null;
+  const signalValue = snapshotStrictNumber(source.value);
+  const ratio = snapshotStrictNumber(source.ratio);
+  if (signalValue === undefined || ratio === undefined) return null;
+  const low = source.low;
+  if (typeof low !== "boolean") return null;
+  const quality = source.quality;
+  if (!snapshotMember(READINESS_SIGNAL_QUALITIES, quality)) return null;
+  const signal: ReadinessSignal = {
+    name,
+    value: signalValue,
+    baseline: snapshotNumber(source.baseline),
+    ratio,
+    low,
+    quality,
+    observedAt: snapshotString(source.observedAt),
+    availableAt: snapshotString(source.availableAt),
+    evidenceLocalDate: snapshotString(source.evidenceLocalDate)
+  };
+  const availabilitySource = source.availabilitySource;
+  if (snapshotMember(READINESS_AVAILABILITY_SOURCES, availabilitySource)) signal.availabilitySource = availabilitySource;
+  return signal;
+}
+
+/**
+ * `readiness` 窄化。payload 由 `readinessForRun` 产出，形状是
+ * `ReadinessAssessmentResult & {lineage}`。
+ *
+ * 这里刻意**不做任何兜底**：把缺失的 `state` 补成 `not_assessed`、把缺失的信号通道当成
+ * "没测到"，都会把"这根本不是一份 readiness 快照"翻译成一句健康结论 —— 正是本层要挡住的
+ * "未知被读成正常"。fitness 的 `daily` / load 的 `days` 因为拿不出这些必需字段，
+ * 自然返回 `null`（不需要为它们写特例）。
+ */
+export function readReadinessSnapshot(payload: unknown): ReadinessSnapshotView | null {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const source = payload as Record<string, unknown>;
+  const asOf = snapshotString(source.asOf);
+  const localDate = snapshotString(source.localDate);
+  if (asOf === null || localDate === null) return null;
+  const coverage = source.coverage;
+  if (!snapshotMember(READINESS_COVERAGES, coverage)) return null;
+  const assessment = source.assessment;
+  if (!snapshotMember(READINESS_ASSESSMENTS, assessment)) return null;
+  const state = source.state;
+  if (!snapshotMember(READINESS_STATES, state)) return null;
+  const scoreStatus = source.scoreStatus;
+  if (!snapshotMember(READINESS_SCORE_STATUSES, scoreStatus)) return null;
+  const stateEvidence = snapshotStateEvidence(source.stateEvidence);
+  if (stateEvidence === null) return null;
+  // 缺 `score` 不等于 `score: null`：前者是畸形 payload，后者是契约定义的"未标定"。
+  const score = snapshotStrictNumber(source.score);
+  if (score === undefined) return null;
+  const rawSignals = source.signals;
+  if (typeof rawSignals !== "object" || rawSignals === null) return null;
+  const signalSource = rawSignals as Record<string, unknown>;
+  const sleep = snapshotReadinessSignal(signalSource.sleep, "sleep");
+  const hrv = snapshotReadinessSignal(signalSource.hrv, "hrv");
+  const rhr = snapshotReadinessSignal(signalSource.rhr, "rhr");
+  if (sleep === null || hrv === null || rhr === null) return null;
+  const sleepStreak = source.sleepStreak;
+  if (typeof sleepStreak !== "boolean") return null;
+  const reasonCodes = source.reasonCodes;
+  // 空数组合法，但必须是数组且元素是非空字符串：把 `[""]` 或含数字的数组读成理由码，
+  // 会让解释层去翻译一个不存在的 code。
+  if (!Array.isArray(reasonCodes) ||
+      reasonCodes.some((code) => typeof code !== "string" || code === "")) return null;
+  return {
+    baselineEpochId: snapshotBaselineEpochId(payload),
+    asOf,
+    localDate,
+    coverage,
+    assessment,
+    state,
+    stateEvidence,
+    score,
+    scoreStatus,
+    signals: { sleep, hrv, rhr },
+    sleepStreak,
+    reasonCodes: [...(reasonCodes as string[])],
+    availableAt: snapshotString(source.availableAt),
+    observedAt: snapshotString(source.observedAt),
+    evidenceLocalDate: snapshotString(source.evidenceLocalDate)
+  };
+}

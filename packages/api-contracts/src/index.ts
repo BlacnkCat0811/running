@@ -38,9 +38,11 @@ export type {
 export {
   readFitnessSnapshot,
   readLoadSnapshot,
+  readReadinessSnapshot,
   type FitnessSnapshot,
   type FitnessSnapshotDailyPoint,
-  type LoadSnapshot
+  type LoadSnapshot,
+  type ReadinessSnapshotView
 } from "@rai/contracts";
 
 import type {
