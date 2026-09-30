@@ -644,6 +644,64 @@ export interface MobileVerdict {
   reasonCodes?: string[];
 }
 
+/**
+ * §13.3：Coach 决策的版本化输出。
+ *
+ * 实测（2026-09-30 独立审计）：在本次改动之前，**全仓不存在任何 Coach 版本常量，
+ * 也不存在版本化的决策输出类型** —— 唯一的决策形状是无版本字段的 `MobileVerdict`。
+ * 版本矩阵把 Coach 标为"未落地（工程项）"，这一项就是它。
+ *
+ * 它与 `MobileVerdict` 的关系是**同一次决策的两个投影**，不是两次计算：
+ * `tone` / `reasons` 直接来自 `MobileVerdict`，`action` 来自决策自身报告的
+ * `CoachPlanDisposition`（分支在哪一步被选中，就由那一步报告），
+ * 所以这里不重算任何阈值（§13.4 的"再从原始 ratio 独立分支"禁令）。
+ */
+export const COACH_MODEL_VERSION = "rai-coach-v2.0.0" as const;
+
+/**
+ * §13.3 的动作枚举。**它是一个投影标签，不是第二套判定。**
+ *
+ * 取值集合比方案草图窄，这是 2026-09-30 一次 829,440 组输入的扫描结论：
+ * 六值是一组**相对于计划的动词**（保留/削减某份已保存的计划），
+ * 而 Coach 的实际结果空间是 (tone) × (处方课型) × (有没有计划) × (九种分支)。
+ * 扫描确认枚举**无法**被补成全的，具体缺口：
+ * - "今天没有计划" —— 用 `action: null` + `no_stored_plan_today` 如实表达（不硬填）。
+ * - "无计划 + green + 质量窗口" —— Coach 会**新建**一节 tempo/interval 课。
+ *   "新建"既不是保留也不是削减，却是它最有行动力的输出。当前同样落 `null`。
+ * - "削减的是量而不是时长" —— taper 与周预算钳制砍的都是距离，
+ *   枚举里没有 `reduce_volume`，只能用最接近的 `reduce_duration`。
+ * - "主动恢复跑" —— 没有 recovery 成员，落在 `easy_only`。
+ * 这四条**不**通过新造枚举值来掩盖：它们是方案草图的缺口，记在这里等 §13.3 定夺。
+ */
+export type CoachAction =
+  | "keep_plan"
+  | "reduce_intensity"
+  | "reduce_duration"
+  | "easy_only"
+  | "rest"
+  | "collect_evidence";
+
+export interface CoachDecisionV2 {
+  version: typeof COACH_MODEL_VERSION;
+  /** 产出这条决策的发布单元。没有发布记录时是显式占位，不编造 id。 */
+  bundleId: string;
+  tone: MobileVerdictTone;
+  /**
+   * 🔴 **允许为 null，这是刻意的偏离**：方案草图的六值枚举**无法**表达
+   * "今天没有已保存的计划"——那既不是 keep_plan（没有计划可保留），
+   * 也不是 reduce_*（没有东西可降）。
+   *
+   * 判据以 `reasons` 里的 `no_stored_plan_today` 为准，**不要**用 `action === null` 反推
+   * "有没有计划"：比赛日留白在没有任何周计划时也返回 `keep_plan`（比赛本身就是承诺），
+   * 所以 null 是"无计划**且**没有别的可说的动作"的合取，不是"无计划"的充要条件。
+   * 这是 2026-09-30 的一次扫描（829,440 组输入）发现的自相矛盾之处，已按事实修正。
+   */
+  action: CoachAction | null;
+  reasons: Array<{ code: string; params: Record<string, string | number | null> }>;
+  /** 本次决策实际消费的快照身份。取不到的类别不出现，不写空串占位。 */
+  inputSnapshotIds: string[];
+}
+
 export type MobileStepPurpose = "warmup" | "work" | "recovery" | "cooldown";
 
 /** Step goal. Mirrors the WorkoutKit goal model so the device layer is a pure translation. */

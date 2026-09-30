@@ -631,3 +631,106 @@ var/rai.sqlite  SHA-256  BC3B117B…F14C  →  BC3B117B…F14C   （完全相同
   如实标注为"非我所为"—— 那正是我在同时编辑。它没有把这当成异常去"修"，
   而是把歧义留给了读者，这是正确的处置。
 - 三个子智能体都只读、都把临时产物写到 `var\` 并在结束时删除，`var/rai.sqlite` 未被写入。
+
+---
+
+## 十一、第二轮独立审计（2026-09-30，两个只读子智能体）
+
+与 §十 同样的做法：只读、只看源码与实跑输出、结论与本状态文档冲突时以审计为准。
+
+### 11.1 §14.2 的"日级快照表"：**结论是不需要建**（负面结果）
+
+方案 §14.2 建议新增 `daily_readiness_snapshots` / `daily_durability_snapshots`，
+§14.3 还给了唯一键。审计读完每条读路径后的结论是 **`no_new_table_needed`**：
+
+- **readiness 的每一个消费方都是"读时重算"**：`apps/api/src/mobile-read.ts:288` 每次都调
+  `loadDatedReadiness(database, now, TZ)`，而它是 `assessDatedReadiness(loadDatedRecoveryFacts(...))`
+  ——对 `canonical_nights` / `canonical_hrv_days` / `health_records` 的即时 SQL。
+  Coach 与 prediction 各自也重算。**全仓没有任何日级序列的消费方**：
+  `packages/storage-sqlite/src/read/` 里 readiness/durability 零命中，`server.ts` 没有序列端点，
+  iOS 明确不解码 `readinessSnapshot`。
+- 唯一"读存档"的路径是 `/v1/model-snapshots`，只服务一个 Web 组件做展示。
+- 因此建表只会多一份**没人读、且随 run 一起被 prune 掉**的副本。审计实测：
+  8 个 sealed run 经 `retireOldReleases(2)` + `pruneSupersededModelRuns` 后 readiness 行 **8 → 3**。
+
+🔴 **更重要的是它顺手定位了一个真机制，而不是"数据不够"**：
+历史某天之所以答不出来，是因为 `canonicalizeNights` 每次导入都
+`DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;`（`canonicalize-nights.ts:160`）
+再重新插入，而插入**不带 `computed_at`**（默认取 `now`）；RHR 的到达时间又受
+`import_manifest.import_completed_at` 这个**全局标量**约束（每次导入覆盖）。
+于是"在 D 当天评估 D"必然看到比 D 更晚的到达时间 ⇒ `coverage: none / not_assessed`。
+审计用合成 fixture 复现了两侧：把 `computed_at` 回拨后同一天立刻变成 `partial / caution`。
+**这与本文档 §五-4 报告的 769 天里只有 1 天可判定、302 天"有读数但到达时间不可考"是同一件事，
+但给出了可修的位置** —— 修的是到达时间不被覆盖，不是再建一张表。
+
+### 11.2 §14.8 的迁移编号**已过期**，且新迁移的约定被完整记录
+
+- 方案说"下一版本可以是 v23"。实测代码已在 **v24**（v23 = V2 快照/发布/校准，
+  v24 = engine 版本门三态 + refusals + epoch），**v25 才是下一个空位**。
+- 校验和是**冻结**的（`database.ts:1673-1698`），历史迁移正文由
+  `migration-policy.test.ts:143-159` 保证不可改；`database.ts:1666-1671` 明确写着
+  **不要更新冻结表** —— 那是唯一会弄坏既有库的动作。
+- 新 v25 的完整步骤（新文件 + import + 追加表项 + `transpiledChecksumFor(25)` 冻结）已记在审计报告里。
+- 订正上一轮审计的一处说法：`RaiDatabase.open(":memory:")` **在全仓并不存在**；
+  它在内存里确实可用（实测 24/24），但仓库的真实测试约定是**临时文件**
+  （`v24-migration.test.ts:35` 的 `mkdtempSync` + `open(join(root,"db.sqlite"))`）。
+
+### 11.3 Coach 决策面：一次 829,440 组输入的扫描查出**本批次自己写的 5 个矛盾**
+
+这批扫描在 §十二 的实现过程中做的，结论直接改掉了实现（详见 §十二）。这里只记方法：
+它按 12 个决策相关维度穷举，把每组输入同时过 legacy 与 V2 两个投影，
+于是"枚举是否真的全"这个问题从设计争论变成了分布统计。
+**这正是本文档一直在用的同一招：把"应该没问题"换成"实测是多少"。**
+
+---
+
+## 十二、§13.3 Coach 版本化输出：从"未落地"到有契约、有投影、有扫描
+
+版本矩阵把 Coach 标为"🔴 未落地（工程项）"，审计确认得比方案更彻底：
+**全仓不存在 Coach 版本常量，也不存在版本化的决策输出类型**，
+唯一的决策形状是无版本字段的 `MobileVerdict`。
+
+### 12.1 实现了什么
+
+- `packages/api-contracts`：`COACH_MODEL_VERSION = "rai-coach-v2.0.0"`、
+  `CoachAction`、`CoachDecisionV2`。
+- `apps/api/src/mobile-coach.ts`：`CoachPlanDisposition`（9 值）+
+  `decideNextSessionDecision`（返回 `{session, disposition}`）+
+  `projectCoachDecisionV2`（纯翻译）。`decideNextSession` 变成一行包装，
+  **处方函数体一字未改**（只改名为 `prescribeUnplannedSession` 再包一层）。
+
+关键设计：**`action` 由决策自己报告的分支（disposition）决定，不靠比较课型倒推。**
+倒推是二次解释 —— `decidePlannedSession` 有多条会产出**相同 kind** 的路径
+（原样保留、被 taper 缩短、被周预算缩减），课型相同并不代表动作相同。
+
+### 12.2 扫描查出的 5 个矛盾（都已修 + 各留回归用例）
+
+| # | 修前 | 修后 |
+|---|---|---|
+| 1 | 比赛日无计划 ⇒ `keep_plan` 却**不说**"没有已保存计划"，与契约注释里的判据自相矛盾 | 无计划这个**事实**对每种 disposition 都如实出现；比赛日保留的是"比赛"这份承诺，所以仍是 `keep_plan`，但理由里同时有 `no_stored_plan_today` |
+| 2 | `budget_exhausted` 一律 `reduce_duration`，而该分支可能直接给**休息**（57,600 组样本说"缩短时长"而教练开的是休息） | 看处方：`rest` ⇒ `rest`，其余 ⇒ `reduce_duration` |
+| 3 | `collect_evidence` 放在最前，吞掉 483,840/829,440 组，含 161,280 个"比赛日留白" | 只在**唯一原因是证据不足**时才是动作；其余情形它留在 `reasons` 当正交标志 |
+| 4 | `downgraded_quality` 的"其余一律 `reduce_intensity`"实际只落在 `long_run`，而长跑被砍的是**量** | 按最终处方选词：easy/recovery ⇒ `easy_only`，rest ⇒ `rest`，long_run ⇒ `reduce_duration` |
+| 5 | recovery 课被标成 `easy_only`（丢掉了 verdict 自己做出的恢复跑区分） | 同上，恢复跑与轻松跑同档，是**有意的**合并，已写进注释 |
+
+🔴 **并且必须记下一条本批次**自己**造成的：** 我在写这批代码时把
+`COACH_MODEL_VERSION` 与类型一起放进了 `import type`，于是它在运行期只是个类型名字 ——
+文件**编译不过**（`cannot be used as a value`）。是并发的只读审计先报出来的。
+同一族的问题在本会话已出现第四次（静默替换、静默丢参、静默丢导入）。
+
+### 12.3 还没有接线的部分（明确列出）
+
+`projectCoachDecisionV2` 目前**没有生产调用方**：`MobileTodayResponse` 上没有 `decision` 字段。
+不接线不是遗漏，而是两个**已确认的**硬约束：
+
+1. **iOS 字段覆盖门**：`apps/ios/tests/run-tech-presentation-tests.sh:158-224` 会解析
+   `MobileTodayResponse` 的每个字段，凡是既没有展示锚点、又没有写明 `metadata_only` 理由的
+   **直接让 `npm run test:ios` 失败**。加一个顶层字段必须先把它登记进那份清单。
+2. **`recommendationRevision` 哈希**：`apps/api/src/data.ts:508-520` 对
+   `{..., verdict, nextSession, ...}` 取 SHA-256。往 `MobileVerdict`/`MobileNextSession`
+   **内部**加任何不稳定字段 ⇒ 每次 `POST /v1/mobile/lock` 都会 409 `mobile_recommendation_stale`。
+   （本设计把新字段放在 `MobileVerdict` **之外**，正是为了不碰这个哈希。）
+
+3. ⚠️ **`npm run test:ios` 在本机跑不了**：它需要 Linux/WSL，本机未安装。
+   所以 iOS 门在此主机上是**未验证**状态，不是"通过"。已确认 `MobileTodayResponse`
+   的字段集合未被本次改动触碰（`decision` 在其中零命中），因此那道门的**输入**没变。

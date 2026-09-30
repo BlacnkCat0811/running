@@ -1,3 +1,8 @@
+// 版本常量是**值**，不能与上面那组类型一起走 `import type`（否则它只是个类型名字，
+// 编译期就在 `projectCoachDecisionV2` 里报 "cannot be used as a value"）。
+import { COACH_MODEL_VERSION } from "@rai/api-contracts";
+import type { CoachAction, CoachDecisionV2 } from "@rai/api-contracts";
+
 import type {
   MobileAbilityCard,
   MobileCalibrationCard,
@@ -817,47 +822,110 @@ function structuredSession(
 }
 
 export function decideNextSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
-  const resolved = decidePlannedSession(input, verdict);
-  if (resolved.kind === "rest" || input.weeklyDistanceGoalKm == null) return resolved;
-  const remaining = Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
-  if ((resolved.distanceKm ?? 0) <= remaining + 0.05) return resolved;
-  if (remaining <= 0) return structuredSession("rest", "本周预算已完成", "已导入跑量达到周目标，不再追加训练。", input.zones, null, null, null, null);
-  const structure = buildSessionStructure("easy", input.zones, { targetDistanceKm: remaining });
-  const numbers = plannedDayNumbers("easy", structure, remaining, input.zones);
-  if ((numbers.distanceKm ?? 0) > remaining + 0.05) return structuredSession("rest", "保留恢复", "剩余跑量不足以安排完整课表，不追加训练。", input.zones, null, null, null, null);
-  return { ...resolved, ...numbers, kind: "easy", title: "预算内轻松跑", reason: "按本自然周剩余跑量缩减今日处方。",
-    paceSecondsPerKmLower: input.zones?.easyPaceLower ?? null, paceSecondsPerKmUpper: input.zones?.easyPaceUpper ?? null,
-    heartRateBpmLower: input.zones?.easyHrLower ?? null, heartRateBpmUpper: input.zones?.easyHrUpper ?? null };
+  return decideNextSessionDecision(input, verdict).session;
 }
 
-function decidePlannedSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
+/**
+ * §13.3：决策**自己报告**它走了哪条分支。
+ *
+ * 为什么不从外面推断：`action` 若靠比较"计划课型 vs 最终课型"倒推，就变成了对决策的
+ * 二次解释 —— 而 `decidePlannedSession` 有多条会产出**相同 kind** 的路径
+ * （计划被原样保留、被 taper 缩短、被周预算缩减），kind 相同并不代表动作相同。
+ * 分支在哪一步被选中，就由那一步如实报告；投影只做翻译，不做判断。
+ */
+export type CoachPlanDisposition =
+  | "no_stored_plan"
+  | "kept_stored_plan"
+  | "stored_rest_kept"
+  | "race_day_blank"
+  | "downgraded_quality"
+  | "downgraded_taper"
+  | "downgraded_red_tone"
+  | "budget_limited"
+  | "budget_exhausted";
+
+export function decideNextSessionDecision(
+  input: CoachInput,
+  verdict: MobileVerdict
+): { session: MobileNextSession; disposition: CoachPlanDisposition } {
+  const resolved = decidePlannedSession(input, verdict);
+  if (resolved.session.kind === "rest" || input.weeklyDistanceGoalKm == null) return resolved;
+  const remaining = Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
+  if ((resolved.session.distanceKm ?? 0) <= remaining + 0.05) return resolved;
+  if (remaining <= 0) {
+    return {
+      session: structuredSession("rest", "本周预算已完成", "已导入跑量达到周目标，不再追加训练。", input.zones, null, null, null, null),
+      disposition: "budget_exhausted"
+    };
+  }
+  const structure = buildSessionStructure("easy", input.zones, { targetDistanceKm: remaining });
+  const numbers = plannedDayNumbers("easy", structure, remaining, input.zones);
+  if ((numbers.distanceKm ?? 0) > remaining + 0.05) {
+    return {
+      session: structuredSession("rest", "保留恢复", "剩余跑量不足以安排完整课表，不追加训练。", input.zones, null, null, null, null),
+      disposition: "budget_exhausted"
+    };
+  }
+  return {
+    session: { ...resolved.session, ...numbers, kind: "easy", title: "预算内轻松跑", reason: "按本自然周剩余跑量缩减今日处方。",
+      paceSecondsPerKmLower: input.zones?.easyPaceLower ?? null, paceSecondsPerKmUpper: input.zones?.easyPaceUpper ?? null,
+      heartRateBpmLower: input.zones?.easyHrLower ?? null, heartRateBpmUpper: input.zones?.easyHrUpper ?? null },
+    disposition: "budget_limited"
+  };
+}
+
+function decidePlannedSession(
+  input: CoachInput,
+  verdict: MobileVerdict
+): { session: MobileNextSession; disposition: CoachPlanDisposition } {
   const planned = input.storedWeekPlan.find(day => day.localDate === input.today);
   // An explicit rest is never upgraded because the runner looks ready.
   if (planned?.kind === "rest" || input.raceTarget?.date === input.today) {
-    return structuredSession("rest", input.raceTarget?.date === input.today ? "比赛日留白" : "计划休息",
-      input.raceTarget?.date === input.today ? "比赛当天不追加训练；是否参赛及比赛完成以实际记录为准。" : (planned?.reason ?? "遵循已保存的休息安排。"),
-      input.zones, null, null, null, null);
+    const raceDay = input.raceTarget?.date === input.today;
+    return {
+      session: structuredSession("rest", raceDay ? "比赛日留白" : "计划休息",
+        raceDay ? "比赛当天不追加训练；是否参赛及比赛完成以实际记录为准。" : (planned?.reason ?? "遵循已保存的休息安排。"),
+        input.zones, null, null, null, null),
+      disposition: raceDay ? "race_day_blank" : "stored_rest_kept"
+    };
   }
   const fallback = decideUnplannedSession(input, verdict);
-  if (!planned || verdict.tone === "red") return fallback;
+  if (!planned) return { ...fallback, disposition: "no_stored_plan" };
+  if (verdict.tone === "red") return { ...fallback, disposition: "downgraded_red_tone" };
   const quality = planned.kind === "tempo" || planned.kind === "interval";
-  if (quality && verdict.tone !== "green") return { ...fallback, reason: `原计划为${sessionTitle(planned.kind)}；${fallback.reason}` };
+  if (quality && verdict.tone !== "green") {
+    return { ...fallback, session: { ...fallback.session, reason: `原计划为${sessionTitle(planned.kind)}；${fallback.session.reason}` },
+      disposition: "downgraded_quality" };
+  }
   if (isTaper(input)) {
-    if (planned.kind === "long_run" || quality || (planned.distanceKm ?? 0) > (fallback.distanceKm ?? 0)) return fallback;
+    if (planned.kind === "long_run" || quality || (planned.distanceKm ?? 0) > (fallback.session.distanceKm ?? 0)) {
+      return { ...fallback, disposition: "downgraded_taper" };
+    }
   }
   const numbers = plannedDayNumbers(planned.kind, planned.structure, planned.distanceKm, input.zones);
   const easy = !quality;
-  return {
+  return { disposition: "kept_stored_plan", session: {
     kind: planned.kind, title: sessionTitle(planned.kind), reason: planned.reason ?? "遵循已保存课表；实时恢复与负荷门控仍然生效。",
     ...numbers,
     paceSecondsPerKmLower: easy ? input.zones?.easyPaceLower ?? null : planned.kind === "interval" ? input.zones?.intervalPaceLower ?? null : input.zones?.thresholdPaceLower ?? null,
     paceSecondsPerKmUpper: easy ? input.zones?.easyPaceUpper ?? null : planned.kind === "interval" ? input.zones?.intervalPaceUpper ?? null : input.zones?.thresholdPaceUpper ?? null,
     heartRateBpmLower: easy ? input.zones?.easyHrLower ?? null : input.zones?.thresholdHrLower ?? null,
     heartRateBpmUpper: easy ? input.zones?.easyHrUpper ?? null : input.zones?.thresholdHrUpper ?? null
-  };
+  } };
 }
 
-function decideUnplannedSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
+/**
+ * 无计划日的处方。**函数体保持原样** —— 这里只把它改名并包一层报告分支的 wrapper，
+ * 避免在"接线"这一步顺手改动处方的任何数值。
+ */
+function decideUnplannedSession(
+  input: CoachInput,
+  verdict: MobileVerdict
+): { session: MobileNextSession; disposition: CoachPlanDisposition } {
+  return { session: prescribeUnplannedSession(input, verdict), disposition: "no_stored_plan" };
+}
+
+function prescribeUnplannedSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
   const remainingKm =
     input.weeklyDistanceGoalKm == null ? null : Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
   const remainingDays = Math.max(1, daysInclusive(input.today, weekEnd(input.today)));
@@ -1430,4 +1498,106 @@ export function decideVerdictFromSnapshots(context: Omit<CoachInput,
   return decideVerdict({...context,lastNightSleepMinutes:null,sleepBaselineMinutes:null,morningHrvMs:null,hrvBaselineMs:null,
     restingHeartRateBpm:null,restingHeartRateBaselineBpm:null,nightsBelowSleepBaseline:0,
     recoveryEvidenceDate:readiness.localDate,recoveryEvidenceStatus:readiness.coverage==="none"?"unknown":"valid"},assessment);
+}
+
+/**
+ * §13.3：把**同一次决策**投影成版本化输出。**纯翻译，不重算。**
+ *
+ * - `tone` / `reasons` 直接取自 `MobileVerdict`（reasons 就是它的 triggers）。
+ * - `action` 来自决策自己报告的 `disposition`，不是比较课型倒推出来的。
+ * - `inputSnapshotIds` 只放**真实存在**的身份：readiness 快照的
+ *   `modelVersion`/`asOf`、它的 rule set、以及 fitness 快照日期。
+ *   取不到的类别直接不出现 —— 不写空串占位，也不编 id。
+ *
+ * `action` 为 null 的判据见 `CoachDecisionV2.action` 的注释：六值枚举表达不了
+ * "今天没有计划"。
+ */
+export function projectCoachDecisionV2(input: {
+  context: CoachInput;
+  verdict: MobileVerdict;
+  disposition: CoachPlanDisposition;
+  sessionKind: MobileSessionKind;
+  readiness: import("@rai/contracts").ReadinessAssessmentResult | null;
+  bundleId?: string | null;
+}): CoachDecisionV2 {
+  const { context, verdict, disposition, sessionKind, readiness } = input;
+  const codes = verdict.reasonCodes ?? [];
+  // 「今天有没有已保存的计划」是**事实**，不是从 action 反推出来的结论。
+  // 独立审计用 829,440 组输入扫描发现：只按 disposition 判断会让"比赛日留白 + 无计划"
+  // 走进 keep_plan 却又不带 no_stored_plan_today，与本文档写下的判据自相矛盾。
+  const hasStoredPlan = context.storedWeekPlan.some((day) => day.localDate === context.today);
+  // 证据不足在两个地方出现：reason code 与（狭义的）动作。审计指出把 collect_evidence
+  // 放在最前面会吞掉一切（483,840/829,440，含 161,280 个"比赛日留白"），
+  // 对比赛日说"去收集证据"是错的指令。所以它只在**唯一原因是证据不足**时才成为动作；
+  // 其余情形它留在 reasons 里当正交标志。
+  const evidenceOnly = codes.length > 0 && codes.every((code) => code === "insufficient_data");
+
+  const action: CoachAction | null = (() => {
+    switch (disposition) {
+      case "no_stored_plan":
+        // 六值枚举里没有"今天没有计划"：既没有可保留的，也没有可降阶的。
+        return evidenceOnly ? "collect_evidence" : null;
+      case "kept_stored_plan":
+      case "stored_rest_kept":
+        return "keep_plan";
+      case "race_day_blank":
+        // 比赛日本身就是承诺；即使没有周计划也不是"无计划"。
+        return "keep_plan";
+      case "downgraded_quality":
+        // 按**最终处方**选词，而不是一律 reduce_intensity。
+        // 扫描（829,440 组）显示非 green 时不会产出 tempo/interval，所以"其余一律
+        // reduce_intensity"实际只落在 long_run 上 —— 而长跑被砍掉的是**量**，不是强度。
+        if (sessionKind === "easy" || sessionKind === "recovery") return "easy_only";
+        if (sessionKind === "rest") return "rest";
+        if (sessionKind === "long_run") return "reduce_duration";
+        return "reduce_intensity";
+      case "downgraded_taper":
+        // 注：taper 与预算钳制砍的都是**距离/量**。六值枚举里没有 reduce_volume，
+        // 这里用最接近的 reduce_duration，并把这条局限记在 §13.3 的说明里，
+        // 不另造一个方案没授权的枚举值。
+        return "reduce_duration";
+      case "downgraded_red_tone":
+        return sessionKind === "rest" ? "rest" : "easy_only";
+      case "budget_limited":
+        return "reduce_duration";
+      case "budget_exhausted":
+        // 审计指出这里原先一律 reduce_duration，但该分支可能直接给出休息
+        // （"本周预算已完成"/"保留恢复"）—— 处方式是休息时说要"缩短时长"是错的。
+        return sessionKind === "rest" ? "rest" : "reduce_duration";
+    }
+  })();
+
+  const reasons = [
+    // 「今天有没有已保存的计划」是**事实**，所以它对每一种 disposition 都如实出现，
+    // 包括比赛日：比赛日没有周计划时同样要说出"没有已保存的计划"，
+    // 否则读的人会以为 keep_plan 是因为保住了一份并不存在的计划。
+    ...(hasStoredPlan
+      ? []
+      : [{ code: "no_stored_plan_today", params: { localDate: context.today } }]),
+    { code: `plan_disposition_${disposition}`, params: { sessionKind } },
+    ...(evidenceOnly && action !== "collect_evidence"
+      ? [{ code: "evidence_insufficient_not_actionable", params: { codeCount: codes.length } }]
+      : []),
+    ...verdict.triggers.map((item) => ({
+      code: item.code,
+      params: { value: item.value, threshold: item.threshold }
+    }))
+  ];
+
+  const inputSnapshotIds: string[] = [];
+  if (readiness !== null) {
+    inputSnapshotIds.push(`readiness:${readiness.modelVersion}@${readiness.asOf}`);
+    inputSnapshotIds.push(`readiness_ruleset:${readiness.stateEvidence.ruleSetVersion}`);
+  }
+  if (context.snapshotDate !== null) inputSnapshotIds.push(`fitness:${context.snapshotDate}`);
+
+  return {
+    version: COACH_MODEL_VERSION,
+    // 没有发布记录时给一个**显式占位**，而不是编造一个看起来像 id 的字符串。
+    bundleId: input.bundleId ?? "no_active_release_bundle",
+    tone: verdict.tone,
+    action,
+    reasons,
+    inputSnapshotIds
+  };
 }
