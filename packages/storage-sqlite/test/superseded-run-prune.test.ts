@@ -224,3 +224,89 @@ test("protects feature ancestry when model replay has no parent", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * §16.1 **S04** 的后半句：「活跃**及回滚** bundle 依赖不被删」。
+ *
+ * 🔴 这半句此前**从未被执行过**。2026-09-30 的独立审计指出：
+ * `pruneSupersededModelRuns` 里有一段"被 `model_release_bundles` 引用 ⇒ 保留"
+ * （`database.ts:2872-2874`），但**没有任何 prune 用例会写入 `model_release_bundles`**，
+ * 所以那三行实现的保护一次也没跑过，状态文档却把它当成既有证据写进了 §9.1 的条件 7。
+ *
+ * 这条用例把它跑起来。注意它同时是**两条**防线：
+ * 1. 保留循环主动把被引用的 run 加进 retained；
+ * 2. 即使循环失效，`model_release_bundles.model_run_id` 的外键是
+ *    `ON DELETE RESTRICT` —— 删掉被引用的 run 会直接抛错，而不是悄悄留下悬挂引用。
+ * 所以断言分两种失败模式：run 必须存活，且 prune 必须**不抛**。
+ */
+test("S04: a run referenced by a release bundle survives pruning (rollback target)", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prune-bundle-"));
+  const store = await openStore(root);
+  try {
+      const runs = [
+        seedRun(store, "a", "2026-01-01T00:00:00.000Z", 1, null),
+        seedRun(store, "b", "2026-01-02T00:00:00.000Z", 1, null),
+        seedRun(store, "c", "2026-01-03T00:00:00.000Z", 1, null),
+        seedRun(store, "d", "2026-01-04T00:00:00.000Z", 1, null)
+      ];
+      const rollbackTarget = runs[0] as SeededRun; // 最老的一个：keepRecent: 1 下必然被清
+      const active = runs[3] as SeededRun;
+      activate(store, active.modelRunId, "2026-01-04T01:00:00.000Z");
+
+      // 发过一个 release bundle，并把它的 run 留作回滚目标（未激活）。
+      store.database.prepare(`INSERT INTO model_release_bundles
+        (model_run_id, base_model_run_id, dataset_version, snapshot_hash, evaluation_json, status, created_at)
+        VALUES (?, NULL, 'ds-1', 'hash-1', '{}', 'passed', '2026-01-01T02:00:00.000Z')`)
+        .run(rollbackTarget.modelRunId);
+
+      // keepRecent: 1 ⇒ 不设保护的话 'a' 与 'b' 都会被清。
+      const result = store.pruneSupersededModelRuns({ keepRecent: 1 });
+
+      const survivors = (store.database.prepare("SELECT id FROM model_runs").all() as unknown as Array<{ id: string }>)
+        .map((row) => row.id);
+      assert.ok(
+        survivors.includes(rollbackTarget.modelRunId),
+        "被 release bundle 引用的 run 是回滚目标，prune 不得删它"
+      );
+      assert.ok(survivors.includes(active.modelRunId), "活跃 run 当然也必须在");
+      assert.equal(result.retainedModelRuns, survivors.length);
+      // bundle 行本身必须还在，否则"回滚按钮"指向一个已消失的目标。
+      assert.equal(count(store, "model_release_bundles"), 1);
+      assert.equal(
+        (store.database.prepare("SELECT model_run_id AS id FROM model_release_bundles").get() as { id: string }).id,
+        rollbackTarget.modelRunId
+      );
+      assert.deepEqual(store.database.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+});
+
+/**
+ * 反向：**没有** bundle 引用时，老 run 仍然要被清掉。
+ *
+ * 缺了这条，"保留循环"可以退化成"永不删除任何东西"而上面那条依然全绿 ——
+ * 那就把 prune 变成了 no-op，同样不是我们想要的。
+ */
+test("S04: without a bundle reference the older run is still pruned", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prune-nobundle-"));
+  try {
+    const store = await openStore(root);
+    try {
+      seedRun(store, "a", "2026-01-01T00:00:00.000Z", 1, null);
+      seedRun(store, "b", "2026-01-02T00:00:00.000Z", 1, null);
+      const active = seedRun(store, "c", "2026-01-03T00:00:00.000Z", 1, null);
+      activate(store, active.modelRunId, "2026-01-03T01:00:00.000Z");
+
+      const result = store.pruneSupersededModelRuns({ keepRecent: 0 });
+      assert.equal(result.modelRuns, 2, "no bundle reference ⇒ nothing is protected beyond the active run");
+      assert.equal(count(store, "model_runs"), 1);
+      assert.deepEqual(store.database.prepare("PRAGMA foreign_key_check").all(), []);
+    } finally {
+      store.close();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
