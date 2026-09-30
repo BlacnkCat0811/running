@@ -33,6 +33,8 @@
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
 | **只读工具链全量实跑** | 8 个已文档化的 CLI/脚本，逐一实跑 | **全部 exit=0**（见下） |
+| §16.1 验收矩阵 | `npm run check:acceptance-matrix` | **54 条 / cited 51 / declared-gap 3 / missing 0** |
+| 包边界 | `npm run check:package-boundaries` | **15 个包 / 30 条 src 边 / 禁线 4 条 → 通过** |
 
 > **工具链实跑（2026-09-30，均只读）**：
 > `walk-forward` 2004 ms · `model-version-replay` 643 ms（gate `rai-shadow-gate-v1` 通过：
@@ -126,7 +128,7 @@
 
 ---
 
-## 五、本状态文档新增的八条可执行结论
+## 五、本状态文档新增的九条可执行结论
 
 ### 1. 负向学习的瓶颈已定位到**可靠性门槛**（不是可比性、不是 K）
 
@@ -308,6 +310,32 @@ gate 三态、未评估项及原因。指标形状因领域而异（Fitness 比 
 两条判据值得单独记：**`repoRevision` 允许 null 但必须显式出现**（"少一个键"与
 "当时确实不知道"是两件事）；**`status: not_evaluable` 的 gate 必须写原因** ——
 不写，读的人会以为它没必要评估。`not_evaluable` 是正式状态，不是自动通过或失败。
+
+### 9. ✅ §7.7-5 / §13.4 的依赖约束此前**没有任何东西在守**
+
+方案两处要求同一条不变量（"scoring 不 import readiness、API、storage"），
+并要求"不只依靠源码字符串 grep"。实测：**这条不变量今天成立，但拦不住任何人** ——
+workspace 依赖允许写 `"@rai/readiness": "*"`，一旦有人加上，编译照过、测试照绿，
+而"恢复不再影响 Fitness"这条 P0 不变量已经被悄悄破坏。
+
+新增 `npm run check:package-boundaries`（已接进 pre-commit），四类判据各拦一种漂移：
+
+| 判据 | 拦住的漂移 |
+|---|---|
+| **A 分层** | `packages/*/src` 不得 import `apps/*`（**只查 src**：仓库既有先例是包级测试可以 import app 实现） |
+| **B 具名禁线** | scoring 不得触达 readiness / storage-sqlite / application / model-eval，每条禁线**写明理由**，报错信息本身就是设计说明 |
+| **C 声明↔实际** | package.json 声明的 workspace 依赖必须与 src 实际 import 一致，**两个方向都查** |
+| **D 边集白名单** | workspace→workspace 的边逐条列出；新增一条边必须有意改文件，review 时一定看得见 |
+
+**顺手查出一处真实不一致**：`@rai/normalization` 声明了 `@rai/contracts`，
+但 **src 与 test 都没用过** —— 声明比实际宽，会让人误判这个包允许依赖谁。已删除。
+
+突变验证：让 `scoring` import `readiness` ⇒ **三条判据同时转红**（B 禁线、C 未声明、
+D 未列边）；往白名单塞一条不存在的边 ⇒ 报"已不存在，请删除"，防止清单变成永久豁免。
+
+> **一个必须记下来的自伤**：这个检查的第一版用了过宽的正则 `/@rai\/api/` 来识别"app 依赖"，
+> 而 `@rai/api-contracts` 是**合法的契约包** —— 于是它报了 **57 处假阳性**。
+> 假阳性比漏报更能毁掉一个门禁：它逼人把检查关掉。修正后只剩 1 处真阳性。
 
 ---
 

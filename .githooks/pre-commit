@@ -45,3 +45,10 @@ fi
 # 触发面：测试与方案文档都可能改变这个结论，所以每次提交都跑（约 0.3s）。
 echo "pre-commit: 跑 §16.1 验收矩阵覆盖检查"
 node --import tsx scripts/check-acceptance-matrix.mts
+
+# §7.7-5 / §13.4 的依赖约束。这条不变量今天成立，但此前**没有任何东西在守**：
+# workspace 依赖允许写 "@/rai/readiness": "*"，一旦有人加上，编译照过、测试照绿，
+# 而"恢复不再影响 Fitness"这条 P0 不变量已经被悄悄破坏。
+# 检查四类判据：包不得依赖 app、scoring 的具名禁线、声明↔实际一致、边集白名单。
+echo "pre-commit: 跑包边界检查"
+node scripts/check-package-boundaries.mjs
