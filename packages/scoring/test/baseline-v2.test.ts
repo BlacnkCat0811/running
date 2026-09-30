@@ -42,7 +42,7 @@ const feature = (overrides: Partial<WorkoutFeatureVector> = {}): WorkoutFeatureV
   ...overrides
 });
 
-test("adaptive baseline excludes future, same-session, other-stratum and excluded observations", () => {
+test("B01: adaptive baseline excludes future, same-session, other-stratum and excluded observations", () => {
   const current = feature({ id: "current", trainingSessionId: "current", workoutStartAt: "2026-09-29T00:00:00Z" });
   const history = Array.from({ length: 6 }, (_, i) => feature({
     id: `f${i}`, trainingSessionId: `s${i}`, workoutStartAt: `2026-09-${String(3 + i * 3).padStart(2, "0")}T00:00:00Z`
@@ -72,7 +72,7 @@ test("a years-old workout never fills a sparse contemporary bucket", () => {
   assert.equal(result.windowDays, 42);
 });
 
-test("rebase is a reviewed candidate, never an automatic epoch/TA change", () => {
+test("B03: rebase is a reviewed candidate, never an automatic epoch/TA change", () => {
   const value = { asOf: "2026-09-29T00:00:00Z", epochStartedAt: "2026-01-01T00:00:00Z",
     lastReviewedAt: "2026-08-20T00:00:00Z", independentSessions: 12,
     saturatedFraction: 0.3, precedingSaturatedReviews: 1 };

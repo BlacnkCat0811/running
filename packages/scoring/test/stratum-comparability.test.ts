@@ -91,7 +91,7 @@ test("every session type maps to a stratum, and never outside the allowed set", 
   );
 });
 
-test("a sparse bucket is not comparable, and refuses learning in both directions", () => {
+test("F12: a sparse bucket is not comparable, and refuses learning in both directions", () => {
   const score = scoreFeature(feature(), baseline, 1, SPARSE);
   assert.equal(score.stratumComparability.status, "not_comparable");
   assert.ok(score.stratumComparability.reasonCodes.includes("insufficient_independent_sessions"));

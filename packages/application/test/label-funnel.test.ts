@@ -24,7 +24,7 @@ function label(db: DatabaseSync, revision: number, at: string, protocol: string 
     .run(`label-${revision}`, revision, protocol, excluded ? "exclude" : null, at);
 }
 
-test("label funnel distinguishes unconfirmed, later confirmation, withdrawal and historical replay", () => {
+test("T03: label funnel distinguishes unconfirmed, later confirmation, withdrawal and historical replay", () => {
   const db = fixture();
   try {
     const before = "2026-09-02T00:00:00.000Z";
@@ -41,7 +41,7 @@ test("label funnel distinguishes unconfirmed, later confirmation, withdrawal and
   } finally { db.close(); }
 });
 
-test("user exclusion, protocol mismatch and threshold-only records never become race labels", () => {
+test("T03: user exclusion, protocol mismatch and threshold-only records never become race labels", () => {
   const db = fixture();
   try {
     label(db, 1, "2026-09-02T00:00:00.000Z", "five_k_time_trial", true);
@@ -56,7 +56,7 @@ test("user exclusion, protocol mismatch and threshold-only records never become 
   } finally { db.close(); }
 });
 
-test("latest revisions and corrected results are counted once; inactive sessions are rejected", () => {
+test("T03: latest revisions and corrected results are counted once; inactive sessions are rejected", () => {
   const db = fixture();
   try {
     label(db, 1, "2026-09-02T00:00:00.000Z", "five_k_time_trial");

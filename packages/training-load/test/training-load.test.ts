@@ -333,7 +333,7 @@ test("physiological state keeps every named rule it had", () => {
   assert.equal(phys({ sleepMinutes: 400, sleepBaselineMinutes: 430, nightsBelowSleepBaseline: 3 }), "depleted");
 });
 
-test("low-night streak counts only recorded nights in its own window", () => {
+test("R04: low-night streak counts only recorded nights in its own window", () => {
   const night = (minutes: number | null) => ({ asleepUnionMinutes: minutes });
   assert.equal(countNightsBelowSleepBaseline([night(300), night(300), night(300)], 430), 3);
   // A gap day carries no reading: it neither extends the streak nor counts as a
@@ -429,7 +429,7 @@ test("assessLoad separates the indicators from the classification", () => {
   assert.equal(nominal.basis, "effective_range");
 });
 
-test("assessLoad exposes exactly one basis, so three signals cannot each vote", () => {
+test("L03: assessLoad exposes exactly one basis, so three signals cannot each vote", () => {
   // §9.4 forbids ATL, ACWR and the excess voting separately. The shape enforces it: `basis` is a
   // single value, and the risk follows the classifier's first match — later signals cannot add
   // a second vote even when their thresholds are also breached.
@@ -531,7 +531,7 @@ const zoneExposure = (entries: Array<[HeartRateZone, number]>) =>
     fraction: durationSeconds / 3600
   }));
 
-test("the load vector passes compositeLoad through untouched (§9.6 golden parity)", () => {
+test("L01: the load vector passes compositeLoad through untouched (§9.6 golden parity)", () => {
   const { load } = vectorFixture();
   const vector = buildLoadVectorV2({ load });
   assert.equal(vector.compositeLoad, load.load);
@@ -614,7 +614,7 @@ test("high intensity minutes come from the shared zone set, or are withheld", ()
   assert.ok(thin.reasonCodes.includes("heart_rate_coverage_below_threshold"));
 });
 
-test("mechanical load stays null until a mapping is validated", () => {
+test("L02: mechanical load stays null until a mapping is validated", () => {
   const vector = buildLoadVectorV2(vectorFixture());
   assert.equal(vector.mechanicalLoad, null);
   assert.equal(vector.mechanicalModelVersion, null);

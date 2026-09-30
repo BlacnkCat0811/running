@@ -21,7 +21,7 @@ import {
   vdotFromPerformance
 } from "../src/index.js";
 
-test("Daniels VDOT matches a representative 20-minute 5K and round-trips", () => {
+test("P01: Daniels VDOT matches a representative 20-minute 5K and round-trips", () => {
   const vdot = vdotFromPerformance(5_000, 20 * 60);
   assert.ok(vdot > 49 && vdot < 51);
   assert.ok(Math.abs(performanceSecondsFromVdot(5_000, vdot) - 20 * 60) < 0.01);

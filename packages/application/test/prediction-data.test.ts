@@ -150,7 +150,7 @@ function fixtureDatabase(): DatabaseSync {
   return database;
 }
 
-test("V2 prediction modes isolate recovery and give an exactly reconstructible correction ledger", async () => {
+test("P03: V2 prediction modes isolate recovery and give an exactly reconstructible correction ledger", async () => {
   const db = fixtureDatabase();
   try {
     db.prepare(`INSERT INTO health_records

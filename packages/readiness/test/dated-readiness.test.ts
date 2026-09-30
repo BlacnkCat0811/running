@@ -15,7 +15,7 @@ const input = () => ({
   nights: [] as DatedRecoverySignal[]
 });
 
-test("dated readiness cannot wash stale sleep into today with fresh HRV", () => {
+test("R02: dated readiness cannot wash stale sleep into today with fresh HRV", () => {
   const value = input();
   value.signals.sleep = signal(30, "2026-09-28");
   const result = assessDatedReadiness(value);

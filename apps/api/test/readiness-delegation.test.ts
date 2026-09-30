@@ -198,7 +198,7 @@ test("the extracted rules reproduce the pre-refactor assessment over the whole i
   assert.equal(compared, 4500);
 });
 
-test("a reading without its own baseline does not inflate coverage", () => {
+test("R03: a reading without its own baseline does not inflate coverage", () => {
   const input: CoachInput = {
     ...base(),
     sleepBaselineMinutes: null,

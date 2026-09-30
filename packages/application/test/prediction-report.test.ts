@@ -30,7 +30,7 @@ const prediction: RaceTimePrediction = {
   evidenceCodes: ["race_prediction_vdot_baseline"]
 };
 
-test("applies CatBoost log-residual correction multiplicatively to the full interval", () => {
+test("P05: applies CatBoost log-residual correction multiplicatively to the full interval", () => {
   const adjusted = adjustPredictionWithCatBoost(prediction, 0.1);
   assert.ok(Math.abs((adjusted.predictedSeconds ?? 0) - 3_410) < 1e-9);
   assert.ok(Math.abs((adjusted.optimisticSeconds ?? 0) - 3_190) < 1e-9);
@@ -42,7 +42,7 @@ test("applies CatBoost log-residual correction multiplicatively to the full inte
   assert.ok(adjusted.evidenceCodes.includes("catboost_residual_model"));
 });
 
-test("rejects an invalid production correction before changing a prediction", () => {
+test("P05: rejects an invalid production correction before changing a prediction", () => {
   assert.throws(() => adjustPredictionWithCatBoost(prediction, Number.NaN));
   assert.throws(() => adjustPredictionWithCatBoost(prediction, 0.3));
 });

@@ -11,7 +11,7 @@ const evidence: LactateThresholdEvidence = {
   source: "threshold_test", quality: 0.95
 };
 
-test("observed threshold test does not require a VO2 estimate", () => {
+test("Z02: observed threshold test does not require a VO2 estimate", () => {
   const result = estimateLactateThresholdFromEvidence(noVo2, profile, [evidence], asOf);
   assert.equal(result.status, "available");
   assert.equal(result.method, "observed_threshold_v3");
@@ -21,7 +21,7 @@ test("observed threshold test does not require a VO2 estimate", () => {
   assert.ok(!result.evidenceCodes.includes("lactate_threshold_one_hour_proxy"));
 });
 
-test("ordinary, weak, short or future segments cannot rescue an absent prior", () => {
+test("Z02: ordinary, weak, short or future segments cannot rescue an absent prior", () => {
   for (const row of [
     { ...evidence, source: "sustained_segment" as const },
     { ...evidence, quality: 0.3 },

@@ -45,7 +45,7 @@ test("a report that self-certifies what it could not do passes", () => {
   assert.doesNotThrow(() => assertCaWeightAblationReport(validReport()));
 });
 
-test("accuracy cannot be claimed while there are no labeled outcomes", () => {
+test("F11: accuracy cannot be claimed while there are no labeled outcomes", () => {
   // §6.1-5：无标签时 A/B 精度排序必须 not_evaluable，不许拿 V1 分数当"真值"。
   assert.throws(
     () => assertCaWeightAblationReport(validReport({ accuracyComparison: "evaluated" })),
@@ -63,7 +63,7 @@ test("accuracy cannot be claimed while there are no labeled outcomes", () => {
   })));
 });
 
-test("the five required candidates are a floor, not a suggestion", () => {
+test("F11: the five required candidates are a floor, not a suggestion", () => {
   // §6.1-1：A、B、去 Pace、去 Efficiency、去 Stability。
   assert.throws(
     () => assertCaWeightAblationReport(validReport({ outcomes: [candidate("v2a"), candidate("v2b")] })),

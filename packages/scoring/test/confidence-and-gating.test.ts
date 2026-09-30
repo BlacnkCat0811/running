@@ -75,7 +75,7 @@ const feature = (overrides: Partial<WorkoutFeatureVector> = {}): WorkoutFeatureV
   ...overrides
 });
 
-test("§6.7: the three rule factors combine geometrically at .60/.25/.15", () => {
+test("F14: §6.7 the three rule factors combine geometrically at .60/.25/.15", () => {
   const result = evaluateConfidenceV2({
     dataConfidence: 0.9,
     comparability: 1,
@@ -93,7 +93,7 @@ test("§6.7: the three rule factors combine geometrically at .60/.25/.15", () =>
   assert.equal(result.calibrationTarget, null);
 });
 
-test("§6.7: a missing factor is insufficient evidence, and is not renormalised away", () => {
+test("F15: §6.7 a missing factor is insufficient evidence, and is not renormalised away", () => {
   const result = evaluateConfidenceV2({
     dataConfidence: 0.9,
     comparability: 1,
@@ -105,7 +105,7 @@ test("§6.7: a missing factor is insufficient evidence, and is not renormalised 
   assert.equal(result.overallStatus, "insufficient_evidence");
 });
 
-test("§6.7: a factor of exactly zero is an observed zero, not unknown evidence", () => {
+test("F15: §6.7 a factor of exactly zero is an observed zero, not unknown evidence", () => {
   // Must not take log(0); must not collapse into the null case either — the two
   // forbid learning for different reasons and the diagnosis has to survive.
   const result = evaluateConfidenceV2({
@@ -119,7 +119,7 @@ test("§6.7: a factor of exactly zero is an observed zero, not unknown evidence"
   assert.equal(result.overallStatus, "insufficient_evidence");
 });
 
-test("§6.7: broken inputs throw rather than being clamped into a plausible number", () => {
+test("F15: §6.7 broken inputs throw rather than being clamped into a plausible number", () => {
   const valid = { dataConfidence: 0.9, comparability: 1, maturity: 1, evidenceCoverage: 1 };
   assert.throws(() => evaluateConfidenceV2({ ...valid, dataConfidence: Number.NaN }));
   assert.throws(() => evaluateConfidenceV2({ ...valid, dataConfidence: Number.POSITIVE_INFINITY }));

@@ -55,7 +55,7 @@ function runCli(...args: string[]): { status: number | null; stdout: string; std
   });
 }
 
-test("walk-forward CLI degrades on labeled-outcome-free database without throwing", async () => {
+test("M03: walk-forward CLI degrades on labeled-outcome-free database without throwing", async () => {
   await withEmptyDatabase(async (databasePath) => {
     const result = runCli("--database", databasePath, "--as-of", AS_OF);
     assert.equal(result.status, 0, result.stderr);

@@ -37,3 +37,11 @@ if git diff --cached --name-only --diff-filter=ACMR -- packages/storage-sqlite |
   echo "pre-commit: packages/storage-sqlite/ 有改动，跑迁移门禁"
   node --import tsx --test packages/storage-sqlite/test/migration-policy.test.ts
 fi
+
+# §16.1 验收矩阵的覆盖检查。此前"覆盖了多少条"只是一个断言：2026-09-30 实测矩阵共 54 条，
+# 而按 ID 被引用的只有 19 条 —— 但"没引用"与"没覆盖"是两件事，看数字分不出来。
+# 这个检查把每条判成 cited / declared-gap / missing，missing 即失败；
+# 于是新增一条验收用例而不写测试、也不写缺哪一半，提交就会被拦下。
+# 触发面：测试与方案文档都可能改变这个结论，所以每次提交都跑（约 0.3s）。
+echo "pre-commit: 跑 §16.1 验收矩阵覆盖检查"
+node --import tsx scripts/check-acceptance-matrix.mts

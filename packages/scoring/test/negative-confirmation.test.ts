@@ -78,7 +78,7 @@ const feature = (overrides: Partial<WorkoutFeatureVector> = {}): WorkoutFeatureV
 const config = defaultRaiModelConfig;
 const strong = (): ReturnType<typeof scoreFeature> => scoreFeature(feature(), baseline, 1);
 
-test("default policy wants two consecutive negatives", () => {
+test("F10: default policy wants two consecutive negatives", () => {
   assert.equal(config.negativeConfirmationCount, 2);
   const score = strong();
   assert.ok(Math.abs((score.learningObservation ?? 0) - 60) < 1e-9);

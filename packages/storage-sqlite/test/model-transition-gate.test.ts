@@ -92,7 +92,7 @@ test("fails a same-scale candidate on the metrics the legacy gate already police
   ]);
 });
 
-test("exempts removed-dimension drift on a cross-scale release and records it instead", () => {
+test("S02: exempts removed-dimension drift on a cross-scale release and records it instead", () => {
   const result = evaluate({ schema: crossScaleSchema, metrics: passingCrossScale });
   assert.equal(result.transition, "cross_scale");
   assert.equal(result.status, "passed");
@@ -102,7 +102,7 @@ test("exempts removed-dimension drift on a cross-scale release and records it in
   assert.ok(result.migrationReport.includes("current_ability_mean_absolute_delta:11"));
 });
 
-test("gates a cross-scale release on the replacement assertions", () => {
+test("S02: gates a cross-scale release on the replacement assertions", () => {
   const missing = evaluate({ schema: crossScaleSchema });
   assert.equal(missing.status, "not_evaluable");
   assert.ok(missing.notEvaluableReasons.includes("readiness_output_missing"));

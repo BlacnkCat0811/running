@@ -529,7 +529,7 @@ test("rejects an artifact directory junction that resolves outside the configure
   }
 });
 
-test("requires Node ONNX verification for runner-accepted artifacts", async () => {
+test("M02: requires Node ONNX verification for runner-accepted artifacts", async () => {
   let onnxVerificationCalls = 0;
   await verifyAcceptedOnnxArtifact("accepted", async () => {
     onnxVerificationCalls += 1;
@@ -543,7 +543,7 @@ test("requires Node ONNX verification for runner-accepted artifacts", async () =
   );
 });
 
-test("compares Node ONNX outputs with Python golden vectors", async () => {
+test("M02: compares Node ONNX outputs with Python golden vectors", async () => {
   const vectors = [0, 1, 2].map((index) => ({
     sampleId: `sample-${index}`,
     distance: (["five_k", "ten_k", "half_marathon"] as const)[index]!,

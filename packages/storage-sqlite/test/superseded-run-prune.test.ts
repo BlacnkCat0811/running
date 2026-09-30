@@ -78,7 +78,7 @@ async function openStore(root: string): Promise<RaiDatabase> {
  * retention the database grows as O(runs × days). Pruning must reclaim the
  * superseded copies — and only those.
  */
-test("prunes superseded runs and keeps the active run intact", async () => {
+test("S04: prunes superseded runs and keeps the active run intact", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prune-runs-"));
   try {
     const store = await openStore(root);
@@ -172,7 +172,7 @@ test("refuses to prune while no run is active", async () => {
  * `model_runs.parent_model_run_id` is NO ACTION, so a retained run's ancestors
  * must survive even when they fall outside the retention window.
  */
-test("keeps the ancestry of a retained run", async () => {
+test("S04: keeps the ancestry of a retained run", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prune-lineage-"));
   try {
     const store = await openStore(root);

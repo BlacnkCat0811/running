@@ -3,7 +3,7 @@ import {mkdtempSync,rmSync} from "node:fs";import {join} from "node:path";import
 import {RaiDatabase,SqliteModelRunRepository,SqliteModelReleaseRepository,ModelRunActivationError,REQUIRED_MODEL_DOMAINS,semanticHash} from "../src/index.js";
 import type {ModelLineageV2} from "@rai/contracts";
 const at="2026-09-29T00:00:00Z";
-test("v23 releases atomically publish/rollback and reject failed, stale and changed snapshots",async()=>{
+test("S01: v23 releases atomically publish/rollback and reject failed, stale and changed snapshots",async()=>{
  const root=mkdtempSync(join(tmpdir(),"rai-v2-release-"));const store=await RaiDatabase.open(join(root,"db.sqlite"),{createMigrationBackup:false});
  try{
  const db=store.database;db.prepare("INSERT INTO import_manifest VALUES('dataset_version','dataset')").run();

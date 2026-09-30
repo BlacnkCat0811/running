@@ -124,7 +124,7 @@ test("preparation reproduces the documented legacy formula exactly", () => {
   assert.ok((assessment.values.five_k ?? 0) > 0.75 && (assessment.values.five_k ?? 0) < 0.78);
 });
 
-test("the fixed 8-week denominator is preserved even when history is shorter", () => {
+test("D01: the fixed 8-week denominator is preserved even when history is shorter", () => {
   // §8.1 names this exact defect: a user with two weeks of data is read as under-trained.
   // The legacy denominator must survive the migration; the difference is reported, not acted on.
   const facts = runSeries(4, 10, 14);
@@ -161,7 +161,7 @@ test("coverage days are fractional, matching the legacy unrounded day difference
   assert.equal(assessment.historyCoverageDays, 28.5);
 });
 
-test("evidence level separates incomplete history from genuinely low volume", () => {
+test("D01: evidence level separates incomplete history from genuinely low volume", () => {
   const short = assessPreparation(runSeries(4, 10, 14), AS_OF);
   assert.equal(short.evidenceLevel, "developing");
   assert.deepEqual(short.reasonCodes, ["history_incomplete"]);
@@ -200,7 +200,7 @@ test("preparation rejects inputs it cannot compute honestly", () => {
 // §17.4 Durability：只出证据，不给分数
 // -----------------------------------------------------------------------------
 
-test("durability never produces a score without calibration", () => {
+test("D02: durability never produces a score without calibration", () => {
   for (const count of [0, 1, 2, 5, 40]) {
     const assessment = assessDurability({
       lateRunStability: 0.9,

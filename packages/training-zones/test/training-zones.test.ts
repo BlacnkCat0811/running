@@ -58,7 +58,7 @@ test("keeps seven valid resting-heart-rate days when MAD is zero or near zero", 
   }
 });
 
-test("manual values take precedence only after their effective date", () => {
+test("Z01: manual values take precedence only after their effective date", () => {
   const settings = {
     revision: 1,
     effectiveFromLocalDate: "2026-07-14",
@@ -815,7 +815,7 @@ test("paired coverage is real pairing, not the smaller of the two coverages", ()
   assert.equal(overlapping.agreement, "aligned");
 });
 
-test("a brief divergence is not a standing conflict", () => {
+test("Z03: a brief divergence is not a standing conflict", () => {
   // §10.4: heart rate lags during intervals and must not be read as a permanent conflict.
   const brief = assessZoneCoherence({
     durationSeconds: 600,

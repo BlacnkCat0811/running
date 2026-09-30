@@ -27,7 +27,7 @@ test("rejects invalid residual outputs and correction limits", () => {
   assert.throws(() => correctionFractionFromLogResidual(0, 0.5));
 });
 
-test("validates the immutable CatBoost artifact manifest contract", () => {
+test("M01: validates the immutable CatBoost artifact manifest contract", () => {
   const hash = "a".repeat(64);
   const manifest = {
     modelVersion: "race-residual-catboost-v4",

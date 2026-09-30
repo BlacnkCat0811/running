@@ -32,7 +32,7 @@ test("empty data has null metrics and does not activate anything", () => {
   }).blocksActivation, true);
 });
 
-test("train, calibration and test use separate event identities, arrival time and embargo", () => {
+test("M04: train, calibration and test use separate event identities, arrival time and embargo", () => {
   const value = {
     trainingEventIds: ["train"], trainingLabelsAvailableThrough: "2026-06-01T00:00:00Z",
     calibration: cases("cal", "07", [0, 0.01, -0.01, 0.03, -0.03]),
@@ -48,7 +48,7 @@ test("train, calibration and test use separate event identities, arrival time an
   }), /calibration\/embargo/);
 });
 
-test("empirical intervals are nested, independently evaluated and not individual guarantees", () => {
+test("I01: empirical intervals are nested, independently evaluated and not individual guarantees", () => {
   const artifact = fitEmpiricalIntervals({
     predictorVersion: "baseline-v1", distance: "five_k",
     calibration: cases("cal", "07", [-0.1, -0.05, 0, 0.05, 0.1]), asOf, policy
