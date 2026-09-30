@@ -29,24 +29,23 @@
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck`（现覆盖 `packages/`、`apps/`、**`scripts/`**） | **0** |
-| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1097 tests / 1079 pass / 0 fail / 18 skipped** |
+| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1133 tests / 1115 pass / 0 fail / 18 skipped** |
 | web 侧全量 | `npm run test -w @rai/web` | **18 文件 / 111 tests / 0 fail** |
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
-| 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
-| **只读工具链全量实跑** | 8 个已文档化的 CLI/脚本，逐一实跑 | **全部 exit=0**（见下） |
+| 文档行号引用 | `npm run check:doc-refs` | 越界 2 / 漂移 99 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的源码演进） |
+| **只读工具链全量实跑** | 7 个可直接跑的 CLI/脚本，逐一实跑 | **全部 exit=0，且 `var/rai.sqlite` 逐字节未变**（见下） |
 | §16.1 验收矩阵 | `npm run check:acceptance-matrix` | **54 条 / cited 54 / declared-gap 0 / missing 0** |
 | 包边界 | `npm run check:package-boundaries` | **15 个包 / 30 条 src 边 / 禁线 4 条 → 通过** |
 | 速度合理性盘点 | `npm run data:speed-plausibility` | **11835 样本 / 0 越界**（只读，exit 0） |
 
-> **工具链实跑（2026-09-30，均只读）**：
-> `walk-forward` 2004 ms · `model-version-replay` 643 ms（gate `rai-shadow-gate-v1` 通过：
-> CA 均值 |Δ| 3.47、最终 TA |Δ| 1.61）· `ablation` 1286 ms（6 候选、**6 个发布阻断**）·
-> `normalization-coverage` 481 ms · `readiness-replay-coverage` 1826 ms ·
-> `backfill-canonical-nights`（dry-run）436 ms · `model-v2 --action inspect` 411 ms ·
-> `prediction-eval` 286 ms（`no_active_catboost_model`）· `baseline-rebase-review`
-> （`review.status = not_evaluable`，见 §五-7）。
+> **工具链实跑（最新一轮，均只读）**：
+> `ablation` 627 ms · `readiness-replay-coverage` 1846 ms · `rebase-review` 492 ms ·
+> `speed-inventory` 555 ms · `normalization-coverage` 529 ms · `model-version-replay` 357 ms ·
+> `phase0-baseline` 453 ms —— 全部 exit=0，跑前跑后 `var/rai.sqlite` 的 SHA-256 相同。
 > 这一步的用途是抓"工具悄悄坏掉"：批次 19 的消融脚本曾经自 `017bf95` 起完全无法运行，
 > 而没有任何门禁会因此转红。
+> 另有 `walk-forward` / `prediction-eval` / `model-v2 inspect` / 两个**文件入参** CLI
+> （`model-replay`、`prediction-challengers`，缺入参时按设计非 0 退出）。
 
 > **计数口径**：node 侧必须用**带引号的 glob**交给 node 自己展开。
 > 直接 `npm run test` 在本机（Windows/cmd）只跑到 498 条 —— 那是脚本壳差异，不是回归。
@@ -795,5 +794,23 @@ treated as ingestion time." —— 全量重建恰好把那个 "known" 抹掉了
 
 ⚠️ **必须写明的边界**：本工作区的 `var/rai.sqlite` 里 canonical 表是 **0 行**（schema 22，从未回填），
 所以这个修复**在本库上没有任何可观测效果**，效果全部由合成用例钉住。
-另外 RHR 的可得性走的是 `import_manifest.import_completed_at` —— 一个**每次导入覆盖的全局标量**，
-不在本次修复范围内，它是同一族问题的另一条通道。
+（已复跑核对：`readiness-replay-coverage` 修复前后逐字段相同 —— `assessableDays 1`、
+`asKnownThenBlockedDays 302`、`coverage {none:768, partial:1, complete:0}`。）
+
+### 13.5 🔴 **订正**：RHR 那条通道**不是**同一族缺陷，不能照这个思路修
+
+上一版本文档把 RHR 的可得性（走 `import_manifest.import_completed_at`，一个每次导入覆盖的
+全局标量）写成"同一族问题的另一条通道"，暗示它是待修的同类缺陷。**这个说法是错的**，
+写下来以免有人照着去"修"：
+
+- 那个标量的注释已经写明它是 **"a conservative upper bound, not a fabricated record-level
+  arrival time"** —— 取**最近一次**发布作为上界，是在**故意保守**。
+- 若改成"取 asOf 当时生效的那次发布"，就会让**后来才导入的记录**看起来在当时已经可得 ——
+  那是**往未来泄漏**的方向错，正是 §15.4 明令禁止的。
+- 真正要解决它，需要**记录级入库时间**（每条记录第一次被系统接受是什么时候），
+  而现在没有这个东西：`health_records.created_at` 是**数据源**创建时间，
+  契约明确拒绝把它当成入库时间。
+
+所以这里的诚实结论是：**这一条是设计级缺口（缺 record-level ingest ledger），不是可以就地打的补丁。**
+它的可观测后果是 RHR 通道在历史 `asOf` 上一律不可得，而这**恰好**是保守方向 ——
+宁可说"那时还不知道"，也不谎称"那时已经知道"。
