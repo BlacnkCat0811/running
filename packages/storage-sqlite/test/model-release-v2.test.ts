@@ -3,6 +3,48 @@ import {mkdtempSync,rmSync} from "node:fs";import {join} from "node:path";import
 import {RaiDatabase,SqliteModelRunRepository,SqliteModelReleaseRepository,ModelRunActivationError,REQUIRED_MODEL_DOMAINS,semanticHash} from "../src/index.js";
 import type {ModelLineageV2} from "@rai/contracts";
 const at="2026-09-29T00:00:00Z";
+test("epoch origins survive while current or rollback releases need them, then retire normally", async () => {
+ const root=mkdtempSync(join(tmpdir(),"rai-epoch-retention-"));
+ const store=await RaiDatabase.open(join(root,"db.sqlite"),{createMigrationBackup:false});
+ try {
+  const db=store.database;
+  db.prepare("INSERT INTO import_manifest VALUES('dataset_version','dataset')").run();
+  const releases=new SqliteModelReleaseRepository(db),models=new SqliteModelRunRepository(db);
+  let previous:string|null=null,sequence=0;
+  const publish=(id:string,epoch:string,origin=false)=>{
+   const stamp=new Date(Date.parse(at)+sequence++*1000).toISOString();
+   db.prepare(`INSERT INTO feature_runs(id,dataset_version,canonical_contract_version,feature_schema_version,feature_config_json,feature_config_hash,status)
+     VALUES(?,'dataset','canonical-health-v2','workout-feature-v4','{}','hash','succeeded')`).run('f'+id);
+   db.prepare(`INSERT INTO model_runs(id,feature_run_id,dataset_version,model_version,model_config_json,model_config_hash,evaluated_at,status)
+     VALUES(?,?,'dataset','v2','{}','hash',?,'succeeded')`).run(id,'f'+id,stamp);
+   db.prepare(`INSERT INTO training_metric_runs(id,model_run_id,algorithm_version,config_json,config_hash,timezone_identifier,evaluated_at,status)
+     VALUES(?,?,'v5','{}','hash','UTC',?,'succeeded')`).run('t'+id,id,stamp);
+   const lineage:ModelLineageV2={sourceRunId:id,datasetVersion:'dataset',factsSnapshotHash:semanticHash({}),overrideSnapshotHash:semanticHash([]),
+    modelVersion:'rai-v2.0.0',featureSchemaVersion:'workout-feature-v4',configVersion:'v12',configHash:'hash',baselineEpochId:epoch,
+    calibrationCohortHash:null,normalizationVersion:null,normalizationConfigHash:null,timezoneIdentifier:'UTC',asOf:stamp,dataThroughAt:null};
+   releases.recordLineage(id,'rai-v2.0.0','v12',lineage);
+   for(const domain of REQUIRED_MODEL_DOMAINS)releases.putSnapshot(id,domain,'summary',stamp,{lineage});
+   releases.recordEvaluation({runId:id,baseRunId:previous,datasetVersion:'dataset',status:'passed',createdAt:stamp,
+    report:origin?{rebase:{candidateEpoch:epoch,effectiveAt:stamp}}:{}});
+   models.activateSucceeded(id,stamp);previous=id;
+   releases.retireOldReleases(1);
+  };
+  const exists=(id:string)=>Boolean(db.prepare('SELECT 1 FROM model_release_bundles WHERE model_run_id=?').get(id));
+  publish('origin-a','epoch-a',true);publish('a1','epoch-a');publish('a2','epoch-a');publish('a3','epoch-a');
+  assert.equal(exists('origin-a'),true);
+  assert.equal(exists('a1'),false);
+  assert.equal(exists('a2'),true);
+  store.pruneSupersededModelRuns({keepRecent:1});
+  assert.ok(db.prepare('SELECT 1 FROM model_runs WHERE id=?').get('origin-a'));
+  publish('origin-b','epoch-b',true);
+  assert.equal(exists('origin-a'),true,'the retained rollback release still needs epoch-a');
+  publish('b1','epoch-b');
+  assert.equal(exists('origin-a'),false,'no permanent pin after the last dependent epoch-a release retires');
+  assert.equal(exists('origin-b'),true);
+  publish('b2','epoch-b');
+  assert.equal(exists('origin-b'),true);
+ } finally {store.close();rmSync(root,{recursive:true,force:true});}
+});
 test("S01: v23 releases atomically publish/rollback and reject failed, stale and changed snapshots",async()=>{
  const root=mkdtempSync(join(tmpdir(),"rai-v2-release-"));const store=await RaiDatabase.open(join(root,"db.sqlite"),{createMigrationBackup:false});
  try{

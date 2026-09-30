@@ -19,18 +19,16 @@
 //                                                isolation, readiness output
 //                                                completeness) become the gate
 //   scale cannot be determined                -> not_evaluable, never a pass
-//   zero matched sessions                     -> not_evaluable, never a pass
+//   zero matched sessions                     -> not_evaluable unless explicit
+//                                                complete empty-cohort proof
 //
 // `invalidValueCount > 0`, non-finite metrics and eligibility drift always fail,
 // on both scales.
 //
-// Design: deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §14.5.
+// Design: docs/ALGORITHM.md §14.
 //
-// Persistence is deliberately out of scope here. `model_validation_gates.status`
-// is CHECK-constrained to ('passed','failed','skipped'), so `not_evaluable`
-// cannot be stored without its own migration, and writing it as 'skipped' would
-// read as "no base run". This module therefore stays a pure decision function;
-// wiring it into the recompute pipeline lands with that migration.
+// This module stays pure. The recompute pipeline persists its three-state result
+// with the immutable release evaluation, including any explicit empty proof.
 
 export const MODEL_TRANSITION_GATE_VERSION = "rai-model-transition-gate-v2" as const;
 
@@ -110,11 +108,24 @@ export interface ModelTransitionGateInput {
   baseModelRunId: string | null;
   schema: ModelTransitionSchemaContext;
   metrics: ModelTransitionMetricsV2;
+  /** DB-derived proof for a legitimate empty dataset, never a generic bypass. */
+  emptyCohort?: {
+    baseSessions: number;
+    removedBaseSessions: number;
+    remainingSourceSessions: number;
+    candidateFeatures: number;
+    candidateAssessments: number;
+    candidateLoads: number;
+    candidateDailyRows: number;
+    candidateCheckpointRows: number;
+    domainSnapshotsEmpty: boolean;
+  };
   /** Defaults to `MODEL_TRANSITION_GATE_THRESHOLDS_V2`. */
   thresholds?: ModelTransitionGateThresholdsV2;
 }
 
 export interface ModelTransitionGateResultV2 {
+  emptyCohort?: ModelTransitionGateInput["emptyCohort"];
   candidateModelRunId: string;
   baseModelRunId: string | null;
   gateVersion: typeof MODEL_TRANSITION_GATE_VERSION;
@@ -158,7 +169,20 @@ export function evaluateModelTransitionGateV2(
 
   const hasBase = input.baseModelRunId !== null && input.baseModelRunId !== input.candidateModelRunId;
   if (!hasBase) notEvaluableReasons.push("no_base_run");
-  if (metrics.matchedSessions === 0) notEvaluableReasons.push("no_matched_sessions");
+  const empty = input.emptyCohort;
+  const verifiedEmpty = empty !== undefined &&
+    [empty.baseSessions, empty.removedBaseSessions, empty.remainingSourceSessions,
+      empty.candidateFeatures, empty.candidateAssessments, empty.candidateLoads,
+      empty.candidateDailyRows, empty.candidateCheckpointRows]
+      .every((value) => Number.isInteger(value) && value >= 0) &&
+    empty.baseSessions === empty.removedBaseSessions && empty.remainingSourceSessions === 0 &&
+    empty.candidateFeatures === 0 && empty.candidateAssessments === 0 && empty.candidateLoads === 0 &&
+    empty.candidateDailyRows === 0 && empty.candidateCheckpointRows === 0 && empty.domainSnapshotsEmpty === true &&
+    metrics.matchedSessions === 0 && metrics.candidateEligibleSessions === 0 && metrics.baseEligibleSessions === 0 &&
+    metrics.invalidValueCount === 0 && metrics.readinessOutputCoverage === 1 && metrics.recoveryIsolationHolds === true;
+  if (empty !== undefined && !verifiedEmpty) failureReasons.push("empty_cohort_evidence_invalid");
+  if (metrics.matchedSessions === 0 && !verifiedEmpty) notEvaluableReasons.push("no_matched_sessions");
+  if (verifiedEmpty) migrationReport.push("confirmed_empty_cohort:no_remaining_source_or_derived_training");
 
   if (transition !== "unknown") {
     if (metrics.eligibleSessionDelta > thresholds.maxEligibleSessionDelta) {
@@ -213,6 +237,7 @@ export function evaluateModelTransitionGateV2(
     failureReasons.length > 0 ? "failed" : notEvaluableReasons.length > 0 ? "not_evaluable" : "passed";
 
   return {
+    ...(empty === undefined ? {} : { emptyCohort: empty }),
     candidateModelRunId: input.candidateModelRunId,
     baseModelRunId: input.baseModelRunId,
     gateVersion: MODEL_TRANSITION_GATE_VERSION,

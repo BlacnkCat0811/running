@@ -10,7 +10,7 @@ import { localDateAt, localDateTimeAt, stableId } from "./utils.js";
  * `v1 → v2`：日期范围从"只看段的开始时刻"改为"开始与结束都看"。
  * v1 下**最近的一夜永远不入表**（那一夜的段都开始于前一晚），而 `canonicalizeNights`
  * 本身是 DELETE + 全量重建，所以下一次导入就会用新版本覆盖全部行
- * （与 `docs/SLEEP_HRV_DESIGN.md` 的 bump 政策一致）。
+ * （与 `docs/DATA_PIPELINE.md` 的 bump 政策一致）。
  */
 export const CANONICAL_NIGHT_ALGORITHM_VERSION = "canonical-night-v2" as const;
 

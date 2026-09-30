@@ -1,0 +1,68 @@
+{
+  "version": "rai-v2-release-rehearsal-v1",
+  "asOf": "2026-09-30T00:00:00.000Z",
+  "sourceHash": "cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d",
+  "sourceUnchanged": true,
+  "writes": "disposable_backup_only",
+  "aggregates": {
+    "schemaVersion": 25,
+    "activeFeatureSchema": "workout-feature-v4",
+    "publishedSnapshots": 537,
+    "copyBytes": 324943872,
+    "peakRssKb": 416184
+  },
+  "comparison": {
+    "baseline": {
+      "subject": "V2 full recompute",
+      "cacheState": "warm",
+      "rounds": 2,
+      "environment": "darwin/x64; Node v22.23.2; source sha256 cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d"
+    },
+    "candidate": {
+      "subject": "V2 unchanged-facts incremental recompute",
+      "cacheState": "warm",
+      "rounds": 2,
+      "environment": "darwin/x64; Node v22.23.2; source sha256 cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d"
+    },
+    "isolatedVariable": "full versus incremental recompute, identical facts/as-of/config",
+    "claim": "measured_under_stated_conditions"
+  },
+  "warmup": {
+    "elapsedMs": 73949.66588100001,
+    "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+    "runId": "model_run_e50ad560-c7c7-4be6-9e9f-25ee8520adb6"
+  },
+  "baseline": [
+    {
+      "elapsedMs": 31379.734505999993,
+      "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+      "runId": "model_run_7551e5a7-054a-4c4a-b612-1897b57249de"
+    },
+    {
+      "elapsedMs": 40442.28309900002,
+      "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+      "runId": "model_run_4714c4e9-d118-4979-a41c-0754096360fd"
+    }
+  ],
+  "candidate": [
+    {
+      "elapsedMs": 32609.22045600001,
+      "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+      "runId": "model_run_d846b052-6c09-42da-b01b-6cf264e2bd8b"
+    },
+    {
+      "elapsedMs": 26906.25556000002,
+      "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+      "runId": "model_run_20391e6a-b171-40ad-b6c0-fe537fd4f7f6"
+    }
+  ],
+  "rollback": {
+    "status": "passed",
+    "from": "model_run_20391e6a-b171-40ad-b6c0-fe537fd4f7f6",
+    "to": "model_run_4714c4e9-d118-4979-a41c-0754096360fd",
+    "reopenVerified": true
+  },
+  "predictionContracts": "sync_and_async_heuristic_fallback_verified",
+  "accuracyStatus": "not_evaluable",
+  "note": "No V1/V2 speedup or prediction accuracy claim; two warm rounds per recompute mode."
+}

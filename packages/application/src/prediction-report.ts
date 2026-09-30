@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import {
   MODEL_EVAL_VERSION, fitEmpiricalIntervals, evaluateIntervalArtifact,
   compareResidualChallengers, predictionMetrics, assertPredictionCorrectionLedger,
+  toHeuristicRange, assertIntervalPresentation,
   type EvaluationCase
 } from "@rai/model-eval";
 
@@ -838,7 +839,7 @@ export function buildPredictionReport(
   database: DatabaseSync,
   options: PredictionReportOptions = {}
 ): PhysiologyPredictionReport {
-  return buildPredictionReportContext(database, options).report;
+  return attachCalibratedIntervals(database, buildPredictionReportContext(database, options).report, options);
 }
 
 async function buildPredictionReportAsyncInternal(
@@ -1132,10 +1133,12 @@ function attachCalibratedIntervals(database:DatabaseSync, report:PhysiologyPredi
   const baselineHash=database.prepare("SELECT 1 FROM sqlite_master WHERE name='feature_runs'").get() ? currentAbilityBaselineHash(database) : null;
   const repository=new SqliteCalibrationRepository(database);
   const races=report.snapshot.races.map((prediction)=>{
+    const heuristicRange=toHeuristicRange(prediction.optimisticSeconds,prediction.pessimisticSeconds);
+    assertIntervalPresentation({kind:"heuristic",range:heuristicRange});
     const predictorKey=predictionPolicyKey(options.mode??"legacy",prediction.method,prediction.method==="catboost_residual_v6"?report.modelSelection.machineLearning.artifactSha256:null,report.inputs.scenario);
     const selected=baselineHash && prediction.predictedSeconds!==null
       ? repository.select(predictorKey,baselineHash,prediction.distance,report.generatedAt,prediction.predictedSeconds):null;
-    return {...prediction,intervalEvidence:{predictorKey,
+    return {...prediction,heuristicRange,intervalEvidence:{predictorKey,
       status:selected?"empirically_evaluated" as const:"insufficient_calibration" as const,
       artifactId:selected?.artifactId??null,p50Seconds:selected?.bounds.p50Seconds??null,
       p80:selected?.bounds.p80??null,p90:selected?.bounds.p90??null,

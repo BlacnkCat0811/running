@@ -7,6 +7,7 @@ import {defaultRaiModelConfig} from '@rai/scoring';
 import {RaiApplicationService} from './service.js';
 import {prepareCalibration,compareStoredModelSnapshots,type CalibrationSubmission} from './model-v2-maintenance.js';
 import {currentAbilityBaselineHash} from './prediction-ability-baseline.js';
+import {buildBaselineRebaseReview,recordBaselineRebaseReview} from './baseline-rebase-review.js';
 
 const args=process.argv.slice(2),options=new Map<string,string|true>();
 const names=new Set(['--database','--action','--as-of','--reference-start','--input','--base-run','--run-id','--expected-active','--prediction-run-id','--apply']);
@@ -24,7 +25,7 @@ const instant=value('--as-of')??new Date().toISOString();
 if(!Number.isFinite(Date.parse(instant)))throw new Error('Invalid --as-of');
 const at=new Date(instant).toISOString();
 if(!existsSync(databasePath))throw new Error('Database not found');
-if(!['inspect','rebase','rollback','calibrate','compare','activate-prediction'].includes(action))throw new Error('Unsupported --action');
+if(!['inspect','rebase','review-baseline','rollback','calibrate','compare','activate-prediction'].includes(action))throw new Error('Unsupported --action');
 const reference=value('--reference-start'),runId=value('--run-id'),expected=value('--expected-active');
 const baseRunId=value('--base-run'),inputPath=value('--input'),predictionRunId=value('--prediction-run-id');
 if(action==='activate-prediction'&&!predictionRunId)throw new Error('activate-prediction requires --prediction-run-id');
@@ -48,6 +49,7 @@ if(action==='compare'){
     console.log(JSON.stringify({mode:'dry-run',action,databasePath,reference:reference??null,runId:runId??null,
       active:db.prepare('SELECT * FROM active_model_run').all(),baselineHash:currentAbilityBaselineHash(db),
       pendingMigrations:RaiDatabase.pendingMigrations(databasePath),
+      baselineReview:action==='review-baseline'?buildBaselineRebaseReview(db,{asOf:at}):null,
       predictionCandidate:prediction?{...prediction,calibrationPredictorKey:typeof prediction.artifactSha==='string'?catBoostCalibrationKey(prediction.artifactSha):null}:null,
       calibration:preview?{status:preview.status,evaluation:preview.evaluation}:null},null,2));
   }finally{db.close();}
@@ -57,6 +59,9 @@ if(action==='compare'){
     const store=await RaiDatabase.open(databasePath,{migrationPolicy:'refuse'});
     try{
       if(action==='rollback')new SqliteModelReleaseRepository(store.database).rollback(runId!,expected!,at);
+      else if(action==='review-baseline'){
+        console.log(JSON.stringify({action,...recordBaselineRebaseReview(store.database,{asOf:at})},null,2));
+      }
       else if(action==='activate-prediction')new PredictionModelService(store).activate(predictionRunId!);
       else if(calibrationInput){
         const staged=prepareCalibration(store.database,calibrationInput,at);
@@ -70,7 +75,7 @@ if(action==='compare'){
         const job=service.runNextJob();
         if(job?.id!==jobId||job.status!=='succeeded')throw new Error(`Rebase was not published: ${JSON.stringify(job)}`);
       }
-      if(!calibrationInput)console.log(JSON.stringify({action,status:'succeeded'}));
+      if(!calibrationInput&&action!=='review-baseline')console.log(JSON.stringify({action,status:'succeeded'}));
     }finally{store.close();}
   }finally{release();}
 }

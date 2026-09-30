@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { canonicalSemanticJson } from "@rai/contracts";
-import { evaluateIntervalArtifact, empiricalIntervalBounds, validateIntervalArtifact, assertIntervalPublicationPolicy, type IntervalArtifact, type EvaluationCase } from "@rai/model-eval";
+import { evaluateIntervalArtifact, empiricalIntervalBounds, validateIntervalArtifact, assertIntervalPublicationPolicy, assertIntervalPresentation, type IntervalArtifact, type EvaluationCase } from "@rai/model-eval";
 import { semanticHash } from "./model-release-repository.js";
 
 export class SqliteCalibrationRepository {
@@ -15,7 +15,9 @@ export class SqliteCalibrationRepository {
     const hash=semanticHash(artifact), id=semanticHash({hash,baselineHash,test,asOf});
     this.db.prepare(`INSERT OR IGNORE INTO prediction_calibration_artifacts
       VALUES (?,?,?,?,?,?,?,?,?)`).run(id,artifact.predictorVersion,baselineHash,artifact.distance,asOf,
-        canonicalSemanticJson(artifact),hash,canonicalSemanticJson(evaluation),evaluation.status);
+        canonicalSemanticJson(artifact),hash,canonicalSemanticJson({
+          ...evaluation,evaluationCohortHash:semanticHash(test)
+        }),evaluation.status);
     return id;
   }
   select(predictorVersion:string,baselineHash:string,distance:string,asOf:string,point:number) {
@@ -30,10 +32,19 @@ export class SqliteCalibrationRepository {
       const artifact=JSON.parse(String(row.artifact_json)) as IntervalArtifact;
       validateIntervalArtifact(artifact);
       assertIntervalPublicationPolicy(artifact.policy);
-      const evaluation=JSON.parse(String(row.evaluation_json)) as ReturnType<typeof evaluateIntervalArtifact>;
+      const evaluation=JSON.parse(String(row.evaluation_json)) as ReturnType<typeof evaluateIntervalArtifact> & {
+        evaluationCohortHash?: string
+      };
       if (semanticHash(artifact)!==row.artifact_hash || artifact.predictorVersion!==predictorVersion ||
         artifact.distance!==distance || evaluation.blocksPublication || evaluation.status!=="passed") return null;
-      return {artifactId:String(row.id),bounds:empiricalIntervalBounds(artifact,point),evaluation};
+      const bounds=empiricalIntervalBounds(artifact,point);
+      for (const key of ["p80","p90"] as const) {
+        assertIntervalPresentation({kind:"calibrated",evidence:{
+          ...evaluation[key],...bounds[key],status:"empirically_evaluated",domainMatch:"matched",
+          evaluationCohortHash:evaluation.evaluationCohortHash??null,calibrationVersion:artifact.version
+        }});
+      }
+      return {artifactId:String(row.id),bounds,evaluation};
     } catch { return null; }
   }
 }

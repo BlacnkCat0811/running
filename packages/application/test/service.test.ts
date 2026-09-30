@@ -238,11 +238,14 @@ test("creates immutable feature/model runs and switches the active model", async
   }
 });
 
-test("freezes the override snapshot before feature extraction starts", async () => {
+test("freezes overrides during extraction but refuses to publish after a concurrent revision change", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-override-snapshot-"));
   const store = await seedDatabase(join(root, "rai.sqlite"));
   try {
     const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
+    const incumbent = service.runNextJob();
+    assert.equal(incumbent?.status, "succeeded");
     const pipeline = Reflect.get(service, "pipeline") as object;
     const extractFeatures = Reflect.get(pipeline, "extractFeatures") as (
       ...args: unknown[]
@@ -266,7 +269,11 @@ test("freezes the override snapshot before feature extraction starts", async () 
 
     service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
     const completed = service.runNextJob();
-    assert.equal(completed?.status, "succeeded");
+    assert.equal(completed?.status, "failed");
+    assert.match(String(completed?.error?.message ?? ""), /overrides changed/i);
+    for (const table of ["active_model_run", "active_model_release"]) {
+      assert.equal(store.database.prepare(`SELECT model_run_id AS id FROM ${table}`).get()?.id, incumbent?.modelRunId);
+    }
     const row = store.database.prepare(`
       SELECT metric.config_json AS configJson, load.rpe
       FROM training_metric_runs metric
@@ -278,6 +285,10 @@ test("freezes the override snapshot before feature extraction starts", async () 
       []
     );
     assert.equal(row.rpe, null);
+    service.enqueueFullRecompute({ evaluatedAt: dateForRun(8), timezoneIdentifier: "UTC" });
+    const refreshed = service.runNextJob();
+    assert.equal(refreshed?.status, "succeeded", JSON.stringify(refreshed));
+    assert.equal(store.database.prepare("SELECT rpe FROM active_workout_training_loads WHERE training_session_id='session_7'").get()?.rpe, 10);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -888,6 +899,18 @@ test("V2 lineage uses a stable epoch and explicit rebase preserves the previous 
     assert.notEqual(lineage(third).baselineEpochId,initial.baselineEpochId);
     const release=store.database.prepare('SELECT evaluation_json AS json,status FROM model_release_bundles WHERE model_run_id=?').get(third)!;
     assert.equal(release.status,'passed');assert.equal(JSON.parse(String(release.json)).rebase.referenceStartAt,dateForRun(1));
+    assert.equal(JSON.parse(String(release.json)).rebase.effectiveAt,at);
+    assert.equal(JSON.parse(String(release.json)).rebase.rebaseReason,"explicit_reference_start");
     assert.equal(store.database.prepare("SELECT payload_json AS json FROM model_domain_snapshots WHERE model_run_id=? AND domain='fitness'").get(first)?.json,firstSnapshot);
+    const { buildBaselineRebaseReview } = await import('../src/baseline-rebase-review.js');
+    const review = buildBaselineRebaseReview(store.database, { asOf: at });
+    assert.equal(review.epoch.startedAt, at);
+    for (let round = 0; round < 3; round++) execute({...defaultRaiModelConfig,baselineReferenceStartAt:dateForRun(1)});
+    const afterPruning = buildBaselineRebaseReview(store.database, { asOf: at });
+    assert.equal(afterPruning.epoch.epochId, review.epoch.epochId);
+    assert.equal(afterPruning.epoch.startedAt, review.epoch.startedAt);
+    assert.equal(afterPruning.epoch.startedAtSource, 'published_rebase.effectiveAt');
+    assert.ok(store.database.prepare('SELECT 1 FROM model_release_bundles WHERE model_run_id=?').get(third));
+    assert.ok(store.database.prepare('SELECT 1 FROM model_runs WHERE id=?').get(third), 'run pruning must retain the epoch origin dependency');
   } finally {store.close();rmSync(root,{recursive:true,force:true});}
 });

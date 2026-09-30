@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Cross-version Fitness replay on one stored feature snapshot
-// (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §3.4 / §15.5 / §15.8).
+// (docs/ALGORITHM.md §3.4 / §15.5 / §15.8).
 //
 // §3.4 requires the V2 release to replay the available history and to keep the V1 result
 // runnable for comparison and rollback. The CA weighting ablation is NOT that comparison:

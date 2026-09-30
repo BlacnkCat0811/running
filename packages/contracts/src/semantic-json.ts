@@ -1,6 +1,6 @@
 // Deterministic JSON canonicalisation for semantic output hashing.
 //
-// `RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md` §3.2 requires that two runs over
+// `docs/ALGORITHM.md` §3.2 requires that two runs over
 // the same facts and the same config produce the same semantic hash, while
 // operational metadata (timestamps, task ids, durations) is allowed to differ.
 // That needs rules stricter than `JSON.stringify`:

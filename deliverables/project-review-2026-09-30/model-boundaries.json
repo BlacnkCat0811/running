@@ -1,0 +1,34 @@
+{
+  "version": "rai-model-boundary-review-v1",
+  "writes": "synthetic_temporary_databases_only",
+  "results": [
+    {
+      "id": "R1",
+      "violation": true,
+      "refused": false,
+      "effectiveOverride": "exclude",
+      "before": "excluded",
+      "after": "eligible",
+      "evaluatedAt": "2026-09-30T12:44:14.961Z"
+    },
+    {
+      "id": "R2",
+      "violation": true,
+      "jobStatus": "failed",
+      "error": {
+        "message": "Model-version gate failed: not_evaluable",
+        "name": "Error"
+      },
+      "remainingPublishedRows": 10
+    },
+    {
+      "id": "R3",
+      "violation": true,
+      "before": "2026-01-31T04:00:00.000Z",
+      "after": "2026-01-19T00:00:00.000Z",
+      "sameEpoch": true,
+      "originReceiptRetained": false
+    }
+  ],
+  "violationCount": 3
+}

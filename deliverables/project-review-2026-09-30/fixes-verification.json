@@ -1,0 +1,246 @@
+{
+  "version": "rai-project-review-fixes-v1",
+  "date": "2026-09-30",
+  "timezone": "Asia/Shanghai",
+  "baseCommit": "f33ec708802d4b7cc4f6284af7e84efa4b5800cd",
+  "workingTree": "uncommitted, includes preceding implementation and documentation consolidation",
+  "originalReviewEvidence": {
+    "file": "verification.json",
+    "sha256": "b2613eda4c68d9f00956da045e390c1e48e0f6d59b6fe075f3fa37e3241132bc"
+  },
+  "findings": [
+    {
+      "id": "R1",
+      "status": "fixed",
+      "mechanism": "V4 override snapshot hash checked on publication, activation and rollback; legacy V3 metric config override IDs checked; concurrent revision blocks stale publication, same-facts rollback allowed",
+      "regression": "typed activation refusal, CLI repository rollback refusal, both active pointers preserved, concurrent change refused then fresh recompute accepted, real desktop HTTP 409/UI/pointer regression"
+    },
+    {
+      "id": "R2",
+      "status": "fixed",
+      "mechanism": "explicit DB-derived complete empty-cohort proof; all known base sessions removed, no active sources or candidate derived training; no generic no-matched waiver",
+      "regression": "all deleted and empty-to-empty publish; missing/NaN/partial evidence, source remnants, unknown scale and corruption still block"
+    },
+    {
+      "id": "R3",
+      "status": "fixed",
+      "mechanism": "pin original rebase release for current and retained rollback dataset/epoch dependencies, permit normal retirement after all dependents leave; same dataset lookup in review",
+      "regression": "three production recomputes plus pruning preserve epoch/effectiveAt; storage test confirms origin run retained and obsolete epoch origins eventually removed",
+      "limitation": "cannot reconstruct metadata already physically pruned before this fix"
+    },
+    {
+      "id": "R4",
+      "status": "fixed_code_and_local_regressions",
+      "mechanism": "shell-free Node driver, explicit test-file enumeration, direct Node/Vitest children, combined exit status and cancellation propagation",
+      "regression": "real children test success/failure matrix and paths with spaces; startup/termination failure cases; npm/Windows CI entry contract",
+      "windowsRuntimeExecuted": false
+    }
+  ],
+  "checks": [
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "npm test",
+      "entry": "node scripts/run-tests.mjs",
+      "exitCode": 0,
+      "node": {
+        "tests": 1163,
+        "passed": 1160,
+        "failed": 0,
+        "skipped": 3
+      },
+      "web": {
+        "files": 18,
+        "passed": 111
+      }
+    },
+    {
+      "command": "node --import tsx --test packages/application/test/test-runner.test.ts packages/application/test/import-idempotency-and-checkpoint.test.ts packages/storage-sqlite/test/model-transition-gate.test.ts packages/storage-sqlite/test/model-release-v2.test.ts",
+      "exitCode": 0,
+      "passed": 28
+    },
+    {
+      "command": "npm run test:e2e:web",
+      "includes": "npm run build",
+      "exitCode": 0,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "frozen 390px responsive test"
+    },
+    {
+      "command": "npm run review:model-boundaries",
+      "exitCode": 0,
+      "violationCount": 0,
+      "originalViolationCount": 3
+    },
+    {
+      "command": "npm run data:verify-v2-release -- --database var/rai.sqlite --as-of 2026-09-30T00:00:00.000Z --out output/review-fixes-2026-09-30/release-rehearsal.json",
+      "exitCode": 0,
+      "sourceDatabaseReadOnly": true,
+      "recomputeRollbackReopen": "passed"
+    },
+    {
+      "command": "npm run check:docs",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check:acceptance-matrix",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run check:package-boundaries",
+      "exitCode": 0
+    }
+  ],
+  "releaseRehearsal": {
+    "version": "rai-v2-release-rehearsal-v1",
+    "asOf": "2026-09-30T00:00:00.000Z",
+    "sourceHash": "cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d",
+    "sourceUnchanged": true,
+    "writes": "disposable_backup_only",
+    "aggregates": {
+      "schemaVersion": 25,
+      "activeFeatureSchema": "workout-feature-v4",
+      "publishedSnapshots": 537,
+      "copyBytes": 324943872,
+      "peakRssKb": 412628
+    },
+    "comparison": {
+      "baseline": {
+        "subject": "V2 full recompute",
+        "cacheState": "warm",
+        "rounds": 2,
+        "environment": "darwin/x64; Node v22.23.2; source sha256 cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d"
+      },
+      "candidate": {
+        "subject": "V2 unchanged-facts incremental recompute",
+        "cacheState": "warm",
+        "rounds": 2,
+        "environment": "darwin/x64; Node v22.23.2; source sha256 cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d"
+      },
+      "isolatedVariable": "full versus incremental recompute, identical facts/as-of/config",
+      "claim": "measured_under_stated_conditions"
+    },
+    "warmup": {
+      "elapsedMs": 120488.684496,
+      "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+      "runId": "model_run_f0f836f0-21d9-4b8e-8415-f6e4422e4a0d"
+    },
+    "baseline": [
+      {
+        "elapsedMs": 38884.037146999995,
+        "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+        "runId": "model_run_5068c6a0-a1d1-4438-b285-870b4957dd0e"
+      },
+      {
+        "elapsedMs": 33214.11695299999,
+        "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+        "runId": "model_run_8a8607fa-b3bd-4487-a8b0-c5f87eafd631"
+      }
+    ],
+    "candidate": [
+      {
+        "elapsedMs": 32220.476208000007,
+        "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+        "runId": "model_run_0f7d88b5-4e0c-447b-925f-387cb7aa8c4c"
+      },
+      {
+        "elapsedMs": 20818.330202000012,
+        "scoreHash": "ac73d7675461bf77ceb00d4bcfd4cb80e79723e9ba280c098e76f696780ffaea",
+        "runId": "model_run_134707f9-0876-41be-89a1-68e3f7fa7a91"
+      }
+    ],
+    "rollback": {
+      "status": "passed",
+      "from": "model_run_134707f9-0876-41be-89a1-68e3f7fa7a91",
+      "to": "model_run_8a8607fa-b3bd-4487-a8b0-c5f87eafd631",
+      "reopenVerified": true
+    },
+    "predictionContracts": "sync_and_async_heuristic_fallback_verified",
+    "accuracyStatus": "not_evaluable",
+    "note": "No V1/V2 speedup or prediction accuracy claim; two warm rounds per recompute mode."
+  },
+  "sourceFilesSha256": {
+    "packages/storage-sqlite/src/model-release-repository.ts": "38bf78f856b8fd6ccb51a8de97f6b0b25aaa5c8fc638d6a99a08951601ec5090",
+    "packages/storage-sqlite/src/model-run-repository.ts": "0d5671a7898b2233845bfd4eecb8deb2c23386e0287bbffc1550bd678c361e85",
+    "packages/storage-sqlite/src/model-transition-gate.ts": "3ea1997cf41a2b831eb0cf59e34ca70cb3baab3f5b2301e5bc77d278025f630d",
+    "packages/application/src/services/recompute-pipeline.ts": "0ec9906fce7e26297d975ecd61ff6d75e26bda46267d0ad5f41441944a6aa805",
+    "packages/application/src/baseline-rebase-review.ts": "5479a21e7748a49c5ab97c0df8de178f9b3fb129b120469da1dd24486effc83d",
+    "packages/storage-sqlite/test/model-release-v2.test.ts": "eaab315f75d63e0467bbebed8ba65c186b3fa8621809b63bd664cacec5f0eee8",
+    "packages/storage-sqlite/test/model-transition-gate.test.ts": "8293ea562c345c65dab9a5707fa6ec29cb1e683f4aa3fcf6a73462649b516cd4",
+    "packages/application/test/service.test.ts": "f59ecfbb7e3e0a0f978351bb2a790cf599ab1974992972eeef9d351e94764cf9",
+    "packages/application/test/import-idempotency-and-checkpoint.test.ts": "fbc6deece5b211dcd2dfa31a3a37708e46c129749c1862c6ebf67aa142f6d6b5",
+    "packages/application/test/test-runner.test.ts": "dd46cbefaded8f63fbc330972c8ac9b5064a7796a6789efd706c598805e0f9d9",
+    "scripts/run-tests.mjs": "3d2eb307f668e4abe197ecc05f74b7bdf8470d8f5a5a8e5923d76b213fc65fa1",
+    "package.json": "e61380fd0e18cee3592f5538b79acdeed82a03e2cca5f1404db40c8283e27925",
+    "apps/web/e2e/web-flows.test.ts": "6eda9b00d8d8e7e1a9176fac2f314032296e1e8e9cfaf0272f8d352680bf6e4d"
+  },
+  "documentsSha256": {
+    "docs/PROJECT_REVIEW.md": "7776ba1619a5b666c527df59d09d2423eb39d326344e69c7ce733930f8e87ce7",
+    "docs/ALGORITHM.md": "85cc02b7cfda0b7d4a8a8e9c66b024ed978cbc6c632cb621371a0c0b48202fa6",
+    "docs/OPERATIONS.md": "5d179c2ff095c6d501f9ca6a475fe820e108717e7d96977930e09a49467fb024",
+    "deliverables/README.md": "25d03177193e6e0f8ffd252c41f2e6873c25c9e30e5ab60e27771c66fc776d9e"
+  },
+  "probeFile": {
+    "file": "model-boundaries-after.json",
+    "sha256": "63aba250b388f3b728fb224d29acb9c31c25832ca233551b5f1a892235b8765b"
+  },
+  "originalDatabase": {
+    "path": "/Users/ta/running/var/rai.sqlite",
+    "sha256": "cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d",
+    "unchanged": true,
+    "migratedOrActivated": false
+  },
+  "noNewMigration": true,
+  "existingNumericGateThresholdsUnchanged": true,
+  "executionNotes": [
+    "initial concurrent-override test and desktop activation success expectation were replaced with assertions for the newly required rejection, retaining frozen extraction checks",
+    "desktop test now waits for the actual newer successful run, not a stale success message",
+    "prior failing review artifacts are preserved; fixes have separate evidence",
+    "rehearsal timing is diagnostic only; other checks ran concurrently, no performance improvement claim"
+  ],
+  "notExecutedThisFix": [
+    "real Windows host/remote CI",
+    "iOS physical device or simulator acceptance",
+    "Python/iOS/Rust gates (implementations unchanged; earlier project review results remain historical)",
+    "responsive/full E2E",
+    "production deployment or original database migration"
+  ],
+  "localLogs": "/Users/ta/running/output/review-fixes-2026-09-30",
+  "logSha256": {
+    "boundaries.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "boundaries.log": "baaddb0890813f4ad88ac51d33278a752fd134fc505e9a82ce35cf358a65fd45",
+    "docs.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "docs.log": "d5caf6c925082b9c94d18d2b7e41e2fa5f8422835aceb024be33b99b1f461a6c",
+    "e2e-final.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "e2e-final.log": "b34c002d8f307d19d6283be259e103a8ca316d40fe398cee5ba62c67142b9e6f",
+    "e2e.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "e2e.log": "d8a7ee1ff63bc5af91f1ca6de09c447c697094961ce2f8e7886ae1e1f49fbba9",
+    "focused.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "focused.log": "36bd62ec6a4cc663f9c7678fc3663f3610eb25220405c78245bc719d079cb4da",
+    "matrix.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "matrix.log": "3f86d748fbe7141616097c7bdc668b3e6f8c3517a40ffd915229d52feba1bd01",
+    "model-boundaries-after.json": "63aba250b388f3b728fb224d29acb9c31c25832ca233551b5f1a892235b8765b",
+    "model-boundaries.json": "54281c1cdd970620b0c1c11f2264732600ad6cd55923242e76e6874cc7e46bab",
+    "probes-final.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "probes-final.log": "176a58e4ffb96845e109642d3564636e9aa2527790300a1e128484dae7adce01",
+    "probes.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "probes.log": "dc1bc38bbe3bf6cf4e94897fde63485158c01a77cacefc8029baf34ba0d2428d",
+    "regressions.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "regressions.log": "7942db8f3fde506d1ea8f852ee9cc644dca1182615f3e6eb9b38d6ff5b1db50f",
+    "release-rehearsal.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "release-rehearsal.json": "b11c3132c97938c0d5b150985edb5327c9c15d23c121975acc480867874fe1e4",
+    "release-rehearsal.log": "26b92392d7c21a6f743b9b9b9c66bda5a1294b21b17e929a3599492cf6c907a2",
+    "tests-final.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "tests-final.log": "2b618f4f69f70bf4ea969787a88e03177a2c3cf6213e23c3232e0522591d73c2",
+    "tests.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "tests.log": "e2fd49013a2929499e9146d61c39c519769c572ed966f0a029fbd03689d95796",
+    "typecheck-final.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "typecheck-final.log": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "typecheck.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "typecheck.log": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b"
+  }
+}

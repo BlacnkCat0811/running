@@ -12,6 +12,7 @@ cd "$(git rev-parse --show-toplevel)"
 node scripts/check-blob-size.mjs
 
 npm run typecheck
+npm run check:docs
 
 # iOS 判据（typecheck-ios.sh + run-model-tests.sh）此前没有任何自动入口，
 # 只有人记得的时候才会被跑 —— 2026-09-19 的 test11 回归就是这么进主干的。

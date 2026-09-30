@@ -3,7 +3,7 @@
 //
 // Fixes "code + config + data" as of the current commit so a later V2 candidate
 // can be compared against a reproducible V1 reference
-// (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §17.1).
+// (docs/ALGORITHM.md §17.1).
 //
 // Read-only with respect to the database: it reports the schema version and row
 // counts and never writes to `var/rai.sqlite`. Opening it read-only also avoids

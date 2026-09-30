@@ -1,6 +1,6 @@
-import { physStateFromReadiness } from "@rai/readiness";
+import { loadPersistedTrainingLoads, loadDailyPhysEvidence } from "../training-load-data.js";
 import { identityNormalizationConfigHash } from "@rai/normalization";
-import { readinessForRun, loadDatedReadiness } from "../model-v2-snapshots.js";
+import { readinessForRun } from "../model-v2-snapshots.js";
 import { DURABILITY_MODEL_VERSION, PREPARATION_TARGETS, PREPARATION_WINDOW_DAYS, assessPreparation, assessDurability, buildDurabilitySnapshot } from "@rai/durability";
 import type { ModelLineageV2, WorkoutFeaturePayloadV4 } from "@rai/contracts";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
@@ -248,36 +248,73 @@ export class RecomputePipeline {
       const releases = new SqliteModelReleaseRepository(this.database);
       this.sealDomainSnapshots(modelRun, metricRunId, features, request, lineage);
       const legacy = this.modelRuns.evaluateValidationGate(modelRun.id, incumbentModelRunId, false);
+      // The incumbent is immutable and still contains deleted sessions. Only
+      // explicit inactive facts explain removal; a missing candidate row for an
+      // active session must still fail the original eligibility drift gate.
+      const deletedAssessments = (id: string | null): number => id === null ? 0 : Number(
+        this.database.prepare(`SELECT COUNT(*) AS n FROM ability_assessments a
+          JOIN training_sessions s ON s.id=a.training_session_id
+          WHERE a.model_run_id=? AND s.status='inactive'
+          AND a.assessment_status IN ('eligible','trial')
+          AND NOT EXISTS (SELECT 1 FROM effective_workout_overrides o
+            WHERE o.training_session_id=a.training_session_id)`).get(id)?.n ?? 0);
+      const removedEligibleSessions = deletedAssessments(incumbentModelRunId);
+      const retainedDeletedSessions = Number(this.database.prepare(`SELECT COUNT(*) AS n
+        FROM workout_features f JOIN training_sessions s ON s.id=f.training_session_id
+        WHERE f.feature_run_id=? AND s.status='inactive'`).get(modelRun.featureRunId)?.n ?? 0);
+      const comparableBaseEligible = legacy.metrics.baseEligibleSessions - removedEligibleSessions;
+      const factAdjustedMetrics = {
+        baseEligibleSessions: comparableBaseEligible,
+        eligibleSessionDelta: Math.abs(comparableBaseEligible - legacy.metrics.candidateEligibleSessions) /
+          Math.max(1, comparableBaseEligible),
+        invalidValueCount: legacy.metrics.invalidValueCount + retainedDeletedSessions
+      };
       const baseSchema = incumbentModelRunId ? this.database.prepare(`SELECT f.feature_schema_version AS schema
         FROM model_runs m JOIN feature_runs f ON f.id=m.feature_run_id WHERE m.id=?`).get(incumbentModelRunId)?.schema : null;
       const previousLineage = incumbentModelRunId ? this.database.prepare("SELECT lineage_json AS json FROM model_v2_runs WHERE model_run_id=?").get(incumbentModelRunId)?.json : null;
       const previousEpoch = typeof previousLineage === "string" ? (JSON.parse(previousLineage) as ModelLineageV2).baselineEpochId : null;
+      const removedCalibrationSessions = incumbentModelRunId ? Number(this.database.prepare(`
+        SELECT COUNT(*) AS n FROM model_runs m,
+          json_each(json_extract(m.summary_json,'$.baseline.calibrationFeatureIds')) calibration
+        JOIN workout_features f ON f.id=calibration.value
+        JOIN training_sessions s ON s.id=f.training_session_id
+        WHERE m.id=? AND s.status='inactive'`).get(incumbentModelRunId)?.n??0) : 0;
+      const deletionRecalibration = removedCalibrationSessions > 0 &&
+        previousEpoch !== null && previousEpoch !== lineage.baselineEpochId;
       const explicitRebase = request.modelConfig.baselineReferenceStartAt !== undefined && reference !== null &&
         previousEpoch !== null && previousEpoch !== lineage.baselineEpochId;
       // Recalibration intentionally marks the earlier period as calibrating in the
       // new coordinate system. Do not confuse that planned relabeling with lost
       // source eligibility; post-calibration statuses still face the normal gate.
-      let rebaseMetrics: { matchedSessions:number; eligibleSessionDelta:number; assessmentStatusChangeRate:number } | null = null;
-      if (explicitRebase && incumbentModelRunId) {
+      let rebaseMetrics: { matchedSessions:number; baseEligibleSessions:number; candidateEligibleSessions:number;
+        eligibleSessionDelta:number; assessmentStatusChangeRate:number } | null = null;
+      if ((explicitRebase || deletionRecalibration) && incumbentModelRunId) {
         const matched = this.database.prepare(`SELECT COUNT(*) AS n,
           SUM(CASE WHEN b.assessment_status<>c.assessment_status THEN 1 ELSE 0 END) AS changed
           FROM ability_assessments b JOIN ability_assessments c ON b.training_session_id=c.training_session_id
           JOIN workout_features f ON f.id=c.feature_id
           WHERE b.model_run_id=? AND c.model_run_id=? AND julianday(f.workout_start_at)>julianday(?)`)
-          .get(incumbentModelRunId,modelRun.id,reference.calibrationEndAt) as {n:number;changed:number|null};
+          .get(incumbentModelRunId,modelRun.id,reference?.calibrationEndAt??request.evaluatedAt) as {n:number;changed:number|null};
         const eligible = (id:string):number => Number(this.database.prepare(`SELECT COUNT(*) AS n
           FROM model_runs m JOIN workout_features f ON f.feature_run_id=m.feature_run_id
-          WHERE m.id=? AND f.eligibility_status IN ('eligible','trial')`).get(id)?.n??0);
+          WHERE m.id=? AND f.eligibility_status IN ('eligible','trial')
+          AND NOT EXISTS (SELECT 1 FROM training_sessions s
+            WHERE s.id=f.training_session_id AND s.status='inactive')`).get(id)?.n??0);
         const oldCount=eligible(incumbentModelRunId),newCount=eligible(modelRun.id);
-        rebaseMetrics={matchedSessions:matched.n,eligibleSessionDelta:Math.abs(oldCount-newCount)/Math.max(1,oldCount),
+        rebaseMetrics={matchedSessions:deletionRecalibration?legacy.metrics.matchedSessions:matched.n,
+          baseEligibleSessions:oldCount,candidateEligibleSessions:newCount,
+          eligibleSessionDelta:Math.abs(oldCount-newCount)/Math.max(1,oldCount),
           assessmentStatusChangeRate:matched.n?Number(matched.changed??0)/matched.n:0};
       }
       const gate = incumbentModelRunId ? evaluateModelTransitionGateV2({
         candidateModelRunId:modelRun.id, baseModelRunId:incumbentModelRunId,
+        ...(features.length === 0 ? {emptyCohort: this.emptyCohortEvidence(incumbentModelRunId,modelRun.id,metricRunId)} : {}),
         schema:{baseModelVersion:legacy.metrics.baseModelVersion??null,candidateModelVersion:MODEL_CONFIG_VERSION,
           baseFeatureSchemaVersion:typeof baseSchema === "string" ? baseSchema : null,candidateFeatureSchemaVersion:FEATURE_SCHEMA_VERSION,
-          baseScaleId:previousEpoch,candidateScaleId:lineage.baselineEpochId},
+          baseScaleId:previousEpoch,candidateScaleId:lineage.baselineEpochId ??
+            (deletionRecalibration ? "uncalibrated_after_confirmed_calibration_removal" : null)},
         metrics:{...legacy.metrics,assessmentStatusChangeRate:legacy.metrics.assessmentStatusChangeRate??0,
+          ...factAdjustedMetrics,
           ...(rebaseMetrics??{}),
           readinessOutputCoverage:Number(releases.snapshots(modelRun.id).some((row)=>row.domain==="readiness")),recoveryIsolationHolds:this.recoveryIsolationHolds}
       }) : {
@@ -285,8 +322,14 @@ export class RecomputePipeline {
         blocksActivation:!this.recoveryIsolationHolds, failureReasons:this.recoveryIsolationHolds?[]:["recovery_isolation_violated"]
       };
       releases.recordEvaluation({runId:modelRun.id,baseRunId:incumbentModelRunId,datasetVersion,
-        status:gate.status,report:{...gate,rebase:explicitRebase?{
-          referenceStartAt:request.modelConfig.baselineReferenceStartAt!,calibrationEndAt:reference.calibrationEndAt,
+        status:gate.status,report:{...gate,factChanges:{
+          removedEligibleSessions,retainedDeletedSessions,removedCalibrationSessions,deletionRecalibration,
+          eligibilityComparisonBasis:rebaseMetrics?"source_features":"ability_assessments",
+          originalBaseEligibleSessions:legacy.metrics.baseEligibleSessions,
+          originalEligibleSessionDelta:legacy.metrics.eligibleSessionDelta
+        },rebase:explicitRebase||deletionRecalibration?{
+          referenceStartAt:request.modelConfig.baselineReferenceStartAt??null,calibrationEndAt:reference?.calibrationEndAt??null,
+          effectiveAt:request.evaluatedAt,rebaseReason:explicitRebase?"explicit_reference_start":"calibration_evidence_removed",
           previousEpoch,candidateEpoch:lineage.baselineEpochId,fullHistoryMetrics:legacy.metrics}:null},createdAt:request.evaluatedAt});
       if (gate.blocksActivation) throw new Error(`Model-version gate failed: ${gate.failureReasons.join(", ") || "not_evaluable"}`);
       this.activateModelRunAndCompleteJob(job.id, modelRun.id, features.length);
@@ -299,6 +342,33 @@ export class RecomputePipeline {
       this.finishModelRun(modelRun.id, this.isCancellationError(error) ? "cancelled" : "failed", error);
       throw error;
     }
+  }
+
+  private emptyCohortEvidence(baseId:string,candidateId:string,metricRunId:string) {
+    const counts = this.database.prepare(`SELECT COUNT(*) AS total,
+      SUM(CASE WHEN s.status='inactive' THEN 1 ELSE 0 END) AS removed
+      FROM model_runs m JOIN workout_features f ON f.feature_run_id=m.feature_run_id
+      LEFT JOIN training_sessions s ON s.id=f.training_session_id WHERE m.id=?`).get(baseId)!;
+    const count = (sql:string,...args:string[]) => Number(this.database.prepare(sql).get(...args)?.n??0);
+    const snapshots = new SqliteModelReleaseRepository(this.database).snapshots(candidateId);
+    const emptyArray = (domain:string,key:string) => {
+      const payload=snapshots.find(row=>row.domain===domain&&row.key==='summary')?.payload as Record<string,unknown>|undefined;
+      return Array.isArray(payload?.[key]) && payload[key].length===0;
+    };
+    return {
+      baseSessions:Number(counts.total),removedBaseSessions:Number(counts.removed??0),
+      remainingSourceSessions:count("SELECT COUNT(*) AS n FROM training_sessions WHERE status IN ('active','ambiguous')"),
+      candidateFeatures:count("SELECT COUNT(*) AS n FROM workout_features f JOIN model_runs m ON m.feature_run_id=f.feature_run_id WHERE m.id=?",candidateId),
+      candidateAssessments:count("SELECT COUNT(*) AS n FROM ability_assessments WHERE model_run_id=?",candidateId),
+      candidateLoads:count("SELECT COUNT(*) AS n FROM workout_training_loads WHERE training_metric_run_id=?",metricRunId),
+      candidateDailyRows:count("SELECT COUNT(*) AS n FROM daily_ability_snapshots WHERE model_run_id=?",candidateId)+
+        count("SELECT COUNT(*) AS n FROM daily_training_metrics WHERE training_metric_run_id=?",metricRunId)+
+        count("SELECT COUNT(*) AS n FROM daily_zone_profiles WHERE training_metric_run_id=?",metricRunId),
+      candidateCheckpointRows:count("SELECT COUNT(*) AS n FROM model_checkpoints WHERE model_run_id=?",candidateId),
+      domainSnapshotsEmpty:emptyArray('fitness','assessments')&&emptyArray('fitness','daily')&&
+        emptyArray('load','days')&&emptyArray('zones','profiles')&&
+        !snapshots.some(row=>row.domain==='load_vector'||row.domain==='zone_coherence')
+    };
   }
 
   runSnapshotRefresh(job: RecomputeJob): void {
@@ -1539,41 +1609,7 @@ export class RecomputePipeline {
   }
 
   private loadPersistedTrainingLoads(metricRunId: string): WorkoutTrainingLoad[] {
-    const rows = this.database.prepare(`
-      SELECT * FROM workout_training_loads
-      WHERE training_metric_run_id = ? ORDER BY local_date, training_session_id
-    `).all(metricRunId) as unknown as Array<Record<string, unknown>>;
-    return rows.map((row) => ({
-      trainingSessionId: String(row.training_session_id),
-      localDate: String(row.local_date),
-      distanceMeters: row.distance_km === null ? null : Number(row.distance_km) * 1000,
-      durationSeconds: Number(row.duration_seconds),
-      load: Number(row.training_load),
-      intensity: Number(row.intensity),
-      source: String(row.load_source) as WorkoutTrainingLoad["source"],
-      confidence: Number(row.confidence),
-      rpe: row.rpe === null ? null : Number(row.rpe),
-      sessionType: String(row.session_type) as SessionType,
-      averageHeartRate: row.average_heart_rate_bpm === null ? null : Number(row.average_heart_rate_bpm),
-      elevationGainMeters: row.elevation_gain_meters === null ? null : Number(row.elevation_gain_meters),
-      stimulusType: String(row.stimulus_type ?? "unclassified") as WorkoutTrainingLoad["stimulusType"],
-      breakdown: {
-        rawHrrTrimp: asNullableNumber(row.raw_hrr_trimp),
-        internalLoad: asNullableNumber(row.internal_load),
-        paceLoad: asNullableNumber(row.pace_load),
-        distanceReferenceMeters: asNullableNumber(row.distance_reference_meters),
-        distanceExposureRatio: asNullableNumber(row.distance_exposure_ratio),
-        distanceFactor: Number(row.distance_factor ?? 1),
-        compositeLoad: Number(row.training_load),
-        compositeIntensity: Number(row.intensity),
-        heartRateConfidence: Number(row.heart_rate_load_confidence ?? 0),
-        paceConfidence: Number(row.pace_load_confidence ?? 0)
-      },
-      explanations: parseJson<{ explanations: WorkoutTrainingLoad["explanations"] }>(
-        String(row.provenance_json),
-        { explanations: [] }
-      ).explanations
-    }));
+    return loadPersistedTrainingLoads(this.database, metricRunId);
   }
 
   /**
@@ -1583,13 +1619,7 @@ export class RecomputePipeline {
    * null and is retained only as a compatibility column.
    */
   private loadDailyPhysEvidence(startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {
-    const result:DailyPhysEvidence[]=[];
-    for(let date=startDate;date<=throughDate;date=addDays(date,1)){
-      const end=Date.parse(localDateStartAt(addDays(date,1),timezoneIdentifier))-1;
-      const asOf=new Date(Math.min(end,Date.parse(asOfAt))).toISOString();
-      result.push({localDate:date,physState:physStateFromReadiness(loadDatedReadiness(this.database,asOf,timezoneIdentifier))});
-    }
-    return result;
+    return loadDailyPhysEvidence(this.database, startDate, throughDate, timezoneIdentifier, asOfAt);
   }
 
   private loadLegacyDailyPhysEvidence(startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {

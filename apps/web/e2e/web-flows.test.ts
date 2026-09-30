@@ -1169,7 +1169,7 @@ responsiveTest("390px 下首次启动可从更多进入恢复设置，且关键�
   }
 });
 
-desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和删除恢复", async () => {
+desktopTest("合成数据可完成首次导入、覆盖重算、拒绝旧覆盖模型和删除恢复", async () => {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
   });
@@ -1426,6 +1426,14 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
       .getByText("新模型已激活", { exact: true })
       .waitFor({ timeout: 120_000 });
 
+    // The existing success message may still belong to the import job. Wait
+    // for the override's newer run itself, not a stale UI success frame.
+    await page.waitForFunction(async () => {
+      const response = await fetch("/v1/model-runs");
+      const models = await response.json() as Array<{ active: boolean; status: string }>;
+      return models.length === 2 && models.every(model => model.status === "succeeded") && models[0]?.active;
+    }, undefined, { timeout: 120_000 });
+
     const modelsBeforeSwitch = (await fetch(
       `${firstRunApi.origin}/v1/model-runs`,
     ).then((response) => response.json())) as Array<{
@@ -1472,16 +1480,16 @@ desktopTest("合成数据可完成首次导入、覆盖重算、模型切换和�
     );
     await activateButton.click();
     assert.equal(await activateButton.isDisabled(), true);
-    await activationResponse;
+    const refusedActivation = await activationResponse;
+    assert.equal(refusedActivation.status(), 409);
+    const activationError = await refusedActivation.json() as { message: string };
+    assert.match(activationError.message, /overrides changed/i);
+    await page.getByRole("alert").filter({ hasText: /overrides changed/i }).waitFor();
+    consumeExpectedHttpFailures(runtimeErrors, 409, /\/v1\/model-runs\/[^/]+\/activate$/);
     await page.unroute("**/v1/model-runs/*/activate");
-    await page.waitForFunction(async (previous) => {
-      const response = await fetch("/v1/model-runs");
-      const models = (await response.json()) as Array<{
-        id: string;
-        active: boolean;
-      }>;
-      return models.find((model) => model.active)?.id !== previous;
-    }, activeBeforeSwitch);
+    const afterRefusal = await fetch(`${firstRunApi.origin}/v1/model-runs`).then(response => response.json()) as
+      Array<{ id: string; active: boolean }>;
+    assert.equal(afterRefusal.find(model => model.active)?.id, activeBeforeSwitch);
 
     await page.goto(`${firstRunApi.origin}/data`, {
       waitUntil: "domcontentloaded",

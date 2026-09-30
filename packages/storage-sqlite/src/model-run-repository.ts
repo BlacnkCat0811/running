@@ -134,6 +134,9 @@ export class SqliteModelRunRepository {
   activateSucceeded(modelRunId: string, activatedAt: string): void {
     this.database.exec("SAVEPOINT rai_model_activation");
     try {
+      if (!this.database.prepare("SELECT 1 FROM model_runs WHERE id=?").get(modelRunId)) {
+        throw new ModelRunActivationError("not_found", "Model run was not found");
+      }
       const schema = this.database.prepare("SELECT 1 FROM sqlite_master WHERE name='feature_runs'").get() ? this.database.prepare(`SELECT f.feature_schema_version AS schema FROM model_runs m
         JOIN feature_runs f ON f.id=m.feature_run_id WHERE m.id=?`).get(modelRunId)?.schema : null;
       if (schema === "workout-feature-v4") {
@@ -152,8 +155,26 @@ export class SqliteModelRunRepository {
             stage: "release_gate", reasonCodes: ["release_verification_failed"], detail
           });
         }
-      } else if (this.database.prepare("SELECT 1 FROM sqlite_master WHERE name='active_model_release'").get()) {
-        this.database.exec("DELETE FROM active_model_release");
+      } else {
+        // Historical V3 runs captured override IDs in the metric config instead
+        // of V2 lineage. The compatibility route must not bypass this protection.
+        if (this.database.prepare("SELECT 1 FROM sqlite_master WHERE name='effective_workout_overrides'").get()) {
+          const currentIds = this.database.prepare(`SELECT id FROM effective_workout_overrides
+            ORDER BY training_session_id`).all().map((row) => String(row.id));
+          const config = this.database.prepare(`SELECT config_json AS json FROM training_metric_runs
+            WHERE model_run_id=? AND status='succeeded' ORDER BY created_at DESC,id DESC LIMIT 1`).get(modelRunId)?.json;
+          const snapshot: unknown = typeof config === "string" ? JSON.parse(config).overrideSnapshotIds : undefined;
+          if ((snapshot !== undefined && JSON.stringify(snapshot) !== JSON.stringify(currentIds)) ||
+              (snapshot === undefined && currentIds.length > 0)) {
+            const detail = "Workout overrides changed or legacy snapshot is unavailable; recompute before activation";
+            throw new ModelRunActivationError("release_gate", detail, {
+              stage: "release_gate", reasonCodes: ["override_snapshot_mismatch"], detail
+            });
+          }
+        }
+        if (this.database.prepare("SELECT 1 FROM sqlite_master WHERE name='active_model_release'").get()) {
+          this.database.exec("DELETE FROM active_model_release");
+        }
       }
       this.activateValidated(modelRunId, activatedAt);
       this.database.exec("RELEASE rai_model_activation");

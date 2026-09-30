@@ -50,3 +50,6 @@ apps/ios/Pods/
 # AMap iOS SDK key: local only, injected into the generated Pods xcconfig by the Podfile.
 # Template is committed as apps/ios/Configs/AmapKey.xcconfig.example.
 apps/ios/Configs/AmapKey.xcconfig
+
+# Generated data audit is a runtime report, not maintained project documentation
+/docs/DATA_AUDIT.md

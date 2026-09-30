@@ -878,6 +878,12 @@ export interface LactateThresholdEstimate {
 }
 
 export interface RaceTimePrediction {
+  /** Rule-derived bounds, never an empirical P80/P90 coverage claim. */
+  heuristicRange?: {
+    kind: "heuristic_not_calibrated";
+    lowerSeconds: number | null;
+    upperSeconds: number | null;
+  };
   machineLearningPolicyReason?: "calibration_unavailable" | "ridge_not_validated";
   intervalEvidence?: {
     predictorKey: string;
@@ -1313,7 +1319,7 @@ export function assertPhysiologyPredictionSnapshot(
 // V2 model lineage and replay envelope.
 //
 // Additive only: nothing above this marker changes meaning. The V2 optimisations
-// are designed in `deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md`
+// are designed in `docs/ALGORITHM.md`
 // (§3.2 lineage, §15.2 replay, §15.7 labels). These types fix the vocabulary the
 // later phases attach to; having the vocabulary is not the same as having a
 // replayable run.
@@ -1410,7 +1416,7 @@ export interface OutcomeLabelV2 {
 export * from "./semantic-json.js";
 
 // -----------------------------------------------------------------------------
-// Session comparability strata (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §6.2).
+// Session comparability strata (docs/ALGORITHM.md §6.2).
 //
 // A workout may only be compared against workouts of the same kind. Comparing a
 // tempo run against recovery jogs is what turns "the training plan changed" into
@@ -1466,7 +1472,7 @@ export interface StratumComparability {
 }
 
 // -----------------------------------------------------------------------------
-// Confidence V2 (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §6.7).
+// Confidence V2 (docs/ALGORITHM.md §6.7).
 //
 // Rule-based evidence reliability is kept strictly apart from `modelConfidence` /
 // `overall`. The first is a deterministic function of how good the evidence is;
@@ -1514,7 +1520,7 @@ export interface ConfidenceV2 {
 }
 
 // -----------------------------------------------------------------------------
-// Readiness V1 contract (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §7.4).
+// Readiness V1 contract (docs/ALGORITHM.md §7.4).
 //
 // Additive only. `assessment` is deliberately kept separate from `state`:
 // `assessment` is what the evidence says, `state` is the training-facing mapping

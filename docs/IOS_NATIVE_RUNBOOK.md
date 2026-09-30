@@ -34,21 +34,21 @@ pod install                                                    # 输出「已注
 
 没有 Key 时构建依旧成功，但高德底图不加载。`Pods/` 与 `AmapKey.xcconfig` 都不入库，workspace 由 CocoaPods 生成，不手工编辑。
 
-高德底图还有隐私门控：首次打开 App 先要选择是否同意（见 `apps/ios/README.md` 的「隐私门控」）。只有同意后才初始化 SDK 并创建 `MAMapView`；未同意时训练详情显示离线轨迹，设置页可随时开启或关闭。
+高德底图还有隐私门控：首次打开 App 先要选择是否同意。只有同意后才初始化 SDK 并创建 `MAMapView`；未同意时训练详情显示离线轨迹，设置页可随时开启或关闭。
 
 无签名模拟器构建可用于快速验证 SwiftUI/API 层编译：
 
 ```bash
 xcodebuild -workspace apps/ios/RAI.xcworkspace \
   -scheme RAI \
-  -destination 'platform=iOS Simulator,id=7A65F02F-2F9B-412B-899A-EDA4DE20B68E' \
+  -destination 'generic/platform=iOS Simulator' \
   -configuration Debug \
   -derivedDataPath /tmp/rai-derived \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-2026-09-08 已在本机 Xcode 26.5 / iOS Simulator 26.5 通过该构建；2026-09-11 接入高德 pod 后，构建入口从 `RAI.xcodeproj` 改为 `RAI.xcworkspace`（`pod install` 后同样通过）。真实 iPhone
-安装、签名、HealthKit 权限和路线能力仍需按下方步骤验收。
+以上仅验证当前环境的模拟器编译，不沿用历史机器的SDK、设备UDID或旧“已通过”记录。
+真实iPhone安装、签名、HealthKit权限和路线能力仍需按下方步骤验收。
 
 ### 验证入口
 
@@ -68,7 +68,7 @@ npm run test:ios
 
 | 脚本 | 额外前置 | 用途 |
 |---|---|---|
-| `run-visual-tests.sh` | 已启动的模拟器 + `var/rai.sqlite`（`var/` 不入库） | 真机观感/交互截图验收（`-only-testing:…` 可只跑单个用例） |
+| `run-visual-tests.sh` | 已启动的模拟器 + `var/rai.sqlite`（`var/` 不入库） | 模拟器交互/截图验收，不替代真机观感（`-only-testing:…` 可只跑单个用例） |
 | `run-coordinate-sdk-check.sh` | `apps/ios/Pods`（先 `pod install`）+ 已启动模拟器 | 用高德 SDK 对拍本地 GCJ02 转换 |
 
 在**会拒绝嵌套沙箱**的外层环境（如加固沙箱）里跑 `run-visual-tests.sh`，要额外传
@@ -81,22 +81,19 @@ npm run test:ios
 `CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*] = RAI/RAI.entitlements`，模拟器包 `codesign -d --entitlements` 为空。
 此时 HealthKit 调用直接返回
 `Error Domain=com.apple.healthkit Code=4 "Missing com.apple.developer.healthkit entitlement."`，
-`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift:1003-1026` 的
-`readAuthorizationState()` 四分支，文案见 `RAI/HealthKitExport.swift:42` 的 `HealthKitExportError`），
+`HealthKitSync` 在授权检查处按设计 fail closed（`RAI/HealthKitSync.swift` 的
+`readAuthorizationState()` 四分支，文案见 `RAI/HealthKitExport.swift` 的 `HealthKitExportError`），
 首页与设置页显示「同步未完成」。
 
-模拟器的 Health 库本身也是空的：`~/Library/Developer/CoreSimulator/Devices/<udid>/data/Library/Health/healthdb.sqlite`
-没有样本，`Client/` 下没有 RAI 的授权记录。所以**模拟器上点「重试同步」不会成功，这是环境限制，不是同步逻辑缺陷**。
-模拟器能验收的是失败态 UI、离线缓存和上传前后的界面状态；真实 HealthKit 读取只能在真机上验收。
-
-给模拟器包手工 `codesign --force --sign - --entitlements RAI/RAI.entitlements` 补权限也不可行：
-权限确实写进签名，但 LaunchServices 会拒绝启动（`FBProcessExit code 64 launch-failed`，POSIX 162）。
+模拟器是否有样本/授权取决于该实例，不能沿用旧机器“Health库为空”的结论。
+本项目上述无签名构建主要验证失败态UI、离线缓存和界面流程，不认证HealthKit真机读取或后台调度。
+不要用手工补签名绕过工程能力配置；真实读取、权限和生命周期验收使用受支持签名的真机构建。
 
 ## 首次连接
 
 在原生 App 的“设置”填写 API 服务地址和 Token。连接成功后应能看到 `serverId`、`athleteId`、`datasetEpoch` 和协议版本。不要填写手机上的 `127.0.0.1`；服务端应绑定手机可达地址，并按现有策略配置 HTTPS/局域网访问。
 
-在“设置”点“同步健康数据”，只申请读取权限。App 通过现有 ZIP/XML 导入接口上传，不向 Apple 健康写入。后台同步由三个机制承担：HealthKit background delivery 负责“知道有变化”，`BGProcessingTask`（`app.rai.running.health-sync`）负责“给几分钟 CPU 做完导出与导入提交”，带 identifier 的 background URLSession 负责“把字节搬完”。**系统调度不可承诺具体时刻**；能承诺的只有两件事：一是已上传/已导入的进度一定落盘、下次唤醒能续接，二是前台打开时一定能补齐。真机验收清单见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`。
+在“设置”点“同步健康数据”，只申请读取权限。App 通过现有 ZIP/XML 导入接口上传，不向 Apple 健康写入。后台同步由三个机制承担：HealthKit background delivery 负责“知道有变化”，`BGProcessingTask`（`app.rai.running.health-sync`）负责“给几分钟 CPU 做完导出与导入提交”，带 identifier 的 background URLSession 负责“把字节搬完”。**系统调度不可承诺具体时刻**；能承诺的只有两件事：一是已上传/已导入的进度一定落盘、下次唤醒能续接，二是前台打开时按权限、网络和服务状态重试补齐。真机验收清单见 `docs/IOS_NATIVE_SYNC_PROTOCOL.md`。
 
 ## 排障
 
@@ -119,3 +116,17 @@ npm run test:ios
 ## 数据位置与隐私
 
 页面缓存位于 App Support 下的 `RAI/cache.sqlite`，同步任务位于 `RAI/sync.sqlite`，凭证只在 Keychain。文件使用 iOS 数据保护。日志和诊断不得记录 Token、完整健康样本或精确路线。
+
+## 真机人工验收清单
+
+以下不由模拟器构建或纯逻辑测试替代；尚未现场执行时标记未验证。
+
+- 首次、拒绝、部分或撤销HealthKit读权限；未授权类型保持未知，不出现写权限。
+- 前台首次导出、同批重传、获jobId后的断网/杀进程/重启续接；anchor只在导入成功后前移。
+- 锁屏、系统后台唤醒/过期、background URLSession回调与前台主动同步竞争，不丢新意图、不重复提交。
+- 服务URL、serverId、athleteId、datasetEpoch改变时，旧任务/缓存不串目标；未知身份不当成确认空。
+- Route迟到、更正或配额限制时继续补齐/pending，不永久invalid或丢掉已导入兄弟路线。
+- 恢复备份、服务重启、401/409/超时后保留草稿与反馈，分清同步、导入、分析三个阶段。
+- 地图同意前不初始化SDK；坐标SDK对拍、VoiceOver、大字体、减少动态效果和耗电需真机观察。
+
+记录设备、OS/App版本、数据scope、步骤/结果和脱敏证据；不得上传真实健康导出或凭证。

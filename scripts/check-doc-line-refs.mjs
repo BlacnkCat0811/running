@@ -57,7 +57,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_DOCS = ["deliverables/ARCHITECTURE_PRODUCT_STATUS_2026-09-28.md"];
+const DEFAULT_DOCS = ["docs/ARCHITECTURE.md", "docs/ALGORITHM.md", "docs/DATA_PIPELINE.md", "docs/OPERATIONS.md"];
 
 /** 同名文件消歧：文档里的缩写写法指向哪一个。 */
 const AMBIGUOUS = {

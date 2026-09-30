@@ -74,6 +74,12 @@ export class SqliteModelReleaseRepository {
     const lineage = this.db.prepare(`SELECT lineage_json AS json,lineage_hash AS hash
       FROM model_v2_runs WHERE model_run_id=?`).get(runId) as { json: string; hash: string } | undefined;
     if (!lineage || semanticHash(JSON.parse(lineage.json)) !== lineage.hash) throw new Error("V2 lineage digest mismatch");
+    const captured = JSON.parse(lineage.json) as ModelLineageV2;
+    const currentOverrideIds = this.db.prepare(`SELECT id FROM effective_workout_overrides
+      ORDER BY training_session_id`).all().map((row) => String(row.id));
+    if (captured.overrideSnapshotHash !== semanticHash(currentOverrideIds)) {
+      throw new Error("Workout overrides changed since candidate evaluation; recompute before activation");
+    }
     if (semanticHash(this.snapshots(runId)) !== bundle.snapshot_hash) throw new Error("V2 release snapshot digest mismatch");
     const currentDataset = this.db.prepare("SELECT value FROM import_manifest WHERE key='dataset_version'").get()?.value ?? "dataset_unknown";
     if (bundle.dataset_version !== currentDataset) throw new Error("Dataset changed since candidate evaluation");
@@ -91,7 +97,24 @@ export class SqliteModelReleaseRepository {
     const active=this.db.prepare("SELECT model_run_id AS id FROM active_model_release WHERE singleton=1").get()?.id;
     if(typeof active!=="string")return;
     const rows=this.db.prepare("SELECT model_run_id AS id FROM model_release_bundles WHERE model_run_id<>? ORDER BY activated_at DESC,created_at DESC,rowid DESC").all(active) as Array<{id:string}>;
-    for(const row of rows.slice(keepHistorical))this.db.prepare("DELETE FROM model_release_bundles WHERE model_run_id=?").run(row.id);
+    const retained = new Set([active, ...rows.slice(0, keepHistorical).map((row) => row.id)]);
+    // Epoch creation receipts are dependencies, not ordinary rollback history.
+    // Pin the original effectiveAt for each current/retained rollback epoch.
+    // Normal run pruning already retains every surviving release receipt.
+    for (const id of [...retained]) {
+      const origin = this.db.prepare(`SELECT origin.model_run_id AS id
+        FROM model_v2_runs lineage JOIN model_release_bundles dependent
+          ON dependent.model_run_id=lineage.model_run_id
+        JOIN model_release_bundles origin
+          ON origin.dataset_version=dependent.dataset_version
+          AND json_extract(origin.evaluation_json,'$.rebase.candidateEpoch')=
+              json_extract(lineage.lineage_json,'$.baselineEpochId')
+        WHERE lineage.model_run_id=? AND origin.status='passed' AND origin.activated_at IS NOT NULL
+          AND json_extract(origin.evaluation_json,'$.rebase.effectiveAt') IS NOT NULL
+        ORDER BY origin.created_at ASC,origin.model_run_id ASC LIMIT 1`).get(id)?.id;
+      if (typeof origin === "string") retained.add(origin);
+    }
+    for(const row of rows)if(!retained.has(row.id))this.db.prepare("DELETE FROM model_release_bundles WHERE model_run_id=?").run(row.id);
   }
 
   /** Explicit rollback tool; no data rewrites and no stale-data rollback. */

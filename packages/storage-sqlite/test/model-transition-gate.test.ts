@@ -55,6 +55,40 @@ function evaluate(options: {
   });
 }
 
+test("confirmed empty-cohort transition is explicit and does not waive unknown or corrupt evidence", () => {
+  const empty: NonNullable<ModelTransitionGateInput["emptyCohort"]> = {
+    baseSessions: 7, removedBaseSessions: 7, remainingSourceSessions: 0,
+    candidateFeatures: 0, candidateAssessments: 0, candidateLoads: 0,
+    candidateDailyRows: 0, candidateCheckpointRows: 0, domainSnapshotsEmpty: true
+  };
+  const input: ModelTransitionGateInput = {
+    candidateModelRunId: "candidate", baseModelRunId: "base", schema: sameScaleSchema,
+    metrics: metrics({ matchedSessions: 0, baseEligibleSessions: 0, candidateEligibleSessions: 0,
+      currentAbilityMeanAbsoluteDelta: null, currentAbilityP95AbsoluteDelta: null,
+      finalTrueAbilityDelta: null, readinessOutputCoverage: 1, recoveryIsolationHolds: true }),
+    emptyCohort: empty
+  };
+  assert.equal(evaluateModelTransitionGateV2(input).status, "passed");
+  for (const patch of [
+    { remainingSourceSessions: 1 }, { removedBaseSessions: 6 }, { candidateFeatures: 1 },
+    { candidateAssessments: 1 }, { candidateLoads: 1 }, { candidateDailyRows: 1 },
+    { candidateCheckpointRows: 1 }, { domainSnapshotsEmpty: false },
+    { baseSessions: Number.NaN }, { baseSessions: -1 }, { baseSessions: 1.5 },
+    { baseSessions: undefined, removedBaseSessions: undefined }
+  ]) {
+    const result = evaluateModelTransitionGateV2({ ...input, emptyCohort: { ...empty, ...patch } as typeof empty });
+    assert.equal(result.status, "failed", JSON.stringify(patch));
+    assert.ok(result.failureReasons.includes("empty_cohort_evidence_invalid"));
+  }
+  const { emptyCohort: _proof, ...unproven } = input;
+  assert.ok(evaluateModelTransitionGateV2(unproven).notEvaluableReasons.includes("no_matched_sessions"));
+  assert.equal(evaluateModelTransitionGateV2({ ...input, baseModelRunId: null }).status, "not_evaluable");
+  assert.equal(evaluateModelTransitionGateV2({ ...input, schema: { ...sameScaleSchema, baseModelVersion: null } }).status, "not_evaluable");
+  for (const patch of [{ invalidValueCount: 1 }, { recoveryIsolationHolds: false }, { readinessOutputCoverage: 0 }]) {
+    assert.equal(evaluateModelTransitionGateV2({ ...input, metrics: { ...input.metrics, ...patch } }).status, "failed");
+  }
+});
+
 const passingCrossScale = {
   readinessOutputCoverage: 1,
   recoveryIsolationHolds: true,

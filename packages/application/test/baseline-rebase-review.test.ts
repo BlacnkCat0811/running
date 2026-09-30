@@ -6,7 +6,7 @@ import test from "node:test";
 
 import { RaiDatabase } from "@rai/storage-sqlite";
 
-import { buildBaselineRebaseReview } from "../src/baseline-rebase-review.js";
+import { buildBaselineRebaseReview, recordBaselineRebaseReview } from "../src/baseline-rebase-review.js";
 
 /**
  * §6.4 的 rebase 检查在真实库上**没有任何生产调用方**（唯一引用是单测）。
@@ -182,5 +182,37 @@ test("an epoch that starts after the assessment instant is refused", async () =>
       /Epoch start .* is after asOf/,
       "标尺建于评估时点之后时，这份 run 与这个 epoch 不自洽"
     );
+  });
+});
+
+test("B03: persisted prospective reviews are idempotent, rate limited, policy scoped and never publish an epoch", async () => {
+  await withDatabase((_store,db) => {
+    // A real epoch is mandatory; legacy runs cannot invent one from a date.
+    assert.throws(() => recordBaselineRebaseReview(db), /published baseline epoch/);
+    db.prepare(`INSERT INTO daily_ability_snapshots
+      (id,model_run_id,local_date,baseline_epoch_id,timezone_identifier,snapshot_status)
+      VALUES ('review-epoch',?,'2026-06-20','epoch-a','UTC','active')`).run(RUN);
+    const firstAt="2026-09-25T00:00:00.000Z",secondAt="2026-10-23T00:00:00.000Z";
+    for(let i=0;i<12;i++) {
+      insertAssessment(db,i,"2026-09-24T08:00:00.000Z",{efficiency:100},{efficiency:1});
+      insertAssessment(db,12+i,"2026-10-22T08:00:00.000Z",{efficiency:100},{efficiency:1});
+    }
+    const first=recordBaselineRebaseReview(db,{asOf:firstAt});
+    assert.equal(first.historyMode,"prospective_history_started");
+    assert.equal(first.decision.status,"keep_epoch");
+    assert.deepEqual(recordBaselineRebaseReview(db,{asOf:firstAt}),first);
+    const early=recordBaselineRebaseReview(db,{asOf:"2026-09-26T00:00:00.000Z"});
+    assert.equal(early.decision.status,"not_due");
+    assert.equal(early.persisted,false);
+    const second=recordBaselineRebaseReview(db,{asOf:secondAt});
+    assert.equal(second.decision.status,"candidate_requested");
+    assert.equal(second.decision.autoRebase,false);
+    assert.equal(db.prepare("SELECT model_run_id AS id FROM active_model_run").get()?.id,RUN);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM baseline_rebase_reviews").get()?.n,2);
+    assert.throws(()=>recordBaselineRebaseReview(db,{asOf:firstAt}),/backdate/);
+    assert.throws(()=>db.exec("UPDATE baseline_rebase_reviews SET saturated_reviews=99"),/immutable/);
+    const changed=recordBaselineRebaseReview(db,{asOf:secondAt,windowDays:29});
+    assert.equal(changed.historyMode,"prospective_history_started");
+    assert.equal(changed.decision.status,"keep_epoch");
   });
 });

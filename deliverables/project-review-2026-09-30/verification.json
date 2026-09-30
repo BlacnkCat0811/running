@@ -1,0 +1,1287 @@
+{
+  "version": "rai-project-review-v1",
+  "reviewDate": "2026-09-30",
+  "timezone": "Asia/Shanghai",
+  "repository": "/Users/ta/running",
+  "baseCommit": "f33ec708802d4b7cc4f6284af7e84efa4b5800cd",
+  "reviewScope": "current uncommitted worktree including preceding V2 implementation; no production data writes or new production algorithm fixes during documentation/review task",
+  "cleanup": {
+    "trackedMarkdownBefore": 192,
+    "markdownNow": 20,
+    "removedTrackedMarkdown": 179,
+    "removedTrackedFiles": 198,
+    "retainedDocuments": [
+      "AGENTS.md",
+      "README.md",
+      "apps/ios/README.md",
+      "apps/ios/design/README.md",
+      "apps/ios/design/TECHNOLOGY_SKIN.md",
+      "deliverables/README.md",
+      "deploy/README-UBUNTU.md",
+      "docs/ALGORITHM.md",
+      "docs/ARCHITECTURE.md",
+      "docs/DATA_PIPELINE.md",
+      "docs/DECISIONS.md",
+      "docs/IOS_NATIVE_API_CONTRACT.md",
+      "docs/IOS_NATIVE_RUNBOOK.md",
+      "docs/IOS_NATIVE_SYNC_PROTOCOL.md",
+      "docs/OPERATIONS.md",
+      "docs/PROJECT_REVIEW.md",
+      "docs/RUST_DATA_ENGINE.md",
+      "docs/WEB.md",
+      "docs/adr/ADR-004-healthkit-sync-invariants.md",
+      "research/README.md"
+    ],
+    "removed": [
+      {
+        "path": "RAI_PRD_V1.0.md",
+        "baseGitBlob": "576d1f4e1e743c87c59c1b247e2ab697b3699483",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-09/README.md",
+        "baseGitBlob": "72696ed8a43d1b114d1ee46be308dfbc2735cabf",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-09/visual-review/README.md",
+        "baseGitBlob": "b8cdc76fe59a957ee2b203c6e85524fc195545df",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-10-ios-fixes/README.md",
+        "baseGitBlob": "e2d7b16d55411c2ca4a988a0874068338d036331",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-10-replica/README.md",
+        "baseGitBlob": "c025dd6bbf87f75bd05812b08fb3a70077c726db",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-16-ability-card/README.md",
+        "baseGitBlob": "e7494366a65ebd037dfd720c30f4b26224a5821b",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-16-tech-polish/README.md",
+        "baseGitBlob": "27ccd5f310b8e4a3b45fa21ce6a50db1162a09b1",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-17-field-coverage/README.md",
+        "baseGitBlob": "f7d60f36c19e790d6bc06b04d5631ca6e2a9b5cf",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/acceptance/2026-09-19-freshness-semantics/README.md",
+        "baseGitBlob": "93ac1d3345f1abb0297fa33e381a7edf2d6827b5",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "apps/ios/design/technology-v1/README.md",
+        "baseGitBlob": "36bdcb8e679cfaeb00f2763089afe16fe3a24344",
+        "currentTopic": "apps/ios/design/README.md"
+      },
+      {
+        "path": "deliverables/ARCHITECTURE_PRODUCT_STATUS_2026-09-28.linerefs.json",
+        "baseGitBlob": "547ff5eb7ecfd4729ae3eb6b28fcc41bfe8ae6b0",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/ARCHITECTURE_PRODUCT_STATUS_2026-09-28.md",
+        "baseGitBlob": "5ae7bf452f3fa6a7327c7e4ec09edd909e33d88f",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/BASELINE_REBASE_REVIEW.json",
+        "baseGitBlob": "4db6eb205a35c93740c2a3dd7d33843696fa503b",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/CA_WEIGHT_ABLATION.json",
+        "baseGitBlob": "00c5f6e59626afb0a801cc72ad94a81a177171d5",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/DATA_FRESHNESS_SEMANTICS_PLAN_2026-09-19.md",
+        "baseGitBlob": "889e67a5e0b53c7296dc1394605216150f2b3824",
+        "currentTopic": "docs/DATA_PIPELINE.md"
+      },
+      {
+        "path": "deliverables/IOS_SYNC_DEVICE_CHECKLIST_2026-09-22.md",
+        "baseGitBlob": "42cf3e5d2a154b0ef5c056f77bad8612e110bd1c",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/MODEL_VERSION_REPLAY_2026-09-30.json",
+        "baseGitBlob": "58808eb4e1561a0e0f339c008bec83d8a72182cc",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/N2_IDENTITY_FREEZE_2026-09-24.md",
+        "baseGitBlob": "02e630ed4e134e133130971e0c06e70b49369067",
+        "currentTopic": "docs/DECISIONS.md"
+      },
+      {
+        "path": "deliverables/N3_DESIGN_OUT_OF_TREE_2026-09-24.md",
+        "baseGitBlob": "2d23fd04122707683a06fc87eb3c7b70cea546ae",
+        "currentTopic": "docs/DECISIONS.md"
+      },
+      {
+        "path": "deliverables/NORMALIZATION_COVERAGE.json",
+        "baseGitBlob": "b6e703225da0aa9b4f784e29b7822bb926be1f04",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/PHASE0_BASELINE.json",
+        "baseGitBlob": "035081fe2f6f5ce2b8dba95decb74fa33a01ca78",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/PREPARATION_MIGRATION_GOLDEN.json",
+        "baseGitBlob": "88be2b2ebb531632781fe5d4018dcfd27bab522c",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md",
+        "baseGitBlob": "1a404227e1358bf65e8e722aa5a124646860a915",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.verification.json",
+        "baseGitBlob": "dcdec534fb06ea74a60710a069a5cb03573edb2d",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/RAI_V2_STATUS_2026-09-30.md",
+        "baseGitBlob": "5a2e96a0d49b2e45e92075a8c57e72dbfbacb54a",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/READINESS_REPLAY_COVERAGE.json",
+        "baseGitBlob": "9a28a83422c38895e1304aa5e4ce1cb90dedb3b2",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/SHADOW_REMOVAL_RUNTIME_INVARIANTS_2026-09-20.md",
+        "baseGitBlob": "69d766dba99a84852a8dbe195a5e0423192cb421",
+        "currentTopic": "docs/DECISIONS.md"
+      },
+      {
+        "path": "deliverables/SPEED_PLAUSIBILITY_INVENTORY.json",
+        "baseGitBlob": "cf2249d936fe2c334b61713b1953544d894d9dea",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/USER_EXPERIENCE_IMPLEMENTATION_2026-09-28.md",
+        "baseGitBlob": "5e469c714187c65ea17e345ada63ed85a540d5ec",
+        "currentTopic": "docs/WEB.md"
+      },
+      {
+        "path": "deliverables/USER_EXPERIENCE_OPTIMIZATION_PLAN_2026-09-28.md",
+        "baseGitBlob": "8a8b3c1276ce1e6ee56c442ca7c86d1388278a44",
+        "currentTopic": "docs/WEB.md"
+      },
+      {
+        "path": "deliverables/archive/AUDIT_FIXES_2026-09-28.md",
+        "baseGitBlob": "4f2f3105d4f02fe6523d231b5efe9747385e5d24",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/AUDIT_VERIFICATION_2026-09-21.md",
+        "baseGitBlob": "128877e727884b23a46d8c53428af03325ee7787",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/AUDIT_VERIFICATION_2026-09-24.md",
+        "baseGitBlob": "95b10457c71b599d751b078aba590cd95045139e",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/AUDIT_VERIFICATION_2026-09-28.md",
+        "baseGitBlob": "8e805f2c8fda8deba4987f78281597e1a7b7bf0c",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/BACKEND_IOS_AUDIT_2026-09-16.md",
+        "baseGitBlob": "64c4f25001bd0960ba3a764f3668d34f3fbaa4e3",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/BACKEND_IOS_FIXES_2026-09-16.md",
+        "baseGitBlob": "056920af6ab33451c40c4b87f085b7a0ae7d885a",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/BACKEND_IOS_REVIEW_2026-09-15-R2.md",
+        "baseGitBlob": "116ba8ad1e5fcebde5ffb4b2ef51b32c5a65381e",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/BACKEND_IOS_REVIEW_VERIFY_2026-09-16.md",
+        "baseGitBlob": "f39ef5f75617fe98ba421f1399eb4061dc101e8e",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/BACKEND_REVIEW_AND_SOL_PLAN_2026-09-16.md",
+        "baseGitBlob": "32181b6600b4a16b90d082bb490beb96c413b92d",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/BACKEND_REVIEW_VERIFICATION_2026-09-16.md",
+        "baseGitBlob": "c5f37fece4e22f16e711e987424e32ddccedb547",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/BACKEND_SOL_EXECUTION_2026-09-16.md",
+        "baseGitBlob": "15d7539fd97c3e43c7193538dc31fcf2786ce539",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/BATCH4_TIMEZONE_PLAN_2026-09-21.md",
+        "baseGitBlob": "75034225dbe26f24188f2d9a76b6af95d2890495",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/BRANCH_AUDIT_2026-09-24.md",
+        "baseGitBlob": "9267ff048a51fc5b14f139044895161cf436d66b",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/CLOUD_DEPLOY_PLAN_2026-09-19.md",
+        "baseGitBlob": "80ca634d68bcbc101275bf1b3b8319aa6b28f5b9",
+        "currentTopic": "docs/OPERATIONS.md"
+      },
+      {
+        "path": "deliverables/archive/CODE_REVIEW_FIXES_2026-09-22.md",
+        "baseGitBlob": "119a92673ba2c22c57588d5063830b056e31041a",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/DATA_MODEL_REVIEW_2026-09-10.md",
+        "baseGitBlob": "dcef357e7c2ec6003a54f5f4701b88d0fcc9ac95",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/DEPLOY_2026-09-26.md",
+        "baseGitBlob": "6782c3b8a85c0abc09151f5bd7204722e24ac4e1",
+        "currentTopic": "docs/OPERATIONS.md"
+      },
+      {
+        "path": "deliverables/archive/DISK_CAPACITY_AUDIT_2026-09-15.md",
+        "baseGitBlob": "a030ad16fbec5b1a05d5abd6a5ba34cd507fa9d3",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/DISK_CLEANUP_MANIFEST_2026-09-15.txt",
+        "baseGitBlob": "c61680255d5c7c7803af2d3ca1477f665558b830",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/E2E_CASE9_ROOT_CAUSE_2026-09-21.md",
+        "baseGitBlob": "b61b7eb2939f2a633bd0cfa844188619f46e4c72",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/ENV_RAI_DEV_EMPTY_DB_2026-09-20.md",
+        "baseGitBlob": "eea1e150d0b107662e51df26ea95056ab51d4ca6",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/ENV_XCODE_IOS_TOOLCHAIN_2026-09-20.md",
+        "baseGitBlob": "bf50d23991d102adbbdef1e1ed0910cebf10380c",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/FIELD_COVERAGE_2026-09-17.md",
+        "baseGitBlob": "f05501f3d9564705b866f2f97429dba034e544f3",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/FIXES_2026-09-13-REVIEW.md",
+        "baseGitBlob": "72d57ffab63b1ab343f6bfaf92f23e134899df6c",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/FIXES_2026-09-13.md",
+        "baseGitBlob": "c62aabc0a781f484670d6a99fa610f485b448d46",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/FIX_VERIFICATION_2026-09-17.md",
+        "baseGitBlob": "0f44c011b04772e0ce54eca9a9e0ed4cf4d125a5",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/GARMIN_CONNECT_IMPORT_DESIGN_2026-09-10.md",
+        "baseGitBlob": "c7be5cc02446b5d624f89342d2d6d8bb548dc8ea",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/IMPLEMENTATION_PLAN_2026-09-21.md",
+        "baseGitBlob": "626cf6eb48a219e9ca7611bcb1aba9a05d63953c",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/IMPORT_PREFLIGHT_EARLY_EXIT_2026-09-23.md",
+        "baseGitBlob": "db7a604aa695abb57cfc4a34db1bec90140f5566",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/IMPORT_STAGE_ATTRIBUTION_2026-09-21.md",
+        "baseGitBlob": "43b075b633e7d8ef3a30b2274634649f236550e4",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_CODE_REVIEW_2026-09-15.md",
+        "baseGitBlob": "dc58c85bad51771cc5800f692eaca8304d7270e5",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_EXPORT_DETERMINISM_FIX_PLAN_2026-09-22.md",
+        "baseGitBlob": "e1527a784e0b5612fd8f27b25ab070be17642eb1",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_EXPORT_DETERMINISM_P0P1_IMPLEMENTATION_2026-09-22.md",
+        "baseGitBlob": "294a6d754163b389c38adc55c4daf2469947b5b4",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_EXPORT_DETERMINISM_P0P1_VERIFICATION_2026-09-23.md",
+        "baseGitBlob": "a9dfe64f665250ded64e1325f2305b58b648a8f0",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_MODEL_AUDIT_2026-09-25.md",
+        "baseGitBlob": "26b03dd9c094acfb72e07ea2cd1a9a4eccd1055f",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_MODEL_OPTIMIZATION_PLAN_2026-09-25.md",
+        "baseGitBlob": "faa24ed5cdc3c1863cf9a3380842465489d3e30a",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_MODEL_WALK_FORWARD_2026-09-25.json",
+        "baseGitBlob": "112cb52c00d0eaa1e45efc50d05aad0b1eb45dac",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_MODEL_WALK_FORWARD_REVIEW_2026-09-25.md",
+        "baseGitBlob": "12f38e6b439192a275cd68d0d310278198495e5f",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_PLAN_RACE_IMPLEMENTATION_2026-09-25.md",
+        "baseGitBlob": "4784e23b723825999f2883326bbc14be048db6ec",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_PLAN_RACE_REVIEW_2026-09-25.md",
+        "baseGitBlob": "78cd6711c9a9af2b674f7ff46d0c44ea7f6cf4b4",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_REVIEW_AND_SOL_PLAN_2026-09-16.md",
+        "baseGitBlob": "ff08e636ded72345e8e27feeb6e9e6714a803687",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_SIMULATOR_HEALTHKIT_ENABLEMENT_2026-09-23.md",
+        "baseGitBlob": "aba3d9d8575314006eec0d93282b886460a10d66",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_SYNC_FIX_PLAN_2026-09-24.md",
+        "baseGitBlob": "95b77e4c13ac54064852441f6f5dbc0816030bb1",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/IOS_SYNC_VERIFICATION_2026-09-22.md",
+        "baseGitBlob": "4c2a759ec039c6b4e78ee929ad23b480dc092a64",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/LEGACY_ITEMS_VERIFICATION_2026-09-24.md",
+        "baseGitBlob": "ae779128c612fac0a828e14b03597597dbe26f10",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/MODEL_VERSION_REPLAY_2026-09-29.json",
+        "baseGitBlob": "336ec7df5f7cfb3216aad1d197bac9f05f884a75",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/MUTATION_SCOPE_2026-09-24.md",
+        "baseGitBlob": "3f6c733208bfe8857e39720edfa1d85fb438e0a9",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/N100_MIGRATION_PLAN_2026-09-19.md",
+        "baseGitBlob": "5f6a0fde707b52be1a7ff5b68f5c569c2a496ef5",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/N1_MIGRATION_COMMENT_2026-09-24.md",
+        "baseGitBlob": "3bd01739244f8019d5a1242d798ebd41ec78020a",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/NEXT_STEPS_MULTIAGENT_2026-09-20.md",
+        "baseGitBlob": "41a77f43f1e3663e55a48743a81fb1851d2a0125",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/OPTIMIZATION_FIX_2026-09-26.md",
+        "baseGitBlob": "344c20044db14540714d126d8525c4e28f96c1fc",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/OPTIMIZATION_PLAN_2026-09-21.md",
+        "baseGitBlob": "bbf40a0f917c9224f32407754c772e6b864c7018",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/OPTIMIZATION_SUGGESTIONS_2026-09-12.md",
+        "baseGitBlob": "be107884a50e66f3975a667bf54a285fad6dee07",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/P0_2_IDENTITY_MODEL_DECISION_2026-09-10.md",
+        "baseGitBlob": "1893edeca4ea8d00c48d2f914d93ab1eb600c555",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE0_BATCH1_2026-09-28.md",
+        "baseGitBlob": "521bae22982e1dff3dcb255a827960d8ccad33a4",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE1_BATCH2_2026-09-28.md",
+        "baseGitBlob": "78a12a5ab9996738a4df5cd9dcd0b08b425b05f6",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE1_BATCH3_2026-09-28.md",
+        "baseGitBlob": "2fd6bfa3d91279c36350ccf76e94bcb26edf58b7",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE1_BATCH4_2026-09-28.md",
+        "baseGitBlob": "b9ade438a0f899ef64a776342c7fb5cfefd65bf6",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE2_BATCH5_2026-09-28.md",
+        "baseGitBlob": "16c84daf3f1382fd00824160b1ba2d00ee22f852",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE2_BATCH6_2026-09-28.md",
+        "baseGitBlob": "b054ae61c4aa76e938a510bb95751159c390b51e",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE2_BATCH7_2026-09-28.md",
+        "baseGitBlob": "341189b1143e74fabacf5197f5309fcaff09a592",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE2_BATCH8_2026-09-28.md",
+        "baseGitBlob": "3a80d866ce822ba6ddda5aed403fc3dfcffda35c",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE2_BATCH9_2026-09-28.md",
+        "baseGitBlob": "cc873a40c21a3e1e7313945e6435945083ccd59b",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE3_BATCH10_2026-09-28.md",
+        "baseGitBlob": "b73513f3fd3c7cc857eeda0056ed13f6413bab96",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE3_BATCH11_2026-09-28.md",
+        "baseGitBlob": "f36da4b9bf429826c811b8887b2444a37249319f",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE3_BATCH12_2026-09-28.md",
+        "baseGitBlob": "ee681b2cbb423916d4b4b1a79b9c10ada12db631",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE3_BATCH13_2026-09-28.md",
+        "baseGitBlob": "d7becf921f9536fc6c9c300060f1b85a7154d0fb",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE3_BATCH14_2026-09-28.md",
+        "baseGitBlob": "f4b00b3c28fb4df0fdb95ec1831f4a418fc3d433",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PHASE3_BATCH15_2026-09-28.md",
+        "baseGitBlob": "296b9cbb9950675b03f31065c29a4422c27408e6",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/PLAN_P0_P3_2026-09-17.md",
+        "baseGitBlob": "de6ea9382f7722a2a3409c53874d7c7c630dcd97",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PLAN_P0_P3_RECHECK_2026-09-17.md",
+        "baseGitBlob": "44e3ac5d23d83a194d79cd66bd379b89303c711a",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PLAN_P0_P3_REVISED_2026-09-17.md",
+        "baseGitBlob": "ccceebc3056e83067f561b7b72dba85737538512",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PLAN_P0_P3_VERIFIED_EXECUTION_2026-09-17.md",
+        "baseGitBlob": "f2a4b674b5a27a1f8e47fef647fab1bf4bc55988",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PRE_SUBMIT_OPTIMIZATION_2026-09-21.md",
+        "baseGitBlob": "7aba6a6ce0d4520e0e18af1b28ce36ac47034bbe",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PRODUCT_OPTIMIZATION_MULTIAGENT_2026-09-17.md",
+        "baseGitBlob": "83724dc5e0f9f5fb0707a516200964bfd6fa1246",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PROJECT_AUDIT_2026-09-12.md",
+        "baseGitBlob": "bcb221bb6f3ab01aaa0dbc78048f1c550eb081a8",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PROJECT_AUDIT_2026-09-15.md",
+        "baseGitBlob": "7fb8f1e1e8813022252ff75b93f223794a6d9efd",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PROJECT_AUDIT_2026-09-23.md",
+        "baseGitBlob": "7df0041189f8c5ad62f3c5d73bc6810d8f322778",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PROJECT_AUDIT_2026-09-24.md",
+        "baseGitBlob": "797062651b2fb95fba1e0456d591a440ad0328d3",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/PROJECT_AUDIT_2026-09-26.md",
+        "baseGitBlob": "6755bf4eb67453db9b0dc3f948c5a9bd3d688f22",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_ALGORITHM_V2_REMAINING_DESIGN_2026-09-29.md",
+        "baseGitBlob": "987e3f75bae433c9a4b20b37d0136520ea3b902d",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_HK_BACKGROUND_V21_GAP_2026-09-23.md",
+        "baseGitBlob": "ef07545752b7b758ed455230f29f60cf1833af94",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md",
+        "baseGitBlob": "3af44885f21797947a48a353ae7dfa8b4dda8a02",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md",
+        "baseGitBlob": "5a42324e25f0a33deff4b7792c5bb7e3f18376db",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_MUTATION_2026-09-23.md",
+        "baseGitBlob": "5536a505f0165c4a7cd02d9c596a84eb02a8344a",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_MUTATION_SUMMARY_2026-09-23.json",
+        "baseGitBlob": "dc6a769c596c407ad96b46a66a24d3049607cfb1",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_ABLATION_2026-09-29.json",
+        "baseGitBlob": "8e5ad92cd6c41d59a6658f72e8dcba0efd31018f",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH16_REPLAY_AND_LEGACY_COMPAT_2026-09-29.md",
+        "baseGitBlob": "65c68a4afebda3da10cbd9f1c051dd2a278484aa",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH17_CHALLENGERS_READINESS_EPOCH_LOAD_2026-09-30.md",
+        "baseGitBlob": "8c2358f555d006c46e7d71548b2b756a929a63c9",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH18_ACCEPTANCE_MATRIX_2026-09-30.md",
+        "baseGitBlob": "560e2f87505f819a3725def82456d54dfc099e0a",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH19_ABLATION_TOOLING_AND_NEGATIVE_GATE_2026-09-30.md",
+        "baseGitBlob": "8c27e23b27c149d895c076856348c9505a6d6907",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH20_SCRIPTS_TYPECHECK_SCOPE_2026-09-30.md",
+        "baseGitBlob": "ebde9def398e6526ee802a145d09558183102487",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH21_NEGATIVE_GATE_DIAGNOSIS_2026-09-30.md",
+        "baseGitBlob": "aa1f5e57059c23acb2f42c35df241d55b8027da6",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH22_ABLATION_REPORT_CONTRACT_2026-09-30.md",
+        "baseGitBlob": "3339e8b8818a7959f5a31c2d1277e1e06ae4845d",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH23_R05_D03_ACCEPTANCE_2026-09-30.md",
+        "baseGitBlob": "3f664150fc858a549ecf0924b748c53b255a6572",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH24_READINESS_FACTS_AND_LEAKAGE_2026-09-30.md",
+        "baseGitBlob": "545874c5c3c358a81b4fcbc7cbb8662f32118e82",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH25_CANONICAL_NIGHT_RANGE_2026-09-30.md",
+        "baseGitBlob": "5bba159d90b991ec8d8e87247af625900d9b36f0",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH26_REBASE_REVIEW_2026-09-30.md",
+        "baseGitBlob": "88e32ba9a461460061abbb37a2cf20d415161f05",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BATCH27_ACCEPTANCE_MATRIX_CHECK_2026-09-30.md",
+        "baseGitBlob": "f00cc8532ccc45fc083e5725a92245083420defe",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_BOUNDED_CANDIDATE_2026-09-29.json",
+        "baseGitBlob": "cdaea39ee1fde4019aab0467ea9dd478c725b5d0",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_EVALUATION_2026-09-29.json",
+        "baseGitBlob": "81b748e9a551df90d0db93cc3636027247cab5b9",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_IMPLEMENTATION_2026-09-29.md",
+        "baseGitBlob": "5df9b0f7f4a4f259d8a89dcf7ce2f527446c1df2",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_IMPLEMENTATION_2026-09-29.verification.json",
+        "baseGitBlob": "70bab5f4ab75f6a37c1c6d0e3cda30df1a7a03c1",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RAI_V2_PROGRESS_STATUS_2026-09-29.md",
+        "baseGitBlob": "b79f24ba21e1a543d09865fe602d8a61feb397ab",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/RUST_ENGINE_CLOUD_DEPLOY_PLAN_2026-09-19.md",
+        "baseGitBlob": "df37bd7c835a23d20b1a64c70f52abcbcc279faf",
+        "currentTopic": "docs/OPERATIONS.md"
+      },
+      {
+        "path": "deliverables/archive/RUST_REFACTOR_PHASE2_PLAN_2026-09-20.md",
+        "baseGitBlob": "6e071d5f457e1e210279ef3e73b84f53a0491ad4",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/SCORING_CONFIDENCE_FINDINGS_2026-09-10.md",
+        "baseGitBlob": "3d9cbb1bb8c4e617af5aca4598bfa0623c162d0a",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "deliverables/archive/SYNC_SOURCE_DEADLOCK_2026-09-22.md",
+        "baseGitBlob": "2a33f849f8b61a1186847f4658bf42d868a8ffcd",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_CHANGES_2026-09-26.md",
+        "baseGitBlob": "5bdb478e33771d0e1292ca35065ffa8bebdc2a34",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-11.md",
+        "baseGitBlob": "5568b0dba2ffa5cac7d60cd5e799ecafd7b5f5c2",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-12.md",
+        "baseGitBlob": "3cf7b9ae8093a67c966906a63589fdd2d0686230",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-13-R2.md",
+        "baseGitBlob": "a06d643dc238a5b48a04f937631022eb16dc7203",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-13.md",
+        "baseGitBlob": "13bb15ff8d36d4e8dfca8e23ecbe60bf0d677e49",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-14.md",
+        "baseGitBlob": "c9e704433225678151f302f741f31dfe866bdb67",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-16.md",
+        "baseGitBlob": "8d4ff72bf8034f95b633e1d0bfb27ad496272548",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-17.md",
+        "baseGitBlob": "0f0b5fd9f89bfe9e085b666bed09044af8d22edf",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-21.md",
+        "baseGitBlob": "8594843182e34c15c56629331245564e6a64dca2",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/UNCOMMITTED_REVIEW_2026-09-25.md",
+        "baseGitBlob": "434b33dd5ebfffb19ca888d1f7cc14f06223562a",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/gstack/design-review-rai-2026-09-04.md",
+        "baseGitBlob": "43307c6633900b7a8ec76559ef31aee2a3f28606",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/gstack/project-verification-and-implementation-plan-2026-09-07.md",
+        "baseGitBlob": "efcf3a1e194cc790307335f537c2436acfa323bb",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/gstack/raw/design-review-rai-2026-09-04.md",
+        "baseGitBlob": "26d45c56f22094de416d4886ee6be8364454392a",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/gstack/raw/investigation-rai-2026-09-04.md",
+        "baseGitBlob": "0b0791428764d47f08f3411b02cabf53c2f3b790",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/gstack/raw/product-review-rai-2026-09-04.md",
+        "baseGitBlob": "cbe29359b865a034db4e85d27dabed8c65c553be",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/icp-footer-live.png",
+        "baseGitBlob": "d3eaddfc7efa6e4183a6320a8f3350789d4d30d4",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/archive/ios-pixel-skin-removal-2026-09-18.md",
+        "baseGitBlob": "f0f447ffa527cdbc461dc55119743372b5c7c7c6",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "deliverables/plan-page-week-v1.md",
+        "baseGitBlob": "a88f657119b46c7cced1b6cb05ee349ada773503",
+        "currentTopic": "docs/WEB.md"
+      },
+      {
+        "path": "deliverables/watch-app-design-v1.md",
+        "baseGitBlob": "c0d11f98237775fb8d1797843cf8b37eafc6474a",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/watch-plan-execution-v1.md",
+        "baseGitBlob": "ff7a1ec22f80c5c458c694e6676e58fffc6437e9",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "deliverables/workout-segments-v1.md",
+        "baseGitBlob": "6c3c9caed89df38cabf93e0c29a2e5d51200af71",
+        "currentTopic": "docs/WEB.md"
+      },
+      {
+        "path": "deploy/README-CLOUD-2C2G.md",
+        "baseGitBlob": "d678547e01ad7bb3d0f35f48da282ad607adbe90",
+        "currentTopic": "deploy/README-UBUNTU.md"
+      },
+      {
+        "path": "deploy/n100/README.md",
+        "baseGitBlob": "620492eb884110d5378fa06b4607c41fc408ed34",
+        "currentTopic": "deploy/README-UBUNTU.md"
+      },
+      {
+        "path": "docs/ARCHITECTURE_DEBT_MIGRATION.md",
+        "baseGitBlob": "5da3b4690995f40057f25d5cac87a199158b7612",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/BACKEND_REFACTOR_IMPLEMENTATION.md",
+        "baseGitBlob": "693609af76e2a7eb3e5f5e664a4ce21749779023",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/CATBOOST_DIRECT_ACTIVATION.md",
+        "baseGitBlob": "636c03d35a0111a0e79d1c807c5cd39f15bfa1fa",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/DATABASE_DESIGN.md",
+        "baseGitBlob": "289486a2bce2c8363ff36c06435d1d5c1f9253c1",
+        "currentTopic": "docs/DATA_PIPELINE.md"
+      },
+      {
+        "path": "docs/DATA_AUDIT.md",
+        "baseGitBlob": "7bb21f013187a67c4577f1e5ef4c79be76858242",
+        "currentTopic": "docs/DATA_PIPELINE.md"
+      },
+      {
+        "path": "docs/FIGMA_HIFI_SPEC.md",
+        "baseGitBlob": "508a33bbe341665c8bf4c0b95f39fb2a5aa075b9",
+        "currentTopic": "docs/WEB.md"
+      },
+      {
+        "path": "docs/INCREMENTAL_COMPUTE_OPTIMIZATION.md",
+        "baseGitBlob": "ca5b5b79fd050e77fd428565d00428872327c47c",
+        "currentTopic": "docs/DATA_PIPELINE.md"
+      },
+      {
+        "path": "docs/IOS_CLOUD_REVIEW_PLAN_2026-09-07.md",
+        "baseGitBlob": "9c9700a76fecc305787e9c01638528a4603e8db5",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "docs/IOS_NATIVE_ACCEPTANCE.md",
+        "baseGitBlob": "287e8ec53e7caf2165782368abe8923e6e610b68",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "docs/IOS_NATIVE_IMPLEMENTATION_PLAN.md",
+        "baseGitBlob": "dc1f86c84b0354a3f47ce2bfd360f7b3bea6251e",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "docs/IOS_NATIVE_UI_REVIEW.md",
+        "baseGitBlob": "2dd3fabf9911b8d41f1e01a95f3b18d88baebf2a",
+        "currentTopic": "docs/IOS_NATIVE_SYNC_PROTOCOL.md"
+      },
+      {
+        "path": "docs/PARSER_DESIGN.md",
+        "baseGitBlob": "a4d2545d1802c3b998cb2baad145d75aa952a016",
+        "currentTopic": "docs/DATA_PIPELINE.md"
+      },
+      {
+        "path": "docs/PHYSIOLOGY_PREDICTION_BASELINE.md",
+        "baseGitBlob": "fe4d8ecee6f516af5f1e52d1df026e9ad79bc7da",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/PROJECT_HEALTH_AUDIT_2026-09-04.md",
+        "baseGitBlob": "b5ef982b2d83a641409747945582eda2f4373cfd",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/PROJECT_HEALTH_AUDIT_2026-09-09.md",
+        "baseGitBlob": "5f0605b28690b7ee16943983473ba23f04041aed",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/PROJECT_HEALTH_AUDIT_2026-09-10.md",
+        "baseGitBlob": "359659927c66371313cdc7d24180e2f5dfabe9ff",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/SLEEP_HRV_DESIGN.md",
+        "baseGitBlob": "710327ac6d2d5c6104d2a6c649aa0a1b023ac186",
+        "currentTopic": "docs/DATA_PIPELINE.md"
+      },
+      {
+        "path": "docs/TRAINING_LOAD_V1.md",
+        "baseGitBlob": "0d2eb35518e1d5fbc1e3829f649a6faf34acd904",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/UI_WIREFRAMES.md",
+        "baseGitBlob": "c651bac0c4d9550f51c097a7023c750384d77bf6",
+        "currentTopic": "docs/WEB.md"
+      },
+      {
+        "path": "docs/WEB_IMPLEMENTATION.md",
+        "baseGitBlob": "ac49139beaf8f1cb4dcf150b97fc8aa72330b731",
+        "currentTopic": "docs/WEB.md"
+      },
+      {
+        "path": "docs/archive/ARCHITECTURE_MODEL_ACCEPTANCE_2026-09-07.md",
+        "baseGitBlob": "188627e85cbc60ee4322b350c81f154b3cf59465",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/ARCHITECTURE_MODEL_AUDIT_2026-09-07.md",
+        "baseGitBlob": "f523ae46973d5f251dede22d6210dc67e4f3b85b",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/ARCHITECTURE_MODEL_IMPLEMENTATION_2026-09-07.md",
+        "baseGitBlob": "e9a5246bcd8a07e987e016e432de16dcc6769879",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/CATBOOST_10_ROUND_OPTIMIZATION.md",
+        "baseGitBlob": "6cbbbbacfd4c0d90e72b843c39260f80c64a5eb5",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/MODEL_ACCURACY_MULTIAGENT_AUDIT_2026-09-07.md",
+        "baseGitBlob": "fa25a34b1c83f87cf15bbbd0a1b4a7119a36ff6d",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/MODEL_DISTRIBUTION_REPORT.md",
+        "baseGitBlob": "346da03922c608cca06d6fe2e84197de864840c0",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/MODEL_VALIDATION_PLAN.md",
+        "baseGitBlob": "974569490654ea7fa69b5385ad01a6a7e7c37d11",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/PHYSIOLOGY_OPTIMIZATION_AUDIT.md",
+        "baseGitBlob": "fb27dd7de62c0e7853bd4acfa1fbd8ac771a885b",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/PR3_PRODUCTION_READINESS.md",
+        "baseGitBlob": "60c00963b0e7980ebe573eeadfc9cfc3bb5634a3",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/PROJECT_AUDIT_2026-07-13.md",
+        "baseGitBlob": "9e2fc436ce3746093e128d5adef7dede2cbf2e57",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/archive/PROJECT_AUDIT_2026-07-17.md",
+        "baseGitBlob": "793bdc8aac12ca2184681e8e094336dc478974c1",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/archive/PROJECT_AUDIT_2026-07-17_R2.md",
+        "baseGitBlob": "a9ce09815a6b79773deda0a256b66bf6fd6e8f58",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/archive/PROJECT_AUDIT_2026-07-17_R3.md",
+        "baseGitBlob": "424e6a83df5d2017e539f66f81ee961a3c0068d3",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/archive/README.md",
+        "baseGitBlob": "9d6d749d004856ee3e6430f610cb0c53cee383c2",
+        "currentTopic": "docs/PROJECT_REVIEW.md"
+      },
+      {
+        "path": "docs/archive/SLEEP_HRV_IMPL_STATUS.md",
+        "baseGitBlob": "e41b578cb6bde25ae69c9d35ca7f3c4a601cd1f1",
+        "currentTopic": "docs/DATA_PIPELINE.md"
+      },
+      {
+        "path": "docs/archive/TRAINING_LOAD_AUDIT.md",
+        "baseGitBlob": "963448a44840ae3c17e4624fc93c789a7282f397",
+        "currentTopic": "docs/ALGORITHM.md"
+      },
+      {
+        "path": "docs/archive/WEB_COMPLETION_AUDIT.md",
+        "baseGitBlob": "bfb51d1eed1dbc333aaf5cd361035e6a2c5d1691",
+        "currentTopic": "docs/WEB.md"
+      }
+    ],
+    "recovery": "git history for tracked baseline content; prior uncommitted status/design updates consolidated into maintained docs, not an exact byte-for-byte backup"
+  },
+  "findings": [
+    {
+      "id": "R1",
+      "priority": "P1",
+      "status": "open",
+      "evidence": "synthetic production-path replay",
+      "summary": "activation accepts obsolete override snapshot"
+    },
+    {
+      "id": "R2",
+      "priority": "P1",
+      "status": "open",
+      "evidence": "synthetic production-path replay",
+      "summary": "confirmed deletion of every session cannot publish empty results"
+    },
+    {
+      "id": "R3",
+      "priority": "P2",
+      "status": "open",
+      "evidence": "synthetic repeated recompute and production receipt retirement",
+      "summary": "current epoch effective time is lost after origin release retirement"
+    },
+    {
+      "id": "R4",
+      "priority": "P2",
+      "status": "open",
+      "evidence": "source/config review only; Windows not executed on macOS",
+      "summary": "POSIX npm test script incompatible with configured default Windows CI entry"
+    }
+  ],
+  "checks": [
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "node": {
+        "tests": 1154,
+        "passed": 1151,
+        "failed": 0,
+        "skipped": 3,
+        "skipReason": "Windows-only path alias, locked-file rollback and process-tree semantics"
+      },
+      "web": {
+        "files": 18,
+        "passed": 111,
+        "failed": 0
+      }
+    },
+    {
+      "command": "npm run build (test:e2e:web prerequisite)",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run test:e2e:web",
+      "exitCode": 0,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "390px frozen responsive coverage"
+    },
+    {
+      "command": "npm run test:ios",
+      "exitCode": 0,
+      "swiftFilesTypechecked": 67,
+      "sdkDependentFilesExcluded": 3,
+      "backgroundStructureChecks": 252,
+      "exportDeterminismChecks": 14,
+      "realDeviceAcceptance": false
+    },
+    {
+      "command": "npm run ml:test",
+      "exitCode": 0,
+      "passed": 26
+    },
+    {
+      "command": "CARGO_NET_OFFLINE=true npm run rust:verify",
+      "exitCode": 0,
+      "rustTests": 2,
+      "integrationTests": 11,
+      "skipped": 0
+    },
+    {
+      "command": "npm run smoke:api",
+      "exitCode": 0,
+      "isolatedRuntime": true
+    },
+    {
+      "command": "npm audit --omit=dev --json",
+      "exitCode": 0,
+      "registryReportedProductionVulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0,
+        "total": 0
+      }
+    },
+    {
+      "command": "npm run check:docs",
+      "exitCode": 0,
+      "markdownFiles": 20,
+      "boundary": "inline local Markdown paths and README reachability, not heading-fragment/remote/semantic certification"
+    },
+    {
+      "command": "npm run check:doc-refs",
+      "exitCode": 0,
+      "numericReferencesInDefaultDocs": 0,
+      "boundary": "maintained docs now use stable file/symbol references; zero numeric refs is not semantic certification"
+    },
+    {
+      "command": "npm run check:acceptance-matrix",
+      "exitCode": 0,
+      "cited": 54,
+      "declaredGap": 0,
+      "missing": 0,
+      "boundary": "ID citation count, not behavioral or accuracy coverage"
+    },
+    {
+      "command": "npm run check:package-boundaries",
+      "exitCode": 0,
+      "packages": 15,
+      "sourceEdges": 30
+    },
+    {
+      "command": "node --import tsx --test packages/application/test/documentation-links.test.ts apps/api/test/deploy-cloud.test.ts",
+      "exitCode": 0,
+      "passed": 5
+    },
+    {
+      "command": "npm run review:model-boundaries -- --out /tmp/rai-model-boundaries.json",
+      "exitCode": 1,
+      "violationCount": 3,
+      "status": "confirmed_open_findings",
+      "boundary": "exit 1 is reviewed invariant failure; exit 2 is probe setup failure"
+    }
+  ],
+  "database": {
+    "originalUnchanged": true,
+    "sha256": "cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d",
+    "writes": "synthetic temporary databases only for current review; no real DB migration/recompute/activation"
+  },
+  "notVerified": [
+    "Windows runtime",
+    "live production deployment and remote CI execution",
+    "physical-device HealthKit/background dispatch",
+    "simulator visual and AMap SDK acceptance",
+    "full responsive E2E",
+    "statistical prediction accuracy with independent real labels",
+    "exhaustive security penetration test"
+  ],
+  "sourceFilesSha256": {
+    ".githooks/pre-commit": "dbcbbc5cf9c2e11f045271a7a0a4a0096a438df04edc57e8e03f2dd0254731fe",
+    ".github/workflows/ci.yml": "24231f86939c2d462ffb6046704f48068dddd96bdccc9e8cd224700a19a7b074",
+    ".gitignore": "3ad9ad49a388ee6737c7a4fc4817237ecf80c92ef233f39282090e5c276386a6",
+    "apps/api/test/deploy-cloud.test.ts": "8f66cc0e9a8b936bdba145dc086c5d13c67f2c2327f0b0e59e6504887050bb1f",
+    "apps/api/test/native-import-worker.test.ts": "1d4b265ec937e26322bf709f35fc91c2c6f379c9faa270978dcf016358c043f5",
+    "package.json": "2d53f5c4ed87f544433a88e663c4024466a4a95d95c60bdd7a0b19212d40dbc6",
+    "packages/application/src/backfill-canonical-nights.ts": "4fa021de96c4898ffa4571f9b78fc2a0d56ef1a5d51eb844e0e0144dc3a30af5",
+    "packages/application/src/baseline-rebase-review.ts": "00dc25e7030fc75ed28711c426f2bbfcb3824621d5799f4e8444caef443d361f",
+    "packages/application/src/index.ts": "92c785a4e4a8b3c927a8dc6332d191a1572805e7adb2dd6b38f3f5a79722821f",
+    "packages/application/src/load-replay-data.ts": "a12a4515cd9b1621472048ce497463f1727ca83ed3de4be5e9fec9f37c4c2ae9",
+    "packages/application/src/load-replay-v2.ts": "7d994838756c05c052d93f03a3db1c644a79cab99ee2442ae0c1998184c868b3",
+    "packages/application/src/model-v2-cli.ts": "33fcf2d528f927ec3430e3c5307630cad76cdffe42cae37c7a994cb65c15a16c",
+    "packages/application/src/prediction-report.ts": "e8bef5b2d27d6b2f5357bc7f55eb00cc0d64d308a2fb07cb4a46cf625d8640e2",
+    "packages/application/src/services/recompute-pipeline.ts": "1524ef3a22f4ccc548b77ce6ed3c2e4791882677165614163daa486a118beae7",
+    "packages/application/src/training-load-data.ts": "c782a874e777b45160832033a758888b7c48b51d3d4ece5aa5aa722a2e10c72c",
+    "packages/application/test/baseline-rebase-review.test.ts": "6e2044ac552b860bdaa1c818397ae84257eb58f13233c7ce8217e4ff4182156d",
+    "packages/application/test/documentation-links.test.ts": "0edf952e2439b196c4fcc6d4009500f7ec2ae7f722ec7ca19a05fb6b140c5df6",
+    "packages/application/test/import-idempotency-and-checkpoint.test.ts": "dc16444b8a75735e8ba06e2e211e4ff1ba8d19a280ae1668aff0b890444c0a0a",
+    "packages/application/test/load-replay-v2.test.ts": "77d821b2282619d7dbce478a7781e33586c6a6b3cbaa7f0ae495e8f96743b8ef",
+    "packages/application/test/service.test.ts": "76b3813d92dfd91f39e9b191c55af912f7cc8c09b6197181788a6ad37b6561e0",
+    "packages/contracts/src/index.ts": "a0749e03477d3f918315ec198090a747b3998bc315246d036de4b8757c6c59b1",
+    "packages/contracts/src/semantic-json.ts": "7f780d83c8898abde39dd9f0bef6894a448eec28e88ada944974c392fe43e847",
+    "packages/health-export-parser/src/canonicalize-nights.ts": "b0aec5f471c48fc7c59f8b0d2b7d7e72b5279e1bf2f893ceaf3117fa6af230c1",
+    "packages/model-eval/src/index.ts": "8aea32e86d314b430e77d26d1f0e19aaa080b9c9fcde0734c6fef756d0be597f",
+    "packages/model-eval/test/interval-presentation.test.ts": "739cff69b91e72fe39fb80f3363a720316b83b9055524d648d90f6bcd215f42e",
+    "packages/storage-sqlite/src/calibration-repository.ts": "2d19f084359e5d8f07216a199483eeea47c3d0ba91315864f84b75288a4a697c",
+    "packages/storage-sqlite/src/database.ts": "aa05f6c07cf6f80fc14c71ac9d2f89cd30bea8c1258d43a15a81ffd2f36d3b20",
+    "packages/storage-sqlite/src/model-transition-gate.ts": "7519f6df0b33c4285fac2ddc95dfa9e9af97efcdc5c8f772c3fd5bf09ccfbac0",
+    "packages/storage-sqlite/src/v24-migration.ts": "6e164cb521dc3b427cacc1fea5188f0edc02c6f376315a55266567347fa31fdb",
+    "packages/storage-sqlite/src/v25-migration.ts": "1a8bfb2e270b5db2d9db250b4abcdfc25024b906865a050325ca589a972b73ac",
+    "packages/storage-sqlite/test/calibration-repository.test.ts": "d34d1c95eaa1b8f611c6b44808113966d62bbda1fe374d6b4c05b14fbec58512",
+    "scripts/ablation-ca-weights.mts": "a1b1d6150c3a4ea37ebe7e44576f649a73182d93fd957c865f1be8baa827d6b4",
+    "scripts/backfill-canonical-nights.mts": "b2f1b934d49343f31127b10bd19c489224f7da5db422d780ec768e4619b2b679",
+    "scripts/baseline-rebase-review.mts": "801f64c8660314fadf12958dd57c903c5a4f03fd3ea768111e213f452c417803",
+    "scripts/check-acceptance-matrix.mts": "00d07f7724d19edc15516a6343a8d6eb65aaa9095b706e0e0bb09ba84bb8593f",
+    "scripts/check-doc-line-refs.mjs": "fd900892d62a855c0ea2d7e05a661516a7a1e915e4c578403c105ef238ece6e3",
+    "scripts/check-doc-links.mjs": "4944905a1366509e2e7798bb221fc12f6e5c0600544b3987848f867e4b7a4ec8",
+    "scripts/load-replay.mts": "92ab66502f7e06ddc335588d673f71fa86929d364aab64453b6deab1c85be5a8",
+    "scripts/model-version-replay.mts": "c117cb2c11331a3ed98ff8bcefdbaf0adf57433a841767316ac278015d591b7f",
+    "scripts/review-model-boundaries.mts": "b660150b009f046193951bfd66afe4dac7640a9ff0fd85bb04646f69b8edbae3",
+    "scripts/snapshot-phase0-baseline.mts": "fecf2614b5b966437609e6995a99242fdc49e7baff6f6b96fa3e20a620670dd3",
+    "scripts/verify-v2-release.mts": "ff8034291ada4af01fd8142cbb30bb1867f03671c81dae7a32590f3880e136c0"
+  },
+  "documentsSha256": {
+    "AGENTS.md": "4e66dc3a6360450d70d457569bf90994938309a88b035a52c3d4f8c85c53bfae",
+    "README.md": "bb8376a0a01455d9657849bb33ebb279efb7331f3d985803bb9a12b2d2ce3a34",
+    "apps/ios/README.md": "cd8a7404719404b5c122f67c9abf2a12e72de35e076134c191ead71830eeef7a",
+    "apps/ios/design/README.md": "814b92db4b30e667e39d89de7f8cb2dbed59fdc672e8300457182b9e2bc07473",
+    "apps/ios/design/TECHNOLOGY_SKIN.md": "5d78614613e06de46d513b4a308418b3888d2521eb4b6ec09e5e52bd70882e8b",
+    "deliverables/README.md": "e0b46af95e3a2613586bde2d338dde170fa668d1cdfb48aa6e2623fb2aa4ff22",
+    "deploy/README-UBUNTU.md": "5eb87251d0ffde61d1ca09505af8fa3401d9b561b19ac19df648de7415d733c7",
+    "docs/ALGORITHM.md": "271a1558580765af928e9508adb30c1054cd998b677e09352b78b0c169dc9a85",
+    "docs/ARCHITECTURE.md": "42350a260fe002808317ddacbb57cc652b6e098f9271d03a7299200b75827b92",
+    "docs/DATA_PIPELINE.md": "80801845cc402c3613f6ed439687b15948d49ac51b8510dd3f2e03d5e4064418",
+    "docs/DECISIONS.md": "cdb806f3d5653c1d619a0931e5b13729f099e420dbeb1446502f768f04746f43",
+    "docs/IOS_NATIVE_API_CONTRACT.md": "b1f98633fdbae8228904c1fba2b57ee845b506352c094bc33990abf83741a6bf",
+    "docs/IOS_NATIVE_RUNBOOK.md": "741ba0e6476739dfad1425358d7f72998128b188f23153444fd7b12eb94f03c8",
+    "docs/IOS_NATIVE_SYNC_PROTOCOL.md": "97c8b780b3d1251fccbde80c9121db895527ef98595960253e1d1e7d7d90b4b4",
+    "docs/OPERATIONS.md": "276e8a311e25a83ae2c98237716b1aabdd41b12817a6864e56a5bda8f13eb806",
+    "docs/PROJECT_REVIEW.md": "24b81b91c592622cbdd9d6b5a0d7abe8dde50ad5bb07e0d252cb5d07942e9065",
+    "docs/RUST_DATA_ENGINE.md": "d427bb4534630a41a1636f3527949ce999e64028a9cc206cd7884c4bb4b34b77",
+    "docs/WEB.md": "f2e439f124222d2a07eef67115a4cd5afefd7cfb4825938df1ca0946a9c38377",
+    "docs/adr/ADR-004-healthkit-sync-invariants.md": "da80ad7df74a03d4b3ba45ba0c5ced28b491ae22f8addbb3002cc66150d3bf14",
+    "research/README.md": "5d7cbcae0a6db4e54504e6a3fab65aac2fa6a8d4094d18c8babc1efa933a1a01"
+  },
+  "evidenceFiles": {
+    "model-boundaries.json": "39db8575195feae2dc571961408b55f7222868e84c50f4c810f373ced66af47b"
+  },
+  "localLogs": "/Users/ta/running/output/project-review-2026-09-30",
+  "logSha256": {
+    "boundaries.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "boundaries.log": "baaddb0890813f4ad88ac51d33278a752fd134fc505e9a82ce35cf358a65fd45",
+    "doc-refs.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "doc-refs.log": "42775a5275bb67a8deaa0f24ebfe0bf5ad1c8076257d996fb86c2abf57ba9cce",
+    "doc-tests.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "doc-tests.log": "004c91264d7126e8a44184224e3bb1ea43702a0b33ba47b31a79c721964df981",
+    "docs.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "docs.log": "fa36fa371fff466af9e3177b65eb50f1171e8acb9a7e649945b3b171a2334fde",
+    "e2e.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "e2e.log": "d841c4822a0f68c33719de5473efb276aaaaf6f96aa86d2384bcb3692cedbdfc",
+    "ios.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "ios.log": "7a78e0f82df5ba59e32d32fd14dabd5a2bcb98a324d33252bac8ed8b7873fd93",
+    "matrix.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "matrix.log": "3f86d748fbe7141616097c7bdc668b3e6f8c3517a40ffd915229d52feba1bd01",
+    "ml.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "ml.log": "1313c6a864d82ca96f2a3a4eed47a5df4a36b8a3a48a056a08f2b77dd7190ff8",
+    "model-boundaries.exit": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+    "model-boundaries.log": "15e3656b3de6f0052ed95ce91200902ed7cde57f907d3e2e70f44fa78d09c71d",
+    "npm-audit.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "npm-audit.json": "ebfbbb71c9970ef0b100cf85ea87435f1f9b467e1ae30ac7471366156587278d",
+    "npm-audit.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "rust.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "rust.log": "136164e7750c275c4504036b288cac55698a238e78d03d0c3b8341f47a2910ba",
+    "smoke.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "smoke.log": "e6deb0fb4b855a1ceca9e2b4fe427163215f2a71db2e72b09771fa248797ad5b",
+    "tests.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "tests.log": "29734e57b433a5e64f70cbb94d1590b58532d3680b4b8c7f6d8c0a06d0d341ca",
+    "typecheck-final.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "typecheck-final.log": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b",
+    "typecheck.exit": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "typecheck.log": "e6b64ff8ff910cc8ea6e6868a4ba0ba4d2973a569bdad75bfe8b9eaf772ef18b"
+  },
+  "conclusion": "documentation consolidation complete; applicable existing regression gates passed; 2 P1 and 2 P2 findings remain open, not release-certified"
+}

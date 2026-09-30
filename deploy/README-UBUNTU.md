@@ -1,9 +1,8 @@
 # Ubuntu 部署
 
 当前方案：**2 核 2GB 云服务器单机部署，不迁移 N100，不使用 FRP**。
-资源预算、已有服务器切换、完整备份及低内存发布步骤见
-[`README-CLOUD-2C2G.md`](README-CLOUD-2C2G.md)。已有服务器优先按该页操作，
-不要用示例环境文件覆盖现有 Token、身份标识或路径。
+本页是唯一现行云部署入口，资源预算和维护顺序见文末。
+不要用示例环境文件覆盖现有 Token、身份标识或路径；仓库修改不代表线上已部署。
 
 应用只监听 `127.0.0.1:8787`（`RAI_API_HOST` / `RAI_API_PORT` 可覆盖），由 Nginx 提供 HTTPS 并托管静态 Web。SQLite、上传文件、运行时状态和备份放在 `/var/lib/rai`，不要把该目录放到 Web 根目录或共享盘。
 
@@ -11,7 +10,7 @@
 
 - Nginx 直接托管 `apps/web/dist`（SPA，`try_files` 回退到 `index.html`）；
 - 仅 `location /v1/` 反代到 `127.0.0.1:8787`，**透传客户端自己的 Bearer Token**；
-- 不做 `auth_basic`、不做 Nginx 侧 Token 注入（WKWebView 无法处理 Basic Auth 弹窗，且注入会让 iOS 壳自带 Token 失效）；
+- 不做 Nginx 侧 Token 注入，必须透传客户端自己的 Bearer Token；
 - 后端 `apps/api/src/local-request-security.ts` 统一校验 Bearer 与请求上下文。
 
 ## 首次部署
@@ -151,7 +150,7 @@ sudo bash deploy/upgrade.sh --apply    # 执行
 ```
 
 以下旧式构建命令本身**不包含备份或低内存停服保护**，
-2C2G 当前部署应使用 `README-CLOUD-2C2G.md` 的完整维护流程：
+2C2G 当前部署应按本页资源预算与维护流程操作：
 
 ```bash
 cd /opt/rai
@@ -204,8 +203,30 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 可在服务器运行 `bash deploy/check-runtime-readonly.sh` 收集只读运行证据；脚本不重启服务、不迁移、不输出令牌。它不能代替 TLS 检查、实际任务引擎核验或完整运行时恢复演练。环境变量只证明配置意图，备份文件存在也不证明能够完整恢复。
 
-如果 `RAI_PUBLIC_HOSTS` 非空，仍需单独核实健康数据和路线的匿名可见性。这轮本地代码交付没有登录服务器修改既有配置；完整发布/设备验收清单见 `deliverables/USER_EXPERIENCE_IMPLEMENTATION_2026-09-28.md`。
+如果 `RAI_PUBLIC_HOSTS` 非空，仍需单独核实健康数据和路线的匿名可见性。本地代码审查不代表已登录服务器核对配置；发布/设备验收见[运维](../docs/OPERATIONS.md)及[iOS runbook](../docs/IOS_NATIVE_RUNBOOK.md)。
 
 ### 运维脚本的执行边界（2026-09-28 审计修订）
 
 `deploy/check-runtime-readonly.sh` 是明确保留的**人工运维入口**，不进入自动生产门禁，也不由客户端、API 启动或部署脚本自动执行。发布负责人应在目标 Linux/systemd 服务器上运行 `bash deploy/check-runtime-readonly.sh` 并归档输出；非 Linux 环境退出 2 表示“未核验”，不是通过。自动测试仅验证脚本语法和非 Linux 的拒绝路径，不能替代生产运行、TLS/实际引擎检查或恢复演练。
+
+## 资源预算与一致性维护
+
+配置依据：[systemd service](rai-api.service)、[env模板](rai.env.example)、[Nginx](nginx-rai.conf)。
+MemoryHigh=1100M、MemoryMax=1400M、MemorySwapMax=512M、CPUQuota=150%；Node堆每进程512MiB，数值库线程1。
+这些是初始预算，不保证任意规模健康导出能在2GB内完成；swap限制不等于主机已有swap。
+先检查磁盘、内存和实际cgroup生效值，不关闭质量门禁换吞吐。
+不迁移N100、不安装FRP、不新增第二个可写主库。可选Rust路径见[Rust说明](../docs/RUST_DATA_ENGINE.md)，不能只改env而不部署匹配工件。
+
+升级前停手机同步、等待任务结束、禁止独立CLI写者，保留代码/环境/身份配置和回滚版本。
+[backup-runtime.sh](backup-runtime.sh)默认dry-run，对整个runtime做冷备；所有自定义DB/工件目录都需纳入实际备份范围。
+
+```bash
+sudo install -d -m 700 /var/backups/rai
+sudo bash deploy/backup-runtime.sh --output-dir /var/backups/rai
+# 确认路径、空间、服务状态和维护窗口后才执行：
+sudo bash deploy/backup-runtime.sh --output-dir /var/backups/rai --apply
+```
+
+备份结束会恢复原服务状态；升级迁移前再明确停服。迁移默认检查、显式apply，流程见[运维](../docs/OPERATIONS.md)。
+不要把旧二进制与新schema的兼容视为当然成立；先在副本验证、保存工件，启动后核对身份、读写、队列和恢复能力。
+不能对运行中WAL主库作普通文件复制；备份和配置含敏感信息，须严格权限并离线保护。

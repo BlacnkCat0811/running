@@ -146,3 +146,22 @@ test("D10: a day outside the resulting series is reported as absent, not as a ze
   assert.equal(empty.candidate.output.day, null);
   assert.equal(empty.candidate.output.excludedFactCount, 0);
 });
+
+test("F05: load replay checks event time as well as availability and does not trust a false unknown flag", () => {
+  const input = {
+    descriptor: descriptor("as_known_then", false),
+    facts: facts({ observedAtOf: "2026-02-20T01:00:00Z" })
+  };
+  const result = replayLoadRulings(input);
+  assert.equal(result.base.output.includedFactCount, input.facts.facts.length - 1);
+  assert.equal(result.candidate.output.includedFactCount, input.facts.facts.length - 1);
+  assert.throws(() => replayLoadRulings({
+    ...input, facts: facts({ availableAtOf: null })
+  }), /Unknown arrival times/);
+  assert.throws(() => replayLoadRulings({
+    ...input, facts: facts({ observedAtOf: "invalid" })
+  }), /Invalid load observation/);
+  assert.throws(() => replayLoadRulings({
+    ...input, facts: facts({ extra: [input.facts.facts[0]!] })
+  }), /Duplicate replay session/);
+});

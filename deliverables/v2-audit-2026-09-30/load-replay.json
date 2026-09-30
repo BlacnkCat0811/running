@@ -1,0 +1,60 @@
+{
+  "version": "rai-load-replay-v1",
+  "descriptor": {
+    "caseId": "published-load:training_metric_run_48d36e2e-1cb0-4728-90c8-6ae8d68e4590",
+    "asOf": "2026-09-30T00:00:00.000Z",
+    "timezoneIdentifier": "Asia/Shanghai",
+    "replayMode": "event_time_reconstruction",
+    "factsSnapshotHash": "c0a95884521540340e1bf966552604d695b2d98483c6c8aff9bf5db0501e9833",
+    "overrideSnapshotHash": "11399977711ec044394852eb8599fbd612e32e059e8a7236398c796abd955d6e",
+    "availabilityUnknown": false
+  },
+  "base": {
+    "version": "observation_time_arrival_counterfactual",
+    "output": {
+      "localDate": "2026-09-30",
+      "includedFactCount": 266,
+      "excludedFactCount": 0,
+      "day": {
+        "trainingStatus": "recovery",
+        "explanationCodes": [
+          "seven_days_without_run"
+        ],
+        "loadRatio": 0.120994,
+        "chronicEwma": 6.404128,
+        "strain": null
+      }
+    },
+    "semantic": "{\"day\":{\"chronicEwma\":6.404128,\"explanationCodes\":[\"seven_days_without_run\"],\"loadRatio\":0.120994,\"strain\":null,\"trainingStatus\":\"recovery\"},\"excludedFactCount\":0,\"includedFactCount\":266,\"localDate\":\"2026-09-30\"}"
+  },
+  "candidate": {
+    "version": "training-load-config-v5",
+    "output": {
+      "localDate": "2026-09-30",
+      "includedFactCount": 266,
+      "excludedFactCount": 0,
+      "day": {
+        "trainingStatus": "recovery",
+        "explanationCodes": [
+          "seven_days_without_run"
+        ],
+        "loadRatio": 0.120994,
+        "chronicEwma": 6.404128,
+        "strain": null
+      }
+    },
+    "semantic": "{\"day\":{\"chronicEwma\":6.404128,\"explanationCodes\":[\"seven_days_without_run\"],\"loadRatio\":0.120994,\"strain\":null,\"trainingStatus\":\"recovery\"},\"excludedFactCount\":0,\"includedFactCount\":266,\"localDate\":\"2026-09-30\"}"
+  },
+  "semanticEqual": true,
+  "rulingEqual": true,
+  "arrivalSensitiveExplanationCodes": [],
+  "accuracyStatus": "not_evaluable",
+  "note": "两条分支共用同一个生产负荷函数，只差到达时间假设；差值衡量的是可用性口径的影响，不是模型精度。",
+  "source": {
+    "trainingMetricRunId": "training_metric_run_48d36e2e-1cb0-4728-90c8-6ae8d68e4590",
+    "loadConfigVersion": "training-load-config-v4",
+    "availableAt": "2026-09-04T08:54:37.167Z",
+    "scope": "published_derived_snapshot_not_raw_as_known_then",
+    "recoveryPolicy": "same_as_of_production_readiness_for_both_branches"
+  }
+}

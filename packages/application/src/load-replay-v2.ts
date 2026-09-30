@@ -36,7 +36,7 @@ export interface LoadReplayFacts {
   physEvidence: DailyPhysEvidence[];
 }
 
-interface LoadReplayOutput {
+export interface LoadReplayOutput {
   localDate: string;
   includedFactCount: number;
   excludedFactCount: number;
@@ -69,11 +69,22 @@ export function replayLoadRulings(input: {
   facts: LoadReplayFacts;
 }) {
   const asOf = Date.parse(input.descriptor.asOf);
+  const ids = new Set<string>();
+  for (const fact of input.facts.facts) {
+    if (!Number.isFinite(Date.parse(fact.observedAt))) throw new Error("Invalid load observation time");
+    if (fact.availableAt !== null && !Number.isFinite(Date.parse(fact.availableAt))) {
+      throw new Error("Invalid load arrival time");
+    }
+    if (input.descriptor.replayMode === "as_known_then" && fact.availableAt === null) {
+      throw new Error("Unknown arrival times cannot certify as-known-then replay");
+    }
+    if (ids.has(fact.load.trainingSessionId)) throw new Error("Duplicate replay session");
+    ids.add(fact.load.trainingSessionId);
+  }
   const run = (facts: LoadReplayFacts, arrivalEqualsObservation: boolean): LoadReplayOutput => {
     const included = facts.facts.filter((fact) =>
-      arrivalEqualsObservation
-        ? Date.parse(fact.observedAt) <= asOf
-        : fact.availableAt !== null && Date.parse(fact.availableAt) <= asOf
+      Date.parse(fact.observedAt) <= asOf && (arrivalEqualsObservation ||
+        (fact.availableAt !== null && Date.parse(fact.availableAt) <= asOf))
     );
     const days = buildDailyTrainingMetricsV2(
       included.map((fact) => fact.load),

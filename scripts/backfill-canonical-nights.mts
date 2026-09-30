@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // `canonical_nights` / `canonical_hrv_days` 的空表回填。
 //
-// 背景：`docs/SLEEP_HRV_DESIGN.md` 的 v17 迁移策略写明回填有两条路 —— 下一次 CLI import，
+// 背景：`docs/DATA_PIPELINE.md` 的 v17 迁移策略写明回填有两条路 —— 下一次 CLI import，
 // 或 `recoverDatabaseJobs` 在启动时发现"夜表为空且存在睡眠行"时回填。**第二条从未接线。**
 // 后果可观测：本机 `var/rai.sqlite` 有 5222 行睡眠段 / 684 行 HRV，而两张 canonical 表各 0 行，
 // 于是 §7 的 Readiness 在这份库上永远只能拿到 `coverage: none`。

@@ -10,6 +10,8 @@
   "scripts": {
     "check:node": "node scripts/check-node-version.mjs",
     "check:doc-refs": "node scripts/check-doc-line-refs.mjs",
+    "check:docs": "node scripts/check-doc-links.mjs",
+    "review:model-boundaries": "tsx scripts/review-model-boundaries.mts",
     "preinstall": "node scripts/check-node-version.mjs",
     "pretypecheck": "node scripts/check-node-version.mjs",
     "pretest": "node scripts/check-node-version.mjs",
@@ -33,7 +35,7 @@
     "preml:test": "npm run check:node",
     "preml:train": "npm run check:node",
     "typecheck": "tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test packages/*/test/*.test.ts apps/api/test/*.test.ts; node_status=$?; npm run test -w @rai/web; web_status=$?; test $node_status -eq 0 -a $web_status -eq 0",
+    "test": "node scripts/run-tests.mjs",
     "test:ios": "bash apps/ios/tests/run-ios-gates.sh",
     "test:ios:live": "python3 apps/ios/tests/check-export-determinism-live.py",
     "test:ios:mutation": "python3 apps/ios/tests/check-background-mutations.py",
@@ -95,7 +97,11 @@
     "predata:speed-plausibility": "npm run check:node",
     "data:speed-plausibility": "tsx scripts/speed-plausibility-inventory.mts",
     "data:model-replay": "tsx packages/application/src/model-replay-cli.ts",
-    "predata:model-replay": "npm run check:node"
+    "predata:model-replay": "npm run check:node",
+    "data:load-replay": "tsx scripts/load-replay.mts",
+    "predata:load-replay": "npm run check:node",
+    "data:verify-v2-release": "tsx scripts/verify-v2-release.mts",
+    "predata:verify-v2-release": "npm run check:node"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

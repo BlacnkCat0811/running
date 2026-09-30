@@ -1,0 +1,31 @@
+{
+  "version": "rai-model-boundary-review-v1",
+  "writes": "synthetic_temporary_databases_only",
+  "results": [
+    {
+      "id": "R1",
+      "violation": false,
+      "refused": true,
+      "effectiveOverride": "exclude",
+      "before": "excluded",
+      "after": "excluded",
+      "evaluatedAt": "2026-09-30T14:15:43.296Z"
+    },
+    {
+      "id": "R2",
+      "violation": false,
+      "jobStatus": "succeeded",
+      "error": null,
+      "remainingPublishedRows": 0
+    },
+    {
+      "id": "R3",
+      "violation": false,
+      "before": "2026-01-31T04:00:00.000Z",
+      "after": "2026-01-31T04:00:00.000Z",
+      "sameEpoch": true,
+      "originReceiptRetained": true
+    }
+  ],
+  "violationCount": 0
+}

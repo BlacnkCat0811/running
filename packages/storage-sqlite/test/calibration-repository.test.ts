@@ -30,5 +30,21 @@ test('calibration artifacts are immutable, temporal, cohort-verifiable and scope
   assert.throws(()=>store.database.prepare("UPDATE prediction_calibration_artifacts SET status='failed' WHERE id=?").run(id),/immutable/);
   assert.equal(repository.save(artifact,baseline,tests,at),id);
   assert.equal(store.database.prepare('SELECT COUNT(*) AS n FROM prediction_calibration_artifacts').get()?.n,1);
+  // The production selector, not just an isolated presentation unit test, must
+  // refuse old/malformed "passed" records without independent test provenance.
+  const stored = JSON.parse(String(store.database.prepare(
+    "SELECT evaluation_json AS json FROM prediction_calibration_artifacts WHERE id=?").get(id)?.json));
+  assert.match(stored.evaluationCohortHash, /^[a-f0-9]{64}$/);
+  const invalidEvaluations = [
+    {...stored,evaluationCohortHash:null},
+    {...stored,p80:{...stored.p80,evaluationSampleCount:0}},
+    {...stored,p90:{...stored.p90,empiricalCoverage:0.5}}
+  ];
+  for (const [index,evaluation] of invalidEvaluations.entries()) {
+    store.database.prepare(`INSERT INTO prediction_calibration_artifacts
+      SELECT ?,predictor_version,baseline_hash,distance,available_at,artifact_json,artifact_hash,?,status
+      FROM prediction_calibration_artifacts WHERE id=?`).run(`zz-invalid-${index}`,JSON.stringify(evaluation),id);
+    assert.equal(repository.select(predictor,baseline,"five_k",at,1000),null);
+  }
  }finally{store.close();rmSync(root,{recursive:true,force:true});}
 });

@@ -8,7 +8,8 @@ import { RaiApplicationService } from "@rai/application";
 import { healthTypes, workoutTypes } from "@rai/contracts";
 import { defaultFeatureConfig } from "@rai/features";
 import { canonicalizeRunningWorkouts, parseAppleHealthXml } from "@rai/health-export-parser";
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, SqliteModelRunRepository, SqliteModelReleaseRepository, ModelRunActivationError } from "@rai/storage-sqlite";
+import { replayPublishedLoadSnapshot } from "../src/load-replay-data.js";
 
 /**
  * §16.1 的 F09 与 S03 —— 这两条守的是同一类事：**同一次训练只能被算一次，旧状态不能在新口径下被复用**。
@@ -85,54 +86,8 @@ async function withFixture(run: (store: RaiDatabase, xmlPath: string) => Promise
   }
 }
 
-/**
- * §16.1 **T02**：「删除训练后重放 → 所有下游去除该事实影响」。
- *
- * 🔴 这一条此前**一条断言都没有**：矩阵检查把它算作"被引用"，靠的全是
- * `${localDate}T02:00:00.000Z` 这类时间戳模板里的 `T02` 恰好在词边界上（见
- * `scripts/check-acceptance-matrix.mts` 里 citedIdsIn 的注释）。收紧判据后它掉出来，
- * 被如实写进 KNOWN_GAPS。现在把缺口补上。
- *
- * 覆盖面：导入层早有"删除后不得复活"的守卫（`tombstone-deletion.test.ts`），
- * 但那测的是**事实层**。T02 要的是**派生层**：删除之后重放，被删训练不得继续出现在
- * 特征 run、逐次负荷与能力时间线里。
- *
- * 重现的是**真实删除路径产生的那个状态**，而不是我另编一个：
- * `canonicalize.ts:436-443` 会把"不再属于任何 workout group"的训练
- * `SET status='inactive'`（workout 从导出里消失时就是这样），并因
- * `canonical_workout_id` 是 `ON DELETE SET NULL` 而失去 canonical 链接。
- * 两者一起就是"这次训练被删了"在库里的样子。直接 `DELETE FROM workouts` 不是合法路径
- * —— 它会被外键挡住（本用例第一版就是这么失败的）。
- *
- * `listActiveForFeatures` 的两个条件（`JOIN workouts` + `status IN ('active','ambiguous')`）
- * 正好分别对应这两处，所以这个用例同时钉住两条排除路径。
- *
- * ⚠️ **为什么用 24 次训练而不是共用的那 7 次**：第一版用 7 次时，第二次全量重算
- * **直接失败**，报 `Model-version gate failed: eligible_session_delta` ——
- * 删掉 1/7 = 14%，超过 `maxEligibleSessionDelta = 0.05`（`model-transition-gate.ts:103,164`）。
- * 也就是说：**历史短的时候，任何一次删除都会让重放被版本闸门挡住**，
- * §4.7 要的"下游去除影响"根本走不完。这是本用例查出来的真实交互，已记进状态文档 §十六。
- * 24 次时 1/24 = 4.2% < 5%，闸门放行，才谈得上验证下游。
- */
-/**
- * 🔴 **T02 仍然没有覆盖，但原因从"没人写"变成了"走不通"** —— 本用例把这个阻塞钉住。
- *
- * 我按 §16.1 T02 的要求写了断言（删除训练 → 重放 → 下游一条都不剩），它**跑不完**：
- * 第二次全量重算直接失败，`Model-version gate failed: eligible_session_delta`。
- * 7 次训练时删 1 个是 14%；换成 24 次（名义 4.2%）**同样失败**。
- * 闸门比的是**合格**训练数（`eligibility_status IN ('eligible','trial')`，
- * `model-run-repository.ts:262,265-266`），不是特征行数，所以"删掉 N 分之一"不等于
- * delta 就是 1/N —— 具体基数我还没查清，不猜。
- *
- * 我不改闸门（放宽它正是本方案禁止的那类作弊），也不把这条测试改成断言"失败是对的"
- * 来假装 T02 已完成。**这个用例只声明一件确定的事**：
- * **删除训练后重放会被版本闸门挡住，而且被挡住的候选不会半发布** ——
- * 旧 run 仍然是活跃的，它的派生行一个字都没动（§2.3-9「发布不可半成功」）。
- *
- * 它的用处：如果将来有人让"删除后可重放"，这条用例会**转红**，
- * 逼着他回来把 T02 从 KNOWN_GAPS 里摘掉。
- */
-test("deleting a training blocks the replay at the version gate, and nothing is half-published", async () => {
+// Reproduce canonicalization's explicit inactive fact; keep the old bundle immutable.
+async function verifyDeletedReplay(corruptIncumbent: boolean, deleteFirst = false, deleteCount = 1): Promise<void> {
   await withFixture(async (store, xmlPath) => {
     await parseAppleHealthXml(xmlPath, store, { fileSize: 1 });
     canonicalizeRunningWorkouts(store.database);
@@ -140,17 +95,30 @@ test("deleting a training blocks the replay at the version gate, and nothing is 
     service.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
     assert.equal(service.runNextJob()?.status, "succeeded");
     const before = readCounts(store);
+    const replay=replayPublishedLoadSnapshot(store.database,"2026-01-25T04:00:00.000Z","Asia/Shanghai");
+    assert.equal(replay.base.output.includedFactCount,days.length);
+    assert.equal(replay.candidate.output.includedFactCount,0,"a snapshot computed later was not historically available");
+    assert.equal(replay.source.scope,"published_derived_snapshot_not_raw_as_known_then");
+    assert.throws(()=>replayPublishedLoadSnapshot(store.database,"2026-01-25T04:00:00.000Z","UTC"),/timezone differs/);
     const activeBefore = (store.database.prepare("SELECT model_run_id AS id FROM active_model_run").get() as { id: string }).id;
     assert.equal(before.features, days.length);
+    if (corruptIncumbent) {
+      // An unrelated eligibility mismatch must not be forgiven merely because
+      // this dataset also contains one legitimate deletion.
+      store.database.prepare(`UPDATE ability_assessments SET assessment_status='eligible'
+        WHERE id=(SELECT id FROM ability_assessments WHERE model_run_id=?
+          AND assessment_status='calibrating' ORDER BY sequence_number LIMIT 1)`).run(activeBefore);
+    }
 
     // 重现真实删除路径产生的状态（canonicalize.ts:436-443 的 SET status='inactive'
     // 加上 canonical_workout_id 的 ON DELETE SET NULL）。
-    const target = store.database.prepare(`
+    const targets = store.database.prepare(`
       SELECT session.id AS sessionId FROM training_sessions session
       JOIN workouts workout ON workout.id = session.canonical_workout_id
-      ORDER BY workout.start_at DESC LIMIT 1
-    `).get() as unknown as { sessionId: string };
-    store.database.prepare(
+      ORDER BY workout.start_at ${deleteFirst ? "ASC" : "DESC"} LIMIT ?
+    `).all(deleteCount) as unknown as Array<{ sessionId: string }>;
+    const target=targets[0]!;
+    for (const target of targets) store.database.prepare(
       "UPDATE training_sessions SET status = 'inactive', canonical_workout_id = NULL WHERE id = ?"
     ).run(target.sessionId);
 
@@ -159,18 +127,125 @@ test("deleting a training blocks the replay at the version gate, and nothing is 
     service.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
     const job = service.runNextJob();
 
-    assert.equal(job?.status, "failed", "预期的阻塞：删除训练后重放会被 eligible_session_delta 挡住");
-    const jobRow = store.database.prepare(
-      "SELECT error_json AS error FROM recompute_jobs ORDER BY created_at DESC LIMIT 1"
-    ).get() as unknown as { error: string };
-    assert.match(jobRow.error, /eligible_session_delta/, "挡住它的必须是那个明确的 gate 原因，不是别的偶发错误");
-
-    // 关键的一半：被拒的候选**不得半发布**。
+    if (corruptIncumbent) {
+      assert.equal(job?.status, "failed");
+      assert.match(String(store.database.prepare("SELECT error_json AS error FROM recompute_jobs WHERE id=?")
+        .get(job!.id)?.error), /eligible_session_delta/);
+      assert.equal(store.database.prepare("SELECT model_run_id AS id FROM active_model_run").get()?.id, activeBefore);
+      assert.equal(readCounts(store).features, before.features);
+      return;
+    }
+    assert.equal(job?.status, "succeeded", JSON.stringify(job));
     const activeAfter = (store.database.prepare("SELECT model_run_id AS id FROM active_model_run").get() as { id: string }).id;
-    assert.equal(activeAfter, activeBefore, "闸门失败时活跃指针必须原地不动");
+    assert.notEqual(activeAfter, activeBefore);
     const after = readCounts(store);
-    assert.equal(after.features, days.length, "旧 run 的派生行不得被失败候选动过");
-    assert.equal(after.loads, days.length);
+    assert.equal(after.features, days.length - deleteCount);
+    assert.equal(after.loads, days.length - deleteCount);
+    for (const table of ["active_ability_assessments", "active_workout_training_loads"]) {
+      assert.equal(store.database.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE training_session_id=?`).get(target.sessionId)?.n, 0);
+    }
+    assert.equal(store.database.prepare(`SELECT COUNT(*) AS n FROM workout_features f
+      JOIN model_runs m ON m.feature_run_id=f.feature_run_id WHERE m.id=? AND f.training_session_id=?`)
+      .get(activeAfter, target.sessionId)?.n, 0);
+    assert.equal(store.database.prepare("SELECT COUNT(*) AS n FROM ability_assessments WHERE model_run_id=?")
+      .get(activeBefore)?.n, before.assessments, "the rollback bundle remains immutable");
+    const report = JSON.parse(String(store.database.prepare(
+      "SELECT evaluation_json AS json FROM model_release_bundles WHERE model_run_id=?").get(activeAfter)?.json));
+    assert.equal(report.thresholds.maxEligibleSessionDelta, 0.05);
+    assert.equal(report.factChanges.removedEligibleSessions, deleteCount === days.length ? 1 : deleteFirst ? 0 : 1);
+    assert.equal(report.factChanges.deletionRecalibration, deleteFirst);
+    if (deleteFirst) {
+      assert.equal(report.rebase.rebaseReason,"calibration_evidence_removed");
+      assert.equal(report.rebase.effectiveAt,"2026-01-25T04:00:00.000Z");
+    }
+    assert.equal(report.factChanges.retainedDeletedSessions, 0);
+    assert.equal(report.metrics.eligibleSessionDelta, 0);
+    if (deleteCount === days.length) {
+      assert.equal(report.emptyCohort.baseSessions, days.length);
+      assert.equal(report.emptyCohort.removedBaseSessions, days.length);
+      assert.equal(report.emptyCohort.domainSnapshotsEmpty, true);
+      for (const table of ["active_ability_assessments", "active_workout_training_loads", "active_daily_ability_snapshots", "active_daily_training_metrics"]) {
+        assert.equal(store.database.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n, 0, table);
+      }
+      // Empty-on-empty recomputes must remain valid; never reuse the deleted run.
+      service.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
+      assert.equal(service.runNextJob()?.status, "succeeded");
+      assert.equal(readCounts(store).assessments, 0);
+    }
+    await withFixture(async (fresh, path) => {
+      await parseAppleHealthXml(path, fresh, { fileSize: 1 });
+      canonicalizeRunningWorkouts(fresh.database);
+      for (const target of targets) fresh.database.prepare("UPDATE training_sessions SET status='inactive',canonical_workout_id=NULL WHERE id=?")
+        .run(target.sessionId);
+      const clean = new RaiApplicationService(fresh);
+      clean.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
+      assert.equal(clean.runNextJob()?.status, "succeeded");
+      const scores = (db: RaiDatabase) => db.database.prepare(`SELECT training_session_id, assessment_status,
+        current_ability, true_ability_after FROM active_ability_assessments ORDER BY sequence_number`).all();
+      assert.deepEqual(scores(store), scores(fresh), "no deleted contribution survives in the remaining ability trajectory");
+    });
+
+  });
+}
+
+test("T02: deleted training is removed from the published replay without relaxing drift thresholds", () => verifyDeletedReplay(false));
+test("T02: deleting calibration evidence rebuilds the remaining trajectory", () => verifyDeletedReplay(false, true));
+test("T02: removing calibration evidence can return to an uncalibrated state without stale scores", () => verifyDeletedReplay(false, true, 2));
+test("T02: removing all trainings publishes an empty bundle and repeated empty replays stay valid", () => verifyDeletedReplay(false, true, days.length));
+test("known deletion does not excuse unexplained eligibility drift or half-publication", () => verifyDeletedReplay(true));
+
+test("an empty historical cutoff cannot masquerade as confirmed deletion while source sessions remain", async () => {
+  await withFixture(async (store, xmlPath) => {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: 1 });
+    canonicalizeRunningWorkouts(store.database);
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
+    const initial = service.runNextJob()!;
+    assert.equal(initial.status, "succeeded");
+    service.enqueueFullRecompute({ evaluatedAt: "2025-12-01T00:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
+    const candidate = service.runNextJob()!;
+    assert.equal(candidate.status, "failed");
+    assert.match(String(candidate.error?.message ?? ""), /empty_cohort_evidence_invalid/);
+    assert.equal(store.database.prepare("SELECT model_run_id AS id FROM active_model_run").get()?.id, initial.modelRunId);
+    assert.equal(readCounts(store).features, days.length);
+  });
+});
+
+test("activation and CLI rollback reject old overrides without changing either active pointer", async () => {
+  await withFixture(async (store, xmlPath) => {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: 1 });
+    canonicalizeRunningWorkouts(store.database);
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({ evaluatedAt: new Date().toISOString(), timezoneIdentifier: "Asia/Shanghai" });
+    const first = service.runNextJob()!;
+    assert.equal(first.status, "succeeded");
+    const target = String(store.database.prepare(`SELECT training_session_id AS id
+      FROM active_ability_assessments ORDER BY sequence_number DESC LIMIT 1`).get()?.id);
+    service.appendWorkoutOverride({ trainingSessionId: target, expectedRevision: 0,
+      eligibilityOverride: "exclude", sessionType: null, performanceProtocol: null,
+      rpe: null, conditionTags: [], note: null });
+    const second = service.runNextJob()!;
+    assert.equal(second.status, "succeeded", JSON.stringify(second));
+    const repo = new SqliteModelRunRepository(store.database);
+    const releases = new SqliteModelReleaseRepository(store.database);
+    assert.throws(() => repo.activateSucceeded(first.modelRunId!, new Date().toISOString()),
+      (error: unknown) => error instanceof ModelRunActivationError && error.code === "release_gate" && /overrides changed/i.test(error.message));
+    assert.throws(() => releases.rollback(first.modelRunId!, second.modelRunId!, new Date().toISOString()), /overrides changed/i);
+    // V3 compatibility activation cannot bypass the same check by using its
+    // older training_metric_runs.config_json snapshot location.
+    store.database.prepare("UPDATE feature_runs SET feature_schema_version='workout-feature-v3' WHERE id=?").run(first.featureRunId!);
+    assert.throws(() => repo.activateSucceeded(first.modelRunId!, new Date().toISOString()),
+      (error: unknown) => error instanceof ModelRunActivationError && error.code === "release_gate");
+    for (const table of ["active_model_run", "active_model_release"]) {
+      assert.equal(store.database.prepare(`SELECT model_run_id AS id FROM ${table}`).get()?.id, second.modelRunId);
+    }
+    assert.equal(store.database.prepare("SELECT assessment_status AS status FROM active_ability_assessments WHERE training_session_id=?").get(target)?.status, "excluded");
+    // An unchanged override revision still allows a genuine same-facts rollback.
+    service.enqueueFullRecompute({ evaluatedAt: new Date().toISOString(), timezoneIdentifier: "Asia/Shanghai" });
+    const third = service.runNextJob()!;
+    assert.equal(third.status, "succeeded");
+    releases.rollback(second.modelRunId!, third.modelRunId!, new Date().toISOString());
+    assert.equal(store.database.prepare("SELECT model_run_id AS id FROM active_model_run").get()?.id, second.modelRunId);
   });
 });
 

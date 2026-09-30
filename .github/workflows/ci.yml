@@ -134,6 +134,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Validate maintained documentation and acceptance references
+        run: npm run check:docs && npm run check:acceptance-matrix
+
       - name: Run tests
         run: npm test
 

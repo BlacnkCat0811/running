@@ -1,31 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { BASELINE_POLICY_VERSION, defaultRebasePolicy } from "@rai/scoring";
+import { BASELINE_POLICY_VERSION, defaultRebasePolicy, reviewBaselineRebase } from "@rai/scoring";
+import { semanticHash } from "@rai/storage-sqlite";
 
 /**
- * §6.4 的 **rebase 定期检查**在真实库上的只读盘点。
- *
- * 为什么需要它：`reviewBaselineRebase` 有实现、有单测，但**没有任何生产调用方**
- * （仓库里唯一引用是 `packages/scoring/test/baseline-v2.test.ts`）。所以"每 28 天最多检查一次、
- * 冷却 90 天、饱和触发"这套政策实际上从未跑过 —— 与批次 19 的消融脚本同一类问题：
- * 代码在那里、测试是绿的、但它不在任何真实路径上。
- *
- * 本模块把**可推导的事实**算出来，并把**推不出来的事实**明确标出来，而不是用默认值糊过去：
- *
- * | 输入 | 是否可推导 | 来源 |
- * |---|---|---|
- * | `asOf` | ✅ | 默认取 active run 的 `evaluated_at`（数据前沿，不是墙上时钟） |
- * | `epochStartedAt` | ✅ | 最新 checkpoint 的 `state.baseline.calibrationEndAt` |
- * | `independentSessions` | ✅ | 窗口内 `assessment_status='eligible'` 的去重 `training_session_id` |
- * | `saturatedFraction` | ✅ | 存储的逐维度分数 vs `effective_weights_json` |
- * | `lastReviewedAt` | ❌ **未持久化** | 没有任何表记"上次检查时间" |
- * | `precedingSaturatedReviews` | ❌ **未持久化** | 没有任何表记"连续饱和次数" |
- *
- * 🔴 **为什么不用默认值补上后两个**：`precedingSaturatedReviews` 直接决定
- * `candidate_requested` 还是 `keep_epoch`（`>= consecutiveReviews` 才请求候选）。
- * 填 0 ⇒ 永远 `keep_epoch`；填 1 ⇒ 只要这次饱和就 `candidate_requested`。
- * 两个都是**确定但任意**的答案，会把"缺状态"伪装成"检查结论"。
- * 所以本报告给出 `reviewStatus = "not_evaluable"`，并把缺失项**门控了哪条分支**写出来。
+ * Read-only epoch/saturation inventory and prospective review policy.
+ * Migration 25 stores explicit review history; an uninitialized ledger stays
+ * not_evaluable. recordBaselineRebaseReview starts observation prospectively,
+ * never invents a past review and never automatically changes a baseline.
  */
 
 export const BASELINE_REBASE_REVIEW_VERSION = "rai-baseline-rebase-review-v1" as const;
@@ -55,8 +37,8 @@ export function buildBaselineRebaseReview(database: DatabaseSync, options: Basel
       .some((row) => row.name === column);
 
   const activeRun = database.prepare(
-    "SELECT m.id AS id, m.evaluated_at AS evaluatedAt FROM model_runs m WHERE m.id=(SELECT model_run_id FROM active_model_run)"
-  ).get() as { id: string; evaluatedAt: string } | undefined;
+    "SELECT m.id AS id, m.evaluated_at AS evaluatedAt, m.dataset_version AS datasetVersion FROM model_runs m WHERE m.id=(SELECT model_run_id FROM active_model_run)"
+  ).get() as { id: string; evaluatedAt: string; datasetVersion: string } | undefined;
   if (!activeRun) throw new Error("No active model run; there is no epoch to review");
 
   const asOf = options.asOf ?? String(activeRun.evaluatedAt);
@@ -76,7 +58,7 @@ export function buildBaselineRebaseReview(database: DatabaseSync, options: Basel
   }
   const baseline = (state.baseline ?? null) as
     { calibrationStartAt?: unknown; calibrationEndAt?: unknown; calibrationFeatureIds?: unknown } | null;
-  const epochStartedAt = typeof baseline?.calibrationEndAt === "string" ? baseline.calibrationEndAt : null;
+  let epochStartedAt = typeof baseline?.calibrationEndAt === "string" ? baseline.calibrationEndAt : null;
   if (epochStartedAt === null || !Number.isFinite(Date.parse(epochStartedAt))) {
     throw new Error("The checkpoint does not record a usable baseline calibrationEndAt");
   }
@@ -147,6 +129,30 @@ export function buildBaselineRebaseReview(database: DatabaseSync, options: Basel
        WHERE model_run_id=? AND baseline_epoch_id IS NOT NULL`
     ).all(activeRun.id) as Array<{ id: string }>).map((row) => String(row.id))
     : [];
+  const effectiveAt = epochIds.length === 1 && tableExists("model_release_bundles")
+    ? database.prepare(`SELECT json_extract(evaluation_json,'$.rebase.effectiveAt') AS at
+        FROM model_release_bundles WHERE status='passed' AND activated_at IS NOT NULL AND dataset_version=?
+        AND json_extract(evaluation_json,'$.rebase.candidateEpoch')=?
+        ORDER BY created_at ASC,model_run_id ASC LIMIT 1`).get(activeRun.datasetVersion,epochIds[0]!)?.at : null;
+  if (typeof effectiveAt === "string" && Number.isFinite(Date.parse(effectiveAt))) {
+    if (Date.parse(effectiveAt)>Date.parse(asOf)) throw new Error("Epoch effective time is after asOf");
+    epochStartedAt=effectiveAt;
+  }
+  const policyHash = semanticHash({policy:{...policy,policyVersion:BASELINE_POLICY_VERSION},windowDays});
+  const history = epochIds.length === 1 && tableExists("baseline_rebase_reviews")
+    ? database.prepare(`SELECT reviewed_at AS at,saturated_reviews AS count,evidence_json AS json
+        FROM baseline_rebase_reviews WHERE epoch_id=? AND policy_hash=? AND reviewed_at<=?
+        ORDER BY reviewed_at DESC LIMIT 1`).get(epochIds[0]!,policyHash,new Date(asOf).toISOString()) as
+        {at:string;count:number;json:string}|undefined
+    : undefined;
+  const persistedDecision = history && saturatedFraction !== null
+    ? (Date.parse(history.at) === Date.parse(asOf)
+      ? (JSON.parse(history.json) as BaselineReviewRecord).decision
+      : reviewBaselineRebase({
+        asOf,epochStartedAt,lastReviewedAt:history.at,independentSessions:sessions.size,
+        saturatedFraction,precedingSaturatedReviews:history.count
+      },policy))
+    : null;
 
   return {
     reportVersion: BASELINE_REBASE_REVIEW_VERSION,
@@ -161,7 +167,7 @@ export function buildBaselineRebaseReview(database: DatabaseSync, options: Basel
         : epochIds.length === 0 ? "column_empty_for_this_run" as const
           : epochIds.length === 1 ? "available" as const : "multiple_values_for_one_run" as const,
       startedAt: epochStartedAt,
-      startedAtSource: "checkpoint.state.baseline.calibrationEndAt",
+      startedAtSource: typeof effectiveAt === "string" ? "published_rebase.effectiveAt" : "checkpoint.state.baseline.calibrationEndAt",
       modelRunId: activeRun.id,
       checkpointVersion: String(checkpoint.version),
       checkpointThroughAt: checkpoint.throughAt === null ? null : String(checkpoint.throughAt),
@@ -188,16 +194,16 @@ export function buildBaselineRebaseReview(database: DatabaseSync, options: Basel
       perDimension
     },
     reviewHistory: {
-      lastReviewedAt: null,
-      precedingSaturatedReviews: null,
-      status: "not_persisted" as const,
+      lastReviewedAt: history?.at??null,
+      precedingSaturatedReviews: history?.count??null,
+      status: history ? "persisted" as const : "not_persisted" as const,
       /** 缺这两个输入会门控哪些分支 —— 写清楚，免得有人用默认值补上。 */
-      gatedBranches: [
+      gatedBranches: history ? [] : [
         "lastReviewedAt 为 null 时 `not_due`（每 28 天最多一次）永不成立",
         "precedingSaturatedReviews 决定 `candidate_requested` 还是 `keep_epoch`（需 >= consecutiveReviews）"
       ]
     },
-    review: {
+    review: persistedDecision ? {...persistedDecision,reason:null} : {
       status: "not_evaluable" as const,
       reason: "review_history_not_persisted",
       autoRebase: false as const,
@@ -209,7 +215,66 @@ export function buildBaselineRebaseReview(database: DatabaseSync, options: Basel
         "{not_due, epoch_cooldown, insufficient_evidence, keep_epoch, candidate_requested}。"
     },
     note:
-      "只读盘点：`saturation` 与 `evidence` 是实测事实，`review` 是明确不可评估。" +
+      "只读盘点：`saturation` 与 `evidence` 是实测事实；有持久化检查历史时才继续裁决。" +
       "§6.4 的触发数字仍是候选政策，不是本项目已校准的生理常数。"
   };
+}
+
+/**
+ * Explicitly start/continue prospective review history. An empty ledger means
+ * "observation starts now", never evidence of a previous saturated review.
+ * No model publication or automatic rebase is performed here.
+ */
+export function recordBaselineRebaseReview(database: DatabaseSync, options: BaselineRebaseReviewOptions = {}) {
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const evidence = buildBaselineRebaseReview(database, options);
+    const epochId = evidence.epoch.epochId;
+    if (epochId === null) throw new Error("A published baseline epoch is required to record a review");
+    const policyHash = semanticHash({policy:evidence.policy,windowDays:evidence.window.windowDays});
+    const previous = database.prepare(`SELECT reviewed_at AS at,saturated_reviews AS count,
+      evidence_json AS json FROM baseline_rebase_reviews
+      WHERE epoch_id=? AND policy_hash=? ORDER BY reviewed_at DESC LIMIT 1`)
+      .get(epochId,policyHash) as {at:string;count:number;json:string}|undefined;
+    const asOf = new Date(evidence.asOf).toISOString();
+    if (previous && Date.parse(previous.at) > Date.parse(asOf)) throw new Error("Cannot backdate a baseline review");
+    if (previous?.at === asOf) {
+      const saved = JSON.parse(previous.json) as {evidence:typeof evidence};
+      const measured = (value:typeof evidence) => ({
+        epoch:value.epoch,policy:value.policy,window:value.window,evidence:value.evidence,saturation:value.saturation
+      });
+      if (semanticHash(measured(saved.evidence)) !== semanticHash(measured(evidence))) throw new Error("Review evidence changed at the same cutoff");
+      database.exec("COMMIT");
+      return JSON.parse(previous.json) as BaselineReviewRecord;
+    }
+    if (evidence.saturation.saturatedFraction === null) throw new Error("No saturation evidence; review remains not_evaluable");
+    const decision = reviewBaselineRebase({
+      asOf,epochStartedAt:evidence.epoch.startedAt,lastReviewedAt:previous?.at??null,
+      independentSessions:evidence.evidence.independentSessions,
+      saturatedFraction:evidence.saturation.saturatedFraction,precedingSaturatedReviews:previous?.count??0
+    },options.policy??defaultRebasePolicy);
+    const record: BaselineReviewRecord = {
+      epochId,policyHash,asOf,evidence,decision,
+      historyMode:previous?"continued":"prospective_history_started",
+      persisted:decision.status!=="not_due"
+    };
+    if (record.persisted) database.prepare(`INSERT INTO baseline_rebase_reviews
+      VALUES (?,?,?,?,?,?,?)`).run(epochId,policyHash,asOf,evidence.epoch.modelRunId,
+        decision.status,decision.saturatedReviews,JSON.stringify(record));
+    database.exec("COMMIT");
+    return record;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+interface BaselineReviewRecord {
+  epochId:string;
+  policyHash:string;
+  asOf:string;
+  evidence:ReturnType<typeof buildBaselineRebaseReview>;
+  decision:ReturnType<typeof reviewBaselineRebase>;
+  historyMode:"continued"|"prospective_history_started";
+  persisted:boolean;
 }

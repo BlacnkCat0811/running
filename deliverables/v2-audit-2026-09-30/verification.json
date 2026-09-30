@@ -1,0 +1,144 @@
+{
+  "verificationDate": "2026-09-30",
+  "timezone": "Asia/Shanghai",
+  "repository": "/Users/ta/running",
+  "baseCommit": "f33ec708802d4b7cc4f6284af7e84efa4b5800cd",
+  "workingTree": "uncommitted implementation; source hashes below",
+  "scope": "implementation audit, code fixes, read-only source inspection and disposable-backup release rehearsal; no original DB migration, no ML activation",
+  "sourceFilesSha256": {
+    "package.json": "716f7d043c8cec0cce662afd6d80abf40eec39cf3ef117884c64b51e5aade6e0",
+    "packages/application/src/baseline-rebase-review.ts": "00dc25e7030fc75ed28711c426f2bbfcb3824621d5799f4e8444caef443d361f",
+    "packages/application/src/index.ts": "92c785a4e4a8b3c927a8dc6332d191a1572805e7adb2dd6b38f3f5a79722821f",
+    "packages/application/src/load-replay-data.ts": "a12a4515cd9b1621472048ce497463f1727ca83ed3de4be5e9fec9f37c4c2ae9",
+    "packages/application/src/load-replay-v2.ts": "7d994838756c05c052d93f03a3db1c644a79cab99ee2442ae0c1998184c868b3",
+    "packages/application/src/model-v2-cli.ts": "33fcf2d528f927ec3430e3c5307630cad76cdffe42cae37c7a994cb65c15a16c",
+    "packages/application/src/prediction-report.ts": "e8bef5b2d27d6b2f5357bc7f55eb00cc0d64d308a2fb07cb4a46cf625d8640e2",
+    "packages/application/src/services/recompute-pipeline.ts": "1524ef3a22f4ccc548b77ce6ed3c2e4791882677165614163daa486a118beae7",
+    "packages/application/src/training-load-data.ts": "c782a874e777b45160832033a758888b7c48b51d3d4ece5aa5aa722a2e10c72c",
+    "packages/application/test/baseline-rebase-review.test.ts": "6e2044ac552b860bdaa1c818397ae84257eb58f13233c7ce8217e4ff4182156d",
+    "packages/application/test/import-idempotency-and-checkpoint.test.ts": "dc16444b8a75735e8ba06e2e211e4ff1ba8d19a280ae1668aff0b890444c0a0a",
+    "packages/application/test/load-replay-v2.test.ts": "77d821b2282619d7dbce478a7781e33586c6a6b3cbaa7f0ae495e8f96743b8ef",
+    "packages/application/test/service.test.ts": "76b3813d92dfd91f39e9b191c55af912f7cc8c09b6197181788a6ad37b6561e0",
+    "packages/contracts/src/index.ts": "526659e2195d191e46828a9c294c15a25e96a9f0eed8de83b9af1a3214053bbb",
+    "packages/model-eval/src/index.ts": "8aea32e86d314b430e77d26d1f0e19aaa080b9c9fcde0734c6fef756d0be597f",
+    "packages/model-eval/test/interval-presentation.test.ts": "739cff69b91e72fe39fb80f3363a720316b83b9055524d648d90f6bcd215f42e",
+    "packages/storage-sqlite/src/calibration-repository.ts": "2d19f084359e5d8f07216a199483eeea47c3d0ba91315864f84b75288a4a697c",
+    "packages/storage-sqlite/src/database.ts": "aa05f6c07cf6f80fc14c71ac9d2f89cd30bea8c1258d43a15a81ffd2f36d3b20",
+    "packages/storage-sqlite/src/v25-migration.ts": "1a8bfb2e270b5db2d9db250b4abcdfc25024b906865a050325ca589a972b73ac",
+    "packages/storage-sqlite/test/calibration-repository.test.ts": "d34d1c95eaa1b8f611c6b44808113966d62bbda1fe374d6b4c05b14fbec58512",
+    "scripts/baseline-rebase-review.mts": "801f64c8660314fadf12958dd57c903c5a4f03fd3ea768111e213f452c417803",
+    "scripts/check-acceptance-matrix.mts": "08a077ba209f7a8af6c659f43e48f91da2c0034312f296a87631a64863ed59e2",
+    "scripts/load-replay.mts": "92ab66502f7e06ddc335588d673f71fa86929d364aab64453b6deab1c85be5a8",
+    "scripts/verify-v2-release.mts": "ff8034291ada4af01fd8142cbb30bb1867f03671c81dae7a32590f3880e136c0"
+  },
+  "checks": [
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "node": {
+        "tests": 1153,
+        "passed": 1150,
+        "failed": 0,
+        "skipped": 3,
+        "skipReason": "Windows-only filesystem/process semantics"
+      },
+      "web": {
+        "files": 18,
+        "passed": 111,
+        "failed": 0
+      }
+    },
+    {
+      "command": "npm run build (executed by test:e2e:web)",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run test:e2e:web",
+      "exitCode": 0,
+      "tests": 11,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "390px responsive test explicitly out of scope"
+    },
+    {
+      "command": "npm run ml:test",
+      "exitCode": 0,
+      "passed": 26
+    },
+    {
+      "command": "node --import tsx --test packages/application/test/import-idempotency-and-checkpoint.test.ts packages/application/test/service.test.ts packages/application/test/baseline-rebase-review.test.ts",
+      "exitCode": 0,
+      "passed": 30,
+      "purpose": "post-review calibration-removal metadata regressions"
+    },
+    {
+      "command": "npm run check:acceptance-matrix",
+      "exitCode": 0,
+      "cited": 54,
+      "declaredGap": 0,
+      "missing": 0,
+      "boundary": "title references, not accuracy or comprehensive behavioral coverage"
+    },
+    {
+      "command": "npm run check:package-boundaries",
+      "exitCode": 0,
+      "packages": 15,
+      "srcEdges": 30
+    },
+    {
+      "command": "npm run check:doc-refs",
+      "exitCode": 1,
+      "outOfRangeOrUnresolved": 2,
+      "historicalContentDrift": 99,
+      "blankLineAnchors": 9,
+      "document": "deliverables/ARCHITECTURE_PRODUCT_STATUS_2026-09-28.md",
+      "boundary": "unrelated historical architecture line references were not rewritten to fake passing"
+    }
+  ],
+  "database": {
+    "path": "/Users/ta/running/var/rai.sqlite",
+    "originalSchema": 22,
+    "activeFeatureSchema": "workout-feature-v3",
+    "activeModelConfig": "rai-model-config-v3",
+    "sessionCount": 268,
+    "labeledOutcomeCount": 0,
+    "sha256Before": "cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d",
+    "sha256After": "cef127be078031b66072eda5d0ecc4552d1d70a5d95898ebd9ff1420aa4b957d"
+  },
+  "rehearsal": {
+    "file": "release-rehearsal.json",
+    "exitCode": 0,
+    "writes": "disposable_backup_only",
+    "schema": 25,
+    "activeFeatureSchema": "workout-feature-v4",
+    "scope": "V2 full/incremental parity, retained V2 bundle rollback/reopen; not all historical V1 binaries"
+  },
+  "notActivated": [
+    "fitted weather normalization",
+    "new learned weighting/threshold policy",
+    "Durability numeric penalty",
+    "CatBoost",
+    "empirical P80/P90"
+  ],
+  "remainingConditions": [
+    "original database deployment is not performed",
+    "independent labeled outcomes and weather evidence insufficient",
+    "legacy raw record arrival ledger unavailable; not reconstructed or fabricated"
+  ],
+  "documents": {
+    "planSha256": "3588be323653705c27dcb9c870732b8a22259302503d60b1365cfc2098befe3e",
+    "statusSha256": "af1610e1423b10729e107fd36c7d3e882b261803b6c1392df6caddb4d65a0cea"
+  },
+  "artifacts": {
+    "baseline.json": "175685124dd02462c7cd8647f4c288497a5389342230f5cfb1fed8b41b8a259d",
+    "load-replay.json": "83e6573f1c83dd6afcda0b42eca31d86700f6d0518790a4aa40611607d23f034",
+    "normalization.json": "79f09c424dc40a7a8affc55abd215fe0ab68ea283877d95ef4e292e84957c3d5",
+    "release-rehearsal.json": "f060fc0683e7d329d65d44d9643e631a2091b525f21627c8449207d6856f8df3",
+    "walk-forward.json": "b40f413f3368756399be06d9f2665294e1d197f23ed84a798e11730723ced4bc"
+  }
+}

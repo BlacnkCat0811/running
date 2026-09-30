@@ -1,71 +1,44 @@
-# RAI CatBoost residual training
+# CatBoost 残差研究与发布合同
 
-This directory is the isolated Python training environment. Production
-inference does not import Python or CatBoost and loads only the validated
-`model.onnx` artifact; user-triggered model training runs this environment in a
-separate process.
+生产Web/API只需要Node；Python用于用户明确发起的离线训练/评估，不是`npm start`的前置。
+整体语义见[算法](../docs/ALGORITHM.md)，运行边界见[架构](../docs/ARCHITECTURE.md)。
 
-## Environment
+## 环境
 
-Python 3.12 is the reference runtime. Python 3.13 is accepted for local
-development. The production start command runs this same preflight and fails
-early with bootstrap guidance when the environment is unavailable.
+Python3.12为参考环境，3.13用于本地开发；依赖由[requirements.lock](requirements.lock)固定。
 
-```powershell
+```bash
 npm run ml:bootstrap
+npm run ml:check
 npm run ml:test
 ```
 
-The bootstrap installs the fully pinned `research/requirements.lock`, then the
-local package without dependency resolution. Set `RAI_PYTHON` to use an
-equivalent managed environment instead of `research/.venv`.
+`RAI_PYTHON`可选择受管环境；不要为运行API自动安装/启动训练栈。
 
-## Input contract
+## 数据
 
-Input is UTF-8 JSONL, sorted by the absolute instant represented by `observedAt`
-and then `sampleId`. Every row must
-use `schemaVersion: "race-residual-feature-v3"`. The TypeScript exporter owns
-feature calculation and must use only information available strictly before the
-labeled test or race starts. `null` is the only valid representation of a
-missing numeric value; it is converted to `NaN` for CatBoost.
-
-Training also requires `--data-through-at`. Every label must be completed by
-that locked cutoff. Walk-forward fitting uses only labels whose `completedAt`
-is no later than the prediction sample's `observedAt`, so overlapping workouts
-and equal-start-time samples cannot leak outcomes into one another.
-
-The complete ordered contract is emitted in `feature-schema.json` and enforced
-by `rai_ml.contract`. The target is always:
+[contract.py](rai_ml/contract.py)当前为`race-residual-feature-v4`；特征顺序、schema hash必须与TS导出器完全一致。
+UTF-8 JSONL按真实时间/事件稳定排序。null是唯一合法数值缺失标记，不能填0制造样本。
+监督标签仅限已确认且合格的5K/10K/半马标准测试/比赛；普通训练、CA/TA不是标签。
+事件结束、标签可得时间和locked cutoff必须满足防泄漏约束；更正、撤销与重复事件不能悄悄污染holdout。
 
 ```text
 targetLogResidual = log(actualSeconds / baselinePredictedSeconds)
 ```
 
-## Train
+## 训练与工件
 
-```powershell
-npm run ml:train -- --input var/ml-datasets/race-residual-v2.jsonl --output var/model-artifacts/prediction/<run-id> --data-through-at 2026-07-11T00:00:00Z
+```bash
+npm run ml:train -- --input /absolute/path/dataset.jsonl --output /absolute/path/new-artifact-dir --data-through-at 2026-09-30T00:00:00.000Z
 ```
 
-The output directory must not already exist. Publication is atomic and contains:
+参数以[训练入口](rai_ml/train.py)和[Python环境工具](scripts/python-env.mjs)为准。工件目录必须是新目录，内容/manifest/hash不可原地覆盖。
+输出包括ONNX、manifest、feature schema、evaluation、ONNX golden及三方challenger证据。
 
-- `model.onnx`
-- `manifest.json`
-- `feature-schema.json`
-- `evaluation.json`
-- `onnx-golden.json`
+## 发布不是训练成功
 
-The worker may equivalently invoke
-`python research/rai_ml/train.py --input <jsonl> --output-dir <directory> --data-through-at <ISO-8601>`.
-Exit code `0` means the activation gate accepted the model, `2` means valid
-artifacts were produced but the model was rejected, and `1` means training or
-contract validation failed. A rejected model must never become active.
-
-The manifest records the exact input-file SHA-256 and hashes for `model.onnx`,
-`feature-schema.json`, `evaluation.json`, and `onnx-golden.json`. The TypeScript runner verifies all
-of them, along with CatBoost parameters, activation thresholds, exit-code/status
-agreement, Python ONNX parity, and Node runtime golden-vector parity before returning a result to the activation service.
-
-Residual corrections are multiplicative. The predicted, optimistic, and
-pessimistic times are all scaled by the same bounded factor, preserving the
-relative interval shape used by offline and production inference.
+[TS模型服务](../packages/application/src/prediction-model-service.ts)与[Python pipeline](rai_ml/pipeline.py)执行样本数、事件时间切分、embargo、独立holdout、分距离退化、paired bootstrap、原生/ONNX/Node parity和工件hash检查。
+残差限制±12%；最终point policy不叠加多个校准器。无active/不兼容/推理失败时逐距离回退公式并给原因码。
+CatBoost须与同样本公式基线、Ridge公平比较，并满足独立区间calibration/test闸门。不能用重复holdout调参后继续称“独立”。
+**进程exit0或model run succeeded不等于已满足所有active选择条件**；以发布服务和选择器为准。
+无真实标签时完整工程合同仍可测试，但准确率指标必须null，不激活ML/经验P80/P90。

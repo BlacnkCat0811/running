@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // CA dimension-weight ablation for the V2-A change
-// (RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md §6.1).
+// (docs/ALGORITHM.md §6.1).
 //
 // §6.1 makes this report a release condition, not a nice-to-have: the weight PR is
 // not accepted without it. It compares the candidate weightings on ONE fixed

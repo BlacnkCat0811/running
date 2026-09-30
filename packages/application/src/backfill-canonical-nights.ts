@@ -7,7 +7,7 @@ import { canonicalizeNights } from "@rai/health-export-parser";
  * `canonical_nights` / `canonical_hrv_days` 的**空表回填**。
  *
  * 为什么这是一个真实的缺口，而不是"顺手加个工具"：
- * - `docs/SLEEP_HRV_DESIGN.md`（v17 迁移策略）写明回填有两条路：下一次 CLI import，
+ * - `docs/DATA_PIPELINE.md`（v17 迁移策略）写明回填有两条路：下一次 CLI import，
  *   或 `recoverDatabaseJobs` 在 `RaiDatabase.open` 之后发现"夜表为空且存在睡眠行"时调用
  *   `canonicalizeNights`。**第二条从未接线** —— 仓库里 `canonicalizeNights` 的唯一调用点是
  *   `packages/health-export-parser/src/cli.ts`。

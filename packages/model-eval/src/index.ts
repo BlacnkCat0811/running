@@ -324,6 +324,9 @@ export function assertIntervalPresentation(presentation: IntervalPresentation): 
   }
 
   const evidence = presentation.evidence;
+  if (evidence.nominalCoverage !== 0.8 && evidence.nominalCoverage !== 0.9) {
+    throw new Error("Interval presentation: unsupported nominal coverage");
+  }
   if (evidence.coverageClaim !== "empirical_target_not_individual_guarantee") {
     throw new Error("Interval presentation: the empirical-target disclaimer is required verbatim (§12.9)");
   }
@@ -344,7 +347,8 @@ export function assertIntervalPresentation(presentation: IntervalPresentation): 
   if (!ordered(evidence.lowerSeconds, evidence.upperSeconds)) {
     throw new Error("Interval presentation: calibrated bounds must be finite and ordered");
   }
-  if (evidence.evaluationSampleCount < INTERVAL_RELEASE_POLICY.minimumTestSamples) {
+  if (!Number.isInteger(evidence.evaluationSampleCount) ||
+      evidence.evaluationSampleCount < INTERVAL_RELEASE_POLICY.minimumTestSamples) {
     throw new Error(
       `Interval presentation: ${evidence.evaluationSampleCount} evaluation samples is below the publication floor ` +
       `${INTERVAL_RELEASE_POLICY.minimumTestSamples}`
@@ -353,13 +357,15 @@ export function assertIntervalPresentation(presentation: IntervalPresentation): 
   const floor = evidence.nominalCoverage === 0.8
     ? INTERVAL_RELEASE_POLICY.minimumCoverage.p80
     : INTERVAL_RELEASE_POLICY.minimumCoverage.p90;
-  if (evidence.empiricalCoverage === null || evidence.empiricalCoverage < floor) {
+  if (evidence.empiricalCoverage === null || !Number.isFinite(evidence.empiricalCoverage) ||
+      evidence.empiricalCoverage < floor || evidence.empiricalCoverage > 1) {
     throw new Error(
       `Interval presentation: empirical coverage ${String(evidence.empiricalCoverage)} is below the floor ${floor} ` +
       `for nominal ${evidence.nominalCoverage}`
     );
   }
-  if (evidence.evaluationCohortHash === null || evidence.calibrationVersion === null) {
+  if (typeof evidence.evaluationCohortHash !== "string" || !evidence.evaluationCohortHash.trim() ||
+      typeof evidence.calibrationVersion !== "string" || !evidence.calibrationVersion.trim()) {
     throw new Error("Interval presentation: a published interval must name its cohort hash and calibration version");
   }
 }

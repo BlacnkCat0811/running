@@ -2,7 +2,7 @@
 
 - **状态**：已接受（Accepted）· **封板日期**：2026-09-23
 - **范围**：`apps/ios/RAI/` 的 HealthKit 同步写入路径 + `packages/health-export-parser/` 的 GPX 配额
-- **来源**：多智能体讨论 + 红队质询后的实施轮，报告见 `deliverables/archive/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`
+- **历史来源**：封板讨论从 Git 查阅；下列决策仍有效，文中旧测试计数只代表封板时记录，不是当前审查结果。
 - **依据规范**：《RAI HealthKit 后台可靠同步系统 V2.1 架构设计与实施规范》
 
 > ### 🛑 如果你觉得下面某一条"写错了、像个 Bug"——先读这里
@@ -27,7 +27,7 @@
 ### 背景
 
 成功收尾要一次做两件事：把 anchor / 导出水位写进 `sync_state`，并删掉 `sync_tasks` 里的任务行。
-写入路径是 `SyncTaskStore.commitSuccess`（`apps/ios/RAI/SyncTaskStore.swift:371-416`）：
+写入路径是 `SyncTaskStore.commitSuccess`（`apps/ios/RAI/SyncTaskStore.swift`）：
 
 ```text
 BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELETE sync_tasks + changes()==1 → COMMIT
@@ -119,7 +119,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 ### 背景
 
 服务端超配额时有三种可能的下游状态：`pending` / `imported` / `invalid`
-（`workout_routes.file_status`）。配额分支在 `packages/health-export-parser/src/gpx-parser.ts:418-446`。
+（`workout_routes.file_status`）。配额分支在 `packages/health-export-parser/src/gpx-parser.ts`。
 
 ### 曾经的反转
 
@@ -127,7 +127,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 
 ### 决定
 
-**配额超限落 `pending`**（`gpx-parser.ts:433`）；`invalid` 只保留给**真的坏了**的文件
+**配额超限落 `pending`**（`gpx-parser.ts`）；`invalid` 只保留给**真的坏了**的文件
 （解析失败的 `invalid_xml` 路径，`:446`）。
 
 ### 理由（这是四条里后果最重的一条）
@@ -137,7 +137,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 1. `DELETE FROM route_points`；
 2. 把 `point_count` 归零。
 
-而重算管线（`recompute-pipeline.ts:751`）的汇总**只统计 `file_status = 'imported'`**。
+而重算管线（`recompute-pipeline.ts`）的汇总**只统计 `file_status = 'imported'`**。
 ⇒ 用 `invalid` 表达"超配额"，会让**该次跑步的轨迹与高程增益静默消失**，
 用户看到的不是"同步失败"，而是 **"这次跑步没有轨迹"** —— 不可归因，看起来像数据本身缺失，
 而且 `invalid` 意味着**永远不会再重试**。
@@ -150,7 +150,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 - `packages/health-export-parser/test/gpx-quota.test.ts` 第 2 条断言：
   超点数的路线被拒 ⇒ 状态为 `pending` + 产生 issue，且**兄弟路线仍是 `imported`**
   （证明"拒绝一份"不会波及整批）；第 3 条断言超字节的路线**完全未被改动**。
-- 代码注释逐字记录了这次反转的推理（`gpx-parser.ts:418-425`）。
+- 代码注释逐字记录了这次反转的推理（`gpx-parser.ts`）。
 
 ### ❌ 不要这样改
 
@@ -181,11 +181,11 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 幂等性并不依赖"同一个用户永远算出同一个 hash"，而是由**两道边界**保证：
 
 1. 🔴 **盘上有持久化任务行 ⇒ 永远不返回 `.startFreshSync`**
-   （`BackgroundSyncPolicy.swift:118-123`）。任务行的存在本身就说明"有一个批次还没走完"；
+   （`BackgroundSyncPolicy.swift`）。任务行的存在本身就说明"有一个批次还没走完"；
    想重新导出只有**一个合法入口**：用户显式点「重新导入全部」。
    这条不变式由 `BackgroundSyncPolicyRegression` 在**全参数组合**上钉死。
 2. 内容层面另有一把**稳定的**摘要：`digestHealthKitExportContent`
-   （`apps/api/src/import-sources.ts:238-283`，会剥掉 `<ExportDate>`），
+   （`apps/api/src/import-sources.ts`，会剥掉 `<ExportDate>`），
    供"这份载荷是否就是产生当前主库的那一份"这类判断使用。
 
 也就是说：**频控/防并发靠边界（规则 1），内容比较靠稳定摘要（规则 2），
@@ -194,7 +194,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 ### ❌ 不要这样改
 
 - 不要把它改成"内容摘要"以求稳定 —— 那会让"两份来源、两个 job"的
-  `BackgroundSyncPolicy.swift:120-123` 自述约束失效。
+  `BackgroundSyncPolicy.swift` 自述约束失效。
 - 不要因为它"每次变"就认为幂等没生效：幂等的入口是
   `import_sources.idempotency_key = sha256(serverId\0athleteId\0datasetEpoch\0batchId)`，
   在同一次批次内是稳定的。
@@ -204,7 +204,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 ## 补充 A：GPX 三级配额的基准参数与"为什么不照抄规范"
 
 规范给的三个数字是 **20 MB / 50,000 点 / 200,000 点**。本仓**三个都没照抄**，
-固化为（`packages/health-export-parser/src/gpx-parser.ts:54,65,80`）：
+固化为（`packages/health-export-parser/src/gpx-parser.ts,65,80`）：
 
 | 层级 | 规范 | **本仓固化值** | 类别 |
 | :--- | :--- | :--- | :--- |
@@ -214,7 +214,7 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 
 ### 推导依据（每条都可核对）
 
-1. **每点约 213 字节**：`HealthKitExport.swift:1039-1062` 的 `gpx(_ locations:)`
+1. **每点约 213 字节**：`HealthKitExport.swift` 的 `gpx(_ locations:)`
    逐点**无抽稀**地写 `trkpt` + `ele` + `time` + `speed` + `course` + `hAcc` + `vAcc`
    （`lat`/`lon` 在 `trkpt` 属性里）⇒ 8 个字段。
 2. **24 小时百公里越野 ≈ 86,400 点 ≈ 18.4 MB**（按 1 Hz 采样）。
@@ -264,7 +264,7 @@ let bound = anchor.withUnsafeBytes { buffer in
 guard bound == SQLITE_OK else { fail("state anchor bind"); return false }
 ```
 
-落点：`apps/ios/RAI/SyncTaskStore.swift:419-467`（`upsertState`）。
+落点：`apps/ios/RAI/SyncTaskStore.swift`（`upsertState`）。
 
 ### 为什么这条必须单独记一笔
 
@@ -288,7 +288,7 @@ guard bound == SQLITE_OK else { fail("state anchor bind"); return false }
 
 同步时用户看到：**「同步水位写入后无法读回一致的值，本次提交已回滚。」**
 
-它不是偶发：`HealthKitExport.swift:369` 的 `let exportedThrough = Date()` 带完整小数秒，
+它不是偶发：`HealthKitExport.swift` 的 `let exportedThrough = Date()` 带完整小数秒，
 而 `sync_state.export_end` 是 REAL 列，写入走 `timeIntervalSince1970`、读回走
 `Date(timeIntervalSince1970:)` —— 这两步合起来**不是恒等映射**。
 
@@ -306,7 +306,7 @@ guard bound == SQLITE_OK else { fail("state anchor bind"); return false }
 
 ⇒ 回读断言拿**原始 Date** 去比读回来的 Date，约一半概率判不等 ⇒ 一次**完全成功的**提交被
 整段回滚（决策一让异常方向只剩"这次没提交上"，所以它没有写坏数据，但用户就是同步不了）。
-route 一侧同因：`HealthKitExport.swift:286` 的 `routeNow = Date()` 同样带小数秒。
+route 一侧同因：`HealthKitExport.swift` 的 `routeNow = Date()` 同样带小数秒。
 
 ### 🔴 为什么两层门禁此前都看不见它
 

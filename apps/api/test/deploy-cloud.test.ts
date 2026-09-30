@@ -28,9 +28,10 @@ test("cloud configuration preserves authentication, engine selection and bounded
   assert.doesNotMatch(nginx, /18787/);
 });
 
-test("cloud deployment uses generic cold backups and retains the old entry point", () => {
-  assert.match(read("README-UBUNTU.md"), /README-CLOUD-2C2G\.md/);
-  assert.match(read("README-CLOUD-2C2G.md"), /deploy\/backup-runtime\.sh/);
+test("cloud deployment documents generic cold backups in the single maintained guide", () => {
+  assert.match(read("README-UBUNTU.md"), /deploy\/backup-runtime\.sh/);
+  assert.match(read("README-UBUNTU.md"), /MemoryHigh=1100M/);
+  assert.doesNotMatch(read("README-UBUNTU.md"), /README-CLOUD-2C2G\.md/);
   assert.match(read("backup-runtime.sh"), /apply=false/);
   assert.match(read("n100/backup-runtime.sh"), /exec bash .*backup-runtime\.sh/);
 });

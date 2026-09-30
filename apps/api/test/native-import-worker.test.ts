@@ -60,7 +60,7 @@ test("accepted Rust jobs keep their engine across restart and run the actual nat
     // 才能走到 `native-record-writer` 的那条守卫（它位于 `if (this.count === 0) return`
     // 之后，见 `native-record-writer.ts:244-251`）。此前这个 fixture 只有 `<Workout>`，
     // 于是 `count === 0` 早退、守卫**从未被评估** —— 2026-09-22 的 `--database-is-staging`
-    // 缺陷正是从这个洞里漏到线上的（见 `deliverables/archive/IMPORT_STAGE_ATTRIBUTION_2026-09-21.md` §20）。
+    // 缺陷正是从这个洞里漏到线上的（见 `docs/DATA_PIPELINE.md` §20）。
     writeFileSync(join(second, "export.xml"), `<HealthData>
     <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch" unit="count/min" value="142"
       startDate="2026-01-03 08:00:00 +0800" endDate="2026-01-03 08:00:05 +0800"/>

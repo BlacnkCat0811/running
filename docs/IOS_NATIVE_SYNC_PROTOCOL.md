@@ -12,14 +12,10 @@ background `URLSession`（字节搬运）——都已在 `apps/ios/RAI/` 里接�
 唯一已确定改变的是"切到后台"不再等于"用户取消"。HealthKit 导出仍复用
 `HealthKitExport.swift` 的 ZIP/XML 管道。
 
-> **2026-09-23 增补**：V2.1 规范里属于**数据正确性**的后两项也已落地 —— anchor / 导出水位收口进
-> `sync_state` 的**单事务**提交（§2 原则 3），服务端 GPX 字节 / 点数 / 批次点数三级配额（§5.2）。
-> 逐条对照与证据见文末「V2.1 规范对照」及 `deliverables/archive/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`。
->
-> **2026-09-23 再增补**：§3.5 的 **Route 自适应降频**（UNKNOWN → ACTIVE → COOLING → SETTLED）
-> 落地为逐 workout 的伴生状态机，固定 14 天全量重扫退役为"候选集"。见下文「按 workout 定频」
-> 与 `deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
-> ⚠️ 该报告的收益一栏按**真实时间滑窗**算是 −49%（1 次/天同步），不是稳态值乘天数 —— 别引用错的数。
+anchor/导出水位在 `sync_state` 单事务提交；服务端 GPX 有字节/点数/批次点数限额。
+Route 使用逐 workout 的 UNKNOWN → ACTIVE → COOLING → SETTLED 伴生状态机。
+取舍与失败方向见 [ADR-004](adr/ADR-004-healthkit-sync-invariants.md)，真机步骤见 [runbook](IOS_NATIVE_RUNBOOK.md)。
+旧机器收益和历史批次计数不作为当前性能承诺。
 
 ## 状态机
 
@@ -115,7 +111,7 @@ sample 类型，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源（�
 - 判据**不是**"它属于哪一批"。服务端没有按批次查来源的接口（`sourceByIdempotencyKey` 只在
   `saveUpload` 内部用；`GET /v1/import-sources/recent` 只返回 `lastUsedAt != null` 的来源，而
   "已上传未导入"恰好是 `null`），所以上个进程那次上传的**结局拿不回来** —— `sourceId` 只能靠
-  **重传同一份字节**让服务端幂等命中（`import-sources.ts:323-331` 按归档字节比对，返回同一条来源）。
+  **重传同一份字节**让服务端幂等命中（`import-sources.ts` 按归档字节比对，返回同一条来源）。
   既然横竖要重传，留着一个仍在跑的上传只是让两份同样的字节同时打向服务端，其中一份必然撞
   `import_upload_busy`（429）。
 - 判据**也不是**"登记过没有"。生命周期中止之后登记还在而等待者已被摘掉，那正是**要取消**的状态；
@@ -166,7 +162,7 @@ sample 类型，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源（�
 v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态只在服务端完成数据库激活、审计文件发布和终态 job 持久化后返回。手机把这个持久化终态作为服务端确认，再提交本地待确认 anchor 和导出水位；若 App 在此后退出，恢复时先查询已有 source/job，不重新产生业务数据。未来若服务端拆分导入发布和游标确认，可在保持本状态机的前提下增加独立端点。
 
 🔴 **`inspect` 是 `POST /v1/import-jobs` 的强制前置门。** 成功导入过的 HealthKit 上传会被
-服务端 retain（`import-source-finalization.ts:35-39`：记录在、目录已删），对这类来源直接建任务
+服务端 retain（`import-source-finalization.ts`：记录在、目录已删），对这类来源直接建任务
 只会得到一个必然失败的 job。`inspect` 返回 `unchanged` 时必须走"删除暂存来源 + 提交游标"分支，
 **不得创建任务**。
 
@@ -220,83 +216,8 @@ v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态�
 `errorNoData` 与鉴权错误，锁屏错误一律抛出到调用方 —— 一旦有人把两者合并，"锁屏"就会变成
 "这份数据是空的"，Anchor 随之推进，那段数据永久跳过。
 
-## 尚待完成
 
-服务端目前已经有上传、预检、导入任务和 job 查询接口；批次幂等由运行时状态库中的 `idempotency_key` 和活动/历史 job 查询保证。服务端成功确认复用已持久化的 job 终态，v1 不要求额外游标确认端点。自动化异常矩阵和真实设备上的生命周期中断、路线晚到、删除传播及大历史内存测试仍未运行。
-
-### V2.1 规范（`RAI HealthKit 后台可靠同步系统 V2.1`）对照：已完成的 / 仍未做的 / 有意不照做的
-
-以下每一项都已在 `deliverables/archive/RAI_HK_BACKGROUND_V21_GAP_2026-09-23.md` 里给了差距矩阵与优先级；
-2026-09-23 那一轮的逐条结论、证据与回滚方式见 `deliverables/archive/RAI_HK_BACKGROUND_V21_INCR_2026-09-23.md`；
-Route 定频那一项见 `deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
-
-- 🟡 **`beginBackgroundTask` 仍包裹整个 `performSync`**（`HealthKitSync.swift:717-726`；
-  `performSync` 本体自 `:689` 起）。
-  V2.1 §Phase 0 明确要求移除它，本仓的结构门禁 `check-background-capabilities.py:320-331` 又**要求它存在**
-  （`len(background_task_lines) >= 1`）。**已定案：零行为变更、只把口径写清楚**，理由三条：
-  ① 移除它会让"用户点同步后立刻切后台"**没有任何收尾窗口**（BGTask 是"择机"而非"立刻"）；
-  ② 现有 `expirationHandler` 已正确走 `suspendForLifecycle()`（`HealthKitSync.swift:718-726`，收尾调用在 `:721`），
-  即**规范想防的"系统到期被当成用户取消"这件事已经不存在**；
-  ③ 拿不出"移除后更好"的可证伪判据 ⇒ 不做。这条记为**有意偏离**，不再当待办。
-- ✅ **anchor / 导出水位已收口到 SQLite 单事务**（V2.1 §2 原则 3，2026-09-23 完成）：
-  `sync_state` 表 + `SyncTaskStore.commitSuccess` 的单事务（详见上文「状态机」后的说明与文末验收）。
-  仍未落地的是规范 §2.1 的 `sync_transactions` **严格表结构**与 candidate/committed **双列**形式 ——
-  现状用"单列 + 提交前回读断言 + `changes()` 校验"拿到同一保证（取舍与失败方向见新报告 §1）。
-  `lastSyncAt` / `lastWorkoutCount` / `lastAutoSync` 三个键**有意留在 `UserDefaults`**：丢了无害，
-  且它们按 scope 分键的语义与"已提交水位"不同，搬进表会静默改掉语义。
-- ✅ **Route 自适应降频已落地**（V2.1 §3.5 的 UNKNOWN → ACTIVE → COOLING → SETTLED，2026-09-23 完成）：
-  14 天窗口降级为**候选集**，查询由 `RouteSyncStateMachine`（纯函数）逐 workout 决定，
-  状态存在 `SyncTaskStore.sqlite` 的 `sync_route_state`（**不是** `UserDefaults`，也不叫 `routeAnchor` ——
-  HealthKit 没有 route anchor，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源，所以状态只能挂在 workout 的 uuid 上）。
-  阈值：`active` 24 h（按 **workout 年龄**）/ `cooling` 查询节流 12 h / `settled` 3 天后永久休眠；
-  `settled` 的唯一唤醒通道是"重新导入全部"（`routeForceRescan`）。
-  🔴 **两条不变式**：① 「跳过一轮」绝不改动状态（否则"没读到"会被记成"没变化"，一条刚变更的轨迹
-  可能直接降到 `settled` 而永不再查）；② 降频记忆只在 `commitSuccess` **之后**落盘
-  （反过来会造出"记成已稳定、数据却从未交付"的不可自愈窗口）。
-  两者都有独立回归 + 突变验证（门禁 §14h）。详见 `deliverables/archive/RAI_HK_BACKGROUND_V21_PHASE2_T1_2026-09-23.md`。
-  🟡 **两项如实说明**：① 收益按真实时间滑窗算是 **−49%**（1 次/天同步、14 天累计），
-  不是"稳态省 90% × 14 天"——显著的是**单次同步**（20 → 稳态 0–3 条 `HKWorkoutRouteQuery`）；
-  ② 被跳过的 route 不进载荷 ⇒ `digestHealthKitExportContent` 的内容摘要会变 ⇒ 服务端"未变化"
-  早退锚点在「`cooling` 且同步间隔 < 12 h」这个交叉窗口里可能落空。**治本要改服务端摘要口径，属独立决策。**
-  省略 GPX **不等于删除**，前提是 manifest 声明 `sourceScope: "healthkit"`
-  （`resolvePreserveAbsent` → `preserveAbsent: true`）——这条前提已被门禁判据钉住。
-- ✅ **服务端已有 GPX 字节 / 点数 / 批次点数三级配额**（V2.1 §5.2，2026-09-23 完成）：
-  单文件 **64 MiB** / 单 workout **300,000 点** / 整批 **20,000,000 点**。
-  ⚠️ 后两项**有意不照抄**规范的 50,000 与 200,000：50,000 点 ≈ 13.9 小时轨迹（一次 24 h 超马必被误杀，
-  `gpx-quota.test.ts` 里那条 86,400 点的轨迹就是**必须被接受**的合法反例）；200,000 点/批会让
-  "重新导入全部"这条唯一的重建路径**永久打不开**（三年用户 ≈ 1.68 M 点，8.4× 超限）。数字推导见新报告 §2。
-  ZIP slip 防御、实际字节计量、压缩比与条目数上限此前已**超出**规范要求。
-- **Silent Push（§3.2 第三优先级）未实现**。规范自述它只是"加速器"，缺失不影响最终一致性
-  （第一优先级前台拉取 + 第二优先级 BGTask 已覆盖）。
-- **`errorDatabaseInaccessible` 与 `errorNoData` 的辨别尚无真机证据**：模拟器无法锁屏，这条路径
-  只能靠真机验收（见 `deliverables/IOS_SYNC_DEVICE_CHECKLIST_2026-09-22.md`）。
-
-🔴 **后台三机制的真机验收是一个独立验收项，完成前不得把静态审查或模拟器构建写成"后台可用"。**
-可执行清单见 **`deliverables/IOS_SYNC_DEVICE_CHECKLIST_2026-09-22.md`**（= 方案 §11.0–11.4 + 落地后新增的
-V11/V12，含前置条件、构建期检查、逐条操作与回传模板）；方案原文见
-`~/.workbuddy/plans/blazing-nebula-lovelace-RGwzqGbx.md` §11。V1–V12 每条都要求
-"机制被调度的证据 + 逻辑正确的证据 + 服务端对账"三者齐全，并区分「系统根本没调度」与
-「逻辑失败」—— 两者在控制台、nginx 日志、系统设置上留下的痕迹完全不同。
-模拟器上无法验证 background delivery 与 `BGProcessingTask`（包签名为空、无 HealthKit entitlement），
-所以那两项**只能**在真机上判定。background URLSession 虽然在模拟器里"看起来能跑"，但那不构成证据：
-本仓的判据是"进程被杀之后系统还把字节传完"，而模拟器里没有真实的进程回收与重新拉起。
-
-P2-4 另有三条只能上真机才能定的东西，已列进 §11：
-
-1. `URLSessionUploadTask.taskDescription` 与 `X-RAI-Sync-Batch` 头在**进程重启后**是否仍可读
-   （§15 第 2 项）。它现在只影响日志里的 `cancelledCurrentBatch` / `cancelledOthers` 之分，
-   不影响任何动作 —— 所以即使答案是"不可读"，结论也只是一句"把口径记得悲观一点"。
-2. `getAllTasks` 在**新进程**里到底能看到几个任务。日志行
-   `reattached system uploads: kept … cancelled … for the current batch, … from other batches`
-   就是这条证据：`foundAny == false` 而线上确实少了一批 ⇒ 系统没有把任务重挂起来（该查
-   `makeSession()` 的 identifier 与 `UIBackgroundModes`）；`cancelledCurrentBatch == 0` 而
-   `cancelledOthers > 0` ⇒ 重挂了但批次对不上（`persistZip` 的逐字节一致性值得怀疑）。
-3. 生命周期中止期间的**重传冗余**实际发生率（"字节归谁"一节末段）。量它的口径是：
-   同一次数据变化在 nginx 上出现了几个 `POST /v1/imports/uploads`，以及服务端的
-   `import_upload_busy`（429）出现了几次 —— 后者若为 0，说明我们确实只让一份字节在传。
-
-
-### 2026-09-24：冷启动恢复、轨迹隔离与意图交接
+## 冷启动恢复、轨迹隔离与意图交接
 
 后台读取任务前，在单飞所有权内从既有 `rai.handshake.<64位URL哈希>` 恢复 URL、离线身份和同步 scope。
 离线身份只决定是否启动工作；真正执行仍以在线握手为准，并更新同一缓存。健康数据通知显式携带目标 URL，
@@ -311,7 +232,7 @@ P2-4 另有三条只能上真机才能定的东西，已列进 §11：
 
 真机仍需验证冷启动实际续传、新 scope GPX 交付，以及看门狗在 BGProcessingTask 下的预算读数；本机门禁不替代真机验收。
 
-### 2026-09-24（第二轮）：按目标读取的待办快照、恢复请求与受控重开
+## 按目标读取的待办快照、恢复请求与受控重开
 
 **待办快照（只读探针）**。判据是 `HealthKitSync.probePendingWork(for:)`：按**目标 URL** 现读，
 返回 `HealthSyncBackgroundRecovery.PendingWork`，其中 `verdict` 有三值 ——
@@ -343,3 +264,14 @@ P2-4 另有三条只能上真机才能定的东西，已列进 §11：
 在单飞接纳后的执行入口、任何任务读取之前最多重试一次打开；失败保留待办，探针报告 `unknown`。
 重开安全的前提是迁移失败已 `ROLLBACK`、`PRAGMA user_version` 幂等、
 且**不删任何文件**（打不开就是打不开，不做"删库重来"）。
+
+## 仍需真机验收的边界
+
+服务端已提供上传、预检、导入任务、幂等和job终态查询；不能假定sourceId跨小时保留原上传目录。
+当前实现有意保留覆盖performSync的beginBackgroundTask收尾窗口，过期走suspendForLifecycle而不是用户取消；不把“移除它”当作未完成任务。
+anchor使用单事务+提交前回读断言，而非为照抄外部方案增加平行candidate/committed列。
+日志中的成功、编译通过、模拟器测试都不证明系统实际触发了background delivery/BGProcessingTask。
+
+真机至少需覆盖权限变化、锁屏错误、进程回收、background URLSession重挂、迟到路线、删除传播、目标切换和大历史内存；步骤见[runbook](IOS_NATIVE_RUNBOOK.md)。
+记录“机制实际被调度”“逻辑正确”“服务端对账”三类证据，区分系统没有调度与代码执行失败。
+后台调度时间不作保证；前台进入也需满足权限、网络和服务可用性，不能承诺一定补齐。
