@@ -24,7 +24,7 @@
 | 门禁 | 命令 | 结果 |
 |---|---|---|
 | 类型检查 | `npm run typecheck`（现覆盖 `packages/`、`apps/`、**`scripts/`**） | **0** |
-| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1077 tests / 1059 pass / 0 fail / 18 skipped** |
+| node 侧全量 | `node --import tsx --test "packages/*/test/*.test.ts" "apps/api/test/*.test.ts"` | **1081 tests / 1063 pass / 0 fail / 18 skipped** |
 | web 侧全量 | `npm run test -w @rai/web` | **18 文件 / 111 tests / 0 fail** |
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
@@ -136,11 +136,27 @@ asKnownThenBlockedDays  302   （有读数却无法考据到达时间）
 ⇒ 结论：**§7 的 Readiness 在本机基线上不可验收**，且这不是模型问题，是数据到达时间与
 canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不可用。
 
-### 5. 🟡 `canonicalizeNights` 的末夜边界（已定位，未修）
+### 5. ✅ `canonicalizeNights` 的夜表日期范围截断（已修，v1 → v2）
 
-日期范围由每个睡眠段的**开始**时刻决定（`dates = all.map(s => localDateAt(s.start, tz))`），
-而一夜的 InBed 段开始于**前一晚** ⇒ **最后一夜永远不会被访问**。
-合成夹具（3 夜 → 2 主夜）与真实库都可复现。修它属于 import 行为变更，需单独决策。
+日期范围原来看每个睡眠段的**开始**时刻，而一夜的 InBed/Asleep 段通常开始于**前一晚**。
+只要这一夜里**有任何一段**开始于本地午夜之后，范围就已经覆盖它的 wake date；
+但如果**所有**段都开始于午夜之前（数据在这一夜中途结束、或这一夜很短），整夜会被丢掉。
+
+**订正**：这一步曾被描述为"每次导入都会丢掉最近的那一夜"——**过强**。实测口径：
+
+```text
+本机 3 年库副本   v1 = 170 主夜 / 5 午睡 / 170 HRV 日
+                  v2 = 170 主夜 / 5 午睡 / 170 HRV 日   ← 0 差异
+```
+
+它是**范围截断**，不是必然命中的缺陷；真实库的末夜恰好有午夜后的段。
+修复后 `CANONICAL_NIGHT_ALGORITHM_VERSION` bump 到 `canonical-night-v2`
+（`canonicalizeNights` 本就是 DELETE + 全量重建，不产生混排状态）。
+合成用例钉住边界，突变（改回只看开始）令 3 条转红。
+
+> **验证纪律补充**：突变验证里"没有转红"**首先**要怀疑"突变是否真的施加了"。
+> 本轮第一次突变因 PowerShell 替换静默失效而得到"全绿"，若据此断言
+> "这些断言没有牙齿"就会得出与事实相反的结论。
 
 ---
 
@@ -156,7 +172,6 @@ canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不�
 | 线上部署 | 超出本方案范围 |
 | 接入天气服务 | §5.2 第 3 条要求另批 provider/缓存/隐私/成本；§18.4 明确不做 |
 | 任何阈值调整（含 §6.9 门控） | §6.9-6 的预注册未冻结；`labeledOutcomeCount = 0` ⇒ 最大误判下降率无法测量 |
-| 修 `canonicalizeNights` 末夜边界 | 属 import 行为变更；须单独评估对既有夜表的影响 |
 
 ---
 
@@ -202,7 +217,9 @@ canonical 化缺失的问题。`as_known_then` 回放在本库上**永远**不�
    否则 `rebaseReason` 只能是一个编出来的枚举值。
 3. §13.3 的 `CoachDecisionV2` 版本化输出：需要先把 `tone + next session` 到 `action` 的映射设计清楚，
    并保证它是**同一个决策**的兼容映射，而不是第二套裁决。
-4. 修 `canonicalizeNights` 的末夜边界（已定位到行）：属 import 行为变更，需评估对既有夜表的影响。
+4. ~~修 `canonicalizeNights` 的末夜边界~~ —— **已完成**（批次 25，`canonical-night-v2`）。
+   下一步是决定是否对真实库执行一次 `data:backfill-canonical-nights --apply`
+   （它会让夜表从 0 行变成约 175 行，但**不会**让历史日变得可判定）。
 
 **被数据阻塞（等条件，不等代码）**
 

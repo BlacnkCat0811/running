@@ -4,7 +4,15 @@ import { DATABASE_TIMEZONE, healthTypes } from "@rai/contracts";
 
 import { localDateAt, localDateTimeAt, stableId } from "./utils.js";
 
-export const CANONICAL_NIGHT_ALGORITHM_VERSION = "canonical-night-v1" as const;
+/**
+ * 算法版本写入每行的 `provenance_json.algorithmVersion`，用来回答"这行是哪版算法产的"。
+ *
+ * `v1 → v2`：日期范围从"只看段的开始时刻"改为"开始与结束都看"。
+ * v1 下**最近的一夜永远不入表**（那一夜的段都开始于前一晚），而 `canonicalizeNights`
+ * 本身是 DELETE + 全量重建，所以下一次导入就会用新版本覆盖全部行
+ * （与 `docs/SLEEP_HRV_DESIGN.md` 的 bump 政策一致）。
+ */
+export const CANONICAL_NIGHT_ALGORITHM_VERSION = "canonical-night-v2" as const;
 
 export type CanonicalNightKind = "main" | "nap";
 export type HrvDayConfidence = "confident" | "sparse" | "missing";
@@ -151,7 +159,20 @@ export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: s
   try {
     database.exec("DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;");
     if (all.length === 0) { database.exec("COMMIT"); return { mainCount: 0, napCount: 0, hrvCount: 0, rejectedInBedOnly: 0, timezoneIdentifier }; }
-    const dates = all.map((s) => localDateAt(s.start, timezoneIdentifier));
+    // 日期范围必须同时看段的**结束**时刻，不能只看开始。
+    // 一夜的 InBed/Asleep 段通常开始于**前一晚**（约 22:00 local）。只要这一夜里
+    // **有任何一段**开始于本地午夜之后，v1 的范围就已经覆盖它的 wake date；
+    // 但如果**所有**段都开始于午夜之前（数据在这一夜中途结束、或这一夜很短），
+    // v1 会把整个夜丢掉 —— 这是范围截断，不是概率问题。
+    //
+    // 实测口径：本机 3 年数据上 v1 与 v2 都产出 170 个主夜（该库的末夜恰好有午夜后的段），
+    // 所以这次修复对**这份**数据是 0 差异；差异由合成用例钉住。
+    // `CANONICAL_NIGHT_ALGORITHM_VERSION` 仍须 bump：产出行集合的算法文本改了，
+    // provenance 的用途正是"这行是哪版算法产的"。
+    const dates = all.flatMap((s) => [
+      localDateAt(s.start, timezoneIdentifier),
+      localDateAt(s.end, timezoneIdentifier)
+    ]);
     const minDate = dates.sort()[0]!; const maxDate = dates.sort().at(-1)!;
     const hrv = loadHrv(database); let date = minDate; let mainCount = 0; let napCount = 0; let hrvCount = 0; let rejected = 0;
     const insertNight = database.prepare(`INSERT INTO canonical_nights (id,wake_date,timezone_identifier,kind,source_name,source_category,source_rank,has_stages,sleep_onset_at,wake_at,asleep_union_minutes,in_bed_union_minutes,awake_minutes,stage_minutes_json,segment_count,provenance_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
