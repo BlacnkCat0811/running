@@ -25,8 +25,13 @@ function optionValue(args: string[], name: string, fallback: string): string {
 
 function main(): void {
   const args = process.argv.slice(2);
-  const path = resolve(optionValue(args, "--challengers", ""));
-  if (!path || !existsSync(path)) throw new Error(`Challengers document not found: ${path}`);
+  // 先判"有没有给参数"，再判"这个路径存在吗"。
+  // 原实现把两件事合成一句，`--challengers` 缺席时 `optionValue(..., "")` 让 `resolve("")`
+  // 变成当前目录，守卫因为"目录存在"而放行，最终报出的是 EISDIR（见 2026-09-30 审计）。
+  const rawPath = optionValue(args, "--challengers", "");
+  if (rawPath.trim() === "") throw new Error("--challengers requires a path to a saved challengers JSON document");
+  const path = resolve(rawPath);
+  if (!existsSync(path)) throw new Error(`Challengers document not found: ${path}`);
   const minimumSamples = Number(optionValue(args, "--minimum-samples", String(MINIMUM_HOLDOUT_PREDICTIONS)));
   if (!Number.isInteger(minimumSamples) || minimumSamples < 1) {
     throw new Error("--minimum-samples must be a positive integer");

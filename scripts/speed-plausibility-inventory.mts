@@ -22,6 +22,7 @@
 // 用法：
 //   node --import tsx scripts/speed-plausibility-inventory.mts [--database var/rai.sqlite] [--out <path>]
 
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -39,6 +40,16 @@ const readArg = (name: string, fallback: string): string => {
 };
 
 const databasePath = resolve(root, readArg("--database", "var/rai.sqlite"));
+// §15.8-1：产物必须能说出自己出自哪个提交。第一版这里写死了 null，
+// 于是它成了五份 envelope 产物里唯一永远说不出 revision 的那一份（审计 2026-09-30 发现）。
+// 取不到时返回 null 是"不知道"，与"从不记录"是两件事。
+const repoRevision = (() => {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+})();
 // `--out` 是可选的：不传就只打印，不写盘（与其它只读盘点脚本一致）。
 const outIndex = argv.indexOf("--out");
 const outPath = outIndex >= 0 ? (argv[outIndex + 1] ?? null) : null;
@@ -105,7 +116,7 @@ const report = {
   ...evaluationReportEnvelope({
     generatedBy: "scripts/speed-plausibility-inventory.mts",
     databasePath: databasePath.replace(root, "."),
-    repoRevision: null,
+    repoRevision,
     reproduceCommand:
       "node --import tsx scripts/speed-plausibility-inventory.mts --database var/rai.sqlite --out deliverables/SPEED_PLAUSIBILITY_INVENTORY.json",
     accuracyStatus: "not_evaluable",

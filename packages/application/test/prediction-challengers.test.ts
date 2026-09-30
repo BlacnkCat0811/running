@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import test from "node:test";
 
 import {
   RESIDUAL_CHALLENGERS_VERSION,
   evaluateResidualChallengers,
+  parseResidualChallengerFile,
   readResidualChallengerImport
 } from "../src/prediction-challengers.js";
 
@@ -134,5 +136,25 @@ test("D8: the importer refuses an unknown document version", () => {
   assert.throws(
     () => readResidualChallengerImport({ ...document(WINNING), challengersVersion: "rai-residual-challengers-v9" }),
     /Unsupported challenger document version/
+  );
+});
+
+// 2026-09-30 的独立审计复现了这个失败模式：CLI 未传 `--challengers` 时
+// `optionValue(..., "")` → `resolve("")` 得到**当前目录**，`existsSync(CWD)` 为真于是守卫放行，
+// 最终 `readFileSync` 抛 EISDIR —— 报出来的是"对目录调了读"，而不是"你没给文件"。
+// 目录存在不等于文件存在，所以这里把三种输入分开断言。
+test("D8: reading a challengers document distinguishes no-path, no-file and not-a-file", () => {
+  assert.throws(() => parseResidualChallengerFile(""), /requires a file path/);
+  assert.throws(() => parseResidualChallengerFile("   "), /requires a file path/);
+  assert.throws(
+    () => parseResidualChallengerFile(resolve("var", "definitely-not-here.json")),
+    /Challengers document not found/
+  );
+  // 目录：必须有明确措辞，且**不能**是 EISDIR。
+  assert.throws(
+    () => parseResidualChallengerFile(resolve("var")),
+    (error: unknown) => error instanceof Error
+      && /must be a file, not a directory/.test(error.message)
+      && !/EISDIR/.test(error.message)
   );
 });

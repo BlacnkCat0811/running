@@ -16,7 +16,7 @@
 
 ## 一、一句话结论
 
-方案主干（P0/P1 的工程边界）**已实施并逐条有测试**；§16.1 的验收矩阵改为**可执行判据**：54 条中 51 条按 ID 被引用、3 条在检查脚本里逐条声明缺哪一半、0 条既未引用也未声明（§三）。
+方案主干（P0/P1 的工程边界）**已实施并逐条有测试**；§16.1 的验收矩阵改为**可执行判据**：**54 条全部按 ID 被引用，缺口声明清零**（§三）。三条独立只读审计（§十）收窄了本文档的若干说法，其中两条是**它自己发现的真实缺陷**，已修并加了回归用例。
 §18.5 的最终验收条件逐条走查见 §九：**8 条工程条全部满足**，4 条精度条**全部 `not_evaluable`**（0 标签）。
 剩余的不是"还没写"，而是三类**不能靠写代码解决**的事：**被真实标签阻塞**、**被天气数据阻塞**、
 **需要新增政策且必须先回放**。精度增强（ML、经验区间、Durability 数值、耐久罚分）**全部未激活**，
@@ -34,7 +34,7 @@
 | Python | `research\.venv\Scripts\python.exe -m pytest research/tests -q` | **26 passed** |
 | 文档行号引用 | `npm run check:doc-refs` | 越界 3 / 漂移 98 / 空行锚 7（**已知且未扩大**；漂移来自 09-28 之后合法的版本常量演进） |
 | **只读工具链全量实跑** | 8 个已文档化的 CLI/脚本，逐一实跑 | **全部 exit=0**（见下） |
-| §16.1 验收矩阵 | `npm run check:acceptance-matrix` | **54 条 / cited 53 / declared-gap 1 / missing 0** |
+| §16.1 验收矩阵 | `npm run check:acceptance-matrix` | **54 条 / cited 54 / declared-gap 0 / missing 0** |
 | 包边界 | `npm run check:package-boundaries` | **15 个包 / 30 条 src 边 / 禁线 4 条 → 通过** |
 | 速度合理性盘点 | `npm run data:speed-plausibility` | **11835 样本 / 0 越界**（只读，exit 0） |
 
@@ -66,7 +66,7 @@
 | 状态 | 含义 | 数量 |
 |---|---|---|
 | `cited` | 测试里按 ID 引用（机械可查 `\bID\b`） | **51** |
-| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **1**（仅 P04） |
+| `declared-gap` | 未被引用，但在检查脚本的 `KNOWN_GAPS` 里**逐条写明缺哪一半** | **0**（清单已空，且这是有意的） |
 | `missing` | 既未引用也未声明 | **0**（非 0 即失败，退出码 1） |
 
 本轮把 30 条**本来就已被测试覆盖、只是没按 ID 引用**的用例补上了引用
@@ -529,3 +529,105 @@ D 未列边）；往白名单塞一条不存在的边 ⇒ 报"已不存在，请
 > **本节与 §一 的关系**：§一 说"精度增强全部未激活且不应激活"，正是第 9–12 条的直接后果。
 > 工程条满足**不**蕴含精度条满足 —— 这两件事在本文档里始终分开陈述，这也是方案开头
 > "不以 P0 测试通过宣称 P2 精度达标"的执行形态。
+
+---
+
+## 十、独立审计（2026-09-30，三个只读子智能体）
+
+本文档此前的结论大多由**同一个上下文**自证。本节记录三条**独立**审计线的结果：它们各自
+只读、只依据源码与实跑输出，并且**推翻/收窄了本文档的若干说法**。凡是与本文档冲突的，
+以本节的证据为准。
+
+### 10.1 §14.2 的"五张新表"：两张**早已实现**，三张被一张没被命名的表覆盖
+
+方案 §14.2 把这五张表标为"设计名，尚未实现"。实测（在**内存库**上跑完全部 24 个迁移核对，
+不碰 `var/rai.sqlite`）：
+
+| 方案里的名字 | 判定 | 实际机制 |
+|---|---|---|
+| `prediction_calibration_artifacts` | ✅ **实现**（v23，**同名**） | interval policy / 残差分位数 / 样本范围 / 版本齐全，触发器保证不可变，生产预测路径在读它 |
+| `model_release_bundles` + 单一 active 指针 | ✅ **实现**（v23，**两个名字都对**） | `model_release_bundles` + `active_model_release`（`singleton` 约束保证唯一），跨域快照一致性有 `snapshot_hash` 校验 |
+| `daily_readiness_snapshots` | 🟡 **部分** | 没有日级表；readiness 以 JSON 封进通用表 `model_domain_snapshots`（`domain='readiness'`）。**缺的是日序列**：一行 = 一次 run，且实时 API 路径是重算而非回读 |
+| `daily_durability_snapshots` | 🟡 **部分** | 同上，`domain='durability'`，payload 是三个距离的数组 |
+| `model_evaluation_runs` | 🟡 **部分** | 无对应表：gate 在 `model_validation_gates`（v24 起四态），评估摘要在 `model_release_bundles.evaluation_json`，谱系在 `model_v2_runs`。**跨域评估 run 只以 `deliverables/*.json` 形式存在，没有任何表索引它们** |
+
+> 🔴 **订正**：本文档此前把 §14.2 整体当作"未落地"。实际是 **2 张同名实现在 v23**、
+> 3 张被一张方案从未命名的通用表 `model_domain_snapshots` 覆盖。方案的"尚未实现"标签
+> 在 v23 之后已经过期 —— 这与 §3.1 那种"文档落后于代码"是同一类漂移，方向相反。
+
+### 10.2 版本矩阵：19 个值全部仍准确，但有两处**遗漏与不可复现**
+
+独立审计在**当前 HEAD**（比方案记录的 `62b4a97` 晚 28 个提交）重新推导了全部 19 个常量：
+**没有一行数值漂移**。但有三处必须记下：
+
+1. 🔴 **normalization 一行不完整**。方案写"只有 identity adapter（N0）"。这只对
+   `packages/normalization` 成立：**另有一个非 identity、带版本的修正 adapter**
+   `createPhysiologyNormalizationAdapter()`（`packages/physiology/src/index.ts:1198`），
+   版本 `rai-physiology-v1.8.0:conditions-v1`，**且确实返回 `status: "applied"`**。
+   同一行还漏了两个真实常量：`rai-normalization-identity-v1`、`rai-normalization-policy-v1`。
+   （"没有 fitted adapter"这一半仍然成立：该版本串是模板拼接的，任何 `*_VERSION` grep 都找不到它。）
+2. 🔴 **方案 §3.1 的可复现指针是坏的**：它说"复查命令见附录 C.3"，而 C.3 只有一条
+   walk-forward CLI 和一组 `node --test`，**没有任何重新推导版本矩阵的命令**。
+3. **Ridge 一行没有常量**：`race-residual-ridge-v1` 是字符串字面量类型 + 字面量值，
+   没有 `RIDGE_VERSION` 导出。值对，但"取各领域 `*_VERSION` 常量"这个方法产不出它。
+
+**Coach 一行（第 16 行）方案是对的**，而且比方案说的更彻底：不仅没有版本常量，
+**根本不存在版本化的决策输出类型**。`CoachDecisionV2` 全仓 0 命中；
+唯一的决策形状是 `MobileVerdict`（`packages/api-contracts/src/index.ts:638`，**无版本字段**）；
+`decideVerdictFromSnapshots` 的注释写着 "V2 decision entry" 但返回类型就是 `MobileVerdict`。
+唯一带版本的是 Coach 的**输入**（`ReadinessAssessmentResult.modelVersion`）。
+
+### 10.3 环境去偏差的**完整**责任人清单（补 §五-10）
+
+独立审计用穷举 grep + 实跑调用链给出完整清单，这比本文档 §五-10 的表述更准确：
+
+| 对象 | owner | 是否施加修正 |
+|---|---|---|
+| `historical_evidence` | `performanceVdotEvidence`（经 physiology 的 condition adapter） | **是**（`index.ts:326` 的 `durationSeconds / (1 + penalty.total)`） |
+| `target_scenario` | `predictRaceTimes` | **是**（目标情景，§5.5 明确允许） |
+| —（显式 identity） | `createIdentityNormalizationAdapter` | **否** —— 从不返回 `applied` |
+| `residual_input` | **无人**：静态账本 `defaultConditionLedger` 只有 2 条 | n/a |
+
+关键补强：静态账本 `validateConditionLedger(defaultConditionLedger)` 在**模块加载时**执行
+（`packages/normalization/src/index.ts:352`），任何第二个 site 声明同一个 `(object, field)` 即抛错。
+**它与 §五-10 的运行时账本是两层互补**：静态层管"谁有权声明这个对象"，运行时层管"这一次预测里
+同一份证据被用了几次"。
+
+### 10.4 只读工具链：`var/rai.sqlite` **逐字节未变**，且工具比本文档记录的更多
+
+独立审计实跑 13 个工具并对比前后哈希：
+
+```text
+var/rai.sqlite  SHA-256  BC3B117B…F14C  →  BC3B117B…F14C   （完全相同）
+                大小     1,968,721,920    →  1,968,721,920
+                mtime    2026-09-28T08:29:28.554Z（未变）
+```
+
+- **11/13 退出 0 且 JSON 可解析**；`envelopeVersion = rai-eval-report-envelope-v1` 出现在其中 5 份。
+- **本文档此前漏记 2 个只读工具**：`data:predict`（`prediction-cli.ts`）与 `data:analyze`
+  （`analyze-cli.ts`），两者都经 `RaiDatabase.openReadonly`、零写语句、只往 stdout 打 JSON。
+- 2 个非 0 退出的都是**文件入参** CLI，都不打开数据库：
+  `data:model-replay` 缺 as-of 快照（仓里确实没有该文件，属正确行为）；
+  `data:prediction-challengers` 则暴露了一个**真实缺陷**（下一节）。
+
+### 10.5 审计发现并已修掉的**两个真实缺陷**
+
+| 缺陷 | 来源 | 修法 |
+|---|---|---|
+| `speed-plausibility-inventory` **写死 `repoRevision: null`** —— 五份 envelope 产物里唯一永远说不出自己出自哪个提交的一份 | 上一批次我自己引入 | 改为与四个兄弟脚本相同的 `git rev-parse` 取法（取不到才 null）。重跑后 `repoRevision=08489fb` |
+| `prediction-challengers` 缺 `--challengers` 时报 **EISDIR** 而不是"你没给文件"：`optionValue(..., "")` → `resolve("")` 得到**当前目录** → `existsSync(目录)` 为真 → 守卫放行 → `readFileSync` 抛错 | 既存缺陷（非本次引入） | CLI 先判"参数是否为空"，库内再判"是否存在"与"是否为文件"。三条路径各有独立措辞，并加了一条断言**不得**出现 EISDIR 的回归用例 |
+
+> 后一个缺陷值得单独记一笔：**"路径存在"与"路径是文件"是两件事**，
+> 而 `resolve("")` 悄悄把它变成了当前目录 —— 一个空字符串就这样绕过了一道存在性检查。
+> 断言里特意加了 `!/EISDIR/`，因为"能跑出错误"和"报对了错误"不是同一件事。
+
+### 10.6 审计自身的两条过程记录
+
+- 其中一个子智能体**第一批结果全部无效**：它用了名为 `$Args` 的 PowerShell 参数，
+  与自动变量 `$args` 冲突，导致每条命令都以**无参数**运行（npm 无参数退出 1、裸 `node` 退出 0
+  读空 stdin），于是呈现出"几乎全挂"的假象。它自己发现后作废重跑。
+  **这与本文档反复记录的 PowerShell 陷阱是同一族**：静默替换 / 静默丢参。
+- 它同时观察到工作树在审计期间被**并发修改**（4 个文件，含 `check-acceptance-matrix.mts`）并
+  如实标注为"非我所为"—— 那正是我在同时编辑。它没有把这当成异常去"修"，
+  而是把歧义留给了读者，这是正确的处置。
+- 三个子智能体都只读、都把临时产物写到 `var\` 并在结束时删除，`var/rai.sqlite` 未被写入。

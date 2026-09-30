@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { compareResidualChallengers, type EvaluationCase } from "@rai/model-eval";
 import type { RaceDistance } from "@rai/contracts";
 
@@ -193,8 +193,20 @@ export function readResidualChallengerImport(value: unknown): ResidualChallenger
  * 只负责"读文件 + JSON 解析"，返回**原始**文档。
  * 校验一律由 `readResidualChallengerImport` 做一次 —— 若这里也返回已导入的结构，
  * 调用方再传给评估函数时校验就会跑在转换后的对象上，等于没有校验。
+ *
+ * 但"是不是一个文件"必须在读之前判掉。2026-09-30 的独立审计复现了原来的失败模式：
+ * CLI 未传 `--challengers` 时 `optionValue(..., "")` 返回空串，`resolve("")` 得到**当前目录**，
+ * `existsSync(CWD)` 为真于是守卫放行，`readFileSync` 才抛 `EISDIR` ——
+ * 报出来的是"对目录调了读"，而不是"你没给文件"。目录存在不等于文件存在。
  */
 export function parseResidualChallengerFile(path: string): unknown {
+  if (typeof path !== "string" || path.trim() === "") {
+    throw new Error("Challengers document requires a file path (got an empty path)");
+  }
+  if (!existsSync(path)) throw new Error(`Challengers document not found: ${path}`);
+  if (!statSync(path).isFile()) {
+    throw new Error(`Challengers document must be a file, not a directory: ${path}`);
+  }
   return JSON.parse(readFileSync(path, "utf8")) as unknown;
 }
 

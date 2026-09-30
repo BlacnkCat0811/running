@@ -1,9 +1,9 @@
 {
   "envelopeVersion": "rai-eval-report-envelope-v1",
   "generatedBy": "scripts/speed-plausibility-inventory.mts",
-  "generatedAt": "2026-09-30T06:55:08.243Z",
+  "generatedAt": "2026-09-30T07:28:01.821Z",
   "databasePath": ".\\var\\rai.sqlite",
-  "repoRevision": null,
+  "repoRevision": "08489fbd1275b95a4bb05a6a9b6d2bac06b6bbee",
   "reproduceCommand": "node --import tsx scripts/speed-plausibility-inventory.mts --database var/rai.sqlite --out deliverables/SPEED_PLAUSIBILITY_INVENTORY.json",
   "accuracyStatus": "not_evaluable",
   "accuracyReason": "这是检测率盘点，不是门控效果的验收：检出率只能说明这类样本多不多，不能说明门控是否改善了能力学习。",
