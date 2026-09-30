@@ -103,7 +103,7 @@
 
 本轮最终验证汇总及各产物 hash 见：
 
-`/Users/ta/running/deliverables/RAI_V2_IMPLEMENTATION_2026-09-29.verification.json`。
+`/Users/ta/running/deliverables/archive/RAI_V2_IMPLEMENTATION_2026-09-29.verification.json`。
 
 验证命令：
 

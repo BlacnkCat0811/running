@@ -2,7 +2,7 @@
 
 日期：2026-09-30
 对象方案：`deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md`
-上一份记录：`deliverables/RAI_V2_IMPLEMENTATION_2026-09-29.md`、`deliverables/RAI_ALGORITHM_V2_REMAINING_DESIGN_2026-09-29.md`
+上一份记录：`deliverables/archive/RAI_V2_IMPLEMENTATION_2026-09-29.md`、`deliverables/archive/RAI_ALGORITHM_V2_REMAINING_DESIGN_2026-09-29.md`
 
 ## 结论
 

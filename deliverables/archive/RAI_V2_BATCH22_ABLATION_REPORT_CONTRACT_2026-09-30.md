@@ -2,7 +2,7 @@
 
 日期：2026-09-30
 对象方案：`deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md` §6.1-1…5、§6.9-6、§6.9-7
-上一份记录：`deliverables/RAI_V2_BATCH21_NEGATIVE_GATE_DIAGNOSIS_2026-09-30.md`
+上一份记录：`deliverables/archive/RAI_V2_BATCH21_NEGATIVE_GATE_DIAGNOSIS_2026-09-30.md`
 
 ## 0. 结论
 

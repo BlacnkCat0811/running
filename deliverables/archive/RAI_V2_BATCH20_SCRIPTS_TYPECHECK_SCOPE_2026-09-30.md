@@ -1,7 +1,7 @@
 # RAI V2 批次 20 实施记录 —— 把 `scripts/` 纳入 typecheck，并修掉它暴露的 3 个类型谎言
 
 日期：2026-09-30
-上一份记录：`deliverables/RAI_V2_BATCH19_ABLATION_TOOLING_AND_NEGATIVE_GATE_2026-09-30.md`
+上一份记录：`deliverables/archive/RAI_V2_BATCH19_ABLATION_TOOLING_AND_NEGATIVE_GATE_2026-09-30.md`
 
 ## 0. 结论
 

@@ -2,7 +2,7 @@
 
 日期：2026-09-30
 对象方案：`deliverables/RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md` §16.1 R05 / D03
-上一份记录：`deliverables/RAI_V2_BATCH22_ABLATION_REPORT_CONTRACT_2026-09-30.md`
+上一份记录：`deliverables/archive/RAI_V2_BATCH22_ABLATION_REPORT_CONTRACT_2026-09-30.md`
 
 ## 0. 结论
 

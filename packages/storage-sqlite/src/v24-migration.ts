@@ -5,7 +5,7 @@ const nowSql = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
 /**
  * v24 —— 一次补齐四个互相独立、但都属于"缺一列/缺一张表"的缺口
- * （设计见 `deliverables/RAI_ALGORITHM_V2_REMAINING_DESIGN_2026-09-29.md` 的 D1 / D4 / D5）。
+ * （设计见 `deliverables/archive/RAI_ALGORITHM_V2_REMAINING_DESIGN_2026-09-29.md` 的 D1 / D4 / D5）。
  *
  * 1. `model_runs.engine_version`：引擎版本此前**只活在 configHash 的输入里**，没有独立列，
  *    于是"哪个引擎产出过这个 run"只能看 `model_version`，而那一列的语义是**配置**版本。

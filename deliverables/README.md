@@ -9,16 +9,16 @@
 |---|---|---|
 | `RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.md` | **V2 方案主干**：目标架构、不变量、版本矩阵、分阶段实施、验收矩阵 | 2026-09-28 |
 | `RAI_ALGORITHM_V2_OPTIMIZATION_2026-09-28.verification.json` | 上述方案的机器可读核验记录 | 2026-09-28 |
-| `RAI_V2_IMPLEMENTATION_2026-09-29.md` | **实施记录**：已交付什么、明确未通过什么、还挂着的工程项 | 2026-09-29 14:58 |
-| `RAI_V2_IMPLEMENTATION_2026-09-29.verification.json` | 上条的验证汇总与产物 hash | 2026-09-29 14:59 |
-| `RAI_V2_BATCH16_REPLAY_AND_LEGACY_COMPAT_2026-09-29.md` | 批次 16：V1/V2 分版本回放真实性 + §3.3 旧数据兼容标记 | 2026-09-29 16:24 |
-| `RAI_V2_PROGRESS_STATUS_2026-09-29.md` | 进度排查：断流点状态、P0 回归（模型切换 500）根因与修复、门禁实跑 | 2026-09-29 19:22 |
-| `RAI_ALGORITHM_V2_REMAINING_DESIGN_2026-09-29.md` | **V2 剩余项设计**：11 项未完成工程项的现状证据、设计、验收判据、回滚与依赖顺序 | 2026-09-29 19:5x |
+| `RAI_V2_STATUS_2026-09-30.md` | **当前实施状态**：门禁实跑、§16.1 覆盖（52/53）、11 项剩余项状态、被阻塞项与原因、下一步 | 2026-09-30 |
 | `ARCHITECTURE_PRODUCT_STATUS_2026-09-28.md` | 产品架构现状基线（**被 `npm run check:doc-refs` 扫描**） | 2026-09-28 |
 | `ARCHITECTURE_PRODUCT_STATUS_2026-09-28.linerefs.json` | 上条的行号引用基线快照（与文档成对，勿单独移动） | 2026-09-28 |
 
 > ⚠️ `ARCHITECTURE_PRODUCT_STATUS_2026-09-28.md` 与它的 `.linerefs.json` 是 `check:doc-refs`
 > 的唯一默认扫描对象。**动这一对之前先跑该门禁**，并注意改动会体现在"内容漂移"计数上。
+>
+> 📌 **状态类文档顶层只保留一份。** 批次记录（`RAI_V2_BATCH*`）与 09-29 的实施/进度/剩余项设计
+> 已全部移入 `archive/`。新的一轮结束时应当**更新 `RAI_V2_STATUS_*.md`**，
+> 而不是在顶层再并列一份新的时点快照（本规则此前被违反过：批次 16–23 曾直接堆在顶层）。
 
 ## 二、机器可读产物（可由脚本重跑复现）
 
@@ -49,10 +49,11 @@
 
 ## 四、archive/
 
-- `archive/`：**历史时点快照**——批次记录（`PHASE*_BATCH*`）、各类审计与复核
-  （`PROJECT_AUDIT_*`、`UNCOMMITTED_REVIEW_*`、`AUDIT_VERIFICATION_*`）、问题根因报告、
-  平台/部署方案、iOS 评审与实施记录、以及更早的 `gstack/` 调查原始件。
-- 归档**只挪位置、不改内容**；文内互相引用已按新路径更新。
+- `archive/`：**历史时点快照**——V2 批次记录（`RAI_V2_BATCH*`）、09-29 的实施/进度/剩余项设计、
+  各类审计与复核（`PROJECT_AUDIT_*`、`UNCOMMITTED_REVIEW_*`、`AUDIT_VERIFICATION_*`）、
+  问题根因报告、平台/部署方案、iOS 评审与实施记录、以及更早的 `gstack/` 调查原始件。
+- 归档**只挪位置、不改内容**；文内互相引用已按新路径更新（含 `packages/storage-sqlite/src/v24-migration.ts`
+  注释里指向剩余项设计文档的那一处）。
 - 归档文档的结论**默认视为过期**：引用前先确认它是否已被顶层某份文档取代。
 
 ## 五、约定
