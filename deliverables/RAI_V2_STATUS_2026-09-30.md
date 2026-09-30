@@ -1016,3 +1016,46 @@ Model-version gate failed: eligible_session_delta
 > 与它本来要防的分布漂移？
 
 在这之前，§16.1 T02 保持 `declared-gap`，矩阵维持 **54 条 / cited 53 / declared-gap 1 / missing 0**。
+
+---
+
+## 十七、I02 的后半句补上了：`heuristicRange` 从"不存在"到有类型、有闸门
+
+### 17.1 审计当时的结论
+
+§16.1 **I02** 要求：「不展示为 P80/P90 保证；**只保留明确 `heuristicRange`**」。
+第二轮独立审计的判定是 **cited but not covered**，两个具体缺口：
+
+1. 唯一带 I02 标题的用例其实断言的是 R01（缺证据→不出结论），I02 那半句没有标题；
+2. **`heuristicRange` 这个名字在整个 `src` 里 0 命中** —— 契约里根本没有这个字段。
+   Web 上只有一句手写文案「参考区间（非 P80/P90 保证）」在挡着。
+
+### 17.2 现在补上的是什么
+
+在 `@rai/model-eval` 里把"规则范围"与"覆盖率区间"做成**两个类型**，而不是靠调用方自觉：
+
+| 类型 | 含义 |
+|---|---|
+| `HeuristicRange`（`kind: "heuristic_not_calibrated"`） | 旧规则范围。**名字本身就是语义** —— 它回答"这个范围凭什么"：凭规则，不是凭校准 |
+| `PredictionIntervalEvidence` | 只有走完发布合同才允许展示的覆盖率区间 |
+| `assertIntervalPresentation()` | 唯一的展示闸门 |
+
+闸门拒绝四类东西，每一条都对应 §12.9 的一句要求：
+
+1. **把 coverage 数字挂在启发式范围上**（哪怕只多一个字段）—— 这正是 §12.6 禁的"把
+   `optimisticSeconds`/`pessimisticSeconds` 直接改名成 P80/P90"；
+2. 校准证据没走完发布合同（status ≠ `empirically_evaluated`、域不匹配、bounds 为 null）；
+3. 实测覆盖低于该 nominal 的发布下限 —— 且 **P80 与 P90 各用各的下限**，不能混用；
+4. 丢掉 §12.9 要求原样保留的那句免责声明。
+
+### 17.3 为什么这样就够了，以及它**不**做什么
+
+在此之前，"不要把规则范围说成 P80/P90"只是一句写在文档里的产品要求，靠人记得。
+现在它变成**类型系统 + 运行时断言**：`optimisticSeconds` 只能被包成
+`heuristic_not_calibrated`，想给它挂 `nominalCoverage` 会直接抛。
+
+⚠️ 它**不**做什么要说清楚：它管的是**展示层能不能这么声称**，不产生校准、也不改善区间宽度。
+真正的 P80/P90 仍然需要独立 calibration artifact + 独立测试 + 足够样本，
+而那依旧卡在 0 标签上（§九 条件 9–11）。
+
+验证：6 条用例；突变验证把"禁止挂 coverage 字段"的循环清空 ⇒ 对应用例转红，恢复后确认。

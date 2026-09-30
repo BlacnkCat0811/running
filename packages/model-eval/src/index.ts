@@ -245,6 +245,125 @@ export interface IntervalArtifact {
   cohortDescriptor: string;
 }
 
+/**
+ * §12.9 / §16.1 **I02**：P80/P90 是**目标覆盖**（nominal coverage），不是"你有 80% 概率落在此范围"。
+ * 未校准、域不匹配或独立评估不足时，**只能**给规则区间，而且它不许挂 P80/P90 的名字。
+ *
+ * 做法是让两者在**类型上**就是两个东西，而不是靠调用方自觉：
+ *  · `HeuristicRange` —— 旧规则范围，`kind` 字面上就写着 `not_calibrated`；
+ *  · `PredictionIntervalEvidence` —— 只有走完发布合同才允许被展示。
+ * `assertIntervalPresentation` 是唯一的展示闸门，不合格直接抛。
+ *
+ * 背景：`optimisticSeconds` / `pessimisticSeconds` 这两个老字段名里**没有任何"未校准"的含义**，
+ * 把它们直接改名成 P80/P90 正是 §12.6 明令禁止的事。这里把那条禁令变成可执行约束。
+ */
+export interface HeuristicRange {
+  /** 这个标签是语义，不是装饰：它回答"这个范围凭什么" —— 凭规则，不是凭校准。 */
+  kind: "heuristic_not_calibrated";
+  lowerSeconds: number | null;
+  upperSeconds: number | null;
+}
+
+export interface PredictionIntervalEvidence {
+  nominalCoverage: 0.8 | 0.9;
+  status: "insufficient_calibration" | "empirically_evaluated" | "out_of_domain";
+  lowerSeconds: number | null;
+  upperSeconds: number | null;
+  empiricalCoverage: number | null;
+  evaluationSampleCount: number;
+  coverageConfidenceInterval: { lower: number; upper: number } | null;
+  evaluationCohortHash: string | null;
+  calibrationVersion: string | null;
+  domainMatch: "matched" | "unknown" | "mismatched";
+  /** §12.9 的产品文案合同：这句必须原样带上，前端不得替换成保证性措辞。 */
+  coverageClaim: "empirical_target_not_individual_guarantee";
+}
+
+export type IntervalPresentation =
+  | { kind: "heuristic"; range: HeuristicRange }
+  | { kind: "calibrated"; evidence: PredictionIntervalEvidence };
+
+/** 把旧规则区间包成显式的 heuristic range；不谎称它已校准。 */
+export function toHeuristicRange(lowerSeconds: number | null, upperSeconds: number | null): HeuristicRange {
+  return { kind: "heuristic_not_calibrated", lowerSeconds, upperSeconds };
+}
+
+function ordered(lower: number | null, upper: number | null): boolean {
+  if (lower === null || upper === null) return lower === null && upper === null;
+  return Number.isFinite(lower) && Number.isFinite(upper) && lower <= upper;
+}
+
+/**
+ * §16.1 I02 的展示闸门。**这是"不展示为 P80/P90 保证"这句话唯一的可执行形式。**
+ *
+ * 它拒绝四类东西：
+ * 1. 把 coverage 数字挂在**启发式**范围上（哪怕只是多带一个字段）；
+ * 2. 校准证据没走完发布合同（状态不是 empirically_evaluated、域不匹配、bounds 为 null）；
+ * 3. 实测覆盖低于该 nominal 的发布下限（`INTERVAL_RELEASE_POLICY`）；
+ * 4. 丢掉 §12.9 要求的那句免责声明。
+ */
+export function assertIntervalPresentation(presentation: IntervalPresentation): void {
+  if (presentation.kind === "heuristic") {
+    const range = presentation.range as unknown as Record<string, unknown>;
+    if (range.kind !== "heuristic_not_calibrated") {
+      throw new Error("Interval presentation: a heuristic range must be labelled heuristic_not_calibrated");
+    }
+    // 挂着覆盖率数字的启发式范围，就是"把规则范围包装成 P80/P90"。
+    for (const forbidden of ["nominalCoverage", "empiricalCoverage", "coverageConfidenceInterval"]) {
+      if (range[forbidden] !== undefined) {
+        throw new Error(
+          `Interval presentation: a heuristic range must not carry ${forbidden} — ` +
+          "that is presenting a rule range as a calibrated coverage claim (§12.9)"
+        );
+      }
+    }
+    if (!ordered(presentation.range.lowerSeconds, presentation.range.upperSeconds)) {
+      throw new Error("Interval presentation: heuristic range bounds must be both null or both finite and ordered");
+    }
+    return;
+  }
+
+  const evidence = presentation.evidence;
+  if (evidence.coverageClaim !== "empirical_target_not_individual_guarantee") {
+    throw new Error("Interval presentation: the empirical-target disclaimer is required verbatim (§12.9)");
+  }
+  if (evidence.status !== "empirically_evaluated") {
+    throw new Error(
+      `Interval presentation: status ${evidence.status} cannot be shown as a calibrated interval; ` +
+      "use a heuristic range instead (§12.9)"
+    );
+  }
+  if (evidence.domainMatch !== "matched") {
+    throw new Error(
+      `Interval presentation: domainMatch is ${evidence.domainMatch}; an out-of-domain cohort cannot publish P labels`
+    );
+  }
+  if (evidence.lowerSeconds === null || evidence.upperSeconds === null) {
+    throw new Error("Interval presentation: calibrated bounds cannot be null when status is empirically_evaluated");
+  }
+  if (!ordered(evidence.lowerSeconds, evidence.upperSeconds)) {
+    throw new Error("Interval presentation: calibrated bounds must be finite and ordered");
+  }
+  if (evidence.evaluationSampleCount < INTERVAL_RELEASE_POLICY.minimumTestSamples) {
+    throw new Error(
+      `Interval presentation: ${evidence.evaluationSampleCount} evaluation samples is below the publication floor ` +
+      `${INTERVAL_RELEASE_POLICY.minimumTestSamples}`
+    );
+  }
+  const floor = evidence.nominalCoverage === 0.8
+    ? INTERVAL_RELEASE_POLICY.minimumCoverage.p80
+    : INTERVAL_RELEASE_POLICY.minimumCoverage.p90;
+  if (evidence.empiricalCoverage === null || evidence.empiricalCoverage < floor) {
+    throw new Error(
+      `Interval presentation: empirical coverage ${String(evidence.empiricalCoverage)} is below the floor ${floor} ` +
+      `for nominal ${evidence.nominalCoverage}`
+    );
+  }
+  if (evidence.evaluationCohortHash === null || evidence.calibrationVersion === null) {
+    throw new Error("Interval presentation: a published interval must name its cohort hash and calibration version");
+  }
+}
+
 /** A recorded cohort, not a version label, is the authority for calibration coefficients. */
 export function validateIntervalArtifact(artifact: IntervalArtifact): void {
   if (artifact.version !== "empirical-log-interval-v1" || typeof artifact.cohortDescriptor !== "string") {
