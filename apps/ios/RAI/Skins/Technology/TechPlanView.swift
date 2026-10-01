@@ -53,7 +53,6 @@ struct TechPlanView: View {
                 }
                 } else {
                     planOverview
-                    rollingPlanPanel
                     if let days = native.today?.recentPlanExecution, !days.isEmpty {
                         TechPlanExecutionPanel(days: days)
                     }
@@ -89,7 +88,7 @@ struct TechPlanView: View {
         .background(TechColor.background)
         .foregroundStyle(TechColor.ink)
         .scrollIndicators(.hidden)
-        .techNavigation(editing ? "编辑周计划" : "训练计划")
+        .techNavigation(editing ? "编辑周计划" : "训练计划", backDisabled: isSaving)
         .sheet(isPresented: $showingLock) { TechLockSheet() }
         .sheet(item: $raceEditor) { context in TechRaceGoalEditor(context: context) }
         .sheet(item: Binding(get: { native.planPreview }, set: { native.planPreview = $0 })) { preview in
@@ -106,7 +105,6 @@ struct TechPlanView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .navigationBarBackButtonHidden(isSaving)
         .confirmationDialog("放弃未保存的修改？", isPresented: $discardDraft, titleVisibility: .visible) {
             Button("放弃并加载最新计划", role: .destructive) { loadDraft() }
         }
@@ -308,6 +306,7 @@ struct TechPlanView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(TechColor.mint, in: RoundedRectangle(cornerRadius: 12))
                 }
+                scheduleDisclosure
                 TechPrimaryButton(
                     title: schedulableCount == 0 ? "撤回手表旧课表" : "一键同步到手表",
                     systemName: "applewatch",
@@ -375,25 +374,44 @@ struct TechPlanView: View {
         }
     }
 
-    private var rollingPlanPanel: some View {
-        TechPanel {
-            VStack(alignment: .leading, spacing: 10) {
-                TechSectionHeader(title: "未来七日 · 手表排期", trailing: native.workoutPlan.map { "v\($0.planRevision)" } ?? "未加载")
-                Text("上方为周一至周日的自然周；此处从今天起连续七日，与生成窗口一致。")
-                    .font(.caption).foregroundStyle(TechColor.muted)
-                Text("执行窗口按当前预算、比赛与负荷规则复核；调整后的处方以下列内容为准，保存的原计划不会被静默改写。")
-                    .font(.caption).foregroundStyle(TechColor.muted)
-                if let plan = native.workoutPlan {
+    /// 未来七日的逐日排期（原先独立成块的「未来七日 · 手表排期」）。
+    ///
+    /// 折起来，不删掉：本页上方已有一条「7 天训练安排」的日历条，再平铺第二条从今天起的
+    /// 七日表，会让同一页出现两份七日计划（2026-10-01 的可用性反馈）。但两条的时间窗**真的
+    /// 不同** —— 上方是自然周（周一至周日，来自 `/v1/mobile/today`），这里是生成窗口（从
+    /// 今天起连续七日，决定上表内容）—— 所以不能合成一条，只能一条常显、一条按需展开。
+    ///
+    /// 整块（含结尾那行"已保存 v… · 本次会话尚未核验系统日程"）只在计划已加载时存在。
+    /// 计划为 `nil` 时不会丢掉预警：`watchNeedsUpdate` 的前提是本次会话核验过系统日程
+    /// （`lastWatchRevision` 只在 `recordWatchAcknowledgement(plan:)` 里赋值，并与会话重置
+    /// 一起清空），没有计划时它必然是 `false`；而外层面板此时已经明说"还没有本周课表。
+    /// 生成后即可一键同步到手表。"，再补一句"尚未核验"只是把"没有计划"说第二遍。
+    @ViewBuilder
+    private var scheduleDisclosure: some View {
+        if let plan = native.workoutPlan {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("从今天起连续七日，与生成窗口一致。执行窗口按当前预算、比赛与负荷规则复核；调整后的处方以下列内容为准，保存的原计划不会被静默改写。")
+                        .font(.caption).foregroundStyle(TechColor.muted)
                     ForEach(plan.days) { day in
                         TechExecutablePlanDay(day: day)
                     }
+                    Text("已保存 v\(native.goals?.revision ?? 0) · " + (native.lastWatchRevision.map { "本次会话已核验系统日程 v\($0)" } ?? "本次会话尚未核验系统日程"))
+                        .font(.caption).foregroundStyle(TechColor.muted)
+                    if native.watchNeedsUpdate {
+                        Text("计划版本或有效处方已变化，请重新同步手表。").font(.caption).foregroundStyle(TechColor.coral)
+                    }
                 }
-                Text("已保存 v\(native.goals?.revision ?? 0) · " + (native.lastWatchRevision.map { "本次会话已核验系统日程 v\($0)" } ?? "本次会话尚未核验系统日程"))
-                    .font(.caption).foregroundStyle(TechColor.muted)
-                if native.watchNeedsUpdate {
-                    Text("计划版本或有效处方已变化，请重新同步手表。").font(.caption).foregroundStyle(TechColor.coral)
+                .padding(.top, 6)
+            } label: {
+                HStack(spacing: 8) {
+                    Text("未来七日排期").font(.caption.weight(.semibold)).foregroundStyle(TechColor.ink)
+                    Spacer(minLength: 8)
+                    Text("v\(plan.planRevision)").font(.caption2).foregroundStyle(TechColor.muted)
                 }
+                .frame(minHeight: 44)
             }
+            .tint(TechColor.cyan)
         }
     }
 

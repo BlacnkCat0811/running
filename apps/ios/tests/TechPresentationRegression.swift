@@ -112,6 +112,34 @@ struct TechPresentationRegression {
         var prepared = TechSeriesData(points: [])
         for _ in 0..<10 { prepared = TechSeriesData(points: large) }
         check(prepared.points.count <= 360 && prepared.validCount == 50_000, "50k input bounded")
+
+        // 训练感受档位 = 契约 `rpe`（1–10 整数）的展示切面，不是新枚举。
+        // 下面四条是"档位仍能被服务端读懂"的前提：值域越界会被 `service.ts:149` 直接拒收，
+        // 非单调会让两个词指向同一个强度，最高档 < 9 则用户选了"最累"却拿不到
+        // `prediction-data.ts:150` 的 hard_workout 证据 —— 三种都不会让任何测试变红，
+        // 只让界面和算法各说各话。
+        let effortValues = TechEffortScale.options.map(\.value)
+        check(effortValues == effortValues.sorted(), "Effort tiers must be monotone in rpe value")
+        check(Set(effortValues).count == effortValues.count,
+              "Two tiers sharing a value make their labels indistinguishable")
+        check(effortValues.allSatisfy { (1...10).contains($0) },
+              "Tier values must stay inside the contract's 1...10")
+        check(effortValues.last == 10, "Picking the hardest tier must reach rpe 10")
+        let effortLabels = TechEffortScale.options.map(\.label)
+        check(Set(effortLabels).count == effortLabels.count && effortLabels.allSatisfy { !$0.isEmpty },
+              "Tier labels must be non-empty and unique")
+        check((1...10).allSatisfy { !TechEffortScale.label(for: $0).isEmpty },
+              "Every legal rpe must render as a word, including off-tier legacy values")
+        check(TechEffortScale.label(for: 1) == "轻松" && TechEffortScale.label(for: 10) == "极限",
+              "The ends of 1...10 must read as words")
+        check(TechEffortScale.label(for: 9) == "很累", "Every legal rpe renders as a word")
+        check(TechEffortScale.label(for: 3) == "轻松",
+              "A tie reads as the lighter tier rather than talking the user's effort up")
+        check(TechEffortScale.option(for: 8)?.label == "很累",
+              "A tier value resolves to its own label")
+        check(TechEffortScale.option(for: 7) == nil,
+              "An off-tier stored value must not be silently relabelled as a tier")
+
         print("Technology presentation: \(checks) checks passed")
         print(String(format: "50,000 points preparation: %.2f ms/run (host microbenchmark without -O, not device FPS)",
                      Date().timeIntervalSince(start) * 100))

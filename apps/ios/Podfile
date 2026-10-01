@@ -54,4 +54,67 @@ post_install do |installer|
     end
     puts "[RAI] 已注入高德 Key 到 #{xcconfigs.size} 个 xcconfig（值不入库）。"
   end
+
+  # --- 修 MAMapKit umbrella header（AMap 随包发的头文件缺口，与 Key 无关） ----
+  # 现象：构建时 clang 报
+  #   warning: umbrella header for module 'MAMapKit' does not include header 'X.h'
+  # 成因：MAMapKit.framework 的 Modules/module.modulemap 是
+  #   `umbrella header "MAMapKit.h"` + `module * { export * }`，
+  # 而 AMap 发的 MAMapKit.h 漏掉了 Headers/ 里的 7 个头。clang 会对其中**无法从
+  # umbrella 传递到达**的每个头报一条 -Wincomplete-umbrella。实测 AMap3DMap
+  # 11.2.100 报 3 条：MAMapSnapshot.h / MATerrainOverlay.h / MATerrainOverlayRenderer.h
+  # （另 4 个漏掉的头被别的头间接 import，所以不报）。
+  # 为什么不能只补报错的那 3 个：那 3 个只是"当下不可达"的结果，不是原因。AMap 换一版、
+  # 或内部 import 关系一变，警告就会换个名字回来。这里按"umbrella 必须覆盖 Headers/ 下
+  # 每一个头"补齐全部缺口 —— 幂等，且 AMap 升级后自动跟随。
+  # 为什么写在这里：Pods/ 不入库，每次 pod install 都会重建这份头文件，手改会被冲掉。
+  # ⚠️ CocoaPods 解包出来的头是 0444（只读），直接写会 `Permission denied @ rb_sysopen`，
+  #    所以先给 owner 补上写位。
+  # ⚠️ 匹配不到 framework 时下面整段不会执行：这种"补丁其实没跑"必须自己喊出来，否则 AMap
+  #    换个目录结构之后，会退化成一条每次构建都出现、却没人知道来源的 clang 警告。
+  umbrellas = Dir[File.join(__dir__, 'Pods', '*', 'MAMapKit.framework', 'Headers', 'MAMapKit.h')]
+  if umbrellas.empty?
+    puts '[RAI] ⚠️ 未找到 MAMapKit.framework，umbrella header 补丁本次未执行。' \
+         '若构建时仍出现 umbrella header for module MAMapKit does not include header，' \
+         '说明 AMap 的目录结构变了，这个补丁要跟着改。'
+  end
+  umbrellas.each do |umbrella|
+    headers_dir = File.dirname(umbrella)
+    modulemap = File.join(File.dirname(headers_dir), 'Modules', 'module.modulemap')
+    text = File.read(umbrella)
+    missing = Dir[File.join(headers_dir, '*.h')].map { |path| File.basename(path) }.sort.reject do |name|
+      name == File.basename(umbrella) ||
+        text.match?(%r{#\s*import\s*[<"']MAMapKit/#{Regexp.escape(name)}[>"']})
+    end
+
+    # 这个补丁只在 modulemap 用 "umbrella header" 时才有意义。若 AMap 改成 umbrella
+    # 目录（`umbrella "."`）或自带完整列表，警告的成因就变了，得重新判断成因，
+    # 而不是继续往这里追加 import。
+    if File.exist?(modulemap) && !File.read(modulemap).match?(/umbrella\s+header/)
+      puts '[RAI] ⚠️ MAMapKit 的 modulemap 不再用 umbrella header：' \
+           '请重新确认 -Wincomplete-umbrella 的成因，不要沿用这个补丁。'
+    end
+
+    if missing.empty?
+      puts '[RAI] MAMapKit umbrella header 已完整，无需补齐。'
+      next
+    end
+
+    mode = File.stat(umbrella).mode
+    File.chmod(mode | 0o200, umbrella) if (mode & 0o200).zero?
+
+    File.open(umbrella, 'a') do |file|
+      file.puts ''
+      file.puts '// --- RAI: AMap 随包发的 umbrella header 漏了下面这些头，补齐以免 clang 报'
+      file.puts '// -Wincomplete-umbrella。本段由 apps/ios/Podfile 的 post_install 写入，请勿手改。'
+      missing.each { |name| file.puts "#import <MAMapKit/#{name}>" }
+    end
+
+    # 补完要真的补齐：判据落在"文件里现在有没有这几行 import"上，而不是"跑过这段代码"。
+    after = File.read(umbrella)
+    still_missing = missing.reject { |name| after.include?("#import <MAMapKit/#{name}>") }
+    raise "MAMapKit umbrella header 补丁未生效：#{still_missing.join(', ')}" unless still_missing.empty?
+
+    puts "[RAI] 已补齐 MAMapKit umbrella header 缺的 #{missing.size} 个头：#{missing.join(', ')}"
+  end
 end

@@ -112,6 +112,7 @@ npm run test:ios
 | `pod: command not found` | CocoaPods 已装但不在 PATH：`export PATH="$(gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/{print $2}'):$PATH"`，或 `gem install cocoapods` |
 | `unable to find utility "simctl"` | 命令行工具指向了 CommandLineTools：`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` 或 `sudo xcode-select -s /Applications/Xcode.app` |
 | 构建后地图卡片仍是默认城市视野 | 高德渲染器就绪前会忽略 fit，`RouteMapContainer` 会在 0.2 s 后重试；若持续出现，先确认 `pod install` 打印了「已注入高德 Key」，再检查 `Configs/AmapKey.xcconfig` 的 Key 是否绑定了本 App 的 Bundle ID |
+| 训练详情里往下滑，页面不动而地图被划走 | 不该发生：路线卡片默认锁定手势（`mapInteractive = false`），`RouteMapContainer` 只在点按解锁后才接管平移。逐条核对 `apps/ios/tests/check-today-layout.py` 的「地图手势锁定」判据：SwiftUI 默认值、屏蔽层的 `allowsHitTesting`、`map.isScrollEnabled/isZoomEnabled` |
 
 ## 数据位置与隐私
 
@@ -128,5 +129,6 @@ npm run test:ios
 - Route迟到、更正或配额限制时继续补齐/pending，不永久invalid或丢掉已导入兄弟路线。
 - 恢复备份、服务重启、401/409/超时后保留草稿与反馈，分清同步、导入、分析三个阶段。
 - 地图同意前不初始化SDK；坐标SDK对拍、VoiceOver、大字体、减少动态效果和耗电需真机观察。
+- 训练详情里压着路线卡片上下滑动是**翻页**而不是拖动地图；轻点地图解锁后才可缩放拖动，右下角「锁定」一键收回，且解锁/锁定都不影响右上角「显示完整路线」的 fit。
 
 记录设备、OS/App版本、数据scope、步骤/结果和脱敏证据；不得上传真实健康导出或凭证。

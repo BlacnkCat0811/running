@@ -59,6 +59,18 @@ struct TechBackground: View {
 private struct TechNavigation: ViewModifier {
     @Environment(\.dismiss) private var dismiss
     let title: String
+    /// 保存/提交进行中时把**自定义**返回按钮置灰。
+    ///
+    /// 这个开关存在的唯一理由：页面曾用 `.navigationBarBackButtonHidden(isSaving)` 表达同一
+    /// 意图 —— 而那个 modifier 传 `false` 时会把系统返回按钮**放回来**，于是系统箭头与本
+    /// modifier 自己加的那个并存（训练计划页 2026-10-01 的「两个返回按钮」）。挡住返回只能
+    /// 作用在自己那条 ToolbarItem 上，不能再通过 `navigationBarBackButtonHidden` 表达。
+    ///
+    /// 代价（有意接受）：`navigationBarBackButtonHidden(true)` 同时关掉侧滑返回，所以本 App 的
+    /// tech 页一律没有侧滑返回。计划页在 2026-10-01 之前是唯一例外 —— 它靠传 `false` 把系统
+    /// 按钮和侧滑一起放了回来，代价是两条箭头。要单独恢复侧滑得自己接
+    /// `interactivePopGestureRecognizer`（并处理与自定义按钮的 disabled 状态对齐），不在本轮范围。
+    var backDisabled: Bool = false
     func body(content: Content) -> some View {
         content
             .navigationTitle(title)
@@ -75,6 +87,7 @@ private struct TechNavigation: ViewModifier {
                         Image(systemName: "chevron.left").font(.system(size: 20, weight: .medium))
                             .foregroundStyle(TechColor.ink).frame(width: 44, height: 44)
                     }.buttonStyle(.plain).accessibilityLabel("返回")
+                        .disabled(backDisabled)
                         .accessibilityIdentifier("navigation.back")
                 }
             }
@@ -86,7 +99,9 @@ private struct TechNavigation: ViewModifier {
 }
 
 extension View {
-    func techNavigation(_ title: String) -> some View { modifier(TechNavigation(title: title)) }
+    func techNavigation(_ title: String, backDisabled: Bool = false) -> some View {
+        modifier(TechNavigation(title: title, backDisabled: backDisabled))
+    }
 }
 
 struct TechPanel<Content: View>: View {

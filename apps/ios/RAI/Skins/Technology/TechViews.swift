@@ -1598,7 +1598,12 @@ struct TechWorkoutDetailView: View {
                 if let value = override.statisticsParticipation { Text("统计参与：\(value)") }
                 if let value = override.sessionType { Text("训练类型：\(nativeSessionName(value))") }
                 if let value = override.performanceProtocol { Text("表现协议：\(value)") }
-                if let value = override.rpe { Text("RPE：\(nativeNumber(value))") }
+                if let value = override.rpe {
+                    // 词在前、原始整数在后：整数是服务端真正读到的值（`prediction-data.ts:150`
+                    // 拿 `rpe >= 9` 当"很吃力"的证据），只显示词会让"我选了很累，为什么负荷
+                    // 没变"无从核对。
+                    Text("训练感受：\(TechEffortScale.label(for: Int(value)))（RPE \(Int(value))）")
+                }
                 if !override.conditionTags.isEmpty { Text("状态标签：\(override.conditionTags.joined(separator: "、"))") }
                 if let value = override.note, !value.isEmpty { Text(value) }
             }

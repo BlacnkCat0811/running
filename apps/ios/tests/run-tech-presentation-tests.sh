@@ -21,6 +21,10 @@ xcrun swiftc -parse-as-library -disable-sandbox apps/ios/RAI/APIModels.swift \
 python3 - <<'PY'
 import pathlib, re
 
+def without_comments(text):
+    """去注释：多处判据要钉的是"源码在说什么"，不是"注释在说什么"，放最前面共用。"""
+    return re.sub(r"/\*.*?\*/|//[^\n]*", "", text, flags=re.S)
+
 source = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTheme.swift").read_text()
 colors = {}
 for name, r, g, b in re.findall(
@@ -266,7 +270,37 @@ def mapped_cases(source, function_name):
     assert found, f"Could not locate {function_name}; the enum gate must fail loudly instead of skipping"
     return set(re.findall(r'case "([^"]+)": return', found.group(1)))
 
+def mapped_labels(source, function_name):
+    """同一条函数体正则，取 `case "x": return "y"` 的**文案** y（`default` 行不匹配，故不在内）。
+
+    文案清单必须从源码里取。写死在闸门里的话，文案一改这条断言就静默失效（判据恒真），
+    而"面板里又抄了一份状态文案"正是它要拦的事。
+    """
+    found = re.search(rf"func {function_name}\(_ \w+: String\) -> String \{{(.*?)\n\}}", source, re.S)
+    assert found, (f"Could not locate {function_name}; the copy gate must fail loudly instead of "
+                   "skipping")
+    labels = re.findall(r'case "[^"]+": return "([^"]+)"', found.group(1))
+    assert labels, (f"Could not read any label out of {function_name}; the copy gate would otherwise "
+                    "compare nothing and pass")
+    return labels
+
 tech_enums = pathlib.Path("apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift").read_text()
+
+# `MobilePlanExecutionDay.status` 的闭集只有一个来源：**契约源码**。这里沿用本文件对
+# `MobileTodayResponse` 的做法（正则解析 + 数量下限），而不是在脚本里再抄一份取值清单 ——
+# 手抄的那份不随契约变，于是契约新增一个取值时，穷举表与枚举对账会**一起**对着过期清单
+# 配平、双双变绿，而界面已经落到域外分支上（本文件后面记的 SyncPhase 事故就是这个形状：
+# default ⇒ 新增取值编译通过、回归全绿、用户看到错文案）。
+plan_day = re.search(r"export interface MobilePlanExecutionDay \{(.*?)\n\}", contract, re.S)
+assert plan_day, ("Could not locate MobilePlanExecutionDay in the contract; the plan-execution "
+                  "status gate must fail loudly instead of skipping")
+plan_status_line = re.search(r"^\s*status\??:\s*(.+?);\s*$", plan_day.group(1), re.M)
+assert plan_status_line, ("MobilePlanExecutionDay has no parseable `status` field; the plan-execution "
+                          "status gate must fail loudly instead of skipping")
+plan_execution_status = re.findall(r'"([^"]+)"', plan_status_line.group(1))
+assert len(plan_execution_status) >= 2, (
+    f"MobilePlanExecutionDay.status parsed as {plan_execution_status}, which is implausibly few — "
+    "the regex stopped matching the contract, it did not shrink.")
 
 enum_checks = 0
 for enum_name, values, mappings in [
@@ -294,6 +328,13 @@ for enum_name, values, mappings in [
      [("techRecommendationBasisName", tech_enums)]),
     ("MobileRecommendation.recoveryAdjustment", ["none", "veto", "no_evidence"],
      [("techRecoveryAdjustmentName", tech_enums)]),
+    # 近七日执行记录的状态。它在视图里此前是三个平行 switch，文案那份的 `default` 是
+    # 「缺少计划快照」：契约多一个取值就编译通过、回归全绿，用户看到一句自信的错话 ——
+    # 与 `techSyncPhase` 的 `default: "等待同步"` 同一个形状。
+    # 清单来自**契约源码**（见上面的解析），不是这里手写的一行：契约新增取值时，这条会自己
+    # 变红，而不是等着谁记得回来改。
+    ("MobilePlanExecutionDay.status", plan_execution_status,
+     [("techPlanExecutionStatusName", tech_enums)]),
 ]:
     expected = set(values)
     for function_name, source in mappings:
@@ -319,6 +360,10 @@ for file_name, functions in [
      ["techPhaseName(", "techStimulusMatchName(", "techRaceDistanceName(",
       "techSyncStatusName(", "techCoverageStateName(", "techRecoveryCoverageName(",
       "techRecoveryAssessmentName(", "techRecommendationBasisName(", "techRecoveryAdjustmentName("]),
+    # 执行状态胶囊住在计划预览表里（不在 TechViews.swift）：文案必须走映射函数，
+    # 否则契约机器码——或面板自己抄的一句话——就会直接上屏。
+    ("apps/ios/RAI/Skins/Technology/TechPlanPreviewSheet.swift",
+     ["techPlanExecutionStatusName("]),
 ]:
     body = pathlib.Path(file_name).read_text()
     for call in functions:
@@ -378,7 +423,7 @@ print(f"Phase labels: {len(sync_phases)} SyncPhase values, {len(labelled)} expli
 # （那只会在合法重命名时变红，是真红里的假红）。
 # ---------------------------------------------------------------------------
 preview_sheet_path = "apps/ios/RAI/Skins/Technology/TechPlanPreviewSheet.swift"
-preview_sheet = re.sub(r"/\*.*?\*/|//[^\n]*", "", pathlib.Path(preview_sheet_path).read_text(), flags=re.S)
+preview_sheet = without_comments(pathlib.Path(preview_sheet_path).read_text())
 
 # 1) 预览不得隐式落库。
 for auto in [".task", ".onAppear", ".onChange"]:
@@ -407,4 +452,152 @@ for anchor, label in [
         f"{preview_sheet_path} lost the {label}. A one-sided branch silently hides either "
         "'nothing was replaced' or the replaced dates themselves.")
 print("Plan preview gate: confirm-only, with both replaced-date and previous-prescription branches present.")
+
+# ---------------------------------------------------------------------------
+# 训练计划页的两处可用性修复（2026-10-01 反馈），各钉一条"改回去不会变红"的判据。
+#
+# ① 两个返回按钮：`techNavigation` 隐藏系统返回按钮并自加一个，而页面里
+#    `.navigationBarBackButtonHidden(isSaving)` 在非保存态传 `false`，把系统按钮又放了
+#    回来 —— 页面上就出现两个箭头。挡住返回只能作用在自定义那条 ToolbarItem 上。
+# ② 两条七日表：本页同时平铺「7 天训练安排」（自然周）与「未来七日」（生成窗口）。
+#    两个时间窗不同所以不能合并，但第二条必须折起来。判据落在"平铺渲染只有一处"上，
+#    而不是"文件里有没有 DisclosureGroup 四个字"（后者在合法重构时会假红）。
+# ---------------------------------------------------------------------------
+def slice_between(text, start, end, label):
+    """取 `start` 之后、`end` 之前的源码。两端锚点缺失**或顺序颠倒**都必须报错 —— 判据载体
+    被搬走、或 end 跑到了 start 前面时，切片会静默退化成"start 之后全文"（或整个文件），
+    是这仓库踩过的"判据恒真"事故。"""
+    assert text.count(start) >= 1, f"{label}: start anchor {start!r} not found"
+    assert text.count(end) >= 1, f"{label}: end anchor {end!r} not found"
+    tail = text.split(start, 1)[1]
+    assert end in tail, (f"{label}: end anchor {end!r} must come after start anchor {start!r}; "
+                         "otherwise the slice silently widens to everything after start")
+    return tail.split(end, 1)[0]
+
+plan_view = without_comments(
+    pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanView.swift").read_text())
+assert "navigationBarBackButtonHidden" not in plan_view, (
+    "TechPlanView.swift hides/re-shows the system back button again. `techNavigation` already "
+    "hides it and adds its own; a second `navigationBarBackButtonHidden(false)` is what put two "
+    "arrows in the bar. To block leaving mid-save use `backDisabled:` instead.")
+assert "backDisabled: isSaving" in plan_view, (
+    "The plan page stopped disabling the custom back button while saving; that guard used to be "
+    "expressed by re-showing the system button, which cannot come back.")
+theme = without_comments(
+    pathlib.Path("apps/ios/RAI/Skins/Technology/TechTheme.swift").read_text())
+assert ".navigationBarBackButtonHidden(true)" in theme, (
+    "The shared navigation modifier must keep the system back button hidden")
+assert ".disabled(backDisabled)" in theme, (
+    "TechNavigation must apply backDisabled to its own back button, not to the bar")
+assert plan_view.count('TechSectionHeader(title: "7 天训练安排"') == 1, (
+    "Exactly one flat seven-day strip belongs on the plan page")
+assert plan_view.count("ForEach(plan.days)") == 1, (
+    "The rolling seven-day window must be rendered exactly once")
+disclosure = slice_between(plan_view, "private var scheduleDisclosure", "private var goalEditor",
+                           "plan schedule disclosure")
+assert "DisclosureGroup" in disclosure, (
+    "The second seven-day window must stay collapsed; a flat list is what made the page show "
+    "two seven-day tables at once.")
+assert "ForEach(plan.days)" in disclosure and "TechExecutablePlanDay" in disclosure, (
+    "The rolling window's per-day rows must live inside the disclosure")
+print("Plan page: one back button, one flat seven-day strip (rolling window collapsed).")
+
+# ---------------------------------------------------------------------------
+# 近七日执行记录：一天一行、只留一个入口。
+#
+# 旧版每天铺三行文字 + 最多两个 NavigationLink（"查看当天训练"、"检查数据与同步"），
+# 七天就是十几条链接（2026-10-01 反馈："太乱"）。这条钉的是形态：执行面板里
+# NavigationLink 只许出现一次（整行那个），且 0 条记录必须说成"尚未导入训练"，
+# 不许把缺失渲染成 0 公里 —— 那正是这个面板存在的意义（区分"没导入"与"没跑")。
+# ---------------------------------------------------------------------------
+execution = slice_between(preview_sheet, "struct TechPlanExecutionPanel",
+                          "struct TechExecutablePlanDay", "plan execution panel")
+assert execution.count("NavigationLink") == 1, (
+    "The execution panel must offer exactly one entry per day (the whole row); per-day "
+    "'查看当天训练' / '检查数据与同步' links are the clutter this round removed.")
+assert "检查数据与同步" not in execution, (
+    "Sync diagnostics belong in the day's detail view, not repeated on all seven rows")
+assert execution.count("TechBadge(") == 1, "One status chip per row, not a paragraph"
+assert "尚未导入训练" in execution, (
+    "Zero records must read as 'nothing imported yet', never as 0 km")
+assert 'guard day.observedWorkoutCount > 0 else' in execution, (
+    "The absence of an import must stay a separate branch from a zero-distance run")
+# 状态文案只有一个来源：面板里不得再出现 `techPlanExecutionStatusName` 会产出的任何一句。
+# 清单从那个函数的源码里取（不写死 —— 写死的话文案一改，这条就变成永远成立的废话）。
+for status_copy in mapped_labels(tech_enums, "techPlanExecutionStatusName"):
+    assert status_copy not in execution, (
+        f"The execution panel hard-codes the status copy {status_copy!r}. The chip must read it from "
+        "techPlanExecutionStatusName; a second copy is the one that keeps the old wording after the "
+        "contract grows a value.")
+# 域外取值（契约新增、本端枚举没跟上）说的是"未知状态"，配色也复用 unknown 那一档。
+# 这条钉的是那个开关形状：`?? .unknown` 被改成别的档位时，这里没有保护（真出问题只会在
+# 屏上画错一种颜色），但"配色 switch 不许长 default"能钉住，因为它一旦有 default，
+# 枚举少一个取值就不再是编译错误 —— 那正是这次修复的全部意义。
+assert "default:" not in slice_between(
+    preview_sheet, "private func statusChip", "struct TechExecutablePlanDay", "status chip resolver"), (
+    "The status chip resolver grew a `default:` branch. Colours must switch over "
+    "TechPlanExecutionStatus with no default, so losing an enum case is a compile error instead of "
+    "a catch-all colour.")
+print("Execution panel: one row per day, one entry, absence never rendered as zero.")
+
+# ---------------------------------------------------------------------------
+# 训练感受：用户点的是词，服务端读的是 1–10 的整数。
+#
+# 2026-10-01 反馈：「训练详情里训练反馈 1–10 不适合用户」。把数字输入换回文本框、
+# 或把档位映射删掉，本脚本、类型检查、UI 回归都不会有任何反应 —— 用户却又要面对量表。
+# 因此这里钉三件事：反馈页**确实渲染**档位、整页只有一个自由文本框（备注）、以及档位表与
+# 模型侧 `rpe >= 9` 阈值的跨语言对账（阈值只在 TS 源码里解析，本端不留副本）。
+# ---------------------------------------------------------------------------
+feedback_path = "apps/ios/RAI/Skins/Technology/TechWorkoutFeedbackView.swift"
+feedback = without_comments(pathlib.Path(feedback_path).read_text())
+# 判据要钉"档位真的渲染了"，不是"文件里出现过这几个字"：
+#  - 只断言 `TechEffortScale.options` 存在，会被死代码骗过（档位表还在、界面已经不用它）；
+#  - 只断言 `effortChip(` 存在更糟 —— 那个函数**定义**本身就含这四个字，删掉调用照样绿；
+#  - 只断言 `.numberPad` 不存在，挡不住"换回普通键盘的自由文本 RPE 框"（1–10 又回来了）。
+body = slice_between(feedback, "var body: some View", "private var effortChips", "feedback body")
+assert "effortChips" in body, (
+    f"{feedback_path} no longer renders the effort chips in its body; the tiers are still defined "
+    "but the form bypasses them, which is how the 1–10 question comes back.")
+assert "ForEach(TechEffortScale.options" in feedback, (
+    f"{feedback_path} no longer iterates TechEffortScale.options — the chips must come from the "
+    "tier table, not from a list written next to the buttons.")
+text_fields = feedback.count("TextField(")
+assert text_fields == 1 and 'TextField("备注"' in feedback, (
+    f"{feedback_path} has {text_fields} text fields; the only free-text field on this form is 备注. "
+    "A second field is how the 1–10 RPE box comes back — words are the only way to record effort.")
+assert ".numberPad" not in feedback, (
+    f"{feedback_path} brought back a numeric keyboard; a free RPE field is what made the runner "
+    "read a scale instead of choosing a word.")
+
+# 档位表与模型阈值的跨语言单源对账。
+# `row.rpe >= 9` 是"这跑得很吃力"的证据门槛（packages/application/src/prediction-data.ts），
+# 也是 `TechEffortScale` 第三条硬约束的对手方。阈值必须在**模型侧解析**后与档位表比对：
+# 在 Swift 或本脚本里再写一个字面量 9，模型侧改成 8 时对账就变成"对着副本自证" —— 界面上
+# 两个词换了意思，而所有判据全绿。解析不到就报错，不许静默跳过。
+prediction_data = pathlib.Path("packages/application/src/prediction-data.ts").read_text()
+threshold_match = re.search(r"row\.rpe\s*>=\s*(\d+)", prediction_data)
+assert threshold_match, ("Could not locate the hard_workout rpe threshold in prediction-data.ts; "
+                         "the effort gate must fail loudly instead of skipping")
+hard_workout_rpe = int(threshold_match.group(1))
+tiers = [(int(value), label) for value, label in
+         re.findall(r'TechEffortOption\(value: (\d+), label: "([^"]+)"\)', tech_enums)]
+assert len(tiers) >= 2, (f"parsed {len(tiers)} effort tiers out of TechEnumPresentation.swift; the "
+                         "regex stopped matching the tier table, it did not shrink.")
+crossing = [(value, label) for value, label in tiers if value >= hard_workout_rpe]
+assert len(crossing) == 1 and crossing[0][0] == max(value for value, _ in tiers), (
+    f"exactly one tier may cross rpe >= {hard_workout_rpe} (parsed from prediction-data.ts) and it "
+    f"must be the hardest one; got {crossing}. Either the tier table changed meaning, or the model "
+    f"threshold moved — change them together and this reconciliation with them.")
+print(f"Effort tiers: only {crossing[0][1]!r} ({crossing[0][0]}) crosses the rpe >= {hard_workout_rpe} "
+      "hard_workout threshold parsed from prediction-data.ts.")
+
+# 训练详情的人工覆盖面板：显示词，但必须同时给出整数（算法读的是整数）。
+override_panel = slice_between(without_comments(
+    pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_text()),
+    "private func overridePanel", "struct TechAnalysisView", "override panel")
+assert "TechEffortScale.label(for: Int(value))" in override_panel, (
+    "The training-detail override panel must present the effort as a word, not a bare number")
+assert "（RPE \\(Int(value))）" in override_panel, (
+    "The override panel must still print the stored integer; `prediction-data.ts` reads `rpe >= 9`")
+print("Effort tiers: the feedback form offers words, the detail panel prints word + integer.")
 PY

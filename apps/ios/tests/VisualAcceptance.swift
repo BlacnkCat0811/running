@@ -137,8 +137,11 @@ final class VisualAcceptance: XCTestCase {
         XCTAssertTrue(app.buttons["全部训练指标"].waitForExistence(timeout: 45))
         XCTAssertTrue(app.navigationBars["训练详情"].exists)
         capture("02-detail")
-        // Scroll the page gutter: a plain swipeUp() lands on the route map, which
-        // legitimately owns pan gestures, and the fitted trace leaves the card.
+        // 沿页面留白拖动，**不**落在卡片上。卡片自 2026-10-01 起默认锁定地图手势
+        // （判据见 check-today-layout.py 的「地图手势锁定」段），压在它上面滑已经是
+        // 翻页；但本验收以 `-rai.privacy.amap.state declined` 启动，卡片只画离线轨迹、
+        // 不加载高德底图，**这条路径覆盖不到底图上的手势冲突** —— 那一项在
+        // docs/IOS_NATIVE_RUNBOOK.md 的真机人工验收清单里。
         dragContent(up: true); capture("02-detail-route")
         let metrics = app.buttons["全部训练指标"]
         scrollTo(metrics); metrics.tap(); capture("02-detail-metrics")

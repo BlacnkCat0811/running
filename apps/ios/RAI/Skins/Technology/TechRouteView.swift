@@ -37,12 +37,17 @@ private struct TechRouteGeometry {
 
 private struct TechPreparedRoute: View {
     let geometry: TechRouteGeometry
-    // Default to the interactive map only after privacy consent; keep offline trace available.
+    // Show the map card only after privacy consent; gestures stay locked until the
+    // card is tapped — the offline trace stays available either way.
     @State private var showingSystemMap = true
     /// One-shot signal that the next map update should fit the entire route.
     /// Reset back to false on the first consume so it doesn't refit whenever
     /// SwiftUI happens to redraw.
     @State private var fitRequest = false
+    /// 地图手势是否解锁。默认 **false**：训练详情整体是一个 `ScrollView`，而
+    /// `MAMapView` 会吃掉落在它身上的拖动 —— 于是"往下翻页"变成"把地图划走"
+    /// （2026-10-01 用户反馈）。锁定时地图只是一张静态图，纵向滑动照常翻页。
+    @State private var mapInteractive = false
     /// 高德底图是否已获得用户同意（未同意时不创建 MAMapView，见 MapPrivacy）。
     @AppStorage(MapPrivacy.storageKey) private var mapPrivacyState = MapPrivacy.State.ask.rawValue
 
@@ -59,11 +64,16 @@ private struct TechPreparedRoute: View {
                 TechColor.background
                 Text("有效路线坐标不足").font(.footnote).foregroundStyle(TechColor.muted).padding(16)
             } else if showingSystemMap, mapAllowed {
-                NativeRouteMap(coordinates: coordinates, triggerFit: fitRequest)
+                NativeRouteMap(coordinates: coordinates, triggerFit: fitRequest, isInteractive: mapInteractive)
                     .accessibilityIdentifier("workout.route.map")
                     .onChange(of: fitRequest) { _, newValue in
                         if newValue { fitRequest = false }
                     }
+                // 屏蔽层始终挂载、只切换命中测试：结构不变 ⇒ 地图不会被重建，
+                // 相机也就不会因为开关手势而重新 fit 回完整路线。
+                gestureShield
+                    .allowsHitTesting(!mapInteractive)
+                    .accessibilityHidden(mapInteractive)
             } else {
                 trace
             }
@@ -74,9 +84,10 @@ private struct TechPreparedRoute: View {
             Menu {
                 Button("轨迹图（离线可用）") { showingSystemMap = false }
                 if mapAllowed {
-                    Button("加载互动地图") { showingSystemMap = true }
+                    Button("加载互动地图") { showingSystemMap = true; mapInteractive = false }
                     Button("显示完整路线") {
                         showingSystemMap = true
+                        mapInteractive = false
                         fitRequest = true
                     }
                 } else {
@@ -88,11 +99,49 @@ private struct TechPreparedRoute: View {
                     .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 12))
             }.padding(8).accessibilityLabel("路线显示方式")
         }
-        Text(showingSystemMap && mapAllowed ? "互动地图 · 可缩放和拖动，右上角可恢复完整路线"
-             : mapAllowed ? "真实轨迹 · 通过右上角地图按钮加载底图" : "真实轨迹 · 未启用高德底图")
+        .overlay(alignment: .bottomTrailing) {
+            if showingSystemMap, mapAllowed, mapInteractive { lockButton }
+        }
+        Text(captionText)
             .font(.caption).foregroundStyle(TechColor.muted)
             .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// 触摸屏蔽层：锁定时把整块地图变成"只响应轻点"的静态图，纵向滑动完全交给
+    /// 外层 `ScrollView`，而不是被 `MAMapView` 的平移手势截获；轻点即解锁。
+    private var gestureShield: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture { mapInteractive = true }
+            .accessibilityIdentifier("workout.route.map.lock")
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("地图已锁定，轻点解锁缩放与拖动")
+    }
+
+    /// 解锁后必须能一键收回手势，否则用户又要靠运气才能往下滑。
+    private var lockButton: some View {
+        Button { mapInteractive = false } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "lock.fill").font(.system(size: 11, weight: .semibold))
+                Text("锁定").techScaledFont(13, weight: .semibold)
+            }
+            .foregroundStyle(TechColor.ink)
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(TechColor.elevated.opacity(0.92), in: Capsule())
+        }
+        .padding(8)
+        .accessibilityLabel("锁定地图，恢复上下滑动翻页")
+    }
+
+    private var captionText: String {
+        guard showingSystemMap, mapAllowed else {
+            return mapAllowed ? "真实轨迹 · 通过右上角地图按钮加载底图" : "真实轨迹 · 未启用高德底图"
+        }
+        return mapInteractive
+            ? "互动地图已解锁 · 可缩放拖动，点右下角「锁定」恢复上下滑动翻页"
+            : "互动地图已锁定 · 上下滑动翻页，轻点地图解锁缩放与拖动"
     }
 
     private var trace: some View {
@@ -137,13 +186,17 @@ private struct TechPreparedRoute: View {
 /// database stores). AMap basemaps and `convert(_:toPointTo:)` expect GCJ-02,
 /// so the container converts once per update and only for rendering — the
 /// stored data is never touched.
+///
+/// 手势策略：`isInteractive == false`（默认）时地图不接管任何拖动，落在卡片上的
+/// 纵向滑动由上层的训练详情 `ScrollView` 消费 —— 详细原因见 `applyGesturePolicy`。
 private struct NativeRouteMap: UIViewRepresentable {
     let coordinates: [CLLocationCoordinate2D]
     let triggerFit: Bool
+    let isInteractive: Bool
     func makeUIView(context: Context) -> RouteMapContainer { RouteMapContainer() }
     static func dismantleUIView(_ view: RouteMapContainer, coordinator: ()) { view.stop() }
     func updateUIView(_ view: RouteMapContainer, context: Context) {
-        view.update(coordinates: coordinates, triggerFit: triggerFit)
+        view.update(coordinates: coordinates, triggerFit: triggerFit, interactive: isInteractive)
     }
 }
 
@@ -157,6 +210,8 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     private var sourceCoordinates: [CLLocationCoordinate2D] = []
     private var drawScheduled = false
     private var stopped = false
+    /// 见 `applyGesturePolicy`：默认锁定，纵向滑动留给外层滚动视图。
+    private var isInteractive = false
     /// Symmetric padding keeps the route's bounding-box center at the card's
     /// exact center while leaving room for the line and endpoint markers.
     private static let fitInsets = UIEdgeInsets(top: 24, left: 24, bottom: 24, right: 24)
@@ -193,6 +248,9 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         map.isRotateEnabled = false
         map.isRotateCameraEnabled = false
         map.showsCompass = false
+        // 手势默认关闭，直到 SwiftUI 侧显式解锁（见 applyGesturePolicy）。
+        map.isScrollEnabled = false
+        map.isZoomEnabled = false
         addSubview(map)
         trace.strokeColor = UIColor.cyan.cgColor
         trace.fillColor = UIColor.clear.cgColor
@@ -206,7 +264,11 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         clipsToBounds = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func update(coordinates wgsCoordinates: [CLLocationCoordinate2D], triggerFit: Bool) {
+    func update(coordinates wgsCoordinates: [CLLocationCoordinate2D], triggerFit: Bool, interactive: Bool) {
+        if interactive != isInteractive {
+            isInteractive = interactive
+            applyGesturePolicy()
+        }
         let changed = !sourceCoordinates.elementsEqual(wgsCoordinates) {
             $0.latitude == $1.latitude && $0.longitude == $1.longitude
         }
@@ -227,6 +289,15 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         stopped = true
         needsFit = false
         map.delegate = nil
+    }
+    /// 训练详情整体是一个 `ScrollView`，而 `MAMapView` 会吃掉落在它身上的拖动：
+    /// 手指压在路线卡片上往下滑，被划走的是地图而不是页面（2026-10-01 用户反馈）。
+    /// 这里是第二层防护 —— SwiftUI 侧的触摸屏蔽层已经让触摸到不了地图，但地图自己
+    /// 的平移/缩放手势开关也要跟着关，否则任何绕过屏蔽层的路径（指针、辅助功能、
+    /// 未来的布局改动）都会把老问题带回来。旋转与俯仰在 `init` 里已永久关闭。
+    private func applyGesturePolicy() {
+        map.isScrollEnabled = isInteractive
+        map.isZoomEnabled = isInteractive
     }
     override func layoutSubviews() {
         super.layoutSubviews()

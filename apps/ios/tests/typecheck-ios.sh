@@ -1,11 +1,13 @@
 #!/bin/bash
-# 沙箱内可用的 iOS 层类型检查。
+# 不依赖 Pods、也不调用 xcodebuild 的 iOS 层类型检查。
 #
-# 为什么需要它：本机没有 CocoaPods（`pod` 不存在），`apps/ios/Pods` 不入库，因此
-# xcodebuild 与完整 target 编译都跑不起来。但高德 SDK 只被 3 个文件直接依赖，
-# 其余 Swift 源码可以配一个替身模块用 `swiftc -typecheck` 真实检查——原生页面
-# （`NativeViews.swift` 的根壳与 `Skins/Technology/TechViews.swift`）都在覆盖范围内，
-# 这是它们唯一能被验证的通道。
+# 为什么需要它：它不必先 `pod install`，任何装有 Xcode 的机器与 CI 都能跑。高德 SDK 只被
+# 3 个文件直接依赖，其余 Swift 源码配替身模块即可用 `swiftc -typecheck` 真实检查——原生
+# 页面（`NativeViews.swift` 根壳与 `Skins/Technology/TechViews.swift`）也在覆盖内。
+# ⚠️ 2026-09-30 订正：原文称"本机没有 CocoaPods、`apps/ios/Pods` 不入库，因此 xcodebuild
+# 跑不起来"，两个前提都不成立 —— CocoaPods 已装（核对方式：`pod --version` 应与
+# `Podfile.lock` 里的 COCOAPODS 行同值，本机两者都是 1.17.0），Pods 已就位且
+# `Pods/Manifest.lock` 与 `Podfile.lock` 逐字节一致。
 #
 # 覆盖率：apps/ios/RAI/** 除下列 3 个文件外的全部源码。
 #   MapPrivacy.swift / RAIApp.swift / TechRouteView.swift

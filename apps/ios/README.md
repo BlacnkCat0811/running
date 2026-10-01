@@ -21,6 +21,14 @@ open RAI.xcworkspace
 选择真实设备/开发团队，按签名与HealthKit capability要求运行。使用workspace而非单独xcodeproj，避免缺Pods框架。
 手机上的127.0.0.1不是API主机；填写手机可达的HTTPS/可信局域网服务与Token。
 
+`Podfile` 的 `post_install` 会修一处高德 SDK 自带的头文件缺口：`MAMapKit.framework` 的
+module map 声明 `umbrella header "MAMapKit.h"`，而随包的 `MAMapKit.h` 漏了 `Headers/` 下的头，
+构建期 clang 因此报 `umbrella header for module 'MAMapKit' does not include header …`。
+补丁按“umbrella 必须覆盖 `Headers/` 下每一个头”补齐，幂等，随 SDK 升级自动跟随。
+`Pods/` 不入库，所以这类修改只能写在 `Podfile` 里，手改 `Pods/` 会被下次 `pod install` 冲掉。
+`pod install` 还会顺带改一次 `RAI.xcodeproj/project.pbxproj`（删 4 行空的 `inputPaths/outputPaths`），
+与依赖无关，`git restore` 掉即可。
+
 ## 文档职责
 
 - [API合同](../../docs/IOS_NATIVE_API_CONTRACT.md)：身份、DTO、revision、命令终态。
@@ -46,3 +54,4 @@ npm run test:ios
 服务URL、serverId、athleteId、datasetEpoch共同隔离缓存和任务；未知scope不能当旧数据安全复用。
 HealthKit失败、网络不可用、同步未发生、今天无恢复覆盖、训练数据陈旧分开显示。
 地图SDK先有明确隐私同意才初始化。WGS-84是存储坐标，显示转换不得写回原始路线。
+训练详情的路线卡片默认**锁住地图手势**：压在卡片上上下滑动是翻页，轻点地图解锁后才可缩放拖动，右下角「锁定」一键收回。

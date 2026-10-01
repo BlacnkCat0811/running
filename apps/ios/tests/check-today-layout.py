@@ -38,4 +38,16 @@ assert 'selectedTime = data.points[index].offsetSeconds / 60' in chart
 route = (root / "TechRouteView.swift").read_text()
 assert '@State private var showingSystemMap = true' in route
 assert 'else if showingSystemMap, mapAllowed' in route
-print("Compact card heights, minute chart coordinates, structured steps and map consent checks passed")
+# 地图手势锁定：训练详情整体是 ScrollView，`MAMapView` 一旦接管拖动，
+# 「往下翻页」就变成「把地图划走」（2026-10-01 用户反馈）。下面 4 条各钉住一个
+# 改错了照样编译通过的环节：SwiftUI 侧默认值、屏蔽层的命中测试、以及解锁状态
+# 是否真的驱动了高德自己的手势开关。
+assert '@State private var mapInteractive = false' in route, \
+    "地图必须默认锁定，否则纵向滑动又被 MAMapView 截获"
+assert 'allowsHitTesting(!mapInteractive)' in route, \
+    "锁定时屏蔽层必须放行触摸给外层滚动视图，解锁后必须不再拦截地图"
+assert 'NativeRouteMap(coordinates: coordinates, triggerFit: fitRequest, isInteractive: mapInteractive)' in route, \
+    "解锁状态必须从 SwiftUI 传到 UIKit 层"
+for key in ('map.isScrollEnabled = isInteractive', 'map.isZoomEnabled = isInteractive'):
+    assert key in route, f"解锁状态必须真正驱动高德手势开关，缺少：{key}"
+print("Compact card heights, minute chart coordinates, structured steps, map consent and map gesture lock checks passed")

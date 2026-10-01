@@ -112,3 +112,104 @@ func techRecoveryAdjustmentName(_ value: String) -> String {
     default: return "未知恢复处理"
     }
 }
+
+/// `MobilePlanExecutionDay.status` = observed | pending | unknown
+///
+/// 契约注释把语义写死了：这是**历史观测**，不是完成度/依从性评分（"Missing imports remain
+/// pending"）—— 所以文案只说服务端收到了什么，不说用户做没做到（"未导入" ≠ "未完成"）。
+/// 生产者：`apps/api/src/plan-execution.ts:37`
+/// （`workoutCount > 0 ? "observed" : planned ? "pending" : "unknown"`）。
+///
+/// 闭集在 Swift 侧只声明一次（就是这个枚举）：视图按它给状态胶囊配色，而那个 switch
+/// **没有 `default`**，所以枚举少一个取值编译不过。此前它在视图里是三份平行 switch，文案
+/// 那份的 `default` 是「缺少计划快照」—— 契约多一个取值就编译通过、回归全绿，用户却看到
+/// 一句自信的错话（"这份计划没有快照"，而它可能恰恰有）。与 `techSyncPhase` 的
+/// `default: "等待同步"` 同一个形状（那次 SyncPhase 事故记在
+/// `apps/ios/tests/run-tech-presentation-tests.sh` 里）。
+///
+/// ⚠️ "枚举少一个 ⇒ 编译不过"只在**枚举与契约配平**时成立，配平由闸门钉住：同一脚本的穷举表
+/// 比对的是从 `packages/api-contracts` 解析出来的取值，不是脚本里手抄的一份清单 ——
+/// 手抄的那份不随契约变，会让穷举表与枚举对账一起对着过期清单配平、双双变绿。
+enum TechPlanExecutionStatus: String {
+    case observed
+    case pending
+    case unknown
+}
+
+/// `MobilePlanExecutionDay.status` 的文案：唯一来源（闸门 `mapped_cases` 逐值对账）。
+///
+/// `default` 是**域外取值**（契约新增、本端还没跟上）：它只许说"本端不认识这个取值"，
+/// 不许借一句域内的话 —— 借来的那句会在某个真实取值上变成假话。
+func techPlanExecutionStatusName(_ value: String) -> String {
+    switch value {
+    case "observed": return "已记录训练"
+    case "pending": return "等待数据"
+    case "unknown": return "缺少计划快照"
+    default: return "未知状态"
+    }
+}
+
+/// 训练感受的一个档位。
+struct TechEffortOption: Equatable {
+    /// 契约接受的 `rpe` 整数（1–10）。
+    let value: Int
+    /// 用户直接点选的词。
+    let label: String
+}
+
+/// 训练感受：契约里 `rpe`（1–10 的整数）的**展示切面**。
+///
+/// 为什么不是自由数字输入：用户要回答的是"这次跑得有多累"，不是量表读数。1–10 得先知道
+/// 量表定义才能填，填出来的数字因人而异（2026-10-01 可用性反馈："不适合用户反馈"）。
+///
+/// 但**服务端读的仍是数字**，所以档位不是可以另立的一套枚举：
+/// - `packages/application/src/service.ts:149` 只接受 1–10 的整数，0/11/小数直接拒收；
+/// - `packages/training-zones/src/index.ts:932` 用 `RPE_INTENSITY[round(rpe)]` 折算内部负荷；
+/// - `packages/application/src/prediction-data.ts:150` 把 `rpe >= 9` 当成"这跑得很吃力"的证据。
+///
+/// 于是三条硬约束（前两条的断言在 `apps/ios/tests/TechPresentationRegression.swift`）：档位值必须
+/// 落在 1–10、必须单调、**只有最高档跨过 `rpe >= 9`** —— 否则用户选了"最累"却拿不到
+/// hard_workout 证据，界面说什么都不会报错。
+///
+/// 🔴 第三条是这张表的**决定**，不是剩下的巧合：五个档位里只有"极限"(10) 会走进 hard_workout
+/// 分支，"很累"(8) 什么都不产生；而 9 与 10 产出的是**同一条**证据（quality 均 0.55），
+/// 差别只在 `RPE_INTENSITY`（8→0.76、9→0.84、10→0.90）。让出去的是 8 与 10 之间那一格负荷
+/// 精度，不是证据供给；换来的是词与阈值第一次对齐 —— 旧路径（1–10 数字输入）能存下一个
+/// 界面读作"很累"（`label(for: 9)`）、模型却当成接近极限的 9。
+///
+/// 不去改档位值凑阈值：顶档改 9（或整表下移）会让同一个词在改版前后写入不同的数，而界面
+/// 零变化；在 8 与 10 之间插一档 9，则要给 9 起一个与"很累""极限"都分得开的词，而"接近
+/// 极限 vs 极限"恰是这张量表上最不可靠的一次区分 —— 一次点击就决定要不要产出证据。
+///
+/// 阈值在 iOS 侧**不留副本**：唯一来源是 `packages/application/src/prediction-data.ts:150`，
+/// 由 `apps/ios/tests/run-tech-presentation-tests.sh` 从 TS 源码解析后与下表逐值对账。
+/// 在这里（或测试里）写一个字面量 9，对账就会在模型侧改成 8 之后变成"对着副本自证"。
+/// Web 端今天仍可直接写 9，所以旧值照旧要能读。
+enum TechEffortScale {
+    /// 五档覆盖 1–10 的代表点，取的是契约本身接受的整数，不是新造的量表。
+    static let options: [TechEffortOption] = [
+        TechEffortOption(value: 2, label: "轻松"),
+        TechEffortOption(value: 4, label: "稍微累"),
+        TechEffortOption(value: 6, label: "累"),
+        TechEffortOption(value: 8, label: "很累"),
+        TechEffortOption(value: 10, label: "极限"),
+    ]
+
+    /// 档位里**恰好等于**该值的选项。旧数据里那些非档位取值（1/3/5/7/9）返回 `nil` ——
+    /// 调用方据此提示"当前记录 7"，而不是把它显示成"很累"、再在用户没动它的时候悄悄改成 8。
+    static func option(for value: Int) -> TechEffortOption? {
+        options.first { $0.value == value }
+    }
+
+    /// 任意合法取值都能读成一句人话：取最接近的档位。等距时取较小的一档 ——
+    /// 宁可说得轻一点，不替用户加码。
+    static func label(for value: Int) -> String {
+        var best = options[0]
+        var bestDistance = Int.max
+        for option in options {
+            let distance = abs(option.value - value)
+            if distance < bestDistance { bestDistance = distance; best = option }
+        }
+        return best.label
+    }
+}
