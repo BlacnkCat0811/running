@@ -119,6 +119,22 @@ Readiness state 带 heuristic_rules / not_empirically_validated；no_low_signal 
 Load Vector 是扩展，不重写 composite；未标定 mechanical 为 null。ACWR 单独升高不能自动覆盖恢复、计划和强度分布。
 unknown prehistory/未同步日不能直接当作已观察到的休息日。Load 状态消费同源 Readiness。
 
+### 9.6 状态曲线与恢复时间（2026-10-02）
+
+[form.ts](../packages/training-load/src/form.ts) 增加两个**读时**派生量，都不写回 `daily_training_metrics`，因此没有模型尺度变化、迁移门禁看到的数字与之前完全一致：
+
+- **状态** `form = chronicEwma − acuteEwma`（单位是日 EWMA 负荷），同时给 `formRatio` —— 绝对负荷单位不跨人可比。分档（±10% / ±25% / ±30%）是负荷管理的常规区间，写成具名常量，**没有**做过结果验证。
+- **恢复时间** 以最近一次**已结束**训练为锚，按 `RECOVERY_BASE_HOURS[sessionType] × clamp(该次负荷 / 个人 chronic, 0.5, 3)` 外推，上限 96 小时；`isLoadProxy: true` 随响应一起走。
+
+两者的边界都是硬的：
+
+- 没有已结束训练、或没有 chronic 背景 ⇒ `insufficient_data` 且 `remainingHours = null`；**"不知道"不等于"已恢复"**，不能渲染成 0 小时；
+- 它是 **负荷代理**，不是睡眠债、不是生理恢复债；UI 文案固定写"按负荷推算，非实测恢复状态"；
+- 状态是**独立类型** `TrainingFormStatus`，不并入 §9.5 的 `TrainingStatusCode`（后者的阈值与验收测试有自己的含义，塞进第二套刻度会让那些测试静默换义）；
+- 两者都**不覆盖** Readiness、计划或训练状态（对齐 L03）。`estimateRecoveryTime` 接受 `physState` 并在 strained 时放大，但**当前没有调用方传入**：physState 目前只有一个生产者（移动端 today 路径），在桌面上另算一份会让同一个早晨在两个界面上给出不同答案。接线的位置在那里，不在读侧。
+
+界面上两者同处一块面板（"状态与恢复"）而不是两张卡：它们来自同一条负荷曲线，分开摆会诱导把恢复时间读成第四个测量值。
+
 ## 10. 分区
 
 [training-zones](../packages/training-zones/src/index.ts) 保留手工设置有效期、threshold/maxHR 来源、平滑与课型刺激。
@@ -237,6 +253,8 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
 | N01 | 环境三项缺一 / 三项齐全且为零 / 三项齐全且有修正 | unavailable 不产出部分修正、not_needed 显式 0、applied 与证据同一计算；可得率按解析结果计数 | physiology/API/UI |
 | N02 | 上坡 / 下坡 / 平坦的同一配速 | 等强配速随坡度单调、零坡度恒等、超出成本模型域时夹取并给理由 | physiology/API |
 | N03 | 无海拔采样 / 单点采样 / 坡度超出可信范围 / 分段过短 | gradePercent 与等强配速均为 null 且带理由码，未知不得渲染为 0 | API/UI |
+| L05 | 日指标叠加状态曲线 | 持久化字段逐位不变；chronic=0/NaN ⇒ insufficient_data 而非中性档；分档在边界上归属明确 | training-load/UI |
+| L06 | 无已结束训练 / 无 chronic 背景 / 负荷相对值达上限 / 窗口已过 | 前两者 insufficient 且 remainingHours=null（不渲染 0）；负荷越大估计越长并在上限处封顶；低置信度如实标注 | training-load/API/UI |
 
 ### 16.2 核验层级
 

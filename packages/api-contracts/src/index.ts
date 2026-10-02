@@ -21,6 +21,9 @@ export type {
   TrainingStatisticsOverviewResponse,
   TrainingStatisticsHistoryResponse,
   TrainingLoadTimelineResponse,
+  TrainingLoadTimelineDay,
+  TrainingFormStatus,
+  RecoveryTimeEstimate,
   HeartRateZone,
   PaceZone,
   StimulusType,
@@ -54,6 +57,7 @@ import type {
   PredictionModelEvent,
   PredictionModelRun,
   PredictionModelRunStatus,
+  RecoveryTimeEstimate,
   WorkoutEnvironmentView,
   WorkoutGradeSummary,
   WorkoutSplitGrade,
@@ -1067,6 +1071,13 @@ export interface MobileTodayResponse {
   coverage: MobileCoverage;
   /** What today's recovery evidence supports — answers "what does it say", not "did we measure". */
   recoveryAssessment: MobileRecoveryAssessment;
+  /**
+   * §9.6 load-proxy recovery estimate: hours until a quality session is
+   * supported. Deliberately **not** named `recovery`: that name is already taken
+   * by `MobileRecoveryBreakdown` below, which reports *measured* evidence, and
+   * one name for both would let an extrapolation read as a measurement.
+   */
+  recoveryTime: RecoveryTimeEstimate;
   /** Why today's recommendation reads the way it does, and whether recovery was consulted. */
   recommendation: MobileRecommendation;
   /**

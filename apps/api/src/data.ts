@@ -16,6 +16,7 @@ import {
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
 import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
+import { estimateRecoveryTime, withTrainingForm } from "@rai/training-load";
 
 import type {
   AbilityMetricSet,
@@ -34,6 +35,7 @@ import type {
   ModelRunSummary,
   RecomputeJobDto,
   RecomputeJobEventDto,
+  RecoveryTimeEstimate,
   RoutePointDto,
   DailyTrainingMetric,
   DailyZoneProfile,
@@ -1038,6 +1040,7 @@ export class RaiReadStore {
       generatedAt: new Date().toISOString(),
       timezone: DATABASE_TIMEZONE,
       status: overview.status,
+      recoveryTime: this.recoveryEstimate(overview.status?.chronicEwma ?? null),
       statusConfidence: overview.rolling7Days.loadConfidence,
       week: overview.week,
       month: overview.month,
@@ -1067,9 +1070,29 @@ export class RaiReadStore {
     return {
       generatedAt: new Date().toISOString(),
       timezone: DATABASE_TIMEZONE,
-      days: timeline.days,
+      // §9.6 form is read-time only: the persisted daily metric is unchanged, so
+      // no model-run scale moves and the transition gate sees the same numbers.
+      days: withTrainingForm(timeline.days),
       components: timeline.components
     };
+  }
+
+  /**
+   * §9.6 load-proxy recovery estimate.
+   *
+   * Anchored on the newest finished session and scaled by that session's load
+   * relative to the athlete's own chronic EWMA. It is deliberately **not** merged
+   * with today's Readiness here: `physState` has exactly one producer (the mobile
+   * today path) and inventing a second one on the desktop surface would let the
+   * two screens disagree about the same morning. `estimateRecoveryTime` already
+   * accepts `physState`; wiring it in belongs where that value exists.
+   */
+  private recoveryEstimate(chronicEwma: number | null): RecoveryTimeEstimate {
+    return estimateRecoveryTime({
+      now: new Date(),
+      recentLoads: this.statisticsRepository.recentLoads(5),
+      chronicEwma
+    });
   }
 
   /**

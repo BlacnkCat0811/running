@@ -448,7 +448,44 @@ struct TechTodayView: View {
             TechSectionHeader(title: "恢复状态", trailing: data.recovery.stateLabel,
                               trailingColor: recoveryStatusColor(data.recovery.state))
             TechTodayRecoveryMetrics(recovery: data.recovery)
+            if let estimate = data.recoveryTime {
+                recoveryTimeRow(estimate)
+            }
         }
+    }
+
+    /// §9.6 recovery interval. Rendered inside the recovery card but visually
+    /// separated, and its footnote says it is extrapolated from load — putting it
+    /// beside the measured sleep/HRV numbers without that line would let an
+    /// extrapolation read as a fourth measurement.
+    @ViewBuilder private func recoveryTimeRow(_ estimate: RecoveryTimeEstimate) -> some View {
+        Divider().overlay(TechColor.grid)
+        VStack(alignment: .leading, spacing: 5) {
+            if estimate.isAvailable, let hours = estimate.remainingHours {
+                Text(hours <= 0
+                     ? "建议间隔：已结束，可安排质量课"
+                     : "建议间隔：约 \(nativeNumber(hours, digits: 0)) 小时")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TechColor.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let readyAt = estimate.readyAt, hours > 0 {
+                    Text("\(nativeDate(readyAt)) 之后")
+                        .font(.caption).foregroundStyle(TechColor.muted)
+                }
+            } else {
+                Text("建议间隔：数据不足，暂不外推")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(TechColor.muted)
+            }
+            if let anchor = estimate.anchor {
+                Text("起点：\(anchor.localDate) 的\(nativeSessionName(anchor.sessionType))")
+                    .font(.caption).foregroundStyle(TechColor.muted)
+            }
+            Text("按负荷外推，不是实测恢复状态")
+                .font(.caption2).foregroundStyle(TechColor.muted)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("today.recovery.interval")
     }
 }
 

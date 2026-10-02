@@ -183,6 +183,9 @@ field_anchors = {
     "verdict": "data.verdict.",
     "nextSession": "data.nextSession",
     "recovery": "data.recovery.",
+    # 2026-10-02 §9.6：负荷外推的建议间隔。它与 `recovery`（实测证据）是相邻但**不同**的
+    # 两个对象，所以锚点也必须分开 —— 复用同一个锚点会让"卡片还在"同时为两条判据背书。
+    "recoveryTime": "estimate.isAvailable",
     "postRun": "today.postRun",
     "weekStructure": "data.weekStructure.",
     "race": "data.race.",

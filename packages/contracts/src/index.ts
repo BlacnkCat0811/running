@@ -439,6 +439,13 @@ export interface TrainingStatisticsOverviewResponse {
   generatedAt: string;
   timezone: string;
   status: DailyTrainingMetric | null;
+  /**
+   * §9.6 load-proxy recovery estimate anchored on the newest finished session.
+   * A load extrapolation, not a measured recovery state. Named `recoveryTime`
+   * rather than `recovery` so it cannot be confused with the measured
+   * `recoveryAssessment` on the mobile contract.
+   */
+  recoveryTime: RecoveryTimeEstimate;
   statusConfidence: number | null;
   week: TrainingPeriodSummary;
   month: TrainingPeriodSummary;
@@ -457,7 +464,7 @@ export interface TrainingStatisticsHistoryResponse {
 export interface TrainingLoadTimelineResponse {
   generatedAt: string;
   timezone: string;
-  days: DailyTrainingMetric[];
+  days: TrainingLoadTimelineDay[];
   components: Array<{
     localDate: string;
     internalLoad: number | null;
@@ -465,6 +472,64 @@ export interface TrainingLoadTimelineResponse {
     compositeLoad: number;
   }>;
 }
+
+// -----------------------------------------------------------------------------
+// Training form and recovery time (docs/ALGORITHM.md §9.6).
+//
+// Both are **load proxies**, not physiological measurements: `form` is the
+// difference between the chronic and acute EWMA of the same composite load the
+// rest of §9 uses, and recovery time extrapolates from the last session's load.
+// They are named and typed to keep that visible — `isLoadProxy` travels with the
+// recovery estimate, and neither may override Readiness, the plan, or the
+// training status (§9.5 / L03).
+//
+// `form` is deliberately a separate type from `TrainingStatusCode`: that code is
+// the §9.5 action classification with its own thresholds and acceptance tests,
+// and folding a second scale into it would silently change what those tests mean.
+// -----------------------------------------------------------------------------
+
+export const TRAINING_FORM_POLICY_VERSION = "rai-training-form-v1" as const;
+export const RECOVERY_TIME_POLICY_VERSION = "rai-recovery-time-v1" as const;
+
+export type TrainingFormStatus =
+  | "insufficient_data"
+  | "transition"
+  | "fresh"
+  | "neutral"
+  | "loaded"
+  | "overreached";
+
+/** A persisted daily metric plus its read-time form curve. The stored row is unchanged. */
+export interface TrainingLoadTimelineDay extends DailyTrainingMetric {
+  /** `chronicEwma − acuteEwma`, in daily-EWMA load units. Null before history exists. */
+  form: number | null;
+  /** `form / chronicEwma`. Reported because absolute load units are not comparable across athletes. */
+  formRatio: number | null;
+  formStatus: TrainingFormStatus;
+}
+
+export interface RecoveryTimeEstimate {
+  policyVersion: typeof RECOVERY_TIME_POLICY_VERSION;
+  status: "available" | "insufficient_data";
+  /** Hours until the next quality session is supported by this estimate. */
+  remainingHours: number | null;
+  /** When the estimate clears, ISO instant. Null when insufficient. */
+  readyAt: string | null;
+  /** The session the estimate is anchored on. */
+  anchor: {
+    trainingSessionId: string;
+    localDate: string;
+    endedAt: string;
+    load: number;
+    sessionType: SessionType;
+  } | null;
+  /** Why the number reads the way it does. The UI renders these instead of inventing wording. */
+  basisCodes: string[];
+  /** Always true: this is an extrapolation from load, not a measured recovery state. */
+  isLoadProxy: true;
+  confidence: number | null;
+}
+
 export type SessionTypeSource = "auto" | "override";
 export const performanceProtocols = [
   "five_k_time_trial",

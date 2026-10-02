@@ -2,6 +2,8 @@ import "../pixel-layout.css";
 import "../training-reference.css";
 import type {
   DailyTrainingMetric,
+  RecoveryTimeEstimate,
+  TrainingLoadTimelineDay,
   TrainingPeriodSummary,
   TrainingStatisticsGranularity,
   TrainingStatisticsHistoryResponse,
@@ -23,7 +25,7 @@ import {
 } from "recharts";
 
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
-import { duration, pace, sessionType, shortDate, stimulusType } from "../format.js";
+import { duration, formStatus, pace, recoveryBasis, sessionType, shortDate, stimulusType } from "../format.js";
 import { useRemote } from "../hooks.js";
 import { Pulse, TrendDown, TrendUp, WarningCircle } from "../icons.js";
 
@@ -115,8 +117,59 @@ function EvidenceTimeline({ periods }: { periods: TrainingPeriodSummary[] }) {
 
 type LoadView = "composite" | "internal" | "pace";
 
+/**
+ * §9.6 form and recovery, side by side.
+ *
+ * Deliberately one panel rather than two cards: the two numbers come from the same
+ * load curve, and splitting them invites reading the recovery estimate as an
+ * independent measurement of the body. The footnote says which is which.
+ */
+export function FormRecoveryPanel({ day, recovery }: {
+  day: TrainingLoadTimelineDay | null;
+  recovery: RecoveryTimeEstimate;
+}) {
+  const remaining = recovery.remainingHours;
+  const readyLabel = recovery.readyAt === null || remaining === null
+    ? "--"
+    : remaining === 0
+      ? "现在即可安排质量课"
+      : `${new Date(recovery.readyAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 之后`;
+  const formLabel = day === null || day.form === null
+    ? "数据不足"
+    : `${day.form > 0 ? "+" : ""}${day.form.toFixed(1)}（${day.formRatio === null ? "--" : `${day.formRatio >= 0 ? "+" : ""}${Math.round(day.formRatio * 100)}%`}）`;
+  return (
+    <section className="panel form-recovery-panel" aria-label="状态与恢复">
+      <div className="panel-heading">
+        <div>
+          <h2>状态与恢复</h2>
+          <p>两项都从同一条负荷曲线派生；不是生理测量，也不覆盖当天的恢复证据。</p>
+        </div>
+        <code>{recovery.policyVersion}</code>
+      </div>
+      <div className="form-recovery-grid">
+        <div className="form-block">
+          <small>状态（慢性 − 急性 EWMA）</small>
+          <b>{formLabel}</b>
+          <span className={`form-status form-${day?.formStatus ?? "insufficient_data"}`}>{formStatus(day?.formStatus ?? "insufficient_data")}</span>
+          <em>正值表示长期负荷高于近期负荷，通常出现在减量或休息之后。</em>
+        </div>
+        <div className="recovery-block">
+          <small>建议间隔（负荷外推）</small>
+          <b>{remaining === null ? "--" : remaining === 0 ? "已结束" : `${remaining} 小时`}</b>
+          <span>{readyLabel}</span>
+          <em>{recovery.status === "insufficient_data" ? "数据不足，不外推" : `起点：${recovery.anchor?.localDate ?? "--"} 的${sessionType(recovery.anchor?.sessionType ?? "unknown")}`}</em>
+        </div>
+      </div>
+      <div className="form-recovery-basis">
+        {recovery.basisCodes.map((code) => <span key={code}>{recoveryBasis(code)}</span>)}
+      </div>
+      <p className="form-recovery-note">状态是负荷曲线上的相对位置，恢复时间是按其负荷推算的建议间隔；两者都不构成医学结论，也不替代当天的恢复读数。</p>
+    </section>
+  );
+}
+
 function LoadTimelineChart({ items, components, view }: {
-  items: DailyTrainingMetric[];
+  items: TrainingLoadTimelineDay[];
   components: TrainingLoadTimelineResponse["components"];
   view: LoadView;
 }) {
@@ -132,7 +185,7 @@ function LoadTimelineChart({ items, components, view }: {
         : componentMap.get(item.localDate)?.compositeLoad ?? item.load
   }));
   const label = view === "internal" ? "内部负荷" : view === "pace" ? "配速负荷" : "综合负荷";
-  return <div className="statistics-chart load-timeline-chart chart-with-data"><div className="chart-visual" role="img" aria-label={`${label}趋势，共 ${source.length} 天`}><ResponsiveContainer width="100%" height="100%"><BarChart data={data} margin={{ top: 16, right: 10, bottom: 0, left: 0 }}><CartesianGrid vertical={false} stroke="#dfe5df" /><XAxis dataKey="localDate" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#6d786f" }} tickLine={false} axisLine={false} minTickGap={34} /><YAxis width={40} tick={{ fontSize: 9, fill: "#6d786f" }} tickLine={false} axisLine={false} /><Tooltip formatter={(value, name) => [value === null ? "--" : Number(value).toFixed(1), name]} /><Bar dataKey="selectedLoad" name={label} fill={view === "internal" ? "#b85a4a" : view === "pace" ? "#3d779b" : "#d1a755"} opacity={0.72} />{view === "composite" ? <><Line type="monotone" dataKey="acuteEwma" name="急性负荷" stroke="#b94f3f" strokeWidth={2} dot={false} /><Line type="monotone" dataKey="chronicEwma" name="慢性负荷" stroke="#1f6d4c" strokeWidth={2} dot={false} /></> : null}</BarChart></ResponsiveContainer></div><details className="chart-data-details"><summary>查看{label}数据</summary><div className="chart-data-table-wrap"><table><caption className="sr-only">{label}每日趋势数据</caption><thead><tr><th>日期</th><th>{label}</th>{view === "composite" ? <><th>急性负荷</th><th>慢性负荷</th></> : null}</tr></thead><tbody>{data.map((item) => <tr key={item.localDate}><td>{item.localDate}</td><td>{item.selectedLoad === null ? "--" : item.selectedLoad.toFixed(1)}</td>{view === "composite" ? <><td>{item.acuteEwma === null ? "--" : item.acuteEwma.toFixed(1)}</td><td>{item.chronicEwma === null ? "--" : item.chronicEwma.toFixed(1)}</td></> : null}</tr>)}</tbody></table></div></details></div>;
+  return <div className="statistics-chart load-timeline-chart chart-with-data"><div className="chart-visual" role="img" aria-label={`${label}趋势，共 ${source.length} 天`}><ResponsiveContainer width="100%" height="100%"><BarChart data={data} margin={{ top: 16, right: 10, bottom: 0, left: 0 }}><CartesianGrid vertical={false} stroke="#dfe5df" /><XAxis dataKey="localDate" tickFormatter={shortDate} tick={{ fontSize: 10, fill: "#6d786f" }} tickLine={false} axisLine={false} minTickGap={34} /><YAxis yAxisId="load" width={40} tick={{ fontSize: 9, fill: "#6d786f" }} tickLine={false} axisLine={false} />{view === "composite" ? <YAxis yAxisId="form" orientation="right" width={40} tick={{ fontSize: 9, fill: "#4b6fa8" }} tickLine={false} axisLine={false} /> : null}<Tooltip formatter={(value, name) => [value === null ? "--" : Number(value).toFixed(1), name]} /><Bar yAxisId="load" dataKey="selectedLoad" name={label} fill={view === "internal" ? "#b85a4a" : view === "pace" ? "#3d779b" : "#d1a755"} opacity={0.72} />{view === "composite" ? <><Line yAxisId="load" type="monotone" dataKey="acuteEwma" name="急性负荷" stroke="#b94f3f" strokeWidth={2} dot={false} /><Line yAxisId="load" type="monotone" dataKey="chronicEwma" name="慢性负荷" stroke="#1f6d4c" strokeWidth={2} dot={false} /><Line yAxisId="form" type="monotone" dataKey="form" name="状态（慢−急）" stroke="#4b6fa8" strokeWidth={1.6} strokeDasharray="4 3" dot={false} connectNulls={false} /></> : null}</BarChart></ResponsiveContainer></div><details className="chart-data-details"><summary>查看{label}数据</summary><div className="chart-data-table-wrap"><table><caption className="sr-only">{label}每日趋势数据</caption><thead><tr><th>日期</th><th>{label}</th>{view === "composite" ? <><th>急性负荷</th><th>慢性负荷</th><th>状态</th></> : null}</tr></thead><tbody>{data.map((item) => <tr key={item.localDate}><td>{item.localDate}</td><td>{item.selectedLoad === null ? "--" : item.selectedLoad.toFixed(1)}</td>{view === "composite" ? <><td>{item.acuteEwma === null ? "--" : item.acuteEwma.toFixed(1)}</td><td>{item.chronicEwma === null ? "--" : item.chronicEwma.toFixed(1)}</td><td>{item.form === null ? "--" : item.form.toFixed(1)}</td></> : null}</tr>)}</tbody></table></div></details></div>;
 }
 
 export function StatisticsPage() {
@@ -149,6 +202,10 @@ export function StatisticsPage() {
   return <div className="page statistics-page statistics-reference-page">
     <header className="page-header split runner-page-header statistics-reference-header"><div><h1>运动统计</h1><p>{overview.data.status?.localDate ?? "--"} · 跑量、训练负荷与恢复节奏</p></div><div className="segmented" role="group" aria-label="统计周期">{granularities.map((item) => <button type="button" key={item.value} className={granularity === item.value ? "active" : ""} aria-pressed={granularity === item.value} onClick={() => setGranularity(item.value)}>{item.label}</button>)}</div></header>
     <StatusPanel metric={overview.data.status} confidence={overview.data.statusConfidence} />
+    <FormRecoveryPanel
+      day={timeline.data && timeline.dataPath === "/v1/training-statistics/load?days=180" ? timeline.data.days.at(-1) ?? null : null}
+      recovery={overview.data.recoveryTime}
+    />
     {current ? <>
       <section className="statistics-kpis" aria-label="当前周期统计">
         <PeriodMetric label="跑量" value={`${km(current.distanceMeters)} km`} comparison={current.comparison?.distanceChangeFraction ?? null} />

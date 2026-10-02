@@ -22,8 +22,8 @@ import type {
   WorkoutListItem
 } from "@rai/api-contracts";
 import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, type DailyTrainingMetric } from "@rai/contracts";
-import { SqliteRecoveryFactsReadRepository } from "@rai/storage-sqlite";
-import { classifyPhysState, countNightsBelowSleepBaseline } from "@rai/training-load";
+import { SqliteRecoveryFactsReadRepository, SqliteTrainingStatisticsReadRepository } from "@rai/storage-sqlite";
+import { classifyPhysState, countNightsBelowSleepBaseline, estimateRecoveryTime } from "@rai/training-load";
 import { loadRaceReadiness } from "@rai/application";
 
 import {
@@ -136,6 +136,7 @@ export function assembleMobileCoach(args: {
   | "nextSession"
   | "decision"
   | "recovery"
+  | "recoveryTime"
   | "recoveryAssessment"
   | "readinessSnapshot"
   | "recommendation"
@@ -359,6 +360,14 @@ export function assembleMobileCoach(args: {
       reasonCodes: assessment.reasonCodes,
       lastObservationDate: observationDates.length === 0 ? null : observationDates.sort().at(-1)!
     },
+    // §9.6：纯负荷外推，**刻意不合并**今日 physState。physState 已经影响 verdict 与
+    // 处方，这里再乘一次等于同一份证据被用了两遍；而且"量到的恢复证据"与"从负荷推
+    // 出来的恢复时间"放在同一张卡片上，后者会看起来像前者。
+    recoveryTime: estimateRecoveryTime({
+      now: new Date(),
+      recentLoads: new SqliteTrainingStatisticsReadRepository(database).recentLoads(5),
+      chronicEwma: args.latestMetric?.chronicEwma ?? null
+    }),
     recommendation: {
       ...buildRecommendation(input, assessment, verdict),
       plannedKind: planned?.kind ?? null,

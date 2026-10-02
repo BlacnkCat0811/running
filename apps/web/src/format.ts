@@ -189,6 +189,37 @@ const environmentReasonLabels: Record<string, string> = {
 export const environmentStatus = (value: string): string => environmentStatusLabels[value] ?? value;
 export const environmentReason = (value: string): string => environmentReasonLabels[value] ?? value;
 
+/**
+ * §9.6 form and recovery wording.
+ *
+ * Both quantities are derived from load, and the wording must keep that visible:
+ * `loaded` is a statement about the load curve, not a diagnosis, and a recovery
+ * estimate is an extrapolation rather than a measurement.
+ */
+const formStatusLabels: Record<string, string> = {
+  insufficient_data: "数据不足",
+  transition: "状态过剩",
+  fresh: "较新鲜",
+  neutral: "负荷平衡",
+  loaded: "负荷偏高",
+  overreached: "负荷显著偏高"
+};
+
+const recoveryBasisLabels: Record<string, string> = {
+  load_proxy_not_measurement: "按负荷推算，非实测恢复状态",
+  no_finished_session_with_load: "没有已完成的训练可作为起点",
+  no_chronic_load_context: "长期负荷背景不足，无法外推",
+  relative_load_capped: "单次负荷已达相对上限",
+  readiness_strained_multiplier: "已合并当天恢复不足的证据",
+  readiness_caution_multiplier: "已合并当天恢复偏低的证据",
+  recovery_capped_at_maximum: "已达估计上限",
+  recovery_window_elapsed: "恢复窗口已结束",
+  low_load_confidence: "该次负荷置信度偏低"
+};
+
+export const formStatus = (value: string): string => formStatusLabels[value] ?? value;
+export const recoveryBasis = (value: string): string => recoveryBasisLabels[value] ?? value;
+
 const explanationLabels: Record<string, string> = {
   efficiency_below_baseline: "心率效率低于个人基线",
   efficiency_above_baseline: "心率效率高于个人基线",

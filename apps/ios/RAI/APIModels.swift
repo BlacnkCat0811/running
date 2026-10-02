@@ -175,6 +175,33 @@ struct MobileNextSession: Codable {
     let structure: MobileSessionStructure?
 }
 
+/// §9.6 load-proxy recovery estimate: hours until a quality session is supported.
+///
+/// `isLoadProxy` is decoded rather than assumed so an older server that one day
+/// sends something else cannot be presented as a measurement. `basisCodes` are
+/// rendered through `nativeRecoveryBasis`, never as raw codes.
+struct RecoveryTimeEstimate: Codable {
+    let policyVersion: String
+    let status: String
+    let remainingHours: Double?
+    let readyAt: String?
+    let anchor: RecoveryTimeAnchor?
+    let basisCodes: [String]
+    let isLoadProxy: Bool
+    let confidence: Double?
+
+    /// A finished session is not a supportable anchor.
+    var isAvailable: Bool { status == "available" && remainingHours != nil }
+}
+
+struct RecoveryTimeAnchor: Codable {
+    let trainingSessionId: String
+    let localDate: String
+    let endedAt: String
+    let load: Double
+    let sessionType: String
+}
+
 struct MobileRecoveryBreakdown: Codable {
     let score: Double?
     let lastNightSleepMinutes: Double?
@@ -355,6 +382,11 @@ struct MobileTodayResponse: Codable {
     let verdict: MobileVerdict
     let nextSession: MobileNextSession
     let recovery: MobileRecoveryBreakdown
+    /// §9.6 load-proxy recovery estimate. Optional so a build that talks to an
+    /// older server keeps decoding the whole payload; the card is then hidden.
+    /// Deliberately separate from `recovery` above: that one reports *measured*
+    /// evidence, this one extrapolates from load.
+    let recoveryTime: RecoveryTimeEstimate?
     let postRun: MobilePostRunVerdict?
     let weekStructure: MobileWeekStructure
     let race: MobileRaceCard

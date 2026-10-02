@@ -627,3 +627,19 @@ export function buildDailyTrainingMetricsV2(loads: WorkoutTrainingLoad[], throug
       statusExplanations:assessment.explanations};
   });
 }
+
+// §9.6 状态曲线与恢复时间：读时派生，不写回持久化日指标。
+export {
+  TRAINING_FORM_POLICY_VERSION,
+  RECOVERY_TIME_POLICY_VERSION,
+  RECOVERY_BASE_HOURS,
+  defaultRecoveryTimeConfig,
+  defaultTrainingFormConfig,
+  classifyTrainingForm,
+  estimateRecoveryTime,
+  withTrainingForm,
+  type RecentLoadInput,
+  type RecoveryTimeConfig,
+  type RecoveryTimeInput,
+  type TrainingFormConfig
+} from "./form.js";

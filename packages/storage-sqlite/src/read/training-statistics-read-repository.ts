@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type {
   DailyTrainingMetric,
+  SessionType,
   StimulusType,
   TrainingPeriodSummary,
   TrainingStatisticsGranularity,
@@ -44,6 +45,51 @@ export class SqliteTrainingStatisticsReadRepository {
       `)
       .all(start, end) as unknown as Record<string, unknown>[];
     return rows.map(mapDailyMetric);
+  }
+
+  /**
+   * The most recent finished sessions with their load, newest first.
+   *
+   * `endedAt` comes from `training_sessions.anchor_end_at`: a recovery estimate
+   * needs the clock start, and a local date cannot express "seven hours ago".
+   * Rows without a parsable end time are dropped rather than defaulted to now —
+   * that would silently reset the clock to zero elapsed time.
+   */
+  recentLoads(limit: number): Array<{
+    trainingSessionId: string;
+    localDate: string;
+    endedAt: string;
+    load: number;
+    sessionType: SessionType;
+    confidence: number;
+  }> {
+    const rows = this.database
+      .prepare(`
+        SELECT load.training_session_id, load.local_date, load.training_load,
+          load.session_type, load.confidence, session.anchor_end_at
+        FROM active_workout_training_loads load
+        JOIN training_sessions session ON session.id = load.training_session_id
+        WHERE session.anchor_end_at IS NOT NULL
+        ORDER BY session.anchor_end_at DESC
+        LIMIT ?
+      `)
+      .all(limit) as unknown as Record<string, unknown>[];
+    return rows.flatMap((row) => {
+      const endedAt = typeof row.anchor_end_at === "string" ? row.anchor_end_at : null;
+      const load = nullableNumber(row.training_load);
+      const confidence = nullableNumber(row.confidence);
+      if (endedAt === null || !Number.isFinite(Date.parse(endedAt)) || load === null || confidence === null) {
+        return [];
+      }
+      return [{
+        trainingSessionId: String(row.training_session_id),
+        localDate: String(row.local_date),
+        endedAt,
+        load,
+        sessionType: String(row.session_type) as SessionType,
+        confidence
+      }];
+    });
   }
 
   loadComponentsBetween(start: string, end: string): LoadTimelineComponent[] {

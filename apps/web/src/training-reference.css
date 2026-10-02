@@ -388,4 +388,29 @@
   .detail-page .splits-grade-summary b { margin-left: 4px; font-size: 11px; }
   .detail-page .splits-grade-summary small { flex-basis: 100%; opacity: 0.7; }
   .detail-page .splits-grade-note { margin: 0 2px 6px; font-size: 9px; opacity: 0.8; }
+
+  /* Statistics: form + recovery (§9.6). One panel, two derived quantities, and a
+     footnote that says neither is a measurement. */
+  .statistics-reference-page .form-recovery-panel { margin-top: 12px; padding: 10px 12px; }
+  .statistics-reference-page .form-recovery-panel .panel-heading { min-height: 30px; padding: 0 2px 6px; }
+  .statistics-reference-page .form-recovery-panel .panel-heading code { font-size: 10px; }
+  .statistics-reference-page .form-recovery-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--training-grid);
+  }
+  .statistics-reference-page .form-recovery-grid > div { padding: 10px 12px; border-right: 1px dashed var(--training-grid); }
+  .statistics-reference-page .form-recovery-grid > div:last-child { border-right: 0; }
+  .statistics-reference-page .form-recovery-grid small { display: block; font-size: 9px; opacity: 0.75; }
+  .statistics-reference-page .form-recovery-grid b { display: block; margin-top: 5px; font-size: 20px; }
+  .statistics-reference-page .form-recovery-grid span { display: block; margin-top: 3px; font-size: 11px; }
+  .statistics-reference-page .form-recovery-grid em { display: block; margin-top: 6px; font-size: 9px; font-style: normal; opacity: 0.72; }
+  .statistics-reference-page .form-status.form-transition,
+  .statistics-reference-page .form-status.form-fresh { color: #1f6d4c; }
+  .statistics-reference-page .form-status.form-loaded { color: #b87822; }
+  .statistics-reference-page .form-status.form-overreached { color: #b94f3f; }
+  .statistics-reference-page .form-status.form-insufficient_data { opacity: 0.6; }
+  .statistics-reference-page .form-recovery-basis { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .statistics-reference-page .form-recovery-basis span { padding: 2px 7px; border: 1px solid var(--training-grid); font-size: 9px; }
+  .statistics-reference-page .form-recovery-note { margin: 8px 2px 0; font-size: 9px; line-height: 1.5; opacity: 0.8; }
 }
