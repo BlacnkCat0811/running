@@ -404,7 +404,9 @@ export const predictionModelTrainBodySchema = {
       minLength: 20,
       maxLength: 35,
       pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,3})?(?:Z|[+-]\\d{2}:\\d{2})$"
-    }
+    },
+    // §12.12 训练范围：缺省 population（老客户端不因为升级就换成更低的门槛）。
+    scope: { type: "string", enum: ["population", "personal"] }
   }
 } as const;
 

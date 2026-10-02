@@ -1232,9 +1232,20 @@ export interface PredictionModelEvaluationMetrics {
   byDistance: Record<RaceDistance, PredictionModelDistanceMetrics>;
 }
 
+/**
+ * Which floor a training run was gated by (docs/ALGORITHM.md §12.12).
+ *
+ * `scope` changes **how much data** is required, never **how good the model must be**:
+ * a personal model still has to beat the rule baseline by `MINIMUM_MAE_IMPROVEMENT` on
+ * held-out data. It exists so a personal model is never mistaken for a population one
+ * after activation.
+ */
+export type PredictionModelScope = "population" | "personal";
+
 export interface PredictionModelRun {
   id: string;
   algorithm: "catboost";
+  scope: PredictionModelScope;
   modelVersion: string;
   featureSchemaVersion: string;
   featureSchemaHash: string | null;

@@ -10,6 +10,7 @@ import {
   type PredictionModelEvent,
   type PredictionModelEvaluationMetrics,
   type PredictionModelRun,
+  type PredictionModelScope,
   type PredictionModelTrainingRequest,
   type PredictionModelTrainingResult,
   type RaceDistance
@@ -43,6 +44,37 @@ export const MINIMUM_HOLDOUT_PREDICTIONS = 24;
 export const MINIMUM_HOLDOUTS_PER_DISTANCE = 6;
 export const MINIMUM_WALK_FORWARD_PREDICTIONS = 12;
 export const MINIMUM_WALK_FORWARD_PER_DISTANCE = 3;
+/**
+ * Personal scope's floors **are** the artifact's own floors.
+ *
+ * Deliberately not a new pair of numbers: a personal model is trained on one runner,
+ * and what it needs is exactly what the artifact contract already requires before it
+ * can be fitted at all (24 labels, 4 per distance). Inventing separate constants would
+ * be a second place for "how much is enough" to drift.
+ */
+export const PERSONAL_MINIMUM_LABELS = MINIMUM_ARTIFACT_TRAINING_LABELS;
+export const PERSONAL_MINIMUM_LABELS_PER_DISTANCE = MINIMUM_ARTIFACT_TRAINING_LABELS_PER_DISTANCE;
+
+export interface PredictionScopeFloors {
+  scope: PredictionModelScope;
+  requiredLabels: number;
+  requiredLabelsPerDistance: number;
+}
+
+export function predictionScopeFloors(scope: PredictionModelScope): PredictionScopeFloors {
+  return scope === "personal"
+    ? {
+        scope,
+        requiredLabels: PERSONAL_MINIMUM_LABELS,
+        requiredLabelsPerDistance: PERSONAL_MINIMUM_LABELS_PER_DISTANCE
+      }
+    : {
+        scope,
+        requiredLabels: MINIMUM_PREDICTION_LABELS,
+        requiredLabelsPerDistance: MINIMUM_LABELS_PER_DISTANCE
+      };
+}
+
 export const MINIMUM_MAE_IMPROVEMENT = 0.05;
 export const MAXIMUM_DISTANCE_MAE_REGRESSION = 0.05;
 export const MAXIMUM_INTERVAL_COVERAGE_DROP = 0.05;
@@ -90,10 +122,26 @@ interface PredictionModelRunRow {
   startedAt: string | null;
   completedAt: string | null;
   activatedAt: string | null;
+  requestJson: string;
   workerToken: string | null;
   heartbeatAt: string | null;
   attemptCount: number;
   active: number;
+}
+
+/**
+ * Scope of a stored run, read back from `request_json`.
+ *
+ * A run with no recorded scope predates the field and was trained under the
+ * population gate — that is the honest default, not "personal".
+ */
+function storedScope(requestJson: string): PredictionModelScope {
+  try {
+    const parsed = JSON.parse(requestJson) as { scope?: unknown };
+    return parsed.scope === "personal" ? "personal" : "population";
+  } catch {
+    return "population";
+  }
 }
 
 interface PredictionModelEventRow {
@@ -106,7 +154,7 @@ interface PredictionModelEventRow {
   createdAt: string;
 }
 
-export interface PredictionTrainingPreflight {
+export interface PredictionTrainingPreflight extends PredictionScopeFloors {
   available: number;
   availableByDistance: Record<RaceDistance, number>;
   eligible: boolean;
@@ -117,8 +165,9 @@ export class PredictionTrainingPreconditionError extends Error {
 
   constructor(readonly preflight: PredictionTrainingPreflight) {
     super(
-      `CatBoost 训练至少需要 ${MINIMUM_PREDICTION_LABELS} 个标签，` +
-      `且每个距离至少 ${MINIMUM_LABELS_PER_DISTANCE} 个；当前共有 ${preflight.available} 个`
+      `CatBoost 训练（${preflight.scope === "personal" ? "个人" : "人群"}范围）至少需要 ` +
+      `${preflight.requiredLabels} 个标签，且每个距离至少 ${preflight.requiredLabelsPerDistance} 个；` +
+      `当前共有 ${preflight.available} 个`
     );
   }
 }
@@ -166,6 +215,8 @@ export const MAXIMUM_PREDICTION_TRAINING_ATTEMPTS = 3;
 
 export interface EnqueuePredictionTrainingInput {
   asOf?: string;
+  /** Defaults to `population`: an unqualified training request keeps the old gate. */
+  scope?: PredictionModelScope;
 }
 
 interface PredictionModelStore {
@@ -240,7 +291,7 @@ export class PredictionModelService {
     this.artifactRoot = resolve(artifactRoot ?? runtimeVar, artifactRoot ? "" : "model-artifacts/prediction");
   }
 
-  preflight(asOf: string): PredictionTrainingPreflight {
+  preflight(asOf: string, scope: PredictionModelScope = "population"): PredictionTrainingPreflight {
     if (!isIsoDate(asOf)) {
       throw new PredictionTrainingInputError("asOf 必须是带时区的有效 ISO 8601 时间");
     }
@@ -250,13 +301,15 @@ export class PredictionModelService {
     const samples = buildRaceResidualTrainingDataset(this.store.database, asOf).samples;
     const availableByDistance = emptyDistanceCounts();
     for (const sample of samples) availableByDistance[sample.distance] += 1;
+    const floors = predictionScopeFloors(scope);
     return {
+      ...floors,
       available: samples.length,
       availableByDistance,
       eligible:
-        samples.length >= MINIMUM_PREDICTION_LABELS &&
+        samples.length >= floors.requiredLabels &&
         distances.every(
-          (distance) => availableByDistance[distance] >= MINIMUM_LABELS_PER_DISTANCE
+          (distance) => availableByDistance[distance] >= floors.requiredLabelsPerDistance
         )
     };
   }
@@ -282,7 +335,8 @@ export class PredictionModelService {
       throw new PredictionTrainingInProgressError(existingBeforePreflight.id);
     }
     const sourceFingerprint = predictionTrainingSourceFingerprint(this.store.database);
-    const preflight = this.preflight(asOf);
+    const scope: PredictionModelScope = input.scope ?? "population";
+    const preflight = this.preflight(asOf, scope);
     if (!preflight.eligible) throw new PredictionTrainingPreconditionError(preflight);
     const abilityBaselineHash = currentAbilityBaselineHash(this.store.database);
     if (abilityBaselineHash === null) {
@@ -326,7 +380,7 @@ export class PredictionModelService {
         abilityBaselineHash,
         asOf,
         JSON.stringify(CATBOOST_V1_HYPERPARAMETERS),
-        JSON.stringify({ asOf }),
+        JSON.stringify({ asOf, scope }),
         preflight.available,
         JSON.stringify(preflight.availableByDistance),
         now
@@ -1063,6 +1117,7 @@ export class PredictionModelService {
         run.cancel_requested AS cancelRequested, run.failure_json AS failureJson,
         run.created_at AS createdAt, run.started_at AS startedAt,
         run.completed_at AS completedAt, run.activated_at AS activatedAt,
+        run.request_json AS requestJson,
         run.worker_token AS workerToken, run.heartbeat_at AS heartbeatAt,
         run.attempt_count AS attemptCount,
         CASE WHEN active.prediction_model_run_id = run.id THEN 1 ELSE 0 END AS active
@@ -1076,6 +1131,7 @@ export class PredictionModelService {
       id: row.id,
       algorithm: row.algorithm,
       modelVersion: row.modelVersion,
+      scope: storedScope(row.requestJson),
       featureSchemaVersion: row.featureSchemaVersion,
       featureSchemaHash: row.featureSchemaHash,
       abilityBaselineHash: row.abilityBaselineHash,

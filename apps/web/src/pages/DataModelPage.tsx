@@ -753,14 +753,18 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
       setBusy(false);
     }
   };
-  const trainPredictionModel = async () => {
+  /**
+   * §12.12 训练范围。缺省人群：老行为不变；个人范围必须显式请求 ——
+   * 它训练出来的是**一个人**的模型，激活判据（优于规则基线 5%）一个字不放宽。
+   */
+  const trainPredictionModel = async (scope: "population" | "personal" = "population") => {
     setPredictionModelBusy(true);
     setPredictionModelNotice(null);
     setError(null);
     try {
       const result = await api<TrainPredictionModelResponse>(
         "/v1/prediction-models/train",
-        { method: "POST", body: "{}" },
+        { method: "POST", body: JSON.stringify({ scope }) },
       );
       setPredictionModelNotice({
         tone: "info",
@@ -779,6 +783,8 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
           : undefined;
       setPredictionModelNotice({
         tone: "error",
+        // 这句话是既有行为，不因为新增个人范围而改写：缺什么就说什么。
+        // 个人范围的建议另起一行渲染，读者不会把两件事混成一句。
         message: shortage
           ? `当前有 ${shortage.available}/${shortage.required} 条可用真实结果，尚不能训练。`
           : caught instanceof Error
@@ -1260,6 +1266,17 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
                   </dd>
                 </div>
               </dl>
+            ) : null}
+            {predictionModelNotice.shortage &&
+            predictionModelNotice.shortage.scope !== "personal" ? (
+              <button
+                type="button"
+                className="text-button"
+                disabled={predictionModelBusy}
+                onClick={() => void trainPredictionModel("personal")}
+              >
+                改用个人范围训练（≥24 条，每个距离 ≥4 条；激活判据不变）
+              </button>
             ) : null}
           </div>
         ) : null}

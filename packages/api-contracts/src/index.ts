@@ -40,6 +40,7 @@ export type {
   RunningDynamicsMetricName,
   RunningDynamicsMetricStatus,
   PerformanceEntry,
+  PredictionModelScope,
   PerformanceEntryDistance,
   ShareCardResponse,
   ShareCardRoutePoint,
@@ -66,6 +67,7 @@ import type {
   PredictionModelEvent,
   PredictionModelRun,
   PredictionModelRunStatus,
+  PredictionModelScope,
   RecoveryTimeEstimate,
   RunningDynamicsAnalysis,
   RunningDynamicsFlag,
@@ -82,6 +84,11 @@ import type {
 } from "@rai/contracts";
 
 export interface TrainPredictionModelRequest {
+  /**
+   * §12.12 训练范围。缺省 `population`：老客户端不会因为这次升级而拿到更低的门槛，
+   * 而个人范围需要显式请求 —— 它训练出来的是**一个人**的模型，必须能被认出来。
+   */
+  scope?: PredictionModelScope;
   /** Omit to reuse the current active training request, or use the server's current time for a new run. */
   asOf?: string;
 }
@@ -122,6 +129,8 @@ export interface PredictionModelDetailResponse {
 }
 
 export interface InsufficientPredictionLabelsResponse {
+  /** §12.12 拒绝时实际采用的门槛范围；个人请求不该被告知需要人群的 50 条。 */
+  scope?: PredictionModelScope;
   code: "insufficient_labeled_outcomes";
   required: number;
   available: number;

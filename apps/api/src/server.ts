@@ -1554,16 +1554,19 @@ app.post<{ Body: TrainPredictionModelRequest }>(
     try {
       const service = new PredictionModelService(store, predictionArtifactRoot);
       try {
-        const runId = service.enqueue({ asOf });
+        const runId = service.enqueue({ asOf, scope: request.body?.scope ?? "population" });
         predictionModelWorker.schedule();
         return { runId, status: "queued" as const };
       } catch (error) {
         if (error instanceof PredictionTrainingPreconditionError) {
           return reply.code(422).send({
             code: error.code,
-            required: MINIMUM_PREDICTION_LABELS,
+            // The refusal quotes the floors it actually applied: a personal request
+            // that fails must not be told it needs the population's 50 labels.
+            scope: error.preflight.scope,
+            required: error.preflight.requiredLabels,
             available: error.preflight.available,
-            requiredPerDistance: MINIMUM_LABELS_PER_DISTANCE,
+            requiredPerDistance: error.preflight.requiredLabelsPerDistance,
             availableByDistance: error.preflight.availableByDistance,
             message: error.message
           });

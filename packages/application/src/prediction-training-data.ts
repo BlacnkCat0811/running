@@ -15,7 +15,8 @@ import {
 } from "@rai/training-load";
 
 import {
-  loadLabeledRaceOutcomes
+  loadLabeledRaceOutcomes,
+  MANUAL_ENTRY_ID_PREFIX
 } from "./prediction-data.js";
 import {
   historicalEligibilitySql,
@@ -334,7 +335,21 @@ export function buildRaceResidualTrainingDataset(
   for (const outcome of outcomes) {
     // Apple workout weather and accumulated elevation are result metadata. Without
     // an independently timestamped pre-race scenario they are unavailable here.
-    const base = buildFormulaPredictionBase(database, outcome.observedAt, { mode: "current_prepared" });
+    //
+    // §12.10: a manually entered race **did not exist** on the day it was run, so
+    // "the rule's prediction at that moment" cannot include it or anything else
+    // entered later. Left on the session path, every manual label silently dropped out
+    // of the training set — the zero-label knot would have looked untied while the
+    // model still saw nothing. Manual labels therefore use the current state minus
+    // themselves, the same construction the personal calibration pass uses, and the
+    // split below still orders samples by `labelAvailableAt`, so a sample never
+    // trains on a prediction that postdates its own availability.
+    const base = outcome.id.startsWith(MANUAL_ENTRY_ID_PREFIX)
+      ? buildFormulaPredictionBase(database, asOf, {
+          mode: "current_prepared",
+          excludeLabelIds: [outcome.id]
+        })
+      : buildFormulaPredictionBase(database, outcome.observedAt, { mode: "current_prepared" });
     const prediction = base.snapshot.races.find((race) => race.distance === outcome.distance);
     if (!prediction || prediction.status !== "available" || prediction.predictedSeconds === null) {
       continue;
