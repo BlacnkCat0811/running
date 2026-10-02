@@ -17,6 +17,11 @@ import type {
   MobileSessionKind,
   MobileTodayResponse,
   MobileWorkoutPlanDay,
+  MobileAdherenceWeek,
+  MobilePeriodization,
+  MobilePlanAdherence,
+  MobileRaceTarget,
+  MobileReplanAdvice,
   MobileWorkoutPlanResponse,
   TrainingZonesCurrentResponse,
   WorkoutListItem
@@ -25,6 +30,9 @@ import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, type DailyTrainingMetric } from "@ra
 import { SqliteRecoveryFactsReadRepository, SqliteTrainingStatisticsReadRepository } from "@rai/storage-sqlite";
 import { classifyPhysState, countNightsBelowSleepBaseline, estimateRecoveryTime } from "@rai/training-load";
 import { loadRaceReadiness } from "@rai/application";
+import { buildPeriodization } from "./plan-periodization.js";
+import { buildPlanAdherence, replanAdvice, type PlanDayObservation } from "./plan-adherence.js";
+import type { PlanHistoryRevision } from "./mobile-goals.js";
 
 import {
   assessRecovery,
@@ -109,6 +117,40 @@ const recoveryNote = (
   return note;
 };
 
+/**
+ * §20 periodisation, adherence and re-plan advice for the today payload.
+ *
+ * All three are computed here rather than stored: the skeleton must follow the race
+ * target the moment it changes, adherence must be re-derivable from the plan journal
+ * plus observations, and neither may write anything.
+ */
+function planSurfaces(args: {
+  today: string;
+  goals: { raceTarget?: MobileRaceTarget | null };
+  planHistory?: readonly PlanHistoryRevision[];
+  recentWeeklyKm?: number;
+  planActual?: readonly PlanDayObservation[];
+}): {
+  periodization: MobilePeriodization | null;
+  adherence: MobilePlanAdherence | null;
+  replan: MobileReplanAdvice | null;
+} {
+  const raceTarget = args.goals.raceTarget ?? null;
+  const periodization = raceTarget
+    ? buildPeriodization({ today: args.today, raceTarget, recentWeeklyKm: args.recentWeeklyKm ?? 0 })
+    : null;
+  if (periodization === null || args.planHistory === undefined) {
+    return { periodization, adherence: null, replan: null };
+  }
+  const adherence = buildPlanAdherence({
+    today: args.today,
+    history: args.planHistory,
+    actual: args.planActual ?? [],
+    periodization
+  });
+  return { periodization, adherence, replan: replanAdvice({ adherence, periodization }) };
+}
+
 export function assembleMobileCoach(args: {
   database: DatabaseSync;
   dashboard: DashboardResponse;
@@ -128,6 +170,12 @@ export function assembleMobileCoach(args: {
   coverage: MobileCoverage;
   fourWeekDistanceChangeFraction: number | null;
   previousWeekDistanceKm: number;
+  /** Plan revision journal, newest first; read-time only (never rewritten here). */
+  planHistory?: readonly PlanHistoryRevision[];
+  /** The athlete's own recent weekly volume, in km, as the baseline for phase bands. */
+  recentWeeklyKm?: number;
+  /** Per-day observations for adherence, already summed by the caller. */
+  planActual?: readonly PlanDayObservation[];
 }): Pick<
   MobileTodayResponse,
   | "ability"
@@ -137,6 +185,9 @@ export function assembleMobileCoach(args: {
   | "decision"
   | "recovery"
   | "recoveryTime"
+  | "periodization"
+  | "adherence"
+  | "replan"
   | "recoveryAssessment"
   | "readinessSnapshot"
   | "recommendation"
@@ -363,6 +414,7 @@ export function assembleMobileCoach(args: {
     // §9.6：纯负荷外推，**刻意不合并**今日 physState。physState 已经影响 verdict 与
     // 处方，这里再乘一次等于同一份证据被用了两遍；而且"量到的恢复证据"与"从负荷推
     // 出来的恢复时间"放在同一张卡片上，后者会看起来像前者。
+    ...planSurfaces(args),
     recoveryTime: estimateRecoveryTime({
       now: new Date(),
       recentLoads: new SqliteTrainingStatisticsReadRepository(database).recentLoads(5),

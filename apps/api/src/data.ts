@@ -93,6 +93,29 @@ const paceSeconds = (duration: number, distance: number | null): number | null =
 
 const localDateInShanghai = (value: Date): string => localCalendarFormatter(DATABASE_TIMEZONE, "day").format(value);
 
+/**
+ * Mean distance of the athlete's last four complete weeks, in km.
+ *
+ * Complete weeks only: the week in progress is systematically short, and feeding it
+ * into the phase bands would shrink every plan a little more each day.
+ */
+export function recentWeeklyKm(
+  metrics: ReadonlyArray<{ localDate: string; distanceMeters: number }>,
+  today: string
+): number {
+  const currentWeekStart = mobileWeekStart(today);
+  const totals = new Map<string, number>();
+  for (const metric of metrics) {
+    const weekStart = mobileWeekStart(metric.localDate);
+    if (weekStart >= currentWeekStart) continue;
+    totals.set(weekStart, (totals.get(weekStart) ?? 0) + metric.distanceMeters);
+  }
+  const weeks = [...totals.entries()].sort((left, right) => right[0].localeCompare(left[0])).slice(0, 4);
+  if (weeks.length === 0) return 0;
+  const mean = weeks.reduce((sum, [, meters]) => sum + meters, 0) / weeks.length;
+  return Math.round((mean / 1_000) * 10) / 10;
+}
+
 export const mobileLocalDate = (): string => localDateInShanghai(new Date());
 
 const shiftMobileDate = (date: string, days: number): string => {
@@ -470,6 +493,12 @@ export class RaiReadStore {
           ? Math.min(1, weekDistanceKm / goalDistanceKm)
           : null
     };
+    // One observation query feeds both the seven-day execution strip and §20
+    // adherence: two queries would be two chances for them to disagree.
+    const planActual = this.database.prepare(`
+      SELECT local_date AS localDate, SUM(distance_km) AS distanceKm, COUNT(*) AS workoutCount
+      FROM active_workout_training_loads WHERE local_date >= ? AND local_date < ? GROUP BY local_date
+    `).all(shiftMobileDate(today, -28), today) as Array<{ localDate: string; distanceKm: number; workoutCount: number }>;
     const coach = assembleMobileCoach({
       database: this.database,
       dashboard,
@@ -490,14 +519,12 @@ export class RaiReadStore {
       },
       coverage,
       fourWeekDistanceChangeFraction,
-      previousWeekDistanceKm: this.previousWeekDistanceKm(today)
+      previousWeekDistanceKm: this.previousWeekDistanceKm(today),
+      planHistory: planHistory ?? [],
+      recentWeeklyKm: recentWeeklyKm(recentMetrics, today),
+      planActual
     });
-    const recentPlanExecution = planHistory === undefined ? undefined : buildPlanExecution(today, planHistory,
-      this.database.prepare(`
-        SELECT local_date AS localDate, SUM(distance_km) AS distanceKm, COUNT(*) AS workoutCount
-        FROM active_workout_training_loads WHERE local_date >= ? AND local_date < ? GROUP BY local_date
-      `).all(shiftMobileDate(today, -7), today) as Array<{ localDate: string; distanceKm: number; workoutCount: number }>
-    );
+    const recentPlanExecution = planHistory === undefined ? undefined : buildPlanExecution(today, planHistory, planActual);
     // Kept for clients that have not shipped the `sync`/`coverage` reads yet, and
     // now derived from the refresh outcome alone. It used to answer "is there a
     // main night dated today", which reported an ordinary coverage gap — a night

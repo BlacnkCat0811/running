@@ -186,6 +186,11 @@ field_anchors = {
     # 2026-10-02 §9.6：负荷外推的建议间隔。它与 `recovery`（实测证据）是相邻但**不同**的
     # 两个对象，所以锚点也必须分开 —— 复用同一个锚点会让"卡片还在"同时为两条判据背书。
     "recoveryTime": "estimate.isAvailable",
+    # 2026-10-02 §20：周期骨架、依从性与重排建议。三者都要有落点 —— 一个"计划阶段"
+    # 不显示在今天页上，用户就只能在减量期里按专项期的量去跑。
+    "periodization": "data.periodization",
+    "adherence": "data.adherence",
+    "replan": "data.replan",
     "postRun": "today.postRun",
     "weekStructure": "data.weekStructure.",
     "race": "data.race.",

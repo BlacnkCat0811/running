@@ -1,0 +1,229 @@
+import type { MobileRaceDistance, MobileRaceTarget } from "@rai/api-contracts";
+
+/**
+ * Race-driven multi-week periodisation (docs/ALGORITHM.md §20).
+ *
+ * The coach used to reason one week at a time: `race-plan-policy` knew a 14-day
+ * taper window and nothing else, so a half-marathon eight weeks out and a parkrun
+ * next Saturday produced the same weekly structure. This module is the missing
+ * skeleton — phases, volume bands, long-run caps and quality doses derived from the
+ * race date — and it is **deterministic and read-time**: no LLM, nothing persisted.
+ *
+ * Two consequences of being read-time, both deliberate:
+ *
+ * 1. changing the race date immediately changes the whole skeleton, with no stale
+ *    window to reconcile;
+ * 2. the skeleton never *is* the plan. It is the envelope the weekly generation and
+ *    its validator are held to; the week itself is still drafted, previewed and
+ *    confirmed by the runner.
+ *
+ * Bands are policy constants for 5K/10K/half-marathon only. They are not fitted to
+ * outcomes, so nothing here claims they are optimal — only that a plan outside them
+ * is not what the coach intended to prescribe.
+ */
+
+export const PERIODIZATION_POLICY_VERSION = "rai-periodization-v1" as const;
+export const PERIODIZATION_MAXIMUM_WEEKS = 24;
+
+export type PeriodizationPhase = "base" | "build" | "peak" | "taper" | "race_week" | "past";
+
+export interface PeriodizationWeek {
+  /** Monday of the week, local date. */
+  weekStart: string;
+  phase: PeriodizationPhase;
+  /** Whole weeks between this week's Monday and the race week (race week = 0). */
+  weeksToRace: number;
+  volumeBandKm: { lower: number; upper: number };
+  longRunCapKm: number;
+  /** Quality sessions this week should contain (tempo/interval/race). */
+  qualityDose: number;
+  note: string;
+}
+
+export interface Periodization {
+  policyVersion: typeof PERIODIZATION_POLICY_VERSION;
+  /** The day this skeleton was computed for. */
+  generatedFor: string;
+  raceDate: string | null;
+  distance: MobileRaceDistance | null;
+  weeks: PeriodizationWeek[];
+  current: PeriodizationWeek | null;
+  reasonCodes: string[];
+}
+
+/**
+ * Phase boundaries in whole weeks before the race.
+ *
+ * A half marathon needs the longest build; a 5K is mostly sharpening. The numbers
+ * are policy, and the test suite pins the boundaries so a change is a visible
+ * decision rather than a drifting constant.
+ */
+const PHASE_BOUNDARIES: Record<MobileRaceDistance, { base: number; build: number; peak: number }> = {
+  five_k: { base: 4, build: 2, peak: 1 },
+  ten_k: { base: 6, build: 3, peak: 2 },
+  half_marathon: { base: 8, build: 4, peak: 2 }
+};
+
+/** Volume bands as a fraction of the athlete's own recent weekly volume. */
+const PHASE_VOLUME: Record<PeriodizationPhase, { lower: number; upper: number }> = {
+  base: { lower: 0.9, upper: 1.05 },
+  build: { lower: 0.95, upper: 1.1 },
+  peak: { lower: 0.9, upper: 1.05 },
+  taper: { lower: 0.55, upper: 0.75 },
+  race_week: { lower: 0.4, upper: 0.6 },
+  past: { lower: 0.5, upper: 0.9 }
+};
+
+/** Long-run share of the week, and the absolute ceiling per target distance. */
+const PHASE_LONG_RUN_SHARE: Record<PeriodizationPhase, number> = {
+  base: 0.32,
+  build: 0.38,
+  peak: 0.38,
+  taper: 0.3,
+  race_week: 0.25,
+  past: 0.3
+};
+
+const DISTANCE_LONG_RUN_CAP_KM: Record<MobileRaceDistance, number> = {
+  five_k: 14,
+  ten_k: 18,
+  half_marathon: 28
+};
+
+const QUALITY_DOSE: Record<PeriodizationPhase, number> = {
+  base: 1,
+  build: 2,
+  peak: 2,
+  taper: 1,
+  race_week: 1,
+  past: 1
+};
+
+const PHASE_NOTES: Record<PeriodizationPhase, string> = {
+  base: "打基础：以轻松跑累积量，质量课保持一次。",
+  build: "专项期：量最大，质量课两次，长距离逐步拉长。",
+  peak: "强化期：维持量的同时提高质量课强度，不再加量。",
+  taper: "减量期：量降到常态的一半左右，保留少量质量刺激。",
+  race_week: "比赛周：只保留短促刺激，赛前 2 天完全轻松。",
+  past: "比赛已过：按恢复与下一次目标重新开始。"
+};
+
+const MINIMUM_BAND_KM = 5;
+const MAXIMUM_WEEKLY_KM = 200;
+
+const isLocalDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));
+
+/** Monday of the ISO week containing `date`. */
+export function periodizationWeekStart(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - ((value.getUTCDay() + 6) % 7));
+  return value.toISOString().slice(0, 10);
+}
+
+const shiftDate = (date: string, days: number): string => {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+};
+
+function phaseFor(weeksToRace: number, distance: MobileRaceDistance): PeriodizationPhase {
+  if (weeksToRace < 0) return "past";
+  const boundaries = PHASE_BOUNDARIES[distance];
+  if (weeksToRace === 0) return "race_week";
+  if (weeksToRace <= boundaries.peak) return "taper";
+  if (weeksToRace <= boundaries.peak + boundaries.build) return "build";
+  if (weeksToRace <= boundaries.peak + boundaries.build + boundaries.base) return "base";
+  return "base";
+}
+
+/** The quality dose the phase allows, as a ceiling the validator can use. */
+export function periodizationQualityCap(phase: PeriodizationPhase): number {
+  return QUALITY_DOSE[phase];
+}
+
+/** Volume fraction of the athlete's own recent week that the phase permits. */
+export function periodizationVolumeFraction(phase: PeriodizationPhase): number {
+  return PHASE_VOLUME[phase].upper;
+}
+
+export function buildPeriodization(input: {
+  today: string;
+  raceTarget: Pick<MobileRaceTarget, "date" | "distance"> | null | undefined;
+  /** The athlete's recent weekly volume, in km. */
+  recentWeeklyKm: number;
+}): Periodization {
+  const reasonCodes: string[] = [];
+  if (!isLocalDate(input.today)) throw new Error("buildPeriodization requires a local date for today");
+  const race = input.raceTarget;
+  const weekly = Number.isFinite(input.recentWeeklyKm)
+    ? Math.min(MAXIMUM_WEEKLY_KM, Math.max(0, input.recentWeeklyKm))
+    : 0;
+  if (weekly <= 0) reasonCodes.push("no_recent_weekly_volume");
+  if (!race || !isLocalDate(race.date)) {
+    return {
+      policyVersion: PERIODIZATION_POLICY_VERSION,
+      generatedFor: input.today,
+      raceDate: null,
+      distance: null,
+      weeks: [],
+      current: null,
+      reasonCodes: [...reasonCodes, "no_race_target"]
+    };
+  }
+
+  const raceWeekStart = periodizationWeekStart(race.date);
+  const currentWeekStart = periodizationWeekStart(input.today);
+  const weeksToRace = Math.round(
+    (Date.parse(`${raceWeekStart}T00:00:00Z`) - Date.parse(`${currentWeekStart}T00:00:00Z`)) / (7 * 86_400_000)
+  );
+  if (weeksToRace > PERIODIZATION_MAXIMUM_WEEKS) {
+    reasonCodes.push("race_beyond_maximum_horizon");
+  }
+  if (weeksToRace < 0) reasonCodes.push("race_in_the_past");
+
+  const baseline = weekly > 0 ? weekly : PHASE_VOLUME.base.lower * MINIMUM_BAND_KM;
+  // The skeleton is forward-looking: weeks already behind us are not part of it, and
+  // a race in the past produces no skeleton at all (the loop does not run).
+  // The horizon counts the race week itself: 24 weeks means 24 rows, not 25.
+  const firstOffset = Math.max(0, weeksToRace - (PERIODIZATION_MAXIMUM_WEEKS - 1));
+
+  const weeks: PeriodizationWeek[] = [];
+  for (let offset = firstOffset; offset <= weeksToRace; offset += 1) {
+    const weekStart = shiftDate(raceWeekStart, -7 * (weeksToRace - offset));
+    if (weekStart < currentWeekStart) continue;
+    const phase = phaseFor(offset, race.distance);
+    const band = PHASE_VOLUME[phase];
+    const volumeBandKm = {
+      lower: Math.max(MINIMUM_BAND_KM, Math.round(baseline * band.lower * 10) / 10),
+      upper: Math.max(MINIMUM_BAND_KM, Math.round(baseline * band.upper * 10) / 10)
+    };
+    const longRunCapKm = Math.min(
+      DISTANCE_LONG_RUN_CAP_KM[race.distance],
+      Math.max(
+        MINIMUM_BAND_KM,
+        Math.round(volumeBandKm.upper * PHASE_LONG_RUN_SHARE[phase] * 10) / 10
+      )
+    );
+    weeks.push({
+      weekStart,
+      phase,
+      weeksToRace: offset,
+      volumeBandKm,
+      longRunCapKm,
+      qualityDose: QUALITY_DOSE[phase],
+      note: PHASE_NOTES[phase]
+    });
+  }
+
+  const current = weeks.find((week) => week.weekStart === currentWeekStart) ?? null;
+  if (current === null && weeks.length > 0) reasonCodes.push("current_week_outside_window");
+  return {
+    policyVersion: PERIODIZATION_POLICY_VERSION,
+    generatedFor: input.today,
+    raceDate: race.date,
+    distance: race.distance,
+    weeks,
+    current,
+    reasonCodes
+  };
+}

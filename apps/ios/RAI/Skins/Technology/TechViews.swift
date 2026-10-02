@@ -20,6 +20,7 @@ struct TechTodayView: View {
                     trainingOverview(today)
                     if let postRun = today.postRun { postRunPanel(postRun) }
                     recommendationPanel(today)
+                    planPhaseLine(today)
                     abilityCard(today)
                     TechTodayMetrics(workout: today.recentWorkouts.first, refreshRevision: today.generatedAt)
                     raceSummary(today)
@@ -439,6 +440,46 @@ struct TechTodayView: View {
                         .foregroundStyle(TechColor.green)
                 }
                 TechWeekBars(points: data.weekDaily, today: data.today.localDate)
+            }
+        }
+    }
+
+    /// §20 one-line plan context for the today page.
+    ///
+    /// Phase, the week's band and how much of it was observed — three facts that
+    /// change what today's session means. The re-plan hint is a *suggestion*: it
+    /// never re-drafts anything, and the wording says so.
+    @ViewBuilder private func planPhaseLine(_ data: MobileTodayResponse) -> some View {
+        if let periodization = data.periodization, let week = periodization.current {
+            TechPanel {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(nativePhaseName(week.phase))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(TechColor.cyan)
+                        Text("\(techRaceDistanceName(periodization.distance ?? "")) · 距比赛 \(week.weeksToRace) 周")
+                            .font(.caption).foregroundStyle(TechColor.muted)
+                        Spacer(minLength: 0)
+                        if let adherence = data.adherence?.current {
+                            Text(nativeAdherenceName(adherence.status))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(adherence.status == "under" ? TechColor.coral : TechColor.muted)
+                        }
+                    }
+                    Text("本周 \(nativeNumber(week.volumeBandKm.lower, digits: 0))–\(nativeNumber(week.volumeBandKm.upper, digits: 0)) km · 长距离 ≤\(nativeNumber(week.longRunCapKm, digits: 0)) km · 质量课 ≤\(week.qualityDose)")
+                        .font(.caption).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let adherence = data.adherence?.current, adherence.plannedDistanceKm != nil {
+                        Text("已完成 \(nativeKilometers(adherence.observedDistanceKm)) / 计划 \(nativeKilometers(adherence.plannedDistanceKm))，其中 \(adherence.unknownDays) 天没有观测记录（不等于没跑）")
+                            .font(.caption2).foregroundStyle(TechColor.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let replan = data.replan, replan.recommended {
+                        Text("建议重新生成课表：\(replan.reasons.first?.detail ?? "")（需要你确认，不会自动修改）")
+                            .font(.caption2).foregroundStyle(TechColor.yellow)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
         }
     }

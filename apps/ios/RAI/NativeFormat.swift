@@ -382,6 +382,29 @@ func nativeEnvironmentReason(_ code: String) -> String {
     }
 }
 
+/// §20 phase and adherence wording. Keeping them out of the view means a new phase
+/// cannot silently fall through to a raw machine value.
+func nativePhaseName(_ phase: String) -> String {
+    switch phase {
+    case "base": return "打基础期"
+    case "build": return "专项期"
+    case "peak": return "强化期"
+    case "taper": return "减量期"
+    case "race_week": return "比赛周"
+    case "past": return "比赛已过"
+    default: return phase
+    }
+}
+
+func nativeAdherenceName(_ status: String) -> String {
+    switch status {
+    case "met": return "超额完成"
+    case "on_track": return "按计划"
+    case "under": return "低于计划"
+    default: return "无观测"
+    }
+}
+
 /// §19 dynamics reason wording. "The watch never recorded it" and "too few samples
 /// to compare" are different gaps and must not collapse into one sentence.
 func nativeDynamicsReason(_ code: String) -> String {

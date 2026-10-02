@@ -382,6 +382,11 @@ struct MobileTodayResponse: Codable {
     let verdict: MobileVerdict
     let nextSession: MobileNextSession
     let recovery: MobileRecoveryBreakdown
+    /// §20 race-driven skeleton, adherence and re-plan advice. Optional so an older
+    /// server keeps decoding; the section is then hidden.
+    let periodization: MobilePeriodization?
+    let adherence: MobilePlanAdherence?
+    let replan: MobileReplanAdvice?
     /// §9.6 load-proxy recovery estimate. Optional so a build that talks to an
     /// older server keeps decoding the whole payload; the card is then hidden.
     /// Deliberately separate from `recovery` above: that one reports *measured*
@@ -1177,6 +1182,75 @@ struct WorkoutSplitGrade: Codable {
     let gradeAdjustedPaceSecondsPerKm: Double?
     let policyVersion: String
     let reasonCodes: [String]
+}
+
+/// §20 race-driven periodisation. Read-time and deterministic: the skeleton follows
+/// the race target the moment it changes, and nothing here is persisted.
+struct MobilePeriodization: Codable {
+    let policyVersion: String
+    let generatedFor: String
+    let raceDate: String?
+    let distance: String?
+    let weeks: [MobilePeriodizationWeek]
+    let current: MobilePeriodizationWeek?
+    let reasonCodes: [String]
+}
+
+struct MobilePeriodizationWeek: Codable, Identifiable {
+    let weekStart: String
+    let phase: String
+    let weeksToRace: Int
+    let volumeBandKm: MobileVolumeBand
+    let longRunCapKm: Double
+    let qualityDose: Int
+    let note: String
+
+    var id: String { weekStart }
+}
+
+struct MobileVolumeBand: Codable {
+    let lower: Double
+    let upper: Double
+}
+
+/// §20 adherence. `unknownDays` is a first-class field: a planned day nobody observed
+/// is not a missed session, and the view must be able to say which it is.
+struct MobilePlanAdherence: Codable {
+    let policyVersion: String
+    let generatedFor: String
+    let weeks: [MobileAdherenceWeek]
+    let current: MobileAdherenceWeek?
+    let reasonCodes: [String]
+}
+
+struct MobileAdherenceWeek: Codable, Identifiable {
+    let weekStart: String
+    let phase: String?
+    let plannedDays: Int
+    let observedDays: Int
+    let unknownDays: Int
+    let plannedDistanceKm: Double?
+    let observedDistanceKm: Double
+    let volumeRatio: Double?
+    let qualityPlanned: Int
+    let qualityObserved: Int
+    let status: String
+
+    var id: String { weekStart }
+}
+
+/// §20 advice only. A re-draft still goes through preview/confirm.
+struct MobileReplanAdvice: Codable {
+    let policyVersion: String
+    let recommended: Bool
+    let reasons: [MobileReplanReason]
+}
+
+struct MobileReplanReason: Codable, Identifiable {
+    let code: String
+    let detail: String
+
+    var id: String { code }
 }
 
 /// D9 share card. The route arrives already trimmed: `polylines` is a list so a

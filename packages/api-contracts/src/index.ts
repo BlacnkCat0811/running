@@ -1066,6 +1066,59 @@ export interface MobileRecommendation {
 }
 
 /** Aggregated payload for the iOS home page ("今天"). */
+export type MobilePeriodizationPhase = "base" | "build" | "peak" | "taper" | "race_week" | "past";
+
+export interface MobilePeriodizationWeek {
+  weekStart: string;
+  phase: MobilePeriodizationPhase;
+  weeksToRace: number;
+  volumeBandKm: { lower: number; upper: number };
+  longRunCapKm: number;
+  qualityDose: number;
+  note: string;
+}
+
+/** §20 race-driven skeleton. Read-time and deterministic: no LLM, nothing persisted. */
+export interface MobilePeriodization {
+  policyVersion: string;
+  generatedFor: string;
+  raceDate: string | null;
+  distance: MobileRaceDistance | null;
+  weeks: MobilePeriodizationWeek[];
+  current: MobilePeriodizationWeek | null;
+  reasonCodes: string[];
+}
+
+export interface MobileAdherenceWeek {
+  weekStart: string;
+  phase: MobilePeriodizationPhase | null;
+  plannedDays: number;
+  observedDays: number;
+  /** Days the plan asked for a session and nothing was observed. Not "missed". */
+  unknownDays: number;
+  plannedDistanceKm: number | null;
+  observedDistanceKm: number;
+  volumeRatio: number | null;
+  qualityPlanned: number;
+  qualityObserved: number;
+  status: "unknown" | "on_track" | "under" | "met";
+}
+
+export interface MobilePlanAdherence {
+  policyVersion: string;
+  generatedFor: string;
+  weeks: MobileAdherenceWeek[];
+  current: MobileAdherenceWeek | null;
+  reasonCodes: string[];
+}
+
+/** Advice only: a re-draft still goes through preview/confirm. */
+export interface MobileReplanAdvice {
+  policyVersion: string;
+  recommended: boolean;
+  reasons: Array<{ code: string; detail: string }>;
+}
+
 export interface MobileTodayResponse {
   /** Strict dated V2 result; legacy clients may keep reading the compatible assessment. */
   readinessSnapshot?: import("@rai/contracts").ReadinessAssessmentResult;
@@ -1099,6 +1152,12 @@ export interface MobileTodayResponse {
   recoveryTime: RecoveryTimeEstimate;
   /** Why today's recommendation reads the way it does, and whether recovery was consulted. */
   recommendation: MobileRecommendation;
+  /** §20 race-driven skeleton for the coming weeks. Null when no race target is set. */
+  periodization: MobilePeriodization | null;
+  /** §20 weekly adherence. Null when no plan history exists. */
+  adherence: MobilePlanAdherence | null;
+  /** §20 whether to offer a re-draft. Never a write. */
+  replan: MobileReplanAdvice | null;
   /**
    * @deprecated Transitional flag, now derived from `sync`. It used to answer
    * "is there a main night dated today", which reported an ordinary coverage gap
