@@ -217,6 +217,21 @@ const recoveryBasisLabels: Record<string, string> = {
   low_load_confidence: "该次负荷置信度偏低"
 };
 
+/**
+ * §19 dynamics wording. "No samples" and "too few to compare" are different gaps,
+ * and a run whose watch never recorded contact time must not look like a run with
+ * a contact-time finding.
+ */
+const dynamicsReasonLabels: Record<string, string> = {
+  no_samples: "手表没有记录该指标",
+  coverage_below_minimum: "覆盖不足，未做前后对比",
+  comparable_speed_samples_insufficient: "同配速样本不足",
+  no_speed_matched_pairs: "后半程没有可配对的同配速样本",
+  matched_average_undefined: "同配速样本均值无法计算"
+};
+
+export const dynamicsReason = (value: string): string => dynamicsReasonLabels[value] ?? value;
+
 export const formStatus = (value: string): string => formStatusLabels[value] ?? value;
 export const recoveryBasis = (value: string): string => recoveryBasisLabels[value] ?? value;
 

@@ -1332,6 +1332,7 @@ struct TechWorkoutDetailView: View {
                     } else {
                         splitPanel(native.selectedSeries)
                     }
+                    if let dynamics = native.selectedSeries?.dynamics { dynamicsPanel(dynamics) }
                     qualityPanel(detail)
                     if let load = detail.trainingLoad { trainingLoadPanel(load) }
                     if let zones = detail.zoneSummary { zonePanel(zones) }
@@ -1524,6 +1525,66 @@ struct TechWorkoutDetailView: View {
                 .foregroundStyle(TechColor.ink).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+/// §19 stride read-out. Coverage and sample counts stay visible next to every
+    /// average: an average without its coverage is the failure this panel exists to
+    /// avoid, and these numbers are device estimates rather than measurements.
+    private func dynamicsPanel(_ dynamics: RunningDynamicsAnalysis) -> some View {
+        TechPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                TechSectionHeader(title: "跑姿动态", trailing: dynamics.policyVersion, trailingColor: TechColor.cyan)
+                Text("同一次跑的前后半程对比，且只在配速可比的位置比较；来自手表估计，未经实验室校验。")
+                    .font(.caption)
+                    .foregroundStyle(TechColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if dynamics.analysable.isEmpty {
+                    Text(dynamics.note ?? "这次训练没有可用的跑姿动态样本")
+                        .font(.footnote)
+                        .foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 12) {
+                        ForEach(dynamics.metrics) { metric in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(metric.label).font(.caption).foregroundStyle(TechColor.muted)
+                                Text(dynamicsAverage(metric)).font(.subheadline.weight(.semibold)).monospacedDigit()
+                                Text(dynamicsDrift(metric)).font(.caption2).foregroundStyle(TechColor.muted)
+                                Text("覆盖 \(nativeNumber(metric.coverage * 100, digits: 0))% · \(metric.samples) 样本")
+                                    .font(.caption2).foregroundStyle(TechColor.muted)
+                                if !metric.reasonCodes.isEmpty {
+                                    Text(metric.reasonCodes.map(nativeDynamicsReason).joined(separator: "；"))
+                                        .font(.caption2).foregroundStyle(TechColor.yellow)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                    if !dynamics.flags.isEmpty {
+                        ForEach(dynamics.flags) { flag in
+                            Text("\(flag.detail)（同配速样本 \(flag.comparableSamples) 个）")
+                                .font(.caption).foregroundStyle(TechColor.yellow)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if let note = dynamics.note {
+                        Text(note).font(.caption2).foregroundStyle(TechColor.muted)
+                    }
+                }
+            }
+        }
+    }
+
+    private func dynamicsAverage(_ metric: RunningDynamicsMetricAnalysis) -> String {
+        guard let average = metric.average else { return "--" }
+        let digits = metric.unit == "spm" ? 0 : 1
+        return "\(nativeNumber(average, digits: digits)) \(metric.unit)"
+    }
+
+    private func dynamicsDrift(_ metric: RunningDynamicsMetricAnalysis) -> String {
+        guard let drift = metric.driftFraction else { return "无同配速对比" }
+        let sign = drift > 0 ? "+" : ""
+        return "后半程 \(sign)\(nativeNumber(drift * 100, digits: 1))%"
     }
 
     /// Environment read-out (docs/ALGORITHM.md §5).

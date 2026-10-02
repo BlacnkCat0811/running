@@ -382,6 +382,19 @@ func nativeEnvironmentReason(_ code: String) -> String {
     }
 }
 
+/// §19 dynamics reason wording. "The watch never recorded it" and "too few samples
+/// to compare" are different gaps and must not collapse into one sentence.
+func nativeDynamicsReason(_ code: String) -> String {
+    switch code {
+    case "no_samples": return "手表没有记录该指标"
+    case "coverage_below_minimum": return "覆盖不足，未做前后对比"
+    case "comparable_speed_samples_insufficient": return "同配速样本不足"
+    case "no_speed_matched_pairs": return "后半程没有可配对的同配速样本"
+    case "matched_average_undefined": return "同配速样本均值无法计算"
+    default: return code
+    }
+}
+
 // `calibrationNeedsAttention(_:)` 已移到 `CalibrationState.swift`：那边是纯
 // Foundation，能被 `run-model-tests.sh` 在 macOS 上编译并钉住；本文件当时依赖
 // `PixelColor`（iOS 专属），判据留在这里就永远进不了秒级闸门。

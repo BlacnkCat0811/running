@@ -28,6 +28,13 @@ const series = (overrides: Partial<WorkoutSeriesResponse> = {}): WorkoutSeriesRe
   sourceCategory: "apple_watch",
   splits: [],
   grade: null,
+  dynamics: {
+    policyVersion: "rai-dynamics-v1",
+    evidenceStatus: "device_estimated_not_lab_validated",
+    metrics: [],
+    flags: [],
+    note: null
+  },
   segments: [],
   segmentPlan: null,
   segmentNote: null,

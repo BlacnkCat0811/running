@@ -60,6 +60,7 @@ import type {
 } from "@rai/api-contracts";
 import { buildPlanExecution } from "./plan-execution.js";
 import { environmentCoverage, environmentViewForWorkout, splitGradeContexts } from "./workout-environment.js";
+import { buildRunningDynamics } from "./workout-dynamics.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
 import { DEFAULT_WEEKLY_DISTANCE_KM, type PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
@@ -1195,6 +1196,80 @@ export class RaiReadStore {
         value: point.value
       }))
     });
+    const series = {
+      heartRate: this.asMetricSeries(
+        this.seriesRepository.metricSeries(
+          "HKQuantityTypeIdentifierHeartRate",
+          "count/min",
+          startedAt,
+          endedAt,
+          sourceName
+        )
+      ),
+      speed: this.asMetricSeries(
+        this.seriesRepository.metricSeries(
+          "HKQuantityTypeIdentifierRunningSpeed",
+          "km/hr",
+          startedAt,
+          endedAt,
+          sourceName
+        )
+      ),
+      power: this.asMetricSeries(
+        this.seriesRepository.metricSeries(
+          "HKQuantityTypeIdentifierRunningPower",
+          "W",
+          startedAt,
+          endedAt,
+          sourceName
+        )
+      ),
+      cadence: this.asMetricSeries(
+        this.seriesRepository.metricSeries(
+          "HKQuantityTypeIdentifierStepCount",
+          "spm",
+          startedAt,
+          endedAt,
+          sourceName,
+          (value, row) => {
+            const seconds = Math.max(
+              1,
+              (Date.parse(String(row.end_at)) - Date.parse(String(row.start_at))) / 1000
+            );
+            return value / (seconds / 60);
+          },
+          true
+        )
+      ),
+      elevation: this.asMetricSeries(this.seriesRepository.routeElevationSeries(id)),
+      strideLength: this.asMetricSeries(
+        this.seriesRepository.metricSeries(
+          "HKQuantityTypeIdentifierRunningStrideLength",
+          "m",
+          startedAt,
+          endedAt,
+          sourceName
+        )
+      ),
+      verticalOscillation: this.asMetricSeries(
+        this.seriesRepository.metricSeries(
+          "HKQuantityTypeIdentifierRunningVerticalOscillation",
+          "cm",
+          startedAt,
+          endedAt,
+          sourceName
+        )
+      ),
+      groundContactTime: this.asMetricSeries(
+        this.seriesRepository.metricSeries(
+          "HKQuantityTypeIdentifierRunningGroundContactTime",
+          "ms",
+          startedAt,
+          endedAt,
+          sourceName
+        )
+      )
+    };
     return {
       trainingSessionId: id,
       startedAt,
@@ -1206,80 +1281,13 @@ export class RaiReadStore {
       segmentPlan: segmentation.plan,
       segmentNote: segmentation.note,
       hasMeasuredWorkoutSteps: segmentation.hasMeasuredWorkoutSteps,
-      series: {
-        heartRate: this.asMetricSeries(
-          this.seriesRepository.metricSeries(
-            "HKQuantityTypeIdentifierHeartRate",
-            "count/min",
-            startedAt,
-            endedAt,
-            sourceName
-          )
-        ),
-        speed: this.asMetricSeries(
-          this.seriesRepository.metricSeries(
-            "HKQuantityTypeIdentifierRunningSpeed",
-            "km/hr",
-            startedAt,
-            endedAt,
-            sourceName
-          )
-        ),
-        power: this.asMetricSeries(
-          this.seriesRepository.metricSeries(
-            "HKQuantityTypeIdentifierRunningPower",
-            "W",
-            startedAt,
-            endedAt,
-            sourceName
-          )
-        ),
-        cadence: this.asMetricSeries(
-          this.seriesRepository.metricSeries(
-            "HKQuantityTypeIdentifierStepCount",
-            "spm",
-            startedAt,
-            endedAt,
-            sourceName,
-            (value, row) => {
-              const seconds = Math.max(
-                1,
-                (Date.parse(String(row.end_at)) - Date.parse(String(row.start_at))) / 1000
-              );
-              return value / (seconds / 60);
-            },
-            true
-          )
-        ),
-        elevation: this.asMetricSeries(this.seriesRepository.routeElevationSeries(id)),
-        strideLength: this.asMetricSeries(
-          this.seriesRepository.metricSeries(
-            "HKQuantityTypeIdentifierRunningStrideLength",
-            "m",
-            startedAt,
-            endedAt,
-            sourceName
-          )
-        ),
-        verticalOscillation: this.asMetricSeries(
-          this.seriesRepository.metricSeries(
-            "HKQuantityTypeIdentifierRunningVerticalOscillation",
-            "cm",
-            startedAt,
-            endedAt,
-            sourceName
-          )
-        ),
-        groundContactTime: this.asMetricSeries(
-          this.seriesRepository.metricSeries(
-            "HKQuantityTypeIdentifierRunningGroundContactTime",
-            "ms",
-            startedAt,
-            endedAt,
-            sourceName
-          )
-        )
-      }
+      // §19: coverage and speed-matched drift, computed at read time like the
+      // segments. Display-only — nothing here reaches CA/TA.
+      dynamics: buildRunningDynamics({
+        durationSeconds: Math.max(0, (Date.parse(endedAt) - Date.parse(startedAt)) / 1000),
+        series
+      }),
+      series
     };
   }
 

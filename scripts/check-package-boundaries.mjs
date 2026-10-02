@@ -52,6 +52,9 @@ const ALLOWED_EDGES = new Set([
   "application -> training-load",
   "application -> training-zones",
   "durability -> contracts",
+  // 2026-10-02 §19：跑姿动态读侧是纯逻辑包，只吃 contracts —— 它**不得**变成第二个
+  // 修正所有者（§5.5），也不得进入 CA/TA，所以刻意不给它 features/scoring 的边。
+  "dynamics -> contracts",
   "features -> contracts",
   "features -> normalization",
   "health-export-parser -> contracts",

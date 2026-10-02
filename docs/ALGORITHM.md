@@ -135,6 +135,16 @@ unknown prehistory/未同步日不能直接当作已观察到的休息日。Load
 
 界面上两者同处一块面板（"状态与恢复"）而不是两张卡：它们来自同一条负荷曲线，分开摆会诱导把恢复时间读成第四个测量值。
 
+### 9.7 跑姿动态读侧（2026-10-02）
+
+[dynamics](../packages/dynamics/src/index.ts) 是新的纯逻辑包，只依赖 contracts：手表上报的步频/步幅/垂直振幅/触地时间**已经进库、也已经在图上画出来**，但 `packages/features` 与 `packages/scoring` 对它们的引用数是 **0**。这条读侧把"存了但没分析"补上，边界是硬的：
+
+- `evidenceStatus = device_estimated_not_lab_validated` 随每次响应走；**读数不得进入 CA/TA**（没有实验室校验，也没有标签）。
+- 覆盖率按**时间**算，不按样本数：采样密集但只覆盖两分钟的序列不等于 60% 覆盖。低于 `MINIMUM_METRIC_COVERAGE` 报 `insufficient_coverage` 并给出真实覆盖率，**不给漂移数值**。
+- 前后半程只在**配速可比**的窗口内比较（`COMPARABLE_SPEED_TOLERANCE_MPS`）：否则一次正分段会被渲染成"步频崩了"，而那是关于配速的结论穿上了跑姿的外衣。配对样本不足时报 `no_speed_matched_pairs` 且 `driftFraction = null`。
+- 未知不是 0：没有样本 ⇒ `unavailable` + `no_samples`，均值/漂移都是 `null`。
+- 配对发生在 [workout-dynamics.ts](../apps/api/src/workout-dynamics.ts)（存储格式的知识在 API 层），分析本身在纯包内。
+
 ## 10. 分区
 
 [training-zones](../packages/training-zones/src/index.ts) 保留手工设置有效期、threshold/maxHR 来源、平滑与课型刺激。
@@ -254,6 +264,9 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
 | N02 | 上坡 / 下坡 / 平坦的同一配速 | 等强配速随坡度单调、零坡度恒等、超出成本模型域时夹取并给理由 | physiology/API |
 | N03 | 无海拔采样 / 单点采样 / 坡度超出可信范围 / 分段过短 | gradePercent 与等强配速均为 null 且带理由码，未知不得渲染为 0 | API/UI |
 | L05 | 日指标叠加状态曲线 | 持久化字段逐位不变；chronic=0/NaN ⇒ insufficient_data 而非中性档；分档在边界上归属明确 | training-load/UI |
+| Y01 | 采样密集但只覆盖一小段 / 覆盖率低于地板 | 覆盖率按时间计；低于地板给 insufficient_coverage + 真实覆盖率，不给漂移数值 | dynamics/API/UI |
+| Y02 | 前后半程配速不同 / 无可比配速样本 | 不做跨配速比较；无配对样本时 driftFraction=null 且带理由码，不得把降速读成跑姿变化 | dynamics/API/UI |
+| Y03 | 手表未记录某指标 / 序列含非有限值 | unavailable + no_samples，均值与漂移均为 null（不渲染为 0）；非有限样本被丢弃而非参与平均 | dynamics/API/UI |
 | L06 | 无已结束训练 / 无 chronic 背景 / 负荷相对值达上限 / 窗口已过 | 前两者 insufficient 且 remainingHours=null（不渲染 0）；负荷越大估计越长并在上限处封顶；低置信度如实标注 | training-load/API/UI |
 
 ### 16.2 核验层级

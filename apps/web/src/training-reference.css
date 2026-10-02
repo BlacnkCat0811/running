@@ -413,4 +413,24 @@
   .statistics-reference-page .form-recovery-basis { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .statistics-reference-page .form-recovery-basis span { padding: 2px 7px; border: 1px solid var(--training-grid); font-size: 9px; }
   .statistics-reference-page .form-recovery-note { margin: 8px 2px 0; font-size: 9px; line-height: 1.5; opacity: 0.8; }
+
+  /* Workout detail: stride dynamics (§19). Coverage and sample counts stay visible
+     next to every average — an average without its coverage is the failure this
+     panel is built to avoid. */
+  .detail-page .workout-dynamics-panel { margin-top: 10px; padding: 10px 12px; }
+  .detail-page .workout-dynamics-panel .panel-heading { min-height: 28px; padding: 0 0 6px; }
+  .detail-page .workout-dynamics-panel .panel-heading code { font-size: 10px; }
+  .detail-page .dynamics-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--training-grid); }
+  .detail-page .dynamics-metric { padding: 8px 10px; border-right: 1px dashed var(--training-grid); }
+  .detail-page .dynamics-metric:last-child { border-right: 0; }
+  .detail-page .dynamics-metric small { display: block; font-size: 9px; opacity: 0.75; }
+  .detail-page .dynamics-metric b { display: block; margin-top: 4px; font-size: 14px; }
+  .detail-page .dynamics-metric span { display: block; margin-top: 3px; font-size: 11px; }
+  .detail-page .dynamics-metric em { display: block; margin-top: 4px; font-size: 9px; font-style: normal; opacity: 0.7; }
+  .detail-page .dynamics-metric.dynamics-unavailable,
+  .detail-page .dynamics-metric.dynamics-insufficient_coverage { opacity: 0.72; }
+  .detail-page .dynamics-metric em.dynamics-reason { color: #b87822; opacity: 1; }
+  .detail-page .dynamics-flags { margin: 8px 0 0; padding-left: 16px; font-size: 10px; }
+  .detail-page .dynamics-flags small { opacity: 0.7; }
+  .detail-page .dynamics-note { margin: 8px 0 0; font-size: 9px; line-height: 1.5; opacity: 0.8; }
 }

@@ -1663,6 +1663,69 @@ export interface WorkoutGradeSummary {
 }
 
 // -----------------------------------------------------------------------------
+// Running dynamics (docs/ALGORITHM.md §19).
+//
+// Watch-reported stride metrics: cadence, stride length, vertical oscillation and
+// ground contact time. They reach the database today and are drawn as raw series,
+// but nothing analyses them — `packages/features` and `packages/scoring` reference
+// them zero times. This contract is that read-out, and it is **display and evidence
+// only**: no laboratory validation exists for this pipeline, so no value here may
+// enter CA/TA, and `evidenceStatus` travels with every response saying so.
+//
+// Coverage is part of the contract rather than a UI concern: a watch that reported
+// ground contact time for eight seconds of a one-hour run must be able to say
+// "insufficient coverage" instead of producing an average that looks complete.
+// -----------------------------------------------------------------------------
+
+export const RUNNING_DYNAMICS_POLICY_VERSION = "rai-dynamics-v1" as const;
+
+export type RunningDynamicsMetricName =
+  | "cadence"
+  | "stride_length"
+  | "vertical_oscillation"
+  | "ground_contact_time";
+
+export type RunningDynamicsMetricStatus =
+  | "available"
+  | "partial"
+  | "insufficient_coverage"
+  | "unavailable";
+
+export interface RunningDynamicsMetricAnalysis {
+  name: RunningDynamicsMetricName;
+  label: string;
+  unit: string;
+  status: RunningDynamicsMetricStatus;
+  samples: number;
+  /** Share of the run's duration the metric spans. Reported even when insufficient. */
+  coverage: number;
+  average: number | null;
+  firstHalfAverage: number | null;
+  secondHalfAverage: number | null;
+  /** Relative change of the second half against the first, at comparable speed. */
+  driftFraction: number | null;
+  /** How many second-half samples found a speed-matched partner in the first half. */
+  comparableSamples: number;
+  reasonCodes: string[];
+}
+
+export interface RunningDynamicsFlag {
+  code: string;
+  metric: RunningDynamicsMetricName;
+  detail: string;
+  driftFraction: number;
+  comparableSamples: number;
+}
+
+export interface RunningDynamicsAnalysis {
+  policyVersion: typeof RUNNING_DYNAMICS_POLICY_VERSION;
+  evidenceStatus: "device_estimated_not_lab_validated";
+  metrics: RunningDynamicsMetricAnalysis[];
+  flags: RunningDynamicsFlag[];
+  note: string | null;
+}
+
+// -----------------------------------------------------------------------------
 // Readiness V1 contract (docs/ALGORITHM.md §7.4).
 //
 // Additive only. `assessment` is deliberately kept separate from `state`:

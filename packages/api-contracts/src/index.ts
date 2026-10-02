@@ -34,6 +34,11 @@ export type {
   EnvironmentViewStatus,
   WorkoutSplitGrade,
   WorkoutGradeSummary,
+  RunningDynamicsAnalysis,
+  RunningDynamicsFlag,
+  RunningDynamicsMetricAnalysis,
+  RunningDynamicsMetricName,
+  RunningDynamicsMetricStatus,
   TrainingZoneProfileSettings,
   TrainingZonesCurrentResponse,
   TrainingZonesHistoryResponse,
@@ -58,6 +63,11 @@ import type {
   PredictionModelRun,
   PredictionModelRunStatus,
   RecoveryTimeEstimate,
+  RunningDynamicsAnalysis,
+  RunningDynamicsFlag,
+  RunningDynamicsMetricAnalysis,
+  RunningDynamicsMetricName,
+  RunningDynamicsMetricStatus,
   WorkoutEnvironmentView,
   WorkoutGradeSummary,
   WorkoutSplitGrade,
@@ -619,6 +629,11 @@ export interface WorkoutSeriesResponse {
   splits: WorkoutSplit[];
   /** Distance-weighted grade-adjusted pace across the covered splits. */
   grade: WorkoutGradeSummary | null;
+  /**
+   * §19 stride read-out: coverage, speed-matched half-split drift and flags.
+   * Device estimates, display-only — never an input to CA/TA.
+   */
+  dynamics: RunningDynamicsAnalysis;
   segments: WorkoutSegment[];
   segmentPlan: WorkoutSegmentPlanMatch | null;
   /** Why `segments` is empty, or what the match assumed — never silently blank. */

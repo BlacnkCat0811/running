@@ -16,6 +16,7 @@
     "@rai/api-contracts": "*",
     "@rai/application": "*",
     "@rai/contracts": "*",
+    "@rai/dynamics": "*",
     "@rai/health-export-parser": "*",
     "@rai/physiology": "*",
     "@rai/readiness": "*",

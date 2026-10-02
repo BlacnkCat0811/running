@@ -1083,11 +1083,14 @@ struct WorkoutSeriesResponse: Codable {
     var showsPlanSegments: Bool { hasMeasuredWorkoutSteps == true && !segments.isEmpty }
     /// Grade summary for the splits. Absent on older APIs; the panel then hides.
     let grade: WorkoutGradeSummary?
+    /// §19 stride read-out. Absent on older APIs — the panel then hides rather
+    /// than the whole detail page failing to decode.
+    let dynamics: RunningDynamicsAnalysis?
     let series: WorkoutSeries
 
     private enum CodingKeys: String, CodingKey {
         case trainingSessionId, startedAt, endedAt, sourceCategory
-        case splits, segments, segmentPlan, segmentNote, hasMeasuredWorkoutSteps, grade, series
+        case splits, segments, segmentPlan, segmentNote, hasMeasuredWorkoutSteps, grade, dynamics, series
     }
 
     init(from decoder: Decoder) throws {
@@ -1102,6 +1105,7 @@ struct WorkoutSeriesResponse: Codable {
         segmentNote = try container.decodeIfPresent(String.self, forKey: .segmentNote)
         hasMeasuredWorkoutSteps = try container.decodeIfPresent(Bool.self, forKey: .hasMeasuredWorkoutSteps)
         grade = try container.decodeIfPresent(WorkoutGradeSummary.self, forKey: .grade)
+        dynamics = try container.decodeIfPresent(RunningDynamicsAnalysis.self, forKey: .dynamics)
         series = try container.decode(WorkoutSeries.self, forKey: .series)
     }
 }
@@ -1173,6 +1177,53 @@ struct WorkoutSplitGrade: Codable {
     let gradeAdjustedPaceSecondsPerKm: Double?
     let policyVersion: String
     let reasonCodes: [String]
+}
+
+/// §19 stride read-out.
+///
+/// Device estimates with no laboratory validation: `evidenceStatus` is decoded so
+/// the view cannot present them as measurements. Coverage travels with every
+/// metric because an average without its coverage is the finding this contract
+/// exists to prevent.
+struct RunningDynamicsAnalysis: Codable {
+    let policyVersion: String
+    let evidenceStatus: String
+    let metrics: [RunningDynamicsMetricAnalysis]
+    let flags: [RunningDynamicsFlag]
+    let note: String?
+
+    /// Metrics that can carry a comparison; unavailable ones are listed but not
+    /// counted as findings.
+    var analysable: [RunningDynamicsMetricAnalysis] {
+        metrics.filter { $0.status == "available" || $0.status == "partial" }
+    }
+}
+
+struct RunningDynamicsMetricAnalysis: Codable, Identifiable {
+    let name: String
+    let label: String
+    let unit: String
+    let status: String
+    let samples: Int
+    let coverage: Double
+    let average: Double?
+    let firstHalfAverage: Double?
+    let secondHalfAverage: Double?
+    let driftFraction: Double?
+    let comparableSamples: Int
+    let reasonCodes: [String]
+
+    var id: String { name }
+}
+
+struct RunningDynamicsFlag: Codable, Identifiable {
+    let code: String
+    let metric: String
+    let detail: String
+    let driftFraction: Double
+    let comparableSamples: Int
+
+    var id: String { code }
 }
 
 /// Distance-weighted grade-adjusted pace across the covered splits.

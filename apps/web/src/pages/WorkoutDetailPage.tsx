@@ -1,6 +1,6 @@
 import "../pixel-layout.css";
 import "../training-reference.css";
-import type { WorkoutDetailResponse, WorkoutEnvironmentView, WorkoutSegment, WorkoutSegmentPurpose, WorkoutSeriesResponse } from "@rai/api-contracts";
+import type { RunningDynamicsAnalysis, WorkoutDetailResponse, WorkoutEnvironmentView, WorkoutSegment, WorkoutSegmentPurpose, WorkoutSeriesResponse } from "@rai/api-contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
@@ -10,7 +10,7 @@ import { RoutePlot } from "../components/RoutePlot.js";
 import { StatusBadge } from "../components/StatusBadge.js";
 import { WorkoutSeriesChart } from "../components/WorkoutSeriesChart.js";
 import { api } from "../api.js";
-import { confidenceLevel, date, duration, environment, environmentReason, environmentStatus, explanation, heartRateZone, missingReason, number, pace, paceZone, sessionType, status, stimulusType } from "../format.js";
+import { confidenceLevel, date, duration, dynamicsReason, environment, environmentReason, environmentStatus, explanation, heartRateZone, missingReason, number, pace, paceZone, sessionType, status, stimulusType } from "../format.js";
 import { useRemote } from "../hooks.js";
 import { ArrowLeft, CheckCircle, Heartbeat, MapTrifold, PencilSimple, Pulse, Target, Timer, Warning } from "../icons.js";
 
@@ -146,6 +146,61 @@ export function WorkoutSplits({ splits, grade }: { splits: WorkoutSeriesResponse
             </tbody>
           </table>
         </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * §19 stride read-out.
+ *
+ * Three statements the panel must never blur: how much of the run each metric
+ * actually covers, whether the two halves were run at comparable speed, and that
+ * these are device estimates rather than laboratory measurements.
+ */
+export function WorkoutDynamicsPanel({ dynamics }: { dynamics: RunningDynamicsAnalysis }) {
+  const analysable = dynamics.metrics.filter((metric) => metric.status === "available" || metric.status === "partial");
+  return (
+    <section className="panel workout-dynamics-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>跑姿动态</h2>
+          <p>同一次跑的前后半程对比，且只在配速可比的位置比较；来自手表估计，未经实验室校验。</p>
+        </div>
+        <code>{dynamics.policyVersion}</code>
+      </div>
+      {analysable.length === 0 ? (
+        <div className="splits-empty">{dynamics.note ?? "这次训练没有可用的跑姿动态样本"}</div>
+      ) : (
+        <>
+          <div className="dynamics-grid">
+            {dynamics.metrics.map((metric) => (
+              <div key={metric.name} className={`dynamics-metric dynamics-${metric.status}`}>
+                <small>{metric.label}</small>
+                <b>{metric.average === null ? "--" : `${metric.average.toFixed(metric.unit === "spm" ? 0 : 1)} ${metric.unit}`}</b>
+                <span>
+                  {metric.driftFraction === null
+                    ? "无同配速对比"
+                    : `后半程 ${metric.driftFraction > 0 ? "+" : ""}${(metric.driftFraction * 100).toFixed(1)}%`}
+                </span>
+                <em>覆盖 {Math.round(metric.coverage * 100)}% · {metric.samples} 样本</em>
+                {metric.reasonCodes.length > 0 ? (
+                  <em className="dynamics-reason">{metric.reasonCodes.map(dynamicsReason).join("；")}</em>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {dynamics.flags.length > 0 ? (
+            <ul className="dynamics-flags">
+              {dynamics.flags.map((flag) => (
+                <li key={flag.code}>{flag.detail}<small>（同配速样本 {flag.comparableSamples} 个）</small></li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="dynamics-note">
+            {dynamics.note ?? "未发现同配速下的明显漂移。"}
+          </p>
+        </>
       )}
     </section>
   );
@@ -376,6 +431,7 @@ export function WorkoutDetailPage() {
       <section className="performance-strip expanded detail-reference-metrics"><article><Timer size={31} /><span>距离</span><b>{number(workout.distanceKm)} km</b></article><article><Timer size={31} /><span>用时</span><b>{duration(workout.durationSeconds)}</b></article><article><Pulse size={31} /><span>平均配速</span><b>{pace(workout.averagePaceSecondsPerKm)}/km</b></article><article><Heartbeat size={31} /><span>平均心率</span><b>{workout.averageHeartRateBpm === null ? "--" : `${Math.round(workout.averageHeartRateBpm)} bpm`}</b></article><article><Target size={31} /><span>即时能力</span><b>{number(workout.currentAbility)}</b></article><article><CheckCircle size={31} /><span>置信度</span><b>{confidenceLevel(workout.confidence)}</b></article></section>
       {!series.loading && !series.error && series.data && series.dataPath === seriesPath ? <><WorkoutSegments series={series.data} /><WorkoutSplits splits={series.data.splits} grade={series.data.grade} /></> : null}
       <WorkoutEnvironmentPanel environment={workout.environment} />
+      {series.data && series.dataPath === seriesPath ? <WorkoutDynamicsPanel dynamics={series.data.dynamics} /> : null}
       {data.trainingLoad ? <><section className="workout-load-band"><span><small>综合负荷</small><b>{Math.round(data.trainingLoad.breakdown.compositeLoad)}</b></span><span><small>内部负荷</small><b>{data.trainingLoad.breakdown.internalLoad === null ? "--" : Math.round(data.trainingLoad.breakdown.internalLoad)}</b></span><span><small>配速负荷</small><b>{data.trainingLoad.breakdown.paceLoad === null ? "--" : Math.round(data.trainingLoad.breakdown.paceLoad)}</b></span><span><small>距离修正</small><b>×{data.trainingLoad.breakdown.distanceFactor.toFixed(2)}</b></span><span><small>原始 HRR-TRIMP</small><b>{data.trainingLoad.breakdown.rawHrrTrimp === null ? "--" : data.trainingLoad.breakdown.rawHrrTrimp.toFixed(1)}</b></span><span><small>距离暴露</small><b>{data.trainingLoad.breakdown.distanceExposureRatio === null ? "--" : `${data.trainingLoad.breakdown.distanceExposureRatio.toFixed(2)}× P75`}</b></span><span><small>心率负荷置信</small><b>{Math.round(data.trainingLoad.breakdown.heartRateConfidence * 100)}%</b></span><span><small>配速负荷置信</small><b>{Math.round(data.trainingLoad.breakdown.paceConfidence * 100)}%</b></span></section><div className="workout-load-explanations"><span>{loadSourceLabels[data.trainingLoad.source]}</span>{data.trainingLoad.explanations.map((item) => <span key={item.code}>{loadExplanationLabels[item.code] ?? item.code}</span>)}</div></> : null}
 
       {data.zoneSummary ? <section className="panel workout-zones-panel"><div className="panel-heading"><div><h2>{stimulusType(data.zoneSummary.stimulusType)}</h2><p>{data.zoneSummary.secondaryStimulusTypes.length ? `次要刺激：${data.zoneSummary.secondaryStimulusTypes.map(stimulusType).join("、")}` : "未识别达到最低剂量的次要刺激"} · 快照 {data.zoneSummary.zoneProfileId.slice(-8)}</p></div><strong>{Math.round(data.zoneSummary.stimulusConfidence * 100)}%</strong></div><div className="workout-zone-grid"><ZoneDistribution title="心率分区" coverage={data.zoneSummary.heartRateCoverage} items={data.zoneSummary.heartRateExposure} kind="heart" /><ZoneDistribution title="配速分区" coverage={data.zoneSummary.paceCoverage} items={data.zoneSummary.paceExposure} kind="pace" /></div>{data.zoneSummary.explanationCodes.length ? <div className="zone-explanations">{data.zoneSummary.explanationCodes.map((code) => <span key={code}>{explanation(code)}</span>)}</div> : null}</section> : null}
