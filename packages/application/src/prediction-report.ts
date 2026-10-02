@@ -68,6 +68,13 @@ export interface PredictionReportOptions {
   humidityPercent?: number;
   elevationGainMeters?: Partial<Record<RaceDistance, number>>;
   recoveryReadiness?: number | null;
+  /**
+   * Labels to exclude from the evidence (§12.11 leave-one-out).
+   *
+   * A parameter of the real chain rather than a parallel implementation: the personal
+   * calibration pass must see exactly what the production report would have seen.
+   */
+  excludeLabelIds?: readonly string[];
 }
 
 export interface PredictionEvaluationReport {
@@ -251,7 +258,8 @@ export function buildFormulaPredictionBase(
 ): FormulaPredictionBase {
   const directEvidence = loadDirectVo2Evidence(database, asOf);
   const labeledPerformance = loadLabeledPerformanceEvidence(database, asOf);
-  const performanceVdotEvidence = loadPerformanceVdotEvidence(database, asOf);
+  const excluded = new Set(options.excludeLabelIds ?? []);
+  const performanceVdotEvidence = loadPerformanceVdotEvidence(database, asOf, excluded);
   const thresholdEvidence = loadLactateThresholdEvidence(database, asOf);
   const readinessEvidence = loadRaceReadinessEvidence(database, asOf);
   const modelReadiness: PredictionReadiness = options.mode === "neutral_potential"

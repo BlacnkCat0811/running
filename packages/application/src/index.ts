@@ -19,6 +19,12 @@ export {
   type LabeledRaceOutcome
 } from "./prediction-data.js";
 export { RecomputePipeline } from "./services/recompute-pipeline.js";
+// §12.11 个人自校准：留一法回放产出残差样本，拟合与展示闸门在 @rai/model-eval。
+export {
+  buildPersonalCalibrationSamples,
+  personalCalibrationStatus,
+  type PersonalCalibrationPass
+} from "./personal-calibration.js";
 // §6.9 / F08: the speed inventory must normalise units with the *same* converter the pipeline
 // uses. Exporting it keeps a read-only report from growing a second unit convention that would
 // disagree with the runtime (the unit column is not homogeneous: this DB holds both km/hr and m/s).

@@ -20,10 +20,11 @@ import {
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
 import { DATABASE_TIMEZONE, SHARE_CARD_POLICY_VERSION, localCalendarFormatter } from "@rai/contracts";
-import { personalCalibrationReadiness, type PersonalCalibrationReadiness } from "@rai/model-eval";
+import { fitPersonalInterval, personalCalibrationReadiness } from "@rai/model-eval";
+import type { PersonalCalibrationProgress } from "@rai/contracts";
 import {
   buildLabelFunnel,
-  loadLabeledRaceOutcomes,
+  buildPersonalCalibrationSamples,
   type LabelFunnelReport
 } from "@rai/application";
 import { estimateRecoveryTime, withTrainingForm } from "@rai/training-load";
@@ -1353,15 +1354,20 @@ export class RaiReadStore {
    */
   labelProgress(): {
     funnel: LabelFunnelReport;
-    personal: PersonalCalibrationReadiness;
+    personal: PersonalCalibrationProgress;
   } {
     const asOf = new Date().toISOString();
-    const outcomes = loadLabeledRaceOutcomes(this.database, asOf);
+    const pass = buildPersonalCalibrationSamples(this.database, asOf);
+    const readiness = personalCalibrationReadiness(pass.samples);
+    const fitted = readiness.available ? fitPersonalInterval({ samples: pass.samples }) : null;
     return {
       funnel: buildLabelFunnel(this.database, asOf),
-      personal: personalCalibrationReadiness(
-        outcomes.map((outcome) => ({ distance: outcome.distance, observedAt: outcome.completedAt }))
-      )
+      personal: {
+        ...readiness,
+        labelCount: pass.labelCount,
+        scoredCount: pass.scoredCount,
+        band: fitted
+      }
     };
   }
 

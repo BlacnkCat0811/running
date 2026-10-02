@@ -5,6 +5,7 @@ import {
   PERSONAL_CALIBRATION_POLICY,
   assertPersonalIntervalPresentation,
   fitPersonalInterval,
+  personalBandSeconds,
   personalCalibrationReadiness,
   type PersonalCalibrationSample
 } from "../src/index.js";
@@ -34,12 +35,12 @@ function series(bias: (index: number) => number, count = 8): PersonalCalibration
 }
 
 test("M05: a personal band must not borrow the population vocabulary", () => {
-  const evidence = fitPersonalInterval({ distance: "ten_k", samples: series((index) => index * 10) });
+  const evidence = fitPersonalInterval({ samples: series((index) => index * 10) });
   assert.ok(evidence, "eight labels with held-out residuals are enough for the personal tier");
-  assert.equal(evidence.method, "leave_one_out_residual_v1");
+  assert.equal(evidence.method, "leave_one_out_relative_residual_v1");
   assert.equal(evidence.coverageClaim, "personal_self_calibrated_not_population_guarantee");
   assert.equal(evidence.samples, 8);
-  assert.equal(evidence.evaluated, 8, "every label contributes its own held-out residual");
+  assert.equal(evidence.evaluated, 8, "every label contributes its own held-out ratio");
   assertPersonalIntervalPresentation(evidence);
 
   for (const forbidden of ["nominalCoverage", "coverageP80", "coverageP90"]) {
@@ -55,9 +56,23 @@ test("M05: a personal band must not borrow the population vocabulary", () => {
   );
 });
 
+test("M05: a band that excludes the runner's own centre is a bias claim, not an uncertainty", () => {
+  const evidence = fitPersonalInterval({ samples: series((index) => index * 4) });
+  assert.ok(evidence);
+  // A systematic bias the rule does not capture: every ratio sits above 1. The band
+  // is allowed to sit above 1 — it is the runner's own centre — but it must *contain*
+  // that centre, or it is claiming something the sample does not support.
+  assert.ok(evidence.relativeLower > 1, "eight consistently slower races push the whole band above 1");
+  assertPersonalIntervalPresentation(evidence);
+  assert.throws(
+    () => assertPersonalIntervalPresentation({ ...evidence, relativeUpper: evidence.relativeLower - 0.01 } as never),
+    /contain the runner's own centre/
+  );
+});
+
 test("M06: below the label floor no band is produced at all", () => {
   const samples = series((index) => index, PERSONAL_CALIBRATION_POLICY.minimumSamples - 1);
-  assert.equal(fitPersonalInterval({ distance: "ten_k", samples }), null);
+  assert.equal(fitPersonalInterval({ samples }), null);
 
   const readiness = personalCalibrationReadiness(samples);
   assert.equal(readiness.available, false);
@@ -67,7 +82,7 @@ test("M06: below the label floor no band is produced at all", () => {
 });
 
 test("M06: the gate refuses a band whose residuals are not leave-one-out", () => {
-  const evidence = fitPersonalInterval({ distance: "ten_k", samples: series((index) => index * 5) });
+  const evidence = fitPersonalInterval({ samples: series((index) => index * 5) });
   assert.ok(evidence);
   assert.throws(
     () => assertPersonalIntervalPresentation({ ...evidence, evaluated: evidence.samples - 2 } as never),
@@ -103,12 +118,19 @@ test("M06: a short block of labels does not qualify, however many there are", ()
 });
 
 test("M05: the band is the runner's own residual spread, and it widens with it", () => {
-  const tight = fitPersonalInterval({ distance: "ten_k", samples: series((index) => (index % 2 === 0 ? -5 : 5)) });
-  const loose = fitPersonalInterval({ distance: "ten_k", samples: series((index) => (index % 2 === 0 ? -60 : 60)) });
+  const tight = fitPersonalInterval({ samples: series((index) => (index % 2 === 0 ? -5 : 5)) });
+  const loose = fitPersonalInterval({ samples: series((index) => (index % 2 === 0 ? -60 : 60)) });
   assert.ok(tight && loose);
-  assert.ok(loose.upperSeconds - loose.lowerSeconds > tight.upperSeconds - tight.lowerSeconds);
-  // Residuals, not absolute times: a bias of +10 s per label stays a narrow band.
-  assert.ok(tight.upperSeconds - tight.lowerSeconds <= 10);
+  assert.ok(
+    loose.relativeUpper - loose.relativeLower > tight.relativeUpper - tight.relativeLower,
+    "a wider residual spread must produce a wider band"
+  );
+  // Ratios, not seconds: ±5 s on a 2 400 s prediction is a band a few tenths of a
+  // percent wide, and that is the point — the same ratio transfers between distances.
+  assert.ok(tight.relativeUpper - tight.relativeLower <= 0.01);
+  assert.ok(tight.relativeLower <= tight.relativeCenter && tight.relativeCenter <= tight.relativeUpper);
+  const bounds = personalBandSeconds(tight, 2_400);
+  assert.ok(bounds && bounds.lowerSeconds <= 2_400 && bounds.upperSeconds >= 2_400);
 });
 
 test("M06: non-finite residuals cannot enter the band", () => {
@@ -116,7 +138,7 @@ test("M06: non-finite residuals cannot enter the band", () => {
     ...series((index) => index * 3, 7),
     sample({ actualSeconds: Number.NaN })
   ];
-  const evidence = fitPersonalInterval({ distance: "ten_k", samples });
+  const evidence = fitPersonalInterval({ samples });
   assert.ok(evidence);
   assert.equal(evidence.samples, 8, "the label still counts toward the sample floor");
   assert.equal(evidence.evaluated, 7, "but a non-finite residual is not evaluated");

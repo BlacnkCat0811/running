@@ -1025,15 +1025,33 @@ export interface PersonalCalibrationSample {
   actualSeconds: number;
 }
 
+/**
+ * A **relative** band, pooled across distances.
+ *
+ * Per-distance fitting would demand eight races at the same distance, which is a far
+ * higher bar than the eight labels the policy states — and for one athlete it is
+ * rarely reachable. Pooling the *ratio* `actual / predicted` keeps the sample the
+ * policy actually asks for, and the ratio is the quantity that transfers between
+ * distances: a runner who is systematically 2 % slower than the rule predicts is
+ * 2 % slower at 10K and at the half.
+ */
 export interface PersonalIntervalEvidence {
   policyVersion: typeof PERSONAL_CALIBRATION_POLICY_VERSION;
-  method: "leave_one_out_residual_v1";
-  distance: RaceDistance;
+  method: "leave_one_out_relative_residual_v1";
   samples: number;
-  /** Held-out residuals actually available; must be samples - 1 per distance. */
+  /** Labels that contributed a finite held-out ratio. */
   evaluated: number;
-  lowerSeconds: number;
-  upperSeconds: number;
+  /**
+   * Ratio quantiles plus the runner's own centre (median ratio).
+   *
+   * The band is required to contain the centre, **not** 1: a runner the rule is
+   * consistently optimistic about has a band that legitimately sits above 1, and
+   * pretending otherwise would hide the most useful thing in the sample. Whether to
+   * correct by the centre is the caller's decision and is shown explicitly.
+   */
+  relativeLower: number;
+  relativeCenter: number;
+  relativeUpper: number;
   coverageClaim: "personal_self_calibrated_not_population_guarantee";
 }
 
@@ -1093,33 +1111,47 @@ export function personalCalibrationReadiness(
  * range it may show instead (which claims even less).
  */
 export function fitPersonalInterval(input: {
-  distance: RaceDistance;
   samples: readonly PersonalCalibrationSample[];
   policy?: PersonalCalibrationPolicy;
 }): PersonalIntervalEvidence | null {
   const policy = input.policy ?? PERSONAL_CALIBRATION_POLICY;
-  const own = input.samples.filter((sample) => sample.distance === input.distance);
-  const residuals = own
-    .map((sample) => sample.actualSeconds - sample.pointSeconds)
-    .filter((value) => Number.isFinite(value));
+  const ratios = input.samples
+    .map((sample) =>
+      Number.isFinite(sample.pointSeconds) && sample.pointSeconds > 0 && Number.isFinite(sample.actualSeconds)
+        ? sample.actualSeconds / sample.pointSeconds
+        : Number.NaN
+    )
+    .filter((value) => Number.isFinite(value) && value > 0);
   // The floor is on *labels*: at seven labels the band would be five quantile points
-  // pretending to be a distribution. One non-finite residual is tolerated inside an
-  // otherwise sufficient set (the label still counts, the residual does not).
-  if (own.length < policy.minimumSamples || residuals.length < policy.minimumSamples - 1) return null;
-  const lower = personalQuantile(residuals, policy.lowerQuantile);
-  const upper = personalQuantile(residuals, policy.upperQuantile);
+  // pretending to be a distribution. One unusable pair is tolerated inside an
+  // otherwise sufficient set (the label still counts, the ratio does not).
+  if (input.samples.length < policy.minimumSamples || ratios.length < policy.minimumSamples - 1) return null;
+  const lower = personalQuantile(ratios, policy.lowerQuantile);
+  const upper = personalQuantile(ratios, policy.upperQuantile);
   if (lower === null || upper === null || !(lower <= upper)) return null;
+  const center = personalQuantile(ratios, 0.5);
+  if (center === null) return null;
   return {
     policyVersion: PERSONAL_CALIBRATION_POLICY_VERSION,
-    method: "leave_one_out_residual_v1",
-    distance: input.distance,
-    samples: own.length,
-    evaluated: residuals.length,
-    // Residuals are added to the point estimate by the caller: the band is a
-    // property of the residence, not of one prediction.
-    lowerSeconds: lower,
-    upperSeconds: upper,
+    method: "leave_one_out_relative_residual_v1",
+    samples: input.samples.length,
+    evaluated: ratios.length,
+    relativeLower: Math.round(lower * 10_000) / 10_000,
+    relativeCenter: Math.round(center * 10_000) / 10_000,
+    relativeUpper: Math.round(upper * 10_000) / 10_000,
     coverageClaim: "personal_self_calibrated_not_population_guarantee"
+  };
+}
+
+/** Applies the ratio band to a point prediction. Null when the point is unusable. */
+export function personalBandSeconds(
+  evidence: PersonalIntervalEvidence,
+  pointSeconds: number
+): { lowerSeconds: number; upperSeconds: number } | null {
+  if (!Number.isFinite(pointSeconds) || pointSeconds <= 0) return null;
+  return {
+    lowerSeconds: Math.round(pointSeconds * evidence.relativeLower),
+    upperSeconds: Math.round(pointSeconds * evidence.relativeUpper)
   };
 }
 
@@ -1143,8 +1175,15 @@ export function assertPersonalIntervalPresentation(evidence: PersonalIntervalEvi
   if (evidence.coverageClaim !== "personal_self_calibrated_not_population_guarantee") {
     throw new Error("Personal interval: the self-calibrated disclaimer is required verbatim");
   }
-  if (!Number.isFinite(evidence.lowerSeconds) || !Number.isFinite(evidence.upperSeconds) || evidence.lowerSeconds > evidence.upperSeconds) {
-    throw new Error("Personal interval: bounds must be finite and ordered");
+  const { relativeLower, relativeCenter, relativeUpper } = evidence;
+  for (const [name, value] of [["relativeLower", relativeLower], ["relativeCenter", relativeCenter], ["relativeUpper", relativeUpper]] as const) {
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`Personal interval: ${name} must be a positive finite ratio`);
+  }
+  if (relativeLower > relativeCenter || relativeCenter > relativeUpper) {
+    throw new Error(
+      "Personal interval: the band must contain the runner's own centre — otherwise it is a bias claim " +
+      "wearing the clothes of an uncertainty"
+    );
   }
   if (!Number.isInteger(evidence.samples) || evidence.samples < PERSONAL_CALIBRATION_POLICY.minimumSamples) {
     throw new Error(
@@ -1153,6 +1192,9 @@ export function assertPersonalIntervalPresentation(evidence: PersonalIntervalEvi
     );
   }
   if (evidence.evaluated < evidence.samples - 1) {
-    throw new Error("Personal interval: fewer held-out residuals than labels — the band is not leave-one-out");
+    throw new Error("Personal interval: fewer held-out ratios than labels — the band is not leave-one-out");
+  }
+  if (evidence.evaluated < PERSONAL_CALIBRATION_POLICY.minimumSamples - 1) {
+    throw new Error("Personal interval: too few held-out ratios to form quantiles");
   }
 }

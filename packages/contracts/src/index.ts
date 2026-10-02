@@ -1689,6 +1689,43 @@ export interface PerformanceEntry {
 }
 
 // -----------------------------------------------------------------------------
+// Personal calibration progress (docs/ALGORITHM.md §12.11).
+//
+// A **relative** band, and deliberately not the population interval shape: it has no
+// nominalCoverage, no P80/P90, and a claim string that says so. The client multiplies
+// it by a rule prediction to show the runner their own band.
+// -----------------------------------------------------------------------------
+
+export interface PersonalCalibrationBand {
+  policyVersion: string;
+  method: "leave_one_out_relative_residual_v1";
+  samples: number;
+  evaluated: number;
+  relativeLower: number;
+  relativeCenter: number;
+  relativeUpper: number;
+  coverageClaim: "personal_self_calibrated_not_population_guarantee";
+}
+
+export interface PersonalCalibrationProgress {
+  policyVersion: string;
+  available: boolean;
+  /** Labels that produced a held-out residual — the number the band is built from. */
+  samples: number;
+  /** Labels that exist, scored or not. */
+  labelCount: number;
+  scoredCount: number;
+  distances: number;
+  spanDays: number;
+  minimumSamples: number;
+  minimumDistances: number;
+  minimumSpanDays: number;
+  reasonCodes: string[];
+  /** Null until the floors are met; the client then shows nothing but progress. */
+  band: PersonalCalibrationBand | null;
+}
+
+// -----------------------------------------------------------------------------
 // Share card (docs/WEB.md, docs/DECISIONS.md D9).
 //
 // A card is built by the **server** so that "hide my home" has exactly one

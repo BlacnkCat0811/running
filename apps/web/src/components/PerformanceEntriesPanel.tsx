@@ -31,17 +31,30 @@ interface LabelProgress {
   personal: {
     available: boolean;
     samples: number;
+    labelCount: number;
+    scoredCount: number;
     distances: number;
     spanDays: number;
     minimumSamples: number;
     minimumDistances: number;
     minimumSpanDays: number;
     reasonCodes: string[];
+    band: {
+      samples: number;
+      evaluated: number;
+      relativeLower: number;
+      relativeCenter: number;
+      relativeUpper: number;
+      coverageClaim: string;
+    } | null;
   };
 }
 
+/** `+1.2%` / `−0.8%` — a ratio band reads as a percentage, never as seconds. */
+const relative = (ratio: number): string => `${ratio >= 1 ? "+" : "−"}${Math.abs((ratio - 1) * 100).toFixed(1)}%`;
+
 const personalReason = (code: string): string => ({
-  samples_below_minimum: "标签数量不足",
+  samples_below_minimum: "可用于留一法的标签不足",
   distances_below_minimum: "覆盖的距离种类不足",
   span_below_minimum: "时间跨度不足"
 }[code] ?? code);
@@ -150,11 +163,20 @@ export function PerformanceEntriesPanel() {
         <div className="performance-entry-progress">
           <span>可用标签 <b>{progress.data.funnel.usableOutcomeCount}</b>（手工 {progress.data.funnel.manualEntryCount}）</span>
           <span>个人区间门槛：标签 {progress.data.personal.samples}/{progress.data.personal.minimumSamples} · 距离 {progress.data.personal.distances}/{progress.data.personal.minimumDistances} · 跨度 {progress.data.personal.spanDays}/{progress.data.personal.minimumSpanDays} 天</span>
-          <small>
-            {progress.data.personal.available
-              ? "已达到个人自校准门槛；它给出的是你自己留一法残差的区间，不是人群 P80/P90。"
-              : `尚未达到：${progress.data.personal.reasonCodes.map(personalReason).join("、")}。`}
-          </small>
+          {progress.data.personal.band ? (
+            /* 相对带，不是绝对秒数：它乘在任意距离的规则预测上。刻意不用 P80/P90 措辞。 */
+            <small>
+              自校准带：{relative(progress.data.personal.band.relativeLower)} ~ {relative(progress.data.personal.band.relativeUpper)}
+              （中心 {relative(progress.data.personal.band.relativeCenter)}，{progress.data.personal.band.evaluated} 个留出残差）。
+              把它乘在任意距离的规则预测上，就是你自己的区间；它是**自我校准**，不是人群 P80/P90 保证。
+            </small>
+          ) : (
+            <small>
+              {progress.data.personal.available
+                ? "已满足样本门槛，但可用残差还不足以形成分位数带。"
+                : `尚未达到：${progress.data.personal.reasonCodes.map(personalReason).join("、")}。`}
+            </small>
+          )}
         </div>
       ) : null}
       {remote.loading && !remote.data ? <LoadingBlock label="正在读取成绩条目" /> : null}

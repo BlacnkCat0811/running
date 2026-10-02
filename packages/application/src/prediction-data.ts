@@ -240,9 +240,18 @@ export function loadLabeledPerformanceEvidence(
 
 export function loadPerformanceVdotEvidence(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  /**
+   * Labels to leave out (docs/ALGORITHM.md §12.11).
+   *
+   * The personal-calibration pass needs the prediction that would have been made
+   * *without* the label it is about to score; exclusion is a parameter of the real
+   * loader rather than a second implementation of the evidence chain.
+   */
+  excludeLabelIds: ReadonlySet<string> = new Set()
 ): PerformanceVdotEvidence[] {
   const labeled = performanceRows(database, asOf).flatMap((row) => {
+    if (excludeLabelIds.has(row.id)) return [];
     const label = evidenceLabel(row);
     if (
       label === null ||
@@ -303,7 +312,21 @@ export function loadPerformanceVdotEvidence(
       new Date(Date.parse(asOf) - PERFORMANCE_ENVELOPE_WINDOW_DAYS * 86_400_000).toISOString(),
       asOf
     ) as unknown as PerformanceEnvelopeRow[];
-  return rows.flatMap((row) => {
+  const manual = loadManualPerformanceOutcomes(database, asOf).flatMap((outcome) => {
+    if (excludeLabelIds.has(outcome.id)) return [];
+    // §12.10: an entered race informs the prediction it will later be calibrated
+    // against. The recompute-stored VO2 ensemble is a separate path and is
+    // deliberately untouched here (it changes stored snapshots and needs its own gate).
+    return [performanceVdotEvidence({
+      id: outcome.id,
+      observedAt: outcome.completedAt,
+      distanceMeters: outcome.actualDistanceMeters,
+      durationSeconds: outcome.actualSeconds,
+      source: "race",
+      quality: 1
+    })];
+  });
+  const envelope = rows.flatMap((row) => {
     // A labeled performance is already represented above. Do not turn the
     // same event into an additional training-envelope observation.
     if (evidenceLabel(row) !== null) return [];
@@ -336,6 +359,9 @@ export function loadPerformanceVdotEvidence(
       conditions: parsePerformanceConditions(row.metadataJson)
     })];
   }).concat(labeled);
+  // Manual entries last: ordering is stable and the session-derived evidence keeps
+  // exactly the order it had before this path existed.
+  return [...envelope, ...manual];
 }
 
 function metadataQuantity(metadataJson: string, key: string): {
