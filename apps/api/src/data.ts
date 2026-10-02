@@ -13,9 +13,11 @@ import {
   SqliteWorkoutReadRepository,
   SqliteZoneReadRepository,
   SqliteRecoveryFactsReadRepository,
+  SqlitePrivacyZoneRepository,
+  type StoredPrivacyZone,
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
-import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
+import { DATABASE_TIMEZONE, SHARE_CARD_POLICY_VERSION, localCalendarFormatter } from "@rai/contracts";
 import { estimateRecoveryTime, withTrainingForm } from "@rai/training-load";
 
 import type {
@@ -35,6 +37,7 @@ import type {
   ModelRunSummary,
   RecomputeJobDto,
   RecomputeJobEventDto,
+  ShareCardResponse,
   RecoveryTimeEstimate,
   RoutePointDto,
   DailyTrainingMetric,
@@ -61,6 +64,7 @@ import type {
 import { buildPlanExecution } from "./plan-execution.js";
 import { environmentCoverage, environmentViewForWorkout, splitGradeContexts } from "./workout-environment.js";
 import { buildRunningDynamics } from "./workout-dynamics.js";
+import { trimRouteForShare } from "./share-card.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
 import { DEFAULT_WEEKLY_DISTANCE_KM, type PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
@@ -151,6 +155,7 @@ export class RaiReadStore {
   private readonly trendsRepository: SqliteTrendsReadRepository;
   private readonly auditRepository: SqliteAuditReadRepository;
   private readonly recoveryRepository: SqliteRecoveryFactsReadRepository;
+  private readonly privacyZoneRepository: SqlitePrivacyZoneRepository;
   private cacheVersion = -1;
   private readonly cache = new Map<string, unknown>();
 
@@ -178,6 +183,7 @@ export class RaiReadStore {
     this.trendsRepository = new SqliteTrendsReadRepository(this.database);
     this.auditRepository = new SqliteAuditReadRepository(this.database);
     this.recoveryRepository = new SqliteRecoveryFactsReadRepository(this.database);
+    this.privacyZoneRepository = new SqlitePrivacyZoneRepository(this.database);
   }
 
   close(): void {
@@ -1288,6 +1294,68 @@ export class RaiReadStore {
         series
       }),
       series
+    };
+  }
+
+  /** Configured privacy zones (docs/DECISIONS.md D9). Token-gated at the route. */
+  privacyZones(): { revision: number; zones: StoredPrivacyZone[] } {
+    return { revision: this.privacyZoneRepository.revision(), zones: this.privacyZoneRepository.list() };
+  }
+
+  /**
+   * Share card for one run: the numbers plus the **already trimmed** route.
+   *
+   * Trimming happens here, on the server, so the credential that can see raw
+   * coordinates is not the one that renders the card. Clients draw `polylines` and
+   * cannot reconnect across a cut because the cut is a separate array element.
+   */
+  workoutShareCard(id: string): ShareCardResponse | null {
+    const row = this.workoutsRepository.getDetailRow(id);
+    if (!row) return null;
+    const zones = this.privacyZoneRepository.list();
+    const points = this.seriesRepository.routePoints(row.canonicalWorkoutId);
+    const trimmed = trimRouteForShare(
+      points.map((point) => ({ latitude: point.latitude, longitude: point.longitude })),
+      zones.map((zone) => ({
+        centerLatitude: zone.centerLatitude,
+        centerLongitude: zone.centerLongitude,
+        radiusMeters: zone.radiusMeters
+      }))
+    );
+    const distanceKm = row.distanceKm;
+    const durationSeconds = row.durationSeconds;
+    // The grade summary is read from the same series response the detail page uses,
+    // so the card cannot quote a different flat-equivalent pace than the app shows.
+    const series = this.workoutSeries(id);
+    const note = trimmed.zonesApplied === 0
+      ? "未配置隐私区：卡片显示完整轨迹。"
+      : trimmed.polylines.length === 0
+        ? "整条轨迹都在隐私区内，卡片不含路线。"
+        : trimmed.gaps > 0
+          ? `路线在隐私区处断开（${trimmed.gaps} 处），区域内的坐标从未离开服务器。`
+          : "隐私区未与本次路线相交。";
+    return {
+      trainingSessionId: id,
+      generatedAt: new Date().toISOString(),
+      privacy: {
+        policyVersion: SHARE_CARD_POLICY_VERSION,
+        zonesApplied: trimmed.zonesApplied,
+        redactedPoints: trimmed.redactedPoints,
+        gaps: trimmed.gaps,
+        unfiltered: trimmed.zonesApplied === 0
+      },
+      workout: {
+        startedAt: row.startedAt,
+        sessionType: row.sessionType,
+        distanceKm,
+        durationSeconds,
+        averagePaceSecondsPerKm: paceSeconds(durationSeconds, distanceKm),
+        averageHeartRateBpm: row.averageHeartRateBpm,
+        elevationGainMeters: this.workoutsRepository.elevationGain(row.canonicalWorkoutId),
+        gradeAdjustedPaceSecondsPerKm: series?.grade?.gradeAdjustedPaceSecondsPerKm ?? null
+      },
+      polylines: trimmed.polylines,
+      note
     };
   }
 

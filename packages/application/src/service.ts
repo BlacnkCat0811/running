@@ -11,9 +11,12 @@ import type { RecomputePlan } from "@rai/health-export-parser";
 import {
   RaiDatabase,
   SqliteModelRunRepository,
+  SqlitePrivacyZoneRepository,
   RecomputeJobRepository,
   SqliteTrainingSessionRepository,
-  type JobCancellationResult
+  type JobCancellationResult,
+  type PrivacyZoneInput,
+  type StoredPrivacyZone
 } from "@rai/storage-sqlite";
 
 import { appNow, opaqueId } from "./utils.js";
@@ -141,6 +144,34 @@ export class RaiApplicationService {
       };
     } catch (error) {
       this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RELEASE rai_app_mutation");
+      throw error;
+    }
+  }
+
+  /**
+   * Replaces the privacy-zone collection (docs/DECISIONS.md D9).
+   *
+   * Runs under the same transaction discipline as every other main-database
+   * mutation — this is the single-writer path, so a zone added while a recompute
+   * is running cannot interleave with it.
+   */
+  replacePrivacyZones(zones: readonly PrivacyZoneInput[], expectedRevision: number): {
+    revision: number;
+    zones: StoredPrivacyZone[];
+  } {
+    const repository = new SqlitePrivacyZoneRepository(this.database);
+    this.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_app_mutation");
+    try {
+      const revision = repository.replace(zones, expectedRevision);
+      this.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_app_mutation");
+      return { revision, zones: repository.list() };
+    } catch (error) {
+      try {
+        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation");
+      } catch {
+        // The failing statement may already have closed the transaction; the
+        // original error is what the caller must see.
+      }
       throw error;
     }
   }

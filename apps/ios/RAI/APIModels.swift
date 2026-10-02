@@ -1179,6 +1179,41 @@ struct WorkoutSplitGrade: Codable {
     let reasonCodes: [String]
 }
 
+/// D9 share card. The route arrives already trimmed: `polylines` is a list so a
+/// renderer cannot reconnect across a privacy-zone cut by accident.
+struct ShareCardResponse: Codable {
+    let trainingSessionId: String
+    let generatedAt: String
+    let privacy: ShareCardPrivacy
+    let workout: ShareCardWorkout
+    let polylines: [[ShareCardRoutePoint]]
+    let note: String?
+}
+
+struct ShareCardPrivacy: Codable {
+    let policyVersion: String
+    let zonesApplied: Int
+    let redactedPoints: Int
+    let gaps: Int
+    let unfiltered: Bool
+}
+
+struct ShareCardWorkout: Codable {
+    let startedAt: String
+    let sessionType: String
+    let distanceKm: Double?
+    let durationSeconds: Double
+    let averagePaceSecondsPerKm: Double?
+    let averageHeartRateBpm: Double?
+    let elevationGainMeters: Double?
+    let gradeAdjustedPaceSecondsPerKm: Double?
+}
+
+struct ShareCardRoutePoint: Codable, Equatable {
+    let latitude: Double
+    let longitude: Double
+}
+
 /// §19 stride read-out.
 ///
 /// Device estimates with no laboratory validation: `evidenceStatus` is decoded so

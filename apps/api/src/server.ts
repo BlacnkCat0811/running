@@ -55,6 +55,7 @@ import {
   isTrustedDevelopmentOrigin
 } from "./local-request-security.js";
 import { DatabaseMaintenance, backupPolicyFromEnvironment } from "./maintenance.js";
+import { PrivacyZoneRevisionConflictError, PrivacyZoneValidationError } from "@rai/storage-sqlite";
 import { MobileGoalsRevisionConflictError, MobileGoalsStore, type PlanMergeOptions } from "./mobile-goals.js";
 import { mobileLockRejection, mobileRefreshOutcome } from "./mobile-sync.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
@@ -79,6 +80,7 @@ import {
   predictionModelIdParamsSchema,
   predictionModelTrainBodySchema,
   predictionQuerySchema,
+  privacyZonesBodySchema,
   recoveryTrendQuerySchema,
   restoreBodySchema,
   trainingLoadQuerySchema,
@@ -262,6 +264,9 @@ const publicReadRoutes = new Set([
  */
 const tokenRequiredReadRoutes = new Set([
   "/v1/exports/workout-summary",
+  // 分享卡带轨迹几何（哪怕已在服务端裁剪），隐私区本身更是家/公司坐标：两者都不进匿名读。
+  "/v1/workouts/:id/share-card",
+  "/v1/privacy-zones",
   "/v1/performance",
   "/v1/commands/:id",
   "/v1/openapi.json",
@@ -296,6 +301,7 @@ const metadataOnlyMutationRoutes = new Set([
 const databaseRequiredMutationRoutes = new Set([
   "/v1/workouts/:id/override",
   "/v1/training-zones/profile",
+  "/v1/privacy-zones",
   "/v1/prediction-models/train",
   "/v1/prediction-models/:id/cancel",
   "/v1/prediction-models/:id/activate",
@@ -944,6 +950,62 @@ app.get<{ Params: { id: string } }>("/v1/workouts/:id/series", { schema: { param
   if (!series) return reply.code(404).send({ message: "未找到该训练的时间序列" });
   return series;
 });
+
+/**
+ * Share card: numbers plus the **already trimmed** route (docs/DECISIONS.md D9).
+ *
+ * Token-required, unlike the other workout reads: the payload carries route
+ * geometry, and the credentials that may see raw coordinates should not be the
+ * ones rendering a card that was supposed to hide them.
+ */
+/**
+ * Type alias rather than an inline generic: `schemas.test.ts` parses route
+ * registrations with `(?:<[^<>]*>)?`, so a nested `Array<{…}>` makes the route
+ * invisible to the gate that checks every mounted route is documented.
+ */
+type PrivacyZonesBody = {
+  revision: number;
+  zones: Array<{
+    id: string;
+    label: string;
+    centerLatitude: number;
+    centerLongitude: number;
+    radiusMeters: number;
+    createdAt: string;
+  }>;
+};
+
+app.get<{ Params: { id: string } }>("/v1/workouts/:id/share-card", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
+  const card = withReadStore((store) => store.workoutShareCard(request.params.id));
+  if (!card) return reply.code(404).send({ message: "未找到该训练记录" });
+  return card;
+});
+
+app.get("/v1/privacy-zones", async () => withReadStore((store) => store.privacyZones()));
+
+app.put<{ Body: PrivacyZonesBody }>(
+  "/v1/privacy-zones",
+  { schema: { body: privacyZonesBodySchema } },
+  async (request, reply) => {
+    if (isDatabaseWriteBusy()) {
+      return reply.code(409).send({ message: "任务执行期间不能修改隐私区" });
+    }
+    const store = await openMainDatabase();
+    try {
+      return new RaiApplicationService(store).replacePrivacyZones(request.body.zones, request.body.revision);
+    } catch (error) {
+      if (error instanceof PrivacyZoneRevisionConflictError) {
+        return reply.code(409).send({ code: error.code, message: error.message, actualRevision: error.actualRevision });
+      }
+      if (error instanceof PrivacyZoneValidationError) {
+        return reply.code(400).send({ code: error.code, message: error.message });
+      }
+      throw error;
+    } finally {
+      store.close();
+    }
+  }
+);
 
 app.post<{ Body: { localDate: string; kind: MobileSessionKind; revision?: number; structure?: MobileSessionStructure | null } }>(
   "/v1/mobile/workout-plan/synced",

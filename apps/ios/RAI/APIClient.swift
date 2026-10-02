@@ -213,6 +213,11 @@ struct RaiAPIClient {
         try await get(path: "/v1/workouts/\(escapedPath(id))/series", baseURL: baseURL, token: token)
     }
 
+    /// D9 分享卡片：服务端已按隐私区裁剪轨迹，客户端只画 `polylines`。
+    func shareCard(id: String, baseURL: URL, token: String) async throws -> ShareCardResponse {
+        try await get(path: "/v1/workouts/\(escapedPath(id))/share-card", baseURL: baseURL, token: token)
+    }
+
     func updateGoals(
         _ input: UpdateMobileGoalsRequest,
         baseURL: URL,

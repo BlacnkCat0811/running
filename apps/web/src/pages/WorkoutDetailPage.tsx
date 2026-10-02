@@ -7,6 +7,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { OverrideDrawer } from "../components/OverrideDrawer.js";
 import { RoutePlot } from "../components/RoutePlot.js";
+import { ShareCardPanel } from "../components/ShareCardPanel.js";
 import { StatusBadge } from "../components/StatusBadge.js";
 import { WorkoutSeriesChart } from "../components/WorkoutSeriesChart.js";
 import { api } from "../api.js";

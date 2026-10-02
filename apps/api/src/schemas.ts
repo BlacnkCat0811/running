@@ -321,6 +321,39 @@ export const trainingZoneProfileBodySchema = {
   }
 } as const;
 
+/**
+ * Privacy zones (docs/DECISIONS.md D9).
+ *
+ * `revision` is required, not optional: a write that does not say which version it
+ * read is a write that can silently drop a zone somebody just added, and here that
+ * means an unredacted card rather than a lost preference.
+ */
+export const privacyZonesBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["revision", "zones"],
+  properties: {
+    revision: { type: "integer", minimum: 0 },
+    zones: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "label", "centerLatitude", "centerLongitude", "radiusMeters", "createdAt"],
+        properties: {
+          id: { type: "string", minLength: 1, maxLength: 64 },
+          label: { type: "string", minLength: 1, maxLength: 64 },
+          centerLatitude: { type: "number", minimum: -90, maximum: 90 },
+          centerLongitude: { type: "number", minimum: -180, maximum: 180 },
+          radiusMeters: { type: "number", exclusiveMinimum: 0, maximum: 5000 },
+          createdAt: { type: "string", minLength: 1, maxLength: 40 }
+        }
+      }
+    }
+  }
+} as const;
+
 export const predictionQuerySchema = {
   type: "object",
   additionalProperties: false,
@@ -667,6 +700,7 @@ export const openapiDocument = {
       ImportJobResponse: importJobResponseSchema,
       WorkoutOverride: overrideBodySchema,
       TrainingZoneProfileUpdate: trainingZoneProfileBodySchema,
+      PrivacyZonesUpdate: privacyZonesBodySchema,
       PredictionModelTrainRequest: predictionModelTrainBodySchema,
       DeleteDatabaseRequest: deleteBodySchema,
       RestoreBackupRequest: restoreBodySchema,
@@ -700,6 +734,13 @@ export const openapiDocument = {
     }) },
     "/v1/workouts/{id}": { get: operation(["Workouts"], "训练详情", { parameters: pathId }) },
     "/v1/workouts/{id}/series": { get: operation(["Workouts"], "训练内时间序列", { parameters: pathId }) },
+    "/v1/workouts/{id}/share-card": { get: operation(["Workouts"], "分享卡片（服务端已按隐私区裁剪轨迹）", { parameters: pathId }) },
+    "/v1/privacy-zones": {
+      get: operation(["Privacy"], "读取隐私区与 revision"),
+      put: operation(["Privacy"], "整体替换隐私区（expectedRevision 冲突返回 409）", {
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/PrivacyZonesUpdate" } } } }
+      })
+    },
     "/v1/workouts/{id}/override": { patch: operation(["Workouts"], "追加训练覆盖 revision 并重算", {
       parameters: pathId,
       requestBody: body({ $ref: "#/components/schemas/WorkoutOverride" }, "完整的训练覆盖字段")

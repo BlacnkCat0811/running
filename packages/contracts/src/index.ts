@@ -1663,6 +1663,56 @@ export interface WorkoutGradeSummary {
 }
 
 // -----------------------------------------------------------------------------
+// Share card (docs/WEB.md, docs/DECISIONS.md D9).
+//
+// A card is built by the **server** so that "hide my home" has exactly one
+// implementation: the clients draw the polylines they are handed and never see the
+// coordinates that were removed. `polylines` is a list rather than one line with
+// gaps so a renderer cannot reconnect across a cut by accident.
+// -----------------------------------------------------------------------------
+
+export const SHARE_CARD_POLICY_VERSION = "rai-share-card-v1" as const;
+
+export interface ShareCardRoutePoint {
+  latitude: number;
+  longitude: number;
+}
+
+export interface ShareCardResponse {
+  trainingSessionId: string;
+  generatedAt: string;
+  privacy: {
+    policyVersion: typeof SHARE_CARD_POLICY_VERSION;
+    zonesApplied: number;
+    /** Points inside a zone that were removed before this payload was built. */
+    redactedPoints: number;
+    /**
+     * How many breaks the drawn line has because of zones. Counted as gaps rather
+     * than as "segments overlapping a circle": with 50 m sampling a 200 m zone
+     * overlaps ten segments, and that number tells a reader nothing about the card.
+     */
+    gaps: number;
+    /** True when no zone is configured — the polylines are the raw route. */
+    unfiltered: boolean;
+  };
+  workout: {
+    startedAt: string;
+    /** Passthrough of the stored value, like every other read response. */
+    sessionType: string;
+    distanceKm: number | null;
+    durationSeconds: number;
+    averagePaceSecondsPerKm: number | null;
+    averageHeartRateBpm: number | null;
+    elevationGainMeters: number | null;
+    /** Minetti-equivalent flat pace, when the run had usable altitude data. */
+    gradeAdjustedPaceSecondsPerKm: number | null;
+  };
+  polylines: ShareCardRoutePoint[][];
+  /** What the reader should know about the card, e.g. why the line is broken. */
+  note: string | null;
+}
+
+// -----------------------------------------------------------------------------
 // Running dynamics (docs/ALGORITHM.md §19).
 //
 // Watch-reported stride metrics: cadence, stride length, vertical oscillation and

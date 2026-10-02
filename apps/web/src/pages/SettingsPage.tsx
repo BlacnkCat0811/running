@@ -9,6 +9,8 @@ import type {
   HealthResponse,
 } from "@rai/api-contracts";
 import { useEffect, useRef, useState } from "react";
+
+import { PrivacyZoneEditor } from "../components/ShareCardPanel.js";
 import { Link } from "react-router-dom";
 
 import { ApiError, api, readApiToken, writeApiToken } from "../api.js";
@@ -500,6 +502,11 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           </div>
         )}
       </section>
+
+      {/* D9 隐私区：决定**分享出去**的卡片显示什么，App 内仍显示完整轨迹。
+          没有数据库时整块不挂载：否则首次导入流程会去打一个必然 409 的接口，
+          控制台里那条错误会盖住真正需要用户注意的信息。 */}
+      {hasDatabase ? <PrivacyZoneEditor /> : null}
 
       <section className="panel backup-panel">
         <div className="panel-heading">

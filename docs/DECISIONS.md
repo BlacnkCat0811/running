@@ -34,6 +34,20 @@
 现有SwiftUI App通过API使用TS计算，只读HealthKit。已授权HealthKit background delivery、BGProcessingTask及background URLSession；未授权独立Watch/macOS产品或HealthKit写入。
 四条容易被“优化”破坏的同步不变式及后续补充保留在 [ADR-004](adr/ADR-004-healthkit-sync-invariants.md)。真机检查见 [iOS runbook](IOS_NATIVE_RUNBOOK.md)。
 
+## D9. 隐私区在主库，分享卡的裁剪在服务端
+
+**主库而非控制库**：备份/恢复只覆盖主库（`DatabaseMaintenance(databasePath, runtimeRoot)`）。
+隐私区若住在控制库，恢复后它会静默消失 —— 而用户正好在重建之后分享的第一张卡片就是没裁剪的。
+
+**裁剪只在服务端发生一次**（[share-card](../apps/api/src/share-card.ts)）：客户端只画 `polylines`，
+拿不到被移除的坐标。两个"藏起我家"的实现就是两次泄漏机会。
+`polylines` 是**数组的数组**而不是带洞的一条线：断开是数据结构里的，不是绘制代码要记得遵守的标志位。
+
+**裁剪必须切断穿越**：只删区内的点会留下一条穿过隐私区的弦 —— 卡片上就是一条直穿家门口的直线。
+圆-线段求交把线段切在圆上，`gaps` 报告断了几处（不是"多少段压到圆"，那个数对读者没有意义）。
+
+分享卡路由**需要令牌**（轨迹几何 + 裁剪元数据）；隐私区读路由同样需要令牌（家/公司坐标）。
+
 ## D7. 设计资产、文档和隐私
 
 大设计图已出库，不再次搬回仓库；[blob size检查](../scripts/check-blob-size.mjs)按路径无关的文件体积守卫，不能换目录绕过。

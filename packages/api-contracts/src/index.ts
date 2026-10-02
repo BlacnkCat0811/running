@@ -39,6 +39,8 @@ export type {
   RunningDynamicsMetricAnalysis,
   RunningDynamicsMetricName,
   RunningDynamicsMetricStatus,
+  ShareCardResponse,
+  ShareCardRoutePoint,
   TrainingZoneProfileSettings,
   TrainingZonesCurrentResponse,
   TrainingZonesHistoryResponse,
@@ -68,6 +70,8 @@ import type {
   RunningDynamicsMetricAnalysis,
   RunningDynamicsMetricName,
   RunningDynamicsMetricStatus,
+  ShareCardResponse,
+  ShareCardRoutePoint,
   WorkoutEnvironmentView,
   WorkoutGradeSummary,
   WorkoutSplitGrade,
@@ -1287,6 +1291,25 @@ export interface WorkoutSegment {
   averagePaceSecondsPerKm: number | null;
   averageHeartRateBpm: number | null;
   averageCadenceSpm: number | null;
+}
+
+/**
+ * Privacy zones (docs/DECISIONS.md D9).
+ *
+ * `revision` is returned with the list because the write is a whole-collection
+ * replace: a client that did not read a revision cannot safely save one.
+ */
+export interface PrivacyZonesResponse {
+  revision: number;
+  zones: Array<{
+    id: string;
+    label: string;
+    centerLatitude: number;
+    centerLongitude: number;
+    radiusMeters: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
 /** Which stored plan day a run was matched to, and how confidently. */

@@ -1332,6 +1332,7 @@ struct TechWorkoutDetailView: View {
                     } else {
                         splitPanel(native.selectedSeries)
                     }
+                    TechShareCardView(trainingSessionId: workoutId)
                     if let dynamics = native.selectedSeries?.dynamics { dynamicsPanel(dynamics) }
                     qualityPanel(detail)
                     if let load = detail.trainingLoad { trainingLoadPanel(load) }

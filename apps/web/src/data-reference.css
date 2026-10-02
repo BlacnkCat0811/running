@@ -265,6 +265,18 @@
   .data-page .job-list > div { min-height: 32px; }
   .data-page .prediction-model-management { margin-top: 0; }
 
+  /* Privacy zones (D9). Coordinates are typed by hand: the desktop route plot has
+     no basemap, and a map picker would mean sending home coordinates to a tile
+     provider. */
+  .settings-page .privacy-zone-panel { margin-top: 12px; }
+  .settings-page .privacy-zone-empty { margin: 8px 2px; font-size: 10px; opacity: 0.8; }
+  .settings-page .privacy-zone-list { display: grid; gap: 8px; }
+  .settings-page .privacy-zone-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr .8fr auto; gap: 8px; align-items: end; }
+  .settings-page .privacy-zone-row label { display: grid; gap: 3px; font-size: 9px; }
+  .settings-page .privacy-zone-row input { min-height: 32px; padding: 4px 8px; border: 1px solid var(--training-grid); background: var(--training-paper); color: inherit; font: inherit; }
+  .settings-page .privacy-zone-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .settings-page .privacy-zone-saved { margin: 8px 2px 0; font-size: 10px; color: #1f6d4c; }
+
   /* Audit: environment-field availability (§5.2). Rows reuse `.audit-table`, so
      only the explanatory footnote needs a rule of its own. */
   .audit-page .environment-audit-note {

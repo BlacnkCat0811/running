@@ -108,3 +108,12 @@ export {
 } from "./read/prediction-recovery-read-repository.js";
 
 export { SqliteCalibrationRepository } from "./calibration-repository.js";
+
+// §5.5/D9 隐私区：主库表，随备份/恢复一起走。
+export {
+  PrivacyZoneRevisionConflictError,
+  PrivacyZoneValidationError,
+  SqlitePrivacyZoneRepository,
+  type PrivacyZoneInput,
+  type StoredPrivacyZone
+} from "./privacy-zone-repository.js";
