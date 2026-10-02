@@ -274,6 +274,7 @@ const tokenRequiredReadRoutes = new Set([
   "/v1/workouts/:id/share-card",
   "/v1/privacy-zones",
   "/v1/performance-entries",
+  "/v1/label-funnel",
   "/v1/performance",
   "/v1/commands/:id",
   "/v1/openapi.json",
@@ -1007,6 +1008,15 @@ app.get("/v1/privacy-zones", async () => withReadStore((store) => store.privacyZ
  * write here changes what future predictions are calibrated on.
  */
 app.get("/v1/performance-entries", async () => withReadStore((store) => ({ entries: store.performanceEntries() })));
+
+/**
+ * §12.11 label funnel and progress toward the personal tier.
+ *
+ * Token-gated: it is a count of the runner's confirmed races. It reports progress and
+ * *why* the floors are unmet; it never produces an interval, because a band needs
+ * held-out residuals this read path does not have.
+ */
+app.get("/v1/label-funnel", async () => withReadStore((store) => store.labelProgress()));
 
 app.post<{ Body: PerformanceEntryBody }>(
   "/v1/performance-entries",

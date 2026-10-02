@@ -978,3 +978,181 @@ export function assertCaWeightAblationReport(report: unknown): void {
     throw new Error("Ablation report: an unfrozen pre-registration cannot produce a recommendation");
   }
 }
+
+// -----------------------------------------------------------------------------
+// §12.11 Personal (single-athlete) calibration tier
+//
+// The population gate asks for 50 labels and 24 calibration/test samples. For one
+// runner that is unreachable, and the honest conclusion is *not* to lower it: at
+// N=8 a population claim is simply false. What a single athlete can have is a
+// **self-calibrated** interval: the quantiles of their own leave-one-out residuals,
+// shown with the sample count and without any P80/P90 wording.
+//
+// So this tier is deliberately a different object, not a weakened version of the
+// same one:
+//   - it never reports `nominalCoverage`, `coverageP80` or `coverageP90`;
+//   - it carries `coverageClaim: "personal_self_calibrated_not_population_guarantee"`;
+//   - it is refused outright below `minimumSamples`.
+// -----------------------------------------------------------------------------
+
+export const PERSONAL_CALIBRATION_POLICY_VERSION = "rai-personal-calibration-v1" as const;
+
+export interface PersonalCalibrationPolicy {
+  /** Below this, no interval is produced at all. */
+  minimumSamples: number;
+  /** Independent distances required: a single distance is one race, not a pattern. */
+  minimumDistances: number;
+  /** Span the labels must cover, in days: a single training block is not a history. */
+  minimumSpanDays: number;
+  /** Residual quantiles used for the bounds (0.1 / 0.9 = an 80 % self-calibrated band). */
+  lowerQuantile: number;
+  upperQuantile: number;
+}
+
+export const PERSONAL_CALIBRATION_POLICY: PersonalCalibrationPolicy = {
+  minimumSamples: 8,
+  minimumDistances: 2,
+  minimumSpanDays: 120,
+  lowerQuantile: 0.1,
+  upperQuantile: 0.9
+};
+
+export interface PersonalCalibrationSample {
+  distance: RaceDistance;
+  observedAt: string;
+  /** The prediction that was made for this event from the state known at the time. */
+  pointSeconds: number;
+  actualSeconds: number;
+}
+
+export interface PersonalIntervalEvidence {
+  policyVersion: typeof PERSONAL_CALIBRATION_POLICY_VERSION;
+  method: "leave_one_out_residual_v1";
+  distance: RaceDistance;
+  samples: number;
+  /** Held-out residuals actually available; must be samples - 1 per distance. */
+  evaluated: number;
+  lowerSeconds: number;
+  upperSeconds: number;
+  coverageClaim: "personal_self_calibrated_not_population_guarantee";
+}
+
+export interface PersonalCalibrationReadiness {
+  policyVersion: typeof PERSONAL_CALIBRATION_POLICY_VERSION;
+  available: boolean;
+  samples: number;
+  distances: number;
+  spanDays: number;
+  minimumSamples: number;
+  minimumDistances: number;
+  minimumSpanDays: number;
+  /** Which floors are still unmet, so the UI can say what to do next. */
+  reasonCodes: string[];
+}
+
+const personalQuantile = (values: readonly number[], quantile: number): number | null => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  const position = (sorted.length - 1) * quantile;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower]!;
+  return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (position - lower);
+};
+
+/** Progress toward the personal tier; the numbers are shown to the runner as-is. */
+export function personalCalibrationReadiness(
+  samples: ReadonlyArray<Pick<PersonalCalibrationSample, "distance" | "observedAt">>,
+  policy: PersonalCalibrationPolicy = PERSONAL_CALIBRATION_POLICY
+): PersonalCalibrationReadiness {
+  const distances = new Set(samples.map((sample) => sample.distance));
+  const times = samples.map((sample) => Date.parse(sample.observedAt)).filter(Number.isFinite);
+  const spanDays = times.length < 2 ? 0 : Math.round((Math.max(...times) - Math.min(...times)) / 86_400_000);
+  const reasonCodes: string[] = [];
+  if (samples.length < policy.minimumSamples) reasonCodes.push("samples_below_minimum");
+  if (distances.size < policy.minimumDistances) reasonCodes.push("distances_below_minimum");
+  if (spanDays < policy.minimumSpanDays) reasonCodes.push("span_below_minimum");
+  return {
+    policyVersion: PERSONAL_CALIBRATION_POLICY_VERSION,
+    available: reasonCodes.length === 0,
+    samples: samples.length,
+    distances: distances.size,
+    spanDays,
+    minimumSamples: policy.minimumSamples,
+    minimumDistances: policy.minimumDistances,
+    minimumSpanDays: policy.minimumSpanDays,
+    reasonCodes
+  };
+}
+
+/**
+ * Fits the personal band from **leave-one-out** residuals for one distance.
+ *
+ * Returns `null` rather than a wide band when there are too few residuals: an
+ * interval built from three points is a decoration, and the caller has a heuristic
+ * range it may show instead (which claims even less).
+ */
+export function fitPersonalInterval(input: {
+  distance: RaceDistance;
+  samples: readonly PersonalCalibrationSample[];
+  policy?: PersonalCalibrationPolicy;
+}): PersonalIntervalEvidence | null {
+  const policy = input.policy ?? PERSONAL_CALIBRATION_POLICY;
+  const own = input.samples.filter((sample) => sample.distance === input.distance);
+  const residuals = own
+    .map((sample) => sample.actualSeconds - sample.pointSeconds)
+    .filter((value) => Number.isFinite(value));
+  // The floor is on *labels*: at seven labels the band would be five quantile points
+  // pretending to be a distribution. One non-finite residual is tolerated inside an
+  // otherwise sufficient set (the label still counts, the residual does not).
+  if (own.length < policy.minimumSamples || residuals.length < policy.minimumSamples - 1) return null;
+  const lower = personalQuantile(residuals, policy.lowerQuantile);
+  const upper = personalQuantile(residuals, policy.upperQuantile);
+  if (lower === null || upper === null || !(lower <= upper)) return null;
+  return {
+    policyVersion: PERSONAL_CALIBRATION_POLICY_VERSION,
+    method: "leave_one_out_residual_v1",
+    distance: input.distance,
+    samples: own.length,
+    evaluated: residuals.length,
+    // Residuals are added to the point estimate by the caller: the band is a
+    // property of the residence, not of one prediction.
+    lowerSeconds: lower,
+    upperSeconds: upper,
+    coverageClaim: "personal_self_calibrated_not_population_guarantee"
+  };
+}
+
+/**
+ * The presentation gate for the personal tier.
+ *
+ * It refuses the population vocabulary outright. A personal band labelled P80 would
+ * be read as "80 % of my future races land here", which the numbers cannot support:
+ * they are the quantiles of eight of *my own* residuals.
+ */
+export function assertPersonalIntervalPresentation(evidence: PersonalIntervalEvidence): void {
+  const record = evidence as unknown as Record<string, unknown>;
+  for (const forbidden of ["nominalCoverage", "coverageP80", "coverageP90", "coverageIntervalP80", "coverageIntervalP90"]) {
+    if (record[forbidden] !== undefined) {
+      throw new Error(
+        `Personal interval: ${forbidden} belongs to the population tier — a self-calibrated band must not ` +
+        "borrow its vocabulary (§12.11)"
+      );
+    }
+  }
+  if (evidence.coverageClaim !== "personal_self_calibrated_not_population_guarantee") {
+    throw new Error("Personal interval: the self-calibrated disclaimer is required verbatim");
+  }
+  if (!Number.isFinite(evidence.lowerSeconds) || !Number.isFinite(evidence.upperSeconds) || evidence.lowerSeconds > evidence.upperSeconds) {
+    throw new Error("Personal interval: bounds must be finite and ordered");
+  }
+  if (!Number.isInteger(evidence.samples) || evidence.samples < PERSONAL_CALIBRATION_POLICY.minimumSamples) {
+    throw new Error(
+      `Personal interval: ${evidence.samples} labels is below the personal floor of ` +
+      `${PERSONAL_CALIBRATION_POLICY.minimumSamples}`
+    );
+  }
+  if (evidence.evaluated < evidence.samples - 1) {
+    throw new Error("Personal interval: fewer held-out residuals than labels — the band is not leave-one-out");
+  }
+}

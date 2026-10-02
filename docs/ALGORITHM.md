@@ -192,6 +192,21 @@ P80/P90 只有独立 calibration artifact、独立 test cohort、适用域、样
 生产选择器执行 [展示闸门](../packages/model-eval/src/index.ts)，缺 cohort provenance 的旧 artifact 回退。
 必须同时展示目标覆盖与实际覆盖，并声明 empirical_target_not_individual_guarantee；不把“目标80%”说成个人保证。
 
+### 12.11 个人自校准层（2026-10-02）
+
+人群门槛要 50 条标签、24/24 校准与留出。对单个跑者这不可达，而**正确结论不是把门槛降下来**：N=8 时人群声明本身就是假的。单个跑者能拥有的是**自校准**区间：[个人层策略](../packages/model-eval/src/index.ts) `PERSONAL_CALIBRATION_POLICY`（标签 ≥8、独立距离 ≥2、跨度 ≥120 天）与 `fitPersonalInterval`（留一法残差的分位区间）。
+
+它是**另一个对象，而不是同一个对象的弱化版**：
+
+- 禁止借用人群词汇：`nominalCoverage` / `coverageP80` / `coverageP90` 出现在个人区间上会被 `assertPersonalIntervalPresentation` 直接拒绝；
+- 必须逐字带上 `personal_self_calibrated_not_population_guarantee`；
+- 低于标签地板**不产生区间**（返回 null，而不是给一条很宽的带）；非有限残差不参与拟合，但该标签仍计入样本数；
+- `evaluated`（实际留出的残差数）必须 ≥ `samples − 1`，否则报"不是留一法"。
+
+人群门槛（50/24/M03）**一个字没动**：个人层是并存的第二条通道。
+
+**当前交付边界**：本轮实现的是策略、拟合、展示闸门与**进度可见**（`GET /v1/label-funnel` 返回漏斗 + 还差哪些门槛，UI 显示"标签 3/8 · 距离 1/2 · 跨度 90/120 天"）。**尚未**把留一法回放接进预测报告，所以预测页目前仍只显示 `heuristicRange`；`fitPersonalInterval` 的输入 `pointSeconds` 必须来自"当时已知状态"的回放，那需要一个逐事件的 as-known-then 预测循环，属于下一轮。宁可显示"还差多少"，也不显示一条没有依据的带。
+
 ### 12.10 手工成绩条目（2026-10-02）
 
 标签此前只有一条来源：挂在**训练记录**上的比赛/测试确认。于是"成绩都在手表之前"的跑者标签数为 0 —— 这正是本项目审查记录的状态（"零有效比赛/测试标签"）。[手工成绩](../packages/storage-sqlite/src/performance-entry-repository.ts)（迁移 27）补上这扇门：日期、距离、成绩。
@@ -296,6 +311,8 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
 | N02 | 上坡 / 下坡 / 平坦的同一配速 | 等强配速随坡度单调、零坡度恒等、超出成本模型域时夹取并给理由 | physiology/API |
 | N03 | 无海拔采样 / 单点采样 / 坡度超出可信范围 / 分段过短 | gradePercent 与等强配速均为 null 且带理由码，未知不得渲染为 0 | API/UI |
 | L05 | 日指标叠加状态曲线 | 持久化字段逐位不变；chronic=0/NaN ⇒ insufficient_data 而非中性档；分档在边界上归属明确 | training-load/UI |
+| M05 | 个人区间试图带人群词汇 / 换掉免责声明 | 断言拒绝：个人带不得出现 nominalCoverage/coverageP80/coverageP90，免责声明必须逐字 | model-eval/API/UI |
+| M06 | 标签数、距离数或跨度不足 / 残差非有限 / 残差并非留出 | 不足时不产出区间（返回 null 并报告缺哪一项）；非有限残差不参与拟合但计入样本；evaluated < samples−1 报"不是留一法" | model-eval/API/UI |
 | T04 | 手工成绩在录入时刻之前/之后 / 比赛日在未来 / 撤销后 | 录入前不可见（不进入此前预测）；比赛未发生不是标签；撤销按时刻生效且行保留为墓碑 | application/storage |
 | T05 | 非法日期/距离/时长/隐含配速 / 手工标签计数 | 仓储与 API schema 同界拒绝；漏斗 manualEntryCount 与 byDistance 可对账；手工条目只作标签，不生成轨迹或能力评分 | storage/API/UI |
 | G01 | 赛事距离/周数不同的骨架 / 超过 24 周 / 比赛已过 / 无目标 | 阶段边界按距离分档；减量周与比赛周量带显著小于专项期；超限与过期如实标注且不编造周 | API/UI |

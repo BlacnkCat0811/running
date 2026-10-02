@@ -18,6 +18,7 @@
     "@rai/contracts": "*",
     "@rai/dynamics": "*",
     "@rai/health-export-parser": "*",
+    "@rai/model-eval": "*",
     "@rai/physiology": "*",
     "@rai/readiness": "*",
     "@rai/storage-sqlite": "*",

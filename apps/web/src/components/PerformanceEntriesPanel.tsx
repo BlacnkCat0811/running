@@ -21,6 +21,31 @@ import { Plus, Trash } from "../icons.js";
  * needed it.
  */
 
+interface LabelProgress {
+  funnel: {
+    usableOutcomeCount: number;
+    manualEntryCount: number;
+    confirmedCount: number;
+    byDistance: Record<PerformanceEntryDistance, { usable: number; evaluated: number }>;
+  };
+  personal: {
+    available: boolean;
+    samples: number;
+    distances: number;
+    spanDays: number;
+    minimumSamples: number;
+    minimumDistances: number;
+    minimumSpanDays: number;
+    reasonCodes: string[];
+  };
+}
+
+const personalReason = (code: string): string => ({
+  samples_below_minimum: "标签数量不足",
+  distances_below_minimum: "覆盖的距离种类不足",
+  span_below_minimum: "时间跨度不足"
+}[code] ?? code);
+
 interface EntryRow {
   id: string;
   localDate: string;
@@ -47,6 +72,7 @@ export function PerformanceEntriesPanel() {
   const [opened, setOpened] = useState(false);
   const [token] = useState(() => readApiToken());
   const remote = useRemote<{ entries: EntryRow[] }>("/v1/performance-entries", opened && token.length > 0);
+  const progress = useRemote<LabelProgress>("/v1/label-funnel", opened && token.length > 0);
   const [draft, setDraft] = useState({ localDate: "", distance: "ten_k" as PerformanceEntryDistance, minutes: "", seconds: "" });
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -119,6 +145,18 @@ export function PerformanceEntriesPanel() {
           <p>只作标签与评估证据：可校准、可被评估，不生成轨迹或能力评分。</p>
         </div>
       </div>
+      {/* §12.11 个人自校准的进度：说清还差什么，而不是给一个没有依据的区间。 */}
+      {progress.data ? (
+        <div className="performance-entry-progress">
+          <span>可用标签 <b>{progress.data.funnel.usableOutcomeCount}</b>（手工 {progress.data.funnel.manualEntryCount}）</span>
+          <span>个人区间门槛：标签 {progress.data.personal.samples}/{progress.data.personal.minimumSamples} · 距离 {progress.data.personal.distances}/{progress.data.personal.minimumDistances} · 跨度 {progress.data.personal.spanDays}/{progress.data.personal.minimumSpanDays} 天</span>
+          <small>
+            {progress.data.personal.available
+              ? "已达到个人自校准门槛；它给出的是你自己留一法残差的区间，不是人群 P80/P90。"
+              : `尚未达到：${progress.data.personal.reasonCodes.map(personalReason).join("、")}。`}
+          </small>
+        </div>
+      ) : null}
       {remote.loading && !remote.data ? <LoadingBlock label="正在读取成绩条目" /> : null}
       {remote.error ? <ErrorBlock message={remote.error} onRetry={() => void remote.reload()} /> : null}
       {remote.data ? (

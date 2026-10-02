@@ -20,6 +20,12 @@ import {
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
 import { DATABASE_TIMEZONE, SHARE_CARD_POLICY_VERSION, localCalendarFormatter } from "@rai/contracts";
+import { personalCalibrationReadiness, type PersonalCalibrationReadiness } from "@rai/model-eval";
+import {
+  buildLabelFunnel,
+  loadLabeledRaceOutcomes,
+  type LabelFunnelReport
+} from "@rai/application";
 import { estimateRecoveryTime, withTrainingForm } from "@rai/training-load";
 
 import type {
@@ -1336,6 +1342,27 @@ export class RaiReadStore {
    */
   performanceEntries(): StoredPerformanceEntry[] {
     return this.performanceEntryRepository.list();
+  }
+
+  /**
+   * §12.11 how far the runner is from a personal calibration tier.
+   *
+   * Reports the funnel (which is the reconciliation view T03 asks for) plus the
+   * floors still unmet. It deliberately does **not** produce an interval: a band is
+   * only fitted from held-out residuals, and this read path has no predictor run.
+   */
+  labelProgress(): {
+    funnel: LabelFunnelReport;
+    personal: PersonalCalibrationReadiness;
+  } {
+    const asOf = new Date().toISOString();
+    const outcomes = loadLabeledRaceOutcomes(this.database, asOf);
+    return {
+      funnel: buildLabelFunnel(this.database, asOf),
+      personal: personalCalibrationReadiness(
+        outcomes.map((outcome) => ({ distance: outcome.distance, observedAt: outcome.completedAt }))
+      )
+    };
   }
 
   /** Configured privacy zones (docs/DECISIONS.md D9). Token-gated at the route. */

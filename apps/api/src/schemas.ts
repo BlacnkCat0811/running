@@ -755,6 +755,7 @@ export const openapiDocument = {
     "/v1/workouts/{id}": { get: operation(["Workouts"], "训练详情", { parameters: pathId }) },
     "/v1/workouts/{id}/series": { get: operation(["Workouts"], "训练内时间序列", { parameters: pathId }) },
     "/v1/workouts/{id}/share-card": { get: operation(["Workouts"], "分享卡片（服务端已按隐私区裁剪轨迹）", { parameters: pathId }) },
+    "/v1/label-funnel": { get: operation(["Labels"], "标签漏斗与个人校准进度（不含区间）") },
     "/v1/performance-entries": {
       get: operation(["Labels"], "读取手工成绩条目（含已撤销，便于对账）"),
       post: operation(["Labels"], "录入手工成绩条目（仅作标签/评估证据）", {
