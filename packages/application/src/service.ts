@@ -11,11 +11,14 @@ import type { RecomputePlan } from "@rai/health-export-parser";
 import {
   RaiDatabase,
   SqliteModelRunRepository,
+  SqlitePerformanceEntryRepository,
   SqlitePrivacyZoneRepository,
   RecomputeJobRepository,
   SqliteTrainingSessionRepository,
   type JobCancellationResult,
+  type PerformanceEntryDistance,
   type PrivacyZoneInput,
+  type StoredPerformanceEntry,
   type StoredPrivacyZone
 } from "@rai/storage-sqlite";
 
@@ -144,6 +147,53 @@ export class RaiApplicationService {
       };
     } catch (error) {
       this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RELEASE rai_app_mutation");
+      throw error;
+    }
+  }
+
+  /**
+   * Records a manually entered race result (§12.10).
+   *
+   * Runs under the same single-writer transaction discipline as every other main
+   * database mutation. Validation (distance set, duration and implied pace bounds)
+   * lives in the repository, so a caller cannot bypass it by constructing a row.
+   */
+  appendPerformanceEntry(input: {
+    localDate: string;
+    distance: PerformanceEntryDistance;
+    durationSeconds: number;
+    note: string | null;
+  }): StoredPerformanceEntry {
+    const repository = new SqlitePerformanceEntryRepository(this.database);
+    this.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_app_mutation");
+    try {
+      const entry = repository.insert(input);
+      this.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_app_mutation");
+      return entry;
+    } catch (error) {
+      try {
+        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation");
+      } catch {
+        // The failing statement may already have closed the transaction.
+      }
+      throw error;
+    }
+  }
+
+  /** Tombstones an entry: the label stops counting from this instant (T03). */
+  revokePerformanceEntry(id: string): boolean {
+    const repository = new SqlitePerformanceEntryRepository(this.database);
+    this.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_app_mutation");
+    try {
+      const revoked = repository.revoke(id);
+      this.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_app_mutation");
+      return revoked;
+    } catch (error) {
+      try {
+        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation");
+      } catch {
+        // Same as above.
+      }
       throw error;
     }
   }

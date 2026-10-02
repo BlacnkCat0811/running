@@ -109,6 +109,15 @@ export {
 
 export { SqliteCalibrationRepository } from "./calibration-repository.js";
 
+// §12.10 手工成绩条目：标签闭环的入口，只作标签/评估证据。
+export {
+  PERFORMANCE_ENTRY_DISTANCE_METERS,
+  PerformanceEntryValidationError,
+  SqlitePerformanceEntryRepository,
+  type PerformanceEntryDistance,
+  type StoredPerformanceEntry
+} from "./performance-entry-repository.js";
+
 // §5.5/D9 隐私区：主库表，随备份/恢复一起走。
 export {
   PrivacyZoneRevisionConflictError,

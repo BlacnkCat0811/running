@@ -6,6 +6,11 @@ import { buildLabelFunnel, loadLabeledRaceOutcomes } from "../src/prediction-dat
 function fixture(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   db.exec(`
+    CREATE TABLE performance_entries (
+      id TEXT PRIMARY KEY, local_date TEXT NOT NULL, distance TEXT NOT NULL,
+      duration_seconds REAL NOT NULL, source TEXT NOT NULL, note TEXT,
+      recorded_at TEXT NOT NULL, revoked_at TEXT, revision INTEGER NOT NULL
+    );
     CREATE TABLE workouts(id TEXT PRIMARY KEY, duration_seconds REAL);
     CREATE TABLE training_sessions(id TEXT PRIMARY KEY, status TEXT, anchor_start_at TEXT,
       anchor_end_at TEXT, anchor_distance_km REAL, canonical_workout_id TEXT);

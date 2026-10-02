@@ -39,6 +39,8 @@ export type {
   RunningDynamicsMetricAnalysis,
   RunningDynamicsMetricName,
   RunningDynamicsMetricStatus,
+  PerformanceEntry,
+  PerformanceEntryDistance,
   ShareCardResponse,
   ShareCardRoutePoint,
   TrainingZoneProfileSettings,

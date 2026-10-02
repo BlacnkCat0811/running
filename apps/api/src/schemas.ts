@@ -354,6 +354,25 @@ export const privacyZonesBodySchema = {
   }
 } as const;
 
+/**
+ * §12.10 manually entered race results.
+ *
+ * The bounds mirror `performance-entry-repository`: a client cannot talk the API into
+ * an entry the repository would refuse, and the API cannot accept one the repository
+ * would reject later (they must not disagree about what a race result can be).
+ */
+export const performanceEntryBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["localDate", "distance", "durationSeconds"],
+  properties: {
+    localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
+    distance: { type: "string", enum: ["five_k", "ten_k", "half_marathon"] },
+    durationSeconds: { type: "number", exclusiveMinimum: 0, maximum: 14400 },
+    note: { type: ["string", "null"], maxLength: 200 }
+  }
+} as const;
+
 export const predictionQuerySchema = {
   type: "object",
   additionalProperties: false,
@@ -701,6 +720,7 @@ export const openapiDocument = {
       WorkoutOverride: overrideBodySchema,
       TrainingZoneProfileUpdate: trainingZoneProfileBodySchema,
       PrivacyZonesUpdate: privacyZonesBodySchema,
+      PerformanceEntryCreate: performanceEntryBodySchema,
       PredictionModelTrainRequest: predictionModelTrainBodySchema,
       DeleteDatabaseRequest: deleteBodySchema,
       RestoreBackupRequest: restoreBodySchema,
@@ -735,6 +755,15 @@ export const openapiDocument = {
     "/v1/workouts/{id}": { get: operation(["Workouts"], "训练详情", { parameters: pathId }) },
     "/v1/workouts/{id}/series": { get: operation(["Workouts"], "训练内时间序列", { parameters: pathId }) },
     "/v1/workouts/{id}/share-card": { get: operation(["Workouts"], "分享卡片（服务端已按隐私区裁剪轨迹）", { parameters: pathId }) },
+    "/v1/performance-entries": {
+      get: operation(["Labels"], "读取手工成绩条目（含已撤销，便于对账）"),
+      post: operation(["Labels"], "录入手工成绩条目（仅作标签/评估证据）", {
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/PerformanceEntryCreate" } } } }
+      })
+    },
+    "/v1/performance-entries/{id}": {
+      delete: operation(["Labels"], "撤销成绩条目（墓碑，不删除行）", { parameters: pathId })
+    },
     "/v1/privacy-zones": {
       get: operation(["Privacy"], "读取隐私区与 revision"),
       put: operation(["Privacy"], "整体替换隐私区（expectedRevision 冲突返回 409）", {

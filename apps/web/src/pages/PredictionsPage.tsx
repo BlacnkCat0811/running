@@ -9,6 +9,7 @@ import type {
   RaceTimePrediction
 } from "@rai/api-contracts";
 
+import { PerformanceEntriesPanel } from "../components/PerformanceEntriesPanel.js";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { date, duration, number, pace } from "../format.js";
 import { CheckCircle, Heartbeat, ShieldCheck, Target, Timer, Warning, WarningCircle } from "../icons.js";
@@ -311,6 +312,7 @@ export function PredictionsPage() {
         </section>
       </section>
       <footer className="prediction-footnote"><WarningCircle size={18} /><div><p>本预测基于当前数据与模型计算，仅供参考，不构成医学、训练或比赛决策的唯一依据。请结合自身状态与专业建议合理使用。</p>{data.guidanceCodes.length ? <ul aria-label="预测提示">{data.guidanceCodes.map((code) => <li key={code}>{guidanceLabels[code]}</li>)}</ul> : null}</div><span className="prediction-test-label">温湿度</span></footer>
+      <PerformanceEntriesPanel />
     </div>
   );
 }

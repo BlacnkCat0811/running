@@ -7,6 +7,11 @@ import { loadAcuteChronicLoadRatio, loadTrainingContext } from "../src/predictio
 function loadDatabase(recentLoad: number, futureLoad = 100_000): DatabaseSync {
   const database = new DatabaseSync(":memory:");
   database.exec(`
+    CREATE TABLE performance_entries (
+      id TEXT PRIMARY KEY, local_date TEXT NOT NULL, distance TEXT NOT NULL,
+      duration_seconds REAL NOT NULL, source TEXT NOT NULL, note TEXT,
+      recorded_at TEXT NOT NULL, revoked_at TEXT, revision INTEGER NOT NULL
+    );
     CREATE TABLE training_sessions (
       id TEXT PRIMARY KEY,
       anchor_end_at TEXT NOT NULL,

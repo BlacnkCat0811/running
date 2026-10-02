@@ -1,4 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  PERFORMANCE_ENTRY_DISTANCE_METERS,
+  SqlitePerformanceEntryRepository,
+  type PerformanceEntryDistance
+} from "@rai/storage-sqlite";
 import { legacyRecoveryBackground } from "@rai/readiness";
 
 import { DATABASE_TIMEZONE, healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
@@ -759,11 +764,52 @@ export function loadLactateThresholdEvidence(
   return evidence;
 }
 
+/**
+ * Manually entered race results as labels (docs/ALGORITHM.md §12.10).
+ *
+ * Two as-of rules, both required by T01/T03:
+ *
+ * - the entry must have been **recorded** by `asOf` (`labelAvailableAt`), so a 2023
+ *   race typed in today cannot appear inside yesterday's prediction;
+ * - the race itself must already have happened by `asOf`.
+ *
+ * A manual entry states the nominal distance, so the distance is exact by
+ * construction and there is no "actual distance" to compare against a target. It
+ * carries no GPS or heart-rate verification — that is the runner's own assertion,
+ * and the ID keeps the `performance_entry_` prefix so a report can tell the two
+ * provenance classes apart.
+ */
+export const MANUAL_ENTRY_ID_PREFIX = "performance_entry_";
+
+export function loadManualPerformanceOutcomes(
+  database: DatabaseSync,
+  asOf: string
+): LabeledRaceOutcome[] {
+  const instant = new Date(asOf).toISOString();
+  return new SqlitePerformanceEntryRepository(database).availableAt(instant).flatMap((entry) => {
+    // Noon Asia/Shanghai on the race date: a manual result is dated, not timed, and
+    // noon keeps it on the intended calendar day under either offset.
+    const completedAt = `${entry.localDate}T04:00:00.000Z`;
+    if (Date.parse(completedAt) > Date.parse(instant)) return [];
+    if (Date.parse(entry.recordedAt) > Date.parse(instant)) return [];
+    return [{
+      id: entry.id,
+      distance: entry.distance as PerformanceEntryDistance,
+      observedAt: completedAt,
+      completedAt,
+      labelAvailableAt: entry.recordedAt,
+      actualDistanceMeters: PERFORMANCE_ENTRY_DISTANCE_METERS[entry.distance],
+      actualSeconds: entry.durationSeconds,
+      labelSource: "race"
+    }];
+  });
+}
+
 export function loadLabeledRaceOutcomes(
   database: DatabaseSync,
   asOf: string
 ): LabeledRaceOutcome[] {
-  return performanceRows(database, asOf).flatMap((row) => {
+  const fromSessions = performanceRows(database, asOf).flatMap((row) => {
     if (row.eligibilityOverride === "exclude") return [];
     if (row.performanceProtocol === "thirty_min_threshold") return [];
     const label = evidenceLabel(row);
@@ -793,6 +839,7 @@ export function loadLabeledRaceOutcomes(
       labelSource: label.source
     }];
   });
+  return [...fromSessions, ...loadManualPerformanceOutcomes(database, asOf)];
 }
 
 function protocolTargetDistance(protocol: string | null): RaceDistance | null {
@@ -807,6 +854,8 @@ export interface LabelFunnelReport {
   asOf: string;
   sessionCount: number;
   confirmedCount: number;
+  /** How many usable labels came from manual entries rather than a recorded session. */
+  manualEntryCount: number;
   usableOutcomeCount: number;
   evaluatedOutcomeCount: number;
   rejectedCount: number;
@@ -880,6 +929,13 @@ export function buildLabelFunnel(
     if (reason !== "usable") primaryRejections[reason] = (primaryRejections[reason] ?? 0) + 1;
     return { trainingSessionId: row.id, revision: row.revision, reason };
   });
+  // Manual entries have no session row, so the decision loop above cannot count
+  // them. Without this, `byDistance` would disagree with `usableOutcomeCount` and
+  // the funnel would stop being reconcilable — which is the one thing T03 asks of it.
+  for (const outcome of outcomes) {
+    if (!outcome.id.startsWith(MANUAL_ENTRY_ID_PREFIX)) continue;
+    byDistance[outcome.distance].usable += 1;
+  }
   for (const value of Object.values(byDistance)) {
     if (!Number.isInteger(value.evaluated) || value.evaluated < 0 || value.evaluated > value.usable) {
       throw new Error("Evaluated label counts must be non-negative integers no greater than usable labels");
@@ -890,6 +946,7 @@ export function buildLabelFunnel(
     asOf: instant,
     sessionCount: rows.length,
     confirmedCount,
+    manualEntryCount: outcomes.filter((outcome) => outcome.id.startsWith(MANUAL_ENTRY_ID_PREFIX)).length,
     usableOutcomeCount: outcomes.length,
     evaluatedOutcomeCount: Object.values(byDistance).reduce((n, item) => n + item.evaluated, 0),
     rejectedCount: decisions.filter((item) => item.reason !== "usable").length,

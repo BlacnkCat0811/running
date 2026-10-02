@@ -10,7 +10,13 @@ export {
   loadRaceReadiness,
   loadRaceReadinessEvidence,
   buildLabelFunnel,
-  parsePerformanceConditions
+  parsePerformanceConditions,
+  // §12.10 手工成绩条目：标签装载器的两个入口都要能被独立核对 —— 评估只吃
+  // `loadLabeledRaceOutcomes`（合并结果），而诊断要能分别看到两类来源。
+  loadLabeledRaceOutcomes,
+  loadManualPerformanceOutcomes,
+  type LabelFunnelReport,
+  type LabeledRaceOutcome
 } from "./prediction-data.js";
 export { RecomputePipeline } from "./services/recompute-pipeline.js";
 // §6.9 / F08: the speed inventory must normalise units with the *same* converter the pipeline

@@ -13,7 +13,9 @@ import {
   SqliteWorkoutReadRepository,
   SqliteZoneReadRepository,
   SqliteRecoveryFactsReadRepository,
+  SqlitePerformanceEntryRepository,
   SqlitePrivacyZoneRepository,
+  type StoredPerformanceEntry,
   type StoredPrivacyZone,
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
@@ -179,6 +181,7 @@ export class RaiReadStore {
   private readonly auditRepository: SqliteAuditReadRepository;
   private readonly recoveryRepository: SqliteRecoveryFactsReadRepository;
   private readonly privacyZoneRepository: SqlitePrivacyZoneRepository;
+  private readonly performanceEntryRepository: SqlitePerformanceEntryRepository;
   private cacheVersion = -1;
   private readonly cache = new Map<string, unknown>();
 
@@ -207,6 +210,7 @@ export class RaiReadStore {
     this.auditRepository = new SqliteAuditReadRepository(this.database);
     this.recoveryRepository = new SqliteRecoveryFactsReadRepository(this.database);
     this.privacyZoneRepository = new SqlitePrivacyZoneRepository(this.database);
+    this.performanceEntryRepository = new SqlitePerformanceEntryRepository(this.database);
   }
 
   close(): void {
@@ -1322,6 +1326,16 @@ export class RaiReadStore {
       }),
       series
     };
+  }
+
+  /**
+   * §12.10 manually entered race results, newest first.
+   *
+   * Returns revoked rows too: the list is the record of what was entered, and hiding
+   * a withdrawn entry would make the label count impossible to reconcile by hand.
+   */
+  performanceEntries(): StoredPerformanceEntry[] {
+    return this.performanceEntryRepository.list();
   }
 
   /** Configured privacy zones (docs/DECISIONS.md D9). Token-gated at the route. */

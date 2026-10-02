@@ -1663,6 +1663,32 @@ export interface WorkoutGradeSummary {
 }
 
 // -----------------------------------------------------------------------------
+// Manually entered race results (docs/ALGORITHM.md §12.10).
+//
+// Declared here rather than in storage because the web client reads it: the shape is
+// a contract, and a contract that lives behind the database package forces every
+// consumer to depend on storage. The distance set is closed for the same reason the
+// prediction chain's is — a marathon result has nowhere to go yet.
+// -----------------------------------------------------------------------------
+
+export type PerformanceEntryDistance = "five_k" | "ten_k" | "half_marathon";
+
+export interface PerformanceEntry {
+  id: string;
+  localDate: string;
+  distance: PerformanceEntryDistance;
+  durationSeconds: number;
+  /** Only manual entry exists today; the field is here so provenance stays explicit. */
+  source: "manual";
+  note: string | null;
+  /** When the runner entered it. The label counts from this instant, not the race date. */
+  recordedAt: string;
+  /** Tombstone timestamp. A revoked entry stays readable so the count reconciles. */
+  revokedAt: string | null;
+  revision: number;
+}
+
+// -----------------------------------------------------------------------------
 // Share card (docs/WEB.md, docs/DECISIONS.md D9).
 //
 // A card is built by the **server** so that "hide my home" has exactly one

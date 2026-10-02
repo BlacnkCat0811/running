@@ -192,6 +192,19 @@ P80/P90 只有独立 calibration artifact、独立 test cohort、适用域、样
 生产选择器执行 [展示闸门](../packages/model-eval/src/index.ts)，缺 cohort provenance 的旧 artifact 回退。
 必须同时展示目标覆盖与实际覆盖，并声明 empirical_target_not_individual_guarantee；不把“目标80%”说成个人保证。
 
+### 12.10 手工成绩条目（2026-10-02）
+
+标签此前只有一条来源：挂在**训练记录**上的比赛/测试确认。于是"成绩都在手表之前"的跑者标签数为 0 —— 这正是本项目审查记录的状态（"零有效比赛/测试标签"）。[手工成绩](../packages/storage-sqlite/src/performance-entry-repository.ts)（迁移 27）补上这扇门：日期、距离、成绩。
+
+两条 as-of 规则是硬约束（T01/T03）：
+
+- **按录入时刻起算**：`labelAvailableAt = recordedAt`。今天录入的 2023 年成绩不得出现在昨天做出的预测里；比赛日期本身也必须已经过去。
+- **撤销是墓碑不是删除**：`revokedAt` 保留，撤销后从该时刻起不再计入；行还在，账才能对。
+
+其它边界：距离只允许 5K/10K/半马（与预测链一致）；时长与**隐含配速**双向校验（API schema 与仓储同界，两边不许对"什么算成绩"有分歧）；手工条目的 ID 带 `performance_entry_` 前缀，漏斗里 `manualEntryCount` 单独计数，`byDistance` 也把它们算进去 —— 否则 `byDistance` 会与 `usableOutcomeCount` 对不上，而可对账正是 T03 对漏斗的唯一要求。
+
+**已知限制**：手工成绩没有 GPS/心率佐证，是用户自己的陈述。它因此**只作标签与评估证据**：不生成轨迹、不生成能力评估，也不因录入而让 CA/TA 变化。
+
 ## 13. Coach 与接口
 
 [Coach](../apps/api/src/mobile-coach.ts) 选择动作/强度/tone/reason codes，renderer 只改语言和呈现。
@@ -283,6 +296,8 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
 | N02 | 上坡 / 下坡 / 平坦的同一配速 | 等强配速随坡度单调、零坡度恒等、超出成本模型域时夹取并给理由 | physiology/API |
 | N03 | 无海拔采样 / 单点采样 / 坡度超出可信范围 / 分段过短 | gradePercent 与等强配速均为 null 且带理由码，未知不得渲染为 0 | API/UI |
 | L05 | 日指标叠加状态曲线 | 持久化字段逐位不变；chronic=0/NaN ⇒ insufficient_data 而非中性档；分档在边界上归属明确 | training-load/UI |
+| T04 | 手工成绩在录入时刻之前/之后 / 比赛日在未来 / 撤销后 | 录入前不可见（不进入此前预测）；比赛未发生不是标签；撤销按时刻生效且行保留为墓碑 | application/storage |
+| T05 | 非法日期/距离/时长/隐含配速 / 手工标签计数 | 仓储与 API schema 同界拒绝；漏斗 manualEntryCount 与 byDistance 可对账；手工条目只作标签，不生成轨迹或能力评分 | storage/API/UI |
 | G01 | 赛事距离/周数不同的骨架 / 超过 24 周 / 比赛已过 / 无目标 | 阶段边界按距离分档；减量周与比赛周量带显著小于专项期；超限与过期如实标注且不编造周 | API/UI |
 | G02 | 本周计划被编辑后回看上周依从性 | 一周的义务取自该周本地午夜前生效的版本，改本周不改上周 | API/UI |
 | G03 | 计划要求训练但无观测 / 无计划历史 / 该周未要求训练 | 无观测记 unknownDays 而非未完成；无历史时整体 unknown；未要求训练的周不算达标 | API/UI |

@@ -55,7 +55,12 @@ import {
   isTrustedDevelopmentOrigin
 } from "./local-request-security.js";
 import { DatabaseMaintenance, backupPolicyFromEnvironment } from "./maintenance.js";
-import { PrivacyZoneRevisionConflictError, PrivacyZoneValidationError } from "@rai/storage-sqlite";
+import {
+  PerformanceEntryValidationError,
+  PrivacyZoneRevisionConflictError,
+  PrivacyZoneValidationError,
+  type PerformanceEntryDistance
+} from "@rai/storage-sqlite";
 import { MobileGoalsRevisionConflictError, MobileGoalsStore, type PlanMergeOptions } from "./mobile-goals.js";
 import { mobileLockRejection, mobileRefreshOutcome } from "./mobile-sync.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
@@ -80,6 +85,7 @@ import {
   predictionModelIdParamsSchema,
   predictionModelTrainBodySchema,
   predictionQuerySchema,
+  performanceEntryBodySchema,
   privacyZonesBodySchema,
   recoveryTrendQuerySchema,
   restoreBodySchema,
@@ -267,6 +273,7 @@ const tokenRequiredReadRoutes = new Set([
   // 分享卡带轨迹几何（哪怕已在服务端裁剪），隐私区本身更是家/公司坐标：两者都不进匿名读。
   "/v1/workouts/:id/share-card",
   "/v1/privacy-zones",
+  "/v1/performance-entries",
   "/v1/performance",
   "/v1/commands/:id",
   "/v1/openapi.json",
@@ -302,6 +309,8 @@ const databaseRequiredMutationRoutes = new Set([
   "/v1/workouts/:id/override",
   "/v1/training-zones/profile",
   "/v1/privacy-zones",
+  "/v1/performance-entries",
+  "/v1/performance-entries/:id",
   "/v1/prediction-models/train",
   "/v1/prediction-models/:id/cancel",
   "/v1/prediction-models/:id/activate",
@@ -963,6 +972,14 @@ app.get<{ Params: { id: string } }>("/v1/workouts/:id/series", { schema: { param
  * registrations with `(?:<[^<>]*>)?`, so a nested `Array<{…}>` makes the route
  * invisible to the gate that checks every mounted route is documented.
  */
+/** Alias, not an inline generic: see the note on `PrivacyZonesBody`. */
+type PerformanceEntryBody = {
+  localDate: string;
+  distance: PerformanceEntryDistance;
+  durationSeconds: number;
+  note?: string | null;
+};
+
 type PrivacyZonesBody = {
   revision: number;
   zones: Array<{
@@ -982,6 +999,58 @@ app.get<{ Params: { id: string } }>("/v1/workouts/:id/share-card", { schema: { p
 });
 
 app.get("/v1/privacy-zones", async () => withReadStore((store) => store.privacyZones()));
+
+/**
+ * §12.10 manually entered race results.
+ *
+ * Token-gated both ways: the payload is a race history (dates, places in time), and a
+ * write here changes what future predictions are calibrated on.
+ */
+app.get("/v1/performance-entries", async () => withReadStore((store) => ({ entries: store.performanceEntries() })));
+
+app.post<{ Body: PerformanceEntryBody }>(
+  "/v1/performance-entries",
+  { schema: { body: performanceEntryBodySchema } },
+  async (request, reply) => {
+    if (isDatabaseWriteBusy()) {
+      return reply.code(409).send({ message: "任务执行期间不能录入成绩" });
+    }
+    const store = await openMainDatabase();
+    try {
+      return new RaiApplicationService(store).appendPerformanceEntry({
+        localDate: request.body.localDate,
+        distance: request.body.distance,
+        durationSeconds: request.body.durationSeconds,
+        note: request.body.note ?? null
+      });
+    } catch (error) {
+      if (error instanceof PerformanceEntryValidationError) {
+        return reply.code(400).send({ code: error.code, message: error.message });
+      }
+      throw error;
+    } finally {
+      store.close();
+    }
+  }
+);
+
+app.delete<{ Params: { id: string } }>(
+  "/v1/performance-entries/:id",
+  { schema: { params: identifierParamsSchema } },
+  async (request, reply) => {
+    if (isDatabaseWriteBusy()) {
+      return reply.code(409).send({ message: "任务执行期间不能撤销成绩" });
+    }
+    const store = await openMainDatabase();
+    try {
+      const revoked = new RaiApplicationService(store).revokePerformanceEntry(request.params.id);
+      if (!revoked) return reply.code(404).send({ message: "未找到该成绩条目，或它已被撤销" });
+      return { revoked: true, id: request.params.id };
+    } finally {
+      store.close();
+    }
+  }
+);
 
 app.put<{ Body: PrivacyZonesBody }>(
   "/v1/privacy-zones",
