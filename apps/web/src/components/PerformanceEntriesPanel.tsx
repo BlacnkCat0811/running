@@ -28,6 +28,7 @@ interface LabelProgress {
     confirmedCount: number;
     byDistance: Record<PerformanceEntryDistance, { usable: number; evaluated: number }>;
   };
+  candidates: CandidateRow[];
   personal: {
     available: boolean;
     samples: number;
@@ -58,6 +59,17 @@ const personalReason = (code: string): string => ({
   distances_below_minimum: "覆盖的距离种类不足",
   span_below_minimum: "时间跨度不足"
 }[code] ?? code);
+
+interface CandidateRow {
+  trainingSessionId: string;
+  localDate: string;
+  distance: PerformanceEntryDistance;
+  actualDistanceMeters: number;
+  durationSeconds: number;
+  paceSecondsPerKm: number;
+  confidence: "likely" | "possible";
+  reasons: string[];
+}
 
 interface EntryRow {
   id: string;
@@ -138,6 +150,30 @@ export function PerformanceEntriesPanel() {
     }
   };
 
+  /**
+   * 一键确认已有训练：候选只是建议，确认走的是与手工录入完全相同的写入路径 ——
+   * 候选本身永远不会变成标签。
+   */
+  const confirmCandidate = async (candidate: CandidateRow): Promise<void> => {
+    setError(null);
+    setStatus(null);
+    try {
+      await api<EntryRow>("/v1/performance-entries", {
+        method: "POST",
+        body: JSON.stringify({
+          localDate: candidate.localDate,
+          distance: candidate.distance,
+          durationSeconds: candidate.durationSeconds,
+          note: null
+        })
+      });
+      setStatus("已确认为成绩标签：与手工录入走同一条写入路径，候选列表里不会再出现。");
+      await Promise.all([remote.reload(), progress.reload()]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "确认失败");
+    }
+  };
+
   const revoke = async (id: string): Promise<void> => {
     setError(null);
     setStatus(null);
@@ -199,6 +235,24 @@ export function PerformanceEntriesPanel() {
             ))}
           </div>
         )
+      ) : null}
+      {progress.data && progress.data.candidates.length > 0 ? (
+        <div className="race-candidate-list">
+          <b>看起来像比赛的训练</b>
+          <small>只是建议：确认后按同一条写入路径成为标签，任何一条都可以先核对理由。</small>
+          {progress.data.candidates.map((candidate) => (
+            <div className="race-candidate-row" key={candidate.trainingSessionId}>
+              <span>{shortDate(candidate.localDate)}</span>
+              <span>{raceDistance(candidate.distance)}</span>
+              <b>{clock(candidate.durationSeconds)}</b>
+              <span className={candidate.confidence === "likely" ? "likely" : ""}>
+                {candidate.confidence === "likely" ? "很可能" : "可能"}
+              </span>
+              <span className="race-candidate-reasons">{candidate.reasons.join("；")}</span>
+              <button type="button" className="text-button" onClick={() => void confirmCandidate(candidate)}>确认</button>
+            </div>
+          ))}
+        </div>
       ) : null}
       <div className="performance-entry-form">
         <label><span>日期</span><input type="date" value={draft.localDate} onChange={(event) => setDraft({ ...draft, localDate: event.target.value })} /></label>

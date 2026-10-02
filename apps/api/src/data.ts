@@ -15,6 +15,7 @@ import {
   SqliteRecoveryFactsReadRepository,
   SqlitePerformanceEntryRepository,
   SqlitePrivacyZoneRepository,
+  activeDurationSecondsSql,
   type StoredPerformanceEntry,
   type StoredPrivacyZone,
   type StoredWorkoutListItem
@@ -22,9 +23,11 @@ import {
 import { DATABASE_TIMEZONE, SHARE_CARD_POLICY_VERSION, localCalendarFormatter } from "@rai/contracts";
 import { fitPersonalInterval, personalCalibrationReadiness } from "@rai/model-eval";
 import type { PersonalCalibrationProgress } from "@rai/contracts";
+import { candidateEntryKey, findRaceCandidates, type RaceCandidate } from "./race-candidate.js";
 import {
   buildLabelFunnel,
   buildPersonalCalibrationSamples,
+  loadLabeledRaceOutcomes,
   type LabelFunnelReport
 } from "@rai/application";
 import { estimateRecoveryTime, withTrainingForm } from "@rai/training-load";
@@ -1355,6 +1358,7 @@ export class RaiReadStore {
   labelProgress(): {
     funnel: LabelFunnelReport;
     personal: PersonalCalibrationProgress;
+    candidates: RaceCandidate[];
   } {
     const asOf = new Date().toISOString();
     const pass = buildPersonalCalibrationSamples(this.database, asOf);
@@ -1367,8 +1371,62 @@ export class RaiReadStore {
         labelCount: pass.labelCount,
         scoredCount: pass.scoredCount,
         band: fitted
-      }
+      },
+      candidates: this.raceCandidates(asOf)
     };
+  }
+
+  /**
+   * §12.13 sessions that look like a race or a time trial.
+   *
+   * Read-only suggestions: confirming one posts a manual entry, so the candidate list
+   * can never become a label on its own.
+   */
+  private raceCandidates(asOf: string): RaceCandidate[] {
+    const labelled = new Set(loadLabeledRaceOutcomes(this.database, asOf).map((outcome) => outcome.id));
+    const rows = this.database
+      .prepare(`
+        SELECT session.id,
+          session.anchor_end_at AS completedAt,
+          session.anchor_distance_km AS distanceKm,
+          ${activeDurationSecondsSql("session")} AS durationSeconds
+        FROM training_sessions session
+        WHERE session.status = 'active'
+          AND session.anchor_distance_km IS NOT NULL
+          AND session.anchor_distance_km > 0
+          AND session.anchor_end_at <= ?
+        ORDER BY session.anchor_end_at DESC
+        LIMIT 400
+      `)
+      .all(asOf) as unknown as Array<{
+        id: string;
+        completedAt: string;
+        distanceKm: number;
+        durationSeconds: number;
+      }>;
+    // Manual entries are the confirmation record: an entry made for a date+distance
+    // retires the candidate that suggested it.
+    const entered = new Set(
+      this.performanceEntryRepository
+        .list()
+        .filter((entry) => entry.revokedAt === null)
+        .map((entry) => candidateEntryKey(entry.localDate, entry.distance))
+    );
+    return findRaceCandidates(
+      rows.map((row) => ({
+        trainingSessionId: row.id,
+        completedAt: row.completedAt,
+        localDate: localDateInShanghai(new Date(row.completedAt)),
+        distanceMeters: row.distanceKm * 1_000,
+        durationSeconds: row.durationSeconds,
+        labelled: labelled.has(row.id)
+      })),
+      { existingEntryKeys: entered }
+    )
+      // Newest first, and only the strongest few: a list of forty suggestions is a
+      // list nobody reads.
+      .sort((left, right) => right.localDate.localeCompare(left.localDate))
+      .slice(0, 12);
   }
 
   /** Configured privacy zones (docs/DECISIONS.md D9). Token-gated at the route. */
