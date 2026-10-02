@@ -1,6 +1,6 @@
 import "../pixel-layout.css";
 import "../training-reference.css";
-import type { WorkoutDetailResponse, WorkoutSegment, WorkoutSegmentPurpose, WorkoutSeriesResponse } from "@rai/api-contracts";
+import type { WorkoutDetailResponse, WorkoutEnvironmentView, WorkoutSegment, WorkoutSegmentPurpose, WorkoutSeriesResponse } from "@rai/api-contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
@@ -10,7 +10,7 @@ import { RoutePlot } from "../components/RoutePlot.js";
 import { StatusBadge } from "../components/StatusBadge.js";
 import { WorkoutSeriesChart } from "../components/WorkoutSeriesChart.js";
 import { api } from "../api.js";
-import { confidenceLevel, date, duration, environment, explanation, heartRateZone, missingReason, number, pace, paceZone, sessionType, status, stimulusType } from "../format.js";
+import { confidenceLevel, date, duration, environment, environmentReason, environmentStatus, explanation, heartRateZone, missingReason, number, pace, paceZone, sessionType, status, stimulusType } from "../format.js";
 import { useRemote } from "../hooks.js";
 import { ArrowLeft, CheckCircle, Heartbeat, MapTrifold, PencilSimple, Pulse, Target, Timer, Warning } from "../icons.js";
 
@@ -70,8 +70,138 @@ function ZoneDistribution({ title, coverage, items, kind }: {
   return <div className="workout-zone-distribution"><header><span><b>{title}</b><small>有效覆盖 {Math.round(coverage * 100)}%</small></span></header><div className="zone-stacked-bar" aria-label={`${title}分布`}>{items.map((item, index) => <i key={item.zone} className={`zone-${index + 1}`} style={{ width: `${Math.max(0, item.fraction * 100)}%` }} title={`${kind === "heart" ? heartRateZone(item.zone) : paceZone(item.zone)} ${duration(item.durationSeconds)}`} />)}</div><div className="zone-exposure-list">{items.map((item, index) => <span key={item.zone}><i className={`zone-${index + 1}`} /><b>{kind === "heart" ? heartRateZone(item.zone) : paceZone(item.zone)}</b><small>{duration(item.durationSeconds)}{kind === "pace" && item.distanceMeters > 0 ? ` · ${(item.distanceMeters / 1000).toFixed(1)} km` : ""}</small></span>)}</div></div>;
 }
 
-function WorkoutSplits({ splits }: { splits: WorkoutSeriesResponse["splits"] }) {
-  return <section className="panel workout-splits-panel"><div className="panel-heading"><div><h2>公里分段</h2><p>按累计距离切分；最后不足 1 公里的尾段单独列出。</p></div><code>{splits.length} 段</code></div>{splits.length === 0 ? <div className="splits-empty">没有足够的跑速数据生成公里分段</div> : <div className="splits-table-wrap"><table className="splits-table"><caption className="sr-only">公里分段</caption><thead><tr><th scope="col">分段</th><th scope="col">用时</th><th scope="col">距离</th><th scope="col">平均配速</th><th scope="col">平均心率</th><th scope="col">平均步频</th></tr></thead><tbody>{splits.map((split) => <tr key={split.index}><td><b>{split.distanceMeters < 999.5 ? "尾段" : `${split.index} km`}</b></td><td>{duration(split.durationSeconds)}</td><td>{(split.distanceMeters / 1000).toFixed(split.distanceMeters < 1000 ? 2 : 1)} km</td><td>{pace(split.averagePaceSecondsPerKm)}/km</td><td>{split.averageHeartRateBpm === null ? "--" : `${Math.round(split.averageHeartRateBpm)} bpm`}</td><td>{split.averageCadenceSpm === null ? "--" : `${Math.round(split.averageCadenceSpm)} spm`}</td></tr>)}</tbody></table></div>}</section>;
+export function WorkoutSplits({ splits, grade }: { splits: WorkoutSeriesResponse["splits"]; grade: WorkoutSeriesResponse["grade"] }) {
+  // Grade columns appear only when at least one split actually has altitude. A
+  // permanently empty pair of columns would read as "flat everywhere", which is
+  // exactly the unknown-versus-zero confusion the contract forbids.
+  const withGrade = splits.some((split) => split.grade?.gradePercent !== null && split.grade?.gradePercent !== undefined);
+  const gradeNote = grade === null
+    ? null
+    : grade.reasonCodes.length > 0
+      ? grade.reasonCodes.map(environmentReason).join("；")
+      : null;
+  return (
+    <section className="panel workout-splits-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>公里分段</h2>
+          <p>按累计距离切分；最后不足 1 公里的尾段单独列出。</p>
+        </div>
+        <code>{splits.length} 段</code>
+      </div>
+      {withGrade && grade !== null ? (
+        <div className="splits-grade-summary">
+          <span>等强配速（全程加权）<b>{grade.gradeAdjustedPaceSecondsPerKm === null ? "--" : `${pace(grade.gradeAdjustedPaceSecondsPerKm)}/km`}</b></span>
+          <span>累计爬升 <b>{grade.gainMeters === null ? "--" : `${Math.round(grade.gainMeters)} m`}</b></span>
+          <span>累计下降 <b>{grade.lossMeters === null ? "--" : `${Math.round(grade.lossMeters)} m`}</b></span>
+          <span>覆盖 <b>{grade.coveredSplits}/{grade.totalSplits} 段</b></span>
+          <small>按 Minetti 能耗模型折算为平地等效配速（模型值，非实测）</small>
+        </div>
+      ) : gradeNote ? (
+        <p className="splits-grade-note">未计算坡度与等强配速：{gradeNote}。</p>
+      ) : null}
+      {splits.length === 0 ? (
+        <div className="splits-empty">没有足够的跑速数据生成公里分段</div>
+      ) : (
+        <div className="splits-table-wrap">
+          <table className="splits-table">
+            <caption className="sr-only">公里分段</caption>
+            <thead>
+              <tr>
+                <th scope="col">分段</th>
+                <th scope="col">用时</th>
+                <th scope="col">距离</th>
+                <th scope="col">平均配速</th>
+                {withGrade ? <th scope="col">坡度</th> : null}
+                {withGrade ? <th scope="col">等强配速</th> : null}
+                <th scope="col">平均心率</th>
+                <th scope="col">平均步频</th>
+              </tr>
+            </thead>
+            <tbody>
+              {splits.map((split) => (
+                <tr key={split.index}>
+                  <td><b>{split.distanceMeters < 999.5 ? "尾段" : `${split.index} km`}</b></td>
+                  <td>{duration(split.durationSeconds)}</td>
+                  <td>{(split.distanceMeters / 1000).toFixed(split.distanceMeters < 1000 ? 2 : 1)} km</td>
+                  <td>{pace(split.averagePaceSecondsPerKm)}/km</td>
+                  {withGrade ? (
+                    <td title={split.grade?.reasonCodes.map(environmentReason).join("；") ?? undefined}>
+                      {split.grade?.gradePercent === null || split.grade?.gradePercent === undefined
+                        ? "--"
+                        : `${split.grade.gradePercent > 0 ? "+" : ""}${split.grade.gradePercent.toFixed(1)}%`}
+                    </td>
+                  ) : null}
+                  {withGrade ? (
+                    <td>
+                      {split.grade?.gradeAdjustedPaceSecondsPerKm === null || split.grade?.gradeAdjustedPaceSecondsPerKm === undefined
+                        ? "--"
+                        : `${pace(split.grade.gradeAdjustedPaceSecondsPerKm)}/km`}
+                    </td>
+                  ) : null}
+                  <td>{split.averageHeartRateBpm === null ? "--" : `${Math.round(split.averageHeartRateBpm)} bpm`}</td>
+                  <td>{split.averageCadenceSpm === null ? "--" : `${Math.round(split.averageCadenceSpm)} spm`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Environment read-out for one run.
+ *
+ * The correction itself is applied by the physiology evidence path, not here; this
+ * panel exists so the reader can see the number that path used. When the capture
+ * carried no weather the panel says so and names the missing fields — it never
+ * renders a zero correction that would look like "reference conditions".
+ */
+export function WorkoutEnvironmentPanel({ environment }: { environment: WorkoutEnvironmentView | null }) {
+  if (environment === null) {
+    return (
+      <section className="panel workout-environment-panel">
+        <div className="panel-heading"><div><h2>环境条件</h2><p>这次训练缺少可用于归一化的距离或时长。</p></div></div>
+      </section>
+    );
+  }
+  const measured = environment.temperatureC !== null || environment.humidityPercent !== null;
+  return (
+    <section className="panel workout-environment-panel">
+      <div className="panel-heading">
+        <div>
+          <h2>环境条件</h2>
+          <p>来自手表训练自带的天气与爬升元数据；修正量与历史成绩证据使用同一份计算。</p>
+        </div>
+        <code>{environmentStatus(environment.status)}</code>
+      </div>
+      <div className="environment-grid">
+        <span><small>温度</small><b>{environment.temperatureC === null ? "--" : `${environment.temperatureC.toFixed(1)} °C`}</b></span>
+        <span><small>湿度</small><b>{environment.humidityPercent === null ? "--" : `${Math.round(environment.humidityPercent)} %`}</b></span>
+        <span><small>爬升</small><b>{environment.elevationGainMeters === null ? "--" : `${Math.round(environment.elevationGainMeters)} m`}</b></span>
+        <span><small>修正量</small><b>{environment.correction === null ? "--" : `${(environment.correction.total * 100).toFixed(1)} %`}</b></span>
+        <span><small>等效用时</small><b>{environment.adjusted === null ? "--" : duration(environment.adjusted.durationSeconds)}</b></span>
+        <span><small>等效配速</small><b>{environment.adjusted === null || environment.adjusted.paceSecondsPerKm === null ? "--" : `${pace(environment.adjusted.paceSecondsPerKm)}/km`}</b></span>
+      </div>
+      <div className="environment-reasons">
+        {environment.reasonCodes.map((code) => <span key={code}>{environmentReason(code)}</span>)}
+      </div>
+      <p className="environment-note">
+        {environment.status === "unavailable"
+          ? "环境数据不完整，因此本次不做修正，也不会按 0 惩罚处理；上面列出的原始读数仍然保留。"
+          : environmentalNote(measured)}
+      </p>
+    </section>
+  );
+}
+
+/** Wording for the two states that actually produced a correction. */
+function environmentalNote(measured: boolean): string {
+  return measured
+    ? "等效配速是把本次观测折算到参考条件后的结果，用于跨天气比较，不代表当天能跑出的最好成绩。"
+    : "本次导入没有携带温度/湿度元数据，因此不做环境修正，也不会按 0 惩罚处理。";
 }
 
 /**
@@ -244,7 +374,8 @@ export function WorkoutDetailPage() {
       {jobId ? <div className={`job-banner ${jobStatus === "succeeded" ? "completed" : jobStatus === "failed" || jobStatus === "cancelled" ? "failed" : ""}`}>{jobStatus === "succeeded" ? <CheckCircle size={20} /> : <Warning size={20} />}<span><b>{jobStatus === "succeeded" ? "新模型已激活" : jobStatus === "failed" ? "重算失败" : jobStatus === "cancelled" ? "重算已取消" : jobPollError ? "正在重新连接任务" : "重算任务进行中"}</b><small>{jobStatus === "succeeded" ? jobPollError ?? "页面已经切换到最新 active Run。" : jobStatus === "failed" || jobStatus === "cancelled" ? "旧 active Run 保持不变，可在数据与模型页查看任务详情。" : jobPollError ?? "当前页面继续展示旧 active Run，完成后自动更新。"}</small></span></div> : null}
 
       <section className="performance-strip expanded detail-reference-metrics"><article><Timer size={31} /><span>距离</span><b>{number(workout.distanceKm)} km</b></article><article><Timer size={31} /><span>用时</span><b>{duration(workout.durationSeconds)}</b></article><article><Pulse size={31} /><span>平均配速</span><b>{pace(workout.averagePaceSecondsPerKm)}/km</b></article><article><Heartbeat size={31} /><span>平均心率</span><b>{workout.averageHeartRateBpm === null ? "--" : `${Math.round(workout.averageHeartRateBpm)} bpm`}</b></article><article><Target size={31} /><span>即时能力</span><b>{number(workout.currentAbility)}</b></article><article><CheckCircle size={31} /><span>置信度</span><b>{confidenceLevel(workout.confidence)}</b></article></section>
-      {!series.loading && !series.error && series.data && series.dataPath === seriesPath ? <><WorkoutSegments series={series.data} /><WorkoutSplits splits={series.data.splits} /></> : null}
+      {!series.loading && !series.error && series.data && series.dataPath === seriesPath ? <><WorkoutSegments series={series.data} /><WorkoutSplits splits={series.data.splits} grade={series.data.grade} /></> : null}
+      <WorkoutEnvironmentPanel environment={workout.environment} />
       {data.trainingLoad ? <><section className="workout-load-band"><span><small>综合负荷</small><b>{Math.round(data.trainingLoad.breakdown.compositeLoad)}</b></span><span><small>内部负荷</small><b>{data.trainingLoad.breakdown.internalLoad === null ? "--" : Math.round(data.trainingLoad.breakdown.internalLoad)}</b></span><span><small>配速负荷</small><b>{data.trainingLoad.breakdown.paceLoad === null ? "--" : Math.round(data.trainingLoad.breakdown.paceLoad)}</b></span><span><small>距离修正</small><b>×{data.trainingLoad.breakdown.distanceFactor.toFixed(2)}</b></span><span><small>原始 HRR-TRIMP</small><b>{data.trainingLoad.breakdown.rawHrrTrimp === null ? "--" : data.trainingLoad.breakdown.rawHrrTrimp.toFixed(1)}</b></span><span><small>距离暴露</small><b>{data.trainingLoad.breakdown.distanceExposureRatio === null ? "--" : `${data.trainingLoad.breakdown.distanceExposureRatio.toFixed(2)}× P75`}</b></span><span><small>心率负荷置信</small><b>{Math.round(data.trainingLoad.breakdown.heartRateConfidence * 100)}%</b></span><span><small>配速负荷置信</small><b>{Math.round(data.trainingLoad.breakdown.paceConfidence * 100)}%</b></span></section><div className="workout-load-explanations"><span>{loadSourceLabels[data.trainingLoad.source]}</span>{data.trainingLoad.explanations.map((item) => <span key={item.code}>{loadExplanationLabels[item.code] ?? item.code}</span>)}</div></> : null}
 
       {data.zoneSummary ? <section className="panel workout-zones-panel"><div className="panel-heading"><div><h2>{stimulusType(data.zoneSummary.stimulusType)}</h2><p>{data.zoneSummary.secondaryStimulusTypes.length ? `次要刺激：${data.zoneSummary.secondaryStimulusTypes.map(stimulusType).join("、")}` : "未识别达到最低剂量的次要刺激"} · 快照 {data.zoneSummary.zoneProfileId.slice(-8)}</p></div><strong>{Math.round(data.zoneSummary.stimulusConfidence * 100)}%</strong></div><div className="workout-zone-grid"><ZoneDistribution title="心率分区" coverage={data.zoneSummary.heartRateCoverage} items={data.zoneSummary.heartRateExposure} kind="heart" /><ZoneDistribution title="配速分区" coverage={data.zoneSummary.paceCoverage} items={data.zoneSummary.paceExposure} kind="pace" /></div>{data.zoneSummary.explanationCodes.length ? <div className="zone-explanations">{data.zoneSummary.explanationCodes.map((code) => <span key={code}>{explanation(code)}</span>)}</div> : null}</section> : null}

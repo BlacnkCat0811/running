@@ -157,6 +157,38 @@ export const environment = (value: boolean | null): string => value === true ? "
 export const missingReason = (value: string): string => missingReasonLabels[value] ?? value;
 export const confidenceLevel = (value: number | null): string => value === null ? "不可用" : value >= 0.8 ? "高" : value >= 0.6 ? "中" : "低";
 
+/**
+ * Environment read-out wording (docs/ALGORITHM.md §5).
+ *
+ * The three states must stay distinguishable in the UI: "we corrected for 30 °C"
+ * and "we have no weather for this run" are different facts, and the failure this
+ * contract exists to prevent is both of them rendering as "no adjustment".
+ */
+const environmentStatusLabels: Record<string, string> = {
+  applied: "已按环境条件修正",
+  not_needed: "参考条件，无需修正",
+  unavailable: "环境数据不足，未修正"
+};
+
+const environmentReasonLabels: Record<string, string> = {
+  temperature_missing: "缺少温度",
+  humidity_missing: "缺少湿度",
+  elevation_missing: "缺少爬升",
+  heat_humidity_adjustment: "含高温/高湿修正",
+  elevation_adjustment: "含爬升修正",
+  reference_conditions: "处于参考条件内",
+  elevation_samples_insufficient: "该段没有足够的海拔采样",
+  split_too_short_for_grade: "分段过短，无法计算坡度",
+  grade_implausible_for_split: "坡度超出可信范围",
+  grade_clamped_to_cost_model_domain: "坡度超出成本模型适用范围，已按边界处理",
+  no_split_with_elevation: "没有任何分段带海拔数据",
+  partial_elevation_coverage: "仅部分分段带海拔数据",
+  no_splits: "没有可用的公里分段"
+};
+
+export const environmentStatus = (value: string): string => environmentStatusLabels[value] ?? value;
+export const environmentReason = (value: string): string => environmentReasonLabels[value] ?? value;
+
 const explanationLabels: Record<string, string> = {
   efficiency_below_baseline: "心率效率低于个人基线",
   efficiency_above_baseline: "心率效率高于个人基线",

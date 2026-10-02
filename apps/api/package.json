@@ -17,6 +17,7 @@
     "@rai/application": "*",
     "@rai/contracts": "*",
     "@rai/health-export-parser": "*",
+    "@rai/physiology": "*",
     "@rai/readiness": "*",
     "@rai/storage-sqlite": "*",
     "@rai/training-load": "*",

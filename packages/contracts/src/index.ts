@@ -1520,6 +1520,84 @@ export interface ConfidenceV2 {
 }
 
 // -----------------------------------------------------------------------------
+// Environment view (docs/ALGORITHM.md §5).
+//
+// The environment correction itself already exists and already has an owner:
+// `performanceConditionPenaltyFraction` in @rai/physiology, applied to historical
+// VDOT evidence and to the target race scenario (see the condition ledger in
+// @rai/normalization). What did not exist was any way for a reader to see it — a
+// run in 30 °C and 80 % humidity rendered exactly like a run in 15 °C.
+//
+// This view is that read-out, and **nothing more**: it is a different object from
+// the §5.5 ledger sites, it corrects nothing on its own, and no value here may be
+// wired into evidence without first registering a ledger site. §5.5 forbids
+// correcting the same field twice on the same object.
+//
+// The status taxonomy is deliberately the one the physiology condition adapter
+// already returns. A correction of exactly zero is `not_needed`, not `null`;
+// missing inputs are `unavailable`, never silently treated as reference
+// conditions.
+// -----------------------------------------------------------------------------
+
+export const ENVIRONMENT_VIEW_POLICY_VERSION = "rai-environment-view-v1" as const;
+export const GRADE_ADJUSTMENT_POLICY_VERSION = "rai-grade-adjustment-v1" as const;
+
+export type EnvironmentViewStatus = "applied" | "not_needed" | "unavailable";
+
+export interface WorkoutEnvironmentView {
+  policyVersion: typeof ENVIRONMENT_VIEW_POLICY_VERSION;
+  /** Version of the adapter that produced `adjusted`. */
+  adapterVersion: string;
+  status: EnvironmentViewStatus;
+  /** Where the numbers came from. Only HealthKit workout metadata is read today. */
+  source: "workout_metadata";
+  /** Raw observations. Always reported, even when the correction is unavailable. */
+  temperatureC: number | null;
+  humidityPercent: number | null;
+  elevationGainMeters: number | null;
+  /**
+   * Correction components as fractions of duration. `null` whenever the status is
+   * `unavailable`: a partial penalty presented as a total is exactly the
+   * silent-zero-penalty failure this contract exists to prevent.
+   */
+  correction: { environment: number; elevation: number; total: number } | null;
+  /**
+   * The observation re-expressed at reference conditions. `null` when the
+   * correction is unknown.
+   */
+  adjusted: { durationSeconds: number; paceSecondsPerKm: number | null } | null;
+  /** Codes the UI renders instead of inventing its own wording. */
+  reasonCodes: string[];
+}
+
+/**
+ * Per-split grade context. Elevation comes from the route points of the same run,
+ * so it exists only when a route with altitude was imported.
+ */
+export interface WorkoutSplitGrade {
+  elevationChangeMeters: number | null;
+  gainMeters: number | null;
+  lossMeters: number | null;
+  /** Net grade over the split distance, in percent. Null — not 0 — when unknown. */
+  gradePercent: number | null;
+  /** Minetti-equivalent flat pace, seconds per km. Null when grade or pace is unknown. */
+  gradeAdjustedPaceSecondsPerKm: number | null;
+  policyVersion: typeof GRADE_ADJUSTMENT_POLICY_VERSION;
+  reasonCodes: string[];
+}
+
+export interface WorkoutGradeSummary {
+  policyVersion: typeof GRADE_ADJUSTMENT_POLICY_VERSION;
+  coveredSplits: number;
+  totalSplits: number;
+  gainMeters: number | null;
+  lossMeters: number | null;
+  /** Distance-weighted mean of the covered splits. Null when no split is covered. */
+  gradeAdjustedPaceSecondsPerKm: number | null;
+  reasonCodes: string[];
+}
+
+// -----------------------------------------------------------------------------
 // Readiness V1 contract (docs/ALGORITHM.md §7.4).
 //
 // Additive only. `assessment` is deliberately kept separate from `state`:

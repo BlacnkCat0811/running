@@ -1,4 +1,5 @@
 import {
+  ENVIRONMENT_VIEW_POLICY_VERSION,
   PHYSIOLOGY_PREDICTION_SCHEMA_VERSION,
   assertPhysiologyPredictionSnapshot,
   raceDistanceMeters,
@@ -11,7 +12,8 @@ import {
   type RacePredictionError,
   type RacePredictionMetrics,
   type RaceTimePrediction,
-  type Vo2MaxEstimate
+  type Vo2MaxEstimate,
+  type WorkoutEnvironmentView
 } from "@rai/contracts";
 
 export const PHYSIOLOGY_MODEL_VERSION = "rai-physiology-v1.8.0" as const;
@@ -158,6 +160,12 @@ function assertPositiveFinite(name: string, value: number): void {
   }
 }
 
+function assertFinite(name: string, value: number): void {
+  if (!Number.isFinite(value)) {
+    throw new Error(`${name} must be a finite number`);
+  }
+}
+
 function confidenceLevel(confidence: number): PredictionConfidenceLevel {
   if (confidence >= 0.8) return "high";
   if (confidence >= 0.55) return "moderate";
@@ -271,6 +279,78 @@ export function performanceConditionPenaltyFraction(
     environment,
     elevation,
     total: clamp(environment + elevation, 0, 0.2)
+  };
+}
+
+// -----------------------------------------------------------------------------
+// Grade-adjusted pace (docs/ALGORITHM.md §5) — display-only.
+//
+// This is a *different object* from the two §5.5 ledger sites: it re-expresses a
+// measured pace at a reference gradient, it does not de-bias historical evidence
+// or compensate a future scenario. It therefore must not be wired into
+// `performanceVdotEvidence` or `predictRaceTimes` without registering a ledger
+// site — doing both would be exactly the "same field corrected twice" that
+// `validateConditionLedger` exists to refuse.
+// -----------------------------------------------------------------------------
+
+export const GRADE_ADJUSTMENT_POLICY_VERSION = "rai-grade-adjustment-v1" as const;
+
+/**
+ * The Minetti polynomial is defined on |i| ≤ 0.45 (24°). Beyond that a
+ * fifth-order fit is extrapolation, so callers clamp and say so instead.
+ */
+export const MAXIMUM_GRADE_FRACTION = 0.45;
+
+/**
+ * Energy cost of running as a function of gradient, after Minetti et al. (2002),
+ * J Appl Physiol 93:1039-46:
+ *
+ *   Cr(i) = 155.4i⁵ − 30.86i⁴ − 43.3i³ + 46.3i² + 19.5i + 3.6   [J·kg⁻¹·m⁻¹]
+ *
+ * A published cost model, not a fit to this athlete's labels — which is why it may
+ * be shown without a calibration artifact, and also why it may never be presented
+ * as a measurement.
+ */
+export function gradeCostJoulesPerKgMeter(gradeFraction: number): number {
+  assertFinite("gradeFraction", gradeFraction);
+  const grade = clamp(gradeFraction, -MAXIMUM_GRADE_FRACTION, MAXIMUM_GRADE_FRACTION);
+  return (
+    155.4 * grade ** 5 -
+    30.86 * grade ** 4 -
+    43.3 * grade ** 3 +
+    46.3 * grade ** 2 +
+    19.5 * grade +
+    3.6
+  );
+}
+
+export interface GradeAdjustedPace {
+  paceSecondsPerKm: number;
+  reasonCodes: string[];
+}
+
+/**
+ * Flat-equivalent pace for a measured pace at `gradePercent`.
+ *
+ * Uphill costs more per metre, so the equivalent *flat* pace is faster (a smaller
+ * seconds-per-km number); downhill is the reverse. The ratio is
+ * `Cr(0) / Cr(i)`, i.e. the cost of running flat over the cost actually paid.
+ */
+export function gradeAdjustedPace(
+  paceSecondsPerKm: number,
+  gradePercent: number
+): GradeAdjustedPace {
+  assertPositiveFinite("paceSecondsPerKm", paceSecondsPerKm);
+  assertFinite("gradePercent", gradePercent);
+  const grade = gradePercent / 100;
+  const clamped = Math.abs(grade) > MAXIMUM_GRADE_FRACTION;
+  const cost = gradeCostJoulesPerKgMeter(grade);
+  if (!Number.isFinite(cost) || cost <= 0) {
+    throw new Error("grade cost ratio must be a positive finite number");
+  }
+  return {
+    paceSecondsPerKm: paceSecondsPerKm * (gradeCostJoulesPerKgMeter(0) / cost),
+    reasonCodes: clamped ? ["grade_clamped_to_cost_model_domain"] : []
   };
 }
 
@@ -1211,5 +1291,85 @@ export function createPhysiologyNormalizationAdapter() {
         // Existing partial-input evidence normalisation is explicit, not counted a second time.
         legacyPartialPenalty:penalty.total};
     }
+  };
+}
+
+/**
+ * Read-out of the environment correction for one run (docs/ALGORITHM.md §5).
+ *
+ * This adds no correction site: it calls the same adapter the historical VDOT
+ * evidence path calls, so the number a reader sees is the number that was applied
+ * — not a second estimate that can drift from it. When the adapter reports
+ * `unavailable`, `correction` and `adjusted` stay `null`; a partially known
+ * context is never presented as a complete penalty.
+ */
+export function buildWorkoutEnvironmentView(input: {
+  distanceMeters: number;
+  durationSeconds: number;
+  conditions: PerformanceConditions;
+}): WorkoutEnvironmentView {
+  assertPositiveFinite("distanceMeters", input.distanceMeters);
+  assertPositiveFinite("durationSeconds", input.durationSeconds);
+  const conditions = input.conditions;
+  const adapter = createPhysiologyNormalizationAdapter();
+  const result = adapter.normalize({
+    distanceMeters: input.distanceMeters,
+    durationSeconds: input.durationSeconds,
+    conditions
+  });
+
+  const missing: string[] = [];
+  if (conditions.temperatureC === null || conditions.temperatureC === undefined) {
+    missing.push("temperature_missing");
+  }
+  if (conditions.humidityPercent === null || conditions.humidityPercent === undefined) {
+    missing.push("humidity_missing");
+  }
+  if (conditions.elevationGainMeters === null || conditions.elevationGainMeters === undefined) {
+    missing.push("elevation_missing");
+  }
+
+  if (result.status === "unavailable") {
+    return {
+      policyVersion: ENVIRONMENT_VIEW_POLICY_VERSION,
+      adapterVersion: result.version,
+      status: "unavailable",
+      source: "workout_metadata",
+      temperatureC: conditions.temperatureC ?? null,
+      humidityPercent: conditions.humidityPercent ?? null,
+      elevationGainMeters: conditions.elevationGainMeters ?? null,
+      correction: null,
+      adjusted: null,
+      reasonCodes: missing
+    };
+  }
+
+  const penalty = performanceConditionPenaltyFraction(input.distanceMeters, conditions);
+  const reasonCodes: string[] = [];
+  if (penalty.environment > 0) reasonCodes.push("heat_humidity_adjustment");
+  if (penalty.elevation > 0) reasonCodes.push("elevation_adjustment");
+  if (reasonCodes.length === 0) reasonCodes.push("reference_conditions");
+
+  const adjustedSeconds = result.normalizedSeconds;
+  return {
+    policyVersion: ENVIRONMENT_VIEW_POLICY_VERSION,
+    adapterVersion: result.version,
+    status: result.status,
+    source: "workout_metadata",
+    temperatureC: conditions.temperatureC ?? null,
+    humidityPercent: conditions.humidityPercent ?? null,
+    elevationGainMeters: conditions.elevationGainMeters ?? null,
+    correction: {
+      environment: penalty.environment,
+      elevation: penalty.elevation,
+      total: penalty.total
+    },
+    adjusted: adjustedSeconds === null
+      ? null
+      : {
+          durationSeconds: adjustedSeconds,
+          paceSecondsPerKm: adjustedSeconds / (input.distanceMeters / 1_000)
+        },
+    reasonCodes
   };
 }

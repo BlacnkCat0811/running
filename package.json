@@ -91,6 +91,8 @@
     "data:backfill-canonical-nights": "tsx scripts/backfill-canonical-nights.mts",
     "predata:baseline-rebase-review": "npm run check:node",
     "data:baseline-rebase-review": "tsx scripts/baseline-rebase-review.mts",
+    "predata:env-coverage": "npm run check:node",
+    "data:env-coverage": "tsx scripts/normalization-coverage.mts",
     "predata:acceptance-matrix": "npm run check:node",
     "check:acceptance-matrix": "tsx scripts/check-acceptance-matrix.mts",
     "check:package-boundaries": "node scripts/check-package-boundaries.mjs",

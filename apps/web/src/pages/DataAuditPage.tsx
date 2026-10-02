@@ -25,6 +25,10 @@ export function DataAuditPage() {
   const heartMin = percent(data.featureQuality.minimumHeartRateCoverage);
   const heartAvg = percent(data.featureQuality.averageHeartRateCoverage);
   const heartMax = percent(data.featureQuality.maximumHeartRateCoverage);
+  // A web build can be newer than the API it talks to (the SPA stays cached across a
+  // server rollout). The field is required in the contract, but a missing block must
+  // degrade to "not reported" rather than take the whole audit page down.
+  const environment = data.environment ?? null;
 
   return (
     <div className="page audit-page data-reference-page">
@@ -63,6 +67,28 @@ export function DataAuditPage() {
           <div className="coverage-values"><span><small>最低</small><b>{heartMin}</b></span><span><small>平均</small><b>{heartAvg}</b></span><span><small>最高</small><b>{heartMax}</b></span></div>
           <div className="coverage-ruler"><i /><i /><i /><b /></div>
           <div className="coverage-legend"><span>■ 最低覆盖</span><span>■ 平均覆盖</span><span>■ 最高覆盖</span></div>
+        </section>
+
+        {/* §5.2 "先盘点再决策"：环境修正能不能诚实地做，取决于这几个字段的可得率。
+            放在审计页上，答案就从"某台机器上跑过的 CLI 报告"变成产品里可见的事实。 */}
+        <section className="audit-reference-panel environment-panel">
+          <h2>环境字段可得率</h2>
+          {environment === null ? (
+            <div className="audit-reference-empty"><Warning size={24} /> 当前 API 未返回环境字段统计（可能是旧版本服务端）</div>
+          ) : (
+            <>
+              <div className="audit-table">
+                <div className="audit-tr head"><span>字段</span><span>可得记录数</span><span>占比</span><span>来源</span></div>
+                <div className="audit-tr"><span>温度 HKWeatherTemperature</span><span>{environment.temperatureC.toLocaleString("zh-CN")}</span><span>{share(environment.temperatureC, environment.workouts)}</span><span>手表训练元数据</span></div>
+                <div className="audit-tr"><span>湿度 HKWeatherHumidity</span><span>{environment.humidityPercent.toLocaleString("zh-CN")}</span><span>{share(environment.humidityPercent, environment.workouts)}</span><span>手表训练元数据</span></div>
+                <div className="audit-tr"><span>爬升 HKElevationAscended</span><span>{environment.elevationGainMeters.toLocaleString("zh-CN")}</span><span>{share(environment.elevationGainMeters, environment.workouts)}</span><span>手表训练元数据</span></div>
+                <div className="audit-tr total"><span>三项齐全（可修正）</span><span>{environment.complete.toLocaleString("zh-CN")}</span><span>{share(environment.complete, environment.workouts)}</span><span>{environment.workouts.toLocaleString("zh-CN")} Workouts</span></div>
+              </div>
+              <p className="environment-audit-note">
+                计数使用生产解析器：键存在但读不出数值的不算可得。三项齐全的训练才会产生环境修正；其余保持"未修正"而不是按零惩罚处理。
+              </p>
+            </>
+          )}
         </section>
 
         <section className="audit-reference-panel record-panel">

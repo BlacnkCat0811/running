@@ -30,7 +30,12 @@ print("Today layout checks passed (order, paired summaries, sync visibility, rec
 
 assert views.count('.frame(height: typeSize >= .xxxLarge ? nil : 112, alignment: .topLeading)') == 2
 assert 'if let series = native.selectedSeries, series.showsPlanSegments' in views
-assert 'segmentPanel(series)\n                    } else {\n                        splitPanel(native.selectedSeries?.splits ?? [])' in views, "Plan steps and kilometer splits are mutually exclusive"
+assert 'segmentPanel(series)\n                    } else {\n                        splitPanel(' in views, "Plan steps and kilometer splits are mutually exclusive"
+# 实参不钉：2026-10-02 起分段面板接收整个 series（要读 grade 汇总），
+# 钉的是「两个分支互斥」这一行为，而不是某个实参写法。
+# §5 环境只读视图必须在详情页真的渲染，且理由码走 NativeFormat 的统一翻译。
+assert 'environmentPanel(detail.workout.environment)' in views, "详情页必须展示环境只读视图"
+assert 'nativeEnvironmentReason' in views, "环境理由码必须走统一翻译"
 chart = (root / "TechSeriesChart.swift").read_text()
 assert '.chartXAxisLabel("min")' in chart and '.chartXAxisLabel("秒")' not in chart
 assert 'point.offsetSeconds / 60' in chart and 'selected.offsetSeconds / 60' in chart

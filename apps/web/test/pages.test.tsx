@@ -52,6 +52,13 @@ describe("page data presentation", () => {
       ],
       sessionStatuses: [],
       missingReasons: [],
+      environment: {
+        workouts: 4,
+        temperatureC: 3,
+        humidityPercent: 3,
+        elevationGainMeters: 4,
+        complete: 3
+      },
       issues: []
     }));
 
@@ -59,9 +66,12 @@ describe("page data presentation", () => {
 
     expect(screen.getByText("75.0%", { selector: ".audit-source-table span" })).toBeTruthy();
     expect(screen.getByText("25.0%", { selector: ".audit-source-table span" })).toBeTruthy();
-    expect(screen.getByText("4 Workouts")).toBeTruthy();
+    expect(screen.getByText("4 Workouts", { selector: ".audit-source-table span" })).toBeTruthy();
     expect(screen.getByText("82.0%", { selector: ".audit-overview b" })).toBeTruthy();
     expect(screen.getByText("数据完整性：82.0%", { selector: ".audit-health-bar span" })).toBeTruthy();
+    // §5.2：环境字段可得率是"要不要做修正"的前提，必须在审计页可读。
+    expect(screen.getByText("环境字段可得率")).toBeTruthy();
+    expect(screen.getByText("三项齐全（可修正）")).toBeTruthy();
   });
 
   it("shows prediction uncertainty, method, fallback reason, and report guidance", () => {

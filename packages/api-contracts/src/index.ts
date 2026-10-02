@@ -27,6 +27,10 @@ export type {
   DailyZoneProfile,
   WorkoutZoneSummary,
   TrainingLoadBreakdown,
+  WorkoutEnvironmentView,
+  EnvironmentViewStatus,
+  WorkoutSplitGrade,
+  WorkoutGradeSummary,
   TrainingZoneProfileSettings,
   TrainingZonesCurrentResponse,
   TrainingZonesHistoryResponse,
@@ -50,6 +54,9 @@ import type {
   PredictionModelEvent,
   PredictionModelRun,
   PredictionModelRunStatus,
+  WorkoutEnvironmentView,
+  WorkoutGradeSummary,
+  WorkoutSplitGrade,
   WorkoutTrainingLoad,
   WorkoutZoneSummary
 } from "@rai/contracts";
@@ -297,6 +304,13 @@ export interface WorkoutDetailResponse {
     averageGroundContactTimeMs: number | null;
     modelVersion: string;
     updatedTrueAbility: boolean;
+    /**
+     * Environment read-out for this run (docs/ALGORITHM.md §5). `null` only when
+     * the run has no distance/duration to normalise against; a capture that
+     * carried no weather is `status: "unavailable"` with the missing fields named,
+     * never a zero penalty that looks like reference conditions.
+     */
+    environment: WorkoutEnvironmentView | null;
     heartRateCoverage: number | null;
     heartRateSampleCount: number;
     routeQuality: number | null;
@@ -576,6 +590,20 @@ export interface DataAuditResponse {
   sourceCategories: Array<{ category: string; count: number }>;
   sessionStatuses: Array<{ status: string; count: number }>;
   missingReasons: Array<{ reason: string; count: number }>;
+  /**
+   * Availability of the §5 environment fields across canonical workouts, parsed
+   * with the production parser (a key that exists but cannot be read is not
+   * available). It answers "is there anything to correct?" before any fitted
+   * correction is proposed.
+   */
+  environment: {
+    workouts: number;
+    temperatureC: number;
+    humidityPercent: number;
+    elevationGainMeters: number;
+    /** All three present: the only rows the condition adapter can correct. */
+    complete: number;
+  };
   issues: Array<{ severity: string; code: string; count: number }>;
 }
 
@@ -585,6 +613,8 @@ export interface WorkoutSeriesResponse {
   endedAt: string;
   sourceCategory: string;
   splits: WorkoutSplit[];
+  /** Distance-weighted grade-adjusted pace across the covered splits. */
+  grade: WorkoutGradeSummary | null;
   segments: WorkoutSegment[];
   segmentPlan: WorkoutSegmentPlanMatch | null;
   /** Why `segments` is empty, or what the match assumed — never silently blank. */
@@ -1193,6 +1223,12 @@ export interface WorkoutSplit {
   averagePaceSecondsPerKm: number;
   averageHeartRateBpm: number | null;
   averageCadenceSpm: number | null;
+  /**
+   * Grade context for this split, from the route points of the same run. Absent
+   * (rather than zero-filled) when the run has no altitude data — `null`
+   * `gradePercent` means "unknown", which is not the same as "flat".
+   */
+  grade?: WorkoutSplitGrade | null;
 }
 
 /**

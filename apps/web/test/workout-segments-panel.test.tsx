@@ -27,6 +27,7 @@ const series = (overrides: Partial<WorkoutSeriesResponse> = {}): WorkoutSeriesRe
   endedAt: "2026-09-14T11:59:10.000Z",
   sourceCategory: "apple_watch",
   splits: [],
+  grade: null,
   segments: [],
   segmentPlan: null,
   segmentNote: null,

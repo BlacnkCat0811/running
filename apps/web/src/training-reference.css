@@ -365,4 +365,27 @@
   .statistics-reference-page .statistics-secondary-kpis span { display: block; font-size: 9px; }
   .statistics-reference-page .statistics-secondary-kpis b { display: block; margin-top: 8px; font-size: 18px; }
   .statistics-reference-page .statistics-grid.lower { margin-top: 12px; }
+
+  /* Workout detail: environment read-out and per-split grade (§5).
+     Both describe the capture rather than the performance, so they sit next to the
+     splits: a missing temperature is a data gap, not a finding about the runner. */
+  .detail-page .workout-environment-panel { margin-top: 10px; padding: 10px 12px; }
+  .detail-page .workout-environment-panel .panel-heading { min-height: 28px; padding: 0 0 6px; }
+  .detail-page .workout-environment-panel .panel-heading code { font-size: 10px; }
+  .detail-page .environment-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    border: 1px solid var(--training-grid);
+  }
+  .detail-page .environment-grid > span { padding: 8px 10px; border-right: 1px dashed var(--training-grid); }
+  .detail-page .environment-grid > span:last-child { border-right: 0; }
+  .detail-page .environment-grid small { display: block; font-size: 9px; opacity: 0.75; }
+  .detail-page .environment-grid b { display: block; margin-top: 4px; font-size: 13px; }
+  .detail-page .environment-reasons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .detail-page .environment-reasons span { padding: 2px 7px; border: 1px solid var(--training-grid); font-size: 9px; }
+  .detail-page .environment-note { margin: 8px 0 0; font-size: 9px; line-height: 1.5; opacity: 0.8; }
+  .detail-page .splits-grade-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; padding: 4px 2px 6px; font-size: 9px; }
+  .detail-page .splits-grade-summary b { margin-left: 4px; font-size: 11px; }
+  .detail-page .splits-grade-summary small { flex-basis: 100%; opacity: 0.7; }
+  .detail-page .splits-grade-note { margin: 0 2px 6px; font-size: 9px; opacity: 0.8; }
 }

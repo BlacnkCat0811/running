@@ -196,6 +196,24 @@ export class SqliteAuditReadRepository {
     };
   }
 
+  /**
+   * Canonical workouts with their raw `metadata_json`.
+   *
+   * Returned unparsed on purpose: deciding what the metadata means (unit
+   * conversions, which keys count as an observation) is `@rai/application`'s job,
+   * and this package must not grow an edge to it. The caller is the API's
+   * environment-coverage read-out, which parses with the production parser.
+   */
+  workoutMetadataRows(): Array<{ id: string; metadataJson: string | null }> {
+    const rows = this.database
+      .prepare("SELECT id, metadata_json FROM workouts WHERE is_canonical = 1")
+      .all() as Record<string, unknown>[];
+    return rows.map((row) => ({
+      id: String(row.id),
+      metadataJson: typeof row.metadata_json === "string" ? row.metadata_json : null
+    }));
+  }
+
   diagnosticsActiveModel(): StoredDiagnosticsActiveModel | null {
     const active = this.database
       .prepare(`

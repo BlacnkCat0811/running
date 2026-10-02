@@ -62,6 +62,25 @@
 无天气不能伪造 15°C/50% 实测值，也不能强制 environmentAdjusted=true 才允许负向学习。
 引入新天气服务、拟合 N2/N3 或将新 comparability 硬接 TA 前，必须盘点覆盖、版本化并独立回放。
 
+### 5.1 环境只读视图（2026-10-02）
+
+修正本身早已存在且有唯一所有者：[performanceConditionPenaltyFraction](../packages/physiology/src/index.ts) 经 `createPhysiologyNormalizationAdapter` 作用于历史成绩证据与未来比赛情景（见[条件账本](../packages/normalization/src/index.ts)的两个 site）。缺的只是**读不出来**：30 °C/80% 的一次跑与 15 °C 的一次跑在界面上完全相同。
+
+`WorkoutEnvironmentView`（[合同](../packages/contracts/src/index.ts)）是这次读出的形状，由 [buildWorkoutEnvironmentView](../packages/physiology/src/index.ts) 构造：
+
+- 它调用**同一个** adapter，读者看到的修正量与证据实际使用的修正量不会分叉；
+- `unavailable` 时 `correction` 与 `adjusted` 都是 `null` 并列出缺失字段；**部分已知不得当作完整修正**；
+- `not_needed` 表示三项齐全且修正为零（显式 0，而不是 `null`）；
+- 原始温度/湿度/爬升始终返回；来源仅限手表训练自带的元数据（HealthKit workout metadata），**不引入外部天气服务、不做历史回填**。
+
+可得率是这条链的前提，所以它必须可被计数：[数据审计](../apps/api/src/data.ts) 用生产解析器统计三个字段的可得条数与“三项齐全”条数（键存在但读不出数值不算可得）。CLI 版本是 [normalization-coverage](../scripts/normalization-coverage.mts)（`npm run data:env-coverage`），报告与页面读同一个解析器。
+
+### 5.2 等强配速（坡度归一化，2026-10-02）
+
+[gradeAdjustedPace](../packages/physiology/src/index.ts) 用 Minetti(2002) 能耗多项式把测得配速折算为平地等效值，政策版本是 `GRADE_ADJUSTMENT_POLICY_VERSION`。它与 §5.5 的两个账本 site **是不同对象**：不改历史证据、不改未来情景；因此**不得**接进 `performanceVdotEvidence` / `predictRaceTimes` —— 那会变成同一字段被修正两次，正是 `validateConditionLedger` 拒绝的情形。
+
+分段级证据来自同一次跑的路线点海拔（`route_points.elevation_meters`）：窗口内少于 2 个采样、分段短于 50 m、或 |坡度| 超过 60% 时，`gradePercent` 与等强配速都是 `null` 并给出理由码；**未知不是平坦**。汇总值是已覆盖分段的距离加权平均，并显式报告覆盖段数。
+
 ## 6. Fitness 与基线
 
 [评分实现](../packages/scoring/src/model.ts) 保留 Median/MAD、初始至少 6 次有效训练/跨度 14 日、V2-A 控制组与最低覆盖保护；Recovery/Cardio 不作为 V4 有效权重。
@@ -215,6 +234,9 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
 | B04 | 新标尺重估历史 | 标注回顾性视图；旧事实曲线保留，不回灌 as-known-then | replay/UI |
 | I02 | 无 calibration/域匹配/足够独立评估 | 不展示为 P80/P90 保证；只保留明确 heuristicRange | API/UI |
 | T03 | 已标注结果不合格、重复、更正或撤销 | 漏斗计数可对账、理由可见、失效传播正确 | application/evaluation |
+| N01 | 环境三项缺一 / 三项齐全且为零 / 三项齐全且有修正 | unavailable 不产出部分修正、not_needed 显式 0、applied 与证据同一计算；可得率按解析结果计数 | physiology/API/UI |
+| N02 | 上坡 / 下坡 / 平坦的同一配速 | 等强配速随坡度单调、零坡度恒等、超出成本模型域时夹取并给理由 | physiology/API |
+| N03 | 无海拔采样 / 单点采样 / 坡度超出可信范围 / 分段过短 | gradePercent 与等强配速均为 null 且带理由码，未知不得渲染为 0 | API/UI |
 
 ### 16.2 核验层级
 

@@ -1280,6 +1280,7 @@ struct TechWorkoutDetailView: View {
                     }
                     detailHeader(detail.workout)
                     detailOverview(detail.workout)
+                    environmentPanel(detail.workout.environment)
                     Button("记录感受 / 编辑训练") { feedbackDetail = detail }
                         .frame(minHeight: 44).accessibilityIdentifier("workout.feedback")
                     ShareLink(item: "训练摘要：\(nativeSessionName(detail.workout.sessionType)) · \(nativeKilometers(detail.workout.distanceKm)) · \(techDuration(detail.workout.durationSeconds))") {
@@ -1292,7 +1293,7 @@ struct TechWorkoutDetailView: View {
                     if let series = native.selectedSeries, series.showsPlanSegments {
                         segmentPanel(series)
                     } else {
-                        splitPanel(native.selectedSeries?.splits ?? [])
+                        splitPanel(native.selectedSeries)
                     }
                     qualityPanel(detail)
                     if let load = detail.trainingLoad { trainingLoadPanel(load) }
@@ -1488,27 +1489,98 @@ struct TechWorkoutDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func splitPanel(_ splits: [WorkoutSplit]) -> some View {
+    /// Environment read-out (docs/ALGORITHM.md §5).
+    ///
+    /// The correction is applied by the physiology evidence path, not here; this
+    /// panel only makes the number readable. A capture without weather says so and
+    /// names the missing fields — it must never render as "no correction needed".
+    private func environmentPanel(_ environment: WorkoutEnvironmentView?) -> some View {
+        guard let environment else { return AnyView(EmptyView()) }
+        let statusText: String = {
+            switch environment.status {
+            case "applied": return "已按环境条件修正"
+            case "not_needed": return "参考条件，无需修正"
+            default: return "环境数据不足，未修正"
+            }
+        }()
+        let hasWeather = environment.temperatureC != nil || environment.humidityPercent != nil
+        return AnyView(TechPanel {
+            VStack(alignment: .leading, spacing: 10) {
+                TechSectionHeader(title: "环境条件", trailing: statusText, trailingColor: TechColor.yellow)
+                TechMetricGrid(minimum: 120) {
+                    TechMetricTile(title: "温度", value: environment.temperatureC.map { "\(nativeNumber($0, digits: 1)) °C" } ?? "--")
+                    TechMetricTile(title: "湿度", value: environment.humidityPercent.map { "\(nativeNumber($0, digits: 0)) %" } ?? "--")
+                    TechMetricTile(title: "爬升", value: environment.elevationGainMeters.map { "\(nativeNumber($0, digits: 0)) m" } ?? "--")
+                    TechMetricTile(title: "修正量", value: environment.correction.map { "\(nativeNumber($0.total * 100, digits: 1)) %" } ?? "--", accent: TechColor.yellow)
+                    TechMetricTile(title: "等效用时", value: environment.adjusted.map { techDuration($0.durationSeconds) } ?? "--")
+                    TechMetricTile(title: "等效配速", value: environment.adjusted?.paceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--", accent: TechColor.cyan)
+                }
+                if !environment.reasonCodes.isEmpty {
+                    Text(environment.reasonCodes.map(nativeEnvironmentReason).joined(separator: " · "))
+                        .font(.caption)
+                        .foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(hasWeather
+                     ? "等效配速是把本次观测折算到参考条件后的结果，用于跨天气比较，不代表当天的最好成绩。"
+                     : "本次同步没有携带温度/湿度，因此不做环境修正，也不会按零惩罚处理。")
+                    .font(.caption)
+                    .foregroundStyle(TechColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        })
+    }
+
+    /// Grade context for the splits, or an explicit reason it is missing.
+    ///
+    /// `gradePercent == nil` means unknown — never render it as a flat split.
+    private func splitPanel(_ series: WorkoutSeriesResponse?) -> some View {
+        let splits = series?.splits ?? []
         let maxPace = max(splits.map(\.averagePaceSecondsPerKm).max() ?? 1, 1)
+        let grade = series?.grade
+        let hasGrade = splits.contains { $0.grade?.gradePercent != nil }
         return TechPanel {
             VStack(alignment: .leading, spacing: 4) {
                 TechSectionHeader(title: "公里分段", trailing: "\(splits.count) 段")
+                if hasGrade, let grade {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("等强配速 \(grade.gradeAdjustedPaceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--") · 爬升 \(grade.gainMeters.map { "\(nativeNumber($0, digits: 0)) m" } ?? "--") · 覆盖 \(grade.coveredSplits)/\(grade.totalSplits) 段")
+                        Text("按 Minetti 能耗模型折算为平地等效配速（模型值，非实测）")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(TechColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 4)
+                } else if let grade, !grade.reasonCodes.isEmpty {
+                    Text("未计算坡度与等强配速：\(grade.reasonCodes.map(nativeEnvironmentReason).joined(separator: "；"))")
+                        .font(.caption)
+                        .foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 4)
+                }
                 if splits.isEmpty {
                     Text("没有分段数据")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
                 } else {
                     ForEach(splits) { split in
-                        TechAdaptiveStack(spacing: 8) {
-                            Text(split.distanceMeters < 999.5 ? "尾段" : "\(split.index) km")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(width: 52, alignment: .leading)
-                            TechProgressBar(fraction: split.averagePaceSecondsPerKm / maxPace)
-                            Text("\(techPace(split.averagePaceSecondsPerKm))/km")
-                            Text(split.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
+                        VStack(alignment: .leading, spacing: 2) {
+                            TechAdaptiveStack(spacing: 8) {
+                                Text(split.distanceMeters < 999.5 ? "尾段" : "\(split.index) km")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(width: 52, alignment: .leading)
+                                TechProgressBar(fraction: split.averagePaceSecondsPerKm / maxPace)
+                                Text("\(techPace(split.averagePaceSecondsPerKm))/km")
+                                Text(split.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
+                            }
+                            .font(.caption.weight(.bold).monospacedDigit())
+                            .foregroundStyle(TechColor.muted)
+                            if let splitGrade = split.grade, splitGrade.gradePercent != nil {
+                                Text("坡度 \(nativeNumber(splitGrade.gradePercent, digits: 1))% · 等强 \(splitGrade.gradeAdjustedPaceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--")")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(TechColor.muted)
+                            }
                         }
-                        .font(.caption.weight(.bold).monospacedDigit())
-                        .foregroundStyle(TechColor.muted)
                         .padding(.vertical, 7)
                         .overlay(alignment: .bottom) { Rectangle().fill(TechColor.grid).frame(height: 1) }
                     }

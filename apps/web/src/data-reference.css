@@ -265,6 +265,15 @@
   .data-page .job-list > div { min-height: 32px; }
   .data-page .prediction-model-management { margin-top: 0; }
 
+  /* Audit: environment-field availability (§5.2). Rows reuse `.audit-table`, so
+     only the explanatory footnote needs a rule of its own. */
+  .audit-page .environment-audit-note {
+    margin: 8px 2px 0;
+    font-size: 9px;
+    line-height: 1.5;
+    opacity: 0.8;
+  }
+
 }
 
 @media (min-width: 1024px) and (max-width: 1099px) {

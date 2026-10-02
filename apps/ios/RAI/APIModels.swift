@@ -932,6 +932,8 @@ struct WorkoutDetail: Codable {
     let trueAbilityBefore: Double?
     let trueAbilityAfter: Double?
     let workoutContribution: Double?
+    /// §5 environment read-out. Optional so an older server still decodes.
+    let environment: WorkoutEnvironmentView?
 }
 
 struct WorkoutOverride: Codable {
@@ -1047,11 +1049,13 @@ struct WorkoutSeriesResponse: Codable {
     /// Absent on older APIs: hide inferred/unknown segments rather than claim plan execution.
     let hasMeasuredWorkoutSteps: Bool?
     var showsPlanSegments: Bool { hasMeasuredWorkoutSteps == true && !segments.isEmpty }
+    /// Grade summary for the splits. Absent on older APIs; the panel then hides.
+    let grade: WorkoutGradeSummary?
     let series: WorkoutSeries
 
     private enum CodingKeys: String, CodingKey {
         case trainingSessionId, startedAt, endedAt, sourceCategory
-        case splits, segments, segmentPlan, segmentNote, hasMeasuredWorkoutSteps, series
+        case splits, segments, segmentPlan, segmentNote, hasMeasuredWorkoutSteps, grade, series
     }
 
     init(from decoder: Decoder) throws {
@@ -1065,6 +1069,7 @@ struct WorkoutSeriesResponse: Codable {
         segmentPlan = try container.decodeIfPresent(WorkoutSegmentPlanMatch.self, forKey: .segmentPlan)
         segmentNote = try container.decodeIfPresent(String.self, forKey: .segmentNote)
         hasMeasuredWorkoutSteps = try container.decodeIfPresent(Bool.self, forKey: .hasMeasuredWorkoutSteps)
+        grade = try container.decodeIfPresent(WorkoutGradeSummary.self, forKey: .grade)
         series = try container.decode(WorkoutSeries.self, forKey: .series)
     }
 }
@@ -1116,8 +1121,66 @@ struct WorkoutSplit: Codable, Identifiable {
     let averagePaceSecondsPerKm: Double
     let averageHeartRateBpm: Double?
     let averageCadenceSpm: Double?
+    /// §5 grade context from the route points of the same run. Absent on older
+    /// servers and on runs without altitude; `gradePercent == nil` means unknown,
+    /// which is not the same as flat.
+    let grade: WorkoutSplitGrade?
 
     var id: Int { index }
+}
+
+/// Per-split grade and its flat-equivalent pace.
+///
+/// Display-only: the Minetti cost model re-expresses a measured pace, it does not
+/// correct evidence. Decoded tolerantly so an older server keeps working.
+struct WorkoutSplitGrade: Codable {
+    let elevationChangeMeters: Double?
+    let gainMeters: Double?
+    let lossMeters: Double?
+    let gradePercent: Double?
+    let gradeAdjustedPaceSecondsPerKm: Double?
+    let policyVersion: String
+    let reasonCodes: [String]
+}
+
+/// Distance-weighted grade-adjusted pace across the covered splits.
+struct WorkoutGradeSummary: Codable {
+    let policyVersion: String
+    let coveredSplits: Int
+    let totalSplits: Int
+    let gainMeters: Double?
+    let lossMeters: Double?
+    let gradeAdjustedPaceSecondsPerKm: Double?
+    let reasonCodes: [String]
+}
+
+/// Environment read-out for one run (docs/ALGORITHM.md §5).
+///
+/// The correction is applied by the physiology evidence path; this is the same
+/// number made readable. `status == "unavailable"` means the capture carried no
+/// weather — never render it as a zero correction.
+struct WorkoutEnvironmentView: Codable {
+    let policyVersion: String
+    let adapterVersion: String
+    let status: String
+    let source: String
+    let temperatureC: Double?
+    let humidityPercent: Double?
+    let elevationGainMeters: Double?
+    let correction: WorkoutEnvironmentCorrection?
+    let adjusted: WorkoutEnvironmentAdjusted?
+    let reasonCodes: [String]
+}
+
+struct WorkoutEnvironmentCorrection: Codable {
+    let environment: Double
+    let elevation: Double
+    let total: Double
+}
+
+struct WorkoutEnvironmentAdjusted: Codable {
+    let durationSeconds: Double
+    let paceSecondsPerKm: Double?
 }
 
 struct WorkoutSeries: Codable {

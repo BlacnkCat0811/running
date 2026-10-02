@@ -358,6 +358,30 @@ func nativeStatusName(_ value: String?) -> String {
     }
 }
 
+/// Environment read-out wording (docs/ALGORITHM.md §5).
+///
+/// `applied` and `unavailable` must stay distinguishable in the UI: "we corrected
+/// for 30 °C" and "this capture carried no weather" are different facts, and the
+/// failure this contract prevents is both of them reading as "no adjustment".
+func nativeEnvironmentReason(_ code: String) -> String {
+    switch code {
+    case "temperature_missing": return "缺少温度"
+    case "humidity_missing": return "缺少湿度"
+    case "elevation_missing": return "缺少爬升"
+    case "heat_humidity_adjustment": return "含高温/高湿修正"
+    case "elevation_adjustment": return "含爬升修正"
+    case "reference_conditions": return "处于参考条件内"
+    case "elevation_samples_insufficient": return "该段没有足够的海拔采样"
+    case "split_too_short_for_grade": return "分段过短，无法计算坡度"
+    case "grade_implausible_for_split": return "坡度超出可信范围"
+    case "grade_clamped_to_cost_model_domain": return "坡度超出成本模型适用范围"
+    case "no_split_with_elevation": return "没有任何分段带海拔数据"
+    case "partial_elevation_coverage": return "仅部分分段带海拔数据"
+    case "no_splits": return "没有可用的公里分段"
+    default: return code
+    }
+}
+
 // `calibrationNeedsAttention(_:)` 已移到 `CalibrationState.swift`：那边是纯
 // Foundation，能被 `run-model-tests.sh` 在 macOS 上编译并钉住；本文件当时依赖
 // `PixelColor`（iOS 专属），判据留在这里就永远进不了秒级闸门。

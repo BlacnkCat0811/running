@@ -57,6 +57,7 @@ import type {
   WorkoutSeriesResponse
 } from "@rai/api-contracts";
 import { buildPlanExecution } from "./plan-execution.js";
+import { environmentCoverage, environmentViewForWorkout, splitGradeContexts } from "./workout-environment.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
 import { DEFAULT_WEEKLY_DISTANCE_KM, type PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
@@ -981,6 +982,14 @@ export class RaiReadStore {
       ),
       modelVersion: row.modelVersion,
       updatedTrueAbility: row.updatedTrueAbility,
+      // §5 read-out of the correction that physiology already applies. Absent
+      // weather is reported as `unavailable` with the missing fields named; it is
+      // never folded into a zero penalty that would read as "reference conditions".
+      environment: environmentViewForWorkout({
+        metadataJson: this.seriesRepository.workoutMetadata(row.canonicalWorkoutId),
+        distanceMeters: distance === null ? null : distance * 1000,
+        durationSeconds: duration
+      }),
       heartRateCoverage: row.heartRateCoverage,
       heartRateSampleCount: row.heartRateSampleCount,
       routeQuality: row.routeQuality,
@@ -1151,12 +1160,25 @@ export class RaiReadStore {
     if (!session) return null;
     const { startedAt, endedAt, sourceCategory, sourceName, distanceKm } = session;
     const segmentation = this.segmentRun(session, candidates);
+    const splits = this.seriesRepository.workoutSplits(startedAt, endedAt, sourceName, distanceKm);
+    const elevationSeries = this.seriesRepository.routeElevationSeries(id);
+    // Grade is computed here rather than inside the splits query: the splits read
+    // repository is a data accessor, and the cost model lives in @rai/physiology.
+    const grade = splitGradeContexts({
+      startedAtMs: Date.parse(startedAt),
+      splits,
+      elevationPoints: elevationSeries.points.map((point) => ({
+        timestamp: point.timestamp,
+        value: point.value
+      }))
+    });
     return {
       trainingSessionId: id,
       startedAt,
       endedAt,
       sourceCategory,
-      splits: this.seriesRepository.workoutSplits(startedAt, endedAt, sourceName, distanceKm),
+      splits: splits.map((split, index) => ({ ...split, grade: grade.splits[index] ?? null })),
+      grade: grade.summary,
       segments: segmentation.segments,
       segmentPlan: segmentation.plan,
       segmentNote: segmentation.note,
@@ -1301,7 +1323,13 @@ export class RaiReadStore {
   }
 
   dataAudit(): DataAuditResponse {
-    return this.cached("data-audit", () => this.auditRepository.dataAudit());
+    return this.cached("data-audit", () => ({
+      ...this.auditRepository.dataAudit(),
+      // §5.2 "count first, then decide": the availability of the environment
+      // fields decides whether a fitted correction can ever be honest, so it is
+      // reported in the product rather than only in a CLI run on a DB copy.
+      environment: environmentCoverage(this.auditRepository.workoutMetadataRows())
+    }));
   }
 
   diagnostics(): DiagnosticExportResponse {
