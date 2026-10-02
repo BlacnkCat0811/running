@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildPeriodization, periodizationVolumeFraction, periodizationWeekStart } from "../src/plan-periodization.js";
+import {
+  buildPeriodization,
+  currentPeriodizationWeek,
+  periodizationVolumeFraction,
+  periodizationWeekStart
+} from "../src/plan-periodization.js";
+import { enforcePhaseCeiling, weeklyPlanVolumeCeiling } from "../src/weekly-plan-validate.js";
 import { buildPlanAdherence, replanAdvice, type PlanDayObservation } from "../src/plan-adherence.js";
 import type { PlanHistoryRevision } from "../src/mobile-goals.js";
 
@@ -37,6 +43,17 @@ test("G01: phase boundaries follow the race distance, and the race week is the l
   assert.equal(byPhase("race_week"), 1);
   assert.ok(byPhase("base") >= 4);
   assert.equal(half.current?.weekStart, periodizationWeekStart(TODAY));
+  // The *assignment* matters, not only the counts: a transposition that puts
+  // `race_week` on the furthest week keeps every count identical.
+  assert.equal(half.weeks.at(-1)!.phase, "race_week");
+  assert.equal(half.weeks.at(-1)!.weeksToRace, 0);
+  assert.equal(half.current!.phase, "base");
+  assert.equal(half.current!.weeksToRace, half.weeks.length - 1);
+  assert.deepEqual(
+    half.weeks.map((week) => week.weeksToRace),
+    half.weeks.map((_, index) => half.weeks.length - 1 - index),
+    "weeksToRace counts down to zero at the race week"
+  );
 
   // A 5K sharpens sooner: fewer base weeks, shorter taper.
   const fiveK = buildPeriodization({
@@ -229,4 +246,75 @@ test("G04: a plan above the phase band is flagged, not silently trimmed", () => 
   const adherence = buildPlanAdherence({ today: TODAY, history, actual: [], periodization });
   const advice = replanAdvice({ adherence, periodization });
   assert.ok(advice.reasons.some((reason) => reason.code === "plan_above_phase_band"));
+});
+
+/**
+ * G05: the skeleton has to reach the prescription, not just the read-out.
+ *
+ * The failure this pins is a taper that exists in the plan view while the generated
+ * week is still a build week — the runner sees "减量期" and is handed the volume of
+ * 专项期, which is worse than showing no phase at all.
+ */
+
+test("G05: without a race target nothing changes — the same ceiling as before", () => {
+  const before = weeklyPlanVolumeCeiling(40, null);
+  assert.equal(weeklyPlanVolumeCeiling(40, null, null), before);
+  assert.equal(weeklyPlanVolumeCeiling(40, null, undefined), before);
+  // A phase cap may only ever lower a ceiling, never raise one.
+  assert.equal(weeklyPlanVolumeCeiling(40, null, 2), before);
+  assert.ok(weeklyPlanVolumeCeiling(40, null, periodizationVolumeFraction("taper")) < before);
+  // The ramp limit still wins when it is the tighter of the two.
+  assert.equal(weeklyPlanVolumeCeiling(40, 10, 1.5), weeklyPlanVolumeCeiling(40, 10));
+});
+
+test("G05: the current week is the phase the skeleton reports, and null without a race", () => {
+  const taper = currentPeriodizationWeek({
+    today: TODAY,
+    raceTarget: { date: raceIn(1), distance: "half_marathon" },
+    recentWeeklyKm: 60
+  });
+  assert.equal(taper?.phase, "taper");
+  assert.equal(taper?.volumeBandKm.upper, 45, "0.75 × 60 km");
+
+  const raceWeek = currentPeriodizationWeek({
+    today: TODAY,
+    raceTarget: { date: addDays(periodizationWeekStart(TODAY), 3), distance: "ten_k" },
+    recentWeeklyKm: 60
+  });
+  assert.equal(raceWeek?.phase, "race_week");
+  assert.ok(raceWeek!.volumeBandKm.upper < taper!.volumeBandKm.upper);
+
+  assert.equal(
+    currentPeriodizationWeek({ today: TODAY, raceTarget: null, recentWeeklyKm: 60 }),
+    null,
+    "no race target means no phase, not a default one"
+  );
+});
+
+test("G05: enforcement compresses the week proportionally and keeps its shape", () => {
+  const days = [
+    { localDate: "2026-10-05", kind: "easy" as const, distanceKm: 10, structure: null, reason: null },
+    { localDate: "2026-10-06", kind: "tempo" as const, distanceKm: 12, structure: null, reason: null },
+    { localDate: "2026-10-07", kind: "rest" as const, distanceKm: null, structure: null, reason: null },
+    { localDate: "2026-10-08", kind: "long_run" as const, distanceKm: 18, structure: null, reason: null }
+  ];
+  const warnings: string[] = [];
+  const capped = enforcePhaseCeiling(days, 20, "减量期", warnings);
+  const total = capped.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
+  assert.ok(total <= 20 + 0.5, `expected the week inside the ceiling, got ${total}`);
+  assert.equal(capped[2]!.kind, "rest", "a rest day is not scaled into a run");
+  assert.equal(capped[2]!.distanceKm, null);
+  // Proportional: the long run stays the longest day and the easy run stays the shortest.
+  assert.ok(capped[3]!.distanceKm! > capped[1]!.distanceKm!);
+  assert.ok(capped[1]!.distanceKm! > capped[0]!.distanceKm!);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /减量期/);
+  assert.match(warnings[0]!, /40\.0 km/);
+
+  // Inside the ceiling, or with no ceiling at all: untouched, and no warning.
+  const quiet: string[] = [];
+  assert.deepEqual(enforcePhaseCeiling(days, 100, "基础期", quiet), days);
+  assert.deepEqual(enforcePhaseCeiling(days, null, null, quiet), days);
+  assert.deepEqual(enforcePhaseCeiling(days, Number.NaN, "基础期", quiet), days);
+  assert.deepEqual(quiet, []);
 });

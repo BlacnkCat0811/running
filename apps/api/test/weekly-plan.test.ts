@@ -4,7 +4,8 @@ import test from "node:test";
 
 import type { MobilePlannedDay, MobileSessionStructure, MobileTodayResponse } from "@rai/api-contracts";
 
-import { buildWeeklyPlanPrompt } from "../src/weekly-plan-prompt.js";
+import { buildWeeklyPlanPrompt, WEEKLY_PLAN_PROMPT_VERSION } from "../src/weekly-plan-prompt.js";
+import { currentPeriodizationWeek } from "../src/plan-periodization.js";
 import type { CoachZonePrescription } from "../src/mobile-coach.js";
 import { buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
 import {
@@ -488,7 +489,7 @@ test("a valid model response is accepted and audited", async () => {
   });
   assert.equal(result.audit.generatedBy, "llm");
   assert.equal(result.audit.model, "deepseek:deepseek-chat");
-  assert.equal(result.audit.promptVersion, "weekly-plan-v2");
+  assert.equal(result.audit.promptVersion, "weekly-plan-v3");
   assert.equal(result.days.length, 7);
   // every non-rest day is rebuilt with a real structure
   assert.equal(result.days.filter((day) => day.kind !== "rest").every((day) => day.structure != null), true);
@@ -1671,4 +1672,91 @@ test("fallback respects race day and completed natural-week volume across Sunday
   assert.equal(result.days.at(-1)!.localDate, "2026-10-01");
   assert.ok(result.days.filter(day => day.localDate <= "2026-09-27").every(day => day.kind === "rest"));
   assert.ok(result.days.filter(day => day.localDate > "2026-09-27").reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 40 * 1.05);
+});
+
+/**
+ * G05: the phase has to reach the prescription.
+ *
+ * A taper that exists only in the plan view is worse than no phase at all: the runner
+ * reads "减量期" and is handed 专项期 volume.
+ */
+test("G05: a taper week is generated inside the phase band, and says why", async () => {
+  const today = todayPayload({
+    today: { localDate: "2026-10-05", workoutCount: 0 },
+    week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 }
+  });
+  // Race in twelve days: the week being planned is the taper week of a half marathon.
+  const result = await generateWeeklyPlan({
+    today,
+    goals: {
+      weeklyDistanceKm: 60,
+      easyDurationFloorFraction: 0.8,
+      qualitySessionCap: 2,
+      raceTarget: { date: "2026-10-17", distance: "half_marathon", targetPaceSecondsPerKm: 330 }
+    },
+    prescription: PRESCRIPTION,
+    client: null
+  });
+  const total = result.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
+  // 0.75 × 60 km is the taper band's upper edge; `finish` may adjust slightly, so the
+  // assertion is on the band the runner was promised, not on an exact total.
+  assert.ok(total <= 45 + 0.5, `expected the taper band, got ${total} km`);
+
+  const noRace = await generateWeeklyPlan({
+    today,
+    goals: { weeklyDistanceKm: 60, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: null },
+    prescription: PRESCRIPTION,
+    client: null
+  });
+  const noRaceTotal = noRace.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
+  assert.ok(noRaceTotal > 45, "without a race target the week is not silently tapered");
+  assert.ok(
+    !noRace.warnings.some((warning) => warning.includes("阶段上限")),
+    "no race target means no phase warning at all"
+  );
+  // The race policy already trims taper days, so the phase ceiling is often the second
+  // line of defence rather than the binding one. Either way the week must be inside the
+  // band, and a compression that *did* happen must say so (unit-tested in
+  // plan-periodization.test.ts).
+  if (result.warnings.some((warning) => warning.includes("阶段上限"))) {
+    assert.match(result.warnings.find((warning) => warning.includes("阶段上限"))!, /减量期/);
+  }
+});
+
+test("G05: the prompt carries the phase, and omits the field when there is no race", async () => {
+  const withRace = buildWeeklyPlanPrompt({
+    today: todayPayload({ today: { localDate: "2026-10-05" } }),
+    goals: {
+      weeklyDistanceKm: 60,
+      easyDurationFloorFraction: 0.8,
+      qualitySessionCap: 2,
+      raceTarget: { date: "2026-10-17", distance: "half_marathon", targetPaceSecondsPerKm: 330 }
+    },
+    prescription: PRESCRIPTION,
+    allowedDates: weeklyPlanDates("2026-10-05"),
+    periodization: currentPeriodizationWeek({
+      today: "2026-10-05",
+      raceTarget: { date: "2026-10-17", distance: "half_marathon" },
+      recentWeeklyKm: 60
+    })
+  });
+  const parseContext = (prompt: { user: string }): { racePhase: { phase: string; weeklyVolumeBandKm: { upper: number } } | null } => {
+    // The user message is prose with the context as an embedded JSON block.
+    const start = prompt.user.indexOf("{");
+    const end = prompt.user.lastIndexOf("}");
+    return JSON.parse(prompt.user.slice(start, end + 1)) as never;
+  };
+  const context = parseContext(withRace);
+  assert.equal(context.racePhase?.phase, "taper");
+  assert.equal(context.racePhase?.weeklyVolumeBandKm.upper, 45);
+  assert.equal(WEEKLY_PLAN_PROMPT_VERSION, "weekly-plan-v3");
+
+  const withoutRace = buildWeeklyPlanPrompt({
+    today: todayPayload({ today: { localDate: "2026-10-05" } }),
+    goals: { weeklyDistanceKm: 60, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: null },
+    prescription: PRESCRIPTION,
+    allowedDates: weeklyPlanDates("2026-10-05"),
+    periodization: null
+  });
+  assert.equal(parseContext(withoutRace).racePhase, null);
 });

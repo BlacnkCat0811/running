@@ -1,11 +1,15 @@
+import type { PeriodizationWeek } from "./plan-periodization.js";
 import type { MobileGoalsResponse, MobileTodayResponse } from "@rai/api-contracts";
 
 import type { CoachZonePrescription } from "./mobile-coach.js";
 
-export const WEEKLY_PLAN_PROMPT_VERSION = "weekly-plan-v2";
+/** v3 adds the race phase (docs/ALGORITHM.md §20). A v2 prompt cannot ask for a taper. */
+export const WEEKLY_PLAN_PROMPT_VERSION = "weekly-plan-v3";
 
 export interface WeeklyPlanPromptArgs {
   today: MobileTodayResponse;
+  /** Phase of the week being planned. Absent/null when no race target is set. */
+  periodization?: PeriodizationWeek | null;
   goals: Pick<
     MobileGoalsResponse,
     "weeklyDistanceKm" | "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget"
@@ -61,6 +65,20 @@ export function buildWeeklyPlanPrompt(args: WeeklyPlanPromptArgs): { system: str
       goalProgressFraction: today.week.goalProgressFraction
     },
     weekStructure: today.weekStructure,
+    // §20 阶段：没有目标赛事时整个字段缺席，而不是给一个假阶段。
+    racePhase: args.periodization
+      ? {
+          phase: args.periodization.phase,
+          weeksToRace: args.periodization.weeksToRace,
+          weeklyVolumeBandKm: args.periodization.volumeBandKm,
+          longRunCapKm: args.periodization.longRunCapKm,
+          qualitySessionDose: args.periodization.qualityDose,
+          note: args.periodization.note,
+          instruction:
+            "本周的量必须落在 weeklyVolumeBandKm 之内，最长一次不超过 longRunCapKm，" +
+            "质量课不超过 qualitySessionDose 次；减量与比赛周不得加量。"
+        }
+      : null,
     ability: {
       trueAbility: today.ability.trueAbility,
       currentAbility: today.ability.currentAbility,

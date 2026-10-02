@@ -91,7 +91,14 @@ const MIN_EASY_DISTANCE_KM = 2;
  */
 export function weeklyPlanVolumeCeiling(
   weeklyDistanceKm: number,
-  previousWeekDistanceKm: number | null | undefined
+  previousWeekDistanceKm: number | null | undefined,
+  /**
+   * §20 phase cap as a fraction of the athlete's own weekly volume.
+   *
+   * Optional and last: every existing caller keeps exactly the ceiling it had, and the
+   * phase can only ever *lower* a ceiling, never raise one.
+   */
+  phaseCapFraction?: number | null
 ): number {
   const baseCeiling = Math.max(MIN_PLANNED_DISTANCE_KM, weeklyDistanceKm);
   const rampCeiling =
@@ -99,7 +106,44 @@ export function weeklyPlanVolumeCeiling(
       ? Math.max(previousWeekDistanceKm, baseCeiling * RAMP_BASE_FLOOR_FRACTION) *
         (1 + RAMP_LIMIT_FRACTION)
       : Number.POSITIVE_INFINITY;
-  return Math.min(baseCeiling, rampCeiling);
+  const phaseCeiling =
+    phaseCapFraction == null || !Number.isFinite(phaseCapFraction)
+      ? Number.POSITIVE_INFINITY
+      : Math.max(MIN_PLANNED_DISTANCE_KM, baseCeiling * phaseCapFraction);
+  return Math.min(baseCeiling, rampCeiling, phaseCeiling);
+}
+
+/**
+ * Scales a generated week down to a phase ceiling (§20).
+ *
+ * Applied to the finished week rather than threaded through every producer: the LLM
+ * path, the fallback template and the race policy all end here, and one enforcement
+ * point cannot disagree with itself. Rest days stay rest days, and the reduction is
+ * proportional, so the *shape* of the week survives — a taper is not achieved by
+ * deleting Tuesday.
+ *
+ * Returns the days unchanged when the week is already inside the ceiling, which is the
+ * common case and the only case when no race target is set.
+ */
+export function enforcePhaseCeiling(
+  days: MobilePlannedDay[],
+  ceilingKm: number | null | undefined,
+  phaseLabel: string | null | undefined,
+  warnings: string[] = []
+): MobilePlannedDay[] {
+  if (ceilingKm == null || !Number.isFinite(ceilingKm) || ceilingKm <= 0) return days;
+  const total = days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
+  if (total <= ceilingKm || total <= 0) return days;
+  const factor = ceilingKm / total;
+  warnings.push(
+    `${phaseLabel ? `${phaseLabel}：` : ""}本周处方 ${total.toFixed(1)} km 超出阶段上限 ` +
+      `${ceilingKm.toFixed(1)} km，已按比例压缩到上限。`
+  );
+  return days.map((day) => {
+    if (day.distanceKm == null) return day;
+    const scaled = Math.round(day.distanceKm * factor * 10) / 10;
+    return { ...day, distanceKm: Math.max(0.5, scaled) };
+  });
 }
 
 export interface WeeklyPlanValidationArgs {

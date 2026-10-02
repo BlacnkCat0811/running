@@ -146,6 +146,20 @@ export function periodizationVolumeFraction(phase: PeriodizationPhase): number {
   return PHASE_VOLUME[phase].upper;
 }
 
+/**
+ * The phase of the week a fresh plan covers, or null when there is no race target.
+ *
+ * One line for the callers that only need "which phase is this week", so a plan
+ * generator cannot accidentally use a different window than the skeleton does.
+ */
+export function currentPeriodizationWeek(input: {
+  today: string;
+  raceTarget: Pick<MobileRaceTarget, "date" | "distance"> | null | undefined;
+  recentWeeklyKm: number;
+}): PeriodizationWeek | null {
+  return buildPeriodization(input).current;
+}
+
 export function buildPeriodization(input: {
   today: string;
   raceTarget: Pick<MobileRaceTarget, "date" | "distance"> | null | undefined;
@@ -189,9 +203,14 @@ export function buildPeriodization(input: {
 
   const weeks: PeriodizationWeek[] = [];
   for (let offset = firstOffset; offset <= weeksToRace; offset += 1) {
+    // `offset` counts *up* to the race week; the phase is a function of how many weeks
+    // are left. Passing the offset instead put `race_week` on the week furthest from the
+    // race and `base` on the race itself — the phase *counts* were still right, which is
+    // exactly how a transposed assignment survives a test that only counts.
     const weekStart = shiftDate(raceWeekStart, -7 * (weeksToRace - offset));
     if (weekStart < currentWeekStart) continue;
-    const phase = phaseFor(offset, race.distance);
+    const weeksToRaceForWeek = weeksToRace - offset;
+    const phase = phaseFor(weeksToRaceForWeek, race.distance);
     const band = PHASE_VOLUME[phase];
     const volumeBandKm = {
       lower: Math.max(MINIMUM_BAND_KM, Math.round(baseline * band.lower * 10) / 10),
@@ -207,7 +226,7 @@ export function buildPeriodization(input: {
     weeks.push({
       weekStart,
       phase,
-      weeksToRace: offset,
+      weeksToRace: weeksToRaceForWeek,
       volumeBandKm,
       longRunCapKm,
       qualityDose: QUALITY_DOSE[phase],

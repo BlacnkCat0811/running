@@ -3,7 +3,8 @@ import type { MobileGoalsResponse, MobilePlanAudit, MobilePlannedDay, MobileToda
 import type { CoachZonePrescription } from "./mobile-coach.js";
 import { createPlanModelClient, llmConfigFromEnv, type PlanModelClient } from "./weekly-plan-llm.js";
 import { buildWeeklyPlanPrompt, WEEKLY_PLAN_DAYS, WEEKLY_PLAN_PROMPT_VERSION } from "./weekly-plan-prompt.js";
-import { applyRacePlanPolicy, buildFallbackWeekPlan, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { currentPeriodizationWeek, periodizationVolumeFraction } from "./plan-periodization.js";
+import { applyRacePlanPolicy, buildFallbackWeekPlan, enforcePhaseCeiling, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
 
 export interface WeeklyPlanGenerationResult {
   days: MobilePlannedDay[];
@@ -110,12 +111,25 @@ export async function generateWeeklyPlan(args: {
     };
   }
 
+  // §20 the phase of the week being planned. Computed once and used for three things:
+  // the prompt's context, the validator's ceiling and the final enforcement — three
+  // views of one decision rather than three chances to disagree.
+  const phaseWeek = currentPeriodizationWeek({
+    today: args.today.today.localDate,
+    raceTarget: args.goals.raceTarget,
+    recentWeeklyKm: args.goals.weeklyDistanceKm
+  });
+  const phaseCeilingKm = phaseWeek === null ? null : phaseWeek.volumeBandKm.upper;
+  const finishWeek = (days: MobilePlannedDay[]): MobilePlannedDay[] =>
+    enforcePhaseCeiling(days, phaseCeilingKm, phaseWeek ? `${phaseWeek.phase} 期` : null, warnings);
+
   if (client) {
     const prompt = buildWeeklyPlanPrompt({
       today: args.today,
       goals: args.goals,
       prescription: args.prescription,
-      allowedDates
+      allowedDates,
+      periodization: phaseWeek
     });
     try {
       const raw = await client.complete(prompt);
@@ -132,7 +146,7 @@ export async function generateWeeklyPlan(args: {
       });
       if (validated.days.length > 0) {
         return {
-          days: finish(validated.days),
+          days: finishWeek(finish(validated.days)),
           audit: {
             generatedBy: "llm",
             model: `${client.provider}:${client.model}`,
@@ -168,7 +182,7 @@ export async function generateWeeklyPlan(args: {
     previousWeekDistanceKm: args.previousWeekDistanceKm ?? null
   });
   return {
-    days: finish(applyRacePlanPolicy(days, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings)),
+    days: finishWeek(finish(applyRacePlanPolicy(days, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings))),
     audit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt },
     warnings,
     rejectedCount: 0,
