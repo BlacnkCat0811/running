@@ -1,12 +1,37 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
-vi.mock("../src/api.js", () => ({ api: apiMock }));
+vi.mock("../src/api.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/api.js")>(), api: apiMock
+}));
 
 import { useRemote } from "../src/hooks.js";
+import { writeApiToken } from "../src/api.js";
+
+afterEach(() => { cleanup(); localStorage.clear(); });
 
 describe("useRemote", () => {
+  it("clears privileged data immediately and ignores old responses when credentials change", async () => {
+    writeApiToken("owner");
+    let resolveOld: ((value: { route: number[] }) => void) | undefined;
+    apiMock.mockResolvedValueOnce({ route: [1] });
+    const { result } = renderHook(() => useRemote<{ route: number[] }>("/workout", true, true));
+    await waitFor(() => expect(result.current.data).toEqual({ route: [1] }));
+    apiMock.mockImplementationOnce(() => new Promise<{ route: number[] }>((resolve) => { resolveOld = resolve; }));
+    let oldRequest: Promise<boolean>;
+    act(() => { oldRequest = result.current.reload(); });
+    let resolveAnonymous: ((value: { route: number[] }) => void) | undefined;
+    apiMock.mockImplementationOnce(() => new Promise<{ route: number[] }>((resolve) => { resolveAnonymous = resolve; }));
+    act(() => writeApiToken(""));
+    expect(result.current.data).toBeNull();
+    expect(result.current.loading).toBe(true);
+    await act(async () => { resolveOld?.({ route: [2] }); await oldRequest!; });
+    expect(result.current.data).toBeNull();
+    await act(async () => { resolveAnonymous?.({ route: [] }); });
+    expect(result.current.data).toEqual({ route: [] });
+  });
+
   it("reports an initial request failure when no cached data exists", async () => {
     apiMock.mockRejectedValueOnce(new Error("offline"));
     const { result } = renderHook(() => useRemote<{ ready: boolean }>("/health"));

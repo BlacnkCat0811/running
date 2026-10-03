@@ -259,7 +259,7 @@ export class DatabaseMaintenance {
     return backupInfo;
   }
 
-  async deleteDatabase(): Promise<BackupDto & { restorable?: boolean }> {
+  async deleteDatabase(prepareDeletion: () => void = () => {}): Promise<BackupDto & { restorable?: boolean }> {
     const originalReadable = this.isReadableDatabase(this.databasePath);
     let backupIsQuarantine = false;
     let backupInfo: BackupDto;
@@ -280,6 +280,7 @@ export class DatabaseMaintenance {
     }
     try {
       if (this.isReadableDatabase(this.databasePath)) this.checkpointDatabase(this.databasePath);
+      prepareDeletion();
       await this.removeFileWithRetry(`${this.databasePath}-shm`);
       await this.removeFileWithRetry(`${this.databasePath}-wal`);
       await this.removeFileWithRetry(this.databasePath);
@@ -310,7 +311,8 @@ export class DatabaseMaintenance {
 
   async restoreBackup(
     name: string,
-    beforeCommit: () => void | Promise<void> = () => {}
+    beforeCommit: () => void | Promise<void> = () => {},
+    prepareReplacement: (database: DatabaseSync) => void = () => {}
   ): Promise<{ restored: BackupDto; safetyBackup: BackupDto | null }> {
     if (name !== basename(name) || !name.endsWith(".sqlite")) throw new ClientRequestError("invalid_backup_name", "备份文件名无效", 400);
     if (this.restoreJournal.read()) throw new RestoreRecoveryRequiredError("A previous restore needs startup recovery");
@@ -330,7 +332,8 @@ export class DatabaseMaintenance {
         sourceCandidate.close();
       }
       const migratedCandidate = await RaiDatabase.open(staging, { createMigrationBackup: false });
-      migratedCandidate.close();
+      try { prepareReplacement(migratedCandidate.database); }
+      finally { migratedCandidate.close(); }
       this.checkpointDatabase(staging);
       await this.removeFileWithRetry(`${staging}-shm`);
       await this.removeFileWithRetry(`${staging}-wal`);

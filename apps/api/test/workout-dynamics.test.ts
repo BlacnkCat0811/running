@@ -12,10 +12,50 @@ import { SPEED_PAIRING_TOLERANCE_SECONDS, buildRunningDynamics, pairWithSpeed } 
  * fast/slow session look like a form collapse.
  */
 
-const series = (points: Array<{ offsetSeconds: number; value: number }>): WorkoutMetricSeries => ({
-  unit: "spm",
+const series = (points: Array<{ offsetSeconds: number; value: number }>, unit = "m/s"): WorkoutMetricSeries => ({
+  unit,
   totalSamples: points.length,
   points: points.map((point) => ({ ...point, timestamp: new Date(Date.UTC(2026, 9, 1, 0, 0, 0) + point.offsetSeconds * 1000).toISOString() }))
+});
+
+test("speed pairing converts supported units and declines unknown units", () => {
+  const metric = series([{ offsetSeconds: 0, value: 180 }], "spm");
+  for (const [unit, value] of [["m/s", 3], ["km/hr", 10.8], ["km/h", 10.8], ["mph", 3 / 0.44704], ["mi/hr", 3 / 0.44704]] as const) {
+    const speed = pairWithSpeed(metric, series([{ offsetSeconds: 0, value }], unit))[0]!.speedMetersPerSecond;
+    assert.ok(speed !== null && Math.abs(speed - 3) < 1e-9, unit);
+  }
+  assert.equal(pairWithSpeed(metric, series([{ offsetSeconds: 0, value: 3 }], "unknown"))[0]!.speedMetersPerSecond, null);
+});
+
+test("indexed speed pairing preserves input-order ties, duplicates and tolerance boundaries", () => {
+  const speed = series([
+    { offsetSeconds: 20, value: 4 },
+    { offsetSeconds: 0, value: 2 },
+    { offsetSeconds: 20, value: 9 },
+    { offsetSeconds: 10, value: Number.NaN }
+  ]);
+  const paired = pairWithSpeed(series([0, 10, 20, 35, 35.01, -15, -15.01].map(offsetSeconds => ({ offsetSeconds, value: 180 }))), speed);
+  assert.deepEqual(paired.map(point => point.speedMetersPerSecond), [2, 4, 4, 4, null, 2, null]);
+});
+
+test("indexed speed pairing matches the linear reference across unsorted tracks", () => {
+  let state = 123456;
+  const random = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 2 ** 32; };
+  const speed = series(Array.from({ length: 1000 }, () => ({ offsetSeconds: Math.floor(random() * 2000), value: random() * 5 })), "km/hr");
+  const metric = series(Array.from({ length: 1000 }, () => ({ offsetSeconds: random() * 2200 - 100, value: 180 })));
+  const expected = metric.points.map(point => {
+    let value: number | null = null;
+    let closest = Infinity;
+    for (const sample of speed.points) {
+      const distance = Math.abs(sample.offsetSeconds - point.offsetSeconds);
+      if (distance <= SPEED_PAIRING_TOLERANCE_SECONDS && distance < closest) {
+        closest = distance;
+        value = sample.value * (1 / 3.6);
+      }
+    }
+    return value;
+  });
+  assert.deepEqual(pairWithSpeed(metric, speed).map(point => point.speedMetersPerSecond), expected);
 });
 
 test("Y02: speed pairing respects the tolerance window instead of taking the nearest value", () => {
@@ -74,4 +114,17 @@ test("Y02: a full cadence series at constant speed reports the drift and flags i
   assert.equal(metric?.status, "available");
   assert.equal(metric?.driftFraction, -0.05);
   assert.ok(analysis.flags.some((flag) => flag.code === "cadence_drift"));
+});
+
+test("speed-matched drift is identical for m/s, km/hr and mph", () => {
+  const points = Array.from({ length: 121 }, (_, index) => ({ offsetSeconds: index * 30, value: index <= 60 ? 3 : 3.2 }));
+  const cadence = series(points.map(point => ({ ...point, value: point.offsetSeconds <= 1_800 ? 180 : 171 })), "spm");
+  const analyse = (unit: string, factor: number) => buildRunningDynamics({ durationSeconds: 3_600,
+    series: { cadence, speed: series(points.map(point => ({ ...point, value: point.value * factor })), unit),
+      strideLength: series([]), verticalOscillation: series([]), groundContactTime: series([]) } });
+  const metric = (unit: string, factor: number) => analyse(unit, factor).metrics.find(item => item.name === "cadence")!;
+  assert.equal(metric("m/s", 1).status, "available");
+  assert.equal(metric("km/hr", 3.6).driftFraction, metric("m/s", 1).driftFraction);
+  assert.equal(metric("mph", 1 / 0.44704).driftFraction, metric("m/s", 1).driftFraction);
+  assert.notEqual(metric("unknown", 1).status, "available");
 });

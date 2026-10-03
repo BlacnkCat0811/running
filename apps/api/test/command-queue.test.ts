@@ -91,6 +91,27 @@ test("command route validates payload before acceptance and cancellation works w
   }
 });
 
+test("changing dataset scope cannot replay a successful receipt from the previous dataset", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-command-scope-"));
+  let applies = 0;
+  const queue = new CommandQueue(root, "original", new TaskAdmissionScheduler(new MutationCoordinator()).owner("commands"),
+    async () => ({ applies: ++applies }));
+  const request = { idempotencyKey: "same-operation", kind: "workout_override" as const, payload: override };
+  try {
+    const first = queue.enqueue(request);
+    await waitFor(() => !queue.hasPending);
+    assert.equal(queue.get(first.id)?.status, "succeeded");
+    queue.setScope("restored");
+    assert.equal(queue.get(first.id), null);
+    const second = queue.enqueue(request);
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.status, "queued");
+    await waitFor(() => !queue.hasPending);
+    assert.equal(applies, 2);
+    assert.equal(queue.enqueue(request).id, second.id);
+  } finally { await queue.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("an operation failure rolls back both business writes and its receipt", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-command-rollback-"));
   const main = join(root, "main.sqlite");

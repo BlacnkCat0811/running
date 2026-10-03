@@ -207,6 +207,16 @@ test("mobileToday aggregates today distance, energy and pace from active loads",
     assert.equal(todayBar.workoutCount, 1);
     const dailySum = todayPayload.weekDaily.reduce((sum, day) => sum + day.distanceKm, 0);
     assert.ok(Math.abs(dailySum - todayPayload.week.distanceKm) < 1e-9);
+    const withPlan = read.mobileToday(10, { easyDurationFloorFraction: 0.7, qualitySessionCap: 2,
+      raceTarget: { date: new Date(Date.parse(`${today}T00:00:00Z`) + 60 * 86400000).toISOString().slice(0, 10),
+        distance: "ten_k", targetPaceSecondsPerKm: 300 },
+      weekPlan: [], lockedSession: null }, [{ revision: 1,
+      changedAt: `${today}T00:00:00+08:00`, lockedSession: null,
+      weekPlan: [{ localDate: today, kind: "easy", distanceKm: 5.2 }] }]);
+    assert.equal(withPlan.adherence!.current!.observedDays, 1);
+    assert.equal(withPlan.adherence!.current!.observedDistanceKm, 5.2);
+    assert.equal(withPlan.adherence!.current!.volumeRatio, 1);
+    assert.notEqual(withPlan.adherence!.current!.status, "under");
   } finally {
     read.close();
     rmSync(root, { recursive: true, force: true });
@@ -700,7 +710,9 @@ test("a goals edit keeps the generated structure and its distance unless the ses
 });
 
 
-test("mobile recovery reports a historical night as a reference, never as today's reading", async () => {
+test("mobile recovery reports a historical night as a reference, never as today's reading", async (context) => {
+  const asOf = "2026-10-02T04:00:00.000Z";
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse(asOf) });
   const root = mkdtempSync(join(tmpdir(), "rai-mobile-recovery-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await seed(databasePath);
@@ -711,12 +723,13 @@ test("mobile recovery reports a historical night as a reference, never as today'
     "2026-09-19T06:10:06.000Z"
   );
   try {
+    // SQLite defaults use the real clock, so arrival times must share the fixture clock.
     const insert = store.database.prepare(`INSERT INTO canonical_nights
       (id, wake_date, timezone_identifier, kind, source_name, source_category, source_rank,
-       has_stages, sleep_onset_at, wake_at, asleep_union_minutes, stage_minutes_json, segment_count, provenance_json)
-      VALUES (?, ?, 'Asia/Shanghai', 'main', 'Watch', 'apple_watch', 1, 0, ?, ?, ?, '{}', 1, '{}')`);
-    insert.run("prior-night", "2025-01-21", "2025-01-20T15:00:00Z", "2025-01-20T23:00:00Z", 480);
-    insert.run("latest-night", "2025-01-22", "2025-01-21T15:00:00Z", "2025-01-21T20:00:00Z", 300);
+       has_stages, sleep_onset_at, wake_at, asleep_union_minutes, stage_minutes_json, segment_count, provenance_json, computed_at)
+      VALUES (?, ?, 'Asia/Shanghai', 'main', 'Watch', 'apple_watch', 1, 0, ?, ?, ?, '{}', 1, '{}', ?)`);
+    insert.run("prior-night", "2025-01-21", "2025-01-20T15:00:00Z", "2025-01-20T23:00:00Z", 480, asOf);
+    insert.run("latest-night", "2025-01-22", "2025-01-21T15:00:00Z", "2025-01-21T20:00:00Z", 300, asOf);
     const read = new RaiReadStore(databasePath);
     try {
       const snapshot = read.mobileToday(30);
@@ -744,13 +757,13 @@ test("mobile recovery reports a historical night as a reference, never as today'
       // A night that woke up today is today's reading, independent of the latest run.
       const date = snapshot.today.localDate;
       const baselineNight = new Date(Date.parse(`${date}T00:00:00Z`) - 3 * 86_400_000).toISOString().slice(0, 10);
-      insert.run("baseline-night", baselineNight, `${baselineNight}T15:00:00Z`, `${baselineNight}T23:00:00Z`, 400);
+      insert.run("baseline-night", baselineNight, `${baselineNight}T15:00:00Z`, `${baselineNight}T23:00:00Z`, 400, asOf);
       // V2 requires seven prior comparable days; a single night is not a mature baseline.
       for (let offset=4;offset<=10;offset++) {
         const d=new Date(Date.parse(`${date}T00:00:00Z`)-offset*86400000).toISOString().slice(0,10);
-        insert.run(`reference-${offset}`,d,`${d}T00:00:00+08:00`,`${d}T08:00:00+08:00`,400);
+        insert.run(`reference-${offset}`,d,`${d}T00:00:00+08:00`,`${d}T08:00:00+08:00`,400,asOf);
       }
-      insert.run("today-night", date, `${date}T00:00:00+08:00`, `${date}T08:00:00+08:00`, 480);
+      insert.run("today-night", date, `${date}T00:00:00+08:00`, `${date}T08:00:00+08:00`, 480, asOf);
       const current = read.mobileToday(30);
       assert.equal(current.latestDataDate, "2025-01-22");
       assert.equal(current.verdict.stale, false, "current recovery is independent of the latest run date");

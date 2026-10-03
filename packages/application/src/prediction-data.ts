@@ -1,12 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   PERFORMANCE_ENTRY_DISTANCE_METERS,
+  loadPerformanceEventSessions,
   SqlitePerformanceEntryRepository,
   type PerformanceEntryDistance
 } from "@rai/storage-sqlite";
 import { legacyRecoveryBackground } from "@rai/readiness";
+import { buildRaceResidualTrainingDataset } from "./prediction-training-data.js";
 
-import { DATABASE_TIMEZONE, healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
+import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, SQL_UTC_OFFSET_MODIFIER, healthTypes, raceDistanceMeters, type RaceDistance } from "@rai/contracts";
 import {
   activeDurationSecondsSql,
   SqlitePredictionRecoveryReadRepository
@@ -98,6 +100,46 @@ export interface LabeledRaceOutcome {
   actualDistanceMeters: number;
   actualSeconds: number;
   labelSource: Exclude<PerformanceObservation["source"], "hard_workout">;
+  trainingSessionIds?: readonly string[];
+}
+
+/** Holding out a label must also hold out every representation of its event. */
+export function expandPerformanceEventExclusions(
+  database: DatabaseSync, ids: ReadonlySet<string>, asOf: string
+): ReadonlySet<string> {
+  if (!ids.size) return ids;
+  const expanded = new Set(ids);
+  const repository = new SqlitePerformanceEntryRepository(database);
+  const available = new Set(repository.availableAt(asOf).map(entry => entry.id));
+  // Explicit targets retain their identity even before confirmation; other
+  // labels may link events only while they were available at the cutoff.
+  const events = repository.list().filter(entry => ids.has(entry.id) || available.has(entry.id))
+    .map(entry => ({ id: entry.id, sessions: loadPerformanceEventSessions(database, entry, asOf) }));
+  let changed = true;
+  while (changed) {
+    const previousSize = expanded.size;
+    for (const event of events) {
+      if (expanded.has(event.id) || event.sessions.some(session => expanded.has(session.id))) {
+        expanded.add(event.id);
+        for (const session of event.sessions) expanded.add(session.id);
+      }
+    }
+    changed = expanded.size !== previousSize;
+  }
+  return expanded;
+}
+
+function excludedHealthEventSql(excluded: ReadonlySet<string>): string {
+  return excluded.size ? `AND NOT EXISTS (
+    SELECT 1 FROM training_sessions held_out
+    WHERE held_out.id IN (SELECT value FROM json_each(?))
+      AND julianday(health_records.start_at) <= julianday(held_out.anchor_end_at)
+      AND julianday(health_records.end_at) >= julianday(held_out.anchor_start_at)
+  )` : "";
+}
+
+function excludedHealthBindings(excluded: ReadonlySet<string>): string[] {
+  return excluded.size ? [JSON.stringify([...excluded])] : [];
 }
 
 function median(values: number[]): number | null {
@@ -187,7 +229,7 @@ function performanceRows(database: DatabaseSync, asOf: string): PerformanceRow[]
       WHERE session.status = 'active'
         AND session.anchor_distance_km IS NOT NULL
         AND session.anchor_distance_km > 0
-        AND session.anchor_end_at <= ?
+        AND julianday(session.anchor_end_at) <= julianday(?)
       ORDER BY session.anchor_start_at
     `)
     .all(asOf, asOf) as unknown as PerformanceRow[];
@@ -195,22 +237,25 @@ function performanceRows(database: DatabaseSync, asOf: string): PerformanceRow[]
 
 export function loadDirectVo2Evidence(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  excluded: ReadonlySet<string> = new Set()
 ): Vo2MaxEvidence[] {
   const rows = database
     .prepare(`
       SELECT
         id,
-        start_at AS observedAt,
+        end_at AS observedAt,
         value_numeric AS value,
         source_category AS sourceCategory
       FROM health_records
       WHERE type = ?
         AND value_numeric IS NOT NULL
-        AND start_at < ?
+        AND julianday(start_at) < julianday(?)
+        AND julianday(end_at) <= julianday(?)
+        ${excludedHealthEventSql(excluded)}
       ORDER BY start_at
     `)
-    .all(healthTypes.vo2Max, asOf) as unknown as HealthRecordRow[];
+    .all(healthTypes.vo2Max, asOf, asOf, ...excludedHealthBindings(excluded)) as unknown as HealthRecordRow[];
   return rows.map((row) => ({
     id: row.id,
     observedAt: row.observedAt,
@@ -222,9 +267,11 @@ export function loadDirectVo2Evidence(
 
 export function loadLabeledPerformanceEvidence(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  excluded: ReadonlySet<string> = new Set()
 ): Vo2MaxEvidence[] {
   return performanceRows(database, asOf).flatMap((row) => {
+    if (row.eligibilityOverride === "exclude" || excluded.has(row.id)) return [];
     const label = evidenceLabel(row);
     if (label === null) return [];
     return [performanceEvidence({
@@ -250,8 +297,11 @@ export function loadPerformanceVdotEvidence(
    */
   excludeLabelIds: ReadonlySet<string> = new Set()
 ): PerformanceVdotEvidence[] {
+  excludeLabelIds = expandPerformanceEventExclusions(database, excludeLabelIds, asOf);
+  const manualOutcomes = loadManualPerformanceOutcomes(database, asOf);
+  const manualSessions = new Set(manualOutcomes.flatMap(outcome => outcome.trainingSessionIds ?? []));
   const labeled = performanceRows(database, asOf).flatMap((row) => {
-    if (excludeLabelIds.has(row.id)) return [];
+    if (excludeLabelIds.has(row.id) || manualSessions.has(row.id) || row.eligibilityOverride === "exclude") return [];
     const label = evidenceLabel(row);
     if (
       label === null ||
@@ -312,7 +362,7 @@ export function loadPerformanceVdotEvidence(
       new Date(Date.parse(asOf) - PERFORMANCE_ENVELOPE_WINDOW_DAYS * 86_400_000).toISOString(),
       asOf
     ) as unknown as PerformanceEnvelopeRow[];
-  const manual = loadManualPerformanceOutcomes(database, asOf).flatMap((outcome) => {
+  const manual = manualOutcomes.flatMap((outcome) => {
     if (excludeLabelIds.has(outcome.id)) return [];
     // §12.10: an entered race informs the prediction it will later be calibrated
     // against. The recompute-stored VO2 ensemble is a separate path and is
@@ -327,6 +377,7 @@ export function loadPerformanceVdotEvidence(
     })];
   });
   const envelope = rows.flatMap((row) => {
+    if (excludeLabelIds.has(row.id) || manualSessions.has(row.id)) return [];
     // A labeled performance is already represented above. Do not turn the
     // same event into an additional training-envelope observation.
     if (evidenceLabel(row) !== null) return [];
@@ -408,7 +459,7 @@ export function parsePerformanceConditions(metadataJson: string): {
   return { temperatureC, humidityPercent, elevationGainMeters };
 }
 
-function restingHeartRate(database: DatabaseSync, asOf: string): number | null {
+function restingHeartRate(database: DatabaseSync, asOf: string, excluded: ReadonlySet<string>): number | null {
   const cutoff = new Date(Date.parse(asOf) - 28 * 86_400_000).toISOString();
   const rows = database
     .prepare(`
@@ -416,16 +467,19 @@ function restingHeartRate(database: DatabaseSync, asOf: string): number | null {
       FROM health_records
       WHERE type = ?
         AND value_numeric IS NOT NULL
-        AND start_at >= ?
-        AND start_at < ?
+        AND julianday(start_at) >= julianday(?)
+        AND julianday(start_at) < julianday(?)
+        AND julianday(end_at) <= julianday(?)
+        ${excludedHealthEventSql(excluded)}
     `)
-    .all(healthTypes.restingHeartRate, cutoff, asOf) as unknown as Array<{ value: number }>;
+    .all(healthTypes.restingHeartRate, cutoff, asOf, asOf, ...excludedHealthBindings(excluded)) as unknown as Array<{ value: number }>;
   return median(rows.map((row) => row.value));
 }
 
 function observedMaximumHeartRate(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  excluded: ReadonlySet<string>
 ): number | null {
   const cutoff = new Date(Date.parse(asOf) - 180 * 86_400_000).toISOString();
   const row = database
@@ -434,20 +488,23 @@ function observedMaximumHeartRate(
       FROM health_records
       WHERE type = ?
         AND value_numeric IS NOT NULL
-        AND start_at >= ?
-        AND start_at < ?
+        AND julianday(start_at) >= julianday(?)
+        AND julianday(start_at) < julianday(?)
+        AND julianday(end_at) <= julianday(?)
+        ${excludedHealthEventSql(excluded)}
     `)
-    .get(healthTypes.heartRate, cutoff, asOf) as unknown as { value: number | null } | undefined;
+    .get(healthTypes.heartRate, cutoff, asOf, asOf, ...excludedHealthBindings(excluded)) as unknown as { value: number | null } | undefined;
   return typeof row?.value === "number" && Number.isFinite(row.value) ? row.value : null;
 }
 
 export function loadPhysiologyProfile(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  excluded: ReadonlySet<string> = new Set()
 ): PhysiologyProfile {
   return {
-    restingHeartRateBpm: restingHeartRate(database, asOf),
-    observedMaximumHeartRateBpm: observedMaximumHeartRate(database, asOf)
+    restingHeartRateBpm: restingHeartRate(database, asOf, excluded),
+    observedMaximumHeartRateBpm: observedMaximumHeartRate(database, asOf, excluded)
   };
 }
 
@@ -464,12 +521,14 @@ export function loadRaceReadiness(
 
 export function loadRaceReadinessEvidence(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  excluded: ReadonlySet<string> = new Set()
 ): RaceReadinessEvidence {
   const cutoff = new Date(Date.parse(asOf) - 56 * 86_400_000).toISOString();
   const rows = database
     .prepare(`
       SELECT
+        session.id,
         session.anchor_start_at AS observedAt,
         session.anchor_distance_km AS distanceKm,
         ${activeDurationSecondsSql("session")} AS durationSeconds
@@ -488,11 +547,13 @@ export function loadRaceReadinessEvidence(
       ORDER BY session.anchor_start_at
     `)
     .all(asOf, cutoff, asOf) as unknown as Array<{
+      id: string;
       observedAt: string;
       distanceKm: number;
       durationSeconds: number;
     }>;
   const usable = rows.filter((row) => {
+    if (excluded.has(row.id)) return false;
     if (row.durationSeconds < 5 * 60 || row.durationSeconds > 4 * 60 * 60) return false;
     const pace = row.durationSeconds / 60 / row.distanceKm;
     return pace >= 2.5 && pace <= 15;
@@ -639,14 +700,16 @@ function recordSeries(
       WHERE source_name = ?
         AND type = ?
         AND value_numeric IS NOT NULL
-        AND start_at >= ?
-        AND start_at <= ?
+        AND julianday(start_at) >= julianday(?)
+        AND julianday(start_at) <= julianday(?)
+        AND julianday(end_at) <= julianday(?)
       ORDER BY start_at
     `)
     .all(
       session.sourceName,
       type,
       session.observedAt,
+      session.completedAt,
       session.completedAt
     ) as unknown as SeriesRow[];
 }
@@ -676,7 +739,8 @@ function thresholdEvidenceSource(session: ThresholdSessionRow): {
 
 export function loadLactateThresholdEvidence(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  excluded: ReadonlySet<string> = new Set()
 ): LactateThresholdEvidence[] {
   const cutoff = new Date(Date.parse(asOf) - 365 * 86_400_000).toISOString();
   const sessions = database
@@ -698,8 +762,8 @@ export function loadLactateThresholdEvidence(
       JOIN active_model_run active ON active.model_run_id = model.id
       ${historicalOverrideJoin("LEFT JOIN")}
       WHERE session.status = 'active'
-        AND session.anchor_start_at >= ?
-        AND session.anchor_end_at <= ?
+        AND julianday(session.anchor_start_at) >= julianday(?)
+        AND julianday(session.anchor_end_at) <= julianday(?)
         AND (${historicalEligibilitySql()}) <> 'excluded'
         AND feature.heart_rate_coverage >= 0.75
         AND (julianday(session.anchor_end_at) - julianday(session.anchor_start_at)) * 1440.0 >= 20
@@ -708,6 +772,7 @@ export function loadLactateThresholdEvidence(
     .all(asOf, cutoff, asOf) as unknown as ThresholdSessionRow[];
   const evidence: LactateThresholdEvidence[] = [];
   for (const session of sessions) {
+    if (excluded.has(session.id)) continue;
     const speedBins = minuteMedians(
       recordSeries(database, session, healthTypes.runningSpeed),
       session.observedAt,
@@ -721,7 +786,7 @@ export function loadLactateThresholdEvidence(
     const durationMinutes = Math.floor(
       (Date.parse(session.completedAt) - Date.parse(session.observedAt)) / 60_000
     );
-    const profile = loadPhysiologyProfile(database, session.observedAt);
+    const profile = loadPhysiologyProfile(database, session.observedAt, excluded);
     const resting = profile.restingHeartRateBpm;
     const maximum = profile.observedMaximumHeartRateBpm;
     if (resting === null || maximum === null || maximum <= resting) continue;
@@ -813,20 +878,28 @@ export function loadManualPerformanceOutcomes(
 ): LabeledRaceOutcome[] {
   const instant = new Date(asOf).toISOString();
   return new SqlitePerformanceEntryRepository(database).availableAt(instant).flatMap((entry) => {
-    // Noon Asia/Shanghai on the race date: a manual result is dated, not timed, and
-    // noon keeps it on the intended calendar day under either offset.
-    const completedAt = `${entry.localDate}T04:00:00.000Z`;
+    const recorded = Date.parse(entry.recordedAt);
+    const dayStart = Date.parse(`${entry.localDate}T00:00:00${ISO_UTC_OFFSET}`);
+    // Date-only results have no defensible race clock. Features stop at midnight;
+    // a same-day recording is a conservative finish bound, not a race start.
+    const observedAt = entry.observedAt ?? new Date(dayStart).toISOString();
+    const dayEnd = dayStart + 86_400_000 - 1;
+    const completedAt = entry.completedAt ?? new Date(recorded >= dayStart ? Math.min(dayEnd, recorded) : dayEnd).toISOString();
     if (Date.parse(completedAt) > Date.parse(instant)) return [];
     if (Date.parse(entry.recordedAt) > Date.parse(instant)) return [];
+    const sessions = loadPerformanceEventSessions(database, entry, instant);
+    if (entry.trainingSessionId && !sessions.some(session => session.id === entry.trainingSessionId && session.status === "active")) return [];
+    if (sessions.some(session => session.eligibilityOverride === "exclude")) return [];
     return [{
       id: entry.id,
       distance: entry.distance as PerformanceEntryDistance,
-      observedAt: completedAt,
+      observedAt,
       completedAt,
-      labelAvailableAt: entry.recordedAt,
+      labelAvailableAt: new Date(Math.max(recorded, Date.parse(completedAt))).toISOString(),
       actualDistanceMeters: PERFORMANCE_ENTRY_DISTANCE_METERS[entry.distance],
       actualSeconds: entry.durationSeconds,
-      labelSource: "race"
+      labelSource: "race",
+      trainingSessionIds: sessions.map(session => session.id)
     }];
   });
 }
@@ -862,10 +935,14 @@ export function loadLabeledRaceOutcomes(
           : row.completedAt,
       actualDistanceMeters: row.distanceKm * 1_000,
       actualSeconds: row.durationSeconds,
-      labelSource: label.source
+      labelSource: label.source,
+      trainingSessionIds: [row.id]
     }];
   });
-  return [...fromSessions, ...loadManualPerformanceOutcomes(database, asOf)];
+  const manual = loadManualPerformanceOutcomes(database, asOf);
+  const represented = new Set(manual.flatMap(outcome => outcome.trainingSessionIds ?? []));
+  return [...fromSessions.filter(outcome => !represented.has(outcome.id)), ...manual]
+    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt) || left.id.localeCompare(right.id));
 }
 
 function protocolTargetDistance(protocol: string | null): RaceDistance | null {
@@ -883,11 +960,14 @@ export interface LabelFunnelReport {
   /** How many usable labels came from manual entries rather than a recorded session. */
   manualEntryCount: number;
   usableOutcomeCount: number;
+  /** Exact temporal dataset size, not the number of eligible result labels. */
+  trainingSampleCount: number;
+  trainingExcludedOutcomeCount: number;
   evaluatedOutcomeCount: number;
   rejectedCount: number;
-  /** Mutually exclusive: all sessions = usable + rejected. */
+  /** Mutually exclusive: sessions = (usable outcomes - manual entries) + rejected. */
   primaryRejections: Record<string, number>;
-  byDistance: Record<RaceDistance, { usable: number; evaluated: number }>;
+  byDistance: Record<RaceDistance, { usable: number; trainingSamples: number; evaluated: number }>;
   decisions: Array<{ trainingSessionId: string; revision: number | null; reason: string }>;
   accuracyStatus: "not_evaluable" | "requires_release_evaluation";
 }
@@ -905,6 +985,7 @@ export function buildLabelFunnel(
   if (!Number.isFinite(Date.parse(asOf))) throw new Error("asOf must be a valid instant");
   const instant = new Date(asOf).toISOString();
   const outcomes = loadLabeledRaceOutcomes(database, instant);
+  const trainingSamples = buildRaceResidualTrainingDataset(database, instant).samples;
   const accepted = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
   const rows = database.prepare(`
     SELECT session.id, session.status, session.anchor_start_at AS observedAt,
@@ -924,9 +1005,9 @@ export function buildLabelFunnel(
   }>;
   const primaryRejections: Record<string, number> = {};
   const byDistance: LabelFunnelReport["byDistance"] = {
-    five_k: { usable: 0, evaluated: evaluatedByDistance.five_k ?? 0 },
-    ten_k: { usable: 0, evaluated: evaluatedByDistance.ten_k ?? 0 },
-    half_marathon: { usable: 0, evaluated: evaluatedByDistance.half_marathon ?? 0 }
+    five_k: { usable: 0, trainingSamples: 0, evaluated: evaluatedByDistance.five_k ?? 0 },
+    ten_k: { usable: 0, trainingSamples: 0, evaluated: evaluatedByDistance.ten_k ?? 0 },
+    half_marathon: { usable: 0, trainingSamples: 0, evaluated: evaluatedByDistance.half_marathon ?? 0 }
   };
   let confirmedCount = 0;
   const decisions = rows.map((row) => {
@@ -940,6 +1021,7 @@ export function buildLabelFunnel(
       reason = "usable";
       byDistance[outcome.distance].usable++;
     } else if (row.status !== "active") reason = "inactive_session";
+    else if (outcomes.some(item => item.trainingSessionIds?.includes(row.id))) reason = "superseded_by_manual_entry";
     else if (Date.parse(row.completedAt) > Date.parse(instant)) reason = "not_completed";
     else if (!confirmed) reason = "not_confirmed";
     else if (row.eligibilityOverride === "exclude") reason = "user_excluded";
@@ -967,6 +1049,7 @@ export function buildLabelFunnel(
       throw new Error("Evaluated label counts must be non-negative integers no greater than usable labels");
     }
   }
+  for (const sample of trainingSamples) byDistance[sample.distance].trainingSamples += 1;
   return {
     version: "race-label-funnel-v1",
     asOf: instant,
@@ -974,6 +1057,8 @@ export function buildLabelFunnel(
     confirmedCount,
     manualEntryCount: outcomes.filter((outcome) => outcome.id.startsWith(MANUAL_ENTRY_ID_PREFIX)).length,
     usableOutcomeCount: outcomes.length,
+    trainingSampleCount: trainingSamples.length,
+    trainingExcludedOutcomeCount: outcomes.length - trainingSamples.length,
     evaluatedOutcomeCount: Object.values(byDistance).reduce((n, item) => n + item.evaluated, 0),
     rejectedCount: decisions.filter((item) => item.reason !== "usable").length,
     primaryRejections,

@@ -38,6 +38,8 @@ export class ExternalPredictionModelTrainer implements PredictionModelTrainer {
         request.runId,
         "--as-of",
         request.asOf,
+        "--scope",
+        request.scope ?? "population",
         "--artifact-directory",
         request.artifactDirectory,
         "--result",
@@ -278,6 +280,7 @@ export class PredictionModelWorker {
       const result = await this.trainer.train({
         runId,
         asOf: run.trainingDataThroughAt,
+        scope: run.scope,
         databasePath: this.databasePath,
         artifactDirectory
       }, abortController.signal);

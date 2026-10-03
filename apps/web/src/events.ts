@@ -52,3 +52,26 @@ export function notifyDataUpdated(jobId?: string): boolean {
 export function notifyDatabaseStateChanged(jobId?: string): boolean {
   return notifier().notifyDatabaseStateChanged(jobId);
 }
+
+const PRIVACY_ZONES_CHANGED = "rai:privacy-zones-changed";
+
+export function notifyPrivacyZonesChanged(): void {
+  window.dispatchEvent(new Event(PRIVACY_ZONES_CHANGED));
+  try {
+    localStorage.setItem(PRIVACY_ZONES_CHANGED, crypto.randomUUID());
+  } catch {
+    // Export still revalidates with the server when cross-tab storage is unavailable.
+  }
+}
+
+export function subscribePrivacyZonesChanged(listener: () => void): () => void {
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key === PRIVACY_ZONES_CHANGED) listener();
+  };
+  window.addEventListener(PRIVACY_ZONES_CHANGED, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(PRIVACY_ZONES_CHANGED, listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}

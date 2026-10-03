@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "./api.js";
+import { useApiToken } from "./api-token.js";
 
 export function useRemote<T>(
   path: string,
@@ -9,6 +10,7 @@ export function useRemote<T>(
   refreshOnDataUpdate = true,
   timeoutMs: number | null = null,
 ) {
+  const token = useApiToken();
   const [data, setData] = useState<T | null>(null);
   const dataRef = useRef<T | null>(null);
   const [dataPath, setDataPath] = useState<string | null>(null);
@@ -17,9 +19,10 @@ export function useRemote<T>(
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // Track path/enabled so the first render after a change is not a stale success frame.
-  const [requestKey, setRequestKey] = useState({ path, enabled });
-  if (requestKey.path !== path || requestKey.enabled !== enabled) {
-    setRequestKey({ path, enabled });
+  const [requestKey, setRequestKey] = useState({ path, enabled, token });
+  if (requestKey.path !== path || requestKey.enabled !== enabled || requestKey.token !== token) {
+    const credentialsChanged = requestKey.token !== token;
+    setRequestKey({ path, enabled, token });
     requestIdRef.current += 1;
     controllerRef.current?.abort();
     controllerRef.current = null;
@@ -29,7 +32,7 @@ export function useRemote<T>(
       setDataPath(null);
       setError(null);
       setLoading(false);
-    } else if (!backgroundRefresh) {
+    } else if (!backgroundRefresh || credentialsChanged) {
       dataRef.current = null;
       setData(null);
       setDataPath(null);
@@ -92,7 +95,7 @@ export function useRemote<T>(
       if (timer !== null) clearTimeout(timer);
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [backgroundRefresh, enabled, path, timeoutMs]);
+  }, [backgroundRefresh, enabled, path, timeoutMs, token]);
   useEffect(() => {
     void reload();
     return () => controllerRef.current?.abort();

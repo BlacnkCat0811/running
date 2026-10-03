@@ -140,11 +140,7 @@ export interface AppleHealthParseOptions {
 }
 
 function attributesOf(tag: SaxesTagPlain): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(tag.attributes)) {
-    result[key] = String(value);
-  }
-  return result;
+  return Object.fromEntries(Object.entries(tag.attributes).map(([key, value]) => [key, String(value)]));
 }
 
 function localName(name: string): string {

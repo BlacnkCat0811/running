@@ -3,6 +3,8 @@ import { migrateModelV24 } from "./v24-migration.js";
 import { migrateModelV25 } from "./v25-migration.js";
 import { migrateModelV26 } from "./v26-migration.js";
 import { migrateModelV27 } from "./v27-migration.js";
+import { migrateModelV28 } from "./v28-migration.js";
+import { migrateModelV29 } from "./v29-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1633,7 +1635,9 @@ const migrations: readonly Migration[] = [
   { version: 24, name: "engine_version_gate_three_state_refusals_and_epoch", up: migrateModelV24 },
   { version: 25, name: "baseline_rebase_review_history", up: migrateModelV25 },
   { version: 26, name: "privacy_zones_for_shared_route_cards", up: migrateModelV26 },
-  { version: 27, name: "manual_performance_entries_for_labels", up: migrateModelV27 }
+  { version: 27, name: "manual_performance_entries_for_labels", up: migrateModelV27 },
+  { version: 28, name: "performance_event_identity_and_label_invalidation", up: migrateModelV28 },
+  { version: 29, name: "unlinked_performance_event_label_invalidation", up: migrateModelV29 }
 ];
 
 /**
@@ -1703,7 +1707,9 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   24: "eca8cf8a07292665a2a46820b5ba77e2d2f76c9c113438fdc097ad6e9f123940",
   25: "441c79b0094ef9a6e8aed2ffb90a0407e273c80ae3593047f6bff6beeccaf519",
   26: "089f8e04676dec4ab889544689c1deb237f1d0ffa23c1ed45d01d729b7358931",
-  27: "95bd9406fa2bc210c776828e445cad55c03351bb1a5d79306739f0e76033804c"
+  27: "95bd9406fa2bc210c776828e445cad55c03351bb1a5d79306739f0e76033804c",
+  28: "b571133e763ef7a0e2e1c746a0dabcad9bcf0864aaf0f2c0b9f018b8912ada04",
+  29: "02e5468e61e6202bb2e126019b6c44d0137ece87649d04c018d2b5db3d4bb413"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */

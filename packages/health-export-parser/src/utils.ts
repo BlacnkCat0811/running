@@ -41,7 +41,7 @@ function canonicalize(value: unknown): unknown {
   const prototype = Object.getPrototypeOf(value);
   if (prototype !== Object.prototype && prototype !== null) return value;
   const source = value as Record<string, unknown>;
-  const ordered: Record<string, unknown> = {};
+  const ordered: Record<string, unknown> = Object.create(null);
   for (const key of Object.keys(source).sort()) ordered[key] = canonicalize(source[key]);
   return ordered;
 }
@@ -125,16 +125,18 @@ export function addMetadata(
   value: string | undefined
 ): void {
   if (!key || value === undefined) return;
-  const values = metadata[key] ?? [];
+  const values = Object.hasOwn(metadata, key) ? metadata[key]! : [];
   values.push(value);
-  metadata[key] = values;
+  Object.defineProperty(metadata, key, {
+    value: values, enumerable: true, writable: true, configurable: true
+  });
 }
 
 export function lastMetadataValue(
   metadata: MetadataMap,
   key: string
 ): string | null {
-  const values = metadata[key];
+  const values = Object.hasOwn(metadata, key) ? metadata[key] : undefined;
   return values?.at(-1) ?? null;
 }
 

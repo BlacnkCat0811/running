@@ -38,6 +38,18 @@ test("expired, restarted and evicted candidates cannot write", () => {
   assert.throws(() => new WeeklyPlanPreviews().confirm(first.candidateId, 4, "scope", never), PlanPreviewError);
 });
 
+test("dataset restore expires both unconfirmed previews and their committed acknowledgements", () => {
+  const store = new WeeklyPlanPreviews();
+  const pending = store.create(candidate(), "original");
+  const committed = store.create(candidate(), "original");
+  store.confirm(committed.candidateId, 4, "original", () => ({ ...candidate(), revision: 5 }));
+  store.clear();
+  const never = () => { throw new Error("stale preview must not write"); };
+  for (const preview of [pending, committed]) {
+    assert.throws(() => store.confirm(preview.candidateId, 4, "restored", never), PlanPreviewError);
+  }
+});
+
 test("race rule is idempotent, reserves race day and does not invent race completion", () => {
   const target = { date: "2026-09-27", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
   const source = ["2026-09-25", "2026-09-27"].map(localDate => ({ localDate, kind: "interval" as const, distanceKm: 10, structure: null }));

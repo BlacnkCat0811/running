@@ -1371,6 +1371,8 @@ export interface WorkoutSegment {
  */
 export interface PrivacyZonesResponse {
   revision: number;
+  /** Exact collection state, including coordinates; prevents restore ABA conflicts. */
+  stateToken: string;
   zones: Array<{
     id: string;
     label: string;

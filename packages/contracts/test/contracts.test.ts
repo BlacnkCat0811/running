@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assertPhysiologyPredictionSnapshot, type PhysiologyPredictionSnapshot } from "../src/index.js";
+import { assertPhysiologyPredictionSnapshot, performanceResultValidationError, type PhysiologyPredictionSnapshot } from "../src/index.js";
 
 const snapshot = {
   schemaVersion: "physiology-prediction-v1", modelVersion: "test", generatedAt: "2026-01-01T00:00:00Z",
@@ -40,5 +40,23 @@ test("rejects invalid race adjustment and readiness values", () => {
       ...snapshot,
       races: [{ ...race, readiness }]
     }), /readiness must be between 0 and 1/);
+  }
+});
+
+test("shared race result validation preserves inclusive duration and pace limits", () => {
+  for (const [meters, seconds] of [[4800, 720], [5000, 750], [5000, 4500], [21097.5, 14400]]) {
+    assert.equal(performanceResultValidationError(meters!, seconds!), null);
+  }
+  for (const [meters, seconds] of [[4800, 719], [21097.5, 14401], [5000, 735], [5000, 4590]]) {
+    assert.notEqual(performanceResultValidationError(meters!, seconds!), null);
+  }
+});
+
+test("shared race result validation rejects non-finite and non-positive inputs", () => {
+  for (const meters of [Number.NaN, Number.POSITIVE_INFINITY, 0, -5000]) {
+    assert.notEqual(performanceResultValidationError(meters, 1500), null);
+  }
+  for (const seconds of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1500]) {
+    assert.notEqual(performanceResultValidationError(5000, seconds), null);
   }
 });

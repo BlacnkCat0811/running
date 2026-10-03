@@ -93,6 +93,9 @@ export const IDENTITY_ALGORITHM_PROBES: ReadonlyArray<[string, unknown[]]> = [
   ["record_content", [{ distance: 2, activeEnergy: 1 }]],
   ["workout_content", [{ metadata: { HKA: ["v-HKA"], HKB: ["v-HKB"] }, indoor: true }]],
   ["workout_content", [{ indoor: true, metadata: { HKB: ["v-HKB"], HKA: ["v-HKA"] } }]],
+  // Reserved keys are payload data; fixes here must invalidate existing import anchors.
+  ["record_content", [JSON.parse('{"__proto__":"raw-data","constructor":"data"}')]],
+  ["workout_content", [{ metadata: JSON.parse('{"__proto__":["data"],"constructor":["data"]}') }]],
   ["x", [{ "": 1, z: 2 }]],
   ["x", [{ a: { b: { c: [1, { d: null }, []] } } }]],
 
@@ -149,4 +152,5 @@ export function identityAlgorithmFingerprint(): string {
  *     (`packages/contracts/src/index.ts`) needs its own bump, because that is
  *     the only thing that can invalidate an anchor without the algorithm moving.
  */
-export const FROZEN_IDENTITY_ALGORITHM = "d66182cb07dce10b425f8c6c3f1598a50144aae7fe348b3b2f5cbd2e30d24c9c";
+// Reserved-key content hashing changed; primitive-array record IDs did not.
+export const FROZEN_IDENTITY_ALGORITHM = "6f9f88cfc3884becfd2d96bd49efe898064451b285ccaf39a6889b5038edca75";

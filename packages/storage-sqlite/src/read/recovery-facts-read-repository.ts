@@ -25,6 +25,10 @@ export interface StoredCanonicalHrvDay {
   sampleCount: number; confidence: "confident" | "sparse" | "missing"; windowStartAt: string | null; windowEndAt: string | null; sourceName: string | null; provenance: Record<string, unknown>;
 }
 
+function mapHrvDay(row: Record<string, unknown>): StoredCanonicalHrvDay {
+  return { id: String(row.id), localDate: String(row.local_date), timezoneIdentifier: String(row.timezone_identifier), nightId: String(row.night_id), hrvSdnnMs: row.hrv_sdnn_ms as number | null, sampleCount: Number(row.sample_count), confidence: row.confidence as StoredCanonicalHrvDay["confidence"], windowStartAt: row.window_start_at as string | null, windowEndAt: row.window_end_at as string | null, sourceName: row.source_name as string | null, provenance: JSON.parse(String(row.provenance_json ?? "{}")) };
+}
+
 export class SqliteRecoveryFactsReadRepository {
   constructor(private readonly database: DatabaseSync) {}
 
@@ -43,10 +47,22 @@ export class SqliteRecoveryFactsReadRepository {
     return rows.map(mapNight);
   }
 
+  loadMainNightsRange(from: string, through: string, timezoneIdentifier: string): StoredCanonicalNight[] {
+    const rows = this.database.prepare("SELECT * FROM canonical_nights WHERE wake_date >= ? AND wake_date <= ? AND timezone_identifier = ? AND kind = 'main' ORDER BY wake_date")
+      .all(from, through, timezoneIdentifier) as unknown as Array<Record<string, unknown>>;
+    return rows.map(mapNight);
+  }
+
   loadHrvDay(localDate: string, timezoneIdentifier: string): StoredCanonicalHrvDay | null {
     const row = this.database.prepare("SELECT * FROM canonical_hrv_days WHERE local_date = ? AND timezone_identifier = ?").get(localDate, timezoneIdentifier) as unknown as Record<string, unknown> | undefined;
     if (!row) return null;
-    return { id: String(row.id), localDate: String(row.local_date), timezoneIdentifier: String(row.timezone_identifier), nightId: String(row.night_id), hrvSdnnMs: row.hrv_sdnn_ms as number | null, sampleCount: Number(row.sample_count), confidence: row.confidence as StoredCanonicalHrvDay["confidence"], windowStartAt: row.window_start_at as string | null, windowEndAt: row.window_end_at as string | null, sourceName: row.source_name as string | null, provenance: JSON.parse(String(row.provenance_json ?? "{}")) };
+    return mapHrvDay(row);
+  }
+
+  loadHrvDaysRange(from: string, through: string, timezoneIdentifier: string): StoredCanonicalHrvDay[] {
+    const rows = this.database.prepare("SELECT * FROM canonical_hrv_days WHERE local_date >= ? AND local_date <= ? AND timezone_identifier = ? ORDER BY local_date")
+      .all(from, through, timezoneIdentifier) as unknown as Array<Record<string, unknown>>;
+    return rows.map(mapHrvDay);
   }
 
   /**

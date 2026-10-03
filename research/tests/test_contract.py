@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
 
@@ -51,6 +54,40 @@ def test_loads_contract_and_builds_ordered_float_features(tmp_path):
     assert len(sample.feature_row()) == len(FEATURE_NAMES)
     assert sample.feature_row()[-3:] == [1.0, 0.0, 0.0]
     assert sample.target_log_residual == pytest.approx(math.log(1530 / 1500))
+
+
+def test_typescript_manual_results_export_valid_training_clocks(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("requires the project's Node runtime to export real manual labels")
+    script = """
+import { RaiDatabase, SqlitePerformanceEntryRepository } from '@rai/storage-sqlite';
+import { buildRaceResidualTrainingDataset } from '@rai/application';
+const store = await RaiDatabase.open(process.argv[1], { createMigrationBackup: false });
+try {
+  store.database.exec(`INSERT INTO health_records
+    (id, type, source_name, source_category, value_numeric, start_at, end_at, metadata_json, raw_attributes_json)
+    VALUES ('prior-vo2', 'HKQuantityTypeIdentifierVO2Max', 'Watch', 'apple_watch', 50,
+      '2024-02-01T00:00:00.000Z', '2024-02-01T00:00:00.000Z', '{}', '{}')`);
+  const repository = new SqlitePerformanceEntryRepository(store.database);
+  repository.insert({ localDate: '2024-03-10', distance: 'five_k', durationSeconds: 1290,
+    recordedAt: '2026-10-01T00:00:00.000Z', note: null });
+  repository.insert({ localDate: '2026-10-02', distance: 'ten_k', durationSeconds: 2500,
+    recordedAt: '2026-10-02T02:00:00.000Z', note: null });
+  const { samples } = buildRaceResidualTrainingDataset(store.database, '2026-10-02T03:00:00.000Z');
+  for (const sample of samples) console.log(JSON.stringify(sample));
+} finally { store.close(); }
+"""
+    exported = subprocess.run(
+        [node, "--import", "tsx", "--input-type=module", "-e", script, str(tmp_path / "rai.sqlite")],
+        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, check=True,
+    )
+    path = tmp_path / "manual.jsonl"
+    path.write_text(exported.stdout, encoding="utf-8")
+    samples = load_jsonl(path)
+    assert len(samples) == 2
+    assert all(sample.completed_at > sample.observed_at for sample in samples)
+    assert all(sample.label_available_at >= sample.completed_at for sample in samples)
 
 
 def test_null_feature_becomes_nan(tmp_path):

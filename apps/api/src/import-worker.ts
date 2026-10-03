@@ -185,6 +185,7 @@ export interface ImportQueueOptions {
   scope: string;
   admission: TaskAdmission;
   maxPending?: number;
+  assertAccepting?: () => void;
   onRecoveryRequired?: () => void;
   onTerminal?: (job: ImportJobResponse, succeeded: boolean, durable: boolean) => void | Promise<void>;
 }
@@ -265,6 +266,9 @@ export class ImportWorker {
   /** Explicit startup after database readiness and request dependencies exist. */
   resume(): void { this.scheduleNext(); }
 
+  /** Called under the exclusive restore lease, after all imports are finalized. */
+  setScope(scope: string): void { if (this.queueOptions) this.queueOptions.scope = scope; }
+
   async cancel(id: string): Promise<"not_found" | "terminal" | "publishing" | "cancelled" | "requested"> {
     const job = this.jobs.get(id);
     if (!job) return "not_found";
@@ -332,6 +336,7 @@ export class ImportWorker {
     source?: ImportWorkerSource
   ): ImportJobResponse {
     if (this.closing) throw new Error("导入服务正在关闭");
+    this.queueOptions?.assertAccepting?.();
     if (sourceId) {
       const existing = this.findBySourceId(sourceId);
       if (existing && ["queued", "running", "succeeded"].includes(existing.status)) return existing;
@@ -446,10 +451,11 @@ export class ImportWorker {
 
   findBySourceId(sourceId: string): ImportJobResponse | null {
     const job = [...this.jobs.values()]
-      .filter((candidate) => candidate.sourceId === sourceId)
+      .filter((candidate) => candidate.sourceId === sourceId &&
+        (!this.queueOptions || candidate.queue?.scope === this.queueOptions.scope))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .at(-1);
-    const stored = job ?? this.state.latestJobForSource(sourceId) as MutableImportJob | null;
+    const stored = job ?? this.state.latestJobForSource(sourceId, this.queueOptions?.scope) as MutableImportJob | null;
     return stored ? this.publicJob(stored) : null;
   }
 

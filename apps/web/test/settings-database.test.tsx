@@ -7,7 +7,8 @@ const { apiMock, useRemoteMock } = vi.hoisted(() => ({
   useRemoteMock: vi.fn(),
 }));
 
-vi.mock("../src/api.js", () => ({
+vi.mock("../src/api.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/api.js")>(),
   ApiError: class ApiError extends Error {
     constructor(message: string, readonly status: number, readonly body: unknown) {
       super(message);

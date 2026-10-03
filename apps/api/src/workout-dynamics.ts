@@ -22,39 +22,55 @@ import type { WorkoutMetricSeries } from "@rai/api-contracts";
  */
 export const SPEED_PAIRING_TOLERANCE_SECONDS = 15;
 
-interface Point {
+interface SpeedPoint {
   offsetSeconds: number;
   value: number;
+  index: number;
 }
 
 /** Nearest speed value within the tolerance, or null — never the closest one regardless of distance. */
-function speedAt(points: readonly Point[], offsetSeconds: number): number | null {
-  let best: number | null = null;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const point of points) {
-    if (!Number.isFinite(point.value) || !Number.isFinite(point.offsetSeconds)) continue;
-    const distance = Math.abs(point.offsetSeconds - offsetSeconds);
-    if (distance > SPEED_PAIRING_TOLERANCE_SECONDS) continue;
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      best = point.value;
+function speedLookup(speed: WorkoutMetricSeries): (offsetSeconds: number) => number | null {
+  const scale = speed.unit === "m/s" ? 1
+    : speed.unit === "km/hr" || speed.unit === "km/h" ? 1 / 3.6
+      : speed.unit === "mi/hr" || speed.unit === "mph" ? 0.44704 : null;
+  const sorted = scale === null ? [] : speed.points.map((point, index): SpeedPoint => ({
+    offsetSeconds: point.offsetSeconds,
+    value: point.value * scale,
+    index
+  })).filter((point) => Number.isFinite(point.value) && Number.isFinite(point.offsetSeconds))
+    .sort((left, right) => left.offsetSeconds - right.offsetSeconds || left.index - right.index);
+  // Keep the first input sample at each offset, including original tie precedence.
+  const points = sorted.filter((point, index) => index === 0 || point.offsetSeconds !== sorted[index - 1]!.offsetSeconds);
+  return (offsetSeconds) => {
+    let left = 0;
+    let right = points.length;
+    while (left < right) {
+      const middle = (left + right) >>> 1;
+      if (points[middle]!.offsetSeconds < offsetSeconds) left = middle + 1;
+      else right = middle;
     }
-  }
-  return best;
+    const before = points[left - 1];
+    const after = points[left];
+    const beforeDistance = before ? Math.abs(before.offsetSeconds - offsetSeconds) : Infinity;
+    const afterDistance = after ? Math.abs(after.offsetSeconds - offsetSeconds) : Infinity;
+    const nearest = beforeDistance < afterDistance ||
+      (beforeDistance === afterDistance && before && after && before.index < after.index) ? before : after;
+    return nearest && Math.min(beforeDistance, afterDistance) <= SPEED_PAIRING_TOLERANCE_SECONDS ? nearest.value : null;
+  };
 }
 
-export function pairWithSpeed(
-  metric: WorkoutMetricSeries,
-  speed: WorkoutMetricSeries
-): DynamicsSample[] {
-  const speedPoints = speed.points.map((point) => ({ offsetSeconds: point.offsetSeconds, value: point.value }));
+function pairMetric(metric: WorkoutMetricSeries, speedAt: (offsetSeconds: number) => number | null): DynamicsSample[] {
   return metric.points
     .filter((point) => Number.isFinite(point.offsetSeconds) && Number.isFinite(point.value))
     .map((point) => ({
       offsetSeconds: point.offsetSeconds,
       value: point.value,
-      speedMetersPerSecond: speedAt(speedPoints, point.offsetSeconds)
+      speedMetersPerSecond: speedAt(point.offsetSeconds)
     }));
+}
+
+export function pairWithSpeed(metric: WorkoutMetricSeries, speed: WorkoutMetricSeries): DynamicsSample[] {
+  return pairMetric(metric, speedLookup(speed));
 }
 
 export function buildRunningDynamics(input: {
@@ -65,13 +81,14 @@ export function buildRunningDynamics(input: {
   >;
 }): RunningDynamicsAnalysis {
   const { series } = input;
+  const speedAt = speedLookup(series.speed);
   return analyseRunningDynamics({
     durationSeconds: input.durationSeconds,
     metrics: {
-      cadence: pairWithSpeed(series.cadence, series.speed),
-      stride_length: pairWithSpeed(series.strideLength, series.speed),
-      vertical_oscillation: pairWithSpeed(series.verticalOscillation, series.speed),
-      ground_contact_time: pairWithSpeed(series.groundContactTime, series.speed)
+      cadence: pairMetric(series.cadence, speedAt),
+      stride_length: pairMetric(series.strideLength, speedAt),
+      vertical_oscillation: pairMetric(series.verticalOscillation, speedAt),
+      ground_contact_time: pairMetric(series.groundContactTime, speedAt)
     }
   });
 }

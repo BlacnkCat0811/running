@@ -5,6 +5,7 @@ import type { MobileWeeklyPlanGenerationResponse, MobileWeeklyPlanPreviewRespons
 export class WeeklyPlanPreviews {
   private readonly entries = new Map<string, { value: MobileWeeklyPlanPreviewResponse; fingerprint: string; committed?: MobileWeeklyPlanGenerationResponse }>();
   constructor(private readonly now: () => number = Date.now) {}
+  clear(): void { this.entries.clear(); }
   create(value: Omit<MobileWeeklyPlanPreviewResponse, "candidateId" | "expiresAt">, fingerprint: string): MobileWeeklyPlanPreviewResponse {
     for (const [id, item] of this.entries) if (Date.parse(item.value.expiresAt) <= this.now()) this.entries.delete(id);
     while (this.entries.size >= 8) this.entries.delete(this.entries.keys().next().value!);
@@ -22,4 +23,4 @@ export class WeeklyPlanPreviews {
     return item.committed;
   }
 }
-export class PlanPreviewError extends Error { readonly code = "plan_preview_stale"; }
+export class PlanPreviewError extends Error { readonly code = "plan_preview_stale"; readonly statusCode = 409; }

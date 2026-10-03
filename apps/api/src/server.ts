@@ -1,6 +1,6 @@
 import { workoutExportQuerySchema, workoutSummaryExport } from "./workout-summary-export.js";
 import { workoutDateWindow } from "./workout-date-window.js";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
@@ -44,7 +44,8 @@ import { ModelRunActivationError, PendingMigrationsError, SqliteModelReleaseRepo
 import Fastify from "fastify";
 
 import { RestoreRecoveryRequiredError } from "./restore-journal.js";
-import { apiErrorPayload } from "./api-error.js";
+import { apiErrorPayload, ClientRequestError } from "./api-error.js";
+import { readDatasetEpoch, writeDatasetEpoch, writeDeletedDatasetEpoch } from "./dataset-epoch.js";
 import { CommandQueue, applyMutationCommand } from "./command-queue.js";
 import { DATABASE_TIMEZONE, localCalendarFormatter } from "@rai/contracts";
 import { RaiReadStore, mobileLocalDate } from "./data.js";
@@ -124,7 +125,12 @@ if (importExecutionEngine.name === "rust" && importExecutionEngine.fallback === 
 }
 const serverId = process.env.RAI_SERVER_ID?.trim() || "local";
 const athleteId = process.env.RAI_ATHLETE_ID?.trim() || "athlete_1";
-const datasetEpoch = process.env.RAI_DATASET_EPOCH?.trim() || "default";
+const configuredDatasetEpoch = process.env.RAI_DATASET_EPOCH?.trim() || "default";
+let datasetEpoch = configuredDatasetEpoch;
+let restoringDatabase = false;
+const assertDatasetAccepting = (): void => {
+  if (restoringDatabase) throw new ClientRequestError("database_restore_in_progress", "数据库正在恢复或删除，请完成后重试", 409);
+};
 const syncProtocolVersion = 1;
 const scopeSyncBatchId = (batchId: string): string => createHash("sha256")
   .update([serverId, athleteId, datasetEpoch, batchId].join("\0"))
@@ -367,6 +373,7 @@ const localRequestSecurityOptions = {
 installLocalRequestSecurity(app, localRequestSecurityOptions);
 app.addHook("preHandler", async (request, reply) => {
   const routeUrl = request.routeOptions.url;
+  if (unsafeMethods.has(request.method) || routeUrl === "/v1/handshake") assertDatasetAccepting();
   if (!unsafeMethods.has(request.method) || (routeUrl !== undefined && metadataOnlyMutationRoutes.has(routeUrl))) return;
   if (taskAdmission.isBlocked && routeUrl !== undefined && databaseRequiredMutationRoutes.has(routeUrl)) {
     return reply.code(409).send({ code: "publication_recovery_required", message: "数据库发布需要恢复，请先重启服务检查恢复结果" });
@@ -409,6 +416,7 @@ if (existsSync(webDist)) {
 // inference would chase its own tail through the two initializers.
 // Recovery runs before workers can open the main database or schedule writes.
 await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedRestore();
+datasetEpoch = readDatasetEpoch(databasePath, configuredDatasetEpoch);
 const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
@@ -426,6 +434,7 @@ const importWorker: ImportWorker = new ImportWorker(
   (error) => observeWorkerDatabaseError(error),
   {
     scope: JSON.stringify([serverId, athleteId, datasetEpoch]),
+    assertAccepting: assertDatasetAccepting,
     admission: taskAdmission.owner("import"),
     engine: importExecutionEngine,
     onRecoveryRequired: () => {
@@ -469,6 +478,13 @@ const commandQueue = new CommandQueue(
   (command) => applyMutationCommand(databasePath, predictionArtifactRoot, command),
   () => { invalidateDatabaseReadiness(); recomputeWorker.schedule(); predictionModelWorker.schedule(); }
 );
+const changeDatasetEpoch = (epoch: string): void => {
+  datasetEpoch = epoch;
+  const scope = JSON.stringify([serverId, athleteId, datasetEpoch]);
+  commandQueue.setScope(scope);
+  importWorker.setScope(scope);
+  weeklyPlanPreviews.clear();
+};
 const maintenance = new DatabaseMaintenance(
   databasePath,
   runtimeRoot,
@@ -537,7 +553,7 @@ let readinessCache: boolean | null = null;
 const invalidateDatabaseReadiness = (): void => { readinessCache = null; };
 
 const databaseIsReady = (): boolean => {
-  if (readStores.isReplacing || !existsSync(databasePath) || databaseRecoveryRequired) return false;
+  if (restoringDatabase || readStores.isReplacing || !existsSync(databasePath) || databaseRecoveryRequired) return false;
   try {
     if (readinessCache !== null) return readinessCache;
     const database = new DatabaseSync(databasePath, { readOnly: true });
@@ -591,6 +607,7 @@ const openMainDatabase = async (): Promise<RaiDatabase> => {
 };
 
 const withReadStore = <T>(callback: (store: RaiReadStore) => T): T => {
+  assertDatasetAccepting();
   try {
     return readStores.use(callback);
   } catch (error) {
@@ -600,6 +617,7 @@ const withReadStore = <T>(callback: (store: RaiReadStore) => T): T => {
 };
 
 const withReadDatabase = <T>(callback: (database: DatabaseSync) => T): T => {
+  assertDatasetAccepting();
   try {
     return readStores.useDatabase(callback);
   } catch (error) {
@@ -611,6 +629,7 @@ const withReadDatabase = <T>(callback: (database: DatabaseSync) => T): T => {
 const withReadDatabaseAsync = async <T>(
   callback: (database: DatabaseSync) => Promise<T>
 ): Promise<T> => {
+  assertDatasetAccepting();
   try {
     return await readStores.useDatabaseAsync(callback);
   } catch (error) {
@@ -935,7 +954,11 @@ app.get<{ Querystring: { from: string; through: string } }>("/v1/exports/workout
   });
 
 app.get<{ Params: { id: string } }>("/v1/workouts/:id", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
-  const detail = withReadStore((store) => store.workout(request.params.id));
+  const includeRoute = apiToken
+    ? request.headers.authorization === `Bearer ${apiToken}`
+    : process.env.RAI_ALLOW_ANONYMOUS_ROUTES === "1";
+  reply.header("Cache-Control", "no-store");
+  const detail = withReadStore((store) => store.workout(request.params.id, { includeRoute }));
   if (!detail) return reply.code(404).send({ message: "未找到该训练记录" });
   return detail;
 });
@@ -979,10 +1002,12 @@ type PerformanceEntryBody = {
   distance: PerformanceEntryDistance;
   durationSeconds: number;
   note?: string | null;
+  trainingSessionId?: string | null;
 };
 
 type PrivacyZonesBody = {
   revision: number;
+  stateToken: string;
   zones: Array<{
     id: string;
     label: string;
@@ -994,12 +1019,22 @@ type PrivacyZonesBody = {
 };
 
 app.get<{ Params: { id: string } }>("/v1/workouts/:id/share-card", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
+  reply.header("Cache-Control", "no-store");
+  if (!apiToken || request.headers.authorization !== `Bearer ${apiToken}`) {
+    return reply.code(401).send({ message: "请配置访问令牌并连接后生成分享卡片" });
+  }
   const card = withReadStore((store) => store.workoutShareCard(request.params.id));
   if (!card) return reply.code(404).send({ message: "未找到该训练记录" });
   return card;
 });
 
-app.get("/v1/privacy-zones", async () => withReadStore((store) => store.privacyZones()));
+app.get("/v1/privacy-zones", async (request, reply) => {
+  reply.header("Cache-Control", "no-store");
+  if (!apiToken || request.headers.authorization !== `Bearer ${apiToken}`) {
+    return reply.code(401).send({ message: "请配置访问令牌并连接后读取隐私区" });
+  }
+  return withReadStore((store) => store.privacyZones());
+});
 
 /**
  * §12.10 manually entered race results.
@@ -1031,6 +1066,7 @@ app.post<{ Body: PerformanceEntryBody }>(
         localDate: request.body.localDate,
         distance: request.body.distance,
         durationSeconds: request.body.durationSeconds,
+        trainingSessionId: request.body.trainingSessionId ?? null,
         note: request.body.note ?? null
       });
     } catch (error) {
@@ -1071,7 +1107,7 @@ app.put<{ Body: PrivacyZonesBody }>(
     }
     const store = await openMainDatabase();
     try {
-      return new RaiApplicationService(store).replacePrivacyZones(request.body.zones, request.body.revision);
+      return new RaiApplicationService(store).replacePrivacyZones(request.body.zones, request.body.revision, request.body.stateToken);
     } catch (error) {
       if (error instanceof PrivacyZoneRevisionConflictError) {
         return reply.code(409).send({ code: error.code, message: error.message, actualRevision: error.actualRevision });
@@ -1190,6 +1226,7 @@ app.get("/v1/mobile/workout-plan", async () => {
  * so this endpoint never leaves the week without a plan.
  */
 async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<MobileWeeklyPlanGenerationResponse> {
+  const generationEpoch = datasetEpoch;
   const goals = mobileGoalsStore.read();
   if (expectedRevision != null && expectedRevision !== goals.revision) {
     throw new MobileGoalsRevisionConflictError(goals.revision);
@@ -1203,6 +1240,7 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
     // ignores the prompt cannot prescribe a ramp the runner has not earned.
     previousWeekDistanceKm: inputs.previousWeekDistanceKm
   });
+  if (restoringDatabase || generationEpoch !== datasetEpoch) throw new PlanPreviewError("数据集已在生成期间更换，请重新生成；原课表未修改。");
   // The legacy/automatic path also crosses an async model call. A goal CAS alone
   // cannot detect new imported training or changed zones during generation.
   const latestGoals = mobileGoalsStore.read();
@@ -1271,9 +1309,11 @@ app.post<{ Body: { expectedRevision: number } }>("/v1/mobile/workout-plan/previe
     const release = weeklyPlanGenerationGate.tryAcquire();
     if (!release) return reply.code(409).send({ code: "weekly_plan_generation_busy", message: "课表正在生成，请稍后重试" });
     try {
+      const generationEpoch = datasetEpoch;
       const { goals, inputs, fingerprint } = weeklyPlanSnapshot();
       if (request.body?.expectedRevision !== goals.revision) return reply.code(409).send({ code: "mobile_goals_revision_conflict", message: "目标版本已变化，请刷新后生成" });
       const result = await generateWeeklyPlan({ today: inputs.today, goals, prescription: inputs.prescription, previousWeekDistanceKm: inputs.previousWeekDistanceKm });
+      if (restoringDatabase || generationEpoch !== datasetEpoch) throw new PlanPreviewError("数据集已在预览期间更换，请重新生成；原课表未修改。");
       if (!result.days.length) return reply.code(422).send({ message: "未生成有效课表；原课表保持不变。" });
       // Finished and locked dates remain immutable even if the generator proposes them.
       const dates = weeklyPlanDates(inputs.today.today.localDate);
@@ -1781,15 +1821,21 @@ app.post<{ Params: { name: string }; Body: { confirmation: string } }>(
     if (isDatabaseRestoreBusy()) {
       return reply.code(409).send({ message: "任务执行期间不能恢复数据库" });
     }
-    const result = await maintenance.restoreBackup(
-      request.params.name,
-      () => recoverDatabaseJobs(true)
-    );
-    databaseRecoveryRequired = false;
-    invalidateDatabaseReadiness();
-    recomputeWorker.schedule();
-    predictionModelWorker.schedule();
-    return { restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup };
+    restoringDatabase = true;
+    try {
+      const restoredEpoch = randomUUID();
+      const result = await maintenance.restoreBackup(
+        request.params.name,
+        () => recoverDatabaseJobs(true),
+        database => writeDatasetEpoch(database, configuredDatasetEpoch, restoredEpoch)
+      );
+      changeDatasetEpoch(restoredEpoch);
+      databaseRecoveryRequired = false;
+      invalidateDatabaseReadiness();
+      recomputeWorker.schedule();
+      predictionModelWorker.schedule();
+      return { restored: true, restoredBackup: result.restored, safetyBackup: result.safetyBackup };
+    } finally { restoringDatabase = false; }
   }
 );
 
@@ -1800,12 +1846,35 @@ app.delete<{ Body: { confirmation: string } }>("/v1/database", { schema: { body:
   if (isDatabaseRestoreBusy()) {
     return reply.code(409).send({ message: "任务执行期间不能删除数据库" });
   }
-  const backupInfo = await maintenance.deleteDatabase();
-  databaseRecoveryRequired = true;
-  invalidateDatabaseReadiness();
-  return backupInfo.restorable === false
-    ? { deleted: true, preservation: { kind: "quarantine" as const, snapshot: backupInfo } }
-    : { deleted: true, preservation: { kind: "backup" as const, backup: backupInfo } };
+  restoringDatabase = true;
+  const previousEpoch = datasetEpoch;
+  const deletedEpoch = randomUUID();
+  let epochPrepared = false;
+  try {
+    const backupInfo = await maintenance.deleteDatabase(() => {
+      // Persist before unlink: a crash with no facts DB must not recover old receipts.
+      writeDeletedDatasetEpoch(databasePath, configuredDatasetEpoch, deletedEpoch);
+      epochPrepared = true;
+    });
+    changeDatasetEpoch(deletedEpoch);
+    databaseRecoveryRequired = true;
+    invalidateDatabaseReadiness();
+    return backupInfo.restorable === false
+      ? { deleted: true, preservation: { kind: "quarantine" as const, snapshot: backupInfo } }
+      : { deleted: true, preservation: { kind: "backup" as const, backup: backupInfo } };
+  } catch (error) {
+    if (epochPrepared) {
+      if (!existsSync(databasePath)) {
+        changeDatasetEpoch(deletedEpoch);
+        throw new RestoreRecoveryRequiredError("Database deletion failed without restoring the facts database", { cause: error });
+      }
+      try { writeDeletedDatasetEpoch(databasePath, configuredDatasetEpoch, previousEpoch); }
+      catch (rollbackError) {
+        throw new RestoreRecoveryRequiredError("Database deletion scope rollback failed", { cause: new AggregateError([error, rollbackError]) });
+      }
+    }
+    throw error;
+  } finally { restoringDatabase = false; }
 });
 
 app.setErrorHandler((error, _request, reply) => {

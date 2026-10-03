@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { RaiApplicationService, currentAbilityBaselineHash } from "@rai/application";
-import { healthTypes } from "@rai/contracts";
+import { healthTypes, type PredictionModelTrainingRequest } from "@rai/contracts";
 import { ImportRemovalGuardError } from "@rai/health-export-parser";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
@@ -108,6 +108,47 @@ test("import job ids do not collide in the same millisecond", () => {
 interface ExternalTrainerTestSurface {
   command(args: string[], signal?: AbortSignal): Promise<void>;
 }
+
+for (const scope of [undefined, "population", "personal"] as const) {
+  test(`external prediction trainer forwards ${scope ?? "legacy"} scope to the runner`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-training-scope-"));
+    const trainer = new ExternalPredictionModelTrainer(root);
+    (trainer as unknown as ExternalTrainerTestSurface).command = async (args) => {
+      assert.equal(args[args.indexOf("--scope") + 1], scope ?? "population");
+      writeFileSync(args[args.indexOf("--result") + 1]!, "{}");
+    };
+    try {
+      await trainer.train({ runId: "fixture", asOf: "2026-10-01T00:00:00Z", ...(scope ? { scope } : {}), databasePath: join(root, "rai.sqlite"), artifactDirectory: join(root, "artifact") });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("prediction worker passes the stored personal scope to its trainer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-worker-scope-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(databasePath);
+  const asOf = "2026-10-01T00:00:00.000Z";
+  store.database.prepare(`INSERT INTO prediction_model_runs (
+    id, algorithm, model_version, feature_schema_version, training_data_through_at,
+    hyperparameters_json, request_json, status, label_count, created_at
+  ) VALUES (?, 'catboost', 'test', 'test', ?, '{}', ?, 'queued', 30, ?)`)
+    .run("prediction_model_12345678-1234-1234-1234-123456789abc", asOf, JSON.stringify({ asOf, scope: "personal" }), asOf);
+  store.close();
+  const requests: PredictionModelTrainingRequest[] = [];
+  const worker = new PredictionModelWorker(databasePath, root, root, {
+    train: async (request) => { requests.push(request); throw new Error("fixture stops after scope capture"); }
+  });
+  try {
+    worker.schedule();
+    await waitFor(() => requests.length === 1);
+    assert.equal(requests[0]!.scope, "personal");
+  } finally {
+    await worker.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 interface RecomputeWorkerTestSurface {
   runOneInWorkerThread(): Promise<boolean>;

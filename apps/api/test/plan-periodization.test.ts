@@ -7,7 +7,7 @@ import {
   periodizationVolumeFraction,
   periodizationWeekStart
 } from "../src/plan-periodization.js";
-import { enforcePhaseCeiling, weeklyPlanVolumeCeiling } from "../src/weekly-plan-validate.js";
+import { weeklyPlanVolumeCeiling } from "../src/weekly-plan-validate.js";
 import { buildPlanAdherence, replanAdvice, type PlanDayObservation } from "../src/plan-adherence.js";
 import type { PlanHistoryRevision } from "../src/mobile-goals.js";
 
@@ -40,6 +40,8 @@ test("G01: phase boundaries follow the race distance, and the race week is the l
   assert.equal(half.weeks.length, 13, "race week plus twelve build weeks");
   const byPhase = (phase: string) => half.weeks.filter((item) => item.phase === phase).length;
   assert.equal(byPhase("taper"), 2, "a half marathon tapers for two weeks");
+  assert.equal(byPhase("peak"), 1, "peak precedes the full taper window");
+  assert.equal(byPhase("build"), 4);
   assert.equal(byPhase("race_week"), 1);
   assert.ok(byPhase("base") >= 4);
   assert.equal(half.current?.weekStart, periodizationWeekStart(TODAY));
@@ -62,6 +64,8 @@ test("G01: phase boundaries follow the race distance, and the race week is the l
     recentWeeklyKm: 30
   });
   assert.equal(fiveK.weeks.filter((item) => item.phase === "taper").length, 1);
+  assert.equal(fiveK.weeks.filter((item) => item.phase === "peak").length, 1);
+  assert.equal(fiveK.weeks.filter((item) => item.phase === "build").length, 2);
   assert.equal(fiveK.weeks.filter((item) => item.phase === "race_week").length, 1);
 });
 
@@ -133,7 +137,7 @@ const plannedWeek = (weekStart: string, distanceKm: number, kind: "easy" | "temp
     };
   });
 
-test("G02: a week is judged by the revision in force at its own midnight", () => {
+test("G02: later edits do not rewrite an elapsed week's prescriptions", () => {
   const periodization = buildPeriodization({
     today: TODAY,
     raceTarget: { date: raceIn(8), distance: "ten_k" },
@@ -156,6 +160,49 @@ test("G02: a week is judged by the revision in force at its own midnight", () =>
   assert.equal(lastWeek.volumeRatio, 1);
 });
 
+test("Monday and midweek plans are counted without rewriting elapsed days", () => {
+  const today = "2026-10-07";
+  const periodization = buildPeriodization({ today, raceTarget: null, recentWeeklyKm: 40 });
+  const monday = plannedWeek("2026-10-05", 10);
+  const midweek = [
+    { localDate: "2026-10-05", kind: "easy" as const, distanceKm: 99 },
+    { localDate: today, kind: "easy" as const, distanceKm: 5 },
+    { localDate: "2026-10-09", kind: "easy" as const, distanceKm: 15 }
+  ];
+  const history = [revision("2026-10-07T09:00:00+08:00", 2, midweek),
+    revision("2026-10-05T09:00:00+08:00", 1, monday)];
+  const adherence = buildPlanAdherence({ today, history, periodization, actual: [
+    { localDate: "2026-10-05", workoutCount: 1, distanceKm: 10 },
+    { localDate: today, workoutCount: 1, distanceKm: 10 }
+  ] });
+  assert.equal(adherence.policyVersion, "rai-plan-adherence-v3");
+  assert.equal(adherence.current!.plannedDays, 3);
+  assert.equal(adherence.current!.plannedDistanceKm, 35, "past/current days freeze; future days use the latest plan");
+  assert.equal(adherence.current!.observedDistanceKm, 20);
+  assert.equal(adherence.current!.status, "on_track");
+  const firstMidweek = buildPlanAdherence({ today, periodization, actual: [],
+    history: [revision("2026-10-07T09:00:00+08:00", 1, midweek.filter(day => day.localDate >= today))] });
+  assert.equal(firstMidweek.current!.plannedDays, 2);
+  assert.equal(firstMidweek.current!.plannedDistanceKm, 20);
+  const nextWeek = buildPlanAdherence({ today: "2026-10-12", history, periodization, actual: [] });
+  assert.equal(nextWeek.weeks[1]!.plannedDistanceKm, 35, "the same daily obligations survive after the week ends");
+});
+
+test("same-day initial obligations cannot be replaced by later revisions", () => {
+  const today = "2026-10-05";
+  const periodization = buildPeriodization({ today, raceTarget: null, recentWeeklyKm: 40 });
+  const first = [{ localDate: today, kind: "easy" as const, distanceKm: 10 }];
+  const history = [revision("2026-10-05T17:00:00+08:00", 2, [{ ...first[0]!, distanceKm: 1 }]),
+    revision("2026-10-05T09:00:00+08:00", 1, first)];
+  const current = buildPlanAdherence({ today, history, periodization,
+    actual: [{ localDate: today, workoutCount: 1, distanceKm: 10 }] }).current!;
+  assert.equal(current.plannedDistanceKm, 10);
+  assert.equal(current.volumeRatio, 1);
+  const futureBackfill = buildPlanAdherence({ today: "2026-10-12", periodization, actual: [],
+    history: [revision("2026-10-12T09:00:00+08:00", 1, first)] });
+  assert.equal(futureBackfill.weeks[1]!.plannedDays, 0);
+});
+
 test("G03: unobserved planned days are unknown, not missed", () => {
   const periodization = buildPeriodization({
     today: TODAY,
@@ -169,6 +216,46 @@ test("G03: unobserved planned days are unknown, not missed", () => {
   assert.equal(lastWeek.unknownDays, 3);
   assert.equal(lastWeek.status, "unknown", "no observations is not a failed week");
   assert.equal(lastWeek.volumeRatio, 0);
+});
+
+test("G03: runs before a midweek plan cannot fulfill its unobserved prescriptions", () => {
+  const periodization = buildPeriodization({ today: TODAY, raceTarget: null, recentWeeklyKm: 40 });
+  const lastMonday = weeksAgo(1);
+  const history = [revision(`${addDays(lastMonday, 3)}T09:00:00+08:00`, 1, [
+    { localDate: addDays(lastMonday, 4), kind: "easy", distanceKm: 5 },
+    { localDate: addDays(lastMonday, 6), kind: "easy", distanceKm: 5 }
+  ])];
+  const adherence = buildPlanAdherence({ today: TODAY, history, periodization,
+    actual: [{ localDate: lastMonday, distanceKm: 10, workoutCount: 1 }] });
+  const lastWeek = adherence.weeks[1]!;
+  assert.equal(lastWeek.plannedDistanceKm, 10);
+  assert.equal(lastWeek.observedDistanceKm, 0);
+  assert.equal(lastWeek.observedDays, 0);
+  assert.equal(lastWeek.unknownDays, 2);
+  assert.equal(lastWeek.volumeRatio, 0);
+  assert.equal(lastWeek.status, "unknown");
+  assert.equal(replanAdvice({ adherence, periodization }).recommended, false);
+});
+
+test("G03: rest-day runs do not inflate adherence and missing rest-day observations are not unknown", () => {
+  const periodization = buildPeriodization({ today: TODAY, raceTarget: null, recentWeeklyKm: 40 });
+  const lastMonday = weeksAgo(1);
+  const history = [revision(`${weeksAgo(2)}T09:00:00+08:00`, 1, [
+    { localDate: lastMonday, kind: "rest", distanceKm: null },
+    { localDate: addDays(lastMonday, 1), kind: "rest", distanceKm: null },
+    { localDate: addDays(lastMonday, 2), kind: "easy", distanceKm: 10 },
+    { localDate: addDays(lastMonday, 4), kind: "easy", distanceKm: 10 }
+  ])];
+  const lastWeek = buildPlanAdherence({ today: TODAY, history, periodization, actual: [
+    { localDate: lastMonday, distanceKm: 30, workoutCount: 1 },
+    { localDate: addDays(lastMonday, 2), distanceKm: 5, workoutCount: 1 }
+  ] }).weeks[1]!;
+  assert.equal(lastWeek.plannedDistanceKm, 20);
+  assert.equal(lastWeek.observedDistanceKm, 5);
+  assert.equal(lastWeek.observedDays, 1);
+  assert.equal(lastWeek.unknownDays, 1);
+  assert.equal(lastWeek.volumeRatio, 0.25);
+  assert.equal(lastWeek.status, "under");
 });
 
 test("G03: with no plan history the adherence block is explicitly unknown", () => {
@@ -291,30 +378,41 @@ test("G05: the current week is the phase the skeleton reports, and null without 
   );
 });
 
-test("G05: enforcement compresses the week proportionally and keeps its shape", () => {
-  const days = [
-    { localDate: "2026-10-05", kind: "easy" as const, distanceKm: 10, structure: null, reason: null },
-    { localDate: "2026-10-06", kind: "tempo" as const, distanceKm: 12, structure: null, reason: null },
-    { localDate: "2026-10-07", kind: "rest" as const, distanceKm: null, structure: null, reason: null },
-    { localDate: "2026-10-08", kind: "long_run" as const, distanceKm: 18, structure: null, reason: null }
-  ];
-  const warnings: string[] = [];
-  const capped = enforcePhaseCeiling(days, 20, "减量期", warnings);
-  const total = capped.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
-  assert.ok(total <= 20 + 0.5, `expected the week inside the ceiling, got ${total}`);
-  assert.equal(capped[2]!.kind, "rest", "a rest day is not scaled into a run");
-  assert.equal(capped[2]!.distanceKm, null);
-  // Proportional: the long run stays the longest day and the easy run stays the shortest.
-  assert.ok(capped[3]!.distanceKm! > capped[1]!.distanceKm!);
-  assert.ok(capped[1]!.distanceKm! > capped[0]!.distanceKm!);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0]!, /减量期/);
-  assert.match(warnings[0]!, /40\.0 km/);
+test("G01: all distances reach peak without shortening taper or build", () => {
+  for (const [distance, taperWeeks, buildWeeks] of [
+    ["five_k", 1, 2], ["ten_k", 2, 3], ["half_marathon", 2, 4]
+  ] as const) {
+    const plan = buildPeriodization({ today: TODAY, raceTarget: { date: raceIn(12), distance }, recentWeeklyKm: 40 });
+    const phaseAt = (weeksToRace: number) => plan.weeks.find(week => week.weeksToRace === weeksToRace)!.phase;
+    assert.equal(phaseAt(0), "race_week");
+    for (let week = 1; week <= taperWeeks; week++) assert.equal(phaseAt(week), "taper");
+    assert.equal(phaseAt(taperWeeks + 1), "peak");
+    for (let week = taperWeeks + 2; week <= taperWeeks + buildWeeks + 1; week++) assert.equal(phaseAt(week), "build");
+    assert.equal(phaseAt(taperWeeks + buildWeeks + 2), "base");
+  }
+});
 
-  // Inside the ceiling, or with no ceiling at all: untouched, and no warning.
-  const quiet: string[] = [];
-  assert.deepEqual(enforcePhaseCeiling(days, 100, "基础期", quiet), days);
-  assert.deepEqual(enforcePhaseCeiling(days, null, null, quiet), days);
-  assert.deepEqual(enforcePhaseCeiling(days, Number.NaN, "基础期", quiet), days);
-  assert.deepEqual(quiet, []);
+test("future quality sessions do not make Monday under-delivered or trigger replanning", () => {
+  const periodization = buildPeriodization({ today: TODAY, raceTarget: null, recentWeeklyKm: 40 });
+  const history = [revision(`${weeksAgo(1)}T20:00:00+08:00`, 1, [
+    { localDate: TODAY, kind: "easy", distanceKm: 8 },
+    { localDate: addDays(TODAY, 2), kind: "tempo", distanceKm: 12 },
+    { localDate: addDays(TODAY, 4), kind: "interval", distanceKm: 20 }
+  ])];
+  const adherence = buildPlanAdherence({ today: TODAY, history, actual: [{ localDate: TODAY, distanceKm: 8, workoutCount: 1 }], periodization });
+  assert.equal(adherence.current!.plannedDistanceKm, 40);
+  assert.equal(adherence.current!.status, "on_track");
+  assert.equal(replanAdvice({ adherence, periodization }).recommended, false);
+});
+
+test("unknown weeks break consecutive low-volume observations", () => {
+  const periodization = buildPeriodization({ today: TODAY, raceTarget: null, recentWeeklyKm: 40 });
+  const history = [revision(`${weeksAgo(4)}T20:00:00+08:00`, 1, [
+    ...plannedWeek(weeksAgo(1), 10), ...plannedWeek(weeksAgo(2), 10), ...plannedWeek(weeksAgo(3), 10)
+  ])];
+  const adherence = buildPlanAdherence({ today: TODAY, history, actual: [
+    { localDate: weeksAgo(1), distanceKm: 2, workoutCount: 1 },
+    { localDate: weeksAgo(3), distanceKm: 2, workoutCount: 1 }
+  ], periodization });
+  assert.equal(replanAdvice({ adherence, periodization }).recommended, false);
 });

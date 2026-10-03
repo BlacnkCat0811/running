@@ -8,7 +8,8 @@ import {
   PREDICTION_CORRECTION_CAP_FRACTION,
   PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
   predictionResidualOnnxFeatureNames,
-  PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION
+  PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION,
+  type PredictionModelScope
 } from "@rai/contracts";
 
 export const CATBOOST_RESIDUAL_MODEL_VERSION = CATBOOST_PREDICTION_MODEL_VERSION;
@@ -27,6 +28,7 @@ export interface CatBoostArtifactMetrics {
 export interface CatBoostArtifactManifest {
   modelVersion: typeof CATBOOST_RESIDUAL_MODEL_VERSION;
   algorithm: "catboost";
+  scope: PredictionModelScope;
   featureSchemaVersion: string;
   featureSchemaHash: string;
   trainingDataHash: string;
@@ -64,6 +66,7 @@ export function assertCatBoostArtifactManifest(
   if (
     manifest.modelVersion !== CATBOOST_RESIDUAL_MODEL_VERSION ||
     manifest.algorithm !== "catboost" ||
+    (manifest.scope !== "population" && manifest.scope !== "personal") ||
     manifest.featureSchemaVersion !== PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION ||
     manifest.status !== "accepted"
   ) {
@@ -133,7 +136,7 @@ export class OnnxCatBoostResidualModel {
     private readonly session: InferenceSession
   ) {}
 
-  static async load(artifactDirectory: string): Promise<OnnxCatBoostResidualModel> {
+  static async load(artifactDirectory: string, expectedScope?: PredictionModelScope): Promise<OnnxCatBoostResidualModel> {
     const directory = resolve(artifactDirectory);
     const manifestPath = resolve(directory, "manifest.json");
     const modelPath = resolve(directory, "model.onnx");
@@ -143,6 +146,9 @@ export class OnnxCatBoostResidualModel {
     ]);
     const parsed = JSON.parse(manifestBytes.toString("utf8")) as unknown;
     assertCatBoostArtifactManifest(parsed);
+    if (expectedScope !== undefined && parsed.scope !== expectedScope) {
+      throw new Error("CatBoost artifact scope mismatch");
+    }
     if (sha256(modelBytes) !== parsed.modelSha256) {
       throw new Error("CatBoost ONNX artifact hash mismatch");
     }

@@ -97,6 +97,7 @@ describe("page data presentation", () => {
       guidanceCodes: ["prediction_confidence_low"],
       labelFunnel: {
         sessionCount: 268, confirmedCount: 0, usableOutcomeCount: 0,
+        trainingSampleCount: 0, trainingExcludedOutcomeCount: 0,
         evaluatedOutcomeCount: 0, primaryRejections: { not_confirmed: 268 },
         accuracyStatus: "not_evaluable"
       },

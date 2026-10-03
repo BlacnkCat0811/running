@@ -9,6 +9,19 @@ export class ApiError extends Error {
 }
 
 const TOKEN_STORAGE_KEY = "rai.web.apiToken";
+const TOKEN_CHANGED_EVENT = "rai:api-token-changed";
+
+export function subscribeApiToken(listener: () => void): () => void {
+  const onStorage = (event: StorageEvent): void => {
+    if (event.key === TOKEN_STORAGE_KEY || event.key === null) listener();
+  };
+  window.addEventListener(TOKEN_CHANGED_EVENT, listener);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(TOKEN_CHANGED_EVENT, listener);
+    window.removeEventListener("storage", onStorage);
+  };
+}
 
 /**
  * 桌面浏览器直连云端 API 时使用的令牌。
@@ -33,6 +46,7 @@ export function writeApiToken(token: string): void {
   } catch {
     // 隐私模式等存储不可用时静默降级：请求退回无令牌状态，由页面提示引导用户。
   }
+  window.dispatchEvent(new Event(TOKEN_CHANGED_EVENT));
 }
 
 export function applyApiToken(headers: Headers): void {

@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { MobilePlannedDay, MobileSessionStructure, MobileTodayResponse } from "@rai/api-contracts";
 
 import { buildWeeklyPlanPrompt, WEEKLY_PLAN_PROMPT_VERSION } from "../src/weekly-plan-prompt.js";
-import { currentPeriodizationWeek } from "../src/plan-periodization.js";
+import { buildPeriodization, currentPeriodizationWeek } from "../src/plan-periodization.js";
 import type { CoachZonePrescription } from "../src/mobile-coach.js";
 import { buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
 import {
@@ -14,12 +16,17 @@ import {
   createPlanModelClient,
   llmConfigFromEnv
 } from "../src/weekly-plan-llm.js";
-import { MAX_PLANNED_DISTANCE_KM } from "../src/session-structure.js";
+import { MAX_PLANNED_DISTANCE_KM, structureWorkRepetitions } from "../src/session-structure.js";
 import { readStripped, sourceFiles } from "./source-scan.js";
+import { ManualPlanPolicyError, validateManualPlan } from "../src/manual-plan-policy.js";
+import { MobileGoalsStore } from "../src/mobile-goals.js";
+import type { MobileGoalsResponse } from "@rai/api-contracts";
 import {
   generateWeeklyPlan,
+  constrainUpcomingPlan,
   overwriteWarning,
   overwrittenPlanDates,
+  mergePlanWindow,
   weeklyPlanDates
 } from "../src/weekly-plan-service.js";
 import {
@@ -107,6 +114,237 @@ const validateArgs = (raw: string, overrides: Partial<Parameters<typeof validate
   ...overrides
 });
 
+for (const producer of ["heuristic", "llm"] as const) {
+  test(`phase ceiling constrains ${producer} structures and survives read-time validation`, async () => {
+    const args = {
+      today: todayPayload({
+        today: { localDate: "2026-10-05", workoutCount: 0 },
+        week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 }
+      }),
+      goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2,
+        raceTarget: { date: "2026-10-24", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } },
+      prescription: PRESCRIPTION,
+      previousWeekDistanceKm: 40,
+      client: producer === "heuristic" ? null : { provider: "openai" as const, model: "fixture", complete: async () => JSON.stringify({ days: weeklyPlanDates("2026-10-05").map(localDate => ({ localDate, kind: "easy", distanceKm: 8 })) }) }
+    };
+    const result = await generateWeeklyPlan(args);
+    assert.equal(result.audit.generatedBy, producer);
+    const executableKm = result.days.reduce((sum, day) => sum + (day.structure ? measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)).distanceKm : 0), 0);
+    assert.ok(executableKm <= 30 + 1e-6, `structure total ${executableKm}`);
+    for (const day of result.days) if (day.structure) {
+      assert.equal(day.distanceKm, roundKm(measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)).distanceKm));
+    }
+    assert.deepEqual(constrainUpcomingPlan(result.days, args), result.days);
+  });
+}
+
+test("base phase caps quality sessions while a rolling window applies next week's own budget", async () => {
+  const args = {
+    today: todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
+      week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 } }),
+    goals: { weeklyDistanceKm: 80, easyDurationFloorFraction: 0.5, qualitySessionCap: 2,
+      raceTarget: { date: "2027-01-10", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } },
+    prescription: PRESCRIPTION, client: null
+  };
+  const base = await generateWeeklyPlan(args);
+  assert.ok(base.days.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length <= 1);
+  const noRace = await generateWeeklyPlan({ ...args, goals: { ...args.goals, raceTarget: null } });
+  assert.equal(noRace.days.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length, 2);
+
+  const today = todayPayload({ today: { localDate: "2026-10-09", workoutCount: 0 },
+    week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 12 } });
+  const rollingArgs = { ...args, today, goals: { ...args.goals, weeklyDistanceKm: 40,
+    raceTarget: { date: "2026-10-18", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } } };
+  const days = weeklyPlanDates("2026-10-09").map(localDate => ({ localDate, kind: "easy" as const, distanceKm: 12, structure: null, reason: null }));
+  const constrained = constrainUpcomingPlan(days, rollingArgs);
+  assert.ok(constrained.filter(day => day.localDate <= "2026-10-11").reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 18);
+  assert.ok(constrained.filter(day => day.localDate > "2026-10-11").reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 24);
+});
+
+test("phase long-run limits bind executable single sessions below the weekly ceiling", () => {
+  const raceTarget = { date: "2026-10-24", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
+  const today = todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
+    week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 },
+    periodization: buildPeriodization({ today: "2026-10-05", raceTarget, recentWeeklyKm: 40 }) });
+  // Isolate the single-session cap; long-run-only easy-floor repair is tested separately.
+  const goals = { weeklyDistanceKm: 40, qualitySessionCap: 2, easyDurationFloorFraction: 0, raceTarget };
+  const proposed: MobilePlannedDay[] = [{ localDate: "2026-10-05", kind: "long_run", distanceKm: 29, structure: null, reason: null }];
+  const cap = today.periodization!.current!.longRunCapKm;
+  assert.equal(cap, 9);
+  assert.ok(29 < today.periodization!.current!.volumeBandKm.upper);
+  const warnings: string[] = [];
+  const result = constrainUpcomingPlan(proposed, { today, goals, prescription: PRESCRIPTION }, warnings);
+  const run = result.find(day => day.kind === "long_run")!;
+  assert.ok(run.distanceKm! <= cap);
+  assert.ok(measureStructure(run.structure!, run.kind, pacesFromZones(PRESCRIPTION)).distanceKm <= cap);
+  assert.ok(warnings.some(message => message.includes("长距离超过阶段上限")));
+  assert.deepEqual(constrainUpcomingPlan(result, { today, goals, prescription: PRESCRIPTION }), result);
+  assert.throws(() => validateManualPlan({ ...goals, weekPlan: proposed } as MobileGoalsResponse,
+    today, PRESCRIPTION, 40), ManualPlanPolicyError);
+  const noTarget = constrainUpcomingPlan(proposed, { today, goals: { ...goals, raceTarget: null }, prescription: PRESCRIPTION });
+  assert.ok(noTarget[0]!.distanceKm! > cap, "a stale skeleton must not limit a removed target");
+  const tiny = validateWeeklyPlan(validateArgs(JSON.stringify({ days: proposed }), {
+    allowedDates: ["2026-10-05"], longRunCapKm: 0.1
+  }));
+  assert.equal(tiny.days[0]?.kind, "rest", "an irreducible session cannot exceed a tiny cap");
+});
+
+test("phase budgets reserve locked sessions and completed volume without rewriting today", () => {
+  const goals = { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.5, qualitySessionCap: 2,
+    raceTarget: { date: "2027-01-10", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } };
+  const proposed = weeklyPlanDates("2026-10-05").map(localDate => ({ localDate, kind: "tempo" as const, distanceKm: 8, structure: null, reason: null }));
+  const locked = todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
+    week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 10 },
+    lock: { present: true }, nextSession: { kind: "tempo", distanceKm: 8 } });
+  const result = constrainUpcomingPlan(proposed, { today: locked, goals, prescription: PRESCRIPTION });
+  assert.ok(result.every(day => day.localDate !== "2026-10-05"));
+  assert.ok(result.every(day => !["tempo", "interval", "race"].includes(day.kind)));
+  assert.ok(result.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 22);
+  const completed = todayPayload({ ...locked, today: { localDate: "2026-10-05", workoutCount: 1 },
+    week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 39.9 },
+    weekStructure: { qualitySessionCount: 1 } });
+  const remaining = constrainUpcomingPlan(proposed, { today: completed, goals, prescription: PRESCRIPTION });
+  assert.ok(remaining.every(day => day.kind === "rest"), "a budget below one session must not retain an oversized minimum run");
+});
+
+test("generation and reads use the displayed phase band based on actual recent volume", async () => {
+  const raceTarget = { date: "2026-10-24", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
+  const args = {
+    today: todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
+      week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 },
+      periodization: buildPeriodization({ today: "2026-10-05", raceTarget, recentWeeklyKm: 20 }) }),
+    goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget },
+    prescription: PRESCRIPTION, client: null
+  };
+  const generated = await generateWeeklyPlan(args);
+  assert.equal(args.today.periodization!.current!.volumeBandKm.upper, 15);
+  assert.ok(generated.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 15);
+  assert.deepEqual(constrainUpcomingPlan(generated.days, args), generated.days);
+  const withoutRace = await generateWeeklyPlan({ ...args, goals: { ...args.goals, raceTarget: null } });
+  assert.ok(withoutRace.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) > 15, "stale skeletons must not constrain a removed target");
+});
+
+test("phase volume shrinking preserves the final easy-time floor and is idempotent", async () => {
+  const localDate = "2026-10-05";
+  const raceTarget = { date: "2026-12-13", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
+  const proposed = weeklyPlanDates(localDate).map((date, index) => ({
+    localDate: date,
+    kind: index === 0 ? "easy" : index === 1 ? "tempo" : "rest",
+    distanceKm: index === 0 ? 30 : index === 1 ? 8 : null,
+    structure: null
+  }));
+  const args = {
+    today: todayPayload({ today: { localDate, workoutCount: 0 },
+      week: { periodStart: localDate, periodEnd: "2026-10-11", distanceKm: 0 },
+      periodization: buildPeriodization({ today: localDate, raceTarget, recentWeeklyKm: 20 }) }),
+    goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget },
+    prescription: PRESCRIPTION,
+    client: { provider: "openai", model: "fixture", complete: async () => JSON.stringify({ days: proposed }) }
+  };
+  const result = await generateWeeklyPlan(args);
+  assert.equal(result.audit.generatedBy, "llm");
+  const ceiling = args.today.periodization!.current!.volumeBandKm.upper;
+  const measured = result.days.map(day => ({ day,
+    size: day.structure ? measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)) :
+      { distanceKm: 0, durationSeconds: 0 } }));
+  const totalSeconds = measured.reduce((sum, { size }) => sum + size.durationSeconds, 0);
+  const easySeconds = measured.reduce((sum, { day, size }) => sum +
+    (["easy", "recovery"].includes(day.kind) ? size.durationSeconds : 0), 0);
+  assert.ok(totalSeconds > 0);
+  assert.ok(easySeconds / totalSeconds >= args.goals.easyDurationFloorFraction,
+    `final easy-time fraction ${easySeconds / totalSeconds}`);
+  assert.ok(measured.reduce((sum, { size }) => sum + size.distanceKm, 0) <= ceiling + 1e-6);
+  assert.ok(result.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= ceiling + 1e-6);
+  assert.deepEqual(constrainUpcomingPlan(result.days, args), result.days);
+});
+
+test("final easy-time repair never enlarges a tiny hard-budget session", () => {
+  const days = [
+    { localDate: TODAY, kind: "easy", distanceKm: 30, structure: null },
+    { localDate: "2026-09-08", kind: "tempo", distanceKm: 0.1, structure: {
+      warmup: null, cooldown: null,
+      blocks: [{ iterations: 1, steps: [{ purpose: "work", goal: { type: "distance", meters: 100 }, alert: null }] }]
+    } }
+  ];
+  const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days }), { volumeCeilingKm: 0.1 }));
+  assert.ok(result.days.every(day => day.kind === "rest"), "an unaffordable easy replacement must become rest");
+  assert.ok(result.clamped.some(message => message.includes("轻松时段占比低于下限")));
+});
+
+test("final easy-time repair respects both volume readings across quality-dose boundaries", () => {
+  for (const prescription of [null, PRESCRIPTION]) for (const kind of ["tempo", "interval"] as const) {
+    for (const volumeCeilingKm of [0.1, 2, 5.3, 7.9, 12, 20, 30]) {
+      const days = [
+        { localDate: TODAY, kind: "easy", distanceKm: 30, structure: null },
+        { localDate: "2026-09-08", kind, distanceKm: 8,
+          structure: buildSessionStructure(kind, prescription, { reps: 2 }) }
+      ];
+      const args = validateArgs(JSON.stringify({ days }), { prescription, volumeCeilingKm });
+      const result = validateWeeklyPlan(args);
+      let easySeconds = 0, totalSeconds = 0, measuredKm = 0;
+      for (const day of result.days) {
+        if (!day.structure) continue;
+        const measured = measureStructure(day.structure, day.kind, pacesFromZones(prescription));
+        measuredKm += measured.distanceKm;
+        totalSeconds += measured.durationSeconds;
+        if (["easy", "recovery"].includes(day.kind)) easySeconds += measured.durationSeconds;
+      }
+      const context = `${kind}, budget ${volumeCeilingKm}, zones ${prescription !== null}`;
+      assert.ok(totalSeconds === 0 || easySeconds / totalSeconds >= args.easyDurationFloorFraction, context);
+      assert.ok(measuredKm <= volumeCeilingKm + 1e-6, context);
+      assert.ok(result.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= volumeCeilingKm + 1e-6, context);
+      assert.deepEqual(validateWeeklyPlan({ ...args, raw: JSON.stringify({ days: result.days }) }).days, result.days, context);
+    }
+  }
+});
+
+test("rolling generation reserves retained next-week distance and quality sessions", async () => {
+  const today = todayPayload({ today: { localDate: "2026-10-08", workoutCount: 0 },
+    week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 } });
+  const weekPlan = weeklyPlanDates("2026-10-15", 4).map((localDate, index) => ({
+    localDate, kind: index < 2 ? "tempo" as const : "easy" as const, distanceKm: 8, structure: null, reason: "retain"
+  }));
+  const goals = { weeklyDistanceKm: 40, qualitySessionCap: 2, easyDurationFloorFraction: 0,
+    raceTarget: null, weekPlan };
+  const proposed = weeklyPlanDates("2026-10-08").map(localDate => ({ localDate,
+    kind: localDate <= "2026-10-11" ? "rest" as const : "tempo" as const,
+    distanceKm: localDate <= "2026-10-11" ? null : 10, structure: null, reason: null }));
+  const warnings: string[] = [];
+  const result = constrainUpcomingPlan(proposed, { today, goals, prescription: PRESCRIPTION }, warnings);
+  const merged = mergePlanWindow(weekPlan, result, "2026-10-08");
+  const nextWeek = merged.filter(day => day.localDate >= "2026-10-12");
+  assert.ok(nextWeek.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 40);
+  assert.equal(nextWeek.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length, 2);
+  assert.deepEqual(merged.filter(day => day.localDate >= "2026-10-15"), weekPlan);
+  assert.ok(warnings.some(message => message.includes("窗口外保留")));
+  const generated = await generateWeeklyPlan({ today, goals, prescription: PRESCRIPTION, client: null });
+  assert.ok(mergePlanWindow(weekPlan, generated.days, "2026-10-08")
+    .filter(day => day.localDate >= "2026-10-12").reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 40);
+  const root = mkdtempSync(join(tmpdir(), "rai-retained-budget-"));
+  const store = new MobileGoalsStore(root);
+  try {
+    const saved = store.write({ ...goals, weekPlan: mergePlanWindow(weekPlan, result, "2026-10-08") },
+      { prescription: PRESCRIPTION });
+    assert.ok(saved.weekPlan.filter(day => day.localDate >= "2026-10-12")
+      .reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 40, "persistence must not reintroduce excess volume");
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("retained budgets measure executable structure instead of stale distance hints", () => {
+  const today = todayPayload({ today: { localDate: "2026-10-08", workoutCount: 0 },
+    week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 } });
+  const retained: MobilePlannedDay = { localDate: "2026-10-15", kind: "easy", distanceKm: 1,
+    structure: buildSessionStructure("easy", PRESCRIPTION, { targetDistanceKm: 38 }), reason: null };
+  const measured = measureStructure(retained.structure!, retained.kind, pacesFromZones(PRESCRIPTION)).distanceKm;
+  const proposed = weeklyPlanDates("2026-10-08").map(localDate => ({ localDate,
+    kind: "easy" as const, distanceKm: 10, structure: null, reason: null }));
+  const result = constrainUpcomingPlan(proposed, { today, prescription: PRESCRIPTION,
+    goals: { weeklyDistanceKm: 40, qualitySessionCap: 2, easyDurationFloorFraction: 0.7,
+      raceTarget: null, weekPlan: [retained] } });
+  assert.ok(result.filter(day => day.localDate > "2026-10-11")
+    .reduce((sum, day) => sum + (day.distanceKm ?? 0), measured) <= 40);
+});
+
 const dayJson = (localDate: string, kind: string, extra: Record<string, unknown> = {}) =>
   JSON.stringify({
     days: [
@@ -174,7 +412,7 @@ test("the easy-time floor demotes the last quality session when intensity domina
     JSON.parse(dayJson(date, "easy")).days[0]
   );
   const days = [...easy, ...quality].sort((left, right) => String(left.localDate).localeCompare(String(right.localDate)));
-  const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days }), { qualitySessionCap: 3 }));
+  const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days }), { qualitySessionCap: 3, weeklyDistanceKm: 60 }));
   assert.equal(result.days.filter((day) => day.kind === "tempo" || day.kind === "interval").length, 2);
   assert.equal(result.days.find((day) => day.localDate === "2026-09-11")?.kind, "easy");
   assert.ok(result.clamped.some((entry) => entry.includes("轻松时段占比低于下限")));
@@ -221,6 +459,158 @@ test("pace targets faster than the allowed band are pulled back and reps are cap
   assert.ok((workStep?.alert?.lower ?? 0) >= 240, "配速下限应被收回到间歇区间");
   assert.ok(result.clamped.some((entry) => entry.includes("组数")));
   assert.ok(result.clamped.some((entry) => entry.includes("配速目标")));
+});
+
+for (const kind of ["easy", "recovery", "long_run", "tempo", "interval"] as const) {
+  test(`${kind} heart-rate targets obey the session and step intensity limits`, () => {
+    const structure = buildSessionStructure(kind, PRESCRIPTION, { targetDistanceKm: 5, reps: 2 })!;
+    for (const step of [structure.warmup, ...structure.blocks.flatMap(block => block.steps), structure.cooldown]) {
+      if (step) step.alert = { kind: "heart_rate", lower: 200, upper: 210 };
+    }
+    const day = { localDate: "2026-09-08", kind, distanceKm: 5, structure };
+    const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days: [day] }), { easyDurationFloorFraction: 0 }));
+    assert.deepEqual(result.rejected, []);
+    assert.ok(result.clamped.some(message => message.includes("心率目标")));
+    const safe = result.days[0]!.structure!;
+    for (const step of [safe.warmup, ...safe.blocks.flatMap(block => block.steps), safe.cooldown]) {
+      if (!step?.alert) continue;
+      if (step.purpose === "work" && kind === "interval") {
+        assert.deepEqual(step.alert, { kind: "pace", lower: 240, upper: 265 });
+      } else {
+        const ceiling = step.purpose === "work" && kind === "tempo" ? 172 : 150;
+        assert.equal(step.alert.kind, "heart_rate");
+        assert.equal(step.alert.lower, ceiling);
+        assert.equal(step.alert.upper, ceiling);
+      }
+    }
+  });
+}
+
+test("unknown heart-rate ceilings cannot authorize an unbounded target", () => {
+  const structure: MobileSessionStructure = { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: [
+    { purpose: "work", goal: { type: "distance", meters: 5000 }, alert: { kind: "heart_rate", lower: 200, upper: null } }
+  ] }] };
+  const day = { localDate: "2026-09-08", kind: "easy", distanceKm: 5, structure };
+  for (const prescription of [null, { ...PRESCRIPTION, easyHrLower: null, easyHrUpper: null }]) {
+    const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days: [day] }), { prescription }));
+    assert.notEqual(result.days[0]!.structure!.blocks[0]!.steps[0]!.alert?.kind, "heart_rate");
+    assert.ok(result.clamped.some(message => message.includes("心率目标")));
+  }
+  structure.blocks[0]!.steps[0]!.alert = { kind: "heart_rate", lower: 100, upper: null };
+  const bounded = validateWeeklyPlan(validateArgs(JSON.stringify({ days: [day] })));
+  assert.deepEqual(bounded.days[0]!.structure!.blocks[0]!.steps[0]!.alert, { kind: "heart_rate", lower: 100, upper: 150 });
+});
+
+test("manual easy plans cannot bypass injury guards with high heart-rate alerts", () => {
+  const day: MobilePlannedDay = { localDate: "2026-09-08", kind: "easy", distanceKm: 5, reason: null,
+    structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: [
+      { purpose: "work", goal: { type: "distance", meters: 5000 }, alert: { kind: "heart_rate", lower: 200, upper: 210 } }
+    ] }] } };
+  const goals = { revision: 0, weeklyDistanceKm: 40, qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
+    raceTarget: null, weekPlan: [day] } as MobileGoalsResponse;
+  assert.throws(() => validateManualPlan(goals, todayPayload({ week: { periodStart: TODAY, distanceKm: 0 },
+    injuryFlags: [{ code: "quality_cluster" }] }), PRESCRIPTION, 40), ManualPlanPolicyError);
+});
+
+test("unknown pace bounds remove alerts on every step and reject the corresponding manual plans", () => {
+  for (const prescription of [null, { ...PRESCRIPTION, easyPaceLower: null }]) {
+    for (const target of ["warmup", "work", "recovery", "cooldown"] as const) {
+      const alert = { kind: "pace" as const, lower: 150, upper: 160 };
+      const structure: MobileSessionStructure = {
+        warmup: { purpose: "warmup", goal: { type: "time", seconds: 300 }, alert: target === "warmup" ? alert : null },
+        blocks: [{ iterations: 1, steps: [
+          { purpose: "work", goal: { type: "distance", meters: 5000 }, alert: target === "work" ? alert : null },
+          { purpose: "recovery", goal: { type: "time", seconds: 60 }, alert: target === "recovery" ? alert : null }
+        ] }],
+        cooldown: { purpose: "cooldown", goal: { type: "time", seconds: 300 }, alert: target === "cooldown" ? alert : null }
+      };
+      const day: MobilePlannedDay = { localDate: "2026-09-08", kind: "easy", distanceKm: 7, reason: null, structure };
+      const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days: [day] }), {
+        prescription, qualitySessionCap: 0, injuryFlagCodes: ["load_ratio"]
+      }));
+      const safe = result.days[0]!.structure!;
+      assert.ok([safe.warmup, ...safe.blocks.flatMap(block => block.steps), safe.cooldown]
+        .every(step => step?.alert == null), `${target} must not retain an ungrounded pace target`);
+      assert.ok(result.clamped.some(message => message.includes("无可靠配速区间时移除目标")));
+      const goals = { revision: 0, weeklyDistanceKm: 40, qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
+        raceTarget: null, weekPlan: [day] } as MobileGoalsResponse;
+      assert.throws(() => validateManualPlan(goals, todayPayload({ week: { periodStart: TODAY, distanceKm: 0 },
+        injuryFlags: [{ code: "load_ratio" }] }), prescription, 40), ManualPlanPolicyError);
+    }
+  }
+});
+
+test("long-run-only plans cannot abandon the easy-duration floor after all quality sessions are gone", () => {
+  for (const prescription of [null, PRESCRIPTION]) {
+    const dates = weeklyPlanDates(TODAY);
+    for (const count of [1, 7]) {
+      const days: MobilePlannedDay[] = dates.slice(0, count).map(localDate => ({
+        localDate, kind: "long_run", distanceKm: 4, reason: null, structure: null
+      }));
+      const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days }), {
+        prescription, qualitySessionCap: 0, easyDurationFloorFraction: 1
+      }));
+      assert.deepEqual(result.rejected, []);
+      assert.ok(result.days.every(day => day.kind === "easy" || day.kind === "rest"));
+      assert.equal(result.clamped.filter(message => message.includes("长距离课")).length, count);
+      for (const day of result.days) if (day.structure) {
+        const measured = measureStructure(day.structure, day.kind, pacesFromZones(prescription));
+        assert.ok(measured.distanceKm <= 4 + 1e-6, "repair must not expand a long run");
+        assert.equal(day.distanceKm, roundKm(measured.distanceKm));
+      }
+      const goals = { revision: 0, weeklyDistanceKm: 40, qualitySessionCap: 0, easyDurationFloorFraction: 1,
+        raceTarget: null, weekPlan: days } as MobileGoalsResponse;
+      assert.throws(() => validateManualPlan(goals,
+        todayPayload({ week: { periodStart: TODAY, distanceKm: 0 } }), prescription, 40), ManualPlanPolicyError);
+      const repeated = validateWeeklyPlan(validateArgs(JSON.stringify({ days: result.days }), {
+        prescription, qualitySessionCap: 0, easyDurationFloorFraction: 1
+      }));
+      assert.deepEqual(repeated.clamped, [], "a repaired plan remains stable when exported again");
+      assert.deepEqual(repeated.days, result.days);
+    }
+  }
+});
+
+test("easy/long-run mixtures retain long runs only when the measured easy floor is met", () => {
+  const days = [
+    { localDate: "2026-09-08", kind: "easy", distanceKm: 10 },
+    { localDate: "2026-09-09", kind: "long_run", distanceKm: 5 }
+  ];
+  const permissive = validateWeeklyPlan(validateArgs(JSON.stringify({ days }), { easyDurationFloorFraction: 0.5 }));
+  assert.equal(permissive.days[1]!.kind, "long_run");
+  assert.deepEqual(permissive.clamped, []);
+  const restrictive = validateWeeklyPlan(validateArgs(JSON.stringify({ days }), { easyDurationFloorFraction: 0.8 }));
+  assert.equal(restrictive.days[1]!.kind, "easy");
+  assert.ok(restrictive.clamped.some(message => message.includes("长距离课")));
+});
+
+test("interval repetition ceiling counts all blocks and every work step", () => {
+  const original = buildSessionStructure("interval", PRESCRIPTION, { reps: 8 })!;
+  const variants = [
+    { ...original, blocks: [original.blocks[0]!, original.blocks[0]!] },
+    { ...original, blocks: [{ ...original.blocks[0]!, steps: [...original.blocks[0]!.steps, ...original.blocks[0]!.steps] }] },
+    { ...original, blocks: [{ iterations: 1, steps: Array.from({ length: 12 }, () => original.blocks[0]!.steps[0]!) }] }
+  ];
+  for (const structure of variants) {
+    const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days: [{ localDate: "2026-09-08", kind: "interval", structure }] }),
+      { weeklyDistanceKm: 80, volumeCeilingKm: 80, easyDurationFloorFraction: 0 }));
+    const safe = result.days[0]!.structure!;
+    assert.ok(structureWorkRepetitions(safe) <= 8);
+    assert.ok(measureStructure(safe, "interval", pacesFromZones(PRESCRIPTION)).distanceKm <=
+      measureStructure(structure, "interval", pacesFromZones(PRESCRIPTION)).distanceKm);
+    assert.ok(result.clamped.some(message => message.includes("组数")));
+    assert.deepEqual(validateWeeklyPlan(validateArgs(JSON.stringify({ days: result.days }),
+      { weeklyDistanceKm: 80, volumeCeilingKm: 80, easyDurationFloorFraction: 0 })).clamped, []);
+  }
+});
+
+test("interval structures already below the aggregate ceiling stay intact", () => {
+  const structure = buildSessionStructure("interval", PRESCRIPTION, { reps: 2 })!;
+  structure.blocks.push({ iterations: 3, steps: structure.blocks[0]!.steps });
+  const result = validateWeeklyPlan(validateArgs(JSON.stringify({ days: [{ localDate: "2026-09-08", kind: "interval", structure }] }),
+    { easyDurationFloorFraction: 0 }));
+  assert.deepEqual(result.days[0]!.structure, structure);
+  assert.deepEqual(result.clamped, []);
 });
 
 test("a plan above the weekly ceiling is scaled down", () => {

@@ -14,10 +14,7 @@ import {
   localDateInTimeZone
 } from "@rai/training-load";
 
-import {
-  loadLabeledRaceOutcomes,
-  MANUAL_ENTRY_ID_PREFIX
-} from "./prediction-data.js";
+import { expandPerformanceEventExclusions, loadLabeledRaceOutcomes } from "./prediction-data.js";
 import {
   historicalEligibilitySql,
   historicalOverrideJoin,
@@ -95,7 +92,8 @@ interface ActiveTrainingLoadRow {
 
 export function loadAcuteChronicLoadRatio(
   database: DatabaseSync,
-  asOf: string
+  asOf: string,
+  excluded: ReadonlySet<string> = new Set()
 ): number | null {
   const sourceTables = database.prepare(`
     SELECT COUNT(*) AS count FROM sqlite_master
@@ -211,7 +209,7 @@ export function loadAcuteChronicLoadRatio(
 
   const timezoneIdentifier = rows.at(-1)?.timezoneIdentifier ?? DATABASE_TIMEZONE;
   const throughDate = localDateInTimeZone(asOf, timezoneIdentifier);
-  const loads = rows.map((row) => ({
+  const loads = rows.filter(row => !excluded.has(row.trainingSessionId)).map((row) => ({
     trainingSessionId: row.trainingSessionId,
     localDate: row.localDate,
     durationSeconds: row.durationSeconds,
@@ -225,7 +223,8 @@ export function loadAcuteChronicLoadRatio(
 export function loadTrainingContext(
   database: DatabaseSync,
   asOf: string,
-  distance: RaceDistance
+  distance: RaceDistance,
+  excluded: ReadonlySet<string> = new Set()
 ): TrainingContext {
   const start4w = new Date(Date.parse(asOf) - 28 * 86_400_000).toISOString();
   const start8w = new Date(Date.parse(asOf) - 56 * 86_400_000).toISOString();
@@ -249,13 +248,15 @@ export function loadTrainingContext(
       AND session.anchor_distance_km IS NOT NULL
       AND session.anchor_distance_km > 0
       AND (${historicalEligibilitySql()}) <> 'excluded'
+      AND session.id NOT IN (SELECT value FROM json_each(?))
   `).get(
     start4w,
     start4w,
     exposureThresholdKm[distance],
     asOf,
     start8w,
-    asOf
+    asOf,
+    JSON.stringify([...excluded])
   ) as unknown as {
     distance4w: number | null;
     distance8w: number | null;
@@ -272,7 +273,7 @@ export function loadTrainingContext(
     runFrequency4wPerWeek: numeric(row.runs4w) / 4,
     targetDistanceExposure8w: numeric(row.exposure8w),
     daysSinceLastRun: row.latestAt === null ? 56 : daysBetween(row.latestAt, asOf),
-    acuteChronicLoadRatio: loadAcuteChronicLoadRatio(database, asOf),
+    acuteChronicLoadRatio: loadAcuteChronicLoadRatio(database, asOf, excluded),
     overallDataQuality: row.averageQuality
   };
 }
@@ -282,13 +283,14 @@ export function buildRaceResidualFeatureValues(
   asOf: string,
   distance: RaceDistance,
   base: FormulaPredictionBase,
-  scenario: PhysiologyPredictionScenario
+  scenario: PhysiologyPredictionScenario,
+  excluded: ReadonlySet<string> = new Set()
 ): RaceResidualFeatureValues | null {
   const prediction = base.snapshot.races.find((race) => race.distance === distance);
   if (!prediction || prediction.status !== "available" || prediction.predictedSeconds === null) {
     return null;
   }
-  const context = loadTrainingContext(database, asOf, distance);
+  const context = loadTrainingContext(database, asOf, distance, excluded);
   const conditionAdjustmentSeconds =
     (prediction.environmentAdjustmentSeconds ?? 0) +
     (prediction.elevationAdjustmentSeconds ?? 0) +
@@ -333,23 +335,17 @@ export function buildRaceResidualTrainingDataset(
   const outcomes = loadLabeledRaceOutcomes(database, asOf);
   const samples: RaceResidualTrainingSample[] = [];
   for (const outcome of outcomes) {
+    const excluded = expandPerformanceEventExclusions(database,
+      new Set([outcome.id, ...(outcome.trainingSessionIds ?? [])]), outcome.observedAt);
     // Apple workout weather and accumulated elevation are result metadata. Without
     // an independently timestamped pre-race scenario they are unavailable here.
     //
-    // §12.10: a manually entered race **did not exist** on the day it was run, so
-    // "the rule's prediction at that moment" cannot include it or anything else
-    // entered later. Left on the session path, every manual label silently dropped out
-    // of the training set — the zero-label knot would have looked untied while the
-    // model still saw nothing. Manual labels therefore use the current state minus
-    // themselves, the same construction the personal calibration pass uses, and the
-    // split below still orders samples by `labelAvailableAt`, so a sample never
-    // trains on a prediction that postdates its own availability.
-    const base = outcome.id.startsWith(MANUAL_ENTRY_ID_PREFIX)
-      ? buildFormulaPredictionBase(database, asOf, {
-          mode: "current_prepared",
-          excludeLabelIds: [outcome.id]
-        })
-      : buildFormulaPredictionBase(database, outcome.observedAt, { mode: "current_prepared" });
+    // Retrospective leave-one-out belongs to personal calibration, not temporal
+    // training. Every feature and baseline must precede the event being predicted.
+    const base = buildFormulaPredictionBase(database, outcome.observedAt, {
+      mode: "current_prepared",
+      excludeLabelIds: [...excluded]
+    });
     const prediction = base.snapshot.races.find((race) => race.distance === outcome.distance);
     if (!prediction || prediction.status !== "available" || prediction.predictedSeconds === null) {
       continue;
@@ -368,7 +364,8 @@ export function buildRaceResidualTrainingDataset(
       outcome.observedAt,
       outcome.distance,
       base,
-      scenario
+      scenario,
+      excluded
     );
     if (features === null) continue;
     samples.push({

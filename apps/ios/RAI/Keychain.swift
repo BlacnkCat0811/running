@@ -41,7 +41,7 @@ enum Keychain {
     }
 
     /// 返回 `true` 表示"钥匙串现在就是调用方要的状态"：写入成功，或调用方要求的
-    /// 本来就是清空。只有 `SecItemAdd` 真的失败才返回 `false`。
+    /// 本来就不存在。删除或写入失败都返回 `false`。
     @discardableResult
     static func saveToken(_ token: String, for server: String?) -> Bool {
         let data = Data(token.utf8)
@@ -51,10 +51,12 @@ enum Keychain {
             kSecAttrService as String: service,
             kSecAttrAccount as String: scopedAccount
         ]
-        // 忽略返回值是**有意**的：这是 delete-then-add 的 upsert，条目不存在时
-        // `errSecItemNotFound` 是预期路径。显式 `_ =` 让这个意图可见，并避免
-        // 一条与真实风险无关的编译告警去掩盖下面 `SecItemAdd` 的处理。
-        _ = SecItemDelete(query as CFDictionary)
+        if server == nil { UserDefaults.standard.removeObject(forKey: "rai.apiToken") }
+        let deleteStatus = SecItemDelete(query as CFDictionary)
+        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
+            NSLog("RAI Keychain: SecItemDelete failed (OSStatus %d); the previous token may still be persisted", deleteStatus)
+            return false
+        }
         guard !token.isEmpty else {
             if server == nil { UserDefaults.standard.removeObject(forKey: "rai.apiToken") }
             return true

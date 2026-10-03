@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { RaiApplicationService } from "@rai/application";
 
 import {
   PrivacyZoneRevisionConflictError,
@@ -16,12 +17,12 @@ import {
  * failing private: a rejected write that still emptied the table would leave the
  * runner with no zones at all — and every card they share afterwards unredacted.
  */
-async function withRepository(run: (repository: SqlitePrivacyZoneRepository) => void): Promise<void> {
+async function withRepository(run: (repository: SqlitePrivacyZoneRepository, store: RaiDatabase) => void): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "rai-privacy-"));
   try {
     const store = await RaiDatabase.open(join(root, "rai.sqlite"), { createMigrationBackup: false });
     try {
-      run(new SqlitePrivacyZoneRepository(store.database));
+      run(new SqlitePrivacyZoneRepository(store.database), store);
     } finally {
       store.close();
     }
@@ -39,6 +40,24 @@ const zone = (overrides: Record<string, unknown> = {}) => ({
   createdAt: "2026-10-02T00:00:00.000Z",
   ...overrides
 });
+
+for (const transactionMode of ["owned", "savepoint"] as const) {
+  test(`privacy-zone application writes compose with ${transactionMode} transactions`, async () => {
+    await withRepository((repository, store) => {
+      if (transactionMode === "savepoint") store.database.exec("BEGIN IMMEDIATE");
+      const service = new RaiApplicationService(store, transactionMode);
+      assert.equal(service.replacePrivacyZones([zone()], 0).revision, 1);
+      assert.throws(() => service.replacePrivacyZones([], 0), PrivacyZoneRevisionConflictError);
+      assert.equal(repository.list().length, 1);
+      assert.equal(service.replacePrivacyZones([zone(), zone({ id: "work" })], 1).revision, 2);
+      if (transactionMode === "savepoint") {
+        store.database.exec("ROLLBACK");
+        assert.equal(repository.revision(), 0);
+        assert.deepEqual(repository.list(), []);
+      }
+    });
+  });
+}
 
 test("V03: zones start empty at revision 0 and a write is revision-guarded", async () => {
   await withRepository((repository) => {
@@ -104,5 +123,35 @@ test("V03: removing every zone is an ordinary write, and it is what makes future
     const revision = repository.replace([], 1);
     assert.equal(revision, 2);
     assert.deepEqual(repository.list(), []);
+  });
+});
+
+test("a failed insert rolls back the entire privacy-zone replacement", async () => {
+  await withRepository((repository, store) => {
+    const service = new RaiApplicationService(store);
+    service.replacePrivacyZones([zone()], 0);
+    store.database.exec(`CREATE TRIGGER reject_privacy_zone BEFORE INSERT ON privacy_zones
+      WHEN NEW.id = 'rejected' BEGIN SELECT RAISE(ABORT, 'fixture insert failure'); END`);
+    assert.throws(() => service.replacePrivacyZones([zone({ id: "first" }), zone({ id: "rejected" })], 1), /fixture insert failure/);
+    assert.deepEqual(repository.list().map(item => item.id), ["home"]);
+    assert.equal(repository.revision(), 1);
+    assert.equal(service.replacePrivacyZones([zone()], 1).revision, 2);
+  });
+});
+
+test("restored collection content invalidates stale writes even at the same revision", async () => {
+  await withRepository((repository, store) => {
+    const service = new RaiApplicationService(store);
+    const original = service.replacePrivacyZones([zone()], 0, repository.stateToken());
+    store.database.exec("UPDATE privacy_zones SET center_latitude = 32, label = 'restored' WHERE id = 'home'");
+    assert.equal(repository.revision(), original.revision);
+    assert.notEqual(repository.stateToken(), original.stateToken);
+    assert.throws(() => service.replacePrivacyZones([], original.revision, original.stateToken), PrivacyZoneRevisionConflictError);
+    assert.equal(repository.list()[0]?.centerLatitude, 32);
+    assert.equal(repository.revision(), 1);
+    const current = repository.stateToken();
+    assert.equal(service.replacePrivacyZones([zone({ label: "updated" })], 1, current).revision, 2);
+    assert.throws(() => service.replacePrivacyZones([], 1, current), PrivacyZoneRevisionConflictError,
+      "a late request from another tab cannot reuse an already consumed state");
   });
 });

@@ -46,6 +46,7 @@ import {
 import {
   loadDirectVo2Evidence,
   loadLactateThresholdEvidence,
+  expandPerformanceEventExclusions,
   loadLabeledPerformanceEvidence,
   loadLabeledRaceOutcomes,
   loadPerformanceVdotEvidence,
@@ -256,12 +257,12 @@ export function buildFormulaPredictionBase(
   asOf: string,
   options: PredictionReportOptions
 ): FormulaPredictionBase {
-  const directEvidence = loadDirectVo2Evidence(database, asOf);
-  const labeledPerformance = loadLabeledPerformanceEvidence(database, asOf);
-  const excluded = new Set(options.excludeLabelIds ?? []);
+  const excluded = expandPerformanceEventExclusions(database, new Set(options.excludeLabelIds ?? []), asOf);
+  const directEvidence = loadDirectVo2Evidence(database, asOf, excluded);
+  const labeledPerformance = loadLabeledPerformanceEvidence(database, asOf, excluded);
   const performanceVdotEvidence = loadPerformanceVdotEvidence(database, asOf, excluded);
-  const thresholdEvidence = loadLactateThresholdEvidence(database, asOf);
-  const readinessEvidence = loadRaceReadinessEvidence(database, asOf);
+  const thresholdEvidence = loadLactateThresholdEvidence(database, asOf, excluded);
+  const readinessEvidence = loadRaceReadinessEvidence(database, asOf, excluded);
   const modelReadiness: PredictionReadiness = options.mode === "neutral_potential"
     ? { five_k: 1, ten_k: 1, half_marathon: 1 }
     : readinessEvidence.values;
@@ -283,7 +284,7 @@ export function buildFormulaPredictionBase(
   const recoveryReadiness = options.mode === undefined ? recoveryEvidence.value
     : options.mode === "race_day_scenario" ? options.recoveryReadiness ?? null : null;
   const scenario = resolvedScenario(options.mode !== undefined && options.mode !== "race_day_scenario" ? {} : options);
-  const profile = loadPhysiologyProfile(database, asOf);
+  const profile = loadPhysiologyProfile(database, asOf, excluded);
   const snapshot = buildPhysiologyPredictionSnapshot({
     // Race/test performance is VDOT evidence, not a physiological VO2max
     // measurement. Keep the count for provenance, but never merge the same
@@ -595,6 +596,7 @@ interface ActivePredictionModelRow {
   supportedDistancesJson: string;
   artifactPath: string;
   artifactSha256: string;
+  requestJson: string;
   activatedAt: string;
 }
 
@@ -616,6 +618,7 @@ function activePredictionModel(database: DatabaseSync): ActivePredictionModelRow
         run.holdout_prediction_count AS holdoutPredictionCount,
         run.supported_distances_json AS supportedDistancesJson,
         run.artifact_path AS artifactPath, run.artifact_sha256 AS artifactSha256,
+        run.request_json AS requestJson,
         active.activated_at AS activatedAt
       FROM active_prediction_model active
       JOIN prediction_model_runs run ON run.id = active.prediction_model_run_id
@@ -642,7 +645,8 @@ async function loadActivePredictionModel(
 ): Promise<OnnxCatBoostResidualModel> {
   const key = `${active.id}:${active.artifactSha256}`;
   if (cachedPredictionModel?.key === key) return cachedPredictionModel.model;
-  const model = OnnxCatBoostResidualModel.load(active.artifactPath).then((loaded) => {
+  const scope = parseJson<{ scope?: unknown }>(active.requestJson, {})?.scope === "personal" ? "personal" : "population";
+  const model = OnnxCatBoostResidualModel.load(active.artifactPath, scope).then((loaded) => {
     if (loaded.manifest.modelSha256 !== active.artifactSha256) {
       throw new Error("active prediction model artifact hash mismatch");
     }
@@ -774,6 +778,8 @@ function buildPredictionReportContext(
       sessionCount: labelFunnel.sessionCount,
       confirmedCount: labelFunnel.confirmedCount,
       usableOutcomeCount: labelFunnel.usableOutcomeCount,
+      trainingSampleCount: labelFunnel.trainingSampleCount,
+      trainingExcludedOutcomeCount: labelFunnel.trainingExcludedOutcomeCount,
       evaluatedOutcomeCount: labelFunnel.evaluatedOutcomeCount,
       primaryRejections: labelFunnel.primaryRejections,
       accuracyStatus: labelFunnel.accuracyStatus
@@ -1019,6 +1025,7 @@ async function buildPredictionReportAsyncInternal(
   if (
     currentAbilityBaselineHash(database) !== initialBaselineHash ||
     model.manifest.featureSchemaVersion !== active.featureSchemaVersion ||
+    model.manifest.scope !== (parseJson<{ scope?: unknown }>(active.requestJson, {})?.scope === "personal" ? "personal" : "population") ||
     model.manifest.featureSchemaHash !== active.featureSchemaHash ||
     model.manifest.trainingDataHash !== active.trainingDataHash ||
     model.manifest.labelCount !== active.labelCount ||

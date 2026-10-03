@@ -39,6 +39,9 @@ export { RUNNING_DYNAMICS_POLICY_VERSION as DYNAMICS_POLICY_VERSION } from "@rai
  */
 export const MINIMUM_METRIC_COVERAGE = 0.6;
 
+/** Occupied time buckets, not the span between the first and last samples. */
+export const METRIC_COVERAGE_BUCKET_SECONDS = 30;
+
 /** Minimum comparable samples in *each* half before a drift is reported. */
 export const MINIMUM_HALF_SAMPLES = 20;
 
@@ -97,16 +100,17 @@ const mean = (values: readonly number[]): number | null =>
  */
 export function seriesCoverage(durationSeconds: number, metricLabel: string, samples: readonly DynamicsSample[]): number {
   if (!finite(durationSeconds) || durationSeconds <= 0) return 0;
-  const values = samples.filter((sample) => finite(sample.value));
-  if (values.length === 0) return 0;
-  const offsets = values.map((sample) => sample.offsetSeconds).filter(finite).sort((a, b) => a - b);
-  const first = offsets[0]!;
-  const last = offsets[offsets.length - 1]!;
-  const span = durationSeconds;
-  // A single sample covers one instant, not one span.
-  const covered = values.length === 1 ? 0 : Math.max(0, last - first) / span;
+  const offsets = new Set(samples.filter((sample) => finite(sample.value) &&
+    finite(sample.offsetSeconds) && sample.offsetSeconds >= 0 && sample.offsetSeconds <= durationSeconds)
+    .map((sample) => sample.offsetSeconds));
+  if (offsets.size < 2) return 0;
+  const bucketCount = Math.ceil(durationSeconds / METRIC_COVERAGE_BUCKET_SECONDS);
+  const buckets = new Set([...offsets].map((offset) =>
+    Math.min(bucketCount - 1, Math.floor(offset / METRIC_COVERAGE_BUCKET_SECONDS))));
+  const coveredSeconds = [...buckets].reduce((sum, bucket) => sum +
+    Math.min(METRIC_COVERAGE_BUCKET_SECONDS, durationSeconds - bucket * METRIC_COVERAGE_BUCKET_SECONDS), 0);
   void metricLabel;
-  return Math.min(1, covered);
+  return Math.min(1, coveredSeconds / durationSeconds);
 }
 
 function analyseMetric(
@@ -115,7 +119,8 @@ function analyseMetric(
   samples: readonly DynamicsSample[]
 ): RunningDynamicsMetricAnalysis {
   const label = METRIC_LABELS[name];
-  const usable = samples.filter((sample) => finite(sample.value) && finite(sample.offsetSeconds));
+  const usable = samples.filter((sample) => finite(sample.value) && finite(sample.offsetSeconds) &&
+    sample.offsetSeconds >= 0 && sample.offsetSeconds <= durationSeconds);
   const unit = name === "cadence" ? "spm" : name === "ground_contact_time" ? "ms" : name === "vertical_oscillation" ? "cm" : "m";
   const coverage = seriesCoverage(durationSeconds, label, usable);
   const average = mean(usable.map((sample) => sample.value));
@@ -137,7 +142,7 @@ function analyseMetric(
     return { ...base, status: "unavailable", reasonCodes: ["no_samples"] };
   }
   if (coverage < MINIMUM_METRIC_COVERAGE) {
-    return { ...base, status: "insufficient_coverage", reasonCodes: ["coverage_below_minimum"] };
+    return { ...base, average: null, status: "insufficient_coverage", reasonCodes: ["coverage_below_minimum"] };
   }
 
   const halfway = durationSeconds / 2;
@@ -228,7 +233,7 @@ export function analyseRunningDynamics(input: DynamicsInput): RunningDynamicsAna
   // and "it recorded too little to compare" are different gaps, and a single
   // generic sentence would hide the one the runner can actually act on.
   const analysable = metrics.filter((metric) => metric.status === "available" || metric.status === "partial").length;
-  const note = analysable === 0
+  const note = analysable === 0 && metrics.every((metric) => metric.samples === 0)
     ? "这次训练没有任何跑姿动态样本（手表未记录或未同步）。"
     : metrics.some((metric) => metric.status === "insufficient_coverage")
       ? "部分指标覆盖不足，只展示可用部分。"

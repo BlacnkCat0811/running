@@ -60,8 +60,31 @@ test("Y01: below the coverage floor the metric is insufficient, with the share r
   assert.equal(metric.status, "insufficient_coverage");
   assert.deepEqual(metric.reasonCodes, ["coverage_below_minimum"]);
   assert.equal(metric.driftFraction, null);
+  assert.equal(metric.average, null);
   assert.ok(metric.coverage < MINIMUM_METRIC_COVERAGE);
   assert.ok(metric.samples === 10, "the sample count is still reported: it is the finding that is withheld");
+});
+
+test("Y01: sparse endpoints, duplicated instants and out-of-range offsets cannot claim coverage", () => {
+  const point = (offsetSeconds: number): DynamicsSample => ({ offsetSeconds, value: 170, speedMetersPerSecond: 3 });
+  const sparse = [point(0), point(DURATION)];
+  assert.ok(seriesCoverage(DURATION, "cadence", sparse) < 0.02);
+  assert.equal(seriesCoverage(DURATION, "cadence", Array.from({ length: 500 }, () => point(0))), 0);
+  assert.equal(seriesCoverage(DURATION, "cadence", [point(-10), point(DURATION + 10), point(Number.NaN)]), 0);
+  const analysis = analyseRunningDynamics({ durationSeconds: DURATION, metrics: { cadence: sparse } });
+  const cadence = analysis.metrics.find(metric => metric.name === "cadence")!;
+  assert.equal(cadence.status, "insufficient_coverage");
+  assert.equal(cadence.average, null);
+  assert.equal(cadence.driftFraction, null);
+  assert.deepEqual(analysis.flags, []);
+  assert.match(analysis.note!, /覆盖不足/);
+});
+
+test("Y01: coverage measures occupied time, including gaps and the final partial bucket", () => {
+  const sparseMiddle = series(() => 180, constantSpeed).filter(sample => sample.offsetSeconds < 600 || sample.offsetSeconds >= 3000);
+  assert.ok(seriesCoverage(DURATION, "cadence", sparseMiddle) < 0.35);
+  assert.equal(seriesCoverage(DURATION, "cadence", series(() => 180, constantSpeed)), 1);
+  assert.equal(seriesCoverage(65, "cadence", [0, 30, 65].map(offsetSeconds => ({ offsetSeconds, value: 180, speedMetersPerSecond: 3 }))), 1);
 });
 
 test("Y02: a pace change is not reported as a form change", () => {

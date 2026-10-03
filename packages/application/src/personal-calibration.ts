@@ -58,7 +58,7 @@ export function buildPersonalCalibrationSamples(
     try {
       const base = buildFormulaPredictionBase(database, asOf, {
         mode: "neutral_potential",
-        excludeLabelIds: [label.id]
+        excludeLabelIds: [label.id, ...(label.trainingSessionIds ?? [])]
       });
       const race = base.snapshot.races.find((item) => item.distance === label.distance) ?? null;
       const value = race?.predictedSeconds ?? null;

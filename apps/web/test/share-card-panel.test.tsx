@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { Blob as NodeBlob } from "node:buffer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ShareCardResponse } from "@rai/api-contracts";
@@ -10,10 +11,17 @@ import type { ShareCardResponse } from "@rai/api-contracts";
  */
 const useRemoteMock = vi.hoisted(() => vi.fn());
 vi.mock("../src/hooks.js", () => ({ useRemote: useRemoteMock }));
+const apiMock = vi.hoisted(() => vi.fn());
+vi.mock("../src/api.js", async importOriginal => ({
+  ...await importOriginal<typeof import("../src/api.js")>(), api: apiMock
+}));
 
 import { ShareCardPanel } from "../src/components/ShareCardPanel.js";
+import { writeApiToken } from "../src/api.js";
+import { notifyDataUpdated, notifyDatabaseStateChanged, notifyPrivacyZonesChanged } from "../src/events.js";
 
 beforeEach(() => {
+  vi.clearAllMocks();
   // The card carries route geometry, so the panel deliberately refuses to fetch
   // without a token; the test has to look like a configured browser.
   localStorage.setItem("rai.web.apiToken", "test-token");
@@ -22,6 +30,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   localStorage.clear();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** The panel is on-demand by design: open it before asserting on the payload. */
@@ -66,6 +76,155 @@ const card = (overrides: Partial<ShareCardResponse> = {}): ShareCardResponse => 
 });
 
 describe("share card panel", () => {
+  it("refreshes open cards after same-tab and cross-tab privacy changes", () => {
+    const state = remote(card());
+    useRemoteMock.mockReturnValue(state);
+    const view = render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    act(() => notifyPrivacyZonesChanged());
+    expect(state.reload).toHaveBeenCalledOnce();
+    act(() => window.dispatchEvent(new StorageEvent("storage", { key: "rai:privacy-zones-changed", newValue: "next" })));
+    expect(state.reload).toHaveBeenCalledTimes(2);
+    state.loading = true;
+    view.rerender(<ShareCardPanel trainingSessionId="session_1" />);
+    expect(screen.queryByRole("button", { name: "下载图片" })).toBeNull();
+    expect(screen.queryByRole("img", { name: "分享卡片预览" })).toBeNull();
+  });
+
+  it("exports the freshly redacted payload instead of the cached preview", async () => {
+    useRemoteMock.mockReturnValue(remote(card()));
+    apiMock.mockResolvedValue(card({ polylines: [], note: "整条轨迹都在隐私区内，卡片不含路线。" }));
+    const { blobs, click } = mockImageExport();
+    render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    await waitFor(() => expect(click).toHaveBeenCalledOnce());
+    expect(apiMock).toHaveBeenCalledWith("/v1/workouts/session_1/share-card", expect.objectContaining({
+      cache: "no-store", headers: { authorization: "Bearer test-token" }
+    }));
+    const svg = await blobs[0]!.text();
+    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(svg).not.toContain("<path");
+    expect(screen.getByText(/卡片不含路线/)).toBeTruthy();
+  });
+
+  it("fails closed when export revalidation fails", async () => {
+    useRemoteMock.mockReturnValue(remote(card()));
+    apiMock.mockRejectedValue(new Error("隐私设置校验失败"));
+    const { blobs, click } = mockImageExport();
+    render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("隐私设置校验失败"));
+    expect(blobs).toHaveLength(0);
+    expect(click).not.toHaveBeenCalled();
+    expect(screen.queryByRole("img", { name: "分享卡片预览" })).toBeNull();
+  });
+
+  it("cancels an export if privacy changes while PNG encoding is pending", async () => {
+    useRemoteMock.mockReturnValue(remote(card()));
+    apiMock.mockResolvedValue(card());
+    const { blobs, click } = mockImageExport();
+    let encode!: BlobCallback;
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementation(callback => { encode = callback; });
+    render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    await waitFor(() => expect(encode).toBeTypeOf("function"));
+    act(() => notifyPrivacyZonesChanged());
+    await act(async () => { encode(new Blob(["png"], { type: "image/png" })); });
+    expect(blobs).toHaveLength(1);
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it.each(["database", "data"])("cancels old PNG downloads when %s changes and allows a fresh export", async change => {
+    const state = remote(card());
+    useRemoteMock.mockReturnValue(state);
+    apiMock.mockResolvedValue(card());
+    const { click } = mockImageExport();
+    const encoders: BlobCallback[] = [];
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementation(callback => { encoders.push(callback); });
+    const view = render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    await waitFor(() => expect(encoders).toHaveLength(1));
+    act(() => { if (change === "database") notifyDatabaseStateChanged(); else notifyDataUpdated(); });
+
+    const fresh = card({ polylines: [], note: "更新后不含路线。" });
+    state.data = fresh;
+    apiMock.mockResolvedValue(fresh);
+    view.rerender(<ShareCardPanel trainingSessionId="session_1" />);
+    expect(screen.getByText("更新后不含路线。")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "下载图片" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    await waitFor(() => expect(encoders).toHaveLength(2));
+
+    await act(async () => { encoders[0]!(new Blob(["old-png"], { type: "image/png" })); });
+    expect(click).not.toHaveBeenCalled();
+    expect((screen.getByRole("button", { name: "下载图片" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { encoders[1]!(new Blob(["fresh-png"], { type: "image/png" })); });
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it.each(["database", "data"])("refreshes the real remote preview and cancels encoding when %s changes", async change => {
+    const { useRemote } = await vi.importActual<typeof import("../src/hooks.js")>("../src/hooks.js");
+    useRemoteMock.mockImplementation(useRemote);
+    let payload = card();
+    apiMock.mockImplementation(async () => payload);
+    const { blobs, click } = mockImageExport();
+    const encoders: BlobCallback[] = [];
+    vi.mocked(HTMLCanvasElement.prototype.toBlob).mockImplementation(callback => { encoders.push(callback); });
+    const view = render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    await screen.findByRole("img", { name: "分享卡片预览" });
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    await waitFor(() => expect(encoders).toHaveLength(1));
+
+    payload = card({ polylines: [], note: "更新后不含路线。" });
+    act(() => { if (change === "database") notifyDatabaseStateChanged(); else notifyDataUpdated(); });
+    await screen.findByText("更新后不含路线。");
+    expect(view.container.querySelectorAll("#share-card-session_1 path")).toHaveLength(0);
+    await act(async () => { encoders[0]!(new Blob(["old-png"], { type: "image/png" })); });
+    expect(click).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    await waitFor(() => expect(encoders).toHaveLength(2));
+    expect(await blobs[1]!.text()).not.toContain("<path");
+    await act(async () => { encoders[1]!(new Blob(["fresh-png"], { type: "image/png" })); });
+    expect(click).toHaveBeenCalledOnce();
+    expect(apiMock).toHaveBeenCalledTimes(4);
+  });
+
+  it.each(["token", "session", "privacy", "database", "data"])("cancels an in-flight export when %s changes", async change => {
+    useRemoteMock.mockReturnValue(remote(card()));
+    let resolve!: (value: ShareCardResponse) => void;
+    apiMock.mockReturnValue(new Promise<ShareCardResponse>(done => { resolve = done; }));
+    const { blobs, click } = mockImageExport();
+    const view = render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    fireEvent.click(screen.getByRole("button", { name: "下载图片" }));
+    if (change === "token") act(() => writeApiToken("another-owner"));
+    if (change === "session") view.rerender(<ShareCardPanel trainingSessionId="session_2" />);
+    if (change === "privacy") act(() => notifyPrivacyZonesChanged());
+    if (change === "database") act(() => notifyDatabaseStateChanged());
+    if (change === "data") act(() => notifyDataUpdated());
+    await act(async () => { resolve(card()); });
+    expect(blobs).toHaveLength(0);
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("reacts to a token saved after the panel was mounted", () => {
+    localStorage.clear();
+    useRemoteMock.mockReturnValue(remote(card()));
+    render(<ShareCardPanel trainingSessionId="session_1" />);
+    openPanel();
+    expect(useRemoteMock.mock.lastCall?.[1]).toBe(false);
+    act(() => writeApiToken("owner"));
+    expect(useRemoteMock.mock.lastCall?.[1]).toBe(true);
+    expect(screen.getByRole("img", { name: "分享卡片预览" })).toBeTruthy();
+    act(() => writeApiToken(""));
+    expect(screen.queryByRole("img", { name: "分享卡片预览" })).toBeNull();
+  });
   it("V01: draws each surviving piece as its own path and never reconnects them", () => {
     useRemoteMock.mockReturnValue(remote(card()));
     const { container } = render(<ShareCardPanel trainingSessionId="session_1" />);
@@ -104,6 +263,39 @@ describe("share card panel", () => {
     expect(screen.getByText(/卡片不含路线/)).toBeTruthy();
   });
 });
+
+function mockImageExport() {
+  const blobs: NodeBlob[] = [];
+  vi.stubGlobal("Blob", NodeBlob);
+  // Keep a real, callable URL constructor on the global: WorkBuddy's sandbox fs
+  // shim evaluates `filePath instanceof URL`, so replacing URL with a bare object
+  // turns every dynamic import into a bogus "Right-hand side of 'instanceof' is
+  // not callable". A Proxy forwards everything else (including `new URL(...)` and
+  // the prototype chain) and only intercepts the two static helpers jsdom lacks.
+  const createObjectURL = vi.fn((blob: NodeBlob) => { blobs.push(blob); return `blob:export-${blobs.length}`; });
+  const revokeObjectURL = vi.fn();
+  const StubURL = new Proxy(URL, {
+    get(target, property, receiver) {
+      if (property === "createObjectURL") return createObjectURL;
+      if (property === "revokeObjectURL") return revokeObjectURL;
+      return Reflect.get(target, property, receiver);
+    }
+  });
+  vi.stubGlobal("URL", StubURL);
+  vi.stubGlobal("Image", class {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+  });
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    fillRect: vi.fn(), drawImage: vi.fn(), fillStyle: ""
+  } as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(callback => {
+    callback(new NodeBlob(["png"], { type: "image/png" }) as unknown as Blob);
+  });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  return { blobs, click };
+}
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);

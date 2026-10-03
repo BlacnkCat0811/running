@@ -63,7 +63,7 @@ export class CommandQueue {
   private closing = false;
   private failures = 0;
   constructor(
-    runtimeRoot: string, private readonly scope: string, private readonly admission: TaskAdmission,
+    runtimeRoot: string, private scope: string, private readonly admission: TaskAdmission,
     private readonly apply: (command: DurableCommand) => Promise<unknown>,
     private readonly afterApply: () => void = () => {}
   ) {
@@ -102,6 +102,8 @@ export class CommandQueue {
       .all() as { payload: string }[]).map((row) => JSON.parse(row.payload) as DurableCommand));
   }
   get hasPending(): boolean { return this.pending().length > 0 || this.executing !== null; }
+  /** Called under the exclusive restore lease, with no pending commands. */
+  setScope(scope: string): void { this.scope = scope; }
   enqueue(request: CommandRequest): DurableCommand {
     const id = `command_${createHash("sha256").update(JSON.stringify([this.scope, request.idempotencyKey])).digest("hex")}`;
     const fingerprint = createHash("sha256").update(canonical({ kind: request.kind, payload: request.payload })).digest("hex");

@@ -1064,6 +1064,7 @@ export interface PredictionEnhancementSelection {
       | "race-residual-catboost-v1"
       | "race-residual-catboost-v2"
       | "race-residual-catboost-v4"
+      | "race-residual-catboost-v5"
       | null;
     trainedExampleCount: number;
     evaluatedOutcomeCount: number;
@@ -1109,6 +1110,8 @@ export interface PhysiologyPredictionReport {
     sessionCount: number;
     confirmedCount: number;
     usableOutcomeCount: number;
+    trainingSampleCount: number;
+    trainingExcludedOutcomeCount: number;
     evaluatedOutcomeCount: number;
     primaryRejections: Record<string, number>;
     accuracyStatus: "not_evaluable" | "requires_release_evaluation";
@@ -1196,7 +1199,7 @@ export const predictionResidualFeatureSchema = {
 export const PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH =
   "462e213399e199f268ce1122eeae924db6d55c4dbc0795c643394d22f0366aa7" as const;
 export const CATBOOST_PREDICTION_MODEL_VERSION =
-  "race-residual-catboost-v4" as const;
+  "race-residual-catboost-v5" as const;
 export const PREDICTION_CORRECTION_CAP_FRACTION = 0.12 as const;
 
 export const predictionModelRunStatuses = [
@@ -1283,6 +1286,7 @@ export interface PredictionModelEvent {
 export interface PredictionModelTrainingRequest {
   runId: string;
   asOf: string;
+  scope?: PredictionModelScope;
   databasePath: string;
   artifactDirectory: string;
 }
@@ -1684,6 +1688,21 @@ export interface WorkoutGradeSummary {
 
 export type PerformanceEntryDistance = "five_k" | "ten_k" | "half_marathon";
 
+/** Shared race-result plausibility rules for entry writes and candidate discovery. */
+export function performanceResultValidationError(distanceMeters: number, durationSeconds: number): string | null {
+  if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) {
+    return "distanceMeters must be a positive finite distance";
+  }
+  if (!Number.isFinite(durationSeconds) || durationSeconds < 12 * 60 || durationSeconds > 4 * 60 * 60) {
+    return "durationSeconds is outside the range a race result can occupy";
+  }
+  const pace = durationSeconds / (distanceMeters / 1_000);
+  if (pace < 150 || pace > 900) {
+    return "implied pace is outside the range a race result can occupy";
+  }
+  return null;
+}
+
 export interface PerformanceEntry {
   id: string;
   localDate: string;
@@ -1697,6 +1716,10 @@ export interface PerformanceEntry {
   /** Tombstone timestamp. A revoked entry stays readable so the count reconciles. */
   revokedAt: string | null;
   revision: number;
+  /** Present for a confirmed recorded workout; timestamps are copied by the server. */
+  trainingSessionId?: string | null;
+  observedAt?: string | null;
+  completedAt?: string | null;
 }
 
 // -----------------------------------------------------------------------------

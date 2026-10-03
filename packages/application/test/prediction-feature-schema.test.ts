@@ -40,7 +40,8 @@ test("uses one residual feature schema across contracts and training", () => {
 test("accepts a training-side schema hash at the inference boundary", () => {
   const placeholderHash = "a".repeat(64);
   const manifest = {
-    modelVersion: "race-residual-catboost-v4",
+    modelVersion: "race-residual-catboost-v5",
+    scope: "population",
     algorithm: "catboost",
     featureSchemaVersion: RACE_RESIDUAL_FEATURE_SCHEMA_VERSION,
     featureSchemaHash: raceResidualFeatureSchemaHash(),

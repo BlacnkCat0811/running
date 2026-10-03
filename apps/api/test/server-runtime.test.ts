@@ -610,6 +610,7 @@ test("restore request fails and keeps the current database when job recovery fai
   try {
     const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
+    const epochBefore = (await fetch(`${url}/v1/handshake`).then(result => result.json()) as { datasetEpoch: string }).datasetEpoch;
     const idleDeadline = Date.now() + 5_000;
     while (Date.now() < idleDeadline) {
       const status = await fetch(`${url}/v1/runtime-status`).then((result) => result.json()) as { busy: boolean };
@@ -633,6 +634,8 @@ test("restore request fails and keeps the current database when job recovery fai
       active.close();
     }
     assert.equal((await fetch(`${url}/v1/health`)).status, 200);
+    const epochAfter = (await fetch(`${url}/v1/handshake`).then(result => result.json()) as { datasetEpoch: string }).datasetEpoch;
+    assert.equal(epochAfter, epochBefore, "a rolled-back restore must preserve the current scope");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);
@@ -1266,6 +1269,244 @@ test("scopes sync batch idempotency by dataset epoch", async () => {
   }
 });
 
+for (const restartBeforeImport of [false, true]) test(`deletion isolates receipts and rebuilds the same source ${restartBeforeImport ? "after restart" : "without restart"}`, async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-deleted-scope-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  const inputPath = join(runtimeRoot, "export");
+  mkdirSync(inputPath);
+  const xml = `<HealthData><Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Watch"
+    startDate="2026-01-02 08:00:00 +0800" endDate="2026-01-02 08:30:00 +0800" duration="30" durationUnit="min">
+    <MetadataEntry key="HKMetadataKeySyncIdentifier" value="delete-reimport-workout"/>
+    <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" unit="km" sum="5"/>
+    </Workout></HealthData>`;
+  writeFileSync(join(inputPath, "export.xml"), xml);
+  const state = new RuntimeStateStore(runtimeRoot);
+  state.upsertSource({ id: "same-local-source", kind: "directory", displayName: "delete regression",
+    inputPath, originalPath: inputPath, sourceSha256: null, exportFileName: "export.xml",
+    exportBytes: Buffer.byteLength(xml), routeFileCount: 0, modifiedAt: "2026-01-03T00:00:00Z",
+    createdAt: "2026-01-03T00:00:00Z", lastUsedAt: null });
+  const store = await RaiDatabase.open(databasePath);
+  store.close();
+  const archive = await zipBuffer([{ name: "apple_health_export/export.xml", body: "<HealthData/>" }]);
+  let child: ChildProcess | null = null;
+  let output = "";
+  const start = async (): Promise<string> => {
+    output = "";
+    child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+      cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+        RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "", RAI_SERVER_ID: "local",
+        RAI_ATHLETE_ID: "athlete_1", RAI_DATASET_EPOCH: "delete-fixture", RAI_IMPORT_ENGINE: "typescript" },
+      windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    return url;
+  };
+  const epoch = async (url: string): Promise<string> =>
+    (await fetch(`${url}/v1/handshake`).then(response => response.json()) as { datasetEpoch: string }).datasetEpoch;
+  const upload = async (url: string): Promise<string> => {
+    const form = new FormData();
+    const bytes = new ArrayBuffer(archive.byteLength);
+    new Uint8Array(bytes).set(archive);
+    form.append("file", new Blob([bytes], { type: "application/zip" }), "healthkit.zip");
+    const response = await fetch(`${url}/v1/imports/uploads`, {
+      method: "POST", headers: { "X-RAI-Sync-Batch": "same-deleted-batch" }, body: form
+    });
+    assert.equal(response.status, 200, await response.clone().text());
+    return (await response.json() as { sourceId: string }).sourceId;
+  };
+  const enqueueImport = async (url: string, expectedStatus = 202): Promise<{ id: string; status: string }> => {
+    const response = await fetch(`${url}/v1/import-jobs`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceId: "same-local-source" }) });
+    assert.equal(response.status, expectedStatus, await response.clone().text());
+    return response.json() as Promise<{ id: string; status: string }>;
+  };
+  const commandRequest = { idempotencyKey: "same-deleted-command", kind: "training_zones", payload: {
+    expectedRevision: 0, restingHeartRate: { mode: "auto", valueBpm: null },
+    maximumHeartRate: { mode: "auto", valueBpm: null }, lactateThresholdPace: { mode: "auto", valueSecondsPerKm: null }
+  } };
+  const enqueueCommand = async (url: string): Promise<string> => {
+    const response = await fetch(`${url}/v1/commands`, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(commandRequest) });
+    assert.equal(response.status, 202, await response.clone().text());
+    return (await response.json() as { id: string }).id;
+  };
+  const settle = async (url: string, importId: string, commandId?: string): Promise<void> => {
+    const deadline = Date.now() + 45_000;
+    while (Date.now() < deadline) {
+      const job = state.job(importId);
+      assert.notEqual(job?.status, "failed", JSON.stringify(job) + output);
+      let commandSucceeded = true;
+      if (commandId) {
+        const command = await fetch(`${url}/v1/commands/${commandId}`).then(response => response.json()) as { status: string };
+        assert.notEqual(command.status, "failed", JSON.stringify(command));
+        commandSucceeded = command.status === "succeeded";
+      }
+      const status = await fetch(`${url}/v1/runtime-status`).then(response => response.json()) as { busy: boolean };
+      const performance = await fetch(`${url}/v1/performance`).then(response => response.json()) as { commandPending: boolean };
+      if (job?.status === "succeeded" && job.queue?.finalized && commandSucceeded && !status.busy && !performance.commandPending) return;
+      await new Promise(done => setTimeout(done, 50));
+    }
+    throw new Error(`import/command did not settle: ${output}`);
+  };
+  const sessionCount = (): number => {
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try { return (database.prepare("SELECT COUNT(*) AS n FROM training_sessions WHERE status='active'").get() as { n: number }).n; }
+    finally { database.close(); }
+  };
+  try {
+    let url = await start();
+    assert.equal(await epoch(url), "delete-fixture");
+    const oldBatchSource = await upload(url);
+    const first = await enqueueImport(url);
+    await settle(url, first.id);
+    assert.equal(sessionCount(), 1);
+    const oldCommand = await enqueueCommand(url);
+    await settle(url, first.id, oldCommand);
+    const response = await fetch(`${url}/v1/database`, { method: "DELETE",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "删除我的 RAI 数据" }) });
+    assert.equal(response.status, 200, await response.text());
+    assert.equal(existsSync(databasePath), false);
+    const deletedEpoch = await epoch(url);
+    assert.notEqual(deletedEpoch, "delete-fixture");
+    assert.equal((await fetch(`${url}/v1/commands/${oldCommand}`)).status, 404);
+    if (restartBeforeImport) {
+      assert.ok(child);
+      await stopApi(child);
+      child = null;
+      url = await start();
+      assert.equal(await epoch(url), deletedEpoch, "the empty dataset's new identity must survive restart");
+    }
+    const newBatchSource = await upload(url);
+    assert.notEqual(newBatchSource, oldBatchSource);
+    const second = await enqueueImport(url);
+    assert.notEqual(second.id, first.id);
+    await settle(url, second.id);
+    assert.equal(sessionCount(), 1, "the same source must actually rebuild the deleted facts");
+    assert.equal(await epoch(url), deletedEpoch);
+    const newCommand = await enqueueCommand(url);
+    assert.notEqual(newCommand, oldCommand);
+    await settle(url, second.id, newCommand);
+    assert.ok(child);
+    await stopApi(child);
+    child = null;
+    url = await start();
+    assert.equal(await epoch(url), deletedEpoch, "the rebuilt dataset retains the deletion epoch");
+    assert.equal(await upload(url), newBatchSource);
+    const duplicate = await enqueueImport(url, 200);
+    assert.equal(duplicate.id, second.id);
+    assert.equal(duplicate.status, "succeeded");
+  } finally {
+    if (child) await stopApi(child).catch(() => child?.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+test("restore advances durable dataset scope and reapplies commands instead of replaying stale success", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-restored-scope-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  const store = await RaiDatabase.open(databasePath);
+  store.close();
+  const backup = await new DatabaseMaintenance(databasePath, runtimeRoot).createBackup("before-command");
+  const archive = await zipBuffer([{ name: "apple_health_export/export.xml", body: "<HealthData/>" }]);
+  let child: ChildProcess | null = null;
+  const start = async (): Promise<string> => {
+    child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+      cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+        RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "", RAI_SERVER_ID: "local",
+        RAI_ATHLETE_ID: "athlete_1", RAI_DATASET_EPOCH: "restore-fixture" },
+      windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    return url;
+  };
+  const epoch = async (url: string): Promise<string> =>
+    (await fetch(`${url}/v1/handshake`).then(response => response.json()) as { datasetEpoch: string }).datasetEpoch;
+  const upload = async (url: string): Promise<string> => {
+    const form = new FormData();
+    const contents = new ArrayBuffer(archive.byteLength);
+    new Uint8Array(contents).set(archive);
+    form.append("file", new Blob([contents], { type: "application/zip" }), "healthkit.zip");
+    const response = await fetch(`${url}/v1/imports/uploads`, {
+      method: "POST", headers: { "X-RAI-Sync-Batch": "same-restored-batch" }, body: form
+    });
+    assert.equal(response.status, 200, await response.clone().text());
+    return (await response.json() as { sourceId: string }).sourceId;
+  };
+  const request = { idempotencyKey: "same-restored-command", kind: "training_zones", payload: {
+    expectedRevision: 0, restingHeartRate: { mode: "auto", valueBpm: null },
+    maximumHeartRate: { mode: "auto", valueBpm: null },
+    lactateThresholdPace: { mode: "auto", valueSecondsPerKm: null }
+  } };
+  const enqueue = async (url: string, expectedStatus = 202): Promise<{ id: string; status: string }> => {
+    const response = await fetch(`${url}/v1/commands`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request)
+    });
+    assert.equal(response.status, expectedStatus, await response.clone().text());
+    return response.json() as Promise<{ id: string; status: string }>;
+  };
+  const settle = async (url: string, id: string): Promise<void> => {
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const command = await fetch(`${url}/v1/commands/${id}`).then(response => response.json()) as { status: string };
+      assert.notEqual(command.status, "failed", JSON.stringify(command));
+      const status = await fetch(`${url}/v1/runtime-status`).then(response => response.json()) as { busy: boolean };
+      const performance = await fetch(`${url}/v1/performance`).then(response => response.json()) as { commandPending: boolean };
+      if (command.status === "succeeded" && !status.busy && !performance.commandPending) return;
+      await new Promise(done => setTimeout(done, 50));
+    }
+    throw new Error("command or workers did not settle before restore");
+  };
+  const settingCount = (): number => {
+    const database = new DatabaseSync(databasePath, { readOnly: true });
+    try { return (database.prepare("SELECT COUNT(*) AS n FROM training_zone_profile_settings").get() as { n: number }).n; }
+    finally { database.close(); }
+  };
+  try {
+    let url = await start();
+    assert.equal(await epoch(url), "restore-fixture");
+    const oldSource = await upload(url);
+    const first = await enqueue(url);
+    await settle(url, first.id);
+    assert.equal(settingCount(), 1);
+    const response = await fetch(`${url}/v1/backups/${backup.name}/restore`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirmation: "恢复此备份" })
+    });
+    assert.equal(response.status, 200, await response.text());
+    assert.equal(settingCount(), 0);
+    const restoredEpoch = await epoch(url);
+    assert.notEqual(restoredEpoch, "restore-fixture");
+    assert.equal((await fetch(`${url}/v1/commands/${first.id}`)).status, 404);
+    const newSource = await upload(url);
+    assert.notEqual(newSource, oldSource);
+    const second = await enqueue(url);
+    assert.notEqual(second.id, first.id);
+    assert.equal(second.status, "queued");
+    await settle(url, second.id);
+    assert.equal(settingCount(), 1, "the command must actually affect the restored main database");
+    assert.ok(child);
+    await stopApi(child);
+    child = null;
+    url = await start();
+    assert.equal(await epoch(url), restoredEpoch, "the restored scope must survive API restart");
+    assert.equal(await upload(url), newSource);
+    const duplicate = await enqueue(url, 200);
+    assert.equal(duplicate.id, second.id);
+    assert.equal(duplicate.status, "succeeded");
+    assert.equal(settingCount(), 1);
+  } finally {
+    if (child) await stopApi(child).catch(() => child?.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
 test("training-zone HTTP errors expose only typed client failures", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-zone-errors-"));
   const databasePath = join(runtimeRoot, "var", "rai.sqlite");
@@ -1631,5 +1872,144 @@ test("summary export requires token even on a public host and validates its rang
     const validDay = await fetch(`${url}/v1/workouts?localDate=2026-09-28`, { headers: { authorization: "Bearer export-test-token" } });
     assert.equal(validDay.status, 200);
     assert.equal((await validDay.json() as { total: number }).total, 0);
+    for (const localDate of ["2026-02-29", "2026-04-31"]) {
+      const invalidEntry = await fetch(`${url}/v1/performance-entries`, {
+        method: "POST", headers: { authorization: "Bearer export-test-token", "content-type": "application/json" },
+        body: JSON.stringify({ localDate, distance: "ten_k", durationSeconds: 2400 })
+      });
+      assert.equal(invalidEntry.status, 400);
+    }
+    const entries = await fetch(`${url}/v1/performance-entries`, { headers: { authorization: "Bearer export-test-token" } });
+    assert.deepEqual((await entries.json() as { entries: unknown[] }).entries, []);
   } finally { await stopApi(child).catch(() => child.kill("SIGKILL")); await removeRuntimeRoot(runtimeRoot); }
+});
+
+for (const config of [
+  { token: "route-test-token", anonymousRoutes: "", publicRoute: false },
+  { token: "route-test-token", anonymousRoutes: "1", publicRoute: false },
+  { token: "", anonymousRoutes: "", publicRoute: false },
+  { token: "", anonymousRoutes: "0", publicRoute: false },
+  { token: "", anonymousRoutes: "1", publicRoute: true }
+]) test(`workout route privacy: token=${Boolean(config.token)}, anonymousRoutes=${config.anonymousRoutes || "unset"}`, async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-route-auth-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  const store = await RaiDatabase.open(databasePath, { createMigrationBackup: false });
+  store.database.exec(`
+    INSERT INTO workouts (id, activity_type, source_name, source_category, start_at, end_at,
+      duration_seconds, indoor, metadata_json, raw_attributes_json, is_canonical)
+    VALUES ('private-workout', 'HKWorkoutActivityTypeRunning', 'Watch', 'apple_watch',
+      '2026-09-01T00:00:00.000Z', '2026-09-01T00:30:00.000Z', 1800, 0, '{}', '{}', 1);
+    INSERT INTO workout_statistics (workout_id, ordinal, type, unit, sum_value)
+    VALUES ('private-workout', 0, 'HKQuantityTypeIdentifierDistanceWalkingRunning', 'km', 5);
+    INSERT INTO training_sessions (id, activity_type, anchor_start_at, anchor_end_at,
+      anchor_distance_km, canonical_workout_id, status)
+    VALUES ('private-session', 'HKWorkoutActivityTypeRunning', '2026-09-01T00:00:00.000Z',
+      '2026-09-01T00:30:00.000Z', 5, 'private-workout', 'active');
+    INSERT INTO workout_overrides (id, training_session_id, revision, eligibility_override, condition_tags_json)
+    VALUES ('private-override', 'private-session', 1, 'include', '[]');
+  `);
+  const service = new RaiApplicationService(store);
+  service.enqueueFullRecompute({ evaluatedAt: "2026-09-02T00:00:00.000Z" });
+  assert.equal(service.runNextJob()?.status, "succeeded");
+  store.database.exec(`
+    INSERT INTO workout_routes (id, workout_id, source_name, source_category, relative_path, metadata_json, point_count, file_status)
+    VALUES ('private-route', 'private-workout', 'Watch', 'apple_watch', 'private.gpx', '{}', 2, 'imported');
+    INSERT INTO route_points (route_id, sequence, latitude, longitude)
+    VALUES ('private-route', 0, 31.23, 121.47), ('private-route', 1, 31.24, 121.48);
+  `);
+  store.close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: config.token, RAI_PUBLIC_HOSTS: "127.0.0.1",
+      RAI_ALLOW_ANONYMOUS_ROUTES: config.anonymousRoutes },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    const path = `${url}/v1/workouts/private-session`;
+    const owner = await fetch(path, { headers: { authorization: "Bearer route-test-token" } });
+    assert.equal(owner.status, 200, await owner.clone().text());
+    assert.equal(owner.headers.get("cache-control"), "no-store");
+    const privateDetail = await owner.json() as import("@rai/api-contracts").WorkoutDetailResponse;
+    const coordinates = [[31.23, 121.47], [31.24, 121.48]];
+    assert.deepEqual(privateDetail.route.map(point => [point.latitude, point.longitude]),
+      config.token || config.publicRoute ? coordinates : []);
+    const anonymous = await fetch(path);
+    assert.equal(anonymous.status, 200);
+    assert.equal(anonymous.headers.get("cache-control"), "no-store");
+    const summary = await anonymous.json() as import("@rai/api-contracts").WorkoutDetailResponse;
+    assert.deepEqual(summary.route.map(point => [point.latitude, point.longitude]), config.publicRoute ? coordinates : []);
+    assert.equal(summary.workout.distanceKm, privateDetail.workout.distanceKm);
+    assert.equal(summary.workout.hasRoute, true);
+    for (const protectedPath of [path + "/share-card", `${url}/v1/privacy-zones`]) {
+      assert.equal((await fetch(protectedPath)).status, 401);
+      assert.equal((await fetch(protectedPath, { headers: { authorization: "Bearer incorrect" } })).status, 401);
+      const authorized = await fetch(protectedPath, { headers: { authorization: "Bearer route-test-token" } });
+      assert.equal(authorized.status, config.token ? 200 : 401);
+      if (config.token) assert.equal(authorized.headers.get("cache-control"), "no-store");
+    }
+    if (config.token && config.anonymousRoutes === "") {
+      const headers = { authorization: `Bearer ${config.token}`, "content-type": "application/json" };
+      const eligibilityFixture = new DatabaseSync(databasePath);
+      const overrideAt = new Date().toISOString();
+      try {
+        eligibilityFixture.prepare(`INSERT INTO workout_overrides
+          (id, training_session_id, revision, eligibility_override, created_at)
+          VALUES ('private-excluded', 'private-session', 2, 'exclude', ?)`).run(overrideAt);
+        const rejected = await fetch(`${url}/v1/performance-entries`, { method: "POST", headers,
+          body: JSON.stringify({ localDate: "2026-09-01", distance: "five_k", durationSeconds: 1800,
+            trainingSessionId: "private-session" }) });
+        assert.equal(rejected.status, 400, await rejected.clone().text());
+        assert.equal((await rejected.json() as { code: string }).code, "performance_entry_invalid");
+        const entries = await fetch(`${url}/v1/performance-entries`, { headers }).then(response => response.json()) as {
+          entries: import("@rai/contracts").PerformanceEntry[];
+        };
+        assert.deepEqual(entries.entries, [], "a stale candidate must not leave an unusable confirmation");
+        eligibilityFixture.prepare(`INSERT INTO workout_overrides
+          (id, training_session_id, revision, eligibility_override, created_at)
+          VALUES ('private-restored', 'private-session', 3, 'include', ?)`).run(overrideAt);
+      } finally {
+        eligibilityFixture.close();
+      }
+      const confirmation = await fetch(`${url}/v1/performance-entries`, { method: "POST", headers,
+        body: JSON.stringify({ localDate: "2026-09-01", distance: "five_k", durationSeconds: 1800,
+          trainingSessionId: "private-session" }) });
+      assert.equal(confirmation.status, 200, await confirmation.clone().text());
+      const entry = await confirmation.json() as import("@rai/contracts").PerformanceEntry;
+      assert.equal(entry.trainingSessionId, "private-session");
+      assert.equal(entry.observedAt, "2026-09-01T00:00:00.000Z");
+      assert.equal(entry.completedAt, "2026-09-01T00:30:00.000Z");
+      const initial = await fetch(`${url}/v1/privacy-zones`, { headers }).then(response => response.json()) as import("@rai/api-contracts").PrivacyZonesResponse;
+      assert.match(initial.stateToken, /^[a-f0-9]{64}$/);
+      const zones = [{ id: "home", label: "home", centerLatitude: 31.23, centerLongitude: 121.47,
+        radiusMeters: 300, createdAt: "2026-09-01T00:00:00Z" }];
+      const missingState = await fetch(`${url}/v1/privacy-zones`, { method: "PUT", headers,
+        body: JSON.stringify({ revision: initial.revision, zones }) });
+      assert.equal(missingState.status, 400, "legacy clients cannot bypass the state guard");
+      const saved = await fetch(`${url}/v1/privacy-zones`, { method: "PUT", headers,
+        body: JSON.stringify({ revision: initial.revision, stateToken: initial.stateToken, zones }) });
+      assert.equal(saved.status, 200, await saved.clone().text());
+      const baseline = await saved.json() as import("@rai/api-contracts").PrivacyZonesResponse;
+      const fixture = new DatabaseSync(databasePath);
+      try { fixture.exec("UPDATE privacy_zones SET center_latitude = 32 WHERE id = 'home'"); }
+      finally { fixture.close(); }
+      const stale = await fetch(`${url}/v1/privacy-zones`, { method: "PUT", headers,
+        body: JSON.stringify({ revision: baseline.revision, stateToken: baseline.stateToken, zones: [] }) });
+      assert.equal(stale.status, 409, await stale.clone().text());
+      const current = await fetch(`${url}/v1/privacy-zones`, { headers }).then(response => response.json()) as import("@rai/api-contracts").PrivacyZonesResponse;
+      assert.equal(current.revision, baseline.revision);
+      assert.equal(current.zones[0]?.centerLatitude, 32);
+      assert.notEqual(current.stateToken, baseline.stateToken);
+    }
+    assert.equal((await fetch(path, { headers: { authorization: "Bearer incorrect" } })).status, 200);
+    const incorrect = await fetch(path, { headers: { authorization: "Bearer incorrect" } });
+    assert.deepEqual((await incorrect.json() as import("@rai/api-contracts").WorkoutDetailResponse).route.map(point => [point.latitude, point.longitude]), config.publicRoute ? coordinates : []);
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
 });

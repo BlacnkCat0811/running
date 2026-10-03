@@ -22,7 +22,7 @@ import type { MobileRaceDistance, MobileRaceTarget } from "@rai/api-contracts";
  * is not what the coach intended to prescribe.
  */
 
-export const PERIODIZATION_POLICY_VERSION = "rai-periodization-v1" as const;
+export const PERIODIZATION_POLICY_VERSION = "rai-periodization-v2" as const;
 export const PERIODIZATION_MAXIMUM_WEEKS = 24;
 
 export type PeriodizationPhase = "base" | "build" | "peak" | "taper" | "race_week" | "past";
@@ -58,10 +58,10 @@ export interface Periodization {
  * are policy, and the test suite pins the boundaries so a change is a visible
  * decision rather than a drifting constant.
  */
-const PHASE_BOUNDARIES: Record<MobileRaceDistance, { base: number; build: number; peak: number }> = {
-  five_k: { base: 4, build: 2, peak: 1 },
-  ten_k: { base: 6, build: 3, peak: 2 },
-  half_marathon: { base: 8, build: 4, peak: 2 }
+const PHASE_BOUNDARIES: Record<MobileRaceDistance, { build: number; taper: number }> = {
+  five_k: { build: 2, taper: 1 },
+  ten_k: { build: 3, taper: 2 },
+  half_marathon: { build: 4, taper: 2 }
 };
 
 /** Volume bands as a fraction of the athlete's own recent weekly volume. */
@@ -130,9 +130,9 @@ function phaseFor(weeksToRace: number, distance: MobileRaceDistance): Periodizat
   if (weeksToRace < 0) return "past";
   const boundaries = PHASE_BOUNDARIES[distance];
   if (weeksToRace === 0) return "race_week";
-  if (weeksToRace <= boundaries.peak) return "taper";
-  if (weeksToRace <= boundaries.peak + boundaries.build) return "build";
-  if (weeksToRace <= boundaries.peak + boundaries.build + boundaries.base) return "base";
+  if (weeksToRace <= boundaries.taper) return "taper";
+  if (weeksToRace === boundaries.taper + 1) return "peak";
+  if (weeksToRace <= boundaries.taper + 1 + boundaries.build) return "build";
   return "base";
 }
 

@@ -20,13 +20,15 @@ final class ServerSession {
             // 条目正是靠它。写成 `apiToken.isEmpty || saveToken(...)` 会短路掉删除，
             // 于是"清空"只清了内存，重启后旧 token 又回来了（既有回归会抓到这条）。
             let persisted = saveToken(apiToken, serverURLString)
-            credentialStorageError = (persisted || apiToken.isEmpty)
+            credentialStorageError = persisted
                 ? nil
-                : "凭证未能保存到钥匙串；本次会话可用，但重启后需要重新输入。"
+                : apiToken.isEmpty
+                    ? "凭证未能从钥匙串删除；当前会话已清空，但重启后旧凭证可能再次出现。"
+                    : "凭证未能保存到钥匙串；本次会话可用，但重启后需要重新输入。"
             invalidatePendingProbes(resetConnectionState: true)
         }
     }
-    /// 钥匙串写入失败时留给界面的说明；保存成功或清空 token 后为 `nil`。
+    /// 钥匙串写入或删除失败时留给界面的说明；持久化成功后为 `nil`。
     ///
     /// 必须与 `lastError` 分开：轮询探针在每次探测成功时都会把 `lastError` 清成 `nil`
     /// （`probe()` 的 2xx 分支），凭证存储失败在那里留不住 —— 而这恰恰是一次

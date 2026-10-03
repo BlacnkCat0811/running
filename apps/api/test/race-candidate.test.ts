@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { RaiDatabase, SqlitePerformanceEntryRepository } from "@rai/storage-sqlite";
+import { raceDistanceMeters } from "@rai/contracts";
 
 import {
   DISTANCE_TOLERANCE_FRACTION,
@@ -92,6 +94,50 @@ test("T06: the same bounds the write path enforces are applied here", () => {
     session({ trainingSessionId: "fine", durationSeconds: 2_400 })
   ]);
   assert.deepEqual(candidates.map((item) => item.trainingSessionId), ["fine"]);
+});
+
+test("T06: GPS tolerance cannot propose a result outside nominal race pace bounds", () => {
+  const candidates = findRaceCandidates([
+    session({ trainingSessionId: "nominal-too-fast", distanceMeters: 4_900, durationSeconds: 735 }),
+    session({ trainingSessionId: "nominal-too-slow", distanceMeters: 5_100, durationSeconds: 4_590 }),
+    session({ trainingSessionId: "valid-fast-boundary", distanceMeters: 4_900, durationSeconds: 750 }),
+    session({ trainingSessionId: "valid-slow-boundary", distanceMeters: 5_100, durationSeconds: 4_500 })
+  ]);
+  assert.deepEqual(candidates.map(candidate => candidate.trainingSessionId),
+    ["valid-fast-boundary", "valid-slow-boundary"]);
+});
+
+test("T06: proposed GPS-boundary results can be inserted through the confirmation path", async () => {
+  const store = await RaiDatabase.open(":memory:", { createMigrationBackup: false });
+  try {
+    const repository = new SqlitePerformanceEntryRepository(store.database);
+    const inputs: RaceCandidateSession[] = [];
+    for (const [distance, nominalMeters] of Object.entries(raceDistanceMeters)) {
+      for (const [index, fraction] of [0.98, 1, 1.02].entries()) {
+        for (const [paceIndex, pace] of [150, 900].entries()) {
+          const distanceMeters = nominalMeters * fraction;
+          const durationSeconds = distanceMeters / 1_000 * pace;
+          const localDate = `2026-09-${String(1 + inputs.length).padStart(2, "0")}`;
+          inputs.push(session({ trainingSessionId: `${distance}-${index}-${paceIndex}`, localDate,
+            completedAt: `${localDate}T12:00:00.000Z`, distanceMeters, durationSeconds }));
+        }
+      }
+    }
+    const candidates = findRaceCandidates(inputs);
+    assert.ok(candidates.length > 0);
+    const insertSession = store.database.prepare(`INSERT INTO training_sessions
+      (id, activity_type, anchor_start_at, anchor_end_at, anchor_distance_km, status)
+      VALUES (?, 'HKWorkoutActivityTypeRunning', ?, ?, ?, 'active')`);
+    for (const candidate of candidates) {
+      const original = inputs.find(input => input.trainingSessionId === candidate.trainingSessionId)!;
+      insertSession.run(original.trainingSessionId,
+        new Date(Date.parse(original.completedAt) - original.durationSeconds * 1_000).toISOString(),
+        original.completedAt, original.distanceMeters / 1_000);
+      assert.doesNotThrow(() => repository.insert({ localDate: candidate.localDate,
+        distance: candidate.distance, durationSeconds: candidate.durationSeconds, note: null,
+        trainingSessionId: candidate.trainingSessionId, recordedAt: "2026-10-01T00:00:00.000Z" }));
+    }
+  } finally { store.close(); }
 });
 
 test("T06: the baseline is this runner's own median, not a population pace", () => {

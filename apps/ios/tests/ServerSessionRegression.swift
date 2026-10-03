@@ -372,10 +372,10 @@ struct ServerSessionRegression {
             check(session.lastError == nil, "a successful probe clears the connectivity error")
             check(session.credentialStorageError != nil,
                   "a successful probe must not clear the credential storage error")
-            // 清空 token 本来就不需要落盘，不该继续报错。
+            // 删除失败不能伪装成清空成功。
             session.apiToken = ""
-            check(session.credentialStorageError == nil,
-                  "clearing the token is not a storage failure")
+            check(session.credentialStorageError?.contains("删除") == true,
+                  "a rejected keychain deletion must remain visible")
         }
 
         if failures > 0 {

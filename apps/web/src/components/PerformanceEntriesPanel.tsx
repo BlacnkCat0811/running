@@ -1,8 +1,10 @@
 import type { PerformanceEntryDistance } from "@rai/api-contracts";
 import { useState } from "react";
 
-import { api, readApiToken } from "../api.js";
+import { api } from "../api.js";
+import { useApiToken } from "../api-token.js";
 import { useRemote } from "../hooks.js";
+import { notifyDataUpdated } from "../events.js";
 import { duration, raceDistance, shortDate } from "../format.js";
 import { ErrorBlock, LoadingBlock } from "./Feedback.js";
 import { Plus, Trash } from "../icons.js";
@@ -25,6 +27,8 @@ interface LabelProgress {
   funnel: {
     usableOutcomeCount: number;
     manualEntryCount: number;
+    trainingSampleCount: number;
+    trainingExcludedOutcomeCount: number;
     confirmedCount: number;
     byDistance: Record<PerformanceEntryDistance, { usable: number; evaluated: number }>;
   };
@@ -95,7 +99,7 @@ const clock = (seconds: number): string => {
 
 export function PerformanceEntriesPanel() {
   const [opened, setOpened] = useState(false);
-  const [token] = useState(() => readApiToken());
+  const token = useApiToken();
   const remote = useRemote<{ entries: EntryRow[] }>("/v1/performance-entries", opened && token.length > 0);
   const progress = useRemote<LabelProgress>("/v1/label-funnel", opened && token.length > 0);
   const [draft, setDraft] = useState({ localDate: "", distance: "ten_k" as PerformanceEntryDistance, minutes: "", seconds: "" });
@@ -125,6 +129,7 @@ export function PerformanceEntriesPanel() {
   }
 
   const submit = async (): Promise<void> => {
+    if (busy) return;
     setBusy(true);
     setError(null);
     setStatus(null);
@@ -142,7 +147,7 @@ export function PerformanceEntriesPanel() {
       });
       setStatus("已录入。它会从**录入时刻**起参与预测校准，不会追溯改写此前的预测。");
       setDraft({ localDate: "", distance: draft.distance, minutes: "", seconds: "" });
-      await remote.reload();
+      notifyDataUpdated();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "录入失败");
     } finally {
@@ -155,6 +160,8 @@ export function PerformanceEntriesPanel() {
    * 候选本身永远不会变成标签。
    */
   const confirmCandidate = async (candidate: CandidateRow): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     setStatus(null);
     try {
@@ -162,27 +169,34 @@ export function PerformanceEntriesPanel() {
         method: "POST",
         body: JSON.stringify({
           localDate: candidate.localDate,
+          trainingSessionId: candidate.trainingSessionId,
           distance: candidate.distance,
           durationSeconds: candidate.durationSeconds,
           note: null
         })
       });
       setStatus("已确认为成绩标签：与手工录入走同一条写入路径，候选列表里不会再出现。");
-      await Promise.all([remote.reload(), progress.reload()]);
+      notifyDataUpdated();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "确认失败");
+    } finally {
+      setBusy(false);
     }
   };
 
   const revoke = async (id: string): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     setStatus(null);
     try {
       await api<{ revoked: boolean }>(`/v1/performance-entries/${id}`, { method: "DELETE" });
       setStatus("已撤销：该条从撤销时刻起不再计入标签（记录仍然保留，便于对账）。");
-      await remote.reload();
+      notifyDataUpdated();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "撤销失败");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -195,9 +209,12 @@ export function PerformanceEntriesPanel() {
         </div>
       </div>
       {/* §12.11 个人自校准的进度：说清还差什么，而不是给一个没有依据的区间。 */}
-      {progress.data ? (
+      {progress.loading ? <LoadingBlock label="正在更新标签进度" /> : null}
+      {progress.error ? <ErrorBlock message={progress.error} onRetry={() => void progress.reload()} /> : null}
+      {progress.data && !progress.loading && !progress.error ? (
         <div className="performance-entry-progress">
-          <span>可用标签 <b>{progress.data.funnel.usableOutcomeCount}</b>（手工 {progress.data.funnel.manualEntryCount}）</span>
+          <span>合格成绩 <b>{progress.data.funnel.usableOutcomeCount}</b>（手工 {progress.data.funnel.manualEntryCount}）</span>
+          <span>训练样本 <b>{progress.data.funnel.trainingSampleCount}</b>（缺少赛前证据 {progress.data.funnel.trainingExcludedOutcomeCount}）</span>
           <span>个人区间门槛：标签 {progress.data.personal.samples}/{progress.data.personal.minimumSamples} · 距离 {progress.data.personal.distances}/{progress.data.personal.minimumDistances} · 跨度 {progress.data.personal.spanDays}/{progress.data.personal.minimumSpanDays} 天</span>
           {progress.data.personal.band ? (
             /* 相对带，不是绝对秒数：它乘在任意距离的规则预测上。刻意不用 P80/P90 措辞。 */
@@ -229,14 +246,14 @@ export function PerformanceEntriesPanel() {
                 <b>{clock(entry.durationSeconds)}</b>
                 <span>{entry.revokedAt === null ? `录入于 ${shortDate(entry.recordedAt)}` : "已撤销"}</span>
                 {entry.revokedAt === null ? (
-                  <button type="button" className="text-button" onClick={() => void revoke(entry.id)} aria-label={`撤销 ${entry.localDate} 的成绩`}><Trash size={16} /></button>
+                  <button type="button" className="text-button" disabled={busy} onClick={() => void revoke(entry.id)} aria-label={`撤销 ${entry.localDate} 的成绩`}><Trash size={16} /></button>
                 ) : <span />}
               </div>
             ))}
           </div>
         )
       ) : null}
-      {progress.data && progress.data.candidates.length > 0 ? (
+      {progress.data && !progress.loading && !progress.error && progress.data.candidates.length > 0 ? (
         <div className="race-candidate-list">
           <b>看起来像比赛的训练</b>
           <small>只是建议：确认后按同一条写入路径成为标签，任何一条都可以先核对理由。</small>
@@ -249,16 +266,16 @@ export function PerformanceEntriesPanel() {
                 {candidate.confidence === "likely" ? "很可能" : "可能"}
               </span>
               <span className="race-candidate-reasons">{candidate.reasons.join("；")}</span>
-              <button type="button" className="text-button" onClick={() => void confirmCandidate(candidate)}>确认</button>
+              <button type="button" className="text-button" disabled={busy} onClick={() => void confirmCandidate(candidate)}>确认</button>
             </div>
           ))}
         </div>
       ) : null}
       <div className="performance-entry-form">
-        <label><span>日期</span><input type="date" value={draft.localDate} onChange={(event) => setDraft({ ...draft, localDate: event.target.value })} /></label>
-        <label><span>距离</span><select value={draft.distance} onChange={(event) => setDraft({ ...draft, distance: event.target.value as PerformanceEntryDistance })}>{DISTANCES.map((item) => <option key={item} value={item}>{raceDistance(item)}</option>)}</select></label>
-        <label><span>分</span><input inputMode="numeric" value={draft.minutes} onChange={(event) => setDraft({ ...draft, minutes: event.target.value })} placeholder="42" /></label>
-        <label><span>秒</span><input inputMode="numeric" value={draft.seconds} onChange={(event) => setDraft({ ...draft, seconds: event.target.value })} placeholder="30" /></label>
+        <label><span>日期</span><input type="date" disabled={busy} value={draft.localDate} onChange={(event) => setDraft({ ...draft, localDate: event.target.value })} /></label>
+        <label><span>距离</span><select disabled={busy} value={draft.distance} onChange={(event) => setDraft({ ...draft, distance: event.target.value as PerformanceEntryDistance })}>{DISTANCES.map((item) => <option key={item} value={item}>{raceDistance(item)}</option>)}</select></label>
+        <label><span>分</span><input inputMode="numeric" disabled={busy} value={draft.minutes} onChange={(event) => setDraft({ ...draft, minutes: event.target.value })} placeholder="42" /></label>
+        <label><span>秒</span><input inputMode="numeric" disabled={busy} value={draft.seconds} onChange={(event) => setDraft({ ...draft, seconds: event.target.value })} placeholder="30" /></label>
         <button type="button" className="button primary" disabled={busy || draft.localDate.length === 0} onClick={() => void submit()}>录入</button>
       </div>
       {error ? <p className="zone-setting-refresh-error" role="alert">{error}</p> : null}

@@ -268,6 +268,9 @@ function predictionTrainingSourceFingerprint(database: DatabaseSync): string {
       (SELECT MAX(end_at) FROM health_records) AS latestHealthRecordAt,
       (SELECT COUNT(*) FROM workout_overrides) AS overrideCount,
       (SELECT MAX(created_at || ':' || revision) FROM workout_overrides) AS latestOverride,
+      (SELECT COUNT(*) FROM performance_entries) AS performanceEntryCount,
+      (SELECT MAX(recorded_at || ':' || revision || ':' || COALESCE(revoked_at, '')) FROM performance_entries) AS latestPerformanceEntry,
+      (SELECT revision FROM prediction_label_state WHERE singleton = 1) AS labelRevision,
       (SELECT model_run_id FROM active_model_run WHERE singleton = 1) AS activeModelRunId
   `).get() as unknown as Record<string, unknown>;
   return JSON.stringify({ dataVersion: dataVersion.data_version, ...row });
@@ -321,21 +324,21 @@ export class PredictionModelService {
     if (!isIsoDate(asOf)) {
       throw new PredictionTrainingInputError("asOf must be a valid timezone-qualified ISO 8601 timestamp");
     }
+    const scope: PredictionModelScope = input.scope ?? "population";
     const existingBeforePreflight = this.store.database.prepare(`
-      SELECT id, training_data_through_at AS trainingDataThroughAt
+      SELECT id, training_data_through_at AS trainingDataThroughAt, request_json AS requestJson
       FROM prediction_model_runs
       WHERE status IN ('queued', 'running', 'validating')
       ORDER BY created_at, id
       LIMIT 1
-    `).get() as unknown as { id: string; trainingDataThroughAt: string } | undefined;
+    `).get() as unknown as { id: string; trainingDataThroughAt: string; requestJson: string } | undefined;
     if (existingBeforePreflight) {
-      if (input.asOf === undefined || existingBeforePreflight.trainingDataThroughAt === asOf) {
+      if (storedScope(existingBeforePreflight.requestJson) === scope && (input.asOf === undefined || existingBeforePreflight.trainingDataThroughAt === asOf)) {
         return existingBeforePreflight.id;
       }
       throw new PredictionTrainingInProgressError(existingBeforePreflight.id);
     }
     const sourceFingerprint = predictionTrainingSourceFingerprint(this.store.database);
-    const scope: PredictionModelScope = input.scope ?? "population";
     const preflight = this.preflight(asOf, scope);
     if (!preflight.eligible) throw new PredictionTrainingPreconditionError(preflight);
     const abilityBaselineHash = currentAbilityBaselineHash(this.store.database);
@@ -345,14 +348,14 @@ export class PredictionModelService {
     this.store.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_prediction_mutation");
     try {
       const existing = this.store.database.prepare(`
-        SELECT id, training_data_through_at AS trainingDataThroughAt
+        SELECT id, training_data_through_at AS trainingDataThroughAt, request_json AS requestJson
         FROM prediction_model_runs
         WHERE status IN ('queued', 'running', 'validating')
         ORDER BY created_at, id
         LIMIT 1
-      `).get() as unknown as { id: string; trainingDataThroughAt: string } | undefined;
+      `).get() as unknown as { id: string; trainingDataThroughAt: string; requestJson: string } | undefined;
       if (existing) {
-        if (input.asOf === undefined || existing.trainingDataThroughAt === asOf) {
+        if (storedScope(existing.requestJson) === scope && (input.asOf === undefined || existing.trainingDataThroughAt === asOf)) {
           this.store.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_prediction_mutation");
           return existing.id;
         }
@@ -679,7 +682,7 @@ export class PredictionModelService {
     }
     this.insertEvent(id, "validation", 4, 5, "正在验证 walk-forward 指标与 ONNX 一致性", validatingAt);
 
-    const rejectionReasons = this.validateTrainingResult(result);
+    const rejectionReasons = this.validateTrainingResult(result, current.scope);
     const now = this.clock();
     this.store.database.exec("BEGIN IMMEDIATE");
     try {
@@ -808,7 +811,8 @@ export class PredictionModelService {
     if (run.artifactPath) {
       const artifactReasons = this.validateArtifactBoundary(
         run.artifactPath,
-        run.artifactSha256 ?? ""
+        run.artifactSha256 ?? "",
+        run.scope
       );
       if (artifactReasons.length > 0) {
         throw new Error(`历史预测模型 artifact 校验失败：${artifactReasons.join(", ")}`);
@@ -862,7 +866,7 @@ export class PredictionModelService {
     return rows;
   }
 
-  private validateTrainingResult(result: PredictionModelTrainingResult): string[] {
+  private validateTrainingResult(result: PredictionModelTrainingResult, scope: PredictionModelScope): string[] {
     const reasons: string[] = [];
     // Prefer the Python evaluation gate: rejected models must never activate even if
     // TypeScript metric thresholds happen to pass on a forged or partial result.
@@ -893,7 +897,7 @@ export class PredictionModelService {
     if (!isSha256(result.artifactSha256) || result.artifactPath.length === 0) {
       reasons.push("artifact_invalid");
     } else {
-      reasons.push(...this.validateArtifactBoundary(result.artifactPath, result.artifactSha256));
+      reasons.push(...this.validateArtifactBoundary(result.artifactPath, result.artifactSha256, scope));
     }
     if (result.labelCount < MINIMUM_ARTIFACT_TRAINING_LABELS) reasons.push("label_count_below_minimum");
     for (const distance of distances) {
@@ -943,7 +947,7 @@ export class PredictionModelService {
    * Full ONNX session load remains the runner's responsibility for accepted
    * evaluations; this gate prevents path escape / hash spoofing at activate time.
    */
-  private validateArtifactBoundary(artifactPath: string, artifactSha256: string): string[] {
+  private validateArtifactBoundary(artifactPath: string, artifactSha256: string, scope: PredictionModelScope): string[] {
     const reasons: string[] = [];
     if (artifactPath.length === 0 || !isSha256(artifactSha256)) {
       reasons.push("artifact_invalid");
@@ -957,6 +961,12 @@ export class PredictionModelService {
       return reasons;
     }
     const modelPath = resolve(artifactDirectory, "model.onnx");
+    try {
+      const manifest = JSON.parse(readFileSync(resolve(artifactDirectory, "manifest.json"), "utf8")) as { scope?: unknown };
+      if (manifest?.scope !== scope) reasons.push("artifact_scope_mismatch");
+    } catch {
+      reasons.push("artifact_manifest_invalid");
+    }
     try {
       if (!existsSync(modelPath) || !statSync(modelPath).isFile()) {
         reasons.push("artifact_model_missing");

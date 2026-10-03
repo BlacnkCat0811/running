@@ -237,4 +237,7 @@ console.log(
 );
 if (hard > 0) process.exit(1);
 if (drifted > 0) process.exit(2);
+if (total === 0) {
+  console.warn("NOT CHECKED: no line references found; no source-line validation was performed. Use npm run check:docs for Markdown links.");
+}
 process.exit(0);

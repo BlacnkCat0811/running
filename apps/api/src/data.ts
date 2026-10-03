@@ -16,14 +16,16 @@ import {
   SqlitePerformanceEntryRepository,
   SqlitePrivacyZoneRepository,
   activeDurationSecondsSql,
+  loadPerformanceEventSessions,
   type StoredPerformanceEntry,
   type StoredPrivacyZone,
+  type StoredSeriesSession,
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
 import { DATABASE_TIMEZONE, SHARE_CARD_POLICY_VERSION, localCalendarFormatter } from "@rai/contracts";
 import { fitPersonalInterval, personalCalibrationReadiness } from "@rai/model-eval";
 import type { PersonalCalibrationProgress } from "@rai/contracts";
-import { candidateEntryKey, findRaceCandidates, type RaceCandidate } from "./race-candidate.js";
+import { candidateEntryKey, findRaceCandidates, nearestStandardDistance, type RaceCandidate } from "./race-candidate.js";
 import {
   buildLabelFunnel,
   buildPersonalCalibrationSamples,
@@ -106,26 +108,24 @@ const paceSeconds = (duration: number, distance: number | null): number | null =
 const localDateInShanghai = (value: Date): string => localCalendarFormatter(DATABASE_TIMEZONE, "day").format(value);
 
 /**
- * Mean distance of the athlete's last four complete weeks, in km.
+ * Mean recorded distance over the last four complete calendar weeks, in km.
  *
  * Complete weeks only: the week in progress is systematically short, and feeding it
- * into the phase bands would shrink every plan a little more each day.
+ * into the phase bands would shrink every plan a little more each day. Missing
+ * days do not shorten the denominator or constitute proof of observed rest.
  */
 export function recentWeeklyKm(
   metrics: ReadonlyArray<{ localDate: string; distanceMeters: number }>,
   today: string
 ): number {
   const currentWeekStart = mobileWeekStart(today);
-  const totals = new Map<string, number>();
+  const windowStart = shiftMobileDate(currentWeekStart, -28);
+  let totalMeters = 0;
   for (const metric of metrics) {
-    const weekStart = mobileWeekStart(metric.localDate);
-    if (weekStart >= currentWeekStart) continue;
-    totals.set(weekStart, (totals.get(weekStart) ?? 0) + metric.distanceMeters);
+    if (metric.localDate < windowStart || metric.localDate >= currentWeekStart) continue;
+    totalMeters += metric.distanceMeters;
   }
-  const weeks = [...totals.entries()].sort((left, right) => right[0].localeCompare(left[0])).slice(0, 4);
-  if (weeks.length === 0) return 0;
-  const mean = weeks.reduce((sum, [, meters]) => sum + meters, 0) / weeks.length;
-  return Math.round((mean / 1_000) * 10) / 10;
+  return Math.round((totalMeters / 4_000) * 10) / 10;
 }
 
 export const mobileLocalDate = (): string => localDateInShanghai(new Date());
@@ -511,7 +511,7 @@ export class RaiReadStore {
     // adherence: two queries would be two chances for them to disagree.
     const planActual = this.database.prepare(`
       SELECT local_date AS localDate, SUM(distance_km) AS distanceKm, COUNT(*) AS workoutCount
-      FROM active_workout_training_loads WHERE local_date >= ? AND local_date < ? GROUP BY local_date
+      FROM active_workout_training_loads WHERE local_date >= ? AND local_date <= ? GROUP BY local_date
     `).all(shiftMobileDate(today, -28), today) as Array<{ localDate: string; distanceKm: number; workoutCount: number }>;
     const coach = assembleMobileCoach({
       database: this.database,
@@ -958,9 +958,14 @@ export class RaiReadStore {
     const endDate = localDateInShanghai(now);
     const dates: string[] = [];
     for (let i = normalizedDays - 1; i >= 0; i -= 1) dates.push(shiftMobileDate(endDate, -i));
+    const startDate = dates[0]!;
+    const nights = new Map(this.recoveryRepository.loadMainNightsRange(startDate, endDate, DATABASE_TIMEZONE)
+      .map((night) => [night.wakeDate, night]));
+    const hrvs = new Map(this.recoveryRepository.loadHrvDaysRange(startDate, endDate, DATABASE_TIMEZONE)
+      .map((hrv) => [hrv.localDate, hrv]));
     const points = dates.map((date) => {
-      const night = this.recoveryRepository.loadCanonicalNight(date, DATABASE_TIMEZONE);
-      const hrv = this.recoveryRepository.loadHrvDay(date, DATABASE_TIMEZONE);
+      const night = nights.get(date);
+      const hrv = hrvs.get(date);
       return { date, sleepMinutes: night?.asleepUnionMinutes ?? null, hrvSdnnMs: hrv?.hrvSdnnMs ?? null, hrvSampleCount: hrv?.sampleCount ?? 0, hrvConfidence: hrv?.confidence ?? "missing", sourceCategory: night?.sourceCategory ?? null };
     });
     const latestDataDate = [...points].reverse().find((point) =>
@@ -975,7 +980,7 @@ export class RaiReadStore {
     };
   }
 
-  workout(id: string): WorkoutDetailResponse | null {
+  workout(id: string, options: { includeRoute?: boolean } = {}): WorkoutDetailResponse | null {
     const row = this.workoutsRepository.getDetailRow(id);
     if (!row) return null;
     const zoneSummary = this.zonesRepository.workoutZoneSummary(id);
@@ -1056,7 +1061,7 @@ export class RaiReadStore {
     return {
       workout,
       dimensions: row.dimensions,
-      route: this.seriesRepository.routePoints(row.canonicalWorkoutId) as RoutePointDto[],
+      route: options.includeRoute === false ? [] : this.seriesRepository.routePoints(row.canonicalWorkoutId) as RoutePointDto[],
       override: this.mapOverride(this.workoutsRepository.override(id)),
       trainingLoad: this.workoutsRepository.trainingLoad(id),
       zoneSummary,
@@ -1226,11 +1231,8 @@ export class RaiReadStore {
     return { segments, plan: segmentation.plan, note: segmentation.note, hasMeasuredWorkoutSteps: steps.length >= 2 };
   }
 
-  workoutSeries(id: string, candidates: PlanCandidateDay[] = []): WorkoutSeriesResponse | null {
-    const session = this.seriesRepository.sessionForSeries(id);
-    if (!session) return null;
-    const { startedAt, endedAt, sourceCategory, sourceName, distanceKm } = session;
-    const segmentation = this.segmentRun(session, candidates);
+  private workoutGradeContext(session: StoredSeriesSession) {
+    const { id, startedAt, endedAt, sourceName, distanceKm } = session;
     const splits = this.seriesRepository.workoutSplits(startedAt, endedAt, sourceName, distanceKm);
     const elevationSeries = this.seriesRepository.routeElevationSeries(id);
     // Grade is computed here rather than inside the splits query: the splits read
@@ -1243,6 +1245,15 @@ export class RaiReadStore {
         value: point.value
       }))
     });
+    return { splits, elevationSeries, grade };
+  }
+
+  workoutSeries(id: string, candidates: PlanCandidateDay[] = []): WorkoutSeriesResponse | null {
+    const session = this.seriesRepository.sessionForSeries(id);
+    if (!session) return null;
+    const { startedAt, endedAt, sourceCategory, sourceName } = session;
+    const segmentation = this.segmentRun(session, candidates);
+    const { splits, elevationSeries, grade } = this.workoutGradeContext(session);
     const series = {
       heartRate: this.asMetricSeries(
         this.seriesRepository.metricSeries(
@@ -1288,7 +1299,7 @@ export class RaiReadStore {
           true
         )
       ),
-      elevation: this.asMetricSeries(this.seriesRepository.routeElevationSeries(id)),
+      elevation: this.asMetricSeries(elevationSeries),
       strideLength: this.asMetricSeries(
         this.seriesRepository.metricSeries(
           "HKQuantityTypeIdentifierRunningStrideLength",
@@ -1413,7 +1424,15 @@ export class RaiReadStore {
         .map((entry) => candidateEntryKey(entry.localDate, entry.distance))
     );
     return findRaceCandidates(
-      rows.map((row) => ({
+      rows.filter(row => {
+        const standard = nearestStandardDistance(row.distanceKm * 1_000);
+        if (!standard) return false;
+        return !loadPerformanceEventSessions(this.database, {
+          localDate: localDateInShanghai(new Date(row.completedAt)),
+          distance: standard.distance,
+          trainingSessionId: row.id
+        }, asOf).some(session => session.eligibilityOverride === "exclude");
+      }).map((row) => ({
         trainingSessionId: row.id,
         completedAt: row.completedAt,
         localDate: localDateInShanghai(new Date(row.completedAt)),
@@ -1430,8 +1449,8 @@ export class RaiReadStore {
   }
 
   /** Configured privacy zones (docs/DECISIONS.md D9). Token-gated at the route. */
-  privacyZones(): { revision: number; zones: StoredPrivacyZone[] } {
-    return { revision: this.privacyZoneRepository.revision(), zones: this.privacyZoneRepository.list() };
+  privacyZones(): { revision: number; stateToken: string; zones: StoredPrivacyZone[] } {
+    return { revision: this.privacyZoneRepository.revision(), stateToken: this.privacyZoneRepository.stateToken(), zones: this.privacyZoneRepository.list() };
   }
 
   /**
@@ -1456,9 +1475,8 @@ export class RaiReadStore {
     );
     const distanceKm = row.distanceKm;
     const durationSeconds = row.durationSeconds;
-    // The grade summary is read from the same series response the detail page uses,
-    // so the card cannot quote a different flat-equivalent pace than the app shows.
-    const series = this.workoutSeries(id);
+    const session = this.seriesRepository.sessionForSeries(id);
+    const grade = session ? this.workoutGradeContext(session).grade.summary : null;
     const note = trimmed.zonesApplied === 0
       ? "未配置隐私区：卡片显示完整轨迹。"
       : trimmed.polylines.length === 0
@@ -1484,7 +1502,7 @@ export class RaiReadStore {
         averagePaceSecondsPerKm: paceSeconds(durationSeconds, distanceKm),
         averageHeartRateBpm: row.averageHeartRateBpm,
         elevationGainMeters: this.workoutsRepository.elevationGain(row.canonicalWorkoutId),
-        gradeAdjustedPaceSecondsPerKm: series?.grade?.gradeAdjustedPaceSecondsPerKm ?? null
+        gradeAdjustedPaceSecondsPerKm: grade?.gradeAdjustedPaceSecondsPerKm ?? null
       },
       polylines: trimmed.polylines,
       note

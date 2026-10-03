@@ -30,8 +30,9 @@ test("rejects invalid residual outputs and correction limits", () => {
 test("M01: validates the immutable CatBoost artifact manifest contract", () => {
   const hash = "a".repeat(64);
   const manifest = {
-    modelVersion: "race-residual-catboost-v4",
+    modelVersion: "race-residual-catboost-v5",
     algorithm: "catboost",
+    scope: "population",
     featureSchemaVersion: "race-residual-feature-v4",
     featureSchemaHash: PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
     trainingDataHash: hash,
@@ -53,6 +54,10 @@ test("M01: validates the immutable CatBoost artifact manifest contract", () => {
     }
   };
   assert.doesNotThrow(() => assertCatBoostArtifactManifest(manifest));
+  assert.doesNotThrow(() => assertCatBoostArtifactManifest({ ...manifest, scope: "personal" }));
+  assert.throws(() => assertCatBoostArtifactManifest({ ...manifest, scope: undefined }));
+  assert.throws(() => assertCatBoostArtifactManifest({ ...manifest, scope: "unknown" }));
+  assert.throws(() => assertCatBoostArtifactManifest({ ...manifest, modelVersion: "race-residual-catboost-v4" }));
   assert.throws(() => assertCatBoostArtifactManifest({ ...manifest, status: "rejected" }));
   assert.throws(() => assertCatBoostArtifactManifest({
     ...manifest,
@@ -84,7 +89,8 @@ test("installed native ONNX runtime loads and executes the production feature sh
     const hash = createHash("sha256").update(bytes).digest("hex");
     await writeFile(join(directory, "model.onnx"), bytes);
     await writeFile(join(directory, "manifest.json"), JSON.stringify({
-      modelVersion: "race-residual-catboost-v4", algorithm: "catboost",
+      modelVersion: "race-residual-catboost-v5", algorithm: "catboost",
+      scope: "population",
       featureSchemaVersion: "race-residual-feature-v4",
       featureSchemaHash: PREDICTION_RESIDUAL_FEATURE_SCHEMA_HASH,
       trainingDataHash: "a".repeat(64), modelSha256: hash, labelCount: 51,
@@ -93,7 +99,8 @@ test("installed native ONNX runtime loads and executes the production feature sh
       inputName: "features", outputName: "prediction", correctionCapFraction: 0.12,
       generatedAt: "2026-09-22T00:00:00.000Z", status: "accepted", metrics: {}
     }));
-    const model = await OnnxCatBoostResidualModel.load(directory);
+    await assert.rejects(OnnxCatBoostResidualModel.load(directory, "personal"), /scope mismatch/);
+    const model = await OnnxCatBoostResidualModel.load(directory, "population");
     const result = await model.predict(Object.fromEntries(predictionResidualOnnxFeatureNames.map((name) => [name, 0.05])));
     assert.ok(Math.abs(result.targetLogResidual - 0.05) < 1e-6);
     assert.ok(Math.abs(result.correctionFraction - Math.expm1(0.05)) < 1e-6);

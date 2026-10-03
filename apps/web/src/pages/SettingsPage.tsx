@@ -14,6 +14,7 @@ import { PrivacyZoneEditor } from "../components/ShareCardPanel.js";
 import { Link } from "react-router-dom";
 
 import { ApiError, api, readApiToken, writeApiToken } from "../api.js";
+import { useApiToken } from "../api-token.js";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback.js";
 import { notifyDataUpdated, notifyDatabaseStateChanged } from "../events.js";
 import { date } from "../format.js";
@@ -116,7 +117,7 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState(() => readApiToken());
-  const [tokenSaved, setTokenSaved] = useState(() => readApiToken().length > 0);
+  const tokenSaved = useApiToken().length > 0;
   const [revealToken, setRevealToken] = useState(false);
   // 匿名只读模式下浏览器没有令牌，/v1/backups 必然 401；没有令牌就不发这个请求，
   // 免得设置页在"本来就看不了备份"的情况下挂一个红色错误块。
@@ -185,7 +186,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   const persistApiToken = () => {
     writeApiToken(tokenDraft);
     const stored = readApiToken();
-    setTokenSaved(stored.length > 0);
     setError(null);
     setSuccess(stored ? "API 令牌已保存，正在重新读取数据。" : "API 令牌已清除。");
     // 两个事件缺一不可：data-updated 刷新各页数据，database-state-changed 让 App
@@ -198,7 +198,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   const clearApiToken = () => {
     setTokenDraft("");
     writeApiToken("");
-    setTokenSaved(false);
     setError(null);
     setSuccess("API 令牌已清除。");
     notifyDataUpdated();

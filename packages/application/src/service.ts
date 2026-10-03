@@ -163,6 +163,7 @@ export class RaiApplicationService {
     distance: PerformanceEntryDistance;
     durationSeconds: number;
     note: string | null;
+    trainingSessionId?: string | null;
   }): StoredPerformanceEntry {
     const repository = new SqlitePerformanceEntryRepository(this.database);
     this.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_app_mutation");
@@ -172,7 +173,7 @@ export class RaiApplicationService {
       return entry;
     } catch (error) {
       try {
-        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation");
+        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RELEASE rai_app_mutation");
       } catch {
         // The failing statement may already have closed the transaction.
       }
@@ -190,7 +191,7 @@ export class RaiApplicationService {
       return revoked;
     } catch (error) {
       try {
-        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation");
+        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RELEASE rai_app_mutation");
       } catch {
         // Same as above.
       }
@@ -205,19 +206,20 @@ export class RaiApplicationService {
    * mutation — this is the single-writer path, so a zone added while a recompute
    * is running cannot interleave with it.
    */
-  replacePrivacyZones(zones: readonly PrivacyZoneInput[], expectedRevision: number): {
+  replacePrivacyZones(zones: readonly PrivacyZoneInput[], expectedRevision: number, expectedStateToken?: string): {
     revision: number;
+    stateToken: string;
     zones: StoredPrivacyZone[];
   } {
     const repository = new SqlitePrivacyZoneRepository(this.database);
     this.database.exec(this.transactionMode === "owned" ? "BEGIN IMMEDIATE" : "SAVEPOINT rai_app_mutation");
     try {
-      const revision = repository.replace(zones, expectedRevision);
+      const revision = repository.replace(zones, expectedRevision, expectedStateToken);
       this.database.exec(this.transactionMode === "owned" ? "COMMIT" : "RELEASE rai_app_mutation");
-      return { revision, zones: repository.list() };
+      return { revision, stateToken: repository.stateToken(), zones: repository.list() };
     } catch (error) {
       try {
-        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation");
+        this.database.exec(this.transactionMode === "owned" ? "ROLLBACK" : "ROLLBACK TO rai_app_mutation; RELEASE rai_app_mutation");
       } catch {
         // The failing statement may already have closed the transaction; the
         // original error is what the caller must see.

@@ -37,8 +37,7 @@ import {
   MINIMUM_HOLDOUT_PREDICTIONS,
   MINIMUM_HOLDOUTS_PER_DISTANCE,
   MINIMUM_MAE_IMPROVEMENT,
-  MINIMUM_LABELS_PER_DISTANCE,
-  MINIMUM_PREDICTION_LABELS,
+  predictionScopeFloors,
   MINIMUM_WALK_FORWARD_PER_DISTANCE,
   MINIMUM_WALK_FORWARD_PREDICTIONS,
   ONNX_PARITY_TOLERANCE,
@@ -56,6 +55,7 @@ interface RunnerArguments {
   database: string;
   runId: string;
   asOf: string;
+  scope: "population" | "personal";
   artifactDirectory: string;
   result: string;
 }
@@ -170,6 +170,7 @@ export interface OnnxGoldenJson {
 
 interface ManifestJson {
   modelVersion: string;
+  scope: RunnerArguments["scope"];
   algorithm: string;
   featureSchemaVersion: string;
   featureSchemaHash: string;
@@ -206,10 +207,13 @@ function parseArguments(values: string[]): RunnerArguments {
     if (!options.get(key)) throw new Error(`缺少 --${key}`);
   }
   const asOf = new Date(Date.parse(options.get("as-of")!)).toISOString();
+  const scope = options.get("scope") ?? "population";
+  if (scope !== "population" && scope !== "personal") throw new Error("--scope 必须是 population 或 personal");
   return {
     database: resolve(options.get("database")!),
     runId: options.get("run-id")!,
     asOf,
+    scope,
     artifactDirectory: resolve(options.get("artifact-directory")!),
     result: resolve(options.get("result")!)
   };
@@ -276,7 +280,8 @@ function distanceCounts(samples: RaceResidualTrainingSample[]): Record<RaceDista
 function runPython(
   input: string,
   artifactDirectory: string,
-  generatedAt: string
+  generatedAt: string,
+  scope: RunnerArguments["scope"]
 ): Promise<{ code: number; output: string }> {
   const projectRoot = resolve(import.meta.dirname, "../../..");
   return new Promise((resolvePromise, reject) => {
@@ -290,7 +295,9 @@ function runPython(
       "--generated-at",
       generatedAt,
       "--data-through-at",
-      generatedAt
+      generatedAt,
+      "--scope",
+      scope
     ], {
       cwd: projectRoot,
       windowsHide: true,
@@ -371,10 +378,12 @@ function assertArtifactContract(
   artifactDirectory: string,
   exportedDatasetSha256: string,
   pythonExitCode: number,
-  expectedDataThroughAt: string
+  expectedDataThroughAt: string,
+  expectedScope: RunnerArguments["scope"]
 ): void {
   if (
     manifest.modelVersion !== CATBOOST_PREDICTION_MODEL_VERSION ||
+    manifest.scope !== expectedScope ||
     manifest.algorithm !== "catboost" ||
     manifest.featureSchemaVersion !== PREDICTION_RESIDUAL_FEATURE_SCHEMA_VERSION
   ) {
@@ -670,9 +679,10 @@ async function main(): Promise<void> {
       database.close();
     }
     const counts = distanceCounts(samples);
+    const floors = predictionScopeFloors(args.scope);
     if (
-      samples.length < MINIMUM_PREDICTION_LABELS ||
-      distances.some((distance) => counts[distance] < MINIMUM_LABELS_PER_DISTANCE)
+      samples.length < floors.requiredLabels ||
+      distances.some((distance) => counts[distance] < floors.requiredLabelsPerDistance)
     ) {
       throw new Error(
         `训练标签不足：总数 ${samples.length}，分距离 ${JSON.stringify(counts)}`
@@ -682,7 +692,7 @@ async function main(): Promise<void> {
     writeFileSync(datasetPath, jsonl, "utf8");
     const exportedDatasetSha256 = sha256(jsonl);
 
-    const trained = await runPython(datasetPath, args.artifactDirectory, args.asOf);
+    const trained = await runPython(datasetPath, args.artifactDirectory, args.asOf, args.scope);
     if (trained.code !== 0 && trained.code !== 2) {
       throw new Error(trained.output || `Python 训练失败，退出码 ${trained.code}`);
     }
@@ -695,11 +705,12 @@ async function main(): Promise<void> {
       args.artifactDirectory,
       exportedDatasetSha256,
       trained.code,
-      args.asOf
+      args.asOf,
+      args.scope
     );
 
     await verifyAcceptedOnnxArtifact(evaluation.status, async () => {
-      const model = await OnnxCatBoostResidualModel.load(args.artifactDirectory);
+      const model = await OnnxCatBoostResidualModel.load(args.artifactDirectory, args.scope);
       if (model.manifest.modelSha256 !== manifest.modelSha256) {
         throw new Error("Node ONNX loader 与 manifest artifact hash 不一致");
       }

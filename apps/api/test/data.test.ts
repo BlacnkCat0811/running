@@ -6,9 +6,35 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { RaiApplicationService } from "@rai/application";
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, type SqliteSeriesReadRepository } from "@rai/storage-sqlite";
 
-import { RaiReadStore } from "../src/data.js";
+import { RaiReadStore, recentWeeklyKm } from "../src/data.js";
+
+test("recent weekly volume uses four complete calendar weeks without dropping empty weeks", () => {
+  const today = "2026-10-05";
+  assert.equal(recentWeeklyKm([{ localDate: "2026-09-07", distanceMeters: 40_000 }], today), 10);
+  assert.equal(recentWeeklyKm([
+    { localDate: "2026-09-06", distanceMeters: 100_000 },
+    { localDate: "2026-09-07", distanceMeters: 4_000 },
+    { localDate: "2026-09-13", distanceMeters: 8_000 },
+    { localDate: "2026-09-14", distanceMeters: 12_000 },
+    { localDate: "2026-09-21", distanceMeters: 16_000 },
+    { localDate: "2026-10-04", distanceMeters: 20_000 },
+    { localDate: "2026-10-05", distanceMeters: 100_000 },
+    { localDate: "2026-10-12", distanceMeters: 100_000 }
+  ], today), 15);
+  assert.equal(recentWeeklyKm([{ localDate: "2024-01-01", distanceMeters: 40_000 }], "2026-10-03"), 0);
+  assert.equal(recentWeeklyKm([], today), 0);
+});
+
+test("recent weekly volume keeps a stable Monday boundary across weekdays and years", () => {
+  const metrics = [{ localDate: "2025-12-01", distanceMeters: 4_000 },
+    { localDate: "2025-12-28", distanceMeters: 8_000 },
+    { localDate: "2025-12-29", distanceMeters: 100_000 }];
+  assert.equal(recentWeeklyKm(metrics, "2025-12-29"), 3);
+  assert.equal(recentWeeklyKm(metrics, "2026-01-04"), 3);
+  assert.equal(recentWeeklyKm(metrics, "2026-01-05"), 27);
+});
 
 const runDate = (index: number): string =>
   new Date(Date.UTC(2025, 0, 1 + index * 3, 0, 0, 0)).toISOString();
@@ -64,6 +90,55 @@ async function seed(path: string): Promise<RaiDatabase> {
   assert.equal(service.runNextJob()?.status, "succeeded");
   return store;
 }
+
+test("recovery trends batch date ranges without losing gaps, leap days or timezone isolation", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "rai-recovery-range-"));
+  const path = join(root, "rai.sqlite");
+  const store = await RaiDatabase.open(path, { createMigrationBackup: false });
+  const night = store.database.prepare(`INSERT INTO canonical_nights
+    (id, wake_date, timezone_identifier, kind, source_name, source_category, source_rank, has_stages,
+      asleep_union_minutes, sleep_onset_at, wake_at, stage_minutes_json, segment_count, provenance_json)
+    VALUES (?, ?, ?, ?, 'Watch', 'apple_watch', 1, 0, ?, ?, ?, '{}', 1, '{}')`);
+  const hrv = store.database.prepare(`INSERT INTO canonical_hrv_days
+    (id, local_date, timezone_identifier, night_id, hrv_sdnn_ms, sample_count, confidence, provenance_json)
+    VALUES (?, ?, ?, ?, ?, 2, 'confident', '{}')`);
+  for (const [id, date, timezone, kind, minutes] of [
+    ["before", "2024-02-27", "Asia/Shanghai", "main", 600],
+    ["first", "2024-02-28", "Asia/Shanghai", "main", 420],
+    ["leap", "2024-02-29", "Asia/Shanghai", "main", 480],
+    ["nap", "2024-03-01", "Asia/Shanghai", "nap", 30],
+    ["other", "2024-03-01", "UTC", "main", 999],
+    ["after", "2024-03-03", "Asia/Shanghai", "main", 600]
+  ] as const) {
+    const wakeAt = `${date}T00:00:00.000Z`;
+    night.run(id, date, timezone, kind, minutes,
+      new Date(Date.parse(wakeAt) - minutes * 60_000).toISOString(), wakeAt);
+    if (id !== "nap") hrv.run(`hrv-${id}`, date, timezone, id, 40);
+  }
+  hrv.run("hrv-last", "2024-03-02", "Asia/Shanghai", "leap", 55);
+  store.close();
+  const read = new RaiReadStore(path);
+  try {
+    const database = (read as unknown as { database: DatabaseSync }).database;
+    const queries = t.mock.method(database, "prepare");
+    const now = new Date("2024-03-01T16:30:00.000Z");
+    const trend = read.recoveryTrends(4, now);
+    assert.equal(queries.mock.callCount(), 2);
+    assert.equal(trend.asOf, "2024-03-02");
+    assert.equal(trend.latestDataDate, "2024-03-02");
+    assert.deepEqual(trend.days.map(day => [day.date, day.sleepMinutes, day.hrvSdnnMs]), [
+      ["2024-02-28", 420, 40], ["2024-02-29", 480, 40],
+      ["2024-03-01", null, null], ["2024-03-02", null, 55]
+    ]);
+    assert.equal(trend.days[2]?.hrvConfidence, "missing");
+    assert.equal(trend.days[2]?.hrvSampleCount, 0);
+    assert.equal(read.recoveryTrends(365, now).days.length, 365);
+    assert.equal(queries.mock.callCount(), 4, "a full year still adds only two queries");
+  } finally {
+    read.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("maps active SQLite results into Web API DTOs", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-api-"));
@@ -405,7 +480,7 @@ test("refreshes cached summaries after another connection commits", async () => 
   }
 });
 
-test("bounds workout route and metric samples in SQL while preserving totals and endpoints", async () => {
+test("bounds workout route and metric samples in SQL while preserving totals and endpoints", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "rai-api-sampling-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await seed(databasePath);
@@ -447,7 +522,17 @@ test("bounds workout route and metric samples in SQL while preserving totals and
     assert.ok((detail?.route.length ?? 0) <= 501);
     assert.equal(detail?.route[0]?.elevationMeters, 0);
     assert.equal(detail?.route.at(-1)?.elevationMeters, 1000);
+    const repository = (read as unknown as { seriesRepository: SqliteSeriesReadRepository }).seriesRepository;
+    const routeReads = t.mock.method(repository, "routePoints");
+    const publicDetail = read.workout(sessionId, { includeRoute: false });
+    assert.ok(publicDetail);
+    assert.deepEqual(publicDetail.route, []);
+    assert.equal(routeReads.mock.callCount(), 0, "public details must not even query private coordinates");
+    assert.equal(publicDetail.workout.distanceKm, detail.workout.distanceKm);
+    const elevationReads = t.mock.method(repository, "routeElevationSeries");
+    const metricReads = t.mock.method(repository, "metricSeries");
     const series = read.workoutSeries(sessionId);
+    assert.equal(elevationReads.mock.callCount(), 1, "the grade and chart share one elevation query");
     assert.equal(series?.series.heartRate.totalSamples, 1201);
     assert.ok((series?.series.heartRate.points.length ?? 0) <= 601);
     assert.equal(series?.series.heartRate.points[0]?.offsetSeconds, 0);
@@ -455,6 +540,13 @@ test("bounds workout route and metric samples in SQL while preserving totals and
     assert.equal(series?.series.elevation.totalSamples, 1001);
     assert.ok((series?.series.elevation.points.length ?? 0) <= 601);
     assert.equal(series?.series.elevation.points.at(-1)?.value, 1000);
+    const metricsBeforeCard = metricReads.mock.callCount();
+    t.mock.method(read, "workoutSeries", () => { throw new Error("share cards must not compute full series"); });
+    const card = read.workoutShareCard(sessionId);
+    assert.ok(card);
+    assert.equal(card.workout.gradeAdjustedPaceSecondsPerKm, series?.grade?.gradeAdjustedPaceSecondsPerKm ?? null);
+    assert.equal(elevationReads.mock.callCount(), 2);
+    assert.equal(metricReads.mock.callCount(), metricsBeforeCard);
   } finally {
     read.close();
     rmSync(root, { recursive: true, force: true });

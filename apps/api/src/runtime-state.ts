@@ -201,15 +201,15 @@ export class RuntimeStateStore {
     return this.withCorruptionRecovery(() => this.readJobs(limit));
   }
 
-  latestJobForSource(sourceId: string): RuntimeImportJobRow | null {
-    return this.withCorruptionRecovery(() => this.readJobs(1, sourceId).at(-1) ?? null);
+  latestJobForSource(sourceId: string, scope?: string): RuntimeImportJobRow | null {
+    return this.withCorruptionRecovery(() => this.readJobs(1, sourceId, undefined, scope).at(-1) ?? null);
   }
 
   job(id: string): RuntimeImportJobRow | null {
     return this.withCorruptionRecovery(() => this.readJobs(1, undefined, id).at(-1) ?? null);
   }
 
-  private readJobs(limit: number, sourceId?: string, id?: string): RuntimeImportJobRow[] {
+  private readJobs(limit: number, sourceId?: string, id?: string, scope?: string): RuntimeImportJobRow[] {
     const db = this.open();
     try {
       const rows = db.prepare(`SELECT id, source_id AS sourceId, status, phase, message, created_at AS createdAt,
@@ -217,7 +217,8 @@ export class RuntimeStateStore {
         removal_guard_json AS removalGuardJson, performance_json AS performanceJson, execution_json AS executionJson
         FROM import_jobs ${id !== undefined ? "WHERE id = ?" : sourceId === undefined ? `WHERE status IN ('queued', 'running') OR json_extract(execution_json, '$.queue.finalized') = 0 OR sequence_number IN
           (SELECT sequence_number FROM import_jobs ORDER BY sequence_number DESC LIMIT ?)
-        ORDER BY sequence_number DESC` : "WHERE source_id = ? ORDER BY sequence_number DESC LIMIT 1"}`).all(id ?? sourceId ?? limit) as unknown as Array<RuntimeImportJobRow & {
+        ORDER BY sequence_number DESC` : `WHERE source_id = ? ${scope === undefined ? "" : "AND json_extract(execution_json, '$.queue.scope') = ?"} ORDER BY sequence_number DESC LIMIT 1`}`)
+        .all(...(sourceId !== undefined && scope !== undefined ? [sourceId, scope] : [id ?? sourceId ?? limit])) as unknown as Array<RuntimeImportJobRow & {
           sourceId: string | null;
           summaryJson: string | null;
           removalGuardJson: string | null;

@@ -1,6 +1,7 @@
 import type { MobileGoalsResponse, MobileTodayResponse } from "@rai/api-contracts";
 import type { CoachZonePrescription } from "./mobile-coach.js";
 import { applyRacePlanPolicy, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { phaseForPlanDate } from "./weekly-plan-service.js";
 
 export class ManualPlanPolicyError extends Error { readonly code = "plan_policy_violation"; }
 
@@ -24,10 +25,14 @@ export function validateManualPlan(goals: MobileGoalsResponse, today: MobileToda
   for (const [monday, days] of weeks) {
     const currentWeek = monday === today.week.periodStart;
     const reserved = currentWeek && today.lock.present && today.today.workoutCount === 0 ? today.nextSession.distanceKm ?? 0 : 0;
-    const budget = Math.max(0, weeklyPlanVolumeCeiling(goals.weeklyDistanceKm, currentWeek ? previousWeekDistanceKm : null) - (currentWeek ? today.week.distanceKm + reserved : 0));
+    const phase = phaseForPlanDate({ today, goals }, days[0]!.localDate);
+    const budget = Math.max(0, Math.min(weeklyPlanVolumeCeiling(goals.weeklyDistanceKm, currentWeek ? previousWeekDistanceKm : null), phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY) - (currentWeek ? today.week.distanceKm + reserved : 0));
     if (budget === 0 && days.some(day => day.kind !== "rest")) throw new ManualPlanPolicyError("本自然周跑量预算已用完，请减少未来安排或调整周目标。");
     const safeDays = applyRacePlanPolicy(days, goals.raceTarget, goals.weeklyDistanceKm, prescription);
-    const checked = validateWeeklyPlan({ raw: JSON.stringify({ days: safeDays }), allowedDates: safeDays.map(day => day.localDate), prescription, weeklyDistanceKm: budget, qualitySessionCap: Math.max(0, goals.qualitySessionCap - (currentWeek ? today.weekStructure.qualitySessionCount : 0)), easyDurationFloorFraction: goals.easyDurationFloorFraction, injuryFlagCodes: today.injuryFlags.map(flag => flag.code) });
+    const reservedQuality = reserved > 0 && ["tempo", "interval", "race"].includes(today.nextSession.kind) ? 1 : 0;
+    const checked = validateWeeklyPlan({ raw: JSON.stringify({ days: safeDays }), allowedDates: safeDays.map(day => day.localDate), prescription, weeklyDistanceKm: budget,
+      volumeCeilingKm: budget, ...(phase ? { longRunCapKm: phase.longRunCapKm } : {}),
+      qualitySessionCap: Math.max(0, Math.min(goals.qualitySessionCap, phase?.qualityDose ?? goals.qualitySessionCap) - (currentWeek ? today.weekStructure.qualitySessionCount + reservedQuality : 0)), easyDurationFloorFraction: goals.easyDurationFloorFraction, injuryFlagCodes: today.injuryFlags.map(flag => flag.code) });
     if (checked.rejected.length || checked.clamped.length) {
       throw new ManualPlanPolicyError(`课表未保存：${[...checked.rejected, ...checked.clamped].join("；")}。请调整安排后重试，或预览重新生成的安全课表。`);
     }

@@ -1,5 +1,6 @@
 import "../pixel-layout.css";
 import "../training-reference.css";
+import "../components/share-card-panel.css";
 import type { RunningDynamicsAnalysis, WorkoutDetailResponse, WorkoutEnvironmentView, WorkoutSegment, WorkoutSegmentPurpose, WorkoutSeriesResponse } from "@rai/api-contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
@@ -451,6 +452,7 @@ export function WorkoutDetailPage() {
         <article className="panel"><div className="panel-heading"><div><h2>解释与数据质量</h2><p>所有结论来自 active Assessment · {workout.modelVersion}。</p></div></div><ul className="evidence-list">{workout.explanationCodes.map((code) => <li key={code}>{explanation(code)}</li>)}</ul><div className="quality-grid"><span><small>心率覆盖</small><b>{workout.heartRateCoverage === null ? "--" : `${(workout.heartRateCoverage * 100).toFixed(1)}%`}</b></span><span><small>质量分</small><b>{number(workout.qualityScore)}</b></span><span><small>来源置信</small><b>{number(workout.sourceConfidence)}</b></span><span><small>训练贡献</small><b>{number(workout.workoutContribution)}</b></span></div>{workout.missingReasons.length > 0 ? <div className="missing-reasons"><b>数据与资格说明</b>{workout.missingReasons.map((reason) => <span key={reason}>{missingReason(reason)}</span>)}</div> : null}<div className="running-form-metrics"><span>功率 {workout.averagePowerWatts === null ? "--" : `${Math.round(workout.averagePowerWatts)} W`}</span><span>步幅 {workout.averageStrideLengthMeters === null ? "--" : `${workout.averageStrideLengthMeters.toFixed(2)} m`}</span><span>垂直振幅（设备估计，仅记录） {workout.averageVerticalOscillationCm === null ? "--" : `${workout.averageVerticalOscillationCm.toFixed(1)} cm`}</span><span>触地时间（设备估计，仅记录） {workout.averageGroundContactTimeMs === null ? "--" : `${Math.round(workout.averageGroundContactTimeMs)} ms`}</span></div></article>
       </section>
       {data.override ? <section className="panel review-panel"><div className="panel-heading"><div><h2>个人复盘</h2><p>标准测试和比赛标签会用于生理与成绩预测校准，不反向修改当前 CA。</p></div><code>revision {data.override.revision}</code></div><div className="review-content"><span><small>RPE</small><b>{data.override.rpe ?? "--"}</b></span><span><small>标准测试</small><b>{data.override.performanceProtocol ?? "--"}</b></span><span><small>状态标签</small><b>{data.override.conditionTags.join("、") || "--"}</b></span><span className="review-note"><small>备注</small><p>{data.override.note || "没有备注"}</p></span></div></section> : null}
+      <div className="desktop-share-card"><ShareCardPanel key={workout.id} trainingSessionId={workout.id} /></div>
       {editing ? <OverrideDrawer detail={data} onClose={() => setEditing(false)} onSaved={(value) => void watchJob(value)} /> : null}
     </div>
   );

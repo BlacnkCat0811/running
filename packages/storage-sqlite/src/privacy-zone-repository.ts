@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 
 /**
  * Privacy zones for shared route cards (docs/WEB.md, docs/DECISIONS.md D9).
@@ -30,7 +31,9 @@ export type PrivacyZoneInput = Omit<StoredPrivacyZone, "updatedAt">;
 export class PrivacyZoneRevisionConflictError extends Error {
   readonly code = "privacy_zone_revision_conflict";
   constructor(readonly expectedRevision: number, readonly actualRevision: number) {
-    super(`Privacy zones changed: expected revision ${expectedRevision}, found ${actualRevision}`);
+    super(expectedRevision === actualRevision
+      ? "Privacy zone contents changed after a restore or another write; reload before saving"
+      : `Privacy zones changed: expected revision ${expectedRevision}, found ${actualRevision}`);
   }
 }
 
@@ -84,6 +87,11 @@ export class SqlitePrivacyZoneRepository {
     return Number(row?.revision ?? 0);
   }
 
+  /** Revision alone can repeat after a restore; bind writes to the exact state read. */
+  stateToken(): string {
+    return createHash("sha256").update(JSON.stringify({ revision: this.revision(), zones: this.list() })).digest("hex");
+  }
+
   /**
    * Replaces the whole collection. Returns the new revision.
    *
@@ -91,7 +99,7 @@ export class SqlitePrivacyZoneRepository {
    * after it succeeded is rejected, which is what makes a client retry safe to
    * surface (the caller re-reads instead of guessing).
    */
-  replace(zones: readonly PrivacyZoneInput[], expectedRevision: number): number {
+  replace(zones: readonly PrivacyZoneInput[], expectedRevision: number, expectedStateToken?: string): number {
     if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
       throw new PrivacyZoneValidationError("expectedRevision must be a non-negative integer");
     }
@@ -104,11 +112,10 @@ export class SqlitePrivacyZoneRepository {
       throw new PrivacyZoneValidationError("privacy zone ids must be unique");
     }
 
-    this.database.exec("BEGIN IMMEDIATE");
+    this.database.exec("SAVEPOINT rai_privacy_zones");
     try {
       const current = this.revision();
-      if (current !== expectedRevision) {
-        this.database.exec("ROLLBACK");
+      if (current !== expectedRevision || (expectedStateToken !== undefined && expectedStateToken !== this.stateToken())) {
         throw new PrivacyZoneRevisionConflictError(expectedRevision, current);
       }
       const now = new Date().toISOString();
@@ -132,16 +139,13 @@ export class SqlitePrivacyZoneRepository {
       this.database
         .prepare("UPDATE privacy_zone_revisions SET revision = ?, updated_at = ? WHERE singleton = 1")
         .run(next, now);
-      this.database.exec("COMMIT");
+      this.database.exec("RELEASE rai_privacy_zones");
       return next;
     } catch (error) {
-      if (!(error instanceof PrivacyZoneRevisionConflictError)) {
-        try {
-          this.database.exec("ROLLBACK");
-        } catch {
-          // The transaction may already be closed by the failing statement; the
-          // original error is what the caller needs to see.
-        }
+      try {
+        this.database.exec("ROLLBACK TO rai_privacy_zones; RELEASE rai_privacy_zones");
+      } catch {
+        // Preserve the original error if SQLite already closed the transaction.
       }
       throw error;
     }

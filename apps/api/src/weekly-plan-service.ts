@@ -1,10 +1,10 @@
 import type { MobileGoalsResponse, MobilePlanAudit, MobilePlannedDay, MobileTodayResponse } from "@rai/api-contracts";
 
-import type { CoachZonePrescription } from "./mobile-coach.js";
+import { plannedDayNumbers, type CoachZonePrescription } from "./mobile-coach.js";
 import { createPlanModelClient, llmConfigFromEnv, type PlanModelClient } from "./weekly-plan-llm.js";
 import { buildWeeklyPlanPrompt, WEEKLY_PLAN_DAYS, WEEKLY_PLAN_PROMPT_VERSION } from "./weekly-plan-prompt.js";
-import { currentPeriodizationWeek, periodizationVolumeFraction } from "./plan-periodization.js";
-import { applyRacePlanPolicy, buildFallbackWeekPlan, enforcePhaseCeiling, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { currentPeriodizationWeek, periodizationWeekStart, type PeriodizationWeek } from "./plan-periodization.js";
+import { applyRacePlanPolicy, buildFallbackWeekPlan, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
 
 export interface WeeklyPlanGenerationResult {
   days: MobilePlannedDay[];
@@ -13,6 +13,18 @@ export interface WeeklyPlanGenerationResult {
   /** Counters useful for the API response and for after-the-fact review. */
   rejectedCount: number;
   clampedCount: number;
+}
+
+export function phaseForPlanDate(
+  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals">,
+  localDate: string
+): PeriodizationWeek | null {
+  const skeleton = args.today.periodization;
+  if (skeleton && skeleton.generatedFor === args.today.today.localDate &&
+    skeleton.raceDate === args.goals.raceTarget?.date && skeleton.distance === args.goals.raceTarget?.distance) {
+    return skeleton.weeks.find(week => week.weekStart === periodizationWeekStart(localDate)) ?? null;
+  }
+  return currentPeriodizationWeek({ today: localDate, raceTarget: args.goals.raceTarget, recentWeeklyKm: args.goals.weeklyDistanceKm });
 }
 
 export function weeklyPlanDates(today: string, days: number = WEEKLY_PLAN_DAYS): string[] {
@@ -81,7 +93,7 @@ export async function generateWeeklyPlan(args: {
   goals: Pick<
     MobileGoalsResponse,
     "weeklyDistanceKm" | "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget"
-  >;
+  > & Partial<Pick<MobileGoalsResponse, "weekPlan">>;
   prescription: CoachZonePrescription | null;
   client?: PlanModelClient | null;
   previousWeekDistanceKm?: number | null;
@@ -111,17 +123,8 @@ export async function generateWeeklyPlan(args: {
     };
   }
 
-  // §20 the phase of the week being planned. Computed once and used for three things:
-  // the prompt's context, the validator's ceiling and the final enforcement — three
-  // views of one decision rather than three chances to disagree.
-  const phaseWeek = currentPeriodizationWeek({
-    today: args.today.today.localDate,
-    raceTarget: args.goals.raceTarget,
-    recentWeeklyKm: args.goals.weeklyDistanceKm
-  });
-  const phaseCeilingKm = phaseWeek === null ? null : phaseWeek.volumeBandKm.upper;
-  const finishWeek = (days: MobilePlannedDay[]): MobilePlannedDay[] =>
-    enforcePhaseCeiling(days, phaseCeilingKm, phaseWeek ? `${phaseWeek.phase} 期` : null, warnings);
+  // The prompt describes the current phase; final constraints apply per natural week.
+  const phaseWeek = phaseForPlanDate(args, args.today.today.localDate);
 
   if (client) {
     const prompt = buildWeeklyPlanPrompt({
@@ -146,7 +149,7 @@ export async function generateWeeklyPlan(args: {
       });
       if (validated.days.length > 0) {
         return {
-          days: finishWeek(finish(validated.days)),
+          days: finish(validated.days),
           audit: {
             generatedBy: "llm",
             model: `${client.provider}:${client.model}`,
@@ -182,7 +185,7 @@ export async function generateWeeklyPlan(args: {
     previousWeekDistanceKm: args.previousWeekDistanceKm ?? null
   });
   return {
-    days: finishWeek(finish(applyRacePlanPolicy(days, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings))),
+    days: finish(days),
     audit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt },
     warnings,
     rejectedCount: 0,
@@ -196,25 +199,38 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const injuryFlagCodes = args.today.injuryFlags.map(flag => flag.code);
 
-    const safe = applyRacePlanPolicy(proposed, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings);
-    const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
-      { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
-    const groups = [complete.filter(day => day.localDate <= args.today.week.periodEnd), complete.filter(day => day.localDate > args.today.week.periodEnd)];
-    return groups.flatMap((days, index) => {
-      if (!days.length) return [];
-      const protectedToday = index === 0 && (args.today.today.workoutCount > 0 || args.today.lock.present);
-      const adjustable = days.filter(day => !(protectedToday && day.localDate === args.today.today.localDate));
-      const reserved = protectedToday && args.today.today.workoutCount === 0 ? args.today.nextSession.distanceKm ?? 0 : 0;
-      const remainingKm = Math.max(0, weeklyPlanVolumeCeiling(args.goals.weeklyDistanceKm, index === 0 ? args.previousWeekDistanceKm : null) - (index === 0 ? args.today.week.distanceKm + reserved : 0));
-      if (remainingKm <= 0) {
-        warnings.push("自然周剩余预算已用完，未完成日期不再追加训练。");
-        return adjustable.map(day => ({ ...day, kind: "rest" as const, distanceKm: null, structure: null, reason: "本自然周预算已用完。" }));
-      }
-      const result = validateWeeklyPlan({ raw: JSON.stringify({ days: adjustable }), allowedDates, prescription: args.prescription,
-        weeklyDistanceKm: remainingKm, qualitySessionCap: Math.max(0, args.goals.qualitySessionCap - (index === 0 ? args.today.weekStructure.qualitySessionCount : 0)),
-        easyDurationFloorFraction: args.goals.easyDurationFloorFraction, injuryFlagCodes });
-      warnings.push(...result.rejected, ...result.clamped);
-      return result.days;
-    });
-
+  const safe = applyRacePlanPolicy(proposed, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings);
+  const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
+    { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
+  const replacementDates = new Set(complete.map(day => day.localDate));
+  const groups = [complete.filter(day => day.localDate <= args.today.week.periodEnd), complete.filter(day => day.localDate > args.today.week.periodEnd)];
+  return groups.flatMap((days, index) => {
+    if (!days.length) return [];
+    const protectedToday = index === 0 && (args.today.today.workoutCount > 0 || args.today.lock.present);
+    const adjustable = days.filter(day => !(protectedToday && day.localDate === args.today.today.localDate));
+    const reserved = protectedToday && args.today.today.workoutCount === 0 ? args.today.nextSession.distanceKm ?? 0 : 0;
+    const phase = phaseForPlanDate(args, days[0]!.localDate);
+    // A rolling window can leave the end of next calendar week untouched.
+    const weekStart = periodizationWeekStart(days[0]!.localDate);
+    const retained = (args.goals.weekPlan ?? []).filter(day => day.localDate >= args.today.today.localDate &&
+      periodizationWeekStart(day.localDate) === weekStart && !replacementDates.has(day.localDate));
+    const retainedKm = retained.reduce((sum, day) => sum +
+      (plannedDayNumbers(day.kind, day.structure, day.distanceKm, args.prescription).distanceKm ?? 0), 0);
+    const retainedQuality = retained.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length;
+    const ceilingKm = Math.min(weeklyPlanVolumeCeiling(args.goals.weeklyDistanceKm, index === 0 ? args.previousWeekDistanceKm : null), phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY);
+    const remainingKm = Math.max(0, ceilingKm - retainedKm - (index === 0 ? args.today.week.distanceKm + reserved : 0));
+    const reservedQuality = reserved > 0 && ["tempo", "interval", "race"].includes(args.today.nextSession.kind) ? 1 : 0;
+    const qualityCap = Math.max(0, Math.min(args.goals.qualitySessionCap, phase?.qualityDose ?? args.goals.qualitySessionCap) - retainedQuality - (index === 0 ? args.today.weekStructure.qualitySessionCount + reservedQuality : 0));
+    if (retainedKm > 0 || retainedQuality > 0) warnings.push(`${weekStart} 自然周已为窗口外保留课表预留 ${retainedKm.toFixed(1)} km、${retainedQuality} 堂质量课。`);
+    if (remainingKm <= 0) {
+      warnings.push("自然周剩余预算已用完，未完成日期不再追加训练。");
+      return adjustable.map(day => ({ ...day, kind: "rest" as const, distanceKm: null, structure: null, reason: "本自然周预算已用完。" }));
+    }
+    const result = validateWeeklyPlan({ raw: JSON.stringify({ days: adjustable }), allowedDates, prescription: args.prescription,
+      weeklyDistanceKm: remainingKm, volumeCeilingKm: remainingKm, qualitySessionCap: qualityCap,
+      ...(phase ? { longRunCapKm: phase.longRunCapKm } : {}),
+      easyDurationFloorFraction: args.goals.easyDurationFloorFraction, injuryFlagCodes });
+    warnings.push(...result.rejected, ...result.clamped.map(message => phase ? `${phase.note} 阶段上限 ${ceilingKm.toFixed(1)} km：${message}` : message));
+    return result.days;
+  });
 }

@@ -251,7 +251,8 @@ export function PredictionsPage() {
 
       {data.labelFunnel ? <section className="panel" aria-label="标签评估进度">
         <h2>标签与验证进度</h2>
-        <p>训练 {data.labelFunnel.sessionCount} 次 → 已确认 {data.labelFunnel.confirmedCount} 次 → 合格比赛结果 {data.labelFunnel.usableOutcomeCount} 次 → 可回放评估 {data.labelFunnel.evaluatedOutcomeCount} 次。</p>
+        <p>训练 {data.labelFunnel.sessionCount} 次 → 已确认 {data.labelFunnel.confirmedCount} 次 → 合格比赛结果 {data.labelFunnel.usableOutcomeCount} 次 → 训练样本 {data.labelFunnel.trainingSampleCount} 次 → 可回放评估 {data.labelFunnel.evaluatedOutcomeCount} 次。</p>
+        {data.labelFunnel.trainingExcludedOutcomeCount > 0 ? <p>缺少赛前证据的成绩 {data.labelFunnel.trainingExcludedOutcomeCount} 次，未进入训练集。</p> : null}
         <p>{data.labelFunnel.accuracyStatus === "not_evaluable"
           ? "尚无合格标签，不能证明预测准确率或激活精度增强。"
           : "已有标签不代表通过发布门槛；仍需分距离、独立留出和区间验证。"}</p>

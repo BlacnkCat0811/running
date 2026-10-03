@@ -14,8 +14,8 @@ import type { ShareCardRoutePoint } from "@rai/api-contracts";
  * segments are cut where they cross a circle, not merely pruned of their
  * endpoints.
  *
- * Geometry is done in a local equirectangular frame (metres) around the route's
- * own centroid: at the scale of a 5 km privacy zone the error is far below the
+ * Geometry is done in a local equirectangular frame (metres) around each
+ * zone's own centre: at the scale of a 5 km privacy zone the error is far below the
  * zone radius, and it keeps the intersection arithmetic a plain quadratic.
  */
 
@@ -98,6 +98,32 @@ function subtractIntervals(
 
 const lerp = (from: number, to: number, t: number): number => from + (to - from) * t;
 
+const longitudeDelta = (degrees: number): number => ((degrees + 180) % 360 + 360) % 360 - 180;
+
+/** Canonical coordinates without a drawable chord between +180 and -180. */
+function splitAtDateline(points: ShareCardRoutePoint[]): ShareCardRoutePoint[][] {
+  const result: ShareCardRoutePoint[][] = [];
+  let offset = Math.floor((points[0]!.longitude + 180) / 360) * 360;
+  let current = [{ ...points[0]!, longitude: points[0]!.longitude - offset }];
+  for (let index = 1; index < points.length; index++) {
+    const a = points[index - 1]!;
+    const b = points[index]!;
+    const longitude = b.longitude - offset;
+    if (longitude > 180 || longitude < -180) {
+      const boundary = longitude > 180 ? 180 : -180;
+      const t = (boundary + offset - a.longitude) / (b.longitude - a.longitude);
+      const latitude = lerp(a.latitude, b.latitude, t);
+      current.push({ latitude, longitude: boundary });
+      result.push(current);
+      offset += boundary * 2;
+      current = [{ latitude, longitude: -boundary }];
+    }
+    current.push({ ...b, longitude: b.longitude - offset });
+  }
+  if (current.length >= 2) result.push(current);
+  return result;
+}
+
 /**
  * Removes everything inside any zone from a route, splitting the polyline where a
  * segment crosses a boundary.
@@ -121,30 +147,30 @@ export function trimRouteForShare(
     return { polylines: [], redactedPoints: 0, gaps: 0, zonesApplied: usableZones.length };
   }
 
-  const referenceLatitude =
-    usable.reduce((sum, point) => sum + point.latitude, 0) / usable.length;
-  const metersPerDegreeLongitude =
-    111_320 * Math.cos((referenceLatitude * Math.PI) / 180);
-  const project = (point: ShareCardRoutePoint): { x: number; y: number } => ({
-    x: point.longitude * metersPerDegreeLongitude,
-    y: point.latitude * EARTH_METERS_PER_DEGREE_LATITUDE
-  });
-  const circles = usableZones.map((zone) => {
-    const projected = project({ latitude: zone.centerLatitude, longitude: zone.centerLongitude });
-    return { x: projected.x, y: projected.y, radius: zone.radiusMeters };
-  });
-
-  const projected = usable.map(project);
+  const referenceLongitude = usable[0]!.longitude;
+  const unwrapped: ShareCardRoutePoint[] = [];
+  for (const point of usable) {
+    const previous = unwrapped.at(-1)?.longitude ?? referenceLongitude;
+    const delta = point.longitude - previous;
+    unwrapped.push({ ...point, longitude: previous + (Math.abs(delta) <= 180 ? delta : longitudeDelta(delta)) });
+  }
+  const circles = usableZones.map((zone) => ({
+    latitude: zone.centerLatitude,
+    longitude: referenceLongitude + longitudeDelta(zone.centerLongitude - referenceLongitude),
+    metersPerDegreeLongitude: 111_320 * Math.cos((zone.centerLatitude * Math.PI) / 180),
+    radius: zone.radiusMeters
+  }));
   const insideAnyZone = (index: number): boolean =>
-    circles.some(
-      (circle) => squaredDistance(projected[index]!.x, projected[index]!.y, circle.x, circle.y) <= circle.radius ** 2
-    );
+    circles.some((circle) => squaredDistance(
+      longitudeDelta(unwrapped[index]!.longitude - circle.longitude) * circle.metersPerDegreeLongitude,
+      (unwrapped[index]!.latitude - circle.latitude) * EARTH_METERS_PER_DEGREE_LATITUDE,
+      0, 0
+    ) <= circle.radius ** 2);
 
   let redactedPoints = 0;
-  const keep: boolean[] = usable.map((_, index) => {
+  usable.forEach((_, index) => {
     const inside = insideAnyZone(index);
     if (inside) redactedPoints += 1;
-    return !inside;
   });
 
   const polylines: ShareCardRoutePoint[][] = [];
@@ -158,14 +184,19 @@ export function trimRouteForShare(
   };
 
   for (let index = 0; index < usable.length - 1; index += 1) {
-    const a = usable[index]!;
-    const b = usable[index + 1]!;
-    const pa = projected[index]!;
-    const pb = projected[index + 1]!;
-
+    const a = unwrapped[index]!;
+    const b = unwrapped[index + 1]!;
     const cuts: Array<[number, number]> = [];
     for (const circle of circles) {
-      const interval = insideInterval(pa.x, pa.y, pb.x, pb.y, circle.x, circle.y, circle.radius);
+      // Pick the zone's nearest longitude copy for this unwrapped segment.
+      const centerLongitude = circle.longitude + Math.round(((a.longitude + b.longitude) / 2 - circle.longitude) / 360) * 360;
+      const interval = insideInterval(
+        (a.longitude - centerLongitude) * circle.metersPerDegreeLongitude,
+        (a.latitude - circle.latitude) * EARTH_METERS_PER_DEGREE_LATITUDE,
+        (b.longitude - centerLongitude) * circle.metersPerDegreeLongitude,
+        (b.latitude - circle.latitude) * EARTH_METERS_PER_DEGREE_LATITUDE,
+        0, 0, circle.radius
+      );
       if (interval !== null) cuts.push(interval);
     }
 
@@ -198,7 +229,7 @@ export function trimRouteForShare(
   // A single surviving point cannot be drawn as a route, and reporting it as one
   // would suggest the card shows more than it does.
   return {
-    polylines,
+    polylines: polylines.flatMap(splitAtDateline),
     redactedPoints,
     // What a reader needs in order to interpret a broken line on the card.
     gaps: Math.max(0, polylines.length - 1),

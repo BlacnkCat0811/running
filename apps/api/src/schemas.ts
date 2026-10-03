@@ -331,9 +331,10 @@ export const trainingZoneProfileBodySchema = {
 export const privacyZonesBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["revision", "zones"],
+  required: ["revision", "stateToken", "zones"],
   properties: {
     revision: { type: "integer", minimum: 0 },
+    stateToken: { type: "string", pattern: "^[a-f0-9]{64}$" },
     zones: {
       type: "array",
       maxItems: 20,
@@ -369,6 +370,7 @@ export const performanceEntryBodySchema = {
     localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     distance: { type: "string", enum: ["five_k", "ten_k", "half_marathon"] },
     durationSeconds: { type: "number", exclusiveMinimum: 0, maximum: 14400 },
+    trainingSessionId: { type: ["string", "null"], minLength: 1, maxLength: 200 },
     note: { type: ["string", "null"], maxLength: 200 }
   }
 } as const;

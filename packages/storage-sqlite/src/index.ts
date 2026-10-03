@@ -112,6 +112,7 @@ export { SqliteCalibrationRepository } from "./calibration-repository.js";
 // §12.10 手工成绩条目：标签闭环的入口，只作标签/评估证据。
 export {
   PERFORMANCE_ENTRY_DISTANCE_METERS,
+  loadPerformanceEventSessions,
   PerformanceEntryValidationError,
   SqlitePerformanceEntryRepository,
   type PerformanceEntryDistance,

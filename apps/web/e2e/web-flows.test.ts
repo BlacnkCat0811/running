@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -736,6 +736,49 @@ desktopTest("概览统计失败时显示错误而不伪装成数据积累", asyn
   } finally {
     await context.close();
   }
+});
+
+desktopTest("分享图片在导出前重新裁剪隐私轨迹", async () => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
+  await context.addInitScript(() => localStorage.setItem("rai.web.apiToken", "share-test-token"));
+  const page = await context.newPage();
+  const runtimeErrors = collectRuntimeErrors(page);
+  let requests = 0;
+  try {
+    await page.route("**/v1/workouts/*/share-card", async route => {
+      requests += 1;
+      assert.equal(route.request().headers().authorization, "Bearer share-test-token");
+      const id = new URL(route.request().url()).pathname.split("/")[3]!;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        trainingSessionId: id, generatedAt: "2026-10-02T00:00:00Z",
+        workout: { startedAt: "2026-10-01T00:00:00Z", sessionType: "easy", distanceKm: 5,
+          durationSeconds: 1800, averagePaceSecondsPerKm: 360, averageHeartRateBpm: 140,
+          elevationGainMeters: 0, gradeAdjustedPaceSecondsPerKm: null },
+        privacy: { policyVersion: "rai-share-card-v1", zonesApplied: requests > 1 ? 1 : 0,
+          redactedPoints: requests > 1 ? 2 : 0, gaps: 0, unfiltered: requests === 1 },
+        polylines: requests > 1 ? [] : [[{ latitude: 31.2, longitude: 121.4 }, { latitude: 31.3, longitude: 121.5 }]],
+        note: requests > 1 ? "整条轨迹都在隐私区内，卡片不含路线。" : "未配置隐私区"
+      }) });
+    });
+    await page.goto(`${fixtureApi.origin}/workouts`, { waitUntil: "domcontentloaded" });
+    await page.locator(".workout-table .row-link").first().click();
+    await page.getByRole("button", { name: "生成分享卡片" }).click();
+    await page.locator(".share-card path").waitFor();
+    const downloaded = page.waitForEvent("download");
+    await page.getByRole("button", { name: "下载图片" }).click();
+    const download = await downloaded;
+    const path = join(temporaryRoot, "private-share.png");
+    await download.saveAs(path);
+    const png = await readFile(path);
+    assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    assert.equal(png.readUInt32BE(16), 800);
+    assert.equal(png.readUInt32BE(20), 420);
+    assert.equal(requests, 2, "the export must make its own fresh request");
+    assert.equal(await page.locator(".share-card path").count(), 0);
+    await page.getByText("已下载分享图片").waitFor();
+    await page.locator(".desktop-share-card").screenshot({ path: join(tmpdir(), "rai-share-card-desktop.png") });
+    assert.deepEqual(runtimeErrors, []);
+  } finally { await context.close(); }
 });
 
 desktopTest("合成数据主流程可导航、筛选、检查详情和只读比较", async () => {

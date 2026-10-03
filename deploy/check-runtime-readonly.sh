@@ -25,6 +25,7 @@ except OSError:
 config = {key: env.get(key, '(default/not set)') for key in ('RAI_API_HOST', 'RAI_API_PORT', 'RAI_IMPORT_ENGINE', 'RAI_RUST_FALLBACK')}
 config['apiTokenConfigured'] = bool(env.get('RAI_API_TOKEN', '').strip())
 config['anonymousReadsConfigured'] = bool(env.get('RAI_PUBLIC_HOSTS', '').strip())
+config['anonymousRoutesEnabled'] = env.get('RAI_ALLOW_ANONYMOUS_ROUTES') == '1'
 print(json.dumps(config, ensure_ascii=False, indent=2))
 print('Environment shows configuration intent only; validate actual engine from per-job telemetry.')
 for name in ('rai.sqlite', 'rai-control.sqlite', 'runtime.sqlite'):
@@ -35,6 +36,10 @@ files = [p for p in backups.glob('*.sqlite') if p.is_file()]
 print(f'Database backup file count: {len(files)}; this is NOT proof of complete runtime recovery.')
 if config['anonymousReadsConfigured']:
     print('ACTION: anonymous health reads are configured. Review route-coordinate and health privacy before release.')
+if not config['apiTokenConfigured']:
+    print('ACTION: RAI_API_TOKEN is missing. Configure a token before release; raw routes are hidden by default.')
+if config['anonymousRoutesEnabled']:
+    print('ACTION: anonymous raw routes are explicitly enabled. Remove RAI_ALLOW_ANONYMOUS_ROUTES before release.')
 PY
 df -h "$root"
 echo 'Still required: deployed Git revision, TLS/nginx configuration, end-to-end device sync, whole-runtime restore rehearsal.'

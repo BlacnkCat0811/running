@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { api, applyApiToken, readApiToken, writeApiToken } from "../src/api.js";
+import { useApiToken } from "../src/api-token.js";
 
 const okResponse = () => new Response(JSON.stringify({ ok: true }), { status: 200 });
 
@@ -10,8 +12,34 @@ describe("browser API token", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.unstubAllGlobals();
     localStorage.clear();
+  });
+
+  it("updates mounted consumers on save, replacement and removal", () => {
+    const { result } = renderHook(useApiToken);
+    expect(result.current).toBe("");
+    act(() => writeApiToken("first"));
+    expect(result.current).toBe("first");
+    act(() => writeApiToken("second"));
+    expect(result.current).toBe("second");
+    act(() => writeApiToken(""));
+    expect(result.current).toBe("");
+  });
+
+  it("updates mounted consumers on another tab's storage events", () => {
+    const { result } = renderHook(useApiToken);
+    act(() => {
+      localStorage.setItem("rai.web.apiToken", "other-tab");
+      window.dispatchEvent(new StorageEvent("storage", { key: "rai.web.apiToken" }));
+    });
+    expect(result.current).toBe("other-tab");
+    act(() => {
+      localStorage.clear();
+      window.dispatchEvent(new StorageEvent("storage", { key: null }));
+    });
+    expect(result.current).toBe("");
   });
 
   it("trims the token on write and clears it on blank input", () => {

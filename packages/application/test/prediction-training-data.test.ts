@@ -2,7 +2,92 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-import { loadAcuteChronicLoadRatio, loadTrainingContext } from "../src/prediction-training-data.js";
+import { RaiDatabase, SqlitePerformanceEntryRepository } from "@rai/storage-sqlite";
+import { buildRaceResidualTrainingDataset, loadAcuteChronicLoadRatio, loadTrainingContext } from "../src/prediction-training-data.js";
+import { buildLabelFunnel } from "../src/prediction-data.js";
+
+test("manual training samples cannot see later labels or physiology evidence", async () => {
+  const store = await RaiDatabase.open(":memory:", { createMigrationBackup: false });
+  try {
+    const repository = new SqlitePerformanceEntryRepository(store.database);
+    repository.insert({ localDate: "2026-05-01", distance: "ten_k", durationSeconds: 3100,
+      note: null, recordedAt: "2026-05-02T00:00:00.000Z" });
+    const entry = repository.insert({ localDate: "2026-06-01", distance: "ten_k", durationSeconds: 3000,
+      note: null, recordedAt: "2026-06-02T00:00:00.000Z" });
+    const cutoff = "2026-09-30T00:00:00.000Z";
+    const sample = () => buildRaceResidualTrainingDataset(store.database, cutoff).samples.find(row => row.sampleId === entry.id);
+    const before = sample();
+    assert.ok(before, "the May result was already available before the June race");
+    repository.insert({ localDate: "2026-09-01", distance: "ten_k", durationSeconds: 2100,
+      note: null, recordedAt: "2026-09-02T00:00:00.000Z" });
+    assert.deepEqual(sample(), before, "a September label cannot change a June feature or target baseline");
+    store.database.prepare(`INSERT INTO health_records
+      (id, type, source_name, source_category, value_numeric, start_at, end_at, metadata_json, raw_attributes_json)
+      VALUES ('later-vo2', 'HKQuantityTypeIdentifierVO2Max', 'Watch', 'apple_watch', 60,
+        '2026-06-03T00:00:00.000Z', '2026-06-03T00:00:00.000Z', '{}', '{}')`).run();
+    assert.deepEqual(sample(), before, "post-race physiology cannot enter the earlier sample either");
+    assert.deepEqual(buildRaceResidualTrainingDataset(store.database, "2026-06-03T00:00:00.000Z")
+      .samples.find(row => row.sampleId === entry.id), before);
+  } finally { store.close(); }
+});
+
+test("future event associations cannot change a fixed historical training dataset", async () => {
+  const store = await RaiDatabase.open(":memory:", { createMigrationBackup: false });
+  try {
+    const database = store.database;
+    database.exec(`INSERT INTO health_records
+      (id, type, source_name, source_category, unit, value_numeric, start_at, end_at, metadata_json, raw_attributes_json)
+      VALUES ('prior-vo2', 'HKQuantityTypeIdentifierVO2Max', 'Watch', 'apple_watch', 'mL/min*kg', 50,
+        '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z', '{}', '{}');
+      INSERT INTO training_sessions
+        (id, activity_type, anchor_start_at, anchor_end_at, anchor_distance_km, status)
+      VALUES ('morning', 'HKWorkoutActivityTypeRunning', '2026-06-01T00:00:00.000Z',
+        '2026-06-01T00:25:00.000Z', 5, 'active'),
+        ('evening', 'HKWorkoutActivityTypeRunning', '2026-06-01T10:00:00.000Z',
+        '2026-06-01T10:30:00.000Z', 5, 'active');
+      INSERT INTO workout_overrides
+        (id, training_session_id, revision, session_type, performance_protocol, condition_tags_json, created_at)
+      VALUES ('morning-label', 'morning', 1, 'race', 'five_k_time_trial', '[]', '2026-06-01T01:00:00.000Z'),
+        ('evening-label', 'evening', 1, 'race', 'five_k_time_trial', '[]', '2026-06-01T11:00:00.000Z')`);
+    const asOf = "2026-06-02T00:00:00.000Z";
+    const before = buildRaceResidualTrainingDataset(database, asOf);
+    assert.equal(before.samples.length, 2);
+    assert.ok(before.samples.find(sample => sample.sampleId === "evening"));
+    const repository = new SqlitePerformanceEntryRepository(database);
+    const later = repository.insert({ localDate: "2026-06-01", distance: "five_k", durationSeconds: 1800,
+      note: null, recordedAt: "2026-07-01T00:00:00.000Z" });
+    assert.deepEqual(buildRaceResidualTrainingDataset(database, asOf), before,
+      "a future date-only entry must not merge the independent morning and evening events in an earlier snapshot");
+    repository.revoke(later.id, "2026-08-01T00:00:00.000Z");
+    assert.deepEqual(buildRaceResidualTrainingDataset(database, asOf), before);
+  } finally { store.close(); }
+});
+
+test("retrospective manual labels without pre-race evidence are not temporal training samples", async () => {
+  const store = await RaiDatabase.open(":memory:", { createMigrationBackup: false });
+  try {
+    const repository = new SqlitePerformanceEntryRepository(store.database);
+    for (const localDate of ["2025-05-01", "2025-06-01"])
+      repository.insert({ localDate, distance: "ten_k", durationSeconds: 3000, note: null,
+        recordedAt: "2026-09-01T00:00:00.000Z" });
+    const asOf = "2026-09-30T00:00:00.000Z";
+    assert.deepEqual(buildRaceResidualTrainingDataset(store.database, asOf).samples, []);
+    const funnel = buildLabelFunnel(store.database, asOf);
+    assert.equal(funnel.usableOutcomeCount, 2);
+    assert.equal(funnel.trainingSampleCount, 0);
+    assert.equal(funnel.trainingExcludedOutcomeCount, 2);
+    store.database.exec(`INSERT INTO health_records
+      (id, type, source_name, source_category, value_numeric, start_at, end_at, metadata_json, raw_attributes_json)
+      VALUES ('pre-race-vo2', 'HKQuantityTypeIdentifierVO2Max', 'Watch', 'apple_watch', 50,
+        '2025-04-01T00:00:00.000Z', '2025-04-01T00:00:00.000Z', '{}', '{}')`);
+    const dataset = buildRaceResidualTrainingDataset(store.database, asOf);
+    const withEvidence = buildLabelFunnel(store.database, asOf);
+    assert.equal(withEvidence.trainingSampleCount, dataset.samples.length);
+    assert.equal(withEvidence.trainingSampleCount, 2);
+    assert.equal(withEvidence.trainingExcludedOutcomeCount, 0);
+    assert.equal(withEvidence.byDistance.ten_k.trainingSamples, 2);
+  } finally { store.close(); }
+});
 
 function loadDatabase(recentLoad: number, futureLoad = 100_000): DatabaseSync {
   const database = new DatabaseSync(":memory:");

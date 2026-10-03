@@ -19,10 +19,11 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <h:HealthData xmlns:h="fixture">
  <Me biologicalSex="HKBiologicalSexMale"/><ExportDate value="2026-01-02 00:00:00 +0800"/>
  <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Apple Watch 中文 ⌚" unit="count/min"
- startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:00:05 +0800" value="1.5e2" __proto__="ignored">
+ startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:00:05 +0800" value="1.5e2" __proto__="raw-data">
   <MetadataEntry key="10" value="a&#xA;b"/><MetadataEntry key="2" value="&amp;"/>
   <MetadataEntry key="HKMetadataKeySyncIdentifier" value="record-uuid"/>
   <MetadataEntry key="duplicate" value="first"/><MetadataEntry key="duplicate" value="second"/>
+  <MetadataEntry key="__proto__" value="metadata-data"/>
  </Record>
  <Record type="HKQuantityTypeIdentifierSleepAnalysis" sourceName="Apple Watch" value="HKCategoryValueSleepAnalysisAsleepCore"
  startDate="2026-01-01 00:00:00 +0800" endDate="2026-01-01 06:00:00 +0800"/>
@@ -30,9 +31,10 @@ const xml = `<?xml version="1.0" encoding="UTF-8"?>
  <Workout workoutActivityType="HKWorkoutActivityTypeRunning" sourceName="Apple Watch" duration="30" durationUnit="min"
  startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:30:00 +0800">
   <MetadataEntry key="RAIHealthKitWorkoutUUID" value="workout-uuid"/>
+  <MetadataEntry key="constructor" value="workout-data"/>
   <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" unit="km" sum="5"/>
-  <WorkoutEvent type="HKWorkoutEventTypePause" date="2026-01-01 08:10:00 +0800"><MetadataEntry key="reason" value="灯"/></WorkoutEvent>
-  <WorkoutRoute><FileReference path="/workout-routes/Route.GPX"/></WorkoutRoute>
+  <WorkoutEvent type="HKWorkoutEventTypePause" date="2026-01-01 08:10:00 +0800"><MetadataEntry key="reason" value="灯"/><MetadataEntry key="__proto__" value="event-data"/></WorkoutEvent>
+  <WorkoutRoute><MetadataEntry key="toString" value="route-data"/><FileReference path="/workout-routes/Route.GPX"/></WorkoutRoute>
  </Workout>
  <ActivitySummary dateComponents="2026-01-01" activeEnergyBurned="500"/>
 </h:HealthData>`;
@@ -57,6 +59,17 @@ test("Rust decoded data preserves TS stable IDs, metadata, routes, updates, and 
       stores.push(store);
       await parseAppleHealthXml(path, store, { fileSize: statSync(path).size, atomic: false,
         native: { engine, spoolRoot: root, stagingDatabase: databasePath(engine) } });
+      const record = store.database.prepare("SELECT metadata_json, raw_attributes_json FROM health_records WHERE type='HKQuantityTypeIdentifierHeartRate'").get()!;
+      assert.deepEqual(JSON.parse(String(record.metadata_json)).__proto__, ["metadata-data"]);
+      assert.equal(JSON.parse(String(record.raw_attributes_json)).__proto__, "raw-data");
+      for (const [table, key, value] of [
+        ["workouts", "constructor", "workout-data"],
+        ["workout_events", "__proto__", "event-data"],
+        ["workout_routes", "toString", "route-data"]
+      ] as const) {
+        const row = store.database.prepare(`SELECT metadata_json FROM ${table}`).get()!;
+        assert.deepEqual(JSON.parse(String(row.metadata_json))[key], [value]);
+      }
       await importGpxRoutes(root, store, { native: { engine, spoolRoot: root } });
       canonicalizeRunningWorkouts(store.database);
       store.flush();

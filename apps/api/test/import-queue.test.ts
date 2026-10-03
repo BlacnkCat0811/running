@@ -120,7 +120,29 @@ test("idempotency and job lookup outlive the latest twenty completed jobs", asyn
     assert.equal(worker.get("job-0")?.status, "succeeded");
     assert.equal(worker.create(f.input, undefined, "source-0").id, "job-0");
     assert.equal(worker.hasPending, false);
+    worker.setScope("restored");
+    assert.equal(worker.findBySourceId("source-0"), null, "on-disk old receipts must not leak across scopes");
+    assert.equal(worker.findBySourceId("source-24"), null, "in-memory old receipts must not leak across scopes");
+    const release = f.mutations.acquire("fixture restore");
+    try {
+      const next = worker.create(f.input, undefined, "source-0");
+      assert.notEqual(next.id, "job-0");
+      assert.equal(f.state.job(next.id)?.queue?.scope, "restored");
+      await worker.cancel(next.id);
+    } finally { release(); }
   } finally {
     await worker?.close(); rmSync(f.root, { recursive: true, force: true });
   }
+});
+
+test("restore admission is rechecked after asynchronous source lookup", async () => {
+  const f = fixture();
+  const worker = new ImportWorker(join(f.root, "rai.sqlite"), f.root, f.root, undefined, undefined, undefined, {
+    scope: "fixture", admission: new TaskAdmissionScheduler(f.mutations).owner("import"),
+    assertAccepting: () => { throw new Error("fixture restore in progress"); }
+  });
+  try {
+    assert.throws(() => worker.create(f.input, undefined, "source"), /fixture restore in progress/);
+    assert.equal(worker.hasPending, false);
+  } finally { await worker.close(); rmSync(f.root, { recursive: true, force: true }); }
 });

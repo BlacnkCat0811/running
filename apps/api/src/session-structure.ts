@@ -139,7 +139,7 @@ export function structureWorkRepetitions(structure: MobileSessionStructure): num
   let total = 0;
   for (const block of structure.blocks) {
     const workSteps = block.steps.filter((step) => step.purpose === "work").length;
-    total += Math.max(1, block.iterations) * Math.max(1, workSteps);
+    total += Math.max(1, block.iterations) * workSteps;
   }
   return total;
 }

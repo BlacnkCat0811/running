@@ -21,9 +21,17 @@ func SecItemCopyMatching(_ query: CFDictionary, _ result: UnsafeMutablePointer<C
     result?.pointee = copyValue
     return copyStatus
 }
-func SecItemDelete(_ query: CFDictionary) -> OSStatus { errSecSuccess }
+var deleteStatus = errSecSuccess
+var addCalls = 0
+func SecItemDelete(_ query: CFDictionary) -> OSStatus {
+    if deleteStatus == errSecSuccess { copyValue = nil; copyStatus = errSecItemNotFound }
+    return deleteStatus
+}
 var addStatus = errSecSuccess
-func SecItemAdd(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus { addStatus }
+func SecItemAdd(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus {
+    addCalls += 1
+    return addStatus
+}
 
 @main struct KeychainRegression {
     static func main() {
@@ -54,9 +62,24 @@ func SecItemAdd(_ query: CFDictionary, _ result: UnsafeMutablePointer<CFTypeRef?
             precondition(Keychain.saveToken("fresh-token", for: server), "a successful add must report success")
             addStatus = errSecDuplicateItem
             precondition(!Keychain.saveToken("fresh-token", for: server), "a rejected add must not report success")
-            // 清空 token 不需要落盘，所以即使 add 会失败也不算写入失败。
+            // 清空必须确实删除；不存在是成功，锁定或拒绝是失败。
             addStatus = errSecDuplicateItem
             precondition(Keychain.saveToken("", for: server), "clearing the token is not a storage failure")
+            deleteStatus = errSecItemNotFound
+            precondition(Keychain.saveToken("", for: server))
+            for status in [errSecInteractionNotAllowed, errSecAuthFailed] {
+                deleteStatus = status
+                copyStatus = errSecSuccess
+                copyValue = Data("old-secret".utf8) as CFData
+                let before = addCalls
+                precondition(!Keychain.saveToken("", for: server), "a rejected delete must not report success")
+                precondition(Keychain.loadToken(for: server) == "old-secret", "failed deletion leaves the old credential persisted")
+                precondition(!Keychain.saveToken("new-secret", for: server))
+                precondition(addCalls == before, "failed deletion must not attempt a replacement add")
+            }
+            deleteStatus = errSecSuccess
+            precondition(Keychain.saveToken("", for: server))
+            precondition(Keychain.loadToken(for: server).isEmpty)
             addStatus = errSecSuccess
         }
         print("PASS: scoped and legacy Keychain reads clear plaintext and fail closed on missing, locked, denied or invalid credentials; a rejected write is reported to the caller instead of looking like success")

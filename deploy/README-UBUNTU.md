@@ -76,10 +76,11 @@ RAI_PUBLIC_HOSTS=api.example.com
 
 效果与边界：
 
-- **公开**：`server.ts` 里 `publicReadRoutes` 列举的读接口 —— 训练列表与详情、GPS 轨迹序列、趋势、统计、训练分区、预测、移动端课表等。前端所有展示页因此无需令牌即可渲染。
+- **公开**：`server.ts` 里 `publicReadRoutes` 列举的读接口，包括训练列表与不含原始坐标的详情、趋势、统计、训练分区、预测、课表等。训练详情的原始轨迹仍需正确令牌，匿名响应的 `route` 为空，且响应不缓存。
 - **仍需 Token**：所有写请求（`POST/PUT/PATCH/DELETE`），以及 `GET /v1/backups/:name`（直接下载整个 SQLite 库）、`GET /v1/import-sources/*`（返回服务器文件系统路径）、`GET /v1/diagnostics`、`GET /v1/openapi.json`、`GET /v1/jobs*`、`GET /v1/import-jobs*`。
 - Host 白名单与只读白名单**同时生效**：伪造其它 Host 的匿名读仍返回 401，DNS-rebinding 防护不退化。
-- 🔴 这是**隐私降级**：轨迹序列含起终点坐标，等价于公开常跑路线与居住区域。仅在你能接受「知道域名的人都能看到这些数据」时开启。
+- 这是**隐私降级**：知道域名的人仍可看到已公开的健康摘要。`RAI_PUBLIC_HOSTS` 不开放原始轨迹、分享卡或隐私区读路由。
+- 未配置 `RAI_API_TOKEN` 时原始轨迹同样默认隐藏；仅本地显式 `RAI_ALLOW_ANONYMOUS_ROUTES=1` 可开启匿名原始轨迹，生产环境不得设置此开关。`check-runtime-readonly.sh` 会对缺失令牌或开启匿名轨迹给出 ACTION。
 - 配套限速在 `deploy/nginx-rai.conf` 的 `limit_req_zone`（5 r/s + burst 100），读接口公开后它是防批量抓取与流量包超额的第一道闸，不要单独关掉。
 
 ## 验证

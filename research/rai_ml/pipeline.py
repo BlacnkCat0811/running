@@ -46,7 +46,7 @@ class TrainingError(RuntimeError):
 
 @dataclass(frozen=True)
 class TrainingConfig:
-    model_version: str = "race-residual-catboost-v4"
+    model_version: str = "race-residual-catboost-v5"
     minimum_labels: int = 50
     minimum_labels_per_distance: int = 8
     initial_training_size: int = 12
@@ -670,7 +670,10 @@ def train_and_export(
     training_data_through_at: str,
     generated_at: str | None = None,
     input_file_sha256: str | None = None,
+    scope: str = "population",
 ) -> TrainingResult:
+    if scope not in ("population", "personal"):
+        raise TrainingError("scope must be population or personal")
     if config.initial_training_size < 2:
         raise TrainingError("initial_training_size must be at least 2")
     if len(samples) < config.minimum_labels:
@@ -786,6 +789,7 @@ def train_and_export(
         timestamp = generated_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         manifest = {
             "modelVersion": config.model_version,
+            "scope": scope,
             "algorithm": "catboost",
             "pythonRuntime": {
                 "python": sys.version.split()[0],

@@ -11,9 +11,11 @@ import {
   PERSONAL_MINIMUM_LABELS_PER_DISTANCE,
   PredictionModelService,
   PredictionTrainingPreconditionError,
+  PredictionTrainingInProgressError,
   predictionScopeFloors
 } from "@rai/application";
 import { RaiDatabase, SqlitePerformanceEntryRepository } from "@rai/storage-sqlite";
+import { ISO_UTC_OFFSET } from "@rai/contracts";
 
 /**
  * M12: personal scope lowers the **data** floor and nothing else.
@@ -49,6 +51,18 @@ function labelPlan(
       durationSeconds: DISTANCE_SECONDS[distance] - index
     };
   });
+}
+
+function seedLabels(store: RaiDatabase, entries: ReturnType<typeof labelPlan>): void {
+  const repository = new SqlitePerformanceEntryRepository(store.database);
+  const evidence = store.database.prepare(`INSERT INTO health_records
+    (id, type, source_name, source_category, value_numeric, start_at, end_at, metadata_json, raw_attributes_json)
+    VALUES (?, 'HKQuantityTypeIdentifierVO2Max', 'Watch', 'apple_watch', 50, ?, ?, '{}', '{}')`);
+  for (const entry of entries) {
+    const recorded = repository.insert({ ...entry, note: null, recordedAt: RECORDED });
+    const beforeRace = new Date(Date.parse(`${entry.localDate}T00:00:00${ISO_UTC_OFFSET}`) - 3_600_000).toISOString();
+    evidence.run(`vo2-${recorded.id}`, beforeRace, beforeRace);
+  }
 }
 
 async function withService(run: (service: PredictionModelService, database: RaiDatabase) => void): Promise<void> {
@@ -88,8 +102,7 @@ test("M12: personal scope reuses the artifact floors instead of inventing new on
 
 test("M12: 30 labels are refused as population and accepted as personal", async () => {
   await withService((service, store) => {
-    const repository = new SqlitePerformanceEntryRepository(store.database);
-    for (const entry of labelPlan(30)) repository.insert({ ...entry, note: null, recordedAt: RECORDED });
+    seedLabels(store, labelPlan(30));
 
     const population = service.preflight(AS_OF, "population");
     assert.equal(population.available, 30);
@@ -117,8 +130,7 @@ test("M12: 30 labels are refused as population and accepted as personal", async 
 
 test("M12: an unqualified request keeps the population gate", async () => {
   await withService((service, store) => {
-    const repository = new SqlitePerformanceEntryRepository(store.database);
-    for (const entry of labelPlan(30)) repository.insert({ ...entry, note: null, recordedAt: RECORDED });
+    seedLabels(store, labelPlan(30));
     // No `scope` at all: an older client must not silently get the lower floor.
     assert.throws(
       () => service.enqueue({ asOf: AS_OF }),
@@ -133,13 +145,12 @@ test("M12: an unqualified request keeps the population gate", async () => {
 
 test("M12: per-distance floors still apply inside the personal scope", async () => {
   await withService((service, store) => {
-    const repository = new SqlitePerformanceEntryRepository(store.database);
     // 27 labels, but only three at the half marathon. The total clears the personal
     // floor while one distance does not — and the artifact contract requires all
     // three, so this must still be refused.
-    for (const entry of labelPlan(12, ["ten_k"])) repository.insert({ ...entry, note: null, recordedAt: RECORDED });
-    for (const entry of labelPlan(12, ["five_k"])) repository.insert({ ...entry, note: null, recordedAt: RECORDED });
-    for (const entry of labelPlan(3, ["half_marathon"])) repository.insert({ ...entry, note: null, recordedAt: RECORDED });
+    seedLabels(store, labelPlan(12, ["ten_k"]));
+    seedLabels(store, labelPlan(12, ["five_k"]));
+    seedLabels(store, labelPlan(3, ["half_marathon"]));
 
     const personal = service.preflight(AS_OF, "personal");
     assert.equal(personal.available, 27);
@@ -172,5 +183,8 @@ test("M12: a stored run reports the scope it was trained under, and old rows def
     // A row written before the field existed was trained under the population gate.
     // Reading it as "personal" would relabel history as something it was not.
     assert.equal(runs.find((run) => run.id === "run_legacy")!.scope, "population");
+    assert.equal(service.enqueue({ asOf: AS_OF, scope: "personal" }), "run_personal");
+    assert.throws(() => service.enqueue({ asOf: AS_OF, scope: "population" }), PredictionTrainingInProgressError);
+    assert.throws(() => service.enqueue({}), PredictionTrainingInProgressError);
   });
 });

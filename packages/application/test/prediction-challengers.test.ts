@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -144,17 +146,22 @@ test("D8: the importer refuses an unknown document version", () => {
 // 最终 `readFileSync` 抛 EISDIR —— 报出来的是"对目录调了读"，而不是"你没给文件"。
 // 目录存在不等于文件存在，所以这里把三种输入分开断言。
 test("D8: reading a challengers document distinguishes no-path, no-file and not-a-file", () => {
-  assert.throws(() => parseResidualChallengerFile(""), /requires a file path/);
-  assert.throws(() => parseResidualChallengerFile("   "), /requires a file path/);
-  assert.throws(
-    () => parseResidualChallengerFile(resolve("var", "definitely-not-here.json")),
-    /Challengers document not found/
-  );
-  // 目录：必须有明确措辞，且**不能**是 EISDIR。
-  assert.throws(
-    () => parseResidualChallengerFile(resolve("var")),
-    (error: unknown) => error instanceof Error
-      && /must be a file, not a directory/.test(error.message)
-      && !/EISDIR/.test(error.message)
-  );
+  const directory = mkdtempSync(join(tmpdir(), "rai-challenger-file-"));
+  try {
+    assert.throws(() => parseResidualChallengerFile(""), /requires a file path/);
+    assert.throws(() => parseResidualChallengerFile("   "), /requires a file path/);
+    assert.throws(
+      () => parseResidualChallengerFile(join(directory, "missing.json")),
+      /Challengers document not found/
+    );
+    // 目录：必须有明确措辞，且**不能**是 EISDIR。
+    assert.throws(
+      () => parseResidualChallengerFile(directory),
+      (error: unknown) => error instanceof Error
+        && /must be a file, not a directory/.test(error.message)
+        && !/EISDIR/.test(error.message)
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

@@ -21,7 +21,8 @@ import {
 import {
   DISTANCE_ROUNDING_KM,
   MAX_PLANNED_DISTANCE_KM,
-  normalizeSessionStructure
+  normalizeSessionStructure,
+  structureWorkRepetitions
 } from "./session-structure.js";
 
 /**
@@ -113,39 +114,6 @@ export function weeklyPlanVolumeCeiling(
   return Math.min(baseCeiling, rampCeiling, phaseCeiling);
 }
 
-/**
- * Scales a generated week down to a phase ceiling (§20).
- *
- * Applied to the finished week rather than threaded through every producer: the LLM
- * path, the fallback template and the race policy all end here, and one enforcement
- * point cannot disagree with itself. Rest days stay rest days, and the reduction is
- * proportional, so the *shape* of the week survives — a taper is not achieved by
- * deleting Tuesday.
- *
- * Returns the days unchanged when the week is already inside the ceiling, which is the
- * common case and the only case when no race target is set.
- */
-export function enforcePhaseCeiling(
-  days: MobilePlannedDay[],
-  ceilingKm: number | null | undefined,
-  phaseLabel: string | null | undefined,
-  warnings: string[] = []
-): MobilePlannedDay[] {
-  if (ceilingKm == null || !Number.isFinite(ceilingKm) || ceilingKm <= 0) return days;
-  const total = days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
-  if (total <= ceilingKm || total <= 0) return days;
-  const factor = ceilingKm / total;
-  warnings.push(
-    `${phaseLabel ? `${phaseLabel}：` : ""}本周处方 ${total.toFixed(1)} km 超出阶段上限 ` +
-      `${ceilingKm.toFixed(1)} km，已按比例压缩到上限。`
-  );
-  return days.map((day) => {
-    if (day.distanceKm == null) return day;
-    const scaled = Math.round(day.distanceKm * factor * 10) / 10;
-    return { ...day, distanceKm: Math.max(0.5, scaled) };
-  });
-}
-
 export interface WeeklyPlanValidationArgs {
   raceTarget?: MobileRaceTarget | null;
   raw: string;
@@ -157,6 +125,10 @@ export interface WeeklyPlanValidationArgs {
   injuryFlagCodes: string[];
   /** When known, the ramp ceiling is capped at previous week + 30%. */
   previousWeekDistanceKm?: number | null;
+  /** Hard remaining/phase budget: even a minimum session must fit or become rest. */
+  volumeCeilingKm?: number;
+  /** Phase-specific limit on a long-run prescription, not merely its display hint. */
+  longRunCapKm?: number;
 }
 
 export interface WeeklyPlanValidationResult {
@@ -193,32 +165,47 @@ function measuredDay(
   return measureStructure(day.structure, day.kind, pacesFromZones(prescription));
 }
 
-/** Enforces the pace floor for every work step so a plan can never prescribe a faster target. */
-function clampStepPaces(
+/** Enforces work intensity by session kind and easy intensity for support steps. */
+function clampStepTargets(
   day: MobilePlannedDay,
   prescription: CoachZonePrescription | null,
   clamped: string[]
 ): MobilePlannedDay {
-  if (!day.structure || !prescription) return day;
-  const floor =
-    day.kind === "interval"
-      ? prescription.intervalPaceLower
-      : day.kind === "tempo"
-        ? prescription.thresholdPaceLower
-        : prescription.easyPaceLower;
-  if (floor == null) return day;
-
-  let changed = false;
-  const clampAlert = (step: NonNullable<MobileSessionStructure["warmup"]>) => {
+  if (!day.structure) return day;
+  let paceChanged = false;
+  let heartRateChanged = false;
+  const clampAlert = (step: MobileWorkoutStep): MobileWorkoutStep => {
     const alert = step.alert;
-    if (!alert || alert.kind !== "pace") return step;
-    const lower = alert.lower == null ? null : Math.max(alert.lower, floor);
-    const upper = alert.upper == null ? null : Math.max(alert.upper, floor);
-    if (lower !== alert.lower || upper !== alert.upper) {
-      changed = true;
+    if (!alert) return step;
+    const kind = step.purpose === "work" ? day.kind : "easy";
+    const paceLower = kind === "interval" ? prescription?.intervalPaceLower :
+      kind === "tempo" ? prescription?.thresholdPaceLower : prescription?.easyPaceLower;
+    const paceUpper = kind === "interval" ? prescription?.intervalPaceUpper :
+      kind === "tempo" ? prescription?.thresholdPaceUpper : prescription?.easyPaceUpper;
+    if (alert.kind === "pace") {
+      if (paceLower == null) {
+        paceChanged = true;
+        return { ...step, alert: null };
+      }
+      const lower = alert.lower == null ? null : Math.max(alert.lower, paceLower);
+      const upper = alert.upper == null ? null : Math.max(alert.upper, paceLower);
+      if (lower === alert.lower && upper === alert.upper) return step;
+      paceChanged = true;
       return { ...step, alert: { ...alert, lower, upper } };
     }
-    return step;
+    const ceiling = kind === "interval" ? null :
+      kind === "tempo" ? prescription?.thresholdHrUpper : prescription?.easyHrUpper;
+    // Interval HR has no prescribed band; an unknown ceiling cannot authorize
+    // arbitrary intensity. Use the matching pace band, or remove the target.
+    if (ceiling == null) {
+      heartRateChanged = true;
+      return { ...step, alert: paceLower == null ? null : { kind: "pace", lower: paceLower, upper: paceUpper ?? null } };
+    }
+    const lower = alert.lower == null ? null : Math.min(alert.lower, ceiling);
+    const upper = Math.min(alert.upper ?? ceiling, ceiling);
+    if (lower === alert.lower && upper === alert.upper) return step;
+    heartRateChanged = true;
+    return { ...step, alert: { ...alert, lower, upper } };
   };
 
   const structure: MobileSessionStructure = {
@@ -229,36 +216,64 @@ function clampStepPaces(
     })),
     cooldown: day.structure.cooldown ? clampAlert(day.structure.cooldown) : null
   };
-  if (!changed) return day;
-  clamped.push(`${day.localDate} 配速目标被收回到允许区间`);
+  if (!paceChanged && !heartRateChanged) return day;
+  if (paceChanged) clamped.push(`${day.localDate} 配速目标被收回到允许区间；无可靠配速区间时移除目标`);
+  if (heartRateChanged) clamped.push(`${day.localDate} 心率目标被收回到允许区间；无可靠心率区间时改用配速或移除目标`);
   return { ...day, structure };
 }
 
 function clampIntervalReps(day: MobilePlannedDay, clamped: string[]): MobilePlannedDay {
   if (!day.structure || day.kind !== "interval") return day;
-  let changed = false;
-  const blocks = day.structure.blocks.map((block) => {
-    if (block.iterations <= MAX_INTERVAL_REPS) return block;
-    changed = true;
-    return { ...block, iterations: MAX_INTERVAL_REPS };
-  });
-  if (!changed) return day;
+  if (structureWorkRepetitions(day.structure) <= MAX_INTERVAL_REPS) return day;
+  let remaining = MAX_INTERVAL_REPS;
+  const blocks: MobileSessionStructure["blocks"] = [];
+  for (const block of day.structure.blocks) {
+    const workSteps = block.steps.filter(step => step.purpose === "work").length;
+    if (workSteps === 0) { blocks.push(block); continue; }
+    if (remaining === 0) continue;
+    const iterations = Math.min(block.iterations, Math.floor(remaining / workSteps));
+    if (iterations > 0) {
+      blocks.push({ ...block, iterations });
+      remaining -= iterations * workSteps;
+    } else {
+      // Keep only the prefix that fits; rebuilding a custom short session from
+      // the standard 800 m template could accidentally increase its dose.
+      const steps: MobileWorkoutStep[] = [];
+      for (const step of block.steps) {
+        if (step.purpose === "work") {
+          if (remaining === 0) break;
+          remaining--;
+        }
+        steps.push(step);
+      }
+      blocks.push({ iterations: 1, steps });
+    }
+  }
   clamped.push(`${day.localDate} 间歇组数超过 ${MAX_INTERVAL_REPS}，已截断`);
   return { ...day, structure: { ...day.structure, blocks } };
 }
 
-function demoteToEasy(day: MobilePlannedDay, prescription: CoachZonePrescription | null): MobilePlannedDay {
+function demoteToEasy(
+  day: MobilePlannedDay, prescription: CoachZonePrescription | null, ceilingKm?: number
+): MobilePlannedDay {
   const measured = measuredDay(day, prescription);
   const asked = measured && measured.distanceKm > 0 ? measured.distanceKm : day.distanceKm;
   // Clamped like every other request for a structure: the demoted day is rebuilt
   // from this number, and a request at the cap measures just above it.
-  const target = asked == null ? null : Math.min(MAX_PLANNED_DISTANCE_KM - DISTANCE_ROUNDING_KM, asked);
+  const target = asked == null ? null : Math.max(0, Math.min(
+    MAX_PLANNED_DISTANCE_KM - DISTANCE_ROUNDING_KM, asked,
+    ceilingKm == null ? Number.POSITIVE_INFINITY : ceilingKm - DISTANCE_ROUNDING_KM
+  ));
   const structure = buildSessionStructure("easy", prescription, { targetDistanceKm: target ?? null });
   // Re-measured and rounded like every other exit in this file. The value is
   // persisted, summed into the weekly total and shown in the app, so passing the
   // raw measurement through printed `7.838461538461538` on a degraded day while
   // the day before it read a plain `7.8`.
   const remeasured = structure ? measureStructure(structure, "easy", pacesFromZones(prescription)).distanceKm : 0;
+  if (ceilingKm != null && (!structure || remeasured <= 0 ||
+      remeasured > ceilingKm + 1e-6 || roundKm(remeasured) > ceilingKm + 1e-6)) {
+    return { ...day, kind: "rest", distanceKm: null, structure: null };
+  }
   return {
     localDate: day.localDate,
     kind: "easy",
@@ -453,6 +468,23 @@ function easyDurationFraction(days: MobilePlannedDay[], prescription: CoachZoneP
   return easy / total;
 }
 
+function capLongRunDistance(
+  day: MobilePlannedDay, capKm: number | undefined,
+  prescription: CoachZonePrescription | null, clamped: string[]
+): MobilePlannedDay {
+  if (day.kind !== "long_run" || capKm === undefined || !Number.isFinite(capKm) ||
+      Math.max(daySizeKm(day, prescription), day.distanceKm ?? 0) <= capKm + 1e-6) return day;
+  const structure = buildSessionStructure("long_run", prescription, {
+    targetDistanceKm: Math.max(0, capKm - DISTANCE_ROUNDING_KM)
+  });
+  const measured = structure ? measureStructure(structure, "long_run", pacesFromZones(prescription)).distanceKm : 0;
+  clamped.push(`${day.localDate} 长距离超过阶段上限 ${capKm.toFixed(1)}km，已缩减处方`);
+  if (!structure || measured <= 0 || measured > capKm + 1e-6 || roundKm(measured) > capKm + 1e-6) {
+    return { ...day, kind: "rest", distanceKm: null, structure: null, reason: "阶段预算不足以支撑最短长距离处方。" };
+  }
+  return { ...day, distanceKm: roundKm(measured), structure };
+}
+
 export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanValidationResult {
   const rejected: string[] = [];
   const clamped: string[] = [];
@@ -597,7 +629,7 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
   }
 
   // --- pace containment -----------------------------------------------------
-  days = days.map((day) => clampStepPaces(day, args.prescription, clamped));
+  days = days.map((day) => clampStepTargets(day, args.prescription, clamped));
 
   // --- per-day ceiling ------------------------------------------------------
   // Enforced again here, and not only where each day was first built: demotion
@@ -606,6 +638,7 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
   // are computed, which keeps the warnings quoting the same numbers that get
   // stored.
   days = days.map((day) => capDayDistance(day, args.prescription, clamped));
+  days = days.map((day) => capLongRunDistance(day, args.longRunCapKm, args.prescription, clamped));
 
   // --- volume ceiling -------------------------------------------------------
   const totalDistance = (list: MobilePlannedDay[]): number => weekSizeOf(list, args.prescription);
@@ -620,9 +653,11 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
   // ever sees the stored ones.
   const weekTotal = (list: MobilePlannedDay[]): number =>
     Math.max(totalDistance(list), storedDistance(list));
-  const ceiling =
+  const ceiling = Math.min(
+    args.volumeCeilingKm ?? Number.POSITIVE_INFINITY,
     weeklyPlanVolumeCeiling(args.weeklyDistanceKm, args.previousWeekDistanceKm) *
-    VOLUME_CEILING_TOLERANCE;
+      VOLUME_CEILING_TOLERANCE
+  );
   // Gated on what the week *costs*, not on what it measures: a plan whose
   // structures carry no measurable distance (an `open` work goal, a day without
   // warm-up or cool-down) measured 0 km, so the whole block below was skipped and
@@ -694,13 +729,13 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
     // The most expensive session goes first, so the one that survives is the
     // cheapest the week can run: keeping whichever happened to sit earliest left
     // a 5.3 km interval in a week that could have afforded a 2.5 km easy run.
-    // One session is retained — a week with no running at all is not a plan — and
-    // when the ceiling is below even that floor the warning below says so.
+    // Without a hard remaining budget, one minimum session is retained and any
+    // overshoot is reported. A hard budget may instead leave every day at rest.
     const cheapestKm = days.reduce(
       (min, day) => (day.kind === "rest" ? min : Math.min(min, daySizeKm(day, args.prescription))),
       Number.POSITIVE_INFINITY
     );
-    const limit = Number.isFinite(cheapestKm) ? Math.max(ceiling, cheapestKm) : ceiling;
+    const limit = args.volumeCeilingKm == null && Number.isFinite(cheapestKm) ? Math.max(ceiling, cheapestKm) : ceiling;
     const byCost = days
       .map((day, index) => ({ day, index }))
       .filter((entry) => entry.day.kind !== "rest")
@@ -711,7 +746,7 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
     let remaining = byCost.length;
     let dropped = 0;
     for (const entry of byCost) {
-      if (remaining <= 1 || weekTotal(days) <= limit + 1e-6) break;
+      if (remaining <= (args.volumeCeilingKm == null ? 1 : 0) || weekTotal(days) <= limit + 1e-6) break;
       days[entry.index] = {
         localDate: entry.day.localDate,
         kind: "rest",
@@ -743,6 +778,25 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
     if (dropped > 0) {
       clamped.push(`周跑量预算不足以支撑 ${dropped} 堂课，已改为休息`);
     }
+  }
+
+  // Volume fitting can shrink easy running while fixed quality doses survive.
+  // Repair the final mix without enlarging either measured or stored distance.
+  for (let pass = 0; pass < days.length; pass += 1) {
+    const fraction = easyDurationFraction(days, args.prescription);
+    if (fraction == null || fraction >= args.easyDurationFloorFraction) break;
+    const qualityIndex = days.findLastIndex(day => QUALITY_KINDS.has(day.kind));
+    // Long runs are not easy/recovery in this policy; they cannot make the floor optional.
+    const index = qualityIndex >= 0 ? qualityIndex : days.findLastIndex(day => day.kind === "long_run");
+    if (index < 0) {
+      rejected.push("轻松时段占比低于下限，无法形成有效课表");
+      break;
+    }
+    const day = days[index]!;
+    const limit = Math.min(daySizeKm(day, args.prescription), day.distanceKm ?? Number.POSITIVE_INFINITY);
+    const replacement = demoteToEasy(day, args.prescription, limit);
+    days[index] = replacement;
+    clamped.push(`轻松时段占比低于下限，已${replacement.kind === "rest" ? "改为休息" : "降级"} ${day.localDate} 的${day.kind === "long_run" ? "长距离课" : "质量课"}`);
   }
 
   return { days, rejected, clamped };

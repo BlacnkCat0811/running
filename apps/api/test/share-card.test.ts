@@ -144,3 +144,87 @@ test("V03: zone parameters that cannot describe a circle are ignored, not obeyed
   assert.equal(result.zonesApplied, 0);
   assert.equal(result.polylines[0]!.length, points.length, "an invalid zone must not silently delete the route");
 });
+
+test("privacy zones redact nearby points across the antimeridian", () => {
+  for (const direction of [-1, 1]) {
+    const points = [-179.999, -179.9985].map(longitude => ({ latitude: 0, longitude: direction * longitude }));
+    const result = trimRouteForShare(points, [{ centerLatitude: 0, centerLongitude: direction * 179.999, radiusMeters: 300 }]);
+    assert.equal(result.redactedPoints, 2);
+    assert.deepEqual(result.polylines, []);
+  }
+});
+
+test("dateline-crossing segments are clipped along their short arc in either direction", () => {
+  const points = [179.99, 179.999, -179.999, -179.99].map(longitude => ({ latitude: 0, longitude }));
+  for (const route of [points, [...points].reverse()]) {
+    for (const centerLongitude of [-180, 180]) {
+      const result = trimRouteForShare(route, [{ centerLatitude: 0, centerLongitude, radiusMeters: 300 }]);
+      assert.equal(result.redactedPoints, 2);
+      assert.equal(result.polylines.length, 2);
+      assert.equal(result.gaps, 1);
+      for (const polyline of result.polylines) {
+        for (const point of polyline) {
+          assert.ok(Math.abs(point.longitude) <= 180);
+          assert.ok((180 - Math.abs(point.longitude)) * 111_320 >= 300 - 0.001, "no boundary interpolation may reveal a point inside the zone");
+        }
+        assert.ok(Math.abs(polyline[0]!.longitude - polyline.at(-1)!.longitude) < 1);
+      }
+    }
+  }
+});
+
+test("unredacted dateline crossings never draw a chord across the world", () => {
+  const points = [179.99, 179.999, -179.999, -179.99].map(longitude => ({ latitude: 0, longitude }));
+  for (const route of [points, [...points].reverse()]) {
+    const result = trimRouteForShare(route, []);
+    assert.equal(result.redactedPoints, 0);
+    assert.equal(result.gaps, 0, "a geographic seam is not a privacy gap");
+    assert.equal(result.polylines.length, 2);
+    for (const polyline of result.polylines) {
+      for (let index = 1; index < polyline.length; index++) {
+        assert.ok(Math.abs(polyline[index]!.longitude - polyline[index - 1]!.longitude) < 1);
+      }
+    }
+  }
+});
+
+test("a short dateline-crossing segment is cut even when both endpoints are outside the zone", () => {
+  for (const latitude of [0, 60]) {
+    const points = [179.99, -179.99].map(longitude => ({ latitude, longitude }));
+    const metersPerDegree = 111_320 * Math.cos(latitude * Math.PI / 180);
+    for (const route of [points, [...points].reverse()]) {
+      const result = trimRouteForShare(route, [{ centerLatitude: latitude, centerLongitude: 180, radiusMeters: 300 }]);
+      assert.equal(result.redactedPoints, 0);
+      assert.equal(result.polylines.length, 2);
+      assert.equal(result.gaps, 1);
+      for (const polyline of result.polylines) {
+        assert.ok(Math.abs(polyline[0]!.longitude - polyline.at(-1)!.longitude) < 1);
+        for (const point of polyline) {
+          assert.ok(Math.abs(point.longitude) <= 180);
+          assert.ok((180 - Math.abs(point.longitude)) * metersPerDegree >= 300 - 0.001);
+        }
+      }
+    }
+  }
+});
+
+test("privacy boundaries do not move when distant parts of a route change its mean latitude", () => {
+  for (const direction of [-1, 1]) {
+    const latitude = direction * 60;
+    const metersPerDegree = 111_320 * Math.cos(latitude * Math.PI / 180);
+    const points = [
+      { latitude: direction * 59.8, longitude: 120 },
+      { latitude, longitude: 120 + 299.5 / metersPerDegree },
+      { latitude, longitude: 120 + 400 / metersPerDegree }
+    ];
+    const result = trimRouteForShare(points, [{ centerLatitude: latitude, centerLongitude: 120, radiusMeters: 300 }]);
+    assert.equal(result.redactedPoints, 1, "a point 299.5 m from the zone center must remain hidden");
+    for (const polyline of result.polylines) {
+      for (const point of polyline) {
+        const x = (point.longitude - 120) * metersPerDegree;
+        const y = (point.latitude - latitude) * DEGREE_LATITUDE_METERS;
+        assert.ok(Math.hypot(x, y) >= 300 - 0.001, "all emitted coordinates must clear the zone's own boundary");
+      }
+    }
+  }
+});

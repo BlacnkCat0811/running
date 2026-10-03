@@ -1,6 +1,7 @@
-import { currentAbilityBaselineHash } from "../src/prediction-ability-baseline.js";
+import { currentAbilityBaselineHash, predictionLabelRevision } from "../src/prediction-ability-baseline.js";
 import { fitEmpiricalIntervals, INTERVAL_RELEASE_POLICY, type EvaluationCase } from "@rai/model-eval";
-import { SqliteCalibrationRepository } from "@rai/storage-sqlite";
+import { PHYSIOLOGY_MODEL_VERSION } from "@rai/physiology";
+import { SqliteCalibrationRepository, SqlitePerformanceEntryRepository } from "@rai/storage-sqlite";
 import { catBoostCalibrationKey } from "../src/prediction-policy.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -33,6 +34,8 @@ import {
   verifyOnnxGoldenVectors
 } from "../src/prediction-training-runner.js";
 import { buildPredictionReportAsync } from "../src/prediction-report.js";
+import { RaiApplicationService } from "../src/service.js";
+import { loadLabeledRaceOutcomes, loadManualPerformanceOutcomes, type LabeledRaceOutcome } from "../src/prediction-data.js";
 
 const asOf = "2026-07-11T00:00:00.000Z";
 
@@ -157,6 +160,7 @@ function writeArtifact(root: string, label = "test-run"): {
   mkdirSync(artifactPath, { recursive: true });
   const bytes = Buffer.from(`onnx-fixture:${label}`);
   writeFileSync(join(artifactPath, "model.onnx"), bytes);
+  writeFileSync(join(artifactPath, "manifest.json"), JSON.stringify({ scope: "population" }));
   return {
     artifactPath,
     artifactSha256: createHash("sha256").update(bytes).digest("hex")
@@ -195,10 +199,14 @@ function successfulResult(root: string, label = "test-run"): PredictionModelTrai
 }
 
 const activationClock=()=>"2026-09-29T00:00:00.000Z";
-function approveIntervals(store:RaiDatabase,result:PredictionModelTrainingResult):void {
-  const baseline=currentAbilityBaselineHash(store.database)!;
+function approveIntervals(store:RaiDatabase,result:PredictionModelTrainingResult, dependency?: LabeledRaceOutcome, baselineHash?: string):void {
+  const baseline=baselineHash ?? currentAbilityBaselineHash(store.database)!;
   for(const distance of ["five_k","ten_k","half_marathon"] as const){
-    const rows=(prefix:string,month:string):EvaluationCase[]=>Array.from({length:24},(_,i)=>({
+    const rows=(prefix:string,month:string):EvaluationCase[]=>Array.from({length:24},(_,i)=>
+      dependency && dependency.distance === distance && prefix === "cal" && i === 0 ? {
+        eventId: dependency.id, distance, predictedAt: dependency.observedAt, outcomeAt: dependency.completedAt,
+        availableAt: dependency.labelAvailableAt, actualSeconds: dependency.actualSeconds, predictedSeconds: 1000
+      } : ({
       eventId:`${prefix}-${distance}-${i}`,distance,predictedAt:`2026-${month}-${String(i+1).padStart(2,"0")}T00:00:00Z`,
       outcomeAt:`2026-${month}-${String(i+1).padStart(2,"0")}T01:00:00Z`,availableAt:`2026-${month}-${String(i+1).padStart(2,"0")}T02:00:00Z`,
       actualSeconds:prefix==="cal"?1000*Math.exp(-0.1+i*0.2/23):1000,predictedSeconds:1000
@@ -337,6 +345,49 @@ test("does not serve an active residual model for a different formula baseline",
   }
 });
 
+for (const version of ["v4", "v5"]) test(`the temporal exclusion fix rejects formula-${version} models and intervals without erasing their audit rows`, async () => {
+  const root = mkdtempSync(join(tmpdir(), `rai-formula-${version}-retirement-`));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const legacyBaseline = createHash("sha256").update(JSON.stringify({
+      modelRunId: "prediction-ability-run",
+      featureRunId: "prediction-feature-run",
+      datasetVersion: "dataset-1",
+      modelVersion: "ability-1",
+      modelConfigHash: "ability-config-1",
+      featureSchemaVersion: "features-1",
+      featureConfigHash: "feature-config-1",
+      canonicalContractVersion: "contract-1",
+      physiologyModelVersion: PHYSIOLOGY_MODEL_VERSION,
+      formulaPredictionBaseVersion: `rai-formula-prediction-base-${version}`,
+      labelRevision: predictionLabelRevision(store.database)
+    })).digest("hex");
+    const currentBaseline = currentAbilityBaselineHash(store.database)!;
+    assert.notEqual(currentBaseline, legacyBaseline);
+    const service = new PredictionModelService(store, undefined, "owned", activationClock);
+    const runId = service.enqueue({ asOf });
+    service.claimNext();
+    const result = successfulResult(root, `formula-${version}`);
+    service.completeAndActivate(runId, result);
+    approveIntervals(store, result, undefined, legacyBaseline);
+    store.database.prepare("UPDATE prediction_model_runs SET ability_baseline_hash = ? WHERE id = ?")
+      .run(legacyBaseline, runId);
+    const intervals = new SqliteCalibrationRepository(store.database);
+    const key = catBoostCalibrationKey(result.artifactSha256);
+    assert.ok(intervals.select(key, legacyBaseline, "five_k", activationClock(), 1000));
+    assert.equal(intervals.select(key, currentBaseline, "five_k", activationClock(), 1000), null);
+    assert.throws(() => service.activate(runId), error => error instanceof PredictionModelActivationCompatibilityError &&
+      error.reasons.includes("ability_baseline_mismatch"));
+    store.database.prepare("INSERT INTO active_prediction_model (singleton, prediction_model_run_id) VALUES (1, ?)")
+      .run(runId);
+    const report = await buildPredictionReportAsync(store.database, { asOf: activationClock() });
+    assert.equal(report.modelSelection.machineLearning.status, "inference_unavailable");
+    assert.ok(report.snapshot.races.every(race => race.method !== "catboost_residual_v6"));
+    assert.equal(service.get(runId)?.status, "succeeded");
+    assert.equal(store.database.prepare("SELECT COUNT(*) AS count FROM prediction_calibration_artifacts").get()?.count, 3);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("point validation waits for independent intervals before atomic CatBoost activation", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-prediction-model-"));
   const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
@@ -362,6 +413,147 @@ test("point validation waits for independent intervals before atomic CatBoost ac
       SELECT prediction_model_run_id AS id FROM active_prediction_model WHERE singleton = 1
     `).get() as unknown as { id: string };
     assert.equal(active.id, runId);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const mutation of ["manual_revocation", "workout_exclusion", "unlinked_manual_replacement"] as const) {
+  test(`${mutation} retires active models and intervals and blocks historical reactivation`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-label-invalidation-"));
+    const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+    try {
+      const entries = new SqlitePerformanceEntryRepository(store.database);
+      const entry = entries.insert({ localDate: "2026-08-01", distance: "five_k", durationSeconds: 1000,
+        note: null, recordedAt: "2026-08-02T00:00:00Z" });
+      const dependency = loadManualPerformanceOutcomes(store.database, activationClock())[0]!;
+      const service = new PredictionModelService(store, undefined, "owned", activationClock);
+      const id = service.enqueue({ asOf });
+      service.claimNext();
+      const result = successfulResult(root, mutation);
+      service.completeAndActivate(id, result);
+      approveIntervals(store, result, dependency);
+      service.activate(id);
+      const baseline = currentAbilityBaselineHash(store.database)!;
+      const intervals = new SqliteCalibrationRepository(store.database);
+      const key = catBoostCalibrationKey(result.artifactSha256);
+      assert.ok(intervals.select(key, baseline, "five_k", activationClock(), 1000));
+      if (mutation === "manual_revocation") {
+        assert.equal(new RaiApplicationService(store).revokePerformanceEntry(entry.id), true);
+      } else if (mutation === "workout_exclusion") {
+        store.database.exec(`INSERT INTO workout_overrides
+          (id, training_session_id, revision, session_type, performance_protocol, eligibility_override, condition_tags_json, created_at)
+          VALUES ('withdrawn-label', 'prediction_session_0', 2, 'race', 'five_k_time_trial', 'exclude', '[]', '2026-09-30T00:00:00Z')`);
+      } else {
+        const original = loadLabeledRaceOutcomes(store.database, asOf).find(outcome => outcome.id === "prediction_session_0");
+        assert.equal(Math.round(original!.actualSeconds), 1500);
+        const replacement = new RaiApplicationService(store).appendPerformanceEntry({
+          localDate: "2024-01-01", distance: "five_k", durationSeconds: 1000, note: null
+        });
+        assert.equal(replacement.trainingSessionId, null);
+        const outcomes = loadLabeledRaceOutcomes(store.database, replacement.recordedAt);
+        assert.equal(outcomes.find(outcome => outcome.id === replacement.id)?.actualSeconds, 1000);
+        assert.ok(!outcomes.some(outcome => outcome.id === original!.id));
+      }
+      const current = currentAbilityBaselineHash(store.database)!;
+      assert.notEqual(current, baseline);
+      assert.equal(service.get(id)?.active, false);
+      assert.equal(intervals.select(key, current, "five_k", "2026-10-03T00:00:00Z", 1000), null);
+      assert.throws(() => service.activate(id), error => error instanceof PredictionModelActivationCompatibilityError &&
+        error.reasons.includes("ability_baseline_mismatch"));
+      assert.equal(service.get(id)?.status, "succeeded", "historical audit rows are retained");
+      assert.equal(store.database.prepare("SELECT COUNT(*) AS count FROM prediction_calibration_artifacts").get()?.count, 3);
+      // Even a restored or externally inserted stale pointer must fail closed at serve time.
+      store.database.prepare("INSERT INTO active_prediction_model (singleton, prediction_model_run_id) VALUES (1, ?)").run(id);
+      const report = await buildPredictionReportAsync(store.database, { asOf: "2026-10-03T00:00:00Z" });
+      assert.equal(report.modelSelection.machineLearning.status, "inference_unavailable");
+      assert.ok(report.snapshot.races.every(race => race.method !== "catboost_residual_v6"));
+    } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
+test("label invalidation rolls back with the mutation and pending training rejects a withdrawn baseline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-label-inflight-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const entries = new SqlitePerformanceEntryRepository(store.database);
+    const entry = entries.insert({ localDate: "2026-08-01", distance: "five_k", durationSeconds: 1000,
+      note: null, recordedAt: "2026-08-02T00:00:00Z" });
+    const service = new PredictionModelService(store);
+    const id = service.enqueue({ asOf });
+    service.claimNext();
+    const before = currentAbilityBaselineHash(store.database);
+    store.database.exec("BEGIN IMMEDIATE");
+    new RaiApplicationService(store, "savepoint").revokePerformanceEntry(entry.id);
+    assert.notEqual(currentAbilityBaselineHash(store.database), before);
+    store.database.exec("ROLLBACK");
+    assert.equal(currentAbilityBaselineHash(store.database), before);
+    assert.equal(entries.list()[0]?.revokedAt, null);
+    entries.revoke(entry.id);
+    const completed = service.completeAndActivate(id, successfulResult(root, "withdrawn-inflight"));
+    assert.equal(completed.status, "rejected");
+    assert.ok((completed.failure as { reasons: string[] }).reasons.includes("ability_baseline_mismatch"));
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("M12: completion rejects artifacts from a different or missing scope", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-artifact-scope-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store);
+    for (const scope of ["population", undefined, "unknown"] as const) {
+      const id = service.enqueue({ asOf, scope: "personal" });
+      service.claimNext();
+      const result = successfulResult(root, `scope-${scope}`);
+      writeFileSync(join(result.artifactPath, "manifest.json"), JSON.stringify({ scope }));
+      const completed = service.completeAndActivate(id, result);
+      assert.equal(completed.status, "rejected");
+      assert.equal(completed.active, false);
+      assert.ok((completed.failure as { reasons: string[] }).reasons.includes("artifact_scope_mismatch"));
+    }
+    const id = service.enqueue({ asOf, scope: "personal" });
+    service.claimNext();
+    const result = successfulResult(root, "personal");
+    writeFileSync(join(result.artifactPath, "manifest.json"), JSON.stringify({ scope: "personal" }));
+    assert.equal(service.completeAndActivate(id, result).status, "succeeded");
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("M12: activation rechecks manifest scope before publishing the model", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-activation-scope-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const service = new PredictionModelService(store, undefined, "owned", activationClock);
+    const id = service.enqueue({ asOf });
+    service.claimNext();
+    const result = successfulResult(root);
+    assert.equal(service.completeAndActivate(id, result).status, "succeeded");
+    approveIntervals(store, result);
+    writeFileSync(join(result.artifactPath, "manifest.json"), JSON.stringify({ scope: "personal" }));
+    assert.throws(() => service.activate(id), /artifact_scope_mismatch/);
+    assert.equal(service.get(id)!.active, false);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CatBoost run versions do not alter the ability baseline hash", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-prediction-version-hash-"));
+  const store = await seedLabeledOutcomes(join(root, "rai.sqlite"), 51);
+  try {
+    const hash = currentAbilityBaselineHash(store.database);
+    const id = new PredictionModelService(store).enqueue({ asOf });
+    for (const version of ["race-residual-catboost-v4", "race-residual-catboost-v5"]) {
+      store.database.prepare("UPDATE prediction_model_runs SET model_version = ? WHERE id = ?").run(version, id);
+      assert.equal(currentAbilityBaselineHash(store.database), hash);
+    }
+    store.database.prepare("UPDATE model_runs SET model_version = 'ability-2'").run();
+    assert.notEqual(currentAbilityBaselineHash(store.database), hash);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
@@ -627,6 +819,7 @@ test("preserves stored model versions and refuses to activate incompatible histo
 
     assertActivationRejected("model_version", "race-residual-catboost-v0", "model_version_mismatch");
     assert.equal(service.get(historicalId)?.modelVersion, "race-residual-catboost-v0");
+    assertActivationRejected("model_version", "race-residual-catboost-v4", "model_version_mismatch");
     store.database.prepare(`
       UPDATE prediction_model_runs SET model_version = ? WHERE id = ?
     `).run(historical.modelVersion, historicalId);

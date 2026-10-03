@@ -1,4 +1,4 @@
-import type { PerformanceEntryDistance } from "@rai/contracts";
+import { performanceResultValidationError, raceDistanceMeters, type PerformanceEntryDistance } from "@rai/contracts";
 
 /**
  * Sessions that *look like* a race or a time trial (docs/ALGORITHM.md §12.13).
@@ -23,23 +23,14 @@ import type { PerformanceEntryDistance } from "@rai/contracts";
  * was proposed: a suggestion the runner cannot audit is a suggestion they cannot trust.
  */
 
-export const RACE_CANDIDATE_POLICY_VERSION = "rai-race-candidate-v1" as const;
+export const RACE_CANDIDATE_POLICY_VERSION = "rai-race-candidate-v2" as const;
 
 /** How far a session may sit from a standard distance and still be proposed. */
 export const DISTANCE_TOLERANCE_FRACTION = 0.03;
 /** How much faster than the runner's median at that distance counts as "hard". */
 export const RELATIVE_PACE_THRESHOLD = 0.05;
 
-export const STANDARD_DISTANCE_METERS: Record<PerformanceEntryDistance, number> = {
-  five_k: 5_000,
-  ten_k: 10_000,
-  half_marathon: 21_097.5
-};
-
-const MINIMUM_SECONDS = 12 * 60;
-const MAXIMUM_SECONDS = 4 * 60 * 60;
-const MINIMUM_PACE_SECONDS_PER_KM = 150;
-const MAXIMUM_PACE_SECONDS_PER_KM = 900;
+export const STANDARD_DISTANCE_METERS: Record<PerformanceEntryDistance, number> = raceDistanceMeters;
 
 export interface RaceCandidateSession {
   trainingSessionId: string;
@@ -102,15 +93,11 @@ export function findRaceCandidates(
 ): RaceCandidate[] {
   const eligible = sessions.flatMap((session) => {
     if (session.labelled) return [];
-    if (!Number.isFinite(session.durationSeconds) || !Number.isFinite(session.distanceMeters)) return [];
-    if (session.distanceMeters <= 0) return [];
-    if (session.durationSeconds < MINIMUM_SECONDS || session.durationSeconds > MAXIMUM_SECONDS) return [];
+    if (performanceResultValidationError(session.distanceMeters, session.durationSeconds) !== null) return [];
     const standard = nearestStandardDistance(session.distanceMeters);
     if (standard === null) return [];
+    if (performanceResultValidationError(STANDARD_DISTANCE_METERS[standard.distance], session.durationSeconds) !== null) return [];
     const paceSecondsPerKm = session.durationSeconds / (session.distanceMeters / 1_000);
-    if (paceSecondsPerKm < MINIMUM_PACE_SECONDS_PER_KM || paceSecondsPerKm > MAXIMUM_PACE_SECONDS_PER_KM) {
-      return [];
-    }
     return [{ session, standard, paceSecondsPerKm }];
   });
 

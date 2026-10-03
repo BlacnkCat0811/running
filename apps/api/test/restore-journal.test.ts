@@ -8,6 +8,7 @@ import test from "node:test";
 import { RaiDatabase } from "@rai/storage-sqlite";
 import { DatabaseMaintenance } from "../src/maintenance.js";
 import { RestoreJournal } from "../src/restore-journal.js";
+import { readDatasetEpoch, writeDatasetEpoch } from "../src/dataset-epoch.js";
 
 for (const point of ["prepared", "moved", "installed", "committed"] as const) {
   test(`startup replays restore interruption at ${point}`, async () => {
@@ -19,11 +20,14 @@ for (const point of ["prepared", "moved", "installed", "committed"] as const) {
     try {
       const store = await RaiDatabase.open(target);
       store.database.exec("CREATE TABLE marker(value TEXT); INSERT INTO marker VALUES ('original')");
+      writeDatasetEpoch(store.database, "configured", "original-epoch");
       store.close();
       await copyFile(target, snapshot);
       await copyFile(target, staging);
       const candidate = new DatabaseSync(staging);
-      candidate.exec("UPDATE marker SET value='candidate'"); candidate.close();
+      candidate.exec("UPDATE marker SET value='candidate'");
+      writeDatasetEpoch(candidate, "configured", "candidate-epoch");
+      candidate.close();
       const journal = new RestoreJournal(target, root);
       const intent = { target, staging, snapshot, snapshotIsQuarantine: false, phase: "prepared" as const };
       journal.write(intent);
@@ -37,6 +41,7 @@ for (const point of ["prepared", "moved", "installed", "committed"] as const) {
       const active = new DatabaseSync(target, { readOnly: true });
       try { assert.equal(active.prepare("SELECT value FROM marker").get()!.value, point === "committed" ? "candidate" : "original"); }
       finally { active.close(); }
+      assert.equal(readDatasetEpoch(target, "configured"), point === "committed" ? "candidate-epoch" : "original-epoch");
       assert.equal(journal.read(), null);
       assert.ok(existsSync(snapshot));
     } finally { rmSync(root, { recursive: true, force: true }); }

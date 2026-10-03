@@ -9,17 +9,16 @@ import type { PlanHistoryRevision } from "./mobile-goals.js";
  * Read-time, like the periodisation it sits beside. The rules that matter here are
  * about **not** overstating what was observed:
  *
- * 1. A day with no observations is `unknown`, never a missed session. Import lag and
+ * 1. A prescribed training day with no observations is `unknown`, never a missed session. Import lag and
  *    a phone left at home look identical from here, and only one of them is a fact
  *    about training.
- * 2. A week's obligations are read from the plan revision that was in force at that
- *    week's local midnight — editing today's plan must not rewrite last week's
- *    adherence.
+ * 2. Obligations freeze per local day, with the first same-day prescription used
+ *    when none existed at midnight. Later edits cannot rewrite elapsed days.
  * 3. Adherence never writes anything. It produces a *recommendation* to re-draft,
  *    and the existing preview/confirm flow is still the only way a plan changes.
  */
 
-export const PLAN_ADHERENCE_POLICY_VERSION = "rai-plan-adherence-v1" as const;
+export const PLAN_ADHERENCE_POLICY_VERSION = "rai-plan-adherence-v3" as const;
 export const REPLAN_POLICY_VERSION = "rai-replan-v1" as const;
 
 /** Below this share of the planned volume a week reads as under-delivered. */
@@ -33,11 +32,13 @@ export interface AdherenceWeek {
   weekStart: string;
   phase: PeriodizationPhase | null;
   plannedDays: number;
-  /** Days the plan asked for a session and the plan snapshot exists. */
+  /** Non-rest prescription dates with at least one observed workout. */
   observedDays: number;
   unknownDays: number;
   plannedDistanceKm: number | null;
+  /** Observed volume on non-rest prescription dates, not all runs that week. */
   observedDistanceKm: number;
+  /** Whole-week progress; current-week status compares only obligations due so far. */
   volumeRatio: number | null;
   qualityPlanned: number;
   qualityObserved: number;
@@ -75,8 +76,7 @@ const round = (value: number, digits = 2): number => {
  * Builds weekly adherence for the last `weeks` weeks (most recent first).
  *
  * `history` is the plan revision journal, newest first, as stored by
- * `mobile-goals`; the revision in force at a week's local midnight is the one that
- * defines what that week asked for.
+ * `mobile-goals`; each day's effective prescription defines its obligation.
  */
 export function buildPlanAdherence(input: {
   today: string;
@@ -89,7 +89,8 @@ export function buildPlanAdherence(input: {
   const currentWeekStart = periodizationWeekStart(input.today);
   const observed = new Map(input.actual.map((day) => [day.localDate, day]));
   const revisions = [...input.history]
-    .filter((item) => Number.isFinite(Date.parse(item.changedAt)))
+    .filter((item) => Number.isFinite(Date.parse(item.changedAt)) &&
+      Date.parse(item.changedAt) < Date.parse(`${shiftDate(input.today, 1)}T00:00:00${ISO_UTC_OFFSET}`))
     .sort((left, right) => Date.parse(right.changedAt) - Date.parse(left.changedAt) || right.revision - left.revision);
 
   const result: AdherenceWeek[] = [];
@@ -99,10 +100,19 @@ export function buildPlanAdherence(input: {
   for (let index = 0; index < weeksToReport; index += 1) {
     const weekStart = shiftDate(currentWeekStart, -7 * index);
     const phase = input.periodization.weeks.find((week) => week.weekStart === weekStart)?.phase ?? null;
-    // Freeze at local midnight: later edits must not rewrite what last week asked for.
-    const boundary = Date.parse(`${weekStart}T00:00:00${ISO_UTC_OFFSET}`);
-    const revision = revisions.find((item) => Date.parse(item.changedAt) < boundary);
-    const planned = revision?.weekPlan.filter((day) => periodizationWeekStart(day.localDate) === weekStart) ?? [];
+    const planned = Array.from({ length: 7 }, (_, offset) => {
+      const localDate = shiftDate(weekStart, offset);
+      const boundary = Date.parse(`${localDate}T00:00:00${ISO_UTC_OFFSET}`);
+      if (localDate > input.today) return revisions[0]?.weekPlan.find(day => day.localDate === localDate);
+      const atMidnight = revisions.find(item => Date.parse(item.changedAt) <= boundary);
+      const existing = atMidnight?.weekPlan.find(day => day.localDate === localDate);
+      if (existing) return existing;
+      // Initial plans made on Monday or midweek still create real obligations.
+      const end = Date.parse(`${shiftDate(localDate, 1)}T00:00:00${ISO_UTC_OFFSET}`);
+      const firstSameDay = [...revisions].reverse().find(item => Date.parse(item.changedAt) > boundary &&
+        Date.parse(item.changedAt) < end && item.weekPlan.some(day => day.localDate === localDate));
+      return firstSameDay?.weekPlan.find(day => day.localDate === localDate);
+    }).filter(day => day !== undefined);
 
     let plannedDistanceKm: number | null = null;
     let observedDistanceKm = 0;
@@ -110,20 +120,23 @@ export function buildPlanAdherence(input: {
     let unknownDays = 0;
     let qualityPlanned = 0;
     let qualityObserved = 0;
+    let dueDistanceKm = 0;
 
     for (let offset = 0; offset < 7; offset += 1) {
       const localDate = shiftDate(weekStart, offset);
       const plannedDay = planned.find((day) => day.localDate === localDate) ?? null;
-      const seen = observed.get(localDate) ?? null;
-      if (plannedDay?.distanceKm != null) {
+      if (!plannedDay || plannedDay.kind === "rest") continue;
+      const seen = localDate <= input.today ? observed.get(localDate) ?? null : null;
+      if (plannedDay.distanceKm != null) {
         plannedDistanceKm = (plannedDistanceKm ?? 0) + plannedDay.distanceKm;
+        if (localDate <= input.today) dueDistanceKm += plannedDay.distanceKm;
       }
-      if (plannedDay && QUALITY_KINDS.has(plannedDay.kind)) qualityPlanned += 1;
+      if (QUALITY_KINDS.has(plannedDay.kind)) qualityPlanned += 1;
       if (seen && seen.workoutCount > 0) {
         observedDays += 1;
         observedDistanceKm += seen.distanceKm;
-        if (plannedDay && QUALITY_KINDS.has(plannedDay.kind)) qualityObserved += 1;
-      } else if (plannedDay && localDate <= input.today) {
+        if (QUALITY_KINDS.has(plannedDay.kind)) qualityObserved += 1;
+      } else if (localDate <= input.today) {
         unknownDays += 1;
       }
     }
@@ -133,13 +146,13 @@ export function buildPlanAdherence(input: {
         ? round(observedDistanceKm / plannedDistanceKm, 3)
         : null;
     const status: AdherenceWeek["status"] =
-      revision === undefined
+      planned.length === 0
         ? "unknown"
         : observedDays === 0 && unknownDays > 0
           ? "unknown"
-          : volumeRatio !== null && volumeRatio < ADHERENCE_LOW_VOLUME_RATIO
+          : dueDistanceKm > 0 && observedDistanceKm / dueDistanceKm < ADHERENCE_LOW_VOLUME_RATIO
             ? "under"
-            : volumeRatio !== null && volumeRatio >= 1
+            : volumeRatio !== null && volumeRatio >= 1 && shiftDate(weekStart, 6) <= input.today
               ? "met"
               : "on_track";
 
@@ -179,7 +192,7 @@ export function replanAdvice(input: {
   periodization: Periodization;
 }): ReplanAdvice {
   const reasons: Array<{ code: string; detail: string }> = [];
-  const completedWeeks = input.adherence.weeks.filter((week) => week.status !== "unknown");
+  const completedWeeks = input.adherence.weeks.filter((week) => shiftDate(week.weekStart, 6) < input.adherence.generatedFor);
 
   let consecutiveLow = 0;
   for (const week of completedWeeks) {
@@ -187,7 +200,7 @@ export function replanAdvice(input: {
       consecutiveLow += 1;
       if (consecutiveLow >= REPLAN_CONSECUTIVE_LOW_WEEKS) break;
     } else {
-      consecutiveLow = 0;
+      break;
     }
   }
   if (consecutiveLow >= REPLAN_CONSECUTIVE_LOW_WEEKS) {
@@ -199,11 +212,11 @@ export function replanAdvice(input: {
 
   const missedQuality = completedWeeks
     .slice(0, 1)
-    .reduce((sum, week) => sum + Math.max(0, week.qualityPlanned - week.qualityObserved), 0);
+    .reduce((sum, week) => sum + (week.status === "unknown" ? 0 : Math.max(0, week.qualityPlanned - week.qualityObserved)), 0);
   if (missedQuality >= REPLAN_MISSED_QUALITY_SESSIONS) {
     reasons.push({
       code: "quality_sessions_unobserved",
-      detail: `本周有 ${missedQuality} 次质量课没有观测到训练记录，可能需要重排而不是补课。`
+      detail: `上一已结束周有 ${missedQuality} 次质量课没有观测到训练记录，可能需要重排而不是补课。`
     });
   }
 
