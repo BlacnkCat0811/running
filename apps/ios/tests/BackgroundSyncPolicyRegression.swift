@@ -26,7 +26,7 @@ import Foundation
 ///
 /// 之所以要有这个可执行文件：`HealthKitSync.swift` 与 `RAIApp.swift`/`AppDelegate.swift`
 /// 都不被任何回归脚本编译（前者只被 `typecheck-ios.sh` 类型检查，后两个连同被
-/// `typecheck-ios.sh:92` 排除），判据若留在它们里面就没有执行者。
+/// `typecheck-ios.sh:102` 排除），判据若留在它们里面就没有执行者。
 /// `BackgroundUploadSession.swift` 同样：它 `#if os(iOS)` 包裹且要真实 `URLSession` 才能跑，
 /// 所以它的判据在能搬出去的地方就必须搬出去。
 @main

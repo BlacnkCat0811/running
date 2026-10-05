@@ -33,7 +33,7 @@ struct TechTodayRecoveryMetrics: View {
             Image(systemName: icon)
                 .font(.system(size: 23, weight: .medium))
                 .foregroundStyle(color)
-                .shadow(color: color.opacity(0.3), radius: 6).accessibilityHidden(true)
+                .accessibilityHidden(true)
             Text(title).font(.caption).foregroundStyle(TechColor.muted)
             Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
                 .foregroundStyle(TechColor.ink)

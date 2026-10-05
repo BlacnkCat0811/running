@@ -128,11 +128,11 @@ struct TechWorkoutFeedbackView: View {
             Text(label)
                 .font(.subheadline.weight(selected ? .semibold : .regular))
                 .lineLimit(1).fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(selected ? TechColor.background : TechColor.muted)
+                .foregroundStyle(selected ? TechColor.actionInk : TechColor.muted)
                 .padding(.horizontal, 14)
                 .background {
-                    if selected { Capsule().fill(TechColor.action) }
-                    else { Capsule().fill(TechColor.paper) }
+                    if selected { TechSurfaceShape().fill(TechColor.action) }
+                    else { TechSurfaceShape().fill(TechColor.paper) }
                 }
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())

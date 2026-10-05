@@ -382,6 +382,20 @@ func nativeEnvironmentReason(_ code: String) -> String {
     }
 }
 
+/// Correction-status wording for `WorkoutEnvironmentView.status`.
+///
+/// The contract requires all three states to stay distinguishable in the UI, and
+/// the failure it exists to prevent is `unavailable` reading as `not_needed`
+/// ("this capture carried no weather" must never look like "no adjustment was
+/// needed"). Kept out of the view for the same reason as the reason codes above.
+func nativeEnvironmentStatus(_ status: String) -> String {
+    switch status {
+    case "applied": return "已按环境条件修正"
+    case "not_needed": return "处于参考条件，未修正"
+    default: return "环境数据不足，未修正"
+    }
+}
+
 /// §20 phase and adherence wording. Keeping them out of the view means a new phase
 /// cannot silently fall through to a raw machine value.
 func nativePhaseName(_ phase: String) -> String {

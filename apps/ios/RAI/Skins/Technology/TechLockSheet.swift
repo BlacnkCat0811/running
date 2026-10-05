@@ -56,7 +56,7 @@ struct TechLockSheet: View {
                         Button("暂不锁定") { dismiss() }
                             .font(.subheadline).foregroundStyle(TechColor.cyan)
                             .frame(maxWidth: .infinity, minHeight: 44)
-                            .overlay(Capsule().stroke(TechColor.cyan.opacity(0.7), lineWidth: 1))
+                            .overlay(TechSurfaceShape().stroke(TechColor.cyan.opacity(0.7), lineWidth: 1))
                             .buttonStyle(TechPressStyle()).disabled(native.isLockingSession)
                     } else {
                         TechEmptyState(title: "暂无训练建议", message: "请返回首页刷新数据。")
@@ -77,7 +77,7 @@ struct TechLockSheet: View {
         .presentationDetents(typeSize >= .xxxLarge ? [.large] : [.medium, .large]).presentationDragIndicator(.visible)
         .interactiveDismissDisabled(native.isLockingSession)
         .presentationCornerRadius(24).presentationBackground(TechColor.paper)
-        .preferredColorScheme(.dark).tint(TechColor.cyan)
+        .preferredColorScheme(.light).tint(TechColor.cyan)
     }
 }
 #endif

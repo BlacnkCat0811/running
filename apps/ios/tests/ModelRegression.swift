@@ -839,6 +839,17 @@ final class RequestLog: @unchecked Sendable {
             check(text.contains("别处更新"), "feedback conflict is actionable and preserves draft")
         } else { preconditionFailure("CAS conflict cannot succeed") }
 
+        // §5 环境修正三态（docs/ALGORITHM.md）。契约要求 `applied` / `not_needed` /
+        // `unavailable` 在 UI 里可区分：把三者压成同一个字符串，就会让"本次没带天气"
+        // 读成"无需修正"—— 这正是该契约存在的理由。未知取值一律落到安全侧。
+        check(nativeEnvironmentStatus("applied") == "已按环境条件修正", "Applied correction has its own wording")
+        check(nativeEnvironmentStatus("not_needed") == "处于参考条件，未修正", "Reference conditions say so explicitly")
+        check(nativeEnvironmentStatus("unavailable") == "环境数据不足，未修正", "Missing weather must not read as no adjustment")
+        check(nativeEnvironmentStatus("applied") != nativeEnvironmentStatus("unavailable"),
+              "The two states a reader must never confuse stay distinguishable")
+        check(nativeEnvironmentStatus("brand_new_status") == "环境数据不足，未修正",
+              "An unknown status falls to the safe side, never to 'not needed'")
+
         print("All model regression checks passed.")
     }
 }

@@ -1356,6 +1356,7 @@ struct WorkoutEnvironmentView: Codable {
     let adapterVersion: String
     let status: String
     let source: String
+    let weatherCondition: Int?
     let temperatureC: Double?
     let humidityPercent: Double?
     let elevationGainMeters: Double?

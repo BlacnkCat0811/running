@@ -8,13 +8,17 @@ import SwiftUI
 /// are unavailable; it never presents a synthetic street map as real geography.
 struct TechRouteView: View, Equatable {
     let route: [RoutePoint]
+    let splits: [WorkoutSplit]
+    let startedAt: String
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.route.elementsEqual(rhs.route) {
-            $0.latitude == $1.latitude && $0.longitude == $1.longitude
+        lhs.startedAt == rhs.startedAt && lhs.splits.elementsEqual(rhs.splits) {
+            $0.distanceMeters == $1.distanceMeters && $0.durationSeconds == $1.durationSeconds
+        } && lhs.route.elementsEqual(rhs.route) {
+            $0.latitude == $1.latitude && $0.longitude == $1.longitude && $0.timestamp == $1.timestamp
         }
     }
     var body: some View {
-        TechPreparedRoute(geometry: TechRouteGeometry(route: route))
+        TechPreparedRoute(geometry: TechRouteGeometry(route: route, splits: splits, startedAt: startedAt))
     }
 }
 
@@ -23,8 +27,11 @@ private struct TechRouteGeometry {
     let coordinates: [CLLocationCoordinate2D]
     let points: [MKMapPoint]
     let rect: MKMapRect
-    init(route: [RoutePoint]) {
-        coordinates = route.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+    let kilometerMarkers: [TechRouteKilometerMarker]
+    init(route: [RoutePoint], splits: [WorkoutSplit], startedAt: String) {
+        let displayRoute = techRoutePointsForRendering(route)
+        kilometerMarkers = techRouteKilometerMarkers(route: displayRoute, splits: splits, startedAt: startedAt)
+        coordinates = displayRoute.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
             .filter { $0.latitude.isFinite && $0.longitude.isFinite && CLLocationCoordinate2DIsValid($0) }
         points = coordinates.map(MKMapPoint.init).filter { $0.x.isFinite && $0.y.isFinite }
         let bounds = points.reduce(MKMapRect.null) {
@@ -64,7 +71,8 @@ private struct TechPreparedRoute: View {
                 TechColor.background
                 Text("有效路线坐标不足").font(.footnote).foregroundStyle(TechColor.muted).padding(16)
             } else if showingSystemMap, mapAllowed {
-                NativeRouteMap(coordinates: coordinates, triggerFit: fitRequest, isInteractive: mapInteractive)
+                NativeRouteMap(coordinates: coordinates, kilometerMarkers: geometry.kilometerMarkers,
+                               triggerFit: fitRequest, isInteractive: mapInteractive)
                     .accessibilityIdentifier("workout.route.map")
                     .onChange(of: fitRequest) { _, newValue in
                         if newValue { fitRequest = false }
@@ -78,8 +86,8 @@ private struct TechPreparedRoute: View {
                 trace
             }
         }
-        .frame(height: 280)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .frame(height: 220)
+        .clipShape(TechSurfaceShape())
         .overlay(alignment: .topTrailing) {
             Menu {
                 Button("轨迹图（离线可用）") { showingSystemMap = false }
@@ -96,7 +104,7 @@ private struct TechPreparedRoute: View {
             } label: {
                 Image(systemName: "map").font(.system(size: 18))
                     .foregroundStyle(TechColor.cyan).frame(width: 44, height: 44)
-                    .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 12))
+                    .background(TechColor.paper, in: TechSurfaceShape())
             }.padding(8).accessibilityLabel("路线显示方式")
         }
         .overlay(alignment: .bottomTrailing) {
@@ -106,6 +114,7 @@ private struct TechPreparedRoute: View {
             .font(.caption).foregroundStyle(TechColor.muted)
             .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityValue("公里标记：\(geometry.kilometerMarkers.map { "\($0.kilometer) km" }.joined(separator: "、"))")
     }
 
     /// 触摸屏蔽层：锁定时把整块地图变成"只响应轻点"的静态图，纵向滑动完全交给
@@ -129,7 +138,7 @@ private struct TechPreparedRoute: View {
             }
             .foregroundStyle(TechColor.ink)
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(TechColor.elevated.opacity(0.92), in: Capsule())
+            .background(TechColor.elevated.opacity(0.92), in: TechSurfaceShape())
         }
         .padding(8)
         .accessibilityLabel("锁定地图，恢复上下滑动翻页")
@@ -137,16 +146,16 @@ private struct TechPreparedRoute: View {
 
     private var captionText: String {
         guard showingSystemMap, mapAllowed else {
-            return mapAllowed ? "真实轨迹 · 通过右上角地图按钮加载底图" : "真实轨迹 · 未启用高德底图"
+            return mapAllowed ? "真实 GPS 轨迹 · 离线" : "真实 GPS 轨迹 · 未启用高德底图"
         }
         return mapInteractive
-            ? "互动地图已解锁 · 可缩放拖动，点右下角「锁定」恢复上下滑动翻页"
-            : "互动地图已锁定 · 上下滑动翻页，轻点地图解锁缩放与拖动"
+            ? "高德底图 · 已解锁"
+            : "高德底图 · 已锁定"
     }
 
     private var trace: some View {
         Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TechColor.background))
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TechColor.mint))
             var grid = Path()
             for x in stride(from: 0.0, through: size.width, by: 28) {
                 grid.move(to: CGPoint(x: x, y: 0)); grid.addLine(to: CGPoint(x: x, y: size.height))
@@ -167,15 +176,38 @@ private struct TechPreparedRoute: View {
             }
             var path = Path()
             path.addLines(projected)
-            context.stroke(path, with: .color(TechColor.cyan.opacity(0.15)), lineWidth: 8)
             context.stroke(path, with: .color(TechColor.cyan), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
             for (point, color) in [(projected[0], TechColor.cyan), (projected[projected.count - 1], TechColor.coral)] {
+                // Circle, not a square: `RouteMapContainer` draws the same two
+                // endpoints with `UIBezierPath(ovalIn:)`, and one route rendered
+                // two ways is a needless inconsistency (2026-10-05).
                 let dot = Path(ellipseIn: CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10))
                 context.fill(dot, with: .color(color))
                 context.stroke(dot, with: .color(.white), lineWidth: 1.5)
             }
+            let markerPoints = geometry.kilometerMarkers.map { marker in
+                let mapPoint = MKMapPoint(CLLocationCoordinate2D(latitude: marker.latitude, longitude: marker.longitude))
+                return CGPoint(x: (mapPoint.x - rect.minX) * scale + offsetX,
+                               y: (mapPoint.y - rect.minY) * scale + offsetY)
+            }
+            let frames = techRouteMarkerFrames(points: markerPoints, kilometers: geometry.kilometerMarkers.map(\.kilometer), size: size)
+            var leaders = Path()
+            for (index, frame) in frames.enumerated() {
+                guard let frame, let leader = techRouteMarkerLeader(point: markerPoints[index], frame: frame) else { continue }
+                leaders.move(to: leader.start)
+                leaders.addLine(to: leader.end)
+            }
+            context.stroke(leaders, with: .color(TechColor.ink.opacity(0.7)), lineWidth: 1)
+            for (index, marker) in geometry.kilometerMarkers.enumerated() {
+                guard let frame = frames[index] else { continue }
+                let badge = Path(frame)
+                context.fill(badge, with: .color(TechColor.ink))
+                context.stroke(badge, with: .color(TechColor.background), lineWidth: 1)
+                context.draw(Text("\(marker.kilometer)").font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(TechColor.background), at: CGPoint(x: frame.midX, y: frame.midY))
+            }
         }
-        .accessibilityLabel("真实 GPS 轨迹，\(coordinates.count) 个坐标点；青色标记起点，红色标记终点，无地图底图")
+        .accessibilityLabel("真实 GPS 轨迹，\(coordinates.count) 个坐标点；绿色标记起点，红色标记终点，无地图底图")
     }
 }
 
@@ -191,12 +223,13 @@ private struct TechPreparedRoute: View {
 /// 纵向滑动由上层的训练详情 `ScrollView` 消费 —— 详细原因见 `applyGesturePolicy`。
 private struct NativeRouteMap: UIViewRepresentable {
     let coordinates: [CLLocationCoordinate2D]
+    let kilometerMarkers: [TechRouteKilometerMarker]
     let triggerFit: Bool
     let isInteractive: Bool
     func makeUIView(context: Context) -> RouteMapContainer { RouteMapContainer() }
     static func dismantleUIView(_ view: RouteMapContainer, coordinator: ()) { view.stop() }
     func updateUIView(_ view: RouteMapContainer, context: Context) {
-        view.update(coordinates: coordinates, triggerFit: triggerFit, interactive: isInteractive)
+        view.update(coordinates: coordinates, kilometerMarkers: kilometerMarkers, triggerFit: triggerFit, interactive: isInteractive)
     }
 }
 
@@ -205,9 +238,13 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     private let trace = CAShapeLayer()
     private let start = CAShapeLayer()
     private let end = CAShapeLayer()
+    private let kilometerLeaders = CAShapeLayer()
     /// GCJ-02 coordinates, converted from the incoming WGS-84 route for display.
     private var coordinates: [CLLocationCoordinate2D] = []
     private var sourceCoordinates: [CLLocationCoordinate2D] = []
+    private var sourceKilometerMarkers: [TechRouteKilometerMarker] = []
+    private var kilometerCoordinates: [CLLocationCoordinate2D] = []
+    private var kilometerBadges: [UILabel] = []
     private var drawScheduled = false
     private var stopped = false
     /// 见 `applyGesturePolicy`：默认锁定，纵向滑动留给外层滚动视图。
@@ -240,9 +277,8 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     override init(frame: CGRect) {
         super.init(frame: frame)
         map.delegate = self
-        // Night basemap matches the dark technology skin (the MapKit version
-        // forced .dark the same way). Labels/buildings stay visible.
-        map.mapType = .standardNight
+        // The light basemap matches the sole fresh skin.
+        map.mapType = .standard
         map.isShowsBuildings = true
         map.isShowsLabels = true
         map.isRotateEnabled = false
@@ -252,19 +288,23 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         map.isScrollEnabled = false
         map.isZoomEnabled = false
         addSubview(map)
-        trace.strokeColor = UIColor.cyan.cgColor
+        trace.strokeColor = UIColor(TechColor.cyan).cgColor
         trace.fillColor = UIColor.clear.cgColor
         trace.lineWidth = 3
         trace.lineJoin = .round
         trace.lineCap = .round
-        for shape in [trace, start, end] { layer.addSublayer(shape) }
-        start.fillColor = UIColor.cyan.cgColor
-        end.fillColor = UIColor.systemPink.cgColor
+        for shape in [trace, kilometerLeaders, start, end] { layer.addSublayer(shape) }
+        kilometerLeaders.strokeColor = UIColor(TechColor.ink).withAlphaComponent(0.7).cgColor
+        kilometerLeaders.fillColor = UIColor.clear.cgColor
+        kilometerLeaders.lineWidth = 1
+        start.fillColor = UIColor(TechColor.cyan).cgColor
+        end.fillColor = UIColor(TechColor.coral).cgColor
         for dot in [start, end] { dot.strokeColor = UIColor.white.cgColor; dot.lineWidth = 2 }
         clipsToBounds = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func update(coordinates wgsCoordinates: [CLLocationCoordinate2D], triggerFit: Bool, interactive: Bool) {
+    func update(coordinates wgsCoordinates: [CLLocationCoordinate2D], kilometerMarkers: [TechRouteKilometerMarker],
+                triggerFit: Bool, interactive: Bool) {
         if interactive != isInteractive {
             isInteractive = interactive
             applyGesturePolicy()
@@ -272,10 +312,35 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         let changed = !sourceCoordinates.elementsEqual(wgsCoordinates) {
             $0.latitude == $1.latitude && $0.longitude == $1.longitude
         }
-        guard changed || triggerFit else { return }
+        let markersChanged = sourceKilometerMarkers != kilometerMarkers
+        guard changed || markersChanged || triggerFit else { return }
         if changed {
             sourceCoordinates = wgsCoordinates
             coordinates = wgsCoordinates.map(GCJ02.fromWGS84)
+        }
+        if markersChanged {
+            sourceKilometerMarkers = kilometerMarkers
+            kilometerCoordinates = kilometerMarkers.map {
+                GCJ02.fromWGS84(CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude))
+            }
+            for badge in kilometerBadges { badge.removeFromSuperview() }
+            kilometerBadges = kilometerMarkers.map { marker in
+                let badge = UILabel()
+                badge.text = String(marker.kilometer)
+                badge.font = UIFont.monospacedDigitSystemFont(ofSize: 9, weight: .bold)
+                badge.textAlignment = .center
+                badge.textColor = UIColor(TechColor.background)
+                badge.backgroundColor = UIColor(TechColor.ink)
+                badge.layer.borderColor = UIColor(TechColor.background).cgColor
+                badge.layer.borderWidth = 1
+                badge.layer.cornerRadius = TechMetrics.corner
+                badge.clipsToBounds = true
+                badge.isUserInteractionEnabled = false
+                badge.isAccessibilityElement = true
+                badge.accessibilityLabel = "\(marker.kilometer) 公里"
+                addSubview(badge)
+                return badge
+            }
         }
         let fitKey = Self.fitKey(for: coordinates)
         if triggerFit || fitKey != lastFitKey {
@@ -394,6 +459,20 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         for (layer, point) in [(start, points.first), (end, points.last)] {
             layer.path = point.map { UIBezierPath(ovalIn: CGRect(x: $0.x - 5, y: $0.y - 5, width: 10, height: 10)).cgPath }
         }
+        let markerPoints = kilometerCoordinates.map { map.convert($0, toPointTo: self) }
+        let frames = techRouteMarkerFrames(points: markerPoints, kilometers: sourceKilometerMarkers.map(\.kilometer), size: bounds.size)
+        let leaders = UIBezierPath()
+        for (index, badge) in kilometerBadges.enumerated() {
+            badge.isHidden = frames[index] == nil
+            guard let frame = frames[index] else { continue }
+            badge.frame = frame
+            badge.layer.cornerRadius = frame.height / 2
+            if let leader = techRouteMarkerLeader(point: markerPoints[index], frame: frame) {
+                leaders.move(to: leader.start)
+                leaders.addLine(to: leader.end)
+            }
+        }
+        kilometerLeaders.path = leaders.cgPath
         CATransaction.commit()
     }
 
@@ -420,6 +499,188 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
             minY: MAMapRectGetMinY(rect),
             maxY: MAMapRectGetMaxY(rect)
         )
+    }
+}
+
+/// A separate, consent-gated map for sharing. Its input cannot contain the raw
+/// detail route, and every privacy-trimmed polyline remains a separate stroke.
+struct TechShareRouteMap: UIViewRepresentable {
+    let polylines: [[ShareCardRoutePoint]]
+    let onSnapshot: (UIImage?) -> Void
+
+    func makeUIView(context: Context) -> TechShareRouteMapContainer {
+        TechShareRouteMapContainer(polylines: polylines, onSnapshot: onSnapshot)
+    }
+    func updateUIView(_ view: TechShareRouteMapContainer, context: Context) {}
+    static func dismantleUIView(_ view: TechShareRouteMapContainer, coordinator: ()) { view.stop() }
+}
+
+final class TechShareRouteMapContainer: UIView, MAMapViewDelegate {
+    private var map: MAMapView?
+    private let lines: [[CLLocationCoordinate2D]]
+    private let trace = CAShapeLayer()
+    private var completion: ((UIImage?) -> Void)?
+    private var snapshotScheduled = false
+    private var stopped = false
+    private var fitAttempts = 0
+    private var snapshotAttempts = 0
+
+    private static let maxSnapshotAttempts = 3
+    private static let snapshotRetryDelay: TimeInterval = 1
+
+    init(polylines: [[ShareCardRoutePoint]], onSnapshot: @escaping (UIImage?) -> Void) {
+        lines = techShareRoutePolylinesForRendering(polylines).map { line in
+            line.map { GCJ02.fromWGS84(CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)) }
+        }
+        completion = onSnapshot
+        super.init(frame: .zero)
+        guard MapPrivacy.mapEnabled, !lines.isEmpty else {
+            DispatchQueue.main.async { [weak self] in self?.finish(nil) }
+            return
+        }
+        MapPrivacy.configureIfAgreed()
+        let map = MAMapView(frame: .zero)
+        self.map = map
+        map.delegate = self
+        map.mapType = .standard
+        map.isShowsBuildings = true
+        map.isShowsLabels = true
+        map.isScrollEnabled = false
+        map.isZoomEnabled = false
+        map.isRotateEnabled = false
+        map.isRotateCameraEnabled = false
+        map.showsCompass = false
+        addSubview(map)
+        trace.strokeColor = UIColor(TechColor.cyan).cgColor
+        trace.fillColor = UIColor.clear.cgColor
+        trace.lineWidth = 4
+        trace.lineCap = .round
+        trace.lineJoin = .round
+        layer.addSublayer(trace)
+        clipsToBounds = true
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard !stopped, let map, bounds.width > 0, bounds.height > 0 else { return }
+        map.frame = bounds
+        drawTrace()
+        guard !snapshotScheduled else { return }
+        snapshotScheduled = true
+        scheduleFit()
+    }
+
+    func stop() {
+        stopped = true
+        completion = nil
+        map?.delegate = nil
+    }
+
+    func mapViewRegionChanged(_ mapView: MAMapView) { drawTrace() }
+    func mapView(_ mapView: MAMapView, regionDidChangeAnimated animated: Bool) { drawTrace() }
+
+    private func scheduleFit() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.fitAndCapture() }
+    }
+
+    private func fitAndCapture() {
+        guard !stopped, let map, bounds.width > 0, bounds.height > 0,
+              MapPrivacy.mapEnabled, let rect = routeRect else { finish(nil); return }
+        fitAttempts += 1
+        map.setVisibleMapRect(rect, edgePadding: UIEdgeInsets(top: 28, left: 28, bottom: 28, right: 28), animated: false)
+        let visible = map.visibleMapRect
+        let expectedWidth = max(rect.size.width, rect.size.height * bounds.width / bounds.height)
+        let expectedHeight = max(rect.size.height, rect.size.width * bounds.height / bounds.width)
+        let fitted = visible.origin.x <= rect.origin.x && visible.origin.y <= rect.origin.y
+            && visible.origin.x + visible.size.width >= rect.origin.x + rect.size.width
+            && visible.origin.y + visible.size.height >= rect.origin.y + rect.size.height
+            && visible.size.width <= expectedWidth * 4 && visible.size.height <= expectedHeight * 4
+        guard fitted else {
+            if fitAttempts < 12 { scheduleFit() } else { finish(nil) }
+            return
+        }
+        drawTrace()
+        // The SDK owns the tile-ready timeout; a partial/blank basemap must not
+        // be exported as an AMap card. The snapshot keeps its attribution intact.
+        snapshotAttempts += 1
+        map.takeSnapshot(in: map.bounds, timeoutInterval: 8) { [weak self] image, state in
+            guard let self, !self.stopped, MapPrivacy.mapEnabled else {
+                self?.finish(nil); return
+            }
+            guard state == 1, let image, image.size.width > 0, image.size.height > 0 else {
+                guard self.snapshotAttempts < Self.maxSnapshotAttempts else {
+                    self.finish(nil)
+                    return
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.snapshotRetryDelay) { [weak self] in
+                    guard let self, !self.stopped else { return }
+                    self.fitAndCapture()
+                }
+                return
+            }
+            self.finish(self.drawRoute(on: image))
+        }
+    }
+
+    private var routeRect: MAMapRect? {
+        let points = lines.flatMap { $0 }.map(MAMapPointForCoordinate)
+        guard let first = points.first else { return nil }
+        var minY = first.y, maxY = first.y
+        for point in points {
+            minY = min(minY, point.y); maxY = max(maxY, point.y)
+        }
+        guard let xBounds = techCircularInterval(values: points.map(\.x), period: MAMapSizeWorld.width) else {
+            return nil
+        }
+        return MAMapRect(origin: MAMapPoint(x: xBounds.start, y: minY),
+                         size: MAMapSize(width: max(xBounds.width, 1), height: max(maxY - minY, 1)))
+    }
+
+    private func routePath() -> UIBezierPath {
+        let path = UIBezierPath()
+        guard let map, map.bounds.width > 0, map.bounds.height > 0 else { return path }
+        for line in lines {
+            let points = line.map { map.convert($0, toPointTo: map) }
+            guard let first = points.first, points.allSatisfy({ $0.x.isFinite && $0.y.isFinite }) else { continue }
+            path.move(to: first)
+            for point in points.dropFirst() { path.addLine(to: point) }
+        }
+        return path
+    }
+
+    private func drawTrace() {
+        guard !stopped else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        trace.path = routePath().cgPath
+        CATransaction.commit()
+    }
+
+    private func drawRoute(on image: UIImage) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = image.scale
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        return renderer.image { context in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+            context.cgContext.scaleBy(x: image.size.width / bounds.width, y: image.size.height / bounds.height)
+            let path = routePath()
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            UIColor(TechColor.background).withAlphaComponent(0.7).setStroke()
+            path.lineWidth = 7
+            path.stroke()
+            UIColor(TechColor.cyan).setStroke()
+            path.lineWidth = 3
+            path.stroke()
+        }
+    }
+
+    private func finish(_ image: UIImage?) {
+        guard !stopped, let completion else { return }
+        self.completion = nil
+        completion(image)
     }
 }
 #endif

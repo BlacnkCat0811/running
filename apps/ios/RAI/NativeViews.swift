@@ -3,7 +3,7 @@ import SwiftUI
 
 // iOS 原生壳。这里是**唯一**的原生入口：底部 Tab + 五个页面。
 //
-// 2026-09-18 起原生端只有一套视觉（冰蓝科技），页面实现在
+// 原生端只有一套视觉（清新），页面实现在
 // `RAI/Skins/Technology/TechViews.swift`。此文件只保留壳层本身：
 // Tab 模型（`NativeTab`）与根视图（`NativeRootView`）。
 // 曾经的像素皮肤（`PixelTheme` / `PixelCharts` / `PixelIcons` /

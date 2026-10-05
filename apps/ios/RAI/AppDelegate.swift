@@ -11,7 +11,7 @@ import BackgroundTasks
 /// 在后台拉起）就一个观察者都没有，健康数据的变化不会被感知。
 ///
 /// 🔴 **这里不能改成调 `AppModel.registerSyncEntryPoints()`。** `AppModel` 定义在
-/// `RAIApp.swift` 里，而那个文件被 `typecheck-ios.sh:92` 从类型检查里排除 ——
+/// `RAIApp.swift` 里，而那个文件被 `typecheck-ios.sh:102` 从类型检查里排除 ——
 /// 逻辑写进去就没有任何门禁看得见它。所以注册逻辑本身也留在本文件。
 ///
 /// 为什么用 `UIApplicationDelegateAdaptor` 而不是继续挂在视图上：视图必须先被建出来，

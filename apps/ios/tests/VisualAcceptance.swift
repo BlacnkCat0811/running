@@ -36,7 +36,7 @@ final class VisualAcceptance: XCTestCase {
         tree.name = name + "-accessibility"; tree.lifetime = .keepAlways; add(tree)
     }
 
-    func scrollTo(_ element: XCUIElement, limit: Int = 30) {
+    func scrollTo(_ element: XCUIElement, limit: Int = 30, horizontalOffset: CGFloat = 0.07) {
         // isHittable alone includes content obscured by the custom bottom bar.
         // Center the actual target in the unobscured scrolling region before tapping.
         let bottom = app.buttons["tab.设置"].exists ? app.buttons["tab.设置"].frame.minY : app.windows.firstMatch.frame.height - 90
@@ -44,9 +44,9 @@ final class VisualAcceptance: XCTestCase {
             if element.exists {
                 let frame = element.frame
                 if frame.midY >= 115 && frame.midY < bottom - 25 { return }
-                if frame.midY < 115 { dragContent(up: false); continue }
+                if frame.midY < 115 { dragContent(up: false, horizontalOffset: horizontalOffset); continue }
             }
-            dragContent(up: true)
+            dragContent(up: true, horizontalOffset: horizontalOffset)
         }
         capture("unreachable-target")
         print(element.debugDescription)
@@ -69,12 +69,12 @@ final class VisualAcceptance: XCTestCase {
         XCTFail("The page kept moving after \(limit) drags; the bottom never settled")
     }
 
-    // Drag the page gutter, not the map/charts, which legitimately own pan gestures.
-    func dragContent(up: Bool) {
+    // Detail charts use the center to exercise scrolling directly over their plot.
+    func dragContent(up: Bool, horizontalOffset: CGFloat = 0.07) {
         let startY: CGFloat = app.keyboards.count > 0 ? 0.45 : (up ? 0.70 : 0.35)
         let endY: CGFloat = app.keyboards.count > 0 ? 0.20 : (up ? 0.40 : 0.65)
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.07, dy: startY))
-        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.07, dy: endY))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: horizontalOffset, dy: startY))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: horizontalOffset, dy: endY))
         start.press(forDuration: 0.05, thenDragTo: end)
     }
 
@@ -134,32 +134,63 @@ final class VisualAcceptance: XCTestCase {
         let first = app.buttons["workout." + id]
         scrollTo(first)
         first.tap()
-        XCTAssertTrue(app.buttons["全部训练指标"].waitForExistence(timeout: 45))
+        let summary = app.descendants(matching: .any)["workout.summary"].firstMatch
+        let trainingEffect = app.descendants(matching: .any)["workout.training-effect"].firstMatch
+        let route = app.descendants(matching: .any)["workout.route"].firstMatch
+        let adjustedPace = app.descendants(matching: .any)["workout.summary.gradeAdjustedPace"]
+        XCTAssertTrue(adjustedPace.waitForExistence(timeout: 45))
+        XCTAssertTrue(trainingEffect.waitForExistence(timeout: 10), "训练详情必须展示训练效果卡片")
+        XCTAssertTrue(route.waitForExistence(timeout: 30), "有路线的训练必须在首屏展示地图或离线轨迹")
         XCTAssertTrue(app.navigationBars["训练详情"].exists)
+        XCTAssertLessThan(route.frame.minY, summary.frame.minY)
+        XCTAssertTrue(adjustedPace.isHittable, "平均等强配速必须在首屏摘要中可见")
+        XCTAssertLessThan(summary.frame.maxY, app.buttons["tab.设置"].frame.minY,
+                          "地图和完整摘要必须同时容纳在默认字号的首屏")
+        XCTAssertTrue(app.buttons["workout.feedback"].isHittable)
+        XCTAssertTrue(app.buttons["workout.share"].isHittable)
+        for field in ["date", "weather", "temperature", "humidity"] {
+            XCTAssertTrue(app.descendants(matching: .any)["workout.summary." + field].firstMatch.exists)
+        }
+        XCTAssertFalse(app.descendants(matching: .any)["workout.summary.metrics"].firstMatch.exists)
         capture("02-detail")
-        // 沿页面留白拖动，**不**落在卡片上。卡片自 2026-10-01 起默认锁定地图手势
-        // （判据见 check-today-layout.py 的「地图手势锁定」段），压在它上面滑已经是
-        // 翻页；但本验收以 `-rai.privacy.amap.state declined` 启动，卡片只画离线轨迹、
-        // 不加载高德底图，**这条路径覆盖不到底图上的手势冲突** —— 那一项在
-        // docs/IOS_NATIVE_RUNBOOK.md 的真机人工验收清单里。
-        dragContent(up: true); capture("02-detail-route")
-        let metrics = app.buttons["全部训练指标"]
-        scrollTo(metrics); metrics.tap(); capture("02-detail-metrics")
-        // Collapse after recording the metrics so all time-series remain easy to inspect.
-        scrollTo(metrics); metrics.tap()
-        scrollTo(app.staticTexts["训练时序"]); capture("02-detail-series")
+        summary.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["workout.summary.metrics"].firstMatch.waitForExistence(timeout: 5))
+        capture("02-detail-metrics")
+        summary.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.04)).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["workout.summary.metrics"].firstMatch.waitForNonExistence(timeout: 5))
+        app.buttons["workout.share"].tap()
+        XCTAssertTrue(app.staticTexts["请先在设置中启用高德地图。"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.images["workout.share.preview"].exists, "未授权高德地图不能生成组合分享卡片")
+        XCTAssertFalse(app.buttons["workout.share.send"].exists, "未授权高德地图不能分享伪底图")
+        capture("02-detail-share-map-required")
+        app.buttons["关闭"].tap()
+        // This path checks the offline trace; AMap gestures still need consent-bound acceptance.
+        dragContent(up: true, horizontalOffset: 0.5); capture("02-detail-route")
+        for (key, title) in [("pace", "配速"), ("heartRate", "心率"), ("cadence", "步频"),
+                             ("strideLength", "步幅"), ("power", "跑步功率"), ("groundContactTime", "触地时间"),
+                             ("verticalOscillation", "垂直振幅"), ("elevation", "海拔")] {
+            scrollTo(app.staticTexts[title], horizontalOffset: 0.5)
+            XCTAssertTrue(app.staticTexts[title].isHittable, "\(title)应直接纵向展示，不依赖切换")
+            capture("02-detail-" + key)
+        }
         let (seriesData, _) = try await URLSession.shared.data(from: URL(string: server + "/v1/workouts/" + id + "/series")!)
         let series = try JSONSerialization.jsonObject(with: seriesData) as? [String: Any]
         let hasSteps = series?["hasMeasuredWorkoutSteps"] as? Bool == true && !(series?["segments"] as? [[String: Any]] ?? []).isEmpty
-        scrollTo(app.staticTexts[hasSteps ? "课表分段" : "公里分段"])
+        scrollTo(app.staticTexts[hasSteps ? "课表分段" : "公里分段"], horizontalOffset: 0.5)
         XCTAssertFalse(app.staticTexts[hasSteps ? "公里分段" : "课表分段"].exists)
+        if !hasSteps {
+            let splits = app.descendants(matching: .any)["workout.splits"].firstMatch
+            XCTAssertEqual(splits.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "等强")).count, 0,
+                           "逐公里分段不应展示等强配速")
+        }
         capture("02-detail-segments")
-        scrollTo(app.staticTexts["质量与模型"]); capture("02-detail-quality")
-        scrollTo(app.staticTexts["训练负荷"]); capture("02-detail-load")
-        scrollTo(app.buttons["负荷依据"]); app.buttons["负荷依据"].tap()
-        capture("02-detail-load-evidence")
-        scrollTo(app.staticTexts["区间暴露"])
-        dragContent(up: true); capture("02-detail-zones")
+        XCTAssertFalse(app.buttons["负荷依据"].exists)
+        XCTAssertFalse(app.staticTexts["区间暴露"].exists)
+        XCTAssertFalse(app.staticTexts["环境条件"].exists)
+        XCTAssertFalse(app.buttons["全部训练指标"].exists)
+        XCTAssertFalse(app.staticTexts["分享卡片"].exists)
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "个有效样本", "个峰谷采样点")).count, 0)
+        scrollTo(app.staticTexts["质量与模型"], horizontalOffset: 0.5); capture("02-detail-quality")
     }
 
     func test03Plan() {
@@ -308,13 +339,22 @@ final class VisualAcceptance: XCTestCase {
         }
         let row = app.buttons["workout." + id]
         scrollTo(row); row.tap()
-        XCTAssertTrue(app.buttons["全部训练指标"].waitForExistence(timeout: 45))
-        scrollTo(app.staticTexts["训练时序"])
-        scrollTo(app.buttons["workout.series.next"])
-        app.buttons["workout.series.next"].tap()
-        XCTAssertTrue(app.staticTexts["workout.series.selection"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["workout.summary.gradeAdjustedPace"].waitForExistence(timeout: 45))
+        let pace = app.descendants(matching: .any)["workout.series.pace"].firstMatch
+        scrollTo(pace, horizontalOffset: 0.5)
+        XCTAssertFalse(app.buttons["workout.series.pace.next"].exists)
+        XCTAssertFalse(app.buttons["workout.series.pace.previous"].exists)
+        pace.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.45)).tap()
+        XCTAssertTrue(app.staticTexts["workout.series.pace.selection"].waitForExistence(timeout: 5))
         capture("13-series-inspection")
-        scrollTo(app.staticTexts["质量与模型"])
+        let heartRate = app.descendants(matching: .any)["workout.series.heartRate"].firstMatch
+        scrollTo(heartRate, horizontalOffset: 0.5)
+        XCTAssertFalse(app.staticTexts["workout.series.heartRate.selection"].exists,
+                       "配速图的选中点不得污染心率图")
+        heartRate.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.45)).tap()
+        XCTAssertTrue(app.staticTexts["workout.series.heartRate.selection"].waitForExistence(timeout: 5))
+        capture("13-heartRate-inspection")
+        scrollTo(app.staticTexts["质量与模型"], horizontalOffset: 0.5)
         XCTAssertTrue(app.staticTexts["质量与模型"].isHittable)
         capture("13-series-page-scroll")
     }

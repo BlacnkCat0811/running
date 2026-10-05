@@ -57,7 +57,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 
 # 后台三机制的纯策略（P2-1）：投递唤醒该不该跑、BGProcessingTask 该推进哪一步。
 # 这两件事的调用点在 `AppDelegate.swift` / `RAIApp.swift`。
-# ⚠️ 覆盖范围（2026-09-24 实测修正，别再照抄旧说法）：`typecheck-ios.sh:92` 的排除清单是
+# ⚠️ 覆盖范围（2026-09-24 实测修正，别再照抄旧说法）：`typecheck-ios.sh:102` 的排除清单是
 # `MapPrivacy.swift / RAIApp.swift / TechRouteView.swift` 这三个 —— **`AppDelegate.swift` 不在其中**，
 # 它会真被类型检查（实测：往它末尾插一句类型错误的代码，`typecheck-ios.sh` 立刻以
 # `AppDelegate.swift:303:… error:` 退出 1）。但 `typecheck-ios.sh` 只做类型检查、不跑任何断言，

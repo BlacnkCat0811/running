@@ -57,7 +57,7 @@ struct TechTodayView: View {
                 .navigationTitle("训练判定依据")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showingVerdict = false } } }
-            }.preferredColorScheme(.dark)
+            }.preferredColorScheme(.light)
         }
     }
 
@@ -107,7 +107,7 @@ struct TechTodayView: View {
                     .font(.caption2).foregroundStyle(TechColor.muted)
                 TechProgressBar(fraction: data.week.goalProgressFraction)
                 Text(nativePercent(data.week.goalProgressFraction)).font(.caption2).foregroundStyle(TechColor.cyan)
-            }.padding(.horizontal, 8).padding(.vertical, 6).background(TechColor.paper, in: RoundedRectangle(cornerRadius: 6))
+            }.padding(.horizontal, 8).padding(.vertical, 6).background(TechColor.paper, in: TechSurfaceShape())
         }
     }
 
@@ -232,7 +232,7 @@ struct TechTodayView: View {
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(TechColor.paleYellow)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(TechColor.yellow, lineWidth: 1))
+                        .overlay(TechSurfaceShape().stroke(TechColor.yellow, lineWidth: 1))
                 }
             }
         }
@@ -362,7 +362,7 @@ struct TechTodayView: View {
                 }
             }
             Label("\(data.nextSession.title) \(nativeKilometers(data.nextSession.distanceKm))", systemImage: nativeSessionSymbol(data.nextSession.kind))
-                .techScaledFont(22, weight: .semibold).foregroundStyle(TechColor.action)
+                .techScaledFont(22, weight: .semibold).foregroundStyle(TechColor.cyan)
             TechAdaptiveStack {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("建议配速 " + techPaceRange(data.nextSession.paceSecondsPerKmLower, data.nextSession.paceSecondsPerKmUpper))
@@ -371,8 +371,8 @@ struct TechTodayView: View {
                 Spacer(minLength: 8)
                 Button { showingLock = true } label: {
                     Text(data.lock.relockSuggested ? "重新确认" : data.lock.present ? "已锁定" : "锁定安排").font(.caption.weight(.semibold))
-                        .foregroundStyle(TechColor.background).padding(.horizontal, 14).frame(minHeight: 44)
-                        .background(TechColor.action, in: Capsule())
+                        .foregroundStyle(TechColor.actionInk).padding(.horizontal, 14).frame(minHeight: 44)
+                        .background(TechColor.action, in: TechSurfaceShape())
                 }.buttonStyle(TechPressStyle()).disabled(lockDisabled(data))
                     .saturation(lockDisabled(data) ? 0 : 1)
             }
@@ -401,9 +401,13 @@ struct TechTodayView: View {
         }
         .padding(TechMetrics.panelPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { TechRunningLandscape(road: true) }
-        .clipShape(RoundedRectangle(cornerRadius: TechMetrics.corner))
-        .overlay(RoundedRectangle(cornerRadius: TechMetrics.corner).strokeBorder(TechColor.cyan.opacity(0.4), lineWidth: 0.7))
+        // 这张「今日推荐训练」卡曾经把山景插画当卡面（`TechRunningLandscape(road: true)`）。
+        // 那块插画会把卡面切成"左半页底色 / 右半天空+山"两半，建议文字直接压在插画上；
+        // 2026-10-05 用户要求移除。换成与其它面板同一个纸白底，只留那道青色描边 ——
+        // 它是这张卡在今日页里唯一的身份标记，别一起删掉。
+        .background(TechColor.paper)
+        .clipShape(TechSurfaceShape())
+        .overlay(TechSurfaceShape().strokeBorder(TechColor.cyan.opacity(0.4), lineWidth: 0.7))
     }
 
     /// 锁定只被两件事挡住：安排已锁，或上一次刷新真的失败了。
@@ -731,7 +735,7 @@ struct TechWeekOverviewView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(TechColor.background, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
     }
 }
 
@@ -814,7 +818,7 @@ struct TechBodyMetricsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(TechColor.background, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
         .task {
             await native.refreshBodyMetrics()
         }
@@ -957,7 +961,7 @@ struct TechBodyMetricsView: View {
                                         .font(.caption2).foregroundStyle(TechColor.muted)
                                 }
                             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(TechColor.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                                .background(TechColor.blue.opacity(0.06), in: TechSurfaceShape())
                         }
                     }
                 } else {
@@ -1008,14 +1012,14 @@ struct TechBodyMetricsView: View {
         }
         .padding(9)
         .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-        .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 12))
+        .background(TechColor.paper, in: TechSurfaceShape())
 
     }
 
     private func zoneRow(code: String, label: String, value: String, tint: Color) -> some View {
         HStack(spacing: 8) {
             Text(code).font(.caption.weight(.semibold)).foregroundStyle(TechColor.background)
-                .frame(width: 28, height: 24).background(tint, in: RoundedRectangle(cornerRadius: 6))
+                .frame(width: 28, height: 24).background(tint, in: TechSurfaceShape())
             Text(label)
                 .font(.caption.weight(.bold))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1061,9 +1065,9 @@ struct TechBodyMetricsView: View {
         case "easy": return TechColor.cyan
         case "marathon": return TechColor.blue
         case "lactate_threshold": return TechColor.leaf
-        case "anaerobic_endurance": return Color.purple
-        case "sprint": return Color.pink
-        default: return TechColor.grid
+        case "anaerobic_endurance": return TechColor.violet
+        case "sprint": return TechColor.coral
+        default: return TechColor.muted
         }
     }
 
@@ -1249,7 +1253,7 @@ struct TechWorkoutsView: View {
                             NavigationLink { TechNativeSettingsView() } label: {
                                 Text("前往同步").font(.subheadline.weight(.semibold))
                                     .foregroundStyle(TechColor.background).frame(maxWidth: .infinity, minHeight: 48)
-                                    .background(TechColor.cyan, in: Capsule())
+                                    .background(TechColor.cyan, in: TechSurfaceShape())
                             }
                         }
                         TechPanel(tint: TechColor.blue, fill: TechColor.blue.opacity(0.09)) {
@@ -1267,7 +1271,7 @@ struct TechWorkoutsView: View {
                                 } label: {
                                     TechWorkoutRow(workout: workout)
                                         .padding(.horizontal, 12)
-                                        .background(TechColor.paper, in: RoundedRectangle(cornerRadius: 14))
+                                        .background(TechColor.paper, in: TechSurfaceShape())
                                 }
                                 .buttonStyle(TechPressStyle()).accessibilityIdentifier("workout.\(workout.id)")
                             }
@@ -1335,49 +1339,33 @@ struct TechWorkoutRow: View {
 struct TechWorkoutDetailView: View {
     @Environment(NativeAppModel.self) private var native
     let workoutId: String
-    @State private var selectedMetric = "heartRate"
     @State private var feedbackDetail: WorkoutDetailResponse?
-
-    private let metricItems = [
-        ("心率", "heartRate"),
-        ("速度", "speed"),
-        ("功率", "power"),
-        ("步频", "cadence"),
-        ("海拔", "elevation"),
-        ("步幅", "strideLength"),
-        ("垂直", "verticalOscillation"),
-        ("触地", "groundContactTime")
-    ]
+    @State private var summaryExpanded = false
 
     var body: some View {
         ScrollView {
             if let detail = native.selectedWorkout, detail.workout.id == workoutId {
-                VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
+                let series = native.selectedSeries.flatMap { $0.trainingSessionId == workoutId ? $0 : nil }
+                LazyVStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
+                    routePanel(detail, series: series)
+                    detailOverview(detail, grade: series?.grade)
+                    trainingEffectPanel(detail)
                     if let error = native.workoutDetailError {
                         Text(error).font(.footnote).foregroundStyle(TechColor.coral)
                     }
-                    detailHeader(detail.workout)
-                    detailOverview(detail.workout)
-                    environmentPanel(detail.workout.environment)
-                    Button("记录感受 / 编辑训练") { feedbackDetail = detail }
-                        .frame(minHeight: 44).accessibilityIdentifier("workout.feedback")
-                    ShareLink(item: "训练摘要：\(nativeSessionName(detail.workout.sessionType)) · \(nativeKilometers(detail.workout.distanceKm)) · \(techDuration(detail.workout.durationSeconds))") {
-                        Label("分享无路线摘要", systemImage: "square.and.arrow.up")
+                    if let series {
+                        seriesPanels(series, workout: detail.workout, zones: detail.zoneSummary)
                     }
-                    if !detail.route.isEmpty { routePanel(detail.route) }
-                    DisclosureGroup { detailMetrics(detail.workout) } label: { Text("全部训练指标").frame(minHeight: 44) }
-                        .font(.subheadline).tint(TechColor.cyan)
-                    if let series = native.selectedSeries { seriesPanel(series) }
-                    if let series = native.selectedSeries, series.showsPlanSegments {
+                    if let series, series.showsPlanSegments {
                         segmentPanel(series)
                     } else {
-                        splitPanel(native.selectedSeries)
+                        splitPanel(series)
                     }
-                    TechShareCardView(trainingSessionId: workoutId)
-                    if let dynamics = native.selectedSeries?.dynamics { dynamicsPanel(dynamics) }
+                    if series == nil, let zones = detail.zoneSummary {
+                        zoneDistribution(zones, metric: .heartRate)
+                    }
+                    if let dynamics = series?.dynamics { dynamicsPanel(dynamics) }
                     qualityPanel(detail)
-                    if let load = detail.trainingLoad { trainingLoadPanel(load) }
-                    if let zones = detail.zoneSummary { zonePanel(zones) }
                     if let override = detail.override { overridePanel(override) }
                 }
                 .padding(.horizontal, TechMetrics.pageHorizontal)
@@ -1403,113 +1391,296 @@ struct TechWorkoutDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(TechColor.background, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if let detail = native.selectedWorkout, detail.workout.id == workoutId {
+                    TechIconButton(systemName: "square.and.pencil", accessibilityLabel: "记录感受 / 编辑训练") {
+                        feedbackDetail = detail
+                    }.accessibilityIdentifier("workout.feedback")
+                    TechWorkoutShareMenu(detail: detail, grade: native.selectedSeries.flatMap {
+                        $0.trainingSessionId == workoutId ? $0.grade : nil
+                    })
+                }
+            }
+        }
         .sheet(item: $feedbackDetail) { TechWorkoutFeedbackView(detail: $0) }
-        .task(id: workoutId) { await native.loadWorkout(id: workoutId) }
+        .task(id: workoutId) {
+            summaryExpanded = false
+            await native.loadWorkout(id: workoutId)
+        }
         .refreshable { await native.loadWorkout(id: workoutId) }
     }
 
-    private func detailHeader(_ workout: WorkoutDetail) -> some View {
-        HStack(spacing: 14) {
-            TechIconBox(systemName: nativeSessionSymbol(workout.sessionType), size: 48)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(nativeSessionName(workout.sessionType)).font(.headline)
-                Text(nativeDate(workout.startedAt)).font(.caption).foregroundStyle(TechColor.muted)
-            }
-            Spacer()
-            if workout.indoor == true { TechBadge(title: "室内") }
-        }.padding(.vertical, 6)
-    }
-
-    private func detailOverview(_ workout: WorkoutDetail) -> some View {
-        VStack(spacing: 8) {
-            TechPanel {
+    private func detailOverview(_ detail: WorkoutDetailResponse, grade: WorkoutGradeSummary?) -> some View {
+        let workout = detail.workout
+        let weather = TechWorkoutWeather(condition: workout.environment?.weatherCondition)
+        return TechPanel(tint: TechColor.cyan) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("训练摘要").font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text(nativeSessionName(workout.sessionType)).font(.caption).foregroundStyle(TechColor.muted)
+                    if workout.indoor == true { TechBadge(title: "室内") }
+                    Image(systemName: summaryExpanded ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold)).foregroundStyle(TechColor.cyan)
+                        .accessibilityHidden(true)
+                }
+                Text(nativeDate(workout.startedAt))
+                    .font(.caption.monospacedDigit()).foregroundStyle(TechColor.muted)
+                    .accessibilityIdentifier("workout.summary.date")
+                TechFlowLayout(spacing: 12) {
+                    Label("天气 \(weather.title)", systemImage: weather.symbol)
+                        .accessibilityIdentifier("workout.summary.weather")
+                    Label("温度 \(techValue(workout.environment?.temperatureC, digits: 1, unit: " °C"))", systemImage: "thermometer.medium")
+                        .accessibilityIdentifier("workout.summary.temperature")
+                    Label("湿度 \(techValue(workout.environment?.humidityPercent, digits: 0, unit: "%"))", systemImage: "humidity")
+                        .accessibilityIdentifier("workout.summary.humidity")
+                }
+                .font(.caption.monospacedDigit()).foregroundStyle(TechColor.muted)
                 TechMetricGrid(minimum: 140) {
                     overviewMetric(techKilometers(workout.distanceKm), "距离")
-                    overviewMetric(techDuration(workout.durationSeconds), "时长")
+                    overviewMetric(techDuration(workout.durationSeconds), "运动时间")
+                }
+                Rectangle().fill(TechColor.grid).frame(height: TechMetrics.border)
+                TechMetricGrid(minimum: 96) {
+                    summaryMetric("平均配速", value: workout.averagePaceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--")
+                    summaryMetric("平均等强配速", value: grade?.gradeAdjustedPaceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--", accent: TechColor.cyan)
+                        .accessibilityIdentifier("workout.summary.gradeAdjustedPace")
+                        .accessibilityHint("服务端按 Minetti 能耗模型计算的已覆盖分段距离加权平地等效配速，仅按坡度折算，非实测。")
+                    summaryMetric("平均心率", value: techValue(workout.averageHeartRateBpm, digits: 0, unit: " bpm"))
+                    summaryMetric("累计上升", value: techValue(workout.elevationGainMeters, digits: 0, unit: " m"))
+                    summaryMetric("能量消耗", value: techValue(workout.activeEnergyKcal, digits: 0, unit: " kcal"))
+                    summaryMetric("训练负荷", value: nativeNumber(detail.trainingLoad?.load, digits: 0))
+                }
+                if let grade, grade.coveredSplits < grade.totalSplits {
+                    Text(grade.coveredSplits > 0
+                         ? "等强配速覆盖 \(grade.coveredSplits)/\(grade.totalSplits) 段"
+                         : "等强配速暂无可用坡度数据")
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let environment = workout.environment {
+                    environmentSummary(environment)
+                }
+                if summaryExpanded {
+                    Rectangle().fill(TechColor.grid).frame(height: TechMetrics.border)
+                    Text("全部训练指标").font(.subheadline.weight(.medium))
+                    detailMetrics(workout)
+                        .accessibilityIdentifier("workout.summary.metrics")
+                    if let adjusted = workout.environment?.adjusted {
+                        summaryMetric("环境等效用时", value: techDuration(adjusted.durationSeconds))
+                            .accessibilityIdentifier("workout.summary.adjustedDuration")
+                    }
+                    if let load = detail.trainingLoad {
+                        HStack(spacing: 12) {
+                            summaryMetric("负荷强度", value: nativeNumber(load.intensity))
+                            summaryMetric("负荷置信度", value: nativePercent(load.confidence))
+                        }
+                        Text("主要刺激：\(nativeStimulusName(load.stimulusType))")
+                            .font(.caption).foregroundStyle(TechColor.muted)
+                    }
                 }
             }
-            TechMetricGrid {
-                TechMetricTile(title: "平均配速", value: techPace(workout.averagePaceSecondsPerKm) + "/km")
-                TechMetricTile(title: "平均心率", value: nativeNumber(workout.averageHeartRateBpm, digits: 0) + " bpm")
-                TechMetricTile(title: "能量消耗", value: nativeNumber(workout.activeEnergyKcal, digits: 0) + " kcal")
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { summaryExpanded.toggle() } }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(summaryExpanded ? "已展开" : "已收起")
+        .accessibilityAction(named: summaryExpanded ? "收起全部训练指标" : "展开全部训练指标") {
+            summaryExpanded.toggle()
+        }
+        .accessibilityIdentifier("workout.summary")
+    }
+
+    /// Environment correction read-out (docs/ALGORITHM.md §5), folded into the summary.
+    ///
+    /// The contract states that `reasonCodes` are "codes the UI renders" and that
+    /// `applied` / `not_needed` / `unavailable` "must stay distinguishable in the UI".
+    /// Both were only ever rendered by the standalone `environmentPanel`, so removing
+    /// that panel silently dropped them — this restores the two required slots while
+    /// keeping the observations where they already are (the weather row above).
+    ///
+    /// `adjusted.paceSecondsPerKm` is deliberately **not** given a slot: it is a second
+    /// "equivalent pace" sitting next to the summary's grade-adjusted pace, and putting
+    /// the two side by side is exactly what makes a reader take one for the other.
+    /// The equivalent *duration* is shown (in the expanded section) because a duration
+    /// cannot be confused with a pace.
+    private func environmentSummary(_ environment: WorkoutEnvironmentView) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("环境修正").font(.caption).foregroundStyle(TechColor.muted)
+                Spacer(minLength: 8)
+                Text(nativeEnvironmentStatus(environment.status))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(environment.status == "applied" ? TechColor.success : TechColor.muted)
+            }
+            if let total = environment.correction?.total {
+                Text("修正量 \(nativeNumber(total * 100, digits: 1))%")
+                    .font(.caption2.monospacedDigit()).foregroundStyle(TechColor.muted)
+            }
+            if !environment.reasonCodes.isEmpty {
+                Text(environment.reasonCodes.map(nativeEnvironmentReason).joined(separator: " · "))
+                    .font(.caption2).foregroundStyle(TechColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("workout.summary.environment")
     }
 
     private func overviewMetric(_ value: String, _ label: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(value).techScaledFont(32, weight: .semibold).monospacedDigit()
+            Text(value).techScaledFont(28, weight: .semibold).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
             Text(label).font(.caption).foregroundStyle(TechColor.muted)
-        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func summaryMetric(_ title: String, value: String, accent: Color = TechColor.ink) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(value).font(.subheadline.weight(.semibold).monospacedDigit()).foregroundStyle(accent)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.caption2).foregroundStyle(TechColor.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     private func detailMetrics(_ workout: WorkoutDetail) -> some View {
-        TechMetricGrid(minimum: 140) {
-            TechMetricTile(title: "距离", value: nativeKilometers(workout.distanceKm), accent: TechColor.cyan)
-            TechMetricTile(title: "时长", value: techDuration(workout.durationSeconds), accent: TechColor.green)
-            TechMetricTile(title: "配速", value: "\(techPace(workout.averagePaceSecondsPerKm))/km", accent: TechColor.cyan)
-            TechMetricTile(title: "平均心率", value: workout.averageHeartRateBpm.map { "\(nativeNumber($0, digits: 0)) bpm" } ?? "--")
-            TechMetricTile(title: "步频", value: workout.averageCadenceSpm.map { "\(nativeNumber($0, digits: 0)) spm" } ?? "--")
-            TechMetricTile(title: "功率", value: workout.averagePowerWatts.map { "\(nativeNumber($0, digits: 0)) W" } ?? "--")
-            TechMetricTile(title: "步幅", value: workout.averageStrideLengthMeters.map { "\(nativeNumber($0)) m" } ?? "--")
-            TechMetricTile(title: "垂直振幅", value: workout.averageVerticalOscillationCm.map { "\(nativeNumber($0)) cm" } ?? "--")
-            TechMetricTile(title: "触地时间", value: workout.averageGroundContactTimeMs.map { "\(nativeNumber($0, digits: 0)) ms" } ?? "--")
-            TechMetricTile(title: "爬升", value: workout.elevationGainMeters.map { "\(nativeNumber($0, digits: 0)) m" } ?? "--", accent: TechColor.yellow)
-            TechMetricTile(title: "能量", value: workout.activeEnergyKcal.map { "\(nativeNumber($0, digits: 0)) kcal" } ?? "--", accent: TechColor.cyan)
-            TechMetricTile(title: "质量分", value: nativeNumber(workout.qualityScore), accent: TechColor.green)
+        TechMetricGrid(minimum: 96) {
+            summaryMetric("经过时间", value: techDuration(workout.elapsedSeconds))
+            summaryMetric("平均步频", value: techValue(workout.averageCadenceSpm, digits: 0, unit: " spm"))
+            summaryMetric("平均功率", value: techValue(workout.averagePowerWatts, digits: 0, unit: " W"))
+            summaryMetric("平均步幅", value: techValue(workout.averageStrideLengthMeters, digits: 2, unit: " m"))
+            summaryMetric("垂直振幅", value: techValue(workout.averageVerticalOscillationCm, digits: 1, unit: " cm"))
+            summaryMetric("触地时间", value: techValue(workout.averageGroundContactTimeMs, digits: 0, unit: " ms"))
+            summaryMetric("质量分", value: nativeNumber(workout.qualityScore))
         }
     }
 
-    private func routePanel(_ route: [RoutePoint]) -> some View {
-        TechPanel(tint: TechColor.cyan) {
-            VStack(alignment: .leading, spacing: 9) {
-                TechSectionHeader(title: "路线", trailing: "\(route.count) 个点", trailingColor: TechColor.cyan)
-                if route.count > 1 {
-                    TechRouteView(route: route).equatable()
-                } else {
-                    Text("路线数据不足")
-                        .font(.footnote)
-                        .foregroundStyle(TechColor.muted)
-                }
+    @ViewBuilder
+    private func routePanel(_ detail: WorkoutDetailResponse, series: WorkoutSeriesResponse?) -> some View {
+        if detail.route.count > 1 {
+            TechRouteView(route: detail.route, splits: series?.splits ?? [], startedAt: detail.workout.startedAt).equatable()
+                .accessibilityIdentifier("workout.route")
+        } else {
+            Label(detail.workout.indoor == true ? "室内训练 · 无 GPS 路线" : "暂无可用 GPS 路线", systemImage: "map")
+                .font(.footnote).foregroundStyle(TechColor.muted)
+                .frame(maxWidth: .infinity, minHeight: 72)
+                .accessibilityIdentifier("workout.route.empty")
+        }
+    }
+
+    private func trainingEffectPanel(_ detail: WorkoutDetailResponse) -> some View {
+        let zones = detail.zoneSummary
+        let scores = zones?.stimulusScores ?? []
+        let displayedScores = scores
+            .filter { $0.qualifyingSeconds > 0 || $0.score > 0 }
+            .sorted {
+                if $0.score != $1.score { return $0.score > $1.score }
+                return $0.stimulusType < $1.stimulusType
             }
-        }
-    }
+        let primary = techWorkoutPrimaryStimulusScore(zones)
+        let primaryType = zones?.stimulusType ?? detail.trainingLoad?.stimulusType
+        let confidence = zones?.stimulusConfidence ?? detail.trainingLoad?.confidence
 
-    private func seriesPanel(_ series: WorkoutSeriesResponse) -> some View {
-        let metric = metricSeries(from: series.series, key: selectedMetric)
-        return TechPanel {
+        return TechPanel(tint: TechColor.yellow) {
             VStack(alignment: .leading, spacing: 10) {
-                TechSectionHeader(title: "训练时序", trailing: "\(metric.totalSamples) 点", trailingColor: TechColor.cyan)
-                TechFilterChips(items: metricItems.map { (title: $0.0, value: $0.1) }, selection: $selectedMetric)
-                if metric.points.isEmpty {
-                    Text("没有可展示的\(metric.unit)样本")
+                TechSectionHeader(title: "训练效果", trailing: nativePercent(confidence), trailingColor: TechColor.yellow)
+                if let primary {
+                    HStack(alignment: .bottom, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("主要刺激").font(.caption).foregroundStyle(TechColor.muted)
+                            Text(nativeStimulusName(primary.stimulusType))
+                                .font(.title3.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("有效时长 \(nativeDuration(primary.qualifyingSeconds)) / 目标 \(nativeDuration(primary.targetSeconds))")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(TechColor.muted)
+                        }
+                        Spacer(minLength: 8)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(nativePercent(primary.score))
+                                .font(.title2.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(TechColor.yellow)
+                            Text("目标完成度").font(.caption2).foregroundStyle(TechColor.muted)
+                        }
+                    }
+                } else if primaryType == "unclassified" {
+                    Text("本次训练刺激未分类")
+                        .font(.footnote).foregroundStyle(TechColor.muted)
+                } else if let primaryType, !primaryType.isEmpty {
+                    Text("主要刺激：\(nativeStimulusName(primaryType))")
+                        .font(.subheadline.weight(.semibold))
+                } else {
+                    Text("本次训练暂无可用的刺激数据")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
-                        .frame(maxWidth: .infinity, minHeight: 120)
-                } else if selectedMetric == "heartRate" {
-                    TechHeartRateChart(metric: metric,
-                        averageHeartRate: native.selectedWorkout?.workout.averageHeartRateBpm,
-                        durationSeconds: native.selectedWorkout?.workout.elapsedSeconds ?? 0).equatable()
-                } else {
-                    TechSeriesChart(metric: metric).equatable()
+                }
+                if let zones, !zones.secondaryStimulusTypes.isEmpty {
+                    Text("次要刺激：\(zones.secondaryStimulusTypes.map(nativeStimulusName).joined(separator: "、"))")
+                        .font(.caption)
+                        .foregroundStyle(TechColor.muted)
+                }
+                ForEach(displayedScores, id: \.stimulusType) { score in
+                    TechStatLine(
+                        label: nativeStimulusName(score.stimulusType),
+                        value: "\(nativePercent(score.score)) · \(nativeDuration(score.qualifyingSeconds))",
+                        tint: trainingEffectTint(score.stimulusType),
+                        fraction: score.score.isFinite ? score.score : nil,
+                        note: score.confidence.isFinite ? "可信 \(nativePercent(score.confidence))" : nil
+                    )
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("workout.training-effect")
     }
 
-    private func metricSeries(from series: WorkoutSeries, key: String) -> MetricSeries {
-        switch key {
-        case "speed": return series.speed
-        case "power": return series.power
-        case "cadence": return series.cadence
-        case "elevation": return series.elevation
-        case "strideLength": return series.strideLength
-        case "verticalOscillation": return series.verticalOscillation
-        case "groundContactTime": return series.groundContactTime
-        default: return series.heartRate
+    private func trainingEffectTint(_ stimulusType: String) -> Color {
+        switch stimulusType {
+        case "recovery", "aerobic_base": return TechColor.cyan
+        case "marathon_pace", "lactate_threshold": return TechColor.yellow
+        case "vo2max", "anaerobic_endurance": return TechColor.coral
+        default: return TechColor.leaf
         }
+    }
+
+    private func seriesPanels(_ series: WorkoutSeriesResponse, workout: WorkoutDetail, zones: WorkoutZoneSummary?) -> some View {
+        ForEach(TechWorkoutMetric.allCases) { metric in
+            VStack(alignment: .leading, spacing: 12) {
+                TechWorkoutSeriesChart(metric: metric, series: metric.series(in: series.series),
+                                       average: metric.average(in: workout), durationSeconds: workout.elapsedSeconds).equatable()
+                if let zones, metric == .pace || metric == .heartRate {
+                    zoneDistribution(zones, metric: metric)
+                }
+            }
+            .padding(.vertical, 8)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("workout.metric.\(metric.rawValue)")
+        }
+    }
+
+    private func zoneDistribution(_ zones: WorkoutZoneSummary, metric: TechWorkoutMetric) -> some View {
+        let isHeart = metric == .heartRate
+        let exposures = isHeart ? zones.heartRateExposure : zones.paceExposure
+        let coverage = isHeart ? zones.heartRateCoverage : zones.paceCoverage
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("\(isHeart ? "心率" : "配速")区间 · 有效覆盖 \(nativePercent(coverage))")
+                .font(.caption).foregroundStyle(TechColor.muted)
+            ForEach(exposures) { zone in
+                TechStatLine(label: isHeart ? nativeHeartRateZone(zone.zone) : techWorkoutPaceZoneName(zone.zone),
+                             value: "\(nativePercent(zone.fraction)) · \(techDuration(zone.durationSeconds))",
+                             tint: isHeart ? techHeartRateZoneColor(zone.zone) : TechColor.cyan,
+                             fraction: zone.fraction)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("workout.zones.\(metric.rawValue)")
     }
 
     private func segmentPanel(_ series: WorkoutSeriesResponse) -> some View {
@@ -1629,75 +1800,13 @@ struct TechWorkoutDetailView: View {
         return "后半程 \(sign)\(nativeNumber(drift * 100, digits: 1))%"
     }
 
-    /// Environment read-out (docs/ALGORITHM.md §5).
-    ///
-    /// The correction is applied by the physiology evidence path, not here; this
-    /// panel only makes the number readable. A capture without weather says so and
-    /// names the missing fields — it must never render as "no correction needed".
-    private func environmentPanel(_ environment: WorkoutEnvironmentView?) -> some View {
-        guard let environment else { return AnyView(EmptyView()) }
-        let statusText: String = {
-            switch environment.status {
-            case "applied": return "已按环境条件修正"
-            case "not_needed": return "参考条件，无需修正"
-            default: return "环境数据不足，未修正"
-            }
-        }()
-        let hasWeather = environment.temperatureC != nil || environment.humidityPercent != nil
-        return AnyView(TechPanel {
-            VStack(alignment: .leading, spacing: 10) {
-                TechSectionHeader(title: "环境条件", trailing: statusText, trailingColor: TechColor.yellow)
-                TechMetricGrid(minimum: 120) {
-                    TechMetricTile(title: "温度", value: environment.temperatureC.map { "\(nativeNumber($0, digits: 1)) °C" } ?? "--")
-                    TechMetricTile(title: "湿度", value: environment.humidityPercent.map { "\(nativeNumber($0, digits: 0)) %" } ?? "--")
-                    TechMetricTile(title: "爬升", value: environment.elevationGainMeters.map { "\(nativeNumber($0, digits: 0)) m" } ?? "--")
-                    TechMetricTile(title: "修正量", value: environment.correction.map { "\(nativeNumber($0.total * 100, digits: 1)) %" } ?? "--", accent: TechColor.yellow)
-                    TechMetricTile(title: "等效用时", value: environment.adjusted.map { techDuration($0.durationSeconds) } ?? "--")
-                    TechMetricTile(title: "等效配速", value: environment.adjusted?.paceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--", accent: TechColor.cyan)
-                }
-                if !environment.reasonCodes.isEmpty {
-                    Text(environment.reasonCodes.map(nativeEnvironmentReason).joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(TechColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text(hasWeather
-                     ? "等效配速是把本次观测折算到参考条件后的结果，用于跨天气比较，不代表当天的最好成绩。"
-                     : "本次同步没有携带温度/湿度，因此不做环境修正，也不会按零惩罚处理。")
-                    .font(.caption)
-                    .foregroundStyle(TechColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        })
-    }
-
-    /// Grade context for the splits, or an explicit reason it is missing.
-    ///
-    /// `gradePercent == nil` means unknown — never render it as a flat split.
+    /// Kilometer rows retain measured pace and grade; adjusted pace appears only in the summary.
     private func splitPanel(_ series: WorkoutSeriesResponse?) -> some View {
         let splits = series?.splits ?? []
         let maxPace = max(splits.map(\.averagePaceSecondsPerKm).max() ?? 1, 1)
-        let grade = series?.grade
-        let hasGrade = splits.contains { $0.grade?.gradePercent != nil }
         return TechPanel {
             VStack(alignment: .leading, spacing: 4) {
                 TechSectionHeader(title: "公里分段", trailing: "\(splits.count) 段")
-                if hasGrade, let grade {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("等强配速 \(grade.gradeAdjustedPaceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--") · 爬升 \(grade.gainMeters.map { "\(nativeNumber($0, digits: 0)) m" } ?? "--") · 覆盖 \(grade.coveredSplits)/\(grade.totalSplits) 段")
-                        Text("按 Minetti 能耗模型折算为平地等效配速（模型值，非实测）")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(TechColor.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.vertical, 4)
-                } else if let grade, !grade.reasonCodes.isEmpty {
-                    Text("未计算坡度与等强配速：\(grade.reasonCodes.map(nativeEnvironmentReason).joined(separator: "；"))")
-                        .font(.caption)
-                        .foregroundStyle(TechColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.vertical, 4)
-                }
                 if splits.isEmpty {
                     Text("没有分段数据")
                         .font(.footnote)
@@ -1716,7 +1825,7 @@ struct TechWorkoutDetailView: View {
                             .font(.caption.weight(.bold).monospacedDigit())
                             .foregroundStyle(TechColor.muted)
                             if let splitGrade = split.grade, splitGrade.gradePercent != nil {
-                                Text("坡度 \(nativeNumber(splitGrade.gradePercent, digits: 1))% · 等强 \(splitGrade.gradeAdjustedPaceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--")")
+                                Text("坡度 \(nativeNumber(splitGrade.gradePercent, digits: 1))%")
                                     .font(.caption2.monospacedDigit())
                                     .foregroundStyle(TechColor.muted)
                             }
@@ -1727,6 +1836,8 @@ struct TechWorkoutDetailView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("workout.splits")
     }
 
     private func qualityPanel(_ detail: WorkoutDetailResponse) -> some View {
@@ -1750,51 +1861,6 @@ struct TechWorkoutDetailView: View {
                 }
                 if !detail.workout.explanationCodes.isEmpty {
                     Text(detail.workout.explanationCodes.joined(separator: " · "))
-                        .font(.caption)
-                        .foregroundStyle(TechColor.muted)
-                }
-            }
-        }
-    }
-
-    private func trainingLoadPanel(_ load: WorkoutTrainingLoad) -> some View {
-        TechPanel {
-            TechSectionHeader(title: "训练负荷")
-            Text(nativeNumber(load.load)).techScaledFont(34, weight: .semibold).monospacedDigit()
-                .foregroundStyle(TechColor.ink)
-            DisclosureGroup {
-                HStack(spacing: 8) {
-                    techMetricCaption("强度", value: nativeNumber(load.intensity))
-                    techMetricCaption("置信度", value: nativePercent(load.confidence))
-                    techMetricCaption("心率", value: load.averageHeartRate.map { nativeNumber($0, digits: 0) } ?? "--")
-                }
-                Text("来源：\(load.source) · 刺激：\(nativeStimulusName(load.stimulusType))")
-                    .font(.caption).foregroundStyle(TechColor.muted)
-                ForEach(load.explanations, id: \.code) { explanation in
-                    Text(explanation.code + (explanation.value.map { " · \(nativeNumber($0))" } ?? ""))
-                        .font(.caption2).foregroundStyle(TechColor.muted)
-                }
-            } label: { Text("负荷依据").frame(minHeight: 44) }.font(.caption).tint(TechColor.cyan)
-        }
-    }
-
-    private func zonePanel(_ zones: WorkoutZoneSummary) -> some View {
-        TechPanel(tint: TechColor.yellow) {
-            VStack(alignment: .leading, spacing: 9) {
-                TechSectionHeader(title: "区间暴露", trailing: nativeStimulusName(zones.stimulusType), trailingColor: TechColor.yellow)
-                Text("心率覆盖 \(nativePercent(zones.heartRateCoverage)) · 配速覆盖 \(nativePercent(zones.paceCoverage))")
-                    .font(.caption)
-                    .foregroundStyle(TechColor.muted)
-                ForEach(zones.heartRateExposure) { zone in
-                    TechStatLine(
-                        label: nativeHeartRateZone(zone.zone),
-                        value: nativePercent(zone.fraction),
-                        tint: techHeartRateZoneColor(zone.zone),
-                        fraction: zone.fraction
-                    )
-                }
-                if !zones.secondaryStimulusTypes.isEmpty {
-                    Text("次要刺激：\(zones.secondaryStimulusTypes.map(nativeStimulusName).joined(separator: "、"))")
                         .font(.caption)
                         .foregroundStyle(TechColor.muted)
                 }
@@ -2052,7 +2118,7 @@ struct TechAnalysisView: View {
 
     private func legendDot(_ title: String, color: Color) -> some View {
         HStack(spacing: 5) {
-            Rectangle().fill(color).frame(width: 9, height: 9)
+            Circle().fill(color).frame(width: 9, height: 9)
             Text(title).font(.caption2.weight(.bold)).foregroundStyle(TechColor.muted)
         }
     }
@@ -2138,7 +2204,7 @@ struct TechNativeSettingsView: View {
             .modifier(TechKeyboardDismiss())
             .toolbar(.visible, for: .navigationBar)
             .toolbarBackground(TechColor.background, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
         } label: {
             TechPanel {
                 HStack(spacing: 14) {
@@ -2229,7 +2295,7 @@ struct TechNativeSettingsView: View {
                 Image(systemName: healthSync.lastError == nil ? "heart.fill" : "exclamationmark.circle")
                     .font(.system(size: 40, weight: .light)).foregroundStyle(TechColor.coral)
                     .frame(width: 68, height: 68)
-                    .background(healthSync.lastError == nil ? Color.white : .clear, in: RoundedRectangle(cornerRadius: 17))
+                    .background(healthSync.lastError == nil ? Color.white : .clear, in: TechSurfaceShape())
                 Text(healthSync.lastError == nil ? "Apple 健康" : "同步未完成").font(.title2.weight(.semibold))
                 Text(healthSync.lastError == nil ? "只读访问" : "请检查连接与健康权限后重试。")
                     .font(.caption).foregroundStyle(TechColor.muted)
@@ -2288,7 +2354,7 @@ struct TechNativeSettingsView: View {
             Image(systemName: icon).foregroundStyle(tint).frame(width: 24)
             Text(title).font(.subheadline)
             Spacer()
-        }.padding(10).background(TechColor.background.opacity(0.4), in: Capsule())
+        }.padding(10).background(TechColor.background.opacity(0.4), in: TechSurfaceShape())
     }
 
     private var cachePanel: some View {
@@ -2308,7 +2374,7 @@ struct TechNativeSettingsView: View {
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(TechColor.coral)
                     .frame(maxWidth: .infinity, minHeight: 44)
-                    .overlay(Capsule().stroke(TechColor.coral.opacity(0.7), lineWidth: 1))
+                    .overlay(TechSurfaceShape().stroke(TechColor.coral.opacity(0.7), lineWidth: 1))
                 }
                 .buttonStyle(TechPressStyle())
             }
@@ -2345,7 +2411,7 @@ struct TechNativeSettingsView: View {
     private var versionPanel: some View {
         TechPanel(tint: TechColor.cyan) {
             VStack(alignment: .leading, spacing: 8) {
-                TechSectionHeader(title: "关于 RAI", trailing: "TECHNOLOGY EDITION", trailingColor: TechColor.cyan)
+                TechSectionHeader(title: "关于 RAI", trailing: "FRESH SKIN", trailingColor: TechColor.cyan)
                 LabeledContent("应用", value: "RAI 原生 iOS")
                     .font(.footnote.weight(.bold))
                 LabeledContent("最低系统", value: "iOS 17")

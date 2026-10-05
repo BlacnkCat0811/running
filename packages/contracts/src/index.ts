@@ -1631,6 +1631,8 @@ export interface WorkoutEnvironmentView {
   status: EnvironmentViewStatus;
   /** Where the numbers came from. Only HealthKit workout metadata is read today. */
   source: "workout_metadata";
+  /** Optional additive HealthKit weather code; null means unrecorded or unknown. */
+  weatherCondition?: number | null;
   /** Raw observations. Always reported, even when the correction is unavailable. */
   temperatureC: number | null;
   humidityPercent: number | null;

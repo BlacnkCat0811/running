@@ -215,11 +215,30 @@ export function environmentViewForWorkout(input: {
   ) {
     return null;
   }
-  return buildWorkoutEnvironmentView({
-    distanceMeters,
-    durationSeconds,
-    conditions: parsePerformanceConditions(input.metadataJson ?? "{}")
-  });
+  return {
+    ...buildWorkoutEnvironmentView({
+      distanceMeters,
+      durationSeconds,
+      conditions: parsePerformanceConditions(input.metadataJson ?? "{}")
+    }),
+    weatherCondition: workoutWeatherCondition(input.metadataJson)
+  };
+}
+
+/** HealthKit's observed weather code, not an inference from temperature/humidity. */
+function workoutWeatherCondition(metadataJson: string | null): number | null {
+  try {
+    const metadata: unknown = JSON.parse(metadataJson ?? "{}");
+    if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+    const raw = (metadata as Record<string, unknown>).HKWeatherCondition;
+    const value: unknown = Array.isArray(raw) ? raw.at(-1) : raw;
+    if (typeof value !== "number" && typeof value !== "string") return null;
+    if (typeof value === "string" && !/^\d+$/.test(value.trim())) return null;
+    const code = Number(value);
+    return Number.isInteger(code) && code > 0 && code <= 27 ? code : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface EnvironmentCoverage {

@@ -1,15 +1,19 @@
-# Technology 视觉合同
+# 清新视觉合同
 
-现有原生iOS只有科技视觉；源文件为[TechViews](../RAI/Skins/Technology/TechViews.swift)与[TechTheme](../RAI/Skins/Technology/TechTheme.swift)。
+现有原生iOS只有清新视觉；源文件为[TechViews](../RAI/Skins/Technology/TechViews.swift)、[TechTheme](../RAI/Skins/Technology/TechTheme.swift)与[圆角表面组件](../RAI/Skins/Technology/TechSurfaceStyle.swift)。`Technology` / `Tech` 名称仅沿用代码路径，不代表保留旧皮肤。
 界面入口见[iOS README](../README.md)，历史视觉文件说明见[设计索引](README.md)。不以旧截图数量/旧测试计数冒充当前验收。
 
 ## 实现边界
 
-- 深色底、青蓝强调、统一卡片/字体/间距令牌；颜色通过Theme取得，不到处内联色值。
+- 浅薄荷底、白色面板、薄荷绿操作色，配速/心率/训练效果分别用蓝/珊瑚/黄；文字使用同色系深色保证对比度。颜色通过Theme取得。
+- 连续圆角、原生高清 SF Symbols、连续进度环与胶囊进度条，配以平滑山景与跑鞋插画；没有像素绘制、深色备选、霓虹、发光或皮肤选择器。
+- 山景插画在**无边框页面背景**下（今日首页头部）用页底色自身的 alpha 渐隐把边缘融进底色，不留直边；渐变体只允许取页底色及其透明版本，`check-fresh-skin.py` 把这一点钉在比较值上（块数固定为三、每块颜色白名单）。皮肤其余部分仍不得出现渐变填充的表面。
+- 原有字体、间距、控件尺寸、模块顺序与导航保持不变；圆角只改变表面路径，系统图标沿用原有字体度量与无障碍语义，装饰插画不接收触控。
+- 图表仍使用真实观测值和原比例，不量化数据、改写路线或补造分数。高德底图与分享导出统一浅色。
 - 五个原生入口复用NativeRootView、NativeAppModel、现有API与导航；不复制评分、同步或写命令逻辑。
 - 展示层不能把null补成健康/0，也不能把“无今天恢复覆盖”改成“能力下降”。
 - 今日能力卡/详情、计划草稿、锁课、反馈、数据状态和同步失败使用合同明确的状态及操作。
-- 历史像素主题选择已撤去，残留UserDefaults皮肤键不代表用户数据需要迁移。
+- 旧皮肤运行时样式已替换，残留UserDefaults皮肤键无人读取，不迁移或删除用户数据。
 
 ## 数据与可访问性
 

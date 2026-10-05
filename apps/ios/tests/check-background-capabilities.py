@@ -661,7 +661,7 @@ check(
     "BGTaskScheduler.register is now scheduled inside a Task; registering after launch completes "
     "makes every later submit fail",
 )
-# 注册点恰好一处：`RAIApp.swift` 被 `typecheck-ios.sh:92` 排除，逻辑写进去就没有门禁看得见。
+# 注册点恰好一处：`RAIApp.swift` 被 `typecheck-ios.sh:102` 排除，逻辑写进去就没有门禁看得见。
 check(
     app_delegate.count("registerBackgroundTasks()") >= 2 and "registerBackgroundTasks" not in app,
     "registerBackgroundTasks belongs in AppDelegate.swift (RAIApp.swift is excluded from type checking)",

@@ -69,9 +69,17 @@ final class AppModel {
 /// 的视图，被 TechViews 的路线面板引用，所以这里只需要入口签名）。
 struct TechRouteView: View, Equatable {
     let route: [RoutePoint]
+    let splits: [WorkoutSplit]
+    let startedAt: String
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.route.elementsEqual(rhs.route) { $0.latitude == $1.latitude && $0.longitude == $1.longitude }
     }
+    var body: some View { EmptyView() }
+}
+
+struct TechShareRouteMap: View {
+    let polylines: [[ShareCardRoutePoint]]
+    let onSnapshot: (UIImage?) -> Void
     var body: some View { EmptyView() }
 }
 #endif

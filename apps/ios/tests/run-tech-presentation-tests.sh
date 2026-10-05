@@ -16,6 +16,7 @@ xcrun swiftc -parse-as-library -disable-sandbox apps/ios/RAI/APIModels.swift \
   apps/ios/RAI/Skins/Technology/TechPlotData.swift \
   apps/ios/RAI/Skins/Technology/TechSyncPresentation.swift \
   apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift \
+  apps/ios/RAI/Skins/Technology/TechWorkoutDetailPresentation.swift \
   apps/ios/tests/TechPresentationRegression.swift -o "$tmp/tech-presentation"
 "$tmp/tech-presentation"
 python3 - <<'PY'
@@ -56,7 +57,7 @@ def token(pattern, text, label):
     return match.groups()
 
 checks = 0
-for foreground in ["ink", "cyan", "coral", "yellow", "leaf", "muted-0", "muted-1"]:
+for foreground in ["ink", "cyan", "blue", "coral", "yellow", "leaf", "success", "violet", "muted-0", "muted-1"]:
     for background in ["background", "paper", "elevated"]:
         ratio = contrast(colors[foreground], colors[background])
         assert ratio >= 4.5, f"{foreground} on {background}: {ratio:.2f} < 4.5"
@@ -78,14 +79,14 @@ primary = source.split("struct TechPrimaryButton", 1)[1].split("struct TechProgr
     r"foregroundStyle\(isDisabled \? TechColor\.\w+ : TechColor\.(\w+)\)", primary,
     "TechPrimaryButton label color")
 (fill_token,) = token(
-    r"else \{ Capsule\(\)\.fill\(TechColor\.(\w+)\) \}", primary,
+    r"else \{ TechSurfaceShape\(\)\.fill\(TechColor\.(\w+)\) \}", primary,
     "TechPrimaryButton enabled fill color")
 
 sheet = pathlib.Path("apps/ios/RAI/Skins/Technology/TechConfirmationSheet.swift").read_text()
 destructive = sheet.split("if destructive {", 1)[1].split("} else {", 1)[0]
 (destructive_label,) = token(r"foregroundStyle\(TechColor\.(\w+)\)", destructive,
                              "destructive confirmation label color")
-(destructive_fill,) = token(r"background\(TechColor\.(\w+), in: Capsule\(\)\)", destructive,
+(destructive_fill,) = token(r"background\(TechColor\.(\w+), in: TechSurfaceShape\(\)\)", destructive,
                             "destructive confirmation fill color")
 
 for label, foreground, fill in [
@@ -96,8 +97,7 @@ for label, foreground, fill in [
     assert ratio >= 4.5, f"{label} ({foreground} on {fill}): {ratio:.2f} < 4.5"
     checks += 1
 
-# 配速区间徽章：文字压在 `cyan.opacity(0.75)` 上，必须按**叠加后**的颜色算。
-# 承载面取 `paper`（本皮肤里最暗的面板底），叠加结果最暗、深色文字对比度最低，即最不利情形。
+# 配速区间徽章：必须按实际填充与 paper 面板**叠加后**的颜色算。
 detail = pathlib.Path("apps/ios/RAI/Skins/Technology/TechAbilityDetailView.swift").read_text()
 badge = re.search(
     r"foregroundStyle\(TechColor\.(\w+)\)\s*\n\s*\.padding\(6\)\s*\n"
@@ -609,3 +609,4 @@ assert "（RPE \\(Int(value))）" in override_panel, (
     "The override panel must still print the stored integer; `prediction-data.ts` reads `rpe >= 9`")
 print("Effort tiers: the feedback form offers words, the detail panel prints word + integer.")
 PY
+python3 apps/ios/tests/check-fresh-skin.py

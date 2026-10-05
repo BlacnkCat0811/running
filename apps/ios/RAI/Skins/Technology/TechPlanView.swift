@@ -198,8 +198,8 @@ struct TechPlanView: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 9)
-            .foregroundStyle(isToday ? TechColor.background : TechColor.muted)
-            .background(isToday ? TechColor.action : TechColor.grid.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(isToday ? TechColor.actionInk : TechColor.muted)
+            .background(isToday ? TechColor.action : TechColor.grid.opacity(0.25), in: TechSurfaceShape())
             Circle().fill(techSessionColor(day.kind)).frame(width: 8, height: 8)
             Text(nativeSessionName(day.kind))
                 .font(.caption2)
@@ -213,8 +213,8 @@ struct TechPlanView: View {
         .padding(.horizontal, 2)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity)
-        .background(isToday ? TechColor.blue.opacity(0.17) : TechColor.paper, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(isToday ? TechColor.cyan : TechColor.grid.opacity(0.45), lineWidth: 1))
+        .background(isToday ? TechColor.blue.opacity(0.17) : TechColor.paper, in: TechSurfaceShape())
+        .overlay(TechSurfaceShape().stroke(isToday ? TechColor.cyan : TechColor.grid.opacity(0.45), lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 9))
     }
 
@@ -296,7 +296,7 @@ struct TechPlanView: View {
                         .foregroundStyle(TechColor.ink)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(TechColor.paleYellow, in: RoundedRectangle(cornerRadius: 12))
+                        .background(TechColor.paleYellow, in: TechSurfaceShape())
                 }
                 if let message = planSyncMessage {
                     Text(message)
@@ -304,7 +304,7 @@ struct TechPlanView: View {
                         .foregroundStyle(TechColor.ink)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(TechColor.mint, in: RoundedRectangle(cornerRadius: 12))
+                        .background(TechColor.mint, in: TechSurfaceShape())
                 }
                 scheduleDisclosure
                 TechPrimaryButton(
@@ -330,7 +330,7 @@ struct TechPlanView: View {
                     .foregroundStyle(TechColor.cyan)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background {
-                        Capsule().stroke(TechColor.cyan, lineWidth: 1)
+                        TechSurfaceShape().stroke(TechColor.cyan, lineWidth: 1)
                     }
                 }
                 .buttonStyle(TechPressStyle())
@@ -590,7 +590,7 @@ struct TechPlanView: View {
                         }
                     }
                 }
-                .background { TechRaceLandscape().clipShape(RoundedRectangle(cornerRadius: TechMetrics.corner)) }
+                .background { TechRaceLandscape().clipShape(TechSurfaceShape()) }
             }
         }
     }

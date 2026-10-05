@@ -22,10 +22,12 @@ struct TechRing: View {
     }
     private var graphic: some View {
         ZStack {
+            // Track ring: a *closed* circle, so `lineCap` would be ignored anyway
+            // (a closed subpath has no endpoints). Not passing it keeps the code
+            // honest about which strokes actually need a round cap.
             Circle().stroke(TechColor.grid.opacity(0.6), lineWidth: size * 0.10)
             Circle().trim(from: 0, to: progress.isFinite ? min(max(progress, 0), 1) : 0)
-                .stroke(AngularGradient(colors: [tint, TechColor.blue, TechColor.leaf], center: .center, startAngle: .degrees(0), endAngle: .degrees(360)),
-                        style: StrokeStyle(lineWidth: size * 0.10, lineCap: .round))
+                .stroke(tint, style: StrokeStyle(lineWidth: size * 0.10, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 4) {
                 Text(value).font(.system(.title3, design: .default).weight(.semibold).monospacedDigit())
@@ -50,15 +52,13 @@ struct TechInstrumentRing: View {
             Circle().stroke(TechColor.blue.opacity(0.13), lineWidth: 1)
             Circle().stroke(TechColor.success.opacity(0.07), lineWidth: size * 0.17)
                 .frame(width: size * 0.80, height: size * 0.80)
+            // Closed concentric ring — see the note on `TechRing.graphic` above.
             Circle().stroke(TechColor.grid.opacity(0.6), lineWidth: size * 0.085)
                 .frame(width: size * 0.80, height: size * 0.80)
             Circle().trim(from: 0, to: progress.isFinite ? min(max(progress, 0), 1) : 0)
-                .stroke(AngularGradient(colors: [TechColor.cyan, TechColor.success, TechColor.yellow],
-                                        center: .center, startAngle: .degrees(0), endAngle: .degrees(360)),
-                        style: StrokeStyle(lineWidth: size * 0.085, lineCap: .round))
+                .stroke(TechColor.cyan, style: StrokeStyle(lineWidth: size * 0.085, lineCap: .round))
                 .frame(width: size * 0.80, height: size * 0.80)
                 .rotationEffect(.degrees(-90))
-                .shadow(color: TechColor.success.opacity(0.28), radius: 5)
             Circle().fill(TechColor.background)
                 .frame(width: size * 0.51, height: size * 0.51)
             Circle().stroke(TechColor.cyan.opacity(0.22), lineWidth: 1)
@@ -106,13 +106,13 @@ struct TechAbilityGauge: View {
     var lineWidth: CGFloat = 12
 
     private var filled: Double { progress.isFinite ? min(max(progress, 0), 1) : 0 }
-    private var glowRadius: CGFloat { 6 }
+    private var lowerClearance: CGFloat { 6 }
     private var stroke: StrokeStyle { StrokeStyle(lineWidth: lineWidth, lineCap: .round) }
     /// Stroke is centered on the path. Inset by half the line width so the
-    /// round caps stay inside `size`; otherwise `.clipped()` shears them off.
+    /// stroke stays inside `size`; otherwise `.clipped()` shears it off.
     private var inset: CGFloat { lineWidth / 2 }
     private var radius: CGFloat { (size - lineWidth) / 2 }
-    private var bottomOverflow: CGFloat { inset + glowRadius }
+    private var bottomOverflow: CGFloat { inset + lowerClearance }
     private var arcHeight: CGFloat { size / 2 + bottomOverflow }
 
     var body: some View {
@@ -127,13 +127,12 @@ struct TechAbilityGauge: View {
                     if filled > 0 {
                         Circle().trim(from: 0, to: 0.5 * filled)
                             .stroke(TechColor.energy, style: stroke)
-                            .shadow(color: TechColor.blue.opacity(0.45), radius: glowRadius)
                     }
                 }
                 .rotationEffect(.degrees(180))
                 .padding(inset)
                 ForEach([-72.0, -36, 0, 36, 72], id: \.self) { angle in
-                    Capsule().fill(TechColor.paper)
+                    TechSurfaceShape().fill(TechColor.paper)
                         .frame(width: lineWidth * 0.22, height: lineWidth * 1.24)
                         .offset(y: -radius)
                         .rotationEffect(.degrees(angle))
@@ -224,8 +223,8 @@ struct TechMiniBars: View {
                 // A ratio width needs a categorical scale step. Integer X values
                 // form a continuous scale and can collapse these bars to zero width.
                 BarMark(x: .value("周期", String(index)), y: .value("公里", values[index]), width: .ratio(0.58))
-                    .foregroundStyle(LinearGradient(colors: [colors.indices.contains(index) ? colors[index] : TechColor.cyan, TechColor.leaf.opacity(0.4)], startPoint: .top, endPoint: .bottom))
-                    .cornerRadius(3)
+                    .foregroundStyle(colors.indices.contains(index) ? colors[index] : TechColor.cyan)
+                    .cornerRadius(4)
             }
         }
         .chartXAxis {
@@ -271,7 +270,7 @@ struct TechLineChart: View {
                         .foregroundStyle(tint).symbolSize(22)
                 }
                 AreaMark(x: .value("周期", index), yStart: .value("基线", low), yEnd: .value("跑力", values[index]))
-                    .foregroundStyle(LinearGradient(colors: [tint.opacity(0.18), .clear], startPoint: .top, endPoint: .bottom))
+                    .foregroundStyle(tint.opacity(0.08))
                     .interpolationMethod(.monotone)
             }
         }

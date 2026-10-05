@@ -1,123 +1,215 @@
 #if os(iOS)
 import SwiftUI
+import UIKit
 
-/// Share card for one run (docs/DECISIONS.md D9).
-///
-/// The route is trimmed **on the server**: this view draws each polyline as its own
-/// stroke and never joins them, so a privacy zone becomes a visible break instead
-/// of a chord through the house. The view never receives the removed coordinates —
-/// that is the whole reason the card is built server-side rather than here.
-///
-/// The image is rendered with `ImageRenderer` and handed to `ShareLink`, so the
-/// runner can send it through any app they already use without this project
-/// uploading anything anywhere.
-struct TechShareCardView: View {
-    @Environment(ServerSession.self) private var session
-    let trainingSessionId: String
-
-    @State private var card: ShareCardResponse?
-    @State private var status: String?
-    @State private var failed = false
-
-    private var requestKey: String { session.serverURLString + session.apiToken + trainingSessionId }
+struct TechWorkoutShareMenu: View {
+    let detail: WorkoutDetailResponse
+    var grade: WorkoutGradeSummary? = nil
+    @State private var showingShareSheet = false
 
     var body: some View {
-        TechPanel {
-            VStack(alignment: .leading, spacing: 10) {
-                TechSectionHeader(
-                    title: "分享卡片",
-                    trailing: card.map { $0.privacy.unfiltered ? "未过滤" : "已按隐私区裁剪" } ?? "读取中",
-                    trailingColor: card?.privacy.unfiltered == true ? TechColor.yellow : TechColor.green
-                )
-                if failed {
-                    Text("无法生成分享卡片（需要令牌或网络）。")
-                        .font(.footnote).foregroundStyle(TechColor.coral)
-                } else if let card {
-                    preview(card)
-                    Text(card.note ?? "卡片只包含服务端允许的坐标。")
-                        .font(.caption).foregroundStyle(TechColor.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("隐私区 \(card.privacy.zonesApplied) 个 · 隐藏 \(card.privacy.redactedPoints) 点 · 断点 \(card.privacy.gaps)")
-                        .font(.caption2).foregroundStyle(TechColor.muted)
-                    if let image = renderedImage(card) {
-                        ShareLink(item: image, preview: SharePreview("训练卡片", image: image)) {
-                            Label("分享图片", systemImage: "square.and.arrow.up")
+        Button {
+            showingShareSheet = true
+        } label: {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(TechColor.cyan)
+                .frame(width: 44, height: 44)
+        }
+        .accessibilityLabel("分享训练卡片")
+        .accessibilityIdentifier("workout.share")
+        .sheet(isPresented: $showingShareSheet) {
+            TechWorkoutShareSheet(detail: detail, grade: grade)
+        }
+    }
+}
+
+private struct TechWorkoutShareSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(ServerSession.self) private var session
+    @Environment(NativeAppModel.self) private var native
+    let detail: WorkoutDetailResponse
+    let grade: WorkoutGradeSummary?
+    @State private var card: ShareCardResponse?
+    @State private var image: UIImage?
+    @State private var error: String?
+    @State private var attempt = 0
+
+    private var identity: String { native.feedbackSessionID }
+    private var requestKey: String { identity + detail.id + String(attempt) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let image {
+                        Image(uiImage: image).resizable().scaledToFit()
+                            .accessibilityLabel("训练分享卡片")
+                            .accessibilityIdentifier("workout.share.preview")
+                        if let card {
+                            Text(card.note ?? (card.privacy.unfiltered ? "未配置隐私区：卡片显示完整轨迹。" : "路线已按隐私区裁剪。"))
+                                .font(.footnote).foregroundStyle(TechColor.muted)
                         }
-                        .frame(minHeight: 44)
+                    } else if let error {
+                        TechEmptyState(title: "卡片暂不可用", message: error, systemName: "exclamationmark.triangle")
+                        TechPrimaryButton(title: "重新生成", systemName: "arrow.clockwise") { attempt += 1 }
+                    } else if let card {
+                        let key = requestKey
+                        // Only the server-trimmed polylines reach the share map, never detail.route.
+                        TechShareRouteMap(polylines: card.polylines) { snapshot in
+                            guard key == requestKey else { return }
+                            guard let snapshot else { error = "高德底图未加载完成，请检查网络后重试。"; return }
+                            image = renderedImage(TechWorkoutCombinedShareImage(
+                                detail: detail, grade: grade, card: card, snapshot: snapshot
+                            ))
+                            if image == nil { error = "无法生成训练分享图片，请重试。" }
+                        }
+                        .frame(height: 260)
+                        .id(requestKey)
+                        TechLoadingState(title: "正在生成训练分享卡片")
                     } else {
-                        Text("当前设备无法渲染图片，可用上面的文字摘要分享。")
-                            .font(.caption2).foregroundStyle(TechColor.muted)
+                        TechLoadingState(title: "正在读取训练路线")
                     }
-                    if let status { Text(status).font(.caption2).foregroundStyle(TechColor.muted) }
-                } else {
-                    Text("正在生成分享卡片…").font(.footnote).foregroundStyle(TechColor.muted)
+                }
+                .padding(TechMetrics.pageHorizontal)
+            }
+            .background(TechColor.background)
+            .foregroundStyle(TechColor.ink)
+            .navigationTitle("分享训练卡片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    TechIconButton(systemName: "xmark", accessibilityLabel: "关闭") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if let image {
+                        let item = Image(uiImage: image)
+                        ShareLink(item: item, preview: SharePreview("训练分享卡片", image: item)) {
+                            Image(systemName: "square.and.arrow.up").frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("分享训练卡片")
+                        .accessibilityIdentifier("workout.share.send")
+                    }
                 }
             }
         }
-        .task(id: requestKey) { await load() }
+        .preferredColorScheme(.light)
+        .task(id: requestKey) { await prepare() }
+        .onChange(of: identity) { _, _ in dismiss() }
     }
 
-    @ViewBuilder private func preview(_ card: ShareCardResponse) -> some View {
-        // A fixed 2:1 canvas; the polylines are drawn in their own coordinate space so
-        // a break stays a break regardless of how many pieces survive.
-        Canvas { context, size in
-            let bounds = card.polylines.flatMap { $0 }
-            guard let first = bounds.first else { return }
-            let minLat = bounds.map(\.latitude).min() ?? first.latitude
-            let maxLat = bounds.map(\.latitude).max() ?? first.latitude
-            let minLon = bounds.map(\.longitude).min() ?? first.longitude
-            let maxLon = bounds.map(\.longitude).max() ?? first.longitude
-            let spanLat = max(maxLat - minLat, 1e-6)
-            let spanLon = max(maxLon - minLon, 1e-6)
-            let inset: CGFloat = 12
-            for line in card.polylines where line.count >= 2 {
-                var path = Path()
-                for (index, point) in line.enumerated() {
-                    let x = inset + CGFloat((point.longitude - minLon) / spanLon) * (size.width - inset * 2)
-                    let y = inset + CGFloat(1 - (point.latitude - minLat) / spanLat) * (size.height - inset * 2)
-                    if index == 0 { path.move(to: CGPoint(x: x, y: y)) } else { path.addLine(to: CGPoint(x: x, y: y)) }
-                }
-                context.stroke(path, with: .color(TechColor.cyan), lineWidth: 2.4)
-            }
+    @MainActor
+    private func prepare() async {
+        let key = requestKey
+        card = nil; image = nil; error = nil
+        guard MapPrivacy.mapEnabled else { error = "请先在设置中启用高德地图。"; return }
+        guard let url = session.serverURL, !session.apiToken.isEmpty else {
+            error = "请连接服务并配置访问令牌后分享路线。"; return
         }
-        .frame(height: 160)
-        .frame(maxWidth: .infinity)
-        .background(TechColor.elevated)
-        .overlay(Rectangle().stroke(TechColor.grid, lineWidth: 1))
-        .accessibilityLabel("分享卡片预览")
-    }
-
-    @MainActor private func renderedImage(_ card: ShareCardResponse) -> Image? {
-        let renderer = ImageRenderer(content: cardImage(card).frame(width: 800, height: 420))
-        renderer.scale = 2
-        guard let uiImage = renderer.uiImage else { return nil }
-        return Image(uiImage: uiImage)
-    }
-
-    private func cardImage(_ card: ShareCardResponse) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            preview(card).frame(height: 300)
-            Text("\(nativeDate(card.workout.startedAt)) · \(nativeKilometers(card.workout.distanceKm)) · \(nativeDuration(card.workout.durationSeconds))")
-                .font(.headline).foregroundStyle(TechColor.ink)
-            if !card.privacy.unfiltered {
-                Text("已按隐私区裁剪").font(.caption).foregroundStyle(TechColor.muted)
-            }
-        }
-        .padding(24)
-        .background(TechColor.paper)
-    }
-
-    private func load() async {
-        failed = false
-        guard let url = session.serverURL else { failed = true; return }
         do {
-            let result = try await RaiAPIClient().shareCard(
-                id: trainingSessionId, baseURL: url, token: session.apiToken
-            )
+            let result = try await RaiAPIClient().shareCard(id: detail.id, baseURL: url, token: session.apiToken)
+            guard !Task.isCancelled, key == requestKey else { return }
+            guard result.trainingSessionId == detail.id else { error = "训练记录不匹配，请重试。"; return }
+            guard result.polylines.contains(where: { $0.count >= 2 }) else {
+                error = result.note ?? "本次训练暂无可分享的 GPS 路线。"; return
+            }
             card = result
         } catch {
-            failed = true
+            guard !Task.isCancelled, key == requestKey else { return }
+            self.error = "无法读取分享路线，请检查服务连接后重试。"
         }
+    }
+
+    @MainActor
+    private func renderedImage<Content: View>(_ content: Content) -> UIImage? {
+        let renderer = ImageRenderer(content: content.frame(width: 390)
+            .environment(\.dynamicTypeSize, .medium).environment(\.colorScheme, .light))
+        renderer.scale = 3
+        return renderer.uiImage
+    }
+}
+
+private struct TechWorkoutCombinedShareImage: View {
+    let detail: WorkoutDetailResponse
+    let grade: WorkoutGradeSummary?
+    let card: ShareCardResponse
+    let snapshot: UIImage
+
+    var body: some View {
+        let workout = detail.workout
+        let weather = TechWorkoutWeather(condition: workout.environment?.weatherCondition)
+        let gradeAdjustedPace = techShareGradeAdjustedPace(card: card.workout, detailGrade: grade)
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("RAI · 训练分享").font(.title3.weight(.semibold))
+                Text("\(nativeSessionName(workout.sessionType)) · \(nativeDate(workout.startedAt))")
+                    .font(.caption).foregroundStyle(TechColor.muted)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 16)
+
+            Text("路线").font(.headline.weight(.semibold))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 10)
+            Image(uiImage: snapshot).resizable().scaledToFit()
+                .frame(maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(nativeKilometers(card.workout.distanceKm)) · \(techDuration(card.workout.durationSeconds))")
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                Text(card.privacy.unfiltered ? "未配置隐私区 · 完整轨迹" : "路线已按隐私区裁剪")
+                    .font(.caption).foregroundStyle(TechColor.muted)
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 14)
+            .padding(.bottom, 22)
+
+            Divider().overlay(TechColor.grid).padding(.horizontal, 24)
+
+            VStack(alignment: .leading, spacing: 18) {
+                Text("训练摘要").font(.headline.weight(.semibold))
+                HStack(alignment: .top, spacing: 12) {
+                    metric("距离", techKilometers(workout.distanceKm), prominent: true)
+                    metric("运动时间", techDuration(workout.durationSeconds), prominent: true)
+                }
+                Divider().overlay(TechColor.grid)
+                HStack(alignment: .top, spacing: 12) {
+                    metric("平均配速", workout.averagePaceSecondsPerKm.map { "\(techPace($0))/km" } ?? "--")
+                    metric("平均等强配速", gradeAdjustedPace.map { "\(techPace($0))/km" } ?? "--")
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    metric("平均心率", techValue(workout.averageHeartRateBpm, digits: 0, unit: " bpm"))
+                    metric("累计上升", techValue(workout.elevationGainMeters, digits: 0, unit: " m"))
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    metric("能量消耗", techValue(workout.activeEnergyKcal, digits: 0, unit: " kcal"))
+                    metric("训练负荷", nativeNumber(detail.trainingLoad?.load, digits: 0))
+                }
+                if let grade, grade.coveredSplits < grade.totalSplits {
+                    Text("等强配速覆盖 \(grade.coveredSplits)/\(grade.totalSplits) 段")
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                }
+                Divider().overlay(TechColor.grid)
+                Label(weather.title, systemImage: weather.symbol)
+                    .font(.caption).foregroundStyle(TechColor.muted)
+                HStack(alignment: .top, spacing: 12) {
+                    metric("温度", techValue(workout.environment?.temperatureC, digits: 1, unit: " °C"))
+                    metric("湿度", techValue(workout.environment?.humidityPercent, digits: 0, unit: "%"))
+                }
+            }
+            .padding(24)
+        }
+        .padding(.vertical, 24)
+        .background(TechColor.paper)
+        .foregroundStyle(TechColor.ink)
+    }
+
+    private func metric(_ title: String, _ value: String, prominent: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(value).font(.system(size: prominent ? 28 : 18, weight: .semibold).monospacedDigit())
+                .fixedSize(horizontal: false, vertical: true)
+            Text(title).font(.caption).foregroundStyle(TechColor.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 #endif

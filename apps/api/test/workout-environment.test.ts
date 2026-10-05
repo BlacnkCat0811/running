@@ -171,3 +171,25 @@ test("N01: the workout-level view needs a distance and a duration to normalise a
   assert.equal(view?.temperatureC, 30);
   assert.equal(view?.elevationGainMeters, 50);
 });
+
+test("weather is read only from HealthKit metadata, independently of correction availability", () => {
+  const view = (metadata: unknown) => environmentViewForWorkout({
+    metadataJson: typeof metadata === "string" ? metadata : JSON.stringify(metadata),
+    distanceMeters: 5_000,
+    durationSeconds: 1_500
+  });
+  assert.equal(view({ HKWeatherCondition: ["3"] })?.weatherCondition, 3);
+  assert.equal(view({ HKWeatherCondition: ["1", "24"] })?.weatherCondition, 24);
+  assert.equal(view({ HKWeatherCondition: 27 })?.weatherCondition, 27);
+  assert.equal(view({ HKWeatherCondition: ["3"] })?.status, "unavailable");
+  const withoutWeather = view({ HKWeatherTemperature: "30 degC", HKWeatherHumidity: "70 %" });
+  assert.equal(withoutWeather?.weatherCondition, null, "Temperature/humidity cannot imply clear skies");
+  assert.equal(withoutWeather?.temperatureC, 30);
+  assert.equal(withoutWeather?.humidityPercent, 70);
+  for (const raw of [null, "", "clear", "3.5", "0", 28, -1, true, [], ["1", "unknown"]]) {
+    assert.equal(view({ HKWeatherCondition: raw })?.weatherCondition, null, `Invalid code: ${JSON.stringify(raw)}`);
+  }
+  for (const metadata of ["{invalid", "null", "[]"]) {
+    assert.equal(view(metadata)?.weatherCondition, null);
+  }
+});

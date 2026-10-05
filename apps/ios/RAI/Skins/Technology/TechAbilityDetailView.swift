@@ -33,7 +33,7 @@ struct TechAbilityDetailView: View {
         .techNavigation("跑步能力").navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(TechColor.background, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
         .refreshable {
             await native.refreshAll()
             await native.refreshBodyMetrics()
@@ -88,7 +88,7 @@ struct TechAbilityDetailView: View {
                     .padding(9)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(TechColor.paleYellow)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(TechColor.yellow, lineWidth: 1))
+                    .overlay(TechSurfaceShape().stroke(TechColor.yellow, lineWidth: 1))
             }
         }
     }
@@ -195,7 +195,7 @@ struct TechAbilityDetailView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(TechColor.background.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .background(TechColor.background.opacity(0.5), in: TechSurfaceShape())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title) \(available ? value : "暂无数据") \(unit)")
     }
@@ -291,9 +291,9 @@ struct TechAbilityDetailView: View {
                     ForEach(profile.paceBands) { band in
                         TechAdaptiveStack(spacing: 8) {
                             Text(techPaceZoneCode(band.zone))
-                                .font(.caption.weight(.semibold)).foregroundStyle(TechColor.background)
+                                .font(.caption.weight(.semibold)).foregroundStyle(TechColor.actionInk)
                                 .padding(6)
-                                .background(TechColor.cyan.opacity(0.75), in: RoundedRectangle(cornerRadius: 6))
+                                .background(TechColor.action.opacity(0.75), in: TechSurfaceShape())
                             Text(techPaceZoneName(band.zone)).font(.subheadline.weight(.medium))
                                 .foregroundStyle(TechColor.ink)
                             Spacer(minLength: 6)

@@ -51,9 +51,9 @@ struct RAIApp: App {
                 .environment(model.discovery)
                 #if os(iOS)
                 .environment(model.native)
-                // 2026-09-18 起原生端只有冰蓝科技一套视觉：配色与强调色固定，
+                // 原生端只有清新一套视觉：配色与强调色固定，
                 // 不再从 `rai.appearance.skin` 读取（存量键留着不影响，无人读它）。
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(.light)
                 .tint(TechColor.cyan)
                 #endif
                 #if os(iOS)

@@ -180,7 +180,7 @@ struct SetupView: View {
 
     var body: some View {
         #if os(iOS)
-        // 2026-09-18 起原生端只有冰蓝科技一套视觉，首次连接页固定走 TechSetupView。
+        // 原生端只有清新一套视觉，首次连接页固定走 TechSetupView。
         // 像素皮肤的 `pixelBody`、`serverPlaceholder` 与两个草稿状态一并删除：
         // `TechSetupView` 自己管草稿，外层再存一份只会是一份没人读的副本。
         TechSetupView()

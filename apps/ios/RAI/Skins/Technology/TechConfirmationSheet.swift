@@ -27,7 +27,7 @@ struct TechConfirmationSheet: View {
                     Button(action: confirm) {
                         Text(confirmTitle).font(.subheadline.weight(.semibold))
                             .foregroundStyle(TechColor.background).padding(12).frame(maxWidth: .infinity, minHeight: 44)
-                            .background(TechColor.coral, in: Capsule())
+                            .background(TechColor.coral, in: TechSurfaceShape())
                     }.buttonStyle(TechPressStyle())
                 } else {
                     TechPrimaryButton(title: confirmTitle, action: confirm)
@@ -40,7 +40,7 @@ struct TechConfirmationSheet: View {
         .presentationCornerRadius(24)
         .presentationDragIndicator(.visible)
         .presentationBackground(TechColor.elevated)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
         .accessibilityIdentifier("technology.confirmation")
     }
 
@@ -48,8 +48,8 @@ struct TechConfirmationSheet: View {
         Button("取消", action: cancel).font(.subheadline.weight(.medium))
             .foregroundStyle(destructive ? TechColor.ink : TechColor.cyan)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(destructive ? TechColor.grid.opacity(0.5) : .clear, in: Capsule())
-            .overlay(Capsule().strokeBorder(destructive ? .clear : TechColor.cyan.opacity(0.6), lineWidth: 1))
+            .background(destructive ? TechColor.grid.opacity(0.5) : .clear, in: TechSurfaceShape())
+            .overlay(TechSurfaceShape().strokeBorder(destructive ? .clear : TechColor.cyan.opacity(0.6), lineWidth: 1))
             .buttonStyle(TechPressStyle())
     }
 }

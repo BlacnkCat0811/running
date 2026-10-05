@@ -74,7 +74,7 @@ struct TechSetupView: View {
                     Button { discovery.start() } label: {
                         Text("重新发现").font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 44)
-                            .overlay(Capsule().strokeBorder(TechColor.cyan.opacity(0.65), lineWidth: 1))
+                            .overlay(TechSurfaceShape().strokeBorder(TechColor.cyan.opacity(0.65), lineWidth: 1))
                     }.buttonStyle(TechPressStyle()).foregroundStyle(TechColor.cyan)
                 }
                 Label("手机与服务器在同一网络。", systemImage: "wifi")

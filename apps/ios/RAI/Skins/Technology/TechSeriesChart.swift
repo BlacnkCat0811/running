@@ -4,38 +4,71 @@ import SwiftUI
 
 /// Equatable input boundary prevents unrelated detail-page changes from
 /// rebuilding the sorted / sampled series. Selection state lives below it.
-struct TechSeriesChart: View, Equatable {
-    let metric: MetricSeries
+struct TechWorkoutSeriesChart: View, Equatable {
+    let metric: TechWorkoutMetric
+    let series: MetricSeries
+    let average: Double?
+    let durationSeconds: Double
+
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.metric.unit == rhs.metric.unit
-            && lhs.metric.points.elementsEqual(rhs.metric.points) {
+        lhs.metric == rhs.metric && lhs.average == rhs.average && lhs.durationSeconds == rhs.durationSeconds
+            && lhs.series.unit == rhs.series.unit && lhs.series.totalSamples == rhs.series.totalSamples
+            && lhs.series.points.elementsEqual(rhs.series.points) {
                 $0.offsetSeconds == $1.offsetSeconds && $0.value == $1.value
             }
     }
+
     var body: some View {
-        TechPreparedSeriesChart(data: TechSeriesData(points: metric.points), unit: metric.unit)
+        TechPreparedWorkoutSeriesChart(metric: metric, data: TechSeriesData(points: metric.chartSeries(from: series).points),
+                                       average: average, durationSeconds: durationSeconds)
     }
 }
 
-struct TechHeartRateChart: View, Equatable {
-    let metric: MetricSeries
-    let averageHeartRate: Double?
+private struct TechPreparedWorkoutSeriesChart: View {
+    let metric: TechWorkoutMetric
+    let data: TechSeriesData
+    let average: Double?
     let durationSeconds: Double
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.averageHeartRate == rhs.averageHeartRate && lhs.durationSeconds == rhs.durationSeconds
-            && TechSeriesChart(metric: lhs.metric) == TechSeriesChart(metric: rhs.metric)
-    }
-    var body: some View {
-        let data = TechSeriesData(points: metric.points.filter { $0.value > 0 })
-        VStack(alignment: .leading, spacing: 16) {
-            Label("心率", systemImage: "heart").font(.subheadline.weight(.medium)).foregroundStyle(TechColor.coral)
-            TechMetricGrid(minimum: 140) {
-                TechMetricTile(title: "平均心率", value: "\(nativeNumber(averageHeartRate, digits: 0)) bpm")
-                TechMetricTile(title: "最大心率", value: "\(nativeNumber(data.maximum, digits: 0)) bpm")
-            }
-            TechPreparedSeriesChart(data: data, unit: "bpm", durationSeconds: durationSeconds,
-                                    chartIdentifier: "workout.heartRate.chart")
+
+    private var accent: Color {
+        switch metric {
+        case .pace: return TechColor.blue
+        case .heartRate: return TechColor.coral
+        case .power: return TechColor.yellow
+        case .elevation: return TechColor.leaf
+        default: return TechColor.cyan
         }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TechSectionHeader(title: metric.title,
+                              trailing: metric == .elevation ? metric.unit : "平均 \(value(average))",
+                              trailingColor: accent)
+            if data.validCount > 0 {
+                HStack {
+                    Text("\(metric == .pace ? "最快" : "最低") \(value(data.minimum))")
+                    Spacer(minLength: 8)
+                    Text("\(metric == .pace ? "最慢" : "最高") \(value(data.maximum))")
+                }
+                .font(.caption.monospacedDigit()).foregroundStyle(TechColor.muted)
+            }
+            if data.points.isEmpty {
+                Text("暂无\(metric.title)时序样本")
+                    .font(.footnote).foregroundStyle(TechColor.muted)
+                    .frame(maxWidth: .infinity, minHeight: 72)
+            } else {
+                TechPreparedSeriesChart(data: data, unit: metric.unit, durationSeconds: durationSeconds,
+                                        chartIdentifier: "workout.series.\(metric.rawValue)",
+                                        accent: accent, isPace: metric == .pace, digits: metric.digits,
+                                        metricTitle: metric.title)
+            }
+        }
+    }
+
+    private func value(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "--" }
+        return metric == .pace ? "\(techPace(value))/km" : "\(nativeNumber(value, digits: metric.digits)) \(metric.unit)"
     }
 }
 
@@ -44,6 +77,10 @@ private struct TechPreparedSeriesChart: View {
     let unit: String
     var durationSeconds: Double = 0
     var chartIdentifier = "workout.series.chart"
+    var accent: Color = TechColor.cyan
+    var isPace = false
+    var digits = 1
+    var metricTitle = "训练"
     @ScaledMetric(relativeTo: .caption) private var height: CGFloat = 190
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var selectedTime: Double?
@@ -51,6 +88,13 @@ private struct TechPreparedSeriesChart: View {
     private var selected: MetricPoint? {
         guard let selectedTime else { return nil }
         return data.points.min { abs($0.offsetSeconds / 60 - selectedTime) < abs($1.offsetSeconds / 60 - selectedTime) }
+    }
+
+    private var accessibilityValue: String {
+        if let selected {
+            return "\(nativeNumber(selected.offsetSeconds / 60, digits: 1)) min，\(formatted(selected.value)) \(isPace ? "/km" : unit)"
+        }
+        return "\(isPace ? "最快" : "最低") \(data.minimum.map(formatted) ?? "--")，\(isPace ? "最慢" : "最高") \(data.maximum.map(formatted) ?? "--") \(isPace ? "/km" : unit)"
     }
 
     var body: some View {
@@ -61,10 +105,10 @@ private struct TechPreparedSeriesChart: View {
                 Chart {
                     ForEach(data.points) { point in
                         LineMark(x: .value("时间 (min)", point.offsetSeconds / 60), y: .value(unit, point.value))
-                            .foregroundStyle(TechColor.cyan).interpolationMethod(.linear)
+                            .foregroundStyle(accent).interpolationMethod(.linear)
                         if data.points.count == 1 {
                             PointMark(x: .value("时间 (min)", point.offsetSeconds / 60), y: .value(unit, point.value))
-                                .foregroundStyle(TechColor.cyan)
+                                .foregroundStyle(accent)
                         }
                     }
                     if let selected {
@@ -76,6 +120,7 @@ private struct TechPreparedSeriesChart: View {
                 }
                 .chartXScale(domain: 0...max(1.0 / 60, durationSeconds.isFinite ? durationSeconds / 60 : 0,
                                            (data.points.last?.offsetSeconds ?? 0) / 60))
+                .chartYScale(domain: .automatic(includesZero: false, reversed: isPace))
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: typeSize.isAccessibilitySize ? 2 : 4)) {
                         AxisValueLabel().foregroundStyle(TechColor.muted)
@@ -83,12 +128,16 @@ private struct TechPreparedSeriesChart: View {
                     }
                 }
                 .chartYAxis {
-                    AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) {
-                        AxisValueLabel().foregroundStyle(TechColor.muted)
+                    AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { axis in
+                        AxisValueLabel {
+                            if let value = axis.as(Double.self) {
+                                Text(formatted(value)).foregroundStyle(TechColor.muted)
+                            }
+                        }
                         AxisGridLine().foregroundStyle(TechColor.grid)
                     }
                 }
-                .chartXAxisLabel("min").chartYAxisLabel(unit)
+                .chartXAxisLabel("min").chartYAxisLabel(isPace ? "min/km" : unit)
                 .frame(height: height)
                 .chartOverlay { proxy in
                     GeometryReader { geometry in
@@ -102,37 +151,35 @@ private struct TechPreparedSeriesChart: View {
                     }
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("训练时序，\(data.validCount) 个有效采样时刻")
-                .accessibilityValue("最低 \(nativeNumber(data.minimum))，最高 \(nativeNumber(data.maximum)) \(unit)")
+                .accessibilityLabel("\(metricTitle)时序")
+                .accessibilityValue(accessibilityValue)
+                .accessibilityAdjustableAction { direction in
+                    switch direction {
+                    case .increment: adjustSelection(1)
+                    case .decrement: adjustSelection(-1)
+                    @unknown default: break
+                    }
+                }
+                .accessibilityAction(named: "上一点") { adjustSelection(-1) }
+                .accessibilityAction(named: "下一点") { adjustSelection(1) }
                 .accessibilityIdentifier(chartIdentifier)
 
                 if let selected {
-                    Text("\(nativeNumber(selected.offsetSeconds / 60, digits: 1) + " min") · \(nativeNumber(selected.value)) \(unit)")
+                    Text("\(nativeNumber(selected.offsetSeconds / 60, digits: 1) + " min") · \(formatted(selected.value)) \(isPace ? "/km" : unit)")
                         .font(.subheadline.monospacedDigit()).foregroundStyle(TechColor.ink)
-                        .accessibilityIdentifier("workout.series.selection")
+                        .accessibilityIdentifier("\(chartIdentifier).selection")
                 }
-                Text(data.validCount > data.points.count
-                     ? "显示 \(data.points.count) 个峰谷采样点，原始数据不变。轻点图表查看。"
-                     : "轻点图表查看数值，上下滑动浏览页面。")
-                    .font(.caption).foregroundStyle(TechColor.muted)
-                HStack {
-                    Button { moveSelection(-1) } label: { Text("上一点").frame(minWidth: 44, minHeight: 44) }
-                        .accessibilityIdentifier("workout.series.previous")
-                    Spacer()
-                    Button { moveSelection(1) } label: { Text("下一点").frame(minWidth: 44, minHeight: 44) }
-                        .accessibilityIdentifier("workout.series.next")
-                }
-                .font(.subheadline).foregroundStyle(TechColor.cyan).buttonStyle(TechPressStyle())
-                .frame(minHeight: 44)
             }
         }
     }
 
-    private func moveSelection(_ direction: Int) {
-        guard !data.points.isEmpty else { return }
-        let current = selected.flatMap { point in data.points.firstIndex { $0.offsetSeconds == point.offsetSeconds } }
-        let index = current.map { min(max($0 + direction, 0), data.points.count - 1) } ?? 0
-        selectedTime = data.points[index].offsetSeconds / 60
+    private func formatted(_ value: Double) -> String {
+        isPace ? techPace(value) : nativeNumber(value, digits: digits)
     }
+
+    private func adjustSelection(_ direction: Int) {
+        selectedTime = techSeriesSelectionTime(points: data.points, selectedTime: selectedTime, direction: direction)
+    }
+
 }
 #endif

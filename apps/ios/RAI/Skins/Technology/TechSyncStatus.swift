@@ -37,7 +37,7 @@ struct TechHomeActions: View {
                         else { Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90").font(.system(size: 19, weight: .medium)) }
                     }
                     .foregroundStyle(TechColor.cyan).frame(width: 44, height: 44)
-                    .background(TechColor.paper, in: RoundedRectangle(cornerRadius: TechMetrics.corner))
+                    .background(TechColor.paper, in: TechSurfaceShape())
                 }
                 .buttonStyle(TechPressStyle()).disabled(sync.isBusy || !session.isReachable)
                 .accessibilityLabel("同步健康数据")
@@ -57,7 +57,7 @@ struct TechHomeActions: View {
                 NavigationLink { TechPlanView() } label: {
                     Image(systemName: "calendar").font(.system(size: 19, weight: .medium))
                         .foregroundStyle(TechColor.ink).frame(width: 44, height: 44)
-                        .background(TechColor.paper, in: RoundedRectangle(cornerRadius: TechMetrics.corner))
+                        .background(TechColor.paper, in: TechSurfaceShape())
                 }.buttonStyle(TechPressStyle()).accessibilityLabel("打开训练计划")
                 Text("训练计划").font(.caption2).foregroundStyle(TechColor.muted)
             }
@@ -70,7 +70,7 @@ struct TechHomeActions: View {
             NavigationLink(destination: destination) {
                 Image(systemName: symbol).font(.system(size: 19, weight: .medium))
                     .foregroundStyle(TechColor.ink).frame(width: 44, height: 44)
-                    .background(TechColor.paper, in: RoundedRectangle(cornerRadius: TechMetrics.corner))
+                    .background(TechColor.paper, in: TechSurfaceShape())
             }
             .buttonStyle(TechPressStyle()).accessibilityLabel("打开" + title)
             .accessibilityIdentifier(id)
@@ -212,7 +212,6 @@ struct TechSyncStatus: View {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 28, weight: .medium)).foregroundStyle(TechColor.success)
-                            .shadow(color: TechColor.success.opacity(0.18), radius: 8)
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 6) {
                             Text(state == .succeeded ? "健康同步完成" : "上次健康同步")
