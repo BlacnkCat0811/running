@@ -1884,6 +1884,31 @@ test("summary export requires token even on a public host and validates its rang
   } finally { await stopApi(child).catch(() => child.kill("SIGKILL")); await removeRuntimeRoot(runtimeRoot); }
 });
 
+/**
+ * POST a write while tolerating the API's **startup recompute window**.
+ *
+ * A fixture that has already run a full recompute leaves an `active_model_run` row behind, so
+ * `checkTrainingZoneBackfill` (`server.ts`) enqueues one more job as the API boots. The
+ * recompute worker holds the shared `"recompute"` admission lock for the whole worker-thread
+ * spawn, and during that window **every write route answers `409 mutation_conflict`** — that is
+ * the lock's documented behaviour (`recompute-worker.ts`: "an idle drain makes every write
+ * route answer `mutation_conflict` instead of its real status"), and the iOS client retries on
+ * exactly this code. It is not what these cases are testing, so wait it out with a bounded
+ * retry instead of assuming the first response is the final one.
+ *
+ * A write that is *permanently* conflicting still fails: the budget is finite and the caller
+ * keeps asserting the real status afterwards.
+ */
+async function postToleratingStartupRecompute(
+  url: string, headers: Record<string, string>, body: string
+): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(url, { method: "POST", headers, body });
+    if (response.status !== 409 || attempt >= 6) return response;
+    await new Promise((done) => setTimeout(done, 250));
+  }
+}
+
 for (const config of [
   { token: "route-test-token", anonymousRoutes: "", publicRoute: false },
   { token: "route-test-token", anonymousRoutes: "1", publicRoute: false },
@@ -1960,9 +1985,9 @@ for (const config of [
         eligibilityFixture.prepare(`INSERT INTO workout_overrides
           (id, training_session_id, revision, eligibility_override, created_at)
           VALUES ('private-excluded', 'private-session', 2, 'exclude', ?)`).run(overrideAt);
-        const rejected = await fetch(`${url}/v1/performance-entries`, { method: "POST", headers,
-          body: JSON.stringify({ localDate: "2026-09-01", distance: "five_k", durationSeconds: 1800,
-            trainingSessionId: "private-session" }) });
+        const rejected = await postToleratingStartupRecompute(`${url}/v1/performance-entries`, headers,
+          JSON.stringify({ localDate: "2026-09-01", distance: "five_k", durationSeconds: 1800,
+            trainingSessionId: "private-session" }));
         assert.equal(rejected.status, 400, await rejected.clone().text());
         assert.equal((await rejected.json() as { code: string }).code, "performance_entry_invalid");
         const entries = await fetch(`${url}/v1/performance-entries`, { headers }).then(response => response.json()) as {
@@ -1975,9 +2000,9 @@ for (const config of [
       } finally {
         eligibilityFixture.close();
       }
-      const confirmation = await fetch(`${url}/v1/performance-entries`, { method: "POST", headers,
-        body: JSON.stringify({ localDate: "2026-09-01", distance: "five_k", durationSeconds: 1800,
-          trainingSessionId: "private-session" }) });
+      const confirmation = await postToleratingStartupRecompute(`${url}/v1/performance-entries`, headers,
+        JSON.stringify({ localDate: "2026-09-01", distance: "five_k", durationSeconds: 1800,
+          trainingSessionId: "private-session" }));
       assert.equal(confirmation.status, 200, await confirmation.clone().text());
       const entry = await confirmation.json() as import("@rai/contracts").PerformanceEntry;
       assert.equal(entry.trainingSessionId, "private-session");
