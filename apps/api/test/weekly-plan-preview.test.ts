@@ -64,7 +64,6 @@ test("race rule is idempotent, reserves race day and does not invent race comple
 
 test("manual race-day edits persist the safe policy rewrite", () => {
   const goals = {
-    weeklyDistanceKm: 40,
     qualitySessionCap: 2,
     easyDurationFloorFraction: 0.8,
     raceTarget: { date: "2026-09-27", distance: "half_marathon", targetPaceSecondsPerKm: 330 },
@@ -77,19 +76,19 @@ test("manual race-day edits persist the safe policy rewrite", () => {
     weekStructure: { qualitySessionCount: 0 },
     injuryFlags: []
   } as unknown as MobileTodayResponse;
-  const safe = validateManualPlan(goals, today, null, 0);
+  const safe = validateManualPlan({ goals, today, prescription: null, previousWeekDistanceKm: 0, weeklyVolumeBaselineKm: 40, recentWeeklyKm: 40 });
   assert.equal(safe.weekPlan[0]!.kind, "rest");
   assert.equal(safe.weekPlan[0]!.distanceKm, null);
   assert.equal(safe.weekPlan[0]!.structure, null);
 });
 
 test("manual writes reject forbidden quality and completed-volume overrun before persistence", () => {
-  const goals = { weeklyDistanceKm: 10, qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
+  const goals = { qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
     raceTarget: null, weekPlan: [{ localDate: "2026-09-26", kind: "tempo", distanceKm: 10, structure: null }] } as MobileGoalsResponse;
   const today = { today: { localDate: "2026-09-25", workoutCount: 0 }, lock: { present: false },
     week: { periodStart: "2026-09-21", distanceKm: 0 }, weekStructure: { qualitySessionCount: 0 }, injuryFlags: [] } as unknown as MobileTodayResponse;
-  assert.throws(() => validateManualPlan(goals, today, null, 0), ManualPlanPolicyError);
+  assert.throws(() => validateManualPlan({ goals, today, prescription: null, previousWeekDistanceKm: 0, weeklyVolumeBaselineKm: 10, recentWeeklyKm: 10 }), ManualPlanPolicyError);
   today.week.distanceKm = 10;
   goals.weekPlan[0]!.kind = "easy";
-  assert.throws(() => validateManualPlan(goals, today, null, 0), /预算已用完/);
+  assert.throws(() => validateManualPlan({ goals, today, prescription: null, previousWeekDistanceKm: 0, weeklyVolumeBaselineKm: 10, recentWeeklyKm: 10 }), /预算已用完/);
 });

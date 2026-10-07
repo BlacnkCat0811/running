@@ -119,7 +119,8 @@ export interface CoachInput {
   weekDurationSeconds: number;
   weekEasyDurationSeconds: number;
   weekQualityCount: number;
-  weeklyDistanceGoalKm: number | null;
+  /** Weekly volume ceiling today's session must fit inside, km. Derived, never stored. */
+  weeklyVolumeCeilingKm: number;
   easyDurationFloorFraction: number;
   qualitySessionCap: number;
   fourWeekDistanceChangeFraction: number | null;
@@ -531,8 +532,8 @@ export function sessionRanges(
 }
 
 /**
- * Authoritative measure of a structure. Shared by the generator and by the LLM
- * output validator so both sides agree on what a plan actually amounts to.
+ * Authoritative structure measurement shared by coach generation and plan
+ * validation, so both agree on the executable distance and duration.
  */
 export function measureStructure(
   structure: MobileSessionStructure,
@@ -717,7 +718,7 @@ export function buildSessionStructure(
  * carries at most `MAX_STEP_METERS`, one block at most `MAX_BLOCK_ITERATIONS`
  * repetitions. Nothing bounds the total, so a payload that satisfies all of them
  * — a single 20-rep block of 100 km work steps — measures 2000 km. The plan
- * validator caps what the *model* sends (`capDayDistance`); a structure arriving
+ * validator caps supplied structures (`capDayDistance`); a structure arriving
  * over `PUT /v1/mobile/goals` or `POST /v1/mobile/lock` reaches the same store,
  * the same two plan endpoints and the same workout bridge, so it is held to the
  * same ceiling here.
@@ -849,8 +850,8 @@ export function decideNextSessionDecision(
   verdict: MobileVerdict
 ): { session: MobileNextSession; disposition: CoachPlanDisposition } {
   const resolved = decidePlannedSession(input, verdict);
-  if (resolved.session.kind === "rest" || input.weeklyDistanceGoalKm == null) return resolved;
-  const remaining = Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
+  if (resolved.session.kind === "rest") return resolved;
+  const remaining = Math.max(0, input.weeklyVolumeCeilingKm - input.weekDistanceKm);
   if ((resolved.session.distanceKm ?? 0) <= remaining + 0.05) return resolved;
   if (remaining <= 0) {
     return {
@@ -926,10 +927,9 @@ function decideUnplannedSession(
 }
 
 function prescribeUnplannedSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
-  const remainingKm =
-    input.weeklyDistanceGoalKm == null ? null : Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm);
+  const remainingKm = Math.max(0, input.weeklyVolumeCeilingKm - input.weekDistanceKm);
   const remainingDays = Math.max(1, daysInclusive(input.today, weekEnd(input.today)));
-  const perDayKm = remainingKm == null ? 8 : Math.max(4, Math.min(14, remainingKm / remainingDays));
+  const perDayKm = Math.max(4, Math.min(14, remainingKm / remainingDays));
   const zones = input.zones;
   const taper = isTaper(input);
 
@@ -1183,9 +1183,7 @@ export function buildWeekStructure(input: CoachInput): MobileWeekStructure {
       easyEnoughCount: input.easyEnoughCount,
       honestyFraction,
       note
-    },
-    remainingDistanceKm:
-      input.weeklyDistanceGoalKm == null ? null : Math.max(0, input.weeklyDistanceGoalKm - input.weekDistanceKm)
+    }
   };
 }
 

@@ -165,7 +165,7 @@ struct TechExecutablePlanDay: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(day.executable ? "可同步" : "不下发：休息、未生成、已记录训练或待重新确认")
                 if !day.reason.isEmpty { Text(day.reason) }
-                Text("来源：\(day.source == "llm" ? "模型生成并经规则复核" : "规则模板 / 手工计划")")
+                Text("来源：\(NativeAppModel.planSourceName(day.source))")
                 ForEach(nativeStructureLines(day.structure)) { line in
                     Text("\(line.title)：\(line.detail)")
                 }

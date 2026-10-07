@@ -96,7 +96,7 @@ test("the store reports a failed refresh and never calls a missing night stale",
   let outcome: MobileRefreshOutcome | null = null;
   const read = new RaiReadStore(databasePath, () => outcome);
   try {
-    const ok = read.mobileToday(30);
+    const ok = read.mobileToday();
     assert.equal(ok.sync.status, "ok");
     assert.equal(ok.sync.lastSuccessAt, "2026-09-18T06:10:06.000Z");
     assert.equal(ok.freshness.state, "valid");
@@ -106,7 +106,7 @@ test("the store reports a failed refresh and never calls a missing night stale",
     assert.equal(ok.coverage.sleep.latestDate, null);
 
     outcome = failed("2026-09-19T02:00:00.000Z", "导出包缺少 workout 记录");
-    const broken = read.mobileToday(30);
+    const broken = read.mobileToday();
     assert.equal(broken.sync.status, "failed");
     assert.equal(broken.sync.error, "导出包缺少 workout 记录");
     assert.equal(broken.sync.lastAttemptAt, "2026-09-19T02:00:00.000Z");

@@ -126,11 +126,6 @@ export function IosLoading({
   );
 }
 
-/** Remaining below 0.05 km would display as 0.0 km. */
-export function isWeekGoalComplete(remaining: number | null): boolean {
-  return remaining != null && remaining < 0.05;
-}
-
 export const trainingStatusLabel: Record<TrainingStatusCode, string> = {
   insufficient_data: "数据积累中",
   recovery: "恢复阶段",

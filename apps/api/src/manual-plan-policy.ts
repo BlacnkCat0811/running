@@ -6,14 +6,26 @@ import { phaseForPlanDate } from "./weekly-plan-service.js";
 export class ManualPlanPolicyError extends Error { readonly code = "plan_policy_violation"; }
 
 /** Validate before persistence; race-day safety policy may rewrite the pending days. */
-export function validateManualPlan(goals: MobileGoalsResponse, today: MobileTodayResponse, prescription: CoachZonePrescription | null, previousWeekDistanceKm: number, previous?: MobileGoalsResponse): MobileGoalsResponse {
+export function validateManualPlan(args: {
+  goals: MobileGoalsResponse;
+  today: MobileTodayResponse;
+  prescription: CoachZonePrescription | null;
+  /** Baseline of the weekly volume ceiling, km. Derived by `weeklyCapacity`, never stored. */
+  weeklyVolumeBaselineKm: number;
+  /** Observed mean of the last four complete weeks, km — what the phase bands scale. */
+  recentWeeklyKm: number;
+  previousWeekDistanceKm: number;
+  previous?: MobileGoalsResponse;
+}): MobileGoalsResponse {
+  const { goals, today, prescription, weeklyVolumeBaselineKm, recentWeeklyKm, previousWeekDistanceKm, previous } = args;
+  const protectedToday = today.today.workoutCount > 0 || today.lock.present || goals.weekPlanPreservedDate === today.today.localDate;
   if (previous) {
-    const frozen = (date: string) => date < today.today.localDate || (date === today.today.localDate && (today.today.workoutCount > 0 || today.lock.present));
+    const frozen = (date: string) => date < today.today.localDate || (date === today.today.localDate && protectedToday);
     const oldDays = previous.weekPlan.filter(day => frozen(day.localDate));
     const newDays = goals.weekPlan.filter(day => frozen(day.localDate));
-    if (JSON.stringify(oldDays) !== JSON.stringify(newDays)) throw new ManualPlanPolicyError("历史、已完成或已锁定日期不能通过周计划编辑改写。请保留原日期内容。");
+    if (JSON.stringify(oldDays) !== JSON.stringify(newDays)) throw new ManualPlanPolicyError("历史、已完成、已锁定或迁移保留日期不能通过周计划编辑改写。请保留原日期内容。");
   }
-  const pending = goals.weekPlan.filter(day => day.localDate >= today.today.localDate && !(day.localDate === today.today.localDate && (today.today.workoutCount > 0 || today.lock.present)));
+  const pending = goals.weekPlan.filter(day => day.localDate >= today.today.localDate && !(day.localDate === today.today.localDate && protectedToday));
   const weeks = new Map<string, typeof pending>();
   for (const day of pending) {
     const date = new Date(`${day.localDate}T00:00:00Z`);
@@ -24,11 +36,11 @@ export function validateManualPlan(goals: MobileGoalsResponse, today: MobileToda
   const safeByDate = new Map<string, MobileGoalsResponse["weekPlan"][number]>();
   for (const [monday, days] of weeks) {
     const currentWeek = monday === today.week.periodStart;
-    const reserved = currentWeek && today.lock.present && today.today.workoutCount === 0 ? today.nextSession.distanceKm ?? 0 : 0;
-    const phase = phaseForPlanDate({ today, goals }, days[0]!.localDate);
-    const budget = Math.max(0, Math.min(weeklyPlanVolumeCeiling(goals.weeklyDistanceKm, currentWeek ? previousWeekDistanceKm : null), phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY) - (currentWeek ? today.week.distanceKm + reserved : 0));
+    const reserved = currentWeek && protectedToday && today.today.workoutCount === 0 ? today.nextSession.distanceKm ?? 0 : 0;
+    const phase = phaseForPlanDate({ today, goals, recentWeeklyKm }, days[0]!.localDate);
+    const budget = Math.max(0, Math.min(weeklyPlanVolumeCeiling(weeklyVolumeBaselineKm, currentWeek ? previousWeekDistanceKm : null), phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY) - (currentWeek ? today.week.distanceKm + reserved : 0));
     if (budget === 0 && days.some(day => day.kind !== "rest")) throw new ManualPlanPolicyError("本自然周跑量预算已用完，请减少未来安排或调整周目标。");
-    const safeDays = applyRacePlanPolicy(days, goals.raceTarget, goals.weeklyDistanceKm, prescription);
+    const safeDays = applyRacePlanPolicy(days, goals.raceTarget, weeklyVolumeBaselineKm, prescription);
     const reservedQuality = reserved > 0 && ["tempo", "interval", "race"].includes(today.nextSession.kind) ? 1 : 0;
     const checked = validateWeeklyPlan({ raw: JSON.stringify({ days: safeDays }), allowedDates: safeDays.map(day => day.localDate), prescription, weeklyDistanceKm: budget,
       volumeCeilingKm: budget, ...(phase ? { longRunCapKm: phase.longRunCapKm } : {}),

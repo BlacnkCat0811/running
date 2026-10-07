@@ -290,7 +290,7 @@ const COACH_CONTEXT: Parameters<typeof decideVerdictFromSnapshots>[0] = {
   weekDurationSeconds: 7200,
   weekEasyDurationSeconds: 5400,
   weekQualityCount: 0,
-  weeklyDistanceGoalKm: 40,
+  weeklyVolumeCeilingKm: 40,
   easyDurationFloorFraction: 0.5,
   qualitySessionCap: 2,
   fourWeekDistanceChangeFraction: 0.1,

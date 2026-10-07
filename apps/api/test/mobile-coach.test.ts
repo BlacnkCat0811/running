@@ -63,7 +63,7 @@ const base = (): CoachInput => ({
   weekDurationSeconds: 7200,
   weekEasyDurationSeconds: 5400,
   weekQualityCount: 0,
-  weeklyDistanceGoalKm: 30,
+  weeklyVolumeCeilingKm: 30,
   easyDurationFloorFraction: 0.7,
   qualitySessionCap: 2,
   fourWeekDistanceChangeFraction: 0.1,
@@ -258,7 +258,7 @@ test("taper does not dump leftover weekly volume into a long run", () => {
   const input = {
     ...base(),
     raceTarget: { date: "2026-09-10", distance: "ten_k" as const, targetPaceSecondsPerKm: null },
-    weeklyDistanceGoalKm: 40,
+    weeklyVolumeCeilingKm: 40,
     weekDistanceKm: 10
   };
   const verdict = decideVerdict(input);

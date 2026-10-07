@@ -63,7 +63,7 @@ const base = (): CoachInput => ({
   weekDurationSeconds: 7200,
   weekEasyDurationSeconds: 5400,
   weekQualityCount: 0,
-  weeklyDistanceGoalKm: 30,
+  weeklyVolumeCeilingKm: 30,
   easyDurationFloorFraction: 0.7,
   qualitySessionCap: 2,
   fourWeekDistanceChangeFraction: 0.1,
@@ -289,7 +289,7 @@ test("C01: a race day with no stored plan still says no plan was stored", () => 
 test("C01: a budget-exhausted rest is labelled rest, not reduce_duration", () => {
   // 扫描的现场：周预算已用完 ⇒ 处方是"本周预算已完成"的**休息**，
   // 而修好之前这里一律映射成 reduce_duration —— 处方式休息却说"缩短时长"。
-  const input: CoachInput = { ...base(), weekDistanceKm: 30, weeklyDistanceGoalKm: 30 };
+  const input: CoachInput = { ...base(), weekDistanceKm: 30, weeklyVolumeCeilingKm: 30 };
   const verdict = decideVerdict(input);
   const { session, disposition } = decideNextSessionDecision(input, verdict);
   assert.equal(disposition, "budget_exhausted");

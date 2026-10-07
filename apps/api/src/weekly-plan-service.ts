@@ -1,10 +1,11 @@
+import { runCoachSessionTargets } from "./run-coach-policy.js";
 import type { MobileGoalsResponse, MobilePlanAudit, MobilePlannedDay, MobileTodayResponse } from "@rai/api-contracts";
 
 import { plannedDayNumbers, type CoachZonePrescription } from "./mobile-coach.js";
-import { createPlanModelClient, llmConfigFromEnv, type PlanModelClient } from "./weekly-plan-llm.js";
-import { buildWeeklyPlanPrompt, WEEKLY_PLAN_DAYS, WEEKLY_PLAN_PROMPT_VERSION } from "./weekly-plan-prompt.js";
 import { currentPeriodizationWeek, periodizationWeekStart, type PeriodizationWeek } from "./plan-periodization.js";
-import { applyRacePlanPolicy, buildFallbackWeekPlan, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { applyRacePlanPolicy, buildCoachWeekPlan, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+
+export const WEEKLY_PLAN_DAYS = 7;
 
 export interface WeeklyPlanGenerationResult {
   days: MobilePlannedDay[];
@@ -16,7 +17,7 @@ export interface WeeklyPlanGenerationResult {
 }
 
 export function phaseForPlanDate(
-  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals">,
+  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "recentWeeklyKm">,
   localDate: string
 ): PeriodizationWeek | null {
   const skeleton = args.today.periodization;
@@ -24,7 +25,10 @@ export function phaseForPlanDate(
     skeleton.raceDate === args.goals.raceTarget?.date && skeleton.distance === args.goals.raceTarget?.distance) {
     return skeleton.weeks.find(week => week.weekStart === periodizationWeekStart(localDate)) ?? null;
   }
-  return currentPeriodizationWeek({ today: localDate, raceTarget: args.goals.raceTarget, recentWeeklyKm: args.goals.weeklyDistanceKm });
+  // The bands are a fraction of what the athlete actually runs, so the fallback
+  // must use observed volume. Feeding a configured number here is exactly what
+  // made the generated plan and the today payload disagree about the same week.
+  return currentPeriodizationWeek({ today: localDate, raceTarget: args.goals.raceTarget, recentWeeklyKm: args.recentWeeklyKm });
 }
 
 export function weeklyPlanDates(today: string, days: number = WEEKLY_PLAN_DAYS): string[] {
@@ -35,6 +39,13 @@ export function weeklyPlanDates(today: string, days: number = WEEKLY_PLAN_DAYS):
     value.setUTCDate(value.getUTCDate() + index);
     return value.toISOString().slice(0, 10);
   });
+}
+
+export function shouldGenerateWeeklyPlan(today: string,
+  goals: Pick<MobileGoalsResponse, "weekPlan" | "weekPlanReplanRequired" | "runCoach">): boolean {
+  if (goals.runCoach || goals.weekPlanReplanRequired || new Date(`${today}T00:00:00Z`).getUTCDay() !== 1) return false;
+  const dates = weeklyPlanDates(today);
+  return dates.length > 0 && !goals.weekPlan.some(day => dates.includes(day.localDate));
 }
 
 const structureKey = (day: MobilePlannedDay): string => (day.structure ? JSON.stringify(day.structure) : "");
@@ -83,19 +94,18 @@ export function overwriteWarning(previous: MobilePlannedDay[], next: MobilePlann
   return `已覆盖 ${dates.length} 天既有课表（${shown}${suffix}）：原有分段与说明不再保留`;
 }
 
-/**
- * Produces the next week of training. Always returns a usable plan: if the model
- * is missing, unreachable, or its output cannot pass validation, the
- * deterministic fallback is used instead.
- */
+/** Produces a deterministic coach plan, measured and constrained before review. */
 export async function generateWeeklyPlan(args: {
   today: MobileTodayResponse;
   goals: Pick<
     MobileGoalsResponse,
-    "weeklyDistanceKm" | "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget"
-  > & Partial<Pick<MobileGoalsResponse, "weekPlan">>;
+    "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget"
+  > & Partial<Pick<MobileGoalsResponse, "weekPlan" | "weekPlanReplanRequired" | "weekPlanPreservedDate" | "runCoach">>;
+  /** Baseline of the weekly volume ceiling, km. Derived by `weeklyCapacity`, never stored. */
+  weeklyVolumeBaselineKm: number;
+  /** Observed mean of the last four complete weeks, km — what the phase bands scale. */
+  recentWeeklyKm: number;
   prescription: CoachZonePrescription | null;
-  client?: PlanModelClient | null;
   previousWeekDistanceKm?: number | null;
   now?: Date;
 }): Promise<WeeklyPlanGenerationResult> {
@@ -104,14 +114,6 @@ export async function generateWeeklyPlan(args: {
   const warnings: string[] = [];
   const injuryFlagCodes = args.today.injuryFlags.map((flag) => flag.code);
   const finish = (proposed: MobilePlannedDay[]) => constrainUpcomingPlan(proposed, args, warnings);
-
-  const client =
-    args.client === undefined
-      ? (() => {
-          const config = llmConfigFromEnv();
-          return config ? createPlanModelClient(config) : null;
-        })()
-      : args.client;
 
   if (allowedDates.length === 0) {
     return {
@@ -123,65 +125,13 @@ export async function generateWeeklyPlan(args: {
     };
   }
 
-  // The prompt describes the current phase; final constraints apply per natural week.
-  const phaseWeek = phaseForPlanDate(args, args.today.today.localDate);
-
-  if (client) {
-    const prompt = buildWeeklyPlanPrompt({
-      today: args.today,
-      goals: args.goals,
-      prescription: args.prescription,
-      allowedDates,
-      periodization: phaseWeek
-    });
-    try {
-      const raw = await client.complete(prompt);
-      const validated = validateWeeklyPlan({
-        raw,
-        raceTarget: args.goals.raceTarget,
-        allowedDates,
-        prescription: args.prescription,
-        weeklyDistanceKm: args.goals.weeklyDistanceKm,
-        qualitySessionCap: args.goals.qualitySessionCap,
-        easyDurationFloorFraction: args.goals.easyDurationFloorFraction,
-        injuryFlagCodes,
-        previousWeekDistanceKm: args.previousWeekDistanceKm ?? null
-      });
-      if (validated.days.length > 0) {
-        return {
-          days: finish(validated.days),
-          audit: {
-            generatedBy: "llm",
-            model: `${client.provider}:${client.model}`,
-            promptVersion: WEEKLY_PLAN_PROMPT_VERSION,
-            generatedAt
-          },
-          warnings: [...warnings, ...validated.rejected, ...validated.clamped],
-          rejectedCount: validated.rejected.length,
-          clampedCount: validated.clamped.length
-        };
-      }
-      // The validator's reasons are the only description of what the model got
-      // wrong. Dropping them left an operator with "校验失败" and no way to tell
-      // a truncated JSON from a hallucinated date.
-      const detail = validated.rejected.slice(0, 3).join("；");
-      warnings.push(`模型输出未通过校验${detail ? `（${detail}）` : ""}，已回退到保守模板`);
-    } catch (error) {
-      warnings.push(`模型调用失败（${error instanceof Error ? error.message : "未知错误"}），已回退到保守模板`);
-    }
-  } else {
-    warnings.push("未配置模型密钥（RAI_LLM_API_KEY），已使用保守模板");
-  }
-
-  const days = buildFallbackWeekPlan({
+  const days = buildCoachWeekPlan({
     easyDurationFloorFraction: args.goals.easyDurationFloorFraction,
     allowedDates,
     prescription: args.prescription,
-    weeklyDistanceKm: args.goals.weeklyDistanceKm,
+    weeklyDistanceKm: args.weeklyVolumeBaselineKm,
     qualitySessionCap: args.goals.qualitySessionCap,
     injuryFlagCodes,
-    // The template is held to the same ramp ceiling as the model, so an
-    // unusable model key cannot prescribe a week the runner has not earned.
     previousWeekDistanceKm: args.previousWeekDistanceKm ?? null
   });
   return {
@@ -194,19 +144,20 @@ export async function generateWeeklyPlan(args: {
 }
 
 export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
-  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm">,
+  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm">,
   warnings: string[] = []): MobilePlannedDay[] {
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const injuryFlagCodes = args.today.injuryFlags.map(flag => flag.code);
 
-  const safe = applyRacePlanPolicy(proposed, args.goals.raceTarget, args.goals.weeklyDistanceKm, args.prescription, warnings);
+  const safe = applyRacePlanPolicy(proposed, args.goals.raceTarget, args.weeklyVolumeBaselineKm, args.prescription, warnings);
   const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
     { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
   const replacementDates = new Set(complete.map(day => day.localDate));
   const groups = [complete.filter(day => day.localDate <= args.today.week.periodEnd), complete.filter(day => day.localDate > args.today.week.periodEnd)];
   return groups.flatMap((days, index) => {
     if (!days.length) return [];
-    const protectedToday = index === 0 && (args.today.today.workoutCount > 0 || args.today.lock.present);
+    const protectedToday = index === 0 && (args.today.today.workoutCount > 0 || args.today.lock.present ||
+      args.goals.weekPlanReplanRequired === true || args.goals.weekPlanPreservedDate === args.today.today.localDate);
     const adjustable = days.filter(day => !(protectedToday && day.localDate === args.today.today.localDate));
     const reserved = protectedToday && args.today.today.workoutCount === 0 ? args.today.nextSession.distanceKm ?? 0 : 0;
     const phase = phaseForPlanDate(args, days[0]!.localDate);
@@ -217,7 +168,7 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
     const retainedKm = retained.reduce((sum, day) => sum +
       (plannedDayNumbers(day.kind, day.structure, day.distanceKm, args.prescription).distanceKm ?? 0), 0);
     const retainedQuality = retained.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length;
-    const ceilingKm = Math.min(weeklyPlanVolumeCeiling(args.goals.weeklyDistanceKm, index === 0 ? args.previousWeekDistanceKm : null), phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY);
+    const ceilingKm = Math.min(weeklyPlanVolumeCeiling(args.weeklyVolumeBaselineKm, index === 0 ? args.previousWeekDistanceKm : null), phase?.volumeBandKm.upper ?? Number.POSITIVE_INFINITY);
     const remainingKm = Math.max(0, ceilingKm - retainedKm - (index === 0 ? args.today.week.distanceKm + reserved : 0));
     const reservedQuality = reserved > 0 && ["tempo", "interval", "race"].includes(args.today.nextSession.kind) ? 1 : 0;
     const qualityCap = Math.max(0, Math.min(args.goals.qualitySessionCap, phase?.qualityDose ?? args.goals.qualitySessionCap) - retainedQuality - (index === 0 ? args.today.weekStructure.qualitySessionCount + reservedQuality : 0));
@@ -232,5 +183,5 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
       easyDurationFloorFraction: args.goals.easyDurationFloorFraction, injuryFlagCodes });
     warnings.push(...result.rejected, ...result.clamped.map(message => phase ? `${phase.note} 阶段上限 ${ceilingKm.toFixed(1)} km：${message}` : message));
     return result.days;
-  });
+  }).map(day => runCoachSessionTargets(day, args.goals.runCoach, args.prescription));
 }

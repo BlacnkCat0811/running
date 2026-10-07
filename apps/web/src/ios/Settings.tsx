@@ -12,7 +12,6 @@ import { Card, IosLoading } from "./shared.js";
 export function IosSettings() {
   const goals = useRemote<MobileGoalsResponse>("/v1/mobile/goals");
   const native = useNativeStatus();
-  const [value, setValue] = useState("");
   const [easyFloor, setEasyFloor] = useState("70");
   const [qualityCap, setQualityCap] = useState("2");
   const [raceDate, setRaceDate] = useState("");
@@ -22,14 +21,10 @@ export function IosSettings() {
   const [saving, setSaving] = useState(false);
   const nativeBridge = hasNativeBridge();
 
-  const weeklyGoal = goals.data?.weeklyDistanceKm;
   const easyFloorValue = goals.data?.easyDurationFloorFraction;
   const qualityCapValue = goals.data?.qualitySessionCap;
   const raceDateValue = goals.data?.raceTarget?.date ?? "";
   const raceDistanceValue = goals.data?.raceTarget?.distance ?? "";
-  useEffect(() => {
-    if (weeklyGoal != null) setValue(String(weeklyGoal));
-  }, [weeklyGoal]);
   useEffect(() => {
     if (easyFloorValue != null) setEasyFloor(String(Math.round(easyFloorValue * 100)));
   }, [easyFloorValue]);
@@ -42,12 +37,8 @@ export function IosSettings() {
   }, [raceDateValue, raceDistanceValue]);
 
   async function saveGoal() {
-    const weeklyDistanceKm = Number(value);
-    if (!Number.isFinite(weeklyDistanceKm) || weeklyDistanceKm < 1 || weeklyDistanceKm > 500) {
-      setError("请输入 1–500 的周跑量（公里）");
-      setSaved(false);
-      return;
-    }
+    const current = goals.data;
+    if (saving || !current) return;
     const floor = Number(easyFloor) / 100;
     if (!Number.isFinite(floor) || floor < 0.4 || floor > 0.95) {
       setError("轻松时长占比请填 40–95");
@@ -61,11 +52,10 @@ export function IosSettings() {
     setSaving(true);
     setError(null);
     try {
-      const next = await api<MobileGoalsResponse>("/v1/mobile/goals", {
+      await api<MobileGoalsResponse>("/v1/mobile/goals", {
         method: "PUT",
         body: JSON.stringify({
-          weeklyDistanceKm,
-          expectedRevision: goals.data?.revision,
+          expectedRevision: current.revision,
           easyDurationFloorFraction: floor,
           qualitySessionCap: cap,
           raceTarget: raceDate && raceDistance
@@ -73,7 +63,6 @@ export function IosSettings() {
             : null,
         }),
       });
-      setValue(String(next.weeklyDistanceKm));
       setSaved(true);
       notifyDataUpdated();
       window.setTimeout(() => setSaved(false), 1800);
@@ -155,20 +144,6 @@ export function IosSettings() {
           <IosLoading error={goals.error} onRetry={() => void goals.reload()} />
         ) : (
           <>
-            <label className="ios-input-label" htmlFor="ios-weekly-goal">
-              每周跑量（km）
-            </label>
-            <input
-              id="ios-weekly-goal"
-              className="ios-input"
-              value={value}
-              onChange={(event) => {
-                setValue(event.target.value);
-                setError(null);
-              }}
-              inputMode="decimal"
-            />
-            {error ? <p className="ios-sync-error">{error}</p> : null}
             <label className="ios-input-label" htmlFor="ios-easy-floor">
               轻松时长下限（%）
             </label>
@@ -213,10 +188,11 @@ export function IosSettings() {
               <option value="ten_k">10 公里</option>
               <option value="half_marathon">半程马拉松</option>
             </select>
+            {error ? <p className="ios-sync-error">{error}</p> : null}
             <button
               type="button"
               className="ios-save"
-              disabled={saving}
+              disabled={saving || !goals.data}
               onClick={() => void saveGoal()}
             >
               {saved ? "已保存" : "保存目标"}

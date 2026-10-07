@@ -1,0 +1,136 @@
+import type { MobileRaceDistance, MobileRaceTarget, MobileRunCoachPlan } from "@rai/api-contracts";
+import { runCoachIsTraining, runCoachPhase } from "./run-coach-policy.js";
+
+import { MINIMUM_BAND_KM, currentPeriodizationWeek, periodizationVolumeFraction, type PeriodizationPhase } from "./plan-periodization.js";
+import { RAMP_LIMIT_FRACTION } from "./weekly-plan-validate.js";
+
+/**
+ * Weekly plan capacity, **derived from training facts instead of configured**.
+ *
+ * The runner used to carry a `weeklyDistanceKm` goal and the coach treated that
+ * number as both the ceiling and the athlete's recent volume. Two consequences:
+ * a stored goal could be years out of date while still capping every plan, and
+ * the generation path fed the *goal* into the periodisation bands where the read
+ * path fed real 4-week volume — the same field meaning two different things.
+ *
+ * Capacity now comes from one of three places, in this order of precedence:
+ *
+ *   1. a race target — target weekly volume for that distance, trimmed by the
+ *      current phase, and never above what the last four weeks justify;
+ *   2. recent volume — the mean of the last four complete calendar weeks, with
+ *      a conservative restart floor while recorded volume remains small;
+ *   3. nothing at all — a restart floor of `NO_HISTORY_WEEKLY_KM`.
+ *
+ * Run Coach goals select a policy target, never a user-entered weekly mileage.
+ */
+
+/** Target weekly volume per race distance, km — the ceiling a race block aims at. */
+export const RACE_WEEKLY_BASELINE_KM: Record<MobileRaceDistance, number> = {
+  five_k: 15,
+  ten_k: 25,
+  half_marathon: 35
+};
+
+/**
+ * Conservative restart baseline for absent or very small recorded volume.
+ *
+ * Deliberately the same value as the periodisation bands' own no-history floor
+ * (`MINIMUM_BAND_KM`, used at `plan-periodization.ts:198`): importing it keeps
+ * the two from drifting into two different "starting over" numbers.
+ *
+ * It must stay above `MIN_PLANNED_DISTANCE_KM` in `weekly-plan-validate.ts`. At
+ * or below that, `weeklyPlanVolumeCeiling`'s `Math.min` is pinned by its own
+ * floor and the whole week collapses to a single kilometre that no later ramp
+ * can lift. The same floor must survive the first completed week: that week's
+ * four-week mean is diluted by the three preceding empty weeks.
+ */
+export const NO_HISTORY_WEEKLY_KM = MINIMUM_BAND_KM;
+
+export type WeeklyCapacitySource = "race_target" | "recent_volume" | "no_history";
+
+export interface WeeklyCapacity {
+  /** The baseline handed to `weeklyPlanVolumeCeiling(baselineKm, previousWeekDistanceKm)`. */
+  baselineKm: number;
+  /** Phase of the week the plan covers, or null when there is no race target. */
+  phase: PeriodizationPhase | null;
+  source: WeeklyCapacitySource;
+  /** True when neither recent nor previous-week volume exists. */
+  coldStart: boolean;
+  reasonCodes: string[];
+}
+
+const isLocalDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+export function weeklyCapacity(input: {
+  today: string;
+  raceTarget?: Pick<MobileRaceTarget, "date" | "distance"> | null;
+  runCoach?: MobileRunCoachPlan | null;
+  /** Mean of the last four complete calendar weeks, km (`data.ts` `recentWeeklyKm`). */
+  recentWeeklyKm: number;
+  /** Distance run in the seven days before this week (`data.ts` `previousWeekDistanceKm`). */
+  previousWeekDistanceKm?: number | null;
+  /** Pre-resolved phase; pass explicitly to avoid re-deriving the skeleton. */
+  phase?: PeriodizationPhase | null;
+}): WeeklyCapacity {
+  const reasonCodes: string[] = [];
+  const recent = Number.isFinite(input.recentWeeklyKm) ? Math.max(0, input.recentWeeklyKm) : 0;
+  const previous =
+    input.previousWeekDistanceKm != null && Number.isFinite(input.previousWeekDistanceKm) && input.previousWeekDistanceKm > 0
+      ? input.previousWeekDistanceKm
+      : null;
+
+  // `distance` is typed, but a stored race target crosses a JSON boundary: an
+  // unknown value would index this table to `undefined` and poison every
+  // downstream ceiling with NaN. Treat it as "no race target" instead.
+  let race: Pick<MobileRaceTarget, "date" | "distance"> | null = null;
+  let raceBaselineKm = 0;
+  if (input.raceTarget != null) {
+    const candidate = RACE_WEEKLY_BASELINE_KM[input.raceTarget.distance];
+    if (Number.isFinite(candidate)) {
+      race = input.raceTarget;
+      raceBaselineKm = candidate;
+    }
+  }
+  const programme = input.runCoach && runCoachIsTraining(input.runCoach, input.today) ? input.runCoach : null;
+  if (programme?.goal !== "fitness" && programme?.raceDistanceKm != null) {
+    const km = programme.raceDistanceKm;
+    raceBaselineKm = km <= 5 ? 15 : km <= 10 ? 25 : km <= 21.1 ? 35 : km <= 42.2 ? 45 : 55;
+  }
+
+  const phase =
+    input.phase !== undefined
+      ? input.phase
+      : programme ? runCoachPhase(input.today, programme)
+      : race != null && isLocalDate(input.today)
+        ? currentPeriodizationWeek({ today: input.today, raceTarget: race, recentWeeklyKm: recent })?.phase ?? null
+        : null;
+
+  // Nothing observed and nothing last week: a restart, not a plan. Reusing the
+  // periodisation floor keeps this above `MIN_PLANNED_DISTANCE_KM` so a coach
+  // template can still pay for one or two easy days instead of collapsing.
+  if (recent <= 0 && previous == null) {
+    reasonCodes.push("no_recent_weekly_volume");
+    if (race == null) reasonCodes.push("no_race_target");
+    return { baselineKm: NO_HISTORY_WEEKLY_KM, phase, source: "no_history", coldStart: true, reasonCodes };
+  }
+
+  if (recent < NO_HISTORY_WEEKLY_KM) reasonCodes.push("restart_volume_floor");
+  if (race == null && !(programme && programme.goal !== "fitness")) {
+    // Keep a restart executable without rewriting the observed four-week mean.
+    // The caller still applies the previous-week ramp to this baseline.
+    if (programme?.goal === "fitness") reasonCodes.push("run_coach_fitness_progression");
+    return { baselineKm: Math.max(NO_HISTORY_WEEKLY_KM, recent * (programme?.goal === "fitness" ? 1.1 : 1)), phase: null, source: "recent_volume", coldStart: false, reasonCodes };
+  }
+
+  // A race sets the target; the last four weeks decide how fast we may approach
+  // it. The "+30%" guard is written out here rather than left to
+  // `weeklyPlanVolumeCeiling`, because that helper floors its ramp base at *half
+  // the goal*: with a 38.5 km race baseline and an 8 km week it would permit
+  // 25 km — a threefold jump the runner has not earned.
+  const raceTargetKm = raceBaselineKm * (phase != null ? periodizationVolumeFraction(phase) : 1);
+  const recentCeiling = Math.max(NO_HISTORY_WEEKLY_KM, recent * (1 + RAMP_LIMIT_FRACTION));
+  const baselineKm = Math.min(raceTargetKm, recentCeiling);
+  reasonCodes.push("race_target_baseline");
+  if (recentCeiling < raceTargetKm) reasonCodes.push("recent_volume_caps_race_target");
+  return { baselineKm, phase, source: "race_target", coldStart: false, reasonCodes };
+}

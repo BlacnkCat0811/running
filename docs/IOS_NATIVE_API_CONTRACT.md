@@ -29,12 +29,21 @@
 | 统计 | `GET /v1/mobile/statistics` | 月度、总量和心率区间直接展示服务端结果 |
 | 趋势 | `GET /v1/mobile/trends` | 12 周、增幅、纪录和洞察直接展示服务端结果 |
 | 目标 | `GET /v1/mobile/goals` | 保存当前 revision 和逐日计划 |
+| 跑步教练 | `GET /v1/mobile/run-coach` | 读取计划、阶段、容量说明和力量补充；读取不写入 |
 
 日期字符串保持服务端返回的 ISO/本地日期语义。页面显示使用本地格式化，不能把缓存时间冒充健康数据截至时间。
 
 ## 写接口
 
-`PUT /v1/mobile/goals` 必须带 `weeklyDistanceKm`，并在已有目标上带 `expectedRevision`。客户端发送服务端允许的当前编辑字段（周目标、轻松训练下限、质量课上限、比赛目标和逐日计划）；锁课由 `POST /v1/mobile/lock` 专门维护，不随目标保存请求发送。服务端以 revision 做并发检查；`409 mobile_goals_revision_conflict` 时重新读取后提示用户，不静默覆盖。
+`PUT /v1/mobile/goals` 在已有目标上必须带 `expectedRevision`，其余字段**皆可省略**：请求里没出现的字段沿用已存值，因此"只改比赛目标"不会顺手改写其它设置。可编辑字段为轻松训练下限、质量课上限、比赛目标和逐日计划（**周跑量目标已退役**，见 `DECISIONS.md`；周容量改由比赛目标或近期实测跑量推导）；锁课由 `POST /v1/mobile/lock` 专门维护，不随目标保存请求发送。服务端以 revision 做并发检查；`409 mobile_goals_revision_conflict` 时重新读取后提示用户，不静默覆盖。
+
+`GET /v1/mobile/goals` 可返回服务端只读 `weekPlanPreservedDate: string | null`，表示旧课表迁移当日的保护日期；客户端不得在 `PUT` 中回传。该保护不随预览确认清除，仅在上海本地日期相等时生效；今日建议和 WorkoutKit 使用同一处方，恢复与负荷闸门仍有效，未来课表容量不被抬高。旧 Swift 客户端可忽略这一新增字段，保护、过期及校验均在服务端完成。
+
+`runCoach` 也是 goals 的只读元数据，不得在 `PUT` 中回传。`POST /v1/mobile/run-coach` 接受 `{ expectedRevision, action, config? }`，action 为 `start|update|refresh|pause|resume|end`；仅 start/update 携带完整 config。返回 `{ revision, plan, phase, phases, daysToRace, elapsedWeeks, weeklyCapacityKm, notices, strength }`。配置及边界见 [RUN_COACH](RUN_COACH.md)。
+
+教练命令与 goals 共用 CAS；无效状态/配置为 `422 run_coach_invalid`，过期修订为 `409 mobile_goals_revision_conflict`。active/paused 期间，直接 PUT 目标或逐日计划返回 `409 run_coach_managed`，旧生成和预览也被拒绝。独立手动课表在结束后显式保存或确认时清除教练管理状态。
+
+原生全量刷新和教练入口先 GET，再对 active 计划 POST refresh，事实相同不会增加 revision。命令确认成功后刷新 today/goals/workout-plan，依赖读取失败只报告“已保存但未刷新”，不伪装成保存失败。教练缓存按服务身份和 revision 隔离，已确认的新教练缓存可独立于较旧 goals 缓存恢复；旧修订的今日处方和手表课表不得展示为新计划，缺少匹配安排时显示尚未刷新。旧读取不能覆盖新命令；离线不执行命令。手表同步和撤回仍需用户手动操作，教练状态变化不会自动修改设备。
 
 `POST /v1/mobile/lock` 带 `action: lock|relock` 和当前 `recommendationRevision`。服务端只拒绝两种情形：上次健康同步失败（`409 mobile_refresh_failed`），或建议版本已过期（`409 mobile_recommendation_stale`）。**今天没有恢复记录不是拒绝理由** —— 没戴表是普通的覆盖缺口，不应阻止锁课；锁课只允许联网执行。
 

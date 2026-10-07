@@ -49,7 +49,7 @@ check() { # name JSON_file predicate_name
 
 echo "== GET /v1/mobile/today =="
 curl -s "$BASE/v1/mobile/today" -o var/smoke-today.json
-node -e "const d=require('./var/smoke-today.json'); console.log('today:', JSON.stringify({date:d.today.localDate, km:d.today.distanceKm, pace:d.today.paceSecondsPerKm, kcal:d.today.energyKcal, count:d.today.workoutCount})); console.log('week:', JSON.stringify({km:d.week.distanceKm, goal:d.week.goalDistanceKm, progress:d.week.goalProgressFraction})); console.log('weekDaily days:', d.weekDaily.length, 'recent:', d.recentWorkouts.length)"
+node -e "const d=require('./var/smoke-today.json'); console.log('today:', JSON.stringify({date:d.today.localDate, km:d.today.distanceKm, pace:d.today.paceSecondsPerKm, kcal:d.today.energyKcal, count:d.today.workoutCount})); console.log('week:', JSON.stringify({km:d.week.distanceKm, count:d.week.workoutCount, duration:d.week.durationSeconds})); console.log('weekDaily days:', d.weekDaily.length, 'recent:', d.recentWorkouts.length)"
 check "today.distanceKm is number" var/smoke-today.json "today-distance"
 check "today.weekDaily length 7" var/smoke-today.json "week-daily"
 check "today.recentWorkouts <= 5" var/smoke-today.json "recent-workouts"
@@ -75,19 +75,18 @@ check "trends.ability series" var/smoke-trends.json "ability"
 echo "== GET/PUT /v1/mobile/goals =="
 curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-before.json
 echo "before: $(cat var/smoke-goals-before.json)"
-BEFORE_GOAL=$(node -e "const d=require('./var/smoke-goals-before.json'); process.stdout.write(JSON.stringify({weeklyDistanceKm:d.weeklyDistanceKm}))")
 HTTP=$(curl -s -o var/smoke-goals-put.json -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
   -H "content-type: application/json" -H "Origin: $ORIGIN" \
-  -d '{"weeklyDistanceKm": 33.3}')
+  -d '{"easyDurationFloorFraction": 0.75}')
 echo "PUT http=$HTTP body=$(cat var/smoke-goals-put.json)"
 [ "$HTTP" = "200" ] && { echo "PASS: PUT returns 200"; pass=$((pass+1)); } || { echo "FAIL: PUT expected 200 got $HTTP"; fail=$((fail+1)); }
 curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-after.json
-node -e "const a=require('./var/smoke-goals-after.json'); console.log('after:', JSON.stringify(a)); process.exit(a.weeklyDistanceKm === 33.3 ? 0 : 1)" && { echo "PASS: goals round-trip"; pass=$((pass+1)); } || { echo "FAIL: goals round-trip"; fail=$((fail+1)); }
+node -e "const a=require('./var/smoke-goals-after.json'); console.log('after:', JSON.stringify(a)); process.exit(a.easyDurationFloorFraction === 0.75 ? 0 : 1)" && { echo "PASS: goals round-trip"; pass=$((pass+1)); } || { echo "FAIL: goals round-trip"; fail=$((fail+1)); }
 
 echo "== validation: PUT rejects out-of-range =="
 HTTP2=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
-  -H "content-type: application/json" -H "Origin: $ORIGIN" -d '{"weeklyDistanceKm": 9999}')
-[ "$HTTP2" = "400" ] && { echo "PASS: 9999 rejected with 400"; pass=$((pass+1)); } || { echo "FAIL: expected 400 got $HTTP2"; fail=$((fail+1)); }
+  -H "content-type: application/json" -H "Origin: $ORIGIN" -d '{"easyDurationFloorFraction": 9}')
+[ "$HTTP2" = "400" ] && { echo "PASS: floor 9 rejected with 400"; pass=$((pass+1)); } || { echo "FAIL: expected 400 got $HTTP2"; fail=$((fail+1)); }
 
 echo ""
 echo "== RESULT: pass=$pass fail=$fail =="

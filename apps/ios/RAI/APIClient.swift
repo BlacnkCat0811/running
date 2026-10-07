@@ -85,14 +85,6 @@ enum RaiAPIClientError: LocalizedError {
 }
 
 struct RaiAPIClient {
-    /// Client budget for plan preview (and the legacy generation budget guard).
-    ///
-    /// Must out-wait the server model budget (50 s) to receive a preview or
-    /// fallback. Preview does not persist the business plan: confirm does.
-    /// A timeout on a mutating request is NOT evidence that nothing was saved.
-    /// The cross-language budget regression keeps this greater than the server's.
-    static let generateTimeoutInterval: TimeInterval = 60
-
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
@@ -100,9 +92,7 @@ struct RaiAPIClient {
     init(session: URLSession? = nil) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
-        // Caps the whole transfer regardless of the per-request timeout, so it
-        // has to clear `generateTimeoutInterval` or URLSession would cut the
-        // generate call short anyway.
+        // Cap the whole transfer separately from individual request deadlines.
         configuration.timeoutIntervalForResource = 75
         configuration.waitsForConnectivity = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -131,6 +121,14 @@ struct RaiAPIClient {
         try await get(path: "/v1/mobile/goals", baseURL: baseURL, token: token)
     }
 
+    func runCoach(baseURL: URL, token: String) async throws -> MobileRunCoachResponse {
+        try await get(path: "/v1/mobile/run-coach", baseURL: baseURL, token: token)
+    }
+
+    func runCoachCommand(_ input: MobileRunCoachCommand, baseURL: URL, token: String) async throws -> MobileRunCoachResponse {
+        try await send(path: "/v1/mobile/run-coach", method: "POST", body: input, baseURL: baseURL, token: token)
+    }
+
     /// The executable week handed to the workout scheduler. Read-only, so it
     /// never competes with the goals revision lock.
     func workoutPlan(baseURL: URL, token: String) async throws -> MobileWorkoutPlanResponse {
@@ -139,7 +137,7 @@ struct RaiAPIClient {
 
     func previewWeeklyPlan(_ input: GenerateWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanPreview {
         try await send(path: "/v1/mobile/workout-plan/preview", method: "POST", body: input,
-                       baseURL: baseURL, token: token, timeout: Self.generateTimeoutInterval)
+                       baseURL: baseURL, token: token)
     }
 
     func confirmWeeklyPlan(_ input: ConfirmWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanGenerationResponse {

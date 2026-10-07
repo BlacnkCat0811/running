@@ -1,5 +1,5 @@
 import type { MobileTodayResponse, WorkoutListResponse } from "@rai/api-contracts";
-import { useEffect, type CSSProperties } from "react";
+import { useEffect } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
 import { duration, sessionKind } from "../format.js";
@@ -9,7 +9,6 @@ import {
   EmptyState,
   formatMd,
   IosLoading,
-  isWeekGoalComplete,
   shanghaiDate,
   Stat,
   weekDay,
@@ -40,10 +39,8 @@ export function IosWeekDetail() {
   }
 
   const data = today.data;
-  const progress = Math.round((data.week.goalProgressFraction ?? 0) * 100);
   const max = Math.max(...data.weekDaily.map((item) => item.distanceKm), 1);
-  const goalKm = data.week.goalDistanceKm;
-  const remaining = goalKm == null ? null : goalKm - data.week.distanceKm;
+  const trainedDays = data.weekDaily.filter((item) => item.workoutCount > 0).length;
   const weekItems = (workouts.data?.items ?? []).filter((item) =>
     inCurrentWeek(item.startedAt, data.week.periodStart, data.week.periodEnd),
   );
@@ -68,42 +65,17 @@ export function IosWeekDetail() {
           <strong>
             {data.week.distanceKm.toFixed(1)} <small>km</small>
           </strong>
-          <p>目标完成度 {progress}%</p>
-          <div className="ios-hero-progress">
-            <i style={{ width: `${progress}%` }} />
-          </div>
+          <p>本周已跑</p>
           <small className="ios-hero-footnote">
-            {goalKm == null
-              ? `${data.week.workoutCount} 次训练 · ${duration(data.week.durationSeconds)}`
-              : isWeekGoalComplete(remaining)
-                ? "已完成周目标"
-                : `距本周目标还差 ${(remaining ?? 0).toFixed(1)} km`}
+            {data.week.workoutCount} 次训练 · {duration(data.week.durationSeconds)}
           </small>
-        </div>
-        <div
-          className="ios-hero-ring"
-          style={{ "--progress": `${progress * 3.6}deg` } as CSSProperties}
-        >
-          <span>{progress}%</span>
         </div>
       </section>
       <div className="ios-stat-grid">
         <Stat label="本周次数" value={String(data.week.workoutCount)} />
         <Stat label="本周时长" value={duration(data.week.durationSeconds)} />
-        <Stat
-          label="周目标"
-          value={goalKm == null ? "--" : `${goalKm.toFixed(1)} km`}
-        />
-        <Stat
-          label={isWeekGoalComplete(remaining) ? "周目标" : "还差"}
-          value={
-            goalKm == null
-              ? "--"
-              : isWeekGoalComplete(remaining)
-                ? "已完成"
-                : `${(remaining ?? 0).toFixed(1)} km`
-          }
-        />
+        <Stat label="日均跑量" value={`${(data.week.distanceKm / 7).toFixed(1)} km`} />
+        <Stat label="训练天数" value={`${trainedDays}/7`} />
       </div>
       <Card title="每日跑量">
         <div className="ios-week-chart">

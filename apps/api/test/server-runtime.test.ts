@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { createServer, type ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -15,8 +15,112 @@ import yazl from "yazl";
 import { DatabaseMaintenance } from "../src/maintenance.js";
 import { ImportPublicationJournal, readImportReceipt, writeImportReceipt } from "../src/import-publication.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
+import { MobileGoalsStore } from "../src/mobile-goals.js";
+import { mobileLocalDate } from "../src/data.js";
+import { weeklyPlanDates } from "../src/weekly-plan-service.js";
+import { seedRecentRunningWeeks } from "./weekly-training-fixture.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
+
+test("Run Coach routes enforce managed plans, CAS, pause exports and the return to manual planning", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-run-coach-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  (await RaiDatabase.open(databasePath)).close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "",
+      RAI_SERVER_ID: "local", RAI_ATHLETE_ID: "athlete_1", RAI_DATASET_EPOCH: "default" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    const read = async (path: string) => (await fetch(url + path)).json();
+    const mutate = async (path: string, body: object, method = "POST") => fetch(url + path, {
+      method, headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+    });
+    const config = { goal: "fitness", raceDate: null, raceDistanceKm: null, targetTimeSeconds: null,
+      runningDays: [1, 2, 4, 6, 7], longRunDays: [7], targetType: "pace", strengthTraining: false };
+    const goals = await read("/v1/mobile/goals");
+    const start = await mutate("/v1/mobile/run-coach", { expectedRevision: goals.revision, action: "start", config });
+    assert.equal(start.status, 200, await start.clone().text());
+    let coach = await start.json();
+    assert.equal(coach.plan.status, "active");
+    assert.equal((await mutate("/v1/mobile/goals", { expectedRevision: coach.revision, runCoach: null }, "PUT")).status, 400);
+    for (const path of ["/v1/mobile/workout-plan/generate", "/v1/mobile/workout-plan/preview"]) {
+      assert.equal((await mutate(path, { expectedRevision: coach.revision })).status, 409);
+    }
+    const manual = await mutate("/v1/mobile/goals", { expectedRevision: coach.revision, weekPlan: [] }, "PUT");
+    assert.equal(manual.status, 409);
+    assert.equal((await manual.json()).code, "run_coach_managed");
+    const pause = await mutate("/v1/mobile/run-coach", { expectedRevision: coach.revision, action: "pause" });
+    assert.equal(pause.status, 200); coach = await pause.json();
+    assert.equal((await read("/v1/mobile/today")).nextSession.kind, "rest");
+    assert.ok((await read("/v1/mobile/workout-plan")).days.every((day: { executable: boolean }) => !day.executable));
+    assert.equal((await mutate("/v1/mobile/run-coach", { expectedRevision: coach.revision - 1, action: "resume" })).status, 409);
+    const end = await mutate("/v1/mobile/run-coach", { expectedRevision: coach.revision, action: "end" });
+    assert.equal(end.status, 200); coach = await end.json();
+    const preview = await mutate("/v1/mobile/workout-plan/preview", { expectedRevision: coach.revision });
+    assert.equal(preview.status, 200, await preview.clone().text());
+    const candidate = await preview.json();
+    assert.ok(candidate.days.some((day: { kind: string }) => day.kind !== "rest"));
+    const confirm = await mutate("/v1/mobile/workout-plan/confirm", { candidateId: candidate.candidateId, expectedRevision: candidate.revision });
+    assert.equal(confirm.status, 200, await confirm.clone().text());
+    assert.equal((await read("/v1/mobile/goals")).runCoach, null);
+    assert.ok((await read("/v1/mobile/workout-plan")).days.some((day: { executable: boolean }) => day.executable));
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+test("manual plan validation derives capacity from the race target being saved", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-candidate-capacity-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  const today = mobileLocalDate();
+  await seedRecentRunningWeeks(databasePath, today, 30);
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    const put = (body: object) => fetch(`${url}/v1/mobile/goals`, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+    });
+    const dates = weeklyPlanDates(today, 98);
+    const raceTarget = { date: dates[90]!, distance: "five_k", targetPaceSecondsPerKm: null };
+    const targetSave = await put({ raceTarget });
+    assert.equal(targetSave.status, 200, await targetSave.clone().text());
+    let goals = await targetSave.json();
+    const nextMonday = dates.slice(1, 8).find(date => new Date(`${date}T00:00:00Z`).getUTCDay() === 1)!;
+    const weekPlan = weeklyPlanDates(nextMonday, 4).map(localDate => ({ localDate, kind: "easy", distanceKm: 5 }));
+    const removeRace = await put({ expectedRevision: goals.revision, raceTarget: null, weekPlan });
+    assert.equal(removeRace.status, 200, await removeRace.clone().text());
+    goals = await removeRace.json();
+    assert.equal(goals.raceTarget, null);
+    assert.equal(goals.weekPlan.reduce((sum: number, day: { distanceKm: number | null }) => sum + (day.distanceKm ?? 0), 0), 20);
+    const addRace = await put({ expectedRevision: goals.revision, raceTarget, weekPlan });
+    assert.equal(addRace.status, 422, await addRace.clone().text());
+    assert.equal((await addRace.json()).code, "plan_policy_violation");
+    const unchanged = await (await fetch(`${url}/v1/mobile/goals`)).json();
+    assert.equal(unchanged.revision, goals.revision, "a rejected candidate cannot partially persist its target");
+    assert.equal(unchanged.raceTarget, null);
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
 
 test("restore and deletion reject a committed import whose acknowledgement is still pending", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-pending-publication-"));
@@ -155,19 +259,6 @@ async function waitForBoundPort(child: ChildProcess, output: () => string): Prom
   });
 }
 
-async function within<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-      })
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 async function stopApi(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null && child.stdout?.closed && child.stderr?.closed && !child.connected) return;
@@ -802,53 +893,82 @@ test("startup foreign-key failure cannot be bypassed by the request hot-open pol
   }
 });
 
-test("weekly plan generation gate is wired to the route without holding the global mutation lock", async () => {
-  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-weekly-plan-gate-"));
+test("weekly coach generation ignores legacy model settings and performs no upstream requests", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-rule-plan-"));
   const databasePath = join(runtimeRoot, "var", "rai.sqlite");
   mkdirSync(join(runtimeRoot, "var"));
   (await RaiDatabase.open(databasePath)).close();
-
   let upstreamCalls = 0;
-  let releaseFirst: (() => void) | undefined;
-  let firstResponse: ServerResponse | undefined;
-  let notifyFirstCalled: (() => void) | undefined;
-  const firstCalled = new Promise<void>((resolveCalled) => {
-    notifyFirstCalled = resolveCalled;
-  });
-  const completionPayload = JSON.stringify({
-    choices: [{ finish_reason: "stop", message: { content: "{\"days\":[]}" } }]
-  });
   const upstream = createServer((request, response) => {
     request.resume();
     upstreamCalls += 1;
     response.setHeader("content-type", "application/json");
-    if (upstreamCalls === 1) {
-      firstResponse = response;
-      releaseFirst = () => response.end(completionPayload);
-      notifyFirstCalled?.();
-      return;
-    }
-    response.end(completionPayload);
+    response.end(JSON.stringify({ choices: [{ message: { content: '{"days":[]}' }, finish_reason: "stop" }] }));
   });
-  await new Promise<void>((resolveListen) => upstream.listen(0, "127.0.0.1", resolveListen));
+  await new Promise<void>(resolveListen => upstream.listen(0, "127.0.0.1", resolveListen));
   const upstreamAddress = upstream.address();
   assert.ok(upstreamAddress && typeof upstreamAddress !== "string");
-
   const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
     cwd: projectRoot,
-    env: {
-      ...process.env,
-      RAI_RUNTIME_ROOT: runtimeRoot,
-      RAI_DATABASE: databasePath,
-      RAI_API_PORT: "0",
-      RAI_LOG_LEVEL: "silent",
-      RAI_LLM_API_KEY: "fixture-key",
-      RAI_LLM_PROVIDER: "fixture",
-      RAI_LLM_MODEL: "fixture-model",
-      RAI_LLM_BASE_URL: `http://127.0.0.1:${upstreamAddress.port}`
-    },
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe", "ipc"]
+    env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_CONTROL_DATABASE: join(runtimeRoot, "var/rai-control.sqlite"), RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "",
+      RAI_LLM_API_KEY: "fixture-key", RAI_LLM_PROVIDER: "fixture", RAI_LLM_MODEL: "fixture-model",
+      RAI_LLM_BASE_URL: 'http://127.0.0.1:' + upstreamAddress.port, RAI_LLM_MAX_TOKENS: "8192" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = 'http://127.0.0.1:' + await waitForBoundPort(child, () => output);
+    await waitForApi(child, url, () => output);
+    const post = (path: string, body: object) => fetch(url + path, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const goals = await fetch(url + "/v1/mobile/goals").then(response => response.json()) as import("@rai/api-contracts").MobileGoalsResponse;
+    const first = await post("/v1/mobile/workout-plan/preview", { expectedRevision: goals.revision });
+    assert.equal(first.status, 200);
+    const preview = await first.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
+    const repeated = await post("/v1/mobile/workout-plan/preview", { expectedRevision: goals.revision });
+    assert.equal(repeated.status, 200);
+    const repeatedPreview = await repeated.json() as typeof preview;
+    assert.deepEqual(preview.days, repeatedPreview.days);
+    assert.equal(preview.audit.generatedBy, "heuristic");
+    assert.equal(preview.audit.model, null);
+    assert.equal(preview.audit.promptVersion, null);
+    assert.ok(preview.warnings.every(warning => !/模型|回退|RAI_LLM/.test(warning)));
+    assert.ok(preview.days.every(day => !/模型|回退/.test(day.reason ?? "")));
+    const confirmed = await post("/v1/mobile/workout-plan/confirm", { candidateId: preview.candidateId, expectedRevision: preview.revision });
+    assert.equal(confirmed.status, 200, await confirmed.text());
+    const legacy = await post("/v1/mobile/workout-plan/generate", { expectedRevision: goals.revision + 1 });
+    assert.equal(legacy.status, 200);
+    const generated = await legacy.json() as import("@rai/api-contracts").MobileWeeklyPlanGenerationResponse;
+    assert.equal(generated.audit.generatedBy, "heuristic");
+    assert.equal(generated.audit.model, null);
+    assert.equal(upstreamCalls, 0, "legacy model settings must never cause a network request");
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await new Promise<void>(resolveClose => upstream.close(() => resolveClose()));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+test("startup retires legacy future plans and only preview confirmation enables them again", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-rule-plan-transition-http-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  const controlPath = join(runtimeRoot, "var/rai-control.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  (await RaiDatabase.open(databasePath)).close();
+  const today = mobileLocalDate();
+  const dates = weeklyPlanDates(today, 30);
+  const seed = new MobileGoalsStore(runtimeRoot, controlPath);
+  const original = seed.write({ weekPlan: [today, dates[1]!, dates[29]!].map(localDate => ({
+    localDate, kind: "easy", distanceKm: 8, reason: "已保存的旧处方"
+  })), weekPlanAudit: { generatedBy: "llm", model: "legacy:model", promptVersion: "legacy-v1", generatedAt: null } }, { prescription: null });
+  seed.close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_CONTROL_DATABASE: controlPath, RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
   });
   let output = "";
   child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
@@ -856,49 +976,69 @@ test("weekly plan generation gate is wired to the route without holding the glob
   try {
     const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
     await waitForApi(child, url, () => output);
-    const generate = (): Promise<Response> => fetch(`${url}/v1/mobile/workout-plan/generate`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}"
+    const getGoals = async () => await fetch(`${url}/v1/mobile/goals`).then(response => response.json()) as import("@rai/api-contracts").MobileGoalsResponse;
+    const post = (path: string, body: object, method = "POST") => fetch(`${url}/v1/mobile/${path}`, {
+      method, headers: { "content-type": "application/json" }, body: JSON.stringify(body)
     });
-
-    const first = generate();
-    await within(firstCalled, 5_000, "weekly plan generation did not call the fixture upstream");
-    const busyStarted = performance.now();
-    const busy = await generate();
-    assert.equal(busy.status, 409);
-    assert.ok(performance.now() - busyStarted < 1_000, "busy generation should fail fast");
-    assert.deepEqual(await busy.json(), {
-      code: "weekly_plan_generation_busy",
-      message: "课表正在生成，请稍后重试"
-    });
-    assert.equal(upstreamCalls, 1);
-
-    const edit = await fetch(`${url}/v1/mobile/goals`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: 0, weeklyDistanceKm: 35 })
-    });
+    const pending = await getGoals();
+    assert.equal(pending.revision, original.revision + 1);
+    assert.equal(pending.weekPlanReplanRequired, true);
+    assert.deepEqual(pending.weekPlan, original.weekPlan.filter(day => day.localDate === today));
+    const plan = await fetch(`${url}/v1/mobile/workout-plan`).then(response => response.json()) as import("@rai/api-contracts").MobileWorkoutPlanResponse;
+    const getToday = async () => await fetch(`${url}/v1/mobile/today`).then(response => response.json()) as import("@rai/api-contracts").MobileTodayResponse;
+    const retainedToday = await getToday();
+    assert.equal(retainedToday.nextSession.distanceKm, 8, "migration must preserve the actual today's prescription, not just storage");
+    assert.equal(plan.days[0]?.distanceKm, 8, "WorkoutKit must receive the same preserved prescription");
+    assert.equal(plan.days[0]?.executable, true);
+    assert.ok(plan.days.filter(day => day.localDate > today).every(day => !day.executable && day.structure === null));
+    for (const [path, body, method] of [
+      ["workout-plan/generate", { expectedRevision: pending.revision }, "POST"],
+      ["goals", { expectedRevision: pending.revision, weekPlan: original.weekPlan }, "PUT"]
+    ] as const) {
+      const blocked = await post(path, body, method);
+      assert.equal(blocked.status, 409);
+      assert.equal((await blocked.json() as { code: string }).code, "weekly_plan_confirmation_required");
+    }
+    const spoof = await post("goals", { weekPlanReplanRequired: false }, "PUT");
+    assert.equal(spoof.status, 400, "migration state must not be writable by clients");
+    const spoofDate = await post("goals", { weekPlanPreservedDate: today }, "PUT");
+    assert.equal(spoofDate.status, 400, "today's preservation date must not be writable by clients");
+    const response = await post("workout-plan/preview", { expectedRevision: pending.revision });
+    assert.equal(response.status, 200);
+    const cancelled = await response.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
+    assert.ok(cancelled.days.every(day => day.localDate > today));
+    assert.deepEqual(await getGoals(), pending, "creating or abandoning a preview cannot clear pending state");
+    const edit = await post("goals", { expectedRevision: pending.revision,
+      easyDurationFloorFraction: 0.85, qualitySessionCap: 1 }, "PUT");
     assert.equal(edit.status, 200, await edit.text());
-
-    assert.ok(firstResponse);
-    releaseFirst?.();
-    const firstResult = await first;
-    assert.equal(firstResult.status, 409, await firstResult.text());
-    const goals = await fetch(`${url}/v1/mobile/goals`).then((response) => response.json()) as {
-      revision: number;
-      weeklyDistanceKm: number;
-    };
-    assert.equal(goals.revision, 1);
-    assert.equal(goals.weeklyDistanceKm, 35);
-
-    const afterRelease = await generate();
-    assert.equal(afterRelease.status, 200, await afterRelease.text());
-    assert.equal(upstreamCalls, 2);
+    const changed = await getGoals();
+    assert.equal(changed.weekPlanReplanRequired, true);
+    assert.equal((await post("workout-plan/confirm", { candidateId: cancelled.candidateId, expectedRevision: cancelled.revision })).status, 409);
+    assert.deepEqual(await getGoals(), changed);
+    const next = await post("workout-plan/preview", { expectedRevision: changed.revision });
+    assert.equal(next.status, 200);
+    const preview = await next.json() as typeof cancelled;
+    assert.equal(preview.audit.generatedBy, "heuristic");
+    const confirmBody = { candidateId: preview.candidateId, expectedRevision: preview.revision };
+    const confirmed = await post("workout-plan/confirm", confirmBody);
+    assert.equal(confirmed.status, 200, await confirmed.text());
+    const enabled = await getGoals();
+    assert.equal(enabled.revision, changed.revision + 1);
+    assert.equal(enabled.weekPlanReplanRequired, false);
+    assert.deepEqual(enabled.weekPlan.find(day => day.localDate === today), pending.weekPlan[0]);
+    assert.equal(enabled.weekPlanAudit?.generatedBy, "heuristic");
+    assert.equal((await getToday()).nextSession.distanceKm, 8, "confirmation must not end today's protection");
+    const enabledPlan = await fetch(`${url}/v1/mobile/workout-plan`).then(response => response.json()) as import("@rai/api-contracts").MobileWorkoutPlanResponse;
+    assert.equal(enabledPlan.days[0]?.distanceKm, 8);
+    assert.equal(enabledPlan.days[0]?.source, "llm", "the preserved legacy day must not be relabelled as rule generation");
+    assert.equal((await post("workout-plan/confirm", confirmBody)).status, 200);
+    assert.deepEqual(await getGoals(), enabled, "confirmation retry must not create another revision");
+    const manual = await post("goals", { expectedRevision: enabled.revision, weekPlan: enabled.weekPlan }, "PUT");
+    assert.equal(manual.status, 200, await manual.text());
+    const afterManual = await getGoals();
+    assert.equal((await post("workout-plan/generate", { expectedRevision: afterManual.revision })).status, 200);
   } finally {
-    releaseFirst?.();
     await stopApi(child).catch(() => child.kill("SIGKILL"));
-    await new Promise<void>((resolveClose) => upstream.close(() => resolveClose()));
     await removeRuntimeRoot(runtimeRoot);
   }
 });
@@ -1815,12 +1955,12 @@ test("plan preview/confirm HTTP flow is non-mutating, idempotent and revision sa
     assert.equal((await getGoals()).revision, committed.revision, "lost acknowledgement retry is not another write");
     const stale = await (await post("workout-plan/preview", { expectedRevision: committed.revision })).json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
     const today = await fetch(`${url}/v1/mobile/today`).then(response => response.json()) as import("@rai/api-contracts").MobileTodayResponse;
-    const edit = await post("goals", { expectedRevision: committed.revision, weeklyDistanceKm: committed.weeklyDistanceKm, raceTarget: { date: today.today.localDate, distance: "ten_k", targetPaceSecondsPerKm: 330 } }, "PUT");
+    const edit = await post("goals", { expectedRevision: committed.revision, raceTarget: { date: today.today.localDate, distance: "ten_k", targetPaceSecondsPerKm: 330 } }, "PUT");
     assert.equal(edit.status, 200, await edit.text());
     const changed = await getGoals();
     assert.equal((await post("workout-plan/confirm", { candidateId: stale.candidateId, expectedRevision: stale.revision })).status, 409);
     assert.equal((await getGoals()).revision, changed.revision);
-    const invalid = await post("goals", { expectedRevision: changed.revision, weeklyDistanceKm: 10, qualitySessionCap: 0, weekPlan: [{ localDate: today.today.localDate, kind: "tempo", distanceKm: 10 }] }, "PUT");
+    const invalid = await post("goals", { expectedRevision: changed.revision, qualitySessionCap: 0, weekPlan: [{ localDate: today.today.localDate, kind: "tempo", distanceKm: 10 }] }, "PUT");
     assert.equal(invalid.status, 200, await invalid.text());
     const safelyRewritten = await getGoals();
     assert.equal(safelyRewritten.revision, changed.revision + 1);

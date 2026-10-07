@@ -139,8 +139,11 @@ assert "native.today ?? initialData" in week_view, "Week detail must observe ref
 assert ".task { await native.refreshAll(requestHandshake: false) }" in week_view
 assert ".refreshable { await native.refreshAll() }" in week_view
 assert "data.week.hasWeeklyActivityStatistics" in week_view, "Missing API fields must not be shown as empty distributions"
-assert "detail: remainingDistanceLabel" in week_view
-assert "data.week.remainingDistanceKm" in week_view
+# The weekly goal is retired. The detail must still state the observed distance,
+# and nothing may reintroduce a goal ring, fraction or remaining distance.
+assert "data.week.distanceKm" in week_view, "Week detail must still render the observed distance"
+for retired in ["goalProgressFraction", "goalDistanceKm", "remainingDistanceKm", "remainingDistanceLabel"]:
+    assert retired not in week_view, f"Retired weekly-goal field came back: {retired}"
 
 # Today redesign: keep the three real measurements and a distinct linear ability visual.
 today_widgets = pathlib.Path("apps/ios/RAI/Skins/Technology/TechTodayRecovery.swift").read_text()
@@ -509,6 +512,20 @@ assert "DisclosureGroup" in disclosure, (
 assert "ForEach(plan.days)" in disclosure and "TechExecutablePlanDay" in disclosure, (
     "The rolling window's per-day rows must live inside the disclosure")
 print("Plan page: one back button, one flat seven-day strip (rolling window collapsed).")
+
+editable_plan = slice_between(plan_view, "private var editablePlanIndexes", "private var weekPlanPanel",
+                              "pending migration editor guard")
+assert "native.goals?.weekPlanReplanRequired != true" in editable_plan, (
+    "Pending migration must not offer future-day editors")
+watch_panel = slice_between(plan_view, "private var watchPlanPanel", "private func syncPlanToWatch",
+                           "pending migration watch panel")
+assert "native.goals?.weekPlanReplanRequired == true" in watch_panel, (
+    "The replan notice must depend on the server-owned migration state")
+for text in ["重新预览规则课表", "手表上的旧排期不会自动撤回", "请手动同步以撤回或替换"]:
+    assert text in watch_panel, f"Missing migration action or Watch warning: {text}"
+assert "NativeAppModel.planSourceName(audit.generatedBy)" in watch_panel, (
+    "Watch provenance must use the tested rule/manual/legacy labels")
+print("Plan migration: future editing withheld, explicit preview offered, manual Watch replacement explained.")
 
 # ---------------------------------------------------------------------------
 # 近七日执行记录：一天一行、只留一个入口。

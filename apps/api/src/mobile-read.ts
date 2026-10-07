@@ -1,10 +1,10 @@
+import { runCoachSessionTargets } from "./run-coach-policy.js";
 import { loadDatedReadiness } from "@rai/application";
 import { decideVerdictFromSnapshots } from "./mobile-coach.js";
 import type { DatabaseSync } from "node:sqlite";
 import { readinessStateEvidence } from "@rai/readiness";
 
 import { applyRacePlanPolicy } from "./weekly-plan-validate.js";
-import { DEFAULT_WEEKLY_DISTANCE_KM } from "./mobile-goals.js";
 import type {
   DashboardResponse,
   MobileCoverage,
@@ -165,11 +165,13 @@ export function assembleMobileCoach(args: {
   goals: Pick<
     MobileGoalsResponse,
     "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession"
-  >;
+  > & Partial<Pick<MobileGoalsResponse, "runCoach" | "weekPlanPreservedDate">>;
   /** Per-metric record coverage, so the assessment can report the newest observation that exists. */
   coverage: MobileCoverage;
   fourWeekDistanceChangeFraction: number | null;
   previousWeekDistanceKm: number;
+  /** Weekly volume ceiling the coach must fit inside, km. Derived by `weeklyCapacity`. */
+  weeklyVolumeCeilingKm: number;
   /** Plan revision journal, newest first; read-time only (never rewritten here). */
   planHistory?: readonly PlanHistoryRevision[];
   /** The athlete's own recent weekly volume, in km, as the baseline for phase bands. */
@@ -292,7 +294,7 @@ export function assembleMobileCoach(args: {
     weekDurationSeconds: week.durationSeconds,
     weekEasyDurationSeconds: weekSessions.easyDurationSeconds,
     weekQualityCount: weekSessions.qualityCount,
-    weeklyDistanceGoalKm: week.goalDistanceKm,
+    weeklyVolumeCeilingKm: args.weeklyVolumeCeilingKm,
     easyDurationFloorFraction: args.goals.easyDurationFloorFraction ?? DEFAULT_EASY_DURATION_FLOOR,
     qualitySessionCap: args.goals.qualitySessionCap ?? DEFAULT_QUALITY_SESSION_CAP,
     fourWeekDistanceChangeFraction: args.fourWeekDistanceChangeFraction,
@@ -361,7 +363,9 @@ export function assembleMobileCoach(args: {
   const verdict = dated ? decideVerdictFromSnapshots(input,dated) : decideVerdict(input, assessment);
   // §13.3：处方与**它走了哪条分支**一起取回来 —— disposition 由决策自己报告，
   // 版本化输出据此投影，不去比较课型倒推（见 projectCoachDecisionV2 的说明）。
-  const { session: computed, disposition } = decideNextSessionDecision(input, verdict);
+  const { session, disposition } = decideNextSessionDecision(input, verdict);
+  const computed = args.goals.weekPlanPreservedDate === today ? session :
+    runCoachSessionTargets(session, args.goals.runCoach, input.zones);
   const nextSession = resolveLockedNextSession(computed, input.lockedSession, today, input.zones);
   const lock = lockState(input.lockedSession, today, verdict.tone);
   lock.candidate = computed;
@@ -494,10 +498,11 @@ export const WORKOUT_PLAN_WINDOW_DAYS = 7;
  */
 export function assembleMobileWorkoutPlan(args: {
   raceTarget?: import("@rai/api-contracts").MobileRaceTarget | null;
-  weeklyDistanceKm?: number;
+  weeklyVolumeCeilingKm?: number;
   relockSuggested?: boolean;
   today: string;
   todaySession: MobileNextSession;
+  todayPlanSource?: MobilePlanSource;
   todayCompleted: boolean;
   storedPlan: MobilePlannedDay[];
   zones: TrainingZonesCurrentResponse | null;
@@ -511,10 +516,10 @@ export function assembleMobileWorkoutPlan(args: {
   const windowEnd = shiftDate(args.today, windowDays - 1);
 
   const days: MobileWorkoutPlanDay[] = [
-    planDayFromSession(args.today, args.todaySession, prescription, source, !args.todayCompleted && !args.relockSuggested)
+    planDayFromSession(args.today, args.todaySession, prescription, args.todayPlanSource ?? source, !args.todayCompleted && !args.relockSuggested)
   ];
 
-  for (const planned of applyRacePlanPolicy(args.storedPlan, args.raceTarget, args.weeklyDistanceKm ?? DEFAULT_WEEKLY_DISTANCE_KM, prescription)
+  for (const planned of applyRacePlanPolicy(args.storedPlan, args.raceTarget, args.weeklyVolumeCeilingKm ?? 0, prescription)
     .filter((day) => day.localDate > args.today && day.localDate <= windowEnd)
     .sort((left, right) => left.localDate.localeCompare(right.localDate))) {
     const numbers = plannedDayNumbers(planned.kind, planned.structure, planned.distanceKm, prescription);

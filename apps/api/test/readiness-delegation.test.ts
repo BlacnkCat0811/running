@@ -117,7 +117,7 @@ const base = (): CoachInput => ({
   weekDurationSeconds: 7200,
   weekEasyDurationSeconds: 5400,
   weekQualityCount: 0,
-  weeklyDistanceGoalKm: 30,
+  weeklyVolumeCeilingKm: 30,
   easyDurationFloorFraction: 0.7,
   qualitySessionCap: 2,
   fourWeekDistanceChangeFraction: 0.1,

@@ -93,21 +93,16 @@ struct TechTodayView: View {
                     Text("今日总距离").font(.caption).foregroundStyle(TechColor.muted)
                 }
                 Spacer(minLength: 0)
-                ZStack {
-                    TechInstrumentRing(progress: data.week.goalProgressFraction ?? 0, size: 112)
-                }.accessibilityLabel("本周目标进度 \(nativePercent(data.week.goalProgressFraction))")
             }
             TechMetricGrid {
                 heroMetric("时间", techDuration(data.today.durationSeconds))
                 heroMetric("平均配速", techPace(data.today.paceSecondsPerKm) + "/km")
                 heroMetric("kcal", data.today.energyKcal.map { nativeNumber($0, digits: 0) } ?? "--")
             }
-            HStack(spacing: 10) {
-                Text("本周 \(nativeNumber(data.week.distanceKm)) / \(nativeNumber(data.week.goalDistanceKm)) km")
-                    .font(.caption2).foregroundStyle(TechColor.muted)
-                TechProgressBar(fraction: data.week.goalProgressFraction)
-                Text(nativePercent(data.week.goalProgressFraction)).font(.caption2).foregroundStyle(TechColor.cyan)
-            }.padding(.horizontal, 8).padding(.vertical, 6).background(TechColor.paper, in: TechSurfaceShape())
+            Text("本周 \(nativeNumber(data.week.distanceKm)) km · \(data.week.workoutCount) 次")
+                .font(.caption2).foregroundStyle(TechColor.muted)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(TechColor.paper, in: TechSurfaceShape())
         }
     }
 
@@ -427,27 +422,6 @@ struct TechTodayView: View {
         return nil
     }
 
-    private func weekPanel(_ data: MobileTodayResponse) -> some View {
-        TechPanel {
-            VStack(alignment: .leading, spacing: 11) {
-                TechSectionHeader(title: "本周里程", trailing: nativePercent(data.week.goalProgressFraction), trailingColor: TechColor.coral)
-                HStack(alignment: .firstTextBaseline) {
-                    Text(nativeKilometers(data.week.distanceKm))
-                        .font(.system(.title3, design: .default).weight(.semibold))
-                        .foregroundStyle(TechColor.ink)
-                    Text("/ \(nativeKilometers(data.week.goalDistanceKm))")
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(TechColor.muted)
-                    Spacer()
-                    Text("\(data.week.workoutCount) 次")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(TechColor.green)
-                }
-                TechWeekBars(points: data.weekDaily, today: data.today.localDate)
-            }
-        }
-    }
-
     /// §20 one-line plan context for the today page.
     ///
     /// Phase, the week's band and how much of it was observed — three facts that
@@ -612,10 +586,6 @@ struct TechWeekOverviewView: View {
 
     private var data: MobileTodayResponse { native.today ?? initialData }
 
-    private var remainingDistanceLabel: String {
-        data.week.remainingDistanceKm.map { "剩余 \(nativeKilometers($0))" } ?? "未设置周目标"
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
@@ -627,18 +597,18 @@ struct TechWeekOverviewView: View {
                     Spacer()
                 }.padding(.vertical, 6)
                 TechPanel {
-                    HStack(spacing: 24) {
-                        TechRing(progress: data.week.goalProgressFraction ?? 0,
-                                 value: nativeKilometers(data.week.distanceKm), label: "已完成", size: 144,
-                                 detail: remainingDistanceLabel)
-                        VStack(alignment: .leading, spacing: 14) {
-                            Text("周进度").font(.subheadline).foregroundStyle(TechColor.muted)
-                            Text(nativePercent(data.week.goalProgressFraction))
-                                .font(.title.weight(.bold)).foregroundStyle(TechColor.cyan)
-                            Text("目标 \(nativeKilometers(data.week.goalDistanceKm))")
+                    HStack(alignment: .firstTextBaseline, spacing: 24) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(nativeKilometers(data.week.distanceKm))
+                                .techScaledFont(38, weight: .bold).monospacedDigit()
+                                .foregroundStyle(TechColor.ink)
+                            Text("本周跑量").font(.caption).foregroundStyle(TechColor.muted)
+                        }
+                        Spacer(minLength: 0)
+                        VStack(alignment: .trailing, spacing: 6) {
+                            Text("\(data.week.workoutCount) 次").font(.headline).foregroundStyle(TechColor.ink)
+                            Text(techDuration(data.week.durationSeconds))
                                 .font(.caption).foregroundStyle(TechColor.muted)
-                            Text("\(data.week.workoutCount) 次 · \(techDuration(data.week.durationSeconds))")
-                                .font(.caption).foregroundStyle(TechColor.ink)
                         }
                     }.frame(maxWidth: .infinity)
                 }
@@ -706,11 +676,6 @@ struct TechWeekOverviewView: View {
                             tint: TechColor.yellow,
                             fraction: data.weekStructure.easyHonesty.honestyFraction
                         )
-                        if let remaining = data.weekStructure.remainingDistanceKm {
-                            Text("距离周目标还差 \(nativeKilometers(remaining))")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(TechColor.muted)
-                        }
                     }
                 }
 

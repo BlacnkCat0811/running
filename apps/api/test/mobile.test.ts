@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -14,11 +14,63 @@ import type {
   TrainingZonesCurrentResponse
 } from "@rai/api-contracts";
 
-import { RaiReadStore } from "../src/data.js";
-import { DEFAULT_WEEKLY_DISTANCE_KM, MobileGoalsStore } from "../src/mobile-goals.js";
-import { buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
+import { RaiReadStore, mobileLocalDate } from "../src/data.js";
+import { MobileGoalsStore } from "../src/mobile-goals.js";
+import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP, buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
 import { assembleMobileWorkoutPlan, recommendationAdjustmentReason, zonePrescription } from "../src/mobile-read.js";
 import { MAX_PLANNED_DISTANCE_KM } from "../src/session-structure.js";
+
+test("legacy-day protection survives confirmation and restart, expires by Shanghai date, and keeps live gates", async (context) => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-06T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-preserved-day-read-"));
+  const databasePath = join(root, "rai.sqlite");
+  (await RaiDatabase.open(databasePath)).close();
+  const controlPath = join(root, "var", "control.sqlite");
+  let goalsStore = new MobileGoalsStore(root, controlPath);
+  let read = new RaiReadStore(databasePath);
+  try {
+    const today = mobileLocalDate();
+    goalsStore.write({ weekPlan: [today, "2026-10-07"].map(localDate => ({
+      localDate, kind: "easy", distanceKm: 8, reason: "旧处方"
+    })), weekPlanAudit: { generatedBy: "llm", model: "legacy", promptVersion: "v1", generatedAt: null } });
+    const pending = goalsStore.retireLegacyModelPlan(today);
+    assert.equal(pending.weekPlanPreservedDate, today);
+    const current = read.mobileToday(pending);
+    assert.equal(current.nextSession.distanceKm, 8);
+    const offered = read.mobileWorkoutPlan(pending);
+    assert.equal(offered.days[0]?.distanceKm, 8);
+    assert.equal(offered.days[0]?.executable, true);
+    assert.equal(read.mobileWeeklyPlanInputs(pending).weeklyVolumeBaselineKm, 5, "protection must not enlarge future capacity");
+
+    const taperGoals = { ...pending, raceTarget: { date: "2026-10-07", distance: "ten_k" as const, targetPaceSecondsPerKm: 330 } };
+    const taper = read.mobileToday(taperGoals);
+    assert.ok(taper.nextSession.distanceKm! < 8, "live taper policy can still shorten the protected day");
+    assert.equal(read.mobileWorkoutPlan(taperGoals).days[0]?.distanceKm, taper.nextSession.distanceKm);
+    const quality = read.mobileToday({ ...pending, weekPlan: [{ localDate: today, kind: "interval", distanceKm: 8 }] });
+    assert.notEqual(quality.nextSession.kind, "interval", "incomplete calibration still vetoes legacy quality work");
+
+    const confirmed = goalsStore.write({ expectedRevision: pending.revision, weekPlan: pending.weekPlan,
+      weekPlanAudit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt: null }
+    }, { confirmCoachPlan: true });
+    assert.equal(read.mobileToday(confirmed).nextSession.distanceKm, 8);
+    assert.equal(read.mobileWorkoutPlan(confirmed).days[0]?.source, "llm");
+    read.close();
+    goalsStore.close();
+    goalsStore = new MobileGoalsStore(root, controlPath);
+    read = new RaiReadStore(databasePath);
+    assert.equal(read.mobileToday(goalsStore.read()).nextSession.distanceKm, 8, "restart cannot lose the preserved day");
+
+    context.mock.timers.setTime(Date.parse("2026-10-06T16:01:00Z"));
+    assert.equal(mobileLocalDate(), "2026-10-07");
+    const nextDay = { ...goalsStore.read(), weekPlan: [{ localDate: "2026-10-07", kind: "easy" as const, distanceKm: 8 }] };
+    assert.equal(read.mobileToday(nextDay).nextSession.distanceKm, 5, "yesterday's legacy protection must not widen today's budget");
+    assert.equal(read.mobileWorkoutPlan(nextDay).days[0]?.source, "heuristic");
+  } finally {
+    read.close();
+    goalsStore.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 const runDate = (index: number): string =>
   new Date(Date.UTC(2025, 0, 1 + index * 3, 0, 0, 0)).toISOString();
@@ -80,7 +132,7 @@ test("mobileToday returns zero-filled today with week series and recent workouts
   store.close();
   const read = new RaiReadStore(databasePath);
   try {
-    const today = read.mobileToday(30);
+    const today = read.mobileToday();
     assert.equal(today.timezone, "Asia/Shanghai");
     // Fixture workouts are from 2025-01; "today" has no training and must zero-fill.
     assert.equal(today.today.distanceKm, 0);
@@ -95,8 +147,6 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     const todayBar = today.weekDaily.find((day) => day.localDate === today.today.localDate);
     assert.ok(todayBar, "weekDaily must include today");
     assert.equal(todayBar.distanceKm, 0);
-    assert.equal(today.week.goalDistanceKm, 30);
-    assert.equal(today.week.goalProgressFraction, 0);
     assert.ok(Array.isArray(today.recentWorkouts));
     assert.ok(today.recentWorkouts.length > 0 && today.recentWorkouts.length <= 5);
     assert.ok(["green", "yellow", "red"].includes(today.verdict.tone));
@@ -125,15 +175,10 @@ test("mobileToday returns zero-filled today with week series and recent workouts
     // undated recovery cannot authorize a quality session.
     assert.equal(today.verdict.stale, true, "undated recovery cannot authorize a quality session");
 
-    const observed = read.mobileToday(30, undefined, []);
+    const observed = read.mobileToday(undefined, []);
     assert.equal(observed.recentPlanExecution?.length, 7);
     assert.ok(observed.recentPlanExecution?.every((day) => day.localDate < observed.today.localDate));
     assert.deepEqual(observed.weekPlan, today.weekPlan, "historical observations do not change today's executable plan");
-
-    // With a null goal there is no progress fraction either.
-    const noGoal = read.mobileToday(null);
-    assert.equal(noGoal.week.goalDistanceKm, null);
-    assert.equal(noGoal.week.goalProgressFraction, null);
   } finally {
     read.close();
     rmSync(root, { recursive: true, force: true });
@@ -152,7 +197,7 @@ test("the top-level data date and the coverage date cannot drift apart", async (
   store.close();
   const read = new RaiReadStore(databasePath);
   try {
-    const today = read.mobileToday(30);
+    const today = read.mobileToday();
     assert.equal(today.latestDataDate, "2025-01-22");
     assert.equal(today.coverage.latestTrainingDate, today.latestDataDate);
   } finally {
@@ -193,13 +238,12 @@ test("mobileToday aggregates today distance, energy and pace from active loads",
 
   const read = new RaiReadStore(databasePath);
   try {
-    const todayPayload = read.mobileToday(10);
+    const todayPayload = read.mobileToday();
     assert.ok(Math.abs(todayPayload.today.distanceKm - 5.2) < 1e-9);
     assert.equal(todayPayload.today.workoutCount, 1);
     const todayPace = todayPayload.today.paceSecondsPerKm;
     assert.ok(todayPace !== null && Math.abs(todayPace - 1800 / 5.2) < 1e-9);
     assert.ok(todayPayload.today.energyKcal !== null && todayPayload.today.energyKcal > 0);
-    assert.ok(todayPayload.week.goalProgressFraction !== null && todayPayload.week.goalProgressFraction > 0);
     assert.equal(todayPayload.weekDaily.length, 7);
     const todayBar = todayPayload.weekDaily.find((day) => day.localDate === todayPayload.today.localDate);
     assert.ok(todayBar, "weekDaily must include today");
@@ -207,7 +251,7 @@ test("mobileToday aggregates today distance, energy and pace from active loads",
     assert.equal(todayBar.workoutCount, 1);
     const dailySum = todayPayload.weekDaily.reduce((sum, day) => sum + day.distanceKm, 0);
     assert.ok(Math.abs(dailySum - todayPayload.week.distanceKm) < 1e-9);
-    const withPlan = read.mobileToday(10, { easyDurationFloorFraction: 0.7, qualitySessionCap: 2,
+    const withPlan = read.mobileToday({ easyDurationFloorFraction: 0.7, qualitySessionCap: 2,
       raceTarget: { date: new Date(Date.parse(`${today}T00:00:00Z`) + 60 * 86400000).toISOString().slice(0, 10),
         distance: "ten_k", targetPaceSecondsPerKm: 300 },
       weekPlan: [], lockedSession: null }, [{ revision: 1,
@@ -250,7 +294,7 @@ test("mobile week averages cover all runs and distributions exclude other weeks 
   store.close();
   const read = new RaiReadStore(databasePath);
   try {
-    const week = read.mobileToday(40).week;
+    const week = read.mobileToday().week;
     const count = rows.length - 1;
     assert.equal(week.averageSpeedKmPerHour, 10);
     assert.equal(week.averagePaceSecondsPerKm, 360);
@@ -273,7 +317,7 @@ test("mobile week without current runs has missing averages rather than zero", a
   store.close();
   const read = new RaiReadStore(databasePath);
   try {
-    const week = read.mobileToday(40).week;
+    const week = read.mobileToday().week;
     assert.equal(week.averageSpeedKmPerHour, null);
     assert.equal(week.averagePaceSecondsPerKm, null);
     assert.equal(week.averageHeartRateBpm, null);
@@ -422,28 +466,49 @@ test("mobile goals store persists, clamps and recovers from corrupt files", () =
     const store = new MobileGoalsStore(root);
     // Defaults before any write; var/ may not exist yet.
     const initial = store.read();
-    assert.equal(initial.weeklyDistanceKm, DEFAULT_WEEKLY_DISTANCE_KM);
+    assert.equal(initial.easyDurationFloorFraction, DEFAULT_EASY_DURATION_FLOOR);
+    assert.equal(initial.qualitySessionCap, DEFAULT_QUALITY_SESSION_CAP);
+    assert.equal(initial.raceTarget, null);
     assert.ok(!existsSync(join(root, "var", "mobile-goals.json")));
 
-    const written = store.write({ weeklyDistanceKm: 42.5 });
-    assert.equal(written.weeklyDistanceKm, 42.5);
-    assert.equal(written.easyDurationFloorFraction, 0.7);
-    assert.equal(written.qualitySessionCap, 2);
+    const written = store.write({ easyDurationFloorFraction: 0.75 });
+    assert.equal(written.easyDurationFloorFraction, 0.75);
+    assert.equal(written.qualitySessionCap, DEFAULT_QUALITY_SESSION_CAP);
     assert.equal(written.raceTarget, null);
     assert.equal(written.lockedSession, null);
     assert.ok(written.updatedAt > initial.updatedAt);
     // Round-trips through a fresh store instance (simulated restart).
     const reloaded = new MobileGoalsStore(root).read();
-    assert.equal(reloaded.weeklyDistanceKm, 42.5);
+    assert.equal(reloaded.easyDurationFloorFraction, 0.75);
 
-    // Values are clamped into [1, 500].
-    assert.equal(new MobileGoalsStore(root).write({ weeklyDistanceKm: 9999 }).weeklyDistanceKm, 500);
-    assert.equal(new MobileGoalsStore(root).write({ weeklyDistanceKm: 0.2 }).weeklyDistanceKm, 1);
+    // Every goal is optional, so an empty edit is legal: it still advances the
+    // revision and leaves every stored field exactly as it was.
+    const untouched = new MobileGoalsStore(root).write({});
+    assert.equal(untouched.revision, reloaded.revision + 1);
+    assert.equal(untouched.easyDurationFloorFraction, 0.75);
+    assert.equal(untouched.qualitySessionCap, DEFAULT_QUALITY_SESSION_CAP);
+
+    // Values are clamped into their own ranges rather than trusted.
+    assert.equal(new MobileGoalsStore(root).write({ easyDurationFloorFraction: 9 }).easyDurationFloorFraction, 0.95);
+    assert.equal(new MobileGoalsStore(root).write({ easyDurationFloorFraction: 0.1 }).easyDurationFloorFraction, 0.4);
+    assert.equal(new MobileGoalsStore(root).write({ qualitySessionCap: 99 }).qualitySessionCap, 4);
+    assert.equal(new MobileGoalsStore(root).write({ qualitySessionCap: -1 }).qualitySessionCap, 0);
+
+    // A payload written before the weekly goal was retired still reads: the key
+    // is ignored rather than rejected, and the fields that remain survive.
+    const legacyPayload = JSON.parse(readFileSync(join(root, "var", "mobile-goals.json"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(root, "var", "mobile-goals.json"),
+      `${JSON.stringify({ ...legacyPayload, weeklyDistanceKm: 42 })}\n`, "utf8");
+    // The unknown key must not make the file unreadable, and the goals that do
+    // still exist must come back at the values the writes above left behind.
+    const legacyRead = new MobileGoalsStore(root).read();
+    assert.equal(legacyRead.easyDurationFloorFraction, 0.4);
+    assert.equal(legacyRead.qualitySessionCap, 0);
 
     // Corrupt file falls back to defaults instead of throwing.
     writeFileSync(join(root, "var", "mobile-goals.json"), "{not json", "utf8");
     const recovered = new MobileGoalsStore(root).read();
-    assert.equal(recovered.weeklyDistanceKm, DEFAULT_WEEKLY_DISTANCE_KM);
+    assert.equal(recovered.easyDurationFloorFraction, DEFAULT_EASY_DURATION_FLOOR);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -455,7 +520,6 @@ test("race goals reject impossible calendar dates instead of normalizing them", 
     const store = new MobileGoalsStore(root);
     assert.throws(
       () => store.write({
-        weeklyDistanceKm: 30,
         raceTarget: { date: "2026-02-31", distance: "ten_k", targetPaceSecondsPerKm: null }
       }),
       /real YYYY-MM-DD date/
@@ -512,6 +576,8 @@ test("control goals migration commits the current goal and its history together"
     const legacyPath = join(root, "var", "mobile-goals.json");
     const legacy = {
       revision: 7,
+      // Deliberately still carries the retired key: the migration must accept a
+      // payload written before that key existed, and ignore what it no longer knows.
       weeklyDistanceKm: 42,
       easyDurationFloorFraction: 0.75,
       qualitySessionCap: 3,
@@ -524,7 +590,12 @@ test("control goals migration commits the current goal and its history together"
     writeFileSync(legacyPath, `${JSON.stringify(legacy)}\n`, "utf8");
     const store = new MobileGoalsStore(root, controlPath);
     try {
-      assert.equal(store.read().weeklyDistanceKm, 42);
+      // A legacy file still carrying the retired key migrates without losing what
+      // remains: the migration is gated on `revision` now, so this also proves the
+      // replacement probe accepts a real payload.
+      const migrated = store.read();
+      assert.equal(migrated.easyDurationFloorFraction, 0.75);
+      assert.equal(migrated.qualitySessionCap, 3);
       const control = new DatabaseSync(controlPath);
       try {
         const current = control.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get() as { revision: number };
@@ -543,11 +614,11 @@ test("control goals migration commits the current goal and its history together"
   }
 });
 
-test("mobile goals store can lock today's session without dropping weekly distance", () => {
+test("mobile goals store can lock today's session without dropping other goals", () => {
   const root = mkdtempSync(join(tmpdir(), "rai-lock-"));
   try {
     const store = new MobileGoalsStore(root);
-    store.write({ weeklyDistanceKm: 36 });
+    store.write({ easyDurationFloorFraction: 0.8, qualitySessionCap: 3 });
     const locked = store.lockSession({
       localDate: "2026-09-03",
       verdictTone: "yellow",
@@ -576,7 +647,9 @@ test("mobile goals store can lock today's session without dropping weekly distan
         }
       }
     });
-    assert.equal(locked.weeklyDistanceKm, 36);
+    // Locking today's session must not disturb the other stored goals.
+    assert.equal(locked.easyDurationFloorFraction, 0.8);
+    assert.equal(locked.qualitySessionCap, 3);
     assert.equal(locked.lockedSession?.localDate, "2026-09-03");
     assert.equal(locked.lockedSession?.session.kind, "easy");
     const reread = new MobileGoalsStore(root).read().lockedSession?.session;
@@ -592,7 +665,6 @@ test("weekly plan keeps valid structures and drops malformed ones", () => {
   try {
     const store = new MobileGoalsStore(root);
     const written = store.write({
-      weeklyDistanceKm: 36,
       weekPlan: [
         {
           localDate: "2026-09-04",
@@ -670,7 +742,6 @@ test("a goals edit keeps the generated structure and its distance unless the ses
   try {
     const store = new MobileGoalsStore(root);
     const initial = store.write({
-      weeklyDistanceKm: 36,
       weekPlan: [
         { localDate: "2026-09-04", kind: "interval", distanceKm: 9.4, structure: intervalStructure, reason: "周三 6×800m" },
         { localDate: "2026-09-05", kind: "easy", distanceKm: 8 }
@@ -682,7 +753,6 @@ test("a goals edit keeps the generated structure and its distance unless the ses
     // exactly what a "save my weekly distance" round trip looks like.
     const edited = new MobileGoalsStore(root).write({
       expectedRevision: initial.revision,
-      weeklyDistanceKm: 42,
       weekPlan: [
         { localDate: "2026-09-04", kind: "interval", distanceKm: 7 },
         { localDate: "2026-09-05", kind: "tempo", distanceKm: 6 }
@@ -702,7 +772,7 @@ test("a goals edit keeps the generated structure and its distance unless the ses
     assert.equal(changed?.structure, undefined, "训练类型改变后不得沿用旧结构");
 
     // An explicit empty plan still clears, so the merge never blocks deletion.
-    const cleared = new MobileGoalsStore(root).write({ weeklyDistanceKm: 42, weekPlan: [] });
+    const cleared = new MobileGoalsStore(root).write({ weekPlan: [] });
     assert.equal(cleared.weekPlan.length, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -732,7 +802,7 @@ test("mobile recovery reports a historical night as a reference, never as today'
     insert.run("latest-night", "2025-01-22", "2025-01-21T15:00:00Z", "2025-01-21T20:00:00Z", 300, asOf);
     const read = new RaiReadStore(databasePath);
     try {
-      const snapshot = read.mobileToday(30);
+      const snapshot = read.mobileToday();
       // The newest recorded night is older than today. It stays reachable as the
       // historical reference (note + freshness.recoveryDate) but must never be
       // served as today's sleep/HRV/RHR.
@@ -764,7 +834,7 @@ test("mobile recovery reports a historical night as a reference, never as today'
         insert.run(`reference-${offset}`,d,`${d}T00:00:00+08:00`,`${d}T08:00:00+08:00`,400,asOf);
       }
       insert.run("today-night", date, `${date}T00:00:00+08:00`, `${date}T08:00:00+08:00`, 480, asOf);
-      const current = read.mobileToday(30);
+      const current = read.mobileToday();
       assert.equal(current.latestDataDate, "2025-01-22");
       assert.equal(current.verdict.stale, false, "current recovery is independent of the latest run date");
       assert.equal(current.recovery.lastNightSleepMinutes, 480, "今天的夜才进今天的读数");
@@ -961,7 +1031,7 @@ test("a goals row written before weekPlanAudit existed still reads back as null"
     database
       .prepare("INSERT INTO mobile_goals (singleton, revision, payload_json, updated_at) VALUES (1, 3, ?, ?)")
       .run(
-        JSON.stringify({ weeklyDistanceKm: 30, weekPlan: [{ localDate: "2026-09-04", kind: "easy", distanceKm: 8 }] }),
+        JSON.stringify({ weekPlan: [{ localDate: "2026-09-04", kind: "easy", distanceKm: 8 }] }),
         "2026-09-01T00:00:00.000Z"
       );
     database.close();
@@ -994,7 +1064,6 @@ test("a merged plan day stores the distance its structure measures, not the edit
     const store = new MobileGoalsStore(root, controlPath);
     const written = store.write(
       {
-        weeklyDistanceKm: 30,
         weekPlan: [{ localDate: "2026-09-05", kind: "interval", distanceKm: 7, structure, reason: "VO2" }]
       },
       { prescription }
@@ -1022,13 +1091,12 @@ test("without a zone prescription the merge keeps the prior distance, never the 
 
     const store = new MobileGoalsStore(root, controlPath);
     store.write(
-      { weeklyDistanceKm: 30, weekPlan: [{ localDate: "2026-09-05", kind: "interval", distanceKm: measuredKm, structure }] },
+      { weekPlan: [{ localDate: "2026-09-05", kind: "interval", distanceKm: measuredKm, structure }] },
       { prescription }
     );
     // Same structure, no zones readable: the echoed 7 km must not be persisted
     // next to a structure that measures ~9.7 km.
     const merged = store.write({
-      weeklyDistanceKm: 30,
       weekPlan: [{ localDate: "2026-09-05", kind: "interval", distanceKm: 7, structure }]
     });
     assert.equal(merged.weekPlan[0]?.distanceKm, measuredKm);
@@ -1049,7 +1117,7 @@ test("a day typed into the editor without a structure is persisted with the one 
     const prescription = zonePrescription(planZones);
     const store = new MobileGoalsStore(root, join(root, "var", "control.sqlite"));
     const written = store.write(
-      { weeklyDistanceKm: 30, weekPlan: [{ localDate: "2026-09-14", kind: "tempo", distanceKm: 6 }] },
+      { weekPlan: [{ localDate: "2026-09-14", kind: "tempo", distanceKm: 6 }] },
       { prescription }
     );
     const day = written.weekPlan[0]!;
@@ -1086,7 +1154,7 @@ test("a rest day stores neither a distance nor a structure", () => {
   try {
     const store = new MobileGoalsStore(root, join(root, "var", "control.sqlite"));
     const written = store.write(
-      { weeklyDistanceKm: 30, weekPlan: [{ localDate: "2026-09-16", kind: "rest", distanceKm: 5 }] },
+      { weekPlan: [{ localDate: "2026-09-16", kind: "rest", distanceKm: 5 }] },
       { prescription: zonePrescription(planZones) }
     );
     assert.equal(written.weekPlan[0]?.distanceKm, null);
@@ -1107,7 +1175,6 @@ test("a locked snapshot is re-measured on the way out of the store", () => {
     const store = new MobileGoalsStore(root, join(root, "var", "control.sqlite"));
     const written = store.write(
       {
-        weeklyDistanceKm: 30,
         lockedSession: {
           localDate: "2026-09-13",
           verdictTone: "green",
@@ -1145,13 +1212,13 @@ test("a structure sent for a different kind than the stored day is discarded", (
     const easy = buildSessionStructure("easy", prescription, { targetDistanceKm: 6 });
     assert.ok(easy);
     const first = store.write(
-      { weeklyDistanceKm: 30, weekPlan: [{ localDate: "2026-09-14", kind: "easy", distanceKm: 6, structure: easy }] },
+      { weekPlan: [{ localDate: "2026-09-14", kind: "easy", distanceKm: 6, structure: easy }] },
       { prescription }
     );
     assert.equal(first.weekPlan[0]?.kind, "easy");
 
     const swapped = store.write(
-      { weeklyDistanceKm: 30, weekPlan: [{ localDate: "2026-09-14", kind: "tempo", distanceKm: 6, structure: easy }] },
+      { weekPlan: [{ localDate: "2026-09-14", kind: "tempo", distanceKm: 6, structure: easy }] },
       { prescription }
     );
     const day = swapped.weekPlan[0]!;
@@ -1179,7 +1246,6 @@ test("editing the distance of a target-sized day rebuilds it, and a fixed-dose d
     const store = new MobileGoalsStore(root, join(root, "var", "control.sqlite"));
     store.write(
       {
-        weeklyDistanceKm: 40,
         weekPlan: [
           { localDate: "2026-09-14", kind: "easy", distanceKm: 6 },
           { localDate: "2026-09-15", kind: "tempo", distanceKm: 6 }
@@ -1192,7 +1258,6 @@ test("editing the distance of a target-sized day rebuilds it, and a fixed-dose d
     // skins), which is what these requests look like on the wire.
     const edited = store.write(
       {
-        weeklyDistanceKm: 40,
         weekPlan: [
           { localDate: "2026-09-14", kind: "easy", distanceKm: 12 },
           { localDate: "2026-09-15", kind: "tempo", distanceKm: 12 }
@@ -1246,7 +1311,6 @@ test("a client-supplied structure over the single-day ceiling is rebuilt, never 
 
     const written = store.write(
       {
-        weeklyDistanceKm: 30,
         weekPlan: [{ localDate: "2026-09-14", kind: "long_run", distanceKm: 5, structure: oversized }]
       },
       { prescription }
@@ -1269,7 +1333,6 @@ test("a client-supplied structure over the single-day ceiling is rebuilt, never 
 
     const locked = store.write(
       {
-        weeklyDistanceKm: 30,
         lockedSession: {
           localDate: "2026-09-14",
           verdictTone: "green",
@@ -1331,7 +1394,6 @@ test("a structure already inside the ceiling is stored untouched", () => {
     assert.ok(interval);
     const written = store.write(
       {
-        weeklyDistanceKm: 30,
         weekPlan: [{ localDate: "2026-09-14", kind: "interval", distanceKm: 5, structure: interval }]
       },
       { prescription }
@@ -1356,7 +1418,7 @@ test("a structure built for the new kind is trusted even when the stored kind di
     const easy = buildSessionStructure("easy", prescription, { targetDistanceKm: 6 });
     assert.ok(easy);
     store.write(
-      { weeklyDistanceKm: 30, weekPlan: [{ localDate: "2026-09-14", kind: "easy", distanceKm: 6, structure: easy }] },
+      { weekPlan: [{ localDate: "2026-09-14", kind: "easy", distanceKm: 6, structure: easy }] },
       { prescription }
     );
 
@@ -1364,7 +1426,6 @@ test("a structure built for the new kind is trusted even when the stored kind di
     assert.ok(generated);
     const written = store.write(
       {
-        weeklyDistanceKm: 30,
         weekPlan: [{ localDate: "2026-09-14", kind: "interval", distanceKm: 11.9, structure: generated }]
       },
       { prescription }
@@ -1387,29 +1448,28 @@ test("race goals create, edit and clear survive control database reopen without 
   const controlPath = join(root, "var", "control.sqlite");
   let store = new MobileGoalsStore(root, controlPath);
   try {
-    const original = store.write({ weeklyDistanceKm: 42, easyDurationFloorFraction: 0.75,
+    const original = store.write({ easyDurationFloorFraction: 0.75,
       qualitySessionCap: 3, weekPlan: [{ localDate: "2026-12-01", kind: "easy", distanceKm: 8 }] });
     const target = { date: "2026-12-06", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
-    const created = store.write({ weeklyDistanceKm: 42, expectedRevision: original.revision, raceTarget: target });
+    const created = store.write({ expectedRevision: original.revision, raceTarget: target });
     store.close();
     store = new MobileGoalsStore(root, controlPath);
     assert.deepEqual(store.read().raceTarget, target);
     assert.deepEqual(store.read().weekPlan, original.weekPlan);
     assert.equal(store.read().easyDurationFloorFraction, 0.75);
     assert.equal(store.read().qualitySessionCap, 3);
-    assert.throws(() => store.write({ weeklyDistanceKm: 42, expectedRevision: original.revision, raceTarget: null }));
+    assert.throws(() => store.write({ expectedRevision: original.revision, raceTarget: null }));
     assert.deepEqual(store.read().raceTarget, target);
     const editedTarget = { date: "2027-01-10", distance: "ten_k" as const, targetPaceSecondsPerKm: null };
-    const edited = store.write({ weeklyDistanceKm: 42, expectedRevision: created.revision, raceTarget: editedTarget });
+    const edited = store.write({ expectedRevision: created.revision, raceTarget: editedTarget });
     store.close();
     store = new MobileGoalsStore(root, controlPath);
     assert.deepEqual(store.read().raceTarget, editedTarget);
-    store.write({ weeklyDistanceKm: 42, expectedRevision: edited.revision, raceTarget: null });
+    store.write({ expectedRevision: edited.revision, raceTarget: null });
     store.close();
     store = new MobileGoalsStore(root, controlPath);
     assert.equal(store.read().raceTarget, null);
     assert.deepEqual(store.read().weekPlan, original.weekPlan);
-    assert.equal(store.read().weeklyDistanceKm, 42);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

@@ -108,7 +108,7 @@ const PHASE_NOTES: Record<PeriodizationPhase, string> = {
   past: "比赛已过：按恢复与下一次目标重新开始。"
 };
 
-const MINIMUM_BAND_KM = 5;
+export const MINIMUM_BAND_KM = 5;
 const MAXIMUM_WEEKLY_KM = 200;
 
 const isLocalDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(`${value}T00:00:00Z`));

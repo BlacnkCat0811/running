@@ -9,7 +9,7 @@ import Foundation
 }
 struct CachedValue<Value> { let value: Value; let cachedAt: Date }
 @MainActor final class CacheStore {
-    private var entries: [String: Data] = [:]
+    private static var entries: [String: Data] = [:]
     private static var handshakes: [String: RaiHandshake] = [:]
     static func loadHandshake(baseURL: URL) -> RaiHandshake? { handshakes[baseURL.absoluteString] }
     static func saveHandshake(_ value: RaiHandshake, baseURL: URL) { handshakes[baseURL.absoluteString] = value }
@@ -18,14 +18,14 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
         baseURL.absoluteString + (handshake?.datasetEpoch ?? "")
     }
     func read<V: Codable>(_ type: V.Type, scope: String, key: String) -> CachedValue<V>? {
-        guard let data = entries[scope + key], let value = try? JSONDecoder().decode(type, from: data) else { return nil }
+        guard let data = Self.entries[scope + key], let value = try? JSONDecoder().decode(type, from: data) else { return nil }
         return CachedValue(value: value, cachedAt: Date())
     }
     func write<V: Codable>(_ value: V, scope: String, key: String) -> Date? {
-        entries[scope + key] = try? JSONEncoder().encode(value)
+        Self.entries[scope + key] = try? JSONEncoder().encode(value)
         return Date()
     }
-    func clear(scope: String) { entries = entries.filter { !$0.key.hasPrefix(scope) } }
+    func clear(scope: String) { Self.entries = Self.entries.filter { !$0.key.hasPrefix(scope) } }
 }
 
 final class StubProtocol: URLProtocol, @unchecked Sendable {
@@ -128,7 +128,7 @@ final class RequestLog: @unchecked Sendable {
         }
         let race = MobileRaceTarget(date: "2026-12-06", distance: "half_marathon", targetPaceSecondsPerKm: 330)
         for target in [race, nil] as [MobileRaceTarget?] {
-            let request = UpdateMobileGoalsRequest(expectedRevision: 12, weeklyDistanceKm: 40,
+            let request = UpdateMobileGoalsRequest(expectedRevision: 12,
                 easyDurationFloorFraction: nil, qualitySessionCap: nil, raceTarget: target, weekPlan: nil)
             let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as! [String: Any]
             check(object["weekPlan"] == nil, "race-only save does not replace weekly plan")
@@ -144,7 +144,11 @@ final class RequestLog: @unchecked Sendable {
         """
         let oldWeek = try JSONDecoder().decode(WeekSummary.self, from: Data(legacyWeekJSON.utf8))
         check(!oldWeek.hasWeeklyActivityStatistics, "old API/cache is not mistaken for empty weekly statistics")
-        check(abs((oldWeek.remainingDistanceKm ?? 0) - 18.9) < 0.0001, "weekly ring shows 18.9 km remaining after 11.1 of 30 km")
+        // The legacy payload above still carries `goalDistanceKm` / `goalProgressFraction`.
+        // It has to keep decoding: the decoder ignores what the contract retired, and
+        // the fields that remain must survive the round trip.
+        check(oldWeek.distanceKm == 11.1 && oldWeek.workoutCount == 2,
+              "a legacy week payload still decodes with the retired goal keys present")
         let emptyWeekJSON = legacyWeekJSON.replacingOccurrences(of: "}", with: ",\"heartRateZones\":[],\"paceZones\":[]}")
         let emptyWeek = try JSONDecoder().decode(WeekSummary.self, from: Data(emptyWeekJSON.utf8))
         check(emptyWeek.hasWeeklyActivityStatistics, "new API empty zones remain a valid no-data result")
@@ -158,11 +162,6 @@ final class RequestLog: @unchecked Sendable {
               fullWeek.averagePaceSecondsPerKm == 324.324 && fullWeek.averageHeartRateBpm == 145 &&
               fullWeek.heartRateZones?.first?.durationSeconds == 3000 && fullWeek.paceZones?.first?.durationSeconds == 3600,
               "native decoder preserves all five weekly statistics from the API")
-        for (goal, remaining) in [("10", Optional(0.0)), ("null", nil), ("0", nil)] {
-            let json = legacyWeekJSON.replacingOccurrences(of: "\"goalDistanceKm\":30", with: "\"goalDistanceKm\":\(goal)")
-            let week = try JSONDecoder().decode(WeekSummary.self, from: Data(json.utf8))
-            check(week.remainingDistanceKm == remaining, "remaining distance handles exceeded or absent goal \(goal)")
-        }
         for (state, expected) in [("recovered", "恢复良好"), ("reduced", "恢复不足"), ("depleted", "需要休息"), ("unknown", "未识别状态")] {
             let json = "{\"state\":\"\(state)\",\"lastNightSleepMinutes\":420,\"note\":\"test\"}"
             let recovery = try JSONDecoder().decode(MobileRecoveryBreakdown.self, from: Data(json.utf8))
@@ -292,7 +291,7 @@ final class RequestLog: @unchecked Sendable {
         """
         let generationJSON = """
         {"generatedAt":"2026-09-11T00:30:00.000Z","revision":8,
-         "audit":{"generatedBy":"llm","model":"deepseek:deepseek-chat","promptVersion":"weekly-plan-v1","generatedAt":"2026-09-11T00:30:00.000Z"},
+         "audit":{"generatedBy":"heuristic","model":null,"promptVersion":null,"generatedAt":"2026-09-11T00:30:00.000Z"},
          "days":[{"localDate":"2026-09-11","kind":"easy","distanceKm":8,"structure":null,"reason":"轻松"}],"warnings":[]}
         """
         let goalsJSON = """
@@ -358,6 +357,7 @@ final class RequestLog: @unchecked Sendable {
         check(raceSaved && raceModel.goals?.raceTarget == race, "race save updates model after server acknowledgement and refresh")
         let raceBody = try JSONSerialization.jsonObject(with: raceRequests.lastBody(method: "PUT", path: "/v1/mobile/goals")!) as! [String: Any]
         check(raceBody["expectedRevision"] as? Int == 12 && raceBody["weekPlan"] == nil, "race save carries editor revision without replacing the plan")
+        check(raceBody["easyDurationFloorFraction"] == nil, "race save touches only the race target")
         raceHandler(savedRaceJSON, putStatus: 409)
         let raceConflict = await raceModel.saveRaceTarget(nil, expectedRevision: 12)
         check(!raceConflict && raceModel.goals?.raceTarget == race, "race conflict preserves persisted target and reports failure")
@@ -370,6 +370,31 @@ final class RequestLog: @unchecked Sendable {
         let clearBody = try JSONSerialization.jsonObject(with: raceRequests.lastBody(method: "PUT", path: "/v1/mobile/goals")!) as! [String: Any]
         check(clearBody["raceTarget"] is NSNull, "real clear request sends explicit JSON null")
 
+        do {
+            let planModel = NativeAppModel(session: ServerSession(), api: api)
+            let storedPlanJSON = savedRaceJSON
+            raceHandler(storedPlanJSON)
+            await planModel.refreshAll(requestHandshake: false)
+            let updatedPlanJSON = storedPlanJSON.replacingOccurrences(of: "\"revision\":13", with: "\"revision\":14")
+                .replacingOccurrences(of: "\"easyDurationFloorFraction\":0.7", with: "\"easyDurationFloorFraction\":0.85")
+                .replacingOccurrences(of: "\"qualitySessionCap\":2", with: "\"qualitySessionCap\":3")
+            raceHandler(updatedPlanJSON)
+            let planSaved = await planModel.saveGoals(
+                expectedRevision: 13,
+                easyDurationFloorFraction: 0.85,
+                qualitySessionCap: 3,
+                weekPlan: []
+            )
+            let planBody = try JSONSerialization.jsonObject(with: raceRequests.lastBody(method: "PUT", path: "/v1/mobile/goals")!) as! [String: Any]
+            check(planSaved, "saving training settings succeeds")
+            check(planBody["expectedRevision"] as? Int == 13, "plan save keeps revision conflict protection")
+            check(planBody["easyDurationFloorFraction"] as? Double == 0.85 && planBody["qualitySessionCap"] as? Int == 3,
+                  "remaining weekly settings are still editable")
+            check((planBody["raceTarget"] as? [String: Any])?["targetPaceSecondsPerKm"] as? Double == 330,
+                  "plan save preserves the stored race target")
+            check(planBody["weekPlan"] as? [String] == [], "plan save still submits the daily plan")
+        }
+
         let previewBase = try JSONSerialization.jsonObject(with: Data(generationJSON.utf8)) as! [String: Any]
         var previewObject = previewBase
         previewObject["candidateId"] = "preview-test"
@@ -379,6 +404,33 @@ final class RequestLog: @unchecked Sendable {
         previewObject["windowStart"] = "2026-09-11"
         previewObject["windowEnd"] = "2026-09-17"
         let previewJSON = String(data: try JSONSerialization.data(withJSONObject: previewObject), encoding: .utf8)!
+
+        do {
+            let oldGoals = try JSONDecoder().decode(MobileGoalsResponse.self, from: Data(goalsJSON.utf8))
+            check(oldGoals.weekPlanReplanRequired != true, "old API and cache payloads default to no pending migration")
+            let pendingJSON = goalsJSON
+                .replacingOccurrences(of: "\"weekPlanAudit\":null", with: "\"weekPlanAudit\":null,\"weekPlanReplanRequired\":true")
+                .replacingOccurrences(of: "\"weekPlan\":[]", with: "\"weekPlan\":[{\"localDate\":\"2026-09-18\",\"kind\":\"easy\",\"distanceKm\":8}]")
+            let pendingModel = NativeAppModel(session: ServerSession(), api: api)
+            raceHandler(pendingJSON)
+            await pendingModel.refreshAll(requestHandshake: false)
+            check(pendingModel.goals?.weekPlanReplanRequired == true, "pending retirement loads from the API")
+            let cached = try JSONDecoder().decode(MobileGoalsResponse.self, from: JSONEncoder().encode(pendingModel.goals!))
+            check(cached.weekPlanReplanRequired == true, "pending retirement survives cache encoding and decoding")
+            raceHandler(pendingJSON.replacingOccurrences(of: "\"revision\":12", with: "\"revision\":13"))
+            let saved = await pendingModel.saveGoals(expectedRevision: 12, easyDurationFloorFraction: 0.85,
+                                                     qualitySessionCap: 1, weekPlan: cached.weekPlan)
+            let body = try JSONSerialization.jsonObject(with: raceRequests.lastBody(method: "PUT", path: "/v1/mobile/goals")!) as! [String: Any]
+            check(saved && pendingModel.goals?.weekPlanReplanRequired == true, "saving settings cannot clear pending confirmation")
+            check(body["weekPlan"] == nil, "pending settings save omits even a nonempty daily plan")
+            check(body["weekPlanReplanRequired"] == nil, "clients cannot write the server-owned migration state")
+            check(body["easyDurationFloorFraction"] as? Double == 0.85 && body["qualitySessionCap"] as? Int == 1,
+                  "training settings remain writable while a rule preview needs confirmation")
+            StubProtocol.handler = { _ in (503, "{}", 0) }
+            await pendingModel.refreshAll(requestHandshake: false)
+            check(pendingModel.isOffline && pendingModel.goals?.weekPlanReplanRequired == true,
+                  "an offline cache does not silently remove the confirmation gate")
+        }
 
         // Regression: an older full refresh must not undo an acknowledged save.
         do {
@@ -430,8 +482,9 @@ final class RequestLog: @unchecked Sendable {
 
         let generated = await model.regenerateWeeklyPlan()
         check(generated, "a plan generation reports success")
-        check(model.planPreview?.audit.generatedBy == "llm", "preview exposes generation provenance")
-        check(model.planPreview?.audit.model == "deepseek:deepseek-chat", "preview names the generating model")
+        check(model.planPreview?.audit.generatedBy == "heuristic", "preview exposes rule coach provenance")
+        check(model.planPreview?.audit.model == nil && model.planPreview?.audit.promptVersion == nil,
+              "rule coach previews have no language model or prompt metadata")
         let generationBody = generationRequests.lastBody(method: "POST", path: "/v1/mobile/workout-plan/preview")
         let generationObject = generationBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         check(generationObject?["expectedRevision"] as? Int == 12, "a generated plan posts the loaded goals revision")
@@ -610,33 +663,37 @@ final class RequestLog: @unchecked Sendable {
         _ = await newLock.value
         check(!model.isLockingSession, "the owning lock request clears its spinner")
 
-        let fallbackJSON = """
+        let coachJSON = """
         {"generatedAt":"2026-09-11T00:30:00.000Z","revision":9,
          "audit":{"generatedBy":"heuristic","model":null,"promptVersion":null,"generatedAt":"2026-09-11T00:30:00.000Z"},
          "days":[{"localDate":"2026-09-11","kind":"easy","distanceKm":8,"structure":null,"reason":null}],
-         "warnings":["未配置 RAI_LLM_API_KEY，已回退到启发式课表"]}
+         "warnings":["已收紧本周跑量"]}
         """
-        if let fallback = try? JSONDecoder().decode(MobileWeeklyPlanGenerationResponse.self, from: Data(fallbackJSON.utf8)) {
-            let summary = NativeAppModel.generationSummary(fallback)
-            check(summary.contains("保守模板"), "a fallback plan is labelled as a fallback")
-            check(summary.contains("RAI_LLM_API_KEY"), "a fallback plan explains why it fell back")
+        if let coach = try? JSONDecoder().decode(MobileWeeklyPlanGenerationResponse.self, from: Data(coachJSON.utf8)) {
+            let summary = NativeAppModel.generationSummary(coach)
+            check(summary.contains("规则教练生成"), "a coach plan is labelled as rule generation")
+            check(summary.contains("已收紧本周跑量"), "rule adjustments are still surfaced")
+            check(!summary.contains("回退") && !summary.contains("保守模板"), "normal rule generation is never labelled as failure or fallback")
         } else {
-            check(false, "a fallback generation payload decodes")
+            check(false, "a rule coach generation payload decodes")
         }
+        check(NativeAppModel.planSourceName("llm") == "历史模型课表", "legacy plans are not relabelled as rule generation")
+        check(NativeAppModel.planSourceName("manual") == "手工计划", "manual provenance stays distinct")
+        check(NativeAppModel.planSourceName("future-source") == "来源未知", "unknown provenance does not pretend to be a rule plan")
 
         // The server prepends the overwrite note, so a one-warning display would
         // hide that stored work was replaced.
         let overwrittenJSON = """
         {"generatedAt":"2026-09-11T00:30:00.000Z","revision":10,
-         "audit":{"generatedBy":"llm","model":"deepseek:deepseek-chat","promptVersion":"weekly-plan-v1","generatedAt":"2026-09-11T00:30:00.000Z"},
+         "audit":{"generatedBy":"heuristic","model":null,"promptVersion":null,"generatedAt":"2026-09-11T00:30:00.000Z"},
          "days":[{"localDate":"2026-09-11","kind":"interval","distanceKm":9,"structure":null,"reason":null}],
-         "warnings":["已覆盖 2 天既有课表（2026-09-12、2026-09-13）：原有分段与说明不再保留","未配置 RAI_LLM_API_KEY，已回退到启发式课表","第三条不该出现"]}
+         "warnings":["已覆盖 2 天既有课表（2026-09-12、2026-09-13）：原有分段与说明不再保留","自然周剩余预算已用完","第三条不该出现"]}
         """
         if let overwritten = try? JSONDecoder().decode(MobileWeeklyPlanGenerationResponse.self, from: Data(overwrittenJSON.utf8)) {
             let summary = NativeAppModel.generationSummary(overwritten)
-            check(summary.contains("deepseek:deepseek-chat"), "a model plan names the model")
+            check(summary.contains("规则教练生成"), "a rewritten plan still names its rule coach")
             check(summary.contains("已覆盖 2 天既有课表"), "an overwrite of stored work is surfaced")
-            check(summary.contains("RAI_LLM_API_KEY"), "the reason for a fallback is still surfaced")
+            check(summary.contains("自然周剩余预算已用完"), "the rule adjustment is still surfaced")
             check(!summary.contains("第三条"), "the summary stays short instead of listing every warning")
         } else {
             check(false, "an overwrite generation payload decodes")
@@ -697,25 +754,12 @@ final class RequestLog: @unchecked Sendable {
         check(NativeGoalWeekDraft.parsedDistance("") == nil, "an empty field means unset, not zero")
         check(NativeGoalWeekDraft.parsedDistance("abc") == nil, "a non-numeric distance does not parse")
         check(
-            NativeGoalWeekDraft.weeklyDistanceIsValid("1") && NativeGoalWeekDraft.weeklyDistanceIsValid("500"),
-            "the weekly bounds are inclusive"
-        )
-        check(
-            !NativeGoalWeekDraft.weeklyDistanceIsValid("0.9") && !NativeGoalWeekDraft.weeklyDistanceIsValid("500.1"),
-            "the weekly bounds reject just outside"
-        )
-        check(!NativeGoalWeekDraft.weeklyDistanceIsValid(""), "an empty weekly target is invalid")
-        check(
             NativeGoalWeekDraft.dayDistanceIsValid("") && NativeGoalWeekDraft.dayDistanceIsValid("80"),
             "a day may be unset or sit exactly on the cap"
         )
         check(
             !NativeGoalWeekDraft.dayDistanceIsValid("80.1") && !NativeGoalWeekDraft.dayDistanceIsValid("-1"),
             "a day outside 0–80 is rejected"
-        )
-        check(
-            NativeGoalWeekDraft.maxDayDistanceKm < NativeGoalWeekDraft.maxWeeklyDistanceKm,
-            "one day can never exceed the whole week"
         )
 
         func planStructure(_ meters: Double) -> MobileSessionStructure {
@@ -849,6 +893,116 @@ final class RequestLog: @unchecked Sendable {
               "The two states a reader must never confuse stay distinguishable")
         check(nativeEnvironmentStatus("brand_new_status") == "环境数据不足，未修正",
               "An unknown status falls to the safe side, never to 'not needed'")
+
+        let coachPlanJSON = """
+        {"id":"coach-fixture","startedOn":"2026-09-16","status":"active","pausedOn":null,"endedOn":null,
+         "adaptationKey":"facts","adaptedAt":"2026-09-16T01:00:00Z","goal":"fitness","raceDate":null,
+         "raceDistanceKm":null,"targetTimeSeconds":null,"runningDays":[1,2,4,6,7],"longRunDays":[7],
+         "targetType":"heart_rate","strengthTraining":true,"durationWeeks":12}
+        """
+        let decodedCoach = try JSONDecoder().decode(MobileRunCoachPlan.self, from: Data(coachPlanJSON.utf8))
+        check(decodedCoach.config.longRunDays == [7] && decodedCoach.config.targetType == "heart_rate", "coach DTO preserves training preferences")
+        let roundTrippedCoach = try JSONDecoder().decode(MobileRunCoachPlan.self, from: JSONEncoder().encode(decodedCoach))
+        check(roundTrippedCoach == decodedCoach,
+              "coach plan survives the offline cache round trip")
+        let runCoachJSON = """
+        {"revision":2,"plan":\(coachPlanJSON),"phase":null,"daysToRace":null,"elapsedWeeks":0,"weeklyCapacityKm":5,"notices":[],"phases":[],"strength":[]}
+        """
+        let coachGoals = { (revision: Int) in """
+        {"revision":\(revision),"easyDurationFloorFraction":0.8,"qualitySessionCap":2,"raceTarget":null,
+         "weekPlan":[],"lockedSession":null,"weekPlanAudit":null,"weekPlanReplanRequired":false,
+         "runCoach":\(revision == 1 ? "null" : coachPlanJSON),"updatedAt":"2026-09-16T01:00:00Z"}
+        """ }
+        let coachSession = ServerSession()
+        let coachModel = NativeAppModel(session: coachSession, api: api)
+        let coachLog = RequestLog()
+        StubProtocol.handler = { request in
+            coachLog.record(request)
+            if request.url!.path == "/v1/mobile/run-coach" { return (200, runCoachJSON, 0) }
+            if request.url!.path == "/v1/mobile/goals" {
+                return (200, coachGoals(coachLog.count(method: "POST", path: "/v1/mobile/run-coach") == 0 ? 1 : 2), 0)
+            }
+            return (503, "{}", 0)
+        }
+        _ = await coachModel.refreshPlanState()
+        let coachSaved = await coachModel.changeRunCoach(action: "start", config: decodedCoach.config)
+        check(coachSaved, "coach acknowledgement remains saved even when dependent reads fail")
+        check(coachModel.runCoach?.revision == 2 && coachModel.goals?.runCoach?.id == "coach-fixture", "coach write refreshes the matching goals revision")
+        check(coachModel.runCoachError?.contains("已保存") == true, "a partial refresh is not reported as a failed coach save")
+        let coachBody = try JSONSerialization.jsonObject(with: coachLog.lastBody(method: "POST", path: "/v1/mobile/run-coach")!) as! [String: Any]
+        check(coachBody["expectedRevision"] as? Int == 1 && coachBody["action"] as? String == "start", "coach commands carry the editor's CAS revision")
+        let encodedConfig = coachBody["config"] as! [String: Any]
+        check(encodedConfig["raceDate"] is NSNull && encodedConfig["raceDistanceKm"] is NSNull && encodedConfig["targetTimeSeconds"] is NSNull,
+              "fitness commands explicitly encode nullable fields required by the API schema")
+        check(!coachModel.isPlanBusy, "coach mutation always releases the shared plan gate")
+        StubProtocol.handler = { request in
+            if request.url!.path == "/v1/mobile/run-coach" { return (200, runCoachJSON, 0.15) }
+            return (503, "{}", 0)
+        }
+        let oldCoachWrite = Task { await coachModel.changeRunCoach(action: "pause") }
+        try await Task.sleep(for: .milliseconds(25))
+        coachSession.serverURL = URL(string: "https://new-coach-scope.invalid")
+        let obsoleteCoachSaved = await oldCoachWrite.value
+        check(!obsoleteCoachSaved, "a coach reply from the old server cannot publish into the new scope")
+        check(!coachModel.isUpdatingRunCoach, "obsolete coach requests release only their own spinner")
+
+        let partialCoachSession = ServerSession()
+        let partialCoachLog = RequestLog()
+        let partialCoachModel = NativeAppModel(session: partialCoachSession, api: api)
+        StubProtocol.handler = { request in
+            partialCoachLog.record(request)
+            if request.url!.path == "/v1/mobile/run-coach" { return (200, runCoachJSON, 0) }
+            if request.url!.path == "/v1/mobile/goals" && partialCoachLog.count(method: "POST", path: "/v1/mobile/run-coach") == 0 {
+                return (200, coachGoals(1), 0)
+            }
+            return (503, "{}", 0)
+        }
+        _ = await partialCoachModel.refreshPlanState()
+        let partiallyRefreshedCoachSaved = await partialCoachModel.changeRunCoach(action: "start", config: decodedCoach.config)
+        check(partiallyRefreshedCoachSaved && partialCoachModel.currentPlanRevision == 2 && partialCoachModel.goals?.revision == 1,
+              "the coach acknowledgement establishes the display revision even when every dependent read fails")
+        StubProtocol.handler = { _ in (503, "{}", 0) }
+        let restartedCoachModel = NativeAppModel(session: partialCoachSession, api: api)
+        await restartedCoachModel.bootstrap()
+        check(restartedCoachModel.isOffline && restartedCoachModel.runCoach?.revision == 2 && restartedCoachModel.currentPlanRevision == 2,
+              "a saved coach acknowledgement survives an offline restart independently of the old goals cache")
+        check(restartedCoachModel.goals == nil && restartedCoachModel.workoutPlan == nil,
+              "older goal and workout caches cannot masquerade as the acknowledged coach revision")
+
+        let pausedCoachPlanJSON = coachPlanJSON.replacingOccurrences(of: "\"status\":\"active\"", with: "\"status\":\"paused\"")
+        let pausedCoachJSON = runCoachJSON.replacingOccurrences(of: coachPlanJSON, with: pausedCoachPlanJSON)
+        let pausedGoalsJSON = coachGoals(2).replacingOccurrences(of: coachPlanJSON, with: pausedCoachPlanJSON)
+        let currentCoachPlanJSON = planJSON.replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":2")
+        let pausedRetryLog = RequestLog()
+        StubProtocol.handler = { request in
+            pausedRetryLog.record(request)
+            if request.url!.path == "/v1/mobile/run-coach" { return (200, pausedCoachJSON, 0) }
+            if request.url!.path == "/v1/mobile/goals" { return (200, pausedGoalsJSON, 0) }
+            if request.url!.path == "/v1/mobile/today" { return (200, todayJSON, 0) }
+            if request.url!.path == "/v1/mobile/workout-plan" { return (200, currentCoachPlanJSON, 0) }
+            return (503, "{}", 0)
+        }
+        let pausedRetrySucceeded = await restartedCoachModel.refreshRunCoach()
+        check(pausedRetrySucceeded && !restartedCoachModel.isOffline && restartedCoachModel.runCoach?.plan?.status == "paused",
+              "an offline paused-coach retry restores connectivity and the acknowledged state")
+        check(restartedCoachModel.goals?.revision == 2 && restartedCoachModel.workoutPlan?.planRevision == 2 && restartedCoachModel.runCoachError == nil,
+              "paused-coach retry repairs dependent reads and clears the partial-refresh error")
+        check(pausedRetryLog.count(method: "POST", path: "/v1/mobile/run-coach") == 0,
+              "paused-coach retry remains read-only and does not resume the plan")
+
+        let newerPausedCoachJSON = pausedCoachJSON.replacingOccurrences(of: "\"revision\":2", with: "\"revision\":3")
+        StubProtocol.handler = { request in
+            if request.url!.path == "/v1/mobile/run-coach" { return (200, newerPausedCoachJSON, 0) }
+            if request.url!.path == "/v1/mobile/goals" { return (200, pausedGoalsJSON, 0) }
+            if request.url!.path == "/v1/mobile/today" { return (200, todayJSON, 0) }
+            if request.url!.path == "/v1/mobile/workout-plan" { return (200, currentCoachPlanJSON, 0) }
+            return (503, "{}", 0)
+        }
+        let staleCoachRetrySucceeded = await restartedCoachModel.refreshRunCoach()
+        check(!staleCoachRetrySucceeded && restartedCoachModel.currentPlanRevision == 3 && restartedCoachModel.runCoach?.revision == 3,
+              "a newer coach read cannot be undone by older dependent snapshots")
+        check(restartedCoachModel.runCoachError?.contains("未刷新") == true && !restartedCoachModel.isTodayAvailable,
+              "stale dependent reads keep the retry error visible and cannot enable today's training")
 
         print("All model regression checks passed.")
     }

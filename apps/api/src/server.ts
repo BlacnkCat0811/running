@@ -62,7 +62,7 @@ import {
   PrivacyZoneValidationError,
   type PerformanceEntryDistance
 } from "@rai/storage-sqlite";
-import { MobileGoalsRevisionConflictError, MobileGoalsStore, type PlanMergeOptions } from "./mobile-goals.js";
+import { MobileGoalsRevisionConflictError, MobileGoalsStore, WeeklyPlanConfirmationRequiredError, type PlanMergeOptions } from "./mobile-goals.js";
 import { mobileLockRejection, mobileRefreshOutcome } from "./mobile-sync.js";
 import { MutationConflictError, MutationCoordinator } from "./mutation-coordinator.js";
 import { DatabaseNotReadyError, ReadStoreManager } from "./read-store-manager.js";
@@ -100,9 +100,11 @@ import {
 import { TaskAdmissionScheduler } from "./task-admission.js";
 import { needsFullTrainingZoneBackfill, readTrainingZoneWorkoutSetCounts } from "./training-zone-backfill.js";
 import { TryAcquireGate } from "./try-acquire-gate.js";
-import { generateWeeklyPlan, mergePlanWindow, overwriteWarning, weeklyPlanDates } from "./weekly-plan-service.js";
+import { generateWeeklyPlan, mergePlanWindow, overwriteWarning, shouldGenerateWeeklyPlan, weeklyPlanDates } from "./weekly-plan-service.js";
 import { WeeklyPlanPreviews, PlanPreviewError } from "./weekly-plan-preview.js";
 import { validateManualPlan, ManualPlanPolicyError } from "./manual-plan-policy.js";
+import { registerRunCoachRoutes } from "./run-coach.js";
+import { weeklyCapacity } from "./weekly-capacity.js";
 import {
   ImportWorker,
   PredictionModelWorker,
@@ -275,6 +277,7 @@ const publicReadRoutes = new Set([
  * Read routes that keep requiring the token. See the comment above.
  */
 const tokenRequiredReadRoutes = new Set([
+  "/v1/mobile/run-coach",
   "/v1/exports/workout-summary",
   // 分享卡带轨迹几何（哪怕已在服务端裁剪），隐私区本身更是家/公司坐标：两者都不进匿名读。
   "/v1/workouts/:id/share-card",
@@ -306,6 +309,7 @@ const metadataOnlyMutationRoutes = new Set([
   "/v1/import-sources/discover",
   "/v1/imports/uploads",
   "/v1/mobile/goals",
+  "/v1/mobile/run-coach",
   "/v1/mobile/lock",
   "/v1/mobile/workout-plan/generate",
   "/v1/mobile/workout-plan/preview",
@@ -419,6 +423,7 @@ await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedResto
 datasetEpoch = readDatasetEpoch(databasePath, configuredDatasetEpoch);
 const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
+mobileGoalsStore.retireLegacyModelPlan(mobileLocalDate());
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
 const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error), taskAdmission.owner("recompute"));
 const importSources = createImportSourceManager(runtimeRoot, projectRoot, maxImportZipBytes);
@@ -825,11 +830,8 @@ app.addHook("onClose", async () => {
  */
 async function ensureWeeklyPlan(): Promise<void> {
   const today = mobileLocalDate();
-  const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
-  if (weekday !== 1) return;
-  if (weeklyPlanDates(today).length === 0) return;
   const goals = mobileGoalsStore.read();
-  if (goals.weekPlan.some((day) => day.localDate === today)) return;
+  if (!shouldGenerateWeeklyPlan(today, goals)) return;
   await runWeeklyPlanGeneration(goals.revision);
 }
 
@@ -1210,42 +1212,45 @@ app.get("/v1/training-zones/current", async (_request, reply) => {
 app.get("/v1/mobile/today", async () => {
   // Goals live in a plain file and do not depend on database readiness.
   const goals = mobileGoalsStore.read();
-  return withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, goals, mobileGoalsStore.planHistory(200)));
+  return withReadStore((store) => store.mobileToday(goals, mobileGoalsStore.planHistory(200)));
 });
+
+registerRunCoachRoutes({ app, store: mobileGoalsStore,
+  inputs: goals => withReadStore(store => store.mobileWeeklyPlanInputs(goals, mobileGoalsStore.planHistory(200))) });
 
 // Executable week handed to the WorkoutKit bridge. Read-only: it never mutates
 // goals, so it is deliberately absent from the mutation route registries below.
 app.get("/v1/mobile/workout-plan", async () => {
   const goals = mobileGoalsStore.read();
-  return withReadStore((store) => store.mobileWorkoutPlan(goals.weeklyDistanceKm, goals));
+  return withReadStore((store) => store.mobileWorkoutPlan(goals));
 });
 
-/**
- * Generates the next week of training and persists it into goals.weekPlan.
- * A generation that cannot be validated falls back to the heuristic template,
- * so this endpoint never leaves the week without a plan.
- */
+/** Legacy and Monday-only deterministic generation, without bypassing migration confirmation. */
 async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<MobileWeeklyPlanGenerationResponse> {
   const generationEpoch = datasetEpoch;
   const goals = mobileGoalsStore.read();
+  if (goals.runCoach?.status === "active" || goals.runCoach?.status === "paused") throw new PlanPreviewError("自适应教练管理当前课表，请在教练计划中调整偏好。");
   if (expectedRevision != null && expectedRevision !== goals.revision) {
     throw new MobileGoalsRevisionConflictError(goals.revision);
   }
-  const inputs = withReadStore((store) => store.mobileWeeklyPlanInputs(goals.weeklyDistanceKm, goals, mobileGoalsStore.planHistory(200)));
+  if (goals.weekPlanReplanRequired) throw new WeeklyPlanConfirmationRequiredError();
+  const generationGoals = { ...goals, runCoach: null };
+  const inputs = withReadStore((store) => store.mobileWeeklyPlanInputs(generationGoals, mobileGoalsStore.planHistory(200)));
   const result = await generateWeeklyPlan({
     today: inputs.today,
-    goals,
+    goals: generationGoals,
     prescription: inputs.prescription,
-    // Caps the generated week at last week's volume + 30%, so a model that
-    // ignores the prompt cannot prescribe a ramp the runner has not earned.
+    // Both numbers come from the read store, so a generated week and the today
+    // payload scale the same bands and obey the same ceiling.
+    weeklyVolumeBaselineKm: inputs.weeklyVolumeBaselineKm,
+    recentWeeklyKm: inputs.recentWeeklyKm,
     previousWeekDistanceKm: inputs.previousWeekDistanceKm
   });
   if (restoringDatabase || generationEpoch !== datasetEpoch) throw new PlanPreviewError("数据集已在生成期间更换，请重新生成；原课表未修改。");
-  // The legacy/automatic path also crosses an async model call. A goal CAS alone
-  // cannot detect new imported training or changed zones during generation.
+  // A goal CAS alone cannot detect imported training or changed zones.
   const latestGoals = mobileGoalsStore.read();
   if (latestGoals.revision !== goals.revision) throw new MobileGoalsRevisionConflictError(latestGoals.revision);
-  const latestInputs = withReadStore(store => store.mobileWeeklyPlanInputs(latestGoals.weeklyDistanceKm, latestGoals));
+  const latestInputs = withReadStore(store => store.mobileWeeklyPlanInputs(latestGoals));
   if (latestInputs.today.recommendationRevision !== inputs.today.recommendationRevision ||
       JSON.stringify(latestInputs.prescription) !== JSON.stringify(inputs.prescription) ||
       latestInputs.previousWeekDistanceKm !== inputs.previousWeekDistanceKm ||
@@ -1264,20 +1269,18 @@ async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<Mobil
       warnings: [...result.warnings, "未能算出有效的日期窗口，已保留既有课表"]
     };
   }
-  // Prepended, not appended: this warns that stored work is being replaced, and
-  // the model-validation notes can fill the list ahead of it otherwise.
+  // Replacement warnings take precedence over the coach's adjustment notes.
   const overwrite = overwriteWarning(goals.weekPlan, result.days);
   const warnings = overwrite ? [overwrite, ...result.warnings] : result.warnings;
   const written = mobileGoalsStore.write(
     {
       expectedRevision: goals.revision,
-      weeklyDistanceKm: goals.weeklyDistanceKm,
       weekPlan: mergePlanWindow(goals.weekPlan, result.days, inputs.today.today.localDate),
       weekPlanAudit: result.audit
     },
     // The generator already measured these days against this same prescription;
     // re-measuring is idempotent and keeps every write on one path.
-    { prescription: inputs.prescription }
+    { prescription: inputs.prescription, ...(goals.runCoach?.status === "ended" ? { runCoach: null } : {}) }
   );
   return {
     generatedAt: result.audit.generatedAt ?? new Date().toISOString(),
@@ -1293,7 +1296,8 @@ const weeklyPlanPreviews = new WeeklyPlanPreviews();
 
 function weeklyPlanSnapshot() {
   const goals = mobileGoalsStore.read(planPrescription());
-  const inputs = withReadStore(store => store.mobileWeeklyPlanInputs(goals.weeklyDistanceKm, goals, mobileGoalsStore.planHistory(200)));
+  const effectiveGoals = goals.runCoach?.status === "ended" ? { ...goals, runCoach: null } : goals;
+  const inputs = withReadStore(store => store.mobileWeeklyPlanInputs(effectiveGoals, mobileGoalsStore.planHistory(200)));
   const fingerprint = createHash("sha256").update(JSON.stringify({
     scope: [serverId, athleteId, datasetEpoch], goals,
     recommendation: inputs.today.recommendationRevision,
@@ -1311,13 +1315,16 @@ app.post<{ Body: { expectedRevision: number } }>("/v1/mobile/workout-plan/previe
     try {
       const generationEpoch = datasetEpoch;
       const { goals, inputs, fingerprint } = weeklyPlanSnapshot();
+      if (goals.runCoach?.status === "active" || goals.runCoach?.status === "paused") throw new PlanPreviewError("自适应教练不支持手工改期或重排，请调整跑步日偏好。");
       if (request.body?.expectedRevision !== goals.revision) return reply.code(409).send({ code: "mobile_goals_revision_conflict", message: "目标版本已变化，请刷新后生成" });
-      const result = await generateWeeklyPlan({ today: inputs.today, goals, prescription: inputs.prescription, previousWeekDistanceKm: inputs.previousWeekDistanceKm });
+      const result = await generateWeeklyPlan({ today: inputs.today, goals, prescription: inputs.prescription, weeklyVolumeBaselineKm: inputs.weeklyVolumeBaselineKm, recentWeeklyKm: inputs.recentWeeklyKm, previousWeekDistanceKm: inputs.previousWeekDistanceKm });
       if (restoringDatabase || generationEpoch !== datasetEpoch) throw new PlanPreviewError("数据集已在预览期间更换，请重新生成；原课表未修改。");
       if (!result.days.length) return reply.code(422).send({ message: "未生成有效课表；原课表保持不变。" });
       // Finished and locked dates remain immutable even if the generator proposes them.
       const dates = weeklyPlanDates(inputs.today.today.localDate);
-      const days = result.days.filter(day => day.localDate !== inputs.today.today.localDate || (!inputs.today.lock.present && inputs.today.today.workoutCount === 0));
+      const days = result.days.filter(day => day.localDate !== inputs.today.today.localDate ||
+        (!goals.weekPlanReplanRequired && goals.weekPlanPreservedDate !== inputs.today.today.localDate &&
+          !inputs.today.lock.present && inputs.today.today.workoutCount === 0));
       const replacedDates = goals.weekPlan.filter(old => {
         const next = days.find(day => day.localDate === old.localDate);
         return next && JSON.stringify([old.kind, old.distanceKm, old.structure, old.reason]) !== JSON.stringify([next.kind, next.distanceKm, next.structure, next.reason]);
@@ -1336,9 +1343,10 @@ app.post<{ Body: { candidateId: string; expectedRevision: number } }>("/v1/mobil
   try {
     const { goals, inputs, fingerprint } = weeklyPlanSnapshot();
     return weeklyPlanPreviews.confirm(request.body.candidateId, request.body.expectedRevision, fingerprint, preview => {
-      const written = mobileGoalsStore.write({ expectedRevision: preview.revision, weeklyDistanceKm: goals.weeklyDistanceKm,
+      const written = mobileGoalsStore.write({ expectedRevision: preview.revision,
         weekPlan: mergePlanWindow(goals.weekPlan, preview.days, inputs.today.today.localDate),
-        weekPlanAudit: preview.audit }, { prescription: inputs.prescription });
+        weekPlanAudit: preview.audit }, { prescription: inputs.prescription, confirmCoachPlan: true,
+        ...(goals.runCoach?.status === "ended" ? { runCoach: null } : {}) });
       return { generatedAt: preview.generatedAt, revision: written.revision, audit: preview.audit, days: preview.days, warnings: preview.warnings };
     });
   } catch (error) {
@@ -1363,6 +1371,7 @@ app.post<{ Body: { expectedRevision?: number } }>(
       reply.header("Deprecation", "@1790553600");
       return await runWeeklyPlanGeneration(request.body?.expectedRevision);
     } catch (error) {
+      if (error instanceof WeeklyPlanConfirmationRequiredError) return reply.code(409).send({ code: error.code, message: error.message });
       if (error instanceof PlanPreviewError) return reply.code(409).send({ code: error.code, message: error.message });
       if (error instanceof MobileGoalsRevisionConflictError) {
         return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
@@ -1406,13 +1415,33 @@ app.put<{ Body: UpdateMobileGoalsInput }>(
       // there are no zones and no plan views in that state, and `null` would
       // silently substitute the default paces for the runner's own.
       const options = planPrescription();
+      const managedGoals = mobileGoalsStore.read(options);
+      if (managedGoals.runCoach && managedGoals.runCoach.status !== "ended" &&
+          (request.body.weekPlan !== undefined || request.body.raceTarget !== undefined)) {
+        return reply.code(409).send({ code: "run_coach_managed", message: "当前目标和课表由自适应教练管理，请在教练计划中修改。" });
+      }
+      if (managedGoals.runCoach?.status === "ended" && request.body.weekPlan !== undefined) options.runCoach = null;
       if (request.body.weekPlan !== undefined && databaseIsReady()) {
         const current = mobileGoalsStore.read(options);
-        const inputs = withReadStore(store => store.mobileWeeklyPlanInputs(current.weeklyDistanceKm, current));
-        options.validate = candidate => validateManualPlan(candidate, inputs.today, inputs.prescription, inputs.previousWeekDistanceKm, current);
+        const inputs = withReadStore(store => store.mobileWeeklyPlanInputs(options.runCoach === null ? { ...current, runCoach: null } : current));
+        options.validate = candidate => validateManualPlan({
+          goals: candidate,
+          today: inputs.today,
+          prescription: inputs.prescription,
+          // The same write may change the race target; reserve existing facts
+          // and locks, but derive the capacity from the candidate configuration.
+          weeklyVolumeBaselineKm: weeklyCapacity({
+            today: inputs.today.today.localDate, raceTarget: candidate.raceTarget, runCoach: candidate.runCoach ?? null,
+            recentWeeklyKm: inputs.recentWeeklyKm, previousWeekDistanceKm: inputs.previousWeekDistanceKm
+          }).baselineKm,
+          recentWeeklyKm: inputs.recentWeeklyKm,
+          previousWeekDistanceKm: inputs.previousWeekDistanceKm,
+          previous: current
+        });
       }
       return mobileGoalsStore.write(request.body, options);
     } catch (error) {
+      if (error instanceof WeeklyPlanConfirmationRequiredError) return reply.code(409).send({ code: error.code, message: error.message });
       if (error instanceof ManualPlanPolicyError) return reply.code(422).send({ code: error.code, message: error.message });
       if (error instanceof MobileGoalsRevisionConflictError) {
         return reply.code(409).send({ code: error.code, message: error.message, currentRevision: error.currentRevision });
@@ -1428,7 +1457,7 @@ app.post<{ Body: LockMobileSessionInput }>(
   async (request, reply) => {
     const goals = mobileGoalsStore.read();
     const ignoreLock = request.body.action === "relock";
-    const snapshot = withReadStore((store) => store.mobileToday(goals.weeklyDistanceKm, goals));
+    const snapshot = withReadStore((store) => store.mobileToday(goals));
     const rejection = mobileLockRejection({
       syncStatus: snapshot.sync.status,
       recommendationRevision: snapshot.recommendationRevision,

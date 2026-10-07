@@ -2,6 +2,10 @@
 import SwiftUI
 
 struct TechPlanView: View {
+    var body: some View { TechRunCoachView() }
+}
+
+struct TechManualPlanView: View {
     @State private var editing = false
     @State private var showingLock = false
     @State private var raceEditor: RaceGoalEditorContext?
@@ -9,7 +13,6 @@ struct TechPlanView: View {
     @State private var planSyncMessage: String?
     @State private var selectedDay: MobileWeekPlanDay?
     @Environment(NativeAppModel.self) private var native
-    @State private var weeklyText = "30"
     @State private var easyFloor = 0.8
     @State private var qualityCap = 2
     @State private var weekPlan: [MobileGoalsPlanItem] = []
@@ -21,15 +24,9 @@ struct TechPlanView: View {
     @State private var discardDraft = false
     private var draftIsStale: Bool { draftBase?.revision != native.goals?.revision }
 
-    // The bounds, the parsing rule and the "clear a stale structure" rule are
-    // shared with the pixel skin through `NativeGoalWeekDraft`; none of them is a
-    // skin decision, and keeping a copy per skin is how the 2026-09-13 fix ended
-    // up in one skin only.
-    private var weeklyValue: Double? { NativeGoalWeekDraft.parsedDistance(weeklyText) }
     private var areDistancesValid: Bool {
         NativeGoalWeekDraft.distancesAreValid(distanceDrafts, for: weekPlan)
     }
-    private var isWeeklyValid: Bool { NativeGoalWeekDraft.weeklyDistanceIsValid(weeklyText) }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -40,15 +37,20 @@ struct TechPlanView: View {
                         TechPanel(tint: TechColor.yellow) {
                             Text("计划已更新，你的未保存修改仍保留。请查看最新计划后再编辑。")
                             if let latest = native.goals {
-                                Text("最新：\(nativeKilometers(latest.weeklyDistanceKm)) / 周，质量课 ≤\(latest.qualitySessionCap)；你的草稿：\(weeklyText) km / 周，质量课 ≤\(qualityCap)。")
+                                Text("最新：轻松训练时长 ≥\(nativePercent(latest.easyDurationFloorFraction))，质量课 ≤\(latest.qualitySessionCap)；你的草稿：轻松训练时长 ≥\(nativePercent(easyFloor))，质量课 ≤\(qualityCap)。")
                                     .font(.caption)
                             }
                             Button("放弃草稿并加载最新计划") { discardDraft = true }
                         }
                     }
                     goalEditor
-                    weekPlanPanel
-                TechPrimaryButton(title: "保存计划", systemName: "checkmark", isBusy: isSaving, isDisabled: isSaving || native.isPlanBusy || draftIsStale || !isWeeklyValid || !areDistancesValid || native.isOffline || native.goals == nil) {
+                    if native.goals?.weekPlanReplanRequired == true {
+                        Text("请先确认规则教练课表；训练设置仍可保存。")
+                            .font(.footnote).foregroundStyle(TechColor.coral)
+                    } else {
+                        weekPlanPanel
+                    }
+                TechPrimaryButton(title: "保存计划", systemName: "checkmark", isBusy: isSaving, isDisabled: isSaving || native.isPlanBusy || draftIsStale || !areDistancesValid || native.isOffline || native.goals == nil) {
                     Task { await save() }
                 }
                 } else {
@@ -62,7 +64,7 @@ struct TechPlanView: View {
                 }
                 racePanel
                 if !editing {
-                    TechPrimaryButton(title: "编辑周计划", isDisabled: native.goals == nil || native.isOffline || native.isPlanBusy) {
+                    TechPrimaryButton(title: native.goals?.weekPlanReplanRequired == true ? "编辑训练设置" : "编辑周计划", isDisabled: native.goals == nil || native.isOffline || native.isPlanBusy) {
                         loadDraft()
                         editing = true
                     }
@@ -132,23 +134,16 @@ struct TechPlanView: View {
     private var planOverview: some View {
         VStack(alignment: .leading, spacing: 20) {
             TechHeroCard {
+                // The weekly-distance headline went away with the stored weekly goal,
+                // so the two gauges are now the card's own content instead of a
+                // second column beside it — and the adaptive stack no longer needs
+                // an inner one to keep them paired on a narrow phone.
                 TechAdaptiveStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("本周总里程").font(.subheadline).foregroundStyle(TechColor.muted)
-                        Text(nativeNumber(native.goals?.weeklyDistanceKm) + " km")
-                            .techScaledFont(34, weight: .bold).foregroundStyle(TechColor.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    // Keep the two related gauges together when the mileage
-                    // moves to its own row on a smaller phone.
-                    TechAdaptiveStack(spacing: 16) {
-                        TechGauge(progress: native.goals?.easyDurationFloorFraction ?? 0,
-                                  value: nativePercent(native.goals?.easyDurationFloorFraction), label: "轻松占比", size: 68)
-                        TechGauge(progress: Double(native.goals?.qualitySessionCap ?? 0) / 4,
-                                  value: "\(native.goals?.qualitySessionCap ?? 0)", label: "质量课上限", size: 68)
-                    }
+                    TechGauge(progress: native.goals?.easyDurationFloorFraction ?? 0,
+                              value: nativePercent(native.goals?.easyDurationFloorFraction), label: "轻松占比", size: 68)
+                    TechGauge(progress: Double(native.goals?.qualitySessionCap ?? 0) / 4,
+                              value: "\(native.goals?.qualitySessionCap ?? 0)", label: "质量课上限", size: 68)
                 }
-
             }
             TechSectionHeader(title: "7 天训练安排", trailing: "本周")
             if native.today?.weekPlan.isEmpty != false {
@@ -256,6 +251,12 @@ struct TechPlanView: View {
                     trailing: plan == nil ? "未生成" : "\(schedulableCount) 项可上表",
                     trailingColor: TechColor.cyan
                 )
+                if native.goals?.weekPlanReplanRequired == true {
+                    Text("旧模型课表的未来安排已停用，请重新预览并确认规则教练课表。")
+                        .font(.footnote).foregroundStyle(TechColor.coral)
+                    Text("手表上的旧排期不会自动撤回，请手动同步以撤回或替换。")
+                        .font(.caption).foregroundStyle(TechColor.muted)
+                }
                 if plan == nil {
                     Text("还没有本周课表。生成后即可一键同步到手表「体能训练」。")
                         .font(.footnote)
@@ -282,11 +283,7 @@ struct TechPlanView: View {
                         .foregroundStyle(TechColor.coral)
                 }
                 if let audit = plan?.audit {
-                    Text(
-                        audit.generatedBy == "llm"
-                            ? "由 \(audit.model ?? "大模型") 生成 · \(nativeDate(audit.generatedAt ?? ""))"
-                            : "由保守模板生成 · \(nativeDate(audit.generatedAt ?? ""))"
-                    )
+                    Text("\(NativeAppModel.planSourceName(audit.generatedBy)) · \(nativeDate(audit.generatedAt ?? ""))")
                     .font(.caption2)
                     .foregroundStyle(TechColor.muted)
                 }
@@ -322,9 +319,9 @@ struct TechPlanView: View {
                         if native.isRegeneratingPlan {
                             ProgressView().tint(TechColor.cyan).scaleEffect(0.7)
                         } else {
-                            Image(systemName: "wand.and.stars")
+                            Image(systemName: "calendar.badge.clock")
                         }
-                        Text(native.isRegeneratingPlan ? "生成中…" : "预览未来七日课表")
+                        Text(native.isRegeneratingPlan ? "生成中…" : (native.goals?.weekPlanReplanRequired == true ? "重新预览规则课表" : "预览未来七日课表"))
                             .font(.caption.weight(.semibold))
                     }
                     .foregroundStyle(TechColor.cyan)
@@ -418,22 +415,7 @@ struct TechPlanView: View {
     private var goalEditor: some View {
         TechPanel {
             VStack(alignment: .leading, spacing: 13) {
-                TechSectionHeader(title: "周目标", trailing: "1–500 km")
-                TechField("每周跑量") {
-                    HStack {
-                        TextField("30", text: $weeklyText)
-                            .accessibilityIdentifier("plan.weeklyDistance")
-                            .keyboardType(.decimalPad)
-                            .textInputAutocapitalization(.never)
-                        Text("km")
-                            .foregroundStyle(TechColor.muted)
-                    }
-                }
-                if !weeklyText.isEmpty && !isWeeklyValid {
-                    Text("请输入 1 到 500 km 的目标。")
-                        .font(.caption)
-                        .foregroundStyle(TechColor.coral)
-                }
+                TechSectionHeader(title: "训练设置")
                 VStack(alignment: .leading, spacing: 7) {
                     HStack {
                         Text("轻松训练时长下限")
@@ -473,6 +455,7 @@ struct TechPlanView: View {
     /// is the inert one, and guessing would restore exactly the edit this
     /// property exists to withhold.
     private var editablePlanIndexes: [Int] {
+        guard native.goals?.weekPlanReplanRequired != true else { return [] }
         guard let today = native.today?.today.localDate else { return [] }
         return weekPlan.indices.filter { weekPlan[$0].localDate > today }
     }
@@ -598,7 +581,6 @@ struct TechPlanView: View {
     private func loadDraft() {
         guard let goals = native.goals else { return }
         draftBase = goals
-        weeklyText = nativeNumber(goals.weeklyDistanceKm)
         easyFloor = goals.easyDurationFloorFraction
         qualityCap = goals.qualitySessionCap
         weekPlan = goals.weekPlan
@@ -606,8 +588,7 @@ struct TechPlanView: View {
     }
 
     private func save() async {
-        guard !isSaving, !draftIsStale, let draftBase, areDistancesValid, let weekly = weeklyValue,
-              NativeGoalWeekDraft.weeklyDistanceIsValid(weeklyText) else { return }
+        guard !isSaving, !draftIsStale, let draftBase, areDistancesValid else { return }
         let plan = NativeGoalWeekDraft.normalized(
             weekPlan,
             drafts: distanceDrafts,
@@ -617,7 +598,6 @@ struct TechPlanView: View {
         saveMessage = nil
         let success = await native.saveGoals(
             expectedRevision: draftBase.revision,
-            weeklyDistanceKm: weekly,
             easyDurationFloorFraction: easyFloor,
             qualitySessionCap: qualityCap,
             weekPlan: plan

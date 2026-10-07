@@ -61,7 +61,9 @@ npm run check:package-boundaries
 | 长期约束与不能随意“优化”的决策 | [决策](docs/DECISIONS.md) |
 | Web 页面、写命令与桌面验收 | [Web](docs/WEB.md) |
 | 当前审查结果与未决问题 | [项目审查](docs/PROJECT_REVIEW.md) |
+| 今日页计划类卡片的口径冲突与改法 | [计划卡口径](docs/TODAY_PLAN_CARDS_REVIEW.md) |
 | iOS 构建、权限和平台入口 | [iOS](apps/ios/README.md) |
+| 新版跑步教练流程与未复刻边界 | [跑步教练](docs/RUN_COACH.md) |
 | Rust 可选数据执行器 | [Rust](docs/RUST_DATA_ENGINE.md) |
 | ML 环境与工件 | [研究目录](research/README.md) |
 | 固定时点、固定数据库的机器证据 | [核验产物](deliverables/README.md) |

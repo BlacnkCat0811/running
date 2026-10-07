@@ -797,8 +797,8 @@ export interface MobileIntervalBlock {
 
 /**
  * Structured session shape. Deliberately mirrors WorkoutKit's
- * `CustomWorkout(warmup:blocks:cooldown:)` so that any producer (heuristic
- * coach or LLM) can fill it and the device layer needs no mapping logic.
+ * `CustomWorkout(warmup:blocks:cooldown:)` so that the coach and manual plans
+ * use the same structure without device-side mapping logic.
  */
 export interface MobileSessionStructure {
   warmup: MobileWorkoutStep | null;
@@ -806,7 +806,7 @@ export interface MobileSessionStructure {
   cooldown: MobileWorkoutStep | null;
 }
 
-/** Who produced a stored weekly plan; kept for auditability (LLM output is not reproducible). */
+/** Plan provenance. `llm` remains readable only for legacy plans and history. */
 export type MobilePlanSource = "llm" | "heuristic" | "manual";
 
 export interface MobilePlanAudit {
@@ -869,7 +869,6 @@ export interface MobileWeekStructure {
     honestyFraction: number | null;
     note: string;
   };
-  remainingDistanceKm: number | null;
 }
 
 export interface MobileRaceTarget {
@@ -949,7 +948,7 @@ export interface MobileWorkoutPlanResponse {
   days: MobileWorkoutPlanDay[];
 }
 
-/** Result of a weekly plan generation (model or fallback). */
+/** Result of deterministic weekly coach generation. */
 export interface MobileWeeklyPlanGenerationResponse {
   generatedAt: string;
   revision: number;
@@ -1198,8 +1197,6 @@ export interface MobileTodayResponse {
     distanceKm: number;
     durationSeconds: number;
     workoutCount: number;
-    goalDistanceKm: number | null;
-    goalProgressFraction: number | null;
     /** Running-only averages; heart rate is weighted by recorded workout duration. */
     averageSpeedKmPerHour?: number | null;
     averagePaceSecondsPerKm?: number | null;
@@ -1294,7 +1291,6 @@ export interface MobileTrendsResponse {
 /** Weekly training goals persisted server-side for the iOS settings page. */
 export interface MobileGoalsResponse {
   revision: number;
-  weeklyDistanceKm: number;
   easyDurationFloorFraction: number;
   qualitySessionCap: number;
   raceTarget: MobileRaceTarget | null;
@@ -1302,12 +1298,60 @@ export interface MobileGoalsResponse {
   lockedSession: MobileLockedSession | null;
   /** Audit trail of the last weekly plan generation. */
   weekPlanAudit: MobilePlanAudit | null;
+  /** Server-owned migration state; only confirming a coach preview clears it. */
+  weekPlanReplanRequired?: boolean;
+  /** Server-owned legacy-day protection; expires by local date, not by confirmation. */
+  weekPlanPreservedDate?: string | null;
+  /** Server-managed adaptive running programme; edited through run-coach commands. */
+  runCoach?: MobileRunCoachPlan | null;
   updatedAt: string;
+}
+
+export interface MobileRunCoachConfig {
+  goal: "fitness" | "finish" | "time";
+  raceDate: string | null;
+  raceDistanceKm: number | null;
+  targetTimeSeconds: number | null;
+  /** ISO weekdays: Monday = 1, Sunday = 7. */
+  runningDays: number[];
+  longRunDays: number[];
+  targetType: "pace" | "heart_rate";
+  strengthTraining: boolean;
+  /** Fitness programme length; legacy configurations default to 12 weeks. */
+  durationWeeks?: number;
+}
+
+export interface MobileRunCoachPlan extends MobileRunCoachConfig {
+  id: string;
+  startedOn: string;
+  status: "active" | "paused" | "ended";
+  pausedOn: string | null;
+  endedOn: string | null;
+  /** Facts/config fingerprint, not a fitness score or Garmin confidence value. */
+  adaptationKey: string | null;
+  adaptedAt: string | null;
+}
+
+export interface MobileRunCoachCommand {
+  expectedRevision: number;
+  action: "start" | "update" | "refresh" | "pause" | "resume" | "end";
+  config?: MobileRunCoachConfig;
+}
+
+export interface MobileRunCoachResponse {
+  revision: number;
+  plan: MobileRunCoachPlan | null;
+  phase: string | null;
+  daysToRace: number | null;
+  elapsedWeeks: number;
+  weeklyCapacityKm: number;
+  notices: string[];
+  phases: Array<{ phase: string; startsOn: string; endsOn: string; current: boolean }>;
+  strength: Array<{ localDate: string; durationMinutes: number; exercises: Array<{ name: string; dose: string }> }>;
 }
 
 export interface UpdateMobileGoalsInput {
   expectedRevision?: number;
-  weeklyDistanceKm: number;
   easyDurationFloorFraction?: number;
   qualitySessionCap?: number;
   raceTarget?: MobileRaceTarget | null;

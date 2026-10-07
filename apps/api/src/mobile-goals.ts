@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
 
@@ -11,6 +11,7 @@ import type {
   MobileRaceTarget,
   MobileSessionKind,
   MobileSessionStructure,
+  MobileRunCoachPlan,
   UpdateMobileGoalsInput
 } from "@rai/api-contracts";
 import { MOBILE_SESSION_KINDS } from "@rai/contracts";
@@ -28,8 +29,8 @@ import {
 } from "./mobile-coach.js";
 import { MAX_PLANNED_DISTANCE_KM, normalizeSessionStructure } from "./session-structure.js";
 import { isValidLocalDate } from "./local-date.js";
+import { normalizeRunCoachPlan } from "./run-coach-policy.js";
 
-export const DEFAULT_WEEKLY_DISTANCE_KM = 30;
 const GOALS_FILE = "mobile-goals.json";
 /** Derived from the shared list so this set cannot drift from the API's enum. */
 const SESSION_KINDS = new Set<MobileSessionKind>(MOBILE_SESSION_KINDS);
@@ -47,13 +48,15 @@ const TARGET_SIZED_KINDS = new Set<MobileSessionKind>(["easy", "recovery", "long
 
 interface StoredGoals {
   revision: number;
-  weeklyDistanceKm: number;
   easyDurationFloorFraction: number;
   qualitySessionCap: number;
   raceTarget: MobileRaceTarget | null;
   weekPlan: MobileGoalsResponse["weekPlan"];
   lockedSession: MobileLockedSession | null;
   weekPlanAudit: MobilePlanAudit | null;
+  weekPlanReplanRequired: boolean;
+  weekPlanPreservedDate: string | null;
+  runCoach: MobileRunCoachPlan | null;
   updatedAt: string;
 }
 
@@ -67,19 +70,21 @@ interface StoredGoals {
 const MAX_READ_ROWS = 200;
 const cappedReadLimit = (limit: number): number => Math.min(MAX_READ_ROWS, Math.max(1, Math.round(limit)));
 
-const clampGoal = (value: number): number => Math.min(500, Math.max(1, value));
 const clampFraction = (value: number): number => Math.min(0.95, Math.max(0.4, value));
 const clampCap = (value: number): number => Math.min(4, Math.max(0, Math.round(value)));
+const normalizePreservedDate = (value: unknown): string | null => typeof value === "string" && isValidLocalDate(value) ? value : null;
 
 const emptyGoals = (): StoredGoals => ({
   revision: 0,
-  weeklyDistanceKm: DEFAULT_WEEKLY_DISTANCE_KM,
   easyDurationFloorFraction: DEFAULT_EASY_DURATION_FLOOR,
   qualitySessionCap: DEFAULT_QUALITY_SESSION_CAP,
   raceTarget: null,
   weekPlan: [],
   lockedSession: null,
   weekPlanAudit: null,
+  weekPlanReplanRequired: false,
+  weekPlanPreservedDate: null,
+  runCoach: null,
   updatedAt: new Date(0).toISOString()
 });
 
@@ -99,7 +104,11 @@ const emptyGoals = (): StoredGoals => ({
  * own structure does not describe.
  */
 export interface PlanMergeOptions {
+  /** Internal programme capability, never accepted by the public goals body. */
+  runCoach?: MobileRunCoachPlan | null;
   prescription?: CoachZonePrescription | null;
+  /** Internal confirmation capability; never accepted in the public goals body. */
+  confirmCoachPlan?: boolean;
   /** Runs on the measured candidate before any durable write. */
   validate?: (candidate: MobileGoalsResponse) => MobileGoalsResponse | void;
 }
@@ -186,10 +195,34 @@ export class MobileGoalsStore {
     return this.toResponse(this.cached, options);
   }
 
-  write(input: UpdateMobileGoalsInput, options?: PlanMergeOptions): MobileGoalsResponse {
-    if (!Number.isFinite(input.weeklyDistanceKm)) {
-      throw new MobileGoalsInputError("weeklyDistanceKm must be a finite number");
+  /** Retire tomorrow and later from legacy model weeks, without rewriting today's prescription. */
+  retireLegacyModelPlan(today: string): MobileGoalsResponse {
+    if (!isValidLocalDate(today)) throw new MobileGoalsInputError("迁移日期无效");
+    const current = this.readStored();
+    if (current.weekPlanAudit?.generatedBy !== "llm") return this.toResponse(current);
+    const hasToday = current.weekPlan.some(day => day.localDate === today);
+    const needsRetirement = !current.weekPlanReplanRequired && current.weekPlan.some(day => day.localDate > today);
+    // Protect a legacy day even with no future rows to retire, and backfill
+    // already-retired payloads that did not carry a protection date.
+    const needsProtection = current.weekPlanPreservedDate == null && hasToday;
+    if (!needsRetirement && !needsProtection) return this.toResponse(current);
+    if (!this.controlDatabase) {
+      const backup = `${this.filePath}.llm-retired.bak`;
+      if (!existsSync(backup)) copyFileSync(this.filePath, backup);
     }
+    const retired: StoredGoals = {
+      ...current,
+      revision: current.revision + 1,
+      weekPlan: current.weekPlan.filter(day => day.localDate <= today),
+      weekPlanReplanRequired: current.weekPlanReplanRequired || needsRetirement,
+      weekPlanPreservedDate: hasToday ? today : null,
+      updatedAt: new Date().toISOString()
+    };
+    this.persistGoals(retired, current.revision);
+    return this.toResponse(retired);
+  }
+
+  write(input: UpdateMobileGoalsInput, options?: PlanMergeOptions): MobileGoalsResponse {
     if (input.raceTarget !== undefined && input.raceTarget !== null &&
         !isValidLocalDate(input.raceTarget.date)) {
       throw new MobileGoalsInputError("raceTarget.date must be a real YYYY-MM-DD date");
@@ -198,9 +231,14 @@ export class MobileGoalsStore {
     if (input.expectedRevision != null && input.expectedRevision !== current.revision) {
       throw new MobileGoalsRevisionConflictError(current.revision);
     }
+    if (options?.confirmCoachPlan && (input.weekPlan === undefined || input.weekPlanAudit?.generatedBy !== "heuristic")) {
+      throw new MobileGoalsInputError("确认课表必须提供规则教练方案");
+    }
+    if (current.weekPlanReplanRequired && input.weekPlan !== undefined && !options?.confirmCoachPlan) {
+      throw new WeeklyPlanConfirmationRequiredError();
+    }
     const stored: StoredGoals = {
       revision: current.revision + 1,
-      weeklyDistanceKm: clampGoal(input.weeklyDistanceKm),
       easyDurationFloorFraction:
         input.easyDurationFloorFraction == null
           ? current.easyDurationFloorFraction
@@ -217,18 +255,31 @@ export class MobileGoalsStore {
           ? current.lockedSession
           : normalizeLockedSession(input.lockedSession, options?.prescription),
       weekPlanAudit: input.weekPlanAudit === undefined ? current.weekPlanAudit : normalizePlanAudit(input.weekPlanAudit),
+      weekPlanReplanRequired: options?.confirmCoachPlan ? false : current.weekPlanReplanRequired,
+      weekPlanPreservedDate: current.weekPlanPreservedDate,
+      runCoach: options?.runCoach === undefined ? current.runCoach : options.runCoach,
       updatedAt: new Date().toISOString()
     };
     const validated = options?.validate?.(this.toResponse(stored, options));
     if (validated) stored.weekPlan = validated.weekPlan;
+    this.persistGoals(stored, current.revision);
+    return this.toResponse(stored, options);
+  }
+
+  private persistGoals(stored: StoredGoals, expectedRevision: number): void {
     if (this.controlDatabase) {
-      this.writeControlGoals(stored, current.revision);
+      this.writeControlGoals(stored, expectedRevision);
     } else {
       mkdirSync(dirname(this.filePath), { recursive: true });
-      writeFileSync(this.filePath, `${JSON.stringify(stored, null, 2)}\n`, "utf8");
+      const temporary = `${this.filePath}.${process.pid}.tmp`;
+      try {
+        writeFileSync(temporary, `${JSON.stringify(stored, null, 2)}\n`, "utf8");
+        renameSync(temporary, this.filePath);
+      } finally {
+        rmSync(temporary, { force: true });
+      }
     }
     this.cached = stored;
-    return this.toResponse(stored, options);
   }
 
   /** Measures the stored plan so the editor and the plan views show one number. */
@@ -236,13 +287,15 @@ export class MobileGoalsStore {
     const prescription = options?.prescription;
     return {
       revision: stored.revision,
-      weeklyDistanceKm: stored.weeklyDistanceKm,
       easyDurationFloorFraction: stored.easyDurationFloorFraction,
       qualitySessionCap: stored.qualitySessionCap,
       raceTarget: stored.raceTarget,
       weekPlan: stored.weekPlan.map((day) => measurePlanDay(day, prescription)),
       lockedSession: measureLockedSession(stored.lockedSession, prescription),
       weekPlanAudit: stored.weekPlanAudit,
+      weekPlanReplanRequired: stored.weekPlanReplanRequired,
+      weekPlanPreservedDate: stored.weekPlanPreservedDate,
+      runCoach: stored.runCoach,
       updatedAt: stored.updatedAt
     };
   }
@@ -252,13 +305,7 @@ export class MobileGoalsStore {
   }
 
   lockSession(locked: MobileLockedSession, options?: PlanMergeOptions): MobileGoalsResponse {
-    return this.write(
-      {
-        weeklyDistanceKm: this.read().weeklyDistanceKm,
-        lockedSession: locked
-      },
-      options
-    );
+    return this.write({ lockedSession: locked }, options);
   }
 
   /**
@@ -421,19 +468,19 @@ export class MobileGoalsStore {
   private loadFile(): StoredGoals {
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as Partial<StoredGoals>;
-      const weekly = Number(parsed.weeklyDistanceKm);
-      if (!Number.isFinite(weekly)) throw new Error("invalid weeklyDistanceKm");
       const floor = Number(parsed.easyDurationFloorFraction);
       const cap = Number(parsed.qualitySessionCap);
       return {
         revision: Number.isInteger(parsed.revision) && Number(parsed.revision) >= 0 ? Number(parsed.revision) : 0,
-        weeklyDistanceKm: clampGoal(weekly),
         easyDurationFloorFraction: Number.isFinite(floor) ? clampFraction(floor) : DEFAULT_EASY_DURATION_FLOOR,
         qualitySessionCap: Number.isFinite(cap) ? clampCap(cap) : DEFAULT_QUALITY_SESSION_CAP,
         raceTarget: normalizeRaceTarget(parsed.raceTarget ?? null),
         weekPlan: normalizeWeekPlan(Array.isArray(parsed.weekPlan) ? parsed.weekPlan : [], []),
         lockedSession: normalizeLockedSession(parsed.lockedSession ?? null),
         weekPlanAudit: normalizePlanAudit(parsed.weekPlanAudit ?? null),
+        weekPlanReplanRequired: parsed.weekPlanReplanRequired === true,
+        weekPlanPreservedDate: normalizePreservedDate(parsed.weekPlanPreservedDate),
+        runCoach: normalizeRunCoachPlan(parsed.runCoach),
         updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date(0).toISOString()
       };
     } catch {
@@ -487,33 +534,40 @@ export class MobileGoalsStore {
           database.close();
           throw new Error(`mobile-goals.json 迁移失败：文件损坏（${error instanceof Error ? error.message : "JSON 无效"}）`);
         }
-        const weekly = Number(parsed.weeklyDistanceKm);
-        if (!Number.isFinite(weekly)) {
+        // The migration used to be gated on `weeklyDistanceKm` being a finite
+        // number. That field is gone, so `revision` takes over as the probe: a
+        // real payload always carries it, and without a check a truncated or
+        // unrelated JSON would migrate silently as a fresh install.
+        if (!Number.isInteger(parsed.revision) || Number(parsed.revision) < 0) {
           database.close();
-          throw new Error("mobile-goals.json 迁移失败：weeklyDistanceKm 无效");
+          throw new Error("mobile-goals.json 迁移失败：revision 无效");
         }
         initial = {
           revision: 0,
-          weeklyDistanceKm: clampGoal(weekly),
           easyDurationFloorFraction: Number.isFinite(Number(parsed.easyDurationFloorFraction)) ? clampFraction(Number(parsed.easyDurationFloorFraction)) : DEFAULT_EASY_DURATION_FLOOR,
           qualitySessionCap: Number.isFinite(Number(parsed.qualitySessionCap)) ? clampCap(Number(parsed.qualitySessionCap)) : DEFAULT_QUALITY_SESSION_CAP,
           raceTarget: normalizeRaceTarget(parsed.raceTarget ?? null),
           weekPlan: normalizeWeekPlan(Array.isArray(parsed.weekPlan) ? parsed.weekPlan : [], []),
           lockedSession: normalizeLockedSession(parsed.lockedSession ?? null),
           weekPlanAudit: normalizePlanAudit(parsed.weekPlanAudit ?? null),
+          weekPlanReplanRequired: parsed.weekPlanReplanRequired === true,
+          weekPlanPreservedDate: normalizePreservedDate(parsed.weekPlanPreservedDate),
+          runCoach: normalizeRunCoachPlan(parsed.runCoach),
           updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString()
         };
         const backup = `${this.filePath}.migrated.bak`;
         if (!existsSync(backup)) copyFileSync(this.filePath, backup);
       }
       const payload = JSON.stringify({
-        weeklyDistanceKm: initial.weeklyDistanceKm,
         easyDurationFloorFraction: initial.easyDurationFloorFraction,
         qualitySessionCap: initial.qualitySessionCap,
         raceTarget: initial.raceTarget,
         weekPlan: initial.weekPlan,
         lockedSession: initial.lockedSession,
-        weekPlanAudit: initial.weekPlanAudit
+        weekPlanAudit: initial.weekPlanAudit,
+        weekPlanReplanRequired: initial.weekPlanReplanRequired,
+        weekPlanPreservedDate: initial.weekPlanPreservedDate,
+        runCoach: initial.runCoach
       });
       database.exec("BEGIN IMMEDIATE");
       try {
@@ -546,13 +600,15 @@ export class MobileGoalsStore {
     const parsed = JSON.parse(row.payload_json) as Partial<StoredGoals>;
     return {
       revision: Number(row.revision),
-      weeklyDistanceKm: Number.isFinite(Number(parsed.weeklyDistanceKm)) ? clampGoal(Number(parsed.weeklyDistanceKm)) : DEFAULT_WEEKLY_DISTANCE_KM,
       easyDurationFloorFraction: Number.isFinite(Number(parsed.easyDurationFloorFraction)) ? clampFraction(Number(parsed.easyDurationFloorFraction)) : DEFAULT_EASY_DURATION_FLOOR,
       qualitySessionCap: Number.isFinite(Number(parsed.qualitySessionCap)) ? clampCap(Number(parsed.qualitySessionCap)) : DEFAULT_QUALITY_SESSION_CAP,
       raceTarget: normalizeRaceTarget(parsed.raceTarget ?? null),
       weekPlan: normalizeWeekPlan(Array.isArray(parsed.weekPlan) ? parsed.weekPlan : [], []),
       lockedSession: normalizeLockedSession(parsed.lockedSession ?? null),
       weekPlanAudit: normalizePlanAudit(parsed.weekPlanAudit ?? null),
+      weekPlanReplanRequired: parsed.weekPlanReplanRequired === true,
+      weekPlanPreservedDate: normalizePreservedDate(parsed.weekPlanPreservedDate),
+      runCoach: normalizeRunCoachPlan(parsed.runCoach),
       updatedAt: row.updated_at
     };
   }
@@ -560,13 +616,15 @@ export class MobileGoalsStore {
   private writeControlGoals(stored: StoredGoals, expectedRevision: number): void {
     if (!this.controlDatabase) return;
     const payload = JSON.stringify({
-      weeklyDistanceKm: stored.weeklyDistanceKm,
       easyDurationFloorFraction: stored.easyDurationFloorFraction,
       qualitySessionCap: stored.qualitySessionCap,
       raceTarget: stored.raceTarget,
       weekPlan: stored.weekPlan,
       lockedSession: stored.lockedSession,
-      weekPlanAudit: stored.weekPlanAudit
+      weekPlanAudit: stored.weekPlanAudit,
+      weekPlanReplanRequired: stored.weekPlanReplanRequired,
+      weekPlanPreservedDate: stored.weekPlanPreservedDate,
+      runCoach: stored.runCoach
     });
     this.controlDatabase.exec("BEGIN IMMEDIATE");
     try {
@@ -588,6 +646,15 @@ export class MobileGoalsStore {
       try { this.controlDatabase.exec("ROLLBACK"); } catch { /* preserve the original error */ }
       throw error;
     }
+  }
+}
+
+export class WeeklyPlanConfirmationRequiredError extends Error {
+  readonly code = "weekly_plan_confirmation_required";
+  readonly statusCode = 409;
+  constructor() {
+    super("旧模型课表的未来安排已停用，请先预览并确认规则教练课表。");
+    this.name = "WeeklyPlanConfirmationRequiredError";
   }
 }
 

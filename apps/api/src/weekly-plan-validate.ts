@@ -26,12 +26,11 @@ import {
 } from "./session-structure.js";
 
 /**
- * Guard rails for model-generated weekly plans.
+ * Shared guard rails for coach-generated and manually edited weekly plans.
  *
  * Three layers, in order:
  *   1. shape validation  - reject anything malformed or dated outside the window
  *   2. business clamping - volume ramp, quality cap, easy floor, pace bounds
- *   3. fallback          - handled by the caller, which uses the heuristic plan
  *
  * Nothing unvalidated may reach the goals store, and every adjustment is
  * reported so a generation can be audited after the fact.
@@ -73,8 +72,7 @@ const MIN_PLANNED_DISTANCE_KM = 1;
 const MIN_EASY_DISTANCE_KM = 2;
 
 /**
- * Nominal weekly volume ceiling, shared by the model validator and the fallback
- * template so the two can never drift apart.
+ * Nominal weekly volume ceiling shared by validation and the rule coach.
  *
  * The ceiling is the tighter of the weekly goal and last week's realised volume
  * plus `RAMP_LIMIT_FRACTION`, with a floor under the ramp base (see
@@ -83,10 +81,10 @@ const MIN_EASY_DISTANCE_KM = 2;
  * coerces `null` to `0` and would collapse the whole week to nothing.
  *
  * Returned before `VOLUME_CEILING_TOLERANCE`. The validator needs the tolerance
- * because a model's per-day rounding can overshoot and it is the last line of
- * defence against a plan the runner has not earned; the fallback template does
+ * because input rounding can overshoot and it is the last line of defence
+ * against a plan the runner has not earned; the coach template does
  * not, because it re-measures its own week and closes any residual itself (see
- * `buildFallbackWeekPlan`). That is a property of the template, not an accident:
+ * `buildCoachWeekPlan`). That is a property of the template, not an accident:
  * if the template ever starts trusting its arithmetic again, this comment and
  * the assertion in `weekly-plan.test.ts` are what will notice.
  */
@@ -537,7 +535,7 @@ export function validateWeeklyPlan(args: WeeklyPlanValidationArgs): WeeklyPlanVa
       // still being rewritten: a silent cut would look like the model's idea on
       // the audit screen, and the day is reported with the number that survived.
       clamped.push(
-        `${localDate} 模型请求 ${roundKm(distanceHint)}km 超过 ${MAX_PLANNED_DISTANCE_KM}km 单日上限，已按上限排课`
+        `${localDate} 课表请求 ${roundKm(distanceHint)}km 超过 ${MAX_PLANNED_DISTANCE_KM}km 单日上限，已按上限排课`
       );
     }
     const cappedHint = distanceHint == null ? null : Math.min(MAX_PLANNED_DISTANCE_KM, distanceHint);
@@ -830,8 +828,7 @@ export function applyRacePlanPolicy(
 }
 
 /**
- * Deterministic plan used when the model is unavailable or its output cannot be
- * salvaged.
+ * Deterministic coach plan, sized from the athlete's budget and zone prescription.
  *
  * Sized from one budget — the tighter of the weekly goal and the ramp ceiling —
  * in this order: quality structures first (the coach fixes them, so their cost
@@ -841,7 +838,7 @@ export function applyRacePlanPolicy(
  * minimum, so a week too small for quality work is easy-only and never over
  * budget.
  */
-export function buildFallbackWeekPlan(args: {
+export function buildCoachWeekPlan(args: {
   easyDurationFloorFraction?: number;
   allowedDates: string[];
   prescription: CoachZonePrescription | null;
@@ -855,7 +852,7 @@ export function buildFallbackWeekPlan(args: {
   if (dates.length === 0) return [];
   const paces = pacesFromZones(args.prescription);
   const blocking = args.injuryFlagCodes.some((code) => QUALITY_BLOCKING_FLAGS.has(code));
-  const reason = "模型不可用，按保守模板安排";
+  const reason = "规则教练根据周跑量预算与质量课上限安排";
   const restReason = "周跑量预算不足，安排休息";
   const ceiling = weeklyPlanVolumeCeiling(args.weeklyDistanceKm, args.previousWeekDistanceKm);
 
@@ -1023,7 +1020,7 @@ export function buildFallbackWeekPlan(args: {
   if (cap > 0 && fraction !== null && fraction < (args.easyDurationFloorFraction ?? 0.7)) {
     // Rebuild the entire budget with fewer quality sessions: replacing only a
     // label would leave the old hard structure, and demotion can increase size.
-    return buildFallbackWeekPlan({ ...args, qualitySessionCap: cap - 1 });
+    return buildCoachWeekPlan({ ...args, qualitySessionCap: cap - 1 });
   }
   return plan;
 }

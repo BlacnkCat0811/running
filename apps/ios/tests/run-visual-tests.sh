@@ -33,6 +33,7 @@ trap cleanup EXIT
 mkdir -p "$runtime/var"
 sqlite3 "${RAI_VISUAL_DATABASE:-$root/var/rai.sqlite}" ".backup '$runtime/var/rai.sqlite'"
 RAI_RUNTIME_ROOT="$runtime" RAI_DATABASE="$runtime/var/rai.sqlite" RAI_API_PORT=8792 RAI_LOG_LEVEL=warn \
+  RAI_SERVER_ID=visual-acceptance RAI_DATASET_EPOCH="visual-$(basename "$runtime")" RAI_API_TOKEN="" \
   node --import tsx apps/api/src/server.ts > "$out/api.log" 2>&1 & api_pid=$!
 ready=false
 # Startup includes validation/migration of the isolated database. A real
@@ -49,25 +50,25 @@ done
 $ready || { echo 'Isolated API did not start'; exit 1; }
 # Populate only this copy's blank day editor with the API's own recommended week.
 python3 - <<'PY'
-import json, urllib.request
+import json, urllib.request, urllib.error
 base='http://127.0.0.1:8792'
 g=json.load(urllib.request.urlopen(base+'/v1/mobile/goals'))
 t=json.load(urllib.request.urlopen(base+'/v1/mobile/today'))
 if not g['weekPlan']:
-    # 只回填**今天及以后**。`validateManualPlan` 的 frozen() 判定把"过去日期 / 今天已完成或
-    # 已锁定"视为不可改写（`apps/api/src/manual-plan-policy.ts:9-14`），而 `/v1/mobile/today`
-    # 的 weekPlan 覆盖整个自然周（含已过去的日子）⇒ 整周原样回填必然
-    # 422 `plan_policy_violation`，脚本在夹具这一步就死，后面整条模拟器验收链（构建、
-    # 截图、跨进程字节比对）全跑不到。服务端拒绝改写历史日期是对的，过时的是这个夹具。
-    value={'expectedRevision':g['revision'],'weeklyDistanceKm':g['weeklyDistanceKm'],
-           'weekPlan':[{k:d[k] for k in ('localDate','kind','distanceKm')} for d in t['weekPlan']
-                       if d['localDate'] >= t['today']['localDate']]}
-    req=urllib.request.Request(base+'/v1/mobile/goals', data=json.dumps(value).encode(), method='PUT',
-                              headers={'Content-Type':'application/json'})
-    urllib.request.urlopen(req).close()
+    # Use the measured preview/confirmation flow, never copy a read-model fallback
+    # into the manual editor or overwrite completed dates in the fixture.
+    def post(path, value):
+        req=urllib.request.Request(base+path, data=json.dumps(value).encode(), method='POST',
+                                  headers={'Content-Type':'application/json'})
+        return json.load(urllib.request.urlopen(req))
+    preview=post('/v1/mobile/workout-plan/preview', {'expectedRevision':g['revision']})
+    post('/v1/mobile/workout-plan/confirm', {'candidateId':preview['candidateId'], 'expectedRevision':preview['revision']})
 # Warm the expensive read-only physiology/route queries before the UI timeout begins.
 for endpoint in ['/v1/predictions','/v1/training-zones/current','/v1/training-statistics/overview']:
-    urllib.request.urlopen(base+endpoint, timeout=90).read()
+    try:
+        urllib.request.urlopen(base+endpoint, timeout=90).read()
+    except urllib.error.HTTPError as error:
+        if error.code != 404: raise
 rows=json.load(urllib.request.urlopen(base+'/v1/workouts?limit=100'))['items']
 route=next((w['id'] for w in rows if w['hasRoute']), None)
 if route:

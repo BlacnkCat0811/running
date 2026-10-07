@@ -50,7 +50,7 @@ iOS 的 WKWebView 不是生产页面路径；Web 内保留的壳兼容布局不�
 
 - API负责HTTP/控制，重型导入和重算由现有串行协调机制执行；不增加多API写者/PM2 cluster。
 - 主库保存健康事实、训练、覆盖、不可变派生run及已发布指针。
-- `runtime.sqlite` 保存来源/任务状态；`rai-control.sqlite` 保存周目标/计划revision等控制状态。
+- `runtime.sqlite` 保存来源/任务状态；`rai-control.sqlite` 保存训练目标（轻松时长下限、质量课上限、比赛目标）/计划revision等控制状态（周跑量目标已退役，周容量改为推导，见[DECISIONS](DECISIONS.md) D14）。
 - iOS有本地页面缓存和同步任务日志，不成为第二个独立评分/健康事实主库。
 - 原库、WAL、控制库、运行时状态、上传和工件都可能包含敏感信息；备份与迁移按[运维](OPERATIONS.md)协调，不只复制一个活跃`.sqlite`文件。
 

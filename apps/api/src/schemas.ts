@@ -101,6 +101,27 @@ const mobileRaceTargetSchema = {
   }
 } as const;
 
+export const runCoachCommandSchema = {
+  type: "object", additionalProperties: false, required: ["expectedRevision", "action"],
+  properties: {
+    expectedRevision: { type: "integer", minimum: 0 },
+    action: { type: "string", enum: ["start", "update", "refresh", "pause", "resume", "end"] },
+    config: { type: "object", additionalProperties: false,
+      required: ["goal", "raceDate", "raceDistanceKm", "targetTimeSeconds", "runningDays", "longRunDays", "targetType", "strengthTraining"],
+      properties: {
+        goal: { type: "string", enum: ["fitness", "finish", "time"] },
+        raceDate: { anyOf: [{ type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" }, { type: "null" }] },
+        raceDistanceKm: { anyOf: [{ type: "number", minimum: 1.6, maximum: 1609.344 }, { type: "null" }] },
+        targetTimeSeconds: { anyOf: [{ type: "number", minimum: 240, maximum: 1_500_000 }, { type: "null" }] },
+        runningDays: { type: "array", minItems: 3, maxItems: 7, uniqueItems: true, items: { type: "integer", minimum: 1, maximum: 7 } },
+        longRunDays: { type: "array", minItems: 1, maxItems: 7, uniqueItems: true, items: { type: "integer", minimum: 1, maximum: 7 } },
+        targetType: { type: "string", enum: ["pace", "heart_rate"] }, strengthTraining: { type: "boolean" },
+        durationWeeks: { type: "integer", minimum: 6, maximum: 52 }
+      }
+    }
+  }
+} as const;
+
 /**
  * Alert bounds depend on the alert kind: pace is seconds per kilometre and heart
  * rate is beats per minute, so one shared ceiling would let a body-invalid heart
@@ -275,10 +296,12 @@ export const mobilePlanSyncedBodySchema = {
 export const mobileGoalsBodySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["weeklyDistanceKm"],
+  // Nothing is required: every goal is optional and the store merges whatever it
+  // is given. `weeklyDistanceKm` used to be the one mandatory field; it is gone
+  // with the stored weekly goal, and a client that still sends it now fails on
+  // `additionalProperties` — which is the intended signal that it no longer exists.
   properties: {
     expectedRevision: { type: "integer", minimum: 0 },
-    weeklyDistanceKm: { type: "number", minimum: 1, maximum: 500 },
     easyDurationFloorFraction: { type: "number", minimum: 0.4, maximum: 0.95 },
     qualitySessionCap: { type: "integer", minimum: 0, maximum: 4 },
     raceTarget: { anyOf: [mobileRaceTargetSchema, { type: "null" }] },
@@ -802,6 +825,12 @@ export const openapiDocument = {
         requestBody: body({ $ref: "#/components/schemas/MobileGoalsUpdate" }, "周跑量、轻松占比、质量课上限与赛事目标")
       })
     },
+    "/v1/mobile/run-coach": {
+      get: operation(["Read"], "自适应跑步教练计划、阶段和补充力量安排"),
+      post: operation(["Workouts"], "创建、更新偏好、自适应刷新、暂停、恢复或结束跑步教练计划", {
+        requestBody: body(runCoachCommandSchema, "当前目标 revision 和教练命令；不支持逐日改期")
+      })
+    },
     "/v1/mobile/lock": {
       post: operation(["Workouts"], "锁定或按新裁决重锁今天的课", {
         requestBody: body({ $ref: "#/components/schemas/MobileLock" }, "lock 或 relock")
@@ -811,7 +840,7 @@ export const openapiDocument = {
       get: operation(["Read"], "iOS 可执行周课表：今日按闸门裁决，其后按已存计划逐日给出结构、距离与时长")
     },
     "/v1/mobile/workout-plan/generate": {
-      post: operation(["Workouts"], "生成并持久化下周课表；模型不可用时回退保守模板并在 warnings 中说明", {
+      post: operation(["Workouts"], "规则教练生成并持久化未来七日课表；旧模型课表待确认时返回 409", {
         // Every field is optional — the handler reads `expectedRevision` with a
         // `?.` — so the body itself is not required, unlike the other writes.
         deprecated: true,
@@ -825,7 +854,7 @@ export const openapiDocument = {
       })
     },
     "/v1/mobile/workout-plan/preview": {
-      post: operation(["Workouts"], "生成未来七日候选课表；不保存、不推送手表，15 分钟过期", {
+      post: operation(["Workouts"], "规则教练生成未来七日候选课表；不保存、不推送手表，15 分钟过期", {
         requestBody: body({ type: "object", additionalProperties: false, required: ["expectedRevision"], properties: {
           expectedRevision: { type: "integer", minimum: 0 }
         } }, "当前目标 revision")

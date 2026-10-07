@@ -16,6 +16,11 @@ final class NativeAppModel {
     private(set) var trends: MobileTrendsResponse?
     private(set) var goals: MobileGoalsResponse?
     private(set) var workoutPlan: MobileWorkoutPlanResponse?
+    private(set) var runCoach: MobileRunCoachResponse?
+    private(set) var isLoadingRunCoach = false
+    private(set) var isUpdatingRunCoach = false
+    var runCoachError: String?
+    private var runCoachRequestID = UUID()
     private(set) var predictions: NativePredictionResponse?
     private(set) var dashboard: NativeDashboardResponse?
     private(set) var trainingZones: NativeTrainingZonesCurrentResponse?
@@ -54,7 +59,8 @@ final class NativeAppModel {
     private var saveGoalsRequestID = UUID()
     private var refreshQueued = false
     private var refreshHandshakeQueued = false
-    var isPlanBusy: Bool { isSavingGoals || isLockingSession || isRegeneratingPlan || isSyncingPlan }
+    var isPlanBusy: Bool { isSavingGoals || isLockingSession || isRegeneratingPlan || isSyncingPlan || isUpdatingRunCoach }
+    var currentPlanRevision: Int { max(minimumPlanRevision, max(goals?.revision ?? 0, runCoach?.revision ?? 0)) }
     /// Human-readable result of the last plan generation, including fallbacks.
     var planMessage: String?
     var planPreview: MobileWeeklyPlanPreview?
@@ -67,7 +73,7 @@ final class NativeAppModel {
     func watchPlanNeedsUpdate(_ plan: MobileWorkoutPlanResponse?) -> Bool {
         guard let revision = lastWatchRevision else { return false }
         guard let plan else { return true }
-        return goals?.revision != revision || plan.planRevision != revision ||
+        return currentPlanRevision != revision || plan.planRevision != revision ||
             plan.days != lastWatchDays || plan.timezone != lastWatchTimezone
     }
     var workoutSessionType: String? {
@@ -282,6 +288,85 @@ final class NativeAppModel {
             errorMessage = failedPanels == 4
                 ? "核心数据均未能更新，当前显示的是上次结果。"
                 : "有 \(failedPanels) 项数据未能更新，其余已刷新。"
+        }
+        if fetchedGoals?.runCoach != nil { await refreshRunCoach() }
+    }
+
+    @discardableResult
+    func refreshRunCoach() async -> Bool {
+        guard !isLoadingRunCoach, !isPlanBusy, let baseURL = session.serverURL else { return false }
+        let configuration = configurationID
+        let token = session.apiToken
+        let requestID = UUID()
+        runCoachRequestID = requestID
+        isLoadingRunCoach = true
+        defer { if runCoachRequestID == requestID { isLoadingRunCoach = false } }
+        func isCurrent() -> Bool {
+            configuration == configurationID && baseURL == session.serverURL && token == session.apiToken &&
+                runCoachRequestID == requestID && !Task.isCancelled
+        }
+        do {
+            let value = try await api.runCoach(baseURL: baseURL, token: token)
+            guard isCurrent(), value.revision >= currentPlanRevision else { return false }
+            minimumPlanRevision = max(minimumPlanRevision, value.revision)
+            runCoach = value
+            recordCache(value, key: "run-coach")
+            runCoachError = nil
+            if value.plan?.status == "active", !isOffline {
+                return await changeRunCoach(action: "refresh", expectedRevision: value.revision)
+            }
+            // Paused/ended plans also need coherent dependent reads after a
+            // partial save, and an offline retry must restore reachability.
+            let refreshed = await refreshPlanState()
+            guard isCurrent() else { return false }
+            guard refreshed else {
+                runCoachError = "教练状态已更新，但训练安排未刷新，请重新连接后刷新。"
+                return false
+            }
+            if value.plan?.status == "active", value.revision == currentPlanRevision {
+                return await changeRunCoach(action: "refresh", expectedRevision: value.revision)
+            }
+            return true
+        } catch {
+            guard isCurrent() else { return false }
+            runCoachError = friendlyMessage(error)
+            return false
+        }
+    }
+
+    @discardableResult
+    func changeRunCoach(action: String, config: MobileRunCoachConfig? = nil, expectedRevision: Int? = nil) async -> Bool {
+        guard !isPlanBusy, !isOffline, let baseURL = session.serverURL,
+              let revision = expectedRevision ?? goals?.revision else { return false }
+        let configuration = configurationID
+        let token = session.apiToken
+        let requestID = UUID()
+        saveGoalsRequestID = requestID
+        isUpdatingRunCoach = true
+        defer { if saveGoalsRequestID == requestID { isUpdatingRunCoach = false } }
+        func isCurrent() -> Bool {
+            configuration == configurationID && baseURL == session.serverURL && token == session.apiToken &&
+                saveGoalsRequestID == requestID && !Task.isCancelled
+        }
+        do {
+            let value = try await api.runCoachCommand(MobileRunCoachCommand(expectedRevision: revision, action: action, config: config), baseURL: baseURL, token: token)
+            guard isCurrent() else { return false }
+            invalidatePlanReads()
+            minimumPlanRevision = max(minimumPlanRevision, value.revision)
+            runCoach = value
+            recordCache(value, key: "run-coach")
+            runCoachError = nil
+            let refreshed = await refreshPlanState()
+            guard isCurrent() else { return false }
+            if !refreshed { runCoachError = "教练计划已保存，但训练安排未刷新，请重新连接后刷新。" }
+            return true
+        } catch {
+            guard isCurrent() else { return false }
+            runCoachError = friendlyMessage(error)
+            if case RaiAPIClientError.server(let code, _, _) = error, code == "mobile_goals_revision_conflict" {
+                _ = await refreshPlanState()
+            }
+            return false
         }
     }
 
@@ -502,7 +587,6 @@ final class NativeAppModel {
 
     func saveGoals(
         expectedRevision: Int,
-        weeklyDistanceKm: Double,
         easyDurationFloorFraction: Double,
         qualitySessionCap: Int,
         weekPlan: [MobileGoalsPlanItem]
@@ -510,11 +594,10 @@ final class NativeAppModel {
         guard let current = goals else { return false }
         return await persistGoals(UpdateMobileGoalsRequest(
             expectedRevision: expectedRevision,
-            weeklyDistanceKm: weeklyDistanceKm,
             easyDurationFloorFraction: easyDurationFloorFraction,
             qualitySessionCap: qualitySessionCap,
             raceTarget: current.raceTarget,
-            weekPlan: weekPlan
+            weekPlan: current.weekPlanReplanRequired == true ? nil : weekPlan
         ))
     }
 
@@ -523,7 +606,6 @@ final class NativeAppModel {
         guard let current = goals else { return false }
         return await persistGoals(UpdateMobileGoalsRequest(
             expectedRevision: expectedRevision,
-            weeklyDistanceKm: current.weeklyDistanceKm,
             easyDurationFloorFraction: nil,
             qualitySessionCap: nil,
             raceTarget: target,
@@ -654,7 +736,7 @@ final class NativeAppModel {
         }
     }
 
-    /// Requests a preview, optionally generated by the server's fallback template.
+    /// Requests a deterministic coach preview.
     /// Only confirmPlanPreview persists it; creating or cancelling a preview
     /// leaves the runner's stored week unchanged.
     @discardableResult
@@ -848,16 +930,18 @@ final class NativeAppModel {
         return nil
     }
 
-    /// Turns a generation result into one honest sentence, including the reason
-    /// it fell back to the deterministic template.
-    ///
-    /// Two warnings are shown, not one: the first explains where the plan came
-    /// from and the second is usually that an existing plan was overwritten —
-    /// dropping either would hide something the runner needs to know.
+    nonisolated static func planSourceName(_ source: String) -> String {
+        switch source {
+        case "heuristic": return "规则教练生成"
+        case "manual": return "手工计划"
+        case "llm": return "历史模型课表"
+        default: return "来源未知"
+        }
+    }
+
+    /// Reports the plan's provenance and the first two adjustment warnings.
     nonisolated static func generationSummary(_ result: MobileWeeklyPlanGenerationResponse) -> String {
-        let source = result.audit.generatedBy == "llm"
-            ? "大模型生成（\(result.audit.model ?? "未标注模型")）"
-            : "已回退到保守模板"
+        let source = planSourceName(result.audit.generatedBy)
         let quality = result.days.filter { $0.kind == "tempo" || $0.kind == "interval" }.count
         let total = result.days.reduce(0) { $0 + ($1.distanceKm ?? 0) }
         var text = "\(source)：\(result.days.count) 天 / 质量课 \(quality) 堂 / 合计 \(String(format: "%.1f", total)) km。"
@@ -888,6 +972,11 @@ final class NativeAppModel {
         let cachedStatistics = cache.read(MobileStatisticsResponse.self, scope: cacheScope, key: "statistics")
         let cachedTrends = cache.read(MobileTrendsResponse.self, scope: cacheScope, key: "trends")
         let cachedGoals = cache.read(MobileGoalsResponse.self, scope: cacheScope, key: "goals")
+        if let cachedCoach = cache.read(MobileRunCoachResponse.self, scope: cacheScope, key: "run-coach"),
+           cachedCoach.value.revision >= max(currentPlanRevision, cachedGoals?.value.revision ?? 0) {
+            runCoach = cachedCoach.value
+            minimumPlanRevision = cachedCoach.value.revision
+        }
         let cachedPredictions = cache.read(NativePredictionResponse.self, scope: cacheScope, key: "predictions")
         let cachedZones = cache.read(NativeTrainingZonesCurrentResponse.self, scope: cacheScope, key: "training-zones")
         if let cachedToday,
@@ -958,6 +1047,8 @@ final class NativeAppModel {
         trends = nil
         goals = nil
         workoutPlan = nil
+        runCoach = nil
+        runCoachError = nil
         predictions = nil
         dashboard = nil
         trainingZones = nil
@@ -974,6 +1065,9 @@ final class NativeAppModel {
     private func invalidatePlanOperations() {
         invalidatePlanReads()
         saveGoalsRequestID = UUID()
+        runCoachRequestID = UUID()
+        isUpdatingRunCoach = false
+        isLoadingRunCoach = false
         isSavingGoals = false
         isSyncingPlan = false
         planSyncRequestID = UUID()
@@ -1006,6 +1100,7 @@ final class NativeAppModel {
         guard value.revision >= max(minimumPlanRevision, goals?.revision ?? 0) else { return }
         minimumPlanRevision = value.revision
         goals = value
+        if runCoach?.revision != value.revision { runCoach = nil }
         recordCache(value, key: "goals")
     }
 
@@ -1175,8 +1270,6 @@ enum NativeGoalWeekDraft {
     static func canEditDistance(_ kind: String) -> Bool {
         ["easy", "recovery", "long_run"].contains(kind)
     }
-    static let minWeeklyDistanceKm: Double = 1
-    static let maxWeeklyDistanceKm: Double = 500
     /// Above this a single day is a data-entry mistake rather than a workout.
     static let maxDayDistanceKm: Double = 80
 
@@ -1184,12 +1277,6 @@ enum NativeGoalWeekDraft {
     /// editor expresses "no distance set", which the server stores as null.
     static func parsedDistance(_ text: String) -> Double? {
         Double(text.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    static func weeklyDistanceIsValid(_ text: String) -> Bool {
-        parsedDistance(text).map {
-            $0.isFinite && (minWeeklyDistanceKm...maxWeeklyDistanceKm).contains($0)
-        } ?? false
     }
 
     static func dayDistanceIsValid(_ text: String) -> Bool {

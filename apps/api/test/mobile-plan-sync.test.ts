@@ -176,7 +176,7 @@ test("a cached read still sees this store's own writes", () => {
     assert.equal(store.planHistory()[0]?.revision, 0);
     assert.deepEqual(store.planPushes(SINCE), []);
 
-    const written = store.write({ weeklyDistanceKm: 44 });
+    const written = store.write({});
     store.recordPlanPush(pushReceipt("2026-09-16", "2026-09-15T06:00:00.000Z"));
 
     assert.equal(store.planHistory()[0]?.revision, written.revision);
@@ -236,7 +236,8 @@ test("a cached window matches the query it replaced", () => {
       );
     }
 
-    for (const revision of [2, 3]) store.write({ weeklyDistanceKm: 30 + revision });
+    // Two empty writes are enough to advance the revision past the cached window.
+    for (let i = 0; i < 2; i++) store.write({});
     for (const limit of [1, 2, 3, 999]) {
       assert.deepEqual(
         store.planHistory(limit).map((entry) => entry.revision),

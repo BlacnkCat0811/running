@@ -36,10 +36,11 @@ final class VisualAcceptance: XCTestCase {
         tree.name = name + "-accessibility"; tree.lifetime = .keepAlways; add(tree)
     }
 
-    func scrollTo(_ element: XCUIElement, limit: Int = 30, horizontalOffset: CGFloat = 0.07) {
+    func scrollTo(_ element: XCUIElement, limit: Int = 30, horizontalOffset: CGFloat = 0.07, inSheet: Bool = false) {
         // isHittable alone includes content obscured by the custom bottom bar.
         // Center the actual target in the unobscured scrolling region before tapping.
-        let bottom = app.buttons["tab.设置"].exists ? app.buttons["tab.设置"].frame.minY : app.windows.firstMatch.frame.height - 90
+        let bottom = inSheet ? app.windows.firstMatch.frame.height - 34 :
+            (app.buttons["tab.设置"].exists ? app.buttons["tab.设置"].frame.minY : app.windows.firstMatch.frame.height - 90)
         for _ in 0..<limit {
             if element.exists {
                 let frame = element.frame
@@ -195,19 +196,19 @@ final class VisualAcceptance: XCTestCase {
 
     func test03Plan() {
         app.buttons["打开训练计划"].tap(); sleep(2)
+        app.buttons["手动课表"].tap(); sleep(1)
         capture("03-plan")
         // The week strip and the watch panel sit above the editor button now, so
         // it no longer lands on the first screenful.
         scrollTo(app.buttons["编辑周计划"])
         app.buttons["编辑周计划"].tap(); capture("03-plan-editor")
-        let field = app.textFields["plan.weeklyDistance"]
-        XCTAssertTrue(field.exists)
-        field.tap()
-        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 12) + "501")
+        XCTAssertFalse(app.textFields["plan.weeklyDistance"].exists)
+        XCTAssertTrue(app.sliders.firstMatch.exists)
+        XCTAssertTrue(app.steppers.firstMatch.exists)
         let save = app.buttons["保存计划"]
         scrollTo(save)
-        XCTAssertFalse(save.isEnabled)
-        capture("03-plan-invalid")
+        XCTAssertTrue(save.isEnabled)
+        capture("03-plan-controls")
         app.buttons["取消"].tap()
         XCTAssertTrue(app.buttons["编辑周计划"].exists)
         capture("03-plan-cancelled")
@@ -266,18 +267,18 @@ final class VisualAcceptance: XCTestCase {
 
     func test11NativeBackGestureAndSafeArea() {
         app.buttons["打开训练计划"].tap()
-        XCTAssertTrue(app.navigationBars["训练计划"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["跑步教练"].waitForExistence(timeout: 10))
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.45))
         start.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.45)))
         XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.navigationBars["训练计划"].exists, "Native edge-back must pop the destination")
+        XCTAssertFalse(app.navigationBars["跑步教练"].exists, "Native edge-back must pop the destination")
         app.buttons["打开训练计划"].tap()
-        XCTAssertTrue(app.navigationBars["训练计划"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["跑步教练"].waitForExistence(timeout: 10))
         capture("11-visible-back")
         start.press(forDuration: 0.1,
                     thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.13, dy: 0.45)),
                     withVelocity: XCUIGestureVelocity(rawValue: 50), thenHoldForDuration: 0.4)
-        XCTAssertTrue(app.navigationBars["训练计划"].exists, "A short, slow edge gesture must be cancellable")
+        XCTAssertTrue(app.navigationBars["跑步教练"].exists, "A short, slow edge gesture must be cancellable")
         app.buttons["navigation.back"].tap()
         XCTAssertTrue(app.buttons["打开训练计划"].waitForExistence(timeout: 10))
         // `15e8126` moved the weekly/body entries into the header and updated
@@ -303,7 +304,7 @@ final class VisualAcceptance: XCTestCase {
         capture("11-home-safe-area")
     }
 
-    func test12LargeAbilityAndKeyboard() {
+    func test12LargeAbilityAndPlanEditor() {
         launch(large: true)
         scrollTo(app.buttons["today.ability"], limit: 50)
         app.buttons["today.ability"].tap()
@@ -315,15 +316,15 @@ final class VisualAcceptance: XCTestCase {
         // Restore Today at the top without depending on a huge accessibility scroll.
         tab("训练"); tab("今日")
         app.buttons["打开训练计划"].tap()
+        app.buttons["手动课表"].tap()
         scrollTo(app.buttons["编辑周计划"], limit: 60)
         app.buttons["编辑周计划"].tap()
-        let field = app.textFields["plan.weeklyDistance"]
-        scrollTo(field, limit: 40)
-        field.tap()
-        XCTAssertTrue(app.buttons["keyboard.done"].waitForExistence(timeout: 5))
-        capture("12-large-editor-keyboard")
-        app.buttons["keyboard.done"].tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["plan.weeklyDistance"].exists)
+        scrollTo(app.steppers.firstMatch, limit: 40)
+        XCTAssertTrue(app.steppers.firstMatch.isHittable)
+        capture("12-large-editor-controls")
+        scrollTo(app.buttons["保存计划"], limit: 40)
+        XCTAssertTrue(app.buttons["保存计划"].isEnabled)
         app.buttons["取消"].tap()
         capture("12-large-plan")
     }
@@ -371,6 +372,107 @@ final class VisualAcceptance: XCTestCase {
             app.swipeDown()
         }
     }
+
+    @MainActor
+    func test15RunCoachLifecycleAndLargeText() async throws {
+        let current = try await coachGoals()
+        if let plan = current["runCoach"] as? [String: Any], plan["status"] as? String != "ended" {
+            try await coachCommand("end", revision: try XCTUnwrap(current["revision"] as? Int))
+        }
+        launch()
+        app.buttons["打开训练计划"].tap()
+        XCTAssertTrue(app.buttons["coach.create"].waitForExistence(timeout: 15))
+        scrollTo(app.buttons["coach.create"]); app.buttons["coach.create"].tap()
+        XCTAssertTrue(app.navigationBars["创建教练计划"].waitForExistence(timeout: 10))
+        capture("15-coach-setup")
+        app.buttons["coach.setup.save"].tap()
+        guard app.buttons["coach.preferences"].waitForExistence(timeout: 20) else {
+            capture("15-coach-create-failed"); XCTFail("Coach creation did not finish"); return
+        }
+        XCTAssertTrue(app.staticTexts["改善跑步体能"].exists)
+        capture("15-coach-active")
+
+        app.buttons["coach.preferences"].tap()
+        XCTAssertTrue(app.navigationBars["训练偏好"].waitForExistence(timeout: 10))
+        scrollTo(app.buttons["心率"], limit: 30, inSheet: true)
+        app.buttons["心率"].tap()
+        let strength = app.switches["补充力量训练"]
+        scrollTo(strength, inSheet: true)
+        strength.switches.firstMatch.tap()
+        XCTAssertEqual(strength.value as? String, "1", "Tap the switch control, not the enclosing form row")
+        capture("15-coach-preferences")
+        XCTAssertTrue(app.buttons["coach.setup.save"].isEnabled, "A newly opened preferences sheet must capture the current revision")
+        app.buttons["coach.setup.save"].tap()
+        XCTAssertTrue(app.buttons["coach.preferences"].waitForExistence(timeout: 20))
+        let updated = try await coachGoals()
+        let profile = try XCTUnwrap(updated["runCoach"] as? [String: Any])
+        XCTAssertEqual(profile["targetType"] as? String, "heart_rate")
+        XCTAssertEqual(profile["strengthTraining"] as? Bool, true)
+
+        scrollTo(app.buttons["coach.pause-resume"])
+        app.buttons["coach.pause-resume"].tap(); app.buttons["暂停教练计划？"].tap()
+        XCTAssertTrue(app.staticTexts["已暂停"].waitForExistence(timeout: 15))
+        capture("15-coach-paused")
+        let (planData, _) = try await URLSession.shared.data(from: URL(string: server + "/v1/mobile/workout-plan")!)
+        let planPayload = try XCTUnwrap(try JSONSerialization.jsonObject(with: planData) as? [String: Any])
+        XCTAssertTrue((planPayload["days"] as? [[String: Any]] ?? []).allSatisfy { $0["executable"] as? Bool == false })
+        app.buttons["coach.pause-resume"].tap(); app.buttons["按当前训练状态继续计划？"].tap()
+        XCTAssertTrue(app.staticTexts["进行中"].waitForExistence(timeout: 15))
+
+        launch(large: true)
+        app.buttons["打开训练计划"].tap()
+        XCTAssertTrue(app.buttons["coach.preferences"].waitForExistence(timeout: 15))
+        XCTAssertLessThanOrEqual(app.staticTexts["改善跑步体能"].frame.maxX, app.staticTexts["进行中"].frame.minX)
+        XCTAssertLessThanOrEqual(app.buttons["coach.preferences"].frame.maxX, app.buttons["coach.pause-resume"].frame.minX)
+        capture("15-coach-large-overview")
+        scrollTo(app.buttons["coach.end"], limit: 70)
+        XCTAssertTrue(app.buttons["coach.end"].isHittable)
+        capture("15-coach-large-calendar")
+        app.buttons["coach.end"].tap(); app.buttons["结束当前教练计划？"].tap()
+        XCTAssertTrue(app.staticTexts["已结束"].waitForExistence(timeout: 15))
+        capture("15-coach-ended")
+        let ended = try await coachGoals()
+        XCTAssertEqual((ended["runCoach"] as? [String: Any])?["status"] as? String, "ended")
+    }
+
+    @MainActor
+    func test16RunCoachRaceSetup() async throws {
+        let current = try await coachGoals()
+        if let plan = current["runCoach"] as? [String: Any], plan["status"] as? String != "ended" {
+            try await coachCommand("end", revision: try XCTUnwrap(current["revision"] as? Int))
+            launch()
+        }
+        app.buttons["打开训练计划"].tap()
+        scrollTo(app.buttons["coach.create"]); app.buttons["coach.create"].tap()
+        app.buttons["coach.setup.goal"].tap(); app.buttons["目标时间"].tap()
+        app.buttons["coach.setup.distance"].tap(); app.buttons["半程马拉松"].tap()
+        capture("16-coach-time-goal")
+        app.buttons["coach.setup.save"].tap()
+        guard app.buttons["coach.preferences"].waitForExistence(timeout: 20) else {
+            capture("16-coach-create-failed"); XCTFail("Race coach creation did not finish"); return
+        }
+        let goals = try await coachGoals()
+        let profile = try XCTUnwrap(goals["runCoach"] as? [String: Any])
+        XCTAssertEqual(profile["goal"] as? String, "time")
+        XCTAssertEqual(profile["raceDistanceKm"] as? Double, 21.0975)
+        XCTAssertEqual(profile["targetTimeSeconds"] as? Double, 3600)
+        capture("16-coach-race-overview")
+        try await coachCommand("end", revision: try XCTUnwrap(goals["revision"] as? Int))
+    }
+
+    private func coachGoals() async throws -> [String: Any] {
+        let (data, response) = try await URLSession.shared.data(from: URL(string: server + "/v1/mobile/goals")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        return try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private func coachCommand(_ action: String, revision: Int) async throws {
+        var request = URLRequest(url: URL(string: server + "/v1/mobile/run-coach")!)
+        request.httpMethod = "POST"; request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["action": action, "expectedRevision": revision])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+    }
     @MainActor
     func test08FaultStates() async throws {
         try await proxyMode("normal")
@@ -383,6 +485,7 @@ final class VisualAcceptance: XCTestCase {
         if app.buttons["知道了"].exists { app.buttons["知道了"].tap() }
         capture("06-offline")
         app.buttons["打开训练计划"].tap()
+        app.buttons["手动课表"].tap()
         XCTAssertFalse(app.buttons["编辑周计划"].isEnabled)
         capture("06-offline-plan")
 
@@ -409,6 +512,7 @@ final class VisualAcceptance: XCTestCase {
         try await proxyMode("lock-preview")
         launchProxy(); sleep(8)
         app.buttons["打开训练计划"].tap()
+        app.buttons["手动课表"].tap()
         scrollTo(app.buttons["锁定今日安排"])
         app.buttons["锁定今日安排"].tap()
         capture("03-lock-preview-fixture")
@@ -427,18 +531,22 @@ final class VisualAcceptance: XCTestCase {
     @MainActor
     func test10RevisionConflict() async throws {
         app.buttons["打开训练计划"].tap()
+        app.buttons["手动课表"].tap()
         scrollTo(app.buttons["编辑周计划"])
         app.buttons["编辑周计划"].tap()
         let url = URL(string: server + "/v1/mobile/goals")!
         let (body, _) = try await URLSession.shared.data(from: url)
         let before = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         let revision = try XCTUnwrap(before["revision"] as? Int)
-        let weekly = try XCTUnwrap(before["weeklyDistanceKm"] as? Double)
-        let changed = weekly >= 499.9 ? weekly - 0.1 : weekly + 0.1
+        // Bump a goal the editor still owns. The weekly distance used to be the
+        // scratch field here; it is retired, so `easyDurationFloorFraction` moves
+        // within its own legal range instead.
+        let floor = try XCTUnwrap(before["easyDurationFloorFraction"] as? Double)
+        let changed = floor >= 0.9 ? floor - 0.05 : floor + 0.05
         var request = URLRequest(url: url)
         request.httpMethod = "PUT"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["expectedRevision": revision, "weeklyDistanceKm": changed])
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["expectedRevision": revision, "easyDurationFloorFraction": changed])
         let (_, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
         scrollTo(app.buttons["保存计划"])

@@ -1,23 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import type { MobilePlannedDay, MobileSessionStructure, MobileTodayResponse } from "@rai/api-contracts";
 
-import { buildWeeklyPlanPrompt, WEEKLY_PLAN_PROMPT_VERSION } from "../src/weekly-plan-prompt.js";
-import { buildPeriodization, currentPeriodizationWeek } from "../src/plan-periodization.js";
+import { buildPeriodization } from "../src/plan-periodization.js";
 import type { CoachZonePrescription } from "../src/mobile-coach.js";
 import { buildSessionStructure, measureStructure, pacesFromZones, roundKm } from "../src/mobile-coach.js";
-import {
-  DEFAULT_TOTAL_BUDGET_MS,
-  MAX_LLM_RESPONSE_BYTES,
-  createPlanModelClient,
-  llmConfigFromEnv
-} from "../src/weekly-plan-llm.js";
 import { MAX_PLANNED_DISTANCE_KM, structureWorkRepetitions } from "../src/session-structure.js";
-import { readStripped, sourceFiles } from "./source-scan.js";
 import { ManualPlanPolicyError, validateManualPlan } from "../src/manual-plan-policy.js";
 import { MobileGoalsStore } from "../src/mobile-goals.js";
 import type { MobileGoalsResponse } from "@rai/api-contracts";
@@ -30,7 +22,7 @@ import {
   weeklyPlanDates
 } from "../src/weekly-plan-service.js";
 import {
-  buildFallbackWeekPlan,
+  buildCoachWeekPlan,
   parsePlanJson,
   RAMP_BASE_FLOOR_FRACTION,
   RAMP_LIMIT_FRACTION,
@@ -53,6 +45,17 @@ const PRESCRIPTION: CoachZonePrescription = {
 };
 
 const TODAY = "2026-09-07";
+
+/**
+ * Capacity stands in for the stored weekly goal these tests used to pass.
+ *
+ * Both numbers are deliberately equal so every assertion below keeps its exact
+ * value: the ceiling baseline and the observed volume the phase bands scale used
+ * to be one field and are now two, and pinning them equal is what makes this
+ * file a regression test for "the number changed hands, not the arithmetic".
+ * `weekly-capacity.test.ts` is where the two are pulled apart on purpose.
+ */
+const capacityInputs = (km: number) => ({ weeklyVolumeBaselineKm: km, recentWeeklyKm: km });
 
 const todayPayload = (overrides: Record<string, unknown> = {}): MobileTodayResponse =>
   ({
@@ -84,7 +87,7 @@ const todayPayload = (overrides: Record<string, unknown> = {}): MobileTodayRespo
     freshness: { state: "valid", checkedAt: "2026-09-07T00:30:00.000Z", latestTrainingDate: "2026-09-06", recoveryDate: "2026-09-07" },
     recommendationRevision: "rev-1",
     today: { localDate: TODAY, distanceKm: 0, durationSeconds: 0, paceSecondsPerKm: null, energyKcal: null, workoutCount: 0 },
-    week: { periodStart: "2026-09-07", periodEnd: "2026-09-13", distanceKm: 12, durationSeconds: 4200, workoutCount: 2, goalDistanceKm: 40, goalProgressFraction: 0.3 },
+    week: { periodStart: "2026-09-07", periodEnd: "2026-09-13", distanceKm: 12, durationSeconds: 4200, workoutCount: 2 },
     weekDaily: [],
     recentWorkouts: [],
     ability: { trueAbility: 44, currentAbility: 43.5, changeFrom7DaysAgo: 0.2, growthVelocityPerWeek: 0.1, decayPoints: 0, snapshotDate: "2026-09-06", explanation: "" },
@@ -114,37 +117,36 @@ const validateArgs = (raw: string, overrides: Partial<Parameters<typeof validate
   ...overrides
 });
 
-for (const producer of ["heuristic", "llm"] as const) {
-  test(`phase ceiling constrains ${producer} structures and survives read-time validation`, async () => {
-    const args = {
-      today: todayPayload({
-        today: { localDate: "2026-10-05", workoutCount: 0 },
-        week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 }
-      }),
-      goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2,
-        raceTarget: { date: "2026-10-24", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } },
-      prescription: PRESCRIPTION,
-      previousWeekDistanceKm: 40,
-      client: producer === "heuristic" ? null : { provider: "openai" as const, model: "fixture", complete: async () => JSON.stringify({ days: weeklyPlanDates("2026-10-05").map(localDate => ({ localDate, kind: "easy", distanceKm: 8 })) }) }
-    };
-    const result = await generateWeeklyPlan(args);
-    assert.equal(result.audit.generatedBy, producer);
-    const executableKm = result.days.reduce((sum, day) => sum + (day.structure ? measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)).distanceKm : 0), 0);
-    assert.ok(executableKm <= 30 + 1e-6, `structure total ${executableKm}`);
-    for (const day of result.days) if (day.structure) {
-      assert.equal(day.distanceKm, roundKm(measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)).distanceKm));
-    }
-    assert.deepEqual(constrainUpcomingPlan(result.days, args), result.days);
-  });
-}
+test("phase ceiling constrains coach structures and survives read-time validation", async () => {
+  const args = {
+    today: todayPayload({
+      today: { localDate: "2026-10-05", workoutCount: 0 },
+      week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 }
+    }),
+    goals: { easyDurationFloorFraction: 0.7, qualitySessionCap: 2,
+      raceTarget: { date: "2026-10-24", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } },
+    ...capacityInputs(40),
+    prescription: PRESCRIPTION,
+    previousWeekDistanceKm: 40
+  };
+  const result = await generateWeeklyPlan(args);
+  assert.equal(result.audit.generatedBy, "heuristic");
+  const executableKm = result.days.reduce((sum, day) => sum + (day.structure ? measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)).distanceKm : 0), 0);
+  assert.ok(executableKm <= 30 + 1e-6, `structure total ${executableKm}`);
+  for (const day of result.days) if (day.structure) {
+    assert.equal(day.distanceKm, roundKm(measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)).distanceKm));
+  }
+  assert.deepEqual(constrainUpcomingPlan(result.days, args), result.days);
+});
 
 test("base phase caps quality sessions while a rolling window applies next week's own budget", async () => {
   const args = {
     today: todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
       week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 } }),
-    goals: { weeklyDistanceKm: 80, easyDurationFloorFraction: 0.5, qualitySessionCap: 2,
+    goals: { easyDurationFloorFraction: 0.5, qualitySessionCap: 2,
       raceTarget: { date: "2027-01-10", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } },
-    prescription: PRESCRIPTION, client: null
+    ...capacityInputs(80),
+    prescription: PRESCRIPTION
   };
   const base = await generateWeeklyPlan(args);
   assert.ok(base.days.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length <= 1);
@@ -153,7 +155,7 @@ test("base phase caps quality sessions while a rolling window applies next week'
 
   const today = todayPayload({ today: { localDate: "2026-10-09", workoutCount: 0 },
     week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 12 } });
-  const rollingArgs = { ...args, today, goals: { ...args.goals, weeklyDistanceKm: 40,
+  const rollingArgs = { ...args, today, ...capacityInputs(40), goals: { ...args.goals,
     raceTarget: { date: "2026-10-18", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } } };
   const days = weeklyPlanDates("2026-10-09").map(localDate => ({ localDate, kind: "easy" as const, distanceKm: 12, structure: null, reason: null }));
   const constrained = constrainUpcomingPlan(days, rollingArgs);
@@ -167,21 +169,21 @@ test("phase long-run limits bind executable single sessions below the weekly cei
     week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 },
     periodization: buildPeriodization({ today: "2026-10-05", raceTarget, recentWeeklyKm: 40 }) });
   // Isolate the single-session cap; long-run-only easy-floor repair is tested separately.
-  const goals = { weeklyDistanceKm: 40, qualitySessionCap: 2, easyDurationFloorFraction: 0, raceTarget };
+  const goals = { qualitySessionCap: 2, easyDurationFloorFraction: 0, raceTarget };
   const proposed: MobilePlannedDay[] = [{ localDate: "2026-10-05", kind: "long_run", distanceKm: 29, structure: null, reason: null }];
   const cap = today.periodization!.current!.longRunCapKm;
   assert.equal(cap, 9);
   assert.ok(29 < today.periodization!.current!.volumeBandKm.upper);
   const warnings: string[] = [];
-  const result = constrainUpcomingPlan(proposed, { today, goals, prescription: PRESCRIPTION }, warnings);
+  const result = constrainUpcomingPlan(proposed, { today, goals, ...capacityInputs(40), prescription: PRESCRIPTION }, warnings);
   const run = result.find(day => day.kind === "long_run")!;
   assert.ok(run.distanceKm! <= cap);
   assert.ok(measureStructure(run.structure!, run.kind, pacesFromZones(PRESCRIPTION)).distanceKm <= cap);
   assert.ok(warnings.some(message => message.includes("长距离超过阶段上限")));
-  assert.deepEqual(constrainUpcomingPlan(result, { today, goals, prescription: PRESCRIPTION }), result);
-  assert.throws(() => validateManualPlan({ ...goals, weekPlan: proposed } as MobileGoalsResponse,
-    today, PRESCRIPTION, 40), ManualPlanPolicyError);
-  const noTarget = constrainUpcomingPlan(proposed, { today, goals: { ...goals, raceTarget: null }, prescription: PRESCRIPTION });
+  assert.deepEqual(constrainUpcomingPlan(result, { today, goals, ...capacityInputs(40), prescription: PRESCRIPTION }), result);
+  assert.throws(() => validateManualPlan({ goals: { ...goals, weekPlan: proposed } as MobileGoalsResponse,
+    today, prescription: PRESCRIPTION, previousWeekDistanceKm: 40, ...capacityInputs(40) }), ManualPlanPolicyError);
+  const noTarget = constrainUpcomingPlan(proposed, { today, goals: { ...goals, raceTarget: null }, ...capacityInputs(40), prescription: PRESCRIPTION });
   assert.ok(noTarget[0]!.distanceKm! > cap, "a stale skeleton must not limit a removed target");
   const tiny = validateWeeklyPlan(validateArgs(JSON.stringify({ days: proposed }), {
     allowedDates: ["2026-10-05"], longRunCapKm: 0.1
@@ -190,20 +192,20 @@ test("phase long-run limits bind executable single sessions below the weekly cei
 });
 
 test("phase budgets reserve locked sessions and completed volume without rewriting today", () => {
-  const goals = { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.5, qualitySessionCap: 2,
+  const goals = { easyDurationFloorFraction: 0.5, qualitySessionCap: 2,
     raceTarget: { date: "2027-01-10", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 } };
   const proposed = weeklyPlanDates("2026-10-05").map(localDate => ({ localDate, kind: "tempo" as const, distanceKm: 8, structure: null, reason: null }));
   const locked = todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
     week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 10 },
     lock: { present: true }, nextSession: { kind: "tempo", distanceKm: 8 } });
-  const result = constrainUpcomingPlan(proposed, { today: locked, goals, prescription: PRESCRIPTION });
+  const result = constrainUpcomingPlan(proposed, { today: locked, goals, ...capacityInputs(40), prescription: PRESCRIPTION });
   assert.ok(result.every(day => day.localDate !== "2026-10-05"));
   assert.ok(result.every(day => !["tempo", "interval", "race"].includes(day.kind)));
   assert.ok(result.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 22);
   const completed = todayPayload({ ...locked, today: { localDate: "2026-10-05", workoutCount: 1 },
     week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 39.9 },
     weekStructure: { qualitySessionCount: 1 } });
-  const remaining = constrainUpcomingPlan(proposed, { today: completed, goals, prescription: PRESCRIPTION });
+  const remaining = constrainUpcomingPlan(proposed, { today: completed, goals, ...capacityInputs(40), prescription: PRESCRIPTION });
   assert.ok(remaining.every(day => day.kind === "rest"), "a budget below one session must not retain an oversized minimum run");
 });
 
@@ -213,8 +215,9 @@ test("generation and reads use the displayed phase band based on actual recent v
     today: todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
       week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 },
       periodization: buildPeriodization({ today: "2026-10-05", raceTarget, recentWeeklyKm: 20 }) }),
-    goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget },
-    prescription: PRESCRIPTION, client: null
+    goals: { easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget },
+    ...capacityInputs(40),
+    prescription: PRESCRIPTION
   };
   const generated = await generateWeeklyPlan(args);
   assert.equal(args.today.periodization!.current!.volumeBandKm.upper, 15);
@@ -237,12 +240,11 @@ test("phase volume shrinking preserves the final easy-time floor and is idempote
     today: todayPayload({ today: { localDate, workoutCount: 0 },
       week: { periodStart: localDate, periodEnd: "2026-10-11", distanceKm: 0 },
       periodization: buildPeriodization({ today: localDate, raceTarget, recentWeeklyKm: 20 }) }),
-    goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget },
-    prescription: PRESCRIPTION,
-    client: { provider: "openai", model: "fixture", complete: async () => JSON.stringify({ days: proposed }) }
+    goals: { easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget },
+    ...capacityInputs(40),
+    prescription: PRESCRIPTION
   };
-  const result = await generateWeeklyPlan(args);
-  assert.equal(result.audit.generatedBy, "llm");
+  const result = { days: constrainUpcomingPlan(proposed as MobilePlannedDay[], args) };
   const ceiling = args.today.periodization!.current!.volumeBandKm.upper;
   const measured = result.days.map(day => ({ day,
     size: day.structure ? measureStructure(day.structure, day.kind, pacesFromZones(PRESCRIPTION)) :
@@ -304,20 +306,20 @@ test("rolling generation reserves retained next-week distance and quality sessio
   const weekPlan = weeklyPlanDates("2026-10-15", 4).map((localDate, index) => ({
     localDate, kind: index < 2 ? "tempo" as const : "easy" as const, distanceKm: 8, structure: null, reason: "retain"
   }));
-  const goals = { weeklyDistanceKm: 40, qualitySessionCap: 2, easyDurationFloorFraction: 0,
+  const goals = { qualitySessionCap: 2, easyDurationFloorFraction: 0,
     raceTarget: null, weekPlan };
   const proposed = weeklyPlanDates("2026-10-08").map(localDate => ({ localDate,
     kind: localDate <= "2026-10-11" ? "rest" as const : "tempo" as const,
     distanceKm: localDate <= "2026-10-11" ? null : 10, structure: null, reason: null }));
   const warnings: string[] = [];
-  const result = constrainUpcomingPlan(proposed, { today, goals, prescription: PRESCRIPTION }, warnings);
+  const result = constrainUpcomingPlan(proposed, { today, goals, ...capacityInputs(40), prescription: PRESCRIPTION }, warnings);
   const merged = mergePlanWindow(weekPlan, result, "2026-10-08");
   const nextWeek = merged.filter(day => day.localDate >= "2026-10-12");
   assert.ok(nextWeek.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 40);
   assert.equal(nextWeek.filter(day => ["tempo", "interval", "race"].includes(day.kind)).length, 2);
   assert.deepEqual(merged.filter(day => day.localDate >= "2026-10-15"), weekPlan);
   assert.ok(warnings.some(message => message.includes("窗口外保留")));
-  const generated = await generateWeeklyPlan({ today, goals, prescription: PRESCRIPTION, client: null });
+  const generated = await generateWeeklyPlan({ today, goals, ...capacityInputs(40), prescription: PRESCRIPTION });
   assert.ok(mergePlanWindow(weekPlan, generated.days, "2026-10-08")
     .filter(day => day.localDate >= "2026-10-12").reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 40);
   const root = mkdtempSync(join(tmpdir(), "rai-retained-budget-"));
@@ -338,8 +340,8 @@ test("retained budgets measure executable structure instead of stale distance hi
   const measured = measureStructure(retained.structure!, retained.kind, pacesFromZones(PRESCRIPTION)).distanceKm;
   const proposed = weeklyPlanDates("2026-10-08").map(localDate => ({ localDate,
     kind: "easy" as const, distanceKm: 10, structure: null, reason: null }));
-  const result = constrainUpcomingPlan(proposed, { today, prescription: PRESCRIPTION,
-    goals: { weeklyDistanceKm: 40, qualitySessionCap: 2, easyDurationFloorFraction: 0.7,
+  const result = constrainUpcomingPlan(proposed, { today, prescription: PRESCRIPTION, ...capacityInputs(40),
+    goals: { qualitySessionCap: 2, easyDurationFloorFraction: 0.7,
       raceTarget: null, weekPlan: [retained] } });
   assert.ok(result.filter(day => day.localDate > "2026-10-11")
     .reduce((sum, day) => sum + (day.distanceKm ?? 0), measured) <= 40);
@@ -506,10 +508,10 @@ test("manual easy plans cannot bypass injury guards with high heart-rate alerts"
     structure: { warmup: null, cooldown: null, blocks: [{ iterations: 1, steps: [
       { purpose: "work", goal: { type: "distance", meters: 5000 }, alert: { kind: "heart_rate", lower: 200, upper: 210 } }
     ] }] } };
-  const goals = { revision: 0, weeklyDistanceKm: 40, qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
+  const goals = { revision: 0, qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
     raceTarget: null, weekPlan: [day] } as MobileGoalsResponse;
-  assert.throws(() => validateManualPlan(goals, todayPayload({ week: { periodStart: TODAY, distanceKm: 0 },
-    injuryFlags: [{ code: "quality_cluster" }] }), PRESCRIPTION, 40), ManualPlanPolicyError);
+  assert.throws(() => validateManualPlan({ goals, today: todayPayload({ week: { periodStart: TODAY, distanceKm: 0 },
+    injuryFlags: [{ code: "quality_cluster" }] }), prescription: PRESCRIPTION, previousWeekDistanceKm: 40, ...capacityInputs(40) }), ManualPlanPolicyError);
 });
 
 test("unknown pace bounds remove alerts on every step and reject the corresponding manual plans", () => {
@@ -532,10 +534,10 @@ test("unknown pace bounds remove alerts on every step and reject the correspondi
       assert.ok([safe.warmup, ...safe.blocks.flatMap(block => block.steps), safe.cooldown]
         .every(step => step?.alert == null), `${target} must not retain an ungrounded pace target`);
       assert.ok(result.clamped.some(message => message.includes("无可靠配速区间时移除目标")));
-      const goals = { revision: 0, weeklyDistanceKm: 40, qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
+      const goals = { revision: 0, qualitySessionCap: 0, easyDurationFloorFraction: 0.8,
         raceTarget: null, weekPlan: [day] } as MobileGoalsResponse;
-      assert.throws(() => validateManualPlan(goals, todayPayload({ week: { periodStart: TODAY, distanceKm: 0 },
-        injuryFlags: [{ code: "load_ratio" }] }), prescription, 40), ManualPlanPolicyError);
+      assert.throws(() => validateManualPlan({ goals, today: todayPayload({ week: { periodStart: TODAY, distanceKm: 0 },
+        injuryFlags: [{ code: "load_ratio" }] }), prescription, previousWeekDistanceKm: 40, ...capacityInputs(40) }), ManualPlanPolicyError);
     }
   }
 });
@@ -558,10 +560,10 @@ test("long-run-only plans cannot abandon the easy-duration floor after all quali
         assert.ok(measured.distanceKm <= 4 + 1e-6, "repair must not expand a long run");
         assert.equal(day.distanceKm, roundKm(measured.distanceKm));
       }
-      const goals = { revision: 0, weeklyDistanceKm: 40, qualitySessionCap: 0, easyDurationFloorFraction: 1,
+      const goals = { revision: 0, qualitySessionCap: 0, easyDurationFloorFraction: 1,
         raceTarget: null, weekPlan: days } as MobileGoalsResponse;
-      assert.throws(() => validateManualPlan(goals,
-        todayPayload({ week: { periodStart: TODAY, distanceKm: 0 } }), prescription, 40), ManualPlanPolicyError);
+      assert.throws(() => validateManualPlan({ goals,
+        today: todayPayload({ week: { periodStart: TODAY, distanceKm: 0 } }), prescription, previousWeekDistanceKm: 40, ...capacityInputs(40) }), ManualPlanPolicyError);
       const repeated = validateWeeklyPlan(validateArgs(JSON.stringify({ days: result.days }), {
         prescription, qualitySessionCap: 0, easyDurationFloorFraction: 1
       }));
@@ -733,7 +735,7 @@ test("malformed structures are dropped and rebuilt from the session kind", () =>
 
 test("fallback plan covers the whole window and stays conservative", () => {
   const dates = weeklyPlanDates(TODAY);
-  const days = buildFallbackWeekPlan({
+  const days = buildCoachWeekPlan({
     allowedDates: dates,
     prescription: PRESCRIPTION,
     weeklyDistanceKm: 35,
@@ -748,7 +750,7 @@ test("fallback plan covers the whole window and stays conservative", () => {
     / measured.reduce((sum, row) => sum + row.seconds, 0) >= 0.7);
   assert.equal(days.every((day) => day.structure != null), true);
 
-  const blocked = buildFallbackWeekPlan({
+  const blocked = buildCoachWeekPlan({
     allowedDates: dates,
     prescription: PRESCRIPTION,
     weeklyDistanceKm: 35,
@@ -765,7 +767,7 @@ test("a week too small for quality work stays easy-only and inside the goal", ()
   // unpayable and no easy day ever reached the floor, so a 5 km goal produced
   // ~28.8 km — the default path for a deployment without an LLM key.
   for (const goal of [5, 8, 15]) {
-    const days = buildFallbackWeekPlan({
+    const days = buildCoachWeekPlan({
       allowedDates: weeklyPlanDates(TODAY),
       prescription: PRESCRIPTION,
       weeklyDistanceKm: goal,
@@ -794,7 +796,7 @@ test("a week too small for quality work stays easy-only and inside the goal", ()
 
 test("the fallback template is held to the ramp ceiling too", () => {
   const total = (previousWeekDistanceKm: number | null): number =>
-    buildFallbackWeekPlan({
+    buildCoachWeekPlan({
       allowedDates: weeklyPlanDates(TODAY),
       prescription: PRESCRIPTION,
       weeklyDistanceKm: 40,
@@ -813,232 +815,74 @@ test("the fallback template is held to the ramp ceiling too", () => {
   assert.ok(total(38) >= 38, `an earned week was cut to ${total(38)}km`);
 });
 
-test("generation falls back when no model is configured", async () => {
-  const result = await generateWeeklyPlan({
+test("coach generation is deterministic, structured and has no fallback warning", async () => {
+  const args = {
     today: todayPayload(),
-    goals: { weeklyDistanceKm: 35, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget: null },
+    goals: { easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget: null },
+    ...capacityInputs(35),
     prescription: PRESCRIPTION,
-    client: null
-  });
+    now: new Date("2026-09-07T00:00:00Z")
+  };
+  const result = await generateWeeklyPlan(args);
+  assert.deepEqual(await generateWeeklyPlan(args), result);
   assert.equal(result.audit.generatedBy, "heuristic");
   assert.equal(result.audit.model, null);
+  assert.equal(result.audit.promptVersion, null);
   assert.equal(result.days.length, 7);
-  assert.ok(result.warnings.some((entry) => entry.includes("RAI_LLM_API_KEY")));
+  assert.ok(result.days.filter(day => day.kind !== "rest").every(day => day.structure != null));
+  assert.ok(result.warnings.every(entry => !/模型|回退|RAI_LLM/.test(entry)));
 });
 
-test("generation falls back when the model call fails or returns garbage", async () => {
-  const failing = {
-    provider: "deepseek",
-    model: "deepseek-chat",
-    complete: async () => {
-      throw new Error("网络不可达");
-    }
+test("migration previews reserve today's unchanged prescription and quality budget", async () => {
+  const args = {
+    today: todayPayload({ nextSession: { kind: "interval", distanceKm: 10 },
+      week: { periodStart: TODAY, periodEnd: "2026-09-13", distanceKm: 0 } }),
+    goals: { easyDurationFloorFraction: 0.7, qualitySessionCap: 2,
+      raceTarget: null, weekPlanReplanRequired: true },
+    ...capacityInputs(40),
+    prescription: PRESCRIPTION
   };
-  const failed = await generateWeeklyPlan({
-    today: todayPayload(),
-    goals: { weeklyDistanceKm: 35, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget: null },
-    prescription: PRESCRIPTION,
-    client: failing
-  });
-  assert.equal(failed.audit.generatedBy, "heuristic");
-  assert.ok(failed.warnings.some((entry) => entry.includes("模型调用失败")));
-
-  const garbage = {
-    provider: "deepseek",
-    model: "deepseek-chat",
-    complete: async () => "抱歉，我无法完成。"
-  };
-  const invalid = await generateWeeklyPlan({
-    today: todayPayload(),
-    goals: { weeklyDistanceKm: 35, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget: null },
-    prescription: PRESCRIPTION,
-    client: garbage
-  });
-  assert.equal(invalid.audit.generatedBy, "heuristic");
-  assert.equal(invalid.days.length, 7);
+  const result = await generateWeeklyPlan(args);
+  assert.equal(result.days.length, 6);
+  assert.ok(result.days.every(day => day.localDate > TODAY));
+  assert.ok(result.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0) <= 30);
+  assert.ok(result.days.filter(day => ["interval", "tempo"].includes(day.kind)).length <= 1);
 });
 
-test("a valid model response is accepted and audited", async () => {
-  const payload = JSON.stringify({
-    days: [
-      { localDate: "2026-09-07", kind: "easy", distanceKm: 8, reason: "今天轻松", structure: null },
-      { localDate: "2026-09-08", kind: "interval", distanceKm: 9, reason: "VO2", structure: null },
-      { localDate: "2026-09-09", kind: "rest", distanceKm: null, reason: "休息", structure: null },
-      { localDate: "2026-09-10", kind: "easy", distanceKm: 8, reason: "轻松", structure: null },
-      { localDate: "2026-09-11", kind: "easy", distanceKm: 8, reason: "轻松", structure: null },
-      { localDate: "2026-09-12", kind: "tempo", distanceKm: 10, reason: "阈值", structure: null },
-      { localDate: "2026-09-13", kind: "long_run", distanceKm: 14, reason: "长距离", structure: null }
-    ]
-  });
-  const client = { provider: "deepseek", model: "deepseek-chat", complete: async () => payload };
-  const result = await generateWeeklyPlan({
-    today: todayPayload(),
-    goals: { weeklyDistanceKm: 45, easyDurationFloorFraction: 0.5, qualitySessionCap: 2, raceTarget: null },
-    prescription: PRESCRIPTION,
-    client
-  });
-  assert.equal(result.audit.generatedBy, "llm");
-  assert.equal(result.audit.model, "deepseek:deepseek-chat");
-  assert.equal(result.audit.promptVersion, "weekly-plan-v3");
-  assert.equal(result.days.length, 7);
-  // every non-rest day is rebuilt with a real structure
-  assert.equal(result.days.filter((day) => day.kind !== "rest").every((day) => day.structure != null), true);
+test("confirmed migration days remain frozen for regeneration and manual edits", async () => {
+  const protectedDay = { localDate: TODAY, kind: "easy" as const, distanceKm: 8, structure: null, reason: "旧处方" };
+  const today = todayPayload({ nextSession: { kind: "easy", distanceKm: 8 },
+    week: { periodStart: TODAY, periodEnd: "2026-09-13", distanceKm: 0 } });
+  const goals = { revision: 2, easyDurationFloorFraction: 0.8, qualitySessionCap: 2,
+    raceTarget: null, weekPlan: [protectedDay], lockedSession: null, weekPlanAudit: null,
+    weekPlanReplanRequired: false, weekPlanPreservedDate: TODAY, updatedAt: "2026-09-07T01:00:00Z" };
+  const args = { today, goals, ...capacityInputs(5), prescription: PRESCRIPTION };
+  const result = await generateWeeklyPlan(args);
+  assert.ok(result.days.every(day => day.localDate > TODAY));
+  assert.ok(result.days.every(day => day.kind === "rest"), "the old day spends more than this week's new budget");
+  const manualArgs = { ...args, previousWeekDistanceKm: 0, previous: goals };
+  assert.doesNotThrow(() => validateManualPlan(manualArgs));
+  assert.throws(() => validateManualPlan({ ...manualArgs, goals: { ...goals, weekPlan: [] } }), ManualPlanPolicyError);
+  assert.throws(() => validateManualPlan({ ...manualArgs,
+    goals: { ...goals, weekPlan: [{ ...protectedDay, distanceKm: 4 }] } }), ManualPlanPolicyError);
+  const expired = await generateWeeklyPlan({ ...args, goals: { ...goals, weekPlanPreservedDate: "2026-09-06" } });
+  assert.ok(expired.days.some(day => day.localDate === TODAY), "yesterday's protection cannot freeze today");
 });
 
-test("llm configuration comes from the environment and never invents a key", () => {
-  assert.equal(llmConfigFromEnv({}), null);
-  const deepseek = llmConfigFromEnv({ RAI_LLM_API_KEY: "sk-test" });
-  assert.equal(deepseek?.provider, "deepseek");
-  assert.equal(deepseek?.model, "deepseek-chat");
-  assert.equal(deepseek?.baseUrl, "https://api.deepseek.com");
-  const openai = llmConfigFromEnv({
-    RAI_LLM_API_KEY: "sk-test",
-    RAI_LLM_PROVIDER: "OpenAI",
-    RAI_LLM_MODEL: "gpt-4o",
-    RAI_LLM_BASE_URL: "https://api.openai.com/v1/"
-  });
-  assert.equal(openai?.provider, "openai");
-  assert.equal(openai?.model, "gpt-4o");
-  assert.equal(openai?.baseUrl, "https://api.openai.com/v1");
+test("missing execution imports never increase the coach's prescribed volume", async () => {
+  const args = { today: todayPayload(), goals: { easyDurationFloorFraction: 0.7,
+    qualitySessionCap: 2, raceTarget: null }, ...capacityInputs(40), prescription: PRESCRIPTION,
+    now: new Date("2026-09-07T00:00:00Z") };
+  const expected = await generateWeeklyPlan(args);
+  for (const status of ["pending", "unknown"]) {
+    const result = await generateWeeklyPlan({ ...args, today: todayPayload({ recentPlanExecution: [{
+      localDate: "2026-09-06", planRevision: 1, plannedKind: "easy", plannedDistanceKm: 8,
+      observedDistanceKm: 0, observedWorkoutCount: 0, distanceRatio: null, status
+    }] }) });
+    assert.deepEqual(result, expected);
+  }
 });
 
-test("the model client sends a bearer token and retries once on server errors", async () => {
-  const calls: Array<{ url: string; auth: string | undefined }> = [];
-  let attempts = 0;
-  const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
-    attempts += 1;
-    calls.push({
-      url: String(url),
-      auth: (init?.headers as Record<string, string> | undefined)?.authorization
-    });
-    if (attempts === 1) {
-      return new Response("upstream error", { status: 503 });
-    }
-    return new Response(JSON.stringify({ choices: [{ message: { content: '{"days":[]}' } }] }), { status: 200 });
-  }) as unknown as typeof fetch;
-
-  const client = createPlanModelClient(
-    { provider: "deepseek", model: "deepseek-chat", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
-    { fetchImpl }
-  );
-  const content = await client.complete({ system: "s", user: "u" });
-  assert.equal(content, '{"days":[]}');
-  assert.equal(attempts, 2);
-  assert.equal(calls[0]?.url, "https://api.deepseek.com/chat/completions");
-  assert.equal(calls[0]?.auth, "Bearer sk-secret");
-});
-
-test("the output budget leaves room for the plan after a reasoning model's hidden tokens", async () => {
-  const budgets: number[] = [];
-  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { max_tokens?: number };
-    budgets.push(Number(body.max_tokens));
-    return new Response(JSON.stringify({ choices: [{ message: { content: '{"days":[]}' } }] }), { status: 200 });
-  }) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
-    { fetchImpl }
-  );
-  await client.complete({ system: "s", user: "u" });
-  // A reasoning model bills its hidden tokens against `max_tokens`. A measured
-  // week spent 2921 reasoning tokens plus roughly 1150 visible ones, so at 4096
-  // the JSON was cut off mid-object, `parsePlanJson` found no `days` array, and
-  // the whole week was silently replaced by the conservative template.
-  const budget = budgets[0] ?? 0;
-  assert.ok(budget >= 8192, `max_tokens ${budget} leaves too little room for the visible plan after reasoning`);
-});
-
-test("a response the provider truncated is rejected instead of parsed", async () => {
-  // `finish_reason: "length"` means the JSON was cut off mid-object. Parsing that
-  // string is what let `parsePlanJson` find no `days` array and quietly fall back
-  // to the template, with nothing in the log naming the truncation.
-  let attempts = 0;
-  const fetchImpl = (async () => {
-    attempts += 1;
-    return new Response(
-      JSON.stringify({ choices: [{ finish_reason: "length", message: { content: '{"days":[{"local' } }] }),
-      { status: 200 }
-    );
-  }) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
-    { fetchImpl }
-  );
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /截断/);
-  // Not retried: the retry would send the same `max_tokens`, so it truncates the
-  // same way while spending what is left of the caller's budget — and the abort
-  // that ends *that* attempt is what would then be reported.
-  assert.equal(attempts, 1);
-});
-
-test("a retry killed by our own deadline does not erase the cause", async () => {
-  // The first failure is the provider's; the second is our shrinking timeout. The
-  // report must name the provider's, because "the operation was aborted" describes
-  // this function's deadline, not what went wrong.
-  let attempts = 0;
-  const fetchImpl = ((_url: string | URL | Request, init?: RequestInit) =>
-    new Promise<Response>((resolve, reject) => {
-      attempts += 1;
-      if (attempts === 1) {
-        resolve(new Response("upstream exploded", { status: 500 }));
-        return;
-      }
-      init?.signal?.addEventListener("abort", () =>
-        reject(new DOMException("This operation was aborted", "AbortError"))
-      );
-    })) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
-    { fetchImpl, totalBudgetMs: 6_000, timeoutMs: 45_000 }
-  );
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /模型服务返回 500/);
-  assert.equal(attempts, 2);
-});
-
-test("a response the provider completed is still accepted", async () => {
-  const fetchImpl = (async () =>
-    new Response(
-      JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: '{"days":[]}' } }] }),
-      { status: 200 }
-    )) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "deepseek", model: "deepseek-flash", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
-    { fetchImpl }
-  );
-  assert.equal(await client.complete({ system: "s", user: "u" }), '{"days":[]}');
-});
-
-test("the output budget can be raised from the environment", async () => {
-  const budgets: number[] = [];
-  const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { max_tokens?: number };
-    budgets.push(Number(body.max_tokens));
-    return new Response(JSON.stringify({ choices: [{ message: { content: '{"days":[]}' } }] }), { status: 200 });
-  }) as unknown as typeof fetch;
-  const config = llmConfigFromEnv({ RAI_LLM_API_KEY: "sk-test", RAI_LLM_MAX_TOKENS: "16384" });
-  assert.ok(config);
-  const client = createPlanModelClient(config, { fetchImpl });
-  await client.complete({ system: "s", user: "u" });
-  assert.equal(budgets[0], 16384);
-  // A malformed value falls back to the default rather than being sent upstream
-  // as `max_tokens: NaN`, which the provider would reject over the wrong thing.
-  assert.equal(llmConfigFromEnv({ RAI_LLM_API_KEY: "sk-test", RAI_LLM_MAX_TOKENS: "abc" })?.maxTokens, 8192);
-  assert.equal(llmConfigFromEnv({ RAI_LLM_API_KEY: "sk-test" })?.maxTokens, 8192);
-});
-
-test("a 401 is not retried", async () => {
-  let attempts = 0;
-  const fetchImpl = (async () => {
-    attempts += 1;
-    return new Response("unauthorized", { status: 401 });
-  }) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "deepseek", model: "deepseek-chat", apiKey: "bad", baseUrl: "https://api.deepseek.com" },
-    { fetchImpl }
-  );
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }));
-  assert.equal(attempts, 1);
-});
 
 test("regeneration reports the days whose stored prescription it replaces", () => {
   const structure: MobileSessionStructure = {
@@ -1124,174 +968,6 @@ test("a plan that scales down keeps interval reps on the coach's 800 m rep", () 
   assert.ok(result.clamped.some((entry) => entry.includes("超过上限") && entry.includes("已缩减至")));
 });
 
-test("the model client stops retrying once the total budget is spent", async () => {
-  let attempts = 0;
-  const fetchImpl = (async () => {
-    attempts += 1;
-    return new Response("upstream error", { status: 503 });
-  }) as unknown as typeof fetch;
-
-  const client = createPlanModelClient(
-    { provider: "deepseek", model: "deepseek-chat", apiKey: "sk-secret", baseUrl: "https://api.deepseek.com" },
-    // A budget too small for a second attempt: the retry must not start, so the
-    // endpoint can never outlive the client's own timeout.
-    { fetchImpl, totalBudgetMs: 50 }
-  );
-
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }));
-  assert.equal(attempts, 1);
-});
-
-test("short model budgets are never extended to a five-second minimum", async () => {
-  let attempts = 0;
-  const fetchImpl = ((_url: string | URL | Request, init?: RequestInit) =>
-    new Promise<Response>((_resolve, reject) => {
-      attempts += 1;
-      init?.signal?.addEventListener("abort", () => {
-        reject(new DOMException("This operation was aborted", "AbortError"));
-      }, { once: true });
-    })) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
-    { fetchImpl, totalBudgetMs: 80, timeoutMs: 30 }
-  );
-  const started = performance.now();
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }));
-  const elapsed = performance.now() - started;
-  assert.equal(attempts, 1);
-  assert.ok(elapsed < 1_000, `80ms budget unexpectedly took ${elapsed.toFixed(0)}ms`);
-});
-
-test("invalid model timeout configuration is rejected", () => {
-  const config = { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" };
-  assert.throws(() => createPlanModelClient(config, { timeoutMs: 0 }), /positive finite/);
-  assert.throws(() => createPlanModelClient(config, { totalBudgetMs: Number.NaN }), /positive finite/);
-  assert.throws(() => createPlanModelClient(config, { timeoutMs: Number.POSITIVE_INFINITY }), /positive finite/);
-});
-
-test("non-success model responses cancel their bodies before retrying", async () => {
-  let calls = 0;
-  let cancellations = 0;
-  const fetchImpl = (async () => {
-    calls += 1;
-    return new Response(new ReadableStream<Uint8Array>({
-      cancel() { cancellations += 1; }
-    }), { status: 503 });
-  }) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
-    { fetchImpl }
-  );
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /模型服务返回 503/);
-  assert.equal(calls, 2);
-  assert.equal(cancellations, 2);
-});
-
-test("model response size is enforced from streamed bytes, not content-length", async () => {
-  for (const headers of [undefined, { "content-length": "1" }]) {
-    let cancellations = 0;
-    let calls = 0;
-    const fetchImpl = (async () => {
-      calls += 1;
-      return new Response(new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(new Uint8Array(MAX_LLM_RESPONSE_BYTES));
-          controller.enqueue(new Uint8Array(1));
-        },
-        cancel() { cancellations += 1; }
-      }), { status: 200, ...(headers ? { headers } : {}) });
-    }) as unknown as typeof fetch;
-    const client = createPlanModelClient(
-      { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
-      { fetchImpl }
-    );
-    await assert.rejects(() => client.complete({ system: "s", user: "u" }), /大小限制/);
-    assert.equal(calls, 1, "oversized responses must not be retried");
-    assert.equal(cancellations, 1);
-  }
-});
-
-test("declared oversized model responses are cancelled without reading", async () => {
-  let pulls = 0;
-  let cancellations = 0;
-  const fetchImpl = (async () => new Response(new ReadableStream<Uint8Array>({
-    pull() { pulls += 1; },
-    cancel() { cancellations += 1; }
-  }), {
-    status: 200,
-    headers: { "content-length": String(MAX_LLM_RESPONSE_BYTES + 1) }
-  })) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
-    { fetchImpl }
-  );
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }), /大小限制/);
-  assert.equal(cancellations, 1);
-  assert.ok(pulls <= 1);
-});
-
-test("normal multi-chunk model JSON is accepted and malformed JSON stays safe", async () => {
-  const encoder = new TextEncoder();
-  const content = '{"days":[],"说明":"轻松跑"}';
-  const response = encoder.encode(JSON.stringify({ choices: [{ message: { content } }] }));
-  const multibyte = encoder.encode("轻");
-  let multibyteOffset = -1;
-  for (let index = 0; index <= response.length - multibyte.length; index += 1) {
-    if (multibyte.every((byte, offset) => response[index + offset] === byte)) {
-      multibyteOffset = index;
-      break;
-    }
-  }
-  assert.ok(multibyteOffset >= 0, "fixture must contain a real UTF-8 multibyte character");
-  // Split after the first byte of “轻” so decoding each chunk independently
-  // would corrupt the payload. The client must count bytes but decode the
-  // complete body.
-  const chunks = [
-    response.slice(0, multibyteOffset + 1),
-    response.slice(multibyteOffset + 1, multibyteOffset + 2),
-    response.slice(multibyteOffset + 2)
-  ];
-  const good = createPlanModelClient(
-    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
-    {
-      fetchImpl: (async () => new Response(new ReadableStream<Uint8Array>({
-        start(controller) {
-          for (const chunk of chunks) controller.enqueue(chunk);
-          controller.close();
-        }
-      }))) as unknown as typeof fetch
-    }
-  );
-  assert.equal(await good.complete({ system: "s", user: "u" }), content);
-
-  let malformedCalls = 0;
-  const malformed = createPlanModelClient(
-    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
-    {
-      fetchImpl: (async () => {
-        malformedCalls += 1;
-        return new Response("{not-json");
-      }) as unknown as typeof fetch
-    }
-  );
-  await assert.rejects(() => malformed.complete({ system: "s", user: "u" }), /有效 JSON/);
-  assert.equal(malformedCalls, 2);
-});
-
-test("a slow model response body is bounded by the attempt deadline", async () => {
-  let cancellations = 0;
-  const fetchImpl = (async () => new Response(new ReadableStream<Uint8Array>({
-    cancel() { cancellations += 1; }
-  }))) as unknown as typeof fetch;
-  const client = createPlanModelClient(
-    { provider: "fixture", model: "fixture", apiKey: "unused", baseUrl: "http://fixture.invalid" },
-    { fetchImpl, timeoutMs: 40, totalBudgetMs: 100 }
-  );
-  const started = performance.now();
-  await assert.rejects(() => client.complete({ system: "s", user: "u" }));
-  assert.ok(performance.now() - started < 1_000);
-  assert.equal(cancellations, 1);
-});
 
 test("a model that misreports distance is overruled by the structure it sent", () => {
   // The model claims 1 km but hands over a 6.3 km work step. The stored value
@@ -1374,7 +1050,7 @@ test("a comeback week is not capped by the injury week that preceded it", () => 
 
 test("the fallback plan measures every day and stays inside the weekly goal", () => {
   const dates = weeklyPlanDates(TODAY);
-  const days = buildFallbackWeekPlan({
+  const days = buildCoachWeekPlan({
     allowedDates: dates,
     prescription: PRESCRIPTION,
     weeklyDistanceKm: 50,
@@ -1414,7 +1090,7 @@ test("the fallback template never exceeds its own ceiling", () => {
     { goal: 50, prev: null }
   ];
   for (const { goal, prev } of cases) {
-    const days = buildFallbackWeekPlan({
+    const days = buildCoachWeekPlan({
       allowedDates: weeklyPlanDates(TODAY),
       prescription: PRESCRIPTION,
       weeklyDistanceKm: goal,
@@ -1438,7 +1114,7 @@ test("a budget too tight for two sessions is spent on one properly sized session
   // Two easy days at the structure's minimum already measure 5.08 km, so a 5 km
   // goal cannot pay for both. The week gets one real session instead of either
   // breaking the ceiling or leaving half the budget unspent.
-  const days = buildFallbackWeekPlan({
+  const days = buildCoachWeekPlan({
     allowedDates: weeklyPlanDates(TODAY),
     prescription: PRESCRIPTION,
     weeklyDistanceKm: 5,
@@ -1458,7 +1134,7 @@ test("a goal smaller than one easy session plans rest rather than an over-budget
   // Deliberate: the ceiling is the safety property. A 1 km week cannot pay for
   // the shortest structure the coach can express (~2.5 km), and fielding it
   // anyway is exactly the "template exceeds its own ceiling" defect.
-  const days = buildFallbackWeekPlan({
+  const days = buildCoachWeekPlan({
     allowedDates: weeklyPlanDates(TODAY),
     prescription: PRESCRIPTION,
     weeklyDistanceKm: 1,
@@ -1489,130 +1165,6 @@ test("a demoted quality session stores a rounded, re-measured distance", () => {
   }
 });
 
-test("the client waits longer for a generated plan than the server spends on it", () => {
-  // Preview waits for model generation but never persists the business plan.
-  // Keep enough client budget to receive the candidate or fallback. Timeout
-  // ordering cannot establish whether a separate mutating request committed.
-  // These budgets live in different languages, so check both declarations.
-  const raw = readFileSync(new URL("../../ios/RAI/APIClient.swift", import.meta.url), "utf8");
-  // Comments stripped the way the Swift reader would: a comment that merely
-  // mentions the constant must not be able to stand in for the real argument.
-  const source = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-  // Anchored to the start of a line, to an optional receiver (`configuration.`)
-  // and to a declaration, so a comment cannot supply the number either.
-  const declaration = (name: string): number => {
-    const match = new RegExp(
-      "^\\s*(?:[\\w.]*\\.)?(?:static\\s+)?(?:(?:let|var)\\s+)?" + name + "\\s*(?::\\s*TimeInterval)?\\s*=\\s*([\\d_.]+)",
-      "m"
-    ).exec(source);
-    assert.ok(match, `APIClient.swift 必须声明 ${name}`);
-    const value = Number(match![1]!.replace(/_/g, ""));
-    assert.ok(Number.isFinite(value) && value > 0, `${name} 必须是正的数字字面量，实际读到 ${match![1]}`);
-    return value * 1000;
-  };
-  const clientMs = declaration("generateTimeoutInterval");
-  assert.ok(
-    DEFAULT_TOTAL_BUDGET_MS < clientMs,
-    `服务端总预算 ${DEFAULT_TOTAL_BUDGET_MS}ms 必须小于客户端超时 ${clientMs}ms`
-  );
-  // `timeoutIntervalForResource` caps the whole transfer regardless of the
-  // per-request timeout, so it is the number that actually decides whether the
-  // client gives up first. Asserting only the per-request value would let it be
-  // lowered underneath the server's budget with every test still green.
-  const resourceMs = declaration("timeoutIntervalForResource");
-  assert.ok(
-    DEFAULT_TOTAL_BUDGET_MS < resourceMs,
-    `服务端总预算 ${DEFAULT_TOTAL_BUDGET_MS}ms 必须小于资源超时 ${resourceMs}ms`
-  );
-  assert.ok(
-    resourceMs >= clientMs,
-    `资源超时 ${resourceMs}ms 不得低于单请求超时 ${clientMs}ms`
-  );
-  assert.match(
-    source,
-    /func previewWeeklyPlan[\s\S]*?path: "\/v1\/mobile\/workout-plan\/preview"[\s\S]*?timeout:\s*Self\.generateTimeoutInterval/,
-    "previewWeeklyPlan 必须带上这个超时，否则会退回默认的 POST 超时"
-  );
-
-  // No production caller may override the default. The timing tests above
-  // verify the actual spending behaviour instead of pinning its source
-  // expression, which previously preserved the buggy five-second floor.
-  const llmSource = readStripped(new URL("../src/weekly-plan-llm.ts", import.meta.url));
-  // Pinning the declaration is not enough on its own: leaving it alone and
-  // writing `Date.now() + totalBudgetMs * 2` at the one place the budget is
-  // spent doubles the real budget while every number a reader can see stays
-  // put. The single use is pinned, and the identifier is counted — so a second
-  // deadline computed anywhere in the file fails the equality.
-  assert.match(
-    llmSource,
-    /const deadline = Date\.now\(\) \+ totalBudgetMs;/,
-    "总预算必须一次性花完，不得在使用点放大"
-  );
-  assert.equal(
-    (llmSource.match(/\btotalBudgetMs\b/g) ?? []).length,
-    4,
-    "总预算在 weekly-plan-llm.ts 中只应出现四处：选项声明、默认取值、赋值与唯一使用点"
-  );
-  // The short-budget and slow-body tests above exercise the actual deadline
-  // behaviour. Keep only the single-horizon invariant here rather than pinning
-  // the formerly buggy Math.max expression as source text.
-  assert.match(
-    llmSource,
-    /^\s*const remaining = deadline - Date\.now\(\);\s*$/m,
-    "剩余预算必须就是 deadline 减当前时间，不得附加任何宽限"
-  );
-  assert.equal(
-    (llmSource.match(/\bDate\.now\(\)/g) ?? []).length,
-    2,
-    "时间只能看两处：读取 deadline 与计算剩余预算；第三处必然在另一条时间线上"
-  );
-  assert.ok(
-    !/\blet\s+deadline\b/.test(llmSource),
-    "deadline 必须是 const：可重新赋值就意味着可以在循环里续期"
-  );
-
-  const serviceSource = readStripped(new URL("../src/weekly-plan-service.ts", import.meta.url));
-  // The ban is on the identifier, not on one way of spelling an option: a
-  // caller can pass a budget without ever writing `totalBudgetMs:` — shorthand
-  // (`{ totalBudgetMs, timeoutMs }`), a spread, a variable of its own, or a
-  // concatenated key all skip the property shape. Matching the words instead
-  // covers every one of those, and they have no other business in the
-  // generation path.
-  assert.ok(
-    !/budget|timeout/i.test(serviceSource),
-    "生成路径不得自带预算或超时：客户端预算是照着默认值算的"
-  );
-  assert.ok(
-    !/\bJSON\s*\.\s*parse\b/.test(serviceSource),
-    "生成路径不得用 JSON.parse 拼装选项：那是绕过字面量检查的手法"
-  );
-
-  // And the same rule against every other module: the generation path is not
-  // the only place a client could be built, and an option object is reachable
-  // only as `createPlanModelClient`'s second argument. Banning the identifier
-  // everywhere and the second argument everywhere closes the route where some
-  // neighbouring module — `server.ts`, a helper, a future route file — quietly
-  // constructs its own client with a budget the client's timeout never saw.
-  const scanned = sourceFiles(new URL("../src/", import.meta.url));
-  assert.ok(scanned.length > 1, "应当扫描到多个源文件");
-  for (const file of scanned) {
-    const normalizedFile = file.replace(/\\/g, "/");
-    if (normalizedFile.endsWith("/weekly-plan-llm.ts")) continue;
-    const name = normalizedFile.slice(normalizedFile.indexOf("src/"));
-    const text = readStripped(file);
-    assert.ok(
-      !/\btotalBudgetMs\b/.test(text),
-      name + " 不得自带 LLM 总预算：客户端预算是照着默认值算的"
-    );
-    for (const call of text.match(/createPlanModelClient\s*\([\s\S]*?\)/g) ?? []) {
-      const args = call.slice(call.indexOf("(") + 1, call.lastIndexOf(")"));
-      assert.ok(
-        !args.includes(","),
-        `${name} 必须以单参数创建模型客户端，否则可以自带预算：${call.trim()}`
-      );
-    }
-  }
-});
 
 test("no single day exceeds the per-day distance ceiling", () => {
   // The weekly goal is accepted up to 500 km, and `RAMP_BASE_FLOOR_FRACTION`
@@ -1620,7 +1172,7 @@ test("no single day exceeds the per-day distance ceiling", () => {
   // the template for a day no runner has ever done. The cap is per day and the
   // stored number has to describe the rebuilt structure, not the request.
   const dates = weeklyPlanDates(TODAY).slice(0, 3);
-  const days = buildFallbackWeekPlan({
+  const days = buildCoachWeekPlan({
     allowedDates: dates,
     prescription: PRESCRIPTION,
     weeklyDistanceKm: 500,
@@ -2016,26 +1568,10 @@ test("a week below what the coach can prescribe says so instead of claiming a re
 });
 
 
-test("weekly prompt includes historical observations without treating missing imports as missed runs", () => {
-  const execution = [{
-    localDate: "2026-09-06", planRevision: 1, plannedKind: "easy", plannedDistanceKm: 8,
-    observedDistanceKm: 0, observedWorkoutCount: 0, distanceRatio: null, status: "pending"
-  }];
-  const prompt = buildWeeklyPlanPrompt({
-    today: todayPayload({ recentPlanExecution: execution }),
-    goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget: null },
-    prescription: PRESCRIPTION, allowedDates: [TODAY]
-  });
-  assert.match(prompt.user, /recentExecution/);
-  assert.match(prompt.user, /pending\/unknown 不代表漏跑/);
-  assert.match(prompt.user, /不得据此补偿加量/);
-  assert.match(prompt.user, /"plannedDistanceKm": 8/);
-});
-
 test("fallback plans enforce the same easy-duration floor at every volume budget", () => {
   for (const prescription of [null, PRESCRIPTION]) for (const weeklyDistanceKm of [1, 5, 15, 20, 30, 40, 80]) {
     for (const floor of [0.5, 0.7, 0.9, 1]) {
-      const days = buildFallbackWeekPlan({ allowedDates: weeklyPlanDates("2026-09-21"), prescription,
+      const days = buildCoachWeekPlan({ allowedDates: weeklyPlanDates("2026-09-21"), prescription,
         weeklyDistanceKm, qualitySessionCap: 2, easyDurationFloorFraction: floor, injuryFlagCodes: [] });
       let total = 0, easy = 0;
       for (const day of days) {
@@ -2056,7 +1592,7 @@ test("fallback respects race day and completed natural-week volume across Sunday
     week: { periodStart: "2026-09-21", periodEnd: "2026-09-27", distanceKm: 40 },
     weekStructure: { qualitySessionCount: 2 }
   });
-  const result = await generateWeeklyPlan({ today, goals: { weeklyDistanceKm: 40, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: { date: "2026-09-27", distance: "half_marathon", targetPaceSecondsPerKm: 330 } }, prescription: PRESCRIPTION, client: null });
+  const result = await generateWeeklyPlan({ today, goals: { easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: { date: "2026-09-27", distance: "half_marathon", targetPaceSecondsPerKm: 330 } }, ...capacityInputs(40), prescription: PRESCRIPTION });
   assert.equal(result.days.length, 7);
   assert.equal(result.days[0]!.localDate, "2026-09-25");
   assert.equal(result.days.at(-1)!.localDate, "2026-10-01");
@@ -2079,13 +1615,12 @@ test("G05: a taper week is generated inside the phase band, and says why", async
   const result = await generateWeeklyPlan({
     today,
     goals: {
-      weeklyDistanceKm: 60,
       easyDurationFloorFraction: 0.8,
       qualitySessionCap: 2,
       raceTarget: { date: "2026-10-17", distance: "half_marathon", targetPaceSecondsPerKm: 330 }
     },
-    prescription: PRESCRIPTION,
-    client: null
+    ...capacityInputs(60),
+    prescription: PRESCRIPTION
   });
   const total = result.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
   // 0.75 × 60 km is the taper band's upper edge; `finish` may adjust slightly, so the
@@ -2094,9 +1629,9 @@ test("G05: a taper week is generated inside the phase band, and says why", async
 
   const noRace = await generateWeeklyPlan({
     today,
-    goals: { weeklyDistanceKm: 60, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: null },
-    prescription: PRESCRIPTION,
-    client: null
+    goals: { easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: null },
+    ...capacityInputs(60),
+    prescription: PRESCRIPTION
   });
   const noRaceTotal = noRace.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
   assert.ok(noRaceTotal > 45, "without a race target the week is not silently tapered");
@@ -2113,40 +1648,34 @@ test("G05: a taper week is generated inside the phase band, and says why", async
   }
 });
 
-test("G05: the prompt carries the phase, and omits the field when there is no race", async () => {
-  const withRace = buildWeeklyPlanPrompt({
-    today: todayPayload({ today: { localDate: "2026-10-05" } }),
-    goals: {
-      weeklyDistanceKm: 60,
-      easyDurationFloorFraction: 0.8,
-      qualitySessionCap: 2,
-      raceTarget: { date: "2026-10-17", distance: "half_marathon", targetPaceSecondsPerKm: 330 }
-    },
-    prescription: PRESCRIPTION,
-    allowedDates: weeklyPlanDates("2026-10-05"),
-    periodization: currentPeriodizationWeek({
-      today: "2026-10-05",
-      raceTarget: { date: "2026-10-17", distance: "half_marathon" },
-      recentWeeklyKm: 60
-    })
-  });
-  const parseContext = (prompt: { user: string }): { racePhase: { phase: string; weeklyVolumeBandKm: { upper: number } } | null } => {
-    // The user message is prose with the context as an embedded JSON block.
-    const start = prompt.user.indexOf("{");
-    const end = prompt.user.lastIndexOf("}");
-    return JSON.parse(prompt.user.slice(start, end + 1)) as never;
+/**
+ * G06: capacity reaches the week through two separate numbers.
+ *
+ * Both used to be one field (`goals.weeklyDistanceKm`). A migration that quietly
+ * routed one of them to both uses would leave half the derivation dead while
+ * every assertion above stayed green — those cases pin the two equal by
+ * construction. Here they are pulled apart against a deliberately oversized
+ * draft, so what survives is the ceiling rather than the draft.
+ */
+test("G06: the ceiling baseline and the observed volume are separately load-bearing", () => {
+  const raceTarget = { date: "2026-10-24", distance: "half_marathon" as const, targetPaceSecondsPerKm: 330 };
+  const base = {
+    today: todayPayload({ today: { localDate: "2026-10-05", workoutCount: 0 },
+      week: { periodStart: "2026-10-05", periodEnd: "2026-10-11", distanceKm: 0 } }),
+    goals: { easyDurationFloorFraction: 0.7, qualitySessionCap: 2, raceTarget },
+    prescription: PRESCRIPTION
   };
-  const context = parseContext(withRace);
-  assert.equal(context.racePhase?.phase, "taper");
-  assert.equal(context.racePhase?.weeklyVolumeBandKm.upper, 45);
-  assert.equal(WEEKLY_PLAN_PROMPT_VERSION, "weekly-plan-v3");
+  const proposed: MobilePlannedDay[] = weeklyPlanDates("2026-10-05").map(localDate =>
+    ({ localDate, kind: "easy" as const, distanceKm: 30, structure: null, reason: null }));
+  const capped = (weeklyVolumeBaselineKm: number, recentWeeklyKm: number): number =>
+    constrainUpcomingPlan(proposed, { ...base, weeklyVolumeBaselineKm, recentWeeklyKm })
+      .reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
 
-  const withoutRace = buildWeeklyPlanPrompt({
-    today: todayPayload({ today: { localDate: "2026-10-05" } }),
-    goals: { weeklyDistanceKm: 60, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, raceTarget: null },
-    prescription: PRESCRIPTION,
-    allowedDates: weeklyPlanDates("2026-10-05"),
-    periodization: null
-  });
-  assert.equal(parseContext(withoutRace).racePhase, null);
+  // A half marathon two weeks out: taper, so the band's upper edge is 0.75 x recent.
+  const control = capped(60, 60);
+  assert.ok(control > 0);
+  // Same observed volume, a smaller baseline: the baseline is what caps the week.
+  assert.ok(capped(5, 60) < control, "the baseline must cap the week");
+  // Same baseline, less observed volume: the phase band is what caps the week.
+  assert.ok(capped(60, 10) < control, "observed volume must reach the phase band");
 });

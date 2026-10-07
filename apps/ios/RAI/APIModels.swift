@@ -151,8 +151,7 @@ struct MobileSessionStructure: Codable, Equatable {
     let cooldown: MobileWorkoutStep?
 }
 
-/// Who produced a stored weekly plan. Kept so a surprising week can be traced
-/// back to the model that wrote it.
+/// Plan provenance, including legacy model plans retained for historical decoding.
 struct MobilePlanAudit: Codable, Equatable {
     let generatedBy: String
     let model: String?
@@ -249,7 +248,6 @@ struct MobileWeekStructure: Codable {
     let qualitySessionCount: Int
     let qualitySessionCap: Int
     let easyHonesty: EasyHonesty
-    let remainingDistanceKm: Double?
 }
 
 struct EasyHonesty: Codable {
@@ -612,8 +610,6 @@ struct WeekSummary: Codable {
     let distanceKm: Double
     let durationSeconds: Double
     let workoutCount: Int
-    let goalDistanceKm: Double?
-    let goalProgressFraction: Double?
     let averageSpeedKmPerHour: Double?
     let averagePaceSecondsPerKm: Double?
     let averageHeartRateBpm: Double?
@@ -623,12 +619,6 @@ struct WeekSummary: Codable {
     /// nil arrays mean an older API/cache, while [] means a successful empty aggregation.
     var hasWeeklyActivityStatistics: Bool {
         heartRateZones != nil && paceZones != nil
-    }
-
-    var remainingDistanceKm: Double? {
-        guard let goalDistanceKm, goalDistanceKm.isFinite, goalDistanceKm > 0,
-              distanceKm.isFinite else { return nil }
-        return max(0, goalDistanceKm - distanceKm)
     }
 }
 
@@ -751,18 +741,110 @@ struct CurrentAbilityPoint: Codable, Identifiable {
 
 struct MobileGoalsResponse: Codable {
     let revision: Int
-    let weeklyDistanceKm: Double
     let easyDurationFloorFraction: Double
     let qualitySessionCap: Int
     let raceTarget: MobileRaceTarget?
     let weekPlan: [MobileGoalsPlanItem]
     let lockedSession: MobileLockedSession?
     let weekPlanAudit: MobilePlanAudit?
+    let weekPlanReplanRequired: Bool?
+    var runCoach: MobileRunCoachPlan? = nil
     let updatedAt: String
 }
 
+struct MobileRunCoachConfig: Codable, Equatable {
+    var goal: String
+    var raceDate: String?
+    var raceDistanceKm: Double?
+    var targetTimeSeconds: Double?
+    var runningDays: [Int]
+    var longRunDays: [Int]
+    var targetType: String
+    var strengthTraining: Bool
+    var durationWeeks: Int? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case goal, raceDate, raceDistanceKm, targetTimeSeconds, runningDays, longRunDays
+        case targetType, strengthTraining, durationWeeks
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(goal, forKey: .goal)
+        try values.encode(raceDate, forKey: .raceDate)
+        try values.encode(raceDistanceKm, forKey: .raceDistanceKm)
+        try values.encode(targetTimeSeconds, forKey: .targetTimeSeconds)
+        try values.encode(runningDays, forKey: .runningDays)
+        try values.encode(longRunDays, forKey: .longRunDays)
+        try values.encode(targetType, forKey: .targetType)
+        try values.encode(strengthTraining, forKey: .strengthTraining)
+        try values.encodeIfPresent(durationWeeks, forKey: .durationWeeks)
+    }
+}
+
+struct MobileRunCoachPlan: Codable, Equatable {
+    let id: String
+    let startedOn: String
+    let status: String
+    let pausedOn: String?
+    let endedOn: String?
+    let adaptationKey: String?
+    let adaptedAt: String?
+    let goal: String
+    let raceDate: String?
+    let raceDistanceKm: Double?
+    let targetTimeSeconds: Double?
+    let runningDays: [Int]
+    let longRunDays: [Int]
+    let targetType: String
+    let strengthTraining: Bool
+    var durationWeeks: Int? = nil
+
+    var config: MobileRunCoachConfig {
+        MobileRunCoachConfig(goal: goal, raceDate: raceDate, raceDistanceKm: raceDistanceKm,
+            targetTimeSeconds: targetTimeSeconds, runningDays: runningDays, longRunDays: longRunDays,
+            targetType: targetType, strengthTraining: strengthTraining, durationWeeks: durationWeeks)
+    }
+}
+
+struct MobileRunCoachCommand: Encodable {
+    let expectedRevision: Int
+    let action: String
+    let config: MobileRunCoachConfig?
+}
+
+struct MobileRunCoachResponse: Codable {
+    let revision: Int
+    let plan: MobileRunCoachPlan?
+    let phase: String?
+    let daysToRace: Int?
+    let elapsedWeeks: Int
+    let weeklyCapacityKm: Double
+    let notices: [String]
+    let phases: [Phase]?
+    let strength: [StrengthSession]
+
+    struct StrengthSession: Codable, Identifiable {
+        let localDate: String
+        let durationMinutes: Int
+        let exercises: [Exercise]
+        var id: String { localDate }
+    }
+    struct Phase: Codable, Identifiable {
+        let phase: String
+        let startsOn: String
+        let endsOn: String
+        let current: Bool
+        var id: String { startsOn }
+    }
+    struct Exercise: Codable {
+        let name: String
+        let dose: String
+    }
+}
+
 /// A persisted planned day. `structure` and `reason` are carried through
-/// unchanged on save so editing the weekly distance cannot silently downgrade a
+/// unchanged on save so editing training settings cannot silently downgrade a
 /// generated prescription.
 struct MobileGoalsPlanItem: Codable, Identifiable {
     let localDate: String
@@ -776,21 +858,19 @@ struct MobileGoalsPlanItem: Codable, Identifiable {
 
 struct UpdateMobileGoalsRequest: Encodable {
     let expectedRevision: Int?
-    let weeklyDistanceKm: Double
     let easyDurationFloorFraction: Double?
     let qualitySessionCap: Int?
     let raceTarget: MobileRaceTarget?
     let weekPlan: [MobileGoalsPlanItem]?
 
     enum CodingKeys: String, CodingKey {
-        case expectedRevision, weeklyDistanceKm, easyDurationFloorFraction, qualitySessionCap
+        case expectedRevision, easyDurationFloorFraction, qualitySessionCap
         case raceTarget, weekPlan
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(expectedRevision, forKey: .expectedRevision)
-        try container.encode(weeklyDistanceKm, forKey: .weeklyDistanceKm)
         try container.encodeIfPresent(easyDurationFloorFraction, forKey: .easyDurationFloorFraction)
         try container.encodeIfPresent(qualitySessionCap, forKey: .qualitySessionCap)
         // Explicit null clears the persisted race; omission would preserve it.

@@ -80,10 +80,13 @@ import { environmentCoverage, environmentViewForWorkout, splitGradeContexts } fr
 import { buildRunningDynamics } from "./workout-dynamics.js";
 import { trimRouteForShare } from "./share-card.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
-import { DEFAULT_WEEKLY_DISTANCE_KM, type PlanHistoryRevision } from "./mobile-goals.js";
+import type { PlanHistoryRevision } from "./mobile-goals.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { constrainUpcomingPlan } from "./weekly-plan-service.js";
-import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP } from "./mobile-coach.js";
+import { weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { weeklyCapacity } from "./weekly-capacity.js";
+import { runCoachEndDate, runCoachIsTraining, runCoachWeekday } from "./run-coach-policy.js";
+import { DEFAULT_EASY_DURATION_FLOOR, DEFAULT_QUALITY_SESSION_CAP, plannedDayNumbers } from "./mobile-coach.js";
 import {
   matchPlanDay,
   measuredStepsOf,
@@ -333,11 +336,10 @@ export class RaiReadStore {
   }
 
   mobileToday(
-    goalDistanceKm: number | null,
-    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession">,
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach">,
     planHistory?: PlanHistoryRevision[]
   ): MobileTodayResponse {
-    return this.mobileTodayWithExecutablePlan(goalDistanceKm, goals, planHistory).today;
+    return this.mobileTodayWithExecutablePlan(goals, planHistory).today;
   }
 
   /**
@@ -355,11 +357,30 @@ export class RaiReadStore {
    * 自己上一轮的输出）。让同一次结果显式传出去，比让它被重算更安全。
    */
   private mobileTodayWithExecutablePlan(
-    goalDistanceKm: number | null,
-    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession">,
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach">,
     planHistory?: PlanHistoryRevision[]
   ): { today: MobileTodayResponse; effective: MobileWorkoutPlanResponse } {
     const today = mobileLocalDate();
+    // A paused/ended programme never falls back to an invented daily run after
+    // its saved seven-day window expires. Imported history remains observable.
+    if (goals?.runCoach) {
+      const programme = goals.runCoach;
+      const stopped = !runCoachIsTraining(programme, today);
+      const saved = new Map(goals.weekPlan.map(day => [day.localDate, day]));
+      const window = Array.from({ length: 7 }, (_, index) => {
+        const localDate = shiftMobileDate(today, index);
+        const preservedToday = localDate === today &&
+          (goals!.weekPlanPreservedDate === today || goals!.lockedSession?.localDate === today);
+        const raceDay = programme.raceDate === localDate;
+        const unavailable = raceDay || localDate > runCoachEndDate(programme) ||
+          (!preservedToday && !programme.runningDays.includes(runCoachWeekday(localDate)));
+        if (!stopped && !unavailable && saved.has(localDate)) return saved.get(localDate)!;
+        return { localDate, kind: "rest" as const, distanceKm: null,
+          reason: stopped ? "教练计划未在进行。" : raceDay ? "比赛日留白；不等于比赛已完成。" : unavailable ? "非可跑步日或训练周期已结束。" : "教练训练安排待刷新。" };
+      });
+      goals = { ...goals, ...(stopped || programme.raceDate === today ? { lockedSession: null } : {}), weekPlan: [...goals.weekPlan.filter(day => day.localDate < today), ...window,
+        ...(stopped ? [] : goals.weekPlan.filter(day => day.localDate > shiftMobileDate(today, 6)))] };
+    }
     const weekStart = mobileWeekStart(today);
     const weekEnd = shiftMobileDate(weekStart, 6);
 
@@ -500,12 +521,7 @@ export class RaiReadStore {
       periodEnd: weekEnd,
       distanceKm: weekDistanceKm,
       durationSeconds: Number(weekRow.duration_seconds ?? 0),
-      workoutCount: Number(weekRow.workout_count ?? 0),
-      goalDistanceKm: goalDistanceKm,
-      goalProgressFraction:
-        goalDistanceKm !== null && goalDistanceKm > 0
-          ? Math.min(1, weekDistanceKm / goalDistanceKm)
-          : null
+      workoutCount: Number(weekRow.workout_count ?? 0)
     };
     // One observation query feeds both the seven-day execution strip and §20
     // adherence: two queries would be two chances for them to disagree.
@@ -513,12 +529,35 @@ export class RaiReadStore {
       SELECT local_date AS localDate, SUM(distance_km) AS distanceKm, COUNT(*) AS workoutCount
       FROM active_workout_training_loads WHERE local_date >= ? AND local_date <= ? GROUP BY local_date
     `).all(shiftMobileDate(today, -28), today) as Array<{ localDate: string; distanceKm: number; workoutCount: number }>;
+    // Capacity is derived from training facts, never from a stored preference. The
+    // coach decision and the WorkoutKit export must obey the same ceiling, and it
+    // must move when the athlete's actual volume moves.
+    const previousWeekDistanceKm = this.previousWeekDistanceKm(today);
+    const recentWeeklyKmValue = recentWeeklyKm(recentMetrics, today);
+    const capacityBaselineKm = weeklyCapacity({
+      today,
+      raceTarget: goals?.raceTarget ?? null,
+      runCoach: goals?.runCoach ?? null,
+      recentWeeklyKm: recentWeeklyKmValue,
+      previousWeekDistanceKm
+    }).baselineKm;
+    // Two roles, one source. The coach *spends* against a ceiling, while the plan
+    // generator and the export re-derive their own ceiling from the baseline —
+    // handing an already-ramped number to code that applies the ramp again would
+    // compound the guard and quietly shrink every generated week.
+    const capacityCeilingKm = weeklyPlanVolumeCeiling(capacityBaselineKm, previousWeekDistanceKm);
+    const zones = this.trainingZonesCurrent();
+    const preservedToday = goals?.weekPlanPreservedDate === today ? goals.weekPlan.find(day => day.localDate === today) : null;
+    // Protect only today's volume from the migration; live recovery/load gates
+    // still resolve the session, and future days keep the derived weekly budget.
+    const todayCeilingKm = preservedToday ? Math.max(capacityCeilingKm, weekDistanceKm +
+      (plannedDayNumbers(preservedToday.kind, preservedToday.structure, preservedToday.distanceKm, zonePrescription(zones)).distanceKm ?? 0)) : capacityCeilingKm;
     const coach = assembleMobileCoach({
       database: this.database,
       dashboard,
       latestMetric,
       recentMetrics,
-      zones: this.trainingZonesCurrent(),
+      zones,
       recentWorkouts,
       week,
       weekDaily,
@@ -528,14 +567,17 @@ export class RaiReadStore {
         easyDurationFloorFraction: goals?.easyDurationFloorFraction ?? DEFAULT_EASY_DURATION_FLOOR,
         qualitySessionCap: goals?.qualitySessionCap ?? DEFAULT_QUALITY_SESSION_CAP,
         raceTarget: goals?.raceTarget ?? null,
+        runCoach: goals?.runCoach ?? null,
+        weekPlanPreservedDate: goals?.weekPlanPreservedDate ?? null,
         weekPlan: goals?.weekPlan ?? [],
         lockedSession: goals?.lockedSession ?? null
       },
       coverage,
       fourWeekDistanceChangeFraction,
-      previousWeekDistanceKm: this.previousWeekDistanceKm(today),
+      previousWeekDistanceKm,
+      weeklyVolumeCeilingKm: todayCeilingKm,
       planHistory: planHistory ?? [],
-      recentWeeklyKm: recentWeeklyKm(recentMetrics, today),
+      recentWeeklyKm: recentWeeklyKmValue,
       planActual
     });
     const recentPlanExecution = planHistory === undefined ? undefined : buildPlanExecution(today, planHistory, planActual);
@@ -596,7 +638,7 @@ export class RaiReadStore {
       ...coach,
       recommendation: { ...coach.recommendation, planRevision: (goals as { revision?: number } | undefined)?.revision ?? 0 }
     };
-    const effective = this.executableMobilePlan(result, goalDistanceKm, goals);
+    const effective = this.executableMobilePlan(result, capacityBaselineKm, recentWeeklyKmValue, goals);
     result.weekPlan = result.weekPlan.map(day => {
       if (day.localDate <= today) return day;
       const prescribed = effective.days.find(item => item.localDate === day.localDate);
@@ -612,36 +654,41 @@ export class RaiReadStore {
    * the very same `executableMobilePlan` result instead of recomputing it.
    */
   mobileWorkoutPlan(
-    goalDistanceKm: number | null,
     goals?: Pick<
       MobileGoalsResponse,
-      "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision"
+      "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision" | "weekPlanPreservedDate" | "runCoach"
     >
   ): MobileWorkoutPlanResponse {
-    return this.mobileTodayWithExecutablePlan(goalDistanceKm, goals).effective;
+    return this.mobileTodayWithExecutablePlan(goals).effective;
   }
 
   private executableMobilePlan(
     today: MobileTodayResponse,
-    goalDistanceKm: number | null,
-    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession"> &
+    weeklyVolumeBaselineKm: number,
+    recentWeeklyKm: number,
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach"> &
       Partial<Pick<MobileGoalsResponse, "weekPlanAudit" | "revision">>
   ): MobileWorkoutPlanResponse {
     const currentZones = this.trainingZonesCurrent();
+    const previousWeekDistanceKm = this.previousWeekDistanceKm(today.today.localDate);
     const executablePlan = constrainUpcomingPlan(goals?.weekPlan ?? [], {
       // Today's actual/effective session is reserved; export never replaces a lock.
       today: { ...today, lock: { ...today.lock, present: true } },
-      goals: { weeklyDistanceKm: goalDistanceKm ?? DEFAULT_WEEKLY_DISTANCE_KM, easyDurationFloorFraction: today.weekStructure.easyDurationFloorFraction,
-        qualitySessionCap: today.weekStructure.qualitySessionCap, raceTarget: goals?.raceTarget ?? null },
-      prescription: zonePrescription(currentZones), previousWeekDistanceKm: this.previousWeekDistanceKm(today.today.localDate)
+      goals: { easyDurationFloorFraction: today.weekStructure.easyDurationFloorFraction,
+        qualitySessionCap: today.weekStructure.qualitySessionCap, raceTarget: goals?.raceTarget ?? null, runCoach: goals?.runCoach ?? null },
+      weeklyVolumeBaselineKm,
+      recentWeeklyKm,
+      prescription: zonePrescription(currentZones),
+      previousWeekDistanceKm
     });
     return assembleMobileWorkoutPlan({
       today: today.today.localDate,
       todaySession: today.nextSession,
+      ...(goals?.weekPlanPreservedDate === today.today.localDate ? { todayPlanSource: "llm" as const } : {}),
       todayCompleted: today.today.workoutCount > 0,
       relockSuggested: today.lock.relockSuggested,
       raceTarget: goals?.raceTarget ?? null,
-      weeklyDistanceKm: goalDistanceKm ?? DEFAULT_WEEKLY_DISTANCE_KM,
+      weeklyVolumeCeilingKm: weeklyVolumeBaselineKm,
       storedPlan: executablePlan,
       zones: currentZones,
       audit: goals?.weekPlanAudit ?? null,
@@ -654,24 +701,46 @@ export class RaiReadStore {
    * plan generator needs. Reusing `mobileToday` keeps the gate rules in one
    * place; the previous week's volume travels with it because the generator's
    * ramp ceiling is `previous week + 30%`.
+   *
+   * Capacity travels too, derived here by the same rule the today payload uses:
+   * a generator that computed its own baseline could disagree with the card the
+   * runner is looking at.
    */
   mobileWeeklyPlanInputs(
-    goalDistanceKm: number | null,
     goals?: Pick<
       MobileGoalsResponse,
-      "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision"
+      "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision" | "weekPlanPreservedDate" | "runCoach"
     >,
     planHistory?: PlanHistoryRevision[]
   ): {
     today: MobileTodayResponse;
     prescription: ReturnType<typeof zonePrescription>;
     previousWeekDistanceKm: number;
+    recentWeeklyKm: number;
+    weeklyVolumeBaselineKm: number;
   } {
-    const today = this.mobileToday(goalDistanceKm, goals, planHistory);
+    const today = this.mobileToday(goals, planHistory);
+    const previousWeekDistanceKm = this.previousWeekDistanceKm(today.today.localDate);
+    // Mirror the window `mobileTodayWithExecutablePlan` uses for its own recent
+    // volume, so both paths read the same four complete weeks.
+    const latestMetric = this.statisticsRepository.latestMetric();
+    const metricEnd = latestMetric?.localDate ?? today.latestDataDate ?? today.today.localDate;
+    const recent = recentWeeklyKm(
+      this.statisticsRepository.metricsBetween(shiftMobileDate(metricEnd, -56), metricEnd),
+      today.today.localDate
+    );
     return {
       today,
       prescription: zonePrescription(this.trainingZonesCurrent()),
-      previousWeekDistanceKm: this.previousWeekDistanceKm(today.today.localDate)
+      previousWeekDistanceKm,
+      recentWeeklyKm: recent,
+      weeklyVolumeBaselineKm: weeklyCapacity({
+        today: today.today.localDate,
+        raceTarget: goals?.raceTarget ?? null,
+        runCoach: goals?.runCoach ?? null,
+        recentWeeklyKm: recent,
+        previousWeekDistanceKm
+      }).baselineKm
     };
   }
 

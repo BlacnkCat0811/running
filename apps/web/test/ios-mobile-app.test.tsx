@@ -58,9 +58,7 @@ const today = {
     periodEnd: "2026-09-06",
     distanceKm: 5.2,
     durationSeconds: 1800,
-    workoutCount: 1,
-    goalDistanceKm: 30,
-    goalProgressFraction: 0.173
+    workoutCount: 1
   },
   weekDaily: [
     { localDate: "2026-08-31", distanceKm: 0, workoutCount: 0 },
@@ -142,8 +140,7 @@ const today = {
       easyEnoughCount: 1,
       honestyFraction: 1,
       note: "轻松日够轻松"
-    },
-    remainingDistanceKm: 24.8
+    }
   },
   race: {
     target: null,
@@ -398,7 +395,6 @@ function mockRemote() {
     if (path === "/v1/mobile/trends") return remote(trends, { dataPath: path });
     if (path === "/v1/mobile/goals") {
       return remote({
-        weeklyDistanceKm: 30,
         easyDurationFloorFraction: 0.7,
         qualitySessionCap: 2,
         raceTarget: null,
@@ -689,12 +685,54 @@ describe("iOS mobile detail navigation", () => {
     expect(screen.getByText(/今天还没跑 · 本周已 5.2 km/)).toBeTruthy();
   });
 
-  it("rejects weekly goals outside 1–500", () => {
+  it("does not offer a weekly distance setting", () => {
     renderApp("/settings");
-    fireEvent.change(screen.getByLabelText("每周跑量（km）"), { target: { value: "0" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存目标" }));
-    expect(screen.getByText("请输入 1–500 的周跑量（公里）")).toBeTruthy();
+    expect(screen.queryByLabelText("每周跑量（km）")).toBeNull();
+    expect(screen.getByLabelText("轻松时长下限（%）")).toBeTruthy();
+    expect(screen.getByLabelText("每周质量课上限")).toBeTruthy();
+    expect(screen.getByLabelText("目标赛事日期")).toBeTruthy();
     expect(screen.getByText("未连接")).toBeTruthy();
+  });
+
+  it("saves only the edited goals and leaves the rest to the store", async () => {
+    const goals = {
+      revision: 12,
+      easyDurationFloorFraction: 0.7,
+      qualitySessionCap: 2,
+      raceTarget: null,
+      weekPlan: [],
+      lockedSession: null,
+      updatedAt: "2026-09-01T00:00:00.000Z"
+    };
+    useRemoteMock.mockImplementation((path: string) => remote(goals, { dataPath: path }));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(goals)));
+    try {
+      renderApp("/settings");
+      fireEvent.change(screen.getByLabelText("轻松时长下限（%）"), { target: { value: "85" } });
+      fireEvent.change(screen.getByLabelText("每周质量课上限"), { target: { value: "3" } });
+      fireEvent.change(screen.getByLabelText("目标赛事日期"), { target: { value: "2026-12-06" } });
+      fireEvent.change(screen.getByLabelText("目标距离"), { target: { value: "half_marathon" } });
+      fireEvent.click(screen.getByRole("button", { name: "保存目标" }));
+      expect(await screen.findByRole("button", { name: "已保存" })).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [path, init] = fetchMock.mock.calls[0]!;
+      expect(path).toBe("/v1/mobile/goals");
+      expect(init?.method).toBe("PUT");
+      expect(JSON.parse(init?.body as string)).toEqual({
+        expectedRevision: 12,
+        easyDurationFloorFraction: 0.85,
+        qualitySessionCap: 3,
+        raceTarget: { date: "2026-12-06", distance: "half_marathon", targetPaceSecondsPerKm: null }
+      });
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("does not save goals before the persisted settings are available", () => {
+    useRemoteMock.mockImplementation((path: string) => remote(null, { dataPath: path }));
+    renderApp("/settings");
+    expect((screen.getByRole("button", { name: "保存目标" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("still shows health sync when weekly goals fail to load", () => {
@@ -781,7 +819,8 @@ describe("iOS mobile detail navigation", () => {
     renderApp("/");
     fireEvent.click(screen.getByRole("button", { name: "个人资料" }));
     expect(screen.getByRole("heading", { name: "设置" })).toBeTruthy();
-    expect(screen.getByLabelText("每周跑量（km）")).toBeTruthy();
+    expect(screen.getByLabelText("轻松时长下限（%）")).toBeTruthy();
+    expect(screen.queryByLabelText("每周跑量（km）")).toBeNull();
   });
 });
 

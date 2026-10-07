@@ -10,8 +10,8 @@ import type {
 /**
  * Shape validation for structured sessions.
  *
- * This is a trust boundary: structures arrive from the LLM, from the network,
- * and from previously persisted JSON. Nothing here may assume the input is
+ * This is a trust boundary: structures arrive from the network and from
+ * previously persisted JSON. Nothing here may assume the input is
  * well formed, and anything rejected is dropped rather than propagated.
  */
 

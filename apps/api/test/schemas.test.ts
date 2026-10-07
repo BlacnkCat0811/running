@@ -13,6 +13,7 @@ import {
   predictionModelIdParamsSchema,
   predictionModelTrainBodySchema,
   recoveryTrendQuerySchema,
+  runCoachCommandSchema,
   trainingZoneProfileBodySchema,
   trainingZonesHistoryQuerySchema,
   trainingLoadQuerySchema,
@@ -286,7 +287,6 @@ test("the goals schema keeps step goals and alerts inside their own semantic bou
   app.post("/goals", { schema: { body: mobileGoalsBodySchema } }, async () => ({ ok: true }));
   const step = (goal: unknown, alert: unknown = null) => ({ purpose: "work", goal, alert });
   const goals = (structure: unknown) => ({
-    weeklyDistanceKm: 30,
     weekPlan: [{ localDate: "2026-09-07", kind: "interval", distanceKm: 8, structure }]
   });
   const structure = (goal: unknown, alert: unknown = null) => ({
@@ -546,6 +546,7 @@ test("native session and race pickers exactly match their API contracts", () => 
   const raceDistances = mobileGoalsBodySchema.properties.raceTarget.anyOf[0].properties.distance.enum;
   let sessionPickers = 0;
   let racePickers = 0;
+  let coachPickers = 0;
   for (const file of swiftSources()) {
     const source = stripComments(readFileSync(file, "utf8"));
     const normalizedFile = file.replace(/\\/g, "/");
@@ -579,6 +580,25 @@ test("native session and race pickers exactly match their API contracts", () => 
         }
         continue;
       }
+      if (name.endsWith("TechRunCoachView.swift")) {
+        const options = balancedBlock(source, source.indexOf("{", close));
+        const tags = [...options.matchAll(/\.tag\(\s*([^)]*)\)/g)].map(match => match[1]!.trim());
+        const config = runCoachCommandSchema.properties.config.properties;
+        if (args.includes('"目标"') || args.includes('"强度目标"')) {
+          const values = tags.map(value => JSON.parse(value) as string).sort();
+          const accepted = args.includes('"目标"') ? config.goal.enum : config.targetType.enum;
+          assert.deepEqual(values, [...accepted].sort(), name + " 的教练偏好必须与 API 契约一致");
+        } else {
+          assert.ok(args.includes('"比赛距离"'), name + " 出现未登记的教练 Picker");
+          assert.deepEqual(tags.map(Number), [5, 10, 21.0975, 42.195, -1]);
+          assert.match(source, /distance == -1 \? Double\(customDistance\)/);
+          assert.match(source, /km >= 1\.6 && km <= 1609\.344/);
+          assert.equal(config.raceDistanceKm.anyOf[0].minimum, 1.6);
+          assert.equal(config.raceDistanceKm.anyOf[0].maximum, 1609.344);
+        }
+        coachPickers += 1;
+        continue;
+      }
       const isRace = args.includes('"比赛距离"');
       const isInputMode = args.includes('"目标输入方式"');
       assert.ok(isRace || isInputMode || args.includes('"训练类型"'), name + " 出现未登记的 Picker，请补充对应 API 契约扫描");
@@ -598,4 +618,5 @@ test("native session and race pickers exactly match their API contracts", () => 
   }
   assert.ok(sessionPickers >= 1, "必须保留训练类型选择器");
   assert.ok(racePickers >= 1, "必须保留比赛距离选择器");
+  assert.equal(coachPickers, 3, "教练目标、比赛距离和强度目标必须分别扫描，不能因跳过新页面而空转");
 });
