@@ -52,13 +52,19 @@ export interface Periodization {
 }
 
 /**
- * Phase boundaries in whole weeks before the race.
+ * Phase boundaries in whole weeks before the race — **the only place a build length is
+ * written down**.
  *
  * A half marathon needs the longest build; a 5K is mostly sharpening. The numbers
  * are policy, and the test suite pins the boundaries so a change is a visible
  * decision rather than a drifting constant.
+ *
+ * Exported so a regression can assert the boundary *table* instead of a copy of it.
+ * `runCoachPhase` delegates here (2026-10-07); before that it carried its own flat
+ * `taper + 5` build window, which gave a 5K plan five weeks of build and a half
+ * marathon four — the wrong direction — and moved inside a natural week.
  */
-const PHASE_BOUNDARIES: Record<MobileRaceDistance, { build: number; taper: number }> = {
+export const PHASE_BOUNDARIES: Record<MobileRaceDistance, { build: number; taper: number }> = {
   five_k: { build: 2, taper: 1 },
   ten_k: { build: 3, taper: 2 },
   half_marathon: { build: 4, taper: 2 }
@@ -136,6 +142,40 @@ function phaseFor(weeksToRace: number, distance: MobileRaceDistance): Periodizat
   return "base";
 }
 
+/**
+ * Whole weeks, aligned to the natural week, between `today`'s week and the race's week —
+ * negative once the race week is behind us.
+ *
+ * The single alignment. `buildPeriodization` and `periodizationPhaseFor` both read it, so
+ * there is exactly one answer to "how many weeks out is this race"; deriving it from raw day
+ * differences instead is what let one natural week report two different phases.
+ */
+export function periodizationWeeksToRace(today: string, raceDate: string): number {
+  const raceWeekStart = periodizationWeekStart(raceDate);
+  const currentWeekStart = periodizationWeekStart(today);
+  return Math.round(
+    (Date.parse(`${raceWeekStart}T00:00:00Z`) - Date.parse(`${currentWeekStart}T00:00:00Z`)) / (7 * 86_400_000)
+  );
+}
+
+/**
+ * Phase of the natural week `today` falls in, for **any** horizon.
+ *
+ * `buildPeriodization` deliberately stops at `PERIODIZATION_MAXIMUM_WEEKS` and produces no
+ * `current` week past it, because that skeleton is what the today page renders. A *phase* is
+ * still defined out there, and `past` — a race already run — has to stay reachable, so
+ * callers that ask "which phase is this week" rather than "which row of the skeleton" come
+ * here. Same boundary table, same alignment, no window.
+ *
+ * Throws on an unparseable date rather than guessing: every caller holds a validated plan.
+ */
+export function periodizationPhaseFor(today: string, raceTarget: Pick<MobileRaceTarget, "date" | "distance">): PeriodizationPhase {
+  if (!isLocalDate(today) || !isLocalDate(raceTarget.date)) {
+    throw new Error("periodizationPhaseFor requires local dates for today and the race");
+  }
+  return phaseFor(periodizationWeeksToRace(today, raceTarget.date), raceTarget.distance);
+}
+
 /** The quality dose the phase allows, as a ceiling the validator can use. */
 export function periodizationQualityCap(phase: PeriodizationPhase): number {
   return QUALITY_DOSE[phase];
@@ -203,9 +243,7 @@ export function buildPeriodization(input: {
 
   const raceWeekStart = periodizationWeekStart(race.date);
   const currentWeekStart = periodizationWeekStart(input.today);
-  const weeksToRace = Math.round(
-    (Date.parse(`${raceWeekStart}T00:00:00Z`) - Date.parse(`${currentWeekStart}T00:00:00Z`)) / (7 * 86_400_000)
-  );
+  const weeksToRace = periodizationWeeksToRace(input.today, race.date);
   if (weeksToRace > PERIODIZATION_MAXIMUM_WEEKS) {
     reasonCodes.push("race_beyond_maximum_horizon");
   }

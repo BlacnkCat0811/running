@@ -6,7 +6,6 @@ import { MobileGoalsRevisionConflictError, type MobileGoalsStore } from "./mobil
 import { WEAK_PREPARATION_NOTE, WEAK_PREPARATION_SCORE } from "./mobile-coach.js";
 import { buildCoachWeekPlan } from "./weekly-plan-validate.js";
 import { constrainUpcomingPlan, mergePlanWindow, weeklyPlanDates } from "./weekly-plan-service.js";
-import { periodizationVolumeBandKm } from "./plan-periodization.js";
 import { RunCoachInputError, runCoachDaysBetween, runCoachEndDate, runCoachIsTraining, runCoachPhase, runCoachRaceTarget, runCoachShiftDate, runCoachWeekday, validateRunCoachConfig } from "./run-coach-policy.js";
 import { weeklyCapacity } from "./weekly-capacity.js";
 import { runCoachCommandSchema } from "./schemas.js";
@@ -21,8 +20,8 @@ type Inputs = ReturnType<RaiReadStore["mobileWeeklyPlanInputs"]>;
  *
  *   1. `weeklyCapacity`'s baseline — race target trimmed by phase, then by the +30%
  *      ramp guard over the last four weeks; and
- *   2. this week's periodisation band `upper` (`periodizationVolumeBandKm`) — the
- *      exact number the today page prints for the same week.
+ *   2. this week's periodisation band `upper`, **taken from the today payload itself** —
+ *      the exact number the today page prints for the same week.
  *
  * The band is the tighter of the two whenever recorded volume is small, and it has to
  * be the one that binds: decision 1 keeps the cold-start plan at ~5 km, and the screen
@@ -34,8 +33,12 @@ export function runCoachWeeklyBudget(plan: MobileRunCoachPlan, inputs: Inputs): 
   const today = inputs.today.today.localDate;
   const capacityKm = weeklyCapacity({ today, raceTarget: runCoachRaceTarget(plan), runCoach: plan,
     recentWeeklyKm: inputs.recentWeeklyKm, previousWeekDistanceKm: inputs.previousWeekDistanceKm }).baselineKm;
-  const phase = runCoachPhase(today, plan);
-  return phase === null ? capacityKm : Math.min(capacityKm, periodizationVolumeBandKm(phase, inputs.recentWeeklyKm));
+  // Read the band out of the payload the today page renders rather than recomputing it from
+  // the phase: same phase, same rounding, same `MAXIMUM_WEEKLY_KM` clamp, one number. It used
+  // to recompute, and the recomputation was the phase's other algorithm — which is how 33 km
+  // got published beside a 31.5 km band for the same week on a 5K plan.
+  const pageBand = inputs.today.periodization?.current?.volumeBandKm.upper ?? null;
+  return pageBand === null ? capacityKm : Math.min(capacityKm, pageBand);
 }
 
 /** Preparation score → confidence band. **Policy constants, not fitted** (same footing as `PHASE_VOLUME`). */

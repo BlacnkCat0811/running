@@ -118,3 +118,13 @@
 进行中和暂停的教练计划禁止旧编辑器直接修改目标和逐日课表，也禁止旧生成/预览接口改排；用户通过跑步日偏好表达未来可用时间。暂停及结束令所有未完成的未来跑步处方不可执行，跨周也不能回退到默认跑步。恢复按当前证据生成，不积累补课债务。结束后显式保存或确认手动课表才退出教练管理。
 
 算法留在 TypeScript 服务端，Swift 只管理视图、缓存和命令。佳明内部算法、Firstbeat 指标及成绩信心值不可复刻，不编造这些数值；本项目政策常量不称为佳明算法。力量训练仅在原生展示，尚不导出为 WorkoutKit 力量训练。手表仍需用户显式同步，暂停或结束不代表已从手表撤回。
+
+## D16. 周期化阶段只有一个来源
+
+2026-10-07 合并两套 phase 推导。[plan-periodization](../apps/api/src/plan-periodization.ts) 的 `PHASE_BOUNDARIES` 是阶段边界的**唯一**归属，[run-coach-policy](../apps/api/src/run-coach-policy.ts) 的 `runCoachPhase` 降级为适配器：骨架窗口内取今天页那一行（`current.phase`），窗口外（比赛已过、或超过 24 周）用同一张表与同一个周对齐（`periodizationWeeksToRace`）直接回答，`past` 因此仍然可达。
+
+被替换的是 2026-10-07 教练接入时新写的 `floor(daysBetween / 7)` 配固定 `taper + 5`，三条可实测的后果：同一自然周内阶段会从 `peak` 跳到 `taper`（周计划与「第 N 周 · 强化期」在周中自己变）；5K 得到 5 周专项期而半马 4 周（方向相反）；对自定义距离返回 `"base"`，假装有一套不存在的骨架。三条由 [run-coach-phase.test.ts](../apps/api/test/run-coach-phase.test.ts) 锁住，并做过突变验证（`five_k.build` 2→3 时 5K 长度断言变红）。
+
+`weeklyCapacity` 不再按「有计划 / 只有赛事目标」在 `runCoachPhase` 与 `currentPeriodizationWeek` 之间二选一——那种结构本身就是漂移的温床；现在只选择询问哪个赛事目标，phase 的语义只剩一个：当前自然周所在的周期化阶段。`runCoachWeeklyBudget` 的「本周量带上限」直接取自今天页渲染的 `periodization.current.volumeBandKm.upper`，不再按阶段重算一份（重算正是 33 与 31.5 同屏的成因）。
+
+契约影响：`MobileRunCoachResponse.phase` 对自定义距离由 `"base"` 变为 `null`，界面落到既有的「持续训练」文案，iOS 无需改动。同批**未**处理、留待单独决定：`phases` 区间数组对无骨架计划仍以 `"base"` 填充，与 `phase: null` 的语义不自洽。

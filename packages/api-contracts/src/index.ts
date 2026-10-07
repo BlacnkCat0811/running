@@ -1383,10 +1383,12 @@ export interface MobileRunCoachResponse {
   revision: number;
   plan: MobileRunCoachPlan | null;
   /**
-   * The race-block phase, or `null` when there is no race block to be in a phase of (a fitness
-   * programme). A closed set on purpose: it used to be `string`, and the iOS side mapped it with
-   * a private `default:`, so a seventh phase would have compiled, passed every regression, and
-   * silently reused an existing word.
+   * The race-block phase, or `null` when there is no race block to be in a phase of — a fitness
+   * programme, or a distance outside the calibrated 5K / 10K / half-marathon set. Neither has a
+   * periodisation skeleton behind it, and `null` is what the UI renders as「持续训练」: answering
+   * `"base"` for a marathon asserted a plan that does not exist. A closed set on purpose: it used
+   * to be `string`, and the iOS side mapped it with a private `default:`, so a seventh phase would
+   * have compiled, passed every regression, and silently reused an existing word.
    */
   phase: MobilePeriodizationPhase | null;
   daysToRace: number | null;

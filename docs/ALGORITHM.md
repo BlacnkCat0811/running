@@ -157,6 +157,8 @@ unknown prehistory/未同步日不能直接当作已观察到的休息日。Load
 - **状态有上限**：≤24 周；超过就给 `race_beyond_maximum_horizon`，比赛已过给 `race_in_the_past` 且不产出任何周；没有目标赛事就明说 `no_race_target`，不编一个阶段出来。
 - **只对 5K/10K/半马**（与预测链一致）；量带是政策常量，**没有**做结果拟合，因此它只声明"这是教练想给的量"，不声明最优。
 
+阶段边界的**唯一归属**是本节的 `PHASE_BOUNDARIES`（2026-10-07 收敛）。教练页通过 [run-coach-policy](../apps/api/src/run-coach-policy.ts) 的 `runCoachPhase` 适配器读它：骨架窗口内直接取今天页那一行（`current.phase`），窗口外（比赛已过、或超过 24 周）用同一张表和同一个周对齐（`periodizationWeeksToRace`）直接回答，`past` 因此仍然可达。此前教练侧另有一套按天推算的实现（`floor(days/7)` 配固定 `taper+5` 的 build 窗口），会给 5K 5 周、半马 4 周专项期（方向相反），让同一自然周内阶段跳变，并对自定义距离返回一个并不存在的阶段——三条都由 [run-coach-phase.test.ts](../apps/api/test/run-coach-phase.test.ts) 锁住。
+
 近期周跑量使用当前周之前的四个完整自然周（周一到周日），按窗口内已观测总里程除以四；空周不缩短分母，窗口外的陈旧记录、当前周和未来记录不参与。这个量是已记录跑量，不把缺失日期认定为已观测休息；窗口内没有跑量时保留 `no_recent_weekly_volume`。
 
 **周容量是推导值，不是用户设置**（[weekly-capacity](../apps/api/src/weekly-capacity.ts)，2026-10-06 起）。用户手工设定的"周跑量目标"已退役：它一度同时充当展示口径与排课容量，而这两者本来就该同源。现在的基线三档：

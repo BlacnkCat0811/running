@@ -1,7 +1,7 @@
 import type { MobileRaceTarget, MobileRunCoachConfig, MobileRunCoachPlan, MobileSessionKind, MobileSessionStructure, MobileWorkoutStep } from "@rai/api-contracts";
 import { sessionRanges, type CoachZonePrescription } from "./mobile-coach.js";
 import { isValidLocalDate } from "./local-date.js";
-import type { PeriodizationPhase } from "./plan-periodization.js";
+import { currentPeriodizationWeek, periodizationPhaseFor, type PeriodizationPhase } from "./plan-periodization.js";
 
 export class RunCoachInputError extends Error {}
 
@@ -42,16 +42,39 @@ export function runCoachRaceTarget(plan: MobileRunCoachConfig): MobileRaceTarget
     targetPaceSecondsPerKm: plan.goal === "time" ? plan.targetTimeSeconds! / plan.raceDistanceKm! : null };
 }
 
+/**
+ * Phase of the **natural week** `today` falls in, or `null` when the programme has no race
+ * with a periodisation skeleton behind it.
+ *
+ * An adapter over the §20 skeleton, not a second implementation: `PHASE_BOUNDARIES` in
+ * `plan-periodization.ts` is the single place a build length is written down, so the coach
+ * page, the plan generator and the today page cannot disagree about the same week.
+ *
+ * It used to be its own algorithm — `floor(daysBetween(today, raceDate) / 7)` with a flat
+ * `taper + 5` build window — with three measurable consequences (all pinned by
+ * `test/run-coach-phase.test.ts`):
+ *
+ *   1. a function of the **day**, so one natural week could read `peak` on Monday and
+ *      `taper` on Tuesday, moving the skeleton and the "第 N 周 · 强化期" label mid-week;
+ *   2. a 5K plan earned five weeks of build and the half marathon four — backwards;
+ *   3. no distance check, so a 42.195 km race was handed `"base"` despite having no
+ *      skeleton, no volume band and no taper. `null` is that case's honest answer now, and
+ *      the UI already has a word for it ("持续训练").
+ *
+ * Inside the skeleton's window the today page's own resolved row is the answer, so the two
+ * surfaces read the same object. Outside it — a race already run, or one further out than
+ * `PERIODIZATION_MAXIMUM_WEEKS` — the skeleton has no row to read while the phase is still
+ * defined, so the same boundary table answers directly instead of a second window rule.
+ *
+ * `recentWeeklyKm` scales the volume band, which the phase does not read — the skeleton
+ * computes both in one pass, so `0` is passed rather than threading a number that cannot
+ * change the answer.
+ */
 export function runCoachPhase(today: string, plan: MobileRunCoachConfig): PeriodizationPhase | null {
-  if (!plan.raceDate || plan.goal === "fitness") return null;
-  const weeks = Math.floor(runCoachDaysBetween(today, plan.raceDate) / 7);
-  if (weeks < 0) return "past";
-  if (weeks === 0) return "race_week";
-  const taper = (plan.raceDistanceKm ?? 0) <= 5 ? 1 : 2;
-  if (weeks <= taper) return "taper";
-  if (weeks === taper + 1) return "peak";
-  if (weeks <= taper + 5) return "build";
-  return "base";
+  const raceTarget = runCoachRaceTarget(plan);
+  if (raceTarget === null || !isValidLocalDate(today)) return null;
+  return currentPeriodizationWeek({ today, raceTarget, recentWeeklyKm: 0 })?.phase
+    ?? periodizationPhaseFor(today, raceTarget);
 }
 
 export const runCoachIsTraining = (plan: MobileRunCoachPlan, today: string): boolean =>

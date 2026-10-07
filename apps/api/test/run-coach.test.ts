@@ -32,7 +32,14 @@ test("coach setup validates actual dates, distance/time, unique weekdays and lon
     assert.throws(() => validateRunCoachConfig(value, "2026-10-06", true));
   }
   assert.equal(runCoachRaceTarget({ ...config, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: 42.195 }), null);
-  assert.equal(runCoachPhase("2026-11-30", { ...config, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: 42.195 }), "race_week");
+  // A distance outside the calibrated set has no skeleton, so it has no phase either. This
+  // used to answer "race_week": the old `floor(daysBetween / 7)` never looked at the
+  // distance, so a marathon was handed the phase of a periodised plan that does not exist.
+  assert.equal(runCoachPhase("2026-11-30", { ...config, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: 42.195 }), null);
+  // …while a calibrated distance still answers, and answers for the natural week: 2026-11-30
+  // (Mon) and 2026-12-06 (Sun) are the same Mon–Sun week, so both read `race_week`.
+  assert.equal(runCoachPhase("2026-11-30", { ...config, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: 21.0975 }), "race_week");
+  assert.equal(runCoachPhase("2026-12-06", { ...config, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: 21.0975 }), "race_week");
   assert.equal(runCoachIsTraining({ ...plan, status: "paused" }, "2026-10-06"), false);
   assert.equal(runCoachEndDate({ ...plan, durationWeeks: 6 }), "2026-11-16");
   assert.equal(runCoachIsTraining({ ...plan, durationWeeks: 6 }, "2026-11-17"), false);
@@ -401,5 +408,56 @@ test("one weekly budget is published and spent, and matches the band the today p
     // than the race-target capacity: 30 × 1.05 = 31.5, not the 36.75 the read path used to publish.
     assert.equal(inputs.recentWeeklyKm > 0, true);
     assert.equal(budget, Math.min(inputs.weeklyVolumeBaselineKm, 31.5));
+
+    // Same invariant for every calibrated distance. A 5K plan used to derive its band from
+    // `floor(days / 7)` over a flat `taper + 5` build window while the today page derived it
+    // from `PHASE_BOUNDARIES`, so the two sides could name different bands for one week. The
+    // half marathon happened to agree, which is exactly why the assertions above — written
+    // against a half-marathon fixture — never caught it.
+    for (const [label, raceDistanceKm] of [["5K", 5], ["10K", 10], ["half marathon", 21.0975]] as const) {
+      const variant = { ...raceConfig, raceDistanceKm };
+      const variantGoals = { ...store.read(), runCoach: { ...plan, ...variant, runningDays: [1, 2, 3, 4, 5, 6, 7], longRunDays: [4] },
+        raceTarget: runCoachRaceTarget({ ...plan, ...variant }) };
+      const variantInputs = read.mobileWeeklyPlanInputs(variantGoals);
+      const todayBand = variantInputs.today.periodization!.current!.volumeBandKm.upper;
+      const expected = Math.min(variantInputs.weeklyVolumeBaselineKm, todayBand);
+      assert.equal(runCoachWeeklyBudget(variantGoals.runCoach, variantInputs), expected,
+        `${label}: the budget must be the smaller of the capacity and the today page band`);
+      assert.equal(runCoachResponse(variantGoals, variantInputs).weeklyCapacityKm, expected,
+        `${label}: the route must publish that same number`);
+      assert.ok(expected <= todayBand + 1e-9, `${label}: the budget may never exceed the today page band`);
+    }
+  } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("when the phase band is the binding constraint it is read from the today page, not recomputed", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-coach-band-binds-"));
+  const path = join(root, "rai.sqlite");
+  // 8 km/week, deliberately *below* the race-target capacity: `max(5, 8 × 1.3) = 10.4` km, so
+  // the phase band (8 × 1.05 = 8.4 km) is the number that binds. That is the only shape in
+  // which "the coach's band" and "the today page's band" are observably different quantities —
+  // with 30 km/week the capacity wins and hides the difference.
+  //
+  // Both race dates below put the two old algorithms on opposite sides of their build/taper
+  // boundary: `floor(days / 7)` says `build` (band 8 × 1.1 = 8.8) while `PHASE_BOUNDARIES`
+  // says `base` (band 8.4). Publishing 8.8 here is the 33-vs-31.5 defect in miniature.
+  await seedRecentRunningWeeks(path, "2026-10-07", 8);
+  const store = new MobileGoalsStore(root);
+  const read = new RaiReadStore(path);
+  try {
+    for (const [label, raceDistanceKm, raceDate] of [["10K", 10, "2026-11-29"], ["5K", 5, "2026-11-22"]] as const) {
+      const variant = { ...raceConfig, raceDate, raceDistanceKm };
+      const goals = { ...store.read(), runCoach: { ...plan, ...variant, runningDays: [1, 2, 3, 4, 5, 6, 7], longRunDays: [4] },
+        raceTarget: runCoachRaceTarget({ ...plan, ...variant }) };
+      const inputs = read.mobileWeeklyPlanInputs(goals);
+      const todayBand = inputs.today.periodization!.current!.volumeBandKm.upper;
+      assert.ok(inputs.weeklyVolumeBaselineKm > todayBand,
+        `${label}: the fixture must leave the capacity looser than the band (${inputs.weeklyVolumeBaselineKm} vs ${todayBand})`);
+      assert.equal(runCoachWeeklyBudget(goals.runCoach, inputs), todayBand,
+        `${label}: with the band binding, the budget must be the today page's band`);
+      assert.equal(runCoachResponse(goals, inputs).weeklyCapacityKm, todayBand,
+        `${label}: and so must the published number`);
+    }
   } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
 });

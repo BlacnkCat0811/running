@@ -31,7 +31,7 @@
 
 | 卡上文案 | 来源 | 算法 |
 | --- | --- | --- |
-| 本周 15–18 km | 阶段量带 | 基线 = 最近 4 个完整自然周实测均量（`apps/api/src/data.ts:117-135`）× base 系数 0.9–1.05（`apps/api/src/plan-periodization.ts:68`） |
+| 本周 15–18 km | 阶段量带 | 基线 = 最近 4 个完整自然周实测均量（`apps/api/src/data.ts:117-135`）× base 系数 0.9–1.05（`apps/api/src/plan-periodization.ts:74`） |
 | 已完成 10.0 / 计划 10.5 km | 课表处方里程之和 | 按计划日志逐日累加非休息处方里程（`apps/api/src/plan-adherence.ts:117-142`） |
 
 截图里 **10.5 < 15**：课表本身低于量带下限约 30%，界面一个字都没解释。

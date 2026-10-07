@@ -29,9 +29,11 @@
 
 [run-coach](../apps/api/src/run-coach.ts) 复用既有结构化训练模板、分区和 `constrainUpcomingPlan`，不在手机重写评分核心。
 周容量与读接口使用同一 [weekly-capacity](../apps/api/src/weekly-capacity.ts)：无数据保守重启 5 km；体能计划基于实测四周均值最多增加 10%，仍受上周斜坡、已完成量和恢复闸门约束。
-读接口发布的 `weeklyCapacityKm` 是**本周预算**，不是裸容量：它取 `min(容量, 本周量带上限)`（`runCoachWeeklyBudget`），生成侧与今天页量带上限用的是同一个函数。此前读侧发布的是已经过斜坡、却未按阶段裁剪的容量，与生成侧实际使用的数字是两个量（36.75 对 31.5），同屏三个数。
+读接口发布的 `weeklyCapacityKm` 是**本周预算**，不是裸容量：它取 `min(容量, 本周量带上限)`（`runCoachWeeklyBudget`），而"本周量带上限"直接取自今天页渲染的 `periodization.current.volumeBandKm.upper` 本身，不是按阶段重算一份。此前读侧发布的是已经过斜坡、却未按阶段裁剪的容量，与生成侧实际使用的数字是两个量（36.75 对 31.5），同屏三个数。
 赛事计划由距离和阶段给出政策目标，再受近期实际跑量限制；全马/更长距离的目标基线分别为 45/55 km，不能越过已有证据闸门。
 阶段按赛事倒推 base/build/peak/taper/race_week；当前阶段边界及剂量是本项目规则，不是佳明内部周期计算，也不是已验证的全马或超长距离训练方案。
+阶段边界**只写在** [plan-periodization](../apps/api/src/plan-periodization.ts) 的 `PHASE_BOUNDARIES` 一处：教练页与今天页都经 `runCoachPhase` 适配器读它，并按自然周（`periodizationWeekStart`）对齐。2026-10-07 之前教练侧另有一套按天推算（`floor(days/7)` 配固定 `taper+5` 的 build 窗口），会给 5K 比半马更长的专项期、并让同一自然周内阶段发生跳变。
+自定义距离（如全马）没有骨架，因此**没有阶段**：`phase` 为 `null`、界面显示「持续训练」，而不是给它一个并不存在的「基础期」。
 
 未完成校准时只给基础轻松训练；缺少可用心率上界时不下发心率警报，也不把配速目标伪装为心率目标。
 心率偏好在安全闸门和预算裁剪之后统一应用，生成、今日建议与手表导出使用相同目标；裁剪重建不能静默切回配速。

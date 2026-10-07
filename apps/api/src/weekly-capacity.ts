@@ -1,5 +1,5 @@
 import type { MobileRaceDistance, MobileRaceTarget, MobileRunCoachPlan } from "@rai/api-contracts";
-import { runCoachIsTraining, runCoachPhase } from "./run-coach-policy.js";
+import { runCoachIsTraining, runCoachRaceTarget } from "./run-coach-policy.js";
 
 import { MINIMUM_BAND_KM, currentPeriodizationWeek, periodizationVolumeFraction, type PeriodizationPhase } from "./plan-periodization.js";
 import { RAMP_LIMIT_FRACTION } from "./weekly-plan-validate.js";
@@ -35,7 +35,7 @@ export const RACE_WEEKLY_BASELINE_KM: Record<MobileRaceDistance, number> = {
  * Conservative restart baseline for absent or very small recorded volume.
  *
  * Deliberately the same value as the periodisation bands' own no-history floor
- * (`MINIMUM_BAND_KM`, used at `plan-periodization.ts:198`): importing it keeps
+ * (`MINIMUM_BAND_KM`, used at `plan-periodization.ts:252`): importing it keeps
  * the two from drifting into two different "starting over" numbers.
  *
  * It must stay above `MIN_PLANNED_DISTANCE_KM` in `weekly-plan-validate.ts`. At
@@ -97,12 +97,23 @@ export function weeklyCapacity(input: {
     raceBaselineKm = km <= 5 ? 15 : km <= 10 ? 25 : km <= 21.1 ? 35 : km <= 42.2 ? 45 : 55;
   }
 
+  // Which race the phase is asked about: a programme's own target when there is a programme,
+  // otherwise the caller's goals-level target. That is a target choice, not a second
+  // algorithm — and `runCoachRaceTarget` returns `null` for a fitness goal or a distance
+  // outside the calibrated set, which is exactly when no phase should be claimed.
+  const raceTargetForPhase = input.runCoach ? runCoachRaceTarget(input.runCoach) : race;
+
   const phase =
     input.phase !== undefined
       ? input.phase
-      : programme ? runCoachPhase(input.today, programme)
-      : race != null && isLocalDate(input.today)
-        ? currentPeriodizationWeek({ today: input.today, raceTarget: race, recentWeeklyKm: recent })?.phase ?? null
+      // One derivation, one alignment. Branching between `runCoachPhase` and
+      // `currentPeriodizationWeek` per source is what let the two drift: a 5K plan read
+      // `build` here and `base` on the today page for the same week. A programme's own race
+      // target and a goals-level one are the same question with a different target, so only
+      // the target is selected below — the query itself stays singular, and stays windowed
+      // so the volume cut agrees with the band the today page prints.
+      : raceTargetForPhase != null && isLocalDate(input.today)
+        ? currentPeriodizationWeek({ today: input.today, raceTarget: raceTargetForPhase, recentWeeklyKm: recent })?.phase ?? null
         : null;
 
   // Nothing observed and nothing last week: a restart, not a plan. Reusing the
