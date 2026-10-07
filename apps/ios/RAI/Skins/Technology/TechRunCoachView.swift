@@ -26,13 +26,25 @@ struct TechRunCoachView: View {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
                 if let plan {
                     overview(plan)
+                    // Decision 4: a distance outside the prediction chain says so where the
+                    // distance itself is stated, not at the bottom of the page among notices.
+                    if native.runCoach?.confidence?.reasonCodes.contains("unsupported_distance") == true {
+                        Label("该比赛距离不在成绩预测链内：不提供成绩预测与备赛信心值。训练仍受跑量与恢复闸门约束。",
+                              systemImage: "info.circle")
+                            .font(.footnote).foregroundStyle(TechColor.yellow)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("coach.unsupported-distance")
+                    }
+                    explanation
+                    runnableDays(plan)
+                    confidenceCard
                     if let phases = native.runCoach?.phases, !phases.isEmpty {
                         DisclosureGroup("计划阶段") {
                             ForEach(phases) { phase in
                                 HStack(alignment: .top, spacing: 12) {
                                     Image(systemName: phase.current ? "circle.inset.filled" : "circle").foregroundStyle(phase.current ? TechColor.green : TechColor.muted)
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(phaseName(phase.phase)).font(.subheadline.weight(.semibold))
+                                        Text(techCoachPhaseName(phase.phase)).font(.subheadline.weight(.semibold))
                                         Text("\(nativeDay(phase.startsOn)) – \(nativeDay(phase.endsOn))").font(.caption).foregroundStyle(TechColor.muted)
                                     }
                                 }.padding(.vertical, 7)
@@ -158,30 +170,155 @@ struct TechRunCoachView: View {
             if let seconds = plan.targetTimeSeconds { Text("目标 \(nativeDuration(seconds))").font(.headline.monospacedDigit()) }
             HStack {
                 Text("第 \((native.runCoach?.elapsedWeeks ?? 0) + 1) 周")
-                Text(phaseName(native.runCoach?.phase))
+                Text(native.runCoach?.phase.map(techCoachPhaseName) ?? techCoachNoRaceBlockLabel)
                 Spacer()
                 Text(plan.targetType == "heart_rate" ? "心率目标" : "配速目标")
             }.font(.caption).foregroundStyle(TechColor.muted)
-            Text("跑步日：\(plan.runningDays.map(weekdayName).joined(separator: "、"))")
-                .font(.caption).foregroundStyle(TechColor.muted)
             if let adapted = plan.adaptedAt { Text("最近调整 \(nativeDate(adapted))").font(.caption2).foregroundStyle(TechColor.muted) }
         }.accessibilityIdentifier("coach.overview")
     }
 
-    private var calendar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TechSectionHeader(title: "未来七日")
-            if let schedule {
-                ForEach(schedule.days) { day in
-                    TechExecutablePlanDay(day: day)
-                    if let completed = native.today?.weekPlan.first(where: { $0.localDate == day.localDate })?.completedWorkoutId {
-                        NavigationLink { TechWorkoutDetailView(workoutId: completed) } label: { Label("训练记录与反馈", systemImage: "bubble.left.and.text.bubble.right") }
-                            .font(.caption)
-                    }
-                    Divider()
+    /// The calibration card the explanation is allowed to read, tied to the plan revision the
+    /// rest of the page is showing so a stale payload cannot explain a fresh plan.
+    private var todayCalibration: MobileCalibrationCard? {
+        guard let today = native.today, today.recommendation.planRevision == native.currentPlanRevision else { return nil }
+        return today.calibration
+    }
+
+    /// Decision 1: the cold start keeps the "certain but tiny" week at ~5 km, so *explaining* it
+    /// is the deliverable, not a nicety. This row was the page's most-missed fact — the plan
+    /// listing five running days and paying for one of them had no sentence connecting the two,
+    /// and the only wording that came close sat at the bottom of the page, in muted footnote
+    /// type, inside a disclosure.
+    @ViewBuilder private var explanation: some View {
+        let calibration = todayCalibration
+        // `executable` means the day can still be sent to the watch. It becomes false
+        // after today's run or while today's prescription needs reconfirmation, but the
+        // session remains part of the stored weekly schedule. Count planned sessions here
+        // so "排入" does not change merely because the runner completed one.
+        let scheduled = schedule?.days.filter { $0.kind != "rest" }.count
+        let budget = native.runCoach?.weeklyCapacityKm
+        let facts: [String] = [
+            calibration.map { $0.status == "completed"
+                ? "校准已完成"
+                : "校准未完成（\($0.eligibleSessions)/\($0.requirements.sessions) 次）" },
+            scheduled.map { "本周排入 \($0) 次训练" },
+            budget.map { "本周预算 \(nativeNumber($0, digits: 1)) km" }
+        ].compactMap { $0 }
+        if !facts.isEmpty || (calibration?.status ?? "completed") != "completed" {
+            VStack(alignment: .leading, spacing: 6) {
+                if !facts.isEmpty {
+                    Text(facts.joined(separator: " · "))
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            } else { Text("训练安排尚未刷新。").font(.footnote).foregroundStyle(TechColor.muted) }
+                if let calibration, calibration.status != "completed" {
+                    // Says why the number is small without claiming the programme is wrong.
+                    Text("本周 \(nativeNumber(budget, digits: 1)) km 是保守起步，不是整个计划的全部内容："
+                         + "校准未完成时只排轻松训练，先把基础建立起来。")
+                        .font(.footnote).foregroundStyle(TechColor.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityIdentifier("coach.explanation")
         }
+    }
+
+    /// The running days are **available**, not promised. The old label read 「跑步日：…」 and sat
+    /// directly above a week in which most of those days were empty, so the page contradicted
+    /// itself in two adjacent rows.
+    private func runnableDays(_ plan: MobileRunCoachPlan) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("可跑步日（可选，不是承诺）：\(plan.runningDays.map(weekdayName).joined(separator: "、"))")
+            if let unplanned = native.runCoach?.unplannedDays, let detail = unplanned.first?.detail {
+                Text("其中 \(unplanned.count) 天本周没有排入训练。\(detail)")
+            }
+        }
+        .font(.caption).foregroundStyle(TechColor.muted)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("coach.running-days")
+    }
+
+    /// Decision 3: preparation confidence. `status != "available"` renders an explicit empty
+    /// state — never `0`, which would read as the assertion "preparedness is zero", and never an
+    /// empty ring, which reads as "the app is still loading".
+    @ViewBuilder private var confidenceCard: some View {
+        if let confidence = native.runCoach?.confidence {
+            TechPanel {
+                TechSectionHeader(title: "备赛信心")
+                if confidence.status == "available", let value = confidence.value {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(techCoachConfidenceBandName(confidence.band ?? ""))
+                            .font(.headline).foregroundStyle(bandColor(confidence.band))
+                        Spacer(minLength: 8)
+                        Text("\(Int(value.rounded()))").font(.title2.bold().monospacedDigit())
+                        Text("/ 100").font(.caption).foregroundStyle(TechColor.muted)
+                    }
+                    if let level = confidence.evidenceLevel {
+                        Text(techCoachEvidenceLevelName(level)).font(.caption).foregroundStyle(TechColor.muted)
+                    }
+                    if let components = confidence.components {
+                        Text(componentLine(components)).font(.caption).foregroundStyle(TechColor.muted)
+                    }
+                } else {
+                    Text("暂无法给出信心值").font(.headline)
+                }
+                Text(confidence.note).font(.footnote).foregroundStyle(TechColor.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("coach.confidence")
+        }
+    }
+
+    /// The five shares the score is a weighted sum of, in the same order the weights are declared
+    /// (`@rai/durability` `PREPARATION_TARGETS`). Shown so a low score names what is missing
+    /// instead of reading as a verdict on the runner.
+    private func componentLine(_ components: MobileRunCoachResponse.Components) -> String {
+        let percent = { (value: Double) in "\(Int((value * 100).rounded()))%" }
+        return "跑量 \(percent(components.volume)) · 长课 \(percent(components.longRun))"
+            + " · 频率 \(percent(components.frequency)) · 强度暴露 \(percent(components.exposure))"
+            + " · 新鲜度 \(percent(components.recency))"
+    }
+
+    /// Colour never carries the meaning on its own — the band label does, and it is text.
+    private func bandColor(_ band: String?) -> Color {
+        switch band {
+        case "high": return TechColor.green
+        case "moderate": return TechColor.yellow
+        default: return TechColor.coral
+        }
+    }
+
+    private var calendar: some View {
+        // Tomorrow onwards. Today has its own authoritative card (`今日训练`); listing it again as
+        // the first row of "未来七日" made the page state the same day twice, in two different
+        // shapes, and made the window eight days wide.
+        let upcoming = (schedule?.days ?? []).filter { day in
+            guard let today = native.today?.today.localDate else { return true }
+            return day.localDate > today
+        }
+        return VStack(alignment: .leading, spacing: 10) {
+            TechSectionHeader(title: "未来七日")
+            if upcoming.isEmpty {
+                Text(schedule == nil ? "训练安排尚未刷新。" : "未来七日没有已生成的安排。")
+                    .font(.footnote).foregroundStyle(TechColor.muted)
+            }
+            ForEach(upcoming) { day in
+                TechExecutablePlanDay(day: day, unplanned: unplannedReason(for: day.localDate))
+                if let completed = native.today?.weekPlan.first(where: { $0.localDate == day.localDate })?.completedWorkoutId {
+                    NavigationLink { TechWorkoutDetailView(workoutId: completed) } label: { Label("训练记录与反馈", systemImage: "bubble.left.and.text.bubble.right") }
+                        .font(.caption)
+                }
+                Divider()
+            }
+        }
+    }
+
+    /// The server's own code for a selected running day that carries no session. Facts, not
+    /// motives — the read path cannot tell a budget cut from a ramp-guard cut.
+    private func unplannedReason(for localDate: String) -> String? {
+        guard let row = native.runCoach?.unplannedDays?.first(where: { $0.localDate == localDate }) else { return nil }
+        return "\(techCoachUnplannedReasonName(row.code))：\(row.detail)"
     }
 
     @ViewBuilder private var strength: some View {
@@ -229,9 +366,6 @@ struct TechRunCoachView: View {
         }
     }
 
-    private func phaseName(_ value: String?) -> String {
-        switch value { case "base": "基础期"; case "build": "专项期"; case "peak": "强化期"; case "taper": "减量期"; case "race_week": "比赛周"; case "past": "赛后恢复"; default: "持续训练" }
-    }
     private func weekdayName(_ day: Int) -> String { ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"][min(7, max(1, day))] }
 }
 
@@ -253,6 +387,13 @@ struct TechRunCoachSetup: View {
     @State private var loaded = false
 
     private var km: Double { distance == -1 ? Double(customDistance) ?? 0 : distance }
+    /// The pace the entered duration works out to, `m:ss /km`. Nil until both inputs are usable.
+    private var targetPaceLabel: String? {
+        guard km > 0, targetMinutes > 0 else { return nil }
+        let seconds = (targetMinutes * 60 / km).rounded()
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        return String(format: "%d:%02d /km", Int(seconds) / 60, Int(seconds) % 60)
+    }
     private var valid: Bool {
         runningDays.count >= 3 && !longRunDays.isEmpty && longRunDays.isSubset(of: runningDays) &&
             (goal == "fitness" || (km >= 1.6 && km <= 1609.344 && (goal != "time" || (150...900).contains(targetMinutes * 60 / km)))) &&
@@ -272,11 +413,26 @@ struct TechRunCoachSetup: View {
                             Text("5 km").tag(5.0); Text("10 km").tag(10.0); Text("半程马拉松").tag(21.0975)
                             Text("马拉松").tag(42.195); Text("自定义").tag(-1.0)
                         }.disabled(plan != nil).accessibilityIdentifier("coach.setup.distance")
-                        if distance == -1 { TextField("距离（km）", text: $customDistance).keyboardType(.decimalPad).disabled(plan != nil) }
+                        if distance == -1 {
+                            TextField("距离（km）", text: $customDistance).keyboardType(.decimalPad).disabled(plan != nil)
+                            // Decision 4: say it while the choice is being made, not after the
+                            // runner has filled in a date and a target time for a distance that
+                            // will never get a prediction or a confidence value.
+                            Text("自定义距离不在成绩预测链内：不会有成绩预测，也不会有备赛信心值。")
+                                .font(.caption).foregroundStyle(TechColor.muted)
+                        }
                         DatePicker("比赛日期", selection: $raceDate, in: plan == nil ? Date().addingTimeInterval(42 * 86_400)...Date().addingTimeInterval(364 * 86_400) : Date.distantPast...Date.distantFuture, displayedComponents: .date)
                             .disabled(plan != nil)
                         if goal == "time" {
                             HStack { Text("目标时间（分钟）"); TextField("分钟", value: $targetMinutes, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
+                            // Derived, not judged: the stored goal is a duration, so the pace it
+                            // implies is invisible until someone divides. The form used to accept
+                            // a half-marathon target of 1:00:00 (2:51/km) with nothing on screen
+                            // to notice. Showing the quotient needs no new threshold — every
+                            // "beyond world class" cut-off would be an uncalibrated constant.
+                            if let pace = targetPaceLabel {
+                                Text("目标配速 \(pace)").font(.caption).foregroundStyle(TechColor.muted)
+                            }
                         }
                     }
                 }

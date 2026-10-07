@@ -149,6 +149,74 @@ func techPlanExecutionStatusName(_ value: String) -> String {
     }
 }
 
+/// `MobilePeriodizationPhase` = base | build | peak | taper | race_week | past
+///
+/// `MobileRunCoachResponse.phase` is `MobilePeriodizationPhase | null`, and null means "there is
+/// no race block to be in a phase of" (a fitness programme). The caller supplies that word, not
+/// this function — see `TechRunCoachView.overview`. This mapper used to live in that view as a
+/// private function whose `default:` was「持续训练」, so a seventh phase added to the contract
+/// would have compiled, passed every regression, and silently reused that word — even though a
+/// fitness programme had already been reaching it in production, which is how the word got its
+/// current meaning.
+func techCoachPhaseName(_ value: String) -> String {
+    switch value {
+    case "base": return "基础期"
+    case "build": return "专项期"
+    case "peak": return "强化期"
+    case "taper": return "减量期"
+    case "race_week": return "比赛周"
+    case "past": return "赛后恢复"
+    default: return "未知阶段"
+    }
+}
+
+/// The word for "this programme has no race block", so no phase is the answer.
+///
+/// Kept beside the mapper rather than at the call site so the two cannot drift into two
+/// different ways of saying "not a race block".
+let techCoachNoRaceBlockLabel = "持续训练"
+
+/// `MobileRunCoachConfidence.band` = low | moderate | high
+///
+/// Deliberately not a percentage-shaped word ("成功率"), because the value is a *preparation*
+/// score: how much of this distance's weekly volume, long run, frequency, exposure and recency
+/// has been covered. A well-prepared runner can still miss a goal time.
+func techCoachConfidenceBandName(_ value: String) -> String {
+    switch value {
+    case "low": return "准备不足"
+    case "moderate": return "准备中"
+    case "high": return "准备充分"
+    default: return "未知档位"
+    }
+}
+
+/// `MobileRunCoachConfidence.evidenceLevel` = insufficient | developing | established
+///
+/// How much history stands behind the number. `developing` matters most: it means the recorded
+/// history does not cover a full preparation window, so a low score is **not** evidence of low
+/// volume — it is evidence of a short history.
+func techCoachEvidenceLevelName(_ value: String) -> String {
+    switch value {
+    case "insufficient": return "证据不足"
+    case "developing": return "历史不足 8 周"
+    case "established": return "历史已覆盖完整窗口"
+    default: return "未知证据档位"
+    }
+}
+
+/// `MobileRunCoachResponse.unplannedDays[].code` = no_session_scheduled | pre_race_taper
+///
+/// Codes, not motives: the read path cannot tell a weekly-budget cut from a ramp-guard cut from
+/// a pre-race cut, and the stored day used to answer all three with「恢复日。」— a cause it had
+/// never established.
+func techCoachUnplannedReasonName(_ value: String) -> String {
+    switch value {
+    case "no_session_scheduled": return "本周未排课"
+    case "pre_race_taper": return "赛前减量"
+    default: return "未排课"
+    }
+}
+
 /// 训练感受的一个档位。
 struct TechEffortOption: Equatable {
     /// 契约接受的 `rpe` 整数（1–10）。

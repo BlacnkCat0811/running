@@ -29,7 +29,7 @@ import type {
 import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, type DailyTrainingMetric } from "@rai/contracts";
 import { SqliteRecoveryFactsReadRepository, SqliteTrainingStatisticsReadRepository } from "@rai/storage-sqlite";
 import { classifyPhysState, countNightsBelowSleepBaseline, estimateRecoveryTime } from "@rai/training-load";
-import { loadRaceReadiness } from "@rai/application";
+import { loadRaceReadinessEvidence } from "@rai/application";
 import { buildPeriodization } from "./plan-periodization.js";
 import { buildPlanAdherence, replanAdvice, type PlanDayObservation } from "./plan-adherence.js";
 import type { PlanHistoryRevision } from "./mobile-goals.js";
@@ -200,7 +200,15 @@ export function assembleMobileCoach(args: {
   | "weekPlan"
   | "phase"
   | "lock"
-> {
+> & {
+  /**
+   * The preparation assessment this call already computed, handed back so callers
+   * can reuse it instead of re-reading the same facts. **Deliberately not part of
+   * `MobileTodayResponse`** — it is an internal handoff, not a wire field; the
+   * today payload only carries the three numbers the card renders.
+   */
+  preparation: ReturnType<typeof loadRaceReadinessEvidence> | null;
+} {
   const { database, dashboard, latestMetric, recentMetrics, zones, recentWorkouts, week, weekDaily, today } = args;
   const latestWorkout = recentWorkouts[0] ?? dashboard.latestWorkout;
   const coachWorkout = latestWorkout
@@ -246,12 +254,18 @@ export function assembleMobileCoach(args: {
   const physState = classifyPhysState({ sleepMinutes: sleep.lastNight, sleepBaselineMinutes: sleep.baseline, hrvSdnnMs: hrv.current, hrvBaselineMs: hrv.baseline, rhrBpm: rhr.current, rhrBaselineBpm: rhr.baseline, nightsBelowSleepBaseline: sleep.nightsBelow });
   const qualityDays = consecutiveQualityDays(weekSessions.recentByDate, args.latestDataDate ?? today);
   const asOf = `${(args.latestDataDate ?? today)}T16:00:00.000Z`;
-  let readiness: { five_k?: number; ten_k?: number; half_marathon?: number } = {};
+  // One assessment, three consumers: the race card needs the per-distance scores,
+  // the coach confidence needs the same assessment's components and evidence
+  // level, and the verdict gates read the race target. `loadRaceReadiness` used to
+  // throw away everything but `values`; reading it twice is how "what the card
+  // shows" and "what the confidence explains" drift apart.
+  let preparation: ReturnType<typeof loadRaceReadinessEvidence> | null = null;
   try {
-    readiness = loadRaceReadiness(database, asOf);
+    preparation = loadRaceReadinessEvidence(database, asOf);
   } catch {
-    readiness = {};
+    preparation = null;
   }
+  const readiness = preparation?.values ?? {};
   const raceDistance = args.goals.raceTarget?.distance ?? "ten_k";
   const raceTargetKm = RACE_TARGETS[raceDistance];
   const weeklyDistance8w = recentMetrics.slice(-56).reduce((sum, day) => sum + day.distanceMeters / 1000, 0) / 8;
@@ -448,7 +462,8 @@ export function assembleMobileCoach(args: {
       nextKind: nextSession.kind,
       lockPresent: lock.present
     }),
-    lock
+    lock,
+    preparation
   };
 }
 

@@ -1102,6 +1102,7 @@ export interface MobilePeriodization {
 export interface MobileAdherenceWeek {
   weekStart: string;
   phase: MobilePeriodizationPhase | null;
+  /** Days the plan asked for a **session** — rest days are not obligations and are not counted. */
   plannedDays: number;
   observedDays: number;
   /** Days the plan asked for a session and nothing was observed. Not "missed". */
@@ -1338,16 +1339,77 @@ export interface MobileRunCoachCommand {
   config?: MobileRunCoachConfig;
 }
 
+/**
+ * Coach confidence value — *preparation*, not a probability of hitting a time.
+ *
+ * It re-publishes the prep assessment the today card already shows (weekly volume,
+ * longest run, frequency, target-distance exposure, recency), so it answers "how
+ * ready is this runner for this distance" and nothing else. It is **not** a goal
+ * feasibility estimate and does not consume the race-time prediction chain.
+ *
+ * Three gates; any one failing ⇒ `status: "insufficient_data"` and `value: null`.
+ * **`value` is never `0` to mean "no data"** — zero reads as the assertion "preparedness
+ * is zero", which is the same banned shape as `DurabilityAssessment.durabilityScore`
+ * (see `@rai/durability`). The UI must render an explicit empty state instead.
+ *
+ * Banding thresholds are policy constants, not fitted against outcomes.
+ */
+export interface MobileRunCoachConfidence {
+  status: "available" | "insufficient_data";
+  /** 0–100. Must be `null` whenever `status !== "available"`. */
+  value: number | null;
+  band: "low" | "moderate" | "high" | null;
+  /** v1 only ever reports `"preparation"`; goal feasibility would be a new basis. */
+  basis: "preparation" | null;
+  /** Shares of the prep targets, 0–1. Null exactly when `value` is null. */
+  components: {
+    volume: number;
+    longRun: number;
+    frequency: number;
+    exposure: number;
+    recency: number;
+  } | null;
+  /**
+   * How much history stands behind the number. `developing` means the history does
+   * not cover a full preparation window, so a low value is not evidence of low volume.
+   */
+  evidenceLevel: "insufficient" | "developing" | "established" | null;
+  reasonCodes: string[];
+  /** Plain language. Always states that this is not a goal-hit probability. */
+  note: string;
+}
+
 export interface MobileRunCoachResponse {
   revision: number;
   plan: MobileRunCoachPlan | null;
-  phase: string | null;
+  /**
+   * The race-block phase, or `null` when there is no race block to be in a phase of (a fitness
+   * programme). A closed set on purpose: it used to be `string`, and the iOS side mapped it with
+   * a private `default:`, so a seventh phase would have compiled, passed every regression, and
+   * silently reused an existing word.
+   */
+  phase: MobilePeriodizationPhase | null;
   daysToRace: number | null;
   elapsedWeeks: number;
   weeklyCapacityKm: number;
   notices: string[];
-  phases: Array<{ phase: string; startsOn: string; endsOn: string; current: boolean }>;
+  phases: Array<{ phase: MobilePeriodizationPhase; startsOn: string; endsOn: string; current: boolean }>;
   strength: Array<{ localDate: string; durationMinutes: number; exercises: Array<{ name: string; dose: string }> }>;
+  /**
+   * Selected running weekdays inside the programme that carry **no session**, with a
+   * code and the observable counts behind it.
+   *
+   * Codes, not motives. The read path cannot tell a budget cut from a ramp-guard cut
+   * from a pre-race cut, and the stored day used to answer all three with "恢复日。" —
+   * a cause it had never established. Report the fact and let the screen explain it.
+   */
+  unplannedDays: Array<{
+    localDate: string;
+    code: "no_session_scheduled" | "pre_race_taper";
+    detail: string;
+  }>;
+  /** Null only when there is no race programme at all (no plan, or a fitness goal). */
+  confidence: MobileRunCoachConfidence | null;
 }
 
 export interface UpdateMobileGoalsInput {

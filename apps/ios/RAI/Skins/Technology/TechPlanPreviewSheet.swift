@@ -160,10 +160,14 @@ struct TechPlanExecutionPanel: View {
 
 struct TechExecutablePlanDay: View {
     let day: MobileWorkoutPlanDay
+    /// The server's code for a selected running day this week did not pay for. Nil when the day
+    /// needs no explanation (it is not a running day, or it carries a session).
+    var unplanned: String?
     var body: some View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
                 Text(day.executable ? "可同步" : "不下发：休息、未生成、已记录训练或待重新确认")
+                if let unplanned { Text(unplanned) }
                 if !day.reason.isEmpty { Text(day.reason) }
                 Text("来源：\(NativeAppModel.planSourceName(day.source))")
                 ForEach(nativeStructureLines(day.structure)) { line in

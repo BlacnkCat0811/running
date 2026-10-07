@@ -20,7 +20,7 @@ import {
   historicalOverrideJoin,
   historicalQualitySql
 } from "./prediction-historical-features.js";
-import { assessPreparation } from "@rai/durability";
+import { assessPreparation, type EvidenceLevel, type PreparationComponents } from "@rai/durability";
 import {
   performanceEvidence,
   performanceVdotEvidence,
@@ -78,6 +78,15 @@ export interface RaceReadinessEvidence {
   status: "available" | "insufficient_data";
   evidenceCount: number;
   dataThroughAt: string | null;
+  /**
+   * The prep assessment's own breakdown and history coverage, published instead of
+   * discarded. `loadRaceReadiness` used to keep `values` alone, so the coach could
+   * only show a bare score; recomputing the five components elsewhere would be a
+   * second implementation of the same weighted sum, which is how two screens end up
+   * explaining one number differently.
+   */
+  components: Partial<Record<RaceDistance, PreparationComponents>>;
+  evidenceLevel: EvidenceLevel;
 }
 
 export interface RecoveryReadinessEvidence {
@@ -574,14 +583,18 @@ export function loadRaceReadinessEvidence(
       values: {},
       status: "insufficient_data",
       evidenceCount: 0,
-      dataThroughAt: null
+      dataThroughAt: null,
+      components: {},
+      evidenceLevel: "insufficient"
     };
   }
   return {
     values: assessment.values as PredictionReadiness,
     status: "available",
     evidenceCount: assessment.evidenceCount,
-    dataThroughAt: assessment.latestTrainingAt
+    dataThroughAt: assessment.latestTrainingAt,
+    components: assessment.components,
+    evidenceLevel: assessment.evidenceLevel
   };
 }
 

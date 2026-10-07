@@ -85,3 +85,16 @@
 ### 旧周计划生成接口
 
 原生已不再定义直接 `generate` 客户端方法，使用 preview/confirm 两阶段。服务端旧接口为兼容保留并标记 deprecated，不再作为新客户端集成入口。
+
+## 2026-10-07 增量契约：跑步教练的准备度与预算
+
+`GET` / `POST /v1/mobile/run-coach` 新增两个字段，均为**兼容扩展**（旧客户端忽略即安全）：
+
+- `confidence`：`null`（无比赛计划或体能计划）或 `{ status, value, band, basis, components, evidenceLevel, reasonCodes, note }`。
+  - `value` 是 0–100 的**备赛准备度**，不是达标概率；`note` 每次都声明这一点。
+  - `status !== "available"` 时 `value` / `band` / `components` / `evidenceLevel` 一律为 `null`。**客户端不得把 `null` 显示为 `0`** —— 0 会被读成"准备度为零"这个断言（与 `@rai/durability` 对 `durabilityScore` 的红线同形）。空态必须显示"暂无法给出信心值"。
+  - `band` 分界 70 / 40 是 policy 常数、未拟合；校准未完成时不允许 `high`。
+  - `reasonCodes` 含 `unsupported_distance` 表示该距离不在预测链内（当前 5K / 10K / 半马之外均如此）。
+- `unplannedDays`：`[{ localDate, code, detail }]`，只覆盖**用户自选的跑步日**中本周没有排入训练的那些天。`code` 是事实码（`no_session_scheduled` / `pre_race_taper`），`detail` 是可观测计数，不含动机判断。
+
+同时修正 `weeklyCapacityKm` 的语义：它现在是**本周可花预算**（`min(容量, 本周量带上限)`），与生成侧和今天页量带上限同源。它此前的值是未按阶段裁剪的容量，与生成侧实际使用的数字不一致；**同名同型，取值口径变了**，如果客户端把它当作"上限"来做二次裁剪，请改用今天页的 `periodization.current.volumeBandKm.upper`。

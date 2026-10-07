@@ -1259,6 +1259,15 @@ export function buildInjuryFlags(input: CoachInput): MobileInjuryFlag[] {
   return flags;
 }
 
+/**
+ * Prep score below which the card explains *what is missing* instead of implying
+ * "train harder". Shared with the coach confidence value so the two surfaces cannot
+ * drift into different thresholds for the same sentence.
+ */
+export const WEAK_PREPARATION_SCORE = 0.55;
+/** The single wording for a weak prep score; used by the race card and the coach. */
+export const WEAK_PREPARATION_NOTE = "缺的是这条距离的周量和长课，不是再加 VO₂。";
+
 export function buildRaceCard(input: CoachInput): MobileRaceCard {
   const target = input.raceTarget;
   if (!target) {
@@ -1278,8 +1287,8 @@ export function buildRaceCard(input: CoachInput): MobileRaceCard {
   let note = days == null || days < 0
     ? `${distanceLabel}目标已过期。`
     : `距 ${distanceLabel} 还有 ${days} 天。`;
-  if (input.raceShapeScore != null && input.raceShapeScore < 0.55) {
-    note += " 赛事准备度还不足：缺的是这条距离的周量和长课，不是再加 VO₂。";
+  if (input.raceShapeScore != null && input.raceShapeScore < WEAK_PREPARATION_SCORE) {
+    note += ` 赛事准备度还不足：${WEAK_PREPARATION_NOTE}`;
   } else if (taper) {
     note += " 进入减量：量降 20–40%，不再拉新的最长距离。";
   } else if (input.raceShapeScore != null) {

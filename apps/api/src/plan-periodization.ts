@@ -147,6 +147,22 @@ export function periodizationVolumeFraction(phase: PeriodizationPhase): number {
 }
 
 /**
+ * The `upper` of one phase's volume band, in km — the number the today page shows.
+ *
+ * Extracted from `buildPeriodization`'s loop so the coach can *spend* against the
+ * same band instead of recomputing it. It used to recompute: the coach capped its
+ * week at `max(5, recent) × fraction` and the band capped at `max(5, recent × fraction)`,
+ * which differ whenever recent volume sits below the 5 km floor — and the subtraction
+ * was published as `weeklyCapacityKm`, i.e. a third number on the same screen. The
+ * floor has to stay *outside* the multiplication; that is the whole difference.
+ */
+export function periodizationVolumeBandKm(phase: PeriodizationPhase, recentWeeklyKm: number): number {
+  const weekly = Number.isFinite(recentWeeklyKm) ? Math.max(0, recentWeeklyKm) : 0;
+  const baseline = weekly > 0 ? weekly : PHASE_VOLUME.base.lower * MINIMUM_BAND_KM;
+  return Math.max(MINIMUM_BAND_KM, Math.round(baseline * PHASE_VOLUME[phase].upper * 10) / 10);
+}
+
+/**
  * The phase of the week a fresh plan covers, or null when there is no race target.
  *
  * One line for the callers that only need "which phase is this week", so a plan
@@ -214,7 +230,7 @@ export function buildPeriodization(input: {
     const band = PHASE_VOLUME[phase];
     const volumeBandKm = {
       lower: Math.max(MINIMUM_BAND_KM, Math.round(baseline * band.lower * 10) / 10),
-      upper: Math.max(MINIMUM_BAND_KM, Math.round(baseline * band.upper * 10) / 10)
+      upper: periodizationVolumeBandKm(phase, baseline)
     };
     const longRunCapKm = Math.min(
       DISTANCE_LONG_RUN_CAP_KM[race.distance],

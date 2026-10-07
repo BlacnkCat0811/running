@@ -184,6 +184,23 @@ test("Monday and midweek plans are counted without rewriting elapsed days", () =
     history: [revision("2026-10-07T09:00:00+08:00", 1, midweek.filter(day => day.localDate >= today))] });
   assert.equal(firstMidweek.current!.plannedDays, 2);
   assert.equal(firstMidweek.current!.plannedDistanceKm, 20);
+  // Rest days are not obligations and must not be counted: a week of one run plus six explicit
+  // rest days reported `plannedDays: 7` while `unknownDays`/`qualityPlanned` were derived from
+  // the single prescribed day. Nothing renders it, which is why it survived — until someone
+  // builds "本周剩余 N 次" on top of it.
+  const withRests = buildPlanAdherence({ today, periodization, actual: [],
+    history: [revision("2026-10-07T09:00:00+08:00", 1, [
+      { localDate: today, kind: "easy" as const, distanceKm: 5 },
+      ...[2, 3, 4, 5, 6, 7].map(offset => ({ localDate: addDays(today, offset), kind: "rest" as const, distanceKm: null }))
+    ])] });
+  assert.equal(withRests.current!.plannedDays, 1, "six rest days are not six planned sessions");
+  assert.equal(withRests.current!.plannedDistanceKm, 5);
+  assert.equal(withRests.current!.unknownDays, 1, "unknownDays counts the same universe as plannedDays");
+  const allRests = buildPlanAdherence({ today, periodization, actual: [],
+    history: [revision("2026-10-07T09:00:00+08:00", 1,
+      [2, 3, 4, 5, 6, 7].map(offset => ({ localDate: addDays(today, offset), kind: "rest" as const, distanceKm: null })))] });
+  assert.equal(allRests.current!.plannedDays, 0);
+  assert.equal(allRests.current!.status, "unknown", "a week with no obligation cannot report progress");
   const nextWeek = buildPlanAdherence({ today: "2026-10-12", history, periodization, actual: [] });
   assert.equal(nextWeek.weeks[1]!.plannedDistanceKm, 35, "the same daily obligations survive after the week ends");
 });

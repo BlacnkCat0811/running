@@ -113,6 +113,9 @@ export function buildPlanAdherence(input: {
         Date.parse(item.changedAt) < end && item.weekPlan.some(day => day.localDate === localDate));
       return firstSameDay?.weekPlan.find(day => day.localDate === localDate);
     }).filter(day => day !== undefined);
+    // The universe every field below is derived from: the days the plan actually asked for a
+    // session. Rest days are not obligations.
+    const prescribedDays = planned.filter(day => day.kind !== "rest");
 
     let plannedDistanceKm: number | null = null;
     let observedDistanceKm = 0;
@@ -146,7 +149,7 @@ export function buildPlanAdherence(input: {
         ? round(observedDistanceKm / plannedDistanceKm, 3)
         : null;
     const status: AdherenceWeek["status"] =
-      planned.length === 0
+      prescribedDays.length === 0
         ? "unknown"
         : observedDays === 0 && unknownDays > 0
           ? "unknown"
@@ -159,7 +162,12 @@ export function buildPlanAdherence(input: {
     result.push({
       weekStart,
       phase,
-      plannedDays: planned.length,
+      // Prescribed days only, matching `unknownDays` / `qualityPlanned`. It used to be
+      // `planned.length`, which counted rest days too: a week the plan answered with one run and
+      // six explicit rest days reported `plannedDays: 7` while every other field in the same row
+      // was derived from the single prescribed day. Nothing renders it today, which is exactly
+      // why it would have survived until someone built "本周剩余 N 次" on top of it.
+      plannedDays: prescribedDays.length,
       observedDays,
       unknownDays,
       plannedDistanceKm: plannedDistanceKm === null ? null : round(plannedDistanceKm, 1),

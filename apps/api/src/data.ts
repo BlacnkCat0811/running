@@ -359,7 +359,7 @@ export class RaiReadStore {
   private mobileTodayWithExecutablePlan(
     goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach">,
     planHistory?: PlanHistoryRevision[]
-  ): { today: MobileTodayResponse; effective: MobileWorkoutPlanResponse } {
+  ): { today: MobileTodayResponse; effective: MobileWorkoutPlanResponse; preparation: ReturnType<typeof assembleMobileCoach>["preparation"] } {
     const today = mobileLocalDate();
     // A paused/ended programme never falls back to an invented daily run after
     // its saved seven-day window expires. Imported history remains observable.
@@ -552,7 +552,7 @@ export class RaiReadStore {
     // still resolve the session, and future days keep the derived weekly budget.
     const todayCeilingKm = preservedToday ? Math.max(capacityCeilingKm, weekDistanceKm +
       (plannedDayNumbers(preservedToday.kind, preservedToday.structure, preservedToday.distanceKm, zonePrescription(zones)).distanceKm ?? 0)) : capacityCeilingKm;
-    const coach = assembleMobileCoach({
+    const { preparation, ...coach } = assembleMobileCoach({
       database: this.database,
       dashboard,
       latestMetric,
@@ -645,7 +645,7 @@ export class RaiReadStore {
       if (!prescribed) return day;
       return { ...day, kind: prescribed.kind, title: prescribed.title, distanceKm: prescribed.distanceKm ?? 0, structure: prescribed.structure };
     });
-    return { today: result, effective };
+    return { today: result, effective, preparation };
   }
 
   /**
@@ -718,8 +718,14 @@ export class RaiReadStore {
     previousWeekDistanceKm: number;
     recentWeeklyKm: number;
     weeklyVolumeBaselineKm: number;
+    /**
+     * The prep assessment the today payload was built from, handed to the coach so
+     * the confidence card explains the same numbers the race card shows instead of
+     * re-reading the facts (two reads = two chances to disagree).
+     */
+    preparation: ReturnType<typeof assembleMobileCoach>["preparation"];
   } {
-    const today = this.mobileToday(goals, planHistory);
+    const { today, preparation } = this.mobileTodayWithExecutablePlan(goals, planHistory);
     const previousWeekDistanceKm = this.previousWeekDistanceKm(today.today.localDate);
     // Mirror the window `mobileTodayWithExecutablePlan` uses for its own recent
     // volume, so both paths read the same four complete weeks.
@@ -734,6 +740,7 @@ export class RaiReadStore {
       prescription: zonePrescription(this.trainingZonesCurrent()),
       previousWeekDistanceKm,
       recentWeeklyKm: recent,
+      preparation,
       weeklyVolumeBaselineKm: weeklyCapacity({
         today: today.today.localDate,
         raceTarget: goals?.raceTarget ?? null,

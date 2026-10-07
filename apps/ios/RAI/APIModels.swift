@@ -819,11 +819,43 @@ struct MobileRunCoachResponse: Codable {
     let phase: String?
     let daysToRace: Int?
     let elapsedWeeks: Int
+    /// This week's *spendable* budget, km — the number the week was actually generated from.
     let weeklyCapacityKm: Double
     let notices: [String]
     let phases: [Phase]?
     let strength: [StrengthSession]
+    /// Selected running weekdays inside the programme that carry no session, with a code and
+    /// the observable counts behind it. Optional so a payload cached before this field existed
+    /// still decodes.
+    let unplannedDays: [UnplannedDay]?
+    /// Prep readiness for the race distance. Nil when there is no race programme at all.
+    let confidence: Confidence?
 
+    struct Confidence: Codable, Equatable {
+        let status: String
+        /// 0–100. Nil — never `0` — whenever `status` is not `available`; `0` would read as the
+        /// assertion "preparedness is zero".
+        let value: Double?
+        let band: String?
+        let basis: String?
+        let components: Components?
+        let evidenceLevel: String?
+        let reasonCodes: [String]
+        let note: String
+    }
+    struct Components: Codable, Equatable {
+        let volume: Double
+        let longRun: Double
+        let frequency: Double
+        let exposure: Double
+        let recency: Double
+    }
+    struct UnplannedDay: Codable, Identifiable {
+        let localDate: String
+        let code: String
+        let detail: String
+        var id: String { localDate }
+    }
     struct StrengthSession: Codable, Identifiable {
         let localDate: String
         let durationMinutes: Int

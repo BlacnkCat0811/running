@@ -273,6 +273,117 @@ for field, anchor in sorted(field_anchors.items()):
         "Payload present + contract present + no display slot is exactly the 2026-09-17 "
         "regression, so this gate fails instead of passing quietly.")
 
+# ---------------------------------------------------------------------------
+# 教练响应（`MobileRunCoachResponse`）的字段覆盖。
+#
+# 在这之前这里是**零覆盖**：`MobileTodayResponse` 的 33 个字段被逐个对账，教练响应一个都
+# 没有 —— 于是给它加字段是"裸奔"改动（本次新增的 `confidence` 与 `unplannedDays` 就是在
+# 这种状态下做的，是本次改动要一并补上的判据）。口径与上面完全一致：字段全集从**契约源码**
+# 解析，锚点逐条写在视图里，例外逐条写理由 —— 任何"payload 发了但没人显示"的字段在这里
+# 变红，而不是等用户发现。
+#
+# ⚠️ 用 `^ {2}` 而不是 `^\s{2}`：`unplannedDays` 是内联对象数组，成员缩进 4 格，
+# `\s{2}` 会把它们一并收进字段集，于是门禁开始对账几个并不存在的顶层字段。
+# ---------------------------------------------------------------------------
+coach_interface = re.search(r"export interface MobileRunCoachResponse \{(.*?)\n\}", contract, re.S)
+assert coach_interface, ("Could not locate MobileRunCoachResponse in the contract; the coach field "
+                         "coverage gate must fail loudly instead of skipping")
+coach_fields = re.findall(r"^ {2}(\w+)\??:", coach_interface.group(1), re.M)
+assert len(coach_fields) >= 8, (
+    f"MobileRunCoachResponse parsed as {len(coach_fields)} fields, which is implausibly few — "
+    "the regex stopped matching the contract, it did not shrink.")
+
+coach_view = without_comments(
+    pathlib.Path("apps/ios/RAI/Skins/Technology/TechRunCoachView.swift").read_text()
+    + pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanPreviewSheet.swift").read_text())
+coach_anchors = {
+    "revision": "coach.revision == native.currentPlanRevision",
+    "plan": "return coach.plan",
+    "phase": "native.runCoach?.phase.map(techCoachPhaseName)",
+    "daysToRace": "native.runCoach?.daysToRace",
+    "elapsedWeeks": "native.runCoach?.elapsedWeeks",
+    # 2026-10-07：这一格是"算完却丢掉"的正例。它此前是另一套公式算出来的容量，直接上屏会
+    # 与今天页的量带打架；现在它是本周**预算**，与今天页量带上限同源（见 `runCoachWeeklyBudget`）。
+    # 断言锚在解释行上：那个数字必须带着"校准未完成"一起出现，否则一句孤立的 km 数会被读成承诺。
+    "weeklyCapacityKm": "本周预算 \\(nativeNumber($0, digits: 1)) km",
+    "notices": "coach.notices",
+    "phases": "native.runCoach?.phases",
+    "strength": "native.runCoach?.strength",
+    "unplannedDays": "native.runCoach?.unplannedDays",
+    # 🔴 锚在**形状**上（`<读> {`），不是裸子串。裸子串 `native.runCoach?.confidence` 在这个
+    # 文件里有**两处**命中（另一处是 `:31` 的 unsupported-distance 提示），所以把信心卡片整块
+    # 删掉它照样命中；再给绑定加一个条件（`, false {`）也照样命中。
+    # 2026-10-07 突变验证实测：13 条突变里**唯一存活**的就是
+    # `if let confidence = native.runCoach?.confidence, false {` —— 覆盖表全绿。
+    # 收紧成 `<读> {` 后它变红，且对局部变量改名免疫（`if let c = native.runCoach?.confidence {` 仍匹配）。
+    "confidence": "native.runCoach?.confidence {",
+}
+coach_metadata_only = {
+    # v1 只有 `"preparation"` 一个取值。要出现第二个（目标可达性）才需要展示位 ——
+    # 那时它必须回答"按当前预测能不能跑到目标时间"，而那是**另一条预测链**，
+    # 不是在本页再抄一份准备度。
+    "confidence.basis": "v1 只有 preparation 一个取值，无需区分",
+}
+coach_unaccounted = set(coach_fields) - set(coach_anchors) - set(coach_metadata_only)
+assert not coach_unaccounted, (
+    f"MobileRunCoachResponse grew {sorted(coach_unaccounted)} with no display slot and no "
+    "documented reason. Give it an anchor in TechRunCoachView.swift, or list it in "
+    "coach_metadata_only with a reason — payload present + no display slot is the 2026-09-17 "
+    "regression, and the coach response had zero coverage of it until 2026-10-07.")
+# 两个集合都可能写子字段（`confidence.basis`），所以比"顶层契约字段"时只取点号前那一段 ——
+# 否则一条合法登记会被判成 stale，那是假红。假红的门禁和恒绿的门禁一样糟。
+coach_stale = ({key.split(".")[0] for key in set(coach_anchors) | set(coach_metadata_only)}
+               - set(coach_fields))
+assert not coach_stale, f"the coach field gate still lists {sorted(coach_stale)}, which the contract no longer has"
+for field, anchor in sorted(coach_anchors.items()):
+    assert anchor in coach_view, (
+        f"The coach page stopped rendering {field} ({anchor!r} missing). Payload present + "
+        "contract present + no display slot is exactly the 2026-09-17 regression.")
+
+# 覆盖表（上面）证明的是"字段被**读到**"，**不**证明"卡片会**渲染**" —— 两者差一个条件子句。
+# `if let sessions = native.runCoach?.strength, false {` 保留 anchor 子串、关掉整块 UI，
+# 覆盖表与锚点全都照绿（2026-10-07 突变验证实测 13 条里唯一存活的就是这个形状）。
+# 视图的条件表里出现**裸布尔字面量**只可能是死代码或开关，所以整类一次钉死，
+# 而不是逐字段去猜哪个 `if let` 可以被"多接一个条件"绕过。
+# ⚠️ 它挡不住的不是字面量的开关：`if cond, someFlag {`（`someFlag` 是变量）、`.opacity(0)`、
+# 或者把读改写进一个恒为 nil 的表达式 —— 那些要另设判据。
+literal_conditions = [
+    match.group(0)
+    for match in re.finditer(
+        r"(?:if|guard|while)\s+(?:true|false)\s*(?:,|\{)"
+        r"|(?:if|guard|while)[^\n]*?,\s*(?:true|false)\s*(?:,|\{)",
+        coach_view)
+]
+assert not literal_conditions, (
+    f"A literal boolean appears in a condition list in the coach view: {literal_conditions}. It "
+    "either makes the branch dead code or switches a whole card off while every anchor above "
+    "still matches. Remove the condition instead of forcing it.")
+
+# 方向断言：`confidence` 的空态必须真的走空态分支。
+# `value` 在 `status != "available"` 时是 `null`（服务端永远不发 0），所以任何把它读成数字的
+# 写法都得先过这一关；`?? 0` 这类兜底会把"没有证据"渲染成"准备度为零"这个断言 ——
+# 与 `@rai/durability` 对 `durabilityScore` 的红线同形（"`null` 也不是 0"）。
+assert 'if confidence.status == "available", let value = confidence.value' in coach_view, (
+    "TechRunCoachView no longer gates the confidence value on `status == \"available\"`. Without "
+    "it a `?? 0` fallback is one edit away, and 0 reads as the assertion \"preparedness is zero\" "
+    "— the shape `@rai/durability` explicitly forbids for `durabilityScore`.")
+assert "?? 0" not in coach_view.split("if confidence.status")[1].split("private func componentLine")[0], (
+    "The confidence card grew a `?? 0` fallback. Absent evidence must render an empty state, "
+    "never a zero: `null` is not `0`.")
+# 显示映射必须真的被调用（定义存在 ≠ 视图用它）：这四组闭集文案都在 `TechEnumPresentation`，
+# 视图直出契约取值就会把 `moderate` / `pre_race_taper` / `half_marathon` 这类机器码送上屏。
+for call in ["techCoachPhaseName(", "techCoachConfidenceBandName(", "techCoachEvidenceLevelName(",
+             "techCoachUnplannedReasonName("]:
+    assert call in coach_view, (
+        f"TechRunCoachView no longer calls {call} — the mapping exists but the view bypasses it, "
+        "which is how contract machine codes reach the screen.")
+assert "private func phaseName" not in coach_view, (
+    "A private `phaseName` came back into the coach view. Its `default:` was「持续训练」, a word "
+    "already reached in production by fitness programmes, so a seventh contract phase would "
+    "reuse it silently. Use `techCoachPhaseName` + `techCoachNoRaceBlockLabel`.")
+print(f"Coach field coverage: {len(coach_anchors)}/{len(coach_fields)} MobileRunCoachResponse "
+      f"fields have a Technology display slot and {len(coach_metadata_only)} is metadata by design.")
+
 # 闭集枚举：契约里的每个取值都必须在展示映射里出现，多一个少一个都算红。
 # 域外值会以机器码形式漏到界面上（`need_sync` / `too_hard` / `half_marathon`）。
 def mapped_cases(source, function_name):
@@ -313,6 +424,35 @@ assert len(plan_execution_status) >= 2, (
     f"MobilePlanExecutionDay.status parsed as {plan_execution_status}, which is implausibly few — "
     "the regex stopped matching the contract, it did not shrink.")
 
+def union_values(interface_name, field_name):
+    """契约里某个内联联合字段的取值清单。
+
+    逐字解析而不是在脚本里手抄：手抄的那份不随契约变，于是契约新增一个取值时，穷举表与
+    枚举对账会**一起**对着过期清单配平、双双变绿 —— 而界面已经落到 `default` 上。
+    解析不到就报错，不许静默跳过（静默跳过的门禁比没有门禁更糟）。
+    """
+    body = re.search(rf"export interface {interface_name} \{{(.*?)\n\}}", contract, re.S)
+    assert body, (f"Could not locate {interface_name} in the contract; the closed-set gate must "
+                  "fail loudly instead of skipping")
+    line = re.search(rf"^\s*{field_name}\??:\s*(.+?);\s*$", body.group(1), re.M)
+    assert line, (f"{interface_name} has no parseable `{field_name}` field; the closed-set gate "
+                  "must fail loudly instead of skipping")
+    values = re.findall(r'"([^"]+)"', line.group(1))
+    assert len(values) >= 2, (
+        f"{interface_name}.{field_name} parsed as {values}, which is implausibly few — the regex "
+        "stopped matching the contract, it did not shrink.")
+    return values
+
+phase_alias = re.search(r"export type MobilePeriodizationPhase = (.+?);", contract)
+assert phase_alias, ("Could not locate MobilePeriodizationPhase in the contract; the coach phase "
+                     "gate must fail loudly instead of skipping")
+periodization_phases = re.findall(r'"([^"]+)"', phase_alias.group(1))
+assert len(periodization_phases) >= 4, (
+    f"MobilePeriodizationPhase parsed as {periodization_phases}, which is implausibly few.")
+coach_bands = union_values("MobileRunCoachConfidence", "band")
+coach_evidence_levels = union_values("MobileRunCoachConfidence", "evidenceLevel")
+coach_unplanned_codes = union_values("MobileRunCoachResponse", "code")
+
 enum_checks = 0
 for enum_name, values, mappings in [
     ("MobileDayPhase", ["need_sync", "morning_open", "locked", "post_run", "rest_done"],
@@ -346,6 +486,18 @@ for enum_name, values, mappings in [
     # 变红，而不是等着谁记得回来改。
     ("MobilePlanExecutionDay.status", plan_execution_status,
      [("techPlanExecutionStatusName", tech_enums)]),
+    # 2026-10-07 教练页的四组新闭集。`techCoachPhaseName` 尤其重要：它此前是视图里的一个
+    # 私有函数，`default:` 是「持续训练」，而体能计划在生产里已经走到那个分支 —— 契约新增
+    # 第七个阶段时它会静默复用这个词。现在它与契约逐值配平，多一个少一个都红。
+    # 取值全部从契约源码解析（`union_values` / `periodization_phases`），不在这里手抄。
+    ("MobilePeriodizationPhase", periodization_phases,
+     [("techCoachPhaseName", tech_enums)]),
+    ("MobileRunCoachConfidence.band", coach_bands,
+     [("techCoachConfidenceBandName", tech_enums)]),
+    ("MobileRunCoachConfidence.evidenceLevel", coach_evidence_levels,
+     [("techCoachEvidenceLevelName", tech_enums)]),
+    ("MobileRunCoachResponse.unplannedDays[].code", coach_unplanned_codes,
+     [("techCoachUnplannedReasonName", tech_enums)]),
 ]:
     expected = set(values)
     for function_name, source in mappings:
@@ -359,8 +511,9 @@ print(f"Technology color tokens: {checks} foreground/background pairs meet the 4
 print("Token checks do not replace rendered-view accessibility auditing.")
 print(f"Field coverage: {len(field_anchors)}/{len(contract_fields)} MobileTodayResponse fields have a "
       f"Technology display slot and {len(metadata_only)} are metadata by design "
-      f"({', '.join(sorted(metadata_only))}); {enum_checks} closed-set enum mappings cover every "
-      f"contract value.")
+      f"({', '.join(sorted(metadata_only))}); {len(coach_anchors)}/{len(coach_fields)} "
+      f"MobileRunCoachResponse fields likewise ({len(coach_metadata_only)} metadata by design); "
+      f"{enum_checks} closed-set enum mappings cover every contract value.")
 
 # 映射函数存在 ≠ 映射函数被调用：把 `techPhaseName(data.phase)` 改回直出
 # `data.phase` 时，上面的穷举断言依然全绿（函数体一个字没动），用户却重新看到
