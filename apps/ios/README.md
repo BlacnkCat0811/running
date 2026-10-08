@@ -38,7 +38,7 @@ module map 声明 `umbrella header "MAMapKit.h"`，而随包的 `MAMapKit.h` 漏
 - [同步协议](../../docs/IOS_NATIVE_SYNC_PROTOCOL.md)：原子任务、后台恢复、scope与路由。
 - [ADR-004](../../docs/adr/ADR-004-healthkit-sync-invariants.md)：不可随意颠倒的提交/清理等规则。
 - [运行与真机验收](../../docs/IOS_NATIVE_RUNBOOK.md)：权限、故障、恢复与人工清单。
-- [设计资产索引](design/README.md) / [清新视觉规范](design/TECHNOLOGY_SKIN.md)：当前唯一清新视觉及历史视觉证据。
+- [设计资产索引](design/README.md) / [运动深色视觉规范](design/TECHNOLOGY_SKIN.md)：当前唯一运动深色视觉及历史视觉证据。
 
 ## 自动与人工验收
 
