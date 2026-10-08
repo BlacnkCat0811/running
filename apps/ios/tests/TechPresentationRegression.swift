@@ -389,6 +389,209 @@ struct TechPresentationRegression {
         check(TechEffortScale.option(for: 7) == nil,
               "An off-tier stored value must not be silently relabelled as a tier")
 
+        func coachPlan(startedOn: String = "2026-10-08", raceDate: String? = nil,
+                       goal: String = "fitness", durationWeeks: Int? = 12) -> MobileRunCoachPlan {
+            MobileRunCoachPlan(id: "cycle-test", startedOn: startedOn, status: "active",
+                pausedOn: nil, endedOn: nil, adaptationKey: nil, adaptedAt: nil,
+                goal: goal, raceDate: raceDate, raceDistanceKm: goal == "fitness" ? nil : 10,
+                targetTimeSeconds: nil, runningDays: [1, 3, 5], longRunDays: [5],
+                targetType: "pace", strengthTraining: false, durationWeeks: durationWeeks)
+        }
+        check(techCoachTotalWeeks(for: coachPlan(durationWeeks: 6)) == 6,
+              "Fitness programmes keep their configured duration")
+        check(techCoachTotalWeeks(for: coachPlan(durationWeeks: nil)) == 12,
+              "Legacy fitness programmes use the API's twelve-week default")
+        check(techCoachTotalWeeks(for: coachPlan(durationWeeks: 0)) == nil,
+              "Invalid fitness durations do not invent a cycle")
+        let longRace = coachPlan(raceDate: "2027-04-08", goal: "finish")
+        check(techCoachTotalWeeks(for: longRace) == 27,
+              "Race cycles ignore the twelve-week fitness setting and include the final race-day bucket")
+        check(techCoachTotalWeeks(for: coachPlan(raceDate: "2027-04-08", goal: "time", durationWeeks: 6)) == 27,
+              "A hidden fitness duration cannot shorten a target-time race programme")
+        check(techCoachTotalWeeks(for: coachPlan(raceDate: "2027-04-08", goal: "finish", durationWeeks: nil)) == 27,
+              "Legacy race plans derive their cycle without a duration field")
+        check(techCoachTotalWeeks(for: coachPlan(raceDate: "2026-10-14", goal: "finish")) == 1 &&
+              techCoachTotalWeeks(for: coachPlan(raceDate: "2026-10-15", goal: "finish")) == 2,
+              "Inclusive cycle buckets match floor(days / 7) + 1 at the race-day boundary")
+        check(techCoachTotalWeeks(for: coachPlan(startedOn: "2028-02-28", raceDate: "2028-03-06", goal: "finish")) == 2,
+              "Race cycle dates account for leap days")
+        check(techCoachTotalWeeks(for: coachPlan(startedOn: "2027-03-08", raceDate: "2027-03-15", goal: "finish")) == 2,
+              "Civil-date cycle lengths do not lose a day across daylight-saving changes")
+        for invalidRace in [nil, "2026-10-07", "2027-02-29", "2027-4-08", "not-a-date"] as [String?] {
+            check(techCoachTotalWeeks(for: coachPlan(raceDate: invalidRace, goal: "finish")) == nil,
+                  "Missing or invalid race dates do not fall back to a fitness duration")
+        }
+        check(techCoachTotalWeeks(for: coachPlan(startedOn: "not-a-date", raceDate: "2027-04-08", goal: "finish")) == nil,
+              "An invalid start date cannot create race-cycle progress")
+
+        let coachPaceAlert = MobileStepAlert(kind: "pace", lower: 360, upper: 450)
+        let coachHeartRateAlert = MobileStepAlert(kind: "heart_rate", lower: 130, upper: 145)
+        func coachStructure(_ alerts: [MobileStepAlert?]) -> MobileSessionStructure {
+            let warmup = MobileWorkoutStep(purpose: "warmup", goal: .time(seconds: 300), alert: coachHeartRateAlert)
+            let recovery = MobileWorkoutStep(purpose: "recovery", goal: .time(seconds: 120), alert: coachHeartRateAlert)
+            return MobileSessionStructure(warmup: warmup, blocks: [
+                MobileIntervalBlock(iterations: 3, steps: [recovery] + alerts.map {
+                    MobileWorkoutStep(purpose: "work", goal: .distance(meters: 800), alert: $0)
+                })
+            ], cooldown: MobileWorkoutStep(purpose: "cooldown", goal: .time(seconds: 300), alert: coachHeartRateAlert))
+        }
+        func coachSession(_ structure: MobileSessionStructure?, heartRateUpper: Double? = 125) -> MobileNextSession {
+            MobileNextSession(kind: "easy", title: "轻松跑", reason: "", distanceKm: 5, durationMinutes: 30,
+                paceSecondsPerKmLower: 360, paceSecondsPerKmUpper: 450,
+                heartRateBpmLower: nil, heartRateBpmUpper: heartRateUpper, structure: structure)
+        }
+        func coachDay(_ date: String, kind: String = "easy", structure: MobileSessionStructure? = nil) -> MobileWorkoutPlanDay {
+            MobileWorkoutPlanDay(localDate: date, kind: kind, title: "", reason: "",
+                distanceKm: kind == "rest" ? nil : 5, durationMinutes: kind == "rest" ? nil : 30,
+                paceSecondsPerKmLower: 360, paceSecondsPerKmUpper: 450,
+                heartRateBpmLower: 120, heartRateBpmUpper: 125,
+                structure: structure, source: "heuristic", executable: kind != "rest")
+        }
+        let hrStructure = coachStructure([coachHeartRateAlert, coachHeartRateAlert])
+        let hrTarget = techCoachTrainingTarget(for: coachSession(hrStructure), preferredType: "heart_rate")
+        check(hrTarget?.alert == coachHeartRateAlert && hrTarget?.title == "目标心率",
+              "Today uses the actual main-work heart-rate target, not either session-level reference range")
+        check(techCoachTrainingTarget(for: coachDay("2026-10-09", structure: hrStructure), preferredType: "heart_rate") == hrTarget,
+              "Upcoming rows and executable details share today's prescription-based target rule")
+        check(techCoachTrainingTarget(for: coachSession(hrStructure), preferredType: "pace") == hrTarget,
+              "A preserved heart-rate prescription outranks newly changed preferences")
+        let paceTarget = techCoachTrainingTarget(structure: coachStructure([coachPaceAlert]))
+        check(paceTarget?.alert == coachPaceAlert && paceTarget?.title == "目标配速",
+              "Main-work pace is not replaced by warmup, recovery or cooldown heart rate")
+        check(techCoachTrainingTarget(for: coachSession(coachStructure([nil])), preferredType: "heart_rate") == nil,
+              "A structured workout with no work alert cannot silently acquire a pace or heart-rate target")
+        check(techCoachTrainingTarget(structure: coachStructure([coachHeartRateAlert, nil]), legacyAlert: coachPaceAlert) == nil,
+              "An untargeted work step cannot be hidden behind another step's target")
+        check(techCoachTrainingTarget(structure: coachStructure([coachHeartRateAlert, coachPaceAlert])) == nil,
+              "Mixed work targets stay in the detailed steps rather than becoming one misleading range")
+        check(techCoachTrainingTarget(structure: coachStructure([]), legacyAlert: coachPaceAlert) == nil,
+              "Warmup-only structures do not invent a main training target")
+        check(techCoachTrainingTarget(structure: coachStructure([MobileStepAlert(kind: "unknown", lower: 130, upper: 145)])) == nil,
+              "An unknown alert kind cannot be labelled as pace")
+        let singleBound = MobileStepAlert(kind: "heart_rate", lower: nil, upper: 145)
+        check(techCoachTrainingTarget(structure: coachStructure([singleBound]))?.alert == singleBound,
+              "A real one-sided target remains one-sided")
+        check(techCoachTrainingTarget(for: coachSession(nil), preferredType: "heart_rate")?.alert ==
+              MobileStepAlert(kind: "heart_rate", lower: nil, upper: 125),
+              "Legacy unstructured sessions use the selected heart-rate reference, not pace")
+        check(techCoachTrainingTarget(for: coachSession(nil), preferredType: "pace")?.alert == coachPaceAlert,
+              "Legacy pace sessions keep their existing target display")
+        check(techCoachTrainingTarget(for: coachSession(nil, heartRateUpper: nil), preferredType: "heart_rate") == nil,
+              "Missing legacy heart-rate evidence never falls back to pace")
+        check(techCoachTrainingTarget(for: coachDay("2026-10-09"), preferredType: "heart_rate")?.alert ==
+              MobileStepAlert(kind: "heart_rate", lower: 120, upper: 125),
+              "Legacy executable rows and details also respect the selected target type")
+
+        // Schedule display does not take a today response: a failed/missing today
+        // endpoint cannot hide a valid independently refreshed executable week.
+        let upcomingScheduleDays = [
+            coachDay("2026-10-13"), coachDay("2026-10-08"), coachDay("2026-10-11", kind: "rest"),
+            coachDay("2026-10-10"), coachDay("2026-10-07"), coachDay("2026-10-12"), coachDay("2026-10-09")
+        ]
+        func coachSchedule(timezone: String = "Asia/Shanghai", days: [MobileWorkoutPlanDay]) -> MobileWorkoutPlanResponse {
+            MobileWorkoutPlanResponse(generatedAt: "2026-10-01T00:00:00Z", timezone: timezone,
+                windowDays: days.count, planRevision: 2, audit: nil, days: days)
+        }
+        let coachNow = ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")!
+        let validSchedule = coachSchedule(days: upcomingScheduleDays)
+        check(techCoachUpcomingTrainingDays(in: validSchedule, now: coachNow).map(\.localDate) ==
+              ["2026-10-09", "2026-10-10", "2026-10-12"],
+              "Independent schedules exclude today, past days and rest, sort chronologically and limit to three")
+        let midnightNow = ISO8601DateFormatter().date(from: "2026-10-08T16:30:00Z")!
+        check(techCoachUpcomingTrainingDays(in: validSchedule, now: midnightNow).map(\.localDate) ==
+              ["2026-10-10", "2026-10-12", "2026-10-13"],
+              "The current schedule-local date, not a cached response date or generatedAt, is the cutoff")
+        check(techCoachUpcomingTrainingDays(in: coachSchedule(timezone: "America/New_York", days: upcomingScheduleDays),
+              now: midnightNow).map(\.localDate) == ["2026-10-09", "2026-10-10", "2026-10-12"],
+              "Future training respects the schedule timezone rather than Shanghai or the device timezone")
+        check(techCoachUpcomingTrainingDays(in: coachSchedule(days: [coachDay("2026-10-08"),
+              coachDay("2026-10-09", kind: "rest")]), now: coachNow).isEmpty,
+              "An exhausted or all-rest schedule does not fabricate future training")
+
+        // The API's week strip marks observations planned=false, and marks rest days planned=true.
+        let recorded = MobileWeekPlanDay(localDate: "2026-10-07", kind: "completed", title: "已完成",
+            planned: false, completedWorkoutId: "recorded-run", distanceKm: 5, workoutCount: 2, structure: nil)
+        let upcoming = MobileWeekPlanDay(localDate: "2026-10-09", kind: "easy", title: "轻松跑",
+            planned: true, completedWorkoutId: nil, distanceKm: 5, workoutCount: 0, structure: nil)
+        let restDays = ["2026-10-05", "2026-10-06", "2026-10-08", "2026-10-10", "2026-10-11"].map {
+            MobileWeekPlanDay(localDate: $0, kind: "rest", title: "休息", planned: true,
+                completedWorkoutId: nil, distanceKm: 0, workoutCount: 0, structure: nil)
+        }
+        let weekDays = restDays + [recorded, upcoming]
+        let legacyProgress = TechCoachWeekProgress(days: weekDays, adherence: nil)
+        check(legacyProgress.completedCount == 1 && legacyProgress.plannedCount == 2,
+              "A recorded day remains in progress; rest days never add training obligations")
+        check(legacyProgress.fraction == 0.5 && legacyProgress.unrecordedCount == 1,
+              "Two workouts on one date still complete one prescribed day")
+        let onlyRest = TechCoachWeekProgress(days: restDays, adherence: nil)
+        check(onlyRest.plannedCount == 0 && onlyRest.fraction == nil,
+              "An all-rest week has no training obligations or fabricated progress")
+        let allRecorded = TechCoachWeekProgress(days: [recorded], adherence: nil)
+        check(allRecorded.completedCount == 1 && allRecorded.plannedCount == 1 && allRecorded.fraction == 1,
+              "Recording the final training day must complete the week instead of emptying its denominator")
+        let adherence = MobileAdherenceWeek(weekStart: "2026-10-05", phase: nil, plannedDays: 4,
+            observedDays: 1, unknownDays: 1, plannedDistanceKm: 20, observedDistanceKm: 5,
+            volumeRatio: 0.25, qualityPlanned: 0, qualityObserved: 0, status: "on_track")
+        let progress = TechCoachWeekProgress(days: weekDays, adherence: adherence)
+        check(progress.completedCount == 1 && progress.plannedCount == 4 && progress.fraction == 0.25,
+              "Frozen adherence obligations outrank the strip's current prescriptions")
+        check(progress.unknownCount == 1 && progress.unrecordedCount == 3,
+              "Unobserved prescribed days stay explicitly unknown, not missed workouts")
+        let distanceMissing = MobileAdherenceWeek(weekStart: "2026-10-05", phase: nil, plannedDays: 4,
+            observedDays: 1, unknownDays: 1, plannedDistanceKm: nil, observedDistanceKm: 5,
+            volumeRatio: nil, qualityPlanned: 0, qualityObserved: 0, status: "unknown")
+        let countProgress = TechCoachWeekProgress(days: weekDays, adherence: distanceMissing)
+        check(countProgress.fraction == 0.25 && countProgress.unknownCount == 1,
+              "Missing distance uses observed-day progress without hiding pending sync")
+
+        check(techCoachWeekDayTitle(recorded) == "已完成", "Observed planned=false days are never labelled unplanned")
+        check(techCoachWeekDayTitle(upcoming) == "轻松跑", "Upcoming prescriptions keep their training title")
+        check(techCoachWeekDayTitle(restDays[0]) == "休息", "Explicit rest stays distinct from an unplanned day")
+        let noRecordID = MobileWeekPlanDay(localDate: "2026-10-07", kind: "completed", title: "已完成",
+            planned: false, completedWorkoutId: nil, distanceKm: 5, workoutCount: 1, structure: nil)
+        check(techCoachDayIsCompleted(noRecordID) && techCoachWeekDayTitle(noRecordID) == "已完成",
+              "An observed day without a detail ID still counts and reads as completed")
+        let unplanned = MobileWeekPlanDay(localDate: "2026-10-09", kind: "easy", title: "轻松跑",
+            planned: false, completedWorkoutId: nil, distanceKm: 0, workoutCount: 0, structure: nil)
+        check(techCoachWeekDayTitle(unplanned) == "未排课" &&
+              TechCoachWeekProgress(days: [unplanned], adherence: nil).plannedCount == 0,
+              "A genuinely unplanned day is not a prescribed training day")
+
+        check(techCoachRaceCountdown(raceDate: "2026-10-07", todayLocalDate: "2026-10-08", daysToRace: 0) == "比赛日已过",
+              "A past race stays past when the server clamps its countdown to zero")
+        check(techCoachRaceCountdown(raceDate: "2026-10-08", todayLocalDate: "2026-10-08", daysToRace: 0) == "距比赛 0 天",
+              "Race day is not confused with an expired race")
+        check(techCoachRaceCountdown(raceDate: "2026-10-15", todayLocalDate: "2026-10-08", daysToRace: 7) == "距比赛 7 天",
+              "Future races retain their countdown")
+        check(techCoachRaceCountdown(raceDate: "2026-10-07", todayLocalDate: "2026-10-08", daysToRace: nil) == "比赛日已过",
+              "The date can establish an expired race even without countdown metadata")
+        check(techCoachRaceCountdown(raceDate: nil, todayLocalDate: "2026-10-08", daysToRace: 0) == nil,
+              "Fitness plans do not acquire a race countdown")
+
+        func calibration(_ status: String, sessions: Int) -> MobileCalibrationCard {
+            MobileCalibrationCard(status: status, eligibleSessions: sessions, eligibleDurationMinutes: 0,
+                spanDays: 0, highCoverageSessions: 0,
+                requirements: CalibrationRequirements(sessions: 6, durationMinutes: 180, spanDays: 14, highCoverageSessions: 3),
+                message: "")
+        }
+        let coldStart = calibration("not_started", sessions: 0)
+        check(techCoachCalibrationLabel(coldStart) == "校准未完成（0/6 次）",
+              "Cold start names the actual calibration progress")
+        let coldStartExplanation = techCoachCalibrationExplanation(coldStart, weeklyBudgetKm: 5)
+        check(coldStartExplanation?.contains("本周 5.0 km 是保守起步，不是整个计划的全部内容") == true &&
+              coldStartExplanation?.contains("校准未完成时只排轻松训练") == true,
+              "The small budget must explain conservative training rather than read as the whole programme")
+        check(techCoachCalibrationLabel(calibration("calibrating", sessions: 2)) == "校准未完成（2/6 次）",
+              "Calibration in progress keeps the server's session counts")
+        let calibrated = calibration("completed", sessions: 6)
+        check(techCoachCalibrationLabel(calibrated) == "校准已完成" &&
+              techCoachCalibrationExplanation(calibrated, weeklyBudgetKm: 5) == nil,
+              "Completed calibration must not keep claiming a conservative calibration start")
+        check(techCoachCalibrationExplanation(nil, weeklyBudgetKm: 5) == nil,
+              "Missing calibration cannot be reported as incomplete")
+        check(techCoachCalibrationExplanation(coldStart, weeklyBudgetKm: nil)?.hasPrefix("当前训练安排是保守起步") == true,
+              "Missing budget still explains conservative training without inventing a distance")
+
         print("Technology presentation: \(checks) checks passed")
         print(String(format: "50,000 points preparation: %.2f ms/run (host microbenchmark without -O, not device FPS)",
                      Date().timeIntervalSince(start) * 100))

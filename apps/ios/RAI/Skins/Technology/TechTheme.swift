@@ -2,46 +2,41 @@
 import SwiftUI
 import UIKit
 
-/// The single fresh skin. Text accents are darker than decorative pastel fills.
-///
-/// ⚠️ Token names are historical, not descriptive: in this skin `cyan` renders as a
-/// deep mint green, `green` is an alias of it, `success` is another green and `leaf`
-/// is a muted violet. They survived the palette change because ~20 call sites and the
-/// contrast gate address them by name. **Read the value, not the name.** A rename
-/// would be a purely cosmetic diff with real risk of missing a site, so it is
-/// deliberately not done here.
+/// One athletic palette, not a selectable skin. Historical names remain so the
+/// existing semantic mappings stay intact: `cyan` is Volt, `paper` is a dark
+/// surface, and `pale*` tokens are subdued dark semantic backgrounds.
 enum TechColor {
-    static let background = Color(red: 245/255, green: 250/255, blue: 248/255)
-    static let paper = Color(red: 255/255, green: 255/255, blue: 255/255)
-    static let ink = Color(red: 38/255, green: 62/255, blue: 53/255)
+    static let background = Color(red: 11/255, green: 12/255, blue: 13/255)
+    static let paper = Color(red: 21/255, green: 23/255, blue: 25/255)
+    static let ink = Color(red: 247/255, green: 248/255, blue: 243/255)
     static let muted = Color(uiColor: UIColor { traits in
         traits.accessibilityContrast == .high
-            ? UIColor(red: 0.23, green: 0.32, blue: 0.28, alpha: 1)
-            : UIColor(red: 0.36, green: 0.44, blue: 0.40, alpha: 1)
+            ? UIColor(red: 0.84, green: 0.87, blue: 0.89, alpha: 1)
+            : UIColor(red: 0.706, green: 0.729, blue: 0.749, alpha: 1)
     })
-    static let elevated = Color(red: 238/255, green: 247/255, blue: 242/255)
-    static let cyan = Color(red: 37/255, green: 118/255, blue: 87/255)
-    static let blue = Color(red: 43/255, green: 103/255, blue: 158/255)
+    static let elevated = Color(red: 32/255, green: 35/255, blue: 38/255)
+    static let cyan = Color(red: 196/255, green: 255/255, blue: 0/255)
+    static let blue = Color(red: 139/255, green: 190/255, blue: 255/255)
     static let green = cyan
-    static let leaf = Color(red: 83/255, green: 100/255, blue: 161/255)
-    static let coral = Color(red: 171/255, green: 65/255, blue: 86/255)
-    static let yellow = Color(red: 133/255, green: 94/255, blue: 20/255)
-    static let success = Color(red: 35/255, green: 119/255, blue: 90/255)
-    static let dusk = Color(red: 216/255, green: 239/255, blue: 228/255)
-    static let horizon = Color(red: 250/255, green: 247/255, blue: 220/255)
-    static let landscape = Color(red: 181/255, green: 221/255, blue: 202/255)
-    static let violet = Color(red: 135/255, green: 80/255, blue: 128/255)
-    static let grid = Color(red: 201/255, green: 221/255, blue: 210/255)
-    static let mint = Color(red: 237/255, green: 248/255, blue: 242/255)
-    static let paleCyan = Color(red: 237/255, green: 246/255, blue: 253/255)
-    static let paleCoral = Color(red: 253/255, green: 239/255, blue: 240/255)
-    static let paleYellow = Color(red: 252/255, green: 247/255, blue: 228/255)
-    static let sky = Color(red: 133/255, green: 188/255, blue: 235/255)
-    static let rose = Color(red: 240/255, green: 142/255, blue: 145/255)
-    static let sun = Color(red: 239/255, green: 197/255, blue: 107/255)
+    static let leaf = Color(red: 176/255, green: 168/255, blue: 240/255)
+    static let coral = Color(red: 255/255, green: 140/255, blue: 152/255)
+    static let yellow = Color(red: 242/255, green: 198/255, blue: 109/255)
+    static let success = Color(red: 134/255, green: 210/255, blue: 167/255)
+    static let dusk = Color(red: 24/255, green: 27/255, blue: 30/255)
+    static let horizon = Color(red: 28/255, green: 30/255, blue: 32/255)
+    static let landscape = Color(red: 38/255, green: 43/255, blue: 46/255)
+    static let violet = Color(red: 211/255, green: 164/255, blue: 224/255)
+    static let grid = Color(red: 52/255, green: 56/255, blue: 61/255)
+    static let mint = Color(red: 24/255, green: 31/255, blue: 18/255)
+    static let paleCyan = Color(red: 22/255, green: 30/255, blue: 39/255)
+    static let paleCoral = Color(red: 38/255, green: 25/255, blue: 30/255)
+    static let paleYellow = Color(red: 35/255, green: 31/255, blue: 20/255)
+    static let sky = Color(red: 139/255, green: 190/255, blue: 255/255)
+    static let rose = Color(red: 255/255, green: 140/255, blue: 152/255)
+    static let sun = Color(red: 242/255, green: 198/255, blue: 109/255)
     static let energy = cyan
-    static let action = Color(red: 181/255, green: 231/255, blue: 207/255)
-    static let actionInk = Color(red: 38/255, green: 62/255, blue: 53/255)
+    static let action = Color(red: 196/255, green: 255/255, blue: 0/255)
+    static let actionInk = Color(red: 11/255, green: 12/255, blue: 13/255)
 }
 
 enum TechMetrics {
@@ -87,7 +82,7 @@ private struct TechNavigation: ViewModifier {
             .toolbar(.visible, for: .navigationBar)
             .toolbarBackground(TechColor.background, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.light, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .tint(TechColor.cyan)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -107,6 +102,14 @@ private struct TechNavigation: ViewModifier {
 }
 
 extension View {
+    /// Keep native List/Form behavior while using the same static page surface.
+    func techFormSurface() -> some View {
+        scrollContentBackground(.hidden)
+            .background(TechColor.background)
+            .foregroundStyle(TechColor.ink)
+            .tint(TechColor.cyan)
+    }
+
     func techNavigation(_ title: String, backDisabled: Bool = false) -> some View {
         modifier(TechNavigation(title: title, backDisabled: backDisabled))
     }
@@ -130,7 +133,7 @@ struct TechPanel<Content: View>: View {
                     .fill(fill)
                     .overlay {
                         TechSurfaceShape()
-                            .strokeBorder(tint.opacity(contrast == .increased ? 1 : 0.72),
+                            .strokeBorder(tint.opacity(contrast == .increased ? 1 : 0.32),
                                           lineWidth: contrast == .increased ? 1 : TechMetrics.border)
                     }
             }
@@ -138,6 +141,7 @@ struct TechPanel<Content: View>: View {
 }
 
 struct TechHeroCard<Content: View>: View {
+    @Environment(\.colorSchemeContrast) private var contrast
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
@@ -148,7 +152,8 @@ struct TechHeroCard<Content: View>: View {
                     .fill(TechColor.paper)
                     .overlay {
                         TechSurfaceShape()
-                            .strokeBorder(TechColor.grid, lineWidth: TechMetrics.border)
+                            .strokeBorder(TechColor.grid.opacity(contrast == .increased ? 1 : 0.45),
+                                          lineWidth: TechMetrics.border)
                     }
             }
     }
@@ -159,7 +164,7 @@ struct TechBadge: View {
     var color: Color = TechColor.cyan
     var fill: Color = TechColor.mint
     var body: some View {
-        Text(title).font(.caption.weight(.medium)).foregroundStyle(color)
+        Text(title).font(.caption.weight(.semibold)).foregroundStyle(color)
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(fill, in: TechSurfaceShape())
     }
@@ -171,7 +176,7 @@ struct TechSectionHeader: View {
     var trailingColor: Color = TechColor.muted
     var body: some View {
         TechAdaptiveStack(spacing: 8) {
-            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.ink)
+            Text(title).techFont(.section).foregroundStyle(TechColor.ink)
                 .fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
             if let trailing {
@@ -192,7 +197,7 @@ struct TechPageHeader<Trailing: View>: View {
     var body: some View {
         TechAdaptiveStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).techScaledFont(title == "RAI" ? 32 : 24, weight: .bold)
+                Text(title).techFont(title == "RAI" ? .metric : .pageTitle)
                     .foregroundStyle(TechColor.ink)
                     .accessibilityAddTraits(.isHeader)
                 if !eyebrow.isEmpty {
@@ -216,7 +221,7 @@ struct TechSegmentedControl<Value: Hashable>: View {
         HStack(spacing: 4) {
             ForEach(items, id: \.value) { item in
                 Button { selection = item.value } label: {
-                    Text(item.title).font(.subheadline.weight(.medium))
+                    Text(item.title).font(.subheadline.weight(.bold))
                         .lineLimit(1).fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(selection == item.value ? TechColor.actionInk : TechColor.muted)
                         .frame(maxWidth: .infinity, minHeight: 30)
@@ -237,11 +242,11 @@ struct TechMetricTile: View {
     let title: String
     let value: String
     var accent: Color = TechColor.ink
-    var fill: Color = TechColor.paper
+    var fill: Color = TechColor.elevated
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             Text(title).font(.caption).foregroundStyle(TechColor.muted)
-            Text(value).font(.system(.title3, design: .default).weight(.semibold).monospacedDigit())
+            Text(value).techFont(.compactMetric).monospacedDigit()
                 .foregroundStyle(accent).fixedSize(horizontal: false, vertical: true)
         }
         .padding(12).frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
@@ -259,7 +264,7 @@ struct TechFilterChips<Value: Hashable>: View {
             HStack(spacing: 7) {
                 ForEach(items, id: \.value) { item in
                     Button { selection = item.value } label: {
-                        Text(item.title).font(.subheadline.weight(.medium)).fixedSize()
+                        Text(item.title).font(.subheadline.weight(.bold)).fixedSize()
                             .foregroundStyle(selection == item.value ? TechColor.actionInk : TechColor.muted)
                             .padding(.horizontal, 16).frame(minHeight: 30)
                             .background {
@@ -276,6 +281,7 @@ struct TechFilterChips<Value: Hashable>: View {
 }
 
 struct TechIconButton: View {
+    @Environment(\.isEnabled) private var isEnabled
     let systemName: String
     let accessibilityLabel: String
     var color: Color = TechColor.cyan
@@ -284,7 +290,7 @@ struct TechIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName).font(.system(size: 19, weight: .medium))
-                .foregroundStyle(color).frame(width: 44, height: 44)
+                .foregroundStyle(isEnabled ? color : TechColor.muted).frame(width: 44, height: 44)
                 .background(fill, in: TechSurfaceShape())
         }.buttonStyle(TechPressStyle()).accessibilityLabel(accessibilityLabel)
     }
@@ -300,9 +306,9 @@ struct TechPrimaryButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if isBusy { ProgressView().tint(TechColor.actionInk) }
+                if isBusy { ProgressView().tint(isDisabled ? TechColor.muted : TechColor.actionInk) }
                 else if let systemName { Image(systemName: systemName) }
-                Text(isBusy ? busyTitle : title).font(.subheadline.weight(.semibold))
+                Text(isBusy ? busyTitle : title).font(.subheadline.weight(.bold))
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(isDisabled ? TechColor.muted : TechColor.actionInk)
@@ -387,7 +393,7 @@ struct TechEmptyState: View {
                 TechShoeIllustration()
             } else {
                 Image(systemName: systemName).font(.system(size: 56, weight: .ultraLight))
-                    .foregroundStyle(TechColor.energy).padding(.bottom, 12)
+                    .foregroundStyle(TechColor.muted).padding(.bottom, 12)
             }
             Text(title).font(.title3.weight(.semibold)).foregroundStyle(TechColor.ink)
             Text(message).font(.subheadline).foregroundStyle(TechColor.muted).multilineTextAlignment(.center)
@@ -414,7 +420,7 @@ struct TechField<Content: View>: View {
             Text(label).font(.caption).foregroundStyle(TechColor.muted)
             content.font(.subheadline).foregroundStyle(TechColor.ink)
                 .padding(.horizontal, 12).padding(.vertical, 8).frame(minHeight: 44)
-                .background(TechColor.background.opacity(0.65), in: TechSurfaceShape())
+                .background(TechColor.elevated, in: TechSurfaceShape())
         }
     }
 }
@@ -434,7 +440,7 @@ struct TechInsightCard: View {
 }
 
 struct TechRunnerIcon: View {
-    var color: Color = TechColor.cyan
+    var color: Color = TechColor.ink
     var background: Color = .clear
     var size: CGFloat = 42
     var body: some View {
@@ -446,8 +452,8 @@ struct TechRunnerIcon: View {
 
 struct TechIconBox: View {
     let systemName: String
-    var tint: Color = TechColor.cyan
-    var fill: Color = TechColor.mint
+    var tint: Color = TechColor.muted
+    var fill: Color = TechColor.elevated
     var size: CGFloat = 42
     var body: some View {
         Image(systemName: systemName).font(.system(size: size * 0.45, weight: .medium))
@@ -472,7 +478,7 @@ struct TechTabBar: View {
                     VStack(spacing: 5) {
                         Image(systemName: tab == .home ? (selection == tab ? "house.fill" : "house") : tab.systemName)
                             .font(.system(size: 22, weight: .semibold)).frame(height: 25)
-                        Text(tab.title).font(.caption2.weight(.medium))
+                        Text(tab.title).font(.caption2.weight(.semibold))
                     }
                     .foregroundStyle(selection == tab ? TechColor.cyan : TechColor.muted)
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -483,7 +489,7 @@ struct TechTabBar: View {
                     .accessibilityShowsLargeContentViewer { Text(tab.title) }
             }
         }.padding(.horizontal, 12).padding(.top, 8)
-            .background(TechColor.paper)
+            .background(TechColor.background)
             .overlay(alignment: .top) { Rectangle().fill(TechColor.grid.opacity(0.4)).frame(height: 0.5) }
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }

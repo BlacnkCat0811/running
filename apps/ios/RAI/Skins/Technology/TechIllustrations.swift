@@ -18,8 +18,8 @@ struct TechShoeIllustration: View {
                 path.addLine(to: CGPoint(x: 21, y: 91))
                 path.closeSubpath()
             }
-            context.fill(upper, with: .color(TechColor.action))
-            context.stroke(upper, with: .color(TechColor.cyan), style: StrokeStyle(lineWidth: 3, lineJoin: .round))
+            context.fill(upper, with: .color(TechColor.elevated))
+            context.stroke(upper, with: .color(TechColor.muted.opacity(0.6)), style: StrokeStyle(lineWidth: 3, lineJoin: .round))
             let sole = Path { path in
                 path.move(to: CGPoint(x: 18, y: 86))
                 path.addQuadCurve(to: CGPoint(x: 182, y: 87), control: CGPoint(x: 95, y: 96))
@@ -29,12 +29,12 @@ struct TechShoeIllustration: View {
                 path.closeSubpath()
             }
             context.fill(sole, with: .color(TechColor.paper))
-            context.stroke(sole, with: .color(TechColor.cyan), style: StrokeStyle(lineWidth: 3, lineJoin: .round))
+            context.stroke(sole, with: .color(TechColor.muted.opacity(0.6)), style: StrokeStyle(lineWidth: 3, lineJoin: .round))
             let detail = Path { path in
                 path.move(to: CGPoint(x: 55, y: 68))
                 path.addQuadCurve(to: CGPoint(x: 114, y: 69), control: CGPoint(x: 72, y: 92))
             }
-            context.stroke(detail, with: .color(TechColor.cyan.opacity(0.6)), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+            context.stroke(detail, with: .color(TechColor.grid), style: StrokeStyle(lineWidth: 4, lineCap: .round))
             var laces = Path()
             for index in 0..<3 {
                 let x = 84 + CGFloat(index) * 10
@@ -42,7 +42,7 @@ struct TechShoeIllustration: View {
                 laces.move(to: CGPoint(x: x, y: y))
                 laces.addLine(to: CGPoint(x: x - 10, y: y + 9))
             }
-            context.stroke(laces, with: .color(TechColor.paper), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+            context.stroke(laces, with: .color(TechColor.muted), style: StrokeStyle(lineWidth: 4, lineCap: .round))
         }.frame(height: 150).accessibilityHidden(true)
     }
 }
@@ -99,7 +99,7 @@ struct TechRunningLandscape: View {
                     let width = size.width - start
                     context.fill(Path(CGRect(x: start, y: 0, width: width, height: size.height)),
                                  with: .color(TechColor.paleCyan))
-                    let fills = [TechColor.dusk, TechColor.landscape.opacity(0.65), TechColor.action.opacity(0.8)]
+                    let fills = [TechColor.dusk, TechColor.landscape.opacity(0.65), TechColor.elevated.opacity(0.8)]
                     for layer in 0..<3 {
                         let offset = CGFloat(layer) * 0.12
                         let hills = Path { path in
@@ -129,14 +129,14 @@ struct TechRunningLandscape: View {
                                               control: CGPoint(x: size.width * 0.84, y: size.height * 0.77))
                             path.closeSubpath()
                         }
-                        context.fill(trail, with: .color(TechColor.paleYellow))
+                        context.fill(trail, with: .color(TechColor.grid))
                     }
                     if blendsIntoPage { blendEdgesIntoPage(&context, size: size, start: start) }
                 }
                 if !blendsIntoPage {
                     Image(systemName: "figure.run")
                         .font(.system(size: road ? 26 : 32, weight: .medium))
-                        .foregroundStyle(TechColor.cyan.opacity(0.55))
+                        .foregroundStyle(TechColor.muted.opacity(0.55))
                         .position(x: geometry.size.width * 0.76, y: geometry.size.height * 0.73)
                 }
             }
@@ -186,16 +186,16 @@ struct TechTodayHeader: View {
             TechAdaptiveStack {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        Image(systemName: "mountain.2.fill").foregroundStyle(TechColor.energy)
+                        Image(systemName: "mountain.2.fill").foregroundStyle(TechColor.ink)
                             .font(.system(size: 28, weight: .bold)).accessibilityHidden(true)
-                        Text("RAI").techScaledFont(34, weight: .bold).accessibilityAddTraits(.isHeader)
+                        Text("RAI").techScaledFont(34, weight: .heavy).accessibilityAddTraits(.isHeader)
                     }
                     Text(date).font(.caption).foregroundStyle(TechColor.muted)
                 }
                 Spacer(minLength: 0)
                 TechHomeActions()
             }
-            Text("坚持，让更好的你发生 💙").font(.caption).foregroundStyle(TechColor.muted)
+            Text("坚持，让更好的你发生 \(Image(systemName: "heart.fill"))").font(.caption).foregroundStyle(TechColor.muted)
         }
         .padding(.vertical, 8)
         // 这里原本还有 `.padding(.top, -25)`，想让山景伸到导航栏底下。它做不到：

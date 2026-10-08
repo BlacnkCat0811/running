@@ -22,7 +22,7 @@ struct TechWorkoutExportView: View {
     private var identity: String { native.feedbackScope + session.apiToken }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("导出训练摘要").font(.headline)
+            Text("导出训练摘要").font(.headline.weight(.bold))
             Text("仅包含已分析训练的开始时间、类型、距离、时长和配速。不含坐标、心率、备注、设备或身份标识。单次最多 366 天 / 2000 条。")
                 .font(.footnote).foregroundStyle(TechColor.muted)
             DatePicker("开始日期", selection: $from, displayedComponents: .date)
@@ -32,9 +32,13 @@ struct TechWorkoutExportView: View {
             Text("日期按 Asia/Shanghai 统计；未分析记录不在本次摘要范围。")
                 .font(.caption).foregroundStyle(TechColor.muted)
             Button(busy ? "正在准备…" : "预览导出") { Task { await prepare() } }.disabled(busy || from > through)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(busy || from > through ? TechColor.muted : TechColor.cyan)
             if let preview {
                 Text("将导出 \(preview.count) 条训练，\(preview.from) 至 \(preview.through)。")
                 Button("保存 CSV…") { exporting = true }.disabled(preview.count == 0)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(preview.count == 0 ? TechColor.muted : TechColor.cyan)
             }
             if let message { Text(message).font(.footnote) }
         }

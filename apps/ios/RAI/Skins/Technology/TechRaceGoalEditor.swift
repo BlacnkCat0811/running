@@ -48,7 +48,7 @@ struct TechRaceGoalEditor: View {
                     DatePicker("比赛日期", selection: $date, displayedComponents: .date)
                     if NativeRaceGoalDraft.dateFormatter.string(from: date) < (native.today?.today.localDate ?? NativeRaceGoalDraft.dateFormatter.string(from: Date())) {
                         Text("所选日期已过。保存只保留历史目标，不代表已经参赛或完赛；如需备赛，请选择未来日期。")
-                            .font(.caption).foregroundStyle(.orange)
+                            .font(.caption).foregroundStyle(TechColor.yellow)
                     }
                     Picker("比赛距离", selection: $distance) {
                         Text("5 公里").tag("five_k")
@@ -73,9 +73,9 @@ struct TechRaceGoalEditor: View {
                             .font(.footnote)
                     }
                     Text("配速单位：分:秒 / 公里，范围 2:30–15:00。留空表示不设目标配速。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(TechColor.muted)
                     if !validTarget {
-                        Text("请输入有效配速，例如 5:30（2:30–15:00）。").foregroundStyle(.red)
+                        Text("请输入有效配速，例如 5:30（2:30–15:00）。").foregroundStyle(TechColor.coral)
                     }
                 }
                 .disabled(saving)
@@ -83,10 +83,10 @@ struct TechRaceGoalEditor: View {
                     Text("保存后更新比赛倒计时、赛事准备度和减量提示。准备度不是目标成绩达成概率。既有计划保留，执行窗口按比赛约束复核；请查看并重新同步手表。")
                     if stale {
                         Text("目标已在其他页面更新。请关闭后重新打开，避免覆盖新内容。")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(TechColor.coral)
                     }
-                    if let failure { Text(failure).foregroundStyle(.red) }
-                    if native.isOffline { Text("当前离线，请连接服务后保存。").foregroundStyle(.red) }
+                    if let failure { Text(failure).foregroundStyle(TechColor.coral) }
+                    if native.isOffline { Text("当前离线，请连接服务后保存。").foregroundStyle(TechColor.coral) }
                 }.font(.footnote)
                 if context.goals.raceTarget != nil {
                     Section {
@@ -96,6 +96,7 @@ struct TechRaceGoalEditor: View {
                     }
                 }
             }
+            .techFormSurface()
             .navigationTitle("比赛目标")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

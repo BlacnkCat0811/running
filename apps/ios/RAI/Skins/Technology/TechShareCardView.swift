@@ -93,7 +93,7 @@ private struct TechWorkoutShareSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.light)
+        .preferredColorScheme(.dark)
         .task(id: requestKey) { await prepare() }
         .onChange(of: identity) { _, _ in dismiss() }
     }
@@ -123,7 +123,7 @@ private struct TechWorkoutShareSheet: View {
     @MainActor
     private func renderedImage<Content: View>(_ content: Content) -> UIImage? {
         let renderer = ImageRenderer(content: content.frame(width: 390)
-            .environment(\.dynamicTypeSize, .medium).environment(\.colorScheme, .light))
+            .environment(\.dynamicTypeSize, .medium).environment(\.colorScheme, .dark))
         renderer.scale = 3
         return renderer.uiImage
     }
@@ -141,7 +141,7 @@ private struct TechWorkoutCombinedShareImage: View {
         let gradeAdjustedPace = techShareGradeAdjustedPace(card: card.workout, detailGrade: grade)
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("RAI · 训练分享").font(.title3.weight(.semibold))
+                Text("RAI · 训练分享").font(.title3.weight(.bold))
                 Text("\(nativeSessionName(workout.sessionType)) · \(nativeDate(workout.startedAt))")
                     .font(.caption).foregroundStyle(TechColor.muted)
             }
@@ -205,7 +205,7 @@ private struct TechWorkoutCombinedShareImage: View {
 
     private func metric(_ title: String, _ value: String, prominent: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(value).font(.system(size: prominent ? 28 : 18, weight: .semibold).monospacedDigit())
+            Text(value).font(.system(size: prominent ? 28 : 18, weight: .bold).monospacedDigit())
                 .fixedSize(horizontal: false, vertical: true)
             Text(title).font(.caption).foregroundStyle(TechColor.muted)
         }

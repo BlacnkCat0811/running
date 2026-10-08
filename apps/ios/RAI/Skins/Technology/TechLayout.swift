@@ -44,6 +44,40 @@ struct TechMetricGrid<Content: View>: View {
 }
 
 /// Display sizes stay recognisable at the default size and follow Dynamic Type.
+enum TechFontRole {
+    case display, hero, metric, compactMetric, pageTitle, section, label
+
+    var size: CGFloat {
+        switch self {
+        case .display: return 60
+        case .hero: return 52
+        case .metric: return 32
+        case .compactMetric: return 22
+        case .pageTitle: return 28
+        case .section: return 17
+        case .label: return 12
+        }
+    }
+
+    var weight: Font.Weight {
+        switch self {
+        case .display, .hero: return .heavy
+        case .metric, .compactMetric, .pageTitle, .section: return .bold
+        case .label: return .medium
+        }
+    }
+
+    var relativeTo: Font.TextStyle {
+        switch self {
+        case .display, .hero: return .largeTitle
+        case .metric, .pageTitle: return .title
+        case .compactMetric: return .title3
+        case .section: return .headline
+        case .label: return .caption
+        }
+    }
+}
+
 private struct TechScaledFont: ViewModifier {
     @ScaledMetric private var size: CGFloat
     let weight: Font.Weight
@@ -57,6 +91,10 @@ private struct TechScaledFont: ViewModifier {
 }
 
 extension View {
+    func techFont(_ role: TechFontRole) -> some View {
+        techScaledFont(role.size, weight: role.weight, relativeTo: role.relativeTo)
+    }
+
     func techScaledFont(_ size: CGFloat, weight: Font.Weight = .semibold,
                         relativeTo: Font.TextStyle = .title) -> some View {
         modifier(TechScaledFont(size: size, weight: weight, relativeTo: relativeTo))

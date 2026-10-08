@@ -204,14 +204,14 @@ struct TechManualPlanView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(TechColor.ink)
             Text(day.distanceKm > 0 ? nativeKilometers(day.distanceKm) : "—")
-                .font(.caption2.monospacedDigit())
+                .font(.caption2.weight(.bold).monospacedDigit())
                 .fixedSize(horizontal: false, vertical: true)
-                .foregroundStyle(TechColor.muted)
+                .foregroundStyle(TechColor.ink)
         }
         .padding(.horizontal, 2)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity)
-        .background(isToday ? TechColor.blue.opacity(0.17) : TechColor.paper, in: TechSurfaceShape())
+        .background(isToday ? TechColor.mint : TechColor.paper, in: TechSurfaceShape())
         .overlay(TechSurfaceShape().stroke(isToday ? TechColor.cyan : TechColor.grid.opacity(0.45), lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 9))
     }

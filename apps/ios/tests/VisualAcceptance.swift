@@ -425,6 +425,15 @@ final class VisualAcceptance: XCTestCase {
         XCTAssertLessThanOrEqual(app.staticTexts["改善跑步体能"].frame.maxX, app.staticTexts["进行中"].frame.minX)
         XCTAssertLessThanOrEqual(app.buttons["coach.preferences"].frame.maxX, app.buttons["coach.pause-resume"].frame.minX)
         capture("15-coach-large-overview")
+        let (todayData, _) = try await URLSession.shared.data(from: URL(string: server + "/v1/mobile/today")!)
+        let todayPayload = try XCTUnwrap(try JSONSerialization.jsonObject(with: todayData) as? [String: Any])
+        let weekDays = try XCTUnwrap(todayPayload["weekPlan"] as? [[String: Any]])
+        let firstDate = try XCTUnwrap(weekDays.first?["localDate"] as? String)
+        let firstDay = app.buttons["coach.week-day." + firstDate]
+        scrollTo(firstDay, limit: 70)
+        XCTAssertTrue(firstDay.isHittable)
+        XCTAssertGreaterThan(firstDay.frame.height, 140, "Accessibility day cards must grow to fit all of their content")
+        capture("15-coach-large-week-days")
         scrollTo(app.buttons["coach.end"], limit: 70)
         XCTAssertTrue(app.buttons["coach.end"].isHittable)
         capture("15-coach-large-calendar")
@@ -549,13 +558,168 @@ final class VisualAcceptance: XCTestCase {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["expectedRevision": revision, "easyDurationFloorFraction": changed])
         let (_, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
-        scrollTo(app.buttons["保存计划"])
-        app.buttons["保存计划"].tap()
-        XCTAssertTrue(app.staticTexts["计划已在其他设备更新"].waitForExistence(timeout: 15))
+        let save = app.buttons["保存计划"]
+        scrollTo(save)
+        // A known stale draft is disabled before submission. If the latest
+        // revision has not arrived yet, the existing CAS rejection refreshes it.
+        if save.isEnabled { save.tap() }
+        let conflict = app.staticTexts["计划已更新，你的未保存修改仍保留。请查看最新计划后再编辑。"]
+        XCTAssertTrue(conflict.waitForExistence(timeout: 15))
+        XCTAssertFalse(save.isEnabled, "A stale draft must not be saveable")
+        let cap = try XCTUnwrap(before["qualitySessionCap"] as? Int)
+        let oldPercent = String(format: "%.0f%%", locale: Locale(identifier: "en_US_POSIX"), floor * 100)
+        let newPercent = String(format: "%.0f%%", locale: Locale(identifier: "en_US_POSIX"), changed * 100)
+        let comparison = app.staticTexts["最新：轻松训练时长 ≥\(newPercent)，质量课 ≤\(cap)；你的草稿：轻松训练时长 ≥\(oldPercent)，质量课 ≤\(cap)。"]
+        XCTAssertTrue(comparison.exists, "The latest settings and the unmodified draft must both remain visible")
+
+        func verifyPersistedGoals() async throws {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            let goals = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(goals["revision"] as? Int, revision + 1, "Rejected save / draft reload must not create another revision")
+            XCTAssertEqual(try XCTUnwrap(goals["easyDurationFloorFraction"] as? Double), changed, accuracy: 0.0000001,
+                           "The stale draft must not overwrite the other client's value")
+            XCTAssertEqual(goals["qualitySessionCap"] as? Int, cap)
+            XCTAssertEqual(
+                try JSONSerialization.data(withJSONObject: try XCTUnwrap(goals["weekPlan"]), options: .sortedKeys),
+                try JSONSerialization.data(withJSONObject: try XCTUnwrap(before["weekPlan"]), options: .sortedKeys),
+                "Conflict handling must not replace the persisted weekly plan"
+            )
+        }
+        try await verifyPersistedGoals()
+        scrollTo(conflict)
         capture("03-revision-conflict")
-        app.buttons["加载最新计划"].tap()
+
+        let discard = app.buttons["放弃草稿并加载最新计划"]
+        scrollTo(discard)
+        discard.tap()
+        let confirmDiscard = app.buttons["放弃并加载最新计划"]
+        XCTAssertTrue(confirmDiscard.waitForExistence(timeout: 10), "Discarding requires the existing explicit confirmation")
+        capture("03-revision-discard-confirm")
+        let cancelConfirmation = app.sheets.buttons["取消"].firstMatch
+        if cancelConfirmation.exists {
+            cancelConfirmation.tap()
+        } else {
+            // iOS 26 presents this confirmation as a popover: cancellation is
+            // the native, accessibility-identified outside dismiss region.
+            let dismissPopup = app.otherElements["PopoverDismissRegion"]
+            XCTAssertTrue(dismissPopup.waitForExistence(timeout: 10))
+            dismissPopup.tap()
+        }
+        XCTAssertFalse(confirmDiscard.exists, "Cancellation must dismiss, not confirm, the destructive action")
+        XCTAssertTrue(comparison.exists, "Cancelling the confirmation must preserve the original draft")
+        XCTAssertFalse(save.isEnabled)
+        discard.tap()
+        XCTAssertTrue(confirmDiscard.waitForExistence(timeout: 10))
+        confirmDiscard.tap()
+        XCTAssertFalse(conflict.exists)
+        XCTAssertTrue(save.isEnabled, "Explicit reload must restore an editable draft at the latest revision")
+        XCTAssertTrue(app.staticTexts[newPercent].exists, "The reloaded draft must display the latest setting")
+        try await verifyPersistedGoals()
         app.buttons["取消"].tap()
         capture("03-revision-reloaded")
+    }
+
+    @MainActor
+    func test17LargeWorkoutDetailAndFeedback() async throws {
+        launch(large: true)
+        tab("训练")
+        let (data, response) = try await URLSession.shared.data(from: URL(string: server + "/v1/workouts?limit=100")!)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+        let payload = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let rows = payload["items"] as? [[String: Any]] ?? []
+        let id = try XCTUnwrap(rows.first(where: { $0["hasRoute"] as? Bool == true })?["id"] as? String,
+                               "The isolated acceptance database must provide a real route-bearing workout")
+        let row = app.buttons["workout." + id]
+        scrollTo(row, limit: 60)
+        capture("17-large-workout-row")
+        row.tap()
+        XCTAssertTrue(app.navigationBars["训练详情"].waitForExistence(timeout: 45))
+        XCTAssertTrue(app.descendants(matching: .any)["workout.route"].firstMatch.waitForExistence(timeout: 30),
+                      "The real route must remain available at accessibility text sizes")
+        let summaryTitle = app.staticTexts["训练摘要"]
+        XCTAssertTrue(summaryTitle.waitForExistence(timeout: 30))
+        capture("17-large-detail-top")
+        scrollTo(summaryTitle, limit: 50, horizontalOffset: 0.5)
+        summaryTitle.tap()
+        capture("17-large-detail-expanded")
+        app.buttons["workout.feedback"].tap()
+        XCTAssertTrue(app.navigationBars["训练反馈"].waitForExistence(timeout: 20))
+        capture("17-large-feedback")
+        app.navigationBars["训练反馈"].buttons["完成"].tap()
+        XCTAssertTrue(app.navigationBars["训练详情"].exists)
+        let pace = app.descendants(matching: .any)["workout.series.pace"].firstMatch
+        scrollTo(pace, limit: 60, horizontalOffset: 0.5)
+        XCTAssertTrue(pace.isHittable)
+        capture("17-large-pace-chart")
+    }
+
+    func test18LargeAnalysisAndBody() {
+        launch(large: true)
+        tab("统计")
+        capture("18-large-statistics")
+        tab("趋势")
+        capture("18-large-trends")
+        app.buttons["纪录"].tap()
+        capture("18-large-records")
+        tab("今日")
+        app.buttons["today.body"].tap()
+        XCTAssertTrue(app.navigationBars["身体指标"].waitForExistence(timeout: 45))
+        capture("18-large-body")
+    }
+
+    func test19SettingsSecondaryScreens() {
+        let destinations = [
+            ("RAI 服务", "server"), ("地图底图", "map"),
+            ("训练提醒", "reminders"), ("导出训练摘要", "export"), ("关于 RAI", "about"),
+        ]
+        for large in [false, true] {
+            launch(large: large)
+            tab("设置")
+            for (title, identifier) in destinations {
+                let link = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+                scrollTo(link, limit: 60)
+                link.tap()
+                XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 15))
+                capture("19-" + (large ? "large-" : "") + identifier)
+                app.buttons["navigation.back"].tap()
+                XCTAssertTrue(app.buttons["tab.设置"].exists)
+            }
+        }
+    }
+
+    @MainActor
+    func test20RaceEditorAndPlanPreview() async throws {
+        for large in [false, true] {
+            launch(large: large)
+            let before = try await coachGoals()
+            app.buttons["打开训练计划"].tap()
+            app.buttons["手动课表"].tap()
+            let edit = app.buttons["race-goal-edit"]
+            scrollTo(edit, limit: 60)
+            edit.tap()
+            XCTAssertTrue(app.navigationBars["比赛目标"].waitForExistence(timeout: 15))
+            capture("20-" + (large ? "large-" : "") + "race-pace")
+            app.segmentedControls.buttons["完赛时间"].tap()
+            XCTAssertTrue(app.textFields["race-goal-finish"].exists)
+            capture("20-" + (large ? "large-" : "") + "race-time")
+            app.navigationBars["比赛目标"].buttons["取消"].tap()
+            let preview = app.buttons["预览未来 7 日课表"]
+            scrollTo(preview, limit: 60)
+            XCTAssertTrue(preview.isEnabled)
+            preview.tap()
+            XCTAssertTrue(app.navigationBars["确认新课表"].waitForExistence(timeout: 30))
+            XCTAssertTrue(app.buttons["确认替换"].isEnabled)
+            capture("20-" + (large ? "large-" : "") + "plan-preview")
+            app.navigationBars["确认新课表"].buttons["取消"].tap()
+            let after = try await coachGoals()
+            XCTAssertEqual(after["revision"] as? Int, before["revision"] as? Int,
+                           "Opening/cancelling editors and previews must not save implicitly")
+            XCTAssertEqual(
+                try JSONSerialization.data(withJSONObject: try XCTUnwrap(after["weekPlan"]), options: .sortedKeys),
+                try JSONSerialization.data(withJSONObject: try XCTUnwrap(before["weekPlan"]), options: .sortedKeys)
+            )
+        }
     }
 
     private func launchProxy() {

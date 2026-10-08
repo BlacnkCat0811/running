@@ -5,9 +5,24 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1] / "RAI" / "Skins" / "Technology"
 views = (root / "TechViews.swift").read_text()
 body = views[views.index("struct TechTodayView"):views.index("private func trainingOverview")]
-ordered = ["todayHero(today)", "recoveryPanel(today)", "trainingOverview(today)", "recommendationPanel(today)"]
+ordered = [
+    "todayHero(today)", "recoveryPanel(today)", "trainingOverview(today)",
+    "if let postRun = today.postRun { postRunPanel(postRun) }",
+    "recommendationPanel(today)", "planPhaseLine(today)", "abilityCard(today)",
+    "TechTodayMetrics(", "raceSummary(today)",
+]
 positions = [body.index(call) for call in ordered]
 assert positions == sorted(positions), "Today/recovery must lead the training cards"
+hero = views[views.index("private func todayHero"):views.index("private func heroMetric")]
+assert "Text(nativeNumber(data.today.distanceKm, digits: 2))" in hero
+assert ".techFont(.hero).monospacedDigit()" in hero, "Emphasize the real distance in its existing slot"
+assert 'Text("km").font(.subheadline.weight(.medium)).foregroundStyle(TechColor.muted)' in hero
+recommendation = views[views.index("private func recommendationPanel"):views.index("private func lockDisabled")]
+assert "Button { showingLock = true } label:" in recommendation
+assert ".disabled(lockDisabled(data))" in recommendation
+assert ".foregroundStyle(lockDisabled(data) ? TechColor.muted : TechColor.actionInk)" in recommendation
+assert ".background(lockDisabled(data) ? TechColor.grid : TechColor.action, in: TechSurfaceShape())" in recommendation, \
+    "Unavailable lock actions must be neutral, not a live Volt CTA"
 assert "TechTodayHealthTiles" not in views
 assert "TechTodayHealthTiles" not in (root / "TechIllustrations.swift").read_text()
 assert "TechSyncStatus(" not in body, "Background sync must not add a home status card"
@@ -22,6 +37,8 @@ assert "HStack(alignment: .top" in row
 assert "typeSize >= .xxxLarge" in row and "VStack" in row
 assert "verdictPanel(data)" in row and "activityPanel(data)" in row
 sync = (root / "TechSyncStatus.swift").read_text()
+assert ".disabled(sync.isBusy || !session.isReachable)" in sync
+assert ".foregroundStyle(sync.isBusy || !session.isReachable ? TechColor.muted : TechColor.cyan)" in sync
 assert "var showsHistory = true" in sync, "Settings must retain sync history"
 assert "showsHistory || state == .busy || state == .failed || state == .cancelled" in sync
 recovery = (root / "TechTodayRecovery.swift").read_text()

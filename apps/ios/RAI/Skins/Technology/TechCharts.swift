@@ -49,8 +49,8 @@ struct TechInstrumentRing: View {
     var size: CGFloat = 124
     var body: some View {
         ZStack {
-            Circle().stroke(TechColor.blue.opacity(0.13), lineWidth: 1)
-            Circle().stroke(TechColor.success.opacity(0.07), lineWidth: size * 0.17)
+            Circle().stroke(TechColor.grid.opacity(0.55), lineWidth: 1)
+            Circle().stroke(TechColor.grid.opacity(0.18), lineWidth: size * 0.17)
                 .frame(width: size * 0.80, height: size * 0.80)
             // Closed concentric ring — see the note on `TechRing.graphic` above.
             Circle().stroke(TechColor.grid.opacity(0.6), lineWidth: size * 0.085)
@@ -61,7 +61,7 @@ struct TechInstrumentRing: View {
                 .rotationEffect(.degrees(-90))
             Circle().fill(TechColor.background)
                 .frame(width: size * 0.51, height: size * 0.51)
-            Circle().stroke(TechColor.cyan.opacity(0.22), lineWidth: 1)
+            Circle().stroke(TechColor.grid.opacity(0.65), lineWidth: 1)
                 .frame(width: size * 0.52, height: size * 0.52)
             TechRunnerIcon(color: TechColor.ink, size: size * 0.33)
         }.frame(width: size, height: size).accessibilityHidden(true)
@@ -146,7 +146,7 @@ struct TechAbilityGauge: View {
                     VStack(spacing: 3) {
                         if !value.isEmpty {
                             Text(value)
-                                .font(.system(size: size * 0.2, weight: .semibold)).monospacedDigit()
+                                .font(.system(size: size * 0.2, weight: .heavy)).monospacedDigit()
                                 .foregroundStyle(TechColor.ink).lineLimit(1).minimumScaleFactor(0.55)
                         }
                         if !caption.isEmpty {
@@ -159,7 +159,7 @@ struct TechAbilityGauge: View {
                 }
             }
             if typeSize.isAccessibilitySize && !value.isEmpty {
-                Text(value).font(.title.weight(.semibold)).monospacedDigit().foregroundStyle(TechColor.ink)
+                Text(value).font(.title.weight(.bold)).monospacedDigit().foregroundStyle(TechColor.ink)
                 Text(caption).font(.caption).foregroundStyle(TechColor.muted)
             }
             HStack {

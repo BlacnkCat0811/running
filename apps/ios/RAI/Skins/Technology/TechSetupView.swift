@@ -14,13 +14,13 @@ struct TechSetupView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 14) {
-                    Text("RAI").techScaledFont(32, weight: .bold).tracking(3).foregroundStyle(TechColor.cyan)
+                    Text("RAI").techScaledFont(32, weight: .heavy).tracking(3).foregroundStyle(TechColor.ink)
                     Text("RUNNING\nANALYTICS").font(.caption2.weight(.medium)).tracking(1.2)
                         .foregroundStyle(TechColor.muted)
                 }.padding(.top, 8)
                 TechOrbit()
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("让每一次跑步都有依据").font(.title2.weight(.semibold)).foregroundStyle(TechColor.ink)
+                    Text("让每一次跑步都有依据").font(.title2.weight(.bold)).foregroundStyle(TechColor.ink)
                     Text("连接 RAI 本地服务，获取专业的跑步数据分析与建议。")
                         .font(.footnote).foregroundStyle(TechColor.muted)
                 }
@@ -74,8 +74,8 @@ struct TechSetupView: View {
                     Button { discovery.start() } label: {
                         Text("重新发现").font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 44)
-                            .overlay(TechSurfaceShape().strokeBorder(TechColor.cyan.opacity(0.65), lineWidth: 1))
-                    }.buttonStyle(TechPressStyle()).foregroundStyle(TechColor.cyan)
+                            .overlay(TechSurfaceShape().strokeBorder(TechColor.grid, lineWidth: 1))
+                    }.buttonStyle(TechPressStyle()).foregroundStyle(TechColor.ink)
                 }
                 Label("手机与服务器在同一网络。", systemImage: "wifi")
                     .font(.caption).foregroundStyle(TechColor.muted).frame(maxWidth: .infinity)

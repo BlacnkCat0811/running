@@ -56,12 +56,12 @@ struct TechTodayMetrics: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(title).font(.caption2).foregroundStyle(TechColor.muted)
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(value).techScaledFont(20, relativeTo: .title3).monospacedDigit()
-                    Text(unit).font(.caption2)
+                    Text(value).techScaledFont(20, weight: .bold, relativeTo: .title3).monospacedDigit()
+                    Text(unit).font(.caption2).foregroundStyle(TechColor.muted)
                 }.foregroundStyle(TechColor.ink).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            Image(systemName: icon).font(.system(size: 19, weight: .medium)).foregroundStyle(TechColor.cyan)
+            Image(systemName: icon).font(.system(size: 19, weight: .medium)).foregroundStyle(TechColor.muted)
                 .accessibilityHidden(true)
         }.frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)

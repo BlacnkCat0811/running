@@ -17,9 +17,9 @@ struct TechLockSheet: View {
                         TechPanel {
                             TechAdaptiveStack {
                                 TechRunnerIcon()
-                                Text(session.title).font(.headline)
+                                Text(session.title).font(.headline.weight(.bold))
                                 Spacer()
-                                Text(nativeKilometers(session.distanceKm)).font(.headline.monospacedDigit())
+                                Text(nativeKilometers(session.distanceKm)).techFont(.compactMetric).monospacedDigit()
                             }
                         }
                         TechSectionHeader(title: "推荐原因")
@@ -77,7 +77,7 @@ struct TechLockSheet: View {
         .presentationDetents(typeSize >= .xxxLarge ? [.large] : [.medium, .large]).presentationDragIndicator(.visible)
         .interactiveDismissDisabled(native.isLockingSession)
         .presentationCornerRadius(24).presentationBackground(TechColor.paper)
-        .preferredColorScheme(.light).tint(TechColor.cyan)
+        .preferredColorScheme(.dark).tint(TechColor.cyan)
     }
 }
 #endif

@@ -35,7 +35,7 @@ struct TechTodayRecoveryMetrics: View {
                 .foregroundStyle(color)
                 .accessibilityHidden(true)
             Text(title).font(.caption).foregroundStyle(TechColor.muted)
-            Text(value).font(.subheadline.weight(.semibold)).monospacedDigit()
+            Text(value).font(.subheadline.weight(.bold)).monospacedDigit()
                 .foregroundStyle(TechColor.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.center)

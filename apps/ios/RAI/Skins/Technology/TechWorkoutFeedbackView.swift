@@ -39,11 +39,11 @@ struct TechWorkoutFeedbackView: View {
             Form {
                 Section("记录感受（均可选）") {
                     Text("这次跑得怎么样？选最接近的一档；不选表示不记录。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(TechColor.muted)
                     effortChips
                     if let stored = offScaleStoredEffort {
                         Text("当前记录：\(TechEffortScale.label(for: stored))（RPE \(stored)，不在档位中）。选择任一档位后会按档位保存。")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(TechColor.muted)
                     }
                     TextField("备注", text: $note, axis: .vertical).lineLimit(3...6)
                 }.disabled(busy || pending || saved)
@@ -57,7 +57,7 @@ struct TechWorkoutFeedbackView: View {
                     participationPicker("模型评估", selection: $input.eligibilityOverride)
                     participationPicker("跑量与负荷统计", selection: $input.statisticsParticipation)
                     Text("两项互相独立，不删除 Apple 健康原始记录。选择自动判断可撤销覆盖。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(TechColor.muted)
                 }.disabled(busy || pending || saved)
                 if let message { Section { Text(message).accessibilityIdentifier("feedback.result") } }
                 if let latest {
@@ -89,9 +89,10 @@ struct TechWorkoutFeedbackView: View {
                         }
                     }
                     Text("反馈不保证改变下一次建议；备注不会自动变成训练指令。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(TechColor.muted)
                 }
             }
+            .techFormSurface()
             .navigationTitle("训练反馈").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)

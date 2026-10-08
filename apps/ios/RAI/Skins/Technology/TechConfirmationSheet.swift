@@ -25,7 +25,7 @@ struct TechConfirmationSheet: View {
                 if destructive {
                     cancelButton
                     Button(action: confirm) {
-                        Text(confirmTitle).font(.subheadline.weight(.semibold))
+                        Text(confirmTitle).font(.subheadline.weight(.bold))
                             .foregroundStyle(TechColor.background).padding(12).frame(maxWidth: .infinity, minHeight: 44)
                             .background(TechColor.coral, in: TechSurfaceShape())
                     }.buttonStyle(TechPressStyle())
@@ -40,7 +40,7 @@ struct TechConfirmationSheet: View {
         .presentationCornerRadius(24)
         .presentationDragIndicator(.visible)
         .presentationBackground(TechColor.elevated)
-        .preferredColorScheme(.light)
+        .preferredColorScheme(.dark)
         .accessibilityIdentifier("technology.confirmation")
     }
 

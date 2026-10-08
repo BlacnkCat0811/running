@@ -1,4 +1,8 @@
-"""Guard the non-pixel fresh surface and its existing layout/input boundaries."""
+"""Guard the athletic dark surface and the original layout/input boundaries.
+
+The filename is historical. Only the old light appearance contract is migrated;
+layout, measurements, touch targets and interaction guards remain enforced.
+"""
 import pathlib
 import re
 
@@ -18,15 +22,17 @@ app = source(root / "RAIApp.swift")
 route = source(skin / "TechRouteView.swift")
 share = source(skin / "TechShareCardView.swift")
 
-assert ".preferredColorScheme(.light)" in app
-assert r".environment(\.colorScheme, .light)" in share
-assert route.count("map.mapType = .standard") == 2, "Both live and exported maps must be light"
+assert ".preferredColorScheme(.dark)" in app
+assert r".environment(\.colorScheme, .dark)" in share
+assert route.count("map.mapType = .standardNight") == 2, "Interactive and exported maps must use the SDK night basemap"
+assert not re.search(r"map\.mapType = \.standard\b", route), "No light basemap may remain"
 for path in [root / "RAIApp.swift", *skin.glob("*.swift")]:
     text = source(path)
-    assert not re.search(r"(?:preferredColorScheme|toolbarColorScheme)\(\.dark", text), path
-    assert r".environment(\.colorScheme, .dark)" not in text, path
-    assert ".standardNight" not in text, path
+    assert not re.search(r"(?:preferredColorScheme|toolbarColorScheme)\(\.light", text), path
+    assert r".environment(\.colorScheme, .light)" not in text, path
+    assert "Color.white" not in text and "UIColor.white" not in text, f"Fixed white surface remains: {path}"
     assert "LinearGradient(" not in text and "AngularGradient(" not in text, path
+    assert ".ultraThinMaterial" not in text and ".glassEffect(" not in text, f"No glass layers: {path}"
     if path.name != "TechIllustrations.swift":
         assert "linearGradient(" not in text, f"Gradient fill outside the page backdrop: {path}"
     assert "TechPixel" not in text, f"Pixel component remains: {path}"
@@ -73,8 +79,22 @@ for stop in fade_stops:
     assert stop.strip() in ("TechColor.background", "TechColor.background.opacity(0)"), \
         f"页面背景柔化只能渐变页底色本身，不得引入第二种颜色: {stop}"
 
-assert "static let background = Color(red: 245/255, green: 250/255, blue: 248/255)" in theme
-assert "static let paper = Color(red: 255/255, green: 255/255, blue: 255/255)" in theme
+for name, rgb in {
+    "background": (11, 12, 13), "paper": (21, 23, 25), "elevated": (32, 35, 38),
+    "grid": (52, 56, 61), "ink": (247, 248, 243), "cyan": (196, 255, 0),
+    "action": (196, 255, 0), "actionInk": (11, 12, 13),
+    "yellow": (242, 198, 109), "coral": (255, 140, 152), "blue": (139, 190, 255),
+}.items():
+    r, g, b = rgb
+    assert f"static let {name} = Color(red: {r}/255, green: {g}/255, blue: {b}/255)" in theme, \
+        f"Athletic color contract changed: {name}"
+assert ".toolbarColorScheme(.dark, for: .navigationBar)" in theme
+layout = source(skin / "TechLayout.swift")
+assert "enum TechFontRole" in layout and "func techFont(_ role: TechFontRole)" in layout
+assert "ScaledMetric(wrappedValue: size, relativeTo: relativeTo)" in layout
+assert "content.font(.system(size: size, weight: weight))" in layout, "Keep scaled system fonts"
+for role in ["display", "hero", "metric", "compactMetric", "pageTitle", "section", "label"]:
+    assert f"case .{role}: return" in layout, f"Missing typography role: {role}"
 for name, value in {"pageHorizontal": 20, "pageVertical": 16, "bottomClearance": 24,
                     "sectionSpacing": 16, "panelPadding": 16, "border": 1,
                     "smallBorder": 1, "shadow": 0}.items():
@@ -95,6 +115,8 @@ assert "UIGraphicsImageRenderer" not in surfaces + theme, "Keep symbols in their
 assert "Image(systemName: systemName)" in theme
 icon_button = theme.split("struct TechIconButton", 1)[1].split("struct TechPrimaryButton", 1)[0]
 assert ".accessibilityLabel(accessibilityLabel)" in icon_button
+assert r"@Environment(\.isEnabled) private var isEnabled" in icon_button
+assert ".foregroundStyle(isEnabled ? color : TechColor.muted)" in icon_button
 assert ".accessibilityIdentifier(\"tab.\\(tab.title)\")" in theme
 assert ".accessibilityAddTraits(selection == tab ? .isSelected : [])" in theme
 assert not (skin / "TechPixelStyle.swift").exists(), "Retire the pixel drawing implementation"
@@ -115,6 +137,11 @@ assert "path.addCurve(" in illustrations and "path.addQuadCurve(" in illustratio
 assert ".frame(height: 150).accessibilityHidden(true)" in illustrations
 assert ".clipped().allowsHitTesting(false).accessibilityHidden(true)" in illustrations
 assert "context.stroke(line," in illustrations and "line.addLines(points)" in illustrations
+shoe = illustrations.split("struct TechShoeIllustration", 1)[1].split("struct TechRaceLandscape", 1)[0]
+landscape = illustrations.split("struct TechRunningLandscape", 1)[1].split("struct TechTodayHeader", 1)[0]
+for label, text in [("Shoe", shoe), ("Landscape", landscape)]:
+    assert "TechColor.action" not in text and "TechColor.cyan" not in text, \
+        f"{label}: keep Volt for actions/current data, not decorative fills"
 
 progress = theme.split("struct TechProgressBar", 1)[1].split("struct TechStatLine", 1)[0]
 assert "guard let fraction, fraction.isFinite else { return nil }" in progress
@@ -138,4 +165,26 @@ assert "map.isScrollEnabled = false" in route and "map.isZoomEnabled = false" in
 assert "mapInteractive" in route and "applyGesturePolicy()" in route
 assert "GCJ02.fromWGS84" in route
 assert "static let storageKey" not in theme, "Do not introduce a second skin or theme preference"
-print("Fresh skin: smooth surfaces, native symbols, original layout metrics and progress semantics passed")
+coach = source(skin / "TechRunCoachView.swift")
+timeline = coach.split("private struct TechCoachWeekTimeline", 1)[1].split("private struct TechCoachTrainingDays", 1)[0]
+assert "@ScaledMetric(relativeTo: .caption) private var cardWidth" in timeline
+assert "@ScaledMetric(relativeTo: .title3) private var iconHeight" in timeline
+assert ".frame(width: min(cardWidth, 260), alignment: .topLeading)" in timeline
+assert ".frame(minHeight: 140, alignment: .topLeading)" in timeline, \
+    "Week cards must grow vertically rather than clip accessibility text at 140pt"
+assert ".frame(height: iconHeight)" in timeline, "Scaled symbols must reserve their full height"
+assert not re.search(r"\.frame\([^)]*\bheight:\s*140\b", timeline), \
+    "A fixed-height frame would undo the week-card accessibility reflow"
+assert timeline.count(".fixedSize(horizontal: false, vertical: true)") >= 5, \
+    "Weekday, date, title, distance and stack must retain their full text height"
+assert '"coach.week-day.\\(day.localDate)"' in timeline, "Keep individually testable day controls"
+ring = coach.split("private struct TechRingProgress", 1)[1].split("private struct TechCoachDaySheet", 1)[0]
+assert ".frame(width: 76, height: 76)" in ring, "Do not enlarge the coach's original ring"
+assert ring.count(".lineLimit(1).minimumScaleFactor(0.25)") == 2, \
+    "Both ring texts must fit their original graphic slot at accessibility sizes"
+assert ".accessibilityLabel(label)" in ring and ".accessibilityValue(value)" in ring, \
+    "Font fitting must not change or shorten the original spoken metric"
+assert "guard let fraction, fraction.isFinite else { return nil }" in ring
+assert "return min(1, max(0, fraction))" in ring
+assert ".animation(reduceMotion ? nil" in ring
+print("Athletic skin: dark surfaces/night maps, scaled type roles, native symbols, original layout and progress semantics passed")

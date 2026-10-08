@@ -106,6 +106,7 @@ private struct TechPreparedSeriesChart: View {
                     ForEach(data.points) { point in
                         LineMark(x: .value("时间 (min)", point.offsetSeconds / 60), y: .value(unit, point.value))
                             .foregroundStyle(accent).interpolationMethod(.linear)
+                            .lineStyle(StrokeStyle(lineWidth: 2))
                         if data.points.count == 1 {
                             PointMark(x: .value("时间 (min)", point.offsetSeconds / 60), y: .value(unit, point.value))
                                 .foregroundStyle(accent)
@@ -116,6 +117,7 @@ private struct TechPreparedSeriesChart: View {
                             .foregroundStyle(TechColor.muted).lineStyle(StrokeStyle(lineWidth: 1, dash: [4]))
                         PointMark(x: .value("时间 (min)", selected.offsetSeconds / 60), y: .value(unit, selected.value))
                             .foregroundStyle(TechColor.ink)
+                            .symbolSize(42)
                     }
                 }
                 .chartXScale(domain: 0...max(1.0 / 60, durationSeconds.isFinite ? durationSeconds / 60 : 0,
@@ -124,7 +126,7 @@ private struct TechPreparedSeriesChart: View {
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: typeSize.isAccessibilitySize ? 2 : 4)) {
                         AxisValueLabel().foregroundStyle(TechColor.muted)
-                        AxisGridLine().foregroundStyle(TechColor.grid)
+                        AxisGridLine().foregroundStyle(TechColor.grid.opacity(0.45))
                     }
                 }
                 .chartYAxis {
@@ -134,7 +136,7 @@ private struct TechPreparedSeriesChart: View {
                                 Text(formatted(value)).foregroundStyle(TechColor.muted)
                             }
                         }
-                        AxisGridLine().foregroundStyle(TechColor.grid)
+                        AxisGridLine().foregroundStyle(TechColor.grid.opacity(0.45))
                     }
                 }
                 .chartXAxisLabel("min").chartYAxisLabel(isPace ? "min/km" : unit)

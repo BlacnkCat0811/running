@@ -3,8 +3,8 @@ import SwiftUI
 
 /// 高德底图的隐私说明与同意入口。
 ///
-/// 刻意使用系统配色与系统控件，不做皮肤化：它挂在 App 根部、与页面皮肤解耦，
-/// 页面视觉改版时不应该被迫同步改这里。
+/// 保留系统表面与系统控件；填充按钮显式配对行动色和反色文字，
+/// 避免继承全局强调色后仍使用系统白字，降低隐私选择的可读性。
 struct MapPrivacyConsentView: View {
     enum Context {
         /// 首启门控：必须先做选择，第二个按钮表示只用离线轨迹。
@@ -40,6 +40,8 @@ struct MapPrivacyConsentView: View {
                 HStack(spacing: 12) {
                     Button("同意并启用地图", action: onAgree)
                         .buttonStyle(.borderedProminent)
+                        .tint(TechColor.action)
+                        .foregroundStyle(TechColor.actionInk)
                     Button(context == .firstRun ? "仅使用离线轨迹" : "取消", action: onDismiss)
                         .buttonStyle(.bordered)
                 }

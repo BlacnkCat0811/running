@@ -33,7 +33,7 @@ struct TechAbilityDetailView: View {
         .techNavigation("跑步能力").navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(TechColor.background, for: .navigationBar)
-        .toolbarColorScheme(.light, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .refreshable {
             await native.refreshAll()
             await native.refreshBodyMetrics()
@@ -188,7 +188,7 @@ struct TechAbilityDetailView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(title).font(.caption).foregroundStyle(TechColor.muted).fixedSize(horizontal: false, vertical: true)
             Text(value)
-                .techScaledFont(24).monospacedDigit()
+                .techScaledFont(24, weight: .bold).monospacedDigit()
                 .foregroundStyle(available ? TechColor.ink : TechColor.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Text(unit).font(.caption2).foregroundStyle(TechColor.muted)

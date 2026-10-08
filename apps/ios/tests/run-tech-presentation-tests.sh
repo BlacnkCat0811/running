@@ -12,11 +12,13 @@ trap 'rm -rf "$tmp"' EXIT
 # 有人往这些文件里加 `@Observable`，触发宏插件后失败形态会是 `sandbox_apply: Operation
 # not permitted` 加满屏 `produced malformed response`，与真实错误完全无关。预置掉这个坑。
 xcrun swiftc -parse-as-library -disable-sandbox apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/NativeFormat.swift apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/CalibrationState.swift \
   apps/ios/RAI/VerdictPresentation.swift \
   apps/ios/RAI/Skins/Technology/TechPlotData.swift \
   apps/ios/RAI/Skins/Technology/TechSyncPresentation.swift \
   apps/ios/RAI/Skins/Technology/TechEnumPresentation.swift \
   apps/ios/RAI/Skins/Technology/TechWorkoutDetailPresentation.swift \
+  apps/ios/RAI/Skins/Technology/TechRunCoachPresentation.swift \
   apps/ios/tests/TechPresentationRegression.swift -o "$tmp/tech-presentation"
 "$tmp/tech-presentation"
 python3 - <<'PY'
@@ -58,10 +60,20 @@ def token(pattern, text, label):
 
 checks = 0
 for foreground in ["ink", "cyan", "blue", "coral", "yellow", "leaf", "success", "violet", "muted-0", "muted-1"]:
-    for background in ["background", "paper", "elevated"]:
+    for background in ["background", "paper", "elevated", "mint", "paleCyan", "paleCoral", "paleYellow"]:
         ratio = contrast(colors[foreground], colors[background])
         assert ratio >= 4.5, f"{foreground} on {background}: {ratio:.2f} < 4.5"
         checks += 1
+
+# Dark semantic badges and insight panels use translucent fills. Verify the
+# resulting color on every neutral layer, including BOTH muted contrast variants,
+# rather than comparing uncomposited palette tokens.
+for foreground in ["cyan", "blue", "coral", "yellow", "leaf", "success", "violet", "muted-0", "muted-1"]:
+    for background in ["background", "paper", "elevated"]:
+        for alpha in [0.07, 0.08, 0.12, 0.15]:
+            ratio = contrast(colors[foreground], blend(colors[foreground], colors[background], alpha))
+            assert ratio >= 4.5, f"{foreground} on {foreground}@{alpha} over {background}: {ratio:.2f} < 4.5"
+            checks += 1
 
 # ---------------------------------------------------------------------------
 # 反色控件：文字压在**填充色**上，判据是"文字色 / 填充色"。
@@ -89,9 +101,18 @@ destructive = sheet.split("if destructive {", 1)[1].split("} else {", 1)[0]
 (destructive_fill,) = token(r"background\(TechColor\.(\w+), in: TechSurfaceShape\(\)\)", destructive,
                             "destructive confirmation fill color")
 
+consent = without_comments(pathlib.Path("apps/ios/RAI/MapPrivacyConsentView.swift").read_text())
+consent_primary = consent.split('Button("同意并启用地图"', 1)[1].split("Button(", 1)[0]
+assert ".buttonStyle(.borderedProminent)" in consent_primary, "Keep the native privacy consent action"
+(consent_label,) = token(r"foregroundStyle\(TechColor\.(\w+)\)", consent_primary,
+                         "privacy consent explicit inverse label")
+(consent_fill,) = token(r"tint\(TechColor\.(\w+)\)", consent_primary,
+                        "privacy consent explicit prominent fill")
+
 for label, foreground, fill in [
     ("Primary button label", label_token, fill_token),
     ("Destructive confirmation label", destructive_label, destructive_fill),
+    ("Privacy consent button label", consent_label, consent_fill),
 ]:
     ratio = contrast(colors[foreground], colors[fill])
     assert ratio >= 4.5, f"{label} ({foreground} on {fill}): {ratio:.2f} < 4.5"
@@ -109,6 +130,39 @@ ratio = contrast(colors[badge_label], blend(colors[badge_fill], colors["paper"],
 assert ratio >= 4.5, (f"Pace zone badge label ({badge_label} on {badge_fill}@{badge_alpha} "
                       f"over paper): {ratio:.2f} < 4.5")
 checks += 1
+
+# Disabled buttons must remain neutral and readable; the enabled inverse label
+# must not leak onto the dark disabled fill.
+(disabled_label,) = token(
+    r"foregroundStyle\(isDisabled \? TechColor\.(\w+) :", primary,
+    "TechPrimaryButton disabled label color")
+(disabled_fill,) = token(
+    r"if isDisabled \{ TechSurfaceShape\(\)\.fill\(TechColor\.(\w+)\) \}", primary,
+    "TechPrimaryButton disabled fill color")
+disabled_variants = ["muted-0", "muted-1"] if disabled_label == "muted" else [disabled_label]
+for foreground in disabled_variants:
+    ratio = contrast(colors[foreground], colors[disabled_fill])
+    assert ratio >= 4.5, f"Disabled button ({foreground} on {disabled_fill}): {ratio:.2f} < 4.5"
+    checks += 1
+
+# Today's inline CTA stays bound to the ORIGINAL availability predicate while
+# adopting the same enabled inverse / disabled neutral color contract.
+today_source = pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_text()
+lock_cta = today_source.split("private func recommendationPanel", 1)[1].split("private func lockDisabled", 1)[0]
+disabled_lock_label, enabled_lock_label = token(
+    r"foregroundStyle\(lockDisabled\(data\) \? TechColor\.(\w+) : TechColor\.(\w+)\)",
+    lock_cta, "Today lock CTA label colors")
+disabled_lock_fill, enabled_lock_fill = token(
+    r"background\(lockDisabled\(data\) \? TechColor\.(\w+) : TechColor\.(\w+), in:",
+    lock_cta, "Today lock CTA fill colors")
+for foreground, fill in [
+    (enabled_lock_label, enabled_lock_fill),
+    *[(variant, disabled_lock_fill) for variant in (
+        ["muted-0", "muted-1"] if disabled_lock_label == "muted" else [disabled_lock_label])],
+]:
+    ratio = contrast(colors[foreground], colors[fill])
+    assert ratio >= 4.5, f"Today lock CTA ({foreground} on {fill}): {ratio:.2f} < 4.5"
+    checks += 1
 
 # ---------------------------------------------------------------------------
 # 「有数据、有契约、没有展示位」是这套皮肤上真实复发过的一类缺陷：改版今日页时把
@@ -383,6 +437,47 @@ assert "private func phaseName" not in coach_view, (
     "reuse it silently. Use `techCoachPhaseName` + `techCoachNoRaceBlockLabel`.")
 print(f"Coach field coverage: {len(coach_anchors)}/{len(coach_fields)} MobileRunCoachResponse "
       f"fields have a Technology display slot and {len(coach_metadata_only)} is metadata by design.")
+
+# Unit-tested presentation must remain wired into the cards, and the calibration explanation
+# must render near the overview rather than surviving only as an unused helper or bottom notice.
+coach_page = without_comments(pathlib.Path("apps/ios/RAI/Skins/Technology/TechRunCoachView.swift").read_text())
+assert coach_page.index('.accessibilityIdentifier("coach.overview")') < coach_page.index("\n                    explanation\n") < coach_page.index('.accessibilityIdentifier("coach.today")'), (
+    "Calibration progress and conservative-start context must render immediately after the overview")
+explanation = coach_page.split("@ViewBuilder private var explanation:", 1)[1].split("private func coachControls", 1)[0]
+for anchor in ["$0.recommendation.planRevision == native.currentPlanRevision", "techCoachCalibrationLabel",
+               "techCoachCalibrationExplanation", "本周排入", "本周预算"]:
+    assert anchor in explanation, f"Coach first-screen explanation lost {anchor}"
+assert ".executable" not in explanation, "Recording or reconfirming today must not remove it from the scheduled count"
+week_progress = coach_page.split("private struct TechCoachWeekProgressCard:", 1)[1].split("private struct TechCoachProgressStat:", 1)[0]
+assert "TechCoachWeekProgress(days: days, adherence: adherence)" in week_progress, "Weekly counts must use the tested adherence/legacy presentation"
+assert "progress.unknownCount" in week_progress and "天待同步" in week_progress, "Missing observations must remain explicit, including without distance data"
+week_timeline = coach_page.split("private struct TechCoachWeekTimeline:", 1)[1].split("private struct TechCoachTrainingDays:", 1)[0]
+assert "Text(techCoachWeekDayTitle(day))" in week_timeline, "The timeline must use completion before planned status"
+hero = coach_page.split("private struct TechCoachHeroCard:", 1)[1].split("private struct TechTodayTrainingCard:", 1)[0]
+assert "techCoachTotalWeeks(for: plan)" in hero and "plan.durationWeeks" not in hero, \
+    "Race-cycle progress must use the tested date-derived duration, not the fitness setting"
+assert "techCoachRaceCountdown(raceDate: plan.raceDate, todayLocalDate: todayLocalDate, daysToRace: daysToRace)" in hero, "A zero countdown must be checked against the actual race date"
+training_days = coach_page.split("private struct TechCoachTrainingDays:", 1)[1].split("private struct TechCoachRollingUpcomingSection:", 1)[0]
+assert "可跑步日" in training_days and "可选，不是承诺" in training_days and "$0.detail" in training_days, "Running-day preferences must not promise sessions or drop unplanned-day facts"
+print("Coach presentation: observed-day progress, calibration context, timeline status and race expiry are wired into the view.")
+
+# Main-work alerts, rather than session-level zone references, drive every target summary.
+for name in ["TechTodayTrainingCard", "TechCoachRollingUpcomingRow",
+             "TechCoachExecutableDaySheet", "TechCoachUpcomingRow"]:
+    card = coach_page.split(f"private struct {name}: View {{", 1)[1].split("\nprivate struct ", 1)[0]
+    assert "techCoachTrainingTarget(" in card and "target.formattedRange" in card, (
+        f"{name} must render the tested prescription-based target")
+    assert "paceSecondsPerKmLower" not in card and "heartRateBpmLower" not in card, (
+        f"{name} bypasses the target helper and may prefer pace over the actual heart-rate alert")
+assert 'if plan.status == "active" {' in coach_page, "Upcoming schedules must be gated only on active coach status"
+upcoming_block = coach_page.split('if plan.status == "active" {', 1)[1].split("if let confidence", 1)[0]
+assert re.match(r"\s*if let schedule \{\s*TechCoachRollingUpcomingSection\(", upcoming_block), (
+    "A valid schedule must render before and independently of the today fallback")
+assert "techCoachUpcomingTrainingDays(in: schedule)" in upcoming_block, (
+    "Independent schedules must use the tested schedule-local current-date cutoff")
+assert "} else if let today = todayForCurrentPlan {" in upcoming_block, (
+    "The week-strip fallback still requires an available revision-matching today response")
+print("Coach targets follow main-work alerts; valid future schedules remain visible without a today response.")
 
 # 闭集枚举：契约里的每个取值都必须在展示映射里出现，多一个少一个都算红。
 # 域外值会以机器码形式漏到界面上（`need_sync` / `too_hard` / `half_marathon`）。

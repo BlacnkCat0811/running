@@ -952,6 +952,18 @@ final class RequestLog: @unchecked Sendable {
               "fitness commands explicitly encode nullable fields required by the API schema")
         check(!coachModel.isPlanBusy, "coach mutation always releases the shared plan gate")
         StubProtocol.handler = { request in
+            if request.url!.path == "/v1/mobile/goals" { return (200, coachGoals(2), 0) }
+            if request.url!.path == "/v1/mobile/workout-plan" {
+                return (200, planJSON.replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":2"), 0)
+            }
+            return (503, "{}", 0)
+        }
+        let todayOnlyFailure = await coachModel.refreshPlanState()
+        check(!todayOnlyFailure && !coachModel.isTodayAvailable && !coachModel.isOffline,
+              "A failed today read does not mark successful goals and schedule reads offline")
+        check(coachModel.goals?.runCoach?.status == "active" && coachModel.currentWorkoutPlan?.planRevision == 2,
+              "The active coach keeps an independently refreshed current schedule available when today fails")
+        StubProtocol.handler = { request in
             if request.url!.path == "/v1/mobile/run-coach" { return (200, runCoachJSON, 0.15) }
             return (503, "{}", 0)
         }

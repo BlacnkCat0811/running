@@ -155,7 +155,7 @@ private struct TechPreparedRoute: View {
 
     private var trace: some View {
         Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TechColor.mint))
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(TechColor.paper))
             var grid = Path()
             for x in stride(from: 0.0, through: size.width, by: 28) {
                 grid.move(to: CGPoint(x: x, y: 0)); grid.addLine(to: CGPoint(x: x, y: size.height))
@@ -163,7 +163,7 @@ private struct TechPreparedRoute: View {
             for y in stride(from: 0.0, through: size.height, by: 28) {
                 grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y))
             }
-            context.stroke(grid, with: .color(TechColor.blue.opacity(0.10)), lineWidth: 0.5)
+            context.stroke(grid, with: .color(TechColor.grid.opacity(0.45)), lineWidth: 0.5)
             let points = mapPoints
             guard points.count > 1 else { return }
             let rect = mapRect
@@ -183,7 +183,7 @@ private struct TechPreparedRoute: View {
                 // two ways is a needless inconsistency (2026-10-05).
                 let dot = Path(ellipseIn: CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10))
                 context.fill(dot, with: .color(color))
-                context.stroke(dot, with: .color(.white), lineWidth: 1.5)
+                context.stroke(dot, with: .color(TechColor.background), lineWidth: 1.5)
             }
             let markerPoints = geometry.kilometerMarkers.map { marker in
                 let mapPoint = MKMapPoint(CLLocationCoordinate2D(latitude: marker.latitude, longitude: marker.longitude))
@@ -277,8 +277,8 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
     override init(frame: CGRect) {
         super.init(frame: frame)
         map.delegate = self
-        // The light basemap matches the sole fresh skin.
-        map.mapType = .standard
+        // Use the installed SDK's night basemap; route and camera inputs are unchanged.
+        map.mapType = .standardNight
         map.isShowsBuildings = true
         map.isShowsLabels = true
         map.isRotateEnabled = false
@@ -299,7 +299,7 @@ private final class RouteMapContainer: UIView, MAMapViewDelegate {
         kilometerLeaders.lineWidth = 1
         start.fillColor = UIColor(TechColor.cyan).cgColor
         end.fillColor = UIColor(TechColor.coral).cgColor
-        for dot in [start, end] { dot.strokeColor = UIColor.white.cgColor; dot.lineWidth = 2 }
+        for dot in [start, end] { dot.strokeColor = UIColor(TechColor.background).cgColor; dot.lineWidth = 2 }
         clipsToBounds = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -542,7 +542,7 @@ final class TechShareRouteMapContainer: UIView, MAMapViewDelegate {
         let map = MAMapView(frame: .zero)
         self.map = map
         map.delegate = self
-        map.mapType = .standard
+        map.mapType = .standardNight
         map.isShowsBuildings = true
         map.isShowsLabels = true
         map.isScrollEnabled = false

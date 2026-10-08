@@ -27,25 +27,25 @@ struct TechPlanPreviewSheet: View {
                     Text("替换日期：" + (preview.replacedDates.isEmpty ? "无既有处方被替换" : preview.replacedDates.joined(separator: "、")))
                         .font(.footnote)
                     Text("预览有效至 \(nativeDate(preview.expiresAt))")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(TechColor.muted)
                 }
                 Section("变更摘要") {
                     Text("总跑量：\(nativeKilometers(previousDistance)) → \(nativeKilometers(candidateDistance))")
                     Text("质量课：\((preview.previousDays ?? []).filter { isQuality($0.kind) }.count) → \(preview.days.filter { isQuality($0.kind) }.count) 次")
                     Text(preview.replacedDates.isEmpty ? "本次没有替换既有处方。" : "本次将替换 \(preview.replacedDates.count) 天既有处方。")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        .font(.footnote).foregroundStyle(TechColor.muted)
                 }
                 Section("候选课表") {
                     ForEach(preview.days, id: \.localDate) { day in
                         VStack(alignment: .leading, spacing: 6) {
                             if let previous = preview.previousDays?.first(where: { $0.localDate == day.localDate }) {
                                 Text("原计划：\(nativeSessionName(previous.kind)) · \(nativeKilometers(previous.distanceKm))")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(TechColor.muted)
                             } else {
-                                Text("原计划：未安排").font(.caption).foregroundStyle(.secondary)
+                                Text("原计划：未安排").font(.caption).foregroundStyle(TechColor.muted)
                             }
                             Text("\(day.localDate) · \(nativeSessionName(day.kind)) · \(nativeKilometers(day.distanceKm))")
-                            if let reason = day.reason { Text(reason).font(.caption).foregroundStyle(.secondary) }
+                            if let reason = day.reason { Text(reason).font(.caption).foregroundStyle(TechColor.muted) }
                             ForEach(nativeStructureLines(day.structure)) { line in
                                 Text("\(line.title)：\(line.detail)").font(.caption)
                             }
@@ -58,10 +58,11 @@ struct TechPlanPreviewSheet: View {
                     }
                 }
                 if preview.revision != native.goals?.revision {
-                    Text("目标版本已改变，请取消并重新生成预览。").foregroundStyle(.red)
+                    Text("目标版本已改变，请取消并重新生成预览。").foregroundStyle(TechColor.coral)
                 }
-                if let failure { Text(failure).foregroundStyle(.red) }
+                if let failure { Text(failure).foregroundStyle(TechColor.coral) }
             }
+            .techFormSurface()
             .navigationTitle("确认新课表")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(native.isRegeneratingPlan) }

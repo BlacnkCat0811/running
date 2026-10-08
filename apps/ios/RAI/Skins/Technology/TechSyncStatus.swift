@@ -36,7 +36,7 @@ struct TechHomeActions: View {
                         if userSyncBusy { ProgressView().tint(TechColor.cyan) }
                         else { Image(systemName: "arrow.trianglehead.2.clockwise.rotate.90").font(.system(size: 19, weight: .medium)) }
                     }
-                    .foregroundStyle(TechColor.cyan).frame(width: 44, height: 44)
+                    .foregroundStyle(sync.isBusy || !session.isReachable ? TechColor.muted : TechColor.cyan).frame(width: 44, height: 44)
                     .background(TechColor.paper, in: TechSurfaceShape())
                 }
                 .buttonStyle(TechPressStyle()).disabled(sync.isBusy || !session.isReachable)
@@ -188,13 +188,13 @@ struct TechSyncStatus: View {
                     // 待发数据（预检查在导出之前就返回了），而凭证失效时数据完好、缺的只是登录。
                     // 三件事共用一句正文会让其中两句变成假话，所以按阶段分流。
                     Label(techSyncPhase(sync.phase), systemImage: pendingIcon)
-                        .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.cyan)
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.cyan)
                     Text(pendingDetail)
                         .font(.caption).foregroundStyle(TechColor.muted)
                     if showsActions { TechSyncAction(title: "继续同步", compact: true) }
                 } else if state == .busy {
                     Label(techSyncPhase(sync.phase), systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(TechColor.cyan)
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(TechColor.cyan)
                     Text("同步时保持应用打开；下拉刷新仅更新页面，不导入健康数据。")
                         .font(.caption).foregroundStyle(TechColor.muted)
                 } else if state == .failed {
