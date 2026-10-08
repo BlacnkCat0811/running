@@ -484,7 +484,6 @@ import Foundation
         // new plan would not change — while the sync itself said "本周没有还需要上表
         // 的训练". Both now read one classification; only the wording differs.
 
-        let wholeWeek = plannedWeek
         // Everything run: the week is finished, not missing. Regenerating it would not
         // put anything back on the watch, so the panel must not suggest that.
         let allDone = WorkoutPlanMapper.weekOffer(

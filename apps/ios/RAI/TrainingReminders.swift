@@ -7,6 +7,7 @@ import UserNotifications
 @Observable @MainActor
 final class TrainingReminders {
     static let shared = TrainingReminders()
+    nonisolated static let storagePrefix = "rai.training-reminder."
     private let center = UNUserNotificationCenter.current()
     private var generation = UUID()
     private var activeScope = ""
@@ -15,15 +16,19 @@ final class TrainingReminders {
     private(set) var hour = 8
     private(set) var denied = false
     private(set) var busy = false
-    private let prefix = "rai.training-reminder."
+    private var prefix: String { Self.storagePrefix }
+
+    nonisolated static func storedHour(scope: String) -> Int {
+        let stored = UserDefaults.standard.integer(forKey: storagePrefix + scope + ".hour")
+        return (7...21).contains(stored) ? stored : 8
+    }
 
     func bind(scope: String) {
         guard scope != activeScope else { return }
         generation = UUID()
         activeScope = scope
         enabled = UserDefaults.standard.bool(forKey: prefix + scope + ".enabled")
-        let stored = UserDefaults.standard.integer(forKey: prefix + scope + ".hour")
-        hour = (7...21).contains(stored) ? stored : 8
+        hour = Self.storedHour(scope: scope)
         message = nil
     }
 

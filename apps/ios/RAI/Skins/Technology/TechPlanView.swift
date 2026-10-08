@@ -23,6 +23,9 @@ struct TechManualPlanView: View {
     @State private var draftBase: MobileGoalsResponse?
     @State private var discardDraft = false
     private var draftIsStale: Bool { draftBase?.revision != native.goals?.revision }
+    private var scheduleHour: Int {
+        TrainingReminders.storedHour(scope: native.feedbackScope)
+    }
 
     private var areDistancesValid: Bool {
         NativeGoalWeekDraft.distancesAreValid(distanceDrafts, for: weekPlan)
@@ -116,7 +119,7 @@ struct TechManualPlanView: View {
             if native.goals == nil { await native.refreshAll() }
             // The watch panel lives on this page now, so it must be able to fill
             // itself even when the home screen never ran in this session.
-            if native.workoutPlan == nil { _ = await native.refreshWorkoutPlan() }
+            if native.currentWorkoutPlan == nil { _ = await native.refreshWorkoutPlan() }
             if !editing { loadDraft() }
         }
         .onChange(of: native.goals?.revision) { _, _ in if !editing { loadDraft() } }
@@ -145,7 +148,7 @@ struct TechManualPlanView: View {
                               value: "\(native.goals?.qualitySessionCap ?? 0)", label: "质量课上限", size: 68)
                 }
             }
-            TechSectionHeader(title: "7 天训练安排", trailing: "本周")
+            TechSectionHeader(title: "7 天训练安排", trailing: "自然周")
             if native.today?.weekPlan.isEmpty != false {
                 Text("尚未取到本周安排").font(.footnote).foregroundStyle(TechColor.muted)
             } else {
@@ -222,7 +225,7 @@ struct TechManualPlanView: View {
     /// the home screen no longer carries the watch panel, so this page is the
     /// only place that can rewrite the stored week or mirror it onto the watch.
     private var watchPlanPanel: some View {
-        let plan = native.workoutPlan
+        let plan = native.currentWorkoutPlan
         // The panel used to count the server's `executable` flag, which is a
         // looser question than "did this day survive mapping" — a week could read
         // "5 项可上表" while the watch received four. Counting with the bridge's
@@ -238,12 +241,18 @@ struct TechManualPlanView: View {
         // two surfaces.
         let now = Date()
         let offer = plan.map {
-            WorkoutPlanMapper.weekOffer(in: $0, now: now, completedLocalDates: native.completedWeekDates)
+            WorkoutPlanMapper.weekOffer(
+                in: $0,
+                now: now,
+                completedLocalDates: native.completedWeekDates,
+                hour: scheduleHour
+            )
         }
         let schedulableCount = offer?.offered.count ?? 0
         let unoffered = plan.map {
             WorkoutPlanMapper.unofferedDays(in: $0, completedLocalDates: native.completedWeekDates)
         } ?? []
+        let canClearStaleWatch = native.watchNeedsClear
         return TechPanel {
             VStack(alignment: .leading, spacing: 12) {
                 TechSectionHeader(
@@ -258,7 +267,7 @@ struct TechManualPlanView: View {
                         .font(.caption).foregroundStyle(TechColor.muted)
                 }
                 if plan == nil {
-                    Text("还没有本周课表。生成后即可一键同步到手表「体能训练」。")
+                    Text(native.workoutPlanError ?? "尚未取得当前有效课表。生成或刷新后即可一键同步到手表「体能训练」。")
                         .font(.footnote)
                         .foregroundStyle(TechColor.muted)
                 } else if schedulableCount == 0 {
@@ -284,8 +293,18 @@ struct TechManualPlanView: View {
                 }
                 if let audit = plan?.audit {
                     Text("\(NativeAppModel.planSourceName(audit.generatedBy)) · \(nativeDate(audit.generatedAt ?? ""))")
-                    .font(.caption2)
-                    .foregroundStyle(TechColor.muted)
+                        .font(.caption2)
+                        .foregroundStyle(TechColor.muted)
+                }
+                if let plan {
+                    Text("有效课表更新于 \(nativeDate(plan.generatedAt)) · 手表排期 \(String(format: "%02d:00", scheduleHour))")
+                        .font(.caption2)
+                        .foregroundStyle(TechColor.muted)
+                }
+                if let error = native.workoutPlanError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(TechColor.yellow)
                 }
                 if let message = native.planMessage {
                     Text(message)
@@ -305,10 +324,11 @@ struct TechManualPlanView: View {
                 }
                 scheduleDisclosure
                 TechPrimaryButton(
-                    title: schedulableCount == 0 ? "撤回手表旧课表" : "一键同步到手表",
+                    title: canClearStaleWatch || schedulableCount == 0 ? "撤回手表旧课表" : "一键同步到手表",
                     systemName: "applewatch",
                     isBusy: isSyncingPlan,
-                    isDisabled: native.isOffline || plan == nil || native.isPlanBusy
+                    isDisabled: native.isPlanBusy ||
+                        (canClearStaleWatch ? false : native.isOffline || plan == nil)
                 ) {
                     syncPlanToWatch()
                 }
@@ -321,7 +341,7 @@ struct TechManualPlanView: View {
                         } else {
                             Image(systemName: "calendar.badge.clock")
                         }
-                        Text(native.isRegeneratingPlan ? "生成中…" : (native.goals?.weekPlanReplanRequired == true ? "重新预览规则课表" : "预览未来七日课表"))
+                        Text(native.isRegeneratingPlan ? "生成中…" : (native.goals?.weekPlanReplanRequired == true ? "重新预览规则课表" : "预览未来 7 日课表"))
                             .font(.caption.weight(.semibold))
                     }
                     .foregroundStyle(TechColor.cyan)
@@ -337,20 +357,34 @@ struct TechManualPlanView: View {
     }
 
     private func syncPlanToWatch() {
-        guard !isSyncingPlan, let syncID = native.beginPlanSync() else { return }
+        let clearOnly = native.watchNeedsClear
+        guard !isSyncingPlan, let syncID = native.beginPlanSync(allowOffline: clearOnly) else { return }
         isSyncingPlan = true
         planSyncMessage = nil
         Task {
             defer { isSyncingPlan = false; native.endPlanSync(syncID) }
-            guard await native.refreshPlanState(), let plan = native.workoutPlan else {
+            if clearOnly {
+                let outcome = await WorkoutKitBridge.clearRequestingAuthorization(
+                    isCurrent: { native.isCurrentPlanSync(syncID) }
+                )
+                guard native.isCurrentPlanSync(syncID) else { return }
+                if outcome.authorized && outcome.verified {
+                    native.recordWatchClearAcknowledgement()
+                }
+                planSyncMessage = outcome.report
+                return
+            }
+            guard await native.refreshPlanState(), let plan = native.currentWorkoutPlan else {
                 planSyncMessage = "未能确认最新计划，未改动手表排期。请刷新后重试。"
                 return
             }
+            let usedScheduleHour = scheduleHour
             // Permission is asked for only when the user actually tries to sync, so
             // the system prompt arrives with an obvious reason attached to it.
             let outcome = await WorkoutKitBridge.syncRequestingAuthorization(
                 plan: plan,
                 completedLocalDates: native.completedWeekDates,
+                scheduleHour: usedScheduleHour,
                 isCurrent: {
                     native.isCurrentPlanSync(syncID) && native.goals?.revision == plan.planRevision &&
                         native.workoutPlan?.days == plan.days && native.workoutPlan?.timezone == plan.timezone
@@ -358,7 +392,7 @@ struct TechManualPlanView: View {
             )
             guard native.isCurrentPlanSync(syncID) else { return }
             if outcome.verified && outcome.authorized {
-                native.recordWatchAcknowledgement(plan: plan)
+                native.recordWatchAcknowledgement(plan: plan, scheduleHour: usedScheduleHour)
             }
             // Receipts are registered only for the days the bridge read back off
             // the scheduler: the row means "the watch received this day", and a
@@ -380,15 +414,15 @@ struct TechManualPlanView: View {
     ///
     /// 整块（含结尾那行"已保存 v… · 本次会话尚未核验系统日程"）只在计划已加载时存在。
     /// 计划为 `nil` 时不会丢掉预警：`watchNeedsUpdate` 的前提是本次会话核验过系统日程
-    /// （`lastWatchRevision` 只在 `recordWatchAcknowledgement(plan:)` 里赋值，并与会话重置
+    /// （`lastWatchRevision` 只在 Watch 排期确认或撤回成功后赋值，并与会话重置
     /// 一起清空），没有计划时它必然是 `false`；而外层面板此时已经明说"还没有本周课表。
     /// 生成后即可一键同步到手表。"，再补一句"尚未核验"只是把"没有计划"说第二遍。
     @ViewBuilder
     private var scheduleDisclosure: some View {
-        if let plan = native.workoutPlan {
+        if let plan = native.currentWorkoutPlan {
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("从今天起连续七日，与生成窗口一致。执行窗口按当前预算、比赛与负荷规则复核；调整后的处方以下列内容为准，保存的原计划不会被静默改写。")
+                        Text("从今天起连续七日（含今天），与生成窗口一致。执行窗口按当前预算、比赛与负荷规则复核；调整后的处方以下列内容为准，保存的原计划不会被静默改写。")
                         .font(.caption).foregroundStyle(TechColor.muted)
                     ForEach(plan.days) { day in
                         TechExecutablePlanDay(day: day)
@@ -402,7 +436,7 @@ struct TechManualPlanView: View {
                 .padding(.top, 6)
             } label: {
                 HStack(spacing: 8) {
-                    Text("未来七日排期").font(.caption.weight(.semibold)).foregroundStyle(TechColor.ink)
+                    Text("未来 7 日手表排期（含今天）").font(.caption.weight(.semibold)).foregroundStyle(TechColor.ink)
                     Spacer(minLength: 8)
                     Text("v\(plan.planRevision)").font(.caption2).foregroundStyle(TechColor.muted)
                 }

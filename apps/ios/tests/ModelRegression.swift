@@ -517,8 +517,22 @@ final class RequestLog: @unchecked Sendable {
         let latestPlanRefreshed = await model.refreshPlanState()
         check(latestPlanRefreshed && model.goals?.revision == 13 && model.workoutPlan?.planRevision == 13, "matching acknowledged revision refreshes every dependent plan surface")
         let verifiedWatchPlan = model.workoutPlan!
-        model.recordWatchAcknowledgement(plan: verifiedWatchPlan)
+        model.recordWatchAcknowledgement(
+            plan: verifiedWatchPlan,
+            scheduleHour: 8
+        )
         check(!model.watchNeedsUpdate, "a verified matching watch plan is current")
+        let watchHourKey = "rai.training-reminder.\(model.feedbackScope).hour"
+        let previousWatchHour = UserDefaults.standard.object(forKey: watchHourKey)
+        UserDefaults.standard.set(8, forKey: watchHourKey)
+        model.recordWatchAcknowledgement(plan: verifiedWatchPlan, scheduleHour: 7)
+        check(model.watchNeedsUpdate, "a changed reminder hour dirties the Watch plan against the hour actually synced")
+        if let previousWatchHour {
+            UserDefaults.standard.set(previousWatchHour, forKey: watchHourKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: watchHourKey)
+        }
+        model.recordWatchAcknowledgement(plan: verifiedWatchPlan, scheduleHour: 8)
         var watchObject = try JSONSerialization.jsonObject(with: JSONEncoder().encode(verifiedWatchPlan)) as! [String: Any]
         watchObject["generatedAt"] = "2099-01-01T00:00:00Z"
         let reloadedWatchPlan = try JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: JSONSerialization.data(withJSONObject: watchObject))
@@ -528,6 +542,8 @@ final class RequestLog: @unchecked Sendable {
         watchObject["days"] = watchDays
         let gatedWatchPlan = try JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: JSONSerialization.data(withJSONObject: watchObject))
         check(model.watchPlanNeedsUpdate(gatedWatchPlan), "same goals revision with a newly vetoed prescription needs device update")
+        model.recordWatchClearAcknowledgement()
+        check(!model.watchNeedsUpdate && !model.watchNeedsClear, "a verified Watch withdrawal clears the stale acknowledgement")
 
         StubProtocol.handler = { _ in
             (409, "{\"code\":\"mobile_goals_revision_conflict\",\"message\":\"训练目标已在其他页面更新\"}", 0)

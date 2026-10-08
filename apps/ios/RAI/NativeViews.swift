@@ -62,8 +62,31 @@ struct NativeRootView: View {
         }
         .task(id: reminderSnapshot) {
             guard scenePhase == .active else { return }
-            await TrainingReminders.shared.reconcile(scope: native.feedbackScope, plan: native.workoutPlan,
+            await TrainingReminders.shared.reconcile(scope: native.feedbackScope, plan: native.currentWorkoutPlan,
                 completed: native.completedWeekDates, available: native.canConfirmToday)
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            // HealthKit updates are not guaranteed at a civil-date boundary.
+            // Refresh once on foreground and once just after the next plan day
+            // begins so the coach, today's recommendation and the executable
+            // Watch week cannot remain on yesterday's snapshot.
+            await native.refreshAll()
+            while !Task.isCancelled {
+                let timezone = TimeZone(identifier: native.today?.timezone ?? "Asia/Shanghai") ?? .current
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = timezone
+                let start = calendar.startOfDay(for: Date())
+                let next = calendar.date(byAdding: .day, value: 1, to: start) ?? Date().addingTimeInterval(86_400)
+                let delay = max(1, next.timeIntervalSinceNow + 1)
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await native.refreshAll()
+            }
         }
         .onChange(of: healthSync.dataUpdatedGeneration) { _, _ in
             Task {
@@ -75,8 +98,11 @@ struct NativeRootView: View {
     }
 
     private var reminderSnapshot: String {
-        let plan = native.workoutPlan.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
-        return native.feedbackScope + plan + native.completedWeekDates.sorted().joined() + String(native.canConfirmToday) + String(describing: scenePhase)
+        let plan = native.currentWorkoutPlan.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        return native.feedbackScope + "\(native.currentPlanRevision)" +
+            plan + native.completedWeekDates.sorted().joined() +
+            String(TrainingReminders.storedHour(scope: native.feedbackScope)) +
+            String(native.canConfirmToday) + String(describing: scenePhase)
     }
 
     private var navigationContent: some View {

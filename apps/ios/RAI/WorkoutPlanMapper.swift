@@ -52,7 +52,7 @@ enum PaceBounds: Equatable {
 
 enum WorkoutPlanMapper {
     /// Early enough that a morning runner can still see it before leaving.
-    static let defaultScheduleHour = 7
+    nonisolated static let defaultScheduleHour = 7
     /// When the nominal time has already passed, schedule this far ahead instead
     /// of silently dropping today's session.
     static let lateFloorSeconds: TimeInterval = 60
@@ -74,7 +74,15 @@ enum WorkoutPlanMapper {
     /// days whose prescription failed to build, and days left with no usable
     /// step after filtering.
     static func plannedWorkouts(from plan: MobileWorkoutPlanResponse) -> [PlannedWorkout] {
-        plan.days.compactMap { plannedWorkout(from: $0) }
+        plannedWorkouts(from: plan, hour: defaultScheduleHour)
+    }
+
+    static func plannedWorkouts(
+        from plan: MobileWorkoutPlanResponse,
+        hour: Int,
+        minute: Int = 0
+    ) -> [PlannedWorkout] {
+        plan.days.compactMap { plannedWorkout(from: $0, hour: hour, minute: minute) }
     }
 
     /// What one week has to offer the watch, and why the rest of it does not.
@@ -130,9 +138,11 @@ enum WorkoutPlanMapper {
     static func weekOffer(
         in plan: MobileWorkoutPlanResponse,
         now: Date,
-        completedLocalDates: Set<String>
+        completedLocalDates: Set<String>,
+        hour: Int = defaultScheduleHour,
+        minute: Int = 0
     ) -> WeekOffer {
-        let executable = plannedWorkouts(from: plan)
+        let executable = plannedWorkouts(from: plan, hour: hour, minute: minute)
         let timeZone = resolvedTimeZone(for: plan)
         let offered = owed(
             executable,
@@ -160,9 +170,17 @@ enum WorkoutPlanMapper {
     static func schedulableCount(
         in plan: MobileWorkoutPlanResponse,
         now: Date,
-        completedLocalDates: Set<String>
+        completedLocalDates: Set<String>,
+        hour: Int = defaultScheduleHour,
+        minute: Int = 0
     ) -> Int {
-        weekOffer(in: plan, now: now, completedLocalDates: completedLocalDates).offered.count
+        weekOffer(
+            in: plan,
+            now: now,
+            completedLocalDates: completedLocalDates,
+            hour: hour,
+            minute: minute
+        ).offered.count
     }
 
     /// The plan's own timezone, or the device's when the payload carried no usable

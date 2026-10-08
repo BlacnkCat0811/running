@@ -129,6 +129,44 @@ enum WorkoutKitBridge {
         }
     }
 
+    /// Result of withdrawing every workout previously scheduled by RAI.
+    ///
+    /// Clearing is deliberately separate from syncing a current plan: when a
+    /// goals mutation has invalidated the cached plan, there may be no safe
+    /// prescription to pass to `sync`, but an old local Watch schedule still
+    /// needs an explicit withdrawal path.
+    struct ClearOutcome: Equatable {
+        var authorized: Bool
+        var verified: Bool
+        var deviceUnsupported = false
+        var authorizationState: String?
+
+        static let unsupportedDevice = ClearOutcome(
+            authorized: false,
+            verified: false,
+            deviceUnsupported: true
+        )
+
+        var report: String {
+            if deviceUnsupported {
+                return "此设备无法撤回「体能训练」排期：需要 iPhone 已配对 Apple Watch（模拟器不支持排期）。"
+            }
+            if !authorized {
+                switch authorizationState {
+                case "denied":
+                    return "排期授权已被拒绝，未撤回手表旧课表。"
+                case "restricted":
+                    return "系统限制了 RAI 的排期授权，未撤回手表旧课表。"
+                default:
+                    return "需要先允许 RAI 使用体能训练计划，才能撤回手表旧课表。"
+                }
+            }
+            return verified
+                ? "手表旧课表已撤回。"
+                : "未能确认手表旧课表已撤回，请在手表「体能训练」中确认。"
+        }
+    }
+
     static var isSupported: Bool { WorkoutScheduler.isSupported }
 
     static var maxScheduledWorkoutCount: Int { WorkoutScheduler.maxAllowedScheduledWorkoutCount }
@@ -155,6 +193,40 @@ enum WorkoutKitBridge {
         await WorkoutScheduler.shared.requestAuthorization() == .authorized
     }
 
+    /// Removes every workout RAI previously scheduled, without requiring a
+    /// current server plan.
+    @MainActor static func clearRequestingAuthorization(
+        isCurrent: @escaping @MainActor () -> Bool = { true }
+    ) async -> ClearOutcome {
+        let outcome = await clear(isCurrent: isCurrent)
+        guard !outcome.authorized, !outcome.deviceUnsupported else { return outcome }
+        guard isCurrent(), await requestAuthorization(), isCurrent() else { return outcome }
+        return await clear(isCurrent: isCurrent)
+    }
+
+    @MainActor static func clear(
+        isCurrent: @escaping @MainActor () -> Bool = { true }
+    ) async -> ClearOutcome {
+        guard isSupported else { return .unsupportedDevice }
+        let state = await WorkoutScheduler.shared.authorizationState
+        guard state == .authorized else {
+            return ClearOutcome(
+                authorized: false,
+                verified: false,
+                authorizationState: describe(state)
+            )
+        }
+        guard isCurrent() else {
+            return ClearOutcome(authorized: true, verified: false)
+        }
+        await WorkoutScheduler.shared.removeAllWorkouts()
+        let remaining = await WorkoutScheduler.shared.scheduledWorkouts.count
+        return ClearOutcome(
+            authorized: true,
+            verified: remaining == 0 && isCurrent()
+        )
+    }
+
     /// Runs the whole sync flow: try, ask once if the scheduler has not decided,
     /// then retry.
     ///
@@ -164,12 +236,26 @@ enum WorkoutKitBridge {
     @MainActor static func syncRequestingAuthorization(
         plan: MobileWorkoutPlanResponse,
         completedLocalDates: Set<String>,
+        scheduleHour: Int = WorkoutPlanMapper.defaultScheduleHour,
+        scheduleMinute: Int = 0,
         isCurrent: @escaping @MainActor () -> Bool = { true }
     ) async -> SyncOutcome {
-        let outcome = await sync(plan: plan, completedLocalDates: completedLocalDates, isCurrent: isCurrent)
+        let outcome = await sync(
+            plan: plan,
+            completedLocalDates: completedLocalDates,
+            scheduleHour: scheduleHour,
+            scheduleMinute: scheduleMinute,
+            isCurrent: isCurrent
+        )
         guard !outcome.authorized, !outcome.deviceUnsupported else { return outcome }
         guard isCurrent(), await requestAuthorization(), isCurrent() else { return outcome }
-        return await sync(plan: plan, completedLocalDates: completedLocalDates, isCurrent: isCurrent)
+        return await sync(
+            plan: plan,
+            completedLocalDates: completedLocalDates,
+            scheduleHour: scheduleHour,
+            scheduleMinute: scheduleMinute,
+            isCurrent: isCurrent
+        )
     }
 
     /// Replaces everything RAI previously scheduled.
@@ -181,6 +267,8 @@ enum WorkoutKitBridge {
         plan: MobileWorkoutPlanResponse,
         now: Date = Date(),
         completedLocalDates: Set<String>,
+        scheduleHour: Int = WorkoutPlanMapper.defaultScheduleHour,
+        scheduleMinute: Int = 0,
         isCurrent: @escaping @MainActor () -> Bool = { true }
     ) async -> SyncOutcome {
         // Order matters: an unsupported device reports neither a prompt nor an
@@ -212,7 +300,9 @@ enum WorkoutKitBridge {
         let offer = WorkoutPlanMapper.weekOffer(
             in: plan,
             now: now,
-            completedLocalDates: completedLocalDates
+            completedLocalDates: completedLocalDates,
+            hour: scheduleHour,
+            minute: scheduleMinute
         )
         let offered = offer.offered
         let skipped = offer.skipped
@@ -252,12 +342,16 @@ enum WorkoutKitBridge {
             ))
         }
         guard !pending.isEmpty else {
+            let dropped = skipped + (offered.count - pending.count)
+            await WorkoutScheduler.shared.removeAllWorkouts()
+            let remaining = await WorkoutScheduler.shared.scheduledWorkouts.count
+            let current = isCurrent()
             return SyncOutcome(
                 scheduled: 0,
                 attempted: 0,
-                skipped: skipped,
+                skipped: dropped,
                 authorized: true,
-                verified: false,
+                verified: remaining == 0 && current,
                 timeZoneFallback: timeZone == nil,
                 offered: offered.count,
                 expired: expired,

@@ -20,6 +20,9 @@ struct TechRunCoachView: View {
         guard let value = native.workoutPlan, value.planRevision == native.currentPlanRevision else { return nil }
         return value
     }
+    private var scheduleHour: Int {
+        TrainingReminders.storedHour(scope: native.feedbackScope)
+    }
 
     var body: some View {
         ScrollView {
@@ -164,7 +167,11 @@ struct TechRunCoachView: View {
                 HStack {
                     Text(nativeDate(date))
                     Spacer()
-                    if let days = native.runCoach?.daysToRace { Text("距比赛 \(days) 天") }
+                    if let today = native.today?.today.localDate, date < today {
+                        Text("比赛日已过")
+                    } else if let days = native.runCoach?.daysToRace {
+                        Text("距比赛 \(days) 天")
+                    }
                 }.font(.subheadline.monospacedDigit())
             }
             if let seconds = plan.targetTimeSeconds { Text("目标 \(nativeDuration(seconds))").font(.headline.monospacedDigit()) }
@@ -233,6 +240,7 @@ struct TechRunCoachView: View {
             if let unplanned = native.runCoach?.unplannedDays, let detail = unplanned.first?.detail {
                 Text("其中 \(unplanned.count) 天本周没有排入训练。\(detail)")
             }
+            Text("进行中的教练计划不支持单日改期；需要调整时请修改可跑步日偏好。")
         }
         .font(.caption).foregroundStyle(TechColor.muted)
         .fixedSize(horizontal: false, vertical: true)
@@ -298,9 +306,9 @@ struct TechRunCoachView: View {
             return day.localDate > today
         }
         return VStack(alignment: .leading, spacing: 10) {
-            TechSectionHeader(title: "未来七日")
+            TechSectionHeader(title: "接下来安排")
             if upcoming.isEmpty {
-                Text(schedule == nil ? "训练安排尚未刷新。" : "未来七日没有已生成的安排。")
+                Text(schedule == nil ? (native.workoutPlanError ?? "训练安排尚未刷新。") : "接下来没有已生成的安排。")
                     .font(.footnote).foregroundStyle(TechColor.muted)
             }
             ForEach(upcoming) { day in
@@ -339,9 +347,14 @@ struct TechRunCoachView: View {
 
     private var watch: some View {
         VStack(alignment: .leading, spacing: 10) {
+            let canClearStaleWatch = schedule == nil && native.watchNeedsClear
             TechPrimaryButton(title: plan?.status == "active" ? "同步跑步课表到手表" : "撤回手表课表", systemName: "applewatch", isBusy: native.isSyncingPlan,
-                              isDisabled: schedule == nil || controlsUnavailable) {
+                              isDisabled: native.isPlanBusy ||
+                                  (canClearStaleWatch ? false : schedule == nil || controlsUnavailable)) {
                 Task { await syncWatch() }
+            }
+            if schedule == nil, let error = native.workoutPlanError {
+                Text(error).font(.caption).foregroundStyle(TechColor.yellow)
             }
             if native.watchNeedsUpdate { Text("手表课表需要更新").font(.caption).foregroundStyle(TechColor.coral) }
             if let watchMessage { Text(watchMessage).font(.footnote).foregroundStyle(TechColor.muted) }
@@ -349,17 +362,33 @@ struct TechRunCoachView: View {
     }
 
     @MainActor private func syncWatch() async {
-        guard let id = native.beginPlanSync() else { return }
+        let clearOnly = native.watchNeedsClear
+        guard let id = native.beginPlanSync(allowOffline: clearOnly) else { return }
         defer { native.endPlanSync(id) }
-        guard await native.refreshWorkoutPlan(), native.isCurrentPlanSync(id), let schedule = native.workoutPlan else {
+        if clearOnly {
+            let outcome = await WorkoutKitBridge.clearRequestingAuthorization(
+                isCurrent: { native.isCurrentPlanSync(id) }
+            )
+            guard native.isCurrentPlanSync(id) else { return }
+            watchMessage = outcome.report
+            if outcome.authorized && outcome.verified {
+                native.recordWatchClearAcknowledgement()
+            }
+            return
+        }
+        guard await native.refreshWorkoutPlan(), native.isCurrentPlanSync(id), let schedule = native.currentWorkoutPlan else {
             watchMessage = "课表未刷新，原手表排期未修改。"; return
         }
-        let outcome = await WorkoutKitBridge.syncRequestingAuthorization(plan: schedule, completedLocalDates: native.completedWeekDates,
+        let usedScheduleHour = scheduleHour
+        let outcome = await WorkoutKitBridge.syncRequestingAuthorization(
+            plan: schedule,
+            completedLocalDates: native.completedWeekDates,
+            scheduleHour: usedScheduleHour,
             isCurrent: { native.isCurrentPlanSync(id) })
         guard native.isCurrentPlanSync(id) else { return }
         watchMessage = outcome.report
         if outcome.authorized && outcome.verified {
-            native.recordWatchAcknowledgement(plan: schedule)
+            native.recordWatchAcknowledgement(plan: schedule, scheduleHour: usedScheduleHour)
             if let error = await native.recordPlanSync(schedule, localDates: outcome.scheduledLocalDates) {
                 watchMessage = outcome.report + "\n" + error
             }
@@ -387,6 +416,20 @@ struct TechRunCoachSetup: View {
     @State private var loaded = false
 
     private var km: Double { distance == -1 ? Double(customDistance) ?? 0 : distance }
+    private var planTimeZone: TimeZone {
+        TimeZone(identifier: native.today?.timezone ?? "Asia/Shanghai") ?? .current
+    }
+    private var planCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = planTimeZone
+        return calendar
+    }
+    private var raceDateRange: ClosedRange<Date> {
+        let start = planCalendar.startOfDay(for: Date())
+        let minimum = planCalendar.date(byAdding: .day, value: 42, to: start) ?? start
+        let maximum = planCalendar.date(byAdding: .day, value: 364, to: start) ?? start
+        return minimum...maximum
+    }
     /// The pace the entered duration works out to, `m:ss /km`. Nil until both inputs are usable.
     private var targetPaceLabel: String? {
         guard km > 0, targetMinutes > 0 else { return nil }
@@ -421,8 +464,10 @@ struct TechRunCoachSetup: View {
                             Text("自定义距离不在成绩预测链内：不会有成绩预测，也不会有备赛信心值。")
                                 .font(.caption).foregroundStyle(TechColor.muted)
                         }
-                        DatePicker("比赛日期", selection: $raceDate, in: plan == nil ? Date().addingTimeInterval(42 * 86_400)...Date().addingTimeInterval(364 * 86_400) : Date.distantPast...Date.distantFuture, displayedComponents: .date)
+                        DatePicker("比赛日期", selection: $raceDate, in: plan == nil ? raceDateRange : Date.distantPast...Date.distantFuture, displayedComponents: .date)
                             .disabled(plan != nil)
+                        Text("日期按 \(planTimeZone.identifier) 计算。新建比赛计划需要至少 6 周准备时间。")
+                            .font(.caption).foregroundStyle(TechColor.muted)
                         if goal == "time" {
                             HStack { Text("目标时间（分钟）"); TextField("分钟", value: $targetMinutes, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
                             // Derived, not judged: the stored goal is a duration, so the pace it
@@ -444,6 +489,8 @@ struct TechRunCoachSetup: View {
                     }
                 }
                 Section("长距离偏好日") {
+                    Text("可多选；教练每周通常从中选择一个长距离日。")
+                        .font(.caption).foregroundStyle(TechColor.muted)
                     ForEach(runningDays.sorted(), id: \.self) { day in
                         Toggle(weekdayName(day), isOn: Binding(get: { longRunDays.contains(day) }, set: { value in
                             if value { longRunDays.insert(day) } else { longRunDays.remove(day) }
@@ -464,7 +511,7 @@ struct TechRunCoachSetup: View {
             }
             .navigationTitle(plan == nil ? "创建教练计划" : "训练偏好")
             .navigationBarTitleDisplayMode(.inline)
-            .environment(\.timeZone, TimeZone(identifier: "Asia/Shanghai")!)
+            .environment(\.timeZone, planTimeZone)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(native.isUpdatingRunCoach) }
                 ToolbarItem(placement: .confirmationAction) {
@@ -492,14 +539,14 @@ struct TechRunCoachSetup: View {
             }
             if let value = plan.raceDate {
                 let parser = DateFormatter(); parser.locale = Locale(identifier: "en_US_POSIX")
-                parser.timeZone = TimeZone(identifier: "Asia/Shanghai"); parser.dateFormat = "yyyy-MM-dd"
+                parser.timeZone = planTimeZone; parser.dateFormat = "yyyy-MM-dd"
                 if let date = parser.date(from: value) { raceDate = date }
             }
             if let seconds = plan.targetTimeSeconds { targetMinutes = seconds / 60 }
         }
     }
     @MainActor private func save() async {
-        let date = DateFormatter(); date.calendar = Calendar(identifier: .gregorian); date.timeZone = TimeZone(identifier: "Asia/Shanghai"); date.dateFormat = "yyyy-MM-dd"
+        let date = DateFormatter(); date.calendar = planCalendar; date.timeZone = planTimeZone; date.dateFormat = "yyyy-MM-dd"
         let config = MobileRunCoachConfig(goal: goal, raceDate: goal == "fitness" ? nil : date.string(from: raceDate),
             raceDistanceKm: goal == "fitness" ? nil : km, targetTimeSeconds: goal == "time" ? targetMinutes * 60 : nil,
             runningDays: runningDays.sorted(), longRunDays: longRunDays.sorted(), targetType: targetType, strengthTraining: strengthTraining, durationWeeks: durationWeeks)

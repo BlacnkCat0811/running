@@ -7,6 +7,18 @@ struct TechPlanPreviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var failure: String?
 
+    private var candidateDistance: Double {
+        preview.days.reduce(0) { $0 + ($1.distanceKm ?? 0) }
+    }
+
+    private var previousDistance: Double {
+        (preview.previousDays ?? []).reduce(0) { $0 + ($1.distanceKm ?? 0) }
+    }
+
+    private func isQuality(_ kind: String) -> Bool {
+        kind == "tempo" || kind == "interval"
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -16,6 +28,12 @@ struct TechPlanPreviewSheet: View {
                         .font(.footnote)
                     Text("预览有效至 \(nativeDate(preview.expiresAt))")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("变更摘要") {
+                    Text("总跑量：\(nativeKilometers(previousDistance)) → \(nativeKilometers(candidateDistance))")
+                    Text("质量课：\((preview.previousDays ?? []).filter { isQuality($0.kind) }.count) → \(preview.days.filter { isQuality($0.kind) }.count) 次")
+                    Text(preview.replacedDates.isEmpty ? "本次没有替换既有处方。" : "本次将替换 \(preview.replacedDates.count) 天既有处方。")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("候选课表") {
                     ForEach(preview.days, id: \.localDate) { day in
@@ -160,6 +178,7 @@ struct TechPlanExecutionPanel: View {
 
 struct TechExecutablePlanDay: View {
     let day: MobileWorkoutPlanDay
+    @Environment(NativeAppModel.self) private var native
     /// The server's code for a selected running day this week did not pay for. Nil when the day
     /// needs no explanation (it is not a running day, or it carries a session).
     var unplanned: String?
@@ -167,6 +186,7 @@ struct TechExecutablePlanDay: View {
         DisclosureGroup {
             VStack(alignment: .leading, spacing: 6) {
                 Text(day.executable ? "可同步" : "不下发：休息、未生成、已记录训练或待重新确认")
+                Text("手表排期：\(String(format: "%02d:00", TrainingReminders.storedHour(scope: native.feedbackScope)))")
                 if let unplanned { Text(unplanned) }
                 if !day.reason.isEmpty { Text(day.reason) }
                 Text("来源：\(NativeAppModel.planSourceName(day.source))")

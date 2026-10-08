@@ -50,6 +50,7 @@ final class NativeAppModel {
     private var predictionLastCacheAt: Date?
     private(set) var isLockingSession = false
     private(set) var isLoadingWorkoutPlan = false
+    private(set) var workoutPlanError: String?
     private(set) var isRegeneratingPlan = false
     private(set) var isSavingGoals = false
     private(set) var isRefreshingPlan = false
@@ -68,13 +69,32 @@ final class NativeAppModel {
     private(set) var lastWatchSyncAt: Date?
     private var lastWatchDays: [MobileWorkoutPlanDay]?
     private var lastWatchTimezone: String?
+    private var lastWatchHour: Int?
     var watchNeedsUpdate: Bool { watchPlanNeedsUpdate(workoutPlan) }
+
+    /// The only executable plan the UI is allowed to present as current.
+    ///
+    /// A goals mutation can succeed while the follow-up executable-plan read
+    /// fails. Keeping the old response in memory is useful for diagnostics and
+    /// offline recovery, but it must not be presented as the new prescription.
+    var currentWorkoutPlan: MobileWorkoutPlanResponse? {
+        guard let workoutPlan, workoutPlan.planRevision == currentPlanRevision else { return nil }
+        return workoutPlan
+    }
+
+    /// True when the last Watch acknowledgement refers to a plan that is no
+    /// longer current. This is intentionally independent of connectivity: a
+    /// stale local Watch schedule can be withdrawn without fetching a new plan.
+    var watchNeedsClear: Bool {
+        lastWatchRevision != nil && currentWorkoutPlan == nil && watchPlanNeedsUpdate(workoutPlan)
+    }
 
     func watchPlanNeedsUpdate(_ plan: MobileWorkoutPlanResponse?) -> Bool {
         guard let revision = lastWatchRevision else { return false }
         guard let plan else { return true }
         return currentPlanRevision != revision || plan.planRevision != revision ||
-            plan.days != lastWatchDays || plan.timezone != lastWatchTimezone
+            plan.days != lastWatchDays || plan.timezone != lastWatchTimezone ||
+            Self.storedScheduleHour(scope: cacheScope) != lastWatchHour
     }
     var workoutSessionType: String? {
         didSet {
@@ -267,12 +287,19 @@ final class NativeAppModel {
         }
         // Non-fatal: the executable week is a convenience, and a failure here
         // must not mark the whole refresh as offline.
-        if let fetchedPlan = try? await api.workoutPlan(baseURL: baseURL, token: token) {
+        do {
+            let fetchedPlan = try await api.workoutPlan(baseURL: baseURL, token: token)
             guard isCurrent() else { return }
             if fetchedPlan.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) {
                 workoutPlan = fetchedPlan
+                workoutPlanError = nil
                 recordCache(fetchedPlan, key: workoutPlanCacheKey)
+            } else {
+                workoutPlanError = "服务返回的课表版本已过期，请刷新后重试。"
             }
+        } catch {
+            guard isCurrent() else { return }
+            workoutPlanError = friendlyMessage(error)
         }
         let workoutsSucceeded = await refreshWorkouts()
         guard isCurrent() else { return }
@@ -603,7 +630,7 @@ final class NativeAppModel {
 
     /// Only changes the race target; omitted weekly-plan fields remain untouched.
     func saveRaceTarget(_ target: MobileRaceTarget?, expectedRevision: Int) async -> Bool {
-        guard let current = goals else { return false }
+        guard goals != nil else { return false }
         return await persistGoals(UpdateMobileGoalsRequest(
             expectedRevision: expectedRevision,
             easyDurationFloorFraction: nil,
@@ -713,6 +740,7 @@ final class NativeAppModel {
                 token == session.apiToken && mutation == planMutationEpoch && !Task.isCancelled
         }
         isLoadingWorkoutPlan = true
+        workoutPlanError = nil
         defer {
             if requestID == workoutPlanRequestID, configuration == configurationID {
                 isLoadingWorkoutPlan = false
@@ -721,9 +749,13 @@ final class NativeAppModel {
         do {
             let fetched = try await api.workoutPlan(baseURL: baseURL, token: token)
             guard isCurrent() else { return false }
-            guard fetched.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) else { return false }
+            guard fetched.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) else {
+                workoutPlanError = "服务返回的课表版本已过期，请刷新后重试。"
+                return false
+            }
             workoutPlan = fetched
             recordCache(fetched, key: workoutPlanCacheKey)
+            workoutPlanError = nil
             return true
         } catch {
             guard isCurrent() else { return false }
@@ -731,6 +763,9 @@ final class NativeAppModel {
                let cachedPlan = cache.read(MobileWorkoutPlanResponse.self, scope: cacheScope, key: workoutPlanCacheKey)?.value,
                cachedPlan.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) {
                 workoutPlan = cachedPlan
+                workoutPlanError = "课表读取失败，当前显示的是离线缓存。"
+            } else {
+                workoutPlanError = friendlyMessage(error)
             }
             return false
         }
@@ -838,11 +873,20 @@ final class NativeAppModel {
         }
     }
 
-    func recordWatchAcknowledgement(plan: MobileWorkoutPlanResponse) {
+    func recordWatchAcknowledgement(plan: MobileWorkoutPlanResponse, scheduleHour: Int) {
         lastWatchRevision = plan.planRevision
         lastWatchDays = plan.days
         lastWatchTimezone = plan.timezone
+        lastWatchHour = min(23, max(0, scheduleHour))
         lastWatchSyncAt = Date()
+    }
+
+    func recordWatchClearAcknowledgement() {
+        lastWatchRevision = nil
+        lastWatchSyncAt = Date()
+        lastWatchDays = nil
+        lastWatchTimezone = nil
+        lastWatchHour = nil
     }
 
     func refreshRacePrediction() async {
@@ -1047,6 +1091,7 @@ final class NativeAppModel {
         trends = nil
         goals = nil
         workoutPlan = nil
+        workoutPlanError = nil
         runCoach = nil
         runCoachError = nil
         predictions = nil
@@ -1086,6 +1131,7 @@ final class NativeAppModel {
         lastWatchSyncAt = nil
         lastWatchDays = nil
         lastWatchTimezone = nil
+        lastWatchHour = nil
     }
 
     private func invalidatePlanReads() {
@@ -1137,15 +1183,18 @@ final class NativeAppModel {
         }
         if let newPlan, newPlan.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) {
             workoutPlan = newPlan
+            workoutPlanError = nil
             recordCache(newPlan, key: workoutPlanCacheKey)
+        } else if newPlan == nil {
+            workoutPlanError = "当前课表未能刷新，旧课表不会作为最新处方使用。"
         }
         if newGoals != nil { isOffline = false; session.isReachable = true }
         return coherent && newToday != nil && newPlan?.planRevision == goals?.revision
     }
 
     /// Device scheduling shares the mutation gate with saves and generation.
-    func beginPlanSync() -> UUID? {
-        guard !isPlanBusy, !isOffline else { return nil }
+    func beginPlanSync(allowOffline: Bool = false) -> UUID? {
+        guard !isPlanBusy, (allowOffline || !isOffline) else { return nil }
         isSyncingPlan = true
         planSyncRequestID = UUID()
         return planSyncRequestID
@@ -1254,6 +1303,11 @@ final class NativeAppModel {
 
     private static func loadHandshake(for baseURL: URL) -> RaiHandshake? {
         CacheStore.loadHandshake(baseURL: baseURL)
+    }
+
+    private static func storedScheduleHour(scope: String) -> Int {
+        let stored = UserDefaults.standard.integer(forKey: "rai.training-reminder." + scope + ".hour")
+        return (7...21).contains(stored) ? stored : 8
     }
 
 }
