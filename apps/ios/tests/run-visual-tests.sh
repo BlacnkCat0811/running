@@ -79,8 +79,9 @@ python3 apps/ios/tests/visual-state-proxy.py > "$out/state-proxy.log" 2>&1 & pro
 xcrun simctl boot "$device" 2>/dev/null || true
 xcrun simctl bootstatus "$device" -b > "$out/simulator.log"
 xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
-# Build the CocoaPods workspace: the AMap SDK arrives as a pod, so the bare
-# project fails to link (ld: framework 'Pods_RAI' not found).
+# Build the CocoaPods workspace: it remains the recommended entry point because
+# it includes the generated Pods project. The Podfile also keeps the bare
+# project buildable by removing the empty aggregate Pods_RAI link.
 #
 # `RAI_XCODEBUILD_SWIFT_FLAGS` 默认留空：普通本机 / CI 构建应保留 swift-driver 自己的
 # 沙箱。只有当这条脚本跑在**会拒绝嵌套沙箱**的外层环境里（WorkBuddy 等加固沙箱）才需要

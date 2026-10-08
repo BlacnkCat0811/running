@@ -56,8 +56,9 @@ jobs:
       - name: Install CocoaPods dependencies
         run: cd apps/ios && pod install
       - name: Build iOS simulator target
-        # The AMap SDK is a CocoaPod, so the workspace is the build entry point:
-        # building RAI.xcodeproj alone fails with "framework 'Pods_RAI' not found".
+        # The workspace remains the recommended build entry point because it
+        # includes the generated Pods project. The Podfile also removes the
+        # empty aggregate link so the bare RAI.xcodeproj remains buildable.
         run: |
           xcodebuild -workspace apps/ios/RAI.xcworkspace -scheme RAI \
             -sdk iphonesimulator \

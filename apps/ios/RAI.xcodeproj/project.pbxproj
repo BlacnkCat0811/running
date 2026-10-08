@@ -6,15 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		81FA0500D91B7C4A3267A004 /* Pods_RAI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D01E22B5CBD9C9E6A1F333DB /* Pods_RAI.framework */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
 		38EE73A2A3DE2B5FDA2A5D65 /* Pods-RAI.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RAI.release.xcconfig"; path = "Target Support Files/Pods-RAI/Pods-RAI.release.xcconfig"; sourceTree = "<group>"; };
 		7974F30908F62FD2224DD37D /* Pods-RAI.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-RAI.debug.xcconfig"; path = "Target Support Files/Pods-RAI/Pods-RAI.debug.xcconfig"; sourceTree = "<group>"; };
 		8A1B2C3D4E5F60718293A003 /* RAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		D01E22B5CBD9C9E6A1F333DB /* Pods_RAI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_RAI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -43,7 +38,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				81FA0500D91B7C4A3267A004 /* Pods_RAI.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,7 +47,6 @@
 		3C5E145F0D9F71464E6C788B /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				D01E22B5CBD9C9E6A1F333DB /* Pods_RAI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -163,13 +156,9 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-RAI/Pods-RAI-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
-			inputPaths = (
-			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-RAI/Pods-RAI-resources-${CONFIGURATION}-output-files.xcfilelist",
-			);
-			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -360,8 +349,14 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于生成跑步分析。数据会发送到你在应用中配置的 RAI 服务；请在授权前确认服务位置、保留和删除规则。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MARKETING_VERSION = 0.1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -407,8 +402,14 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.healthcare-fitness";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "RAI 需要读取你的跑步、心率、路线与恢复相关数据，用于生成跑步分析。数据会发送到你在应用中配置的 RAI 服务；请在授权前确认服务位置、保留和删除规则。";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MARKETING_VERSION = 0.1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",

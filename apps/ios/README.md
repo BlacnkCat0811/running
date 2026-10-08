@@ -18,7 +18,9 @@ pod install
 open RAI.xcworkspace
 ```
 
-选择真实设备/开发团队，按签名与HealthKit capability要求运行。使用workspace而非单独xcodeproj，避免缺Pods框架。
+选择真实设备/开发团队，按签名与HealthKit capability要求运行。推荐使用workspace；
+执行过 `pod install` 后，单独打开 `RAI.xcodeproj` 也可以构建，不会再因为
+`Pods_RAI.framework` 这个空的CocoaPods聚合框架缺失而链接失败。
 手机上的127.0.0.1不是API主机；填写手机可达的HTTPS/可信局域网服务与Token。
 
 `Podfile` 的 `post_install` 会修一处高德 SDK 自带的头文件缺口：`MAMapKit.framework` 的
@@ -26,8 +28,9 @@ module map 声明 `umbrella header "MAMapKit.h"`，而随包的 `MAMapKit.h` 漏
 构建期 clang 因此报 `umbrella header for module 'MAMapKit' does not include header …`。
 补丁按“umbrella 必须覆盖 `Headers/` 下每一个头”补齐，幂等，随 SDK 升级自动跟随。
 `Pods/` 不入库，所以这类修改只能写在 `Podfile` 里，手改 `Pods/` 会被下次 `pod install` 冲掉。
-`pod install` 还会顺带改一次 `RAI.xcodeproj/project.pbxproj`（删 4 行空的 `inputPaths/outputPaths`），
-与依赖无关，`git restore` 掉即可。
+`post_integrate` 还会从 `RAI.xcodeproj` 移除空的 `Pods_RAI.framework` 聚合链接；
+这是为了让单独打开 xcodeproj 时也能链接成功，不要在 `pod install` 后用 `git restore`
+恢复这部分生成改动。
 
 ## 文档职责
 
