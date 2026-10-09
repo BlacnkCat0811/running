@@ -106,7 +106,7 @@ describe("useRemote", () => {
     expect(result.current.dataPath).toBe("/workouts?offset=30");
   });
 
-  // fetch 没有默认超时：本地 API 挂起时首屏会永远停在"正在检查本地数据库"。
+  // 显式配置的 timeoutMs 生效：本地 API 挂起时首屏要离开"正在检查本地数据库"。
   it("fails with a timeout message when the request never settles", async () => {
     vi.useFakeTimers();
     try {
@@ -138,6 +138,43 @@ describe("useRemote", () => {
       await act(async () => { vi.advanceTimersByTime(60000); });
 
       expect(result.current.data).toEqual({ ready: true });
+      expect(result.current.error).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // 审计 3.9：常规读取必须**默认有界**。此前 `timeoutMs` 默认 null ⇒ 无界等待，
+  // 页面可以永久停在 loading。期望值写死文案与秒数（不引用模块常量）：被锁的是
+  // "默认值存在且为 15 秒"这个对外契约，引用常量会让测试跟着实现一起漂移。
+  it("applies a bounded wait to a default (unconfigured) read", async () => {
+    vi.useFakeTimers();
+    try {
+      apiMock.mockImplementation(() => new Promise(() => {}));
+      const { result } = renderHook(() => useRemote<{ ready: boolean }>("/v1/health"));
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => { vi.advanceTimersByTime(15_000); });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.data).toBeNull();
+      expect(result.current.error).toBe("请求超时（超过 15 秒）");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the wait unbounded only when the caller explicitly opts out with null", async () => {
+    vi.useFakeTimers();
+    try {
+      apiMock.mockImplementation(() => new Promise(() => {}));
+      const { result } = renderHook(() =>
+        useRemote<{ ready: boolean }>("/v1/health", true, false, true, null),
+      );
+
+      await act(async () => { vi.advanceTimersByTime(120_000); });
+
+      expect(result.current.loading).toBe(true);
       expect(result.current.error).toBeNull();
     } finally {
       vi.useRealTimers();
