@@ -16,6 +16,7 @@ import { RaiDatabase } from "./database.js";
 import { evaluateRemovalGuard, ImportRemovalGuardError } from "./import-guard.js";
 import { prepareNative, type NativeOptions } from "./native-worker.js";
 import { NativeRecordWriter } from "./native-record-writer.js";
+import { validSampleUUID, type HealthKitRecordDeletion } from "./sync-manifest.js";
 import {
   addMetadata,
   classifySource,
@@ -137,6 +138,8 @@ export interface AppleHealthParseOptions {
   atomic?: boolean;
   /** Explicit HealthKit deletion events. Absence never implies deletion. */
   deletedWorkoutIds?: readonly string[];
+  deletedRecords?: readonly HealthKitRecordDeletion[];
+  healthKitRecordIdentity?: boolean;
 }
 
 function attributesOf(tag: SaxesTagPlain): Record<string, string> {
@@ -281,7 +284,9 @@ export async function parseAppleHealthXml(
   const atomic = options.atomic !== false;
   if (atomic) store.beginAtomicImport();
   const entityGeneration = options.incremental?.generation ?? "full-import";
-  if (native && options.atomic === false && options.native?.stagingDatabase) {
+  const hasRecordAliases = store.hasHealthKitRecordAliases();
+  if (native && !options.healthKitRecordIdentity && !hasRecordAliases
+    && options.atomic === false && options.native?.stagingDatabase) {
     nativeRecords = new NativeRecordWriter(native.directory, entityGeneration, options.incremental?.batchId, Boolean(options.incremental));
   }
   if (options.incremental) {
@@ -290,6 +295,7 @@ export async function parseAppleHealthXml(
       options.incremental.preserveAbsent ? { preserveAbsent: true } : undefined
     );
   }
+  store.markHealthKitRecordDeletions(options.deletedRecords ?? [], options.incremental?.batchId);
   let currentRecord: RecordDraft | null = null;
   let currentWorkout: WorkoutDraft | null = null;
   let currentWorkoutEvent: CanonicalWorkoutEvent | null = null;
@@ -308,6 +314,7 @@ export async function parseAppleHealthXml(
   const recordInventory = new Map<string, InventoryItem>();
   const workoutInventory = new Map<string, InventoryItem>();
   const sourceHash = createHash("sha256");
+  const carriedDeletedSources: HealthKitRecordDeletion[] = [];
 
   const parser = new SaxesParser({ xmlns: false });
 
@@ -421,22 +428,58 @@ export async function parseAppleHealthXml(
     } else if (name === "Record" && currentRecord) {
       const record = buildRecord(currentRecord);
       if (record) {
+        let uuid = options.healthKitRecordIdentity
+          ? lastMetadataValue(record.metadata, "RAIHealthKitSampleUUID") : null;
+        if (options.healthKitRecordIdentity && (!uuid || !validSampleUUID(uuid))) {
+          throw new Error("HealthKit v2 record is missing a valid sample UUID");
+        }
+        const sourceIdentifiers: string[] = [];
+        const candidateId = record.id;
+        const legacyId = uuid || hasRecordAliases
+          ? stableId("record", [record.type, record.sourceName, record.startAt, record.endAt,
+            currentRecord.attributes.value ?? null, record.unit])
+          : candidateId;
+        let aliasDeleted = false;
+        if (!uuid && hasRecordAliases) {
+          const identity = store.resolveHealthKitRecordXmlIdentity(candidateId, legacyId);
+          record.id = identity.id;
+          aliasDeleted = identity.tombstoned;
+          if (identity.source?.type === record.type) {
+            uuid = identity.source.uuid;
+            record.metadata.RAIHealthKitSampleUUID = [uuid];
+          }
+        }
+        if (uuid) {
+          record.id = store.resolveHealthKitRecordId(record.type, uuid, candidateId, legacyId);
+          sourceIdentifiers.push(store.healthKitRecordSourceIdentifier(record.type, uuid));
+        }
         const category = classifySource(record.sourceName, record.device, record.metadata);
         const contentHash = stableId("record_content", [currentRecord.attributes, currentRecord.metadata]);
-        if (nativeRecords) {
+        // Native v1 apply understands canonical-ID tombstones, not source UUIDs.
+        // Keep v2 and UUID-less alias resolution on the shared TS write path
+        // even when Rust supplies XML parsing.
+        if (nativeRecords && !uuid) {
           nativeRecords.capture(record, category, currentRecord.attributes, contentHash);
         } else {
-        const observation = store.observeImportEntity(
-          "record", record.id, entityGeneration, record.startAt,
-          options.incremental?.batchId, contentHash
-        );
-        const shouldWrite = !observation.tombstoned
-          && (!options.incremental || observation.inserted || observation.updated);
-        if (shouldWrite) {
-          store.insertRecord(record, category, currentRecord.attributes);
-          if (!options.incremental || observation.inserted) insertedRecordCount += 1;
-        }
-        if (observation.tombstoned) tombstonedCount += 1;
+          const observation = aliasDeleted ? { inserted: false, updated: false, tombstoned: true } : store.observeImportEntity(
+            "record", record.id, entityGeneration, record.startAt,
+            options.incremental?.batchId, contentHash, sourceIdentifiers
+          );
+          const shouldWrite = !observation.tombstoned
+            && (!options.incremental || observation.inserted || observation.updated);
+          if (uuid && !observation.tombstoned) {
+            store.saveHealthKitRecordFact(record, uuid, category, currentRecord.attributes, contentHash);
+          }
+          if (shouldWrite) {
+            store.insertRecord(record, category, currentRecord.attributes);
+            if (!options.incremental || observation.inserted) insertedRecordCount += 1;
+          }
+          if (observation.tombstoned) {
+            tombstonedCount += 1;
+            if (uuid && store.isHealthKitRecordSourceDeleted(record.type, uuid)) {
+              carriedDeletedSources.push({ type: record.type, uuid });
+            }
+          }
         }
         updateInventory(
           recordInventory,
@@ -606,15 +649,18 @@ export async function parseAppleHealthXml(
         options.incremental.preserveAbsent ? { preserveAbsent: true } : undefined
       )
       : { removedRecords: 0, removedWorkouts: 0, dirtyWorkoutTimes: [] as string[] };
-    if (atomic) store.commitAtomicImport();
-    else store.flush();
+    const recordDeletions = [...(options.deletedRecords ?? []), ...carriedDeletedSources];
+    const removedHealthKitRecords = recordDeletions.length
+      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration) : 0;
     if (options.deletedWorkoutIds?.length) {
       explicitDeletionTimes = store.removeWorkoutsBySyncIdentifiers(options.deletedWorkoutIds, options.incremental?.batchId);
     }
+    if (atomic) store.commitAtomicImport();
+    else store.flush();
     return {
       recordCount, workoutCount, activitySummaryCount, issueCount,
       insertedRecordCount, insertedWorkoutCount,
-      removedRecordCount: finalized.removedRecords,
+      removedRecordCount: finalized.removedRecords + removedHealthKitRecords,
       removedWorkoutCount: finalized.removedWorkouts,
       tombstonedCount,
       dirtyWorkoutTimes: [...insertedWorkoutTimes, ...explicitDeletionTimes, ...finalized.dirtyWorkoutTimes]

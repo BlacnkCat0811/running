@@ -1,5 +1,5 @@
 import { DATABASE_TIMEZONE } from "@rai/contracts";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 import { basename, dirname, relative, resolve } from "node:path";
@@ -19,6 +19,7 @@ import { importGpxRoutes } from "./gpx-parser.js";
 import { ImportRemovalGuardError } from "./import-guard.js";
 import { importEngine, nativeFallback, NATIVE_VERSION, type NativeOptions } from "./native-worker.js";
 import { stableId } from "./utils.js";
+import { readHealthSyncManifest } from "./sync-manifest.js";
 import {
   acquireDatabasePublicationLock,
   probeDatabaseStructure,
@@ -302,7 +303,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
       native: { ...args.native, stagingDatabase },
       fileSize: xmlSize,
       atomic: false,
-      deletedWorkoutIds: readSyncManifest(args.input),
+      ...syncManifestParseOptions(args.input),
       ...(incremental ? { incremental: {
         generation: stableId("import_generation", [batchId, new Date().toISOString()]),
         batchId,
@@ -446,26 +447,13 @@ async function importCommand(args: ParsedArguments): Promise<void> {
 }
 
 export function readSyncManifest(inputRoot: string): string[] {
-  let current = resolve(inputRoot);
-  let path: string | null = null;
-  for (let depth = 0; depth <= 3; depth += 1) {
-    const candidate = resolve(current, "sync-manifest.json");
-    if (existsSync(candidate)) {
-      path = candidate;
-      break;
-    }
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  if (!path) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as { version?: unknown; deletedSourceIds?: unknown };
-    if (parsed.version !== 1 || !Array.isArray(parsed.deletedSourceIds)) return [];
-    return parsed.deletedSourceIds.filter((value): value is string => typeof value === "string" && value.length > 0);
-  } catch {
-    throw new Error("sync-manifest.json 无法读取，拒绝将缺失内容当作删除");
-  }
+  return readHealthSyncManifest(inputRoot).deletedWorkoutIds;
+}
+
+function syncManifestParseOptions(inputRoot: string) {
+  const manifest = readHealthSyncManifest(inputRoot);
+  return { deletedWorkoutIds: manifest.deletedWorkoutIds, deletedRecords: manifest.deletedRecords,
+    healthKitRecordIdentity: manifest.recordIdentity };
 }
 
 async function auditCommand(args: ParsedArguments): Promise<void> {
