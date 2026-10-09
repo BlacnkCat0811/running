@@ -104,6 +104,13 @@ import { generateWeeklyPlan, mergePlanWindow, overwriteWarning, shouldGenerateWe
 import { WeeklyPlanPreviews, PlanPreviewError } from "./weekly-plan-preview.js";
 import { validateManualPlan, ManualPlanPolicyError } from "./manual-plan-policy.js";
 import { registerRunCoachRoutes } from "./run-coach.js";
+import { PlanPublicationService, PlanOperationError } from "./plan-publication.js";
+import { digest, prescriptionDigest } from "./plan-digest.js";
+import type { MobilePlanReceiptInput } from "@rai/api-contracts";
+import type { MobilePlanOperationScope } from "@rai/api-contracts";
+import { planOperationScopeSchema } from "./schemas.js";
+import { isValidLocalDate } from "./local-date.js";
+import { normalizeSessionStructure } from "./session-structure.js";
 import { weeklyCapacity } from "./weekly-capacity.js";
 import {
   ImportWorker,
@@ -277,6 +284,8 @@ const publicReadRoutes = new Set([
  * Read routes that keep requiring the token. See the comment above.
  */
 const tokenRequiredReadRoutes = new Set([
+  "/v1/mobile/training-plan-state",
+  "/v1/mobile/plan-operations/:id",
   "/v1/mobile/run-coach",
   "/v1/exports/workout-summary",
   // 分享卡带轨迹几何（哪怕已在服务端裁剪），隐私区本身更是家/公司坐标：两者都不进匿名读。
@@ -423,6 +432,8 @@ await new DatabaseMaintenance(databasePath, runtimeRoot).recoverInterruptedResto
 datasetEpoch = readDatasetEpoch(databasePath, configuredDatasetEpoch);
 const readStores: ReadStoreManager = new ReadStoreManager(databasePath, () => mobileRefreshOutcome(importWorker.latest()));
 const mobileGoalsStore = new MobileGoalsStore(runtimeRoot, controlDatabasePath);
+const planPublication = new PlanPublicationService(mobileGoalsStore, () => JSON.stringify([serverId, athleteId, datasetEpoch]),
+  () => ({ serverId, athleteId, datasetEpoch }));
 mobileGoalsStore.retireLegacyModelPlan(mobileLocalDate());
 let observeWorkerDatabaseError: (error: unknown) => void = () => {};
 const recomputeWorker = new RecomputeWorker(databasePath, (error) => observeWorkerDatabaseError(error), taskAdmission.owner("recompute"));
@@ -875,7 +886,10 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   datasetEpoch,
   syncProtocolVersion,
   apiVersion: "v1",
-  planReceiptMetadata: true
+  planReceiptMetadata: true,
+  planSnapshotContractVersion: 1,
+  ...(mobileGoalsStore.supportsPublicationOperations ? { planPublicationContractVersion: 1 } : {}),
+  planReceiptContractVersion: 2
 }));
 app.get("/v1/openapi.json", async () => openapiDocument);
 app.get("/v1/performance", async () => ({
@@ -1125,23 +1139,49 @@ app.put<{ Body: PrivacyZonesBody }>(
   }
 );
 
-app.post<{ Body: { localDate: string; kind: MobileSessionKind; revision?: number; structure?: MobileSessionStructure | null; workoutID?: string; scheduledAt?: string; idempotencyKey?: string; exportNotes?: string[] } }>(
+app.post<{ Body: MobilePlanReceiptInput }>(
   "/v1/mobile/workout-plan/synced",
   { schema: { body: mobilePlanSyncedBodySchema } },
   async (request) => {
     const pushedAt = new Date().toISOString();
+    const body = request.body;
+    if (!isValidLocalDate(body.localDate)) throw new PlanOperationError("plan_receipt_date_invalid", "回执日期无效。", 422);
+    let matchesCurrent: boolean | undefined;
+    if (body.contractVersion === 2) {
+      const required = [body.scope, body.operationId, body.coherenceToken, body.workoutID, body.scheduledAt,
+        body.verifiedAt, body.timezone, body.prescriptionDigest, body.lifecycleEvent, body.structure];
+      if (required.some(value => value == null) || body.revision == null) throw new PlanOperationError("plan_receipt_contract_mismatch", "新回执缺少必要核验字段。", 422);
+      if (digest(body.scope) !== digest({ serverId, athleteId, datasetEpoch })) throw new PlanOperationError("plan_receipt_scope_mismatch", "回执属于其他服务或数据集。");
+      const date = new Intl.DateTimeFormat("en-CA", { timeZone: body.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(body.scheduledAt!));
+      if (date !== body.localDate || Date.parse(body.verifiedAt!) > Date.now() + 300_000 ||
+          prescriptionDigest(body.kind, body.structure!) !== body.prescriptionDigest ||
+          digest(normalizeSessionStructure(body.structure)) !== digest(body.structure)) {
+        throw new PlanOperationError("plan_receipt_evidence_mismatch", "日期、核验时刻或实际导出摘要不匹配。", 422);
+      }
+      const current = withReadStore(store => store.trainingPlanState(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch })));
+      const expected = current.workoutPlan.days.find(day => day.localDate === body.localDate && day.executable);
+      matchesCurrent = body.lifecycleEvent === "verified" && body.revision === current.metadata.goalsRevision &&
+        body.coherenceToken === current.metadata.coherenceToken && expected?.kind === body.kind &&
+        prescriptionDigest(expected.kind, expected.structure) === body.prescriptionDigest;
+    } else if (body.operationId || body.scope || body.coherenceToken || body.verifiedAt || body.timezone || body.prescriptionDigest || body.lifecycleEvent) {
+      throw new PlanOperationError("plan_receipt_contract_mismatch", "新增字段需要回执契约版本 2。", 422);
+    }
     const recordedAt = mobileGoalsStore.recordPlanPush({
+      ...body,
+      ...(body.contractVersion === 2 ? { idempotencyKey: body.idempotencyKey ?? `${body.workoutID}:${body.lifecycleEvent}` } : {}),
       localDate: request.body.localDate,
       kind: request.body.kind,
       revision: request.body.revision ?? 0,
       structure: request.body.structure ?? null,
       pushedAt,
+      ...(matchesCurrent === undefined ? {} : { matchesCurrent }),
       ...(request.body.workoutID !== undefined ? { workoutID: request.body.workoutID } : {}),
       ...(request.body.scheduledAt !== undefined ? { scheduledAt: request.body.scheduledAt } : {}),
       ...(request.body.idempotencyKey !== undefined ? { idempotencyKey: request.body.idempotencyKey } : {}),
       ...(request.body.exportNotes !== undefined ? { exportNotes: request.body.exportNotes } : {})
     });
-    return { recordedAt };
+    return { recordedAt, ...(matchesCurrent === undefined ? {} : { matchesCurrent: matchesCurrent && mobileGoalsStore.planPushIsActive(body.workoutID!, body.scheduledAt!) }),
+      informationLevel: body.contractVersion === 2 ? "verifiedClient" : "legacy" };
   }
 );
 
@@ -1220,7 +1260,16 @@ app.get("/v1/mobile/today", async () => {
   return withReadStore((store) => store.mobileToday(goals, mobileGoalsStore.planHistory(200)));
 });
 
-registerRunCoachRoutes({ app, store: mobileGoalsStore,
+app.get("/v1/mobile/training-plan-state", async (_request, reply) => {
+  reply.header("Cache-Control", "no-store");
+  return withReadStore(store => store.trainingPlanState(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch })));
+});
+
+app.get<{ Params: { id: string } }>("/v1/mobile/plan-operations/:id", { schema: { params: identifierParamsSchema } },
+  async request => planPublication.result(request.params.id));
+
+registerRunCoachRoutes({ app, store: mobileGoalsStore, scope: () => JSON.stringify([serverId, athleteId, datasetEpoch]),
+  identity: () => ({ serverId, athleteId, datasetEpoch }),
   inputs: goals => withReadStore(store => store.mobileWeeklyPlanInputs(goals, mobileGoalsStore.planHistory(200))) });
 
 // Executable week handed to the WorkoutKit bridge. Read-only: it never mutates
@@ -1340,12 +1389,13 @@ app.post<{ Body: { expectedRevision: number } }>("/v1/mobile/workout-plan/previe
     } finally { release(); }
   });
 
-app.post<{ Body: { candidateId: string; expectedRevision: number } }>("/v1/mobile/workout-plan/confirm", {
+app.post<{ Body: { candidateId: string; expectedRevision: number; operationId?: string; operationScope?: MobilePlanOperationScope } }>("/v1/mobile/workout-plan/confirm", {
   schema: { body: { type: "object", additionalProperties: false, required: ["candidateId", "expectedRevision"], properties: {
-    candidateId: { type: "string", minLength: 1, maxLength: 80 }, expectedRevision: { type: "integer", minimum: 0 }
+    candidateId: { type: "string", minLength: 1, maxLength: 80 }, expectedRevision: { type: "integer", minimum: 0 }, operationId: { type: "string", format: "uuid" }, operationScope: planOperationScopeSchema
   } } }
 }, async (request, reply) => {
   try {
+    return planPublication.publish("preview-confirm", request.body, () => {
     const { goals, inputs, fingerprint } = weeklyPlanSnapshot();
     return weeklyPlanPreviews.confirm(request.body.candidateId, request.body.expectedRevision, fingerprint, preview => {
       const written = mobileGoalsStore.write({ expectedRevision: preview.revision,
@@ -1353,6 +1403,7 @@ app.post<{ Body: { candidateId: string; expectedRevision: number } }>("/v1/mobil
         weekPlanAudit: preview.audit }, { prescription: inputs.prescription, confirmCoachPlan: true,
         ...(goals.runCoach?.status === "ended" ? { runCoach: null } : {}) });
       return { generatedAt: preview.generatedAt, revision: written.revision, audit: preview.audit, days: preview.days, warnings: preview.warnings };
+    }, request.body.operationId === undefined);
     });
   } catch (error) {
     if (error instanceof PlanPreviewError || error instanceof MobileGoalsRevisionConflictError) return reply.code(409).send({ code: error.code, message: error.message });
@@ -1414,6 +1465,7 @@ app.put<{ Body: UpdateMobileGoalsInput }>(
   { schema: { body: mobileGoalsBodySchema } },
   async (request, reply) => {
     try {
+      return planPublication.publish("goals", request.body, () => {
       // Re-measured with the live zone prescription so a distance typed into
       // the goals editor cannot outlive the structure it contradicts. The key
       // is omitted — not set to null — when the read database is unavailable:
@@ -1423,7 +1475,7 @@ app.put<{ Body: UpdateMobileGoalsInput }>(
       const managedGoals = mobileGoalsStore.read(options);
       if (managedGoals.runCoach && managedGoals.runCoach.status !== "ended" &&
           (request.body.weekPlan !== undefined || request.body.raceTarget !== undefined)) {
-        return reply.code(409).send({ code: "run_coach_managed", message: "当前目标和课表由自适应教练管理，请在教练计划中修改。" });
+        throw new PlanOperationError("run_coach_managed", "当前目标和课表由自适应教练管理，请在教练计划中修改。");
       }
       if (managedGoals.runCoach?.status === "ended" && request.body.weekPlan !== undefined) options.runCoach = null;
       if (request.body.weekPlan !== undefined && databaseIsReady()) {
@@ -1445,6 +1497,7 @@ app.put<{ Body: UpdateMobileGoalsInput }>(
         });
       }
       return mobileGoalsStore.write(request.body, options);
+      });
     } catch (error) {
       if (error instanceof WeeklyPlanConfirmationRequiredError) return reply.code(409).send({ code: error.code, message: error.message });
       if (error instanceof ManualPlanPolicyError) return reply.code(422).send({ code: error.code, message: error.message });
@@ -1460,6 +1513,7 @@ app.post<{ Body: LockMobileSessionInput }>(
   "/v1/mobile/lock",
   { schema: { body: mobileLockBodySchema } },
   async (request, reply) => {
+    return planPublication.publish("lock", request.body, () => {
     const goals = mobileGoalsStore.read();
     const ignoreLock = request.body.action === "relock";
     const snapshot = withReadStore((store) => store.mobileToday(goals));
@@ -1468,7 +1522,7 @@ app.post<{ Body: LockMobileSessionInput }>(
       recommendationRevision: snapshot.recommendationRevision,
       expectedRevision: request.body.expectedRevision
     });
-    if (rejection) return reply.code(409).send(rejection);
+    if (rejection) throw new PlanOperationError(rejection.code, rejection.message);
     if (request.body.action === "lock" && snapshot.lock.present) {
       return mobileGoalsStore.read(planPrescription());
     }
@@ -1481,6 +1535,7 @@ app.post<{ Body: LockMobileSessionInput }>(
       },
       planPrescription()
     );
+    });
   }
 );
 

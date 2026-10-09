@@ -5,6 +5,7 @@ struct TechRunCoachSetup: View {
     @Environment(NativeAppModel.self) private var native
     @Environment(\.dismiss) private var dismiss
     let plan: MobileRunCoachPlan?
+    let editorSessionID: String
     @State private var goal = "fitness"
     @State private var distance = 10.0
     @State private var customDistance = "50"
@@ -43,7 +44,7 @@ struct TechRunCoachSetup: View {
     private var valid: Bool {
         runningDays.count >= 3 && !longRunDays.isEmpty && longRunDays.isSubset(of: runningDays) &&
             (goal == "fitness" || (km >= 1.6 && km <= 1609.344 && (goal != "time" || (150...900).contains(targetMinutes * 60 / km)))) &&
-            baseRevision == native.goals?.revision && baseRevision == native.currentPlanRevision
+            baseRevision == native.goals?.revision && baseRevision == native.currentPlanRevision && editorSessionID == native.feedbackSessionID
     }
 
     var body: some View {
@@ -109,7 +110,7 @@ struct TechRunCoachSetup: View {
                 if longRunDays.isEmpty { Text("请选择长距离偏好日。").foregroundStyle(TechColor.coral) }
                 if goal != "fitness" && !(1.6...1609.344).contains(km) { Text("比赛距离须为 1.6–1609.344 km。").foregroundStyle(TechColor.coral) }
                 if goal == "time" && km > 0 && !(150...900).contains(targetMinutes * 60 / km) { Text("目标时间对应配速须为 2:30–15:00 /km。").foregroundStyle(TechColor.coral) }
-                if baseRevision != native.goals?.revision { Text("计划已在别处更新，请关闭后重新编辑；当前草稿未保存。").foregroundStyle(TechColor.coral) }
+                if baseRevision != native.goals?.revision || editorSessionID != native.feedbackSessionID { Text("计划或连接已更新，请关闭后重新编辑；当前草稿未保存。").foregroundStyle(TechColor.coral) }
                 if let error = native.runCoachError { Text(error).foregroundStyle(TechColor.coral) }
             }
             .techFormSurface()
@@ -150,11 +151,12 @@ struct TechRunCoachSetup: View {
         }
     }
     @MainActor private func save() async {
+        guard valid else { return }
         let date = DateFormatter(); date.calendar = planCalendar; date.timeZone = planTimeZone; date.dateFormat = "yyyy-MM-dd"
         let config = MobileRunCoachConfig(goal: goal, raceDate: goal == "fitness" ? nil : date.string(from: raceDate),
             raceDistanceKm: goal == "fitness" ? nil : km, targetTimeSeconds: goal == "time" ? targetMinutes * 60 : nil,
             runningDays: runningDays.sorted(), longRunDays: longRunDays.sorted(), targetType: targetType, strengthTraining: strengthTraining, durationWeeks: durationWeeks)
-        if await native.changeRunCoach(action: plan == nil ? "start" : "update", config: config, expectedRevision: baseRevision) { dismiss() }
+        if await native.changeRunCoach(action: plan == nil ? "start" : "update", config: config, expectedRevision: baseRevision, editorSessionID: editorSessionID) { dismiss() }
     }
 }
 #endif

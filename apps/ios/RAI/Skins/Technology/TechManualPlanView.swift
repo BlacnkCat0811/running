@@ -15,8 +15,9 @@ struct TechManualPlanView: View {
     @State private var saveMessage: String?
     @State private var saveSucceeded = false
     @State private var draftBase: MobileGoalsResponse?
+    @State private var draftSessionID: String?
     @State private var discardDraft = false
-    private var draftIsStale: Bool { draftBase?.revision != native.planPresentation.goals?.revision }
+    private var draftIsStale: Bool { draftBase?.revision != native.planPresentation.goals?.revision || draftSessionID != native.feedbackSessionID }
     private var areDistancesValid: Bool {
         NativeGoalWeekDraft.distancesAreValid(distanceDrafts, for: weekPlan)
     }
@@ -119,6 +120,7 @@ struct TechManualPlanView: View {
             // field / overview visible instead of preserving a deep old offset.
             proxy.scrollTo("plan.top", anchor: .top)
         }
+        .onChange(of: native.feedbackSessionID) { _, _ in raceEditor = nil; selectedDay = nil; showingLock = false }
         }
     }
 
@@ -369,7 +371,7 @@ struct TechManualPlanView: View {
                             }
                         }
                         Button(goals.raceTarget == nil ? "设置比赛目标" : "编辑比赛目标") {
-                            raceEditor = RaceGoalEditorContext(goals: goals)
+                            raceEditor = RaceGoalEditorContext(goals: goals, editorSessionID: native.feedbackSessionID)
                         }
                         .disabled(native.isOffline || editing || native.isPlanBusy)
                         .accessibilityIdentifier("race-goal-edit")
@@ -388,6 +390,7 @@ struct TechManualPlanView: View {
     private func loadDraft() {
         guard let goals = native.planPresentation.goals else { return }
         draftBase = goals
+        draftSessionID = native.feedbackSessionID
         easyFloor = goals.easyDurationFloorFraction
         qualityCap = goals.qualitySessionCap
         weekPlan = goals.weekPlan
@@ -407,7 +410,8 @@ struct TechManualPlanView: View {
             expectedRevision: draftBase.revision,
             easyDurationFloorFraction: easyFloor,
             qualitySessionCap: qualityCap,
-            weekPlan: plan
+            weekPlan: plan,
+            editorSessionID: draftSessionID
         )
         saveMessage = success ? (native.planMessage ?? "已保存，服务端已确认。") : (native.errorMessage ?? "保存未完成，你的草稿已保留。")
         saveSucceeded = success

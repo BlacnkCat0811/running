@@ -47,6 +47,7 @@ import type {
   MobileTodayResponse,
   MobileTrendsResponse,
   MobileWorkoutPlanResponse,
+  TrainingPlanStateResponse,
   ModelRunComparisonResponse,
   ModelRunSummary,
   RecomputeJobDto,
@@ -80,7 +81,10 @@ import { environmentCoverage, environmentViewForWorkout, splitGradeContexts } fr
 import { buildRunningDynamics } from "./workout-dynamics.js";
 import { trimRouteForShare } from "./share-card.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
-import type { PlanHistoryRevision } from "./mobile-goals.js";
+import type { MobileGoalsStore, PlanHistoryRevision } from "./mobile-goals.js";
+import { digest, executionContent } from "./plan-digest.js";
+import { runCoachResponse } from "./run-coach.js";
+import { PlanOperationError } from "./plan-publication.js";
 import { assembleMobileCoach, assembleMobileWorkoutPlan, zonePrescription } from "./mobile-read.js";
 import { constrainUpcomingPlan } from "./weekly-plan-service.js";
 import { weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
@@ -333,6 +337,72 @@ export class RaiReadStore {
       this.database.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  trainingPlanState(store: MobileGoalsStore, identity: () => { serverId: string; athleteId: string; datasetEpoch: string }): TrainingPlanStateResponse {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const fileIdentity = statSync(this.path);
+      const scope = identity();
+      const goals = store.read();
+      const controlDigest = digest({ goals, history: store.planHistory(200) });
+      const version = this.database.prepare("PRAGMA data_version").get()!.data_version;
+      let result: TrainingPlanStateResponse;
+      this.database.exec("BEGIN DEFERRED");
+      try {
+        const localDate = mobileLocalDate();
+        const publications = {
+          import: this.database.prepare("SELECT key, value FROM import_manifest ORDER BY key").all(),
+          model: this.database.prepare("SELECT * FROM active_model_run ORDER BY singleton").all(),
+          zones: this.database.prepare("SELECT * FROM training_zone_profile_settings ORDER BY revision DESC LIMIT 1").all(),
+          datasetEpoch: scope.datasetEpoch,
+          recoveryNights: this.database.prepare(`SELECT id, wake_date, timezone_identifier, kind, source_rank, has_stages,
+            sleep_onset_at, wake_at, asleep_union_minutes, awake_minutes, stage_minutes_json
+            FROM canonical_nights WHERE wake_date >= ? AND timezone_identifier = ? ORDER BY wake_date, id`).all(shiftMobileDate(localDate, -70), DATABASE_TIMEZONE),
+          recoveryHrv: this.database.prepare(`SELECT id, local_date, night_id, hrv_sdnn_ms, sample_count, confidence, window_end_at
+            FROM canonical_hrv_days WHERE local_date >= ? AND timezone_identifier = ? ORDER BY local_date, id`).all(shiftMobileDate(localDate, -70), DATABASE_TIMEZONE),
+          restingHeartRate: this.database.prepare(`SELECT id, start_at, source_category, value_numeric FROM health_records
+            WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate' AND start_at >= ? ORDER BY start_at, id`).all(`${shiftMobileDate(localDate, -70)}T00:00:00Z`)
+        };
+        const measuredGoals = store.read({ prescription: this.mobilePlanPrescription() });
+        const computed = this.mobileTodayWithExecutablePlan(measuredGoals, store.planHistory(200));
+        const { today, effective } = computed;
+        const inputs = this.mobileWeeklyPlanInputs(measuredGoals, undefined, computed);
+        const ruleVersion = "rai-effective-plan-v1";
+        const publicationDigest = digest(publications);
+        const windowStart = today.today.localDate;
+        const windowEnd = shiftMobileDate(windowStart, effective.windowDays - 1);
+        const coherenceToken = digest({
+          scope, goalsRevision: goals.revision, ruleVersion, publicationDigest,
+          timezone: DATABASE_TIMEZONE, localDate: windowStart, windowStart, windowEnd,
+          calibration: today.calibration.status, injury: today.injuryFlags.map(flag => flag.code),
+          training: today.today, week: today.week, capacity: inputs.weeklyVolumeBaselineKm,
+          previous: inputs.previousWeekDistanceKm, recent: inputs.recentWeeklyKm,
+          completed: today.weekPlan.filter(day => day.completedWorkoutId !== null).map(day => day.localDate),
+          prescription: inputs.prescription, content: executionContent(effective.days)
+        });
+        result = {
+          metadata: { contractVersion: 1, ...scope, goalsRevision: goals.revision, coherenceToken,
+            timezone: DATABASE_TIMEZONE, localDate: windowStart, windowStart, windowEnd, ruleVersion, publicationDigest },
+          availability: effective.days.some(day => day.executable && day.kind !== "rest") ? "ready" : "empty",
+          goals: measuredGoals, today, workoutPlan: { ...effective, windowStart, windowEnd },
+          coachSummary: runCoachResponse(measuredGoals, inputs)
+        };
+        this.database.exec("COMMIT");
+      } catch (error) {
+        this.database.exec("ROLLBACK");
+        throw error;
+      }
+      const unchanged = version === this.database.prepare("PRAGMA data_version").get()!.data_version &&
+        controlDigest === digest({ goals: store.read(), history: store.planHistory(200) }) &&
+        digest(scope) === digest(identity()) && result.metadata.localDate === mobileLocalDate();
+      const currentFile = statSync(this.path);
+      if (fileIdentity.ino !== currentFile.ino || fileIdentity.mtimeMs !== currentFile.mtimeMs) {
+        throw new PlanOperationError("plan_snapshot_changed", "训练数据库在读取期间发布，请重读完整快照。", 503);
+      }
+      if (unchanged) return result;
+      this.cache.clear();
+    }
+    throw new PlanOperationError("plan_snapshot_changed", "训练事实在读取期间变化，请重试完整快照。", 503);
   }
 
   mobileToday(
@@ -711,7 +781,8 @@ export class RaiReadStore {
       MobileGoalsResponse,
       "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanAudit" | "revision" | "weekPlanPreservedDate" | "runCoach"
     >,
-    planHistory?: PlanHistoryRevision[]
+    planHistory?: PlanHistoryRevision[],
+    computed?: ReturnType<RaiReadStore["mobileTodayWithExecutablePlan"]>
   ): {
     today: MobileTodayResponse;
     prescription: ReturnType<typeof zonePrescription>;
@@ -725,7 +796,7 @@ export class RaiReadStore {
      */
     preparation: ReturnType<typeof assembleMobileCoach>["preparation"];
   } {
-    const { today, preparation } = this.mobileTodayWithExecutablePlan(goals, planHistory);
+    const { today, preparation } = computed ?? this.mobileTodayWithExecutablePlan(goals, planHistory);
     const previousWeekDistanceKm = this.previousWeekDistanceKm(today.today.localDate);
     // Mirror the window `mobileTodayWithExecutablePlan` uses for its own recent
     // volume, so both paths read the same four complete weeks.

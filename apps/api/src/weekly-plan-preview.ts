@@ -13,14 +13,15 @@ export class WeeklyPlanPreviews {
     this.entries.set(preview.candidateId, { value: preview, fingerprint });
     return preview;
   }
-  confirm(id: string, revision: number, fingerprint: string, write: (preview: MobileWeeklyPlanPreviewResponse) => MobileWeeklyPlanGenerationResponse): MobileWeeklyPlanGenerationResponse {
+  confirm(id: string, revision: number, fingerprint: string, write: (preview: MobileWeeklyPlanPreviewResponse) => MobileWeeklyPlanGenerationResponse, remember = true): MobileWeeklyPlanGenerationResponse {
     const item = this.entries.get(id);
     if (!item || Date.parse(item.value.expiresAt) <= this.now()) throw new PlanPreviewError("预览已过期，请重新生成；原课表未变更。");
     if (item.value.revision !== revision) throw new PlanPreviewError("预览版本不匹配，请重新生成。");
     if (item.committed) return item.committed; // A lost acknowledgement must not create a second revision.
     if (item.fingerprint !== fingerprint) throw new PlanPreviewError("目标、训练数据或日期已变化，请重新预览。原课表未变更。");
-    item.committed = write(item.value);
-    return item.committed;
+    const result = write(item.value);
+    if (remember) item.committed = result;
+    return result;
   }
 }
 export class PlanPreviewError extends Error { readonly code = "plan_preview_stale"; readonly statusCode = 409; }

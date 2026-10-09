@@ -135,6 +135,20 @@ struct RaiAPIClient {
         try await get(path: "/v1/mobile/workout-plan", baseURL: baseURL, token: token)
     }
 
+    func trainingPlanState(baseURL: URL, token: String) async throws -> TrainingPlanStateResponse {
+        try await get(path: "/v1/mobile/training-plan-state", baseURL: baseURL, token: token)
+    }
+
+    func planOperation<Result: Decodable>(id: String, baseURL: URL, token: String) async throws -> PlanPublicationResult<Result> {
+        try await get(path: "/v1/mobile/plan-operations/\(escapedPath(id))", baseURL: baseURL, token: token)
+    }
+    func replayPlanPublication<Result: Decodable>(_ operation: PendingPlanPublication, baseURL: URL, token: String) async throws -> Result {
+        let paths = ["coach": "/v1/mobile/run-coach", "confirm": "/v1/mobile/workout-plan/confirm", "goals": "/v1/mobile/goals", "lock": "/v1/mobile/lock"]
+        guard let path = paths[operation.route] else { throw RaiAPIClientError.decoding("未知的发布操作") }
+        return try await request(path: path, query: [], method: operation.route == "goals" ? "PUT" : "POST",
+            body: operation.payload, baseURL: baseURL, token: token)
+    }
+
     func previewWeeklyPlan(_ input: PreviewWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanPreview {
         try await send(path: "/v1/mobile/workout-plan/preview", method: "POST", body: input,
                        baseURL: baseURL, token: token)
@@ -303,6 +317,8 @@ struct RaiAPIClient {
         } catch let error as URLError where error.code == .timedOut {
             // 超时与"连不上"对用户的处置方式不同，分开呈现（原先统一折叠成 .unavailable）。
             throw RaiAPIClientError.timedOut
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch {
             throw RaiAPIClientError.unavailable
         }

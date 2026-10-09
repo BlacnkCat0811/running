@@ -7,23 +7,91 @@ import Foundation
         let now = ISO8601DateFormatter().date(from: "2026-10-08T00:00:00Z")!
         let plan = PlanTestFixtures.plan()
         func sync(_ fake: FakeWorkoutScheduler, plan: MobileWorkoutPlanResponse = plan, current: @escaping () -> Bool = { true }, time: Date = now) async -> PlanWatchSyncOutcome {
-            await PlanWatchScheduling.sync(scheduler: fake, plan: plan, completedDates: [], hour: 8, now: time, isCurrent: current)
+            await PlanWatchScheduling.sync(scheduler: fake, plan: plan, completedDates: [], hour: 8, now: time, journal: FakePlanScheduleStorage.journal(), isCurrent: current)
         }
         let full = FakeWorkoutScheduler()
         let all = await sync(full)
         check(all.verified && all.offered == 3 && all.receipts.count == 3 && all.clearVerified, "all three UUID/time/content matches establish full coverage")
         check(all.receipts.allSatisfy { $0.structure == plan.days.first?.structure && $0.workoutID != nil && $0.idempotencyKey == $0.workoutID }, "receipts contain the actual exported structure and stable operation IDs")
         check(!all.report.contains("已收到"), "system verification never asserts physical Watch delivery")
+        struct DigestFixture: Decodable { let kind: String; let structure: MobileSessionStructure?; let digest: String }
+        let digests = try JSONDecoder().decode([DigestFixture].self, from: Data(contentsOf: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("apps/ios/tests/fixtures/prescription-digests.json")))
+        for fixture in digests {
+            check(PlanFingerprint.prescriptionDigest(kind: fixture.kind, structure: fixture.structure) == fixture.digest, "cross-language deterministic prescription digest \(fixture.kind)")
+        }
+        let brokenStorage = FakePlanScheduleStorage(); brokenStorage.failWrites = true
+        let safeJournal = PlanScheduleJournal(storage: brokenStorage, operation: FakePlanScheduleStorage.journal().operation)
+        let neverCleared = FakeWorkoutScheduler()
+        let storageFailure = await PlanWatchScheduling.sync(scheduler: neverCleared, plan: plan, completedDates: [], hour: 8,
+            now: now, journal: safeJournal, isCurrent: { true })
+        check(storageFailure.storageError != nil && neverCleared.clearCalls == 0 && neverCleared.submitted.isEmpty,
+              "failed durable intent precedes every destructive SDK side effect")
+        let beforeClear = FakeWorkoutScheduler()
+        beforeClear.listed = full.listed
+        let capacityStorage = FakePlanScheduleStorage()
+        let capacityJournal = PlanScheduleJournal(storage: capacityStorage, operation: FakePlanScheduleStorage.journal(previous: all.confirmedEntries).operation)
+        beforeClear.capacity = 2
+        let deniedReplacement = await PlanWatchScheduling.sync(scheduler: beforeClear, plan: plan, completedDates: [], hour: 8,
+            now: now, journal: capacityJournal, isCurrent: { true })
+        check(deniedReplacement.validationError != nil && beforeClear.clearCalls == 0 && beforeClear.listed == full.listed,
+              "whole-window preflight failure retains actual existing UUIDs")
+        for phase in ["removeAll", "schedule", "readBack3"] {
+            let storage = FakePlanScheduleStorage()
+            let operation = PlanScheduleJournal(storage: storage, operation: FakePlanScheduleStorage.journal().operation)
+            let fake = FakeWorkoutScheduler()
+            var interrupted = false
+            fake.event = { event in if event == phase { interrupted = true; storage.failWrites = true } }
+            let result = await PlanWatchScheduling.sync(scheduler: fake, plan: plan, completedDates: [], hour: 8,
+                now: now, journal: operation, isCurrent: { true })
+            check(interrupted && storage.value?.terminal == false && (phase == "readBack3" || !result.verified),
+                  "termination-equivalent failed persistence after \(phase) retains an unfinished durable operation")
+            storage.failWrites = false
+            fake.event = nil
+            let restarted = PlanScheduleJournal(storage: storage, operation: storage.value!)
+            let recovered = await PlanWatchScheduling.recover(scheduler: fake, journal: restarted, withdraw: true, isCurrent: { true })
+            check(recovered.cleanupVerified && fake.listed.isEmpty,
+                  "foreground recovery after \(phase) targets original UUID/time without another schedule call")
+        }
 
         let partial = FakeWorkoutScheduler(); partial.silentDates = ["2026-10-10"]
         let two = await sync(partial)
         check(!two.verified && two.scheduled == 2 && two.receipts.map(\.localDate) == ["2026-10-09", "2026-10-11"], "partial success registers exactly the two confirmed days")
+        let unexpected = FakeWorkoutScheduler()
+        unexpected.event = { event in
+            if event == "readBack3", let first = unexpected.submitted.first {
+                unexpected.listed.append(.init(workoutID: UUID(), at: first.at, contentMatches: false, complete: false))
+            }
+        }
+        let extra = await sync(unexpected)
+        check(extra.scheduled == 3 && !extra.clearVerified && !extra.verified,
+              "unexpected final system entry prevents claiming full replacement despite all owed matches")
+        for variant in ["unknown-id", "wrong-time", "duplicate", "previous-entry"] {
+            let storage = FakePlanScheduleStorage()
+            let journal = PlanScheduleJournal(storage: storage, operation: FakePlanScheduleStorage.journal(previous: all.confirmedEntries).operation)
+            let fake = FakeWorkoutScheduler()
+            let scheduled = await PlanWatchScheduling.sync(scheduler: fake, plan: plan, completedDates: [], hour: 8,
+                now: now, journal: journal, isCurrent: { true })
+            check(scheduled.verified && storage.value?.terminal == false, "recovery fixture stops before committing a replacement")
+            let expected = fake.listed[0]
+            var at = expected.at
+            if variant == "wrong-time" { at.hour = 9 }
+            fake.listed.append(variant == "previous-entry" ? full.listed[0] :
+                .init(workoutID: variant == "unknown-id" ? UUID() : expected.workoutID, at: at, contentMatches: true, complete: false))
+            let recovered = await PlanWatchScheduling.recover(scheduler: fake, journal: journal, withdraw: false, isCurrent: { true })
+            check(recovered.scheduled == 3 && !recovered.verified && !recovered.clearVerified &&
+                  recovered.validationError != nil && storage.value?.terminal == false,
+                  "recovery rejects extra \(variant) without ending the original safety journal")
+            fake.listed.removeLast()
+            let exact = await PlanWatchScheduling.recover(scheduler: fake, journal: journal, withdraw: false, isCurrent: { true })
+            check(exact.verified && exact.clearVerified, "recovery accepts the exact original UUID/time inventory after \(variant) is removed")
+        }
         let capacity = FakeWorkoutScheduler(); capacity.capacity = 2
         let capped = await sync(capacity)
-        check(capped.offered == 3 && capped.attempted == 2 && capped.scheduled == 2 && !capped.verified, "offered3 pending2 confirmed2 is NOT complete")
+        check(capped.offered == 3 && capped.attempted == 0 && capped.scheduled == 0 && !capped.verified, "capacity failure prevents the entire destructive replacement")
         let reject = FakeWorkoutScheduler(); reject.rejectDates = ["2026-10-10"]
         let rejected = await sync(reject)
-        check(!rejected.verified && rejected.attempted == 2 && rejected.days.contains { $0.reason == "SDK 不支持必要目标" }, "unsupported required goal rejects the entire day")
+        check(!rejected.verified && rejected.attempted == 0 && rejected.days.contains { $0.reason == "SDK 不支持必要目标" }, "unsupported required goal preserves the entire previous schedule")
         for variant in ["id", "time", "content", "complete", "missing-date", "other-day"] {
             let fake = FakeWorkoutScheduler()
             fake.readTransform = { entries in entries.map { value in
@@ -51,6 +119,11 @@ import Foundation
         stale.listed = [.init(workoutID: UUID(), at: all.submittedEntries.first.map { entry in full.submitted.first!.at } ?? DateComponents(), contentMatches: true, complete: false)]
         let noReplace = await sync(stale)
         check(!noReplace.clearVerified && noReplace.receipts.isEmpty && stale.submitted.isEmpty, "silent removeAll failure prevents replacement and false old-date confirmation")
+        stale.listed = [full.listed[0]]
+        let scopedClearFailure = await PlanWatchScheduling.sync(scheduler: stale, plan: plan, completedDates: [], hour: 8,
+            now: now, journal: FakePlanScheduleStorage.journal(previous: all.confirmedEntries), isCurrent: { true })
+        check(!scopedClearFailure.clearVerified && stale.submitted.isEmpty,
+              "silent targeted clear failure cannot be reported as a successful replacement")
         let emptyPlan = PlanTestFixtures.plan(dates: [])
         let notCleared = await sync(stale, plan: emptyPlan)
         check(notCleared.report.contains("旧排期未能确认撤回") && !notCleared.verified, "empty-window clear failure cannot be hidden by normal empty copy")
@@ -80,7 +153,7 @@ import Foundation
         check(!deniedResult.authorized && denied.authRequests == 0 && !deniedResult.report.contains("重装"), "denied authorization uses supported settings guidance, not reinstall/reset")
         for state in ["denied", "restricted"] {
             let fake = FakeWorkoutScheduler(); fake.state = state
-            let outcome = await PlanWatchScheduling.clear(scheduler: fake, isCurrent: { true })
+            let outcome = await PlanWatchScheduling.clear(scheduler: fake, journal: FakePlanScheduleStorage.journal(), isCurrent: { true })
             check(!outcome.verified && outcome.report.contains(state == "denied" ? "拒绝" : "限制") &&
                   fake.authRequests == 0, "withdrawal reports \(state) without implying system clear or re-prompting")
         }

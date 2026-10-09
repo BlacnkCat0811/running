@@ -6,7 +6,10 @@ struct TechRunCoachView: View {
     @State private var showingSetup = false
     @State private var editing = false
     @State private var setupID = UUID()
+    @State private var setupSessionID = ""
     @State private var pendingAction: String?
+    @State private var pendingRevision: Int?
+    @State private var pendingSessionID: String?
     @State private var showingLock = false
     @State private var selectedDay: MobileWeekPlanDay?
     @State private var selectedExecutableDay: MobileWorkoutPlanDay?
@@ -29,6 +32,10 @@ struct TechRunCoachView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
                 if let plan {
+                    if plan.status == "active", native.handshake?.planSnapshotContractVersion != nil {
+                        Button("按最新训练事实调整计划") { Task { await native.changeRunCoach(action: "refresh") } }
+                            .disabled(controlsUnavailable)
+                    }
                     TechCoachHeroCard(
                         plan: plan,
                         phase: snapshot.coach.map { $0.phase.map(techCoachPhaseName) ?? techCoachNoRaceBlockLabel } ?? "阶段待刷新",
@@ -130,7 +137,7 @@ struct TechRunCoachView: View {
                         if let execution = snapshot.today?.recentPlanExecution, !execution.isEmpty {
                             TechPlanExecutionPanel(days: execution)
                         }
-                        Button(role: .destructive) { pendingAction = "end" } label: {
+                        Button(role: .destructive) { prepareAction("end") } label: {
                             Label("结束计划", systemImage: "stop.circle")
                         }
                         .disabled(controlsUnavailable)
@@ -191,7 +198,7 @@ struct TechRunCoachView: View {
         .task { await native.refreshRunCoach() }
         .refreshable { await native.refreshAll() }
         .sheet(isPresented: $showingSetup) {
-            TechRunCoachSetup(plan: editing ? plan : nil).id(setupID)
+            TechRunCoachSetup(plan: editing ? plan : nil, editorSessionID: setupSessionID).id(setupID)
         }
         .sheet(isPresented: $showingLock) { TechLockSheet() }
         .sheet(item: $selectedDay) { day in
@@ -214,12 +221,21 @@ struct TechRunCoachView: View {
         ) {
             if let action = pendingAction {
                 Button(actionTitle, role: action == "end" ? .destructive : nil) {
+                    let revision = pendingRevision
+                    let sessionID = pendingSessionID
                     pendingAction = nil
-                    Task { await native.changeRunCoach(action: action) }
+                    Task { await native.changeRunCoach(action: action, expectedRevision: revision, editorSessionID: sessionID) }
                 }
             }
             Button("取消", role: .cancel) { pendingAction = nil }
         }
+        .onChange(of: native.feedbackSessionID) { _, _ in
+            showingSetup = false; showingLock = false; pendingAction = nil; selectedDay = nil; selectedExecutableDay = nil
+        }
+    }
+
+    private func prepareAction(_ action: String) {
+        pendingRevision = snapshot.revision; pendingSessionID = native.feedbackSessionID; pendingAction = action
     }
 
     private var actionTitle: String {
@@ -266,6 +282,7 @@ struct TechRunCoachView: View {
         HStack(spacing: 12) {
             Button {
                 setupID = UUID()
+                setupSessionID = native.feedbackSessionID
                 editing = true
                 showingSetup = true
             } label: {
@@ -274,7 +291,7 @@ struct TechRunCoachView: View {
             .accessibilityIdentifier("coach.preferences")
             Spacer(minLength: 8)
             Button {
-                pendingAction = plan.status == "paused" ? "resume" : "pause"
+                prepareAction(plan.status == "paused" ? "resume" : "pause")
             } label: {
                 Label(
                     plan.status == "paused" ? "继续计划" : "暂停计划",
@@ -290,6 +307,7 @@ struct TechRunCoachView: View {
     private var createButton: some View {
         TechPrimaryButton(title: "创建教练计划", systemName: "plus", isDisabled: controlsUnavailable || native.goals == nil) {
             setupID = UUID()
+            setupSessionID = native.feedbackSessionID
             editing = false
             showingSetup = true
         }

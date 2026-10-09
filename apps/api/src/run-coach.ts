@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import type { MobileGoalsResponse, MobilePlannedDay, MobileRaceTarget, MobileRunCoachCommand, MobileRunCoachConfidence, MobileRunCoachPlan, MobileRunCoachResponse } from "@rai/api-contracts";
+import type { MobileGoalsResponse, MobilePlanOperationScope, MobilePlannedDay, MobileRaceTarget, MobileRunCoachCommand, MobileRunCoachConfidence, MobileRunCoachPlan, MobileRunCoachResponse } from "@rai/api-contracts";
 import type { RaiReadStore } from "./data.js";
 import { MobileGoalsRevisionConflictError, type MobileGoalsStore } from "./mobile-goals.js";
 import { WEAK_PREPARATION_NOTE, WEAK_PREPARATION_SCORE } from "./mobile-coach.js";
@@ -9,6 +9,7 @@ import { constrainUpcomingPlan, mergePlanWindow, weeklyPlanDates } from "./weekl
 import { RunCoachInputError, runCoachDaysBetween, runCoachEndDate, runCoachIsTraining, runCoachPhase, runCoachRaceTarget, runCoachShiftDate, runCoachWeekday, validateRunCoachConfig } from "./run-coach-policy.js";
 import { weeklyCapacity } from "./weekly-capacity.js";
 import { runCoachCommandSchema } from "./schemas.js";
+import { PlanPublicationService } from "./plan-publication.js";
 
 type Inputs = ReturnType<RaiReadStore["mobileWeeklyPlanInputs"]>;
 
@@ -303,19 +304,21 @@ export function runCoachResponse(goals: MobileGoalsResponse, inputs: Inputs): Mo
     notices, phases, strength };
 }
 
-export function registerRunCoachRoutes(args: { app: FastifyInstance; store: MobileGoalsStore; inputs: (goals: MobileGoalsResponse) => Inputs }) {
+export function registerRunCoachRoutes(args: { app: FastifyInstance; store: MobileGoalsStore; scope?: () => string; identity?: () => MobilePlanOperationScope; inputs: (goals: MobileGoalsResponse) => Inputs }) {
+  const publication = new PlanPublicationService(args.store, args.scope ?? (() => "legacy"), args.identity);
   args.app.get("/v1/mobile/run-coach", async () => {
     const goals = args.store.read();
     return runCoachResponse(goals, args.inputs(goals));
   });
   args.app.post<{ Body: MobileRunCoachCommand }>("/v1/mobile/run-coach", { schema: { body: runCoachCommandSchema } }, async (request, reply) => {
+    try {
+    return publication.publish("run-coach", request.body, () => {
     const goals = args.store.read();
-    if (request.body.expectedRevision !== goals.revision) return reply.code(409).send({ code: "mobile_goals_revision_conflict", message: "计划已更新，请刷新后重试。" });
+    if (request.body.expectedRevision !== goals.revision) throw new MobileGoalsRevisionConflictError(goals.revision);
     const inputs = args.inputs(goals);
     const today = inputs.today.today.localDate;
     const { action, config } = request.body;
     let plan = goals.runCoach ?? null;
-    try {
       if (config && !["start", "update"].includes(action)) throw new RunCoachInputError("该操作不接受训练设置。");
       if (["start", "update"].includes(action)) {
         if (!config) throw new RunCoachInputError("缺少教练计划设置。");
@@ -358,6 +361,7 @@ export function registerRunCoachRoutes(args: { app: FastifyInstance; store: Mobi
         ...(plan.status !== "active" ? { lockedSession: null } : {})
       }, { runCoach: plan, confirmCoachPlan: true, prescription: effectiveInputs.prescription });
       return runCoachResponse(written, args.inputs(written));
+    });
     } catch (error) {
       if (error instanceof MobileGoalsRevisionConflictError) return reply.code(409).send({ code: error.code, message: error.message });
       if (error instanceof RunCoachInputError) return reply.code(422).send({ code: "run_coach_invalid", message: error.message });

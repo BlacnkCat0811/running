@@ -8,13 +8,15 @@ import Foundation
     func probe() async {}
 }
 struct CachedValue<Value> { let value: Value; let cachedAt: Date }
-@MainActor final class CacheStore {
+@MainActor final class CacheStore: PlanSchedulePersistence {
     private static var entries: [String: Data] = [:]
     static var failPlanWrites = false
     static var failWrites = false
     private static var acknowledgements: [String: PlanWriteAcknowledgement] = [:]
     private static var ledger: PlanWatchLedger?
+    private static var scheduleJournal: PlanScheduleOperationJournal?
     private static var handshakes: [String: RaiHandshake] = [:]
+    static func resetScheduleSafety() { ledger = nil; scheduleJournal = nil }
     static func loadHandshake(baseURL: URL) -> RaiHandshake? { handshakes[baseURL.absoluteString] }
     static func saveHandshake(_ value: RaiHandshake, baseURL: URL) { handshakes[baseURL.absoluteString] = value }
     static func urlScope(baseURL: URL) -> String { baseURL.absoluteString }
@@ -25,12 +27,18 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
         guard let data = Self.entries[scope + key], let value = try? JSONDecoder().decode(type, from: data) else { return nil }
         return CachedValue(value: value, cachedAt: Date())
     }
+    func readResult<V: Codable>(_ type: V.Type, scope: String, key: String) -> CacheReadResult<CachedValue<V>> { read(type, scope: scope, key: key).map { .value($0) } ?? .notFound }
+    func recordPlanDiagnostic(_ event: PlanDiagnosticEvent) {}
+    func exportPlanDiagnostics() -> URL? { nil }
     func write<V: Codable>(_ value: V, scope: String, key: String) -> Date? {
         guard !Self.failWrites else { return nil }
         Self.entries[scope + key] = try? JSONEncoder().encode(value)
         return Date()
     }
     func planWriteAcknowledgement(scope: String) -> PlanWriteAcknowledgement? { Self.acknowledgements[scope] }
+    func planAcknowledgementResult(scope: String) -> CacheReadResult<PlanWriteAcknowledgement> {
+        Self.acknowledgements[scope].map { .value($0) } ?? .notFound
+    }
     func acknowledgePlanWrite(_ ack: PlanWriteAcknowledgement, scope: String, goals: MobileGoalsResponse? = nil, coach: MobileRunCoachResponse? = nil) -> Bool {
         guard !Self.failPlanWrites else { return false }
         guard ack.revision >= (Self.acknowledgements[scope]?.revision ?? 0) else { return true }
@@ -42,10 +50,27 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
     }
     func planRevisionFloor(scope: String) -> Int? { Self.acknowledgements[scope]?.revision ?? 0 }
     func pendingPlanReceipts(scope: String) -> [PlanSyncReceipt] { read([PlanSyncReceipt].self, scope: scope, key: "receipt-journal")?.value ?? [] }
+    func pendingPlanReceiptsResult(scope: String) -> CacheReadResult<[PlanSyncReceipt]> { .value(pendingPlanReceipts(scope: scope)) }
     func savePendingPlanReceipts(_ receipts: [PlanSyncReceipt], scope: String) -> Bool { write(receipts, scope: scope, key: "receipt-journal") != nil }
     func watchLedger() -> PlanWatchLedger? { Self.ledger }
+    func watchLedgerResult() -> CacheReadResult<PlanWatchLedger?> { .value(Self.ledger) }
     func saveWatchLedger(_ ledger: PlanWatchLedger?) -> Bool { Self.ledger = ledger; return true }
     func clear(scope: String) { Self.entries = Self.entries.filter { !$0.key.hasPrefix(scope) } }
+    func scheduleJournalResult() -> CacheReadResult<PlanScheduleOperationJournal> { Self.scheduleJournal.map { .value($0) } ?? .notFound }
+    func saveScheduleJournal(_ value: PlanScheduleOperationJournal) -> Bool { Self.scheduleJournal = value; return !Self.failWrites }
+    func commitScheduleResult(_ operation: PlanScheduleOperationJournal, ledger: PlanWatchLedger?, receipts: [PlanSyncReceipt]) -> Bool {
+        guard !Self.failWrites else { return false }
+        Self.scheduleJournal = operation; Self.ledger = ledger
+        var pending = pendingPlanReceipts(scope: operation.scope)
+        if operation.phase == .withdrawn {
+            let ids = Set((operation.previousEntries + operation.items.map(\.entry)).map { $0.workoutID.uuidString })
+            pending.removeAll { (operation.clearAll || ids.contains($0.workoutID ?? "")) && ($0.lifecycleEvent == nil || $0.lifecycleEvent == "verified") }
+        }
+        for receipt in receipts where !pending.contains(where: { $0.idempotencyKey == receipt.idempotencyKey }) { pending.append(receipt) }
+        return savePendingPlanReceipts(pending, scope: operation.scope)
+    }
+    func pendingPublication(scope: String) -> CacheReadResult<PendingPlanPublication?> { .value(read(PendingPlanPublication.self, scope: scope, key: "publication")?.value) }
+    func savePublication(_ value: PendingPlanPublication?, scope: String) -> Bool { write(value, scope: scope, key: "publication") != nil }
 }
 
 final class StubProtocol: URLProtocol, @unchecked Sendable {
@@ -498,10 +523,12 @@ final class RequestLog: @unchecked Sendable {
             return (503, "{}", 0)
         }
         let planFetched = await model.refreshWorkoutPlan()
-        check(planFetched && model.workoutPlan?.days.count == 2, "the executable week is fetched and stored")
-        check(model.workoutPlan?.days.first?.structure?.blocks.first?.iterations == 6, "the session structure survives the round trip")
-        check(model.workoutPlan?.days.first?.executable == true, "an executable day is marked as such")
-        check(model.workoutPlan?.planRevision == 7, "the plan revision is carried for conflict messages")
+        check(!planFetched && model.currentWorkoutPlan == nil && model.goals?.revision == 12,
+              "partial legacy reads retain editable goals without promoting a stale execution response")
+        let decodedPlan = try JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: Data(planJSON.utf8))
+        check(decodedPlan.days.first?.structure?.blocks.first?.iterations == 6, "the session structure survives the round trip")
+        check(decodedPlan.days.first?.executable == true, "an executable day is marked as such")
+        check(decodedPlan.planRevision == 7, "the plan revision is carried for conflict messages")
 
         let generated = await model.createWeeklyPlanPreview()
         check(generated, "a plan generation reports success")
@@ -514,6 +541,8 @@ final class RequestLog: @unchecked Sendable {
         check(generationRequests.count(method: "POST", path: "/v1/mobile/workout-plan/confirm") == 0, "preview never confirms implicitly")
         let candidate = model.planPreview!
         let confirmedJSON = generationJSON.replacingOccurrences(of: "\"revision\":8", with: "\"revision\":13")
+        StubProtocol.handler = { _ in (503, "{}", 0) }
+        await model.refreshAll(requestHandshake: false)
         StubProtocol.handler = { request in
             let path = request.url!.path
             if path.hasSuffix("/confirm") { return (200, confirmedJSON, 0) }
@@ -576,7 +605,8 @@ final class RequestLog: @unchecked Sendable {
         watchObject["days"] = watchDays
         let gatedWatchPlan = try JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: JSONSerialization.data(withJSONObject: watchObject))
         check(model.watchPlanNeedsUpdate(gatedWatchPlan), "same goals revision with a newly vetoed prescription needs device update")
-        model.recordWatchClearAcknowledgement()
+        check(model.commitScheduleWithdrawal(journal: model.makeClearJournal()!, previous: model.watchLedger, empty: true),
+              "verified withdrawal commits its safety records together")
         check(!model.watchNeedsUpdate && !model.watchNeedsClear, "a verified Watch withdrawal clears the stale acknowledgement")
 
         StubProtocol.handler = { _ in
@@ -683,6 +713,7 @@ final class RequestLog: @unchecked Sendable {
         }
         session.serverURL = URL(string: "https://rai-lock-loading-old.test")
         model.serverConfigurationChanged()
+        let lockPlanJSON = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 12, dates: ["2026-09-16", "2026-09-17"]))
         StubProtocol.handler = { request in
             let path = request.url!.path
             if path.hasSuffix("/lock") {
@@ -690,7 +721,7 @@ final class RequestLog: @unchecked Sendable {
             }
             if path.hasSuffix("/today") { return (200, todayJSON, 0) }
             if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
-            if path.hasSuffix("/workout-plan") { return (200, planJSON, 0) }
+            if path.hasSuffix("/workout-plan") { return (200, lockPlanJSON, 0) }
             if path == "/v1/workouts" { return (200, list("lock-refresh"), 0) }
             return (503, "{}", 0)
         }
@@ -755,7 +786,7 @@ final class RequestLog: @unchecked Sendable {
             let receiptPlan = PlanTestFixtures.plan(dates: ["2026-10-09", "2026-10-10", "2026-10-11"])
             let fake = FakeWorkoutScheduler(); fake.silentDates = ["2026-10-10"]
             let outcome = await PlanWatchScheduling.sync(scheduler: fake, plan: receiptPlan, completedDates: [], hour: 8,
-                now: ISO8601DateFormatter().date(from: "2026-10-08T00:00:00Z")!, isCurrent: { true })
+                now: ISO8601DateFormatter().date(from: "2026-10-08T00:00:00Z")!, journal: FakePlanScheduleStorage.journal(), isCurrent: { true })
             let receiptSession = ServerSession()
             let receiptModel = NativeAppModel(session: receiptSession, api: api)
             let log = RequestLog()
@@ -988,8 +1019,8 @@ final class RequestLog: @unchecked Sendable {
         let todayOnlyFailure = await coachModel.refreshPlanState()
         check(!todayOnlyFailure && !coachModel.isTodayAvailable && !coachModel.isOffline,
               "A failed today read does not mark successful goals and schedule reads offline")
-        check(coachModel.goals?.runCoach?.status == "active" && coachModel.currentWorkoutPlan?.planRevision == 2,
-              "The active coach keeps an independently refreshed current schedule available when today fails")
+        check(coachModel.goals?.runCoach?.status == "active" && coachModel.workoutPlan?.planRevision == 2 && coachModel.currentWorkoutPlan == nil,
+              "a partial legacy schedule remains a reference, never current execution when today fails")
         StubProtocol.handler = { request in
             if request.url!.path == "/v1/mobile/run-coach" { return (200, runCoachJSON, 0.15) }
             return (503, "{}", 0)
@@ -1090,7 +1121,9 @@ final class RequestLog: @unchecked Sendable {
                 case "goals": saved = await isolated.saveGoals(expectedRevision: 12, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, weekPlan: [])
                 case "lock": saved = await isolated.lockNextSession()
                 case "coach": saved = await isolated.changeRunCoach(action: "start", config: decodedCoach.config, expectedRevision: 12)
-                default: saved = await isolated.confirmPlanPreview(candidate)
+                default:
+                    isolated.planPreview = candidate
+                    saved = await isolated.confirmPlanPreview(candidate)
                 }
                 CacheStore.failPlanWrites = false
                 CacheStore.failWrites = false
@@ -1122,9 +1155,19 @@ final class RequestLog: @unchecked Sendable {
                 var changed = try JSONSerialization.jsonObject(with: Data(freshPlan.utf8)) as! [String: Any]
                 changed["generatedAt"] = "2099-01-01T00:00:00Z"
                 var wire = String(decoding: try JSONSerialization.data(withJSONObject: changed), as: UTF8.self)
-                StubProtocol.handler = { _ in (200, wire, 0) }
+                StubProtocol.handler = { request in
+                    if request.url!.path.hasSuffix("/goals") { return (200, v13Goals, 0) }
+                    if request.url!.path.hasSuffix("/today") { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":13"), 0) }
+                    if request.url!.path.hasSuffix("/workout-plan") { return (200, wire, 0) }
+                    return (503, "{}", 0)
+                }
                 _ = await restarted.refreshWorkoutPlan()
                 check(restarted.isCurrentPlanSync(snapshot), "only generatedAt changes do not invalidate the lease")
+                var renamedDays = changed["days"] as! [[String: Any]]
+                renamedDays[0]["title"] = "仅展示名称"; renamedDays[0]["reason"] = "仅展示理由"; changed["days"] = renamedDays
+                wire = String(decoding: try JSONSerialization.data(withJSONObject: changed), as: UTF8.self)
+                _ = await restarted.refreshWorkoutPlan()
+                check(restarted.isCurrentPlanSync(snapshot), "display wording alone does not revoke an execution-semantic lease")
                 var changedDays = changed["days"] as! [[String: Any]]; changedDays[0]["executable"] = false; changed["days"] = changedDays
                 wire = String(decoding: try JSONSerialization.data(withJSONObject: changed), as: UTF8.self)
                 _ = await restarted.refreshWorkoutPlan()
@@ -1198,7 +1241,7 @@ final class RequestLog: @unchecked Sendable {
                         return (503, "{}", 0)
                     }
                     _ = await restarted.refreshWorkoutPlan()
-                    check(restarted.watchNeedsUpdate && restarted.watchStatusLabel == PlanWatchState.stale.label,
+                    check(restarted.watchNeedsUpdate && restarted.watchStatusLabel.contains("中断"),
                           "a changed effective plan makes a partial persisted ledger stale, not partially current")
                     wire = freshPlan
                     _ = await restarted.refreshWorkoutPlan()
@@ -1210,7 +1253,8 @@ final class RequestLog: @unchecked Sendable {
                         return (503, "{}", 0)
                     }
                     let afterRestart = NativeAppModel(session: isolatedSession, api: api, now: { clock })
-                    check(afterRestart.watchLedger?.entries.count == 1 && afterRestart.watchState == .unknown && afterRestart.watchStatusLabel == "未核验", "persisted last-sync record never becomes current verification after restart")
+                    check(afterRestart.watchLedger?.entries.count == 1 && afterRestart.watchState == .unknown && afterRestart.hasInterruptedSchedule, "partial operation after restart remains interrupted, never becomes current verification")
+                    _ = await coordinator.recover(model: restarted, scheduler: fake, withdraw: true)
                     let invalidating = FakeWorkoutScheduler()
                     var competingResult = ""
                     let competitor = FakeWorkoutScheduler()
@@ -1265,6 +1309,182 @@ final class RequestLog: @unchecked Sendable {
                 check(restarted.currentPlanRevision == 0 && restarted.watchStatusLabel == "未核验", "scope switch does not carry A's revision or verification into B")
                 clock = clock.addingTimeInterval(86400)
             }
+        }
+
+        do {
+            let publicationSession = ServerSession()
+            let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let initial = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let published = try PlanTestFixtures.state(revision: 13)
+            let publishedJSON = try PlanTestFixtures.json(published)
+            let publishedGoals = try PlanTestFixtures.json(published.goals)
+            let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2))
+            let log = RequestLog()
+            let publisher = NativeAppModel(session: publicationSession, api: api, now: { clock })
+            StubProtocol.handler = { request in
+                log.record(request)
+                if request.url!.path == "/v1/handshake" { return (200, capabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, initial, 0) }
+                return (503, "{}", 0)
+            }
+            await publisher.bootstrap()
+            let rejectedEditor = await publisher.saveRaceTarget(nil, expectedRevision: 12, editorSessionID: "other-connection")
+            check(!rejectedEditor && log.count(method: "PUT", path: "/v1/mobile/goals") == 0,
+                  "equal revisions cannot authorize a draft owned by another connection")
+            let lostReply = await publisher.saveRaceTarget(nil, expectedRevision: 12)
+            check(!lostReply && publisher.hasPendingPlanPublication && publisher.currentWorkoutPlan == nil,
+                  "lost business response retains durable original operation and disables old execution")
+            let originalBody = log.lastBody(method: "PUT", path: "/v1/mobile/goals")!
+            let operation = try JSONSerialization.jsonObject(with: originalBody) as! [String: Any]
+            let operationId = operation["operationId"] as! String
+            let restarted = NativeAppModel(session: publicationSession, api: api, now: { clock })
+            StubProtocol.handler = { request in
+                log.record(request)
+                if request.url!.path == "/v1/handshake" { return (200, capabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, publishedJSON, 0) }
+                if request.url!.path == "/v1/mobile/plan-operations/" + operationId {
+                    return (200, "{\"status\":\"committed\",\"operationId\":\"\(operationId)\",\"result\":\(publishedGoals)}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            await restarted.bootstrap()
+            check(restarted.hasPendingPlanPublication, "pending publication survives model reconstruction and cached identity recovery")
+            let secondPublish = await restarted.saveRaceTarget(nil, expectedRevision: 13)
+            check(!secondPublish && log.count(method: "PUT", path: "/v1/mobile/goals") == 1,
+                  "uncertain original result blocks a different publication without changing its revision or operation key")
+            let resolved = await restarted.resolvePlanPublication()
+            check(!restarted.hasPendingPlanPublication && restarted.currentPlanRevision == 13 &&
+                  resolved.contains("没有再次发布") && log.count(method: "PUT", path: "/v1/mobile/goals") == 1,
+                  "foreground operation query after restart accepts committed result without another business write")
+        }
+
+        do {
+            CacheStore.resetScheduleSafety()
+            let recoverySession = ServerSession()
+            let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let state = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, planReceiptContractVersion: 2))
+            StubProtocol.handler = { request in
+                switch request.url!.path {
+                case "/v1/handshake": return (200, capabilities, 0)
+                case "/v1/mobile/training-plan-state": return (200, state, 0)
+                case "/v1/mobile/workout-plan/synced": return (200, "{\"recordedAt\":\"2026-10-09T04:00:00Z\",\"matchesCurrent\":true}", 0)
+                default: return (503, "{}", 0)
+                }
+            }
+            let original = NativeAppModel(session: recoverySession, api: api, now: { clock })
+            await original.bootstrap()
+            let fake = FakeWorkoutScheduler()
+            let coordinator = PlanWatchSyncCoordinator()
+            _ = await coordinator.sync(model: original, scheduler: fake)
+            let oldLedger = original.watchLedger!
+            let oldIDs = Set(oldLedger.entries.map { $0.workoutID.uuidString })
+            let lease = original.beginPlanSync()!
+            _ = await original.refreshPlanState()
+            let snapshot = original.planSyncSnapshot(lease)!
+            let journal = original.makeScheduleJournal(snapshot: snapshot)!
+            let replacement = await PlanWatchScheduling.sync(scheduler: fake, plan: original.currentWorkoutPlan!, completedDates: [],
+                hour: snapshot.reminderHour, now: clock, journal: journal, isCurrent: { original.isCurrentPlanSync(snapshot) })
+            check(replacement.verified && !journal.operation.terminal, "replacement recovery fixture stops after SDK verification but before ledger commit")
+            original.endPlanSync(lease)
+            let restarted = NativeAppModel(session: recoverySession, api: api, now: { clock })
+            await restarted.bootstrap()
+            let first = fake.listed[0]
+            fake.listed.append(.init(workoutID: UUID(), at: first.at, contentMatches: false, complete: false))
+            _ = await coordinator.recover(model: restarted, scheduler: fake, withdraw: false)
+            check(restarted.hasInterruptedSchedule && restarted.watchLedger == oldLedger &&
+                  CacheStore().pendingPlanReceipts(scope: restarted.feedbackScope).isEmpty,
+                  "unknown recovery entries preserve the old ledger and cannot end the journal or enqueue verified receipts")
+            fake.listed.removeLast()
+            let delayed = fake.listed.removeLast()
+            _ = await coordinator.recover(model: restarted, scheduler: fake, withdraw: false)
+            let partialPending = CacheStore().pendingPlanReceipts(scope: restarted.feedbackScope)
+            check(restarted.hasInterruptedSchedule && restarted.watchLedger?.entries.count == replacement.scheduled - 1 &&
+                  Set(partialPending.filter { $0.lifecycleEvent == "replaced" }.compactMap(\.workoutID)) == oldIDs,
+                  "partial recovery records the fully removed old entries while retaining an unfinished replacement journal")
+            fake.listed.append(delayed)
+            _ = await coordinator.recover(model: restarted, scheduler: fake, withdraw: false)
+            let pending = CacheStore().pendingPlanReceipts(scope: restarted.feedbackScope)
+            let replaced = pending.filter { $0.lifecycleEvent == "replaced" }
+            check(!restarted.hasInterruptedSchedule && restarted.watchState == .verifiedCurrent &&
+                  restarted.watchLedger?.entries == replacement.confirmedEntries,
+                  "exact recovery commits the newly verified ledger and ends the interrupted journal")
+            check(Set(replaced.compactMap(\.workoutID)) == oldIDs && replaced.count == oldIDs.count &&
+                  pending.filter { $0.lifecycleEvent == "verified" }.count == replacement.scheduled,
+                  "recovered replacement atomically queues every old termination event with the new verified receipts")
+            check(!replaced.contains { event in replacement.confirmedEntries.contains {
+                $0.workoutID.uuidString == event.workoutID
+            } }, "repeating partial recovery cannot terminate newly confirmed replacement entries")
+            check(replaced.allSatisfy { event in oldLedger.receipts!.contains {
+                $0.workoutID == event.workoutID && $0.scheduledAt == event.scheduledAt &&
+                    $0.structure == event.structure && $0.prescriptionDigest == event.prescriptionDigest
+            } }, "recovered replacement events retain the old actual UUID/time/prescription evidence")
+        }
+
+        do {
+            CacheStore.resetScheduleSafety()
+            let receiptSession = ServerSession()
+            let clock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let initial = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let updated = try PlanTestFixtures.json(PlanTestFixtures.state(revision: 13, coherence: String(repeating: "c", count: 64)))
+            let capabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, planReceiptContractVersion: 2))
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/handshake" { return (200, capabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, initial, 0) }
+                return (503, "{}", 0)
+            }
+            let receiptModel = NativeAppModel(session: receiptSession, api: api, now: { clock })
+            await receiptModel.bootstrap()
+            let fake = FakeWorkoutScheduler()
+            let coordinator = PlanWatchSyncCoordinator()
+            _ = await coordinator.sync(model: receiptModel, scheduler: fake)
+            let oldReceipt = receiptModel.watchLedger!.receipts![0]
+            let log = RequestLog()
+            StubProtocol.handler = { request in
+                log.record(request)
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, updated, 0) }
+                if request.url!.path == "/v1/mobile/workout-plan/synced" {
+                    let body = try! JSONSerialization.jsonObject(with: log.lastBody(method: "POST", path: request.url!.path)!) as! [String: Any]
+                    let matches = (body["revision"] as! Int) == 13 && body["lifecycleEvent"] as! String == "verified"
+                    return (200, "{\"recordedAt\":\"2026-10-09T04:00:00Z\",\"matchesCurrent\":\(matches)}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            _ = await coordinator.sync(model: receiptModel, scheduler: fake)
+            let currentLedger = receiptModel.watchLedger!
+            check(currentLedger.revision == 13 && receiptModel.watchState == .verifiedCurrent &&
+                  CacheStore().pendingPlanReceipts(scope: receiptModel.feedbackScope).contains { $0.revision == 12 && $0.lifecycleEvent == "verified" },
+                  "historical-retry fixture retains lost old receipts beside a successfully verified replacement")
+            let historicalMessage = await receiptModel.retryPlanSyncReceipts()
+            check(receiptModel.watchLedger == currentLedger && receiptModel.watchState == .verifiedCurrent &&
+                  !historicalMessage.contains("请撤回") && !receiptModel.hasPendingPlanReceipts,
+                  "retrying stale historical verification never quarantines or asks to withdraw the current ledger")
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/workout-plan/synced" {
+                    return (409, "{\"code\":\"plan_receipt_scope_mismatch\",\"message\":\"old receipt identity\"}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            _ = await receiptModel.recordPlanSyncReceipts([oldReceipt])
+            check(receiptModel.watchLedger == currentLedger && receiptModel.watchState == .verifiedCurrent,
+                  "historical scope-mismatch receipts cannot mark unrelated current entries for withdrawal")
+            StubProtocol.handler = { _ in (200, "{\"recordedAt\":\"2026-10-09T04:00:00Z\",\"matchesCurrent\":false}", 0) }
+            var differentTime = currentLedger.receipts![0]
+            differentTime.scheduledAt = ISO8601DateFormatter().string(from: currentLedger.entries[0].scheduledAt.addingTimeInterval(3600))
+            differentTime.idempotencyKey = UUID().uuidString
+            _ = await receiptModel.recordPlanSyncReceipts([differentTime])
+            check(receiptModel.watchLedger == currentLedger && receiptModel.watchState == .verifiedCurrent,
+                  "same UUID at a different instant cannot invalidate the current system entry")
+            var actualCurrent = currentLedger.receipts![0]
+            actualCurrent.workoutID = actualCurrent.workoutID!.lowercased()
+            let precise = ISO8601DateFormatter(); precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            actualCurrent.scheduledAt = precise.string(from: currentLedger.entries[0].scheduledAt)
+            _ = await receiptModel.recordPlanSyncReceipts([actualCurrent])
+            check(receiptModel.watchLedger?.requiresWithdrawal == true && receiptModel.watchState == .stale,
+                  "stale evidence for the actual current UUID/instant still requires withdrawal across equivalent timestamp encodings")
         }
 
         // Legacy missing revision is separately tested; it never enables execution.

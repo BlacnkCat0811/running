@@ -1,0 +1,5 @@
+[
+  {"kind":"easy","structure":null,"digest":"db18762a1385c31a20ac38a712ad35438164c6f13568630acb93a44118cd19f0"},
+  {"kind":"easy","structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":4000},"alert":null}]}],"cooldown":null},"digest":"16ae0248a7b2fb7945b60ac16a56401b45a19aec73b1e4a1e2c917a34eb15e71"},
+  {"kind":"interval","structure":{"warmup":{"purpose":"warmup","goal":{"type":"time","seconds":600},"alert":null},"blocks":[{"iterations":6,"steps":[{"purpose":"work","goal":{"type":"distance","meters":800},"alert":{"kind":"pace","lower":270,"upper":300}},{"purpose":"recovery","goal":{"type":"time","seconds":90},"alert":null}]}],"cooldown":{"purpose":"cooldown","goal":{"type":"open"},"alert":null}},"digest":"57369dd2b013a89406cdd7246fde2c5876bcd6c092f64a25b037a41388d75c44"}
+]

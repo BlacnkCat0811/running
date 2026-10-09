@@ -23,12 +23,12 @@ export function apiErrorPayload(error: unknown): ApiErrorPayload {
   return {
     status,
     body: {
-      code: status >= 500
+      code: status >= 500 && !["plan_snapshot_changed", "plan_operations_unavailable"].includes(String(providedCode))
         ? "internal_error"
         : typeof providedCode === "string" && providedCode.length > 0
           ? providedCode
           : "request_error",
-      message: status >= 500 ? "本地服务处理请求失败" : message
+      message: status >= 500 && !["plan_snapshot_changed", "plan_operations_unavailable"].includes(String(providedCode)) ? "本地服务处理请求失败" : message
     }
   };
 }

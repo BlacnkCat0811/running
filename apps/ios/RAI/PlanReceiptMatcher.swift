@@ -17,6 +17,27 @@ enum PlanReceiptMatcher {
         return date
     }
 
+    static func matches(receipt: PlanSyncReceipt, entry: PlanScheduledEntry) -> Bool {
+        guard let workoutID = receipt.workoutID, UUID(uuidString: workoutID) == entry.workoutID,
+              receipt.localDate == entry.localDate, let scheduledAt = receipt.scheduledAt else { return false }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let instant = formatter.date(from: scheduledAt) ?? ISO8601DateFormatter().date(from: scheduledAt)
+        return instant == entry.scheduledAt
+    }
+
+    /// Missing requests remain partial; unexpected or duplicate system entries
+    /// must never be hidden by matching every requested workout.
+    static func hasOnlyRequestedEntries(requests: [PlanSchedulingRequest], listed: [PlanSchedulingReadback], timeZone: TimeZone) -> Bool {
+        var remaining = requests.map(\.entry)
+        for item in listed {
+            guard let at = instant(item.at, fallbackTimeZone: timeZone),
+                  let index = remaining.firstIndex(where: { $0.workoutID == item.workoutID && $0.scheduledAt == at }) else { return false }
+            remaining.remove(at: index)
+        }
+        return true
+    }
+
     static func confirm(requests: [PlanSchedulingRequest], listed: [PlanSchedulingReadback], timeZone: TimeZone) -> Set<UUID> {
         var remaining = listed
         var confirmed = Set<UUID>()

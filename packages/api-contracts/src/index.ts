@@ -161,6 +161,15 @@ export interface HandshakeResponse {
   apiVersion: string;
   /** /synced accepts UUID/time/idempotency/export metadata. Older servers omit it. */
   planReceiptMetadata?: boolean;
+  planSnapshotContractVersion?: number;
+  planPublicationContractVersion?: number;
+  planReceiptContractVersion?: number;
+}
+
+export interface MobilePlanOperationScope {
+  serverId: string;
+  athleteId: string;
+  datasetEpoch: string;
 }
 
 export interface ModelRunSummary {
@@ -950,6 +959,47 @@ export interface MobileWorkoutPlanResponse {
   days: MobileWorkoutPlanDay[];
 }
 
+export interface TrainingPlanStateResponse {
+  metadata: {
+    contractVersion: 1;
+    serverId: string;
+    athleteId: string;
+    datasetEpoch: string;
+    goalsRevision: number;
+    coherenceToken: string;
+    timezone: string;
+    localDate: string;
+    windowStart: string;
+    windowEnd: string;
+    ruleVersion: string;
+    publicationDigest: string;
+  };
+  availability: "ready" | "empty";
+  goals: MobileGoalsResponse;
+  today: MobileTodayResponse;
+  workoutPlan: MobileWorkoutPlanResponse & { windowStart: string; windowEnd: string };
+  coachSummary: MobileRunCoachResponse;
+}
+
+export interface MobilePlanReceiptInput {
+  localDate: string;
+  kind: MobileSessionKind;
+  revision?: number;
+  structure?: MobileSessionStructure | null;
+  workoutID?: string;
+  scheduledAt?: string;
+  idempotencyKey?: string;
+  exportNotes?: string[];
+  contractVersion?: 2;
+  scope?: { serverId: string; athleteId: string; datasetEpoch: string };
+  operationId?: string;
+  coherenceToken?: string;
+  verifiedAt?: string;
+  timezone?: string;
+  prescriptionDigest?: string;
+  lifecycleEvent?: "verified" | "withdrawn" | "replaced";
+}
+
 /** Result of deterministic weekly coach generation. */
 export interface MobileWeeklyPlanGenerationResponse {
   generatedAt: string;
@@ -984,6 +1034,8 @@ export interface MobileLockState {
 }
 
 export interface LockMobileSessionInput {
+  operationId?: string;
+  operationScope?: MobilePlanOperationScope;
   action: "lock" | "relock";
   expectedRevision?: string;
 }
@@ -1336,6 +1388,8 @@ export interface MobileRunCoachPlan extends MobileRunCoachConfig {
 }
 
 export interface MobileRunCoachCommand {
+  operationId?: string;
+  operationScope?: MobilePlanOperationScope;
   expectedRevision: number;
   action: "start" | "update" | "refresh" | "pause" | "resume" | "end";
   config?: MobileRunCoachConfig;
@@ -1417,6 +1471,8 @@ export interface MobileRunCoachResponse {
 }
 
 export interface UpdateMobileGoalsInput {
+  operationId?: string;
+  operationScope?: MobilePlanOperationScope;
   expectedRevision?: number;
   easyDurationFloorFraction?: number;
   qualitySessionCap?: number;

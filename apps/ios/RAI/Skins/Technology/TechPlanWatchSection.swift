@@ -7,6 +7,7 @@ struct TechPlanWatchSection: View {
     @Environment(NativeAppModel.self) private var native
     let allowsSynchronization: Bool
     @State private var message: String?
+    @State private var diagnosticURL: URL?
 
     private var plan: MobileWorkoutPlanResponse? { native.planPresentation.executablePlan }
     private var hour: Int { TrainingReminders.storedHour(scope: native.feedbackScope) }
@@ -48,7 +49,7 @@ struct TechPlanWatchSection: View {
                 }
                 if allowsSynchronization {
                     TechPrimaryButton(title: "同步跑步课表到系统日程", systemName: "applewatch",
-                        isBusy: native.isSyncingPlan, isDisabled: native.isPlanBusy || native.isOffline || plan == nil) {
+                        isBusy: native.isSyncingPlan, isDisabled: native.isPlanBusy || native.isOffline || plan == nil || native.hasInterruptedSchedule) {
                         synchronize()
                     }
                     .accessibilityIdentifier("plan.watch.sync")
@@ -56,11 +57,41 @@ struct TechPlanWatchSection: View {
                 Button("撤回 RAI 系统旧排期", role: .destructive, action: withdraw)
                     .disabled(native.isPlanBusy)
                     .accessibilityIdentifier("plan.watch.clear")
+                if native.hasInterruptedSchedule {
+                    Text("操作中断后不会自动继续排期。请选择核验原条目或撤回；离线和无计划时仍可操作。")
+                        .font(.caption).foregroundStyle(TechColor.coral)
+                    Button("核验中断操作的系统日程") {
+                        Task { message = await PlanWatchSyncCoordinator.shared.recover(model: native, withdraw: false) }
+                    }.disabled(native.isPlanBusy || native.scheduleStorageIssue)
+                    Button("撤回中断操作的条目", role: .destructive) {
+                        Task { message = await PlanWatchSyncCoordinator.shared.recover(model: native, withdraw: true) }
+                    }.disabled(native.isPlanBusy || native.scheduleStorageIssue)
+                }
+                if let issue = native.planPresentation.issue {
+                    Text("\(issue.code.rawValue)：\(issue.message)").font(.caption).foregroundStyle(TechColor.yellow)
+                }
+                if native.handshake?.planSnapshotContractVersion == nil {
+                    Text("旧服务只校验共享版本，不提供完整事实快照保证；升级服务后可启用强一致读取。")
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                }
+                if native.handshake?.planReceiptContractVersion != 2 {
+                    Text("此服务使用旧回执协议，不能登记事实令牌或撤回事件；本机核验与服务端登记分开处理。")
+                        .font(.caption2).foregroundStyle(TechColor.muted)
+                }
+                if native.hasPendingPlanPublication {
+                    Button("确认上次发布结果") { Task { message = await native.resolvePlanPublication() } }
+                        .disabled(native.isOffline || native.isPlanBusy)
+                }
                 if native.hasPendingPlanReceipts {
                     Button("重试登记已核验日期") {
                         Task { message = await native.retryPlanSyncReceipts() }
                     }.disabled(native.isOffline || native.isPlanBusy)
                 }
+                Button("准备脱敏计划诊断包") {
+                    diagnosticURL = native.exportPlanDiagnostics()
+                    if diagnosticURL == nil { message = "诊断记录无法读取或导出；不会包含令牌、路线或原始健康数据。" }
+                }
+                if let diagnosticURL { ShareLink("分享脱敏计划诊断", item: diagnosticURL) }
                 if let message { Text(message).font(.caption).foregroundStyle(TechColor.muted).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("plan.watch.result") }
                 if let message = native.planMessage { Text(message).font(.caption).foregroundStyle(TechColor.muted) }
                 if native.planPersistenceFailed { Text(native.errorMessage ?? "本地确认记录未持久化，请联网刷新。") .font(.caption).foregroundStyle(TechColor.coral) }

@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { RaiApplicationService } from "@rai/application";
@@ -19,6 +20,7 @@ import { MobileGoalsStore } from "../src/mobile-goals.js";
 import { mobileLocalDate } from "../src/data.js";
 import { weeklyPlanDates } from "../src/weekly-plan-service.js";
 import { seedRecentRunningWeeks } from "./weekly-training-fixture.js";
+import { prescriptionDigest } from "../src/plan-digest.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 
@@ -1977,6 +1979,96 @@ test("plan preview/confirm HTTP flow is non-mutating, idempotent and revision sa
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);
   }
+});
+
+test("snapshot capabilities, durable confirm restart and receipt lifecycle work through the production router", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-plan-state-http-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"));
+  (await RaiDatabase.open(databasePath)).close();
+  const launch = async () => {
+    const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+      cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+        RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "", RAI_LLM_API_KEY: "" },
+      windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+    });
+    let output = "";
+    child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+    try {
+      const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+      await waitForApi(child, url, () => output);
+      return { child, url };
+    } catch (error) { await stopApi(child).catch(() => child.kill("SIGKILL")); throw error; }
+  };
+  let server = await launch();
+  const post = (path: string, body: object) => fetch(server.url + path, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+  });
+  const snapshot = async () => await fetch(server.url + "/v1/mobile/training-plan-state")
+    .then(response => response.json()) as import("@rai/api-contracts").TrainingPlanStateResponse;
+  try {
+    const handshake = await fetch(server.url + "/v1/handshake").then(response => response.json()) as import("@rai/api-contracts").HandshakeResponse;
+    assert.equal(handshake.planSnapshotContractVersion, 1);
+    assert.equal(handshake.planPublicationContractVersion, 1);
+    assert.equal(handshake.planReceiptContractVersion, 2);
+    const initial = await snapshot();
+    const previewResponse = await post("/v1/mobile/workout-plan/preview", { expectedRevision: initial.metadata.goalsRevision });
+    assert.equal(previewResponse.status, 200, await previewResponse.clone().text());
+    const preview = await previewResponse.json() as import("@rai/api-contracts").MobileWeeklyPlanPreviewResponse;
+    const operationId = randomUUID();
+    const operationScope = { serverId: handshake.serverId, athleteId: handshake.athleteId, datasetEpoch: handshake.datasetEpoch };
+    const input = { candidateId: preview.candidateId, expectedRevision: preview.revision, operationId, operationScope };
+    const response = await post("/v1/mobile/workout-plan/confirm", input);
+    assert.equal(response.status, 200, await response.clone().text());
+    const committed = await response.json();
+    await stopApi(server.child);
+    server = await launch();
+    const retry = await post("/v1/mobile/workout-plan/confirm", input);
+    assert.equal(retry.status, 200, await retry.clone().text());
+    assert.deepEqual(await retry.json(), committed, "durable result bypasses missing process-local preview after restart");
+    const queried = await fetch(server.url + "/v1/mobile/plan-operations/" + operationId).then(reply => reply.json()) as { status: string; result: unknown };
+    assert.equal(queried.status, "committed"); assert.deepEqual(queried.result, committed);
+    const changedKey = await post("/v1/mobile/workout-plan/confirm", { ...input, candidateId: "different" });
+    assert.equal(changedKey.status, 409);
+    assert.equal((await changedKey.json() as { code: string }).code, "plan_operation_key_conflict");
+    const unknownOldIntent = await post("/v1/mobile/workout-plan/confirm", { ...input, operationId: randomUUID(),
+      operationScope: { ...operationScope, datasetEpoch: "old-dataset" } });
+    assert.equal(unknownOldIntent.status, 409);
+    assert.equal((await unknownOldIntent.json() as { code: string }).code, "plan_operation_scope_mismatch",
+      "even a never-committed old intent cannot be applied to a replacement dataset");
+    const current = await snapshot();
+    assert.equal(current.metadata.goalsRevision, initial.metadata.goalsRevision + 1);
+    assert.equal(current.today.recommendation.planRevision, current.workoutPlan.planRevision);
+    const day = current.workoutPlan.days.find(item => item.executable && item.structure)!;
+    assert.ok(day, "fixture must have a genuine executable prescription");
+    const workoutID = randomUUID();
+    const receipt = { contractVersion: 2, scope: { serverId: handshake.serverId, athleteId: handshake.athleteId, datasetEpoch: handshake.datasetEpoch },
+      operationId: randomUUID(), coherenceToken: current.metadata.coherenceToken, verifiedAt: new Date().toISOString(),
+      timezone: current.metadata.timezone, prescriptionDigest: prescriptionDigest(day.kind, day.structure), lifecycleEvent: "verified",
+      localDate: day.localDate, kind: day.kind, revision: current.metadata.goalsRevision, structure: day.structure,
+      workoutID, scheduledAt: day.localDate + "T00:00:00Z" };
+    const registered = await post("/v1/mobile/workout-plan/synced", receipt);
+    assert.equal(registered.status, 200, await registered.clone().text());
+    const first = await registered.json() as { recordedAt: string; matchesCurrent: boolean };
+    assert.equal(first.matchesCurrent, true);
+    const repeated = await post("/v1/mobile/workout-plan/synced", { ...receipt, verifiedAt: new Date().toISOString() });
+    assert.equal(repeated.status, 200, await repeated.clone().text());
+    assert.equal((await repeated.json() as { recordedAt: string }).recordedAt, first.recordedAt);
+    const mismatched = await post("/v1/mobile/workout-plan/synced", { ...receipt, prescriptionDigest: "0".repeat(64) });
+    assert.equal(mismatched.status, 422);
+    assert.equal((await mismatched.json() as { code: string }).code, "plan_receipt_evidence_mismatch");
+    const wrongScope = await post("/v1/mobile/workout-plan/synced", { ...receipt, scope: { ...receipt.scope, datasetEpoch: "other-epoch" } });
+    assert.equal(wrongScope.status, 409);
+    const withdrawn = await post("/v1/mobile/workout-plan/synced", { ...receipt, lifecycleEvent: "withdrawn" });
+    assert.equal(withdrawn.status, 200, await withdrawn.clone().text());
+    assert.equal((await withdrawn.json() as { matchesCurrent: boolean }).matchesCurrent, false);
+    const lateVerify = await post("/v1/mobile/workout-plan/synced", receipt);
+    assert.equal((await lateVerify.json() as { matchesCurrent: boolean }).matchesCurrent, false, "a duplicate old verification cannot reactivate a withdrawn entry");
+    const legacy = await post("/v1/mobile/workout-plan/synced", { localDate: day.localDate, kind: day.kind, revision: current.metadata.goalsRevision, structure: day.structure });
+    assert.equal(legacy.status, 200, await legacy.clone().text());
+    assert.equal((await legacy.json() as { informationLevel: string }).informationLevel, "legacy");
+  } finally { await stopApi(server.child).catch(() => server.child.kill("SIGKILL")); await removeRuntimeRoot(runtimeRoot); }
 });
 
 test("summary export requires token even on a public host and validates its range before reading", async () => {

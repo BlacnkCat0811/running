@@ -9,7 +9,7 @@ struct CachedValue<Value: Codable>: Codable {
 }
 
 @MainActor
-final class CacheStore {
+final class CacheStore: PlanSchedulePersistence {
     enum ReadIssue: String { case unavailable, unsupportedSchema, corruptPayload }
     private(set) var lastReadIssue: ReadIssue?
     private var database: OpaquePointer?
@@ -83,13 +83,15 @@ final class CacheStore {
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
         bind(key, to: statement, at: 2)
-        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return nil }
+        guard result == SQLITE_ROW else { lastReadIssue = .unavailable; return nil }
         guard (1...2).contains(sqlite3_column_int(statement, 2)) else {
             lastReadIssue = .unsupportedSchema
             return nil
         }
         let cachedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
-        guard let bytes = sqlite3_column_blob(statement, 1) else { return nil }
+        guard let bytes = sqlite3_column_blob(statement, 1) else { lastReadIssue = .corruptPayload; return nil }
         let length = Int(sqlite3_column_bytes(statement, 1))
         let payload = Data(bytes: bytes, count: length)
         guard let value = try? JSONDecoder().decode(type, from: payload) else {
@@ -97,6 +99,16 @@ final class CacheStore {
             return nil
         }
         return CachedValue(value: value, cachedAt: cachedAt)
+    }
+
+    func readResult<Value: Codable>(_ type: Value.Type, scope: String, key: String) -> CacheReadResult<CachedValue<Value>> {
+        if let value = read(type, scope: scope, key: key) { return .value(value) }
+        switch lastReadIssue {
+        case .unavailable: return .storageUnavailable
+        case .unsupportedSchema: return .unsupportedSchema
+        case .corruptPayload: return .corruptPayload
+        case nil: return .notFound
+        }
     }
 
     func write<Value: Codable>(_ value: Value, scope: String, key: String) -> Date? {
@@ -133,6 +145,10 @@ final class CacheStore {
     }
 
     func planWriteAcknowledgement(scope: String) -> PlanWriteAcknowledgement? {
+        planAcknowledgementResult(scope: scope).value
+    }
+
+    func planAcknowledgementResult(scope: String) -> CacheReadResult<PlanWriteAcknowledgement> {
         readMetadata(PlanWriteAcknowledgement.self, sql: "SELECT payload FROM plan_write_acknowledgements WHERE scope = ?", key: scope)
     }
 
@@ -143,7 +159,9 @@ final class CacheStore {
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
         switch sqlite3_step(statement) {
-        case SQLITE_ROW: return Int(sqlite3_column_int64(statement, 0))
+        case SQLITE_ROW:
+            guard sqlite3_column_type(statement, 0) == SQLITE_INTEGER, sqlite3_column_int64(statement, 0) >= 0 else { return nil }
+            return Int(sqlite3_column_int64(statement, 0))
         case SQLITE_DONE: return 0
         default: return nil
         }
@@ -159,6 +177,7 @@ final class CacheStore {
         guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
         var committed = false
         defer { if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) } }
+        if planAcknowledgementResult(scope: scope).failureCode == .unsupportedSchema { return false }
         if let floor = planRevisionFloor(scope: scope), floor > acknowledgement.revision {
             committed = SQLiteSupport.execute("COMMIT", database: database)
             return committed
@@ -177,7 +196,7 @@ final class CacheStore {
         }
         sqlite3_finalize(statement)
         guard result == SQLITE_DONE, let deletion = prepare("""
-            DELETE FROM cache_entries WHERE scope = ? AND cache_key IN ('goals','today','run-coach','workout-plan')
+            DELETE FROM cache_entries WHERE scope = ? AND cache_key IN ('goals','today','run-coach','workout-plan','training-plan-state')
             """) else { return false }
         bind(scope, to: deletion, at: 1)
         let deleted = sqlite3_step(deletion)
@@ -190,10 +209,15 @@ final class CacheStore {
     }
 
     func watchLedger() -> PlanWatchLedger? {
-        readMetadata(PlanWatchLedger.self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "watch-ledger")
+        watchLedgerResult().value ?? nil
+    }
+
+    func watchLedgerResult() -> CacheReadResult<PlanWatchLedger?> {
+        readMetadata(Optional<PlanWatchLedger>.self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "watch-ledger")
     }
 
     func saveWatchLedger(_ ledger: PlanWatchLedger?) -> Bool {
+        guard !watchLedgerResult().isFailure else { return false }
         guard let statement = prepare("INSERT OR REPLACE INTO app_metadata(metadata_key, payload) VALUES ('watch-ledger', ?)"),
               let payload = try? JSONEncoder().encode(ledger) else { return false }
         defer { sqlite3_finalize(statement) }
@@ -204,10 +228,20 @@ final class CacheStore {
     }
 
     func pendingPlanReceipts(scope: String) -> [PlanSyncReceipt] {
-        readMetadata([PlanSyncReceipt].self, sql: "SELECT payload FROM plan_receipt_journal WHERE scope = ?", key: scope) ?? []
+        pendingPlanReceiptsResult(scope: scope).value ?? []
+    }
+
+    func pendingPlanReceiptsResult(scope: String) -> CacheReadResult<[PlanSyncReceipt]> {
+        let result = readMetadata([PlanSyncReceipt].self, sql: "SELECT payload FROM plan_receipt_journal WHERE scope = ?", key: scope)
+        if let values = result.value {
+            if values.contains(where: { $0.contractVersion != nil && $0.contractVersion != 2 }) { return .unsupportedSchema }
+            if !values.allSatisfy(\.hasRequiredVerificationFields) { return .corruptPayload }
+        }
+        return result
     }
 
     func savePendingPlanReceipts(_ receipts: [PlanSyncReceipt], scope: String) -> Bool {
+        guard !pendingPlanReceiptsResult(scope: scope).isFailure, receipts.allSatisfy(\.hasRequiredVerificationFields) else { return false }
         guard let payload = try? JSONEncoder().encode(receipts),
               let statement = prepare("INSERT OR REPLACE INTO plan_receipt_journal(scope, payload) VALUES (?, ?)") else { return false }
         defer { sqlite3_finalize(statement) }
@@ -218,12 +252,113 @@ final class CacheStore {
         }
     }
 
-    private func readMetadata<V: Decodable>(_ type: V.Type, sql: String, key: String) -> V? {
-        guard let statement = prepare(sql) else { return nil }
+    private func readMetadata<V: Decodable>(_ type: V.Type, sql: String, key: String) -> CacheReadResult<V> {
+        guard let statement = prepare(sql) else { return .storageUnavailable }
         defer { sqlite3_finalize(statement) }
         bind(key, to: statement, at: 1)
-        guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else { return nil }
-        return try? JSONDecoder().decode(type, from: Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0))))
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return .notFound }
+        guard result == SQLITE_ROW else { return .storageUnavailable }
+        guard let bytes = sqlite3_column_blob(statement, 0) else { return .corruptPayload }
+        let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0)))
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let version = object["schemaVersion"] as? Int, version != 1 { return .unsupportedSchema }
+        do { return .value(try JSONDecoder().decode(type, from: data)) }
+        catch { return .corruptPayload }
+    }
+
+    func pendingPublication(scope: String) -> CacheReadResult<PendingPlanPublication?> {
+        readMetadata(Optional<PendingPlanPublication>.self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "publication." + scope)
+    }
+
+    func savePublication(_ value: PendingPlanPublication?, scope: String) -> Bool {
+        guard !pendingPublication(scope: scope).isFailure else { return false }
+        return saveMetadata(value, key: "publication." + scope)
+    }
+
+    private func saveMetadata<Value: Encodable>(_ value: Value, key: String) -> Bool {
+        guard let payload = try? JSONEncoder().encode(value),
+              let statement = prepare("INSERT OR REPLACE INTO app_metadata(metadata_key, payload) VALUES (?, ?)") else { return false }
+        defer { sqlite3_finalize(statement) }
+        bind(key, to: statement, at: 1)
+        return payload.withUnsafeBytes { buffer in
+            sqlite3_bind_blob(statement, 2, buffer.baseAddress, Int32(payload.count), nil)
+            return sqlite3_step(statement) == SQLITE_DONE
+        }
+    }
+
+    func scheduleJournalResult() -> CacheReadResult<PlanScheduleOperationJournal> {
+        let value = readMetadata(PlanScheduleOperationJournal.self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "schedule-operation")
+        if let operation = value.value, operation.schemaVersion != 1 { return .unsupportedSchema }
+        return value
+    }
+
+    func saveScheduleJournal(_ value: PlanScheduleOperationJournal) -> Bool {
+        guard !scheduleJournalResult().isFailure else { return false }
+        return saveMetadata(value, key: "schedule-operation")
+    }
+
+    func commitScheduleResult(_ operation: PlanScheduleOperationJournal, ledger: PlanWatchLedger?, receipts: [PlanSyncReceipt]) -> Bool {
+        let existing = pendingPlanReceiptsResult(scope: operation.scope)
+        guard !existing.isFailure, !watchLedgerResult().isFailure,
+              SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
+        var committed = false
+        defer { if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) } }
+        if operation.phase == .withdrawn && operation.clearAll {
+            guard withdrawAllPendingReceipts(observedAt: operation.updatedAt) else { return false }
+        }
+        let current = pendingPlanReceiptsResult(scope: operation.scope)
+        guard !current.isFailure else { return false }
+        var pending = current.value ?? []
+        if operation.phase == .withdrawn {
+            let ids = Set((operation.previousEntries + operation.items.map(\.entry)).map { $0.workoutID.uuidString })
+            pending.removeAll { ids.contains($0.workoutID ?? "") && ($0.lifecycleEvent == nil || $0.lifecycleEvent == "verified") }
+        }
+        for receipt in receipts where !pending.contains(where: { $0.idempotencyKey == receipt.idempotencyKey }) { pending.append(receipt) }
+        guard saveScheduleJournal(operation), saveWatchLedger(ledger), savePendingPlanReceipts(pending, scope: operation.scope) else { return false }
+        committed = SQLiteSupport.execute("COMMIT", database: database)
+        return committed
+    }
+
+    private func withdrawAllPendingReceipts(observedAt: Date) -> Bool {
+        guard let statement = prepare("SELECT scope FROM plan_receipt_journal") else { return false }
+        var scopes: [String] = []
+        var result = sqlite3_step(statement)
+        while result == SQLITE_ROW {
+            if let text = sqlite3_column_text(statement, 0) { scopes.append(String(cString: text)) }
+            result = sqlite3_step(statement)
+        }
+        sqlite3_finalize(statement)
+        guard result == SQLITE_DONE else { return false }
+        for scope in scopes {
+            let previous = pendingPlanReceiptsResult(scope: scope)
+            guard !previous.isFailure else { return false }
+            var pending = (previous.value ?? []).filter { $0.lifecycleEvent != nil && $0.lifecycleEvent != "verified" }
+            for var receipt in previous.value ?? [] where receipt.contractVersion == 2 && receipt.lifecycleEvent == "verified" {
+                receipt.lifecycleEvent = "withdrawn"; receipt.verifiedAt = ISO8601DateFormatter().string(from: observedAt)
+                receipt.idempotencyKey = (receipt.workoutID ?? "") + ":withdrawn"
+                if !pending.contains(where: { $0.idempotencyKey == receipt.idempotencyKey }) { pending.append(receipt) }
+            }
+            guard savePendingPlanReceipts(pending, scope: scope) else { return false }
+        }
+        return true
+    }
+
+    func recordPlanDiagnostic(_ event: PlanDiagnosticEvent) {
+        let result = readMetadata([PlanDiagnosticEvent].self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "plan-diagnostics")
+        guard !result.isFailure else { return }
+        _ = saveMetadata(Array(((result.value ?? []) + [event]).suffix(500)), key: "plan-diagnostics")
+    }
+
+    func exportPlanDiagnostics() -> URL? {
+        let result = readMetadata([PlanDiagnosticEvent].self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "plan-diagnostics")
+        guard !result.isFailure else { return nil }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("rai-plan-diagnostics.json")
+        do {
+            try encoder.encode(result.value ?? []).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            return url
+        } catch { return nil }
     }
 
     func clear(scope: String) {

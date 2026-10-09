@@ -51,6 +51,25 @@ enum PaceBounds: Equatable {
 }
 
 enum WorkoutPlanMapper {
+    struct MappingResult {
+        enum Status: String { case exact, normalized, unsupported }
+        let status: Status
+        let reasonCode: String?
+        let workout: PlannedWorkout?
+        let exportedStructure: MobileSessionStructure?
+        let differences: [String]
+    }
+
+    static func executionMapping(from day: MobileWorkoutPlanDay, hour: Int) -> MappingResult {
+        guard ["easy", "recovery", "long_run", "tempo", "interval"].contains(day.kind), day.executable,
+              let mapped = plannedWorkout(from: day, hour: hour),
+              let exported = safeExportedStructure(mapped, original: day.structure) else {
+            return .init(status: .unsupported, reasonCode: "required_prescription_not_lossless", workout: nil, exportedStructure: nil, differences: [])
+        }
+        let exact = exported == day.structure
+        return .init(status: exact ? .exact : .normalized, reasonCode: nil, workout: mapped,
+            exportedStructure: exported, differences: exact ? [] : ["target_bounds_reordered"])
+    }
     /// Early enough that a morning runner can still see it before leaving.
     nonisolated static let defaultScheduleHour = 7
     /// When the nominal time has already passed, schedule this far ahead instead
@@ -296,11 +315,14 @@ enum WorkoutPlanMapper {
             }
             if let alert = raw.alert {
                 guard let sent = actual.alert, alert.kind == sent.kind,
+                      ["pace", "heart_rate"].contains(alert.kind), alert.lower != nil, alert.upper != nil,
+                      alert.lower?.rounded() == alert.lower, alert.upper?.rounded() == alert.upper,
+                      alert.kind != "pace" || [alert.lower!, alert.upper!].allSatisfy({ (120...1200).contains($0) }),
                       alert.lower?.isFinite != false, alert.upper?.isFinite != false,
                       (alert.lower == nil) == (sent.lower == nil), (alert.upper == nil) == (sent.upper == nil) else { return false }
                 let normalized = ordered(lower: alert.lower, upper: alert.upper)
                 guard normalized.0 == sent.lower, normalized.1 == sent.upper else { return false }
-            }
+            } else if actual.alert != nil { return false }
             return true
         }
         guard equalDose(original.warmup, exported.warmup), equalDose(original.cooldown, exported.cooldown) else { return nil }

@@ -43,7 +43,7 @@
 
 教练命令与 goals 共用 CAS；无效状态/配置为 `422 run_coach_invalid`，过期修订为 `409 mobile_goals_revision_conflict`。active/paused 期间，直接 PUT 目标或逐日计划返回 `409 run_coach_managed`，旧生成和预览也被拒绝。独立手动课表在结束后显式保存或确认时清除教练管理状态。
 
-原生全量刷新和教练入口先 GET，再对 active 计划 POST refresh，事实相同不会增加 revision。命令确认成功后刷新 today/goals/workout-plan，依赖读取失败只报告“已保存但未刷新”，不伪装成保存失败。教练缓存按服务身份和 revision 隔离，已确认的新教练缓存可独立于较旧 goals 缓存恢复；旧修订的今日处方和手表课表不得展示为新计划，缺少匹配安排时显示尚未刷新。旧读取不能覆盖新命令；离线不执行命令。手表同步和撤回仍需用户手动操作，教练状态变化不会自动修改设备。
+旧协议原生全量刷新和教练入口先 GET，再对 active 计划 POST refresh，事实相同不会增加 revision。支持完整快照的新协议入口只读取；适应通过用户显式点击“按最新训练事实调整计划”执行。命令确认成功后刷新完整计划，依赖读取失败只报告“已保存但未刷新”，不伪装成保存失败。教练缓存按服务身份和 revision 隔离，已确认的新教练缓存可独立于较旧 goals 缓存恢复；旧修订的今日处方和手表课表不得展示为新计划，缺少匹配安排时显示尚未刷新。旧读取不能覆盖新命令；离线不执行命令。手表同步和撤回仍需用户手动操作，教练状态变化不会自动修改设备。
 
 `POST /v1/mobile/lock` 带 `action: lock|relock` 和当前 `recommendationRevision`。服务端只拒绝两种情形：上次健康同步失败（`409 mobile_refresh_failed`），或建议版本已过期（`409 mobile_recommendation_stale`）。**今天没有恢复记录不是拒绝理由** —— 没戴表是普通的覆盖缺口，不应阻止锁课；锁课只允许联网执行。
 
@@ -100,6 +100,8 @@
 同时修正 `weeklyCapacityKm` 的语义：它现在是**本周可花预算**（`min(容量, 本周量带上限)`），与生成侧和今天页量带上限同源。它此前的值是未按阶段裁剪的容量，与生成侧实际使用的数字不一致；**同名同型，取值口径变了**，如果客户端把它当作"上限"来做二次裁剪，请改用今天页的 `periodization.current.volumeBandKm.upper`。
 
 ## 训练计划一致性与排期回执（2026-10-09）
+
+后续增量：完整聚合能力 `planSnapshotContractVersion=1`、持久发布能力 `planPublicationContractVersion=1`、回执事件能力 `planReceiptContractVersion=2`。端点、必需安全字段、版本降级、90 天结果保留、墓碑与恢复规则见 [IOS_TRAINING_PLAN_STATE_V1](IOS_TRAINING_PLAN_STATE_V1.md)。新增能力独立协商，不能用旧 `planReceiptMetadata` 布尔发送版本 2 字段。
 
 实现与兼容政策见 [IOS_TRAINING_PLAN_IMPLEMENTATION](IOS_TRAINING_PLAN_IMPLEMENTATION.md)。
 `/workout-plan/synced` 的准确语义是客户端**本地系统日程已核验**；不是物理手表收到的证明。

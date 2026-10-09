@@ -11,13 +11,17 @@ import sys
 root = Path(sys.argv[1])
 source = Path('apps/ios/RAI/NativeAppModel.swift').read_text()
 source = source.removeprefix('#if os(iOS)\n').removesuffix('#endif\n')
+store = Path('apps/ios/RAI/TrainingPlanStore.swift').read_text()
 mutants = {
-    'forgot-watermark': ('if cache.acknowledgePlanWrite(ack, scope: cacheScope, goals: goals, coach: coach) {', 'if true {'),
-    'id-only-lease': ('planSyncSnapshot(snapshot.leaseID) == snapshot', 'isCurrentPlanSync(snapshot.leaseID)'),
+    'forgot-watermark': (store, 'if repository.acknowledge(ack, scope: scope, goals: goals, coach: coach) {', 'if true {'),
+    'id-only-lease': (source, 'planSyncSnapshot(snapshot.leaseID)?.matchesForExecution(snapshot) == true', 'isCurrentPlanSync(snapshot.leaseID)'),
 }
-for name, (before, after) in mutants.items():
-    assert source.count(before) == 1, (name, 'anchor must occur exactly once')
-    (root/f'{name}.swift').write_text(source.replace(before, after))
+for name, (text, before, after) in mutants.items():
+    assert text.count(before) == 1, (name, 'anchor must occur exactly once')
+    folder = root / name
+    folder.mkdir()
+    (folder/'NativeAppModel.swift').write_text(source if name == 'forgot-watermark' else text.replace(before, after))
+    (folder/'TrainingPlanStore.swift').write_text(store if name == 'id-only-lease' else text.replace(before, after))
 PY
 for mutant in forgot-watermark id-only-lease; do
   xcrun swiftc -parse-as-library -disable-sandbox \
@@ -25,9 +29,10 @@ for mutant in forgot-watermark id-only-lease; do
     apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/CalibrationState.swift apps/ios/RAI/UserDataNoticePolicy.swift \
     apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \
     apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift apps/ios/RAI/PlanReceiptMatcher.swift \
-    apps/ios/RAI/PlanWatchSyncCoordinator.swift "$tmp/$mutant.swift" \
-    apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift -o "$tmp/$mutant"
-  python3 - "$tmp/$mutant" "$mutant" <<'PY'
+    apps/ios/RAI/PlanWatchSyncCoordinator.swift apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/TrainingPlanRepository.swift \
+    "$tmp/$mutant/NativeAppModel.swift" "$tmp/$mutant/TrainingPlanStore.swift" \
+    apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift -o "$tmp/$mutant/test"
+  python3 - "$tmp/$mutant/test" "$mutant" <<'PY'
 import subprocess, sys
 expected = {
   'forgot-watermark': 'manual confirm watermark survives all failed reads and offline restart',

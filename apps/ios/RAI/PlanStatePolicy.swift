@@ -10,6 +10,7 @@ struct PlanWriteAcknowledgement: Codable, Equatable {
 }
 
 enum PlanAvailability: Equatable {
+    case empty
     case current
     case cached(asOf: Date?)
     case refreshing
@@ -19,6 +20,7 @@ enum PlanAvailability: Equatable {
 
     var message: String {
         switch self {
+        case .empty: return "当前窗口没有待执行训练；仍可管理旧系统排期"
         case .current: return "当前安排"
         case .cached: return "上次缓存安排；联网后请重新确认"
         case .refreshing: return "正在刷新今天的安排"
@@ -38,6 +40,7 @@ struct PlanPresentationSnapshot {
     let executablePlan: MobileWorkoutPlanResponse?
     let availability: PlanAvailability
     let lastKnownTodayDate: String?
+    var issue: PlanReadIssue? = nil
 }
 
 /// Equality deliberately excludes generatedAt and all credentials. Revision alone
@@ -53,6 +56,22 @@ struct PlanSyncSnapshot: Equatable {
     let localDate: String
     let windowDays: Int
     let leaseID: UUID
+    var coherenceToken: String? = nil
+    var windowStart: String? = nil
+    var windowEnd: String? = nil
+    var serverIdentity: PlanReceiptScope? = nil
+
+    func matchesForExecution(_ other: PlanSyncSnapshot) -> Bool {
+        scope == other.scope && configuration == other.configuration && revision == other.revision &&
+            timezone == other.timezone && reminderHour == other.reminderHour && completedDates == other.completedDates &&
+            localDate == other.localDate && windowDays == other.windowDays && leaseID == other.leaseID &&
+            coherenceToken == other.coherenceToken && windowStart == other.windowStart && windowEnd == other.windowEnd &&
+            serverIdentity == other.serverIdentity && days.count == other.days.count &&
+            zip(days, other.days).allSatisfy { left, right in
+                left.localDate == right.localDate && left.kind == right.kind && left.executable == right.executable &&
+                    left.structure == right.structure
+            }
+    }
 }
 
 enum PlanWatchState: String {
@@ -81,6 +100,8 @@ struct PlanWatchLedger: Codable, Equatable {
     let confirmedAt: Date
     var registeredDates: [String]
     var requiresWithdrawal: Bool? = nil
+    var receipts: [PlanSyncReceipt]? = nil
+    var coherenceToken: String? = nil
 }
 
 struct PlanScheduledEntry: Codable, Equatable {
@@ -92,14 +113,90 @@ struct PlanScheduledEntry: Codable, Equatable {
 enum PlanFingerprint {
     static func make(days: [MobileWorkoutPlanDay], timezone: String, hour: Int, completed: Set<String>) -> String {
         struct Input: Encodable {
-            let days: [MobileWorkoutPlanDay]
+            let days: [String]
             let timezone: String
             let hour: Int
             let completed: [String]
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let data = (try? encoder.encode(Input(days: days, timezone: timezone, hour: hour, completed: completed.sorted()))) ?? Data()
+        let content = days.map { "\($0.localDate)|\($0.executable)|\(prescriptionDigest(kind: $0.kind, structure: $0.structure))" }
+        let data = (try? encoder.encode(Input(days: content, timezone: timezone, hour: hour, completed: completed.sorted()))) ?? Data()
         return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
+
+    static func prescriptionDigest(kind: String, structure: MobileSessionStructure?) -> String {
+        func number(_ value: Double?) -> String {
+            guard let value else { return "~" }
+            return String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), value == 0 ? 0 : value)
+        }
+        func step(_ value: MobileWorkoutStep?) -> [String] {
+            guard let value else { return ["~"] }
+            let goal: [String]
+            switch value.goal {
+            case .distance(let meters): goal = ["distance", number(meters)]
+            case .time(let seconds): goal = ["time", number(seconds)]
+            case .open: goal = ["open", "~"]
+            }
+            return [value.purpose] + goal + [value.alert?.kind ?? "~", number(value.alert?.lower), number(value.alert?.upper)]
+        }
+        var parts = ["rai-prescription-v1", kind]
+        if let structure {
+            parts += step(structure.warmup) + [String(structure.blocks.count)]
+            for block in structure.blocks {
+                parts += [number(Double(block.iterations)), String(block.steps.count)]
+                for item in block.steps { parts += step(item) }
+            }
+            parts += step(structure.cooldown)
+        } else { parts.append("~") }
+        return SHA256.hash(data: Data(parts.joined(separator: "|").utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+enum CacheReadResult<Value> {
+    case value(Value), notFound, unsupportedSchema, corruptPayload, storageUnavailable
+    var value: Value? { if case .value(let value) = self { return value }; return nil }
+    var isFailure: Bool {
+        switch self { case .value, .notFound: return false; default: return true }
+    }
+    var failureCode: PlanReadIssue.Code? {
+        switch self {
+        case .unsupportedSchema: return .unsupportedSchema
+        case .corruptPayload: return .corruptPayload
+        case .storageUnavailable: return .storageUnavailable
+        default: return nil
+        }
+    }
+}
+
+struct PlanReadIssue: Equatable {
+    enum Code: String { case offline, timeout, unauthorized, contractMismatch, revisionConflict, serverUnavailable, storageUnavailable, corruptPayload, unsupportedSchema }
+    let code: Code
+    let message: String
+    var retryable: Bool { [.offline, .timeout, .serverUnavailable, .revisionConflict].contains(code) }
+}
+
+struct PlanPublicationResult<Result: Decodable>: Decodable {
+    let status: String
+    let operationId: String
+    let result: Result?
+}
+
+struct PendingPlanPublication: Codable {
+    let operationId: String
+    let route: String
+    let payload: Data
+    let preparedAt: Date
+}
+
+struct PlanDiagnosticEvent: Codable {
+    let at: Date
+    let name: String
+    let scopeDigest: String
+    let operationId: String?
+    let revision: Int
+    let owed: Int?
+    let confirmed: Int?
+    let errorCode: String?
+    var durationMilliseconds: Double? = nil
 }

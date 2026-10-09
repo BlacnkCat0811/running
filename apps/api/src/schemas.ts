@@ -1,5 +1,5 @@
 import { workoutExportQuerySchema } from "./workout-summary-export.js";
-import { MOBILE_SESSION_KINDS } from "@rai/contracts";
+import { DATABASE_TIMEZONE, MOBILE_SESSION_KINDS } from "@rai/contracts";
 
 import {
   MAX_ALERT_HEART_RATE_BPM,
@@ -12,6 +12,11 @@ import {
 } from "./session-structure.js";
 
 const identifier = { type: "string", minLength: 1, maxLength: 160 } as const;
+export const planOperationScopeSchema = {
+  type: "object", additionalProperties: false, required: ["serverId", "athleteId", "datasetEpoch"],
+  properties: { serverId: { type: "string", minLength: 1, maxLength: 256 }, athleteId: { type: "string", minLength: 1, maxLength: 256 },
+    datasetEpoch: { type: "string", minLength: 1, maxLength: 256 } }
+} as const;
 
 export const identifierParamsSchema = {
   type: "object",
@@ -104,6 +109,8 @@ const mobileRaceTargetSchema = {
 export const runCoachCommandSchema = {
   type: "object", additionalProperties: false, required: ["expectedRevision", "action"],
   properties: {
+    operationId: { type: "string", format: "uuid" },
+    operationScope: planOperationScopeSchema,
     expectedRevision: { type: "integer", minimum: 0 },
     action: { type: "string", enum: ["start", "update", "refresh", "pause", "resume", "end"] },
     config: { type: "object", additionalProperties: false,
@@ -252,6 +259,8 @@ export const mobileLockBodySchema = {
   additionalProperties: false,
   required: ["action"],
   properties: {
+    operationId: { type: "string", format: "uuid" },
+    operationScope: planOperationScopeSchema,
     action: { type: "string", enum: ["lock", "relock"] },
     expectedRevision: { type: "string", minLength: 8, maxLength: 128 }
   }
@@ -287,6 +296,15 @@ export const mobilePlanSyncedBodySchema = {
   additionalProperties: false,
   required: ["localDate", "kind"],
   properties: {
+    contractVersion: { const: 2 },
+    scope: { type: "object", additionalProperties: false, required: ["serverId", "athleteId", "datasetEpoch"],
+      properties: { serverId: { type: "string", minLength: 1 }, athleteId: { type: "string", minLength: 1 }, datasetEpoch: { type: "string", minLength: 1 } } },
+    operationId: { type: "string", format: "uuid" },
+    coherenceToken: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    verifiedAt: { type: "string", format: "date-time" },
+    timezone: { const: DATABASE_TIMEZONE },
+    prescriptionDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    lifecycleEvent: { type: "string", enum: ["verified", "withdrawn", "replaced"] },
     localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     kind: { type: "string", enum: [...MOBILE_SESSION_KINDS] },
     revision: { type: "integer", minimum: 0, maximum: 1_000_000 },
@@ -306,6 +324,8 @@ export const mobileGoalsBodySchema = {
   // with the stored weekly goal, and a client that still sends it now fails on
   // `additionalProperties` — which is the intended signal that it no longer exists.
   properties: {
+    operationId: { type: "string", format: "uuid" },
+    operationScope: planOperationScopeSchema,
     expectedRevision: { type: "integer", minimum: 0 },
     easyDurationFloorFraction: { type: "number", minimum: 0.4, maximum: 0.95 },
     qualitySessionCap: { type: "integer", minimum: 0, maximum: 4 },
@@ -646,6 +666,8 @@ const successSchema = (summary: string): Record<string, unknown> => {
     "导出移除路线与健康时序的本地诊断 JSON": ["generatedAt", "privacy"],
     "全局导入与重算状态": ["databaseReady", "busy", "recomputeJob", "importJob"],
     "分页训练列表": ["items", "total", "limit", "offset"],
+    "同一冻结事实视图中的目标、今日、滚动执行窗口与教练摘要": ["metadata", "availability", "goals", "today", "workoutPlan", "coachSummary"],
+    "查询原发布操作：committed、notFound 或 expired": ["status", "operationId"],
     "训练详情": ["workout", "dimensions"],
     "训练内时间序列": ["trainingSessionId", "series"],
     "追加训练覆盖 revision 并重算": ["overrideId", "jobId"],
@@ -822,6 +844,8 @@ export const openapiDocument = {
     }) },
     "/v1/training-zones/current": { get: operation(["Read"], "今日心率与配速分区") },
     "/v1/mobile/today": { get: operation(["Read"], "iOS 首页聚合：能力主卡、今日裁决、下一堂课、恢复拆解、跑后结论与周结构") },
+    "/v1/mobile/training-plan-state": { get: operation(["Read"], "同一冻结事实视图中的目标、今日、滚动执行窗口与教练摘要") },
+    "/v1/mobile/plan-operations/{id}": { get: operation(["Read"], "查询原发布操作：committed、notFound 或 expired", { parameters: pathId }) },
     "/v1/mobile/statistics": { get: operation(["Read"], "iOS 统计页聚合：近 3 月分运动类型里程、滚动汇总与心率区间分布") },
     "/v1/mobile/trends": { get: operation(["Read"], "iOS 趋势页聚合：能力曲线、12 周跑量、四周增幅、个人纪录与洞察") },
     "/v1/mobile/goals": {
@@ -868,7 +892,7 @@ export const openapiDocument = {
     "/v1/mobile/workout-plan/confirm": {
       post: operation(["Workouts"], "确认预览；校验目标版本与训练数据快照，支持重复确认幂等", {
         requestBody: body({ type: "object", additionalProperties: false, required: ["candidateId", "expectedRevision"], properties: {
-          candidateId: { type: "string", minLength: 1, maxLength: 80 }, expectedRevision: { type: "integer", minimum: 0 }
+          candidateId: { type: "string", minLength: 1, maxLength: 80 }, expectedRevision: { type: "integer", minimum: 0 }, operationId: { type: "string", format: "uuid" }, operationScope: planOperationScopeSchema
         } }, "候选标识及预览基准 revision")
       })
     },

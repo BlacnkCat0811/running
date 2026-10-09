@@ -25,8 +25,17 @@ final class WorkoutKitBridge: WorkoutScheduling {
         await WorkoutScheduler.shared.schedule(plan, at: request.at)
     }
     func remove(_ request: PlanSchedulingRequest) async {
-        guard let plan = plans[request.entry.workoutID] else { return }
-        await WorkoutScheduler.shared.remove(plan, at: request.at)
+        await removeEntries([request.entry])
+    }
+    func removeEntries(_ entries: [PlanScheduledEntry]) async {
+        let listed = await WorkoutScheduler.shared.scheduledWorkouts
+        for item in listed {
+            guard entries.contains(where: {
+                $0.workoutID == item.plan.id &&
+                PlanReceiptMatcher.instant(item.date, fallbackTimeZone: TimeZone(identifier: "Asia/Shanghai")!) == $0.scheduledAt
+            }) else { continue }
+            await WorkoutScheduler.shared.remove(item.plan, at: item.date)
+        }
     }
     func removeAll() async { await WorkoutScheduler.shared.removeAllWorkouts() }
     func readBack() async -> [PlanSchedulingReadback] {

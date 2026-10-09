@@ -7,6 +7,9 @@ struct RaiHandshake: Codable, Equatable {
     let syncProtocolVersion: Int
     let apiVersion: String
     var planReceiptMetadata: Bool? = nil
+    var planSnapshotContractVersion: Int? = nil
+    var planPublicationContractVersion: Int? = nil
+    var planReceiptContractVersion: Int? = nil
 }
 
 struct RaiAPIError: Codable {
@@ -810,10 +813,12 @@ struct MobileRunCoachPlan: Codable, Equatable {
     }
 }
 
-struct MobileRunCoachCommand: Encodable {
+struct MobileRunCoachCommand: Codable {
     let expectedRevision: Int
     let action: String
     let config: MobileRunCoachConfig?
+    var operationId: String? = nil
+    var operationScope: PlanReceiptScope? = nil
 }
 
 struct MobileRunCoachResponse: Codable {
@@ -897,10 +902,12 @@ struct UpdateMobileGoalsRequest: Encodable {
     let qualitySessionCap: Int?
     let raceTarget: MobileRaceTarget?
     let weekPlan: [MobileGoalsPlanItem]?
+    var operationId: String? = nil
+    var operationScope: PlanReceiptScope? = nil
 
     enum CodingKeys: String, CodingKey {
         case expectedRevision, easyDurationFloorFraction, qualitySessionCap
-        case raceTarget, weekPlan
+        case raceTarget, weekPlan, operationId, operationScope
     }
 
     func encode(to encoder: Encoder) throws {
@@ -911,6 +918,8 @@ struct UpdateMobileGoalsRequest: Encodable {
         // Explicit null clears the persisted race; omission would preserve it.
         try container.encode(raceTarget, forKey: .raceTarget)
         try container.encodeIfPresent(weekPlan, forKey: .weekPlan)
+        try container.encodeIfPresent(operationId, forKey: .operationId)
+        try container.encodeIfPresent(operationScope, forKey: .operationScope)
     }
 }
 
@@ -941,6 +950,31 @@ struct MobileWorkoutPlanResponse: Codable, Equatable {
     let planRevision: Int
     let audit: MobilePlanAudit?
     let days: [MobileWorkoutPlanDay]
+    var windowStart: String? = nil
+    var windowEnd: String? = nil
+}
+
+struct TrainingPlanStateResponse: Codable {
+    struct Metadata: Codable, Equatable {
+        let contractVersion: Int
+        let serverId: String
+        let athleteId: String
+        let datasetEpoch: String
+        let goalsRevision: Int
+        let coherenceToken: String
+        let timezone: String
+        let localDate: String
+        let windowStart: String
+        let windowEnd: String
+        let ruleVersion: String
+        let publicationDigest: String
+    }
+    let metadata: Metadata
+    let availability: String
+    let goals: MobileGoalsResponse
+    let today: MobileTodayResponse
+    let workoutPlan: MobileWorkoutPlanResponse
+    let coachSummary: MobileRunCoachResponse
 }
 
 /// A locally verified system-schedule receipt, NOT physical Watch delivery.
@@ -955,10 +989,48 @@ struct PlanSyncReceipt: Codable, Equatable {
     var scheduledAt: String? = nil
     var idempotencyKey: String? = nil
     var exportNotes: [String]? = nil
+    var contractVersion: Int? = nil
+    var scope: PlanReceiptScope? = nil
+    var operationId: String? = nil
+    var coherenceToken: String? = nil
+    var verifiedAt: String? = nil
+    var timezone: String? = nil
+    var prescriptionDigest: String? = nil
+    var lifecycleEvent: String? = nil
+
+    var hasRequiredVerificationFields: Bool {
+        guard contractVersion == 2 else { return contractVersion == nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        func instant(_ value: String?) -> Date? {
+            guard let value else { return nil }
+            return formatter.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        }
+        guard let scope, !scope.serverId.isEmpty, !scope.athleteId.isEmpty, !scope.datasetEpoch.isEmpty,
+              let operationId, UUID(uuidString: operationId) != nil, let workoutID, UUID(uuidString: workoutID) != nil,
+              instant(scheduledAt) != nil, instant(verifiedAt) != nil, timezone == "Asia/Shanghai", structure != nil,
+              let coherenceToken, coherenceToken.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              let prescriptionDigest, prescriptionDigest.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+              let lifecycleEvent, ["verified", "withdrawn", "replaced"].contains(lifecycleEvent) else { return false }
+        return true
+    }
+
+    mutating func useLegacyContract(metadata: Bool) {
+        contractVersion = nil; scope = nil; operationId = nil; coherenceToken = nil
+        verifiedAt = nil; timezone = nil; prescriptionDigest = nil; lifecycleEvent = nil
+        if !metadata { workoutID = nil; scheduledAt = nil; idempotencyKey = nil; exportNotes = nil }
+    }
+}
+
+struct PlanReceiptScope: Codable, Equatable {
+    let serverId: String
+    let athleteId: String
+    let datasetEpoch: String
 }
 
 struct PlanSyncReceiptResponse: Decodable {
     let recordedAt: String
+    let matchesCurrent: Bool?
 }
 
 struct MobilePlannedDay: Codable, Equatable {
@@ -1004,9 +1076,11 @@ struct MobileWeeklyPlanPreview: Codable, Identifiable {
     var id: String { candidateId }
 }
 
-struct ConfirmWeeklyPlanRequest: Encodable {
+struct ConfirmWeeklyPlanRequest: Codable {
     let candidateId: String
     let expectedRevision: Int
+    var operationId: String? = nil
+    var operationScope: PlanReceiptScope? = nil
 }
 
 struct PreviewWeeklyPlanRequest: Encodable {
@@ -1023,13 +1097,17 @@ struct PreviewWeeklyPlanRequest: Encodable {
 struct LockMobileSessionRequest: Encodable {
     let action: String
     let expectedRevision: String?
+    var operationId: String? = nil
+    var operationScope: PlanReceiptScope? = nil
 
-    enum CodingKeys: String, CodingKey { case action, expectedRevision }
+    enum CodingKeys: String, CodingKey { case action, expectedRevision, operationId, operationScope }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(action, forKey: .action)
         try container.encodeIfPresent(expectedRevision, forKey: .expectedRevision)
+        try container.encodeIfPresent(operationId, forKey: .operationId)
+        try container.encodeIfPresent(operationScope, forKey: .operationScope)
     }
 }
 

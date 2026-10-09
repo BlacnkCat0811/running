@@ -4,6 +4,7 @@ import SwiftUI
 struct RaceGoalEditorContext: Identifiable {
     let id = UUID()
     let goals: MobileGoalsResponse
+    let editorSessionID: String
 }
 
 /// Snapshot the revision when opened: concurrent edits must conflict, not overwrite.
@@ -31,7 +32,7 @@ struct TechRaceGoalEditor: View {
         } ?? "")
     }
 
-    private var stale: Bool { native.goals?.revision != context.goals.revision }
+    private var stale: Bool { native.goals?.revision != context.goals.revision || context.editorSessionID != native.feedbackSessionID }
     private var resolvedPace: Double? {
         inputMode == "pace" ? NativeRaceGoalDraft.paceSeconds(pace) : NativeRaceGoalDraft.finishSeconds(finish).map { $0 / NativeRaceGoalDraft.kilometers(distance) }
     }
@@ -137,7 +138,7 @@ struct TechRaceGoalEditor: View {
         guard !saving, !stale, !native.isOffline else { return }
         saving = true
         failure = nil
-        let success = await native.saveRaceTarget(target, expectedRevision: context.goals.revision)
+        let success = await native.saveRaceTarget(target, expectedRevision: context.goals.revision, editorSessionID: context.editorSessionID)
         saving = false
         if success { dismiss() }
         else { failure = native.errorMessage ?? "保存未完成，请重试。" }

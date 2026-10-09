@@ -29,6 +29,8 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/CacheStore.swift > "$tm
 # 环境里会直接死掉，失败形态是满屏 "produced malformed response"，与真实错误无关。
 xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
+  apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/PlanWatchScheduling.swift \
+  apps/ios/RAI/WorkoutPlanMapper.swift apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/UserDataNoticePolicy.swift \
   apps/ios/RAI/ServerSession.swift \
   "$tmp/CacheStore.swift" \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \

@@ -311,6 +311,108 @@ struct StoreRegression {
         precondition(sqlite3_exec(failureDB, "UPDATE plan_write_acknowledgements SET payload=x'00' WHERE scope='A'", nil, nil, nil) == SQLITE_OK)
         check(safety.planWriteAcknowledgement(scope: "A") == nil && safety.planRevisionFloor(scope: "A") == 13,
               "corrupt explanatory write metadata cannot erase the authoritative scalar revision floor")
+        check(safety.planAcknowledgementResult(scope: "A").failureCode == .corruptPayload,
+              "safety metadata corruption has a typed read result, never a cache miss")
+        let snapshot = PlanSyncSnapshot(scope: "journal-scope", configuration: UUID(), revision: 13, days: [],
+            timezone: "Asia/Shanghai", reminderHour: 8, completedDates: [], localDate: "2026-10-09", windowDays: 7, leaseID: UUID())
+        let scheduleJournal = PlanScheduleJournal(storage: safety, snapshot: snapshot, previousEntries: [])
+        check(scheduleJournal.prepare([]) && scheduleJournal.persist(.clearing), "write-ahead intent and clearing phase commit before any SDK effect")
+        safety.clearAll(); safety.prune(maxEntries: 0)
+        let reopenedJournal = CacheStore(fileURL: safetyURL)
+        check(reopenedJournal.scheduleJournalResult().value?.phase == .clearing &&
+              reopenedJournal.scheduleJournalResult().value?.terminal == false,
+              "unfinished operation survives clear-cache, eviction and simulated process restart")
+        let publication = PendingPlanPublication(operationId: UUID().uuidString, route: "coach", payload: Data("{}".utf8), preparedAt: Date())
+        check(safety.savePublication(publication, scope: "journal-scope"), "pending business publication is safety metadata")
+        safety.clearAll()
+        check((CacheStore(fileURL: safetyURL).pendingPublication(scope: "journal-scope").value ?? nil)?.operationId == publication.operationId,
+              "lost-response business operation survives clear-cache and reopen")
+        precondition(sqlite3_exec(failureDB, "CREATE TRIGGER fail_receipt BEFORE INSERT ON plan_receipt_journal BEGIN SELECT RAISE(ABORT, 'injected'); END", nil, nil, nil) == SQLITE_OK)
+        check(!scheduleJournal.finish(ledger: ledger, receipts: [pendingReceipt], verified: true),
+              "ledger, schedule journal and pending receipts do not report a partial transaction as committed")
+        check(CacheStore(fileURL: safetyURL).scheduleJournalResult().value?.phase == .clearing &&
+              CacheStore(fileURL: safetyURL).watchLedger() == nil,
+              "receipt persistence failure rolls journal and ledger back to the preceding durable intent")
+        precondition(sqlite3_exec(failureDB, "DROP TRIGGER fail_receipt", nil, nil, nil) == SQLITE_OK)
+        let exported = MobileSessionStructure(warmup: nil, blocks: [.init(iterations: 1, steps: [
+            .init(purpose: "work", goal: .distance(meters: 4000), alert: nil)
+        ])], cooldown: nil)
+        let uuid = UUID().uuidString
+        let verifiedReceipt = PlanSyncReceipt(localDate: "2026-10-09", kind: "easy", revision: 13, structure: exported,
+            workoutID: uuid, scheduledAt: "2026-10-09T00:00:00Z", idempotencyKey: uuid, contractVersion: 2,
+            scope: .init(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch"), operationId: UUID().uuidString,
+            coherenceToken: String(repeating: "a", count: 64), verifiedAt: "2026-10-09T00:00:00Z", timezone: "Asia/Shanghai",
+            prescriptionDigest: PlanFingerprint.prescriptionDigest(kind: "easy", structure: exported), lifecycleEvent: "verified")
+        let replacementScope = "replacement-recovery"
+        let oldEntry = PlanScheduledEntry(workoutID: UUID(uuidString: uuid)!, localDate: verifiedReceipt.localDate,
+            scheduledAt: ISO8601DateFormatter().date(from: verifiedReceipt.scheduledAt!)!)
+        let previousLedger = PlanWatchLedger(scope: replacementScope, revision: 13, entries: [oldEntry], fingerprint: "old",
+            reminderHour: 8, confirmedAt: Date(), registeredDates: [oldEntry.localDate], receipts: [verifiedReceipt])
+        let replacementSnapshot = PlanSyncSnapshot(scope: replacementScope, configuration: UUID(), revision: 14, days: [],
+            timezone: "Asia/Shanghai", reminderHour: 8, completedDates: [], localDate: "2026-10-10", windowDays: 7, leaseID: UUID())
+        let replacementJournal = PlanScheduleJournal(storage: safety, snapshot: replacementSnapshot, previousEntries: [oldEntry])
+        let replacementDay = MobileWorkoutPlanDay(localDate: "2026-10-10", kind: "easy", title: "replacement", reason: "",
+            distanceKm: 4, durationMinutes: nil, paceSecondsPerKmLower: nil, paceSecondsPerKmUpper: nil,
+            heartRateBpmLower: nil, heartRateBpmUpper: nil, structure: exported, source: "manual", executable: true)
+        let replacementWorkout = WorkoutPlanMapper.plannedWorkout(from: replacementDay, hour: 8)!
+        let replacementEntry = PlanScheduledEntry(workoutID: UUID(), localDate: replacementDay.localDate,
+            scheduledAt: oldEntry.scheduledAt.addingTimeInterval(86400))
+        var at = DateComponents(year: 2026, month: 10, day: 10, hour: 8, minute: 0)
+        at.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        let replacementRequest = PlanSchedulingRequest(entry: replacementEntry, at: at, workout: replacementWorkout,
+            exportedStructure: exported, exportNotes: [], kind: "easy")
+        let replacementReceipt = PlanSyncReceipt(localDate: replacementEntry.localDate, kind: "easy", revision: 14, structure: exported,
+            workoutID: replacementEntry.workoutID.uuidString, scheduledAt: ISO8601DateFormatter().string(from: replacementEntry.scheduledAt),
+            idempotencyKey: replacementEntry.workoutID.uuidString, contractVersion: 2, scope: verifiedReceipt.scope,
+            operationId: replacementJournal.operation.operationId.uuidString, coherenceToken: String(repeating: "c", count: 64),
+            verifiedAt: "2026-10-10T00:00:00Z", timezone: "Asia/Shanghai", prescriptionDigest: verifiedReceipt.prescriptionDigest,
+            lifecycleEvent: "verified")
+        let replacementLedger = PlanWatchLedger(scope: replacementScope, revision: 14, entries: [replacementEntry], fingerprint: "new",
+            reminderHour: 8, confirmedAt: Date(), registeredDates: [], receipts: [replacementReceipt])
+        var replacedReceipt = verifiedReceipt
+        replacedReceipt.lifecycleEvent = "replaced"; replacedReceipt.verifiedAt = "2026-10-10T00:00:00Z"
+        replacedReceipt.idempotencyKey = uuid + ":replaced"
+        check(safety.saveWatchLedger(previousLedger) && replacementJournal.prepare([replacementRequest]) &&
+              replacementJournal.persist(.verifying), "replacement recovery retains the old actual receipt until the final transaction")
+        precondition(sqlite3_exec(failureDB, """
+            CREATE TRIGGER fail_recovery_receipts BEFORE INSERT ON plan_receipt_journal
+            WHEN NEW.scope = 'replacement-recovery' BEGIN SELECT RAISE(ABORT, 'injected'); END
+            """, nil, nil, nil) == SQLITE_OK)
+        check(!replacementJournal.finish(ledger: replacementLedger, receipts: [replacementReceipt, replacedReceipt], verified: true),
+              "replacement recovery does not report success when lifecycle receipt persistence fails")
+        let failedRecovery = CacheStore(fileURL: safetyURL)
+        check(failedRecovery.watchLedger() == previousLedger && failedRecovery.scheduleJournalResult().value?.phase == .verifying &&
+              failedRecovery.pendingPlanReceipts(scope: replacementScope).isEmpty,
+              "failed replacement recovery preserves old evidence and rolls back new ledger, terminal journal and both events")
+        precondition(sqlite3_exec(failureDB, "DROP TRIGGER fail_recovery_receipts", nil, nil, nil) == SQLITE_OK)
+        let retryRecovery = PlanScheduleJournal(storage: safety, operation: failedRecovery.scheduleJournalResult().value!)
+        check(retryRecovery.finish(ledger: replacementLedger, receipts: [replacementReceipt, replacedReceipt], verified: true),
+              "replacement recovery atomically commits the new verified receipt with the old replaced event")
+        let committedRecovery = CacheStore(fileURL: safetyURL)
+        check(committedRecovery.watchLedger() == replacementLedger && committedRecovery.scheduleJournalResult().value?.terminal == true &&
+              committedRecovery.pendingPlanReceipts(scope: replacementScope) == [replacementReceipt, replacedReceipt],
+              "reopening preserves both sides of the replacement and its terminal safety journal")
+        check(safety.savePendingPlanReceipts([verifiedReceipt], scope: "older-service"), "verified old-scope pending receipt is retained without a ledger")
+        let clearJournal = PlanScheduleJournal(storage: safety, snapshot: snapshot, previousEntries: [])
+        check(clearJournal.prepareClear() && clearJournal.finishWithdrawal(ledger: nil, receipts: []),
+              "explicit app-wide clear atomically ends all pending verification events across scopes")
+        let withdrawnReceipts = safety.pendingPlanReceiptsResult(scope: "older-service").value!
+        check(withdrawnReceipts.count == 1 && withdrawnReceipts[0].lifecycleEvent == "withdrawn" &&
+              withdrawnReceipts[0].structure == exported && withdrawnReceipts[0].workoutID == uuid,
+              "an old queued verification cannot reactivate coverage after all-app withdrawal")
+        check(!safety.savePendingPlanReceipts([PlanSyncReceipt(localDate: "2026-10-09", kind: "easy", revision: 13, structure: nil, contractVersion: 2)], scope: "unsafe"),
+              "new receipt contract safety fields are required even in local persistence")
+        precondition(sqlite3_exec(failureDB, "UPDATE plan_receipt_journal SET payload=x'00' WHERE scope='A'", nil, nil, nil) == SQLITE_OK)
+        check(safety.pendingPlanReceiptsResult(scope: "A").failureCode == .corruptPayload &&
+              !safety.savePendingPlanReceipts([], scope: "A") &&
+              safety.pendingPlanReceiptsResult(scope: "A").failureCode == .corruptPayload,
+              "corrupt pending receipts cannot be replaced by a guessed empty journal")
+        precondition(sqlite3_exec(failureDB, "UPDATE app_metadata SET payload=x'7b22736368656d6156657273696f6e223a3939397d' WHERE metadata_key='schedule-operation'", nil, nil, nil) == SQLITE_OK)
+        check(safety.scheduleJournalResult().failureCode == .unsupportedSchema && !safety.saveScheduleJournal(scheduleJournal.operation),
+              "higher safety journal schema stays quarantined, never overwritten or treated as absent")
+        check(brokenCache.pendingPlanReceiptsResult(scope: "A").failureCode == .storageUnavailable &&
+              brokenCache.scheduleJournalResult().failureCode == .storageUnavailable,
+              "unavailable SQLite is distinct from empty safety metadata")
 
         let legacyURL = root.appendingPathComponent("legacy-cache.sqlite")
         var legacyDB: OpaquePointer?

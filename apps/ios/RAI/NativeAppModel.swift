@@ -8,15 +8,16 @@ final class NativeAppModel {
     let session: ServerSession
     private let api: RaiAPIClient
     private let now: () -> Date
-    private let cache = CacheStore()
+    private let cache: CacheStore
+    let trainingPlanStore: TrainingPlanStore
 
     private(set) var handshake: RaiHandshake?
-    private(set) var today: MobileTodayResponse?
+    var today: MobileTodayResponse? { trainingPlanStore.today }
     private(set) var statistics: MobileStatisticsResponse?
     private(set) var trends: MobileTrendsResponse?
-    private(set) var goals: MobileGoalsResponse?
-    private(set) var workoutPlan: MobileWorkoutPlanResponse?
-    private(set) var runCoach: MobileRunCoachResponse?
+    var goals: MobileGoalsResponse? { trainingPlanStore.goals }
+    var workoutPlan: MobileWorkoutPlanResponse? { trainingPlanStore.workoutPlan }
+    var runCoach: MobileRunCoachResponse? { trainingPlanStore.coach }
     private(set) var isLoadingRunCoach = false
     private(set) var isUpdatingRunCoach = false
     var runCoachError: String?
@@ -32,7 +33,10 @@ final class NativeAppModel {
     private(set) var isLoading = false
     private(set) var isRefreshing = false
     private(set) var isOffline = false
-    private(set) var isTodayAvailable = false
+    private(set) var isTodayAvailable: Bool {
+        get { trainingPlanStore.isCurrent }
+        set { if !newValue { trainingPlanStore.invalidate() } }
+    }
     var canConfirmToday: Bool {
         guard let today else { return false }
         return hasKnownCurrentCoachState && !planPersistenceFailed &&
@@ -51,19 +55,18 @@ final class NativeAppModel {
     private(set) var predictionLoadState: PredictionLoadState = .unavailable(message: "尚未加载预测")
     private var predictionLastCacheAt: Date?
     private(set) var isLockingSession = false
-    private(set) var isLoadingWorkoutPlan = false
+    var isLoadingWorkoutPlan: Bool { trainingPlanStore.isRefreshing }
     private(set) var workoutPlanError: String?
     private(set) var isRegeneratingPlan = false
     private(set) var isSavingGoals = false
-    private(set) var isRefreshingPlan = false
+    var isRefreshingPlan: Bool { trainingPlanStore.isRefreshing }
     private(set) var isSyncingPlan = false
     private var planMutationEpoch = UUID()
-    private var planRefreshRequestID = UUID()
     private var saveGoalsRequestID = UUID()
     private var refreshQueued = false
     private var refreshHandshakeQueued = false
     var isPlanBusy: Bool { isSavingGoals || isLockingSession || isRegeneratingPlan || isSyncingPlan || isUpdatingRunCoach }
-    var currentPlanRevision: Int { max(minimumPlanRevision, max(goals?.revision ?? 0, runCoach?.revision ?? 0)) }
+    var currentPlanRevision: Int { trainingPlanStore.revision }
     /// Human-readable result of the last plan generation, including fallbacks.
     var planMessage: String?
     var planPreview: MobileWeeklyPlanPreview?
@@ -80,17 +83,11 @@ final class NativeAppModel {
     /// fails. Keeping the old response in memory is useful for diagnostics and
     /// offline recovery, but it must not be presented as the new prescription.
     var currentWorkoutPlan: MobileWorkoutPlanResponse? {
-        guard hasKnownCurrentCoachState, !planPersistenceFailed,
-              let workoutPlan, workoutPlan.planRevision == currentPlanRevision else { return nil }
-        return workoutPlan
+        trainingPlanStore.executablePlan
     }
 
     private var hasKnownCurrentCoachState: Bool {
-        let plans = [
-            goals?.revision == currentPlanRevision ? goals?.runCoach : nil,
-            runCoach?.revision == currentPlanRevision ? runCoach?.plan : nil
-        ].compactMap { $0 }
-        return plans.allSatisfy { ["active", "paused", "ended"].contains($0.status) }
+        trainingPlanStore.knownCoachState
     }
 
     /// True when the last Watch acknowledgement refers to a plan that is no
@@ -101,6 +98,7 @@ final class NativeAppModel {
     }
 
     func watchPlanNeedsUpdate(_ plan: MobileWorkoutPlanResponse?) -> Bool {
+        if let token = trainingPlanStore.metadata?.coherenceToken, let ledger = watchLedger, ledger.coherenceToken != token { return true }
         guard let revision = lastWatchRevision else {
             guard let ledger = watchLedger else { return false }
             guard let plan else { return !ledger.entries.isEmpty }
@@ -111,8 +109,8 @@ final class NativeAppModel {
         }
         guard let plan else { return true }
         return currentPlanRevision != revision || plan.planRevision != revision ||
-            plan.days != lastWatchDays || plan.timezone != lastWatchTimezone ||
-            Self.storedScheduleHour(scope: cacheScope) != lastWatchHour || completedWeekDates != lastWatchCompleted
+            PlanFingerprint.make(days: plan.days, timezone: plan.timezone, hour: Self.storedScheduleHour(scope: cacheScope), completed: completedWeekDates) !=
+            PlanFingerprint.make(days: lastWatchDays ?? [], timezone: lastWatchTimezone ?? "", hour: lastWatchHour ?? -1, completed: lastWatchCompleted ?? [])
     }
     var workoutSessionType: String? {
         didSet {
@@ -127,17 +125,17 @@ final class NativeAppModel {
     private var workoutRequestID = UUID()
     private var detailRequestID = UUID()
     private var lockRequestID = UUID()
-    private var workoutPlanRequestID = UUID()
     private var regeneratePlanRequestID = UUID()
     private var planSyncRequestID = UUID()
     private var planSyncBaseURL: URL?
     private var planSyncToken = ""
-    private var minimumPlanRevision = 0
-    private(set) var planPersistenceFailed = false
-    private(set) var planWriteAcknowledgement: PlanWriteAcknowledgement?
+    var planPersistenceFailed: Bool { trainingPlanStore.persistenceFailed }
+    var planWriteAcknowledgement: PlanWriteAcknowledgement? { trainingPlanStore.acknowledgement }
     private(set) var watchLedger: PlanWatchLedger?
     private(set) var watchState: PlanWatchState = .unknown
     private var lastWatchCompleted: Set<String>?
+    private(set) var interruptedSchedule: PlanScheduleOperationJournal?
+    private(set) var scheduleStorageIssue = false
 
     /// Dates `/v1/mobile/today` reports as already trained.
     ///
@@ -154,14 +152,20 @@ final class NativeAppModel {
 
     init(session: ServerSession, api: RaiAPIClient? = nil, now: @escaping () -> Date = Date.init) {
         self.now = now
-        self.api = api ?? RaiAPIClient()
+        let resolvedAPI = api ?? RaiAPIClient()
+        let cache = CacheStore()
+        self.api = resolvedAPI
+        self.cache = cache
         self.session = session
         let baseURL = session.serverURL ?? URL(fileURLWithPath: "/")
         let knownHandshake = Self.loadHandshake(for: baseURL)
         self.handshake = knownHandshake
-        self.cacheScope = CacheStore.scope(baseURL: baseURL, handshake: knownHandshake)
+        let scope = CacheStore.scope(baseURL: baseURL, handshake: knownHandshake)
+        self.cacheScope = scope
+        self.trainingPlanStore = TrainingPlanStore(cache: cache, api: resolvedAPI, scope: scope, now: now)
         restorePlanSafetyState()
         watchLedger = cache.watchLedger()
+        scheduleStateChanged()
     }
 
     func bootstrap() async {
@@ -275,26 +279,15 @@ final class NativeAppModel {
         // 「统计接口 500」会把已经拿到的今日/趋势/目标一起丢掉，再整体回退到
         // 更旧的缓存。一次单点抖动等于整页降级，而且用户看不出是哪一项坏了。
         // 现在失败的面板保持原值不动，成功的照常写入并落缓存。
-        async let pendingToday = api.today(baseURL: baseURL, token: token)
+        async let pendingPlanState = refreshPlanState()
         async let pendingStatistics = api.statistics(baseURL: baseURL, token: token)
         async let pendingTrends = api.trends(baseURL: baseURL, token: token)
-        async let pendingGoals = api.goals(baseURL: baseURL, token: token)
-        let fetchedToday = try? await pendingToday
+        let planSucceeded = await pendingPlanState
         let fetchedStatistics = try? await pendingStatistics
         let fetchedTrends = try? await pendingTrends
-        let fetchedGoals = try? await pendingGoals
         guard isCurrent() else { return }
         var failedPanels = 0
-        let snapshotIsCurrent = (fetchedGoals?.revision ?? -1) >= max(minimumPlanRevision, goals?.revision ?? -1) &&
-            fetchedToday?.recommendation.planRevision == fetchedGoals?.revision
-        if let fetchedToday, snapshotIsCurrent {
-            isTodayAvailable = true
-            today = fetchedToday
-            recordCache(fetchedToday, key: "today")
-        } else {
-            isTodayAvailable = false
-            failedPanels += 1
-        }
+        if !planSucceeded { failedPanels += 1 }
         if let fetchedStatistics {
             statistics = fetchedStatistics
             recordCache(fetchedStatistics, key: "statistics")
@@ -307,32 +300,11 @@ final class NativeAppModel {
         } else {
             failedPanels += 1
         }
-        if let fetchedGoals {
-            acceptGoals(fetchedGoals)
-        } else {
-            failedPanels += 1
-        }
-        // Non-fatal: the executable week is a convenience, and a failure here
-        // must not mark the whole refresh as offline.
-        do {
-            let fetchedPlan = try await api.workoutPlan(baseURL: baseURL, token: token)
-            guard isCurrent() else { return }
-            if fetchedPlan.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) {
-                workoutPlan = fetchedPlan
-                workoutPlanError = nil
-                recordCache(fetchedPlan, key: workoutPlanCacheKey)
-            } else {
-                workoutPlanError = "服务返回的课表版本已过期，请刷新后重试。"
-            }
-        } catch {
-            guard isCurrent() else { return }
-            workoutPlanError = friendlyMessage(error)
-        }
         let workoutsSucceeded = await refreshWorkouts()
         guard isCurrent() else { return }
         // Any successful panel proves service reachability. Recommendation freshness is
         // tracked separately, so a list-only failure cannot invalidate every panel.
-        let anySucceeded = workoutsSucceeded || fetchedToday != nil || fetchedStatistics != nil || fetchedTrends != nil || fetchedGoals != nil
+        let anySucceeded = workoutsSucceeded || planSucceeded || fetchedStatistics != nil || fetchedTrends != nil
         isOffline = !anySucceeded
         session.isReachable = anySucceeded
         if failedPanels > 0 {
@@ -343,11 +315,12 @@ final class NativeAppModel {
                 ? "核心数据均未能更新，当前显示的是上次结果。"
                 : "有 \(failedPanels) 项数据未能更新，其余已刷新。"
         }
-        if fetchedGoals?.runCoach != nil { await refreshRunCoach() }
+        if goals?.runCoach != nil { await refreshRunCoach() }
     }
 
     @discardableResult
     func refreshRunCoach() async -> Bool {
+        if handshake?.planSnapshotContractVersion != nil { return await refreshPlanState() }
         guard !isLoadingRunCoach, !isPlanBusy, let baseURL = session.serverURL else { return false }
         let configuration = configurationID
         let token = session.apiToken
@@ -363,8 +336,7 @@ final class NativeAppModel {
         do {
             let value = try await api.runCoach(baseURL: baseURL, token: token)
             guard isCurrent(), value.revision >= currentPlanRevision else { return false }
-            minimumPlanRevision = max(minimumPlanRevision, value.revision)
-            runCoach = value
+            trainingPlanStore.acceptCoach(value)
             recordCache(value, key: "run-coach")
             runCoachError = nil
             if value.plan?.status == "active", !isOffline {
@@ -390,7 +362,8 @@ final class NativeAppModel {
     }
 
     @discardableResult
-    func changeRunCoach(action: String, config: MobileRunCoachConfig? = nil, expectedRevision: Int? = nil) async -> Bool {
+    func changeRunCoach(action: String, config: MobileRunCoachConfig? = nil, expectedRevision: Int? = nil, editorSessionID: String? = nil) async -> Bool {
+        guard editorSessionID == nil || editorSessionID == feedbackSessionID else { return false }
         guard !isPlanBusy, !isOffline, let baseURL = session.serverURL,
               let revision = expectedRevision ?? goals?.revision else { return false }
         let configuration = configurationID
@@ -404,10 +377,12 @@ final class NativeAppModel {
                 saveGoalsRequestID == requestID && !Task.isCancelled
         }
         do {
-            let value = try await api.runCoachCommand(MobileRunCoachCommand(expectedRevision: revision, action: action, config: config), baseURL: baseURL, token: token)
+            let value: MobileRunCoachResponse = try await publishPlan(route: "coach",
+                input: MobileRunCoachCommand(expectedRevision: revision, action: action, config: config), baseURL: baseURL, token: token, isCurrent: isCurrent)
             guard isCurrent() else { return false }
             acknowledgePlanWrite(revision: value.revision, action: action, coach: value)
-            runCoach = value
+            finishPlanPublication()
+            trainingPlanStore.acceptCoach(value)
             runCoachError = nil
             let refreshed = await refreshPlanState()
             guard isCurrent() else { return false }
@@ -642,7 +617,8 @@ final class NativeAppModel {
         expectedRevision: Int,
         easyDurationFloorFraction: Double,
         qualitySessionCap: Int,
-        weekPlan: [MobileGoalsPlanItem]
+        weekPlan: [MobileGoalsPlanItem],
+        editorSessionID: String? = nil
     ) async -> Bool {
         guard let current = goals else { return false }
         return await persistGoals(UpdateMobileGoalsRequest(
@@ -651,11 +627,11 @@ final class NativeAppModel {
             qualitySessionCap: qualitySessionCap,
             raceTarget: current.raceTarget,
             weekPlan: current.weekPlanReplanRequired == true ? nil : weekPlan
-        ))
+        ), editorSessionID: editorSessionID)
     }
 
     /// Only changes the race target; omitted weekly-plan fields remain untouched.
-    func saveRaceTarget(_ target: MobileRaceTarget?, expectedRevision: Int) async -> Bool {
+    func saveRaceTarget(_ target: MobileRaceTarget?, expectedRevision: Int, editorSessionID: String? = nil) async -> Bool {
         guard goals != nil else { return false }
         return await persistGoals(UpdateMobileGoalsRequest(
             expectedRevision: expectedRevision,
@@ -663,10 +639,11 @@ final class NativeAppModel {
             qualitySessionCap: nil,
             raceTarget: target,
             weekPlan: nil
-        ))
+        ), editorSessionID: editorSessionID)
     }
 
-    private func persistGoals(_ request: UpdateMobileGoalsRequest) async -> Bool {
+    private func persistGoals(_ request: UpdateMobileGoalsRequest, editorSessionID: String? = nil) async -> Bool {
+        guard editorSessionID == nil || editorSessionID == feedbackSessionID else { return false }
         guard !isPlanBusy else { return false }
         guard !isOffline, let baseURL = session.serverURL else {
             errorMessage = "请先连接 RAI 服务。"
@@ -686,13 +663,10 @@ final class NativeAppModel {
         }
         guard isCurrent() else { return false }
         do {
-            let updated = try await api.updateGoals(
-                request,
-                baseURL: baseURL,
-                token: token
-            )
+            let updated: MobileGoalsResponse = try await publishPlan(route: "goals", input: request, baseURL: baseURL, token: token, isCurrent: isCurrent)
             guard isCurrent() else { return false }
             acknowledgePlanWrite(revision: updated.revision, action: "goals", goals: updated)
+            finishPlanPublication()
             acceptGoals(updated)
             let refreshed = await refreshPlanState()
             guard isCurrent() else { return false }
@@ -731,13 +705,12 @@ final class NativeAppModel {
         }
         guard isCurrent() else { return false }
         do {
-            let updated = try await api.lockSession(
-                LockMobileSessionRequest(action: relock ? "relock" : "lock", expectedRevision: current.recommendationRevision),
-                baseURL: baseURL,
-                token: token
-            )
+            let updated: MobileGoalsResponse = try await publishPlan(route: "lock",
+                input: LockMobileSessionRequest(action: relock ? "relock" : "lock", expectedRevision: current.recommendationRevision),
+                baseURL: baseURL, token: token, isCurrent: isCurrent)
             guard isCurrent() else { return false }
             acknowledgePlanWrite(revision: updated.revision, action: relock ? "relock" : "lock", goals: updated)
+            finishPlanPublication()
             acceptGoals(updated)
             if !(await refreshPlanState()), isCurrent() {
                 planMessage = "课程已锁定，但计划数据未能刷新。请刷新页面，不必重复锁定。"
@@ -755,46 +728,7 @@ final class NativeAppModel {
     /// rest of the app — it simply leaves whatever was last shown in place.
     @discardableResult
     func refreshWorkoutPlan() async -> Bool {
-        guard !isLoadingWorkoutPlan, let baseURL = session.serverURL else { return false }
-        let requestID = UUID()
-        workoutPlanRequestID = requestID
-        let configuration = configurationID
-        let token = session.apiToken
-        let mutation = planMutationEpoch
-        func isCurrent() -> Bool {
-            requestID == workoutPlanRequestID && configuration == configurationID && baseURL == session.serverURL &&
-                token == session.apiToken && mutation == planMutationEpoch && !Task.isCancelled
-        }
-        isLoadingWorkoutPlan = true
-        workoutPlanError = nil
-        defer {
-            if requestID == workoutPlanRequestID, configuration == configurationID {
-                isLoadingWorkoutPlan = false
-            }
-        }
-        do {
-            let fetched = try await api.workoutPlan(baseURL: baseURL, token: token)
-            guard isCurrent() else { return false }
-            guard fetched.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) else {
-                workoutPlanError = "服务返回的课表版本已过期，请刷新后重试。"
-                return false
-            }
-            workoutPlan = fetched
-            recordCache(fetched, key: workoutPlanCacheKey)
-            workoutPlanError = nil
-            return true
-        } catch {
-            guard isCurrent() else { return false }
-            if workoutPlan == nil,
-               let cachedPlan = cache.read(MobileWorkoutPlanResponse.self, scope: cacheScope, key: workoutPlanCacheKey)?.value,
-               cachedPlan.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) {
-                workoutPlan = cachedPlan
-                workoutPlanError = "课表读取失败，当前显示的是离线缓存。"
-            } else {
-                workoutPlanError = friendlyMessage(error)
-            }
-            return false
-        }
+        await refreshPlanState()
     }
 
     /// Requests a deterministic coach preview.
@@ -865,7 +799,7 @@ final class NativeAppModel {
 
     @discardableResult
     func confirmPlanPreview(_ preview: MobileWeeklyPlanPreview) async -> Bool {
-        guard !isPlanBusy, !isOffline, preview.revision == goals?.revision,
+        guard !isPlanBusy, !isOffline, preview.revision == goals?.revision, preview.candidateId == planPreview?.candidateId,
               let baseURL = session.serverURL else { return false }
         let configuration = configurationID
         let token = session.apiToken
@@ -878,9 +812,11 @@ final class NativeAppModel {
                 baseURL == session.serverURL && token == session.apiToken && !Task.isCancelled
         }
         do {
-            let result = try await api.confirmWeeklyPlan(ConfirmWeeklyPlanRequest(candidateId: preview.candidateId, expectedRevision: preview.revision), baseURL: baseURL, token: token)
+            let result: MobileWeeklyPlanGenerationResponse = try await publishPlan(route: "confirm",
+                input: ConfirmWeeklyPlanRequest(candidateId: preview.candidateId, expectedRevision: preview.revision), baseURL: baseURL, token: token, isCurrent: isCurrent)
             guard isCurrent() else { return false }
             acknowledgePlanWrite(revision: result.revision, action: "preview-confirm")
+            finishPlanPublication()
             planPreview = nil
             let refreshed = await refreshPlanState()
             guard isCurrent() else { return false }
@@ -908,24 +844,11 @@ final class NativeAppModel {
         watchState = .verifiedCurrent
     }
 
-    func recordWatchClearResult(_ outcome: PlanWatchClearOutcome) {
+    func recordWatchClearFailure(_ outcome: PlanWatchClearOutcome) {
         if outcome.deviceUnsupported { watchState = .unsupported }
         else if outcome.superseded { watchState = .unknown }
         else if !outcome.authorized { watchState = .denied }
-        else if outcome.verified { recordWatchClearAcknowledgement() }
         else { watchState = .stale }
-    }
-
-    func recordWatchClearAcknowledgement() {
-        lastWatchRevision = nil
-        lastWatchSyncAt = Date()
-        lastWatchDays = nil
-        lastWatchTimezone = nil
-        lastWatchHour = nil
-        lastWatchCompleted = nil
-        watchLedger = nil
-        watchState = .empty
-        if !cache.saveWatchLedger(nil) { errorMessage = "系统排期已清空，但上次记录未能清除。" }
     }
 
     func refreshRacePrediction() async {
@@ -979,6 +902,7 @@ final class NativeAppModel {
         cache.clear(scope: cacheScope)
         clearPresentation()
         restorePlanSafetyState()
+        trainingPlanStore.loadCache()
     }
 
     private var workoutsCacheKey: String {
@@ -990,32 +914,14 @@ final class NativeAppModel {
     private func loadCachedData() {
         isTodayAvailable = false
         restorePlanSafetyState()
+        trainingPlanStore.loadCache()
         // 每个 key 只读一次：原先为了拿 cachedAt 又重复读了一遍，10 个 key 变成 20 次查询。
-        let cachedToday = cache.read(MobileTodayResponse.self, scope: cacheScope, key: "today")
         let cachedStatistics = cache.read(MobileStatisticsResponse.self, scope: cacheScope, key: "statistics")
         let cachedTrends = cache.read(MobileTrendsResponse.self, scope: cacheScope, key: "trends")
-        let cachedGoals = cache.read(MobileGoalsResponse.self, scope: cacheScope, key: "goals")
-        if let cachedCoach = cache.read(MobileRunCoachResponse.self, scope: cacheScope, key: "run-coach"),
-           cachedCoach.value.revision >= max(currentPlanRevision, cachedGoals?.value.revision ?? 0) {
-            runCoach = cachedCoach.value
-            minimumPlanRevision = cachedCoach.value.revision
-        }
         let cachedPredictions = cache.read(NativePredictionResponse.self, scope: cacheScope, key: "predictions")
         let cachedZones = cache.read(NativeTrainingZonesCurrentResponse.self, scope: cacheScope, key: "training-zones")
-        if let cachedToday,
-           (cachedToday.value.recommendation.planRevision ?? cachedGoals?.value.revision ?? minimumPlanRevision) >= max(minimumPlanRevision, cachedGoals?.value.revision ?? 0) {
-            today = cachedToday.value
-        }
         statistics = cachedStatistics?.value
         trends = cachedTrends?.value
-        if let cachedGoals, cachedGoals.value.revision >= max(minimumPlanRevision, goals?.revision ?? 0) {
-            goals = cachedGoals.value
-            minimumPlanRevision = cachedGoals.value.revision
-        }
-        if let cachedPlan = cache.read(MobileWorkoutPlanResponse.self, scope: cacheScope, key: workoutPlanCacheKey)?.value,
-           cachedPlan.planRevision >= minimumPlanRevision {
-            workoutPlan = cachedPlan
-        }
         predictions = cachedPredictions?.value
         predictionLastCacheAt = cachedPredictions?.cachedAt
         if cachedPredictions != nil {
@@ -1030,7 +936,7 @@ final class NativeAppModel {
         loadCachedWorkouts()
         // 缓存新鲜度：陈旧数据不隐藏，由 TechFreshnessBanner 显式告知用户，因此这里不设硬 TTL。
         lastCacheUpdate = [
-            cachedToday?.cachedAt,
+            trainingPlanStore.cachedAt,
             cachedStatistics?.cachedAt,
             cachedTrends?.cachedAt,
             cachedPredictions?.cachedAt,
@@ -1052,7 +958,9 @@ final class NativeAppModel {
         }
         self.handshake = handshake
         cacheScope = nextScope
+        trainingPlanStore.configure(scope: nextScope, clear: changed)
         restorePlanSafetyState()
+        scheduleStateChanged()
         if changed {
             watchLedger = cache.watchLedger()
             watchState = .unknown
@@ -1071,13 +979,10 @@ final class NativeAppModel {
         workoutListError = nil
         bodyMetricsError = nil
         isTodayAvailable = false
-        today = nil
+        trainingPlanStore.configure(scope: cacheScope, clear: true)
         statistics = nil
         trends = nil
-        goals = nil
-        workoutPlan = nil
         workoutPlanError = nil
-        runCoach = nil
         runCoachError = nil
         predictions = nil
         dashboard = nil
@@ -1101,14 +1006,12 @@ final class NativeAppModel {
         isSavingGoals = false
         isSyncingPlan = false
         planSyncRequestID = UUID()
-        minimumPlanRevision = 0
+        trainingPlanStore.configure(scope: cacheScope, clear: true)
         refreshQueued = false
         refreshHandshakeQueued = false
         lockRequestID = UUID()
-        workoutPlanRequestID = UUID()
         regeneratePlanRequestID = UUID()
         isLockingSession = false
-        isLoadingWorkoutPlan = false
         isRegeneratingPlan = false
         planMessage = nil
         planPreview = nil
@@ -1125,18 +1028,11 @@ final class NativeAppModel {
         planMutationEpoch = UUID()
         runCoachRequestID = UUID()
         isLoadingRunCoach = false
-        planRefreshRequestID = UUID()
-        workoutPlanRequestID = UUID()
-        isLoadingWorkoutPlan = false
-        isRefreshingPlan = false
+        trainingPlanStore.invalidate()
     }
 
     private func acceptGoals(_ value: MobileGoalsResponse) {
-        guard value.revision >= max(minimumPlanRevision, goals?.revision ?? 0) else { return }
-        minimumPlanRevision = value.revision
-        goals = value
-        if runCoach?.revision != value.revision { runCoach = nil }
-        recordCache(value, key: "goals")
+        trainingPlanStore.acceptGoals(value)
     }
 
     /// Writes refresh only their dependent surfaces. Older full-page reads cannot
@@ -1147,53 +1043,18 @@ final class NativeAppModel {
         let configuration = configurationID
         let token = session.apiToken
         let mutation = planMutationEpoch
-        let requestID = UUID()
-        planRefreshRequestID = requestID
-        isRefreshingPlan = true
-        defer { if requestID == planRefreshRequestID { isRefreshingPlan = false } }
-        async let goalRead = api.goals(baseURL: baseURL, token: token)
-        async let todayRead = api.today(baseURL: baseURL, token: token)
-        async let planRead = api.workoutPlan(baseURL: baseURL, token: token)
-        let newGoals = try? await goalRead
-        let newToday = try? await todayRead
-        let newPlan = try? await planRead
-        guard configuration == configurationID, token == session.apiToken,
-              baseURL == session.serverURL, mutation == planMutationEpoch,
-              requestID == planRefreshRequestID, !Task.isCancelled else { return false }
-        if let newGoals { acceptGoals(newGoals) }
-        let coherent = newGoals?.revision == currentPlanRevision &&
-            newToday?.recommendation.planRevision == newGoals?.revision
-        if let newToday, coherent {
-            isTodayAvailable = true
-            today = newToday
-            recordCache(newToday, key: "today")
-        } else {
-            isTodayAvailable = false
+        let complete = await trainingPlanStore.refresh(baseURL: baseURL, token: token, handshake: handshake) {
+            configuration == self.configurationID && token == self.session.apiToken && baseURL == self.session.serverURL && mutation == self.planMutationEpoch
         }
-        if let newPlan, newPlan.planRevision >= max(minimumPlanRevision, goals?.revision ?? 0) {
-            workoutPlan = newPlan
-            workoutPlanError = nil
-            recordCache(newPlan, key: workoutPlanCacheKey)
-        } else if newPlan == nil {
-            workoutPlanError = "当前课表未能刷新，旧课表不会作为最新处方使用。"
-        }
-        if newGoals != nil { isOffline = false; session.isReachable = true }
-        let complete = coherent && newToday != nil && newPlan?.planRevision == currentPlanRevision
-        if complete, planPersistenceFailed {
-            let ack = planWriteAcknowledgement ?? PlanWriteAcknowledgement(revision: currentPlanRevision, action: "online-verification", acknowledgedAt: now(), planId: nil)
-            if cache.acknowledgePlanWrite(ack, scope: cacheScope, goals: newGoals, coach: runCoach) {
-                planPersistenceFailed = false
-                UserDefaults.standard.removeObject(forKey: planQuarantineKey)
-                recordCache(newToday, key: "today")
-                recordCache(newPlan, key: workoutPlanCacheKey)
-            }
-        }
-        return complete && !planPersistenceFailed && currentWorkoutPlan != nil
+        workoutPlanError = complete ? nil : trainingPlanStore.issue?.message
+        if trainingPlanStore.serviceReachable { isOffline = false; session.isReachable = true }
+        if complete { lastCacheUpdate = trainingPlanStore.cachedAt }
+        return complete && currentWorkoutPlan != nil
     }
 
     /// Device scheduling shares the mutation gate with saves and generation.
     func beginPlanSync(allowOffline: Bool = false) -> UUID? {
-        guard !isPlanBusy, (allowOffline || !isOffline) else { return nil }
+        guard !isPlanBusy, (allowOffline || !isOffline), (allowOffline || !hasPendingPlanPublication) else { return nil }
         isSyncingPlan = true
         planSyncBaseURL = session.serverURL
         planSyncToken = session.apiToken
@@ -1208,62 +1069,18 @@ final class NativeAppModel {
     func endPlanSync(_ id: UUID) { if id == planSyncRequestID { isSyncingPlan = false } }
 
 
-    private var planQuarantineKey: String { "rai.plan-write-unpersisted." + cacheScope }
-
     private func restorePlanSafetyState() {
-        planWriteAcknowledgement = cache.planWriteAcknowledgement(scope: cacheScope)
-        minimumPlanRevision = max(minimumPlanRevision, cache.planRevisionFloor(scope: cacheScope) ?? 0)
-        if let failedRevision = UserDefaults.standard.object(forKey: planQuarantineKey) as? Int {
-            minimumPlanRevision = max(minimumPlanRevision, failedRevision)
-            planPersistenceFailed = true
-        } else { planPersistenceFailed = cache.planRevisionFloor(scope: cacheScope) == nil }
+        trainingPlanStore.restoreSafety()
     }
 
     private func acknowledgePlanWrite(revision: Int, action: String, goals: MobileGoalsResponse? = nil, coach: MobileRunCoachResponse? = nil) {
         invalidatePlanReads()
-        minimumPlanRevision = max(minimumPlanRevision, revision)
-        isTodayAvailable = false
-        let ack = PlanWriteAcknowledgement(revision: revision, action: action, acknowledgedAt: now(), planId: coach?.plan?.id ?? goals?.runCoach?.id)
-        planWriteAcknowledgement = ack
-        if cache.acknowledgePlanWrite(ack, scope: cacheScope, goals: goals, coach: coach) {
-            minimumPlanRevision = max(minimumPlanRevision, cache.planRevisionFloor(scope: cacheScope) ?? revision)
-            planPersistenceFailed = false
-            UserDefaults.standard.removeObject(forKey: planQuarantineKey)
-        } else {
-            // Best-effort independent quarantine. If ALL local persistence fails,
-            // cross-restart safety cannot be guaranteed; never claim otherwise.
-            planPersistenceFailed = true
-            UserDefaults.standard.set(revision, forKey: planQuarantineKey)
-            errorMessage = "服务端已保存，本地确认记录未持久化。旧执行缓存已禁用，请联网刷新；本地存储不可用时无法保证重启安全。"
-        }
+        trainingPlanStore.acknowledge(revision: revision, action: action, goals: goals, coach: coach)
+        if planPersistenceFailed { errorMessage = trainingPlanStore.issue?.message }
     }
 
     var planPresentation: PlanPresentationSnapshot {
-        let revision = currentPlanRevision
-        let coach = runCoach.flatMap { $0.revision == revision ? $0 : nil }
-        let candidate = coach?.plan ?? (goals?.revision == revision ? goals?.runCoach : nil)
-        let coachPlan = candidate.flatMap { ["active", "paused", "ended"].contains($0.status) ? $0 : nil }
-        let knownCoachState = hasKnownCurrentCoachState
-        let matchingToday = today.flatMap { value in
-            value.recommendation.planRevision == revision &&
-            UserDataNoticePolicy.isCurrentDay(value.today.localDate, timezone: value.timezone, now: now()) &&
-            (isTodayAvailable || isOffline) && !planPersistenceFailed && knownCoachState ? value : nil
-        }
-        let availability: PlanAvailability
-        if isRefreshingPlan || isLoadingRunCoach { availability = .refreshing }
-        else if !knownCoachState || (planPersistenceFailed && planWriteAcknowledgement == nil) { availability = .unavailable }
-        else if planPersistenceFailed || (planWriteAcknowledgement != nil && (goals?.revision != revision || currentWorkoutPlan == nil)) { availability = .savedAwaitingRefresh }
-        else if isOffline, matchingToday != nil { availability = .cached(asOf: lastCacheUpdate) }
-        else if matchingToday != nil && currentWorkoutPlan != nil { availability = .current }
-        else if (goals.map { $0.revision != revision } ?? false) ||
-            (workoutPlan.map { $0.planRevision != revision } ?? false) ||
-            (today?.recommendation.planRevision.map { $0 != revision } ?? false) {
-            availability = .revisionMismatch
-        }
-        else { availability = .unavailable }
-        return PlanPresentationSnapshot(revision: revision, goals: goals?.revision == revision && knownCoachState ? goals : nil,
-            coach: coach, coachPlan: coachPlan, today: matchingToday, executablePlan: currentWorkoutPlan,
-            availability: availability, lastKnownTodayDate: today?.today.localDate)
+        trainingPlanStore.presentation(offline: isOffline)
     }
 
     func planSyncSnapshot(_ id: UUID) -> PlanSyncSnapshot? {
@@ -1273,28 +1090,138 @@ final class NativeAppModel {
               today.today.localDate == UserDataNoticePolicy.localDate(now: now(), timezone: plan.timezone) else { return nil }
         return PlanSyncSnapshot(scope: cacheScope, configuration: configurationID, revision: plan.planRevision,
             days: plan.days, timezone: plan.timezone, reminderHour: Self.storedScheduleHour(scope: cacheScope),
-            completedDates: completedWeekDates, localDate: today.today.localDate, windowDays: plan.windowDays, leaseID: id)
+            completedDates: completedWeekDates, localDate: today.today.localDate, windowDays: plan.windowDays, leaseID: id,
+            coherenceToken: trainingPlanStore.metadata?.coherenceToken, windowStart: plan.windowStart, windowEnd: plan.windowEnd,
+            serverIdentity: handshake.map { .init(serverId: $0.serverId, athleteId: $0.athleteId, datasetEpoch: $0.datasetEpoch) })
     }
 
     func isCurrentPlanSync(_ snapshot: PlanSyncSnapshot) -> Bool {
-        planSyncSnapshot(snapshot.leaseID) == snapshot
+        planSyncSnapshot(snapshot.leaseID)?.matchesForExecution(snapshot) == true
     }
 
     var planSyncNow: Date { now() }
 
+    var hasPendingPlanPublication: Bool {
+        let result = cache.pendingPublication(scope: cacheScope)
+        return result.isFailure || (result.value ?? nil) != nil
+    }
+
+    private func publishPlan<Input: Encodable, Result: Decodable>(route: String, input: Input, baseURL: URL, token: String, isCurrent: () -> Bool) async throws -> Result {
+        guard isCurrent() else { throw CancellationError() }
+        let scope = cacheScope
+        let encoded = try JSONEncoder().encode(input)
+        var object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        let operationID = UUID().uuidString
+        let durable = handshake?.planPublicationContractVersion == 1
+        if durable {
+            let existing = cache.pendingPublication(scope: scope)
+            guard !existing.isFailure, (existing.value ?? nil) == nil else {
+                throw RaiAPIClientError.server(code: "plan_publication_pending", message: "上次发布结果尚未确认，请先确认原操作，不要重复发布。", status: 409)
+            }
+            object["operationId"] = operationID
+            if let handshake {
+                object["operationScope"] = ["serverId": handshake.serverId, "athleteId": handshake.athleteId, "datasetEpoch": handshake.datasetEpoch]
+            }
+        }
+        let payload = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+        let pending = PendingPlanPublication(operationId: operationID, route: route, payload: payload, preparedAt: now())
+        if durable, !cache.savePublication(pending, scope: scope) {
+            throw RaiAPIClientError.server(code: "plan_publication_storage_unavailable", message: "无法持久化发布意图，尚未提交。", status: 409)
+        }
+        trainingPlanStore.invalidate()
+        do { return try await api.replayPlanPublication(pending, baseURL: baseURL, token: token) }
+        catch {
+            if durable, case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status), !code.hasPrefix("plan_operation_") {
+                _ = cache.savePublication(nil, scope: scope)
+            }
+            if durable, !(error is CancellationError) { planMessage = "发布结果尚未确认；请查询原操作，重试不会提高 expectedRevision。" }
+            throw error
+        }
+    }
+
+    private func finishPlanPublication() {
+        if !planPersistenceFailed, !cache.savePublication(nil, scope: cacheScope) {
+            planMessage = "已保存，但本地操作结果记录未清除；请确认原操作，不要重新发布。"
+        }
+    }
+
+    private func resolvePendingPublication<Result: Decodable>(_ pending: PendingPlanPublication, baseURL: URL, token: String, isCurrent: () -> Bool) async throws -> Result {
+        guard isCurrent() else { throw CancellationError() }
+        let scope = cacheScope
+        let response: PlanPublicationResult<Result> = try await api.planOperation(id: pending.operationId, baseURL: baseURL, token: token)
+        guard isCurrent() else { throw CancellationError() }
+        guard response.operationId == pending.operationId else { throw RaiAPIClientError.decoding("发布查询返回了其他操作的结果") }
+        if response.status == "committed", let result = response.result { return result }
+        if response.status == "scopeMismatch" {
+            throw RaiAPIClientError.server(code: "plan_operation_scope_mismatch", message: "原操作属于其他数据集，请回到原连接确认，不能重放。", status: 409)
+        }
+        if response.status == "notFound" {
+            do { return try await api.replayPlanPublication(pending, baseURL: baseURL, token: token) }
+            catch {
+                if case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status), !code.hasPrefix("plan_operation_") {
+                    _ = cache.savePublication(nil, scope: scope)
+                }
+                throw error
+            }
+        }
+        if response.status == "expired" {
+            throw RaiAPIClientError.server(code: "plan_operation_expired", message: "原操作结果已过保留期，不能重放；请核对历史。", status: 410)
+        }
+        throw RaiAPIClientError.decoding("未知的发布操作状态，原操作不会重放")
+    }
+
+    func resolvePlanPublication() async -> String {
+        guard !isPlanBusy, !isOffline, handshake?.planPublicationContractVersion == 1, let baseURL = session.serverURL else {
+            return "请连接支持持久操作查询的原服务后确认。"
+        }
+        let result = cache.pendingPublication(scope: cacheScope)
+        guard !result.isFailure else { return "发布账目无法读取，不能当作无操作；请恢复本地存储。" }
+        guard let pending = result.value ?? nil else { return "没有待确认发布。" }
+        let scope = cacheScope; let configuration = configurationID; let token = session.apiToken
+        let requestID = UUID(); saveGoalsRequestID = requestID
+        isSavingGoals = true
+        defer { if saveGoalsRequestID == requestID { isSavingGoals = false } }
+        func valid() -> Bool { requestID == saveGoalsRequestID && scope == cacheScope && configuration == configurationID && token == session.apiToken && baseURL == session.serverURL && !Task.isCancelled }
+        do {
+            switch pending.route {
+            case "coach":
+                let value: MobileRunCoachResponse = try await resolvePendingPublication(pending, baseURL: baseURL, token: token, isCurrent: valid)
+                guard valid() else { return "连接已变化，请在原服务确认结果。" }
+                acknowledgePlanWrite(revision: value.revision, action: "operation-recovery", coach: value)
+            case "confirm":
+                let value: MobileWeeklyPlanGenerationResponse = try await resolvePendingPublication(pending, baseURL: baseURL, token: token, isCurrent: valid)
+                guard valid() else { return "连接已变化，请在原服务确认结果。" }
+                acknowledgePlanWrite(revision: value.revision, action: "operation-recovery")
+                planPreview = nil
+            default:
+                let value: MobileGoalsResponse = try await resolvePendingPublication(pending, baseURL: baseURL, token: token, isCurrent: valid)
+                guard valid() else { return "连接已变化，请在原服务确认结果。" }
+                acknowledgePlanWrite(revision: value.revision, action: "operation-recovery", goals: value)
+            }
+            finishPlanPublication()
+            let refreshed = await refreshPlanState()
+            return refreshed ? "原操作已保存，完整计划已刷新；没有再次发布。" : "原操作已保存，等待完整计划刷新；不要重复发布。"
+        } catch { return "原操作结果尚未确认：" + friendlyMessage(error) }
+    }
+
     var hasPendingPlanReceipts: Bool {
-        !cache.pendingPlanReceipts(scope: cacheScope).isEmpty
+        let result = cache.pendingPlanReceiptsResult(scope: cacheScope)
+        return result.isFailure || !(result.value ?? []).isEmpty
     }
 
     /// Foreground explicit retry only. The original UUID/idempotency key and
     /// exported structure survive a lost server reply.
     func retryPlanSyncReceipts() async -> String {
         guard !isOffline, !isPlanBusy else { return "请连接服务后重试登记。" }
-        let pending = cache.pendingPlanReceipts(scope: cacheScope)
-        return await recordPlanSyncReceipts(pending) ?? "已登记上次核验日期。"
+        guard let leaseID = beginPlanSync() else { return "另一计划操作或未确认发布尚未结束，请稍后重试。" }
+        defer { endPlanSync(leaseID) }
+        let result = cache.pendingPlanReceiptsResult(scope: cacheScope)
+        guard !result.isFailure else { return "待登记账目无法读取，原数据保留，不能覆盖为空；请先恢复存储。" }
+        let pending = result.value ?? []
+        return await recordPlanSyncReceipts(pending, leaseID: leaseID) ?? "已登记上次核验日期。"
     }
 
-    func recordPlanSyncReceipts(_ receipts: [PlanSyncReceipt], snapshot: PlanSyncSnapshot? = nil) async -> String? {
+    func recordPlanSyncReceipts(_ receipts: [PlanSyncReceipt], snapshot: PlanSyncSnapshot? = nil, leaseID: UUID? = nil) async -> String? {
         guard !receipts.isEmpty else { return nil }
         let scope = cacheScope
         let configuration = configurationID
@@ -1304,81 +1231,253 @@ final class NativeAppModel {
             scope == cacheScope && configuration == configurationID && token == session.apiToken &&
             baseURL == session.serverURL && !Task.isCancelled &&
             (snapshot.map { isCurrentPlanSync($0) } ?? true)
+            && (leaseID.map { isCurrentPlanSync($0) } ?? true)
         }
-        let retained = cache.pendingPlanReceipts(scope: scope)
-        var pending = retained
+        func matchingLedger(for receipt: PlanSyncReceipt) -> PlanWatchLedger? {
+            guard let ledger = watchLedger, ledger.scope == scope, ledger.revision == receipt.revision,
+                  ledger.entries.contains(where: { PlanReceiptMatcher.matches(receipt: receipt, entry: $0) }) else { return nil }
+            return ledger
+        }
+        let retained = cache.pendingPlanReceiptsResult(scope: scope)
+        guard !retained.isFailure else { return "待登记账目无法读取，停止登记并保留原数据。" }
+        var pending = retained.value ?? []
         for receipt in receipts where !pending.contains(where: { $0.idempotencyKey == receipt.idempotencyKey && $0.localDate == receipt.localDate }) { pending.append(receipt) }
         var persisted = cache.savePendingPlanReceipts(pending, scope: scope)
+        var staleReceipts = false
+        var historicalReceipts = false
         for receipt in receipts {
             guard current() else { break }
             do {
                 var wire = receipt
                 // Older servers reject unknown fields; optional handshake
                 // capability permits staggered updates without blind 400 retries.
-                if handshake?.planReceiptMetadata != true {
-                    wire.workoutID = nil; wire.scheduledAt = nil; wire.idempotencyKey = nil; wire.exportNotes = nil
+                if handshake?.planReceiptContractVersion != 2 {
+                    if wire.lifecycleEvent != nil && wire.lifecycleEvent != "verified" { continue }
+                    wire.useLegacyContract(metadata: handshake?.planReceiptMetadata == true)
                 }
-                _ = try await api.recordPlanSync(wire, baseURL: baseURL, token: token)
+                let response = try await api.recordPlanSync(wire, baseURL: baseURL, token: token)
                 guard current() else { break }
+                if response.matchesCurrent == false, receipt.lifecycleEvent == "verified" {
+                    if var ledger = matchingLedger(for: receipt) {
+                        staleReceipts = true
+                        watchState = .stale
+                        ledger.requiresWithdrawal = true; watchLedger = ledger
+                        if !cache.saveWatchLedger(ledger) { persisted = false }
+                    } else { historicalReceipts = true }
+                }
                 pending.removeAll { $0.idempotencyKey == receipt.idempotencyKey && $0.localDate == receipt.localDate }
-                if var ledger = watchLedger, ledger.scope == scope, ledger.entries.contains(where: { $0.localDate == receipt.localDate && $0.workoutID.uuidString == receipt.workoutID }) {
+                if var ledger = matchingLedger(for: receipt) {
                     ledger.registeredDates = Array(Set(ledger.registeredDates + [receipt.localDate])).sorted()
                     watchLedger = ledger
                     if !cache.saveWatchLedger(ledger) { persisted = false }
                 }
                 if !cache.savePendingPlanReceipts(pending, scope: scope) { persisted = false }
-            } catch { /* Retain this exact receipt for an explicit foreground retry. */ }
+            } catch {
+                guard current() else { break }
+                let code: String
+                if case RaiAPIClientError.server(let value, _, _) = error { code = value } else { code = "network" }
+                if code == "plan_receipt_scope_mismatch", receipt.lifecycleEvent == "verified",
+                   var ledger = matchingLedger(for: receipt) {
+                    staleReceipts = true; watchState = .stale
+                    ledger.requiresWithdrawal = true; watchLedger = ledger
+                    if !cache.saveWatchLedger(ledger) { persisted = false }
+                }
+                cache.recordPlanDiagnostic(.init(at: now(), name: "receipt_retry_failed", scopeDigest: scope,
+                    operationId: receipt.operationId, revision: receipt.revision, owed: nil, confirmed: nil, errorCode: code))
+            }
         }
         if !persisted { return "系统日程结果与服务端登记分别处理；本地待登记账目未持久化，请检查存储后重试。" }
         let failures = receipts.filter { receipt in pending.contains { $0.idempotencyKey == receipt.idempotencyKey && $0.localDate == receipt.localDate } }.count
+        if staleReceipts { return "已登记历史核验，但服务端事实已变化，不计当前覆盖；请撤回或更新。" + (failures > 0 ? "另有 \(failures) 天仍待登记。" : "") }
+        if historicalReceipts { return "历史核验已登记，不计当前覆盖；当前系统排期状态未变。" + (failures > 0 ? "另有 \(failures) 天仍待登记。" : "") }
         return failures == 0 ? nil : "\(failures) 天的系统日程回执未在服务端登记；可前台重试，系统排期核验结果不因此作废。"
     }
 
     var watchStatusLabel: String {
+        if scheduleStorageIssue { return "安全账目无法读取，停止替换排期" }
+        if interruptedSchedule != nil { return "排期操作中断，需前台核验／撤回" }
         if watchLedger?.requiresWithdrawal == true { return "中断排期尚未确认撤回" }
         if let ledger = watchLedger, ledger.scope != cacheScope { return "上次为其他服务排期，需核验／撤回" }
         if [.verifiedCurrent, .partial, .empty].contains(watchState) && watchNeedsUpdate { return PlanWatchState.stale.label }
         return watchState.label
     }
 
-    func recordWatchResult(_ outcome: PlanWatchSyncOutcome, snapshot: PlanSyncSnapshot) {
-        guard isCurrentPlanSync(snapshot), !outcome.superseded else { return }
-        watchState = outcome.deviceUnsupported ? .unsupported : !outcome.authorized ? .denied :
-            outcome.verified ? (outcome.offered == 0 ? .empty : .verifiedCurrent) : .partial
-        guard outcome.authorized, outcome.clearVerified else { return }
-        let ledger = PlanWatchLedger(scope: snapshot.scope, revision: snapshot.revision, entries: outcome.confirmedEntries,
-            fingerprint: PlanFingerprint.make(days: snapshot.days, timezone: snapshot.timezone, hour: snapshot.reminderHour, completed: snapshot.completedDates),
-            reminderHour: snapshot.reminderHour, confirmedAt: now(), registeredDates: [])
-        watchLedger = ledger
-        if outcome.verified && outcome.offered > 0, let plan = currentWorkoutPlan {
-            recordWatchAcknowledgement(plan: plan, scheduleHour: snapshot.reminderHour)
-        }
-        if outcome.offered == 0 {
-            lastWatchRevision = nil; lastWatchDays = nil; lastWatchTimezone = nil
-            lastWatchHour = nil; lastWatchCompleted = nil
-        }
-        if !cache.saveWatchLedger(ledger) { errorMessage = "系统日程结果已读取，但上次确认记录未能持久化。" }
+    var hasInterruptedSchedule: Bool { interruptedSchedule != nil || scheduleStorageIssue }
+
+    func scheduleStateChanged() {
+        let result = cache.scheduleJournalResult()
+        scheduleStorageIssue = result.isFailure || cache.watchLedgerResult().isFailure || cache.pendingPlanReceiptsResult(scope: cacheScope).isFailure
+        interruptedSchedule = result.value.flatMap { $0.terminal ? nil : $0 }
     }
 
-    func recordWatchInterrupted(_ outcome: PlanWatchSyncOutcome, snapshot: PlanSyncSnapshot) {
-        watchState = .stale
-        let ids = Set(outcome.submittedEntries.map { $0.workoutID.uuidString })
-        let pending = cache.pendingPlanReceipts(scope: snapshot.scope).filter { !ids.contains($0.workoutID ?? "") }
-        if !cache.savePendingPlanReceipts(pending, scope: snapshot.scope) {
-            errorMessage = "本次排期已失效，但待登记账目未能更新；请联网重新核验后再登记。"
+    func exportPlanDiagnostics() -> URL? { cache.exportPlanDiagnostics() }
+
+    func diagnoseSchedule(_ outcome: PlanWatchSyncOutcome, journal: PlanScheduleJournal) {
+        cache.recordPlanDiagnostic(.init(at: now(), name: outcome.cleanupVerified ? "schedule_readback" : "withdrawal_unverified",
+            scopeDigest: journal.operation.scope, operationId: journal.operation.operationId.uuidString,
+            revision: journal.operation.goalsRevision, owed: outcome.offered, confirmed: outcome.scheduled,
+            errorCode: outcome.storageError != nil ? "storage_unavailable" : !outcome.verified ? "schedule_readback_mismatch" : nil))
+    }
+
+    func makeScheduleJournal(snapshot: PlanSyncSnapshot) -> PlanScheduleJournal? {
+        scheduleStateChanged()
+        guard !hasInterruptedSchedule, !planPersistenceFailed else { return nil }
+        let previous = watchLedger?.scope == snapshot.scope ? watchLedger?.entries ?? [] : []
+        return PlanScheduleJournal(storage: cache, snapshot: snapshot, previousEntries: previous)
+    }
+
+    func makeClearJournal() -> PlanScheduleJournal? {
+        scheduleStateChanged()
+        guard !scheduleStorageIssue else { return nil }
+        if let interruptedSchedule { return PlanScheduleJournal(storage: cache, operation: interruptedSchedule) }
+        let snapshot = PlanSyncSnapshot(scope: watchLedger?.scope ?? cacheScope, configuration: configurationID, revision: watchLedger?.revision ?? currentPlanRevision, days: [],
+            timezone: "Asia/Shanghai", reminderHour: Self.storedScheduleHour(scope: cacheScope), completedDates: [],
+            localDate: UserDataNoticePolicy.localDate(now: now(), timezone: "Asia/Shanghai"), windowDays: 7, leaseID: planSyncRequestID)
+        return PlanScheduleJournal(storage: cache, snapshot: snapshot, previousEntries: watchLedger?.entries ?? [])
+    }
+
+    func interruptedScheduleJournal() -> PlanScheduleJournal? {
+        scheduleStateChanged()
+        guard !scheduleStorageIssue, let interruptedSchedule else { return nil }
+        return PlanScheduleJournal(storage: cache, operation: interruptedSchedule)
+    }
+
+    func enrichPlanReceipts(_ receipts: [PlanSyncReceipt], snapshot: PlanSyncSnapshot, operationID: UUID) -> [PlanSyncReceipt] {
+        guard let coherence = snapshot.coherenceToken, let identity = snapshot.serverIdentity else { return receipts }
+        return receipts.map { receipt in
+            var value = receipt
+            value.contractVersion = 2; value.scope = identity; value.operationId = operationID.uuidString
+            value.coherenceToken = coherence; value.verifiedAt = ISO8601DateFormatter().string(from: now())
+            value.timezone = snapshot.timezone; value.prescriptionDigest = PlanFingerprint.prescriptionDigest(kind: value.kind, structure: value.structure)
+            value.lifecycleEvent = "verified"
+            return value
         }
-        if outcome.cleanupVerified && outcome.clearVerified {
-            recordWatchClearAcknowledgement()
+    }
+
+    private func lifecycleReceipts(_ ledger: PlanWatchLedger?, event: String) -> [PlanSyncReceipt] {
+        (ledger?.receipts ?? []).filter { $0.contractVersion == 2 }.map { original in
+            var value = original
+            value.lifecycleEvent = event
+            value.verifiedAt = ISO8601DateFormatter().string(from: now())
+            value.idempotencyKey = (value.workoutID ?? "") + ":" + event
+            return value
+        }
+    }
+
+    func commitWatchResult(_ outcome: PlanWatchSyncOutcome, snapshot: PlanSyncSnapshot, journal: PlanScheduleJournal, receipts: [PlanSyncReceipt]) -> Bool {
+        guard outcome.didAttemptClear else {
+            if outcome.deviceUnsupported { watchState = .unsupported }
+            else if !outcome.authorized && !outcome.superseded { watchState = .denied }
+            scheduleStateChanged()
+            return true
+        }
+        guard outcome.clearVerified, isCurrentPlanSync(snapshot) else { scheduleStateChanged(); return false }
+        let ledger = PlanWatchLedger(scope: snapshot.scope, revision: snapshot.revision, entries: outcome.confirmedEntries,
+            fingerprint: PlanFingerprint.make(days: snapshot.days, timezone: snapshot.timezone, hour: snapshot.reminderHour, completed: snapshot.completedDates),
+            reminderHour: snapshot.reminderHour, confirmedAt: now(), registeredDates: [], receipts: receipts, coherenceToken: snapshot.coherenceToken)
+        let events = lifecycleReceipts(watchLedger, event: "replaced")
+        guard journal.finish(ledger: ledger, receipts: receipts + events, verified: outcome.verified) else {
+            scheduleStateChanged(); return false
+        }
+        watchLedger = ledger
+        watchState = outcome.verified ? (outcome.offered == 0 ? .empty : .verifiedCurrent) : .partial
+        if outcome.verified && outcome.offered > 0, let plan = currentWorkoutPlan { recordWatchAcknowledgement(plan: plan, scheduleHour: snapshot.reminderHour) }
+        scheduleStateChanged()
+        return true
+    }
+
+    func recordScheduleLifecycle(event: String, ledger: PlanWatchLedger?) async {
+        let receipts = lifecycleReceipts(ledger, event: event)
+        guard let ledger else { return }
+        let previous = cache.pendingPlanReceiptsResult(scope: ledger.scope)
+        guard !previous.isFailure else { scheduleStorageIssue = true; return }
+        var pending = (previous.value ?? []).filter { value in
+            !ledger.entries.contains { $0.workoutID.uuidString == value.workoutID } ||
+                (value.lifecycleEvent != nil && value.lifecycleEvent != "verified")
+        }
+        for receipt in receipts where !pending.contains(where: { $0.idempotencyKey == receipt.idempotencyKey }) { pending.append(receipt) }
+        guard cache.savePendingPlanReceipts(pending, scope: ledger.scope) else { scheduleStorageIssue = true; return }
+        if ledger.scope == cacheScope, !isOffline { _ = await recordPlanSyncReceipts(receipts) }
+    }
+
+    func commitScheduleWithdrawal(journal: PlanScheduleJournal, previous: PlanWatchLedger?, empty: Bool) -> Bool {
+        guard journal.finishWithdrawal(ledger: nil, receipts: lifecycleReceipts(previous, event: "withdrawn")) else {
+            scheduleStateChanged()
+            return false
+        }
+        watchLedger = nil
+        lastWatchSyncAt = now()
+        lastWatchRevision = nil; lastWatchDays = nil; lastWatchTimezone = nil; lastWatchHour = nil; lastWatchCompleted = nil
+        watchState = empty ? .empty : .stale
+        scheduleStateChanged()
+        return true
+    }
+
+    func recordRecoveredSchedule(_ outcome: PlanWatchSyncOutcome, journal: PlanScheduleJournal, withdraw: Bool) async -> String {
+        guard outcome.authorized, !outcome.superseded, outcome.storageError == nil, outcome.validationError == nil else { return outcome.report }
+        if withdraw || journal.operation.clearAll {
+            guard outcome.cleanupVerified else { return "未能确认撤回，风险账目保留；请检查手表后重试。" }
+            let previous = watchLedger
+            guard commitScheduleWithdrawal(journal: journal, previous: previous, empty: outcome.clearVerified) else {
+                return "撤回已读回，但确认账目未能原子提交；请重新核验。"
+            }
+            return "原操作条目已核验撤回；请在配对手表确认。"
+        }
+        let operation = journal.operation
+        let previousLedger = watchLedger
+        let receipts = operation.items.filter { item in outcome.confirmedEntries.contains(item.entry) }.map { item in
+            var receipt = PlanSyncReceipt(localDate: item.entry.localDate, kind: item.kind, revision: operation.goalsRevision,
+                structure: item.structure, workoutID: item.entry.workoutID.uuidString, scheduledAt: ISO8601DateFormatter().string(from: item.entry.scheduledAt),
+                idempotencyKey: item.entry.workoutID.uuidString)
+            if let identity = operation.serverIdentity, let coherence = operation.coherenceToken {
+                receipt.contractVersion = 2; receipt.scope = identity; receipt.coherenceToken = coherence
+                receipt.operationId = operation.operationId.uuidString; receipt.verifiedAt = ISO8601DateFormatter().string(from: now())
+                receipt.timezone = operation.timezone; receipt.prescriptionDigest = item.prescriptionDigest; receipt.lifecycleEvent = "verified"
+            }
+            return receipt
+        }
+        if operation.scope == cacheScope, !isOffline { _ = await refreshPlanState() }
+        let current = operation.scope == cacheScope && trainingPlanStore.isCurrent &&
+            operation.goalsRevision == currentPlanRevision && operation.coherenceToken != nil &&
+            operation.coherenceToken == trainingPlanStore.metadata?.coherenceToken
+        let ledger = PlanWatchLedger(scope: operation.scope, revision: operation.goalsRevision, entries: outcome.confirmedEntries,
+            fingerprint: current ? PlanFingerprint.make(days: workoutPlan?.days ?? [], timezone: operation.timezone, hour: operation.reminderHour, completed: completedWeekDates) : "",
+            reminderHour: operation.reminderHour, confirmedAt: now(), registeredDates: [], requiresWithdrawal: !current, receipts: receipts, coherenceToken: operation.coherenceToken)
+        // A repeated partial recovery may already have a new ledger. Only the
+        // original replacement targets may receive termination events.
+        let events = previousLedger?.scope == operation.scope ? lifecycleReceipts(previousLedger, event: "replaced").filter { receipt in
+            operation.previousEntries.contains { PlanReceiptMatcher.matches(receipt: receipt, entry: $0) }
+        } : []
+        guard journal.finish(ledger: ledger, receipts: receipts + events, verified: outcome.verified) else {
+            return "系统日程已读回，但确认账目未持久化，仍需重新核验。"
+        }
+        watchLedger = ledger
+        watchState = current && outcome.verified ? .verifiedCurrent : .stale
+        return "原操作核验 \(outcome.scheduled)/\(outcome.offered) 项。" + (current ? "可显式重试登记回执。" : "与当前计划尚未确认一致，请撤回或更新。")
+    }
+
+    func recordWatchInterrupted(_ outcome: PlanWatchSyncOutcome, snapshot: PlanSyncSnapshot, journal: PlanScheduleJournal) {
+        watchState = .stale
+        guard outcome.didAttemptClear || !outcome.submittedEntries.isEmpty else {
+            _ = journal.cancelBeforeSideEffect(ledger: watchLedger)
+            scheduleStateChanged()
             return
         }
-        guard !outcome.cleanupVerified, !outcome.submittedEntries.isEmpty else { return }
+        if outcome.cleanupVerified && outcome.clearVerified {
+            if !commitScheduleWithdrawal(journal: journal, previous: watchLedger, empty: true) {
+                errorMessage = "撤回已读回，但操作账目未能原子提交；请重新核验。"
+            }
+            return
+        }
         let ledger = PlanWatchLedger(scope: snapshot.scope, revision: snapshot.revision,
-            entries: outcome.submittedEntries, fingerprint: "", reminderHour: snapshot.reminderHour,
-            confirmedAt: now(), registeredDates: [], requiresWithdrawal: true)
+            entries: outcome.submittedEntries + journal.operation.previousEntries, fingerprint: "", reminderHour: snapshot.reminderHour,
+            confirmedAt: now(), registeredDates: [], requiresWithdrawal: true, receipts: watchLedger?.receipts)
         watchLedger = ledger
+        _ = journal.persist(.withdrawalRequired)
         if !cache.saveWatchLedger(ledger) {
             errorMessage = "本次旧条目未能确认撤回，且本地撤回风险记录未持久化；请立即显式撤回并检查手表。"
         }
+        scheduleStateChanged()
     }
 
     private func loadCachedWorkouts() {

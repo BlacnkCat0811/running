@@ -60,6 +60,7 @@ export interface MatchedPlanDay {
 
 /** A plan day that could explain a run, with where the candidate came from. */
 export interface PlanCandidateDay {
+  validUntil?: string;
   localDate: string;
   kind: MobileSessionKind;
   revision: number;
@@ -369,7 +370,7 @@ export const assemblePlanCandidates = (
   history: ReadonlyArray<PlanHistoryRevision>
 ): PlanCandidateDay[] => {
   const candidates: PlanCandidateDay[] = pushes.flatMap((push) =>
-    push.structure == null
+    push.structure == null || (push.lifecycleEvent !== undefined && push.lifecycleEvent !== "verified")
       ? []
       : [
           {
@@ -379,7 +380,13 @@ export const assemblePlanCandidates = (
             matchedBy: "push_record" as const,
             structure: push.structure,
             distanceKm: null,
-            pushedAt: push.pushedAt
+            pushedAt: push.verifiedAt ?? push.pushedAt,
+            ...(() => {
+              const end = pushes.filter(event => event.workoutID === push.workoutID && event.scheduledAt === push.scheduledAt &&
+                event.lifecycleEvent !== undefined && event.lifecycleEvent !== "verified")
+                .map(event => event.verifiedAt ?? event.pushedAt).sort()[0];
+              return end ? { validUntil: end } : {};
+            })()
           }
         ]
   );
@@ -501,6 +508,7 @@ export const matchPlanDay = (input: {
     .flatMap((candidate) => {
       const pushedAtMs = Date.parse(candidate.pushedAt!);
       if (!Number.isFinite(pushedAtMs)) return [];
+      if (candidate.validUntil && startedAtMs >= Date.parse(candidate.validUntil)) return [];
       if (pushedAtMs > startedAtMs || startedAtMs - pushedAtMs > PLAN_MATCH_WINDOW_MS) return [];
       return [candidate];
     })
