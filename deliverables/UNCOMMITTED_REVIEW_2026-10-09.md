@@ -530,3 +530,70 @@ EXIT=0 / 0 fail** 为准。
 > 多出的那条 `publication lock rejects PID reuse when the process identity differs` 是按设计的
 > fail-safe 跳过（`ps` 探测进程身份被沙箱拒）。**别看 skip 数变化就以为覆盖丢了。**
 
+---
+
+## 九、状态更新（提交与部署，2026-10-10 00:45 CST 收口）
+
+> 本节为**追加**，不改写上文任何一行。上文 §八 序 0 的「⏸ 未执行」与「D1 的风险原样保留」
+> 是 **2026-10-09 当时的时点结论**；下面记录这批改动此后发生的事实，并列出被事实推翻的条目。
+
+### 9.1 提交与推送
+
+- 起点 `6f5faac` → 终点 **`e05f59e`**：**7 个主题化 commit**，**45 文件 / +4145 / −323**。
+  删除行数与提交前**逐字节一致（323）**；insertions 算术闭合（2033 已跟踪 + 1580 新增源文件 + 532 本报告）
+  ⇒ 无内容丢失。
+- **顺序即依赖**（后组建立在前组的新 API 上）：
+
+  | # | commit | 主题 | 关键产物 |
+  | --- | --- | --- | --- |
+  | 1 | `915230b` | feat(storage) | v30/v31 迁移：`healthkit_record_sources` / `healthkit_record_aliases` / `healthkit_record_facts` |
+  | 2 | `b91bf89` | feat(parser) | 导出清单 v2 + HealthKit 记录身份（sample UUID） |
+  | 3 | `d1ab7b6` | feat(api) | 握手声明 `healthKitRecordSyncVersion=2`、接受 v2 导出清单 |
+  | 4 | `6774a3e` | feat(ios) | 记录级变更游标 / 归档 / 后台恢复接入 v2（24 项：18 M + 6 A） |
+  | 5 | `65d51a9` | fix(web) | 常规读取默认套 15 秒 deadline（审计 3.9） |
+  | 6 | `3320dc0` | docs | 记录同步 v2 协议、ADR-004 与升级边界 |
+  | 7 | `e05f59e` | docs(deliverables) | 本报告 |
+
+- **逐节点独立可用（不是只看最终态）**：先 `git stash push -u --keep-index -- <后续组路径>` 把工作区
+  摆成节点态，再实跑门禁 —— 这样 pre-commit hook 的结论才落在真节点态上。实测：
+  1 storage `typecheck EXIT=0` + 定向 **133/131/0/2**；2 parser **201/200/0/1**；3 api **135/133/0/2**；
+  4 ios `test:ios EXIT=0`（archive 19 / cursor 8 / record sync 23 / capabilities 269 / determinism 14）；
+  5 web hooks **9/9 pass**；6 docs `check:docs` **28 files / 229 links / 0 problems**；7 `git status --short` 变空。
+- **推送**：`6f5faac..e05f59e  main -> main`；`git log -1 origin/main` = `e05f59e`；
+  `git status -sb` 无 ahead / behind。
+
+### 9.2 线上部署（腾讯云轻量 `lhins-3gatdqed`，2026-10-10 00:45 CST）
+
+| 步骤 | 实测证据 |
+| --- | --- |
+| 影响面 | `package.json` / `package-lock.json` / `deploy/` **均未变** ⇒ 跳过 `npm ci` |
+| 迁移前基线 | `/v1/data-summary`：`healthRecords 183556 / workouts 285 / trainingSessions 282 / routePoints 135192 / assessments 282`，`issues: []` |
+| 备份 | `POST /v1/backups` ⇒ `rai.manual.2026-10-09T16-44-39-103Z.b7747ad4.sqlite`（614862848 B）；远程 `ls \| fgrep -c b7747ad4` = **1** |
+| 迁移预演（只读） | `version: 29`、`pending: [30, 31]`、counts 与基线逐项一致 ⇒ 确认**必须停服迁移** |
+| build | `npm run build` ⇒ `BUILD_EXIT=0`（12.23s），新 index chunk **`index--S1o6fi6.js`** |
+| 迁移 | `systemctl stop rai-api` → `data:migrate --apply` ⇒ **v29 → v31**、counts **285 / 135192 / 183556 逐项不变**、`pending: []`、`foreignKeyCheck: ok`、`elapsedMs 3625`、`APPLY_EXIT=0` |
+| 起服 | `ACTIVE=active`、`NRestarts=0`、`MemoryMax=1468006400`、`ActiveEnterTimestamp=Sat 2026-10-10 00:45:28 CST` |
+| 握手 | `/v1/handshake` ⇒ **`healthKitRecordSyncVersion: 2`**（此前该字段缺失正是"线上是旧版"的判据，现已闭合） |
+| 数据 | `/v1/data-summary` 与迁移前**逐项相同**、`issues: []`；`schema_migrations` 含 **v1…v31** |
+| 新表 | `healthkit_record_facts` 存在、**0 行**（`healthkit_record_sources` 尚无映射 ⇒ v31 无回填，符合设计；同时证明新表真建上了） |
+| 服务定义 | `/etc/systemd/system/rai-api.service` 与仓库 `deploy/rai-api.service` **逐字节相同**，含 `RestartPreventExitStatus=78` |
+| 匿名面 | `/v1/backups`、`/v1/diagnostics`、`/v1/import-sources/recent` **全 401**；`/v1/health` ⇒ `{"status":"ok","databaseReady":true}` |
+| SPA | `/`、`/settings`、`/workouts` 全 **200**；站点 chunk = `index--S1o6fi6.js`（与 dist 一致），旧 chunk `index--8bVyjH7i.js` **404** |
+| 冷路径用例 | 在**线上那份代码**上跑 `apps/api/test/healthkit-record-changes.test.ts` ⇒ `EXIT=0`、2 tests / 2 pass / 0 fail / 0 skipped |
+
+启动日志另确认：`publicReadRoutes: 27 / tokenRequiredReadRoutes: 20`、`databasePath: /var/lib/rai/var/rai.sqlite`、
+`RAI local API ready`；环境 `RAI_IMPORT_ENGINE=rust` / `RAI_RUST_FALLBACK=typescript` / `RAI_RUST_BINARY=/opt/rai-native/rai-data-worker`
+（`RAI_IMPORT_VALIDATION_MODE` 已不在），无导入进程在跑。本机 `var/rai.sqlite` mtime 仍 `2026-10-08 00:35`（未被本次部署触碰）。
+
+### 9.3 被本次事实推翻的上文条目（只列这些）
+
+| 位置 | 原文（时点结论） | 现状 |
+| --- | --- | --- |
+| §八 序 0 | `⏸ **未执行**`：部署 + `data:migrate` | **已执行**（见 9.2），线上库 v29 → **v31** |
+| §八「为什么 0 没执行」 | 「**D1 的风险原样保留**：线上库若仍低于 v30，重新部署会因 `migrationPolicy:"refuse"` 起不来」 | **已消除**：线上库现为 **v31**，重部署不会再因 `refuse` 拒启 |
+| 门禁实跑表 | 表上方已标「时点快照」；申报过期项为 突变 92→95、record wiring 21→23 | 以 §八「收尾回归实跑（最终态，2026-10-09 23:11）」为准 |
+
+**仍然未决、且不因本次部署而改变**：🟡5「`anchoredRecords` 的 `next == nil` 是否可达」——
+**只能真机判定**（HealthKit 读授权必须走真机 UI 弹窗，`simctl` 不支持 health）；报告与源码注释只落了
+「未决 + 判定手段」，**未改成兜 nil**。其余 🟡2 / 🟡3 / 🟡4 / 🟡6 / 🟡7 / 🟡8 与 §七 全部方法学备注均属**记账项**，本轮未改。
+
