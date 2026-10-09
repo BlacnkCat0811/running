@@ -64,6 +64,7 @@ npm run check:package-boundaries
 | 今日页计划类卡片的口径冲突与改法 | [计划卡口径](docs/TODAY_PLAN_CARDS_REVIEW.md) |
 | iOS 构建、权限和平台入口 | [iOS](apps/ios/README.md) |
 | 新版跑步教练流程与未复刻边界 | [跑步教练](docs/RUN_COACH.md) |
+| iOS 训练计划现状复核与后续实施方案 | [训练计划架构方案](docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md) |
 | Rust 可选数据执行器 | [Rust](docs/RUST_DATA_ENGINE.md) |
 | ML 环境与工件 | [研究目录](research/README.md) |
 | 固定时点、固定数据库的机器证据 | [核验产物](deliverables/README.md) |

@@ -98,3 +98,16 @@
 - `unplannedDays`：`[{ localDate, code, detail }]`，只覆盖**用户自选的跑步日**中本周没有排入训练的那些天。`code` 是事实码（`no_session_scheduled` / `pre_race_taper`），`detail` 是可观测计数，不含动机判断。
 
 同时修正 `weeklyCapacityKm` 的语义：它现在是**本周可花预算**（`min(容量, 本周量带上限)`），与生成侧和今天页量带上限同源。它此前的值是未按阶段裁剪的容量，与生成侧实际使用的数字不一致；**同名同型，取值口径变了**，如果客户端把它当作"上限"来做二次裁剪，请改用今天页的 `periodization.current.volumeBandKm.upper`。
+
+## 训练计划一致性与排期回执（2026-10-09）
+
+实现与兼容政策见 [IOS_TRAINING_PLAN_IMPLEMENTATION](IOS_TRAINING_PLAN_IMPLEMENTATION.md)。
+`/workout-plan/synced` 的准确语义是客户端**本地系统日程已核验**；不是物理手表收到的证明。
+新可选字段：`workoutID`（UUID）、`scheduledAt`（ISO 8601 时刻）、`idempotencyKey`、`exportNotes`。
+`structure` 是实际导出的结构，不是未加说明的原始处方。相同幂等键不同内容拒绝；相同内容重试返回首次 recordedAt。
+旧客户端照常发送原四字段；新客户端通过可选 `handshake.planReceiptMetadata` 能力位决定是否发送新增字段。
+
+客户端安全字段（revision、timezone、windowDays、executable、结构的 goal 类型/剂量）不得用乐观默认掩盖缺失。
+解释字段新增使用 Optional 或明确的 decodeIfPresent 策略；普通 stored-property 默认值不是缺键解码策略。
+未知计划状态不解释成 active，未知可执行目标不解释成 open。legacy today 缺 planRevision 可解码，但不能用于当前训练确认或手表同步。
+写成功后读取失败仍算“已保存待刷新”，不能暴露低版本执行缓存，不能引导重复提交；缓存清理不删除确认水位。

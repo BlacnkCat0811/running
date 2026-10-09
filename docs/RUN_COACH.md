@@ -22,7 +22,7 @@
 本项目设置至少三个跑步日，长距离偏好必须属于跑步日；这些是本地配置限制，不宣称是佳明限制。
 目标类别、赛事距离和结束日期在当前计划中固定，目标时间和训练偏好可修改；更换赛事创建新计划。
 偏好不是每周训练次数的保证：校准、跑量、恢复或已完成预算不足时可以减少训练或安排休息。
-因此教练页把"这一周排了几次、为什么这么小"提到首屏（校准进度 + 已排次数 + 本周预算），并把「跑步日」改称「可跑步日（可选，不是承诺）」—— 解释是交付要求，不是可选文案。
+因此教练页把"未来7日排了几次、为何采用保守预算"提到首屏（校准进度 + 滚动窗口已排次数 + 自然周预算），并把「跑步日」改称「可跑步日（可选，不是承诺）」—— 解释是交付要求，不是可选文案。
 无历史时仍然给出确定的计划（保守起步 5 km），而不是空态；同时必须说明它是保守起步、不是整个计划的全部内容。
 
 ## 服务端政策
@@ -78,3 +78,10 @@
 - `npm run test:ios`：原生源码类型检查、DTO/缓存、CAS、旧服务响应和部分刷新失败回归。
 - `apps/ios/tests/run-visual-tests.sh -only-testing:VisualAcceptance/VisualAcceptance/test15RunCoachLifecycleAndLargeText -only-testing:VisualAcceptance/VisualAcceptance/test16RunCoachRaceSetup`：隔离 API 下的原生操作及大字体截图。
 - 真机签名、HealthKit 读取、WorkoutKit 授权和实际手表撤回仍按 [原生运行说明](IOS_NATIVE_RUNBOOK.md) 人工验收。
+
+## 客户端排期与状态一致性（2026-10-09）
+
+完整执行边界与故障回归见 [IOS_TRAINING_PLAN_IMPLEMENTATION](IOS_TRAINING_PLAN_IMPLEMENTATION.md)。
+自然周预算/进度与滚动未来7日排课数量分开展示；“未来3次训练”不解释成连续3天。
+无骨架（fitness、全马、自定义不支持距离）时 phase=null 且 phases=[]；客户端不生成替代阶段。
+显式同步核验本机系统日程，真实手表可见性另行核验；暂停/结束和离线/无计划仍有显式撤回入口。
