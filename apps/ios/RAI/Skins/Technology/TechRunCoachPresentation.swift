@@ -1,5 +1,11 @@
 import Foundation
 
+/// A missing coach summary is not the assertion that the programme just started.
+func techCoachCurrentWeek(elapsedWeeks: Int?) -> Int? {
+    guard let elapsedWeeks, elapsedWeeks >= 0, elapsedWeeks < Int.max else { return nil }
+    return elapsedWeeks + 1
+}
+
 /// Count the same seven-day buckets as the API's elapsedWeeks, including race
 /// day. A race on the next bucket's first day belongs to that final week.
 func techCoachTotalWeeks(for plan: MobileRunCoachPlan) -> Int? {

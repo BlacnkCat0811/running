@@ -512,7 +512,7 @@ import Foundation
             "a week whose prescriptions all failed to build is not reported as finished"
         )
         check(
-            nothingUsable.emptyOfferMessage.contains("生成"),
+            nothingUsable.emptyOfferMessage.contains("预览并确认"),
             "the unusable week is the one that tells the runner to regenerate"
         )
         // The panel's fallback for "there is no plan to classify" must be that same
@@ -650,98 +650,6 @@ import Foundation
             "a future session reads as planned"
         )
 
-        // MARK: The receipt's attribution
-
-        // A listed entry names its own day, so two days that prescribe the same
-        // workout must not share a receipt: the day whose `schedule` silently did
-        // nothing must not collect the one that landed.
-        let berlin = TimeZone(identifier: "Europe/Berlin")!
-        func at(_ year: Int, _ month: Int, _ day: Int, hour: Int = 8) -> DateComponents {
-            var components = DateComponents()
-            components.year = year
-            components.month = month
-            components.day = day
-            components.hour = hour
-            return components
-        }
-        let monday = PlanReceiptMatcher.PendingDay(localDate: "2026-09-14", at: at(2026, 9, 14))
-        let tuesday = PlanReceiptMatcher.PendingDay(localDate: "2026-09-15", at: at(2026, 9, 15))
-
-        // Only Tuesday reached the watch, even though both days were scheduled
-        // from the same prescription. The receipt must name Tuesday and only
-        // Tuesday — the old content-based matcher named Monday instead.
-        check(
-            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [at(2026, 9, 15)], timeZone: berlin)
-                == ["2026-09-15"],
-            "a receipt names the day that reached the watch, not its identical twin"
-        )
-        check(
-            PlanReceiptMatcher.confirm(
-                pending: [monday, tuesday],
-                listed: [at(2026, 9, 14), at(2026, 9, 15)],
-                timeZone: berlin
-            ) == ["2026-09-14", "2026-09-15"],
-            "both days are confirmed when both reached the watch"
-        )
-        check(
-            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [at(2026, 9, 14)], timeZone: berlin)
-                == ["2026-09-14"],
-            "one listed day confirms exactly one planned day"
-        )
-
-        // A listed instant carries its own zone when the system normalises
-        // `ScheduledWorkoutPlan.date` to UTC. 23:00 UTC on the 14th is already
-        // 01:00 on the 15th in Berlin, so the receipt must name the 15th — the
-        // day it actually falls on in the plan's timezone. Comparing the raw
-        // year/month/day fields instead would name the 14th.
-        var lateUtc = at(2026, 9, 14, hour: 23)
-        lateUtc.timeZone = TimeZone(identifier: "UTC")
-        check(
-            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [lateUtc], timeZone: berlin)
-                == ["2026-09-15"],
-            "a listed instant is read as the day it falls on in the plan's timezone"
-        )
-        // The same instant expressed in the plan's own zone is the 14th.
-        var lateBerlin = at(2026, 9, 14, hour: 23)
-        lateBerlin.timeZone = berlin
-        check(
-            PlanReceiptMatcher.confirm(pending: [monday, tuesday], listed: [lateBerlin], timeZone: berlin)
-                == ["2026-09-14"],
-            "a listed instant in the plan's own zone keeps its day"
-        )
-
-        // Nothing to attribute: the caller then keeps its previous behaviour
-        // rather than reporting a receipt nobody can stand behind.
-        check(
-            PlanReceiptMatcher.confirm(pending: [monday], listed: [], timeZone: berlin) == nil,
-            "an empty read-back is not attributed"
-        )
-        // `Calendar.date(from:)` returns the *reference date* for empty
-        // components instead of nil, so "no date" has to be detected on the
-        // fields — otherwise this entry would read as 2001-01-01 and count as a
-        // usable date, quietly disabling the caller's fallback.
-        check(
-            PlanReceiptMatcher.confirm(pending: [monday], listed: [DateComponents()], timeZone: berlin) == nil,
-            "a listed entry with no date cannot confirm anything"
-        )
-        check(
-            PlanReceiptMatcher.confirm(
-                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09-14", at: DateComponents())],
-                listed: [at(2026, 9, 14)],
-                timeZone: berlin
-            ) == [],
-            "a planned day with no date is never confirmed"
-        )
-        // A `localDate` that cannot be read is the same case one field earlier.
-        check(
-            PlanReceiptMatcher.confirm(
-                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09", at: at(2026, 9, 14))],
-                listed: [at(2026, 9, 14)],
-                timeZone: berlin
-            ) == [],
-            "a planned day whose date cannot be read is never confirmed"
-        )
-
         // MARK: Reviewing a week whose early days have already passed
 
         // The scheduler pushes a slot ahead, but only inside its own day: a day that
@@ -783,56 +691,8 @@ import Foundation
         check(instant(weekAt[3]) == "2026-9-17 7:00", "a day still ahead is untouched")
         check(Set(weekAt.map(instant)).count == week.count, "no two days of the week share one instant")
 
-        var pendingWeek: [PlanReceiptMatcher.PendingDay] = []
-        for (index, day) in week.enumerated() {
-            if let at = weekAt[index] {
-                pendingWeek.append(PlanReceiptMatcher.PendingDay(localDate: day, at: at))
-            }
-        }
-        check(pendingWeek.count == week.count, "every day of the week is still sent to the scheduler")
-        // Monday's `schedule` did nothing this time; Tuesday, Wednesday and Thursday
-        // landed. The receipt must name those three and never Monday.
-        check(
-            PlanReceiptMatcher.confirm(
-                pending: pendingWeek,
-                listed: [weekAt[1]!, weekAt[2]!, weekAt[3]!],
-                timeZone: shanghai
-            ) == ["2026-09-15", "2026-09-16", "2026-09-17"],
-            "a mid-week sync names the days that landed, never the one that did not"
-        )
-        check(
-            PlanReceiptMatcher.confirm(pending: pendingWeek, listed: weekAt.compactMap { $0 }, timeZone: shanghai)
-                == week,
-            "a week that landed in full is reported in full"
-        )
-
-        // The eligibility rule, exercised on its own: an instant that has drifted off
-        // the day it stands for is refused, and the slot it would have consumed stays
-        // available to the day the instant actually names.
-        check(
-            PlanReceiptMatcher.confirm(
-                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09-14", at: at(2026, 9, 16, hour: 21))],
-                listed: [at(2026, 9, 16, hour: 21)],
-                timeZone: berlin
-            ) == [],
-            "a day whose instant drifted off its own date is not confirmed"
-        )
-        // Between 23:59 and midnight the push really does cross into the next day.
-        // Refusing the receipt is the deliberate side of that trade: the day is
-        // reported as unconfirmed, and tomorrow's session cannot claim it instead.
-        let lastMinuteOfToday = calendar.date(
-            from: DateComponents(year: 2026, month: 9, day: 16, hour: 23, minute: 59, second: 40)
-        )!
-        let crossing = scheduled("2026-09-16", now: lastMinuteOfToday)!
-        check(instant(crossing) == "2026-9-17 0:00", "a slot pushed past midnight is dated the next day")
-        check(
-            PlanReceiptMatcher.confirm(
-                pending: [PlanReceiptMatcher.PendingDay(localDate: "2026-09-16", at: crossing)],
-                listed: [crossing],
-                timeZone: shanghai
-            ) == [],
-            "a receipt that would cross midnight is refused, not reassigned"
-        )
+        let lastMinute = calendar.date(from: DateComponents(year: 2026, month: 9, day: 16, hour: 23, minute: 59, second: 40))!
+        check(instant(scheduled("2026-09-16", now: lastMinute)) == "2026-9-17 0:00", "late mapper slot can cross midnight; strict scheduler must refuse it")
 
         if failures > 0 {
             print("\(failures) workout plan mapper check(s) failed.")

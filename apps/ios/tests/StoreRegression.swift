@@ -260,6 +260,73 @@ struct StoreRegression {
               && migrating.loadState(scope: "locked-scope")?.exportEnd == Date(timeIntervalSince1970: 42),
               "reopening preserves the committed anchor and watermark")
 
+        // Safety metadata is durable, scoped, transactional, and not evictable.
+        let safetyURL = root.appendingPathComponent("plan-safety.sqlite")
+        let safety = CacheStore(fileURL: safetyURL)
+        let floor12 = PlanWriteAcknowledgement(revision: 12, action: "fixture", acknowledgedAt: Date(), planId: nil)
+        let floor13 = PlanWriteAcknowledgement(revision: 13, action: "preview-confirm", acknowledgedAt: Date(), planId: nil)
+        _ = safety.write("old-execution", scope: "A", key: "workout-plan")
+        _ = safety.write("old-today", scope: "A", key: "today")
+        check(safety.acknowledgePlanWrite(floor13, scope: "A"), "plan acknowledgement transaction commits")
+        check(safety.read(String.self, scope: "A", key: "workout-plan") == nil && safety.read(String.self, scope: "A", key: "today") == nil,
+              "write transaction invalidates old executable and today caches")
+        safety.clear(scope: "A"); safety.prune(maxEntries: 0)
+        let reopenedSafety = CacheStore(fileURL: safetyURL)
+        check(reopenedSafety.planWriteAcknowledgement(scope: "A")?.revision == 13, "floor survives clear-cache, eviction, and database reopen")
+        check(reopenedSafety.planWriteAcknowledgement(scope: "B") == nil, "identity scopes have independent write floors")
+        _ = reopenedSafety.write("new-execution", scope: "A", key: "workout-plan")
+        check(reopenedSafety.acknowledgePlanWrite(floor12, scope: "A") && reopenedSafety.planWriteAcknowledgement(scope: "A")?.revision == 13,
+              "late acknowledgement cannot lower the durable floor")
+        check(reopenedSafety.read(String.self, scope: "A", key: "workout-plan")?.value == "new-execution",
+              "late lower acknowledgement cannot delete higher-version execution cache")
+        safety.clearAll()
+        check(safety.planWriteAcknowledgement(scope: "A")?.revision == 13, "clear-all affects presentation caches, never safety metadata")
+        let ledger = PlanWatchLedger(scope: "A", revision: 13, entries: [.init(workoutID: UUID(), localDate: "2026-10-09", scheduledAt: Date())], fingerprint: "digest", reminderHour: 8, confirmedAt: Date(), registeredDates: [])
+        check(safety.saveWatchLedger(ledger), "app-wide last-sync ledger persists")
+        check(CacheStore(fileURL: safetyURL).watchLedger() == ledger, "last-sync ledger survives reopen without pretending current system verification")
+        check(safety.saveWatchLedger(nil) && CacheStore(fileURL: safetyURL).watchLedger() == nil, "verified clear removes durable last-sync record")
+        let pendingReceipt = PlanSyncReceipt(localDate: "2026-10-09", kind: "easy", revision: 13, structure: nil,
+            workoutID: UUID().uuidString, scheduledAt: "2026-10-09T00:00:00Z", idempotencyKey: "pending-key", exportNotes: [])
+        check(safety.savePendingPlanReceipts([pendingReceipt], scope: "A"), "confirmed receipt retry journal commits")
+        safety.clearAll(); safety.prune(maxEntries: 0)
+        check(CacheStore(fileURL: safetyURL).pendingPlanReceipts(scope: "A") == [pendingReceipt] &&
+              safety.pendingPlanReceipts(scope: "B").isEmpty, "pending receipt journal survives clearing/eviction/reopen without crossing scopes")
+
+        var failureDB: OpaquePointer?
+        precondition(sqlite3_open(safetyURL.path, &failureDB) == SQLITE_OK)
+        defer { sqlite3_close(failureDB) }
+        precondition(sqlite3_exec(failureDB, "CREATE TRIGGER fail_plan_write BEFORE INSERT ON plan_write_acknowledgements BEGIN SELECT RAISE(ABORT, 'injected'); END", nil, nil, nil) == SQLITE_OK)
+        _ = safety.write("diagnostic-old", scope: "C", key: "workout-plan")
+        check(!safety.acknowledgePlanWrite(floor13, scope: "C"), "injected SQLite acknowledgement failure is not reported as durable success")
+        check(safety.planWriteAcknowledgement(scope: "C") == nil && safety.read(String.self, scope: "C", key: "workout-plan")?.value == "diagnostic-old",
+              "failed transaction rolls back metadata and cache invalidation together; model must quarantine old cache")
+        precondition(sqlite3_exec(failureDB, "DROP TRIGGER fail_plan_write", nil, nil, nil) == SQLITE_OK)
+        check(safety.acknowledgePlanWrite(floor13, scope: "C") && safety.read(String.self, scope: "C", key: "workout-plan") == nil,
+              "acknowledgement recovery durably invalidates the old cache")
+        _ = safety.write("test", scope: "C", key: "schema")
+        precondition(sqlite3_exec(failureDB, "UPDATE cache_entries SET schema_version=999 WHERE cache_key='schema'", nil, nil, nil) == SQLITE_OK)
+        check(safety.read(String.self, scope: "C", key: "schema") == nil && safety.lastReadIssue == .unsupportedSchema, "unknown cache schema is classified and fails closed")
+        precondition(sqlite3_exec(failureDB, "UPDATE cache_entries SET schema_version=2,payload=x'00' WHERE cache_key='schema'", nil, nil, nil) == SQLITE_OK)
+        check(safety.read(String.self, scope: "C", key: "schema") == nil && safety.lastReadIssue == .corruptPayload, "corrupt cache is distinct from cache absence without logging payload")
+        precondition(sqlite3_exec(failureDB, "UPDATE plan_write_acknowledgements SET payload=x'00' WHERE scope='A'", nil, nil, nil) == SQLITE_OK)
+        check(safety.planWriteAcknowledgement(scope: "A") == nil && safety.planRevisionFloor(scope: "A") == 13,
+              "corrupt explanatory write metadata cannot erase the authoritative scalar revision floor")
+
+        let legacyURL = root.appendingPathComponent("legacy-cache.sqlite")
+        var legacyDB: OpaquePointer?
+        precondition(sqlite3_open(legacyURL.path, &legacyDB) == SQLITE_OK)
+        precondition(sqlite3_exec(legacyDB, """
+            CREATE TABLE cache_entries (scope TEXT NOT NULL, cache_key TEXT NOT NULL, cached_at REAL NOT NULL, payload BLOB NOT NULL, PRIMARY KEY(scope, cache_key));
+            INSERT INTO cache_entries VALUES ('legacy', 'value', 1, x'226c656761637922');
+            """, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(legacyDB)
+        let migratedCache = CacheStore(fileURL: legacyURL)
+        check(migratedCache.read(String.self, scope: "legacy", key: "value")?.value == "legacy",
+              "known pre-versioned cache explicitly migrates to schema1 without inventing DTO fields")
+        check(migratedCache.write("schema2", scope: "legacy", key: "value") != nil &&
+              CacheStore(fileURL: legacyURL).read(String.self, scope: "legacy", key: "value")?.value == "schema2",
+              "migrated cache accepts new schema2 writes and survives reopen")
+
         print("\(checks) store regression checks passed")
     }
 }

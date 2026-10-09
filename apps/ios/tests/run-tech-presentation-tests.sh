@@ -177,7 +177,7 @@ for foreground, fill in [
 # 例外必须逐条写明理由，不允许静默漏过。
 # ---------------------------------------------------------------------------
 tech_views = pathlib.Path("apps/ios/RAI/Skins/Technology/TechViews.swift").read_text()
-tech_views += pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanView.swift").read_text()
+tech_views += (pathlib.Path("apps/ios/RAI/Skins/Technology/TechManualPlanView.swift").read_text() + pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanWatchSection.swift").read_text())
 tech_views = re.sub(r"/\*.*?\*/|//[^\n]*", "", tech_views, flags=re.S)
 
 # Weekly/body navigation lives beside sync, not at the bottom of Today.
@@ -252,8 +252,8 @@ field_anchors = {
     "weekStructure": "data.weekStructure.",
     "race": "data.race.",
     "injuryFlags": "summary.injuryFlags",
-    "weekPlan": "ForEach(native.today?.weekPlan ?? [])",  # 用户移除本周活动内课表，计划页继续承载
-    "recentPlanExecution": "native.today?.recentPlanExecution",
+    "weekPlan": "ForEach(native.planPresentation.today?.weekPlan ?? [])",  # 用户移除本周活动内课表，计划页继续承载
+    "recentPlanExecution": "native.planPresentation.today?.recentPlanExecution",
     "phase": "data.phase",
     "lock": "data.lock.",
     # 2026-09-19：时效语义拆成四件事，界面各自有落点 —— 刷新结果（`sync`）与
@@ -348,29 +348,29 @@ assert len(coach_fields) >= 8, (
     "the regex stopped matching the contract, it did not shrink.")
 
 coach_view = without_comments(
-    pathlib.Path("apps/ios/RAI/Skins/Technology/TechRunCoachView.swift").read_text()
+    ("\n".join(pathlib.Path("apps/ios/RAI/Skins/Technology/" + name).read_text() for name in ['TechRunCoachView.swift', 'TechCoachOverviewSection.swift', 'TechCoachWeekSection.swift', 'TechCoachUpcomingSection.swift', 'TechCoachEvidenceSection.swift', 'TechCoachDaySheet.swift', 'TechRunCoachSetup.swift', 'TechCoachStrengthSection.swift']))
     + pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanPreviewSheet.swift").read_text())
 coach_anchors = {
-    "revision": "coach.revision == native.currentPlanRevision",
-    "plan": "return coach.plan",
-    "phase": "native.runCoach?.phase.map(techCoachPhaseName)",
-    "daysToRace": "native.runCoach?.daysToRace",
-    "elapsedWeeks": "native.runCoach?.elapsedWeeks",
+    "revision": "native.planPresentation",
+    "plan": "snapshot.coachPlan",
+    "phase": "$0.phase.map(techCoachPhaseName)",
+    "daysToRace": "snapshot.coach?.daysToRace",
+    "elapsedWeeks": "snapshot.coach?.elapsedWeeks",
     # 2026-10-07：这一格是"算完却丢掉"的正例。它此前是另一套公式算出来的容量，直接上屏会
     # 与今天页的量带打架；现在它是本周**预算**，与今天页量带上限同源（见 `runCoachWeeklyBudget`）。
     # 断言锚在解释行上：那个数字必须带着"校准未完成"一起出现，否则一句孤立的 km 数会被读成承诺。
     "weeklyCapacityKm": "本周预算 \\(nativeNumber($0, digits: 1)) km",
     "notices": "coach.notices",
-    "phases": "native.runCoach?.phases",
-    "strength": "native.runCoach?.strength",
-    "unplannedDays": "native.runCoach?.unplannedDays",
-    # 🔴 锚在**形状**上（`<读> {`），不是裸子串。裸子串 `native.runCoach?.confidence` 在这个
+    "phases": "snapshot.coach?.phases",
+    "strength": "snapshot.coach?.strength",
+    "unplannedDays": "snapshot.coach?.unplannedDays",
+    # 🔴 锚在**形状**上（`<读> {`），不是裸子串。裸子串 `snapshot.coach?.confidence` 在这个
     # 文件里有**两处**命中（另一处是 `:31` 的 unsupported-distance 提示），所以把信心卡片整块
     # 删掉它照样命中；再给绑定加一个条件（`, false {`）也照样命中。
     # 2026-10-07 突变验证实测：13 条突变里**唯一存活**的就是
-    # `if let confidence = native.runCoach?.confidence, false {` —— 覆盖表全绿。
-    # 收紧成 `<读> {` 后它变红，且对局部变量改名免疫（`if let c = native.runCoach?.confidence {` 仍匹配）。
-    "confidence": "native.runCoach?.confidence {",
+    # `if let confidence = snapshot.coach?.confidence, false {` —— 覆盖表全绿。
+    # 收紧成 `<读> {` 后它变红，且对局部变量改名免疫（`if let c = snapshot.coach?.confidence {` 仍匹配）。
+    "confidence": "snapshot.coach?.confidence {",
 }
 coach_metadata_only = {
     # v1 只有 `"preparation"` 一个取值。要出现第二个（目标可达性）才需要展示位 ——
@@ -395,7 +395,7 @@ for field, anchor in sorted(coach_anchors.items()):
         "contract present + no display slot is exactly the 2026-09-17 regression.")
 
 # 覆盖表（上面）证明的是"字段被**读到**"，**不**证明"卡片会**渲染**" —— 两者差一个条件子句。
-# `if let sessions = native.runCoach?.strength, false {` 保留 anchor 子串、关掉整块 UI，
+# `if let sessions = snapshot.coach?.strength, false {` 保留 anchor 子串、关掉整块 UI，
 # 覆盖表与锚点全都照绿（2026-10-07 突变验证实测 13 条里唯一存活的就是这个形状）。
 # 视图的条件表里出现**裸布尔字面量**只可能是死代码或开关，所以整类一次钉死，
 # 而不是逐字段去猜哪个 `if let` 可以被"多接一个条件"绕过。
@@ -440,31 +440,31 @@ print(f"Coach field coverage: {len(coach_anchors)}/{len(coach_fields)} MobileRun
 
 # Unit-tested presentation must remain wired into the cards, and the calibration explanation
 # must render near the overview rather than surviving only as an unused helper or bottom notice.
-coach_page = without_comments(pathlib.Path("apps/ios/RAI/Skins/Technology/TechRunCoachView.swift").read_text())
+coach_page = without_comments(("\n".join(pathlib.Path("apps/ios/RAI/Skins/Technology/" + name).read_text() for name in ['TechRunCoachView.swift', 'TechCoachOverviewSection.swift', 'TechCoachWeekSection.swift', 'TechCoachUpcomingSection.swift', 'TechCoachEvidenceSection.swift', 'TechCoachDaySheet.swift', 'TechRunCoachSetup.swift', 'TechCoachStrengthSection.swift'])))
 assert coach_page.index('.accessibilityIdentifier("coach.overview")') < coach_page.index("\n                    explanation\n") < coach_page.index('.accessibilityIdentifier("coach.today")'), (
     "Calibration progress and conservative-start context must render immediately after the overview")
 explanation = coach_page.split("@ViewBuilder private var explanation:", 1)[1].split("private func coachControls", 1)[0]
 for anchor in ["$0.recommendation.planRevision == native.currentPlanRevision", "techCoachCalibrationLabel",
-               "techCoachCalibrationExplanation", "本周排入", "本周预算"]:
+               "techCoachCalibrationExplanation", "未来7日已排", "本周预算"]:
     assert anchor in explanation, f"Coach first-screen explanation lost {anchor}"
 assert ".executable" not in explanation, "Recording or reconfirming today must not remove it from the scheduled count"
-week_progress = coach_page.split("private struct TechCoachWeekProgressCard:", 1)[1].split("private struct TechCoachProgressStat:", 1)[0]
+week_progress = coach_page.split("struct TechCoachWeekProgressCard:", 1)[1].split("struct TechCoachProgressStat:", 1)[0]
 assert "TechCoachWeekProgress(days: days, adherence: adherence)" in week_progress, "Weekly counts must use the tested adherence/legacy presentation"
 assert "progress.unknownCount" in week_progress and "天待同步" in week_progress, "Missing observations must remain explicit, including without distance data"
-week_timeline = coach_page.split("private struct TechCoachWeekTimeline:", 1)[1].split("private struct TechCoachTrainingDays:", 1)[0]
+week_timeline = coach_page.split("struct TechCoachWeekTimeline:", 1)[1].split("struct TechCoachTrainingDays:", 1)[0]
 assert "Text(techCoachWeekDayTitle(day))" in week_timeline, "The timeline must use completion before planned status"
-hero = coach_page.split("private struct TechCoachHeroCard:", 1)[1].split("private struct TechTodayTrainingCard:", 1)[0]
+hero = coach_page.split("struct TechCoachHeroCard:", 1)[1].split("struct TechTodayTrainingCard:", 1)[0]
 assert "techCoachTotalWeeks(for: plan)" in hero and "plan.durationWeeks" not in hero, \
     "Race-cycle progress must use the tested date-derived duration, not the fitness setting"
 assert "techCoachRaceCountdown(raceDate: plan.raceDate, todayLocalDate: todayLocalDate, daysToRace: daysToRace)" in hero, "A zero countdown must be checked against the actual race date"
-training_days = coach_page.split("private struct TechCoachTrainingDays:", 1)[1].split("private struct TechCoachRollingUpcomingSection:", 1)[0]
+training_days = coach_page.split("struct TechCoachTrainingDays:", 1)[1].split("struct TechCoachRollingUpcomingSection:", 1)[0]
 assert "可跑步日" in training_days and "可选，不是承诺" in training_days and "$0.detail" in training_days, "Running-day preferences must not promise sessions or drop unplanned-day facts"
 print("Coach presentation: observed-day progress, calibration context, timeline status and race expiry are wired into the view.")
 
 # Main-work alerts, rather than session-level zone references, drive every target summary.
 for name in ["TechTodayTrainingCard", "TechCoachRollingUpcomingRow",
              "TechCoachExecutableDaySheet", "TechCoachUpcomingRow"]:
-    card = coach_page.split(f"private struct {name}: View {{", 1)[1].split("\nprivate struct ", 1)[0]
+    card = coach_page.split(f"struct {name}: View {{", 1)[1].split("\nstruct ", 1)[0]
     assert "techCoachTrainingTarget(" in card and "target.formattedRange" in card, (
         f"{name} must render the tested prescription-based target")
     assert "paceSecondsPerKmLower" not in card and "heartRateBpmLower" not in card, (
@@ -734,7 +734,7 @@ def slice_between(text, start, end, label):
     return tail.split(end, 1)[0]
 
 plan_view = without_comments(
-    pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanView.swift").read_text())
+    (pathlib.Path("apps/ios/RAI/Skins/Technology/TechManualPlanView.swift").read_text() + pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanWatchSection.swift").read_text()))
 assert "navigationBarBackButtonHidden" not in plan_view, (
     "TechPlanView.swift hides/re-shows the system back button again. `techNavigation` already "
     "hides it and adds its own; a second `navigationBarBackButtonHidden(false)` is what put two "
@@ -750,29 +750,23 @@ assert ".disabled(backDisabled)" in theme, (
     "TechNavigation must apply backDisabled to its own back button, not to the bar")
 assert plan_view.count('TechSectionHeader(title: "7 天训练安排"') == 1, (
     "Exactly one flat seven-day strip belongs on the plan page")
-assert plan_view.count("ForEach(plan.days)") == 1, (
-    "The rolling seven-day window must be rendered exactly once")
-disclosure = slice_between(plan_view, "private var scheduleDisclosure", "private var goalEditor",
-                           "plan schedule disclosure")
-assert "DisclosureGroup" in disclosure, (
-    "The second seven-day window must stay collapsed; a flat list is what made the page show "
-    "two seven-day tables at once.")
-assert "ForEach(plan.days)" in disclosure and "TechExecutablePlanDay" in disclosure, (
-    "The rolling window's per-day rows must live inside the disclosure")
+watch_section = without_comments(pathlib.Path("apps/ios/RAI/Skins/Technology/TechPlanWatchSection.swift").read_text())
+assert watch_section.count("ForEach(plan.days)") == 1, "Exactly one rolling schedule list belongs in the shared section"
+assert "DisclosureGroup" in watch_section and "TechExecutablePlanDay" in watch_section, "Rolling window remains collapsed and separate from natural-week progress"
+assert "TechPlanWatchSection(allowsSynchronization: true)" in plan_view, "Manual page must use the shared explicit scheduling entry"
+assert 'Button("撤回 RAI 系统旧排期"' in watch_section, "No-plan/offline users must retain an explicit withdrawal entry"
+assert "PlanWatchSyncCoordinator.shared" in watch_section and "WorkoutKitBridge" not in plan_view, "Views must not own divergent scheduling flows"
 print("Plan page: one back button, one flat seven-day strip (rolling window collapsed).")
 
 editable_plan = slice_between(plan_view, "private var editablePlanIndexes", "private var weekPlanPanel",
                               "pending migration editor guard")
-assert "native.goals?.weekPlanReplanRequired != true" in editable_plan, (
+assert "native.planPresentation.goals?.weekPlanReplanRequired != true" in editable_plan, (
     "Pending migration must not offer future-day editors")
-watch_panel = slice_between(plan_view, "private var watchPlanPanel", "private func syncPlanToWatch",
-                           "pending migration watch panel")
-assert "native.goals?.weekPlanReplanRequired == true" in watch_panel, (
-    "The replan notice must depend on the server-owned migration state")
+watch_panel = watch_section
+assert "native.goals?.weekPlanReplanRequired == true" in watch_panel, "Migration notice uses server-owned state"
 for text in ["重新预览规则课表", "手表上的旧排期不会自动撤回", "请手动同步以撤回或替换"]:
-    assert text in watch_panel, f"Missing migration action or Watch warning: {text}"
-assert "NativeAppModel.planSourceName(audit.generatedBy)" in watch_panel, (
-    "Watch provenance must use the tested rule/manual/legacy labels")
+    assert text in watch_panel, f"Missing migration warning: {text}"
+assert "NativeAppModel.planSourceName(audit.generatedBy)" in watch_panel, "Provenance retains rule/manual/history labels"
 print("Plan migration: future editing withheld, explicit preview offered, manual Watch replacement explained.")
 
 # ---------------------------------------------------------------------------

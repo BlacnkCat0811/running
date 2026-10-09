@@ -135,7 +135,7 @@ struct RaiAPIClient {
         try await get(path: "/v1/mobile/workout-plan", baseURL: baseURL, token: token)
     }
 
-    func previewWeeklyPlan(_ input: GenerateWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanPreview {
+    func previewWeeklyPlan(_ input: PreviewWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanPreview {
         try await send(path: "/v1/mobile/workout-plan/preview", method: "POST", body: input,
                        baseURL: baseURL, token: token)
     }
@@ -144,12 +144,10 @@ struct RaiAPIClient {
         try await send(path: "/v1/mobile/workout-plan/confirm", method: "POST", body: input, baseURL: baseURL, token: token)
     }
 
-    /// Registers that a plan day was handed to the Watch.
-    ///
-    /// Best-effort by contract: the caller reports a failure but must never let
-    /// it invalidate a sync that already landed on the watch. Losing a receipt
-    /// costs segment labels on a later detail page; losing the sync would cost
-    /// the runner the session itself.
+    /// Registers a client-verified LOCAL SYSTEM workout schedule. Physical
+    /// paired-Watch visibility is a separate manual acceptance step.
+    /// Registration failure does not revoke SDK readback; the coordinator keeps
+    /// the exact exported receipt for an explicit foreground retry.
     func recordPlanSync(
         _ receipt: PlanSyncReceipt,
         baseURL: URL,

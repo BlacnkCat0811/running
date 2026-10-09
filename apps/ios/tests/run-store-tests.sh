@@ -28,7 +28,7 @@ sed '1{/^#if os(iOS)$/d;}; ${/^#endif$/d;}' apps/ios/RAI/CacheStore.swift > "$tm
 # `@Observable`，宏插件被 swift-driver 包进 `sandbox-exec` 后在外层拒绝嵌套沙箱的
 # 环境里会直接死掉，失败形态是满屏 "produced malformed response"，与真实错误无关。
 xcrun swiftc -parse-as-library -disable-sandbox \
-  apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/APIModels.swift apps/ios/RAI/PlanStatePolicy.swift \
   apps/ios/RAI/ServerSession.swift \
   "$tmp/CacheStore.swift" \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \

@@ -66,8 +66,8 @@ enum WorkoutPlanMapper {
     /// intensity it asks for (a 2 000 s/km recovery jog pushed to 1 800 s/km is a
     /// faster workout than the athlete was told to run).
     static let maxPaceSecondsPerKm = 1_800.0
-    /// Heart rate is the opposite case: a bound above what a human can reach is
-    /// decoration rather than intent, so clamping it is lossless.
+    /// Compatibility ceiling, not a physiological equivalence guarantee.
+    /// Strict export rejects changed bounds rather than calling them "lossless".
     static let maxHeartRateBpm = 240.0
 
     /// Days the server cannot or should not sync are dropped here: rest days,
@@ -119,7 +119,7 @@ enum WorkoutPlanMapper {
         /// Named rather than inlined because it is also what the panel falls back
         /// to when there is no plan at all to classify: one string, so the two
         /// renderings of "this week has nothing to send" cannot drift apart.
-        static let unusableWeekMessage = "本周没有可上表的训练日，生成一份新的课表再同步。"
+        static let unusableWeekMessage = "未来7日窗口没有可上表的训练日，预览并确认新的课表再同步。"
 
         /// The panel's line when the week offers nothing.
         ///
@@ -129,7 +129,7 @@ enum WorkoutPlanMapper {
         /// whole point of telling the two apart.
         var emptyOfferMessage: String {
             isExhausted
-                ? "本周日期均已记录训练或已过去，不需要再上表。"
+                ? "当前窗口日期均已记录训练或已过去，不需要再上表。"
                 : Self.unusableWeekMessage
         }
     }
@@ -255,6 +255,60 @@ enum WorkoutPlanMapper {
             blocks: blocks,
             cooldown: structure.cooldown.flatMap { step(from: $0) }
         )
+    }
+
+    /// Execution uses this strict boundary in addition to the tolerant display
+    /// mapper. Never truncate required steps, clamp dose, or silently discard a
+    /// required target and then claim the original prescription was exported.
+    static func safeExportedStructure(_ mapped: PlannedWorkout, original: MobileSessionStructure?) -> MobileSessionStructure? {
+        func step(_ value: PlannedWorkout.Step) -> MobileWorkoutStep {
+            let goal: MobileStepGoal
+            switch value.goal {
+            case let .distance(meters): goal = .distance(meters: meters)
+            case let .time(seconds): goal = .time(seconds: seconds)
+            case .open: goal = .open
+            }
+            let alert: MobileStepAlert?
+            switch value.alert {
+            case let .pace(lower, upper): alert = .init(kind: "pace", lower: lower, upper: upper)
+            case let .heartRate(lower, upper): alert = .init(kind: "heart_rate", lower: lower, upper: upper)
+            case nil: alert = nil
+            }
+            return .init(purpose: value.purpose, goal: goal, alert: alert)
+        }
+        let exported = MobileSessionStructure(warmup: mapped.warmup.map { step($0) },
+            blocks: mapped.blocks.map { .init(iterations: $0.iterations, steps: $0.steps.map { step($0) }) },
+            cooldown: mapped.cooldown.map { step($0) })
+        guard let original, original.blocks.count == exported.blocks.count else { return nil }
+        func equalDose(_ raw: MobileWorkoutStep?, _ actual: MobileWorkoutStep?) -> Bool {
+            guard let raw else { return actual == nil }
+            guard let actual, raw.goal == actual.goal, raw.purpose == actual.purpose,
+                  ["warmup", "work", "recovery", "cooldown"].contains(raw.purpose) else { return false }
+            // The receipt reader normalizes dose to whole metres/seconds.
+            // Refuse a compatibility payload that would export a different dose
+            // than the server can preserve, rather than silently rounding it.
+            switch raw.goal {
+            case let .distance(meters):
+                guard meters >= 1, meters.rounded() == meters else { return false }
+            case let .time(seconds):
+                guard seconds >= 1, seconds.rounded() == seconds else { return false }
+            case .open: break
+            }
+            if let alert = raw.alert {
+                guard let sent = actual.alert, alert.kind == sent.kind,
+                      alert.lower?.isFinite != false, alert.upper?.isFinite != false,
+                      (alert.lower == nil) == (sent.lower == nil), (alert.upper == nil) == (sent.upper == nil) else { return false }
+                let normalized = ordered(lower: alert.lower, upper: alert.upper)
+                guard normalized.0 == sent.lower, normalized.1 == sent.upper else { return false }
+            }
+            return true
+        }
+        guard equalDose(original.warmup, exported.warmup), equalDose(original.cooldown, exported.cooldown) else { return nil }
+        for (raw, actual) in zip(original.blocks, exported.blocks) {
+            guard raw.iterations == actual.iterations, raw.steps.count == actual.steps.count,
+                  zip(raw.steps, actual.steps).allSatisfy({ equalDose($0, $1) }) else { return nil }
+        }
+        return exported
     }
 
     /// The instant the session should appear on the watch. A nominal time that

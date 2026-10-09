@@ -10,6 +10,8 @@ struct CachedValue<Value: Codable>: Codable {
 
 @MainActor
 final class CacheStore {
+    enum ReadIssue: String { case unavailable, unsupportedSchema, corruptPayload }
+    private(set) var lastReadIssue: ReadIssue?
     private var database: OpaquePointer?
     private let fileURL: URL
 
@@ -30,7 +32,7 @@ final class CacheStore {
         openDatabase(at: fileURL)
         execute("""
             PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
+            PRAGMA synchronous = FULL;
             CREATE TABLE IF NOT EXISTS cache_entries (
                 scope TEXT NOT NULL,
                 cache_key TEXT NOT NULL,
@@ -42,7 +44,26 @@ final class CacheStore {
                 ON cache_entries(scope, cached_at);
             CREATE INDEX IF NOT EXISTS idx_cache_entries_cached_at_global
                 ON cache_entries(cached_at);
+            CREATE TABLE IF NOT EXISTS plan_write_acknowledgements (
+                scope TEXT PRIMARY KEY, revision INTEGER NOT NULL, payload BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS app_metadata (
+                metadata_key TEXT PRIMARY KEY, payload BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS plan_receipt_journal (
+                scope TEXT PRIMARY KEY, payload BLOB NOT NULL
+            );
             """)
+        // Known v1 rows contain the same DTO representation; v2 adds explicit
+        // envelope versioning. Unknown versions never become executable data.
+        if let statement = prepare("PRAGMA table_info(cache_entries)") {
+            var found = false
+            while sqlite3_step(statement) == SQLITE_ROW {
+                if let name = sqlite3_column_text(statement, 1), String(cString: name) == "schema_version" { found = true }
+            }
+            sqlite3_finalize(statement)
+            if !found { execute("ALTER TABLE cache_entries ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1") }
+        }
         try? FileManager.default.setAttributes(
             [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
             ofItemAtPath: fileURL.path
@@ -54,18 +75,27 @@ final class CacheStore {
     }
 
     func read<Value: Codable>(_ type: Value.Type, scope: String, key: String) -> CachedValue<Value>? {
-        guard let statement = prepare("SELECT cached_at, payload FROM cache_entries WHERE scope = ? AND cache_key = ?") else {
+        lastReadIssue = nil
+        guard let statement = prepare("SELECT cached_at, payload, schema_version FROM cache_entries WHERE scope = ? AND cache_key = ?") else {
+            lastReadIssue = .unavailable
             return nil
         }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
         bind(key, to: statement, at: 2)
         guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        guard (1...2).contains(sqlite3_column_int(statement, 2)) else {
+            lastReadIssue = .unsupportedSchema
+            return nil
+        }
         let cachedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 0))
         guard let bytes = sqlite3_column_blob(statement, 1) else { return nil }
         let length = Int(sqlite3_column_bytes(statement, 1))
         let payload = Data(bytes: bytes, count: length)
-        guard let value = try? JSONDecoder().decode(type, from: payload) else { return nil }
+        guard let value = try? JSONDecoder().decode(type, from: payload) else {
+            lastReadIssue = .corruptPayload
+            return nil
+        }
         return CachedValue(value: value, cachedAt: cachedAt)
     }
 
@@ -73,11 +103,12 @@ final class CacheStore {
         let cachedAt = Date()
         guard let payload = try? JSONEncoder().encode(value),
               let statement = prepare("""
-                INSERT INTO cache_entries(scope, cache_key, cached_at, payload)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO cache_entries(scope, cache_key, cached_at, payload, schema_version)
+                VALUES (?, ?, ?, ?, 2)
                 ON CONFLICT(scope, cache_key) DO UPDATE SET
                     cached_at = excluded.cached_at,
-                    payload = excluded.payload
+                    payload = excluded.payload,
+                    schema_version = excluded.schema_version
                 """) else {
             SQLiteSupport.report("cache encode/prepare", database: database)
             return nil
@@ -99,6 +130,100 @@ final class CacheStore {
         }
         prune()
         return cachedAt
+    }
+
+    func planWriteAcknowledgement(scope: String) -> PlanWriteAcknowledgement? {
+        readMetadata(PlanWriteAcknowledgement.self, sql: "SELECT payload FROM plan_write_acknowledgements WHERE scope = ?", key: scope)
+    }
+
+    /// The scalar floor remains authoritative even if explanatory metadata
+    /// becomes undecodable. Failure to query safety storage is not a cache miss.
+    func planRevisionFloor(scope: String) -> Int? {
+        guard let statement = prepare("SELECT revision FROM plan_write_acknowledgements WHERE scope = ?") else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        switch sqlite3_step(statement) {
+        case SQLITE_ROW: return Int(sqlite3_column_int64(statement, 0))
+        case SQLITE_DONE: return 0
+        default: return nil
+        }
+    }
+
+    /// One transaction makes the durable floor, cache invalidation, and the
+    /// complete write response visible together. Safety metadata is not pruned
+    /// or deleted by "clear cache".
+    func acknowledgePlanWrite(
+        _ acknowledgement: PlanWriteAcknowledgement, scope: String,
+        goals: MobileGoalsResponse? = nil, coach: MobileRunCoachResponse? = nil
+    ) -> Bool {
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else { return false }
+        var committed = false
+        defer { if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) } }
+        if let floor = planRevisionFloor(scope: scope), floor > acknowledgement.revision {
+            committed = SQLiteSupport.execute("COMMIT", database: database)
+            return committed
+        }
+        guard let payload = try? JSONEncoder().encode(acknowledgement),
+              let statement = prepare("""
+                INSERT INTO plan_write_acknowledgements(scope, revision, payload) VALUES (?, ?, ?)
+                ON CONFLICT(scope) DO UPDATE SET revision = excluded.revision, payload = excluded.payload
+                WHERE excluded.revision >= plan_write_acknowledgements.revision
+                """) else { return false }
+        bind(scope, to: statement, at: 1)
+        sqlite3_bind_int64(statement, 2, Int64(acknowledgement.revision))
+        let result = payload.withUnsafeBytes { buffer -> Int32 in
+            sqlite3_bind_blob(statement, 3, buffer.baseAddress, Int32(payload.count), nil)
+            return sqlite3_step(statement)
+        }
+        sqlite3_finalize(statement)
+        guard result == SQLITE_DONE, let deletion = prepare("""
+            DELETE FROM cache_entries WHERE scope = ? AND cache_key IN ('goals','today','run-coach','workout-plan')
+            """) else { return false }
+        bind(scope, to: deletion, at: 1)
+        let deleted = sqlite3_step(deletion)
+        sqlite3_finalize(deletion)
+        guard deleted == SQLITE_DONE else { return false }
+        if let goals, write(goals, scope: scope, key: "goals") == nil { return false }
+        if let coach, write(coach, scope: scope, key: "run-coach") == nil { return false }
+        committed = SQLiteSupport.execute("COMMIT", database: database)
+        return committed
+    }
+
+    func watchLedger() -> PlanWatchLedger? {
+        readMetadata(PlanWatchLedger.self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "watch-ledger")
+    }
+
+    func saveWatchLedger(_ ledger: PlanWatchLedger?) -> Bool {
+        guard let statement = prepare("INSERT OR REPLACE INTO app_metadata(metadata_key, payload) VALUES ('watch-ledger', ?)"),
+              let payload = try? JSONEncoder().encode(ledger) else { return false }
+        defer { sqlite3_finalize(statement) }
+        return payload.withUnsafeBytes { buffer in
+            sqlite3_bind_blob(statement, 1, buffer.baseAddress, Int32(payload.count), nil)
+            return sqlite3_step(statement) == SQLITE_DONE
+        }
+    }
+
+    func pendingPlanReceipts(scope: String) -> [PlanSyncReceipt] {
+        readMetadata([PlanSyncReceipt].self, sql: "SELECT payload FROM plan_receipt_journal WHERE scope = ?", key: scope) ?? []
+    }
+
+    func savePendingPlanReceipts(_ receipts: [PlanSyncReceipt], scope: String) -> Bool {
+        guard let payload = try? JSONEncoder().encode(receipts),
+              let statement = prepare("INSERT OR REPLACE INTO plan_receipt_journal(scope, payload) VALUES (?, ?)") else { return false }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        return payload.withUnsafeBytes { buffer in
+            sqlite3_bind_blob(statement, 2, buffer.baseAddress, Int32(payload.count), nil)
+            return sqlite3_step(statement) == SQLITE_DONE
+        }
+    }
+
+    private func readMetadata<V: Decodable>(_ type: V.Type, sql: String, key: String) -> V? {
+        guard let statement = prepare(sql) else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(key, to: statement, at: 1)
+        guard sqlite3_step(statement) == SQLITE_ROW, let bytes = sqlite3_column_blob(statement, 0) else { return nil }
+        return try? JSONDecoder().decode(type, from: Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 0))))
     }
 
     func clear(scope: String) {

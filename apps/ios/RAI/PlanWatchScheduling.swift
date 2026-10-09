@@ -1,0 +1,253 @@
+import Foundation
+
+struct PlanWatchDayResult: Equatable {
+    enum Status: String { case confirmed, failed, filtered }
+    let localDate: String
+    let status: Status
+    let reason: String?
+}
+
+struct PlanWatchSyncOutcome: Equatable {
+    var scheduled = 0
+    var attempted = 0
+    var skipped = 0
+    var authorized = false
+    var verified = false
+    var deviceUnsupported = false
+    var authorizationState: String?
+    var timeZoneFallback = false
+    var offered = 0
+    var expired = 0
+    var alreadyTrained = 0
+    var clearVerified = false
+    var didAttemptClear = false
+    var superseded = false
+    var cleanupVerified = true
+    var validationError: String?
+    var submittedEntries: [PlanScheduledEntry] = []
+    var submittedRequests: [PlanSchedulingRequest] = []
+    var confirmedEntries: [PlanScheduledEntry] = []
+    var receipts: [PlanSyncReceipt] = []
+    var days: [PlanWatchDayResult] = []
+
+    var scheduledLocalDates: [String] { confirmedEntries.map(\.localDate) }
+    var report: String {
+        if deviceUnsupported { return "此设备不支持系统训练排期；需要已配对 Apple Watch 的 iPhone（模拟器不支持）。" }
+        if superseded {
+            if submittedEntries.isEmpty {
+                if !didAttemptClear { return "计划已变化，本次同步已在提交排期前终止，未改动系统排期。" }
+                return clearVerified ? "计划已变化，本次同步已终止；未下发新训练，旧排期已核验清空。"
+                    : "计划已变化，本次同步已终止；旧排期未能确认撤回，请显式撤回并检查手表。"
+            }
+            return cleanupVerified ? "计划已变化，本次同步已终止并核验撤回本次条目。"
+                : "计划已变化，本次同步已终止；本次旧条目未能确认撤回，请显式撤回并检查手表。"
+        }
+        if !authorized {
+            return authorizationState == "denied"
+                ? "排期授权已被拒绝，请在系统设置检查 RAI 的体能训练计划授权；具体入口以当前系统为准。"
+                : "尚未获得系统训练排期授权（\(authorizationState ?? "未知")）。"
+        }
+        if let validationError { return validationError + "；未改动系统排期。" }
+        if offered == 0 {
+            return clearVerified ? "当前窗口没有需要下发的新训练；系统旧排期已核验清空。"
+                : "没有新训练，但旧排期未能确认撤回，请重试并检查手表「体能训练」。"
+        }
+        var text = verified ? "系统训练日程已核验 \(scheduled) 项。" : "系统训练日程部分核验 \(scheduled)/\(offered) 项，未核验日期不登记回执。"
+        if !clearVerified { text += " 旧排期未能确认撤回。" }
+        let reasons = days.filter { $0.status != .confirmed }.compactMap { day in day.reason.map { "\(day.localDate)：\($0)" } }
+        if !reasons.isEmpty { text += " " + reasons.joined(separator: "；") }
+        if expired + alreadyTrained > 0 { text += "（\(expired) 天已过去，\(alreadyTrained) 天已记录训练，不再排期）" }
+        text += " 请在配对手表确认实际可见。"
+        return text
+    }
+}
+
+struct PlanWatchClearOutcome: Equatable {
+    var authorized: Bool
+    var verified: Bool
+    var deviceUnsupported = false
+    var authorizationState: String?
+    var superseded = false
+    var report: String {
+        if deviceUnsupported { return "此设备不支持系统训练排期，尚未撤回旧排期。" }
+        if superseded { return "撤回操作已失效，系统排期状态需要重新核验；请显式重试。" }
+        if !authorized {
+            if authorizationState == "restricted" { return "系统限制了训练排期授权，尚未撤回旧排期；请检查系统限制设置。" }
+            if authorizationState == "denied" { return "排期授权已被拒绝，尚未撤回旧排期；请在系统设置检查 RAI 的体能训练计划授权。" }
+            return "未获排期授权，尚未撤回旧排期；请检查系统设置。"
+        }
+        return verified ? "系统旧排期已核验清空；请在配对手表确认。"
+            : "未能确认旧排期已撤回，请重试并检查手表「体能训练」。"
+    }
+}
+
+struct PlanSchedulingRequest: Equatable {
+    let entry: PlanScheduledEntry
+    let at: DateComponents
+    let workout: PlannedWorkout
+    let exportedStructure: MobileSessionStructure
+    let exportNotes: [String]
+}
+
+struct PlanSchedulingReadback: Equatable {
+    let workoutID: UUID
+    let at: DateComponents
+    let contentMatches: Bool
+    let complete: Bool
+}
+
+/// SDK boundary with no Apple types, executed unchanged by fake-scheduler tests.
+@MainActor
+protocol WorkoutScheduling: AnyObject {
+    var isSupported: Bool { get }
+    var capacity: Int { get }
+    func authorization() async -> String
+    func requestAuthorization() async -> String
+    func prepare(_ request: PlanSchedulingRequest) -> String?
+    func schedule(_ request: PlanSchedulingRequest) async
+    func remove(_ request: PlanSchedulingRequest) async
+    func removeAll() async
+    func readBack() async -> [PlanSchedulingReadback]
+}
+
+@MainActor
+enum PlanWatchScheduling {
+    static func clear(scheduler: any WorkoutScheduling, isCurrent: () -> Bool) async -> PlanWatchClearOutcome {
+        guard scheduler.isSupported else { return .init(authorized: false, verified: false, deviceUnsupported: true) }
+        guard isCurrent() else { return .init(authorized: false, verified: false, superseded: true) }
+        var state = await scheduler.authorization()
+        guard isCurrent() else { return .init(authorized: state == "authorized", verified: false, superseded: true) }
+        if state == "notDetermined" {
+            state = await scheduler.requestAuthorization()
+            guard isCurrent() else { return .init(authorized: state == "authorized", verified: false, superseded: true) }
+        }
+        guard state == "authorized" else { return .init(authorized: false, verified: false, authorizationState: state) }
+        guard isCurrent() else { return .init(authorized: true, verified: false, superseded: true) }
+        await scheduler.removeAll()
+        let remaining = await scheduler.readBack()
+        let current = isCurrent()
+        return .init(authorized: true, verified: remaining.isEmpty && current, superseded: !current)
+    }
+
+    static func sync(
+        scheduler: any WorkoutScheduling, plan: MobileWorkoutPlanResponse, completedDates: Set<String>,
+        hour: Int, now: Date, isCurrent: () -> Bool
+    ) async -> PlanWatchSyncOutcome {
+        var outcome = PlanWatchSyncOutcome()
+        guard scheduler.isSupported else { outcome.deviceUnsupported = true; return outcome }
+        guard isCurrent() else { outcome.superseded = true; return outcome }
+        var state = await scheduler.authorization()
+        guard isCurrent() else { outcome.superseded = true; return outcome }
+        if state == "notDetermined" {
+            state = await scheduler.requestAuthorization()
+            guard isCurrent() else { outcome.superseded = true; return outcome }
+        }
+        outcome.authorizationState = state
+        guard state == "authorized" else { return outcome }
+        outcome.authorized = true
+        // Unsafe execution metadata never receives an optimistic timezone default.
+        guard let zone = TimeZone(identifier: plan.timezone), (1...14).contains(plan.windowDays),
+              Set(plan.days.map(\.localDate)).count == plan.days.count else {
+            outcome.validationError = "排期时区、窗口或逐日身份无法确认"
+            outcome.days = plan.days.map { .init(localDate: $0.localDate, status: .filtered, reason: "排期时区／窗口无法确认") }
+            return outcome
+        }
+        let offer = WorkoutPlanMapper.weekOffer(in: plan, now: now, completedLocalDates: completedDates, hour: hour)
+        outcome.expired = offer.expired
+        outcome.alreadyTrained = offer.alreadyTrained
+        // Include prescribed days lost by the tolerant mapper in coverage, not
+        // just pending requests. Rest, past and completed days are not owed.
+        let localToday = UserDataNoticePolicy.localDate(now: now, timezone: plan.timezone)
+        let owed = plan.days.filter { $0.kind != "rest" && $0.localDate >= localToday && !completedDates.contains($0.localDate) && $0.executable }
+        outcome.offered = owed.count
+        var requests: [PlanSchedulingRequest] = []
+        for day in plan.days where !owed.contains(where: { $0.localDate == day.localDate }) {
+            outcome.days.append(.init(localDate: day.localDate, status: .filtered, reason: "休息、已完成、已过去或暂不可执行"))
+        }
+        for day in owed {
+            guard isCurrent() else { outcome.superseded = true; return outcome }
+            guard requests.count < scheduler.capacity else {
+                outcome.days.append(.init(localDate: day.localDate, status: .failed, reason: "系统排期容量不足")); continue
+            }
+            guard ["easy", "recovery", "long_run", "tempo", "interval"].contains(day.kind) else {
+                outcome.days.append(.init(localDate: day.localDate, status: .failed, reason: "未知训练类型，拒绝导出")); continue
+            }
+            guard let mapped = WorkoutPlanMapper.plannedWorkout(from: day, hour: hour),
+                  let structure = WorkoutPlanMapper.safeExportedStructure(mapped, original: day.structure),
+                  let at = WorkoutPlanMapper.scheduleComponents(for: mapped, timeZone: zone, now: now),
+                  let instant = PlanReceiptMatcher.instant(at, fallbackTimeZone: zone),
+                  UserDataNoticePolicy.localDate(now: instant, timezone: plan.timezone) == day.localDate else {
+                outcome.days.append(.init(localDate: day.localDate, status: .failed, reason: "必要步骤／剂量或排期日期无法无损导出")); continue
+            }
+            let request = PlanSchedulingRequest(entry: .init(workoutID: UUID(), localDate: day.localDate, scheduledAt: instant),
+                at: at, workout: mapped, exportedStructure: structure, exportNotes: structure == day.structure ? [] : ["目标区间规范化；回执为实际导出结构"])
+            if let reason = scheduler.prepare(request) {
+                outcome.days.append(.init(localDate: day.localDate, status: .failed, reason: reason)); continue
+            }
+            requests.append(request)
+        }
+        guard isCurrent() else { outcome.superseded = true; return outcome }
+        outcome.didAttemptClear = true
+        await scheduler.removeAll()
+        let afterClear = await scheduler.readBack()
+        outcome.clearVerified = afterClear.isEmpty
+        var submitted: [PlanSchedulingRequest] = []
+        func superseded() async -> PlanWatchSyncOutcome {
+            outcome.submittedRequests = submitted
+            return await withdrawSuperseded(outcome, scheduler: scheduler)
+        }
+        guard isCurrent() else { return await superseded() }
+        // A silent clear failure must not be made to look like a replacement.
+        guard outcome.clearVerified else { outcome.skipped = owed.count; return outcome }
+        for request in requests {
+            guard isCurrent() else { return await superseded() }
+            // Include even silent/partial calls in cleanup.
+            submitted.append(request)
+            await scheduler.schedule(request)
+            guard isCurrent() else { return await superseded() }
+        }
+        outcome.attempted = submitted.count
+        outcome.submittedEntries = submitted.map(\.entry)
+        outcome.submittedRequests = submitted
+        // One read, no guessed delay. Device measurements can later justify a
+        // bounded retry; a missing entry currently stays honestly unverified.
+        let listed = await scheduler.readBack()
+        guard isCurrent() else { return await superseded() }
+        let confirmed = PlanReceiptMatcher.confirm(requests: requests, listed: listed, timeZone: zone)
+        for request in requests {
+            if confirmed.contains(request.entry.workoutID) {
+                outcome.confirmedEntries.append(request.entry)
+                outcome.days.append(.init(localDate: request.entry.localDate, status: .confirmed, reason: nil))
+                if let day = plan.days.first(where: { $0.localDate == request.entry.localDate }) {
+                    outcome.receipts.append(PlanSyncReceipt(localDate: day.localDate, kind: day.kind, revision: plan.planRevision,
+                        structure: request.exportedStructure, workoutID: request.entry.workoutID.uuidString,
+                        scheduledAt: ISO8601DateFormatter().string(from: request.entry.scheduledAt),
+                        idempotencyKey: request.entry.workoutID.uuidString, exportNotes: request.exportNotes))
+                }
+            } else {
+                outcome.days.append(.init(localDate: request.entry.localDate, status: .failed, reason: "系统未读回匹配的 UUID、时刻与内容"))
+            }
+        }
+        outcome.scheduled = outcome.confirmedEntries.count
+        outcome.skipped = outcome.offered - outcome.scheduled
+        outcome.verified = outcome.clearVerified && outcome.scheduled == outcome.offered
+        return outcome
+    }
+
+    /// Also covers changes during foreground receipt POSTs, after SDK readback
+    /// but before the whole coordinated operation returns to the user.
+    static func withdrawSuperseded(_ original: PlanWatchSyncOutcome, scheduler: any WorkoutScheduling) async -> PlanWatchSyncOutcome {
+        var outcome = original
+        outcome.superseded = true
+        outcome.submittedEntries = outcome.submittedRequests.map(\.entry)
+        for request in outcome.submittedRequests { await scheduler.remove(request) }
+        let left = await scheduler.readBack()
+        let ids = Set(outcome.submittedEntries.map(\.workoutID))
+        outcome.cleanupVerified = !left.contains { ids.contains($0.workoutID) }
+        outcome.clearVerified = left.isEmpty && outcome.didAttemptClear
+        outcome.verified = false
+        outcome.receipts = []
+        outcome.confirmedEntries = []
+        return outcome
+    }
+}

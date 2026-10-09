@@ -6,6 +6,7 @@ struct RaiHandshake: Codable, Equatable {
     let datasetEpoch: String
     let syncProtocolVersion: Int
     let apiVersion: String
+    var planReceiptMetadata: Bool? = nil
 }
 
 struct RaiAPIError: Codable {
@@ -105,8 +106,10 @@ enum MobileStepGoal: Codable, Equatable {
             self = .distance(meters: try container.decode(Double.self, forKey: .meters))
         case "time":
             self = .time(seconds: try container.decode(Double.self, forKey: .seconds))
-        default:
+        case "open":
             self = .open
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: container, debugDescription: "Unknown executable workout goal")
         }
     }
 
@@ -940,17 +943,18 @@ struct MobileWorkoutPlanResponse: Codable, Equatable {
     let days: [MobileWorkoutPlanDay]
 }
 
-/// "This day was handed to the Watch", reported to the server after a sync.
-///
-/// The server has no other way to know: WorkoutKit scheduling is entirely
-/// device-side, and the runner syncs *tomorrow's* session and runs it the same
-/// evening, so the run's own date points at a rest day. The receipt is the only
-/// link between a stored plan day and the run that executed it.
-struct PlanSyncReceipt: Encodable {
+/// A locally verified system-schedule receipt, NOT physical Watch delivery.
+/// `structure` describes the actual export; UUID/time/idempotency metadata is
+/// additive and is sent only when the server advertises the capability.
+struct PlanSyncReceipt: Codable, Equatable {
     let localDate: String
     let kind: String
     let revision: Int
     let structure: MobileSessionStructure?
+    var workoutID: String? = nil
+    var scheduledAt: String? = nil
+    var idempotencyKey: String? = nil
+    var exportNotes: [String]? = nil
 }
 
 struct PlanSyncReceiptResponse: Decodable {
@@ -1005,7 +1009,7 @@ struct ConfirmWeeklyPlanRequest: Encodable {
     let expectedRevision: Int
 }
 
-struct GenerateWeeklyPlanRequest: Encodable {
+struct PreviewWeeklyPlanRequest: Encodable {
     let expectedRevision: Int?
 
     enum CodingKeys: String, CodingKey { case expectedRevision }

@@ -1,0 +1,1 @@
+{"generatedAt":"2026-10-08T00:00:00Z","timezone":"Asia/Shanghai","windowDays":7,"planRevision":12,"days":[{"localDate":"2026-10-09","kind":"easy","title":"轻松跑","reason":"规则安排","structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":4000},"alert":null}]}],"cooldown":null},"source":"heuristic","executable":true}]}

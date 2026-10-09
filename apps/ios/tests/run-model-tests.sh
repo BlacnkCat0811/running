@@ -27,9 +27,12 @@ xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/APIModels.swift apps/ios/RAI/APIC
   apps/ios/RAI/NativeFormat.swift apps/ios/RAI/WorkoutPlanMapper.swift \
   apps/ios/RAI/CalibrationState.swift apps/ios/RAI/UserDataNoticePolicy.swift \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \
-  "$tmp/NativeAppModel.swift" apps/ios/tests/ModelRegression.swift \
+  apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift \
+  apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanWatchSyncCoordinator.swift \
+  "$tmp/NativeAppModel.swift" apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift \
   -o "$tmp/model-tests"
 "$tmp/model-tests"
+bash apps/ios/tests/run-plan-watch-tests.sh
 bash apps/ios/tests/run-user-experience-tests.sh
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/Keychain.swift \
   apps/ios/tests/KeychainRegression.swift -o "$tmp/keychain-tests"
@@ -52,7 +55,8 @@ xcrun swiftc "${swiftc_flags[@]}" "$tmp/CoordinateConversion.swift" \
 # host compiler default, so direct isolated-function transforms stay covered.
 xcrun swiftc "${swiftc_flags[@]}" -swift-version 5 -default-isolation MainActor \
   apps/ios/RAI/APIModels.swift apps/ios/RAI/WorkoutPlanMapper.swift \
-  apps/ios/RAI/PlanReceiptMatcher.swift \
+  apps/ios/RAI/PlanReceiptMatcher.swift apps/ios/RAI/PlanStatePolicy.swift \
+  apps/ios/RAI/PlanWatchScheduling.swift apps/ios/RAI/UserDataNoticePolicy.swift \
   apps/ios/tests/WorkoutPlanMapperRegression.swift -o "$tmp/workout-plan-tests"
 "$tmp/workout-plan-tests"
 
@@ -85,3 +89,7 @@ python3 apps/ios/tests/check-background-capabilities.py
 # （否则 export.xml 字节抖动，`source_sha256` 永不重复）、manifest 不许带墙钟
 # （否则上传幂等键每次都变）。它顺手断言自己没变成孤儿。
 python3 apps/ios/tests/check-export-determinism.py
+# Optional release red/green proof; ordinary gates already execute all positive regressions.
+if [ "${RAI_PLAN_STATE_MUTATIONS:-0}" = 1 ]; then
+  bash apps/ios/tests/run-plan-state-mutations.sh
+fi

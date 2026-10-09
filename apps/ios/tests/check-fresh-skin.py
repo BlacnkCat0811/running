@@ -159,14 +159,14 @@ for boundary in [".frame(width: width * fraction, height: 5)",
                  ".frame(width: 7, height: 7)", ".frame(height: 18)",
                  "ForEach(0..<11)", "width * fraction - 3.5"]:
     assert boundary in ruler, f"Ability ruler layout or measurement changed: {boundary}"
-plan = source(skin / "TechPlanView.swift")
+plan = source(skin / "TechManualPlanView.swift")
 assert ".contentShape(RoundedRectangle(cornerRadius: 9))" in plan, "Plan hit area must not change"
 assert "map.isScrollEnabled = false" in route and "map.isZoomEnabled = false" in route
 assert "mapInteractive" in route and "applyGesturePolicy()" in route
 assert "GCJ02.fromWGS84" in route
 assert "static let storageKey" not in theme, "Do not introduce a second skin or theme preference"
-coach = source(skin / "TechRunCoachView.swift")
-timeline = coach.split("private struct TechCoachWeekTimeline", 1)[1].split("private struct TechCoachTrainingDays", 1)[0]
+coach = source(skin / "TechCoachWeekSection.swift")
+timeline = coach.split("struct TechCoachWeekTimeline", 1)[1].split("struct TechCoachTrainingDays", 1)[0]
 assert "@ScaledMetric(relativeTo: .caption) private var cardWidth" in timeline
 assert "@ScaledMetric(relativeTo: .title3) private var iconHeight" in timeline
 assert ".frame(width: min(cardWidth, 260), alignment: .topLeading)" in timeline
@@ -178,7 +178,7 @@ assert not re.search(r"\.frame\([^)]*\bheight:\s*140\b", timeline), \
 assert timeline.count(".fixedSize(horizontal: false, vertical: true)") >= 5, \
     "Weekday, date, title, distance and stack must retain their full text height"
 assert '"coach.week-day.\\(day.localDate)"' in timeline, "Keep individually testable day controls"
-ring = coach.split("private struct TechRingProgress", 1)[1].split("private struct TechCoachDaySheet", 1)[0]
+ring = source(skin / "TechCoachOverviewSection.swift").split("struct TechRingProgress", 1)[1]
 assert ".frame(width: 76, height: 76)" in ring, "Do not enlarge the coach's original ring"
 assert ring.count(".lineLimit(1).minimumScaleFactor(0.25)") == 2, \
     "Both ring texts must fit their original graphic slot at accessibility sizes"

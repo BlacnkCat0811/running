@@ -722,6 +722,38 @@ final class VisualAcceptance: XCTestCase {
         }
     }
 
+    @MainActor
+    func test21WatchManagementAfterEndAndOfflineRestart() async throws {
+        let current = try await coachGoals()
+        if let profile = current["runCoach"] as? [String: Any], profile["status"] as? String != "ended" {
+            try await coachCommand("end", revision: try XCTUnwrap(current["revision"] as? Int))
+        }
+        launch()
+        app.buttons["打开训练计划"].tap()
+        let clear = app.buttons["plan.watch.clear"]
+        scrollTo(clear, limit: 70)
+        XCTAssertTrue(clear.isEnabled, "Ended/no-current-plan states must retain explicit withdrawal")
+        XCTAssertFalse(app.staticTexts["就绪"].exists, "No current system verification is not readiness")
+        clear.tap()
+        let result = app.staticTexts["plan.watch.result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 15))
+        scrollTo(result, limit: 30)
+        XCTAssertTrue(result.label.contains("不支持") || result.label.contains("未获") || result.label.contains("未能确认") ||
+                      result.label.contains("拒绝") || result.label.contains("限制"),
+                      "Simulator support/auth varies by OS; a refusal must never read as successful withdrawal")
+        capture("21-ended-watch-management")
+
+        try await proxyMode("normal")
+        launchProxy(); sleep(8)
+        try await proxyMode("offline")
+        launchProxy(); sleep(8)
+        defer { Task { try? await self.proxyMode("normal") } }
+        app.buttons["打开训练计划"].tap()
+        scrollTo(app.buttons["plan.watch.clear"], limit: 70)
+        XCTAssertTrue(app.buttons["plan.watch.clear"].isEnabled, "Offline restart must not require a volatile Watch revision to withdraw")
+        capture("21-offline-watch-management")
+    }
+
     private func launchProxy() {
         app.launchArguments = ["-rai.serverURL", "http://127.0.0.1:8793",
                                "-rai.privacy.amap.state", "declined",

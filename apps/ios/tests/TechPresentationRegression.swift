@@ -592,6 +592,10 @@ struct TechPresentationRegression {
         check(techCoachCalibrationExplanation(coldStart, weeklyBudgetKm: nil)?.hasPrefix("当前训练安排是保守起步") == true,
               "Missing budget still explains conservative training without inventing a distance")
 
+        check(techCoachCurrentWeek(elapsedWeeks: nil) == nil, "Missing coach summary does not fabricate week one")
+        check(techCoachCurrentWeek(elapsedWeeks: 0) == 1 && techCoachCurrentWeek(elapsedWeeks: 5) == 6, "Current coach elapsed weeks retain natural presentation")
+        check(techCoachCurrentWeek(elapsedWeeks: -1) == nil && techCoachCurrentWeek(elapsedWeeks: Int.max) == nil, "Invalid elapsed weeks fail closed rather than overflow")
+
         print("Technology presentation: \(checks) checks passed")
         print(String(format: "50,000 points preparation: %.2f ms/run (host microbenchmark without -O, not device FPS)",
                      Date().timeIntervalSince(start) * 100))

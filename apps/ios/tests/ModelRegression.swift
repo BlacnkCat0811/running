@@ -10,6 +10,10 @@ import Foundation
 struct CachedValue<Value> { let value: Value; let cachedAt: Date }
 @MainActor final class CacheStore {
     private static var entries: [String: Data] = [:]
+    static var failPlanWrites = false
+    static var failWrites = false
+    private static var acknowledgements: [String: PlanWriteAcknowledgement] = [:]
+    private static var ledger: PlanWatchLedger?
     private static var handshakes: [String: RaiHandshake] = [:]
     static func loadHandshake(baseURL: URL) -> RaiHandshake? { handshakes[baseURL.absoluteString] }
     static func saveHandshake(_ value: RaiHandshake, baseURL: URL) { handshakes[baseURL.absoluteString] = value }
@@ -22,9 +26,25 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
         return CachedValue(value: value, cachedAt: Date())
     }
     func write<V: Codable>(_ value: V, scope: String, key: String) -> Date? {
+        guard !Self.failWrites else { return nil }
         Self.entries[scope + key] = try? JSONEncoder().encode(value)
         return Date()
     }
+    func planWriteAcknowledgement(scope: String) -> PlanWriteAcknowledgement? { Self.acknowledgements[scope] }
+    func acknowledgePlanWrite(_ ack: PlanWriteAcknowledgement, scope: String, goals: MobileGoalsResponse? = nil, coach: MobileRunCoachResponse? = nil) -> Bool {
+        guard !Self.failPlanWrites else { return false }
+        guard ack.revision >= (Self.acknowledgements[scope]?.revision ?? 0) else { return true }
+        Self.acknowledgements[scope] = ack
+        for key in ["goals", "today", "workout-plan", "run-coach"] { Self.entries.removeValue(forKey: scope + key) }
+        if let goals { _ = write(goals, scope: scope, key: "goals") }
+        if let coach { _ = write(coach, scope: scope, key: "run-coach") }
+        return true
+    }
+    func planRevisionFloor(scope: String) -> Int? { Self.acknowledgements[scope]?.revision ?? 0 }
+    func pendingPlanReceipts(scope: String) -> [PlanSyncReceipt] { read([PlanSyncReceipt].self, scope: scope, key: "receipt-journal")?.value ?? [] }
+    func savePendingPlanReceipts(_ receipts: [PlanSyncReceipt], scope: String) -> Bool { write(receipts, scope: scope, key: "receipt-journal") != nil }
+    func watchLedger() -> PlanWatchLedger? { Self.ledger }
+    func saveWatchLedger(_ ledger: PlanWatchLedger?) -> Bool { Self.ledger = ledger; return true }
     func clear(scope: String) { Self.entries = Self.entries.filter { !$0.key.hasPrefix(scope) } }
 }
 
@@ -308,7 +328,7 @@ final class RequestLog: @unchecked Sendable {
                      "restingHeartRate":{"state":"current","latestDate":"2026-09-16"}},
          "recoveryAssessment":{"targetDate":"2026-09-16","coverage":"complete","assessment":"no_low_signal",
                                "reasonCodes":[],"lastObservationDate":"2026-09-16"},
-         "recommendation":{"basis":"training_load_and_plan","recoveryAdjustment":"none",
+         "recommendation":{"planRevision":12,"basis":"training_load_and_plan","recoveryAdjustment":"none",
                            "uncertaintyReasons":[],"reasonCodes":[]},
          "freshness":{"state":"valid","checkedAt":"2026-09-16T00:30:00.000Z","latestTrainingDate":"2026-09-15","recoveryDate":"2026-09-16"},
          "recommendationRevision":"recommendation-12",
@@ -343,7 +363,10 @@ final class RequestLog: @unchecked Sendable {
                     }
                     return (200, goals, 0)
                 }
-                if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+                if path.hasSuffix("/today") {
+                    let revision = (try? JSONSerialization.jsonObject(with: Data(goals.utf8)) as? [String: Any])?["revision"] as? Int ?? 12
+                    return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":\(revision)"), 0)
+                }
                 if path.hasSuffix("/workouts") { return (200, fastList, 0) }
                 return (503, "{}", 0)
             }
@@ -480,7 +503,7 @@ final class RequestLog: @unchecked Sendable {
         check(model.workoutPlan?.days.first?.executable == true, "an executable day is marked as such")
         check(model.workoutPlan?.planRevision == 7, "the plan revision is carried for conflict messages")
 
-        let generated = await model.regenerateWeeklyPlan()
+        let generated = await model.createWeeklyPlanPreview()
         check(generated, "a plan generation reports success")
         check(model.planPreview?.audit.generatedBy == "heuristic", "preview exposes rule coach provenance")
         check(model.planPreview?.audit.model == nil && model.planPreview?.audit.promptVersion == nil,
@@ -504,13 +527,24 @@ final class RequestLog: @unchecked Sendable {
         _ = await model.refreshPlanState()
         let confirmedWithStaleReads = await model.confirmPlanPreview(candidate)
         check(confirmedWithStaleReads && model.planPreview == nil, "confirmation acknowledgement survives stale follow-up reads")
+        check(model.planPresentation.availability == .savedAwaitingRefresh && model.planPresentation.goals == nil, "saved acknowledgement plus old goals exposes saved-awaiting-refresh, not old current controls")
         check(model.planMessage?.contains("已保存，但显示未刷新") == true, "partial refresh is not reported as failed persistence")
         let staleRefresh = await model.refreshPlanState()
         check(!staleRefresh, "old read revision cannot satisfy acknowledged confirmation revision")
+        do {
+            StubProtocol.handler = { _ in (503, "{}", 0) }
+            let restarted = NativeAppModel(session: session, api: api, now: { modelNow })
+            await restarted.bootstrap()
+            check(restarted.currentPlanRevision >= 13 && restarted.currentWorkoutPlan == nil,
+                  "manual confirm watermark survives all failed reads and offline restart")
+            restarted.clearCache()
+            check(restarted.currentPlanRevision >= 13, "clear-cache preserves acknowledged execution safety floor")
+        }
+
         StubProtocol.handler = { request in
             let path = request.url!.path
             if path.hasSuffix("/goals") { return (200, goalsJSON.replacingOccurrences(of: "\"revision\":12", with: "\"revision\":13"), 0) }
-            if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+            if path.hasSuffix("/today") { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":13"), 0) }
             if path.hasSuffix("/workout-plan") { return (200, planJSON.replacingOccurrences(of: "\"planRevision\":7", with: "\"planRevision\":13"), 0) }
             return (503, "{}", 0)
         }
@@ -548,7 +582,7 @@ final class RequestLog: @unchecked Sendable {
         StubProtocol.handler = { _ in
             (409, "{\"code\":\"mobile_goals_revision_conflict\",\"message\":\"训练目标已在其他页面更新\"}", 0)
         }
-        let conflicted = await model.regenerateWeeklyPlan()
+        let conflicted = await model.createWeeklyPlanPreview()
         check(!conflicted, "a revision conflict is reported as a failure")
         check(model.planMessage == "训练目标已在别处更新，请重新生成本周课表。", "a revision conflict tells the user to regenerate")
 
@@ -559,7 +593,7 @@ final class RequestLog: @unchecked Sendable {
             failedRevisionRequests.record(request)
             return request.url!.path.hasSuffix("/goals") ? (503, "{}", 0) : (200, generationJSON, 0)
         }
-        let missingRevision = await model.regenerateWeeklyPlan()
+        let missingRevision = await model.createWeeklyPlanPreview()
         check(!missingRevision, "generation fails closed when the goals revision cannot be read")
         check(
             failedRevisionRequests.count(method: "POST", path: "/v1/mobile/workout-plan/preview") == 0,
@@ -577,7 +611,7 @@ final class RequestLog: @unchecked Sendable {
             cancelledGenerationRequests.record(request)
             return request.url!.path.hasSuffix("/goals") ? (200, goalsJSON, 0.15) : (200, generationJSON, 0)
         }
-        let cancelledGeneration = Task { await model.regenerateWeeklyPlan() }
+        let cancelledGeneration = Task { await model.createWeeklyPlanPreview() }
         try await Task.sleep(for: .milliseconds(20))
         cancelledGeneration.cancel()
         _ = await cancelledGeneration.value
@@ -593,7 +627,7 @@ final class RequestLog: @unchecked Sendable {
             switchedGenerationRequests.record(request)
             return request.url!.path.hasSuffix("/goals") ? (200, goalsJSON, 0.15) : (200, generationJSON, 0)
         }
-        let oldGeneration = Task { await model.regenerateWeeklyPlan() }
+        let oldGeneration = Task { await model.createWeeklyPlanPreview() }
         try await Task.sleep(for: .milliseconds(20))
         session.serverURL = URL(string: "https://rai-plan-new.test")
         model.serverConfigurationChanged()
@@ -633,11 +667,11 @@ final class RequestLog: @unchecked Sendable {
             if path == "/v1/workouts" { return (200, list("generation-refresh"), 0) }
             return (503, "{}", 0)
         }
-        let oldPlanGeneration = Task { await model.regenerateWeeklyPlan() }
+        let oldPlanGeneration = Task { await model.createWeeklyPlanPreview() }
         try await Task.sleep(for: .milliseconds(20))
         session.serverURL = URL(string: "https://rai-generate-loading-new.test")
         model.serverConfigurationChanged()
-        let newPlanGeneration = Task { await model.regenerateWeeklyPlan() }
+        let newPlanGeneration = Task { await model.createWeeklyPlanPreview() }
         try await Task.sleep(for: .milliseconds(220))
         _ = await oldPlanGeneration.value
         check(model.isRegeneratingPlan, "an old generation cannot stop the new configuration's generation spinner")
@@ -715,51 +749,44 @@ final class RequestLog: @unchecked Sendable {
             check(false, "an overwrite generation payload decodes")
         }
 
-        // --- plan-sync receipts follow the bridge, not the mapper -------------
-        // `recordPlanSync` must register exactly the days the bridge read back off
-        // the scheduler. Re-deriving the set from the mapper would register days
-        // the watch never received, and a later run would then be labelled with a
-        // prescription that was never handed over.
-        let receiptPlanJSON = """
-        {"generatedAt":"2026-09-11T01:00:00.000Z","timezone":"Asia/Shanghai","windowDays":2,"planRevision":7,
-         "audit":{"generatedBy":"llm","model":null,"promptVersion":null,"generatedAt":"2026-09-11T00:30:00.000Z"},
-         "days":[
-          {"localDate":"2026-09-11","kind":"easy","title":"轻松跑","reason":"","distanceKm":8,"durationMinutes":48,
-           "paceSecondsPerKmLower":330,"paceSecondsPerKmUpper":390,"heartRateBpmLower":120,"heartRateBpmUpper":150,
-           "structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":null}]}],"cooldown":null},
-           "source":"llm","executable":true},
-          {"localDate":"2026-09-12","kind":"easy","title":"轻松跑","reason":"","distanceKm":8,"durationMinutes":48,
-           "paceSecondsPerKmLower":330,"paceSecondsPerKmUpper":390,"heartRateBpmLower":120,"heartRateBpmUpper":150,
-           "structure":{"warmup":null,"blocks":[{"iterations":1,"steps":[{"purpose":"work","goal":{"type":"distance","meters":8000},"alert":null}]}],"cooldown":null},
-           "source":"llm","executable":true}
-         ]}
-        """
-        final class ReceiptCounter: @unchecked Sendable {
-            private let lock = NSLock()
-            private var value = 0
-            func bump() { lock.lock(); value += 1; lock.unlock() }
-            var count: Int { lock.lock(); defer { lock.unlock() }; return value }
-        }
-        if let receiptPlan = try? JSONDecoder().decode(MobileWorkoutPlanResponse.self, from: Data(receiptPlanJSON.utf8)) {
-            check(receiptPlan.days.count == 2, "the receipt fixture holds two offerable days")
-            let receipts = ReceiptCounter()
+        // Receipt regression uses actual scheduler output, never re-derives
+        // confirmation from original plan dates/structures.
+        do {
+            let receiptPlan = PlanTestFixtures.plan(dates: ["2026-10-09", "2026-10-10", "2026-10-11"])
+            let fake = FakeWorkoutScheduler(); fake.silentDates = ["2026-10-10"]
+            let outcome = await PlanWatchScheduling.sync(scheduler: fake, plan: receiptPlan, completedDates: [], hour: 8,
+                now: ISO8601DateFormatter().date(from: "2026-10-08T00:00:00Z")!, isCurrent: { true })
+            let receiptSession = ServerSession()
+            let receiptModel = NativeAppModel(session: receiptSession, api: api)
+            let log = RequestLog()
             StubProtocol.handler = { request in
-                if request.url!.path.hasSuffix("/workout-plan/synced") {
-                    receipts.bump()
-                    return (200, "{}", 0)
-                }
+                log.record(request)
                 return (503, "{}", 0)
             }
-            _ = await model.recordPlanSync(receiptPlan, localDates: ["2026-09-12"])
-            check(receipts.count == 1, "only the day the bridge reported back is registered as a receipt")
-            _ = await model.recordPlanSync(receiptPlan, localDates: [])
-            check(receipts.count == 1, "an empty bridged set registers no receipt at all")
-            _ = await model.recordPlanSync(receiptPlan, localDates: ["2026-09-11", "2026-09-12"])
-            check(receipts.count == 3, "both bridged days are registered")
-            _ = await model.recordPlanSync(receiptPlan, localDates: ["2026-09-30"])
-            check(receipts.count == 3, "a date outside the plan registers nothing")
-        } else {
-            check(false, "the receipt fixture decodes")
+            let failed = await receiptModel.recordPlanSyncReceipts(outcome.receipts)
+            check(failed != nil && receiptModel.hasPendingPlanReceipts, "failed registration retains exact confirmed receipts for foreground retry")
+            check(log.count(method: "POST", path: "/v1/mobile/workout-plan/synced") == 2, "partial sync registers exactly two verified days, not the unverified day")
+            let pending = CacheStore().pendingPlanReceipts(scope: receiptModel.feedbackScope)
+            check(pending.map(\.localDate) == ["2026-10-09", "2026-10-11"] && pending.map(\.workoutID) == outcome.receipts.map(\.workoutID), "retained journal carries actual exported day IDs and structures")
+            StubProtocol.handler = { request in log.record(request); return (200, "{\"recordedAt\":\"2026-10-08T00:00:00Z\"}", 0) }
+            let repaired = await receiptModel.recordPlanSyncReceipts(pending)
+            check(repaired == nil && !receiptModel.hasPendingPlanReceipts, "foreground retry clears only successfully registered entries")
+            _ = await receiptModel.recordPlanSyncReceipts([])
+            check(log.count(method: "POST", path: "/v1/mobile/workout-plan/synced") == 4, "empty confirmed set emits no guessed receipts")
+            let body = try JSONSerialization.jsonObject(with: log.lastBody(method: "POST", path: "/v1/mobile/workout-plan/synced")!) as! [String: Any]
+            check(body["workoutID"] == nil && body["idempotencyKey"] == nil && body["structure"] != nil, "older server wire contract omits new metadata but retains actual export")
+            let modernSession = ServerSession()
+            CacheStore.saveHandshake(RaiHandshake(serverId: "fixture-server", athleteId: "fixture-athlete",
+                datasetEpoch: "fixture-epoch", syncProtocolVersion: 1, apiVersion: "v1", planReceiptMetadata: true),
+                baseURL: modernSession.serverURL!)
+            let modernModel = NativeAppModel(session: modernSession, api: api)
+            let modernResult = await modernModel.recordPlanSyncReceipts(outcome.receipts)
+            let modernBody = try JSONSerialization.jsonObject(with: log.lastBody(method: "POST", path: "/v1/mobile/workout-plan/synced")!) as! [String: Any]
+            let exported = outcome.receipts.last!
+            check(modernResult == nil && modernBody["workoutID"] as? String == exported.workoutID &&
+                  modernBody["scheduledAt"] as? String == exported.scheduledAt &&
+                  modernBody["idempotencyKey"] as? String == exported.idempotencyKey,
+                  "advertised receipt capability sends actual verified UUID/time and stable idempotency key")
         }
 
         // --- shared goal-editor rules ----------------------------------------
@@ -1006,7 +1033,7 @@ final class RequestLog: @unchecked Sendable {
             pausedRetryLog.record(request)
             if request.url!.path == "/v1/mobile/run-coach" { return (200, pausedCoachJSON, 0) }
             if request.url!.path == "/v1/mobile/goals" { return (200, pausedGoalsJSON, 0) }
-            if request.url!.path == "/v1/mobile/today" { return (200, todayJSON, 0) }
+            if request.url!.path == "/v1/mobile/today" { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":2"), 0) }
             if request.url!.path == "/v1/mobile/workout-plan" { return (200, currentCoachPlanJSON, 0) }
             return (503, "{}", 0)
         }
@@ -1022,7 +1049,7 @@ final class RequestLog: @unchecked Sendable {
         StubProtocol.handler = { request in
             if request.url!.path == "/v1/mobile/run-coach" { return (200, newerPausedCoachJSON, 0) }
             if request.url!.path == "/v1/mobile/goals" { return (200, pausedGoalsJSON, 0) }
-            if request.url!.path == "/v1/mobile/today" { return (200, todayJSON, 0) }
+            if request.url!.path == "/v1/mobile/today" { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":2"), 0) }
             if request.url!.path == "/v1/mobile/workout-plan" { return (200, currentCoachPlanJSON, 0) }
             return (503, "{}", 0)
         }
@@ -1031,6 +1058,246 @@ final class RequestLog: @unchecked Sendable {
               "a newer coach read cannot be undone by older dependent snapshots")
         check(restartedCoachModel.runCoachError?.contains("未刷新") == true && !restartedCoachModel.isTodayAvailable,
               "stale dependent reads keep the retry error visible and cannot enable today's training")
+
+        // All four durable write paths, including a failed acknowledgement store.
+        for action in ["goals", "lock", "coach", "confirm"] {
+            for persistenceFails in [false, true] {
+                let isolatedSession = ServerSession()
+                var clock = ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")!
+                let isolated = NativeAppModel(session: isolatedSession, api: api, now: { clock })
+                let oldPlan = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 12, dates: ["2026-09-16", "2026-09-17"]))
+                StubProtocol.handler = { request in
+                    let path = request.url!.path
+                    if path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
+                    if path.hasSuffix("/today") { return (200, todayJSON, 0) }
+                    if path.hasSuffix("/workout-plan") { return (200, oldPlan, 0) }
+                    return (503, "{}", 0)
+                }
+                let seeded = await isolated.refreshPlanState()
+                check(seeded, "\(action): coherent safety fixtures contain real today revision")
+                let v13Goals = goalsJSON.replacingOccurrences(of: "\"revision\":12", with: "\"revision\":13")
+                let v13Coach = runCoachJSON.replacingOccurrences(of: "\"revision\":2", with: "\"revision\":13")
+                CacheStore.failPlanWrites = persistenceFails
+                CacheStore.failWrites = persistenceFails
+                StubProtocol.handler = { request in
+                    guard request.httpMethod == "PUT" || request.httpMethod == "POST" else { return (503, "{}", 0) }
+                    if request.url!.path.hasSuffix("/confirm") { return (200, confirmedJSON, 0) }
+                    if request.url!.path.hasSuffix("/run-coach") { return (200, v13Coach, 0) }
+                    return (200, v13Goals, 0)
+                }
+                let saved: Bool
+                switch action {
+                case "goals": saved = await isolated.saveGoals(expectedRevision: 12, easyDurationFloorFraction: 0.8, qualitySessionCap: 2, weekPlan: [])
+                case "lock": saved = await isolated.lockNextSession()
+                case "coach": saved = await isolated.changeRunCoach(action: "start", config: decodedCoach.config, expectedRevision: 12)
+                default: saved = await isolated.confirmPlanPreview(candidate)
+                }
+                CacheStore.failPlanWrites = false
+                CacheStore.failWrites = false
+                check(saved && isolated.currentPlanRevision == 13 && isolated.currentWorkoutPlan == nil,
+                      "\(action): acknowledgement survives failed dependent reads")
+                if persistenceFails {
+                    check(isolated.planPersistenceFailed && isolated.errorMessage?.contains("本地确认记录未持久化") == true,
+                          "\(action): failed durable write is visible and execution is quarantined")
+                }
+                let restarted = NativeAppModel(session: isolatedSession, api: api, now: { clock })
+                await restarted.bootstrap()
+                check(restarted.currentPlanRevision >= 13 && restarted.currentWorkoutPlan == nil,
+                      "\(action): offline restart cannot expose old v12 executable cache")
+                check(restarted.planPersistenceFailed == persistenceFails,
+                      "\(action): independent quarantine survives a failed SQLite acknowledgement")
+                let freshPlan = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 13, dates: ["2026-09-16", "2026-09-17"]))
+                StubProtocol.handler = { request in
+                    if request.url!.path.hasSuffix("/goals") { return (200, v13Goals, 0) }
+                    if request.url!.path.hasSuffix("/today") { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":13"), 0) }
+                    if request.url!.path.hasSuffix("/workout-plan") { return (200, freshPlan, 0) }
+                    return (503, "{}", 0)
+                }
+                let recovered = await restarted.refreshPlanState()
+                check(recovered && !restarted.planPersistenceFailed && restarted.currentWorkoutPlan?.planRevision == 13,
+                      "\(action): online coherent confirmation repairs persistence and execution")
+                let lease = restarted.beginPlanSync()!
+                let snapshot = restarted.planSyncSnapshot(lease)!
+                check(restarted.isCurrentPlanSync(snapshot), "\(action): complete snapshot obtains lease")
+                var changed = try JSONSerialization.jsonObject(with: Data(freshPlan.utf8)) as! [String: Any]
+                changed["generatedAt"] = "2099-01-01T00:00:00Z"
+                var wire = String(decoding: try JSONSerialization.data(withJSONObject: changed), as: UTF8.self)
+                StubProtocol.handler = { _ in (200, wire, 0) }
+                _ = await restarted.refreshWorkoutPlan()
+                check(restarted.isCurrentPlanSync(snapshot), "only generatedAt changes do not invalidate the lease")
+                var changedDays = changed["days"] as! [[String: Any]]; changedDays[0]["executable"] = false; changed["days"] = changedDays
+                wire = String(decoding: try JSONSerialization.data(withJSONObject: changed), as: UTF8.self)
+                _ = await restarted.refreshWorkoutPlan()
+                check(!restarted.isCurrentPlanSync(snapshot), "same revision recovery gate change invalidates the complete snapshot lease")
+                restarted.endPlanSync(lease)
+                if action == "goals" && !persistenceFails {
+                    let goodToday = todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":13")
+                    var todayWire = goodToday
+                    wire = freshPlan
+                    StubProtocol.handler = { request in
+                        if request.url!.path.hasSuffix("/goals") { return (200, v13Goals, 0) }
+                        if request.url!.path.hasSuffix("/today") { return (200, todayWire, 0) }
+                        if request.url!.path.hasSuffix("/workout-plan") { return (200, wire, 0) }
+                        return (503, "{}", 0)
+                    }
+                    _ = await restarted.refreshPlanState()
+                    for change in ["structure", "timezone", "hour", "completed", "midnight", "token"] {
+                        let syncID = restarted.beginPlanSync()!
+                        let before = restarted.planSyncSnapshot(syncID)!
+                        let hourKey = "rai.training-reminder." + restarted.feedbackScope + ".hour"
+                        let originalHour = UserDefaults.standard.object(forKey: hourKey)
+                        let oldToken = isolatedSession.apiToken
+                        switch change {
+                        case "structure":
+                            let replacement = MobileWorkoutPlanResponse(generatedAt: "new timestamp", timezone: "Asia/Shanghai", windowDays: 7, planRevision: 13,
+                                audit: nil, days: [PlanTestFixtures.day("2026-09-16", meters: 6000), PlanTestFixtures.day("2026-09-17")])
+                            wire = try PlanTestFixtures.json(replacement); _ = await restarted.refreshWorkoutPlan()
+                        case "timezone":
+                            wire = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 13, dates: ["2026-09-16", "2026-09-17"], timezone: "UTC")); _ = await restarted.refreshWorkoutPlan()
+                        case "hour": UserDefaults.standard.set(before.reminderHour == 8 ? 9 : 8, forKey: hourKey)
+                        case "completed":
+                            var object = try JSONSerialization.jsonObject(with: Data(goodToday.utf8)) as! [String: Any]
+                            object["weekPlan"] = [["localDate":"2026-09-16", "kind":"easy", "title":"completed", "planned":true, "completedWorkoutId":"observed", "distanceKm":4, "workoutCount":1]]
+                            todayWire = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+                            _ = await restarted.refreshPlanState()
+                        case "midnight": clock = clock.addingTimeInterval(86400)
+                        default: isolatedSession.apiToken = "another identity"
+                        }
+                        check(!restarted.isCurrentPlanSync(before), "snapshot lease invalidates \(change), not merely revision changes")
+                        restarted.endPlanSync(syncID)
+                        isolatedSession.apiToken = oldToken
+                        if let originalHour { UserDefaults.standard.set(originalHour, forKey: hourKey) }
+                        else { UserDefaults.standard.removeObject(forKey: hourKey) }
+                        clock = ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")!
+                        wire = freshPlan; todayWire = goodToday
+                        _ = await restarted.refreshPlanState()
+                    }
+                    let coordinator = PlanWatchSyncCoordinator()
+                    let fake = FakeWorkoutScheduler()
+                    fake.silentDates = ["2026-09-17"]
+                    let log = RequestLog()
+                    StubProtocol.handler = { request in
+                        log.record(request)
+                        if request.url!.path.hasSuffix("/goals") { return (200, v13Goals, 0) }
+                        if request.url!.path.hasSuffix("/today") { return (200, goodToday, 0) }
+                        if request.url!.path.hasSuffix("/workout-plan") { return (200, freshPlan, 0) }
+                        if request.url!.path.hasSuffix("/synced") { return (200, "{\"recordedAt\":\"2026-09-16T00:00:00Z\"}", 0) }
+                        return (503, "{}", 0)
+                    }
+                    let partial = await coordinator.sync(model: restarted, scheduler: fake)
+                    check(partial.contains("部分核验") && restarted.watchState == .partial && log.count(method: "POST", path: "/v1/mobile/workout-plan/synced") == 1,
+                          "shared coordinator registers partial confirmed day, never calls it full coverage")
+                    check(restarted.watchLedger?.entries.count == 1 && restarted.watchLedger?.registeredDates == ["2026-09-16"], "ledger stores actual confirmed coverage and separate server registration")
+                    await restarted.refreshAll(requestHandshake: false)
+                    check(restarted.watchState == .partial,
+                          "same-scope ordinary refresh preserves this session's actual partial system verification")
+                    wire = try PlanTestFixtures.json(MobileWorkoutPlanResponse(generatedAt: "new", timezone: "Asia/Shanghai", windowDays: 7, planRevision: 13,
+                        audit: nil, days: [PlanTestFixtures.day("2026-09-16", meters: 6000), PlanTestFixtures.day("2026-09-17")]))
+                    StubProtocol.handler = { request in
+                        if request.url!.path.hasSuffix("/workout-plan") { return (200, wire, 0) }
+                        return (503, "{}", 0)
+                    }
+                    _ = await restarted.refreshWorkoutPlan()
+                    check(restarted.watchNeedsUpdate && restarted.watchStatusLabel == PlanWatchState.stale.label,
+                          "a changed effective plan makes a partial persisted ledger stale, not partially current")
+                    wire = freshPlan
+                    _ = await restarted.refreshWorkoutPlan()
+                    StubProtocol.handler = { request in
+                        if request.url!.path.hasSuffix("/goals") { return (200, v13Goals, 0) }
+                        if request.url!.path.hasSuffix("/today") { return (200, goodToday, 0) }
+                        if request.url!.path.hasSuffix("/workout-plan") { return (200, wire, 0) }
+                        if request.url!.path.hasSuffix("/synced") { return (200, "{\"recordedAt\":\"2026-09-16T00:00:00Z\"}", 0) }
+                        return (503, "{}", 0)
+                    }
+                    let afterRestart = NativeAppModel(session: isolatedSession, api: api, now: { clock })
+                    check(afterRestart.watchLedger?.entries.count == 1 && afterRestart.watchState == .unknown && afterRestart.watchStatusLabel == "未核验", "persisted last-sync record never becomes current verification after restart")
+                    let invalidating = FakeWorkoutScheduler()
+                    var competingResult = ""
+                    let competitor = FakeWorkoutScheduler()
+                    invalidating.event = { event in
+                        if event == "schedule" {
+                            wire = freshPlan.replacingOccurrences(of: "\"executable\":true", with: "\"executable\":false")
+                            StubProtocol.handler = { request in
+                                if request.url!.path.hasSuffix("/workout-plan") { return (200, wire, 0) }
+                                return (503, "{}", 0)
+                            }
+                            _ = await restarted.refreshWorkoutPlan()
+                            competingResult = await coordinator.clear(model: restarted, scheduler: competitor)
+                        }
+                    }
+                    let cancelledReport = await coordinator.sync(model: restarted, scheduler: invalidating)
+                    check(cancelledReport.contains("已终止") && invalidating.removed.count == 1 && invalidating.listed.isEmpty,
+                          "same-revision mid-schedule mutation uses targeted cleanup in shared coordinator")
+                    check(competingResult.contains("尚未结束") && competitor.readCount == 0, "serial coordinator rejects next operation until old cleanup completes")
+                    wire = freshPlan
+                    let lateReceiptLog = RequestLog()
+                    StubProtocol.handler = { request in
+                        lateReceiptLog.record(request)
+                        if request.url!.path.hasSuffix("/goals") { return (200, v13Goals, 0) }
+                        if request.url!.path.hasSuffix("/today") { return (200, goodToday, 0) }
+                        if request.url!.path.hasSuffix("/workout-plan") { return (200, wire, 0) }
+                        if request.url!.path.hasSuffix("/synced") { return (200, "{\"recordedAt\":\"2026-09-16T00:00:00Z\"}", 0.25) }
+                        return (503, "{}", 0)
+                    }
+                    _ = await restarted.refreshPlanState()
+                    let lateReceiptScheduler = FakeWorkoutScheduler()
+                    let lateSync = Task { await coordinator.sync(model: restarted, scheduler: lateReceiptScheduler) }
+                    for _ in 0..<200 {
+                        if lateReceiptLog.count(method: "POST", path: "/v1/mobile/workout-plan/synced") > 0 { break }
+                        try await Task.sleep(for: .milliseconds(2))
+                    }
+                    wire = freshPlan.replacingOccurrences(of: "\"executable\":true", with: "\"executable\":false")
+                    _ = await restarted.refreshWorkoutPlan()
+                    let lateReport = await lateSync.value
+                    check(lateReport.contains("已终止") && lateReceiptScheduler.removed.count == 2 && lateReceiptScheduler.listed.isEmpty,
+                          "effective change during server receipt registration withdraws all of this operation's submitted IDs")
+                    check(!restarted.hasPendingPlanReceipts && restarted.watchState == .empty,
+                          "superseded withdrawn days are not queued for later registration or retained as verified current")
+                    StubProtocol.handler = { _ in (503, "{}", 0) }
+                    await afterRestart.bootstrap()
+                    let withdrawal = await coordinator.clear(model: afterRestart, scheduler: FakeWorkoutScheduler())
+                    check(withdrawal.contains("已核验清空") && afterRestart.watchState == .empty,
+                          "offline restart with no current plan still supports explicit withdrawal")
+                }
+                // Distinct identity scope may start at its own revision, not A's floor.
+                isolatedSession.serverURL = URL(string: "https://\(UUID().uuidString).invalid")!
+                restarted.serverConfigurationChanged()
+                check(restarted.currentPlanRevision == 0 && restarted.watchStatusLabel == "未核验", "scope switch does not carry A's revision or verification into B")
+                clock = clock.addingTimeInterval(86400)
+            }
+        }
+
+        // Legacy missing revision is separately tested; it never enables execution.
+        do {
+            let legacy = NativeAppModel(session: ServerSession(), api: api, now: { modelNow })
+            let plan12 = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 12, dates: ["2026-09-16"]))
+            StubProtocol.handler = { request in
+                if request.url!.path.hasSuffix("/goals") { return (200, goalsJSON, 0) }
+                if request.url!.path.hasSuffix("/today") { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12,", with: ""), 0) }
+                if request.url!.path.hasSuffix("/workout-plan") { return (200, plan12, 0) }
+                return (503, "{}", 0)
+            }
+            let coherent = await legacy.refreshPlanState()
+            check(!coherent && !legacy.canConfirmToday && legacy.planPresentation.today == nil, "legacy today missing revision decodes but cannot be current execution")
+            check(legacy.planPresentation.availability == .unavailable, "unavailable today is not mislabeled as a known revision mismatch")
+        }
+
+        do {
+            let unknownState = NativeAppModel(session: ServerSession(), api: api, now: { ISO8601DateFormatter().date(from: "2026-09-16T00:00:00Z")! })
+            let unknownGoals = coachGoals(2).replacingOccurrences(of: "\"status\":\"active\"", with: "\"status\":\"future-status\"")
+            let plan2 = try PlanTestFixtures.json(PlanTestFixtures.plan(revision: 2, dates: ["2026-09-16"]))
+            StubProtocol.handler = { request in
+                if request.url!.path.hasSuffix("/goals") { return (200, unknownGoals, 0) }
+                if request.url!.path.hasSuffix("/today") { return (200, todayJSON.replacingOccurrences(of: "\"planRevision\":12", with: "\"planRevision\":2"), 0) }
+                if request.url!.path.hasSuffix("/workout-plan") { return (200, plan2, 0) }
+                return (503, "{}", 0)
+            }
+            let usable = await unknownState.refreshPlanState()
+            check(!usable && unknownState.planPresentation.coachPlan == nil && unknownState.currentWorkoutPlan == nil,
+                  "unknown coach state is not interpreted as active execution")
+            check(!unknownState.canConfirmToday && unknownState.planPresentation.today == nil,
+                  "unknown coach state cannot confirm or display a current training recommendation")
+        }
 
         print("All model regression checks passed.")
     }

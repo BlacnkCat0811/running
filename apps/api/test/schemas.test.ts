@@ -580,7 +580,7 @@ test("native session and race pickers exactly match their API contracts", () => 
         }
         continue;
       }
-      if (name.endsWith("TechRunCoachView.swift")) {
+      if (name.endsWith("TechRunCoachSetup.swift")) {
         const options = balancedBlock(source, source.indexOf("{", close));
         const tags = [...options.matchAll(/\.tag\(\s*([^)]*)\)/g)].map(match => match[1]!.trim());
         const config = runCoachCommandSchema.properties.config.properties;
