@@ -63,9 +63,14 @@ code, .numeric, strong { font-family: "Cascadia Mono", "SFMono-Regular", Consola
 .nav-links a.active { background: #e3ebe5; color: #174b36; font-weight: 650; }
 .local-note { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 11px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .app-content { margin-left: 240px; min-height: 100dvh; }
-.site-footer { padding: 6px 24px 40px; color: var(--muted); font-size: 12px; text-align: center; }
+.site-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 18px; padding: 6px 24px 40px; color: var(--muted); font-size: 12px; text-align: center; }
 .site-footer a { color: var(--muted); border-bottom: 1px solid transparent; transition: color .15s ease, border-color .15s ease; }
 .site-footer a:hover, .site-footer a:focus-visible { color: var(--ink); border-bottom-color: currentColor; }
+/* 公安联网备案：图标在左、编号在右，同一行内垂直居中；图标按原比例缩到 20px 高。 */
+.site-footer-police { display: inline-flex; align-items: center; gap: 5px; }
+.site-footer-police img { display: block; height: 20px; width: auto; }
+/* 下划线横跨图标会断开，所以这一项 hover 只做颜色反馈，不画下边框。 */
+.site-footer a.site-footer-police:hover, .site-footer a.site-footer-police:focus-visible { border-bottom-color: transparent; }
 .page { width: min(1440px, 100%); margin: 0 auto; padding: 42px 46px 72px; }
 .page-header { margin-bottom: 28px; }
 .page-header.split { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; }
