@@ -27,7 +27,7 @@ nonisolated enum RouteSyncStateMachine {
     /// 🔴 `nextState` 在 `shouldQuery == false` 时是**原样携带**（含 `lastCheckedAt` 不动）。
     /// 这一条是整台机器的意义所在：跳过查询**不能**被记成"查过了、而且和上次一样"，
     /// 否则 `stableCheckCount` 会把"没查"当成一次稳定证据，冷却期凭空缩短，
-    /// 一条**刚变更过**的轨迹就可能被直接判进 `settled` 而永不再查。
+    /// 一条**刚变更过**的轨迹就可能被直接判进 `settled`，错过高频补齐窗口。
     /// （这与 ADR-004 决策二「没读到 ≠ 没变化」是同一条不变式在客户端的另一处落点。）
     struct Decision: Equatable {
         let shouldQuery: Bool
@@ -39,8 +39,14 @@ nonisolated enum RouteSyncStateMachine {
     static let activeWindow: TimeInterval = 24 * 60 * 60
     /// 冷却期的查询节流：距**上次实际查询**不足这么久就跳过。
     static let coolingInterval: TimeInterval = 12 * 60 * 60
-    /// 休眠阈值：跑完超过这么久、且冷却期已验证稳定，就永久不再查。
+    /// 休眠阈值：跑完超过这么久、且冷却期已验证稳定，就转入低频重新发现。
     static let settleWindow: TimeInterval = 3 * 24 * 60 * 60
+    /// HealthKit 不暴露读取权限的变化；空路线每天复查，已有路线每周复查。
+    /// 这些是最低间隔，不是定时任务：只在已有同步机会中分批执行。
+    static let emptyRediscoveryInterval: TimeInterval = 24 * 60 * 60
+    static let settledRediscoveryInterval: TimeInterval = 7 * 24 * 60 * 60
+    /// 每轮最多追加这么多历史/休眠候选，不恢复每轮全历史轨迹查询。
+    static let rediscoveryBatchLimit = 20
     /// 降频到 `cooling` 所需的**连续**稳定观测次数。
     ///
     /// 为什么不是 1：`routeHash` 是内容摘要，一次"看起来一样"可能只是查询当刻轨迹恰好
@@ -73,9 +79,10 @@ nonisolated enum RouteSyncStateMachine {
     static func shouldQuery(
         existing: RouteSyncRecord,
         now: Date,
-        isForceManualRescan: Bool = false
+        isForceManualRescan: Bool = false,
+        hasWorkoutChange: Bool = false
     ) -> Bool {
-        if isForceManualRescan { return true }
+        if isForceManualRescan || hasWorkoutChange { return true }
         switch existing.status {
         case .unknown:
             // 从未观测过。不查就永远没有点数与摘要，冷却与休眠都无从谈起。
@@ -85,12 +92,36 @@ nonisolated enum RouteSyncStateMachine {
             // （见 `decide` 里 active → cooling 的那一步）—— 少查一次就少一份证据。
             return true
         case .cooling:
-            // 唯一一个"有条件地不查"的状态：距上次**实际查询**不足 12 小时就跳过。
+            // 距上次**实际查询**不足 12 小时就跳过。
             return now.timeIntervalSince(existing.lastCheckedAt) >= coolingInterval
         case .settled:
-            // 永久休眠。只有人工重扫能唤醒，而它已经在上面第一行被拦掉了。
-            return false
+            let interval = existing.pointCount == 0 || existing.routeHash == nil
+                ? emptyRediscoveryInterval : settledRediscoveryInterval
+            return now.timeIntervalSince(existing.lastCheckedAt) >= interval
         }
+    }
+
+    /// 休眠路线（包括近期 workout）和窗口外的待查路线共享一个有界轮转队列。
+    /// cursor 只记录候选遍历位置，**不是** HealthKit anchor 或稳定性证据。
+    /// 即使旧 workout 已删除/暂不可读，也要跨过它；否则队首的不可读 UUID 会饿死后面的路线。
+    static func rediscoveryCandidates(
+        existing: [RouteSyncRecord],
+        currentWorkoutUUIDs: Set<String>,
+        changedWorkoutUUIDs: Set<String> = [],
+        now: Date,
+        cursor: String?,
+        limit: Int = rediscoveryBatchLimit
+    ) -> [String] {
+        guard limit > 0 else { return [] }
+        let due = existing.filter { record in
+            !changedWorkoutUUIDs.contains(record.workoutUUID)
+                && (!currentWorkoutUUIDs.contains(record.workoutUUID) || record.status == .settled)
+                && shouldQuery(existing: record, now: now)
+        }.map(\.workoutUUID).sorted()
+        guard let cursor else { return Array(due.prefix(limit)) }
+        let after = due.filter { $0 > cursor }
+        let wrapped = due.filter { $0 <= cursor }
+        return Array((after + wrapped).prefix(limit))
     }
 
     /// 记录阶段：拿到（或没拿到）观测后算出下一个状态。这是本次改造对外的主契约。
@@ -101,9 +132,13 @@ nonisolated enum RouteSyncStateMachine {
         existing: RouteSyncRecord,
         observation: RouteObservation?,
         now: Date,
-        isForceManualRescan: Bool = false
+        isForceManualRescan: Bool = false,
+        hasWorkoutChange: Bool = false
     ) -> Decision {
-        let needsQuery = shouldQuery(existing: existing, now: now, isForceManualRescan: isForceManualRescan)
+        let needsQuery = shouldQuery(
+            existing: existing, now: now,
+            isForceManualRescan: isForceManualRescan, hasWorkoutChange: hasWorkoutChange
+        )
         guard needsQuery, let observation else {
             // 没查 ⇒ 状态一动不动。宁可下一轮再判，也不许把"这次没看"记成一次检查。
             return Decision(shouldQuery: needsQuery, nextState: existing)
@@ -151,7 +186,7 @@ nonisolated enum RouteSyncStateMachine {
             // 但会漏掉"轨迹在冷却期里被补传"的窗口，所以两级判据都要满足才落到 `settled`。
             next.status = age > settleWindow ? .settled : .cooling
         case .settled:
-            // 到不了：`settled` 的 `shouldQuery` 恒为 false，上面已被 `guard` 挡回。留着是为了穷尽。
+            // 低频复查没有变化就继续休眠；点数/摘要变化已在上面唤醒到 active。
             next.status = .settled
         }
         return Decision(shouldQuery: true, nextState: next)

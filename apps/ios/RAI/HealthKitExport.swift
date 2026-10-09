@@ -8,6 +8,7 @@ nonisolated struct HealthKitExportResult: Sendable {
     let zipURL: URL
     let workoutCount: Int
     let recordCount: Int
+    let deletionCount: Int
     /// 本轮**装进载荷**的 route 文件数。
     ///
     /// ⚠️ 语义漂移：自 T1（按 workout 定频）起，本字段为「**本轮实际查询到的 workout 数**」，
@@ -28,6 +29,7 @@ nonisolated struct HealthKitExportResult: Sendable {
     let maxEndDate: Date?
     let exportedThrough: Date
     let workoutAnchor: Data?
+    let recordCursors: Data
     let sourceScope: String
     /// 本轮**实际查询过**的 workout 的伴生 Route 状态（键 = 小写化的 workout uuid）。
     ///
@@ -37,6 +39,8 @@ nonisolated struct HealthKitExportResult: Sendable {
     /// 它**不由导出侧落盘**：导出跑在脱离主线程的上下文里，而 `SyncTaskStore` 是
     /// `@MainActor`。回传成值、由主线程侧在一次成功收尾里写下去。
     let routeStates: [String: RouteSyncRecord]
+    /// 本轮最后一个低频候选。即使 workout 暂不可读，也推进遍历位置，不伪造观测。
+    let routeDiscoveryCursor: String?
 }
 
 nonisolated enum HealthKitExportError: LocalizedError, Equatable {
@@ -62,6 +66,7 @@ nonisolated enum HealthKitExportError: LocalizedError, Equatable {
     /// 两者的正确处置完全相反（解锁后自动重跑 vs. 报失败并让用户去处理），
     /// 文档 §3.4 要求这两条路彻底分开，理由见 `HealthSyncBlockedRecovery`。
     case databaseLocked
+    case missingRecordAnchor
 
     var errorDescription: String? {
         switch self {
@@ -75,6 +80,8 @@ nonisolated enum HealthKitExportError: LocalizedError, Equatable {
         case .authorizationCheckFailed:
             return "无法确认 Apple 健康读取授权状态（健康数据未响应）。请稍后重试；"
                 + "若反复出现，请在 iPhone 设置 → 健康 → 数据访问与设备 中确认 RAI 已获得读取权限。"
+        case .missingRecordAnchor:
+            return "健康记录查询未返回可恢复游标，请重试同步。"
         case .databaseLocked:
             // 用户不需要做任何事，所以文案刻意不含"请重试"之外的动作项 ——
             // 设备一解锁就会自动继续（见 `RaiStartup.observeProtectedDataAvailability`）。
@@ -273,7 +280,10 @@ nonisolated enum HealthKitExport {
     static func exportArchive(
         from startDate: Date?,
         workoutAnchor: Data?,
+        recordCursors: Data? = nil,
+        recordsForceRescan: Bool = false,
         routeStates: [String: RouteSyncRecord] = [:],
+        routeDiscoveryCursor: String? = nil,
         routeForceRescan: Bool = false,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
@@ -293,7 +303,27 @@ nonisolated enum HealthKitExport {
             anchorData: workoutAnchor
         )
         try Task.checkCancellation()
-        let workouts = workoutBatch.added
+        var merged = Dictionary(uniqueKeysWithValues: workoutBatch.added.map {
+            (routeFileWorkoutId($0), $0)
+        })
+        let rediscovery = routeForceRescan ? [] : RouteSyncStateMachine.rediscoveryCandidates(
+            existing: Array(routeStates.values),
+            currentWorkoutUUIDs: Set(merged.keys),
+            changedWorkoutUUIDs: workoutBatch.changedUUIDs,
+            now: routeNow,
+            cursor: routeDiscoveryCursor
+        )
+        let rediscoveryIDs = Set(rediscovery)
+        let historicalIDs = rediscovery.filter { merged[$0] == nil }
+        if !historicalIDs.isEmpty {
+            // 按有限 UUID 集合定点取 workout，不使用最近窗口，更不扫描全部历史。
+            let historical = try await knownRunningWorkouts(store: store, uuids: historicalIDs)
+            for workout in historical { merged[routeFileWorkoutId(workout)] = workout }
+        }
+        let workouts = merged.values.sorted {
+            $0.startDate == $1.startDate
+                ? $0.uuid.uuidString < $1.uuid.uuidString : $0.startDate < $1.startDate
+        }
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("rai-hk-\(UUID().uuidString)", isDirectory: true)
@@ -325,12 +355,14 @@ nonisolated enum HealthKitExport {
             let routeKey = routeFileWorkoutId(workout)
             let previous = routeStates[routeKey]
                 ?? RouteSyncStateMachine.baseline(workoutUUID: routeKey, workoutEndDate: workout.endDate)
+            let hasWorkoutChange = workoutBatch.changedUUIDs.contains(routeKey)
             let routeFiles: [(name: String, url: URL)]
             if RouteSyncStateMachine.shouldQuery(
                 existing: previous,
                 now: routeNow,
-                isForceManualRescan: routeForceRescan
-            ) {
+                isForceManualRescan: routeForceRescan,
+                hasWorkoutChange: hasWorkoutChange
+            ) && (previous.status != .settled || routeForceRescan || hasWorkoutChange || rediscoveryIDs.contains(routeKey)) {
                 let fetch = try await routeEntries(
                     for: workout,
                     store: store,
@@ -338,12 +370,15 @@ nonisolated enum HealthKitExport {
                     warnings: warnings
                 )
                 routeFiles = fetch.entries
-                routeDecisions[routeKey] = RouteSyncStateMachine.decide(
-                    existing: previous,
-                    observation: fetch.observation,
-                    now: routeNow,
-                    isForceManualRescan: routeForceRescan
-                ).nextState
+                if let observation = fetch.observation {
+                    routeDecisions[routeKey] = RouteSyncStateMachine.decide(
+                        existing: previous,
+                        observation: observation,
+                        now: routeNow,
+                        isForceManualRescan: routeForceRescan,
+                        hasWorkoutChange: hasWorkoutChange
+                    ).nextState
+                }
             } else {
                 // 跳过：这一轮既不产出任何 route 文件，也不改动状态一个字。
                 //
@@ -360,48 +395,29 @@ nonisolated enum HealthKitExport {
             routeCount += routeFiles.count
             files.append(contentsOf: routeFiles)
             try write(xml, workoutXML(workout, routeNames: routeFiles.map(\.name)))
-            recordCount += try await writeWorkoutRecords(for: workout, store: store, xml: xml, warnings: warnings)
         }
 
         await onProgress("正在读取心率与恢复数据")
         try Task.checkCancellation()
-        recordCount += try await writeGlobalRecords(store: store, from: startDate, xml: xml, warnings: warnings)
+        let records = try await writeGlobalRecords(
+            store: store, cursorData: recordCursors, forceHistory: recordsForceRescan,
+            xml: xml, warnings: warnings
+        )
+        recordCount += records.count
         let exportedThrough = Date()
         try write(xml, "\n</HealthData>\n")
         try xml.synchronize()
 
         let manifestURL = directory.appendingPathComponent("sync-manifest.json")
-        // Deletions are named by UUID, and the importer matches that against the
-        // `RAIHealthKitWorkoutUUID` entry this exporter writes on every workout
-        // (`storage-sqlite/src/database.ts` checks both identifier keys). Naming
-        // the sync identifier instead would be no more precise and no less: the
-        // UUID can only ever match one row.
-        //
-        // 🔴 This manifest deliberately carries **no wall-clock timestamp**. It
-        // used to hold `createdAt: ISO8601DateFormatter().string(from: Date())`,
-        // which is a fresh value on every export: the archive bytes could never
-        // repeat, so `payloadHash` — the idempotency key the uploader sends —
-        // differed every time and the server created a brand-new import source
-        // for each sync instead of recognising the batch it had already seen.
-        // Nothing reads the field: the content digest takes only
-        // `version` / `sourceScope` / `deletedSourceIds`
-        // (`import-sources.ts:268-274`) and the offline CLI reads only
-        // `version` / `deletedSourceIds` (`health-export-parser/src/cli.ts:462-464`).
-        // A human asking "when was this produced" has `<ExportDate>` in
-        // `export.xml`, which the server strips before hashing anyway.
+        // v2 adds type-scoped record UUID deletions. No absence or wall-clock
+        // semantics: the same facts still have the same upload content digest.
         let manifest: [String: Any] = [
-            "version": 1,
+            "version": 2,
             "sourceScope": "healthkit",
             "sourceEntityType": "HKWorkoutActivityTypeRunning",
             "sourceIds": workouts.map(workoutSyncId),
-            // Sorted: `HKAnchoredObjectQuery` does not promise an order for
-            // `deletedObjects`, and this array is written verbatim into the ZIP.
-            // Nothing downstream reads the order — the server keeps neither the
-            // manifest nor its list, it only digests `deletedSourceIds` after
-            // de-duplicating and sorting it (`import-sources.ts:268-274`) — but an
-            // unstable array still changes the archive bytes and therefore the
-            // upload hash.
             "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString }.sorted(),
+            "deletedRecords": records.deleted,
             "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"]
         ]
         let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
@@ -423,13 +439,16 @@ nonisolated enum HealthKitExport {
             zipURL: zipURL,
             workoutCount: workouts.count,
             recordCount: recordCount,
+            deletionCount: workoutBatch.deleted.count + records.deleted.count,
             routeCount: routeCount,
             warnings: warnings.snapshot,
             maxEndDate: workouts.map(\.endDate).max(),
             exportedThrough: exportedThrough,
             workoutAnchor: workoutBatch.anchor,
+            recordCursors: records.cursors,
             sourceScope: "healthkit",
-            routeStates: routeDecisions
+            routeStates: routeDecisions,
+            routeDiscoveryCursor: rediscovery.last
         )
     }
 
@@ -471,11 +490,21 @@ nonisolated enum HealthKitExport {
         return types
     }
 
+    /// Observe every authorized record type, not only sleep/HRV/resting HR.
+    /// Historical corrections to workout-associated quantities may otherwise
+    /// have no workout notification to wake the existing delivery pipeline.
+    static var recordSampleTypes: [HKSampleType] {
+        readTypes.compactMap { type -> HKSampleType? in
+            guard type is HKQuantityType || type is HKCategoryType else { return nil }
+            return type as? HKSampleType
+        }.sorted { $0.identifier < $1.identifier }
+    }
+
     private static func runningWorkouts(
         store: HKHealthStore,
         from startDate: Date?,
         anchorData: Data?
-    ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], anchor: Data?) {
+    ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], anchor: Data?, changedUUIDs: Set<String>) {
         let stored = anchorData.flatMap(decodeAnchor)
         var predicates = [HKQuery.predicateForWorkouts(with: .running)]
         if stored == nil, let startDate {
@@ -510,7 +539,10 @@ nonisolated enum HealthKitExport {
                 if left.startDate == right.startDate { return left.uuid.uuidString < right.uuid.uuidString }
                 return left.startDate < right.startDate
             }
-            return (workouts, batch.deleted, encodeAnchor(batch.next))
+            return (
+                workouts, batch.deleted, encodeAnchor(batch.next),
+                Set(batch.added.map(routeFileWorkoutId))
+            )
         } catch {
             if isAuthorizationError(error) {
                 throw HealthKitExportError.notAuthorized
@@ -527,6 +559,22 @@ nonisolated enum HealthKitExport {
             if isDatabaseInaccessible(error) {
                 throw HealthKitExportError.databaseLocked
             }
+            throw error
+        }
+    }
+
+    private static func knownRunningWorkouts(store: HKHealthStore, uuids: [String]) async throws -> [HKWorkout] {
+        let ids = Set(uuids.compactMap(UUID.init(uuidString:)))
+        guard !ids.isEmpty else { return [] }
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            HKQuery.predicateForWorkouts(with: .running),
+            HKQuery.predicateForObjects(with: ids)
+        ])
+        do {
+            return try await samples(type: .workoutType(), predicate: predicate, store: store)
+        } catch {
+            if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
+            if isAuthorizationError(error) { throw HealthKitExportError.notAuthorized }
             throw error
         }
     }
@@ -729,69 +777,48 @@ nonisolated enum HealthKitExport {
         return "    <WorkoutStatistics \(attrs)/>\n"
     }
 
-    private static func writeWorkoutRecords(
-        for workout: HKWorkout,
+    private static func writeGlobalRecords(
         store: HKHealthStore,
+        cursorData: Data?,
+        forceHistory: Bool,
         xml: FileHandle,
         warnings: WarningBag
-    ) async throws -> Int {
-        var types: [(HKQuantityType, HKUnit, String, String, String)] = [
-            (HKQuantityType.quantityType(forIdentifier: .heartRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierHeartRate", "count/min", "未授权读取心率"),
-            (HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!, .meter(), "HKQuantityTypeIdentifierDistanceWalkingRunning", "m", "部分健康数据类型未授权"),
-            (HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!, .kilocalorie(), "HKQuantityTypeIdentifierActiveEnergyBurned", "kcal", "部分健康数据类型未授权"),
-            (HKQuantityType.quantityType(forIdentifier: .stepCount)!, .count(), "HKQuantityTypeIdentifierStepCount", "count", "部分健康数据类型未授权"),
-            (HKQuantityType.quantityType(forIdentifier: .runningSpeed)!, HKUnit.meter().unitDivided(by: .second()), "HKQuantityTypeIdentifierRunningSpeed", "m/s", "部分健康数据类型未授权"),
-            (HKQuantityType.quantityType(forIdentifier: .runningPower)!, HKUnit.watt(), "HKQuantityTypeIdentifierRunningPower", "W", "部分健康数据类型未授权"),
-            (HKQuantityType.quantityType(forIdentifier: .runningStrideLength)!, .meter(), "HKQuantityTypeIdentifierRunningStrideLength", "m", "部分健康数据类型未授权"),
-            (HKQuantityType.quantityType(forIdentifier: .runningVerticalOscillation)!, HKUnit.meterUnit(with: .centi), "HKQuantityTypeIdentifierRunningVerticalOscillation", "cm", "部分健康数据类型未授权"),
-            (HKQuantityType.quantityType(forIdentifier: .runningGroundContactTime)!, HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierRunningGroundContactTime", "ms", "部分健康数据类型未授权")
+    ) async throws -> (count: Int, cursors: Data, deleted: [[String: String]]) {
+        // Corrupt cursors fail closed. They are never silently turned into a
+        // window query; a missing type starts from nil and reads all history.
+        var cursors = try cursorData.map {
+            try JSONDecoder().decode([String: HealthKitRecordCursor].self, from: $0)
+        } ?? [:]
+        let now = Date()
+        var count = 0
+        var deletions: [String: Set<String>] = [:]
+        var quantities: [(HKQuantityType, HKUnit, String, String)] = [
+            (HKQuantityType.quantityType(forIdentifier: .heartRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierHeartRate", "count/min"),
+            (HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!, .meter(), "HKQuantityTypeIdentifierDistanceWalkingRunning", "m"),
+            (HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!, .kilocalorie(), "HKQuantityTypeIdentifierActiveEnergyBurned", "kcal"),
+            (HKQuantityType.quantityType(forIdentifier: .stepCount)!, .count(), "HKQuantityTypeIdentifierStepCount", "count"),
+            (HKQuantityType.quantityType(forIdentifier: .runningSpeed)!, HKUnit.meter().unitDivided(by: .second()), "HKQuantityTypeIdentifierRunningSpeed", "m/s"),
+            (HKQuantityType.quantityType(forIdentifier: .runningPower)!, HKUnit.watt(), "HKQuantityTypeIdentifierRunningPower", "W"),
+            (HKQuantityType.quantityType(forIdentifier: .runningStrideLength)!, .meter(), "HKQuantityTypeIdentifierRunningStrideLength", "m"),
+            (HKQuantityType.quantityType(forIdentifier: .runningVerticalOscillation)!, HKUnit.meterUnit(with: .centi), "HKQuantityTypeIdentifierRunningVerticalOscillation", "cm"),
+            (HKQuantityType.quantityType(forIdentifier: .runningGroundContactTime)!, HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierRunningGroundContactTime", "ms")
         ]
         if let physicalEffort = HKQuantityType.quantityType(forIdentifier: .physicalEffort) {
             let unit = HKUnit.kilocalorie().unitDivided(by: HKUnit.hour().unitMultiplied(by: .gramUnit(with: .kilo)))
-            types.append((
+            quantities.append((
                 physicalEffort,
                 unit,
                 "HKQuantityTypeIdentifierPhysicalEffort",
-                "kcal/hr·kg",
-                "部分健康数据类型未授权"
+                "kcal/hr·kg"
             ))
         }
-        let predicate = HKQuery.predicateForObjects(from: workout)
-        var count = 0
-        for (type, unit, xmlType, xmlUnit, denied) in types {
-            try Task.checkCancellation()
-            let samples: [HKQuantitySample] = try await optionalSamples(
-                type: type,
-                predicate: predicate,
-                store: store,
-                warnings: warnings,
-                deniedMessage: denied
-            )
-            for sample in samples {
-                try Task.checkCancellation()
-                try write(xml, recordXML(sample, type: xmlType, unit: unit, xmlUnit: xmlUnit))
-                count += 1
-            }
-        }
-        return count
-    }
-
-    private static func writeGlobalRecords(
-        store: HKHealthStore,
-        from startDate: Date?,
-        xml: FileHandle,
-        warnings: WarningBag
-    ) async throws -> Int {
-        let start = startDate ?? Calendar.current.date(byAdding: .year, value: -3, to: Date()) ?? Date.distantPast
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date(), options: .strictStartDate)
-        var count = 0
-        var quantities: [(HKQuantityType, HKUnit, String, String)] = [
+        quantities.append(contentsOf: [
             (HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierRestingHeartRate", "count/min"),
             (HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!, HKUnit.secondUnit(with: .milli), "HKQuantityTypeIdentifierHeartRateVariabilitySDNN", "ms"),
             (HKQuantityType.quantityType(forIdentifier: .vo2Max)!, HKUnit.literUnit(with: .milli).unitDivided(by: HKUnit.gramUnit(with: .kilo).unitMultiplied(by: .minute())), "HKQuantityTypeIdentifierVO2Max", "mL/min·kg"),
             (HKQuantityType.quantityType(forIdentifier: .bodyMass)!, .gramUnit(with: .kilo), "HKQuantityTypeIdentifierBodyMass", "kg"),
             (HKQuantityType.quantityType(forIdentifier: .respiratoryRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierRespiratoryRate", "count/min")
-        ]
+        ])
         if let wrist = HKQuantityType.quantityType(forIdentifier: .appleSleepingWristTemperature) {
             quantities.append((
                 wrist,
@@ -808,39 +835,106 @@ nonisolated enum HealthKitExport {
                 "count/min"
             ))
         }
-        for (type, unit, xmlType, xmlUnit) in quantities {
+
+        var descriptors: [(HKSampleType, HKUnit?, String, String?)] = quantities.map {
+            ($0.0, $0.1, $0.2, $0.3)
+        }
+        descriptors.append((HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!, nil,
+                            "HKCategoryTypeIdentifierSleepAnalysis", nil))
+        for (type, unit, xmlType, xmlUnit) in descriptors {
             try Task.checkCancellation()
-            let samples: [HKQuantitySample] = try await optionalSamples(
-                type: type,
-                predicate: predicate,
-                store: store,
-                warnings: warnings,
-                deniedMessage: "部分恢复数据未授权"
-            )
-            for sample in samples {
-                try Task.checkCancellation()
-                try write(xml, recordXML(sample, type: xmlType, unit: unit, xmlUnit: xmlUnit))
-                count += 1
+            let previous = cursors[xmlType]
+            let decoded = previous.flatMap { decodeAnchor($0.anchor) }
+            let history = previous == nil || decoded == nil
+                || previous!.needsHistoryRead(now: now, force: forceHistory)
+            do {
+                // Drain the old change cursor FIRST, even when replaying history.
+                // Resetting before draining can lose deletion events for old rows.
+                var starts: [HKQueryAnchor?] = [decoded]
+                if history, decoded != nil { starts.append(nil) }
+                var next: HKQueryAnchor?
+                for start in starts {
+                    next = try await HealthKitRecordCursor.drain(from: start, query: { anchor in
+                        try await anchoredRecords(store: store, type: type, anchor: anchor)
+                    }, consume: { added, deleted in
+                        for sample in added.sorted(by: {
+                            $0.startDate == $1.startDate ? $0.uuid.uuidString < $1.uuid.uuidString : $0.startDate < $1.startDate
+                        }) {
+                            try Task.checkCancellation()
+                            if let sample = sample as? HKQuantitySample, let unit, let xmlUnit {
+                                try write(xml, recordXML(sample, type: xmlType, unit: unit, xmlUnit: xmlUnit))
+                            } else if let sample = sample as? HKCategorySample {
+                                var attrs = "type=\"\(xmlType)\" sourceName=\"\(escape(sample.sourceRevision.source.name))\" sourceVersion=\"\(escape(sample.sourceRevision.version ?? "1"))\""
+                                if let device = deviceDescription(sample.device) { attrs += " device=\"\(escape(device))\"" }
+                                attrs += " value=\"\(sleepName(sample.value))\" creationDate=\"\(appleDate(sample.startDate))\" startDate=\"\(appleDate(sample.startDate))\" endDate=\"\(appleDate(sample.endDate))\""
+                                try write(xml, "\n          <Record \(attrs)>\(sampleMetadataXML(sample))</Record>")
+                            } else {
+                                throw HealthKitExportError.missingRecordAnchor
+                            }
+                            count += 1
+                        }
+                        for item in deleted {
+                            deletions[xmlType, default: []].insert(item.uuid.uuidString.lowercased())
+                        }
+                    })
+                }
+                guard let next else { throw HealthKitExportError.missingRecordAnchor }
+                let encoded = try NSKeyedArchiver.archivedData(withRootObject: next, requiringSecureCoding: true)
+                cursors[xmlType] = HealthKitRecordCursor(
+                    anchor: encoded, historyReadAt: history ? now : previous!.historyReadAt
+                )
+            } catch {
+                if isAuthorizationError(error) || isNoDataError(error) {
+                    warnings.add("部分健康记录暂不可读取；已保留该类型的同步游标")
+                    // Do not advance a denied/unavailable type, even if earlier
+                    // pages were read. Retry from the same committed cursor.
+                    continue
+                }
+                if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
+                throw error
             }
         }
-        let sleeps: [HKCategorySample] = try await optionalSamples(
-            type: HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
-            predicate: predicate,
-            store: store,
-            warnings: warnings,
-            deniedMessage: "部分恢复数据未授权"
-        )
-        for sample in sleeps {
-            try Task.checkCancellation()
-            var attrs = "type=\"HKCategoryTypeIdentifierSleepAnalysis\" sourceName=\"\(escape(sample.sourceRevision.source.name))\" sourceVersion=\"\(escape(sample.sourceRevision.version ?? "1"))\""
-            if let device = deviceDescription(sample.device) {
-                attrs += " device=\"\(escape(device))\""
-            }
-            attrs += " value=\"\(sleepName(sample.value))\" creationDate=\"\(appleDate(sample.startDate))\" startDate=\"\(appleDate(sample.startDate))\" endDate=\"\(appleDate(sample.endDate))\""
-            try write(xml, "\n              <Record \(attrs)/>")
-            count += 1
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let deleted = deletions.keys.sorted().flatMap { type in
+            deletions[type]!.sorted().map { ["type": type, "uuid": $0] }
         }
-        return count
+        return (count, try encoder.encode(cursors), deleted)
+    }
+
+    private static func anchoredRecords(
+        store: HKHealthStore, type: HKSampleType, anchor: HKQueryAnchor?
+    ) async throws -> (added: [HKSample], deleted: [HKDeletedObject], next: HKQueryAnchor) {
+        let box = QueryContinuation<(added: [HKSample], deleted: [HKDeletedObject], next: HKQueryAnchor)>()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result = try await withCheckedThrowingContinuation { continuation in
+                box.set(continuation)
+                let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: 1000) {
+                    _, samples, deleted, next, error in
+                    if let error { box.resume(throwing: error); return }
+                    // 🔴 这条 guard 的**前提**没有被验证过（2026-10-09 审查 🟡5）：查询"没有返回
+                    // 任何对象"时 completion 给的 anchor 是否为 nil，只有 Apple 文档一句可读
+                    // （读得出 nil 可达），没有实测；同文件的 anchoredWorkouts 对同一情形做了
+                    // **相反**处置（HKQueryAnchor(fromValue: 0) 兜底而不是抛错），两处不一致说明
+                    // "nil 是硬错误"是当初的选择、不是被证明过的事实。结构门禁钉的是**这个决定**、
+                    // 不是它的前提 ⇒ 门禁全绿不等于 nil 不可达。若 nil 真的可达，整批记录同步会
+                    // **永久失败**：每轮都在这里抛同一个错、游标永不推进，而界面只显示同步失败、
+                    // 不会提示"有记录被跳过"。判定手段＝挑一个**零样本**记录类型跑一次导出，看
+                    // completion 是否给出 nil（需真机 + HealthKit 读授权，模拟器替代不了）。
+                    // ⚠️ 拿到该结论之前**不要**改成兜 nil：归零会让游标每轮全量重读（另一个
+                    // 缺陷），且违反"绝不把读不到当空数据推进 anchor"的既有纪律。
+                    // 见 docs/IOS_NATIVE_SYNC_PROTOCOL.md「仍需真机验收的边界」。
+                    guard let next else {
+                        box.resume(throwing: HealthKitExportError.missingRecordAnchor); return
+                    }
+                    box.resume(returning: (samples ?? [], deleted ?? [], next))
+                }
+                box.execute(query, on: store)
+            }
+            try Task.checkCancellation()
+            return result
+        } onCancel: { box.cancel() }
     }
 
     private static func optionalSamples<T: HKSample>(
@@ -926,7 +1020,16 @@ nonisolated enum HealthKitExport {
             attrs += " device=\"\(escape(device))\""
         }
         attrs += " unit=\"\(xmlUnit)\" creationDate=\"\(appleDate(sample.startDate))\" startDate=\"\(appleDate(sample.startDate))\" endDate=\"\(appleDate(sample.endDate))\" value=\"\(format(value))\""
-        return "\n          <Record \(attrs)/>"
+        return "\n          <Record \(attrs)>\(sampleMetadataXML(sample))</Record>"
+    }
+
+    private static func sampleMetadataXML(_ sample: HKSample) -> String {
+        var metadata = sample.metadata ?? [:]
+        metadata["RAIHealthKitSampleUUID"] = sample.uuid.uuidString.lowercased()
+        return metadata.keys.sorted().compactMap { key in
+            guard let value = metadata[key], let serialized = serializeMetadata(value) else { return nil }
+            return "<MetadataEntry key=\"\(escape(key))\" value=\"\(escape(serialized))\"/>"
+        }.joined()
     }
 
     /// 一个 workout 的 route 产物：写进载荷的 GPX 条目，以及这一轮的**观测摘要**。
@@ -935,7 +1038,8 @@ nonisolated enum HealthKitExport {
     /// 反推等于把"轨迹有没有变"这条判据架在"文件还在不在"上，而文件的生命周期只到本次导出结束。
     struct RouteFetch {
         let entries: [(name: String, url: URL)]
-        let observation: RouteObservation
+        /// nil 是查询未能完成，不能记成零点数或稳定证据。
+        let observation: RouteObservation?
     }
 
     private static func routeEntries(
@@ -944,19 +1048,28 @@ nonisolated enum HealthKitExport {
         directory: URL,
         warnings: WarningBag
     ) async throws -> RouteFetch {
-        let routes: [HKWorkoutRoute] = try await optionalSamples(
-            type: HKSeriesType.workoutRoute(),
-            predicate: HKQuery.predicateForObjects(from: workout),
-            store: store,
-            warnings: warnings,
-            deniedMessage: "未授权读取路线"
-        )
+        let routes: [HKWorkoutRoute]
+        do {
+            routes = try await samples(
+                type: HKSeriesType.workoutRoute(),
+                predicate: HKQuery.predicateForObjects(from: workout),
+                store: store
+            )
+        } catch {
+            if isAuthorizationError(error) || isNoDataError(error) {
+                warnings.add("路线暂不可读取；已保留路线同步状态")
+                return RouteFetch(entries: [], observation: nil)
+            }
+            if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
+            throw error
+        }
         var entries: [(name: String, url: URL)] = []
         let routesDirectory = directory.appendingPathComponent("workout-routes", isDirectory: true)
         try FileManager.default.createDirectory(at: routesDirectory, withIntermediateDirectories: true)
         let workoutId = routeFileWorkoutId(workout)
         var digest = SHA256()
         var pointTotal = 0
+        var complete = true
         for route in routes {
             try Task.checkCancellation()
             let locations: [CLLocation]
@@ -965,11 +1078,14 @@ nonisolated enum HealthKitExport {
             } catch {
                 if isAuthorizationError(error) {
                     warnings.add("未授权读取路线")
+                    complete = false
                     continue
                 }
                 if isNoDataError(error) {
+                    complete = false
                     continue
                 }
+                if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
                 throw error
             }
             guard !locations.isEmpty else { continue }
@@ -984,7 +1100,9 @@ nonisolated enum HealthKitExport {
                 digest.update(data: Data(document.utf8))
             }
         }
-        // 没有任何条目 ⇒ 观测是"0 个点、没有摘要"。摘要用 `nil` 而不是空 SHA256 的十六进制：
+        // 部分段读取失败也不输出不完整路线，不以它覆盖已有 GPX 或积累稳定证据。
+        guard complete else { return RouteFetch(entries: [], observation: nil) }
+        // 查询成功且没有任何条目 ⇒ 观测是"0 个点、没有摘要"。摘要用 `nil` 而不是空 SHA256 的十六进制：
         // 后者是一个"看起来像内容摘要"的值，会让"没有轨迹"和"有一段空轨迹"变成两回事。
         let observation = RouteObservation(
             pointCount: entries.isEmpty ? 0 : pointTotal,

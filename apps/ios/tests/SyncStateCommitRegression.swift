@@ -223,6 +223,7 @@ struct SyncStateCommitRegression {
             store.loadState(scope: "s1")?.workoutAnchor == anchorB,
             "the anchor written moments earlier is rolled back with the failed delete"
         )
+        sqlite3_exec(control, "DROP TRIGGER fail_task_delete", nil, nil, nil)
         sqlite3_close(control)
 
         // ---- 4. `forgetState`：「重新导入全部」用它。删**整行**，这样"从未提交过"与
@@ -232,6 +233,44 @@ struct SyncStateCommitRegression {
         check(store.forgetState(scope: "s1"), "forgetState succeeds")
         check(store.loadState(scope: "s1") == nil, "forgetState removes the row, not just its values")
         check(store.load(scope: "s1") == Data([7]), "forgetState leaves the task row alone")
+
+        // Record cursors are business-delivery state, not best-effort route
+        // memory. They share the success transaction and survive manual rescan
+        // so old deletions can be drained before resetting an anchored query.
+        let cursorsA = Data("cursor-a".utf8)
+        let cursorsB = Data("cursor-b".utf8)
+        saveTask(30, scope: "records")
+        check(store.commitSuccess(scope: "records", anchor: anchorA, watermark: .keep, recordCursors: cursorsA),
+              "record and workout cursors commit together")
+        check(store.loadRecordCursors(scope: "records") == cursorsA, "record cursors read back exactly")
+        check(store.loadRecordCursors(scope: "other") == nil, "record cursors are scope isolated")
+        let reopened = SyncTaskStore(directory: root)
+        check(reopened.loadRecordCursors(scope: "records") == cursorsA, "record cursors survive reopening the journal")
+        check(!store.commitSuccess(scope: "records", anchor: anchorB, watermark: .keep, recordCursors: cursorsB),
+              "no task row means record cursors cannot advance either")
+        check(store.loadRecordCursors(scope: "records") == cursorsA, "failed success keeps old record cursors")
+        saveTask(31, scope: "records")
+        check(store.commitSuccess(scope: "records", anchor: nil, watermark: .keep),
+              "legacy pending tasks may commit without record cursors")
+        check(store.loadRecordCursors(scope: "records") == cursorsA, "legacy task does not erase v2 cursors")
+        check(store.forgetState(scope: "records"), "manual workout reset succeeds")
+        check(store.loadRecordCursors(scope: "records") == cursorsA, "manual rescan retains cursors to drain deletions")
+        var cursorControl: OpaquePointer?
+        precondition(sqlite3_open(path, &cursorControl) == SQLITE_OK)
+        defer { sqlite3_close(cursorControl) }
+        precondition(sqlite3_exec(cursorControl, """
+            CREATE TRIGGER fail_record_cursor BEFORE UPDATE ON sync_record_cursors
+            BEGIN SELECT RAISE(ABORT, 'cursor fixture'); END;
+            """, nil, nil, nil) == SQLITE_OK)
+        saveTask(32, scope: "records")
+        check(!store.commitSuccess(scope: "records", anchor: anchorB, watermark: .advance(late), recordCursors: cursorsB),
+              "record cursor failure rolls back the entire success transaction")
+        check(store.loadRecordCursors(scope: "records") == cursorsA, "failed cursor write keeps the old cursor")
+        check(store.loadState(scope: "records") == nil, "failed cursor write rolls back the workout watermark too")
+        check(store.load(scope: "records") == Data([32]), "failed cursor write preserves the pending batch")
+        sqlite3_exec(cursorControl, "DROP TRIGGER fail_record_cursor", nil, nil, nil)
+        check(store.commitSuccess(scope: "records", anchor: anchorB, watermark: .advance(late), recordCursors: cursorsB),
+              "the unchanged pending batch can retry its cursor commit")
 
         // 一个不可用的日志不得假装提交成功（`isAvailable == false` 时所有读写都是 no-op）。
         let broken = SyncTaskStore(directory: URL(fileURLWithPath: "/dev/null/not-a-directory"))

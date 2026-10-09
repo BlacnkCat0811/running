@@ -707,6 +707,16 @@ check(
     re.search(r"hasBackgroundUploadTask:\s*true", sync) is None,
     "HealthKitSync claims a system-owned upload while no background URLSession exists",
 )
+# 9i-bis. 🔴 软预算必须真的接在**后台轮询**上，而不是躺在测试里。
+#     失效方式是静默的：`shouldYield` 只被回归调用时测试全绿，而生产里没人遵守预算 ——
+#     报告 3.10 记的正是这一形态（"软预算被测试容易被误认为生产遵守预算"）。
+#     另一半（只接在轮询上、且只在后台生效）由回归在纯函数 `shouldYieldPolling` 上分开钉住：
+#     接到导出/上传会让 GB 级导出自断重来，漏掉 `isBackground` 会掐掉用户正看着的前台同步。
+check(
+    "BackgroundRunPolicy.shouldYieldPolling(" in sync,
+    "HealthKitSync.waitForJob does not consume the background soft budget — the policy is left "
+    "test-only, so production never yields inside the polling loop (audit 3.10)",
+)
 
 # 9j. 🔴 pbxproj 不许出现 `INFOPLIST_KEY_UIBackgroundModes` / `…BGTaskSchedulerPermittedIdentifiers`。
 #     为什么：那两个键必须写进 **源文件** `RAI/Info.plist`。写进 pbxproj 的 `INFOPLIST_KEY_*`
@@ -1510,6 +1520,64 @@ check(
     "whatever routeFiles held, i.e. either a stale value or a compile error",
 )
 
+# 14h-3. settled 是低频重新发现，不是永久终止；历史候选必须有界且能跨过不可读 UUID。
+check(
+    "(HKSeriesType.workoutRoute(), nil)" in sync,
+    "route-only arrivals never reach the existing observer/background-intent pipeline",
+)
+check(
+    "RouteSyncStateMachine.rediscoveryCandidates(" in health_export,
+    "the periodic policy has no exporter caller — routes outside the recent window stay lost",
+)
+check(
+    "rediscoveryIDs.contains(routeKey)" in route_loop,
+    "recent settled workouts bypass the rediscovery batch budget",
+)
+check(
+    route_loop.count("hasWorkoutChange: hasWorkoutChange") == 2,
+    "anchored workout changes must bypass throttling both when planning and recording the observation",
+)
+check(
+    "if let observation = fetch.observation" in route_loop,
+    "a failed/partial route query must not write an empty observation or stability evidence",
+)
+historical_fetch = tail_after(health_export, "private static func knownRunningWorkouts(", "knownRunningWorkouts(")
+historical_fetch = historical_fetch.split("\n    private static func ")[0]
+check(
+    "HKQuery.predicateForObjects(with: ids)" in historical_fetch
+    and "predicateForSamples" not in historical_fetch,
+    "historical rediscovery must fetch only planned workout UUIDs, not a date window or all history",
+)
+check(
+    "CREATE TABLE IF NOT EXISTS sync_route_discovery" in store_src
+    and "func loadRouteDiscoveryCursor(" in store_src,
+    "the bounded queue has no persisted scope-local cursor; unreadable early UUIDs could starve later ones",
+)
+check(
+    "loadRouteDiscoveryCursor(scope: activeScope)" in sync
+    and "routeDiscoveryCursor: routeDiscoveryCursor" in sync,
+    "the exporter never receives the persisted traversal position",
+)
+check(
+    sync.count("routeDiscoveryCursor: exported.routeDiscoveryCursor") == 2,
+    "both normal-import and unchanged success must advance the rediscovery queue",
+)
+check(
+    "pendingRouteDiscoveryCursor: exported.routeDiscoveryCursor" in sync
+    and sync.count("routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor") == 4,
+    "interrupted uploads must persist the traversal position and advance it in every resumed-success branch",
+)
+check(
+    "discoveryCursor: routeDiscoveryCursor" in commit_body,
+    "the cursor is not flushed with route observations after successful delivery",
+)
+ordered(
+    upsert_body,
+    "loadRouteDiscoveryCursor(scope: scope) == discoveryCursor",
+    '"COMMIT"',
+    "the traversal cursor is committed without an in-transaction read-back assertion",
+)
+
 # 省略 GPX 的**安全性前提**：manifest 必须声明 healthkit scope。
 check(
     '"sourceScope": "healthkit"' in health_export,
@@ -1618,7 +1686,9 @@ check("PRIMARY KEY (scope, workout_uuid)" in store_src,
       "route memory must be keyed by both scope and workout UUID")
 check("PRAGMA user_version = 2" in store_src and "ALTER TABLE sync_route_state RENAME" in store_src,
       "installed route schemas need an explicit versioned migration")
-check("taskStore.upsertRouteStates(Array(routeStates.values), scope: activeScope)" in commit_body,
+check(re.search(
+          r"taskStore\.upsertRouteStates\(\s*Array\(routeStates\.values\),\s*scope: activeScope,"
+          r"\s*discoveryCursor: routeDiscoveryCursor\s*\)", commit_body) is not None,
       "route observations must be saved under the active authoritative scope")
 
 # --- 15b. 冷启动恢复的第二轮（2026-09-24）：调度与回执一律走"按目标读到的快照" ----------
@@ -1693,7 +1763,57 @@ for script in sorted(TESTS.glob("*.sh")):
 # 2026-09-24 再补（冷启动恢复第二轮：按目标读取的待办快照）：+28 条（§10g-bis/ter/quater
 # 的 6 条、§15b-1..5 的 8 条，以及 §15b-5 的编译单元配对循环按脚本数展开的 14 条）。
 # ⚠️ 本次实测打印 **251** 条 ⇒ 按"打印总数 − 1"把地板收到 **250**（零容忍）。
-MIN_CHECKS = 250
+
+# --- 15c. 投递的「记」与「跑」必须分开：单飞与节流只限制执行 -------------------------
+# 这一节的失效方式全是**静默**的：投递被丢掉时没有任何报错，只是某一天起"自动同步再也不
+# 推进" —— 直到下一次投递、用户手动点同步，或者打开 App。
+#
+# 15c-1. 🔴 意图必须在**派发之前**记下，而不是只在某个分支里记。
+#        旧形态是"`.ignore` 直接 `break`"：投递既没有代次（`shouldAcknowledgeIntent` 保护的是
+#        **已经记下来**的那一代），也不会驱动任何后续轮次，于是旧批次收工清空之后，后台按快照
+#        判定"无待办"。判据的载体是 `Decision.recordsTheDelivery` —— 它是"要不要记"的唯一答案，
+#        而 `decide` 的返回值只回答"现在跑不跑"（两件事的配对由 `BackgroundSyncPolicyRegression`
+#        的 `unboundDeliveriesAreIgnored` 逐格钉住）。
+entry_body = tail_after(
+    app_delegate, "static func registerSyncEntryPoints(", "registerSyncEntryPoints"
+).split("\n    /// ")[0]
+entry_clean = without_comment_lines(entry_body)
+ordered(
+    entry_clean,
+    "if decision.recordsTheDelivery {",
+    "switch decision {",
+    "registerSyncEntryPoints must record the delivery before dispatching on the decision — recording "
+    "only inside a branch (or not at all) is exactly how a real change gets dropped",
+)
+check(
+    "case .deferToBackgroundLater:" in entry_clean
+    and "submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)" in entry_clean,
+    "the 'remember this delivery, but do not run now' disposition is not wired: a delivery that "
+    "arrived during a running sync or inside the throttle window would be remembered with nothing "
+    "scheduled to ever run it",
+)
+# 15c-2. 🔴 一轮收工后必须把"这一轮没覆盖到的那一代"接过去。判据住在 `SyncFollowUp.handoff`
+#        （纯函数、有执行者），这里只钉"它被生产接线用了"：留在纯函数里没人调就是孤儿门禁。
+check(
+    "SyncFollowUp.handoff(" in app_delegate,
+    "the uncovered-generation handoff is not wired to production — the judgement has no consumer",
+)
+ordered(
+    entry_clean,
+    "await healthSync.syncIfNeeded(",
+    "await handOffUncoveredGenerations(healthSync: healthSync, session: session)",
+    "registerSyncEntryPoints must hand off the generations a foreground round did not cover — "
+    "without it the notification stays on disk until the next background entry",
+)
+# 2026-10-09 再补（投递的「记」与「跑」必须分开 ⇒ P1 可达性缺陷）：+4 条（§15c 的 4 条）。
+# 2026-10-09 二次修正（未提交改动审查 🟡2）：同一批改动的最终态实测打印 **269** 条，而地板
+#   还停在 255 ⇒ 差 14，违反本文件自己写的"零容忍"，那 13 条新增结构判据（§14h-3：rediscovery
+#   队列 / `sync_route_discovery` / `knownRunningWorkouts` 定点取 / `routeDiscoveryCursor` 续传）
+#   可以被静默吃掉。按"打印总数 − 1"重设为 **268**。
+#   判据：删掉 §14h-3 里任意一条 `check(...)` 必须变红。
+# ⚠️ 教训：地板必须在**本文件最后一次改动之后**现跑现设 —— 沿用改动中途测到的数就会差（本次差 14）。
+# 注：上面那行"实测 251 / 地板 250"是 2026-09-24 的**时点快照**，不要当当前值。
+MIN_CHECKS = 268
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "

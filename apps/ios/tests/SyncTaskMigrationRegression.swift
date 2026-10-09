@@ -73,6 +73,8 @@ struct SyncTaskMigrationRegression {
         try require(task.jobId == "job-1", "jobId was lost")
         try require(task.workoutCount == 12, "workoutCount was lost")
         try require(task.pendingAnchor == Data("hello".utf8), "pendingAnchor was lost")
+        try require(task.pendingRecordCursors == nil, "old pending batches must not manufacture record cursors")
+        try require(task.pendingRouteDiscoveryCursor == nil, "old pending batches must not manufacture a route traversal cursor")
         try require(
             task.exportEnd == Date(timeIntervalSinceReferenceDate: 789_000_000),
             "exportEnd did not decode as a reference-date Double"
@@ -155,6 +157,8 @@ struct SyncTaskMigrationRegression {
             jobId: nil,
             payloadHash: String(repeating: "a", count: 64),
             pendingAnchor: Data([0x01, 0x02]),
+            pendingRecordCursors: Data("record-cursors-v2".utf8),
+            pendingRouteDiscoveryCursor: "history-019",
             exportEnd: Date(timeIntervalSinceReferenceDate: 100),
             workoutCount: 7,
             uploadTaskId: 42,
@@ -176,6 +180,17 @@ struct SyncTaskMigrationRegression {
             throw MigrationRegressionFailure("a P1 payload did not round-trip: \(error)")
         }
         try require(restored.schemaVersion == SyncTaskState.currentSchemaVersion, "schemaVersion was lost")
+        try require(restored.pendingRecordCursors == original.pendingRecordCursors, "pending record cursors were lost")
+        try require(restored.pendingRouteDiscoveryCursor == original.pendingRouteDiscoveryCursor,
+                    "a resumed upload must retain its pending route traversal cursor")
+        var previousVersion = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        previousVersion.removeValue(forKey: "pendingRouteDiscoveryCursor")
+        let previousTask = try JSONDecoder().decode(
+            SyncTaskState.self, from: JSONSerialization.data(withJSONObject: previousVersion)
+        )
+        try require(previousTask.pendingRouteDiscoveryCursor == nil
+                    && previousTask.pendingRecordCursors == original.pendingRecordCursors,
+                    "a pre-rediscovery v2 task still resumes without inventing a traversal position")
         try require(restored.uploadTaskId == 42, "uploadTaskId was lost")
         try require(restored.uploadState == .inFlight, "uploadState was lost")
         try require(restored.multipartFileName == "upload-aaa.multipart", "multipartFileName was lost")

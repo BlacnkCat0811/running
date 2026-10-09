@@ -12,17 +12,15 @@ nonisolated enum RouteSyncStatus: String, Codable, Sendable, CaseIterable {
     case active
     /// 中频冷却：已证实稳定、且已跨过 24 小时。每 12 小时最多查一次。
     case cooling
-    /// 永久休眠：已跨过 3 天且冷却期验证稳定。**不再查询**，只有人工重扫能唤醒。
+    /// 低频休眠：已跨过 3 天且冷却期验证稳定。空路线每日、已有路线每周分批复查。
     case settled
 }
 
 /// 一条 Workout 的 Route 伴生状态。
 ///
-/// 🔴 为什么是"Workout 的伴生状态"而不是独立实体：Apple HealthKit **没有** route anchor 这种东西。
-/// `HKAnchoredObjectQuery` 只作用于 sample 类型，而 `HKWorkoutRoute` 是**附着在 `HKWorkout` 上的
-/// 衍生资源**（要先用 `HKQuery.predicateForObjects(from: workout)` 找到它，再用
-/// `HKWorkoutRouteQuery` 逐点取回）。把 route 当成独立 anchor 去伪造一个，等于凭空发明 API；
-/// 因此每个同步 scope 内以 workout UUID 标识状态；持久化复合主键为 (scope, workout_uuid)。
+/// 路线点的读取仍依赖所属 workout：先用 `HKQuery.predicateForObjects(from: workout)`
+/// 找到 route sample，再用 `HKWorkoutRouteQuery` 逐点取回。sample 的变化通知不等于路线
+/// 内容已完整可读，因此降频记忆以 workout UUID 标识，复合主键为 (scope, workout_uuid)。
 nonisolated struct RouteSyncRecord: Equatable, Sendable {
     /// 小写化的 `HKWorkout.uuid.uuidString`。
     ///

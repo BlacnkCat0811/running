@@ -33,10 +33,24 @@ nonisolated enum SyncDeliveryPolicy {
     enum Decision: Equatable {
         /// App 在前台：直接同步，不需要任何后台机制。
         case syncNow
-        /// 记下"有新数据待同步"并请求一次后台执行。
+        /// 记下"有新数据待同步"，并**立刻**请求一次后台执行。
         case deferToBackground
-        /// 这次唤醒不值得做事（未绑定 / 已有同步在跑 / 刚同步过且没有在途批次）。
+        /// 记下"有新数据待同步"，但**这一轮不跑**：已有同步在跑（单飞闸门被占），或还在
+        /// 后台节流窗口内。区别只在"下一次执行排到什么时候"（`BackgroundRunPolicy.resubmitDelay`），
+        /// 不在"这条变化记不记"。
+        case deferToBackgroundLater
+        /// 这次唤醒**没有目标**（未绑定服务端）：既没有东西可跑，也没有目标能消费一条意图。
         case ignore
+
+        /// 这次唤醒里有没有一件"必须先被记下来"的事。
+        ///
+        /// 🔴 **只有未绑定是"不必记"的。** 单飞与节流限制的是"这一轮要不要现在跑"，不是
+        /// "这条变化要不要留下"。把两者混成一个 `ignore`（旧版就是直接 `break`）的后果是：
+        /// 这条通知既没有代次、也不会驱动任何后续轮次 —— 旧批次收工清空之后，后台按快照判
+        /// "无待办"，自动同步停在原地，直到下一次投递、打开 App 或用户手动点同步。
+        /// 代次确认（`shouldAcknowledgeIntent`）保护的是**已经记下来**的那一代，保护不了
+        /// 被直接丢掉的那一代。
+        var recordsTheDelivery: Bool { self != .ignore }
     }
 
     /// 后台投递唤醒之间的最小间隔。**与前台 `HealthKitSync.autoSyncInterval` 同一个值**。
@@ -49,16 +63,22 @@ nonisolated enum SyncDeliveryPolicy {
     /// 这次投递唤醒的处置。
     ///
     /// 判据顺序（越靠前越先过滤）：
-    ///   1. 未绑定服务端、或已有同步在跑 ⇒ `.ignore`。第二条同时是 `RaiBackgroundSync` 的
-    ///      单飞要求：`HealthSyncTaskOwner` 以 `task == nil` 单飞，重复进入会被静默拒绝，
-    ///      而**静默拒绝**在 BGTask 侧会被记成"跑过了"（见 `BackgroundRunPolicy` 的说明）。
-    ///   2. 前台 ⇒ `.syncNow`。前台不加节流：用户正看着界面，节流的代价是他点了同步却没反应。
-    ///   3. 🔴 **有在途批次 ⇒ 立刻 `.deferToBackground`，不看节流。**
+    ///   1. 未绑定服务端 ⇒ `.ignore`。**这是唯一不记意图的分支**：没有目标，意图也没有
+    ///      任何东西能消费它。
+    ///   2. 🔴 **已有同步在跑 ⇒ `.deferToBackgroundLater`，不是 `.ignore`。**
+    ///      `HealthSyncTaskOwner` 以 `task == nil` 单飞，重复进入会被静默拒绝，所以这一轮
+    ///      确实不该跑。但正在跑的那一轮的**导出起点早于这条通知**，它的字节覆盖不到这次
+    ///      变化 —— 直接丢掉等于把这条通知从盘上抹掉，于是它既没有代次、也不会驱动任何
+    ///      后续轮次，旧批次收工清空之后后台判定"无待办"，自动同步停在原地。
+    ///   3. 前台 ⇒ `.syncNow`。前台不加节流：用户正看着界面，节流的代价是他点了同步却没反应。
+    ///   4. 🔴 **有在途批次 ⇒ 立刻 `.deferToBackground`，不看节流。**
     ///      这条是本节最容易写错的地方。节流回答的是"要不要**再拉一次新数据**"，
     ///      而盘上卡着一批未走完的字节时，问题已经不是"要不要刷新"而是"这批怎么收尾"。
     ///      把节流放在它前面，后果是切后台那一刻刚被中断的批次，要等满 15 分钟才有人管。
-    ///   4. 刚同步过 ⇒ `.ignore`。
-    ///   5. 其余 ⇒ `.deferToBackground`。
+    ///   5. 刚同步过 ⇒ `.deferToBackgroundLater`。注意这里**也不是** `.ignore`：节流能决定的
+    ///      只是"现在不跑"，而"这一轮覆盖不到的那一代"必须留到下一次执行（`resubmitDelay`
+    ///      之后由后台接手）。
+    ///   6. 其余 ⇒ `.deferToBackground`。
     static func decide(
         isForeground: Bool,
         isBound: Bool,
@@ -67,11 +87,52 @@ nonisolated enum SyncDeliveryPolicy {
         lastSyncAt: Date?,
         now: Date
     ) -> Decision {
-        guard isBound, !isSyncRunning else { return .ignore }
+        guard isBound else { return .ignore }
+        guard !isSyncRunning else { return .deferToBackgroundLater }
         if isForeground { return .syncNow }
         if hasPendingTask { return .deferToBackground }
-        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .ignore }
+        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .deferToBackgroundLater }
         return .deferToBackground
+    }
+}
+
+/// 一轮同步收工之后，"**这一轮没有覆盖到的那一代**"该由谁接手。
+///
+/// 为什么单独立一条判据：代次确认（`shouldAcknowledgeIntent`）只负责**留下**导出起点之后
+/// 到达的通知（代次比对决定它不会被本轮吞掉），而"留下来"与"有人来接"是两件事。少了接手的
+/// 这一方，那条通知会一直躺在盘上，直到下一次切后台或下一次投递 —— 表现就是报告里那句
+/// "自动同步停在原地，直到再次通知、打开 App 或手动同步"。
+///
+/// 判据只在两个维度上取值：
+///   - **有没有未覆盖的代次**：没有就什么都不做（这是前台自旋唯一的入口）；
+///   - **在不在前台、还有没有补跑额度**：前台优先当场补跑（用户正看着界面，把新数据拖到
+///     下一次切后台等于让他盯着旧数字），其余交给后台执行。
+nonisolated enum SyncFollowUp {
+    /// 一轮收工后最多在**前台**再补跑几轮。
+    ///
+    /// 🔴 **必须有上限。** HealthKit 在一次大批导入期间会连发投递，每一轮导出都可能被新的
+    /// 投递甩在后面；没有上限的话"补跑"会退化成前台自旋 —— 而每一次自旋都是一轮 GB 级导出。
+    /// 超出额度的那一代交给后台的 `BackgroundRunPolicy.resubmitDelay` 兜着（关掉 App 之后照跑）。
+    static let maxForegroundRounds = 1
+
+    enum Handoff: Equatable {
+        /// 这一轮已经把盘上的代次都覆盖了 ⇒ 什么都不做。
+        case nothing
+        /// 前台且还有额度 ⇒ 立刻再跑一轮。
+        case runAgain
+        /// 交给后台执行（不在前台，或前台额度已用完）。
+        case scheduleBackground
+    }
+
+    /// - Parameter foregroundRoundsLeft: 本轮还剩几轮前台补跑额度（从 `maxForegroundRounds` 起算）。
+    static func handoff(
+        hasUncoveredGeneration: Bool,
+        isForeground: Bool,
+        foregroundRoundsLeft: Int
+    ) -> Handoff {
+        guard hasUncoveredGeneration else { return .nothing }
+        if isForeground, foregroundRoundsLeft > 0 { return .runAgain }
+        return .scheduleBackground
     }
 }
 
@@ -151,6 +212,25 @@ nonisolated enum BackgroundRunPolicy {
         reserve: TimeInterval = reserveForPersistence
     ) -> Bool {
         now.timeIntervalSince(startedAt) >= budget - reserve
+    }
+
+    /// 后台**轮询**该不该把这一轮让出去 —— 软预算的真正接入点。
+    ///
+    /// 为什么单独一条、而不是到处直接判 `shouldYield`：软预算**能不能**生效，取决于当前
+    /// 处在流程的哪一段。轮询是"等服务端算"，放弃是**零代价**的（`jobId` 已落盘，下一次
+    /// 唤醒走 `.resumeJob` 从同一处续接）；而导出与上传被中断要从头再来（GB 级 HealthKit
+    /// 导出是整个流程里最贵的一步）。所以软预算只接在轮询上，不接在导出/上传上 ——
+    /// 在那里"主动收手"不是保守，是自伤。
+    ///
+    /// 为什么还要 `isBackground`：前台没有系统额度限制，`softBudget` 只是"我方"给后台拍的
+    /// 一个上限。拿它在**前台**掐掉用户正看着的那一次同步，就是把参数当成了策略。
+    static func shouldYieldPolling(
+        isBackground: Bool,
+        backgroundStartedAt: Date?,
+        now: Date
+    ) -> Bool {
+        guard isBackground, let backgroundStartedAt else { return false }
+        return shouldYield(startedAt: backgroundStartedAt, now: now)
     }
 
     /// 这一轮该向系统报"成功"还是"失败"。

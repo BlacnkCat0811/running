@@ -71,6 +71,10 @@ final class SyncTaskStore {
                 export_end REAL,
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sync_record_cursors (
+                scope TEXT PRIMARY KEY,
+                payload BLOB NOT NULL
+            );
             """
         let execResult = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
@@ -189,6 +193,10 @@ final class SyncTaskStore {
             );
             CREATE INDEX IF NOT EXISTS idx_route_status_cooling
                 ON sync_route_state(scope, route_status, last_checked_at);
+            CREATE TABLE IF NOT EXISTS sync_route_discovery (
+                scope TEXT PRIMARY KEY NOT NULL,
+                last_workout_uuid TEXT NOT NULL
+            );
             """, database: database)
     }
 
@@ -368,7 +376,7 @@ final class SyncTaskStore {
     ///
     /// - Parameter anchor: `nil` 表示**保留**已提交的 anchor（不是"写成空"）。
     @discardableResult
-    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate) -> Bool {
+    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil) -> Bool {
         guard isAvailable, let database else { fail("commit"); return false }
         lastError = nil
         // 🔴 写入前先把时间点吸附到 REAL 列能逐位往返的那一个值上（`Date.canonicalForREAL`）。
@@ -397,6 +405,13 @@ final class SyncTaskStore {
             lastError = "同步水位写入后无法读回一致的值，本次提交已回滚。"
             return false
         }
+        if let recordCursors {
+            guard writeRecordCursors(recordCursors, scope: scope),
+                  loadRecordCursors(scope: scope) == recordCursors else {
+                lastError = "健康记录游标写入后无法读回一致的值，本次提交已回滚。"
+                return false
+            }
+        }
         guard let statement = prepare("DELETE FROM sync_tasks WHERE scope = ?") else { return false }
         bind(scope, to: statement, at: 1)
         let step = sqlite3_step(statement)
@@ -412,6 +427,36 @@ final class SyncTaskStore {
             fail("commit"); return false
         }
         committed = true
+        return true
+    }
+
+    func loadRecordCursors(scope: String) -> Data? {
+        guard let statement = prepare("SELECT payload FROM sync_record_cursors WHERE scope = ?") else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { fail("record cursor read"); return nil }
+        let count = Int(sqlite3_column_bytes(statement, 0))
+        guard count > 0, let pointer = sqlite3_column_blob(statement, 0) else {
+            fail("record cursor payload"); return nil
+        }
+        return Data(bytes: pointer, count: count)
+    }
+
+    private func writeRecordCursors(_ data: Data, scope: String) -> Bool {
+        guard !data.isEmpty, data.count <= Int(Int32.max), let database,
+              let statement = prepare("""
+                INSERT INTO sync_record_cursors(scope, payload) VALUES (?, ?)
+                ON CONFLICT(scope) DO UPDATE SET payload = excluded.payload
+                """) else { fail("record cursor prepare"); return false }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        let bound = data.withUnsafeBytes {
+            sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), SQLiteSupport.transient)
+        }
+        guard bound == SQLITE_OK, sqlite3_step(statement) == SQLITE_DONE,
+              sqlite3_changes(database) == 1 else { fail("record cursor write"); return false }
         return true
     }
 
@@ -543,6 +588,22 @@ final class SyncTaskStore {
     /// 是个位数，一个块就装完。
     private static let routeStateChunkSize = 400
 
+    /// 有界历史候选队列的位置。与观测状态分开：不可读的 workout 也要跨过，
+    /// 但绝不能为它伪造 lastCheckedAt 或稳定证据。
+    func loadRouteDiscoveryCursor(scope: String) -> String? {
+        guard isAvailable,
+              let statement = prepare("SELECT last_workout_uuid FROM sync_route_discovery WHERE scope = ?")
+        else { return nil }
+        defer { sqlite3_finalize(statement) }
+        guard SQLiteSupport.bind(scope, to: statement, at: 1) else {
+            fail("route discovery cursor bind"); return nil
+        }
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { fail("read route discovery cursor"); return nil }
+        return columnText(statement, 0)
+    }
+
     /// 读伴生状态。
     ///
     /// - Parameter uuids: 传 `nil` 读**全部**。管线走这条路：导出跑在脱离主线程的上下文里
@@ -630,9 +691,11 @@ final class SyncTaskStore {
     /// 三条护栏与 `commitSuccess` 同源（ADR-004 决策一）：单事务、**提交前**回读断言、
     /// `changes()` 逐行校验。
     @discardableResult
-    func upsertRouteStates(_ specified: [RouteSyncRecord], scope: String) -> Bool {
+    func upsertRouteStates(
+        _ specified: [RouteSyncRecord], scope: String, discoveryCursor: String? = nil
+    ) -> Bool {
         guard isAvailable, let database else { fail("route state upsert"); return false }
-        guard !specified.isEmpty else { return true }
+        guard !specified.isEmpty || discoveryCursor != nil else { return true }
         lastError = nil
         // 🔴 与 `commitSuccess` 同源的一步：两个时间列都是 REAL，而 `Date` ↔
         //    `timeIntervalSince1970` 的往返**不是双射**（实测约一半有损，见
@@ -740,6 +803,20 @@ final class SyncTaskStore {
                 lastError = "路线同步状态写入后无法读回一致的值，本次提交已回滚。"
                 SQLiteSupport.report("route state read-back mismatch", database: database)
                 return false
+            }
+        }
+        if let discoveryCursor {
+            guard let cursorStatement = prepare("""
+                INSERT INTO sync_route_discovery(scope, last_workout_uuid) VALUES (?, ?)
+                ON CONFLICT(scope) DO UPDATE SET last_workout_uuid = excluded.last_workout_uuid
+                """) else { return false }
+            defer { sqlite3_finalize(cursorStatement) }
+            guard SQLiteSupport.bind(scope, to: cursorStatement, at: 1),
+                  SQLiteSupport.bind(discoveryCursor, to: cursorStatement, at: 2),
+                  sqlite3_step(cursorStatement) == SQLITE_DONE,
+                  sqlite3_changes(database) == 1,
+                  loadRouteDiscoveryCursor(scope: scope) == discoveryCursor else {
+                fail("route discovery cursor upsert"); return false
             }
         }
         guard SQLiteSupport.execute("COMMIT", database: database) else {

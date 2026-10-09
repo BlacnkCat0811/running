@@ -1,11 +1,11 @@
 import Foundation
 
-/// `SyncDeliveryPolicy` / `BackgroundRunPolicy` 的回归。
+/// `SyncDeliveryPolicy` / `BackgroundRunPolicy` / `SyncFollowUp` 的回归。
 ///
 /// 钉的是那些**改错了照样编译通过、肉眼也看不出来**的判据：
 ///
-///   1. 未绑定 / 已有同步在跑 ⇒ 这次唤醒一律 `.ignore`（后者是单飞要求，静默拒绝在 BGTask
-///      侧会被记成"跑过了"）；
+///   1. 未绑定服务端 ⇒ 这次唤醒一律 `.ignore`。这是**唯一**不记意图的分支：没有目标，
+///      意图也没有任何东西能消费它；
 ///   2. 前台不加节流；
 ///   3. 🔴 **有在途批次 ⇒ 立刻放行，不看节流** —— 节流回答的是"要不要再拉一次新数据"，
 ///      而盘上卡着一批未走完的字节时问题不是刷新而是收尾；
@@ -22,7 +22,20 @@ import Foundation
 ///      也不是"上一次同步写下的展示标志"（后者属于别的目标）；
 ///  11. 请求是一次性的 ⇒ `shouldResubmit` 必须自己把没做完的活儿再排一次（快照说"不知道"时也算）；
 ///  12. 🔴 系统重挂起来的传输**只在本进程正在等它时**才留（判据不是"它属于哪一批"——
-///      上一个进程那次上传的结局拿不回来，留着一个仍在跑的上传只是多一倍重复流量）。
+///      上一个进程那次上传的结局拿不回来，留着一个仍在跑的上传只是多一倍重复流量）；
+///  13. 🔴 **已有同步在跑 ⇒ `.deferToBackgroundLater`，不是 `.ignore`**。正在跑的那一轮的
+///      导出起点早于这条通知，它的字节覆盖不到这次变化 —— 丢掉它，那条通知就既没有代次、
+///      也不会驱动任何后续轮次，旧批次收工清空之后自动同步停在原地（P1 可达性缺陷）；
+///  14. 🔴 **节流窗口内的投递同样只限制"现在跑"，不限制"记住"**（同上）。单飞与节流回答的
+///      都是"这一轮要不要现在跑"，而"要不要留下这条变化"的答案只有未绑定才是"不留"；
+///  15. 🔴 **一轮收工后，"没被覆盖到的那一代"必须有人接手**（`SyncFollowUp`），且**前台补跑
+///      有硬上限**（`maxForegroundRounds`）—— HealthKit 大批导入期间会连发投递，没有上限的
+///      "补跑"就是前台自旋，每次自旋都是一轮 GB 级导出；
+///  16. `PendingWork.hasUncoveredGeneration`（通知 + 恢复请求）与 `needsAnotherRound`
+///      （再加上"盘上卡着一批"）是两件事：混用会让一次网络失败之后，前台立刻重放同一个失败请求；
+///  17. 🔴 **软预算只接在后台轮询上，且只在后台生效**（`shouldYieldPolling`）。接错位置的两个
+///      方向都是自伤：接到导出/上传上会让一次没跑完的 GB 级导出自断重来（永远做不完），
+///      漏掉 `isBackground` 会掐掉用户正看着的那次前台同步。
 ///
 /// 之所以要有这个可执行文件：`HealthKitSync.swift` 与 `RAIApp.swift`/`AppDelegate.swift`
 /// 都不被任何回归脚本编译（前者只被 `typecheck-ios.sh` 类型检查，后两个连同被
@@ -51,7 +64,9 @@ struct BackgroundSyncPolicyRegression {
     }
 
     static func main() throws {
-        try deliveryIsIgnoredWhenUnboundOrAlreadyRunning()
+        try unboundDeliveriesAreIgnored()
+        try aDeliveryDuringARunningSyncIsNeverDropped()
+        try aThrottledDeliveryIsStillRemembered()
         try foregroundDeliveryIsNeverThrottled()
         try pendingTaskBypassesThrottle()
         try freshDeliveryIsThrottled()
@@ -66,26 +81,26 @@ struct BackgroundSyncPolicyRegression {
         try aTaskRowNeverStartsAFreshExport()
         try noTaskFollowsTheRecordedIntent()
         try budgetReservesTimeForPersistence()
+        try softBudgetOnlyYieldsBackgroundPolling()
         try successIsReportedFromTheRemainingWork()
         try unfinishedWorkResubmitsItself()
+        try uncoveredGenerationsAreHandedOff()
         try identifiersAreStableAndDistinct()
         try systemReloadedUploadsAreOnlyKeptWhenTracked()
         print("Background sync policy regression tests passed")
     }
 
-    /// 契约 1：未绑定服务端时任何唤醒都不做事；已有同步在跑时同理。
+    /// 🔴 契约 13/16：**未绑定服务端是唯一"不记意图"的分支**，且这时无论单飞闸门什么状态
+    /// 都只有 `.ignore` 一种处置（没有目标 ⇒ 意图没有东西能消费，跑也没有目标可跑）。
     ///
-    /// 后半条不是省事：`HealthSyncTaskOwner` 以 `task == nil` 单飞，第二次进入被**静默拒绝**，
-    /// 而 BGTask 那侧只看到"handler 返回了"，会把它记成"跑过了"。
-    private static func deliveryIsIgnoredWhenUnboundOrAlreadyRunning() throws {
-        // 写死四行期望值，**不写 `(isBound && !isRunning) ? … : …`** ——
-        // 那是把实现重抄一遍：两边出自同一个想象，改坏了照样一起错。
-        // 判据以表格形式写出来的唯一价值就是它能与实现**不一致**。
+    /// 判据以表格形式写出来（而不是拿实现推一遍），唯一的价值就是它能与实现**不一致**。
+    private static func unboundDeliveriesAreIgnored() throws {
+        // `recordsTheDelivery` 与 `decide` 是两处判断，配对关系必须逐格钉住：
+        // 判据错位的两个方向都是静默的 —— 少记一次（丢一条变化）或多记一次
+        // （往一个不存在的目标上写意图，而它永远不会被任何一轮消费）。
         let cases: [(bound: Bool, running: Bool, expected: SyncDeliveryPolicy.Decision)] = [
             (false, false, .ignore),
-            (false, true, .ignore),
-            (true, false, .deferToBackground),
-            (true, true, .ignore)
+            (false, true, .ignore)
         ]
         for row in cases {
             let decision = SyncDeliveryPolicy.decide(
@@ -100,15 +115,71 @@ struct BackgroundSyncPolicyRegression {
                 decision == row.expected,
                 "unbound=\(row.bound) running=\(row.running) decided \(decision) instead of \(row.expected)"
             )
+            try require(
+                !decision.recordsTheDelivery,
+                "a delivery for a target that does not exist was recorded as a pending intent"
+            )
         }
-        // 前台也一样：在跑就不许再进。
+        // 反过来逐格钉住三种**已绑定**的处置都必须被记下来（未绑定那两格上面已经钉过）。
+        for decision in [
+            SyncDeliveryPolicy.Decision.syncNow,
+            .deferToBackground,
+            .deferToBackgroundLater
+        ] {
+            try require(
+                decision.recordsTheDelivery,
+                "\(decision) would drop a delivery for a target that is bound"
+            )
+        }
+    }
+
+    /// 🔴 契约 13：**已有同步在跑 ⇒ 记下意图、延后排一轮，绝不 `.ignore`。**
+    ///
+    /// 这条钉的是一次真实的可达性缺陷（报告 P1）：正在跑的那一轮的**导出起点早于这条通知**，
+    /// 它的字节覆盖不到这次变化；而 `.ignore` 既不写代次、也不会驱动任何后续轮次 ⇒ 旧批次
+    /// 收工清空之后，后台按快照判定"无待办"，自动同步停在原地，直到下一次投递、打开 App 或
+    /// 用户手动点同步。前半条（不重复进入）仍然是单飞要求，不能因为"要记住"而放开。
+    private static func aDeliveryDuringARunningSyncIsNeverDropped() throws {
+        // 前台与后台各一格：单飞闸门与"在不在前台"是两件事，处置都必须落在同一格上。
+        for isForeground in [true, false] {
+            try require(
+                SyncDeliveryPolicy.decide(
+                    isForeground: isForeground, isBound: true, isSyncRunning: true,
+                    hasPendingTask: false, lastSyncAt: nil, now: now
+                ) == .deferToBackgroundLater,
+                "a delivery that arrived while a sync was running was ignored"
+            )
+        }
+        // 节流窗口内 + 正在跑：两个成因不冲突，也只许落在同一格上。
         try require(
             SyncDeliveryPolicy.decide(
-                isForeground: true, isBound: true, isSyncRunning: true,
-                hasPendingTask: true, lastSyncAt: nil, now: now
-            ) == .ignore,
-            "a foreground delivery re-entered an already-running sync"
+                isForeground: false, isBound: true, isSyncRunning: true,
+                hasPendingTask: false, lastSyncAt: now, now: now
+            ) == .deferToBackgroundLater,
+            "the single-flight gate and the throttle disagreed on what to do with a delivery"
         )
+    }
+
+    /// 🔴 契约 14：**节流窗口内的投递只限制"现在不跑"，不限制"记住"。**
+    ///
+    /// 放在 `foregroundDeliveryIsNeverThrottled` **之前**是有意的：两者都踩到实现里的同一行
+    /// （节流判断），先跑的那一条才是"被改坏的那条判据"的指认者。前台那一格不该替这里背锅 ——
+    /// 前台本来就跑，与"后台节流窗口内要不要记"是两件不同的事。
+    private static func aThrottledDeliveryIsStillRemembered() throws {
+        for elapsed in [1.0, SyncDeliveryPolicy.throttle - 1] {
+            let decision = SyncDeliveryPolicy.decide(
+                isForeground: false, isBound: true, isSyncRunning: false,
+                hasPendingTask: false, lastSyncAt: now.addingTimeInterval(-elapsed), now: now
+            )
+            try require(
+                decision == .deferToBackgroundLater,
+                "a delivery inside the throttle window was dropped instead of being remembered"
+            )
+            try require(
+                decision.recordsTheDelivery,
+                "a delivery inside the throttle window would not be recorded"
+            )
+        }
     }
 
     /// 契约 2：前台不加节流。用户正看着界面，节流的代价是他点了同步却没反应。
@@ -137,23 +208,26 @@ struct BackgroundSyncPolicyRegression {
             ) == .deferToBackground,
             "an in-flight batch was held back by the fresh-delivery throttle"
         )
-        // 对照：同一时刻、没有在途批次时，节流**必须**生效 —— 否则上一条可能是靠"节流根本没实现"通过的。
+        // 对照：同一时刻、没有在途批次时，节流**必须**生效 —— 否则上一条可能是靠"节流根本没实现"
+        // 通过的。这里"生效"的准确含义是"不立刻跑"，而**不是**"丢掉"：节流管不到记忆，
+        // 所以期望值是 `deferToBackgroundLater` 而不是 `ignore`（契约 14）。
         try require(
             SyncDeliveryPolicy.decide(
                 isForeground: false, isBound: true, isSyncRunning: false,
                 hasPendingTask: false, lastSyncAt: justSynced, now: now
-            ) == .ignore,
-            "the throttle did not fire for a fresh delivery right after a successful sync"
+            ) == .deferToBackgroundLater,
+            "the throttle no longer holds back a fresh delivery after a successful sync"
         )
     }
 
-    /// 契约 4：节流窗口内不再投递，窗口外恢复。边界取 `throttle` 本身（含等号）。
+    /// 契约 4：节流窗口内不立刻跑、窗口外恢复；窗口内也必须被**记下来**。边界取 `throttle`
+    /// 本身（含等号）。
     private static func freshDeliveryIsThrottled() throws {
         let throttle = SyncDeliveryPolicy.throttle
         try require(throttle > 0, "the delivery throttle was disabled")
         let cases: [(TimeInterval, SyncDeliveryPolicy.Decision)] = [
-            (1, .ignore),
-            (throttle - 1, .ignore),
+            (1, .deferToBackgroundLater),
+            (throttle - 1, .deferToBackgroundLater),
             (throttle, .deferToBackground),
             (throttle + 1, .deferToBackground)
         ]
@@ -352,6 +426,51 @@ struct BackgroundSyncPolicyRegression {
         )
     }
 
+    /// 契约 17：🔴 软预算**只接在后台轮询上**，且**只在后台生效**。
+    ///
+    /// 为什么必须把这两件事一起钉住：软预算真正的风险不是"没接线"（那只是让测试显得比生产
+    /// 更严格），而是**接错位置**。接到导出/上传上，一次没跑完的 GB 级 HealthKit 导出会被
+    /// 自己的预算反复掐断 —— 每次都从头再来，永远做不完；而漏掉 `isBackground`，前台同步
+    /// （用户正看着界面点的那一次）也会被这个拍出来的数字掐掉。
+    ///
+    /// 入参里的"超预算时刻"用 `softBudget` 现算而不是写死 120 —— 与契约 11 同一条理由：
+    /// 那个数字是拍的参数，钉死它只会让以后调参的人以为门禁坏了。
+    private static func softBudgetOnlyYieldsBackgroundPolling() throws {
+        let start = now
+        let pastBudget = start.addingTimeInterval(BackgroundRunPolicy.softBudget)
+        let withinBudget = start.addingTimeInterval(1)
+
+        // 后台 + 已超预算 ⇒ 让出。**这是唯一该为真的组合。**
+        try require(
+            BackgroundRunPolicy.shouldYieldPolling(
+                isBackground: true, backgroundStartedAt: start, now: pastBudget
+            ) == true,
+            "a background poll past its soft budget did not yield"
+        )
+        // 前台 ⇒ 一律不让出：判据是"有没有系统额度限制"，不是"花了多久"。
+        try require(
+            BackgroundRunPolicy.shouldYieldPolling(
+                isBackground: false, backgroundStartedAt: start, now: pastBudget
+            ) == false,
+            "the soft budget yielded a foreground sync"
+        )
+        // 后台但**没有后台起点**（前台驱动的这一轮没有 `backgroundPassStartedAt`）⇒ 不让出。
+        // 缺这一条，前台同步会因为起点为 nil 而被误算成"预算无限"或"超预算"，两种都不对。
+        try require(
+            BackgroundRunPolicy.shouldYieldPolling(
+                isBackground: true, backgroundStartedAt: nil, now: pastBudget
+            ) == false,
+            "a poll with no recorded background start yielded"
+        )
+        // 后台但还在预算内 ⇒ 不许提前收手。
+        try require(
+            BackgroundRunPolicy.shouldYieldPolling(
+                isBackground: true, backgroundStartedAt: start, now: withinBudget
+            ) == false,
+            "a background poll yielded before consuming its budget"
+        )
+    }
+
     /// 契约 12：报给系统的成败看"收工时盘上还有没有没走完的工作"，**不是**"这一轮跑没跑起来"。
     ///
     /// 单飞闸门拒绝掉的那一次如果报成功，系统会认为这个 App 的后台预算够用，
@@ -417,6 +536,68 @@ struct BackgroundSyncPolicyRegression {
             BackgroundRunPolicy.earliestBeginDate(now: now)
                 == now.addingTimeInterval(BackgroundRunPolicy.resubmitDelay),
             "the resubmit deadline did not apply the minimum delay"
+        )
+    }
+
+    /// 🔴 契约 15/16：一轮收工后，"**这一轮没覆盖到的那一代**"必须有人接手，且前台补跑有硬上限。
+    ///
+    /// 前两条钉的是"接得准"：没有未覆盖的代次就不许再跑（这是前台自旋唯一的入口），
+    /// 而在前台、又有额度时必须当场补跑（把新数据拖到下一次切后台，用户就只能盯着旧数字）。
+    /// 最后一条钉的是"接得住但别失控"：HealthKit 大批导入期间会连发投递，额度必须有限 ——
+    /// 没有上限的"补跑"就是连续几轮 GB 级导出。
+    ///
+    /// 期望值逐格手写，不拿 `isForeground && left > 0` 推一遍（那是把实现重抄一遍）。
+    private static func uncoveredGenerationsAreHandedOff() throws {
+        let rows: [(uncovered: Bool, foreground: Bool, left: Int, expected: SyncFollowUp.Handoff)] = [
+            (false, true, 1, .nothing),
+            (false, false, 1, .nothing),
+            (false, true, 0, .nothing),
+            (true, true, 1, .runAgain),
+            (true, false, 1, .scheduleBackground)
+        ]
+        for row in rows {
+            let handoff = SyncFollowUp.handoff(
+                hasUncoveredGeneration: row.uncovered,
+                isForeground: row.foreground,
+                foregroundRoundsLeft: row.left
+            )
+            try require(
+                handoff == row.expected,
+                "uncovered=\(row.uncovered) foreground=\(row.foreground) left=\(row.left) "
+                    + "handed off \(handoff) instead of \(row.expected)"
+            )
+        }
+        // 额度为 0 等于把前台补跑整个删掉（而且没有任何报错），必须为正。
+        try require(
+            SyncFollowUp.maxForegroundRounds > 0,
+            "foreground follow-up rounds are disabled outright"
+        )
+        // 前台额度用完 ⇒ 必须交给后台，不许自旋。
+        //
+        // ⚠️ 这一格**刻意不放进上面那张表**：表里再放一行同样的输入，先红的就是表（循环里那条
+        // 泛化消息），而"额度是不是真的有限"这条判据的指认者就变成了一个说不清被改坏了哪里的
+        // 消息 —— `check-background-mutations.py` 的 `assertion_hit` 会指错地方。
+        try require(
+            SyncFollowUp.handoff(hasUncoveredGeneration: true, isForeground: true, foregroundRoundsLeft: 0)
+                == .scheduleBackground,
+            "foreground follow-up rounds are unbounded"
+        )
+        // 「没覆盖到的那一代」= 通知 + 恢复请求；而"盘上卡着一批"不进这一格 —— 那是后台重排
+        // 的活（`needsAnotherRound`），混用会让一次网络失败之后前台立刻重放同一个失败请求。
+        try require(
+            pending(verdict: .empty, hasIntent: true).hasUncoveredGeneration
+                && pending(verdict: .empty, hasRecoveryRequest: true).hasUncoveredGeneration,
+            "an unclaimed notification or recovery request stopped counting as an uncovered generation"
+        )
+        try require(
+            !pending(verdict: .empty).hasUncoveredGeneration
+                && !pending(verdict: .pending).hasUncoveredGeneration,
+            "unfinished bytes on disk were mistaken for a notification that this round did not cover"
+        )
+        // 反过来：`needsAnotherRound` 仍然把"盘上卡着一批"算进去（BGTask 的重排与回执用它）。
+        try require(
+            pending(verdict: .pending).needsAnotherRound && pending(verdict: .unknown).needsAnotherRound,
+            "the resubmit judgement lost its unfinished-batch or unreadable-journal case"
         )
     }
 

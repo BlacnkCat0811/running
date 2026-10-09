@@ -44,6 +44,11 @@ nonisolated struct SyncTaskState: Codable {
     var jobId: String?
     let payloadHash: String
     let pendingAnchor: Data?
+    /// Opaque per-type v2 cursors. Optional so old pending uploads still resume.
+    let pendingRecordCursors: Data?
+    /// 有界路线候选队列的位置。续传成功也必须推进，否则后台反复中断会一直困在首批。
+    /// Optional + decodeIfPresent 保留旧任务兼容性；仅在交付成功后写入降频记忆。
+    let pendingRouteDiscoveryCursor: String?
     let exportEnd: Date?
     let workoutCount: Int
 
@@ -82,6 +87,8 @@ nonisolated struct SyncTaskState: Codable {
         jobId: String? = nil,
         payloadHash: String,
         pendingAnchor: Data? = nil,
+        pendingRecordCursors: Data? = nil,
+        pendingRouteDiscoveryCursor: String? = nil,
         exportEnd: Date? = nil,
         workoutCount: Int,
         schemaVersion: Int? = SyncTaskState.currentSchemaVersion,
@@ -106,6 +113,8 @@ nonisolated struct SyncTaskState: Codable {
         self.jobId = jobId
         self.payloadHash = payloadHash
         self.pendingAnchor = pendingAnchor
+        self.pendingRecordCursors = pendingRecordCursors
+        self.pendingRouteDiscoveryCursor = pendingRouteDiscoveryCursor
         self.exportEnd = exportEnd
         self.workoutCount = workoutCount
         self.schemaVersion = schemaVersion
@@ -145,6 +154,8 @@ nonisolated struct SyncTaskState: Codable {
         sourceId = try container.decodeIfPresent(String.self, forKey: .sourceId)
         jobId = try container.decodeIfPresent(String.self, forKey: .jobId)
         pendingAnchor = try container.decodeIfPresent(Data.self, forKey: .pendingAnchor)
+        pendingRecordCursors = try container.decodeIfPresent(Data.self, forKey: .pendingRecordCursors)
+        pendingRouteDiscoveryCursor = try container.decodeIfPresent(String.self, forKey: .pendingRouteDiscoveryCursor)
         exportEnd = try container.decodeIfPresent(Date.self, forKey: .exportEnd)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
         uploadTaskId = try container.decodeIfPresent(Int.self, forKey: .uploadTaskId)

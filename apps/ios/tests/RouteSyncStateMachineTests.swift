@@ -163,7 +163,7 @@ struct RouteSyncStateMachineTests {
         // ---- 6. 🔴 跳过的那一轮**绝不**改动状态，尤其不产生稳定证据。
         //      这是整台机器唯一会把"没读到"写成"没变化"的地方，它与 ADR-004 决策二
         //      「没读到 ≠ 没变化」是同一条不变式。破了它的后果不是报错，是**静默丢数据**：
-        //      一条刚变更过的轨迹会被当成"又一次确认稳定"，直接降到 settled 而永不再查。
+        //      一条刚变更过的轨迹会被当成"又一次确认稳定"，直接降到 settled 而错过及时补齐。
         let fiveDaysOld = record(.cooling, endDate: end.addingTimeInterval(-5 * day), checkedAt: end, stable: 2)
         let skipped = RouteSyncStateMachine.decide(
             existing: fiveDaysOld,
@@ -198,12 +198,91 @@ struct RouteSyncStateMachineTests {
             "a cooling route confirmed stable past the 3-day mark finally settles"
         )
 
-        // ---- 7. settled 永不再查 —— 只有人工重扫能唤醒它。
+        // ---- 7. settled 降为低频，不再永久终止。间隔从上次真实观测计，不是 workout 年龄。
         let settled = record(.settled, endDate: end.addingTimeInterval(-10 * day), checkedAt: end, stable: 5)
         check(
-            !RouteSyncStateMachine.shouldQuery(existing: settled, now: end.addingTimeInterval(10 * day)),
-            "a settled route is never queried again, however much time passes"
+            !RouteSyncStateMachine.shouldQuery(existing: settled, now: end.addingTimeInterval(7 * day - 1)),
+            "an existing settled route is skipped before the weekly rediscovery boundary"
         )
+        check(
+            RouteSyncStateMachine.shouldQuery(existing: settled, now: end.addingTimeInterval(7 * day)),
+            "an existing settled route is eligible exactly one week after the last real check"
+        )
+        let rediscoveredUnchanged = RouteSyncStateMachine.decide(
+            existing: settled, observation: observation(500, "h1"), now: end.addingTimeInterval(7 * day)
+        )
+        check(rediscoveredUnchanged.nextState.status == .settled, "an unchanged rediscovery keeps the low-frequency state")
+        check(
+            rediscoveredUnchanged.nextState.lastCheckedAt == end.addingTimeInterval(7 * day),
+            "only a real rediscovery starts the next weekly interval"
+        )
+        let settledEmpty = record(
+            .settled, endDate: end.addingTimeInterval(-30 * day),
+            points: 0, hash: nil, checkedAt: end, stable: 5
+        )
+        check(
+            !RouteSyncStateMachine.shouldQuery(existing: settledEmpty, now: end.addingTimeInterval(day - 1)),
+            "empty routes are still throttled just before one day"
+        )
+        check(
+            RouteSyncStateMachine.shouldQuery(existing: settledEmpty, now: end.addingTimeInterval(day)),
+            "empty routes are rediscovered daily even if the workout is months old"
+        )
+        let lateRoute = RouteSyncStateMachine.decide(
+            existing: settledEmpty, observation: observation(850, "late"),
+            now: end.addingTimeInterval(day)
+        )
+        check(
+            lateRoute.nextState.status == .active && lateRoute.nextState.stableCheckCount == 0,
+            "a route arriving after empty settlement wakes high-frequency tracking"
+        )
+        check(lateRoute.nextState.pointCount == 850, "rediscovery stores late route points")
+        let correctedRoute = RouteSyncStateMachine.decide(
+            existing: settled, observation: observation(500, "corrected"),
+            now: end.addingTimeInterval(7 * day)
+        )
+        check(correctedRoute.nextState.status == .active, "a settled route correction is rediscovered even with the same point count")
+        let unavailable = RouteSyncStateMachine.decide(
+            existing: settledEmpty, observation: nil, now: end.addingTimeInterval(day)
+        )
+        check(
+            unavailable.shouldQuery && unavailable.nextState == settledEmpty,
+            "an unreadable rediscovery never counts as an empty/stable observation or moves its clock"
+        )
+        let changedWorkout = RouteSyncStateMachine.decide(
+            existing: settled, observation: observation(600, "changed"),
+            now: end.addingTimeInterval(hour), hasWorkoutChange: true
+        )
+        check(changedWorkout.shouldQuery && changedWorkout.nextState.status == .active,
+              "an anchored workout change bypasses settlement without waiting a week")
+        check(
+            RouteSyncStateMachine.shouldQuery(existing: cooling, now: end.addingTimeInterval(hour), hasWorkoutChange: true),
+            "an anchored workout change also bypasses cooling"
+        )
+        let unrelatedChange = RouteSyncStateMachine.decide(
+            existing: settled, observation: observation(500, "h1"),
+            now: end.addingTimeInterval(hour), hasWorkoutChange: true
+        )
+        check(unrelatedChange.nextState.status == .settled, "a workout-only change does not reset an unchanged route to active")
+        check(
+            !RouteSyncStateMachine.shouldQuery(existing: settledEmpty, now: end.addingTimeInterval(-day)),
+            "a backwards clock does not cause repeated rediscovery"
+        )
+        // 原始故障链：连续空观测可以降频，但不可以成为永久终止条件。
+        var emptyChain = firstLook.nextState
+        for time in [25 * hour, 26 * hour, 4 * day] {
+            emptyChain = RouteSyncStateMachine.decide(
+                existing: emptyChain, observation: observation(0, nil),
+                now: end.addingTimeInterval(time)
+            ).nextState
+        }
+        check(emptyChain.status == .settled, "repeated successful zero-point observations can still enter low-frequency settlement")
+        let grantedLater = RouteSyncStateMachine.decide(
+            existing: emptyChain, observation: observation(1000, "now-authorized"),
+            now: end.addingTimeInterval(5 * day)
+        )
+        check(grantedLater.shouldQuery && grantedLater.nextState.status == .active,
+              "late arrival or later read permission recovers automatically after repeated empty observations")
 
         // ---- 8. 人工重扫：回 active、稳定计数清零、这一轮必查。
         //      清零放在**变化判定之前**是必须的：一条恰好没变的轨迹若保留了旧的
@@ -258,6 +337,51 @@ struct RouteSyncStateMachineTests {
             now: end.addingTimeInterval(12 * hour)
         )
         check(deterministicA == deterministicB, "the machine is a pure function of its inputs")
+
+        // ---- 11. 历史候选有界、轮转且不依赖最近窗口。不可读/已删除的 UUID 不能饿死队列。
+        var backlog = (0..<45).map { index in
+            RouteSyncRecord(
+                workoutUUID: String(format: "history-%03d", index), workoutEndDate: settledEmpty.workoutEndDate,
+                status: settledEmpty.status, pointCount: settledEmpty.pointCount, routeHash: settledEmpty.routeHash,
+                lastCheckedAt: settledEmpty.lastCheckedAt, stableCheckCount: settledEmpty.stableCheckCount
+            )
+        }
+        let later = end.addingTimeInterval(8 * day)
+        func candidates(_ records: [RouteSyncRecord], current: Set<String> = [],
+                        changes: Set<String> = [], cursor: String? = nil, limit: Int = 20) -> [String] {
+            RouteSyncStateMachine.rediscoveryCandidates(
+                existing: records, currentWorkoutUUIDs: current, changedWorkoutUUIDs: changes,
+                now: later, cursor: cursor, limit: limit
+            )
+        }
+        let page1 = candidates(backlog)
+        let page2 = candidates(backlog, cursor: page1.last)
+        let page3 = candidates(backlog, cursor: page2.last)
+        check(page1.count == RouteSyncStateMachine.rediscoveryBatchLimit, "one pass admits at most 20 rediscovery candidates")
+        check(page2.count == 20 && page3.count == 20, "resumed and wraparound pages respect the same budget")
+        check(Set(page1).isDisjoint(with: Set(page2)), "the next pass progresses even if no earlier workout was readable")
+        check(
+            Set(page1 + page2 + page3) == Set(backlog.map(\.workoutUUID)),
+            "three bounded passes visit every old route instead of permanently ignoring historical workouts"
+        )
+        check(candidates(Array(backlog.reversed())) == page1, "candidate order is deterministic independent of database row order")
+        check(candidates(backlog, current: Set(backlog.map(\.workoutUUID))).count == 20,
+              "settled routes inside the recent window share the same budget")
+        check(candidates(backlog, limit: 0).isEmpty, "a zero budget reads no history")
+        check(candidates(backlog, limit: -1).isEmpty, "a negative budget cannot become an unlimited scan")
+        backlog[0].status = .active
+        backlog[1].status = .cooling
+        check(candidates(backlog).contains(backlog[0].workoutUUID), "old active routes also enter the historical queue")
+        check(candidates(backlog).contains(backlog[1].workoutUUID), "old cooling routes are not lost when they leave the recent window")
+        let current = Set([backlog[0].workoutUUID, backlog[1].workoutUUID])
+        let changes = Set([backlog[2].workoutUUID])
+        let separate = candidates(backlog, current: current, changes: changes)
+        check(Set(separate).isDisjoint(with: current), "current active/cooling workouts use their normal queries, not extra history slots")
+        check(Set(separate).isDisjoint(with: changes), "anchored changes use immediate queries, not extra history slots")
+        let notDue = record(.settled, checkedAt: later, stable: 4)
+        check(candidates([notDue]).isEmpty, "not-yet-due settled routes are not admitted to rediscovery")
+        check(candidates(backlog, cursor: "deleted-cursor") == candidates(backlog),
+              "a cursor whose row disappeared still has a deterministic next page")
 
         print("\(checks) route sync state machine checks passed")
     }

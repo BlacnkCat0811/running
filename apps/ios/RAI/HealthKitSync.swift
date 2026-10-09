@@ -39,6 +39,16 @@ final class HealthKitSync {
     /// 每次 `performSync` 开头重置，否则上一次的手动取消会让下一次在握手后立刻自杀。
     private var cancelCause: SyncCancelCause = .none
 
+    /// 本轮 `BGProcessingTask` 的起点。**只在后台路径设置**（`performBackgroundPass`），
+    /// 前台同步永远是 `nil`。
+    ///
+    /// 它是软预算（`BackgroundRunPolicy.shouldYield`）的执行时钟，唯一消费点在 `waitForJob`
+    /// 的轮询里 —— 那里放弃是**零代价**的（`jobId` 已落盘，下次唤醒走 `.resumeJob` 从同一处
+    /// 续接）。刻意不接到导出/上传上：那两个阶段被中断要重头来过（GB 级 HealthKit 导出是
+    /// 整个流程最贵的一步），"主动收手"在那里不是保守而是自伤。判据本身是纯函数
+    /// `BackgroundRunPolicy.shouldYieldPolling`（可被纯逻辑回归编译），这里只持有起点。
+    private var backgroundPassStartedAt: Date?
+
     /// 上一次 `loadTask()` 是否遇到"磁盘上**有** payload 但解不开"。
     ///
     /// 与"没有任务"必须分开：解不开说明磁盘上留着一份属于**别的版本**的进度，把它当成
@@ -110,7 +120,7 @@ final class HealthKitSync {
     /// 这不是命名洁癖：名字里带着哈希，就让"这个文件属于哪一批"由文件名本身回答
     /// （`.zip` 与 `.multipart` 都是），于是恢复时不必对动辄几个 GB 的包重算哈希 ——
     /// 旧实现 `pendingTaskZip` 会对每个候选路径跑一次整文件哈希，代价是几十秒到几分钟。
-    static func zipName(for payloadHash: String) -> String { "upload-\(payloadHash).zip" }
+    static func zipName(for payloadHash: String) -> String { HealthSyncArchive.zipName(for: payloadHash) }
 
     static func multipartName(for payloadHash: String) -> String { "upload-\(payloadHash).multipart" }
 
@@ -369,10 +379,10 @@ final class HealthKitSync {
         observerStore = store
         let types: [(HKSampleType, NSPredicate?)] = [
             (.workoutType(), HKQuery.predicateForWorkouts(with: .running)),
-            (HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!, nil),
-            (HKObjectType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!, nil),
-            (HKObjectType.quantityType(forIdentifier: .restingHeartRate)!, nil)
-        ]
+            // Route 可独立于 workout 晚到；通知走既有节流/后台意图链路，
+            // 历史路线由有界低频队列重新发现，不在回调中重扫全部历史。
+            (HKSeriesType.workoutRoute(), nil)
+        ] + HealthKitExport.recordSampleTypes.map { ($0, nil) }
         observers = types.map { sampleType, predicate in
             HKObserverQuery(sampleType: sampleType, predicate: predicate) { [weak self] _, completion, _ in
                 // 🔴 `completion()` 必须在**任何 `await`／`Task`／状态守卫之前**调用。
@@ -439,7 +449,7 @@ final class HealthKitSync {
         await syncOwner.run { [weak self] in
             guard let self else { return }
             guard self.prepareJournalForExecution() else { return }
-            await self.performSync(to: serverURL, apiToken: apiToken, full: full)
+            await self.performSync(to: serverURL, apiToken: apiToken, full: full, manual: true)
         }
     }
 
@@ -594,6 +604,10 @@ final class HealthKitSync {
     }
 
     private func performBackgroundPass(to serverURL: URL, apiToken: String) async {
+        // 后台软预算的起点。只有**后台路径**会走到这里（前台 `performSync` 由按钮/观察者驱动，
+        // 不经过 `runBackgroundPass`）⇒ `waitForJob` 里的 `shouldYieldPolling` 天然只对后台生效。
+        backgroundPassStartedAt = Date()
+        defer { backgroundPassStartedAt = nil }
         restoreBackgroundContext(for: serverURL)
         let task = loadTask()
         if taskStore.lastError != nil {
@@ -686,7 +700,7 @@ final class HealthKitSync {
         }
     }
 
-    private func performSync(to serverURL: URL?, apiToken: String, full: Bool) async {
+    private func performSync(to serverURL: URL?, apiToken: String, full: Bool, manual: Bool = false) async {
         guard !isBusy else { return }
         guard let serverURL else {
             lastError = "请先连接 RAI 服务"
@@ -836,11 +850,35 @@ final class HealthKitSync {
         // 进度写点已在 `saveTask`/`clearTask` 里维护这个标志；这里补一次是为了让**重启后
         // 第一次读盘**也反映到界面上（`loadTask` 是唯一能看见磁盘上旧进度的地方）。
         hasPendingTask = restoredTask != nil
+        if restoredTask?.pendingRecordCursors != nil, (identity.healthKitRecordSyncVersion ?? 0) < 2 {
+            // A backend downgrade must not acknowledge a saved v2 archive while
+            // silently ignoring its typed deletion events. Keep the same batch
+            // and cursors until the server can apply its protocol again.
+            lastError = "服务端尚不支持完整健康记录增量，已保留待同步批次；请先升级服务端。"
+            phase = SyncPhase.failed.rawValue
+            message = nil
+            return
+        }
+        let restoredZip: URL?
+        do {
+            if let restoredTask {
+                restoredZip = try await persistedZipURL(restoredTask)
+            } else {
+                restoredZip = nil
+            }
+            try checkCancellation()
+        } catch {
+            if handleCancellation(error) { return }
+            lastError = friendlyMessage(error)
+            phase = SyncPhase.failed.rawValue
+            message = nil
+            return
+        }
         let unitStep = SyncAtomicUnit.nextStep(
             full: full,
             sourceId: restoredTask?.sourceId,
             jobId: restoredTask?.jobId,
-            hasZip: restoredTask.flatMap { persistedZipURL($0) } != nil,
+            hasZip: restoredZip != nil,
             hasMultipart: restoredTask.flatMap { persistedMultipartURL(for: $0) } != nil
         )
         if let restored = restoredTask, unitStep == .inspect, let sourceId = restored.sourceId {
@@ -864,7 +902,9 @@ final class HealthKitSync {
                         workoutCount: restored.workoutCount,
                         advanceWatermark: restored.exportEnd != nil,
                         clearWatermark: restored.exportEnd == nil,
-                        anchor: restored.pendingAnchor
+                        anchor: restored.pendingAnchor,
+                        recordCursors: restored.pendingRecordCursors,
+                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
                     )
                     return
                 }
@@ -888,7 +928,9 @@ final class HealthKitSync {
                     workoutCount: restored.workoutCount,
                     advanceWatermark: restored.exportEnd != nil,
                     clearWatermark: restored.exportEnd == nil,
-                    anchor: restored.pendingAnchor
+                    anchor: restored.pendingAnchor,
+                    recordCursors: restored.pendingRecordCursors,
+                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
                 )
                 return
             } catch {
@@ -922,7 +964,7 @@ final class HealthKitSync {
                 phase = SyncPhase.collecting.rawValue
                 message = nil
             }
-        } else if let restored = restoredTask, unitStep == .upload, let persisted = persistedZipURL(restored) {
+        } else if let restored = restoredTask, unitStep == .upload, let persisted = restoredZip {
             do {
                 phase = SyncPhase.uploading.rawValue
                 message = "正在恢复已保存的健康数据批次"
@@ -955,7 +997,9 @@ final class HealthKitSync {
                         workoutCount: restored.workoutCount,
                         advanceWatermark: restored.exportEnd != nil,
                         clearWatermark: restored.exportEnd == nil,
-                        anchor: restored.pendingAnchor
+                        anchor: restored.pendingAnchor,
+                        recordCursors: restored.pendingRecordCursors,
+                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
                     )
                 } else {
                     try checkCancellation()
@@ -974,7 +1018,9 @@ final class HealthKitSync {
                         workoutCount: restored.workoutCount,
                         advanceWatermark: restored.exportEnd != nil,
                         clearWatermark: restored.exportEnd == nil,
-                        anchor: restored.pendingAnchor
+                        anchor: restored.pendingAnchor,
+                        recordCursors: restored.pendingRecordCursors,
+                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
                     )
                 }
                 return
@@ -994,6 +1040,7 @@ final class HealthKitSync {
         // （`zipName` / `multipartName` 都由它派生）—— 失败路径刻意不删：那正是续传的全部依据。
         var batchHash: String?
         var transientExportURL: URL?
+        var uncommittedArchive: HealthSyncArchive.PreparedArchive?
         do {
             // Asking is not the same as being answered. HealthKit returns without
             // an error when the user refuses read access — later queries just yield
@@ -1054,7 +1101,14 @@ final class HealthKitSync {
             // 表很小（每 workout 一行），整表读比"导出中发现一个 uuid 再跨 actor 回来查"更省。
             // 读失败（`isAvailable == false`）时是空字典 ⇒ 每个 workout 都按首查处理，
             // 方向安全：多查一次，不会漏读轨迹。
+            let recordCursors = taskStore.loadRecordCursors(scope: activeScope)
+            if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
+            guard (identity.healthKitRecordSyncVersion ?? 0) >= 2 else {
+                throw SyncHTTPError(message: "服务端尚不支持完整健康记录增量，请先升级服务端。")
+            }
             let routeStates = taskStore.loadRouteStates(scope: activeScope)
+            let routeDiscoveryCursor = taskStore.loadRouteDiscoveryCursor(scope: activeScope)
+            if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
             let onProgress: @Sendable (String) async -> Void = { [weak self] status in
                 await MainActor.run { [weak self] in
                     // 任何来源的中止一旦发生就不再发布晚到的进度：原因分类只影响 phase 怎么写，
@@ -1081,20 +1135,26 @@ final class HealthKitSync {
                 try await HealthKitExport.exportArchive(
                     from: lowerBound,
                     workoutAnchor: anchor,
+                    recordCursors: recordCursors,
+                    recordsForceRescan: full || manual,
                     routeStates: routeStates,
+                    routeDiscoveryCursor: routeDiscoveryCursor,
                     // 人工重扫 = `full`（"重新导入全部"）：所有 workout 的状态复位成 `active`，
-                    // 于是这一轮每个都重查一次。它是 `settled` 唯一的唤醒通道。
+                    // 于是这一轮每个都重查一次，不受低频间隔或候选数限制。
                     routeForceRescan: full,
                     onProgress: onProgress
                 )
             }
             transientExportURL = exported.zipURL
             try checkCancellation()
-            // 先算哈希再落盘：名字里必须带哈希，而"落盘之后再算"会在哈希失败时留下一份
-            // 来路不明的 ZIP（名字只能回退成 `upload.zip`，且没有进度能指向它）。
-            let payloadHash = try fileHash(exported.zipURL)
-            let persisted = try persistZip(exported.zipURL, payloadHash: payloadHash)
+            // 只把 scope 目录快照交给 worker；分块哈希/复制/原子发布都不触碰 MainActor 状态。
+            message = "正在保存健康数据批次"
+            let prepared = try await HealthSyncArchive.prepare(exported.zipURL, in: artifactFolder())
+            uncommittedArchive = prepared
             transientExportURL = nil
+            try checkCancellation()
+            let payloadHash = prepared.payloadHash
+            let persisted = prepared.zipURL
             batchHash = payloadHash
             let pendingAnchor = exported.workoutAnchor
             // `exported` = "ZIP 已落盘、`payloadHash` 已算，还没上传"。写它而不是直接写
@@ -1112,6 +1172,8 @@ final class HealthKitSync {
                 jobId: nil,
                 payloadHash: payloadHash,
                 pendingAnchor: pendingAnchor,
+                pendingRecordCursors: exported.recordCursors,
+                pendingRouteDiscoveryCursor: exported.routeDiscoveryCursor,
                 exportEnd: exported.exportedThrough,
                 workoutCount: exported.workoutCount,
                 multipartFileName: Self.multipartName(for: payloadHash),
@@ -1119,6 +1181,8 @@ final class HealthKitSync {
                 multipartBoundary: Self.multipartBoundary(for: payloadHash),
                 uploadState: .pending
             ))
+            // 日志落盘后产物归可恢复任务所有；之后取消或上传失败都必须保留它。
+            uncommittedArchive = nil
             try checkCancellation()
             phase = SyncPhase.uploading.rawValue
             message = "正在上传 \(exported.workoutCount) 次跑步"
@@ -1149,7 +1213,9 @@ final class HealthKitSync {
                     workoutCount: exported.workoutCount,
                     advanceWatermark: true,
                     anchor: pendingAnchor,
-                    routeStates: exported.routeStates
+                    recordCursors: exported.recordCursors,
+                    routeStates: exported.routeStates,
+                    routeDiscoveryCursor: exported.routeDiscoveryCursor
                 )
             } else {
                 try checkCancellation()
@@ -1168,12 +1234,22 @@ final class HealthKitSync {
                     workoutCount: exported.workoutCount,
                     advanceWatermark: true,
                     anchor: pendingAnchor,
-                    routeStates: exported.routeStates
+                    recordCursors: exported.recordCursors,
+                    routeStates: exported.routeStates,
+                    routeDiscoveryCursor: exported.routeDiscoveryCursor
                 )
             }
         } catch {
+            if let uncommittedArchive {
+                // 取消中的清理不能再走带取消闸门的 runDetached，否则清理本身会被跳过。
+                await Task.detached(priority: .utility) {
+                    uncommittedArchive.discardIfUncommitted()
+                }.value
+            }
             if let transientExportURL {
-                try? FileManager.default.removeItem(at: transientExportURL)
+                await Task.detached(priority: .utility) {
+                    try? FileManager.default.removeItem(at: transientExportURL)
+                }.value
             }
             if handleCancellation(error) { return }
             // 🔴 **兜底 catch 不许覆盖更具体的结论。** 这一段此前无条件写 `failed`，于是
@@ -1280,8 +1356,10 @@ final class HealthKitSync {
         advanceWatermark: Bool,
         clearWatermark: Bool = false,
         anchor: Data? = nil,
+        recordCursors: Data? = nil,
         recordWorkoutCount: Bool = true,
-        routeStates: [String: RouteSyncRecord] = [:]
+        routeStates: [String: RouteSyncRecord] = [:],
+        routeDiscoveryCursor: String? = nil
     ) throws {
         try checkCancellation()
         guard SyncStateCommitPlan.mayCommit(phase: SyncPhase.migrate(phase)) else {
@@ -1299,7 +1377,7 @@ final class HealthKitSync {
         )
         let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(
             checkpoint: .syncCommitted,
-            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark) },
+            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors) },
             acknowledge: { acknowledgeBackgroundIntent(checkpoint: $0) }
         )
         guard committed else {
@@ -1308,14 +1386,17 @@ final class HealthKitSync {
         // 🔴 「降频记忆」只能在**这次同步已经被判定成功之后**落盘，而且必须排在
         // `commitSuccess` 之后。反过来的话会出现一个不可自愈的窗口：状态机把某个 workout
         // 记成"已稳定、可以少查"，而这一批数据**从未真正交付到服务端**（上传失败、导入失败、
-        // 或进程在导入中途被杀）。之后它一路降到 `settled`，而 `settled` 只有人工重扫能唤醒
-        // ⇒ 服务端永远收不到这条轨迹，界面却一直显示同步成功。
+        // 或进程在导入中途被杀）。之后它一路降到 `settled`，服务端要等低频重新发现才能
+        // 收到这条轨迹，界面却一直显示同步成功。
         // 反过来（提交成功、记忆没写上）只损失一次"下次再多查一遍"，且下一轮会自己补上。
         //
         // 写失败**不**让本次同步变红：durable 的部分（水位 + 进度）已经提交，这里失败的后果
         // 只是"下一轮重查一次"。但也不静默——`upsertRouteStates` 会把原因推进
         // `taskStore.lastError`，并由 `SQLiteSupport.report` 打出带错误码的日志。
-        if !routeStates.isEmpty, !taskStore.upsertRouteStates(Array(routeStates.values), scope: activeScope) {
+        if !routeStates.isEmpty || routeDiscoveryCursor != nil,
+           !taskStore.upsertRouteStates(
+                Array(routeStates.values), scope: activeScope, discoveryCursor: routeDiscoveryCursor
+           ) {
             NSLog("[RAI] route state flush after commit failed: %@", taskStore.lastError ?? "unknown")
         }
         // `hasPendingTask` 只在**真的清掉了那一行**之后才翻 —— 它现在与 `clearTask()` 同为
@@ -1354,7 +1435,8 @@ final class HealthKitSync {
             let inserted = summary.insertedWorkouts ?? 0
             let updated = summary.updatedWorkouts ?? 0
             if inserted == 0 && updated == 0 {
-                base = "Apple 健康数据已是最新"
+                base = exported.recordCount > 0 || exported.deletionCount > 0
+                    ? "已同步 Apple 健康记录" : "Apple 健康数据已是最新"
             } else if inserted > 0 && updated > 0 {
                 base = "已从 Apple 健康导入 \(inserted) 次、更新 \(updated) 次跑步"
             } else if updated > 0 {
@@ -1388,7 +1470,8 @@ final class HealthKitSync {
         // 此处只把三者当成「这一轮有没有读到任何东西」的判据（任一非 0 即非空导出），
         // 所以偏小的值不会误报。⚠️ 将来若要展示「导出了几条轨迹」，**不要**直接读这个字段
         // —— 它会给出一个偏小的数且不报错。详见 `HealthKitExportResult.routeCount` 的声明注释。
-        guard exported.workoutCount == 0, exported.recordCount == 0, exported.routeCount == 0 else {
+        guard exported.workoutCount == 0, exported.recordCount == 0, exported.routeCount == 0,
+              exported.deletionCount == 0 else {
             return latestMessage(base: base, warnings: exported.warnings)
         }
         return latestMessage(base: base, warnings: exported.warnings + [Self.emptyExportHint])
@@ -1610,6 +1693,23 @@ final class HealthKitSync {
         var idleFailures = 0
         while ContinuousClock.now < deadline {
             try Task.checkCancellation()
+            // 🔴 **后台软预算**（`BackgroundRunPolicy.shouldYieldPolling`）：这一轮后台唤醒已经
+            // 把它那份额度花掉了。轮询放弃是**零代价**的 —— `jobId` 已落盘，下一次唤醒走
+            // `.resumeJob` 从同一处接着等；而继续占着额度只会撞上系统 expiration，被迫在
+            // **半途**收手（那才是"写完一半 multipart 就断电"那种位置）。收手走
+            // `suspendForLifecycle()`：它把 phase 落回**可续接**阶段，不是 `failed`、也不是
+            // 用户取消 —— 与系统收回执行时间是同一条语义。判据在纯函数里，这里只接线。
+            #if os(iOS)
+            if BackgroundRunPolicy.shouldYieldPolling(
+                isBackground: UIApplication.shared.applicationState != .active,
+                backgroundStartedAt: backgroundPassStartedAt,
+                now: Date()
+            ) {
+                Self.report("background pass: soft budget reached while polling the import job; yielding this round")
+                suspendForLifecycle()
+                throw CancellationError()
+            }
+            #endif
             do {
                 let job = try await getJob(id: id, on: serverURL)
                 try checkCancellation()
@@ -1749,35 +1849,7 @@ final class HealthKitSync {
     /// 排除备份的理由是体积：一次全量导出可以是好几个 GB，让 iCloud 备份多背一份
     /// "随时可以重新生成"的字节没有道理。
     private func protect(_ url: URL) {
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        var mutable = url
-        try? mutable.setResourceValues(values)
-        try? FileManager.default.setAttributes(
-            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-            ofItemAtPath: url.path
-        )
-    }
-
-    /// 把导出的 ZIP 落到持久位置，并按 `payloadHash` 命名。
-    ///
-    /// 名字里带哈希不是命名洁癖：它让"这个文件属于哪一批"由文件名本身回答，
-    /// 于是恢复时不必对几个 GB 的包重算哈希（旧实现 `pendingTaskZip` 会对**每个候选
-    /// 路径**跑一次整文件哈希，代价是几十秒到几分钟）。
-    ///
-    /// 用 `copyItem` 而不是重新打包：服务端幂等只比**归档字节**
-    /// （`import-sources.ts:326-329`），逐字节相同才命中同一份来源。
-    @discardableResult
-    private func persistZip(_ zipURL: URL, payloadHash: String) throws -> URL {
-        try ensureArtifactFolder()
-        let durable = artifactURL(named: Self.zipName(for: payloadHash))
-        if FileManager.default.fileExists(atPath: durable.path) {
-            try FileManager.default.removeItem(at: durable)
-        }
-        try FileManager.default.copyItem(at: zipURL, to: durable)
-        protect(durable)
-        try? FileManager.default.removeItem(at: zipURL)
-        return durable
+        HealthSyncArchive.protect(url)
     }
 
     /// 删掉某一批的全部本地产物。
@@ -1811,15 +1883,23 @@ final class HealthKitSync {
     /// 两条纪律：
     ///   - `target` 必须与当前服务器一致 —— 否则会把 A 服务器的批次传给 B；
     ///   - 🔴 老 payload 只存了哈希、没存文件名（`zipFileName == nil`）。名字相同**不代表
-    ///     批次相同**：`persistZip` 是覆盖写，崩溃窗口里可能留下"新文件 + 老 task"。
+    ///     批次相同**：旧 `persistZip` 是覆盖写，崩溃窗口里可能留下"新文件 + 老 task"。
     ///     所以这条回退路径必须校验哈希。代价是一次整文件哈希，且只在**升级时仍有在飞
     ///     任务**这一次付出 —— 其余情况全部靠文件名，零哈希。
-    private func persistedZipURL(_ task: SyncTaskState) -> URL? {
+    private func persistedZipURL(_ task: SyncTaskState) async throws -> URL? {
         guard task.target == activeServerURL?.absoluteString else { return nil }
         let file = task.zipFileName ?? Self.legacyZipName
         let url = artifactURL(named: file)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        if task.zipFileName == nil, (try? fileHash(url)) != task.payloadHash { return nil }
+        if task.zipFileName == nil {
+            do {
+                guard try await HealthSyncArchive.fileHash(url) == task.payloadHash else { return nil }
+            } catch {
+                // 保持旧版本“校验失败不认领文件”的语义，但不能把取消吞成一次重新导出。
+                try checkCancellation()
+                return nil
+            }
+        }
         return url
     }
 
@@ -1982,11 +2062,6 @@ final class HealthKitSync {
         }
         hasPendingTask = false
         return true
-    }
-
-    private func fileHash(_ url: URL) throws -> String {
-        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
-        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func urlScope(for url: URL) -> String {

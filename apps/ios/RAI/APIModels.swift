@@ -6,6 +6,7 @@ struct RaiHandshake: Codable, Equatable {
     let datasetEpoch: String
     let syncProtocolVersion: Int
     let apiVersion: String
+    var healthKitRecordSyncVersion: Int? = nil
     var planReceiptMetadata: Bool? = nil
     var planSnapshotContractVersion: Int? = nil
     var planPublicationContractVersion: Int? = nil

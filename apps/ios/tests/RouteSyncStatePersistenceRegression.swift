@@ -285,6 +285,49 @@ struct RouteSyncStatePersistenceRegression {
         let upgradedAgain = SyncTaskStore(directory: legacyRoot)
         check(upgradedAgain.loadRouteStates(scope: scopeA)[a.workoutUUID] == a, "reopening never repeats the destructive migration")
 
+        // 重新发现队列和观测分别存储，且仍共用单事务和 scope。
+        check(store.loadRouteDiscoveryCursor(scope: scopeA) == nil, "an existing journal starts without a rediscovery cursor")
+        let beforeCursorOnly = store.loadRouteStates(scope: scopeA)
+        check(store.upsertRouteStates([], scope: scopeA, discoveryCursor: "history-019"),
+              "an unreadable historical page can advance only its traversal cursor")
+        check(store.loadRouteStates(scope: scopeA) == beforeCursorOnly,
+              "advancing traversal without observations never fabricates stable checks or timestamps")
+        check(reopened.loadRouteDiscoveryCursor(scope: scopeA) == "history-019", "the traversal cursor survives a different connection")
+        check(store.loadRouteDiscoveryCursor(scope: scopeB) == nil, "a different server/epoch inherits no traversal cursor")
+        check(store.upsertRouteStates([], scope: scopeB, discoveryCursor: "scope-b-last"), "scope B writes its own traversal cursor")
+        check(store.loadRouteDiscoveryCursor(scope: scopeA) == "history-019", "scope B never moves scope A's traversal cursor")
+
+        precondition(sqlite3_exec(control, """
+            CREATE TRIGGER ignore_route_discovery_update BEFORE UPDATE ON sync_route_discovery
+            BEGIN SELECT RAISE(IGNORE); END;
+            """, nil, nil, nil) == SQLITE_OK)
+        var cursorBatchRecord = changed
+        cursorBatchRecord.pointCount += 1
+        check(!store.upsertRouteStates([cursorBatchRecord], scope: scopeA, discoveryCursor: "history-039"),
+              "a traversal cursor UPSERT that touches zero rows fails")
+        check(store.lastError != nil, "a silently ignored cursor write leaves diagnostics")
+        check(store.loadRouteStates(scope: scopeA)[changed.workoutUUID] == changed,
+              "a failed cursor write rolls back route observations in the same batch")
+        check(store.loadRouteDiscoveryCursor(scope: scopeA) == "history-019", "a failed batch leaves its previous cursor intact")
+        precondition(sqlite3_exec(control, "DROP TRIGGER ignore_route_discovery_update", nil, nil, nil) == SQLITE_OK)
+        check(store.upsertRouteStates([cursorBatchRecord], scope: scopeA, discoveryCursor: "history-039"),
+              "observations and the traversal cursor commit together after recovery")
+        check(store.loadRouteStates(scope: scopeA)[changed.workoutUUID] == cursorBatchRecord
+              && store.loadRouteDiscoveryCursor(scope: scopeA) == "history-039",
+              "a successful batch exposes both its route memory and cursor")
+
+        // 已安装 v2 库没有新表；ensure-schema 必须幂等补表，不得丢弃既有路线/任务。
+        var installedDB: OpaquePointer?
+        precondition(sqlite3_open(legacyRoot.appendingPathComponent("sync.sqlite").path, &installedDB) == SQLITE_OK)
+        precondition(sqlite3_exec(installedDB, "DROP TABLE sync_route_discovery", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(installedDB)
+        let withDiscovery = SyncTaskStore(directory: legacyRoot)
+        check(withDiscovery.isAvailable, "an installed v2 journal gains the rediscovery table")
+        check(withDiscovery.loadRouteStates(scope: scopeA)[a.workoutUUID] == a, "adding the table preserves installed settled memory")
+        check(withDiscovery.load(scope: "old-scope") == Data([1, 2]), "adding the table preserves unfinished upload bytes")
+        check(withDiscovery.upsertRouteStates([], scope: scopeA, discoveryCursor: "installed-last"),
+              "the upgraded table can persist a traversal cursor")
+
         print("\(checks) route state persistence regression checks passed")
     }
 }

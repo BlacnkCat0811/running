@@ -28,7 +28,7 @@ enum RaiStartup {
     /// 🔴 **派发决策在这里，不在观察者里。** P1 时观察者自己判 `applicationState == .active`
     /// 然后 `return` —— 那等于把后台唤醒整个吞掉（P2 的全部意义就是让后台唤醒也能干活）。
     /// 现在观察者只说"数据变了"，这里按 `SyncDeliveryPolicy` 决定：
-    /// 前台当场跑 / 后台记下意图交给 `BGProcessingTask` / 不值得跑。
+    /// 前台当场跑 / 后台记下意图、排一轮执行（立刻或延后）/ 未绑定目标才是真的不值得记。
     @MainActor
     static func registerSyncEntryPoints(healthSync: HealthKitSync, session: ServerSession) {
         healthSync.startObservingHealthChanges { [weak healthSync, weak session] in
@@ -37,14 +37,25 @@ enum RaiStartup {
             // 而这里问的是"这个目标有没有事要做"。读不出来时按"有"处理（`?? true`）—— 两个判错
             // 方向分别是多跑一轮（代价是一次导出）与少跑一轮（等下一次投递），保守的那侧是不漏。
             let pending = healthSync.probePendingWork(for: session.serverURL)
-            switch SyncDeliveryPolicy.decide(
+            let isBound = session.serverURL != nil
+            let decision = SyncDeliveryPolicy.decide(
                 isForeground: UIApplication.shared.applicationState == .active,
-                isBound: session.serverURL != nil,
+                isBound: isBound,
                 isSyncRunning: healthSync.isBusy,
                 hasPendingTask: pending?.hasUnfinishedWork ?? true,
                 lastSyncAt: healthSync.lastSyncAt,
                 now: Date()
-            ) {
+            )
+            // 🔴 **先记意图，再决定这一轮跑不跑。** 一次投递就是一次真实的数据变化，而单飞与
+            // 节流能决定的只是"要不要现在跑"，不该决定"这条变化要不要被记住"（判据在
+            // `Decision.recordsTheDelivery`）。旧版把 `.ignore` 直接 `break` 掉，于是
+            // "导出期间到达的通知"与"节流窗口内的通知"双双落空：旧批次收工清空之后，后台按
+            // 快照判定"无待办"，自动同步就此停在原地。代次确认（`shouldAcknowledgeIntent`）
+            // 只能保护**已经记下来**的那一代。
+            if decision.recordsTheDelivery {
+                healthSync.recordBackgroundIntent(for: session.serverURL)
+            }
+            switch decision {
             case .syncNow:
                 // `force: true` 与原先视图层的调用一致：观察者被唤醒就说明数据真的变了，
                 // 不该再被前台的 15 分钟节流挡掉（节流已经在 `decide` 里对后台路径做过了）。
@@ -53,13 +64,63 @@ enum RaiStartup {
                     apiToken: session.apiToken,
                     force: true
                 )
+                // 收工后检查"这一轮没覆盖到的那一代"（导出起点之后到达的通知）。判据在
+                // `SyncFollowUp.handoff`，这里只接线。
+                await handOffUncoveredGenerations(healthSync: healthSync, session: session)
             case .deferToBackground:
-                // 记下意图再 submit：`submit` 本身不携带"为什么"，而一个过期的待发请求
-                // 落到 BGTask 上时，只有这个意图位能告诉它"这次真的有新数据"。
-                healthSync.recordBackgroundIntent(for: session.serverURL)
+                // `submit` 本身不携带"为什么"，而一个过期的待发请求落到 BGTask 上时，
+                // 只有意图位能告诉它"这次真的有新数据"（意图已在上面记下）。
                 submitBackgroundRun()
+            case .deferToBackgroundLater:
+                // 单飞闸门被占 / 还在后台节流窗口内：这一轮不跑，但**已经把变化记下来了**，
+                // 所以要保证它真的会被跑 —— 排一次延后的后台执行，而不是等下一次投递来救。
+                // 不立即 submit 是刻意的：BGTask 与正在跑的那一轮撞车只会被单飞静默拒绝，
+                // 换来一条"跑过了"的假记录。
+                submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
             case .ignore:
                 break
+            }
+        }
+    }
+
+    /// 一轮同步收工后，把"**这一轮没有覆盖到的那一代**"接过去。
+    ///
+    /// 为什么必须有这一步：代次确认只负责把导出起点之后到达的通知**留下**（不被本轮吞掉），
+    /// 不负责找人来跑它。少接这一手，那条通知会一直躺在盘上，直到下一次切后台或下一次投递
+    /// —— 那正是"自动同步停在原地"的形态。
+    ///
+    /// 🔴 判据住在 `SyncFollowUp.handoff`（纯函数、有执行者），这里只做接线与额度递减。
+    /// 额度是硬的：HealthKit 大批导入期间会连发投递，没有上限的"补跑"就是前台自旋，而每次
+    /// 自旋都是一轮 GB 级导出。超出的那一代交给后台的 `resubmitDelay` 兜着。
+    ///
+    /// ⚠️ 这里读的是**这一轮自己按目标现读的快照**（`probePendingWork`），不是
+    /// `lastError` / `phase` 这类展示字段：单飞被拒的那一次什么都没跑，拿它的落点判断
+    /// "有没有没覆盖的活儿"就是拿别人的结论给自己打分。
+    @MainActor
+    private static func handOffUncoveredGenerations(healthSync: HealthKitSync, session: ServerSession) async {
+        guard let serverURL = session.serverURL else { return }
+        var roundsLeft = SyncFollowUp.maxForegroundRounds
+        while true {
+            let pending = healthSync.probePendingWork(for: serverURL)
+            switch SyncFollowUp.handoff(
+                hasUncoveredGeneration: pending?.hasUncoveredGeneration ?? true,
+                isForeground: UIApplication.shared.applicationState == .active,
+                foregroundRoundsLeft: roundsLeft
+            ) {
+            case .nothing:
+                return
+            case .scheduleBackground:
+                submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
+                return
+            case .runAgain:
+                roundsLeft -= 1
+                await healthSync.syncIfNeeded(
+                    to: serverURL,
+                    apiToken: session.apiToken,
+                    // 与派发侧同理：这一轮要跑的是**新到的那一代**，不该被前台的 15 分钟
+                    // 节流挡掉（那正是它被留下来的原因）。
+                    force: true
+                )
             }
         }
     }
@@ -103,6 +164,8 @@ enum RaiStartup {
                     // 走 `force: false` 会被 15 分钟窗口挡下，而那个窗口对"等解锁"毫无意义。
                     force: true
                 )
+                // 与投递唤醒那条路同一条收尾：解锁期间到达的投递也可能没被这一轮覆盖到。
+                await RaiStartup.handOffUncoveredGenerations(healthSync: healthSync, session: session)
             }
         }
     }

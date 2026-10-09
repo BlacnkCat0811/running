@@ -17,6 +17,16 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   -o "$tmp/health-sync-cancellation-tests"
 "$tmp/health-sync-cancellation-tests"
 
+# 与 App 一样启用 MainActor 默认隔离，防止纯逻辑编译掩盖大文件 helper 的执行边界错误。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  -swift-version 5 -default-isolation MainActor \
+  apps/ios/RAI/HealthSyncCancellation.swift \
+  apps/ios/RAI/HealthSyncArchive.swift \
+  apps/ios/tests/HealthSyncArchiveRegression.swift \
+  -o "$tmp/health-sync-archive-tests"
+"$tmp/health-sync-archive-tests"
+python3 apps/ios/tests/check-health-sync-archive.py
+
 # 恢复分支的判据单独一个可执行：一个模块只能有一个 `@main`，所以共用源码、分开编译。
 # 它是 2026-09-22 线上「未找到导入来源」死锁的回归（详见该测试文件头部）。
 xcrun swiftc -parse-as-library -disable-sandbox \
@@ -54,6 +64,12 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/tests/SyncTaskMigrationRegression.swift \
   -o "$tmp/sync-task-migration-tests"
 "$tmp/sync-task-migration-tests"
+
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/HealthKitRecordCursor.swift \
+  apps/ios/tests/HealthKitRecordCursorRegression.swift \
+  -o "$tmp/healthkit-record-cursor-tests"
+"$tmp/healthkit-record-cursor-tests"
 
 # 后台三机制的纯策略（P2-1）：投递唤醒该不该跑、BGProcessingTask 该推进哪一步。
 # 这两件事的调用点在 `AppDelegate.swift` / `RAIApp.swift`。
@@ -144,3 +160,8 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/tests/RouteSyncStatePersistenceRegression.swift \
   -o "$tmp/route-sync-state-persistence-tests"
 "$tmp/route-sync-state-persistence-tests"
+
+# 这个 python 门禁除了 iOS 源码，还读 `packages/health-export-parser/src/apple-health-parser.ts`
+# 做文本判据。静态输入面解析看不穿 bash → python 的间接层，所以这里**显式点名**它 ——
+# 否则 `RAI_MUTATION_FOR` 裁剪时那条 parser 突变会静默漏跑（改了它却没验到它的判据）。
+python3 apps/ios/tests/check-healthkit-record-sync.py

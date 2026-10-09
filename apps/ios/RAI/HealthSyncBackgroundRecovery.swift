@@ -83,6 +83,15 @@ nonisolated enum HealthSyncBackgroundRecovery {
         /// 而不是"报个成功然后没人再管"。
         var hasUnfinishedWork: Bool { verdict != .empty }
 
+        /// 这个目标身上挂着**一代没有被任何一轮覆盖到**的变更：一条健康数据通知，或一条
+        /// scope 恢复请求。
+        ///
+        /// 与 `needsAnotherRound` 刻意分开：那个还包含"盘上卡着一批没走完的字节"，而"补跑新
+        /// 代次"不该顺手重放一次失败的批次（那是后台重排的活，`applicationDidEnterBackground`
+        /// 与 BGTask 的回执都用 `needsAnotherRound`）。混用的可见后果是：一次网络失败之后
+        /// 前台会立刻再跑一轮同样的失败请求 —— 那不是"接住新代次"，只是重放错误。
+        var hasUncoveredGeneration: Bool { hasIntent || hasRecoveryRequest }
+
         /// 收工后还要不要再排一次后台执行。`BGTaskScheduler` 的请求是一次性的。
         var needsAnotherRound: Bool { hasUnfinishedWork || hasIntent || hasRecoveryRequest }
 

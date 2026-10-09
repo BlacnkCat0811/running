@@ -87,12 +87,15 @@ SYNC_STATE_PLAN = "apps/ios/RAI/SyncStateCommitPlan.swift"
 SYNC_TASK_STORE = "apps/ios/RAI/SyncTaskStore.swift"
 ROUTE_SYNC_MACHINE = "apps/ios/RAI/RouteSyncStateMachine.swift"
 STORE_RUNNER = "apps/ios/tests/run-store-tests.sh"
+HEALTH_ARCHIVE = "apps/ios/RAI/HealthSyncArchive.swift"
+HEALTH_PARSER = "packages/health-export-parser/src/apple-health-parser.ts"
 # 🔴 凡是被突变**改到**的文件都必须在这里。少一个的失效方式是致命的：`restore()` 会静默跳过它
 # （那个"跳过"是为信号处理器的窗口留的），于是改坏的源码留在工作区、下一轮的基线检查才炸。
 SOURCES = [
     LIFECYCLE, SYNC, SYNC_PHASE, APP, APP_DELEGATE, ROOT_VIEW, TECH_THEME, TECH_PRESENTATION, MODEL_RUNNER,
     HEALTH_SYNC_RUNNER, BG_POLICY, RECOVERY, IDENTITY_PUBLISHER, UPLOAD_SESSION, API_CLIENT, HEALTH_EXPORT,
     SYNC_STATE_PLAN, SYNC_TASK_STORE, ROUTE_SYNC_MACHINE, STORE_RUNNER,
+    HEALTH_ARCHIVE, HEALTH_PARSER,
 ]
 
 SWIFT_GATE = "bash apps/ios/tests/run-health-sync-tests.sh"
@@ -592,7 +595,11 @@ MUTATIONS = [
             "        UserDefaults.standard.removeObject(forKey: scopedKey(Self.taskKey))\n",
         ),
         PY_GATE,
-        "must be set at saveTask and the three journal-read failure paths",
+        # ⚠️ 期望文案必须与 `check-background-capabilities.py` 里那条 `check(...)` 的**当前**
+        # 措辞逐字一致：这里曾是旧版文案（"...and the three journal-read failure paths"），
+        # 而那条判据的措辞改过、这一份副本没跟着改 ⇒ 门禁其实红了（`verdict=RED`），
+        # 但 `assertion_hit=False`，于是这条突变在报告里长期记成"没被抓住"（2026-10-09 实测）。
+        "hasPendingTask must be set at saveTask, journal-read failures and failed database preparation",
     ),
     # ---- P1 · 展示层：「卡着一批」不得被显示成「上次成功」 ----
     (
@@ -624,8 +631,8 @@ MUTATIONS = [
         lambda: edit(
             BG_POLICY,
             "        if hasPendingTask { return .deferToBackground }\n"
-            "        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .ignore }\n",
-            "        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .ignore }\n"
+            "        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .deferToBackgroundLater }\n",
+            "        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .deferToBackgroundLater }\n"
             "        if hasPendingTask { return .deferToBackground }\n",
         ),
         SWIFT_GATE,
@@ -709,6 +716,116 @@ MUTATIONS = [
         ),
         SWIFT_GATE,
         "did not schedule the next background run",
+    ),
+    # ---- P3 · 后台软预算的接线（2026-10-09，审计 3.10）--------------------------------
+    # 缺陷形态：`shouldYield` 有实现、有测试、**没有生产调用者** ⇒ 测试全绿而生产从不遵守预算
+    # （"软预算被测试容易被误认为生产遵守预算"）。下面两条分开钉两件事：
+    # 一条钉"接在哪"（只接轮询、且只在后台 —— 纯判据），一条钉"到底接没接"（结构门禁）。
+    (
+        "[P3] 判据: 软预算对前台也让出 => 用户正看着的那次同步被拍出来的参数掐掉",
+        lambda: edit(
+            BG_POLICY,
+            "        guard isBackground, let backgroundStartedAt else { return false }\n",
+            "        guard let backgroundStartedAt else { return false }\n",
+        ),
+        SWIFT_GATE,
+        "the soft budget yielded a foreground sync",
+    ),
+    (
+        "[P3] 结构门禁: 软预算退回只剩测试 => 生产再不遵守预算，而门禁全绿（审计 3.10）",
+        # 把调用名换掉即可：capabilities 9i-bis 是**文本**检查（`HealthKitSync.swift` 没有任何
+        # 回归编译它，所以这里不能靠"编译不过"来变红）。
+        lambda: edit(
+            SYNC,
+            "            if BackgroundRunPolicy.shouldYieldPolling(\n",
+            "            if BackgroundRunPolicy.disabledPollingYield(\n",
+        ),
+        PY_GATE,
+        "does not consume the background soft budget",
+    ),
+    # ---- P1 · 投递的可达性（2026-10-09）：单飞与节流只限制"执行"，不限制"记忆" ----------
+    # 缺陷形态：`.ignore` 既写代次也不驱动任何后续轮次 ⇒ 旧批次收工清空之后，后台按快照判定
+    # "无待办"，自动同步停在原地。下面四条分别钉判据（`decide` 的两个成因 + "要不要记"）、
+    # 额度（`SyncFollowUp`）与接线（AppDelegate），另加两条**结构门禁**钉接线本身。
+    #
+    # ⚠️ 顺序与 `BackgroundSyncPolicyRegression.main()` 一一对应：每条突变只允许被它自己那一条
+    # 断言抓住（`assertion_hit` 指认的必须是"被改坏的那条判据"，不是一个碰巧先跑到的邻居）。
+    (
+        "[P1] 判据: 运行中的投递仍被直接忽略 => 导出起点之后的变化没有代次，自动同步停在原地",
+        lambda: edit(
+            BG_POLICY,
+            "        guard !isSyncRunning else { return .deferToBackgroundLater }\n",
+            "        guard !isSyncRunning else { return .ignore }\n",
+        ),
+        SWIFT_GATE,
+        "a delivery that arrived while a sync was running was ignored",
+    ),
+    (
+        "[P1] 判据: 节流窗口内的投递被丢掉 => 这一代既没有代次也没人排下一轮",
+        lambda: edit(
+            BG_POLICY,
+            "        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .deferToBackgroundLater }\n",
+            "        if let lastSyncAt, now.timeIntervalSince(lastSyncAt) < throttle { return .ignore }\n",
+        ),
+        SWIFT_GATE,
+        "a delivery inside the throttle window was dropped instead of being remembered",
+    ),
+    (
+        "[P1] 判据: 未绑定的投递也记意图 => 往一个不存在的目标上写永远没人消费的意图",
+        lambda: edit(
+            BG_POLICY,
+            "        var recordsTheDelivery: Bool { self != .ignore }",
+            "        var recordsTheDelivery: Bool { true }",
+        ),
+        SWIFT_GATE,
+        "a delivery for a target that does not exist was recorded as a pending intent",
+    ),
+    (
+        "[P1] 判据: 前台补跑没有上限 => 大批导入期间前台自旋，每轮都是 GB 级导出",
+        lambda: edit(
+            BG_POLICY,
+            "        if isForeground, foregroundRoundsLeft > 0 { return .runAgain }",
+            "        if isForeground { return .runAgain }",
+        ),
+        SWIFT_GATE,
+        "foreground follow-up rounds are unbounded",
+    ),
+    (
+        "[P1] 结构门禁: 只在 defer 分支里记意图 => 运行中/节流窗口内的投递又被丢掉",
+        lambda: edit(
+            APP_DELEGATE,
+            "            if decision.recordsTheDelivery {\n"
+            "                healthSync.recordBackgroundIntent(for: session.serverURL)\n"
+            "            }\n"
+            "            switch decision {\n",
+            "            switch decision {\n",
+        ),
+        PY_GATE,
+        "registerSyncEntryPoints must record the delivery before dispatching on the decision",
+    ),
+    (
+        "[P1] 结构门禁: 收工后不接没覆盖到的那一代 => 通知一直躺在盘上，自动同步停在原地",
+        # 锚点带上后一行（`case .deferToBackground:`）：`handOffUncoveredGenerations` 在
+        # `observeProtectedDataAvailability` 里也有一处调用，只锚调用行会命中两次而拒绝施加。
+        lambda: edit(
+            APP_DELEGATE,
+            "                await handOffUncoveredGenerations(healthSync: healthSync, session: session)\n"
+            "            case .deferToBackground:\n",
+            "            case .deferToBackground:\n",
+        ),
+        PY_GATE,
+        "registerSyncEntryPoints must hand off the generations a foreground round did not cover",
+    ),
+    (
+        "[P1] 结构门禁: 忘了给 deferToBackgroundLater 排执行 => 记下来了却永远没人跑",
+        lambda: edit(
+            APP_DELEGATE,
+            "                submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)\n"
+            "            case .ignore:\n",
+            "            case .ignore:\n",
+        ),
+        PY_GATE,
+        "the 'remember this delivery, but do not run now' disposition is not wired",
     ),
     # ---- 冷启动恢复第二轮（2026-09-24）：调度与回执一律走"按目标读到的快照" ----
     # 全部是"改错了照样编译通过、肉眼也看不出来"的形态，所以每一条都要有自己的执行者。
@@ -1159,8 +1276,9 @@ MUTATIONS = [
             "            if RouteSyncStateMachine.shouldQuery(\n"
             "                existing: previous,\n"
             "                now: routeNow,\n"
-            "                isForceManualRescan: routeForceRescan\n"
-            "            ) {\n",
+            "                isForceManualRescan: routeForceRescan,\n"
+            "                hasWorkoutChange: hasWorkoutChange\n"
+            "            ) && (previous.status != .settled || routeForceRescan || hasWorkoutChange || rediscoveryIDs.contains(routeKey)) {\n",
             "            if true {\n",
         ),
         PY_GATE,
@@ -1168,7 +1286,7 @@ MUTATIONS = [
     ),
     (
         "[本轮新增2] 判据: 把降频记忆挪到 commitSuccess **之前** => 一次从未交付的同步也会被记成"
-        "「这条轨迹已经稳定」，之后一路降到 settled，而 settled 只有人工重扫能唤醒",
+        "「这条轨迹已经稳定」，之后一路降到 settled，错过及时补齐窗口",
         lambda: edit(
             SYNC,
             "        let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(",
@@ -1196,7 +1314,7 @@ MUTATIONS = [
         "no longer loads the route state snapshot",
     ),
     (
-        "[本轮新增2] 判据: routeForceRescan 不再接 `full` => `settled` 的路线没有任何唤醒通道，"
+        "[本轮新增2] 判据: routeForceRescan 不再接 `full` => 人工重扫不能绕过低频休眠间隔，"
         "而「重新导入全部」会继续跳过它自己承诺要重做的那些 workout",
         lambda: edit(SYNC, "routeForceRescan: full,", "routeForceRescan: false,"),
         PY_GATE,
@@ -1282,6 +1400,66 @@ MUTATIONS = [
         lambda: edit(STORE_RUNNER, "  apps/ios/RAI/RouteSyncState.swift \\\n", ""),
         PY_GATE,
         "run-store-tests.sh compiles SyncTaskStore.swift without RouteSyncState.swift",
+    ),
+    # ---- [P4] 门禁有效性：HealthKit 记录同步 v2 的两个新门禁（2026-10-09，审查 🟡4）--------
+    # 缺陷形态：`check-health-sync-archive.py` / `check-healthkit-record-sync.py` 的**执行**有
+    # （`run-health-sync-tests.sh:28 / :164`），但**没有任何一条突变是为它们的断言设计的** ⇒
+    # “改坏了它们会红”从未被任何常驻机制证明过（ADR-004 三层表里“突变验证”缺的一角）。
+    #
+    # ⚠️ 选 mutation 的约束（2026-10-09 实测踩过）：这两个 python 门禁跑在 `SWIFT_GATE` 的**末尾**，
+    # 而该脚本是 `set -e`。所以突变必须满足「**Swift 部分照样绿**、只有 python 门禁能抓」——
+    # 否则 Swift 回归先失败，脚本根本走不到 python 门禁，`assertion_hit=False`（这类突变在报告里
+    # 是 BAD，不能留）。反例（都已实测排除，别再加回来）：
+    #   · 拿掉 `HealthSyncArchive` 的 `nonisolated` ⇒ Swift 归档回归先红
+    #     （`file work blocked MainActor until the worker timed out`）；
+    #   · 把 `read(upToCount: chunkSize)` 换成常量 ⇒ Swift 归档回归先红
+    #     （`ZIP was not processed in complete chunks`）。
+    # 下面三条都改**行为**（不是改名/换写法）而 Swift 侧不覆盖：
+    (
+        "[P4] 结构门禁: 归档写进 iCloud 备份 => 大 ZIP 被备份拖走",
+        lambda: edit(
+            HEALTH_ARCHIVE,
+            "isExcludedFromBackup = true",
+            "isExcludedFromBackup = false",
+        ),
+        SWIFT_GATE,
+        "persistent archive entered backups",
+    ),
+    (
+        "[P4] 结构门禁: 记录删除挪到原子提交之后 => 删除不再落在同一个原子导入事务里",
+        # 改的是 TS；`run-health-sync-tests.sh` **不编译 TS**，所以只有 python 记录同步门禁
+        # 能抓它（断言是"删除必须出现在原子提交之前"）。
+        lambda: edit(
+            HEALTH_PARSER,
+            "    const recordDeletions = [...(options.deletedRecords ?? []), ...carriedDeletedSources];\n"
+            "    const removedHealthKitRecords = recordDeletions.length\n"
+            "      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration) : 0;\n"
+            "    if (options.deletedWorkoutIds?.length) {\n"
+            "      explicitDeletionTimes = store.removeWorkoutsBySyncIdentifiers(options.deletedWorkoutIds, options.incremental?.batchId);\n"
+            "    }\n"
+            "    if (atomic) store.commitAtomicImport();\n"
+            "    else store.flush();\n",
+            "    if (options.deletedWorkoutIds?.length) {\n"
+            "      explicitDeletionTimes = store.removeWorkoutsBySyncIdentifiers(options.deletedWorkoutIds, options.incremental?.batchId);\n"
+            "    }\n"
+            "    if (atomic) store.commitAtomicImport();\n"
+            "    else store.flush();\n"
+            "    const recordDeletions = [...(options.deletedRecords ?? []), ...carriedDeletedSources];\n"
+            "    const removedHealthKitRecords = recordDeletions.length\n"
+            "      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration) : 0;\n",
+        ),
+        SWIFT_GATE,
+        "record deletions must be applied before the atomic import commits",
+    ),
+    (
+        "[P4] 结构门禁: 导出清单退回 version 1 => 服务端按旧协议读 v2 载荷",
+        lambda: edit(
+            HEALTH_EXPORT,
+            '"version": 2,',
+            '"version": 1,',
+        ),
+        SWIFT_GATE,
+        "the export manifest must be v2 and carry the record deletions",
     ),
 ]
 
