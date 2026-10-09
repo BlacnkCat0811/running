@@ -159,6 +159,8 @@ export interface HandshakeResponse {
   datasetEpoch: string;
   syncProtocolVersion: number;
   apiVersion: string;
+  /** Typed record UUID deltas; additive capability, not a change of dataset scope. */
+  healthKitRecordSyncVersion?: number;
   /** /synced accepts UUID/time/idempotency/export metadata. Older servers omit it. */
   planReceiptMetadata?: boolean;
   planSnapshotContractVersion?: number;

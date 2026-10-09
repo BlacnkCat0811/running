@@ -25,6 +25,31 @@ import {
 } from "../src/import-sources.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 
+test("v2 HealthKit deletion-only payloads are distinct, ordered-independent, and always preserve absent facts", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-v2-deletion-digest-"));
+  const uuid = "00000000-0000-0000-0000-00000000000a";
+  try {
+    writeFileSync(join(root, "export.xml"), "<HealthData/>");
+    const digest = async (deletedRecords: { type: string; uuid: string }[]) => {
+      writeFileSync(join(root, "sync-manifest.json"), JSON.stringify({
+        version: 2, sourceScope: "healthkit", deletedSourceIds: [], deletedRecords
+      }));
+      return digestHealthKitExportContent(root);
+    };
+    const one = { type: "HKQuantityTypeIdentifierHeartRateVariabilitySDNN", uuid };
+    const two = { type: "HKCategoryTypeIdentifierSleepAnalysis", uuid };
+    const empty = await digest([]);
+    const first = await digest([one]);
+    const both = await digest([one, two]);
+    assert.notEqual(first, empty, "record-only deletion must not be deduplicated as an empty sync");
+    assert.notEqual(first, both, "type is part of source identity");
+    assert.equal(await digest([two, { ...one, uuid: uuid.toUpperCase() }, one]), both);
+    assert.deepEqual(resolvePreserveAbsent(root, { kind: "upload" }),
+      { preserveAbsent: true, reason: "manifest-healthkit" });
+    assert.equal(isHealthKitUploadSource({ kind: "upload" }, root), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 async function zip(path: string, entries: Array<{ name: string; body: string }>): Promise<void> {
   const archive = new yazl.ZipFile();
   for (const entry of entries) archive.addBuffer(Buffer.from(entry.body), entry.name);

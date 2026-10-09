@@ -886,6 +886,7 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   datasetEpoch,
   syncProtocolVersion,
   apiVersion: "v1",
+  healthKitRecordSyncVersion: 2,
   planReceiptMetadata: true,
   planSnapshotContractVersion: 1,
   ...(mobileGoalsStore.supportsPublicationOperations ? { planPublicationContractVersion: 1 } : {}),

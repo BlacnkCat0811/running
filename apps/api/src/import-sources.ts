@@ -164,8 +164,9 @@ export function readSyncManifestScope(inputPath: string): SyncManifestScope {
     };
     // Only the versioned manifest contract may opt into destructive semantics.
     // A hand-written or legacy manifest remains conservative.
-    if (parsed.version !== 1) return { declared: true, sourceScope: null };
+    if (parsed.version !== 1 && parsed.version !== 2) return { declared: true, sourceScope: null };
     const scope = parsed.sourceScope;
+    if (parsed.version === 2 && scope !== "healthkit") return { declared: true, sourceScope: null };
     return {
       declared: true,
       sourceScope: typeof scope === "string" && scope.trim().length > 0 ? scope.trim() : null
@@ -265,13 +266,21 @@ export async function digestHealthKitExportContent(exportRoot: string): Promise<
     let content = raw;
     try {
       const manifest = JSON.parse(raw) as Record<string, unknown>;
-      content = JSON.stringify({
+      const semantics = {
         version: manifest.version,
         sourceScope: manifest.sourceScope,
         deletedSourceIds: Array.isArray(manifest.deletedSourceIds)
           ? [...new Set(manifest.deletedSourceIds.filter((id): id is string => typeof id === "string"))].sort()
           : []
-      });
+      };
+      content = JSON.stringify(manifest.version === 2 ? {
+        ...semantics,
+        deletedRecords: Array.isArray(manifest.deletedRecords)
+          ? [...new Set(manifest.deletedRecords.map((item) => {
+            const record = item as { type?: unknown; uuid?: unknown } | null;
+            return JSON.stringify([record?.type, typeof record?.uuid === "string" ? record.uuid.toLowerCase() : record?.uuid]);
+          }))].sort() : manifest.deletedRecords
+      } : semantics);
     } catch { /* An invalid manifest must remain distinct and fail during import. */ }
     hash.update(`\0sync-manifest\0${content}\0`);
   }
