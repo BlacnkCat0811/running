@@ -5,6 +5,8 @@ import { migrateModelV26 } from "./v26-migration.js";
 import { migrateModelV27 } from "./v27-migration.js";
 import { migrateModelV28 } from "./v28-migration.js";
 import { migrateModelV29 } from "./v29-migration.js";
+import { migrateModelV30 } from "./v30-migration.js";
+import { migrateModelV31 } from "./v31-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1637,7 +1639,9 @@ const migrations: readonly Migration[] = [
   { version: 26, name: "privacy_zones_for_shared_route_cards", up: migrateModelV26 },
   { version: 27, name: "manual_performance_entries_for_labels", up: migrateModelV27 },
   { version: 28, name: "performance_event_identity_and_label_invalidation", up: migrateModelV28 },
-  { version: 29, name: "unlinked_performance_event_label_invalidation", up: migrateModelV29 }
+  { version: 29, name: "unlinked_performance_event_label_invalidation", up: migrateModelV29 },
+  { version: 30, name: "healthkit_record_source_identity", up: migrateModelV30 },
+  { version: 31, name: "healthkit_record_aliases_and_source_facts", up: migrateModelV31 }
 ];
 
 /**
@@ -1709,7 +1713,9 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   26: "089f8e04676dec4ab889544689c1deb237f1d0ffa23c1ed45d01d729b7358931",
   27: "95bd9406fa2bc210c776828e445cad55c03351bb1a5d79306739f0e76033804c",
   28: "b571133e763ef7a0e2e1c746a0dabcad9bcf0864aaf0f2c0b9f018b8912ada04",
-  29: "02e5468e61e6202bb2e126019b6c44d0137ece87649d04c018d2b5db3d4bb413"
+  29: "02e5468e61e6202bb2e126019b6c44d0137ece87649d04c018d2b5db3d4bb413",
+  30: "f9bbf0499b467c731679e6b92aa6541983793503851b24c885d3a5b827021d4c",
+  31: "bcc34b942bb696ccc500629fcac865773199128e351290bea776772a359bb3bf"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -2519,6 +2525,250 @@ export class RaiDatabase {
     return removed;
   }
 
+  /** Type scopes UUID tombstones; canonical IDs retain the legacy XML formula. */
+  healthKitRecordSourceIdentifier(type: string, uuid: string): string {
+    return `healthkit-record:v2:${type}:${uuid.toLowerCase()}`;
+  }
+
+  isHealthKitRecordSourceDeleted(type: string, uuid: string): boolean {
+    return this.database.prepare(`
+      SELECT 1 FROM import_source_tombstones WHERE entity_kind = 'record' AND source_identifier = ?
+    `).get(this.healthKitRecordSourceIdentifier(type, uuid)) !== undefined;
+  }
+
+  hasHealthKitRecordAliases(): boolean {
+    return this.database.prepare("SELECT 1 FROM healthkit_record_aliases LIMIT 1").get() !== undefined;
+  }
+
+  /** Retain aliases after deletion: old XML must find the canonical tombstone,
+   * not silently build a new row from its original sync ID or corrected dates. */
+  resolveHealthKitRecordAlias(aliasId: string): string {
+    return this.healthKitRecordAliasTarget(aliasId) ?? aliasId;
+  }
+
+  private healthKitRecordAliasTarget(aliasId: string): string | undefined {
+    const row = this.database.prepare(`
+      SELECT s.record_id AS id FROM healthkit_record_aliases a
+      JOIN healthkit_record_sources s USING (sample_type, sample_uuid)
+      WHERE a.alias_id = ? ORDER BY s.record_id LIMIT 1
+    `).get(aliasId) as { id: string } | undefined;
+    return row?.id;
+  }
+
+  /** UUID-less XML may not overwrite a live shared row with the facts of an
+   * explicitly deleted source. Prefer its value/date identity over a shared
+   * vendor sync ID when deciding whether all known owners of the alias died. */
+  resolveHealthKitRecordXmlIdentity(candidateId: string, legacyId: string): {
+    id: string; source: { type: string; uuid: string } | null; tombstoned: boolean;
+  } {
+    // A different, previously unseen vendor sync ID is not the deleted source
+    // merely because its value and dates happen to match a known alias.
+    const id = this.healthKitRecordAliasTarget(candidateId);
+    if (id === undefined) return { id: candidateId, source: null, tombstoned: false };
+    const alias = this.database.prepare(`
+      SELECT 1 FROM healthkit_record_aliases a JOIN healthkit_record_sources s USING (sample_type, sample_uuid)
+      WHERE a.alias_id = ? AND s.record_id = ? LIMIT 1
+    `).get(legacyId, id) ? legacyId : candidateId;
+    const owners = this.database.prepare(`
+      SELECT s.sample_type AS type, s.sample_uuid AS uuid, tomb.source_identifier AS deleted
+      FROM healthkit_record_aliases a JOIN healthkit_record_sources s USING (sample_type, sample_uuid)
+      LEFT JOIN import_source_tombstones tomb ON tomb.entity_kind = 'record' AND tomb.source_identifier =
+        'healthkit-record:v2:' || s.sample_type || ':' || s.sample_uuid
+      WHERE a.alias_id = ? AND s.record_id = ?
+    `).all(alias, id) as { type: string; uuid: string; deleted: string | null }[];
+    const live = owners.filter((owner) => owner.deleted === null);
+    // A unique confirmed alias owner lets legacy corrections refresh that
+    // source's snapshot. Multiple owners are deliberately not guessed.
+    return { id, source: live.length === 1 ? live[0]! : null, tombstoned: live.length === 0 };
+  }
+
+  resolveHealthKitRecordId(type: string, uuid: string, candidateId: string, legacyId: string): string {
+    this.begin();
+    const mapped = this.database.prepare(`
+      SELECT record_id AS id FROM healthkit_record_sources WHERE sample_type = ? AND sample_uuid = ?
+    `).get(type, uuid.toLowerCase()) as { id: string } | undefined;
+    // Earlier iOS exporters omitted the original sync identifier. Attach the
+    // UUID to that existing row instead of creating a second identity on upgrade.
+    const id = mapped?.id ?? this.healthKitRecordAliasTarget(candidateId)
+      ?? (this.database.prepare("SELECT 1 FROM health_records WHERE id = ?").get(legacyId) ? legacyId : candidateId);
+    const deleted = this.isHealthKitRecordSourceDeleted(type, uuid);
+    this.database.prepare(`
+      INSERT INTO healthkit_record_sources VALUES (?, ?, ?)
+      ON CONFLICT(sample_type, sample_uuid) DO NOTHING
+    `).run(type, uuid.toLowerCase(), id);
+    const alias = this.database.prepare("INSERT OR IGNORE INTO healthkit_record_aliases VALUES (?, ?, ?)");
+    // The retained canonical ID may describe a *different* UUID's old value.
+    // Only the two formulas actually carried by this source are its aliases.
+    for (const aliasId of new Set([candidateId, legacyId])) alias.run(aliasId, type, uuid.toLowerCase());
+    if (deleted) return id;
+    // A *different*, live UUID may replace a deleted sample sharing its original
+    // sync identifier. Never clear absence/snapshot tombstones or source tombstones.
+    this.database.prepare(`
+      DELETE FROM import_entity_tombstones WHERE entity_kind = 'record' AND entity_id = ?
+        AND source_identifier LIKE 'healthkit-record:v2:%'
+    `).run(id);
+    return id;
+  }
+
+  /** Snapshot every accepted UUID, including one hidden by another UUID's last
+   * write to a shared canonical ID. Never overwrite this with a deleted replay. */
+  saveHealthKitRecordFact(
+    record: CanonicalHealthRecord, uuid: string, category: string,
+    attributes: Record<string, string>, contentHash: string
+  ): void {
+    this.begin();
+    this.database.prepare(`
+      INSERT OR REPLACE INTO healthkit_record_facts
+        (sample_type, sample_uuid, record_json, source_category, raw_attributes_json, content_hash)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(record.type, uuid.toLowerCase(), JSON.stringify(record), category, JSON.stringify(attributes), contentHash);
+  }
+
+  /** Older v30 imports may already have forked a known XML alias into an
+   * unmapped row. An explicit deletion must remove that copy too, but never
+   * another canonical UUID mapping or an alias with any still-live owner. */
+  private removeDeletedHealthKitAliasCopies(recordId: string, source: string, batchId?: string): number {
+    const copies = this.database.prepare(`
+      SELECT DISTINCT r.id, r.start_at AS startAt FROM healthkit_record_aliases a
+      JOIN healthkit_record_sources s USING (sample_type, sample_uuid)
+      JOIN health_records r ON r.id = a.alias_id
+      WHERE s.record_id = ? AND r.id <> s.record_id
+        AND NOT EXISTS (SELECT 1 FROM healthkit_record_sources mapped WHERE mapped.record_id = r.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM healthkit_record_aliases live
+          WHERE live.alias_id = a.alias_id AND NOT EXISTS (
+            SELECT 1 FROM import_source_tombstones tomb
+            WHERE tomb.entity_kind = 'record' AND tomb.source_identifier =
+              'healthkit-record:v2:' || live.sample_type || ':' || live.sample_uuid
+          )
+        )
+    `).all(recordId) as { id: string; startAt: string }[];
+    for (const copy of copies) {
+      this.recordEntityTombstones("record", [copy.id], {
+        ...(batchId === undefined ? {} : { batchId }), sourceIdentifier: source
+      });
+      if (batchId) this.database.prepare(`
+        INSERT OR REPLACE INTO import_entity_changes
+          (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
+        VALUES (?, 'record', ?, 'removed', ?, ?)
+      `).run(batchId, copy.id, copy.startAt, copy.id);
+      this.database.prepare("DELETE FROM import_entity_generations WHERE entity_kind = 'record' AND entity_id = ?").run(copy.id);
+      this.database.prepare("DELETE FROM health_records WHERE id = ?").run(copy.id);
+    }
+    return copies.length;
+  }
+
+  /** Explicit v2 events only. Missing samples/denied permissions never delete.
+   * Shared IDs retain the facts of a live owner, not the deleted owner's value. */
+  removeHealthKitRecords(
+    deletions: readonly { type: string; uuid: string }[], batchId?: string, generation = "full-import"
+  ): number {
+    this.begin();
+    let removed = 0;
+    this.markHealthKitRecordDeletions(deletions, batchId);
+    // Include earlier tombstones whose UUID only became resolvable in this
+    // payload. A deletion-before-arrival must also protect subsequent legacy XML.
+    const resolved = this.database.prepare(`
+      SELECT s.sample_type AS type, s.sample_uuid AS uuid
+      FROM healthkit_record_sources s
+      JOIN import_source_tombstones tomb ON tomb.entity_kind = 'record'
+        AND tomb.source_identifier = 'healthkit-record:v2:' || s.sample_type || ':' || s.sample_uuid
+      JOIN health_records r ON r.id = s.record_id
+    `).all() as { type: string; uuid: string }[];
+    const handled = new Set<string>();
+    for (const deletion of [...deletions, ...resolved]) {
+      const source = this.healthKitRecordSourceIdentifier(deletion.type, deletion.uuid);
+      const row = this.database.prepare(`
+        SELECT s.record_id AS id, r.start_at AS startAt, r.type, r.metadata_json AS metadataJson
+        FROM healthkit_record_sources s
+        LEFT JOIN health_records r ON r.id = s.record_id
+        WHERE s.sample_type = ? AND s.sample_uuid = ?
+      `).get(deletion.type, deletion.uuid.toLowerCase()) as {
+        id: string; startAt: string | null; type: string | null; metadataJson: string | null;
+      } | undefined;
+      if (!row || handled.has(row.id)) continue;
+      handled.add(row.id);
+      removed += this.removeDeletedHealthKitAliasCopies(row.id, source, batchId);
+      const liveSources = this.database.prepare(`
+        SELECT s.sample_type AS type, s.sample_uuid AS uuid FROM healthkit_record_sources s
+        WHERE s.record_id = ? AND NOT EXISTS (
+          SELECT 1 FROM import_source_tombstones tomb
+          WHERE tomb.entity_kind = 'record' AND tomb.source_identifier =
+            'healthkit-record:v2:' || s.sample_type || ':' || s.sample_uuid
+        )
+      `).all(row.id) as { type: string; uuid: string }[];
+      if (liveSources.length) {
+        // Absence from an authoritative snapshot is not a reason to resurrect a
+        // cached fact. Also leave a currently live owner entirely unchanged.
+        if (row.startAt === null) continue;
+        const metadata = JSON.parse(row.metadataJson!) as CanonicalHealthRecord["metadata"];
+        const owner = metadata.RAIHealthKitSampleUUID?.at(-1)?.toLowerCase();
+        if (liveSources.some((live) => live.type === row.type && live.uuid === owner)) continue;
+        const surviving = this.database.prepare(`
+          SELECT f.record_json AS recordJson, f.sample_uuid AS uuid, f.source_category AS category,
+            f.raw_attributes_json AS attributesJson, f.content_hash AS contentHash
+          FROM healthkit_record_facts f JOIN healthkit_record_sources s USING (sample_type, sample_uuid)
+          WHERE s.record_id = ? AND NOT EXISTS (
+            SELECT 1 FROM import_source_tombstones tomb
+            WHERE tomb.entity_kind = 'record' AND tomb.source_identifier =
+              'healthkit-record:v2:' || s.sample_type || ':' || s.sample_uuid
+          ) ORDER BY f.sequence DESC LIMIT 1
+        `).get(row.id) as {
+          recordJson: string; uuid: string; category: string; attributesJson: string; contentHash: string;
+        } | undefined;
+        if (!surviving) {
+          // A v30 shared row cannot reconstruct an overwritten UUID's facts.
+          // Reject rather than acknowledge stale data; a history rescan supplies
+          // the surviving source before this same deletion is retried.
+          throw new Error("共享健康记录缺少存活来源事实，请手动同步补读历史后重试");
+        }
+        const record = JSON.parse(surviving.recordJson) as CanonicalHealthRecord;
+        record.id = row.id;
+        record.metadata.RAIHealthKitSampleUUID = [surviving.uuid];
+        this.observeImportEntity("record", row.id, generation, record.startAt, batchId, surviving.contentHash);
+        this.insertRecord(record, surviving.category, JSON.parse(surviving.attributesJson));
+        // Cold-start seed hashes do not count as updates in observeImportEntity,
+        // but replacing a deleted fact must always activate recomputation.
+        if (batchId) this.database.prepare(`
+          INSERT OR REPLACE INTO import_entity_changes
+            (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
+          VALUES (?, 'record', ?, 'updated', ?, ?)
+        `).run(batchId, row.id, record.startAt, surviving.contentHash);
+        continue;
+      }
+      this.recordEntityTombstones("record", [row.id], {
+        ...(batchId === undefined ? {} : { batchId }), sourceIdentifier: source
+      });
+      if (row.startAt === null) continue;
+      if (batchId) this.database.prepare(`
+        INSERT OR REPLACE INTO import_entity_changes
+          (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
+        VALUES (?, 'record', ?, 'removed', ?, ?)
+      `).run(batchId, row.id, row.startAt, row.id);
+      this.database.prepare("DELETE FROM import_entity_generations WHERE entity_kind = 'record' AND entity_id = ?").run(row.id);
+      this.database.prepare("DELETE FROM health_records WHERE id = ?").run(row.id);
+      removed += 1;
+    }
+    return removed;
+  }
+
+  /** Register before scanning additions: payload order cannot let a carried
+   * deleted UUID overwrite a live replacement with the same legacy identity. */
+  markHealthKitRecordDeletions(
+    deletions: readonly { type: string; uuid: string }[], batchId?: string
+  ): void {
+    this.begin();
+    const sourceDeletion = this.database.prepare(`
+      INSERT INTO import_source_tombstones(entity_kind, source_identifier, batch_id)
+      VALUES ('record', ?, ?)
+      ON CONFLICT(entity_kind, source_identifier) DO NOTHING
+    `);
+    for (const deletion of deletions) {
+      const source = this.healthKitRecordSourceIdentifier(deletion.type, deletion.uuid);
+      sourceDeletion.run(source, batchId ?? null);
+    }
+  }
+
   observeImportEntity(
     kind: "record" | "workout" | "activity_summary",
     id: string,
@@ -2832,7 +3082,7 @@ export class RaiDatabase {
           sourceIdentifier: identifier
         });
       }
-      this.flush();
+      if (!this.atomicImport) this.flush();
       return dirtyWorkoutTimes;
     } catch (error) {
       this.rollback();
