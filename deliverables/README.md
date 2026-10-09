@@ -1,7 +1,15 @@
 # 核验产物
 
 现行说明统一从 [项目README](../README.md) 进入；审查结论只维护 [PROJECT_REVIEW](../docs/PROJECT_REVIEW.md)。
-本目录不是第二套产品规范/实施计划，不再保存重复批次Markdown或archive副本。
+本目录不是第二套产品规范/实施计划，不保存**重复批次** Markdown 或 archive 副本。当轮尚未收尾的审查
+报告可以临时列在下方「当轮审查」一节，并在下一轮并入 `PROJECT_REVIEW` 或删除。
+
+## 当轮审查（未提交改动）
+
+- [UNCOMMITTED_REVIEW_2026-10-09.md](UNCOMMITTED_REVIEW_2026-10-09.md)：HealthKit 记录同步 v2
+  （v30/v31 迁移 + 逐类型变更游标 + 类型作用域 UUID 删除）等 44 项未提交改动的分级审查
+  （1 条 🔴 部署动作 / 8 条 🟡 / 12 项 ✅），附门禁实跑与突变验证。
+  ⚠️ 这是**当轮**产物：收尾后并入 [项目审查](../docs/PROJECT_REVIEW.md) 或删除，不长期保留。
 
 ## 保留的固定时点证据
 
