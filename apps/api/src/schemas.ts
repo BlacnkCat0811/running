@@ -275,7 +275,8 @@ export const mobileWeeklyPlanPreviewBodySchema = {
 } as const;
 
 /**
- * Receipt for "the phone handed this plan day to the Watch".
+ * Receipt for a client-verified local system workout schedule. It is not
+ * proof that the physical paired Watch received the day.
  *
  * `structure` is optional because the phone may sync a day whose structure it
  * did not receive (a manually built session); the date and kind are the parts
@@ -289,7 +290,11 @@ export const mobilePlanSyncedBodySchema = {
     localDate: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" },
     kind: { type: "string", enum: [...MOBILE_SESSION_KINDS] },
     revision: { type: "integer", minimum: 0, maximum: 1_000_000 },
-    structure: { anyOf: [mobileSessionStructureSchema, { type: "null" }] }
+    structure: { anyOf: [mobileSessionStructureSchema, { type: "null" }] },
+    workoutID: { type: "string", format: "uuid" },
+    scheduledAt: { type: "string", format: "date-time" },
+    idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
+    exportNotes: { type: "array", maxItems: 16, items: { type: "string", maxLength: 256 } }
   }
 } as const;
 

@@ -874,7 +874,8 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   athleteId,
   datasetEpoch,
   syncProtocolVersion,
-  apiVersion: "v1"
+  apiVersion: "v1",
+  planReceiptMetadata: true
 }));
 app.get("/v1/openapi.json", async () => openapiDocument);
 app.get("/v1/performance", async () => ({
@@ -1124,19 +1125,23 @@ app.put<{ Body: PrivacyZonesBody }>(
   }
 );
 
-app.post<{ Body: { localDate: string; kind: MobileSessionKind; revision?: number; structure?: MobileSessionStructure | null } }>(
+app.post<{ Body: { localDate: string; kind: MobileSessionKind; revision?: number; structure?: MobileSessionStructure | null; workoutID?: string; scheduledAt?: string; idempotencyKey?: string; exportNotes?: string[] } }>(
   "/v1/mobile/workout-plan/synced",
   { schema: { body: mobilePlanSyncedBodySchema } },
   async (request) => {
     const pushedAt = new Date().toISOString();
-    mobileGoalsStore.recordPlanPush({
+    const recordedAt = mobileGoalsStore.recordPlanPush({
       localDate: request.body.localDate,
       kind: request.body.kind,
       revision: request.body.revision ?? 0,
       structure: request.body.structure ?? null,
-      pushedAt
+      pushedAt,
+      ...(request.body.workoutID !== undefined ? { workoutID: request.body.workoutID } : {}),
+      ...(request.body.scheduledAt !== undefined ? { scheduledAt: request.body.scheduledAt } : {}),
+      ...(request.body.idempotencyKey !== undefined ? { idempotencyKey: request.body.idempotencyKey } : {}),
+      ...(request.body.exportNotes !== undefined ? { exportNotes: request.body.exportNotes } : {})
     });
-    return { recordedAt: pushedAt };
+    return { recordedAt };
   }
 );
 

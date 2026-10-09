@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import type {
   MobileGoalsResponse,
@@ -121,13 +122,17 @@ export interface PlanHistoryRevision {
   lockedSession: MobileLockedSession | null;
 }
 
-/** A plan day the phone handed to the Watch, with the moment it did so. */
+/** Client-verified local system schedule; physical Watch delivery is separate. */
 export interface PlanPushRecord {
   localDate: string;
   revision: number;
   kind: MobileSessionKind;
   structure: MobileSessionStructure | null;
   pushedAt: string;
+  workoutID?: string;
+  scheduledAt?: string;
+  idempotencyKey?: string;
+  exportNotes?: string[];
 }
 
 /**
@@ -357,32 +362,64 @@ export class MobileGoalsStore {
   }
 
   /**
-   * Registers that the phone handed a plan day to the Watch.
+   * Registers the client-verified local system schedule for a plan day.
    *
    * This is a receipt, not a projection: the structure is stored exactly as the
    * phone reported it. Later edits to the week must not rewrite what was
    * executed, and the run's own date cannot identify the plan (the plan is
    * pushed for *tomorrow*), so the receipt is the only reliable link.
    */
-  recordPlanPush(input: PlanPushRecord): void {
-    if (!this.controlDatabase) return;
+  recordPlanPush(input: PlanPushRecord): string {
+    if (!this.controlDatabase) return input.pushedAt;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.localDate)) {
       throw new MobileGoalsInputError("localDate must be YYYY-MM-DD");
     }
     if (!SESSION_KINDS.has(input.kind)) throw new MobileGoalsInputError("kind is not a session kind");
-    this.controlDatabase
-      .prepare(`
-        INSERT INTO mobile_plan_pushes (local_date, revision, kind, payload_json, pushed_at)
-        VALUES (?, ?, ?, ?, ?)
-      `)
-      .run(
-        input.localDate,
-        Number.isFinite(input.revision) ? Math.max(0, Math.round(input.revision)) : 0,
-        input.kind,
-        JSON.stringify({ structure: input.structure }),
-        input.pushedAt
-      );
-    this.invalidateReadCaches();
+    const payload = {
+      structure: input.structure,
+      ...(input.workoutID !== undefined ? { workoutID: input.workoutID } : {}),
+      ...(input.scheduledAt !== undefined ? { scheduledAt: input.scheduledAt } : {}),
+      ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
+      ...(input.exportNotes !== undefined ? { exportNotes: input.exportNotes } : {})
+    };
+    const revision = Number.isFinite(input.revision) ? Math.max(0, Math.round(input.revision)) : 0;
+    // Serialise lookup + insert even if another process owns the same control
+    // database. A unique index alone would turn a concurrent retry into a 500.
+    this.controlDatabase.exec("BEGIN IMMEDIATE");
+    try {
+      if (input.idempotencyKey) {
+        const previous = this.controlDatabase.prepare(`
+          SELECT local_date, revision, kind, payload_json, pushed_at FROM mobile_plan_pushes
+          WHERE json_valid(payload_json) AND json_extract(payload_json, '$.idempotencyKey') = ?
+        `).get(input.idempotencyKey) as { local_date: string; revision: number; kind: string; payload_json: string; pushed_at: string } | undefined;
+        if (previous) {
+          if (previous.local_date !== input.localDate || previous.revision !== revision ||
+              previous.kind !== input.kind || !isDeepStrictEqual(JSON.parse(previous.payload_json), payload)) {
+            throw new MobileGoalsInputError("idempotencyKey was already used for a different system schedule receipt");
+          }
+          this.controlDatabase.exec("COMMIT");
+          return previous.pushed_at;
+        }
+      }
+      this.controlDatabase
+        .prepare(`
+          INSERT INTO mobile_plan_pushes (local_date, revision, kind, payload_json, pushed_at)
+          VALUES (?, ?, ?, ?, ?)
+        `)
+        .run(
+          input.localDate,
+          revision,
+          input.kind,
+          JSON.stringify(payload),
+          input.pushedAt
+        );
+      this.controlDatabase.exec("COMMIT");
+      this.invalidateReadCaches();
+      return input.pushedAt;
+    } catch (error) {
+      this.controlDatabase.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   /** Push receipts at or after `sinceIso`, newest first. */
@@ -421,9 +458,9 @@ export class MobileGoalsStore {
     }>;
     return rows.flatMap((row) => {
       if (!SESSION_KINDS.has(row.kind as MobileSessionKind)) return [];
-      let parsed: { structure?: unknown };
+      let parsed: { structure?: unknown; workoutID?: string; scheduledAt?: string; idempotencyKey?: string; exportNotes?: string[] };
       try {
-        parsed = JSON.parse(row.payload_json) as { structure?: unknown };
+        parsed = JSON.parse(row.payload_json);
       } catch {
         return [];
       }
@@ -433,7 +470,11 @@ export class MobileGoalsStore {
           revision: Number(row.revision),
           kind: row.kind as MobileSessionKind,
           structure: normalizeSessionStructure(parsed.structure),
-          pushedAt: row.pushed_at
+          pushedAt: row.pushed_at,
+          ...(parsed.workoutID !== undefined ? { workoutID: parsed.workoutID } : {}),
+          ...(parsed.scheduledAt !== undefined ? { scheduledAt: parsed.scheduledAt } : {}),
+          ...(parsed.idempotencyKey !== undefined ? { idempotencyKey: parsed.idempotencyKey } : {}),
+          ...(parsed.exportNotes !== undefined ? { exportNotes: parsed.exportNotes } : {})
         }
       ];
     });
@@ -522,6 +563,9 @@ export class MobileGoalsStore {
       );
       CREATE INDEX IF NOT EXISTS idx_mobile_plan_pushes_pushed_at
         ON mobile_plan_pushes(pushed_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_plan_pushes_idempotency
+        ON mobile_plan_pushes(json_extract(payload_json, '$.idempotencyKey'))
+        WHERE json_valid(payload_json) AND json_extract(payload_json, '$.idempotencyKey') IS NOT NULL;
     `);
     const existing = database.prepare("SELECT revision FROM mobile_goals WHERE singleton = 1").get();
     if (!existing) {

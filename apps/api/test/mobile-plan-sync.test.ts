@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import Fastify from "fastify";
 
 import type { MobileSessionKind, MobileSessionStructure } from "@rai/api-contracts";
 import { MOBILE_SESSION_KINDS } from "@rai/contracts";
@@ -250,4 +251,48 @@ test("a cached window matches the query it replaced", () => {
 
     raw.close();
   });
+});
+
+test("system-schedule metadata is additive, idempotent and survives reopen without rewriting legacy receipts", () => {
+  withStore(({ store, root, controlPath }) => {
+    const legacy = pushReceipt("2026-10-09", "2026-10-08T00:00:00Z", { structure });
+    store.recordPlanPush(legacy);
+    const receipt = pushReceipt("2026-10-10", "2026-10-08T01:00:00Z", {
+      structure, workoutID: "ab8f0784-1111-4111-8111-bc78d3e66666",
+      scheduledAt: "2026-10-10T00:00:00Z", idempotencyKey: "schedule-operation-1", exportNotes: ["normalized target bounds"]
+    });
+    assert.equal(store.recordPlanPush(receipt), receipt.pushedAt);
+    assert.equal(store.recordPlanPush({ ...receipt, pushedAt: "2026-10-08T02:00:00Z" }), receipt.pushedAt);
+    assert.equal(store.planPushes(SINCE).length, 2, "lost-reply retry does not append a second receipt");
+    assert.throws(() => store.recordPlanPush({ ...receipt, localDate: "2026-10-11" }), MobileGoalsInputError);
+    const reopened = new MobileGoalsStore(root, controlPath);
+    try {
+      assert.deepEqual(reopened.planPushes(SINCE)[0], receipt);
+      assert.deepEqual(reopened.planPushes(SINCE)[1], legacy);
+      assert.equal(reopened.recordPlanPush(receipt), receipt.pushedAt);
+      assert.equal(store.planPushes(SINCE).length, 2);
+    } finally { reopened.close(); }
+    for (const field of ["workoutID", "scheduledAt", "idempotencyKey", "exportNotes"]) {
+      assert.ok(field in mobilePlanSyncedBodySchema.properties);
+      assert.ok(!mobilePlanSyncedBodySchema.required.includes(field as "localDate" | "kind"));
+    }
+  });
+});
+
+
+test("old and new receipt bodies pass public schema; malformed UUID/time cannot claim metadata", async () => {
+  const app = Fastify({ ajv: { customOptions: { removeAdditional: false } } });
+  app.post("/synced", { schema: { body: mobilePlanSyncedBodySchema } }, request => request.body);
+  try {
+    const legacy = { localDate: "2026-10-09", kind: "easy", revision: 13, structure };
+    const modern = { ...legacy, workoutID: "ab8f0784-1111-4111-8111-bc78d3e66666", scheduledAt: "2026-10-09T00:00:00Z", idempotencyKey: "stable", exportNotes: [] };
+    for (const payload of [legacy, modern]) {
+      const response = await app.inject({ method: "POST", url: "/synced", payload });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(response.json(), payload);
+    }
+    for (const payload of [{ ...modern, workoutID: "not-an-id" }, { ...modern, scheduledAt: "not-an-instant" }]) {
+      assert.equal((await app.inject({ method: "POST", url: "/synced", payload })).statusCode, 400);
+    }
+  } finally { await app.close(); }
 });

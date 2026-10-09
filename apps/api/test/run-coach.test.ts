@@ -259,7 +259,7 @@ test("coach confidence refuses to render absent evidence as zero and degrades an
     const runnable = store.read().weekPlan.filter(day => raceConfig.runningDays.includes(runCoachWeekday(day.localDate)));
     assert.equal(unplanned.length, runnable.filter(day => day.kind === "rest").length);
     assert.ok(unplanned.every(row => row.code === "no_session_scheduled" || row.code === "pre_race_taper"));
-    assert.ok(unplanned.every(row => /本周 \d+ 个可跑步日，排入 \d+ 次训练。/.test(row.detail)));
+    assert.ok(unplanned.every(row => /未来7日窗口 \d+ 个可跑步日，排入 \d+ 次训练。/.test(row.detail)));
 
     // The stored day used to answer every one of these with「恢复日。」— a recovery claim made
     // with `recovery.state == "unknown"` and no recovery evidence in the payload at all. The
@@ -267,7 +267,7 @@ test("coach confidence refuses to render absent evidence as zero and degrades an
     assert.ok(store.read().weekPlan.every(day => !(day.reason ?? "").startsWith("恢复日")),
       "the stored week must not assert a cause the read path never established");
     assert.ok(store.read().weekPlan.filter(day => day.kind === "rest" && raceConfig.runningDays.includes(runCoachWeekday(day.localDate)))
-      .every(day => day.reason === "本周未排课。"));
+      .every(day => day.reason === "未来7日窗口未排课。"));
     assert.equal(runCoachUnplannedDays(null, read.mobileWeeklyPlanInputs(store.read()), []).length, 0);
 
     // Decision 4: a distance outside the prediction chain keeps `runCoachRaceTarget === null`,
@@ -367,7 +367,7 @@ test("unplanned coach days use only the current seven-day window", async context
     assert.deepEqual(response.unplannedDays.map(day => day.localDate),
       ["2026-10-08", "2026-10-09", "2026-10-10", "2026-10-11", "2026-10-12", "2026-10-13"]);
     assert.ok(response.unplannedDays.every(day => day.localDate >= "2026-10-07" && day.localDate <= "2026-10-13"));
-    assert.ok(response.unplannedDays.every(day => day.detail === "本周 7 个可跑步日，排入 1 次训练。"));
+    assert.ok(response.unplannedDays.every(day => day.detail === "未来7日窗口 7 个可跑步日，排入 1 次训练。"));
   } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -458,6 +458,32 @@ test("when the phase band is the binding constraint it is read from the today pa
         `${label}: with the band binding, the budget must be the today page's band`);
       assert.equal(runCoachResponse(goals, inputs).weeklyCapacityKm, todayBand,
         `${label}: and so must the published number`);
+    }
+  } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("full coach response never fabricates phase lists for fitness or unsupported distances", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-11T04:00:00Z") }); // Sunday: rolling window crosses a natural week.
+  const root = mkdtempSync(join(tmpdir(), "rai-coach-null-phases-"));
+  const path = join(root, "rai.sqlite");
+  await seedRecentRunningWeeks(path, "2026-10-11", 30);
+  const store = new MobileGoalsStore(root);
+  const read = new RaiReadStore(path);
+  try {
+    for (const distance of [null, 42.195, 50]) {
+      const programme: MobileRunCoachPlan = { ...plan, ...(distance == null ? {} : { goal: "finish", raceDate: "2026-12-06", raceDistanceKm: distance }) };
+      const goals = { ...store.read(), runCoach: programme, raceTarget: runCoachRaceTarget(programme) };
+      const response = runCoachResponse(goals, read.mobileWeeklyPlanInputs(goals));
+      assert.equal(response.phase, null);
+      assert.deepEqual(response.phases, [], `distance ${distance} has no periodisation skeleton`);
+    }
+    for (const distance of [5, 10, 21.0975]) {
+      const programme: MobileRunCoachPlan = { ...plan, goal: "finish", raceDate: "2026-12-06", raceDistanceKm: distance };
+      const goals = { ...store.read(), runCoach: programme, raceTarget: runCoachRaceTarget(programme) };
+      const inputs = read.mobileWeeklyPlanInputs(goals);
+      const response = runCoachResponse(goals, inputs);
+      assert.equal(response.phase, runCoachPhase(inputs.today.today.localDate, programme));
+      assert.ok(response.phases.length > 0);
     }
   } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
 });

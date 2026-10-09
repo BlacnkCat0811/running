@@ -159,6 +159,8 @@ export interface HandshakeResponse {
   datasetEpoch: string;
   syncProtocolVersion: number;
   apiVersion: string;
+  /** /synced accepts UUID/time/idempotency/export metadata. Older servers omit it. */
+  planReceiptMetadata?: boolean;
 }
 
 export interface ModelRunSummary {

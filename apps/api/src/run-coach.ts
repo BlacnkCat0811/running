@@ -173,7 +173,7 @@ export function runCoachAdaptationKey(plan: MobileRunCoachPlan, inputs: Inputs,
 export const RUN_COACH_REASONS = {
   programme_stopped: "教练计划未在进行。",
   not_a_running_day: "非可跑步日。",
-  no_session_scheduled: "本周未排课。",
+  no_session_scheduled: "未来7日窗口未排课。",
   race_day: "比赛日留白；不等于比赛已完成。",
   post_race_recovery: "比赛后恢复。",
   pre_race_taper: "赛前减量。"
@@ -216,7 +216,7 @@ export function runCoachUnplannedDays(plan: MobileRunCoachPlan | null, inputs: I
     return [{ localDate: day.localDate,
       code: (taper ? "pre_race_taper" : "no_session_scheduled") as RunCoachUnplannedReason,
       detail: taper ? RUN_COACH_REASONS.pre_race_taper
-        : `本周 ${runnable} 个可跑步日，排入 ${scheduled} 次训练。` }];
+        : `未来7日窗口 ${runnable} 个可跑步日，排入 ${scheduled} 次训练。` }];
   });
 }
 
@@ -275,7 +275,8 @@ export function runCoachResponse(goals: MobileGoalsResponse, inputs: Inputs): Mo
   const phases: MobileRunCoachResponse["phases"] = [];
   if (plan) {
     for (let date = plan.startedOn; date <= runCoachEndDate(plan); date = runCoachShiftDate(date, 1)) {
-      const phase = runCoachPhase(date, plan) ?? "base";
+      const phase = runCoachPhase(date, plan);
+      if (phase === null) continue;
       const last = phases.at(-1);
       if (last?.phase === phase) { last.endsOn = date; last.current ||= date === today; }
       else phases.push({ phase, startsOn: date, endsOn: date, current: date === today });
