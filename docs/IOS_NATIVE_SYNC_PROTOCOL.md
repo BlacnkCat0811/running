@@ -17,6 +17,11 @@ Route 使用逐 workout 的 UNKNOWN → ACTIVE → COOLING → SETTLED 伴生状
 取舍与失败方向见 [ADR-004](adr/ADR-004-healthkit-sync-invariants.md)，真机步骤见 [runbook](IOS_NATIVE_RUNBOOK.md)。
 旧机器收益和历史批次计数不作为当前性能承诺。
 
+2026-10-09：非 Workout 记录改为逐类型、无事件日期过滤的分页 anchored 增量。
+v2 manifest 携带类型作用域 UUID 删除，服务端 v30 映射保留历史数据库 ID；
+新增能力字段不改变原有同步身份版本。迁移、兼容性及升级边界见
+[HealthKit 记录同步 v2](HEALTHKIT_RECORD_SYNC_V2.md)。
+
 ## 状态机
 
 **会话边界**是这套状态机的第一等概念：`upload → inspect → startImport` 三步
@@ -41,6 +46,8 @@ Route 使用逐 workout 的 UNKNOWN → ACTIVE → COOLING → SETTLED 伴生状
 本机 `sync.sqlite` 的 `sync_tasks` 表按服务作用域保存当前任务 JSON。旧版本写入 `UserDefaults` 的任务会在首次读取时迁移。页面缓存使用独立的 `cache.sqlite`，清页面缓存不会清除同步任务。
 
 同库还有一张 `sync_state` 表（`scope` 主键 / `workout_anchor` / `export_end` / `updated_at`），存**已提交的** anchor 与导出水位。
+`sync_record_cursors` 保存按 scope 隔离的非 Workout 各类型 anchor；它与水位、任务删除
+共同进入 `commitSuccess` 事务并在 COMMIT 前回读校验，而非采用 Route 的成功后 best-effort 写入。
 两张表在成功收尾时由**同一个事务**写入（`SyncTaskStore.commitSuccess`）。为什么非要在同一事务里：两份状态是
 "这次同步已提交"的两半，拆开就存在「任务行删成功、水位写失败」这个窗口 —— 结果是**旧 anchor + 没有任务 + 界面报成功**
 ⇒ 每次同步重导同一段；而导出里带 `<ExportDate>`（墙钟）⇒ `payloadHash` 每次都变 ⇒ 服务端**每次新建一份导入来源**。
@@ -62,6 +69,8 @@ Route 使用逐 workout 的 UNKNOWN → ACTIVE → COOLING → SETTLED 伴生状
 
 当前任务数据包含：目标 URL、阶段、source ID、job ID、批次校验值、待确认 HealthKit anchor、导出结束时间和跑步数量；P1 另加 `schemaVersion` 与一组**只存文件名**的产物字段
 （`zipFileName` / `multipartFileName` / `multipartBoundary` / `uploadState` …）。
+v2 另存可选的 `pendingRecordCursors`，四条恢复成功路径都提交这份原批次的候选游标；
+老任务缺字段仍可恢复，且不清除已经提交的记录游标。新导出与 v2 批次恢复均检查服务端记录能力。
 🔴 `uploadTaskId` 这个键**目前没有任何写入点**：判据用的是 `RaiBackgroundUploadSession` 内部按
 identifier 索引的两张表（`waiters` / `descriptions`），把它当"字节归系统"的依据会得到**恒假**，
 于是每次唤醒都重传一遍。结构门禁会拦下这类读取。
@@ -74,13 +83,13 @@ identifier 索引的两张表（`waiters` / `descriptions`），把它当"字节
 存**每条 workout 的路线查询记忆**。它是"降频记忆"，和 `sync_state` 一样必须与任务同库 ——
 **不许落 `UserDefaults`、不许落独立 JSON、不许落内存单例**（门禁判 `UserDefaults` 零出现）。
 
-为什么状态的主键必须是 workout uuid：**HealthKit 没有 route anchor**。`HKAnchoredObjectQuery` 只作用于
-sample 类型，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源（先 `HKQuery.predicateForObjects(from:)`
-找到它，再 `HKWorkoutRouteQuery` 逐点取回）。把它当成独立 anchor 去伪造一个，等于凭空发明 API。
-所以这是 **Workout-Scoped Companion State**，不是 `routeAnchor`。
+状态的主键是 workout uuid：先用 `HKQuery.predicateForObjects(from:)` 找到所属 route sample，
+再用 `HKWorkoutRouteQuery` 逐点取回。sample 的变化通知不能证明路线点已经完整到达或可读，
+所以降频依据是每个 workout 的点数/摘要观测，而不是通知或 sample anchor。
+这是 **Workout-Scoped Companion State**。
 
 四态闭集 `unknown` / `active`（24 h，按 **workout 年龄**而非"距上次查询"）/ `cooling`
-（查询节流 12 h，按 `lastCheckedAt`）/ `settled`（`> 3 d` 后永不查询）。判据在
+（查询节流 12 h，按 `lastCheckedAt`）/ `settled`（`> 3 d` 后转入低频复查）。判据在
 `RouteSyncStateMachine`（纯函数、无副作用、可 100% 单测），落盘在
 `SyncTaskStore.loadRouteStates` / `upsertRouteStates`（`BEGIN IMMEDIATE` 单事务 + 逐行
 `sqlite3_changes() == 1` + 提交**前**回读断言，与 `commitSuccess` 同源）。
@@ -89,7 +98,7 @@ sample 类型，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源（�
 
 1. **「跳过一轮」绝不改动任何状态**（`lastCheckedAt` 不动、`stableCheckCount` 不加）。
    破了它不是报错，是**静默丢数据**：一条刚变更过的轨迹会被当成"又一次确认稳定"，
-   直接降到 `settled`，而 `settled` 只有人工重扫能唤醒 ⇒ 服务端永远收不到它。
+   直接降到 `settled`，错过及时补齐窗口。
    这与 `ADR-004` 决策二「没读到 ≠ 没变化」是同一条不变式在客户端的另一处落点。
 2. **降频记忆只在 `commitSuccess` 之后落盘**（`HealthKitSync.markSuccess`）。
    反方向会造出**不可自愈**的窗口：状态机记成"已稳定、可以少查"，而这一批数据从未真正交付
@@ -98,6 +107,27 @@ sample 类型，`HKWorkoutRoute` 是附着在 `HKWorkout` 上的衍生资源（�
 
 `RouteSyncStateMachine.decide` 的输出契约是 `Decision { shouldQuery, nextState }`；
 `shouldQuery == false` 时 `nextState` **原样携带**，这条由一条对全部状态成立的遍历断言守。
+
+**受控重新发现（2026-10-09）**：`settled` 的空路线（零点数或无摘要）每 24 h、
+已有路线每 7 d 才有资格复查，均从上次实际查询计时；复查无变化继续休眠，
+点数或摘要变化回到 `active` 并清零稳定计数。Workout anchor 返回的真实新增/变化
+可以绕过路线节流；最近窗口回读不算变化。路线类型加入既有 HealthKit observer /
+后台意图链路，但通知本身不会触发全历史轨迹扫描，也不保证当轮立即查询所有路线。
+
+每次正常导出最多额外处理 **20 条历史/休眠候选**，其中也包含近期窗口内的休眠路线；
+窗口外的 `unknown` / `active` / 到期 `cooling` 同样可进入队列。历史 workout 按
+候选 UUID 定点取回，不依赖最近 14 天窗口。`sync_route_discovery` 按 scope 持久化
+字典序轮转位置，和观测同事务、在成功交付之后 best-effort 写入；它不是 HealthKit anchor。
+已删除/不可读的 workout 也跨过候选位置，但不改动观测，防止队首饿死其他路线。
+候选位置随 ZIP 写入任务的可选 `pendingRouteDiscoveryCursor`，四个续传成功分支同样推进它，
+避免每批都因后台中断而永久卡在首批；旧任务缺字段仍可恢复。点数/摘要观测仍仅在本轮导出
+直接完成时落盘，续传后仍以旧观测判定频率（可能重复查询，不会漏掉路线），
+不能为不可读的 workout 伪造观测。
+
+HealthKit 不暴露读取权限是否被授予，因此后续开放路线权限通过低频复查恢复，
+不靠猜测授权布尔值。查询报权限/无数据错误或任一段读取失败时，观测为 `nil`，
+不推进 `lastCheckedAt` / 稳定计数，也不输出部分 GPX；成功查询返回空集合仍是合法零点观测。
+以上间隔只约束既有同步机会，不新增后台定时机制；`full` 人工重扫仍不受间隔和批量上限限制。
 
 ## 字节归谁：唯一判据是「本进程还在等它的结局吗」
 
@@ -198,7 +228,7 @@ v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态�
 
 ## HealthKit 规则
 
-跑步 anchor 与时间窗口采用重叠补查；每次 anchored 增量同步还会回读最近 14 天的跑步，用于发现训练保存后才到达的路线。**这条 14 天窗口现在只决定"候选集"**——真正的路线查询由逐 workout 的伴生状态机决定（见上文「按 workout 定频」），所以"在窗口里"不再等于"每次同步都重拉轨迹"。恢复、HRV、静息心率即使没有新增跑步也随窗口导出。部分读取权限或没有样本会形成空/部分结果，不解释为远程删除。删除事件由 HealthKit 导出清单携带，服务端使用导入元数据中的 workout UUID 负责来源失效处理。
+跑步 anchor 与时间窗口采用重叠补查；每次 anchored 增量同步还会回读最近 14 天的跑步，用于发现训练保存后才到达的路线。**这条 14 天窗口现在只决定"候选集"**——真正的路线查询由逐 workout 的伴生状态机决定（见上文「按 workout 定频」），所以"在窗口里"不再等于"每次同步都重拉轨迹"。恢复、HRV、静息心率及其他数量记录使用独立类型 anchor，不再随事件日期窗口导出；初次升级读取可见历史，手动同步及达到补读间隔后的后台同步重读历史以覆盖权限扩大。部分读取权限或没有样本会形成空/部分结果，不解释为远程删除。Workout 删除保持原 UUID 语义；非 Workout 删除由 v2 清单携带 `{type, uuid}`，服务端通过持久化源映射及 tombstone 处理来源失效。
 
 🔴 **锁屏（Protected Data）是两道锁，不是一道。** 设备锁屏、或开机后尚未首次解锁时，HealthKit
 数据库被硬件级加密锁死，**任何**读取都会被拒（`HKError.errorDatabaseInaccessible`）：
@@ -265,12 +295,42 @@ v1 不单独设置“确认游标”端点：导入 job 的 `succeeded` 状态�
 重开安全的前提是迁移失败已 `ROLLBACK`、`PRAGMA user_version` 幂等、
 且**不删任何文件**（打不开就是打不开，不做"删库重来"）。
 
+## 投递的「记」与「跑」：单飞与节流只限制执行（2026-10-09）
+
+**缺陷**（P1）。`SyncDeliveryPolicy.decide` 曾把"已有同步在跑"与"后台节流窗口内"一并判成
+`.ignore`，而派发方在 `.ignore` 分支里直接 `break` ⇒ 这条投递**既没有代次、也不驱动任何后续轮次**。
+正在跑的那一轮的导出起点早于这条通知，它的字节覆盖不到这次变化；旧批次收工清空之后，后台按快照
+判定"无待办"，自动同步停在原地（要等下一次投递、打开 App 或手动点同步）。
+
+**规则**。
+
+- **只要目标已绑定（`session.serverURL != nil`），一次投递就先 `recordBackgroundIntent`，
+  再按 `decide` 的返回值决定这一轮怎么跑。** `Decision.recordsTheDelivery` 回答"要不要记"，
+  `decide` 只回答"现在跑不跑"。**只有未绑定服务端才是真的 `.ignore`** —— 没有目标，
+  意图也没有任何东西能消费它。
+- `decide` 的两个"不跑"成因（单飞被占 / 节流窗口内）都落在 `deferToBackgroundLater`：
+  记下意图，并排一次**延后**的后台执行（`BackgroundRunPolicy.resubmitDelay`，与节流窗口同量级）。
+  立即 `submit` 是错的 —— BGTask 与正在跑的那一轮撞车只会被单飞静默拒绝，换来一条"跑过了"的假记录。
+- 🔴 **一轮收工后必须把"这一轮没覆盖到的那一代"接过去**：判据 `SyncFollowUp.handoff`
+  （前台且还有额度 ⇒ 当场补跑；否则排一次后台执行），额度 `maxForegroundRounds = 1` 是**硬上限** ——
+  HealthKit 大批导入期间会连发投递，没有上限的"补跑"就是前台自旋，每次自旋都是一轮 GB 级导出。
+  与"后台重排"同一条纪律：**"留下来"与"有人来接"是两件事**。
+- `PendingWork.hasUncoveredGeneration`（通知 + 恢复请求）与 `needsAnotherRound`
+  （再加上"盘上卡着一批没走完的字节"）**刻意分开**：补跑新代次不该顺手重放一次失败的批次。
+
+**判据**。`BackgroundSyncPolicyRegression` 的 `unboundDeliveriesAreIgnored` /
+`aDeliveryDuringARunningSyncIsNeverDropped` / `aThrottledDeliveryIsStillRemembered` /
+`uncoveredGenerationsAreHandedOff`（期望值逐格手写，`main()` 的调用顺序决定"红在哪一条上"）；
+结构门禁 `check-background-capabilities.py` §15c；突变 `[P1]` 组七条。
+边界：这条修复保证**自动同步链路不会断**，不保证时延 —— BGProcessingTask 何时被系统派发仍由系统决定。
+
 ## 仍需真机验收的边界
 
 服务端已提供上传、预检、导入任务、幂等和job终态查询；不能假定sourceId跨小时保留原上传目录。
 当前实现有意保留覆盖performSync的beginBackgroundTask收尾窗口，过期走suspendForLifecycle而不是用户取消；不把“移除它”当作未完成任务。
 anchor使用单事务+提交前回读断言，而非为照抄外部方案增加平行candidate/committed列。
 日志中的成功、编译通过、模拟器测试都不证明系统实际触发了background delivery/BGProcessingTask。
+**未决（2026-10-09）**：非 Workout 记录的分页查询在"本次没有返回任何对象"时，completion 给出的 anchor 是否为 nil **没有实测**（只有 Apple 文档那句 "an anchor object corresponding to the last object returned by this query" 可读，它读得出 nil 可达）。当前实现把 nil 当硬错误（`HealthKitExport.anchoredRecords` 抛 `missingRecordAnchor`），而同一文件的跑步查询对同一情形用 `fromValue: 0` 兜底 —— 两处处置**相反**。判定手段＝挑一个**零样本**的记录类型跑一次导出，看 completion 是否给出 nil；若 nil 可达，该批次会**永久失败**（游标永不推进）。在该结论落地前不要改成兜 nil（归零会让游标每轮全量重读，且违反上文「阻塞态绝不推进 anchor」）。
 
 真机至少需覆盖权限变化、锁屏错误、进程回收、background URLSession重挂、迟到路线、删除传播、目标切换和大历史内存；步骤见[runbook](IOS_NATIVE_RUNBOOK.md)。
 记录“机制实际被调度”“逻辑正确”“服务端对账”三类证据，区分系统没有调度与代码执行失败。

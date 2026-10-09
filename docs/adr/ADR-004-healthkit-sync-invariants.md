@@ -354,9 +354,19 @@ route 一侧同因：`HealthKitExport.swift` 的 `routeNow = Date()` 同样带�
 
 | 层 | 载体 | 挡的是 |
 | :--- | :--- | :--- |
-| **结构门禁** | `apps/ios/tests/check-background-capabilities.py`（220 checks / 0 failed） | "改错了照样编译通过"的形状问题：调用顺序、比较值、判据载体是否还在 |
+| **结构门禁** | `apps/ios/tests/check-background-capabilities.py` | "改错了照样编译通过"的形状问题：调用顺序、比较值、判据载体是否还在 |
 | **可跑回归** | `SyncStateCommitRegression.swift`（57 条）、`RouteSyncStatePersistenceRegression.swift`（39 条）、`BackgroundSyncPolicyRegression`、`gpx-quota.test.ts`（4 条） | **语义**：锚点改名挡不住的那些（例如 `mayCommit` 被改成恒真） |
-| **突变验证** | `apps/ios/tests/check-background-mutations.py`（76 条） | 上面两层的**断言有效性**本身：跑绿只说明"没红"，不说明"改坏了会红" |
+| **突变验证** | `apps/ios/tests/check-background-mutations.py` | 上面两层的**断言有效性**本身：跑绿只说明"没红"，不说明"改坏了会红" |
+
+⚠️ 括号里的条数一律是**时点快照**，会随每次改动增减 —— 要引用数字就现跑一遍，别照抄这里的。
+**本文件因此不写具体条数。** 2026-10-09 那批改动曾在这里写下"capabilities 256 / mutations 90"，
+而这两行在**同一批改动的最终态**就已经不等于实测值 —— 说明"贴一个日期"本身并不赋予数字可信度：
+数字会被同一天的后续改动立刻甩掉。要数字就跑
+`python3 apps/ios/tests/check-background-capabilities.py` 与
+`python3 apps/ios/tests/check-background-mutations.py` 看输出；capabilities 的 `MIN_CHECKS`
+地板是**机器强制**的（少一条判据就红），比这里的文字可靠。
+（更早这里写的 220 / 76 是**无日期**快照 —— 那才是真正会误导的形态：照它读会以为"门禁条数没变"，
+把真实增量读成零。）
 
 ⚠️ 已知的效力边界：**结构门禁只钉调用顺序，钉不了语义**。
 实测：把 `SyncStateCommitPlan.mayCommit` 改成恒返回 `true`，
@@ -406,3 +416,59 @@ route 一侧同因：`HealthKitExport.swift` 的 `routeNow = Date()` 同样带�
   恢复请求，再更新原有握手缓存。请求带代次，只有目标 scope 的新导出落盘才能确认。
 - 依赖"两条回调谁先跑"（`applicationDidEnterBackground` 与 SwiftUI `scenePhase`）的写法一律不可接受：
   两者之间没有先后保证。
+
+## 2026-10-09 补充：非 Workout 变更游标
+
+- 记录事件日期不代表到达/删除时间：数量与睡眠查询的 anchored predicate 固定为 nil，
+  按类型分页直到新增与删除均为空。历史补读先排空旧 anchor，再从 nil 读取；
+  权限缺失/空结果从不升级为“缺席即删除”。
+- 记录游标属于业务交付状态，不是 Route 降频记忆。候选游标随 ZIP 写入任务，
+  所有恢复成功路径使用同一候选值；只有服务端确认后才与 Workout 水位、任务删除同事务提交。
+- 新 manifest 能力以新增握手字段声明，不改变旧身份版本。服务端能力缺失时，
+  新导出和已保存 v2 批次恢复都必须停止，绝不能接受忽略删除语义的成功。
+- 源 UUID 映射由新增 v30 表承载，不改历史 ID 公式或原地重写记录 ID。
+  明确删除先写源 tombstone，再扫描新增，避免同包旧 UUID 在 XML 后部覆盖新 UUID 替换值。
+- 升级前已删除且从未携带 UUID 的记录不可猜测匹配：安全清理须走经过验证的完整 XML
+  快照/移除保护。边界、迁移命令和可跑判据见 [记录同步 v2](../HEALTHKIT_RECORD_SYNC_V2.md)。
+
+## 2026-10-09 补充（2）：投递的「记」与「跑」必须分开（P1 可达性）
+
+**缺陷**：`SyncDeliveryPolicy.decide` 把"已有同步在跑"与"后台节流窗口内"两种情形一并判成
+`.ignore`，而调用方（`RaiStartup.registerSyncEntryPoints`）在 `.ignore` 分支里直接 `break` ——
+**这条健康数据通知既没有代次，也不驱动任何后续轮次**。正在跑的那一轮的导出起点早于这条通知，
+它的字节覆盖不到这次变化；旧批次收工清空之后，后台按快照判定"无待办"，自动同步停在原地，
+直到下一次投递、打开 App 或用户手动点同步。代次确认（`shouldAcknowledgeIntent`）只能保护
+**已经记下来**的那一代。
+
+**决定**：
+
+- **单飞与节流只限制"执行"，不限制"记忆"。** 一次投递就是一次真实的数据变化，只要目标已绑定，
+  就先 `recordBackgroundIntent`，再按 `decide` 的返回值决定这一轮怎么跑。`Decision` 上多出来的
+  `deferToBackgroundLater` 表示"记下来，但排一次**延后**的后台执行"（`resubmitDelay`，与节流窗口
+  同量级）；**只有未绑定服务端才是真的 `.ignore`**（没有目标 ⇒ 意图也没有东西能消费它）。
+  判据的载体是 `Decision.recordsTheDelivery`，它回答"要不要记"，而 `decide` 只回答"现在跑不跑"。
+- **不立即 `submit` 是刻意的**：BGTask 与正在跑的那一轮撞车只会被单飞静默拒绝，换来一条
+  "跑过了"的假记录（见 `BackgroundRunPolicy.reportedSuccess` 的说明）。
+- 🔴 **一轮收工后必须把"这一轮没覆盖到的那一代"接过去**（`SyncFollowUp.handoff`）：前台且还有
+  额度 ⇒ 当场补跑（用户正看着界面）；否则排一次后台执行。**前台补跑有硬上限**
+  （`maxForegroundRounds = 1`）—— HealthKit 大批导入期间会连发投递，没有上限的"补跑"就是前台自旋，
+  每次自旋都是一轮 GB 级导出。这与 §15b 的后台重排是同一条纪律的两次应用：**"留下来"与"有人来接"
+  是两件事**，少了接手的那一方，通知会一直躺在盘上。
+- `PendingWork.hasUncoveredGeneration`（通知 + 恢复请求）与 `needsAnotherRound`（再加上"盘上卡着
+  一批没走完的字节"）刻意分开：补跑新代次不该顺手重放一次失败的批次，那只会把网络错误原样重放一遍。
+
+**可证伪性**：
+
+- **可跑回归**：`BackgroundSyncPolicyRegression` 的 `unboundDeliveriesAreIgnored` /
+  `aDeliveryDuringARunningSyncIsNeverDropped` / `aThrottledDeliveryIsStillRemembered` /
+  `uncoveredGenerationsAreHandedOff`。期望值逐格手写（不拿实现推一遍），且 `main()` 的调用顺序
+  决定"红在哪一条上" —— 每条突变只允许被**它自己那一条**断言抓住。
+- **结构门禁**：`check-background-capabilities.py` §15c 钉"意图记在派发**之前**"
+  （`ordered(recordsTheDelivery → switch decision)`）、`deferToBackgroundLater` 的排程接线、
+  以及收工后的交接被生产调用（`SyncFollowUp.handoff` 不能是孤儿）。
+- **突变**：`check-background-mutations.py` 七条（`[P1]` 组）：运行中⇒ignore、节流⇒ignore、
+  未绑定也记意图、前台补跑无上限，以及三条结构门禁（分支里才记意图 / 不交接 / 不排执行）。
+
+⚠️ 边界：这条修复保证的是**自动同步链路不会断**（每一代变化要么被某一轮导出覆盖，要么被记下
+并且有一轮被排出来）。它**不**保证时延 —— BGProcessingTask 何时被系统派发仍由系统决定，
+`earliestBeginDate` 只是下界。
