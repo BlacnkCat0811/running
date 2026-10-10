@@ -1,5 +1,7 @@
 # 原生跑步教练
 
+后续服务端教练闭环的任务拆分、数据合同与验收见 [教练闭环优化文档](COACH_LOOP_OPTIMIZATION_PLAN.md)；该方案待实施，不包含桌面 Web 优化。
+
 ## 对齐对象
 
 对齐新版 **Garmin Run Coach** 的自适应工作流，不是 Jeff/Greg/Amy 专家计划。
