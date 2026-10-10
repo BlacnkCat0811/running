@@ -6,7 +6,7 @@ struct HealthKitRecordCursorRegression {
         let now = Date(timeIntervalSince1970: 1_790_000_000)
         let cursor = HealthKitRecordCursor(anchor: Data([1, 2, 3]), historyReadAt: now)
         precondition(!cursor.needsHistoryRead(now: now, force: false), "normal sync uses the type anchor")
-        precondition(cursor.needsHistoryRead(now: now, force: true), "manual sync replays newly authorized history")
+        precondition(cursor.needsHistoryRead(now: now, force: true), "explicit full import replays newly authorized history")
         precondition(!cursor.needsHistoryRead(now: now.addingTimeInterval(7 * 86400 - 1), force: false))
         precondition(cursor.needsHistoryRead(now: now.addingTimeInterval(7 * 86400), force: false),
                      "background sync eventually replays history even without a detectable permission grant")

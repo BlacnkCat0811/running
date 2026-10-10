@@ -2723,7 +2723,7 @@ export class RaiDatabase {
           // A v30 shared row cannot reconstruct an overwritten UUID's facts.
           // Reject rather than acknowledge stale data; a history rescan supplies
           // the surviving source before this same deletion is retried.
-          throw new Error("共享健康记录缺少存活来源事实，请手动同步补读历史后重试");
+          throw new Error("共享健康记录缺少存活来源事实，请使用「重新导入全部」补读历史后重试");
         }
         const record = JSON.parse(surviving.recordJson) as CanonicalHealthRecord;
         record.id = row.id;

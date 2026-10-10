@@ -59,6 +59,12 @@ check("predicateForSamples" not in records,
       "historical changes cannot be event-date filtered")
 check("HealthKitRecordCursor.drain" in records,
       "tested pagination must drive the production query")
+check("recordsForceRescan: full," in sync,
+      "ordinary sync must not force full record history; only explicit full import does")
+check("manual: true" not in sync and "full || manual" not in sync,
+      "the button/shortcut entry point must not turn incremental sync into history replay")
+check("routeForceRescan: full," in sync,
+      "explicit full import must still rescan routes as well as records")
 check(ordered(records, "var starts: [HKQueryAnchor?] = [decoded]", "starts.append(nil)"),
       "the committed cursor must seed the drain before the nil (full re-read) start")
 check("RAIHealthKitSampleUUID" in export and "sampleMetadataXML(sample)" in quantity,
@@ -98,7 +104,7 @@ check(ordered(parser, "store.removeHealthKitRecords", "if (atomic) store.commitA
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
 # （或把它挪进走不到的分支）都会让它变红。
-MIN_CHECKS = 22
+MIN_CHECKS = 25
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

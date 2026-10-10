@@ -1,7 +1,7 @@
 import Foundation
 
 /// Event time is not arrival time. Anchors have a fixed, unbounded predicate.
-/// Manual sync and periodic history replay also cover newly granted read access,
+/// Explicit full import and periodic history replay also cover newly granted read access,
 /// which HealthKit deliberately doesn't expose as an authorization boolean.
 nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     let anchor: Data

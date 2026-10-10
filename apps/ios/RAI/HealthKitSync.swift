@@ -449,7 +449,7 @@ final class HealthKitSync {
         await syncOwner.run { [weak self] in
             guard let self else { return }
             guard self.prepareJournalForExecution() else { return }
-            await self.performSync(to: serverURL, apiToken: apiToken, full: full, manual: true)
+            await self.performSync(to: serverURL, apiToken: apiToken, full: full)
         }
     }
 
@@ -700,7 +700,7 @@ final class HealthKitSync {
         }
     }
 
-    private func performSync(to serverURL: URL?, apiToken: String, full: Bool, manual: Bool = false) async {
+    private func performSync(to serverURL: URL?, apiToken: String, full: Bool) async {
         guard !isBusy else { return }
         guard let serverURL else {
             lastError = "请先连接 RAI 服务"
@@ -1136,7 +1136,9 @@ final class HealthKitSync {
                     from: lowerBound,
                     workoutAnchor: anchor,
                     recordCursors: recordCursors,
-                    recordsForceRescan: full || manual,
+                    // 普通同步（按钮/快捷指令/自动）均续接记录游标。只有显式
+                    // 「重新导入全部」强制补读；权限扩大仍由每类型 7 天补读覆盖。
+                    recordsForceRescan: full,
                     routeStates: routeStates,
                     routeDiscoveryCursor: routeDiscoveryCursor,
                     // 人工重扫 = `full`（"重新导入全部"）：所有 workout 的状态复位成 `active`，
