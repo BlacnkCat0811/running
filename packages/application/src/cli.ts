@@ -62,6 +62,7 @@ async function main(): Promise<void> {
           id: completed.id,
           type: completed.jobType,
           status: completed.status,
+          error: completed.error,
           featureRunId: completed.featureRunId,
           modelRunId: completed.modelRunId,
           progress: {
@@ -74,7 +75,17 @@ async function main(): Promise<void> {
         2
       )
     );
-    if (completed.status !== "succeeded") process.exitCode = 1;
+    if (completed.status !== "succeeded") {
+      // runNextJob records business failures instead of throwing. Emit that
+      // record before the import worker rolls back and deletes the staging DB.
+      console.error(JSON.stringify({
+        id: completed.id,
+        type: completed.jobType,
+        status: completed.status,
+        error: completed.error ?? { message: "Application task did not succeed" }
+      }));
+      process.exitCode = 1;
+    }
   } finally {
     store.close();
   }

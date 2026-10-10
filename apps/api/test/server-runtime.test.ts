@@ -1382,7 +1382,8 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
     }
     assert.equal(failedJob?.status, "failed");
     const failedTiming = await fetch(`${url}/v1/import-jobs/${importJobId}`)
-      .then((response) => response.json()) as { performance: { totalMs: number; stagesMs: { parseImport: number } } };
+      .then((response) => response.json()) as { error: string; performance: { totalMs: number; stagesMs: { parseImport: number } } };
+    assert.equal(failedTiming.error, "导入失败，请查看服务日志", "raw parser diagnostics must stay internal");
     assert.ok(failedTiming.performance.totalMs >= 0);
     assert.ok(failedTiming.performance.stagesMs.parseImport >= 0, "failed parser still records its duration");
     const latestJob = await fetch(`${url}/v1/import-jobs/latest`);
@@ -1391,6 +1392,12 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
       ...(await fetch(`${url}/v1/import-jobs/${queued.id}`).then((response) => response.json()) as object)
     });
     assert.equal(await fetch(`${url}/v1/import-jobs/active`).then((response) => response.json()), null);
+    const retainedSource = await fetch(`${url}/v1/imports/inspect`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceId })
+    });
+    assert.equal(retainedSource.status, 200, "failed payload remains inspectable for diagnosis/retry");
     // The failed import releases its mutation slot slightly after the job
     // reaches the terminal status; a DELETE fired in that gap is rejected with
     // 409. Retry briefly instead of racing the coordinator.
@@ -1401,7 +1408,14 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
       if (cleanedSource.status !== 409 || Date.now() >= deleteDeadline) break;
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
     }
-    assert.equal(cleanedSource.status, 404, await cleanedSource.text());
+    assert.equal(cleanedSource.status, 200, await cleanedSource.clone().text());
+    assert.deepEqual(await cleanedSource.json(), { deleted: true });
+    const removedSource = await fetch(`${url}/v1/imports/inspect`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sourceId })
+    });
+    assert.equal(removedSource.status, 404, "explicit cleanup must still remove a retained failure");
 
     const importsPath = join(runtimeRoot, "var", "imports");
     rmSync(importsPath, { recursive: true, force: true });

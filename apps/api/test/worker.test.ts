@@ -2053,13 +2053,13 @@ for (const failurePhase of ["recompute", "activate"] as const) {
       const databaseArgument = args.indexOf("--database");
       const candidatePath = args[databaseArgument + 1];
       assert.ok(candidatePath);
-      // 审计报告头部的"数据源"必须指向**主库**，而不是这条命令实际操作的暂存副本：
-      // 报告最终发布成 `docs/DATA_AUDIT.md`，若写成 `var/rai.importing.<jobId>.sqlite`，
-      // 读者会以为数字来自一个临时文件，也就无法判断它描述的是本地还是线上。
-      const sourceArgument = args.indexOf("--source-database");
-      assert.ok(sourceArgument > 0, "audit report must be told which database it describes");
-      assert.equal(args[sourceArgument + 1], databasePath);
       if (commandCount === 1) {
+        // Only the parser generates audit reports; recompute has no source-database
+        // option. Asserting this on recompute used to abort the fixture before its
+        // intended failure, hidden behind the old generic job.error.
+        const sourceArgument = args.indexOf("--source-database");
+        assert.ok(sourceArgument > 0, "audit report must be told which database it describes");
+        assert.equal(args[sourceArgument + 1], databasePath);
         const candidate = new DatabaseSync(candidatePath);
         try {
           candidate.prepare(`
@@ -2073,6 +2073,7 @@ for (const failurePhase of ["recompute", "activate"] as const) {
         }
         return;
       }
+      assert.ok(args.includes("recompute"));
       if (failurePhase === "recompute") throw new Error("simulated recompute failure");
     };
     if (failurePhase === "activate") {
@@ -2093,8 +2094,9 @@ for (const failurePhase of ["recompute", "activate"] as const) {
     try {
       await worker.run(job);
       assert.equal(job.status, "failed");
-      // Client-visible error is sanitized; raw failure detail goes to server logs only.
-      assert.equal(job.error, "导入失败，请查看服务日志");
+      // Internal task state retains diagnostics; only the public DTO is sanitized.
+      assert.match(String(job.error), failurePhase === "recompute"
+        ? /simulated recompute failure/ : /simulated activation failure/);
       assert.equal(readFileSync(markdownPath, "utf8"), "old markdown report");
       assert.deepEqual(JSON.parse(readFileSync(jsonPath, "utf8")), { datasetVersion: "old-generation" });
       const preserved = new DatabaseSync(databasePath, { readOnly: true });

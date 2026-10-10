@@ -34,6 +34,11 @@ export async function finalizeImportSource(
     }
     if (succeeded && isHealthKitUploadSource(source, source.inputPath)) {
       await sources.retainImportedUpload(job.sourceId);
+    } else if (!succeeded && job.status === "failed") {
+      // Keep the actual failed payload available for diagnosis/retry, without
+      // marking it imported. The existing abandoned-upload TTL (24h from upload)
+      // and stored-upload capacity still apply; cancellation cleans up at once.
+      return;
     } else {
       await sources.cleanupUpload(job.sourceId, otherInputs);
     }

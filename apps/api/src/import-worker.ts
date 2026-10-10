@@ -34,7 +34,7 @@ import { ImportPublicationJournal, readImportReceipt, writeImportReceipt } from 
 import type { TaskAdmission } from "./task-admission.js";
 import { terminateProcessTree, waitForShutdown } from "./worker-process.js";
 
-/** Client-visible import failure text; full diagnostics stay in server logs only. */
+/** Client-visible failure text; diagnostics stay in server logs and internal runtime state. */
 export const PUBLIC_IMPORT_FAILURE_ERROR = "导入失败，请查看服务日志";
 
 export class ImportJobEnqueuePersistenceError extends Error {
@@ -726,12 +726,14 @@ export class ImportWorker {
       }
       terminalSucceeded = false;
       const removalGuard = findRemovalGuardError(failure);
+      const detail = failure instanceof Error
+        ? (failure.stack ?? failure.message)
+        : String(failure);
+      // Log while the staging database still exists. Terminal state is persisted
+      // after cleanup, but a cleanup interruption must not erase the journal clue.
+      console.error(`Import job ${job.id} failed: ${detail}`);
       publishTerminalState = () => {
-        const detail = failure instanceof Error
-          ? (failure.stack ?? failure.message)
-          : String(failure);
-        // Keep full diagnostics in server logs only; never return child stderr or paths to clients.
-        console.error(`Import job ${job.id} failed: ${detail}`);
+        // publicJob must never expose these internal diagnostics.
         const waitForEngine = Boolean(job.queue && ["unavailable", "invalid_protocol"].includes(this.nativeFailure ?? ""));
         const resume = Boolean(waitForEngine || (this.queueOptions && this.closing && job.queue && !this.cancelRequested));
         if (waitForEngine) {
@@ -744,7 +746,7 @@ export class ImportWorker {
         if (waitForEngine) { job.phase = "waiting_engine"; job.message = "原任务的 Rust 执行器不可用，请安装匹配版本后重启服务"; }
         // The guard refusal is a deliberate safety stop, not an opaque crash, so
         // the operator is told exactly what was about to be deleted and why.
-        job.error = resume || this.cancelRequested ? null : removalGuard ? removalGuard.userMessage : PUBLIC_IMPORT_FAILURE_ERROR;
+        job.error = resume || this.cancelRequested ? null : removalGuard ? removalGuard.userMessage : detail;
         if (removalGuard) job.removalGuard = removalGuard.toPayload();
         job.completedAt = resume ? null : new Date().toISOString();
       };
@@ -1795,7 +1797,11 @@ export class ImportWorker {
       });
       this.activeChild = child;
       if (this.closing) void terminateProcessTree(child).catch(reject);
+      // Drain BOTH pipes, including successful commands. Keeping only bounded
+      // tails prevents a large export from filling a pipe or the API heap.
+      const outputLimit = 16_384;
       let errorOutput = "";
+      let standardOutput = "";
       let removalGuard: ImportRemovalGuardError | null = null;
       child.on("message", (message: unknown) => {
         if (typeof message === "object" && message !== null) {
@@ -1828,17 +1834,26 @@ export class ImportWorker {
           if (child.connected) child.send({ type: "rai:removal-guard-ack" });
         }
       });
-      child.stderr?.on("data", (chunk: Buffer) => {
-        errorOutput = `${errorOutput}${chunk.toString()}`.slice(-4000);
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        standardOutput = `${standardOutput}${chunk}`.slice(-outputLimit);
+      });
+      child.stderr?.setEncoding("utf8");
+      child.stderr?.on("data", (chunk: string) => {
+        errorOutput = `${errorOutput}${chunk}`.slice(-outputLimit);
       });
       child.on("error", (error) => {
         if (this.activeChild === child) this.activeChild = null;
         reject(error);
       });
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         if (this.activeChild === child) this.activeChild = null;
         if (code === 0) resolvePromise();
-        else reject(removalGuard ?? new Error(errorOutput.trim() || `导入进程退出，代码 ${String(code)}`));
+        else reject(removalGuard ?? new Error([
+          `Import subprocess failed (code=${String(code)}, signal=${signal ?? "none"})`,
+          ...(errorOutput.trim() ? [`stderr:\n${errorOutput.trim()}`] : []),
+          ...(standardOutput.trim() ? [`stdout:\n${standardOutput.trim()}`] : [])
+        ].join("\n")));
       });
     });
   }

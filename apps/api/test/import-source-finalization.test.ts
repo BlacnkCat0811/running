@@ -11,6 +11,7 @@ import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { registerImportRoutes } from "../src/routes/import-routes.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
+import type { ImportJobResponse } from "@rai/api-contracts";
 
 function barrier() {
   let release!: () => void;
@@ -109,4 +110,29 @@ test("a retry accepted before cleanup keeps its source without blocking queue fi
     assert.equal(existsSync(f.input), false);
     assert.equal(f.worker.hasPending, false);
   } finally { proceed.release(); await cancellation; await f.close(); }
+});
+
+test("failed uploads remain inspectable until the bounded abandoned-upload sweep", async () => {
+  const f = await fixture();
+  try {
+    const source = (await f.sources.get(f.sourceId))!;
+    const job: ImportJobResponse = {
+      id: "failed-fixture", sourceId: f.sourceId, status: "failed", phase: "failed",
+      message: "failed", createdAt: source.createdAt, completedAt: new Date().toISOString(),
+      error: "导入失败，请查看服务日志"
+    };
+    f.state.upsertJob({ ...job, inputPath: f.input, queue: { scope: "fixture", attempts: 1, finalized: false } });
+    await finalizeImportSource(f.sources, new MutationCoordinator(), f.worker, job, false, true);
+    assert.ok(await f.sources.get(f.sourceId), "failure must not immediately destroy the actual input");
+    assert.equal((await f.sources.inspect(f.sourceId)).sourceId, f.sourceId);
+    assert.equal((await f.sources.get(f.sourceId))?.lastUsedAt, null, "failed data must not be marked imported");
+    const uploadedAt = Date.parse(source.createdAt);
+    assert.equal(await f.sources.cleanupAbandonedUploads(uploadedAt + 25 * 3600_000), 0,
+      "terminal persistence/ownership must protect the input until finalization");
+    f.state.upsertJob({ ...job, inputPath: f.input, queue: { scope: "fixture", attempts: 1, finalized: true } });
+    assert.equal(await f.sources.cleanupAbandonedUploads(uploadedAt + 23 * 3600_000), 0);
+    assert.equal(await f.sources.cleanupAbandonedUploads(uploadedAt + 25 * 3600_000), 1);
+    assert.equal(await f.sources.get(f.sourceId), null);
+    assert.equal(existsSync(f.input), false);
+  } finally { await f.close(); }
 });
