@@ -39,6 +39,8 @@ import {
 } from "@rai/readiness";
 
 import { DISTANCE_ROUNDING_KM, MAX_PLANNED_DISTANCE_KM } from "./session-structure.js";
+import { raceExecutionProtection } from "./race-plan-policy.js";
+import { assessSessionDose, buildCompleteEasyStructure } from "./coach-session-dose.js";
 
 export const DEFAULT_EASY_DURATION_FLOOR = 0.7;
 export const DEFAULT_QUALITY_SESSION_CAP = 2;
@@ -140,6 +142,9 @@ export interface CoachInput {
   todayWorkoutCount: number;
   storedWeekPlan: MobilePlannedDay[];
   lockedSession: MobileLockedSession | null;
+  /** Existing audit provenance; absent source is legacy/manual compatibility. */
+  storedPlanSource?: "heuristic" | "manual" | "llm" | null;
+  trainingStopped?: boolean;
 }
 
 /** Rounds to the 100 m the app displays, so a stored value cannot out-precise a measured one. */
@@ -291,7 +296,8 @@ export function decideVerdict(input: CoachInput, assessed?: RecoveryAssessment):
   let title = "只宜有氧";
   let reason = "默认轻松跑。数据不足时不安排质量课。";
 
-  const taper = isTaper(input);
+  const protection = raceExecutionProtection(input.today, input.raceTarget?.date);
+  const taper = protection.preRace || protection.raceDay;
   // §9.5: the load verdict comes from the single classification, not from a second ACWR test.
   // The removed `loadRatio > 1.3` clause could not change the outcome for any row produced by
   // `buildDailyTrainingMetrics`: a ratio above 1.3 makes `classifyTrainingStatus` return
@@ -345,8 +351,8 @@ export function decideVerdict(input: CoachInput, assessed?: RecoveryAssessment):
     triggers.push(trigger("consecutive_quality", input.consecutiveQualityDays, 2, reason));
   } else if (taper) {
     tone = "yellow";
-    title = "减量期有氧";
-    reason = "比赛临近，量降下来，强度只保留短促开腿。";
+    title = protection.raceDay ? "比赛日不追加训练" : "赛前保护有氧";
+    reason = "比赛临近，触发赛前执行保护；收紧剂量，不新增最长距离，不改写周期阶段。";
     triggers.push(trigger("taper", input.raceTarget ? daysUntil(input.today, input.raceTarget.date) : null, 14, reason));
   } else if (
     easyDurationFraction != null &&
@@ -843,15 +849,64 @@ export type CoachPlanDisposition =
   | "downgraded_taper"
   | "downgraded_red_tone"
   | "budget_limited"
-  | "budget_exhausted";
+  | "budget_exhausted"
+  | "training_stopped"
+  | "today_completed";
 
 export function decideNextSessionDecision(
   input: CoachInput,
   verdict: MobileVerdict
 ): { session: MobileNextSession; disposition: CoachPlanDisposition } {
-  const resolved = decidePlannedSession(input, verdict);
+  if (input.trainingStopped || input.todayWorkoutCount > 0) return {
+    session: structuredSession("rest", "不追加训练", input.trainingStopped
+      ? "计划已暂停、结束或到期；不会自动重启持续训练。"
+      : "今日已有实际跑步，不自动安排第二堂；短训练仍正常计入事实。",
+    input.zones, null, null, null, null),
+    disposition: input.trainingStopped ? "training_stopped" : "today_completed"
+  };
+  let resolved = decidePlannedSession(input, verdict);
   if (resolved.session.kind === "rest") return resolved;
   const remaining = Math.max(0, input.weeklyVolumeCeilingKm - input.weekDistanceKm);
+  const stored = input.storedWeekPlan.find(day => day.localDate === input.today);
+  const automatic = !stored || input.storedPlanSource === "heuristic" || resolved.disposition !== "kept_stored_plan";
+  if (automatic) {
+    // Safety limits are checked after all stage/recovery/budget changes. Do not
+    // lengthen an unsafe/tapered dose merely to achieve a display of 30 minutes.
+    const dose = assessSessionDose({ kind: resolved.session.kind, structure: resolved.session.structure,
+      zones: input.zones, allowColdStartEstimate: true });
+    if (dose.status !== "feasible") {
+      if (verdict.tone !== "red" && !raceExecutionProtection(input.today, input.raceTarget?.date).preRace) {
+        const structure = buildCompleteEasyStructure("easy", input.zones);
+        const replacement = assessSessionDose({ kind: "easy", structure, zones: input.zones,
+          allowColdStartEstimate: true, maximumDistanceKm: remaining });
+        if (replacement.status === "feasible") {
+          resolved = { ...resolved, session: { ...resolved.session,
+            ...plannedDayNumbers("easy", structure, null, input.zones), kind: "easy", title: "完整轻松跑",
+            reason: "原课剂量不足，改为完整轻松课；不以剩余天数均分。",
+            ...sessionRanges("easy", input.zones) } };
+        } else return { disposition: "budget_exhausted", session: structuredSession("rest", "保留恢复",
+          "minimum_session_not_feasible：剩余硬空间不足完整30分钟课；受控追加尚未启用。", input.zones, null, null, null, null) };
+      } else return { disposition: verdict.tone === "red" ? "downgraded_red_tone" : "downgraded_taper",
+        session: structuredSession("rest", "保留恢复",
+          "minimum_session_not_feasible：恢复/赛前保护后的剂量不足30分钟，不强行延长。", input.zones, null, null, null, null) };
+    }
+    const finalDose = assessSessionDose({ kind: resolved.session.kind, structure: resolved.session.structure,
+      zones: input.zones, allowColdStartEstimate: true, maximumDistanceKm: remaining });
+    if (finalDose.status !== "feasible") {
+      const structure = buildCompleteEasyStructure("easy", input.zones);
+      const easyDose = assessSessionDose({ kind: "easy", structure, zones: input.zones,
+        allowColdStartEstimate: true, maximumDistanceKm: remaining });
+      if (!raceExecutionProtection(input.today, input.raceTarget?.date).preRace && easyDose.status === "feasible") {
+        return { disposition: "budget_limited", session: { ...resolved.session,
+          ...plannedDayNumbers("easy", structure, null, input.zones), kind: "easy", title: "完整轻松跑",
+          reason: "完整质量课放不下，回退为30分钟轻松课；不切碎剂量。",
+          ...sessionRanges("easy", input.zones) } };
+      }
+      return { disposition: "budget_exhausted", session: structuredSession("rest", "保留恢复",
+        "minimum_session_not_feasible：完整课超出当前保护空间；受控追加尚未启用。", input.zones, null, null, null, null) };
+    }
+    return resolved;
+  }
   if ((resolved.session.distanceKm ?? 0) <= remaining + 0.05) return resolved;
   if (remaining <= 0) {
     return {
@@ -898,7 +953,7 @@ function decidePlannedSession(
     return { ...fallback, session: { ...fallback.session, reason: `原计划为${sessionTitle(planned.kind)}；${fallback.session.reason}` },
       disposition: "downgraded_quality" };
   }
-  if (isTaper(input)) {
+  if (raceExecutionProtection(input.today, input.raceTarget?.date).preRace) {
     if (planned.kind === "long_run" || quality || (planned.distanceKm ?? 0) > (fallback.session.distanceKm ?? 0)) {
       return { ...fallback, disposition: "downgraded_taper" };
     }
@@ -927,11 +982,11 @@ function decideUnplannedSession(
 }
 
 function prescribeUnplannedSession(input: CoachInput, verdict: MobileVerdict): MobileNextSession {
-  const remainingKm = Math.max(0, input.weeklyVolumeCeilingKm - input.weekDistanceKm);
-  const remainingDays = Math.max(1, daysInclusive(input.today, weekEnd(input.today)));
-  const perDayKm = Math.max(4, Math.min(14, remainingKm / remainingDays));
+  // Complete intent first; the final gate owns remaining capacity. It is not
+  // divided among unobserved future calendar days.
+  const perDayKm = 5;
   const zones = input.zones;
-  const taper = isTaper(input);
+  const taper = raceExecutionProtection(input.today, input.raceTarget?.date).preRace;
 
   if (verdict.tone === "red") {
     const hardRest =
@@ -1358,6 +1413,12 @@ export function buildWeekPlan(input: CoachInput, next: MobileNextSession): Mobil
       const bounded =
         saved.structure == null ? null : capStructureToDayCeiling(saved.structure, saved.kind, input.zones);
       const numbers = plannedDayNumbers(saved.kind, bounded, saved.distanceKm, input.zones);
+      if (input.storedPlanSource === "heuristic" && saved.kind !== "rest" &&
+        assessSessionDose({ kind: saved.kind, structure: numbers.structure, zones: input.zones,
+          allowColdStartEstimate: true }).status !== "feasible") {
+        return { localDate: day.localDate, kind: "rest", title: "完整课不可行",
+          planned: true, completedWorkoutId: null, distanceKm: 0, workoutCount: 0, structure: null };
+      }
       return {
         localDate: day.localDate,
         kind: saved.kind,
@@ -1470,26 +1531,9 @@ function sessionTitle(kind: MobileSessionKind): string {
   }
 }
 
-function isTaper(input: CoachInput): boolean {
-  if (!input.raceTarget) return false;
-  const days = daysUntil(input.today, input.raceTarget.date);
-  return days != null && days >= 0 && days <= 14;
-}
-
 function daysUntil(today: string, target: string): number | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(target)) return null;
   return Math.round((Date.parse(`${target}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
-}
-
-function daysInclusive(start: string, end: string): number {
-  return Math.max(1, daysUntil(start, end)! + 1);
-}
-
-function weekEnd(today: string): string {
-  const value = new Date(`${today}T00:00:00Z`);
-  const mondayOffset = (value.getUTCDay() + 6) % 7;
-  value.setUTCDate(value.getUTCDate() - mondayOffset + 6);
-  return value.toISOString().slice(0, 10);
 }
 
 /** V2 decision entry: recovery readings are not part of the decision contract. */
@@ -1571,10 +1615,15 @@ export function projectCoachDecisionV2(input: {
         // 审计指出这里原先一律 reduce_duration，但该分支可能直接给出休息
         // （"本周预算已完成"/"保留恢复"）—— 处方式是休息时说要"缩短时长"是错的。
         return sessionKind === "rest" ? "rest" : "reduce_duration";
+      case "training_stopped":
+      case "today_completed":
+        return "rest";
     }
   })();
 
   const reasons = [
+    ...(disposition === "training_stopped" ? [{ code: "programme_stopped", params: { localDate: context.today } }] : []),
+    ...(disposition === "today_completed" ? [{ code: "today_session_already_present", params: { localDate: context.today } }] : []),
     // 「今天有没有已保存的计划」是**事实**，所以它对每一种 disposition 都如实出现，
     // 包括比赛日：比赛日没有周计划时同样要说出"没有已保存的计划"，
     // 否则读的人会以为 keep_plan 是因为保住了一份并不存在的计划。

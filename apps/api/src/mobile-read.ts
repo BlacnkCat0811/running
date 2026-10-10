@@ -1,4 +1,6 @@
-import { runCoachSessionTargets } from "./run-coach-policy.js";
+import { runCoachIsTraining, runCoachSessionTargets } from "./run-coach-policy.js";
+import { enforceAutomaticSessionDose } from "./coach-complete-plan.js";
+import { executionPolicyContext, applyUnsupportedRacePlanPolicy } from "./race-plan-policy.js";
 import { loadDatedReadiness } from "@rai/application";
 import { decideVerdictFromSnapshots } from "./mobile-coach.js";
 import type { DatabaseSync } from "node:sqlite";
@@ -165,7 +167,7 @@ export function assembleMobileCoach(args: {
   goals: Pick<
     MobileGoalsResponse,
     "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession"
-  > & Partial<Pick<MobileGoalsResponse, "runCoach" | "weekPlanPreservedDate">>;
+  > & Partial<Pick<MobileGoalsResponse, "runCoach" | "weekPlanPreservedDate" | "weekPlanAudit">>;
   /** Per-metric record coverage, so the assessment can report the newest observation that exists. */
   coverage: MobileCoverage;
   fourWeekDistanceChangeFraction: number | null;
@@ -200,6 +202,7 @@ export function assembleMobileCoach(args: {
   | "weekPlan"
   | "phase"
   | "lock"
+  | "executionPolicy"
 > & {
   /**
    * The preparation assessment this call already computed, handed back so callers
@@ -334,7 +337,9 @@ export function assembleMobileCoach(args: {
     })),
     todayWorkoutCount: weekDaily.find((day) => day.localDate === today)?.workoutCount ?? 0,
     storedWeekPlan: args.goals.weekPlan ?? [],
-    lockedSession: args.goals.lockedSession ?? null
+    lockedSession: args.goals.lockedSession ?? null,
+    storedPlanSource: args.goals.weekPlanAudit?.generatedBy ?? null,
+    trainingStopped: args.goals.runCoach != null && !runCoachIsTraining(args.goals.runCoach, today)
   };
 
   const calibration: MobileTodayResponse["calibration"] = {
@@ -378,8 +383,16 @@ export function assembleMobileCoach(args: {
   // §13.3：处方与**它走了哪条分支**一起取回来 —— disposition 由决策自己报告，
   // 版本化输出据此投影，不去比较课型倒推（见 projectCoachDecisionV2 的说明）。
   const { session, disposition } = decideNextSessionDecision(input, verdict);
-  const computed = args.goals.weekPlanPreservedDate === today ? session :
+  let computed = args.goals.weekPlanPreservedDate === today ? session :
     runCoachSessionTargets(session, args.goals.runCoach, input.zones);
+  const compatibility = applyUnsupportedRacePlanPolicy([{
+    localDate: today, kind: computed.kind, distanceKm: computed.distanceKm, structure: computed.structure, reason: computed.reason
+  }], args.goals.runCoach?.raceDate, args.goals.raceTarget != null)[0]!;
+  if (compatibility.kind === "rest" && computed.kind !== "rest") computed = {
+    ...computed, kind: "rest", title: "赛前执行保护", reason: compatibility.reason ?? "",
+    distanceKm: null, durationMinutes: null, structure: null,
+    paceSecondsPerKmLower: null, paceSecondsPerKmUpper: null, heartRateBpmLower: null, heartRateBpmUpper: null
+  };
   const nextSession = resolveLockedNextSession(computed, input.lockedSession, today, input.zones);
   const lock = lockState(input.lockedSession, today, verdict.tone);
   lock.candidate = computed;
@@ -401,6 +414,8 @@ export function assembleMobileCoach(args: {
     calibration,
     verdict,
     nextSession,
+    executionPolicy: executionPolicyContext({ localDate: today, raceTarget: args.goals.raceTarget,
+      raceDate: args.goals.runCoach?.raceDate ?? null, weeklyDistanceKm: args.weeklyVolumeCeilingKm }),
     // §13.3：同一次决策的版本化投影。**旧字段一个没动** —— tone 与 verdict 同源，
     // action 来自 disposition，所以这不是第二套算法，也不进入 recommendationRevision
     // 的哈希（那份哈希只吃 verdict/nextSession/candidate）。
@@ -535,6 +550,7 @@ export function assembleMobileWorkoutPlan(args: {
   ];
 
   for (const planned of applyRacePlanPolicy(args.storedPlan, args.raceTarget, args.weeklyVolumeCeilingKm ?? 0, prescription)
+    .map(day => args.audit?.generatedBy === "heuristic" ? enforceAutomaticSessionDose(day, prescription) : day)
     .filter((day) => day.localDate > args.today && day.localDate <= windowEnd)
     .sort((left, right) => left.localDate.localeCompare(right.localDate))) {
     const numbers = plannedDayNumbers(planned.kind, planned.structure, planned.distanceKm, prescription);

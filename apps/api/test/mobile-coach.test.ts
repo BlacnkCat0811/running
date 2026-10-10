@@ -264,7 +264,8 @@ test("taper does not dump leftover weekly volume into a long run", () => {
   const verdict = decideVerdict(input);
   const next = decideNextSession(input, verdict);
   assert.notEqual(next.kind, "long_run");
-  assert.equal(next.kind, "easy");
+  assert.equal(next.kind, "rest", "pre-race dose below 30 minutes rests instead of being padded");
+  assert.match(next.reason, /minimum_session_not_feasible/);
 });
 
 test("post-run only uses today's workout", () => {
@@ -407,7 +408,8 @@ test("easy sessions get a warmup, a single work block and a cooldown", () => {
   assert.equal(structure.blocks.length, 1);
   assert.equal(firstBlock.iterations, 1);
   assert.equal(workStep.purpose, "work");
-  assert.equal(workStep.goal.type, "distance");
+  assert.equal(workStep.goal.type, "time");
+  assert.equal(workStep.goal.type === "time" ? workStep.goal.seconds : null, 1200);
 });
 
 test("rest days carry no prescription and no structure", () => {

@@ -14,6 +14,8 @@ import {
   predictionModelTrainBodySchema,
   recoveryTrendQuerySchema,
   runCoachCommandSchema,
+  coachLoopCommandSchema,
+  coachFeedbackFieldsSchema,
   trainingZoneProfileBodySchema,
   trainingZonesHistoryQuerySchema,
   trainingLoadQuerySchema,
@@ -597,6 +599,33 @@ test("native session and race pickers exactly match their API contracts", () => 
           assert.equal(config.raceDistanceKm.anyOf[0].maximum, 1609.344);
         }
         coachPickers += 1;
+        continue;
+      }
+      if (name.endsWith("TechCoachLoopSection.swift")) {
+        const options = balancedBlock(source, source.indexOf("{", close));
+        const tags = [...options.matchAll(/\.tag\(\s*([^)]*)\)/g)].map(match => match[1]!.trim());
+        const settings = coachLoopCommandSchema.properties.settings.properties;
+        if (args.includes('"模式"') || args.includes('"目标"') && !args.includes("$targetType")) {
+          const values = tags.map(value => JSON.parse(value) as string).sort();
+          const accepted = args.includes('"模式"') ? settings.mode.enum : runCoachCommandSchema.properties.config.properties.goal.enum.filter(value => value !== "fitness");
+          assert.deepEqual(values, [...accepted].sort(), "new-contract mode/goal options must retain explicit semantics");
+        } else if (args.includes('"距离"')) {
+          assert.deepEqual(tags.map(Number), [5, 10, 21.0975], "new setup intentionally offers calibrated standard distances, not fabricated custom phases");
+        } else if (args.includes('"目标", selection: $targetType')) {
+          assert.deepEqual(tags.map(value => JSON.parse(value)).sort(), [...settings.targetType.enum].sort());
+        } else {
+          assert.ok(args.includes("label, selection: value"), "unexpected new subjective-feedback picker");
+          assert.match(options, /String\?\.none/);
+          assert.match(options, /tag\(Optional\(option\.1\)\)/);
+          const fields = coachFeedbackFieldsSchema.properties;
+          for (const [label, field] of [["疲劳", fields.fatigue], ["酸痛", fields.soreness],
+            ["不适", fields.discomfort], ["今日偏好", fields.requestedAction], ["中断原因", fields.interruptionReason]] as const) {
+            const choices = new RegExp(`choices\\("${label}",[^\\[]*\\[([\\s\\S]*?)\\]\\)`).exec(source)?.[1];
+            assert.ok(choices, `${label} feedback choices must be checked against the API`);
+            const values = [...choices.matchAll(/\("[^"]+", "([^"]+)"\)/g)].map(match => match[1]).sort();
+            assert.deepEqual(values, [...field.anyOf[0].enum].sort());
+          }
+        }
         continue;
       }
       const isRace = args.includes('"比赛距离"');

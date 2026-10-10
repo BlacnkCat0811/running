@@ -24,6 +24,61 @@ import { prescriptionDigest } from "../src/plan-digest.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
 
+test("coach-loop opt-in uses real main/control stores, feedback changes the fact token, legacy execution is blocked", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-coach-loop-http-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  (await RaiDatabase.open(databasePath)).close();
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+    const read = async () => {
+      const response = await fetch(url + "/v1/mobile/coach-loop");
+      assert.equal(response.status, 200, await response.clone().text());
+      return response.json();
+    };
+    const handshake = await fetch(url + "/v1/handshake").then(r => r.json());
+    assert.equal(handshake.coachLoopContractVersion, 1);
+    const operationScope = { serverId: handshake.serverId, athleteId: handshake.athleteId, datasetEpoch: handshake.datasetEpoch };
+    const post = (path: string, payload: unknown) => fetch(url + path, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const initial = await read();
+    const enabled = await post("/v1/mobile/coach-loop", { contractVersion: 1, operationId: randomUUID(), operationScope,
+      action: "enable", expectedRevision: initial.revision, expectedFactsHash: initial.factsHash,
+      acceptedPolicyHash: initial.policyHash, settings: { mode: "daily_adaptive", runningDays: [1,2,3,4,5,6,7],
+        longRunDays: [7], targetType: "pace", availabilityMinutesByWeekday: {}, race: null } });
+    assert.equal(enabled.status, 200, await enabled.clone().text());
+    const beforeFeedback = await read();
+    const feedback = await post("/v1/mobile/coach-feedback", { operationId: randomUUID(), operationScope,
+      id: "current-rest", expectedRevision: 0, action: "save", consent: true,
+      fields: { phase: "pre_run", workoutId: null, fatigue: null, soreness: null, discomfort: null,
+        requestedAction: "rest", interruptionReason: null, replacementReason: null, rpeOverrideRef: null,
+        observedAt: new Date().toISOString() } });
+    assert.equal(feedback.status, 200, await feedback.clone().text());
+    const afterFeedback = await read();
+    assert.notEqual(afterFeedback.factsHash, beforeFeedback.factsHash);
+    assert.equal(afterFeedback.revision, beforeFeedback.revision, "GET safety downgrade does not publish a goals revision");
+    assert.equal(afterFeedback.today.executable, false);
+    assert.equal(afterFeedback.feedback.restRequested, true);
+    for (const path of ["/v1/mobile/today", "/v1/mobile/workout-plan", "/v1/mobile/training-plan-state"])
+      assert.equal((await fetch(url + path)).status, 409, "old consumers cannot misinterpret S/H or run stale courses");
+    const summary = await post("/v1/mobile/coach-prediction-refresh", { operationScope });
+    assert.equal(summary.status, 200, await summary.clone().text());
+    assert.equal((await summary.json()).status, "summary_unavailable");
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
 test("Run Coach routes enforce managed plans, CAS, pause exports and the return to manual planning", async () => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-run-coach-"));
   const databasePath = join(runtimeRoot, "var/rai.sqlite");
@@ -74,6 +129,24 @@ test("Run Coach routes enforce managed plans, CAS, pause exports and the return 
     assert.equal(confirm.status, 200, await confirm.clone().text());
     assert.equal((await read("/v1/mobile/goals")).runCoach, null);
     assert.ok((await read("/v1/mobile/workout-plan")).days.some((day: { executable: boolean }) => day.executable));
+    const currentGoals = await read("/v1/mobile/goals");
+    const localDate = weeklyPlanDates(mobileLocalDate())[1]!;
+    const shortManualStructure = {
+      warmup: { purpose: "warmup", goal: { type: "time", seconds: 300 }, alert: null },
+      blocks: [{ iterations: 1, steps: [{ purpose: "work", goal: { type: "time", seconds: 600 }, alert: null }] }],
+      cooldown: { purpose: "cooldown", goal: { type: "time", seconds: 300 }, alert: null }
+    };
+    const shortManual = await mutate("/v1/mobile/goals", { expectedRevision: currentGoals.revision,
+      weekPlan: [
+        { localDate: mobileLocalDate(), kind: "rest", distanceKm: null, structure: null, reason: "explicit manual rest today" },
+        { localDate, kind: "easy", distanceKm: 3.3, structure: shortManualStructure, reason: "explicit manual short" }
+      ] }, "PUT");
+    assert.equal(shortManual.status, 200, await shortManual.clone().text());
+    assert.equal((await shortManual.json()).weekPlanAudit.generatedBy, "manual");
+    const manualExport = (await read("/v1/mobile/workout-plan")).days.find((day: { localDate: string }) => day.localDate === localDate);
+    assert.equal(manualExport?.source, "manual");
+    assert.equal(manualExport?.durationMinutes, 20);
+    assert.equal(manualExport?.executable, true, "the automatic-dose policy must not silently relabel a saved manual short session");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

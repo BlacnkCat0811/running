@@ -15,6 +15,7 @@ import {
   SqliteRecoveryFactsReadRepository,
   SqlitePerformanceEntryRepository,
   SqlitePrivacyZoneRepository,
+  SqliteCoachFactsRepository,
   activeDurationSecondsSql,
   loadPerformanceEventSessions,
   type StoredPerformanceEntry,
@@ -33,6 +34,11 @@ import {
   type LabelFunnelReport
 } from "@rai/application";
 import { estimateRecoveryTime, withTrainingForm } from "@rai/training-load";
+import type { SubjectiveFeedback, WorkoutExecutionAssessment, CoachPredictionSummary } from "@rai/api-contracts";
+import { coachPredictionIdentity } from "./coach-prediction-companion.js";
+import { coachLocalDate, shiftCoachDate, type CoachRunFact } from "./coach-loop-facts.js";
+import { assessWorkoutExecution, coachQualityExecutionSummary, type CoachExecutionWorkout, type CoachExecutionAssociation } from "./coach-execution-assessment.js";
+import { prescriptionDigest } from "./plan-digest.js";
 
 import type {
   AbilityMetricSet,
@@ -81,7 +87,7 @@ import { environmentCoverage, environmentViewForWorkout, splitGradeContexts } fr
 import { buildRunningDynamics } from "./workout-dynamics.js";
 import { trimRouteForShare } from "./share-card.js";
 import { mobileSyncStatus, type MobileRefreshOutcome } from "./mobile-sync.js";
-import type { MobileGoalsStore, PlanHistoryRevision } from "./mobile-goals.js";
+import { planDayWithLock, type MobileGoalsStore, type PlanHistoryRevision } from "./mobile-goals.js";
 import { digest, executionContent } from "./plan-digest.js";
 import { runCoachResponse } from "./run-coach.js";
 import { PlanOperationError } from "./plan-publication.js";
@@ -237,6 +243,112 @@ export class RaiReadStore {
   invalidateCache(): void {
     this.cache.clear();
     this.cacheVersion = -1;
+  }
+
+  /** One read transaction for actual training, today's gates and subjective facts.
+   * Availability is conservative session materialization time, never event time. */
+  coachLoopFacts(goals: MobileGoalsResponse, history: PlanHistoryRevision[],
+    scope: { athleteId: string; datasetEpoch: string }, asOf = new Date().toISOString()) {
+    const date = coachLocalDate(asOf);
+    this.database.exec("BEGIN DEFERRED");
+    try {
+      const rows = this.database.prepare(`SELECT s.id, s.anchor_start_at AS startedAt,
+        s.anchor_end_at AS endedAt, s.anchor_distance_km AS distanceKm, w.duration_seconds AS durationSeconds,
+        s.updated_at AS availableAt
+        FROM training_sessions s JOIN workouts w ON w.id=s.canonical_workout_id
+        WHERE s.status='active' AND s.activity_type='HKWorkoutActivityTypeRunning'
+          AND julianday(s.anchor_start_at)>=julianday(?) AND julianday(s.anchor_end_at)<=julianday(?)
+        ORDER BY s.anchor_start_at,s.id`).all(`${shiftCoachDate(date, -100)}T00:00:00+08:00`, asOf) as
+        Array<{ id: string; startedAt: string; endedAt: string; distanceKm: number; durationSeconds: number; availableAt: string }>;
+      const facts: CoachRunFact[] = rows.filter(row => row.distanceKm > 0 && row.durationSeconds > 0).map(row => ({
+        id: row.id, startedAt: row.startedAt, distanceKm: row.distanceKm, durationSeconds: row.durationSeconds,
+        availableAt: Number.isFinite(Date.parse(row.availableAt)) ? new Date(row.availableAt).toISOString() : null,
+        revisionOrHash: digest(row)
+      }));
+      const inputs = this.mobileWeeklyPlanInputs(goals, history);
+      const repository = new SqliteCoachFactsRepository(this.database);
+      const feedback = repository.feedback<SubjectiveFeedback>(JSON.stringify([scope.athleteId, scope.datasetEpoch]), asOf);
+      const qualityDates = (this.database.prepare(`SELECT local_date AS date,session_type AS kind
+        FROM active_workout_training_loads WHERE local_date>=? AND local_date<=?
+          AND (session_type IN ('tempo','interval','race') OR stimulus_type IN ('lactate_threshold','anaerobic','vo2max'))
+        ORDER BY local_date`).all(shiftCoachDate(date, -28), date) as Array<{ date: string; kind: string }>);
+      const execution = this.coachExecutionAssessments(history, facts, asOf);
+      const executionSummary = coachQualityExecutionSummary({ asOf, assessments: execution,
+        observedDates: facts.map(fact => coachLocalDate(fact.startedAt)),
+        prescriptions: execution.flatMap(row => {
+          const revision = history.find(rev => rev.revision === row.planRevision);
+          const day = revision ? planDayWithLock(revision, row.localDate) : undefined;
+          return revision && day ? [{ day, revision: revision.revision, createdAt: revision.changedAt, availableAt: revision.changedAt,
+            evidenceRef: { source: "plan_history", id: `${revision.revision}:${day.localDate}`, observedAt: revision.changedAt,
+              availableAt: revision.changedAt, revisionOrHash: row.prescriptionDigest } }] : [];
+        }) });
+      const predictionIdentity = coachPredictionIdentity(this.database, scope);
+      const predictionSummary = predictionIdentity ? repository.summary<CoachPredictionSummary>(
+        JSON.stringify([scope.athleteId, scope.datasetEpoch]), digest(predictionIdentity), asOf) : null;
+      const factsHash = digest({ scope, date, facts, feedback, zones: inputs.prescription,
+        recovery: inputs.today.recoveryAssessment, injury: inputs.today.injuryFlags, calibration: inputs.today.calibration,
+        training: inputs.today.weekStructure, recent: inputs.recentWeeklyKm, previous: inputs.previousWeekDistanceKm,
+        sync: inputs.today.sync, predictionIdentity, predictionSummaryId: predictionSummary?.id ?? null });
+      this.database.exec("COMMIT");
+      return { asOf, date, facts, factsHash, inputs, feedback, execution, executionSummary, qualityDates, predictionIdentity, predictionSummary,
+        historyCoverageFrom: facts.length ? facts.map(row => coachLocalDate(row.startedAt)).sort()[0]! : null };
+    } catch (error) { this.database.exec("ROLLBACK"); throw error; }
+  }
+
+  coachExecutionAssessments(history: PlanHistoryRevision[], facts: CoachRunFact[], asOf: string): WorkoutExecutionAssessment[] {
+    const today = coachLocalDate(asOf), dates = new Set(history.flatMap(row => [
+      ...row.weekPlan.map(day => day.localDate), ...(row.lockedSession ? [row.lockedSession.localDate] : [])
+    ]));
+    const assessments: WorkoutExecutionAssessment[] = [];
+    for (const date of [...dates].filter(date => date >= shiftCoachDate(today, -28) && date <= today).sort()) {
+      const midnight = `${date}T00:00:00+08:00`;
+      const known = history.filter(row => Date.parse(row.changedAt) <= Date.parse(asOf) &&
+        planDayWithLock(row, date) !== undefined).sort((a, b) => a.revision - b.revision);
+      const frozen = known.filter(row => Date.parse(row.changedAt) <= Date.parse(midnight)).at(-1) ?? known[0];
+      if (!frozen) continue;
+      const day = planDayWithLock(frozen, date)!;
+      const evidenceRef = { source: "plan_history", id: `${frozen.revision}:${date}`, observedAt: frozen.changedAt,
+        availableAt: frozen.changedAt, revisionOrHash: prescriptionDigest(day.kind, day.structure ?? null) };
+      const workouts: CoachExecutionWorkout[] = [], associations: CoachExecutionAssociation[] = [];
+      for (const fact of facts.filter(fact => coachLocalDate(fact.startedAt) === date)) {
+        const series = this.workoutSeries(fact.id, day.structure ? [{ localDate: date, kind: day.kind, revision: frozen.revision,
+          matchedBy: "plan_history", structure: day.structure, distanceKm: day.distanceKm, pushedAt: null }] : []);
+        if (!series) continue;
+        const session = this.seriesRepository.sessionForSeries(fact.id);
+        const signalIntervals: CoachExecutionWorkout["signalIntervals"][number][] = session ? this.seriesRepository.metricIntervals("HKQuantityTypeIdentifierHeartRate",
+          session.sourceName, session.startedAt, session.endedAt).map(interval => ({
+            channel: "heart_rate" as const, startOffsetSeconds: (interval.startMs - Date.parse(fact.startedAt)) / 1000,
+            durationSeconds: (interval.endMs - interval.startMs) / 1000, value: interval.value, availableAt: asOf
+          })) : [];
+        if (session) {
+          const track = this.seriesRepository.speedTrack(session.startedAt, session.endedAt, session.sourceName, fact.distanceKm);
+          for (const sample of track?.samples ?? []) if (sample.metersPerSecond > 0) signalIntervals.push({
+            channel: "pace", startOffsetSeconds: (sample.startMs - Date.parse(fact.startedAt)) / 1000,
+            durationSeconds: (sample.endMs - sample.startMs) / 1000, value: 1000 / sample.metersPerSecond,
+            // Raw signal first-availability is not retained independently;
+            // certify current evaluation only, never historical as-known-then.
+            availableAt: asOf
+          });
+        }
+        workouts.push({ id: fact.id, startedAt: fact.startedAt, endedAt: series.endedAt, availableAt: fact.availableAt,
+          distanceMeters: fact.distanceKm * 1000, durationSeconds: fact.durationSeconds,
+          evidenceLevel: series.hasMeasuredWorkoutSteps ? "measured_steps" : series.segmentPlan ? "reconstructed_segments" : "summary_only",
+          measuredStepsComplete: series.hasMeasuredWorkoutSteps === true && !!day.structure &&
+            series.segments.length === (day.structure.warmup ? 1 : 0) + (day.structure.cooldown ? 1 : 0) +
+              day.structure.blocks.reduce((sum, block) => sum + block.iterations * block.steps.length, 0),
+          segments: series.segments, signalIntervals,
+          evidenceRef: { source: "workout", id: fact.id, observedAt: fact.startedAt, availableAt: fact.availableAt, revisionOrHash: fact.revisionOrHash } });
+        // A same-day timestamp is not a binding. The segmentation matcher must
+        // independently select this exact pre-existing revision.
+        if (series.segmentPlan?.revision === frozen.revision && Date.parse(frozen.changedAt) <= Date.parse(fact.startedAt))
+          associations.push({ workoutId: fact.id, prescriptionDigest: evidenceRef.revisionOrHash,
+            method: series.hasMeasuredWorkoutSteps ? "measured_steps_with_plan" : "plan_history",
+            validFrom: frozen.changedAt, validUntil: null, availableAt: fact.availableAt, retractedAt: null, evidenceRef });
+      }
+      assessments.push(assessWorkoutExecution({ asOf, prescription: { day, revision: frozen.revision,
+        createdAt: frozen.changedAt, availableAt: frozen.changedAt, evidenceRef }, workouts, associations }));
+    }
+    return assessments;
   }
 
   private cached<T>(key: string, load: () => T): T {
@@ -427,7 +539,8 @@ export class RaiReadStore {
    * 自己上一轮的输出）。让同一次结果显式传出去，比让它被重算更安全。
    */
   private mobileTodayWithExecutablePlan(
-    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach">,
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach"> &
+      Partial<Pick<MobileGoalsResponse, "weekPlanAudit">>,
     planHistory?: PlanHistoryRevision[]
   ): { today: MobileTodayResponse; effective: MobileWorkoutPlanResponse; preparation: ReturnType<typeof assembleMobileCoach>["preparation"] } {
     const today = mobileLocalDate();
@@ -639,6 +752,7 @@ export class RaiReadStore {
         raceTarget: goals?.raceTarget ?? null,
         runCoach: goals?.runCoach ?? null,
         weekPlanPreservedDate: goals?.weekPlanPreservedDate ?? null,
+        weekPlanAudit: goals?.weekPlanAudit ?? null,
         weekPlan: goals?.weekPlan ?? [],
         lockedSession: goals?.lockedSession ?? null
       },
@@ -749,7 +863,8 @@ export class RaiReadStore {
       weeklyVolumeBaselineKm,
       recentWeeklyKm,
       prescription: zonePrescription(currentZones),
-      previousWeekDistanceKm
+      previousWeekDistanceKm,
+      automaticDosePolicy: goals?.weekPlanAudit?.generatedBy === "heuristic"
     });
     return assembleMobileWorkoutPlan({
       today: today.today.localDate,

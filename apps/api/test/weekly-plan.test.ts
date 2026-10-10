@@ -1634,7 +1634,7 @@ test("G05: a taper week is generated inside the phase band, and says why", async
     prescription: PRESCRIPTION
   });
   const noRaceTotal = noRace.days.reduce((sum, day) => sum + (day.distanceKm ?? 0), 0);
-  assert.ok(noRaceTotal > 45, "without a race target the week is not silently tapered");
+  assert.ok(noRaceTotal > total, "without a race target complete sessions are not restricted by race protection");
   assert.ok(
     !noRace.warnings.some((warning) => warning.includes("阶段上限")),
     "no race target means no phase warning at all"

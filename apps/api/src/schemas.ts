@@ -129,6 +129,29 @@ export const runCoachCommandSchema = {
   }
 } as const;
 
+export const coachLoopCommandSchema = {
+  type: "object", additionalProperties: false,
+  required: ["contractVersion", "operationId", "operationScope", "expectedRevision", "expectedFactsHash", "action"],
+  properties: {
+    contractVersion: { const: 1 }, operationId: { type: "string", format: "uuid" }, operationScope: planOperationScopeSchema,
+    expectedRevision: { type: "integer", minimum: 0 }, expectedFactsHash: { type: "string", minLength: 1, maxLength: 200 },
+    action: { enum: ["enable", "refresh", "update", "pause", "resume", "end"] },
+    acceptedPolicyHash: { type: "string", minLength: 1, maxLength: 200 },
+    settings: { type: "object", additionalProperties: false,
+      required: ["mode", "runningDays", "longRunDays", "availabilityMinutesByWeekday", "targetType", "race"],
+      properties: {
+        mode: { enum: ["daily_adaptive", "race_preparation"] },
+        runningDays: { type: "array", minItems: 1, maxItems: 7, uniqueItems: true, items: { type: "integer", minimum: 1, maximum: 7 } },
+        longRunDays: { type: "array", maxItems: 7, uniqueItems: true, items: { type: "integer", minimum: 1, maximum: 7 } },
+        availabilityMinutesByWeekday: { type: "object", additionalProperties: false,
+          patternProperties: { "^[1-7]$": { anyOf: [{ type: "integer", minimum: 10, maximum: 240 }, { type: "null" }] } } },
+        targetType: { enum: ["pace", "heart_rate"] },
+        race: { anyOf: [runCoachCommandSchema.properties.config, { type: "null" }] }
+      }
+    }
+  }
+} as const;
+
 /**
  * Alert bounds depend on the alert kind: pace is seconds per kilometre and heart
  * rate is beats per minute, so one shared ceiling would let a body-invalid heart
@@ -313,6 +336,39 @@ export const mobilePlanSyncedBodySchema = {
     scheduledAt: { type: "string", format: "date-time" },
     idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
     exportNotes: { type: "array", maxItems: 16, items: { type: "string", maxLength: 256 } }
+  }
+} as const;
+
+export const coachLoopSyncedBodySchema = {
+  ...mobilePlanSyncedBodySchema,
+  required: ["contractVersion", "scope", "operationId", "coherenceToken", "workoutID", "scheduledAt",
+    "verifiedAt", "timezone", "prescriptionDigest", "lifecycleEvent", "structure", "revision", "localDate",
+    "kind", "idempotencyKey", "coachLoop"],
+  properties: { ...mobilePlanSyncedBodySchema.properties, coachLoop: {
+    type: "object", additionalProperties: false, required: ["contractVersion", "policyHash", "decisionRef"],
+    properties: { contractVersion: { const: 1 }, policyHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+      decisionRef: { anyOf: [{ type: "string", pattern: "^[a-f0-9]{64}$" }, { type: "null" }] } }
+  } }
+} as const;
+
+const optionalFeedbackEnum = <T extends string>(values: readonly T[]) => ({
+  anyOf: [{ type: "string", enum: values }, { type: "null" }]
+} as const);
+export const coachFeedbackFieldsSchema = {
+  type: "object", additionalProperties: false,
+  required: ["phase", "observedAt", "workoutId", "fatigue", "soreness", "discomfort", "requestedAction",
+    "interruptionReason", "replacementReason", "rpeOverrideRef"],
+  properties: {
+    phase: { enum: ["pre_run", "post_run"] }, observedAt: { type: "string", format: "date-time" },
+    workoutId: { anyOf: [{ type: "string", minLength: 1 }, { type: "null" }] },
+    fatigue: optionalFeedbackEnum(["usual", "elevated", "high"]),
+    soreness: optionalFeedbackEnum(["none", "mild", "marked"]),
+    discomfort: optionalFeedbackEnum(["none", "present"]),
+    requestedAction: optionalFeedbackEnum(["none", "easy_only", "rest"]),
+    interruptionReason: optionalFeedbackEnum(["time_constraint", "fatigue", "discomfort", "weather", "equipment", "other"]),
+    replacementReason: optionalFeedbackEnum(["time_constraint", "preference", "fatigue", "discomfort", "other"]),
+    rpeOverrideRef: { anyOf: [{ type: "object", additionalProperties: false, required: ["workoutId", "revision"],
+      properties: { workoutId: { type: "string", minLength: 1 }, revision: { type: "integer", minimum: 1 } } }, { type: "null" }] }
   }
 } as const;
 
@@ -785,6 +841,26 @@ export const openapiDocument = {
     }
   },
   paths: {
+    "/v1/mobile/coach-loop": {
+      get: operation(["Read"], "版本化教练聚合：S/H、有效课表、反馈和执行评价；无写副作用"),
+      post: operation(["Workouts"], "显式确认规则并启用、刷新、暂停或结束持续/比赛训练；原子发布追加课", {
+        requestBody: body(coachLoopCommandSchema, "合同版本、数据域、规则确认及CAS/事实令牌")
+      })
+    },
+    "/v1/mobile/coach-execution": { get: operation(["Read"], "过去28日冻结处方的观测、剂量和刺激评价") },
+    "/v1/mobile/coach-loop/synced": { post: operation(["Workouts"], "核验今天新版教练授权的实际系统导出；保留失效回执与撤回账目，不代表手表收件", {
+      requestBody: body(coachLoopSyncedBodySchema, "旧系统排期核验字段及新版规则/追加授权身份")
+    }) },
+    "/v1/mobile/coach-feedback": { post: operation(["Workouts"], "自愿提交/追加修订/撤回主观反馈，不触发Fitness重算", {
+      requestBody: body({ type: "object", required: ["operationId", "operationScope", "id", "expectedRevision", "action", "consent"],
+        properties: { operationId: { type: "string", format: "uuid" }, operationScope: planOperationScopeSchema,
+          id: { type: "string" }, expectedRevision: { type: "integer" }, action: { enum: ["save", "retract"] },
+          consent: { const: true }, fields: coachFeedbackFieldsSchema } }, "幂等操作、反馈修订和显式采集同意")
+    }) },
+    "/v1/mobile/coach-prediction-refresh": { post: operation(["Workouts"], "显式异步计算既有预测，提取兼容的教练摘要；GET不计算", {
+      requestBody: body({ type: "object", additionalProperties: false, required: ["operationScope"],
+        properties: { operationScope: planOperationScopeSchema } }, "当前数据域身份")
+    }) },
     "/v1/performance": { get: operation(["Jobs"], "进程性能与调度状态", {
       responses: { ...responses("进程性能与调度状态"), "200": jsonResponse("进程性能", {
         type: "object", required: ["uptimeMs", "requests", "admission"],

@@ -196,7 +196,7 @@ test("C01: every disposition maps to a declared action, and null is reserved for
   const dispositions: CoachPlanDisposition[] = [
     "no_stored_plan", "kept_stored_plan", "stored_rest_kept", "race_day_blank",
     "downgraded_quality", "downgraded_taper", "downgraded_red_tone",
-    "budget_limited", "budget_exhausted"
+    "budget_limited", "budget_exhausted", "training_stopped", "today_completed"
   ];
   const verdict = decideVerdict(base());
   const seen = new Set<string | null>();

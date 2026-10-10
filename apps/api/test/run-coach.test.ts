@@ -14,13 +14,123 @@ import { seedRecentRunningWeeks } from "./weekly-training-fixture.js";
 import {
   buildCoachConfidence, buildRunCoachWeek, coachConfidenceFromPreparation, COACH_CONFIDENCE_MODERATE_FLOOR,
   COACH_CONFIDENCE_HIGH_FLOOR, COACH_PREPARATION_STALE_AFTER_DAYS, registerRunCoachRoutes, runCoachAdaptationKey, runCoachResponse,
-  runCoachUnplannedDays, runCoachWeeklyBudget
+  runCoachUnplannedDays, runCoachWeeklyBudget, runCoachPlanExecutionIdentity
 } from "../src/run-coach.js";
 import { normalizeRunCoachPlan, runCoachEndDate, runCoachIsTraining, runCoachPhase, runCoachRaceTarget, runCoachWeekday, validateRunCoachConfig } from "../src/run-coach-policy.js";
 
 const config: MobileRunCoachConfig = { goal: "fitness", raceDate: null, raceDistanceKm: null, targetTimeSeconds: null,
   runningDays: [1, 2, 4, 6, 7], longRunDays: [7], targetType: "pace", strengthTraining: true };
 const plan: MobileRunCoachPlan = { ...config, id: "fixture", startedOn: "2026-10-06", status: "active", pausedOn: null, endedOn: null, adaptationKey: null, adaptedAt: null };
+
+test("AC3-01/02 partial route: changed evidence with unchanged execution does not create goals/history revisions", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-coach-no-change-"));
+  const path = join(root, "rai.sqlite");
+  (await RaiDatabase.open(path)).close();
+  const store = new MobileGoalsStore(root, join(root, "rai-control.sqlite"));
+  const read = new RaiReadStore(path);
+  const app = Fastify();
+  let explanationOnly = false;
+  let observedWeekKm = 0;
+  const noChangeOperationId = "11111111-1111-4111-8111-111111111111";
+  const staleOperationId = "22222222-2222-4222-8222-222222222222";
+  const changedOperationId = "33333333-3333-4333-8333-333333333333";
+  const inputs = (goals: ReturnType<MobileGoalsStore["read"]>) => {
+    const current = read.mobileWeeklyPlanInputs(goals, store.planHistory());
+    return { ...current, today: { ...current.today,
+      week: { ...current.today.week, distanceKm: observedWeekKm },
+      verdict: { ...current.today.verdict, reason: explanationOnly ? `${current.today.verdict.reason} 补充解释。` : current.today.verdict.reason }
+    } };
+  };
+  registerRunCoachRoutes({ app, store, scope: () => "synthetic-no-change-scope", inputs });
+  try {
+    const started = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
+      payload: { expectedRevision: store.read().revision, action: "start", config } });
+    assert.equal(started.statusCode, 200, started.body);
+    const before = store.read();
+    const beforeHistory = store.planHistory();
+    assert.ok(before.runCoach);
+    const originalKey = runCoachAdaptationKey(before.runCoach, inputs(before));
+    const identity = runCoachPlanExecutionIdentity(before.runCoach, before.weekPlan, inputs(before));
+    assert.equal(runCoachPlanExecutionIdentity({ ...before.runCoach, adaptedAt: "2026-10-07T05:00:00Z", adaptationKey: "metadata-only" },
+      before.weekPlan.map(day => ({ ...day, reason: "new explanation only" })), inputs(before)), identity);
+    explanationOnly = true;
+    assert.notEqual(runCoachAdaptationKey(before.runCoach, inputs(before)), originalKey);
+    const refreshed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
+      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId } });
+    assert.equal(refreshed.statusCode, 200, refreshed.body);
+    assert.equal(refreshed.json().revision, before.revision);
+    assert.deepEqual(store.read(), before);
+    assert.deepEqual(store.planHistory(), beforeHistory);
+    assert.equal((store.publicationResult("synthetic-no-change-scope", noChangeOperationId) as { status: string }).status, "committed");
+    const repeated = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
+      payload: { expectedRevision: before.revision, action: "refresh", operationId: noChangeOperationId } });
+    assert.deepEqual(repeated.json(), refreshed.json());
+    assert.equal(store.read().revision, before.revision);
+    assert.equal((await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
+      payload: { expectedRevision: before.revision - 1, action: "refresh", operationId: staleOperationId } })).statusCode, 409);
+    observedWeekKm = 5;
+    const changed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
+      payload: { expectedRevision: before.revision, action: "refresh", operationId: changedOperationId } });
+    assert.equal(changed.statusCode, 200, changed.body);
+    assert.ok(store.read().revision > before.revision, "real constraint changes must still publish a revision");
+    assert.ok(store.read().weekPlan.filter(day => day.localDate >= "2026-10-07" && day.localDate <= "2026-10-11")
+      .every(day => day.kind === "rest"), "completed volume cannot be swallowed by the no-change gate");
+  } finally { await app.close(); read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("AC3-05 partial route: refresh retains future rows beyond its replacement window", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-coach-fixed-outside-"));
+  const path = join(root, "rai.sqlite");
+  (await RaiDatabase.open(path)).close();
+  const store = new MobileGoalsStore(root);
+  const read = new RaiReadStore(path);
+  const app = Fastify();
+  registerRunCoachRoutes({ app, store, inputs: goals => read.mobileWeeklyPlanInputs(goals, store.planHistory()) });
+  try {
+    const started = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
+      payload: { expectedRevision: store.read().revision, action: "start", config } });
+    assert.equal(started.statusCode, 200, started.body);
+    const current = store.read();
+    const structure = buildSessionStructure("easy", null, { targetDistanceKm: 3 });
+    const outside = { localDate: "2026-10-15", kind: "easy" as const, distanceKm: 3, structure, reason: "future fixed original" };
+    const written = store.write({ expectedRevision: current.revision, weekPlan: [...current.weekPlan, outside] });
+    const original = written.weekPlan.find(day => day.localDate === outside.localDate);
+    const refreshed = await app.inject({ method: "POST", url: "/v1/mobile/run-coach",
+      payload: { expectedRevision: written.revision, action: "refresh" } });
+    assert.equal(refreshed.statusCode, 200, refreshed.body);
+    assert.deepEqual(store.read().weekPlan.find(day => day.localDate === outside.localDate), original);
+  } finally { await app.close(); read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("AC1 compatibility read: unsupported two-day quality/long protection applies to the effective layer without rewriting storage", async context => {
+  context.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-07T04:00:00Z") });
+  const root = mkdtempSync(join(tmpdir(), "rai-coach-custom-protection-"));
+  const path = join(root, "rai.sqlite");
+  (await RaiDatabase.open(path)).close();
+  const store = new MobileGoalsStore(root);
+  const read = new RaiReadStore(path);
+  try {
+    const custom: MobileRunCoachPlan = { ...plan, goal: "finish", raceDate: "2026-10-10", raceDistanceKm: 42.195,
+      startedOn: "2026-08-01", runningDays: [1, 2, 3, 4, 5, 6, 7], longRunDays: [3] };
+    const structure = buildSessionStructure("long_run", null, { targetDistanceKm: 5 });
+    const day = { localDate: "2026-10-07", kind: "long_run" as const, distanceKm: 5, structure, reason: "stored original" };
+    const threeDays = store.write({ weekPlan: [day] }, { runCoach: custom });
+    assert.equal(read.mobileToday(threeDays).executionPolicy?.protections.length, 0);
+    assert.equal(read.mobileToday(threeDays).nextSession.kind, "long_run");
+    const twoDays = store.write({ expectedRevision: threeDays.revision, weekPlan: [day] },
+      { runCoach: { ...custom, raceDate: "2026-10-09" } });
+    const original = store.read();
+    const today = read.mobileToday(twoDays);
+    assert.equal(today.nextSession.kind, "rest");
+    assert.equal(today.executionPolicy?.phase, null);
+    assert.equal(today.executionPolicy?.protections[0]?.constraints[0]?.kind, "no_quality_or_long_run");
+    assert.equal(read.mobileWorkoutPlan(twoDays).days[0]?.executable, false);
+    assert.deepEqual(store.read(), original);
+    assert.equal(store.read().weekPlan[0]?.kind, "long_run");
+  } finally { read.close(); store.close(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("coach setup validates actual dates, distance/time, unique weekdays and long-run subsets", () => {
   assert.doesNotThrow(() => validateRunCoachConfig(config, "2026-10-06", true));

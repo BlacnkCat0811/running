@@ -114,6 +114,8 @@ export interface PlanMergeOptions {
   confirmCoachPlan?: boolean;
   /** Runs on the measured candidate before any durable write. */
   validate?: (candidate: MobileGoalsResponse) => MobileGoalsResponse | void;
+  /** Explicit command clock for deterministic coach publication/replay. */
+  evaluatedAt?: string;
 }
 
 /** One stored plan revision, as it was written. */
@@ -122,6 +124,16 @@ export interface PlanHistoryRevision {
   changedAt: string;
   weekPlan: MobilePlannedDay[];
   lockedSession: MobileLockedSession | null;
+}
+
+/** A lock is its own prescription, not a flag on a possibly different week row. */
+export function planDayWithLock(
+  plan: Pick<PlanHistoryRevision, "weekPlan" | "lockedSession">, date: string
+): MobilePlannedDay | undefined {
+  if (plan.lockedSession?.localDate !== date) return plan.weekPlan.find(day => day.localDate === date);
+  const session = plan.lockedSession.session;
+  return { localDate: date, kind: session.kind, distanceKm: session.distanceKm,
+    structure: session.structure, reason: session.reason };
 }
 
 /** Client-verified local system schedule; physical Watch delivery is separate. */
@@ -144,6 +156,7 @@ export interface PlanPushRecord {
   prescriptionDigest?: string;
   lifecycleEvent?: "verified" | "withdrawn" | "replaced";
   matchesCurrent?: boolean;
+  coachLoop?: import("@rai/api-contracts").CoachLoopReceiptContext;
 }
 
 /**
@@ -213,6 +226,26 @@ export class MobileGoalsStore {
   }
 
   get supportsPublicationOperations(): boolean { return this.controlDatabase !== null; }
+
+  /** Coach configuration, anchor and decision receipts share the publication
+   * transaction with goals/history. Not a second store of health facts. */
+  coachLoopState<T>(scope: string): T | null {
+    const row = this.controlDatabase?.prepare(`SELECT payload_json FROM mobile_coach_loop_receipts
+      WHERE scope=? ORDER BY sequence DESC LIMIT 1`).get(scope) as { payload_json: string } | undefined;
+    return row ? JSON.parse(row.payload_json) as T : null;
+  }
+
+  coachLoopReceipts<T>(scope: string, limit = 100): T[] {
+    return (this.controlDatabase?.prepare(`SELECT payload_json FROM mobile_coach_loop_receipts
+      WHERE scope=? ORDER BY sequence DESC LIMIT ?`).all(scope, cappedReadLimit(limit)) as
+      { payload_json: string }[] | undefined ?? []).map(row => JSON.parse(row.payload_json) as T);
+  }
+
+  appendCoachLoopReceipt(scope: string, operationId: string, state: unknown): void {
+    if (!this.publicationTransaction || !this.controlDatabase) throw new Error("Coach receipt requires atomic plan publication");
+    this.controlDatabase.prepare("INSERT INTO mobile_coach_loop_receipts(scope,operation_id,payload_json) VALUES (?,?,?)")
+      .run(scope, operationId, JSON.stringify(state));
+  }
 
   publicationResult(scope: string, operationId: string): unknown {
     const row = this.controlDatabase?.prepare("SELECT result_json, expires_at FROM mobile_plan_operations WHERE scope = ? AND operation_id = ?")
@@ -328,7 +361,7 @@ export class MobileGoalsStore {
       weekPlanReplanRequired: options?.confirmCoachPlan ? false : current.weekPlanReplanRequired,
       weekPlanPreservedDate: current.weekPlanPreservedDate,
       runCoach: options?.runCoach === undefined ? current.runCoach : options.runCoach,
-      updatedAt: new Date().toISOString()
+      updatedAt: options?.evaluatedAt ?? new Date().toISOString()
     };
     const validated = options?.validate?.(this.toResponse(stored, options));
     if (validated) stored.weekPlan = validated.weekPlan;
@@ -444,7 +477,8 @@ export class MobileGoalsStore {
     const revision = Number.isFinite(input.revision) ? Math.max(0, Math.round(input.revision)) : 0;
     // Serialise lookup + insert even if another process owns the same control
     // database. A unique index alone would turn a concurrent retry into a 500.
-    this.controlDatabase.exec("BEGIN IMMEDIATE");
+    const ownsTransaction = !this.publicationTransaction;
+    if (ownsTransaction) this.controlDatabase.exec("BEGIN IMMEDIATE");
     try {
       if (input.contractVersion === 2) {
         const previous = this.controlDatabase.prepare(`
@@ -455,7 +489,8 @@ export class MobileGoalsStore {
         if (previous) {
           const actual = JSON.parse(previous.payload_json) as PlanPushRecord;
           if (previous.kind !== input.kind || previous.revision !== revision || digest(actual.scope) !== digest(input.scope) ||
-              actual.prescriptionDigest !== input.prescriptionDigest || !isDeepStrictEqual(actual.structure, input.structure)) {
+              actual.prescriptionDigest !== input.prescriptionDigest || !isDeepStrictEqual(actual.structure, input.structure) ||
+              !isDeepStrictEqual(actual.coachLoop, input.coachLoop)) {
             throw new PlanOperationError("plan_receipt_key_conflict", "相同系统条目不能登记不同的实际导出内容。");
           }
         }
@@ -474,7 +509,7 @@ export class MobileGoalsStore {
                 !isDeepStrictEqual(original.structure, input.structure)) {
               throw new PlanOperationError("plan_receipt_key_conflict", "同一回执键不能改变实际导出内容或生命周期事件。");
             }
-            this.controlDatabase.exec("COMMIT");
+            if (ownsTransaction) this.controlDatabase.exec("COMMIT");
             return previous.pushed_at;
           }
           const previousPayload = JSON.parse(previous.payload_json);
@@ -484,7 +519,7 @@ export class MobileGoalsStore {
               previous.kind !== input.kind || !isDeepStrictEqual(previousPayload, actualPayload)) {
             throw new MobileGoalsInputError("idempotencyKey was already used for a different system schedule receipt");
           }
-          this.controlDatabase.exec("COMMIT");
+          if (ownsTransaction) this.controlDatabase.exec("COMMIT");
           return previous.pushed_at;
         }
       }
@@ -495,7 +530,7 @@ export class MobileGoalsStore {
             AND json_extract(payload_json, '$.scheduledAt') = ?
             AND json_extract(payload_json, '$.lifecycleEvent') = ? LIMIT 1
         `).get(input.workoutID!, input.scheduledAt!, input.lifecycleEvent!) as { pushed_at: string } | undefined;
-        if (repeated) { this.controlDatabase.exec("COMMIT"); return repeated.pushed_at; }
+        if (repeated) { if (ownsTransaction) this.controlDatabase.exec("COMMIT"); return repeated.pushed_at; }
       }
       this.controlDatabase
         .prepare(`
@@ -509,11 +544,11 @@ export class MobileGoalsStore {
           JSON.stringify(payload),
           input.pushedAt
         );
-      this.controlDatabase.exec("COMMIT");
+      if (ownsTransaction) this.controlDatabase.exec("COMMIT");
       this.invalidateReadCaches();
       return input.pushedAt;
     } catch (error) {
-      this.controlDatabase.exec("ROLLBACK");
+      if (ownsTransaction) this.controlDatabase.exec("ROLLBACK");
       throw error;
     }
   }
@@ -529,6 +564,23 @@ export class MobileGoalsStore {
 
   /** Push receipts at or after `sinceIso`, newest first. */
   planPushes(sinceIso: string, limit = 50): PlanPushRecord[] {
+    return this.allPlanPushes().filter(push => push.pushedAt >= sinceIso).slice(0, cappedReadLimit(limit));
+  }
+
+  /** Safety occupancy cannot use a presentation/history LIMIT: an older active
+   * system entry does not disappear when unrelated receipts arrive. */
+  activePlanPushes(): PlanPushRecord[] {
+    return this.allPlanPushes().filter(push => push.kind !== "rest" &&
+      (push.lifecycleEvent == null || push.lifecycleEvent === "verified") &&
+      (!push.workoutID || !push.scheduledAt || this.planPushIsActive(push.workoutID, push.scheduledAt)));
+  }
+
+  planPushForSystemEntry(workoutID: string, scheduledAt: string): PlanPushRecord | null {
+    return this.allPlanPushes().find(push => push.workoutID === workoutID && push.scheduledAt === scheduledAt &&
+      (push.lifecycleEvent == null || push.lifecycleEvent === "verified")) ?? null;
+  }
+
+  private allPlanPushes(): PlanPushRecord[] {
     if (!this.controlDatabase) return [];
     const version = this.dataVersion();
     if (!this.planPushCache || this.planPushCache.dataVersion !== version) {
@@ -540,9 +592,7 @@ export class MobileGoalsStore {
     // caller-supplied, so that is not a safe thing to build on. Keeping every
     // receipt removes the case entirely, and the table gains about one row a day
     // (one per plan sync), so "every receipt" stays small.
-    return this.planPushCache.rows
-      .filter((push) => push.pushedAt >= sinceIso)
-      .slice(0, cappedReadLimit(limit));
+    return this.planPushCache.rows;
   }
 
   /** Fills the push cache. Every receipt is kept — see `planPushes` for why no limit. */
@@ -671,6 +721,11 @@ export class MobileGoalsStore {
       CREATE TABLE IF NOT EXISTS mobile_plan_operations (
         scope TEXT NOT NULL, operation_id TEXT NOT NULL, request_digest TEXT NOT NULL,
         result_json TEXT, expires_at TEXT NOT NULL, PRIMARY KEY(scope, operation_id)
+      );
+      CREATE TABLE IF NOT EXISTS mobile_coach_loop_receipts (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
+        operation_id TEXT NOT NULL, payload_json TEXT NOT NULL,
+        UNIQUE(scope,operation_id)
       );
       CREATE INDEX IF NOT EXISTS idx_mobile_plan_pushes_pushed_at
         ON mobile_plan_pushes(pushed_at);

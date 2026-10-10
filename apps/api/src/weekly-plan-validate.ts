@@ -6,7 +6,7 @@ import type {
   MobileWorkoutStep
 } from "@rai/api-contracts";
 import { MOBILE_SESSION_KINDS } from "@rai/contracts";
-import { racePlanPhase, taperDayCeiling } from "./race-plan-policy.js";
+import { raceExecutionProtection, taperDayCeiling } from "./race-plan-policy.js";
 
 import {
   buildSessionStructure,
@@ -806,12 +806,12 @@ export function applyRacePlanPolicy(
   weeklyDistanceKm: number, prescription: CoachZonePrescription | null, warnings: string[] = []
 ): MobilePlannedDay[] {
   return days.map(day => {
-    const phase = racePlanPhase(day.localDate, target);
-    if (phase === "race_day" && day.kind !== "rest") {
+    const protection = raceExecutionProtection(day.localDate, target?.date);
+    if (protection.raceDay && day.kind !== "rest") {
       warnings.push(`${day.localDate} 比赛日不追加训练，已留白`);
       return { ...day, kind: "rest", distanceKm: null, structure: null, reason: "比赛日留白；不等于比赛已完成。" };
     }
-    if (phase !== "taper" || day.kind === "rest") return day;
+    if (!protection.preRace || day.kind === "rest") return day;
     const ceiling = taperDayCeiling(weeklyDistanceKm);
     const measured = day.structure ? measureStructure(day.structure, day.kind, pacesFromZones(prescription)).distanceKm : day.distanceKm ?? 0;
     if ((day.kind === "easy" || day.kind === "recovery") && measured <= ceiling + 0.05) return day;
@@ -828,7 +828,8 @@ export function applyRacePlanPolicy(
 }
 
 /**
- * Deterministic coach plan, sized from the athlete's budget and zone prescription.
+ * Legacy deterministic template retained for compatibility/offline baselines.
+ * New automatic generation uses buildCompleteCoachWeekPlan and final dose gates.
  *
  * Sized from one budget — the tighter of the weekly goal and the ramp ceiling —
  * in this order: quality structures first (the coach fixes them, so their cost

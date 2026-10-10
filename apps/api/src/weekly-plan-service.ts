@@ -3,7 +3,9 @@ import type { MobileGoalsResponse, MobilePlanAudit, MobilePlannedDay, MobileToda
 
 import { plannedDayNumbers, type CoachZonePrescription } from "./mobile-coach.js";
 import { currentPeriodizationWeek, periodizationWeekStart, type PeriodizationWeek } from "./plan-periodization.js";
-import { applyRacePlanPolicy, buildCoachWeekPlan, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { applyRacePlanPolicy, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
+import { buildCompleteCoachWeekPlan, enforceAutomaticSessionDose, fitCompleteSessionsToBudget } from "./coach-complete-plan.js";
+import { applyUnsupportedRacePlanPolicy } from "./race-plan-policy.js";
 
 export const WEEKLY_PLAN_DAYS = 7;
 
@@ -108,12 +110,14 @@ export async function generateWeeklyPlan(args: {
   prescription: CoachZonePrescription | null;
   previousWeekDistanceKm?: number | null;
   now?: Date;
+  /** Automatic generation only; manual/legacy validation keeps its stored text. */
+  automaticDosePolicy?: boolean;
 }): Promise<WeeklyPlanGenerationResult> {
   const generatedAt = (args.now ?? new Date()).toISOString();
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const warnings: string[] = [];
   const injuryFlagCodes = args.today.injuryFlags.map((flag) => flag.code);
-  const finish = (proposed: MobilePlannedDay[]) => constrainUpcomingPlan(proposed, args, warnings);
+  const finish = (proposed: MobilePlannedDay[]) => constrainUpcomingPlan(proposed, { ...args, automaticDosePolicy: true }, warnings);
 
   if (allowedDates.length === 0) {
     return {
@@ -125,7 +129,7 @@ export async function generateWeeklyPlan(args: {
     };
   }
 
-  const days = buildCoachWeekPlan({
+  const days = buildCompleteCoachWeekPlan({
     easyDurationFloorFraction: args.goals.easyDurationFloorFraction,
     allowedDates,
     prescription: args.prescription,
@@ -144,12 +148,14 @@ export async function generateWeeklyPlan(args: {
 }
 
 export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
-  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm">,
+  args: Pick<Parameters<typeof generateWeeklyPlan>[0], "today" | "goals" | "prescription" | "previousWeekDistanceKm" | "weeklyVolumeBaselineKm" | "recentWeeklyKm" | "automaticDosePolicy">,
   warnings: string[] = []): MobilePlannedDay[] {
   const allowedDates = weeklyPlanDates(args.today.today.localDate);
   const injuryFlagCodes = args.today.injuryFlags.map(flag => flag.code);
 
-  const safe = applyRacePlanPolicy(proposed, args.goals.raceTarget, args.weeklyVolumeBaselineKm, args.prescription, warnings);
+  const safe = applyUnsupportedRacePlanPolicy(
+    applyRacePlanPolicy(proposed, args.goals.raceTarget, args.weeklyVolumeBaselineKm, args.prescription, warnings),
+    args.goals.runCoach?.raceDate, args.goals.raceTarget != null, warnings);
   const complete = allowedDates.map(localDate => safe.find(day => day.localDate === localDate) ??
     { localDate, kind: "rest" as const, distanceKm: null, structure: null, reason: "未生成有效处方，保留休息。" });
   const replacementDates = new Set(complete.map(day => day.localDate));
@@ -177,11 +183,32 @@ export function constrainUpcomingPlan(proposed: MobilePlannedDay[],
       warnings.push("自然周剩余预算已用完，未完成日期不再追加训练。");
       return adjustable.map(day => ({ ...day, kind: "rest" as const, distanceKm: null, structure: null, reason: "本自然周预算已用完。" }));
     }
-    const result = validateWeeklyPlan({ raw: JSON.stringify({ days: adjustable }), allowedDates, prescription: args.prescription,
+    const validation = { allowedDates, prescription: args.prescription,
       weeklyDistanceKm: remainingKm, volumeCeilingKm: remainingKm, qualitySessionCap: qualityCap,
       ...(phase ? { longRunCapKm: phase.longRunCapKm } : {}),
-      easyDurationFloorFraction: args.goals.easyDurationFloorFraction, injuryFlagCodes });
+      easyDurationFloorFraction: args.goals.easyDurationFloorFraction, injuryFlagCodes };
+    const candidates = args.automaticDosePolicy
+      ? fitCompleteSessionsToBudget(adjustable, args.prescription, remainingKm, warnings) : adjustable;
+    const result = validateWeeklyPlan({ ...validation, raw: JSON.stringify({ days: candidates }) });
     warnings.push(...result.rejected, ...result.clamped.map(message => phase ? `${phase.note} 阶段上限 ${ceilingKm.toFixed(1)} km：${message}` : message));
+    if (args.automaticDosePolicy) {
+      let current = result.days;
+      // Dropping a short easy day can alter the final intensity mix. Repeat the
+      // same validator, not a second set of floor/quality/ramp rules.
+      for (let pass = 0; pass <= WEEKLY_PLAN_DAYS; pass++) {
+        const complete = fitCompleteSessionsToBudget(
+          current.map(day => enforceAutomaticSessionDose(day, args.prescription, warnings)),
+          args.prescription, remainingKm, warnings);
+        const checked = validateWeeklyPlan({ ...validation, raw: JSON.stringify({ days: complete }) });
+        warnings.push(...checked.rejected, ...checked.clamped);
+        if (JSON.stringify(current) === JSON.stringify(checked.days)) return checked.days;
+        current = checked.days;
+      }
+      warnings.push("完整课最终约束未稳定，保守返回休息。");
+      return current.map(day => ({ ...day, kind: "rest" as const, structure: null, distanceKm: null,
+        reason: "no_feasible_safe_plan：最终完整剂量校验未稳定。" }));
+    }
     return result.days;
-  }).map(day => runCoachSessionTargets(day, args.goals.runCoach, args.prescription));
+  }).map(day => runCoachSessionTargets(day, args.goals.runCoach, args.prescription))
+    .map(day => args.automaticDosePolicy ? enforceAutomaticSessionDose(day, args.prescription, warnings) : day);
 }

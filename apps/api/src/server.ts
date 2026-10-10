@@ -102,8 +102,10 @@ import { needsFullTrainingZoneBackfill, readTrainingZoneWorkoutSetCounts } from 
 import { TryAcquireGate } from "./try-acquire-gate.js";
 import { generateWeeklyPlan, mergePlanWindow, overwriteWarning, shouldGenerateWeeklyPlan, weeklyPlanDates } from "./weekly-plan-service.js";
 import { WeeklyPlanPreviews, PlanPreviewError } from "./weekly-plan-preview.js";
-import { validateManualPlan, ManualPlanPolicyError } from "./manual-plan-policy.js";
+import { validateManualPlan, ManualPlanPolicyError, manualPlanWriteInput } from "./manual-plan-policy.js";
 import { registerRunCoachRoutes } from "./run-coach.js";
+import { CoachLoopRuntime, type CoachRuntimeReceipt } from "./coach-loop-runtime.js";
+import { registerCoachLoopRoutes } from "./coach-loop-routes.js";
 import { PlanPublicationService, PlanOperationError } from "./plan-publication.js";
 import { digest, prescriptionDigest } from "./plan-digest.js";
 import type { MobilePlanReceiptInput } from "@rai/api-contracts";
@@ -252,6 +254,8 @@ const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  * inheriting whichever default the author did not think about.
  */
 const publicReadRoutes = new Set([
+  "/v1/mobile/coach-loop",
+  "/v1/mobile/coach-execution",
   "/v1/health",
   "/v1/handshake",
   "/v1/dashboard",
@@ -326,6 +330,10 @@ const metadataOnlyMutationRoutes = new Set([
   "/v1/mobile/workout-plan/synced"
 ]);
 const databaseRequiredMutationRoutes = new Set([
+  "/v1/mobile/coach-loop",
+  "/v1/mobile/coach-loop/synced",
+  "/v1/mobile/coach-feedback",
+  "/v1/mobile/coach-prediction-refresh",
   "/v1/workouts/:id/override",
   "/v1/training-zones/profile",
   "/v1/privacy-zones",
@@ -386,6 +394,17 @@ const localRequestSecurityOptions = {
 installLocalRequestSecurity(app, localRequestSecurityOptions);
 app.addHook("preHandler", async (request, reply) => {
   const routeUrl = request.routeOptions.url;
+  if (routeUrl?.startsWith("/v1/mobile/") &&
+    !["/v1/mobile/coach-loop", "/v1/mobile/coach-loop/synced", "/v1/mobile/coach-execution", "/v1/mobile/coach-feedback",
+      "/v1/mobile/coach-prediction-refresh", "/v1/mobile/plan-operations/:id"].includes(routeUrl)) {
+    const managed = mobileGoalsStore.coachLoopState<CoachRuntimeReceipt>(JSON.stringify({ serverId, athleteId, datasetEpoch }));
+    if (managed &&
+      ["/v1/mobile/today","/v1/mobile/run-coach","/v1/mobile/training-plan-state","/v1/mobile/workout-plan",
+        "/v1/mobile/goals","/v1/mobile/lock"].some(prefix => routeUrl === prefix || routeUrl.startsWith(`${prefix}/`))) {
+      return reply.code(409).send({ code: "coach_loop_contract_required",
+        message: "当前课表由新版教练合同管理，请使用 /v1/mobile/coach-loop；旧协议不能执行追加课。" });
+    }
+  }
   if (unsafeMethods.has(request.method) || routeUrl === "/v1/handshake") assertDatasetAccepting();
   if (!unsafeMethods.has(request.method) || (routeUrl !== undefined && metadataOnlyMutationRoutes.has(routeUrl))) return;
   if (taskAdmission.isBlocked && routeUrl !== undefined && databaseRequiredMutationRoutes.has(routeUrl)) {
@@ -840,6 +859,7 @@ app.addHook("onClose", async () => {
  * retried the same day, and never regenerates once the week is already planned.
  */
 async function ensureWeeklyPlan(): Promise<void> {
+  if (mobileGoalsStore.coachLoopState(JSON.stringify({ serverId, athleteId, datasetEpoch }))) return;
   const today = mobileLocalDate();
   const goals = mobileGoalsStore.read();
   if (!shouldGenerateWeeklyPlan(today, goals)) return;
@@ -889,6 +909,7 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   healthKitRecordSyncVersion: 2,
   planReceiptMetadata: true,
   planSnapshotContractVersion: 1,
+  coachLoopContractVersion: 1,
   ...(mobileGoalsStore.supportsPublicationOperations ? { planPublicationContractVersion: 1 } : {}),
   planReceiptContractVersion: 2
 }));
@@ -1273,6 +1294,11 @@ registerRunCoachRoutes({ app, store: mobileGoalsStore, scope: () => JSON.stringi
   identity: () => ({ serverId, athleteId, datasetEpoch }),
   inputs: goals => withReadStore(store => store.mobileWeeklyPlanInputs(goals, mobileGoalsStore.planHistory(200))) });
 
+const coachLoopRuntime = new CoachLoopRuntime(mobileGoalsStore, () => ({ serverId, athleteId, datasetEpoch }),
+  (goals, history) => withReadStore(store => store.coachLoopFacts(goals, history, { athleteId, datasetEpoch })),
+  () => !isDatabaseWriteBusy());
+registerCoachLoopRoutes({ app, runtime: coachLoopRuntime, identity: () => ({ serverId, athleteId, datasetEpoch }), openMainDatabase });
+
 // Executable week handed to the WorkoutKit bridge. Read-only: it never mutates
 // goals, so it is deliberately absent from the mutation route registries below.
 app.get("/v1/mobile/workout-plan", async () => {
@@ -1282,6 +1308,8 @@ app.get("/v1/mobile/workout-plan", async () => {
 
 /** Legacy and Monday-only deterministic generation, without bypassing migration confirmation. */
 async function runWeeklyPlanGeneration(expectedRevision?: number): Promise<MobileWeeklyPlanGenerationResponse> {
+  const managed = mobileGoalsStore.coachLoopState<CoachRuntimeReceipt>(JSON.stringify({ serverId, athleteId, datasetEpoch }));
+  if (managed) throw new PlanPreviewError("新版教练由显式刷新命令管理，旧生成器不能覆盖课表。");
   const generationEpoch = datasetEpoch;
   const goals = mobileGoalsStore.read();
   if (goals.runCoach?.status === "active" || goals.runCoach?.status === "paused") throw new PlanPreviewError("自适应教练管理当前课表，请在教练计划中调整偏好。");
@@ -1497,7 +1525,7 @@ app.put<{ Body: UpdateMobileGoalsInput }>(
           previous: current
         });
       }
-      return mobileGoalsStore.write(request.body, options);
+      return mobileGoalsStore.write(manualPlanWriteInput(request.body, new Date().toISOString()), options);
       });
     } catch (error) {
       if (error instanceof WeeklyPlanConfirmationRequiredError) return reply.code(409).send({ code: error.code, message: error.message });

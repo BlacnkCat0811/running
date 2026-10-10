@@ -1,9 +1,16 @@
-import type { MobileGoalsResponse, MobileTodayResponse } from "@rai/api-contracts";
+import type { MobileGoalsResponse, MobileTodayResponse, UpdateMobileGoalsInput } from "@rai/api-contracts";
 import type { CoachZonePrescription } from "./mobile-coach.js";
 import { applyRacePlanPolicy, validateWeeklyPlan, weeklyPlanVolumeCeiling } from "./weekly-plan-validate.js";
 import { phaseForPlanDate } from "./weekly-plan-service.js";
 
 export class ManualPlanPolicyError extends Error { readonly code = "plan_policy_violation"; }
+
+/** Public manual edits cannot retain or forge an automatic-generation guarantee. */
+export function manualPlanWriteInput(input: UpdateMobileGoalsInput, changedAt: string): UpdateMobileGoalsInput {
+  if (input.weekPlan === undefined) return input;
+  if (!Number.isFinite(Date.parse(changedAt))) throw new ManualPlanPolicyError("人工课表的保存时刻无效。");
+  return { ...input, weekPlanAudit: { generatedBy: "manual", model: null, promptVersion: null, generatedAt: changedAt } };
+}
 
 /** Validate before persistence; race-day safety policy may rewrite the pending days. */
 export function validateManualPlan(args: {

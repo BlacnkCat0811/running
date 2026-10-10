@@ -7,6 +7,7 @@ import { migrateModelV28 } from "./v28-migration.js";
 import { migrateModelV29 } from "./v29-migration.js";
 import { migrateModelV30 } from "./v30-migration.js";
 import { migrateModelV31 } from "./v31-migration.js";
+import { migrateModelV32 } from "./v32-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1641,7 +1642,8 @@ const migrations: readonly Migration[] = [
   { version: 28, name: "performance_event_identity_and_label_invalidation", up: migrateModelV28 },
   { version: 29, name: "unlinked_performance_event_label_invalidation", up: migrateModelV29 },
   { version: 30, name: "healthkit_record_source_identity", up: migrateModelV30 },
-  { version: 31, name: "healthkit_record_aliases_and_source_facts", up: migrateModelV31 }
+  { version: 31, name: "healthkit_record_aliases_and_source_facts", up: migrateModelV31 },
+  { version: 32, name: "coach_feedback_and_prediction_companions", up: migrateModelV32 }
 ];
 
 /**
@@ -1715,7 +1717,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   28: "b571133e763ef7a0e2e1c746a0dabcad9bcf0864aaf0f2c0b9f018b8912ada04",
   29: "02e5468e61e6202bb2e126019b6c44d0137ece87649d04c018d2b5db3d4bb413",
   30: "f9bbf0499b467c731679e6b92aa6541983793503851b24c885d3a5b827021d4c",
-  31: "bcc34b942bb696ccc500629fcac865773199128e351290bea776772a359bb3bf"
+  31: "bcc34b942bb696ccc500629fcac865773199128e351290bea776772a359bb3bf",
+  32: "127e817eb9f6371190ae8b872937eaa2ed049ac86528c76b82ccc0d740359f66"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */

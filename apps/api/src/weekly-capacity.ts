@@ -3,6 +3,12 @@ import { runCoachIsTraining, runCoachRaceTarget } from "./run-coach-policy.js";
 
 import { MINIMUM_BAND_KM, currentPeriodizationWeek, periodizationVolumeFraction, type PeriodizationPhase } from "./plan-periodization.js";
 import { RAMP_LIMIT_FRACTION } from "./weekly-plan-validate.js";
+import type { CoachCapacityAnchor } from "@rai/api-contracts";
+import { digest } from "./plan-digest.js";
+import { periodizationWeekStart } from "./plan-periodization.js";
+import { CAPACITY_ENVELOPE_CANDIDATE_VERSION } from "./coach-loop-policy.js";
+import { coachLocalDate, runEvidenceRef, shiftCoachDate, visibleCoachRuns, type CoachRunFact } from "./coach-loop-facts.js";
+import { isValidLocalDate } from "./local-date.js";
 
 /**
  * Weekly plan capacity, **derived from training facts instead of configured**.
@@ -144,4 +150,69 @@ export function weeklyCapacity(input: {
   reasonCodes.push("race_target_baseline");
   if (recentCeiling < raceTargetKm) reasonCodes.push("recent_volume_caps_race_target");
   return { baselineKm, phase, source: "race_target", coldStart: false, reasonCodes };
+}
+
+/**
+ * O0-F offline candidate. Only pre-week single-workout facts enter the anchor.
+ * Current-week training consumes space and cannot raise its own permission.
+ * No store, migration, wall clock, goal time, readiness score or planned km.
+ */
+export function buildCoachCapacityAnchor(input: {
+  asOf: string;
+  facts: readonly CoachRunFact[];
+  /** Earliest date for which the import history is known usable (not inferred rest). */
+  historyCoverageFrom: string | null;
+  scope: { athleteId: string; datasetEpoch: string };
+  revision: number;
+}): CoachCapacityAnchor {
+  if (!Number.isInteger(input.revision) || input.revision < 1 || !input.scope.athleteId || !input.scope.datasetEpoch) {
+    throw new Error("Explicit capacity-anchor revision and data scope required");
+  }
+  const weekStart = periodizationWeekStart(coachLocalDate(input.asOf));
+  const from = shiftCoachDate(weekStart, -28);
+  const historyThrough = shiftCoachDate(weekStart, -1);
+  const runs = visibleCoachRuns(input.facts, input.asOf)
+    .filter(run => coachLocalDate(run.startedAt) >= from && coachLocalDate(run.startedAt) < weekStart);
+  const factsHash = digest({ scope: input.scope, weekStart, historyCoverageFrom: input.historyCoverageFrom,
+    runs, policyVersion: CAPACITY_ENVELOPE_CANDIDATE_VERSION });
+  const coverageFrom = input.historyCoverageFrom && isValidLocalDate(input.historyCoverageFrom) ? input.historyCoverageFrom : null;
+  const coverageDays = coverageFrom && coverageFrom <= historyThrough
+    ? Math.min(28, Math.round((Date.parse(`${weekStart}T00:00:00Z`) -
+      Date.parse(`${coverageFrom}T00:00:00Z`)) / 86_400_000)) : 0;
+  return {
+    id: digest({ scope: input.scope, weekStart, factsHash, revision: input.revision }),
+    revision: input.revision, factsHash, weekStart, historyThrough,
+    observedDays: new Set(runs.map(run => coachLocalDate(run.startedAt))).size,
+    coverageDays, recentWeeklyKm: runs.reduce((sum, run) => sum + run.distanceKm, 0) / 4,
+    previousWeekKm: runs.filter(run => coachLocalDate(run.startedAt) >= shiftCoachDate(weekStart, -7))
+      .reduce((sum, run) => sum + run.distanceKm, 0),
+    policyVersion: CAPACITY_ENVELOPE_CANDIDATE_VERSION, evidenceRefs: runs.map(runEvidenceRef)
+  };
+}
+
+/** Candidate constants are not activated by an environment flag or a GET. */
+export function coachCapacityEnvelope(input: {
+  anchor: CoachCapacityAnchor;
+  suggestedWeeklyKm: number;
+  legacyProtectionKm: number;
+  loadHistorySufficient: boolean;
+  /** Caller must carry the applicable product/phase hard cap, not Infinity. */
+  absoluteProtectionKm: number;
+  explicitPhaseHardCapKm?: number | null;
+}): { suggestedWeeklyKm: number; weeklyProtectionKm: number; rolling7Km: number; rolling14Km: number; evidenceSufficient: boolean } {
+  for (const km of [input.suggestedWeeklyKm, input.legacyProtectionKm, input.absoluteProtectionKm]) {
+    if (!Number.isFinite(km) || km < 0) throw new Error("Finite non-negative capacity bounds required");
+  }
+  if (input.explicitPhaseHardCapKm != null && (!Number.isFinite(input.explicitPhaseHardCapKm) || input.explicitPhaseHardCapKm < 0)) {
+    throw new Error("Invalid phase protection cap");
+  }
+  const { anchor } = input;
+  const evidenceSufficient = anchor.coverageDays >= 28 && anchor.observedDays >= 8 &&
+    anchor.recentWeeklyKm > 0 && anchor.previousWeekKm > 0 && input.loadHistorySufficient;
+  const base = evidenceSufficient
+    ? Math.min(anchor.recentWeeklyKm * (1 + RAMP_LIMIT_FRACTION), anchor.previousWeekKm * (1 + RAMP_LIMIT_FRACTION), input.absoluteProtectionKm)
+    : Math.min(input.legacyProtectionKm, input.absoluteProtectionKm);
+  const weeklyProtectionKm = Math.min(base, input.explicitPhaseHardCapKm ?? base);
+  return { suggestedWeeklyKm: input.suggestedWeeklyKm, weeklyProtectionKm,
+    rolling7Km: base, rolling14Km: 2 * base, evidenceSufficient };
 }

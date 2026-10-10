@@ -19,13 +19,13 @@ import type { PlanHistoryRevision } from "./mobile-goals.js";
  */
 
 export const PLAN_ADHERENCE_POLICY_VERSION = "rai-plan-adherence-v3" as const;
-export const REPLAN_POLICY_VERSION = "rai-replan-v1" as const;
+export const REPLAN_POLICY_VERSION = "rai-replan-v2" as const;
 
 /** Below this share of the planned volume a week reads as under-delivered. */
 export const ADHERENCE_LOW_VOLUME_RATIO = 0.6;
 /** Two consecutive under-delivered weeks are the trigger, not one. */
 export const REPLAN_CONSECUTIVE_LOW_WEEKS = 2;
-/** A week with at least this many unobserved quality sessions is worth re-drafting. */
+/** @deprecated Observation gaps are not confirmed failures and never trigger re-drafting. */
 export const REPLAN_MISSED_QUALITY_SESSIONS = 2;
 
 export interface AdherenceWeek {
@@ -218,15 +218,9 @@ export function replanAdvice(input: {
     });
   }
 
-  const missedQuality = completedWeeks
-    .slice(0, 1)
-    .reduce((sum, week) => sum + (week.status === "unknown" ? 0 : Math.max(0, week.qualityPlanned - week.qualityObserved)), 0);
-  if (missedQuality >= REPLAN_MISSED_QUALITY_SESSIONS) {
-    reasons.push({
-      code: "quality_sessions_unobserved",
-      detail: `上一已结束周有 ${missedQuality} 次质量课没有观测到训练记录，可能需要重排而不是补课。`
-    });
-  }
+  // `qualityObserved` retains its compatible "record on the date" meaning.
+  // Absence is an evidence gap, not a missed prescription; O2's future
+  // assessment must supply known_not_met before it can affect adaptation.
 
   const current = input.adherence.current;
   const currentPhase = input.periodization.current;

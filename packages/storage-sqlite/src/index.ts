@@ -108,6 +108,7 @@ export {
 } from "./read/prediction-recovery-read-repository.js";
 
 export { SqliteCalibrationRepository } from "./calibration-repository.js";
+export { SqliteCoachFactsRepository } from "./coach-facts-repository.js";
 
 // §12.10 手工成绩条目：标签闭环的入口，只作标签/评估证据。
 export {

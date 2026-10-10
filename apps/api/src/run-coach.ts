@@ -4,19 +4,23 @@ import type { MobileGoalsResponse, MobilePlanOperationScope, MobilePlannedDay, M
 import type { RaiReadStore } from "./data.js";
 import { MobileGoalsRevisionConflictError, type MobileGoalsStore } from "./mobile-goals.js";
 import { WEAK_PREPARATION_NOTE, WEAK_PREPARATION_SCORE } from "./mobile-coach.js";
-import { buildCoachWeekPlan } from "./weekly-plan-validate.js";
+import { buildCompleteCoachWeekPlan } from "./coach-complete-plan.js";
 import { constrainUpcomingPlan, mergePlanWindow, weeklyPlanDates } from "./weekly-plan-service.js";
 import { RunCoachInputError, runCoachDaysBetween, runCoachEndDate, runCoachIsTraining, runCoachPhase, runCoachRaceTarget, runCoachShiftDate, runCoachWeekday, validateRunCoachConfig } from "./run-coach-policy.js";
 import { weeklyCapacity } from "./weekly-capacity.js";
 import { runCoachCommandSchema } from "./schemas.js";
 import { PlanPublicationService } from "./plan-publication.js";
+import { SESSION_DOSE_POLICY_VERSION } from "./coach-session-dose.js";
+import { EXECUTION_PROTECTION_POLICY_VERSION, UNSUPPORTED_RACE_PROTECTION_POLICY_VERSION, unsupportedRaceExecutionProtection } from "./race-plan-policy.js";
+import { digest, prescriptionDigest } from "./plan-digest.js";
+import { plannedDayNumbers } from "./mobile-coach.js";
 
 type Inputs = ReturnType<RaiReadStore["mobileWeeklyPlanInputs"]>;
 
 /**
  * Weekly budget the coach may spend this week — **one number, two consumers**.
  *
- * It is published as `weeklyCapacityKm` *and* handed to `buildCoachWeekPlan`, so the
+ * It is published as `weeklyCapacityKm` *and* handed to `buildCompleteCoachWeekPlan`, so the
  * screen and the sessions cannot disagree. It is the smaller of
  *
  *   1. `weeklyCapacity`'s baseline — race target trimmed by phase, then by the +30%
@@ -161,7 +165,29 @@ export function runCoachAdaptationKey(plan: MobileRunCoachPlan, inputs: Inputs,
     today: today.today, week: today.week, recovery: today.recoveryAssessment,
     calibration: today.calibration, injury: today.injuryFlags, verdict: today.verdict,
     coverage: today.coverage, latestDataDate: today.latestDataDate, zones: inputs.prescription,
-    recent: inputs.recentWeeklyKm, previous: inputs.previousWeekDistanceKm, policy })).digest("hex");
+    recent: inputs.recentWeeklyKm, previous: inputs.previousWeekDistanceKm, policy,
+    ruleVersions: { sessionDose: SESSION_DOSE_POLICY_VERSION, budgetAllocation: "rai-coach-complete-allocation-v1",
+      executionProtection: EXECUTION_PROTECTION_POLICY_VERSION,
+      unsupportedRaceProtection: UNSUPPORTED_RACE_PROTECTION_POLICY_VERSION } })).digest("hex");
+}
+
+/**
+ * Metadata/evidence changes are not plan revisions. This conservative equality
+ * gate does not activate O3's candidate search or O0's unapproved authorization.
+ * Missing/present dates and programme configuration remain distinct identities.
+ */
+export function runCoachPlanExecutionIdentity(
+  plan: MobileRunCoachPlan, days: readonly MobilePlannedDay[], inputs: Inputs
+): string {
+  const { adaptationKey: _key, adaptedAt: _at, ...configuration } = plan;
+  const today = inputs.today.today.localDate;
+  return digest({
+    configuration,
+    days: [...days].filter(day => day.localDate >= today).sort((a, b) => a.localDate.localeCompare(b.localDate)).map(day => {
+      const numbers = plannedDayNumbers(day.kind, day.structure, day.distanceKm, inputs.prescription);
+      return [day.localDate, day.kind, prescriptionDigest(day.kind, numbers.structure)];
+    })
+  });
 }
 
 /**
@@ -213,7 +239,7 @@ export function runCoachUnplannedDays(plan: MobileRunCoachPlan | null, inputs: I
     // Race day and everything after it already carry their own reason on the day itself.
     if (day.kind !== "rest" || !isRunnable || !runCoachIsTraining(plan, today)) return [];
     const taper = plan.raceDate != null && runCoachRaceTarget(plan) === null &&
-      runCoachDaysBetween(day.localDate, plan.raceDate) <= 2;
+      unsupportedRaceExecutionProtection(day.localDate, plan.raceDate).preRace;
     return [{ localDate: day.localDate,
       code: (taper ? "pre_race_taper" : "no_session_scheduled") as RunCoachUnplannedReason,
       detail: taper ? RUN_COACH_REASONS.pre_race_taper
@@ -229,19 +255,15 @@ export function buildRunCoachWeek(plan: MobileRunCoachPlan, goals: MobileGoalsRe
   // and the number on screen cannot be two different quantities.
   const baseline = runCoachWeeklyBudget(plan, inputs);
   const available = dates.filter(date => plan.runningDays.includes(runCoachWeekday(date)) && date <= runCoachEndDate(plan));
-  const template = buildCoachWeekPlan({ allowedDates: dates, prescription: inputs.prescription,
+  const template = buildCompleteCoachWeekPlan({ allowedDates: dates, prescription: inputs.prescription,
     weeklyDistanceKm: baseline, previousWeekDistanceKm: inputs.previousWeekDistanceKm,
     qualitySessionCap: inputs.today.calibration.status === "completed" ? goals.qualitySessionCap : 0,
     easyDurationFloorFraction: goals.easyDurationFloorFraction, injuryFlagCodes: inputs.today.injuryFlags.map(flag => flag.code) });
   const rank = (day: MobilePlannedDay) => day.kind === "long_run" ? 0 : ["tempo", "interval"].includes(day.kind) ? 1 : 2;
   const sessions = template.filter(day => day.kind !== "rest").sort((a, b) => rank(a) - rank(b)).slice(0, available.length);
-  // Reuse the measured easy structure for a preferred endurance day; the final
-  // validator still enforces its long-run share and the easy-duration floor.
-  if (inputs.today.calibration.status === "completed" && sessions.length >= 4) {
-    const longest = sessions.filter(day => day.kind === "easy").sort((a, b) => (b.distanceKm ?? 0) - (a.distanceKm ?? 0))[0];
-    if (longest) longest.kind = "long_run";
-    sessions.sort((a, b) => rank(a) - rank(b));
-  }
+  // A 30-minute easy dose is not automatically an LSD just because it is the
+  // longest of several equal doses. O4 must supply approved long-run history
+  // and substantive dose selection rather than relabeling this baseline.
   const assigned = new Map<string, MobilePlannedDay>();
   for (const session of sessions) {
     const remaining = available.filter(date => !assigned.has(date));
@@ -249,7 +271,10 @@ export function buildRunCoachWeek(plan: MobileRunCoachPlan, goals: MobileGoalsRe
       const gap = (date: string) => Math.min(7, ...[...assigned.keys()].map(other => Math.abs(runCoachDaysBetween(other, date))));
       return gap(b) - gap(a) || a.localeCompare(b);
     });
-    const date = session.kind === "long_run" ? spread.find(date => plan.longRunDays.includes(runCoachWeekday(date))) ?? spread[0] : spread[0];
+    // Preserve a feasible template date before redistributing into preferred
+    // weekdays. Sorting by kind must not silently move future quality to today.
+    const date = session.kind === "long_run" ? spread.find(date => plan.longRunDays.includes(runCoachWeekday(date))) ?? spread[0]
+      : remaining.includes(session.localDate) ? session.localDate : spread[0];
     if (date) assigned.set(date, { ...session, localDate: date });
   }
   // No-motive wording on purpose. This branch also swallows days the ramp guard and the
@@ -257,13 +282,15 @@ export function buildRunCoachWeek(plan: MobileRunCoachPlan, goals: MobileGoalsRe
   // assertion the code had never established. It reports the fact; `unplannedDays` reports
   // the code.
   const proposed = dates.map(date => assigned.get(date) ?? rest(date, plan.runningDays.includes(runCoachWeekday(date)) ? RUN_COACH_REASONS.no_session_scheduled : RUN_COACH_REASONS.not_a_running_day));
-  let safe = constrainUpcomingPlan(proposed, { ...inputs, goals: { ...goals, runCoach: plan, raceTarget: runCoachRaceTarget(plan) }, weeklyVolumeBaselineKm: baseline });
+  let safe = constrainUpcomingPlan(proposed, { ...inputs, goals: { ...goals, runCoach: plan, raceTarget: runCoachRaceTarget(plan) },
+    weeklyVolumeBaselineKm: baseline, automaticDosePolicy: true });
   // Every race day stays blank, including distances outside the prediction set.
   // Uncalibrated distances keep the conservative pre-race recovery policy.
   if (plan.raceDate) safe = safe.map(day => {
     if (day.localDate === plan.raceDate) return rest(day.localDate, RUN_COACH_REASONS.race_day);
     if (day.localDate > plan.raceDate!) return rest(day.localDate, RUN_COACH_REASONS.post_race_recovery);
-    if (!runCoachRaceTarget(plan) && runCoachDaysBetween(day.localDate, plan.raceDate!) <= 2 && ["tempo", "interval", "long_run"].includes(day.kind)) return rest(day.localDate, RUN_COACH_REASONS.pre_race_taper);
+    if (!runCoachRaceTarget(plan) && unsupportedRaceExecutionProtection(day.localDate, plan.raceDate!).preRace &&
+      ["tempo", "interval", "long_run"].includes(day.kind)) return rest(day.localDate, RUN_COACH_REASONS.pre_race_taper);
     return day;
   });
   return safe;
@@ -352,11 +379,23 @@ export function registerRunCoachRoutes(args: { app: FastifyInstance; store: Mobi
         easyDurationFloorFraction: goals.easyDurationFloorFraction, lockedSession: goals.lockedSession,
         weekPlanPreservedDate: goals.weekPlanPreservedDate ?? null });
       if (action === "refresh" && plan.adaptationKey === key) return runCoachResponse(goals, inputs);
-      const days = buildRunCoachWeek(plan, { ...effectiveGoals, weekPlan: goals.weekPlan.filter(day => day.localDate <= today) }, effectiveInputs);
-      plan = { ...plan, adaptationKey: key, adaptedAt: new Date().toISOString() };
+      const previousWindow = action === "refresh" ? goals.weekPlan : goals.weekPlan.filter(day => day.localDate <= today);
+      const days = buildRunCoachWeek(plan, { ...effectiveGoals, weekPlan: previousWindow }, effectiveInputs);
       const retainedToday = goals.weekPlanPreservedDate === today || effectiveInputs.today.today.workoutCount > 0 || goals.lockedSession?.localDate === today;
+      const nextWeekPlan = mergePlanWindow(previousWindow,
+        days.filter(day => day.localDate !== today || !retainedToday), today);
+      if (action === "refresh" && goals.runCoach && !goals.weekPlanReplanRequired &&
+        goals.weekPlanAudit?.generatedBy === "heuristic" &&
+        runCoachPlanExecutionIdentity(goals.runCoach, goals.weekPlan, effectiveInputs) ===
+        runCoachPlanExecutionIdentity(plan, nextWeekPlan, effectiveInputs)) {
+        // A persistent operationId still gets its no-write result atomically
+        // through publicationOperation. Do not write adaptationKey/adaptedAt
+        // merely to advance goalsRevision or overwrite historical rationale.
+        return runCoachResponse(goals, effectiveInputs);
+      }
+      plan = { ...plan, adaptationKey: key, adaptedAt: new Date().toISOString() };
       const written = args.store.write({ expectedRevision: goals.revision, raceTarget: runCoachRaceTarget(plan),
-        weekPlan: mergePlanWindow(goals.weekPlan.filter(day => day.localDate <= today), days.filter(day => day.localDate !== today || !retainedToday), today),
+        weekPlan: nextWeekPlan,
         weekPlanAudit: { generatedBy: "heuristic", model: null, promptVersion: null, generatedAt: plan.adaptedAt },
         ...(plan.status !== "active" ? { lockedSession: null } : {})
       }, { runCoach: plan, confirmCoachPlan: true, prescription: effectiveInputs.prescription });
