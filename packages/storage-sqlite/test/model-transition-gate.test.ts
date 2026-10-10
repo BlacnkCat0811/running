@@ -5,7 +5,8 @@ import {
   MODEL_TRANSITION_GATE_VERSION,
   evaluateModelTransitionGateV2,
   type ModelTransitionGateInput,
-  type ModelTransitionMetricsV2
+  type ModelTransitionMetricsV2,
+  type ModelTransitionSourceBackfillEvidence
 } from "../src/index.js";
 
 const sameScaleSchema: ModelTransitionGateInput["schema"] = {
@@ -232,4 +233,124 @@ test("a new engine/config version with the same known epoch retains strict regre
   assert.equal(result.transition,"same_scale");
   assert.equal(result.status,"failed");
   assert.ok(result.failureReasons.includes("final_true_ability_delta"));
+});
+
+// --- sourceBackfill: pure history backfill reclassifies eligibility drift -------
+
+function backfill(overrides: Partial<ModelTransitionSourceBackfillEvidence> = {}): ModelTransitionSourceBackfillEvidence {
+  return {
+    preservedAbsent: true,
+    removedRecords: 0,
+    removedWorkouts: 0,
+    removedActivitySummaries: 0,
+    removedEligibleSessions: 0,
+    removedCalibrationSessions: 0,
+    earliestInsertedIsNewGlobalEarliest: true,
+    ...overrides
+  };
+}
+
+/** Both eligibility failures exceed their limits, so the gate must act on them. */
+const driftingEligibility = { eligibleSessionDelta: 0.9, assessmentStatusChangeRate: 0.44 };
+
+function evaluateBackfill(
+  sourceBackfill: ModelTransitionSourceBackfillEvidence | undefined,
+  metricOverrides: Partial<ModelTransitionMetricsV2> = driftingEligibility
+) {
+  return evaluateModelTransitionGateV2({
+    candidateModelRunId: "candidate",
+    baseModelRunId: "base",
+    schema: sameScaleSchema,
+    metrics: metrics(metricOverrides),
+    ...(sourceBackfill === undefined ? {} : { sourceBackfill })
+  });
+}
+
+test("sourceBackfill: verified pure backfill records both drift reasons and passes", () => {
+  // Mutation that turns this red: flip `verifiedBackfill` off (e.g. require
+  // preservedAbsent === false, or drop a field from the equality check) so the
+  // drift falls back to failureReasons.
+  const result = evaluateBackfill(backfill());
+  assert.equal(result.status, "passed");
+  assert.equal(result.blocksActivation, false);
+  assert.deepEqual(result.failureReasons, []);
+  assert.deepEqual(result.migrationReport, [
+    "source_backfill_eligible_session_delta:0.9",
+    "source_backfill_assessment_status_change_rate:0.44"
+  ]);
+  assert.deepEqual(result.sourceBackfill, backfill());
+});
+
+test("sourceBackfill: without the global-earliest proof the drift still fails", () => {
+  // Mutation that turns this red: drop `earliestInsertedIsNewGlobalEarliest` from
+  // the verifiedBackfill conjunction, which would let a non-backwards import pass.
+  const result = evaluateBackfill(backfill({ earliestInsertedIsNewGlobalEarliest: false }));
+  assert.equal(result.status, "failed");
+  assert.equal(result.blocksActivation, true);
+  assert.deepEqual(result.failureReasons, [
+    "eligible_session_delta",
+    "assessment_status_change_rate"
+  ]);
+  assert.deepEqual(result.migrationReport, []);
+});
+
+test("sourceBackfill: any recorded deletion keeps the drift as a hard failure", () => {
+  // Mutation that turns this red: stop asserting removed* === 0, which would let a
+  // destructive import masquerade as a backfill.
+  for (const patch of [
+    { removedRecords: 1 },
+    { removedWorkouts: 1 },
+    { removedActivitySummaries: 1 },
+    { removedEligibleSessions: 1 },
+    { removedCalibrationSessions: 1 },
+    { preservedAbsent: false }
+  ]) {
+    const result = evaluateBackfill(backfill(patch));
+    assert.equal(result.status, "failed", JSON.stringify(patch));
+    assert.ok(result.failureReasons.includes("eligible_session_delta"), JSON.stringify(patch));
+    assert.ok(result.failureReasons.includes("assessment_status_change_rate"), JSON.stringify(patch));
+  }
+});
+
+test("sourceBackfill: a hard failure is never waived by a valid backfill", () => {
+  // Mutation that turns this red: move the `invalid_values` / non-finite checks
+  // behind `if (!verifiedBackfill)`, which would let corrupt inputs pass.
+  const invalid = evaluateBackfill(backfill(), { ...driftingEligibility, invalidValueCount: 2 });
+  assert.equal(invalid.status, "failed");
+  assert.ok(invalid.failureReasons.includes("invalid_values"));
+  assert.deepEqual(invalid.failureReasons, ["invalid_values"]);
+
+  const nonFinite = evaluateBackfill(backfill(), { ...driftingEligibility, recoveryNullRateDelta: Number.NaN });
+  assert.equal(nonFinite.status, "failed");
+  assert.ok(nonFinite.failureReasons.includes("non_finite_metric:recoveryNullRateDelta"));
+});
+
+test("sourceBackfill: omitted evidence is bit-identical to the pre-backfill gate", () => {
+  // Mutation that turns this red: make the drift branch unconditional (always
+  // record instead of fail), or include an empty sourceBackfill key in the result.
+  const result = evaluateBackfill(undefined);
+  assert.equal(result.status, "failed");
+  assert.equal(result.blocksActivation, true);
+  assert.deepEqual(result.failureReasons, [
+    "eligible_session_delta",
+    "assessment_status_change_rate"
+  ]);
+  assert.deepEqual(result.migrationReport, []);
+  assert.deepEqual(result.notEvaluableReasons, []);
+  assert.equal("sourceBackfill" in result, false);
+});
+
+test("sourceBackfill: malformed counts are rejected rather than treated as zero", () => {
+  // Mutation that turns this red: replace Number.isInteger assertions with a
+  // truthiness test, letting NaN / negative counts through as "no deletion".
+  for (const patch of [
+    { removedRecords: Number.NaN },
+    { removedWorkouts: -1 },
+    { removedActivitySummaries: 1.5 },
+    { removedEligibleSessions: Number.NaN }
+  ]) {
+    const result = evaluateBackfill(backfill(patch as Partial<ModelTransitionSourceBackfillEvidence>));
+    assert.equal(result.status, "failed", JSON.stringify(patch));
+    assert.ok(result.failureReasons.includes("eligible_session_delta"), JSON.stringify(patch));
+  }
 });

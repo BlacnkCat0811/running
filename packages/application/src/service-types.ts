@@ -61,6 +61,12 @@ export interface RecomputeRequest {
   featureConfig: FeatureConfig;
   modelConfig: RaiModelConfig;
   incrementalPlan?: RecomputePlan;
+  /**
+   * Identity of the import batch whose staging DB this recompute runs against.
+   * Absent for a plain rebuild; when present the pipeline can prove a pure source
+   * backfill from the batch's change ledger instead of inferring it.
+   */
+  importBatchId?: string;
 }
 
 export interface RecomputeOptions {
@@ -68,6 +74,7 @@ export interface RecomputeOptions {
   timezoneIdentifier?: string;
   featureConfig?: FeatureConfig;
   modelConfig?: RaiModelConfig;
+  importBatchId?: string;
 }
 
 export const MODEL_CHECKPOINT_VERSION = "rai-model-checkpoint-v2";

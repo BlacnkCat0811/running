@@ -650,6 +650,8 @@ export class ImportWorker {
           "--timezone",
           DATABASE_TIMEZONE,
           ...(this.recomputeEvaluatedAt ? ["--evaluated-at", this.recomputeEvaluatedAt] : []),
+          "--import-batch",
+          job.id,
           ...(incremental ? ["--dirty-from", incremental] : [])
         ]));
         this.assertNotClosing();

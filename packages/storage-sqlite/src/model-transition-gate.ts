@@ -23,7 +23,11 @@
 //                                                complete empty-cohort proof
 //
 // `invalidValueCount > 0`, non-finite metrics and eligibility drift always fail,
-// on both scales.
+// on both scales. The one exception is a *verified* source backfill (see
+// `ModelTransitionSourceBackfillEvidence`): when the import provably removed
+// nothing and only extended the fact timeline backwards, the two data-driven
+// eligibility failures become migration records instead — identical in spirit to
+// the verified-empty-cohort path.
 //
 // Design: docs/ALGORITHM.md §14.
 //
@@ -103,6 +107,38 @@ export const MODEL_TRANSITION_GATE_THRESHOLDS_V2: ModelTransitionGateThresholdsV
   minReadinessOutputCoverage: 1
 };
 
+/**
+ * DB-derived proof for a pure source backfill, never a generic bypass.
+ *
+ * A backfill import carries an *older* history slice than the base run had. That
+ * legitimately re-labels existing sessions (they now have fuller inputs), so the
+ * data-driven eligibility drift can no longer distinguish "facts were lost" from
+ * "facts were extended backwards". This evidence is the structural proof that it
+ * is the latter: the import removed nothing at all and the newest gap it fills is
+ * strictly before everything the database already held.
+ *
+ * Mirrors `emptyCohort`: it converts the two eligibility drift failures into
+ * migration records and never waives a hard failure (`invalid_values`,
+ * non-finite metrics, distribution limits, replacement assertions).
+ */
+export interface ModelTransitionSourceBackfillEvidence {
+  /**
+   * The import recorded no deletion for its batch, i.e. absence from the payload
+   * was preserved rather than interpreted as removal.
+   */
+  preservedAbsent: boolean;
+  removedRecords: number;
+  removedWorkouts: number;
+  removedActivitySummaries: number;
+  removedEligibleSessions: number;
+  removedCalibrationSessions: number;
+  /**
+   * The batch's earliest inserted record is the new global earliest fact, so the
+   * fact timeline really moved backwards. Membership only; no time comparison.
+   */
+  earliestInsertedIsNewGlobalEarliest: boolean;
+}
+
 export interface ModelTransitionGateInput {
   candidateModelRunId: string;
   baseModelRunId: string | null;
@@ -120,12 +156,15 @@ export interface ModelTransitionGateInput {
     candidateCheckpointRows: number;
     domainSnapshotsEmpty: boolean;
   };
+  /** DB-derived proof for a pure source backfill, never a generic bypass. */
+  sourceBackfill?: ModelTransitionSourceBackfillEvidence;
   /** Defaults to `MODEL_TRANSITION_GATE_THRESHOLDS_V2`. */
   thresholds?: ModelTransitionGateThresholdsV2;
 }
 
 export interface ModelTransitionGateResultV2 {
   emptyCohort?: ModelTransitionGateInput["emptyCohort"];
+  sourceBackfill?: ModelTransitionGateInput["sourceBackfill"];
   candidateModelRunId: string;
   baseModelRunId: string | null;
   gateVersion: typeof MODEL_TRANSITION_GATE_VERSION;
@@ -184,12 +223,39 @@ export function evaluateModelTransitionGateV2(
   if (metrics.matchedSessions === 0 && !verifiedEmpty) notEvaluableReasons.push("no_matched_sessions");
   if (verifiedEmpty) migrationReport.push("confirmed_empty_cohort:no_remaining_source_or_derived_training");
 
+  // A verified backfill reclassifies a *legitimate* eligibility drift as a
+  // migration record. It is deliberately all-or-nothing: every removal count must
+  // be a real zero (integers, never negative) and the batch must own the global
+  // earliest fact, which together prove no data was lost and the timeline merely
+  // grew backwards. Any missing/odd evidence leaves the normal failures in place.
+  const backfill = input.sourceBackfill;
+  const verifiedBackfill = backfill !== undefined &&
+    [backfill.removedRecords, backfill.removedWorkouts, backfill.removedActivitySummaries,
+      backfill.removedEligibleSessions, backfill.removedCalibrationSessions]
+      .every((value) => Number.isInteger(value) && value >= 0) &&
+    backfill.preservedAbsent === true &&
+    backfill.removedRecords === 0 && backfill.removedWorkouts === 0 &&
+    backfill.removedActivitySummaries === 0 && backfill.removedEligibleSessions === 0 &&
+    backfill.removedCalibrationSessions === 0 && backfill.earliestInsertedIsNewGlobalEarliest === true;
+
   if (transition !== "unknown") {
     if (metrics.eligibleSessionDelta > thresholds.maxEligibleSessionDelta) {
-      failureReasons.push("eligible_session_delta");
+      if (verifiedBackfill) {
+        migrationReport.push(
+          `source_backfill_eligible_session_delta:${formatMetric(metrics.eligibleSessionDelta)}`
+        );
+      } else {
+        failureReasons.push("eligible_session_delta");
+      }
     }
     if (metrics.assessmentStatusChangeRate > thresholds.maxStatusChangeRate) {
-      failureReasons.push("assessment_status_change_rate");
+      if (verifiedBackfill) {
+        migrationReport.push(
+          `source_backfill_assessment_status_change_rate:${formatMetric(metrics.assessmentStatusChangeRate)}`
+        );
+      } else {
+        failureReasons.push("assessment_status_change_rate");
+      }
     }
 
     if (transition === "same_scale") {
@@ -238,6 +304,7 @@ export function evaluateModelTransitionGateV2(
 
   return {
     ...(empty === undefined ? {} : { emptyCohort: empty }),
+    ...(backfill === undefined ? {} : { sourceBackfill: backfill }),
     candidateModelRunId: input.candidateModelRunId,
     baseModelRunId: input.baseModelRunId,
     gateVersion: MODEL_TRANSITION_GATE_VERSION,

@@ -41,7 +41,8 @@ import {
   RaiDatabase,
   SqliteModelRunRepository, SqliteModelReleaseRepository, semanticHash, evaluateModelTransitionGateV2,
   RecomputeJobRepository,
-  SqliteTrainingSessionRepository
+  SqliteTrainingSessionRepository,
+  type ModelTransitionSourceBackfillEvidence
 } from "@rai/storage-sqlite";
 import {
   buildAdaptiveBaselineTimeline,
@@ -306,9 +307,12 @@ export class RecomputePipeline {
           eligibleSessionDelta:Math.abs(oldCount-newCount)/Math.max(1,oldCount),
           assessmentStatusChangeRate:matched.n?Number(matched.changed??0)/matched.n:0};
       }
+      const sourceBackfill = this.sourceBackfillEvidence(
+        request.importBatchId, removedEligibleSessions, removedCalibrationSessions);
       const gate = incumbentModelRunId ? evaluateModelTransitionGateV2({
         candidateModelRunId:modelRun.id, baseModelRunId:incumbentModelRunId,
         ...(features.length === 0 ? {emptyCohort: this.emptyCohortEvidence(incumbentModelRunId,modelRun.id,metricRunId)} : {}),
+        ...(sourceBackfill === undefined ? {} : {sourceBackfill}),
         schema:{baseModelVersion:legacy.metrics.baseModelVersion??null,candidateModelVersion:MODEL_CONFIG_VERSION,
           baseFeatureSchemaVersion:typeof baseSchema === "string" ? baseSchema : null,candidateFeatureSchemaVersion:FEATURE_SCHEMA_VERSION,
           baseScaleId:previousEpoch,candidateScaleId:lineage.baselineEpochId ??
@@ -326,7 +330,8 @@ export class RecomputePipeline {
           removedEligibleSessions,retainedDeletedSessions,removedCalibrationSessions,deletionRecalibration,
           eligibilityComparisonBasis:rebaseMetrics?"source_features":"ability_assessments",
           originalBaseEligibleSessions:legacy.metrics.baseEligibleSessions,
-          originalEligibleSessionDelta:legacy.metrics.eligibleSessionDelta
+          originalEligibleSessionDelta:legacy.metrics.eligibleSessionDelta,
+          sourceBackfill:sourceBackfill??null
         },rebase:explicitRebase||deletionRecalibration?{
           referenceStartAt:request.modelConfig.baselineReferenceStartAt??null,calibrationEndAt:reference?.calibrationEndAt??null,
           effectiveAt:request.evaluatedAt,rebaseReason:explicitRebase?"explicit_reference_start":"calibration_evidence_removed",
@@ -368,6 +373,62 @@ export class RecomputePipeline {
       domainSnapshotsEmpty:emptyArray('fitness','assessments')&&emptyArray('fitness','daily')&&
         emptyArray('load','days')&&emptyArray('zones','profiles')&&
         !snapshots.some(row=>row.domain==='load_vector'||row.domain==='zone_coherence')
+    };
+  }
+
+  /**
+   * Structural proof that this candidate's eligibility drift is a pure source
+   * backfill: the import removed nothing at all and is the one that pushed the
+   * fact timeline backwards. Returns `undefined` (leaving the gate untouched)
+   * whenever the batch identity is unknown, so a plain rebuild can never take the
+   * exemption. Every field is a count or a membership test — no thresholds.
+   */
+  private sourceBackfillEvidence(
+    importBatchId: string | undefined,
+    removedEligibleSessions: number,
+    removedCalibrationSessions: number
+  ): ModelTransitionSourceBackfillEvidence | undefined {
+    if (importBatchId === undefined) return undefined;
+    const count = (sql: string, ...args: SQLInputValue[]): number =>
+      Number(this.database.prepare(sql).get(...args)?.n ?? 0);
+    // `import_entity_changes` is the per-batch change ledger and is the only place
+    // a removal of a fact row is written with its batch identity: rows with
+    // `change_type='removed'` are inserted by `removeDeletedHealthKitAliasCopies`
+    // (database.ts) and `removeHealthKitRecords` (database.ts) exactly when the
+    // corresponding `health_records` row is deleted. Counting them by kind is
+    // therefore a direct, per-batch zero-deletion witness.
+    const removedByKind = (kind: "record" | "workout" | "activity_summary"): number => count(
+      `SELECT COUNT(*) AS n FROM import_entity_changes
+       WHERE batch_id = ? AND entity_kind = ? AND change_type = 'removed'`,
+      importBatchId, kind);
+    const removedRecords = removedByKind("record");
+    const removedWorkouts = removedByKind("workout");
+    const removedActivitySummaries = removedByKind("activity_summary");
+    // Durable tombstones attributed to this batch are the second, independent
+    // witness. `recordEntityTombstones` is called on the same code paths that
+    // delete a fact row, and also for an arrival-less deletion that leaves no
+    // change row, so requiring both to be empty is strictly stronger than either
+    // alone. Source tombstones are intentionally excluded: a deletion before the
+    // entity ever arrived creates no fact-row loss.
+    const batchTombstones = count(
+      `SELECT COUNT(*) AS n FROM import_entity_tombstones WHERE batch_id = ?`, importBatchId);
+    const preservedAbsent = removedRecords === 0 && removedWorkouts === 0 &&
+      removedActivitySummaries === 0 && batchTombstones === 0;
+    // Membership only — never a time-string comparison. The row that currently
+    // holds the global minimum `start_at` must be one of this batch's *inserted*
+    // records; an update of an already-present row would not have moved the
+    // timeline backwards, so only `inserted` proves the backfill.
+    const earliest = this.database.prepare(
+      `SELECT id FROM health_records
+       WHERE start_at = (SELECT MIN(start_at) FROM health_records) LIMIT 1`
+    ).get() as { id: string } | undefined;
+    const earliestInsertedIsNewGlobalEarliest = earliest !== undefined && count(
+      `SELECT COUNT(*) AS n FROM import_entity_changes
+       WHERE batch_id = ? AND entity_kind = 'record' AND change_type = 'inserted' AND entity_id = ?`,
+      importBatchId, earliest.id) === 1;
+    return {
+      preservedAbsent, removedRecords, removedWorkouts, removedActivitySummaries,
+      removedEligibleSessions, removedCalibrationSessions, earliestInsertedIsNewGlobalEarliest
     };
   }
 
@@ -439,6 +500,7 @@ export class RecomputePipeline {
       // (2026-09-20) `validationMode` is deliberately not read back: historical
       // job.request records still carry the key, and the shadow replay it selected
       // no longer exists. Ignoring it keeps old jobs replayable.
+      ,...(typeof parsed.importBatchId === "string" ? { importBatchId: parsed.importBatchId } : {})
       ,...(parsed.incrementalPlan?.mode === "partial" && typeof parsed.incrementalPlan.dirtyFromAt === "string"
         ? {
             incrementalPlan: {

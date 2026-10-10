@@ -33,7 +33,8 @@ export {
   type ModelTransitionGateThresholdsV2,
   type ModelTransitionKind,
   type ModelTransitionMetricsV2,
-  type ModelTransitionSchemaContext
+  type ModelTransitionSchemaContext,
+  type ModelTransitionSourceBackfillEvidence
 } from "./model-transition-gate.js";
 export {
   RaiDatabase,

@@ -234,6 +234,7 @@ export function defaultRequest(options: RecomputeOptions = {}): RecomputeRequest
     evaluatedAt: normalizeInstant(options.evaluatedAt ?? appNow(), "evaluatedAt"),
     timezoneIdentifier: options.timezoneIdentifier ?? DATABASE_TIMEZONE,
     featureConfig: options.featureConfig ?? defaultFeatureConfig,
-    modelConfig: options.modelConfig ?? defaultRaiModelConfig
+    modelConfig: options.modelConfig ?? defaultRaiModelConfig,
+    ...(options.importBatchId === undefined ? {} : { importBatchId: options.importBatchId })
   };
 }

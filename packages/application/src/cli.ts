@@ -20,7 +20,7 @@ async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
   if (command !== "recompute" && command !== "refresh-snapshots") {
     throw new Error(
-      "Usage: data:recompute -- --database <sqlite> [--evaluated-at <ISO>] [--timezone <IANA>]\n" +
+      "Usage: data:recompute -- --database <sqlite> [--evaluated-at <ISO>] [--timezone <IANA>] [--import-batch <id>]\n" +
         "   or: data:refresh-snapshots -- --database <sqlite>"
     );
   }
@@ -29,6 +29,7 @@ async function main(): Promise<void> {
   const evaluatedAt = optionValue(args, "--evaluated-at", new Date().toISOString());
   const timezoneIdentifier = optionValue(args, "--timezone", DATABASE_TIMEZONE);
   const dirtyFromAt = optionValue(args, "--dirty-from", "");
+  const importBatchId = optionValue(args, "--import-batch", "");
   const elevationGains = await nativeElevationGains(databasePath, {
     spoolRoot: resolve(optionValue(args, "--native-spool-root", dirname(databasePath))),
     engine: importEngine(optionValue(args, "--engine", "typescript")),
@@ -46,10 +47,11 @@ async function main(): Promise<void> {
           reasons: ["import_dataset_diff"]
         }
       : null;
+    const recomputeOptions = { evaluatedAt, timezoneIdentifier, ...(importBatchId ? { importBatchId } : {}) };
     const jobId = command === "recompute"
       ? incrementalPlan
-        ? service.enqueueIncrementalRecompute(incrementalPlan, { evaluatedAt, timezoneIdentifier })
-        : service.enqueueFullRecompute({ evaluatedAt, timezoneIdentifier })
+        ? service.enqueueIncrementalRecompute(incrementalPlan, recomputeOptions)
+        : service.enqueueFullRecompute(recomputeOptions)
       : service.enqueueSnapshotRefresh({ evaluatedAt, timezoneIdentifier });
     if (jobId === null) throw new Error("Incremental recompute unexpectedly produced no task");
     const completed = service.runNextJob();
