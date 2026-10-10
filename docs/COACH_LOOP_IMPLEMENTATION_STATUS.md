@@ -228,3 +228,21 @@ npm run check:coach-release -- --evidence output/coach-loop/2026-10-10/mapping-c
 - 超建议量追加只允许最终处方与已评估30分钟候选的摘要一致；不匹配的未锁定旧课进入修补，授权与预留随最终完整课一起发布。
 
 [定向回归](../apps/api/test/coach-loop-runtime-safety.test.ts)覆盖保留/锁定长课、无今日周课表及冲突锁课、人工短课、设备回执、冻结质量评价、HTTP七日合同和窗口外预算、配速/心率追加授权及重试稳定性。此前工件仍是历史记录，不能作为修改后源码的发布证据；本次不迁移真实数据库、不自动启用计划、不操作真实设备。
+
+## 12. 状态更新（提交与部署，2026-10-10 CST 收口）
+
+本节只补状态，**不改写上文任何设计边界与验收结论**（§4/§9 的「未部署/未迁移真库」是当时轮次的记录）。
+
+- **提交**：本批拆为 3 个提交并推送到 gitee `main`（`origin/main` 由 `308fee9` 前进到 `1f6e58e`）——
+  `015d0b0` 共享合同 + iOS 原生消费、`a5bc050` 服务端运行时/路由/策略 + v32 存储 + 回放门禁脚本、
+  `1f6e58e` 本实现状态与优化方案/研究文档。工作区干净，累计 101 文件（+12352 / −117）。
+- **部署**（腾讯云轻量 `lhins-3gatdqed`，2026-10-10 17:56 CST）：线上 HEAD `e05f59e → 1f6e58e`。
+  本批新增 v32 迁移 ⇒ 按闸门**停服应用**：`pending [32] → []`、`foreignKeyCheck ok`、
+  counts 不变（workouts 285 / route_points 135192 / health_records 183556），随后 `restart rai-api`（NRestarts=0）。
+  部署前备份 `rai.manual.2026-10-10T09-56-08-904Z.98d47998.sqlite`。
+- **线上验证**：`handshake` 返回 `coachLoopContractVersion=1`；教练闭环聚合端点 200 且带
+  `policyHash`/`executionToken`；今日响应已含 `executionPolicy`（`phase:"base"` + `rai-periodization-v2`）；
+  数据摘要 `issues: []`；匿名只读路由 `29/20`（较 2026-10-09 的 27/20 多 2 条新读路由）；匿名写端点仍 401；
+  导入引擎环境未变（`RAI_IMPORT_ENGINE=rust` + `RAI_RUST_FALLBACK=typescript`），无 Rust 子进程残留。
+- **仍未完成**（不因本次部署而闭合）：迁移以外的长期真数据实证、独立领域/golden 审阅、物理设备与协议回退验收。
+  iOS 改动对手机是 **no-op**（手机跑的是 build 产物）——需重新在 Xcode build + 安装才生效。
