@@ -274,3 +274,49 @@ iOS 改动对已安装 App 是 **no-op**，需 Xcode 重新 build 安装。
 日后若要改，两个方向都需新契约、属独立改动：
 ① 服务端在保留的 source 上标记"上次导入失败"，让恢复分支直接放弃；
 ② iOS 侧对"已知失败的 `sourceId`"不再自动 `startImport`。
+
+## 十一、部署记录（2026-10-10 22:34 CST）
+
+**已同步并部署到线上 `tpandmr.xyz`。**
+
+| 项 | 值 |
+|---|---|
+| 本地 / 远程 HEAD | `b6c1830`（`main` = `origin/main`，工作区干净） |
+| 服务器部署前 HEAD | `6a1de72`（= 本批**起点**，非假设） |
+| 实际推送范围 | `6a1de72..b6c1830` = **3 提交 / 17 files / +618 −32** |
+| 部署后服务器 HEAD | **`b6c1830`** ✅ |
+| installed unit == repo unit | ✅ `diff /etc/systemd/system/rai-api.service /opt/rai/deploy/rai-api.service` EXIT=0（`deploy/` 本批无 diff ⇒ 未重装 unit） |
+| 迁移闸门 | **`"pending": []`**（库 **v32**；本批 `database.ts` 改的是报错文案，**不是迁移**） |
+| 重启 | MainPID `1366347 → 1440966`，`NRestarts=0`，日志 `RAI local API ready` |
+| 稳定性复查（+3 min） | `active/running` / `NRestarts=0` / `ActiveEnterTimestamp` 未变 ✅ 无崩溃循环 |
+
+**部署后端点上验**（本机直打真域名，非 localhost）：
+
+| 端点 | 结果 |
+|---|---|
+| `/v1/health` | 200 · `status:"ok"` **且** `databaseReady:true` |
+| `/v1/runtime-status` | 200 · `databaseReady:true` · `busy:false` |
+| `/v1/data-summary` | 200 · **`issues: []`** |
+| `/v1/data-audit` | 200 · **`issues: []`** |
+
+**「跑的是新代码」的论据**：`ExecStart=/usr/bin/node --import tsx apps/api/src/server.ts` **直跑 TS 源码、
+无编译产物**；进程启动（22:34:46 CST）晚于 `git pull` ⇒ 运行的必定是 `b6c1830` 的源码。本批**无 web 改动**
+⇒ 未 `vite build`、未 reload nginx（vhost 内还住着 `/wb2api/`，未触碰）。
+
+**对照物**：`/v1/runtime-status` 里现存那条 `importJob`（`web_import_mv299tmh…`，`status:"failed"`，
+`error:"导入失败，请查看服务日志"`）是修复**前**写入库的历史记录 —— 正是本次要消灭的那类"真因不可得"
+文案。新代码下重算 CLI 会在回滚前把业务 `error` 写进持久诊断；这条旧记录**不会**被追溯改写。
+
+**锁状态**：`/var/lib/rai/var/rai.sqlite.import.lock` 为本次 API 持有的**新鲜活锁**
+（`{"pid":1440966,"kind":"api","startedAt":"2026-10-10T14:34:46.615Z"}`）⇒ 不阻塞下次导入；
+另有 4 个 `.stale.*` 是 10-10 那 4 次失败导入的残留，无害。
+
+### ⚠️ 本次部署**不解决**手机上的同步失败
+
+真因在 **iOS 客户端**：「按钮 / 快捷指令 / 自动同步」此前都把记录游标重置为全量重读
+（`HealthKitSync.swift:452` 硬编码 `manual: true` → `:1139 recordsForceRescan: full || manual`）。
+而**线上部署对已安装的 App 是 no-op** ⇒ **必须用 Xcode 重新 build 并装到手机**，否则下次点同步仍会
+上传 ~250 MB、仍会失败（自锁：候选游标只在服务端接受后才落盘，失败就不推进，下次仍全量）。
+
+本批**服务端**改动的实际收益 = **让下一次失败可诊断**（真因穿透到持久诊断与 CLI stderr）+
+**失败上传包不再被立即删除**（可复核 / 可重试），**而非**让当前这次失败变成功。
