@@ -129,6 +129,20 @@ struct RaiAPIClient {
         try await send(path: "/v1/mobile/run-coach", method: "POST", body: input, baseURL: baseURL, token: token)
     }
 
+    func coachLoop(baseURL: URL, token: String) async throws -> CoachLoopResponse {
+        try await get(path: "/v1/mobile/coach-loop", baseURL: baseURL, token: token)
+    }
+
+    func coachFeedback(_ input: CoachLoopFeedbackCommand, baseURL: URL, token: String) async throws -> CoachLoopFeedbackResult {
+        try await send(path: "/v1/mobile/coach-feedback", method: "POST", body: input, baseURL: baseURL, token: token)
+    }
+
+    func refreshCoachPrediction(scope: PlanReceiptScope, baseURL: URL, token: String) async throws -> CoachLoopPredictionResult {
+        struct Body: Encodable { let operationScope: PlanReceiptScope }
+        return try await send(path: "/v1/mobile/coach-prediction-refresh", method: "POST",
+            body: Body(operationScope: scope), baseURL: baseURL, token: token)
+    }
+
     /// The executable week handed to the workout scheduler. Read-only, so it
     /// never competes with the goals revision lock.
     func workoutPlan(baseURL: URL, token: String) async throws -> MobileWorkoutPlanResponse {
@@ -143,7 +157,7 @@ struct RaiAPIClient {
         try await get(path: "/v1/mobile/plan-operations/\(escapedPath(id))", baseURL: baseURL, token: token)
     }
     func replayPlanPublication<Result: Decodable>(_ operation: PendingPlanPublication, baseURL: URL, token: String) async throws -> Result {
-        let paths = ["coach": "/v1/mobile/run-coach", "confirm": "/v1/mobile/workout-plan/confirm", "goals": "/v1/mobile/goals", "lock": "/v1/mobile/lock"]
+        let paths = ["coach": "/v1/mobile/run-coach", "coach-loop": "/v1/mobile/coach-loop", "confirm": "/v1/mobile/workout-plan/confirm", "goals": "/v1/mobile/goals", "lock": "/v1/mobile/lock"]
         guard let path = paths[operation.route] else { throw RaiAPIClientError.decoding("未知的发布操作") }
         return try await request(path: path, query: [], method: operation.route == "goals" ? "PUT" : "POST",
             body: operation.payload, baseURL: baseURL, token: token)
@@ -167,7 +181,38 @@ struct RaiAPIClient {
         baseURL: URL,
         token: String
     ) async throws -> PlanSyncReceiptResponse {
-        try await send(
+        if receipt.coachLoop != nil {
+            // Synthesized Codable omits nil optionals. The new contract needs
+            // an explicit null decisionRef for regular courses and canonical
+            // null alerts/bounds for cold-start steps, not invented targets.
+            var object = try JSONSerialization.jsonObject(with: encoder.encode(receipt)) as! [String: Any]
+            var context = object["coachLoop"] as! [String: Any]
+            if let decisionRef = receipt.coachLoop?.decisionRef { context["decisionRef"] = decisionRef }
+            else { context["decisionRef"] = NSNull() }
+            object["coachLoop"] = context
+            if var structure = object["structure"] as? [String: Any] {
+                func step(_ value: Any?) -> Any {
+                    guard var result = value as? [String: Any] else { return NSNull() }
+                    if var alert = result["alert"] as? [String: Any] {
+                        alert["lower"] = alert["lower"] ?? NSNull()
+                        alert["upper"] = alert["upper"] ?? NSNull()
+                        result["alert"] = alert
+                    } else { result["alert"] = NSNull() }
+                    return result
+                }
+                structure["warmup"] = step(structure["warmup"])
+                structure["cooldown"] = step(structure["cooldown"])
+                structure["blocks"] = (structure["blocks"] as? [[String: Any]] ?? []).map { block in
+                    var value = block
+                    value["steps"] = (block["steps"] as? [Any] ?? []).map { step($0) }
+                    return value
+                }
+                object["structure"] = structure
+            }
+            return try await request(path: "/v1/mobile/coach-loop/synced", query: [], method: "POST",
+                body: JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), baseURL: baseURL, token: token)
+        }
+        return try await send(
             path: "/v1/mobile/workout-plan/synced",
             method: "POST",
             body: receipt,

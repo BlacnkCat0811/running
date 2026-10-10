@@ -26,7 +26,9 @@ struct TechManualPlanView: View {
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
-                if editing {
+                if native.isCoachLoopManaged {
+                    TechCoachLoopSection()
+                } else if editing {
                     if draftIsStale {
                         TechPanel(tint: TechColor.yellow) {
                             Text("计划已更新，你的未保存修改仍保留。请查看最新计划后再编辑。")

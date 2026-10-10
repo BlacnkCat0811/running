@@ -18,6 +18,8 @@ final class NativeAppModel {
     var goals: MobileGoalsResponse? { trainingPlanStore.goals }
     var workoutPlan: MobileWorkoutPlanResponse? { trainingPlanStore.workoutPlan }
     var runCoach: MobileRunCoachResponse? { trainingPlanStore.coach }
+    var coachLoop: CoachLoopResponse? { trainingPlanStore.coachLoop }
+    var isCoachLoopManaged: Bool { coachLoop?.settings != nil }
     private(set) var isLoadingRunCoach = false
     private(set) var isUpdatingRunCoach = false
     var runCoachError: String?
@@ -98,7 +100,8 @@ final class NativeAppModel {
     }
 
     func watchPlanNeedsUpdate(_ plan: MobileWorkoutPlanResponse?) -> Bool {
-        if let token = trainingPlanStore.metadata?.coherenceToken, let ledger = watchLedger, ledger.coherenceToken != token { return true }
+        if let token = isCoachLoopManaged ? coachLoop?.executionToken : trainingPlanStore.metadata?.coherenceToken,
+           let ledger = watchLedger, ledger.coherenceToken != token { return true }
         guard let revision = lastWatchRevision else {
             guard let ledger = watchLedger else { return false }
             guard let plan else { return !ledger.entries.isEmpty }
@@ -363,6 +366,12 @@ final class NativeAppModel {
 
     @discardableResult
     func changeRunCoach(action: String, config: MobileRunCoachConfig? = nil, expectedRevision: Int? = nil, editorSessionID: String? = nil) async -> Bool {
+        if isCoachLoopManaged {
+            guard config == nil, ["refresh", "pause", "resume", "end"].contains(action) else {
+                runCoachError = "当前使用新版教练合同，请在新版训练偏好中修改。"; return false
+            }
+            return await changeCoachLoop(action: action, expectedRevision: expectedRevision, editorSessionID: editorSessionID)
+        }
         guard editorSessionID == nil || editorSessionID == feedbackSessionID else { return false }
         guard !isPlanBusy, !isOffline, let baseURL = session.serverURL,
               let revision = expectedRevision ?? goals?.revision else { return false }
@@ -395,6 +404,116 @@ final class NativeAppModel {
                 _ = await refreshPlanState()
             }
             return false
+        }
+    }
+
+    @discardableResult
+    func changeCoachLoop(action: String, preferences: CoachLoopPreferences? = nil, acceptedPolicyHash: String? = nil,
+                         expectedRevision: Int? = nil, editorSessionID: String? = nil) async -> Bool {
+        guard editorSessionID == nil || editorSessionID == feedbackSessionID else { return false }
+        guard handshake?.coachLoopContractVersion == 1, handshake?.planPublicationContractVersion == 1,
+              !isPlanBusy, !isOffline, let baseURL = session.serverURL, let loop = coachLoop,
+              trainingPlanStore.isCurrent, expectedRevision == nil || expectedRevision == loop.revision else {
+            runCoachError = "请先联网读取当前教练合同；未提交。"; return false
+        }
+        if action == "enable" {
+            scheduleStateChanged()
+            guard !scheduleStorageIssue, !hasInterruptedSchedule, !hasPendingPlanReceipts,
+                  watchLedger?.entries.isEmpty != false else {
+                runCoachError = "旧系统排期或未登记回执尚未协调，请先核验／撤回并登记；未转换模式。"
+                return false
+            }
+        }
+        let configuration = configurationID; let token = session.apiToken; let requestID = UUID()
+        saveGoalsRequestID = requestID; isUpdatingRunCoach = true
+        defer { if saveGoalsRequestID == requestID { isUpdatingRunCoach = false } }
+        func valid() -> Bool {
+            configuration == configurationID && baseURL == session.serverURL && token == session.apiToken &&
+                requestID == saveGoalsRequestID && !Task.isCancelled
+        }
+        do {
+            let command = CoachLoopCommand(contractVersion: 1, operationId: UUID().uuidString, operationScope: loop.scope,
+                expectedRevision: loop.revision, expectedFactsHash: loop.factsHash, action: action,
+                acceptedPolicyHash: acceptedPolicyHash, settings: preferences)
+            let value: CoachLoopResponse = try await publishPlan(route: "coach-loop", input: command,
+                baseURL: baseURL, token: token, isCurrent: valid)
+            guard valid() else { return false }
+            planMutationEpoch = UUID()
+            trainingPlanStore.acceptCoachLoopWrite(value); finishPlanPublication()
+            runCoachError = nil
+            let refreshed = await refreshPlanState()
+            guard valid() else { return false }
+            if !refreshed { runCoachError = "教练命令已保存，但当前执行快照尚未确认；请重读，不要重新发布。" }
+            return true
+        } catch {
+            guard valid() else { return false }
+            runCoachError = friendlyMessage(error)
+            if case RaiAPIClientError.server(let code, _, _) = error,
+               ["coach_facts_changed", "mobile_goals_revision_conflict"].contains(code) { _ = await refreshPlanState() }
+            return false
+        }
+    }
+
+    /// Saving subjective evidence and adapting the plan are separate commands.
+    /// Lost replies retry the exact operation and payload, never a new UUID.
+    func saveCoachFeedback(fields: CoachLoopFeedbackCommand.Fields? = nil, retract: CoachLoopFeedback? = nil, retry: Bool = false) async -> Bool {
+        guard !isPlanBusy, !isOffline, handshake?.coachLoopContractVersion == 1,
+              let loop = coachLoop, let baseURL = session.serverURL else { return false }
+        let pending = cache.pendingCoachFeedback(scope: cacheScope)
+        guard !pending.isFailure else { runCoachError = "反馈操作记录无法读取，请恢复存储，不要重新提交。"; return false }
+        let previous = pending.value ?? nil
+        if previous != nil && !retry { runCoachError = "上次反馈结果尚未确认，请先重试原反馈。"; return false }
+        guard retry ? previous != nil : (fields != nil || retract != nil) else { return false }
+        let command = previous ?? CoachLoopFeedbackCommand(operationId: UUID().uuidString, operationScope: loop.scope,
+            id: retract?.id ?? UUID().uuidString, expectedRevision: retract?.revision ?? 0,
+            action: retract == nil ? "save" : "retract", consent: true, fields: fields)
+        guard command.operationScope == loop.scope else { runCoachError = "原反馈属于其他数据集，未重放。"; return false }
+        let scope = cacheScope; let configuration = configurationID; let token = session.apiToken
+        guard cache.saveCoachFeedback(command, scope: scope) else { return false }
+        isUpdatingRunCoach = true
+        defer { if configuration == configurationID { isUpdatingRunCoach = false } }
+        do {
+            let result = try await api.coachFeedback(command, baseURL: baseURL, token: token)
+            guard scope == cacheScope, configuration == configurationID, token == session.apiToken,
+                  baseURL == session.serverURL, !Task.isCancelled else { return false }
+            guard cache.saveCoachFeedback(nil, scope: scope) else {
+                runCoachError = "反馈已保存，本地操作确认未持久化，请重试原反馈。"; return false
+            }
+            trainingPlanStore.invalidate()
+            let refreshed = await refreshPlanState()
+            runCoachError = !refreshed ? "反馈已保存，读取失败；尚未刷新训练安排。" :
+                result.refreshRequired ? "反馈已保存；有效安全限制立即生效，训练安排需单独刷新。" : nil
+            return true
+        } catch {
+            guard scope == cacheScope, configuration == configurationID else { return false }
+            if case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status),
+               ["coach_feedback_invalid", "coach_feedback_revision_conflict", "coach_feedback_not_found", "FST_ERR_VALIDATION"].contains(code) {
+                guard cache.saveCoachFeedback(nil, scope: scope) else {
+                    runCoachError = "反馈被拒绝，但操作记录无法确认，请恢复存储。"; return false
+                }
+                _ = await refreshPlanState()
+                runCoachError = "反馈未保存：" + friendlyMessage(error)
+                return false
+            }
+            runCoachError = "反馈结果尚未确认，请重试原反馈：" + friendlyMessage(error)
+            return false
+        }
+    }
+
+    func refreshCoachPrediction() async {
+        guard !isPlanBusy, !isOffline, let loop = coachLoop, let baseURL = session.serverURL else { return }
+        let scope = cacheScope; let token = session.apiToken; let configuration = configurationID
+        isUpdatingRunCoach = true
+        defer { if configuration == configurationID { isUpdatingRunCoach = false } }
+        do {
+            let result = try await api.refreshCoachPrediction(scope: loop.scope, baseURL: baseURL, token: token)
+            guard scope == cacheScope, configuration == configurationID, token == session.apiToken,
+                  baseURL == session.serverURL, !Task.isCancelled else { return }
+            runCoachError = result.status == "published" ? nil : "预测摘要不可用：需要兼容的已发布数据快照。"
+            _ = await refreshPlanState()
+        } catch {
+            guard scope == cacheScope, configuration == configurationID else { return }
+            runCoachError = friendlyMessage(error)
         }
     }
 
@@ -1084,6 +1203,17 @@ final class NativeAppModel {
     }
 
     func planSyncSnapshot(_ id: UUID) -> PlanSyncSnapshot? {
+        if let loop = coachLoop, isCoachLoopManaged {
+            guard isCurrentPlanSync(id), !planPersistenceFailed, trainingPlanStore.isCurrent,
+                  let plan = currentWorkoutPlan, !loop.refreshRequired,
+                  goals?.revision == loop.revision,
+                  UserDataNoticePolicy.isCurrentDay(loop.today.day.localDate, timezone: loop.timezone, now: now()) else { return nil }
+            return .init(scope: cacheScope, configuration: configurationID, revision: loop.revision,
+                days: plan.days, timezone: loop.timezone, reminderHour: Self.storedScheduleHour(scope: cacheScope),
+                completedDates: [], localDate: loop.today.day.localDate, windowDays: 1, leaseID: id,
+                coherenceToken: loop.executionToken, windowStart: loop.today.day.localDate, windowEnd: loop.today.day.localDate,
+                serverIdentity: loop.scope, coachLoop: loop.receiptContext)
+        }
         guard isCurrentPlanSync(id), !planPersistenceFailed, let plan = currentWorkoutPlan,
               goals?.revision == plan.planRevision, let today = planPresentation.today, isTodayAvailable,
               today.timezone == plan.timezone,
@@ -1184,6 +1314,11 @@ final class NativeAppModel {
         func valid() -> Bool { requestID == saveGoalsRequestID && scope == cacheScope && configuration == configurationID && token == session.apiToken && baseURL == session.serverURL && !Task.isCancelled }
         do {
             switch pending.route {
+            case "coach-loop":
+                let value: CoachLoopResponse = try await resolvePendingPublication(pending, baseURL: baseURL, token: token, isCurrent: valid)
+                guard valid() else { return "连接已变化，请在原服务确认结果。" }
+                planMutationEpoch = UUID()
+                trainingPlanStore.acceptCoachLoopWrite(value)
             case "coach":
                 let value: MobileRunCoachResponse = try await resolvePendingPublication(pending, baseURL: baseURL, token: token, isCurrent: valid)
                 guard valid() else { return "连接已变化，请在原服务确认结果。" }
@@ -1251,7 +1386,11 @@ final class NativeAppModel {
                 var wire = receipt
                 // Older servers reject unknown fields; optional handshake
                 // capability permits staggered updates without blind 400 retries.
-                if handshake?.planReceiptContractVersion != 2 {
+                if wire.coachLoop != nil {
+                    guard handshake?.coachLoopContractVersion == 1 else {
+                        throw RaiAPIClientError.decoding("服务不支持原教练排期回执，不能降级或改写")
+                    }
+                } else if handshake?.planReceiptContractVersion != 2 {
                     if wire.lifecycleEvent != nil && wire.lifecycleEvent != "verified" { continue }
                     wire.useLegacyContract(metadata: handshake?.planReceiptMetadata == true)
                 }
@@ -1350,6 +1489,7 @@ final class NativeAppModel {
             value.coherenceToken = coherence; value.verifiedAt = ISO8601DateFormatter().string(from: now())
             value.timezone = snapshot.timezone; value.prescriptionDigest = PlanFingerprint.prescriptionDigest(kind: value.kind, structure: value.structure)
             value.lifecycleEvent = "verified"
+            value.coachLoop = snapshot.coachLoop
             return value
         }
     }
@@ -1433,13 +1573,14 @@ final class NativeAppModel {
                 receipt.contractVersion = 2; receipt.scope = identity; receipt.coherenceToken = coherence
                 receipt.operationId = operation.operationId.uuidString; receipt.verifiedAt = ISO8601DateFormatter().string(from: now())
                 receipt.timezone = operation.timezone; receipt.prescriptionDigest = item.prescriptionDigest; receipt.lifecycleEvent = "verified"
+                receipt.coachLoop = operation.coachLoop
             }
             return receipt
         }
         if operation.scope == cacheScope, !isOffline { _ = await refreshPlanState() }
         let current = operation.scope == cacheScope && trainingPlanStore.isCurrent &&
             operation.goalsRevision == currentPlanRevision && operation.coherenceToken != nil &&
-            operation.coherenceToken == trainingPlanStore.metadata?.coherenceToken
+            operation.coherenceToken == (isCoachLoopManaged ? coachLoop?.executionToken : trainingPlanStore.metadata?.coherenceToken)
         let ledger = PlanWatchLedger(scope: operation.scope, revision: operation.goalsRevision, entries: outcome.confirmedEntries,
             fingerprint: current ? PlanFingerprint.make(days: workoutPlan?.days ?? [], timezone: operation.timezone, hour: operation.reminderHour, completed: completedWeekDates) : "",
             reminderHour: operation.reminderHour, confirmedAt: now(), registeredDates: [], requiresWithdrawal: !current, receipts: receipts, coherenceToken: operation.coherenceToken)

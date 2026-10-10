@@ -18,6 +18,10 @@ struct TechPlanWatchSection: View {
                 TechSectionHeader(title: "手表课表", trailing: native.watchStatusLabel, trailingColor: TechColor.muted)
                 Text("核验的是本机系统训练日程，不代表配对手表已收到；请在手表确认实际可见。")
                     .font(.caption).foregroundStyle(TechColor.muted)
+                if native.isCoachLoopManaged {
+                    Text("新版教练只下发今天已发布的完整课；未来是展望。事实变化后需重新读取和显式更新／撤回系统日程。")
+                        .font(.caption).foregroundStyle(TechColor.yellow)
+                }
                 if native.goals?.weekPlanReplanRequired == true {
                     Text("旧模型课表的未来安排已停用，请重新预览规则课表。手表上的旧排期不会自动撤回，请手动同步以撤回或替换。")
                         .font(.caption).foregroundStyle(TechColor.coral)

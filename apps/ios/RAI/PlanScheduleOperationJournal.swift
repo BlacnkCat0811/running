@@ -26,6 +26,7 @@ struct PlanScheduleOperationJournal: Codable, Equatable {
     var previousEntries: [PlanScheduledEntry]
     var updatedAt: Date
     var clearAll = false
+    var coachLoop: CoachLoopReceiptContext? = nil
     var terminal: Bool { [.verified, .withdrawn].contains(phase) }
 
     func requests() -> [PlanSchedulingRequest] {
@@ -67,6 +68,7 @@ final class PlanScheduleJournal {
             coherenceToken: snapshot.coherenceToken, serverIdentity: snapshot.serverIdentity, timezone: snapshot.timezone, windowStart: snapshot.windowStart,
             windowEnd: snapshot.windowEnd, reminderHour: snapshot.reminderHour, phase: .prepared, items: [],
             previousEntries: previousEntries, updatedAt: Date())
+        operation.coachLoop = snapshot.coachLoop
     }
     init(storage: any PlanSchedulePersistence, operation: PlanScheduleOperationJournal) {
         self.storage = storage; self.operation = operation

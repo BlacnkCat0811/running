@@ -8,6 +8,7 @@ final class TrainingPlanStore {
     private(set) var today: MobileTodayResponse?
     private(set) var workoutPlan: MobileWorkoutPlanResponse?
     private(set) var coach: MobileRunCoachResponse?
+    private(set) var coachLoop: CoachLoopResponse?
     private(set) var metadata: TrainingPlanStateResponse.Metadata?
     private(set) var availability: PlanAvailability = .unavailable
     private(set) var issue: PlanReadIssue?
@@ -42,10 +43,21 @@ final class TrainingPlanStore {
     var executablePlan: MobileWorkoutPlanResponse? {
         guard isCurrent, !persistenceFailed, knownCoachState,
               workoutPlan?.planRevision == revision else { return nil }
+        if let loop = coachLoop, loop.settings != nil {
+            guard !loop.refreshRequired,
+                  UserDataNoticePolicy.isCurrentDay(loop.today.day.localDate, timezone: loop.timezone, now: now()) else { return nil }
+        }
         return workoutPlan
     }
 
     func presentation(offline: Bool) -> PlanPresentationSnapshot {
+        if let loop = coachLoop, loop.settings != nil {
+            return .init(revision: revision, goals: goals?.revision == revision ? goals : nil,
+                coach: nil, coachPlan: nil, today: nil, executablePlan: executablePlan,
+                availability: isRefreshing ? .refreshing : isCurrent && !loop.refreshRequired ? availability :
+                    offline ? .cached(asOf: cachedAt) : .savedAwaitingRefresh,
+                lastKnownTodayDate: loop.today.day.localDate, issue: issue)
+        }
         let currentCoach = coach?.revision == revision ? coach : nil
         let plan = currentCoach?.plan ?? (goals?.revision == revision ? goals?.runCoach : nil)
         let reference = today.flatMap { value in
@@ -68,7 +80,7 @@ final class TrainingPlanStore {
     func configure(scope: String, clear: Bool = false) {
         invalidate()
         if self.scope != scope || clear {
-            goals = nil; today = nil; workoutPlan = nil; coach = nil; metadata = nil
+            goals = nil; today = nil; workoutPlan = nil; coach = nil; coachLoop = nil; metadata = nil
             acknowledgement = nil; minimumRevision = 0; cachedAt = nil
             availability = .unavailable; issue = nil
         }
@@ -132,6 +144,13 @@ final class TrainingPlanStore {
     func loadCache() {
         restoreSafety()
         guard !isCurrent else { return }
+        if let cached = repository.cached(CoachLoopResponse.self, scope: scope, key: "coach-loop").value,
+           cached.value.settings != nil, cached.value.revision >= revision {
+            coachLoop = cached.value; goals = cached.value.goals; minimumRevision = cached.value.revision
+            today = nil; workoutPlan = nil; coach = nil; cachedAt = cached.cachedAt
+            availability = .cached(asOf: cachedAt)
+            return
+        }
         let aggregateResult = repository.cached(TrainingPlanStateResponse.self, scope: scope, key: "training-plan-state")
         let aggregate = aggregateResult.value
         if aggregateResult.isFailure {
@@ -166,6 +185,32 @@ final class TrainingPlanStore {
         let retries = max(0, min(2, handshake?.planSnapshotContractVersion == nil ? legacyRetryCount : 0))
         for attempt in 0...retries {
             do {
+                if let version = handshake?.coachLoopContractVersion {
+                    guard version == 1 else { throw RaiAPIClientError.decoding("不支持的教练闭环契约，不能回退旧执行协议") }
+                    let loop = try await repository.api.coachLoop(baseURL: baseURL, token: token)
+                    guard valid() else { return false }
+                    serviceReachable = true
+                    try validateCoachLoop(loop, handshake: handshake)
+                    coachLoop = loop
+                    if loop.settings != nil {
+                        if persistenceFailed {
+                            let ack = acknowledgement ?? .init(revision: loop.revision, action: "online-verification", acknowledgedAt: now(), planId: nil)
+                            guard repository.acknowledge(ack, scope: scope, goals: loop.goals, coach: nil) else {
+                                availability = .savedAwaitingRefresh; return false
+                            }
+                            persistenceFailed = false
+                            UserDefaults.standard.removeObject(forKey: quarantineKey)
+                        }
+                        minimumRevision = max(minimumRevision, loop.revision); goals = loop.goals
+                        today = nil; coach = nil; workoutPlan = loop.devicePlan; metadata = nil
+                        cachedAt = repository.persist(loop, scope: scope, key: "coach-loop")
+                        isCurrent = true; issue = nil
+                        availability = loop.refreshRequired ? .savedAwaitingRefresh : loop.today.executable ? .current : .empty
+                        return true
+                    }
+                } else if coachLoop?.settings != nil {
+                    throw RaiAPIClientError.decoding("服务不再支持已启用的教练合同，禁止旧协议执行；旧排期需显式撤回")
+                }
                 let value = try await repository.read(baseURL: baseURL, token: token, handshake: handshake)
                 guard valid() else { return false }
                 serviceReachable = true
@@ -220,6 +265,59 @@ final class TrainingPlanStore {
             }
         }
         return false
+    }
+
+    func acceptCoachLoopWrite(_ value: CoachLoopResponse) {
+        acknowledge(revision: value.revision, action: "coach-loop", goals: value.goals)
+        coachLoop = value
+        today = nil; coach = nil; workoutPlan = nil
+        _ = repository.persist(value, scope: scope, key: "coach-loop")
+    }
+
+    private func validateCoachLoop(_ value: CoachLoopResponse, handshake: RaiHandshake?) throws {
+        func hash(_ value: String) -> Bool { value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil }
+        guard value.contractVersion == 1, value.timezone == "Asia/Shanghai",
+              value.scope.serverId == handshake?.serverId, value.scope.athleteId == handshake?.athleteId,
+              value.scope.datasetEpoch == handshake?.datasetEpoch, !value.scope.serverId.isEmpty,
+              !value.scope.athleteId.isEmpty, !value.scope.datasetEpoch.isEmpty,
+              value.revision >= revision, value.goals.revision == value.revision,
+              hash(value.policyHash), hash(value.factsHash), hash(value.executionToken),
+              UserDataNoticePolicy.isCurrentDay(value.today.day.localDate, timezone: value.timezone, now: now()),
+              UserDataNoticePolicy.localDate(now: ISO8601DateFormatter().date(from: value.asOf) ??
+                fractionDate(value.asOf) ?? .distantPast, timezone: value.timezone) == value.today.day.localDate,
+              value.executionPolicy.localDate == value.today.day.localDate,
+              value.days.count == 7, value.days.first?.day.localDate == value.today.day.localDate,
+              value.days.first?.day == value.today.day,
+              value.days.first?.executable == value.today.executable,
+              value.days.first?.decisionRef == value.today.decisionRef,
+              value.volumePolicy.suggestedWeeklyKm.isFinite, value.volumePolicy.suggestedWeeklyKm >= 0,
+              value.volumePolicy.weeklyProtectionKm.isFinite, value.volumePolicy.weeklyProtectionKm >= 0 else {
+            throw RaiAPIClientError.decoding("教练闭环的身份、事实版本或当前日期无效")
+        }
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: value.timezone)!
+        let formatter = DateFormatter(); formatter.calendar = calendar; formatter.timeZone = calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd"
+        guard let start = formatter.date(from: value.today.day.localDate),
+              value.days.map(\.day.localDate) == (0..<7).map({ formatter.string(from: calendar.date(byAdding: .day, value: $0, to: start)!) }),
+              value.settings.map({ ["daily_adaptive", "race_preparation"].contains($0.mode) &&
+                ["active", "paused", "ended"].contains($0.status) && ["pace", "heart_rate"].contains($0.targetType) }) ?? true,
+              value.settings?.status == "active" || !value.days.contains(where: \.executable),
+              !value.today.executable || value.today.decisionRef == value.volumePolicy.extension.authorizedDecisionRef,
+              !value.today.executable || value.volumePolicy.extension.status != "eligible" || value.today.decisionRef != nil else {
+            throw RaiAPIClientError.decoding("教练窗口、生命周期或追加授权不一致")
+        }
+        if value.today.executable {
+            guard WorkoutPlanMapper.executionMapping(from: value.devicePlan.days[0], hour: 7).status == .exact else {
+                // A refresh-required snapshot is reference-only, not executable.
+                if value.refreshRequired { return }
+                throw RaiAPIClientError.decoding("今日新课型无法无损映射，禁止执行")
+            }
+        }
+    }
+
+    private func fractionDate(_ value: String) -> Date? {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
     }
 
     private func diagnostic(_ name: String, code: String? = nil) {

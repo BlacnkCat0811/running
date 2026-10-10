@@ -60,13 +60,14 @@ struct PlanSyncSnapshot: Equatable {
     var windowStart: String? = nil
     var windowEnd: String? = nil
     var serverIdentity: PlanReceiptScope? = nil
+    var coachLoop: CoachLoopReceiptContext? = nil
 
     func matchesForExecution(_ other: PlanSyncSnapshot) -> Bool {
         scope == other.scope && configuration == other.configuration && revision == other.revision &&
             timezone == other.timezone && reminderHour == other.reminderHour && completedDates == other.completedDates &&
             localDate == other.localDate && windowDays == other.windowDays && leaseID == other.leaseID &&
             coherenceToken == other.coherenceToken && windowStart == other.windowStart && windowEnd == other.windowEnd &&
-            serverIdentity == other.serverIdentity && days.count == other.days.count &&
+            serverIdentity == other.serverIdentity && coachLoop == other.coachLoop && days.count == other.days.count &&
             zip(days, other.days).allSatisfy { left, right in
                 left.localDate == right.localDate && left.kind == right.kind && left.executable == right.executable &&
                     left.structure == right.structure

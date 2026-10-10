@@ -1,0 +1,997 @@
+{
+  "contractVersion": 1,
+  "scope": {
+    "serverId": "test-server",
+    "athleteId": "synthetic",
+    "datasetEpoch": "synthetic-v1"
+  },
+  "timezone": "Asia/Shanghai",
+  "executionToken": "acdf3b636faee219658ce971feec443bbef5c6d19a81bb0c68d720c99e0db2a8",
+  "policyHash": "70f2fb8ffedd9feb174f7e311fdfec6655c64341c036b2166b8b0e25bee563a5",
+  "policyManifest": {
+    "contractVersion": 2,
+    "trainingModeVersion": "rai-coach-runtime-mode-v1",
+    "sessionDoseVersion": "rai-coach-session-dose-v1",
+    "budgetAllocationVersion": "rai-coach-complete-allocation-v1",
+    "extensionEligibilityVersion": "rai-coach-extension-eligibility-candidate-v1",
+    "capacityEnvelopeVersion": "rai-coach-capacity-envelope-candidate-v1",
+    "executionProtectionVersion": "rai-pre-race-execution-protection-v1",
+    "executionAssessmentVersion": "rai-coach-execution-assessment-candidate-v1",
+    "adaptationVersion": "rai-coach-runtime-repair-v2",
+    "templateLibraryVersion": "rai-coach-template-library-v1",
+    "subjectiveFeedbackVersion": "rai-coach-subjective-feedback-candidate-v1",
+    "predictionSummaryVersion": "rai-coach-goal-gap-candidate-v1",
+    "replayScenarioVersion": "rai-coach-behavior-replay-v1"
+  },
+  "revision": 1,
+  "factsHash": "0d182933309e0f92ecbe48ebb9c8bd14b21d6dd63af67532e370f416265d02b3",
+  "asOf": "2026-10-08T04:00:00Z",
+  "settings": {
+    "mode": "daily_adaptive",
+    "runningDays": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "longRunDays": [
+      7
+    ],
+    "availabilityMinutesByWeekday": {},
+    "targetType": "pace",
+    "race": null,
+    "status": "active"
+  },
+  "raceTarget": null,
+  "volumePolicy": {
+    "schemaVersion": 1,
+    "asOf": "2026-10-08T04:00:00Z",
+    "weekStart": "2026-10-05",
+    "timezone": "Asia/Shanghai",
+    "anchor": {
+      "id": "2ab98e9a1710b3da785331d443b1fd5925b2bea5921b68bf1ae2ad77c5f3d3db",
+      "revision": 1,
+      "factsHash": "5b7d5d42072373eba52dbd7d43c25a9b3425e53dbdb6e3f6fb5f93f486fe97af",
+      "weekStart": "2026-10-05",
+      "historyThrough": "2026-10-04",
+      "observedDays": 8,
+      "coverageDays": 28,
+      "recentWeeklyKm": 20,
+      "previousWeekKm": 20,
+      "policyVersion": "rai-coach-capacity-envelope-candidate-v1",
+      "evidenceRefs": [
+        {
+          "source": "workout",
+          "id": "history-0-0",
+          "observedAt": "2026-09-07T01:00:00Z",
+          "availableAt": "2026-09-07T02:00:00Z",
+          "revisionOrHash": "synthetic-history-0-0-v1"
+        },
+        {
+          "source": "workout",
+          "id": "history-0-1",
+          "observedAt": "2026-09-10T01:00:00Z",
+          "availableAt": "2026-09-10T02:00:00Z",
+          "revisionOrHash": "synthetic-history-0-1-v1"
+        },
+        {
+          "source": "workout",
+          "id": "history-1-0",
+          "observedAt": "2026-09-14T01:00:00Z",
+          "availableAt": "2026-09-14T02:00:00Z",
+          "revisionOrHash": "synthetic-history-1-0-v1"
+        },
+        {
+          "source": "workout",
+          "id": "history-1-1",
+          "observedAt": "2026-09-17T01:00:00Z",
+          "availableAt": "2026-09-17T02:00:00Z",
+          "revisionOrHash": "synthetic-history-1-1-v1"
+        },
+        {
+          "source": "workout",
+          "id": "history-2-0",
+          "observedAt": "2026-09-21T01:00:00Z",
+          "availableAt": "2026-09-21T02:00:00Z",
+          "revisionOrHash": "synthetic-history-2-0-v1"
+        },
+        {
+          "source": "workout",
+          "id": "history-2-1",
+          "observedAt": "2026-09-24T01:00:00Z",
+          "availableAt": "2026-09-24T02:00:00Z",
+          "revisionOrHash": "synthetic-history-2-1-v1"
+        },
+        {
+          "source": "workout",
+          "id": "history-3-0",
+          "observedAt": "2026-09-28T01:00:00Z",
+          "availableAt": "2026-09-28T02:00:00Z",
+          "revisionOrHash": "synthetic-history-3-0-v1"
+        },
+        {
+          "source": "workout",
+          "id": "history-3-1",
+          "observedAt": "2026-10-01T01:00:00Z",
+          "availableAt": "2026-10-01T02:00:00Z",
+          "revisionOrHash": "synthetic-history-3-1-v1"
+        }
+      ]
+    },
+    "suggestedWeeklyKm": 20,
+    "weeklyProtectionKm": 26,
+    "rollingLimits": [
+      {
+        "days": 7,
+        "ceilingKm": 26
+      },
+      {
+        "days": 14,
+        "ceilingKm": 52
+      }
+    ],
+    "actualWeekKm": 20,
+    "regularReservedKm": 0,
+    "extensionReservedKm": 0,
+    "otherReservedKm": 0,
+    "suggestedRemainingKm": 0,
+    "actualOverSuggestionKm": 0,
+    "constraints": [
+      {
+        "code": "natural_week",
+        "from": "2026-10-05",
+        "to": "2026-10-11",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 6,
+        "passed": true
+      },
+      {
+        "code": "rolling_7_days",
+        "from": "2026-10-02",
+        "to": "2026-10-08",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 6,
+        "passed": true
+      },
+      {
+        "code": "rolling_7_days",
+        "from": "2026-10-03",
+        "to": "2026-10-09",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 6,
+        "passed": true
+      },
+      {
+        "code": "rolling_7_days",
+        "from": "2026-10-04",
+        "to": "2026-10-10",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 6,
+        "passed": true
+      },
+      {
+        "code": "rolling_7_days",
+        "from": "2026-10-05",
+        "to": "2026-10-11",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 6,
+        "passed": true
+      },
+      {
+        "code": "rolling_7_days",
+        "from": "2026-10-06",
+        "to": "2026-10-12",
+        "actualKm": 0,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 26,
+        "passed": true
+      },
+      {
+        "code": "rolling_7_days",
+        "from": "2026-10-07",
+        "to": "2026-10-13",
+        "actualKm": 0,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 26,
+        "passed": true
+      },
+      {
+        "code": "rolling_7_days",
+        "from": "2026-10-08",
+        "to": "2026-10-14",
+        "actualKm": 0,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 26,
+        "remainingBeforeCandidateKm": 26,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-09-25",
+        "to": "2026-10-08",
+        "actualKm": 40,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 12,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-09-26",
+        "to": "2026-10-09",
+        "actualKm": 40,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 12,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-09-27",
+        "to": "2026-10-10",
+        "actualKm": 40,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 12,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-09-28",
+        "to": "2026-10-11",
+        "actualKm": 40,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 12,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-09-29",
+        "to": "2026-10-12",
+        "actualKm": 30,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 22,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-09-30",
+        "to": "2026-10-13",
+        "actualKm": 30,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 22,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-01",
+        "to": "2026-10-14",
+        "actualKm": 30,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 22,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-02",
+        "to": "2026-10-15",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 32,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-03",
+        "to": "2026-10-16",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 32,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-04",
+        "to": "2026-10-17",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 32,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-05",
+        "to": "2026-10-18",
+        "actualKm": 20,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 32,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-06",
+        "to": "2026-10-19",
+        "actualKm": 0,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 52,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-07",
+        "to": "2026-10-20",
+        "actualKm": 0,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 52,
+        "passed": true
+      },
+      {
+        "code": "rolling_14_days",
+        "from": "2026-10-08",
+        "to": "2026-10-21",
+        "actualKm": 0,
+        "reservedKm": 0,
+        "candidateKm": 5,
+        "ceilingKm": 52,
+        "remainingBeforeCandidateKm": 52,
+        "passed": true
+      }
+    ],
+    "extension": {
+      "status": "eligible",
+      "assessedForDate": "2026-10-08",
+      "candidatePrescriptionDigest": "dc104531ddf2304bc942b94c86b0dd9d30813b4a560e2aa319bcc7fd384218fa",
+      "authorizedDecisionRef": "58fefd50cda5ce190e9e307f76464a2b59a8d40b3381f89c0bea89d2412146d5",
+      "approvedSessionsInRolling7Days": 0,
+      "maximumSessionsInRolling7Days": 2,
+      "reasons": [
+        {
+          "code": "extension_allowed",
+          "policyVersion": "rai-coach-extension-eligibility-candidate-v1",
+          "affectedDates": [
+            "2026-10-08"
+          ],
+          "params": {
+            "approvedCount": 0,
+            "maximum": 2
+          },
+          "evidenceRefs": []
+        }
+      ]
+    },
+    "policyManifest": {
+      "contractVersion": 2,
+      "trainingModeVersion": "rai-coach-runtime-mode-v1",
+      "sessionDoseVersion": "rai-coach-session-dose-v1",
+      "budgetAllocationVersion": "rai-coach-complete-allocation-v1",
+      "extensionEligibilityVersion": "rai-coach-extension-eligibility-candidate-v1",
+      "capacityEnvelopeVersion": "rai-coach-capacity-envelope-candidate-v1",
+      "executionProtectionVersion": "rai-pre-race-execution-protection-v1",
+      "executionAssessmentVersion": "rai-coach-execution-assessment-candidate-v1",
+      "adaptationVersion": "rai-coach-runtime-repair-v2",
+      "templateLibraryVersion": "rai-coach-template-library-v1",
+      "subjectiveFeedbackVersion": "rai-coach-subjective-feedback-candidate-v1",
+      "predictionSummaryVersion": "rai-coach-goal-gap-candidate-v1",
+      "replayScenarioVersion": "rai-coach-behavior-replay-v1"
+    }
+  },
+  "refreshRequired": false,
+  "today": {
+    "day": {
+      "localDate": "2026-10-08",
+      "kind": "easy",
+      "distanceKm": 4.3,
+      "structure": {
+        "warmup": {
+          "purpose": "warmup",
+          "goal": {
+            "type": "time",
+            "seconds": 300
+          },
+          "alert": {
+            "kind": "heart_rate",
+            "lower": 120,
+            "upper": 145
+          }
+        },
+        "blocks": [
+          {
+            "iterations": 1,
+            "steps": [
+              {
+                "purpose": "work",
+                "goal": {
+                  "type": "time",
+                  "seconds": 1200
+                },
+                "alert": {
+                  "kind": "pace",
+                  "lower": 360,
+                  "upper": 420
+                }
+              }
+            ]
+          }
+        ],
+        "cooldown": {
+          "purpose": "cooldown",
+          "goal": {
+            "type": "time",
+            "seconds": 300
+          },
+          "alert": {
+            "kind": "heart_rate",
+            "lower": 120,
+            "upper": 145
+          }
+        }
+      },
+      "reason": "规则模板 easy；整课 30 分钟。"
+    },
+    "executable": true,
+    "authorizedDecisionRef": "58fefd50cda5ce190e9e307f76464a2b59a8d40b3381f89c0bea89d2412146d5",
+    "decisionRef": "58fefd50cda5ce190e9e307f76464a2b59a8d40b3381f89c0bea89d2412146d5",
+    "templateId": "easy"
+  },
+  "days": [
+    {
+      "day": {
+        "localDate": "2026-10-08",
+        "kind": "easy",
+        "distanceKm": 4.3,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          },
+          "blocks": [
+            {
+              "iterations": 1,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 1200
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 360,
+                    "upper": 420
+                  }
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          }
+        },
+        "reason": "规则模板 easy；整课 30 分钟。"
+      },
+      "executable": true,
+      "authorizedDecisionRef": "58fefd50cda5ce190e9e307f76464a2b59a8d40b3381f89c0bea89d2412146d5",
+      "decisionRef": "58fefd50cda5ce190e9e307f76464a2b59a8d40b3381f89c0bea89d2412146d5",
+      "templateId": "easy"
+    },
+    {
+      "day": {
+        "localDate": "2026-10-09",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      },
+      "executable": false,
+      "authorizedDecisionRef": null,
+      "decisionRef": null,
+      "templateId": "rest"
+    },
+    {
+      "day": {
+        "localDate": "2026-10-10",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      },
+      "executable": false,
+      "authorizedDecisionRef": null,
+      "decisionRef": null,
+      "templateId": "rest"
+    },
+    {
+      "day": {
+        "localDate": "2026-10-11",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      },
+      "executable": false,
+      "authorizedDecisionRef": null,
+      "decisionRef": null,
+      "templateId": "rest"
+    },
+    {
+      "day": {
+        "localDate": "2026-10-12",
+        "kind": "interval",
+        "distanceKm": 7.2,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          },
+          "blocks": [
+            {
+              "iterations": 4,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "distance",
+                    "meters": 800
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 240,
+                    "upper": 270
+                  }
+                },
+                {
+                  "purpose": "recovery",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 120
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          }
+        },
+        "reason": "规则模板 interval；整课 42.4 分钟。"
+      },
+      "executable": true,
+      "authorizedDecisionRef": null,
+      "decisionRef": null,
+      "templateId": "interval"
+    },
+    {
+      "day": {
+        "localDate": "2026-10-13",
+        "kind": "easy",
+        "distanceKm": 5.7,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          },
+          "blocks": [
+            {
+              "iterations": 1,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 1800
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 360,
+                    "upper": 420
+                  }
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          }
+        },
+        "reason": "规则模板 aerobic_endurance；整课 40 分钟。"
+      },
+      "executable": true,
+      "authorizedDecisionRef": null,
+      "decisionRef": null,
+      "templateId": "aerobic_endurance"
+    },
+    {
+      "day": {
+        "localDate": "2026-10-14",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      },
+      "executable": false,
+      "authorizedDecisionRef": null,
+      "decisionRef": null,
+      "templateId": "rest"
+    }
+  ],
+  "feedback": {
+    "policyVersion": "rai-coach-subjective-feedback-candidate-v1",
+    "policyStatus": "candidate",
+    "evidenceStatus": "none",
+    "activeFeedbackIds": [],
+    "restRequested": false,
+    "qualityBlocked": false,
+    "extensionBlocked": false,
+    "reasons": []
+  },
+  "subjectiveFeedback": [],
+  "execution": [],
+  "executionSummary": {
+    "version": "rai-coach-execution-assessment-candidate-v1",
+    "policyStatus": "candidate",
+    "asOf": "2026-10-08T04:00:00Z",
+    "qualityPlanned": 0,
+    "qualityObserved": 0,
+    "qualityConfirmed": 0,
+    "qualityKnownNotMet": 0,
+    "qualityUnconfirmed": 0
+  },
+  "executionPolicy": {
+    "localDate": "2026-10-08",
+    "phase": null,
+    "phasePolicyVersion": "rai-periodization-v2",
+    "protections": []
+  },
+  "goalGap": {
+    "policyVersion": "rai-coach-goal-gap-candidate-v1",
+    "policyStatus": "candidate",
+    "status": "no_time_goal",
+    "summaryId": null,
+    "distance": null,
+    "targetSeconds": null,
+    "referenceSeconds": null,
+    "gapSeconds": null,
+    "preparationGaps": [],
+    "freshness": {
+      "asOf": null,
+      "dataThroughAt": null,
+      "stale": false
+    },
+    "calibrationStatus": null,
+    "reasons": [
+      {
+        "code": "no_time_goal",
+        "policyVersion": "rai-coach-goal-gap-candidate-v1",
+        "affectedDates": [
+          "2026-10-08"
+        ],
+        "params": {},
+        "evidenceRefs": []
+      }
+    ]
+  },
+  "goals": {
+    "revision": 1,
+    "easyDurationFloorFraction": 0.7,
+    "qualitySessionCap": 2,
+    "raceTarget": null,
+    "weekPlan": [
+      {
+        "localDate": "2026-10-08",
+        "kind": "easy",
+        "distanceKm": 4.3,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          },
+          "blocks": [
+            {
+              "iterations": 1,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 1200
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 360,
+                    "upper": 420
+                  }
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          }
+        },
+        "reason": "规则模板 easy；整课 30 分钟。"
+      },
+      {
+        "localDate": "2026-10-09",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      },
+      {
+        "localDate": "2026-10-10",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      },
+      {
+        "localDate": "2026-10-11",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      },
+      {
+        "localDate": "2026-10-12",
+        "kind": "interval",
+        "distanceKm": 7.2,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          },
+          "blocks": [
+            {
+              "iterations": 4,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "distance",
+                    "meters": 800
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 240,
+                    "upper": 270
+                  }
+                },
+                {
+                  "purpose": "recovery",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 120
+                  },
+                  "alert": null
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 600
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          }
+        },
+        "reason": "规则模板 interval；整课 42.4 分钟。"
+      },
+      {
+        "localDate": "2026-10-13",
+        "kind": "easy",
+        "distanceKm": 5.7,
+        "structure": {
+          "warmup": {
+            "purpose": "warmup",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          },
+          "blocks": [
+            {
+              "iterations": 1,
+              "steps": [
+                {
+                  "purpose": "work",
+                  "goal": {
+                    "type": "time",
+                    "seconds": 1800
+                  },
+                  "alert": {
+                    "kind": "pace",
+                    "lower": 360,
+                    "upper": 420
+                  }
+                }
+              ]
+            }
+          ],
+          "cooldown": {
+            "purpose": "cooldown",
+            "goal": {
+              "type": "time",
+              "seconds": 300
+            },
+            "alert": {
+              "kind": "heart_rate",
+              "lower": 120,
+              "upper": 145
+            }
+          }
+        },
+        "reason": "规则模板 aerobic_endurance；整课 40 分钟。"
+      },
+      {
+        "localDate": "2026-10-14",
+        "kind": "rest",
+        "distanceKm": null,
+        "reason": "尚未排课"
+      }
+    ],
+    "lockedSession": null,
+    "weekPlanAudit": {
+      "generatedBy": "heuristic",
+      "model": null,
+      "promptVersion": null,
+      "generatedAt": "2026-10-08T04:00:00Z"
+    },
+    "weekPlanReplanRequired": false,
+    "weekPlanPreservedDate": null,
+    "runCoach": null,
+    "updatedAt": "2026-10-08T04:00:00Z"
+  },
+  "reasons": [
+    {
+      "code": "suggested_volume_met",
+      "policyVersion": "rai-coach-complete-allocation-v1",
+      "affectedDates": [
+        "2026-10-08"
+      ],
+      "params": {
+        "actualWeekKm": 20,
+        "suggestedWeeklyKm": 20
+      },
+      "evidenceRefs": []
+    },
+    {
+      "code": "extension_allowed",
+      "policyVersion": "rai-coach-extension-eligibility-candidate-v1",
+      "affectedDates": [
+        "2026-10-08"
+      ],
+      "params": {
+        "approvedCount": 0,
+        "maximum": 2
+      },
+      "evidenceRefs": []
+    }
+  ]
+}

@@ -14,7 +14,9 @@ struct TechTodayView: View {
             VStack(alignment: .leading, spacing: TechMetrics.sectionSpacing) {
                 TechTodayHeader(date: native.today.map { nativeDay($0.today.localDate) } ?? "RUNNING INTELLIGENCE")
 
-                if let today = native.today {
+                if native.isCoachLoopManaged {
+                    TechCoachLoopSection()
+                } else if let today = native.today {
                     todayHero(today)
                     recoveryPanel(today)
                     trainingOverview(today)

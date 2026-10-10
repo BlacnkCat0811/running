@@ -96,6 +96,78 @@ final class PlanStoreProtocol: URLProtocol, @unchecked Sendable {
         futureHandshake.planSnapshotContractVersion = 9
         let future = await store.refresh(baseURL: base, token: "", handshake: futureHandshake, isValid: { true })
         check(!future && store.issue?.code == .contractMismatch, "higher snapshot capability fails closed without a legacy downgrade")
+        let loopData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
+        let loop = try JSONDecoder().decode(CoachLoopResponse.self, from: loopData)
+        let loopJSON = String(decoding: loopData, as: UTF8.self)
+        let loopHandshake = RaiHandshake(serverId: loop.scope.serverId, athleteId: loop.scope.athleteId,
+            datasetEpoch: loop.scope.datasetEpoch, syncProtocolVersion: 1, apiVersion: "v1",
+            planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2, coachLoopContractVersion: 1)
+        let loopStore = TrainingPlanStore(cache: cache, api: api, scope: UUID().uuidString,
+            now: { ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")! })
+        PlanStoreProtocol.handler = { request in
+            precondition(request.url!.path == "/v1/mobile/coach-loop", "opted-in client must not use legacy S-based reads")
+            return (200, loopJSON, 0)
+        }
+        let loopLoaded = await loopStore.refresh(baseURL: base, token: "", handshake: loopHandshake, isValid: { true })
+        check(loopLoaded && loopStore.executablePlan?.windowDays == 1 &&
+            loopStore.executablePlan?.days[0].structure == loop.today.day.structure,
+            "AC0-12 native v1 reads exact published today, never exports future outlook")
+        check(loopStore.coachLoop?.volumePolicy.suggestedWeeklyKm == 20 && loopStore.coachLoop?.volumePolicy.weeklyProtectionKm == 26,
+            "AC0-13 native retains independent S20/H26 and real extension authority")
+        check(loopStore.today == nil && loopStore.coach == nil && loopStore.presentation(offline: false).today == nil,
+            "old today/fitness projections cannot reappear after explicit conversion")
+        let loopCached = TrainingPlanStore(cache: cache, api: api, scope: loopStore.scope,
+            now: { ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")! })
+        loopCached.loadCache()
+        check(loopCached.coachLoop?.settings?.mode == "daily_adaptive" && loopCached.executablePlan == nil,
+            "offline new-contract cache is reference-only")
+        for variant in ["identity", "facts", "token", "duplicate", "paused", "authorization", "missing-authorization", "timezone", "today-mismatch"] {
+            var object = try JSONSerialization.jsonObject(with: loopData) as! [String: Any]
+            switch variant {
+            case "identity": object["scope"] = ["serverId": "other", "athleteId": loop.scope.athleteId, "datasetEpoch": loop.scope.datasetEpoch]
+            case "facts": object["factsHash"] = "not-a-hash"
+            case "token": object.removeValue(forKey: "executionToken")
+            case "duplicate":
+                var days = object["days"] as! [[String: Any]]; days[1] = days[0]; object["days"] = days
+            case "paused":
+                var settings = object["settings"] as! [String: Any]; settings["status"] = "paused"; object["settings"] = settings
+            case "authorization":
+                var today = object["today"] as! [String: Any]; today["decisionRef"] = String(repeating: "f", count: 64); object["today"] = today
+            case "missing-authorization":
+                var today = object["today"] as! [String: Any]; today["decisionRef"] = NSNull(); object["today"] = today
+                var days = object["days"] as! [[String: Any]]; days[0]["decisionRef"] = NSNull(); object["days"] = days
+            case "timezone": object["timezone"] = "UTC"
+            default:
+                var today = object["today"] as! [String: Any]; today["executable"] = false; object["today"] = today
+            }
+            let invalid = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+            PlanStoreProtocol.handler = { _ in (200, invalid, 0) }
+            let rejected = await loopStore.refresh(baseURL: base, token: "", handshake: loopHandshake, isValid: { true })
+            check(!rejected && loopStore.executablePlan == nil, "new client fails closed for \(variant)")
+        }
+        var oldServer = loopHandshake; oldServer.coachLoopContractVersion = nil
+        PlanStoreProtocol.handler = { _ in preconditionFailure("must refuse protocol rollback before issuing any legacy request") }
+        let rollback = await loopCached.refresh(baseURL: base, token: "", handshake: oldServer, isValid: { true })
+        check(!rollback && loopCached.executablePlan == nil, "AC4-12/AC0-21 server rollback never downgrades an opted-in plan")
+        var futureLoop = loopHandshake; futureLoop.coachLoopContractVersion = 2
+        let futureLoopRead = await loopStore.refresh(baseURL: base, token: "", handshake: futureLoop, isValid: { true })
+        check(!futureLoopRead && loopStore.executablePlan == nil, "unknown future coach contract is not guessed")
+        let fields = CoachLoopFeedbackCommand.Fields(phase: "pre_run", observedAt: loop.asOf, requestedAction: "rest")
+        let encodedFields = try JSONSerialization.jsonObject(with: JSONEncoder().encode(fields)) as! [String: Any]
+        check(encodedFields["fatigue"] is NSNull && encodedFields["workoutId"] is NSNull &&
+            encodedFields["rpeOverrideRef"] is NSNull && encodedFields["requestedAction"] as? String == "rest",
+            "AC5-01/02 feedback skips encode explicit null, not missing/normal or duplicate RPE")
+        let preferences = CoachLoopPreferences(mode: "daily_adaptive", runningDays: [4], longRunDays: [],
+            availabilityMinutesByWeekday: [:], targetType: "pace", race: nil)
+        let encodedPreferences = try JSONSerialization.jsonObject(with: JSONEncoder().encode(preferences)) as! [String: Any]
+        check(encodedPreferences["race"] is NSNull && encodedPreferences["status"] == nil,
+            "unlimited daily preferences explicitly clear race without smuggling lifecycle state")
+        let feedbackCommand = CoachLoopFeedbackCommand(operationId: UUID().uuidString, operationScope: loop.scope,
+            id: UUID().uuidString, expectedRevision: 0, action: "save", consent: true, fields: fields)
+        check(cache.saveCoachFeedback(feedbackCommand, scope: loopStore.scope), "feedback intent is durably saved before network")
+        cache.clear(scope: loopStore.scope)
+        check((cache.pendingCoachFeedback(scope: loopStore.scope).value ?? nil)?.operationId == feedbackCommand.operationId,
+            "clearing presentation cache cannot erase unknown-result feedback operation")
         print("TrainingPlanStore regression: \(count) checks passed")
     }
 }

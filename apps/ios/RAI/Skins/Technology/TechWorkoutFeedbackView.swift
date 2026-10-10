@@ -18,6 +18,7 @@ struct TechWorkoutFeedbackView: View {
     @State private var message: String?
     @State private var scope: String?
     @State private var latest: WorkoutDetailResponse?
+    @State private var showingCoachReasons = false
 
     init(detail: WorkoutDetailResponse) {
         self.detail = detail
@@ -59,6 +60,12 @@ struct TechWorkoutFeedbackView: View {
                     Text("两项互相独立，不删除 Apple 健康原始记录。选择自动判断可撤销覆盖。")
                         .font(.caption).foregroundStyle(TechColor.muted)
                 }.disabled(busy || pending || saved)
+                if native.handshake?.coachLoopContractVersion == 1 {
+                    Section {
+                        Button("补充训练后原因（可跳过，不复制RPE）") { showingCoachReasons = true }
+                            .disabled(native.isOffline || native.isPlanBusy)
+                    }
+                }
                 if let message { Section { Text(message).accessibilityIdentifier("feedback.result") } }
                 if let latest {
                     Section("最新记录（你的输入仍保留）") {
@@ -96,6 +103,9 @@ struct TechWorkoutFeedbackView: View {
             .navigationTitle("训练反馈").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.disabled(busy) } }
             .interactiveDismissDisabled(busy)
+            .sheet(isPresented: $showingCoachReasons) {
+                TechCoachLoopFeedbackSheet(sessionID: native.feedbackSessionID, workoutID: detail.workout.id)
+            }
             .onChange(of: native.feedbackSessionID) { _, _ in dismiss() }
             .onAppear {
                 guard scope == nil else { return }

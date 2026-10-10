@@ -275,6 +275,15 @@ final class CacheStore: PlanSchedulePersistence {
         return saveMetadata(value, key: "publication." + scope)
     }
 
+    func pendingCoachFeedback(scope: String) -> CacheReadResult<CoachLoopFeedbackCommand?> {
+        readMetadata(CoachLoopFeedbackCommand?.self, sql: "SELECT payload FROM app_metadata WHERE metadata_key = ?", key: "coach-feedback." + scope)
+    }
+
+    func saveCoachFeedback(_ value: CoachLoopFeedbackCommand?, scope: String) -> Bool {
+        guard !pendingCoachFeedback(scope: scope).isFailure else { return false }
+        return saveMetadata(value, key: "coach-feedback." + scope)
+    }
+
     private func saveMetadata<Value: Encodable>(_ value: Value, key: String) -> Bool {
         guard let payload = try? JSONEncoder().encode(value),
               let statement = prepare("INSERT OR REPLACE INTO app_metadata(metadata_key, payload) VALUES (?, ?)") else { return false }

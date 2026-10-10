@@ -164,6 +164,8 @@ export interface HandshakeResponse {
   /** /synced accepts UUID/time/idempotency/export metadata. Older servers omit it. */
   planReceiptMetadata?: boolean;
   planSnapshotContractVersion?: number;
+  /** Opt-in coach-loop aggregate/commands; legacy plan DTOs retain their meaning. */
+  coachLoopContractVersion?: number;
   planPublicationContractVersion?: number;
   planReceiptContractVersion?: number;
 }
@@ -1187,6 +1189,8 @@ export interface MobileReplanAdvice {
 }
 
 export interface MobileTodayResponse {
+  /** Metadata only; limits already apply server-side. Not another race phase. */
+  executionPolicy?: import("./coach-loop.js").CoachExecutionPolicyContext;
   /** Strict dated V2 result; legacy clients may keep reading the compatible assessment. */
   readinessSnapshot?: import("@rai/contracts").ReadinessAssessmentResult;
   /**
@@ -1603,3 +1607,11 @@ export interface WorkoutSummaryExportResponse {
   count: number;
   csv: string;
 }
+export type {
+  CoachEvidenceRef, CoachDecisionReason, CoachPolicyManifest, CoachTrainingMode,
+  CoachExecutionPolicyContext, CoachSessionDose, CoachCapacityAnchor,
+  CoachVolumeConstraint, CoachVolumePolicy, CoachLoopCandidate, WorkoutExecutionAssessment,
+  CoachPlanRepairCost, CoachAdaptationRecord, CoachQualityExecutionSummary,
+  SubjectiveFeedback, CoachPredictionSummary, CoachGoalGap,
+  CoachLoopSettings, CoachLoopCommand, CoachLoopRuntimeResponse, CoachLoopReceiptContext, CoachLoopDeviceReceipt
+} from "./coach-loop.js";

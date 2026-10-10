@@ -11,12 +11,238 @@ struct RaiHandshake: Codable, Equatable {
     var planSnapshotContractVersion: Int? = nil
     var planPublicationContractVersion: Int? = nil
     var planReceiptContractVersion: Int? = nil
+    var coachLoopContractVersion: Int? = nil
 }
 
 struct RaiAPIError: Codable {
     let code: String?
     let message: String?
     let currentRevision: Int?
+}
+
+// Explicit v1 coach-loop consumer. Never maps S onto the legacy weekly cap or
+// invents a fitness programme for the unlimited daily-adaptive mode.
+struct CoachLoopReceiptContext: Codable, Equatable {
+    let contractVersion: Int
+    let policyHash: String
+    let decisionRef: String?
+}
+
+struct CoachLoopPreferences: Codable, Equatable {
+    var mode: String
+    var runningDays: [Int]
+    var longRunDays: [Int]
+    var availabilityMinutesByWeekday: [String: Int?]
+    var targetType: String
+    var race: MobileRunCoachConfig?
+
+    enum CodingKeys: String, CodingKey {
+        case mode, runningDays, longRunDays, availabilityMinutesByWeekday, targetType, race
+    }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(mode, forKey: .mode)
+        try values.encode(runningDays, forKey: .runningDays)
+        try values.encode(longRunDays, forKey: .longRunDays)
+        try values.encode(availabilityMinutesByWeekday, forKey: .availabilityMinutesByWeekday)
+        try values.encode(targetType, forKey: .targetType)
+        try values.encode(race, forKey: .race) // null is part of the daily-mode contract
+    }
+}
+
+struct CoachLoopSettings: Codable {
+    let mode: String
+    let status: String
+    let runningDays: [Int]
+    let longRunDays: [Int]
+    let availabilityMinutesByWeekday: [String: Int?]
+    let targetType: String
+    let race: MobileRunCoachConfig?
+
+    var preferences: CoachLoopPreferences {
+        .init(mode: mode, runningDays: runningDays, longRunDays: longRunDays,
+            availabilityMinutesByWeekday: availabilityMinutesByWeekday, targetType: targetType, race: race)
+    }
+}
+
+struct CoachLoopCommand: Encodable {
+    let contractVersion: Int
+    let operationId: String
+    let operationScope: PlanReceiptScope
+    let expectedRevision: Int
+    let expectedFactsHash: String
+    let action: String
+    var acceptedPolicyHash: String? = nil
+    var settings: CoachLoopPreferences? = nil
+}
+
+struct CoachLoopReason: Codable {
+    let code: String
+    let policyVersion: String
+    let affectedDates: [String]
+}
+
+struct CoachLoopFeedback: Codable, Identifiable {
+    let id: String
+    let revision: Int
+    let localDate: String
+    let phase: String
+    let requestedAction: String?
+    let observedAt: String
+    let availableAt: String
+    let validUntil: String
+    let retractedAt: String?
+}
+
+struct CoachLoopFeedbackCommand: Codable {
+    let operationId: String
+    let operationScope: PlanReceiptScope
+    let id: String
+    let expectedRevision: Int
+    let action: String
+    let consent: Bool
+    var fields: Fields? = nil
+
+    struct Fields: Codable {
+        let phase: String
+        let observedAt: String
+        var workoutId: String? = nil
+        var fatigue: String? = nil
+        var soreness: String? = nil
+        var discomfort: String? = nil
+        var requestedAction: String? = nil
+        var interruptionReason: String? = nil
+        var replacementReason: String? = nil
+        var rpeOverrideRef: RPEOverrideRef? = nil
+        // RPE remains the existing workout-override fact, not a second value.
+        struct RPEOverrideRef: Codable { let workoutId: String; let revision: Int }
+        enum CodingKeys: String, CodingKey {
+            case phase, observedAt, workoutId, fatigue, soreness, discomfort, requestedAction
+            case interruptionReason, replacementReason, rpeOverrideRef
+        }
+        func encode(to encoder: Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(phase, forKey: .phase); try values.encode(observedAt, forKey: .observedAt)
+            try values.encode(workoutId, forKey: .workoutId); try values.encode(fatigue, forKey: .fatigue)
+            try values.encode(soreness, forKey: .soreness); try values.encode(discomfort, forKey: .discomfort)
+            try values.encode(requestedAction, forKey: .requestedAction)
+            try values.encode(interruptionReason, forKey: .interruptionReason)
+            try values.encode(replacementReason, forKey: .replacementReason)
+            try values.encode(rpeOverrideRef, forKey: .rpeOverrideRef)
+        }
+    }
+}
+
+struct CoachLoopFeedbackResult: Decodable {
+    let feedback: CoachLoopFeedback?
+    let saved: Bool
+    let refreshRequired: Bool
+}
+
+struct CoachLoopPredictionResult: Decodable {
+    let status: String
+    let summaryId: String?
+    let reason: String?
+}
+
+struct CoachLoopResponse: Codable {
+    struct Day: Codable, Identifiable {
+        let day: MobilePlannedDay
+        let executable: Bool
+        let decisionRef: String?
+        var templateId: String? = nil
+        var id: String { day.localDate }
+    }
+    struct Volume: Codable {
+        struct Anchor: Codable {
+            let id: String
+            let revision: Int
+            let factsHash: String
+            let weekStart: String
+            let historyThrough: String
+        }
+        struct Extension: Codable {
+            let status: String
+            let authorizedDecisionRef: String?
+            let approvedSessionsInRolling7Days: Int
+            let maximumSessionsInRolling7Days: Int
+            let reasons: [CoachLoopReason]
+        }
+        let suggestedWeeklyKm: Double
+        let weeklyProtectionKm: Double
+        let actualWeekKm: Double
+        let suggestedRemainingKm: Double
+        let actualOverSuggestionKm: Double
+        let anchor: Anchor
+        let `extension`: Extension
+    }
+    struct Execution: Codable, Identifiable {
+        struct Dose: Codable { let status: String }
+        struct Stimulus: Codable { let status: String }
+        let localDate: String
+        let observation: String
+        let completion: String
+        let dose: Dose
+        let stimulus: Stimulus
+        let reasons: [CoachLoopReason]
+        var id: String { localDate }
+    }
+    struct ExecutionSummary: Codable {
+        let qualityObserved: Int
+        let qualityConfirmed: Int
+        let qualityKnownNotMet: Int
+        let qualityUnconfirmed: Int
+    }
+    struct ExecutionPolicy: Codable {
+        struct Protection: Codable { let code: String; let active: Bool }
+        let localDate: String
+        let phase: String?
+        let protections: [Protection]
+    }
+    struct GoalGap: Codable {
+        let status: String
+        let targetSeconds: Double?
+        let referenceSeconds: Double?
+        let gapSeconds: Double?
+        let calibrationStatus: String?
+    }
+    let contractVersion: Int
+    let scope: PlanReceiptScope
+    let timezone: String
+    let executionToken: String
+    let policyHash: String
+    let revision: Int
+    let factsHash: String
+    let asOf: String
+    let settings: CoachLoopSettings?
+    let volumePolicy: Volume
+    let refreshRequired: Bool
+    let today: Day
+    let days: [Day]
+    let subjectiveFeedback: [CoachLoopFeedback]
+    let execution: [Execution]
+    let executionSummary: ExecutionSummary
+    let executionPolicy: ExecutionPolicy
+    let goalGap: GoalGap?
+    let goals: MobileGoalsResponse
+    let reasons: [CoachLoopReason]
+
+    var receiptContext: CoachLoopReceiptContext {
+        .init(contractVersion: 1, policyHash: policyHash, decisionRef: today.decisionRef)
+    }
+
+    /// Only today's published course can be exported. The future is an outlook,
+    /// never seven days of device authorization copied from today's readiness.
+    var devicePlan: MobileWorkoutPlanResponse {
+        let source = today.day
+        let day = MobileWorkoutPlanDay(localDate: source.localDate, kind: source.kind,
+            title: today.templateId ?? days.first?.templateId ?? source.kind, reason: source.reason ?? "",
+            distanceKm: source.distanceKm, durationMinutes: nil, paceSecondsPerKmLower: nil,
+            paceSecondsPerKmUpper: nil, heartRateBpmLower: nil, heartRateBpmUpper: nil,
+            structure: source.structure, source: "coach_loop", executable: today.executable && !refreshRequired)
+        return .init(generatedAt: asOf, timezone: timezone, windowDays: 1, planRevision: revision,
+            audit: goals.weekPlanAudit, days: [day], windowStart: source.localDate, windowEnd: source.localDate)
+    }
 }
 
 struct WorkoutListItem: Codable, Identifiable, Equatable {
@@ -998,6 +1224,7 @@ struct PlanSyncReceipt: Codable, Equatable {
     var timezone: String? = nil
     var prescriptionDigest: String? = nil
     var lifecycleEvent: String? = nil
+    var coachLoop: CoachLoopReceiptContext? = nil
 
     var hasRequiredVerificationFields: Bool {
         guard contractVersion == 2 else { return contractVersion == nil }

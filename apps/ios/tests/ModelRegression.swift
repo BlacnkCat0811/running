@@ -71,6 +71,8 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
     }
     func pendingPublication(scope: String) -> CacheReadResult<PendingPlanPublication?> { .value(read(PendingPlanPublication.self, scope: scope, key: "publication")?.value) }
     func savePublication(_ value: PendingPlanPublication?, scope: String) -> Bool { write(value, scope: scope, key: "publication") != nil }
+    func pendingCoachFeedback(scope: String) -> CacheReadResult<CoachLoopFeedbackCommand?> { .value(read(CoachLoopFeedbackCommand?.self, scope: scope, key: "coach-feedback")?.value ?? nil) }
+    func saveCoachFeedback(_ value: CoachLoopFeedbackCommand?, scope: String) -> Bool { write(value, scope: scope, key: "coach-feedback") != nil }
 }
 
 final class StubProtocol: URLProtocol, @unchecked Sendable {
@@ -1519,6 +1521,87 @@ final class RequestLog: @unchecked Sendable {
                   "unknown coach state cannot confirm or display a current training recommendation")
         }
 
+        do {
+            CacheStore.resetScheduleSafety()
+            let data = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
+            let loop = try JSONDecoder().decode(CoachLoopResponse.self, from: data)
+            let json = String(decoding: data, as: UTF8.self)
+            let session = ServerSession()
+            let handshake = RaiHandshake(serverId: loop.scope.serverId, athleteId: loop.scope.athleteId,
+                datasetEpoch: loop.scope.datasetEpoch, syncProtocolVersion: 1, apiVersion: "v1",
+                planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2, coachLoopContractVersion: 1)
+            CacheStore.saveHandshake(handshake, baseURL: session.serverURL!)
+            let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubProtocol.self]
+            let model = NativeAppModel(session: session, api: RaiAPIClient(session: URLSession(configuration: configuration)),
+                now: { ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")! })
+            let wireRequests = RequestLog()
+            StubProtocol.handler = { request in
+                precondition(request.url!.path == "/v1/mobile/coach-loop/synced")
+                wireRequests.record(request)
+                let object = try! JSONSerialization.jsonObject(with: wireRequests.lastBody(method: "POST", path: request.url!.path)!) as! [String: Any]
+                let context = object["coachLoop"] as! [String: Any]
+                let structure = object["structure"] as! [String: Any]
+                let block = (structure["blocks"] as! [[String: Any]])[0]
+                let work = (block["steps"] as! [[String: Any]])[0]
+                precondition(context["decisionRef"] is NSNull && structure["warmup"] is NSNull &&
+                    structure["cooldown"] is NSNull && work["alert"] is NSNull, "regular/cold-start wire must preserve canonical unknowns")
+                return (200, "{\"recordedAt\":\"2026-10-08T04:00:00Z\",\"matchesCurrent\":false}", 0)
+            }
+            let wireAPI = RaiAPIClient(session: URLSession(configuration: configuration))
+            let noTargets = MobileSessionStructure(warmup: nil, blocks: [.init(iterations: 1, steps: [
+                .init(purpose: "work", goal: .time(seconds: 1800), alert: nil)])], cooldown: nil)
+            let wireReceipt = PlanSyncReceipt(localDate: loop.today.day.localDate, kind: "easy", revision: loop.revision,
+                structure: noTargets, coachLoop: .init(contractVersion: 1, policyHash: loop.policyHash, decisionRef: nil))
+            _ = try await wireAPI.recordPlanSync(wireReceipt, baseURL: session.serverURL!, token: "")
+            check(wireRequests.count(method: "POST", path: "/v1/mobile/coach-loop/synced") == 1,
+                "regular and cold-start receipts preserve explicit null authority/targets without a legacy downgrade")
+            var receiptCount = 0
+            let loopRequests = RequestLog()
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/coach-loop" { return (200, json, 0) }
+                precondition(request.url!.path == "/v1/mobile/coach-loop/synced", "native must never use legacy receipt endpoint")
+                loopRequests.record(request)
+                let object = try! JSONSerialization.jsonObject(with: loopRequests.lastBody(method: "POST", path: "/v1/mobile/coach-loop/synced")!) as! [String: Any]
+                let context = object["coachLoop"] as! [String: Any]
+                precondition(context["decisionRef"] as? String == loop.today.decisionRef &&
+                    object["coherenceToken"] as? String == loop.executionToken, "authorization and effective facts identity must survive export")
+                receiptCount += 1
+                return (200, "{\"recordedAt\":\"2026-10-08T04:00:00Z\",\"matchesCurrent\":true}", 0)
+            }
+            let loaded = await model.refreshPlanState()
+            check(loaded, "native model selects new contract before old aggregates")
+            check(model.today == nil && model.currentWorkoutPlan?.windowDays == 1 && model.coachLoop?.settings?.mode == "daily_adaptive",
+                "native screens share one new-contract today authority without fabricated programme")
+            let scheduler = FakeWorkoutScheduler()
+            _ = await PlanWatchSyncCoordinator.shared.sync(model: model, scheduler: scheduler)
+            check(receiptCount == 1 && model.watchLedger?.entries.count == 1,
+                "AC0-12 device fake proves exact today-only scheduling and explicit new receipt route")
+            check(model.watchLedger?.receipts?.first?.coachLoop == loop.receiptContext,
+                "new receipt authorization survives durable ledger and withdrawal")
+            let conversion = await model.changeCoachLoop(action: "enable", preferences: loop.settings!.preferences,
+                acceptedPolicyHash: loop.policyHash)
+            check(!conversion && model.runCoachError?.contains("旧系统排期") == true,
+                "local uncoordinated schedule blocks conversion even before the server can see a receipt")
+            let lease = model.beginPlanSync()!
+            let snapshot = model.planSyncSnapshot(lease)!
+            let journal = PlanScheduleJournal(storage: CacheStore(), snapshot: snapshot, previousEntries: [])
+            check(journal.operation.coachLoop == loop.receiptContext, "interrupted scheduling journal persists new authority for recovery")
+            model.endPlanSync(lease)
+            var sends = 0
+            StubProtocol.handler = { request in
+                precondition(request.url!.path == "/v1/mobile/coach-loop")
+                if request.httpMethod == "GET" { return (200, json, 0) }
+                sends += 1
+                return (503, "{}", 0)
+            }
+            let published = await model.changeCoachLoop(action: "refresh")
+            check(!published, "unknown-result coach publication is not reported as saved")
+            check(model.hasPendingPlanPublication && model.currentWorkoutPlan == nil && sends == 1,
+                "lost reply durably retains original new-contract operation and invalidates execution")
+            let republished = await model.changeCoachLoop(action: "refresh")
+            check(!republished && sends == 1,
+                "pending new-contract operation prevents issuing a second UUID")
+        }
         print("All model regression checks passed.")
     }
 }

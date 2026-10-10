@@ -267,6 +267,10 @@ field_anchors = {
 }
 # 明确不需要展示位的字段，逐条写理由。
 metadata_only = {
+    # 2026-10-10 O1：解释服务端已应用的骨架阶段/14天保护，不是新放行能力。
+    # phase 已由 periodization 承载；有效 nextSession/WorkoutKit 结构先在服务端限制。
+    # 当前 iOS 刻意不消费此调试元数据，不增加视图，也不允许忽略它绕过安全限制。
+    "executionPolicy": "骨架/执行保护的服务端核对元数据；phase与有效处方已由现有字段承载，不是客户端放行能力",
     "timezone": "时区元数据；界面统一按 Asia/Shanghai 呈现",
     "lastSyncedAt": "同步时间戳；刷新结果已由 sync.status/lastSuccessAt 承载（横幅披露区渲染的是 sync 那一路）",
     "recommendationRevision": "CAS 版本号，仅供写入冲突检测",
