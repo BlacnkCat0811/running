@@ -49,7 +49,7 @@ Override保存修订和可得性。反馈保存之后的重算失败不应撤销
 
 ## 6. 存储与版本
 
-[database](../packages/storage-sqlite/src/database.ts) 定义migrations 1–25；历史migration正文/checksum冻结，不允许原地修改以“修复”旧库。
+[database](../packages/storage-sqlite/src/database.ts) 定义migrations 1–32；历史migration正文/checksum冻结，不允许原地修改以“修复”旧库。
 
 | 结构 | 责任 |
 |---|---|

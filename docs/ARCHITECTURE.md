@@ -1,6 +1,6 @@
 # 项目架构
 
-维护日期：2026-09-30。产品/范围入口：[README](../README.md)、[AGENTS](../AGENTS.md)；已确认问题：[项目审查](PROJECT_REVIEW.md)。
+维护日期：2026-10-07。产品/范围入口：[README](../README.md)、[AGENTS](../AGENTS.md)；已确认问题：[项目审查](PROJECT_REVIEW.md)。
 
 ## 交付结构
 

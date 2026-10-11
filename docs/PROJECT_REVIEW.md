@@ -145,3 +145,19 @@ Node的3个skip属于Windows路径别名、锁定文件回滚、Windows进程树
 
 本轮未修改iOS业务代码/Python/Rust实现，未重新运行其平台门禁；§3的结果明确属于此前完整审查。只修改了桌面E2E用例，未改390px冻结块。
 新的机器核验摘要：[fixes-verification.json](../deliverables/project-review-2026-09-30/fixes-verification.json)。此前的失败产物和审查摘要保持原样，避免重写历史证据。
+
+## 8. 后续批次收尾索引（2026-10-09 ~ 10-11）
+
+§1–§7 是 2026-09-30 那次审查的时点快照。其后三个批次已提交并部署，各留过一份「当轮」审查/验收文档；
+按 [核验产物目录](../deliverables/README.md) 的约定「收尾后并入本文件或删除」，**原文档已删除**。
+**本节只记指针，不重述结论**；需要原文时按下表路径从 Git 取回。
+
+| 批次（主题） | 收尾提交 | 原文档（已删，可用 Git 恢复） |
+|---|---|---|
+| HealthKit 记录同步 v2：v30/v31 迁移 + 逐类型变更游标 + 类型作用域 UUID 删除 | `e05f59e` → `308fee9`（已提交并部署） | `deliverables/UNCOMMITTED_REVIEW_2026-10-09.md` |
+| iOS 数据同步失败修复：普通同步不再全量重扫 + 导入失败诊断可见 + 失败上传包保留 | `0c01f7d` → `14bda36`（已同步并部署） | `deliverables/UNCOMMITTED_REVIEW_2026-10-10.md` |
+| 纯补史导入被资格漂移门禁永久死锁的修复 | `cebb0dc` → `f2e5da0`（验收证据） | `deliverables/VERIFICATION_2026-10-11-source-backfill.md` |
+| iOS `jobId` 前台续接 + 逐类型进度文案 + live 探针陈旧源文件清单 | `076b8bd` / `6ea930f` → `5950a11` | `deliverables/VERIFICATION_2026-10-11-ios-resume.md` |
+
+取回单份原文：`git show <收尾提交>:<原文档路径>`，或用 `git log --follow -- <路径>` 定位。
+`UNCOMMITTED_REVIEW_2026-10-11.md` **不在**本表：它是尚未收尾的当轮批次，仍留在核验产物目录。

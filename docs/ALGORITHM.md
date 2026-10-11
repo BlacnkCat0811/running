@@ -1,6 +1,6 @@
 # 算法合同与验收
 
-维护日期：2026-09-30。本文是现行工程合同，取代已过期的 V1 PRD、分阶段 V2 方案和各批次状态报告。
+维护日期：2026-10-11。本文是现行工程合同，取代已过期的 V1 PRD、分阶段 V2 方案和各批次状态报告。
 代码已实现、候选政策、数据实证与实际激活必须分开表达。当前核验结果见 [项目审查](PROJECT_REVIEW.md)；运行操作见 [运维](OPERATIONS.md)。
 
 ## 0. 范围与证据边界
@@ -16,7 +16,7 @@
 - physiology：[physiology](../packages/physiology/src/index.ts)；Coach：[api-contracts](../packages/api-contracts/src/index.ts)。
 - schema / 冻结 migration checksum：[database](../packages/storage-sqlite/src/database.ts)。
 
-本轮代码为 feature v4/config v11、scoring v2.0.0/config v12、physiology v1.8.0、residual/CatBoost family v4、load config v5、zone config v4、SQLite migrations 1–29。
+本轮代码为 feature v4/config v11、scoring v2.0.0/config v12、physiology v1.8.0、residual/CatBoost family v5、load config v5、zone config v4、SQLite migrations 1–32。
 这是源码版本，不证明任何本地/线上数据库已迁移或模型已激活。
 
 ## 2. 职责与不变量
