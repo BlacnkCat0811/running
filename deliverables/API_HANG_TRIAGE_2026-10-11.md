@@ -673,6 +673,132 @@ for (const stage of ["backupCopy", "backupVerify"] as const) {
 - 这同时解释了 19:34 / 19:36 那两次被代理捕获的载荷**为什么没变成作业行**。
 - ⇒ 想在本机复现导入，必须先处理 `recovery_required`（而不是反复重跑上传）。
 
+---
+
+## 13. 提交 / 推送 / 部署 / 重挂观测（2026-10-11 21:59–22:10）
+
+| 步骤 | 结果 |
+| --- | --- |
+| 1 提交 | `4c09d20 docs(deliverables): 登记…`（2 文件）→ `8990526 feat(import): backup/activation 拆成互斥子阶段…`（6 文件）。门禁全过：blob 923→924 文件全 ≤1.5 MB、`typecheck`、`check:docs` 324 链接 0 问题、§16.1 矩阵 77/77、包边界 16 包 31 边 |
+| 1 推送 | `16b841a..8990526  main -> main`（Gitee） |
+| 2 部署 | dry-run → `--apply`（`setsid nohup`，日志 `/tmp/rai-upgrade.log`）。**`HEAD=8990526`**、`GET /v1/health 已认证且 status=ok、databaseReady=true`、无令牌=401、`schema_migrations 最新 version 32`、`systemctl is-active rai-api` = **active** |
+| 2 外部复核 | `https://tpandmr.xyz/v1/data-summary` = 200（重启后首测 2.95 s 冷启动 → 复测 0.25 s）；Web 指纹 `assets/index--S1o6fi6.js` **与部署前一致**（本次未改 `apps/web`，符合预期） |
+| 3 观测 | watcher 重挂（20 s 一采 ×120 = 40 分钟，窗口约到 22:47），日志 `/tmp/rai-perf.log` |
+
+⚠️ **提交过程的一个真事故（已修正）**：第一次 `git commit` 因 `check:docs` 报
+`deliverables/API_HANG_TRIAGE_2026-10-11.md: not reachable from README.md` 而**失败**，
+但 `git add` 过的 6 个代码文件**留在了索引里**；下一次 `git commit` 便把文档与代码一起提交（`58e7c8a`，8 文件）。
+已用 `git reset --soft HEAD~1` + 按路径分别提交拆回两个提交。
+**教训：`git commit` 提交的是索引里的全部内容，不是"这次才 add 的"；提交失败后索引不会回滚。**
+
+### 13.1 🔴 一条被实测推翻的预测（方案 B）
+
+我在方案 B 里说："历史作业的 `performance_json` 是旧键名，而 `stagesMs` 的 schema 是
+`additionalProperties:false` ⇒ 部署后**旧作业的 stage 明细会在 API 响应里被剔除**"。
+
+**实测：不成立。** 部署后查 `/v1/import-jobs/latest`（作业 27982，旧口径），响应里
+`performance.stagesMs` **原样带着 `backup` / `activation`**：
+
+```
+performance = {"validationMode":"not-run","totalMs":696459.36,"stagesMs":{
+  "changeAnalysis":4464.97,"backup":254222.20,"stagingCopy":9565.46,"parseImport":96476.46,
+  "recompute":72379.28,"activation":258343.18,"cleanup":47.28}, ...}
+```
+
+⇒ 两点结论：
+1. **方案 A / B 的选择实际上没有影响** —— 旧键名照样能读到，"历史明细丢失"这个代价不存在；
+2. 同时说明 **`schemas.ts` 里那个 `stagesMs` 枚举并没有约束住这条响应**（否则会被剔除）。
+   这值得单独看一眼（该 schema 可能只用于文档/别处），但**不影响本次上线**，也没有任何东西被丢掉。
+
+---
+
+## 14. 🔴 新口径实测：254 s / 258 s 各落在哪一段（seq 28143）
+
+作业 28143：**22:15:51 → 22:25:47 = 595,857 ms（9 分 56 秒）**。
+`summary`：`importMode: "incremental"`、inserted/updated/removed = 0/0/0、
+`unchangedWorkouts: 283`、`featuresRecomputed: 0`、`recomputeReasons: []`
+⇒ 这是 **`data-only` 那一类**（没有 recompute），也就是"白跑"形态。
+
+| 新阶段 | ms | 占 totalMs |
+| --- | --- | --- |
+| `backupCapacity` | 1,385 | 0.2% |
+| `backupCopy` | 23,393 | 3.9% |
+| **`backupVerify`** | **196,587** | **33.0%** |
+| `stagingCopy` | 8,630 | 1.4% |
+| `parseImport` | 64,579 | 10.8% |
+| `changeAnalysis` | 402 | 0.1% |
+| `activationAudit` | 37,837 | 6.3% |
+| **`activationSwap`** | **262,297** | **44.0%** |
+| `cleanup` | 39 | ~0% |
+| 合计 | 595,148 | 99.9% ✅（**互斥性成立**，Σ ≤ totalMs） |
+
+旧口径对照：`backup` 254 s = capacity 1.4 + copy 23.4 + **verify 196.6**；
+`activation` 258 s = audit 37.8 + **swap 262.3**。
+
+### 14.1 结论
+
+🔴 **`backupVerify` + `activationSwap` = 458.9 s = 77.0%**，而这两段的共同成分是
+**对 2.16 GB 库做"全库扫描/校验"**：
+
+- `backupVerify` = 一次全库 `PRAGMA quick_check`（`createCurrentBackup` 里两处 `isReadableDatabase`，正常路径走第二处）；
+- `activationSwap` = `activateDatabase`：WAL checkpoint + 移动 + 装入 + **装入后又一次全库 `isReadableDatabase`** + 发布。
+
+对照：真正的拷贝 `backupCopy` 只用 23.4 s（我独立进程测同一个备份是 **12.4 s**）——
+**瓶颈不在"搬字节"，在"逐页校验两个 2.16 GB 文件"。**
+
+### 14.2 放大器：内存装不下库
+
+```
+free -m:  total 1935 MB   used 565   free 370   buff/cache 1182   available 1370
+```
+
+**库 2.16 GB > 物理内存 1.9 GB** ⇒ 任何全库扫描都无法被页缓存吸收，且与其它 I/O 争抢。
+本仓自己的实测是「506 MB 库 qc 冷 12.0 s / 顺序读全库 1.2 s / 随后 qc 热 0.26 s」
+（`import-worker.ts:1011-1015`），按体积外推到 2.16 GB ≈ 51 s 冷 / 1.1 s 热 ——
+**实测 196.6 s 远超冷态外推**，说明是"内存装不下 + 并发争抢"共同放大的。
+
+### 14.3 P1 的两条分叉（等一个对照测量）
+
+正在云机上单独跑一次全库 `quick_check`（`/tmp/rai-qc.log`，只读）：
+
+- 若**也接近 200 s** ⇒ 是该机的内存/IO 结构性限制 ⇒ P1 应指向
+  「**别在一次导入里做两次全库校验**」或「让库不超过内存」；
+- 若**只要几秒** ⇒ 管线内的 196 s 来自**争抢** ⇒ P1 应指向并发/优先级/让校验走低优先级。
+
+### 14.4 ✅ 对照测量已出：**结构性代价，不是争抢**
+
+```
+quick_check {"quick_check":"ok"}  203,807 ms        ← 独立进程，只读，无并发导入
+同一时段：顺序直读 1 GB（iflag=direct）  3.5 s / 306 MB/s
+```
+
+**独立跑 203.8 s ≈ 管线内 `backupVerify` 196.6 s** ⇒ 分叉的第一支成立。
+
+⇒ 机制：`PRAGMA quick_check` 走 **B 树遍历**（不是线性读），而**库 2.16 GB > 物理内存 1.9 GB**
+⇒ 页缓存装不下、遍历过程不断回落磁盘 ⇒ 等效 ~10 MB/s，比线性读慢 **~30 倍**。
+本仓自测的「506 MB 库 qc 冷 12.0 s / 热 0.26 s」在**库能进缓存**的前提下才成立，本机不满足这个前提。
+
+**一句话**：9 分 56 秒里，**两次全库 `quick_check` 合计 ≈ 400 s（67%）**，
+而真正的"干活"（拷贝 23.4 + 8.6 + 解析 64.6 + 审计 37.8）不到 140 s。
+
+### 14.5 P1 方案（按性价比排序）
+
+| # | 做法 | 预期收益 | 风险/回滚 |
+| --- | --- | --- | --- |
+| **P1-a** | **给云机加内存**（2 GB → 4 GB） | 2.16 GB 的库可常驻页缓存 ⇒ `quick_check` 从 ~200 s 降到**秒级**（对照：506 MB 库热态 0.26 s，外推 2.16 GB ≈1.1 s）；导入 9 分 56 秒 → **~2 分钟** | **零代码**；回滚=降配。且同时缓解「导入期间 API 变慢」——页缓存不够是同一个根因 |
+| **P1-b** | 减少**一次**全库校验：`activateDatabase` 装入后那处 `isReadableDatabase`（`:1550`）改用更轻的 `isStructurallyReadable` | 省 ~200 s | 代码里**已有先例**（`:1526-1531` 就是这么改的，注释写明了），但 `:1011-1018` 明确「判定精度没有放宽、发布时机不变」⇒ **动之前必须读懂它在守护什么** |
+| **P1-c** | 让库瘦身到内存以内（`VACUUM` / 大表外置 / 按 epoch 分库） | 根治 | 工程量最大 |
+
+**建议**：先 **P1-a**。零代码、可回滚、单次收益最大（~400 s），并且它同时解释了「导入期间 API 变慢」
+这条你最初看到的现象——根因是同一个：**库比内存大**。
+
+**验收标准（P1-a）**：`free -m` 的 buff/cache 能容纳 2.16 GB；
+`stagesMs.backupVerify` 196.6 s → **< 10 s**；`activationSwap` 同步下降；导入总时长 → **~2 分钟**；
+导入期间 `GET /v1/runtime-status` 应稳定在亚秒级。
+
+
+
+
 
 
 ### 12.4 观察判据（部署并下一次同步之后）
