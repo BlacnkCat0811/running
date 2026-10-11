@@ -71,11 +71,16 @@
 所以卡 A 说「原计划恢复跑 → 今天休息」，卡 B 同时说「按计划」，两边都没算错。
 这也是 C2/C3 长期无法自愈的结构性原因。
 
-### 🟢 C6 文档口径滞后
+### 🟢 C6 文档口径滞后（✅ 2026-10-11 已订正）
 
-`docs/WEB.md:12` 写「今日页显示所处阶段、本周量带与依从性」，但 `apps/web/src` 对
-`periodization` / `adherence` / `replan` 的引用数为 **0**（实测 grep 为空，
-`volumeBandKm`/`weeksToRace`/`observedDistanceKm` 同样为 0）。**这两张卡目前是 iOS 独有**。
+原 `docs/WEB.md:12` 写「今日页显示所处阶段、本周量带与依从性」，与实现不符（实测见下）。
+该行已于 2026-10-11 订正为：**桌面 Web 无该页**；周计划详情/周目标/锁课落在 **web 的 iOS 移动壳**
+（`apps/web/src/ios/`）；而**所处阶段/本周量带/依从性/重排**属服务端 §20 契约
+（`MobileTodayResponse` 的 `periodization`/`adherence`/`replan`）**仅由原生 iOS 呈现**，Web 两侧都不渲染。
+
+实测依据（订正前后一致）：`apps/web/src` 对 `periodization` / `adherence` / `replan` 的引用数为
+**0**（实测 grep 为空，`volumeBandKm`/`weeksToRace`/`observedDistanceKm` 同样为 0）
+⇒ 这两张卡只在**原生 iOS**（`apps/ios/RAI/Skins/Technology/TechCoachWeekSection.swift`）呈现。
 
 ## 2. 现状数据流（谁读谁）
 
