@@ -167,12 +167,23 @@ def build(source_text: str, work: Path) -> Path:
             "-target", TARGET,
             "-parse-as-library",
             "-swift-version", "5",
-            # HealthKitExport.swift uses RouteSyncStateMachine/RouteObservation, and
-            # that machine needs RouteSyncState's `.settled`/`.cooling` cases.
-            # Both sources must stay listed here or the probe stops compiling.
+            # 🔴 这份清单是**手工维护**的，而 swiftc 看不到别处的声明 ⇒ 少列一个文件，
+            # 症状是满屏 `cannot find '<X>' in scope` + 跟着一串**误导性的**类型推断错
+            # （`generic parameter 'U' could not be inferred`、`type 'String.Type' cannot
+            # conform to 'Hashable'`……），真实原因只有一个：清单过期。
+            #
+            # 每加一条的依据是「HealthKitExport.swift 直接引用的类型定义在哪个文件」：
+            #   - RouteSyncStateMachine / RouteObservation → RouteSyncStateMachine.swift
+            #   - 那个状态机要 RouteSyncState 的 `.settled`/`.cooling` → RouteSyncState.swift
+            #   - HealthKitRecordCursor（逐类型游标）→ HealthKitRecordCursor.swift
+            # 2026-10-11 实测：少了最后一条，探针自 v2 记录游标落地起**一直是编译失败的**
+            # （`run-visual-tests.sh` 的第一步就 SystemExit ⇒ 截图那条通道整体跑不起来）。
+            # 判据不是"这次跑绿"，而是干净树对照：`cebb0dc` 上同样 6 处 `cannot find`、
+            # 同样 `探针编译失败` ⇒ 预存在，与当批改动无关。
             str(ZIP_SOURCE),
             str(REPO / "apps/ios/RAI/RouteSyncState.swift"),
             str(REPO / "apps/ios/RAI/RouteSyncStateMachine.swift"),
+            str(REPO / "apps/ios/RAI/HealthKitRecordCursor.swift"),
             str(module),
             "-o", str(binary),
             "-lz",
@@ -181,7 +192,17 @@ def build(source_text: str, work: Path) -> Path:
     if compiled.returncode != 0:
         print(compiled.stdout)
         print(compiled.stderr, file=sys.stderr)
-        raise SystemExit("探针编译失败（见上）")
+        # 🔴 把"最可能的原因"直接写在失败信息里。此前这里只有一句 `探针编译失败（见上）`，
+        # 而它下面跟着的是**几十行互相矛盾的**类型推断错误（`generic parameter 'U' could not
+        # be inferred` / `type 'String.Type' cannot conform to 'Hashable'`……）。真实原因
+        # 往往只有一个：上面那份源文件清单过期了。2026-10-11 实测，这个缺口让本通道
+        # **静默坏了整整两天**（每个跑它的人都要从零把那一串错误读回"清单"）。
+        raise SystemExit(
+            "探针编译失败（见上）。\n"
+            "最可能的原因：上面的 swiftc 源文件清单过期 —— 只要 HealthKitExport.swift 新引用了\n"
+            "另一个 RAI 源文件里的类型，就必须把那个文件也加进 build() 的参数表。\n"
+            "典型症状：`cannot find '<X>' in scope`，随后跟一串互相矛盾的类型推断错误。"
+        )
     with (binary.parent / "Info.plist").open("wb") as handle:
         plistlib.dump(
             {
