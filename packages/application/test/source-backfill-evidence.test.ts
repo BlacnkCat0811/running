@@ -114,3 +114,76 @@ test("source backfill evidence is read from the per-batch change ledger, not inf
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * The read layer above was seeded with hand-written ledger rows. This case closes
+ * the remaining gap by driving a *production* deletion path and reading the
+ * evidence back: an import that both pushed the timeline backwards and carried an
+ * explicit HealthKit deletion must never read as a preserved-absence backfill.
+ */
+test("a deletion made by the production deleter is never read as a preserved-absence backfill", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-backfill-real-delete-"));
+  const file = join(root, "db.sqlite");
+  const store = await RaiDatabase.open(file, { createMigrationBackup: false });
+  try {
+    const database = store.database;
+    const pipeline = new RecomputePipeline(
+      store,
+      new RecomputeJobRepository(database),
+      new SqliteModelRunRepository(database),
+      new SqliteTrainingSessionRepository(database)
+    );
+    const reader = pipeline as unknown as EvidenceReader;
+
+    database.prepare(`INSERT INTO import_batches (id, xml_sha256, status, import_mode)
+      VALUES ('batch_real_delete', 'sha', 'succeeded', 'incremental')`).run();
+    const record = (id: string, startAt: string): void => {
+      database.prepare(`INSERT INTO health_records
+        (id, type, source_name, source_category, start_at, end_at, metadata_json, raw_attributes_json)
+        VALUES (?, 'HKQuantityTypeIdentifierHeartRate', 'watch', 'active', ?, ?, '{}', '{}')`)
+        .run(id, startAt, startAt);
+    };
+    const change = (kind: string, id: string, type: string): void => {
+      database.prepare(`INSERT INTO import_entity_changes
+        (batch_id, entity_kind, entity_id, change_type, effective_at, content_hash)
+        VALUES ('batch_real_delete', ?, ?, ?, NULL, ?)`).run(kind, id, type, id);
+    };
+
+    // The backfill: two older records arrive, and `r_older` becomes the global earliest.
+    record("r_old", "2023-10-31T00:00:00Z");
+    record("r_older", "2020-02-26T00:00:00Z");
+    change("record", "r_old", "inserted");
+    change("record", "r_older", "inserted");
+
+    const backfillOnly = reader.sourceBackfillEvidence("batch_real_delete", 0, 0);
+    assert.ok(backfillOnly);
+    assert.equal(backfillOnly.preservedAbsent, true);
+    assert.equal(backfillOnly.earliestInsertedIsNewGlobalEarliest, true);
+
+    // ...but the same import also carried an explicit HealthKit deletion event.
+    record("rec_del", "2024-01-01T00:00:00Z");
+    database.prepare("INSERT INTO healthkit_record_sources VALUES (?, ?, ?)")
+      .run("HKQuantityTypeIdentifierHeartRate", "uuid-del", "rec_del");
+    const removed = store.removeHealthKitRecords(
+      [{ type: "HKQuantityTypeIdentifierHeartRate", uuid: "uuid-del" }], "batch_real_delete");
+    store.flush();
+    assert.equal(removed, 1, "the production deleter must resolve and remove the mapped record");
+
+    // The earliest-fact proof still holds, yet the deletion must block the claim —
+    // this is exactly the shape a real data loss would take.
+    const afterDeletion = reader.sourceBackfillEvidence("batch_real_delete", 0, 0);
+    assert.ok(afterDeletion);
+    assert.equal(
+      afterDeletion.earliestInsertedIsNewGlobalEarliest, true,
+      "the backfill membership proof is untouched by the deletion"
+    );
+    assert.equal(
+      afterDeletion.preservedAbsent, false,
+      "a deletion performed by the production path must never look like a preserved-absence backfill"
+    );
+    assert.equal(afterDeletion.removedRecords, 1);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -122,6 +122,21 @@ test("migration collapses duplicate records and realigns the survivor's id", asy
         .prepare("SELECT COUNT(*) AS count FROM import_entity_generations WHERE entity_id LIKE '__realign__%'")
         .get() as unknown as { count: number };
       assert.equal(staged.count, 0);
+
+      // Collapsing a duplicate removes redundancy, not a fact: the collapsed row
+      // carries the same natural identity (type + source, and either the same sync
+      // identifier or the same start/end/value/unit) as the survivor it folds into.
+      // This path is a migration-time id realignment, not an import, so it must
+      // leave no per-batch deletion ledger behind — `sourceBackfillEvidence` reads
+      // `import_entity_changes` as its zero-deletion witness, and adding a row here
+      // would silently break that witness.
+      const deletions = migrated.database
+        .prepare("SELECT COUNT(*) AS count FROM import_entity_changes")
+        .get() as unknown as { count: number };
+      assert.equal(
+        deletions.count, 0,
+        "an id-realignment migration must not write import deletion ledger rows"
+      );
     } finally {
       migrated.close();
     }
