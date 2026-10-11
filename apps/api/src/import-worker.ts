@@ -14,7 +14,7 @@ import {
   writeImportPayloadAnchor
 } from "./import-payload-identity.js";
 
-import type { ImportExecutionEngine, ImportJobResponse, ImportJobPerformance } from "@rai/api-contracts";
+import type { ImportExecutionEngine, ImportJobResponse, ImportJobPerformance, ImportStage } from "@rai/api-contracts";
 import { currentAbilityBaselineHash } from "@rai/application";
 import {
   ImportRemovalGuardError,
@@ -544,7 +544,10 @@ export class ImportWorker {
       }
       await this.removeDatabaseFiles(stagingDatabase);
       this.assertNotClosing();
-      currentBackupPath = await timing.measure("backup", () => this.createCurrentBackup(job.id));
+      // 计时在 `createCurrentBackup` 内部按 `backupCapacity` / `backupCopy` / `backupVerify` 三段各自落账：
+      // 线上一次导入这里报 254 s，而独立进程做同一个备份只要 12.4 s ⇒ 旧的单一口径无法定位，故拆开。
+      // ⚠️ 拆开后三个阶段必须**互斥**（`worker.test.ts` 断言 `totalMs >= ΣstagesMs`），不要在外面再包一层总量。
+      currentBackupPath = await this.createCurrentBackup(job.id, timing);
       this.assertNotClosing();
       if (currentBackupPath) {
         const backupPath = currentBackupPath;
@@ -679,13 +682,15 @@ export class ImportWorker {
       // 锚点不可能先于它所描述的数据出现，激活失败回滚时也随库一起消失。
       payloadSha256 ??= await this.payloadSha256(job, engine);
       this.recordPayloadAnchor(stagingDatabase, payloadSha256);
-      auditPublication = await timing.measure("activation", () => this.stageAuditReports(
+      // 拆成两段（互斥，不外包总量）：审计文件发布 vs 换库本身。
+      // 线上这里曾累计到 258 s，拆开才知道是 `stageAuditReports` 还是 `activateDatabase` 在吃时间。
+      auditPublication = await timing.measure("activationAudit", () => this.stageAuditReports(
         stagingDatabase,
         finalMarkdownReport,
         finalJsonReport,
       ));
       const publication = auditPublication;
-      await timing.measure("activation", async () => {
+      await timing.measure("activationSwap", async () => {
         await this.activateDatabase(
           stagingDatabase,
           job.id,
@@ -994,7 +999,7 @@ export class ImportWorker {
     });
   }
 
-  private async createCurrentBackup(jobId: string): Promise<string | null> {
+  private async createCurrentBackup(jobId: string, timing?: ImportPerformanceTracker): Promise<string | null> {
     if (!existsSync(this.databasePath)) return null;
     const backupDirectory = resolve(this.runtimeRoot, "var/backups");
     await mkdir(backupDirectory, { recursive: true });
@@ -1016,17 +1021,17 @@ export class ImportWorker {
     // 先例见 `maintenance.ts:213-217`（`deleteDatabase` 同样是先 `createBackup`、失败才判可读性）。
     // 🔴 判定精度**没有**放宽：用的还是同一个 `quick_check`，只是挪到备份之后跑；
     // 发布时机也不变 —— 它没通过时 `stagingBackupPath` 直接丢弃，绝不 rename 成正式名。
-    await maintenance.ensureBackupCapacity();
+    await this.measureStage(timing, "backupCapacity", () => maintenance.ensureBackupCapacity());
     const backupPath = resolve(backupDirectory, `rai.before-web-import.${jobId}.sqlite`);
     const stagingBackupPath = `${backupPath}.partial-${randomUUID()}`;
     const currentDatabase = new DatabaseSync(this.databasePath, { readOnly: true });
     try {
       try {
-        await this.backupDatabase(currentDatabase, stagingBackupPath);
+        await this.measureStage(timing, "backupCopy", () => this.backupDatabase(currentDatabase, stagingBackupPath));
       } catch (error) {
         // 备份失败之后才知道「是不是主库坏了」：能读 ⇒ 失败来自环境（盘满 / 权限 / EIO），
         // 清掉残片后原样上抛；不能读 ⇒ 备份失败是预期结果，改走隔离。
-        if (this.isReadableDatabase(this.databasePath)) {
+        if (await this.measureStage(timing, "backupVerify", () => this.isReadableDatabase(this.databasePath))) {
           await this.attachCleanupFailure(stagingBackupPath, error);
           throw error;
         }
@@ -1034,7 +1039,7 @@ export class ImportWorker {
       }
       // 副本已写完但尚未发布。主库真损坏时（坏页没被 `backup()` 读到，例如落在 freelist），
       // 由这一步拦下：丢弃刚写好的副本、改走隔离，正式备份名从此不会出现。
-      if (!this.isReadableDatabase(this.databasePath)) {
+      if (!(await this.measureStage(timing, "backupVerify", () => this.isReadableDatabase(this.databasePath)))) {
         return await this.quarantineCorruptDatabase(jobId, maintenance, stagingBackupPath);
       }
       try {
@@ -1047,12 +1052,27 @@ export class ImportWorker {
       currentDatabase.close();
     }
     try {
-      await maintenance.enforceBackupPolicy(basename(backupPath));
+      // 保留策略清理与开头的容量检查同属「容量管理」，合并记在 `backupCapacity`：
+      // 两段在时间上互斥，命名相同只会让该值等于两者之和，**不会**重复计时（Σ 仍 ≤ totalMs）。
+      await this.measureStage(timing, "backupCapacity", () => maintenance.enforceBackupPolicy(basename(backupPath)));
     } catch (error) {
       const message = error instanceof Error ? error.stack ?? error.message : String(error);
       process.stderr.write(`Import backup retention cleanup failed after backup was published: ${message}\n`);
     }
     return backupPath;
+  }
+
+  /**
+   * 可选阶段计时。`activateDatabase` 的兜底路径（`existingBackupPath === undefined`）没有 tracker，
+   * 那时直接执行、不落账。⚠️ 各阶段名的**时间区间必须互斥**：
+   * `worker.test.ts` 断言 `totalMs >= ΣstagesMs`，重叠会让那条断言失去意义。
+   */
+  private async measureStage<T>(
+    timing: ImportPerformanceTracker | undefined,
+    stage: ImportStage,
+    operation: () => T | Promise<T>
+  ): Promise<T> {
+    return timing ? await timing.measure(stage, operation) : await operation();
   }
 
   private async backupDatabase(database: DatabaseSync, destination: string): Promise<void> {

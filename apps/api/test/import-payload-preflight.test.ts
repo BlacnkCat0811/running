@@ -283,7 +283,9 @@ test("an import records the payload anchor and the next identical sync skips the
     assert.equal(summary.unchangedWorkouts, 3, "every existing session is unchanged by a no-op payload");
     assert.equal(summary.backupName, null, "no backup is produced on this path");
     assert.deepEqual(summary.recomputeReasons, ["payload_identity_unchanged"]);
-    for (const skipped of ["backup", "stagingCopy", "parseImport"]) {
+    // 🔴 这份清单必须跟着契约走。2026-10-11 `backup` 拆成三段后，若这里仍写 "backup"，
+    // 断言会**恒真**（那个名字再也不可能出现）—— 守卫就静默失效了，而且不会变红。
+    for (const skipped of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport"]) {
       assert.ok(!stageNames(second).includes(skipped), `${skipped} must not run`);
     }
     assert.deepEqual(readdirSync(join(root, "var", "backups")), backupsBefore, "no new backup file");
@@ -398,7 +400,10 @@ test("a payload whose identity differs still runs the full pipeline", async () =
     const job = queuedJob(inputPath, true);
     await worker.run(job);
     assert.equal(commandCount, 1, "a differing payload must go through the CLI");
-    assert.ok(stageNames(job).includes("backup"), "the full path still backs up");
+    // 三段都要在：只断言"备份发生过"会漏掉容量检查与全库校验被跳过的情况。
+    for (const ran of ["backupCapacity", "backupCopy", "backupVerify"]) {
+      assert.ok(stageNames(job).includes(ran), `the full path still runs ${ran}`);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

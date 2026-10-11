@@ -493,8 +493,18 @@ export interface CommandResponse {
   error?: { code: string; message: string };
 }
 
-export type ImportStage = "backup" | "stagingCopy" | "parseImport" | "changeAnalysis" |
-  "recompute" | "activation" | "cleanup";
+/**
+ * 导入各阶段的耗时。**平铺且互斥**：任何两个阶段的时间区间不得重叠 ——
+ * `worker.test.ts` 会断言 `totalMs >= ΣstagesMs`，重叠会让那条断言变成假绿。
+ *
+ * 2026-10-11：`backup` 拆成 `backupCapacity` / `backupCopy` / `backupVerify`，
+ * `activation` 拆成 `activationAudit` / `activationSwap`。
+ * 原因：线上一次导入 `backup` 254 s、`activation` 258 s（合计 73.5%），
+ * 而独立进程做同一个备份只要 12.4 s ⇒ 旧口径把三件事/两件事糊在一个数字里，无法定位。
+ * 旧口径对照：`backup` ≈ 三者之和，`activation` = `activationAudit + activationSwap`。
+ */
+export type ImportStage = "backupCapacity" | "backupCopy" | "backupVerify" | "stagingCopy" |
+  "parseImport" | "changeAnalysis" | "recompute" | "activationAudit" | "activationSwap" | "cleanup";
 
 export interface ImportJobPerformance {
   /** Extra full replay comparison only; the model activation gate stays enabled. */

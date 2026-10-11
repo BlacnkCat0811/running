@@ -1541,8 +1541,14 @@ test("recomputes and activates a training session that becomes ambiguous (off)",
     assert.equal(commandCount, 2);
     const timing = job.performance as ImportJobPerformance;
     assert.equal(timing.validationMode, "not-run");
-    for (const stage of ["backup", "stagingCopy", "parseImport", "changeAnalysis", "recompute", "activation", "cleanup"] as const) {
+    for (const stage of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
+      "changeAnalysis", "recompute", "activationAudit", "activationSwap", "cleanup"] as const) {
       assert.ok(timing.stagesMs[stage]! >= 0, `missing ${stage} duration`);
+    }
+    // 🔴 存在 ≠ 干过活：这两段各自都要动真数据（写整份备份副本 / 全库 PRAGMA quick_check），
+    // 被记录成 0 就说明它们没被执行 —— 上面那条 `>= 0` 抓不到这种情况。
+    for (const stage of ["backupCopy", "backupVerify"] as const) {
+      assert.ok(timing.stagesMs[stage]! > 0, `${stage} was recorded but did no work`);
     }
     assert.ok(timing.totalMs >= Object.values(timing.stagesMs).reduce((sum, value) => sum + value, 0));
     assert.equal((job.summary as {
