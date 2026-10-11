@@ -1564,7 +1564,9 @@ check(
 )
 check(
     "pendingRouteDiscoveryCursor: exported.routeDiscoveryCursor" in sync
-    and sync.count("routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor") == 4,
+    # 5 = 四条恢复分支 + 2026-10-11 补上的 `.waitJob`（见 §15d）。续接一个**已经跑完**的
+    # job 时，候选队列位置同样要跟着推进 —— 否则后台每被中断一次就重新困在首批。
+    and sync.count("routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor") == 5,
     "interrupted uploads must persist the traversal position and advance it in every resumed-success branch",
 )
 check(
@@ -1805,6 +1807,58 @@ ordered(
     "registerSyncEntryPoints must hand off the generations a foreground round did not cover — "
     "without it the notification stays on disk until the next background entry",
 )
+
+# --- 15d. 「拿着 jobId 等终态」必须有生产消费点（2026-10-11） ---------------------------
+# `.waitJob` 是 `SyncAtomicUnit.Step` 里**唯一**允许跨会话的一步（`SyncPhase.canSpanSessions`
+# 只对 `importing` 为真），而它此前在生产里**没有任何消费者**：`nextStep` 会正确返回它，
+# 可 `performSync` 只认 `.inspect` 与 `.upload`，于是带 `jobId` 的任务直接坠进导出路径。
+#
+# 三个后果同时发生，且**全部静默**（2026-10-11 线上实测：job 08:06:01 已 `succeeded`，
+# 而 App 回到前台重新开始读健康数据）：
+#   1. 重读一遍 HealthKit（整个流程最贵的一步），而服务端早算完了；
+#   2. 紧随其后的 `saveTask` 用一份 sourceId/jobId 皆空的新任务盖掉旧行 ⇒ 那个 job 再没人接；
+#   3. 界面永远停在"更新尚未完成"——用户以为同步失败。
+#
+# 纯函数回归只能证明 `nextStep` **会**返回 `.waitJob`，证明不了有人**消费**它 —— 这一节钉的
+# 就是那个消费点。（`.inspect` / `.upload` 两条分支没有同类判据，是因为它们各自有别的判据在钉；
+# 缺的恰好是这一条。）
+check(
+    "unitStep == .waitJob" in perform_body,
+    "performSync never consumes the `.waitJob` step: a persisted jobId would fall through to a fresh "
+    "HealthKit export and silently orphan the job the server is still running",
+)
+# 切片到 `.inspect` 分支为止。⚠️ 边界锚点若因为改名而消失，切出来的就是**整个 performSync
+# 剩余部分** —— 那会让下面那条"不得认领意图"的判据必然变红（保守方向），所以这里不另设守卫。
+wait_job_branch = tail_after(
+    perform_body, "unitStep == .waitJob", "performSync's .waitJob branch"
+).split("} else if let restored = restoredTask, unitStep == .inspect")[0]
+check(
+    "waitForJob(id: jobId, on: serverURL)" in wait_job_branch,
+    "performSync's `.waitJob` branch does not wait for the persisted jobId — the server's outcome "
+    "would never be collected, which is the whole point of `importing` spanning sessions",
+)
+check(
+    "markSuccess(" in wait_job_branch,
+    "performSync's `.waitJob` branch does not commit the success: the task row would survive a job that "
+    "actually succeeded, and the banner would stay at 'not finished'",
+)
+check(
+    "observeBackgroundIntentsForExportStart(" not in wait_job_branch,
+    "the resumed-job branch acknowledges the export-start intent although it never reads HealthKit — a "
+    "notification that arrived meanwhile would be dropped (the acknowledgement point must stay at the "
+    "real export start)",
+)
+# 15d-2. 🔴 只差"问服务端一次"的任务不得被 15 分钟节流挡下。
+#   挡下它的后果与上面第 3 条一模一样（界面停在未走完），只是成因不同：App 被挂起过，
+#   服务端在这期间把导入跑完了，而回到前台这一轮被节流窗口挡在门外。
+#   豁免判据必须与 `nextStep` **同源**（`isServerReconciliationOnly`），所以这里同时钉住
+#   符号（判据来自原子单元）与守卫（它确实被串进了那个 `if`）。
+sync_if_needed = tail_after(sync, "func syncIfNeeded(", "syncIfNeeded(").split("\n    func ")[0]
+check(
+    "isServerReconciliationOnly" in sync_if_needed and "!isLedgerResume" in sync_if_needed,
+    "syncIfNeeded lets the 15-minute throttle swallow a `.waitJob` resume: the app would stop "
+    "reconciling a job the server already finished, and the banner would stay at 'not finished'",
+)
 # 2026-10-09 再补（投递的「记」与「跑」必须分开 ⇒ P1 可达性缺陷）：+4 条（§15c 的 4 条）。
 # 2026-10-09 二次修正（未提交改动审查 🟡2）：同一批改动的最终态实测打印 **269** 条，而地板
 #   还停在 255 ⇒ 差 14，违反本文件自己写的"零容忍"，那 13 条新增结构判据（§14h-3：rediscovery
@@ -1813,7 +1867,13 @@ ordered(
 #   判据：删掉 §14h-3 里任意一条 `check(...)` 必须变红。
 # ⚠️ 教训：地板必须在**本文件最后一次改动之后**现跑现设 —— 沿用改动中途测到的数就会差（本次差 14）。
 # 注：上面那行"实测 251 / 地板 250"是 2026-09-24 的**时点快照**，不要当当前值。
-MIN_CHECKS = 268
+# 2026-10-11 再补（`.waitJob` 没有生产消费点 ⇒ 带 jobId 的任务坠进导出路径）：+5 条（§15d 的 5 条）。
+#   同一批改动的最终态实测打印 **274** 条 ⇒ 按"打印总数 − 1"重设为 **273**。
+#   判据：删掉 §15d 里任意一条 `check(...)` 必须变红（突变见 check-background-mutations.py
+#   的 `[P1]` 组）。同一批里另外两个"恢复分支计数"钉子（`recordCursors: restored…` 4→5、
+#   `routeDiscoveryCursor: restored…` 4→5）也一并更新 —— 它们数与不数得上新分支，本身就是
+#   这条缺陷当时没被抓住的原因之一。
+MIN_CHECKS = 273
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "

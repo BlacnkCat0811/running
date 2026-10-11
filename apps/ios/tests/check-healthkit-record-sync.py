@@ -77,7 +77,13 @@ check("writeWorkoutRecords" not in export,
       "associated samples must use type cursors too")
 check("pendingRecordCursors: exported.recordCursors" in sync,
       "a successful export must save the per-type cursors")
-check(sync.count("recordCursors: restored.pendingRecordCursors") == 4,
+# 5 = 四条恢复分支（`.inspect` 的 unchanged/resumed、`.upload` 的 unchanged/resumed）
+# + 2026-10-11 补上的第五条：`.waitJob`（盘上有 jobId 时续接服务端终态）。
+# 🔴 这个数字是**分支总数**的钉子，不是装饰：`SyncAtomicUnit.Step` 里的 `.waitJob`
+# 此前没有任何生产消费点，带 jobId 的任务会直接坠进导出路径 —— 而这门禁当时数的是 4，
+# 恰好把"少一条恢复分支"这件事数成了正常。加分支就必须加这个数，加的时候必须想清楚
+# "这一条**为什么**要提交同一批游标"。
+check(sync.count("recordCursors: restored.pendingRecordCursors") == 5,
       "every resume success must commit the saved cursors")
 check("recordCursors: recordCursors" in body(sync, "private func markSuccess(", "private func "),
       "manual success must also commit the cursors")

@@ -401,7 +401,7 @@ nonisolated enum HealthKitExport {
         try Task.checkCancellation()
         let records = try await writeGlobalRecords(
             store: store, cursorData: recordCursors, forceHistory: recordsForceRescan,
-            xml: xml, warnings: warnings
+            xml: xml, warnings: warnings, onProgress: onProgress
         )
         recordCount += records.count
         let exportedThrough = Date()
@@ -782,7 +782,8 @@ nonisolated enum HealthKitExport {
         cursorData: Data?,
         forceHistory: Bool,
         xml: FileHandle,
-        warnings: WarningBag
+        warnings: WarningBag,
+        onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> (count: Int, cursors: Data, deleted: [[String: String]]) {
         // Corrupt cursors fail closed. They are never silently turned into a
         // window query; a missing type starts from nil and reads all history.
@@ -841,8 +842,19 @@ nonisolated enum HealthKitExport {
         }
         descriptors.append((HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!, nil,
                             "HKCategoryTypeIdentifierSleepAnalysis", nil))
-        for (type, unit, xmlType, xmlUnit) in descriptors {
+        for (index, descriptor) in descriptors.enumerated() {
+            let (type, unit, xmlType, xmlUnit) = descriptor
             try Task.checkCancellation()
+            // 🔴 逐类型进度。这一段是整轮导出里**最长**的一段 —— 全量历史时单个类型
+            // （心率最典型）可以跑上几分钟，而它此前在界面上**一句话都不说**：用户看到的
+            // 是一句静止的「正在读取心率与恢复数据」，没有任何东西能区分"还在读"与"已经卡死"
+            // （2026-10-11 线上实测：手机端停在这里十几分钟，界面零变化，看起来像冻住）。
+            //
+            // 位置放在 `checkCancellation()` 之后、真正查询之前：这样每次上报都对应
+            // "确实要开始读这一类型了"，而不是一句凭空的乐观话术。
+            // ⚠️ 进度文案**不进载荷**：它只走 `onProgress`，`export.xml` / manifest 的字节
+            // 由 `check-export-determinism.py` 钉着，加这一段不得改变任何一个字节。
+            await onProgress("正在读取健康记录 \(index + 1)/\(descriptors.count)（已 \(count) 条）")
             let previous = cursors[xmlType]
             let decoded = previous.flatMap { decodeAnchor($0.anchor) }
             let history = previous == nil || decoded == nil

@@ -501,6 +501,78 @@ MUTATIONS = [
         SWIFT_GATE,
         "did not outrank the other recovery branches",
     ),
+    # ---- P1 · `.waitJob` 的生产消费点（2026-10-11）------------------------------------
+    # 缺陷形态：`SyncAtomicUnit.Step.waitJob` 有纯函数回归（证明 `nextStep` **会**返回它），
+    # 却**没有任何生产消费点** —— `performSync` 只认 `.inspect` / `.upload`，于是带 `jobId`
+    # 的任务坠进导出路径。三个后果全部静默，2026-10-11 线上实测（job 08:06:01 已 succeeded，
+    # 而 App 回到前台重新开始读健康数据）。
+    # 这五条各自针对 §15d 的一条判据，且都改**行为**（不是改名/换写法）。
+    (
+        "[P1] 结构门禁: 盘上有 jobId 时不再续接 => 直接坠进导出路径（重读 HealthKit、"
+        "旧任务行被覆盖、界面永停在未走完）",
+        # 还原成"分支从不匹配 .waitJob"的形状：`unitStep == .waitJob` 这个符号随之消失，
+        # 于是"有没有消费点"这条判据变红。（不是改名：分支本身还在，只是再也接不上那一步。）
+        lambda: edit(
+            SYNC,
+            "        if let restored = restoredTask, unitStep == .waitJob, let jobId = restored.jobId {",
+            "        if let restored = restoredTask, unitStep == .inspect, let jobId = restored.jobId {",
+        ),
+        PY_GATE,
+        "never consumes the `.waitJob` step",
+    ),
+    (
+        "[P1] 结构门禁: 只问一次就当成结局 => 服务端还在算时就把这一批判成功",
+        lambda: edit(
+            SYNC,
+            "                let finished = try await waitForJob(id: jobId, on: serverURL)",
+            "                let finished = try await getJob(id: jobId, on: serverURL)",
+        ),
+        PY_GATE,
+        "does not wait for the persisted jobId",
+    ),
+    (
+        "[P1] 判据: 只差对账的步被放宽成 export => 前台每次进入都重读一遍 HealthKit（GB 级）",
+        lambda: edit(
+            SYNC_PHASE,
+            "        var isServerReconciliationOnly: Bool { self == .waitJob }",
+            "        var isServerReconciliationOnly: Bool { self == .export }",
+        ),
+        SWIFT_GATE,
+        "was not recognised as a server-only reconciliation",
+    ),
+    (
+        "[P1] 结构门禁: 让 15 分钟节流吞掉 jobId 续接 => 回到前台不再对账已落盘的 job",
+        lambda: edit(
+            SYNC,
+            "            if !force, !isBlocked, !isLedgerResume {",
+            "            if !force, !isBlocked {",
+        ),
+        PY_GATE,
+        "lets the 15-minute throttle swallow",
+    ),
+    (
+        "[P1] 结构门禁: `.waitJob` 续接不提交记录游标 => 游标停在上一批，下一轮重导一遍",
+        # 锚点必须带上 `resumedImportMessage`：`recordCursors: restored…` 与
+        # `routeDiscoveryCursor: restored…` 这两行在**每条**恢复分支里都有，单行锚点不唯一。
+        lambda: edit(
+            SYNC,
+            "                    message: resumedImportMessage(job: finished),\n"
+            "                    exportEnd: restored.exportEnd,\n"
+            "                    workoutCount: restored.workoutCount,\n"
+            "                    advanceWatermark: restored.exportEnd != nil,\n"
+            "                    clearWatermark: restored.exportEnd == nil,\n"
+            "                    anchor: restored.pendingAnchor,\n"
+            "                    recordCursors: restored.pendingRecordCursors,\n",
+            "                    message: resumedImportMessage(job: finished),\n"
+            "                    exportEnd: restored.exportEnd,\n"
+            "                    workoutCount: restored.workoutCount,\n"
+            "                    advanceWatermark: restored.exportEnd != nil,\n"
+            "                    clearWatermark: restored.exportEnd == nil,\n"
+            "                    anchor: restored.pendingAnchor,\n",
+        ),
+        SWIFT_GATE,
+        "every resume success must commit the saved cursors",
+    ),
     (
         "结构门禁: 上传返回后直接落 importing => D1 的中间态消失",
         lambda: edit(

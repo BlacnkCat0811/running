@@ -131,6 +131,17 @@ nonisolated enum SyncAtomicUnit {
         case startImport
         /// 拿着 `jobId` 等终态。
         case waitJob
+
+        /// 这一步是不是**只差服务端的结局**：不读 HealthKit、也不传字节。
+        ///
+        /// 唯一的这种步是 `.waitJob` —— 它整个动作就是一次 `GET /v1/import-jobs/<id>`，
+        /// 代价与一次握手同量级。
+        ///
+        /// 为什么单独命名、而不是在调用方写 `jobId != nil`：前台 15 分钟节流的豁免判据
+        /// 必须与 `nextStep` **同源**。写成一份独立的 `jobId != nil`，将来 `nextStep` 的
+        /// 优先级一变（例如让某个本地文件重新压过 `jobId`），节流那边会**静默地**多放行
+        /// 或少放行一步 —— 而"多放行"的那一侧是 GB 级导出。
+        var isServerReconciliationOnly: Bool { self == .waitJob }
     }
 
     /// 由持久化字段推导下一步。

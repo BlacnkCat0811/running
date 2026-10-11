@@ -287,9 +287,30 @@ final class HealthKitSync {
             let urlScope = Self.urlScope(for: serverURL)
             // 🔴 卡在阻塞态时，节流不该挡住恢复（文档 §3.3 / §3.4）。
             // 判据必须读**盘上**那份自述：进程重启后内存 phase 回到 idle，阻塞态只在任务行里。
-            let persistedPhase = self.loadTask()?.resolvedPhase
+            let persistedTask = self.loadTask()
+            let persistedPhase = persistedTask?.resolvedPhase
             let isBlocked = persistedPhase?.isBlocked ?? SyncPhase.migrate(self.phase).isBlocked
-            if !force, !isBlocked {
+            // 🔴 只差"拿 `jobId` 问服务端一次"的任务同样不该被节流挡下。
+            //
+            // 15 分钟节流存在的唯一理由是"别白读 HealthKit"（整个流程里最贵的一步），
+            // 而 `.waitJob` 整个动作就是一次 `GET /v1/import-jobs/<id>` —— 与一次握手同量级。
+            // 挡下它的可见后果正是"服务端早已算完、界面一直停在未走完"：2026-10-11 线上实测，
+            // App 被挂起期间服务端 08:06:01 已经把导入跑完，而回到前台这一轮会被 15 分钟
+            // 窗口挡在门外，于是没有任何人去把那个结局接回来。
+            //
+            // 判据与 `performSync` 里选分支用的是**同一个** `SyncAtomicUnit.nextStep`
+            // （`isServerReconciliationOnly`），不另写一份"什么算便宜"。
+            let isLedgerResume = persistedTask.map {
+                SyncAtomicUnit.nextStep(
+                    sourceId: $0.sourceId,
+                    jobId: $0.jobId,
+                    // `jobId` 一在就短路，这两个入参不影响结论；传 `false` 只是因为这里
+                    // 读本地产物要碰 `activeServerURL` 与本进程的文件系统，而这一步不需要。
+                    hasZip: false,
+                    hasMultipart: false
+                ).isServerReconciliationOnly
+            } ?? false
+            if !force, !isBlocked, !isLedgerResume {
                 let key = self.scopedKey(Self.lastAutoSyncKey, scope: urlScope)
                 let last = UserDefaults.standard.object(forKey: key) as? Date
                 if let last, Date().timeIntervalSince(last) < Self.autoSyncInterval { return }
@@ -881,7 +902,70 @@ final class HealthKitSync {
             hasZip: restoredZip != nil,
             hasMultipart: restoredTask.flatMap { persistedMultipartURL(for: $0) } != nil
         )
-        if let restored = restoredTask, unitStep == .inspect, let sourceId = restored.sourceId {
+        // 🔴 「拿着 `jobId` 等终态」是这套状态机里**唯一**允许跨会话的一段，而它此前
+        // 在生产里没有任何消费点：`SyncAtomicUnit.nextStep` 会正确返回 `.waitJob`，
+        // 但下面两个分支只认 `.inspect` 与 `.upload`，于是带 `jobId` 的任务**直接坠进
+        // 导出路径**。后果不是报错，而是三件静默的坏事一起发生（2026-10-11 线上实测）：
+        //   1. 重读一遍 HealthKit（整个流程最贵的一步），而服务端其实早就算完了；
+        //   2. 紧接着的 `saveTask` 会用一份 `sourceId: nil, jobId: nil` 的新任务**盖掉**旧行
+        //      ⇒ 那个还在服务端跑（或已成功）的 job 再也没人接，来源靠 24h TTL 回收；
+        //   3. 界面永远停在"更新尚未完成"——用户以为同步失败，其实服务端早已成功。
+        //
+        // 这个分支就是那条缺失的消费点。它与 `.inspect` 分支共用 `HealthSyncResumePolicy`
+        // 的失败分类（同一个 `terminalJobCode` 语义），所以两条"拿服务端结论"的路不会分叉。
+        if let restored = restoredTask, unitStep == .waitJob, let jobId = restored.jobId {
+            do {
+                // 如实写 `importing`：这一刻的事实就是"服务端在算，我在等"，而不是盘上那行
+                // 老自述（可能停在 `recomputing` 之类的历史值上）。
+                phase = SyncPhase.importing.rawValue
+                message = "正在等待服务端完成上次导入"
+                // ⚠️ 这里**刻意不**认领后台意图（`observeBackgroundIntentsForExportStart`）。
+                // 那条通道的确认点只在**导出起点**：本分支不重新读 HealthKit，用的是早于
+                // 通知生成的字节，没有资格替那条通知背书 —— 在这里确认，导出期间到达的
+                // 那批新数据就再也没人导。（`markSuccess` 里的确认会读到 `nil` 观察槽，是空操作。）
+                let finished = try await waitForJob(id: jobId, on: serverURL)
+                removeTaskArtifacts(payloadHash: restored.payloadHash)
+                try markSuccess(
+                    message: resumedImportMessage(job: finished),
+                    exportEnd: restored.exportEnd,
+                    workoutCount: restored.workoutCount,
+                    advanceWatermark: restored.exportEnd != nil,
+                    clearWatermark: restored.exportEnd == nil,
+                    anchor: restored.pendingAnchor,
+                    recordCursors: restored.pendingRecordCursors,
+                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
+                )
+                return
+            } catch {
+                if handleCancellation(error) { return }
+                let httpError = error as? SyncHTTPError
+                if HealthSyncResumePolicy.disposition(
+                    statusCode: httpError?.statusCode,
+                    errorCode: httpError?.code
+                ) == .keepTask {
+                    // 轮询超时 / 瞬时读不到：`jobId` 留着，下次唤醒从同一处接着等。
+                    // 这**不是**"任务失败"，是"还没拿到结局"——与 `.inspect` 分支同一条纪律。
+                    lastError = friendlyMessage(error)
+                    message = nil
+                    phase = SyncPhase.failed.rawValue
+                    return
+                }
+                // 这个 job 不可能再等出结果了（服务端说它已终结，或这条 id 它已经不认）。
+                // 先清掉那一行，否则下次同步会从同一个 `jobId` 进来、拿到同一个结局。
+                guard clearTask() else { return }
+                if httpError?.code == HealthSyncResumePolicy.terminalJobCode {
+                    // 任务跑完并明确失败：如实报出去。失败若是确定性的，当场再导一次只是白跑。
+                    lastError = friendlyMessage(error)
+                    message = nil
+                    phase = SyncPhase.failed.rawValue
+                    return
+                }
+                // 服务端已经不认这个 job 了（没有终结任务挡路）：除了重走一遍没有别的路。
+                // `clearTask()` 已经把旧行清掉，所以下面会从一次干净的导出开始。
+                phase = SyncPhase.collecting.rawValue
+                message = nil
+            }
+        } else if let restored = restoredTask, unitStep == .inspect, let sourceId = restored.sourceId {
             do {
                 phase = restored.resolvedPhase.rawValue
                 message = "正在恢复上次同步任务"
@@ -908,16 +992,15 @@ final class HealthKitSync {
                     )
                     return
                 }
-                let jobId: String
-                if let existing = restored.jobId {
-                    jobId = existing
-                } else {
-                    try checkCancellation()
-                    let job = try await startImport(sourceId: sourceId, on: serverURL)
-                    try checkCancellation()
-                    try updateTask(jobId: job.id, phase: .importing)
-                    jobId = job.id
-                }
+                // 走到这里 `jobId` **必然**是空的：带 `jobId` 的任务在上面那个 `.waitJob`
+                // 分支就返回了。原先这里还留着一个 `if let existing = restored.jobId` 的回退，
+                // 那是 `.waitJob` 分支缺席时代的产物 —— 它已经**不可达**（`.inspect` 的前置
+                // 条件就是 `jobId == nil`），留着只会让下一个人以为"上传之后还有可能在等服务端"。
+                try checkCancellation()
+                let job = try await startImport(sourceId: sourceId, on: serverURL)
+                try checkCancellation()
+                try updateTask(jobId: job.id, phase: .importing)
+                let jobId = job.id
                 // `waitForJob` 只在 `succeeded` 时返回，其余终态都抛错 ⇒ 走到下一行就是成功，
                 // 返回值本身没有别的用途（旧代码拿它去清 failedZip 记录，那套机制已删除）。
                 _ = try await waitForJob(id: jobId, on: serverURL)
@@ -1431,25 +1514,37 @@ final class HealthKitSync {
     }
 
     #if os(iOS)
+    /// 服务端 `summary` → "这一批新增/更新了几次跑步"；零新增（或根本没有摘要）时返回 `nil`。
+    ///
+    /// 由调用方决定零新增时说什么，是因为两条收尾路径手上的信息不同：本轮导出那条看得到
+    /// `HealthKitExportResult`（本轮读到了几条记录），而**续接 `jobId`** 那条只有服务端摘要
+    /// —— 硬合成一个函数会让后者去伪造一份它没有的导出结果。
+    private func importedSummaryText(job: ImportJobResponse) -> String? {
+        guard let summary = job.summary else { return nil }
+        let inserted = summary.insertedWorkouts ?? 0
+        let updated = summary.updatedWorkouts ?? 0
+        if inserted > 0 && updated > 0 { return "已从 Apple 健康导入 \(inserted) 次、更新 \(updated) 次跑步" }
+        if updated > 0 { return "已更新 \(updated) 次跑步" }
+        if inserted > 0 { return "已从 Apple 健康导入 \(inserted) 次跑步" }
+        return nil
+    }
+
     private func importMessage(exported: HealthKitExportResult, job: ImportJobResponse) -> String {
-        let base: String
-        if let summary = job.summary {
-            let inserted = summary.insertedWorkouts ?? 0
-            let updated = summary.updatedWorkouts ?? 0
-            if inserted == 0 && updated == 0 {
-                base = exported.recordCount > 0 || exported.deletionCount > 0
-                    ? "已同步 Apple 健康记录" : "Apple 健康数据已是最新"
-            } else if inserted > 0 && updated > 0 {
-                base = "已从 Apple 健康导入 \(inserted) 次、更新 \(updated) 次跑步"
-            } else if updated > 0 {
-                base = "已更新 \(updated) 次跑步"
-            } else {
-                base = "已从 Apple 健康导入 \(inserted) 次跑步"
-            }
-        } else {
-            base = "已从 Apple 健康导入 \(exported.workoutCount) 次跑步"
-        }
+        let base = importedSummaryText(job: job)
+            ?? (job.summary == nil
+                ? "已从 Apple 健康导入 \(exported.workoutCount) 次跑步"
+                : (exported.recordCount > 0 || exported.deletionCount > 0
+                    ? "已同步 Apple 健康记录" : "Apple 健康数据已是最新"))
         return exportMessage(base: base, exported: exported)
+    }
+
+    /// 续接一个**已在服务端跑完**的导入（`.waitJob` 分支）时的收尾文案。
+    ///
+    /// 与 `importMessage` 的差别只有零新增那一格：这条路上没有本轮的
+    /// `HealthKitExportResult` 可看，所以只能说"已是最新"，不能替它编一句
+    /// "已同步 Apple 健康记录"（那是给"本轮确实读到了记录但没有新增行"用的）。
+    private func resumedImportMessage(job: ImportJobResponse) -> String {
+        importedSummaryText(job: job) ?? "Apple 健康数据已是最新"
     }
 
     private func latestMessage(base: String, warnings: [String]) -> String {

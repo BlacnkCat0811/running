@@ -23,6 +23,7 @@ struct SyncAtomicUnitRegression {
         try nothingLocalStartsFromExport()
         try fullIgnoresEveryRecoveryBranch()
         try waitForJobIsNeverReuploaded()
+        try onlyWaitingForTheServerIsTheCheapStep()
         try uploadRecoveryKeepsTheSameBatch()
         try busyUploadIsNotABadBatch()
         try badBatchIsNeverRetried()
@@ -123,6 +124,32 @@ struct SyncAtomicUnitRegression {
             try require(
                 step == .waitJob,
                 "a persisted jobId with zip=\(zip) multipart=\(multipart) went to \(step)"
+            )
+        }
+    }
+
+    /// "只差问服务端一次"的那种步必须能被单独识别出来 —— 前台 15 分钟节流的豁免判据靠它。
+    ///
+    /// 为什么要有这条：豁免本身（`syncIfNeeded` 里那个 `!isLedgerResume`）判定的是
+    /// **代价**，而"哪一步便宜"这件事只有 `nextStep` 有资格回答。豁免一旦放宽到
+    /// `.export`，前台每次进入都会重读一遍 HealthKit（几十秒到几分钟，且是 GB 级）；
+    /// 放宽到 `.upload` 则会把一次几百 MB 的重传塞进每次前台进入。
+    /// 判据落在派生属性上（而不是让调用方自己写 `jobId != nil`）就是为了让这两种放宽
+    /// **在编译期以外**也留下一条会红的断言。
+    private static func onlyWaitingForTheServerIsTheCheapStep() throws {
+        for (zip, multipart) in [(true, true), (true, false), (false, true), (false, false)] {
+            try require(
+                SyncAtomicUnit.nextStep(sourceId: "s", jobId: "j", hasZip: zip, hasMultipart: multipart)
+                    .isServerReconciliationOnly,
+                "a persisted jobId with zip=\(zip) multipart=\(multipart) was not recognised as a "
+                    + "server-only reconciliation, so the foreground throttle would swallow it"
+            )
+        }
+        for step in [SyncAtomicUnit.Step.export, .upload, .inspect, .startImport] {
+            try require(
+                !step.isServerReconciliationOnly,
+                "\(step) claims to be a server-only reconciliation; exempting it from the throttle would "
+                    + "let a GB-scale HealthKit export or upload run on every foreground entry"
             )
         }
     }
