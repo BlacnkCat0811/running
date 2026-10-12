@@ -91,6 +91,8 @@ test("UUID deletion also closes a known untracked XML fork left by a previous v3
     store.observeImportEntity("record", fork, "old-v30-fork", "2020-01-01T00:00:00.000Z");
     store.database.prepare(`
       INSERT INTO health_records
+        (id, type, source_name, source_category, source_version, device, unit,
+         value_numeric, value_text, start_at, end_at, created_at, metadata_json, raw_attributes_json)
       SELECT ?, type, source_name, source_category, source_version, device, unit,
         value_numeric, value_text, start_at, end_at, created_at,
         json_remove(metadata_json, '$.RAIHealthKitSampleUUID'), raw_attributes_json

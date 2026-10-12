@@ -32,6 +32,7 @@ export {
 } from "./canonicalize.js";
 export {
   canonicalizeNights,
+  canonicalizeNightsForWindow,
   CANONICAL_NIGHT_ALGORITHM_VERSION,
   type CanonicalNight,
   type CanonicalHrvDay,

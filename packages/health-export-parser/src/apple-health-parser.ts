@@ -322,11 +322,35 @@ export async function parseAppleHealthXml(
     && options.atomic === false && options.native?.stagingDatabase) {
     nativeRecords = new NativeRecordWriter(native.directory, entityGeneration, options.incremental?.batchId, Boolean(options.incremental));
   }
-  if (options.incremental && !options.recordDelta) {
-    store.seedImportGenerations(
-      options.incremental.generation,
-      options.incremental.preserveAbsent ? { preserveAbsent: true } : undefined
-    );
+  // 🔴 补种与删除判定必须由**同一个**判据驱动。
+  // 它们原本分成两处各写一份条件：补种看 `!recordDelta`，删除判定看 `!preserveAbsent`。
+  // 今天两者恰好等价，但"两处独立条件"意味着只改一处就能造出两种坏法：
+  //   · 补种了却不判删除 ⇒ 每次增量白做一次整库 `INSERT OR IGNORE ... SELECT`
+  //     （文档 §1.1 明确要取消的阶段）；
+  //   · 判删除却没补种 ⇒ 上一批盖的代次全部相对本批"陈旧" ⇒ **误判整库删除**。
+  // 所以三处（补种 / 删除闸门 / finalize）都从这一个判据取值。
+  //
+  // 🔴 但"问题清单的重建"**不是**这三处之一：它与代次无关，只与"这是一次导入"有关。
+  // 它原先藏在 `seedImportGenerations` 里（那个方法无条件 `DELETE FROM import_issues`），
+  // 一旦"增量不补种"，它就被静默丢掉了 ⇒ `import_issues` 跨批累积（见下面的 `else` 分支）。
+  const incremental = options.incremental;
+  const removalDetection = Boolean(incremental && !incremental.preserveAbsent);
+  // 直连（recordDelta）恒为增量载荷，结构上不可能触达删除判定。上面的资格检查已经强制
+  // `preserveAbsent`，这里再断言一次：将来谁放宽了那条资格检查，会立刻在这里红，
+  // 而不是悄悄变成误判整库删除。抛的仍是不合格错误 —— 调用方按"不算本车道"处理（回退旧链路）。
+  if (options.recordDelta && removalDetection) {
+    throw new RecordDeltaNotEligibleError("direct delta lane must not enable absence-as-deletion");
+  }
+  if (removalDetection && incremental) {
+    store.seedImportGenerations(incremental.generation);
+  } else if (incremental && !options.recordDelta) {
+    // preserve-absent 增量（旧链路的 `incremental-import`）**不补种**：那是整库
+    // `INSERT OR IGNORE ... SELECT`，而 `finalizeImportGeneration` 在这条路径上直接早退、
+    // 根本不读代次，所以它是无用功（设计 §2.3 / §1.1）。
+    // 但"本批问题清单"仍必须按批重建 —— 它先前是 `seedImportGenerations` 的**副产品**，
+    // 不补种就丢了它。补种与清问题清单是**两件独立的事**，各自都要显式调用。
+    // ⚠️ `!options.recordDelta` 是必须的：直连车道不做整库重建，主库既有问题不归它管。
+    store.clearImportIssues();
   }
   store.markHealthKitRecordDeletions(options.deletedRecords ?? [], options.incremental?.batchId);
   let currentRecord: RecordDraft | null = null;
@@ -707,11 +731,11 @@ export async function parseAppleHealthXml(
     const xmlSha256 = native?.result.sha256 ?? sourceHash.digest("hex");
     store.setManifest("source_xml_sha256", xmlSha256);
     if (
-      options.incremental
-      && !options.incremental.preserveAbsent
-      && options.incremental.guardAbsentRemoval !== false
+      removalDetection
+      && incremental
+      && incremental.guardAbsentRemoval !== false
     ) {
-      const preview = store.previewGenerationRemoval(options.incremental.generation);
+      const preview = store.previewGenerationRemoval(incremental.generation);
       const existingEntities = store.countImportableEntities();
       const evaluation = evaluateRemovalGuard(preview, existingEntities);
       if (evaluation.exceeded) {
@@ -722,11 +746,11 @@ export async function parseAppleHealthXml(
         );
       }
     }
-    const finalized = options.incremental
+    const finalized = incremental
       ? store.finalizeImportGeneration(
-        options.incremental.generation,
-        options.incremental.batchId,
-        options.incremental.preserveAbsent ? { preserveAbsent: true } : undefined
+        incremental.generation,
+        incremental.batchId,
+        removalDetection ? undefined : { preserveAbsent: true }
       )
       : { removedRecords: 0, removedWorkouts: 0, dirtyWorkoutTimes: [] as string[] };
     const recordDeletions = [...(options.deletedRecords ?? []), ...carriedDeletedSources];

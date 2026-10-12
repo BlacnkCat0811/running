@@ -146,8 +146,8 @@ test("a route past the point quota is refused without calling it corrupt", async
 
 test("a route past the byte quota is left completely untouched", async () => {
   await withExport(["sparse.gpx"], async (root, store) => {
-    // 稀疏但点数很少、字节很多：字节配额必须在 `beginRoutePointReplacement` **之前**判，
-    // 否则"先清空、再说超限"会把一条已经导入过的轨迹擦掉。
+    // 稀疏但点数很少、字节很多：字节配额必须在 `beginRouteVersion` **之前**判，
+    // 否则"先建版本、再说超限"会给一份不会被导入的文件留下垃圾版本行。
     const padding = "x".repeat(MAX_GPX_ROUTE_BYTES + 1);
     writeFileSync(
       join(root, "workout-routes", "sparse.gpx"),

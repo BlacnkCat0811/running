@@ -340,11 +340,21 @@ export async function importGpxRoutes(
       continue;
     }
 
+    let routeVersion: string | null = null;
+    // 🔴 只把 **`parseGpxFile` 自己**的失败当作"可能是这份文件坏了"的窗口。
+    // 建暂存版本之前与解析成功之后的落库阶段都属于基础设施：那些错误**绝不能**被当成
+    // "文件是坏的"吞掉 —— 那会往 `import_issues` 写一条假话（`INVALID_GPX`），
+    // 并把指纹删掉让下次重试，而问题根本不在文件上。
+    //
+    // ⚠️ 光看"错误是从 `parseGpxFile` 里抛出来的"**不足以**划出这个窗口：
+    // 落库回调（`onPoints`）是由 `parseGpxFile` **在内部调用**的，它的失败同样从那里冒出来。
+    // 所以回调在自己失败时打 `routeWriteFailure` 标记，下面的 catch 据此把两类分开。
+    let parseWindowFailure = false;
+    let routeWriteFailure = false;
     try {
       const stat = statSync(fullPath);
-      // 字节配额在 `beginRoutePointReplacement` **之前**判：那条调用会先 `DELETE FROM
-      // route_points` 并把状态打成 `pending`。先判就能做到"这个文件我们一个字节都不动"，
-      // 而不是"先清空、再说超限"。
+      // 字节配额在 `beginRouteVersion` **之前**判：那条调用会先在版本表里建行。
+      // 先判就能做到"这个文件我们一个字节都不动"，而不是"先建版本、再说超限"。
       if (stat.size > MAX_GPX_ROUTE_BYTES) {
         oversizedRouteCount += 1;
         store.insertIssue({
@@ -390,17 +400,42 @@ export async function importGpxRoutes(
         pointCount += cached.pointCount;
         continue;
       }
-      store.beginRoutePointReplacement(routeId);
-      const { pointCount: importedPoints, sha256 } = await parseGpxFile(
-        fullPath,
-        (points) => store.appendRoutePoints(routeId, points),
-        options?.native
-      );
+      // 🔴 点先写进**未发布**的版本，完全不碰 `route_points`。
+      // 旧写法是先 `DELETE FROM route_points` 再解析 —— 于是"文件坏了"会连带把
+      // **已经能用的轨迹**擦掉（`parser.test.ts` 曾经就是按这个行为断言的）。
+      // 现在失败只记在版本上，指针与已发布轨迹原样不动（docs §5.3）。
+      routeVersion = store.beginRouteVersion(routeId);
+      let parsed: Awaited<ReturnType<typeof parseGpxFile>>;
+      // ⚠️ 必须在**抛出点**标记，不能在 `finally` 里翻标志再让外层 catch 去读 ——
+      // `finally` 会先于外层 catch 执行，标志会在 catch 看到它之前就被改掉，
+      // 于是"文件坏了"也会被当成基础设施错误上抛（实测：配额与坏文件两条路径全红）。
+      try {
+        parsed = await parseGpxFile(
+          fullPath,
+          (points) => {
+            try {
+              store.appendRouteVersionPoints(routeVersion!, points);
+            } catch (error) {
+              // 🔴 这是**我们的落库**失败，不是这份文件的问题。在**抛出点**打标记，
+              // 让下面那个 catch 能把它与"文件解析失败"分开 —— 两个 catch 之间没有别的
+              // 通道，靠错误类型去猜也不可靠（DB 错误可以是任何形状）。
+              routeWriteFailure = true;
+              throw error;
+            }
+          },
+          options?.native
+        );
+      } catch (error) {
+        parseWindowFailure = !routeWriteFailure;
+        throw error;
+      }
+      const { pointCount: importedPoints, sha256 } = parsed;
       bundleHash.update(relativePath, "utf8");
       bundleHash.update("\0");
       bundleHash.update(sha256, "utf8");
       bundleHash.update("\0");
-      store.completeRoutePointReplacement(routeId, importedPoints);
+      store.publishRouteVersion(routeVersion, sha256, importedPoints);
+      routeVersion = null;
       store.database.prepare(`
         INSERT INTO route_file_fingerprints (
           relative_path, size_bytes, modified_at_ms, sha256, route_id, point_count, imported_at
@@ -415,6 +450,10 @@ export async function importGpxRoutes(
       pointCount += importedPoints;
     } catch (error) {
       if (error instanceof NativeWorkerError && error.code !== "invalid_xml") throw error;
+      // 解析窗口之外的失败一律**上抛**：那些是"我们没能落库"，不是"这份文件坏了"。
+      // 把它们记成 `INVALID_GPX` 是写一条假话，还会让下一个人去修解析器。
+      // 与上面 `NativeWorkerError` 那条同族：只放行"确属文件问题"的错误。
+      if (!parseWindowFailure) throw error;
       // 🔴 配额超限**不是**「这个文件坏了」，两者必须分开处置。
       //
       // 走 `invalid` 会做什么（实测读码）：`markRouteStatus(id, "invalid")` 先
@@ -430,7 +469,10 @@ export async function importGpxRoutes(
       // 配额能成立靠的是"合法数据碰不到"，不是"处置得巧"。
       if (error instanceof GpxQuotaExceededError) {
         oversizedRouteCount += 1;
-        store.markRouteStatus(routeId, "pending");
+        if (routeVersion) store.rejectRouteVersion(routeVersion);
+        // 只有在**没有**可用旧轨迹时才动路线状态：有旧轨迹时它对用户仍然可用，
+        // 把它打成 `pending` 等于把一条好轨迹说成"没导入"（§5.3「旧可用路线保持」）。
+        if (!store.hasUsableRoute(routeId)) store.markRouteStatus(routeId, "pending");
         store.database.prepare(
           "DELETE FROM route_file_fingerprints WHERE relative_path = ?"
         ).run(relativePath);
@@ -443,7 +485,8 @@ export async function importGpxRoutes(
         });
         continue;
       }
-      store.markRouteStatus(routeId, "invalid");
+      if (routeVersion) store.rejectRouteVersion(routeVersion);
+      if (!store.hasUsableRoute(routeId)) store.markRouteStatus(routeId, "invalid");
       store.database.prepare(
         "DELETE FROM route_file_fingerprints WHERE relative_path = ?"
       ).run(relativePath);

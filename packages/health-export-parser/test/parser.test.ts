@@ -130,10 +130,30 @@ test("streams Health XML, imports GPX, and selects a canonical workout", async (
     writeFileSync(routePath, "<gpx><trkpt", "utf8");
     const invalidResult = await importGpxRoutes(root, store);
     assert.equal(invalidResult.skippedRouteCount, 0);
-    const invalidRoute = store.database.prepare(`
+    // 🔴 坏文件**不得**擦掉已经能用的旧轨迹（docs §5.3：真坏文件拒绝该版本，旧可用路线保持）。
+    // 三件事要同时成立，缺一不可：
+    //   · 已发布状态与点数不变 —— 旧轨迹对用户仍然可用；
+    //   · 旧轨迹的点**仍然读得到** —— 不是只留了个计数；
+    //   · 这次失败留下**可检索的证据**（rejected 版本 + INVALID_GPX issue），不是无声无息。
+    // 旧行为是 `{ fileStatus: "invalid", pointCount: 0 }`：轨迹被静默擦掉，
+    // 用户看到的是"这次跑步没有轨迹"，看起来像数据本身缺失。
+    const afterInvalid = store.database.prepare(`
       SELECT file_status AS fileStatus, point_count AS pointCount FROM workout_routes
     `).get() as unknown as { fileStatus: string; pointCount: number };
-    assert.deepEqual({ ...invalidRoute }, { fileStatus: "invalid", pointCount: 0 });
+    assert.deepEqual({ ...afterInvalid }, { fileStatus: "imported", pointCount: 2 });
+    const survivingPoint = store.database.prepare(
+      "SELECT latitude FROM route_points WHERE sequence = 0"
+    ).get() as unknown as { latitude: number };
+    assert.equal(survivingPoint.latitude, 32.1, "坏文件不得把上一次成功的轨迹擦掉");
+    assert.equal(
+      (store.database.prepare("SELECT COUNT(*) AS n FROM route_versions WHERE status = 'rejected'").get() as { n: number }).n,
+      1,
+      "被拒的版本必须留下痕迹，否则'这份文件试过、没成'就查不到了"
+    );
+    assert.equal(
+      (store.database.prepare("SELECT COUNT(*) AS n FROM import_issues WHERE code = 'INVALID_GPX'").get() as { n: number }).n,
+      1
+    );
 
     writeFileSync(routePath, changedGpx, "utf8");
     const recoveredResult = await importGpxRoutes(root, store);
@@ -233,6 +253,70 @@ test("rolls back the entire XML import when parsing fails after a batch boundary
     await assert.rejects(parseAppleHealthXml(xmlPath, store, { fileSize: 1 }));
     const count = store.database.prepare("SELECT COUNT(*) AS count FROM health_records").get() as unknown as { count: number };
     assert.equal(count.count, 0);
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Y4（2026-10-12 审查）：落库回调的失败**不是**"这份文件坏了"。
+//
+// 回调 `(points) => store.appendRouteVersionPoints(...)` 由 `parseGpxFile` **在内部调用**，
+// 所以它的错误也从 `parseGpxFile` 里冒出来、落进"这份文件可能坏了"的窗口。于是磁盘满 /
+// 库被锁这类故障会被写成一条 `INVALID_GPX` 假话，还会顺手删掉指纹让下次重试 —— 而问题
+// 根本不在文件上。断言：故障**原样上抛**，且**不留下** `INVALID_GPX`。
+test("落库回调失败时上抛，不得被当成'这份文件坏了'", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-parser-write-failure-"));
+  const routeDirectory = join(root, "workout-routes");
+  mkdirSync(routeDirectory);
+  const xmlPath = join(root, "export.xml");
+  writeFileSync(xmlPath, `<HealthData><Workout workoutActivityType="${workoutTypes.running}"
+    sourceName="Watch" startDate="${appleDate("08:00")}" endDate="${appleDate("08:30")}" duration="30" durationUnit="min">
+    <WorkoutRoute><FileReference path="/workout-routes/write-failure.gpx"/></WorkoutRoute>
+  </Workout></HealthData>`, "utf8");
+  // 文件本身是完全合法的：这条用例要证明的正是"坏的不是文件"。
+  writeFileSync(join(routeDirectory, "write-failure.gpx"),
+    `<gpx><trk><trkseg><trkpt lat="31.1" lon="121.1"/><trkpt lat="31.2" lon="121.2"/></trkseg></trk></gpx>`, "utf8");
+  const store = await RaiDatabase.open(join(root, "rai.sqlite"));
+  try {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: statSync(xmlPath).size });
+
+    const original = store.appendRouteVersionPoints.bind(store);
+    const failure = new Error("disk I/O error（模拟落库故障，不是文件问题）");
+    let writeAttempts = 0;
+    store.appendRouteVersionPoints = () => {
+      writeAttempts += 1;
+      throw failure;
+    };
+
+    await assert.rejects(
+      () => importGpxRoutes(root, store),
+      (error: unknown) => error === failure,
+      "落库失败必须原样上抛；记成 INVALID_GPX 是写一条假话，还会让下一个人去修解析器"
+    );
+    // 前置条件：真走到了回调。没有这一条，"根本不解析这个文件"也会让上面的 rejects 变绿。
+    assert.ok(writeAttempts > 0, "前置条件：必须真的走到落库回调");
+
+    assert.equal(
+      (store.database.prepare("SELECT COUNT(*) AS n FROM import_issues WHERE code = 'INVALID_GPX'")
+        .get() as { n: number }).n,
+      0,
+      "基础设施故障不得留下 INVALID_GPX"
+    );
+    const route = store.database.prepare(
+      "SELECT file_status AS fileStatus FROM workout_routes"
+    ).get() as unknown as { fileStatus: string };
+    assert.equal(route.fileStatus, "pending", "失败的那次不得把路线说成'坏文件'");
+
+    // 撤掉故障后，**同一份文件**必须能正常导入 —— 这才是"坏的不是文件"的直接证据。
+    store.appendRouteVersionPoints = original;
+    const recovered = await importGpxRoutes(root, store);
+    assert.equal(recovered.importedRouteCount, 1);
+    assert.equal(recovered.skippedRouteCount, 0);
+    const imported = store.database.prepare(
+      "SELECT file_status AS fileStatus, point_count AS pointCount FROM workout_routes"
+    ).get() as unknown as { fileStatus: string; pointCount: number };
+    assert.deepEqual({ ...imported }, { fileStatus: "imported", pointCount: 2 });
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
