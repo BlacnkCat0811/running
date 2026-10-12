@@ -16,7 +16,9 @@ export {
   buildAudit,
   renderAuditMarkdown,
   stageAuditFiles,
+  stageBuiltAuditFiles,
   writeAuditFiles,
+  type DataAudit,
   type StagedAuditFiles,
 } from "./audit.js";
 export {

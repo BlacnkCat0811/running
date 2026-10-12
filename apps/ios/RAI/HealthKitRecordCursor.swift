@@ -1,14 +1,16 @@
 import Foundation
 
 /// Event time is not arrival time. Anchors have a fixed, unbounded predicate.
-/// Explicit full import and periodic history replay also cover newly granted read access,
-/// which HealthKit deliberately doesn't expose as an authorization boolean.
+/// Only explicit full import replays history after newly granted read access.
+/// Ordinary/automatic sync never resets an established cursor on a timer.
 nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     let anchor: Data
     let historyReadAt: Date
 
-    func needsHistoryRead(now: Date, force: Bool) -> Bool {
-        force || now.timeIntervalSince(historyReadAt) >= 7 * 24 * 60 * 60
+    func needsHistoryRead(now _: Date, force: Bool) -> Bool {
+        // Keep historyReadAt in persisted payloads for backward compatibility.
+        // Elapsed time is not evidence that HealthKit's change cursor is stale.
+        force
     }
 
     /// An additions-empty page is not EOF when it contains deletions. Return

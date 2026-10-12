@@ -20,12 +20,15 @@ import {
   ImportRemovalGuardError,
   identityAlgorithmFingerprint,
   stageAuditFiles,
+  stageBuiltAuditFiles,
+  type DataAudit,
   type RemovalGuardPayload,
   type StagedAuditFiles,
   NATIVE_VERSION,
 } from "@rai/health-export-parser";
 import { isStructurallyReadable } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
+import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 import { RuntimeStateStore } from "./runtime-state.js";
@@ -237,7 +240,7 @@ export class ImportWorker {
     this.state = new RuntimeStateStore(runtimeRoot);
     this.publicationJournal = queueOptions ? new ImportPublicationJournal(databasePath, runtimeRoot) : undefined;
     const repaired = this.publicationJournal?.recover();
-    if (repaired && existsSync(databasePath) && this.isReadableDatabase(databasePath)) {
+    if (repaired && existsSync(databasePath) && databaseReadable(databasePath)) {
       const audit = this.stageAuditReports(databasePath, resolve(runtimeRoot, "docs/DATA_AUDIT.md"), resolve(runtimeRoot, "var/reports/data-audit.json"));
       audit.commit();
       audit.finalize();
@@ -544,6 +547,9 @@ export class ImportWorker {
       }
       await this.removeDatabaseFiles(stagingDatabase);
       this.assertNotClosing();
+      job.phase = "backup";
+      job.message = "正在备份并校验现有数据，准备增量导入";
+      this.persistJobs();
       // 计时在 `createCurrentBackup` 内部按 `backupCapacity` / `backupCopy` / `backupVerify` 三段各自落账：
       // 线上一次导入这里报 254 s，而独立进程做同一个备份只要 12.4 s ⇒ 旧的单一口径无法定位，故拆开。
       // ⚠️ 拆开后三个阶段必须**互斥**（`worker.test.ts` 断言 `totalMs >= ΣstagesMs`），不要在外面再包一层总量。
@@ -568,6 +574,8 @@ export class ImportWorker {
         job.inputPath,
         "--database",
         stagingDatabase,
+        "--owned-candidate",
+        job.id,
         ...engineArgs,
         "--report",
         stagedMarkdownReport,
@@ -684,7 +692,7 @@ export class ImportWorker {
       this.recordPayloadAnchor(stagingDatabase, payloadSha256);
       // 拆成两段（互斥，不外包总量）：审计文件发布 vs 换库本身。
       // 线上这里曾累计到 258 s，拆开才知道是 `stageAuditReports` 还是 `activateDatabase` 在吃时间。
-      auditPublication = await timing.measure("activationAudit", () => this.stageAuditReports(
+      auditPublication = await timing.measure("activationAudit", () => this.prepareAuditReports(
         stagingDatabase,
         finalMarkdownReport,
         finalJsonReport,
@@ -854,13 +862,43 @@ export class ImportWorker {
     databasePath: string,
     markdownPath: string,
     jsonPath: string,
+    preparedAudit?: DataAudit,
   ): StagedAuditFiles {
+    if (preparedAudit) return stageBuiltAuditFiles(preparedAudit, markdownPath, jsonPath);
     const database = new DatabaseSync(databasePath, { readOnly: true });
     try {
       return stageAuditFiles(database, markdownPath, jsonPath);
     } finally {
       database.close();
     }
+  }
+
+  private async prepareAuditReports(databasePath: string, markdownPath: string, jsonPath: string): Promise<StagedAuditFiles> {
+    const audit = await this.databaseTask<DataAudit>({ operation: "audit", path: databasePath });
+    this.assertNotClosing();
+    return this.stageAuditReports(databasePath, markdownPath, jsonPath, audit);
+  }
+
+  /** A Promise wrapper around synchronous SQL is not sufficient: own the
+   * SQLite connection on a separate thread, and propagate termination as a
+   * task failure, never as evidence that a healthy database is corrupt. */
+  private databaseTask<T>(task: ImportDatabaseTask, stage = task.operation === "verify"
+    ? "database_quick_check" : task.operation === "audit" ? "final_audit_build" : "database_checkpoint"): Promise<T> {
+    const started = performance.now();
+    return new Promise<T>((resolveResult, reject) => {
+      const thread = new Worker(new URL("./import-database-bootstrap.mjs", import.meta.url), { workerData: task });
+      this.activeAnalysis = thread;
+      let received = false;
+      let result: T;
+      thread.once("message", (value: T) => { result = value; received = true; });
+      thread.once("error", reject);
+      thread.once("exit", (code) => {
+        if (this.activeAnalysis === thread) this.activeAnalysis = null;
+        this.computeStagesMs[stage] = (this.computeStagesMs[stage] ?? 0) + performance.now() - started;
+        if (code === 0 && received) resolveResult(result);
+        else reject(new Error(`Import database ${task.operation} interrupted`));
+      });
+    });
   }
 
   private countRows(databasePath: string, table: string): number {
@@ -1031,7 +1069,7 @@ export class ImportWorker {
       } catch (error) {
         // 备份失败之后才知道「是不是主库坏了」：能读 ⇒ 失败来自环境（盘满 / 权限 / EIO），
         // 清掉残片后原样上抛；不能读 ⇒ 备份失败是预期结果，改走隔离。
-        if (await this.measureStage(timing, "backupVerify", () => this.isReadableDatabase(this.databasePath))) {
+        if (await this.verifyBackupSource(stagingBackupPath, timing)) {
           await this.attachCleanupFailure(stagingBackupPath, error);
           throw error;
         }
@@ -1039,7 +1077,7 @@ export class ImportWorker {
       }
       // 副本已写完但尚未发布。主库真损坏时（坏页没被 `backup()` 读到，例如落在 freelist），
       // 由这一步拦下：丢弃刚写好的副本、改走隔离，正式备份名从此不会出现。
-      if (!(await this.measureStage(timing, "backupVerify", () => this.isReadableDatabase(this.databasePath)))) {
+      if (!(await this.verifyBackupSource(stagingBackupPath, timing))) {
         return await this.quarantineCorruptDatabase(jobId, maintenance, stagingBackupPath);
       }
       try {
@@ -1060,6 +1098,17 @@ export class ImportWorker {
       process.stderr.write(`Import backup retention cleanup failed after backup was published: ${message}\n`);
     }
     return backupPath;
+  }
+
+  private async verifyBackupSource(partialPath: string, timing?: ImportPerformanceTracker): Promise<boolean> {
+    try {
+      return await this.measureStage(timing, "backupVerify", () => this.isReadableDatabase(this.databasePath));
+    } catch (error) {
+      // A terminated verifier is not proof of corruption. Fail the attempt,
+      // reclaim its partial backup, but never quarantine a healthy live DB.
+      await this.attachCleanupFailure(partialPath, error);
+      throw error;
+    }
   }
 
   /**
@@ -1559,7 +1608,7 @@ export class ImportWorker {
       this.publicationJournal?.prepare(jobId, rollbackPath, originalExisted);
       this.assertNotClosing();
       if (originalExisted) {
-        if (originalReadable) this.checkpointDatabase(this.databasePath);
+        if (originalReadable) await this.checkpointDatabase(this.databasePath, "activation_checkpoint");
         await this.removeDatabaseSidecarsWithRetry(this.databasePath);
         await this.moveDatabaseFile(this.databasePath, rollbackPath);
         originalMoved = true;
@@ -1567,7 +1616,7 @@ export class ImportWorker {
       this.assertNotClosing();
       await mkdir(dirname(this.databasePath), { recursive: true });
       await this.installDatabase(stagingDatabase, this.databasePath);
-      if (!this.isReadableDatabase(this.databasePath)) {
+      if (!(await this.isReadableDatabase(this.databasePath, "activation_verify"))) {
         throw new Error("Imported database is not readable after activation");
       }
       commitBoundaryEntered = true;
@@ -1582,14 +1631,14 @@ export class ImportWorker {
         errors.push(...await this.restoreImportDatabase(rollbackPath, backupPath));
       } else if (!originalExisted && commitBoundaryEntered) {
         try {
-          this.checkpointDatabase(this.databasePath);
+          await this.checkpointDatabase(this.databasePath);
           await this.removeDatabaseSidecarsWithRetry(this.databasePath);
           await this.removeDatabaseFileWithRetry(this.databasePath);
         } catch (cleanupError) {
           errors.push(cleanupError);
         }
       }
-      const activeReadable = this.isReadableDatabase(this.databasePath);
+      const activeReadable = await this.isReadableDatabase(this.databasePath);
       if (gateEntered && (activeReadable || (originalExisted && !originalReadable && existsSync(this.databasePath)))) {
         try {
           await this.releaseActivateGate();
@@ -1630,10 +1679,10 @@ export class ImportWorker {
   private async restoreImportDatabase(rollbackPath: string, backupPath: string | null): Promise<unknown[]> {
     const errors: unknown[] = [];
     const activeExists = existsSync(this.databasePath);
-    const activeReadable = activeExists && this.isReadableDatabase(this.databasePath);
+    const activeReadable = activeExists && await this.isReadableDatabase(this.databasePath);
     if (activeReadable) {
       try {
-        this.checkpointDatabase(this.databasePath);
+        await this.checkpointDatabase(this.databasePath);
         await this.removeDatabaseSidecarsWithRetry(this.databasePath);
         await this.moveDatabaseFile(rollbackPath, this.databasePath);
       } catch (error) {
@@ -1642,7 +1691,7 @@ export class ImportWorker {
     } else {
       if (activeExists) {
         try {
-          try { this.checkpointDatabase(this.databasePath); } catch { /* Candidate is already unreadable. */ }
+          try { await this.checkpointDatabase(this.databasePath); } catch { /* Candidate is already unreadable. */ }
           await this.removeDatabaseSidecarsWithRetry(this.databasePath);
           await this.removeDatabaseFileWithRetry(this.databasePath);
         } catch (error) {
@@ -1660,7 +1709,7 @@ export class ImportWorker {
         }
       }
     }
-    if (!this.isReadableDatabase(this.databasePath)) {
+    if (!(await this.isReadableDatabase(this.databasePath))) {
       errors.push(new Error("Import rollback did not restore a readable active database"));
     }
     return errors;
@@ -1672,11 +1721,11 @@ export class ImportWorker {
     let installed = false;
     try {
       await this.copyDatabaseFile(backupPath, stagingPath);
-      if (!this.isReadableDatabase(stagingPath)) {
+      if (!(await this.isReadableDatabase(stagingPath))) {
         throw new Error("Online import backup is not readable before restoration");
       }
       await this.moveDatabaseFile(stagingPath, this.databasePath);
-      if (!this.isReadableDatabase(this.databasePath)) {
+      if (!(await this.isReadableDatabase(this.databasePath))) {
         throw new Error("Online import backup is not readable after restoration");
       }
       installed = true;
@@ -1708,28 +1757,13 @@ export class ImportWorker {
     return errors;
   }
 
-  private checkpointDatabase(path: string): void {
-    const database = new DatabaseSync(path);
-    applyBusyTimeout(database);
-    try {
-      database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    } finally {
-      database.close();
-    }
+  private checkpointDatabase(path: string, stage = "database_checkpoint"): Promise<void> {
+    return this.databaseTask<void>({ operation: "checkpoint", path }, stage);
   }
 
-  private isReadableDatabase(path: string): boolean {
-    if (!existsSync(path)) return false;
-    try {
-      const database = new DatabaseSync(path, { readOnly: true });
-      try {
-        return (database.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined)?.quick_check === "ok";
-      } finally {
-        database.close();
-      }
-    } catch {
-      return false;
-    }
+  private isReadableDatabase(path: string, stage = "database_quick_check"): Promise<boolean> {
+    if (!existsSync(path)) return Promise.resolve(false);
+    return this.databaseTask<boolean>({ operation: "verify", path }, stage);
   }
 
   private async releaseActivateGate(): Promise<void> {

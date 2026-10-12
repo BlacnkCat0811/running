@@ -14,6 +14,7 @@ export = (root / "apps/ios/RAI/HealthKitExport.swift").read_text()
 sync = (root / "apps/ios/RAI/HealthKitSync.swift").read_text()
 store = (root / "apps/ios/RAI/SyncTaskStore.swift").read_text()
 parser = (root / "packages/health-export-parser/src/apple-health-parser.ts").read_text()
+cursor = (root / "apps/ios/RAI/HealthKitRecordCursor.swift").read_text()
 
 failures: list[str] = []
 checks = 0
@@ -63,6 +64,18 @@ check("recordsForceRescan: full," in sync,
       "ordinary sync must not force full record history; only explicit full import does")
 check("manual: true" not in sync and "full || manual" not in sync,
       "the button/shortcut entry point must not turn incremental sync into history replay")
+history_policy = body(cursor, "func needsHistoryRead(", "/// An additions-empty")
+check("timeIntervalSince" not in history_policy and "force" in history_policy,
+      "ordinary sync must not periodically reset an established record cursor")
+check("previous == nil || decoded != nil || forceHistory" in records,
+      "a corrupt stored anchor must not silently trigger automatic history replay")
+check("guard anchorData == nil || stored != nil" in export,
+      "a corrupt stored workout anchor must not silently reset the workout query")
+check("guard hasWorkoutChange || routeForceRescan || !routeFiles.isEmpty" in export,
+      "workout candidates without a change or GPX retry must not be exported")
+check('"sourceIds": exportedWorkouts.map(workoutSyncId)' in export
+      and "workoutCount: exportedWorkouts.count" in export,
+      "the manifest and UI count must describe exported deltas, not rechecked workouts")
 check("routeForceRescan: full," in sync,
       "explicit full import must still rescan routes as well as records")
 check(ordered(records, "var starts: [HKQueryAnchor?] = [decoded]", "starts.append(nil)"),
@@ -110,7 +123,7 @@ check(ordered(parser, "store.removeHealthKitRecords", "if (atomic) store.commitA
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
 # （或把它挪进走不到的分支）都会让它变红。
-MIN_CHECKS = 25
+MIN_CHECKS = 30
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

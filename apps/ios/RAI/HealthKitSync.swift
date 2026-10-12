@@ -1220,7 +1220,8 @@ final class HealthKitSync {
                     workoutAnchor: anchor,
                     recordCursors: recordCursors,
                     // 普通同步（按钮/快捷指令/自动）均续接记录游标。只有显式
-                    // 「重新导入全部」强制补读；权限扩大仍由每类型 7 天补读覆盖。
+                    // 「重新导入全部」强制补读。权限扩大后的历史也由用户显式补读，
+                    // 不再把日常自动同步每七天升级成全历史导出。
                     recordsForceRescan: full,
                     routeStates: routeStates,
                     routeDiscoveryCursor: routeDiscoveryCursor,

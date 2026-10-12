@@ -33,7 +33,7 @@ interface ImportWorkerTestSurface {
   ): Promise<void>;
   createCurrentBackup(jobId: string): Promise<string | null>;
   backupDatabase(database: DatabaseSync, destination: string): Promise<void>;
-  isReadableDatabase(path: string): boolean;
+  isReadableDatabase(path: string): boolean | Promise<boolean>;
   removePartialBackupFile(path: string): Promise<void>;
   preserveHistoricalState(stagingDatabase: string, previousDatabase: string): void;
   analyzeDatasetChange(
@@ -59,6 +59,12 @@ interface ImportWorkerTestSurface {
     finalize(): void;
     discard(): void;
   };
+  prepareAuditReports(databasePath: string, markdownPath: string, jsonPath: string): Promise<{
+    commit(): void;
+    rollback(): void;
+    finalize(): void;
+    discard(): void;
+  }>;
   removeDatabaseFile(path: string): Promise<void>;
   reclaimDisplacedImportDatabases(stagingDatabase: string): Promise<void>;
   persistJobs(): void;
@@ -103,6 +109,52 @@ test("import job ids do not collide in the same millisecond", () => {
   const ids = Array.from({ length: 100 }, () => createImportJobId(now));
   assert.equal(new Set(ids).size, ids.length);
   assert.equal(ids.every((id) => id.startsWith(`web_import_${now.toString(36)}_`)), true);
+});
+
+test("import integrity checks yield the HTTP event loop and still reject corrupt databases", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-thread-check-"));
+  const path = join(root, "rai.sqlite");
+  marker(path, "unchanged");
+  const worker = new ImportWorker(path, root) as unknown as ImportWorkerTestSurface;
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, 5);
+  try {
+    assert.equal(await worker.isReadableDatabase(path), true);
+    assert.ok(ticks > 0, "await-wrapped synchronous SQL would prevent all timer callbacks");
+    assert.equal(marker(path), "unchanged");
+    const corrupt = join(root, "broken.sqlite");
+    writeFileSync(corrupt, "not a SQLite database");
+    assert.equal(await worker.isReadableDatabase(corrupt), false);
+    assert.equal(await worker.isReadableDatabase(join(root, "missing.sqlite")), false);
+  } finally {
+    clearInterval(timer);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("final import audit builds off-thread and remains unpublished until the database commit", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-thread-audit-"));
+  const path = join(root, "rai.sqlite");
+  const store = await seedCanonical(path);
+  store.close();
+  const worker = new ImportWorker(path, root) as unknown as ImportWorkerTestSurface;
+  const markdown = join(root, "audit.md"), json = join(root, "audit.json");
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, 5);
+  try {
+    const audit = await worker.prepareAuditReports(path, markdown, json);
+    assert.ok(ticks > 0, "the full audit query must not run on the HTTP thread");
+    assert.equal(existsSync(markdown), false);
+    assert.equal(existsSync(json), false);
+    audit.commit();
+    audit.finalize();
+    assert.equal(existsSync(markdown), true);
+    assert.equal((JSON.parse(readFileSync(json, "utf8")) as { totals: { workouts: number } }).totals.workouts, 8);
+    assert.equal(readdirSync(root).some((name) => name.includes(".pending.") || name.includes(".replaced.")), false);
+  } finally {
+    clearInterval(timer);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 interface ExternalTrainerTestSurface {
@@ -1033,6 +1085,22 @@ test("never publishes a safety backup from a database that fails its integrity c
       readdirSync(join(root, "var", "quarantine")).filter((name) => name.endsWith(".sqlite")).length,
       1
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an interrupted integrity worker removes the partial backup without quarantining a healthy main database", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-verify-interrupted-"));
+  const path = join(root, "rai.sqlite");
+  marker(path, "healthy");
+  const worker = new ImportWorker(path, root) as unknown as ImportWorkerTestSurface;
+  worker.isReadableDatabase = async () => { throw new Error("fixture verifier interrupted"); };
+  try {
+    await assert.rejects(worker.createCurrentBackup("interrupted-verifier"), /fixture verifier interrupted/);
+    assert.equal(marker(path), "healthy");
+    assert.deepEqual(readdirSync(join(root, "var", "backups")), []);
+    assert.equal(existsSync(join(root, "var", "quarantine")), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2438,7 +2506,9 @@ test("activates data-only health changes without running model recompute", async
       terminalCleanupStarted = true;
       await terminalCleanup;
     }, "source-data-only");
-    await waitFor(() => terminalCleanupStarted);
+    // This is a real import (including several SQLite worker bootstraps),
+    // not the sub-second scheduler fixtures that use waitFor's 5s default.
+    await waitFor(() => terminalCleanupStarted, 30_000);
     assert.equal(terminalPersistenceFailures, 1);
     assert.equal(importWorker.get(created.id)?.status, "succeeded");
     assert.equal(importWorker.isRunning, true, "worker remains active until terminal cleanup completes");
@@ -2463,6 +2533,7 @@ test("activates data-only health changes without running model recompute", async
     }
   } finally {
     finishTerminalCleanup?.();
+    await importWorker.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

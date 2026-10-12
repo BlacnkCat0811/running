@@ -8,8 +8,12 @@ struct HealthKitRecordCursorRegression {
         precondition(!cursor.needsHistoryRead(now: now, force: false), "normal sync uses the type anchor")
         precondition(cursor.needsHistoryRead(now: now, force: true), "explicit full import replays newly authorized history")
         precondition(!cursor.needsHistoryRead(now: now.addingTimeInterval(7 * 86400 - 1), force: false))
-        precondition(cursor.needsHistoryRead(now: now.addingTimeInterval(7 * 86400), force: false),
-                     "background sync eventually replays history even without a detectable permission grant")
+        for days in [7, 30, 365, 3650] {
+            precondition(!cursor.needsHistoryRead(now: now.addingTimeInterval(Double(days) * 86400), force: false),
+                         "automatic sync must remain incremental even after \(days) days")
+        }
+        precondition(cursor.needsHistoryRead(now: now.addingTimeInterval(365 * 86400), force: true),
+                     "explicit full import remains available after a long idle period")
         let cursors = ["sleep": cursor, "hrv": cursor]
         let decoded = try JSONDecoder().decode([String: HealthKitRecordCursor].self,
                                                from: JSONEncoder().encode(cursors))
@@ -38,6 +42,6 @@ struct HealthKitRecordCursorRegression {
             preconditionFailure("a failed page must fail the export")
         } catch Failure.fixture {}
         precondition(returned == nil, "partial failure cannot return an advanced cursor")
-        print("HealthKit record cursor regression: 8 checks passed")
+        print("HealthKit record cursor regression: 12 checks passed")
     }
 }

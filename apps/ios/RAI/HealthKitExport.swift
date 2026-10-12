@@ -67,6 +67,8 @@ nonisolated enum HealthKitExportError: LocalizedError, Equatable {
     /// 文档 §3.4 要求这两条路彻底分开，理由见 `HealthSyncBlockedRecovery`。
     case databaseLocked
     case missingRecordAnchor
+    case invalidRecordAnchor
+    case invalidWorkoutAnchor
 
     var errorDescription: String? {
         switch self {
@@ -82,6 +84,10 @@ nonisolated enum HealthKitExportError: LocalizedError, Equatable {
                 + "若反复出现，请在 iPhone 设置 → 健康 → 数据访问与设备 中确认 RAI 已获得读取权限。"
         case .missingRecordAnchor:
             return "健康记录查询未返回可恢复游标，请重试同步。"
+        case .invalidRecordAnchor:
+            return "健康记录增量游标无法读取，本次未自动重读全部历史。请使用「重新导入全部」恢复。"
+        case .invalidWorkoutAnchor:
+            return "跑步增量游标无法读取，本次未自动重读全部历史。请使用「重新导入全部」恢复。"
         case .databaseLocked:
             // 用户不需要做任何事，所以文案刻意不含"请重试"之外的动作项 ——
             // 设备一解锁就会自动继续（见 `RaiStartup.observeProtectedDataAvailability`）。
@@ -337,6 +343,7 @@ nonisolated enum HealthKitExport {
         var files: [(name: String, url: URL)] = [("export.xml", xmlURL)]
         var recordCount = 0
         var routeCount = 0
+        var exportedWorkouts: [HKWorkout] = []
 
         try write(xml, """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -369,6 +376,9 @@ nonisolated enum HealthKitExport {
                     directory: directory,
                     warnings: warnings
                 )
+                // An observation hash is not a server acknowledgement: a prior
+                // GPX may still be pending after a quota refusal. Keep bounded
+                // route retries until the protocol can acknowledge each route.
                 routeFiles = fetch.entries
                 if let observation = fetch.observation {
                     routeDecisions[routeKey] = RouteSyncStateMachine.decide(
@@ -392,6 +402,10 @@ nonisolated enum HealthKitExport {
                 // 这里的省略就会变成"把服务端的轨迹删掉"。
                 routeFiles = []
             }
+            // The recent window and bounded historical queue only discover late
+            // routes. Without a workout change or a GPX retry, omit workout XML.
+            guard hasWorkoutChange || routeForceRescan || !routeFiles.isEmpty else { continue }
+            exportedWorkouts.append(workout)
             routeCount += routeFiles.count
             files.append(contentsOf: routeFiles)
             try write(xml, workoutXML(workout, routeNames: routeFiles.map(\.name)))
@@ -415,7 +429,7 @@ nonisolated enum HealthKitExport {
             "version": 2,
             "sourceScope": "healthkit",
             "sourceEntityType": "HKWorkoutActivityTypeRunning",
-            "sourceIds": workouts.map(workoutSyncId),
+            "sourceIds": exportedWorkouts.map(workoutSyncId),
             "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString }.sorted(),
             "deletedRecords": records.deleted,
             "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"]
@@ -437,12 +451,12 @@ nonisolated enum HealthKitExport {
         }
         return HealthKitExportResult(
             zipURL: zipURL,
-            workoutCount: workouts.count,
+            workoutCount: exportedWorkouts.count,
             recordCount: recordCount,
             deletionCount: workoutBatch.deleted.count + records.deleted.count,
             routeCount: routeCount,
             warnings: warnings.snapshot,
-            maxEndDate: workouts.map(\.endDate).max(),
+            maxEndDate: exportedWorkouts.map(\.endDate).max(),
             exportedThrough: exportedThrough,
             workoutAnchor: workoutBatch.anchor,
             recordCursors: records.cursors,
@@ -506,6 +520,9 @@ nonisolated enum HealthKitExport {
         anchorData: Data?
     ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], anchor: Data?, changedUUIDs: Set<String>) {
         let stored = anchorData.flatMap(decodeAnchor)
+        guard anchorData == nil || stored != nil else {
+            throw HealthKitExportError.invalidWorkoutAnchor
+        }
         var predicates = [HKQuery.predicateForWorkouts(with: .running)]
         if stored == nil, let startDate {
             predicates.append(HKQuery.predicateForSamples(withStart: startDate, end: nil, options: .strictStartDate))
@@ -857,6 +874,9 @@ nonisolated enum HealthKitExport {
             await onProgress("正在读取健康记录 \(index + 1)/\(descriptors.count)（已 \(count) 条）")
             let previous = cursors[xmlType]
             let decoded = previous.flatMap { decodeAnchor($0.anchor) }
+            guard previous == nil || decoded != nil || forceHistory else {
+                throw HealthKitExportError.invalidRecordAnchor
+            }
             let history = previous == nil || decoded == nil
                 || previous!.needsHistoryRead(now: now, force: forceHistory)
             do {

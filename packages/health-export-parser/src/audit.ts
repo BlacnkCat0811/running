@@ -653,6 +653,15 @@ export function stageAuditFiles(
   sourceDatabase: string | null = null
 ): StagedAuditFiles {
   const audit = buildAudit(database, sourceDatabase);
+  return stageBuiltAuditFiles(audit, markdownPath, jsonPath);
+}
+
+/** Separate heavy SQL from publication so an API can build the audit off-thread. */
+export function stageBuiltAuditFiles(
+  audit: DataAudit,
+  markdownPath: string,
+  jsonPath: string,
+): StagedAuditFiles {
   for (const path of [markdownPath, jsonPath]) {
     if (existsSync(path) && !statSync(path).isFile()) {
       throw new Error(`Audit output is not a file: ${path}`);

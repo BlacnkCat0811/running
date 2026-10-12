@@ -1,5 +1,5 @@
 import { DATABASE_TIMEZONE } from "@rai/contracts";
-import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 import { basename, dirname, relative, resolve } from "node:path";
@@ -73,6 +73,8 @@ interface ParsedArguments {
    * `--source-database` 显式说明"这份报告描述的目标库"。
    */
   sourceDatabase: string | null;
+  /** API-owned disposable candidate: no second clone, publication or audit. */
+  candidateOwner: string | null;
 }
 
 function optionValue(args: string[], name: string, fallback: string): string {
@@ -93,7 +95,7 @@ function parseArguments(argv: string[]): ParsedArguments {
     );
   }
 
-  return {
+  const parsed: ParsedArguments = {
     native: {
       spoolRoot: resolve(optionValue(argv, "--native-spool-root", dirname(resolve(optionValue(argv, "--database", "var/rai.sqlite"))))),
       engine: importEngine(optionValue(argv, "--engine", process.env.RAI_IMPORT_ENGINE ?? "typescript")),
@@ -121,7 +123,36 @@ function parseArguments(argv: string[]): ParsedArguments {
     ,sourceDatabase: argv.includes("--source-database")
       ? optionValue(argv, "--source-database", "")
       : null
+    ,candidateOwner: argv.includes("--owned-candidate")
+      ? optionValue(argv, "--owned-candidate", "")
+      : null
   };
+  if (parsed.candidateOwner !== null) validateOwnedCandidate(parsed);
+  return parsed;
+}
+
+/** Never expose this optimization as a generic "write the active DB in place". */
+function validateOwnedCandidate(args: ParsedArguments): void {
+  const owner = args.candidateOwner!;
+  const prefix = `rai.importing.${owner}`;
+  const name = basename(args.database);
+  const suffix = name.slice(prefix.length);
+  if (args.command === "audit" || !/^[A-Za-z0-9_-]+$/.test(owner)
+      || !name.startsWith(prefix) || !/^(?:\.attempt-[1-9]\d*)?\.sqlite$/.test(suffix)
+      || args.sourceDatabase === null || resolve(args.sourceDatabase) === args.database) {
+    throw new Error("--owned-candidate requires a private rai.importing.<owner>.sqlite and a distinct --source-database");
+  }
+  const entry = lstatSync(args.database, { throwIfNoEntry: false });
+  if (entry) {
+    if (!entry.isFile()) throw new Error("Owned candidate must be a regular file, not a symlink");
+    if (existsSync(args.sourceDatabase)) {
+      const candidate = statSync(args.database);
+      const source = statSync(args.sourceDatabase);
+      if (candidate.dev === source.dev && candidate.ino === source.ino) {
+        throw new Error("Owned candidate must not alias the active database");
+      }
+    }
+  }
 }
 
 /**
@@ -250,10 +281,31 @@ async function importCommand(args: ParsedArguments): Promise<void> {
   try {
     // 增量导入先复制整份库（506 MB 实测 1.6–2.1 s）。这一段此前完全没有埋点，
     // 是「`parseImport` 涨幅全在埋点之外」的另一半原因。
-    stagingDatabase = await timedStage(
-      "prepare_staging_copy",
-      () => prepareStagingDatabase(args.database, incremental)
-    );
+    if (args.candidateOwner !== null) {
+      // Keep the native writer's existing UUID-suffixed private-path + one-shot
+      // permit barrier. Moving a private candidate is metadata-only, not a copy,
+      // and does not require deploying a relaxed Rust write barrier.
+      stagingDatabase = args.native.engine === "rust"
+        ? `${args.database}.importing.${randomUUID()}` : args.database;
+      if (stagingDatabase !== args.database && existsSync(args.database)) {
+        const database = new DatabaseSync(args.database);
+        try {
+          const checkpoint = database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+          if (checkpoint?.busy !== 0) throw new Error("Owned candidate checkpoint is busy");
+        } finally {
+          database.close();
+        }
+        for (const sidecar of [`${args.database}-wal`, `${args.database}-shm`]) {
+          await removeFileWithRetry(sidecar);
+        }
+        renameSync(args.database, stagingDatabase);
+      }
+    } else {
+      stagingDatabase = await timedStage(
+        "prepare_staging_copy",
+        () => prepareStagingDatabase(args.database, incremental)
+      );
+    }
   } catch (error) {
     releaseImportLock();
     throw error;
@@ -262,7 +314,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
   try {
     store = await timedStage("open_staging_store", () => RaiDatabase.open(stagingDatabase));
   } catch (error) {
-    removeDatabaseFiles(stagingDatabase);
+    if (args.candidateOwner === null || stagingDatabase !== args.database) removeDatabaseFiles(stagingDatabase);
     releaseImportLock();
     throw error;
   }
@@ -385,16 +437,30 @@ async function importCommand(args: ParsedArguments): Promise<void> {
         ) VALUES (?, ?, 'completed', 1, 1, 'Apple Health import completed')
       `)
       .run(stableId("recompute_job_event", [importJobId, "completed"]), importJobId);
-    const stagedAudit = await timedStage("stage_audit_files", () => stageAuditFiles(
+    // The API audits the final candidate after recomputation. Independent CLI
+    // imports keep their existing database + report publication contract.
+    const stagedAudit = args.candidateOwner !== null ? null : await timedStage("stage_audit_files", () => stageAuditFiles(
       store.database,
       args.report,
       args.jsonReport,
       auditSourceLabel(args)
     ));
 
+    if (args.candidateOwner !== null) {
+      await timedStage("checkpoint_candidate", () => {
+        store.flush();
+        const checkpoint = store.database.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get() as { busy: number };
+        if (checkpoint.busy !== 0) throw new Error("Owned candidate checkpoint is busy");
+      });
+    }
     await timedStage("close_store", () => store.close());
     storeClosed = true;
-    try {
+    if (args.candidateOwner !== null && stagingDatabase !== args.database) {
+      await removeFileWithRetry(`${stagingDatabase}-wal`);
+      await removeFileWithRetry(`${stagingDatabase}-shm`);
+      await moveFileWithRetry(stagingDatabase, args.database);
+    }
+    if (stagedAudit) try {
       // 这一段（含 `validateInstalled` 的发布后校验）此前完全没有埋点 —— 冷态下
       // page cache 被挤出后，它单独能占掉十几秒，全部计在 `parseImport` 头上。
       activation = await timedStage(
@@ -422,15 +488,15 @@ async function importCommand(args: ParsedArguments): Promise<void> {
           nightly: nightlyResult,
           gpx: gpxResult,
           canonicalization: canonicalResult,
-          modelCohorts: stagedAudit.audit.readiness,
-          report: args.report,
+          modelCohorts: stagedAudit?.audit.readiness ?? null,
+          report: stagedAudit ? args.report : null,
           database: args.database
           ,mode: incremental ? "incremental" : "full"
           ,batchId
           ,changes
           ,dirtyFromAt
           ,datasetVersion: datasetVersionRow?.value ?? null
-          ,displacedDatabase: activation.displacedDatabase
+          ,displacedDatabase: activation?.displacedDatabase ?? null
         },
         null,
         2
@@ -440,7 +506,7 @@ async function importCommand(args: ParsedArguments): Promise<void> {
     try {
       if (!storeClosed) store.close();
     } finally {
-      removeDatabaseFiles(stagingDatabase);
+      if (args.candidateOwner === null || stagingDatabase !== args.database) removeDatabaseFiles(stagingDatabase);
       releaseImportLock();
     }
   }
