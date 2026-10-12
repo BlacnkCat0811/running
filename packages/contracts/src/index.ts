@@ -5,6 +5,10 @@
 // host a helper the other needs).
 export * from "./timezone.js";
 
+// 直接增量同步的状态合同与"禁止操作"清单（docs/SQLITE_DIRECT_SYNC_DESIGN.md §10.1 / §14.1）。
+// 放 contracts 是因为 API 与 storage 都要读它，而两者互不依赖。
+export * from "./direct-sync.js";
+
 export const CONTRACT_VERSION = "canonical-health-v2" as const;
 
 export const healthTypes = {
@@ -542,6 +546,38 @@ export type PerformanceProtocol = (typeof performanceProtocols)[number];
 export type EligibilityStatus = "eligible" | "trial" | "excluded";
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export type RecomputeJobType = "import" | "full_recompute" | "snapshot_refresh";
+
+/**
+ * `recompute_jobs` 里**唯一**那个消费者（`DatasetService.runNextJob`）真正能执行的任务类型。
+ *
+ * 🔴 为什么这是一个共享常量而不是两边各写一份：`recoverInterrupted()`（存储层）会把
+ * `status='running'` 的任务**一律**放回 `queued`，而那会让**不属于**这个消费者的任务
+ * （`"import"` —— 由 CLI 导入进程创建并推进，见 `packages/health-export-parser/src/cli.ts`）
+ * 被投给一个执行不了它的消费者。实测过的后果：CLI 导入崩溃 → API 重启做恢复 →
+ * 该任务被放回队列 → 消费者领走后以 `Unsupported application job type: import` 置为失败，
+ * 而**原始的中断原因已被 `recoverInterrupted` 清掉**。
+ *
+ * ⇒ 恢复必须按"谁能执行"分派，而不是按"是不是 running"。
+ * 新增任务类型时，这里要么加上它（并给消费者加分支），要么它就必须有自己的所有者：
+ * `recompute-job-recovery.test.ts` 会把"两者都没有"的新类型判红。
+ */
+export const APPLICATION_CONSUMABLE_JOB_TYPES: readonly RecomputeJobType[] = [
+  "full_recompute",
+  "snapshot_refresh"
+];
+
+/**
+ * 有**自己的所有者进程**、因而**不得**被交给应用消费者的任务类型，以及原因。
+ * 恢复流程据此把它们直接判为中断失败，而不是放回一条没人能跑的队列。
+ */
+export const EXTERNALLY_OWNED_JOB_TYPES: readonly { jobType: RecomputeJobType; owner: string }[] = [
+  {
+    jobType: "import",
+    owner: "CLI 导入进程（packages/health-export-parser/src/cli.ts）自己创建并推进；" +
+      "应用消费者不执行它（DatasetService.runNextJob 只认 full_recompute / snapshot_refresh）"
+  }
+];
+
 export type TrainingSessionStatus = "active" | "inactive" | "ambiguous";
 
 export const missingReasonCodes = [

@@ -47,7 +47,10 @@ export type {
   TrainingZoneProfileSettings,
   TrainingZonesCurrentResponse,
   TrainingZonesHistoryResponse,
-  UpdateTrainingZoneProfileInput
+  UpdateTrainingZoneProfileInput,
+  DirectSyncReceipt,
+  IngestStatus,
+  AnalysisStatus
 } from "@rai/contracts";
 
 // 域快照的窄化读取：信封（`ModelSnapshotEntry.payload`）是 `unknown`，消费方（含 web）
@@ -63,6 +66,7 @@ export {
 } from "@rai/contracts";
 
 import type {
+  DirectSyncReceipt,
   MobileSessionKind,
   PredictionModelEvent,
   PredictionModelRun,
@@ -545,6 +549,15 @@ export interface ImportJobResponse {
     modelReplayFrom: string | null;
     durationMs: number;
     backupName: string | null;
+    /**
+     * 直接增量同步回执（docs/SQLITE_DIRECT_SYNC_DESIGN.md §10.1）。
+     *
+     * **可选**是刻意的兼容边界：缺省表示这条回执来自旧的候选发布路径，
+     * 老客户端因此不会因为服务端升级而解析失败；反过来，消费方**不得**把"缺省"
+     * 读成"分析已完成" —— `ingestStatus` 与 `analysisStatus` 是两个独立结论，
+     * 前者为 `committed` 也不代表后者已经 `published`（§1.4）。
+     */
+    directSync?: DirectSyncReceipt;
   };
 }
 
