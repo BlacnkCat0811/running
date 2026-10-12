@@ -30,6 +30,7 @@ import { isStructurallyReadable } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
 import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
 import { dataOnlyBaselineContract, type DataOnlyImportResult } from "./data-only-import.js";
+import { planDirectSyncLane } from "./direct-sync-plan.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 import { RuntimeStateStore } from "./runtime-state.js";
@@ -549,9 +550,17 @@ export class ImportWorker {
         };
         return;
       }
-      if (job.queue && this.queueOptions && this.queueOptions.dataOnlyFastPath !== false
-          && engine.name === "typescript" && engine.version === NATIVE_VERSION
-          && job.preserveAbsent === true && existsSync(this.databasePath)) {
+      // 车道判定抽成纯函数（`direct-sync-plan.ts`）：旧候选链路与直连链路的分歧只在这一个地方，
+      // 每条否决原因都可单测。这里的取值与原内联六条件**逐条等价**。
+      const lane = planDirectSyncLane({
+        queued: Boolean(job.queue && this.queueOptions),
+        fastPathEnabled: this.queueOptions?.dataOnlyFastPath !== false,
+        engine,
+        nativeVersion: NATIVE_VERSION,
+        preserveAbsent: job.preserveAbsent === true,
+        databaseExists: existsSync(this.databasePath)
+      });
+      if (lane.lane === "direct") {
         payloadSha256 = await this.payloadSha256(job, engine);
         this.assertNotClosing();
         if (payloadSha256 !== null) {

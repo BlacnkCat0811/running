@@ -12,6 +12,7 @@ import {
 } from "@rai/health-export-parser";
 import { createHash } from "node:crypto";
 import { readImportReceiptInDatabase, writeImportReceiptInDatabase } from "./import-publication.js";
+import { assertDirectSyncRequestShape, directSyncParserOptions } from "./direct-sync-plan.js";
 import { importPayloadSha256 } from "./import-payload-identity.js";
 import { digestHealthKitRecordSnapshot } from "./import-sources.js";
 import { scoringHealthTypes } from "./health-change-plan.js";
@@ -93,6 +94,9 @@ function compatible(state: Map<string, string>): boolean {
 /** Executed only under the API's existing writer admission, off the HTTP thread.
  * null is a proven rollback/no-write fallback, never a partially accepted batch. */
 export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<DataOnlyImportResult> {
+  // 形状先于一切：直连请求携带快照语义字段 ⇒ 部分载荷会被当成完整快照 ⇒ 静默全库删除。
+  // 类型挡不住 `{ ...request, preserveAbsent: false }` 这种展开，所以在这里运行期再拦一次。
+  assertDirectSyncRequestShape(input);
   // A future scoring policy expansion must disable this lane, not silently
   // reinterpret the previously non-scoring allowlist as safe.
   if (DATA_ONLY_RECORD_TYPES.some(type => (scoringHealthTypes as readonly string[]).includes(type))) return null;
@@ -130,6 +134,10 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
     migrationPolicy: "refuse", foreignKeyValidation: "after-migration", createMigrationBackup: false
   });
   const db = store.database;
+  // 本批的代次取值。**一个变量只承担一种语义**：它只做解析器的 `entityGeneration`
+  // （落在 `import_entity_generations.generation` 上），**不是**事实版本号 ——
+  // 回执不承诺版本号（见 `DirectSyncReceipt` 的说明），所以这里也不叫 generation 的别名。
+  const entityGeneration = `delta:${input.jobId}`;
   try {
     // Acknowledgement must survive power loss, not only a graceful process exit.
     db.exec("PRAGMA synchronous=FULL");
@@ -147,7 +155,7 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
     await parseAppleHealthXml(xmlPath, store, {
       fileSize: Buffer.byteLength(xmlText), healthKitRecordIdentity: true,
       deletedRecords: manifest.deletedRecords,
-      incremental: { generation: `delta:${input.jobId}`, batchId: input.jobId, preserveAbsent: true },
+      incremental: { generation: entityGeneration, batchId: input.jobId, ...directSyncParserOptions() },
       recordDelta: {
         xmlText,
         onBegin() {
@@ -172,7 +180,20 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
             insertedWorkouts: 0, updatedWorkouts: 0, removedWorkouts: 0,
             unchangedWorkouts: Number(db.prepare("SELECT COUNT(*) AS n FROM training_sessions").get()!.n),
             routesUpdated: 0, featuresReused: 0, featuresRecomputed: 0, modelReplayFrom: null,
-            durationMs: Date.now() - input.startedAtMs, backupName: null
+            durationMs: Date.now() - input.startedAtMs, backupName: null,
+            // §10.1 的直连回执。`analysisStatus: "not_required"` **不是**"分析已完成"：
+            // 它能这么写，是因为本车道在入口就证明了这批载荷**结构上不可能**动到分析 ——
+            // 上面的 `DATA_ONLY_RECORD_TYPES ∩ scoringHealthTypes = ∅` 判定（见函数开头）
+            // 与 `isDataOnlyRecordXml` 的类型白名单是两道独立闸门，任一条不成立就直接
+            // return null 回到旧路径。所以它是**结构性结论，不是样本观察**。
+            directSync: {
+              ingestStatus: "committed",
+              analysisStatus: "not_required",
+              receiptId: input.jobId,
+              dependencyGeneration: null,
+              publishedReleaseId: null,
+              parentBatchId: null
+            }
           };
           const metadata = {
             dataset_version: datasetVersion, source_xml_name: basename(xmlPath),
