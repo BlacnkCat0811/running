@@ -57,7 +57,34 @@ import { basename, dirname, join, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_DOCS = ["docs/ARCHITECTURE.md", "docs/ALGORITHM.md", "docs/DATA_PIPELINE.md", "docs/OPERATIONS.md"];
+/**
+ * 默认核对范围。
+ *
+ * 🔴 **这份清单决定"门禁到底看了什么"** —— 脚本不核对这里以外的任何文档，
+ * 而"某份满是 `文件:行号` 的文档没人核对"这件事本身**不报错**。
+ *
+ * 2026-10-12 实测（全仓 `git ls-files` 扫过一遍）：
+ * - 原先这 4 份默认文档**每一份都是 0 处引用**（`docs/ARCHITECTURE.md` / `docs/ALGORITHM.md` /
+ *   `docs/DATA_PIPELINE.md` / `docs/OPERATIONS.md`）⇒ `npm run check:doc-refs` 当时
+ *   **校验了 0 处引用**、却返回 `EXIT=0`。这就是纪律里那句「脚本跑绿 ≠ 门禁存在」的原样复现：
+ *   报告里写"`check:doc-refs` 全绿"是**空话**，它没看过任何一行引用。
+ * - 含引用的文档共 6 份 / 127 处，**全都在这份清单之外**：其中 3 份是带日期的交付快照
+ *   （`deliverables/*_2026-10-11.md`）、`docs/TODAY_PLAN_CARDS_REVIEW.md` 也是带日期的
+ *   时点快照（"本轮只诊断，未改任何代码"）—— 按本文件的第 3 条判读陷阱，**时点快照不该进
+ *   默认范围**（回写等于伪造历史），应显式传入并自行判读。
+ * - `deploy/README-UBUNTU.md`（1 处）是**现行文档**，属于漏登记，待补。
+ *
+ * 所以这里加进来的是**唯一一份"现行 + 有引用"**的文档。加它之前，这道门禁是真空的。
+ */
+const DEFAULT_DOCS = [
+  "docs/ARCHITECTURE.md",
+  "docs/ALGORITHM.md",
+  "docs/DATA_PIPELINE.md",
+  "docs/OPERATIONS.md",
+  // 进行中的设计文档：正文大量用 `文件:行号` 描述"现状"（那一节正是设计的前提），
+  // 所以它必须在门禁范围里，而不是"谁想起来谁手动传"。
+  "docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md"
+];
 
 /** 同名文件消歧：文档里的缩写写法指向哪一个。 */
 const AMBIGUOUS = {
