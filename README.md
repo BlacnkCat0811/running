@@ -15,7 +15,7 @@ RAI 是个人跑步数据分析应用：Apple Health XML/GPX 或 iOS HealthKit �
 
 ## 快速开始
 
-要求 Node.js 22.12+、低于23（见 [.nvmrc](.nvmrc)）；npm workspace。Python 只用于可选训练，不是 Web/API 启动依赖。
+要求 Node.js 22 LTS（≥22.12，默认版本见 [.nvmrc](.nvmrc)）或 24 LTS（24.x）；两条线都已实测通过。npm workspace。Python 只用于可选训练，不是 Web/API 启动依赖。
 
 ```bash
 npm ci

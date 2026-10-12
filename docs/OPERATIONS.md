@@ -5,7 +5,7 @@
 
 ## 开发和门禁
 
-Node22.x按[版本检查](../scripts/check-node-version.mjs)执行；生产TS通过tsx，不切换执行通道绕过migration校验。
+Node22.x/24.x按[版本检查](../scripts/check-node-version.mjs)执行；生产TS通过tsx，不切换执行通道绕过migration校验。
 
 ```bash
 npm ci

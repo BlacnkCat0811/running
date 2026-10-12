@@ -25,7 +25,7 @@ sudo apt-get update
 sudo apt-get install -y ca-certificates curl git nginx certbot python3-certbot-nginx openssl
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
-node --version  # 必须是 v22.12.0 或更高的 22.x
+node --version  # 必须落在受支持的两条 LTS 线上：v22.12.0+ 的 22.x（默认），或 24.x
 
 sudo -u rai git clone https://gitee.com/tpandmr/running.git /opt/rai
 cd /opt/rai

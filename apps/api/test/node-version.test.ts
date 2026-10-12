@@ -6,20 +6,29 @@ import test from "node:test";
 
 import { assertSupportedNodeVersion, isSupportedNodeVersion } from "../../../scripts/check-node-version.mjs";
 
-test("Node version gate accepts the supported Node 22 range", () => {
+test("Node version gate accepts the supported Node 22 and Node 24 ranges", () => {
   assert.equal(isSupportedNodeVersion("22.12.0"), true);
   assert.equal(isSupportedNodeVersion("22.23.1"), true);
+  // 24.x 于 2026-10-12 实测放行：这里钉住"它被接受"，回退本行就会红。
+  assert.equal(isSupportedNodeVersion("24.0.0"), true);
+  assert.equal(isSupportedNodeVersion("24.21.0"), true);
 });
 
 test("Node version gate rejects unsupported releases", () => {
   assert.equal(isSupportedNodeVersion("22.11.0"), false);
   assert.equal(isSupportedNodeVersion("23.0.0"), false);
-  assert.equal(isSupportedNodeVersion("24.0.0"), false);
+  // 25 未被实测，也不是 LTS：放行 24 不等于放行"更大的号"。
+  assert.equal(isSupportedNodeVersion("25.0.0"), false);
   assert.equal(isSupportedNodeVersion("22.12.0-rc.1"), false);
   assert.equal(isSupportedNodeVersion("22.23.1-nightly.20260717"), false);
+  assert.equal(isSupportedNodeVersion("24.21.0-rc.1"), false);
   assert.equal(isSupportedNodeVersion("22.23.1+build.7"), true);
   assert.equal(isSupportedNodeVersion("v22.23.1"), false);
-  assert.throws(() => assertSupportedNodeVersion("24.1.0"), /requires Node\.js >=22\.12\.0 <23/);
+  assert.equal(isSupportedNodeVersion("v24.21.0"), false);
+  assert.throws(
+    () => assertSupportedNodeVersion("25.1.0"),
+    /requires Node\.js >=22\.12\.0 <23 or >=24\.0\.0 <25/
+  );
 });
 
 test("every public runtime command executes the Node gate through npm lifecycle hooks", () => {
