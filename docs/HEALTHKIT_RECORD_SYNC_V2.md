@@ -2,6 +2,9 @@
 
 2026-10-09
 
+后续目标设计（尚未实施）：[SQLite直接增量同步，无项目备份/全库校验/临时主库/换库](SQLITE_DIRECT_SYNC_DESIGN.md)。
+下文描述当前实现，不能据该设计认定线上已覆盖所有混合增量。
+
 ## 协议与兼容性
 
 - `/v1/handshake` 新增可选能力 `healthKitRecordSyncVersion: 2`；原有

@@ -3,6 +3,9 @@
 入口：[架构](ARCHITECTURE.md)；模型语义：[算法](ALGORITHM.md)；操作：[运维](OPERATIONS.md)。
 本文合并旧 parser/database/sleep-HRV/incremental/freshness 草案，源码为最终实现依据，不把过期库统计放在设计文档中。
 
+2026-10-12目标改造（设计，未上线）：[SQLite直接增量同步](SQLITE_DIRECT_SYNC_DESIGN.md)。
+用户要求普通同步不再执行项目备份、全库检查、候选主库复制或文件换库；备份由服务器独立运维负责。
+
 ## 1. 来源、上传与候选库
 
 [导入worker](../apps/api/src/import-worker.ts) 处理ZIP来源、预检、队列和staging发布。
