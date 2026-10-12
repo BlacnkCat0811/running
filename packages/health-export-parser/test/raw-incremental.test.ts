@@ -75,7 +75,7 @@ test("incremental XML scan skips unchanged rows and removes entities absent from
     });
     assert.equal(result.insertedWorkoutCount, 0);
     assert.equal(result.removedWorkoutCount, 1);
-    const workoutCount = store.database.prepare("SELECT COUNT(*) AS count FROM workouts").get() as { count: number };
+    const workoutCount = store.database.prepare("SELECT COUNT(*) AS count FROM workouts WHERE deleted_at IS NULL").get() as { count: number };
     const groupCount = store.database.prepare("SELECT COUNT(*) AS count FROM workout_groups").get() as { count: number };
     assert.equal(workoutCount.count, 1);
     assert.equal(groupCount.count, 1);
@@ -161,7 +161,7 @@ ${recordXml("150")}
       ),
       manifestBefore
     );
-    const workoutCount = store.database.prepare("SELECT COUNT(*) AS count FROM workouts").get() as { count: number };
+    const workoutCount = store.database.prepare("SELECT COUNT(*) AS count FROM workouts WHERE deleted_at IS NULL").get() as { count: number };
     const recordCount = store.database.prepare("SELECT COUNT(*) AS count FROM health_records").get() as { count: number };
     assert.equal(workoutCount.count, 2);
     assert.equal(recordCount.count, 1);
@@ -258,7 +258,7 @@ test("sync identifiers keep workout identity stable while payload updates in pla
     assert.equal(after.id, before.id);
     assert.equal(after.duration, 1860);
     assert.equal(result.insertedWorkoutCount, 0);
-    assert.equal((store.database.prepare("SELECT COUNT(*) AS count FROM workouts").get() as { count: number }).count, 1);
+    assert.equal((store.database.prepare("SELECT COUNT(*) AS count FROM workouts WHERE deleted_at IS NULL").get() as { count: number }).count, 1);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

@@ -94,8 +94,14 @@ test("完整快照仍然补种：载荷里没有的实体会被删掉，而不�
     });
 
     assert.equal(result.removedWorkoutCount, 1, "完整快照必须把载荷里没有的训练判为删除");
-    assert.equal(store.database.prepare("SELECT COUNT(*) AS n FROM workouts WHERE id=?").get(beta)!.n, 0);
-    assert.equal(store.database.prepare("SELECT COUNT(*) AS n FROM workouts").get()!.n, 1);
+    // 🔴 软删（v36）：行**保留**并标 `deleted_at`，而不是物理消失 —— 物理删会沿
+    // workouts→workout_routes→route_versions→route_version_points 级联删掉已发布路线的证据。
+    // 所以这里钉两件事：它不再是"仍在的训练"，以及它**确实**被标记了（不是"其实没删"）。
+    const betaRow = store.database.prepare("SELECT deleted_at AS deletedAt FROM workouts WHERE id=?").get(beta) as
+      { deletedAt: string | null } | undefined;
+    assert.ok(betaRow, "软删必须保留行（保留路线版本证据）");
+    assert.ok(betaRow.deletedAt, "被删除的训练必须有 deleted_at 标记");
+    assert.equal(store.database.prepare("SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NULL").get()!.n, 1);
   });
 });
 

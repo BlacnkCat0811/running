@@ -62,6 +62,12 @@ function stampGeneration(store: RaiDatabase, kind: Kind, id: string, generation:
     .run(kind, id, generation);
 }
 
+/** 仍在数据集里的训练（软删行不算）。 */
+function liveWorkouts(store: RaiDatabase): string[] {
+  return (store.database.prepare("SELECT id FROM workouts WHERE deleted_at IS NULL").all() as unknown as Array<{ id: string }>)
+    .map((row) => row.id);
+}
+
 function countRows(store: RaiDatabase, table: string): number {
   return (store.database.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 }
@@ -116,7 +122,14 @@ test("finalizeImportGeneration records each removed entity in the batch ledger a
       );
     }
     assert.equal(countRows(store, "health_records"), 0, "the stale record row must actually be gone");
-    assert.equal(countRows(store, "workouts"), 0, "the stale workout row must actually be gone");
+    // 🔴 训练是**软删**（v36）：行保留并标 `deleted_at`，因为物理删会沿
+    // workouts→workout_routes→route_versions→route_version_points 级联删掉已发布路线的证据。
+    // 所以这里钉两件事：它不再是"仍在的训练"，以及它确实被标记了。
+    assert.deepEqual(liveWorkouts(store), [], "the stale workout must no longer be a live fact");
+    assert.equal(
+      Number(store.database.prepare("SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NOT NULL").get()!.n), 1,
+      "the stale workout row must be kept and marked deleted (route evidence survives)"
+    );
     assert.equal(countRows(store, "activity_summaries"), 0, "the stale summary row must actually be gone");
   } finally {
     store.close();
@@ -160,7 +173,11 @@ test("removeWorkoutsBySyncIdentifiers attributes an explicit deletion to the imp
     assert.ok(change, "an explicit workout deletion must leave a per-batch ledger row");
     assert.equal(change.changeType, "removed");
     assert.equal(tombstoneBatchId(store, "workout", "wo_del"), "batch_wo_delete");
-    assert.equal(countRows(store, "workouts"), 0);
+    // 软删：行保留并标记，见上一条用例的同款说明。
+    assert.deepEqual(liveWorkouts(store), []);
+    assert.equal(
+      Number(store.database.prepare("SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NOT NULL").get()!.n), 1
+    );
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

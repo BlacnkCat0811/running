@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { beginOwnedTransaction, commitOwnedTransaction, rollbackOwnedTransaction } from "./owned-transaction.js";
+import { workoutPresentConditionSql } from "@rai/storage-sqlite";
 
 import { healthTypes, workoutTypes } from "@rai/contracts";
 
@@ -200,7 +201,7 @@ function loadRunningWorkouts(database: DatabaseSync): WorkoutCandidate[] {
         ) AS runningDynamicsCount,
         CASE WHEN w.device IS NULL THEN 0 ELSE 1 END AS hasDevice
       FROM workouts w
-      WHERE w.activity_type = ?
+      WHERE w.activity_type = ? AND ${workoutPresentConditionSql("w")}
       ORDER BY w.start_at, w.id
     `)
     .all(

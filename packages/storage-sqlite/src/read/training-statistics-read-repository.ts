@@ -1,3 +1,4 @@
+import { sessionFactPresentConditionSql } from "../sql/fragments.js";
 import { DATABASE_TIMEZONE } from "@rai/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -32,7 +33,9 @@ export class SqliteTrainingStatisticsReadRepository {
 
   earliestLoadLocalDate(): string | null {
     const firstRow = this.database
-      .prepare("SELECT MIN(local_date) AS value FROM active_workout_training_loads")
+      .prepare(`SELECT MIN(load.local_date) AS value FROM active_workout_training_loads load
+        JOIN training_sessions session ON session.id = load.training_session_id
+        WHERE ${sessionFactPresentConditionSql("session")}`)
       .get() as Record<string, unknown>;
     return typeof firstRow.value === "string" ? firstRow.value : null;
   }
@@ -69,7 +72,7 @@ export class SqliteTrainingStatisticsReadRepository {
           load.session_type, load.confidence, session.anchor_end_at
         FROM active_workout_training_loads load
         JOIN training_sessions session ON session.id = load.training_session_id
-        WHERE session.anchor_end_at IS NOT NULL
+        WHERE session.anchor_end_at IS NOT NULL AND ${sessionFactPresentConditionSql("session")}
         ORDER BY session.anchor_end_at DESC
         LIMIT ?
       `)

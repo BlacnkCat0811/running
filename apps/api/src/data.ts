@@ -18,6 +18,8 @@ import {
   SqliteCoachFactsRepository,
   activeDurationSecondsSql,
   loadPerformanceEventSessions,
+  sessionFactPresentConditionSql,
+  workoutPresentConditionSql,
   type StoredPerformanceEntry,
   type StoredPrivacyZone,
   type StoredSeriesSession,
@@ -256,7 +258,8 @@ export class RaiReadStore {
         s.anchor_end_at AS endedAt, s.anchor_distance_km AS distanceKm, w.duration_seconds AS durationSeconds,
         s.updated_at AS availableAt
         FROM training_sessions s JOIN workouts w ON w.id=s.canonical_workout_id
-        WHERE s.status='active' AND s.activity_type='HKWorkoutActivityTypeRunning'
+        WHERE s.status='active' AND ${workoutPresentConditionSql("w")}
+          AND s.activity_type='HKWorkoutActivityTypeRunning'
           AND julianday(s.anchor_start_at)>=julianday(?) AND julianday(s.anchor_end_at)<=julianday(?)
         ORDER BY s.anchor_start_at,s.id`).all(`${shiftCoachDate(date, -100)}T00:00:00+08:00`, asOf) as
         Array<{ id: string; startedAt: string; endedAt: string; distanceKm: number; durationSeconds: number; availableAt: string }>;
@@ -269,8 +272,10 @@ export class RaiReadStore {
       const repository = new SqliteCoachFactsRepository(this.database);
       const feedback = repository.feedback<SubjectiveFeedback>(JSON.stringify([scope.athleteId, scope.datasetEpoch]), asOf);
       const qualityDates = (this.database.prepare(`SELECT local_date AS date,session_type AS kind
-        FROM active_workout_training_loads WHERE local_date>=? AND local_date<=?
-          AND (session_type IN ('tempo','interval','race') OR stimulus_type IN ('lactate_threshold','anaerobic','vo2max'))
+        FROM active_workout_training_loads load
+        JOIN training_sessions session ON session.id = load.training_session_id
+        WHERE load.local_date>=? AND load.local_date<=? AND ${sessionFactPresentConditionSql("session")}
+          AND (load.session_type IN ('tempo','interval','race') OR load.stimulus_type IN ('lactate_threshold','anaerobic','vo2max'))
         ORDER BY local_date`).all(shiftCoachDate(date, -28), date) as Array<{ date: string; kind: string }>);
       const execution = this.coachExecutionAssessments(history, facts, asOf);
       const executionSummary = coachQualityExecutionSummary({ asOf, assessments: execution,
@@ -568,7 +573,10 @@ export class RaiReadStore {
     const weekEnd = shiftMobileDate(weekStart, 6);
 
     const anchorRow = this.database.prepare(`
-      SELECT MAX(local_date) AS anchor FROM active_workout_training_loads
+      SELECT MAX(load.local_date) AS anchor
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE ${sessionFactPresentConditionSql("session")}
     `).get() as Record<string, unknown> | undefined;
     const latestDataDate = anchorRow && anchorRow.anchor != null ? String(anchorRow.anchor) : null;
     const syncRow = this.database.prepare(`
@@ -600,8 +608,9 @@ export class RaiReadStore {
         COALESCE(SUM(distance_km), 0) AS distance_km,
         COALESCE(SUM(duration_seconds), 0) AS duration_seconds,
         COUNT(*) AS workout_count
-      FROM active_workout_training_loads
-      WHERE local_date = ?
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date = ? AND ${sessionFactPresentConditionSql("session")}
     `).get(today) as Record<string, unknown>;
     const todayEnergy = this.database.prepare(`
       SELECT COALESCE(SUM(stat.sum_value), 0) AS energy_kcal
@@ -609,7 +618,7 @@ export class RaiReadStore {
       JOIN training_sessions ts ON ts.id = load.training_session_id
       JOIN workout_statistics stat ON stat.workout_id = ts.canonical_workout_id
         AND stat.type = 'HKQuantityTypeIdentifierActiveEnergyBurned'
-      WHERE load.local_date = ?
+      WHERE load.local_date = ? AND ${sessionFactPresentConditionSql("ts")}
     `).get(today) as Record<string, unknown>;
 
     const dailyRows = this.database.prepare(`
@@ -617,8 +626,9 @@ export class RaiReadStore {
         local_date,
         COALESCE(SUM(distance_km), 0) AS distance_km,
         COUNT(*) AS workout_count
-      FROM active_workout_training_loads
-      WHERE local_date BETWEEN ? AND ?
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date BETWEEN ? AND ? AND ${sessionFactPresentConditionSql("session")}
       GROUP BY local_date
       ORDER BY local_date
     `).all(weekStart, weekEnd) as unknown as Array<Record<string, unknown>>;
@@ -638,8 +648,9 @@ export class RaiReadStore {
         COALESCE(SUM(distance_km), 0) AS distance_km,
         COALESCE(SUM(duration_seconds), 0) AS duration_seconds,
         COUNT(*) AS workout_count
-      FROM active_workout_training_loads
-      WHERE local_date BETWEEN ? AND ?
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date BETWEEN ? AND ? AND ${sessionFactPresentConditionSql("session")}
     `).get(weekStart, weekEnd) as Record<string, unknown>;
 
     const weekDistanceKm = Number(weekRow.distance_km ?? 0);
@@ -650,9 +661,11 @@ export class RaiReadStore {
     const recentFourEnd = shiftMobileDate(weekStart, -1);
     const volumeRows = this.database.prepare(`
       SELECT
-        COALESCE(SUM(CASE WHEN local_date BETWEEN ? AND ? THEN distance_km ELSE 0 END), 0) AS recent_km,
-        COALESCE(SUM(CASE WHEN local_date BETWEEN ? AND ? THEN distance_km ELSE 0 END), 0) AS previous_km
-      FROM active_workout_training_loads
+        COALESCE(SUM(CASE WHEN load.local_date BETWEEN ? AND ? THEN load.distance_km ELSE 0 END), 0) AS recent_km,
+        COALESCE(SUM(CASE WHEN load.local_date BETWEEN ? AND ? THEN load.distance_km ELSE 0 END), 0) AS previous_km
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE ${sessionFactPresentConditionSql("session")}
     `).get(recentFourStart, recentFourEnd, priorFourStart, priorFourEnd) as Record<string, unknown>;
     const previousFourKm = Number(volumeRows.previous_km ?? 0);
     const recentFourKm = Number(volumeRows.recent_km ?? 0);
@@ -669,11 +682,13 @@ export class RaiReadStore {
       FROM active_workout_training_loads load
       JOIN training_sessions ts ON ts.id = load.training_session_id
       WHERE load.local_date BETWEEN ? AND ? AND ts.activity_type LIKE '%Running%'
+        AND ${sessionFactPresentConditionSql("ts")}
     `).get(weekStart, weekEnd) as Record<string, number | null>;
     const exposures = this.database.prepare(`
       SELECT zs.* FROM active_workout_zone_summaries zs
       JOIN active_workout_training_loads load ON load.training_session_id = zs.training_session_id
-      WHERE load.local_date BETWEEN ? AND ?
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date BETWEEN ? AND ? AND ${sessionFactPresentConditionSql("session")}
     `).all(weekStart, weekEnd) as Array<Record<string, unknown>>;
     const weekZones = (kind: "heart_rate" | "pace") => {
       const totals = new Map<string, number>();
@@ -710,7 +725,10 @@ export class RaiReadStore {
     // adherence: two queries would be two chances for them to disagree.
     const planActual = this.database.prepare(`
       SELECT local_date AS localDate, SUM(distance_km) AS distanceKm, COUNT(*) AS workoutCount
-      FROM active_workout_training_loads WHERE local_date >= ? AND local_date <= ? GROUP BY local_date
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date >= ? AND load.local_date <= ? AND ${sessionFactPresentConditionSql("session")}
+      GROUP BY load.local_date
     `).all(shiftMobileDate(today, -28), today) as Array<{ localDate: string; distanceKm: number; workoutCount: number }>;
     // Capacity is derived from training facts, never from a stored preference. The
     // coach decision and the WorkoutKit export must obey the same ceiling, and it
@@ -954,9 +972,10 @@ export class RaiReadStore {
   private previousWeekDistanceKm(date: string): number {
     const weekStart = mobileWeekStart(date);
     const row = this.database.prepare(`
-      SELECT COALESCE(SUM(distance_km), 0) AS distance_km
-      FROM active_workout_training_loads
-      WHERE local_date BETWEEN ? AND ?
+      SELECT COALESCE(SUM(load.distance_km), 0) AS distance_km
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date BETWEEN ? AND ? AND ${sessionFactPresentConditionSql("session")}
     `).get(shiftMobileDate(weekStart, -7), shiftMobileDate(weekStart, -1)) as Record<string, unknown>;
     return Number(row.distance_km ?? 0);
   }
@@ -964,7 +983,10 @@ export class RaiReadStore {
   mobileStatistics(): MobileStatisticsResponse {
     const today = mobileLocalDate();
     const anchorRow = this.database.prepare(`
-      SELECT COALESCE(MAX(local_date), ?) AS anchor FROM active_workout_training_loads
+      SELECT COALESCE(MAX(load.local_date), ?) AS anchor
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE ${sessionFactPresentConditionSql("session")}
     `).get(today) as Record<string, unknown>;
     const anchor = String(anchorRow.anchor ?? today);
     const threeMonthsAgo = shiftMobileDate(`${anchor.slice(0, 7)}-01`, -62).slice(0, 7);
@@ -979,7 +1001,7 @@ export class RaiReadStore {
         COUNT(*) AS workout_count
       FROM active_workout_training_loads load
       JOIN training_sessions ts ON ts.id = load.training_session_id
-      WHERE substr(load.local_date, 1, 7) >= ?
+      WHERE substr(load.local_date, 1, 7) >= ? AND ${sessionFactPresentConditionSql("ts")}
       GROUP BY month
       ORDER BY month DESC
       LIMIT 3
@@ -987,12 +1009,13 @@ export class RaiReadStore {
 
     const rollingRows = this.database.prepare(`
       SELECT
-        COALESCE(SUM(CASE WHEN local_date > ? THEN distance_km ELSE 0 END), 0) AS current_km,
-        COALESCE(SUM(CASE WHEN local_date <= ? THEN distance_km ELSE 0 END), 0) AS previous_km,
-        COALESCE(SUM(CASE WHEN local_date > ? THEN duration_seconds ELSE 0 END), 0) AS duration_seconds,
-        COALESCE(SUM(CASE WHEN local_date > ? THEN 1 ELSE 0 END), 0) AS workout_count
-      FROM active_workout_training_loads
-      WHERE local_date > ?
+        COALESCE(SUM(CASE WHEN load.local_date > ? THEN load.distance_km ELSE 0 END), 0) AS current_km,
+        COALESCE(SUM(CASE WHEN load.local_date <= ? THEN load.distance_km ELSE 0 END), 0) AS previous_km,
+        COALESCE(SUM(CASE WHEN load.local_date > ? THEN load.duration_seconds ELSE 0 END), 0) AS duration_seconds,
+        COALESCE(SUM(CASE WHEN load.local_date > ? THEN 1 ELSE 0 END), 0) AS workout_count
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date > ? AND ${sessionFactPresentConditionSql("session")}
     `).get(
       shiftMobileDate(anchor, -28), shiftMobileDate(anchor, -28), shiftMobileDate(anchor, -28),
       shiftMobileDate(anchor, -28), shiftMobileDate(anchor, -56)
@@ -1054,7 +1077,10 @@ export class RaiReadStore {
   mobileTrends(): MobileTrendsResponse {
     const today = mobileLocalDate();
     const anchorRow = this.database.prepare(`
-      SELECT COALESCE(MAX(local_date), ?) AS anchor FROM active_workout_training_loads
+      SELECT COALESCE(MAX(load.local_date), ?) AS anchor
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE ${sessionFactPresentConditionSql("session")}
     `).get(today) as Record<string, unknown>;
     const anchor = String(anchorRow.anchor ?? today);
     const anchorWeekStart = mobileWeekStart(anchor);
@@ -1065,10 +1091,11 @@ export class RaiReadStore {
     const weekRows = this.database.prepare(`
       SELECT
         date(local_date, '-' || ((CAST(strftime('%w', local_date) AS INTEGER) + 6) % 7) || ' days') AS period_start,
-        SUM(distance_km) AS distance_km,
+        SUM(load.distance_km) AS distance_km,
         COUNT(*) AS workout_count
-      FROM active_workout_training_loads
-      WHERE local_date >= ? AND local_date <= ?
+      FROM active_workout_training_loads load
+      JOIN training_sessions session ON session.id = load.training_session_id
+      WHERE load.local_date >= ? AND load.local_date <= ? AND ${sessionFactPresentConditionSql("session")}
       GROUP BY period_start
     `).all(oldestWeekStart, shiftMobileDate(anchorWeekStart, 6)) as unknown as Array<Record<string, unknown>>;
     const weekByStart = new Map(weekRows.map((row) => [String(row.period_start), row]));
@@ -1664,7 +1691,7 @@ export class RaiReadStore {
           session.anchor_distance_km AS distanceKm,
           ${activeDurationSecondsSql("session")} AS durationSeconds
         FROM training_sessions session
-        WHERE session.status = 'active'
+        WHERE session.status = 'active' AND ${sessionFactPresentConditionSql("session")}
           AND session.anchor_distance_km IS NOT NULL
           AND session.anchor_distance_km > 0
           AND session.anchor_end_at <= ?

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { CoachLoopCommand, CoachLoopDeviceReceipt, MobilePlanOperationScope, SubjectiveFeedback } from "@rai/api-contracts";
-import { SqliteCoachFactsRepository, type RaiDatabase } from "@rai/storage-sqlite";
+import { SqliteCoachFactsRepository, type RaiDatabase, workoutPresentConditionSql } from "@rai/storage-sqlite";
 import { buildPredictionReportAsync } from "@rai/application";
 import type { CoachLoopRuntime } from "./coach-loop-runtime.js";
 import { buildSubjectiveFeedback, retractSubjectiveFeedback } from "./coach-subjective-feedback.js";
@@ -53,7 +53,9 @@ export function registerCoachLoopRoutes(args: {
         }else{
           if(!request.body.fields)throw new PlanOperationError("coach_feedback_invalid","缺少反馈字段。",422);
           const fields=request.body.fields;
-          const workout=fields.workoutId?store.database.prepare("SELECT id FROM training_sessions WHERE id=? AND status='active'").get(fields.workoutId):null;
+          const workout=fields.workoutId?store.database.prepare(`SELECT session.id FROM training_sessions session
+            JOIN workouts workout ON workout.id=session.canonical_workout_id
+            WHERE session.id=? AND session.status='active' AND ${workoutPresentConditionSql("workout")}`).get(fields.workoutId):null;
           const rpe=fields.rpeOverrideRef?store.database.prepare(`SELECT revision FROM workout_overrides
             WHERE training_session_id=? AND revision=? AND rpe IS NOT NULL`).get(fields.rpeOverrideRef.workoutId,fields.rpeOverrideRef.revision):null;
           try { feedback=buildSubjectiveFeedback({fields,id:request.body.id,revision:request.body.expectedRevision+1,

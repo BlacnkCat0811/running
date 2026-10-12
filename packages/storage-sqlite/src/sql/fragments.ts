@@ -9,7 +9,7 @@ export function activeDurationSecondsSql(sessionAlias = "session"): string {
     (
       SELECT w.duration_seconds
       FROM workouts w
-      WHERE w.id = ${sessionAlias}.canonical_workout_id
+      WHERE w.id = ${sessionAlias}.canonical_workout_id AND ${workoutPresentConditionSql("w")}
     ),
     (julianday(${sessionAlias}.anchor_end_at) - julianday(${sessionAlias}.anchor_start_at)) * 86400.0
   )`;
@@ -36,6 +36,43 @@ export function activeDurationSecondsSql(sessionAlias = "session"): string {
 export function usableRouteConditionSql(alias?: string): string {
   const prefix = alias ? `${alias}.` : "";
   return `${prefix}file_status = 'imported' AND ${prefix}point_count > 0`;
+}
+
+/**
+ * 「这条训练事实此刻**还在不在**」的**唯一**判据（PR5 D4，见
+ * `docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md`）。
+ *
+ * 语义：`workouts.deleted_at` 为 `NULL` = 事实仍在；非空 = 已删（值 = 删除时刻；v36 只新增可空列）。
+ *
+ * 🔴 为什么必须有这一个函数：
+ * - 今天的事实侧读法是"靠 `JOIN workouts` 顺带隐藏已删训练"，而**不 JOIN 那张表**的读
+ *   （今日/周/月汇总、`planActual`、`qualityDates`、成绩候选…）在删除之后**继续统计旧负荷**
+ *   —— 那正是 §9.1「旧分数 JOIN 新训练」在用户面前显形。
+ * - 判据写成函数之后，"同一件事两处写法"在结构上不可能：全仓只允许这一处出现 `deleted_at`
+ *   的可见性条件（结构门禁扫源码，见 `packages/storage-sqlite/test/workout-presence.test.ts`）。
+ *
+ * ⚠️ 不要用 `import_entity_tombstones` 当长期判据：墓碑会被 `prune-tombstones` 清理，
+ * 清理之后已删训练会**静默复活**。墓碑的职责是"防止后续载荷重新引入"（防复活），
+ * 与"此刻可不可见"是两件事。
+ *
+ * @param alias `workouts` 在调用点的表别名；不传则列名不加前缀。
+ */
+export function workoutPresentConditionSql(alias?: string): string {
+  const prefix = alias ? `${alias}.` : "";
+  return `${prefix}deleted_at IS NULL`;
+}
+
+/**
+ * 会话级的事实存在性判据：该 `training_sessions` 行指向的训练事实此刻仍在。
+ *
+ * 有些读路径（今日/周/月汇总、统计、趋势）手里只有 `training_session_id`，没有 `workouts` 的 JOIN
+ * —— 它们必须用这一条把已删事实排除掉。它**组合**上面那一条，所以"什么算存在"只有一个定义。
+ */
+export function sessionFactPresentConditionSql(sessionAlias = "session"): string {
+  return `${sessionAlias}.canonical_workout_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM workouts fact_present
+    WHERE fact_present.id = ${sessionAlias}.canonical_workout_id
+      AND ${workoutPresentConditionSql("fact_present")})`;
 }
 
 /** Core SELECT list for model-run summary rows (includes active flag and counts). */

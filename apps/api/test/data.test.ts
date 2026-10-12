@@ -572,3 +572,44 @@ test("record type audit uses the covering type-time index", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("PR5 C3：软删的训练从**事实侧**汇总里消失，数字等于删除前减去该训练", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-api-workout-presence-"));
+  const databasePath = join(root, "rai.sqlite");
+  const store = await seed(databasePath);
+  try {
+    const read = new RaiReadStore(databasePath);
+    try {
+      const before = read.workouts({ limit: 50, offset: 0 });
+      const beforeTotals = read.mobileStatistics().totals;
+      assert.equal(before.total, 8, "前置：夹具里应有 8 条训练");
+      assert.equal(read.dashboard().totals.sessions, 8);
+
+      // 软删（v36）。**写侧**由 storage 层的用例证明（`workout-presence.test.ts` 与
+      // `import-removal-ledger.test.ts`）；这一条只证明**读侧**把它当"不在"。
+      store.database.prepare("UPDATE workouts SET deleted_at = ? WHERE id = ?")
+        .run("2026-01-01T00:00:00.000Z", "api_workout_7");
+
+      const after = read.workouts({ limit: 50, offset: 0 });
+      assert.equal(after.total, 7, "已删训练不得再出现在事实侧列表里");
+      assert.equal(after.items.some((item) => item.id === "api_session_7"), false);
+      // 🔴 分析侧**不动**：`dashboard.totals` 数的是已发布 release 的评估行（active_* 视图），
+      // 而 D4.3 明写"已发布 release 是当时的输入 + 当时的结论"，删除事实不改写历史。
+      // 于是这一条同时钉住了两侧：事实侧少一条，分析侧仍是 8 条（并在 PR5 的后续步骤里
+      // 由 `publishedAnalysis` 块带 `factDeleted: true` 标注出来）。
+      assert.equal(read.dashboard().totals.sessions, 8,
+        "已发布分析块不得因为事实被删而改写（§9.1：旧 run 仍是历史证据）");
+
+      // 🔴 数字必须**恰好**少掉那一条（夹具每条 5 km），而不是"少了一些"：
+      // 这正是 §9.1「旧分数 JOIN 新训练」在汇总上的可见形态。
+      const afterTotals = read.mobileStatistics().totals;
+      assert.equal(afterTotals.distanceKm, beforeTotals.distanceKm - 5);
+      assert.equal(afterTotals.workoutCount, beforeTotals.workoutCount - 1);
+    } finally {
+      read.close();
+    }
+  } finally {
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

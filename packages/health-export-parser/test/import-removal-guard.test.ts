@@ -33,8 +33,11 @@ async function seedHistory(root: string): Promise<{ store: RaiDatabase; xmlPath:
   return { store, xmlPath, all };
 }
 
+/** 仍在数据集里的训练数。软删（v36）之后"行还在、事实已删"，所以只数 `deleted_at IS NULL`。 */
 function workoutCount(store: RaiDatabase): number {
-  return (store.database.prepare("SELECT COUNT(*) AS count FROM workouts").get() as { count: number }).count;
+  return (store.database.prepare(
+    "SELECT COUNT(*) AS count FROM workouts WHERE deleted_at IS NULL"
+  ).get() as { count: number }).count;
 }
 
 /**

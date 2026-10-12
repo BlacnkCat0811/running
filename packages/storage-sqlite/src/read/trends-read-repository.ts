@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { sessionFactPresentConditionSql } from "../sql/fragments.js";
 
 import { SQL_UTC_OFFSET_MODIFIER } from "@rai/contracts";
 import { nullableNumber } from "./read-utils.js";
@@ -86,7 +87,8 @@ export class SqliteTrendsReadRepository {
         FROM active_ability_assessments a
         JOIN workout_features f ON f.id = a.feature_id
         JOIN active_workout_training_loads load ON load.training_session_id = a.training_session_id
-        WHERE (? IS NULL OR load.local_date >= ?)
+        JOIN training_sessions session ON session.id = a.training_session_id
+        WHERE (? IS NULL OR load.local_date >= ?) AND ${sessionFactPresentConditionSql("session")}
         ORDER BY f.workout_start_at
       `)
       .all(start, start) as Record<string, unknown>[];
@@ -98,7 +100,8 @@ export class SqliteTrendsReadRepository {
                SUM(load.training_load) AS training_load
         FROM active_ability_assessments a
         JOIN active_workout_training_loads load ON load.training_session_id = a.training_session_id
-        WHERE (? IS NULL OR load.local_date >= ?)
+        JOIN training_sessions session ON session.id = a.training_session_id
+        WHERE (? IS NULL OR load.local_date >= ?) AND ${sessionFactPresentConditionSql("session")}
         GROUP BY load.local_date
         ORDER BY local_date
       `)

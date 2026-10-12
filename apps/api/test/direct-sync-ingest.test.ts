@@ -214,8 +214,12 @@ test("删除-only 载荷：显式删除先于到达也要求分析，且不误�
 
     const db = new DatabaseSync(main, { readOnly: true });
     try {
-      assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM workouts"), 1, "只删点名的那一条");
-      assert.equal((db.prepare("SELECT id FROM workouts").get() as { id: string }).id !== "", true);
+      // 软删（v36）：行保留并标 deleted_at，所以"删掉了"= 不再是**仍在**的训练。
+      assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NULL"), 1,
+        "只删点名的那一条");
+      assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NOT NULL"), 1,
+        "被删的那条必须保留行并标记（路线版本证据不能级联消失）");
+      assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM workouts"), 2);
       assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM recompute_jobs WHERE status='queued'"), 1);
       assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM import_source_tombstones"), 1,
         "删除必须留墓碑，防止后续载荷复活它");

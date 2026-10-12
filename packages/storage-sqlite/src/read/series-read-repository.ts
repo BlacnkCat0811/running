@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
 import { nullableNumber } from "./read-utils.js";
 
@@ -88,7 +89,7 @@ export class SqliteSeriesReadRepository {
           ts.anchor_distance_km,
           w.source_category, w.source_name
         FROM training_sessions ts
-        JOIN workouts w ON w.id = ts.canonical_workout_id
+        JOIN workouts w ON w.id = ts.canonical_workout_id AND ${workoutPresentConditionSql("w")}
         WHERE ts.id = ?
       `)
       .get(trainingSessionId) as Record<string, unknown> | undefined;
@@ -460,7 +461,8 @@ export class SqliteSeriesReadRepository {
    */
   workoutMetadata(workoutId: string): string | null {
     const row = this.database
-      .prepare("SELECT metadata_json AS metadataJson FROM workouts WHERE id = ?")
+      .prepare(`SELECT metadata_json AS metadataJson FROM workouts
+        WHERE id = ? AND ${workoutPresentConditionSql()}`)
       .get(workoutId) as { metadataJson?: unknown } | undefined;
     return typeof row?.metadataJson === "string" ? row.metadataJson : null;
   }

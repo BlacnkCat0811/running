@@ -29,7 +29,7 @@ import type {
   WorkoutListItem
 } from "@rai/api-contracts";
 import { DATABASE_TIMEZONE, ISO_UTC_OFFSET, type DailyTrainingMetric } from "@rai/contracts";
-import { SqliteRecoveryFactsReadRepository, SqliteTrainingStatisticsReadRepository } from "@rai/storage-sqlite";
+import { SqliteRecoveryFactsReadRepository, SqliteTrainingStatisticsReadRepository, sessionFactPresentConditionSql } from "@rai/storage-sqlite";
 import { classifyPhysState, countNightsBelowSleepBaseline, estimateRecoveryTime } from "@rai/training-load";
 import { loadRaceReadinessEvidence } from "@rai/application";
 import { buildPeriodization } from "./plan-periodization.js";
@@ -643,7 +643,8 @@ function loadLatestCoachWorkout(database: DatabaseSync, workout: WorkoutListItem
     JOIN workout_features f ON f.id = a.feature_id
     JOIN active_workout_training_loads load ON load.training_session_id = a.training_session_id
     LEFT JOIN active_workout_zone_summaries zs ON zs.training_session_id = a.training_session_id
-    WHERE a.training_session_id = ?
+    JOIN training_sessions session ON session.id = a.training_session_id
+    WHERE a.training_session_id = ? AND ${sessionFactPresentConditionSql("session")}
   `).get(workout.id) as Record<string, unknown> | undefined;
   const exposures = parseJson<ZoneExposureRow[]>(row?.heart_rate_exposure_json, []);
   const total = exposures.reduce((sum, item) => sum + Number(item.durationSeconds ?? 0), 0);
@@ -694,7 +695,9 @@ function loadWeekSessions(database: DatabaseSync, start: string, end: string): {
       zs.heart_rate_exposure_json
     FROM active_workout_training_loads load
     LEFT JOIN active_workout_zone_summaries zs ON zs.training_session_id = load.training_session_id
+    JOIN training_sessions session ON session.id = load.training_session_id
     WHERE load.local_date >= date(?, '-21 days') AND load.local_date <= ?
+      AND ${sessionFactPresentConditionSql("session")}
     ORDER BY load.local_date, load.training_session_id
   `).all(start, end) as unknown as Array<Record<string, unknown>>;
 

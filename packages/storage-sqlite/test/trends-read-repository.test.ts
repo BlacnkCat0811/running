@@ -27,6 +27,13 @@ test("trends retain the active model run when it predates the selected window", 
     CREATE TABLE model_runs (
       id TEXT, evaluated_at TEXT, model_version TEXT, status TEXT
     );
+    -- PR5 D4：事实存在性判据要 join 这两张表（training_sessions -> workouts.deleted_at）。
+    CREATE TABLE training_sessions (
+      id TEXT, canonical_workout_id TEXT
+    );
+    CREATE TABLE workouts (
+      id TEXT, deleted_at TEXT
+    );
     CREATE TABLE active_model_run (model_run_id TEXT);
     INSERT INTO active_daily_ability_snapshots VALUES
       ('2026-07-18', 42, 0, 0.5, 'active');

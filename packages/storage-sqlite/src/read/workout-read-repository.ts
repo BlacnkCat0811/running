@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
 import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
 
@@ -185,7 +186,7 @@ export class SqliteWorkoutReadRepository {
         FROM active_ability_assessments a
         JOIN workout_features f ON f.id = a.feature_id
         JOIN training_sessions ts ON ts.id = a.training_session_id
-        JOIN workouts w ON w.id = ts.canonical_workout_id
+        JOIN workouts w ON w.id = ts.canonical_workout_id AND ${workoutPresentConditionSql("w")}
         LEFT JOIN active_workout_zone_summaries zs ON zs.training_session_id = ts.id
         ${where}
       `)
@@ -224,7 +225,7 @@ export class SqliteWorkoutReadRepository {
         FROM active_ability_assessments a
         JOIN workout_features f ON f.id = a.feature_id
         JOIN training_sessions ts ON ts.id = a.training_session_id
-        JOIN workouts w ON w.id = ts.canonical_workout_id
+        JOIN workouts w ON w.id = ts.canonical_workout_id AND ${workoutPresentConditionSql("w")}
         LEFT JOIN active_workout_zone_summaries zs ON zs.training_session_id = ts.id
         ${where}
         ORDER BY f.workout_start_at DESC
@@ -277,7 +278,7 @@ export class SqliteWorkoutReadRepository {
         FROM training_sessions ts
         JOIN active_ability_assessments a ON a.training_session_id = ts.id
         JOIN workout_features f ON f.id = a.feature_id
-        JOIN workouts w ON w.id = ts.canonical_workout_id
+        JOIN workouts w ON w.id = ts.canonical_workout_id AND ${workoutPresentConditionSql("w")}
         JOIN model_runs mr ON mr.id = a.model_run_id
         WHERE ts.id = ?
       `)
@@ -356,7 +357,8 @@ export class SqliteWorkoutReadRepository {
 
   private averageRawMetric(workoutId: string, type: string): number | null {
     const workout = this.database
-      .prepare("SELECT source_name, start_at, end_at FROM workouts WHERE id = ?")
+      .prepare(`SELECT source_name, start_at, end_at FROM workouts
+        WHERE id = ? AND ${workoutPresentConditionSql()}`)
       .get(workoutId) as Record<string, unknown> | undefined;
     if (
       typeof workout?.source_name !== "string" ||
@@ -419,7 +421,8 @@ export class SqliteWorkoutReadRepository {
     if (steps !== null && durationSeconds > 0) return steps / (durationSeconds / 60);
 
     const workout = this.database
-      .prepare("SELECT source_name, start_at, end_at FROM workouts WHERE id = ?")
+      .prepare(`SELECT source_name, start_at, end_at FROM workouts
+        WHERE id = ? AND ${workoutPresentConditionSql()}`)
       .get(workoutId) as Record<string, unknown> | undefined;
     if (
       typeof workout?.source_name !== "string" ||

@@ -4,7 +4,7 @@ import type { CanonicalHealthRecord, CanonicalWorkout } from "@rai/contracts";
 
 import type { StoredRoutePoint } from "./series-read-repository.js";
 import { nullableNumber, parseJson } from "./read-utils.js";
-import { usableRouteConditionSql } from "../sql/fragments.js";
+import { usableRouteConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
 /**
  * 固定版本的事实读取器（docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md §4）。
@@ -266,6 +266,10 @@ class SqliteFactsReader implements FactsReader {
   private workoutChunk(filter: FactsWorkoutFilter, cursor: string | null): Row[] {
     const params: Array<string> = [];
     const clauses = timeWindowClauses(filter, params);
+    // 软删行不属于**任何**代次的输入：本读取器的枚举以当前表为全集（见文件头），
+    // 而软删行在当前表里的语义就是"不在"。这条同时把文件头那句"被删除的实体在任何代次下
+    // 都不可见"的边界（D1）**继续成立** —— 判据与读侧同源，不在这里另写一遍。
+    clauses.push(workoutPresentConditionSql());
     return this.pageClause("workouts", clauses, params, cursor);
   }
 

@@ -44,7 +44,9 @@ function fixtureDatabase(): DatabaseSync {
       id TEXT PRIMARY KEY,
       source_name TEXT NOT NULL,
       metadata_json TEXT NOT NULL,
-      duration_seconds REAL
+      duration_seconds REAL,
+      -- v36（PR5-S1+S2）：事实存在性判据要读这一列；手写 schema 必须跟着生产 DDL 走。
+      deleted_at TEXT
     );
     CREATE TABLE workout_features (
       id TEXT PRIMARY KEY,

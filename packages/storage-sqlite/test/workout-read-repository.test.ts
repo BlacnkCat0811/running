@@ -11,13 +11,13 @@ test("average cadence falls back to overlapping step-count records", () => {
       workout_id TEXT, type TEXT, ordinal INTEGER, sum_value REAL, average_value REAL
     );
     CREATE TABLE workouts (
-      id TEXT, source_name TEXT, start_at TEXT, end_at TEXT
+      id TEXT, source_name TEXT, start_at TEXT, end_at TEXT, deleted_at TEXT
     );
     CREATE TABLE health_records (
       source_name TEXT, type TEXT, value_numeric REAL, start_at TEXT, end_at TEXT
     );
     INSERT INTO workouts VALUES (
-      'workout_1', 'RQ Run', '2026-07-16T12:00:00.000Z', '2026-07-16T12:01:00.000Z'
+      'workout_1', 'RQ Run', '2026-07-16T12:00:00.000Z', '2026-07-16T12:01:00.000Z', NULL
     );
     INSERT INTO health_records VALUES
       ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 80, '2026-07-16T12:00:00.000Z', '2026-07-16T12:00:30.000Z'),
@@ -40,13 +40,13 @@ test("running dynamics averages fall back to deduplicated health records", () =>
       workout_id TEXT, type TEXT, ordinal INTEGER, sum_value REAL, average_value REAL
     );
     CREATE TABLE workouts (
-      id TEXT, source_name TEXT, start_at TEXT, end_at TEXT
+      id TEXT, source_name TEXT, start_at TEXT, end_at TEXT, deleted_at TEXT
     );
     CREATE TABLE health_records (
       source_name TEXT, type TEXT, value_numeric REAL, start_at TEXT, end_at TEXT
     );
     INSERT INTO workouts VALUES (
-      'workout_2', 'Apple Watch', '2026-07-16T12:00:00.000Z', '2026-07-16T12:01:00.000Z'
+      'workout_2', 'Apple Watch', '2026-07-16T12:00:00.000Z', '2026-07-16T12:01:00.000Z', NULL
     );
     INSERT INTO health_records VALUES
       ('Apple Watch', 'HKQuantityTypeIdentifierRunningPower', 200, '2026-07-16T12:00:00.000Z', '2026-07-16T12:00:30.000Z'),

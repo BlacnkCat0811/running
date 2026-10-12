@@ -148,9 +148,17 @@ for (const excludedId of ["race", "overlapping-race"]) {
 
 test("candidate confirmation uses the latest available override and ignores future exclusions", async () => {
   await withDatabase((store, path) => {
-    store.database.exec(`INSERT INTO training_sessions
-      (id, activity_type, anchor_start_at, anchor_end_at, anchor_distance_km, status)
-      VALUES ('race', 'HKWorkoutActivityTypeRunning', '2026-09-01T00:00:00Z', '2026-09-01T00:30:00Z', 5, 'active');
+    // PR5-S1/S2：候选必须挂在**真实存在**的训练事实上（D4/清单 11：事实缺失时不用 anchor
+    // 顶一个时长出来），所以夹具要有 workout 行 + `canonical_workout_id`；
+    // 时长也从 workout 读（`activeDurationSecondsSql` 的同源判据）。
+    store.database.exec(`INSERT INTO workouts
+      (id, activity_type, source_name, source_category, source_version, start_at, end_at,
+       duration_seconds, indoor, metadata_json, raw_attributes_json, is_canonical)
+      VALUES ('race-workout', 'HKWorkoutActivityTypeRunning', 'Fixture', 'apple_watch', '1',
+        '2026-09-01T00:00:00Z', '2026-09-01T00:30:00Z', 1800, 0, '{}', '{}', 1);
+      INSERT INTO training_sessions
+      (id, activity_type, anchor_start_at, anchor_end_at, anchor_distance_km, status, canonical_workout_id)
+      VALUES ('race', 'HKWorkoutActivityTypeRunning', '2026-09-01T00:00:00Z', '2026-09-01T00:30:00Z', 5, 'active', 'race-workout');
       INSERT INTO workout_overrides (id, training_session_id, revision, eligibility_override, created_at)
       VALUES ('excluded', 'race', 1, 'exclude', '2026-09-02T08:00:00+08:00'),
         ('included', 'race', 2, 'include', '2026-09-03T08:00:00+08:00'),

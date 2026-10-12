@@ -6,7 +6,13 @@ export function importEquivalence(path: string): Record<string, { rows: number; 
   const db = new DatabaseSync(path, { readOnly: true });
   const volatile = ["id", "model_run_id", "feature_run_id", "feature_id", "training_metric_run_id", "zone_profile_id", "last_assessment_id", "computed_at", "created_at"];
   const domains: Record<string, string[]> = {
-    profile: [], health_records: [], workouts: [], workout_statistics: [], workout_events: [], workout_routes: [], route_points: [],
+    profile: [], health_records: [],
+    // `deleted_at` 是**墙上时钟**（删除发生的时刻），按本函数的既定口径（"不含作业 UUID 与
+    // 墙上时钟审计时间戳"）必须忽略 —— 两个独立进程做同一次删除会得到不同的毫秒值。
+    // ⚠️ 忽略它**不会**让"删除"变得不可见：删除同时写 tombstone 与 `import_entity_changes`
+    // （两者都在比对范围内），所以等价性判断仍然能看见删除这件事本身。
+    workouts: ["deleted_at"],
+    workout_statistics: [], workout_events: [], workout_routes: [], route_points: [],
     activity_summaries: [], entity_inventory: [],
     training_sessions: ["created_at", "updated_at"],
     import_entity_generations: ["generation"],

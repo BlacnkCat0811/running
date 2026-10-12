@@ -11,12 +11,13 @@ import { migrateModelV32 } from "./v32-migration.js";
 import { migrateModelV33 } from "./v33-migration.js";
 import { migrateModelV34 } from "./v34-migration.js";
 import { migrateModelV35 } from "./v35-migration.js";
+import { migrateModelV36 } from "./v36-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
 import { basename, dirname, join } from "node:path";
 
-import { usableRouteConditionSql } from "./sql/fragments.js";
+import { usableRouteConditionSql, workoutPresentConditionSql } from "./sql/fragments.js";
 
 import type {
   CanonicalHealthRecord,
@@ -1672,7 +1673,8 @@ const migrations: readonly Migration[] = [
   { version: 32, name: "coach_feedback_and_prediction_companions", up: migrateModelV32 },
   { version: 33, name: "healthkit_alias_source_lookup", up: migrateModelV33 },
   { version: 34, name: "sparse_fact_history_and_generation_counters", up: migrateModelV34 },
-  { version: 35, name: "route_versions_and_analysis_job_bindings", up: migrateModelV35 }
+  { version: 35, name: "route_versions_and_analysis_job_bindings", up: migrateModelV35 },
+  { version: 36, name: "workout_soft_delete_marker", up: migrateModelV36 }
 ];
 
 /**
@@ -1750,7 +1752,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   32: "127e817eb9f6371190ae8b872937eaa2ed049ac86528c76b82ccc0d740359f66",
   33: "bf321666c206a9f74500e938a7f8e8b13edb21576c9f0dd4a81da28ddce1f076",
   34: "36798b3793aa3cebc92ad6ea76285ec4a40073d030902dde81525bfa0259aa21",
-  35: "de0d2cdac1f7ac80b2e67cff026c40a3152324269e3328eba6f6c718f31611ce"
+  35: "de0d2cdac1f7ac80b2e67cff026c40a3152324269e3328eba6f6c718f31611ce",
+  36: "ff6a727de7b765bf928806db0dff59bdf937e3bdf868f379d04c95efac34d144"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -2053,7 +2056,12 @@ export class RaiDatabase {
         device = excluded.device, start_at = excluded.start_at, end_at = excluded.end_at,
         created_at = excluded.created_at, duration_seconds = excluded.duration_seconds,
         indoor = excluded.indoor, metadata_json = excluded.metadata_json,
-        raw_attributes_json = excluded.raw_attributes_json
+        raw_attributes_json = excluded.raw_attributes_json,
+        -- 🔴 权威载荷重新提到这条训练时必须**撤销软删标记**（v36）。"删错了还能从一份好档案里
+        -- 恢复"是既有契约（见 tombstone-deletion.test.ts 的"权威完整快照清除墓碑"）。
+        -- 这条不会让被墓碑挡住的增量载荷复活：parser 在 tombstoned 时**根本不 insert**
+        -- （apple-health-parser.ts 的 shouldWrite 判定），所以走到这里的都是"应当出现"的实体。
+        deleted_at = NULL
     `);
     this.insertStatisticStatement = this.database.prepare(`
       INSERT INTO workout_statistics (
@@ -2478,9 +2486,14 @@ export class RaiDatabase {
   }
 
   routesToImport(): RouteImportTarget[] {
+    // 已删训练不再"吸引"新的路线导入：它的路线行为了版本证据而保留（不级联删），
+    // 但重导一条已删训练的轨迹属于无意义写入。判据与读侧同源（`workoutPresentConditionSql`）。
     return this.database
       .prepare(
-        "SELECT id, relative_path AS relativePath FROM workout_routes WHERE relative_path IS NOT NULL"
+        `SELECT route.id, route.relative_path AS relativePath FROM workout_routes route
+         LEFT JOIN workouts workout ON workout.id = route.workout_id
+         WHERE route.relative_path IS NOT NULL
+           AND (workout.id IS NULL OR ${workoutPresentConditionSql("workout")})`
       )
       .all() as unknown as RouteImportTarget[];
   }
@@ -3188,7 +3201,12 @@ export class RaiDatabase {
     // values below are literals chosen by `kind`; the id itself stays bound.
     const table = kind === "record" ? "health_records" : kind === "workout" ? "workouts" : "activity_summaries";
     const key = kind === "activity_summary" ? "date_components" : "id";
-    const exists = this.database.prepare(`SELECT 1 FROM ${table} WHERE ${key} = ?`).get(id) !== undefined;
+    // 🔴 "存不存在"按**事实是否仍在**判定，不是"行还在不在"（v36 软删）：被软删的实体
+    // 对数据集而言就是不存在，重新观测到它必须是 `inserted`（= 恢复），否则一条权威载荷
+    // 重新提到它时 `shouldWrite` 会是 false，`deleted_at` 永远擦不掉 —— "删错了也恢复不回来"。
+    const exists = (kind === "workout"
+      ? this.database.prepare(`SELECT 1 FROM workouts WHERE id = ? AND ${workoutPresentConditionSql()}`)
+      : this.database.prepare(`SELECT 1 FROM ${table} WHERE ${key} = ?`)).get(id) !== undefined;
     const previous = this.database.prepare(`
       SELECT content_hash AS contentHash FROM import_entity_generations
       WHERE entity_kind = ? AND entity_id = ?
@@ -3318,7 +3336,9 @@ export class RaiDatabase {
       .prepare(`
         SELECT
           (SELECT COUNT(*) FROM health_records)
-          + (SELECT COUNT(*) FROM workouts)
+          -- 已软删的训练**不算**"可导入实体"：它是删除配额的分母，把已删行算进去会让
+          -- 允许删除的比例随历史删除次数越来越大（守卫被自己的历史悄悄放宽）。
+          + (SELECT COUNT(*) FROM workouts WHERE ${workoutPresentConditionSql()})
           + (SELECT COUNT(*) FROM activity_summaries) AS entityCount
       `)
       .get() as unknown as { entityCount: number };
@@ -3359,7 +3379,14 @@ export class RaiDatabase {
       activity_summary: []
     };
     const deleteRecord = this.database.prepare("DELETE FROM health_records WHERE id = ?");
-    const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");
+    // 🔴 **软删标记**，不是物理删（PR5 D4.5）：物理 `DELETE FROM workouts` 会沿
+    // `workout_routes → route_versions → route_version_points` 级联，把**已发布路线版本的
+    // 全部点**一起删掉（实测：四张表全部归零）。保留行之后，路线证据仍在，"旧 release 保持可读"
+    // 在删除场景下才成立；可见性由 `workoutPresentConditionSql()` 统一排除。
+    // `is_canonical`/`canonical_group_id` 一起清掉，保持"没有分组的训练不该是 canonical"这条既有不变量。
+    const deleteWorkout = this.database.prepare(`UPDATE workouts
+      SET deleted_at = (${nowSql}), is_canonical = 0, canonical_group_id = NULL
+      WHERE id = ? AND ${workoutPresentConditionSql()}`);
     const deleteSummary = this.database.prepare("DELETE FROM activity_summaries WHERE date_components = ?");
     const deleteGeneration = this.database.prepare(
       "DELETE FROM import_entity_generations WHERE entity_kind = ? AND entity_id = ?"
@@ -3447,7 +3474,14 @@ export class RaiDatabase {
         OR ${metadataMatches("workouts.raw_attributes_json", "HKMetadataKeySyncIdentifier")}
         OR ${metadataMatches("workouts.raw_attributes_json", "RAIHealthKitWorkoutUUID")}
       `);
-      const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");
+      // 🔴 **软删标记**，不是物理删（PR5 D4.5）：物理 `DELETE FROM workouts` 会沿
+    // `workout_routes → route_versions → route_version_points` 级联，把**已发布路线版本的
+    // 全部点**一起删掉（实测：四张表全部归零）。保留行之后，路线证据仍在，"旧 release 保持可读"
+    // 在删除场景下才成立；可见性由 `workoutPresentConditionSql()` 统一排除。
+    // `is_canonical`/`canonical_group_id` 一起清掉，保持"没有分组的训练不该是 canonical"这条既有不变量。
+    const deleteWorkout = this.database.prepare(`UPDATE workouts
+      SET deleted_at = (${nowSql}), is_canonical = 0, canonical_group_id = NULL
+      WHERE id = ? AND ${workoutPresentConditionSql()}`);
       const deleteGeneration = this.database.prepare(
         "DELETE FROM import_entity_generations WHERE entity_kind = 'workout' AND entity_id = ?"
       );

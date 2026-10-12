@@ -51,7 +51,10 @@ export {
 } from "./recompute-job-repository.js";
 export {
   activeDurationSecondsSql,
-  MODEL_RUN_SUMMARY_SELECT
+  MODEL_RUN_SUMMARY_SELECT,
+  sessionFactPresentConditionSql,
+  usableRouteConditionSql,
+  workoutPresentConditionSql
 } from "./sql/fragments.js";
 export {
   SqliteTrainingSessionRepository,

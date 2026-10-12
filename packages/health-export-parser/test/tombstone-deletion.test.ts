@@ -30,13 +30,18 @@ ${workouts.map((workout) => `<Workout workoutActivityType="${workoutTypes.runnin
 </HealthData>`;
 }
 
+/** 仍在数据集里的训练数。软删（v36）之后"行还在、事实已删"，所以只数 `deleted_at IS NULL`。 */
 function workoutCount(store: RaiDatabase): number {
-  return (store.database.prepare("SELECT COUNT(*) AS count FROM workouts").get() as { count: number }).count;
+  return (store.database.prepare(
+    "SELECT COUNT(*) AS count FROM workouts WHERE deleted_at IS NULL"
+  ).get() as { count: number }).count;
 }
 
+/** 仍在数据集里的训练 id（软删行不算：`deleted_at` 非空 = 事实已删）。 */
 function workoutIds(store: RaiDatabase): string[] {
-  return (store.database.prepare("SELECT id FROM workouts ORDER BY start_at").all() as unknown as Array<{ id: string }>)
-    .map((row) => row.id);
+  return (store.database.prepare(
+    "SELECT id FROM workouts WHERE deleted_at IS NULL ORDER BY start_at"
+  ).all() as unknown as Array<{ id: string }>).map((row) => row.id);
 }
 
 async function openStore(root: string, xmlPath: string): Promise<RaiDatabase> {

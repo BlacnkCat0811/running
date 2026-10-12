@@ -38,11 +38,11 @@
 
 | # | 事实 | 位置 |
 |---|---|---|
-| 1 | 读侧唯一权威发布指针是单行表 `active_model_run`；所有 `active_*` 视图每次查询重新 JOIN 它 | `database.ts:516-520`、`:932-938`、`:948-955` |
+| 1 | 读侧唯一权威发布指针是单行表 `active_model_run`；所有 `active_*` 视图每次查询重新 JOIN 它 | `database.ts:517-521`、`:932-938`、`:948-955` |
 | 2 | 第二条发布指针 `active_model_release` 指向已过 gate 的 bundle；发布 = 单行 `ON CONFLICT DO UPDATE` | `v2-migration.ts:33-35`、`model-release-repository.ts:89-91` |
-| 3 | 训练列表与计数：assessment × session × workout × zone summary 一条 SQL；`has_route` 读**当前** `workout_routes` 且只判 `point_count > 0` | `read/workout-read-repository.ts:181-194`、`:218-232`；对照 `sql/fragments.ts:36-38` |
-| 4 | 详情行：`JOIN workouts w` + `JOIN model_runs mr`，同时给出分析分数与当前 `w.indoor/source_category` | `read/workout-read-repository.ts:245-284` |
-| 5 | 详情路线点、`sessionForSeries`、第二条路线读路径都读**当前** `workout_routes`；删 workout 后 `sessionForSeries` 返回 `null`（404） | `read/series-read-repository.ts:84-95`、`:107-116`、`:232-233` |
+| 3 | 训练列表与计数：assessment × session × workout × zone summary 一条 SQL；`has_route` 读**当前** `workout_routes` 且只判 `point_count > 0` | `read/workout-read-repository.ts:182-195`、`:218-232`；对照 `sql/fragments.ts:36-38` |
+| 4 | 详情行：`JOIN workouts w` + `JOIN model_runs mr`，同时给出分析分数与当前 `w.indoor/source_category` | `read/workout-read-repository.ts:246-285` |
+| 5 | 详情路线点、`sessionForSeries`、第二条路线读路径都读**当前** `workout_routes`；删 workout 后 `sessionForSeries` 返回 `null`（404） | `read/series-read-repository.ts:85-97`、`:107-116`、`:232-233` |
 | 6 | `mobileTodayWithExecutablePlan` 一个响应混分析视图与当前事实（`canonical_nights`/`health_records`/`import_manifest`） | `apps/api/src/data.ts:570-596`、`:598-613`、`:636-646` |
 | 7 | 今日/周/28 天汇总多条 SQL **不 JOIN** `workouts`：删训练后其分析负荷仍计入里程、次数、能量、`planActual` | `data.ts:603`、`:620`、`:641`、`:655`、`:713` |
 | 8 | 周跑步汇总、月统计 JOIN `training_sessions`（当前事实）判 `activity_type`，无删除判据 | `data.ts:665-672`、`:975-989` |
@@ -246,9 +246,9 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 |---|---|---|
 | 1 | `sql/fragments.ts`（新增，对照 `:36-38`） | 新增 `workoutPresentConditionSql(alias)`；`read/` 与 `apps/api` 的事实侧 JOIN 全部引用它；配结构判据（全仓 `JOIN workouts` 站点必须引用） |
 | 2 | `database.ts:3358`/`:3387`/`:3446`/`:3485`（写侧，受 D4.5 约束） | `workouts.deleted_at` 软删标记（只新增可空列）+ 两处调用改标记；tombstone/账目照旧写 |
-| 3 | `read/workout-read-repository.ts:181-194`、`:196-235` | 加存在性判据；`has_route` 改用 `usableRouteConditionSql`（与 `facts-reader.ts:166-183` 同源）；返回两块视图 |
-| 4 | `read/workout-read-repository.ts:245-284` | 分析块走 `workout_features` 冻结列；`indoor`/`source_category` 移入事实块；加存在性判据 |
-| 5 | `read/series-read-repository.ts:84-95`、`:107-116`、`:232-233` | 分析块路线改读版本表（`complete` + 指针 + `route_version_points` 按 `sequence`）；老库退化读 `route_points` 并标 `routeVersionId: null`；`sessionForSeries` 保持 404 语义；#5 的三处共用一个内部函数 |
+| 3 | `read/workout-read-repository.ts:182-195`、`:196-235` | 加存在性判据；`has_route` 改用 `usableRouteConditionSql`（与 `facts-reader.ts:166-183` 同源）；返回两块视图 |
+| 4 | `read/workout-read-repository.ts:246-285` | 分析块走 `workout_features` 冻结列；`indoor`/`source_category` 移入事实块；加存在性判据 |
+| 5 | `read/series-read-repository.ts:85-97`、`:107-116`、`:232-233` | 分析块路线改读版本表（`complete` + 指针 + `route_version_points` 按 `sequence`）；老库退化读 `route_points` 并标 `routeVersionId: null`；`sessionForSeries` 保持 404 语义；#5 的三处共用一个内部函数 |
 | 6 | `data.ts:598-613`、`:615-634`、`:636-646`、`:651-656`、`:711-714` | 全部 JOIN `training_sessions` + 存在性判据；或在分析块保留并标 `factDeleted`——**同一个数字不许两处不一致** |
 | 7 | `data.ts:665-672`、`:975-989` | 周跑步/月统计加存在性判据 |
 | 8 | `read/training-statistics-read-repository.ts:66-75`、`read/trends-read-repository.ts:80-91` | 加存在性判据；`rows` 拆进两块 |
@@ -295,24 +295,77 @@ A13 的"新数据持续到达仍有结果可读"的**真并发**时序（本环�
 
 ## 5. 实施顺序（每步都能单独跑绿）
 
-| 步 | 内容 | 单独绿的判据 | 阻塞关系 |
-|---|---|---|---|
-| S1 | `workoutPresentConditionSql` + 事实侧排除已删（清单 1、3、6、7、8、11、12） | C3 转绿；**旧响应逐字节不变**（此时还没有新字段） | 🔴 **必须早于 PR4 2e** |
-| S2 | `deleted_at` 软删标记 + 两处写路径 + `import_equivalence` 复核（清单 2） | C7 转绿；既有删除保护用例（A03）全绿 | 🔴 **必须早于 PR4 2e** |
-| S3 | `versions`/`freshness`（D2）+ 绑定列可读 + `metadata` 可选字段（清单 18、9） | C4 的 `generations_absent` 分支转绿；C10 转绿 | 与 S1/S2 同批发布 |
-| S4 | 两块视图 + handshake 能力（清单 3、4、8） | C1、C2、C9 转绿 | 需 S3 |
-| S5 | 详情路线走版本表（清单 5） | C8 转绿（含老库退化分支） | 需 S4 |
-| S6 | 今日/周/统计/趋势/计划快照数值修正（清单 6、7、8、9、10） | C3 在四个端点分别转绿 | 需 S1 |
-| S7 | `executable` 与锁课接入新鲜度（清单 14） | C4 全分支转绿 | 需 S3 |
-| S8 | coach/预测 identity 与 `dataThroughAt` 绑定（清单 10、15） | A13 的"迟到任务不倒退"在**读侧**有断言 | 需 S3 |
-| S9 | 缓存五元组 + `versionSnapshot()`（清单 16） | C6 转绿 | 需 S3 |
-| S10 | `FactsReader.routeFor` 版本语义收尾（清单 17） | 路线读取两条路径同源 | 需 S5 |
-| S11 | `route_points` 双写退役（D7） | C8 仍绿（新版本不再写 `route_points`） | 需 S5 **且** PR4 §2.4 评审同意 |
+| 步 | 内容 | 单独绿的判据 | 阻塞关系 | 状态 |
+|---|---|---|---|---|
+| S1 | `workoutPresentConditionSql` + 事实侧排除已删（清单 1、3、6、7、8、11、12） | C3 转绿；**旧响应逐字节不变**（此时还没有新字段） | 🔴 **必须早于 PR4 2e** | ✅ 已完成（与 S2 同批，见 §8） |
+| S2 | `deleted_at` 软删标记 + 两处写路径 + `import_equivalence` 复核（清单 2） | C7 转绿；既有删除保护用例（A03）全绿 | 🔴 **必须早于 PR4 2e** | ✅ 已完成（与 S1 同批，见 §8） |
+| S3 | `versions`/`freshness`（D2）+ 绑定列可读 + `metadata` 可选字段（清单 18、9） | C4 的 `generations_absent` 分支转绿；C10 转绿 | 与 S1/S2 同批发布 | ⛔ 未做 |
+| S4 | 两块视图 + handshake 能力（清单 3、4、8） | C1、C2、C9 转绿 | 需 S3 | ⛔ 未做 |
+| S5 | 详情路线走版本表（清单 5） | C8 转绿（含老库退化分支） | 需 S4 | ⛔ 未做 |
+| S6 | 今日/周/统计/趋势/计划快照数值修正（清单 6、7、8、9、10） | C3 在四个端点分别转绿 | 需 S1 | ⛔ 未做 |
+| S7 | `executable` 与锁课接入新鲜度（清单 14） | C4 全分支转绿 | 需 S3 | ⛔ 未做 |
+| S8 | coach/预测 identity 与 `dataThroughAt` 绑定（清单 10、15） | A13 的"迟到任务不倒退"在**读侧**有断言 | 需 S3 | ⛔ 未做 |
+| S9 | 缓存五元组 + `versionSnapshot()`（清单 16） | C6 转绿 | 需 S3 | ⛔ 未做 |
+| S10 | `FactsReader.routeFor` 版本语义收尾（清单 17） | 路线读取两条路径同源 | 需 S5 | ⛔ 未做 |
+| S11 | `route_points` 双写退役（D7） | C8 仍绿（新版本不再写 `route_points`） | 需 S5 **且** PR4 §2.4 评审同意 | ⛔ 未做 |
 
 **🔥 解锁 PR4 2e 的最小 PR5 子集 = S1 + S2。** 只有这两步能同时挡住
 ①已删训练的负荷进入当前汇总（C3）与 ②级联销毁已发布路线的版本内容（C7）。
 建议 S3 同批带上，但它在**语义上**不阻塞 2e——2e 不改变 `executable` 的判据。
 ⛔ 顺序不可交换：S4 之前必须 S3（否则新块没有 `versions` 可填）；S7 之前必须 S3；S11 之前必须 S5。
+
+---
+
+## 5.1 S1 + S2 的实测证据（2026-10-13，与 PR4 步骤 2c/2d 同轮）
+
+**结论先行**：`deltaMode: "full"`（PR4 2e）的前置已满足 —— 删除不再级联销毁路线证据，
+且已删训练不再进入任何事实侧汇总。
+
+**写侧（S2）**
+
+- 新迁移 **v36 `workout_soft_delete_marker`**：只 `ALTER TABLE workouts ADD COLUMN deleted_at TEXT`，
+  可空、无默认值（老库补迁移后所有行读作"未删除"）；冻结校验和已追加，历史项一个没动。
+- 两处 `DELETE FROM workouts` → `UPDATE ... SET deleted_at = <now>, is_canonical = 0,
+  canonical_group_id = NULL WHERE id = ? AND <presence>`。tombstone 与账目照旧写。
+- **恢复语义**：`insertWorkout` 的 `ON CONFLICT DO UPDATE` 增加 `deleted_at = NULL`，并且
+  `observeImportEntity` 的"存不存在"改为按**事实是否存在**判定（软删行算"不存在"）——
+  否则一条权威载荷重新提到它时 `shouldWrite` 为 false，`deleted_at` 永远擦不掉，
+  "删错了还能从好档案里恢复"这条既有契约就断了。墓碑仍拦住增量载荷（parser 的 `shouldWrite`），
+  实测"删除是持久的"没有被改坏。
+- `countImportableEntities()`（删除配额的分母）改为只数仍在的训练 —— 否则允许删除的比例会随
+  历史删除次数悄悄变大。
+- `canonicalize.ts` 的 `loadRunningWorkouts` 加同一判据：已删训练不得再被重新分组，
+  否则它会重新长出一个 session。
+- `import_equivalence` 的 `workouts` 域忽略 `deleted_at`（墙上时钟；删除这件事本身由
+  tombstone 与账目承载，二者都在比对范围内）。
+
+**读侧（S1）**
+
+- 新判据只在 `sql/fragments.ts` 一处：`workoutPresentConditionSql(alias)`（事实存在性）与
+  `sessionFactPresentConditionSql(sessionAlias)`（会话级，**组合**前者）。
+- 引用它的读路径：`read/workout-read-repository.ts`（列表/计数/详情/两处按 id 读）、
+  `read/series-read-repository.ts`（会话行 + 元数据）、`read/facts-reader.ts`（固定代次读）、
+  `read/trends-read-repository.ts`、`read/training-statistics-read-repository.ts`、
+  `apps/api/src/data.ts`（今日/周/四周/planActual/统计/趋势锚点/qualityDates/成绩候选/
+  coach 事实）、`apps/api/src/mobile-read.ts`（两处）、`apps/api/src/coach-loop-routes.ts`（锁课校验）、
+  `activeDurationSecondsSql`。
+- 结构判据（`packages/storage-sqlite/test/workout-presence.test.ts`）：全仓**只有**
+  `sql/fragments.ts` 允许出现 `deleted_at IS NULL` 字面量；列出的每个事实侧文件里，
+  每一处 `FROM/JOIN workouts` 所在的语句都必须引用那条判据。
+
+**行为判据**：C3（`apps/api/test/data.test.ts` 新增用例：软删一条之后，事实侧列表 8→7、
+汇总距离**恰好**少 5 km）、C7（`workout-presence.test.ts`：软删后 `route_version_points` 点数不变、
+已发布版本行与指针不动）、会话级判据、v36 列形状。
+
+**收紧的真实代价（已核实）**：会话级判据要求会话挂在真实存在的训练事实上。生产里只有两条写
+`training_sessions` 的路径（`canonicalize.ts` 总带 `canonical_workout_id`；`import-worker.ts` 从既有行复制），
+唯一为空的来源是老库里"workout 被物理删过"（`ON DELETE SET NULL`）—— 那正是要隐藏的行。
+凡"夹具里造了没有 workout 的会话"的测试必须补真实事实，**不许放宽判据**。
+
+**突变验证（3 处，全部被精确捕获）**：判据换成 `1 = 1` ⇒ 5 条转红（含 C3）；
+软删换回物理删 ⇒ C7 转红；会话级判据换成 `1 = 1` ⇒ C3 与会话级用例转红。
+
+**回归**：storage-sqlite 154/154、parser 146/146、`tsc`（pure + full）EXIT=0。
 
 ---
 

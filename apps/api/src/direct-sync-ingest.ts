@@ -199,10 +199,16 @@ export function installDirectSyncWriteGuards(db: DatabaseSync): void {
     PRIMARY KEY (entity_kind, entity_id))`);
   for (const [table, kind] of [["health_records", "record"], ["workouts", "workout"]] as const) {
     for (const event of ["INSERT", "UPDATE", "DELETE"] as const) {
+      // 🔴 UPDATE 有**两种**语义：普通更正 vs **软删标记**（v36 把物理删除改成了
+      // `deleted_at` 标记）。写进 `workouts` 的那条语句是 UPDATE，但账本里它必须是 `removed`。
+      // 判据直接用 `deleted_at`（与读侧同源的列），所以"软删"这件事在三种事件下都能被正确分类；
+      // 漏掉这一条会让**每一次删除批次**在提交前被自己的守卫拒掉（实测就是这条先红）。
+      const removed = event === "DELETE" ? "1"
+        : event === "UPDATE" && table === "workouts" ? "(NEW.deleted_at IS NOT NULL)" : "0";
       db.exec(`CREATE TEMP TRIGGER ${quoted(`rai_direct_sync_track_${kind}_${event}`)}
         AFTER ${event} ON main.${quoted(table)} BEGIN
           INSERT OR REPLACE INTO rai_direct_sync_writes VALUES
-            ('${kind}', ${event === "DELETE" ? "OLD" : "NEW"}.id, ${event === "DELETE" ? 1 : 0});
+            ('${kind}', ${event === "DELETE" ? "OLD" : "NEW"}.id, ${removed});
         END`);
     }
   }

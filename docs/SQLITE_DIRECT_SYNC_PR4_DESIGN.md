@@ -272,6 +272,11 @@ inactive/tombstone 身份…不让 raw FK 级联删掉不可变 release 所需�
 ⚠️ 与 2e 的关系是**顺序**关系，不是"2e 可以顺手做 S1/S2"：S1/S2 必须在 2e 之前单独跑绿
 （PR5 设计 §5 给了各自的判据）。
 
+✅ **2026-10-13：S1 + S2 已落地**（与本文档的 2c/2d 同轮，证据见
+[PR5 设计 §5.1](SQLITE_DIRECT_SYNC_PR5_DESIGN.md)）：`workouts.deleted_at` 软删（v36）、
+唯一存在性判据 `workoutPresentConditionSql()` 覆盖全部事实侧读路径、C3/C7 两条判据转绿、
+3 处突变被精确捕获。⇒ **2e 的前置清单已清空**，放开 `deltaMode: "full"` 只剩它自己的验收。
+
 ### 7.1 撰写后修订（2026-10-13，实施 2a/2b 时定下）
 
 **修订一：分类事实的来源改为"批次账本"，不是第二遍 XML 扫描。**
