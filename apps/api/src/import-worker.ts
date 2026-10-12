@@ -29,6 +29,7 @@ import {
 import { isStructurallyReadable } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
 import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
+import { dataOnlyBaselineContract, type DataOnlyImportResult } from "./data-only-import.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 import { RuntimeStateStore } from "./runtime-state.js";
@@ -185,6 +186,8 @@ export function parseNativeEngineMessage(message: unknown): {
 
 export interface ImportQueueOptions {
   engine?: ImportExecutionEngine;
+  /** Roll back to the candidate-publication path without changing sync identity. */
+  dataOnlyFastPath?: boolean;
   scope: string;
   admission: TaskAdmission;
   maxPending?: number;
@@ -492,6 +495,7 @@ export class ImportWorker {
     let auditPublication: StagedAuditFiles | null = null;
     let terminalSucceeded = false;
     let publishTerminalState: (() => void) | null = null;
+    let fastPathAttempted = false;
     try {
       job.status = "running";
       this.persistJobs();
@@ -544,6 +548,36 @@ export class ImportWorker {
           };
         };
         return;
+      }
+      if (job.queue && this.queueOptions && this.queueOptions.dataOnlyFastPath !== false
+          && engine.name === "typescript" && engine.version === NATIVE_VERSION
+          && job.preserveAbsent === true && existsSync(this.databasePath)) {
+        payloadSha256 = await this.payloadSha256(job, engine);
+        this.assertNotClosing();
+        if (payloadSha256 !== null) {
+          job.phase = "activate";
+          job.message = "正在按增量事务保存原始健康记录";
+          this.persistJobs();
+          fastPathAttempted = true;
+          const fast = await timing.measure("dataOnlyApply", () => this.databaseTask<DataOnlyImportResult>({
+            operation: "data-only", input: {
+              databasePath: this.databasePath, inputPath: job.inputPath, jobId: job.id,
+              payloadSha256: payloadSha256!, startedAtMs
+            }
+          }));
+          if (fast) {
+            terminalSucceeded = true;
+            publishTerminalState = () => {
+              job.status = "succeeded"; job.phase = "completed"; job.error = null;
+              job.summary = fast.summary; job.completedAt = new Date().toISOString();
+              job.message = fast.replayed ? "已恢复完成的增量事务，无需重复入库"
+                : "原始健康记录已增量保存，无需重算或切换数据库";
+            };
+            return;
+          }
+          fastPathAttempted = false;
+          this.assertNotClosing();
+        }
       }
       await this.removeDatabaseFiles(stagingDatabase);
       this.assertNotClosing();
@@ -690,6 +724,12 @@ export class ImportWorker {
       // 锚点不可能先于它所描述的数据出现，激活失败回滚时也随库一起消失。
       payloadSha256 ??= await this.payloadSha256(job, engine);
       this.recordPayloadAnchor(stagingDatabase, payloadSha256);
+      const auditedCandidate = new DatabaseSync(stagingDatabase);
+      try {
+        auditedCandidate.prepare("DELETE FROM import_manifest WHERE key='audit_report_pending_version'").run();
+        auditedCandidate.prepare("INSERT OR REPLACE INTO import_manifest(key,value) VALUES ('data_only_baseline_contract',?)")
+          .run(dataOnlyBaselineContract());
+      } finally { auditedCandidate.close(); }
       // 拆成两段（互斥，不外包总量）：审计文件发布 vs 换库本身。
       // 线上这里曾累计到 258 s，拆开才知道是 `stageAuditReports` 还是 `activateDatabase` 在吃时间。
       auditPublication = await timing.measure("activationAudit", () => this.prepareAuditReports(
@@ -729,6 +769,20 @@ export class ImportWorker {
         };
       };
     } catch (error) {
+      // The SQLite commit may have completed just before a worker lost its
+      // reply or shutdown interrupted the parent. Never report a committed
+      // delta as failed: its receipt is in the SAME transaction as its facts.
+      const committedDelta = fastPathAttempted ? readImportReceipt(this.databasePath, job.id) : null;
+      if (committedDelta) {
+        terminalSucceeded = true;
+        publishTerminalState = () => {
+          job.status = "succeeded"; job.phase = "completed"; job.error = null;
+          job.summary = committedDelta; job.completedAt = new Date().toISOString();
+          job.message = "增量事务已提交，已从持久回执恢复成功结果";
+        };
+        process.stderr.write(`Recovered committed data-only import ${job.id} after its worker reply was lost.\n`);
+        return;
+      }
       this.onDatabaseError(error);
       let failure: unknown = error;
       try {
@@ -883,7 +937,8 @@ export class ImportWorker {
    * SQLite connection on a separate thread, and propagate termination as a
    * task failure, never as evidence that a healthy database is corrupt. */
   private databaseTask<T>(task: ImportDatabaseTask, stage = task.operation === "verify"
-    ? "database_quick_check" : task.operation === "audit" ? "final_audit_build" : "database_checkpoint"): Promise<T> {
+    ? "database_quick_check" : task.operation === "audit" ? "final_audit_build"
+      : task.operation === "data-only" ? "data_only_transaction" : "database_checkpoint"): Promise<T> {
     const started = performance.now();
     return new Promise<T>((resolveResult, reject) => {
       const thread = new Worker(new URL("./import-database-bootstrap.mjs", import.meta.url), { workerData: task });

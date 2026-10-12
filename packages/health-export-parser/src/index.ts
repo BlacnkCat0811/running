@@ -1,5 +1,10 @@
 export { parseAppleHealthXml } from "./apple-health-parser.js";
 export {
+  DATA_ONLY_RECORD_TYPES, DATA_ONLY_MAX_XML_BYTES, DATA_ONLY_MAX_RECORDS,
+  DATA_ONLY_WRITE_GUARD, RecordDeltaNotEligibleError, isDataOnlyRecordXml
+} from "./record-delta-policy.js";
+export { parseHealthSyncManifest, readHealthSyncManifest } from "./sync-manifest.js";
+export {
   prepareNative, nativeElevationGains, importEngine, nativeFallback, nativeBinary, NativeWorkerError,
   NATIVE_PROTOCOL, NATIVE_VERSION, NATIVE_OPERATIONS,
   type ImportEngine, type NativeOptions, type NativeMetrics, type NativeOperation

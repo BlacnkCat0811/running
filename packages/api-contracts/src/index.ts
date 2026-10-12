@@ -503,7 +503,7 @@ export interface CommandResponse {
  * 而独立进程做同一个备份只要 12.4 s ⇒ 旧口径把三件事/两件事糊在一个数字里，无法定位。
  * 旧口径对照：`backup` ≈ 三者之和，`activation` = `activationAudit + activationSwap`。
  */
-export type ImportStage = "backupCapacity" | "backupCopy" | "backupVerify" | "stagingCopy" |
+export type ImportStage = "dataOnlyApply" | "backupCapacity" | "backupCopy" | "backupVerify" | "stagingCopy" |
   "parseImport" | "changeAnalysis" | "recompute" | "activationAudit" | "activationSwap" | "cleanup";
 
 export interface ImportJobPerformance {

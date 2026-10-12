@@ -252,6 +252,35 @@ async function hashRouteFile(path: string, hash: Hash): Promise<void> {
   for await (const chunk of stream) hash.update(chunk as Buffer);
 }
 
+function hashSyncManifest(hash: Hash, raw: string): void {
+  let content = raw;
+  try {
+    const manifest = JSON.parse(raw) as Record<string, unknown>;
+    const semantics = {
+      version: manifest.version,
+      sourceScope: manifest.sourceScope,
+      deletedSourceIds: Array.isArray(manifest.deletedSourceIds)
+        ? [...new Set(manifest.deletedSourceIds.filter((id): id is string => typeof id === "string"))].sort() : []
+    };
+    content = JSON.stringify(manifest.version === 2 ? {
+      ...semantics,
+      deletedRecords: Array.isArray(manifest.deletedRecords)
+        ? [...new Set(manifest.deletedRecords.map((item) => {
+          const record = item as { type?: unknown; uuid?: unknown } | null;
+          return JSON.stringify([record?.type, typeof record?.uuid === "string" ? record.uuid.toLowerCase() : record?.uuid]);
+        }))].sort() : manifest.deletedRecords
+    } : semantics);
+  } catch { /* An invalid manifest must remain distinct and fail during import. */ }
+  hash.update(`\0sync-manifest\0${content}\0`);
+}
+
+/** Byte-compatible digest of a captured, route-free payload, not a reread. */
+export function digestHealthKitRecordSnapshot(xmlText: string, manifestText: string): string {
+  const hash = createHash("sha256").update(stripExportDate(xmlText));
+  hashSyncManifest(hash, manifestText);
+  return hash.digest("hex");
+}
+
 export async function digestHealthKitExportContent(exportRoot: string): Promise<string> {
   const xmlPath = existsSync(resolve(exportRoot, "export.xml"))
     ? resolve(exportRoot, "export.xml")
@@ -262,27 +291,7 @@ export async function digestHealthKitExportContent(exportRoot: string): Promise<
   // manifest semantics so upload deduplication cannot discard those events.
   const manifestPath = findSyncManifestPath(exportRoot);
   if (manifestPath) {
-    const raw = readFileSync(manifestPath, "utf8");
-    let content = raw;
-    try {
-      const manifest = JSON.parse(raw) as Record<string, unknown>;
-      const semantics = {
-        version: manifest.version,
-        sourceScope: manifest.sourceScope,
-        deletedSourceIds: Array.isArray(manifest.deletedSourceIds)
-          ? [...new Set(manifest.deletedSourceIds.filter((id): id is string => typeof id === "string"))].sort()
-          : []
-      };
-      content = JSON.stringify(manifest.version === 2 ? {
-        ...semantics,
-        deletedRecords: Array.isArray(manifest.deletedRecords)
-          ? [...new Set(manifest.deletedRecords.map((item) => {
-            const record = item as { type?: unknown; uuid?: unknown } | null;
-            return JSON.stringify([record?.type, typeof record?.uuid === "string" ? record.uuid.toLowerCase() : record?.uuid]);
-          }))].sort() : manifest.deletedRecords
-      } : semantics);
-    } catch { /* An invalid manifest must remain distinct and fail during import. */ }
-    hash.update(`\0sync-manifest\0${content}\0`);
+    hashSyncManifest(hash, readFileSync(manifestPath, "utf8"));
   }
   const routeRoot = resolve(exportRoot, "workout-routes");
   if (existsSync(routeRoot)) {

@@ -165,6 +165,8 @@ const publicReadHosts = new Set((process.env.RAI_PUBLIC_HOSTS ?? "")
 if (!Number.isFinite(maxImportZipBytes) || maxImportZipBytes <= 0) {
   throw new Error("RAI_IMPORT_MAX_ZIP_BYTES must be a positive number");
 }
+const dataOnlyFastPathSetting = process.env.RAI_IMPORT_DATA_ONLY_FAST_PATH ?? "1";
+if (!["0", "1"].includes(dataOnlyFastPathSetting)) throw new Error("RAI_IMPORT_DATA_ONLY_FAST_PATH must be 0 or 1");
 const releaseDatabasePublicationLock = acquireDatabasePublicationLock(databasePath, "api");
 let publicationLockReleased = false;
 const releasePublicationLock = (): void => {
@@ -472,6 +474,7 @@ const importWorker: ImportWorker = new ImportWorker(
     assertAccepting: assertDatasetAccepting,
     admission: taskAdmission.owner("import"),
     engine: importExecutionEngine,
+    dataOnlyFastPath: dataOnlyFastPathSetting === "1",
     onRecoveryRequired: () => {
       databaseRecoveryRequired = true;
       invalidateDatabaseReadiness();

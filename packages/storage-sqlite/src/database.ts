@@ -8,6 +8,7 @@ import { migrateModelV29 } from "./v29-migration.js";
 import { migrateModelV30 } from "./v30-migration.js";
 import { migrateModelV31 } from "./v31-migration.js";
 import { migrateModelV32 } from "./v32-migration.js";
+import { migrateModelV33 } from "./v33-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1643,7 +1644,8 @@ const migrations: readonly Migration[] = [
   { version: 29, name: "unlinked_performance_event_label_invalidation", up: migrateModelV29 },
   { version: 30, name: "healthkit_record_source_identity", up: migrateModelV30 },
   { version: 31, name: "healthkit_record_aliases_and_source_facts", up: migrateModelV31 },
-  { version: 32, name: "coach_feedback_and_prediction_companions", up: migrateModelV32 }
+  { version: 32, name: "coach_feedback_and_prediction_companions", up: migrateModelV32 },
+  { version: 33, name: "healthkit_alias_source_lookup", up: migrateModelV33 }
 ];
 
 /**
@@ -1718,7 +1720,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   29: "02e5468e61e6202bb2e126019b6c44d0137ece87649d04c018d2b5db3d4bb413",
   30: "f9bbf0499b467c731679e6b92aa6541983793503851b24c885d3a5b827021d4c",
   31: "bcc34b942bb696ccc500629fcac865773199128e351290bea776772a359bb3bf",
-  32: "127e817eb9f6371190ae8b872937eaa2ed049ac86528c76b82ccc0d740359f66"
+  32: "127e817eb9f6371190ae8b872937eaa2ed049ac86528c76b82ccc0d740359f66",
+  33: "bf321666c206a9f74500e938a7f8e8b13edb21576c9f0dd4a81da28ddce1f076"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -2664,14 +2667,15 @@ export class RaiDatabase {
   /** Explicit v2 events only. Missing samples/denied permissions never delete.
    * Shared IDs retain the facts of a live owner, not the deleted owner's value. */
   removeHealthKitRecords(
-    deletions: readonly { type: string; uuid: string }[], batchId?: string, generation = "full-import"
+    deletions: readonly { type: string; uuid: string }[], batchId?: string, generation = "full-import",
+    options?: { currentBatchOnly?: boolean }
   ): number {
     this.begin();
     let removed = 0;
     this.markHealthKitRecordDeletions(deletions, batchId);
     // Include earlier tombstones whose UUID only became resolvable in this
     // payload. A deletion-before-arrival must also protect subsequent legacy XML.
-    const resolved = this.database.prepare(`
+    const resolved = options?.currentBatchOnly ? [] : this.database.prepare(`
       SELECT s.sample_type AS type, s.sample_uuid AS uuid
       FROM healthkit_record_sources s
       JOIN import_source_tombstones tomb ON tomb.entity_kind = 'record'

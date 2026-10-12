@@ -12,11 +12,13 @@ import type {
 import { CONTRACT_VERSION } from "@rai/contracts";
 import { SaxesParser, type SaxesTagPlain } from "saxes";
 
-import { RaiDatabase } from "./database.js";
+import { RaiDatabase, SEED_CONTENT_HASH } from "./database.js";
 import { evaluateRemovalGuard, ImportRemovalGuardError } from "./import-guard.js";
 import { prepareNative, type NativeOptions } from "./native-worker.js";
 import { NativeRecordWriter } from "./native-record-writer.js";
 import { validSampleUUID, type HealthKitRecordDeletion } from "./sync-manifest.js";
+import { identityAlgorithmFingerprint } from "./identity-algorithm.js";
+import { isDataOnlyRecordXml, RecordDeltaNotEligibleError } from "./record-delta-policy.js";
 import {
   addMetadata,
   classifySource,
@@ -140,6 +142,13 @@ export interface AppleHealthParseOptions {
   deletedWorkoutIds?: readonly string[];
   deletedRecords?: readonly HealthKitRecordDeletion[];
   healthKitRecordIdentity?: boolean;
+  /** Narrow live-DB transaction path. The parser owns BEGIN/COMMIT; callbacks
+   * must only use this connection and cannot commit or flush independently. */
+  recordDelta?: {
+    xmlText: string;
+    onBegin(): void;
+    beforeCommit(result: AppleHealthParseResult, xmlSha256: string): void;
+  };
 }
 
 function attributesOf(tag: SaxesTagPlain): Record<string, string> {
@@ -216,6 +225,25 @@ function buildRecord(draft: RecordDraft): CanonicalHealthRecord | null {
   };
 }
 
+/** Only used by the live transaction path. A trigger that silently ignores or
+ * rewrites a write must fail before the receipt/COMMIT, not report acceptance. */
+function assertRecordDeltaFact(
+  store: RaiDatabase, expected: CanonicalHealthRecord, category: string, attributes: Record<string, string>
+): void {
+  const row = store.database.prepare(`SELECT id,type,source_name AS sourceName,source_version AS sourceVersion,
+    device,unit,value_numeric AS numericValue,value_text AS textValue,start_at AS startAt,end_at AS endAt,
+    created_at AS createdAt,metadata_json AS metadata,source_category AS category,raw_attributes_json AS attributes
+    FROM health_records WHERE id=?`).get(expected.id);
+  if (!row) throw new Error("Record delta fact failed its pre-commit assertion");
+  const { category: actualCategory, attributes: actualAttributes, ...actual } = row;
+  actual.metadata = JSON.parse(String(actual.metadata));
+  if (actualCategory !== category ||
+      stableId("fact", [actual]) !== stableId("fact", [expected]) ||
+      stableId("attributes", [JSON.parse(String(actualAttributes))]) !== stableId("attributes", [attributes])) {
+    throw new Error("Record delta fact failed its pre-commit assertion");
+  }
+}
+
 function buildWorkout(draft: WorkoutDraft): CanonicalWorkout | null {
   const attributes = draft.attributes;
   const activityType = attributes.workoutActivityType;
@@ -278,18 +306,23 @@ export async function parseAppleHealthXml(
   options: AppleHealthParseOptions
 ): Promise<AppleHealthParseResult> {
   // The native worker writes only a disposable spool before the import transaction starts.
-  const native = await prepareNative("health", xmlPath, options.native ?? {});
+  if (options.recordDelta && (options.atomic === false || !options.healthKitRecordIdentity
+      || !options.incremental?.preserveAbsent || !isDataOnlyRecordXml(options.recordDelta.xmlText))) {
+    throw new RecordDeltaNotEligibleError("not a bounded preserve-absent v2 record-only batch");
+  }
+  const native = options.recordDelta ? null : await prepareNative("health", xmlPath, options.native ?? {});
   let nativeRecords: NativeRecordWriter | undefined;
   try {
   const atomic = options.atomic !== false;
   if (atomic) store.beginAtomicImport();
+  options.recordDelta?.onBegin();
   const entityGeneration = options.incremental?.generation ?? "full-import";
   const hasRecordAliases = store.hasHealthKitRecordAliases();
   if (native && !options.healthKitRecordIdentity && !hasRecordAliases
     && options.atomic === false && options.native?.stagingDatabase) {
     nativeRecords = new NativeRecordWriter(native.directory, entityGeneration, options.incremental?.batchId, Boolean(options.incremental));
   }
-  if (options.incremental) {
+  if (options.incremental && !options.recordDelta) {
     store.seedImportGenerations(
       options.incremental.generation,
       options.incremental.preserveAbsent ? { preserveAbsent: true } : undefined
@@ -315,6 +348,7 @@ export async function parseAppleHealthXml(
   const workoutInventory = new Map<string, InventoryItem>();
   const sourceHash = createHash("sha256");
   const carriedDeletedSources: HealthKitRecordDeletion[] = [];
+  const deltaIdentities = new Map<string, { type: string; uuid: string; id: string; aliases: Set<string> }>();
 
   const parser = new SaxesParser({ xmlns: false });
 
@@ -452,9 +486,31 @@ export async function parseAppleHealthXml(
         if (uuid) {
           record.id = store.resolveHealthKitRecordId(record.type, uuid, candidateId, legacyId);
           sourceIdentifiers.push(store.healthKitRecordSourceIdentifier(record.type, uuid));
+          if (options.recordDelta) {
+            const mapped = store.database.prepare("SELECT record_id FROM healthkit_record_sources WHERE sample_type=? AND sample_uuid=?")
+              .get(record.type, uuid.toLowerCase());
+            const aliases = new Set([candidateId, legacyId]);
+            if (mapped?.record_id !== record.id || [...aliases].some(alias =>
+              !store.database.prepare("SELECT 1 FROM healthkit_record_aliases WHERE alias_id=? AND sample_type=? AND sample_uuid=?")
+                .get(alias, record.type, uuid!.toLowerCase()))) {
+              throw new Error("Record delta UUID identity failed its pre-commit assertion");
+            }
+            const key = `${record.type}\0${uuid.toLowerCase()}`;
+            const previous = deltaIdentities.get(key);
+            deltaIdentities.set(key, { type: record.type, uuid: uuid.toLowerCase(), id: record.id,
+              aliases: new Set([...(previous?.aliases ?? []), ...aliases]) });
+          }
         }
         const category = classifySource(record.sourceName, record.device, record.metadata);
         const contentHash = stableId("record_content", [currentRecord.attributes, currentRecord.metadata]);
+        if (options.recordDelta) {
+          const existing = store.database.prepare("SELECT 1 FROM health_records WHERE id = ?").get(record.id);
+          const known = store.database.prepare(`SELECT content_hash AS hash FROM import_entity_generations
+            WHERE entity_kind = 'record' AND entity_id = ?`).get(record.id) as { hash: string } | undefined;
+          if (existing && (!known || known.hash === SEED_CONTENT_HASH)) {
+            throw new RecordDeltaNotEligibleError("legacy record needs content-hash initialization");
+          }
+        }
         // Native v1 apply understands canonical-ID tombstones, not source UUIDs.
         // Keep v2 and UUID-less alias resolution on the shared TS write path
         // even when Rust supplies XML parsing.
@@ -469,9 +525,26 @@ export async function parseAppleHealthXml(
             && (!options.incremental || observation.inserted || observation.updated);
           if (uuid && !observation.tombstoned) {
             store.saveHealthKitRecordFact(record, uuid, category, currentRecord.attributes, contentHash);
+            if (options.recordDelta) {
+              const fact = store.database.prepare(`SELECT record_json,source_category,raw_attributes_json,content_hash
+                FROM healthkit_record_facts WHERE sample_type=? AND sample_uuid=?`).get(record.type, uuid.toLowerCase());
+              if (fact?.record_json !== JSON.stringify(record) || fact.source_category !== category
+                  || fact.raw_attributes_json !== JSON.stringify(currentRecord.attributes) || fact.content_hash !== contentHash) {
+                throw new Error("Record delta UUID fact failed its pre-commit assertion");
+              }
+            }
           }
           if (shouldWrite) {
             store.insertRecord(record, category, currentRecord.attributes);
+            if (options.recordDelta) {
+              assertRecordDeltaFact(store, record, category, currentRecord.attributes);
+              const change = store.database.prepare(`SELECT change_type,content_hash FROM import_entity_changes
+                WHERE batch_id=? AND entity_kind='record' AND entity_id=?`).get(options.incremental!.batchId!, record.id);
+              if (!change || change.content_hash !== contentHash ||
+                  change.change_type !== (observation.inserted ? "inserted" : "updated")) {
+                throw new Error("Record delta change ledger failed its pre-commit assertion");
+              }
+            }
             if (!options.incremental || observation.inserted) insertedRecordCount += 1;
           }
           if (observation.tombstoned) {
@@ -490,6 +563,7 @@ export async function parseAppleHealthXml(
         );
         recordCount += 1;
       } else {
+        if (options.recordDelta) throw new RecordDeltaNotEligibleError("invalid record");
         store.insertIssue({
           severity: "warning",
           code: "INVALID_RECORD",
@@ -560,7 +634,11 @@ export async function parseAppleHealthXml(
   });
 
   try {
-    if (native) {
+    if (options.recordDelta) {
+      const text = options.recordDelta.xmlText;
+      sourceHash.update(text, "utf8");
+      parser.write(text).close();
+    } else if (native) {
         for (const row of native.database.prepare("SELECT kind, payload FROM xml_units ORDER BY sequence").iterate() as Iterable<{ kind: string; payload: string }>) {
           const value = JSON.parse(row.payload);
           if (row.kind === "record") {
@@ -625,7 +703,9 @@ export async function parseAppleHealthXml(
       store.setManifest("activity_summary_count", String(activitySummaryCount));
     }
     store.setManifest("parser_contract_version", CONTRACT_VERSION);
-    store.setManifest("source_xml_sha256", native?.result.sha256 ?? sourceHash.digest("hex"));
+    store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
+    const xmlSha256 = native?.result.sha256 ?? sourceHash.digest("hex");
+    store.setManifest("source_xml_sha256", xmlSha256);
     if (
       options.incremental
       && !options.incremental.preserveAbsent
@@ -651,13 +731,12 @@ export async function parseAppleHealthXml(
       : { removedRecords: 0, removedWorkouts: 0, dirtyWorkoutTimes: [] as string[] };
     const recordDeletions = [...(options.deletedRecords ?? []), ...carriedDeletedSources];
     const removedHealthKitRecords = recordDeletions.length
-      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration) : 0;
+      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration,
+        options.recordDelta ? { currentBatchOnly: true } : undefined) : 0;
     if (options.deletedWorkoutIds?.length) {
       explicitDeletionTimes = store.removeWorkoutsBySyncIdentifiers(options.deletedWorkoutIds, options.incremental?.batchId);
     }
-    if (atomic) store.commitAtomicImport();
-    else store.flush();
-    return {
+    const result: AppleHealthParseResult = {
       recordCount, workoutCount, activitySummaryCount, issueCount,
       insertedRecordCount, insertedWorkoutCount,
       removedRecordCount: finalized.removedRecords + removedHealthKitRecords,
@@ -665,6 +744,40 @@ export async function parseAppleHealthXml(
       tombstonedCount,
       dirtyWorkoutTimes: [...insertedWorkoutTimes, ...explicitDeletionTimes, ...finalized.dirtyWorkoutTimes]
     };
+    options.recordDelta?.beforeCommit(result, xmlSha256);
+    if (options.recordDelta) {
+      for (const expected of deltaIdentities.values()) {
+        if (store.database.prepare("SELECT record_id FROM healthkit_record_sources WHERE sample_type=? AND sample_uuid=?")
+          .get(expected.type, expected.uuid)?.record_id !== expected.id || [...expected.aliases].some(alias =>
+            !store.database.prepare("SELECT 1 FROM healthkit_record_aliases WHERE alias_id=? AND sample_type=? AND sample_uuid=?")
+              .get(alias, expected.type, expected.uuid))) {
+          throw new Error("Record delta UUID identity failed its pre-commit assertion");
+        }
+      }
+      for (const { type, uuid } of recordDeletions) {
+        if (!store.isHealthKitRecordSourceDeleted(type, uuid)) {
+          throw new Error("Record delta tombstone failed its pre-commit assertion");
+        }
+      }
+      for (const change of store.database.prepare(`SELECT entity_id,change_type,content_hash FROM import_entity_changes
+        WHERE batch_id=? AND entity_kind='record'`).all(options.incremental!.batchId!)) {
+        const row = store.database.prepare("SELECT type,metadata_json FROM health_records WHERE id=?").get(String(change.entity_id));
+        if (change.change_type === "removed") {
+          if (row) throw new Error("Record delta deletion failed its pre-commit assertion");
+        } else {
+          const metadata = row ? JSON.parse(String(row.metadata_json)) as MetadataMap : {};
+          const owner = lastMetadataValue(metadata, "RAIHealthKitSampleUUID");
+          const fact = owner && row ? store.database.prepare(`SELECT record_json,source_category,raw_attributes_json,content_hash
+            FROM healthkit_record_facts WHERE sample_type=? AND sample_uuid=?`).get(String(row.type), owner.toLowerCase()) : undefined;
+          if (!fact || fact.content_hash !== change.content_hash) throw new Error("Record delta change ledger failed its pre-commit assertion");
+          assertRecordDeltaFact(store, JSON.parse(String(fact.record_json)), String(fact.source_category),
+            JSON.parse(String(fact.raw_attributes_json)));
+        }
+      }
+    }
+    if (atomic) store.commitAtomicImport();
+    else store.flush();
+    return result;
   } catch (error) {
     if (atomic) store.rollbackAtomicImport();
     else store.rollback();
@@ -672,5 +785,11 @@ export async function parseAppleHealthXml(
   }
 
   return { recordCount, workoutCount, activitySummaryCount, issueCount };
+  } catch (error) {
+    // Early failures (including onBegin) must also roll back. In the live delta
+    // path a close() after an uncaught initialization error must never commit.
+    if (options.atomic !== false) store.rollbackAtomicImport();
+    else store.rollback();
+    throw error;
   } finally { nativeRecords?.close(); await native?.dispose(); }
 }

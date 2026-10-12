@@ -703,7 +703,7 @@ const importJobResponseSchema = {
           type: "object",
           additionalProperties: false,
           properties: Object.fromEntries(
-            ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
+            ["dataOnlyApply", "backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
               "changeAnalysis", "recompute", "activationAudit", "activationSwap", "cleanup"]
               .map((stage) => [stage, { type: "number", minimum: 0 }])
           )

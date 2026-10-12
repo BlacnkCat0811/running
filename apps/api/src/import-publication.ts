@@ -9,13 +9,28 @@ interface Publication {
 }
 const receiptKey = (id: string): string => `rai.applied-import.${id}`;
 
+export function readImportReceiptInDatabase(db: DatabaseSync, id: string): ImportJobResponse["summary"] | null {
+  const row = db.prepare("SELECT value FROM import_manifest WHERE key = ?").get(receiptKey(id)) as { value: string } | undefined;
+  return row ? JSON.parse(row.value) as ImportJobResponse["summary"] : null;
+}
+
+/** No connection, COMMIT or checkpoint here: callers may own an atomic delta
+ * transaction. Verify the receipt before that transaction can commit. */
+export function writeImportReceiptInDatabase(
+  db: DatabaseSync, id: string, summary: NonNullable<ImportJobResponse["summary"]>
+): void {
+  const value = JSON.stringify(summary);
+  const result = db.prepare("INSERT OR REPLACE INTO import_manifest (key, value) VALUES (?, ?)").run(receiptKey(id), value);
+  const row = db.prepare("SELECT value FROM import_manifest WHERE key = ?").get(receiptKey(id));
+  if (Number(result.changes) !== 1 || row?.value !== value) throw new Error("Import receipt failed its pre-commit assertion");
+}
+
 export function readImportReceipt(path: string, id: string): ImportJobResponse["summary"] | null {
   if (!existsSync(path)) return null;
   let db: DatabaseSync | undefined;
   try {
     db = new DatabaseSync(path, { readOnly: true });
-    const row = db.prepare("SELECT value FROM import_manifest WHERE key = ?").get(receiptKey(id)) as { value: string } | undefined;
-    return row ? JSON.parse(row.value) as ImportJobResponse["summary"] : null;
+    return readImportReceiptInDatabase(db, id);
   } catch { return null; }
   finally { db?.close(); }
 }
@@ -24,7 +39,7 @@ export function writeImportReceipt(path: string, id: string, summary: NonNullabl
   const db = new DatabaseSync(path);
   try {
     db.exec("PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL");
-    db.prepare("INSERT OR REPLACE INTO import_manifest (key, value) VALUES (?, ?)").run(receiptKey(id), JSON.stringify(summary));
+    writeImportReceiptInDatabase(db, id, summary);
     db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   } finally { db.close(); }
 }

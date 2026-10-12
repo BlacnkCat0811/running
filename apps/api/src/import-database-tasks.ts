@@ -1,11 +1,13 @@
 import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { buildAudit, type DataAudit } from "@rai/health-export-parser";
+import type { DataOnlyImportInput } from "./data-only-import.js";
 
 export type ImportDatabaseTask =
   | { operation: "verify"; path: string }
   | { operation: "audit"; path: string }
-  | { operation: "checkpoint"; path: string };
+  | { operation: "checkpoint"; path: string }
+  | { operation: "data-only"; input: DataOnlyImportInput };
 
 /** Startup recovery also uses this; normal imports execute it in a Worker. */
 export function databaseReadable(path: string): boolean {

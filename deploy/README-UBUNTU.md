@@ -212,6 +212,15 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 ## 资源预算与一致性维护
 
+### HealthKit data-only 快通路（2026-10-12）
+
+本批新增 schema v33：为 UUID 别名修复增加来源索引。部署新 API 前按本页既有
+显式迁移流程备份、停服、迁移并检查 `databaseReady`；不能在 API 运行期间直接建索引。
+`RAI_IMPORT_DATA_ONLY_FAST_PATH=1` 是默认值，`0` 并重启服务可恢复候选发布路径。
+开关不改变同步身份、删除语义或客户端游标。适用范围与故障回滚合同见
+[HealthKit 记录同步 v2](../docs/HEALTHKIT_RECORD_SYNC_V2.md)。
+第一次实际变化导入可能仍需建立解析指纹资格，不能把部署成功等同于下一批必定走快通路。
+
 配置依据：[systemd service](rai-api.service)、[env模板](rai.env.example)、[Nginx](nginx-rai.conf)。
 MemoryHigh=1100M、MemoryMax=1400M、MemorySwapMax=512M、CPUQuota=150%；Node堆每进程512MiB，数值库线程1。
 这些是初始预算，不保证任意规模健康导出能在2GB内完成；swap限制不等于主机已有swap。
