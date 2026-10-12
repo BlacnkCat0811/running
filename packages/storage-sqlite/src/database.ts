@@ -9,10 +9,14 @@ import { migrateModelV30 } from "./v30-migration.js";
 import { migrateModelV31 } from "./v31-migration.js";
 import { migrateModelV32 } from "./v32-migration.js";
 import { migrateModelV33 } from "./v33-migration.js";
+import { migrateModelV34 } from "./v34-migration.js";
+import { migrateModelV35 } from "./v35-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
 import { basename, dirname, join } from "node:path";
+
+import { usableRouteConditionSql } from "./sql/fragments.js";
 
 import type {
   CanonicalHealthRecord,
@@ -41,7 +45,28 @@ export interface RaiDatabaseOpenOptions {
    * strict startup validation has already established the database boundary.
    */
   foreignKeyValidation?: "always" | "after-migration";
+  /**
+   * 谁持有写事务。
+   *
+   * - `"store"`（默认，保持既有行为）：store 自己 `BEGIN`/`COMMIT`，按 5000 个对象攒批。
+   * - `"caller"`：**调用方**持有唯一那个写事务。store 既不 `BEGIN` 也不 `COMMIT`；
+   *   组件内部想做"要么全成要么全退"只能用 SAVEPOINT，**不产生新的提交点**。
+   *
+   * 这是「所有内部组件不能自行 COMMIT」的**机械**实现（见
+   * `docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md` §2.1）：非法提交在调用时会抛错，
+   * 而不是靠约定。
+   *
+   * 🔴 `"caller"` 蕴含两条额外约束，与文档 §1.1「取消的正常同步阶段」直接对应：
+   *   ① 不得自动创建项目备份（`createMigrationBackup` 默认被压成 `false`）；
+   *   ② 不得自动应用迁移（`migrationPolicy` 默认被压成 `"refuse"`），
+   *      且 `foreignKeyValidation` 默认压成 `"after-migration"`，避免每次 open 全库 `foreign_key_check`。
+   * 显式传入与之**冲突**的值会抛错，而不是被静默忽略。
+   */
+  transactionOwner?: TransactionOwner;
 }
+
+/** 写事务的持有者。见 {@link RaiDatabaseOpenOptions.transactionOwner}。 */
+export type TransactionOwner = "store" | "caller";
 
 export class PendingMigrationsError extends Error {
   readonly versions: number[];
@@ -1645,7 +1670,9 @@ const migrations: readonly Migration[] = [
   { version: 30, name: "healthkit_record_source_identity", up: migrateModelV30 },
   { version: 31, name: "healthkit_record_aliases_and_source_facts", up: migrateModelV31 },
   { version: 32, name: "coach_feedback_and_prediction_companions", up: migrateModelV32 },
-  { version: 33, name: "healthkit_alias_source_lookup", up: migrateModelV33 }
+  { version: 33, name: "healthkit_alias_source_lookup", up: migrateModelV33 },
+  { version: 34, name: "sparse_fact_history_and_generation_counters", up: migrateModelV34 },
+  { version: 35, name: "route_versions_and_analysis_job_bindings", up: migrateModelV35 }
 ];
 
 /**
@@ -1721,7 +1748,9 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   30: "f9bbf0499b467c731679e6b92aa6541983793503851b24c885d3a5b827021d4c",
   31: "bcc34b942bb696ccc500629fcac865773199128e351290bea776772a359bb3bf",
   32: "127e817eb9f6371190ae8b872937eaa2ed049ac86528c76b82ccc0d740359f66",
-  33: "bf321666c206a9f74500e938a7f8e8b13edb21576c9f0dd4a81da28ddce1f076"
+  33: "bf321666c206a9f74500e938a7f8e8b13edb21576c9f0dd4a81da28ddce1f076",
+  34: "36798b3793aa3cebc92ad6ea76285ec4a40073d030902dde81525bfa0259aa21",
+  35: "de0d2cdac1f7ac80b2e67cff026c40a3152324269e3328eba6f6c718f31611ce"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -1768,8 +1797,10 @@ export class RaiDatabase {
   private inTransaction = false;
   private objectsSinceCommit = 0;
   private atomicImport = false;
+  /** 活跃 SAVEPOINT 的 LIFO 栈；仅在 `transactionOwner="caller"` 下使用。 */
+  private readonly savepoints: string[] = [];
 
-  private constructor(path: string) {
+  private constructor(path: string, private readonly transactionOwner: TransactionOwner = "store") {
     this.path = path;
     this.database = new DatabaseSync(path);
     try {
@@ -1777,6 +1808,19 @@ export class RaiDatabase {
       this.database.exec("PRAGMA journal_mode = WAL");
       this.database.exec("PRAGMA synchronous = NORMAL");
       this.database.exec("PRAGMA busy_timeout = 5000");
+      // 回读而不是只设置：`PRAGMA journal_mode = WAL` 在不支持的存储上会**静默失败**
+      // 并返回原模式。文档 §1.2 禁止用 `journal_mode=OFF` / `synchronous=OFF` 换速度，
+      // 所以这里断言它真的生效了 —— 断言的是**结果**，不是我们发出过那条语句。
+      if (this.transactionOwner === "caller") {
+        const journal = String((this.database.prepare("PRAGMA journal_mode").get() as { journal_mode?: unknown } | undefined)?.journal_mode ?? "");
+        if (journal.toLowerCase() !== "wal") {
+          throw new Error(`transactionOwner="caller" requires WAL, but journal_mode is ${journal || "unknown"}`);
+        }
+        const synchronous = Number((this.database.prepare("PRAGMA synchronous").get() as { synchronous?: unknown } | undefined)?.synchronous ?? -1);
+        if (!(synchronous >= 1)) {
+          throw new Error(`transactionOwner="caller" refuses synchronous=OFF (read back ${synchronous})`);
+        }
+      }
     } catch (error) {
       this.database.close();
       throw error;
@@ -1784,17 +1828,27 @@ export class RaiDatabase {
   }
 
   static async open(path: string, options: RaiDatabaseOpenOptions = {}): Promise<RaiDatabase> {
-    if (options.migrationPolicy === "refuse") {
+    const transactionOwner = options.transactionOwner ?? "store";
+    // 在 caller 模式下，把"不该发生的事"从默认值上就堵死：显式冲突 ⇒ 抛错，而不是静默忽略。
+    if (transactionOwner === "caller") {
+      if (options.migrationPolicy === "apply") {
+        throw new Error('transactionOwner="caller" cannot apply migrations; migrate explicitly via npm run data:migrate');
+      }
+      if (options.createMigrationBackup === true) {
+        throw new Error('transactionOwner="caller" cannot create a migration backup; backups are owned by operations');
+      }
+    }
+    const migrationPolicy = options.migrationPolicy ?? (transactionOwner === "caller" ? "refuse" : "apply");
+    const createMigrationBackup = options.createMigrationBackup ?? (transactionOwner === "caller" ? false : true);
+    const foreignKeyValidation = options.foreignKeyValidation
+      ?? (transactionOwner === "caller" ? "after-migration" : "always");
+    if (migrationPolicy === "refuse") {
       const pending = RaiDatabase.pendingMigrations(path);
       if (pending.length > 0) throw new PendingMigrationsError(path, pending);
     }
-    const database = new RaiDatabase(path);
+    const database = new RaiDatabase(path, transactionOwner);
     try {
-      await database.migrate(
-        options.createMigrationBackup ?? true,
-        options.foreignKeyValidation ?? "always",
-        options.migrationPolicy ?? "apply"
-      );
+      await database.migrate(createMigrationBackup, foreignKeyValidation, migrationPolicy);
       database.prepareStatements();
       return database;
     } catch (error) {
@@ -2042,19 +2096,33 @@ export class RaiDatabase {
     `);
   }
 
+  /** 声称写事务属于 store 之前，先确认它确实属于 store。 */
+  private assertStoreOwnsTransaction(operation: string): void {
+    if (this.transactionOwner === "caller") {
+      throw new Error(
+        `${operation} requires the transactionOwner="store" mode; this store is opened with transactionOwner="caller" ` +
+        "and does not own its transaction. The caller must use beginCallerTransaction/commitCallerTransaction, " +
+        "and inner components must protect themselves with savepoint/releaseSavepoint/rollbackSavepoint."
+      );
+    }
+  }
+
   private begin(): void {
     if (this.inTransaction) return;
+    this.assertStoreOwnsTransaction("begin()");
     this.database.exec("BEGIN IMMEDIATE");
     this.inTransaction = true;
   }
 
   private markObject(): void {
     this.objectsSinceCommit += 1;
-    if (!this.atomicImport && this.objectsSinceCommit >= 5_000) this.flush();
+    // caller 模式下**没有** 5000 个对象攒批的提交点：整个批次由调用方一次提交。
+    if (this.transactionOwner === "store" && !this.atomicImport && this.objectsSinceCommit >= 5_000) this.flush();
   }
 
   beginAtomicImport(): void {
     if (this.atomicImport) throw new Error("An atomic import is already active");
+    this.assertStoreOwnsTransaction("beginAtomicImport()");
     this.flush();
     this.atomicImport = true;
     this.begin();
@@ -2067,12 +2135,14 @@ export class RaiDatabase {
   }
 
   rollbackAtomicImport(): void {
+    this.assertStoreOwnsTransaction("rollbackAtomicImport()");
     this.rollback();
     this.atomicImport = false;
   }
 
   flush(): void {
     if (!this.inTransaction) return;
+    this.assertStoreOwnsTransaction("flush()");
     this.database.exec("COMMIT");
     this.inTransaction = false;
     this.objectsSinceCommit = 0;
@@ -2080,9 +2150,125 @@ export class RaiDatabase {
 
   rollback(): void {
     if (!this.inTransaction) return;
+    this.assertStoreOwnsTransaction("rollback()");
     this.database.exec("ROLLBACK");
     this.inTransaction = false;
     this.objectsSinceCommit = 0;
+  }
+
+  /**
+   * **内部**提交点：只在 store 拥有事务时提交；caller 模式下提交权归调用方，这里什么都不做。
+   *
+   * 🔴 内部提交一律走这里，不要直接调 `flush()`。caller 模式下 `flush()` 会抛错，
+   * 而失败路径上的 `catch` 紧接着又调 `rollback()` —— 后者同样抛错，
+   * 于是**真正的错误被换成了 `rollback()` 的错误**（实测复现过：调用方只看到
+   * "rollback() requires the transactionOwner=store mode"，真因不见了）。
+   *
+   * 公开的 `flush()` / `rollback()` 在 caller 模式下**仍然**抛错 —— 那是对外的保证：
+   * 组件不得自提交。区别只在于"谁在调用"：外部误用要响亮，内部记账要安静。
+   */
+  private flushIfOwned(): void {
+    if (this.transactionOwner === "caller") return;
+    this.flush();
+  }
+
+  /** **内部**回滚点，理由同 `flushIfOwned`（尤其：不得掩盖上一个错误）。 */
+  private rollbackIfOwned(): void {
+    if (this.transactionOwner === "caller") return;
+    this.rollback();
+  }
+
+  /** 仅 `transactionOwner === "caller"` 可用。开库后由调用方持有的**唯一**写事务。 */
+  beginCallerTransaction(): void {
+    if (this.transactionOwner !== "caller") {
+      throw new Error('beginCallerTransaction() requires transactionOwner="caller"');
+    }
+    if (this.inTransaction) throw new Error("A caller transaction is already active");
+    this.database.exec("BEGIN IMMEDIATE");
+    this.inTransaction = true;
+  }
+
+  /**
+   * 提交调用方的写事务。**提交前断言 SAVEPOINT 栈是空的** ——
+   * 泄漏的 savepoint 说明某个内部组件忘了收尾，那时静默提交会把它没做完的半成品一起落库。
+   */
+  commitCallerTransaction(): void {
+    if (this.transactionOwner !== "caller") {
+      throw new Error('commitCallerTransaction() requires transactionOwner="caller"');
+    }
+    if (!this.inTransaction) throw new Error("No caller transaction is active");
+    if (this.savepoints.length > 0) {
+      throw new Error(`Refusing to commit with ${this.savepoints.length} unreleased savepoint(s): ${this.savepoints.join(", ")}`);
+    }
+    this.database.exec("COMMIT");
+    this.inTransaction = false;
+    this.objectsSinceCommit = 0;
+  }
+
+  /** 回滚调用方的写事务。不在事务中时**静默返回** —— `finally` 里必须能安全调用。 */
+  rollbackCallerTransaction(): void {
+    if (this.transactionOwner !== "caller") {
+      throw new Error('rollbackCallerTransaction() requires transactionOwner="caller"');
+    }
+    this.savepoints.length = 0;
+    if (!this.inTransaction) return;
+    this.database.exec("ROLLBACK");
+    this.inTransaction = false;
+    this.objectsSinceCommit = 0;
+  }
+
+  /**
+   * 组件内部"要么全成要么全退"的保护点。**不产生新的提交点**，所以外层回滚能把它一起撤掉。
+   *
+   * 🔴 强制 LIFO：只允许释放/回滚**最内层**的 savepoint。
+   * SQLite 的 `RELEASE name` 会连带释放该名字之后创建的所有 savepoint —— 允许任意名字
+   * 就等于允许一个组件误放另一个组件未完成的工作，那正是这个 API 要防的事。
+   */
+  savepoint(name: string): void {
+    this.assertCallerOwnedTransaction("savepoint()");
+    const identifier = this.validateSavepointName(name);
+    this.database.exec(`SAVEPOINT ${identifier}`);
+    this.savepoints.push(identifier);
+  }
+
+  /** 确认这一小段成功，并入外层事务。 */
+  releaseSavepoint(name: string): void {
+    const identifier = this.requireInnermostSavepoint("releaseSavepoint()", name);
+    this.database.exec(`RELEASE ${identifier}`);
+    this.savepoints.pop();
+  }
+
+  /** 撤销这一小段并移除它（`ROLLBACK TO` + `RELEASE`，所以调用后该 savepoint 不再存在）。 */
+  rollbackSavepoint(name: string): void {
+    const identifier = this.requireInnermostSavepoint("rollbackSavepoint()", name);
+    this.database.exec(`ROLLBACK TO ${identifier}`);
+    this.database.exec(`RELEASE ${identifier}`);
+    this.savepoints.pop();
+  }
+
+  private assertCallerOwnedTransaction(operation: string): void {
+    if (this.transactionOwner !== "caller") {
+      throw new Error(`${operation} requires transactionOwner="caller"`);
+    }
+    if (!this.inTransaction) throw new Error(`${operation} requires an active caller transaction`);
+  }
+
+  private validateSavepointName(name: string): string {
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(name)) {
+      throw new Error(`Invalid savepoint name: ${JSON.stringify(name)}`);
+    }
+    if (this.savepoints.includes(name)) throw new Error(`Savepoint ${name} is already active`);
+    return name;
+  }
+
+  private requireInnermostSavepoint(operation: string, name: string): string {
+    this.assertCallerOwnedTransaction(operation);
+    const innermost = this.savepoints.at(-1);
+    if (innermost === undefined) throw new Error(`${operation} without an active savepoint`);
+    if (innermost !== name) {
+      throw new Error(`${operation} must target the innermost savepoint (expected ${innermost}, got ${name})`);
+    }
+    return innermost;
   }
 
   setManifest(key: string, value: string): void {
@@ -2378,6 +2564,206 @@ export class RaiDatabase {
       .run(status, status, routeId);
   }
 
+  /**
+   * 该路线当前是否有一份**可用**的已发布轨迹。
+   *
+   * 判据是"已发布 + 非空"，而不是"指针列非空"：指针是 v35 才有的列，
+   * 既有库里的老路线 `published_route_version_id` 仍是 NULL，但它们**确实**有一份正在展示的轨迹。
+   * 拿指针当判据会把老路线误判成"没有可保留的东西"，于是又把旧轨迹擦掉 —— 正是本步要修的那个缺陷。
+   *
+   * 🔴 判据本体在 `sql/fragments.ts` 的 `usableRouteConditionSql()`，与读侧
+   * `FactsReader.routeFor()` **同源**：同一行 `workout_routes` 只能有一个结论，
+   * 不能靠两处各写一遍条件再指望它们一致。
+   */
+  hasUsableRoute(routeId: string): boolean {
+    const row = this.database
+      .prepare(`SELECT 1 AS ok FROM workout_routes WHERE id = ? AND ${usableRouteConditionSql()}`)
+      .get(routeId);
+    return row !== undefined;
+  }
+
+  /**
+   * 路线版本行的 id：由 **route 身份 + 槽位** 确定性推出。
+   *
+   * 🔴 必须确定性：`published_route_version_id` 落在 `workout_routes` 里，而
+   * `importEquivalence`（`apps/api/src/import-equivalence.ts:9`）对那张表**所有列**求摘要 ——
+   * 用随机 id 会让"同样的输入"产出不同的库，TS 与 Rust 两次导入因此不等价
+   * （`native-worker.test.ts` 实测报红）。
+   *
+   * 两个槽位是为了让**暂存**与**已发布**互不干扰：暂存只能写自己的行，
+   * 发布才创建/更新 published 行并移动指针。合成一条行会造出自相矛盾的状态 ——
+   * 一次失败的重新导入会把"正在展示、仍被指针引用"的那条版本打成 `rejected`，
+   * 于是 `file_status = 'imported'`、`route_points` 有 2 个点，而它引用的版本却不是 `complete`。
+   */
+  private routeVersionId(routeId: string, slot: "staging" | "published"): string {
+    const namespace = slot === "staging" ? "route_version_staging" : "route_version";
+    return `routever_${createHash("sha256").update(`${namespace}\0${routeId}`).digest("hex").slice(0, 32)}`;
+  }
+
+  /**
+   * 开这个路线的**未发布**暂存版本（docs §2.4 / §5.3）。
+   *
+   * 点写进 `route_version_points`，**完全不碰** `route_points`，也**完全不碰**
+   * published 槽位那条版本行 —— 这就是"不发布半条路线"的机械保证：
+   * 正在展示的轨迹与它的版本记录在发布前都不受任何影响，中途失败也不会被改写。
+   *
+   * `content_sha256` 在开始时未知，先用 `pending:<versionId>` 占位（含 id、天然唯一）；
+   * 真实摘要在 `publishRouteVersion` 时写入 published 行。
+   */
+  beginRouteVersion(routeId: string): string {
+    this.begin();
+    const versionId = this.routeVersionId(routeId, "staging");
+    // 上次导入若半途失败，暂存行里可能留着半条轨迹的点。必须在写新点之前清掉，
+    // 否则两次的点会拼成一条**点数对得上、内容却是拼接**的轨迹。
+    this.database.prepare("DELETE FROM route_version_points WHERE route_version_id = ?").run(versionId);
+    this.database.prepare(`
+      INSERT INTO route_versions (id, route_id, content_sha256, point_count, status)
+      VALUES (?, ?, ?, 0, 'pending')
+      ON CONFLICT(id) DO UPDATE SET
+        content_sha256 = excluded.content_sha256,
+        point_count = 0,
+        status = 'pending',
+        completed_at = NULL
+    `).run(versionId, routeId, `pending:${versionId}`);
+    return versionId;
+  }
+
+  appendRouteVersionPoints(versionId: string, points: readonly RoutePoint[]): void {
+    this.begin();
+    const insert = this.database.prepare(`
+      INSERT INTO route_version_points (
+        route_version_id, sequence, timestamp, latitude, longitude, elevation_meters,
+        speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const point of points) {
+      insert.run(
+        versionId,
+        point.sequence,
+        point.timestamp,
+        point.latitude,
+        point.longitude,
+        point.elevationMeters,
+        point.speedMetersPerSecond,
+        point.courseDegrees,
+        point.horizontalAccuracyMeters,
+        point.verticalAccuracyMeters
+      );
+    }
+    this.markObject();
+  }
+
+  /**
+   * 发布一个 **已完整写入** 的版本：在一个短事务里换掉该路线的点、移动指针、置 `imported`。
+   *
+   * 🔴 发布前自证：点数必须与调用方声明的相等、序号必须从 0 连续到 n-1。
+   * 只数行数是不够的 —— 分片写入少了一片、或者片内顺序错乱，行数一样可能对上，
+   * 那会发布出一条**中间断掉的轨迹**而无人察觉。
+   *
+   * 自证不通过 ⇒ 抛错且**不做任何写入**，旧轨迹原样可用。
+   */
+  publishRouteVersion(versionId: string, contentSha256: string, expectedPointCount: number): void {
+    this.begin();
+    // 🔴 「换点 + 移指针 + 建 published 行」必须**全有或全无**。
+    // 中途失败若把中间态留在库里，就会出现 `file_status='imported'`、`point_count=2`，
+    // 而 `route_points` 是空的 —— 轨迹静默消失，状态却说它一切正常。
+    // 用 SAVEPOINT 把这一段包起来：它不需要事务所有权（store / caller 两种模式下都可用），
+    // 失败时只回滚到自己这一点，不影响外层已做的工作。
+    const savepoint = "route_version_publish";
+    this.database.exec(`SAVEPOINT ${savepoint}`);
+    try {
+      const version = this.database.prepare(
+        "SELECT route_id AS routeId, status FROM route_versions WHERE id = ?"
+      ).get(versionId) as { routeId: string; status: string } | undefined;
+      if (!version) throw new Error("Route version does not exist");
+      if (version.status !== "pending") throw new Error(`Route version is ${version.status}, not publishable`);
+      const shape = this.database.prepare(`
+        SELECT COUNT(*) AS pointCount, MIN(sequence) AS minSequence, MAX(sequence) AS maxSequence
+        FROM route_version_points WHERE route_version_id = ?
+      `).get(versionId) as { pointCount: number; minSequence: number | null; maxSequence: number | null };
+      const complete = shape.pointCount === expectedPointCount
+        && (expectedPointCount === 0
+          ? shape.minSequence === null && shape.maxSequence === null
+          : shape.minSequence === 0 && shape.maxSequence === expectedPointCount - 1);
+      if (!complete) {
+        throw new Error(
+          `Route version is incomplete: declared ${expectedPointCount} points, stored ` +
+          `${shape.pointCount} (sequence ${String(shape.minSequence)}..${String(shape.maxSequence)})`
+        );
+      }
+      this.database.prepare("DELETE FROM route_points WHERE route_id = ?").run(version.routeId);
+      this.database.prepare(`
+        INSERT INTO route_points (
+          route_id, sequence, timestamp, latitude, longitude, elevation_meters,
+          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
+        )
+        SELECT ?, sequence, timestamp, latitude, longitude, elevation_meters,
+          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
+        FROM route_version_points WHERE route_version_id = ?
+      `).run(version.routeId, versionId);
+      // published 槽位：先 upsert 成 complete，再把指针移过去 —— 顺序不能反，
+      // 指针有外键指向本行，先移指针会在行还不存在时撞 FOREIGN KEY。
+      const publishedId = this.routeVersionId(version.routeId, "published");
+      const completedAt = new Date().toISOString();
+      this.database.prepare(`
+        INSERT INTO route_versions (id, route_id, content_sha256, point_count, status, completed_at)
+        VALUES (?, ?, ?, ?, 'complete', ?)
+        ON CONFLICT(id) DO UPDATE SET
+          content_sha256 = excluded.content_sha256,
+          point_count = excluded.point_count,
+          status = 'complete',
+          completed_at = excluded.completed_at
+      `).run(publishedId, version.routeId, contentSha256, expectedPointCount, completedAt);
+      // 🔴 **真双写**：published 版本行必须**自己带着**这份轨迹的内容。
+      // 只写元数据会让它 `point_count = N` 却没有一行点 —— 那是一条自称完整的谎言，
+      // 而 PR5 正是要按 `status='complete'` 的版本去读内容（docs §3.2 / §2.6）。
+      this.database.prepare("DELETE FROM route_version_points WHERE route_version_id = ?").run(publishedId);
+      this.database.prepare(`
+        INSERT INTO route_version_points (
+          route_version_id, sequence, timestamp, latitude, longitude, elevation_meters,
+          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
+        )
+        SELECT ?, sequence, timestamp, latitude, longitude, elevation_meters,
+          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
+        FROM route_version_points WHERE route_version_id = ?
+      `).run(publishedId, versionId);
+      this.database.prepare(`
+        UPDATE workout_routes
+        SET point_count = ?, file_status = 'imported', published_route_version_id = ?
+        WHERE id = ?
+      `).run(expectedPointCount, publishedId, version.routeId);
+      // 内容已在 published 行里各存一份 ⇒ 暂存行可以丢掉（其点随外键 CASCADE 消失）。
+      this.database.prepare("DELETE FROM route_versions WHERE id = ?").run(versionId);
+      this.database.exec(`RELEASE ${savepoint}`);
+    } catch (error) {
+      this.database.exec(`ROLLBACK TO ${savepoint}`);
+      this.database.exec(`RELEASE ${savepoint}`);
+      throw error;
+    }
+    this.markObject();
+  }
+
+  /**
+   * 标记**暂存**版本被拒（文件坏了 / 超配额）。只动这一行，
+   * 不碰 `route_points`、不碰 `point_count`、不碰 `file_status`、不碰 published 行 ——
+   * 已发布的旧轨迹与它的版本记录保持可用。
+   *
+   * 🔴 显式拒绝去动一条**正被指针引用**的版本：那会造出
+   * "`file_status = 'imported'` 但指针指向 `rejected` 版本"的自相矛盾状态。
+   * 按上面的槽位划分，指针只可能指向 published 行，所以这里是一条**兜底断言**
+   * ——把"按构造不可能"变成"被检查过"。
+   */
+  rejectRouteVersion(versionId: string): void {
+    this.begin();
+    const referenced = this.database.prepare(
+      "SELECT 1 FROM workout_routes WHERE published_route_version_id = ?"
+    ).get(versionId);
+    if (referenced) throw new Error("Refusing to reject a route version that is currently published");
+    this.database.prepare(
+      "UPDATE route_versions SET status = 'rejected', completed_at = ? WHERE id = ? AND status = 'pending'"
+    ).run(new Date().toISOString(), versionId);
+  }
+
   pruneOrphanRoutes(relativePaths: readonly string[]): void {
     this.begin();
     const keep = new Set(relativePaths.map((path) => path.toLowerCase()));
@@ -2511,10 +2897,10 @@ export class RaiDatabase {
           LIMIT ?
         )
       `).run(cutoff, limit);
-      this.flush();
+      this.flushIfOwned();
       return ids.length;
     } catch (error) {
-      this.rollback();
+      this.rollbackIfOwned();
       throw error;
     }
   }
@@ -2828,6 +3214,24 @@ export class RaiDatabase {
     return { inserted: !exists, updated, tombstoned: false };
   }
 
+  /**
+   * 按批重建问题清单（`import_issues`）。
+   *
+   * 🔴 为什么单独成入口：它与"补种代次"是**两件独立的事**。
+   * 2026-10-12 引入"增量不补种"之后，旧链路的 preserve-absent 增量不再调用
+   * `seedImportGenerations`，于是**连带丢掉了这次清空** —— 而它原本就藏在那里面，
+   * 是一条无人声明的副作用（实测：`incremental-import` 的 `import_issues` 变成跨批累积）。
+   * 问题清单的语义是"**本批**导入发现的问题"，必须按批重建。
+   * ⇒ 调用方按"是否在做一次导入"调用它，而**不是**按"是否补种"。
+   *
+   * ⚠️ 直连车道（`recordDelta`）刻意**不**调用它：那条车道不做整库重建，
+   * 主库里既有问题不归它管（这是既有行为，不是本次引入）。
+   */
+  clearImportIssues(): void {
+    this.begin();
+    this.database.exec("DELETE FROM import_issues");
+  }
+
   seedImportGenerations(generation: string, options?: { preserveAbsent?: boolean }): void {
     this.begin();
     // These are compact projections of the current export and are rebuilt by the scan.
@@ -2839,7 +3243,8 @@ export class RaiDatabase {
       // of the payload that is supposed to restore it.
       this.clearEntityTombstones();
     }
-    this.database.exec("DELETE FROM import_issues");
+    // 按批重建问题清单：抽成独立入口，因为"增量不补种"的那条路径也需要它（见 clearImportIssues）。
+    this.clearImportIssues();
     const previous = `${generation}:previous`;
     this.database.prepare(`
       INSERT OR IGNORE INTO import_entity_generations
@@ -3089,10 +3494,10 @@ export class RaiDatabase {
           sourceIdentifier: identifier
         });
       }
-      if (!this.atomicImport) this.flush();
+      if (!this.atomicImport) this.flushIfOwned();
       return dirtyWorkoutTimes;
     } catch (error) {
-      this.rollback();
+      this.rollbackIfOwned();
       throw error;
     }
   }
@@ -3246,7 +3651,7 @@ export class RaiDatabase {
         : Number(this.database
           .prepare(`DELETE FROM feature_runs WHERE id IN (${placeholders(doomedFeatureRunIds)})`)
           .run(...doomedFeatureRunIds).changes);
-      this.flush();
+      this.flushIfOwned();
       return {
         modelRuns,
         featureRuns,
@@ -3258,13 +3663,39 @@ export class RaiDatabase {
         retainedByRecentWindow: extraKept + 1
       };
     } catch (error) {
-      this.rollback();
+      this.rollbackIfOwned();
       throw error;
     }
   }
 
+  /**
+   * 关闭连接。
+   *
+   * 两条都要成立，且都不许退让：
+   * 1. **句柄必须关掉** —— 旧写法是 `this.flush(); this.database.close();`，caller 模式下
+   *    `flush()` 抛错 ⇒ `database.close()` 永不执行 ⇒ `DatabaseSync` 句柄泄漏
+   *    （它不会被 GC 回收，重复打开同一路径可能撞锁）。所以关闭放在 `finally` 里。
+   * 2. **不许静默丢弃调用方未提交的事务** —— caller 模式下提交权归调用方，这里不提交；
+   *    若还有活动事务就关连接，SQLite 会把那一整批**已写入但未提交**的改动回滚掉，
+   *    而调用方**不会收到任何提示**（这是一次静默数据丢失）。所以这种情况下要响亮地报错，
+   *    由调用方先 `commitCallerTransaction()` / `rollbackCallerTransaction()`。
+   *
+   * 两条看起来冲突（报错 vs 必关），实际不冲突：报错在 `try` 里、关闭在 `finally` 里，
+   * 两者都做得到。⚠️ 注意调用方若把它放在 `finally` 里，抛出的错误会**顶替**原来的错误 ——
+   * 那是调用点的写法问题，不是这里的：把 close 放在 `finally` 里的代码，本来就该保证
+   * 事务在进入 `finally` 之前已经收尾。
+   */
   close(): void {
-    this.flush();
-    this.database.close();
+    try {
+      if (this.transactionOwner === "caller" && this.inTransaction) {
+        throw new Error(
+          "close() refused: a caller transaction is still open, so closing now would silently discard " +
+          "uncommitted writes. Call commitCallerTransaction() or rollbackCallerTransaction() first."
+        );
+      }
+      this.flushIfOwned();
+    } finally {
+      this.database.close();
+    }
   }
 }

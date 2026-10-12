@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import type { RecomputeJob, RecomputeJobType, RunStatus } from "@rai/contracts";
+import { APPLICATION_CONSUMABLE_JOB_TYPES, type RecomputeJob, type RecomputeJobType, type RunStatus } from "@rai/contracts";
 
 import { appNow, opaqueId, parseJson } from "./utils.js";
 // Recompute job lifecycle SQL lives only in @rai/storage-sqlite.
@@ -14,16 +14,75 @@ export type JobCancellationResult =
       cancelRequested: boolean;
     };
 
+/**
+ * v35 给 `recompute_jobs` 加的四个分析任务绑定列（`docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md` §3.2）。
+ *
+ * 每个字段都是可选的：**不传就是 NULL**，与 v35 之前的历史行逐列相同。这里**只写列**，
+ * 不碰 `job_type` / `status` 的 `CHECK`（v35 文件头明令禁止放宽）—— 登记一个分析任务
+ * 仍然是登记一个 `'import'` 类型、`'queued'` 状态的任务。
+ */
+export interface RecomputeJobBindings {
+  /** 本批落库后，事实应达到的 raw 代次（`import_generations.raw_generation`）。 */
+  targetRawGeneration?: number;
+  /** 本批落库后，依赖（评分输入）应达到的代次（`import_generations.dependency_generation`）。 */
+  targetDependencyGeneration?: number;
+  /** 登记时预期的 incumbent release；消费者据此检测"登记之后分析基准被换掉"。 */
+  expectedIncumbentReleaseId?: string;
+  /** 本批弄脏的分析输入（会被 `JSON.stringify` 成 `dirty_json`）。 */
+  dirty?: unknown;
+}
+
 export class RecomputeJobRepository {
   constructor(private readonly database: DatabaseSync) {}
 
-  enqueue(jobType: RecomputeJobType, datasetVersion: string | null, request: object): string {
+  /**
+   * 登记一个任务。{@link RecomputeJobBindings} 可选：**不传时执行与历史逐字节相同的 SQL**，
+   * 四个 v35 绑定列保持 NULL。传了才会把对应列追加到 `INSERT` 里（只追加给定的列，
+   * 未给的仍为 NULL）。
+   *
+   * 本方法**不自开事务**（裸 `INSERT` + `logEvent`），所以它可以被放进调用方持有的
+   * 同一个主库事务里落库（§4.2）。⛔ 不要在这里加 `BEGIN`。
+   */
+  enqueue(
+    jobType: RecomputeJobType,
+    datasetVersion: string | null,
+    request: object,
+    bindings?: RecomputeJobBindings
+  ): string {
     const id = opaqueId("recompute_job");
-    this.database.prepare(`
-      INSERT INTO recompute_jobs (
-        id, job_type, status, dataset_version, request_json, progress_phase
-      ) VALUES (?, ?, 'queued', ?, ?, 'queued')
-    `).run(id, jobType, datasetVersion, JSON.stringify(request));
+    const bindingColumns: string[] = [];
+    const bindingValues: Array<number | string> = [];
+    if (bindings?.targetRawGeneration !== undefined) {
+      bindingColumns.push("target_raw_generation");
+      bindingValues.push(bindings.targetRawGeneration);
+    }
+    if (bindings?.targetDependencyGeneration !== undefined) {
+      bindingColumns.push("target_dependency_generation");
+      bindingValues.push(bindings.targetDependencyGeneration);
+    }
+    if (bindings?.expectedIncumbentReleaseId !== undefined) {
+      bindingColumns.push("expected_incumbent_release_id");
+      bindingValues.push(bindings.expectedIncumbentReleaseId);
+    }
+    if (bindings?.dirty !== undefined) {
+      bindingColumns.push("dirty_json");
+      bindingValues.push(JSON.stringify(bindings.dirty));
+    }
+    if (bindingColumns.length === 0) {
+      // 历史路径原样保留 —— 保证"不传绑定参数时行为与今天逐列相同"是可复核的事实，
+      // 而不是"新 SQL 恰好算出了同样的值"。
+      this.database.prepare(`
+        INSERT INTO recompute_jobs (
+          id, job_type, status, dataset_version, request_json, progress_phase
+        ) VALUES (?, ?, 'queued', ?, ?, 'queued')
+      `).run(id, jobType, datasetVersion, JSON.stringify(request));
+    } else {
+      this.database.prepare(`
+        INSERT INTO recompute_jobs (
+          id, job_type, status, dataset_version, request_json, progress_phase, ${bindingColumns.join(", ")}
+        ) VALUES (?, ?, 'queued', ?, ?, 'queued', ${bindingColumns.map(() => "?").join(", ")})
+      `).run(id, jobType, datasetVersion, JSON.stringify(request), ...bindingValues);
+    }
     this.logEvent(id, "queued", 0, 0, "Task queued");
     return id;
   }
@@ -108,14 +167,24 @@ export class RecomputeJobRepository {
       name: "InterruptedRecompute",
       message: "Local API restarted before the recompute completed"
     });
+    // 🔴 外部所有者类型（CLI 导入）的中断原因必须**中立且准确**。
+    // 复用上面那条 recompute 文案会写出假话：那条导入任务不是 recompute，
+    // 真因是**拥有它的那个进程崩了**，与"API 重启"无关。
+    // （这正是本次修复要消除的"用户看到错误原因"，只是下沉到了文案层 ——
+    //  由一条测试钉住文案，所以文案本身也是判据，不能随手复用。）
+    const externalInterrupted = JSON.stringify({
+      name: "InterruptedExternalJob",
+      message: "Job was interrupted before its owning process completed it"
+    });
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const jobs = this.database.prepare(`
-        SELECT id, feature_run_id AS featureRunId, model_run_id AS modelRunId,
+        SELECT id, job_type AS jobType, feature_run_id AS featureRunId, model_run_id AS modelRunId,
           cancel_requested AS cancelRequested
         FROM recompute_jobs WHERE status = 'running' ORDER BY created_at
       `).all() as unknown as Array<{
         id: string;
+        jobType: string;
         featureRunId: string | null;
         modelRunId: string | null;
         cancelRequested: number;
@@ -127,17 +196,24 @@ export class RecomputeJobRepository {
       for (const job of jobs) {
         this.failAssociatedRuns(job.featureRunId, job.modelRunId, now, failure);
         const cancelled = job.cancelRequested === 1;
+        // 🔴 恢复必须按"**谁能执行**"分派，而不是按"是不是 running"。
+        // 不属于应用消费者的任务（`"import"` 由 CLI 导入进程创建并推进）如果被放回
+        // `queued`，唯一那个消费者会领走它并抛 `Unsupported application job type`，
+        // 同时**原始的中断原因被这里清掉** —— 用户看到一条原因错误的失败任务。
+        // 它们没有别的消费者，中断即终态：判为失败并保留中断原因。
+        const consumable = APPLICATION_CONSUMABLE_JOB_TYPES.includes(job.jobType as never);
+        // 非取消的中断：可消费类型带上 recompute 文案，外部所有者类型带上中立文案。
+        const interruptedReason = consumable || cancelled ? failure : externalInterrupted;
         const changed = this.database.prepare(`
           UPDATE recompute_jobs
           SET status = ?, started_at = NULL, completed_at = ?, progress_phase = ?,
-              progress_current = 0, progress_total = 0, cancel_requested = 0,
-              error_json = ?
+              progress_current = 0, progress_total = 0, cancel_requested = 0, error_json = ?
           WHERE id = ? AND status = 'running' AND cancel_requested = ?
         `).run(
-          cancelled ? "cancelled" : "queued",
-          cancelled ? now : null,
-          cancelled ? "cancelled" : "recovered",
-          cancelled ? failure : null,
+          cancelled ? "cancelled" : consumable ? "queued" : "failed",
+          cancelled || !consumable ? now : null,
+          cancelled ? "cancelled" : consumable ? "recovered" : "interrupted",
+          cancelled || !consumable ? interruptedReason : null,
           job.id,
           job.cancelRequested
         );
@@ -146,10 +222,14 @@ export class RecomputeJobRepository {
         }
         this.logEvent(
           job.id,
-          cancelled ? "cancelled" : "recovered",
+          cancelled ? "cancelled" : consumable ? "recovered" : "failed",
           0,
           0,
-          cancelled ? "Interrupted task was cancelled" : "Interrupted task returned to the queue",
+          cancelled
+            ? "Interrupted task was cancelled"
+            : consumable
+              ? "Interrupted task returned to the queue"
+              : "Interrupted task has no consumer for its job type; marked failed instead of re-queued",
           now
         );
       }

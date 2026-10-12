@@ -129,3 +129,16 @@ export {
   type PrivacyZoneInput,
   type StoredPrivacyZone
 } from "./privacy-zone-repository.js";
+
+// §4 固定代次事实读取器（PR3 交付的**契约**）。
+//
+// ⚠️ 消费方在 PR4：本包导出它，但**今天没有任何生产调用方**（全仓只有它的测试与设计文档）。
+// 它读的是 `import_fact_history` / `valid_from_generation` 那套版本化事实，而 v34 的
+// 写入方同样还没落地 —— 所以现在能读到的只有"当前行"（NULL 视为自古以来有效）。
+// 完整的口径与已知边界见 `read/facts-reader.ts` 的文件头。
+export {
+  openFactsReader,
+  type FactsReader,
+  type FactsRecordFilter,
+  type FactsWorkoutFilter
+} from "./read/facts-reader.js";
