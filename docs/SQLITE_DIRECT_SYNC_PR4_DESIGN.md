@@ -232,17 +232,36 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 
 ## 7. 实施顺序（每步都能单独跑绿）
 
-| 步 | 内容 | 单独绿的判据 |
-|---|---|---|
-| 2a | 载荷分类纯函数 + "未知必须分析"门禁 | 新用例（无行为变化） |
-| 2b | parser `callerOwnedTransaction` + SAVEPOINT；与 `recordDelta` 互斥 | 结构判据 + record-only 车道零变化 |
-| 2c | 写守卫分档（先只放 Workout/删除，`analysis_required` 仍走旧路） | 守卫扩展用例 |
-| 2d | 同事务登记 + 代次写入方 + 回执 `queued` | A04 故障注入 + 账本断言 |
-| 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 |
-| 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" |
-| 4 | 局部 canonical 接入 | 窗口外逐字节不变 |
+| 步 | 内容 | 单独绿的判据 | 状态 |
+|---|---|---|---|
+| 2a | 载荷分类纯函数 + "未知必须分析"门禁 | 新用例（无行为变化） | ✅ 已完成（2026-10-13，见 §8.1） |
+| 2b | parser `callerOwnedTransaction` + SAVEPOINT；与 `recordDelta` 互斥 | 结构判据 + record-only 车道零变化 | ✅ 已完成（2026-10-13，见 §8.2） |
+| 2c | 写守卫分档（先只放 Workout/删除，`analysis_required` 仍走旧路） | 守卫扩展用例 | ⛔ 未做 |
+| 2d | 同事务登记 + 代次写入方 + 回执 `queued` | A04 故障注入 + 账本断言 | ⛔ 未做 |
+| 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 | ⛔ 未做 |
+| 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" | ⛔ 未做 |
+| 4 | 局部 canonical 接入 | 窗口外逐字节不变 | ⛔ 未做 |
 
 ⛔ 顺序不可交换：2e 之前必须先有 2d（登记），2d 之前必须先有消费者（**步骤 1，已完成**）。
+
+### 7.1 撰写后修订（2026-10-13，实施 2a/2b 时定下）
+
+**修订一：分类事实的来源改为"批次账本"，不是第二遍 XML 扫描。**
+§2.1 初稿把 `DirectSyncPayloadFacts` 写成"XML 扫描结果"。实施时改定为：这些事实在**事务内**从
+本批自己的账本取 —— 实体种类/数量从 `import_entity_changes`（`entity_kind`）、类型从
+`health_records.type`、删除从 manifest 与 tombstone 表。理由：
+XML 扫描是**第二套解释**，它与真正落库的解析器只要有一处不一致（大小写、属性缺失、
+未来的新元素），分类就会与事实脱节，而且是**静默**的。账本是本批写入的**自身结果**，
+不存在"两套解释分叉"。
+纯函数 `classifyDirectSyncPayload` 的签名因此不变（它只吃事实），变的是**谁来喂它**。
+⇒ 2c 落地时的要求：分类必须在事务内、基于账本，并且**默认分析**（账本读不出来也算"拿不准"）。
+
+**修订二：写守卫的判据是"这张表属不属于本次接收"，不是"本批是不是 record-only"。**
+初稿把守卫分档挂在"载荷类别"上。实施时改定为：守卫只回答一个问题 ——
+**本事务允许写哪些表**。事实类表（records / workouts / routes / canonical / 账本 / tombstone）
+允许，**发布与分析类表**（`model_runs` / `feature_runs` / `active_model_run` / `training_metric_runs` 等）
+一律拒绝。理由：载荷分类是**事后的**结论（要等账本），而守卫必须在**写入发生之前**就位；
+把它挂在事后结论上，等于守卫在写入时还不知道自己的档位。
 
 ---
 
@@ -297,6 +316,46 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 （全量跑时 `share-card-panel.test.tsx` 有一次负载下的 `waitFor` 超时，单跑 17/17）。
 ⇒ 本环境的等价门禁命令是 `node node_modules/typescript/bin/tsc --noEmit -p <tsconfig>` 与
 `RAI_TEST_CONCURRENCY=1 node scripts/run-tests.mjs`（详见当批验收记录）。
+
+### 8.1 步骤 2a 的实测证据（2026-10-13）
+
+- `packages/contracts/src/index.ts`：`scoringHealthTypes` 的**唯一定义**移到这里
+  （此前在 `apps/api/src/health-change-plan.ts`，那里改为转发）。理由：它同时是批次分类、
+  record-only 车道结构闸门、`dataOnlyBaselineContract()` 哈希的输入 —— 三处各写一份
+  等于允许"只改一处就造出**该分析却宣布不需要分析**"。取值与顺序**逐字未变**，
+  所以基线哈希不变（`data-only-import.test.ts` 的既有断言继续通过）。
+- `packages/health-export-parser/src/record-delta-policy.ts`：新增
+  `classifyDirectSyncPayload(facts)` 与两个类型。**默认方向 = 必须分析**：
+  未知类型 / 评分类型 / Workout / 路线 / 显式删除 各自单独成立就要求分析；
+  只有"全部类型都在非评分白名单里且什么都不碰"才允许 `record-only`。
+  输出**排序**（同样输入逐字相同），便于落库与比较。
+- 新用例 `packages/health-export-parser/test/direct-sync-payload-class.test.ts`（9 条）
+  含三条结构前提：两个清单不得有交集、都不得为空、评分清单只能由 `healthTypes` 常量构成。
+- **突变验证**：把未知类型从原因里去掉（= 默认放行）⇒ **3 条转红**
+  （"未知类型一律必须分析"、"白名单 + 未知"，以及确定性用例），其余 6 条仍绿。
+
+### 8.2 步骤 2b 的实测证据（2026-10-13）
+
+- `packages/health-export-parser/src/apple-health-parser.ts`：新增
+  `callerOwnedTransaction?: boolean` 与导出常量 `CALLER_OWNED_PARSE_SAVEPOINT`。
+  语义：不 `BEGIN`/`COMMIT`/`ROLLBACK`、不 `flush()`/`rollback()`；批次边界是
+  `store.savepoint("rai_parse_batch")`，成功 `releaseSavepoint`，失败 `rollbackSavepoint`。
+  与 `recordDelta`、`atomic: false` **互斥**（在函数最前面判定，先于资格检查与任何写入）。
+- **失败路径不得换掉真因**：收尾的 `rollbackSavepoint` 包在 `try/catch` 里（F4 的教训）。
+  泄漏的 savepoint 也不构成静默提交风险 —— 调用方的 `commitCallerTransaction()`
+  会因栈非空**拒绝提交**并点名它（该行为由 `transaction-owner.test.ts` 钉住）。
+- 新用例 `packages/health-export-parser/test/caller-owned-transaction.test.ts`（4 条）：
+  ①两种所有权互斥；②**第二个连接**在 commit 前看不到、commit 后看得到（= 解析器没提交），
+  且解析后能重新拿到同名 savepoint（= 没泄漏）；③截断 XML 失败后，调用方**失败前与失败后**
+  的写入都能提交，而半批事实**一行不落**；④在非 caller 模式的 store 上要求该模式 ⇒ 响亮拒绝。
+- **突变验证（3 处，全部被精确捕获）**：
+  ①分类器忽略未知类型 ⇒ 2a 的 3 条转红；
+  ②解析器在成功路径上自己 `commitCallerTransaction()` ⇒ "commit 前第二个连接看不到"转红
+  （断言语义：*commit 之前第二个连接就看到了行 ⇒ 解析器自己提交了*）；
+  ③失败路径把 `rollbackSavepoint` 换成 `releaseSavepoint`（保留半批）⇒
+  "半批事实一行不落"转红。
+- 回归：`packages/health-export-parser/test/*` **146/146**、受影响的 API 侧 6 个文件 **70/70**、
+  `packages/contracts/test/*` + `application/test/service.test.ts` **49/49**；`tsc`（pure + full）EXIT=0。
 
 ---
 

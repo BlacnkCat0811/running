@@ -138,6 +138,22 @@ export interface AppleHealthParseOptions {
     guardAbsentRemoval?: boolean;
   };
   atomic?: boolean;
+  /**
+   * 解析器进入**调用方持有**的写事务（PR4 步骤 2b，见 `docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md` §2.2）。
+   *
+   * 语义（每一条都有对应断言，不是约定）：
+   * - 要求的 store 是 `RaiDatabase.open(..., { transactionOwner: "caller" })`，且调用方已经
+   *   `beginCallerTransaction()`；解析器**不** `BEGIN`、**不** `COMMIT`、**不** `ROLLBACK`。
+   * - 本批边界用 `store.savepoint(...)` / `releaseSavepoint` 表达，**不产生新的提交点**：
+   *   解析失败只撤掉自己那一段，调用方可以继续做完别的事再决定提交或回滚。
+   * - 解析器也不调用 `flush()` / `rollback()` —— caller 模式下它们会抛错（对外保证：
+   *   组件不得自提交），而失败路径上的抛错会**把真因换掉**。
+   *
+   * 🔴 与 `recordDelta` **互斥**：后者自带"parser 持有 BEGIN/COMMIT"的语义与 record-only 资格判定，
+   * 两个一起传就是两种事务所有权同时成立。冲突直接抛错，而不是让其中一方静默生效。
+   * 🔴 与 `atomic: false` 同样互斥：那个值的意思是"按对象数自行 flush 提交"，与"提交权归调用方"相反。
+   */
+  callerOwnedTransaction?: boolean;
   /** Explicit HealthKit deletion events. Absence never implies deletion. */
   deletedWorkoutIds?: readonly string[];
   deletedRecords?: readonly HealthKitRecordDeletion[];
@@ -150,6 +166,9 @@ export interface AppleHealthParseOptions {
     beforeCommit(result: AppleHealthParseResult, xmlSha256: string): void;
   };
 }
+
+/** `callerOwnedTransaction` 用的 SAVEPOINT 名。名字固定且唯一：泄漏时提交会被拒（`commitCallerTransaction` 会点名它）。 */
+export const CALLER_OWNED_PARSE_SAVEPOINT = "rai_parse_batch";
 
 function attributesOf(tag: SaxesTagPlain): Record<string, string> {
   return Object.fromEntries(Object.entries(tag.attributes).map(([key, value]) => [key, String(value)]));
@@ -305,16 +324,48 @@ export async function parseAppleHealthXml(
   store: RaiDatabase,
   options: AppleHealthParseOptions
 ): Promise<AppleHealthParseResult> {
+  // 🔴 事务所有权是**一次性判定**：两种所有权同时成立时直接抛错，
+  // 而不是让其中一方静默生效（那会造出"以为调用方持有、其实解析器提交了"的批次）。
+  const callerOwned = options.callerOwnedTransaction === true;
+  if (callerOwned && options.recordDelta) {
+    throw new Error(
+      "callerOwnedTransaction and recordDelta are mutually exclusive: the record-delta lane " +
+      "owns BEGIN/COMMIT itself, while callerOwnedTransaction hands ownership to the caller"
+    );
+  }
+  if (callerOwned && options.atomic === false) {
+    throw new Error(
+      'callerOwnedTransaction requires the default atomic mode: atomic: false means "commit every ' +
+      'N objects", which contradicts "the caller owns the only commit point"'
+    );
+  }
   // The native worker writes only a disposable spool before the import transaction starts.
   if (options.recordDelta && (options.atomic === false || !options.healthKitRecordIdentity
       || !options.incremental?.preserveAbsent || !isDataOnlyRecordXml(options.recordDelta.xmlText))) {
     throw new RecordDeltaNotEligibleError("not a bounded preserve-absent v2 record-only batch");
   }
   const native = options.recordDelta ? null : await prepareNative("health", xmlPath, options.native ?? {});
+  // 调用方持有模式下，本批边界是一个 SAVEPOINT（不产生提交点）。
+  // 失败路径**只**撤这一段，调用方仍可继续做完别的事再决定提交或整体回滚。
+  let callerSavepointOpen = false;
+  const abandonCallerSavepoint = (): void => {
+    if (!callerSavepointOpen) return;
+    callerSavepointOpen = false;
+    try {
+      store.rollbackSavepoint(CALLER_OWNED_PARSE_SAVEPOINT);
+    } catch {
+      // 🔴 收尾失败**不得**换掉真因（F4 的教训：`catch` 里的 rollback 抛错会让调用方
+      // 只看到收尾错误）。泄漏的 savepoint 也不构成静默提交风险 ——
+      // 调用方的 `commitCallerTransaction()` 会因为栈非空而**拒绝提交**并点名它。
+    }
+  };
   let nativeRecords: NativeRecordWriter | undefined;
   try {
   const atomic = options.atomic !== false;
-  if (atomic) store.beginAtomicImport();
+  if (callerOwned) {
+    store.savepoint(CALLER_OWNED_PARSE_SAVEPOINT);
+    callerSavepointOpen = true;
+  } else if (atomic) store.beginAtomicImport();
   options.recordDelta?.onBegin();
   const entityGeneration = options.incremental?.generation ?? "full-import";
   const hasRecordAliases = store.hasHealthKitRecordAliases();
@@ -799,11 +850,17 @@ export async function parseAppleHealthXml(
         }
       }
     }
-    if (atomic) store.commitAtomicImport();
+    if (callerOwned) {
+      // 成功路径：释放这一段（并入调用方的事务），**不提交**。release 出错要响亮 ——
+      // 那说明栈不干净（例如别的组件泄漏了 savepoint），静默继续会让调用方以为本批已并入。
+      store.releaseSavepoint(CALLER_OWNED_PARSE_SAVEPOINT);
+      callerSavepointOpen = false;
+    } else if (atomic) store.commitAtomicImport();
     else store.flush();
     return result;
   } catch (error) {
-    if (atomic) store.rollbackAtomicImport();
+    if (callerOwned) abandonCallerSavepoint();
+    else if (atomic) store.rollbackAtomicImport();
     else store.rollback();
     throw error;
   }
@@ -812,7 +869,8 @@ export async function parseAppleHealthXml(
   } catch (error) {
     // Early failures (including onBegin) must also roll back. In the live delta
     // path a close() after an uncaught initialization error must never commit.
-    if (options.atomic !== false) store.rollbackAtomicImport();
+    if (callerOwned) abandonCallerSavepoint();
+    else if (options.atomic !== false) store.rollbackAtomicImport();
     else store.rollback();
     throw error;
   } finally { nativeRecords?.close(); await native?.dispose(); }

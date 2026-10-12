@@ -1,10 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
-import { healthTypes } from "@rai/contracts";
+import { healthTypes, scoringHealthTypes } from "@rai/contracts";
 
-export const scoringHealthTypes = [
-  healthTypes.heartRate, healthTypes.runningSpeed, healthTypes.restingHeartRate,
-  healthTypes.sleepAnalysis, healthTypes.hrvSdnn, healthTypes.vo2Max
-] as const;
+/**
+ * 评分类型清单的**唯一定义**在 `@rai/contracts`（见那里的说明：它同时是批次分类与
+ * record-only 车道结构闸门的输入，两处各写一份等于允许它们悄悄分叉）。
+ * 这里只做转发，保持既有调用点的 import 路径不变。
+ */
+export { scoringHealthTypes };
 
 export interface HealthChangePlan {
   changed: boolean;

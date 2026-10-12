@@ -1,7 +1,9 @@
-export { parseAppleHealthXml } from "./apple-health-parser.js";
+export { parseAppleHealthXml, CALLER_OWNED_PARSE_SAVEPOINT } from "./apple-health-parser.js";
 export {
   DATA_ONLY_RECORD_TYPES, DATA_ONLY_MAX_XML_BYTES, DATA_ONLY_MAX_RECORDS,
-  DATA_ONLY_WRITE_GUARD, RecordDeltaNotEligibleError, isDataOnlyRecordXml
+  DATA_ONLY_WRITE_GUARD, RecordDeltaNotEligibleError, isDataOnlyRecordXml,
+  classifyDirectSyncPayload,
+  type DirectSyncPayloadFacts, type DirectSyncPayloadClassification
 } from "./record-delta-policy.js";
 export { parseHealthSyncManifest, readHealthSyncManifest } from "./sync-manifest.js";
 export {

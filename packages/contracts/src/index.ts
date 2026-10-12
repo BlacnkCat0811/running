@@ -36,6 +36,29 @@ export const workoutTypes = {
   running: "HKWorkoutActivityTypeRunning"
 } as const;
 
+/**
+ * 会影响**评分/分析**的健康记录类型。
+ *
+ * 🔴 这份清单是"能不能不做分析"这个判定的核心，所以它必须**只有一处定义**：
+ * 它同时被
+ *   - 批次分类（`classifyDirectSyncPayload`，决定本批走 record-only 还是必须登记分析）；
+ *   - 直连 record-only 车道的**结构闸门**（`DATA_ONLY_RECORD_TYPES ∩ 本清单 = ∅`，
+ *     见 `apps/api/src/data-only-import.ts`）；
+ *   - `dataOnlyBaselineContract()` 的哈希输入（清单变了，旧基线资格立刻失效）。
+ * 三处各写一份的后果不是"多写几行"，而是**可以只改一处就造出"该分析却宣布不需要分析"**。
+ *
+ * ⚠️ 新增类型时的正确动作是：先判断它是否影响分析，若是则加进本清单；
+ * 加进来会让上面前两条同时生效，而不是只影响其中一条。
+ */
+export const scoringHealthTypes = [
+  healthTypes.heartRate,
+  healthTypes.runningSpeed,
+  healthTypes.restingHeartRate,
+  healthTypes.sleepAnalysis,
+  healthTypes.hrvSdnn,
+  healthTypes.vo2Max
+] as const;
+
 export const SLEEP_ANALYSIS_VALUES = {
   inBed: "HKCategoryValueSleepAnalysisInBed",
   awake: "HKCategoryValueSleepAnalysisAwake",
