@@ -1,4 +1,4 @@
-import { DATABASE_TIMEZONE } from "@rai/contracts";
+import { CLI_OWNED_IMPORT_REQUEST_MODE, DATABASE_TIMEZONE } from "@rai/contracts";
 import { existsSync, lstatSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
@@ -337,7 +337,10 @@ async function importCommand(args: ParsedArguments): Promise<void> {
           id, job_type, status, request_json, progress_phase, started_at
         ) VALUES (?, 'import', 'running', ?, 'prepare', ?)
       `)
-      .run(importJobId, JSON.stringify({ mode: "cli_export_import" }), new Date().toISOString());
+      // 判别物走共享常量：`isApplicationConsumableJob`（消费者与恢复流程的**唯一**判据）
+      // 正是按这个值把 CLI 任务判给外部所有者。两边写字面量会让它们悄悄分叉，
+      // 而分叉的后果是"消费者把 CLI 导入任务当分析任务跑"。
+      .run(importJobId, JSON.stringify({ mode: CLI_OWNED_IMPORT_REQUEST_MODE }), new Date().toISOString());
     store.database
       .prepare(`
         INSERT INTO recompute_job_events (

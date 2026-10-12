@@ -25,6 +25,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
   CONTRACT_VERSION,
@@ -252,6 +253,17 @@ test("A01/§14.1 逐项：真实排队的 v2 增量不触发任何禁止操作�
       assert.deepEqual(leftovers, [],
         `直连车道不得创建项目备份或整库候选，但 var/ 里出现了：${leftovers.join(", ")}`);
       assert.equal(statSync(main).ino, beforeInode, "主库文件身份必须保持不变（不得 rename/install/move）");
+
+      // 🔴 行为级钉住"今天**没有**登记任何分析任务"（设计文档步骤 6b 的三步上线顺序）。
+      // 本车道今天只接受 record-only 载荷，这类载荷**结构上不可能**触及分析，
+      // 所以回执写 `analysisStatus: "not_required"` 是准确的；一旦有人在这里登记分析任务，
+      // 他必须同批把 `deltaMode` 放开到 `"full"`、把回执改成 `"queued"`，
+      // 并接上读侧一致性（PR5）—— 这几条判据会一起变红，不允许只落地一半。
+      const probe = new DatabaseSync(main, { readOnly: true });
+      try {
+        assert.equal(Number(probe.prepare("SELECT COUNT(*) AS n FROM recompute_jobs").get()!.n), 0,
+          "直连车道今天不得登记任何 recompute_jobs 任务（登记属 PR4 步骤 2，必须与 deltaMode 放开同批）");
+      } finally { probe.close(); }
     } finally { await worker.close(); }
   });
 });

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { APPLICATION_CONSUMABLE_JOB_TYPES, type RecomputeJob, type RecomputeJobType, type RunStatus } from "@rai/contracts";
+import { isApplicationConsumableJob, type RecomputeJob, type RecomputeJobType, type RunStatus } from "@rai/contracts";
 
 import { appNow, opaqueId, parseJson } from "./utils.js";
 // Recompute job lifecycle SQL lives only in @rai/storage-sqlite.
@@ -179,12 +179,14 @@ export class RecomputeJobRepository {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const jobs = this.database.prepare(`
-        SELECT id, job_type AS jobType, feature_run_id AS featureRunId, model_run_id AS modelRunId,
+        SELECT id, job_type AS jobType, request_json AS requestJson,
+          feature_run_id AS featureRunId, model_run_id AS modelRunId,
           cancel_requested AS cancelRequested
         FROM recompute_jobs WHERE status = 'running' ORDER BY created_at
       `).all() as unknown as Array<{
         id: string;
         jobType: string;
+        requestJson: string | null;
         featureRunId: string | null;
         modelRunId: string | null;
         cancelRequested: number;
@@ -196,12 +198,15 @@ export class RecomputeJobRepository {
       for (const job of jobs) {
         this.failAssociatedRuns(job.featureRunId, job.modelRunId, now, failure);
         const cancelled = job.cancelRequested === 1;
-        // 🔴 恢复必须按"**谁能执行**"分派，而不是按"是不是 running"。
-        // 不属于应用消费者的任务（`"import"` 由 CLI 导入进程创建并推进）如果被放回
-        // `queued`，唯一那个消费者会领走它并抛 `Unsupported application job type`，
-        // 同时**原始的中断原因被这里清掉** —— 用户看到一条原因错误的失败任务。
-        // 它们没有别的消费者，中断即终态：判为失败并保留中断原因。
-        const consumable = APPLICATION_CONSUMABLE_JOB_TYPES.includes(job.jobType as never);
+        // 🔴 恢复必须按"**谁能执行**"分派，而不是按"是不是 running"，**也不能只按 job_type**。
+        // `'import'` 是两个所有者共用的类型名：CLI 导入进程写它，直连车道登记的分析任务也写它
+        // （v35 不允许放宽 `job_type` 的 CHECK，见 `payload-scoped` 的说明）。所以判据是
+        // `(job_type, 载荷 mode)` 的合取 —— `isApplicationConsumableJob` 是这条判据的**唯一**实现，
+        // 消费端读同一个函数，两边不可能分叉。
+        // 不属于应用消费者的任务如果被放回 `queued`，唯一那个消费者会领走它并
+        // 以"不支持的作业类型/载荷"置为失败，同时**原始的中断原因被这里清掉** —— 用户看到一条
+        // 原因错误的失败任务。它们没有别的消费者，中断即终态：判为失败并保留中断原因。
+        const consumable = isApplicationConsumableJob(job.jobType, job.requestJson);
         // 非取消的中断：可消费类型带上 recompute 文案，外部所有者类型带上中立文案。
         const interruptedReason = consumable || cancelled ? failure : externalInterrupted;
         const changed = this.database.prepare(`
@@ -229,7 +234,7 @@ export class RecomputeJobRepository {
             ? "Interrupted task was cancelled"
             : consumable
               ? "Interrupted task returned to the queue"
-              : "Interrupted task has no consumer for its job type; marked failed instead of re-queued",
+              : "Interrupted task has no consumer for its job type and payload; marked failed instead of re-queued",
           now
         );
       }

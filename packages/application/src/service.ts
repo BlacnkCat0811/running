@@ -1,4 +1,4 @@
-import { DATABASE_TIMEZONE } from "@rai/contracts";
+import { DATABASE_TIMEZONE, isApplicationConsumableJob, recomputeRequestMode } from "@rai/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
 import type {
@@ -284,10 +284,24 @@ export class RaiApplicationService {
     if (!job) return null;
 
     try {
+      // 🔴 准入判据与 `recoverInterrupted()`（存储层）用的是**同一个共享函数**，
+      // 而且判据是 `(job_type, 载荷 mode)` 的合取而不是 `job_type` 一个字段：
+      // `'import'` 是两个所有者共用的类型名（CLI 导入进程 / 直连车道登记的分析任务）。
+      // 不属于本消费者的任务在这里以**说清原因**的方式失败，而不是掉进下面的 `else`
+      // 抛一句"不支持的类型" —— 后者会把"这条活不属于这个消费者"说成"这个类型没人实现"，
+      // 而那正是 2026-10-12 那次"用户看到错误失败原因"缺陷的文案层形态。
+      if (!isApplicationConsumableJob(job.jobType, job.request)) {
+        throw new Error(
+          `Recompute job ${job.id} is not consumable by the application service: ` +
+            `job_type=${job.jobType}, request.mode=${recomputeRequestMode(job.request) ?? "absent"}`
+        );
+      }
       if (job.jobType === "full_recompute") {
         this.pipeline.runFullRecompute(job);
       } else if (job.jobType === "snapshot_refresh") {
         this.pipeline.runSnapshotRefresh(job);
+      } else if (job.jobType === "import") {
+        this.pipeline.runDirectSyncAnalysis(job);
       } else {
         throw new Error(`Unsupported application job type: ${job.jobType}`);
       }

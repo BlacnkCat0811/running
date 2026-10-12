@@ -354,7 +354,9 @@ export interface FactsReader {
 5. **路线版本** → 判据 9。
 6. **局部 canonical + `FactsReader`** → 判据 8、10。
 
-PR4/PR5/PR6 在此之后另出设计。
+PR4 设计已另出：[SQLITE_DIRECT_SYNC_PR4_DESIGN.md](SQLITE_DIRECT_SYNC_PR4_DESIGN.md)
+（全部类型接收、分析任务登记、短写调度；其步骤 1 —— 消费者认识 `import` —— 已实施，见本文档文末）。
+PR5（读侧一致性）/PR6（客户端与切路）仍待另出。
 
 ---
 
@@ -368,7 +370,11 @@ PR4/PR5/PR6 在此之后另出设计。
 | 4. 逐实体代次，替换补种 | ✅ 已完成（结论：**不需要**"逐实体代次"；见下） | 见下 |
 | 5. 路线版本 | ✅ 已完成（含两处对初稿的修正 + 红队 F1/NEW-1/NEW-2 修复） | 见下 |
 | 6. 局部 canonical + `FactsReader` | ✅ 已完成（多智能体并行 + 红队交叉复核） | 见下 |
-| 6b. 分析任务登记（切路前提） | ⛔ **未做，切路前必须做** | 见下 |
+| 6b. 分析任务登记（切路前提） | ◐ **上线三步里的第 1 步已落地**（消费者认识 `import`，但只认直连载荷）；**登记与 `deltaMode: "full"` 仍未做** | 见文末「6b 步骤 1」 |
+
+> ⚠️ 本表以下各节的正文（含 `文件:行号`）是**当时（2026-10-12）**的记录。步骤 6b 的步骤 1
+> 在 2026-10-13 落地后，其中若干行号与"消费者只认识两种类型"一类断言**已经变化** ——
+> 变化清单与新的行号写在文末「步骤 6b 步骤 1 的实测证据（2026-10-13）」，正文不改写。
 
 ### 步骤 1 的实测证据（2026-10-12）
 
@@ -805,3 +811,39 @@ final error:         {"message":"Unsupported application job type: import","name
 - 门禁测试（见上）+ 两条"今天不许登记"的断言：`planDirectSyncLane` 恒为 `deltaMode: "record-only"`、
   直连回执 `analysisStatus` 恒为 `"not_required"`。
 - ⛔ **本步有意未做**：不真的登记任何分析任务，`planDirectSyncLane` 的 `deltaMode` 不放开到 `"full"`。
+
+---
+
+### 步骤 6b 的三步顺序：**第 1 步已落地**（2026-10-13）
+
+完整改动清单、实测输出与**三处突变验证**见
+[PR4 落地设计 §8](SQLITE_DIRECT_SYNC_PR4_DESIGN.md#8-步骤-1-的实测证据2026-10-13)。要点：
+
+- 判据从"按 `job_type`"升级为"`(job_type, 载荷 mode)` 合取"，唯一实现
+  `isApplicationConsumableJob`（`packages/contracts/src/index.ts`）被**恢复流程与消费者共用**；
+  `'import'` 这个类型名现在由两个所有者共用，载荷判别物是
+  `cli_export_import`（CLI）与 `direct_sync_analysis`（直连分析）。
+- 消费者（`RaiApplicationService.runNextJob`）对直连载荷**真正跑分析**，对 CLI 载荷
+  **说清原因地拒绝**（不再是 `Unsupported application job type`）。
+- 恢复流程：CLI 载荷中断仍判 `failed/interrupted` 并保留原因（既有修复不变）；
+  直连载荷中断**回到队列**（§10.1 重启恢复）；**未知载荷默认不放行**。
+- 仍然**没有**登记分析任务、`deltaMode` 仍为 `record-only`、回执 `analysisStatus` 仍为
+  `not_required` —— 这三条现由行为级断言钉住（直连车道跑完 `recompute_jobs` 计数为 0）。
+
+#### 本文档正文里**已过时**的断言（不改写，逐条对照）
+
+| 正文位置 | 当时（2026-10-12） | 现在（2026-10-13） |
+|---|---|---|
+| `packages/health-export-parser/src/cli.ts:340` 的 `.run(..., JSON.stringify({ mode: "cli_export_import" }))` | 行号 340 | 判别物走共享常量，`.run` 挪到 `packages/health-export-parser/src/cli.ts:343`；原 `421-432` → `424-435`、原 `505-512` → `508-515` |
+| "消费者只认识两种类型 ⇒ `import` 落 `else` 抛 `Unsupported`" | `service.ts:287-293` / `:296` | 准入判定在 `service.ts:293-296`，`fail` 在 `:310`；`import` 分支在 `:304`，**不再**落 `Unsupported` |
+| "`APPLICATION_CONSUMABLE_JOB_TYPES` 只含两种 / `EXTERNALLY_OWNED_JOB_TYPES` 类型级清单" | `packages/contracts/src/index.ts:564-579` | 换成 `RECOMPUTE_JOB_TYPE_DISPOSITIONS`（`:595`）+ `PAYLOAD_SCOPED_JOB_OWNERSHIP`；`isApplicationConsumableJob` 在 `:659` |
+| "`recoverInterrupted()` 的 SELECT 不过滤 `job_type`" | `packages/storage-sqlite/src/recompute-job-repository.ts:181-191` | SELECT 移到 `packages/storage-sqlite/src/recompute-job-repository.ts:182-192`，并读出 `request_json` 参与判别 |
+
+#### 同轮发现的一处**既有**测试缺陷（在测试自身，不在产品代码）
+
+`packages/storage-sqlite/test/recompute-job-recovery.test.ts` 原有 4 条用例的测试体写成
+`() => { withJobs(...) }`（同步体调用异步助手）⇒ 断言失败会变成"测试结束后发生的异步活动"，
+报告里那些用例仍然打印 ✔，只有文件级失败。突变验证第一次跑就复现：
+3 条断言实际失败，输出里却只有 1 条文件级红、对应用例显示 ✔。已全部改成
+`async () => { await withJobs(...) }`。**这条对全仓其它测试同样适用**：只要测试体是同步的、
+而断言发生在 `await` 之后，守卫就会以"看起来是绿的"方式失效。

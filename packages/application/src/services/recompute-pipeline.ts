@@ -432,6 +432,24 @@ export class RecomputePipeline {
     };
   }
 
+  /**
+   * 直连增量同步车道登记的分析任务（`job_type='import'` + 载荷
+   * `mode='direct_sync_analysis'`，见 §13 PR4 步骤 1）。
+   *
+   * **前置条件**（由调用方 `RaiApplicationService.runNextJob` 用共享函数
+   * `isApplicationConsumableJob(job.jobType, job.request)` 保证）：这条任务确实归应用消费者。
+   * 这里**不再复写第二遍判据** —— 同一判据两处写法正是这个仓反复踩过的坑。
+   *
+   * ⚠️ 本步只落地"消费者认识它并**真正跑分析**"：计算复用 `runFullRecompute` 的同一套
+   * feature / metric / model 计算与全部业务发布 gate，**尚未**按 `target_raw_generation` /
+   * `target_dependency_generation` 读固定版本事实（`FactsReader`）。代次绑定与"同批登记"
+   * 属 PR4 步骤 2，必须与登记、`deltaMode: "full"` 同批落地（见 `docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md`
+   * 步骤 6b 的三步上线顺序）。
+   */
+  runDirectSyncAnalysis(job: RecomputeJob): void {
+    this.runFullRecompute(job);
+  }
+
   runSnapshotRefresh(job: RecomputeJob): void {
     this.recordCache.clear();
     const request = this.parseRequest(job.request);

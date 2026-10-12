@@ -1,21 +1,19 @@
-// 🔴 地雷门禁：今天把 `import` 类型任务登记进直连车道，**不是"积压"，是立刻失败**。
+// 🔴 门禁：直连车道的「登记分析任务」与「放开 deltaMode」必须**同批**落地。
 //
-// 背景（负责人初稿把这一点写反了，见 docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md 步骤 6b）：
-// 设计文档原本写"没有分析消费者，登记只会积压一堆 queued 行"。核实结果是**错的**：
-//   - 消费者存在：apps/api/src/recompute-worker.ts:75 调 hasPendingJob()，
-//     packages/application/src/service.ts:283 claimNext() 是真正的消费者；
-//   - 但 service.ts:287-293 只认识 full_recompute / snapshot_refresh，
-//     `import` 落进 `else` 抛 `Unsupported application job type: import`，
-//     随后 service.ts:296 把任务置为 failed。
-// ⇒ 今天登记 `'import'` 任务 = 消费者领走后**立刻置为 failed**（用户可见的失败任务）。
+// 背景（2026-10-12，设计文档步骤 6b）：把 `import` 类型任务登记进直连车道**不是"积压"，是立刻失败** ——
+// 消费者（`DatasetService.runNextJob`）当时只认识 full_recompute / snapshot_refresh，
+// `import` 落进 `else` 抛 `Unsupported application job type: import`，随后被置为 failed（用户可见的失败任务）。
+// 当时本文件把这条结论钉成可执行事实，用来逼"步骤 1"落地时**同批**接上步骤 2、3。
 //
-// 本文件把这个结论钉成**可执行事实**：将来谁给消费者加上 `import` 分支（= 具备了登记的前提），
-// 这条测试会立刻变红，逼他**同批**改这里（并把 6b 的上线顺序接上）。
-// 这不是"防止功能"，是"防止悄悄半落地"——先有消费者能处理 `import`，才允许登记。
-//
-// ⛔ 硬约束（今天不许真的登记）：本文件同时钉住
-//   - `planDirectSyncLane` 仍只能给出 `deltaMode: "record-only"`；
-//   - 直连回执的 `analysisStatus` 仍是 `"not_required"`（不是 `"queued"`）。
+// 现状（2026-10-13）：设计文档那三步上线顺序的**第 1 步已落地** ——
+// 消费者认识 `import` 了，但只认**直连分析载荷**（`isApplicationConsumableJob` 按
+// `(job_type, 载荷 mode)` 合取判别）。所以本文件改为钉住**新的**四件事，
+// 继续防止"只让消费者不再报错"式的半落地：
+//   1. 消费者对直连分析载荷**真的跑分析**；对 CLI 载荷**说清原因地拒绝**（不再是 Unsupported）；
+//   2. 直连车道**今天仍然不登记**任何分析任务（行为级，见 direct-sync-prohibited-operations.test.ts）；
+//   3. `planDirectSyncLane` 仍只能给出 `deltaMode: "record-only"`；
+//   4. 直连回执的 `analysisStatus` 仍是 `"not_required"`（没有登记，就不能声称 queued）。
+// 谁要放开 3 或 4，必须同批把 1、2 一起做完（登记 + 代次绑定 + 读侧一致性），而不是只改判据。
 
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -24,49 +22,77 @@ import { join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import {
+  CLI_OWNED_IMPORT_REQUEST_MODE,
+  DIRECT_SYNC_ANALYSIS_REQUEST_MODE
+} from "@rai/contracts";
 import { RaiApplicationService } from "@rai/application";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 import { planDirectSyncLane } from "../src/direct-sync-plan.js";
 import { balancedBlock, readStripped, sourceFiles } from "./source-scan.js";
 
-test("今天 `import` 类型任务会被消费者领走并立刻置为 failed（原因：不支持的作业类型）", async () => {
+async function withStore<T>(run: (store: RaiDatabase) => T | Promise<T>): Promise<T> {
   const root = mkdtempSync(join(tmpdir(), "rai-analysis-job-guard-"));
   const store = await RaiDatabase.open(join(root, "rai.sqlite"));
   try {
-    const repository = new RecomputeJobRepository(store.database);
-    const jobId = repository.enqueue("import", null, { source: "direct-sync-probe" });
-    assert.equal(repository.get(jobId)?.status, "queued");
-
-    // 与真实 worker 同一条路径：worker 先看 hasPendingJob()，再由 runNextJob() 消费。
-    assert.equal(repository.hasPending(), true, "登记后应当被识别为待处理任务");
-
-    const service = new RaiApplicationService(store);
-    const result = service.runNextJob();
-
-    // 阳性对照：结果**必须是被这个 jobId 消费出来的**，而不是"没有任务 ⇒ 返回 null 也算通过"。
-    assert.equal(result?.id, jobId, "runNextJob 必须消费到刚登记的 import 任务");
-    assert.deepEqual(
-      { status: result?.status, progressPhase: result?.progressPhase },
-      { status: "failed", progressPhase: "failed" }
-    );
-    // 断言**具体的失败原因**，而不是只断言"失败了"——后者对任何 pipeline 报错都会通过。
-    assert.deepEqual(result?.error, {
-      message: "Unsupported application job type: import",
-      name: "Error"
-    });
-
-    // 证明它**被消费者领走过**（而不是被 failOutstanding 之类的旁路置失败）。
-    const phases = repository.listEvents(jobId).map(({ phase }) => String(phase));
-    assert.ok(phases.includes("claimed"), `事件里应有 claimed，实际：${phases.join(",")}`);
-    assert.ok(phases.includes("failed"), `事件里应有 failed，实际：${phases.join(",")}`);
-
-    // 消费者只认识 full_recompute / snapshot_refresh，所以这条队列到此清空。
-    assert.equal(repository.hasPending(), false);
+    return await run(store);
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });
   }
+}
+
+function counts(store: RaiDatabase): { featureRuns: number; modelRuns: number } {
+  return {
+    featureRuns: Number(store.database.prepare("SELECT COUNT(*) AS n FROM feature_runs").get()!.n),
+    modelRuns: Number(store.database.prepare("SELECT COUNT(*) AS n FROM model_runs").get()!.n)
+  };
+}
+
+test("步骤 1：消费者认识 `import`，直连分析载荷会被**真正执行**（不再是 Unsupported）", async () => {
+  await withStore(async (store) => {
+    const repository = new RecomputeJobRepository(store.database);
+    const jobId = repository.enqueue("import", null, { mode: DIRECT_SYNC_ANALYSIS_REQUEST_MODE });
+    assert.equal(repository.get(jobId)?.status, "queued");
+    assert.equal(repository.hasPending(), true, "登记后应当被识别为待处理任务");
+
+    const result = new RaiApplicationService(store).runNextJob();
+    // 阳性对照：结果必须是被这个 jobId 消费出来的，而不是"没有任务 ⇒ 返回 null 也算通过"。
+    assert.equal(result?.id, jobId, "runNextJob 必须消费到刚登记的 import 任务");
+    assert.notDeepEqual(result?.error, {
+      message: "Unsupported application job type: import",
+      name: "Error"
+    }, "步骤 1 已落地：消费者不得再把 `import` 当成不支持的作业类型");
+    // 🔴 判据是"**真的跑完了分析**"，不是"没报那个错"：只断言 notDeepEqual 的话，
+    // 把失败原因换成任何别的字符串都能通过。所以断言终态成功 + 分析产物落地 + 发布指针被移动。
+    assert.equal(result?.status, "succeeded", JSON.stringify(result?.error));
+    assert.equal(result?.progressPhase, "completed");
+    assert.ok(counts(store).featureRuns > 0 && counts(store).modelRuns > 0,
+      "分析必须真的产出 feature/model run");
+    assert.equal(Number(store.database.prepare("SELECT COUNT(*) AS n FROM active_model_run").get()!.n), 1,
+      "跑完分析必须移动活跃发布指针（旧 release 仍可读）");
+  });
+});
+
+test("步骤 1 的边界：CLI 载荷被消费者**拒绝**，且不会跑分析（原因说清，不是 Unsupported）", async () => {
+  await withStore(async (store) => {
+    const repository = new RecomputeJobRepository(store.database);
+    const jobId = repository.enqueue("import", null, { mode: CLI_OWNED_IMPORT_REQUEST_MODE });
+
+    const result = new RaiApplicationService(store).runNextJob();
+    assert.equal(result?.id, jobId);
+    assert.equal(result?.status, "failed");
+    const message = String((result?.error as { message?: unknown } | null)?.message ?? "");
+    assert.match(message, /not consumable by the application service/i,
+      `失败原因必须说清"这条活不属于这个消费者"，实际：${message}`);
+    assert.match(message, /cli_export_import/i, "失败原因必须点名是哪种载荷");
+    assert.doesNotMatch(message, /Unsupported application job type/i,
+      "`import` 现在是已知类型；再报 Unsupported 就是把「不属于这个消费者」说成「没人实现」");
+    // "不会跑分析"必须是可观测的：一个 feature run 都不许产生。
+    assert.deepEqual(counts(store), { featureRuns: 0, modelRuns: 0 },
+      "CLI 载荷被拒绝时不得产生任何分析产物");
+  });
 });
 
 test("直连车道今天仍只能是 record-only（未接登记，故不得放开 deltaMode）", () => {
@@ -86,9 +112,9 @@ test("直连车道今天仍只能是 record-only（未接登记，故不得放�
 test("直连回执的 analysisStatus 仍是 not_required（今天没有登记，就不能声称 queued）", () => {
   // ⚠️ 这是一条**源码级**守卫，不是行为级。它的用途是"便宜地钉住唯一产出直连回执的地方"：
   // applyDataOnlyImport 里那个 `directSync: { ... }` 字面量一旦被改成 `"queued"`，这里立刻红。
-  // 🔴 权威的**行为级**守卫是 apps/api/test/direct-sync-prohibited-operations.test.ts:299
-  //    （跑完整直连导入并断言 receipt.analysisStatus === "not_required"）。两者并存：
-  //    源码守卫便宜、随单文件运行；行为守卫是真跑。谁都不替代谁。
+  // 🔴 权威的**行为级**守卫是 apps/api/test/direct-sync-prohibited-operations.test.ts
+  //    （跑完整直连导入并断言 receipt.analysisStatus === "not_required"，以及
+  //     `recompute_jobs` 里没有新任务）。两者并存：源码守卫便宜、随单文件运行；行为守卫是真跑。
   //
   // ⚠️ 覆盖缺口（红队 red-team-2 指出）：本守卫只扫 data-only-import.ts，行为守卫只跑 data-only
   //    这一条车道 ⇒ 二者对"**新增第二个直连回执产出方**"都是盲的。该盲区已由下一条用例

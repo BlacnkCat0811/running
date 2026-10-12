@@ -8,6 +8,18 @@
 
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
+- [DIRECT_SYNC_PR4_STEP1_2026-10-13.md](DIRECT_SYNC_PR4_STEP1_2026-10-13.md)：**SQLite 直接增量同步 PR4 步骤 1 的验收记录**
+  （依据 [PR4 落地设计](../docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md) 与 [PR2+PR3 设计](../docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md) 步骤 6b 的三步顺序）。
+  改的是"消费者先认识 `import`"这一步：判据从**按类型**升级为 **`(job_type, 载荷 mode)` 合取**
+  （`'import'` 是两个所有者共用的类型名），恢复流程与消费者共用同一个函数。
+  含定向用例 11/11、下游包 36/36、`tsc` EXIT=0、**3 处突变全部被精确捕获**，
+  以及一条**既有测试缺陷**的发现与修复（同步测试体调异步助手 ⇒ 失败打印 ✔ 却只有文件级红；
+  全仓扫描 236 个文件命中 0 处，扫描器带阳性对照）。
+  🔴 **如实标注**：本机**没有 `npm`**，`npm test` 无法原样跑；等价跑法
+  `RAI_TEST_CONCURRENCY=1 node scripts/run-tests.mjs` 得 Node 1672/1676（唯一失败即"缺 npm"的环境项）、
+  Web 单独跑 184/184。
+  ⚠️ 同为**当轮**产物：收尾后并入 [运维](../docs/OPERATIONS.md) / [项目审查](../docs/PROJECT_REVIEW.md) 或删除。
+
 - [UNCOMMITTED_REVIEW_2026-10-12.md](UNCOMMITTED_REVIEW_2026-10-12.md)：**当轮未提交改动**（PR1 文档 + PR2/PR3 实现）
   的分级审查（**3 条 🔴 / 4 条 🟡 / 3 项 ✅**）。🔴 的三条都在**门禁真空**上：`check:doc-refs` 当时的
   默认文档集**一份引用都没有**（校验了 0 处却返回 `EXIT=0`）、对新设计文档的两处越界引用未报、

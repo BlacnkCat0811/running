@@ -83,7 +83,8 @@ const DEFAULT_DOCS = [
   "docs/OPERATIONS.md",
   // 进行中的设计文档：正文大量用 `文件:行号` 描述"现状"（那一节正是设计的前提），
   // 所以它必须在门禁范围里，而不是"谁想起来谁手动传"。
-  "docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md"
+  "docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md",
+  "docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md"
 ];
 
 /** 同名文件消歧：文档里的缩写写法指向哪一个。 */

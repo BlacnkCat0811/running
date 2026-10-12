@@ -548,35 +548,124 @@ export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancell
 export type RecomputeJobType = "import" | "full_recompute" | "snapshot_refresh";
 
 /**
- * `recompute_jobs` 里**唯一**那个消费者（`DatasetService.runNextJob`）真正能执行的任务类型。
- *
- * 🔴 为什么这是一个共享常量而不是两边各写一份：`recoverInterrupted()`（存储层）会把
- * `status='running'` 的任务**一律**放回 `queued`，而那会让**不属于**这个消费者的任务
- * （`"import"` —— 由 CLI 导入进程创建并推进，见 `packages/health-export-parser/src/cli.ts`）
- * 被投给一个执行不了它的消费者。实测过的后果：CLI 导入崩溃 → API 重启做恢复 →
- * 该任务被放回队列 → 消费者领走后以 `Unsupported application job type: import` 置为失败，
- * 而**原始的中断原因已被 `recoverInterrupted` 清掉**。
- *
- * ⇒ 恢复必须按"谁能执行"分派，而不是按"是不是 running"。
- * 新增任务类型时，这里要么加上它（并给消费者加分支），要么它就必须有自己的所有者：
- * `recompute-job-recovery.test.ts` 会把"两者都没有"的新类型判红。
+ * CLI 导出导入进程写在 `recompute_jobs.request_json` 里的载荷判别物。
+ * 出处：`packages/health-export-parser/src/cli.ts`（`import` / `incremental-import` 命令）。
  */
-export const APPLICATION_CONSUMABLE_JOB_TYPES: readonly RecomputeJobType[] = [
-  "full_recompute",
-  "snapshot_refresh"
+export const CLI_OWNED_IMPORT_REQUEST_MODE = "cli_export_import";
+
+/**
+ * 直接增量同步车道登记的分析任务写在 `request_json` 里的载荷判别物。
+ *
+ * 🔴 为什么分析任务**必须**带这个判别物，而不是只靠 `job_type`：`'import'` 是
+ * **两个所有者共用的类型名** —— 旧 CLI 导入在写它，直连车道登记的分析任务也要写它
+ * （v35 文件头明令禁止放宽 `job_type` 的 `CHECK`，所以不能靠新增类型名区分）。
+ * 只按类型分派会让两条路互相误伤：
+ *   - 恢复流程把中断的 CLI 导入任务放回队列 ⇒ 消费者领走 ⇒ 旧行为：判 `failed`，
+ *     且**原始中断原因被清掉**（实测形态，见 `recompute-job-recovery.test.ts`）；
+ *   - 反过来，一旦消费者有 `import` 分支而**不看载荷**，一条被复活的 CLI 导入任务
+ *     会被当成分析任务去执行。
+ */
+export const DIRECT_SYNC_ANALYSIS_REQUEST_MODE = "direct_sync_analysis";
+
+/** 谁能执行一条 `recompute_jobs` 任务。`external` = 有自己所有者进程，消费者不得执行。 */
+export type RecomputeJobDisposition = "application" | "payload-scoped" | "external";
+
+export interface RecomputeJobTypeDisposition {
+  readonly jobType: RecomputeJobType;
+  readonly disposition: RecomputeJobDisposition;
+  /** 该类型的执行者（用于文档与失败文案）。 */
+  readonly owner: string;
+}
+
+/**
+ * `recompute_jobs` 里每个 `job_type` 的**有意表态**。
+ *
+ * 🔴 为什么这是一个共享表而不是两边各写一份：`recoverInterrupted()`（存储层）会把
+ * `status='running'` 的任务按"谁能执行"分派，而唯一那个消费者是
+ * `DatasetService.runNextJob`（应用层）。两边各写一份清单，等于允许它们悄悄分叉 ——
+ * 分叉的后果实测过：CLI 导入崩溃 → API 重启做恢复 → 任务被放回队列 → 消费者领走后
+ * 以 `Unsupported application job type: import` 置为失败，而**原始中断原因已被恢复流程清掉**。
+ *
+ * `payload-scoped` 表示**同一个类型名由两个所有者共用**，只能连载荷一起判别 ——
+ * 判别规则见 {@link PAYLOAD_SCOPED_JOB_OWNERSHIP}，执行者是
+ * {@link isApplicationConsumableJob}。新增任务类型时，这里要么给它 `application`
+ * （并在消费者里加分支），要么写明它归谁；`recompute-job-recovery.test.ts` 会把
+ * "两者都没有"的新类型判红，也会把"声明了却与判别函数不一致"的组合判红。
+ */
+export const RECOMPUTE_JOB_TYPE_DISPOSITIONS: readonly RecomputeJobTypeDisposition[] = [
+  {
+    jobType: "full_recompute",
+    disposition: "application",
+    owner: "DatasetService.runNextJob（应用消费者）"
+  },
+  {
+    jobType: "snapshot_refresh",
+    disposition: "application",
+    owner: "DatasetService.runNextJob（应用消费者）"
+  },
+  {
+    jobType: "import",
+    disposition: "payload-scoped",
+    owner: "按载荷判别：CLI 导入进程（cli_export_import）vs 直连车道分析任务（direct_sync_analysis）"
+  }
 ];
 
 /**
- * 有**自己的所有者进程**、因而**不得**被交给应用消费者的任务类型，以及原因。
- * 恢复流程据此把它们直接判为中断失败，而不是放回一条没人能跑的队列。
+ * `payload-scoped` 类型的载荷级归属表。两列都必须**非空**：
+ * 只列"谁能跑"而不列"谁不能跑"，会让判别函数退化成默认放行。
  */
-export const EXTERNALLY_OWNED_JOB_TYPES: readonly { jobType: RecomputeJobType; owner: string }[] = [
+export interface PayloadScopedJobOwnership {
+  readonly jobType: RecomputeJobType;
+  /** 归应用消费者的 `request_json.mode` 取值。**白名单**：不在其中的一律不放行。 */
+  readonly applicationRequestModes: readonly string[];
+  /** 归外部所有者进程的 `request_json.mode` 取值，以及它的所有者。 */
+  readonly externalRequestModes: readonly { readonly requestMode: string; readonly owner: string }[];
+}
+
+export const PAYLOAD_SCOPED_JOB_OWNERSHIP: readonly PayloadScopedJobOwnership[] = [
   {
     jobType: "import",
-    owner: "CLI 导入进程（packages/health-export-parser/src/cli.ts）自己创建并推进；" +
-      "应用消费者不执行它（DatasetService.runNextJob 只认 full_recompute / snapshot_refresh）"
+    applicationRequestModes: [DIRECT_SYNC_ANALYSIS_REQUEST_MODE],
+    externalRequestModes: [{
+      requestMode: CLI_OWNED_IMPORT_REQUEST_MODE,
+      owner: "CLI 导入进程（packages/health-export-parser/src/cli.ts）自己创建并推进"
+    }]
   }
 ];
+
+/** 取载荷里的 `mode`。接受已解析的对象，也接受库里那一列原样的 JSON 文本。 */
+export function recomputeRequestMode(requestJson: unknown): string | null {
+  let value = requestJson;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const mode = (value as { mode?: unknown }).mode;
+  return typeof mode === "string" ? mode : null;
+}
+
+/**
+ * 应用消费者（`DatasetService.runNextJob`）能否执行这条任务。
+ *
+ * 🔴 判据是 `(job_type, 载荷 mode)` 的**合取**，不是 `job_type` 一个字段：
+ * `payload-scoped` 类型的载荷白名单为空、或载荷 `mode` 不在白名单里，一律返回 `false`。
+ * 未知类型同样返回 `false` —— 把一条没人能跑的活投给消费者，只会得到一条
+ * **原因错误**的失败任务（真因是"它根本不属于这个消费者"）。
+ */
+export function isApplicationConsumableJob(jobType: string, requestJson: unknown): boolean {
+  const declared = RECOMPUTE_JOB_TYPE_DISPOSITIONS.find((entry) => entry.jobType === jobType);
+  if (!declared) return false;
+  if (declared.disposition === "application") return true;
+  if (declared.disposition === "external") return false;
+  const scope = PAYLOAD_SCOPED_JOB_OWNERSHIP.find((entry) => entry.jobType === jobType);
+  if (!scope) return false;
+  const mode = recomputeRequestMode(requestJson);
+  return mode !== null && scope.applicationRequestModes.includes(mode);
+}
 
 export type TrainingSessionStatus = "active" | "inactive" | "ambiguous";
 
