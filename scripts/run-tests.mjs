@@ -39,6 +39,58 @@ export function executeSuites(suites, spawn = spawnSync) {
   return failed ? 1 : 0;
 }
 
+/**
+ * Node 套件的文件级并发。
+ *
+ * 🔴 **为什么需要这个旋钮（实测，不是推测）**：本脚本把**全部**测试文件一次性交给
+ * `node --test`，不传 `--test-concurrency` 时 node 用默认并发 = `os.availableParallelism()`
+ * （本机 = 6）。而几个重文件自身就要 5–7 分钟、且靠**墙钟轮询**判成败：
+ *   · `apps/api/test/worker.test.ts:214` 的 `waitFor` 默认预算 **5000 ms**；
+ *   · `apps/api/test/data-only-import-queue.test.ts:61` 的 `wait` 预算 **30 000 ms**；
+ *   · 单跑实测：`server-runtime` **443 s**、`worker` **349 s**。
+ * 六路并行时它们必然重叠 ⇒ 5s / 30s 预算越界 ⇒ **全量红、单跑绿**。
+ * 2026-10-12 用控制变量实验定过性：**同一份代码、同一批文件**，
+ * 默认并发 → `EXIT=1`（2 条超时失败）；`--test-concurrency=1` → `EXIT=0`（132 条 0 失败）。
+ *
+ * ⚠️ **默认行为一个字节都没改**（下面 `undefined → 不传该参数`）：调并发会让全量明显变慢，
+ * 那是 CI 吞吐与稳定性的取舍，属项目决策，不该由一次改动顺手决定。
+ * 需要一份可验收的独占结果时，显式设置：
+ *
+ *     RAI_TEST_CONCURRENCY=2 npm test
+ *
+ * ⛔ 不要为了让它变绿去调大测试里的 5s / 30s 预算 —— 那是把测试调弱换绿灯。
+ */
+export function testConcurrency(env = process.env) {
+  const raw = env.RAI_TEST_CONCURRENCY;
+  if (raw === undefined || raw === "") return undefined;
+  // ⚠️ 用**正则**而不是 `Number.isInteger(Number(raw))`：后者会放行 `" 2"`（Number 去空白）
+  // 与 `"0x2"`（十六进制），于是"非法值静默当成合法"，而使用者以为自己已经独占运行了。
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    throw new Error(
+      `RAI_TEST_CONCURRENCY must be a positive decimal integer, got ${JSON.stringify(raw)}. ` +
+      "Refusing to guess: an empty or non-numeric value would silently fall back to the default."
+    );
+  }
+  return Number(raw);
+}
+
+/**
+ * Node 套件的 argv。
+ *
+ * ⚠️ `concurrency` **故意不给默认值**：给了默认值（`= testConcurrency()`）以后，
+ * 调用方传 `undefined` 也会触发它 —— 于是这个"纯函数"藏了一次**环境读取**，
+ * 而任何断言它的测试都会变成"校验本机此刻的配置"，不再是 hermetic。
+ * 这正是本函数第一版的样子，并且**在门禁里真实地红过一次**（用 `RAI_TEST_CONCURRENCY=1` 跑时）。
+ * 现在由 `main()` 显式传入，`undefined` 就明确表示"不追加并发参数"。
+ */
+export function nodeSuiteArgs(files, concurrency) {
+  return [
+    "--import", "tsx", "--test",
+    ...(concurrency === undefined ? [] : [`--test-concurrency=${concurrency}`]),
+    ...files
+  ];
+}
+
 export function main() {
   const files = nodeTestFiles();
   if (!files.length) throw new Error("No Node test files found; refuse an empty green test run");
@@ -46,7 +98,7 @@ export function main() {
   const requireWeb = createRequire(join(web, "package.json"));
   const vitest = join(dirname(requireWeb.resolve("vitest/package.json")), "vitest.mjs");
   return executeSuites([
-    { name: "Node", cwd: root, args: ["--import", "tsx", "--test", ...files] },
+    { name: "Node", cwd: root, args: nodeSuiteArgs(files, testConcurrency()) },
     { name: "Web", cwd: web, args: [vitest, "run"] }
   ]);
 }

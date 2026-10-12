@@ -59,3 +59,36 @@ test("test runner refuses silent startup failure and stops on cancellation", () 
   assert.equal(runner.executeSuites([suite, suite], () => { calls++; return { status: null, signal: "SIGINT" }; }), 130);
   assert.equal(calls, 1);
 });
+
+test("Node 套件默认 argv 与历史逐字相同，只有显式设了并发才多一个参数", () => {
+  const files = ["packages/a/test/a.test.ts"];
+  // 🔴 断言必须**自洽**，不能读环境：第一版写成 `nodeSuiteArgs(files, undefined)`，
+  // 而 `undefined` 会触发默认参数、去读**真实的** `RAI_TEST_CONCURRENCY` ——
+  // 于是"用 RAI_TEST_CONCURRENCY=1 跑门禁"时这条测试自己红（全量串行跑就是这样红的）。
+  // 一个会读环境变量的测试不是 hermetic 的：它校验的是"我这台机器此刻的配置"，不是代码。
+  // 所以下面一律用**显式传入**的环境对象。
+  const ambient = { RAI_TEST_CONCURRENCY: "1" };  // 故意的：证明它不会渗进默认断言
+  const legacyArgv = ["--import", "tsx", "--test", ...files];
+
+  // 默认（未设置）⇒ argv 与历史逐字相同。谁把默认改成有界并发，这里先红。
+  assert.deepEqual(runner.nodeSuiteArgs(files, runner.testConcurrency({})), legacyArgv);
+  assert.equal(runner.testConcurrency({}), undefined, "未设置时不得凭空产生一个并发值");
+  assert.equal(runner.testConcurrency({ RAI_TEST_CONCURRENCY: "" }), undefined, "空串按未设置处理");
+
+  // 显式设置时才追加参数，且其余 argv 不变。
+  assert.deepEqual(runner.nodeSuiteArgs(files, runner.testConcurrency(ambient)),
+    ["--import", "tsx", "--test", "--test-concurrency=1", ...files]);
+  assert.equal(runner.testConcurrency(ambient), 1);
+  assert.equal(runner.testConcurrency({ RAI_TEST_CONCURRENCY: "2" }), 2);
+});
+
+test("非法并发值必须响亮拒绝，不许静默回落到默认", () => {
+  // 静默回落会让"我想要一份确定性的结果"变成"其实还是 6 路并行"，而使用者以为已经独占。
+  // 断言只钉"响亮拒绝 + 指名道姓"，不钉具体措辞（措辞会随校验收紧而改）：
+  // 例 `" 2"` / `"0x2"` 都能被 `Number()` 解析成 2，所以这一层必须靠正则收。
+  for (const raw of ["0", "-1", "abc", "1.5", " 2", "0x2", "1e2", "+2"]) {
+    assert.throws(() => runner.testConcurrency({ RAI_TEST_CONCURRENCY: raw }),
+      /RAI_TEST_CONCURRENCY must be a positive/,
+      `RAI_TEST_CONCURRENCY=${JSON.stringify(raw)} 应当被拒绝`);
+  }
+});
