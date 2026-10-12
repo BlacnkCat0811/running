@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { beginOwnedTransaction, commitOwnedTransaction, rollbackOwnedTransaction } from "./owned-transaction.js";
 
 import { healthTypes, workoutTypes } from "@rai/contracts";
 
@@ -49,6 +50,9 @@ export interface CanonicalizationResult {
 export interface IncrementalCanonicalizationOptions {
   dirtyWorkoutTimes: readonly string[];
 }
+
+/** 调用方持有事务时本段使用的 SAVEPOINT 名。 */
+export const CANONICALIZE_WORKOUTS_SAVEPOINT = "rai_canonicalize_workouts";
 
 class UnionFind {
   private readonly parent: number[];
@@ -234,8 +238,11 @@ function loadExistingTrainingSessions(database: DatabaseSync): ExistingTrainingS
 
 export function canonicalizeRunningWorkouts(
   database: DatabaseSync,
-  incremental?: IncrementalCanonicalizationOptions
+  incremental?: IncrementalCanonicalizationOptions,
+  transaction: { callerOwnedTransaction?: boolean } = {}
 ): CanonicalizationResult {
+  // caller 模式下提交权归调用方：本段边界是 SAVEPOINT，不是新事务（见 owned-transaction.ts）。
+  const callerOwned = transaction.callerOwnedTransaction === true;
   const allWorkouts = loadRunningWorkouts(database);
   let workouts = allWorkouts;
   if (incremental) {
@@ -297,7 +304,7 @@ export function canonicalizeRunningWorkouts(
     groups.set(root, members);
   });
 
-  database.exec("BEGIN IMMEDIATE");
+  beginOwnedTransaction(database, CANONICALIZE_WORKOUTS_SAVEPOINT, callerOwned);
   try {
     if (incremental) {
       const selectedIds = workouts.map((workout) => workout.id);
@@ -455,9 +462,9 @@ export function canonicalizeRunningWorkouts(
       ORDER BY id
     `).run(workoutTypes.running);
 
-    database.exec("COMMIT");
+    commitOwnedTransaction(database, CANONICALIZE_WORKOUTS_SAVEPOINT, callerOwned);
   } catch (error) {
-    database.exec("ROLLBACK");
+    rollbackOwnedTransaction(database, CANONICALIZE_WORKOUTS_SAVEPOINT, callerOwned);
     throw error;
   }
 

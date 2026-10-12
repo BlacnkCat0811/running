@@ -139,7 +139,7 @@ test("直连回执的 analysisStatus 仍是 not_required（今天没有登记，
   assert.doesNotMatch(block, /analysisStatus:\s*"queued"/);
 });
 
-test("`directSync` 直连回执今天只有一个产出方（新增第二个即红）", () => {
+test("`directSync` 直连回执今天只有两个产出方（新增第三个即红）", () => {
   // 收窄上一条用例的盲区：`\bdirectSync\s*:\s*\{` 在所有 src 里只允许命中 data-only-import.ts。
   // 为什么这条判据不误伤类型声明：`packages/api-contracts/src/index.ts` 的 `directSync?: DirectSyncReceipt;`
   // 在 `directSync` 与 `:` 之间是 `?`，正则 `\s*:` 匹配不上（红队独立核对过，我也复跑确认）。
@@ -160,10 +160,16 @@ test("`directSync` 直连回执今天只有一个产出方（新增第二个即�
   for (const file of roots.flatMap((candidate) => sourceFiles(candidate))) {
     if (/(?<!["'\w])directSync\s*:\s*\{/.test(readStripped(file))) producers.add(relative(rootPath, file));
   }
+  // 两个产出方：
+  //   · `data-only-import.ts` —— record-only 快通路，回执恒为 `not_required`（源码守卫 + 行为守卫）；
+  //   · `direct-sync-ingest.ts` —— 统一接收器（PR4 2c/2d），回执按分类取 `queued` / `not_required`
+  //     （**行为**守卫在 `apps/api/test/direct-sync-ingest.test.ts`，两种分类各一条）。
+  // ⚠️ 上一条源码守卫**只扫第一个**：第二个的判据是行为级的，不是文本级的。
+  // 新增第三个产出方时，必须同时说清它的回执语义由谁守 —— 否则这里只是让它变绿。
   assert.deepEqual(
     [...producers].sort(),
-    ["apps/api/src/data-only-import.ts"],
-    "出现了第二个 `directSync` 产出方：上一条源码守卫只会扫 data-only-import.ts，" +
+    ["apps/api/src/data-only-import.ts", "apps/api/src/direct-sync-ingest.ts"],
+    "出现了第三个 `directSync` 产出方：上一条源码守卫只会扫 data-only-import.ts，" +
       "新产出方不会被它覆盖 —— 请把新产出方一并纳入守卫（或改为运行期唯一来源断言）"
   );
 });

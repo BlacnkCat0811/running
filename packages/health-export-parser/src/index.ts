@@ -5,7 +5,10 @@ export {
   classifyDirectSyncPayload,
   type DirectSyncPayloadFacts, type DirectSyncPayloadClassification
 } from "./record-delta-policy.js";
-export { parseHealthSyncManifest, readHealthSyncManifest } from "./sync-manifest.js";
+export {
+  parseHealthSyncManifest, readHealthSyncManifest,
+  type HealthSyncManifest, type HealthKitRecordDeletion
+} from "./sync-manifest.js";
 export {
   prepareNative, nativeElevationGains, importEngine, nativeFallback, nativeBinary, NativeWorkerError,
   NATIVE_PROTOCOL, NATIVE_VERSION, NATIVE_OPERATIONS,

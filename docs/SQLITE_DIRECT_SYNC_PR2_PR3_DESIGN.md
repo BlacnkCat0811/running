@@ -32,7 +32,7 @@ PR4（分析输入与短写调度）、PR5（读侧一致性）、PR6（客户�
 | `recompute_jobs` 在主库，`job_type CHECK IN ('import','full_recompute','snapshot_refresh')`，`status CHECK IN (queued…cancelled)` | `database.ts:482-498` | 分析任务可与 raw 同事务落库（§4.2 要求）；要加绑定列只能 `ALTER TABLE ADD COLUMN` |
 | `canonicalizeNights` 每次 `DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;` 再全量重建 | `packages/health-export-parser/src/canonicalize-nights.ts:333` | 局部化必须改成按窗口 `DELETE ... WHERE`，且夜间日期范围由段的**开始与结束**共同决定（见同文件注释 `canonicalize-nights.ts:10` 与实现 `canonicalize-nights.ts:259-261`） |
 | 迁移注册表 `migrations` 到 v33 为止；`FROZEN_MIGRATION_CHECKSUMS` 按版本冻结；门禁在 `test/migration-policy.test.ts` | `database.ts:123`（注册表；v33 条目在 `database.ts:1673`）、`database.ts:1718`（冻结值）；`MIGRATION_VERSIONS`/`transpiledChecksumFor` 在 `1757/1769`（同文件） | 新增迁移必须补冻结值，否则门禁转红 |
-| 守卫观测口：`databaseTask` 是唯一线程投递口，`task.operation` ∈ {verify, audit, checkpoint, data-only} | `apps/api/src/import-worker.ts:948-966`；`import-database-tasks.ts:6-10` | PR2 扩展车道要**新增 operation**，否则守卫看不见新通道 |
+| 守卫观测口：`databaseTask` 是唯一线程投递口，`task.operation` ∈ {verify, audit, checkpoint, data-only} | `apps/api/src/import-worker.ts:948-966`；`apps/api/src/import-database-tasks.ts:7-12` | PR2 扩展车道要**新增 operation**，否则守卫看不见新通道 |
 
 ---
 
@@ -254,7 +254,7 @@ ALTER TABLE recompute_jobs ADD COLUMN dirty_json TEXT;
   把 `DELETE FROM canonical_nights` 换成 `DELETE ... WHERE wake_date BETWEEN ? AND ?`（`canonical_hrv_days` 同理），
   扫描范围 `all` 由 `loadSegments` 的全量改为按时间窗过滤。
 - **不改** 来源优先级、跨夜并集、同内容原可得时间、HRV 稀疏/缺失语义（§8.2 明令保留）。
-- 算法文本变了必须 bump `CANONICAL_NIGHT_ALGORITHM_VERSION`（现有做法，见 `canonicalize-nights.ts:7-15`）。
+- 算法文本变了必须 bump `CANONICAL_NIGHT_ALGORITHM_VERSION`（现有做法，见 `packages/health-export-parser/src/canonicalize-nights.ts:8-16`）。
 - 全局重算（VO2Max/校准/配置升级）仍走整表路径，但**不再**触发 backup/copy/swap。
 
 ---

@@ -104,6 +104,43 @@ test("caller 模式下 store 不能自己开事务，也不能自己提交", asy
   });
 });
 
+test("flushIfOwned 是**按所有权**提交：store 模式提交、caller 模式什么都不做", async () => {
+  // 解析器与路线写入器（`@rai/health-export-parser`）在两种所有权下都要能跑：
+  // store 模式下它们确实要提交自己那一段，caller 模式下提交权归调用方。
+  // 🔴 它们此前直接调 `flush()`，于是直连车道**每一批**都在这里失败 —— 而报错看起来像
+  // "事务所有权配置错了"，与真因（组件擅自提交）无关。这条用例把两种语义都钉住。
+  await withPaths(async ({ path }) => {
+    await migrated(path);
+    const owner = await RaiDatabase.open(path, { createMigrationBackup: false });
+    try {
+      owner.setManifest("owned_by_store", "1");
+      owner.flushIfOwned(); // store 模式：等价于 flush()
+      owner.setManifest("owned_by_store_2", "2");
+      owner.beginAtomicImport();
+      owner.flushIfOwned();
+      owner.commitAtomicImport();
+    } finally { owner.close(); }
+    const reader = new DatabaseSync(path, { readOnly: true });
+    try {
+      assert.equal(reader.prepare("SELECT value FROM import_manifest WHERE key='owned_by_store'").get()?.value, "1");
+      assert.equal(reader.prepare("SELECT value FROM import_manifest WHERE key='owned_by_store_2'").get()?.value, "2");
+      assert.equal(reader.prepare("SELECT value FROM import_manifest WHERE key='owned_by_caller'").get(), undefined,
+        "caller 模式下 flushIfOwned 不得替调用方提交");
+    } finally { reader.close(); }
+
+    const caller = await RaiDatabase.open(path, { transactionOwner: "caller" });
+    try {
+      caller.beginCallerTransaction();
+      caller.setManifest("owned_by_caller", "c");
+      caller.flushIfOwned(); // caller 模式：静默无事发生（提交权不归它）
+      assert.equal(manifest(caller, "owned_by_caller"), "c", "同一连接内仍然可见");
+      caller.rollbackCallerTransaction();
+      caller.rollbackIfOwned(); // 同上：不得抛错、也不得做别的事
+      assert.equal(manifest(caller, "owned_by_caller"), null);
+    } finally { caller.close(); }
+  });
+});
+
 test("caller 事务：提交后落库，回滚后消失，且不会留下半批", async () => {
   await withPaths(async ({ path }) => {
     await migrated(path);

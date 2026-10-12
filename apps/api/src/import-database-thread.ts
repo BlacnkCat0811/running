@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { buildImportAudit, checkpointImportDatabase, databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
 import { applyDataOnlyImport } from "./data-only-import.js";
+import { applyDirectSyncImport } from "./direct-sync-ingest.js";
 
 const task = workerData as ImportDatabaseTask;
 let result: unknown;
@@ -9,6 +10,7 @@ switch (task.operation) {
   case "audit": result = buildImportAudit(task.path); break;
   case "checkpoint": result = checkpointImportDatabase(task.path); break;
   case "data-only": result = await applyDataOnlyImport(task.input); break;
+  case "direct-sync": result = await applyDirectSyncImport(task.input); break;
   default: {
     // 🔴 这个 default 今天不可达 —— 它守的是**将来**：给 `ImportDatabaseTask` 加了新 operation
     // 却忘了在这里加分支时，`result` 会保持 `undefined` 并被当作成功回传，

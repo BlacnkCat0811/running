@@ -1,3 +1,4 @@
+import { beginOwnedTransaction, commitOwnedTransaction, rollbackOwnedTransaction } from "./owned-transaction.js";
 import type { DatabaseSync } from "node:sqlite";
 
 import { DATABASE_TIMEZONE, healthTypes } from "@rai/contracts";
@@ -387,12 +388,18 @@ export function canonicalizeNights(database: DatabaseSync, timezoneIdentifier: s
  *
  * `fromLocalDate > toLocalDate` 是**显式空操作**：返回全零计数、不写任何一行（也不开事务）。
  */
+/** 调用方持有事务时，窗口规范化使用的 SAVEPOINT 名。 */
+export const CANONICALIZE_NIGHTS_WINDOW_SAVEPOINT = "rai_canonicalize_nights_window";
+
 export function canonicalizeNightsForWindow(
   database: DatabaseSync,
   timezoneIdentifier: string,
   fromLocalDate: string,
-  toLocalDate: string
+  toLocalDate: string,
+  transaction: { callerOwnedTransaction?: boolean } = {}
 ): CanonicalizationNightsResult {
+  // caller 模式下提交权归调用方：本段边界是 SAVEPOINT，不是新事务（见 owned-transaction.ts）。
+  const callerOwned = transaction.callerOwnedTransaction === true;
   assertLocalDate(fromLocalDate, "fromLocalDate");
   assertLocalDate(toLocalDate, "toLocalDate");
   if (fromLocalDate > toLocalDate) {
@@ -432,7 +439,7 @@ export function canonicalizeNightsForWindow(
     );
   }
 
-  database.exec("BEGIN IMMEDIATE");
+  beginOwnedTransaction(database, CANONICALIZE_NIGHTS_WINDOW_SAVEPOINT, callerOwned);
   try {
     const nightScope: ArrivalScope = { dateColumn: "wake_date", from: fromLocalDate, to: toLocalDate };
     const hrvScope: ArrivalScope = { dateColumn: "local_date", from: fromLocalDate, to: toLocalDate };
@@ -443,13 +450,16 @@ export function canonicalizeNightsForWindow(
     if (all.length === 0) {
       preserveArrivalTime(database, "canonical_nights", "restore");
       preserveArrivalTime(database, "canonical_hrv_days", "restore");
-      database.exec("COMMIT");
+      commitOwnedTransaction(database, CANONICALIZE_NIGHTS_WINDOW_SAVEPOINT, callerOwned);
       return { mainCount: 0, napCount: 0, hrvCount: 0, rejectedInBedOnly: 0, timezoneIdentifier };
     }
     const counts = rebuildCanonicalNights({ database, timezoneIdentifier, segments: all, hrv, firstDate: fromLocalDate, lastDate: toLocalDate });
     preserveArrivalTime(database, "canonical_nights", "restore");
     preserveArrivalTime(database, "canonical_hrv_days", "restore");
-    database.exec("COMMIT");
+    commitOwnedTransaction(database, CANONICALIZE_NIGHTS_WINDOW_SAVEPOINT, callerOwned);
     return { ...counts, timezoneIdentifier };
-  } catch (error) { database.exec("ROLLBACK"); throw error; }
+  } catch (error) {
+    rollbackOwnedTransaction(database, CANONICALIZE_NIGHTS_WINDOW_SAVEPOINT, callerOwned);
+    throw error;
+  }
 }

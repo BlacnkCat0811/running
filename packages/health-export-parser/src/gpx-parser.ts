@@ -548,7 +548,11 @@ export async function importGpxRoutes(
     "source_gpx_bundle_sha256",
     preserveAbsent ? bundleHashFromFingerprints(store) : bundleHash.digest("hex")
   );
-  store.flush();
+  // 🔴 按**所有权**提交，不是"擅自提交"：store 模式下这里就是提交自己那一段；
+  // caller 模式（直连接收事务）下提交权归调用方，这里什么都不做。
+  // 直接写 `store.flush()` 会让整条直连车道在**每一批**上失败（实测：解析器/路线写入器
+  // 都是这么挂的），而失败原因看起来像"事务所有权配置错了"，与真因（组件擅自提交）无关。
+  store.flushIfOwned();
 
   return {
     routeFileCount: allPaths.length,

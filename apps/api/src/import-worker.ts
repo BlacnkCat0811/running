@@ -947,7 +947,8 @@ export class ImportWorker {
    * task failure, never as evidence that a healthy database is corrupt. */
   private databaseTask<T>(task: ImportDatabaseTask, stage = task.operation === "verify"
     ? "database_quick_check" : task.operation === "audit" ? "final_audit_build"
-      : task.operation === "data-only" ? "data_only_transaction" : "database_checkpoint"): Promise<T> {
+      : task.operation === "data-only" ? "data_only_transaction"
+        : task.operation === "direct-sync" ? "direct_sync_transaction" : "database_checkpoint"): Promise<T> {
     const started = performance.now();
     return new Promise<T>((resolveResult, reject) => {
       const thread = new Worker(new URL("./import-database-bootstrap.mjs", import.meta.url), { workerData: task });

@@ -79,7 +79,9 @@ export class NativeRecordWriter {
     // is re-armed before every apply so a replay is authenticated the same way.
     const permit = randomBytes(32).toString("hex");
     store.setManifest("rai.native_import_permit", permit);
-    store.flush();
+    // 同上：按所有权提交（caller 模式下由调用方提交）。native apply 必须**先**让 permit 可见，
+    // 所以这一段在 store 模式下确实要提交 —— `flushIfOwned` 保留了那个语义。
+    store.flushIfOwned();
     const result = await prepareNative("apply-records", this.path, {
       ...options, stagingDatabase: target, permit, fallback: "none"
     });

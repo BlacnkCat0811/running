@@ -50,7 +50,7 @@ const uuid = "00000000-0000-0000-0000-00000000000a";
  * 少写一个键或多写一个键都会**编译不过**，守卫因此不会因为对端新增任务类型而静默失效。
  */
 const databaseTaskOperations: Record<ImportDatabaseTask["operation"], true> = {
-  verify: true, audit: true, checkpoint: true, "data-only": true
+  verify: true, audit: true, checkpoint: true, "data-only": true, "direct-sync": true
 };
 
 interface Guard {

@@ -236,13 +236,41 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 |---|---|---|---|
 | 2a | 载荷分类纯函数 + "未知必须分析"门禁 | 新用例（无行为变化） | ✅ 已完成（2026-10-13，见 §8.1） |
 | 2b | parser `callerOwnedTransaction` + SAVEPOINT；与 `recordDelta` 互斥 | 结构判据 + record-only 车道零变化 | ✅ 已完成（2026-10-13，见 §8.2） |
-| 2c | 写守卫分档（先只放 Workout/删除，`analysis_required` 仍走旧路） | 守卫扩展用例 | ⛔ 未做 |
-| 2d | 同事务登记 + 代次写入方 + 回执 `queued` | A04 故障注入 + 账本断言 | ⛔ 未做 |
-| 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 | ⛔ 未做 |
+| 2c | 写守卫分档（先只放 Workout/删除，`analysis_required` 仍走旧路） | 守卫扩展用例 | ✅ 已完成（2026-10-13，见 §8.3） |
+| 2d | 同事务登记 + 代次写入方 + 回执 `queued` | A04 故障注入 + 账本断言 | ✅ 已完成（2026-10-13，见 §8.3） |
+| 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 | ⛔ 未做；**新增前置：PR5-S1+S2**（见 §7.2） |
 | 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" | ⛔ 未做 |
 | 4 | 局部 canonical 接入 | 窗口外逐字节不变 | ⛔ 未做 |
 
 ⛔ 顺序不可交换：2e 之前必须先有 2d（登记），2d 之前必须先有消费者（**步骤 1，已完成**）。
+
+### 7.2 🔴 2e 的新增前置：PR5-S1 + S2（2026-10-13 实测确认）
+
+放开 `deltaMode: "full"` 意味着生产开始接收 Workout / 评分类型 / **删除**。而读侧今天还不能
+区分"当前事实"与"已发布分析"，于是两类后果会直接对用户可见：
+
+1. **删除之后旧负荷仍然计入当天汇总**：一批删除落地后，`active_workout_training_loads` 里的旧行
+   仍被 `apps/api/src/data.ts` 的今日/周/统计查询统计（那几条 SQL **不 JOIN** `workouts`）。
+2. **删除会级联销毁已发布路线的版本内容**（本轮实测复现，不是推断）：
+
+```text
+before: workouts=1 workout_routes=1 route_versions=1 route_version_points=2
+DELETE FROM workouts WHERE id='w1'
+after : workouts=0 workout_routes=0 route_versions=0 route_version_points=0
+```
+
+外键链是 `workouts --CASCADE--> workout_routes --CASCADE--> route_versions --CASCADE--> route_version_points`
+（`packages/storage-sqlite/src/database.ts:211`、`packages/storage-sqlite/src/v35-migration.ts:24`、`:35`），
+`published_route_version_id` 的 `NO ACTION` **拦不住级联**。这直接违反 §7「删除优先留
+inactive/tombstone 身份…不让 raw FK 级联删掉不可变 release 所需的证据和路线」。
+
+⇒ 因此 **2e 的前置是 [PR5 设计](SQLITE_DIRECT_SYNC_PR5_DESIGN.md) 的 S1（事实侧排除已删）
++ S2（`workouts.deleted_at` 软删标记）**。这不是"顺手优化"，而是"删掉一个训练会连带毁掉
+它的已发布轨迹证据"这条**今天就存在**的缺陷的修复；不修就放开车道，等于把缺陷扩大到
+每一条删除批次。
+
+⚠️ 与 2e 的关系是**顺序**关系，不是"2e 可以顺手做 S1/S2"：S1/S2 必须在 2e 之前单独跑绿
+（PR5 设计 §5 给了各自的判据）。
 
 ### 7.1 撰写后修订（2026-10-13，实施 2a/2b 时定下）
 
@@ -333,6 +361,47 @@ XML 扫描是**第二套解释**，它与真正落库的解析器只要有一处
   含三条结构前提：两个清单不得有交集、都不得为空、评分清单只能由 `healthTypes` 常量构成。
 - **突变验证**：把未知类型从原因里去掉（= 默认放行）⇒ **3 条转红**
   （"未知类型一律必须分析"、"白名单 + 未知"，以及确定性用例），其余 6 条仍绿。
+
+### 8.3 步骤 2c/2d 的实测证据（2026-10-13）
+
+**已落地**：`apps/api/src/direct-sync-ingest.ts`（统一原始接收器）+ 数据库任务 operation
+`"direct-sync"`（`apps/api/src/import-database-tasks.ts` / `import-database-thread.ts`）。
+
+- **一个事务里做完**：`RaiDatabase.open({ transactionOwner: "caller" })` → `PRAGMA synchronous=FULL`
+  → `beginCallerTransaction()` → 解析（`callerOwnedTransaction: true`）→ GPX 路线 → 训练会话局部
+  规范化 → 代次递增 → 登记分析任务 → 回执/批次/清单 → 回读断言 → `commitCallerTransaction()`。
+  失败路径整体回滚。
+- **写守卫按表分类**：`INGEST_TABLE_DISPOSITIONS` 给生产 DDL 的**每一张表**表态（`ingest` / `analysis`），
+  `analysis` 类表装 TEMP 触发器一律 `RAISE(ABORT)`；**未表态的新表会让守卫拒绝安装**（fail-closed）。
+  另有"事实写入全程记账 + 提交前逐条核对账本"的断言。
+- **登记与回执一致**：`analysis-required` ⇒ 同事务 `enqueue("import", …, { mode: "direct_sync_analysis" }, bindings)`
+  + `dependency_generation` 递增 + 回执 `analysisStatus: "queued"`；`record-only` ⇒ 不登记 + `not_required`。
+  提交前断言：任务存在、状态 queued、绑定代次等于刚递增的值、载荷 mode 正确；**反之若声称
+  `not_required` 却登记了任务，直接抛错**。
+- **回执不承诺不存在的版本号**：`dependencyGeneration` 现在有真实写入方（`import_generations`），
+  所以回执填 `String(n)`；`publishedReleaseId` 仍为 `null`（分析还没跑，说 published 是假话）。
+
+**同轮修掉的两个"组件擅自开事务/提交"**（都是实测撞出来的，不是设想）：
+1. `PRAGMA synchronous=FULL` 必须在 `BEGIN` **之前** —— 放进事务里会报
+   `Safety level may not be changed inside a transaction`，让**每一批**都失败；
+2. `importGpxRoutes` / `native-record-writer` 直接调 `store.flush()`，在 caller 模式下抛错，
+   报错看起来像"事务配置错了"。新增**公开**的 `flushIfOwned()` / `rollbackIfOwned()`
+   （"按所有权提交"：store 模式提交、caller 模式什么都不做），并给
+   `canonicalizeRunningWorkouts` / `canonicalizeNightsForWindow` 增加
+   `{ callerOwnedTransaction: true }`（边界从 `BEGIN` 变成 SAVEPOINT，见
+   `packages/health-export-parser/src/owned-transaction.ts`）。
+
+**实测**：新用例 9 条全绿（`apps/api/test/direct-sync-ingest.test.ts`），含：
+record-only 无任务 / Workout 登记**并由真消费者跑完**（闭环）/ 删除-only / GPX 路线（版本表 + 指针）/
+超限与杂物载荷不合格且零写入 / 写守卫逐条拒绝 + 事实表阳性对照 / 未表态表 fail-closed /
+**回执写入点故障注入 ⇒ 事实、批次、任务、账目、代次、回执整批回滚**（随后清掉注入还能重收同一载荷）/ §4.3 无资格 stamp 也可走直连。
+回归：parser 包 **146/146**、API+storage **80/80**、`tsc`（pure + full）EXIT=0。
+
+**突变验证（3+1 处，全部被精确捕获）**：
+① 忽略分类恒判 `not_required` ⇒ 3 条转红（其中 GPX 用例**第一次假绿**，已补"路线批次也必须登记任务"的断言）；
+② 车道内不装写守卫 ⇒ 6 条转红（账本核对因缺临时表而失败）；
+②b 只跳过 `analysis` 表触发器 ⇒ "写守卫"用例转红；
+③ 失败路径不回滚 ⇒ A04 用例的整批回滚断言转红。
 
 ### 8.2 步骤 2b 的实测证据（2026-10-13）
 

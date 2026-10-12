@@ -2157,23 +2157,27 @@ export class RaiDatabase {
   }
 
   /**
-   * **内部**提交点：只在 store 拥有事务时提交；caller 模式下提交权归调用方，这里什么都不做。
+   * **"我拥有才提交"的提交点**：只在 store 拥有事务时提交；caller 模式下提交权归调用方，
+   * 这里什么都不做。
    *
-   * 🔴 内部提交一律走这里，不要直接调 `flush()`。caller 模式下 `flush()` 会抛错，
-   * 而失败路径上的 `catch` 紧接着又调 `rollback()` —— 后者同样抛错，
-   * 于是**真正的错误被换成了 `rollback()` 的错误**（实测复现过：调用方只看到
-   * "rollback() requires the transactionOwner=store mode"，真因不见了）。
+   * 🔴 组件（含 `@rai/health-export-parser` 里的解析/路线写入器）**一律走这里**，
+   * 不要直接调 `flush()`。理由有两条，都是实测出来的：
+   * 1. caller 模式下 `flush()` 会抛错，而失败路径上的 `catch` 紧接着又调 `rollback()` ——
+   *    后者同样抛错，于是**真正的错误被换成了 `rollback()` 的错误**（调用方只看到
+   *    "rollback() requires the transactionOwner=store mode"，真因不见了）；
+   * 2. 解析器/路线写入器在**两种所有权**下都要能跑：store 模式下它们确实要提交自己那一段，
+   *    caller 模式下提交权不归它们。一个方法同时表达这两件事，就不需要在调用点写 `if`。
    *
    * 公开的 `flush()` / `rollback()` 在 caller 模式下**仍然**抛错 —— 那是对外的保证：
-   * 组件不得自提交。区别只在于"谁在调用"：外部误用要响亮，内部记账要安静。
+   * 组件不得**擅自**提交。区别在于 `flushIfOwned()` 是"按所有权提交"，不是"绕过所有权"。
    */
-  private flushIfOwned(): void {
+  flushIfOwned(): void {
     if (this.transactionOwner === "caller") return;
     this.flush();
   }
 
-  /** **内部**回滚点，理由同 `flushIfOwned`（尤其：不得掩盖上一个错误）。 */
-  private rollbackIfOwned(): void {
+  /** 回滚点，理由同 {@link flushIfOwned}（尤其：不得掩盖上一个错误）。 */
+  rollbackIfOwned(): void {
     if (this.transactionOwner === "caller") return;
     this.rollback();
   }

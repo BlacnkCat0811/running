@@ -68,6 +68,7 @@ npm run check:package-boundaries
 | Rust 可选数据执行器 | [Rust](docs/RUST_DATA_ENGINE.md) |
 | 直接增量同步 PR2+PR3 落地设计（同库事务、版本化事实与路线） | [直接同步落地设计](docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md) |
 | 直接增量同步 PR4 落地设计（全部类型接收、分析任务登记、短写调度） | [PR4 落地设计](docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md) |
+| 直接增量同步 PR5 落地设计（分析指针与全部读侧一致性） | [PR5 落地设计](docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md) |
 | ML 环境与工件 | [研究目录](research/README.md) |
 | 固定时点、固定数据库的机器证据 | [核验产物](deliverables/README.md) |
 
