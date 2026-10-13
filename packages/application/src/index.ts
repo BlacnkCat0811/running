@@ -1,4 +1,5 @@
 export * from "./service.js";
+export * from "./write-gate.js";
 export * from "./recompute-job-repository.js";
 export * from "./prediction-report.js";
 export * from "./prediction-model-service.js";

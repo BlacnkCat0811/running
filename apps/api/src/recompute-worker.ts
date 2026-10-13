@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import type { TaskAdmission } from "./task-admission.js";
+import { createWriteLeaseServer, LEASE_WORDS } from "./write-lease.js";
 const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => { database.exec(`PRAGMA busy_timeout = ${milliseconds}`); };
 
 export class RecomputeWorker {
@@ -61,17 +62,17 @@ export class RecomputeWorker {
 
   private async drain(): Promise<void> {
     if (this.running) return;
-    const release = this.admission ? this.admission.acquire() : () => {};
-    if (!release) {
-      this.queueDrain(250);
-      return;
-    }
+    // 🔴 **不再在 spawn 之前取写许可**（PR4 §3.2 / §3.2.1，A11）。
+    // 从前这里 `admission.acquire()` 一直持到整轮 drain 结束：spawn 线程要 ~2.5 s、
+    // 分析 CPU 要几秒到几分钟，这段时间里**每个写路由都拿到 409**。
+    // 现在许可只在 worker 线程的**短写窗口**内被持有：授权由 `createWriteLeaseServer`
+    // 在 `runOneInWorkerThread` 的生命周期内完成（见那里），窗口之间的让路点是
+    // pipeline 里的 `gate.yieldIfStale()`。
     this.scheduled = false;
     this.running = true;
     try {
       // Spawning a worker thread re-registers `tsx` from scratch: ~2.5 s measured on
-      // this machine. The admission lock is held for all of it, so an idle drain makes
-      // every write route answer `mutation_conflict` instead of its real status.
+      // this machine. 空队列仍然早退（不 spawn），否则拆锁会把空转 spawn 2.5 s 重新引入。
       if (!this.hasPendingJob()) return;
       this.recoverInterruptedJobs();
       while (!this.closing && existsSync(this.databasePath)) {
@@ -100,7 +101,6 @@ export class RecomputeWorker {
         }
       }
     } finally {
-      release();
       this.running = false;
       if (!this.closing && this.scheduled) {
         const retryDelay = Math.min(1000, 20 * (2 ** this.consecutiveFailures));
@@ -140,12 +140,24 @@ export class RecomputeWorker {
 
   private runOneInWorkerThread(): Promise<boolean> {
     return new Promise((resolvePromise, reject) => {
+      // 写租约的共享内存（PR4 §3.2.1）：worker 线程请求、主线程授权。
+      // 缓冲区随线程创建/销毁，**不跨轮复用** —— 否则上一轮的残留请求（例如线程被杀时）
+      // 会让下一轮以为"许可已经被授出去了"。
+      const admission = this.admission;
+      const buffer = admission
+        ? new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * LEASE_WORDS)
+        : null;
+      const lease = admission && buffer ? createWriteLeaseServer(admission, new Int32Array(buffer)) : null;
       const worker = new Worker(new URL("./recompute-worker-bootstrap.mjs", import.meta.url), {
-        workerData: { databasePath: this.databasePath }
+        workerData: { databasePath: this.databasePath, ...(buffer === null ? {} : { lease: buffer }) }
       });
       this.activeWorker = worker;
       let result: boolean | null = null;
       let workerError: Error | null = null;
+      const finish = (): void => {
+        // 🔴 线程退出（含崩溃）必须释放租约，否则写路由会永久 409。
+        lease?.dispose();
+      };
       worker.once("message", (message: { ran?: boolean }) => {
         result = message.ran === true;
       });
@@ -153,6 +165,7 @@ export class RecomputeWorker {
         workerError = error;
       });
       worker.once("exit", (code) => {
+        finish();
         if (this.activeWorker === worker) this.activeWorker = null;
         if (workerError) reject(workerError);
         else if (code !== 0 && !this.closing) reject(new Error(`Recompute worker thread exited with code ${code}`));

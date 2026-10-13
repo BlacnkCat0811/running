@@ -11,10 +11,13 @@ import { RecomputeWorker } from "../src/recompute-worker.js";
 
 /**
  * An idle `drain()` used to spawn a worker thread anyway, and that thread registers
- * `tsx` from scratch (~2.5 s measured on this machine). The global mutation admission
- * is held for all of it, so every write route arriving in that window answered
- * `409 mutation_conflict` instead of its real status — which is what made
- * `server-runtime.test.ts` flake against a freshly started API.
+ * `tsx` from scratch (~2.5 s measured on this machine). 那时整轮 drain 持着全局写许可，
+ * 所以这段窗口里每个写路由都拿到 `409 mutation_conflict` —— `server-runtime.test.ts`
+ * 曾经因此对着新起的 API 抖动。
+ *
+ * ⚠️ 2026-10-13（PR4 步骤 3 / A11）之后 drain **不再持锁**：许可只在 worker 线程的写语句期间被持有，
+ * 所以"空闲也要 spawn 2.5 s"这件事现在的代价是**线程开销本身**（而不是"整窗口 409"）。
+ * 这条用例仍然成立且仍然必要 —— 空队列不该付线程开销。
  *
  * `runOneInWorkerThread` is the only spawn site, so counting its invocations is the
  * direct measurement of "did an idle drain pay for a thread it had no work for".
@@ -95,8 +98,8 @@ test("an idle drain never spawns a worker thread", async () => {
       await settle();
       assert.equal(
         spawns(), 0,
-        "an idle drain must not spawn a thread: the global write admission is held "
-          + "for the whole tsx registration, so every write route answers 409"
+        "an idle drain must not spawn a thread: tsx registration costs ~2.5 s and the whole "
+          + "worker-thread lifecycle is what we would be paying for nothing"
       );
     } finally {
       await worker.close();

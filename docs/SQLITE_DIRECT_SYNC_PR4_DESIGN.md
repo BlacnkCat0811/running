@@ -24,8 +24,8 @@
 | 事实 | 位置 | 对设计的影响 |
 |---|---|---|
 | 旧链路把 recompute 跑在**暂存副本**上（子进程 + `--database stagingDatabase`） | `apps/api/src/import-worker.ts:696-710` | 换成"主库上的分析任务"必须自带**版本化输入**，不能直接读当前表 |
-| 分析消费者：`claimNext()` → `pipeline.runXxx(job)` → 失败则 `jobs.fail` | `packages/application/src/service.ts:283-311` | 已加 `import` 分支（步骤 1）；准入判据是 `(job_type, 载荷 mode)` 合取 |
-| 分析**今天已经跑在主库上**：`recompute-thread.ts` 以 `migrationPolicy: "refuse"` 打开主库后 `runNextJob()` | `apps/api/src/recompute-thread.ts:7-12` | "主库上分析"不是新东西；**新的是**不占长写锁 + 读固定版本 |
+| 分析消费者：`claimNext()` → `pipeline.runXxx(job)` → 失败则 `jobs.fail` | `packages/application/src/service.ts:288-312` | 已加 `import` 分支（步骤 1）；准入判据是 `(job_type, 载荷 mode)` 合取 |
+| 分析**今天已经跑在主库上**：`recompute-thread.ts` 以 `migrationPolicy: "refuse"` 打开主库后 `runNextJob()` | `apps/api/src/recompute-thread.ts:12-14` | "主库上分析"不是新东西；**新的是**不占长写锁 + 读固定版本 |
 | 写许可是**整段 drain**：`admission.acquire()` 在 spawn 之前拿到，直到 `finally release()` | `apps/api/src/recompute-worker.ts:64`、`102-104` | §6 要拆的正是这一段；spawn 本身实测 ~2.5 s（同文件注释） |
 | 单写者闸门 = `MutationCoordinator`（一次只允许一个 operation 名） | `apps/api/src/mutation-coordinator.ts:11-25` | 接收侧与分析侧共用它；"接收优先 + 分析最小份额"要在这一层设计 |
 | 接收侧自己也是一个 owner：`admission: taskAdmission.owner("import")` | `apps/api/src/server.ts:475` | 两个 owner 并存 ⇒ 今天的实际语义是"谁先拿到谁独占到底" |
@@ -244,6 +244,42 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 分析输入的稳定性 —— 后者按 §4「步骤 4」与 PR4 的"固定 `FactsReader`"一起解决；
 在它落地之前，输入稳定性依赖"后续批次会重新登记分析"这一既有时序。
 
+### 3.2.2 实施记录：事件驱动的逐语句租约（2026-10-13）
+
+§3.2.1 定下的形状（有界窗口 + 让路点）在实施时被**实测再改了一次**，改动如下。
+
+**① 服务器从"轮询"改成"事件驱动"，这一条改变了整个设计。**
+轮询版（主线程 `setTimeout(1)` 看共享内存）实测每窗口 **7.1 ms**；改成主线程
+`Atomics.waitAsync`（它在主线程合法，`Atomics.wait` 不合法）挂起等 notify 之后，
+实测每窗口 **0.070 ms**（400 窗口 28 ms，`scripts/measure-write-lease.mjs` 是轮询版的可复现基线）。
+**100 倍**的差距把"逐语句租约"从不可行变成可行，于是最终实现**不需要**在 pipeline 里手写窗口：
+写许可只在**单个 SQL 语句**的执行期间被持有 —— 这正是 §6 许可表要的"写锁仅覆盖短 SQL 事务"。
+
+**② 覆盖用连接代理，而不是逐处包窗口。**
+`withWriteGate(database, gate)`（`apps/api/src/write-lease.ts`）把 `prepare(...).run(...)` 与
+`exec(...)` 包进闸门，读（`get`/`all`/`iterate`）不取许可。为什么是代理：
+"我包了这几处"只能靠代码评审保证不漏，而代理把漏写面收敛到**连接**这一个可枚举的点。
+配套把分析用到的 store 收窄成 `AnalysisStore`（只有 `database` 与 `pruneSupersededModelRuns`
+两个成员）——**分析若要用新的 store 成员，编译就会失败**，而不是运行期悄悄绕过闸门。
+（`pruneSupersededModelRuns` 走 store 自己的连接，不经代理，所以显式包一层。）
+
+**③ `drain()` 不再取许可。** `RecomputeWorker` 只在 worker 线程存活期内挂着租约服务器；
+线程退出（含崩溃）时 `dispose()` 必须释放，否则写路由永久 409 —— 这条有专门用例。
+
+**④ 失败开放，不是失败关闭。** worker 等不到授权时等 30 s 后**记诊断并继续写**：
+把整条分析队列挂死比"这一批少一层互斥保护"更糟。诊断计数器在客户端统计里可见（`timeouts`）。
+
+**⑤ 实施中撞到并修掉两个真缺陷**（都是用例当场抓到的，不是设想）：
+- **漏 `Atomics.notify`**：worker 只 `store` 不 `notify`，主线程的 `waitAsync` 永远不醒 ⇒
+  每个窗口都走满超时（协议用例 3 个窗口跑了 15 s 就是这个形态）。
+- **服务器只试一次就收工**：`TaskAdmissionScheduler.acquire()` 是"试一次，返回 null 表示此刻不行"，
+  而 worker 正阻塞在共享内存上等我们 ⇒ 死锁（A11 时间线用例跑满 120 s 超时）。
+  修法：只要**还有未满足的请求**就以 5 ms 重试；空闲时才挂起等 notify。
+
+**⑥ 明确不做的事**：读仍不取许可（§6 许可表如此），所以分析输入在窗口之间可能被并发批次改动。
+这一点在"固定 `FactsReader`"（PR4 的另一项）落地前依赖既有时序（后续批次会重新登记分析），
+**必须与租约同批说明**，不能当成已经解决。
+
 ### 3.3 空队列不启动计算 Worker
 
 已具备：`hasPendingJob()` 在 spawn 之前早退（`apps/api/src/recompute-worker.ts:75`）。
@@ -289,7 +325,7 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 | A06 | 同批同内容重放安全；同批不同内容/错误作用域明确拒绝 | 去掉 receipt 的 payload 比对 |
 | A08 | 大包按稳定原子单元分批；父批未全成不提交最终游标 | 让子批回执提前返回 committed |
 | A10 | 分析失败不撤销已接收事实 | ✅ 已落地（2026-10-13，见 §8.5）；突变靶子=`fail()` 回写 raw 回执 |
-| A11 | CPU 分析期间仍可接收新批次（写锁只覆盖短事务） | 把 `withWriteLease` 换回 drain 全程持锁 |
+| A11 | CPU 分析期间仍可接收新批次（写锁只覆盖短事务） | ✅ 已落地（2026-10-13，见 §3.2.2 / §8.6）；突变靶子=drain 恢复整轮持锁 |
 | A13 | 迟到任务不倒退 active 版本；配置变化使不合格候选拒绝发布 | 去掉 `expected_incumbent_release_id` 比较 |
 | A18 | 只新增迁移、不改历史 checksum；不引入 PostgreSQL/Redis | 改 v34/v35 的 `up` |
 
@@ -307,7 +343,7 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 | 2c | 写守卫分档（先只放 Workout/删除，`analysis_required` 仍走旧路） | 守卫扩展用例 | ✅ 已完成（2026-10-13，见 §8.3） |
 | 2d | 同事务登记 + 代次写入方 + 回执 `queued` | A04 故障注入 + 账本断言 | ✅ 已完成（2026-10-13，见 §8.3） |
 | 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 | ✅ 已完成（2026-10-13，见 §8.4） |
-| 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" | ⛔ 未做 |
+| 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" | ✅ 已完成（2026-10-13，见 §3.2.2 / §8.6） |
 | 4 | 局部 canonical 接入 | 窗口外逐字节不变 | ⛔ 未做 |
 
 ⛔ 顺序不可交换：2e 之前必须先有 2d（登记），2d 之前必须先有消费者（**步骤 1，已完成**）。

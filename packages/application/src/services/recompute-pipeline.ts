@@ -1,4 +1,5 @@
 import { loadPersistedTrainingLoads, loadDailyPhysEvidence } from "../training-load-data.js";
+import { NO_WRITE_GATE, type AnalysisStore, type WriteGate } from "../write-gate.js";
 import { identityNormalizationConfigHash } from "@rai/normalization";
 import { readinessForRun } from "../model-v2-snapshots.js";
 import { DURABILITY_MODEL_VERSION, PREPARATION_TARGETS, PREPARATION_WINDOW_DAYS, assessPreparation, assessDurability, buildDurabilitySnapshot } from "@rai/durability";
@@ -169,11 +170,12 @@ export class RecomputePipeline {
   private healthRecordHasUnitColumn: boolean | null = null;
 
   constructor(
-    private readonly store: RaiDatabase,
+    private readonly store: AnalysisStore,
     private readonly jobs: RecomputeJobRepository,
     private readonly modelRuns: SqliteModelRunRepository,
     private readonly sessions: SqliteTrainingSessionRepository,
-    private readonly nativeElevationGains?: ReadonlyMap<string, number | null>
+    private readonly nativeElevationGains?: ReadonlyMap<string, number | null>,
+    private readonly gate: WriteGate = NO_WRITE_GATE
   ) {}
 
   get database(): DatabaseSync {
@@ -1117,6 +1119,8 @@ export class RecomputePipeline {
     const features: WorkoutFeatureVector[] = [];
     for (const [index, session] of sessions.entries()) {
       this.throwIfCancelled(jobId);
+      // 让路点（PR4 §3.2.1）：把"接收优先"的等待上界从"一整轮"压到"一小段计算"。
+      this.gate.yieldIfStale();
       const featureId = deterministicId("workout_feature", {
         featureRunId: featureRun.id,
         trainingSessionId: session.trainingSessionId
@@ -1217,6 +1221,7 @@ export class RecomputePipeline {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const row of rows) {
+      this.gate.yieldIfStale();
       insert.run(
         deterministicId("workout_feature", { featureRunId: featureRun.id, trainingSessionId: row.training_session_id }),
         featureRun.id, row.training_session_id as SQLInputValue, row.canonical_workout_id as SQLInputValue,
@@ -1384,6 +1389,7 @@ export class RecomputePipeline {
     `);
     let previous: DailyZoneProfile | null = null;
     for (let date = firstDate; date <= throughDate; date = addDays(date, 1)) {
+      this.gate.yieldIfStale();
       const effectiveAt = localDateStartAt(date, request.timezoneIdentifier);
       const activeSettings = [...settings].reverse().find((item) => item.effectiveFromLocalDate <= date) ?? null;
       const temporary = buildDailyZoneProfile({
@@ -1488,6 +1494,7 @@ export class RecomputePipeline {
     const priorDistances: Array<{ observedAt: number; distanceMeters: number }> = [];
     for (const [index, feature] of features.entries()) {
       this.throwIfCancelled(jobId);
+      this.gate.yieldIfStale();
       const session = sessions.get(feature.trainingSessionId);
       const override = overrideSnapshot.byTrainingSessionId.get(feature.trainingSessionId) ?? null;
       const implausibleStatistics = feature.missingReasons.includes("implausible_average_pace") &&
@@ -1978,6 +1985,7 @@ export class RecomputePipeline {
     for (const [index, feature] of sorted.entries()) {
       if (resume && index <= resume.throughSequence) continue;
       this.throwIfCancelled(jobId);
+      this.gate.yieldIfStale();
       const assessmentId = deterministicId("ability_assessment", {
         modelRunId: modelRun.id,
         trainingSessionId: feature.trainingSessionId
@@ -2294,6 +2302,7 @@ export class RecomputePipeline {
     let lastAssessmentId: string | null = null;
 
     for (let date = startDate; date <= endDate; date = addDays(date, 1)) {
+      this.gate.yieldIfStale();
       for (const assessment of byDate.get(date) ?? []) {
         lastAssessmentId = assessment.id;
         if (assessment.trueAbilityAfter !== null) currentAbility = assessment.trueAbilityAfter;
@@ -2383,7 +2392,7 @@ export class RecomputePipeline {
     if (SUPERSEDED_RUN_RETENTION <= 0) return;
     try {
       new SqliteModelReleaseRepository(this.database).retireOldReleases(SUPERSEDED_RUN_RETENTION);
-      this.store.pruneSupersededModelRuns({ keepRecent: SUPERSEDED_RUN_RETENTION });
+      this.gate.scope(() => this.store.pruneSupersededModelRuns({ keepRecent: SUPERSEDED_RUN_RETENTION }));
     } catch (error) {
       process.stderr.write(
         `Superseded run prune skipped: ${error instanceof Error ? error.message : String(error)}\n`

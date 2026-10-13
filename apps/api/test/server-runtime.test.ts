@@ -2207,23 +2207,26 @@ test("summary export requires token even on a public host and validates its rang
  * POST a write while tolerating the API's **startup recompute window**.
  *
  * A fixture that has already run a full recompute leaves an `active_model_run` row behind, so
- * `checkTrainingZoneBackfill` (`server.ts`) enqueues one more job as the API boots. The
- * recompute worker holds the shared `"recompute"` admission lock for the whole worker-thread
- * spawn, and during that window **every write route answers `409 mutation_conflict`** — that is
- * the lock's documented behaviour (`recompute-worker.ts`: "an idle drain makes every write
- * route answer `mutation_conflict` instead of its real status"), and the iOS client retries on
- * exactly this code. It is not what these cases are testing, so wait it out with a bounded
- * retry instead of assuming the first response is the final one.
+ * `checkTrainingZoneBackfill` (`server.ts`) enqueues one more job as the API boots. Two ways a
+ * write can be turned away while that job runs, and neither is what these cases are testing:
  *
- * A write that is *permanently* conflicting still fails: the budget is finite and the caller
- * keeps asserting the real status afterwards.
+ *   · `409 mutation_conflict` — the write permit is momentarily taken (since PR4 步骤 3 it is held
+ *     **per SQL statement**, so this window is short, but it can still land on a request);
+ *   · `409 任务执行期间不能录入成绩` — `isDatabaseWriteBusy()` sees the recompute job still
+ *     **running**. 2026-10-13 之前这条几乎看不到：写路由要等整轮的写许可，等到许可时任务已经跑完；
+ *     A11 拆锁之后写路由不再等，于是真的会在"分析进行中"抵达 —— 这是既有的产品守卫（分析要读用户
+ *     成绩标签，不能读到写了一半的集合），客户端应当重试。
+ *
+ * 所以这里用**有界重试**把它熬过去，而不是假设第一次响应就是最终结果。预算刻意给足：
+ * 启动那一次重算要跑几百条语句，而拆锁之后每条语句都要过一次主线程的租约往返。
+ * 永久冲突的写仍然会失败：预算是有限的，调用方随后照样断言真状态。
  */
 async function postToleratingStartupRecompute(
   url: string, headers: Record<string, string>, body: string
 ): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
     const response = await fetch(url, { method: "POST", headers, body });
-    if (response.status !== 409 || attempt >= 6) return response;
+    if (response.status !== 409 || attempt >= 20) return response;
     await new Promise((done) => setTimeout(done, 250));
   }
 }
