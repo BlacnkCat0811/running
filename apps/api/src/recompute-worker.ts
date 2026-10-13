@@ -37,6 +37,32 @@ export class RecomputeWorker {
     this.queueDrain(20);
   }
 
+  /**
+   * 🔴 兜底巡检：**只在确有待处理任务时**才唤醒；空闲时只做一次只读查询，不 spawn 线程。
+   *
+   * 为什么需要它（2026-10-13 线上首爆）：`recompute_jobs` 的**登记方**与**唤醒方**在不同的
+   * 执行体里 —— 直连车道在 worker 线程的主库事务里 `enqueue`（`direct-sync-ingest.ts`），
+   * 而 `schedule()` 只有主线程的少数几个入口会调。漏掉那一次唤醒，任务就永远停在 `queued`：
+   * `isDatabaseWriteBusy()`（`server.ts`）把 `queued` 算作忙 ⇒ **每个写端点都 409**，
+   * 而被 409 的请求走不到它后面的 `schedule()` ⇒ 这条链没有自愈路径。
+   *
+   * 巡检不绕过任何判据、不改变失败语义 —— 它只是把「该被唤醒」从「依赖某次调用记得」
+   * 变成「最多等一个周期」。
+   */
+  wakeIfPending(): void {
+    if (this.closing) return;
+    let pending: boolean;
+    try {
+      pending = this.hasPendingJob();
+    } catch (error) {
+      // 库暂不可用（迁移中 / 恢复中）不是「没有任务」，但也不是巡检该处理的事：
+      // 报给既有的数据库错误观测通道，库恢复后由既有入口重新调度。
+      this.onDatabaseError(error);
+      return;
+    }
+    if (pending) this.schedule();
+  }
+
   async close(): Promise<void> {
     this.closing = true;
     this.admission?.withdraw();

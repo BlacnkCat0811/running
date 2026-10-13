@@ -486,6 +486,14 @@ const importWorker: ImportWorker = new ImportWorker(
         invalidateDatabaseReadiness();
       }
       await finalizeImportSource(importSources, sourceMutations, importWorker, job, succeeded, durable);
+      // 🔴 直连车道**唯一**的唤醒点（2026-10-13 线上首爆）。`direct-sync-ingest.ts` 在同一个
+      // 主库事务里登记了 `recompute_jobs` 行，但它**不再 spawn CLI** —— 旧链路是靠那个子进程
+      // 内联 `runNextJob()` 自我消化的（`packages/application/src/model-v2-cli.ts`），
+      // 快车道把这个消费者一并去掉了。少了这一句，任务永远停在 `queued`，
+      // 而 `isDatabaseWriteBusy()` 把 `queued` 算作忙 ⇒ 所有写端点永久 409，
+      // 被 409 就走不到后面的 `schedule()` ⇒ 无自愈路径。
+      // ⚠️ 放在**终态回调**里而不是某条成功分支里：失败路径同样可能留下已登记的任务。
+      recomputeWorker.schedule();
     }
   }
 );
@@ -813,6 +821,21 @@ const zoneRefreshTimer = setInterval(() => {
   });
 }, 5 * 60_000);
 zoneRefreshTimer.unref();
+
+/**
+ * 🔴 兜底巡检（2026-10-13 线上首爆后加）。`recompute_jobs` 的**登记方**散布在 worker 线程与
+ * 各条 HTTP 车道上，**唤醒方**却只有本文件里那少数几处 `schedule()` —— 漏一处，
+ * 任务就永远 `queued`，而 `isDatabaseWriteBusy()` 把 `queued` 算作忙 ⇒ **所有写端点 409**，
+ * 且被 409 就走不到后面的 `schedule()` ⇒ 没有自愈路径（实测：一条卡住的任务让 11 个写端点全 409）。
+ *
+ * 周期 60 s 的取舍：空闲时 `wakeIfPending()` 只做一次只读 `SELECT`（`hasPending()`），
+ * **不 spawn worker 线程**，所以稳态成本约等于零；而"漏唤醒"从"必须重启服务"降到"最多等一分钟"。
+ */
+const recomputePollTimer = setInterval(() => {
+  if (closing) return;
+  recomputeWorker.wakeIfPending();
+}, 60_000);
+recomputePollTimer.unref();
 
 /**
  * Reclaims abandoned database copies: `.replaced.` rollback points and

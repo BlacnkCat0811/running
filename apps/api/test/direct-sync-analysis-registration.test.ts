@@ -217,3 +217,41 @@ test("`directSync` 直连回执今天只有两个产出方（新增第三个即�
       "新产出方不会被它覆盖 —— 请把新产出方一并纳入守卫（或改为运行期唯一来源断言）"
   );
 });
+
+test("直连车道登记的分析任务必须被唤醒：import 终态回调要有 schedule()，且有兜底巡检", () => {
+  // 2026-10-13 线上首爆。判据不是"消费者能不能跑"（本文件第一条用例已证明能跑），
+  // 而是「**生产里谁在登记之后唤醒它**」：
+  //   · `direct-sync-ingest.ts` 在同一个主库事务里 `enqueue` 了分析任务；
+  //   · 旧链路的自我消化靠 CLI 子进程内联 `runNextJob()`（`model-v2-cli.ts`），
+  //     而快车道**不 spawn CLI** ⇒ 那一次唤醒一并消失了；
+  //   · 后果不是"分析慢"，是"写通道被封"：`isDatabaseWriteBusy()` 把 `queued` 算作忙，
+  //     而被 409 的请求走不到它后面的 `schedule()` ⇒ 无自愈路径（实测 11 个写端点全 409）。
+  // ⚠️ 本文件其余用例都在**直接调 `runNextJob()`**，所以它们对"没人叫醒消费者"是盲的 ——
+  //    这条守卫补的正是那个盲区（同族：项目纪律「'已部署' ≠ '代码走到了'」）。
+  const server = readStripped(new URL("../src/server.ts", import.meta.url));
+  const marker = server.indexOf("onTerminal: async (");
+  assert.ok(marker >= 0, "server.ts 里找不到 importWorker 的终态回调 onTerminal");
+  const open = server.indexOf("{", marker);
+  assert.ok(open > marker, "onTerminal 的箭头函数体没找到");
+  const block = balancedBlock(server, open);
+  assert.match(
+    block,
+    /recomputeWorker\.schedule\(\)/,
+    "import 终态回调里没有唤醒分析消费者：直连车道登记的任务会永远停在 queued，" +
+      "`isDatabaseWriteBusy()` 随后让所有写端点永久 409。请把 `recomputeWorker.schedule()` " +
+      "放回 onTerminal —— 放在**终态回调**而不是某条成功分支里，失败路径同样可能留下已登记的任务。"
+  );
+
+  // 第二道：兜底巡检。终态回调只堵住 "import 车道" 这一个来源；巡检堵的是"任何来源漏唤醒"，
+  // 把"必须重启服务"降级为"最多等一个周期"。少了它，同类缺口会以别的形态复发。
+  assert.match(
+    server,
+    /recomputeWorker\.wakeIfPending\(\)/,
+    "兜底巡检被移除了：只要有一个登记方漏掉唤醒，任务就永久 queued 并封死写通道"
+  );
+  assert.match(
+    readStripped(new URL("../src/recompute-worker.ts", import.meta.url)),
+    /wakeIfPending\(\): void \{/,
+    "RecomputeWorker 上找不到 wakeIfPending —— 上面那条巡检断言就成了对着空气的正则"
+  );
+});

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import { DIRECT_SYNC_ANALYSIS_REQUEST_MODE } from "@rai/contracts";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 import { RecomputeWorker } from "../src/recompute-worker.js";
@@ -118,6 +119,102 @@ test("a queued job still spawns a worker thread", async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       assert.equal(spawns(), 1, "the idle guard must not skip a queued job");
+    } finally {
+      await worker.close();
+    }
+  });
+});
+
+/**
+ * 2026-10-13 线上首爆：直连车道在事务里登记了 `recompute_jobs`，但没有任何人唤醒消费者
+ * ⇒ 任务永远 `queued` ⇒ `isDatabaseWriteBusy()` 把 `queued` 算作忙 ⇒ 所有写端点 409，
+ * 而被 409 就走不到后面的 `schedule()`（无自愈路径）。
+ *
+ * 这条用例钉住**兜底巡检**这条通道本身：空队列不动作，有任务就唤醒。
+ * 与 `direct-sync-analysis-registration.test.ts` 里那条源码守卫配对 ——
+ * 一条证明"巡检有效"，一条证明"终态回调确实接了巡检要补的那一次唤醒"。
+ */
+test("wakeIfPending：空队列不动作，有 queued 任务就唤醒（兜底巡检的有效性）", async () => {
+  await withDatabase(async (databasePath) => {
+    const { worker, spawns, settle } = await countingWorker(databasePath);
+    try {
+      // ① 空队列：巡檢不得 spawn（否则空转线程会变成定时成本）。
+      worker.wakeIfPending();
+      await settle();
+      assert.equal(spawns(), 0, "空队列的巡检不得 spawn worker 线程");
+
+      // ② 有 queued 任务：巡检必须真的把它唤醒 —— 这正是线上那次缺失的一步。
+      enqueue(databasePath, "snapshot_refresh");
+      worker.wakeIfPending();
+      const deadline = Date.now() + 10_000;
+      while (spawns() === 0 && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      assert.equal(spawns(), 1,
+        "巡检必须唤醒 queued 任务：否则它永远停在 queued，写通道被封且无自愈路径");
+    } finally {
+      await worker.close();
+    }
+  });
+});
+
+/**
+ * 组合验证：把三段拼起来**真跑一次**。
+ *
+ * 上面那条用 stub 计数证明"唤醒会发生"，`direct-sync-analysis-registration.test.ts` 的步骤 1 用例
+ * 证明"消费者能跑直连载荷" —— 但两者合起来仍**不等于**"接起来能跑完"。这一条不 stub
+ * `runOneInWorkerThread`，因此覆盖「登记 → 唤醒 → worker 线程 → claimNext → runDirectSyncAnalysis
+ * → 终态」整条链路。
+ *
+ * 这正是 2026-10-13 线上缺的那一步：登记与消费之间的那一次 `schedule()`。
+ */
+test("组合验证：登记后经唤醒真的被消费者跑完（不 stub spawn）", async () => {
+  await withDatabase(async (databasePath) => {
+    // 与 `direct-sync-ingest.ts` 在同一个主库事务里做的事相同。
+    const database = new DatabaseSync(databasePath);
+    let jobId: string;
+    try {
+      jobId = new RecomputeJobRepository(database).enqueue("import", null, {
+        mode: DIRECT_SYNC_ANALYSIS_REQUEST_MODE
+      });
+    } finally {
+      database.close();
+    }
+
+    const worker = new RecomputeWorker(databasePath);
+    try {
+      worker.wakeIfPending();
+      const deadline = Date.now() + 120_000;
+      let status = "";
+      let failure: string | null = null;
+      let probeError: string | null = null;
+      while (Date.now() < deadline) {
+        // 🔴 探针用**读写连接 + `busy_timeout`**：WAL 下 `readOnly: true` 的连接撞上 worker 的写事务
+        // 会直接抛 `database is locked`（该连接没有 `busy_timeout`）—— 那不是任务的结论。
+        // 探针的读错误一律吞掉、下一轮再读，别把"读不到"当成"没跑完"。
+        try {
+          const probe = new DatabaseSync(databasePath);
+          try {
+            probe.exec("PRAGMA busy_timeout = 5000");
+            const row = probe.prepare(
+              "SELECT status, error_json AS error FROM recompute_jobs WHERE id = ?"
+            ).get(jobId) as { status: string; error: string | null } | undefined;
+            status = row?.status ?? "";
+            failure = row?.error ?? null;
+            probeError = null;
+          } finally {
+            probe.close();
+          }
+        } catch (error) {
+          probeError = error instanceof Error ? error.message : String(error);
+        }
+        if (status === "succeeded" || status === "failed") break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      assert.equal(
+        status, "succeeded",
+        `登记 → 唤醒 → 消费必须真的跑完；终态=${status}，error=${failure ?? probeError ?? "null"}`
+      );
     } finally {
       await worker.close();
     }
