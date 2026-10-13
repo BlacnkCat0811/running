@@ -78,6 +78,10 @@ npm run check:package-boundaries
 | 直接增量同步 PR5 落地设计（分析指针与全部读侧一致性） | [PR5 落地设计](docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md) |
 | ML 环境与工件 | [研究目录](research/README.md) |
 | 固定时点、固定数据库的机器证据 | [核验产物](deliverables/README.md) |
+| 只读的架构可视化审计（6 张交互图 + 规格 + 独立核验） | [架构审计](.archify/rai-audit-20261013-160439/AUDIT-REPORT.md) |
 
 过期 PRD、设计草案、实施批次、重复时点审计已删除；历史从 Git 查阅，不继续复制到 archive。
 新结论更新相应现行文档；生成审计报告不是产品规范，也不能把另一台机器的统计当成本机事实。
+[架构审计](.archify/rai-audit-20261013-160439/AUDIT-REPORT.md) 是**对齐 `60678af` 的时点快照**：
+正文里的 `文件:行号` 刻画的是当时的工作树，源码改动后**不要**回写该目录（回写等于伪造历史），
+需要判断行号是否漂移时把它显式传给 `scripts/check-doc-line-refs.mjs` 自行判读。
