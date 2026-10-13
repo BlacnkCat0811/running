@@ -16,7 +16,7 @@ import {
 import { readImportReceiptInDatabase, writeImportReceiptInDatabase } from "./import-publication.js";
 import { assertDirectSyncRequestShape } from "./direct-sync-plan.js";
 import { importPayloadSha256 } from "./import-payload-identity.js";
-import { digestHealthKitRecordSnapshot } from "./import-sources.js";
+import { digestHealthKitExportContent } from "./import-sources.js";
 
 /**
  * 直连增量同步的**统一原始接收器**（`docs/SQLITE_DIRECT_SYNC_DESIGN.md` §3 的
@@ -24,9 +24,11 @@ import { digestHealthKitRecordSnapshot } from "./import-sources.js";
  *
  * 与既有的 record-only 快通路（`data-only-import.ts`）的分工：
  *   - 那条车道的入口判据是**载荷形状**（`isDataOnlyRecordXml` + 非评分类型白名单），
- *     它结构上不可能触及分析，所以回执可以写 `not_required`；它今天仍在生产里跑。
+ *     它结构上不可能触及分析，所以回执可以写 `not_required`；worker **先**试它。
  *   - 本模块是**一般车道**：接受 Workout / 评分类型 / 显式删除 / GPX，在**同一个主库事务**里
  *     写事实、账本、回执，并在需要分析时**同事务登记**分析任务（§4.2）。
+ *     2026-10-13（步骤 2e）起它是**生产调用方**：worker 在快通路拒收后投递 `direct-sync` 任务，
+ *     端到端证据见 `apps/api/test/import-worker-direct-sync.test.ts`。
  *
  * 三条结构性的设计决定（每一条都有对应断言，改之前先读）：
  *
@@ -235,20 +237,29 @@ interface PreparedPayload {
 }
 
 /**
- * 输入目录里**允许存在**的东西：导出 XML、sync-manifest.json、以及 GPX（可在子目录里，
- * 例如 `workout-routes/`）。别的任何文件/目录类型一律不合格 ——
- * "输入目录里还能有什么"必须是可枚举的，否则载荷校验就退化成"看着像就行"。
+ * 输入目录里**允许存在**的东西，与导入器**真正会读**的东西**逐项对齐**：
+ *   - 顶层：`export.xml`（或 `导出.xml`）+ `sync-manifest.json`；
+ *   - `workout-routes/` 下的 `.gpx`（可再分子目录）。
+ *
+ * 🔴 为什么必须"对齐"而不是"宽松一点"：载荷身份摘要（下一条）只覆盖
+ * XML + manifest + `workout-routes/**`，导入器（`allGpxRelativePaths`）也只走这一个目录。
+ * 允许别的 GPX 位置会造出"被允许、但不进摘要、也不会被导入"的文件 ——
+ * 那种文件既没被证明无害，也没被证明被读过，正好是"看着像就行"的退化形态。
  */
 function inputTreeAllowed(root: string, relative = "", seen = { files: 0, bytes: 0 }): boolean {
-  for (const entry of readdirSync(relative === "" ? root : join(root, relative), { withFileTypes: true })) {
+  const atTopLevel = relative === "";
+  const insideRoutes = relative === "workout-routes" || relative.startsWith("workout-routes/");
+  for (const entry of readdirSync(atTopLevel ? root : join(root, relative), { withFileTypes: true })) {
     const name = entry.name;
+    const child = atTopLevel ? name : `${relative}/${name}`;
     if (entry.isDirectory()) {
-      if (!inputTreeAllowed(root, relative === "" ? name : `${relative}/${name}`, seen)) return false;
+      if (!(atTopLevel && name === "workout-routes") && !insideRoutes) return false;
+      if (!inputTreeAllowed(root, child, seen)) return false;
       continue;
     }
     if (!entry.isFile()) return false;
-    if (relative === "" && ["export.xml", "导出.xml", "sync-manifest.json"].includes(name)) continue;
-    if (!/\.gpx$/i.test(name)) return false;
+    if (atTopLevel && ["export.xml", "导出.xml", "sync-manifest.json"].includes(name)) continue;
+    if (!insideRoutes || !/\.gpx$/i.test(name)) return false;
     seen.files += 1;
     seen.bytes += statSync(join(root, relative, name)).size;
     if (seen.files > DIRECT_SYNC_MAX_ROUTE_FILES || seen.bytes > DIRECT_SYNC_MAX_ROUTE_BYTES) return false;
@@ -257,7 +268,7 @@ function inputTreeAllowed(root: string, relative = "", seen = { files: 0, bytes:
 }
 
 /** 事务之外的本批准备：路径安全、类型/配额、payload identity（§4.1）。 */
-function preparePayload(input: DirectSyncImportInput): PreparedPayload | null {
+async function preparePayload(input: DirectSyncImportInput): Promise<PreparedPayload | null> {
   const entries = readdirSync(input.inputPath);
   const xmlName = entries.includes("export.xml") ? "export.xml" : "导出.xml";
   if (!entries.includes(xmlName) || !entries.includes("sync-manifest.json")) return null;
@@ -274,7 +285,12 @@ function preparePayload(input: DirectSyncImportInput): PreparedPayload | null {
   if (manifest.deletedRecords.length + manifest.deletedWorkoutIds.length > DIRECT_SYNC_MAX_RECORDS) return null;
   const xmlText = readFileSync(xmlPath, "utf8");
   if (Buffer.byteLength(xmlText) > DIRECT_SYNC_MAX_XML_BYTES) return null;
-  const capturedSha256 = importPayloadSha256(digestHealthKitRecordSnapshot(xmlText, manifestText), {
+  // 🔴 必须与**准入时**（worker 的 `computeImportPayloadSha256`）用**同一个**摘要函数：
+  // 两者都折进 `workout-routes/**` 的路由内容。2026-10-13 实测的缺陷：这里曾经只算
+  // XML+manifest（`digestHealthKitRecordSnapshot`），于是任何**带 GPX** 的载荷都会在
+  // "载荷已变更"这句错误结论上**硬失败**（不是回退）—— 而 GPX 正是这条车道要接的类型之一。
+  // 代价：多读一遍 XML 与路由文件（上界 2 MiB + 32 MiB，见上面的常量），换来"同一件事只有一处算法"。
+  const capturedSha256 = importPayloadSha256(await digestHealthKitExportContent(input.inputPath), {
     preserveAbsent: true, contractVersion: CONTRACT_VERSION,
     engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint()
   });
@@ -348,7 +364,7 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
   assertDirectSyncRequestShape(input);
   if (!existsSync(input.databasePath) || !/^[a-f0-9]{64}$/.test(input.payloadSha256)) return null;
   const entries = readdirSync(input.inputPath);
-  const payload = preparePayload(input);
+  const payload = await preparePayload(input);
   if (!payload) return null;
   const probe = RaiDatabase.openReadonly(input.databasePath);
   try {

@@ -30,6 +30,7 @@ import { isStructurallyReadable } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
 import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
 import { dataOnlyBaselineContract, type DataOnlyImportResult } from "./data-only-import.js";
+import type { DirectSyncImportResult } from "./direct-sync-ingest.js";
 import { planDirectSyncLane } from "./direct-sync-plan.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
@@ -584,6 +585,38 @@ export class ImportWorker {
             };
             return;
           }
+          // 🔴 record-only 快通路**拒收**（载荷不只是白名单里的记录增量，或缺少基线戳）。
+          // 2e 之前这个分叉直接掉回旧候选链路 —— 那意味着为一个 Workout 载荷做整库备份、
+          // 校验、切换数据库。现在先走**统一接收器**（PR4 步骤 2c：事实 + 路线 + 登记同事务）：
+          // 它接受 Workout / 评分类型 / 显式删除 / GPX，并由账本决定要不要登记分析任务。
+          // ⚠️ 这里**不能**改成"先统一接收器、再 record-only"：record-only 车道的入口判据
+          // 比本车道更严（白名单 + 基线合同戳），把它放在后面会让它的两条闸门失去意义。
+          this.assertNotClosing();
+          job.message = "正在按增量事务保存原始事实并登记分析";
+          this.persistJobs();
+          const direct = await timing.measure("directSyncApply", () => this.databaseTask<DirectSyncImportResult>({
+            operation: "direct-sync", input: {
+              databasePath: this.databasePath, inputPath: job.inputPath, jobId: job.id,
+              payloadSha256: payloadSha256!, startedAtMs
+            }
+          }));
+          if (direct) {
+            terminalSucceeded = true;
+            publishTerminalState = () => {
+              const analysisQueued = direct.summary.directSync?.analysisStatus === "queued";
+              job.status = "succeeded"; job.phase = "completed"; job.error = null;
+              job.summary = direct.summary; job.completedAt = new Date().toISOString();
+              // 回执的 `analysisStatus` 是**唯一**的判据，不看车道、不看载荷形状：
+              // `queued` ⇒ 同事务里真的登记了分析任务（提交前断言守着）；`not_required` ⇒ 没有。
+              job.message = direct.replayed ? "已恢复完成的增量事务，无需重复入库"
+                : analysisQueued ? "原始事实已增量保存，分析任务已登记，正在重算"
+                : "原始事实已增量保存，无需重算或切换数据库";
+            };
+            return;
+          }
+          // 两条直连车道都不合格（超限、输入目录不被允许、身份基线不合格…）⇒ 回退旧候选链路。
+          // `fastPathAttempted` 只在**两条都拒收之后**才清零：它同时是"这一批可能已经提交、
+          // 只是回执没送到"的标记（见下面的 catch）。
           fastPathAttempted = false;
           this.assertNotClosing();
         }

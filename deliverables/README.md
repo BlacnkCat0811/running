@@ -21,6 +21,14 @@
   §14.1 要求"记录 SQL"而现有守卫只有 5 个通道、**没有 SQL 追踪**（等价的整库扫描不可观测）。
   ⚠️ 这不是验收通过声明；随 PR4/PR5/PR6 落地其判定会上升，引用时以当时最新提交为准。
 
+- [DIRECT_SYNC_PR4_2E_2026-10-13.md](DIRECT_SYNC_PR4_2E_2026-10-13.md)：**PR4 步骤 2e 的验收记录**——
+  直连车道的 `deltaMode` 放开为 `"full"` **并且真的接上统一接收器**（Workout / 评分类型 /
+  显式删除 / GPX）。含端到端用例（真实排队 → 真实子进程 → 真实事务：登记分析任务 + 回执 `queued`
+  + 无备份/无换库/主库 inode 不变）、**full 车道上的 §14.1 全 0**、以及 `directSyncApply` 独立计时。
+  🔴 同轮修掉一个**真缺陷**：接收器复核摘要只算 XML+manifest、worker 准入摘要折进 `workout-routes/**`
+  ⇒ 任何带 GPX 的载荷都硬失败（"载荷已变更"）；测试夹具当年手写了同一份错配方 ⇒ 假绿。
+  **3 处突变全部被精确捕获**。⚠️ P01–P06 与首次历史分页/大包分批仍未迁移。
+
 - [DIRECT_SYNC_PR5_S1S2_2026-10-13.md](DIRECT_SYNC_PR5_S1S2_2026-10-13.md)：**PR5-S1+S2 的验收记录**（PR4-2e 的硬前置）——
   `workouts.deleted_at` 软删（迁移 **v36**，只新增可空列）+ 事实侧唯一存在性判据
   （`workoutPresentConditionSql` / `sessionFactPresentConditionSql`）覆盖全部事实侧读路径。

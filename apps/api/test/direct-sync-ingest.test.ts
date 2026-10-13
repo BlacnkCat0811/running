@@ -7,9 +7,11 @@
 //   3. 写权限按**表**判定：派生分析/发布表一律拒绝，未表态的新表 fail-closed；
 //   4. 失败注入下整批回滚 —— 事实、批次行、任务、回执**一起消失**（A04 的形态）。
 //
-// ⚠️ 覆盖边界（如实标注）：本模块**今天还没有生产调用方**（`planDirectSyncLane` 仍只给
-// `record-only`，生产走的是 data-only 快通路）；把车道放开到 `"full"` 是 2e，
-// 而它**必须等 PR5 的读侧拆分**（否则 §9.1 的"旧分数 JOIN 新训练"会直接对用户可见）。
+// ✅ 2026-10-13（PR4 步骤 2e）：本模块**已经是生产路径** —— `planDirectSyncLane` 给 `"full"`，
+// worker 在 record-only 快通路拒收之后投递 `direct-sync` 任务。端到端的证明在
+// `apps/api/test/import-worker-direct-sync.test.ts`（真实排队 + 真实子进程 + 真实事务）。
+// ⚠️ 仍然如实标注的边界：§9.1 的"旧分数 JOIN 新训练"要在**读侧拆分**（PR5 S3–S11）之后才彻底消失；
+// 今天已删事实不再进事实侧（PR5-S1/S2），但"当前事实"与"已发布分析"仍在同一个响应里。
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -30,7 +32,7 @@ import {
 import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 import { readImportReceipt } from "../src/import-publication.js";
 import { importPayloadSha256 } from "../src/import-payload-identity.js";
-import { digestHealthKitRecordSnapshot } from "../src/import-sources.js";
+import { computeImportPayloadSha256 } from "../src/import-payload-identity.js";
 
 const a = "00000000-0000-0000-0000-00000000000a";
 const b = "00000000-0000-0000-0000-00000000000b";
@@ -57,13 +59,13 @@ const xml = (rows = "") => `<HealthData>${rows}</HealthData>`;
 interface Fixture {
   root: string;
   main: string;
-  /** 造一个输入目录并算出与提交端一致的 payload 摘要。 */
+  /** 造一个输入目录并算出与提交端一致的 payload 摘要（用生产端同一个摘要函数）。 */
   input(rows?: string, options?: {
     deletedRecords?: { type: string; uuid: string }[];
     deletedWorkoutIds?: string[];
     gpx?: Record<string, string>;
     job?: string;
-  }): DirectSyncImportInput;
+  }): Promise<DirectSyncImportInput>;
   seed(rows: string): Promise<void>;
 }
 
@@ -79,7 +81,7 @@ async function fixture(run: (ctx: Fixture) => Promise<void>): Promise<void> {
   store.setProfile({ dateOfBirth: "1990-01-01" });
   store.close();
   let ordinal = 0;
-  const input: Fixture["input"] = (rows = "", options = {}) => {
+  const input: Fixture["input"] = async (rows = "", options = {}) => {
     const inputPath = join(root, `input-${ordinal++}`);
     mkdirSync(inputPath);
     writeFileSync(join(inputPath, "export.xml"), xml(rows));
@@ -92,10 +94,12 @@ async function fixture(run: (ctx: Fixture) => Promise<void>): Promise<void> {
       mkdirSync(join(inputPath, "workout-routes"), { recursive: true });
       writeFileSync(join(inputPath, "workout-routes", name), content);
     }
-    const payloadSha256 = importPayloadSha256(digestHealthKitRecordSnapshot(
-      readFileSync(join(inputPath, "export.xml"), "utf8"),
-      readFileSync(join(inputPath, "sync-manifest.json"), "utf8")
-    ), {
+    // 🔴 摘要必须用**生产端同一个函数**算（worker 的 `computeImportPayloadSha256`），
+    // 包括路由内容。从前这里手写的是"XML+manifest"配方，与生产不一致 —— 于是
+    // "带 GPX 的载荷"在接收器里会被判成"载荷已变更"而硬失败，而这条用例当时**看不见**那个缺陷，
+    // 因为它自己也在用那份错的配方（两边一起错 ⇒ 假绿）。改用生产函数之后，这一条同时守住了
+    // "准入摘要 == 接收时的复核摘要"。它**不是**性能敏感的：夹具只有几条记录。
+    const payloadSha256 = await computeImportPayloadSha256(inputPath, {
       preserveAbsent: true, contractVersion: CONTRACT_VERSION,
       engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint()
     });
@@ -125,7 +129,7 @@ const scalar = (db: DatabaseSync, sql: string, ...params: unknown[]): number =>
 
 test("record-only 载荷：事实+账本+回执同事务落库，回执 not_required 且**没有**登记分析任务", async () => {
   await fixture(async ({ main, input }) => {
-    const batch = input(record(a) + record(b, "25"));
+    const batch = await input(record(a) + record(b, "25"));
     const applied = await applyDirectSyncImport(batch);
     assert.ok(applied, "record-only 载荷必须被接收");
     assert.equal(applied.payloadClass, "record-only");
@@ -154,7 +158,7 @@ test("record-only 载荷：事实+账本+回执同事务落库，回执 not_requ
 
 test("Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环）", async () => {
   await fixture(async ({ main, input }) => {
-    const batch = input(workout());
+    const batch = await input(workout());
     const applied = await applyDirectSyncImport(batch);
     assert.ok(applied);
     assert.equal(applied.payloadClass, "analysis-required", "Workout 一律要求分析");
@@ -206,7 +210,7 @@ test("删除-only 载荷：显式删除先于到达也要求分析，且不误�
     assert.equal(workoutsBefore, 2);
 
     // 删除-only：没有任何 Record/Workout 载荷，只有 manifest 里的显式删除。
-    const batch = input("", { deletedWorkoutIds: ["workout-1"] });
+    const batch = await input("", { deletedWorkoutIds: ["workout-1"] });
     const applied = await applyDirectSyncImport(batch);
     assert.ok(applied);
     assert.equal(applied.payloadClass, "analysis-required", "删除-only 页面不是 EOF，也必须分析");
@@ -232,7 +236,7 @@ test("GPX 路线：路线变更同样要求分析，且路线版本对读侧可�
     const gpx = `<gpx><trk><trkseg>${[0, 1, 2].map((index) =>
       `<trkpt lat="23.1${index}" lon="113.3${index}"><ele>12.5</ele><time>2018-01-02T00:00:0${index}Z</time></trkpt>`
     ).join("")}</trkseg></trk></gpx>`;
-    const batch = input(
+    const batch = await input(
       `<Workout workoutActivityType="${workoutTypes.running}" sourceName="Watch"
         startDate="2018-01-02 08:00:00 +0000" endDate="2018-01-02 08:30:00 +0000"
         duration="30" durationUnit="min">
@@ -264,10 +268,10 @@ test("GPX 路线：路线变更同样要求分析，且路线版本对读侧可�
 test("超限载荷不合格 ⇒ 返回 null（回退旧链路）且**零写入**", async () => {
   await fixture(async ({ main, input }) => {
     // 超过 2 MiB 归一化原始内容上限（§14.3 P01）。不做"先收一半"。
-    const oversized = input(record(a, "1".repeat(2_200_000)));
+    const oversized = await input(record(a, "1".repeat(2_200_000)));
     assert.equal(await applyDirectSyncImport(oversized), null);
     // 输入目录里有非 GPX 的杂物也不合格：输入集合必须可枚举。
-    const dirty = input(record(a));
+    const dirty = await input(record(a));
     writeFileSync(join(dirty.inputPath, "notes.txt"), "hello");
     assert.equal(await applyDirectSyncImport(dirty), null);
 
@@ -350,7 +354,7 @@ test("A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执�
     injected.exec(`CREATE TRIGGER fail_receipt BEFORE INSERT ON import_manifest
       WHEN NEW.key LIKE 'rai.applied-import.%' BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END`);
     injected.close();
-    const batch = input(record(a) + workout());
+    const batch = await input(record(a) + workout());
     await assert.rejects(applyDirectSyncImport(batch), /injected receipt failure/);
 
     const db = new DatabaseSync(main, { readOnly: true });
@@ -380,7 +384,7 @@ test("§4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接�
     assert.equal(db.prepare("SELECT 1 FROM import_manifest WHERE key='data_only_baseline_contract'").get(), undefined,
       "本用例的前提：库里没有快通路资格 stamp");
     db.close();
-    const applied = await applyDirectSyncImport(input(record(a)));
+    const applied = await applyDirectSyncImport(await input(record(a)));
     assert.ok(applied, "没有资格 stamp 也必须能走直连（§4.3 明令它不是门槛）");
   });
 });

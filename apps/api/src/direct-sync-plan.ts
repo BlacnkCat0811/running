@@ -24,11 +24,21 @@ export interface DirectSyncLaneInput {
 export interface DirectSyncLaneDecision {
   readonly lane: "direct" | "legacy";
   /**
-   * 直连时的事实范围。今天**只有** `"record-only"` 一种已实现的车道 ——
-   * 它结构上不可能触及分析（见 `apps/api/src/data-only-import.ts` 的两道类型闸门）。
-   * 扩展到 `"full"` 必须同时把分析任务登记接上，否则会出现"原始已存、分析不更新"。
+   * 直连的**事实范围**。`"full"` = 这条车道接受任意增量载荷（Workout / 评分类型 / 显式删除 /
+   * GPX 轨迹），并由接收器**按账本**决定要不要登记分析任务。
+   *
+   * 🔴 这里回答的是"车道**能不能**装下这类载荷"，不是"这批**是否**需要分析" ——
+   * 后者必须等事实落库、账本出来才能判定（§2.4：分类是**事后**结论，不许为了分类再扫一遍 XML）。
+   * 所以：
+   *   - `"full"` 不等于"每批都会登记任务"：纯 record-only 载荷仍然不登记（回执 `not_required`）；
+   *   - 一旦载荷里有 Workout / 评分类型 / 删除，接收器**必须在同一个事务里**登记 `import` 任务
+   *     并把回执写成 `queued`（`apps/api/src/direct-sync-ingest.ts` 的提交前断言守着这条）。
+   *
+   * 2026-10-13（PR4 步骤 2e）由 `"record-only"` 放开到 `"full"`：三步顺序的第 1 步（消费者认识
+   * `import`，`d2069a4`）与第 2 步（同事务登记 + 绑定列，`d08ad81`）都已落地，前置清空。
+   * 改回去会让"Workout 批次原始已存、分析永不更新"重新变成可能 —— 直接违反上位设计 §1.5。
    */
-  readonly deltaMode: "record-only" | null;
+  readonly deltaMode: "record-only" | "full" | null;
   /** 否决原因，按判定顺序。仅直连时为空。 */
   readonly reasons: readonly string[];
 }
@@ -42,7 +52,7 @@ export function planDirectSyncLane(input: DirectSyncLaneInput): DirectSyncLaneDe
   if (input.engine.version !== input.nativeVersion) return reject("engine_version_mismatch");
   if (!input.preserveAbsent) return reject("payload_is_a_complete_snapshot");
   if (!input.databaseExists) return reject("no_existing_database");
-  return { lane: "direct", deltaMode: "record-only", reasons: [] };
+  return { lane: "direct", deltaMode: "full", reasons: [] };
 }
 
 /**

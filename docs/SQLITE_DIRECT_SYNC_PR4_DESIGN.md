@@ -238,11 +238,12 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 | 2b | parser `callerOwnedTransaction` + SAVEPOINT；与 `recordDelta` 互斥 | 结构判据 + record-only 车道零变化 | ✅ 已完成（2026-10-13，见 §8.2） |
 | 2c | 写守卫分档（先只放 Workout/删除，`analysis_required` 仍走旧路） | 守卫扩展用例 | ✅ 已完成（2026-10-13，见 §8.3） |
 | 2d | 同事务登记 + 代次写入方 + 回执 `queued` | A04 故障注入 + 账本断言 | ✅ 已完成（2026-10-13，见 §8.3） |
-| 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 | ⛔ 未做；前置 PR5-S1+S2 **已于 2026-10-13 满足**（见 §7.2）⇒ 只剩它自己的验收 |
+| 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 | ✅ 已完成（2026-10-13，见 §8.4） |
 | 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" | ⛔ 未做 |
 | 4 | 局部 canonical 接入 | 窗口外逐字节不变 | ⛔ 未做 |
 
 ⛔ 顺序不可交换：2e 之前必须先有 2d（登记），2d 之前必须先有消费者（**步骤 1，已完成**）。
+✅ 2026-10-13：2a–2e 全部落地。剩下的 3（短写租约）与 4（局部 canonical）互不依赖，可并行。
 
 ### 7.2 🔴 2e 的新增前置：PR5-S1 + S2（2026-10-13 实测确认）
 
@@ -432,6 +433,47 @@ record-only 无任务 / Workout 登记**并由真消费者跑完**（闭环）/ 
   `packages/contracts/test/*` + `application/test/service.test.ts` **49/49**；`tsc`（pure + full）EXIT=0。
 
 ---
+
+### 8.4 步骤 2e 的实测证据（2026-10-13）
+
+**改了什么**
+
+| 项 | 位置 | 说明 |
+|---|---|---|
+| 车道判据 | `apps/api/src/direct-sync-plan.ts` | `deltaMode` 由 `"record-only"` 放开为 `"full"`：车道**能装下**任意增量载荷，批次是否需要分析由账本决定（不是车道决定） |
+| 车道接线 | `apps/api/src/import-worker.ts` | record-only 快通路拒收之后，投递 `direct-sync` 数据库任务（统一接收器），**两条都拒收**才回退旧候选链路；`fastPathAttempted` 到最后才清零，所以"已提交但回执没送到"仍可从持久回执恢复 |
+| 计时账本 | `packages/api-contracts/src/index.ts` | `ImportStage` 增加 `directSyncApply`：两条子车道分别计时，否则"直连变慢了"定位不到是哪一条 |
+| 载荷身份 | `apps/api/src/direct-sync-ingest.ts` | 🔴 **修掉一个真缺陷**：接收器原先用 `digestHealthKitRecordSnapshot`（只算 XML+manifest）复核，而 worker 的准入摘要用 `digestHealthKitExportContent`（折进 `workout-routes/**`）。两者不一致 ⇒ **任何带 GPX 的载荷**都会在这句话上硬失败（`Direct sync payload changed after admission`，不是回退）。现在两侧同源 |
+| 输入目录 | `apps/api/src/direct-sync-ingest.ts` | `inputTreeAllowed` 收紧为"顶层 XML+manifest，加上 `workout-routes/**/*.gpx`" —— 与摘要覆盖范围、与 `allGpxRelativePaths` 的发现范围**逐项对齐**；从前允许任意位置的 `.gpx`，那些文件既不入摘要也不会被导入 |
+
+**实测**
+
+- 新增端到端用例 `apps/api/test/import-worker-direct-sync.test.ts`（**2/2**）：真实排队 → 车道判定 →
+  快通路拒收 → 统一接收器（真实子进程 + 真实事务）。断言：事实落库、`training_sessions` 生成、
+  `recompute_jobs` 恰好一条（`job_type='import'`、`status='queued'`、载荷 mode
+  `direct_sync_analysis`、两个代次都为 1、`dirty_json.reasons` 含 `workout_present`）、
+  回执 `analysisStatus='queued'` 且与终态摘要一致、`import_batches.summary_json.analysisJobId` 对上、
+  无备份 / 无换库 / 主库 inode 不变。
+- 带 GPX 的回归用例（同一文件第二条）：`route_versions` 发布一条 complete、`route_version_points` 两点、
+  `dirty_json.reasons` 含 `route_present` —— 这一条就是上面那个摘要缺陷的守卫。
+- `apps/api/test/direct-sync-prohibited-operations.test.ts` 新增 **full 车道**的 §14.1 用例：
+  同一套守卫仪器（方法/子进程/任务/阶段四类通道）在 Workout 载荷上"全 0"，
+  且断言投递序列恰为 `["data-only", "direct-sync"]`。
+- 门禁用例更新：`direct-sync-plan.test.ts`（`full` + 顺序）、
+  `direct-sync-analysis-registration.test.ts`（新增"放开判据 ≠ 接上车道"的源码判据、
+  回执与登记的双向提交前断言）。**回执语义从车道级细化为批次级**：
+  record-only 载荷仍必须 `not_required`，动了分析的批次必须 `queued`。
+
+**突变验证（3 处，全部被精确捕获）**
+
+| # | 突变 | 结果 |
+|---|---|---|
+| 1 | worker 不再投递 `direct-sync` | 两条端到端用例转红（载荷掉回旧候选链路并撞上"不得整库备份"的守卫） |
+| 2 | 接收器复核退回"只算 XML+manifest" | **带 GPX** 的用例转红，无 GPX 的仍绿（正是缺陷的形态） |
+| 3 | 回执恒写 `not_required` | 两条端到端用例转红（"登记了任务却声称分析不必要"） |
+
+**如实标注的边界**：§14.3 P01–P06 需要目标云机，本环境给不了；首次历史分页与大包分批
+（§5.2 分片未实现）仍走旧链路，因此 §14.1 的"全 0"不能推广成整份清单已通过。
 
 ## 9. 未决问题（动工前必须定掉）
 

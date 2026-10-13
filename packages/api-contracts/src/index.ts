@@ -507,9 +507,15 @@ export interface CommandResponse {
  * 而独立进程做同一个备份只要 12.4 s ⇒ 旧口径把三件事/两件事糊在一个数字里，无法定位。
  * 旧口径对照：`backup` ≈ 三者之和，`activation` = `activationAudit + activationSwap`。
  */
-export type ImportStage = "dataOnlyApply" | "backupCapacity" | "backupCopy" | "backupVerify" | "stagingCopy" |
-  "parseImport" | "changeAnalysis" | "recompute" | "activationAudit" | "activationSwap" | "cleanup";
+export type ImportStage = "dataOnlyApply" | "directSyncApply" | "backupCapacity" | "backupCopy" | "backupVerify" |
+  "stagingCopy" | "parseImport" | "changeAnalysis" | "recompute" | "activationAudit" | "activationSwap" | "cleanup";
 
+/**
+ * `directSyncApply` 与 `dataOnlyApply` 分开计时的理由与上面 `activation` 拆分的理由相同：
+ * 两者是**不同的车道**（前者接受 Workout / 评分类型 / 显式删除 / GPX 并可能登记分析任务，
+ * 后者在入口就证明载荷结构上碰不到分析）。糊在一个数字里，直连车道的耗时变化就定位不到 ——
+ * 而"哪条车道、耗时多少"正是 §14.3 P01–P06 要看的量。
+ */
 export interface ImportJobPerformance {
   /** Extra full replay comparison only; the model activation gate stays enabled. */
   validationMode: "shadow" | "off" | "not-run";

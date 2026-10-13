@@ -12,10 +12,10 @@
 // 所以下面还有一条**阳性对照**——让旧候选路径真的跑一遍，断言守卫确实转红。
 // 没有这条对照，第 2 问的"全 0"可能只是守卫瞎了。
 //
-// ⚠️ 覆盖边界（PR1 阶段，必须如实标注）：目前只有**有界的 record-only 增量**
-// 走直连车道，所以本文件证明的是"这条车道不踩 §14.1"。文档要求的其余场景
-// （首次历史分页、删除-only、混合评分批次、大包分批）此刻仍走旧链路，
-// 因此**必然**会踩 —— 它们的守卫随 PR2–PR6 逐条接上，不能据此认为整份 §14.1 已通过。
+// ⚠️ 覆盖边界（必须如实标注，2026-10-13 随 2e 更新）：现在有**两条**直连子车道，
+// 本文件两条都跑 —— record-only 快通路（记录白名单）与统一接收器（Workout / 评分类型 /
+// 删除 / GPX）。仍未迁移、因而**必然**会踩 §14.1 的场景：首次历史分页、大包分批（§5.2 分片计划
+// 未实现，超限直接回退旧链路）。所以"全 0"不能推广成"整份 §14.1 已通过"。
 // 这也是为什么"旧候选路径会触发守卫"被写成了**通过的用例**而不是失败的用例：
 // 它记录的正是尚未迁移的那一半。
 //
@@ -146,18 +146,32 @@ function stagesOf(worker: ImportWorker, jobId: string): Record<string, unknown> 
   return { ...(performance?.stagesMs ?? {}), ...(performance?.computeStagesMs ?? {}) };
 }
 
+/** record-only 快通路的典型载荷：白名单记录类型 + UUID，没有 Workout。 */
+const RECORD_ONLY_XML = `<HealthData><Record type="HKQuantityTypeIdentifierStepCount"
+    sourceName="Watch" unit="count" value="10" startDate="2026-01-01 00:00:00 +0000"
+    endDate="2026-01-01 00:01:00 +0000"><MetadataEntry key="RAIHealthKitSampleUUID"
+    value="${uuid}"/></Record></HealthData>`;
+
+/**
+ * 2e 的全类型载荷：**带 Workout** 的增量。record-only 车道的入口判据（记录白名单）会拒收它，
+ * 所以它必然落到统一接收器 —— 这正是本文件要证明"§14.1 在更宽的车道上也不被踩"的场景。
+ */
+const WORKOUT_XML = `<HealthData><Workout workoutActivityType="HKWorkoutActivityTypeRunning"
+    sourceName="Watch" duration="30" durationUnit="min"
+    startDate="2026-01-01 08:00:00 +0000" endDate="2026-01-01 08:30:00 +0000">
+    <MetadataEntry key="RAIHealthKitWorkoutUUID" value="00000000-0000-0000-0000-00000000000b"/>
+    <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" unit="km" sum="5"/>
+  </Workout></HealthData>`;
+
 async function fixture(run: (ctx: {
   root: string; main: string; input: string;
   make(enabled?: boolean): ImportWorker;
-}) => Promise<void>) {
+}) => Promise<void>, payload?: { xml?: string }) {
   const root = mkdtempSync(join(tmpdir(), "rai-direct-sync-guard-"));
   const main = join(root, "main.sqlite");
   const input = join(root, "input");
   mkdirSync(input);
-  writeFileSync(join(input, "export.xml"), `<HealthData><Record type="HKQuantityTypeIdentifierStepCount"
-    sourceName="Watch" unit="count" value="10" startDate="2026-01-01 00:00:00 +0000"
-    endDate="2026-01-01 00:01:00 +0000"><MetadataEntry key="RAIHealthKitSampleUUID"
-    value="${uuid}"/></Record></HealthData>`);
+  writeFileSync(join(input, "export.xml"), payload?.xml ?? RECORD_ONLY_XML);
   writeFileSync(join(input, "sync-manifest.json"), JSON.stringify({
     version: 2, sourceScope: "healthkit", deletedSourceIds: [], deletedRecords: []
   }));
@@ -254,18 +268,56 @@ test("A01/§14.1 逐项：真实排队的 v2 增量不触发任何禁止操作�
         `直连车道不得创建项目备份或整库候选，但 var/ 里出现了：${leftovers.join(", ")}`);
       assert.equal(statSync(main).ino, beforeInode, "主库文件身份必须保持不变（不得 rename/install/move）");
 
-      // 🔴 行为级钉住"今天**没有**登记任何分析任务"（设计文档步骤 6b 的三步上线顺序）。
-      // 本车道今天只接受 record-only 载荷，这类载荷**结构上不可能**触及分析，
-      // 所以回执写 `analysisStatus: "not_required"` 是准确的；一旦有人在这里登记分析任务，
-      // 他必须同批把 `deltaMode` 放开到 `"full"`、把回执改成 `"queued"`，
-      // 并接上读侧一致性（PR5）—— 这几条判据会一起变红，不允许只落地一半。
+      // 🔴 行为级钉住"**这一批**没有登记分析任务"。2e 之后这条不再是车道级事实，而是批次级：
+      // 本批载荷是白名单记录增量（结构上碰不到分析），所以回执 `not_required` 是准确的，
+      // `recompute_jobs` 必须为空。动了分析的批次（下一条用例）则**必须**登记 ——
+      // 两条用例合起来才说明"回执说的话与账本一致"。
       const probe = new DatabaseSync(main, { readOnly: true });
       try {
         assert.equal(Number(probe.prepare("SELECT COUNT(*) AS n FROM recompute_jobs").get()!.n), 0,
-          "直连车道今天不得登记任何 recompute_jobs 任务（登记属 PR4 步骤 2，必须与 deltaMode 放开同批）");
+          "record-only 载荷不得登记分析任务：它结构上碰不到分析，登记了就是无谓地把分析标脏");
       } finally { probe.close(); }
     } finally { await worker.close(); }
   });
+});
+
+test("A01/§14.1 全类型：含 Workout 的增量走统一接收器，同样一条禁止操作都不踩", async () => {
+  await fixture(async ({ root, main, input, make }) => {
+    const worker = make();
+    const guard = installGuard(worker);
+    const beforeInode = statSync(main).ino;
+    try {
+      const job = worker.create(input, undefined, "guard-full-source");
+      await wait(worker);
+      const done = worker.get(job.id);
+      assert.equal(done?.status, "succeeded", JSON.stringify(done));
+
+      // §14.1 在**更宽**的车道上同样一条都不能踩 —— 这正是 2e 的验收口径（A01 全类型 + 禁止操作 0）。
+      const triggered = triggeredOperations(guard, stagesOf(worker, job.id)).map((operation) => operation.id);
+      assert.deepEqual(triggered, [],
+        `full 车道触发了 §14.1 禁止操作：${triggered.join(", ")}`);
+      assert.deepEqual(guard.commands, [], "full 车道同样不得调用任何子进程 CLI");
+      // 两条子车道的顺序也是判据：先 record-only（入口判据更严），拒收后才走统一接收器。
+      assert.deepEqual(guard.databaseTaskCalls, ["data-only", "direct-sync"],
+        "full 车道的投递序列必须是 data-only（拒收）→ direct-sync（接收）");
+      assert.deepEqual(guard.storeMethodCalls, []);
+      const leftovers = readdirSync(join(root, "var")).filter((name) => /^(backups|rai\.importing)/.test(name));
+      assert.deepEqual(leftovers, [], `full 车道不得创建项目备份或整库候选，但 var/ 里出现了：${leftovers.join(", ")}`);
+      assert.equal(statSync(main).ino, beforeInode, "主库文件身份必须保持不变");
+
+      // 与上一条用例的**对照点**：这一批动了分析（Workout），所以必须登记任务并把回执写成 queued。
+      const probe = new DatabaseSync(main, { readOnly: true });
+      try {
+        assert.equal(Number(probe.prepare("SELECT COUNT(*) AS n FROM recompute_jobs").get()!.n), 1,
+          "含 Workout 的批次必须登记恰好一个分析任务（否则「原始已存、分析不更新」）");
+        assert.equal(Number(probe.prepare("SELECT COUNT(*) AS n FROM workouts WHERE deleted_at IS NULL").get()!.n), 1);
+      } finally { probe.close(); }
+      const receipt = readImportReceipt(main, job.id);
+      assert.equal(receipt?.directSync?.ingestStatus, "committed");
+      assert.equal(receipt?.directSync?.analysisStatus, "queued");
+      assert.equal(receipt?.directSync?.publishedReleaseId, null);
+    } finally { await worker.close(); }
+  }, { xml: WORKOUT_XML });
 });
 
 test("A01/§14.1 阳性对照：旧候选路径确实会触发守卫，所以上一条的「全 0」不是假绿", async () => {

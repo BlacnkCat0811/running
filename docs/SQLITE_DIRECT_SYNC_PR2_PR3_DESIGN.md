@@ -812,6 +812,14 @@ final error:         {"message":"Unsupported application job type: import","name
   直连回执 `analysisStatus` 恒为 `"not_required"`。
 - ⛔ **本步有意未做**：不真的登记任何分析任务，`planDirectSyncLane` 的 `deltaMode` 不放开到 `"full"`。
 
+> ✅ **2026-10-13 更新（步骤 2e）：第 2、3 步都已落地。** 统一接收器在同事务里登记
+> `import` 任务（四个绑定列 + 代次递增 + 回执 `queued`），`deltaMode` 已放开为 `"full"`，
+> worker 在 record-only 快通路拒收之后投递 `direct-sync` 任务。上面那两条"今天不许登记"的
+> 断言已被**新的**判据取代（见 [PR4 §7](SQLITE_DIRECT_SYNC_PR4_DESIGN.md)）：车道仍然是
+> "先 record-only、再统一接收器、最后才回退旧链路"，而回执语义从**车道级**细化为**批次级**
+> （record-only 载荷仍必须 `not_required`；动了分析的批次必须 `queued`）。
+> 端到端证据：`apps/api/test/import-worker-direct-sync.test.ts`（含带 GPX 的回归）。
+
 ---
 
 ### 步骤 6b 的三步顺序：**第 1 步已落地**（2026-10-13）
@@ -827,8 +835,8 @@ final error:         {"message":"Unsupported application job type: import","name
   **说清原因地拒绝**（不再是 `Unsupported application job type`）。
 - 恢复流程：CLI 载荷中断仍判 `failed/interrupted` 并保留原因（既有修复不变）；
   直连载荷中断**回到队列**（§10.1 重启恢复）；**未知载荷默认不放行**。
-- 仍然**没有**登记分析任务、`deltaMode` 仍为 `record-only`、回执 `analysisStatus` 仍为
-  `not_required` —— 这三条现由行为级断言钉住（直连车道跑完 `recompute_jobs` 计数为 0）。
+- ~~仍然**没有**登记分析任务、`deltaMode` 仍为 `record-only`、回执 `analysisStatus` 仍为
+  `not_required`~~ ⇒ **这三条已于同日（步骤 2e）改变**：见上面的更新块。历史记录保留不改写。
 
 #### 本文档正文里**已过时**的断言（不改写，逐条对照）
 

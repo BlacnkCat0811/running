@@ -25,13 +25,17 @@ const base: DirectSyncLaneInput = {
   databaseExists: true
 };
 
-test("六个条件全满足才走直连，且直连只可能是 record-only 车道", () => {
+test("六个条件全满足才走直连，且直连的事实范围是 full（2e：登记与消费者都已就位）", () => {
   const decision = planDirectSyncLane(base);
   assert.equal(decision.lane, "direct");
   assert.deepEqual(decision.reasons, []);
-  // 🔴 扩展到 "full" 必须同时把分析任务登记接上，否则会出现"原始已存、分析不更新"。
-  // 这条断言就是那个闸门：有人放宽 deltaMode 时会先在这里变红。
-  assert.equal(decision.deltaMode, "record-only");
+  // 🔴 这条断言是三步上线顺序（设计 §6b）第 3 步的闸门，它**必须与登记能力同批**才能改：
+  //   · `deltaMode: "full"` 的含义是"车道**能装下** Workout / 评分类型 / 显式删除 / GPX"，
+  //     不是"每批都登记任务" —— 纯 record-only 载荷仍然不登记（回执 not_required）；
+  //   · 一旦载荷动了分析，接收器必须在**同一个事务**里登记 `import` 任务（提交前断言守着）；
+  //   · 消费者必须认识 `import`（`d2069a4`），否则登记出来的是一条用户可见的失败任务。
+  // 谁要把这条改回 "record-only"，必须同批撤回上面的登记能力 —— 否则"原始已存、分析不更新"。
+  assert.equal(decision.deltaMode, "full");
 });
 
 test("逐条否决：每个条件单独失效都会被点名，且不误判为直连", () => {
