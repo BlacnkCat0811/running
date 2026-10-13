@@ -220,7 +220,7 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 | A04 | 写入点逐点故障注入 ⇒ 事实/身份/账本/代次/**任务**/回执**全部回滚** | 把 `enqueue` 挪到 `beforeCommit` 之外 |
 | A06 | 同批同内容重放安全；同批不同内容/错误作用域明确拒绝 | 去掉 receipt 的 payload 比对 |
 | A08 | 大包按稳定原子单元分批；父批未全成不提交最终游标 | 让子批回执提前返回 committed |
-| A10 | 分析失败不撤销已接收事实 | 让分析失败回写 raw 状态 |
+| A10 | 分析失败不撤销已接收事实 | ✅ 已落地（2026-10-13，见 §8.5）；突变靶子=`fail()` 回写 raw 回执 |
 | A11 | CPU 分析期间仍可接收新批次（写锁只覆盖短事务） | 把 `withWriteLease` 换回 drain 全程持锁 |
 | A13 | 迟到任务不倒退 active 版本；配置变化使不合格候选拒绝发布 | 去掉 `expected_incumbent_release_id` 比较 |
 | A18 | 只新增迁移、不改历史 checksum；不引入 PostgreSQL/Redis | 改 v34/v35 的 `up` |
@@ -474,6 +474,39 @@ record-only 无任务 / Workout 登记**并由真消费者跑完**（闭环）/ 
 
 **如实标注的边界**：§14.3 P01–P06 需要目标云机，本环境给不了；首次历史分页与大包分批
 （§5.2 分片未实现）仍走旧链路，因此 §14.1 的"全 0"不能推广成整份清单已通过。
+
+### 8.5 步骤 2e 之后的 A10 证据：分析失败隔离（2026-10-13）
+
+**为什么现在才能测**：A10 的前提是"分析任务真的会被登记"。2e 之前直连车道的 `recompute_jobs`
+计数被断言为 **0**，连"分析失败"这个状态都产生不出来（见验收清单里 A10 那一行的"未覆盖"结论）。
+2e（`34780e3`）落地之后这条判据才有可观测对象。
+
+**用例**：`apps/api/test/analysis-failure-isolation.test.ts`（1 条，约 3 s）。两条独立通道：
+原始接收走真实 `ImportWorker`（真实排队 + 子进程 + 事务），分析走进程内
+`RaiApplicationService.runNextJob()`（与 API 消费者同一入口），故障注入落在**真实写点**上
+（`CREATE TRIGGER ... BEFORE INSERT ON model_runs ... RAISE(ABORT)`），不是 mock。
+
+**三条判据各自的证据**
+
+| 判据 | 断言 |
+|---|---|
+| ① 原回执不变 | 分析失败前后 `readImportReceipt(batch)` **逐字段 deep-equal**（两批都查）；事实/会话计数不变；`import_batches` 计数不变 |
+| ② 失败独立可见 | `recompute_jobs.status='failed'` 且 `error_json` 点名注入原因；**读侧** `GET /v1/jobs` 用的 `RaiReadStore.jobs()` 报 `status='failed'` + `error={code:"task_failed"}`，而同一次读取里前一个成功的任务仍是 `succeeded`；`active_model_run` 与 `dashboard().activeModel` 仍指向成功的那次 release |
+| ③ 重试只计算 | 走 API 的真实重试入口（`POST /v1/model-runs` → `enqueueFullRecompute`）后再跑消费者：批次/事实/会话计数不变、回执仍逐字段不变、`var/` 无备份与整库候选、发布指针**移动到一个新的** release |
+
+⚠️ 如实标注：回执里的 `analysisStatus` 是**写入时刻**的事实（`queued`），消费者不得改写它；
+"分析失败"这个独立状态今天由 `recompute_jobs` + `/v1/jobs` 承载。读侧的**派生**投影
+（把事实版本/分析版本合成一个 `freshness`）属 PR5 S3/S4 —— 本用例钉住的是"两者不会互相污染"，
+那正是那个投影能成立的前提。
+
+**突变验证（4 处，逐个跑，全部按预期变红）**
+
+| # | 突变 | 结果 |
+|---|---|---|
+| 1 | `fail()` 里用任务行的 `model_run_id` 激活候选 | **不变红** —— 因为注入点（`INSERT INTO model_runs`）发生在 `setJobRunIds(..., modelRunId)` **之前**，该列为 NULL，突变体是空操作。如实记录：这条突变选错了靶子，不是用例没牙 |
+| 2 | `fail()` 把排队中回执改写成 `analysisStatus:"failed"`（**§6 表里写明的靶子**） | 转红（"分析失败不得改写原始回执"） |
+| 3 | `fail()` 删掉最新批次行 + 把发布指针指向不存在的 run | 转红（批次计数 + "旧 release 必须仍然可读"） |
+| 4 | `enqueueFullRecompute` 里插入一个批次行（模拟"重试重新接收"） | 转红（"重试不得产生新的批次行"） |
 
 ## 9. 未决问题（动工前必须定掉）
 
