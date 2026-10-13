@@ -2217,18 +2217,37 @@ test("summary export requires token even on a public host and validates its rang
  *     A11 拆锁之后写路由不再等，于是真的会在"分析进行中"抵达 —— 这是既有的产品守卫（分析要读用户
  *     成绩标签，不能读到写了一半的集合），客户端应当重试。
  *
- * 所以这里用**有界重试**把它熬过去，而不是假设第一次响应就是最终结果。预算刻意给足：
- * 启动那一次重算要跑几百条语句，而拆锁之后每条语句都要过一次主线程的租约往返。
- * 永久冲突的写仍然会失败：预算是有限的，调用方随后照样断言真状态。
+ * 所以这里要把它熬过去，而不是假设第一次响应就是最终结果。
+ *
+ * 🔴 2026-10-13 改：原实现是「盲重试 20 次 × 250 ms ≈ 5 s」，实测**预算不足** ——
+ * 本机（`tsx` 冷启动）启动期那一次 `snapshot_refresh` 要 **≈7.5 s**：
+ * 端口可用后 t=34 ms / t=848 ms 仍是 `409 + busy=true + recompute=queued/startedAt=null`，
+ * t=7545 ms 才转 `200`。窗口与耗时同量级 ⇒ 必然红，且失败信息把「服务还在忙」
+ * 说成了「这个接口判错了」（`400 !== 409`，409 的 message 是 `任务执行期间不能录入成绩`）。
+ *
+ * 现在改为**按状态等待**：先轮询 `/v1/runtime-status` 直到 `busy === false`，
+ * 再做那一次真正要断言的请求 —— 这条用例于是测的是接口语义，不再测「本机启动有多快」。
+ * 预算给到 60 s：等的是**真实的状态转换**，不是拿重试次数赌时序；超时不会让断言变绿，
+ * 只会以点名原因的失败收场。
  */
 async function postToleratingStartupRecompute(
   url: string, headers: Record<string, string>, body: string
 ): Promise<Response> {
-  for (let attempt = 0; ; attempt++) {
-    const response = await fetch(url, { method: "POST", headers, body });
-    if (response.status !== 409 || attempt >= 20) return response;
+  const origin = new URL(url).origin;
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const response = await fetch(`${origin}/v1/runtime-status`, { headers });
+    const snapshot = await response.json() as { busy?: boolean };
+    if (snapshot.busy === false) break;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        "启动期重算 60 s 内没有结束（`/v1/runtime-status` 的 busy 仍为 "
+          + `${String(snapshot.busy)}）：写端点会一直 409，这不是本次请求判定得出的结论`
+      );
+    }
     await new Promise((done) => setTimeout(done, 250));
   }
+  return fetch(url, { method: "POST", headers, body });
 }
 
 for (const config of [
