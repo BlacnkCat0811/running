@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "b14e1fa9-a990-4625-8e7e-04b03424b233",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-risks\\candidate.json",
+  "output": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-risks\\architecture-risks.html",
+  "specification": {
+    "sha256": "7eace9855c29d345be30c2cad9380af212807c47ff146215d4091ea6c0a94aa7",
+    "bytes": 14526
+  },
+  "artifact": {
+    "sha256": "81ec0e9ab15ef5544ced6bce8f419f3b9eac4bf76ca9c6e48e0104e34e320577",
+    "bytes": 784614
+  }
+}

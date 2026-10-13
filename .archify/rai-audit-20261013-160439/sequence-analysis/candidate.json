@@ -1,0 +1,468 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "RAI 服务端执行时序：一次 iOS 同步的导入与分析",
+    "locale": "zh-CN",
+    "output": ".archify/rai-audit-20261013-160439/sequence-analysis/sequence-analysis.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://gitee.com/tpandmr/running.git",
+      "provider": "gitee",
+      "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3"
+    }
+  },
+  "participants": [
+    {
+      "id": "client",
+      "type": "frontend",
+      "label": "iOS / Web",
+      "sublabel": "HealthKitSync",
+      "sources": [
+        {
+          "path": "apps/ios/RAI/HealthKitSync.swift",
+          "line": 2155,
+          "end_line": 2176,
+          "label": "上传 ZIP"
+        },
+        {
+          "path": "apps/ios/RAI/HealthKitSync.swift",
+          "line": 2214,
+          "end_line": 2241,
+          "label": "发起导入"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Fastify API",
+      "sublabel": "server.ts",
+      "sources": [
+        {
+          "path": "apps/api/src/routes/import-routes.ts",
+          "line": 16,
+          "end_line": 30,
+          "label": "POST /v1/import-jobs"
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 1290,
+          "end_line": 1296,
+          "label": "GET /v1/mobile/today"
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "database",
+      "label": "runtime DB",
+      "sublabel": "import_jobs",
+      "sources": [
+        {
+          "path": "apps/api/src/runtime-state.ts",
+          "line": 42,
+          "end_line": 47,
+          "label": "var/runtime.sqlite"
+        },
+        {
+          "path": "apps/api/src/runtime-state.ts",
+          "line": 299,
+          "end_line": 305,
+          "label": "import_jobs 表"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "ImportWorker",
+      "sublabel": "import-worker.ts",
+      "sources": [
+        {
+          "path": "apps/api/src/import-worker.ts",
+          "line": 340,
+          "end_line": 392,
+          "label": "create 入队"
+        },
+        {
+          "path": "apps/api/src/import-worker.ts",
+          "line": 303,
+          "end_line": 338,
+          "label": "scheduleNext 取任务"
+        },
+        {
+          "path": "apps/api/src/import-worker.ts",
+          "line": 564,
+          "end_line": 602,
+          "label": "直连车道分派"
+        }
+      ]
+    },
+    {
+      "id": "rx",
+      "type": "backend",
+      "label": "直连接收器",
+      "sublabel": "worker 线程",
+      "sources": [
+        {
+          "path": "apps/api/src/direct-sync-ingest.ts",
+          "line": 413,
+          "end_line": 469,
+          "label": "applyDirectSyncImport"
+        },
+        {
+          "path": "apps/api/src/import-database-thread.ts",
+          "line": 8,
+          "end_line": 13,
+          "label": "worker 线程分派"
+        }
+      ]
+    },
+    {
+      "id": "main",
+      "type": "database",
+      "label": "rai.sqlite",
+      "sublabel": "主库",
+      "sources": [
+        {
+          "path": "apps/api/src/direct-sync-ingest.ts",
+          "line": 470,
+          "end_line": 524,
+          "label": "归一与登记"
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 483,
+          "end_line": 499,
+          "label": "recompute_jobs"
+        }
+      ]
+    },
+    {
+      "id": "recompute",
+      "type": "backend",
+      "label": "重算管线",
+      "sublabel": "RecomputePipeline",
+      "sources": [
+        {
+          "path": "apps/api/src/recompute-worker.ts",
+          "line": 63,
+          "end_line": 84,
+          "label": "worker 线程认领"
+        },
+        {
+          "path": "packages/application/src/services/recompute-pipeline.ts",
+          "line": 195,
+          "end_line": 236,
+          "label": "三段计算"
+        }
+      ]
+    },
+    {
+      "id": "read",
+      "type": "backend",
+      "label": "RaiReadStore",
+      "sublabel": "只读租约",
+      "sources": [
+        {
+          "path": "apps/api/src/read-store-manager.ts",
+          "line": 52,
+          "end_line": 64,
+          "label": "读租约 use()"
+        },
+        {
+          "path": "apps/api/src/data.ts",
+          "line": 217,
+          "end_line": 243,
+          "label": "只读打开主库"
+        }
+      ]
+    }
+  ],
+  "messages": [
+    {
+      "id": "m-upload",
+      "from": "client",
+      "to": "api",
+      "y": 160,
+      "label": "POST /v1/imports/uploads",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-save-upload",
+      "from": "api",
+      "to": "runtime",
+      "y": 188,
+      "label": "saveUpload → import_sources",
+      "variant": "default"
+    },
+    {
+      "id": "m-source-id",
+      "from": "api",
+      "to": "client",
+      "y": 216,
+      "label": "200 { sourceId }",
+      "variant": "return"
+    },
+    {
+      "id": "m-start-import",
+      "from": "client",
+      "to": "api",
+      "y": 244,
+      "label": "POST /v1/import-jobs",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-acquire",
+      "from": "api",
+      "to": "worker",
+      "y": 272,
+      "label": "acquire() + create()",
+      "variant": "security"
+    },
+    {
+      "id": "m-persist",
+      "from": "worker",
+      "to": "runtime",
+      "y": 300,
+      "label": "persistJobs() → import_jobs",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-202",
+      "from": "api",
+      "to": "client",
+      "y": 328,
+      "label": "202 { status: queued }",
+      "variant": "return"
+    },
+    {
+      "id": "m-running",
+      "from": "worker",
+      "to": "runtime",
+      "y": 356,
+      "label": "status = running",
+      "variant": "default"
+    },
+    {
+      "id": "m-task",
+      "from": "worker",
+      "to": "rx",
+      "y": 384,
+      "label": "databaseTask(direct-sync)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-begin",
+      "from": "rx",
+      "to": "main",
+      "y": 412,
+      "label": "BEGIN IMMEDIATE",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-parse",
+      "from": "rx",
+      "to": "main",
+      "y": 440,
+      "label": "parse + canonicalize 事实",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-enqueue-analysis",
+      "from": "rx",
+      "to": "main",
+      "y": 468,
+      "label": "登记 recompute_jobs + 回执",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-commit",
+      "from": "rx",
+      "to": "worker",
+      "y": 496,
+      "label": "COMMIT → analysisStatus=queued",
+      "variant": "return"
+    },
+    {
+      "from": "rx",
+      "to": "recompute",
+      "label": "终态回调触发 schedule()",
+      "variant": "dashed",
+      "note": "server.ts:517",
+      "y": 524
+    },
+    {
+      "id": "m-claim",
+      "from": "recompute",
+      "to": "main",
+      "y": 552,
+      "label": "claim queued → running",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-features",
+      "from": "recompute",
+      "to": "main",
+      "y": 580,
+      "label": "workout_features",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-metrics",
+      "from": "recompute",
+      "to": "main",
+      "y": 608,
+      "label": "training_metric_runs",
+      "variant": "default"
+    },
+    {
+      "id": "m-assessments",
+      "from": "recompute",
+      "to": "main",
+      "y": 636,
+      "label": "ability_assessments",
+      "variant": "default"
+    },
+    {
+      "id": "m-activate",
+      "from": "recompute",
+      "to": "main",
+      "y": 664,
+      "label": "active_model_run ← model_run",
+      "variant": "emphasis"
+    },
+    {
+      "id": "m-poll-job",
+      "from": "client",
+      "to": "api",
+      "y": 692,
+      "label": "GET /v1/import-jobs/:id",
+      "variant": "dashed"
+    },
+    {
+      "id": "m-job-done",
+      "from": "api",
+      "to": "client",
+      "y": 720,
+      "label": "200 { status: succeeded }",
+      "variant": "return"
+    },
+    {
+      "id": "m-poll-today",
+      "from": "client",
+      "to": "api",
+      "y": 748,
+      "label": "GET /v1/mobile/today",
+      "variant": "dashed"
+    },
+    {
+      "id": "m-store-call",
+      "from": "api",
+      "to": "read",
+      "y": 776,
+      "label": "store.mobileTodayWithViews()",
+      "variant": "default"
+    },
+    {
+      "id": "m-select",
+      "from": "read",
+      "to": "main",
+      "y": 804,
+      "label": "SELECT active_* 视图",
+      "variant": "default"
+    },
+    {
+      "id": "m-json",
+      "from": "api",
+      "to": "client",
+      "y": 832,
+      "label": "200 JSON",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "api",
+      "from": 155,
+      "to": 355,
+      "type": "backend"
+    },
+    {
+      "participant": "worker",
+      "from": 305,
+      "to": 535,
+      "type": "backend"
+    },
+    {
+      "participant": "rx",
+      "from": 425,
+      "to": 535,
+      "type": "backend"
+    },
+    {
+      "participant": "recompute",
+      "from": 545,
+      "to": 685,
+      "type": "backend"
+    },
+    {
+      "participant": "api",
+      "from": 695,
+      "to": 832,
+      "type": "backend"
+    },
+    {
+      "participant": "read",
+      "from": 785,
+      "to": 832,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "主链路（源码确认）",
+      "items": [
+        "iOS 先 multipart POST /v1/imports/uploads，幂等头 X-RAI-Sync-Batch 恒等于 payloadHash（apps/ios/RAI/HealthKitSync.swift:2168-2176）",
+        "路由先取单写者闸再建任务：acquire(\"import source enqueue\") → importWorker.create(...) → 202（apps/api/src/routes/import-routes.ts:16-30）",
+        "任务先写进 runtime.sqlite 的 import_jobs 才算受理；持久化失败会从 jobs 映射里回滚（apps/api/src/import-worker.ts:384-392）",
+        "默认车道在 BEGIN IMMEDIATE 内完成解析、局部归一、登记 recompute_jobs 与写回执，然后一次 COMMIT（apps/api/src/direct-sync-ingest.ts:448-469、509-524、584-587）",
+        "分析任务由 RecomputeWorker 在 worker 线程里认领并跑完三段计算（apps/api/src/recompute-worker.ts:63-84）"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "单写者、租约与取消",
+      "items": [
+        "MutationCoordinator.acquire() 冲突时抛 409 / code mutation_conflict（apps/api/src/mutation-coordinator.ts:1-25）",
+        "TaskAdmissionScheduler 全进程只允许一个 CPU 密集写者，FIFO 由 waiting 集合决定（apps/api/src/task-admission.ts:9-39）",
+        "重算的写许可只在短写窗口内持有，长计算用 gate.yieldIfStale() 让路（apps/api/src/recompute-worker.ts:63-84、packages/application/src/write-gate.ts:20-31）",
+        "换库前 readStores.beginReplace() 排空读租约，超时抛 database_busy(409)（apps/api/src/read-store-manager.ts:94-122）",
+        "取消：queued 直接置 cancelled；running 置 cancel_requested 后终止子进程/线程；phase=activate 时不可取消（apps/api/src/import-worker.ts:280-301）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "状态取值与发布指针",
+      "items": [
+        "recompute_jobs.status 只允许 queued / running / succeeded / failed / cancelled（packages/storage-sqlite/src/database.ts:483-499）",
+        "认领任务会写 status='running' 与 progress_phase='claimed'（packages/storage-sqlite/src/recompute-job-repository.ts:109-120）",
+        "runFullRecompute 顺序执行 feature_extraction → training_metrics → model_replay（packages/application/src/services/recompute-pipeline.ts:195-236）",
+        "发布是同库内的单行指针 upsert：active_model_run(singleton=1) → model_run_id，并清空 active prediction model（packages/storage-sqlite/src/model-run-repository.ts:212-218）",
+        "读端始终是只读连接 + active_* 视图，只有已发布 run 可见（packages/storage-sqlite/src/database.ts:545-553）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "旁路与未知",
+      "items": [
+        "本时序画的是默认直连车道；直连被拒（非 typescript 引擎、无主库、载荷是完整快照等）时同一 worker 改走候选库 + rename 换库的维护路径（apps/api/src/direct-sync-plan.ts:47-56、apps/api/src/import-worker.ts:626-645）",
+        "启用 Rust 引擎会让直连车道返回 engine_rust 否决，因此该时序在生产开启 Rust 时不成立（apps/api/src/direct-sync-plan.ts:51）",
+        "Python/ONNX 预测训练是独立支路，不在本次导入时序内（packages/application/src/prediction-training-runner.ts:550-560）",
+        "UNKNOWN：本次审计为只读静态分析，没有启动服务或浏览器；图上的顺序与事务边界来自源码，实际耗时、并发交错与真机轮询节奏未实测"
+      ]
+    }
+  ]
+}

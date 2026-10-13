@@ -1,0 +1,498 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RAI 模块依赖与调用方向（源码实证）",
+    "locale": "zh-CN",
+    "output": ".archify/rai-audit-20261013-160439/architecture-modules/architecture-modules.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://gitee.com/tpandmr/running.git",
+      "provider": "gitee",
+      "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3"
+    },
+    "legend": {
+      "mode": "auto"
+    }
+  },
+  "components": [
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "apps/api 服务与执行器",
+      "sublabel": "server.ts · worker · 队列",
+      "tag": "Fastify :8787",
+      "icon": "backend",
+      "pos": [
+        40,
+        120
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/package.json",
+          "line": 16,
+          "end_line": 25,
+          "label": "依赖声明"
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 29,
+          "end_line": 43,
+          "label": "装配导入"
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 465,
+          "end_line": 496,
+          "label": "worker 装配"
+        }
+      ]
+    },
+    {
+      "id": "application",
+      "type": "backend",
+      "label": "@rai/application 编排",
+      "sublabel": "service.ts · recompute-pipeline",
+      "tag": "唯一编排者",
+      "icon": "backend",
+      "pos": [
+        340,
+        120
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/application/src/service.ts",
+          "line": 55,
+          "end_line": 71,
+          "label": "装配各仓储与管线"
+        },
+        {
+          "path": "packages/application/src/service.ts",
+          "line": 288,
+          "label": "runNextJob 调度"
+        },
+        {
+          "path": "packages/application/src/write-gate.ts",
+          "line": 15,
+          "end_line": 30,
+          "label": "写窗口窄接口"
+        }
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "database",
+      "label": "@rai/storage-sqlite",
+      "sublabel": "migrations · 仓储 · 锁",
+      "tag": "node:sqlite",
+      "icon": "database",
+      "pos": [
+        640,
+        120
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 124,
+          "end_line": 126,
+          "label": "迁移表起点"
+        },
+        {
+          "path": "packages/storage-sqlite/src/publication-lock.ts",
+          "line": 160,
+          "end_line": 186,
+          "label": "跨进程发布锁"
+        },
+        {
+          "path": "packages/storage-sqlite/src/recompute-job-repository.ts",
+          "line": 104,
+          "end_line": 129,
+          "label": "任务抢占"
+        }
+      ]
+    },
+    {
+      "id": "parser",
+      "type": "backend",
+      "label": "@rai/health-export-parser",
+      "sublabel": "SAX 解析 · 身份 · 增量",
+      "tag": "saxes · yauzl",
+      "icon": "backend",
+      "pos": [
+        640,
+        420
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/health-export-parser/src/apple-health-parser.ts",
+          "line": 428,
+          "label": "SaxesParser"
+        },
+        {
+          "path": "packages/health-export-parser/src/canonicalize.ts",
+          "line": 240,
+          "label": "canonical 训练会话"
+        },
+        {
+          "path": "packages/health-export-parser/src/identity-algorithm.ts",
+          "line": 127,
+          "label": "身份算法指纹"
+        }
+      ]
+    },
+    {
+      "id": "algo_leaf",
+      "type": "backend",
+      "label": "评分 / 恢复 / 负荷",
+      "sublabel": "scoring · readiness · training-load",
+      "tag": "叶子或近叶子",
+      "icon": "backend",
+      "pos": [
+        340,
+        420
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/scoring/src/index.ts",
+          "line": 13,
+          "label": "SCORING_MODEL_VERSION"
+        },
+        {
+          "path": "packages/scoring/src/model.ts",
+          "line": 425,
+          "label": "scoreFeature"
+        },
+        {
+          "path": "scripts/check-package-boundaries.mjs",
+          "line": 39,
+          "end_line": 73,
+          "label": "包依赖白名单"
+        }
+      ]
+    },
+    {
+      "id": "contracts",
+      "type": "backend",
+      "label": "@rai/contracts",
+      "sublabel": "领域合同与版本常量",
+      "tag": "叶子包",
+      "icon": "backend",
+      "pos": [
+        40,
+        420
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/scoring/package.json",
+          "line": 1,
+          "end_line": 13,
+          "label": "scoring 只依赖 contracts"
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 50,
+          "label": "DATABASE_TIMEZONE"
+        }
+      ]
+    },
+    {
+      "id": "inference",
+      "type": "cloud",
+      "label": "ONNX 推理（可选模型）",
+      "sublabel": "onnxruntime-node · 否则公式回退",
+      "tag": "需工件存在",
+      "icon": "cloud",
+      "pos": [
+        340,
+        1020
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/prediction-inference/src/index.ts",
+          "line": 5,
+          "label": "onnxruntime-node"
+        },
+        {
+          "path": "packages/prediction-inference/src/index.ts",
+          "line": 134,
+          "end_line": 139,
+          "label": "模型加载"
+        },
+        {
+          "path": "packages/application/src/prediction-model-service.ts",
+          "line": 39,
+          "end_line": 45,
+          "label": "训练标签下限"
+        }
+      ]
+    },
+    {
+      "id": "rust",
+      "type": "external",
+      "label": "Rust 引擎（可选）",
+      "sublabel": "CLI 子进程 · 默认关闭",
+      "tag": "crates/rai-data-worker",
+      "icon": "external",
+      "pos": [
+        640,
+        720
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/health-export-parser/src/native-worker.ts",
+          "line": 69,
+          "end_line": 74,
+          "label": "引擎与回退默认值"
+        },
+        {
+          "path": "packages/health-export-parser/src/native-worker.ts",
+          "line": 121,
+          "end_line": 126,
+          "label": "spawn 子进程"
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 133,
+          "end_line": 136,
+          "label": "缺失二进制即失败"
+        }
+      ]
+    },
+    {
+      "id": "python",
+      "type": "external",
+      "label": "Python 离线训练",
+      "sublabel": "research/ · 非启动依赖",
+      "tag": "产出固定工件",
+      "icon": "external",
+      "pos": [
+        40,
+        720
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "package.json",
+          "line": 79,
+          "end_line": 83,
+          "label": "ml:* 脚本"
+        },
+        {
+          "path": "README.md",
+          "line": 18,
+          "label": "非启动依赖声明"
+        }
+      ]
+    },
+    {
+      "id": "algo_src",
+      "type": "backend",
+      "label": "特征与训练负荷",
+      "sublabel": "features · training-load",
+      "tag": "仍只写 contracts + 内部依赖",
+      "icon": "backend",
+      "pos": [
+        340,
+        720
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "scripts/check-package-boundaries.mjs",
+          "line": 58,
+          "end_line": 59,
+          "label": "features -> normalization"
+        },
+        {
+          "path": "scripts/check-package-boundaries.mjs",
+          "line": 69,
+          "end_line": 70,
+          "label": "training-load -> readiness"
+        },
+        {
+          "path": "packages/application/src/services/recompute-pipeline.ts",
+          "line": 213,
+          "label": "extractFeatures 调用点"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "npm run check:package-boundaries 禁线",
+      "wraps": [
+        "api",
+        "application",
+        "storage",
+        "parser",
+        "contracts",
+        "inference",
+        "algo_leaf",
+        "algo_src"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "api-to-application",
+      "from": "api",
+      "to": "application",
+      "label": "调用编排",
+      "variant": "emphasis"
+    },
+    {
+      "id": "application-to-storage",
+      "from": "application",
+      "to": "storage",
+      "label": "经窄接口读写",
+      "variant": "emphasis"
+    },
+    {
+      "id": "application-to-parser",
+      "from": "application",
+      "to": "parser",
+      "label": "canonical 化",
+      "variant": "default"
+    },
+    {
+      "id": "application-to-inference",
+      "from": "application",
+      "to": "inference",
+      "label": "残差推理",
+      "variant": "dashed"
+    },
+    {
+      "id": "parser-to-rust",
+      "from": "parser",
+      "to": "rust",
+      "label": "--engine rust",
+      "variant": "dashed"
+    },
+    {
+      "id": "python-to-inference",
+      "from": "python",
+      "to": "inference",
+      "label": "固定工件",
+      "variant": "dashed"
+    },
+    {
+      "id": "parser-to-storage",
+      "from": "parser",
+      "to": "storage",
+      "label": "写原始事实",
+      "variant": "default"
+    },
+    {
+      "id": "application-to-algo-src",
+      "from": "application",
+      "to": "algo_src",
+      "label": "特征与负荷",
+      "variant": "emphasis"
+    },
+    {
+      "id": "application-to-algo-leaf",
+      "from": "application",
+      "to": "algo_leaf",
+      "label": "评分与恢复",
+      "variant": "emphasis"
+    },
+    {
+      "id": "algo-src-to-algo-leaf",
+      "from": "algo_src",
+      "to": "algo_leaf",
+      "label": "training-load → readiness",
+      "variant": "default"
+    },
+    {
+      "id": "algo-src-to-contracts",
+      "from": "algo_src",
+      "to": "contracts",
+      "label": "经 normalization",
+      "variant": "default"
+    },
+    {
+      "id": "algo-leaf-to-contracts",
+      "from": "algo_leaf",
+      "to": "contracts",
+      "label": "只依赖契约",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "调用方向由 dependencies 而非命名推定",
+      "items": [
+        "apps/api 的依赖表列出 application / storage-sqlite / health-export-parser / contracts / api-contracts / readiness / training-load / physiology / dynamics / model-eval（apps/api/package.json:16-25）",
+        "编排集中在 @rai/application：RaiApplicationService 构造 RecomputePipeline 并把仓储注入管线（packages/application/src/service.ts:55-71）",
+        "分析只通过收窄后的 AnalysisStore 两个成员拿数据库，写语句经租约闸门代理（packages/application/src/write-gate.ts:8-18、apps/api/src/write-lease.ts:280-311）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "高耦合区域与禁线",
+      "items": [
+        "storage-sqlite 是最大耦合点：migrations 1→36、全部仓储、发布锁与调用方自有事务模式都在一个包里（packages/storage-sqlite/src/database.ts:124-1677）",
+        "算法包群保持叶子纯度：packages/scoring/package.json 只声明 @rai/contracts 依赖，因此算法改动不会反向牵动存储",
+        "包边界由 npm run check:package-boundaries 机械化（package.json:100），文档称其禁止 package→app 与 Fitness→Readiness；本次未逐条阅读规则表，判为无法确认"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "默认路径之外的依赖",
+      "items": [
+        "Rust 引擎：importEngine() 默认 typescript，nativeFallback() 默认 none，只有显式启用且二进制缺失才在加载期失败（packages/health-export-parser/src/native-worker.ts:69-74、apps/api/src/server.ts:133-136）",
+        "ONNX 推理需要已发布的工件；工件不满足哈希/作用域断言时回退公式预测（packages/prediction-inference/src/index.ts:61、134-139）",
+        "Python 训练链不在启动依赖里，只产出固定工件（README.md:18、package.json:79-83）"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "与文档的差异",
+      "items": [
+        "docs/ARCHITECTURE.md:47 把包边界检查说成限制 package→app、Fitness→Readiness；检查器确实存在，但具体禁线表未被本次审计阅读",
+        "docs/ARCHITECTURE.md:19 的 ONNX 链路与源码一致（onnxruntime-node + 工件断言 + 公式回退）",
+        "docs/RUST_DATA_ENGINE.md:33 的默认引擎声明与源码一致（typescript）"
+      ]
+    }
+  ]
+}

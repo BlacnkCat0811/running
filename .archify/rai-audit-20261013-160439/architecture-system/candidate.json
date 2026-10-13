@@ -1,0 +1,455 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RAI 系统总架构（源码实证）",
+    "locale": "zh-CN",
+    "output": ".archify/rai-audit-20261013-160439/architecture-system/architecture-system.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://gitee.com/tpandmr/running.git",
+      "provider": "gitee",
+      "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3"
+    },
+    "legend": {
+      "mode": "auto"
+    }
+  },
+  "components": [
+    {
+      "id": "ios",
+      "type": "frontend",
+      "label": "iOS 客户端",
+      "sublabel": "HealthKit 只读导出 + 上传",
+      "tag": "BGProcessingTask",
+      "icon": "frontend",
+      "pos": [
+        40,
+        120
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/ios/RAI/HealthKitExport.swift",
+          "line": 481,
+          "end_line": 503,
+          "label": "HealthKit 读取类型"
+        },
+        {
+          "path": "apps/ios/RAI/BackgroundUploadSession.swift",
+          "line": 62,
+          "end_line": 70,
+          "label": "后台上传会话"
+        },
+        {
+          "path": "apps/ios/RAI/APIClient.swift",
+          "line": 105,
+          "end_line": 133,
+          "label": "调用的 /v1 读端点"
+        }
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "React Web 工作台",
+      "sublabel": "上传 / 轮询 / 渲染结果",
+      "tag": "桌面 1440×900",
+      "icon": "frontend",
+      "pos": [
+        40,
+        880
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/web/src/pages/DataModelPage.tsx",
+          "line": 94,
+          "end_line": 96,
+          "label": "轮询导入任务"
+        },
+        {
+          "path": "apps/web/src/components/GlobalTaskStatus.tsx",
+          "line": 34,
+          "label": "轮询 /v1/runtime-status"
+        },
+        {
+          "path": "apps/web/src/feedback-command.ts",
+          "line": 23,
+          "end_line": 34,
+          "label": "写命令并回读"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "cloud",
+      "label": "Fastify API 与读快照",
+      "sublabel": "鉴权 · 只读快照 · 单写者准入",
+      "tag": "127.0.0.1:8787",
+      "icon": "cloud",
+      "pos": [
+        40,
+        440
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 129,
+          "end_line": 131,
+          "label": "默认监听与令牌"
+        },
+        {
+          "path": "apps/api/src/read-store-manager.ts",
+          "line": 52,
+          "end_line": 64,
+          "label": "只读快照租用"
+        },
+        {
+          "path": "apps/api/src/task-admission.ts",
+          "line": 9,
+          "end_line": 43,
+          "label": "单写者准入"
+        }
+      ]
+    },
+    {
+      "id": "ingest",
+      "type": "backend",
+      "label": "导入接收与串行任务",
+      "sublabel": "ImportWorker · 写主库",
+      "tag": "import_jobs",
+      "icon": "backend",
+      "pos": [
+        320,
+        120
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/routes/import-routes.ts",
+          "line": 38,
+          "end_line": 83,
+          "label": "ZIP 上传入口"
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 465,
+          "end_line": 496,
+          "label": "ImportWorker 装配"
+        },
+        {
+          "path": "apps/api/src/import-worker.ts",
+          "line": 1718,
+          "end_line": 1729,
+          "label": "换主库与回滚"
+        }
+      ]
+    },
+    {
+      "id": "state",
+      "type": "database",
+      "label": "状态库",
+      "sublabel": "runtime.sqlite + 控制库",
+      "tag": "任务 · 目标",
+      "icon": "database",
+      "pos": [
+        760,
+        440
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/runtime-state.ts",
+          "line": 284,
+          "end_line": 305,
+          "label": "runtime.sqlite 建表"
+        },
+        {
+          "path": "apps/api/src/command-queue.ts",
+          "line": 71,
+          "end_line": 74,
+          "label": "mutation_commands 建表"
+        },
+        {
+          "path": "apps/api/src/mobile-goals.ts",
+          "line": 701,
+          "end_line": 725,
+          "label": "控制库建表"
+        }
+      ]
+    },
+    {
+      "id": "algo",
+      "type": "backend",
+      "label": "特征 / 评分 / 预测",
+      "sublabel": "纯 TS 算法包",
+      "tag": "由任务调度",
+      "icon": "backend",
+      "pos": [
+        40,
+        760
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/application/src/service.ts",
+          "line": 77,
+          "end_line": 96,
+          "label": "重算任务入队"
+        },
+        {
+          "path": "packages/application/src/write-gate.ts",
+          "line": 15,
+          "end_line": 30,
+          "label": "分析写窗口闸门"
+        },
+        {
+          "path": "apps/api/src/write-lease.ts",
+          "line": 64,
+          "end_line": 108,
+          "label": "跨线程短写租约"
+        }
+      ]
+    },
+    {
+      "id": "db_main",
+      "type": "database",
+      "label": "rai.sqlite 主库",
+      "sublabel": "事实 · 派生 run · 回执",
+      "tag": "WAL · v1→v36",
+      "icon": "database",
+      "pos": [
+        440,
+        760
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 126,
+          "label": "RAI_DATABASE 默认路径"
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 124,
+          "end_line": 126,
+          "label": "迁移表起点"
+        },
+        {
+          "path": "apps/api/src/import-publication.ts",
+          "line": 12,
+          "end_line": 26,
+          "label": "import_manifest 回执"
+        }
+      ]
+    },
+    {
+      "id": "algo_engine",
+      "type": "external",
+      "label": "Rust 数据引擎（可选）",
+      "sublabel": "CLI 子进程 · 默认关闭",
+      "tag": "crates/rai-data-worker",
+      "icon": "external",
+      "pos": [
+        760,
+        760
+      ],
+      "size": [
+        200,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/health-export-parser/src/native-worker.ts",
+          "line": 69,
+          "end_line": 74,
+          "label": "引擎与回退默认值"
+        },
+        {
+          "path": "packages/health-export-parser/src/native-worker.ts",
+          "line": 121,
+          "end_line": 126,
+          "label": "spawn CLI 子进程"
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 133,
+          "end_line": 136,
+          "label": "缺失二进制即失败"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "信任边界：回环 + Bearer",
+      "wraps": [
+        "ingest",
+        "api",
+        "algo",
+        "state"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "持久化边界",
+      "wraps": [
+        "db_main",
+        "state"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ios-to-ingest",
+      "from": "ios",
+      "to": "ingest",
+      "label": "上传 ZIP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ingest-to-state",
+      "from": "ingest",
+      "to": "state",
+      "label": "任务状态",
+      "variant": "default"
+    },
+    {
+      "id": "ingest-to-main",
+      "from": "ingest",
+      "to": "db_main",
+      "label": "直连车道写库",
+      "variant": "emphasis"
+    },
+    {
+      "id": "state-to-api",
+      "from": "state",
+      "to": "api",
+      "label": "取命令队列",
+      "variant": "default"
+    },
+    {
+      "id": "main-to-api",
+      "from": "db_main",
+      "to": "api",
+      "label": "只读快照 → DTO",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api-to-algo",
+      "from": "api",
+      "to": "algo",
+      "label": "FIFO 调度重算",
+      "variant": "emphasis"
+    },
+    {
+      "id": "algo-to-main",
+      "from": "algo",
+      "to": "db_main",
+      "label": "写派生 run",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-to-ios",
+      "from": "api",
+      "to": "ios",
+      "label": "GET /v1/mobile/*",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "left"
+    },
+    {
+      "id": "web-to-api",
+      "from": "web",
+      "to": "api",
+      "label": "上传 / 轮询",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "bottom"
+    },
+    {
+      "id": "ingest-to-engine",
+      "from": "ingest",
+      "to": "algo_engine",
+      "label": "--engine rust（可选）",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "单写者与信任边界（源码实证）",
+      "items": [
+        "MutationCoordinator.acquire() 同一时刻只允许一个写操作，冲突返回 409 code=mutation_conflict（apps/api/src/mutation-coordinator.ts:14-25）",
+        "TaskAdmissionScheduler 让 import / recompute / command / prediction 共用一个许可，等待者按 FIFO 保序（apps/api/src/task-admission.ts:16-39）",
+        "默认绑定 127.0.0.1:8787；匿名读必须同时命中公开路由表与公开 Host 白名单（apps/api/src/server.ts:129-131、255-288）",
+        "分析线程用 Atomics 共享内存申请短写租约，超过 30s 失败开放并记诊断，不挂死队列（apps/api/src/write-lease.ts:91-101）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "导入有两套发布机制，默认不是候选库",
+      "items": [
+        "planDirectSyncLane 只在 engine=typescript、引擎版本一致、载荷为增量、主库已存在时选直连，否则退回候选库车道（apps/api/src/direct-sync-plan.ts:47-56）",
+        "直连车道以 caller-owned 单事务写主库，解析、分类、登记 import 分析任务与回执都在同一事务内提交（apps/api/src/direct-sync-ingest.ts:444-469、509-524）",
+        "候选库车道：在线备份 → 候选副本 → 导入 CLI → 校验 → 换主库，失败即回滚（apps/api/src/import-worker.ts:654-682、1718-1729）",
+        "快路径开关默认开启：RAI_IMPORT_DATA_ONLY_FAST_PATH 缺省即为 1（apps/api/src/server.ts:168-169）"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "可选加速：Rust 数据引擎（默认关闭）",
+      "items": [
+        "引擎选择 importEngine() 默认 typescript，回退 nativeFallback() 默认 none，分别由 RAI_IMPORT_ENGINE / RAI_RUST_FALLBACK 覆盖（packages/health-export-parser/src/native-worker.ts:69-74）",
+        "它是 CLI 子进程而非 WASM/napi：解析器用 spawn(binary, [--operation, --input, --output]) 调用 crates/rai-data-worker（packages/health-export-parser/src/native-worker.ts:121-126）",
+        "只有显式启用 rust 且回退为 none 而二进制缺失时，服务才在加载期直接失败（apps/api/src/server.ts:133-136）"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "幂等、原子性与恢复",
+      "items": [
+        "换库意图先落 runtime.sqlite 的 import_publications，进程被杀后可据 phase 回滚或确认（apps/api/src/import-publication.ts:62-118）",
+        "跨进程发布锁用硬链接原子发布 owner 记录，回收时留墓碑避免重放（packages/storage-sqlite/src/publication-lock.ts:176-241）",
+        "写命令幂等键 = sha256(scope + idempotencyKey)，内容不一致直接 409；回执与业务效果写在同一事务（apps/api/src/command-queue.ts:107-115、177-219）",
+        "读端以只读连接取快照，换库前先等待租约排水，上界 20s 后返回 409 database_busy（apps/api/src/read-store-manager.ts:9、94-122）"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "与文档的差异（以源码为准）",
+      "items": [
+        "docs/ARCHITECTURE.md:11-16 只描述候选 SQLite 到原子发布这一条链路，未描述对合格载荷已成为默认的直连事务链路（判定条件见本图琥珀色卡片）",
+        "docs/ARCHITECTURE.md:53 称 runtime.sqlite 保存来源与任务状态；源码里它同时保存 mutation_commands 与 import_publications 两张队列表",
+        "docs/ARCHITECTURE.md:13 把 Rust 记为可选 Record 热循环；源码确认它是 CLI 子进程且默认关闭",
+        "docs/ARCHITECTURE.md:61 要求候选库过完整性、代次与模型 gate 才可切换；直连车道不生成候选库，改用提交前回读断言与模型 gate"
+      ]
+    }
+  ]
+}

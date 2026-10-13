@@ -53,3 +53,11 @@ apps/ios/Configs/AmapKey.xcconfig
 
 # Generated data audit is a runtime report, not maintained project documentation
 /docs/DATA_AUDIT.md
+
+# `.archify/` holds read-only audit output. Its interactive HTML diagrams and the
+# spec JSON that produced them ARE tracked; its prose reports are not, for the same
+# reason /docs/DATA_AUDIT.md is not — they are a dated point-in-time snapshot.
+# check-doc-line-refs.mjs names this exact case ("带日期的时点快照不能用来判漂移…
+# 回写等于伪造历史"), and check-doc-links.mjs would otherwise require every one of
+# them to be reachable from README.md.
+/.archify/**/*.md

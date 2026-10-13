@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "d6803aa8-94fa-4501-9621-85c209bd3074",
+  "status": "current",
+  "command": "deliver",
+  "type": "dataflow",
+  "input": "D:\\running\\.archify\\rai-audit-20261013-160439\\dataflow-core\\candidate.json",
+  "output": "D:\\running\\.archify\\rai-audit-20261013-160439\\dataflow-core\\dataflow-core.html",
+  "specification": {
+    "sha256": "5d6ab025db73b02b124cce64fd0a9b6386e88aef1c4e1cbefba9bbe5d1462008",
+    "bytes": 11871
+  },
+  "artifact": {
+    "sha256": "4c313996f54b949d608575d39e859deea42820c38f7e29ca60d38947cdcd7394",
+    "bytes": 769920
+  }
+}

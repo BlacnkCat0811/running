@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "RAI 核心数据流：Apple Health 导出 → 直连事务落库 → 派生发布 → 读取",
+    "locale": "zh-CN",
+    "output": ".archify/rai-audit-20261013-160439/dataflow-core/dataflow-core.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://gitee.com/tpandmr/running.git",
+      "provider": "gitee",
+      "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3"
+    }
+  },
+  "stages": [
+    { "label": "来源" },
+    { "label": "接入与登记" },
+    { "label": "落库与派生" },
+    { "label": "发布与读取" }
+  ],
+  "nodes": [
+    {
+      "id": "hk",
+      "type": "frontend",
+      "label": "HealthKit 导出",
+      "sublabel": "iOS HealthKit",
+      "tag": "export.xml + GPX",
+      "stage": 0,
+      "row": 1,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "packages/health-export-parser/src/cli.ts", "line": 171, "end_line": 176, "label": "定位 export.xml" },
+        { "path": "apps/ios/RAI/HealthKitSync.swift", "line": 2155, "end_line": 2176, "label": "ZIP 上传" }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Fastify API",
+      "sublabel": "apps/api/src",
+      "tag": "写入门闸",
+      "stage": 1,
+      "row": 1,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "apps/api/src/routes/import-routes.ts", "line": 38, "end_line": 83, "label": "/v1/imports/uploads" },
+        { "path": "apps/api/src/routes/import-routes.ts", "line": 16, "end_line": 30, "label": "/v1/import-jobs" },
+        { "path": "apps/api/src/server.ts", "line": 397, "end_line": 436, "label": "preHandler 单写者闸" }
+      ]
+    },
+    {
+      "id": "runtime",
+      "type": "database",
+      "label": "runtime.sqlite",
+      "sublabel": "import_jobs",
+      "tag": "durable 记录",
+      "stage": 1,
+      "row": 3,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "apps/api/src/runtime-state.ts", "line": 42, "end_line": 47, "label": "var/runtime.sqlite" },
+        { "path": "apps/api/src/runtime-state.ts", "line": 299, "end_line": 305, "label": "import_jobs 表" },
+        { "path": "apps/api/src/command-queue.ts", "line": 70, "end_line": 74, "label": "mutation_commands 表" }
+      ]
+    },
+    {
+      "id": "direct",
+      "type": "backend",
+      "label": "直连接收器",
+      "sublabel": "DirectSyncImport",
+      "tag": "BEGIN IMMEDIATE",
+      "stage": 2,
+      "row": 1,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "apps/api/src/direct-sync-plan.ts", "line": 47, "end_line": 56, "label": "车道判定" },
+        { "path": "apps/api/src/direct-sync-ingest.ts", "line": 413, "end_line": 469, "label": "事务入口与解析" },
+        { "path": "apps/api/src/server.ts", "line": 465, "end_line": 491, "label": "ImportWorker 装配" }
+      ]
+    },
+    {
+      "id": "facts",
+      "type": "database",
+      "label": "rai.sqlite 事实",
+      "sublabel": "health_records",
+      "tag": "同一 rai.sqlite",
+      "stage": 2,
+      "row": 2,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "apps/api/src/direct-sync-ingest.ts", "line": 470, "end_line": 524, "label": "归一 + 登记分析任务" },
+        { "path": "apps/api/src/direct-sync-ingest.ts", "line": 575, "end_line": 587, "label": "manifest + 回执" },
+        { "path": "packages/storage-sqlite/src/database.ts", "line": 140, "end_line": 162, "label": "health_records / workouts 表" }
+      ]
+    },
+    {
+      "id": "derive",
+      "type": "backend",
+      "label": "派生计算",
+      "sublabel": "RecomputePipeline",
+      "tag": "worker 线程 + 租约",
+      "stage": 2,
+      "row": 3,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "packages/application/src/services/recompute-pipeline.ts", "line": 195, "end_line": 236, "label": "特征→负荷→回放" },
+        { "path": "packages/application/src/services/recompute-pipeline.ts", "line": 451, "end_line": 453, "label": "直连分析复用同一管线" },
+        { "path": "apps/api/src/recompute-worker.ts", "line": 63, "end_line": 84, "label": "分析 worker 线程" }
+      ]
+    },
+    {
+      "id": "runs",
+      "type": "database",
+      "label": "派生 run 与指针",
+      "sublabel": "active_model_run",
+      "tag": "同一 rai.sqlite",
+      "stage": 3,
+      "row": 1,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "packages/storage-sqlite/src/model-run-repository.ts", "line": 212, "end_line": 218, "label": "指针 upsert" },
+        { "path": "packages/storage-sqlite/src/database.ts", "line": 483, "end_line": 499, "label": "recompute_jobs 状态" },
+        { "path": "packages/application/src/services/recompute-pipeline.ts", "line": 2152, "end_line": 2160, "label": "领域快照" }
+      ]
+    },
+    {
+      "id": "read",
+      "type": "backend",
+      "label": "RaiReadStore",
+      "sublabel": "只读租约连接",
+      "tag": "GET /v1/…",
+      "stage": 3,
+      "row": 2,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "apps/api/src/read-store-manager.ts", "line": 52, "end_line": 64, "label": "读租约 use()" },
+        { "path": "apps/api/src/data.ts", "line": 217, "end_line": 243, "label": "只读打开主库" },
+        { "path": "apps/api/src/server.ts", "line": 1290, "end_line": 1296, "label": "/v1/mobile/today" }
+      ]
+    },
+    {
+      "id": "clients",
+      "type": "frontend",
+      "label": "Web / iOS",
+      "sublabel": "React · SwiftUI",
+      "tag": "读结果",
+      "stage": 3,
+      "row": 3,
+      "width": 96,
+      "height": 58,
+      "sources": [
+        { "path": "apps/ios/RAI/APIClient.swift", "line": 104, "end_line": 122, "label": "iOS 读端点" },
+        { "path": "apps/web/src/pages/DashboardPage.tsx", "line": 26, "end_line": 31, "label": "Web 读端点" }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "f-upload",
+      "from": "hk",
+      "to": "api",
+      "label": "/v1/imports/uploads",
+      "classification": "POST multipart ZIP",
+      "variant": "emphasis",
+      "labelAt": [207.5, 261]
+    },
+    {
+      "id": "f-job-record",
+      "from": "api",
+      "to": "runtime",
+      "label": "写入 import_jobs",
+      "classification": "durable",
+      "variant": "default",
+      "labelAt": [315, 375]
+    },
+    {
+      "id": "f-dispatch",
+      "from": "api",
+      "to": "direct",
+      "label": "worker 线程执行",
+      "classification": "数据库任务",
+      "variant": "emphasis",
+      "labelAt": [422.5, 261]
+    },
+    {
+      "id": "f-commit",
+      "from": "direct",
+      "to": "facts",
+      "label": "单事务提交",
+      "classification": "事实 + 任务",
+      "variant": "emphasis",
+      "labelAt": [530, 328]
+    },
+    {
+      "id": "f-read-facts",
+      "from": "facts",
+      "to": "derive",
+      "label": "读任务与事实",
+      "classification": "read-only",
+      "variant": "emphasis",
+      "labelAt": [530, 442]
+    },
+    {
+      "id": "f-publish",
+      "from": "derive",
+      "to": "runs",
+      "label": "写快照与指针",
+      "classification": "active_model_run",
+      "variant": "emphasis"
+    },
+    {
+      "id": "f-read-runs",
+      "from": "runs",
+      "to": "read",
+      "label": "只读快照",
+      "classification": "active_* 视图",
+      "variant": "default",
+      "labelAt": [745, 328]
+    },
+    {
+      "id": "f-dto",
+      "from": "read",
+      "to": "clients",
+      "label": "只读 JSON DTO",
+      "classification": "HTTP GET",
+      "variant": "default",
+      "labelAt": [745, 442]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "默认主链路：直连事务车道",
+      "items": [
+        "planDirectSyncLane 只在 queued、fastPath 开启、engine=typescript、版本一致、载荷 preserveAbsent、主库已存在时返回 direct（apps/api/src/direct-sync-plan.ts:47-56）",
+        "RAI_IMPORT_DATA_ONLY_FAST_PATH 默认 \"1\"，所以直连车道是默认路径而不是实验开关（apps/api/src/server.ts:168-169）",
+        "直连在 BEGIN IMMEDIATE 的同一个事务里落事实、账本、recompute_jobs 任务与 import_manifest 回执，然后一次 COMMIT（apps/api/src/direct-sync-ingest.ts:448-469、509-524、584-587）",
+        "解析与归一在同一事务内联执行：parseAppleHealthXml → importGpxRoutes → canonicalizeRunningWorkouts → canonicalizeNightsForWindow（apps/api/src/direct-sync-ingest.ts:461-488）",
+        "分析交给 worker 线程：runDirectSyncAnalysis 直接复用 runFullRecompute 的同一套计算与发布 gate（packages/application/src/services/recompute-pipeline.ts:451-453）"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "派生计算与发布粒度",
+      "items": [
+        "runFullRecompute 顺序执行 feature_extraction → training_metrics → model_replay，并分别落 feature_runs / training_metric_runs / model_runs（recompute-pipeline.ts:195-236）",
+        "特征写入 workout_features，携带 workout-feature-v4 payload 与 eligibility/coverage（recompute-pipeline.ts:1109-1166）",
+        "发布是一次指针 upsert：active_model_run(singleton=1) → model_run_id，并清掉 active prediction model（packages/storage-sqlite/src/model-run-repository.ts:212-218、recompute-pipeline.ts:2371-2383）",
+        "读端只通过 active_ability_assessments / active_daily_ability_snapshots 看到已发布 run，未发布的 run 不可见（packages/storage-sqlite/src/database.ts:545-553）",
+        "recompute_jobs.status 的取值域是 queued / running / succeeded / failed / cancelled（packages/storage-sqlite/src/database.ts:483-499）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "回退车道：候选库 + rename 换库",
+      "items": [
+        "直连拒收时回退到维护路径：createCurrentBackup 生成 var/backups/rai.before-web-import.<jobId>.sqlite，再 copyFile 成 var/rai.importing.<jobId>.sqlite（apps/api/src/import-worker.ts:626-645）",
+        "解析 CLI 以 --owned-candidate 只允许写这个私有候选库，随后跑 recompute CLI（apps/api/src/import-worker.ts:654-682、739-753）",
+        "activateDatabase 先 readStores.beginReplace() 排空读租约，再 rename 候选库为 var/rai.sqlite 并跑一次 quick_check；失败用回滚点恢复（apps/api/src/import-worker.ts:1696-1735）",
+        "该路径仍是首次导入与大包分批的路径；启用 Rust 引擎后直连被否决（engine_rust），只能走它（apps/api/src/import-worker.ts:632-635、apps/api/src/direct-sync-plan.ts:51）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "可选件与明确未知",
+      "items": [
+        "Rust 数据引擎默认关闭：importEngine() 默认返回 typescript，只有 --engine rust 或 RAI_IMPORT_ENGINE=rust 才启用（packages/health-export-parser/src/native-worker.ts:69-72）",
+        "启用 rust 且 fallback=none 时找不到二进制会让 server.ts 启动即抛错，不会静默退回 TS（apps/api/src/server.ts:133-136）",
+        "Rust 的 apply-records 只写私有候选库且要带一次性 permit，主库永远不由它直接写（native-worker.ts:122-124、native-record-writer.ts:76-87）",
+        "预测模型是独立支路：Python 训练产出 model.onnx / feature-schema.json / evaluation.json 并按 SHA-256 校验，再由 active_prediction_model 指针发布（packages/application/src/prediction-training-runner.ts:550-560、prediction-model-service.ts:824-833）",
+        "UNKNOWN：仓库不含部署环境变量记录，无法从源码判定线上是否设置 RAI_IMPORT_ENGINE 或 RAI_IMPORT_DATA_ONLY_FAST_PATH，因此两条车道的线上实际占比无法证明"
+      ]
+    }
+  ]
+}

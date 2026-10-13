@@ -1,0 +1,260 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RAI 边界与风险审计（2026-10-13 快照）",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": ".archify/rai-audit-20261013-160439/architecture-risks/architecture-risks.html",
+    "repository": {
+      "url": "https://gitee.com/tpandmr/running.git",
+      "provider": "gitee",
+      "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3"
+    }
+  },
+  "components": [
+    {
+      "id": "client",
+      "type": "external",
+      "label": "本地 / 公网调用方",
+      "sublabel": "Web SPA · iOS · CLI",
+      "tag": "ZIP ≤ 4 GiB",
+      "pos": [20, 100],
+      "size": [150, 74],
+      "sources": [
+        { "path": "apps/api/src/routes/import-routes.ts", "line": 38, "end_line": 51 },
+        { "path": "apps/api/src/import-sources.ts", "line": 98, "end_line": 106 },
+        { "path": "apps/api/src/local-request-security.ts", "line": 116, "end_line": 135 }
+      ]
+    },
+    {
+      "id": "security",
+      "type": "security",
+      "label": "本机请求闸门",
+      "sublabel": "Bearer · Host · Origin",
+      "tag": "公读白名单",
+      "pos": [20, 240],
+      "size": [150, 74],
+      "sources": [
+        { "path": "apps/api/src/local-request-security.ts", "line": 137, "end_line": 172 },
+        { "path": "apps/api/src/local-request-security.ts", "line": 57, "end_line": 68 }
+      ]
+    },
+    {
+      "id": "mutation",
+      "type": "backend",
+      "label": "MutationCoordinator",
+      "sublabel": "内存单写者 · 409",
+      "tag": "acquireWhenAvailable 2 s",
+      "pos": [300, 380],
+      "size": [170, 74],
+      "sources": [
+        { "path": "apps/api/src/mutation-coordinator.ts", "line": 11, "end_line": 37 },
+        { "path": "apps/api/src/server.ts", "line": 426, "end_line": 435 }
+      ]
+    },
+    {
+      "id": "admission",
+      "type": "backend",
+      "label": "TaskAdmissionScheduler",
+      "sublabel": "唯一 CPU 重写者 · FIFO",
+      "tag": "blockUntilRestart",
+      "pos": [300, 520],
+      "size": [170, 74],
+      "sources": [
+        { "path": "apps/api/src/task-admission.ts", "line": 9, "end_line": 59 },
+        { "path": "apps/api/src/server.ts", "line": 412, "end_line": 414 },
+        { "path": "apps/api/src/server.ts", "line": 422, "end_line": 424 }
+      ]
+    },
+    {
+      "id": "identity",
+      "type": "backend",
+      "label": "载荷身份锚点",
+      "sublabel": "sha256 + dataset_version",
+      "tag": "identityAlgorithm 指纹",
+      "pos": [520, 60],
+      "size": [220, 74],
+      "sources": [
+        { "path": "apps/api/src/import-payload-identity.ts", "line": 120, "end_line": 136 },
+        { "path": "apps/api/src/import-payload-identity.ts", "line": 204, "end_line": 223 },
+        { "path": "packages/health-export-parser/src/identity-algorithm.ts", "line": 127, "end_line": 137 }
+      ]
+    },
+    {
+      "id": "importworker",
+      "type": "backend",
+      "label": "ImportWorker 双车道",
+      "sublabel": "候选 rename · 直连同库事务",
+      "tag": "activation_verify",
+      "pos": [520, 180],
+      "size": [230, 92],
+      "sources": [
+        { "path": "apps/api/src/import-worker.ts", "line": 1678, "end_line": 1740 },
+        { "path": "apps/api/src/import-publication.ts", "line": 47, "end_line": 118 },
+        { "path": "apps/api/src/direct-sync-ingest.ts", "line": 426, "end_line": 468 }
+      ]
+    },
+    {
+      "id": "cmdqueue",
+      "type": "backend",
+      "label": "CommandQueue 持久队列",
+      "sublabel": "runtime.sqlite · 幂等键",
+      "tag": "容量 16 · 退避 30 s",
+      "pos": [520, 320],
+      "size": [230, 84],
+      "sources": [
+        { "path": "apps/api/src/command-queue.ts", "line": 107, "end_line": 146 },
+        { "path": "apps/api/src/command-queue.ts", "line": 177, "end_line": 230 }
+      ]
+    },
+    {
+      "id": "lease",
+      "type": "backend",
+      "label": "分析写租约",
+      "sublabel": "Atomics 序号 · 共享内存",
+      "tag": "超时 30 s 失败开放",
+      "pos": [520, 450],
+      "size": [250, 84],
+      "sources": [
+        { "path": "apps/api/src/write-lease.ts", "line": 78, "end_line": 108 },
+        { "path": "apps/api/src/write-lease.ts", "line": 269, "end_line": 311 },
+        { "path": "apps/api/src/recompute-thread.ts", "line": 6, "end_line": 23 }
+      ]
+    },
+    {
+      "id": "publishlock",
+      "type": "security",
+      "label": "发布锁 .import.lock",
+      "sublabel": "hard-link 原子创建",
+      "tag": "API 启动即持有",
+      "pos": [860, 60],
+      "size": [170, 74],
+      "sources": [
+        { "path": "packages/storage-sqlite/src/publication-lock.ts", "line": 160, "end_line": 186 },
+        { "path": "apps/api/src/server.ts", "line": 170, "end_line": 177 },
+        { "path": "packages/storage-sqlite/src/publication-lock.ts", "line": 195, "end_line": 213 }
+      ]
+    },
+    {
+      "id": "maindb",
+      "type": "database",
+      "label": "主库 rai.sqlite",
+      "sublabel": "import_manifest 账本",
+      "tag": "dataset_version",
+      "pos": [860, 210],
+      "size": [170, 96],
+      "sources": [
+        { "path": "apps/api/src/import-publication.ts", "line": 12, "end_line": 26 },
+        { "path": "apps/api/src/direct-sync-ingest.ts", "line": 584, "end_line": 613 },
+        { "path": "apps/api/src/import-payload-identity.ts", "line": 62, "end_line": 66 }
+      ]
+    },
+    {
+      "id": "maintenance",
+      "type": "backend",
+      "label": "恢复台账与回收",
+      "sublabel": "restore-journal · reclaim",
+      "tag": "显式跳过目录",
+      "pos": [860, 380],
+      "size": [170, 84],
+      "sources": [
+        { "path": "apps/api/src/maintenance.ts", "line": 105, "end_line": 109 },
+        { "path": "apps/api/src/maintenance.ts", "line": 729, "end_line": 768 },
+        { "path": "apps/api/src/restore-journal.ts", "line": 24, "end_line": 63 }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "进程内单写者边界（内存态，不跨进程）",
+      "wraps": ["mutation", "admission", "identity", "importworker", "cmdqueue", "lease"]
+    },
+    {
+      "kind": "region",
+      "label": "持久化边界 var/",
+      "wraps": ["publishlock", "maindb", "maintenance"]
+    }
+  ],
+  "connections": [
+    { "id": "http-in", "from": "client", "to": "security", "label": "Bearer /v1", "variant": "security" },
+    { "id": "write-permit", "from": "security", "to": "mutation", "label": "写路由取许可", "variant": "emphasis" },
+    { "id": "permit-reuse", "from": "admission", "to": "mutation", "label": "复用同一许可", "variant": "emphasis" },
+    { "id": "identity-preflight", "from": "identity", "to": "importworker", "label": "锚点 / 契约判定", "variant": "dashed" },
+    { "id": "import-admit", "from": "importworker", "to": "admission", "label": "scheduleNext 取准入", "fromSide": "left", "toSide": "right" },
+    { "id": "queue-admit", "from": "cmdqueue", "to": "admission", "label": "resume 取准入", "variant": "dashed", "fromSide": "left", "toSide": "right" },
+    { "id": "lease-admit", "from": "lease", "to": "admission", "label": "主线程授权", "variant": "dashed", "fromSide": "left", "toSide": "right" },
+    { "id": "publish-candidate", "from": "importworker", "to": "maindb", "label": "rename 换库 + 读校验", "variant": "emphasis", "fromSide": "right", "toSide": "left" },
+    { "id": "queue-txn", "from": "cmdqueue", "to": "maindb", "label": "BEGIN IMMEDIATE 事务", "fromSide": "right", "toSide": "left" },
+    { "id": "lease-writes", "from": "lease", "to": "maindb", "label": "写语句闸门（可失败开放）", "variant": "dashed", "fromSide": "right", "toSide": "bottom" },
+    { "id": "process-lock", "from": "publishlock", "to": "maindb", "label": "跨进程互斥", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "id": "maintenance-db", "from": "maintenance", "to": "maindb", "label": "恢复 / 删除 / 备份", "variant": "dashed", "fromSide": "top", "toSide": "bottom" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "已保护（A）：单写者与准入",
+      "items": [
+        "TaskAdmissionScheduler 把 CPU 重写者限为唯一：waiting 为 FIFO 集合，blocked / active / controls 任一非空都不放行（apps/api/src/task-admission.ts:9-59）",
+        "写路由经 MutationCoordinator.acquireWhenAvailable 取许可，冲突抛 409 mutation_conflict，最长等 2 s（apps/api/src/mutation-coordinator.ts:14-37；apps/api/src/server.ts:426-435）",
+        "发布恢复未完成时 blockUntilRestart 让 databaseRequiredMutationRoutes 直接 409，而不是排队等待（apps/api/src/server.ts:412-414；apps/api/src/server.ts:481）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "缺口（A）：写租约失败开放",
+      "items": [
+        "worker 侧等待授权超过 LEASE_DEFAULT_TIMEOUT_MS（30 s）时撤回请求、记诊断、**继续写**——该窗口的写不受单写者许可保护（apps/api/src/write-lease.ts:87-103；apps/api/src/write-lease.ts:35-36）",
+        "stats.timeouts 的注释写着「非 0 就是异常」，但代码路径只有一个 onTimeout 回调（默认写 stderr），没有任何阻断写或降级为只读的分支（apps/api/src/write-lease.ts:49-50；apps/api/src/write-lease.ts:96-100）",
+        "进程内并非只有一把锁：sourceMutations 是**第二个独立** MutationCoordinator，weeklyPlanGenerationGate 是独立 TryAcquireGate，二者与 mutationCoordinator 无任何组合关系（apps/api/src/server.ts:372-374；apps/api/src/server.ts:1390；apps/api/src/routes/import-routes.ts:17）"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "缺口（A）：无锁写者与锁残留",
+      "items": [
+        "npm run data:recompute / data:refresh-snapshots 直接 RaiDatabase.open(databasePath) 再 runNextJob() 写主库；packages/application/src/cli.ts 全文没有任何 lock 或 acquireDatabasePublicationLock（package.json:60；package.json:69；packages/application/src/cli.ts:39；packages/application/src/cli.ts:57）",
+        "残留回收正则只匹配 .replaced.<uuid> 与 .importing.*（apps/api/src/maintenance.ts:105-106），且显式跳过目录 !info.isFile()（apps/api/src/maintenance.ts:750）——因此 .import.lock.stale.<id> 目录与 .import.lock.candidate.<uuid> 都不在回收范围内",
+        "全仓搜索 import.lock.candidate / import.lock.stale 只命中 publication-lock.ts 自身；stale 墓碑用 mkdirSync 建**目录**再 rename 进 owner.json，没有任何清理者（packages/storage-sqlite/src/publication-lock.ts:177；packages/storage-sqlite/src/publication-lock.ts:203；packages/storage-sqlite/src/publication-lock.ts:212-213、:222-238）",
+        "观测（不是证明）：var/ 现有 80 个 rai.sqlite.import.lock.stale.* 目录与 12 个 rai.sqlite.import.lock.candidate.<uuid> 文件，与上述代码判断一致"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "已保护（A）：原子发布与回滚",
+      "items": [
+        "ImportPublicationJournal 先把 rename 意图（phase=prepared）写进 runtime.sqlite，换库成功后才 commit；recover() 用 quick_check + 回执判定回滚或抛「需要人工恢复」，绝不凭猜测删文件（apps/api/src/import-publication.ts:47-118）",
+        "激活顺序不可跳步：checkpoint 主库 → 移开 sidecar → 主库 rename 到 var/backups/rai.import-rollback.<uuid>.sqlite → 安装候选 → 读校验；任一步失败走 restoreImportDatabase（apps/api/src/import-worker.ts:1716-1729；apps/api/src/import-worker.ts:1787-1824）",
+        "发布锁用 writeFileSync(flag:'wx') 写候选 + linkSync 原子发布 owner 记录，共享锁路径上永远不会出现半写记录（packages/storage-sqlite/src/publication-lock.ts:176-186）"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "已保护（A）：幂等与提交前断言",
+      "items": [
+        "CommandQueue 幂等键 = sha256([scope, idempotencyKey])，内容指纹 = sha256(canonical({kind,payload}))；同键不同内容抛 409 command_content_mismatch，容量 16（apps/api/src/command-queue.ts:107-123）",
+        "业务效果与幂等回执共用**一个** BEGIN IMMEDIATE 事务，回执写 import_manifest['rai.applied-command.<id>']；重放直接返回旧结果，不重复落库（apps/api/src/command-queue.ts:184-219）",
+        "直连车道提交前回读三件事：未入账本的写、分析任务绑定、回执一致性；任一条不成立即抛错并 rollbackCallerTransaction（apps/api/src/direct-sync-ingest.ts:589-613）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "缺口（A）：身份锚点与增量语义",
+      "items": [
+        "preserveAbsent 是「缺省即删除」的唯一开关。直连车道用返回类型写死 true，并在运行期再拒绝三个快照字段——是类型 + 运行期双闸，不是数据库约束（apps/api/src/direct-sync-plan.ts:47-56、:68-96；apps/api/src/data-only-import.ts:97-99）",
+        "锚点短路只比对 sha256 与 dataset_version；CONTRACT_VERSION 仍是**人工**判据，模块注释承认「没有函数能算出它」（apps/api/src/import-payload-identity.ts:50-59、:120-136）",
+        "身份算法指纹只覆盖 IDENTITY_ALGORITHM_PROBES 列出的探针；探针之外的行为变化不会移动指纹，也就不会让锚点失效（packages/health-export-parser/src/identity-algorithm.ts:50-137）"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "文档与源码不符（完整对照见 DOC-SOURCE-DIFF.md）",
+      "items": [
+        "docs/DATA_PIPELINE.md:55 写「migrations 1–32」；源码实际到 version 36（packages/storage-sqlite/src/database.ts:1677）",
+        "docs/ARCHITECTURE.md:61 声称候选必须通过「完整性、数据代次与模型 gate」才可切换；activateDatabase 的实际门槛只有 checkpoint + 读校验 + 回滚，代次 gate 只在直连车道的分析任务绑定里、模型 gate 只在重算发布里（apps/api/src/import-worker.ts:1702-1729；apps/api/src/direct-sync-ingest.ts:518-524；packages/application/src/services/recompute-pipeline.ts:314）",
+        "docs/ARCHITECTURE.md:59 的「写命令具备 generation 约束」对 CommandQueue 不成立：队列只有 revision 与幂等，没有 generation 判据（apps/api/src/command-queue.ts:177-219）"
+      ]
+    }
+  ]
+}

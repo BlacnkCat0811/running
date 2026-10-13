@@ -1,0 +1,1243 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "startedAt": "2026-10-13T08:49:06.516Z",
+  "specification": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\candidate.json",
+    "sha256": "04d9c37d42349efe32d5bf83b381cd743881fb8e1ddcc75990f9a7f46a6804d5",
+    "bytes": 16115
+  },
+  "artifact": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+    "sha256": "a4fa96738734fd42ac4a66885f78dd3cc8c6168abb90d4640e08547aaf914743",
+    "bytes": 791213
+  },
+  "stages": {
+    "validate": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": null,
+      "execution": "embedded-in-deliver",
+      "command": [
+        "D:\\nodejs\\node.exe",
+        "C:\\Users\\Administrator\\.dsh\\profiles\\desktop\\node_modules\\@tt-a1i\\archify-dsh\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "architecture",
+        "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\candidate.json",
+        "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "D:\\running",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": true,
+        "command": "validate",
+        "specification": {
+          "sha256": "04d9c37d42349efe32d5bf83b381cd743881fb8e1ddcc75990f9a7f46a6804d5",
+          "bytes": 16115
+        },
+        "validation": {
+          "checksPassed": 9,
+          "checkCount": 9,
+          "compositionProfile": "showcase",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 0
+        }
+      }
+    },
+    "deliver": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 2046,
+      "command": [
+        "D:\\nodejs\\node.exe",
+        "C:\\Users\\Administrator\\.dsh\\profiles\\desktop\\node_modules\\@tt-a1i\\archify-dsh\\skills\\archify\\bin\\archify.mjs",
+        "deliver",
+        "architecture",
+        "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\candidate.json",
+        "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+        "--quality",
+        "showcase",
+        "--repo-root",
+        "D:\\running",
+        "--json"
+      ],
+      "receipt": {
+        "schemaVersion": 1,
+        "receiptId": "d7f22a91-7133-4df9-a188-9c4fed721f9f",
+        "ok": true,
+        "command": "deliver",
+        "type": "architecture",
+        "input": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\candidate.json",
+        "output": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+        "specification": {
+          "sha256": "04d9c37d42349efe32d5bf83b381cd743881fb8e1ddcc75990f9a7f46a6804d5",
+          "bytes": 16115
+        },
+        "artifact": {
+          "sha256": "a4fa96738734fd42ac4a66885f78dd3cc8c6168abb90d4640e08547aaf914743",
+          "bytes": 791213
+        },
+        "validation": {
+          "checksPassed": 9,
+          "checkCount": 9,
+          "compositionProfile": "showcase",
+          "compositionStatus": "pass",
+          "errors": 0,
+          "warnings": 0
+        },
+        "evidence": {
+          "verified": true,
+          "repository": "https://gitee.com/tpandmr/running",
+          "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3",
+          "references": 35
+        },
+        "update": {
+          "status": "unavailable",
+          "installedVersion": null,
+          "availableVersion": null,
+          "releaseNotes": null,
+          "checkedAt": null,
+          "source": null,
+          "noticeRequired": false,
+          "noticeText": null,
+          "reason": "disabled"
+        }
+      }
+    },
+    "check": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 286,
+      "command": [
+        "D:\\nodejs\\node.exe",
+        "C:\\Users\\Administrator\\.dsh\\profiles\\desktop\\node_modules\\@tt-a1i\\archify-dsh\\skills\\archify\\bin\\archify.mjs",
+        "check",
+        "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+        "--require-provenance"
+      ],
+      "receipt": {
+        "ok": true,
+        "file": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+        "artifact": {
+          "sha256": "a4fa96738734fd42ac4a66885f78dd3cc8c6168abb90d4640e08547aaf914743",
+          "bytes": 791213
+        },
+        "checks": [
+          {
+            "name": "single_svg",
+            "ok": true,
+            "details": [
+              "found 1 <svg> block(s)"
+            ]
+          },
+          {
+            "name": "finite_svg",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "orthogonal_arrows",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "label_route_clearance",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "relationship_crossings",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "relationship_corridors",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "container_border_runs",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "route_rhythm",
+            "ok": true,
+            "details": []
+          },
+          {
+            "name": "legend_clearance",
+            "ok": true,
+            "details": []
+          }
+        ],
+        "composition": {
+          "schemaVersion": 1,
+          "profile": "showcase",
+          "status": "pass",
+          "summary": {
+            "errors": 0,
+            "warnings": 0
+          },
+          "metrics": {
+            "properCrossings": 0,
+            "resolvedCrossovers": 8,
+            "ambiguousCorridors": 0,
+            "arrowheadCollisions": 0,
+            "containerBorderRuns": 0,
+            "labelRouteClearanceIssues": 0,
+            "labelCanvasOverflowIssues": 0,
+            "minLabelRouteClearance": 5,
+            "desktopReadabilityIssues": 0,
+            "viewportHeightIssues": 0,
+            "minProjectedNodeTextPx": 6.726943942133816,
+            "maxBends": 4,
+            "routesOverSuggestedBends": 4,
+            "maxStretch": 1.297,
+            "routesOverSuggestedStretch": 0,
+            "minSegmentPx": 24,
+            "minInteriorSegmentPx": 34,
+            "shortSegmentCount": 0,
+            "shortEndpointSegmentCount": 0,
+            "shortInteriorSegmentCount": 0,
+            "microSegmentCount": 0
+          },
+          "suggestedLimits": {
+            "bendsPerRelationship": 2,
+            "stretch": 1.35,
+            "segmentPx": 16,
+            "microSegmentPx": 8
+          },
+          "routeReview": {
+            "crossings": [
+              {
+                "left": {
+                  "id": "import_batch",
+                  "from": "import_write",
+                  "to": "main_jobs",
+                  "label": "写 import_batches",
+                  "collectionIndex": 1,
+                  "artifactIndex": 2
+                },
+                "right": {
+                  "id": "read_facts",
+                  "from": "main_facts",
+                  "to": "read_path",
+                  "label": "读 read/* 仓储",
+                  "collectionIndex": 11,
+                  "artifactIndex": 12
+                },
+                "point": [
+                  57,
+                  996
+                ]
+              },
+              {
+                "left": {
+                  "id": "import_fallback",
+                  "from": "import_write",
+                  "to": "candidate_files",
+                  "label": "回退：写候选库",
+                  "collectionIndex": 2,
+                  "artifactIndex": 3
+                },
+                "right": {
+                  "id": "req_runtime",
+                  "from": "req_write",
+                  "to": "runtime_db",
+                  "label": "写 命令队列",
+                  "collectionIndex": 5,
+                  "artifactIndex": 6
+                },
+                "point": [
+                  664,
+                  227.99999999999997
+                ]
+              },
+              {
+                "left": {
+                  "id": "import_fallback",
+                  "from": "import_write",
+                  "to": "candidate_files",
+                  "label": "回退：写候选库",
+                  "collectionIndex": 2,
+                  "artifactIndex": 3
+                },
+                "right": {
+                  "id": "req_control",
+                  "from": "req_write",
+                  "to": "control_db",
+                  "label": "写 mobile_goals",
+                  "collectionIndex": 6,
+                  "artifactIndex": 7
+                },
+                "point": [
+                  776,
+                  471.1
+                ]
+              },
+              {
+                "left": {
+                  "id": "analysis_derived",
+                  "from": "analysis_write",
+                  "to": "main_derived",
+                  "label": "写 model_runs",
+                  "collectionIndex": 7,
+                  "artifactIndex": 8
+                },
+                "right": {
+                  "id": "read_derived",
+                  "from": "main_derived",
+                  "to": "read_path",
+                  "label": "读 分析结果",
+                  "collectionIndex": 12,
+                  "artifactIndex": 13
+                },
+                "point": [
+                  436.00000000000006,
+                  612
+                ],
+                "sharedNode": "main_derived"
+              },
+              {
+                "left": {
+                  "id": "analysis_publish",
+                  "from": "analysis_write",
+                  "to": "main_publish",
+                  "label": "写 门禁 / 发布包",
+                  "collectionIndex": 8,
+                  "artifactIndex": 9
+                },
+                "right": {
+                  "id": "read_derived",
+                  "from": "main_derived",
+                  "to": "read_path",
+                  "label": "读 分析结果",
+                  "collectionIndex": 12,
+                  "artifactIndex": 13
+                },
+                "point": [
+                  436,
+                  753.95
+                ]
+              },
+              {
+                "left": {
+                  "id": "analysis_claims",
+                  "from": "main_jobs",
+                  "to": "analysis_write",
+                  "label": "读 queued 任务",
+                  "collectionIndex": 10,
+                  "artifactIndex": 11
+                },
+                "right": {
+                  "id": "read_facts",
+                  "from": "main_facts",
+                  "to": "read_path",
+                  "label": "读 read/* 仓储",
+                  "collectionIndex": 11,
+                  "artifactIndex": 12
+                },
+                "point": [
+                  344,
+                  996
+                ]
+              },
+              {
+                "left": {
+                  "id": "analysis_claims",
+                  "from": "main_jobs",
+                  "to": "analysis_write",
+                  "label": "读 queued 任务",
+                  "collectionIndex": 10,
+                  "artifactIndex": 11
+                },
+                "right": {
+                  "id": "read_derived",
+                  "from": "main_derived",
+                  "to": "read_path",
+                  "label": "读 分析结果",
+                  "collectionIndex": 12,
+                  "artifactIndex": 13
+                },
+                "point": [
+                  436,
+                  769
+                ]
+              },
+              {
+                "left": {
+                  "id": "read_facts",
+                  "from": "main_facts",
+                  "to": "read_path",
+                  "label": "读 read/* 仓储",
+                  "collectionIndex": 11,
+                  "artifactIndex": 12
+                },
+                "right": {
+                  "id": "read_derived",
+                  "from": "main_derived",
+                  "to": "read_path",
+                  "label": "读 分析结果",
+                  "collectionIndex": 12,
+                  "artifactIndex": 13
+                },
+                "point": [
+                  436,
+                  996
+                ],
+                "sharedNode": "read_path"
+              }
+            ],
+            "detours": [
+              {
+                "relationship": {
+                  "id": "import_batch",
+                  "from": "import_write",
+                  "to": "main_jobs",
+                  "label": "写 import_batches",
+                  "collectionIndex": 1,
+                  "artifactIndex": 2
+                },
+                "bends": 4,
+                "stretch": 1.297
+              },
+              {
+                "relationship": {
+                  "id": "import_fallback",
+                  "from": "import_write",
+                  "to": "candidate_files",
+                  "label": "回退：写候选库",
+                  "collectionIndex": 2,
+                  "artifactIndex": 3
+                },
+                "bends": 3,
+                "stretch": 1
+              },
+              {
+                "relationship": {
+                  "id": "read_facts",
+                  "from": "main_facts",
+                  "to": "read_path",
+                  "label": "读 read/* 仓储",
+                  "collectionIndex": 11,
+                  "artifactIndex": 12
+                },
+                "bends": 3,
+                "stretch": 1.035
+              },
+              {
+                "relationship": {
+                  "id": "read_derived",
+                  "from": "main_derived",
+                  "to": "read_path",
+                  "label": "读 分析结果",
+                  "collectionIndex": 12,
+                  "artifactIndex": 13
+                },
+                "bends": 3,
+                "stretch": 1
+              }
+            ]
+          },
+          "leadingSpace": {
+            "measured": true,
+            "emptyTopPx": 94,
+            "emptyTopRatio": 0.079,
+            "occupiedTop": 94,
+            "viewBoxTop": 0,
+            "canvasHeight": 1196,
+            "typicalNodeHeight": 84,
+            "reviewSuggested": false
+          },
+          "desktopReadability": {
+            "budgetBasis": "legacy-930",
+            "readerContract": "declared-wide-v1",
+            "availableDiagramWidth": 930,
+            "actualBudgetPx": 930,
+            "limit": "legacy",
+            "requestedTargetPx": 7.5,
+            "requestedTargetMet": false,
+            "hardFloorPx": 6,
+            "hardFloorMet": true,
+            "minimumOwner": {
+              "kind": "edge",
+              "id": "import_direct_lane",
+              "from": "import_write",
+              "to": "main_facts"
+            },
+            "minimumSourceTextPx": 8,
+            "minimumProjectedTextPx": 6.726943942133816,
+            "semanticTextCount": 42
+          },
+          "issues": []
+        },
+        "provenance": "current",
+        "deliveryReceiptId": "d7f22a91-7133-4df9-a188-9c4fed721f9f"
+      }
+    },
+    "browser-check": {
+      "status": "pass",
+      "exitCode": 0,
+      "durationMs": 2649,
+      "command": [
+        "D:\\nodejs\\node.exe",
+        "C:\\Users\\Administrator\\.dsh\\profiles\\desktop\\node_modules\\@tt-a1i\\archify-dsh\\skills\\archify\\bin\\archify.mjs",
+        "browser-check",
+        "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+        "--json",
+        "--require-provenance"
+      ],
+      "execution": "in-process",
+      "receipt": {
+        "schemaVersion": 1,
+        "ok": true,
+        "command": "browser-check",
+        "evidenceKind": "automated-browser",
+        "status": "pass",
+        "visualReview": "not-requested",
+        "provenance": "current",
+        "deliveryReceiptId": "d7f22a91-7133-4df9-a188-9c4fed721f9f",
+        "artifact": {
+          "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+          "sha256": "a4fa96738734fd42ac4a66885f78dd3cc8c6168abb90d4640e08547aaf914743",
+          "bytes": 791213
+        },
+        "state": {
+          "detail": "read",
+          "motion": "still"
+        },
+        "chrome": {
+          "status": "available",
+          "executable": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+        },
+        "diagnostics": [],
+        "containment": {
+          "status": "pass",
+          "policy": "fit-or-reader-declared-readable-vertical-scroll",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 1190,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 68,
+                "diagramChromePx": 78,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1256,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 76,
+                "diagramChromePx": 84,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1256,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 76,
+                "diagramChromePx": 84,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 1036,
+              "diagramWidth": 986,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 84,
+                "diagramChromePx": 94,
+                "svgPx": 1066,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 7.132007233273056,
+              "minimumProjectedNonEdgeTextPx": 7.759359721385038,
+              "minimumProjectedEdgeTextPx": 7.132007233273056,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "themeStates": {
+          "status": "pass",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "requestedTheme": "light",
+              "resolvedTheme": "light",
+              "ok": true
+            },
+            {
+              "width": 1440,
+              "height": 900,
+              "requestedTheme": "dark",
+              "resolvedTheme": "dark",
+              "ok": true
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "requestedTheme": "dark",
+              "resolvedTheme": "dark",
+              "ok": true
+            }
+          ]
+        },
+        "readability": {
+          "status": "pass",
+          "minimumProjectedNodeTextPx": 6,
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 1190,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 68,
+                "diagramChromePx": 78,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1256,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 76,
+                "diagramChromePx": 84,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1256,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 76,
+                "diagramChromePx": 84,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 1036,
+              "diagramWidth": 986,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 84,
+                "diagramChromePx": 94,
+                "svgPx": 1066,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 7.132007233273056,
+              "minimumProjectedNonEdgeTextPx": 7.759359721385038,
+              "minimumProjectedEdgeTextPx": 7.132007233273056,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "viewerChrome": {
+          "status": "pass",
+          "viewports": [
+            {
+              "width": 1440,
+              "height": 900,
+              "theme": "light",
+              "innerWidth": 1440,
+              "innerHeight": 900,
+              "scrollWidth": 1440,
+              "scrollHeight": 1190,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 12,
+                "headerPx": 68,
+                "diagramChromePx": 78,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1600,
+              "height": 1000,
+              "theme": "light",
+              "innerWidth": 1600,
+              "innerHeight": 1000,
+              "scrollWidth": 1600,
+              "scrollHeight": 1256,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 76,
+                "diagramChromePx": 84,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 1920,
+              "height": 1080,
+              "theme": "light",
+              "innerWidth": 1920,
+              "innerHeight": 1080,
+              "scrollWidth": 1920,
+              "scrollHeight": 1256,
+              "overflowX": false,
+              "overflowY": true,
+              "verticalScrollAccepted": true,
+              "overflowDisposition": "readable-vertical-scroll",
+              "readerLayout": "adaptive",
+              "readerOverflow": "authored",
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 984,
+              "diagramWidth": 954,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 76,
+                "diagramChromePx": 84,
+                "svgPx": 1032,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 6.900542495479204,
+              "minimumProjectedNonEdgeTextPx": 7.507534659433394,
+              "minimumProjectedEdgeTextPx": 6.900542495479204,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 54,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            },
+            {
+              "width": 2048,
+              "height": 1320,
+              "theme": "light",
+              "innerWidth": 2048,
+              "innerHeight": 1320,
+              "scrollWidth": 2048,
+              "scrollHeight": 1320,
+              "overflowX": false,
+              "overflowY": false,
+              "verticalScrollAccepted": false,
+              "overflowDisposition": "contained",
+              "readerLayout": "adaptive",
+              "readerOverflow": null,
+              "readerFit": "intrinsic-height",
+              "ok": true,
+              "readerWidth": 1036,
+              "diagramWidth": 986,
+              "pageComposition": {
+                "bodyPaddingPx": 64,
+                "headerPx": 84,
+                "diagramChromePx": 94,
+                "svgPx": 1066,
+                "cardsPx": 0,
+                "viewBoxHeight": 1196
+              },
+              "viewBoxWidth": 1106,
+              "minimumProjectedNodeTextPx": 7.132007233273056,
+              "minimumProjectedNonEdgeTextPx": 7.759359721385038,
+              "minimumProjectedEdgeTextPx": 7.132007233273056,
+              "minimumProjectedNodeText": "直连单事务落库",
+              "minimumProjectedNodeTextDetail": "edge",
+              "minimumProjectedNodeTextOwner": {
+                "kind": "edge",
+                "id": "import_direct_lane",
+                "from": "import_write",
+                "to": "main_facts"
+              },
+              "minimumRequiredNodeTextPx": 6,
+              "readabilityOk": true,
+              "hasLegend": true,
+              "hasNavigationDock": true,
+              "legendDockIntersectionArea": 0,
+              "dockStageIntersectionArea": 0,
+              "dockStageGap": 10,
+              "requiredDockStageGap": 10,
+              "viewerChromeStageOk": true,
+              "viewerChromeReserve": 44,
+              "viewerChromeActive": true,
+              "viewerChromeOk": true,
+              "resolvedTheme": "light"
+            }
+          ]
+        },
+        "captures": {
+          "status": "not-requested",
+          "screenshots": [],
+          "contactSheet": null
+        },
+        "sidecars": {
+          "receipt": "architecture-database.browser-check.json",
+          "files": []
+        }
+      }
+    }
+  },
+  "diagnostics": [],
+  "evidence": {
+    "receipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.finalize.json",
+    "summaryReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.finalize-summary.json",
+    "browserCheckReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.browser-check.json"
+  },
+  "visualReview": "not-requested",
+  "finishedAt": "2026-10-13T08:49:12.143Z",
+  "durationMs": 5627,
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-13T08:24:01.187Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  }
+}

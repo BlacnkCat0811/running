@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-risks\\candidate.json",
+    "sha256": "7eace9855c29d345be30c2cad9380af212807c47ff146215d4091ea6c0a94aa7",
+    "bytes": 14526
+  },
+  "artifact": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-risks\\architecture-risks.html",
+    "sha256": "81ec0e9ab15ef5544ced6bce8f419f3b9eac4bf76ca9c6e48e0104e34e320577",
+    "bytes": 784614
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-risks\\architecture-risks.finalize.json",
+    "summaryReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-risks\\architecture-risks.finalize-summary.json",
+    "browserCheckReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-risks\\architecture-risks.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-13T08:24:01.187Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 6840,
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "resolvedCrossovers": 1,
+      "routesOverSuggestedBends": 1
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [
+        {
+          "left": {
+            "id": "import-admit",
+            "from": "importworker",
+            "to": "admission",
+            "label": "scheduleNext 取准入",
+            "collectionIndex": 4,
+            "artifactIndex": 5
+          },
+          "right": {
+            "id": "lease-admit",
+            "from": "lease",
+            "to": "admission",
+            "label": "主线程授权",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "point": [
+            496,
+            495.4
+          ],
+          "sharedNode": "admission"
+        }
+      ],
+      "detours": [
+        {
+          "relationship": {
+            "id": "lease-writes",
+            "from": "lease",
+            "to": "maindb",
+            "label": "写语句闸门（可失败开放）",
+            "collectionIndex": 9,
+            "artifactIndex": 10
+          },
+          "bends": 3,
+          "stretch": 1
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "importworker → admission and lease → admission cross next to admission: move node importworker or lease so the two reach admission from different sides (for example one level with it, one directly above or below it).",
+      "lease → maindb needs 3 bends: move node lease or maindb so they share a row or column with matching centers, or sit diagonally with a clear corner."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

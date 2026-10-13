@@ -1,0 +1,247 @@
+{
+  "generatedAt": "2026-10-13T16:45:00Z",
+  "auditor": "verifier",
+  "repository": {
+    "url": "https://gitee.com/tpandmr/running.git",
+    "provider": "gitee",
+    "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3"
+  },
+  "method": {
+    "readOnly": true,
+    "description": "Opened every sources entry in every candidate and read the cited line range; followed real call sites for topology; recomputed sha256 of every candidate.json and delivered .html against the finalize receipts; searched for the terms a fix would use before accepting a claimed gap.",
+    "notDone": [
+      "no service started, no migration run, no test suite executed",
+      "no rendered page visually inspected (browser-check is a gate result read from the receipt, not my own inspection)",
+      "no live var/*.sqlite inspected; all table claims come from CREATE TABLE statements"
+    ]
+  },
+  "diagrams": [
+    {
+      "candidate": ".archify/rai-audit-20261013-160439/architecture-system/candidate.json",
+      "sha256": "22b2846ef325756a7350c349b1994c9318ae0788fa9f1c773ae1cc74007e9e8a",
+      "artifact": ".archify/rai-audit-20261013-160439/architecture-system/architecture-system.html",
+      "artifactSha256": "146740f328450e8920bad48d1e0085744bd0a2bab729e77c9da2f0b0d42868ba",
+      "gates": { "validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass" },
+      "receiptBoundToBytes": true,
+      "verdict": "verified",
+      "coverage": "图1 fully covered (iOS/Web/API/queue/data processing/DB/algorithm modules + trust and persistence boundaries).",
+      "findings": []
+    },
+    {
+      "candidate": ".archify/rai-audit-20261013-160439/dataflow-core/candidate.json",
+      "sha256": "5d6ab025db73b02b124cce64fd0a9b6386e88aef1c4e1cbefba9bbe5d1462008",
+      "artifact": ".archify/rai-audit-20261013-160439/dataflow-core/dataflow-core.html",
+      "artifactSha256": "4c313996f54b949d608575d39e859deea42820c38f7e29ca60d38947cdcd7394",
+      "gates": { "validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass" },
+      "receiptBoundToBytes": true,
+      "verdict": "verified",
+      "coverage": "图2 covered end-to-end for the default direct lane; the candidate lane is a full card; GPX appears only inside a card item.",
+      "findings": [
+        {
+          "severity": "minor",
+          "claim": "node `direct` sublabel is `DirectSyncImport`",
+          "evidence": "apps/api/src/direct-sync-ingest.ts:222,230,413",
+          "actual": "The real identifiers are DirectSyncImportInput / DirectSyncImportResult / applyDirectSyncImport; `DirectSyncImport` is not a symbol.",
+          "correction": "Use applyDirectSyncImport or DirectSyncImportInput."
+        },
+        {
+          "severity": "minor",
+          "claim": "earlier revision cited ability_assessments + daily_ability_snapshots against recompute-pipeline.ts:1109-1166 / 1474-1495",
+          "evidence": "packages/storage-sqlite/src/database.ts:545-553",
+          "actual": "Resolved in this revision: the card now cites recompute-pipeline.ts:1109-1166 only for workout_features, and the published-run visibility claim cites database.ts:545-553, which is exactly the active_ability_assessments / active_daily_ability_snapshots view block.",
+          "correction": "none needed"
+        }
+      ]
+    },
+    {
+      "candidate": ".archify/rai-audit-20261013-160439/sequence-analysis/candidate.json",
+      "sha256": "fc1edbb21e78b91de23ea1c15412184864748dab6e51ae4ef1bbcc5c71383105",
+      "artifact": ".archify/rai-audit-20261013-160439/sequence-analysis/sequence-analysis.html",
+      "artifactSha256": "79982be416f118fb870dadd4adcfeae0872abef13a00029142c39eccebafdb9a",
+      "gates": { "validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass" },
+      "receiptBoundToBytes": true,
+      "verdict": "verified-with-corrections",
+      "coverage": "图3 covered for the default lane; the candidate lane is a card with the exact reject conditions.",
+      "findings": [
+        {
+          "severity": "major",
+          "claim": "messages imply the analysis consumer claims the queued job immediately after `COMMIT -> analysisStatus=queued`",
+          "evidence": "apps/api/src/recompute-worker.ts:63-84, apps/api/src/server.ts:517,786,804,1251,1851,1978, apps/api/src/import-source-finalization.ts (whole file)",
+          "actual": "The claim mechanism is real (RecomputeJobRepository.claimNext sets status='running', progress_phase='claimed'), but nothing in the import path schedules the consumer: recomputeWorker.schedule() is called only from the CommandQueue afterApply (server.ts:517), the zone-backfill check when it itself queued work (:786), startup (:804), the override PATCH (:1251), POST /v1/model-runs (:1851) and restore (:1978); finalizeImportSource and the ImportWorker onTerminal wiring (server.ts:483-490) contain no schedule call, and drain() stops polling as soon as hasPendingJob() is false (recompute-worker.ts:76).",
+          "correction": "Draw the wake-up edge (or add an explicit '由启动/区域刷新/写命令触发' note) and state the latency honestly instead of implying an immediate hand-off."
+        }
+      ]
+    },
+    {
+      "candidate": ".archify/rai-audit-20261013-160439/architecture-database/candidate.json",
+      "sha256": "38269f315e8b59a3fd516789f50c63f4a2f8f0e3644313e04c2eb25013c4bc75",
+      "artifact": ".archify/rai-audit-20261013-160439/architecture-database/architecture-database.html",
+      "artifactSha256": "a4fa96738734fd42ac4a66885f78dd3cc8c6168abb90d4640e08547aaf914743",
+      "gates": { "validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass" },
+      "receiptBoundToBytes": true,
+      "verdict": "verified-with-corrections",
+      "coverage": "图4 covered: main DB (five layers), runtime DB, control DB, candidate/rollback files, artifact dir, three writer paths and one read path.",
+      "findings": [
+        {
+          "severity": "minor",
+          "claim": "model_validation_gates.status 在 v24 由两态扩到含 not_evaluable",
+          "evidence": "packages/storage-sqlite/src/database.ts:1347-1369 (migration 18), packages/storage-sqlite/src/v24-migration.ts:34-46",
+          "actual": "Migration 18 already had three states: CHECK (status IN ('passed','failed','skipped')); v24 rebuilds the table as ('passed','failed','not_evaluable','skipped').",
+          "correction": "Say 3 → 4 态（补入 not_evaluable）."
+        },
+        {
+          "severity": "minor",
+          "claim": "component 导入写路径 cites packages/storage-sqlite/src/migrate-cli.ts:34-46",
+          "evidence": "packages/storage-sqlite/src/migrate-cli.ts:34-46",
+          "actual": "That is the offline migration CLI (takes the publication lock at :35, opens with migrationPolicy:'apply' at :39-42). It is not the import path, and after the restructure no component or edge represents the offline writer.",
+          "correction": "Add a small 离线 CLI component with cli → main_jobs (schema_migrations), or move the source to main_jobs and mention it in the card."
+        },
+        {
+          "severity": "minor",
+          "claim": "request-path writes are complete",
+          "evidence": "apps/api/src/server.ts:1841-1856, apps/api/src/server.ts:1858-1889",
+          "actual": "POST /v1/model-runs enqueues a recompute_jobs row and POST /v1/model-runs/:id/activate writes active_model_run + model_release_refusals, both from the API request path; the final graph has neither req_write → main_jobs nor req_write → main_publish.",
+          "correction": "Add the two request-path edges."
+        },
+        {
+          "severity": "minor",
+          "claim": "req_write → main_derived labelled 写 用户输入",
+          "evidence": "packages/storage-sqlite/src/database.ts:467, v26-migration.ts:18, v27-migration.ts:16",
+          "actual": "True (workout_overrides, privacy_zones, performance_entries all live in that bucket) but main_derived's other members are pipeline outputs written by analysis_write.",
+          "correction": "Optional: name the three tables in the label."
+        },
+        {
+          "severity": "minor",
+          "claim": "持久化边界 region covers the DB writers",
+          "evidence": "boundaries[].wraps",
+          "actual": "The offline migration CLI writes var/rai.sqlite under the same publication lock but sits outside both boundaries.",
+          "correction": "Fold it in if the 离线 CLI component is added."
+        }
+      ],
+      "tableTraceability": "Every table named in the diagram was traced to a real CREATE TABLE (health_records 140, workouts 162, workout_statistics 183, workout_events 200, workout_routes 210, route_points 225, route_versions v35:22, route_version_points v35:34, feature_runs 351, workout_features 366, model_runs 397, ability_assessments 416, daily_ability_snapshots 450, training_metric_runs 720, workout_training_loads 739, daily_training_metrics 770, canonical_nights 1299, canonical_hrv_days 1328, recompute_jobs 483, recompute_job_events 504, prediction_model_runs 614, prediction_model_events 647, import_batches 974, import_batch_files 991, import_batch_partitions v35:50, model_validation_gates v24:35, model_release_refusals v24:61, model_checkpoints 1065, recompute_validations 1083, model_release_bundles v2:23, active_model_release v2:33, active_model_run 517, active_prediction_model 661, schema_migrations 1965, import_manifest 130, import_generations v34:42, import_fact_history v34:27, import_entity_generations 1037, runtime_meta/import_sources/import_jobs runtime-state:288-299, mutation_commands command-queue:71, import_publications import-publication:53, mobile_goals/history/plan_pushes/plan_operations/coach_loop_receipts mobile-goals:701-725). No table is implied only by a repository method name; no table claim was lost by shortening main_jobs.sublabel (schema_migrations remains the third citation and stays in the card)."
+    },
+    {
+      "candidate": ".archify/rai-audit-20261013-160439/architecture-modules/candidate.json",
+      "sha256": "db0f244617791878f3596f0caf270434c734588e3c18f16cad558ad9533698cc",
+      "artifact": ".archify/rai-audit-20261013-160439/architecture-modules/architecture-modules.html",
+      "artifactSha256": "b737a5d0313b5e8fd335b1ef48d3ce1620ef1a3fbd82268b48908abfa24b8f32",
+      "gates": { "validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass" },
+      "receiptBoundToBytes": true,
+      "verdict": "verified-with-corrections",
+      "coverage": "图5 covered: call direction, external deps, coupling concentration (storage-sqlite), and default states for Rust/ONNX/Python.",
+      "findings": [
+        {
+          "severity": "major",
+          "claim": "edge algo → contracts labelled 只依赖契约",
+          "evidence": "packages/scoring/package.json:1-13, scripts/check-package-boundaries.mjs:39-73, packages/application/src/services/recompute-pipeline.ts:3, packages/application/src/training-load-data.ts:4",
+          "actual": "True for scoring (its only dependency is @rai/contracts) but false for the drawn component, whose sublabel is 'features · scoring · readiness · training-load': the edge whitelist contains features -> normalization and training-load -> readiness, and the live code imports @rai/normalization (recompute-pipeline.ts:3) and @rai/readiness (training-load-data.ts:4).",
+          "correction": "Split the node, or relabel the edge '共同契约（features→normalization、training-load→readiness 另计）' and draw those two edges."
+        },
+        {
+          "severity": "minor",
+          "claim": "boundary label 'npm run check:package-boundaries 禁线' wraps api",
+          "evidence": "scripts/check-package-boundaries.mjs:132-173",
+          "actual": "The edge whitelist and the four forbidden edges are applied to scope === 'packages' only; apps/api is covered by rule A (packages must not import apps), not by the edge whitelist.",
+          "correction": "Move api outside the boundary or relabel it 'packages 依赖禁线（apps 不在其内）'."
+        },
+        {
+          "severity": "minor",
+          "claim": "card says the rule table was not read ('判为无法确认')",
+          "evidence": "scripts/check-package-boundaries.mjs:39-84",
+          "actual": "The table is readable and confirms the doc's claims: ALLOWED_EDGES (30 edges) plus FORBIDDEN_EDGES scoring ↛ readiness/storage-sqlite/application/model-eval.",
+          "correction": "Upgrade that item to A with scripts/check-package-boundaries.mjs:39-84; the doc-vs-source item then reads 'matches'."
+        },
+        {
+          "severity": "minor",
+          "claim": "inference component source apps/../prediction-model-service.ts:39-45",
+          "evidence": "packages/application/src/prediction-model-service.ts:39-45",
+          "actual": "Minimum-label floors for training, not an ONNX/fallback statement.",
+          "correction": "Replace with packages/application/src/prediction-report.ts:30 or the artifact-boundary check."
+        },
+        {
+          "severity": "minor",
+          "claim": "edge set completeness",
+          "evidence": "apps/api/src/server.ts:43, apps/api/src/server.ts:72, scripts/check-package-boundaries.mjs:68",
+          "actual": "apps/api also imports @rai/storage-sqlite and @rai/health-export-parser, and storage-sqlite -> model-eval is whitelisted; none of the three is drawn.",
+          "correction": "Add them or state that only the primary path is shown."
+        }
+      ]
+    },
+    {
+      "candidate": ".archify/rai-audit-20261013-160439/architecture-risks/candidate.json",
+      "sha256": "7eace9855c29d345be30c2cad9380af212807c47ff146215d4091ea6c0a94aa7",
+      "artifact": ".archify/rai-audit-20261013-160439/architecture-risks/architecture-risks.html",
+      "artifactSha256": "81ec0e9ab15ef5544ced6bce8f419f3b9eac4bf76ca9c6e48e0104e34e320577",
+      "gates": { "validate": "pass", "deliver": "pass", "check": "pass", "browser-check": "pass" },
+      "receiptBoundToBytes": true,
+      "verdict": "verified-with-corrections",
+      "coverage": "图6 covered: duplicate execution (idempotency + receipts), concurrent writes (single writer + admission + lease + process lock, incl. the two gaps), consistency (pre-commit read-backs), atomic publication, failure recovery, incremental sync.",
+      "findings": [
+        {
+          "severity": "minor",
+          "claim": "全仓搜索 import.lock.candidate / import.lock.stale 只命中 publication-lock.ts 自身",
+          "evidence": "packages/storage-sqlite/src/publication-lock.ts:177,203,212-213,222-238",
+          "actual": "A literal repo-wide search for the string returns zero matches anywhere — both names are composed from `${lockPath}.stale...` / `${lockPath}.candidate...`. The substantive point (no reclaimer exists) still holds.",
+          "correction": "Rephrase: 两处名字都由 lockPath 模板拼出，没有任何读取/回收它们的代码路径."
+        },
+        {
+          "severity": "minor",
+          "claim": "var/ 现有 80 个 .import.lock.stale.* 目录",
+          "evidence": "file listing of var/",
+          "actual": "I counted 79 stale directories and 12 .candidate.<uuid> files in the same session; the directory changes with every acquisition.",
+          "correction": "Say 约 80（实测 79–80）or drop the exact number."
+        },
+        {
+          "severity": "minor",
+          "claim": "client component source apps/api/src/local-request-security.ts:116-135",
+          "evidence": "that range",
+          "actual": "It is the trusted-unsafe-request rule; it does not evidence the caller set or the ZIP limit.",
+          "correction": "Replace with server.ts:129-132 + import-routes.ts:49-51, or move it to the security component."
+        },
+        {
+          "severity": "minor",
+          "claim": "maintenance tag '显式跳过目录'",
+          "evidence": "apps/api/src/maintenance.ts:750, server.ts:841-853",
+          "actual": "True; the reclaimer also runs on a daily timer and after backups, which is why stale artifacts persist.",
+          "correction": "Optional clarification."
+        }
+      ],
+      "gapClaimsChecked": {
+        "leaseFailOpen": "A — write-lease.ts:91-101 withdraws the request, bumps stats.timeouts, calls onTimeout (default stderr) and keeps writing; no read-only downgrade branch exists and nothing consumes stats.timeouts except the worker postMessage.",
+        "unlockedCliWriter": "A — the whole of packages/application/src/cli.ts imports no lock; acquireDatabasePublicationLock callers are only server.ts:170, health-export-parser/src/cli.ts:204 and migrate-cli.ts:35.",
+        "lockTombstoneReclaimer": "A — the only sweeper is reclaimDisplacedDatabases, whose regex matches .replaced.<uuid> / .importing.* and which skips non-files; tombstones are directories (mkdirSync) and candidate files do not match the regex.",
+        "twoIndependentLocks": "A as a fact (server.ts:372-374, :1390); no consequence demonstrated, which the candidate itself states."
+      },
+      "docDiffUpgrades": [
+        { "item": "DOC-SOURCE-DIFF C4 → A", "evidence": "packages/storage-sqlite/src/model-transition-gate.ts:302-303,313 for docs/ALGORITHM.md:330" },
+        { "item": "DOC-SOURCE-DIFF B1 → A", "evidence": "packages/storage-sqlite/src/database.ts:2261-2263 (throws on unreleased savepoints before COMMIT), :2274" }
+      ]
+    }
+  ],
+  "cannotVerify": {
+    "B": [
+      "图3: whether a recompute_jobs row registered by the direct lane is always woken without another trigger (the missing schedule() call is A; the practical consequence is inference).",
+      "图1/图2: whether a real iOS sync payload always satisfies the direct-lane predicate (deployment payload, not repository data).",
+      "图4/图6: whether the 79 stale lock tombstones were caused by the missing reclaimer (causal link is inference).",
+      "图6: whether the two independent in-process locks can interleave with a real consequence."
+    ],
+    "C": [
+      "docs/ALGORITHM.md:331-333 bundle rollback / checkpoint reuse / override-snapshot matching: model-release-repository.ts and the checkpoint-reuse predicate were not read.",
+      "docs/ARCHITECTURE.md:62 '原始记录不能随模型回滚重写': the rollback implementation was not read.",
+      "Deployment-only facts: Nginx/TLS, systemd, PM2 absence, and whether RAI_IMPORT_ENGINE / RAI_RUST_FALLBACK / RAI_IMPORT_DATA_ONLY_FAST_PATH are set in production.",
+      "iOS keychain access-control details for the '移动端凭证隔离' boundary.",
+      "DOC-SOURCE-DIFF.md §6 reproduction command .archify/tools/check-geometry.mjs — corrected during my own audit: the tool EXISTS (6856 bytes, alongside apply-layout.mjs, check-artifacts.mjs, layout-search.mjs, restore-database-layout.mjs), so the §6 command is reproducible as written; I did not run it because it is a geometry pre-check, not a source check.",
+      "README.md:65 '54 项验收合同' completeness against the acceptance matrix."
+    ]
+  },
+  "gateHealth": {
+    "allCandidatesPass": true,
+    "allReceiptsBoundToVerifiedBytes": true,
+    "history": [
+      "architecture-risks: an earlier passing receipt was bound to a 17 380-byte spec while a 14 526-byte file sat on disk (delivered HTML out of sync); resolved in the final revision.",
+      "architecture-database: an earlier receipt was bound to a superseded 16 724-byte spec and failed validate with 21 diagnostics; resolved by the restructure and re-run.",
+      "dataflow-core: an earlier revision failed deliver (viewport-height) and then validate (desktop-readability, viewBox 1280 vs the 1085 budget); resolved by the stage merge and re-run.",
+      "architecture-system: an earlier revision failed validate with 3 layout/constraint diagnostics; resolved."
+    ]
+  }
+}

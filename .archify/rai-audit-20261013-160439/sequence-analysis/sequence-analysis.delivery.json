@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "aa56d842-ab4b-4707-818c-ade10ac5f8ab",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "D:\\running\\.archify\\rai-audit-20261013-160439\\sequence-analysis\\candidate.json",
+  "output": "D:\\running\\.archify\\rai-audit-20261013-160439\\sequence-analysis\\sequence-analysis.html",
+  "specification": {
+    "sha256": "c1523143e4159bd9a38e4001550386b72990ee1c0ba46d5c7d3f82948ac87838",
+    "bytes": 12940
+  },
+  "artifact": {
+    "sha256": "46b39c16a876d743987f7f6773b2e0f5062d0384c29f3d461d632e093c1b8e25",
+    "bytes": 776072
+  }
+}

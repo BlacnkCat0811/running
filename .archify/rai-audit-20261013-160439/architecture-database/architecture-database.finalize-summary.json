@@ -1,0 +1,299 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\candidate.json",
+    "sha256": "04d9c37d42349efe32d5bf83b381cd743881fb8e1ddcc75990f9a7f46a6804d5",
+    "bytes": 16115
+  },
+  "artifact": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.html",
+    "sha256": "a4fa96738734fd42ac4a66885f78dd3cc8c6168abb90d4640e08547aaf914743",
+    "bytes": 791213
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.finalize.json",
+    "summaryReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.finalize-summary.json",
+    "browserCheckReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-database\\architecture-database.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-13T08:24:01.187Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 5627,
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "resolvedCrossovers": 8,
+      "routesOverSuggestedBends": 4
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [
+        {
+          "left": {
+            "id": "import_batch",
+            "from": "import_write",
+            "to": "main_jobs",
+            "label": "写 import_batches",
+            "collectionIndex": 1,
+            "artifactIndex": 2
+          },
+          "right": {
+            "id": "read_facts",
+            "from": "main_facts",
+            "to": "read_path",
+            "label": "读 read/* 仓储",
+            "collectionIndex": 11,
+            "artifactIndex": 12
+          },
+          "point": [
+            57,
+            996
+          ]
+        },
+        {
+          "left": {
+            "id": "import_fallback",
+            "from": "import_write",
+            "to": "candidate_files",
+            "label": "回退：写候选库",
+            "collectionIndex": 2,
+            "artifactIndex": 3
+          },
+          "right": {
+            "id": "req_runtime",
+            "from": "req_write",
+            "to": "runtime_db",
+            "label": "写 命令队列",
+            "collectionIndex": 5,
+            "artifactIndex": 6
+          },
+          "point": [
+            664,
+            227.99999999999997
+          ]
+        },
+        {
+          "left": {
+            "id": "import_fallback",
+            "from": "import_write",
+            "to": "candidate_files",
+            "label": "回退：写候选库",
+            "collectionIndex": 2,
+            "artifactIndex": 3
+          },
+          "right": {
+            "id": "req_control",
+            "from": "req_write",
+            "to": "control_db",
+            "label": "写 mobile_goals",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "point": [
+            776,
+            471.1
+          ]
+        },
+        {
+          "left": {
+            "id": "analysis_derived",
+            "from": "analysis_write",
+            "to": "main_derived",
+            "label": "写 model_runs",
+            "collectionIndex": 7,
+            "artifactIndex": 8
+          },
+          "right": {
+            "id": "read_derived",
+            "from": "main_derived",
+            "to": "read_path",
+            "label": "读 分析结果",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "point": [
+            436.00000000000006,
+            612
+          ],
+          "sharedNode": "main_derived"
+        },
+        {
+          "left": {
+            "id": "analysis_publish",
+            "from": "analysis_write",
+            "to": "main_publish",
+            "label": "写 门禁 / 发布包",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "right": {
+            "id": "read_derived",
+            "from": "main_derived",
+            "to": "read_path",
+            "label": "读 分析结果",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "point": [
+            436,
+            753.95
+          ]
+        },
+        {
+          "left": {
+            "id": "analysis_claims",
+            "from": "main_jobs",
+            "to": "analysis_write",
+            "label": "读 queued 任务",
+            "collectionIndex": 10,
+            "artifactIndex": 11
+          },
+          "right": {
+            "id": "read_facts",
+            "from": "main_facts",
+            "to": "read_path",
+            "label": "读 read/* 仓储",
+            "collectionIndex": 11,
+            "artifactIndex": 12
+          },
+          "point": [
+            344,
+            996
+          ]
+        },
+        {
+          "left": {
+            "id": "analysis_claims",
+            "from": "main_jobs",
+            "to": "analysis_write",
+            "label": "读 queued 任务",
+            "collectionIndex": 10,
+            "artifactIndex": 11
+          },
+          "right": {
+            "id": "read_derived",
+            "from": "main_derived",
+            "to": "read_path",
+            "label": "读 分析结果",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "point": [
+            436,
+            769
+          ]
+        },
+        {
+          "left": {
+            "id": "read_facts",
+            "from": "main_facts",
+            "to": "read_path",
+            "label": "读 read/* 仓储",
+            "collectionIndex": 11,
+            "artifactIndex": 12
+          },
+          "right": {
+            "id": "read_derived",
+            "from": "main_derived",
+            "to": "read_path",
+            "label": "读 分析结果",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "point": [
+            436,
+            996
+          ],
+          "sharedNode": "read_path"
+        }
+      ],
+      "detours": [
+        {
+          "relationship": {
+            "id": "import_batch",
+            "from": "import_write",
+            "to": "main_jobs",
+            "label": "写 import_batches",
+            "collectionIndex": 1,
+            "artifactIndex": 2
+          },
+          "bends": 4,
+          "stretch": 1.297
+        },
+        {
+          "relationship": {
+            "id": "import_fallback",
+            "from": "import_write",
+            "to": "candidate_files",
+            "label": "回退：写候选库",
+            "collectionIndex": 2,
+            "artifactIndex": 3
+          },
+          "bends": 3,
+          "stretch": 1
+        },
+        {
+          "relationship": {
+            "id": "read_facts",
+            "from": "main_facts",
+            "to": "read_path",
+            "label": "读 read/* 仓储",
+            "collectionIndex": 11,
+            "artifactIndex": 12
+          },
+          "bends": 3,
+          "stretch": 1.035
+        },
+        {
+          "relationship": {
+            "id": "read_derived",
+            "from": "main_derived",
+            "to": "read_path",
+            "label": "读 分析结果",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "bends": 3,
+          "stretch": 1
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "import_write → main_jobs crosses main_facts → read_path: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "import_write → candidate_files crosses req_write → runtime_db: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "import_write → candidate_files crosses req_write → control_db: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "analysis_write → main_derived and main_derived → read_path cross next to main_derived: move node analysis_write or read_path so the two reach main_derived from different sides (for example one level with it, one directly above or below it).",
+      "analysis_write → main_publish crosses main_derived → read_path: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "main_jobs → analysis_write crosses main_facts → read_path: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "main_jobs → analysis_write crosses main_derived → read_path: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "main_facts → read_path and main_derived → read_path cross next to read_path: move node main_facts or main_derived so the two reach read_path from different sides (for example one level with it, one directly above or below it)."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

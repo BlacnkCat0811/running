@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "9bd99828-4a4b-4de5-811f-a1624e7906c2",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-system\\candidate.json",
+  "output": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-system\\architecture-system.html",
+  "specification": {
+    "sha256": "22b2846ef325756a7350c349b1994c9318ae0788fa9f1c773ae1cc74007e9e8a",
+    "bytes": 13434
+  },
+  "artifact": {
+    "sha256": "146740f328450e8920bad48d1e0085744bd0a2bab729e77c9da2f0b0d42868ba",
+    "bytes": 774912
+  }
+}

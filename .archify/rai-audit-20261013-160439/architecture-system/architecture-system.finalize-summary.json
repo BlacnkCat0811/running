@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-system\\candidate.json",
+    "sha256": "22b2846ef325756a7350c349b1994c9318ae0788fa9f1c773ae1cc74007e9e8a",
+    "bytes": 13434
+  },
+  "artifact": {
+    "path": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-system\\architecture-system.html",
+    "sha256": "146740f328450e8920bad48d1e0085744bd0a2bab729e77c9da2f0b0d42868ba",
+    "bytes": 774912
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-system\\architecture-system.finalize.json",
+    "summaryReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-system\\architecture-system.finalize-summary.json",
+    "browserCheckReceipt": "D:\\running\\.archify\\rai-audit-20261013-160439\\architecture-system\\architecture-system.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.0.1",
+    "availableVersion": "3.0.1",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-13T08:24:01.187Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 11295,
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "resolvedCrossovers": 5,
+      "routesOverSuggestedBends": 3
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [
+        {
+          "left": {
+            "id": "ingest-to-state",
+            "from": "ingest",
+            "to": "state",
+            "label": "任务状态",
+            "collectionIndex": 1,
+            "artifactIndex": 2
+          },
+          "right": {
+            "id": "ingest-to-engine",
+            "from": "ingest",
+            "to": "algo_engine",
+            "label": "--engine rust（可选）",
+            "collectionIndex": 9,
+            "artifactIndex": 10
+          },
+          "point": [
+            640,
+            228
+          ],
+          "sharedNode": "ingest"
+        },
+        {
+          "left": {
+            "id": "ingest-to-main",
+            "from": "ingest",
+            "to": "db_main",
+            "label": "直连车道写库",
+            "collectionIndex": 2,
+            "artifactIndex": 3
+          },
+          "right": {
+            "id": "state-to-api",
+            "from": "state",
+            "to": "api",
+            "label": "取命令队列",
+            "collectionIndex": 3,
+            "artifactIndex": 4
+          },
+          "point": [
+            411.95000000000005,
+            489
+          ]
+        },
+        {
+          "left": {
+            "id": "ingest-to-main",
+            "from": "ingest",
+            "to": "db_main",
+            "label": "直连车道写库",
+            "collectionIndex": 2,
+            "artifactIndex": 3
+          },
+          "right": {
+            "id": "main-to-api",
+            "from": "db_main",
+            "to": "api",
+            "label": "只读快照 → DTO",
+            "collectionIndex": 4,
+            "artifactIndex": 5
+          },
+          "point": [
+            411.9500000000001,
+            548.7045454545455
+          ],
+          "sharedNode": "db_main"
+        },
+        {
+          "left": {
+            "id": "state-to-api",
+            "from": "state",
+            "to": "api",
+            "label": "取命令队列",
+            "collectionIndex": 3,
+            "artifactIndex": 4
+          },
+          "right": {
+            "id": "ingest-to-engine",
+            "from": "ingest",
+            "to": "algo_engine",
+            "label": "--engine rust（可选）",
+            "collectionIndex": 9,
+            "artifactIndex": 10
+          },
+          "point": [
+            736,
+            489
+          ]
+        },
+        {
+          "left": {
+            "id": "api-to-algo",
+            "from": "api",
+            "to": "algo",
+            "label": "FIFO 调度重算",
+            "collectionIndex": 5,
+            "artifactIndex": 6
+          },
+          "right": {
+            "id": "web-to-api",
+            "from": "web",
+            "to": "api",
+            "label": "上传 / 轮询",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "point": [
+            124.94999999999999,
+            548
+          ],
+          "sharedNode": "api"
+        }
+      ],
+      "detours": [
+        {
+          "relationship": {
+            "id": "main-to-api",
+            "from": "db_main",
+            "to": "api",
+            "label": "只读快照 → DTO",
+            "collectionIndex": 4,
+            "artifactIndex": 5
+          },
+          "bends": 3,
+          "stretch": 1
+        },
+        {
+          "relationship": {
+            "id": "web-to-api",
+            "from": "web",
+            "to": "api",
+            "label": "上传 / 轮询",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "bends": 3,
+          "stretch": 1.096,
+          "directCorridorBlockers": [
+            {
+              "id": "algo",
+              "label": "特征 / 评分 / 预测",
+              "box": [
+                40,
+                760,
+                200,
+                84
+              ]
+            }
+          ]
+        },
+        {
+          "relationship": {
+            "id": "ingest-to-engine",
+            "from": "ingest",
+            "to": "algo_engine",
+            "label": "--engine rust（可选）",
+            "collectionIndex": 9,
+            "artifactIndex": 10
+          },
+          "bends": 3,
+          "stretch": 1
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "ingest → state and ingest → algo_engine cross next to ingest: move node state or algo_engine so the two reach ingest from different sides (for example one level with it, one directly above or below it).",
+      "ingest → db_main crosses state → api: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "ingest → db_main and db_main → api cross next to db_main: move node ingest or api so the two reach db_main from different sides (for example one level with it, one directly above or below it).",
+      "state → api crosses ingest → algo_engine: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "api → algo and web → api cross next to api: move node algo or web so the two reach api from different sides (for example one level with it, one directly above or below it).",
+      "db_main → api needs 3 bends: move node db_main or api so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "ingest → algo_engine needs 3 bends: move node ingest or algo_engine so they share a row or column with matching centers, or sit diagonally with a clear corner."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

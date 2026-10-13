@@ -1,0 +1,592 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "RAI 持久化读写地图：三个 SQLite 库与候选/发布边界",
+    "locale": "zh-CN",
+    "output": ".archify/rai-audit-20261013-160439/architecture-database/architecture-database.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://gitee.com/tpandmr/running.git",
+      "provider": "gitee",
+      "revision": "60678af97e4710cfd8444b3952df9fff09c2bff3"
+    }
+  },
+  "components": [
+    {
+      "id": "main_facts",
+      "type": "database",
+      "label": "主库 · 事实层",
+      "sublabel": "记录 / 训练 / 路线版本",
+      "tag": "var/rai.sqlite",
+      "pos": [
+        40,
+        120
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 140,
+          "end_line": 245
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 2083,
+          "end_line": 2144
+        },
+        {
+          "path": "packages/storage-sqlite/src/v35-migration.ts",
+          "line": 22,
+          "end_line": 48
+        }
+      ]
+    },
+    {
+      "id": "main_derived",
+      "type": "database",
+      "label": "主库 · 派生分析层",
+      "sublabel": "特征 / 能力 / 负荷 / 恢复",
+      "tag": "var/rai.sqlite",
+      "pos": [
+        60,
+        420
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 351,
+          "end_line": 465
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 720,
+          "end_line": 790
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 1299,
+          "end_line": 1343
+        }
+      ]
+    },
+    {
+      "id": "main_publish",
+      "type": "database",
+      "label": "主库 · 发布闸门与指针",
+      "sublabel": "门禁 / 发布包 / active_*",
+      "tag": "var/rai.sqlite",
+      "pos": [
+        80,
+        720
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/storage-sqlite/src/v24-migration.ts",
+          "line": 35,
+          "end_line": 70
+        },
+        {
+          "path": "packages/storage-sqlite/src/v2-migration.ts",
+          "line": 23,
+          "end_line": 47
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 517,
+          "end_line": 521
+        }
+      ]
+    },
+    {
+      "id": "main_jobs",
+      "type": "database",
+      "label": "主库 · 任务 / 批次 / 账本",
+      "sublabel": "recompute_jobs · import_batches",
+      "tag": "var/rai.sqlite",
+      "pos": [
+        100,
+        1020
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 483,
+          "end_line": 515
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 614,
+          "end_line": 666
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 1962,
+          "end_line": 1984
+        }
+      ]
+    },
+    {
+      "id": "import_write",
+      "type": "backend",
+      "label": "导入写路径",
+      "sublabel": "ImportWorker · migrate-cli",
+      "tag": "直连车道 + 候选车道",
+      "pos": [
+        400,
+        120
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/import-worker.ts",
+          "line": 554,
+          "end_line": 624
+        },
+        {
+          "path": "apps/api/src/direct-sync-ingest.ts",
+          "line": 426,
+          "end_line": 449
+        },
+        {
+          "path": "packages/storage-sqlite/src/migrate-cli.ts",
+          "line": 34,
+          "end_line": 46
+        }
+      ]
+    },
+    {
+      "id": "req_write",
+      "type": "backend",
+      "label": "请求写路径",
+      "sublabel": "CommandQueue · MutationCoordinator",
+      "tag": "BEGIN IMMEDIATE",
+      "pos": [
+        420,
+        420
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/command-queue.ts",
+          "line": 177,
+          "end_line": 200
+        },
+        {
+          "path": "apps/api/src/mutation-coordinator.ts",
+          "line": 11,
+          "end_line": 25
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 514,
+          "end_line": 518
+        }
+      ]
+    },
+    {
+      "id": "analysis_write",
+      "type": "backend",
+      "label": "分析写路径",
+      "sublabel": "Recompute · Prediction worker",
+      "tag": "写租约 · 全局只跑一个",
+      "pos": [
+        440,
+        720
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/recompute-thread.ts",
+          "line": 8,
+          "end_line": 34
+        },
+        {
+          "path": "packages/storage-sqlite/src/recompute-job-repository.ts",
+          "line": 46,
+          "end_line": 88
+        },
+        {
+          "path": "apps/api/src/prediction-worker.ts",
+          "line": 22,
+          "end_line": 62
+        }
+      ]
+    },
+    {
+      "id": "read_path",
+      "type": "backend",
+      "label": "只读读路径",
+      "sublabel": "ReadStoreManager · openReadonly",
+      "tag": "每请求开合",
+      "pos": [
+        460,
+        1020
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/read-store-manager.ts",
+          "line": 52,
+          "end_line": 92
+        },
+        {
+          "path": "packages/storage-sqlite/src/database.ts",
+          "line": 1948,
+          "end_line": 1953
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 647,
+          "end_line": 674
+        }
+      ]
+    },
+    {
+      "id": "runtime_db",
+      "type": "database",
+      "label": "运行时库",
+      "sublabel": "导入源 / 任务 / 命令队列",
+      "tag": "var/runtime.sqlite",
+      "pos": [
+        760,
+        120
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/runtime-state.ts",
+          "line": 284,
+          "end_line": 305
+        },
+        {
+          "path": "apps/api/src/command-queue.ts",
+          "line": 70,
+          "end_line": 74
+        },
+        {
+          "path": "apps/api/src/import-publication.ts",
+          "line": 51,
+          "end_line": 53
+        }
+      ]
+    },
+    {
+      "id": "control_db",
+      "type": "database",
+      "label": "控制库",
+      "sublabel": "周目标 / 计划推送 / 操作幂等",
+      "tag": "var/rai-control.sqlite",
+      "pos": [
+        780,
+        420
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/mobile-goals.ts",
+          "line": 694,
+          "end_line": 735
+        },
+        {
+          "path": "apps/api/src/server.ts",
+          "line": 126,
+          "end_line": 127
+        }
+      ]
+    },
+    {
+      "id": "candidate_files",
+      "type": "database",
+      "label": "候选 / 回滚库文件",
+      "sublabel": "rai.importing.* → rename",
+      "tag": "var/ · import.lock",
+      "pos": [
+        800,
+        720
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "apps/api/src/import-worker.ts",
+          "line": 489,
+          "end_line": 495
+        },
+        {
+          "path": "apps/api/src/import-worker.ts",
+          "line": 1690,
+          "end_line": 1729
+        },
+        {
+          "path": "packages/storage-sqlite/src/publication-lock.ts",
+          "line": 160,
+          "end_line": 186
+        }
+      ]
+    },
+    {
+      "id": "artifact_store",
+      "type": "cloud",
+      "label": "预测工件目录",
+      "sublabel": "model.onnx + manifest.json",
+      "tag": "var/model-artifacts/prediction",
+      "pos": [
+        820,
+        1020
+      ],
+      "size": [
+        220,
+        84
+      ],
+      "sources": [
+        {
+          "path": "packages/application/src/prediction-training-runner.ts",
+          "line": 545,
+          "end_line": 561
+        },
+        {
+          "path": "packages/application/src/prediction-training-runner.ts",
+          "line": 280,
+          "end_line": 305
+        },
+        {
+          "path": "apps/api/src/prediction-worker.ts",
+          "line": 26,
+          "end_line": 47
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "主库 var/rai.sqlite（单文件 · WAL · 单写者）",
+      "wraps": [
+        "main_facts",
+        "main_derived",
+        "main_publish",
+        "main_jobs"
+      ],
+      "pad": 26
+    },
+    {
+      "kind": "security-group",
+      "label": "信任边界：写路径互斥（同一时刻只允许一个写者持有主库）",
+      "wraps": [
+        "import_write",
+        "req_write",
+        "analysis_write"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "var/ 下其余持久化（运行时库 / 控制库 / 候选文件 / 预测工件）",
+      "wraps": [
+        "runtime_db",
+        "control_db",
+        "candidate_files",
+        "artifact_store"
+      ],
+      "pad": 26
+    }
+  ],
+  "connections": [
+    {
+      "id": "import_direct_lane",
+      "from": "import_write",
+      "to": "main_facts",
+      "label": "直连单事务落库",
+      "variant": "emphasis"
+    },
+    {
+      "id": "import_batch",
+      "from": "import_write",
+      "to": "main_jobs",
+      "label": "写 import_batches",
+      "variant": "emphasis"
+    },
+    {
+      "id": "import_fallback",
+      "from": "import_write",
+      "to": "candidate_files",
+      "label": "回退：写候选库",
+      "variant": "dashed"
+    },
+    {
+      "id": "import_runtime",
+      "from": "import_write",
+      "to": "runtime_db",
+      "label": "写 import_jobs",
+      "variant": "emphasis"
+    },
+    {
+      "id": "req_overrides",
+      "from": "req_write",
+      "to": "main_derived",
+      "label": "写 用户输入",
+      "variant": "emphasis"
+    },
+    {
+      "id": "req_runtime",
+      "from": "req_write",
+      "to": "runtime_db",
+      "label": "写 命令队列",
+      "variant": "emphasis"
+    },
+    {
+      "id": "req_control",
+      "from": "req_write",
+      "to": "control_db",
+      "label": "写 mobile_goals",
+      "variant": "emphasis"
+    },
+    {
+      "id": "analysis_derived",
+      "from": "analysis_write",
+      "to": "main_derived",
+      "label": "写 model_runs",
+      "variant": "emphasis"
+    },
+    {
+      "id": "analysis_publish",
+      "from": "analysis_write",
+      "to": "main_publish",
+      "label": "写 门禁 / 发布包",
+      "variant": "emphasis"
+    },
+    {
+      "id": "analysis_artifact",
+      "from": "analysis_write",
+      "to": "artifact_store",
+      "label": "spawn Python 训练",
+      "variant": "emphasis"
+    },
+    {
+      "id": "analysis_claims",
+      "from": "main_jobs",
+      "to": "analysis_write",
+      "label": "读 queued 任务",
+      "variant": "dashed"
+    },
+    {
+      "id": "read_facts",
+      "from": "main_facts",
+      "to": "read_path",
+      "label": "读 read/* 仓储",
+      "variant": "dashed"
+    },
+    {
+      "id": "read_derived",
+      "from": "main_derived",
+      "to": "read_path",
+      "label": "读 分析结果",
+      "variant": "dashed"
+    },
+    {
+      "id": "read_jobs",
+      "from": "main_jobs",
+      "to": "read_path",
+      "label": "读 任务状态",
+      "variant": "dashed"
+    },
+    {
+      "id": "derived_to_publish",
+      "from": "main_derived",
+      "to": "main_publish",
+      "label": "候选 run → 指针",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "方向约定",
+      "items": [
+        "emphasis 实线 = 写路径；dashed 虚线 = 只读读路径或回退车道",
+        "每条边都取自调用点代码，不取 README 或 docs/ARCHITECTURE.md 的声明"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "默认导入车道不产生候选库",
+      "items": [
+        "ImportWorker 先用 planDirectSyncLane 选道；lane===\"direct\" 时直接对活库 var/rai.sqlite 落库，返回即 succeeded（import-worker.ts:554-624）",
+        "record-only 快通路打开活库，PRAGMA synchronous=FULL 后原地提交（data-only-import.ts:133-143）",
+        "统一接收器以 transactionOwner:\"caller\" 打开活库，事实 + 路线 + 分析任务登记同一条事务，store.commitCallerTransaction() 收尾（direct-sync-ingest.ts:426,449,613）",
+        "两条直连车道都拒收才回退候选链路：建 rai.importing.<jobId>.sqlite 再原子 rename（import-worker.ts:617-624, 1718-1729）",
+        "RAI_IMPORT_DATA_ONLY_FAST_PATH 默认为 \"1\"（server.ts:168-169）"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "单写者与打开策略",
+      "items": [
+        "RaiDatabase 连接策略：foreign_keys=ON → busy_timeout=5000 → journal_mode=WAL（回读断言）→ synchronous=NORMAL（database.ts:1853-1875）",
+        "MutationCoordinator.acquire 冲突抛 409 mutation_conflict；TaskAdmissionScheduler 让 CPU 重活全局只跑一个（task-admission.ts:9-39）",
+        "API 以 migrationPolicy:\"refuse\" 打开主库：有未应用迁移即 PendingMigrationsError，启动期 exit 78（server.ts:579-588, 631-645）",
+        "applyMutationCommand 在一条 BEGIN IMMEDIATE 内同时写业务效果与 import_manifest 回执 rai.applied-command.<id>（command-queue.ts:178-194）",
+        "recompute worker 走共享内存写租约 withWriteGate，不逐处包事务（recompute-thread.ts:12-23）"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "候选 vs 已提交（源码里的状态列）",
+      "items": [
+        "route_versions.status ∈ pending|complete|rejected；未完成版本对读侧不可见（v35-migration.ts:27, 14-15）",
+        "import_batch_partitions.status ∈ pending|committed，分片逐块提交回执（v35-migration.ts:55）",
+        "model_release_bundles.status ∈ passed|failed|not_evaluable；active_model_release 单例行才是生效指针（v2-migration.ts:29, 33-36）",
+        "model_validation_gates.status 在 v24 由两态扩到含 not_evaluable（重建表 + 逐列拷贝，v24-migration.ts:34-55）",
+        "候选库文件只有安装后通过 quick_check / 结构探针才保留，否则回滚 var/backups（import-worker.ts:1718-1729）"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "表清单",
+      "items": [
+        "事实层：health_records · workouts · workout_statistics · workout_events · workout_routes · route_points · route_versions · route_version_points",
+        "派生层：feature_runs · workout_features · model_runs · ability_assessments · daily_ability_snapshots · training_metric_runs · workout_training_loads · daily_training_metrics · canonical_nights · canonical_hrv_days",
+        "任务/批次/账本层：recompute_jobs · recompute_job_events · prediction_model_runs · prediction_model_events · import_batches · import_batch_files · import_batch_partitions · schema_migrations · import_manifest · import_generations · import_fact_history",
+        "发布层：model_validation_gates · model_release_refusals · model_checkpoints · recompute_validations · model_release_bundles · active_model_release · active_model_run · active_prediction_model",
+        "运行时库：import_sources · import_jobs · mutation_commands · import_publications · runtime_meta",
+        "控制库：mobile_goals · mobile_goals_history · mobile_plan_pushes · mobile_plan_operations · mobile_coach_loop_receipts"
+      ]
+    }
+  ]
+}
