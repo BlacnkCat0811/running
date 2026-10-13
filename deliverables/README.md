@@ -8,6 +8,18 @@
 
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
+- [DIRECT_SYNC_ANALYSIS_WAKE_FIX_2026-10-13.md](DIRECT_SYNC_ANALYSIS_WAKE_FIX_2026-10-13.md)：
+  **直连车道「登记了分析任务，但没人唤醒消费者」的定位与修复** ——
+  `direct-sync-ingest.ts` 在同一个主库事务里登记了 `recompute_jobs`，而 import 终态回调
+  `onTerminal` 只做导入源清理、不含 `recomputeWorker.schedule()`；旧链路靠 CLI 子进程内联
+  `runNextJob()` 自我消化，快车道**不 spawn CLI** ⇒ 唯一的唤醒点消失。
+  🔴 **后果不是"分析慢"而是"写通道被封"**：`isDatabaseWriteBusy()` 把 `queued` 算作忙 ⇒
+  线上实测 11 个写端点全部 409、滞留 8 分钟以上（`started_at` 恒 null、事件表无 `claimed`）。
+  修复 = `onTerminal` 补唤醒 + `wakeIfPending()` 60 s 兜底巡检；守卫两条（行为级 + 源码级），
+  断言逐条**突变到红**（含"方法仍在、逻辑失效"那次）。⚠️ 同批另记两个**既有红**
+  （`deploy-upgrade` 的 `backup-reminder` 断言、`connection-contention` 的锁等待窗口），
+  三次复现稳定、均不在本批 diff 内；并如实标注全量 `npm test` 的失败形态与降并发复验结果。
+
 - [DIRECT_SYNC_PR6_A15_A17_AND_PR5_S3S6_2026-10-13.md](DIRECT_SYNC_PR6_A15_A17_AND_PR5_S3S6_2026-10-13.md)：
   **批量 A+B 验收：真机等价 HTTP 夹具、§11 备份入口退场、PR5 S3→S6 读侧一致性** ——
   ① **A1**：新 HTTP 夹具走完真机会话顺序（上传 → inspect → import-jobs → 终态），把 A17「文案/状态截图」
