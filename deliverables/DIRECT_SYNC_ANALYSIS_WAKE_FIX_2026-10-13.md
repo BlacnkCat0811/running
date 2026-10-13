@@ -217,3 +217,57 @@ recomputePollTimer.unref();
 启动路径的 `recomputeWorker.schedule()` 会把它拾起并跑完。
 
 在此之前，线上写端点仍会持续 409 —— 这是"未部署"的状态，不是新问题。
+
+---
+
+## 7. 状态更新（2026-10-13 晚）：已提交、已推送、已部署
+
+> 本节为**追加**，上文正文保持当时口径不改（历史可追溯）。
+
+### 7.1 提交（5 个，`60678af` 之上；rebase 到远程 `f552908` 后推送）
+
+| SHA | 内容 |
+|---|---|
+| `e539110` | `docs:` 本报告 + `deliverables/README.md` 登记 |
+| `2ba4b2c` | `fix(api):` 直连车道登记分析任务后必须唤醒消费者 |
+| `c20b8a0` | `test(api):` 写门禁等待改为按 `runtime-status` 判忙 |
+| `c829141` | `fix(ios):` HealthKitSync 6 条类型错误 + 两支回归清单（本批一并收口的当日既有工作） |
+| `054b3d3` | `test(gates):` pre-commit 加「iOS 门禁跳过 ≠ 放行」认账闸门（同上） |
+
+最终校验：`git diff 60678af..HEAD --stat` 的 **deletions = 21**，与提交前 `git diff --stat` 逐字节相同。
+
+### 7.2 全量门禁的如实结果
+
+`npm test`（43 分钟）= node **1786 / 1770 pass / 12 fail / 4 skip** + vitest **1 fail / 185**，**EXIT=1**。
+
+逐个降并发复验后分为两类：
+
+| 类别 | 文件 | 判据 |
+|---|---|---|
+| **环境性红**（全量并发下超时） | `benchmark-import`、`data-only-import-queue`、`import-queue-live`、`native-import-worker`、web `app-token-gate` | 隔离单跑**全绿** |
+| **既有红**（3 次复现均红） | `deploy-upgrade`（`backup-reminder` 断言）、`connection-contention`（`open() 只用了 92 ms`） | 单跑仍红，且 `git diff` 对这 2 个文件**为空** |
+
+⚠️ `deploy-upgrade` 那条是 **PR6 退役备份入口、但测试仍在断言 `backup-reminder`** 的遗留 —— 建议单独立项。
+
+### 7.3 部署（`60678af` → `054b3d3`，Fast-forward）
+
+- 影响面：**仅 `apps/api/src/{server.ts,recompute-worker.ts}` 属运行时改动**；
+  `package.json` / `package-lock.json` / `apps/web` / `database.ts` / `deploy/` **全空** ⇒ 不 build、无迁移、无 unit 同步
+- 迁移只读闸门：`pending: []`、`version: 36`
+- 🔴 **备份入口已退役**：`POST /v1/backups` 返回 **410 `backup_creation_retired`**（PR6 的改动）
+  ⇒ 改用 SQLite 一致性备份 `VACUUM INTO` → `/var/lib/rai/var/backups/rai.pre-deploy-20261013.sqlite`
+- 重启 **20:12:32 CST**，`NRestarts=0`；日志 `Anonymous read enabled ... publicReadRoutes:29, tokenRequiredReadRoutes:20`
+  + `RAI local API ready`，无报错
+
+### 7.4 修复的线上闭环证据
+
+| 时刻 | `recompute_job_0df5316b` |
+|---|---|
+| 17:23:21（修复前登记） | `queued`，`started_at = null` |
+| 20:12:01（重启前复查） | `queued`，`started_at = null`（**滞留 2h48m**） |
+| 20:12:52（重启后 20 s） | **`running`** ← 启动路径的 `schedule()` 把它拾起 |
+| 20:15:15 | **`succeeded`**，`error = null`（partial 重算 ≈2 分 23 秒） |
+
+`busy` 由 `true` 转 `false`。端点核对：health `status:ok` / `databaseReady:true`；
+data-summary `issues: []` 且 counts 与迁移闸门时一致；`mobile/today` `state:valid` / `recoveryDate` 为当天；
+SPA `/` 与 `/settings` 均 200。
