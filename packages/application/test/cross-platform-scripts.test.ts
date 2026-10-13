@@ -184,6 +184,27 @@ test("「本次没有检查任何 iOS 源码」在 .sh 与 Node 两侧不漂移�
   }
 });
 
+test("pre-commit 的 iOS 段：门禁「跳过」不等于「放行」，必须有认账闸门", () => {
+  // 事故形状（2026-10-13）：`60678af` 在 Windows 上提交，`npm run test:ios` 按设计
+  // 打印跳过并 exit 0 ⇒ 钩子放行 ⇒ 6 条 Swift 类型错误进主干，而 message 写着"门禁全绿"。
+  // 下面四条各钉一件事，**都在注释剥掉之后按代码文本断言**（注释里引述那句跳过原话是说明，
+  // 不是漂移点；代码里再抄一份才是）。
+  const hook = readFileSync(resolve(".githooks/pre-commit"), "utf8");
+  const code = hook.split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+
+  assert.ok(code.includes("NO_IOS_SOURCE_CHECKED"),
+    "钩子必须从 scripts/run-ios.mjs 读哨兵常量：平台判断只许有一处，钩子自己判平台就会漂移");
+  assert.ok(!code.includes(iosRunner.NO_IOS_SOURCE_CHECKED),
+    "钩子代码里出现了跳过原话的字面量：`.sh` 与 Node 两份已被本文件上面那条测试钉住，第三份只会先漂移");
+  assert.ok(code.includes("RAI_IOS_UNVERIFIED"),
+    "必须留一个显式认账的逃生口：iOS 判据在非 macOS 上物理跑不了，硬拒会把提交逼到 --no-verify，"
+    + "而那一次会连带绕过 blob 上限 / typecheck / 文档引用 / 迁移冻结四道门禁");
+  assert.ok(code.includes("npm run test:ios"),
+    "认账闸门不能替代跑门禁本身：本机跑得动时必须真跑");
+});
+
 test("open:ios 在 macOS 打开 workspace，其它平台显式跳过且不假装打开", () => {
   const opened = openIos.planOpenIos({ platform: "darwin", exists: () => true });
   assert.equal(opened.command, "open");

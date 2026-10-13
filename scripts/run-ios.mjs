@@ -29,7 +29,7 @@
  *    本机实测以 1 退出，选它就是把"跳过"变回"红"。
  */
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, resolve, win32 } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -86,14 +86,24 @@ export const IOS_TARGETS = {
   }
 };
 
-/** Git for Windows 的 bash 候选路径；不含 System32 的 WSL 启动器（见文件头）。 */
+/**
+ * Git for Windows 的 bash 候选路径；不含 System32 的 WSL 启动器（见文件头）。
+ *
+ * 🔴 必须用 `path.win32.join`，不能用 `path.join`：这些是**那台 Windows 机器上的**路径，
+ * 分隔符不该随"谁在读这个规划函数"而变。用 `path.join` 时在 macOS 上会拼出
+ * `C:\PF/Git/bin/bash.exe`（混合分隔符）—— 生产里看不出来（只有 win32 才会真的拿它去
+ * `existsSync`，而那里 `path.join` 本来就是反斜杠），但
+ * `packages/application/test/cross-platform-scripts.test.ts` 那条
+ * 「win32 上找到 Git Bash 就把 gates 交给 .sh」的判据在 macOS 上**恒为假**：
+ * `exists` 永远不命中 ⇒ `'skip' !== 'run'`（2026-10-13 实测，干净 HEAD 上 node 套件因此恒红一条）。
+ */
 export function gitBashCandidates(env = process.env) {
   const programFiles = env.ProgramFiles ?? "C:\\Program Files";
   const programFilesX86 = env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
   return [
-    join(programFiles, "Git", "bin", "bash.exe"),
-    join(programFilesX86, "Git", "bin", "bash.exe"),
-    ...(env.LOCALAPPDATA ? [join(env.LOCALAPPDATA, "Programs", "Git", "bin", "bash.exe")] : [])
+    win32.join(programFiles, "Git", "bin", "bash.exe"),
+    win32.join(programFilesX86, "Git", "bin", "bash.exe"),
+    ...(env.LOCALAPPDATA ? [win32.join(env.LOCALAPPDATA, "Programs", "Git", "bin", "bash.exe")] : [])
   ];
 }
 

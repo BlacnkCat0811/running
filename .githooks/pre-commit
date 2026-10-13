@@ -26,9 +26,41 @@ node scripts/check-npm-scripts-portable.mjs
 #
 # 这里不做环境判断：`npm run test:ios` 自己会发现"非 macOS / 没有 Xcode"，
 # 打印「本次没有检查任何 iOS 源码」并跳过。把判断放一处，避免两边的条件漂移。
+#
+# 🔴 但「跑门禁可以跳过」与「提交可以放行」是两件事 —— 2026-10-13 付过代价：
+# `60678af` 在 Windows 上提交，`npm run test:ios` 按设计打印跳过并 **exit 0**
+# （`apps/ios/tests/run-ios-gates.sh` 判 `uname -s`；win32 且没有 Git Bash 时
+# `scripts/run-ios.mjs` 自己就返回 skip），于是钩子放行 —— 那棵树上
+# `apps/ios/RAI/HealthKitSync.swift` 带着 6 条类型错误进了主干，而 commit message
+# 写的是"10 支 iOS 结构门禁全绿"。**跳过与通过共用了一个 0。**
+# 所以下面加一道**认账**闸门：本机一个 iOS 判据都没跑 ⇒ 默认拒，要么去 macOS 上查，
+# 要么显式认账。跑门禁本身仍然照跳（那是 `run-ios.mjs` 的既定契约，动它会连带
+# 改掉 AGENTS.md 与 cross-platform-scripts.test.ts 里那两条判据）。
 if git diff --cached --name-only --diff-filter=ACMR -- apps/ios | grep -q .; then
   echo "pre-commit: apps/ios/ 有改动，跑 iOS 门禁"
-  npm run test:ios
+  ios_log="$(mktemp)"
+  # `tee` 保住实时输出（这扇门要跑几分钟，静默的钩子等于没有钩子），日志留给下面判"到底查没查"。
+  if ! npm run test:ios 2>&1 | tee "$ios_log"; then
+    rm -f "$ios_log"
+    exit 1
+  fi
+  # 哨兵从 Node 侧取，**不在钩子里抄第三份字符串**：`cross-platform-scripts.test.ts`
+  # 正在钉"`.sh` 与 Node 两侧不漂移"，钩子里再抄一份只会多一个漂移点。
+  ios_sentinel="$(node --input-type=module -e 'import { NO_IOS_SOURCE_CHECKED } from "./scripts/run-ios.mjs"; console.log(NO_IOS_SOURCE_CHECKED)')"
+  if grep -qF "$ios_sentinel" "$ios_log" && [ "${RAI_IOS_UNVERIFIED:-0}" != "1" ]; then
+    {
+      echo ""
+      echo "❌ 这台机器没有检查任何 iOS 源码（见上），但本次要提交 apps/ios/ 的改动。"
+      echo "   跳过 ≠ 通过：typecheck-ios.sh 与全部 iOS 回归一道都没跑。"
+      echo "   ⇒ 正解：在 macOS 上跑一次 npm run test:ios 再提交。"
+      echo "   ⇒ 确认接受这次未验证提交，请显式认账：RAI_IOS_UNVERIFIED=1 git commit ..."
+      echo "   ⛔ 不要改用 --no-verify：那会把 blob 上限 / typecheck / 文档引用 / 迁移冻结一起绕过。"
+      echo "   📌 这次提交的 message 不许写「iOS 门禁全绿」—— 本机一个 iOS 判据都没执行。"
+    } >&2
+    rm -f "$ios_log"
+    exit 1
+  fi
+  rm -f "$ios_log"
 fi
 
 # 迁移冻结校验和（`packages/storage-sqlite/src/database.ts`）的门禁：每个迁移都有冻结值、
