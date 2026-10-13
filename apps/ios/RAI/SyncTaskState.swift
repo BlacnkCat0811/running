@@ -76,6 +76,35 @@ nonisolated struct SyncTaskState: Codable {
     var lastLifecycleStopAt: Date?
     var lastBackgroundRunAt: Date?
 
+    // MARK: PR6 直连回执（全部 Optional）
+
+    /// 这一批的持久回执（§10.1）。
+    ///
+    /// 为什么要落盘而不是只留在 runtime 里：§10.1 的"重启丢进度"一行要求
+    /// **从主库 receipt/analysis jobs 恢复**，而 `HealthKitSync` 的 runtime 状态
+    /// 在进程被杀之后什么都不剩。留了 `receiptId` 才能对同一批做持久对账 ——
+    /// 也就是 §10.1 的"COMMIT后回复丢失：查询同scope/batch持久receipt，返回同一成功"：
+    /// 没有这份记录，同样的一批只能靠**重传字节**去换一个已经存在的结果。
+    var lastReceipt: DirectSyncReceipt?
+    /// 这一轮是否还没 drain 完（§5.1 / §10.2）。
+    ///
+    /// 唯一用途是"连续分页尚未 drain 完时，不清空后台待办意图"（§10.2 原文）：
+    /// 清空之后，用户不主动打开 App 就再也没人接着发下一批，而"导出过一批"
+    /// 并不等于 HealthKit 通知已全部处理（§5.1）。
+    ///
+    /// `Bool?` 而不是 `Bool`：老 payload 没有这个键，而"没有这个键"与"这一轮没剩下什么"
+    /// 是两件事 —— 读的人必须能分清"未记录"与"记录为 false"（见类型顶部的兼容纪律）。
+    var needsContinuation: Bool?
+    /// 分析那一半的**独立**结论（§1.4 / §9.1）。
+    ///
+    /// 为什么不从 `lastReceipt.analysisStatus` 读：`committed` 之后事实那一半就冻结了，
+    /// 而分析还在动（`queued → running → published`）。把进度写回 `lastReceipt` 就得
+    /// 改写那份"服务端当时提交了什么"的记录，于是对账时再也分不清
+    /// "服务端提交的是这一版分析"还是"客户端后来自己更新过"。两半各存各的，
+    /// 才对得上 §10.2 那句"新 iOS 看到 durable committed receipt 即可提交相应游标，
+    /// **分析另行跟踪**"。
+    var lastAnalysisStatus: DirectSyncAnalysisStatus?
+
     init(
         target: String,
         serverId: String? = nil,
@@ -101,7 +130,10 @@ nonisolated struct SyncTaskState: Codable {
         uploadRequestedAt: Date? = nil,
         uploadCompletedAt: Date? = nil,
         lastLifecycleStopAt: Date? = nil,
-        lastBackgroundRunAt: Date? = nil
+        lastBackgroundRunAt: Date? = nil,
+        lastReceipt: DirectSyncReceipt? = nil,
+        needsContinuation: Bool? = nil,
+        lastAnalysisStatus: DirectSyncAnalysisStatus? = nil
     ) {
         self.target = target
         self.serverId = serverId
@@ -128,6 +160,9 @@ nonisolated struct SyncTaskState: Codable {
         self.uploadCompletedAt = uploadCompletedAt
         self.lastLifecycleStopAt = lastLifecycleStopAt
         self.lastBackgroundRunAt = lastBackgroundRunAt
+        self.lastReceipt = lastReceipt
+        self.needsContinuation = needsContinuation
+        self.lastAnalysisStatus = lastAnalysisStatus
     }
 
     /// 显式解码：老键保持必填，新键一律 `decodeIfPresent`。
@@ -168,6 +203,15 @@ nonisolated struct SyncTaskState: Codable {
         uploadCompletedAt = try container.decodeIfPresent(Date.self, forKey: .uploadCompletedAt)
         lastLifecycleStopAt = try container.decodeIfPresent(Date.self, forKey: .lastLifecycleStopAt)
         lastBackgroundRunAt = try container.decodeIfPresent(Date.self, forKey: .lastBackgroundRunAt)
+        // §10.2「SyncTaskState 新增字段必须 Optional、显式 decodeIfPresent；
+        // 保留旧ZIP、batch和续传身份」—— 这三个键一个都不能用 `decode`：
+        // 老 payload 没有它们，`decode` 会让整份任务解不开，而 `loadTask` 用 `try?`，
+        // 于是"任务消失"，症状是升级后重导整个窗口。上面那些老键保持 `decode` 不变。
+        lastReceipt = try container.decodeIfPresent(DirectSyncReceipt.self, forKey: .lastReceipt)
+        needsContinuation = try container.decodeIfPresent(Bool.self, forKey: .needsContinuation)
+        lastAnalysisStatus = try container.decodeIfPresent(
+            DirectSyncAnalysisStatus.self, forKey: .lastAnalysisStatus
+        )
     }
 
     /// 落盘的那个字符串 → 闭集取值。老 payload 的 `recomputing` 在这里归一到 `importing`。

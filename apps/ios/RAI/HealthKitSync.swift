@@ -6,6 +6,61 @@ import HealthKit
 import UIKit
 #endif
 
+/// §10.3 的用户文案表：普通健康同步说给用户听的句子都从这里取。
+///
+/// 依据 `docs/SQLITE_DIRECT_SYNC_DESIGN.md` §10.3（用户文案）与 §10.2（回执兼容升级）。
+/// 为什么集中成一张表：这六句此前分散在多个调用点上，而 `HealthKitSync.swift` **不被任何
+/// 回归脚本编译**（见文件末尾的说明）—— 文案退回旧语义时没有任何一条判据看得见。
+/// 集中之后，"用户看到哪一句"与"它由哪个入口给出"都能被源码级门禁逐字断言。
+///
+/// 🔴 不要为了"去重"把 `saved` 与后面两个更长的句子拼起来（`saved + "，分析更新中"`）。
+/// 门禁按**逐字字面量**断言六句都在源码里；拼接会让其中两句从源码中消失，判据随即失效。
+/// 三句之间的重叠是这张表的形态，不是重复代码。
+///
+/// ⚠️ 本表只覆盖 §10.3 列出的六句。普通同步里还有几句描述**表外的真实状态**（等待 Apple
+/// 健康授权、等待上一次已在服务端跑起来的导入、恢复上次同步任务、把本批产物写到本地），
+/// §10.3 既没有给出对应句子、也没有把它们列进"移除"清单，因此原样保留 —— 不凭空造第七句。
+nonisolated enum DirectSyncCopy {
+    /// 读取阶段：导出跑步记录、心率/恢复数据，以及把本批打包。
+    static let readingIncrement = "正在读取健康增量"
+    /// 上传阶段：新建批次与「恢复已落盘的批次后继续上传」共用。
+    static let uploadingBatch = "正在上传本批数据"
+    /// 服务端接收阶段：本批事实与更正落库（§4.2 的那个事务）。
+    static let persistingRecords = "正在保存新增与更正记录"
+
+    /// 回执 `ingestStatus == committed` 且 `analysisStatus == not_required`：§9.1 明确
+    /// "本批在结构上不影响分析"**不是**"分析已完成"，所以这里不许说成 `analysisPublished`。
+    static let saved = "健康数据已保存"
+    /// 事实已提交、分析在排队或正在跑（§10.2：分析另行跟踪）。
+    static let savedAnalysisUpdating = "健康数据已保存，分析更新中"
+    /// 分析已发布。
+    static let analysisPublished = "分析已更新"
+    /// 事实已保存、分析失败：可重试的是**分析**，不要求用户重新导出 HealthKit（§10.1）。
+    static let savedAnalysisFailed = "健康数据已保存，分析更新失败，可重试分析"
+
+    /// 语义通知（`DirectSyncCursorPolicy.DirectSyncNotice`，判据在 T2 那边）→ §10.3 的收尾句。
+    ///
+    /// `nil` = 本批还没有"已完成"的话可说（事实还在收 / 回执被服务端拒了），调用方必须
+    /// 沿用今天的文案。判据刻意留在 T2 的 `notice(for:)`、这里只做"通知 → 句子"的映射：
+    /// 两处各判一次"什么算已保存"，迟早会分叉（而分叉的那一天，用户看到的是一句假话）。
+    static func completionCopy(for notice: DirectSyncCursorPolicy.DirectSyncNotice) -> String? {
+        switch notice {
+        case .factsSavedAnalysisNotRequired: return saved
+        case .factsSavedAnalysisPending: return savedAnalysisUpdating
+        case .factsSavedAnalysisPublished: return analysisPublished
+        case .factsSavedAnalysisFailed: return savedAnalysisFailed
+        case .savingFacts: return nil
+        }
+    }
+
+    /// 结论 + 尾注的复合规则：结论只能是"健康数据已保存"这一族，本批计数与导出告警都只做
+    /// 尾注 —— 不许把"分析是否更新"与"导入了多少次"混成一个结论（§10.3 的移除语义）。
+    static func composed(base: String, notes: [String]) -> String {
+        guard !notes.isEmpty else { return base }
+        return "\(base)（\(notes.joined(separator: "；"))）"
+    }
+}
+
 @Observable
 @MainActor
 final class HealthKitSync {
@@ -72,6 +127,17 @@ final class HealthKitSync {
     /// 它只影响失败之后的收尾：坏批次**不得**被登记成"待重试的失败批次"，
     /// 否则每次同步都会拿同一份字节再撞一次，而服务端的拒绝是确定性的 —— 同步永远好不了。
     private var abandonedBatch = false
+
+    /// 本次同步是否被 §10.2 的游标闸门拦下（`.hold`）：**既没失败、也没有结**。
+    ///
+    /// 为什么必须单独一个字段：`performSync` 结尾那段"收尾兜底"用
+    /// `lastError == nil && phase != failed/cancelled` 判断这一轮结没结，而闸门拦下的一轮
+    /// 在那两个通道里**表达不出来** —— 它不是失败（服务端可能已经提交了这批事实），
+    /// 但也绝不能算结（候选游标还留着等下一轮确认）。少了这个字段，兜底会清掉任务行、
+    /// 删掉本地产物，并把界面改口成"同步成功"。
+    ///
+    /// 每次 `performSync` 开头重置：它只描述**本轮**，与 `cancelCause` / `abandonedBatch` 同理。
+    private var cursorHoldThisRound = false
 
     var hasCompletedSync: Bool { lastSyncAt != nil }
 
@@ -733,6 +799,9 @@ final class HealthKitSync {
         cancelCause = .none
         abandonedBatch = false
         taskDecodeError = nil
+        // 闸门拦下的一轮只属于那一轮；不重置的话，下一次同步会被上一轮的 `.hold` 一直
+        // 挡在"收尾兜底"之外（任务行永远不清，界面永远停在未结态）。
+        cursorHoldThisRound = false
         #if os(iOS)
         isBusy = true
         let previousServerURL = activeServerURL
@@ -933,7 +1002,16 @@ final class HealthKitSync {
                     clearWatermark: restored.exportEnd == nil,
                     anchor: restored.pendingAnchor,
                     recordCursors: restored.pendingRecordCursors,
-                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
+                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                    receipt: finished.summary?.directSync,
+                    // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
+                    // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
+                    // 「保留旧等待含义」：它不会给我们回执，等就是自锁）。
+                    requiresReceipt: directSyncNegotiated,
+                    // 对账要用 `summary.analysisJobId`（服务端把那一批登记的分析任务交出来）：
+                    // 回执里的 `analysisStatus` 是 COMMIT 快照（恒 `queued`），
+                    // 只有这个 id 能让客户端在收尾之后问到一个**终态**（§10.3）。
+                    job: finished
                 )
                 return
             } catch {
@@ -988,7 +1066,13 @@ final class HealthKitSync {
                         clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
-                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
+                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
+                        // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
+                        // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
+                        // 水位与游标一个字都不写 ⇒ 下一轮照样 `unchanged` ⇒ **自锁**。
+                        // 推进水位与游标是这条路径的既有语义（ADR-004 的"清产物后提交"）。
+                        requiresReceipt: false
                     )
                     return
                 }
@@ -1001,19 +1085,29 @@ final class HealthKitSync {
                 try checkCancellation()
                 try updateTask(jobId: job.id, phase: .importing)
                 let jobId = job.id
-                // `waitForJob` 只在 `succeeded` 时返回，其余终态都抛错 ⇒ 走到下一行就是成功，
-                // 返回值本身没有别的用途（旧代码拿它去清 failedZip 记录，那套机制已删除）。
-                _ = try await waitForJob(id: jobId, on: serverURL)
+                // `waitForJob` 只在 `succeeded` 时返回，其余终态都抛错 ⇒ 走到下一行就是成功。
+                // 返回值**要接住**：§10.2 的持久回执就在这一次响应里，收尾文案与游标闸门
+                // 都靠它（旧代码把它丢掉，于是这条恢复分支永远说不出"健康数据已保存"）。
+                let finished = try await waitForJob(id: jobId, on: serverURL)
                 removeTaskArtifacts(payloadHash: restored.payloadHash)
                 try markSuccess(
-                    message: "已从上次同步任务恢复",
+                    message: resumedBranchMessage(fallback: "已从上次同步任务恢复", job: finished),
                     exportEnd: restored.exportEnd,
                     workoutCount: restored.workoutCount,
                     advanceWatermark: restored.exportEnd != nil,
                     clearWatermark: restored.exportEnd == nil,
                     anchor: restored.pendingAnchor,
                     recordCursors: restored.pendingRecordCursors,
-                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
+                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                    receipt: finished.summary?.directSync,
+                    // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
+                    // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
+                    // 「保留旧等待含义」：它不会给我们回执，等就是自锁）。
+                    requiresReceipt: directSyncNegotiated,
+                    // 对账要用 `summary.analysisJobId`（服务端把那一批登记的分析任务交出来）：
+                    // 回执里的 `analysisStatus` 是 COMMIT 快照（恒 `queued`），
+                    // 只有这个 id 能让客户端在收尾之后问到一个**终态**（§10.3）。
+                    job: finished
                 )
                 return
             } catch {
@@ -1050,7 +1144,8 @@ final class HealthKitSync {
         } else if let restored = restoredTask, unitStep == .upload, let persisted = restoredZip {
             do {
                 phase = SyncPhase.uploading.rawValue
-                message = "正在恢复已保存的健康数据批次"
+                // §10.3：续传已落盘的批次走同一条上传文案（`uploadingBatch`），不区分"恢复"这种内部差异。
+                message = DirectSyncCopy.uploadingBatch
                 // 大包上传不做自动重试：600s 超时 ×3 最坏阻塞 30 分钟，超过整个导入窗口，
                 // 也远超 iOS 后台任务的执行时限。**multipart 与 ZIP 都已落盘**，所以失败
                 // 不再是"白读一次 HealthKit"—— 下次同步会从这里接着传，且用的是同一个
@@ -1066,7 +1161,7 @@ final class HealthKitSync {
                 // `startImport` 之间才是"原子单元的中间"。少了它，恢复时又只能靠猜。
                 phase = SyncPhase.uploaded.rawValue
                 try updateTask(sourceId: sourceId, phase: .uploaded, uploadState: .completed)
-                message = "正在检查健康数据"
+                message = DirectSyncCopy.persistingRecords
                 let inspection = try await withRetry {
                     try await self.inspect(sourceId: sourceId, on: serverURL)
                 }
@@ -1082,28 +1177,43 @@ final class HealthKitSync {
                         clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
-                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
+                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
+                        // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
+                        // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
+                        // 水位与游标一个字都不写 ⇒ 下一轮照样 `unchanged` ⇒ **自锁**。
+                        // 推进水位与游标是这条路径的既有语义（ADR-004 的"清产物后提交"）。
+                        requiresReceipt: false
                     )
                 } else {
                     try checkCancellation()
                     phase = SyncPhase.importing.rawValue
-                    message = "正在导入并计算跑力"
+                    message = DirectSyncCopy.persistingRecords
                     let job = try await withRetry {
                         try await self.startImport(sourceId: sourceId, on: serverURL)
                     }
                     try checkCancellation()
                     try updateTask(jobId: job.id, phase: .importing)
-                    _ = try await waitForJob(id: job.id, on: serverURL)
+                    // 与 `.inspect` 续接分支同一条纪律：接住这次响应，回执要从它身上取。
+                    let finished = try await waitForJob(id: job.id, on: serverURL)
                     removeTaskArtifacts(payloadHash: restored.payloadHash)
                     try markSuccess(
-                        message: "已从保存的健康数据批次恢复导入",
+                        message: resumedBranchMessage(fallback: "已从保存的健康数据批次恢复导入", job: finished),
                         exportEnd: restored.exportEnd,
                         workoutCount: restored.workoutCount,
                         advanceWatermark: restored.exportEnd != nil,
                         clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
-                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor
+                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        receipt: finished.summary?.directSync,
+                        // 同上：`.upload` 恢复分支也真的等了一个 `jobId` 的终态。
+                        requiresReceipt: directSyncNegotiated,
+                        job: finished,
+                    // 对账要用 `summary.analysisJobId`（服务端把那一批登记的分析任务交出来）：
+                    // 回执里的 `analysisStatus` 是 COMMIT 快照（恒 `queued`），
+                    // 只有这个 id 能让客户端在收尾之后问到一个**终态**（§10.3）。
+                    job: finished
                     )
                 }
                 return
@@ -1271,7 +1381,9 @@ final class HealthKitSync {
             uncommittedArchive = nil
             try checkCancellation()
             phase = SyncPhase.uploading.rawValue
-            message = "正在上传 \(exported.workoutCount) 次跑步"
+            // §10.3 的进度文案不再带次数：这一批的次数是**尾注**（收尾那句的括号里），
+            // 进度说的只是 `uploadingBatch` 那一句。
+            message = DirectSyncCopy.uploadingBatch
             let sourceId = try await uploadWithRecovery(
                 zipURL: persisted,
                 payloadHash: payloadHash,
@@ -1281,7 +1393,7 @@ final class HealthKitSync {
             // 上传一返回就落 `uploaded`，理由同恢复分支：这是 D1 的中间态。
             phase = SyncPhase.uploaded.rawValue
             try updateTask(sourceId: sourceId, phase: .uploaded, uploadState: .completed)
-            message = "正在检查健康数据"
+            message = DirectSyncCopy.persistingRecords
             let inspection = try await withRetry {
                 try await self.inspect(sourceId: sourceId, on: serverURL)
             }
@@ -1301,12 +1413,14 @@ final class HealthKitSync {
                     anchor: pendingAnchor,
                     recordCursors: exported.recordCursors,
                     routeStates: exported.routeStates,
-                    routeDiscoveryCursor: exported.routeDiscoveryCursor
+                    routeDiscoveryCursor: exported.routeDiscoveryCursor,
+                    // 同两条恢复分支：`unchanged` 是对已存在批次的确认，没有新回执可等。
+                    requiresReceipt: false
                 )
             } else {
                 try checkCancellation()
                 phase = SyncPhase.importing.rawValue
-                message = "正在导入并计算跑力"
+                message = DirectSyncCopy.persistingRecords
                 let job = try await withRetry {
                     try await self.startImport(sourceId: sourceId, on: serverURL)
                 }
@@ -1322,7 +1436,16 @@ final class HealthKitSync {
                     anchor: pendingAnchor,
                     recordCursors: exported.recordCursors,
                     routeStates: exported.routeStates,
-                    routeDiscoveryCursor: exported.routeDiscoveryCursor
+                    routeDiscoveryCursor: exported.routeDiscoveryCursor,
+                    receipt: finished.summary?.directSync,
+                    // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
+                    // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
+                    // 「保留旧等待含义」：它不会给我们回执，等就是自锁）。
+                    requiresReceipt: directSyncNegotiated,
+                    // 对账要用 `summary.analysisJobId`（服务端把那一批登记的分析任务交出来）：
+                    // 回执里的 `analysisStatus` 是 COMMIT 快照（恒 `queued`），
+                    // 只有这个 id 能让客户端在收尾之后问到一个**终态**（§10.3）。
+                    job: finished
                 )
             }
         } catch {
@@ -1371,12 +1494,30 @@ final class HealthKitSync {
         // 在这之前就已经 `return` 了，所以这里多出来的 phase 判断是第二道锁：
         // 它挡的是"将来有人加一条不抛错的提前返回"，那种形态下会把一份**还没发出去**的
         // 批次连字节一起删掉 —— 而 `phase` 是唯一能反映这件事的字段。
-        let settled = lastError == nil && phase != SyncPhase.failed.rawValue
+        //
+        // 🔴 还要算上被游标闸门拦下的一轮（`cursorHoldThisRound`）：它**既没失败、也没结**，
+        // 上面那两个通道都看不见它。漏掉它的后果是任务行与候选游标被清掉、界面改口"成功"，
+        // 而 §10.2 要的恰恰是"未确认的批次留着等下一轮"。
+        let settled = !cursorHoldThisRound && lastError == nil && phase != SyncPhase.failed.rawValue
             && phase != SyncPhase.cancelled.rawValue
         if settled {
             if let batchHash { removeTaskArtifacts(payloadHash: batchHash) }
             guard clearTask() else { return }
             phase = SyncPhase.succeeded.rawValue
+        }
+        // 🔴 分析终态对账：**收尾之后**才做，而且**只在这一轮已经收尾**时做。
+        //
+        // 位置的两条理由：
+        //   * `markSuccess` 的 `commitSuccess`（游标提交）已经跑完 —— 这一行以下改不了
+        //     "原始事实已保存"这个结论，它只能改`message`那句给人看的话（§14.2 A17）；
+        //   * 被游标闸门拦下的那一轮（`cursorHoldThisRound`）与失败/取消都进不了 `settled`，
+        //     所以这里天然只覆盖"真的收到了持久回执"的那一轮。
+        //
+        // 同步整体被取消时不再发这一次请求：用户刚刚按下取消，再补一个网络往返既违背他的
+        // 意图，也会在后台额度紧张时抢时间（能省则省，而这一句结论下一轮照样会有）。
+        if settled, !Task.isCancelled, !cursorHoldThisRound,
+           let serverURL = activeServerURL, !activeToken.isEmpty {
+            await reconcilePendingAnalysis(serverURL: serverURL, apiToken: activeToken)
         }
         #else
         lastError = "读取 Apple 健康只能在 iPhone 上进行"
@@ -1417,6 +1558,20 @@ final class HealthKitSync {
         return true
     }
 
+    /// 服务端有没有宣告 §10.2 的回执能力（`/v1/handshake` 的 `factsAnalysisContractVersion`）。
+    ///
+    /// 它是调用点决定 `requiresReceipt` 的唯一依据：**宣告了** = 这一轮跑过导入作业时应该
+    /// 能等到一份持久回执；**没宣告** = 老服务端，§10.2 的原文是「保留旧等待含义」——
+    /// 拿它的 `succeeded` 去等一份永远不会来的回执，只会让游标再也推不动（自锁）。
+    ///
+    /// ⚠️ 判据只到"有没有宣告"这一层，**不在这里判版本下界**：`false` 与 `true` 的语义差别
+    /// 是"适不适用这套判据"，而不是"值够不够新"。值 `>= 1` 的比较住在
+    /// `DirectSyncCursorPolicy.decision` 里（那正是 `server_contract_missing` 存在的理由：
+    /// 给了回执却宣告了一个过低的能力位，是一份自相矛盾的回答，方向只能往安全处倒）。
+    private var directSyncNegotiated: Bool {
+        activeIdentity.flatMap(HealthSyncIdentityPublisher.directSyncCapabilityVersion) != nil
+    }
+
     /// 成功收尾：**一次事务**把「水位前进/清空 + 任务行清空」落下去，然后才更新展示字段。
     ///
     /// 与改造前的区别（V2.1 规范 §2 原则 3「单状态源真相」）：
@@ -1435,6 +1590,18 @@ final class HealthKitSync {
     /// - Parameter routeStates: 本轮实际查询过的 workout 的伴生 Route 状态（键 = workout uuid）。
     ///   默认空 —— 只有**从导出一路走到底**的那两条分支有得传（`SyncAtomicUnit` 的续传分支
     ///   是接着一份已经落盘的本地产物走，没有本轮导出，也就没有新的观测）。
+    /// - Parameter receipt: 服务端 `summary.directSync` 的持久回执（§10.1）。`nil` = 没拿到
+    ///   （老服务端 / 旧候选链路 / 本次没有导入任务）—— 调用方**必须**沿用今天的文案，
+    ///   并把游标交给闸门去判，不许把单一 `succeeded` 当成回执（§10.2）。
+    /// - Parameter requiresReceipt: 这一轮的水位/游标是不是**只有在拿到服务端持久回执之后才敢
+    ///   提交**（§10.2）。传 `false` 的调用点必须说得出"这一轮为什么没有新回执可等"：
+    ///   * 老服务端（能力位缺失，见 `directSyncNegotiated`）—— §10.2「保留旧等待含义」；
+    ///   * `POST /v1/imports/inspect` 回 `unchanged` 的收尾 —— 服务端明确回答"这批不必导入"，
+    ///     那是对**已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
+    ///     本地"清产物后提交"的顺序本身就是 ADR-004 的要求，没有新回执可等。
+    ///   这两种路径若照旧要求回执，就会 `.hold("no_receipt")` ⇒ 水位与游标一个字都不写 ⇒
+    ///   下一轮服务端照样回 `unchanged` ⇒ **自锁**。
+    ///   默认取安全侧（`true`）：新增调用点忘了写就会走回执判据，而不会静默推进游标。
     private func markSuccess(
         message: String,
         exportEnd: Date?,
@@ -1445,7 +1612,10 @@ final class HealthKitSync {
         recordCursors: Data? = nil,
         recordWorkoutCount: Bool = true,
         routeStates: [String: RouteSyncRecord] = [:],
-        routeDiscoveryCursor: String? = nil
+        routeDiscoveryCursor: String? = nil,
+        receipt: DirectSyncReceipt? = nil,
+        requiresReceipt: Bool = true,
+        job: ImportJobResponse? = nil
     ) throws {
         try checkCancellation()
         guard SyncStateCommitPlan.mayCommit(phase: SyncPhase.migrate(phase)) else {
@@ -1453,8 +1623,96 @@ final class HealthKitSync {
             // （把"这次没读到"记成"数据没有变化"，那段健康数据从此不再进入任何一次导出）。
             // 宁可让本次同步失败，也不许把 anchor 推上去。
             phase = SyncPhase.failed.rawValue
-            lastError = "同步正在等待设备解锁或等待重新登录，本次不推进导出水位。"
+            lastError = Self.blockedCommitText
             throw SyncHTTPError(message: lastError ?? "同步处于阻塞状态")
+        }
+        // 🔴 §10.2 的闸门：**先看回执，再决定要不要提交这一页的候选游标**。
+        //
+        // 判据不住在这里（住 `DirectSyncCursorPolicy`）的理由与 `SyncPhase` / `HealthSyncBlockedRecovery`
+        // 同源：`HealthKitSync.swift` 不被任何回归脚本编译，判据写在这里只能靠真机复现。
+        // 这里只负责"把两个维度如实报进去、拿到结论之后怎么办"。
+        //
+        // 两个维度都是**语义入签名**，刻意不做隐式短路（本批踩过的形态正是"一处豁免、
+        // 另一处没豁免"：`needsContinuation` 当时豁免了老服务端，闸门那一侧漏了）：
+        //   - `pendingCursorsPresent: recordCursors != nil` = **这一轮有没有 v2 页游标要提交**
+        //     （`HealthKitExportResult.recordCursors` / `SyncTaskState.pendingRecordCursors`
+        //     那份 blob），与"有没有 anchor"是两件事；
+        //   - `requiresReceipt` = 这一轮的游标**是不是只有服务端确认后才敢提交**（见形参说明）。
+        //
+        // ⚠️ `pendingCursorsPresent` 在本客户端上**恒为真**（`HealthKitExportResult.recordCursors`
+        // 非可选）—— 所以真正把"`unchanged` 收尾 / 老服务端"与"跑了导入作业的收尾"分开的，
+        // 是 `requiresReceipt` 这一个 Bool，而不是它。
+        let directSyncCapabilityVersion = activeIdentity.flatMap(
+            HealthSyncIdentityPublisher.directSyncCapabilityVersion
+        )
+        let cursorDecision = DirectSyncCursorPolicy.decision(
+            serverContractVersion: directSyncCapabilityVersion,
+            receipt: receipt,
+            pendingCursorsPresent: recordCursors != nil,
+            requiresReceipt: requiresReceipt,
+            phase: SyncPhase.migrate(phase)
+        )
+        // §5.1 + §10.2：「还要不要接着发下一批」= 这一轮有没有 drain 完。
+        // 今天的导出把每种样本**读到空页为止**（`HealthKitRecordCursor.drain`：`added` 与
+        // `deleted` 同时为空才收手），所以 `hasMorePages` / `deletionOnlyPage` 恒为假 ——
+        // 续接只可能来自**回执那一半**：未确认的批次不算 drain 完。
+        // `requiresReceipt == false` 时那一半也不适用（这一轮没有"未确认批次"这回事），
+        // 判据与出口同样住在 `DirectSyncCursorPolicy` 里，这里不另写一份。
+        let needsContinuation = DirectSyncCursorPolicy.continuationNeeded(
+            hasMorePages: false,
+            receipt: receipt,
+            deletionOnlyPage: false,
+            requiresReceipt: requiresReceipt
+        )
+        if case let .hold(reason) = cursorDecision {
+            // §10.2 / §5.1：没有 durable committed receipt 就**不提交**候选游标 ——
+            // 提交了它，这一页覆盖的那段窗口再也不会被重读（与 `mayAdvanceAnchor` 同一条纪律，
+            // 只是这次的"没读到"换成了"没被确认"）。
+            //
+            // 具体动作：
+            //   1. `anchor` / `recordCursors` **一个字都不写**：不调用 `commitSuccess`，
+            //      那一行连同它的候选游标原样留在盘上等下一轮确认；
+            //   2. 回执与"仍需续接"写进那一行（§10.1 的「重启丢进度：从主库 receipt /
+            //      analysis jobs 恢复」），且这条写入**不认领**后台待办意图
+            //      （见 `persistPendingReceipt` 与 `saveTask` 的区别）；
+            //   3. 报告**按理由分流** —— `.hold` 的四种理由里只有一种是真的"没成"。
+            //
+            // 🔴 `cursorHoldThisRound` 必须置：`performSync` 的收尾兜底用
+            // `lastError == nil && phase != failed/cancelled` 判"这一轮结了没有"，而闸门拦下的
+            // 一轮**既没失败、也没结** —— 那个判据里表达不出来。不置它，兜底会把任务行连同
+            // 候选游标一起清掉，界面还会改口说"同步成功"。
+            cursorHoldThisRound = true
+            switch reason {
+            case DirectSyncCursorPolicy.notCommittedReason:
+                // 回执**明确**说这一批的事实还没提交（`receiving` / `validating` / `applying`，
+                // 或 `rejected`）：这是真的"没成"，如实报成失败态。
+                lastError = Self.uncommittedBatchText
+                message = lastError
+                phase = SyncPhase.failed.rawValue
+            case DirectSyncCursorPolicy.noReceiptReason,
+                 DirectSyncCursorPolicy.serverContractMissingReason:
+                // 这两种**不是失败**（§10.1：COMMIT 后回复丢失 ⇒ 查询同一回执、返回同一成功）：
+                // 服务端要么已经收下并提交了这一批、只是回执没带（`serverContractMissing` 走到
+                // 这里时 `receipt.isCommitted` 已经为真），要么客户端一个回执都没拿到。
+                // 所以**不置 `lastError`、不置 `failed`**：§14.2 A17 要求 raw COMMIT 之后界面
+                // 能说"已保存 / 分析更新中"，一句失败会把它盖掉 —— 那等于客户端替服务端
+                // 否认一条**已经落盘**的事实。`phase` 也不动：这一轮既没有结，也没有失败。
+                if receipt?.isCommitted == true {
+                    // 主句仍是调用方那句 §10.3 文案（已提交 ⇒ 事实那一半是真的），
+                    // "游标保留待确认"只做**尾注**，不抢主语。
+                    message = message + Self.cursorHoldNote
+                } else {
+                    // 一个回执都没有：只说"没被确认"，不说"失败"—— 这件事没有被证伪。
+                    message = Self.unconfirmedBatchText
+                }
+            default:
+                // `blocked`：上游 `mayCommit` 已经拦过一次，这里用**同一句话**兜底。
+                lastError = Self.blockedCommitText
+                message = lastError
+                phase = SyncPhase.failed.rawValue
+            }
+            persistPendingReceipt(receipt, needsContinuation: needsContinuation)
+            return
         }
         let watermark = SyncStateCommitPlan.watermark(
             advance: advanceWatermark,
@@ -1464,11 +1722,21 @@ final class HealthKitSync {
         let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(
             checkpoint: .syncCommitted,
             persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors) },
-            acknowledge: { acknowledgeBackgroundIntent(checkpoint: $0) }
+            acknowledge: { checkpoint in
+                // §10.2「连续分页尚未 drain 完时，不清空后台待办意图」：认领了它，用户不打开
+                // App 就再也没人接着发下一批。`persistThenAcknowledge` 因此**不再**无条件确认，
+                // 判据就在这一行。
+                guard !needsContinuation else { return }
+                acknowledgeBackgroundIntent(checkpoint: checkpoint)
+            }
         )
         guard committed else {
             throw SyncHTTPError(message: taskStore.lastError ?? "同步进度未能保存")
         }
+        // 🔴 游标**已经提交**（上面那个 `guard`），所以从这里往下都不再影响"事实已保存"这个结论。
+        // 把"这一批的分析任务"写进**独立于任务行**的对账槽：`commitSuccess` 刚刚把任务行删了，
+        // 而分析终态要在提交**之后**才去问 —— 结论必须落在一个活得比任务行长的地方。
+        recordPendingAnalysisReconcile(receipt: receipt, job: job)
         // 🔴 「降频记忆」只能在**这次同步已经被判定成功之后**落盘，而且必须排在
         // `commitSuccess` 之后。反过来的话会出现一个不可自愈的窗口：状态机把某个 workout
         // 记成"已稳定、可以少查"，而这一批数据**从未真正交付到服务端**（上传失败、导入失败、
@@ -1514,6 +1782,165 @@ final class HealthKitSync {
         phase = SyncPhase.succeeded.rawValue
     }
 
+    // MARK: 分析终态对账（§10.2「分析另行跟踪」/ §10.3 后两句文案）
+
+    /// 把"这一批的分析任务"写进**对账槽**（`SyncTaskStore.sync_analysis_reconcile`）。
+    ///
+    /// 为什么此刻才写、且写在**提交之后**：`commitSuccess` 已经在同一个事务里把任务行删了
+    /// （`SyncTaskStore.commitSuccess` 自述"要么都成、要么都不成"），所以从这一行往下，
+    /// 盘上唯一还记得"这批分析要跟踪"的地方就是本槽。写在提交**之前**是不行的：
+    /// 那一轮的游标还没被确认，事实那一半还没有结论，对账槽会先于事实对外说"已保存"。
+    ///
+    /// 回执里的 `analysisJobId` 由服务端给出（`ImportJobResponse.summary.analysisJobId`）：
+    /// * 非空 ⇒ 这是一条要跟踪的分析任务；
+    /// * `null` ⇒ 服务端如实回答"本批不登记分析任务"（`record-only`）⇒ 没有要跟踪的东西；
+    /// * 缺键（`nil`）⇒ 老服务端 / 旧候选链路，同样不跟踪。
+    ///
+    /// 写失败**不抛错**（这是展示/跟踪的记账，不是同步的一部分）：只在日志里留一条。
+    /// 让一次**已经成功**的同步因为一句"待对账"没写上而变红，是 §14.2 A17 明确禁止的方向。
+    private func recordPendingAnalysisReconcile(receipt: DirectSyncReceipt?, job: ImportJobResponse?) {
+        guard let receipt, let jobId = job?.summary?.analysisJobId, !jobId.isEmpty else { return }
+        let payload = DirectSyncAnalysisReconcile(
+            receiptId: receipt.receiptId,
+            ingestStatus: receipt.ingestStatus,
+            analysisStatus: receipt.analysisStatus,
+            analysisJobId: jobId,
+            observedAt: Date()
+        )
+        guard let data = try? JSONEncoder().encode(payload),
+              taskStore.saveAnalysisReconcile(data, scope: activeScope) else {
+            NSLog("[RAI] analysis reconcile slot write failed: %@", taskStore.lastError ?? "unknown")
+            return
+        }
+    }
+
+    /// 收尾之后**一次**有界的分析终态对账：问一次 `GET /v1/jobs/:id`，把终态落到对账槽并按它改口。
+    ///
+    /// ## 它为什么是现在这个样子
+    ///
+    /// * **只在本次同步已经收尾之后跑**（调用点在 `performSync` 的 `settled` 分支里）。
+    ///   这一步是**展示/状态**对账，不是同步的一部分：§14.2 A17 的"raw COMMIT 后可显示
+    ///   已保存"那一半已经由 `markSuccess` 定稿，对账只允许在它**之后**改一句结论。
+    /// * **一次同步最多一次请求，失败即放弃，不重试、不阻塞**。所以这里没有循环、
+    ///   没有 `withRetry`：一个跑不动的对账不该拖住用户的下一次同步，也不该把一次
+    ///   成功的同步拖成超时。
+    /// * **任何失败都不置 `phase` / `lastError`**：对账拿不到终态的正确表现是"这句结论
+    ///   暂时维持不变"（界面继续说「分析更新中」），而不是"同步失败"。这条区分是整轮的要害：
+    ///   把一次成功的同步报成失败，比暂时少说一句"分析已更新"严重得多。
+    /// * **不改写回执**（§8.5）：回执没有被碰过，这里改的只是对账槽与自己重算的 `message`。
+    ///
+    /// ⚠️ 已知边界（如实写下来，不在本轮假装解决）：重启之后 `message` 是空的
+    /// （它是 `@Observable` 的 runtime 字段），所以"重启后接着对账"要等**下一次同步收尾**
+    /// 才会把结论重新说给用户听。对账槽已经把 `receiptId` / `analysisJobId` 存下来了，
+    /// 那一步需要的全部信息都在；今天缺的只是一个"冷启动主动对账"的触发点。
+    private func reconcilePendingAnalysis(serverURL: URL, apiToken: String) async {
+        guard let data = taskStore.loadAnalysisReconcile(scope: activeScope),
+              let pending = try? JSONDecoder().decode(DirectSyncAnalysisReconcile.self, from: data),
+              pending.needsReconcile, let jobId = pending.analysisJobId else { return }
+        // 回执本体没有落盘（`SyncTaskState` 那一行已经随任务清掉了），所以这里按对账槽的
+        // 事实重建一份**只用于判据**的回执。它只喂给 `reconcileAnalysis`，不写回任何地方 ——
+        // §8.5 说的"消费者不得改写回执"因此仍然成立：我们改的是**副本**。
+        // `publishedReleaseId` / `parentBatchId` 用不上（它们不参与分析终态判据），如实填 `nil`。
+        let receipt = DirectSyncReceipt(
+            ingestStatus: pending.ingestStatus,
+            receiptId: pending.receiptId,
+            analysisStatus: pending.analysisStatus,
+            dependencyGeneration: nil,
+            publishedReleaseId: nil,
+            parentBatchId: nil
+        )
+        let status: NativeJobStatus
+        do {
+            status = try await api.job(id: jobId, baseURL: serverURL, token: apiToken)
+        } catch {
+            // 拿不到就**什么都不做**：不写槽、不改口、不报错。日志留一条是为了将来
+            // "为什么一直停在分析更新中"能查到是网络还是任务真的还在跑。
+            // `startedAtMs` 之类的诊断信息这里刻意不打：日志不该出现任务 id 之外的载荷。
+            NSLog("[RAI] analysis reconcile request failed (job %@): %@", jobId, String(describing: error))
+            return
+        }
+        // `jobFailed` 的来源：服务端在读侧对失败任务给 `error.code = "task_failed"`
+        // （`apps/api/src/data.ts` 的 `mapJobFromDomain`）。**不能**只用 `status == "failed"` 推：
+        // 「用户取消」与「执行失败」在服务端都是任务停下来了，而 §10.1 只允许把后者说成
+        // "分析更新失败，可重试分析"。
+        let jobFailed = status.error?.code == "task_failed"
+        guard let reconciled = DirectSyncCursorPolicy.reconcileAnalysis(
+            receipt: receipt, jobStatus: status.status, jobFailed: jobFailed
+        ) else { return }
+
+        var updated = pending
+        updated.analysisStatus = reconciled
+        updated.observedAt = Date()
+        if let encoded = try? JSONEncoder().encode(updated) {
+            // 写失败只是"下次还要再问一遍"，同样不许影响这次同步的结论。
+            if !taskStore.saveAnalysisReconcile(encoded, scope: activeScope) {
+                NSLog("[RAI] analysis reconcile slot update failed: %@", taskStore.lastError ?? "unknown")
+            }
+        }
+        // 重新算那句话：`markSuccess` 传进来的是**提交前**算好的那一句（当时只能看到
+        // `queued`），终态到达之后它必须改成 §10.3 的后两句之一。走**同一个**入口
+        // （`directSyncCompletionBase` → `DirectSyncCursorPolicy.notice(for:)` → `DirectSyncCopy`），
+        // 所以"哪种回执说什么话"仍然只有一份判据，这里不另写映射。
+        if let base = directSyncCompletionBase(receipt: receipt, reconciledAnalysisStatus: reconciled) {
+            message = base
+        }
+    }
+
+    /// 阻塞态兜底：与 `markSuccess` 开头那道 `mayCommit` 守卫用**同一句话**
+    /// （走到这里说明调用点漏了阻塞态的前置返回）。
+    private static let blockedCommitText = "同步正在等待设备解锁或等待重新登录，本次不推进导出水位。"
+
+    /// `.hold` 的**尾注**（不是主句）：这一批的游标还留着，下次同步接着确认。
+    ///
+    /// 它只做尾注的理由见 `.hold` 的 `noReceiptReason` / `serverContractMissingReason` 分支：
+    /// 事实可能**已经**落盘，"游标待确认"是客户端的对账状态，不该抢"健康数据已保存"的主语。
+    private static let cursorHoldNote = "（本批游标保留待确认，下次同步继续确认）"
+
+    /// `.hold` 且**一个回执都没拿到**时的如实说法：没有失败，只是还没被确认。
+    ///
+    /// 🔴 不许写成"失败"：§10.1 把「COMMIT 后回复丢失」定义为"查询同一回执、返回同一成功"，
+    /// 而不是错误。客户端手里没有回执 ≠ 服务端没有提交（这件事**没有被证伪**）。
+    private static let unconfirmedBatchText = "本批健康数据还没有被服务端确认，游标已保留待下次确认"
+
+    /// 回执**明确**说这批事实尚未提交（`receiving` / `validating` / `applying` / `rejected`）：
+    /// 这一条才配叫"没成"，落失败态。
+    private static let uncommittedBatchText = "服务端还没有提交本批事实，本批游标已保留待下次确认。"
+
+    /// 把回执与「仍需续接」写进**已经存在**的任务行，且**不认领**后台待办意图。
+    ///
+    /// 与 `saveTask` 只差最后那一步，而那一步正是 §10.2 要求的：「连续分页尚未 drain 完时，
+    /// 不清空后台待办意图」。`saveTask` 走的是 `persistThenAcknowledge(checkpoint: .taskPersisted)`，
+    /// 它在任务落盘的同时把健康数据通知确认掉 —— 在**批次还没被服务端确认**的时候，那条通知
+    /// 仍然代表"有一批数据没同步完"，认领了它，用户不打开 App 就再也没人接着发。
+    ///
+    /// 任务行必须已经存在：`markSuccess` 的每个调用点都在此之前 `saveTask` 过（恢复分支也是
+    /// 先从盘上读出来的）。读不到就**什么都不写** —— 没有行可更新不是错误，硬造一行反而会
+    /// 让"这一 scope 从未提交过"的判据（`loadCommittedState`）失真。
+    ///
+    /// 🔴 这里**不**碰 `hasPendingTask`：它不是"进度写点"（本函数也没有新增任何进度），
+    /// 而在这个调用点上它必然已经是 `true`（新建路径由 `saveTask` 落，恢复路径由
+    /// `performSync` 的 `hasPendingTask = restoredTask != nil` 落）。多一个写入点就等于
+    /// 界面可以凭空说"还有一批没走完"——那条计数判据在
+    /// `apps/ios/tests/check-background-capabilities.py` 里是按**写入点个数**钉死的。
+    private func persistPendingReceipt(_ receipt: DirectSyncReceipt?, needsContinuation: Bool) {
+        guard var task = loadTask() else { return }
+        task.lastReceipt = receipt
+        task.needsContinuation = needsContinuation
+        // 单独一个字段而不是读 `lastReceipt?.analysisStatus`：`committed` 之后事实那一半就冻结了，
+        // 而分析还在动（`queued → running → published`），T5 的对账会把新终态写在这里。
+        task.lastAnalysisStatus = receipt?.analysisStatus
+        guard let data = try? JSONEncoder().encode(task) else {
+            NSLog("[RAI] pending receipt could not be encoded; the batch stays unconfirmed")
+            return
+        }
+        guard taskStore.save(data, scope: activeScope) else {
+            // 写不进去**不改变结论**：游标本来就没提交，任务行还在，下一轮照样会重新确认。
+            // 只是这条回执的痕迹丢了 —— 如实记日志，不把整次同步改成"失败得更彻底"。
+            NSLog("[RAI] pending receipt write failed: %@", taskStore.lastError ?? "unknown")
+            return
+        }
+    }
+
     #if os(iOS)
     /// 服务端 `summary` → "这一批新增/更新了几次跑步"；零新增（或根本没有摘要）时返回 `nil`。
     ///
@@ -1531,6 +1958,12 @@ final class HealthKitSync {
     }
 
     private func importMessage(exported: HealthKitExportResult, job: ImportJobResponse) -> String {
+        // §10.2 / §10.3：**先看回执**。有回执就按回执说（"健康数据已保存…"这一族），
+        // 没有回执（老服务端 / 旧候选链路）就**逐字**沿用今天的文案 —— 单一 `succeeded`
+        // 不能被解释成"分析已完成"，也不能因为服务端没升级就改口。
+        if let base = directSyncCompletionBase(receipt: job.summary?.directSync) {
+            return exportMessage(base: base, exported: exported, notes: importCountNotes(job: job))
+        }
         let base = importedSummaryText(job: job)
             ?? (job.summary == nil
                 ? "已从 Apple 健康导入 \(exported.workoutCount) 次跑步"
@@ -1544,8 +1977,66 @@ final class HealthKitSync {
     /// 与 `importMessage` 的差别只有零新增那一格：这条路上没有本轮的
     /// `HealthKitExportResult` 可看，所以只能说"已是最新"，不能替它编一句
     /// "已同步 Apple 健康记录"（那是给"本轮确实读到了记录但没有新增行"用的）。
+    /// 回执那一格与 `importMessage` **共用**同一个入口（§10.2：所有恢复分支同一套回执规则）。
     private func resumedImportMessage(job: ImportJobResponse) -> String {
-        importedSummaryText(job: job) ?? "Apple 健康数据已是最新"
+        if let base = directSyncCompletionBase(receipt: job.summary?.directSync) {
+            return DirectSyncCopy.composed(base: base, notes: importCountNotes(job: job))
+        }
+        return importedSummaryText(job: job) ?? "Apple 健康数据已是最新"
+    }
+
+    /// 恢复分支（`.inspect` 续接 / 续传已落盘的批次）走到 `waitForJob` 成功之后的收尾文案。
+    ///
+    /// §10.2 的「所有恢复分支都处理相同 receipt 规则，不能只改新建同步入口」就落在这里：
+    /// 这两条分支今天各自说一句"已从…恢复"，那在回执缺席时是**唯一**能说的话（逐字保留），
+    /// 而一旦拿到回执，就该与新建入口说同一套话。
+    private func resumedBranchMessage(fallback: String, job: ImportJobResponse) -> String {
+        guard let base = directSyncCompletionBase(receipt: job.summary?.directSync) else { return fallback }
+        return DirectSyncCopy.composed(base: base, notes: importCountNotes(job: job))
+    }
+
+    /// 回执（可带一次对账到的分析终态）→ §10.3 的收尾**主句**；`nil` = 不说（没有回执 /
+    /// 事实还在收 / 回执被拒），调用方必须沿用今天的文案。
+    ///
+    /// 形参刻意是 `DirectSyncReceipt` + 一个**可选的分析状态覆盖**，而不是整个
+    /// `ImportJobResponse`：回执里的 `analysisStatus` 是服务端 **COMMIT 时刻**的快照
+    /// （`apps/api/src/direct-sync-ingest.ts` 写 `queued`），真正到 `published` / `failed`
+    /// 要等分析跑完 —— 那一步由 task-5 的**对账**提供（`markSuccess` 之后一次有界的终态查询）。
+    /// 收尾文案只认状态，谁拿到终态谁喂进来，本层不负责去挖。
+    ///
+    /// ⚠️ 今天的生产路径上 `reconciledAnalysisStatus` 恒为 `nil`，而回执本身在 COMMIT 时只会是
+    /// `queued` / `not_required` ⇒ `analysisPublished` / `savedAnalysisFailed` 两句**今天不可达**。
+    /// 它们是 §10.3 要求的三句之二，**不要因为"没人走"就删掉**：对账落地后由它喂进来。
+    private func directSyncCompletionBase(
+        receipt: DirectSyncReceipt?,
+        reconciledAnalysisStatus: DirectSyncAnalysisStatus? = nil
+    ) -> String? {
+        // 对账喂进来的终态要过**同一个** `notice(for:)`：把分析状态替换进一份回执副本，
+        // 于是"哪种回执该说什么"只有 T2 那一份判据（`DirectSyncNotice`），本层只负责
+        // "通知 → §10.3 的句子"。两处各判一次，迟早会分叉。
+        let effective: DirectSyncReceipt?
+        if let receipt, let reconciledAnalysisStatus {
+            effective = DirectSyncReceipt(
+                ingestStatus: receipt.ingestStatus,
+                receiptId: receipt.receiptId,
+                analysisStatus: reconciledAnalysisStatus,
+                dependencyGeneration: receipt.dependencyGeneration,
+                publishedReleaseId: receipt.publishedReleaseId,
+                parentBatchId: receipt.parentBatchId
+            )
+        } else {
+            effective = receipt
+        }
+        guard let notice = DirectSyncCursorPolicy.notice(for: effective) else { return nil }
+        return DirectSyncCopy.completionCopy(for: notice)
+    }
+
+    /// 尾注：本批"导入/更新了几次跑步"。
+    ///
+    /// 它**只能是尾注**：§10.3 要求结论说"健康数据已保存"这一族，把计数与"分析是否更新"
+    /// 混成同一个结论正是这一节要移除的旧语义。没有摘要（老服务端）时给出空数组。
+    private func importCountNotes(job: ImportJobResponse) -> [String] {
+        [importedSummaryText(job: job)].compactMap { $0 }
     }
 
     private func latestMessage(base: String, warnings: [String]) -> String {
@@ -1562,7 +2053,10 @@ final class HealthKitSync {
     /// comes back with nothing at all, the honest move is to name the possibility
     /// rather than report "已是最新" over data the app may never have been allowed
     /// to see.
-    private func exportMessage(base: String, exported: HealthKitExportResult) -> String {
+    ///
+    /// - Parameter notes: 结论之外的尾注（本批计数）。与 `warnings` 处在**同一对括号**里，
+    ///   否则"健康数据已保存，分析更新中（3 次跑步）（一条告警）"会套两层括号。
+    private func exportMessage(base: String, exported: HealthKitExportResult, notes: [String] = []) -> String {
         // `routeCount` 自 T1（按 workout 定频）起语义为「本轮**实际查询到**的 workout 数」，
         // 不再等于「窗口内有轨迹的 workout 数」；降频后它必然偏小，但这**不是 bug**。
         // 此处只把三者当成「这一轮有没有读到任何东西」的判据（任一非 0 即非空导出），
@@ -1570,9 +2064,9 @@ final class HealthKitSync {
         // —— 它会给出一个偏小的数且不报错。详见 `HealthKitExportResult.routeCount` 的声明注释。
         guard exported.workoutCount == 0, exported.recordCount == 0, exported.routeCount == 0,
               exported.deletionCount == 0 else {
-            return latestMessage(base: base, warnings: exported.warnings)
+            return latestMessage(base: base, warnings: notes + exported.warnings)
         }
-        return latestMessage(base: base, warnings: exported.warnings + [Self.emptyExportHint])
+        return latestMessage(base: base, warnings: notes + exported.warnings + [Self.emptyExportHint])
     }
 
     private static let emptyExportHint =
@@ -2234,6 +2728,16 @@ private struct ImportJobResponse: Decodable {
 private struct ImportJobSummary: Decodable {
     let insertedWorkouts: Int?
     let updatedWorkouts: Int?
+    /// §10.1 / §10.2 的持久回执。**可选**：老服务端不带这个键 ⇒ `nil` = 没有回执，
+    /// 于是"游标推不推"由 `DirectSyncCursorPolicy` 决定，文案沿用今天的说法。
+    /// 不许给它兜默认值：一份"看起来像回执"的合成物比没有回执危险得多。
+    let directSync: DirectSyncReceipt?
+    /// 本次分析任务 id，供 task-5 的分析终态对账使用（服务端在回执里带上它）。
+    ///
+    /// ⚠️ 本文件今天**不消费**它：对账入口由 task-5 接在 `markSuccess` 的提交**之后**
+    /// （那一步不许污染"事实已保存"这个结论）。这里先解出来，是为了让服务端补上这个键
+    /// 之后 iOS 侧不需要再改一次解码器 —— 未知键会被忽略，所以它在服务端落地前 `nil`。
+    let analysisJobId: String?
 }
 
 private struct APIErrorMessage: Decodable {

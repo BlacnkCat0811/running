@@ -488,9 +488,40 @@ check(
 # 突变验证脚本**刻意不进** `run-ios-gates.sh`（它会改写源码、跑十几分钟），但它必须有入口：
 # 否则"判据改坏了会红"这个结论谁也复现不了。两条一起钉 —— 既不许没入口，也不许进默认门禁。
 package_json = read(ROOT / "package.json")
+# 🔴 **入口的形态在 2026-10-13 变了，本判据跟着改**：
+# npm script 正文只允许 `&&` / 纯命令 / `node xxx.mjs`（见 `scripts/check-npm-scripts-portable.mjs`），
+# 于是"RAI_MUTATION_FOR=git python3 …"这类 POSIX 前置赋值搬进了 `scripts/run-ios.mjs`（`IOS_TARGETS.mutation`），
+# `package.json` 里现在只有 `node scripts/run-ios.mjs mutation[:scope]`。
+# ⚠️ 改这条时踩过一次：第一版写成 `"check-…py" in package_json or "run-ios.mjs" in package_json`，
+# 而 **`run-ios.mjs` 在 package.json 里出现多次**（gates / live / mutation 全都用它），
+# 于是删掉 mutation 那两条 script 之后它**照样绿** —— 判据匹配的是"有个包装器入口"，
+# 不是"突变脚本有入口"。现在钉的是**目标级**事实：
+#   ①`package.json` 确实有一条把 `run-ios.mjs` 指向 `mutation` 的 script；
+#   ②`run-ios.mjs` 的 `IOS_TARGETS.mutation` 指向 `check-background-mutations.py`。
+package_json = read(ROOT / "package.json")
+ios_runner = read(ROOT / "scripts" / "run-ios.mjs")
 check(
-    "check-background-mutations.py" in package_json,
-    "package.json has no script entry for check-background-mutations.py — the harness would be an orphan",
+    # ⚠️ 必须钉**行首的键**：写成 `"run-ios.mjs mutation" in package_json` 会被
+    # `node scripts/run-ios.mjs mutation-scope` 那条 script 满足（子串！），
+    # 于是删掉 `test:ios:mutation` 之后判据照样绿 —— 实测踩过一次。
+    re.search(r"\"test:ios:mutation\"\s*:", package_json) is not None,
+    "package.json has no test:ios:mutation script — the mutation harness would be an orphan "
+    "where nobody invokes it",
+)
+# 目标块必须**在块内**匹配：`^  mutation:\s*\{.*?^    file:` 里的 `.*?` 会一路跨过
+# `mutation` 块自己的 `}`、跑到后面 `mutation-scope` 的 `file: MUTATION_FILE` 上去，
+# 于是把 `mutation` 的 file 改成别的也照样绿 —— 实测踩过一次（探针 2 假绿）。
+# `[^}]*?` 把匹配限制在**本块的大括号之内**。
+check(
+    re.search(r"^  mutation:\s*\{[^}]*?^    file:\s*MUTATION_FILE", ios_runner, re.S | re.M) is not None,
+    "scripts/run-ios.mjs: IOS_TARGETS.mutation no longer points at the mutation harness — "
+    "the mutation harness has no entry point",
+)
+mutation_path = re.search(r"MUTATION_FILE\s*=\s*\"([^\"]+)\"", ios_runner)
+check(
+    mutation_path is not None and mutation_path.group(1).endswith("check-background-mutations.py"),
+    "scripts/run-ios.mjs: MUTATION_FILE must resolve to check-background-mutations.py "
+    f"(found {mutation_path.group(1) if mutation_path else 'no MUTATION_FILE declaration'})",
 )
 check(
     "check-background-mutations.py" not in aggregate,

@@ -123,6 +123,16 @@ test("raw inserts, corrections, deletions, UUID facts, ledger and receipt commit
       oldReader.exec("COMMIT");
       assert.equal(oldReader.prepare("SELECT SUM(value_numeric) AS n FROM health_records").get()!.n, 85);
       assert.deepEqual(readImportReceipt(main, batch.jobId), applied.summary);
+      // 🔴 这条车道**不登记**分析任务，回执必须写 `analysisJobId: null`（不是缺键）。
+      // 补在这里而不是新文件里的理由：只有这个夹具真的走 `applyDataOnlyImport`（快通路），
+      // 统一接收器的 `record-only` 用例覆盖不到它 —— 实测过：把这里的 `null` 改成任意字符串，
+      // 用统一接收器那条用例去跑是**绿的**（判据没牙）。
+      // 「缺键」与「null」在客户端是两种含义：前者是"这个服务端版本还没提供这个字段"，
+      // 后者是"问过了，本批没有分析任务"（§9.1 不许把 not_required 读成"分析已完成"）。
+      assert.ok(Object.hasOwn(applied.summary, "analysisJobId"),
+        "回执必须带这个键（值为 null），不能靠省略来表达「本批没有分析任务」");
+      assert.equal(applied.summary.analysisJobId, null,
+        "本车道不登记分析任务 ⇒ 如实写 null");
       const rows = snapshot(main);
       assert.equal(rows.health_records!.length, 2);
       assert.equal(rows.healthkit_record_sources!.length, 3);

@@ -31,6 +31,43 @@ export const ANALYSIS_STATUSES = ["not_required", "queued", "running", "publishe
 export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
 
 /**
+ * 事实侧与已发布分析侧各自的版本号（PR5 D2，见 `docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md` §2）。
+ *
+ * 🔴 **只派生、不新增存储。** 四个值全部来自既有表：`import_generations` 的两列、
+ * `active_model_run` 的单行指针、以及该代次上最新一个分析任务的状态 —— 本类型不是
+ * 第 N 份真相，它是那几份真相在**同一个读快照**里的投影。
+ *
+ * `facts` / `analysis` 是**批次计数器**（`import_generations`，PR4 2d 起由直连车道
+ * `apps/api/src/direct-sync-ingest.ts` 递增），不是墙上时钟：`facts` 每个批次 +1，
+ * `analysis` 只在本批会影响分析时 +1。对外呈现用 `String(n)`（§10.1 的口径）。
+ */
+export interface FactVersions {
+  /** `import_generations.raw_generation`；`null` = 这一侧还没有版本可报（见 `Freshness.reason`）。 */
+  facts: string | null;
+  /** `import_generations.dependency_generation`；`null` 的含义同上。 */
+  analysis: string | null;
+  /** `active_model_run.model_run_id`；`null` = 还没有任何已发布分析。 */
+  releaseId: string | null;
+  analysisStatus: AnalysisStatus;
+}
+
+/**
+ * 新鲜度**派生值**。`stale === true` ⇔ `analysisStatus !== "published"` **或**
+ * `analysis !== facts`（D2 原文）。
+ *
+ * ⚠️ `generations_absent` 也算 stale，但它的**行为不同**：它表示"计数器的数字还不可信"
+ * （见 {@link FactVersions} 与 `apps/api/src/data.ts` 的回退分支），消费方在该状态下必须
+ * **沿用今天的行为**，不得凭它把 `executable` 判 `false`、也不得凭它拒锁课 ——
+ * 那不是在保护，而是把产品关掉（D2 的过渡期口径，2026-10-13 实测：全新库与"只走过普通
+ * 导入路径的老库"里 `import_generations` 都是 `(0, 0)`，而训练事实已经在库里）。
+ */
+export interface Freshness {
+  stale: boolean;
+  reason: "up_to_date" | "analysis_behind" | "analysis_failed" | "analysis_missing" | "generations_absent";
+  versions: FactVersions;
+}
+
+/**
  * §10.1 的直连回执。
  *
  * 刻意**不带** `routeReceipts`：路线版本与分片回执属于 PR3，在 PR1 阶段没有任何生产者，

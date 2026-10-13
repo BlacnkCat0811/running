@@ -301,7 +301,9 @@ nonisolated enum HealthKitExport {
         // 而 `lastCheckedAt` 会被写回盘上 ⇒ 快照的语义就不再是"这一次看到了什么"。
         let routeNow = Date()
         var routeDecisions: [String: RouteSyncRecord] = [:]
-        await onProgress("正在读取跑步记录")
+        // §10.3 的读取阶段文案由 `DirectSyncCopy` 单点给出（`HealthKitSync.swift`）：
+        // 这段进度是用户看到的「读取」，不是"备份/临时库/换库"。
+        await onProgress(DirectSyncCopy.readingIncrement)
         try Task.checkCancellation()
         let workoutBatch = try await runningWorkouts(
             store: store,
@@ -411,6 +413,11 @@ nonisolated enum HealthKitExport {
             try write(xml, workoutXML(workout, routeNames: routeFiles.map(\.name)))
         }
 
+        // ⚠️ 这一句**刻意不并入** `DirectSyncCopy.readingIncrement`：它同时是
+        // `apps/ios/tests/check-background-capabilities.py` 切出「逐 workout 轨迹循环」的
+        // 定界符（`route_loop_end`，整行匹配）。改字会让那条既有门禁**新增一条失败**，而本批
+        // 不改任何 .py —— 想统一它必须与那条门禁同批改。它本身是「读取」的细节文案，
+        // 不属于 §10.3 明令移除的三句。
         await onProgress("正在读取心率与恢复数据")
         try Task.checkCancellation()
         let records = try await writeGlobalRecords(
@@ -438,7 +445,8 @@ nonisolated enum HealthKitExport {
         try manifestData.write(to: manifestURL, options: .atomic)
         files.append(("sync-manifest.json", manifestURL))
 
-        await onProgress("正在打包健康数据")
+        // 打包是本批"读取"的最后一步（写出 ZIP 仍属于把这一批准备好），沿用同一条 §10.3 文案。
+        await onProgress(DirectSyncCopy.readingIncrement)
         try Task.checkCancellation()
         let zipURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("apple-health-healthkit-\(UUID().uuidString).zip")

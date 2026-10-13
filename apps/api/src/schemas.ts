@@ -1059,16 +1059,47 @@ export const openapiDocument = {
     "/v1/import-sources/discover": { post: operation(["Jobs"], "发现常用目录中的 Apple Health 导出") },
     "/v1/import-sources/recent": { get: operation(["Jobs"], "最近成功使用的导入来源") },
     "/v1/backups": {
-      get: operation(["Maintenance"], "本地备份列表"),
-      post: operation(["Maintenance"], "创建 SQLite 在线备份")
+      // §11「项目退出备份责任」：应用不创建备份（POST 已退役为 410 + 运维提示），
+      // 只保留只读清单。清单本身**不触发**任何创建/轮换/清理 —— 它只 describe 磁盘上
+      // 已有的文件，是"发现损坏就找得到可恢复快照"的那条路（§12）。
+      get: operation(["Maintenance"], "本地备份清单（只读；应用不创建、不轮换、不清理备份）"),
+      post: operation(["Maintenance"], "已退役：应用不再创建 SQLite 在线备份", {
+        deprecated: true,
+        description: "备份责任已移交服务器运维（§11）。本接口返回 410 与维护提示，不创建任何文件。",
+        responses: {
+          "410": jsonResponse("应用不再创建备份；请在维护窗口前由运维自行完成一致性备份", {
+            type: "object", required: ["code", "message"],
+            properties: {
+              code: { const: "backup_creation_retired" },
+              message: { type: "string" }
+            }
+          }),
+          "401": errorResponse
+        }
+      })
     },
     "/v1/backups/{name}": {
-      get: operation(["Maintenance"], "下载本地 SQLite 备份", {
+      // 下载是**恢复**能力的一半：运维要先把快照取走才能校验和轮换。它不是"创建备份"，
+      // 因此保留可用，并且是只读的（流式读取既有文件）。
+      get: operation(["Maintenance"], "下载已有的本地 SQLite 备份（只读，不创建新备份）", {
         parameters: [{ name: "name", in: "path", required: true, schema: backupParamsSchema.properties.name }],
         responses: { "200": { description: "SQLite 备份", content: { "application/x-sqlite3": { schema: { type: "string", format: "binary" } } } }, "404": errorResponse }
       }),
-      delete: operation(["Maintenance"], "删除指定的本地 SQLite 备份", {
-        parameters: [{ name: "name", in: "path", required: true, schema: backupParamsSchema.properties.name }]
+      // DELETE 一并退役：应用不替运维决定备份的保留/归档/删除，连文件都不碰（§14.2 A15）。
+      delete: operation(["Maintenance"], "已退役：应用不再删除本地 SQLite 备份", {
+        deprecated: true,
+        description: "保留、归档或删除由服务器运维决定（§11）。本接口返回 410，不删除任何文件。",
+        parameters: [{ name: "name", in: "path", required: true, schema: backupParamsSchema.properties.name }],
+        responses: {
+          "410": jsonResponse("应用不再删除备份；已有备份不会被应用删除", {
+            type: "object", required: ["code", "message"],
+            properties: {
+              code: { const: "backup_deletion_retired" },
+              message: { type: "string" }
+            }
+          }),
+          "401": errorResponse
+        }
       })
     },
     "/v1/backups/{name}/restore": { post: operation(["Maintenance"], "校验并原子恢复本地 SQLite 备份", {

@@ -11,7 +11,10 @@ skin = root / "Skins" / "Technology"
 
 
 def source(path):
-    return re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(), flags=re.S)
+    # 显式 encoding：Swift 源码含中文，裸 read_text() 用本机默认编码（Windows = cp936/GBK）
+    # ⇒ 在 Windows 上直接 UnicodeDecodeError 崩溃；这条链只在 macOS 上跑（默认 UTF-8），
+    # 所以"在 Windows 上开发、却在 Windows 上跑不了自己的门禁"这个缺口两边都看不见。
+    return re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.S)
 
 
 theme = source(skin / "TechTheme.swift")

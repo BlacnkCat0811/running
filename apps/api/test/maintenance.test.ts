@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -69,6 +70,62 @@ test("enforces backup retention while preserving the newest snapshot", async () 
     assert.equal(listed.length, 2);
     assert.equal(listed.some((item) => item.name === newest.name), true);
     assert.equal(listed.some((item) => item.name.includes("first")), false);
+  } finally {
+    database.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * §11「项目退出备份责任」在**服务层**的判据：唯一保留的只读入口没有副作用。
+ *
+ * 为什么单靠路由级判据不够：`GET /v1/backups` 之所以能留下，前提是"只读清单不触发
+ * 任何创建/轮换/清理"。这一点挂在 `listBackups()` / `backupStream()` 的实现上，
+ * 而不是挂在路由上 —— 将来有人在清单里顺手调用 `ensureBackupCapacity()` 或
+ * `enforceBackupPolicy()`（§11 明令禁止的自动清理），路由级用例是看不出来的。
+ * 所以这里直接对**磁盘**下判据：清单与下载前后，目录内容与每个文件的 sha256 不变。
+ */
+test("read-only backup listing and streaming never create, rotate or clean up files", async () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-maintenance-readonly-"));
+  const databasePath = join(root, "rai.sqlite");
+  const database = new DatabaseSync(databasePath);
+  try {
+    database.exec("CREATE TABLE marker (value TEXT NOT NULL); INSERT INTO marker VALUES ('kept');");
+    const maintenance = new DatabaseMaintenance(
+      databasePath,
+      root,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { maxCount: 2, maxTotalBytes: Number.MAX_SAFE_INTEGER, minimumFreeBytes: 1 }
+    );
+    // 刻意造出"超出保留策略"的份数：如果清单路径顺手调用了保留策略，
+    // 下面的逐字节对比就会立刻转红（而只比较"名字集合"在某些顺序下会漏掉改写）。
+    await maintenance.createBackup("operator-a");
+    await maintenance.createBackup("operator-b");
+    await maintenance.createBackup("operator-c");
+    const directory = maintenance.backupDirectory;
+    const snapshot = (): Array<{ name: string; sha256: string }> =>
+      readdirSync(directory).sort().map((name) => ({
+        name,
+        sha256: createHash("sha256").update(readFileSync(join(directory, name))).digest("hex")
+      }));
+    const before = snapshot();
+    assert.ok(before.length >= 1, "前置条件：至少有一份既有备份");
+
+    const listed = await maintenance.listBackups();
+    assert.ok(listed.length >= 1);
+
+    const first = listed[0]!;
+    const stream = await maintenance.backupStream(first.name);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    assert.ok(Buffer.concat(chunks).length > 0, "下载既有备份必须真的产出字节");
+
+    assert.deepEqual(snapshot(), before,
+      "只读清单/下载改动了 var/backups：§11 要求不创建、不轮换、不清理既有备份");
   } finally {
     database.close();
     rmSync(root, { recursive: true, force: true });

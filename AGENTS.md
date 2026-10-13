@@ -82,3 +82,25 @@ For iOS work under `apps/ios`, use:
   coordinate cross-check stay manual; they need a booted Simulator and, for the
   former, `var/rai.sqlite`.
 
+## Cross-Platform Command Rules
+
+This repository is developed on Windows and built on macOS, so every npm script
+must behave identically under cmd, PowerShell and bash. Three hard rules, checked
+by `npm run check:scripts` (also wired into `.githooks/pre-commit`):
+
+- npm script bodies may only use `&&`, a plain command, or `node xxx.mjs`.
+  Never `;`, `$?`, `$VAR`, `VAR=x cmd`, `test`, `[ ]`, `uname`, or a glob `*`
+  that needs shell expansion.
+- Platform detection lives inside the script: `process.platform` in Node,
+  `uname -s` in bash. A host that cannot run the check must skip loudly
+  ("no iOS source was checked") and exit 0 — never fail, never pass quietly.
+- Prefer `.mjs`; keep `.sh` only for what must run on macOS. Invoke shell
+  scripts as `bash <path>`, never `./x.sh` (Windows git does not record `+x`).
+  Never use WSL or Git Bash to imitate macOS: `xcodebuild`, CocoaPods and the
+  Simulator run on macOS only.
+
+Do not rely on filename case: Windows and macOS are both case-insensitive, so a
+mismatch stays silent on both ends. `.gitattributes` pins `*.sh`, `*.py`,
+`*.swift` and `*.pbxproj` to LF; verify with `git ls-files --eol` (`i/lf w/lf`)
+instead of assuming.
+

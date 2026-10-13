@@ -9,6 +9,12 @@ export * from "./timezone.js";
 // 放 contracts 是因为 API 与 storage 都要读它，而两者互不依赖。
 export * from "./direct-sync.js";
 
+// 事实侧/分析侧两块视图的**形状**（PR5 D1、D5）。同样放这里：读侧实现（`storage-sqlite`）
+// 要构造它们，API 层（`api-contracts`）要把它们装进响应类型，而这两者互不依赖 ——
+// 留在 `api-contracts` 会让 `storage-sqlite` 出现一条**向上的** import，
+// 被 `npm run check:package-boundaries` 拦下（详见该文件头注释）。
+export * from "./facts-analysis-view.js";
+
 export const CONTRACT_VERSION = "canonical-health-v2" as const;
 
 export const healthTypes = {
@@ -947,6 +953,18 @@ export interface RecomputeJob {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /**
+   * v35 的分析任务绑定列（PR5 §1.2 锚点 18 / 清单 18）。
+   *
+   * 🔴 三个字段都是**可选**的，且语义上"缺省 = `undefined`"而不是 `null`：
+   * v35 之前登记的历史任务这四列**根本不存在**（`ALTER TABLE ADD COLUMN` 让老行为 NULL），
+   * 而"老任务没有绑定代次"与"新任务绑定了一个为 NULL 的代次"是两件事 ——
+   * 后者不可能发生（`enqueue` 只在给了值时才写那一列），前者才是真实情况。
+   * 把两者合成一个 `null` 会让消费方无法回答"这条任务到底有没有版本绑定"。
+   */
+  targetRawGeneration?: number;
+  targetDependencyGeneration?: number;
+  expectedIncumbentReleaseId?: string;
 }
 
 export function assertFiniteOrNull(name: string, value: number | null): void {

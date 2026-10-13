@@ -14,6 +14,11 @@ node scripts/check-blob-size.mjs
 npm run typecheck
 npm run check:docs
 
+# npm script 的跨平台语法闸门（`&&`、纯命令、`node xxx.mjs` 之外的写法一律拦下：
+# `;`、`$?`、`VAR=x cmd`、`test`、`[ ]`、`uname`、`$VAR`、依赖 shell 展开的 `*`、`./x.sh`）。
+# 每一条都真的坏过一次，坏法都是"Mac 上好好的、Windows 上是红的"。毫秒级，每次提交都跑。
+node scripts/check-npm-scripts-portable.mjs
+
 # iOS 判据（typecheck-ios.sh + run-model-tests.sh）此前没有任何自动入口，
 # 只有人记得的时候才会被跑 —— 2026-09-19 的 test11 回归就是这么进主干的。
 # 触发面刻意收窄到 `apps/ios/`：iOS 门禁要真编译全部 Swift 源码，秒级变分钟级，

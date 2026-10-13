@@ -553,7 +553,15 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
         dependencyGeneration: String(generations.dependency),
         publishedReleaseId: null,
         parentBatchId: null
-      }
+      },
+      // 🔴 回执里放**分析任务 id**（`null` = 本批不登记分析）。它不是"分析状态"的更新通道
+      // —— 回执仍然是**写入时刻的凭证**，本字段写进去之后一辈子不变（§8.5：消费者不得改写它）。
+      // 它存在的唯一理由是：`analysisStatus` 是 COMMIT 快照（上面恒为 `queued`），而分析跑完之后
+      // 只有 `GET /v1/jobs/:id` 知道终态。没有这个 id，客户端**没有任何办法**问到那一批分析的结果，
+      // 于是 §10.3 的「分析已更新」/「…分析更新失败，可重试分析」在真机上永远不可达。
+      // 与 `import_batches.summary_json.analysisJobId` 是**同一个值**（下面 batchSummary 用它）：
+      // 批次账本与用户可见回执必须同源，否则"回执说 queued、账本指向另一个任务"没人能发现。
+      analysisJobId
     };
     const metadata: Record<string, string> = {
       dataset_version: datasetVersion,

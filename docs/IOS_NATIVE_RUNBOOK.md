@@ -1,6 +1,44 @@
 # RAI 原生 iOS 运行说明
 
+## 跨平台命令矩阵
+
+本仓库在 Windows 上开发、在 macOS 上构建 iOS，**同一条命令在三端逐字相同**：
+
+| 命令 | Windows（cmd / PowerShell） | macOS |
+|---|---|---|
+| `npm run typecheck` | 真跑 | 真跑 |
+| `npm test` | 真跑（Node 套件 + Web vitest） | 真跑 |
+| `npm run test:ios` | **显式跳过**：打印「本次没有检查任何 iOS 源码」，退出 0 | 真跑（类型检查 + 纯逻辑回归） |
+| `npm run build` | 真跑 | 真跑 |
+| `npm run test:e2e:web` | 真跑 | 真跑 |
+
+三条硬规则由 `npm run check:scripts` 执行（`scripts/check-npm-scripts-portable.mjs`），不是口头约定：
+
+1. **npm script 正文只用双方言都认的语法**：`&&`、纯命令、`node xxx.mjs`。
+   禁用 `;`、`$?`、`$VAR`、`VAR=x cmd`、`test`、`[ ]`、`uname`、依赖 shell 展开的 `*`。
+2. **平台判定只在脚本内部**：Node 用 `process.platform`，bash 用 `uname -s`。
+3. **`.mjs` 优先**，`.sh` 只留"必须在 macOS 跑"的部分；`.sh` 一律用 `bash <path>` 调用，
+   不写 `./x.sh`（Windows 的 git 默认不记录 +x 位）。
+
+⛔ **不要用 WSL / Git Bash 去"模拟"Mac**：`xcodebuild`、CocoaPods、模拟器只在 macOS 上真跑。
+Windows 侧的职责只是让**跨平台可验证**的部分（typecheck、纯逻辑回归、Web e2e）与 Mac 一致；
+iOS 真编译与模拟器验收在 Windows 上拿到的是**显式跳过**，既不是失败，也不是假通过。
+
+为什么这三条要写死（2026-10-13 本机实测，改前全是红的）：`npm run test:ios` 当时是裸
+`bash apps/ios/tests/run-ios-gates.sh`，而 Windows 的 `bash` 解析到 `C:\Windows\System32\bash.exe`
+——那是 **WSL 启动器**，不是 Git Bash，没装分发版时它 exit 1；`npm run test:ios:mutation:scope`
+当时是 `RAI_MUTATION_FOR=git python3 …`，cmd 报 `'RAI_MUTATION_FOR' is not recognized`；
+`npm run open:ios` 报 `'open' is not recognized`。现在它们是 `node scripts/run-ios.mjs <目标>` 与
+`node scripts/open-ios.mjs`，解释器选择与平台判定都在脚本内部。
+
+行尾也是同一类坑：`.gitattributes` 把 `*.sh` / `*.py` / `*.swift` / `*.pbxproj` 钉成 `eol=lf`，
+否则 Windows 上编辑过的 `apps/ios/tests/*.sh` 到了 Mac 会变成 `bad interpreter: /bin/bash^M`。
+判据是 `git ls-files --eol`（`i/lf w/lf`），不是"我记得它应该是 LF"。
+
 ## 前置条件
+
+> 下面这些前置**只对"必须在 macOS 上执行"的步骤成立**。仓库根目录的
+> `typecheck` / `test` / `build` / `test:e2e:web` 在 Windows 上同样真跑，不需要它们。
 
 - macOS、Xcode 和 iOS 17 或更新的 SDK。
 - 已安装本项目使用的 iOS 平台组件。
@@ -10,21 +48,35 @@
 
 ## 构建与运行
 
-从仓库根目录启动可被手机访问的服务：
+从仓库根目录启动可被手机访问的服务（跨平台，Node 入口）：
 
 ```bash
 npm run dev:device
 ```
 
-安装依赖后打开 `apps/ios/RAI.xcworkspace`（**不是** `RAI.xcodeproj`），选择 RAI scheme 和真实 iPhone，检查 Signing & Capabilities 中的 Team，执行 Build/Run。项目最低部署版本保持 iOS 17。
+在 macOS 上打开工作副本；`darwin` 调 `open`，Windows/Linux 上**显式跳过**并说明"本次没有打开任何东西"，
+不会用 `start` 假装打开（`.xcworkspace` 在 Windows 上没有关联程序，只会弹一个对话框然后照样退出 0）：
 
-高德 SDK 以 pod 形式链接，只打开 `RAI.xcodeproj` 会构建失败（`ld: framework 'Pods_RAI' not found`）；`Podfile` / `Podfile.lock` 变更后需重新安装依赖：
+```bash
+npm run open:ios
+```
+
+打开的是 `apps/ios/RAI.xcworkspace`（**不是** `RAI.xcodeproj`），选择 RAI scheme 和真实 iPhone，
+检查 Signing & Capabilities 中的 Team，执行 Build/Run。项目最低部署版本保持 iOS 17。
+
+高德 SDK 以 pod 形式链接，只打开 `RAI.xcodeproj` 会构建失败（`ld: framework 'Pods_RAI' not found`）。
+
+> **macOS 专属（前置：macOS + 已装 CocoaPods）** —— Windows 上没有 CocoaPods，
+> 这步不存在"跳过"以外的选项，所以只作为 macOS 片段保留，不进 npm script。
+> `Podfile` / `Podfile.lock` 变更后重新安装依赖：
 
 ```bash
 cd apps/ios && pod install
 ```
 
-高德 Key 不明文入库：本地放在 `apps/ios/Configs/AmapKey.xcconfig`（由 `.gitignore` 忽略，模板为同目录 `AmapKey.xcconfig.example`），`Podfile` 的 `post_install` 把它注入 CocoaPods 生成的 `Pods-RAI.*.xcconfig`；`RAI/Info.plist` 只留 `$(RAI_AMAP_API_KEY)` 占位符。新建工作副本后：
+高德 Key 不明文入库：本地放在 `apps/ios/Configs/AmapKey.xcconfig`（由 `.gitignore` 忽略，模板为同目录 `AmapKey.xcconfig.example`），`Podfile` 的 `post_install` 把它注入 CocoaPods 生成的 `Pods-RAI.*.xcconfig`；`RAI/Info.plist` 只留 `$(RAI_AMAP_API_KEY)` 占位符。
+
+> **macOS 专属（前置：macOS + 已装 CocoaPods）** —— 新建工作副本后准备 Key 并安装依赖：
 
 ```bash
 cd apps/ios
@@ -36,7 +88,9 @@ pod install                                                    # 输出「已注
 
 高德底图还有隐私门控：首次打开 App 先要选择是否同意。只有同意后才初始化 SDK 并创建 `MAMapView`；未同意时训练详情显示离线轨迹，设置页可随时开启或关闭。
 
-无签名模拟器构建可用于快速验证 SwiftUI/API 层编译：
+> **macOS 专属（前置：macOS + Xcode + 已 `pod install`）** —— 无签名模拟器构建，
+> 用于快速验证 SwiftUI/API 层编译。这是 bash 片段（含 `\` 续行），只能在 macOS 的 bash 里逐字执行：
+> 不要把它塞进 `package.json`（npm script 正文只允许 `&&`、纯命令、`node xxx.mjs`）。
 
 ```bash
 xcodebuild -workspace apps/ios/RAI.xcworkspace \
@@ -58,18 +112,45 @@ xcodebuild -workspace apps/ios/RAI.xcworkspace \
 npm run test:ios
 ```
 
-它等价于 `apps/ios/tests/run-ios-gates.sh`：`typecheck-ios.sh`（除 3 个高德依赖文件外的全部
-`RAI/**` 源码做真实类型检查）+ `run-model-tests.sh`（纯逻辑回归聚合：模型/DTO、Keychain、
-坐标转换、课表映射、会话探测、健康同步取消、缓存与续传日志、Tech 展示层与对比度、
-今日页版式）。非 macOS 或没装 Xcode 时它会**显式跳过并打印"本次没有检查任何 iOS 源码"**，
-不假装通过。`.githooks/pre-commit` 在 `apps/ios/` 有改动时自动跑它。
+它等价于 `node scripts/run-ios.mjs gates` → `bash apps/ios/tests/run-ios-gates.sh`：
+`typecheck-ios.sh`（除 3 个高德依赖文件外的全部 `RAI/**` 源码做真实类型检查）+
+`run-model-tests.sh`（纯逻辑回归聚合：模型/DTO、Keychain、坐标转换、课表映射、会话探测、
+健康同步取消、缓存与续传日志、Tech 展示层与对比度、今日页版式）。非 macOS 或没装 Xcode 时它会
+**显式跳过并打印"本次没有检查任何 iOS 源码"**，不假装通过；`.githooks/pre-commit` 在
+`apps/ios/` 有改动时自动跑它。
 
-下面两条**不在**自动门禁里，需要模拟器或 Pods，属手工验收：
+iOS 家族统一走同一个 Node 包装，四条命令都是"非 macOS ⇒ 显式跳过 + 退出 0"：
+
+| 命令 | 实际执行 | 何时跑 |
+|---|---|---|
+| `npm run test:ios` | `apps/ios/tests/run-ios-gates.sh` | 每次改动（pre-commit 自动） |
+| `npm run test:ios:live` | `check-export-determinism-live.py`（探针装进模拟器，跨进程比对导出字节） | 手工验收 |
+| `npm run test:ios:mutation` | `check-background-mutations.py`（逐条改坏源码再跑门禁，十几分钟） | 判据本身被改动时 |
+| `npm run test:ios:mutation:scope` | 同上，`RAI_MUTATION_FOR=git` 按改动范围裁剪 | 日常 |
+
+`RAI_MUTATION_FOR` 由 Node 通过 `spawnSync` 的 `env` 传给子进程（原来写在 npm script 正文里的
+`RAI_MUTATION_FOR=git …` 是 POSIX 专属，cmd 会把 `RAI_MUTATION_FOR=git` 当成程序名）。
+要按别的范围裁剪，在 **macOS 的 bash** 里直接跑
+`RAI_MUTATION_FOR=<路径> python3 apps/ios/tests/check-background-mutations.py`，
+或往 `scripts/run-ios.mjs` 的目标表里加一个目标（平台判定与 env 都只写在那一个文件里）。
+
+Windows 上如果装了 Git for Windows，`npm run test:ios` 会把判定交给 `run-ios-gates.sh` 自己打印
+（平台判据只写一份：bash 用 `uname -s`，Node 用 `process.platform`）；没装就由 Node 打印同一句话。
+
+`apps/ios/tests/*.py` 读 Swift/TS 源码时**一律显式 `encoding="utf-8"`**（那些文件含中文，
+裸 `read_text()` 会用本机默认编码：Windows = cp936/GBK ⇒ 直接 `UnicodeDecodeError` 崩溃，
+而这条链只在 macOS 上跑、那边默认 UTF-8，于是缺口在两边都看不见）。要在 Windows 上跑这些
+脚本不需要额外环境变量：**判据依赖的是显式 `encoding`**，不是 `PYTHONUTF8=1`。该变量只影响
+脚本自己 `print` 的中文在控制台上的呈现（本机实测：加不加它，退出码与判据结论都一样）——
+若终端里中文显示成乱码，再考虑用 `PYTHONUTF8=1 python apps/ios/tests/<script>.py` 或先
+`chcp 65001`，那属于显示问题，不是门禁问题。
+
+下面两条**不在**自动门禁里，需要模拟器或 Pods，属手工验收（**macOS 专属**，用 `bash <path>` 调用）：
 
 | 脚本 | 额外前置 | 用途 |
 |---|---|---|
-| `run-visual-tests.sh` | 已启动的模拟器 + `var/rai.sqlite`（`var/` 不入库） | 模拟器交互/截图验收，不替代真机观感（`-only-testing:…` 可只跑单个用例） |
-| `run-coordinate-sdk-check.sh` | `apps/ios/Pods`（先 `pod install`）+ 已启动模拟器 | 用高德 SDK 对拍本地 GCJ02 转换 |
+| `bash apps/ios/tests/run-visual-tests.sh` | 已启动的模拟器 + `var/rai.sqlite`（`var/` 不入库） | 模拟器交互/截图验收，不替代真机观感（`-only-testing:…` 可只跑单个用例） |
+| `bash apps/ios/tests/run-coordinate-sdk-check.sh` | `apps/ios/Pods`（先 `pod install`）+ 已启动模拟器 | 用高德 SDK 对拍本地 GCJ02 转换 |
 
 在**会拒绝嵌套沙箱**的外层环境（如加固沙箱）里跑 `run-visual-tests.sh`，要额外传
 `RAI_XCODEBUILD_SWIFT_FLAGS=-disable-sandbox`，否则宏插件起不来、每个 `@Observable` 都报
@@ -115,6 +196,7 @@ npm run test:ios
 | 模拟器上「同步未完成」 | 预期结果：模拟器包没有 HealthKit entitlement、Health 库也没有样本（见上文「模拟器验收不到健康同步」）；到真机按「首次连接」授权后验收 |
 | 清缓存后内容消失 | 重新联网读取；服务端数据、凭证和同步任务不应被清除 |
 | `ld: framework 'Pods_RAI' not found` | 用 `RAI.xcworkspace` 构建；先 `cd apps/ios && pod install` |
+| `bad interpreter: /bin/bash^M` | 脚本被 CRLF 污染了。`.gitattributes` 已把 `*.sh`/`*.py`/`*.swift`/`*.pbxproj` 钉成 `eol=lf`，核对用 `git ls-files --eol <path>`（要达到 `i/lf w/lf`）；经 zip/共享目录（而不是 git）拷过来的树不享受这条保护，先确认行尾再跑 |
 | `pod: command not found` | CocoaPods 已装但不在 PATH：`export PATH="$(gem environment | awk -F': ' '/EXECUTABLE DIRECTORY/{print $2}'):$PATH"`，或 `gem install cocoapods` |
 | `unable to find utility "simctl"` | 命令行工具指向了 CommandLineTools：`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` 或 `sudo xcode-select -s /Applications/Xcode.app` |
 | 构建后地图卡片仍是默认城市视野 | 高德渲染器就绪前会忽略 fit，`RouteMapContainer` 会在 0.2 s 后重试；若持续出现，先确认 `pod install` 打印了「已注入高德 Key」，再检查 `Configs/AmapKey.xcconfig` 的 Key 是否绑定了本 App 的 Bundle ID |
@@ -138,6 +220,26 @@ npm run test:ios
 - 训练详情里压着路线卡片上下滑动是**翻页**而不是拖动地图；轻点地图解锁后才可缩放拖动，右下角「锁定」一键收回，且解锁/锁定都不影响右上角「显示完整路线」的 fit。
 
 记录设备、OS/App版本、数据scope、步骤/结果和脱敏证据；不得上传真实健康导出或凭证。
+
+### 直连增量同步的真机验收（§14.5 第七项 / §14.2 A07、A17）
+
+上位判据是 [SQLite 直接增量同步设计](SQLITE_DIRECT_SYNC_DESIGN.md) §14.5 的「真机 HealthKit 自动增量、
+续传、有效游标保持和新状态完成手动验收」，逐条步骤、预期观测、留存证据与失败判据见
+[PR6 真机验收清单](../deliverables/DIRECT_SYNC_PR6_DEVICE_VERIFICATION_2026-10-13.md)。
+四条最容易判错方向的边界先写在下面，**它们的失败形态都不是报错，而是"看起来正常"**：
+
+- **有效游标保持**：连续两轮同步里，第二轮**不得**重导历史。第一轮之后 App 若被强杀，第二轮必须从已提交水位继续；
+  判据是服务端的批次/来源数量，不是界面耗时（§14.2 A02）。
+- **续传**：`needsContinuation` 为真时**不得**清空后台待办意图 —— 清掉的后果是"用户不打开 App 就再也没人发下一批"，
+  而界面当时显示的是成功（§10.2、§5.1）。
+- **新状态文案**：raw COMMIT 之后应看到「健康数据已保存，分析更新中」；分析终态由一次独立对账取得，
+  之后才可能变成「分析已更新」或「健康数据已保存，分析更新失败，可重试分析」。
+  ⚠️ 对账只在某一次同步收尾时触发，**冷启动不会主动对账** ⇒ 别把"重启后没立刻看到终态文案"记成文案失效（§10.3）。
+- **老服务端**（未宣告 `factsAnalysisContractVersion`）：必须**仍是旧行为**（游标正常推进）。
+  判错方向的后果是每次唤醒都 hold、窗口被反复重导，而用户看到的是"同步完了"（§10.2「保留旧等待含义」）。
+
+真机执行前先在 macOS 上跑 `npm run test:ios`：它本机（Windows）是**显式跳过**，不是通过。
+`HealthKitSync.swift` 不被任何回归编译，所以它的问题只在真机与结构门禁上暴露。
 
 ## 训练计划/WorkoutKit 发布前设备清单（2026-10-09）
 

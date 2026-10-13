@@ -5,16 +5,21 @@
 `check-background-capabilities.py` 的纪律：跑绿只说明"没红"，不说明"判据还在"。
 （此前的写法是散落的 `assert` + 一句硬编码 `"21 checks passed"`，实际有 22 条
 且没有任何地板 ⇒ 改写脚本时静默少跑一条判据不可检测，见未提交改动审查 🟡3。）
+
+🔴 显式 `encoding="utf-8"`：被读的 Swift/TS 源码含中文，而 `read_text()` 不带
+`encoding` 时用**本机默认编码**（Windows = cp936/GBK）⇒ 在 Windows 上直接
+`UnicodeDecodeError` 崩溃退出，而这条链只在 macOS 上跑（默认 UTF-8），
+所以"本机跑不了自己的门禁"这个缺口在两边都看不见。
 """
 import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[3]
-export = (root / "apps/ios/RAI/HealthKitExport.swift").read_text()
-sync = (root / "apps/ios/RAI/HealthKitSync.swift").read_text()
-store = (root / "apps/ios/RAI/SyncTaskStore.swift").read_text()
-parser = (root / "packages/health-export-parser/src/apple-health-parser.ts").read_text()
-cursor = (root / "apps/ios/RAI/HealthKitRecordCursor.swift").read_text()
+export = (root / "apps/ios/RAI/HealthKitExport.swift").read_text(encoding="utf-8")
+sync = (root / "apps/ios/RAI/HealthKitSync.swift").read_text(encoding="utf-8")
+store = (root / "apps/ios/RAI/SyncTaskStore.swift").read_text(encoding="utf-8")
+parser = (root / "packages/health-export-parser/src/apple-health-parser.ts").read_text(encoding="utf-8")
+cursor = (root / "apps/ios/RAI/HealthKitRecordCursor.swift").read_text(encoding="utf-8")
 
 failures: list[str] = []
 checks = 0

@@ -39,12 +39,15 @@ jobs:
         # `.githooks/pre-commit`（`apps/ios/` 有改动时跑 `npm run test:ios`）。
         # 这一步是给"将来把仓库镜像到 GitHub"准备的，判据本身与本机完全同一条命令。
         #
-        # `run-ios-gates.sh` 自带 macOS / Xcode 检测：不满足时**显式跳过并退出 0**
-        # （打印「本次没有检查任何 iOS 源码」），所以这步不会因为 runner 差异静默变绿。
+        # 走 `npm run test:ios`（= `node scripts/run-ios.mjs gates`）而不是裸 `bash …`：
+        # 解释器怎么挑、非 macOS 怎么办，只写在 scripts/run-ios.mjs 一处，
+        # 这里是三端同一入口。run-ios-gates.sh 仍然自带 macOS / Xcode 检测：
+        # 不满足时**显式跳过并退出 0**（打印「本次没有检查任何 iOS 源码」），
+        # 所以这步不会因为 runner 差异静默变绿。
         # runner 上的 Xcode 路径不一定在 /Applications/Xcode.app，按 `xcode-select -p` 传进去。
         run: |
           export DEVELOPER_DIR="$(xcode-select -p)"
-          bash apps/ios/tests/run-ios-gates.sh
+          npm run test:ios
       - name: Cache CocoaPods
         # The AMap pod is a large binary download; the cache key follows Podfile.lock.
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -95,6 +98,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: iOS gates on Windows (must skip loudly, never fail or pass quietly)
+        # `npm run test:ios` 在 Windows 上必须**显式跳过并退出 0**：它不等于"通过"，
+        # 而是"本次没有检查任何 iOS 源码"。这一步钉的就是这个退出码 —— 只要包装脚本
+        # 退回裸 `bash`（本机 PATH 上的 bash 是 WSL 启动器，实测 exit 1），这里立刻变红。
+        # 「跳过时必须打印哪句话」由 packages/application/test/cross-platform-scripts.test.ts 钉。
+        run: npm run test:ios
 
       - name: Run Windows unit and integration tests
         run: npm test

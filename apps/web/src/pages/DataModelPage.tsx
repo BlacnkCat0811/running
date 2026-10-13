@@ -924,7 +924,10 @@ export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {
                 {importJob.error ? <p>{importJob.error}</p> : null}
               </div>
             </div>
-            {["queued", "running"].includes(importJob.status) ? <div className="import-stage-progress"><i><em style={{ width: `${Math.max(4, Math.min(100, importJob.progress ?? 8))}%` }} /></i><ol>{["检查与备份", "读取健康数据", "更新分析结果", "安全切换"].map((stage, index) => <li key={stage} className={(importJob.progress ?? 0) >= index * 25 ? "active" : ""}>{stage}</li>)}</ol></div> : null}
+            {/* §11：应用不再创建备份，所以这里不能说"检查与备份" —— 直连车道
+                （data-only / direct-sync）**根本不创建备份**，写"备份"会让用户以为
+                每次同步都在替他备份一份。这四个阶段名对两条车道都成立。 */}
+            {["queued", "running"].includes(importJob.status) ? <div className="import-stage-progress"><i><em style={{ width: `${Math.max(4, Math.min(100, importJob.progress ?? 8))}%` }} /></i><ol>{["准备与校验", "读取健康数据", "更新分析结果", "安全切换"].map((stage, index) => <li key={stage} className={(importJob.progress ?? 0) >= index * 25 ? "active" : ""}>{stage}</li>)}</ol></div> : null}
             {importJob.status === "succeeded" && importJob.summary ? <div className="import-result"><h3>更新完成</h3><dl><div><dt>新增跑步</dt><dd>{importJob.summary.insertedWorkouts}</dd></div><div><dt>更新跑步</dt><dd>{importJob.summary.updatedWorkouts}</dd></div><div><dt>移除跑步</dt><dd>{importJob.summary.removedWorkouts}</dd></div><div><dt>复用特征</dt><dd>{importJob.summary.featuresReused}</dd></div></dl><small>{importJob.summary.importMode === "incremental" ? "已使用增量更新" : importJob.summary.importMode === "unchanged" ? "数据没有变化" : "已完成完整更新"}</small></div> : null}
             {!["queued", "running"].includes(importJob.status) ? <button className="text-button import-another" onClick={() => setImportJob(null)}>选择另一份导出</button> : null}
             </div>

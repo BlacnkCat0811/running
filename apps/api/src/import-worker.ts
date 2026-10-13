@@ -624,7 +624,15 @@ export class ImportWorker {
       await this.removeDatabaseFiles(stagingDatabase);
       this.assertNotClosing();
       job.phase = "backup";
-      job.message = "正在备份并校验现有数据，准备增量导入";
+      // §10.3 要求移除"正在备份并校验现有数据"这类旧语义 —— 但这条路径**还在跑**，
+      // 所以不能凭空删掉这句话（删了等于把正在发生的事藏起来）。正确的处置是让
+      // `job.message` 自己说清它是**维护路径**：iOS 的 `HealthKitSync.swift` 会把
+      // `job.message` 原样上屏，用户看到的必须是"这是维护/回退路径"，而不是
+      // "App 正在替你备份"。下面那两句同样处理。
+      //
+      // 为什么这条路径还不能删：首次历史分页与大包分批（§5.2 分片计划未实现）仍走这里；
+      // §13 也明确允许"切换前保留旧代码供隔离演练"。
+      job.message = "维护路径：正在创建项目级备份并校验现有数据（该批次未走直连车道）";
       this.persistJobs();
       // 计时在 `createCurrentBackup` 内部按 `backupCapacity` / `backupCopy` / `backupVerify` 三段各自落账：
       // 线上一次导入这里报 254 s，而独立进程做同一个备份只要 12.4 s ⇒ 旧的单一口径无法定位，故拆开。
@@ -637,9 +645,11 @@ export class ImportWorker {
       }
       this.assertNotClosing();
       job.phase = "import";
+      // 同上：§10.3 的旧语义（"正在临时数据库中…"）不能原样上屏，但这两句描述的
+      // 是旧候选链路**真的在发生**的事（在暂存副本上跑 CLI），所以只把它们标注成维护路径。
       job.message = currentBackupPath
-        ? "正在临时数据库中增量同步 Apple Health 数据"
-        : "正在临时数据库中解析 Apple Health 导出文件";
+        ? "维护路径：正在临时数据库中增量同步 Apple Health 数据"
+        : "维护路径：正在临时数据库中解析 Apple Health 导出文件";
       this.persistJobs();
       await timing.measure("parseImport", () => this.command([
         "--import",

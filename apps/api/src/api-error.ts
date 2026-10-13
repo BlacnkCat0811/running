@@ -1,6 +1,6 @@
 /** Stable maintenance errors; internal exceptions remain redacted by apiErrorPayload. */
 export class ClientRequestError extends Error {
-  constructor(readonly code: string, message: string, readonly statusCode: 400 | 404 | 409) {
+  constructor(readonly code: string, message: string, readonly statusCode: 400 | 404 | 409 | 410) {
     super(message);
     this.name = "ClientRequestError";
   }

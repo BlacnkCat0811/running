@@ -28,7 +28,7 @@ while [ "$#" -gt 0 ]; do
     --apply) APPLY=1; shift ;;
     --migrate) MIGRATE=1; shift ;;
     --database) [ "$#" -ge 2 ] || { echo "--database 需要绝对路径" >&2; exit 2; }; DATABASE=$2; shift 2 ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "未知参数：$1" >&2; exit 2 ;;
   esac
 done
@@ -74,25 +74,19 @@ before_head=$(git -C "$APP_DIR" rev-parse --short HEAD)
 before_lock=$(git -C "$APP_DIR" rev-parse HEAD:package-lock.json)
 say "当前 HEAD：$before_head"
 
-# --- 1. 备份（必须成功，否则中止）-------------------------------------------
-# 令牌只从 EnvironmentFile 读取，绝不回显。
+# --- 1. 备份责任：外部运维，应用不代做 ----------------------------------------
+# 设计文档 §11：本脚本不再 POST /v1/backups。应用不创建备份、也不校验外部备份
+# 是否已完成 —— 那是运维在维护窗口前的责任，不是发布脚本的前置条件。
+# 因此下面这句话是**提示**而不是「必须成功否则中止」的闸门：没有它照样继续发布。
+# `backup-reminder` 是 deploy-upgrade.test.ts 的锚点：它钉住"提示**排在停服与迁移之前**"
+# （顺序本身是判据 —— 提示写在迁移之后，等于让运维在已经动过库之后才想起来备份）。
+say "backup-reminder 备份责任：应用不创建备份。请在维护窗口前由运维自行完成一致性备份（本脚本不代做、不校验）。"
+say "  活跃 WAL 库不能只 cp rai.sqlite，见 docs/SQLITE_DIRECT_SYNC_DESIGN.md §11.1。"
+say "  已有备份不会被本脚本或应用删除；保留/归档/删除由运维决定。"
+
+# 令牌只从 EnvironmentFile 读取，绝不回显。只服务于第 5 步的认证健康检查。
 api_token=$(sudo grep -E '^RAI_API_TOKEN=' "$ENV_FILE" | head -1 | cut -d= -f2-)
 [ -n "$api_token" ] || { echo "错误：$ENV_FILE 中没有 RAI_API_TOKEN" >&2; exit 1; }
-
-if [ "$APPLY" -eq 1 ]; then
-  say "+ POST ${HEALTH_URL%/v1/health}/v1/backups"
-  backup_code=$(curl -sS -o /tmp/rai-upgrade-backup.json -w '%{http_code}' \
-    -X POST "${HEALTH_URL%/v1/health}/v1/backups" \
-    -H "Authorization: Bearer $api_token")
-  if [ "$backup_code" != "200" ] && [ "$backup_code" != "201" ]; then
-    echo "错误：备份失败（HTTP $backup_code），中止发布" >&2
-    cat /tmp/rai-upgrade-backup.json >&2
-    exit 1
-  fi
-  say "备份完成"
-else
-  say "[dry-run] POST ${HEALTH_URL%/v1/health}/v1/backups（失败即中止）"
-fi
 
 # --- 2. 拉取代码 -------------------------------------------------------------
 run sudo -u "$RUN_USER" git -C "$APP_DIR" pull --ff-only origin "$BRANCH"

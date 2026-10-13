@@ -66,7 +66,13 @@ export {
 } from "@rai/contracts";
 
 import type {
+  AnalysisBlockRow,
+  AnalysisView,
   DirectSyncReceipt,
+  FactsBlockRow,
+  FactsView,
+  FactVersions,
+  Freshness,
   MobileSessionKind,
   PredictionModelEvent,
   PredictionModelRun,
@@ -172,6 +178,23 @@ export interface HandshakeResponse {
   coachLoopContractVersion?: number;
   planPublicationContractVersion?: number;
   planReceiptContractVersion?: number;
+  /** 直连原始回执能力：1 = summary.directSync 会带 ingestStatus/analysisStatus。老服务端省略。 */
+  factsAnalysisContractVersion?: number;
+  /**
+   * 两块视图能力（PR5 D1.4）：1 = `/v1/workouts`、`/v1/mobile/today`、
+   * `/v1/mobile/training-plan-state` 会带 `currentFacts` / `publishedAnalysis`
+   * （`training-plan-state` 另带 `metadata.versions`/`metadata.freshness`）。
+   * 老服务端省略。
+   *
+   * 🔴 与上面那个能力位**是两个不同的东西**，不要合并成一个数字：
+   * - `factsAnalysisContractVersion` = 直连**回执**（写入时刻的凭证，PR1）；
+   * - 本字段 = 读侧**两块行视图**（PR5）。
+   * 它们由不同的批次落地、可以各自演进（回执已经冻结，两块视图还会加行类型）。
+   * 一个数字承担两种语义，会让"服务端到底升级了哪一侧"变成没人能回答的问题 ——
+   * 这正是本仓反复付过代价的那个形态（对照 `packages/contracts/src/direct-sync.ts`
+   * 里 `rawGeneration` 被删掉的理由）。
+   */
+  factsAnalysisViewContractVersion?: number;
 }
 
 export interface MobilePlanOperationScope {
@@ -318,6 +341,15 @@ export interface WorkoutListResponse {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * 两块视图（PR5 S4）。**可选**：老服务端完全不返回这两个键，而显式返回 `null`
+   * 表示"本端点还没有这一侧视图"（D1.2：`null` 与空对象是两件事，空对象会撒谎）。
+   *
+   * ⚠️ 与 `items` 的并存是**刻意的**：`items` 是今天那个"混过"的列表（已知过渡态），
+   * 两块是分开的视图。这正是"区分而不改名"，也是不制造 flag day 的唯一做法。
+   */
+  currentFacts?: FactsView | null;
+  publishedAnalysis?: AnalysisView | null;
 }
 
 export interface RoutePointDto {
@@ -327,6 +359,26 @@ export interface RoutePointDto {
   speedMetersPerSecond: number | null;
   timestamp: string | null;
 }
+
+/**
+ * 事实侧 / 分析侧的**两块视图**（PR5 D1、D5，见 `docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md` §2）。
+ *
+ * 🔴 **形状住在 `@rai/contracts`，这里只转发**（包边界，2026-10-13 实测修正）：
+ * 读侧实现（`packages/storage-sqlite/src/read/fact-read-view.ts`）要**构造**这两个视图，
+ * 而 `storage-sqlite` 不依赖 `api-contracts`。形状留在这里会让它出现一条向上的 import ——
+ * `tsc` 与测试全绿，只有 `npm run check:package-boundaries` 看得见（未声明的 src 边 +
+ * `package.json` 缺依赖 ⇒ 干净安装会崩）。三条硬约束与各字段的理由随形状一起搬到了
+ * `packages/contracts/src/facts-analysis-view.ts`，不要在这里重写一遍。
+ */
+export type {
+  AnalysisBlockRow,
+  AnalysisView,
+  FactsAnalysisBlocksDisjoint,
+  FactsBlockRow,
+  FactsView
+} from "@rai/contracts";
+
+export { type FactVersions, type Freshness };
 
 export interface WorkoutOverrideDto {
   revision: number;
@@ -341,8 +393,7 @@ export interface WorkoutOverrideDto {
 }
 
 export interface WorkoutDetailResponse {
-  workout: WorkoutListItem & {
-    elapsedSeconds: number;
+  workout: WorkoutListItem & {    elapsedSeconds: number;
     activeEnergyKcal: number | null;
     elevationGainMeters: number | null;
     averageCadenceSpm: number | null;
@@ -378,6 +429,31 @@ export interface WorkoutDetailResponse {
   trainingLoad: WorkoutTrainingLoad | null;
   zoneSummary: WorkoutZoneSummary | null;
   zoneProfile: import("@rai/contracts").DailyZoneProfile | null;
+  /**
+   * 两块视图（PR5 S4/S5）。**可选**，`null` = 本端点还没有这一侧视图。
+   *
+   * 🔴 这里的路线是 S5 的正题（D5 最后一段）：分析块走 `route_versions`
+   * （`status='complete'` + `workout_routes.published_route_version_id` +
+   * `route_version_points` 按 `sequence`），事实块走当前 `route_points`。
+   * 老库指针为 `NULL` 时分析块**允许退化**读当前 `route_points`，并标
+   * `routeVersionId: null` —— 退化必须**可观测**，否则"读了版本表"与"退化了"
+   * 在响应里长得一模一样，C8 就没有牙。
+   */
+  facts?: {
+    workoutId: string;
+    route: RoutePointDto[];
+    routeVersionId: null;
+    analysisState: FactsBlockRow["analysisState"];
+  } | null;
+  analysis?: {
+    workoutId: string;
+    releaseId: string | null;
+    route: RoutePointDto[];
+    /** `null` = **退化读取**（老库没有已发布版本指针），不是"没有路线"。 */
+    routeVersionId: string | null;
+    stale: boolean;
+    factDeleted: boolean;
+  } | null;
 }
 
 
@@ -454,6 +530,17 @@ export interface RecomputeJobDto {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /**
+   * v35 的分析任务绑定列（PR5 C10）。**可选**，且"缺键"是有含义的取值：
+   * v35 之前登记的老任务这四列是 NULL，DTO 里就不出现这些键。
+   *
+   * 🔴 旧任务为什么必须是 `undefined` 而不是 `null`：C10 的原句是"旧任务为 `undefined`
+   * （12 个旧字段逐个不变）"。若把老任务补成 `null`，"没有绑定"与"绑定到空值"
+   * 就再也分不开了，而消费方（分析状态派生、任务对账）要问的第一个问题正是这个。
+   */
+  targetRawGeneration?: number;
+  targetDependencyGeneration?: number;
+  expectedIncumbentReleaseId?: string;
   events?: RecomputeJobEventDto[];
 }
 
@@ -564,6 +651,25 @@ export interface ImportJobResponse {
      * 前者为 `committed` 也不代表后者已经 `published`（§1.4）。
      */
     directSync?: DirectSyncReceipt;
+    /**
+     * 本批**在同一个事务里登记**的分析任务 id（`recompute_jobs.id`）。
+     *
+     * 为什么不能从 `directSync.analysisStatus` 推出来：回执的 `analysisStatus` 是
+     * **COMMIT 时刻的快照**（直连车道恒写 `queued`，见 `apps/api/src/direct-sync-ingest.ts`），
+     * 而"分析到底跑成没有"只有在**另一个通道**上才有终态（`GET /v1/jobs/:id`）。
+     * 没有这个 id，客户端就只知道自己"提交过一批需要分析的事实"，**永远问不到结果** ——
+     * §10.3 的「分析已更新」与「健康数据已保存，分析更新失败，可重试分析」两句因此不可达。
+     *
+     * 取值语义（三态，不是两态）：
+     * - 非空 ⇒ 本批需要分析，且这是要跟踪的那条任务；
+     * - `null` ⇒ 这条车道**明确不登记**分析任务（`record-only` 的 `not_required` 就是这样）；
+     * - 键缺失 ⇒ 这个服务端版本还没提供这个字段（老服务端）。
+     *
+     * `null` 与"缺键"**必须分开**：前者是"问过了，没有分析任务"，后者是"问不到"。
+     * 把后者读成前者，会让一个本该显示「分析更新中」的批次显示成「健康数据已保存」——
+     * 用户于是以为分析已经完事（§9.1 明令不许把 `not_required` 说成"分析已完成"）。
+     */
+    analysisJobId?: string | null;
     /**
      * 本批**恢复事实**（`canonical_nights` / `canonical_hrv_days`）的重建模式。
      *
@@ -1023,12 +1129,22 @@ export interface TrainingPlanStateResponse {
     windowEnd: string;
     ruleVersion: string;
     publicationDigest: string;
+    /**
+     * PR5 S3：事实/分析版本与新鲜度。**可选**，理由见 §1.2 锚点 21 ——
+     * iOS 的 `TrainingPlanStateResponse.Metadata` 是**非可选**字段结构体，
+     * 给它加必填字段会让旧客户端 decode 失败。加可选字段则老客户端原样忽略。
+     */
+    versions?: FactVersions;
+    freshness?: Freshness;
   };
   availability: "ready" | "empty";
   goals: MobileGoalsResponse;
   today: MobileTodayResponse;
   workoutPlan: MobileWorkoutPlanResponse & { windowStart: string; windowEnd: string };
   coachSummary: MobileRunCoachResponse;
+  /** 两块视图（PR5 S4）。可选；`null` = 本端点还没有这一侧视图。 */
+  currentFacts?: FactsView | null;
+  publishedAnalysis?: AnalysisView | null;
 }
 
 export interface MobilePlanReceiptInput {
@@ -1236,8 +1352,7 @@ export interface MobileReplanAdvice {
 
 export interface MobileTodayResponse {
   /** Metadata only; limits already apply server-side. Not another race phase. */
-  executionPolicy?: import("./coach-loop.js").CoachExecutionPolicyContext;
-  /** Strict dated V2 result; legacy clients may keep reading the compatible assessment. */
+  executionPolicy?: import("./coach-loop.js").CoachExecutionPolicyContext;  /** Strict dated V2 result; legacy clients may keep reading the compatible assessment. */
   readinessSnapshot?: import("@rai/contracts").ReadinessAssessmentResult;
   /**
    * §13.3 的版本化决策输出。**与 `verdict`/`nextSession` 是同一次决策的两个投影**：
@@ -1329,6 +1444,20 @@ export interface MobileTodayResponse {
   recentPlanExecution?: MobilePlanExecutionDay[];
   phase: MobileDayPhase;
   lock: MobileLockState;
+  /**
+   * 两块视图（PR5 S4）。可选；`null` = 本端点还没有这一侧视图。
+   *
+   * 🔴 为什么这里的两个块**必须与上面那些数字同一次读**：`today` / `week` / `weekDaily` /
+   * `planActual` 全部来自事实侧。若两块另开一次读，它们之间的提交会让响应出现
+   * "汇总说 7 次、事实块说 6 行"，而那正是 C1 要挡的跨快照混合。
+   *
+   * ⚠️ 本类型上已有一个 `freshness` 字段，它**不是**这里说的新鲜度：那个字段已
+   * `@deprecated`，只由 `sync.status` 派生（§1.2 锚点 14），与版本比较无关。
+   * 版本/新鲜度的正式出口是 `training-plan-state` 的 `metadata.versions`/`freshness`
+   * —— 一个端点两套 freshness 会让"哪个说了算"变成没人能回答的问题，所以这里不给第二份。
+   */
+  currentFacts?: FactsView | null;
+  publishedAnalysis?: AnalysisView | null;
 }
 
 /** Aggregated payload for the iOS statistics page. */

@@ -1,0 +1,23 @@
+# 行尾策略：会被 bash / python / Xcode 直接读取的文件固定在 LF。
+#
+# 为什么必须写成仓库事实、而不能依赖各机的 `core.autocrlf`：
+# `core.autocrlf` 是**本机配置**，不是仓库属性。本机（Windows）它是 `true`，检出即 CRLF；
+# 于是 Windows 上编辑过的 `apps/ios/tests/*.sh` 只要不经 git（zip/共享目录/scp/同步盘）
+# 落到 Mac，`#!/bin/bash\r` 就会让 bash 报 `bad interpreter: /bin/bash^M`。
+# 反过来，Mac 上若有人把 `autocrlf` 设成 `true`，检出的 .sh 同样带 CR —— 同一份提交
+# 在两台机器上判定不同，是最难查的那种分叉。
+#
+# 现状核对（2026-10-13，本机实测）：这些扩展名在 **HEAD 的 blob 里已经是 LF**
+# （`git grep -I -c -P '\r$' HEAD -- '*.sh' '*.py' '*.swift' '*.pbxproj'` 无输出），
+# 所以本文件不是"修历史"，而是把**检出方向**也钉死，并让"内容是不是 LF"不再取决于谁在哪台机器上提交。
+#
+# 刻意**不**写 `* text=auto`：那会把全仓文本重新规范化，带来一次与本次目的无关的巨量 diff。
+# 只列出"行尾会真的改变执行结果"的类型。
+*.sh text eol=lf
+*.py text eol=lf
+*.swift text eol=lf
+*.pbxproj text eol=lf
+
+# 无扩展名的 bash 脚本：`*.sh` 覆盖不到它，但它同样由 `bash <path>` 执行，
+# 同样会因为 CRLF 变成 `bad interpreter`。
+/.githooks/* text eol=lf

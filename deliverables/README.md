@@ -8,6 +8,35 @@
 
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
+- [DIRECT_SYNC_PR6_A15_A17_AND_PR5_S3S6_2026-10-13.md](DIRECT_SYNC_PR6_A15_A17_AND_PR5_S3S6_2026-10-13.md)：
+  **批量 A+B 验收：真机等价 HTTP 夹具、§11 备份入口退场、PR5 S3→S6 读侧一致性** ——
+  ① **A1**：新 HTTP 夹具走完真机会话顺序（上传 → inspect → import-jobs → 终态），把 A17「文案/状态截图」
+  的**协议半边**机械化：`committed`/`queued`/`not_required`/`receiptId` 一致/`publishedReleaseId: null`
+  + 重放取原回执 + COMMIT 前强杀 + COMMIT 后丢回复 + 删除-only，**9/9**（Lead 独立复跑）；
+  ② **A2**：`POST`/`DELETE /v1/backups` 退役为 410（**不是 501** —— `apiErrorPayload` 会吞掉 5xx 文案），
+  `deploy/upgrade.sh` 不再 POST 备份，`deploy/README-UBUNTU.md` 那份"每 40 分钟打一个已退役接口"的
+  运维指引已改；**恢复能力与已有备份文件一律不动**（隔离 `var/` 逐字节断言 + 既有恢复用例真跑）；
+  ③ **B1**：PR5 S3→S6 —— `currentFacts`/`publishedAnalysis` 两块在一个 `BEGIN DEFERRED` 里读齐、
+  行键**交集为空**、旧字段**键集与可选性**逐字节不变；详情路线走 `route_versions`（老库指针 `NULL` 退化并标注）。
+  🔴 本批修掉**三条真缺陷**：直连接收器 `journal_mode=WAL` 早于 `busy_timeout` 导致竞争下整批失败
+  （**Lead 给的第一版修法被实测否掉**：该 PRAGMA 不走 busy handler）、备份约定与代码不一致、
+  以及**三处门禁自身的无牙/假绿**（其中两处是本批刚写的新判据，靠突变探针逼出来）。
+  ⚠️ P01–P06 未测、真机观感未验、A12/A13 真并发不可达；`deploy-upgrade` 4 条在本机 SKIP —— 逐条见报告 §5。
+
+- [DIRECT_SYNC_PR6_DEVICE_VERIFICATION_2026-10-13.md](DIRECT_SYNC_PR6_DEVICE_VERIFICATION_2026-10-13.md)：
+  **PR6「需真机验证的实施项」落地与证据分界**（iOS 侧协议/状态/文案）——
+  ① iOS 持久回执协议：`DirectSyncIngestStatus`/`DirectSyncAnalysisStatus`/`DirectSyncReceipt`
+  与服务端 `INGEST_STATUSES`/`ANALYSIS_STATUSES` **逐字逐序**一致（新增跨语言 parity 门禁，本机真跑 13 条）；
+  ② 游标闸门 `DirectSyncCursorPolicy.decision`：每页候选游标只在**对应 durable committed 回执**之后提交，
+  老服务端/`unchanged` 收尾由 `requiresReceipt` 表达（§10.2「保留旧等待含义」）；
+  ③ §10.3 六句文案集中在 `DirectSyncCopy`，旧三句在 iOS 源码树缺席（反向哨兵）；
+  ④ 分析终态对账：回执只记 COMMIT 快照，`analysisJobId` + `GET /v1/jobs/:id` 让「分析已更新」**真的可达**。
+  本机实测：`npm run typecheck` EXIT=0、全量套件 **1735→1738 tests / 0 fail** + Web 184、`npm run build` EXIT=0、
+  三支新门禁 48/13/43 全绿、**19 个突变探针**。⚠️ **Swift 一行未编译未执行**（本机无 Xcode，
+  `npm run test:ios` 是显式跳过）；真机清单 D1–D4 与「不可达清单」（P01–P06、A12/A13 真并发）在文内。
+  另记三处**本批发现并修掉的真缺陷**：receipt-less 成功路径 × 游标闸门**自锁**、`.hold` 把已提交批次显示成失败、
+  `npm run typecheck` 在制品期 EXIT=2。
+
 - [../docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md](../docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md)：**PR5 落地设计**（读侧一致性）——
   7 条决策（`currentFacts`/`publishedAnalysis` 形状、新鲜度合同、缓存五元组、删除可见性、读侧边界、
   与 PR4 的顺序、`route_points` 退役）、11 步实施顺序、每步判据与突变靶子。

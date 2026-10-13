@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import test from "node:test";
 
 import { RaiApplicationService } from "@rai/application";
@@ -2355,6 +2355,88 @@ for (const config of [
     assert.equal((await fetch(path, { headers: { authorization: "Bearer incorrect" } })).status, 200);
     const incorrect = await fetch(path, { headers: { authorization: "Bearer incorrect" } });
     assert.deepEqual((await incorrect.json() as import("@rai/api-contracts").WorkoutDetailResponse).route.map(point => [point.latitude, point.longitude]), config.publicRoute ? coordinates : []);
+  } finally {
+    await stopApi(child).catch(() => child.kill("SIGKILL"));
+    await removeRuntimeRoot(runtimeRoot);
+  }
+});
+
+/**
+ * §11「项目退出备份责任」的入口级行为判据。
+ *
+ * 为什么不用"断言返回值"了事：`POST /v1/backups` 曾经真的写文件，而**返回值**是可以
+ * 在"仍然写文件"的同时被改成任何样子的（比如提前 return 一个提示、后面照样备份）。
+ * 所以这里把判据放在三个**观测量**上：
+ *   ① 隔离 `var/backups/` 里的文件集合前后完全一致（没有新建、没有删除、没有轮换）；
+ *   ② 每个既有文件的 sha256 逐字节一致（没有原地改写）；
+ *   ③ 恢复用的那份文件仍然在，且 `/v1/backups` 只读清单仍能列出它。
+ * 第 ③ 条是防止"为了退场把恢复能力一起拆掉"的反向哨兵（§12：发现损坏要保留文件、
+ * 交运维，恢复路径是最后一道线）。
+ */
+test("retired backup endpoints create and delete nothing while the recovery path stays usable", async () => {
+  const runtimeRoot = mkdtempSync(join(tmpdir(), "rai-api-backup-exit-"));
+  const databasePath = join(runtimeRoot, "var/rai.sqlite");
+  const backupDirectory = join(runtimeRoot, "var/backups");
+  mkdirSync(join(runtimeRoot, "var"), { recursive: true });
+  (await RaiDatabase.open(databasePath)).close();
+
+  // 预先放两份"运维的备份"：一份可恢复，一份故意不是合法 SQLite（用来证明退役的
+  // 删除接口连**识别**都不做 —— 它根本不碰磁盘）。后者刻意不用 `.sqlite` 扩展名：
+  // `listBackups()` 只列 `*.sqlite`，用非备份扩展名才能把"清单只管备份"与
+  // "接口不碰任何文件"这两件事分开断言。
+  const recoverable = await new DatabaseMaintenance(databasePath, runtimeRoot).createBackup("operator-snapshot");
+  const foreign = join(backupDirectory, "rai.operator-archive-notes.txt");
+  writeFileSync(foreign, "not-a-sqlite-file-but-operations-owns-it\n");
+
+  const inventory = (): Array<{ name: string; sha256: string }> =>
+    readdirSync(backupDirectory).sort().map((name) => ({
+      name,
+      sha256: createHash("sha256").update(readFileSync(join(backupDirectory, name))).digest("hex")
+    }));
+  const before = inventory();
+
+  const child = spawn(process.execPath, ["--import", "tsx", "apps/api/src/server.ts"], {
+    cwd: projectRoot, env: { ...process.env, RAI_RUNTIME_ROOT: runtimeRoot, RAI_DATABASE: databasePath,
+      RAI_API_PORT: "0", RAI_LOG_LEVEL: "silent", RAI_API_TOKEN: "" },
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"]
+  });
+  let output = "";
+  child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  child.stderr?.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+  try {
+    const url = `http://127.0.0.1:${await waitForBoundPort(child, () => output)}`;
+    await waitForApi(child, url, () => output);
+
+    const created = await fetch(`${url}/v1/backups`, { method: "POST" });
+    assert.equal(created.status, 410, await created.clone().text());
+    const createdBody = await created.json() as { code: string; message: string };
+    assert.equal(createdBody.code, "backup_creation_retired");
+    // 4xx（而不是 501）：`apiErrorPayload` 会把 5xx 的 message 压成"本地服务处理请求失败"，
+    // 那样这段运维提示就到不了调用方 —— 而 §11 明确禁止把备份改成静默失败。
+    assert.match(createdBody.message, /不再创建备份/, "旧接口必须给清晰维护提示，而不是静默失败");
+    assert.match(createdBody.message, /运维/, "提示必须说明责任在运维");
+
+    const removed = await fetch(`${url}/v1/backups/${encodeURIComponent(recoverable.name)}`, { method: "DELETE" });
+    assert.equal(removed.status, 410, await removed.clone().text());
+    const removedBody = await removed.json() as { code: string; message: string };
+    assert.equal(removedBody.code, "backup_deletion_retired");
+    assert.match(removedBody.message, /不再删除备份/, "删除接口同样要给提示");
+
+    // ① 文件集合前后一致（没有任何创建/删除/轮换）。
+    assert.deepEqual(inventory(), before,
+      "已退役的备份接口改动了 var/backups：§11 要求不创建、不轮换、不删除任何既有备份");
+
+    // ② 恢复路径仍然可用：只读清单列得出运维那份快照，流也打得开。
+    //    `listBackups()` 只列 `*.sqlite`（非法扩展名不参与恢复），所以这里按同一口径取期望。
+    const listed = await fetch(`${url}/v1/backups`).then(response => response.json()) as Array<{ name: string }>;
+    assert.deepEqual(listed.map(entry => entry.name), [recoverable.name],
+      "只读清单必须仍能列出可恢复的既有备份（否则恢复入口就找不到东西了）");
+    const download = await fetch(`${url}/v1/backups/${encodeURIComponent(recoverable.name)}`);
+    assert.equal(download.status, 200, "下载既有备份是恢复能力的一半，不能被退场波及");
+    assert.equal(
+      createHash("sha256").update(Buffer.from(await download.arrayBuffer())).digest("hex"),
+      before.find(entry => entry.name === recoverable.name)?.sha256,
+      "下载到的必须与磁盘上的既有备份逐字节相同");
   } finally {
     await stopApi(child).catch(() => child.kill("SIGKILL"));
     await removeRuntimeRoot(runtimeRoot);

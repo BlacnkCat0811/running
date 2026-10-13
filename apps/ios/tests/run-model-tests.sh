@@ -62,6 +62,23 @@ xcrun swiftc "${swiftc_flags[@]}" -swift-version 5 -default-isolation MainActor 
   apps/ios/RAI/PlanScheduleOperationJournal.swift \
   apps/ios/tests/WorkoutPlanMapperRegression.swift -o "$tmp/workout-plan-tests"
 "$tmp/workout-plan-tests"
+# 直连回执与游标闸门（`docs/SQLITE_DIRECT_SYNC_DESIGN.md` §5.1 / §10.1 / §10.2）。
+# 为什么必须挂在这扇聚合门禁里：这三个判据的失效方向全是**静默**的 —— 拿服务端的单一
+# `succeeded` 当回执去推进游标，那段窗口从此不会再被任何一次 anchored query 返回；
+# 连续分页还没 drain 完就清空后台待办意图，用户不打开 App 就再也没人接着发下一批。
+# 而它两侧都够不着：`HealthKitSync.swift` 不被任何回归脚本编译（整份锁在 `#if os(iOS)`
+# + HealthKit 里），`typecheck-ios.sh` 又只看类型不跑断言。判据存在 ≠ 判据被执行 ——
+# 本仓在 `TechPlotSampling` / `check-today-layout.py` 上已经各付过一次学费。
+#
+# `SyncPhase.swift` 必须一起编：闸门第一条走的就是 `SyncPhase.mayAdvanceAnchor`
+# （「阻塞态绝不推进 anchor」的唯一出处，不得在这里再抄一份阻塞清单），
+# 而 `SyncTaskState.resolvedPhase` 也由它派生 —— 少编它这里会以
+# `cannot find type 'SyncPhase' in scope` 炸，而全量类型检查（一起编）完全看不出来。
+xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/SyncPhase.swift \
+  apps/ios/RAI/DirectSyncReceiptState.swift apps/ios/RAI/DirectSyncCursorPolicy.swift \
+  apps/ios/RAI/SyncTaskState.swift \
+  apps/ios/tests/DirectSyncReceiptRegression.swift -o "$tmp/direct-sync-receipt-tests"
+"$tmp/direct-sync-receipt-tests"
 
 bash apps/ios/tests/run-session-tests.sh
 bash apps/ios/tests/run-health-sync-tests.sh
@@ -92,6 +109,16 @@ python3 apps/ios/tests/check-background-capabilities.py
 # （否则 export.xml 字节抖动，`source_sha256` 永不重复）、manifest 不许带墙钟
 # （否则上传幂等键每次都变）。它顺手断言自己没变成孤儿。
 python3 apps/ios/tests/check-export-determinism.py
+# 直连同步的三支结构门禁（PR6）。`HealthKitSync.swift` 与 `DirectSyncCursorPolicy.swift` 里
+# 有一批**改错了照样编译通过、肉眼也看不出来**的接线：用户看到的是 §10.3 的哪一句、六句是否
+# 还来自同一个集中入口（旧语义有没有偷偷回来）、游标闸门是不是排在提交之前、被闸门拦下的一轮
+# 会不会顺手把后台待办意图清掉、`requiresReceipt` 在**七类调用点**上有没有各自传对、
+# 以及"对账排在游标提交之后、失败不让同步变红"。
+# 🔴 这三支都**只**断言"自己没变成孤儿"，所以不挂在这里 = 它们一条判据都不执行
+# （`check-today-layout.py` 的历史失效模式）。三条一起挂、缺一条都会让对应门禁转红。
+python3 apps/ios/tests/check-direct-sync-status-copy.py
+python3 apps/ios/tests/check-direct-sync-contract-parity.py
+python3 apps/ios/tests/check-direct-sync-analysis-reconcile.py
 # Optional release red/green proof; ordinary gates already execute all positive regressions.
 if [ "${RAI_PLAN_STATE_MUTATIONS:-0}" = 1 ]; then
   bash apps/ios/tests/run-plan-state-mutations.sh

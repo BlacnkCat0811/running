@@ -39,7 +39,14 @@ test("recent weekly volume keeps a stable Monday boundary across weekdays and ye
 const runDate = (index: number): string =>
   new Date(Date.UTC(2025, 0, 1 + index * 3, 0, 0, 0)).toISOString();
 
-async function seed(path: string): Promise<RaiDatabase> {
+/**
+ * 共享夹具：8 条训练 + 每个会话一次已发布评估（`enqueueFullRecompute` → `runNextJob`）。
+ *
+ * 导出是为了让 PR5 的子步骤（S3–S6）复用**同一份**夹具：两侧一致性判据（C1/C2/C9）
+ * 要比较的就是"同一个库里，新旧两个读取面是否指向同一批事实"，各写一份夹具会让
+ * "两边看到的不一样"这个唯一的失败形态被夹具差异掩盖掉。
+ */
+export async function seed(path: string): Promise<RaiDatabase> {
   const store = await RaiDatabase.open(path);
   const database = store.database;
   database.prepare("INSERT INTO import_manifest (key, value) VALUES (?, ?)").run(

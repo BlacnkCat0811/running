@@ -1803,14 +1803,63 @@ export class RaiDatabase {
   /** 活跃 SAVEPOINT 的 LIFO 栈；仅在 `transactionOwner="caller"` 下使用。 */
   private readonly savepoints: string[] = [];
 
+  /**
+   * 确保库处于 WAL 模式。**不是**一条 `PRAGMA journal_mode = WAL` 就完事，理由都是实测的：
+   *
+   * 1. 已是 WAL 的库**不发**那条语句。对已经是 WAL 的库它是 no-op、不加锁
+   *    （实测：另一连接持写锁时无条件发它也只花 8–9 ms 并成功）；
+   *    而一旦要**切换**（`delete → WAL`）就必须拿独占锁。生产上除下面三类库之外都是 WAL，
+   *    所以"先读后发"让**正常连接彻底不需要**那把独占锁 —— 报告里的失败正是
+   *    "被别人持锁时去拿独占锁"：`applyDirectSyncImport` 每批都开新连接，撞上读侧
+   *    `openReadonly`（每请求开合）就整批 `failed`，且异常里看不出是锁竞争。
+   * 2. **仍会走到重试那一支的三类库**（不是死代码，别当死代码删掉）：
+   *    ① **首次建库**（文件还不存在 / 还是默认 `delete`）；
+   *    ② **备份恢复回来的库**（旧备份可能是 `delete` 模式，恢复不会顺带改模式）；
+   *    ③ **外部工具留下的 `delete` 库**（外部冷备/外部 SQLite 工具写的库都可能是）。
+   *    这三类当时若恰好有并发写者，就需要重试。
+   * 3. mode 切换**不经过** busy handler：实测 `busy_timeout` 设成 3000/5000，只要有别的连接
+   *    持写锁，这条语句仍在 0–1 ms 内抛 `SQLITE_BUSY`（同一情形下普通 INSERT 会等满 3334 ms）。
+   *    所以 SQLite 自己**不会**为它等 —— 只能在这里显式重试，把等待用在该等的地方。
+   * 4. 重试**有上限**，耗尽后**原样上抛**最初的 `database is locked`（不换自造文案）：
+   *    运维唯一的线索就是那句 SQLite 原文，换成"打开数据库失败"会把这个线索弄丢。
+   */
+  private ensureWalMode(): void {
+    // mode 切换不需要（也已经拿不到）busy 等待 ⇒ 用固定次数 + 固定间隔自己等，总量有界。
+    const attempts = 10;
+    const intervalMs = 500;
+    for (let attempt = 0; ; attempt += 1) {
+      const read = (): string => String(
+        (this.database.prepare("PRAGMA journal_mode").get() as { journal_mode?: unknown } | undefined)?.journal_mode ?? ""
+      ).toLowerCase();
+      // 读一次：已经是 WAL 就直接走人，不碰独占锁。
+      if (read() === "wal") return;
+      try {
+        this.database.exec("PRAGMA journal_mode = WAL");
+        return;
+      } catch (error) {
+        // 只对"锁竞争"重试。其它错误原样上抛，不要用重试把真实故障埋掉。
+        const message = error instanceof Error ? error.message : String(error);
+        if (!/database is locked|SQLITE_BUSY/i.test(message) || attempt + 1 >= attempts) throw error;
+        // 每次重试留一行痕：这是"竞争存在但被正确处理"的唯一证据。
+        process.stderr.write(
+          `journal_mode=WAL is blocked by a concurrent writer (attempt ${attempt + 1}/${attempts}); retrying in ${intervalMs} ms\n`
+        );
+      }
+      // 同步睡眠：构造是同步的，这里没法 await；单次 500 ms、总量 ≤ 5 s。
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, intervalMs);
+    }
+  }
+
   private constructor(path: string, private readonly transactionOwner: TransactionOwner = "store") {
     this.path = path;
     this.database = new DatabaseSync(path);
     try {
       this.database.exec("PRAGMA foreign_keys = ON");
-      this.database.exec("PRAGMA journal_mode = WAL");
-      this.database.exec("PRAGMA synchronous = NORMAL");
+      // `busy_timeout` 必须**先于**后面所有需要等锁的语句设置：原来的顺序把它排在
+      // `journal_mode = WAL` 之后，中间那句完全没有超时保护。
       this.database.exec("PRAGMA busy_timeout = 5000");
+      this.ensureWalMode();
+      this.database.exec("PRAGMA synchronous = NORMAL");
       // 回读而不是只设置：`PRAGMA journal_mode = WAL` 在不支持的存储上会**静默失败**
       // 并返回原模式。文档 §1.2 禁止用 `journal_mode=OFF` / `synchronous=OFF` 换速度，
       // 所以这里断言它真的生效了 —— 断言的是**结果**，不是我们发出过那条语句。

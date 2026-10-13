@@ -1,5 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
-import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
+import { sessionFactPresentConditionSql, usableRouteConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
 import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
 
@@ -327,12 +327,41 @@ export class SqliteWorkoutReadRepository {
     };
   }
 
+  /**
+   * 该训练**已发布路线版本的指针**（PR5 S5 / D5 最后一段）。
+   *
+   * 返回 `null` 有两层含义，调用方**必须**自己区分，不要在这里合并：
+   * - `workout_routes` 行不存在（这条训练没有轨迹）⇒ 事实块与分析块**都**没有路线；
+   * - 行存在但 `published_route_version_id IS NULL` ⇒ **老库**（v35 之前发布的路线），
+   *   此时分析块**允许退化**读当前 `route_points` 并标 `routeVersionId: null`
+   *   —— 不猜、不假装它有版本。
+   *
+   * 刻意同时返回 `usableRoute`：调用方若只看指针，会把"有指针但轨迹不可用
+   * （`file_status = 'pending'`）"当成"有轨迹"。判据与写侧同源（`usableRouteConditionSql()`）。
+   */
+  routePointer(workoutId: string): { routeId: string; publishedRouteVersionId: string | null; usable: boolean } | null {
+    const row = this.database.prepare(`
+      SELECT wr.id AS routeId, wr.published_route_version_id AS publishedRouteVersionId,
+        CASE WHEN ${usableRouteConditionSql("wr")} THEN 1 ELSE 0 END AS usable
+      FROM workout_routes wr
+      WHERE wr.workout_id = ?
+      ORDER BY COALESCE(wr.start_at, wr.created_at), wr.id
+      LIMIT 1
+    `).get(workoutId) as { routeId?: unknown; publishedRouteVersionId?: unknown; usable?: unknown } | undefined;
+    if (row === undefined) return null;
+    return {
+      routeId: String(row.routeId),
+      publishedRouteVersionId: typeof row.publishedRouteVersionId === "string"
+        ? row.publishedRouteVersionId : null,
+      usable: Number(row.usable) === 1
+    };
+  }
+
   workoutStatistic(
     workoutId: string,
     type: string,
     preference: "sum" | "average"
-  ): number | null {
-    const row = this.database
+  ): number | null {    const row = this.database
       .prepare(`
         SELECT sum_value, average_value
         FROM workout_statistics

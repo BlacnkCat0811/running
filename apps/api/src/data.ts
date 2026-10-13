@@ -18,11 +18,15 @@ import {
   SqliteCoachFactsRepository,
   activeDurationSecondsSql,
   loadPerformanceEventSessions,
+  readFactReadViewInTransaction,
   sessionFactPresentConditionSql,
   workoutPresentConditionSql,
+  type FactReadView,
+  type FactReadViewLimits,
   type StoredPerformanceEntry,
   type StoredPrivacyZone,
   type StoredSeriesSession,
+  type StoredWorkoutDetailRow,
   type StoredWorkoutListItem
 } from "@rai/storage-sqlite";
 import { DATABASE_TIMEZONE, SHARE_CARD_POLICY_VERSION, localCalendarFormatter } from "@rai/contracts";
@@ -443,6 +447,58 @@ export class RaiReadStore {
     };
   }
 
+  /**
+   * 追加两块视图的 `/v1/workouts`（PR5 S4 / D1.5）。
+   *
+   * 🔴 为什么要包一层而不是把两块塞进 `workouts()`：两块必须在**一个读事务**里取齐
+   * （C1），而 `workouts()` 自己不开事务（列表与计数由 `listByQuery` 一次拿完）。
+   * 这里用一个 `BEGIN DEFERRED` 把"旧字段"与"两块"压在同一快照上 ——
+   * 旧字段一个字节都没变，新块来自**恰好一次**的版本读。
+   */
+  workoutsWithViews(query: Parameters<RaiReadStore["workouts"]>[0]): WorkoutListResponse {
+    return this.factAnalysisBlocks(
+      () => this.workouts(query),
+      (base, view) => ({ ...base, currentFacts: view.facts, publishedAnalysis: view.analysis })
+    );
+  }
+
+  /**
+   * 两块视图（`currentFacts` / `publishedAnalysis`）的**唯一组装点**。
+   *
+   * 三件事在这里一次做完，缺一条 D1 就没落地：
+   * 1. **一个** `BEGIN DEFERRED`：`base` 的读取与两块的读取共用同一个快照。这**不是**
+   *    "两次查询恰好看到同一版本"—— SQLite 的 deferred 事务在第一次读时取 WAL 快照，
+   *    此后本连接的所有读都在那个快照上（C1 的机械实现）。
+   * 2. **两块默认 `null`**：`base` 里没有这两侧视图时就是 `null`，不补空对象（D1.2）。
+   * 3. **旧字段原样透传**：`base` 是既有端点的返回值，这里只 `...base` 追加两个键
+   *    —— 旧字段的取值与键集在这一层不可能被改动（C9）。
+   *
+   * ⚠️ `base` 的读取**也必须在事务内**：`BEGIN DEFERRED` 在 SQLite 里是"第一次读时取快照"，
+   * 所以 `readBase()` 与本函数里的版本读落在同一个 WAL 快照上；顺序反过来也一样。
+   */
+  private factAnalysisBlocks<T extends object>(
+    readBase: () => T,
+    assemble: (base: T, view: FactReadView) => T,
+    limits?: Partial<FactReadViewLimits>
+  ): T {
+    this.database.exec("BEGIN DEFERRED");
+    try {
+      const base = readBase();
+      const view = readFactReadViewInTransaction(this.database, {
+        // 事实块的行数跟着端点的分页走：它回答的是"这一页有哪些事实"，
+        // 读的比 `base` 多会让响应里出现"列表里没有、块里有"的行。
+        factRows: limits?.factRows ?? 100,
+        analysisRows: limits?.analysisRows ?? 200
+      });
+      const result = assemble(base, view);
+      this.database.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   /** A single read transaction keeps export rows and their count on one active snapshot. */
   workoutExportSnapshot(query: Parameters<RaiReadStore["workouts"]>[0]): WorkoutListResponse {
     this.database.exec("BEGIN DEFERRED");
@@ -497,13 +553,29 @@ export class RaiReadStore {
           completed: today.weekPlan.filter(day => day.completedWorkoutId !== null).map(day => day.localDate),
           prescription: inputs.prescription, content: executionContent(effective.days)
         });
+        // 两块视图在**同一个**读事务里取（`factAnalysisBlocks` 会再开一个 `BEGIN DEFERRED`，
+        // 所以这里必须用它的**事务内**形态，而不是 `factAnalysisBlocks` 自己）。
+        const planView = readFactReadViewInTransaction(this.database, {
+          factRows: 100, analysisRows: 200
+        });
         result = {
           metadata: { contractVersion: 1, ...scope, goalsRevision: goals.revision, coherenceToken,
             timezone: DATABASE_TIMEZONE, localDate: windowStart, windowStart, windowEnd, ruleVersion, publicationDigest },
           availability: effective.days.some(day => day.executable && day.kind !== "rest") ? "ready" : "empty",
           goals: measuredGoals, today, workoutPlan: { ...effective, windowStart, windowEnd },
-          coachSummary: runCoachResponse(measuredGoals, inputs)
+          coachSummary: runCoachResponse(measuredGoals, inputs),
+          // 🔴 `versions`/`freshness` **必须**在这儿补，不能写进上面那个 `metadata` 字面量：
+          // `coherenceToken`（`:491-499`）吃的是同一次读出来的 `publicationDigest` 等输入，
+          // 把新字段塞进字面量会改变 `digest` 的输入 ⇒ 同一个库、同一天算出的
+          // `coherenceToken` 会与今天不同 ⇒ 所有已保存的 `coherenceToken` 立刻失效（C9）。
+          // 追加两个**可选**字段则不动任何既有取值（PR5 §1.2 锚点 21：iOS 的 `Metadata`
+          // 是非可选字段结构体，所以只能加可选字段，加必填会让老客户端 decode 失败）。
+          // 两块也一并挂在这里：它们**必须**与 `metadata` 来自同一个 `BEGIN DEFERRED`
+          // （上面 `:467` 那个），所以用**事务内**入口读，不另开事务（SQLite 不支持嵌套）。
+          currentFacts: planView.facts,
+          publishedAnalysis: planView.analysis
         };
+        result.metadata = { ...result.metadata, versions: planView.versions, freshness: planView.freshness };
         this.database.exec("COMMIT");
       } catch (error) {
         this.database.exec("ROLLBACK");
@@ -527,6 +599,24 @@ export class RaiReadStore {
     planHistory?: PlanHistoryRevision[]
   ): MobileTodayResponse {
     return this.mobileTodayWithExecutablePlan(goals, planHistory).today;
+  }
+
+  /**
+   * 追加两块视图的 `/v1/mobile/today`（PR5 S4 / D1.5）。
+   *
+   * 🔴 为什么必须让 `base` 与两块落在**同一个** `BEGIN DEFERRED` 里：`mobileToday` 的
+   * 数字来自今天的事实（今日负荷、周汇总、`planActual`），两块来自版本视图 ——
+   * 若分两次读，它们之间的那次提交会让响应出现"汇总说 7 次、事实块说 6 行"，
+   * 而那正是 C1 要挡的跨快照混合。旧字段的取值一个字都不动，只是多两个键。
+   */
+  mobileTodayWithViews(
+    goals?: Pick<MobileGoalsResponse, "easyDurationFloorFraction" | "qualitySessionCap" | "raceTarget" | "weekPlan" | "lockedSession" | "weekPlanPreservedDate" | "runCoach">,
+    planHistory?: PlanHistoryRevision[]
+  ): MobileTodayResponse {
+    return this.factAnalysisBlocks(
+      () => this.mobileToday(goals, planHistory),
+      (base, view) => ({ ...base, currentFacts: view.facts, publishedAnalysis: view.analysis })
+    );
   }
 
   /**
@@ -1354,7 +1444,66 @@ export class RaiReadStore {
       override: this.mapOverride(this.workoutsRepository.override(id)),
       trainingLoad: this.workoutsRepository.trainingLoad(id),
       zoneSummary,
-      zoneProfile: zoneSummary ? this.zonesRepository.profileById(zoneSummary.zoneProfileId) : null
+      zoneProfile: zoneSummary ? this.zonesRepository.profileById(zoneSummary.zoneProfileId) : null,
+      // 两块视图的**路线**半边（PR5 S5 / D5 最后一段）。行视图那半边在
+      // `currentFacts`/`publishedAnalysis` 的列表端点上；这里回答的是同一个问题的
+      // "轨迹"部分：同一次发布的两张轨迹图，各自来自自己的版本。
+      ...this.detailRouteBlocks(row, options.includeRoute !== false)
+    };
+  }
+
+  /**
+   * 详情路线的两块（PR5 S5，判据 C8）。
+   *
+   * 🔴 三个决定，每一个都是 C8 的突变靶子：
+   * 1. **分析块读版本表**（`routeVersions.publishedRouteVersionId` →
+   *    `route_version_points` 按 `sequence`），**不是**当前 `route_points`。
+   * 2. **事实块读当前 `route_points`**。两块走两张表，所以"分析块偷偷读了当前轨迹"
+   *    可以被一条断言钉住（两条轨迹的内容在夹具里刻意不同）。
+   * 3. **老库退化必须标注**：指针为 `NULL` ⇒ 分析块退回当前 `route_points`，且
+   *    `routeVersionId` 是 `null`。若不标注，"读了版本表"与"退化了"在响应里
+   *    完全一样 —— 那正是 C8 的突变靶子（"让分析块继续读当前 route_points 且不标注退化"）。
+   *
+   * ⚠️ `includeRoute === false`（匿名公开读）时**一个坐标查询都不许发生**：这不是本批新增的
+   * 约束，而是 `/v1/workouts/:id` 既有的安全语义（`data.test.ts` 用 `mock.callCount() === 0`
+   * 钉住"公开详情连私密坐标都不查"）。所以两块在这里给空轨迹 + `routeVersionId: null`：
+   * **没有查过坐标**比"查了但不返回"更诚实，后者会把坐标留在进程内存里。
+   */
+  private detailRouteBlocks(
+    row: StoredWorkoutDetailRow,
+    includeRoute: boolean
+  ): Pick<WorkoutDetailResponse, "facts" | "analysis"> {
+    // 两类事实都不依赖坐标，所以公开读也能给出：分析行的存在性（`assessment`）与
+    // 已发布版本指针（`pointer`）。指针本身不是坐标，公开它是安全的 —— 客户端需要它
+    // 才知道"这块路线是版本内容还是退化内容"。
+    const assessed = this.workoutsRepository.getDetailRow(row.sessionId) !== null;
+    const pointer = this.workoutsRepository.routePointer(row.canonicalWorkoutId);
+    const publishedVersionId = pointer?.publishedRouteVersionId ?? null;
+    const currentRoute = includeRoute
+      ? this.seriesRepository.routePoints(row.canonicalWorkoutId) as RoutePointDto[]
+      : [];
+    const versionRoute = !includeRoute || publishedVersionId === null
+      ? null
+      : this.seriesRepository.routePointsByVersion(publishedVersionId) as RoutePointDto[] | null;
+    return {
+      facts: {
+        workoutId: row.sessionId,
+        route: currentRoute,
+        // 事实块**永远**没有版本指针：它读的就是当前 `route_points`（D5）。写成字面量
+        // `null` 而不是省略，让"这一侧没有版本概念"变成可断言的取值。
+        routeVersionId: null,
+        analysisState: assessed ? "analyzed" : "pending"
+      },
+      analysis: {
+        workoutId: row.sessionId,
+        releaseId: null,
+        // 退化分支：指针 NULL（老库）**或**版本内容读不到 ⇒ 用当前轨迹，并**标注** null。
+        route: versionRoute ?? currentRoute,
+        routeVersionId: versionRoute === null ? null : publishedVersionId,
+        // 退化读（或公开读）不是"那次发布的输入"，所以如实标 stale。
+        stale: versionRoute === null,
+        factDeleted: false
+      }
     };
   }
 
@@ -1958,6 +2107,10 @@ export class RaiReadStore {
     createdAt: string;
     startedAt: string | null;
     completedAt: string | null;
+    /** v35 的分析任务绑定列（PR5 清单 18）。**可选**：老任务没有绑定。 */
+    targetRawGeneration?: number;
+    targetDependencyGeneration?: number;
+    expectedIncumbentReleaseId?: string;
   }): RecomputeJobDto {
     const failed = job.status === "failed";
     return {
@@ -1972,7 +2125,17 @@ export class RaiReadStore {
       error: failed ? { code: "task_failed", message: "任务执行失败" } : null,
       createdAt: job.createdAt,
       startedAt: job.startedAt,
-      completedAt: job.completedAt
+      completedAt: job.completedAt,
+      // 🔴 原样透传，**不做 `?? null`**：`RecomputeJobRepository.map()` 只在列真的有值时
+      // 才设这三个键，所以"没有绑定"的正确 DTO 形态是**缺键**（`undefined` 不参与
+      // `JSON.stringify`），而不是 `null`。补成 `null` 会让客户端无法区分
+      // "老任务（v35 之前）"与"绑定了一个空值"，而 `/v1/jobs` 是唯一的读取面
+      // —— 这份绑定信息读不出去时，C10 断言的正是"它读得出"。
+      ...(job.targetRawGeneration === undefined ? {} : { targetRawGeneration: job.targetRawGeneration }),
+      ...(job.targetDependencyGeneration === undefined
+        ? {} : { targetDependencyGeneration: job.targetDependencyGeneration }),
+      ...(job.expectedIncumbentReleaseId === undefined
+        ? {} : { expectedIncumbentReleaseId: job.expectedIncumbentReleaseId })
     };
   }
 

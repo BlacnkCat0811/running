@@ -12,6 +12,13 @@ struct RaiHandshake: Codable, Equatable {
     var planPublicationContractVersion: Int? = nil
     var planReceiptContractVersion: Int? = nil
     var coachLoopContractVersion: Int? = nil
+    /// 直连原始回执能力（`docs/SQLITE_DIRECT_SYNC_DESIGN.md` §10.2「handshake新增可选
+    /// raw receipt能力，不随意改变 scope 或 datasetEpoch」）。
+    ///
+    /// 服务端宣告 `1`（`apps/api/src/server.ts`，声明在 `packages/api-contracts/src/index.ts`）；
+    /// 老服务端省略这个键 ⇒ `nil`，而那正是"不得拿它的 `succeeded` 冒充回执"的判据。
+    /// 可选 + 合成解码器的 `decodeIfPresent` 足以兼容老服务端，所以这里不需要显式 `init(from:)`。
+    var factsAnalysisContractVersion: Int? = nil
 }
 
 struct RaiAPIError: Codable {
@@ -1918,7 +1925,20 @@ struct NativeFeedbackResult: Codable {
     let overrideId: String
     let jobId: String?
 }
-struct NativeJobStatus: Codable { let status: String }
+/// `GET /v1/jobs/:id` 的读侧投影（`apps/api/src/data.ts` 的 `mapJobFromDomain`）。
+///
+/// `error` 是**必须**解的：服务端在任务失败时给 `error.code = "task_failed"`
+/// （`apps/api/src/data.ts`，`failed ? { code: "task_failed", … } : null`），而
+/// `status` 单独一个字段**分不清"执行失败"与"用户取消"** —— 两者都是任务停下来了，
+/// 但 §10.1 只允许把前者说成"分析更新失败，可重试分析"，取消要说的是另一回事
+/// （「不宣称raw已撤销；只停止分析，保留待更新提示」）。少了这个字段，客户端只能把
+/// 取消也显示成"可重试分析"，那是替用户编一句关于他自己操作的假话。
+///
+/// 可选键 ⇒ 老服务端的响应（没有 `error`）照旧解码。
+struct NativeJobStatus: Codable {
+    let status: String
+    let error: RaiAPIError?
+}
 enum NativeFeedbackOutcome {
     case saved(String)
     case pending(String)

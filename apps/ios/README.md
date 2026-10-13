@@ -8,14 +8,20 @@ TypeScript评分在服务器执行；iOS不运行Node、不复制scorer、不写
 
 macOS、项目所需Xcode/iOS SDK、CocoaPods；最低iOS17，以[工程配置](RAI.xcodeproj/project.pbxproj)为准，不把某台机器的SDK版本/IP写成项目要求。
 
+跨平台入口用 `npm run`（Windows 上不会失败也不会假装成功，详见[运行说明](../../docs/IOS_NATIVE_RUNBOOK.md)）：
+
 ```bash
-# 仓库根目录
-npm run dev:device
+npm run dev:device    # 仓库根目录：启动手机可达的服务
+npm run open:ios      # macOS 打开 RAI.xcworkspace；其它平台显式跳过
+```
+
+> **macOS 专属（前置：macOS + 已装 CocoaPods）**：下面三步只能在 macOS 上做。
+
+```bash
 cd apps/ios
 cp Configs/AmapKey.xcconfig.example Configs/AmapKey.xcconfig
 # 本地填写已绑定Bundle ID的地图Key，不提交Git
 pod install
-open RAI.xcworkspace
 ```
 
 选择真实设备/开发团队，按签名与HealthKit capability要求运行。推荐使用workspace；

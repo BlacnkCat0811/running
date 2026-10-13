@@ -132,6 +132,48 @@ export class SqliteSeriesReadRepository {
     }));
   }
 
+  /**
+   * **分析块**的路线点：按已发布版本读（PR5 S5 / D5 最后一段、清单 5）。
+   *
+   * 这条路与 {@link routePoints} 走的是**两张不同的表**，这是刻意的（D5）：
+   * - 事实块读当前 `route_points`（"现在是什么样的"）；
+   * - 分析块读 `route_versions` → `route_version_points`（"那次发布时输入的是什么"）。
+   *
+   * 🔴 三点是这条 SQL 的存在理由，改任何一点都会让它退化成 `routePoints`：
+   * 1. **`status = 'complete'`**：`pending` 版本是"正在写"的暂存槽（`beginRouteVersion`
+   *    会先清掉它的点），读它等于把半条轨迹当成已发布内容。
+   * 2. **按 `sequence` 排序**，不是按插入顺序也不是 `rowid`：发布时自证过
+   *    "序号从 0 连续到 n-1"（`publishRouteVersion`），`sequence` 是那份自证的载体。
+   * 3. **不回落**：版本 id 为空、版本不存在、状态不是 `complete` ⇒ 返回 `null`。
+   *    "老库指针为 NULL"的退化读由**调用方**决定并标注 `routeVersionId: null`
+   *    （见 `apps/api/src/data.ts` 的 `workout()`）—— 本方法不猜，因为"没有版本"
+   *    与"有版本但读不到"是两件事，只有调用方知道该报哪一种。
+   */
+  routePointsByVersion(routeVersionId: string): StoredRoutePoint[] | null {
+    const version = this.database.prepare(
+      "SELECT status FROM route_versions WHERE id = ?"
+    ).get(routeVersionId) as { status?: unknown } | undefined;
+    if (version === undefined || String(version.status) !== "complete") return null;
+    const rows = this.database
+      .prepare(`
+        SELECT latitude, longitude, elevation_meters, speed_mps, timestamp
+        FROM route_version_points
+        WHERE route_version_id = ?
+        ORDER BY sequence
+      `)
+      .all(routeVersionId) as Record<string, unknown>[];
+    // 版本行存在但点为空 ⇒ `null`（"没有轨迹"），不是 `[]`：契约里 `[]` 与 `null`
+    // 是两种取值，`usableRouteConditionSql` 那边的 `point_count > 0` 也是同一个口径。
+    if (rows.length === 0) return null;
+    return rows.map((row) => ({
+      latitude: Number(row.latitude),
+      longitude: Number(row.longitude),
+      elevationMeters: nullableNumber(row.elevation_meters),
+      speedMetersPerSecond: nullableNumber(row.speed_mps),
+      timestamp: typeof row.timestamp === "string" ? row.timestamp : null
+    }));
+  }
+
   metricSeries(
     type: string,
     fallbackUnit: string,

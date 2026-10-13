@@ -1,9 +1,16 @@
-"""Source-level Today composition checks; does not replace simulator review."""
+"""Source-level Today composition checks; does not replace simulator review.
+
+🔴 显式 `encoding="utf-8"`：这些 Swift 源码含中文，而 `read_text()` 不带 `encoding`
+时用**本机默认编码**（Windows = cp936/GBK）⇒ 在 Windows 上直接 `UnicodeDecodeError`
+崩溃退出（无逐条原因、无跳过说明），而这条链只在 macOS 上跑、macOS 默认 UTF-8，
+所以缺陷在 CI/开发机上都看不见。
+本仓是"在 Windows 上开发、在 macOS 上构建"，门禁必须两边都能跑。
+"""
 import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1] / "RAI" / "Skins" / "Technology"
-views = (root / "TechViews.swift").read_text()
+views = (root / "TechViews.swift").read_text(encoding="utf-8")
 body = views[views.index("struct TechTodayView"):views.index("private func trainingOverview")]
 ordered = [
     "todayHero(today)", "recoveryPanel(today)", "trainingOverview(today)",
@@ -24,24 +31,24 @@ assert ".foregroundStyle(lockDisabled(data) ? TechColor.muted : TechColor.action
 assert ".background(lockDisabled(data) ? TechColor.grid : TechColor.action, in: TechSurfaceShape())" in recommendation, \
     "Unavailable lock actions must be neutral, not a live Volt CTA"
 assert "TechTodayHealthTiles" not in views
-assert "TechTodayHealthTiles" not in (root / "TechIllustrations.swift").read_text()
+assert "TechTodayHealthTiles" not in (root / "TechIllustrations.swift").read_text(encoding="utf-8")
 assert "TechSyncStatus(" not in body, "Background sync must not add a home status card"
 assert "TechFreshnessBanner(" not in body, "Diagnostic timestamps belong in details, not home"
 assert "TechDataSyncDetailView" in views, "Health settings must link to details"
 assert "UserDataNoticePolicy.recommendationNotice" in views
 assert "!native.canConfirmToday" in views, "Stale suggestions cannot be confirmed"
-native_root = (root.parents[1] / "NativeViews.swift").read_text()
+native_root = (root.parents[1] / "NativeViews.swift").read_text(encoding="utf-8")
 assert "TechRequestFailure(" not in native_root, "Background refresh failure must not present a modal"
 row = views[views.index("private func trainingOverview"):views.index("private func todayHero")]
 assert "HStack(alignment: .top" in row
 assert "typeSize >= .xxxLarge" in row and "VStack" in row
 assert "verdictPanel(data)" in row and "activityPanel(data)" in row
-sync = (root / "TechSyncStatus.swift").read_text()
+sync = (root / "TechSyncStatus.swift").read_text(encoding="utf-8")
 assert ".disabled(sync.isBusy || !session.isReachable)" in sync
 assert ".foregroundStyle(sync.isBusy || !session.isReachable ? TechColor.muted : TechColor.cyan)" in sync
 assert "var showsHistory = true" in sync, "Settings must retain sync history"
 assert "showsHistory || state == .busy || state == .failed || state == .cancelled" in sync
-recovery = (root / "TechTodayRecovery.swift").read_text()
+recovery = (root / "TechTodayRecovery.swift").read_text(encoding="utf-8")
 assert 'icon: "heart.fill", color: TechColor.coral' in recovery
 assert 'icon: "waveform.path.ecg", color: TechColor.success' in recovery
 print("Today layout checks passed (order, paired summaries, sync visibility, recovery icons)")
@@ -62,7 +69,7 @@ assert "environmentPanel(" not in views, "独立环境卡片已移除"
 assert "environment.reasonCodes.map(nativeEnvironmentReason)" in views, "环境理由码必须被渲染"
 assert "nativeEnvironmentStatus(environment.status)" in views, "环境修正三态必须可见"
 assert "workout.environment?.adjusted" in views, "环境等效量必须仍有入口"
-chart = (root / "TechSeriesChart.swift").read_text()
+chart = (root / "TechSeriesChart.swift").read_text(encoding="utf-8")
 assert '.chartXAxisLabel("min")' in chart and '.chartXAxisLabel("秒")' not in chart
 assert 'point.offsetSeconds / 60' in chart and 'selected.offsetSeconds / 60' in chart
 assert 'proxy.value(atX:' in chart and '.onTapGesture { location in' in chart
@@ -73,7 +80,7 @@ for action in ('上一点', '下一点'):
     assert f'.accessibilityAction(named: "{action}")' in chart, "Each chart must expose accessible point actions"
 assert 'selectedTime = techSeriesSelectionTime(' in chart and '.accessibilityValue(accessibilityValue)' in chart, \
     "Chart accessibility must update selection and announce the selected sample"
-route = (root / "TechRouteView.swift").read_text()
+route = (root / "TechRouteView.swift").read_text(encoding="utf-8")
 assert '@State private var showingSystemMap = true' in route
 assert 'else if showingSystemMap, mapAllowed' in route
 # 地图手势锁定：训练详情整体是 ScrollView，`MAMapView` 一旦接管拖动，
@@ -122,14 +129,14 @@ assert 'TechWorkoutShareMenu(detail: detail, grade:' in detail, "分享必须从
 # 只断言旧名 `not in` 会**恒真**（实测：往详情页插回内联分享卡片，门禁仍全绿）。
 # 所以锚点必须跟着类型名走，并加一条守卫：被锚的名字真的存在；下次再改名时这里先红，
 # 而不是让 `not in` 静默退化成"检查一个不存在的字符串"。
-share_source = (root / "TechShareCardView.swift").read_text()
+share_source = (root / "TechShareCardView.swift").read_text(encoding="utf-8")
 # 用 `\b` 词边界，不用裸 `in "struct TechWorkoutShareSheet"` —— 子串匹配会被
 # `struct TechWorkoutShareSheetRenamed` 这类改名绕过（2026-10-05 突变验证实测）。
 assert re.search(r"\bstruct TechWorkoutShareSheet\b", share_source), \
     "分享卡片类型已改名：请同步下面的内联挂载锚点，否则 `not in` 会恒真"
 for inline_mount in ("TechWorkoutShareSheet(", "TechShareCardView("):
     assert inline_mount not in detail, f"训练详情滚动内容不应再挂载分享卡片：{inline_mount}"
-share = (root / "TechShareCardView.swift").read_text()
+share = (root / "TechShareCardView.swift").read_text(encoding="utf-8")
 assert 'showingShareSheet' in share and '.sheet(isPresented: $showingShareSheet)' in share, \
     "右上角分享必须直接打开单一训练分享卡片"
 assert 'Button("高德地图卡片"' not in share and 'Button("训练摘要卡片"' not in share, \

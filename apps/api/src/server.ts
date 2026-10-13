@@ -246,7 +246,7 @@ const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
  *                                which is a map of the server's filesystem
  *   GET /v1/diagnostics          server-side job, model and issue internals
  *   GET /v1/openapi.json         the full route table
- *   GET /v1/backups              backup inventory
+ *   GET /v1/backups              backup inventory — names, sizes and timestamps
  *   GET /v1/import-jobs/*        import pipeline state
  *   GET /v1/jobs, /v1/jobs/:id   recompute job events
  *
@@ -914,7 +914,15 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   planSnapshotContractVersion: 1,
   coachLoopContractVersion: 1,
   ...(mobileGoalsStore.supportsPublicationOperations ? { planPublicationContractVersion: 1 } : {}),
-  planReceiptContractVersion: 2
+  planReceiptContractVersion: 2,
+  factsAnalysisContractVersion: 1,
+  // PR5 D1.4 的两块视图能力位。🔴 **刻意另取一个名字**：`factsAnalysisContractVersion`
+  // 已经被"直连原始回执"（`summary.directSync` 的 ingestStatus/analysisStatus）占用，
+  // 两者可以各自演进 —— 回执是**写入时刻的凭证**，两块视图是**读侧的行视图**，
+  // 共用一个数字会让"服务端升级了哪一侧"变成猜。
+  // 范式见 PR5 §1.2 锚点 20：可选版本字段宣告，客户端 `guard == 1` 之后才去读
+  // `currentFacts`/`publishedAnalysis`，否则退回旧字段（旧字段语义没变，所以退回是安全的）。
+  factsAnalysisViewContractVersion: 1
 }));
 app.get("/v1/openapi.json", async () => openapiDocument);
 app.get("/v1/performance", async () => ({
@@ -968,7 +976,7 @@ app.get<{ Querystring: { localDate?: string; limit?: string; offset?: string; st
   { schema: { querystring: workoutListQuerySchema } },
   async (request) =>
     withReadStore((store) =>
-      store.workouts({
+      store.workoutsWithViews({
         ...(request.query.localDate ? workoutDateWindow(request.query.localDate, request.query.localDate) : {}),
         limit: Math.min(Math.max(Number(request.query.limit ?? 30), 1), 100),
         offset: Math.max(Number(request.query.offset ?? 0), 0),
@@ -1282,7 +1290,9 @@ app.get("/v1/training-zones/current", async (_request, reply) => {
 app.get("/v1/mobile/today", async () => {
   // Goals live in a plain file and do not depend on database readiness.
   const goals = mobileGoalsStore.read();
-  return withReadStore((store) => store.mobileToday(goals, mobileGoalsStore.planHistory(200)));
+  // `mobileTodayWithViews` 而不是 `mobileToday`：两块视图（PR5 S4）必须与今天/周的数字
+  // 落在**同一个**读事务里（C1）。旧字段的取值由 `mobileToday` 原样返回，一个字都不动。
+  return withReadStore((store) => store.mobileTodayWithViews(goals, mobileGoalsStore.planHistory(200)));
 });
 
 app.get("/v1/mobile/training-plan-state", async (_request, reply) => {
@@ -1911,11 +1921,21 @@ registerCommandRoutes(app, commandQueue);
 
 app.get("/v1/backups", async () => maintenance.listBackups());
 
-app.post("/v1/backups", async (_request, reply) => {
-  if (isDatabaseWriteBusy()) {
-    return reply.code(409).send({ message: "任务执行期间不能创建备份" });
-  }
-  return maintenance.createBackup();
+// §11「项目退出备份责任」：应用不再**创建**备份。这条路由保留挂载（旧调用方拿到的是
+// 明确维护提示，而不是 404 —— 404 会让人以为路径写错了），但不再走
+// `maintenance.createBackup()`：创建、容量检查与保留策略轮换一并退场。
+// 同时不再需要 `isDatabaseWriteBusy()` 那道 409 闸门 —— 一个不碰数据库的请求
+// 没有"任务执行期间不能做"的理由，留着只会暗示它仍然会写。
+//
+// ⚠️ 为什么是 410 而不是 501：`apiErrorPayload` 会把**所有** 5xx 的 message 压成
+// "本地服务处理请求失败"，用 501 就等于把下面这段运维提示吞掉 —— 那正是 §11
+// 禁止的"静默失败"。410 Gone 的语义（该能力已被永久移除）在这里也更准确：
+// 不是服务坏了，是这份责任已经移交给运维。
+app.post("/v1/backups", async (_request, _reply) => {
+  throw new ClientRequestError("backup_creation_retired",
+    "应用不再创建备份。请在维护窗口前由运维自行完成一致性备份；"
+    + "活跃 WAL 库不能只 cp rai.sqlite，须用 SQLite 一致性备份 API 或存储快照，"
+    + "见 docs/SQLITE_DIRECT_SYNC_DESIGN.md §11.1", 410);
 });
 
 app.get<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
@@ -1925,11 +1945,13 @@ app.get<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: b
   return reply.send(stream);
 });
 
-app.delete<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (request, reply) => {
-  if (isDatabaseWriteBusy()) {
-    return reply.code(409).send({ message: "任务执行期间不能删除备份" });
-  }
-  return { deleted: true, backup: await maintenance.deleteBackup(request.params.name) };
+// 删除交付给运维：应用不替运维决定备份的保留/归档/删除（§11「不扫描它们作自动清理」，
+// §14.2 A15「不创建、验证、轮换或删除备份」）。因此这条路由连文件都不碰 ——
+// 已存在的备份字节不变，是最强的"不删除"证据。
+app.delete<{ Params: { name: string } }>("/v1/backups/:name", { schema: { params: backupParamsSchema } }, async (_request, _reply) => {
+  throw new ClientRequestError("backup_deletion_retired",
+    "应用不再删除备份文件。是否保留、归档或删除由服务器运维决定；"
+    + "已有备份不会被应用删除，见 docs/SQLITE_DIRECT_SYNC_DESIGN.md §11", 410);
 });
 
 app.post<{ Params: { name: string }; Body: { confirmation: string } }>(

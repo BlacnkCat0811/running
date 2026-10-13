@@ -114,7 +114,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     databaseReady,
   );
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState(() => readApiToken());
   const tokenSaved = useApiToken().length > 0;
@@ -129,11 +128,8 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   const [restoreTarget, setRestoreTarget] = useState<BackupDto | null>(null);
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
   const [restoreError, setRestoreError] = useState<string | null>(null);
-  const [backupDeleteTarget, setBackupDeleteTarget] = useState<BackupDto | null>(null);
-  const [backupDeleteError, setBackupDeleteError] = useState<string | null>(null);
   const deleteErrorRef = useRef<HTMLParagraphElement>(null);
   const restoreErrorRef = useRef<HTMLParagraphElement>(null);
-  const backupDeleteErrorRef = useRef<HTMLParagraphElement>(null);
   const successRef = useRef<HTMLDivElement>(null);
   const hasDatabase = databaseReady && !deleted;
   const closeDeleteDialog = () => {
@@ -146,10 +142,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     setRestoreConfirmation("");
     setRestoreError(null);
   };
-  const closeBackupDeleteDialog = () => {
-    setBackupDeleteTarget(null);
-    setBackupDeleteError(null);
-  };
   const [deleteDialogRef, rememberDeleteFocus] = useDialogFocus(
     confirmOpen,
     busy,
@@ -160,16 +152,11 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
     busy,
     closeRestoreDialog,
   );
-  const [backupDeleteDialogRef, rememberBackupDeleteFocus] = useDialogFocus(
-    Boolean(backupDeleteTarget),
-    busy,
-    closeBackupDeleteDialog,
-  );
 
   useEffect(() => {
-    if (!success || busy || confirmOpen || restoreTarget || backupDeleteTarget) return;
+    if (!success || busy || confirmOpen || restoreTarget) return;
     successRef.current?.focus();
-  }, [success, busy, confirmOpen, restoreTarget, backupDeleteTarget]);
+  }, [success, busy, confirmOpen, restoreTarget]);
 
   // Focus only after React has committed the error element and enabled the
   // dialog again; requestAnimationFrame can run before a concurrent render.
@@ -179,14 +166,10 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   useEffect(() => {
     if (!busy && restoreError && restoreTarget) restoreErrorRef.current?.focus();
   }, [busy, restoreError, restoreTarget]);
-  useEffect(() => {
-    if (!busy && backupDeleteError && backupDeleteTarget) backupDeleteErrorRef.current?.focus();
-  }, [busy, backupDeleteError, backupDeleteTarget]);
 
   const persistApiToken = () => {
     writeApiToken(tokenDraft);
     const stored = readApiToken();
-    setError(null);
     setSuccess(stored ? "API 令牌已保存，正在重新读取数据。" : "API 令牌已清除。");
     // 两个事件缺一不可：data-updated 刷新各页数据，database-state-changed 让 App
     // 重新检查 /v1/health —— 未配置令牌时 App 拿不到 health 会整体渲染错误块，
@@ -198,49 +181,9 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
   const clearApiToken = () => {
     setTokenDraft("");
     writeApiToken("");
-    setError(null);
     setSuccess("API 令牌已清除。");
     notifyDataUpdated();
     notifyDatabaseStateChanged();
-  };
-
-  const createBackup = async () => {
-    setBusy(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const backup = await api<BackupDto>("/v1/backups", {
-        method: "POST",
-        body: "{}",
-      });
-      setSuccess(`备份已创建：${backup.name}`);
-      await backups.reload();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "无法创建备份");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const deleteBackup = async () => {
-    if (!backupDeleteTarget) return;
-    setBusy(true);
-    setBackupDeleteError(null);
-    setError(null);
-    setSuccess(null);
-    try {
-      await api<{ deleted: boolean; backup: BackupDto }>(
-        `/v1/backups/${encodeURIComponent(backupDeleteTarget.name)}`,
-        { method: "DELETE" },
-      );
-      setSuccess(`备份已删除：${backupDeleteTarget.name}`);
-      closeBackupDeleteDialog();
-      await backups.reload();
-    } catch (caught) {
-      setBackupDeleteError(caught instanceof Error ? caught.message : "无法删除备份");
-    } finally {
-      setBusy(false);
-    }
   };
 
   const deleteDatabase = async () => {
@@ -354,7 +297,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           <p>当前版本为单用户、本地优先的个人工具。</p>
         </div></div>
       </header>
-      {error ? <ErrorBlock message={error} /> : null}
       {success ? (
         <div className="success-message" ref={successRef} tabIndex={-1}>
           <ShieldCheck size={18} />
@@ -507,19 +449,21 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
           控制台里那条错误会盖住真正需要用户注意的信息。 */}
       {hasDatabase ? <PrivacyZoneEditor /> : null}
 
+      {/* §11「项目退出备份责任」：常规"创建备份"入口退役。
+          下面这块**保留**备份清单与恢复/下载：那是恢复能力，不是备份能力
+          —— 退役恢复入口换不来 §11 想要的任何东西，却会拆掉"发现损坏还能回滚"的
+          最后一道线（§12）。 */}
       <section className="panel backup-panel">
         <div className="panel-heading">
           <div>
             <h2>本地备份</h2>
-            <p>使用 SQLite 在线备份，包含尚在 WAL 中的已提交数据；系统默认保留最近 10 份且总量不超过 20 GB。</p>
+            <p>
+              应用不再创建备份（创建、校验、轮换与删除都已退役）。请在维护窗口前由运维
+              自行完成一致性备份：活跃 WAL 库不能只复制 rai.sqlite，须用 SQLite
+              一致性备份 API 或存储快照。下面列出的已有备份不会被应用删除，由运维决定
+              保留或归档。
+            </p>
           </div>
-          <button
-            className="button secondary"
-            disabled={busy || !hasDatabase}
-            onClick={() => void createBackup()}
-          >
-            {busy ? "处理中" : "创建备份"}
-          </button>
         </div>
         {backups.loading ? (
           <LoadingBlock />
@@ -553,18 +497,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
                     }}
                   >
                     恢复
-                  </button>
-                  <button
-                    className="text-button"
-                    disabled={busy}
-                    aria-label={`删除备份 ${backup.name}`}
-                    onClick={() => {
-                      rememberBackupDeleteFocus();
-                      setBackupDeleteTarget(backup);
-                      setBackupDeleteError(null);
-                    }}
-                  >
-                    删除
                   </button>
                 </span>
               </div>
@@ -778,59 +710,6 @@ export function SettingsPage({ databaseReady }: { databaseReady: boolean }) {
                 onClick={() => void restoreBackup()}
               >
                 {busy ? "正在校验并恢复" : "确认恢复"}
-              </button>
-            </footer>
-          </section>
-        </div>
-      ) : null}
-      {backupDeleteTarget ? (
-        <div
-          className="confirm-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !busy)
-              closeBackupDeleteDialog();
-          }}
-        >
-          <section
-            ref={backupDeleteDialogRef}
-            tabIndex={-1}
-            className="confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="backup-delete-title"
-            aria-describedby={backupDeleteError ? "backup-delete-error" : undefined}
-          >
-            <Warning size={28} />
-            <h2 id="backup-delete-title">确认删除本地备份</h2>
-            <p>此操作会永久删除该备份文件，无法撤销。</p>
-            <p className="restore-name">{backupDeleteTarget.name}</p>
-            {backupDeleteError ? (
-              <p
-                id="backup-delete-error"
-                ref={backupDeleteErrorRef}
-                className="form-error dialog-error"
-                role="alert"
-                tabIndex={-1}
-              >
-                {backupDeleteError}
-              </p>
-            ) : null}
-            <footer>
-              <button
-                className="button secondary"
-                disabled={busy}
-                onClick={closeBackupDeleteDialog}
-              >
-                取消
-              </button>
-              <button
-                className="button danger"
-                disabled={busy}
-                autoFocus
-                onClick={() => void deleteBackup()}
-              >
-                {busy ? "正在删除" : "确认删除"}
               </button>
             </footer>
           </section>

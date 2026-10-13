@@ -75,6 +75,10 @@ final class SyncTaskStore {
                 scope TEXT PRIMARY KEY,
                 payload BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sync_analysis_reconcile (
+                scope TEXT PRIMARY KEY,
+                payload BLOB NOT NULL
+            );
             """
         let execResult = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
@@ -457,6 +461,56 @@ final class SyncTaskStore {
         }
         guard bound == SQLITE_OK, sqlite3_step(statement) == SQLITE_DONE,
               sqlite3_changes(database) == 1 else { fail("record cursor write"); return false }
+        return true
+    }
+
+    // MARK: 分析终态对账槽（§10.1 / §10.2 的「分析另行跟踪」）
+
+    /// 读回上一次对账的结论。`nil` = 这个 scope 还没有过对账。
+    ///
+    /// 🔴 **为什么必须是与 `sync_tasks` 并列的独立槽，而不是任务行里的一个字段**：
+    /// `commitSuccess` 在**同一个事务**里做「水位前进 + 任务行清空」（见上面那段说明）。
+    /// 而分析终态对账按设计发生在**游标提交之后** —— 那一刻任务行已经被删掉了。
+    /// 把结论塞进任务行有两个后果，两个都不能接受：
+    ///   ① 要么把刚清掉的任务行重新写回去，界面于是又说"还卡着一批"（`hasPendingTask`
+    ///      与后台意图判据一起被污染），直接推翻本轮"提交即收尾"的结论；
+    ///   ② 要么把对账挪到 `commitSuccess` **之前**，于是对账失败会把一次**已经成功入库**
+    ///      的同步报成失败 —— 而 §14.2 A17 的"事实已保存"是不许被一个展示动作推翻的。
+    /// 独立槽把两件事分开：`sync_tasks` 只活在飞任务，本表只活"已经收尾的那一批分析到哪了"。
+    ///
+    /// ⚠️ **权威出口只有这一个。** `SyncTaskState.lastAnalysisStatus` 是同一件事在"任务在飞期间"
+    /// 的展示依据（T2 加的，合法），但它随任务行一起消失；重启之后能接着对账的只有本表。
+    /// 将来若要读分析状态，**读这里**，不要读任务行 —— 两份真相会分叉，而分叉的那一份
+    /// 恰好是"重启后看不到"的那一份。
+    func loadAnalysisReconcile(scope: String) -> Data? {
+        guard let statement = prepare("SELECT payload FROM sync_analysis_reconcile WHERE scope = ?") else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { fail("analysis reconcile read"); return nil }
+        let count = Int(sqlite3_column_bytes(statement, 0))
+        guard count > 0, let pointer = sqlite3_column_blob(statement, 0) else {
+            fail("analysis reconcile payload"); return nil
+        }
+        return Data(bytes: pointer, count: count)
+    }
+
+    /// 写下（或覆盖）本 scope 的对账结论。返回值必须被检查：调用方不许"以为写上了"。
+    @discardableResult
+    func saveAnalysisReconcile(_ data: Data, scope: String) -> Bool {
+        guard !data.isEmpty, data.count <= Int(Int32.max), let database,
+              let statement = prepare("""
+                INSERT INTO sync_analysis_reconcile(scope, payload) VALUES (?, ?)
+                ON CONFLICT(scope) DO UPDATE SET payload = excluded.payload
+                """) else { fail("analysis reconcile prepare"); return false }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        let bound = data.withUnsafeBytes {
+            sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), SQLiteSupport.transient)
+        }
+        guard bound == SQLITE_OK, sqlite3_step(statement) == SQLITE_DONE,
+              sqlite3_changes(database) == 1 else { fail("analysis reconcile write"); return false }
         return true
     }
 

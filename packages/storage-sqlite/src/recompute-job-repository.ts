@@ -525,6 +525,18 @@ export class RecomputeJobRepository {
   }
 
   private map(row: Record<string, unknown>): RecomputeJob {
+    // v35 的三个绑定列（PR5 清单 18）。🔴 **可选字段只在列真的有值时才出现**：
+    // v35 之前登记的历史任务这四列是 NULL（`ALTER TABLE ADD COLUMN` 的默认），
+    // 于是它们解出 `undefined` —— 与"这条任务不承诺任何代次"是同一件事。
+    // 写成 `?? null` 会把"没有绑定"和"绑定到 NULL"混成一个取值，
+    // 而"这条任务有没有版本绑定"正是 S3 之后消费方要问的第一个问题。
+    const targetRawGeneration = integerOrUndefined(row.target_raw_generation);
+    const targetDependencyGeneration = integerOrUndefined(row.target_dependency_generation);
+    // 先求值再展开（不直接在展开里调用）：两个 `? :` 各求值一次，读起来也不用数括号。
+    const rawBinding = targetRawGeneration === undefined ? {} : { targetRawGeneration };
+    const dependencyBinding = targetDependencyGeneration === undefined ? {} : { targetDependencyGeneration };
+    const incumbentBinding = typeof row.expected_incumbent_release_id === "string"
+      ? { expectedIncumbentReleaseId: row.expected_incumbent_release_id } : {};
     return {
       id: String(row.id),
       jobType: String(row.job_type) as RecomputeJobType,
@@ -543,7 +555,21 @@ export class RecomputeJobRepository {
       ),
       createdAt: String(row.created_at),
       startedAt: typeof row.started_at === "string" ? row.started_at : null,
-      completedAt: typeof row.completed_at === "string" ? row.completed_at : null
+      completedAt: typeof row.completed_at === "string" ? row.completed_at : null,
+      ...rawBinding,
+      ...dependencyBinding,
+      ...incumbentBinding
     };
   }
+}
+
+/**
+ * 绑定列的取值归一：列不存在 / 为 NULL / 不是整数 ⇒ `undefined`（"没有绑定"）。
+ *
+ * 刻意**不**回落成 `0`：`0` 是一个合法的代次（v34 的初始值），
+ * 把"没有绑定"读成"绑定到代次 0"会让 `targetDependencyGeneration === 0` 的任务
+ * 与老任务无法区分 —— 而 D2 的 `analysisStatus` 派生正是按这个字段筛任务的。
+ */
+function integerOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }

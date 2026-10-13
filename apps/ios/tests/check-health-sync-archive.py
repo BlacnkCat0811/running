@@ -11,9 +11,12 @@ import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[3]
-sync = (root / "apps/ios/RAI/HealthKitSync.swift").read_text()
-worker = (root / "apps/ios/RAI/HealthSyncArchive.swift").read_text()
-runner = (root / "apps/ios/tests/run-health-sync-tests.sh").read_text()
+# 显式 encoding：Swift/bash 源码含中文，裸 read_text() 用本机默认编码（Windows =
+# cp936/GBK）⇒ 在 Windows 上直接 UnicodeDecodeError 崩溃；这条链只在 macOS 上跑
+# （默认 UTF-8），所以"在 Windows 上开发、却在 Windows 上跑不了自己的门禁"两边都看不见。
+sync = (root / "apps/ios/RAI/HealthKitSync.swift").read_text(encoding="utf-8")
+worker = (root / "apps/ios/RAI/HealthSyncArchive.swift").read_text(encoding="utf-8")
+runner = (root / "apps/ios/tests/run-health-sync-tests.sh").read_text(encoding="utf-8")
 
 failures: list[str] = []
 checks = 0

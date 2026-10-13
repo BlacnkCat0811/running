@@ -42,6 +42,7 @@ npm run build
 npm run test:e2e:web
 npm run check:docs
 npm run check:doc-refs
+npm run check:scripts
 npm run check:acceptance-matrix
 npm run check:package-boundaries
 ```
@@ -49,6 +50,12 @@ npm run check:package-boundaries
 `test:e2e:web` 跳过390px；完整项目审查仍遵守窄屏冻结范围。
 现有 iOS 用 `npm run test:ios`；Python 用 `npm run ml:test`。缺 Xcode/平台导致跳过必须报告，不能当通过。
 真机 HealthKit、后台唤醒、地图与视觉验收不能由上述自动检查替代。
+
+跨平台写法是硬规则，不是风格建议：npm script 正文只用 `&&`、纯命令、`node xxx.mjs`
+（禁用 `;`、`$?`、`$VAR`、`VAR=x cmd`、`test`、`[ ]`、`uname`、依赖 shell 展开的 `*`）；
+平台判定只在脚本内部（Node 用 `process.platform`，bash 用 `uname -s`）；`.sh` 只用 `bash <path>` 调用。
+上面这些命令在 Windows cmd / PowerShell / macOS bash 里逐字相同，矩阵与 iOS 侧的显式跳过语义见
+[iOS 运行说明](docs/IOS_NATIVE_RUNBOOK.md)。
 
 ## 文档入口（每个主题只保留一份现行说明）
 

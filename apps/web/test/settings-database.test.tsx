@@ -173,4 +173,70 @@ describe("SettingsPage database preservation", () => {
     expect(screen.queryByText("connection reset after restore")).toBeNull();
     expect(reloadBackups).toHaveBeenCalledOnce();
   });
+
+  // §11「项目退出备份责任」的 UI 侧判据。
+  //
+  // 为什么钉"没有按钮"而不是钉文案：`POST /v1/backups` 与 `DELETE /v1/backups/:name`
+  // 已经退役（服务端回 410），UI 上再留一个"创建备份"按钮就是一个点了必然失败的入口。
+  // 但**恢复**入口必须还在 —— 它是 §12 那条"发现损坏保留文件、交运维"的最后一道线，
+  // 退役它换不来 §11 想要的任何东西。所以这条用例同时钉住"退场"和"没有退过头"。
+  it("retires the create/delete backup entries while keeping the restore entry", async () => {
+    const backup = {
+      name: "rai.operator-snapshot.sqlite",
+      sizeBytes: 2048,
+      createdAt: new Date().toISOString(),
+    };
+    useRemoteMock.mockImplementation((path: string) =>
+      path === "/v1/backups"
+        ? { ...loadingRemote, data: [backup], loading: false, reload: reloadBackups }
+        : loadingRemote,
+    );
+    apiMock.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/v1/backups/rai.operator-snapshot.sqlite/restore" && init?.method === "POST") {
+        return Promise.resolve({
+          restored: true,
+          restoredBackup: backup,
+          safetyBackup: null,
+        });
+      }
+      if (path === "/v1/health") {
+        return Promise.resolve({ status: "ok", databaseReady: true });
+      }
+      throw new Error(`Unexpected API call: ${path}`);
+    });
+    renderSettings();
+
+    // ① 退役：常规"创建备份"入口与每个备份的"删除"入口都不再挂载。
+    expect(screen.queryByRole("button", { name: "创建备份" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^删除备份 / })).toBeNull();
+    expect(screen.queryByText("确认删除本地备份")).toBeNull();
+
+    // ② 责任提示必须在页面上（不是静默消失）。
+    expect(screen.getByText(/应用不再创建备份/)).toBeTruthy();
+
+    // ③ 没有退过头：恢复入口与下载入口仍然可用，且真的能发起恢复。
+    expect(screen.getByRole("button", { name: "恢复" })).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "下载" }).getAttribute("href"),
+    ).toBe(`/v1/backups/${encodeURIComponent(backup.name)}`);
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+    fireEvent.change(screen.getByLabelText("恢复确认文字"), {
+      target: { value: "恢复此备份" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "确认恢复" }));
+    expect(await screen.findByText(/已恢复备份：rai\.operator-snapshot\.sqlite/)).toBeTruthy();
+
+    // ④ 退役的接口一个都没被调用：整个流程里没有 POST/DELETE 打到 /v1/backups 本体。
+    const retiredCalls = apiMock.mock.calls.filter(([path, init]) => {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      return (
+        path === "/v1/backups" && (method === "POST" || method === "DELETE")
+      ) || (
+        typeof path === "string"
+        && /^\/v1\/backups\/[^/]+$/.test(path)
+        && method === "DELETE"
+      );
+    });
+    expect(retiredCalls).toEqual([]);
+  });
 });

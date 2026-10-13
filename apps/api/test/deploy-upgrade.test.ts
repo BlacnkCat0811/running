@@ -23,6 +23,8 @@ function scenario(options: { failMigration?: boolean; recovery?: boolean } = {})
   stub("npm", 'echo "npm $*" >> "$TEST_COMMANDS"\ncase "$*" in *data:migrate*) [ "$TEST_FAIL_MIGRATION" != "1" ] || exit 17 ;; esac');
   stub("systemctl", 'echo "systemctl $*" >> "$TEST_COMMANDS"');
   stub("sleep", "exit 0");
+  // `post` 分支的日志行是 §11 的判据：脚本里唯一的 POST 曾是备份调用，
+  // 所以这行只在"又有人在发布脚本里代做备份"时出现。
   stub("curl", `
 output=""; authenticated=0; post=0
 while [ "$#" -gt 0 ]; do
@@ -64,7 +66,41 @@ fi`);
 bashTest("explicit upgrade migration runs between service stop and restart", () => {
   const result = scenario();
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.commands, /backup[\s\S]*systemctl stop rai-test[\s\S]*data:migrate[\s\S]*systemctl reset-failed rai-test[\s\S]*systemctl restart rai-test/);
+  assert.match(result.commands, /backup-reminder[\s\S]*systemctl stop rai-test[\s\S]*data:migrate[\s\S]*systemctl reset-failed rai-test[\s\S]*systemctl restart rai-test/);
+});
+
+// §11「项目退出备份责任」＋ §14.2 A15：发布脚本**不再** POST /v1/backups。
+//
+// 为什么必须有一条行为级用例，而不是只 grep 源码：这条守卫此前的失效模式正是
+// "看着没调用、实际在调用" —— 升级脚本曾经 POST /v1/backups 并把非 2xx 当成
+// "备份失败，中止发布"。只对源码做文本匹配的话，换个变量拼接就能绕过；
+// 这里让脚本**真的跑一遍**（bash + PATH 上的 curl 替身），再断言替身没被 POST 过。
+//
+// ⚠️ 同时钉住"不是静默失败"：§11 要求输出**外部备份责任提示**，所以光断言
+// "没有 POST" 是不够的 —— 把备份闸门整段删掉也能让上面那条通过。
+bashTest("upgrade publishes an external-backup notice and never POSTs a backup", () => {
+  const result = scenario();
+  assert.equal(result.status, 0, result.stderr);
+
+  // 行为级：curl 替身只在被 POST 时记 `backup`。脚本里唯一的 POST 就是备份调用，
+  // 所以这一行同时钉住"没有 POST /v1/backups"与"没有别的写请求混进来"。
+  assert.doesNotMatch(result.commands, /backup\b/,
+    "发布脚本仍在执行备份调用：§11 要求它把备份责任交给运维，而不是代做");
+
+  // 行为级（另一半）：必须**说出**责任在运维，且不校验外部备份是否完成。
+  assert.match(result.stdout, /备份责任：应用不创建备份/,
+    "§11 要求输出外部备份责任提示，而不是静默跳过备份");
+  assert.match(result.stdout, /不代做、不校验/, "提示必须说清应用不校验外部备份是否完成");
+  assert.match(result.stdout, /§11\.1/,
+    "提示必须指向文档 §11.1 的对外备份约束（活跃 WAL 库不能只 cp）");
+
+  // 源码级（与上一条独立）：连备份端点都不该再出现在**可执行**代码里。
+  // ⚠️ 必须先剥掉注释行：脚本头部要写明"本脚本不再 POST /v1/backups"（§11 的要求），
+  // 直接对全文匹配会把这个说明本身判红，于是判据逼着人删掉解释 —— 那是错的取舍。
+  const code = readFileSync(resolve("deploy/upgrade.sh"), "utf8")
+    .split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
+  assert.doesNotMatch(code, /v1\/backups/, "deploy/upgrade.sh 不得在可执行代码里引用 /v1/backups");
+  assert.doesNotMatch(code, /-X POST/, "deploy/upgrade.sh 不得再发任何 POST");
 });
 
 bashTest("failed migration leaves the service stopped", () => {

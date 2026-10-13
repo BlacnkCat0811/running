@@ -99,6 +99,15 @@ export {
   type StoredTrends
 } from "./read/trends-read-repository.js";
 export {
+  ANALYSIS_BLOCK_KEYS,
+  FACTS_BLOCK_KEYS,
+  readFactReadView,
+  readFactReadViewInTransaction,
+  type FactReadView,
+  type FactReadViewContext,
+  type FactReadViewLimits
+} from "./read/fact-read-view.js";
+export {
   SqliteAuditReadRepository,
   type StoredDataAudit,
   type StoredDataSummary,

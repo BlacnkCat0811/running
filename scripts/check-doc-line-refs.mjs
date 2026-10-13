@@ -164,7 +164,11 @@ let blank = 0;
 let written = 0;
 
 for (const doc of docs) {
-  const text = readFileSync(join(root, doc), "utf8");
+  // 🔴 `resolve` 而不是 `join`：调用方给的可能是**绝对路径**。
+  // 2026-10-13 实测：仓库在 D:、TEMP 在 C: 时，测试用 `relative(root, tmpDoc)` 跨盘拿到的
+  // 就是绝对路径，而 `join(root, "C:\\…")` 会拼成 `D:\running\C:\…` ⇒ ENOENT，`npm test` 在
+  // Windows 上红、在 macOS/Linux 上绿（单根文件系统下 relative 返回 `../../../…`）。
+  const text = readFileSync(resolve(root, doc), "utf8");
   const seen = new Set();
   const rows = [];
   for (const [, file, numbers] of text.matchAll(REF)) {
@@ -178,7 +182,7 @@ for (const doc of docs) {
   }
 
   const baselinePath = baselinePathOf(doc);
-  const absoluteBaseline = join(root, baselinePath);
+  const absoluteBaseline = resolve(root, baselinePath);
   let baseline = null;
   if (!writeBaseline && existsSync(absoluteBaseline)) {
     try {

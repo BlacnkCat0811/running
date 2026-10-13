@@ -193,7 +193,12 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
               dependencyGeneration: null,
               publishedReleaseId: null,
               parentBatchId: null
-            }
+            },
+            // 这条车道**明确不登记**分析任务（`analysisStatus: "not_required"` 是结构性结论，
+            // 见上面那段注释）。写 `null` 而不是省略这个键，是刻意的：客户端必须能分清
+            // "问过了，本批没有分析任务"（`null`）与"这个服务端版本还没提供这个字段"（缺键）。
+            // 缺键会让一个本该说「分析更新中」的批次被读成"分析已完事"（§9.1）。
+            analysisJobId: null
           };
           const metadata = {
             dataset_version: datasetVersion, source_xml_name: basename(xmlPath),

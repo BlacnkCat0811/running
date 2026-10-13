@@ -197,7 +197,12 @@ test("`directSync` 直连回执今天只有两个产出方（新增第三个即�
     .filter((candidate) => existsSync(candidate));
   const producers = new Set<string>();
   for (const file of roots.flatMap((candidate) => sourceFiles(candidate))) {
-    if (/(?<!["'\w])directSync\s*:\s*\{/.test(readStripped(file))) producers.add(relative(rootPath, file));
+    // Windows 上 `relative()` 返回的是 `apps\api\src\…`，与下面期望值里的 POSIX 分隔符不等 ⇒
+    // 这条判据在 macOS/Linux 绿、在 Windows 红。它判的是"哪几个文件是产出方"，
+    // 不是"路径用什么分隔符"，所以先归一化再比较（2026-10-13 实测修）。
+    if (/(?<!["'\w])directSync\s*:\s*\{/.test(readStripped(file))) {
+      producers.add(relative(rootPath, file).replaceAll("\\", "/"));
+    }
   }
   // 两个产出方：
   //   · `data-only-import.ts` —— record-only 快通路，回执恒为 `not_required`（源码守卫 + 行为守卫）；

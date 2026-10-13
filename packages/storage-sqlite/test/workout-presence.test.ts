@@ -147,8 +147,11 @@ test("结构判据：可见性判据只有一处实现，事实侧 JOIN 全部�
   walk(join(root, "apps", "api", "src"));
 
   const visibilityLiteral = /deleted_at\s+IS\s+NULL/i;
+  // Windows 上 `relative()` 返回 `packages\storage-sqlite\src\…`，与下面的期望值（POSIX 分隔符）不等：
+  // 报错文案会写成"出现了第二处字面量"，而实际命中的正是那唯一一处 —— 假警报。
+  // 这条判据比较的是"哪些文件命中"，不是"路径用什么分隔符"，所以先归一化（2026-10-13 实测修）。
   const offenders = sources.filter((file) => visibilityLiteral.test(readFileSync(file, "utf8")))
-    .map((file) => relative(root, file)).sort();
+    .map((file) => relative(root, file).replaceAll("\\", "/")).sort();
   assert.deepEqual(offenders, ["packages/storage-sqlite/src/sql/fragments.ts"],
     "出现了第二处 `deleted_at IS NULL` 字面量：可见性判据必须只有 `workoutPresentConditionSql()` 一处定义");
 
@@ -157,6 +160,9 @@ test("结构判据：可见性判据只有一处实现，事实侧 JOIN 全部�
     "packages/storage-sqlite/src/read/workout-read-repository.ts",
     "packages/storage-sqlite/src/read/series-read-repository.ts",
     "packages/storage-sqlite/src/read/facts-reader.ts",
+    // PR5 S4 新增：两块视图的事实侧读。加进这份清单是刻意的 —— 新文件若不在扫描面里，
+    // 里面每一处 `JOIN workouts` 都可以悄悄不引用判据而"全绿"（结构判据的盲区就是它的扫描面）。
+    "packages/storage-sqlite/src/read/fact-read-view.ts",
     "apps/api/src/data.ts",
     "apps/api/src/mobile-read.ts"
   ];

@@ -103,46 +103,39 @@ curl -fsSI https://api.example.com/settings
 ## 数据目录与自动备份
 
 - 数据目录：`/var/lib/rai`（`RAI_RUNTIME_ROOT`），主库 `/var/lib/rai/var/rai.sqlite`；
-  运行时状态 `/var/lib/rai/var/runtime.sqlite`；备份 `/var/lib/rai/var/backups/`；
-  导入与报告 `/var/lib/rai/imports/`、`/var/lib/rai/reports/`。
-- 应用自带一致性备份：`POST /v1/backups`（node:sqlite `backup()`），保留策略由
-  `RAI_BACKUP_MAX_COUNT` / `RAI_BACKUP_MAX_TOTAL_BYTES` / `RAI_BACKUP_MIN_FREE_BYTES`
-  控制（代码默认 10 份 / 20 GiB / 512 MiB；`rai.env.example` 预置 14 份 / 10 GiB）。
-- 建议用 systemd timer 定时触发（线上同款）：
+  运行时状态 `/var/lib/rai/var/runtime.sqlite`；导入与报告 `/var/lib/rai/imports/`、
+  `/var/lib/rai/reports/`。
+
+### 备份责任边界（2026-10-13 起）
+
+**应用不再创建备份。** `POST /v1/backups` 与 `DELETE /v1/backups/:name` 已退役：
+两者都返回 `410 Gone` 与一条维护提示，且**不碰任何文件**；`GET /v1/backups` 只剩只读清单，
+用于人工点选后从设置页保留的「恢复」入口回滚。见
+[SQLite直接增量同步](../docs/SQLITE_DIRECT_SYNC_DESIGN.md) §11。
+
+⛔ 因此**不要**再为本机部署 `POST /v1/backups` 的 systemd timer —— 那个接口已退役，
+定时任务只会每 40 分钟拿到一次 410。备份改为运维自己的责任：
 
 ```bash
-sudo tee /etc/systemd/system/rai-backup.service >/dev/null <<'EOF'
-[Unit]
-Description=RAI periodic consistency backup
-After=network-online.target rai-api.service
-
-[Service]
-Type=oneshot
-User=rai
-EnvironmentFile=/etc/rai/rai.env
-ExecStart=/usr/bin/curl -fsS -X POST http://127.0.0.1:8787/v1/backups -H "Authorization: Bearer ${RAI_API_TOKEN}"
-EOF
-sudo tee /etc/systemd/system/rai-backup.timer >/dev/null <<'EOF'
-[Unit]
-Description=RAI backup timer (every 40 minutes)
-
-[Timer]
-OnBootSec=3min
-OnUnitActiveSec=40min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-sudo systemctl daemon-reload && sudo systemctl enable --now rai-backup.timer
+# 整 runtime 冷备（停服 → tar → sha256；默认 dry-run，二次确认后加 --apply）
+sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups
+sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups --apply
 ```
 
-- 至少保留一份异机或对象存储副本；`var/backups/` 中的备份包含健康数据与精确路线，按主库同等安全等级保管。
+- 该脚本**停服后**整目录打包，不在运行中的服务上复制 SQLite 文件；输出目录必须在
+  runtime 树之外。它打印 `contains private health data; not encrypted`，压缩/加密与异机
+  副本请自行在停服窗口之外完成。
+- 若确实需要更短停机窗口的**在线**备份，请用 SQLite 一致性备份 API 或与存储协调的快照；
+  §11.1 明确：活跃 WAL 库**不能**只 `cp rai.sqlite`，也不得为“提速”删掉 `-wal`/`-shm`。
+  在线备份多个库**不**自动等于跨库一致（主库 / runtime / 上传工件 / 配置身份要在同一恢复边界内）。
+- 已有备份**不会**被应用删除或自动清理（§11 明令不扫描备份作自动清理）；是否保留、归档、
+  删除由运维决定。`var/backups/` 中的备份包含健康数据与精确路线，按主库同等安全等级保管，
+  至少保留一份异机或对象存储副本。
 
 ## 后续发布新版
 
-推荐用脚本（已把「先备份、再拉取、lockfile 变了才 npm ci」的顺序固化，
-默认 dry-run，确认后再 `--apply`）：
+推荐用脚本（已把「拉取 → lockfile 变了才 npm ci → 重建前端 → 重启并验证真实就绪」
+的顺序固化，默认 dry-run，确认后再 `--apply`）：
 
 ```bash
 cd /opt/rai
@@ -170,8 +163,8 @@ sudo systemctl restart rai-api
 - 若服务端 Nginx 站点按域名（SNI）分流且域名被云厂商备案拦截，可启用
   `deploy/nginx-rai.conf` 注释中的 `rai-ip`（IP 自签证书 + iPhone 安装
   `RAI-IP-CA.mobileconfig`）站点，备案通过后再改回域名。
-- 重大变更前建议先在腾讯云控制台打快照；云快照配额有限时，优先依赖上面的
-  40 分钟应用级备份。
+- 重大变更前建议先在腾讯云控制台打快照；此外用 `deploy/backup-runtime.sh` 做整 runtime
+  冷备（应用不再代做备份，见上面的「备份责任边界」）。
 
 
 ## 显式数据库迁移（2026-09-17 起）
@@ -181,7 +174,8 @@ API 与后台 worker 不再自动迁移主库。API 启动发现待迁移版本�
 ```bash
 cd /opt/rai
 sudo -u rai npm run data:migrate -- --database /var/lib/rai/var/rai.sqlite
-# 先通过既有 POST /v1/backups 完成在线一致性备份，再停服：
+# 先由运维自行完成保护（应用不再代做备份，POST /v1/backups 已退役回 410）：
+sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups --apply
 sudo systemctl stop rai-api
 sudo -u rai npm run data:migrate -- --database /var/lib/rai/var/rai.sqlite --apply
 # 成功后解除可能已触发的启动频率限制，并启动：
@@ -192,7 +186,7 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 健康响应必须同时包含 `status: "ok"` 和 `databaseReady: true`，HTTP 200/服务 active 不足以证明就绪。CLI 与 API 共用 publication lock；不要在 API 运行时执行 `--apply`，不要手工删除活进程锁。
 
-发布脚本可显式加入 `--apply --migrate --database /var/lib/rai/var/rai.sqlite`：在线备份、更新代码和构建完成后，停服、迁移、重启并检查真实就绪；迁移失败保持停止。不加 `--migrate` 不会自动升级库。首次引入本变更时应先更新部署机脚本，再执行该选项。
+发布脚本可显式加入 `--apply --migrate --database /var/lib/rai/var/rai.sqlite`：更新代码和构建完成后，停服、迁移、重启并检查真实就绪；迁移失败保持停止。**脚本本身不再做在线备份**（只打印外部备份责任提示，且不校验运维是否已完成），所以加 `--migrate` 之前请先自行备份。不加 `--migrate` 不会自动升级库。首次引入本变更时应先更新部署机脚本，再执行该选项。
 
 同时更新 systemd unit（保留本机已有的必要定制）：`[Unit]` 段的 `StartLimitIntervalSec=300`、`StartLimitBurst=3`，以及 `[Service]` 段的 `RestartPreventExitStatus=78`，然后 `sudo systemctl daemon-reload`。仅改仓库文件不会更新已安装的 unit。
 
