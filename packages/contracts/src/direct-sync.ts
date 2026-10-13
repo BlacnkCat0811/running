@@ -90,8 +90,12 @@ export interface DirectSyncReceipt {
  * - `stages` —— 会出现在 `performance.stagesMs` / `computeStagesMs` 里的阶段名，用作交叉印证。
  *
  * 🔴 **通道必须在本车道上真的可达**，否则"全 0 ⇒ 通过"是空话。在直连车道上结构性
- * 不可能触发的条目要用 `vacuousOnDirectLane` 明写出来 —— 见 `seed-import-generations`
- * （已补 `storeMethod` 通道，从真空变成真守）与 `canonical-nights-full-rebuild`（仍真空，已声明）。
+ * 不可能触发的条目要用 `vacuousOnDirectLane` 明写出来。
+ *
+ * ✅ 2026-10-13（PR4 步骤 4）：真空清单现在是**空的**，两条都补上了真通道 ——
+ * `seed-import-generations` 补了 `storeMethod`；`canonical-nights-full-rebuild` 在直连车道
+ * 接上**窗口重建**之后补了源码级通道 + 行为判据（见 `apps/api/test/direct-sync-ingest.test.ts`
+ * 的野值金丝雀）。守卫测试把这份清单写死断言成空：再出现真空必须显式声明，不能悄悄混进来。
  */
 export interface ProhibitedDirectSyncOperation {
   /** 稳定 id。改它等于改判据，必须同时改测试与文档。 */
@@ -117,6 +121,19 @@ export interface ProhibitedDirectSyncOperation {
    * 而声明的真空是待办项（谁补上通道，谁把它删掉）。
    */
   readonly vacuousOnDirectLane?: string;
+  /**
+   * **源码级**通道：列出的文件里出现这些标识符（词边界）即视为触发。
+   *
+   * 只在别的手段都不可得时使用（这里是"包级函数"：既不是 worker 方法、也不是 store 方法、
+   * 也不经过子进程）。它有源级判据的固有盲区（改名、间接调用、动态 import 都能绕），
+   * 所以它**不能**单独构成保证 —— 配套的行为判据见
+   * `apps/api/test/direct-sync-ingest.test.ts` 的"窗口外逐字节不变"。
+   * 词边界是刻意的：`canonicalizeNights` 不会匹配到 `canonicalizeNightsForWindow`。
+   */
+  readonly forbiddenIdentifiers?: {
+    readonly files: readonly string[];
+    readonly identifiers: readonly string[];
+  } | null;
   /** 文档 §14.1 的原文条目，便于逐条对照。 */
   readonly description: string;
 }
@@ -202,10 +219,14 @@ export const PROHIBITED_DIRECT_SYNC_OPERATIONS: readonly ProhibitedDirectSyncOpe
     storeMethod: null,
     commandSubcommands: ["import", "incremental-import", "recompute"],
     stages: [],
-    // ⚠️ 声明的真空：直连车道**根本不跑** canonical（局部化要等 PR4 接
-    // `canonicalizeNightsForWindow`），所以本条目在那条车道上恒为 0。
-    // 它现在守的是旧车道的 CLI 路径，对直连车道**不构成保证** —— 别把它算进"已守"。
-    vacuousOnDirectLane: "直连车道不执行任何 canonical 重建；本条目只在旧链路的 CLI 子进程里可观测",
+    // ✅ 2026-10-13（PR4 步骤 4）：直连车道**现在会跑 canonical** —— 只按本批窗口跑
+    // （`canonicalizeNightsForWindow`），全表版本仍然禁止。因此本条目不再是"声明的真空"：
+    // 它有了两条真判据 ——①源码级（下面这个通道：直连接收器里不得出现全表函数），
+    // ②行为级（`direct-sync-ingest.test.ts`：窗口外的 canonical 行必须逐字节不变）。
+    forbiddenIdentifiers: {
+      files: ["apps/api/src/direct-sync-ingest.ts", "apps/api/src/data-only-import.ts"],
+      identifiers: ["canonicalizeNights"]
+    },
     description: "全表 canonical nights 删除/重建"
   }
 ];
@@ -224,6 +245,7 @@ export function unobservableProhibitedOperations(
       // 会让 `seed-import-generations` 被误报成"没人守的孤儿"（假警报），
       // 而假警报会训练人忽略这条检查。通道加一处、判据就要跟着加一处。
       && (operation.storeMethod ?? null) === null
+      && (operation.forbiddenIdentifiers ?? null) === null
       && operation.commandSubcommands.length === 0
       && operation.stages.length === 0)
     .map((operation) => operation.id);

@@ -38,6 +38,8 @@ export {
 export {
   canonicalizeNights,
   canonicalizeNightsForWindow,
+  NIGHT_FEEDING_RECORD_TYPES,
+  NIGHT_FEEDING_TYPE_VALUES,
   CANONICAL_NIGHT_ALGORITHM_VERSION,
   type CanonicalNight,
   type CanonicalHrvDay,

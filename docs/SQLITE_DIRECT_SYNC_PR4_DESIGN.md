@@ -33,8 +33,8 @@
 | 代次计数器 `import_generations(singleton, raw_generation, dependency_generation)` 只有 schema | `packages/storage-sqlite/src/v34-migration.ts:42-49` | **没有写入方**⇒ 数值版本号今天不存在（回执刻意不承诺，见 `packages/contracts/src/direct-sync.ts:60-67`） |
 | 稀疏历史 `import_fact_history`（`record`/`workout`）也只有 schema | `packages/storage-sqlite/src/v34-migration.ts:27-40` | 分析"读固定 G"缺的是**写入方**，不是读取方 |
 | `FactsReader` 已实现，但**无生产调用方**，且只覆盖 update、不覆盖 delete（裁决 D1） | `packages/storage-sqlite/src/read/facts-reader.ts:97-137`、同文件 29-35 | PR4 接它时必须同时定掉"删除是否要在旧代次可见" |
-| 局部 canonical 已实现：`canonicalizeNightsForWindow` 不做 DELETE/事务，由调用方按作用域处理 | `packages/health-export-parser/src/canonicalize-nights.ts:250-261` | 直连车道可以调它；**谁调、在哪个事务里调**是 PR4 要定的 |
-| 既有 `canonicalizeNights` 仍整表 `DELETE` 重建 | `packages/health-export-parser/src/canonicalize-nights.ts:333` | 旧链路不变；直连车道不许走它（§14.1 已把它列为禁止操作） |
+| 局部 canonical 已实现：`canonicalizeNightsForWindow` 不做 DELETE/事务，由调用方按作用域处理 | `packages/health-export-parser/src/canonicalize-nights.ts:266-274` | 直连车道可以调它；**谁调、在哪个事务里调**是 PR4 要定的 |
+| 既有 `canonicalizeNights` 仍整表 `DELETE` 重建 | `packages/health-export-parser/src/canonicalize-nights.ts:346-352` | 旧链路不变；直连车道不许走它（§14.1 已把它列为禁止操作） |
 | 路线版本 API 已就绪：`beginRouteVersion` / `publishRouteVersion`（发布段自带 SAVEPOINT） | `packages/storage-sqlite/src/database.ts:2613`、`2665`、`2672` | 路线"不发布半条"是现成能力；直连车道接上即可 |
 | record-only 车道的两道闸门：类型白名单 + XML 形状 | `apps/api/src/data-only-import.ts:102`、`119` | 扩到全部类型时**不许放宽这两道**，要新增并列车道 |
 | 解析器的 `recordDelta` 资格：`atomic !== false && recordIdentity && preserveAbsent && isDataOnlyRecordXml` | `packages/health-export-parser/src/apple-health-parser.ts:309-312` | 新车道不能复用 `recordDelta` 的资格判定（它是 record-only 专用） |
@@ -293,13 +293,13 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 禁止操作清单里已列）。接入点与作用域：
 
 - 本批触及的睡眠/HRV 类型 ⇒ 由账目算出受影响**夜**（含跨夜：窗口边界按
-  `canonicalize-nights.ts:250-261` 的"开始与结束都算"口径）。
+  `canonicalize-nights.ts:277-280` 的"开始与结束都算"口径）。
 - 在**接收事务内**调用 `canonicalizeNightsForWindow(...)`（受本批窗口限制，保持有界）。
 - 窗口外的 canonical 行必须**逐字节不变**（PR3 已有等价判据，直连车道复用同一条）。
 
-⚠️ 未决（§9 未决 2）：canonical 重建放在**接收事务内**还是**分析任务内**。放接收侧的理由是
-"回执代表一个自洽的原始状态"；放分析侧的理由是"canonical 是派生事实，不该拖长接收事务"。
-本设计**暂定接收事务内**（有界窗口），但需要在步骤 4 用实测（P01 的 p95 预算）复核。
+✅ **已定并落地（2026-10-13，PR4 步骤 4）**：canonical 重建放**接收事务内**（原 §9 未决 2）。
+判据见 §8.7。⚠️ 唯一**没做**的是设计要求的 P01 p95 复核 —— 那需要目标云机与 200 个有效样本
+（§14.4 明令不得用开发机空库替代），本环境给不了，**不宣称**达标。
 
 ---
 
@@ -325,7 +325,7 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 | A06 | 同批同内容重放安全；同批不同内容/错误作用域明确拒绝 | 去掉 receipt 的 payload 比对 |
 | A08 | 大包按稳定原子单元分批；父批未全成不提交最终游标 | 让子批回执提前返回 committed |
 | A10 | 分析失败不撤销已接收事实 | ✅ 已落地（2026-10-13，见 §8.5）；突变靶子=`fail()` 回写 raw 回执 |
-| A11 | CPU 分析期间仍可接收新批次（写锁只覆盖短事务） | ✅ 已落地（2026-10-13，见 §3.2.2 / §8.6）；突变靶子=drain 恢复整轮持锁 |
+| A11 | CPU 分析期间仍可接收新批次（写锁只覆盖短事务） | ✅ 已落地（2026-10-13，见 §3.2.2）；突变靶子=drain 恢复整轮持锁 |
 | A13 | 迟到任务不倒退 active 版本；配置变化使不合格候选拒绝发布 | 去掉 `expected_incumbent_release_id` 比较 |
 | A18 | 只新增迁移、不改历史 checksum；不引入 PostgreSQL/Redis | 改 v34/v35 的 `up` |
 
@@ -343,11 +343,12 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 | 2c | 写守卫分档（先只放 Workout/删除，`analysis_required` 仍走旧路） | 守卫扩展用例 | ✅ 已完成（2026-10-13，见 §8.3） |
 | 2d | 同事务登记 + 代次写入方 + 回执 `queued` | A04 故障注入 + 账本断言 | ✅ 已完成（2026-10-13，见 §8.3） |
 | 2e | **放开 `deltaMode: "full"`**（三步顺序的第 3 步） | A01 全类型 + 禁止操作 0 | ✅ 已完成（2026-10-13，见 §8.4） |
-| 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" | ✅ 已完成（2026-10-13，见 §3.2.2 / §8.6） |
-| 4 | 局部 canonical 接入 | 窗口外逐字节不变 | ⛔ 未做 |
+| 3 | 短写租约拆分（§6） | A11 并发用例 + 读侧"中间态不可见" | ✅ 已完成（2026-10-13，见 §3.2.2） |
+| 4 | 局部 canonical 接入 | 窗口外逐字节不变 | ✅ 已完成（2026-10-13，见 §8.7） |
 
 ⛔ 顺序不可交换：2e 之前必须先有 2d（登记），2d 之前必须先有消费者（**步骤 1，已完成**）。
-✅ 2026-10-13：2a–2e 全部落地。剩下的 3（短写租约）与 4（局部 canonical）互不依赖，可并行。
+✅ 2026-10-13：2a–2e 全部落地。剩下的 3（短写租约）与 4（局部 canonical）互不依赖，可并行
+—— 两者均已落地（步骤 3 见 §3.2.2，步骤 4 见 §8.7）。⇒ **PR4 的实施顺序表已全部走完**。
 
 ### 7.2 🔴 2e 的新增前置：PR5-S1 + S2（2026-10-13 实测确认）
 
@@ -612,11 +613,60 @@ record-only 无任务 / Workout 登记**并由真消费者跑完**（闭环）/ 
 | 3 | `fail()` 删掉最新批次行 + 把发布指针指向不存在的 run | 转红（批次计数 + "旧 release 必须仍然可读"） |
 | 4 | `enqueueFullRecompute` 里插入一个批次行（模拟"重试重新接收"） | 转红（"重试不得产生新的批次行"） |
 
+### 8.7 步骤 4 的实测证据：局部 canonical 接入（2026-10-13）
+
+**已落地**：`apps/api/src/direct-sync-ingest.ts` 在接收事务内、**写完事实之后**调
+`canonicalizeNightsForWindow(db, DATABASE_TIMEZONE, from, to, { callerOwnedTransaction: true })`
+（SAVEPOINT，提交权仍归接收事务）。
+
+- **窗口怎么算**（`nightWindow`）：只由**本批账目**算，不是全表扫描 —— 本批写入的
+  `import_entity_changes` ⨝ `health_records` 中属于喂夜类型（`NIGHT_FEEDING_RECORD_TYPES`，
+  睡眠分段 + HRV SDNN）的 `start_at`/`end_at`，转成 `DATABASE_TIMEZONE` 本地日期后**各向外放宽
+  一天**覆盖跨夜。删除的处理见函数注释：被删的行已不存在，时间取自账本 `effective_at`，
+  而"删的是不是喂夜类型"只能取自 v2 manifest 的**类型化删除**；只要本批有喂夜类型的删除，
+  就把本批**全部** record 删除的时刻并进窗口（宁可宽一点，仍然有界）。
+- **同源判据**：喂夜类型常量是**唯一出处**（`NIGHT_FEEDING_RECORD_TYPES`），两个加载器的
+  `WHERE type = ?` 与"这批碰了夜没有"共用它。各写一份字面量的后果是"某天换类型名 ⇒ 加载器改了、
+  批次判定没改 ⇒ 夜不再重建，而回执里一切正常"（静默陈旧）。
+- **模式落进持久化产物**：回执新增 `summary.canonicalNights`（`"none"` / `"window"` + 窗口与三个计数）。
+  §14.1 要求"证明没有调用"整表重建 —— 这张清单里的 `canonical-nights-full-rebuild` 从 2e 起就是
+  **声明的真空**（直连车道根本不跑 canonical），现在它跑了（只按窗口跑），于是模式本身成了判据。
+  `"full"` 在类型上就不存在。
+
+**判据（`apps/api/test/direct-sync-ingest.test.ts`，2 条，全绿）**
+
+| 用例 | 断言 |
+|---|---|
+| 只重建本批触及的夜 | ①碰了夜的批次 `mode === "window"`；②窗口覆盖被更正的那一夜；③窗口**有界**（`to < 2026-01-11`，不得卷入没碰到的夜）；④被触及的夜**真的重建**（快照不同）；⑤**野值金丝雀**：窗口外那一夜的 `asleep_union_minutes` 被故意写成 999（夹具里不可能的值），重建后必须**逐字节原封不动** |
+| 不碰夜的批次 | `mode === "none"`，`canonical_nights` 与 `canonical_hrv_days` 两张表逐字节不变 |
+
+**突变验证（3 处，逐个跑）**
+
+| # | 突变 | 结果 |
+|---|---|---|
+| M1 | 窗口改成 `0001-01-01 .. 9999-12-31`（等价整表重建） | 转红 2/2。第二条是**硬失败**而不是断言：`canonicalizeNightsForWindow` 直接抛错（`Local date-time does not exist in Asia/Shanghai: 1900-12-31T18:00:00` —— 下界再减一天落到了 JS 日期范围外），失败关闭 |
+| M1b | 窗口改成整个 2026 年（**仍然有界**，但把没碰的夜卷进来） | 转红（"窗口必须有界"那条断言先响） |
+| M1c | 回执照实报**窄**窗口，实际却按整个 2026 年重建 | **第一次跑是绿的** ⇒ 暴露了本用例自己的盲区：重建一个输入未变的夜是**确定性**的，字节碰巧一模一样，"窗口外不变"因此分不清"没碰"与"碰了但结果相同"。补上野值金丝雀后转红（断言落在"金丝雀值 999 必须原封不动"）|
+
+⇒ 金丝雀不是装饰：它把"回执声称的窗口"与"实际重建的范围"这两件事真正绑在了一起。
+⚠️ 如实标注：本文档 §4 要求的 **P01–P06 性能复核本环境给不了**（需目标云机 + 200 个有效样本，
+§14.4 明令不得用开发机空库替代），所以"接收事务内"这个选择的**代价**（p95）仍未被实测过；
+这里能声称的只有**正确性**与**有界性**（窗口由本批账目决定、不随库增长）。
+
+**同轮修正的文档漂移**（不是本次功能的一部分）：`canonicalize-nights.ts` 因新增喂夜类型常量
+而下移 18 行 ⇒ 本文档 §1 的两处旧引用（`:250-261`、`:333`）改成 `:266-274`、`:346-352`；
+PR2/PR3 文档里指向同一文件的 4 处（`:333`×2、`:250-261`、`:259-261`）与 PR5 文档里的
+`api-contracts/src/index.ts:1255-1268`（回执新增字段 ⇒ 下移 17 行 ⇒ `:1272-1285`）同步改。
+另外 §7 表里两处指向**不存在**的小节「§8.6」的引用改为 §3.2.2（步骤 3 的证据一直在那里）。
+核对手段是仓库自带的 `scripts/check-doc-line-refs.mjs`：在 `HEAD` 上生成基线快照后与本轮比对 ——
+修正前 5 处内容漂移，修正后 0 处（越界 0 处）。
+
 ## 9. 未决问题（动工前必须定掉）
 
 1. **未核实**：`RecomputePipeline` 内是否存在"跨阶段未提交写相互依赖"的实际调用点。
    分块提交在单连接内语义成立，但需要逐点核对（含 `recordCache` 的生命周期）。
-2. **未决**：局部 canonical 放在接收事务内还是分析任务内（§4 的两条理由都成立）。
+2. ✅ **已定（2026-10-13，PR4 步骤 4）**：局部 canonical 放**接收事务内**（判据见 §8.7）。
+   理由按 §4 的接收侧一条：回执要代表一个自洽的原始状态。⚠️ 代价（P01 p95）**未实测** —— 见 §8.7 末。
 3. **未决**：删除在**旧代次**是否可见（裁决 D1 要求在接 `FactsReader` 写入方时定掉；
    今天 `import_fact_history` 只覆盖 update，边界用例钉着这个口径）。
 4. **未核实**：`route_points` 过渡期双写的退役时点是否与 PR5 同批（PR5 读侧改完才可退役）。

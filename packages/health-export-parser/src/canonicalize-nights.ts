@@ -98,6 +98,24 @@ function median(values: number[]): number | null {
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
 
+/**
+ * 喂给 `canonical_nights` / `canonical_hrv_days` 的**原始记录类型**（唯一出处）。
+ *
+ * 🔴 为什么必须是常量而不是两处字面量：直连车道的局部重建要**判断"这批碰了夜没有"**，
+ * 判据必须和这两个加载器的 `WHERE type = ?` **同源**。各写一份的后果是"某天给 HRV 换类型名，
+ * 加载器改了、批次判定没改" —— 于是夜不再重建，而回执里一切正常（静默陈旧）。
+ */
+export const NIGHT_FEEDING_RECORD_TYPES = {
+  /** 睡眠分段（`loadSegments`）。 */
+  sleep: healthTypes.sleepAnalysis,
+  /** 心率变异性 SDNN（`loadHrv`）。 */
+  hrv: healthTypes.hrvSdnn
+} as const;
+
+/** 上面的值集合，供"本批碰了夜没有"这类判定使用。 */
+export const NIGHT_FEEDING_TYPE_VALUES: readonly string[] =
+  [NIGHT_FEEDING_RECORD_TYPES.sleep, NIGHT_FEEDING_RECORD_TYPES.hrv];
+
 function loadSegments(database: DatabaseSync): Segment[] {
   const rows = database.prepare(`
     SELECT MIN(id) AS id, source_name AS sourceName, source_category AS sourceCategory,
@@ -106,7 +124,7 @@ function loadSegments(database: DatabaseSync): Segment[] {
     WHERE type = ?
     GROUP BY source_name, source_category, value_text, start_at, end_at
     ORDER BY start_at, id
-  `).all(healthTypes.sleepAnalysis) as unknown as Array<Record<string, string>>;
+  `).all(NIGHT_FEEDING_RECORD_TYPES.sleep) as unknown as Array<Record<string, string>>;
   return rows.map((row) => ({
     id: row.id!, sourceName: row.sourceName!, sourceCategory: row.sourceCategory!, value: row.value ?? "",
     start: Date.parse(row.startAt!), end: Date.parse(row.endAt!)
@@ -120,7 +138,7 @@ function loadHrv(database: DatabaseSync): Array<{ id: string; sourceName: string
     WHERE type = ? AND value_numeric IS NOT NULL
     GROUP BY source_name, start_at, value_numeric
     ORDER BY start_at, id
-  `).all(healthTypes.hrvSdnn) as unknown as Array<Record<string, string | number>>;
+  `).all(NIGHT_FEEDING_RECORD_TYPES.hrv) as unknown as Array<Record<string, string | number>>;
   return rows.map((row) => ({ id: String(row.id), sourceName: String(row.sourceName), start: Date.parse(String(row.startAt)), value: Number(row.value) }))
     .filter((row) => Number.isFinite(row.start) && Number.isFinite(row.value) && row.value >= 0);
 }

@@ -124,6 +124,33 @@ async function fixture(run: (ctx: Fixture) => Promise<void>): Promise<void> {
   finally { rmSync(root, { recursive: true, force: true }); }
 }
 
+/** 睡眠分段：跨夜（23:10 → 次日 06:40），喂 `canonical_nights`。 */
+function sleepSegment(uuid: string, date: string, wake = "06:40:00"): string {
+  return `<Record type="${healthTypes.sleepAnalysis}" sourceName="Watch"
+    value="HKCategoryValueSleepAnalysisAsleepCore"
+    startDate="${date} 23:10:00 +0800" endDate="${date.replace(/^(\d{4})-(\d{2})-(\d{2})$/, (_, y, m, d) =>
+      `${y}-${m}-${String(Number(d) + 1).padStart(2, "0")}`)} ${wake} +0800">
+    <MetadataEntry key="RAIHealthKitSampleUUID" value="${uuid}"/>
+  </Record>`;
+}
+
+/** 一张表里全部行的逐字节快照（用于"窗口外一个字节都不许改"）。 */
+function tableDigest(path: string, table: string): string {
+  const db = new DatabaseSync(path, { readOnly: true });
+  try { return JSON.stringify(db.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()); }
+  finally { db.close(); }
+}
+
+/** `canonical_nights` 按 `wake_date` 分行的逐字节快照。 */
+function nightsByDate(path: string): Map<string, string> {
+  const db = new DatabaseSync(path, { readOnly: true });
+  try {
+    const rows = db.prepare("SELECT * FROM canonical_nights ORDER BY wake_date").all() as
+      Array<Record<string, unknown>>;
+    return new Map(rows.map((row) => [String(row.wake_date), JSON.stringify(row)]));
+  } finally { db.close(); }
+}
+
 const scalar = (db: DatabaseSync, sql: string, ...params: unknown[]): number =>
   Number((db.prepare(sql).get(...params as never[]) as { n: number }).n);
 
@@ -345,6 +372,70 @@ test("fail-closed：出现未表态的表时，守卫拒绝安装（而不是默
   assert.equal(new Set(names).size, names.length, "声明表不得有重复条目");
   assert.deepEqual(unclassifiedIngestTables(["health_records", "workouts"]), []);
   assert.deepEqual(unclassifiedIngestTables(["unknown_table"]), ["unknown_table"]);
+});
+
+test("PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical 行逐字节不变", async () => {
+  await fixture(async ({ main, input }) => {
+    // 两个夜：1/1 与 1/10（睡眠段跨夜 ⇒ wake_date 分别是 1/2 与 1/11）。
+    const first = await applyDirectSyncImport(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000e1", "2026-01-01")
+      + sleepSegment("00000000-0000-0000-0000-0000000000e2", "2026-01-10")));
+    assert.ok(first, "第一批必须被接收");
+    assert.equal(first.summary.canonicalNights?.mode, "window",
+      "碰了夜的批次必须按窗口重建（不是整表、也不是什么都不做）");
+    const before = nightsByDate(main);
+    assert.equal(before.size, 2, `两夜都要有 canonical 行（实际 ${JSON.stringify([...before.keys()])}）`);
+
+    // 🔴 野值金丝雀：把**窗口外**那一夜（1/11）的 canonical 值故意写错 —— 999 分钟在这条夹具里
+    // 不可能出现（23:10→06:40 满打满算 450 分钟）。于是下面那句"逐字节不变"才有牙：
+    // 任何**真的**重建到 1/11 的路径都会把它算回真值 ⇒ 快照必然不同。
+    //
+    // 为什么非要有这条（2026-10-13 突变实测）：把"回执照实报窄窗口、实际按 2026 全年重建"这个
+    // 突变打进来时，**没有**金丝雀的版本是**绿的** —— 重建一个输入未变的夜是确定性的，
+    // 字节碰巧一模一样，"窗口外不变"因此无法区分"没碰"与"碰了但结果相同"。
+    const canary = new DatabaseSync(main);
+    try {
+      canary.prepare("UPDATE canonical_nights SET asleep_union_minutes = 999 WHERE wake_date = '2026-01-11'").run();
+    } finally { canary.close(); }
+    const canaryBefore = nightsByDate(main);
+    assert.equal(JSON.parse(canaryBefore.get("2026-01-11")!).asleep_union_minutes, 999,
+      "金丝雀没写进去的话，下面那条断言什么都没证明");
+
+    // 第二批只更正 1/1 那一夜（更早醒 ⇒ 睡了更短）。
+    const second = await applyDirectSyncImport(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000e1", "2026-01-01", "05:30:00"), { job: "delta-night-2" }));
+    assert.ok(second);
+    const range = second.summary.canonicalNights!;
+    assert.equal(range.mode, "window");
+    assert.ok(range.from! <= "2026-01-02" && range.to! >= "2026-01-02",
+      `窗口必须覆盖被更正的那一夜（${range.from}..${range.to}）`);
+    assert.ok(range.to! < "2026-01-11",
+      `窗口必须**有界**：不得把没碰到的 1/10 那一夜卷进来（${range.from}..${range.to}）`);
+
+    const after = nightsByDate(main);
+    assert.notEqual(after.get("2026-01-02"), before.get("2026-01-02"),
+      "被触及的夜必须真的重建（否则这条用例证明不了任何事）");
+    assert.equal(after.get("2026-01-11"), canaryBefore.get("2026-01-11"),
+      "🔴 窗口外的 canonical 行必须**逐字节**不变（§14.1 的「不许全表重建」就是这一条）：" +
+      "金丝雀值 999 必须原封不动地留在库里");
+  });
+});
+
+test("PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变）", async () => {
+  await fixture(async ({ main, input }) => {
+    const first = await applyDirectSyncImport(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000e3", "2026-02-01")));
+    assert.ok(first);
+    const nights = nightsByDate(main);
+    const hrv = tableDigest(main, "canonical_hrv_days");
+
+    const workoutBatch = await applyDirectSyncImport(await input(workout(), { job: "delta-workout-only" }));
+    assert.ok(workoutBatch);
+    assert.equal(workoutBatch.summary.canonicalNights?.mode, "none",
+      "一批只有 Workout 的载荷不该重建任何夜");
+    assert.deepEqual(nightsByDate(main), nights, "canonical_nights 必须逐字节不变");
+    assert.equal(tableDigest(main, "canonical_hrv_days"), hrv, "canonical_hrv_days 必须逐字节不变");
+  });
 });
 
 test("A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执整批回滚", async () => {

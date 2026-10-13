@@ -51,7 +51,7 @@
 | 11 | 成绩候选只看 `session.status = 'active'`；`durationSeconds` 回退到 anchor 跨度 | `data.ts:1661-1667`、`sql/fragments.ts:6-15` |
 | 12 | Web 趋势 assessment × feature × load；统计页近期负荷 load × 当前 session 时间 | `read/trends-read-repository.ts:80-91`、`read/training-statistics-read-repository.ts:66-75` |
 | 13 | 恢复/解读用已发布 run 的 feature schema 当开关，再读**当前**恢复事实 | `apps/api/src/mobile-read.ts:362-364`；`packages/application/src/model-v2-snapshots.ts:38-52` |
-| 14 | `executable` 与版本无关（结构非空且非 rest）；`freshness.state` 只由 `sync.status` 派生且已 `@deprecated` | `mobile-read.ts:567`、`:614`；`data.ts:774-779`；`api-contracts/src/index.ts:1255-1268` |
+| 14 | `executable` 与版本无关（结构非空且非 rest）；`freshness.state` 只由 `sync.status` 派生且已 `@deprecated` | `mobile-read.ts:567`、`:614`；`data.ts:774-779`；`api-contracts/src/index.ts:1272-1285` |
 | 15 | 锁课 gate 只查 `syncStatus === "failed"` 与 `recommendationRevision`；锁课的 workout 校验只查 `training_sessions.status` | `mobile-sync.ts:99-104`；`server.ts:1552-1557`；`coach-loop-routes.ts:56` |
 | 16 | 缓存开关 = `PRAGMA data_version`（任何一页写清空全部 key），只用于两个 key | `data.ts:208-209`、`:354-364`、`:1824`、`:1837`；`server.ts:926-927` |
 | 17 | `recommendationRevision` 的哈希**已经包含** `activeModel`（旧 release 边界的既成先例） | `data.ts:785-797` |

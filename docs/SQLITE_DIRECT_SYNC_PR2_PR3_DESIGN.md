@@ -30,7 +30,7 @@ PR4（分析输入与短写调度）、PR5（读侧一致性）、PR6（客户�
 | `healthkit_record_facts` 有 `UNIQUE(sample_type, sample_uuid)`，只存**当前**事实 | `packages/storage-sqlite/src/v31-migration.ts:39-48` | 历史版本**不能**塞进这张表，必须新表 |
 | `workout_routes.relative_path TEXT UNIQUE`、`file_status DEFAULT 'pending'` | `database.ts:209-222` | 路线版本不能复用同一 `relative_path`；`file_status` 可作为"未发布"标记复用 |
 | `recompute_jobs` 在主库，`job_type CHECK IN ('import','full_recompute','snapshot_refresh')`，`status CHECK IN (queued…cancelled)` | `database.ts:482-498` | 分析任务可与 raw 同事务落库（§4.2 要求）；要加绑定列只能 `ALTER TABLE ADD COLUMN` |
-| `canonicalizeNights` 每次 `DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;` 再全量重建 | `packages/health-export-parser/src/canonicalize-nights.ts:333` | 局部化必须改成按窗口 `DELETE ... WHERE`，且夜间日期范围由段的**开始与结束**共同决定（见同文件注释 `canonicalize-nights.ts:10` 与实现 `canonicalize-nights.ts:259-261`） |
+| `canonicalizeNights` 每次 `DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;` 再全量重建 | `packages/health-export-parser/src/canonicalize-nights.ts:352` | 局部化必须改成按窗口 `DELETE ... WHERE`，且夜间日期范围由段的**开始与结束**共同决定（见同文件注释 `canonicalize-nights.ts:10` 与实现 `canonicalize-nights.ts:277-280`） |
 | 迁移注册表 `migrations` 到 v33 为止；`FROZEN_MIGRATION_CHECKSUMS` 按版本冻结；门禁在 `test/migration-policy.test.ts` | `database.ts:123`（注册表；v33 条目在 `database.ts:1673`）、`database.ts:1718`（冻结值）；`MIGRATION_VERSIONS`/`transpiledChecksumFor` 在 `1757/1769`（同文件） | 新增迁移必须补冻结值，否则门禁转红 |
 | 守卫观测口：`databaseTask` 是唯一线程投递口，`task.operation` ∈ {verify, audit, checkpoint, data-only} | `apps/api/src/import-worker.ts:948-966`；`apps/api/src/import-database-tasks.ts:7-12` | PR2 扩展车道要**新增 operation**，否则守卫看不见新通道 |
 
@@ -248,7 +248,7 @@ ALTER TABLE recompute_jobs ADD COLUMN dirty_json TEXT;
 
 ### 3.4 canonical 局部化（PR3 边界内只做"可局部"的部分）
 
-`canonicalizeNights` 现在无条件整表删重建（`canonicalize-nights.ts:333`）。本 PR 只做：
+`canonicalizeNights` 现在无条件整表删重建（`canonicalize-nights.ts:352`）。本 PR 只做：
 
 - 新增 `canonicalizeNightsForWindow(database, timezone, fromLocalDate, toLocalDate)`：
   把 `DELETE FROM canonical_nights` 换成 `DELETE ... WHERE wake_date BETWEEN ? AND ?`（`canonical_hrv_days` 同理），
@@ -338,7 +338,7 @@ export interface FactsReader {
 | 级别 | 项 | 处置 |
 |---|---|---|
 | 🔴 | full 载荷被以 `preserveAbsent: false` 送进直连 ⇒ **静默全库删除** | 用 §2.6 的类型约束封死；补一条断言（"参数类型里不存在这个字段"） |
-| 🔴 | `canonicalizeNightsForWindow` 的窗口边界算错 ⇒ 夜间事实丢失或重复 | 复用 `canonicalize-nights.ts:250-261` 的"开始与结束都算"口径；合成用例钉住跨界夜 |
+| 🔴 | `canonicalizeNightsForWindow` 的窗口边界算错 ⇒ 夜间事实丢失或重复 | 复用 `canonicalize-nights.ts:277-280` 的"开始与结束都算"口径；合成用例钉住跨界夜 |
 | 🟡 | 新增两个迁移不可逆 | 先隔离库演练 + 冻结校验和；API 以 `refuse` 开库，pending 直接 exit 78（现有机制） |
 | 🟡 | `workout_routes.relative_path UNIQUE` 与版本表并存会不会冲突 | 版本表不写 `relative_path`；待实施时用一条断言钉住 |
 | ⚪ | ~~未决：`route_version_points` 与既有 `route_points` 是否长期双写~~ | **已定（步骤 5）**：过渡期双写（发布时点写两处），PR5/PR6 让读侧改走版本表后 `route_points` 退役 |
@@ -613,7 +613,7 @@ PR5/PR6 让读侧改走版本表之后，`route_points` 与这次的双写一起
 | F1 | 🔴 | `published_route_version_id` 会指向一条 `rejected` 版本：一条行同时当"暂存"与"已发布记录"用，一次失败的重导把**正被引用**的那条打成 `rejected` ⇒ 读侧（PR5 起 JOIN `complete`）读不到轨迹 | **已修**：拆成 staging / published 两个**确定性**槽位；`begin` 永不碰 published 行；`rejectRouteVersion` 加"拒绝去动被引用版本"的兜底断言 |
 | NEW-1 | 🔴 | 发布"换点"遇瞬时错误 ⇒ `route_points` 被清空，而元数据仍说 `imported`/`point_count=2`（非原子，且 `gpx-parser` 吞错继续） | **已修**：发布段包 `SAVEPOINT`（全有或全无）；并且只把 `parseGpxFile` 那一小段当"文件可能坏了"的窗口，**其余阶段的错误一律上抛**，不再写假话 `INVALID_GPX` |
 | NEW-2 | 🟡 | published 版本行**没有内容**（`point_count=2` 却 0 行点），设计 §3.2/§7 的"过渡期双写"被静默丢掉 ⇒ PR5 切读侧会丢轨迹 | **已修（选 B：真双写）**：发布时把点同时写进 published 版本的 `route_version_points` |
-| F3 | 🟡 | §14.1 的 `seed-import-generations` 只有子命令通道，而直连车道不跑子进程 ⇒ 该守卫在那条车道上**构造性真空**（"全 0"什么都没证明） | **已修**：给清单加**进程内**通道 `storeMethod` 并包 `RaiDatabase.prototype`；另加**能响**的阳性对照。仍真空的 `canonical-nights-full-rebuild` 用 `vacuousOnDirectLane` **显式声明**，并把真空清单写死断言 |
+| F3 | 🟡 | §14.1 的 `seed-import-generations` 只有子命令通道，而直连车道不跑子进程 ⇒ 该守卫在那条车道上**构造性真空**（"全 0"什么都没证明） | **已修**：给清单加**进程内**通道 `storeMethod` 并包 `RaiDatabase.prototype`；另加**能响**的阳性对照。仍真空的 `canonical-nights-full-rebuild` 用 `vacuousOnDirectLane` **显式声明**，并把真空清单写死断言。<br>✅ **2026-10-13 补完（PR4 步骤 4）**：直连车道接上**窗口重建**之后，最后一条真空也补上了真通道 —— ①源码级（`forbiddenIdentifiers`：直连接收器里不得出现全表函数），②行为级（`direct-sync-ingest.test.ts` 的野值金丝雀：窗口外的 canonical 行必须逐字节不变）。⇒ 真空清单现在**写死断言为空**，再出现真空必须显式声明 |
 | F4 | 🟡 | caller 模式下内部提交点直接用公开 `flush()` ⇒ 一条现成写入路径抛错，且 `catch` 里的 `rollback()` 把真错误换掉；`close()` 抛错导致 `database.close()` 永不执行（**句柄泄漏**） | **已修**：新增内部 `flushIfOwned()` / `rollbackIfOwned()`（commit 权不在自己就什么都不做）；`close()` 用 `try/finally` 保证句柄必关。公开 `flush()/rollback()` 在 caller 模式下**仍然抛错**（对外保证不变） |
 | F6 | ⚪ | `direct-sync.ts` 注释声称 "`packages/contracts/test` 与 API 守卫测试都会断言这个不变量" —— 前者**不存在** | **已修**：改成"唯一执行者是 API 守卫测试"，并点明"声称有第二道守卫、实际只有一道"比只有一道更危险 |
 | F2 | 🔴→撤回 | `facts-reader.ts` 的 `>=` | 经复核是**作者突变验证窗口期的中间态**，已回退；按"作者停手后冻结 md5 + 连跑多次一致"结案 |

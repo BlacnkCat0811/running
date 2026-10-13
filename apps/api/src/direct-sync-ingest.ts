@@ -3,12 +3,15 @@ import { createHash } from "node:crypto";
 import { basename, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { CONTRACT_VERSION, DATABASE_TIMEZONE, DIRECT_SYNC_ANALYSIS_REQUEST_MODE } from "@rai/contracts";
+import {
+  CONTRACT_VERSION, DATABASE_TIMEZONE, DIRECT_SYNC_ANALYSIS_REQUEST_MODE, localCalendarFormatter
+} from "@rai/contracts";
 import type { ImportJobResponse } from "@rai/api-contracts";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 import {
-  DATA_ONLY_MAX_RECORDS, DATA_ONLY_MAX_XML_BYTES, NATIVE_VERSION, RecordDeltaNotEligibleError,
-  canonicalizeRunningWorkouts, classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes,
+  DATA_ONLY_MAX_RECORDS, DATA_ONLY_MAX_XML_BYTES, NATIVE_VERSION, NIGHT_FEEDING_TYPE_VALUES,
+  RecordDeltaNotEligibleError, canonicalizeNightsForWindow, canonicalizeRunningWorkouts,
+  classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes,
   parseAppleHealthXml, parseHealthSyncManifest, type DirectSyncPayloadFacts,
   type HealthSyncManifest
 } from "@rai/health-export-parser";
@@ -298,6 +301,53 @@ async function preparePayload(input: DirectSyncImportInput): Promise<PreparedPay
   return { xmlPath, xmlText, manifest };
 }
 
+/** 本地日期（`DATABASE_TIMEZONE`）——与读侧同一口径。 */
+const localDateOf = (instant: number): string =>
+  localCalendarFormatter(DATABASE_TIMEZONE, "day").format(new Date(instant));
+
+const shiftLocalDate = (localDate: string, days: number): string => {
+  const shifted = new Date(Date.parse(`${localDate}T00:00:00.000Z`) + days * 86_400_000);
+  return shifted.toISOString().slice(0, 10);
+};
+
+/**
+ * 本批触及的**夜**窗口（本地日期闭区间）。`null` = 本批一条喂夜的记录都没碰。
+ *
+ * 有界性的来源：窗口只由**本批账目**里的时间戳算出（不是全表扫描），并向外各放宽一天
+ * 以覆盖跨夜（睡眠段常常跨过午夜）。
+ *
+ * 删除的处理：被删的 `health_records` 行已经不存在，时间只能取自账本
+ * （`import_entity_changes.effective_at` = 删除前那条记录的起点），而"删的是不是喂夜类型"
+ * 只能取自 manifest 的**类型化删除**（v2 才有类型）。只要本批有喂夜类型的删除，就把本批
+ * **全部** record 删除的时刻并进窗口 —— 宁可窗口宽一点（仍然有界），也不要漏掉一个夜。
+ */
+function nightWindow(db: DatabaseSync, batchId: string, manifest: HealthSyncManifest): { from: string; to: string } | null {
+  const types = NIGHT_FEEDING_TYPE_VALUES as readonly string[];
+  const placeholders = types.map(() => "?").join(",");
+  const written = db.prepare(`
+    SELECT record.start_at AS startAt, record.end_at AS endAt
+    FROM import_entity_changes change
+    JOIN health_records record ON record.id = change.entity_id
+    WHERE change.batch_id = ? AND change.entity_kind = 'record' AND record.type IN (${placeholders})
+  `).all(batchId, ...types) as Array<{ startAt: string | null; endAt: string | null }>;
+  const deletesNightType = manifest.deletedRecords.some((row) => types.includes(row.type));
+  const removed = deletesNightType ? db.prepare(`
+    SELECT effective_at AS effectiveAt FROM import_entity_changes
+    WHERE batch_id = ? AND entity_kind = 'record' AND change_type = 'removed'
+  `).all(batchId) as Array<{ effectiveAt: string | null }> : [];
+  const instants: number[] = [];
+  for (const row of [...written, ...removed.map((row) => ({ startAt: row.effectiveAt, endAt: row.effectiveAt }))]) {
+    for (const value of [row.startAt, row.endAt]) {
+      if (typeof value !== "string") continue;
+      const parsed = Date.parse(value);
+      if (Number.isFinite(parsed)) instants.push(parsed);
+    }
+  }
+  if (instants.length === 0) return null;
+  const dates = instants.map(localDateOf).sort();
+  return { from: shiftLocalDate(dates[0]!, -1), to: shiftLocalDate(dates.at(-1)!, 1) };
+}
+
 /** 库里已有的清单状态；决定这条车道能不能接（§4.3：**不**要求快通路资格 stamp）。 */
 function identityState(db: DatabaseSync): Map<string, string> {
   return new Map((db.prepare(`SELECT key,value FROM import_manifest
@@ -429,6 +479,14 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       dirtyWorkoutTimes: [...(parsed.dirtyWorkoutTimes ?? []), ...routeDirtyTimes]
     }, { callerOwnedTransaction: true });
 
+    // 恢复事实的**局部**重建（PR4 步骤 4）：只重建本批真正碰到的**夜**。
+    // 窗口外的 canonical 行必须逐字节不变 —— 这是 `canonicalizeNightsForWindow` 的绝对担保，
+    // 也是 §14.1「全表 canonical 删除/重建」在直连车道上仍为 0 的判据。
+    const nightRange = nightWindow(db, input.jobId, payload.manifest);
+    const canonicalNights = nightRange === null ? null
+      : canonicalizeNightsForWindow(db, DATABASE_TIMEZONE, nightRange.from, nightRange.to,
+        { callerOwnedTransaction: true });
+
     const facts = ledgerFacts(db, input.jobId, payload.manifest, routes.changedRouteIds?.length ?? routes.importedRouteCount);
     const classification = classifyDirectSyncPayload(facts);
     const analysisRequired = classification.payloadClass === "analysis-required";
@@ -477,6 +535,15 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       routesUpdated: routes.importedRouteCount,
       featuresReused: 0, featuresRecomputed: 0, modelReplayFrom: null,
       durationMs: Date.now() - input.startedAtMs, backupName: null,
+      // 🔴 canonical 的**模式必须落进持久化产物**（§14.1 的"还要记录 SQL、任务阶段和文件操作"）。
+      // `"full"` 在直连车道上永远不该出现：那条路径是整表删除+重建，禁止操作清单里点名的就是它。
+      canonicalNights: canonicalNights === null
+        ? { mode: "none" as const }
+        : {
+            mode: "window" as const, from: nightRange!.from, to: nightRange!.to,
+            mainCount: canonicalNights.mainCount, napCount: canonicalNights.napCount,
+            hrvCount: canonicalNights.hrvCount
+          },
       directSync: {
         ingestStatus: "committed",
         // 🔴 本批需要分析时这里必须是 `queued`：任务**已经在同一个事务里**登记完了。

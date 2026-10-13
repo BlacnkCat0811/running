@@ -564,6 +564,23 @@ export interface ImportJobResponse {
      * 前者为 `committed` 也不代表后者已经 `published`（§1.4）。
      */
     directSync?: DirectSyncReceipt;
+    /**
+     * 本批**恢复事实**（`canonical_nights` / `canonical_hrv_days`）的重建模式。
+     *
+     * 🔴 为什么必须落进持久化摘要：§14.1 要求"证明没有调用"全表重建，而那张禁止操作清单里
+     * 的 `canonical-nights-full-rebuild` 直到 PR4 步骤 4 之前都是**声明的真空**（直连车道根本
+     * 不跑 canonical）。现在它跑了 —— 只按**本批窗口**跑 —— 于是模式本身成了可观测通道：
+     * `"none"` = 本批没碰夜，`"window"` = 只重建了 `[from, to]`。
+     * **`"full"` 在直连车道上永远不该出现**（那是整表删除+重建）。
+     */
+    canonicalNights?: {
+      mode: "none" | "window";
+      from?: string;
+      to?: string;
+      mainCount?: number;
+      napCount?: number;
+      hrvCount?: number;
+    };
   };
 }
 
