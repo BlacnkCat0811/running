@@ -176,6 +176,74 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 （例如某阶段读回上一阶段刚写的候选行）。同一连接内可见，所以分块提交在**单进程**语义下成立；
 需要逐点核对后再动手（§9 未决 1）。
 
+### 3.2.1 🔴 动工前的实测修订（2026-10-13，独立审计 + 两个探针）
+
+§3.2 是按"整轮 drain 持锁 = 一个长事务"的**假设**写的。逐行核对 + 第二条连接实测之后，
+假设有一处是错的，另有两处必须补：
+
+**(1) 分析根本没有长事务 —— 每一句都是自动提交。** `runFullRecompute` 里
+没有 `BEGIN`/`COMMIT`/`SAVEPOINT`（全文件 `.exec(` 命中数为 0），`RaiDatabase` 只在它自己的导入写入口
+`begin()`；pipeline 直接用 `prepare().run()` 绕开了那些入口。实测（在 `AFTER INSERT` 探针里开
+**第二条只读连接**）：跑到 `INSERT INTO model_runs` 时，`feature_runs` 行**已经对别的连接可见**；
+跑到 `INSERT INTO training_metric_runs` 时 `model_runs` 也已可见；只有发布指针
+（`jobs.complete` 的 `BEGIN IMMEDIATE`）是真正原子的。
+⇒ **要改的不是事务边界，而是"什么时候持写许可"**。中间态对读侧可见这件事今天就已经存在，
+不是拆分引入的。
+
+**(2) 窗口顺序不能照抄 §3.2 的标签。** 代码顺序是 `createModelRun`（第 219 行）**先于**
+`createTrainingMetricRun`（第 221 行），而 `training_metric_runs.model_run_id` 是
+`REFERENCES model_runs(id)` 且外键 `ON`。照标签把"指标窗口"排在"模型窗口"之前会让
+指标行引用一个还不存在的父行 ⇒ `FOREIGN KEY constraint failed`。
+⇒ 窗口必须**按代码顺序**切，不是按语义标签切。
+
+**(3) 读回自己刚写的行是常态，但都靠"同一条连接 + 逐窗口提交"成立**：`(a)→(c)`（复用前缀读
+`feature_runs.parent_feature_run_id`、`INSERT … SELECT` 复制特征行）、`(b)→(d)`（发布阶段读
+`daily_training_metrics` / `daily_zone_profiles` / `training_metric_runs.status`）、
+`(c)→(d)`（发布阶段读候选的 `ability_assessments` / `daily_ability_snapshots` /
+`model_domain_snapshots` / `model_release_bundles` / `model_v2_runs`）。
+⇒ 每条边界都**可以在提交后继续**（提交不改变同一连接的可见性），
+但 **(d) 内部不许再切**：`verifyAndPoint` 重读 bundle/lineage/snapshots 并与指针同事务，
+`model-release-v2.test.ts` 与 `service.test.ts` 各有一条用例钉住这份原子性。
+
+**(4) 不许引入"阶段间全有全无"。** 两条既有用例**依赖**候选行在后续阶段失败后**仍然存在**：
+`packages/application/test/service.test.ts:484`（发布失败后候选 `model_runs` 行必须存在且为
+`failed`）、`apps/api/test/analysis-failure-isolation.test.ts`（A10：失败后候选行可残留）。
+今天的失败路径是"**状态写入**（`finish*Run` → `jobs.fail` → `failAssociatedRuns`），从不回滚删除"。
+
+**(5) 握手成本实测（决定窗口粒度）**：worker 线程与主线程之间只能用共享内存（
+`Atomics.wait` 在 worker 线程合法、在主线程非法；`parentPort` 是异步的，而 pipeline 是同步的）。
+两个探针实测：
+- 朴素"标志位"协议（REQUEST/GRANT 各一个标志）**有正确性缺陷**：第一次授权后 worker 会"跑飞"
+  （后续窗口看到 GRANT 仍为 1 就直接通过）。必须用**序列号**协议（`GRANT === 本次 REQUEST`）。
+- 序列号协议**每窗口 7.3 ms**（200 窗口 / 1468 ms；包含主线程 `setTimeout(1)` 轮询 + 唤醒延迟）。
+⇒ **逐语句租约不可行**：一次年度重算约 10³ 条写语句 ⇒ 光握手就要 ~7 s。
+⇒ 结论：按**有界阶段窗口**发租约（每轮 10–40 个窗口 ⇒ ~0.1–0.3 s），并在长计算里插入
+**显式让路点**（每 N 条/每个分块边界一次），而不是逐语句。
+
+**(6) 非事务副作用**：`process.send({type:"rai:compute-performance"})`（每轮 3 次，
+`recompute-pipeline.ts:2423`）把各计算阶段耗时报给导入进程的 `computeStagesMs`。
+窗口边界**不得**移动 `measureCompute` 的包围范围，否则诊断口径会悄悄变。
+
+**修订后的步骤 3 形状**（取代 §3.2 的四窗口标签）：
+
+| # | 窗口 | 覆盖 | 为什么必须是它 |
+|---|---|---|---|
+| W1 | 特征轮：`createFeatureRun` → 特征行落库 → `finishFeatureRun` | 第 205–215 行 + `extractFeatures` 的写点 + `finishFeatureRun` | 计算与写交替，按**分块边界**让路 |
+| W2 | 模型/指标轮：`createModelRun` → `createTrainingMetricRun` → 指标与域快照落库 → `finish*` | 第 219–232 行 + `replayTrainingMetrics`/`buildAndPersistZoneProfiles`/`persistDailyTrainingMetrics` 的写点 | **顺序与代码一致**（见修订 2） |
+| W3 | 时间线重放轮：`createModelRun` 的重放写点 → `writeModelCheckpoint` → `writeDailySnapshots` → `model_runs.summary_json` → `finishModelRun` → `sealDomainSnapshots` | 第 2086–2121、2330、247–250 行 | 同上 |
+| W4 | 发布：`jobs.complete(...)`（含 `verifyAndPoint` 与指针） | 整段**不可再切** | 修订 3 |
+| W5 | 作业簿记：`setJobRunIds` / `updateJobProgress` 的 INSERT / 取消 | 分散调用点 | 它们是写；漏掉就是"有写不在许可内" |
+
+配套两条：
+- **让路点**：三个计算循环里每 N 条调用一次 `gate.yield()`（释放后立刻重取），
+  保证"接收优先"的等待上界是**一批**而不是**一整轮**。
+- **结构性判据**：新增的窗口必须能证明"分析路径上**没有**不经过 gate 的写"
+  —— 做法与结论写进实施记录，不能只靠"我包了这几处"。
+
+⚠️ 仍未定（实施时以实测为准）：N 的取值（让路频率 vs 握手成本）、以及"读阶段不持许可"之后
+分析输入的稳定性 —— 后者按 §4「步骤 4」与 PR4 的"固定 `FactsReader`"一起解决；
+在它落地之前，输入稳定性依赖"后续批次会重新登记分析"这一既有时序。
+
 ### 3.3 空队列不启动计算 Worker
 
 已具备：`hasPendingJob()` 在 spawn 之前早退（`apps/api/src/recompute-worker.ts:75`）。
