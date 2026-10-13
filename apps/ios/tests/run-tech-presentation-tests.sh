@@ -293,6 +293,14 @@ metadata_only = {
     # 没戴表的普通夜晚被显示成"数据过期"，还让历史夜参与今天的判断。契约里它已标
     # `@deprecated`，iOS 也已停止渲染 —— 保留解码只为尚未升级的旧客户端。
     "freshness": "已废弃：语义拆分为 sync / coverage / recoveryAssessment；界面刻意不再渲染",
+    # 2026-10-13 补登记（PR5 S4「两块视图」）：`factsAnalysisViewsContractVersion = 1` 之后，
+    # `/v1/mobile/today` 会带 `currentFacts` / `publishedAnalysis`。iOS **刻意不消费** ——
+    # 实测 `grep -rn "currentFacts\|publishedAnalysis" apps/ios` 在 `APIModels.swift` 与视图层
+    # **零命中**（今天页展示的是它们派生的 summary 侧摘要，与 `readinessSnapshot` 同族：
+    # 随 payload 发出是为了服务端验收与工具核对）。要改成展示位，请连同"首页该显示哪一套
+    # 事实/分析说法"一起决定，别只加一行锚点 —— 否则同一个决定会在首页出现两种说法。
+    "currentFacts": "PR5 S4 两块视图（事实侧）：证据层，iOS 今天页刻意不消费；展示位属产品决策",
+    "publishedAnalysis": "PR5 S4 两块视图（分析侧）：证据层，iOS 今天页刻意不消费；展示位属产品决策",
 }
 
 unaccounted = set(contract_fields) - set(field_anchors) - set(metadata_only)

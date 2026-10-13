@@ -58,8 +58,13 @@ xcrun swiftc -parse-as-library -disable-sandbox \
 # `SyncTaskState` 的兼容性：升级不得把老设备上已存在的任务丢掉。
 # `loadTask` 用 `try?` 解码 ⇒ 一个解不开的字段会让整份任务被当成"没有任务"，
 # 现象是重导整个窗口、计数归零，而 `sync_tasks` 里那一行还在。
+# `DirectSyncReceiptState.swift` 必须一起编：PR6 给 `SyncTaskState` 加了 `lastReceipt` /
+# `lastAnalysisStatus`（类型 `DirectSyncReceipt` / `DirectSyncAnalysisStatus` 住在那个文件里），
+# 少编这一支会以 `cannot find 'DirectSyncReceipt' in scope` 炸 —— 而全量类型检查（一起编）
+# 完全看不出来（2026-10-13 实测：本支在 HEAD 上红了整轮 `npm run test:ios`）。
 xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
+  apps/ios/RAI/DirectSyncReceiptState.swift \
   apps/ios/RAI/SyncTaskState.swift \
   apps/ios/tests/SyncTaskMigrationRegression.swift \
   -o "$tmp/sync-task-migration-tests"

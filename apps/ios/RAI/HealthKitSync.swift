@@ -1209,11 +1209,10 @@ final class HealthKitSync {
                         receipt: finished.summary?.directSync,
                         // 同上：`.upload` 恢复分支也真的等了一个 `jobId` 的终态。
                         requiresReceipt: directSyncNegotiated,
-                        job: finished,
-                    // 对账要用 `summary.analysisJobId`（服务端把那一批登记的分析任务交出来）：
-                    // 回执里的 `analysisStatus` 是 COMMIT 快照（恒 `queued`），
-                    // 只有这个 id 能让客户端在收尾之后问到一个**终态**（§10.3）。
-                    job: finished
+                        // 对账要用 `summary.analysisJobId`（服务端把那一批登记的分析任务交出来）：
+                        // 回执里的 `analysisStatus` 是 COMMIT 快照（恒 `queued`），
+                        // 只有这个 id 能让客户端在收尾之后问到一个**终态**（§10.3）。
+                        job: finished
                     )
                 }
                 return
@@ -1682,12 +1681,15 @@ final class HealthKitSync {
             // 一轮**既没失败、也没结** —— 那个判据里表达不出来。不置它，兜底会把任务行连同
             // 候选游标一起清掉，界面还会改口说"同步成功"。
             cursorHoldThisRound = true
+            // ⚠️ 下面四处赋的是 `self.message`（**给人看**的那句），不是形参 `message`：
+            // 形参只是"调用方那句话"的来源，本分支在函数收尾之前就 `return`，
+            // 改形参没有任何读者（2026-10-13：这四处写成 `message = …` 直接编译不过）。
             switch reason {
             case DirectSyncCursorPolicy.notCommittedReason:
                 // 回执**明确**说这一批的事实还没提交（`receiving` / `validating` / `applying`，
                 // 或 `rejected`）：这是真的"没成"，如实报成失败态。
                 lastError = Self.uncommittedBatchText
-                message = lastError
+                self.message = lastError
                 phase = SyncPhase.failed.rawValue
             case DirectSyncCursorPolicy.noReceiptReason,
                  DirectSyncCursorPolicy.serverContractMissingReason:
@@ -1700,15 +1702,15 @@ final class HealthKitSync {
                 if receipt?.isCommitted == true {
                     // 主句仍是调用方那句 §10.3 文案（已提交 ⇒ 事实那一半是真的），
                     // "游标保留待确认"只做**尾注**，不抢主语。
-                    message = message + Self.cursorHoldNote
+                    self.message = message + Self.cursorHoldNote
                 } else {
                     // 一个回执都没有：只说"没被确认"，不说"失败"—— 这件事没有被证伪。
-                    message = Self.unconfirmedBatchText
+                    self.message = Self.unconfirmedBatchText
                 }
             default:
                 // `blocked`：上游 `mayCommit` 已经拦过一次，这里用**同一句话**兜底。
                 lastError = Self.blockedCommitText
-                message = lastError
+                self.message = lastError
                 phase = SyncPhase.failed.rawValue
             }
             persistPendingReceipt(receipt, needsContinuation: needsContinuation)
