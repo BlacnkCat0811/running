@@ -172,7 +172,8 @@ struct HealthSyncBackgroundRecoveryRegression {
         func pending(
             _ verdict: HealthSyncBackgroundRecovery.PendingWork.Verdict,
             intent: Bool = false,
-            recovery: Bool = false
+            recovery: Bool = false,
+            continuation: Bool = false
         ) -> HealthSyncBackgroundRecovery.PendingWork {
             HealthSyncBackgroundRecovery.PendingWork(
                 serverURL: "https://rai.example/",
@@ -180,7 +181,11 @@ struct HealthSyncBackgroundRecoveryRegression {
                 scope: "sync-scope-2",
                 verdict: verdict,
                 hasIntent: intent,
-                hasRecoveryRequest: recovery
+                hasRecoveryRequest: recovery,
+                // S2.3 新增维度：本文件的断言都针对"三类判定 × 两个成因位"，
+                // 待续页的判定由 `BackgroundSyncPolicyRegression` 逐条钉着；
+                // 这里显式传 false 保证 memberwise init 的必填位不缺。
+                hasPendingContinuation: continuation
             )
         }
 

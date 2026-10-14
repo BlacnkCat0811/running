@@ -524,9 +524,16 @@ MUTATIONS = [
     ),
     (
         "[P1] 结构门禁: 只问一次就当成结局 => 服务端还在算时就把这一批判成功",
+        # 2026-10-14 去歧义：`let finished = try await waitForJob(id: jobId, on: serverURL)`
+        # 在 HealthKitSync 里有**两个文本完全相同**的站点（`.waitJob` 与 `.inspect` 分支各一）。
+        # `edit()` 要求旧文本恰好 1 处，两个命中 ⇒ 整条以 `stale pattern` 失败、什么都没验到。
+        # 锚点带上 `.waitJob` 分支独有的上一行注释后唯一；且门禁切片只看 `.waitJob` 分支 ——
+        # 改这一处正是它该抓的（改 `.inspect` 那个文本被切成切片之外，抓不到）。
         lambda: edit(
             SYNC,
+            "                // 那批新数据就再也没人导。（`markSuccess` 里的确认会读到 `nil` 观察槽，是空操作。）\n"
             "                let finished = try await waitForJob(id: jobId, on: serverURL)",
+            "                // 那批新数据就再也没人导。（`markSuccess` 里的确认会读到 `nil` 观察槽，是空操作。）\n"
             "                let finished = try await getJob(id: jobId, on: serverURL)",
         ),
         PY_GATE,
@@ -1549,24 +1556,35 @@ MUTATIONS = [
         "[P4] 结构门禁: 记录删除挪到原子提交之后 => 删除不再落在同一个原子导入事务里",
         # 改的是 TS；`run-health-sync-tests.sh` **不编译 TS**，所以只有 python 记录同步门禁
         # 能抓它（断言是"删除必须出现在原子提交之前"）。
-        lambda: edit(
-            HEALTH_PARSER,
-            "    const recordDeletions = [...(options.deletedRecords ?? []), ...carriedDeletedSources];\n"
-            "    const removedHealthKitRecords = recordDeletions.length\n"
-            "      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration) : 0;\n"
-            "    if (options.deletedWorkoutIds?.length) {\n"
-            "      explicitDeletionTimes = store.removeWorkoutsBySyncIdentifiers(options.deletedWorkoutIds, options.incremental?.batchId);\n"
-            "    }\n"
-            "    if (atomic) store.commitAtomicImport();\n"
-            "    else store.flush();\n",
-            "    if (options.deletedWorkoutIds?.length) {\n"
-            "      explicitDeletionTimes = store.removeWorkoutsBySyncIdentifiers(options.deletedWorkoutIds, options.incremental?.batchId);\n"
-            "    }\n"
-            "    if (atomic) store.commitAtomicImport();\n"
-            "    else store.flush();\n"
-            "    const recordDeletions = [...(options.deletedRecords ?? []), ...carriedDeletedSources];\n"
-            "    const removedHealthKitRecords = recordDeletions.length\n"
-            "      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration) : 0;\n",
+        #
+        # 2026-10-14 重锚点：旧形态把"删除块整体下移"写成一段**跨到提交行的旧文本**，而这段
+        # 区间此后长出了 recordDelta 预提交断言与 callerOwned 分支（7a6408a / 6ee6b8c），
+        # 旧文本失配 ⇒ 这条突变以 `stale pattern` 失败、什么都没验到（harness 会继续跑，
+        # 但整轮结论不干净）。两处小 edit 实现**同一次搬移**：单段锚点在这里不可行 ——
+        # 欲搬移的两端相距 50 行，一段 50 行的旧文本只会更脆、更容易再次失配。
+        #   ① 原调用点换成占位计数（保住 `removedHealthKitRecords` 的后续引用）；
+        #   ② 提交语句之后补上真正的删除调用（此刻它在文本上落在提交之后 ⇒ 门禁该红）。
+        # 本机实证（2026-10-14）：应用后 `check-healthkit-record-sync.py` 43 checks 恰 1 红
+        # 且命中下方断言；`npm run typecheck` 0 错（语义型突变，非编译型）。
+        lambda: (
+            edit(
+                HEALTH_PARSER,
+                "    const removedHealthKitRecords = recordDeletions.length\n"
+                "      ? store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration,\n"
+                "        options.recordDelta ? { currentBatchOnly: true } : undefined) : 0;\n",
+                "    const removedHealthKitRecords = 0;\n",
+            ),
+            edit(
+                HEALTH_PARSER,
+                "    } else if (atomic) store.commitAtomicImport();\n"
+                "    else store.flush();\n",
+                "    } else if (atomic) store.commitAtomicImport();\n"
+                "    else store.flush();\n"
+                "    if (recordDeletions.length) {\n"
+                "      store.removeHealthKitRecords(recordDeletions, options.incremental?.batchId, entityGeneration,\n"
+                "        options.recordDelta ? { currentBatchOnly: true } : undefined);\n"
+                "    }\n",
+            ),
         ),
         SWIFT_GATE,
         "record deletions must be applied before the atomic import commits",

@@ -590,7 +590,8 @@ final class SyncTaskStore {
     }
 
     /// `?5` 三种模式：0 保留 / 1 前进（单调） / 2 清空。用编号参数是因为 `?5` 出现两次。
-    private func upsertState(scope: String, anchor: Data?, watermark: SyncWatermarkUpdate) -> Bool {        guard let statement = prepare("""
+    private func upsertState(scope: String, anchor: Data?, watermark: SyncWatermarkUpdate) -> Bool {
+        guard let statement = prepare("""
             INSERT INTO sync_state(scope, workout_anchor, export_end, updated_at)
             VALUES (?1, ?2, ?3, ?4)
             ON CONFLICT(scope) DO UPDATE SET
