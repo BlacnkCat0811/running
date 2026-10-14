@@ -221,6 +221,16 @@ for phrase in LEGACY_COPY:
         f"removed legacy status copy is back in iOS source: {phrase!r} in {', '.join(holders)}",
     )
 
+# 2b（S2.4，2026-10-14 新增）：**英文阶段 token 不得作为兜底直出**。
+# 旧的 `else if !job.phase.isEmpty { message = job.phase }` 会把服务端内部维护语义
+# （`activate` / `backup` / `import` …）原样送上界面。反例夹具在
+# `check-background-mutations.py` 的 `[copy]` 组：把那段兜底写回来，本断言转红。
+check(
+    "message = job.phase" not in sync_code,
+    "the raw English `job.phase` token must not be shown to the user "
+    "(§10.3: no internal maintenance wording — keep the previous message instead)",
+)
+
 # --- 3. §10.2 成功路径上的顺序与后台意图 ---------------------------------------
 
 mark_success = declaration_body(sync_code, re.compile(r"func markSuccess\s*\(")) if sync_code else None

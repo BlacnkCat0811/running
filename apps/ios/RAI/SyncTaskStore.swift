@@ -79,6 +79,10 @@ final class SyncTaskStore {
                 scope TEXT PRIMARY KEY,
                 payload BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sync_continuation (
+                scope TEXT PRIMARY KEY,
+                payload BLOB NOT NULL
+            );
             """
         let execResult = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
@@ -379,8 +383,12 @@ final class SyncTaskStore {
     ///    `clear(scope:)` 只判 `sqlite3_step == SQLITE_DONE`，删 0 行同样返回成功。
     ///
     /// - Parameter anchor: `nil` 表示**保留**已提交的 anchor（不是"写成空"）。
+    /// - Parameter continuationPending: 本批提交后是否仍**悬着未读的页**（S2.3）。
+    ///   `true` 写待续哨兵、`false` 清掉同 scope 的旧哨兵 —— 与游标在**同一个事务**里落账：
+    ///   拆开就会出现"游标已提交、待续标记没写上"的窗口，而那个窗口里没人会去读剩下的页。
+    ///   默认 `false`：既有的调用点（恢复/无导出轮次）不产生新的待续，且会**清掉**完成后的旧标记。
     @discardableResult
-    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil) -> Bool {
+    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil, continuationPending: Bool = false) -> Bool {
         guard isAvailable, let database else { fail("commit"); return false }
         lastError = nil
         // 🔴 写入前先把时间点吸附到 REAL 列能逐位往返的那一个值上（`Date.canonicalForREAL`）。
@@ -415,6 +423,13 @@ final class SyncTaskStore {
                 lastError = "健康记录游标写入后无法读回一致的值，本次提交已回滚。"
                 return false
             }
+        }
+        // 待续标记与游标同一个事务落账（S2.3）。刻意**不做** readBack 断言：它的读点是
+        // `probePendingWork` 的提示性判据，错了只会让前台补跑少几轮/多几轮，不是数据正确性
+        // 问题；而每条提交都多开一条查询的代价是实打实的。写失败仍然 fail（宁可整段回滚）。
+        guard writeContinuation(continuationPending ? Self.continuationPendingSentinel : nil, scope: scope) else {
+            lastError = "待续标记写入失败，本次提交已回滚。"
+            return false
         }
         guard let statement = prepare("DELETE FROM sync_tasks WHERE scope = ?") else { return false }
         bind(scope, to: statement, at: 1)
@@ -514,9 +529,68 @@ final class SyncTaskStore {
         return true
     }
 
+    // MARK: 待续页槽（S2.3：连续分页尚未 drain 完）
+
+    /// 待续标记的哨兵 payload（内容无意义，**存在性即语义**；用 JSON 是为了诊断可读）。
+    private static let continuationPendingSentinel = Data("{\"pending\":true}".utf8)
+
+    /// 读"待续"标记。`nil` = 这个 scope 没有悬着的续页（或从没有过）。
+    ///
+    /// 🔴 为什么必须是与 `sync_tasks` 并列的独立槽：成功提交会**删掉任务行**
+    /// （`commitSuccess` 的事务），而"还有页没读完"恰恰产生于一次**成功提交之后**
+    /// （本轮的导出被 `DirectSyncBatchBudget` 截断）。待续标记如果只活在任务行里，
+    /// 提交那一刻它就和行一起消失 —— 前台补跑与后台唤醒都失去判据，剩下的页再也没人读。
+    ///
+    /// ⚠️ 与"后台意图"（`BackgroundIntentStore`）的分工：意图回答"这个目标还有没有活"
+    /// （粗糙、两种成因混装），本槽回答"活是不是**只是自己没读完**" ——
+    /// 前台补跑额度按它分账（见 `SyncFollowUp.handoff`）。
+    func loadContinuation(scope: String) -> Data? {
+        guard let statement = prepare("SELECT payload FROM sync_continuation WHERE scope = ?") else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { fail("continuation read"); return nil }
+        let count = Int(sqlite3_column_bytes(statement, 0))
+        guard count > 0, let pointer = sqlite3_column_blob(statement, 0) else {
+            fail("continuation payload"); return nil
+        }
+        return Data(bytes: pointer, count: count)
+    }
+
+    /// 写/清待续标记（只在 `commitSuccess` 的事务内调用）。
+    ///
+    /// 语义是二态：`Data` = 悬着（本批提交后仍有未读页）；`nil` = 清。
+    /// 清 = **删行**（"没有行"与"有行"是两种形状，前者才是"没有待续"的正典 ——
+    /// 与 `loadTask` 的纪律同源：读的人必须能分清"未记录"与"记录为否"）。
+    private func writeContinuation(_ data: Data?, scope: String) -> Bool {
+        if let data, !data.isEmpty {
+            guard data.count <= Int(Int32.max), let database,
+                  let statement = prepare("""
+                    INSERT INTO sync_continuation(scope, payload) VALUES (?, ?)
+                    ON CONFLICT(scope) DO UPDATE SET payload = excluded.payload
+                    """) else { fail("continuation prepare"); return false }
+            defer { sqlite3_finalize(statement) }
+            bind(scope, to: statement, at: 1)
+            let bound = data.withUnsafeBytes {
+                sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), SQLiteSupport.transient)
+            }
+            guard bound == SQLITE_OK, sqlite3_step(statement) == SQLITE_DONE,
+                  sqlite3_changes(database) == 1 else { fail("continuation write"); return false }
+            return true
+        }
+        guard let statement = prepare("DELETE FROM sync_continuation WHERE scope = ?") else { return false }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        // ⚠️ 删 0 行**不是**错误（本来就没有待续）—— 与 `DELETE FROM sync_tasks` 的
+        // `changes() == 1` 纪律刻意不同：那里的 0 行意味着"找不到本轮任务行"（错位），
+        // 这里的 0 行意味着"已经是干净的"，正是期望状态。
+        guard sqlite3_step(statement) == SQLITE_DONE else { fail("continuation clear"); return false }
+        return true
+    }
+
     /// `?5` 三种模式：0 保留 / 1 前进（单调） / 2 清空。用编号参数是因为 `?5` 出现两次。
-    private func upsertState(scope: String, anchor: Data?, watermark: SyncWatermarkUpdate) -> Bool {
-        guard let statement = prepare("""
+    private func upsertState(scope: String, anchor: Data?, watermark: SyncWatermarkUpdate) -> Bool {        guard let statement = prepare("""
             INSERT INTO sync_state(scope, workout_anchor, export_end, updated_at)
             VALUES (?1, ?2, ?3, ?4)
             ON CONFLICT(scope) DO UPDATE SET

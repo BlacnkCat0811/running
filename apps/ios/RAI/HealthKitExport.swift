@@ -41,6 +41,16 @@ nonisolated struct HealthKitExportResult: Sendable {
     let routeStates: [String: RouteSyncRecord]
     /// 本轮最后一个低频候选。即使 workout 暂不可读，也推进遍历位置，不伪造观测。
     let routeDiscoveryCursor: String?
+    /// 本轮是否**因为单批预算（`DirectSyncBatchBudget`）截断**而提前收手（观测阶段 2 / S2.1）。
+    ///
+    /// `true` = 至少有一个记录类型只消费到一个页边界就停了，还有未读的页 —— 上层把"待续"
+    /// （`needsContinuation`）持久化，并在下一轮从**已提交游标**继续。
+    /// `false` = 每个读过的类型都读到了空页；没轮到的类型保持旧游标（那是"还没读"，不是"读完了"）。
+    ///
+    /// 🔴 它不是错误：分批是设计行为。`false` 也**不**等于"全部类型都读到底"（可能只是本轮
+    /// 预算够用 + 各类型都读到了空页）—— 续传判定永远以 (hasMorePages, 回执) 合取为准
+    /// （`DirectSyncCursorPolicy.continuationNeeded`）。
+    let hasMorePages: Bool
 }
 
 nonisolated enum HealthKitExportError: LocalizedError, Equatable {
@@ -283,6 +293,9 @@ nonisolated enum HealthKitExport {
     ///     当作首查（安全方向：多查一次，不会漏）。
     ///   - routeForceRescan: 人工重扫（"重新导入全部"）。所有 workout 的状态复位成
     ///     `.active` 且稳定性清零，于是这一轮**每个** workout 都会重查一次。
+    ///   - budget: 单批载荷预算（S2.1）。记录类型的 drain 每消费完一页检查一次；
+    ///     截断时停在**页末尾**并让结果 `hasMorePages == true`。默认取保守值 ——
+    ///     调用点漏传时宁小勿大（多分几批），绝不超界。
     static func exportArchive(
         from startDate: Date?,
         workoutAnchor: Data?,
@@ -291,6 +304,7 @@ nonisolated enum HealthKitExport {
         routeStates: [String: RouteSyncRecord] = [:],
         routeDiscoveryCursor: String? = nil,
         routeForceRescan: Bool = false,
+        budget: DirectSyncBatchBudget = .conservative,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
         try Task.checkCancellation()
@@ -422,7 +436,7 @@ nonisolated enum HealthKitExport {
         try Task.checkCancellation()
         let records = try await writeGlobalRecords(
             store: store, cursorData: recordCursors, forceHistory: recordsForceRescan,
-            xml: xml, warnings: warnings, onProgress: onProgress
+            xml: xml, warnings: warnings, budget: budget, onProgress: onProgress
         )
         recordCount += records.count
         let exportedThrough = Date()
@@ -470,7 +484,8 @@ nonisolated enum HealthKitExport {
             recordCursors: records.cursors,
             sourceScope: "healthkit",
             routeStates: routeDecisions,
-            routeDiscoveryCursor: rediscovery.last
+            routeDiscoveryCursor: rediscovery.last,
+            hasMorePages: records.hasMorePages
         )
     }
 
@@ -808,8 +823,9 @@ nonisolated enum HealthKitExport {
         forceHistory: Bool,
         xml: FileHandle,
         warnings: WarningBag,
+        budget: DirectSyncBatchBudget,
         onProgress: @escaping @Sendable (String) async -> Void
-    ) async throws -> (count: Int, cursors: Data, deleted: [[String: String]]) {
+    ) async throws -> (count: Int, cursors: Data, deleted: [[String: String]], hasMorePages: Bool) {
         // Corrupt cursors fail closed. They are never silently turned into a
         // window query; a missing type starts from nil and reads all history.
         var cursors = try cursorData.map {
@@ -817,6 +833,9 @@ nonisolated enum HealthKitExport {
         } ?? [:]
         let now = Date()
         var count = 0
+        // 单批预算是否已在某个类型处触顶（S2.1）。触顶后**不再开始新类型**，
+        // 但本轮已经读到的部分照常保留（各自的游标已推进到页边界）。
+        var budgetExceeded = false
         var deletions: [String: Set<String>] = [:]
         var quantities: [(HKQuantityType, HKUnit, String, String)] = [
             (HKQuantityType.quantityType(forIdentifier: .heartRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierHeartRate", "count/min"),
@@ -868,6 +887,9 @@ nonisolated enum HealthKitExport {
         descriptors.append((HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!, nil,
                             "HKCategoryTypeIdentifierSleepAnalysis", nil))
         for (index, descriptor) in descriptors.enumerated() {
+            // 预算在**上一个类型**停下 ⇒ 本轮不再开始新类型（未处理的类型保持旧游标，
+            // `hasMorePages` 冒泡给上层 —— S2.1 的"未处理类型不动"纪律）。
+            if budgetExceeded { break }
             let (type, unit, xmlType, xmlUnit) = descriptor
             try Task.checkCancellation()
             // 🔴 逐类型进度。这一段是整轮导出里**最长**的一段 —— 全量历史时单个类型
@@ -888,13 +910,25 @@ nonisolated enum HealthKitExport {
             let history = previous == nil || decoded == nil
                 || previous!.needsHistoryRead(now: now, force: forceHistory)
             do {
-                // Drain the old change cursor FIRST, even when replaying history.
-                // Resetting before draining can lose deletion events for old rows.
-                var starts: [HKQueryAnchor?] = [decoded]
-                if history, decoded != nil { starts.append(nil) }
+                // 本轮的段计划由 `RecordReplayPlan`（纯逻辑，回归逐组合钉着）决定：
+                // 初次重放 = 先增量段（保住删除事件）再历史段（从头）；上轮中断在历史段 =
+                // 只续历史段断点。这里只做接线。
+                let resumingHistoryPhase = previous?.historyReplayPhase == .history
+                let segments = RecordReplayPlan.segments(
+                    decodedAvailable: decoded != nil,
+                    history: history,
+                    resumingHistoryPhase: resumingHistoryPhase
+                )
+                let starts: [HKQueryAnchor?] = segments.map { segment in
+                    switch segment {
+                    case .incremental, .historyResume: return decoded
+                    case .historyFromScratch: return nil
+                    }
+                }
                 var next: HKQueryAnchor?
-                for start in starts {
-                    next = try await HealthKitRecordCursor.drain(from: start, query: { anchor in
+                var interruptedPhase: HealthKitRecordCursor.HistoryReplayPhase?
+                for (segmentIndex, start) in starts.enumerated() {
+                    let outcome = try await HealthKitRecordCursor.drain(from: start, query: { anchor in
                         try await anchoredRecords(store: store, type: type, anchor: anchor)
                     }, consume: { added, deleted in
                         for sample in added.sorted(by: {
@@ -916,12 +950,27 @@ nonisolated enum HealthKitExport {
                         for item in deleted {
                             deletions[xmlType, default: []].insert(item.uuid.uuidString.lowercased())
                         }
+                    }, shouldStop: {
+                        // 单批预算（S2.1）：XML 已写字节 + 已消费条数。检查点在 drain 的
+                        // **页末尾**（见 `HealthKitRecordCursor.drain`），本闭包只读不写。
+                        budget.exceeded(xmlBytes: (try? xml.offsetInFile) ?? 0, records: count)
                     })
+                    next = outcome.anchor
+                    if outcome.hasMorePages {
+                        budgetExceeded = true
+                        interruptedPhase = RecordReplayPlan.interruptedPhase(
+                            segments: segments, interruptedIndex: segmentIndex)
+                        break
+                    }
                 }
                 guard let next else { throw HealthKitExportError.missingRecordAnchor }
                 let encoded = try NSKeyedArchiver.archivedData(withRootObject: next, requiringSecureCoding: true)
                 cursors[xmlType] = HealthKitRecordCursor(
-                    anchor: encoded, historyReadAt: history ? now : previous!.historyReadAt
+                    anchor: encoded,
+                    // 重放完成（未被预算截断）才把 `historyReadAt` 推到 `now`；中断时保留旧值 ——
+                    // "未完成"由 `historyReplayPhase` 承载，下轮据此续段（R-03 防护）。
+                    historyReadAt: (history && interruptedPhase == nil) ? now : (previous?.historyReadAt ?? now),
+                    historyReplayPhase: interruptedPhase
                 )
             } catch {
                 if isAuthorizationError(error) || isNoDataError(error) {
@@ -939,7 +988,7 @@ nonisolated enum HealthKitExport {
         let deleted = deletions.keys.sorted().flatMap { type in
             deletions[type]!.sorted().map { ["type": type, "uuid": $0] }
         }
-        return (count, try encoder.encode(cursors), deleted)
+        return (count, try encoder.encode(cursors), deleted, budgetExceeded)
     }
 
     private static func anchoredRecords(

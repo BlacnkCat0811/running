@@ -78,6 +78,16 @@ nonisolated enum HealthSyncBackgroundRecovery {
         let hasIntent: Bool
         /// 这个 URL scope 上是否挂着一条**恢复请求**（在线握手确认 scope 变了）。
         let hasRecoveryRequest: Bool
+        /// 该 scope 上是否悬着**未读完的页**（S2.3：上一批导出被单批预算截断的持久痕迹，
+        /// 落在 `SyncTaskStore.sync_continuation` 槽）。
+        ///
+        /// 与 `hasUncoveredGeneration` 是**不同的事**：后者是"外部又产生了活"（新投递 /
+        /// scope 恢复请求），本字段是"自己的活没读完"。两者的正确处置不同（前者要重扫新数据，
+        /// 后者从已提交游标接着读即可），而**同一份额度里分不开它们**会互相吃掉：
+        /// 前台补跑额度若只按"有新代次"分配，一次 12,000 条的积压（每批 4,500）会从第二页起
+        /// 全被甩给后台；反过来若把"有待续页"也算新代次，大批导入期间的前台自旋护栏就失效了。
+        /// 见 `SyncFollowUp.handoff`。
+        let hasPendingContinuation: Bool
 
         /// 盘上可能还有没走完的活儿。`unknown` 算"有" —— 保守方向是"多排一轮"，
         /// 而不是"报个成功然后没人再管"。
@@ -90,10 +100,17 @@ nonisolated enum HealthSyncBackgroundRecovery {
         /// 代次"不该顺手重放一次失败的批次（那是后台重排的活，`applicationDidEnterBackground`
         /// 与 BGTask 的回执都用 `needsAnotherRound`）。混用的可见后果是：一次网络失败之后
         /// 前台会立刻再跑一轮同样的失败请求 —— 那不是"接住新代次"，只是重放错误。
+        ///
+        /// ⚠️ 也**刻意不含** `hasPendingContinuation`：待续页不是新代次（见该字段说明）。
         var hasUncoveredGeneration: Bool { hasIntent || hasRecoveryRequest }
 
         /// 收工后还要不要再排一次后台执行。`BGTaskScheduler` 的请求是一次性的。
-        var needsAnotherRound: Bool { hasUnfinishedWork || hasIntent || hasRecoveryRequest }
+        ///
+        /// 含 `hasPendingContinuation`：还有页没读完 = 还有活（分层上是"自己的活"，
+        /// 但对"要不要再排一轮"的回答与另两种成因一致）。
+        var needsAnotherRound: Bool {
+            hasUnfinishedWork || hasIntent || hasRecoveryRequest || hasPendingContinuation
+        }
 
         /// 这一轮能不能向系统报"成功"。判据就是"收工时还有没有事情没做完"（`needsAnotherRound`）。
         var reportsSuccess: Bool { !needsAnotherRound }

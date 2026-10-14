@@ -19,6 +19,20 @@ struct RaiHandshake: Codable, Equatable {
     /// 老服务端省略这个键 ⇒ `nil`，而那正是"不得拿它的 `succeeded` 冒充回执"的判据。
     /// 可选 + 合成解码器的 `decodeIfPresent` 足以兼容老服务端，所以这里不需要显式 `init(from:)`。
     var factsAnalysisContractVersion: Int? = nil
+    /// 直连车道的单批上界（观测阶段 1 起服务端随握手暴露；老服务端省略 ⇒ `nil`）。
+    ///
+    /// 唯一消费点 `DirectSyncBatchBudget.from(bounds:)`：`nil` 时回落保守常量。
+    /// 客户端**不得**把它当"能力位"用（不是 `guard == 1` 那类门），它只是数值参数。
+    var directSyncBounds: DirectSyncBounds? = nil
+}
+
+/// 服务端 `/v1/handshake` 的 `directSyncBounds`（与 `packages/api-contracts/src/index.ts`
+/// 的 `HandshakeResponse.directSyncBounds` 逐字段对应）。
+nonisolated struct DirectSyncBounds: Codable, Equatable, Sendable {
+    let maxXmlBytes: Int
+    let maxRecords: Int
+    let maxRouteFiles: Int
+    let maxRouteBytes: Int
 }
 
 struct RaiAPIError: Codable {

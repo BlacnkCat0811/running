@@ -46,12 +46,13 @@ import Foundation
 struct BackgroundSyncPolicyRegression {
     private static let now = Date(timeIntervalSince1970: 1_780_000_000)
 
-    /// 构造一份**按目标读到的**待办快照。字段值除了 `verdict` 与两个成因位以外都不参与判据，
+    /// 构造一份**按目标读到的**待办快照。字段值除了 `verdict` 与三个成因位以外都不参与判据，
     /// 所以钉死成常量即可。
     private static func pending(
         verdict: HealthSyncBackgroundRecovery.PendingWork.Verdict,
         hasIntent: Bool = false,
-        hasRecoveryRequest: Bool = false
+        hasRecoveryRequest: Bool = false,
+        hasPendingContinuation: Bool = false
     ) -> HealthSyncBackgroundRecovery.PendingWork {
         HealthSyncBackgroundRecovery.PendingWork(
             serverURL: "http://127.0.0.1:8787",
@@ -59,7 +60,8 @@ struct BackgroundSyncPolicyRegression {
             scope: "syncscope000000000000000",
             verdict: verdict,
             hasIntent: hasIntent,
-            hasRecoveryRequest: hasRecoveryRequest
+            hasRecoveryRequest: hasRecoveryRequest,
+            hasPendingContinuation: hasPendingContinuation
         )
     }
 
@@ -85,6 +87,7 @@ struct BackgroundSyncPolicyRegression {
         try successIsReportedFromTheRemainingWork()
         try unfinishedWorkResubmitsItself()
         try uncoveredGenerationsAreHandedOff()
+        try pendingContinuationGetsItsOwnBudget()
         try identifiersAreStableAndDistinct()
         try systemReloadedUploadsAreOnlyKeptWhenTracked()
         print("Background sync policy regression tests passed")
@@ -558,8 +561,10 @@ struct BackgroundSyncPolicyRegression {
         for row in rows {
             let handoff = SyncFollowUp.handoff(
                 hasUncoveredGeneration: row.uncovered,
+                hasPendingContinuation: false,
                 isForeground: row.foreground,
-                foregroundRoundsLeft: row.left
+                foregroundRoundsLeft: row.left,
+                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
             )
             try require(
                 handoff == row.expected,
@@ -578,8 +583,11 @@ struct BackgroundSyncPolicyRegression {
         // 泛化消息），而"额度是不是真的有限"这条判据的指认者就变成了一个说不清被改坏了哪里的
         // 消息 —— `check-background-mutations.py` 的 `assertion_hit` 会指错地方。
         try require(
-            SyncFollowUp.handoff(hasUncoveredGeneration: true, isForeground: true, foregroundRoundsLeft: 0)
-                == .scheduleBackground,
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: true, hasPendingContinuation: false,
+                isForeground: true, foregroundRoundsLeft: 0,
+                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+            ) == .scheduleBackground,
             "foreground follow-up rounds are unbounded"
         )
         // 「没覆盖到的那一代」= 通知 + 恢复请求；而"盘上卡着一批"不进这一格 —— 那是后台重排
@@ -598,6 +606,72 @@ struct BackgroundSyncPolicyRegression {
         try require(
             pending(verdict: .pending).needsAnotherRound && pending(verdict: .unknown).needsAnotherRound,
             "the resubmit judgement lost its unfinished-batch or unreadable-journal case"
+        )
+    }
+
+    /// 🔴 契约（S2.3 新增）：**待续页与新代次分账** —— 两者都要求"再来一轮"，但必须用
+    /// 独立的前台额度与独立的语义位：
+    ///   - 合成一份额度 ⇒ 12,000 条积压（每批 4,500）从第二页起全被甩给后台（常见路径变慢）；
+    ///   - 把待续页算进 `hasUncoveredGeneration` ⇒ 大批导入期间的防自旋护栏被页循环吃掉。
+    private static func pendingContinuationGetsItsOwnBudget() throws {
+        // 纯续页：新代次额度为 0 也照样可以前台续（用续页额度）。
+        try require(
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: false, hasPendingContinuation: true,
+                isForeground: true, foregroundRoundsLeft: 0, continuationRoundsLeft: 1
+            ) == .runAgain,
+            "a pending page lost its own foreground budget (the second batch would always be deferred)"
+        )
+        // 续页额度尽 ⇒ 交后台（有界性的另一面）。
+        try require(
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: false, hasPendingContinuation: true,
+                isForeground: true, foregroundRoundsLeft: 0, continuationRoundsLeft: 0
+            ) == .scheduleBackground,
+            "the continuation budget is unbounded"
+        )
+        // 两种成因同时挂起、新代次额度尽 ⇒ 优先甩后台（新代次优先用**自己的**额度，保守方向）。
+        try require(
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: true, hasPendingContinuation: true,
+                isForeground: true, foregroundRoundsLeft: 0,
+                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+            ) == .scheduleBackground,
+            "an uncovered generation must keep its own budget semantics when both are pending"
+        )
+        // 后台一律排后台执行（不分额度）。
+        try require(
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: false, hasPendingContinuation: true,
+                isForeground: false, foregroundRoundsLeft: 3,
+                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+            ) == .scheduleBackground,
+            "a background round must never spin in the foreground"
+        )
+        // 两个成因都不在 ⇒ 什么都不做。
+        try require(
+            SyncFollowUp.handoff(
+                hasUncoveredGeneration: false, hasPendingContinuation: false,
+                isForeground: true, foregroundRoundsLeft: 3,
+                continuationRoundsLeft: SyncFollowUp.maxForegroundContinuationRounds
+            ) == .nothing,
+            "a non-existent pending page must not schedule anything"
+        )
+        // 额度必须为正（为 0 等于把续页路径整个删掉，而且没有任何报错）。
+        try require(
+            SyncFollowUp.maxForegroundContinuationRounds > 0,
+            "the continuation budget is disabled outright"
+        )
+        // `PendingWork` 上的新维度：`needsAnotherRound` 必须看见待续页
+        // （否则 BGTask 的回执说"没事了"，而页还没读完 —— 重排断链）。
+        try require(
+            pending(verdict: .empty, hasPendingContinuation: true).needsAnotherRound,
+            "a pending page stopped resubmitting the background run"
+        )
+        // 但它**不进** `hasUncoveredGeneration`（那是"外部产生的新活"的专属口径）。
+        try require(
+            !pending(verdict: .empty, hasPendingContinuation: true).hasUncoveredGeneration,
+            "a pending page was mistaken for an uncovered generation (the front-spin guard would weaken)"
         )
     }
 

@@ -100,12 +100,17 @@ enum RaiStartup {
     private static func handOffUncoveredGenerations(healthSync: HealthKitSync, session: ServerSession) async {
         guard let serverURL = session.serverURL else { return }
         var roundsLeft = SyncFollowUp.maxForegroundRounds
+        var continuationRoundsLeft = SyncFollowUp.maxForegroundContinuationRounds
         while true {
             let pending = healthSync.probePendingWork(for: serverURL)
+            let hasUncoveredGeneration = pending?.hasUncoveredGeneration ?? true
+            let hasPendingContinuation = pending?.hasPendingContinuation ?? false
             switch SyncFollowUp.handoff(
-                hasUncoveredGeneration: pending?.hasUncoveredGeneration ?? true,
+                hasUncoveredGeneration: hasUncoveredGeneration,
+                hasPendingContinuation: hasPendingContinuation,
                 isForeground: UIApplication.shared.applicationState == .active,
-                foregroundRoundsLeft: roundsLeft
+                foregroundRoundsLeft: roundsLeft,
+                continuationRoundsLeft: continuationRoundsLeft
             ) {
             case .nothing:
                 return
@@ -113,12 +118,14 @@ enum RaiStartup {
                 submitBackgroundRun(after: BackgroundRunPolicy.resubmitDelay)
                 return
             case .runAgain:
-                roundsLeft -= 1
+                // 按**本轮实际的挂起类型**扣对应额度 —— 扣账口径必须与 `handoff` 的判定
+                // 逐条对齐（两者同时挂起时,handoff 走"新代次"分支，这里同样优先扣新代次额度）。
+                if hasUncoveredGeneration { roundsLeft -= 1 } else { continuationRoundsLeft -= 1 }
                 await healthSync.syncIfNeeded(
                     to: serverURL,
                     apiToken: session.apiToken,
-                    // 与派发侧同理：这一轮要跑的是**新到的那一代**，不该被前台的 15 分钟
-                    // 节流挡掉（那正是它被留下来的原因）。
+                    // 与派发侧同理：这一轮要跑的是**新到的那一代**（或没读完的页），不该被
+                    // 前台的 15 分钟节流挡掉（那正是它被留下来的原因）。
                     force: true
                 )
             }

@@ -102,6 +102,8 @@ SWIFT_GATE = "bash apps/ios/tests/run-health-sync-tests.sh"
 PRESENTATION_GATE = "bash apps/ios/tests/run-tech-presentation-tests.sh"
 PY_GATE = "python3 apps/ios/tests/check-background-capabilities.py"
 EXPORT_GATE = "python3 apps/ios/tests/check-export-determinism.py"
+# S2.4 的反例夹具用：status-copy 门禁是纯 python、可独立跑（与 PY_GATE 同风格）。
+COPY_GATE = "python3 apps/ios/tests/check-direct-sync-status-copy.py"
 CLEAN = SWIFT_GATE + " && " + PY_GATE + " && " + EXPORT_GATE + " && " + PRESENTATION_GATE
 
 # 精确到"编译器报的错"。**不能**写成 `"error:" in out` —— 运行时断言失败打的是
@@ -854,10 +856,13 @@ MUTATIONS = [
     ),
     (
         "[P1] 判据: 前台补跑没有上限 => 大批导入期间前台自旋，每轮都是 GB 级导出",
+        # 2026-10-14（S2.3）改写：handoff 增加"待续页"维度与分额度后，旧锚点行不存在了。
+        # 判据不变（"上限被删掉"必须被它自己那一条抓住），锚点换成新实现里的额度分支：
+        # 突变 = 新代次分支里的上限条件被删（回到"只要前台就再来一轮"的旧形态）。
         lambda: edit(
             BG_POLICY,
-            "        if isForeground, foregroundRoundsLeft > 0 { return .runAgain }",
-            "        if isForeground { return .runAgain }",
+            "        if hasUncoveredGeneration { return foregroundRoundsLeft > 0 ? .runAgain : .scheduleBackground }\n",
+            "        if hasUncoveredGeneration { return .runAgain }\n",
         ),
         SWIFT_GATE,
         "foreground follow-up rounds are unbounded",
@@ -1234,6 +1239,49 @@ MUTATIONS = [
         lambda: edit(HEALTH_EXPORT, "func metadataXML(", "func metadataXMLLines("),
         EXPORT_GATE,
         "every judgement below would be vacuous",
+    ),
+    # --- S2「分批与续传」（2026-10-14）：三条反例，覆盖 S2.3/S2.4 的新接线 --------------
+    # ① phase 兜底写回（S2.4 要求的反例夹具）；② hasMorePages 写回恒假（S2.3 的断链）；
+    # ③ 待续标记不经 commitSuccess（提交后剩下的页没人读）。
+    # ⚠️ 三条都必须满足"Swift 部分照样绿、只有门禁能抓"（见本节开头 :1480 的纪律）：
+    #   ① 只删/加 UI 文案分支（HealthKitSync 不被任何 Swift 回归编译）；
+    #   ② 只是把参数写死 false（编译过、行为变化无 Swift 回归覆盖）；
+    #   ③ 删掉一个带默认值的实参（编译过）。
+    (
+        "[S2] 反例夹具: waitForJob 的 phase 兜底写回来 => 英文阶段 token 直出用户（S2.4）",
+        lambda: edit(
+            SYNC,
+            "                if !job.message.isEmpty {\n"
+            "                    message = job.message\n"
+            "                }\n",
+            "                if !job.message.isEmpty {\n"
+            "                    message = job.message\n"
+            "                } else if !job.phase.isEmpty {\n"
+            "                    message = job.phase\n"
+            "                }\n",
+        ),
+        COPY_GATE,
+        "must not be shown to the user",
+    ),
+    (
+        "[S2] 结构门禁: continuationNeeded 的 hasMorePages 写回恒假 => 预算截断的待续标记永远不写",
+        lambda: edit(
+            SYNC,
+            "            hasMorePages: hasMorePages,\n",
+            "            hasMorePages: false,\n",
+        ),
+        SWIFT_GATE,
+        "the real hasMorePages must reach continuationNeeded",
+    ),
+    (
+        "[S2] 结构门禁: commitSuccess 不再写待续槽 => 提交后剩下的页没人读（前台续跑与后台唤醒都失去判据）",
+        lambda: edit(
+            SYNC,
+            "recordCursors: recordCursors, continuationPending: needsContinuation) },",
+            "recordCursors: recordCursors) },",
+        ),
+        SWIFT_GATE,
+        "markSuccess must persist the continuation flag through commitSuccess",
     ),
     # --- 2026-09-23：§14「成功收尾的单事务提交」+ §10k 孤儿守卫 + §15 判据下限 --------------
     # 这 8 条的名字都带 `[本轮新增]` 前缀，便于 `RAI_MUTATION_ONLY=本轮新增` 单独复跑。

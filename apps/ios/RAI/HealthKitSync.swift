@@ -640,7 +640,11 @@ final class HealthKitSync {
                 readFailed: readFailed
             ),
             hasIntent: backgroundIntentStore.hasIntent(scope: urlScope),
-            hasRecoveryRequest: backgroundRecoveryStore.hasRequest(urlScope: urlScope)
+            hasRecoveryRequest: backgroundRecoveryStore.hasRequest(urlScope: urlScope),
+            // 待续页槽（S2.3）：读失败按"没有待续"处理 —— 后果只是前台少续几轮
+            // （后台路径由"意图"与 `needsAnotherRound` 兜底），不是数据正确性问题。
+            // scope 口径与 `loadRecordCursors` 一致（权威 scope 优先）。
+            hasPendingContinuation: taskStore.loadContinuation(scope: authoritativeScope ?? urlScope) != nil
         )
     }
 
@@ -1002,6 +1006,7 @@ final class HealthKitSync {
                     clearWatermark: restored.exportEnd == nil,
                     anchor: restored.pendingAnchor,
                     recordCursors: restored.pendingRecordCursors,
+                    hasMorePages: restored.needsContinuation ?? false,
                     routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
@@ -1066,6 +1071,7 @@ final class HealthKitSync {
                         clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
+                        hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
@@ -1098,6 +1104,7 @@ final class HealthKitSync {
                     clearWatermark: restored.exportEnd == nil,
                     anchor: restored.pendingAnchor,
                     recordCursors: restored.pendingRecordCursors,
+                    hasMorePages: restored.needsContinuation ?? false,
                     routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
@@ -1177,6 +1184,7 @@ final class HealthKitSync {
                         clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
+                        hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
@@ -1205,6 +1213,7 @@ final class HealthKitSync {
                         clearWatermark: restored.exportEnd == nil,
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
+                        hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
                         receipt: finished.summary?.directSync,
                         // 同上：`.upload` 恢复分支也真的等了一个 `jobId` 的终态。
@@ -1337,6 +1346,10 @@ final class HealthKitSync {
                     // 人工重扫 = `full`（"重新导入全部"）：所有 workout 的状态复位成 `active`，
                     // 于是这一轮每个都重查一次，不受低频间隔或候选数限制。
                     routeForceRescan: full,
+                    // 单批预算（S2.1）：用本次握手宣告的 bounds 收敛（×0.9）；老服务端缺字段
+                    // ⇒ `from` 回落保守常量。超界此前是"静默回退候选链路"（整库备份 + 两次
+                    // 全库校验，线上 9.9–13.3 min），分批之后正常同步的每批都 ≤ 上界。
+                    budget: DirectSyncBatchBudget.from(bounds: identity.directSyncBounds),
                     onProgress: onProgress
                 )
             }
@@ -1374,7 +1387,12 @@ final class HealthKitSync {
                 multipartFileName: Self.multipartName(for: payloadHash),
                 zipFileName: Self.zipName(for: payloadHash),
                 multipartBoundary: Self.multipartBoundary(for: payloadHash),
-                uploadState: .pending
+                uploadState: .pending,
+                // 导出层的"还有未读页"写进任务行（S2.3）：中途崩溃/挂起后，恢复轮从
+                // 任务行透传进 `markSuccess`（提交时再落 `sync_continuation` 槽）。
+                // 不写它的话，恢复轮只能传 false —— 一次被预算截断的导出会在崩溃后
+                // 静默失去"还有页"的记忆。
+                needsContinuation: exported.hasMorePages
             ))
             // 日志落盘后产物归可恢复任务所有；之后取消或上传失败都必须保留它。
             uncommittedArchive = nil
@@ -1411,6 +1429,7 @@ final class HealthKitSync {
                     advanceWatermark: true,
                     anchor: pendingAnchor,
                     recordCursors: exported.recordCursors,
+                    hasMorePages: exported.hasMorePages,
                     routeStates: exported.routeStates,
                     routeDiscoveryCursor: exported.routeDiscoveryCursor,
                     // 同两条恢复分支：`unchanged` 是对已存在批次的确认，没有新回执可等。
@@ -1434,6 +1453,7 @@ final class HealthKitSync {
                     advanceWatermark: true,
                     anchor: pendingAnchor,
                     recordCursors: exported.recordCursors,
+                    hasMorePages: exported.hasMorePages,
                     routeStates: exported.routeStates,
                     routeDiscoveryCursor: exported.routeDiscoveryCursor,
                     receipt: finished.summary?.directSync,
@@ -1601,6 +1621,11 @@ final class HealthKitSync {
     ///   这两种路径若照旧要求回执，就会 `.hold("no_receipt")` ⇒ 水位与游标一个字都不写 ⇒
     ///   下一轮服务端照样回 `unchanged` ⇒ **自锁**。
     ///   默认取安全侧（`true`）：新增调用点忘了写就会走回执判据，而不会静默推进游标。
+    /// - Parameter hasMorePages: 本轮的导出是否因**单批预算**截断而"还有未读页"（S2.1）。
+    ///   导出轮传 `exported.hasMorePages`；恢复轮从任务行透传 `restored.needsContinuation`；
+    ///   默认 `false`（这一轮没有新导出，且盘上也没有悬着的续页）。它进
+    ///   `continuationNeeded` 决定"这轮之后还要不要接着跑"，并被 `commitSuccess` 落进
+    ///   `sync_continuation` 槽（前台补跑与后台唤醒的持久判据）。
     private func markSuccess(
         message: String,
         exportEnd: Date?,
@@ -1609,6 +1634,7 @@ final class HealthKitSync {
         clearWatermark: Bool = false,
         anchor: Data? = nil,
         recordCursors: Data? = nil,
+        hasMorePages: Bool = false,
         recordWorkoutCount: Bool = true,
         routeStates: [String: RouteSyncRecord] = [:],
         routeDiscoveryCursor: String? = nil,
@@ -1652,13 +1678,16 @@ final class HealthKitSync {
             phase: SyncPhase.migrate(phase)
         )
         // §5.1 + §10.2：「还要不要接着发下一批」= 这一轮有没有 drain 完。
-        // 今天的导出把每种样本**读到空页为止**（`HealthKitRecordCursor.drain`：`added` 与
-        // `deleted` 同时为空才收手），所以 `hasMorePages` / `deletionOnlyPage` 恒为假 ——
-        // 续接只可能来自**回执那一半**：未确认的批次不算 drain 完。
+        // `hasMorePages` 自 S2.1 起**不再恒为假**：导出被单批预算截断时，drain 停在页末尾并
+        // 如实报 true（调用方传入；导出轮来自 `HealthKitExportResult.hasMorePages`，
+        // 恢复轮从任务行透传 `restored.needsContinuation`）。`deletionOnlyPage` 仍恒为假 ——
+        // 它的旧语义（"刚消费完的那一页是删除-only ⇒ 未必到底"）已被 drain 内部消化
+        // （删-only 页不是 EOF，继续读到空页为止），预算截断的新停止点由 `hasMorePages` 覆盖。
+        // 续接的另一半来自**回执**：未确认的批次不算 drain 完。
         // `requiresReceipt == false` 时那一半也不适用（这一轮没有"未确认批次"这回事），
         // 判据与出口同样住在 `DirectSyncCursorPolicy` 里，这里不另写一份。
         let needsContinuation = DirectSyncCursorPolicy.continuationNeeded(
-            hasMorePages: false,
+            hasMorePages: hasMorePages,
             receipt: receipt,
             deletionOnlyPage: false,
             requiresReceipt: requiresReceipt
@@ -1723,7 +1752,7 @@ final class HealthKitSync {
         )
         let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(
             checkpoint: .syncCommitted,
-            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors) },
+            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors, continuationPending: needsContinuation) },
             acknowledge: { checkpoint in
                 // §10.2「连续分页尚未 drain 完时，不清空后台待办意图」：认领了它，用户不打开
                 // App 就再也没人接着发下一批。`persistThenAcknowledge` 因此**不再**无条件确认，
@@ -2308,10 +2337,14 @@ final class HealthKitSync {
                 let job = try await getJob(id: id, on: serverURL)
                 try checkCancellation()
                 idleFailures = 0
+                // §10.3（S2.4）：只显示服务端的**受控文案**（`message`）。这里曾经有一个
+                // `else if !job.phase.isEmpty { message = job.phase }` 的兜底 —— 它会把
+                // `receiving`/`activate`/`backup` 这类**英文阶段 token** 原样上屏，而那是服务端的
+                // 内部维护语义，不是给用户的话。message 为空时保持上一条文案（宁可停在上一句
+                // 真实进度上，也不给用户一个实现细节）。反例夹具见
+                // `check-background-mutations.py` 的 `[copy]` 组（写回兜底 ⇒ 门禁红）。
                 if !job.message.isEmpty {
                     message = job.message
-                } else if !job.phase.isEmpty {
-                    message = job.phase
                 }
                 switch job.status {
                 case "succeeded":

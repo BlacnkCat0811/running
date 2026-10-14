@@ -113,7 +113,19 @@ nonisolated enum SyncFollowUp {
     /// 🔴 **必须有上限。** HealthKit 在一次大批导入期间会连发投递，每一轮导出都可能被新的
     /// 投递甩在后面；没有上限的话"补跑"会退化成前台自旋 —— 而每一次自旋都是一轮 GB 级导出。
     /// 超出额度的那一代交给后台的 `BackgroundRunPolicy.resubmitDelay` 兜着（关掉 App 之后照跑）。
+    ///
+    /// 口径：**新代次**（`hasUncoveredGeneration`）专用。待续页另有独立额度
+    /// （`maxForegroundContinuationRounds`）—— 两者是不同的事，合成一份会让
+    /// "12,000 条积压"的第二、三页拿不到额度（那是常见路径），也会让新代次的防自旋护栏
+    /// 被页循环吃掉。
     static let maxForegroundRounds = 1
+
+    /// 一轮收工后，**只因为"自己没读完"（待续页）**而允许的前台续跑轮数（S2.3）。
+    ///
+    /// 有界性的依据：每轮至少消费 1 整页（预算在页末尾检查，见 `HealthKitRecordCursor.drain`），
+    /// 时间上界 ≈ 本额度 × 单页导出成本；读不完的部分与既有路径同源交给后台兜底
+    /// （`needsAnotherRound` 会因待续标记继续为真）。
+    static let maxForegroundContinuationRounds = 3
 
     enum Handoff: Equatable {
         /// 这一轮已经把盘上的代次都覆盖了 ⇒ 什么都不做。
@@ -124,15 +136,26 @@ nonisolated enum SyncFollowUp {
         case scheduleBackground
     }
 
-    /// - Parameter foregroundRoundsLeft: 本轮还剩几轮前台补跑额度（从 `maxForegroundRounds` 起算）。
+    /// - Parameters:
+    ///   - hasUncoveredGeneration: 有新代次（通知 / scope 恢复请求）没被覆盖。
+    ///   - hasPendingContinuation: 上一批还有**未读完的页**（`PendingWork.hasPendingContinuation`）。
+    ///   - foregroundRoundsLeft: 新代次的前台补跑额度（从 `maxForegroundRounds` 起算）。
+    ///   - continuationRoundsLeft: 待续页的前台续跑额度（从 `maxForegroundContinuationRounds` 起算）。
+    ///
+    /// 🔴 判定的优先级 = 新代次优先用**自己的**额度：两者同时挂起时先按新代次扣账，
+    /// 额度尽后若待续页仍悬着再落到续页额度 —— 每个分支都对应"这一轮到底为什么还要跑"，
+    /// 调用方据此扣**对应**的计数器（见 `AppDelegate.handOffUncoveredGenerations`）。
     static func handoff(
         hasUncoveredGeneration: Bool,
+        hasPendingContinuation: Bool,
         isForeground: Bool,
-        foregroundRoundsLeft: Int
+        foregroundRoundsLeft: Int,
+        continuationRoundsLeft: Int
     ) -> Handoff {
-        guard hasUncoveredGeneration else { return .nothing }
-        if isForeground, foregroundRoundsLeft > 0 { return .runAgain }
-        return .scheduleBackground
+        guard hasUncoveredGeneration || hasPendingContinuation else { return .nothing }
+        guard isForeground else { return .scheduleBackground }
+        if hasUncoveredGeneration { return foregroundRoundsLeft > 0 ? .runAgain : .scheduleBackground }
+        return continuationRoundsLeft > 0 ? .runAgain : .scheduleBackground
     }
 }
 

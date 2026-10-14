@@ -83,8 +83,14 @@ check('"sourceIds": exportedWorkouts.map(workoutSyncId)' in export
       "the manifest and UI count must describe exported deltas, not rechecked workouts")
 check("routeForceRescan: full," in sync,
       "explicit full import must still rescan routes as well as records")
-check(ordered(records, "var starts: [HKQueryAnchor?] = [decoded]", "starts.append(nil)"),
-      "the committed cursor must seed the drain before the nil (full re-read) start")
+# 2026-10-14（S2.1）**改写而非删除**：段序从内联数组搬进了 `RecordReplayPlan.segments`
+# （纯逻辑；`HealthKitRecordCursorRegression` 用相等断言逐组合钉着）。判据拆成两处：
+# 一处钉**段序本身**（先增量后历史 —— 内联形态消失但语义不变），一处钉
+# **导出路径确实用这个计划驱动 drain**（否则段序写对了也没人用）。
+check("[.incremental, .historyFromScratch]" in cursor,
+      "the committed cursor must be drained before the nil (full re-read) start")
+check("let segments = RecordReplayPlan.segments(" in records,
+      "the drain segments must be planned by RecordReplayPlan")
 check("RAIHealthKitSampleUUID" in export and "sampleMetadataXML(sample)" in quantity,
       "quantity records must carry their sample UUID into the XML metadata")
 check('sampleMetadataXML(sample))</Record>' in records,
@@ -124,11 +130,47 @@ check("removedHealthKitRecords" in parser and "sourceIdentifiers" in parser,
 check(ordered(parser, "store.removeHealthKitRecords", "if (atomic) store.commitAtomicImport()"),
       "record deletions must be applied before the atomic import commits")
 
+# --- 分批与续传的接线判据（S2.1–S2.3，2026-10-14） ----------------------------
+# 这一批的失效方向全是"改错了照样编译通过"：预算检查放错位置（页首=死循环）、
+# 换算式写错（载荷超界 ⇒ 静默回退候选链路）、待续标记漏接线（剩下的页没人读）。
+# 行为断言在 macOS 的纯逻辑回归（HealthKitRecordCursorRegression /
+# BackgroundSyncPolicyRegression）里跑；这里钉**接线与常量**，本机（Windows）即可执行。
+budget = (root / "apps/ios/RAI/DirectSyncBatchBudget.swift").read_text(encoding="utf-8")
+
+# S2.1：drain 的预算检查必须在**页末尾**（`consume` 之后）——停在页首会让下一轮重读同一页，
+# 预算不变就永远停在同一处（死循环）；跳到页尾会丢数据。停页末尾是唯一安全的停点。
+check(ordered(cursor, "try consume(page.added, page.deleted)", "if shouldStop()"),
+      "the budget check must sit after consume (page boundary); stopping mid-page deadlocks")
+check("hasMorePages: Bool" in cursor and "shouldStop" in cursor,
+      "drain must report hasMorePages and accept the budget probe")
+# S2.2：保守常量与 ×0.9 换算（服务端 bounds 缺字段时的回落路径）。
+check("1_887_436" in budget and "4_500" in budget,
+      "the conservative budget constants drifted (1.8 MiB / 4500)")
+check("Double(bounds.maxXmlBytes) * 0.9" in budget and "Double(bounds.maxRecords) * 0.9" in budget,
+      "the 0.9 margin over the server bounds is gone (payloads would exceed the hard limits)")
+# 导出路径：drain 调用必须接 shouldStop，且检查点必须用 XML 已写字节 + 已消费条数。
+check("budget.exceeded(xmlBytes:" in export,
+      "writeGlobalRecords no longer feeds the budget probe (unbounded batches would come back)")
+# S2.3：待续标记必须过 commitSuccess 的事务；探测点必须读它；前台分额度接线必须都到位。
+check("hasMorePages: hasMorePages" in sync,
+      "the real hasMorePages must reach continuationNeeded (a hard-coded false drops the flag)")
+check("continuationPending: needsContinuation" in sync,
+      "markSuccess must persist the continuation flag through commitSuccess")
+check("loadContinuation(scope:" in sync,
+      "probePendingWork must read the continuation slot (otherwise nobody sends the next page)")
+check("CREATE TABLE IF NOT EXISTS sync_continuation" in store,
+      "the continuation slot table is missing from the store schema")
+check("func writeContinuation(" in store and "continuationPending ?" in store,
+      "commitSuccess must write/clear the continuation slot inside its transaction")
+# 任务行透传：导出轮必须把 hasMorePages 写进任务行（崩溃/挂起后恢复轮才有得透传）。
+check("needsContinuation: exported.hasMorePages" in sync,
+      "the export round must persist hasMorePages into the task row for resume rounds")
+
 # --- 判据总数的下限（**必须放在全部判据之后**） ---------------------------------
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
 # （或把它挪进走不到的分支）都会让它变红。
-MIN_CHECKS = 30
+MIN_CHECKS = 41
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"
