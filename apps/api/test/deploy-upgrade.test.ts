@@ -9,6 +9,17 @@ const canRunBash = spawnSync("bash", ["-c", "true"], { stdio: "ignore" }).status
 const bashTest = (name: string, fn: () => void | Promise<void>) =>
   test(name, { skip: !canRunBash ? "bash is required for deploy script tests" : false }, fn);
 
+/**
+ * `upgrade.sh` 用 `/*` 判"绝对路径"（与生产 Linux 语义一致）；Windows 盘符路径（`C:\…`）
+ * 不满足，脚本会在参数检查处退出 2 —— 看起来像"脚本坏了"，其实是路径方言不同。
+ * 这里把盘符路径转成 Git Bash 的 MSYS 形式（`/c/…`）；POSIX 平台原样返回。
+ */
+function shellAbsolutePath(value: string): string {
+  if (process.platform !== "win32") return value;
+  const match = /^([A-Za-z]):[\\/](.*)$/.exec(value);
+  return match === null ? value : `/${match[1]!.toLowerCase()}/${match[2]!.replaceAll("\\", "/")}`;
+}
+
 function scenario(options: { failMigration?: boolean; recovery?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "rai-upgrade-test-"));
   const bin = join(root, "bin");
@@ -42,7 +53,7 @@ elif [ "$authenticated" -eq 1 ]; then
 else echo 401
 fi`);
   try {
-    const result = spawnSync("bash", [resolve("deploy/upgrade.sh"), "--apply", "--migrate", "--database", join(root, "rai.sqlite")], {
+    const result = spawnSync("bash", [resolve("deploy/upgrade.sh"), "--apply", "--migrate", "--database", shellAbsolutePath(join(root, "rai.sqlite"))], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, RAI_APP_DIR: app,
         RAI_ENV_FILE: join(root, "rai.env"), RAI_SERVICE: "rai-test", TEST_COMMANDS: log,
@@ -66,7 +77,17 @@ fi`);
 bashTest("explicit upgrade migration runs between service stop and restart", () => {
   const result = scenario();
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.commands, /backup-reminder[\s\S]*systemctl stop rai-test[\s\S]*data:migrate[\s\S]*systemctl reset-failed rai-test[\s\S]*systemctl restart rai-test/);
+  // backup-reminder 是 `say` 的 **stdout** 提示，不进命令替身日志 —— 原断言把它写进
+  // `commands` 的行为级匹配是笔误，且本仓从未在有 bash 的环境跑过这一条（本机历来 SKIP），
+  // 直到今天补上 Windows 路径方言后才现形。按下述三段分开钉：
+  assert.match(result.stdout, /backup-reminder/, "backup-reminder 提示必须输出");
+  assert.match(result.commands, /systemctl stop rai-test[\s\S]*data:migrate[\s\S]*systemctl reset-failed rai-test[\s\S]*systemctl restart rai-test/);
+  // "提示先于停服"的顺序判据只能源码级：stdout 与命令日志是两条流，行为级拿不到跨流相对顺序。
+  const upgradeSource = readFileSync(resolve("deploy/upgrade.sh"), "utf8");
+  const reminderAt = upgradeSource.indexOf('say "backup-reminder');
+  const stopAt = upgradeSource.indexOf('run systemctl stop "$SERVICE"');
+  assert.ok(reminderAt >= 0 && stopAt >= 0 && reminderAt < stopAt,
+    "backup-reminder 提示必须排在停服命令之前（顺序本身是判据：先动库后提醒备份是错的）");
 });
 
 // §11「项目退出备份责任」＋ §14.2 A15：发布脚本**不再** POST /v1/backups。

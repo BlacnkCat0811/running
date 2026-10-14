@@ -5,10 +5,46 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+/**
+ * Windows 盘符路径 → MSYS 形式（`C:/x` → `/c/x`）。
+ *
+ * 🔴 为什么必需：bash 向 node stub 传参时，MSYS 会把脚本内的 POSIX 路径
+ * （`/c/...`）**自动转换**成 Windows 形式（`C:/...`）；node 不做反向转换，
+ * 于是 stub 收到的参数带盘符。而 tar 会把 `C:/...` 解读为 `host:path`
+ * （`Cannot connect to C: resolve failed`）。给 tar 喂回 MSYS 形式即可。
+ */
+function toMsysPath(value: string): string {
+  if (process.platform !== "win32") return value;
+  const match = /^([A-Za-z]):[\\/](.*)$/.exec(value);
+  return match === null ? value : `/${match[1]!.toLowerCase()}/${match[2]!.replaceAll("\\", "/")}`;
+}
+
 const script = resolve("deploy/backup-runtime.sh");
 const canRunBash = spawnSync("bash", ["-c", "true"], { stdio: "ignore" }).status === 0;
+
+/**
+ * tar 的可执行路径（node 可直接 spawn 的形式）。
+ *
+ * 🔴 两个反面教材，都实测踩过：
+ * - 直接写 `/usr/bin/tar` 给 node：Windows 上 node 不做 MSYS 路径映射 ⇒ ENOENT，
+ *   stub 静默退出 1，脚本看起来像"拒绝备份"；
+ * - 让 bash 去 PATH 上找 `tar`（`bash -c 'exec tar "$@"'`）：fixture 把 stub 目录放在 PATH
+ *   首位（bash 脚本必须优先命中替身），`tar` 于是又解析成 stub 自己 ⇒ **无限递归 fork 炸弹**。
+ *
+ * 所以：用 cygpath 把 bash 视角的路径转成 node 能执行的绝对路径（POSIX 平台原样返回）。
+ * 探测失败时整套测试**响亮地跳过**，不静默地跑成假绿。
+ */
+function resolveTarPath(): string {
+  const probe = spawnSync("bash", ["-c", 'cygpath -w "$(command -v tar)" 2>/dev/null || command -v tar'],
+    { encoding: "utf8" });
+  return (probe.stdout ?? "").trim();
+}
+const tarPath = canRunBash ? resolveTarPath() : "";
 const bashTest = (name: string, fn: () => void | Promise<void>) =>
-  test(name, { skip: !canRunBash ? "bash is required for deploy script tests" : false }, fn);
+  test(name, {
+    skip: !canRunBash ? "bash is required for deploy script tests"
+      : tarPath === "" ? "a tar executable is required for deploy script tests" : false
+  }, fn);
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "rai-n100-backup-"));
@@ -52,7 +88,13 @@ function fixture() {
   `);
   stub("tar", `
     if (process.env.TEST_FAIL_TAR === "1") process.exit(1);
-    const result = require("node:child_process").spawnSync("/usr/bin/tar", process.argv.slice(2), { stdio: "inherit" });
+    // 绝对路径（resolveTarPath 已转成 node 可执行的格式）：绝不经 PATH —— 见文件头注释的死循环教训。
+    // 参数里的 Windows 盘符路径要转回 MSYS 形式，否则 tar 把 "C:/…" 当远程主机。
+    const args = process.argv.slice(2).map((arg) => {
+      const match = /^([A-Za-z]):[\\\\/](.*)$/.exec(arg);
+      return match === null ? arg : "/" + match[1].toLowerCase() + "/" + match[2].replaceAll("\\\\", "/");
+    });
+    const result = require("node:child_process").spawnSync(${JSON.stringify(tarPath)}, args, { stdio: "inherit" });
     process.exit(result.status ?? 1);
   `);
   return {
@@ -95,7 +137,7 @@ for (const state of ["active", "inactive"]) {
       const backup = readdirSync(f.output).find((name) => name.startsWith("rai-runtime-"));
       assert.ok(backup);
       const archive = join(f.output, backup, "runtime.tar");
-      const listing = spawnSync("/usr/bin/tar", ["-tf", archive], { encoding: "utf8" });
+      const listing = spawnSync(tarPath, ["-tf", toMsysPath(archive)], { encoding: "utf8" });
       assert.equal(listing.status, 0, listing.stderr);
       for (const file of ["rai.sqlite", "runtime.sqlite", "rai-control.sqlite", "model.onnx"]) {
         assert.ok(listing.stdout.includes(file), `missing ${file}`);
