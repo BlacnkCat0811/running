@@ -197,8 +197,17 @@ export interface HandshakeResponse {
   factsAnalysisViewContractVersion?: number;
   /**
    * 直连车道的单批上界（观测版阶段 1 新增；客户端用它做拆批预算，缺省即回落到保守常量）。
-   * 数值单一来源 = `apps/api/src/direct-sync-ingest.ts` 的顶层常量（XML/manifest ≤ 2 MiB、
-   * 记录 ≤ 5000、route ≤ 200 文件 / 32 MiB）。老服务端省略本键。
+   * 数值单一来源 = `apps/api/src/direct-sync-ingest.ts` 的顶层常量
+   * （XML/manifest ≤ 8 MiB、route ≤ 200 文件 / 64 MiB；2026-10-14 由 2 MiB / 32 MiB 放宽）。
+   * 老服务端省略本键。
+   *
+   * 🔴 `maxRecords` 在直连车道**只约束"删除配额"**，**不**约束 XML 里的记录条数 ——
+   * 服务端量的是 `manifest.deletedRecords.length + manifest.deletedWorkoutIds.length`
+   * （`direct-sync-ingest.ts` 的 `preflightDirectSyncPayload`，拒因 `deletions_exceed_bounds`）。
+   * 也就是说客户端按这一维拆批是**单边自律**：拆得比它小只会多分几批；但反向不成立 ——
+   * "XML 记录条数超过 `maxRecords`"**不会**被服务端拒绝，别把它当成一条服务端保证。
+   * 刻意**不**为此新增服务端拒绝路径：直连车道刚因为"收口后多一条硬拒"被真机引爆过一次
+   * （`route_exceeds_bounds` 让同步链卡死），不再加断崖。
    */
   directSyncBounds?: {
     maxXmlBytes: number;
