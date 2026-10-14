@@ -16,6 +16,16 @@
   关键决策 R1：**iOS 分批版先行（阶段 2）→ 服务端收口版后行（阶段 3）**（收口版 × 旧 iOS = 超界批次永久 400）。
   实施完成后本文档应归档/删除（符合本目录"不长期保留实施计划"的约定）。
 
+- [DIRECT_SYNC_TAIL_PAGE_ROOT_FIX_PLAN_2026-10-14.md](DIRECT_SYNC_TAIL_PAGE_ROOT_FIX_PLAN_2026-10-14.md)：
+  **直连同步「尾页超额」根治：方案 + 实施与验收记录** —— 根因是**提交单位（页）与上界单位（字节）不匹配**：
+  服务端按 `statSync(export.xml).size` 判上界，iOS 按 `HKAnchoredObjectQuery limit: 1000` 整页提交，而预算检查写在
+  **页已落盘之后** ⇒ 每批最后一个页整体越界（真机实测预算 1,887,436 B → 实际 2,411,741 B，超 524,305 B，被 400 硬拒并卡死同步链）。
+  修法 = **写前判定（S2.5）**（整页渲染 → 判定 → 整页提交或整页不提交，停止时锚点退回页前）+ **自适应 query limit**
+  （前进粒度从「≥1 整页」降到「≥1 条记录」，夹紧规则 `requested < limit ? max(1, requested) : max(1, limit/2)`）。
+  同批连带三条：route 维度的**先判后取**缺口、`direct_sync_payload_exceeds_bounds` 的**零消费方**（预算收敛 `.convergeBudget`）、
+  上传前**本地自校验** `exceedsServerBounds`（比的是服务端硬上界，`deletions` ↔ manifest 删除配额而非 XML 记录数）。
+  §11 记实跑证据与预存在失败（`check-pr5-facts-analysis.py` 缺 `var/reports/pr5-c9-baseline-keys.json`，干净树复现、与本批无关）。
+
 - [DIRECT_SYNC_ANALYSIS_WAKE_FIX_2026-10-13.md](DIRECT_SYNC_ANALYSIS_WAKE_FIX_2026-10-13.md)：
   **直连车道「登记了分析任务，但没人唤醒消费者」的定位与修复** ——
   `direct-sync-ingest.ts` 在同一个主库事务里登记了 `recompute_jobs`，而 import 终态回调
