@@ -55,8 +55,10 @@ records = body(export, "private static func writeGlobalRecords(", "private stati
 quantity = body(export, "private static func recordXML(", "private static func sampleMetadataXML(")
 commit = body(store, "func commitSuccess(", "func loadRecordCursors(")
 
-check("HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: 1000)" in query,
-      "the record query is no longer anchored/paginated the way the regressions exercise")
+check("HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit)" in query,
+      "the record query must carry a **shrinkable** limit (a fixed literal cannot shrink an oversized page)")
+check("private static let recordPageLimit = 1000" in export,
+      "the full-page cap must stay a named constant (1000) - it is where the shrink path starts")
 check("guard let next else" in query,
       "missing anchor is an error, never cursor zero")
 check("withTaskCancellationHandler" in query and "box.cancel()" in query,
@@ -137,12 +139,18 @@ check(ordered(parser, "store.removeHealthKitRecords", "if (atomic) store.commitA
 # BackgroundSyncPolicyRegression）里跑；这里钉**接线与常量**，本机（Windows）即可执行。
 budget = (root / "apps/ios/RAI/DirectSyncBatchBudget.swift").read_text(encoding="utf-8")
 
-# S2.1：drain 的预算检查必须在**页末尾**（`consume` 之后）——停在页首会让下一轮重读同一页，
-# 预算不变就永远停在同一处（死循环）；跳到页尾会丢数据。停页末尾是唯一安全的停点。
-check(ordered(cursor, "try consume(page.added, page.deleted)", "if shouldStop()"),
-      "the budget check must sit after consume (page boundary); stopping mid-page deadlocks")
-check("hasMorePages: Bool" in cursor and "shouldStop" in cursor,
-      "drain must report hasMorePages and accept the budget probe")
+# S2.5（2026-10-14）：预算判定必须在**提交之前**、用**渲染后的整页字节**做。
+# 旧判据要求"停在页末尾（consume 之后）"，那正是 524 KB 超额的成因：服务端按字节判上界，
+# 而页是不可分的提交单位 ⇒ 每批最后一个页整体越界（真机：预算 1,887,436 B → 实际 2,411,741 B）。
+# 现在的形态：render → decide → commit，放不下就**整页不提交**且锚点回退到页前。
+check(ordered(cursor, "let rendered = try render(page.added, page.deleted)", "try commit(rendered"),
+      "the budget decision must sit between render and commit (committing first IS the 524 KB overage)")
+check("case .retryWithLimit" in cursor and "return (anchor, true, true)" in cursor,
+      "an oversized page must be left uncommitted with the anchor rolled back to the page start")
+check("stoppedBeforePage" in cursor and "hasMorePages" in cursor,
+      "drain must report hasMorePages and stoppedBeforePage separately (zero progress != partial read)")
+check("limit = requested < limit ? max(1, requested) : max(1, limit / 2)" in cursor,
+      "the retry limit must strictly decrease, otherwise the shrink path can never terminate")
 # S2.2：保守常量与 ×0.9 换算（服务端 bounds 缺字段时的回落路径）。
 check("1_887_436" in budget and "4_500" in budget,
       "the conservative budget constants drifted (1.8 MiB / 4500)")
@@ -156,9 +164,9 @@ check("Double(bounds.maxRouteBytes) * 0.9" in budget and "Double(bounds.maxRoute
 check("func routeBudgetExhausted(routeBytes:" in budget
       and "budget.routeBudgetExhausted(routeBytes:" in export,
       "the route budget gate must sit in the export loop (pre-fetch; state and files advance together)")
-# 导出路径：drain 调用必须接 shouldStop，且检查点必须用 XML 已写字节 + 已消费条数。
-check("budget.exceeded(xmlBytes:" in export,
-      "writeGlobalRecords no longer feeds the budget probe (unbounded batches would come back)")
+# 导出路径：drain 调用必须接**写前判定**与**收缩**（判定用渲染后的整页字节 + 已提交字节）。
+check("budget.accepts(" in export and "budget.shrinkLimit(" in export,
+      "writeGlobalRecords must decide before committing the page (accepts) and be able to shrink it")
 # S2.3：待续标记必须过 commitSuccess 的事务；探测点必须读它；前台分额度接线必须都到位。
 check("hasMorePages: hasMorePages" in sync,
       "the real hasMorePages must reach continuationNeeded (a hard-coded false drops the flag)")

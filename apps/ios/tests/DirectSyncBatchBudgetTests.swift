@@ -59,9 +59,83 @@ struct DirectSyncBatchBudgetTests {
         check(probe.routeBudgetExhausted(routeBytes: 250, routeFiles: 9),
               "over both limits is exhausted")
 
-        // xml 判据不受 route 字段影响（既有语义的回归）。
-        check(!probe.exceeded(xmlBytes: 99, records: 9), "xml below limit is not exceeded")
-        check(probe.exceeded(xmlBytes: 100, records: 0), "xml at the limit trips exceeded")
+        // 写前判定（S2.5）：`accepts` 问的是"**加上这一整页**还放得下吗"，不是"现在已经超了吗"。
+        // 边界必须是 `<=`：恰好把额度用满是**放得下**（继续读下一页，由下一页自己判断放不下）。
+        check(probe.accepts(xmlBytes: 0, records: 0, pageBytes: 100, pageRecords: 10),
+              "a page that exactly fills the budget is accepted")
+        check(!probe.accepts(xmlBytes: 0, records: 0, pageBytes: 101, pageRecords: 10),
+              "one byte over the xml budget is rejected")
+        check(!probe.accepts(xmlBytes: 0, records: 0, pageBytes: 100, pageRecords: 11),
+              "one record over the record budget is rejected")
+        check(!probe.accepts(xmlBytes: 60, records: 0, pageBytes: 41, pageRecords: 1),
+              "the already-committed bytes count against the page (this is what the page-end check missed)")
+        check(probe.accepts(xmlBytes: 60, records: 0, pageBytes: 40, pageRecords: 1),
+              "the remaining room is what the page is measured against")
+        check(!probe.accepts(xmlBytes: 100, records: 10, pageBytes: 1, pageRecords: 1),
+              "a full budget rejects any further page")
+
+        // 收缩估算：用本页实测的每记录字节推"还能取几条"，且**永远 ≥1**（否则退化成死循环）。
+        check(probe.shrinkLimit(pageBytes: 1000, pageRecords: 10, usedXmlBytes: 0, usedRecords: 0) == 1,
+              "0.1 B per record estimate still floors at one record, never zero")
+        check(probe.shrinkLimit(pageBytes: 100, pageRecords: 10, usedXmlBytes: 0, usedRecords: 0) == 10,
+              "10 B per record fits ten records into a 100 B budget")
+        check(probe.shrinkLimit(pageBytes: 100, pageRecords: 10, usedXmlBytes: 50, usedRecords: 0) == 5,
+              "only the remaining room counts")
+        check(probe.shrinkLimit(pageBytes: 100, pageRecords: 10, usedXmlBytes: 0, usedRecords: 8) == 2,
+              "the remaining record budget also caps the estimate")
+        check(probe.shrinkLimit(pageBytes: 0, pageRecords: 0, usedXmlBytes: 0, usedRecords: 0) == 1,
+              "a page with no records cannot produce a zero estimate")
+
+        // 缩一档（`halved`）：四维同时折半，且**永不落到 0**。
+        // 落 0 的失效方式很安静：`accepts` 会把每一页都判成放不下 ⇒ 收缩路径一路走到
+        // `limit == 1` 才收手（有界，但该类型本轮零进展、每批都是空批）。
+        let halved = DirectSyncBatchBudget.conservative.halved()
+        check(halved.maxXmlBytes == 943_718, "halving the xml budget is exact integer division")
+        check(halved.maxRecords == 2_250, "halving the record budget is exact integer division")
+        check(halved.maxRouteFiles == 90, "halving the route file budget is exact integer division")
+        check(halved.maxRouteBytes == 15_099_494, "halving the route byte budget is exact integer division")
+        let atFloor = DirectSyncBatchBudget(maxXmlBytes: 1, maxRecords: 1, maxRouteFiles: 1, maxRouteBytes: 1)
+        check(atFloor.halved() == atFloor, "halving never reaches zero: every dimension floors at one")
+
+        // 本地自校验（P2b）：比的是**服务端硬上界**，边界与 `accepts` 同向
+        // （恰好等于上界**不算**超 —— 服务端那三处判据用的都是严格 `>`）。
+        // 四个维度逐条对齐 `apps/api/src/direct-sync-ingest.ts`：xml :418 / route :369 / deletions :440。
+        let maxXml = 8 * 1024 * 1024
+        let maxRouteBytes = 64 * 1024 * 1024
+        check(!budget.exceedsServerBounds(bounds: bounds, xmlBytes: maxXml, deletions: 5_000,
+                                          routeBytes: maxRouteBytes, routeFiles: 200),
+              "a payload exactly at every server bound is NOT over it (the server uses strict >)")
+        check(budget.exceedsServerBounds(bounds: bounds, xmlBytes: maxXml + 1, deletions: 0,
+                                         routeBytes: 0, routeFiles: 0),
+              "one byte over the server xml bound is over")
+        check(budget.exceedsServerBounds(bounds: bounds, xmlBytes: 0, deletions: 5_001,
+                                         routeBytes: 0, routeFiles: 0),
+              "one deletion over the server record bound is over (deletions, not XML record count)")
+        check(budget.exceedsServerBounds(bounds: bounds, xmlBytes: 0, deletions: 0,
+                                         routeBytes: maxRouteBytes + 1, routeFiles: 0),
+              "one byte over the server route byte bound is over")
+        check(budget.exceedsServerBounds(bounds: bounds, xmlBytes: 0, deletions: 0,
+                                         routeBytes: 0, routeFiles: 201),
+              "one file over the server route file bound is over")
+
+        // 收敛档位（P1b）：`apply` = 折半 `steps` 次；`advanced` **幂等封顶** ——
+        // 到顶后再触发不会越界，也不会让 `apply` 多折半一档（那会让"缩预算 + 每次全量导出"
+        // 变成一个没有出口的昂贵循环）。
+        check(DirectSyncBudgetConvergence.initial.apply(to: budget) == budget,
+              "zero steps is the identity: an unconverged sync uses the full handshake budget")
+        check(DirectSyncBudgetConvergence(steps: 1).apply(to: budget) == budget.halved(),
+              "one step halves the budget once")
+        let twiceHalved = budget.halved().halved()
+        check(DirectSyncBudgetConvergence(steps: 2).apply(to: budget) == twiceHalved,
+              "two steps halve twice")
+        check(DirectSyncBudgetConvergence.maxSteps == 3 && !DirectSyncBudgetConvergence(steps: 2).isExhausted,
+              "two steps is not yet exhausted")
+        check(DirectSyncBudgetConvergence.initial.advanced() == DirectSyncBudgetConvergence(steps: 1),
+              "advancing from zero lands on one step")
+        let capped = DirectSyncBudgetConvergence(steps: DirectSyncBudgetConvergence.maxSteps)
+        check(capped.isExhausted, "the cap is where exhaustion starts")
+        check(capped.advanced() == capped,
+              "advancing past the cap is a no-op: repeated rejections cannot shrink the budget without limit")
 
         print("\(checks) checks passed")
     }

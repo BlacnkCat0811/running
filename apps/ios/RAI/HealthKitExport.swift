@@ -41,16 +41,38 @@ nonisolated struct HealthKitExportResult: Sendable {
     let routeStates: [String: RouteSyncRecord]
     /// 本轮最后一个低频候选。即使 workout 暂不可读，也推进遍历位置，不伪造观测。
     let routeDiscoveryCursor: String?
-    /// 本轮是否**因为单批预算（`DirectSyncBatchBudget`）截断**而提前收手（观测阶段 2 / S2.1）。
+    /// 本轮**为什么**被单批预算停住（S2.5 观测，2026-10-14）；`nil` = 没被预算停住。
     ///
-    /// `true` = 至少有一个记录类型只消费到一个页边界就停了，还有未读的页 —— 上层把"待续"
-    /// （`needsContinuation`）持久化，并在下一轮从**已提交游标**继续。
-    /// `false` = 每个读过的类型都读到了空页；没轮到的类型保持旧游标（那是"还没读"，不是"读完了"）。
+    /// `hasMorePages` 由它派生（**不**再单独存一个 Bool）—— 同一事实存两份就会出现
+    /// "说没被截断、其实被截断了"这种**类型上排除不掉**的不一致。
+    /// 三种形态互不替代：`.recordPage` = 整页放不下、停在页首（**正常分批**）；
+    /// `.recordNone` = 连一条都放不进剩余额度、该类型本轮零进展；`.routeFile` = 轨迹文件放不下。
+    let budgetStopReason: BudgetStopReason?
+    /// 本批产物里 `export.xml` 的**实际字节数**（= 盘上文件大小，与服务端
+    /// `statSync(export.xml).size` 同口径）。
     ///
-    /// 🔴 它不是错误：分批是设计行为。`false` 也**不**等于"全部类型都读到底"（可能只是本轮
-    /// 预算够用 + 各类型都读到了空页）—— 续传判定永远以 (hasMorePages, 回执) 合取为准
-    /// （`DirectSyncCursorPolicy.continuationNeeded`）。
-    let hasMorePages: Bool
+    /// 存在的唯一理由 = P2b 的**本地自校验**：上传前拿它与服务端硬上界比一次，
+    /// 超了就缩预算重导，而不是把一份必被 400 的产物发出去。
+    let xmlBytes: Int
+    /// 本批产物里 GPX 轨迹的**实际字节和**（= 各 GPX 盘上字节之和，与服务端
+    /// `inputTreeCheck` 的累加口径一致）。同上，只服务 P2b。
+    let routeBytes: Int
+
+    /// 单批预算停住的形态（S2.5）。**不是错误**：分批是设计行为。
+    nonisolated enum BudgetStopReason: String, Sendable {
+        /// 记录侧：整页放不下，停在页首。
+        case recordPage
+        /// 记录侧：连一条都放不进剩余额度（该类型本轮零进展）。
+        case recordNone
+        /// route 侧：轨迹文件放不进剩余额度（本轮不再取新轨迹，状态不动）。
+        case routeFile
+    }
+
+    /// 本轮是否还有未读的页（= 被预算停住）。
+    ///
+    /// 🔴 `false` **不**等于"全部类型都读到底"（可能只是本轮预算够用 + 各类型都读到了空页）
+    /// —— 续传判定永远以 (hasMorePages, 回执) 合取为准（`DirectSyncCursorPolicy.continuationNeeded`）。
+    var hasMorePages: Bool { budgetStopReason != nil }
 }
 
 nonisolated enum HealthKitExportError: LocalizedError, Equatable {
@@ -225,6 +247,20 @@ nonisolated enum HealthKitExport {
     /// recent window on anchored syncs so late routes are discoverable.
     private static let routeBackfillWindow: TimeInterval = 14 * 24 * 60 * 60
 
+    /// 记录单页的**满页**上限。**可被收缩**（S2.5）：预算放不下整页时，drain 用更小的 `limit`
+    /// 重查同一锚点（极限 1 条）—— 这是"每轮至少前进 1 条记录"的兜底，去掉它就退化成死循环。
+    private static let recordPageLimit = 1000
+
+    /// 一页记录的**渲染产物**（S2.5 写前判定）：先渲染进内存，判定通过才落盘。
+    ///
+    /// `deletions` 与字节一起被"整页原子提交"：被丢弃的那一页的删除事件必须**原样留到下一轮**
+    /// （提前记账会让那些删除永久消失 —— 下一轮不会再读到它们）。
+    nonisolated private struct RenderedRecordPage {
+        let data: Data
+        let deletions: [String]
+        let recordCount: Int
+    }
+
     /// Asks for read access and reports whether the system actually has an answer.
     ///
     /// `requestAuthorization` is the only call that can show the prompt, and it
@@ -293,9 +329,9 @@ nonisolated enum HealthKitExport {
     ///     当作首查（安全方向：多查一次，不会漏）。
     ///   - routeForceRescan: 人工重扫（"重新导入全部"）。所有 workout 的状态复位成
     ///     `.active` 且稳定性清零，于是这一轮**每个** workout 都会重查一次。
-    ///   - budget: 单批载荷预算（S2.1）。记录类型的 drain 每消费完一页检查一次；
-    ///     截断时停在**页末尾**并让结果 `hasMorePages == true`。默认取保守值 ——
-    ///     调用点漏传时宁小勿大（多分几批），绝不超界。
+    ///   - budget: 单批载荷预算（S2.1/S2.5）。**写前判定**：整页先渲染进内存、判定通过才落盘
+    ///     ⇒ 单批字节严格 ≤ 预算。截断时停在**页首**（整页不提交、锚点不推进），结果
+    ///     `budgetStopReason != nil`。默认取保守值 —— 调用点漏传时宁小勿大（多分几批），绝不超界。
     static func exportArchive(
         from startDate: Date?,
         workoutAnchor: Data?,
@@ -360,6 +396,9 @@ nonisolated enum HealthKitExport {
         var recordCount = 0
         var routeCount = 0
         var routeBytes = 0
+        /// route 侧的停因（记录侧的停因在 `records.budgetStopReason`，两者在返回时**取并**）。
+        /// 不复用一个变量：两个停因来自两个收集阶段，唯一的合并点是 `HealthKitExportResult` 那一处。
+        var routeStopReason: HealthKitExportResult.BudgetStopReason?
         var exportedWorkouts: [HKWorkout] = []
 
         try write(xml, """
@@ -386,6 +425,10 @@ nonisolated enum HealthKitExport {
             // 由 `rediscoveryCandidates` 在后续轮次继续发现，cursor 轮转、每轮 ≤ 20 个）。
             // 若改成"fetch 之后丢弃"，状态会先行推进到 settled 而文件永久丢失。
             let routeBudgetExhausted = budget.routeBudgetExhausted(routeBytes: routeBytes, routeFiles: routeCount)
+            // 预算已满 ⇒ 本批路线到此为止：剩余 workout 一律不再取新轨迹（走 `else` 分支，状态不动）。
+            // 记下停因让 `hasMorePages` 为真 ⇒ 调用方续批；未取到的 workout 保持原状态，
+            // 由 `rediscoveryCandidates` 在下一轮继续发现。
+            if routeBudgetExhausted { routeStopReason = .routeFile }
             if !routeBudgetExhausted && RouteSyncStateMachine.shouldQuery(
                 existing: previous,
                 now: routeNow,
@@ -396,25 +439,34 @@ nonisolated enum HealthKitExport {
                     for: workout,
                     store: store,
                     directory: directory,
-                    warnings: warnings
+                    warnings: warnings,
+                    budget: budget,
+                    usedRouteBytes: routeBytes,
+                    usedRouteFiles: routeCount
                 )
                 // An observation hash is not a server acknowledgement: a prior
                 // GPX may still be pending after a quota refusal. Keep bounded
                 // route retries until the protocol can acknowledge each route.
-                routeFiles = fetch.entries
-                // 预算按**磁盘字节**累计（与服务端 `inputTreeCheck` 的口径一致）。
-                for entry in routeFiles {
-                    let attributes = try? FileManager.default.attributesOfItem(atPath: entry.url.path)
-                    routeBytes += (attributes?[.size] as? Int) ?? 0
-                }
-                if let observation = fetch.observation {
-                    routeDecisions[routeKey] = RouteSyncStateMachine.decide(
-                        existing: previous,
-                        observation: observation,
-                        now: routeNow,
-                        isForceManualRescan: routeForceRescan,
-                        hasWorkoutChange: hasWorkoutChange
-                    ).nextState
+                if fetch.budgetExhausted {
+                    // 整条轨迹装不进剩余额度：`routeEntries` 已把本轮分片回滚 ⇒ 零文件、
+                    // 状态一个字不动（与 `else` 分支同语义，只是原因不同）。
+                    routeFiles = []
+                    routeStopReason = .routeFile
+                } else {
+                    routeFiles = fetch.entries
+                    // 预算按**字节**累计，口径 = 盘上 GPX 的 UTF-8 字节数（服务端 `statSync` 同口径）。
+                    // 取 `fetch.bytes`（写文件时算好的 `document.utf8.count`）而不是回头再 `statSync`：
+                    // 值与盘上逐字节同一次，且和 `entries` 严格同进同退。
+                    routeBytes += fetch.bytes
+                    if let observation = fetch.observation {
+                        routeDecisions[routeKey] = RouteSyncStateMachine.decide(
+                            existing: previous,
+                            observation: observation,
+                            now: routeNow,
+                            isForceManualRescan: routeForceRescan,
+                            hasWorkoutChange: hasWorkoutChange
+                        ).nextState
+                    }
                 }
             } else {
                 // 跳过：这一轮既不产出任何 route 文件，也不改动状态一个字。
@@ -496,7 +548,14 @@ nonisolated enum HealthKitExport {
             sourceScope: "healthkit",
             routeStates: routeDecisions,
             routeDiscoveryCursor: rediscovery.last,
-            hasMorePages: records.hasMorePages
+            // 两个收集阶段各有自己的停因，**取并**：记录侧先发生就报记录侧。
+            // 同一批里两侧正常不会同时非空（记录侧停在页首时 route 循环尚未跑到），
+            // 并起来只为在异常组合下也不丢信号。
+            budgetStopReason: records.budgetStopReason ?? routeStopReason,
+            // 实际产物大小（P2b 本地自校验的输入）：这一句在 `</HealthData>` 与
+            // `synchronize()` **之后**执行 ⇒ `offsetInFile` 就是最终盘上大小。
+            xmlBytes: Int(xml.offsetInFile),
+            routeBytes: routeBytes
         )
     }
 
@@ -836,7 +895,10 @@ nonisolated enum HealthKitExport {
         warnings: WarningBag,
         budget: DirectSyncBatchBudget,
         onProgress: @escaping @Sendable (String) async -> Void
-    ) async throws -> (count: Int, cursors: Data, deleted: [[String: String]], hasMorePages: Bool) {
+    ) async throws -> (
+        count: Int, cursors: Data, deleted: [[String: String]],
+        budgetStopReason: HealthKitExportResult.BudgetStopReason?
+    ) {
         // Corrupt cursors fail closed. They are never silently turned into a
         // window query; a missing type starts from nil and reads all history.
         var cursors = try cursorData.map {
@@ -844,9 +906,9 @@ nonisolated enum HealthKitExport {
         } ?? [:]
         let now = Date()
         var count = 0
-        // 单批预算是否已在某个类型处触顶（S2.1）。触顶后**不再开始新类型**，
-        // 但本轮已经读到的部分照常保留（各自的游标已推进到页边界）。
-        var budgetExceeded = false
+        // 本轮被预算停住的**形态**（S2.5）；`nil` = 没被停住。触顶后**不再开始新类型**，
+        // 已读到的部分照常保留（各自游标推进到已提交的页边界）。
+        var budgetStopReason: HealthKitExportResult.BudgetStopReason?
         var deletions: [String: Set<String>] = [:]
         var quantities: [(HKQuantityType, HKUnit, String, String)] = [
             (HKQuantityType.quantityType(forIdentifier: .heartRate)!, HKUnit.count().unitDivided(by: .minute()), "HKQuantityTypeIdentifierHeartRate", "count/min"),
@@ -900,7 +962,7 @@ nonisolated enum HealthKitExport {
         for (index, descriptor) in descriptors.enumerated() {
             // 预算在**上一个类型**停下 ⇒ 本轮不再开始新类型（未处理的类型保持旧游标，
             // `hasMorePages` 冒泡给上层 —— S2.1 的"未处理类型不动"纪律）。
-            if budgetExceeded { break }
+            if budgetStopReason != nil { break }
             let (type, unit, xmlType, xmlUnit) = descriptor
             try Task.checkCancellation()
             // 🔴 逐类型进度。这一段是整轮导出里**最长**的一段 —— 全量历史时单个类型
@@ -938,43 +1000,65 @@ nonisolated enum HealthKitExport {
                 }
                 var next: HKQueryAnchor?
                 var interruptedPhase: HealthKitRecordCursor.HistoryReplayPhase?
+                // 本类型是否出现过"一段一页都没读"（S2.5）。
+                var stoppedBeforePage = false
                 for (segmentIndex, start) in starts.enumerated() {
-                    let outcome = try await HealthKitRecordCursor.drain(from: start, query: { anchor in
-                        try await anchoredRecords(store: store, type: type, anchor: anchor)
-                    }, consume: { added, deleted in
-                        for sample in added.sorted(by: {
-                            $0.startDate == $1.startDate ? $0.uuid.uuidString < $1.uuid.uuidString : $0.startDate < $1.startDate
-                        }) {
-                            try Task.checkCancellation()
-                            if let sample = sample as? HKQuantitySample, let unit, let xmlUnit {
-                                try write(xml, recordXML(sample, type: xmlType, unit: unit, xmlUnit: xmlUnit))
-                            } else if let sample = sample as? HKCategorySample {
-                                var attrs = "type=\"\(xmlType)\" sourceName=\"\(escape(sample.sourceRevision.source.name))\" sourceVersion=\"\(escape(sample.sourceRevision.version ?? "1"))\""
-                                if let device = deviceDescription(sample.device) { attrs += " device=\"\(escape(device))\"" }
-                                attrs += " value=\"\(sleepName(sample.value))\" creationDate=\"\(appleDate(sample.startDate))\" startDate=\"\(appleDate(sample.startDate))\" endDate=\"\(appleDate(sample.endDate))\""
-                                try write(xml, "\n          <Record \(attrs)>\(sampleMetadataXML(sample))</Record>")
-                            } else {
-                                throw HealthKitExportError.missingRecordAnchor
+                    // 🔴 写前判定（S2.5）：整页先渲染进内存，`budget.accepts` 通过才落盘。
+                    let outcome = try await HealthKitRecordCursor.drain(
+                        from: start,
+                        pageLimit: recordPageLimit,
+                        query: { anchor, limit in
+                            try await anchoredRecords(store: store, type: type, anchor: anchor, limit: limit)
+                        },
+                        render: { added, deleted in
+                            try renderedRecordPage(
+                                added: added, deleted: deleted,
+                                xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
+                            )
+                        },
+                        decide: { page, _ in
+                            // 只读不写：判定与收缩估算都基于**已提交**的字节/条数。
+                            if budget.accepts(
+                                xmlBytes: xml.offsetInFile, records: count,
+                                pageBytes: page.data.count, pageRecords: page.recordCount
+                            ) {
+                                return .accept
                             }
-                            count += 1
+                            return .retryWithLimit(budget.shrinkLimit(
+                                pageBytes: page.data.count, pageRecords: page.recordCount,
+                                usedXmlBytes: xml.offsetInFile, usedRecords: count
+                            ))
+                        },
+                        commit: { page, _ in
+                            // 字节与删除事件**一起**提交：被丢弃的页其删除必须留到下一轮。
+                            try xml.write(contentsOf: page.data)
+                            for uuid in page.deletions { deletions[xmlType, default: []].insert(uuid) }
+                            count += page.recordCount
                         }
-                        for item in deleted {
-                            deletions[xmlType, default: []].insert(item.uuid.uuidString.lowercased())
-                        }
-                    }, shouldStop: {
-                        // 单批预算（S2.1）：XML 已写字节 + 已消费条数。检查点在 drain 的
-                        // **页末尾**（见 `HealthKitRecordCursor.drain`），本闭包只读不写。
-                        budget.exceeded(xmlBytes: xml.offsetInFile, records: count)
-                    })
-                    next = outcome.anchor
+                    )
+                    // 🔴 只在锚点有效时替换：`.historyFromScratch` 段的起点是 `nil`，
+                    // 若该段在**页首**就被预算挡住（一页都没读），返回的锚点仍是 `nil`。
+                    // 无条件赋值会把一次**正常的分批**变成 `missingRecordAnchor` 整批失败。
+                    if let advanced = outcome.anchor { next = advanced }
+                    stoppedBeforePage = stoppedBeforePage || outcome.stoppedBeforePage
+                    // `.recordNone` 优先：它表示"这一段一条都没读进去"，是更强的信号。
+                    if outcome.stoppedBeforePage { budgetStopReason = .recordNone }
                     if outcome.hasMorePages {
-                        budgetExceeded = true
+                        if budgetStopReason == nil { budgetStopReason = .recordPage }
                         interruptedPhase = RecordReplayPlan.interruptedPhase(
                             segments: segments, interruptedIndex: segmentIndex)
                         break
                     }
                 }
-                guard let next else { throw HealthKitExportError.missingRecordAnchor }
+                guard let next else {
+                    // 🔴 没有可提交的锚点有两种成因，必须分开：
+                    //   ① 预算在**页首**把这一段挡住了 ⇒ 这是**正常分批**：该类型的游标原样不动
+                    //      （包括"首次读取、还没有游标"），下一批重新来。首次读取的
+                    //      `.historyFromScratch` 段起点就是 `nil`，抛错会把分批变成整批失败。
+                    //   ② 真读到底却拿不到锚点 ⇒ 异常，按旧行为抛。
+                    if stoppedBeforePage { continue }
+                    throw HealthKitExportError.missingRecordAnchor
+                }
                 let encoded = try NSKeyedArchiver.archivedData(withRootObject: next, requiringSecureCoding: true)
                 cursors[xmlType] = HealthKitRecordCursor(
                     anchor: encoded,
@@ -999,18 +1083,51 @@ nonisolated enum HealthKitExport {
         let deleted = deletions.keys.sorted().flatMap { type in
             deletions[type]!.sorted().map { ["type": type, "uuid": $0] }
         }
-        return (count, try encoder.encode(cursors), deleted, budgetExceeded)
+        return (count, try encoder.encode(cursors), deleted, budgetStopReason)
+    }
+
+    /// 一页记录的**渲染**（S2.5 写前判定）：把这一页要写进 `export.xml` 的**全部字节**先在内存里
+    /// 拼出来，再交给 `decide` 判定。拼接顺序与逐条写句柄**完全一致**，因此字节**逐字节等价**
+    /// （`check-export-determinism.py` / `test:ios:live` 钉着导出的确定性；改这里要重跑那条门禁）。
+    private static func renderedRecordPage(
+        added: [HKSample],
+        deleted: [HKDeletedObject],
+        xmlType: String,
+        unit: HKUnit?,
+        xmlUnit: String?
+    ) throws -> RenderedRecordPage {
+        var text = ""
+        for sample in added.sorted(by: {
+            $0.startDate == $1.startDate ? $0.uuid.uuidString < $1.uuid.uuidString : $0.startDate < $1.startDate
+        }) {
+            try Task.checkCancellation()
+            if let sample = sample as? HKQuantitySample, let unit, let xmlUnit {
+                text += recordXML(sample, type: xmlType, unit: unit, xmlUnit: xmlUnit)
+            } else if let sample = sample as? HKCategorySample {
+                var attrs = "type=\"\(xmlType)\" sourceName=\"\(escape(sample.sourceRevision.source.name))\" sourceVersion=\"\(escape(sample.sourceRevision.version ?? "1"))\""
+                if let device = deviceDescription(sample.device) { attrs += " device=\"\(escape(device))\"" }
+                attrs += " value=\"\(sleepName(sample.value))\" creationDate=\"\(appleDate(sample.startDate))\" startDate=\"\(appleDate(sample.startDate))\" endDate=\"\(appleDate(sample.endDate))\""
+                text += "\n          <Record \(attrs)>\(sampleMetadataXML(sample))</Record>"
+            } else {
+                throw HealthKitExportError.missingRecordAnchor
+            }
+        }
+        return RenderedRecordPage(
+            data: Data(text.utf8),
+            deletions: deleted.map { $0.uuid.uuidString.lowercased() },
+            recordCount: added.count
+        )
     }
 
     private static func anchoredRecords(
-        store: HKHealthStore, type: HKSampleType, anchor: HKQueryAnchor?
+        store: HKHealthStore, type: HKSampleType, anchor: HKQueryAnchor?, limit: Int
     ) async throws -> (added: [HKSample], deleted: [HKDeletedObject], next: HKQueryAnchor) {
         let box = QueryContinuation<(added: [HKSample], deleted: [HKDeletedObject], next: HKQueryAnchor)>()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             let result = try await withCheckedThrowingContinuation { continuation in
                 box.set(continuation)
-                let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: 1000) {
+                let query = HKAnchoredObjectQuery(type: type, predicate: nil, anchor: anchor, limit: limit) {
                     _, samples, deleted, next, error in
                     if let error { box.resume(throwing: error); return }
                     // 🔴 这条 guard 的**前提**没有被验证过（2026-10-09 审查 🟡5）：查询"没有返回
@@ -1140,13 +1257,26 @@ nonisolated enum HealthKitExport {
         let entries: [(name: String, url: URL)]
         /// nil 是查询未能完成，不能记成零点数或稳定证据。
         let observation: RouteObservation?
+        /// 本 workout 已写出的 GPX **字节和**。调用方累加它得到 `routeBytes` —— 自累计而不是
+        /// 回头 `statSync`：这里的值就是写文件时用的 `document.utf8.count`，与盘上大小逐字节
+        /// 同值，且与 `entries` 严格同进同退。
+        let bytes: Int
+        /// 本 workout 的轨迹**装不进剩余路线预算**（S2.5 route 侧）。为 `true` 时
+        /// `entries` 必为空、`observation` 必为 nil、`bytes` 必为 0、**状态一律不推进**；
+        /// 调用方只跳过这一个 workout（后面的照常尝试，不做"一次装不下就全停"）。
+        let budgetExhausted: Bool
+
+        static let empty = RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: false)
     }
 
     private static func routeEntries(
         for workout: HKWorkout,
         store: HKHealthStore,
         directory: URL,
-        warnings: WarningBag
+        warnings: WarningBag,
+        budget: DirectSyncBatchBudget,
+        usedRouteBytes: Int,
+        usedRouteFiles: Int
     ) async throws -> RouteFetch {
         let routes: [HKWorkoutRoute]
         do {
@@ -1158,12 +1288,15 @@ nonisolated enum HealthKitExport {
         } catch {
             if isAuthorizationError(error) || isNoDataError(error) {
                 warnings.add("路线暂不可读取；已保留路线同步状态")
-                return RouteFetch(entries: [], observation: nil)
+                return .empty
             }
             if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
             throw error
         }
         var entries: [(name: String, url: URL)] = []
+        // 本 workout 已写出的**字节**（口径 = 盘上 GPX 的 UTF-8 字节数，与服务端
+        // `statSync` 的累计口径一致）。与 `entries` 严格同进同退：判定失败时一起回退。
+        var writtenBytes = 0
         let routesDirectory = directory.appendingPathComponent("workout-routes", isDirectory: true)
         try FileManager.default.createDirectory(at: routesDirectory, withIntermediateDirectories: true)
         let workoutId = routeFileWorkoutId(workout)
@@ -1191,24 +1324,41 @@ nonisolated enum HealthKitExport {
             guard !locations.isEmpty else { continue }
             try Task.checkCancellation()
             let document = try gpx(locations)
+            let bytes = document.utf8.count
+            // 🔴 写前判定（与记录侧同一纪律）：**先算字节、判定放得下，再落盘**。
+            // 旧写法"先落盘、由调用方在下一轮判" ⇒ 单批可超额**一整个 GPX 文件**
+            // （2026-10-14 真机：route 34,009,725 B / 58 文件，均值 586 KB，最坏可达数 MB）。
+            // 装不下 ⇒ **整个 workout 的轨迹一起放弃**，并删掉本轮已写的分片：半条轨迹比没有更坏
+            // （xml 不声明它 ⇒ 载荷里会多出一个无主文件）。
+            if budget.routeBudgetExhausted(
+                routeBytes: usedRouteBytes + writtenBytes + bytes,
+                routeFiles: usedRouteFiles + entries.count + 1
+            ) {
+                for entry in entries { try? FileManager.default.removeItem(at: entry.url) }
+                return RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: true)
+            }
             let name = "workout-routes/\(workoutId)_\(entries.count + 1).gpx"
             let url = directory.appendingPathComponent(name)
             try document.write(to: url, atomically: true, encoding: .utf8)
             if FileManager.default.fileExists(atPath: url.path) {
                 entries.append((name: name, url: url))
                 pointTotal += locations.count
+                writtenBytes += bytes
                 digest.update(data: Data(document.utf8))
             }
         }
         // 部分段读取失败也不输出不完整路线，不以它覆盖已有 GPX 或积累稳定证据。
-        guard complete else { return RouteFetch(entries: [], observation: nil) }
+        guard complete else {
+            for entry in entries { try? FileManager.default.removeItem(at: entry.url) }
+            return .empty
+        }
         // 查询成功且没有任何条目 ⇒ 观测是"0 个点、没有摘要"。摘要用 `nil` 而不是空 SHA256 的十六进制：
         // 后者是一个"看起来像内容摘要"的值，会让"没有轨迹"和"有一段空轨迹"变成两回事。
         let observation = RouteObservation(
             pointCount: entries.isEmpty ? 0 : pointTotal,
             routeHash: entries.isEmpty ? nil : digest.finalize().map { String(format: "%02x", $0) }.joined()
         )
-        return RouteFetch(entries: entries, observation: observation)
+        return RouteFetch(entries: entries, observation: observation, bytes: writtenBytes, budgetExhausted: false)
     }
 
     private static func workoutSyncId(_ workout: HKWorkout) -> String {

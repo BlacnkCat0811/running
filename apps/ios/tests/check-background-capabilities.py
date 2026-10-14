@@ -1572,6 +1572,59 @@ check(
     "if let observation = fetch.observation" in route_loop,
     "a failed/partial route query must not write an empty observation or stability evidence",
 )
+
+# 14h-9. route 侧的**写前判定**（S2.5 route 侧，2026-10-14）。只判"循环里有没有 fetch"
+# 是不够的：旧写法正是一次 fetch 就把整个 workout 的 GPX 落盘 ⇒ 单批超额上界变成
+# **一整个 GPX 文件**（真机实测 34,009,725 B / 58 文件 ≈ 586 KB 均值，最坏可达数 MB）。
+route_entries = tail_after(health_export, "private static func routeEntries(", "routeEntries(")
+route_entries = route_entries.split("\n    private static func ")[0]
+ordered(
+    route_entries,
+    "budget.routeBudgetExhausted(",
+    "try document.write(to: url",
+    "routeEntries writes the GPX BEFORE consulting the route budget — the tail file would then "
+    "overshoot the batch bound by one whole GPX (device-measured: 34 MB across 58 files)",
+)
+check(
+    "return RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: true)" in route_entries,
+    "a route that does not fit must be abandoned wholesale (bytes 0, no observation) — a half-written "
+    "track is worse than none: xml does not reference it, so the payload gains an ownerless file",
+)
+check(
+    "routeStopReason = .routeFile" in route_loop,
+    "the export loop never records the route-side stop reason — `hasMorePages` (derived from it) "
+    "would stay false and a truncated batch would silently end the sync",
+)
+check(
+    "records.budgetStopReason ?? routeStopReason" in health_export,
+    "the two collection stages' stop reasons are no longer combined — a route-side truncation "
+    "would be invisible to `hasMorePages` and the sync would stop with routes still unread",
+)
+check(
+    "routeBytes += fetch.bytes" in route_loop,
+    "route bytes must be accumulated from what routeEntries actually wrote (`fetch.bytes`) — "
+    "re-stat'ing the files would be a second, driftable source of the same fact",
+)
+
+# 14h-10. inspect 的「本批超单批上限」400 必须与瞬时失败分开处置（P1b，2026-10-14）。
+# 与 2026-09-22 那个 404 死锁同构：磁盘行的 `sourceId` 留着 ⇒ `SyncAtomicUnit.nextStep`
+# 恒返回 `.inspect` ⇒ 每次同步重撞同一个 400，而 Nginx 里**再也不会出现 uploads**。
+check(
+    "disposition == .convergeBudget" in sync,
+    "the inspect catch no longer handles .convergeBudget — the payload-bounds 400 falls into the "
+    "abandon path without shrinking the budget, so every sync re-exports the same oversized payload",
+)
+check(
+    "loadBudgetConvergence()" in sync and "saveBudgetConvergence(" in sync,
+    "the budget convergence memory is no longer wired into the export path — a server rejection "
+    "would not change the next export's budget, i.e. the convergence is a no-op",
+)
+check(
+    "clearBudgetConvergence()" in sync,
+    "nothing ever clears the convergence — the budget would stay shrunk forever after a single "
+    "rejection, and the user's explicit full re-import could not restore it",
+)
+
 historical_fetch = tail_after(health_export, "private static func knownRunningWorkouts(", "knownRunningWorkouts(")
 historical_fetch = historical_fetch.split("\n    private static func ")[0]
 check(

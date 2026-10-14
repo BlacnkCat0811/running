@@ -47,12 +47,28 @@ nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
         )
     }
 
-    /// drain 的 `shouldStop` 用：给定当前**已写入字节**与**已消费记录条数**，是否到上界。
+    /// **写前判定**（S2.5，2026-10-14）：给定**已提交**的字节/条数与**本页渲染后的**
+    /// 字节/条数，这一整页放得下吗。`false` ⇒ 调用方必须整页不提交（锚点也不推进）。
     ///
-    /// 调用时机是"消费完一整页之后"（`HealthKitRecordCursor.drain` 的页末尾检查）——
-    /// 所以这里返回 `true` 时的超额是"本页带上来的"，不是"页中途切断了"。
-    func exceeded(xmlBytes: UInt64, records: Int) -> Bool {
-        xmlBytes >= UInt64(maxXmlBytes) || records >= maxRecords
+    /// 🔴 判定必须在 `commit` **之前**、用**渲染后的真实字节**做。旧版 `exceeded(xmlBytes:)`
+    /// 是"页已落盘之后再问" ⇒ 每批最后一个页必然越界（真机实测 524,305 B）。
+    /// 「已写字节还没到预算」**不等于**「下一页放得下」—— 这是旧判据修不掉本缺陷的原因。
+    func accepts(xmlBytes: UInt64, records: Int, pageBytes: Int, pageRecords: Int) -> Bool {
+        xmlBytes + UInt64(max(0, pageBytes)) <= UInt64(maxXmlBytes)
+            && records + max(0, pageRecords) <= maxRecords
+    }
+
+    /// 放不下时的**收缩估算**：用本页实测的"每记录字节"算出剩余额度还能取几条。
+    ///
+    /// 唯一触发场景是"满页比整批预算还大"（正常批走不到这里）。`HealthKitRecordCursor.drain`
+    /// 会把它夹到 `min(返回值, 当前 limit − 1)` ⇒ 收缩严格单调、有限步终止；夹到 <1 时收手（零提交）。
+    /// 🔴 这是"每轮至少前进 1 条记录"的兜底：去掉它，页首回退就会退化成死循环。
+    func shrinkLimit(pageBytes: Int, pageRecords: Int, usedXmlBytes: UInt64, usedRecords: Int) -> Int {
+        guard pageRecords > 0 else { return 1 }
+        let perRecord = max(1, pageBytes / pageRecords)
+        let remainingBytes = Int(max(0, UInt64(maxXmlBytes) - usedXmlBytes))
+        let remainingRecords = max(0, maxRecords - usedRecords)
+        return max(1, min(remainingBytes / perRecord, remainingRecords))
     }
 
     /// route 收集的**先判后取**闸门：给定已累计的路线字节与文件数，本轮是否已到上界。
@@ -63,5 +79,78 @@ nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
     /// `RouteSyncStateMachine.rediscoveryCandidates` 在后续轮次继续发现。
     func routeBudgetExhausted(routeBytes: Int, routeFiles: Int) -> Bool {
         routeBytes >= maxRouteBytes || routeFiles >= maxRouteFiles
+    }
+
+    /// 缩一档：四个维度同时折半（**严格下降且 ≥1**）。
+    ///
+    /// 为什么折半而不是"少一点"：超界的成因是"我方预算与服务端口径不一致"，而差多少
+    /// **未知**（日志里只有一个 400 与一份已经被服务端 retain 掉的暂存上传）。折半给出
+    /// 确定性的上界收缩（`maxSteps` 档内 O(log) 收敛）；"少一点"可能一档都不够，
+    /// 于是每轮都白读一次 HealthKit —— 整个流程里最贵的一步。
+    func halved() -> DirectSyncBatchBudget {
+        DirectSyncBatchBudget(
+            maxXmlBytes: max(1, maxXmlBytes / 2),
+            maxRecords: max(1, maxRecords / 2),
+            maxRouteFiles: max(1, maxRouteFiles / 2),
+            maxRouteBytes: max(1, maxRouteBytes / 2)
+        )
+    }
+
+    /// **本地自校验**（P2b）：本批产物是否真的超过了**服务端硬上界**。
+    ///
+    /// 与 `accepts` 的分工：`accepts` 比的是**我方预算**（= 上界 × 0.9，写前判定用），
+    /// 这里比的是**服务端上界本身**（上传前自校验用）。两者都得"是"才说明"预算没挡住它"。
+    ///
+    /// 🔴 四个维度必须与服务端**逐条同口径**（`apps/api/src/direct-sync-ingest.ts`）：
+    ///   - `xmlBytes` ↔ `statSync(export.xml).size`（`:418`）；
+    ///   - `routeFiles` / `routeBytes` ↔ `inputTreeCheck` 对 `workout-routes/**.gpx` 的
+    ///     文件数与字节累加（`:367-374`，同为 `statSync` 口径）；
+    ///   - `deletions` ↔ **manifest 的 `deletedRecords.length + deletedWorkoutIds.length`**
+    ///     （`:439-443`）—— 🔴 **不是**"XML 里的记录条数"：`DIRECT_SYNC_MAX_RECORDS` 在直连车道
+    ///     **只约束删除配额**。拿记录条数来比会**误报**，把一批本来合法的载荷反复重导。
+    func exceedsServerBounds(
+        bounds: DirectSyncBounds,
+        xmlBytes: Int,
+        deletions: Int,
+        routeBytes: Int,
+        routeFiles: Int
+    ) -> Bool {
+        xmlBytes > bounds.maxXmlBytes
+            || deletions > bounds.maxRecords
+            || routeBytes > bounds.maxRouteBytes
+            || routeFiles > bounds.maxRouteFiles
+    }
+}
+
+/// 预算收敛的**档位**（P1b/P2b）。
+///
+/// 🔴 为什么必须是一个独立、可被回归断言的纯类型：收敛只是"多导一次"，看着无害，
+/// 但**不收敛**的后果是"每次同步都用满预算产出同一份必被拒的产物" ⇒ 每次同步白读一遍
+/// HealthKit（GB 级导出，整个流程最贵的一步）。档数、上限、折半全在这里，
+/// `DirectSyncBatchBudgetTests` 直接钉住；`HealthKitSync` 只做接线。
+nonisolated struct DirectSyncBudgetConvergence: Equatable, Codable, Sendable {
+    /// 已经收敛了几档。0 = 用握手 bounds × 0.9 的原预算。
+    var steps: Int = 0
+
+    /// 收敛上限（档）。
+    ///
+    /// 有界是**判据的一部分**、不是保守：不设上限 ⇒ "缩预算 + 每次全量导出"变成
+    /// 一个没有出口的昂贵循环（用户看到的是"同步一直在转"）。到顶就把确定性失败
+    /// 如实报出去、等人工处置。
+    static let maxSteps = 3
+
+    /// 未收敛（原预算）。
+    static let initial = DirectSyncBudgetConvergence()
+
+    var isExhausted: Bool { steps >= Self.maxSteps }
+
+    /// 再收敛一档。到顶后保持不变（**幂等**：重复触发不会越界，也不会让 `apply` 多折半）。
+    func advanced() -> DirectSyncBudgetConvergence {
+        DirectSyncBudgetConvergence(steps: min(steps + 1, Self.maxSteps))
+    }
+
+    /// 把收敛作用到预算上：折半 `steps` 次。
+    func apply(to budget: DirectSyncBatchBudget) -> DirectSyncBatchBudget {
+        (0..<steps).reduce(budget) { partial, _ in partial.halved() }
     }
 }

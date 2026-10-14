@@ -166,6 +166,9 @@ final class HealthKitSync {
     /// 读不到任何东西，于是**静默地什么都不做**。
     private static let backgroundRecoveryKey = "rai.hk.backgroundRecovery"
     private static let taskKey = "rai.hk.syncTask"
+    /// 预算收敛档位的键（P1b/P2b）。**刻意不放在 `taskKey` 里**：这条记忆唯一发挥
+    /// 作用的时刻，正是我们清掉 task 行的那一刻 —— 放进 task 就等于把它一起删了。
+    private static let budgetConvergenceKey = "rai.hk.budgetConvergence"
     /// Inclusive overlap so workouts finalized just after the previous export are not missed.
     private static let overlap: TimeInterval = 48 * 60 * 60
     private static let autoSyncInterval: TimeInterval = 15 * 60
@@ -1120,14 +1123,26 @@ final class HealthKitSync {
             } catch {
                 if handleCancellation(error) { return }
                 let httpError = error as? SyncHTTPError
-                if HealthSyncResumePolicy.disposition(
+                let disposition = HealthSyncResumePolicy.disposition(
                     statusCode: httpError?.statusCode,
                     errorCode: httpError?.code
-                ) == .keepTask {
+                )
+                if disposition == .keepTask {
                     lastError = friendlyMessage(error)
                     message = nil
                     phase = SyncPhase.failed.rawValue
                     return
+                }
+                // 🔴 P1b：本批**字节自身**超了服务端单批上限 ⇒ 先把预算收敛一档再清任务。
+                // 顺序不能反：`clearTask()` 之后"这一批"就不存在了，而收敛必须活过它，
+                // 否则下次同步会用同一个量级产出同一份必被拒的产物（每次白读一遍 HealthKit）。
+                // 收敛到上限仍被拒时，把确定性失败**如实报出去**、不再默默重导。
+                if disposition == .convergeBudget {
+                    let advanced = loadBudgetConvergence().advanced()
+                    saveBudgetConvergence(advanced)
+                    if advanced.isExhausted {
+                        lastError = "健康数据单批始终超过服务端上限，已停止自动重导；请稍后手动重试或联系维护者。"
+                    }
                 }
                 // 这个 task 不可能恢复了，先清掉它。留着它的后果不是"下次说不定能成"，
                 // 而是下一次同步仍会从上面那句 `inspect(sourceId:)` 进来、拿到同一个 404：
@@ -1280,6 +1295,11 @@ final class HealthKitSync {
                 // 而界面已经宣称"重新导入了全部"。漏掉哪一处都是**静默**的。
                 taskStore.forgetState(scope: activeScope)
                 UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))
+                // 第三处本地记忆：**预算收敛档位**（P1b/P2b）。语义与上面两处同源 ——
+                // 用户显式要求"从头来一次"就该回到满预算；收敛本是对"服务端拒过这个量级"
+                // 的临时让步（每档把四个维度都折半），不是永久降档。
+                // ⚠️ 只在这一处清：自动同步里清它会在下一次立刻重撞同一面墙。
+                clearBudgetConvergence()
             }
             // 🔴 这里原先还有第三个恢复分支：「UserDefaults 里记着一个失败 ZIP ⇒ 直接重传它」。
             // 它已随 P1 删除，理由是它**与 `SyncAtomicUnit` 覆盖同一件事、判据却各不相同**：
@@ -1327,31 +1347,62 @@ final class HealthKitSync {
             // 通知生成的字节去认领那条通知，那批新数据从此没人导。
             // 前台与后台都经过这里 ⇒ 确认逻辑只有一份。
             observeBackgroundIntentsForExportStart(for: serverURL)
+            // 单批预算（S2.1）：用本次握手宣告的 bounds 收敛（×0.9）；老服务端缺字段
+            // ⇒ `from` 回落保守常量。超界此前是"静默回退候选链路"（整库备份 + 两次
+            // 全库校验，线上 9.9–13.3 min），分批之后正常同步的每批都 ≤ 上界。
+            // 🔴 再叠一层**跨批收敛**（P1b）：服务端拒过"这个量级"之后，下一次不能再用
+            // 同一个量级重导 —— 收敛档位存在 `budgetConvergenceKey` 里，活过 `clearTask()`。
+            let baseBudget = loadBudgetConvergence()
+                .apply(to: DirectSyncBatchBudget.from(bounds: identity.directSyncBounds))
             let exported = try await HealthSyncCancellation.runDetached(
                 priority: .userInitiated,
                 onCancelledResult: { result in
                     try? FileManager.default.removeItem(at: result.zipURL)
                 }
             ) {
-                try await HealthKitExport.exportArchive(
-                    from: lowerBound,
-                    workoutAnchor: anchor,
-                    recordCursors: recordCursors,
-                    // 普通同步（按钮/快捷指令/自动）均续接记录游标。只有显式
-                    // 「重新导入全部」强制补读。权限扩大后的历史也由用户显式补读，
-                    // 不再把日常自动同步每七天升级成全历史导出。
-                    recordsForceRescan: full,
-                    routeStates: routeStates,
-                    routeDiscoveryCursor: routeDiscoveryCursor,
-                    // 人工重扫 = `full`（"重新导入全部"）：所有 workout 的状态复位成 `active`，
-                    // 于是这一轮每个都重查一次，不受低频间隔或候选数限制。
-                    routeForceRescan: full,
-                    // 单批预算（S2.1）：用本次握手宣告的 bounds 收敛（×0.9）；老服务端缺字段
-                    // ⇒ `from` 回落保守常量。超界此前是"静默回退候选链路"（整库备份 + 两次
-                    // 全库校验，线上 9.9–13.3 min），分批之后正常同步的每批都 ≤ 上界。
-                    budget: DirectSyncBatchBudget.from(bounds: identity.directSyncBounds),
-                    onProgress: onProgress
-                )
+                // 🔴 P2b 本地自校验：产物如果**真的**超了服务端硬上界，就把它留在本地、
+                // 缩一档预算重导 —— 而不是发出去换一个 400（那会连带卡死恢复链，见 P1b）。
+                // 判据是纯函数（`DirectSyncBatchBudget.exceedsServerBounds`）；与 `accepts`
+                // 的分工：后者比的是**我方预算**，前者比的是**服务端上界本身**。
+                // 有界：最多 `DirectSyncBudgetConvergence.maxSteps` 档，到顶就如实报出去。
+                var attempt = 0
+                while true {
+                    let attemptBudget = DirectSyncBudgetConvergence(steps: attempt).apply(to: baseBudget)
+                    let produced = try await HealthKitExport.exportArchive(
+                        from: lowerBound,
+                        workoutAnchor: anchor,
+                        recordCursors: recordCursors,
+                        // 普通同步（按钮/快捷指令/自动）均续接记录游标。只有显式
+                        // 「重新导入全部」强制补读。权限扩大后的历史也由用户显式补读，
+                        // 不再把日常自动同步每七天升级成全历史导出。
+                        recordsForceRescan: full,
+                        routeStates: routeStates,
+                        routeDiscoveryCursor: routeDiscoveryCursor,
+                        // 人工重扫 = `full`（"重新导入全部"）：所有 workout 的状态复位成 `active`，
+                        // 于是这一轮每个都重查一次，不受低频间隔或候选数限制。
+                        routeForceRescan: full,
+                        budget: attemptBudget,
+                        onProgress: onProgress
+                    )
+                    guard let bounds = identity.directSyncBounds,
+                          attemptBudget.exceedsServerBounds(
+                              bounds: bounds,
+                              xmlBytes: produced.xmlBytes,
+                              // ⚠️ 用**删除配额**（与服务端 `:439-443` 同口径），不是 XML 记录条数
+                              // —— 后者在直连车道不受服务端约束（P3b）。反了会把合法载荷反复重导。
+                              deletions: produced.deletionCount,
+                              routeBytes: produced.routeBytes,
+                              routeFiles: produced.routeCount
+                          ) else { return produced }
+                    // 这一份产物必被拒：先删掉再重导，别把中间产物留在 tmp。
+                    try? FileManager.default.removeItem(at: produced.zipURL)
+                    attempt += 1
+                    guard attempt < DirectSyncBudgetConvergence.maxSteps else {
+                        throw SyncHTTPError(
+                            message: "健康数据单批始终超过服务端上限，本次同步已停止；请稍后重试或联系维护者。"
+                        )
+                    }
+                }
             }
             transientExportURL = exported.zipURL
             try checkCancellation()
@@ -2570,6 +2621,31 @@ final class HealthKitSync {
 
     private func scopedKey(_ key: String, scope: String) -> String {
         "\(key).\(scope)"
+    }
+
+    /// 预算收敛的**跨批记忆**（P1b/P2b）。
+    ///
+    /// 🔴 为什么必须独立于 task 行：这条记忆唯一发挥作用的时刻，正是我们**清掉 task 行**
+    /// 的那一刻（服务端判定本批超上限 ⇒ 必须重导）。放进 `SyncTaskState` 就等于
+    /// `clearTask()` 把"别再撞同一面墙"的记忆一起删掉，于是下一轮用满预算产出同一份
+    /// 必被拒的产物 —— 每轮白读一遍 HealthKit（GB 级导出，整个流程最贵的一步）。
+    /// 作用域与 task 同源（`activeScope` = 服务端 URL 指纹），换服务端不共享。
+    private func loadBudgetConvergence() -> DirectSyncBudgetConvergence {
+        guard let data = UserDefaults.standard.data(forKey: scopedKey(Self.budgetConvergenceKey)),
+              let stored = try? JSONDecoder().decode(DirectSyncBudgetConvergence.self, from: data) else {
+            return .initial
+        }
+        return stored
+    }
+
+    private func saveBudgetConvergence(_ convergence: DirectSyncBudgetConvergence) {
+        guard let data = try? JSONEncoder().encode(convergence) else { return }
+        UserDefaults.standard.set(data, forKey: scopedKey(Self.budgetConvergenceKey))
+    }
+
+    /// 忘掉收敛（回到满预算）。调用点只有一处：用户显式「重新导入全部」。
+    private func clearBudgetConvergence() {
+        UserDefaults.standard.removeObject(forKey: scopedKey(Self.budgetConvergenceKey))
     }
 
     /// The SQLite journal is authoritative. Legacy UserDefaults data is read

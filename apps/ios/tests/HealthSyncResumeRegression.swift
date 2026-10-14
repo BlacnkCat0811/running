@@ -29,7 +29,42 @@ struct HealthSyncResumeRegression {
         try terminalJobIsAbandoned()
         try transientFailuresKeepTheTask()
         try pollingAndResumeAgreeOnTheSourceGoneStatus()
+        try oversizedBatchConvergesInsteadOfLivelocking()
         print("Health sync resume regression tests passed")
+    }
+
+    /// 🔴 P1b（2026-10-14）：inspect 的 `direct_sync_payload_exceeds_bounds` **必须**走
+    /// `.convergeBudget`，不能落进 `.keepTask`。
+    ///
+    /// 事故形态与上面那个 404 同构，只是入口换成 400：
+    /// ```
+    /// POST /v1/imports/uploads  200
+    /// POST /v1/imports/inspect  400 ×N   ← 此后**再无任何 uploads**
+    /// ```
+    /// 成因：磁盘行的 `sourceId` 留着 ⇒ `SyncAtomicUnit.nextStep` 恒返回 `.inspect` ⇒
+    /// 恢复分支每次拿同一个 `sourceId` 重撞同一个 400，而"批次字节"一个字都没改。
+    ///
+    /// 突变验证：把 `disposition` 里那行 code 分支删掉 ⇒ 本条必须变红
+    /// （它会落回 `.keepTask`，正是活锁的形态）。
+    private static func oversizedBatchConvergesInsteadOfLivelocking() throws {
+        try require(
+            HealthSyncResumePolicy.batchExceedsBoundsCode == "direct_sync_payload_exceeds_bounds",
+            "the batch-bound code drifted away from import-worker's laneRefusalFailure mapping"
+        )
+        // 真实形态：inspect 回 400 + 该 code（`import-routes.ts:99-108`）。
+        try require(
+            HealthSyncResumePolicy.disposition(
+                statusCode: 400,
+                errorCode: HealthSyncResumePolicy.batchExceedsBoundsCode
+            ) == .convergeBudget,
+            "an oversized batch must converge the budget — keeping the task re-inspects the same batch forever"
+        )
+        // ⚠️ 同一个 400 **没有**这个 code 时仍是瞬时失败：那不是"批次字节超界"，
+        // 别把一条确定的收敛路径扩成"所有 400 都收敛"。
+        try require(
+            HealthSyncResumePolicy.disposition(statusCode: 400, errorCode: nil) == .keepTask,
+            "a bare 400 must stay transient — only the payload-bounds code is a deterministic batch rejection"
+        )
     }
 
     /// 服务端说「没有这个暂存上传」⇒ 这个 task 不可能恢复。

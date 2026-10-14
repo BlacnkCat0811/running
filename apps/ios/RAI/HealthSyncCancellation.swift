@@ -28,6 +28,17 @@ nonisolated enum HealthSyncResumePolicy {
         case abandonTask
         /// 瞬时失败（网络 / 5xx / 鉴权 / 409 冲突）：保留 task，下次再试。
         case keepTask
+        /// 这一批**字节本身**超了服务端单批上限：重发同样的字节只会拿到同样的 400。
+        ///
+        /// 🔴 必须单独一档，两个方向都不能并：
+        ///   - 并进 `.keepTask` ⇒ **永久活锁**：磁盘行的 `sourceId` 留着 ⇒
+        ///     `SyncAtomicUnit.nextStep` 恒返回 `.inspect` ⇒ 每次同步都撞同一个 400，
+        ///     而 Nginx 里**再也不会出现 `uploads`**（与 2026-09-22 那个 404 死锁同构，
+        ///     只是入口从 404 换成了 400）。
+        ///   - 并进 `.abandonTask` ⇒ 少了"缩预算"这一步：下次同步用满预算产出同一份
+        ///     必被拒的产物 ⇒ 每次白读一遍 HealthKit。
+        /// 正确处置 = **收敛预算**（缩一档并记住）+ 清任务行重导。
+        case convergeBudget
     }
 
     /// 服务端明确回答「没有这个暂存上传」。
@@ -37,7 +48,22 @@ nonisolated enum HealthSyncResumePolicy {
     /// 终结的任务不会自己变好，拿同一个 `jobId` 再等只是重放同一个错误。
     static let terminalJobCode = "import_job_failed"
 
+    /// 服务端对"本批超出单批上限"的稳定码。
+    ///
+    /// 出处：`apps/api/src/import-worker.ts:128-132`（`xml_exceeds_bounds` /
+    /// `manifest_exceeds_bounds` / `deletions_exceed_bounds` / `route_exceeds_bounds`
+    /// 四个 reason 一律折成这一个 code）＋ `apps/api/src/routes/import-routes.ts:99-108`
+    /// （inspect 用它回 400，并带 `bounds`/`actual`）。契约侧的承诺写在
+    /// `packages/api-contracts/src/index.ts:682`（「⇒ 收敛拆批预算后重传」）。
+    ///
+    /// ⚠️ 这条**不**走 `SyncUploadRecovery.contentRejectionStatuses`：那套集合服务的是
+    /// `/v1/imports/uploads` 端点的 400，与 inspect 的 400 是两条路
+    /// （inspect 的 catch 里没有任何 contentRejection 消费点，改那边对本缺陷无效）。
+    static let batchExceedsBoundsCode = "direct_sync_payload_exceeds_bounds"
+
     static func disposition(statusCode: Int?, errorCode: String?) -> Disposition {
+        // 🔴 先判 code、后判状态码：它是 400 而不是 404，落到下面只会得到 `.keepTask`。
+        if errorCode == batchExceedsBoundsCode { return .convergeBudget }
         if statusCode == sourceGoneStatusCode { return .abandonTask }
         if errorCode == terminalJobCode { return .abandonTask }
         return .keepTask

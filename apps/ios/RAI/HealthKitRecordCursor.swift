@@ -35,38 +35,81 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
         force || historyReplayPhase != nil
     }
 
+    /// 单批预算下"这一整页放得下吗"的裁决（S2.5 写前判定，2026-10-14）。
+    ///
+    /// 只有两个 case，**没有"超预算也提交"** —— "先落盘再检查"正是被本改造删掉的旧行为
+    /// （它让每批最后一个页整体越界：真机实测 524,305 B）。
+    nonisolated enum PageDecision: Equatable, Sendable {
+        /// 整页提交，锚点推进到该页 `next`，`limit` 复位到满页。
+        case accept
+        /// 本页放不下：整页不提交、锚点不推进；用给定 `limit` 重查**同一**锚点。
+        case retryWithLimit(Int)
+    }
+
     /// An additions-empty page is not EOF when it contains deletions. Return
     /// only a fully consumed cursor; callers persist it after server acceptance.
     ///
-    /// - Parameter shouldStop: 每消费完**一整页**之后询问"单批预算是否已尽"（S2.1，观测阶段 2）；
-    ///   `true` 时在**页末尾**返回 `hasMorePages: true`，`anchor` 为该页的 `next` ——
-    ///   下一次从这里继续，不重读、不跳过。
+    /// ## 写前判定（S2.5）
     ///
-    /// 🔴 为什么**必须**停在页末尾（既不能停在页中途、也不能"记住读了几条"）：
-    ///   `HKAnchoredObjectQuery` 的 anchor 粒度是**页**（opaque 的 `next`，没有实体级续传点）。
-    ///   停在页中途意味着下一轮从**同一页的页首**重读 —— 预算不变 ⇒ 永远停在同一处（死循环）；
-    ///   而"跳到页尾"会丢数据。停页末尾 + 返回该页 `next` 是唯一没有这两种病的停点。
-    ///   由此也保证**每轮至少消费 1 整页**（预算检查在 `consume` 之后），任何额度下都有界前进。
+    /// 预算判定发生在**整页落盘之前**：调用方把 `render` 的产物（该页完整字节）交给
+    /// `decide`，只有 `.accept` 才 `commit`。
     ///
-    /// - Returns: `(anchor, hasMorePages)`。`hasMorePages == false` 只出现在读到空页
-    ///   （`added` 与 `deleted` 同时为空 = 真到底）——不存在第三处。
-    static func drain<Anchor, Sample, Deletion>(
+    /// 🔴 为什么必须是"写前"而不是"页末尾检查"：服务端按**字节**判上界
+    /// （`statSync(export.xml).size`），而页是**不可分**的提交单位。先落盘再检查 ⇒
+    /// 每批最后一个页**整体越界**（2026-10-14 真机：预算 1,887,436 B → 实际 2,411,741 B，
+    /// 超 524,305 B，被 400 硬拒并卡死同步链）。
+    /// 页末尾检查**修不掉它**：「已写字节还没到预算」不等于「下一页放得下」。
+    ///
+    /// ## 停在哪：页首，不是页尾
+    ///
+    /// 放不下 ⇒ **整页不提交、锚点不推进**（返回页前锚点），这一页留给下一批。
+    /// 下一批的预算是重新给的满额 ⇒ 不是死循环。唯一会卡住的形态是"**单页本身大于整批预算**"，
+    /// 它由 `.retryWithLimit` 兜住（收缩 `limit` 重查同一锚点，极限到 1 条）。
+    ///
+    /// 🔴 前进性粒度从「每轮 ≥1 **整页**」降到「每轮 ≥1 **条记录**」（或本轮明确让给下一批）。
+    /// 旧的"每轮至少 1 整页"是**拿超额换前进**，正是本缺陷的成因，不能保留；
+    /// 但前进性本身必须保留（否则死循环），这就是 `.retryWithLimit` 存在的唯一理由。
+    ///
+    /// - Returns: `(anchor, hasMorePages, stoppedBeforePage)`。
+    ///   - `hasMorePages == false` 只出现在读到空页（`added` 与 `deleted` 同时为空 = 真到底）。
+    ///   - `anchor` 是 `Anchor?`：停止在**页首**且该段一页都没读时，返回的仍是**该段起点**
+    ///     （`.historyFromScratch` 段的起点就是 `nil`）⇒ 调用方不能无条件把它当"前进后的锚点"。
+    ///   - `stoppedBeforePage == true` = 因"连一条都放不进剩余额度"而在**页首**收手：
+    ///     本段本轮零进展。这不是错误（下一批重新给满额预算），但调用方要能区分
+    ///     "读完了" / "读了一部分" / "本轮一条都没读"。
+    static func drain<Anchor, Sample, Deletion, Rendered>(
         from start: Anchor?,
-        query: (Anchor?) async throws -> (added: [Sample], deleted: [Deletion], next: Anchor),
-        consume: ([Sample], [Deletion]) throws -> Void,
-        shouldStop: () -> Bool = { false }
-    ) async throws -> (anchor: Anchor, hasMorePages: Bool) {
+        pageLimit: Int,
+        query: (Anchor?, Int) async throws -> (added: [Sample], deleted: [Deletion], next: Anchor),
+        render: ([Sample], [Deletion]) throws -> Rendered,
+        decide: (Rendered, Int) -> PageDecision,
+        commit: (Rendered, Int) throws -> Void
+    ) async throws -> (anchor: Anchor?, hasMorePages: Bool, stoppedBeforePage: Bool) {
         var anchor = start
+        var limit = pageLimit
         while true {
             try Task.checkCancellation()
-            let page = try await query(anchor)
+            let page = try await query(anchor, limit)
             try Task.checkCancellation()
-            try consume(page.added, page.deleted)
-            // 空页 = 真到底（两个集合都空）；在预算检查**之前**返回 —— 到底了就没有"更多页"。
-            if page.added.isEmpty && page.deleted.isEmpty { return (page.next, false) }
-            anchor = page.next
-            // 预算检查放在页末尾（`consume` 之后）：保证"每轮至少 1 整页"的有界前进。
-            if shouldStop() { return (page.next, true) }
+            // 空页 = 真到底（两个集合都空）；与预算无关，永远没有"更多页"。
+            if page.added.isEmpty && page.deleted.isEmpty { return (page.next, false, false) }
+            let rendered = try render(page.added, page.deleted)
+            switch decide(rendered, page.added.count) {
+            case .accept:
+                try commit(rendered, page.added.count)
+                anchor = page.next
+                limit = pageLimit
+            case .retryWithLimit(let requested):
+                // 🔴 夹紧规则（收敛性全靠它）：请求值**严格小于**当前 `limit` 才采纳，否则折半；
+                // 当前 `limit` 已经是 1 ⇒ 没有更小的页可取了，收手（零提交）。
+                // 没有折半兜底，一次写错的 `requested`（例如恒返回满页值）会让每轮只减 1 条
+                // ⇒ 上千次查询才收敛。折半把它压到 ~log2(pageLimit) 次。
+                guard limit > 1 else {
+                    // 连 1 条都放不进剩余额度 ⇒ 本段到此为止，零提交、零推进。
+                    return (anchor, true, true)
+                }
+                limit = requested < limit ? max(1, requested) : max(1, limit / 2)
+            }
         }
     }
 }
