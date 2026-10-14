@@ -421,14 +421,20 @@ export function preflightDirectSyncPayload(inputPath: string):
   }
   const manifestFileBytes = statSync(manifestPath).size;
   if (manifestFileBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    // 🔴 键名必须是 `maxManifestBytes`，不是 `maxXmlBytes`（P3a，2026-10-14）。
+    // `actual` 报的是 `manifestBytes`，`bounds` 却曾报 `maxXmlBytes` ⇒ 同一个对象的两半
+    // 在说两件事，排查时无法区分"manifest 超了"还是"xml 超了"。
+    // 上界常量**共用**（`DIRECT_SYNC_MAX_XML_BYTES`）是**刻意的**：manifest 与 export.xml
+    // 是同一批里的两个自述文件，各自都要能装进同一个壳上界。共用常量 ≠ 共用键名。
     return { ok: false, rejection: rejectDirect("manifest_exceeds_bounds", "prepare",
-      { actual: { manifestBytes: manifestFileBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
+      { actual: { manifestBytes: manifestFileBytes }, bounds: { maxManifestBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
   }
   const manifestText = readFileSync(manifestPath, "utf8");
   const manifestTextBytes = Buffer.byteLength(manifestText);
   if (manifestTextBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    // 同上（P3a）：键名报的是**被量的那个量**，与 `actual.manifestBytes` 对齐。
     return { ok: false, rejection: rejectDirect("manifest_exceeds_bounds", "prepare",
-      { actual: { manifestBytes: manifestTextBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
+      { actual: { manifestBytes: manifestTextBytes }, bounds: { maxManifestBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
   }
   const manifest = parseHealthSyncManifest(manifestText);
   // v2 身份是这条车道的前提：没有 UUID 映射就无法保证"同一实体"（§7 的稳定身份）。

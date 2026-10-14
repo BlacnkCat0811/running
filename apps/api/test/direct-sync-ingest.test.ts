@@ -304,6 +304,26 @@ test("GPX 路线：路线变更同样要求分析，且路线版本对读侧可�
   });
 });
 
+// P3a（2026-10-14）：`manifest_exceeds_bounds` 的响应 `bounds` 键必须是 `maxManifestBytes`。
+//
+// 为什么这里要一条**源码级**判据而不是行为判据：造一个 >8 MiB 的 manifest 夹具成本很高
+// （manifest 的体积由删除账本撑起来），而这条错配的失效方式是**静默**的 ——
+// `actual` 报 `manifestBytes`、`bounds` 却报 `maxXmlBytes`，同一个对象的两半在说两件事，
+// 排查时无法区分"manifest 超了"还是"xml 超了"。它不会让任何**既有**测试变红。
+test("manifest_exceeds_bounds 的 bounds 键必须与 actual 同指一个量（P3a）", () => {
+  const source = readFileSync(join(import.meta.dirname, "../src/direct-sync-ingest.ts"), "utf8");
+  const sites = source.split(/\r?\n/).filter((line) => line.includes("manifestBytes: manifest"));
+  assert.equal(sites.length, 2,
+    "manifest 上界有两处判定（文件字节 / 文本字节），两处都必须带 bounds");
+  for (const line of sites) {
+    assert.ok(line.includes("bounds: { maxManifestBytes: DIRECT_SYNC_MAX_XML_BYTES }"),
+      `manifest 的 bounds 键必须报 maxManifestBytes（= 被量的那个量），实际：${line.trim()}`);
+  }
+  // 反向对照：xml 那一处必须**仍然**报 maxXmlBytes —— 否则上面那条可以靠"把两处改成同一个键"骗过去。
+  assert.ok(source.includes("bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES }"),
+    "xml_exceeds_bounds 的 bounds 键必须保持 maxXmlBytes（两处误报同一个键就分不清谁超了）");
+});
+
 test("超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1）", async () => {
   await fixture(async ({ main, input }) => {
     // 超过 xml 上界（2026-10-14 起 8 MiB；此前 2 MiB）。不做"先收一半"。
