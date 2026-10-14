@@ -564,6 +564,31 @@ seedImportGenerations全库补种
 它证明「分片未实现 + iOS 预算不覆盖 route」的组合缺口：`DirectSyncBatchBudget` 只含
 xml/records、route 无预算维度，且停止点可超尾页 ⇒ 仅“iOS 分批版铺开”不足以让回填批过界。
 同日放宽直连单批上界（xml 2 → 8 MiB、route 32 → 64 MiB，见 `direct-sync-ingest.ts` 常量注释）
-以先恢复数据流。iOS 侧 route 预算维度**已补**（`DirectSyncBatchBudget` 增 maxRouteFiles / maxRouteBytes 两维；收集侧为“先判后取”闸门——`HealthKitExport.swift` 逐 workout 循环，状态与文件同进同退，余量由 rediscovery 轮转补）；尾页超额记为已知边界（服务端 8 MiB 对“预算 ×0.9 + 尾页”留有余量，根修在 iOS 分批侧另议）。
+以先恢复数据流。iOS 侧 route 预算维度**已补**（`DirectSyncBatchBudget` 增 maxRouteFiles / maxRouteBytes 两维；收集侧为“先判后取”闸门——`HealthKitExport.swift` 逐 workout 循环，状态与文件同进同退，余量由 rediscovery 轮转补）。
+
+🔴 2026-10-14 尾页超额**已根治**（方案见 `deliverables/DIRECT_SYNC_TAIL_PAGE_ROOT_FIX_PLAN_2026-10-14.md`）：
+「服务端 8 MiB 对『预算 ×0.9 + 尾页』留有余量」**不再是一条判据，只是兜底**。
+根因是「提交单位」与「上界单位」不匹配——服务端按**字节**判上界（`statSync(export.xml).size`），
+iOS 按**页**提交（`HKAnchoredObjectQuery` `limit: 1000`），而预算检查发生在页**已落盘之后**
+（真机实测超 524,305 B：预算 1,887,436 → 实际 2,411,741）。四处改动：
+
+1. **记录侧写前判定**：`HealthKitRecordCursor.drain` 的 `PageDecision` —— 整页渲染 → 判定 → 整页提交或整页不提交，
+   停止时锚点回退到**页前**。`PageDecision` **没有「超预算也提交」这个 case**（类型上不可能）。
+2. **自适应 limit**：放不下 ⇒ `.retryWithLimit(n)` 缩小 `limit` 重查**同一锚点**（可缩到 1 条），
+   使前进粒度从「每轮 ≥1 整页」降到「每轮 ≥1 条记录」⇒ 页首回退不退化成死循环；
+   夹紧规则（请求值须严格小于当前值，否则折半）保证 `limit` 单调下降、O(log n) 收敛。
+3. **route 侧整文件判定**：`routeEntries` 先算字节、判定放得下再落盘，装不下则**整个 workout 的轨迹一起放弃**
+   （回滚本轮已写分片）⇒ route 超额上界从「一整个 GPX 文件」降到 0。
+4. **`budgetStopReason`**（`.recordPage` / `.recordNone` / `.routeFile`，两段收集取并）成为 `hasMorePages`
+   的**唯一来源**（同一事实不存两份，杜绝「说没截断、其实截断了」这种类型上排除不掉的不一致）。
+
+同批另有两条独立修复：
+**本地自校验**（上传前用真实产物对比服务端硬上界，超了就缩预算重导，而不是发出去换一个 400）
+与 **inspect-400 出口**（`direct_sync_payload_exceeds_bounds` 单独一档 `.convergeBudget`：收敛一档预算 + 清任务行重导，
+不再落进 `.keepTask` 把同一个 `sourceId` 永远重撞 —— 与 2026-09-22 的 404 死锁同构，只是入口从 404 换成 400）。
+
+剩余边界（如实标注）：收敛档位有上限（`DirectSyncBudgetConvergence.maxSteps = 3`），到顶后如实报维护文案、
+不再自动重导；收敛记忆存在 `UserDefaults`（键 `rai.hk.budgetConvergence`，按服务端 URL 作用域），
+只在用户显式「重新导入全部」时清除。
 
 应用不执行备份；外部备份/恢复由用户运维安排。
