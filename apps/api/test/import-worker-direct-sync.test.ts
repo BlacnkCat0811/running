@@ -264,13 +264,13 @@ test("2e 回归：带 GPX 路由的载荷也能走这条车道（准入摘要与
 });
 
 test("回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选链路拦在整库备份前）", async () => {
-  // 2 MiB 归一化上界（`direct-sync-ingest.ts` 的 `DIRECT_SYNC_MAX_XML_BYTES`）：
+  // 8 MiB 归一化上界（`direct-sync-ingest.ts` 的 `DIRECT_SYNC_MAX_XML_BYTES`，2026-10-14 由 2 MiB 放宽）：
   // 超限会让 record-only 快通路与统一接收器**都**拒收 ⇒ "为什么回退"的一条完整样本。
   const padding = `<Record type="HKQuantityTypeIdentifierStepCount" sourceName="Watch" unit="count" value="999"
     startDate="2018-01-01 00:00:00 +0000" endDate="2018-01-01 00:01:00 +0000">
     <MetadataEntry key="RAIHealthKitSampleUUID" value="00000000-0000-0000-0000-00000000abcd"/>
   </Record>\n`;
-  await fixture({ xml: workoutXml() + padding.repeat(11_000) }, async ({ input, make }) => {
+  await fixture({ xml: workoutXml() + padding.repeat(36_000) }, async ({ input, make }) => {
     const worker = make();
     // 候选链路在"创建整库备份"处被拦下：本用例要证明的是**拒因可见**，不是"旧链路能跑完"
     // （后者由 worker.test.ts 的完整候选用例覆盖，那条会真做备份与全库校验）。
@@ -292,8 +292,8 @@ test("回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选
         ["data-only:fast_path_rejected", "direct-sync:xml_exceeds_bounds"],
         "两条车道各自的拒因必须按尝试顺序留痕");
       const direct = (lane.rejections ?? []).find((entry) => entry.source === "direct-sync");
-      assert.equal(direct?.bounds?.maxXmlBytes, 2 * 1024 * 1024, "拒因必须带上界");
-      assert.ok((direct?.actual?.xmlBytes ?? 0) > 2 * 1024 * 1024, "拒因必须带实测字节数");
+      assert.equal(direct?.bounds?.maxXmlBytes, 8 * 1024 * 1024, "拒因必须带上界");
+      assert.ok((direct?.actual?.xmlBytes ?? 0) > 8 * 1024 * 1024, "拒因必须带实测字节数");
     } finally { await worker.close(); }
   });
 });

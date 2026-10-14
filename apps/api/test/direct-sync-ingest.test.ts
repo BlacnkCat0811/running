@@ -306,17 +306,17 @@ test("GPX 路线：路线变更同样要求分析，且路线版本对读侧可�
 
 test("超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1）", async () => {
   await fixture(async ({ main, input }) => {
-    // 超过 2 MiB 归一化原始内容上限（§14.3 P01）。不做"先收一半"。
-    const oversized = await input(record(a, "1".repeat(2_200_000)));
+    // 超过 xml 上界（2026-10-14 起 8 MiB；此前 2 MiB）。不做"先收一半"。
+    const oversized = await input(record(a, "1".repeat(8_800_000)));
     const oversizedOutcome = await applyDirectSyncImport(oversized);
     assert.ok(isDirectSyncRejection(oversizedOutcome),
       `超限载荷必须被拒收，实际：${JSON.stringify(oversizedOutcome)}`);
     assert.equal(oversizedOutcome.reason, "xml_exceeds_bounds");
     assert.equal(oversizedOutcome.stage, "prepare");
     // 观测版的核心承诺：拒收**带实测值与上界**（"为什么拒"不能只有结论）。
-    assert.ok((oversizedOutcome.actual?.xmlBytes ?? 0) > 2 * 1024 * 1024,
+    assert.ok((oversizedOutcome.actual?.xmlBytes ?? 0) > 8 * 1024 * 1024,
       "拒收记录必须带实测字节数");
-    assert.equal(oversizedOutcome.bounds?.maxXmlBytes, 2 * 1024 * 1024);
+    assert.equal(oversizedOutcome.bounds?.maxXmlBytes, 8 * 1024 * 1024);
     // 输入目录里有非 GPX 的杂物也不合格：输入集合必须可枚举。
     const dirty = await input(record(a));
     writeFileSync(join(dirty.inputPath, "notes.txt"), "hello");

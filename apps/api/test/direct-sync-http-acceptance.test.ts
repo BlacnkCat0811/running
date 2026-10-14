@@ -51,9 +51,10 @@ const POLL_BUDGET_MS = 120_000;
 /**
  * 强杀用例的载荷条数。
  *
- * 它取的是"写事务长到能在中间取到样本"与"留在直连上界内"之间的值：上界是 §14.3 P01 的
- * 5000 条 / 2 MiB（`DATA_ONLY_MAX_RECORDS` / `DATA_ONLY_MAX_XML_BYTES`，两条直连车道共用）。
- * 越界不会报错，只会让用例悄悄掉回旧候选链路 —— 那时"强杀"测的是另一条车道，而报告里看不出。
+ * 它取的是"写事务长到能在中间取到样本"与"留在直连上界内"之间的值：上界是直连 xml 的
+ * 8 MiB（2026-10-14 由 2 MiB 放宽；此前与 record-only 快通路共用 `DATA_ONLY_MAX_XML_BYTES`，
+ * 快通路至今仍为 2 MiB）。界内约束必须显式成立：越界时这些用例测的就不是写事务路径了
+ * （收口前是静默回退候选链路，收口后是显式失败）——两种都会让报告看不出差别。
  *
  * 它对**丢回复**用例同样是必需的：从"回执落库"到"父进程把终态写出去"的窗口只有几十毫秒
  * （实测：小载荷 59 ms，4500 条约 140 ms），而 `child.kill()` 自身有一段不可控延迟。
@@ -82,10 +83,10 @@ function analysisLargeFixtureXml(): string {
   return recordOnlyLargeFixtureXml().replace("</HealthData>", `${workout}</HealthData>`);
 }
 
-/** 夹具自带的上界自检：越界会静默掉回旧链路（备份 + 换库），所以每次构造都验一遍。 */
+/** 夹具自带的上界自检：越界就不在"直连车道内的批"里（旧版静默回退，收口后显式失败），所以每次构造都验一遍。 */
 function assertWithinDirectSyncBounds(xml: string): void {
   const bytes = Buffer.byteLength(xml, "utf8");
-  assert.ok(bytes < 2 * 1024 * 1024, `夹具载荷必须留在直连上界内（2 MiB），实际 ${bytes} 字节`);
+  assert.ok(bytes < 8 * 1024 * 1024, `夹具载荷必须留在直连上界内（8 MiB，2026-10-14 起），实际 ${bytes} 字节`);
   assert.ok(xml.split("<Record ").length - 1 <= 5000, "夹具载荷必须留在 5000 条上界之内");
 }
 
@@ -829,8 +830,8 @@ test("A05：COMMIT 前强杀真子进程 ⇒ 没有半批，重启后任务重�
   const api = session(server.baseUrl);
   try {
     // 载荷要**足够大**：写事务得长到能在它中间取到样本。但它同时必须**留在直连上界之内**
-    // （§14.3 P01：每批 ≤ 5000 条且 ≤ 2 MiB 归一化原始内容）—— 越界不会报错，只会让这条用例
-    // 悄悄掉回旧候选链路，于是"强杀"测的是另一条车道。第一次写这条用例时用了 9000 条，
+    // （直连 xml 上界，2026-10-14 起 8 MiB）—— 收口后越界是显式失败（旧版是静默回退候选链路），
+    // 两种都会让"强杀"测的变成失败路径而不是写事务。第一次写这条用例时用了 9000 条，
     // 日志里出现的是 `var/backups`（旧链路），所以上界在这里被显式钉住。
     const xml = recordOnlyLargeFixtureXml();
     assertWithinDirectSyncBounds(xml);

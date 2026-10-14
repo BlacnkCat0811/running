@@ -65,11 +65,12 @@ test("真实 /v1/handshake 宣告 factsAnalysisContractVersion=1，且既有能�
     // 观测阶段 1（S1.2）：直连单批上界随握手暴露 —— iOS 分批版据此收敛拆批预算。
     // 数值与 `direct-sync-ingest.ts` 的常量同源；这里按**字面量**钉住，
     // 两处任意一边改了而另一边没跟，这条先红。
+    // 2026-10-14 放宽（xml 2→8 MiB、route 32→64 MiB，理由见 `direct-sync-ingest.ts` 常量注释）。
     assert.deepEqual(handshake.directSyncBounds, {
-      maxXmlBytes: 2 * 1024 * 1024,
+      maxXmlBytes: 8 * 1024 * 1024,
       maxRecords: 5000,
       maxRouteFiles: 200,
-      maxRouteBytes: 32 * 1024 * 1024
+      maxRouteBytes: 64 * 1024 * 1024
     }, "directSyncBounds 必须随 /v1/handshake 暴露（缺它 iOS 只能回落保守常量）");
   } finally {
     await stopApi(child);

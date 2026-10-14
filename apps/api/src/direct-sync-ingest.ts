@@ -9,7 +9,7 @@ import {
 import type { ImportJobResponse } from "@rai/api-contracts";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 import {
-  DATA_ONLY_MAX_RECORDS, DATA_ONLY_MAX_XML_BYTES, NATIVE_VERSION, NIGHT_FEEDING_TYPE_VALUES,
+  DATA_ONLY_MAX_RECORDS, NATIVE_VERSION, NIGHT_FEEDING_TYPE_VALUES,
   RecordDeltaNotEligibleError, canonicalizeNightsForWindow, canonicalizeRunningWorkouts,
   classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes,
   parseAppleHealthXml, parseHealthSyncManifest, type DirectSyncPayloadFacts,
@@ -49,19 +49,30 @@ import { digestHealthKitExportContent } from "./import-sources.js";
 export const DIRECT_SYNC_WRITE_GUARD = "rai_direct_sync_may_not_write_analysis_tables";
 
 /**
- * 单批上界沿用 record-only 车道的常量（§14.3 P01：每批 ≤ 5000 条且 ≤ 2 MiB 归一化原始内容）。
- * 超限的载荷**不做**分片（§5.2 的分片计划还没实现）—— 直接不合格、回退旧链路，
+ * 单批上界（§14.3 P01 的"每批 ≤ 5000 条"仍成立；xml 上界 2026-10-14 由 2 MiB 放宽为 8 MiB）。
+ *
+ * 🔴 放宽的原因（2026-10-14 实测）：收口版上线当天，手机全量回填批（xml 2,411,741 B /
+ * route 34,009,725 B）被 `route_exceeds_bounds` + `xml_exceeds_bounds` 双拒 ——
+ * iOS 分批预算（`DirectSyncBatchBudget`）只覆盖 xml/records、且可超尾页，
+ * 沿用 record-only 车道的 2 MiB 会让**正常**回填批硬失败（收口后不再回退旧链路）。
+ * 8 MiB 覆盖 iOS 依新 bounds 收敛的预算（8 × 0.9 MiB + 尾页余量）。
+ * 超限的载荷**不做**分片（§5.2 的分片计划还没实现）—— 直接不合格、显式拒绝，
  * 而不是"先收一半"。
  */
-export const DIRECT_SYNC_MAX_XML_BYTES = DATA_ONLY_MAX_XML_BYTES;
+export const DIRECT_SYNC_MAX_XML_BYTES = 8 * 1024 * 1024;
 export const DIRECT_SYNC_MAX_RECORDS = DATA_ONLY_MAX_RECORDS;
 /**
  * 路线上界是**临时值**（每批文件数与合计字节），口径按 §14.3 P05（轨迹点数与分块单独计量）。
  * ⚠️ 它们**不是**实测结论：P05 要求目标云机实测，本环境给不了。取这两个数的目的是
- * "输入目录里能有什么必须可枚举、可上界"，而不是性能结论；超过上界 ⇒ 不合格回退旧链路。
+ * "输入目录里能有什么必须可枚举、可上界"，而不是性能结论；超过上界 ⇒ 不合格显式拒绝。
+ *
+ * 🔴 2026-10-14 放宽 32 → 64 MiB：手机路线回填批实测 62 文件 / 36.0 MB 磁盘
+ * （服务端口径 58 文件 / 34,009,725 B），而 iOS 侧**没有** route 预算维度
+ * （`DirectSyncBatchBudget` 只含 xml/records）⇒ 32 MiB 会把正常回填批硬拒。
+ * 文件数上界 200 不变（实测 62）。
  */
 export const DIRECT_SYNC_MAX_ROUTE_FILES = 200;
-export const DIRECT_SYNC_MAX_ROUTE_BYTES = 32 * 1024 * 1024;
+export const DIRECT_SYNC_MAX_ROUTE_BYTES = 64 * 1024 * 1024;
 
 /**
  * 直连拒收的**稳定机器码**（观测版，2026-10-14 实施方案 §5.2 S1.1）。
@@ -445,7 +456,7 @@ async function preparePayload(input: DirectSyncImportInput): Promise<PrepareOutc
   // 两者都折进 `workout-routes/**` 的路由内容。2026-10-13 实测的缺陷：这里曾经只算
   // XML+manifest（`digestHealthKitRecordSnapshot`），于是任何**带 GPX** 的载荷都会在
   // "载荷已变更"这句错误结论上**硬失败**（不是回退）—— 而 GPX 正是这条车道要接的类型之一。
-  // 代价：多读一遍 XML 与路由文件（上界 2 MiB + 32 MiB，见上面的常量），换来"同一件事只有一处算法"。
+  // 代价：多读一遍 XML 与路由文件（上界 8 MiB + 64 MiB，见上面的常量），换来"同一件事只有一处算法"。
   const capturedSha256 = importPayloadSha256(await digestHealthKitExportContent(input.inputPath), {
     preserveAbsent: true, contractVersion: CONTRACT_VERSION,
     engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint()
