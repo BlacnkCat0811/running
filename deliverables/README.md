@@ -8,6 +8,14 @@
 
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
+- [INCREMENTAL_SYNC_IMPLEMENTATION_PLAN_2026-10-14.md](INCREMENTAL_SYNC_IMPLEMENTATION_PLAN_2026-10-14.md)：
+  **纯增量原地同步改造 · 实施方案（可执行版 v2）** —— 本轮的**实施锚定文档**（非审查报告）。
+  基线 `51b19cf`（= origin/main = 生产 HEAD），目标：回退率降 0 + 消灭两次全库校验成本，不动 DB 引擎、
+  不加 schema 迁移。含 5 阶段逐步操作（含输入/输出/验收/回滚）、C1–C8 前置条件（唯一硬阻断 = 带校验冷备 +
+  副本恢复验证）、T1–T21 验收用例、R-01~R-10 风险登记册、L1–L5 分级回滚、行号索引。
+  关键决策 R1：**iOS 分批版先行（阶段 2）→ 服务端收口版后行（阶段 3）**（收口版 × 旧 iOS = 超界批次永久 400）。
+  实施完成后本文档应归档/删除（符合本目录"不长期保留实施计划"的约定）。
+
 - [DIRECT_SYNC_ANALYSIS_WAKE_FIX_2026-10-13.md](DIRECT_SYNC_ANALYSIS_WAKE_FIX_2026-10-13.md)：
   **直连车道「登记了分析任务，但没人唤醒消费者」的定位与修复** ——
   `direct-sync-ingest.ts` 在同一个主库事务里登记了 `recompute_jobs`，而 import 终态回调
