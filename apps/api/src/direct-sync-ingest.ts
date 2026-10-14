@@ -397,6 +397,13 @@ const refuse = (
 export function preflightDirectSyncPayload(inputPath: string):
   | { ok: true; xmlPath: string; manifest: HealthSyncManifest }
   | { ok: false; rejection: DirectSyncRejection } {
+  // 🔴 输入目录整体缺失 ⇒ 受控拒收，不让 ENOENT 冒泡成 500。
+  // 正常流程不会走到这里（inspect 路由对"已导入"来源已在上一层跳过本函数），
+  // 这是 worker 兜底与异常态（目录被外部删除）的防线。
+  if (!existsSync(inputPath)) {
+    return { ok: false, rejection: rejectDirect("missing_required_files", "prepare",
+      { detail: "input_path_missing" }) };
+  }
   const entries = readdirSync(inputPath);
   const xmlName = entries.includes("export.xml") ? "export.xml" : "导出.xml";
   if (!entries.includes(xmlName) || !entries.includes("sync-manifest.json")) {
@@ -609,7 +616,8 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
   if (!/^[a-f0-9]{64}$/.test(input.payloadSha256)) {
     return rejectDirect("payload_identity_invalid", "read", { detail: "payloadSha256 不是 64 位十六进制" });
   }
-  const entries = readdirSync(input.inputPath);
+  // 输入目录的存在性与结构由 `preparePayload` → `preflightDirectSyncPayload` 统一判定
+  // （单一来源；原先这里有一次**只读不用**的 `readdirSync`，对缺失目录会抛 ENOENT ⇒ 500）。
   const prepared = await preparePayload(input);
   if (!prepared.ok) return prepared.rejection;
   const payload = prepared.payload;

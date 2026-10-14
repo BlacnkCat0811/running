@@ -90,7 +90,11 @@ export function registerImportRoutes(app: FastifyInstance, dependencies: {
       // （`preflightDirectSyncPayload`，单一来源）—— 超界/不合规的载荷在这里拿到稳定码 +
       // bounds/actual，客户端据此拆批；不再"悄悄降级"进整库备份通路（那条链路已删，S3.3）。
       const source = await importSources.get(request.body.sourceId);
-      if (source) {
+      // 🔴 目录已被清理（成功导入后 `retainImportedUpload` 删除，`import-sources.ts:454-459`）⇒
+      // 盘上没有可预检的载荷，跳过 `preflightDirectSyncPayload` 直接返回 `inspection`
+      // （`lastUsedAt` 非空 ⇒ `status:"unchanged"`，这是重放/恢复场景的正确结局）。
+      // 不加这一条时：对缺失目录 `readdirSync` 抛 ENOENT ⇒ 500（收口版引入的回归）。
+      if (source && existsSync(source.inputPath)) {
         const preflight = preflightDirectSyncPayload(source.inputPath);
         if (!preflight.ok) {
           const failure = laneRefusalFailure(preflight.rejection.reason);

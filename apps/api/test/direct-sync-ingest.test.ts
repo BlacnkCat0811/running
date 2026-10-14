@@ -324,6 +324,15 @@ test("超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入�
     assert.ok(isDirectSyncRejection(dirtyOutcome),
       `含杂物的输入目录必须被拒收，实际：${JSON.stringify(dirtyOutcome)}`);
     assert.equal(dirtyOutcome.reason, "input_tree_not_allowed");
+    // 输入目录整体缺失（成功导入后的清理 / 外部删除）⇒ 受控拒收，不许 ENOENT 冒泡成 500
+    // （inspect 路由对"已导入"来源已在更上一层跳过 preflight；这里是 worker 兜底防线）。
+    const missing = await input(record(a));
+    rmSync(missing.inputPath, { recursive: true, force: true });
+    const missingOutcome = await applyDirectSyncImport(missing);
+    assert.ok(isDirectSyncRejection(missingOutcome),
+      `目录缺失必须受控拒收，实际：${JSON.stringify(missingOutcome)}`);
+    assert.equal(missingOutcome.reason, "missing_required_files");
+    assert.equal(missingOutcome.stage, "prepare");
 
     const db = new DatabaseSync(main, { readOnly: true });
     try {
