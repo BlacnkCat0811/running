@@ -151,6 +151,16 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   -o "$tmp/route-sync-state-machine-tests"
 "$tmp/route-sync-state-machine-tests"
 
+# 直连单批预算（S2.1/S2.2 + 2026-10-14 route 维度补全）：换算与边界都是纯函数，
+# 失效方向静默（换算漏 0.9 ⇒ 载荷贴服务端硬上界；闸门边界写错 ⇒ 恰好等于上界时
+# 放行一个必被拒的批）。`APIModels.swift` 必须一起编：决策依赖 `DirectSyncBounds`。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/DirectSyncBatchBudget.swift \
+  apps/ios/tests/DirectSyncBatchBudgetTests.swift \
+  -o "$tmp/direct-sync-budget-tests"
+"$tmp/direct-sync-budget-tests"
+
 # 上面那批判据的**落盘**一侧：`sync_route_state` 是真库上的单事务批量写。
 # 为什么不能只测"函数返回了什么"：这张表是降频记忆的唯一住处（不许落 `UserDefaults`、
 # 不许落 JSON、不许落内存单例），所以"跨进程还记得住""NULL 与空串分得开""半批写失败会整批

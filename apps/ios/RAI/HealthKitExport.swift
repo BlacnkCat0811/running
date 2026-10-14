@@ -359,6 +359,7 @@ nonisolated enum HealthKitExport {
         var files: [(name: String, url: URL)] = [("export.xml", xmlURL)]
         var recordCount = 0
         var routeCount = 0
+        var routeBytes = 0
         var exportedWorkouts: [HKWorkout] = []
 
         try write(xml, """
@@ -380,7 +381,12 @@ nonisolated enum HealthKitExport {
                 ?? RouteSyncStateMachine.baseline(workoutUUID: routeKey, workoutEndDate: workout.endDate)
             let hasWorkoutChange = workoutBatch.changedUUIDs.contains(routeKey)
             let routeFiles: [(name: String, url: URL)]
-            if RouteSyncStateMachine.shouldQuery(
+            // 🔴 route 预算闸门（2026-10-14，S2 补全）：**先判后取** —— 预算满就不 fetch，
+            // `routeDecisions` 不写 ⇒ 状态与文件严格同进同退（未查的 workout 保持原状，
+            // 由 `rediscoveryCandidates` 在后续轮次继续发现，cursor 轮转、每轮 ≤ 20 个）。
+            // 若改成"fetch 之后丢弃"，状态会先行推进到 settled 而文件永久丢失。
+            let routeBudgetExhausted = budget.routeBudgetExhausted(routeBytes: routeBytes, routeFiles: routeCount)
+            if !routeBudgetExhausted && RouteSyncStateMachine.shouldQuery(
                 existing: previous,
                 now: routeNow,
                 isForceManualRescan: routeForceRescan,
@@ -396,6 +402,11 @@ nonisolated enum HealthKitExport {
                 // GPX may still be pending after a quota refusal. Keep bounded
                 // route retries until the protocol can acknowledge each route.
                 routeFiles = fetch.entries
+                // 预算按**磁盘字节**累计（与服务端 `inputTreeCheck` 的口径一致）。
+                for entry in routeFiles {
+                    let attributes = try? FileManager.default.attributesOfItem(atPath: entry.url.path)
+                    routeBytes += (attributes?[.size] as? Int) ?? 0
+                }
                 if let observation = fetch.observation {
                     routeDecisions[routeKey] = RouteSyncStateMachine.decide(
                         existing: previous,
@@ -953,7 +964,7 @@ nonisolated enum HealthKitExport {
                     }, shouldStop: {
                         // 单批预算（S2.1）：XML 已写字节 + 已消费条数。检查点在 drain 的
                         // **页末尾**（见 `HealthKitRecordCursor.drain`），本闭包只读不写。
-                        budget.exceeded(xmlBytes: (try? xml.offsetInFile) ?? 0, records: count)
+                        budget.exceeded(xmlBytes: xml.offsetInFile, records: count)
                     })
                     next = outcome.anchor
                     if outcome.hasMorePages {

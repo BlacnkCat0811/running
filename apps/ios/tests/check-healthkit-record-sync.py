@@ -148,6 +148,14 @@ check("1_887_436" in budget and "4_500" in budget,
       "the conservative budget constants drifted (1.8 MiB / 4500)")
 check("Double(bounds.maxXmlBytes) * 0.9" in budget and "Double(bounds.maxRecords) * 0.9" in budget,
       "the 0.9 margin over the server bounds is gone (payloads would exceed the hard limits)")
+# route 维度（2026-10-14 补全）：常量、换算与收集侧闸门（先判后取；状态与文件同进同退）。
+check("30_198_988" in budget and "180" in budget,
+      "the conservative route budgets drifted (28.8 MiB / 180 files)")
+check("Double(bounds.maxRouteBytes) * 0.9" in budget and "Double(bounds.maxRouteFiles) * 0.9" in budget,
+      "the 0.9 margin over the route bounds is gone (route payloads would exceed the hard limits)")
+check("func routeBudgetExhausted(routeBytes:" in budget
+      and "budget.routeBudgetExhausted(routeBytes:" in export,
+      "the route budget gate must sit in the export loop (pre-fetch; state and files advance together)")
 # 导出路径：drain 调用必须接 shouldStop，且检查点必须用 XML 已写字节 + 已消费条数。
 check("budget.exceeded(xmlBytes:" in export,
       "writeGlobalRecords no longer feeds the budget probe (unbounded batches would come back)")

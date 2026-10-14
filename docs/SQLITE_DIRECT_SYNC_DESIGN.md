@@ -564,6 +564,6 @@ seedImportGenerations全库补种
 它证明「分片未实现 + iOS 预算不覆盖 route」的组合缺口：`DirectSyncBatchBudget` 只含
 xml/records、route 无预算维度，且停止点可超尾页 ⇒ 仅“iOS 分批版铺开”不足以让回填批过界。
 同日放宽直连单批上界（xml 2 → 8 MiB、route 32 → 64 MiB，见 `direct-sync-ingest.ts` 常量注释）
-以先恢复数据流；**iOS 侧 route 预算维度与尾页收敛仍是未修缺口**（跟踪项）。
+以先恢复数据流。iOS 侧 route 预算维度**已补**（`DirectSyncBatchBudget` 增 maxRouteFiles / maxRouteBytes 两维；收集侧为“先判后取”闸门——`HealthKitExport.swift` 逐 workout 循环，状态与文件同进同退，余量由 rediscovery 轮转补）；尾页超额记为已知边界（服务端 8 MiB 对“预算 ×0.9 + 尾页”留有余量，根修在 iOS 分批侧另议）。
 
 应用不执行备份；外部备份/恢复由用户运维安排。
