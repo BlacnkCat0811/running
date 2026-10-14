@@ -195,6 +195,17 @@ export interface HandshakeResponse {
    * 里 `rawGeneration` 被删掉的理由）。
    */
   factsAnalysisViewContractVersion?: number;
+  /**
+   * 直连车道的单批上界（观测版阶段 1 新增；客户端用它做拆批预算，缺省即回落到保守常量）。
+   * 数值单一来源 = `apps/api/src/direct-sync-ingest.ts` 的顶层常量（XML/manifest ≤ 2 MiB、
+   * 记录 ≤ 5000、route ≤ 200 文件 / 32 MiB）。老服务端省略本键。
+   */
+  directSyncBounds?: {
+    maxXmlBytes: number;
+    maxRecords: number;
+    maxRouteFiles: number;
+    maxRouteBytes: number;
+  };
 }
 
 export interface MobilePlanOperationScope {
@@ -603,6 +614,46 @@ export type ImportStage = "dataOnlyApply" | "directSyncApply" | "backupCapacity"
  * 后者在入口就证明载荷结构上碰不到分析）。糊在一个数字里，直连车道的耗时变化就定位不到 ——
  * 而"哪条车道、耗时多少"正是 §14.3 P01–P06 要看的量。
  */
+/**
+ * 直连车道的**结构化拒收记录**（2026-10-14，观测版；实施方案 §5.2 S1.1）。
+ *
+ * 为什么要有它：直连尝试被拒后整批走候选链路（备份→整库校验→换库，线上 9.9–13.3 min，
+ * 其中两次全库 `PRAGMA quick_check` 占 71.5–76.9%），而"为什么被拒"此前**零日志零遥测**
+ * （`import-worker.ts` 直连段与 `direct-sync-ingest.ts` 全文无 log 语句）。
+ * 这里把拒因带出来落进 `performance_json`，并由主线程补结构化日志。
+ */
+export interface ImportLaneRejection {
+  /** 哪条车道/预检拒的。`preflight` = 载荷摘要都算不出来（`computeImportPayloadSha256` 失败）。 */
+  source: "preflight" | "data-only" | "direct-sync";
+  /** 稳定机器码（direct-sync 侧见 `DirectSyncRejection.reason`；data-only 侧恒为 `fast_path_rejected`）。 */
+  reason: string;
+  /** 拒收发生在哪一步（读取 / 准备 / 身份 / 事务）。 */
+  stage: string;
+  /** 人类可读补充（只含计数与键名，不含健康数据）。 */
+  detail?: string;
+  /** 实测值（计数/字节）。 */
+  actual?: Record<string, number>;
+  /** 触发拒收的上界。 */
+  bounds?: Record<string, number>;
+}
+
+/**
+ * 每次同步的**车道决策**遥测（`performance_json.lane`）。
+ *
+ * 验收口径（实施方案 §5.2 S1.3）：跑一条直连、一条回退，本字段分别为
+ * `outcome: "direct"`（`directSource` 标出哪条子车道）与 `outcome: "fallback"`（附 reasons/rejections）。
+ * `unchanged` = 载荷与上次一致、在**车道判定之前**早退（既非直连也非回退）。
+ */
+export interface ImportLaneTelemetry {
+  outcome: "direct" | "fallback" | "unchanged";
+  /** `outcome=direct` 时：哪条子车道接住的。 */
+  directSource?: "data-only" | "direct-sync";
+  /** `planDirectSyncLane` 的否决理由原样（如 `fast_path_disabled` / `engine_<name>`）；放行时为空数组。 */
+  reasons: string[];
+  /** 逐条拒收记录（按尝试顺序；仅 fallback 时有意义）。 */
+  rejections?: ImportLaneRejection[];
+}
+
 export interface ImportJobPerformance {
   /** Extra full replay comparison only; the model activation gate stays enabled. */
   validationMode: "shadow" | "off" | "not-run";
@@ -611,6 +662,8 @@ export interface ImportJobPerformance {
   computeStagesMs?: Record<string, number>;
   computeProcessMaxRssKiB?: number;
   native?: Record<string, { rustCalls: number; typescriptFallbacks: number; wallMs: number; peakRssKiB: number }>;
+  /** 每次同步的车道决策与拒因（观测版阶段 1；老持久化作业没有该键）。 */
+  lane?: ImportLaneTelemetry;
 }
 
 export interface ImportJobResponse {

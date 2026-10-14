@@ -14,7 +14,9 @@ import {
   writeImportPayloadAnchor
 } from "./import-payload-identity.js";
 
-import type { ImportExecutionEngine, ImportJobResponse, ImportJobPerformance, ImportStage } from "@rai/api-contracts";
+import type {
+  ImportExecutionEngine, ImportJobResponse, ImportJobPerformance, ImportLaneRejection, ImportLaneTelemetry, ImportStage
+} from "@rai/api-contracts";
 import { currentAbilityBaselineHash } from "@rai/application";
 import {
   ImportRemovalGuardError,
@@ -30,7 +32,7 @@ import { isStructurallyReadable } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
 import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
 import { dataOnlyBaselineContract, type DataOnlyImportResult } from "./data-only-import.js";
-import type { DirectSyncImportResult } from "./direct-sync-ingest.js";
+import { isDirectSyncRejection, type DirectSyncImportResult, type DirectSyncRejection } from "./direct-sync-ingest.js";
 import { planDirectSyncLane } from "./direct-sync-plan.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
@@ -498,6 +500,12 @@ export class ImportWorker {
     let terminalSucceeded = false;
     let publishTerminalState: (() => void) | null = null;
     let fastPathAttempted = false;
+    // 观测（阶段 1，实施方案 §5.2 S1.3）：车道决策与拒因。
+    // `null` = 该路径不适用（重放 / 恢复），`performance_json` 不写 `lane` 键。
+    // 落点：finally 的 `job.performance` + 拒收发生时的主线程 stderr 日志（D5：
+    // worker 线程内不打日志，统一在 databaseTask 返回处落 —— parentPort 的聚合不可靠）。
+    let laneTelemetry: ImportLaneTelemetry | null = null;
+    const laneRejections: ImportLaneRejection[] = [];
     try {
       job.status = "running";
       this.persistJobs();
@@ -526,6 +534,7 @@ export class ImportWorker {
       });
       this.assertNotClosing();
       if (preflight) {
+        laneTelemetry = { outcome: "unchanged", reasons: [] };
         job.phase = "activate"; // terminal decision is now irreversible, including no-op imports
         terminalSucceeded = true;
         publishTerminalState = () => {
@@ -561,10 +570,20 @@ export class ImportWorker {
         preserveAbsent: job.preserveAbsent === true,
         databaseExists: existsSync(this.databasePath)
       });
+      // 观测（阶段 1，S1.3）：车道判定先落 telemetry（默认 fallback；直连成功时被就地覆盖）。
+      laneTelemetry = { outcome: "fallback", reasons: [...lane.reasons], rejections: laneRejections };
+      if (lane.lane === "legacy") {
+        process.stderr.write(`Direct sync lane rejected for ${job.id}: ${lane.reasons.join(",")}\n`);
+      }
       if (lane.lane === "direct") {
         payloadSha256 = await this.payloadSha256(job, engine);
         this.assertNotClosing();
-        if (payloadSha256 !== null) {
+        if (payloadSha256 === null) {
+          // 载荷摘要都算不出来：不尝任何一条子车道，直接回退 —— 与改动前
+          // `if (payloadSha256 !== null) { …尝试… }` 的控制流逐条等价。
+          laneRejections.push({ source: "preflight", reason: "payload_identity_unavailable", stage: "read",
+            detail: "computeImportPayloadSha256 失败：同一载荷无法复核身份" });
+        } else {
           job.phase = "activate";
           job.message = "正在按增量事务保存原始健康记录";
           this.persistJobs();
@@ -577,6 +596,7 @@ export class ImportWorker {
           }));
           if (fast) {
             terminalSucceeded = true;
+            laneTelemetry = { outcome: "direct", directSource: "data-only", reasons: [], rejections: laneRejections };
             publishTerminalState = () => {
               job.status = "succeeded"; job.phase = "completed"; job.error = null;
               job.summary = fast.summary; job.completedAt = new Date().toISOString();
@@ -585,6 +605,9 @@ export class ImportWorker {
             };
             return;
           }
+          laneRejections.push({ source: "data-only", reason: "fast_path_rejected", stage: "read",
+            detail: "载荷不是 record-only 白名单形状，或缺快通路基线戳" });
+          process.stderr.write(`Fast path rejected for ${job.id}: continuing to the direct-sync receiver\n`);
           // 🔴 record-only 快通路**拒收**（载荷不只是白名单里的记录增量，或缺少基线戳）。
           // 2e 之前这个分叉直接掉回旧候选链路 —— 那意味着为一个 Workout 载荷做整库备份、
           // 校验、切换数据库。现在先走**统一接收器**（PR4 步骤 2c：事实 + 路线 + 登记同事务）：
@@ -594,14 +617,16 @@ export class ImportWorker {
           this.assertNotClosing();
           job.message = "正在按增量事务保存原始事实并登记分析";
           this.persistJobs();
-          const direct = await timing.measure("directSyncApply", () => this.databaseTask<DirectSyncImportResult>({
-            operation: "direct-sync", input: {
-              databasePath: this.databasePath, inputPath: job.inputPath, jobId: job.id,
-              payloadSha256: payloadSha256!, startedAtMs
-            }
-          }));
-          if (direct) {
+          const direct = await timing.measure("directSyncApply", () =>
+            this.databaseTask<DirectSyncImportResult | DirectSyncRejection>({
+              operation: "direct-sync", input: {
+                databasePath: this.databasePath, inputPath: job.inputPath, jobId: job.id,
+                payloadSha256: payloadSha256!, startedAtMs
+              }
+            }));
+          if (!isDirectSyncRejection(direct)) {
             terminalSucceeded = true;
+            laneTelemetry = { outcome: "direct", directSource: "direct-sync", reasons: [], rejections: laneRejections };
             publishTerminalState = () => {
               const analysisQueued = direct.summary.directSync?.analysisStatus === "queued";
               job.status = "succeeded"; job.phase = "completed"; job.error = null;
@@ -614,10 +639,22 @@ export class ImportWorker {
             };
             return;
           }
+          laneRejections.push({
+            source: "direct-sync", reason: direct.reason, stage: direct.stage,
+            ...(direct.detail === undefined ? {} : { detail: direct.detail }),
+            ...(direct.actual === undefined ? {} : { actual: { ...direct.actual } }),
+            ...(direct.bounds === undefined ? {} : { bounds: { ...direct.bounds } })
+          });
+          process.stderr.write(`Direct sync rejected for ${job.id}: ${direct.reason} (stage=${direct.stage})`
+            + `${direct.actual === undefined ? "" : ` actual=${JSON.stringify(direct.actual)}`}`
+            + `${direct.bounds === undefined ? "" : ` bounds=${JSON.stringify(direct.bounds)}`}\n`);
           // 两条直连车道都不合格（超限、输入目录不被允许、身份基线不合格…）⇒ 回退旧候选链路。
           // `fastPathAttempted` 只在**两条都拒收之后**才清零：它同时是"这一批可能已经提交、
           // 只是回执没送到"的标记（见下面的 catch）。
           fastPathAttempted = false;
+          process.stderr.write(`Falling back to the candidate pipeline for ${job.id}:`
+            + ` reasons=[${lane.reasons.join(",")}]`
+            + ` rejections=[${laneRejections.map((entry) => `${entry.source}:${entry.reason}`).join(",")}]\n`);
           this.assertNotClosing();
         }
       }
@@ -892,7 +929,8 @@ export class ImportWorker {
             ...timing.snapshot(),
             computeStagesMs: { ...this.computeStagesMs },
             computeProcessMaxRssKiB: this.computeProcessMaxRssKiB
-            ,native: { ...this.nativeStats }
+            ,native: { ...this.nativeStats },
+            ...(laneTelemetry === null ? {} : { lane: laneTelemetry })
           };
           publishTerminalState?.();
           if (publishTerminalState) {

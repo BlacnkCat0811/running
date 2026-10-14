@@ -34,7 +34,9 @@ import { RaiApplicationService } from "@rai/application";
 import { RaiDatabase } from "@rai/storage-sqlite";
 import { NATIVE_VERSION, identityAlgorithmFingerprint } from "@rai/health-export-parser";
 
-import { applyDirectSyncImport, type DirectSyncImportInput } from "../src/direct-sync-ingest.js";
+import {
+  applyDirectSyncImport, isDirectSyncRejection, type DirectSyncImportInput, type DirectSyncImportResult
+} from "../src/direct-sync-ingest.js";
 import { readImportReceipt } from "../src/import-publication.js";
 import { computeImportPayloadSha256 } from "../src/import-payload-identity.js";
 
@@ -57,6 +59,17 @@ function workout(): string {
 }
 
 const xml = (rows: string) => `<HealthData>${rows}</HealthData>`;
+
+/**
+ * 观测版（阶段 1）：`applyDirectSyncImport` 返回「成功 | 拒收」判别联合。
+ * 本文件全部调用都**期望成功**，统一走这里 —— 拒收时把拒收码完整打进断言消息。
+ */
+async function applyOrFail(input: DirectSyncImportInput): Promise<DirectSyncImportResult> {
+  const outcome = await applyDirectSyncImport(input);
+  assert.ok(!isDirectSyncRejection(outcome),
+    `expected a successful apply, got rejection: ${JSON.stringify(outcome)}`);
+  return outcome;
+}
 
 interface Fixture {
   main: string;
@@ -101,7 +114,7 @@ function read<T>(main: string, fn: (db: DatabaseSync) => T): T {
 test("需要分析的批次：回执的 analysisJobId 等于 recompute_jobs 那一行，且与批次账本同源", async () => {
   await fixture(async ({ main, input }) => {
     const batch = await input(workout());
-    const applied = await applyDirectSyncImport(batch);
+    const applied = await applyOrFail(batch);
     assert.ok(applied, "含 Workout 的载荷必须被接收");
     assert.equal(applied.payloadClass, "analysis-required");
     // 前提：本批**确实**跑在直连车道上、回执真的说 queued（否则下面那条断言会假绿）。
@@ -145,7 +158,7 @@ test("需要分析的批次：回执的 analysisJobId 等于 recompute_jobs 那�
 test("record-only 批次：analysisJobId 是 null（不是缺键）", async () => {
   await fixture(async ({ main, input }) => {
     const batch = await input(record());
-    const applied = await applyDirectSyncImport(batch);
+    const applied = await applyOrFail(batch);
     assert.ok(applied, "record-only 载荷必须被接收");
     assert.equal(applied.payloadClass, "record-only");
     assert.equal(applied.summary.directSync?.analysisStatus, "not_required");
@@ -171,7 +184,7 @@ test("record-only 批次：analysisJobId 是 null（不是缺键）", async () =
 test("🔴 回执不因分析推进而变：跑完分析后重读，analysisStatus 仍是 queued、id 仍是同一个", async () => {
   await fixture(async ({ main, input }) => {
     const batch = await input(workout());
-    const applied = await applyDirectSyncImport(batch);
+    const applied = await applyOrFail(batch);
     assert.ok(applied);
     const jobId = applied.summary.analysisJobId;
     assert.equal(typeof jobId, "string");

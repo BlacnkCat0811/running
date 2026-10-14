@@ -63,6 +63,73 @@ export const DIRECT_SYNC_MAX_RECORDS = DATA_ONLY_MAX_RECORDS;
 export const DIRECT_SYNC_MAX_ROUTE_FILES = 200;
 export const DIRECT_SYNC_MAX_ROUTE_BYTES = 32 * 1024 * 1024;
 
+/**
+ * 直连拒收的**稳定机器码**（观测版，2026-10-14 实施方案 §5.2 S1.1）。
+ *
+ * 为什么要有它：此前所有不合格路径都折成 `return null` ⇒ worker 只能看到"拒了"，
+ * 看不到"为什么拒"，而后果是整个批走候选链路（线上 9.9–13.3 min，两次全库校验占 71.5–76.9%）。
+ * 拒因进 `performance_json.lane.rejections` 与主线程日志。**阶段 1 只观测，不改控制流**：
+ * 每一条都仍然回退候选链路（收口改为显式失败是阶段 3 的事）。
+ */
+export type DirectSyncRejectionReason =
+  | "missing_required_files"
+  | "input_tree_not_allowed"
+  | "route_exceeds_bounds"
+  | "xml_exceeds_bounds"
+  | "manifest_exceeds_bounds"
+  | "missing_record_identity"
+  | "deletions_exceed_bounds"
+  | "database_not_found"
+  | "payload_identity_invalid"
+  | "pending_migrations"
+  | "identity_not_eligible"
+  | "batch_without_receipt"
+  | "write_guard_triggered";
+
+/** 拒收发生在哪一步（排查用；与 reason 正交）。 */
+export type DirectSyncRejectionStage = "read" | "prepare" | "identity" | "transaction";
+
+/**
+ * 直连车道的拒收记录。
+ *
+ * 🔴 `directSyncRejected: true` 是**判别位**，不是装饰：本对象跨 worker 线程边界
+ * （`import-database-thread.ts` 的 postMessage 走结构化克隆），类实例的原型链会被剥掉 ——
+ * 用 `instanceof` 判别在接收端恒为假（假守卫），所以用数据字段判别（`isDirectSyncRejection`）。
+ */
+export interface DirectSyncRejection {
+  readonly directSyncRejected: true;
+  readonly reason: DirectSyncRejectionReason;
+  readonly stage: DirectSyncRejectionStage;
+  readonly detail?: string;
+  readonly actual?: Readonly<Record<string, number>>;
+  readonly bounds?: Readonly<Record<string, number>>;
+}
+
+/** 判别本对象是不是一条拒收记录（跨线程安全：只看数据字段，不看原型）。 */
+export function isDirectSyncRejection(value: unknown): value is DirectSyncRejection {
+  return typeof value === "object" && value !== null
+    && (value as { directSyncRejected?: unknown }).directSyncRejected === true;
+}
+
+function rejectDirect(
+  reason: DirectSyncRejectionReason, stage: DirectSyncRejectionStage,
+  extra: { detail?: string; actual?: Record<string, number>; bounds?: Record<string, number> } = {}
+): DirectSyncRejection {
+  return { directSyncRejected: true, reason, stage, ...extra };
+}
+
+/**
+ * 事务内的直连拒收（先滚事务、再由 catch 转成 rejection 记录返回；对外**不抛**）。
+ * 与"真错误"（抛给调用方让整批失败）区分 —— 与阶段 1 之前 `RecordDeltaNotEligibleError`
+ * 被 catch 转成 `null` 的路径**逐条等价**，只是现在把理由带出来。
+ */
+class DirectSyncIngestRejected extends Error {
+  constructor(readonly rejection: DirectSyncRejection) {
+    super(rejection.detail ?? rejection.reason);
+    this.name = "DirectSyncIngestRejected";
+  }
+}
+
 export type IngestTableKind = "ingest" | "analysis";
 
 export interface IngestTableDisposition {
@@ -227,17 +294,26 @@ export interface DirectSyncImportInput {
   startedAtMs: number;
 }
 
+/**
+ * 直连接收的**成功**结果形状。
+ *
+ * 观测版（阶段 1）起它不再含 `null` 变体：拒收回退由 `applyDirectSyncImport` 的联合返回
+ * 类型（`DirectSyncImportResult | DirectSyncRejection`）携带，且**带稳定拒因码**。
+ */
 export type DirectSyncImportResult = {
   summary: NonNullable<ImportJobResponse["summary"]>;
   replayed: boolean;
   payloadClass: "record-only" | "analysis-required";
-} | null;
+};
 
 interface PreparedPayload {
   xmlPath: string;
   xmlText: string;
   manifest: HealthSyncManifest;
 }
+
+/** `preparePayload` 的判别联合：成功带载荷，失败带**带码**的拒收记录（观测版）。 */
+type PrepareOutcome = { ok: true; payload: PreparedPayload } | { ok: false; rejection: DirectSyncRejection };
 
 /**
  * 输入目录里**允许存在**的东西，与导入器**真正会读**的东西**逐项对齐**：
@@ -248,46 +324,102 @@ interface PreparedPayload {
  * XML + manifest + `workout-routes/**`，导入器（`allGpxRelativePaths`）也只走这一个目录。
  * 允许别的 GPX 位置会造出"被允许、但不进摘要、也不会被导入"的文件 ——
  * 那种文件既没被证明无害，也没被证明被读过，正好是"看着像就行"的退化形态。
+ *
+ * 观测版差异：返回值从 `boolean` 改为带码结果，把"输入集合不合法"与"路由超上界"
+ * 分开（后者带 `actual`/`bounds`，供 iOS 端收敛拆批预算）。**判定顺序与判据逐条等价。**
  */
-function inputTreeAllowed(root: string, relative = "", seen = { files: 0, bytes: 0 }): boolean {
+function inputTreeCheck(root: string, relative = "", seen = { files: 0, bytes: 0 }): InputTreeOutcome {
   const atTopLevel = relative === "";
   const insideRoutes = relative === "workout-routes" || relative.startsWith("workout-routes/");
   for (const entry of readdirSync(atTopLevel ? root : join(root, relative), { withFileTypes: true })) {
     const name = entry.name;
     const child = atTopLevel ? name : `${relative}/${name}`;
     if (entry.isDirectory()) {
-      if (!(atTopLevel && name === "workout-routes") && !insideRoutes) return false;
-      if (!inputTreeAllowed(root, child, seen)) return false;
+      if (!(atTopLevel && name === "workout-routes") && !insideRoutes) {
+        return { ok: false, rejection: rejectDirect("input_tree_not_allowed", "prepare",
+          { detail: `unexpected_directory:${child}` }) };
+      }
+      const nested = inputTreeCheck(root, child, seen);
+      if (!nested.ok) return nested;
       continue;
     }
-    if (!entry.isFile()) return false;
+    if (!entry.isFile()) {
+      return { ok: false, rejection: rejectDirect("input_tree_not_allowed", "prepare",
+        { detail: `not_a_regular_file:${child}` }) };
+    }
     if (atTopLevel && ["export.xml", "导出.xml", "sync-manifest.json"].includes(name)) continue;
-    if (!insideRoutes || !/\.gpx$/i.test(name)) return false;
+    if (!insideRoutes || !/\.gpx$/i.test(name)) {
+      return { ok: false, rejection: rejectDirect("input_tree_not_allowed", "prepare",
+        { detail: `unexpected_file:${child}` }) };
+    }
     seen.files += 1;
     seen.bytes += statSync(join(root, relative, name)).size;
-    if (seen.files > DIRECT_SYNC_MAX_ROUTE_FILES || seen.bytes > DIRECT_SYNC_MAX_ROUTE_BYTES) return false;
+    if (seen.files > DIRECT_SYNC_MAX_ROUTE_FILES || seen.bytes > DIRECT_SYNC_MAX_ROUTE_BYTES) {
+      return { ok: false, rejection: rejectDirect("route_exceeds_bounds", "prepare", {
+        actual: { routeFiles: seen.files, routeBytes: seen.bytes },
+        bounds: { maxRouteFiles: DIRECT_SYNC_MAX_ROUTE_FILES, maxRouteBytes: DIRECT_SYNC_MAX_ROUTE_BYTES }
+      }) };
+    }
   }
-  return true;
+  return { ok: true };
 }
 
-/** 事务之外的本批准备：路径安全、类型/配额、payload identity（§4.1）。 */
-async function preparePayload(input: DirectSyncImportInput): Promise<PreparedPayload | null> {
+type InputTreeOutcome = { ok: true } | { ok: false; rejection: DirectSyncRejection };
+
+/** `preparePayload` 的失败出口（拒绝原因 + 观测字段一次成型）。 */
+const refuse = (
+  reason: DirectSyncRejectionReason, stage: DirectSyncRejectionStage,
+  extra: { detail?: string; actual?: Record<string, number>; bounds?: Record<string, number> } = {}
+): PrepareOutcome => ({ ok: false, rejection: rejectDirect(reason, stage, extra) });
+
+/**
+ * 事务之外的本批准备：路径安全、类型/配额、payload identity（§4.1）。
+ *
+ * 观测版：每一条"不合格"都带稳定机器码返回（`PrepareOutcome`），不再折成裸 `null`。
+ * 判定顺序、判据、以及"载荷已变更"的**硬失败**语义与之前逐条等价。
+ */
+async function preparePayload(input: DirectSyncImportInput): Promise<PrepareOutcome> {
   const entries = readdirSync(input.inputPath);
   const xmlName = entries.includes("export.xml") ? "export.xml" : "导出.xml";
-  if (!entries.includes(xmlName) || !entries.includes("sync-manifest.json")) return null;
-  if (!inputTreeAllowed(input.inputPath)) return null;
+  if (!entries.includes(xmlName) || !entries.includes("sync-manifest.json")) {
+    return refuse("missing_required_files", "prepare", { detail: `entries:${entries.slice(0, 8).join("|")}` });
+  }
+  const tree = inputTreeCheck(input.inputPath);
+  if (!tree.ok) return { ok: false, rejection: tree.rejection };
   const xmlPath = join(input.inputPath, xmlName);
   const manifestPath = join(input.inputPath, "sync-manifest.json");
-  if (statSync(xmlPath).size > DIRECT_SYNC_MAX_XML_BYTES
-      || statSync(manifestPath).size > DIRECT_SYNC_MAX_XML_BYTES) return null;
+  const xmlFileBytes = statSync(xmlPath).size;
+  if (xmlFileBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    return refuse("xml_exceeds_bounds", "prepare",
+      { actual: { xmlBytes: xmlFileBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
+  }
+  const manifestFileBytes = statSync(manifestPath).size;
+  if (manifestFileBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    return refuse("manifest_exceeds_bounds", "prepare",
+      { actual: { manifestBytes: manifestFileBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
+  }
   const manifestText = readFileSync(manifestPath, "utf8");
-  if (Buffer.byteLength(manifestText) > DIRECT_SYNC_MAX_XML_BYTES) return null;
+  const manifestTextBytes = Buffer.byteLength(manifestText);
+  if (manifestTextBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    return refuse("manifest_exceeds_bounds", "prepare",
+      { actual: { manifestBytes: manifestTextBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
+  }
   const manifest = parseHealthSyncManifest(manifestText);
   // v2 身份是这条车道的前提：没有 UUID 映射就无法保证"同一实体"（§7 的稳定身份）。
-  if (!manifest.recordIdentity) return null;
-  if (manifest.deletedRecords.length + manifest.deletedWorkoutIds.length > DIRECT_SYNC_MAX_RECORDS) return null;
+  if (!manifest.recordIdentity) {
+    return refuse("missing_record_identity", "prepare", { detail: "manifest.recordIdentity 缺失" });
+  }
+  const deletions = manifest.deletedRecords.length + manifest.deletedWorkoutIds.length;
+  if (deletions > DIRECT_SYNC_MAX_RECORDS) {
+    return refuse("deletions_exceed_bounds", "prepare",
+      { actual: { deletions }, bounds: { maxRecords: DIRECT_SYNC_MAX_RECORDS } });
+  }
   const xmlText = readFileSync(xmlPath, "utf8");
-  if (Buffer.byteLength(xmlText) > DIRECT_SYNC_MAX_XML_BYTES) return null;
+  const xmlBytes = Buffer.byteLength(xmlText);
+  if (xmlBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    return refuse("xml_exceeds_bounds", "prepare",
+      { actual: { xmlBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
+  }
   // 🔴 必须与**准入时**（worker 的 `computeImportPayloadSha256`）用**同一个**摘要函数：
   // 两者都折进 `workout-routes/**` 的路由内容。2026-10-13 实测的缺陷：这里曾经只算
   // XML+manifest（`digestHealthKitRecordSnapshot`），于是任何**带 GPX** 的载荷都会在
@@ -298,7 +430,7 @@ async function preparePayload(input: DirectSyncImportInput): Promise<PreparedPay
     engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint()
   });
   if (capturedSha256 !== input.payloadSha256) throw new Error("Direct sync payload changed after admission");
-  return { xmlPath, xmlText, manifest };
+  return { ok: true, payload: { xmlPath, xmlText, manifest } };
 }
 
 /** 本地日期（`DATABASE_TIMEZONE`）——与读侧同一口径。 */
@@ -407,18 +539,34 @@ function countWorkoutChanges(db: DatabaseSync, batchId: string): Record<"inserte
 }
 
 /**
- * 执行一批直连接收。`null` 是**证明过的回退**（不合格或分析登记不可用且本批需要分析），
- * 永远不是"收了一半"：返回 null 之前调用方事务已经整体回滚。
+ * 执行一批直连接收。
+ *
+ * 返回值是判别联合：成功 = `DirectSyncImportResult`；拒收 = `DirectSyncRejection`
+ * （带稳定机器码，拒绝之前调用方事务已经整体回滚 —— 永远不是"收了一半"）。
+ * 调用方用 `isDirectSyncRejection` 判别（**不要**用 `instanceof`：本对象跨 worker
+ * 线程边界，原型链会被结构化克隆剥掉）。
  */
-export async function applyDirectSyncImport(input: DirectSyncImportInput): Promise<DirectSyncImportResult> {
+export async function applyDirectSyncImport(input: DirectSyncImportInput): Promise<DirectSyncImportResult | DirectSyncRejection> {
   assertDirectSyncRequestShape(input);
-  if (!existsSync(input.databasePath) || !/^[a-f0-9]{64}$/.test(input.payloadSha256)) return null;
+  if (!existsSync(input.databasePath)) {
+    return rejectDirect("database_not_found", "read", { detail: "主库文件不存在" });
+  }
+  if (!/^[a-f0-9]{64}$/.test(input.payloadSha256)) {
+    return rejectDirect("payload_identity_invalid", "read", { detail: "payloadSha256 不是 64 位十六进制" });
+  }
   const entries = readdirSync(input.inputPath);
-  const payload = await preparePayload(input);
-  if (!payload) return null;
+  const prepared = await preparePayload(input);
+  if (!prepared.ok) return prepared.rejection;
+  const payload = prepared.payload;
   const probe = RaiDatabase.openReadonly(input.databasePath);
   try {
-    if (!eligibleIdentity(identityState(probe)) || RaiDatabase.pendingMigrations(input.databasePath).length) return null;
+    if (!eligibleIdentity(identityState(probe))) {
+      return rejectDirect("identity_not_eligible", "identity",
+        { detail: "dataset_version / import_completed_at 缺失，或契约/身份算法与当前构建不符" });
+    }
+    if (RaiDatabase.pendingMigrations(input.databasePath).length) {
+      return rejectDirect("pending_migrations", "identity", { detail: "主库有待应用的迁移" });
+    }
   } finally {
     probe.close();
   }
@@ -448,10 +596,14 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     db.exec("PRAGMA synchronous=FULL");
     store.beginCallerTransaction();
     const state = identityState(db);
-    if (!eligibleIdentity(state)) throw new RecordDeltaNotEligibleError("identity state changed before BEGIN");
+    if (!eligibleIdentity(state)) {
+      throw new DirectSyncIngestRejected(rejectDirect("identity_not_eligible", "transaction",
+        { detail: "identity state changed before BEGIN" }));
+    }
     const previousVersion = state.get("dataset_version")!;
     if (db.prepare("SELECT 1 FROM import_batches WHERE id=?").get(input.jobId)) {
-      throw new RecordDeltaNotEligibleError("existing batch has no completed receipt");
+      throw new DirectSyncIngestRejected(rejectDirect("batch_without_receipt", "transaction",
+        { detail: "existing batch has no completed receipt" }));
     }
     const entityGeneration = `delta:${input.jobId}`;
     db.prepare(`INSERT INTO import_batches
@@ -614,8 +766,16 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     return { summary, replayed: false, payloadClass: classification.payloadClass };
   } catch (error) {
     store.rollbackCallerTransaction();
-    if (error instanceof RecordDeltaNotEligibleError ||
-        (error instanceof Error && error.message.includes(DIRECT_SYNC_WRITE_GUARD))) return null;
+    if (error instanceof DirectSyncIngestRejected) return error.rejection;
+    // 解析器（`parseAppleHealthXml`）内部也抛这个类型：缺基线、批次代次不齐等。
+    if (error instanceof RecordDeltaNotEligibleError) {
+      return rejectDirect("identity_not_eligible", "transaction", { detail: error.message });
+    }
+    // 写守卫触发 = **编程错误**（接收事务里出现了不该出现的表）。观测版仍按既有语义回退候选，
+    // 但把 detail 带出来；收口版（阶段 3）会把这条改成 500 内部完整性错误、不再回退。
+    if (error instanceof Error && error.message.includes(DIRECT_SYNC_WRITE_GUARD)) {
+      return rejectDirect("write_guard_triggered", "transaction", { detail: error.message.slice(0, 300) });
+    }
     throw error;
   } finally {
     store.close();

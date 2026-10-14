@@ -52,6 +52,9 @@ import { RaiReadStore, mobileLocalDate } from "./data.js";
 import { createImportSourceManager } from "./import-sources.js";
 import { finalizeImportSource } from "./import-source-finalization.js";
 import {
+  DIRECT_SYNC_MAX_RECORDS, DIRECT_SYNC_MAX_ROUTE_BYTES, DIRECT_SYNC_MAX_ROUTE_FILES, DIRECT_SYNC_MAX_XML_BYTES
+} from "./direct-sync-ingest.js";
+import {
   installLocalRequestSecurity,
   isTrustedDevelopmentOrigin
 } from "./local-request-security.js";
@@ -945,7 +948,16 @@ app.get("/v1/handshake", async (): Promise<HandshakeResponse> => ({
   // 共用一个数字会让"服务端升级了哪一侧"变成猜。
   // 范式见 PR5 §1.2 锚点 20：可选版本字段宣告，客户端 `guard == 1` 之后才去读
   // `currentFacts`/`publishedAnalysis`，否则退回旧字段（旧字段语义没变，所以退回是安全的）。
-  factsAnalysisViewContractVersion: 1
+  factsAnalysisViewContractVersion: 1,
+  // 观测阶段 1（S1.2）：直连单批上界随握手暴露，客户端（iOS 分批版）据此收敛拆批预算。
+  // 数值**单一来源** = `direct-sync-ingest.ts` 的顶层常量 —— 不要在这里写数字字面量，
+  // 两处各写一份数字，收口时必然有一处漂移。
+  directSyncBounds: {
+    maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES,
+    maxRecords: DIRECT_SYNC_MAX_RECORDS,
+    maxRouteFiles: DIRECT_SYNC_MAX_ROUTE_FILES,
+    maxRouteBytes: DIRECT_SYNC_MAX_ROUTE_BYTES
+  }
 }));
 app.get("/v1/openapi.json", async () => openapiDocument);
 app.get("/v1/performance", async () => ({

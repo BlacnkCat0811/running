@@ -26,8 +26,8 @@ import { RaiDatabase } from "@rai/storage-sqlite";
 import { NATIVE_VERSION, identityAlgorithmFingerprint } from "@rai/health-export-parser";
 
 import {
-  DIRECT_SYNC_WRITE_GUARD, INGEST_TABLE_DISPOSITIONS, applyDirectSyncImport,
-  installDirectSyncWriteGuards, unclassifiedIngestTables, type DirectSyncImportInput
+  DIRECT_SYNC_WRITE_GUARD, INGEST_TABLE_DISPOSITIONS, applyDirectSyncImport, isDirectSyncRejection,
+  installDirectSyncWriteGuards, unclassifiedIngestTables, type DirectSyncImportInput, type DirectSyncImportResult
 } from "../src/direct-sync-ingest.js";
 import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 import { readImportReceipt } from "../src/import-publication.js";
@@ -55,6 +55,18 @@ function workout(startAt = "2018-01-02 08:00:00 +0000", syncId = "workout-1"): s
 }
 
 const xml = (rows = "") => `<HealthData>${rows}</HealthData>`;
+
+/**
+ * 观测版（阶段 1）：`applyDirectSyncImport` 返回「成功 | 拒收」判别联合。
+ * 本文件里**期望成功**的调用统一走这里 —— 拒收时把拒收码完整打进断言消息，
+ * 而不是等 `undefined.summary` 报一个指认不了原因的类型错。
+ */
+async function applyOrFail(input: DirectSyncImportInput): Promise<DirectSyncImportResult> {
+  const outcome = await applyDirectSyncImport(input);
+  assert.ok(!isDirectSyncRejection(outcome),
+    `expected a successful apply, got rejection: ${JSON.stringify(outcome)}`);
+  return outcome;
+}
 
 interface Fixture {
   root: string;
@@ -157,7 +169,7 @@ const scalar = (db: DatabaseSync, sql: string, ...params: unknown[]): number =>
 test("record-only 载荷：事实+账本+回执同事务落库，回执 not_required 且**没有**登记分析任务", async () => {
   await fixture(async ({ main, input }) => {
     const batch = await input(record(a) + record(b, "25"));
-    const applied = await applyDirectSyncImport(batch);
+    const applied = await applyOrFail(batch);
     assert.ok(applied, "record-only 载荷必须被接收");
     assert.equal(applied.payloadClass, "record-only");
     assert.equal(applied.replayed, false);
@@ -186,7 +198,7 @@ test("record-only 载荷：事实+账本+回执同事务落库，回执 not_requ
 test("Workout 载荷：同事务登记分析任务，回执 queued，且消费者能把它跑完（闭环）", async () => {
   await fixture(async ({ main, input }) => {
     const batch = await input(workout());
-    const applied = await applyDirectSyncImport(batch);
+    const applied = await applyOrFail(batch);
     assert.ok(applied);
     assert.equal(applied.payloadClass, "analysis-required", "Workout 一律要求分析");
     assert.equal(applied.summary.directSync?.analysisStatus, "queued",
@@ -238,7 +250,7 @@ test("删除-only 载荷：显式删除先于到达也要求分析，且不误�
 
     // 删除-only：没有任何 Record/Workout 载荷，只有 manifest 里的显式删除。
     const batch = await input("", { deletedWorkoutIds: ["workout-1"] });
-    const applied = await applyDirectSyncImport(batch);
+    const applied = await applyOrFail(batch);
     assert.ok(applied);
     assert.equal(applied.payloadClass, "analysis-required", "删除-only 页面不是 EOF，也必须分析");
     assert.equal(applied.summary.removedWorkouts, 1);
@@ -272,7 +284,7 @@ test("GPX 路线：路线变更同样要求分析，且路线版本对读侧可�
       </Workout>`,
       { gpx: { "route-1.gpx": gpx } }
     );
-    const applied = await applyDirectSyncImport(batch);
+    const applied = await applyOrFail(batch);
     assert.ok(applied);
     assert.equal(applied.payloadClass, "analysis-required", "路线变更必须要求分析（它改变本训练特征与时间线）");
     // 回执与分类必须一致：路线批次同样要 `queued`（突变"忽略分类"第一次跑时正是这条缺失，
@@ -292,15 +304,26 @@ test("GPX 路线：路线变更同样要求分析，且路线版本对读侧可�
   });
 });
 
-test("超限载荷不合格 ⇒ 返回 null（回退旧链路）且**零写入**", async () => {
+test("超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入（观测版 S1.1）", async () => {
   await fixture(async ({ main, input }) => {
     // 超过 2 MiB 归一化原始内容上限（§14.3 P01）。不做"先收一半"。
     const oversized = await input(record(a, "1".repeat(2_200_000)));
-    assert.equal(await applyDirectSyncImport(oversized), null);
+    const oversizedOutcome = await applyDirectSyncImport(oversized);
+    assert.ok(isDirectSyncRejection(oversizedOutcome),
+      `超限载荷必须被拒收，实际：${JSON.stringify(oversizedOutcome)}`);
+    assert.equal(oversizedOutcome.reason, "xml_exceeds_bounds");
+    assert.equal(oversizedOutcome.stage, "prepare");
+    // 观测版的核心承诺：拒收**带实测值与上界**（"为什么拒"不能只有结论）。
+    assert.ok((oversizedOutcome.actual?.xmlBytes ?? 0) > 2 * 1024 * 1024,
+      "拒收记录必须带实测字节数");
+    assert.equal(oversizedOutcome.bounds?.maxXmlBytes, 2 * 1024 * 1024);
     // 输入目录里有非 GPX 的杂物也不合格：输入集合必须可枚举。
     const dirty = await input(record(a));
     writeFileSync(join(dirty.inputPath, "notes.txt"), "hello");
-    assert.equal(await applyDirectSyncImport(dirty), null);
+    const dirtyOutcome = await applyDirectSyncImport(dirty);
+    assert.ok(isDirectSyncRejection(dirtyOutcome),
+      `含杂物的输入目录必须被拒收，实际：${JSON.stringify(dirtyOutcome)}`);
+    assert.equal(dirtyOutcome.reason, "input_tree_not_allowed");
 
     const db = new DatabaseSync(main, { readOnly: true });
     try {
@@ -309,6 +332,80 @@ test("超限载荷不合格 ⇒ 返回 null（回退旧链路）且**零写入**
       assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM recompute_jobs"), 0);
       assert.equal((db.prepare("SELECT raw_generation AS raw FROM import_generations WHERE singleton=1").get() as { raw: number }).raw, 0);
     } finally { db.close(); }
+  });
+});
+
+/**
+ * 观测版（阶段 1，S1.1）的**拒收码词典**：每类构造载荷都必须带正确 `reason` 被拒。
+ * 这些码是 stderr 日志与 `performance_json.lane.rejections` 的机器面 —— 改码等于改观测契约，
+ * 所以每一条都单独钉住（而不是只断言"被拒了"）。
+ *
+ * 覆盖边界（如实标注）：`pending_migrations` / `write_guard_triggered` 的**入口形状**
+ * 分别要求一个真欠迁移的库与一个能触发守卫的写路径，前者另有用例（写守卫测试），
+ * 后者需要注入分析表写入 —— 两者都不在本用例里伪造。
+ */
+test("拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 身份不合 / 库不存在 / 批次无回执 各自带正确 reason", async () => {
+  await fixture(async ({ main, input, root }) => {
+    // ① 缺 sync-manifest.json ⇒ missing_required_files（必须文件缺失）。
+    const noManifest = await input(record(a));
+    rmSync(join(noManifest.inputPath, "sync-manifest.json"));
+    const missing = await applyDirectSyncImport(noManifest);
+    assert.ok(isDirectSyncRejection(missing) && missing.reason === "missing_required_files",
+      `缺 manifest 必须报 missing_required_files，实际：${JSON.stringify(missing)}`);
+
+    // ② manifest 是 **v1**（v2 身份缺失，无法保证"同一实体"）⇒ missing_record_identity。
+    //    判据来源 `packages/health-export-parser/src/sync-manifest.ts:21`：
+    //    `version === 1` ⇒ `recordIdentity: false`（v2 才由结构推导出身份）。
+    const noIdentity = await input(record(a));
+    writeFileSync(join(noIdentity.inputPath, "sync-manifest.json"), JSON.stringify({
+      version: 1, deletedWorkoutIds: [], deletedRecords: []
+    }));
+    const identity = await applyDirectSyncImport(noIdentity);
+    assert.ok(isDirectSyncRejection(identity) && identity.reason === "missing_record_identity",
+      `v1（缺 v2 身份）必须报 missing_record_identity，实际：${JSON.stringify(identity)}`);
+
+    // ③ 删除数超上界（>5000）⇒ deletions_exceed_bounds，且带 actual/bounds。
+    const manyDeletions = Array.from({ length: 5001 }, (_, index) => ({
+      type: step, uuid: `00000000-0000-0000-0000-${String(index).padStart(12, "0")}`
+    }));
+    const tooMany = await input(record(a), { deletedRecords: manyDeletions });
+    const deletions = await applyDirectSyncImport(tooMany);
+    assert.ok(isDirectSyncRejection(deletions) && deletions.reason === "deletions_exceed_bounds",
+      `删除超界必须报 deletions_exceed_bounds，实际：${JSON.stringify(deletions)}`);
+    assert.equal(deletions.actual?.deletions, 5001);
+    assert.equal(deletions.bounds?.maxRecords, 5000);
+
+    // ④ 契约/身份代际不符（库侧）⇒ identity_not_eligible。
+    //    注意本场景的 payload 摘要必须仍能复核通过（它先于身份检查），所以改的是**库**不是载荷。
+    const goodPayload = await input(record(b), { job: "delta-identity" });
+    const breakIt = new DatabaseSync(main);
+    try {
+      breakIt.prepare("UPDATE import_manifest SET value='mismatch' WHERE key='parser_contract_version'").run();
+    } finally { breakIt.close(); }
+    const ineligible = await applyDirectSyncImport(goodPayload);
+    assert.ok(isDirectSyncRejection(ineligible) && ineligible.reason === "identity_not_eligible",
+      `契约不符必须报 identity_not_eligible，实际：${JSON.stringify(ineligible)}`);
+    const restore = new DatabaseSync(main);
+    try {
+      restore.prepare("UPDATE import_manifest SET value=? WHERE key='parser_contract_version'").run(CONTRACT_VERSION);
+    } finally { restore.close(); }
+
+    // ⑤ 主库不存在 ⇒ database_not_found（第一条检查，不碰任何目录）。
+    const missingDb = await applyDirectSyncImport({ ...goodPayload, databasePath: join(root, "missing.sqlite") });
+    assert.ok(isDirectSyncRejection(missingDb) && missingDb.reason === "database_not_found",
+      `库不存在必须报 database_not_found，实际：${JSON.stringify(missingDb)}`);
+
+    // ⑥ 同 id 批次存在但没有完成回执 ⇒ batch_without_receipt（数据面异常，不允许"续写"）。
+    const noReceipt = await input(record(a), { job: "delta-no-receipt" });
+    const seedBatch = new DatabaseSync(main);
+    try {
+      seedBatch.prepare(`INSERT INTO import_batches (id,xml_sha256,status,import_mode)
+        VALUES ('delta-no-receipt','x','running','incremental')`).run();
+    } finally { seedBatch.close(); }
+    const receiptLess = await applyDirectSyncImport(noReceipt);
+    assert.ok(isDirectSyncRejection(receiptLess) && receiptLess.reason === "batch_without_receipt",
+      `同 id 无回执必须报 batch_without_receipt，实际：${JSON.stringify(receiptLess)}`);
+    assert.equal(receiptLess.stage, "transaction");
   });
 });
 
@@ -377,7 +474,7 @@ test("fail-closed：出现未表态的表时，守卫拒绝安装（而不是默
 test("PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical 行逐字节不变", async () => {
   await fixture(async ({ main, input }) => {
     // 两个夜：1/1 与 1/10（睡眠段跨夜 ⇒ wake_date 分别是 1/2 与 1/11）。
-    const first = await applyDirectSyncImport(await input(
+    const first = await applyOrFail(await input(
       sleepSegment("00000000-0000-0000-0000-0000000000e1", "2026-01-01")
       + sleepSegment("00000000-0000-0000-0000-0000000000e2", "2026-01-10")));
     assert.ok(first, "第一批必须被接收");
@@ -402,7 +499,7 @@ test("PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical �
       "金丝雀没写进去的话，下面那条断言什么都没证明");
 
     // 第二批只更正 1/1 那一夜（更早醒 ⇒ 睡了更短）。
-    const second = await applyDirectSyncImport(await input(
+    const second = await applyOrFail(await input(
       sleepSegment("00000000-0000-0000-0000-0000000000e1", "2026-01-01", "05:30:00"), { job: "delta-night-2" }));
     assert.ok(second);
     const range = second.summary.canonicalNights!;
@@ -423,13 +520,13 @@ test("PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical �
 
 test("PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变）", async () => {
   await fixture(async ({ main, input }) => {
-    const first = await applyDirectSyncImport(await input(
+    const first = await applyOrFail(await input(
       sleepSegment("00000000-0000-0000-0000-0000000000e3", "2026-02-01")));
     assert.ok(first);
     const nights = nightsByDate(main);
     const hrv = tableDigest(main, "canonical_hrv_days");
 
-    const workoutBatch = await applyDirectSyncImport(await input(workout(), { job: "delta-workout-only" }));
+    const workoutBatch = await applyOrFail(await input(workout(), { job: "delta-workout-only" }));
     assert.ok(workoutBatch);
     assert.equal(workoutBatch.summary.canonicalNights?.mode, "none",
       "一批只有 Workout 的载荷不该重建任何夜");
@@ -463,7 +560,7 @@ test("A04 形态：回执写入点故障注入 ⇒ 事实/批次/任务/回执�
     const cleanup = new DatabaseSync(main);
     cleanup.exec("DROP TRIGGER fail_receipt");
     cleanup.close();
-    const retried = await applyDirectSyncImport({ ...batch, jobId: "delta-retry" });
+    const retried = await applyOrFail({ ...batch, jobId: "delta-retry" });
     assert.ok(retried, "移除故障后必须能重新接收同一份载荷");
     assert.equal(retried.summary.directSync?.analysisStatus, "queued");
   });
@@ -475,7 +572,7 @@ test("§4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接�
     assert.equal(db.prepare("SELECT 1 FROM import_manifest WHERE key='data_only_baseline_contract'").get(), undefined,
       "本用例的前提：库里没有快通路资格 stamp");
     db.close();
-    const applied = await applyDirectSyncImport(await input(record(a)));
+    const applied = await applyOrFail(await input(record(a)));
     assert.ok(applied, "没有资格 stamp 也必须能走直连（§4.3 明令它不是门槛）");
   });
 });

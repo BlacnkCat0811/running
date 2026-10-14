@@ -166,6 +166,15 @@ test("2e：含 Workout 的增量在 worker 里走统一接收器——登记分�
         "record-only 快通路必须**先被尝试**（它的入口判据更严），阶段账本里要有它的耗时");
       assert.ok((done.performance?.stagesMs.directSyncApply ?? 0) > 0,
         "统一接收器必须真的跑了 —— 只有判据放开、没有调用方时这里恒为 undefined");
+      // 观测（阶段 1，S1.3）：直连成功必须如实落 lane 遥测（哪条子车道 + 无否决理由）。
+      assert.equal(done.performance?.lane?.outcome, "direct");
+      assert.equal(done.performance?.lane?.directSource, "direct-sync",
+        "本用例的载荷被 record-only 快通路拒收、由统一接收器接住 —— directSource 必须说清楚");
+      assert.deepEqual(done.performance?.lane?.reasons, []);
+      assert.deepEqual(
+        (done.performance?.lane?.rejections ?? []).map((entry) => `${entry.source}:${entry.reason}`),
+        ["data-only:fast_path_rejected"],
+        "快通路拒收必须留痕（拒因结构化是观测版的核心承诺）");
       for (const stage of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
         "recompute", "activationAudit", "activationSwap"] as const) {
         assert.equal(done.performance?.stagesMs[stage], undefined, `${stage} 不得运行`);
@@ -252,4 +261,39 @@ test("2e 回归：带 GPX 路由的载荷也能走这条车道（准入摘要与
         assert.equal(readImportReceipt(main, job.id)?.directSync?.analysisStatus, "queued");
       } finally { await worker.close(); }
     });
+});
+
+test("回退时 lane 遥测带出两条车道的拒因（观测版 S1.3；候选链路拦在整库备份前）", async () => {
+  // 2 MiB 归一化上界（`direct-sync-ingest.ts` 的 `DIRECT_SYNC_MAX_XML_BYTES`）：
+  // 超限会让 record-only 快通路与统一接收器**都**拒收 ⇒ "为什么回退"的一条完整样本。
+  const padding = `<Record type="HKQuantityTypeIdentifierStepCount" sourceName="Watch" unit="count" value="999"
+    startDate="2018-01-01 00:00:00 +0000" endDate="2018-01-01 00:01:00 +0000">
+    <MetadataEntry key="RAIHealthKitSampleUUID" value="00000000-0000-0000-0000-00000000abcd"/>
+  </Record>\n`;
+  await fixture({ xml: workoutXml() + padding.repeat(11_000) }, async ({ input, make }) => {
+    const worker = make();
+    // 候选链路在"创建整库备份"处被拦下：本用例要证明的是**拒因可见**，不是"旧链路能跑完"
+    // （后者由 worker.test.ts 的完整候选用例覆盖，那条会真做备份与全库校验）。
+    (worker as unknown as Surface).createCurrentBackup = async () => {
+      throw new Error("fixture: candidate pipeline stopped before the whole-database backup");
+    };
+    try {
+      const job = worker.create(input, undefined, "lane-fallback");
+      await wait(worker);
+      const done = worker.get(job.id)!;
+      assert.equal(done.status, "failed", JSON.stringify(done));
+      const lane = done.performance?.lane;
+      assert.ok(lane, "回退必须留下 lane 遥测（观测版 S1.3 的核心承诺）");
+      assert.equal(lane.outcome, "fallback");
+      assert.deepEqual(lane.reasons, [],
+        "车道判定放行了（否决理由为空）—— 这次回退来自两条子车道的拒收");
+      assert.deepEqual(
+        (lane.rejections ?? []).map((entry) => `${entry.source}:${entry.reason}`),
+        ["data-only:fast_path_rejected", "direct-sync:xml_exceeds_bounds"],
+        "两条车道各自的拒因必须按尝试顺序留痕");
+      const direct = (lane.rejections ?? []).find((entry) => entry.source === "direct-sync");
+      assert.equal(direct?.bounds?.maxXmlBytes, 2 * 1024 * 1024, "拒因必须带上界");
+      assert.ok((direct?.actual?.xmlBytes ?? 0) > 2 * 1024 * 1024, "拒因必须带实测字节数");
+    } finally { await worker.close(); }
+  });
 });

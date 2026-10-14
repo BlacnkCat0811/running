@@ -1609,6 +1609,10 @@ test("recomputes and activates a training session that becomes ambiguous (off)",
     assert.equal(commandCount, 2);
     const timing = job.performance as ImportJobPerformance;
     assert.equal(timing.validationMode, "not-run");
+    // 观测（阶段 1，S1.3）：无队列直跑路径必然走候选链路 —— lane 遥测必须如实记录否决理由。
+    // 这条同时钉住"落点唯一"：lane 在 finally 统一挂载，成功/失败两条路径都不许漏。
+    assert.equal(timing.lane?.outcome, "fallback");
+    assert.deepEqual(timing.lane?.reasons, ["not_queued"]);
     for (const stage of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
       "changeAnalysis", "recompute", "activationAudit", "activationSwap", "cleanup"] as const) {
       assert.ok(timing.stagesMs[stage]! >= 0, `missing ${stage} duration`);
