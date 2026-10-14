@@ -1370,7 +1370,13 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sourceId })
     });
-    assert.equal(inspectedDuringImport.status, 200, await inspectedDuringImport.clone().text());
+    // S3.1/D2：inspect 现在**同步预检**直连载荷 —— 这份夹具没有 sync-manifest.json，不合规
+    // ⇒ 400 + 稳定码（不建 job、零副作用；"诊断"由拒因本身给出）。
+    const inspectedText = await inspectedDuringImport.clone().text();
+    assert.equal(inspectedDuringImport.status, 400, inspectedText);
+    const inspectedFailure = JSON.parse(inspectedText) as { code: string; reason: string };
+    assert.equal(inspectedFailure.code, "direct_sync_input_not_allowed");
+    assert.equal(inspectedFailure.reason, "missing_required_files");
     let failedJob: { status: string } | null = null;
     const terminalDeadline = Date.now() + 15_000;
     while (Date.now() < terminalDeadline) {
@@ -1382,10 +1388,16 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
     }
     assert.equal(failedJob?.status, "failed");
     const failedTiming = await fetch(`${url}/v1/import-jobs/${importJobId}`)
-      .then((response) => response.json()) as { error: string; performance: { totalMs: number; stagesMs: { parseImport: number } } };
+      .then((response) => response.json()) as { error: string; performance: { totalMs: number; stagesMs: Record<string, number | undefined> } };
     assert.equal(failedTiming.error, "导入失败，请查看服务日志", "raw parser diagnostics must stay internal");
     assert.ok(failedTiming.performance.totalMs >= 0);
-    assert.ok(failedTiming.performance.stagesMs.parseImport >= 0, "failed parser still records its duration");
+    // S3.1/D2：不合规载荷在**解析之前**被拒收 —— 解析器不再被触达，账本里换成两条直连车道的痕迹。
+    assert.equal(failedTiming.performance.stagesMs.parseImport, undefined,
+      "收口后不合规载荷不得触达解析器");
+    assert.ok((failedTiming.performance.stagesMs.dataOnlyApply ?? 0) > 0,
+      "record-only 快通路必须**先被尝试**（阶段账本里要有它的耗时）");
+    assert.ok((failedTiming.performance.stagesMs.directSyncApply ?? 0) > 0,
+      "统一接收器随后按拒收码拒绝（阶段账本里要有它的耗时）");
     const latestJob = await fetch(`${url}/v1/import-jobs/latest`);
     assert.equal(latestJob.status, 200, await latestJob.clone().text());
     assert.deepEqual(await latestJob.json(), {
@@ -1397,7 +1409,11 @@ test("upload HTTP errors distinguish limits, invalid archives, and internal I/O 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sourceId })
     });
-    assert.equal(retainedSource.status, 200, "failed payload remains inspectable for diagnosis/retry");
+    // 失败的载荷仍可被 inspect 取到**拒因**（同一份预检判据），但不再给出"可导入"的 200 语义；
+    // 手工全量重建走 CLI（D1/D2）。来源本身仍保留在注册表里 —— 下面的 DELETE→404 对照钉住这一点。
+    const retainedText = await retainedSource.clone().text();
+    assert.equal(retainedSource.status, 400, retainedText);
+    assert.equal((JSON.parse(retainedText) as { code: string }).code, "direct_sync_input_not_allowed");
     // The failed import releases its mutation slot slightly after the job
     // reaches the terminal status; a DELETE fired in that gap is rejected with
     // 409. Retry briefly instead of racing the coordinator.
@@ -1509,6 +1525,13 @@ for (const restartBeforeImport of [false, true]) test(`deletion isolates receipt
     <WorkoutStatistics type="HKQuantityTypeIdentifierDistanceWalkingRunning" unit="km" sum="5"/>
     </Workout></HealthData>`;
   writeFileSync(join(inputPath, "export.xml"), xml);
+  // S3.3 收口：本地目录来源也必须满足直连预检（v2 清单）—— 没有它的载荷会被
+  // `missing_required_files` 显式拒绝（候选链路已删）。本用例的主题是**删除/重建语义**，
+  // 所以夹具补齐清单，让两段导入都真正跑起来（第二段还依赖"缺失主库保留首次导入入口"的
+  // 建库契约，见 import-worker 的前置建库）。
+  writeFileSync(join(inputPath, "sync-manifest.json"), JSON.stringify({
+    version: 2, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [], deletedRecords: []
+  }));
   const state = new RuntimeStateStore(runtimeRoot);
   state.upsertSource({ id: "same-local-source", kind: "directory", displayName: "delete regression",
     inputPath, originalPath: inputPath, sourceSha256: null, exportFileName: "export.xml",

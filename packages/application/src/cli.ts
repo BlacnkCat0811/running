@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 
 import type { RecomputePlan } from "@rai/health-export-parser";
 import { importEngine, nativeFallback, nativeElevationGains, NATIVE_VERSION } from "@rai/health-export-parser";
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, acquireDatabasePublicationLock } from "@rai/storage-sqlite";
 
 import { RaiApplicationService } from "./service.js";
 
@@ -36,6 +36,14 @@ async function main(): Promise<void> {
     fallback: nativeFallback(optionValue(args, "--native-fallback", "none")),
     version: optionValue(args, "--native-version", NATIVE_VERSION)
   });
+  // S3.7：在打开库**之前**获取发布锁 —— 与 server（`"api"`）、parser CLI / migrate-cli /
+  // model-v2-cli（`"cli"`）同一个跨进程互斥原语。拿不到就明确拒绝（main 的 catch 会把
+  // "Another ... process is using ..." 打到 stderr 并 exit 1）。
+  //
+  // 为什么必须有：API 运行中裸写主库会让两条进程各自持连接写同一个 WAL 库，
+  // 而账本/游标的全部假设（单写者、批次边界、提交前回读）都建立在互斥之上。
+  // 历史形态是"服务端在跑，运维手敲 data:recompute 直接写主库"——没有任何东西拦它。
+  const releasePublicationLock = acquireDatabasePublicationLock(databasePath, "cli");
   const store = await RaiDatabase.open(databasePath);
   try {
     const service = new RaiApplicationService(store, "owned", elevationGains);
@@ -90,6 +98,7 @@ async function main(): Promise<void> {
     }
   } finally {
     store.close();
+    releasePublicationLock();
   }
 }
 

@@ -28,7 +28,7 @@ import {
   type StagedAuditFiles,
   NATIVE_VERSION,
 } from "@rai/health-export-parser";
-import { isStructurallyReadable } from "@rai/storage-sqlite";
+import { isStructurallyReadable, RaiDatabase } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
 import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
 import { dataOnlyBaselineContract, type DataOnlyImportResult } from "./data-only-import.js";
@@ -78,6 +78,78 @@ function findRemovalGuardError(error: unknown): ImportRemovalGuardError | null {
 const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => {
   database.exec(`PRAGMA busy_timeout = ${milliseconds}`);
 };
+
+/**
+ * 收口后（S3.1/S3.3）直连车道的**显式拒绝**：不再回退候选链路，而是让作业带稳定码失败。
+ *
+ * `reasons` 是稳定机器码序列（lane 否决原因或 `DirectSyncRejection.reason`）；
+ * `rejection` 在带观测字段（actual/bounds）时一并携带。落点：`job.failureCode`（客户端处置）
+ * 与主线程日志（观测）。
+ */
+class ImportLaneRefusal extends Error {
+  constructor(
+    readonly reasons: readonly string[],
+    readonly rejection?: DirectSyncRejection
+  ) {
+    super(`Direct sync refused: ${reasons.join(",")}`);
+    this.name = "ImportLaneRefusal";
+  }
+
+  /** 对外的稳定错误码（客户端可分支处置；见 `ImportJobResponse.failureCode`）。 */
+  get failureCode(): string {
+    return laneRefusalFailure(this.reasons[0] ?? "direct_sync_unavailable").code;
+  }
+
+  /** 对外的**受控中文**文案（不含内部诊断；用户可见文案的用词纪律）。 */
+  get userMessage(): string {
+    return laneRefusalFailure(this.reasons[0] ?? "direct_sync_unavailable").message;
+  }
+}
+
+/**
+ * 拒因 → `{ code, message }` 的**唯一映射表**（lane 否决原因 + direct-sync 拒收码共用）。
+ *
+ * 为什么集中一张表：这些码是 iOS 处置分支（拆批 / 退避 / 报维护）的输入契约，
+ * 散在调用点会让"某个码改了而客户端分支没跟"变成静默错误。
+ */
+export function laneRefusalFailure(reason: string): { code: string; message: string } {
+  switch (reason) {
+    case "fast_path_disabled":
+      return { code: "direct_sync_unavailable", message: "同步入口已暂停（服务端关闭了直连数据通路），请联系维护者" };
+    case "engine_version_mismatch":
+    case "no_existing_database":
+      return { code: "direct_sync_unavailable", message: "服务端直连通道暂不可用，请稍后重试或联系维护者" };
+    case "not_queued":
+      return { code: "direct_sync_internal_integrity", message: "导入失败，请查看服务日志" };
+    case "payload_is_a_complete_snapshot":
+      return { code: "direct_sync_full_snapshot_unsupported", message: "该导出是完整快照形态，直连通道不接受；请改用增量同步" };
+    case "payload_identity_unavailable":
+      return { code: "direct_sync_input_not_allowed", message: "无法复核导出文件身份，请重新导出后重试" };
+    case "xml_exceeds_bounds":
+    case "manifest_exceeds_bounds":
+    case "deletions_exceed_bounds":
+    case "route_exceeds_bounds":
+      return { code: "direct_sync_payload_exceeds_bounds", message: "本批超出服务端单批上限，请减小单批数据量后重传" };
+    case "missing_required_files":
+    case "input_tree_not_allowed":
+    case "missing_record_identity":
+    case "payload_identity_invalid":
+      return { code: "direct_sync_input_not_allowed", message: "导出内容不符合直连通道要求，请重新导出后重试" };
+    case "baseline_rebuild_required":
+      return { code: "direct_sync_baseline_rebuild_required", message: "服务端数据代际与当前版本不符，需维护者重建基线后重试" };
+    case "identity_not_eligible":
+      return { code: "direct_sync_unavailable", message: "服务端数据基线尚未就绪，请稍后重试" };
+    case "pending_migrations":
+    case "database_not_found":
+      return { code: "direct_sync_unavailable", message: "服务端数据库未就绪，请联系维护者" };
+    case "batch_without_receipt":
+    case "write_guard_triggered":
+      return { code: "direct_sync_internal_integrity", message: "导入失败，请查看服务日志" };
+    default:
+      // `engine_<name>` 等前缀式否决与未知码：统一归"不可用"（退避重试是安全方向）。
+      return { code: "direct_sync_unavailable", message: "直连通道当前不可用，请稍后重试" };
+  }
+}
 
 export const predictionModelWorkerRetryDelay = (consecutiveFailures: number): number =>
   Math.min(30_000, 1_000 * (2 ** Math.max(0, consecutiveFailures - 1)));
@@ -493,10 +565,8 @@ export class ImportWorker {
     const stagingDatabase = resolve(this.runtimeRoot, "var", `rai.importing.${job.id}${attempt}.sqlite`);
     const stagedMarkdownReport = resolve(this.runtimeRoot, "var", `data-audit.${job.id}${attempt}.md`);
     const stagedJsonReport = resolve(this.runtimeRoot, "var", `data-audit.${job.id}${attempt}.json`);
-    const finalMarkdownReport = resolve(this.runtimeRoot, "docs/DATA_AUDIT.md");
-    const finalJsonReport = resolve(this.runtimeRoot, "var/reports/data-audit.json");
-    let currentBackupPath: string | null = null;
-    let auditPublication: StagedAuditFiles | null = null;
+    // S3.3：`finalMarkdownReport` / `finalJsonReport` / `currentBackupPath` 的声明随候选链路一起删除
+    // （审计报告发布与项目备份只服务那条链路；保留的方法仍在类上，供阶段 5 隔离退役）。
     let terminalSucceeded = false;
     let publishTerminalState: (() => void) | null = null;
     let fastPathAttempted = false;
@@ -510,6 +580,19 @@ export class ImportWorker {
       job.status = "running";
       this.persistJobs();
       await mkdir(nativeSpoolRoot, { recursive: true });
+      // 2026-10-14（S3.2/S3.3 补全）：**导入入口负责创建/修复存储** —— 这是既有的、被测试钉住的
+      // 契约：`metadataOnlyMutationRoutes` 的注册注释写明 importing / restore / delete 三类路由
+      // 不得被 existsSync 门挡住（否则恢复路径被锁死），deploy/README-UBUNTU.md 的显式迁移契约
+      // 同样写着"缺失主库仍保留首次导入/维护入口"。
+      // 候选链路时代这件事由"从新库开始"的候选导入顺手完成；收口后车道判定要求库已存在
+      // （`no_existing_database` 是**防御性**分支），所以在这里补上等价动作：
+      //   · 只处理"文件不存在"——创建一份全新迁移库（等价于运维的 `data:migrate`）；
+      //   · 已存在但待迁移/损坏的库**绝不**在这里动（那是运维的显式流程：启动退出 78 / 隔离）。
+      // 首包随后走 S3.2 的三态：四项身份全缺 ⇒ 就地初始化。
+      if (!existsSync(this.databasePath)) {
+        process.stderr.write(`Main database missing; creating a fresh database before import ${job.id}.\n`);
+        (await RaiDatabase.open(this.databasePath)).close();
+      }
       const receipt = this.queueOptions ? readImportReceipt(this.databasePath, job.id) : null;
       if (receipt) {
         terminalSucceeded = true;
@@ -573,16 +656,19 @@ export class ImportWorker {
       // 观测（阶段 1，S1.3）：车道判定先落 telemetry（默认 fallback；直连成功时被就地覆盖）。
       laneTelemetry = { outcome: "fallback", reasons: [...lane.reasons], rejections: laneRejections };
       if (lane.lane === "legacy") {
+        // S3.1/D1 收口：车道判定否决 ⇒ **显式失败**（语义从"退回候选"变为"暂停同步入口"）。
+        // 日志（阶段 1 观测面）保留 —— 失败原因仍要能 grep 到。
         process.stderr.write(`Direct sync lane rejected for ${job.id}: ${lane.reasons.join(",")}\n`);
+        throw new ImportLaneRefusal(lane.reasons);
       }
       if (lane.lane === "direct") {
         payloadSha256 = await this.payloadSha256(job, engine);
         this.assertNotClosing();
         if (payloadSha256 === null) {
-          // 载荷摘要都算不出来：不尝任何一条子车道，直接回退 —— 与改动前
-          // `if (payloadSha256 !== null) { …尝试… }` 的控制流逐条等价。
+          // S3.1 收口：载荷摘要算不出来（输入不可读）⇒ 显式失败（带码），不再是回退理由。
           laneRejections.push({ source: "preflight", reason: "payload_identity_unavailable", stage: "read",
             detail: "computeImportPayloadSha256 失败：同一载荷无法复核身份" });
+          throw new ImportLaneRefusal(["payload_identity_unavailable"]);
         } else {
           job.phase = "activate";
           job.message = "正在按增量事务保存原始健康记录";
@@ -648,215 +734,18 @@ export class ImportWorker {
           process.stderr.write(`Direct sync rejected for ${job.id}: ${direct.reason} (stage=${direct.stage})`
             + `${direct.actual === undefined ? "" : ` actual=${JSON.stringify(direct.actual)}`}`
             + `${direct.bounds === undefined ? "" : ` bounds=${JSON.stringify(direct.bounds)}`}\n`);
-          // 两条直连车道都不合格（超限、输入目录不被允许、身份基线不合格…）⇒ 回退旧候选链路。
-          // `fastPathAttempted` 只在**两条都拒收之后**才清零：它同时是"这一批可能已经提交、
-          // 只是回执没送到"的标记（见下面的 catch）。
-          fastPathAttempted = false;
-          process.stderr.write(`Falling back to the candidate pipeline for ${job.id}:`
-            + ` reasons=[${lane.reasons.join(",")}]`
-            + ` rejections=[${laneRejections.map((entry) => `${entry.source}:${entry.reason}`).join(",")}]\n`);
-          this.assertNotClosing();
+          // S3.3 收口：两条直连车道都不合格 ⇒ **显式失败**（带稳定码），不再回退候选链路。
+          // 上面那条 `Direct sync rejected` 日志（阶段 1 观测面）继续保留。
+          // `fastPathAttempted` 保持 true 到 catch —— 若此前确有一批走直连车道**提交**过、
+          // 只是回执没送到，catch 会先试 `readImportReceipt` 恢复成功（判据不变）。
+          throw new ImportLaneRefusal([direct.reason], direct);
         }
       }
-      await this.removeDatabaseFiles(stagingDatabase);
-      this.assertNotClosing();
-      job.phase = "backup";
-      // §10.3 要求移除"正在备份并校验现有数据"这类旧语义 —— 但这条路径**还在跑**，
-      // 所以不能凭空删掉这句话（删了等于把正在发生的事藏起来）。正确的处置是让
-      // `job.message` 自己说清它是**维护路径**：iOS 的 `HealthKitSync.swift` 会把
-      // `job.message` 原样上屏，用户看到的必须是"这是维护/回退路径"，而不是
-      // "App 正在替你备份"。下面那两句同样处理。
-      //
-      // 为什么这条路径还不能删：首次历史分页与大包分批（§5.2 分片计划未实现）仍走这里；
-      // §13 也明确允许"切换前保留旧代码供隔离演练"。
-      job.message = "维护路径：正在创建项目级备份并校验现有数据（该批次未走直连车道）";
-      this.persistJobs();
-      // 计时在 `createCurrentBackup` 内部按 `backupCapacity` / `backupCopy` / `backupVerify` 三段各自落账：
-      // 线上一次导入这里报 254 s，而独立进程做同一个备份只要 12.4 s ⇒ 旧的单一口径无法定位，故拆开。
-      // ⚠️ 拆开后三个阶段必须**互斥**（`worker.test.ts` 断言 `totalMs >= ΣstagesMs`），不要在外面再包一层总量。
-      currentBackupPath = await this.createCurrentBackup(job.id, timing);
-      this.assertNotClosing();
-      if (currentBackupPath) {
-        const backupPath = currentBackupPath;
-        await timing.measure("stagingCopy", () => copyFile(backupPath, stagingDatabase));
-      }
-      this.assertNotClosing();
-      job.phase = "import";
-      // 同上：§10.3 的旧语义（"正在临时数据库中…"）不能原样上屏，但这两句描述的
-      // 是旧候选链路**真的在发生**的事（在暂存副本上跑 CLI），所以只把它们标注成维护路径。
-      job.message = currentBackupPath
-        ? "维护路径：正在临时数据库中增量同步 Apple Health 数据"
-        : "维护路径：正在临时数据库中解析 Apple Health 导出文件";
-      this.persistJobs();
-      await timing.measure("parseImport", () => this.command([
-        "--import",
-        "tsx",
-        "packages/health-export-parser/src/cli.ts",
-        currentBackupPath ? "incremental-import" : "import",
-        "--input",
-        job.inputPath,
-        "--database",
-        stagingDatabase,
-        "--owned-candidate",
-        job.id,
-        ...engineArgs,
-        "--report",
-        stagedMarkdownReport,
-        "--json-report",
-        stagedJsonReport,
-        // 报告最终发布成 `docs/DATA_AUDIT.md`，描述的是**主库**；但 CLI 眼里只有暂存
-        // 副本（上面 `--database stagingDatabase`）。显式告诉它数据源，否则报告头部会
-        // 写 `var/rai.importing.<jobId>.sqlite` —— 读者会以为数字来自一个临时文件。
-        "--source-database",
-        this.databasePath,
-        ...(currentBackupPath ? ["--batch-id", job.id] : ["--replace"]),
-        // Absence-as-deletion is opt-in, so the CLI needs to be told explicitly
-        // when a payload declared itself a complete snapshot. A falsy flag means
-        // "not preserving", matching how the parser reads the same option.
-        ...(currentBackupPath
-          ? [job.preserveAbsent ? "--preserve-absent" : "--replace-absent"]
-          : [])
-      ]));
-      this.assertNotClosing();
-      job.phase = "analyze";
-      job.message = "正在确定受影响的数据范围";
-      this.persistJobs();
-      const change = await timing.measure("changeAnalysis", () => currentBackupPath
-        ? this.queueOptions
-          ? this.analyzeInThread(stagingDatabase, currentBackupPath, job)
-          : this.analyzeDatasetChange(stagingDatabase, currentBackupPath, job.id, job.preserveAbsent)
-        : {
-            mode: "full" as const,
-            dirtyFromAt: null,
-            insertedWorkouts: this.countRows(stagingDatabase, "training_sessions"),
-            updatedWorkouts: 0,
-            removedWorkouts: 0,
-            unchangedWorkouts: 0,
-            routesUpdated: this.countRows(stagingDatabase, "workout_routes")
-          });
-      this.assertNotClosing();
-      if (change.mode === "unchanged") {
-        job.phase = "activate"; // terminal decision is now irreversible, including no-op imports
-        terminalSucceeded = true;
-        publishTerminalState = () => {
-          job.status = "succeeded";
-          job.phase = "completed";
-          job.message = "导出文件中没有影响分析的新数据";
-          job.completedAt = new Date().toISOString();
-          job.summary = {
-            importMode: "unchanged",
-            ...change,
-            featuresReused: 0,
-            featuresRecomputed: 0,
-            modelReplayFrom: null,
-            durationMs: Date.now() - startedAtMs,
-            backupName: currentBackupPath ? currentBackupPath.split(/[\\/]/).at(-1) ?? null : null
-          };
-        };
-        // 这条链路刚刚证明了"把这份载荷应用到主库上不写任何一行"，所以这份载荷的身份
-        // 对**主库**是一个有效锚点 —— 即使暂存副本会被丢弃，也把锚点刷新掉。
-        //
-        // 不刷新会出现"永久失效"：载荷内容其实没变、但组合上下文变了（解析契约版本升级、
-        // 执行的引擎切换）时，判据永远不相等，而判词又一直是 `unchanged`（走不到激活路径），
-        // 锚点就再也写不回去了。刷新的风险面很小 —— `unchanged` 判词本来就被当成权威结论
-        // （暂存库当场丢弃），这里只是把这个已有结论缓存下来。
-        // 这也是一处新增的**主库写入**：单行 upsert，尽力而为，失败只记日志。
-        payloadSha256 ??= await this.payloadSha256(job, engine);
-        this.recordPayloadAnchor(this.databasePath, payloadSha256);
-        return;
-      }
-      let featureSummary = { reused: 0, recomputed: 0 };
-      if (change.mode !== "data-only") {
-        // Incremental staging starts from an online backup, so overrides and immutable
-        // histories already remain attached to their stable training-session identities.
-        job.phase = "recompute";
-        job.message = "导入完成，正在重算 RAI 时间线";
-        this.persistJobs();
-        const incremental = change.mode === "incremental" && change.dirtyFromAt;
-        await timing.measure("recompute", () => this.command([
-          "--import",
-          "tsx",
-          "packages/application/src/cli.ts",
-          "recompute",
-          "--database",
-          stagingDatabase,
-          ...engineArgs,
-          "--timezone",
-          DATABASE_TIMEZONE,
-          ...(this.recomputeEvaluatedAt ? ["--evaluated-at", this.recomputeEvaluatedAt] : []),
-          "--import-batch",
-          job.id,
-          ...(incremental ? ["--dirty-from", incremental] : [])
-        ]));
-        this.assertNotClosing();
-        featureSummary = this.latestFeatureRunSummary(stagingDatabase);
-      }
-      job.phase = "activate";
-      job.message = change.mode === "data-only"
-        ? "导入完成，正在保存无需重算的数据"
-        : "验证完成，正在切换本地数据库";
-      this.persistJobs();
-      if (this.queueOptions) {
-        writeImportReceipt(stagingDatabase, job.id, {
-          recomputeReasons: change.recomputeReasons ?? [],
-          importMode: change.mode === "data-only" ? "incremental" : change.mode,
-          insertedWorkouts: change.insertedWorkouts, updatedWorkouts: change.updatedWorkouts,
-          removedWorkouts: change.removedWorkouts, unchangedWorkouts: change.unchangedWorkouts,
-          routesUpdated: change.routesUpdated, featuresReused: featureSummary.reused,
-          featuresRecomputed: featureSummary.recomputed,
-          modelReplayFrom: change.mode === "incremental" ? change.dirtyFromAt : null,
-          durationMs: Date.now() - startedAtMs,
-          backupName: currentBackupPath ? basename(currentBackupPath) : null
-        });
-      }
-      // 把"这份库是由哪个载荷产生的"写进**暂存库**，让它随激活一起落地：
-      // 锚点不可能先于它所描述的数据出现，激活失败回滚时也随库一起消失。
-      payloadSha256 ??= await this.payloadSha256(job, engine);
-      this.recordPayloadAnchor(stagingDatabase, payloadSha256);
-      const auditedCandidate = new DatabaseSync(stagingDatabase);
-      try {
-        auditedCandidate.prepare("DELETE FROM import_manifest WHERE key='audit_report_pending_version'").run();
-        auditedCandidate.prepare("INSERT OR REPLACE INTO import_manifest(key,value) VALUES ('data_only_baseline_contract',?)")
-          .run(dataOnlyBaselineContract());
-      } finally { auditedCandidate.close(); }
-      // 拆成两段（互斥，不外包总量）：审计文件发布 vs 换库本身。
-      // 线上这里曾累计到 258 s，拆开才知道是 `stageAuditReports` 还是 `activateDatabase` 在吃时间。
-      auditPublication = await timing.measure("activationAudit", () => this.prepareAuditReports(
-        stagingDatabase,
-        finalMarkdownReport,
-        finalJsonReport,
-      ));
-      const publication = auditPublication;
-      await timing.measure("activationSwap", async () => {
-        await this.activateDatabase(
-          stagingDatabase,
-          job.id,
-          currentBackupPath,
-          () => publication.commit(),
-        );
-        publication.finalize();
-      });
-      terminalSucceeded = true;
-      publishTerminalState = () => {
-        job.status = "succeeded";
-        job.phase = "completed";
-        job.message = change.mode === "data-only" ? "导入完成，分析数据没有变化" : "导入与模型重算完成";
-        job.completedAt = new Date().toISOString();
-        job.summary = {
-          recomputeReasons: change.recomputeReasons ?? [],
-          importMode: change.mode === "data-only" ? "incremental" : change.mode,
-          insertedWorkouts: change.insertedWorkouts,
-          updatedWorkouts: change.updatedWorkouts,
-          removedWorkouts: change.removedWorkouts,
-          unchangedWorkouts: change.unchangedWorkouts,
-          routesUpdated: change.routesUpdated,
-          featuresReused: featureSummary.reused,
-          featuresRecomputed: featureSummary.recomputed,
-          modelReplayFrom: change.mode === "incremental" ? change.dirtyFromAt : null,
-          durationMs: Date.now() - startedAtMs,
-          backupName: currentBackupPath ? currentBackupPath.split(/[\\/]/).at(-1) ?? null : null
-        };
-      };
+      // S3.3：旧候选链路（整库备份 → 暂存副本 → CLI 导入 → 重算 → 文件换库）的**调用链已删除**。
+      // 保留的方法（createCurrentBackup / activateDatabase / prepareAuditReports / …）只服务
+      // 阶段 5 的隔离退役；运行期不再有任何路径到达它们。删除依据：iOS 分批版（阶段 2）
+      // 把回退率降到 0 之后，这条链路只剩成本没有功能 —— 它的两次全库 quick_check 占
+      // 单次成本 71.5–76.9%（线上实测整批 9.9–13.3 min）。
     } catch (error) {
       // The SQLite commit may have completed just before a worker lost its
       // reply or shutdown interrupted the parent. Never report a committed
@@ -872,16 +761,32 @@ export class ImportWorker {
         process.stderr.write(`Recovered committed data-only import ${job.id} after its worker reply was lost.\n`);
         return;
       }
-      this.onDatabaseError(error);
-      let failure: unknown = error;
-      try {
-        auditPublication?.rollback();
-      } catch (rollbackError) {
-        failure = new AggregateError(
-          [error, rollbackError],
-          "Import failed and audit report publication could not be rolled back",
-        );
+      if (error instanceof ImportLaneRefusal) {
+        // S3.1 收口：直连拒绝 = **终态失败**（带稳定码 + 受控文案），不是回退信号。
+        // 不经过 `onDatabaseError`（它不是数据库错误）、不碰 removalGuard 链。
+        terminalSucceeded = false;
+        console.error(`Import job ${job.id} refused by the direct-sync lane: ${error.reasons.join(",")}`
+          + `${error.rejection === undefined ? "" : ` detail=${JSON.stringify(error.rejection)}`}`);
+        publishTerminalState = () => {
+          if (this.cancelRequested) {
+            // 取消优先（与既有 catch 同源语义）：用户主动停下的一批不该被报成"被拒"。
+            job.status = "cancelled"; job.phase = "cancelled";
+            job.message = "导入已取消"; job.error = null; job.completedAt = new Date().toISOString();
+            return;
+          }
+          job.status = "failed"; job.phase = "failed";
+          job.message = error.userMessage;
+          // 内部诊断（`publicJob` 会把 job.error 替换成通用文案；客户端拿到的机器面是 failureCode）。
+          job.error = `${error.failureCode}:${error.reasons.join(",")}`;
+          job.failureCode = error.failureCode;
+          job.completedAt = new Date().toISOString();
+        };
+        return;
       }
+      this.onDatabaseError(error);
+      // S3.3：`auditPublication` 的 rollback 随候选链路删除 —— 审计报告发布只由那条链路
+      // 产生（`prepareAuditReports` 仍在类上，供阶段 5 隔离退役）。
+      const failure: unknown = error;
       terminalSucceeded = false;
       const removalGuard = findRemovalGuardError(failure);
       const detail = failure instanceof Error
@@ -2081,6 +1986,8 @@ export class ImportWorker {
       createdAt: job.createdAt,
       completedAt: job.completedAt,
       error: publicError
+      // 稳定失败码**可以**进公开层（它是机器面，不是诊断）：iOS 据此拆批/退避/报维护（I4）。
+      ,...(job.failureCode === undefined ? {} : { failureCode: job.failureCode })
       ,...(job.progress === undefined ? {} : { progress: job.progress })
       ,...(job.summary === undefined ? {} : { summary: job.summary })
       ,...(job.performance === undefined ? {} : { performance: job.performance })

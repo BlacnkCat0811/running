@@ -344,7 +344,7 @@ test("超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入�
  * 分别要求一个真欠迁移的库与一个能触发守卫的写路径，前者另有用例（写守卫测试），
  * 后者需要注入分析表写入 —— 两者都不在本用例里伪造。
  */
-test("拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 身份不合 / 库不存在 / 批次无回执 各自带正确 reason", async () => {
+test("拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 契约代际不符 / 库不存在 / 批次无回执 各自带正确 reason", async () => {
   await fixture(async ({ main, input, root }) => {
     // ① 缺 sync-manifest.json ⇒ missing_required_files（必须文件缺失）。
     const noManifest = await input(record(a));
@@ -375,7 +375,9 @@ test("拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 身份不合 
     assert.equal(deletions.actual?.deletions, 5001);
     assert.equal(deletions.bounds?.maxRecords, 5000);
 
-    // ④ 契约/身份代际不符（库侧）⇒ identity_not_eligible。
+    // ④ **契约/身份代际不符**（库里有身份痕迹但值不符）⇒ `baseline_rebuild_required`。
+    //    S3.2 把身份检查拆成三态：只有**四项全缺**才允许就地初始化（见下一条用例），
+    //    "有痕迹但不合格"必须显式要求运维重建 —— 客户端不能自动修，也不能被当成"没资格"混过去。
     //    注意本场景的 payload 摘要必须仍能复核通过（它先于身份检查），所以改的是**库**不是载荷。
     const goodPayload = await input(record(b), { job: "delta-identity" });
     const breakIt = new DatabaseSync(main);
@@ -383,8 +385,9 @@ test("拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 身份不合 
       breakIt.prepare("UPDATE import_manifest SET value='mismatch' WHERE key='parser_contract_version'").run();
     } finally { breakIt.close(); }
     const ineligible = await applyDirectSyncImport(goodPayload);
-    assert.ok(isDirectSyncRejection(ineligible) && ineligible.reason === "identity_not_eligible",
-      `契约不符必须报 identity_not_eligible，实际：${JSON.stringify(ineligible)}`);
+    assert.ok(isDirectSyncRejection(ineligible) && ineligible.reason === "baseline_rebuild_required",
+      `契约不符（有身份痕迹）必须报 baseline_rebuild_required，实际：${JSON.stringify(ineligible)}`);
+    assert.equal(ineligible.stage, "identity");
     const restore = new DatabaseSync(main);
     try {
       restore.prepare("UPDATE import_manifest SET value=? WHERE key='parser_contract_version'").run(CONTRACT_VERSION);
@@ -406,6 +409,36 @@ test("拒收码词典：缺文件 / 缺 v2 身份 / 删除超界 / 身份不合 
     assert.ok(isDirectSyncRejection(receiptLess) && receiptLess.reason === "batch_without_receipt",
       `同 id 无回执必须报 batch_without_receipt，实际：${JSON.stringify(receiptLess)}`);
     assert.equal(receiptLess.stage, "transaction");
+  });
+});
+
+test("空库首包（四项身份全缺）+ v2 载荷 ⇒ 就地初始化：四要素齐备、第二包照常（S3.2/D3）", async () => {
+  await fixture(async ({ root, input }) => {
+    // 一个**全新**的库：迁移到 v36 但不带任何身份键（"从未有完成过的导入"）。
+    const fresh = join(root, "fresh.sqlite");
+    (await RaiDatabase.open(fresh)).close();
+    const first = await input(record(a), { job: "bootstrap-first" });
+    const applied = await applyOrFail({ ...first, databasePath: fresh });
+    assert.equal(applied.summary.directSync?.ingestStatus, "committed");
+    // 四要素在一批之内齐备：`dataset_version` / `import_completed_at` 由接收器写，
+    // `parser_contract_version` / `parser_identity_algorithm` 由解析器写。
+    const check = new DatabaseSync(fresh, { readOnly: true });
+    try {
+      const state = new Map(
+        (check.prepare("SELECT key, value FROM import_manifest").all() as Array<{ key: string; value: string }>)
+          .map((row) => [row.key, row.value])
+      );
+      for (const key of ["dataset_version", "import_completed_at", "parser_contract_version", "parser_identity_algorithm"]) {
+        assert.ok(state.get(key), `${key} 必须在首包之后齐备（bootstrap 就地初始化）`);
+      }
+      assert.equal(state.get("parser_contract_version"), CONTRACT_VERSION);
+      assert.equal(state.get("parser_identity_algorithm"), identityAlgorithmFingerprint());
+      assert.notEqual(state.get("dataset_version"), "bootstrap", "版本号必须真的前进，不许停在引导符上");
+    } finally { check.close(); }
+    // 第二包（普通批次）在同一库上照常走常规增量 —— 就地初始化只发生一次。
+    const second = await input(record(b), { job: "bootstrap-second" });
+    const followUp = await applyOrFail({ ...second, databasePath: fresh });
+    assert.equal(followUp.summary.directSync?.ingestStatus, "committed");
   });
 });
 

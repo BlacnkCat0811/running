@@ -676,6 +676,15 @@ export interface ImportJobResponse {
   createdAt: string;
   completedAt: string | null;
   error: string | null;
+  /**
+   * 稳定机器码的失败原因（收口阶段 3 起；成功/老持久化作业没有该键）。
+   *
+   * 客户端（iOS）据此分支处置：`direct_sync_payload_exceeds_bounds` ⇒ 收敛拆批预算后重传；
+   * `direct_sync_unavailable` ⇒ 退避重试；`direct_sync_baseline_rebuild_required` ⇒ 报维护。
+   * 与 `error` 的分工：`error` 是给人看的（公开层恒为通用文案），本字段是给程序看的
+   * （枚举见 `apps/api/src/import-worker.ts` 的 `laneRefusalFailure`）。
+   */
+  failureCode?: string;
   progress?: number;
   queuePosition?: number;
   waitingReason?: "writer_busy";

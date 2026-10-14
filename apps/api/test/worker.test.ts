@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { RaiApplicationService, currentAbilityBaselineHash } from "@rai/application";
-import { healthTypes, type PredictionModelTrainingRequest } from "@rai/contracts";
+import { healthTypes, PROHIBITED_DIRECT_SYNC_OPERATIONS, type PredictionModelTrainingRequest } from "@rai/contracts";
 import { ImportRemovalGuardError } from "@rai/health-export-parser";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
@@ -21,8 +21,11 @@ import {
   RecomputeWorker,
   createImportJobId,
   predictionModelWorkerRetryDelay,
-  predictionModelArtifactDirectory
+  predictionModelArtifactDirectory,
+  PUBLIC_IMPORT_FAILURE_ERROR
 } from "../src/worker.js";
+import { MutationCoordinator } from "../src/mutation-coordinator.js";
+import { TaskAdmissionScheduler } from "../src/task-admission.js";
 
 interface ImportWorkerTestSurface {
   activateDatabase(
@@ -50,6 +53,7 @@ interface ImportWorkerTestSurface {
     routesUpdated: number;
   };
   removeDatabaseFiles(databasePath: string): Promise<void>;
+  reclaimDisplacedImportDatabases(stagingDatabase: string): Promise<void>;
   installDatabase(source: string, destination: string): Promise<void>;
   moveDatabaseFile(source: string, destination: string): Promise<void>;
   copyDatabaseFile(source: string, destination: string): Promise<void>;
@@ -217,6 +221,32 @@ async function waitFor(predicate: () => boolean, timeoutMilliseconds = 5000): Pr
     if (Date.now() >= deadline) throw new Error("Timed out waiting for process state");
     await delay(25);
   }
+}
+
+/**
+ * S3.3 收口后的公共断言（候选链路已从运行期删除）：被拒的批次必须
+ *   ① 显式失败 —— 状态 + 稳定失败码（客户端 I4 的处置输入）；
+ *   ② 零禁止操作 —— §14.1 的加强版守卫（候选各阶段一段都不许出现）；
+ *   ③ lane 遥测如实 —— 落点在 finally，失败路径不许漏。
+ * 禁止阶段清单直接取自 contracts（单一来源）。注意 `changeAnalysis` **不在**其内：
+ * 它是"载荷与上次一致"早退路径的合法计量，与候选链路的同名阶段不是一件事。
+ */
+function assertRefusedByClosedLane(
+  job: Record<string, unknown>,
+  expected: { failureCode: string; laneReasons: string[] }
+): ImportJobPerformance {
+  assert.equal(job.status, "failed", String(job.error ?? ""));
+  assert.equal(job.failureCode, expected.failureCode);
+  const timing = job.performance as ImportJobPerformance;
+  assert.equal(timing.lane?.outcome, "fallback");
+  assert.deepEqual(timing.lane?.reasons, expected.laneReasons);
+  const prohibitedStages = [...new Set(
+    PROHIBITED_DIRECT_SYNC_OPERATIONS.flatMap((operation) => operation.stages)
+  )] as (keyof ImportJobPerformance["stagesMs"])[];
+  for (const stage of prohibitedStages) {
+    assert.equal(timing.stagesMs[stage], undefined, `${stage} must not run after S3.3`);
+  }
+  return timing;
 }
 
 const runDate = (index: number): string => new Date(Date.UTC(2025, 0, 1 + index * 3)).toISOString();
@@ -1159,25 +1189,18 @@ test("preserves a corrupt active database and starts import from a fresh databas
   }
 });
 
-test("quarantines a corrupt active database only once across import and activation", async () => {
+test("损坏的主库 + 无队列直跑 ⇒ 显式失败，且不建隔离、不动主库（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"损坏主库在候选链路里被隔离一次
+  // （quarantine 目录恰好 1 个文件）、CLI 两次调用后成功"。隔离由候选的 activate 路径
+  // 执行，已从运行期删除；`quarantineCorruptDatabase` 方法保留（阶段 5 隔离退役）。
+  // 收口后的判据换成：① 无队列直跑 ⇒ `not_queued` 显式失败；② 不得创建任何隔离目录；
+  // ③ 损坏的主库文件一字节不动。
   const root = mkdtempSync(join(tmpdir(), "rai-import-corrupt-run-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"), { recursive: true });
-  writeFileSync(databasePath, "not a sqlite database");
+  const garbage = "not a sqlite database";
+  writeFileSync(databasePath, garbage);
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    if (commandCount !== 1) return;
-    const databaseArgument = args.indexOf("--database");
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    const staging = await seedCanonical(stagingPath);
-    staging.close();
-  };
-  worker.stageAuditReports = () => ({
-    commit() {}, rollback() {}, finalize() {}, discard() {}
-  });
   const job: Record<string, unknown> = {
     id: "web_import_corrupt_once",
     status: "queued",
@@ -1190,13 +1213,14 @@ test("quarantines a corrupt active database only once across import and activati
   };
   try {
     await worker.run(job);
-    assert.equal(job.status, "succeeded");
-    assert.equal(commandCount, 2);
-    assert.equal(
-      readdirSync(join(root, "var", "quarantine"))
-        .filter((name) => name.endsWith(".sqlite")).length,
-      1
-    );
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
+    // 隔离目录是候选 activate 路径的产物：收口后连空目录都不许出现。
+    assert.equal(existsSync(join(root, "var", "quarantine")), false,
+      "收口后的失败批次不得创建隔离目录");
+    // 损坏的主库原样保留（它不是本批的修改对象）。
+    assert.equal(readFileSync(databasePath, "utf8"), garbage);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1551,48 +1575,21 @@ for (const [beforeStatus, afterStatus] of [
   });
 }
 
-test("recomputes and activates a training session that becomes ambiguous (off)", async () => {
+test("无队列直跑路径在收口后显式失败，且零禁止操作（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"候选链路完整跑完（CLI 模拟两次调用）
+  // 后 session 变 ambiguous + 发 issue"。那条链路已从运行期删除 —— 保留的判据换成：
+  //   ① 无队列直跑（测试工装形态，生产恒经 API 队列）⇒ `not_queued`；收口后它必须**显式失败**
+  //      （`direct_sync_internal_integrity`，500 语义的编程错误），而不是静默降级到任何慢路径；
+  //   ② 失败批次**零禁止操作**（候选各阶段一段都不许出现）—— 这是 §14.1 的加强版守卫；
+  //   ③ 主库零变化。
+  // 原"recompute 激活产物"的业务语义由直连 + 分析管道承担（见 import-worker-direct-sync /
+  // analysis-failure-isolation 等），它们不经过本文件的 CLI 工装。
   const root = mkdtempSync(join(tmpdir(), "rai-import-session-status-run-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   const active = await seedCanonical(databasePath);
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    if (commandCount === 1) {
-      const staging = new DatabaseSync(stagingPath);
-      try {
-        staging.prepare(`
-          UPDATE training_sessions SET status = 'ambiguous'
-          WHERE id = 'worker_session_0'
-        `).run();
-        staging.prepare(`
-          INSERT INTO import_issues (severity, code, object_id, message)
-          VALUES ('warning', 'AMBIGUOUS_TRAINING_SESSION_MATCH', 'worker_session_0',
-            'A candidate workout group matched more than one existing training session.')
-        `).run();
-        staging.prepare(`
-          UPDATE import_manifest SET value = 'worker_fixture_ambiguous'
-          WHERE key = 'dataset_version'
-        `).run();
-      } finally {
-        staging.close();
-      }
-      return;
-    }
-    assert.equal(commandCount, 2, "a training-session status change must invoke exactly one recompute");
-    assert.ok(args.includes("recompute"));
-    assert.equal(args.includes("--shadow-validate"), false, "the removed shadow flag must never be passed");
-    const dirtyFromArgument = args.indexOf("--dirty-from");
-    assert.ok(dirtyFromArgument >= 0);
-    assert.equal(args[dirtyFromArgument + 1], runDate(0));
-  };
   const job: Record<string, unknown> = {
     id: "web_import_session_became_ambiguous",
     status: "queued",
@@ -1605,42 +1602,16 @@ test("recomputes and activates a training session that becomes ambiguous (off)",
   };
   try {
     await worker.run(job);
-    assert.equal(job.status, "succeeded", String(job.error ?? ""));
-    assert.equal(commandCount, 2);
-    const timing = job.performance as ImportJobPerformance;
-    assert.equal(timing.validationMode, "not-run");
-    // 观测（阶段 1，S1.3）：无队列直跑路径必然走候选链路 —— lane 遥测必须如实记录否决理由。
-    // 这条同时钉住"落点唯一"：lane 在 finally 统一挂载，成功/失败两条路径都不许漏。
-    assert.equal(timing.lane?.outcome, "fallback");
-    assert.deepEqual(timing.lane?.reasons, ["not_queued"]);
-    for (const stage of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
-      "changeAnalysis", "recompute", "activationAudit", "activationSwap", "cleanup"] as const) {
-      assert.ok(timing.stagesMs[stage]! >= 0, `missing ${stage} duration`);
-    }
-    // 🔴 存在 ≠ 干过活：这两段各自都要动真数据（写整份备份副本 / 全库 PRAGMA quick_check），
-    // 被记录成 0 就说明它们没被执行 —— 上面那条 `>= 0` 抓不到这种情况。
-    for (const stage of ["backupCopy", "backupVerify"] as const) {
-      assert.ok(timing.stagesMs[stage]! > 0, `${stage} was recorded but did no work`);
-    }
-    assert.ok(timing.totalMs >= Object.values(timing.stagesMs).reduce((sum, value) => sum + value, 0));
-    assert.equal((job.summary as {
-      importMode: string;
-      updatedWorkouts: number;
-      modelReplayFrom: string | null;
-    }).importMode, "incremental");
-    assert.equal((job.summary as { updatedWorkouts: number }).updatedWorkouts, 1);
-    assert.equal((job.summary as { modelReplayFrom: string | null }).modelReplayFrom, runDate(0));
-    const activated = new DatabaseSync(databasePath, { readOnly: true });
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
+    const after = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      assert.equal((activated.prepare(`
+      assert.equal((after.prepare(`
         SELECT status FROM training_sessions WHERE id = 'worker_session_0'
-      `).get() as { status: string }).status, "ambiguous");
-      assert.equal((activated.prepare(`
-        SELECT COUNT(*) AS count FROM import_issues
-        WHERE code = 'AMBIGUOUS_TRAINING_SESSION_MATCH' AND object_id = 'worker_session_0'
-      `).get() as { count: number }).count, 1);
+      `).get() as { status: string }).status, "active", "收口后的失败批次不得改动主库");
     } finally {
-      activated.close();
+      after.close();
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1684,7 +1655,11 @@ for (const field of [
   });
 }
 
-test("recomputes and activates a changed profile", async () => {
+test("changed profile：无队列直跑 ⇒ 显式失败且主库 profile 不动（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"profile 变更 ⇒ 候选链路 CLI 重算
+  // （commandCount==2、importMode=full）后主库 profile 被激活"。那条链路已删除；变更分类的
+  // 覆盖由本文件直调用例（`uses full recompute when profile field … changes`）承担，
+  // 重算执行由直连登记的分析管道承担。收口后的判据：显式失败 + 主库 profile 保持旧值。
   const root = mkdtempSync(join(tmpdir(), "rai-import-profile-full-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
@@ -1693,26 +1668,6 @@ test("recomputes and activates a changed profile", async () => {
     .run(JSON.stringify({ HKCharacteristicTypeIdentifierDateOfBirth: "1990-01-01" }));
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    if (commandCount === 1) {
-      const staging = new DatabaseSync(stagingPath);
-      try {
-        staging.prepare("UPDATE profile SET attributes_json = ? WHERE id = 1")
-          .run(JSON.stringify({ HKCharacteristicTypeIdentifierDateOfBirth: "1991-01-01" }));
-      } finally {
-        staging.close();
-      }
-      return;
-    }
-    assert.equal(commandCount, 2, "profile changes must invoke exactly one recompute");
-    assert.ok(args.includes("recompute"));
-  };
   const job: Record<string, unknown> = {
     id: "web_import_profile_full",
     status: "queued",
@@ -1725,16 +1680,16 @@ test("recomputes and activates a changed profile", async () => {
   };
   try {
     await worker.run(job);
-    assert.equal(commandCount, 2);
-    assert.equal(job.status, "succeeded", String(job.error ?? ""));
-    assert.equal((job.summary as { importMode: string }).importMode, "full");
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
       const row = activated.prepare("SELECT attributes_json AS attributesJson FROM profile WHERE id = 1")
         .get() as { attributesJson: string };
       assert.deepEqual(JSON.parse(row.attributesJson), {
-        HKCharacteristicTypeIdentifierDateOfBirth: "1991-01-01"
-      });
+        HKCharacteristicTypeIdentifierDateOfBirth: "1990-01-01"
+      }, "收口后的失败批次不得改动主库 profile");
     } finally {
       activated.close();
     }
@@ -1849,57 +1804,17 @@ test("starts route recompute at the changed GPX workout instead of the first wor
   }
 });
 
-test("recomputes and activates routes when an upgraded database gains its first GPX fingerprint", async () => {
+test("首个 GPX 指纹 + 无队列直跑 ⇒ 显式失败且主库路由零写入（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"升级库首次拿到 GPX 指纹 ⇒ 候选 CLI
+  // 重算（commandCount==2、dirty-from=runDate(0)）后主库出现 route_points 与指纹"。那条
+  // 链路已删除；指纹分类的覆盖由本文件直调用例（`recomputes from the first workout when the
+  // GPX fingerprint has a … transition`）承担。收口后的判据：显式失败 + 主库零路由写入。
   const root = mkdtempSync(join(tmpdir(), "rai-import-route-fingerprint-run-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   const active = await seedCanonical(databasePath);
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    if (commandCount === 1) {
-      const staging = new DatabaseSync(stagingPath);
-      try {
-        staging.prepare(`
-          INSERT INTO import_manifest (key, value)
-          VALUES ('source_gpx_bundle_sha256', 'first-gpx-hash')
-        `).run();
-        staging.prepare(`
-          UPDATE import_manifest SET value = 'worker_fixture_with_routes'
-          WHERE key = 'dataset_version'
-        `).run();
-        staging.prepare(`
-          INSERT INTO workout_routes (
-            id, workout_id, source_category, relative_path, metadata_json,
-            point_count, file_status
-          ) VALUES ('worker_route_new', 'worker_workout_0', 'apple_watch',
-            'routes/new.gpx', '{}', 2, 'imported')
-        `).run();
-        staging.prepare(`
-          INSERT INTO route_points (
-            route_id, sequence, timestamp, latitude, longitude, elevation_meters,
-            horizontal_accuracy_meters
-          ) VALUES
-            ('worker_route_new', 0, ?, 31.20, 121.40, 5, 4),
-            ('worker_route_new', 1, ?, 31.21, 121.41, 15, 4)
-        `).run(runDate(0), new Date(Date.parse(runDate(0)) + 60_000).toISOString());
-      } finally {
-        staging.close();
-      }
-      return;
-    }
-    assert.equal(commandCount, 2, "a newly available GPX bundle must invoke exactly one recompute");
-    assert.ok(args.includes("recompute"));
-    const dirtyFromArgument = args.indexOf("--dirty-from");
-    assert.ok(dirtyFromArgument >= 0);
-    assert.equal(args[dirtyFromArgument + 1], runDate(0));
-  };
   const job: Record<string, unknown> = {
     id: "web_import_first_gpx_fingerprint",
     status: "queued",
@@ -1912,18 +1827,18 @@ test("recomputes and activates routes when an upgraded database gains its first 
   };
   try {
     await worker.run(job);
-    assert.equal(commandCount, 2);
-    assert.equal(job.status, "succeeded");
-    assert.equal((job.summary as { importMode: string; routesUpdated: number }).importMode, "incremental");
-    assert.equal((job.summary as { importMode: string; routesUpdated: number }).routesUpdated, 1);
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
+      // 收口后的失败批次不得往主库写任何路由或指纹。
       assert.equal((activated.prepare(`
         SELECT COUNT(*) AS count FROM route_points WHERE route_id = 'worker_route_new'
-      `).get() as { count: number }).count, 2);
+      `).get() as { count: number }).count, 0);
       assert.equal((activated.prepare(`
-        SELECT value FROM import_manifest WHERE key = 'source_gpx_bundle_sha256'
-      `).get() as { value: string }).value, "first-gpx-hash");
+        SELECT COUNT(*) AS count FROM import_manifest WHERE key = 'source_gpx_bundle_sha256'
+      `).get() as { count: number }).count, 0);
     } finally {
       activated.close();
     }
@@ -2047,7 +1962,11 @@ for (const [previousCount, stagingCount] of [[2, 1], [1, 2]] as const) {
   });
 }
 
-test("activates a rebuilt issue generation that removes legacy duplicates", async () => {
+test("遗留重复 issue 的代际重建：无队列直跑 ⇒ 显式失败且 issue 投影与报告不动（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"重建 issue 代际（去重后只留 1 条）
+  // ⇒ 候选链路一次 CLI 调用（不重算）后主库 issue 投影与审计报告一致"。代际重建与报告发布
+  // 都住在候选链路里，已删除；issue 分类的覆盖由本文件直调用例（`classifies an … import
+  // issue …` 系列）承担。收口后的判据：显式失败 + 主库 issue 投影保持 2 条 + 不发布报告。
   const root = mkdtempSync(join(tmpdir(), "rai-import-issue-upgrade-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
@@ -2060,25 +1979,6 @@ test("activates a rebuilt issue generation that removes legacy duplicates", asyn
   insertIssue.run();
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    assert.equal(commandCount, 1, "issue generation cleanup must not invoke recompute");
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    const staging = new DatabaseSync(stagingPath);
-    try {
-      staging.prepare("DELETE FROM import_issues").run();
-      staging.prepare(`
-        INSERT INTO import_issues (severity, code, object_id, message)
-        VALUES ('warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
-      `).run();
-    } finally {
-      staging.close();
-    }
-  };
   const job: Record<string, unknown> = {
     id: "web_import_issue_upgrade",
     status: "queued",
@@ -2091,110 +1991,34 @@ test("activates a rebuilt issue generation that removes legacy duplicates", asyn
   };
   try {
     await worker.run(job);
-    assert.equal(commandCount, 1);
-    assert.equal(job.status, "succeeded");
-    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      const issueCount = (activated.prepare("SELECT COUNT(*) AS count FROM import_issues").get() as { count: number }).count;
-      const report = JSON.parse(readFileSync(join(root, "var", "reports", "data-audit.json"), "utf8")) as {
-        totals: { importIssues: number };
-      };
-      assert.equal(issueCount, 1);
-      assert.equal(report.totals.importIssues, issueCount);
+      assert.equal((activated.prepare("SELECT COUNT(*) AS count FROM import_issues").get() as { count: number }).count, 2,
+        "收口后的失败批次不得改动主库 issue 投影");
     } finally {
       activated.close();
     }
+    assert.equal(existsSync(join(root, "var", "reports", "data-audit.json")), false,
+      "收口后的失败批次不得发布审计报告");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-for (const failurePhase of ["recompute", "activate"] as const) {
-  test(`keeps the active database and audit reports unchanged when import ${failurePhase} fails`, async () => {
-    const root = mkdtempSync(join(tmpdir(), `rai-import-audit-${failurePhase}-`));
-    const databasePath = join(root, "var", "rai.sqlite");
-    const markdownPath = join(root, "docs", "DATA_AUDIT.md");
-    const jsonPath = join(root, "var", "reports", "data-audit.json");
-    mkdirSync(join(root, "var"));
-    mkdirSync(join(root, "docs"));
-    mkdirSync(join(root, "var", "reports"));
-    const active = await seedCanonical(databasePath);
-    active.database.exec("CREATE TABLE audit_marker (value TEXT NOT NULL); INSERT INTO audit_marker VALUES ('old-generation')");
-    active.close();
-    writeFileSync(markdownPath, "old markdown report", "utf8");
-    writeFileSync(jsonPath, JSON.stringify({ datasetVersion: "old-generation" }), "utf8");
-    const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-    let commandCount = 0;
-    worker.command = async (args) => {
-      commandCount += 1;
-      const databaseArgument = args.indexOf("--database");
-      const candidatePath = args[databaseArgument + 1];
-      assert.ok(candidatePath);
-      if (commandCount === 1) {
-        // Only the parser generates audit reports; recompute has no source-database
-        // option. Asserting this on recompute used to abort the fixture before its
-        // intended failure, hidden behind the old generic job.error.
-        const sourceArgument = args.indexOf("--source-database");
-        assert.ok(sourceArgument > 0, "audit report must be told which database it describes");
-        assert.equal(args[sourceArgument + 1], databasePath);
-        const candidate = new DatabaseSync(candidatePath);
-        try {
-          candidate.prepare(`
-            INSERT INTO health_records (
-              id, type, source_name, source_category, unit, value_numeric,
-              start_at, end_at, metadata_json, raw_attributes_json
-            ) VALUES (?, ?, 'Fixture', 'apple_watch', 'ml/kg*min', 52, ?, ?, '{}', '{}')
-          `).run(`audit_${failurePhase}_vo2`, healthTypes.vo2Max, runDate(1), runDate(1));
-        } finally {
-          candidate.close();
-        }
-        return;
-      }
-      assert.ok(args.includes("recompute"));
-      if (failurePhase === "recompute") throw new Error("simulated recompute failure");
-    };
-    if (failurePhase === "activate") {
-      worker.installDatabase = async () => {
-        throw new Error("simulated activation failure");
-      };
-    }
-    const job: Record<string, unknown> = {
-      id: `web_import_audit_${failurePhase}`,
-      status: "queued",
-      phase: "queued",
-      message: "queued",
-      createdAt: new Date().toISOString(),
-      completedAt: null,
-      error: null,
-      inputPath: join(root, "export"),
-    };
-    try {
-      await worker.run(job);
-      assert.equal(job.status, "failed");
-      // Internal task state retains diagnostics; only the public DTO is sanitized.
-      assert.match(String(job.error), failurePhase === "recompute"
-        ? /simulated recompute failure/ : /simulated activation failure/);
-      assert.equal(readFileSync(markdownPath, "utf8"), "old markdown report");
-      assert.deepEqual(JSON.parse(readFileSync(jsonPath, "utf8")), { datasetVersion: "old-generation" });
-      const preserved = new DatabaseSync(databasePath, { readOnly: true });
-      try {
-        assert.equal((preserved.prepare("SELECT value FROM audit_marker").get() as { value: string }).value, "old-generation");
-      } finally {
-        preserved.close();
-      }
-      assert.deepEqual(
-        readdirSync(join(root, "var")).filter((name) => name.includes(job.id as string)),
-        [],
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-}
-
-test("rolls back the active database and both reports when audit report commit fails", async () => {
-  const root = mkdtempSync(join(tmpdir(), "rai-import-audit-commit-failure-"));
+test("收口后的失败批次：主库与两份审计报告一字节不动，且不留任何发布痕迹（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**（两条原用例合并到这一条）：
+  //   · `keeps the active database and audit reports unchanged when import {recompute,activate} fails`
+  //     —— 原判据注入候选链路的两种失败（CLI 抛错 / `installDatabase` 抛错）；两种注入点都已删除。
+  //   · `rolls back the active database and both reports when audit report commit fails`
+  //     —— 原判据包装 `stageAuditReports` 断言"pending 文件存在后提交失败"；收口后该包装根本
+  //     不会被调用（假绿），其真正的安全属性（报告不得被改动、不得留下 .pending./.replaced.
+  //     中间产物）并入本用例。
+  // 收口后的判据：无队列直跑 ⇒ 显式失败；两份报告与主库 audit_marker 逐字节不动；
+  // docs/var 下不得出现任何 .pending./.replaced. 中间产物与批次名临时文件。
+  const root = mkdtempSync(join(tmpdir(), "rai-import-audit-closed-"));
   const databasePath = join(root, "var", "rai.sqlite");
   const markdownPath = join(root, "docs", "DATA_AUDIT.md");
   const jsonPath = join(root, "var", "reports", "data-audit.json");
@@ -2207,35 +2031,8 @@ test("rolls back the active database and both reports when audit report commit f
   writeFileSync(markdownPath, "old markdown report", "utf8");
   writeFileSync(jsonPath, JSON.stringify({ datasetVersion: "old-generation" }), "utf8");
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  worker.command = async (args) => {
-    const databaseArgument = args.indexOf("--database");
-    const candidatePath = args[databaseArgument + 1];
-    assert.ok(candidatePath);
-    const candidate = new DatabaseSync(candidatePath);
-    try {
-      candidate.prepare("UPDATE audit_marker SET value = 'new-generation'").run();
-      candidate.prepare(`
-        INSERT INTO health_records (
-          id, type, source_name, source_category, unit, value_numeric,
-          start_at, end_at, metadata_json, raw_attributes_json
-        ) VALUES ('audit_commit_body_mass', 'HKQuantityTypeIdentifierBodyMass',
-          'Fixture', 'apple_watch', 'kg', 65, ?, ?, '{}', '{}')
-      `).run(runDate(1), runDate(1));
-    } finally {
-      candidate.close();
-    }
-  };
-  const stageAuditReports = worker.stageAuditReports.bind(worker);
-  worker.stageAuditReports = (candidatePath, finalMarkdownPath, finalJsonPath) => {
-    const publication = stageAuditReports(candidatePath, finalMarkdownPath, finalJsonPath);
-    const pendingJson = readdirSync(join(root, "var", "reports"))
-      .find((name) => name.startsWith("data-audit.json.pending."));
-    assert.ok(pendingJson);
-    rmSync(join(root, "var", "reports", pendingJson));
-    return publication;
-  };
   const job: Record<string, unknown> = {
-    id: "web_import_audit_commit_failure",
+    id: "web_import_audit_closed",
     status: "queued",
     phase: "queued",
     message: "queued",
@@ -2246,7 +2043,9 @@ test("rolls back the active database and both reports when audit report commit f
   };
   try {
     await worker.run(job);
-    assert.equal(job.status, "failed");
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
     assert.equal(readFileSync(markdownPath, "utf8"), "old markdown report");
     assert.deepEqual(JSON.parse(readFileSync(jsonPath, "utf8")), { datasetVersion: "old-generation" });
     const preserved = new DatabaseSync(databasePath, { readOnly: true });
@@ -2263,12 +2062,20 @@ test("rolls back the active database and both reports when audit report commit f
       readdirSync(join(root, "var", "reports")).filter((name) => name.includes(".pending.") || name.includes(".replaced.")),
       [],
     );
+    assert.deepEqual(
+      readdirSync(join(root, "var")).filter((name) => name.includes(job.id as string)),
+      [],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("activates audit projections without recompute so the database matches the CLI report", async () => {
+test("审计投影的对齐：无队列直跑 ⇒ 显式失败且投影与报告不动（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"audit-only 变更（inventory/manifest 对齐、
+  // 不重算）⇒ 候选链路一次 CLI 调用后主库与报告一致"。投影发布与报告都是候选链路的动作，
+  // 已删除；对齐分类的覆盖由本文件直调用例（`classifies an audit inventory/manifest change
+  // as data-only`）承担。收口后的判据：显式失败 + 主库投影不动 + 不发布报告。
   const root = mkdtempSync(join(tmpdir(), "rai-import-audit-projection-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
@@ -2281,40 +2088,6 @@ test("activates audit projections without recompute so the database matches the 
   active.database.prepare("INSERT INTO import_manifest (key, value) VALUES ('record_count', '1')").run();
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    assert.equal(commandCount, 1, "audit-only changes must not invoke recompute");
-    const databaseArgument = args.indexOf("--database");
-    const reportArgument = args.indexOf("--json-report");
-    assert.ok(databaseArgument >= 0);
-    assert.ok(reportArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    const reportPath = args[reportArgument + 1];
-    assert.ok(stagingPath);
-    assert.ok(reportPath);
-    const staging = new DatabaseSync(stagingPath);
-    try {
-      staging.prepare(`
-        UPDATE entity_inventory SET item_count = 2
-        WHERE entity_kind = 'record' AND entity_type = 'HKQuantityTypeIdentifierBodyMass'
-      `).run();
-      staging.prepare("UPDATE import_manifest SET value = '2' WHERE key = 'record_count'").run();
-      staging.prepare("UPDATE import_manifest SET value = 'worker_fixture_duplicate' WHERE key = 'dataset_version'").run();
-      staging.prepare(`
-        INSERT INTO import_issues (severity, code, object_id, message)
-        VALUES ('warning', 'INVALID_RECORD', NULL, 'invalid record fixture')
-      `).run();
-    } finally {
-      staging.close();
-    }
-    mkdirSync(join(root, "var", "reports"), { recursive: true });
-    writeFileSync(reportPath, JSON.stringify({
-      datasetVersion: "worker_fixture_duplicate",
-      parsedRecords: 2,
-      importIssues: 1
-    }), "utf8");
-  };
   const job: Record<string, unknown> = {
     id: "web_import_audit_projection",
     status: "queued",
@@ -2327,35 +2100,25 @@ test("activates audit projections without recompute so the database matches the 
   };
   try {
     await worker.run(job);
-    assert.equal(commandCount, 1);
-    assert.equal(job.status, "succeeded");
-    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
-      const manifest = activated.prepare(`
-        SELECT key, value FROM import_manifest WHERE key IN ('dataset_version', 'record_count')
-      `).all() as unknown as Array<{ key: string; value: string }>;
       const inventory = activated.prepare(`
         SELECT item_count AS itemCount FROM entity_inventory
         WHERE entity_kind = 'record' AND entity_type = 'HKQuantityTypeIdentifierBodyMass'
       `).get() as { itemCount: number };
-      const report = JSON.parse(readFileSync(join(root, "var", "reports", "data-audit.json"), "utf8")) as {
-        datasetVersion: string;
-        totals: {
-          parsedRecords: number;
-          importIssues: number;
-        };
-      };
-      assert.deepEqual(Object.fromEntries(manifest.map((row) => [row.key, row.value])), {
-        dataset_version: report.datasetVersion,
-        record_count: String(report.totals.parsedRecords)
-      });
-      assert.equal(inventory.itemCount, report.totals.parsedRecords);
-      assert.equal((activated.prepare("SELECT COUNT(*) AS count FROM import_issues").get() as { count: number }).count,
-        report.totals.importIssues);
+      const recordCount = activated.prepare(
+        "SELECT value FROM import_manifest WHERE key = 'record_count'"
+      ).get() as { value: string };
+      assert.equal(inventory.itemCount, 1, "收口后的失败批次不得改动主库投影");
+      assert.equal(recordCount.value, "1");
     } finally {
       activated.close();
     }
+    assert.equal(existsSync(join(root, "var", "reports", "data-audit.json")), false,
+      "收口后的失败批次不得发布审计报告");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -2393,7 +2156,10 @@ for (const operation of ["inserted", "removed", "updated"] as const) {
   });
 }
 
-test("activates activity summary changes without running model recompute", async () => {
+test("活动摘要变更：无队列直跑 ⇒ 显式失败且摘要不动（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"活动摘要变更（data-only 分类）⇒ 候选链路
+  // 一次 CLI 调用后主库摘要被激活"。分类覆盖由本文件直调用例（`classifies an … activity
+  // summary as data-only`）承担。收口后的判据：显式失败 + 主库摘要保持旧值。
   const root = mkdtempSync(join(tmpdir(), "rai-import-activity-summary-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
@@ -2403,23 +2169,6 @@ test("activates activity summary changes without running model recompute", async
   `).run("2026-01-04", JSON.stringify({ activeEnergyBurned: 450 }));
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    assert.equal(commandCount, 1, "activity summary changes must not invoke recompute");
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    const staging = new DatabaseSync(stagingPath);
-    try {
-      staging.prepare(`
-        UPDATE activity_summaries SET attributes_json = ? WHERE date_components = ?
-      `).run(JSON.stringify({ activeEnergyBurned: 500 }), "2026-01-04");
-    } finally {
-      staging.close();
-    }
-  };
   const job: Record<string, unknown> = {
     id: "web_import_activity_summary",
     status: "queued",
@@ -2432,15 +2181,16 @@ test("activates activity summary changes without running model recompute", async
   };
   try {
     await worker.run(job);
-    assert.equal(commandCount, 1);
-    assert.equal(job.status, "succeeded");
-    assert.equal((job.summary as { importMode: string }).importMode, "incremental");
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
       const row = activated.prepare(`
         SELECT attributes_json AS attributesJson FROM activity_summaries WHERE date_components = ?
       `).get("2026-01-04") as { attributesJson: string };
-      assert.deepEqual(JSON.parse(row.attributesJson), { activeEnergyBurned: 500 });
+      assert.deepEqual(JSON.parse(row.attributesJson), { activeEnergyBurned: 450 },
+        "收口后的失败批次不得改动活动摘要");
     } finally {
       activated.close();
     }
@@ -2449,130 +2199,58 @@ test("activates activity summary changes without running model recompute", async
   }
 });
 
-test("activates data-only health changes without running model recompute", async () => {
+test("data-only 健康变更：无队列直跑 ⇒ 显式失败且健康记录零写入（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"data-only 记录增量 ⇒ 候选链路照常激活
+  // （importMode=incremental、跳过重算；终态清理在持久化之后才收尾）"。候选链路与它的终态
+  // 清理编排都已删除；"data-only 增量真实入库 + 跳过重算"的覆盖由 `data-only-import-queue.test.ts`
+  // （record-only 快通路）与 `import-worker-direct-sync.test.ts`（统一接收器）承担。
+  // 收口后的判据：显式失败 + 主库零写入 + 时间线里不出现重算阶段。
   const root = mkdtempSync(join(tmpdir(), "rai-import-data-only-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
-  mkdirSync(join(root, "export"));
-  writeFileSync(join(root, "export", "export.xml"), "<HealthData />", "utf8");
   const active = await seedCanonical(databasePath);
   active.close();
-  const importWorker = new ImportWorker(databasePath, root, root);
-  const worker = importWorker as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    assert.equal(commandCount, 1, "data-only imports must not invoke recompute");
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    const staging = new DatabaseSync(stagingPath);
-    try {
-      staging.prepare(`
-        INSERT INTO health_records (
-          id, type, source_name, source_category, unit, value_numeric,
-          start_at, end_at, metadata_json, raw_attributes_json
-        ) VALUES (
-          'worker_body_mass', 'HKQuantityTypeIdentifierBodyMass',
-          'Fixture', 'apple_watch', 'kg', 65, ?, ?, '{}', '{}'
-        )
-      `).run(runDate(1), new Date(Date.parse(runDate(1)) + 10_000).toISOString());
-    } finally {
-      staging.close();
-    }
+  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
+  const job: Record<string, unknown> = {
+    id: "web_import_data_only",
+    status: "queued",
+    phase: "queued",
+    message: "queued",
+    createdAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+    inputPath: join(root, "export")
   };
-  const persistJobs = worker.persistJobs.bind(importWorker);
-  let terminalPersistenceFailures = 0;
-  worker.persistJobs = () => {
-    if (importWorker.latest()?.status === "succeeded" && terminalPersistenceFailures === 0) {
-      terminalPersistenceFailures += 1;
-      throw new Error("fixture transient terminal persistence failure");
-    }
-    persistJobs();
-  };
-  let finishTerminalCleanup: (() => void) | undefined;
-  let terminalCleanupStarted = false;
-  const terminalCleanup = new Promise<void>((resolvePromise) => {
-    finishTerminalCleanup = resolvePromise;
-  });
   try {
-    const created = importWorker.create(join(root, "export"), async () => {
-      const runtime = new DatabaseSync(join(root, "var", "runtime.sqlite"), { readOnly: true });
-      try {
-        const stored = runtime.prepare("SELECT status FROM import_jobs WHERE id = ?").get(created.id) as {
-          status: string;
-        };
-        assert.equal(stored.status, "succeeded", "terminal cleanup must start after durable publication");
-      } finally {
-        runtime.close();
-      }
-      terminalCleanupStarted = true;
-      await terminalCleanup;
-    }, "source-data-only");
-    // This is a real import (including several SQLite worker bootstraps),
-    // not the sub-second scheduler fixtures that use waitFor's 5s default.
-    await waitFor(() => terminalCleanupStarted, 30_000);
-    assert.equal(terminalPersistenceFailures, 1);
-    assert.equal(importWorker.get(created.id)?.status, "succeeded");
-    assert.equal(importWorker.isRunning, true, "worker remains active until terminal cleanup completes");
-    finishTerminalCleanup?.();
-    await waitFor(() => !importWorker.isRunning);
-    assert.equal(commandCount, 1);
-    assert.equal(importWorker.get(created.id)?.status, "succeeded");
-    assert.equal(importWorker.get(created.id)?.summary?.importMode, "incremental");
-    const timing = importWorker.get(created.id)?.performance;
-    assert.equal(timing?.validationMode, "not-run");
-    assert.equal(timing?.stagesMs.recompute, undefined, "data-only imports skip recompute entirely");
-    const reopened = new ImportWorker(databasePath, root, root);
-    assert.deepEqual(reopened.get(created.id)?.performance, timing, "timings survive service restart");
-    await reopened.close();
+    await worker.run(job);
+    const timing = assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
+    assert.equal(timing.stagesMs.recompute, undefined, "收口后的失败批次不得触发重算");
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
       assert.equal((activated.prepare(`
         SELECT COUNT(*) AS count FROM health_records WHERE id = 'worker_body_mass'
-      `).get() as { count: number }).count, 1);
+      `).get() as { count: number }).count, 0);
     } finally {
       activated.close();
     }
   } finally {
-    finishTerminalCleanup?.();
-    await importWorker.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("runs a full recompute when an import only adds VO2 max evidence", async () => {
+test("仅新增 VO2 证据的批次：无队列直跑 ⇒ 显式失败且健康记录零写入（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"仅新增 VO2 ⇒ 候选 CLI 恰好一次重算
+  // （commandCount==2、importMode=full）后主库出现该记录"。那条链路已删除；full/增量分类的
+  // 覆盖由本文件直调用例（`uses full recompute when a scoring health record is inserted`）承担。
+  // 收口后的判据：显式失败 + 主库零写入 + 时间线里不出现重算阶段。
   const root = mkdtempSync(join(tmpdir(), "rai-import-vo2-full-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   const active = await seedCanonical(databasePath);
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    if (commandCount === 1) {
-      const staging = new DatabaseSync(stagingPath);
-      try {
-        staging.prepare(`
-          INSERT INTO health_records (
-            id, type, source_name, source_category, unit, value_numeric,
-            start_at, end_at, metadata_json, raw_attributes_json
-          ) VALUES (?, ?, 'Fixture', 'apple_watch', 'ml/kg*min', 52, ?, ?, '{}', '{}')
-        `).run("worker_imported_vo2_max", healthTypes.vo2Max, runDate(1), runDate(1));
-      } finally {
-        staging.close();
-      }
-      return;
-    }
-    assert.equal(commandCount, 2, "VO2 max changes must invoke exactly one recompute");
-    assert.ok(args.includes("recompute"));
-  };
   const job: Record<string, unknown> = {
     id: "web_import_vo2_full",
     status: "queued",
@@ -2585,14 +2263,15 @@ test("runs a full recompute when an import only adds VO2 max evidence", async ()
   };
   try {
     await worker.run(job);
-    assert.equal(commandCount, 2);
-    assert.equal(job.status, "succeeded");
-    assert.equal((job.summary as { importMode: string }).importMode, "full");
+    const timing = assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
+    assert.equal(timing.stagesMs.recompute, undefined, "收口后的失败批次不得触发重算");
     const activated = new DatabaseSync(databasePath, { readOnly: true });
     try {
       assert.equal((activated.prepare(`
         SELECT COUNT(*) AS count FROM health_records WHERE id = 'worker_imported_vo2_max'
-      `).get() as { count: number }).count, 1);
+      `).get() as { count: number }).count, 0);
     } finally {
       activated.close();
     }
@@ -2824,81 +2503,57 @@ test("reports the import worker as running until asynchronous terminal cleanup f
   }
 });
 
-test("imports preserve by default and only an explicit full snapshot replaces", async () => {
+test("完整快照载荷：经排队入口显式失败 direct_sync_full_snapshot_unsupported（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例用 `captureCommand` 捕获候选 CLI 的
+  // `--preserve-absent / --replace-absent` 参数，断言"缺省即保留、只有显式完整快照才允许
+  // 缺省删除"。候选 CLI 已删除；该语义现在住在**车道判定**里（`payload_is_a_complete_snapshot`
+  // 一票否决 → 稳定码 `direct_sync_full_snapshot_unsupported`）。判据换成：带完整快照清单的
+  // 载荷经**排队入口**（本文件里唯一能越过 `not_queued` 的形态）必须显式失败、零禁止操作，
+  // 且主库零写入。
   const root = mkdtempSync(join(tmpdir(), "rai-healthkit-preserve-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   mkdirSync(join(root, "export"));
   writeFileSync(join(root, "export", "export.xml"), "<HealthData />", "utf8");
-  const manifestPath = join(root, "export", "sync-manifest.json");
+  // 🔴 v1 + 完整快照 scope 是**唯一**能声明"缺省即删除"的清单形状：v2 清单的 scope 必须
+  // 是 `healthkit`（其它值按"不可读"保守处理，`readSyncManifestScope`）。车道判定在解析
+  // 载荷之前就拒绝它 —— 这条用例同时钉住"只有该形状可能打开删除语义"与"直连恒不收"。
+  writeFileSync(join(root, "export", "sync-manifest.json"), JSON.stringify({
+    version: 1, sourceScope: FULL_SNAPSHOT_SOURCE_SCOPE
+  }), "utf8");
   const active = await seedCanonical(databasePath);
   active.close();
-  const captureCommand = async (
-    source: { kind: string; displayName: string; originalPath?: string }
-  ): Promise<string[]> => {
-    const importWorker = new ImportWorker(databasePath, root, root);
-    const worker = importWorker as unknown as ImportWorkerTestSurface;
-    let captured: string[] | null = null;
-    worker.command = async (args) => {
-      captured = args;
-      throw new Error("fixture stop after capturing import args");
-    };
-    try {
-      importWorker.create(join(root, "export"), undefined, "source-healthkit", source);
-      await waitFor(() => captured !== null && !importWorker.isRunning);
-      assert.ok(captured);
-      return captured;
-    } finally {
-      await importWorker.close();
-    }
-  };
+  const projectRoot = resolve(import.meta.dirname, "../../..");
+  const worker = new ImportWorker(databasePath, projectRoot, root, undefined, undefined, undefined, {
+    scope: "fixture", dataOnlyFastPath: true,
+    admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
+  });
   try {
-    const healthKitArgs = await captureCommand({
-      kind: "upload",
-      displayName: "apple-health-healthkit.zip"
-    });
-    assert.ok(healthKitArgs.includes("incremental-import"));
-    assert.ok(healthKitArgs.includes("--preserve-absent"));
-    assert.equal(healthKitArgs.includes("--replace-absent"), false);
-
-    const originalNameArgs = await captureCommand({
-      kind: "upload",
-      displayName: "health.zip",
-      originalPath: join(root, "apple-health-healthkit-local.zip")
-    });
-    assert.ok(originalNameArgs.includes("--preserve-absent"));
-    assert.equal(originalNameArgs.includes("--replace-absent"), false);
-
-    // Neither a directory nor a discovered export declares itself a complete
-    // snapshot, so both must import without enabling deletion.
-    const directoryArgs = await captureCommand({
-      kind: "directory",
-      displayName: "apple-health-healthkit.zip"
-    });
-    assert.ok(directoryArgs.includes("incremental-import"));
-    assert.ok(directoryArgs.includes("--preserve-absent"));
-    assert.equal(directoryArgs.includes("--replace-absent"), false);
-
-    const discoveredArgs = await captureCommand({
-      kind: "discovered",
-      displayName: "apple-health-healthkit.zip"
-    });
-    assert.ok(discoveredArgs.includes("--preserve-absent"));
-    assert.equal(discoveredArgs.includes("--replace-absent"), false);
-
-    // Only a payload that declares a complete snapshot may replace by absence.
-    writeFileSync(
-      manifestPath,
-      JSON.stringify({ version: 1, sourceScope: FULL_SNAPSHOT_SOURCE_SCOPE }),
-      "utf8"
-    );
-    const snapshotArgs = await captureCommand({
-      kind: "upload",
-      displayName: "apple-health-healthkit.zip"
-    });
-    assert.ok(snapshotArgs.includes("--replace-absent"));
-    assert.equal(snapshotArgs.includes("--preserve-absent"), false);
+    const before = new DatabaseSync(databasePath, { readOnly: true });
+    const workoutsBefore = (before.prepare("SELECT COUNT(*) AS n FROM workouts").get() as { n: number }).n;
+    before.close();
+    const created = worker.create(join(root, "export"));
+    await waitFor(() => !worker.hasPending && !worker.isRunning, 15_000);
+    const stored = worker.get(created.id);
+    assert.equal(stored?.status, "failed", String(stored?.error ?? ""));
+    assert.equal(stored?.failureCode, "direct_sync_full_snapshot_unsupported");
+    assert.equal(stored?.performance?.lane?.outcome, "fallback");
+    assert.deepEqual(stored?.performance?.lane?.reasons, ["payload_is_a_complete_snapshot"]);
+    const prohibitedStages = [...new Set(
+      PROHIBITED_DIRECT_SYNC_OPERATIONS.flatMap((operation) => operation.stages)
+    )] as (keyof ImportJobPerformance["stagesMs"])[];
+    for (const stage of prohibitedStages) {
+      assert.equal(stored?.performance?.stagesMs[stage], undefined, `${stage} must not run after S3.3`);
+    }
+    const preserved = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((preserved.prepare("SELECT COUNT(*) AS n FROM workouts").get() as { n: number }).n, workoutsBefore,
+        "收口后的失败批次不得改动主库");
+    } finally {
+      preserved.close();
+    }
   } finally {
+    await worker.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -2925,7 +2580,12 @@ test("closes a queued import before it starts and runs terminal cleanup", async 
 });
 
 
-test("publishes CLI removal guard details and preserves them across restart", async () => {
+test("失败批次公开层只给受控文案：无泄漏，且跨重启保持（S3.3：候选链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例让候选 CLI 触发"删除保护闸门"（60 个 workout
+  // 的完整快照），断言公开文案是受控句、不泄漏内部细节、跨重启保持。CLI 与闸门的运行期调用链
+  // 都已删除；保留的判据换成同一条**公开层纪律**在收口路径上的验证：通用受控 error、
+  // 无路径/无 Error:/无 cli.ts 泄漏、主库原样、跨重启一致。（闸门自身的 IPC 解析仍由下一条
+  // 直调用例覆盖。`failureCode` 目前不随任务持久化 —— 跨重启只保证 error/message。）
   const root = mkdtempSync(join(tmpdir(), "rai-worker-removal-guard-"));
   const databasePath = join(root, "rai.sqlite");
   const input = join(root, "export");
@@ -2949,16 +2609,19 @@ test("publishes CLI removal guard details and preserves them across restart", as
   try {
     worker.create(input);
     await waitFor(() => !worker.isRunning, 30_000);
-    assert.equal(worker.latest()?.status, "failed");
-    assert.match(worker.latest()?.error ?? "", /导入已中止.*60 次训练/);
-    assert.doesNotMatch(worker.latest()?.error ?? "", /rai-worker-removal-guard|Error:|cli.ts/);
+    const latest = worker.latest();
+    assert.equal(latest?.status, "failed");
+    assert.equal(latest?.error, PUBLIC_IMPORT_FAILURE_ERROR,
+      "公开层只许给通用受控文案（内部诊断不出现）");
+    assert.doesNotMatch(latest?.error ?? "", /rai-worker-removal-guard|Error:|cli\.ts/);
     const live = new DatabaseSync(databasePath, { readOnly: true });
     try {
       assert.equal((live.prepare("SELECT COUNT(*) AS n FROM workouts").get() as { n: number }).n, 60);
     } finally { live.close(); }
     const restarted = new ImportWorker(databasePath, projectRoot, root);
     try {
-      assert.equal(restarted.latest()?.error, worker.latest()?.error);
+      assert.equal(restarted.latest()?.error, latest?.error,
+        "失败结论必须跨重启保持（持久化的是内部 error；公开层再净化）");
     } finally { await restarted.close(); }
   } finally {
     await worker.close();
@@ -3014,88 +2677,50 @@ for (const operation of ["add", "clear", "repeat", "upgrade"] as const) {
   });
 }
 
-test("reclaims the displaced rollback point left behind by a committed import", async () => {
+test("displaced 回滚点回收：方法保留，仅对匹配前缀做一次性清理（S3.3：链路已删）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"提交成功后的导入回收
+  // `<staging>.replaced.<uuid>` 回滚点（防 2026-09-15 的 36 GB 堆积）"。生成这些回滚点的
+  // 候选链路已删除，但 `reclaimDisplacedImportDatabases` 方法保留（清理链上的
+  // `terminalSucceeded` 守卫仍在，阶段 5 一并退役）。判据改为**直接调用**该方法：
+  // 匹配前缀的文件被回收，不匹配的不动 —— 清理范围不许扩大。
   const root = mkdtempSync(join(tmpdir(), "rai-import-reclaim-displaced-"));
-  const databasePath = join(root, "var", "rai.sqlite");
+  const stagingDatabase = join(root, "var", "rai.importing.fixture.sqlite");
   mkdirSync(join(root, "var"));
-  const active = await seedCanonical(databasePath);
-  active.close();
-  const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let displacedPath: string | null = null;
-  let commandCount = 0;
-  worker.command = async (args) => {
-    commandCount += 1;
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    if (commandCount > 1) {
-      assert.ok(args.includes("recompute"));
-      return;
-    }
-    const staging = new DatabaseSync(stagingPath);
-    try {
-      staging.prepare(`
-        INSERT INTO health_records (
-          id, type, source_name, source_category, unit, value_numeric,
-          start_at, end_at, metadata_json, raw_attributes_json
-        ) VALUES (?, ?, 'Fixture', 'apple_watch', 'ml/kg*min', 52, ?, ?, '{}', '{}')
-      `).run("worker_reclaim_probe", healthTypes.vo2Max, runDate(1), runDate(1));
-    } finally {
-      staging.close();
-    }
-    // The CLI retains its rename-aside rollback point by contract; reclaiming it
-    // for this import is the worker's responsibility.
-    displacedPath = `${stagingPath}.replaced.77777777-7777-4777-8777-777777777777`;
-    writeFileSync(displacedPath, "pre-import database");
-  };
-  const job: Record<string, unknown> = {
-    id: "web_import_reclaim_displaced",
-    status: "queued",
-    phase: "queued",
-    message: "queued",
-    createdAt: new Date().toISOString(),
-    completedAt: null,
-    error: null,
-    inputPath: join(root, "export")
-  };
+  const importWorker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+  const worker = importWorker as unknown as ImportWorkerTestSurface;
+  const displaced = [
+    `${stagingDatabase}.replaced.77777777-7777-4777-8777-777777777777`,
+    `${stagingDatabase}.replaced.88888888-8888-4888-8888-888888888888`
+  ];
+  const unrelated = join(root, "var", "rai.importing.other.sqlite.replaced.99999999-9999-4999-8999-999999999999");
+  for (const path of [...displaced, unrelated]) writeFileSync(path, "pre-import database");
   try {
-    await worker.run(job);
-    assert.equal(job.status, "succeeded");
-    assert.equal(commandCount, 2);
-    const reclaimed = displacedPath;
-    assert.ok(reclaimed, "the fixture must have produced a displaced database");
-    assert.equal(
-      existsSync(reclaimed),
-      false,
-      "a committed import must not leave a full database copy on disk"
-    );
+    await worker.reclaimDisplacedImportDatabases(stagingDatabase);
+    for (const path of displaced) {
+      assert.equal(existsSync(path), false, "匹配前缀的 displaced 回滚点必须被回收");
+    }
+    assert.equal(existsSync(unrelated), true, "不匹配前缀的文件不许被清理（清理范围不得扩大）");
   } finally {
+    await importWorker.close();
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("keeps the displaced rollback point when an import fails before activation", async () => {
+test("未提交的批次不回收 displaced 回滚点（S3.3：回收守卫保留）", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"导入失败 ⇒ 发布者中途留下的
+  // `<staging>.replaced.<uuid>` 必须保留（它可能是唯一的恢复点）"。候选链路已删除，但清理
+  // 链上的 `terminalSucceeded` 守卫仍在（`...(terminalSucceeded ? [reclaim] : [])`）。
+  // 本用例把 displaced 文件预先放在**确定性的 staging 路径**旁，跑一次必然失败的批次
+  // （无队列直跑），断言它原样保留。
   const root = mkdtempSync(join(tmpdir(), "rai-import-keep-displaced-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   const active = await seedCanonical(databasePath);
   active.close();
   const worker = new ImportWorker(databasePath, root, root) as unknown as ImportWorkerTestSurface;
-  let displacedPath: string | null = null;
-  worker.command = async (args) => {
-    const databaseArgument = args.indexOf("--database");
-    assert.ok(databaseArgument >= 0);
-    const stagingPath = args[databaseArgument + 1];
-    assert.ok(stagingPath);
-    // A publisher killed mid-flight leaves its rollback point behind, and it may
-    // be the only usable recovery point, so the worker must not reclaim it.
-    displacedPath = `${stagingPath}.replaced.88888888-8888-4888-8888-888888888888`;
-    writeFileSync(displacedPath, "pre-import database");
-    throw new Error("import command failed");
-  };
+  const jobId = "web_import_keep_displaced";
   const job: Record<string, unknown> = {
-    id: "web_import_keep_displaced",
+    id: jobId,
     status: "queued",
     phase: "queued",
     message: "queued",
@@ -3104,12 +2729,16 @@ test("keeps the displaced rollback point when an import fails before activation"
     error: null,
     inputPath: join(root, "export")
   };
+  // 无队列直跑的 staging 路径 = `var/rai.importing.<jobId>.sqlite`（attempt 后缀为空）。
+  const kept = join(root, "var", `rai.importing.${jobId}.sqlite.replaced.88888888-8888-4888-8888-888888888888`);
+  writeFileSync(kept, "pre-import database");
   try {
     await worker.run(job);
-    assert.equal(job.status, "failed");
-    const kept = displacedPath;
-    assert.ok(kept, "the fixture must have produced a displaced database");
-    assert.equal(existsSync(kept), true);
+    assertRefusedByClosedLane(job, {
+      failureCode: "direct_sync_internal_integrity", laneReasons: ["not_queued"]
+    });
+    assert.equal(existsSync(kept), true,
+      "失败批次的清理链不得回收 displaced 回滚点（terminalSucceeded=false 一侧）");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, acquireDatabasePublicationLock } from "@rai/storage-sqlite";
 
 const project = resolve(import.meta.dirname, "../../..");
 
@@ -54,4 +54,27 @@ test("successful recompute CLI still emits a successful JSON result", async () =
     assert.equal(output.error, null);
     assert.doesNotMatch(result.stderr, /"status":"failed"/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("S3.7: recompute CLI refuses to run while another process holds the publication lock", async () => {
+  // 场景：服务端（或另一 CLI）在跑。CLI 此前会**裸写主库**（没有任何东西拦它）——
+  // 单写者/批次边界/提交前回读的全部假设都建立在跨进程互斥之上。
+  // 本用例用与 server 同一个原语 (`kind: "api"`) 拿住锁，再跑真 CLI，断言它明确拒绝。
+  const root = mkdtempSync(join(tmpdir(), "rai-recompute-cli-locked-"));
+  const path = join(root, "rai.sqlite");
+  (await RaiDatabase.open(path)).close();
+  const release = acquireDatabasePublicationLock(path, "api");
+  try {
+    const result = spawnSync(process.execPath, [
+      "--import", "tsx", "packages/application/src/cli.ts", "recompute",
+      "--database", path, "--evaluated-at", "2026-10-10T00:00:00.000Z"
+    ], { cwd: project, encoding: "utf8", timeout: 30_000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /Another api process is using/,
+      "CLI 必须**明确拒绝**（含持有者类型），而不是裸写主库或静默等待");
+  } finally {
+    release();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

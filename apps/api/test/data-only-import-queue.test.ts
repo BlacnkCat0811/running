@@ -152,20 +152,28 @@ test("restart acknowledges a committed delta whose runtime job was never complet
   });
 });
 
-test("the rollback flag disables live transactions and restores the existing candidate path", async () => {
+test("回退开关关闭直连通路 ⇒ 显式失败 direct_sync_unavailable；候选链路不得回来", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"`dataOnlyFastPath=false` ⇒ 退回候选链路
+  // （`createCurrentBackup` 恰好被调 1 次）"。D1 收口后语义相反：关闭开关是**暂停同步入口**
+  // （`fast_path_disabled` ⇒ `direct_sync_unavailable`），任何候选动作都不许再发生。
+  // `forbidBulk` 让"候选被重新接回"直接以异常方式炸出来，而不是悄悄多跑一次整库备份。
   await fixture(async ({ main, input, make }) => {
     const worker = make(false);
-    let copies = 0;
-    (worker as unknown as Surface).createCurrentBackup = async () => {
-      copies++;
-      throw new Error("fixture normal backup path");
-    };
+    forbidBulk(worker);
     try {
       const job = worker.create(input);
       await wait(worker);
-      assert.equal(copies, 1);
-      assert.equal(worker.get(job.id)?.status, "failed");
-      assert.equal(worker.get(job.id)?.performance?.stagesMs.dataOnlyApply, undefined);
+      const stored = worker.get(job.id);
+      assert.equal(stored?.status, "failed");
+      assert.equal(stored?.failureCode, "direct_sync_unavailable");
+      assert.equal(stored?.performance?.lane?.outcome, "fallback");
+      assert.deepEqual(stored?.performance?.lane?.reasons, ["fast_path_disabled"]);
+      assert.equal(stored?.performance?.stagesMs.dataOnlyApply, undefined,
+        "入口被暂停 ⇒ 连快通路都不许被尝试");
+      for (const stage of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
+        "recompute", "activationAudit", "activationSwap"] as const) {
+        assert.equal(stored?.performance?.stagesMs[stage], undefined, `${stage} 不得运行（候选链路已删）`);
+      }
       assert.equal(readImportReceipt(main, job.id), null);
       const db = new DatabaseSync(main, { readOnly: true });
       try { assert.equal(db.prepare("SELECT COUNT(*) AS n FROM health_records").get()!.n, 0); }
@@ -174,44 +182,47 @@ test("the rollback flag disables live transactions and restores the existing can
   });
 });
 
-test("the actual candidate pipeline establishes qualification, and the next correction uses the zero-copy lane", async () => {
-  await fixture(async ({ root, main, input, make }) => {
+test("缺身份代际的库 ⇒ 显式失败 direct_sync_baseline_rebuild_required；不再走任何候选/备份路径", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：原用例验证"候选链路建立资格、下一批改用零拷贝车道"
+  // （资格 = 一次整库备份换来的）。资格语义已删；S3.2 的三态在收口后的判据：
+  // 有身份痕迹但与当前契约/身份算法不符 ⇒ **显式失败** `baseline_rebuild_required`
+  // （运维显式处置，客户端不能自动修）；两条车道的拒收都进遥测，主库零写入。
+  await fixture(async ({ main, input, make }) => {
     const db = new DatabaseSync(main);
     db.exec("DELETE FROM import_manifest WHERE key IN ('parser_identity_algorithm','data_only_baseline_contract')");
     db.close();
-    let publications = 0;
-    let worker = new ImportWorker(main, project, root, () => { publications++; },
-      undefined, undefined, {
-        scope: "fixture", admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
-      });
+    const worker = make();
+    forbidBulk(worker);
     try {
-      const initial = worker.create(input, undefined, "qualification-source");
+      const job = worker.create(input, undefined, "qualification-source");
       await wait(worker);
-      assert.equal(worker.get(initial.id)?.status, "succeeded", JSON.stringify(worker.get(initial.id)));
-      assert.equal(publications, 1);
-      assert.ok(worker.get(initial.id)?.performance?.stagesMs.backupCopy! > 0);
-      const qualified = new DatabaseSync(main, { readOnly: true });
+      const stored = worker.get(job.id);
+      assert.equal(stored?.status, "failed", JSON.stringify(stored));
+      assert.equal(stored?.failureCode, "direct_sync_baseline_rebuild_required");
+      assert.equal(stored?.performance?.lane?.outcome, "fallback");
+      // ⚠️ 顺序在本用例里是断言的一部分：快通路**先被尝试并拒收**（缺基线戳），
+      // 统一接收器随后按身份三态拒收 —— 两条拒因都要如实留痕。
+      assert.ok((stored?.performance?.stagesMs.dataOnlyApply ?? 0) > 0,
+        "record-only 快通路必须先被尝试（阶段账本里要有它的耗时）");
+      const rejections = (stored?.performance?.lane?.rejections ?? [])
+        .map((entry) => `${entry.source}:${entry.reason}`);
+      assert.ok(rejections.includes("data-only:fast_path_rejected"),
+        `快通路拒收必须留痕（实际 ${JSON.stringify(rejections)}）`);
+      assert.ok(rejections.includes("direct-sync:baseline_rebuild_required"),
+        `接收器拒收必须留痕（实际 ${JSON.stringify(rejections)}）`);
+      for (const stage of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
+        "recompute", "activationAudit", "activationSwap"] as const) {
+        assert.equal(stored?.performance?.stagesMs[stage], undefined, `${stage} 不得运行（候选链路已删）`);
+      }
+      assert.equal(readImportReceipt(main, job.id), null);
+      const unchanged = new DatabaseSync(main, { readOnly: true });
       try {
-        assert.equal(qualified.prepare("SELECT value FROM import_manifest WHERE key='data_only_baseline_contract'").get()!.value,
-          dataOnlyBaselineContract());
-      } finally { qualified.close(); }
-      await worker.close();
-      worker = make();
-      forbidBulk(worker);
-      const correction = join(root, "correction"); mkdirSync(correction);
-      writeFileSync(join(correction, "export.xml"), readFileSync(join(input, "export.xml"), "utf8").replace('value="10"', 'value="20"'));
-      writeFileSync(join(correction, "sync-manifest.json"), readFileSync(join(input, "sync-manifest.json")));
-      const next = worker.create(correction, undefined, "qualified-correction");
-      await wait(worker);
-      assert.equal(worker.get(next.id)?.status, "succeeded", JSON.stringify(worker.get(next.id)));
-      assert.ok(worker.get(next.id)?.performance?.stagesMs.dataOnlyApply! > 0);
-      assert.equal(worker.get(next.id)?.performance?.stagesMs.backupCopy, undefined);
-      const accepted = new DatabaseSync(main, { readOnly: true });
-      try {
-        assert.equal(accepted.prepare("SELECT value_numeric FROM health_records").get()!.value_numeric, 20);
-        assert.equal(accepted.prepare("SELECT value FROM import_manifest WHERE key='audit_report_pending_version'").get()!.value,
-          accepted.prepare("SELECT value FROM import_manifest WHERE key='dataset_version'").get()!.value);
-      } finally { accepted.close(); }
+        assert.equal(unchanged.prepare("SELECT COUNT(*) AS n FROM health_records").get()!.n, 0);
+        assert.equal(
+          (unchanged.prepare("SELECT value FROM import_manifest WHERE key='dataset_version'").get() as { value: string }).value,
+          "baseline"
+        );
+      } finally { unchanged.close(); }
     } finally { await worker.close(); }
   });
 });

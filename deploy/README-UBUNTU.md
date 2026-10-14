@@ -210,10 +210,15 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 本批新增 schema v33：为 UUID 别名修复增加来源索引。部署新 API 前按本页既有
 显式迁移流程备份、停服、迁移并检查 `databaseReady`；不能在 API 运行期间直接建索引。
-`RAI_IMPORT_DATA_ONLY_FAST_PATH=1` 是默认值，`0` 并重启服务可恢复候选发布路径。
-开关不改变同步身份、删除语义或客户端游标。适用范围与故障回滚合同见
+`RAI_IMPORT_DATA_ONLY_FAST_PATH=1` 是默认值；`0`（并重启服务）会**暂停同步入口**——
+直连车道以 `fast_path_disabled` 显式失败（稳定码 `direct_sync_unavailable`），**不再回退任何
+候选路径**：旧的整库备份 / 暂存副本 / CLI 换库链路已随服务端收口版从运行期删除（2026-10-14，阶段 3）。
+开关不改变同步身份、删除语义或客户端游标。超界批次同理显式拒绝
+（`direct_sync_payload_exceeds_bounds`），不静默降级。适用范围与故障回滚合同见
 [HealthKit 记录同步 v2](../docs/HEALTHKIT_RECORD_SYNC_V2.md)。
-第一次实际变化导入可能仍需建立解析指纹资格，不能把部署成功等同于下一批必定走快通路。
+空库首包会**就地初始化**身份（bootstrap）；库里已有身份痕迹但与当前契约/身份算法不符时，
+显式报 `direct_sync_baseline_rebuild_required`（需运维 CLI 重建或回退服务端版本）——
+不能把部署成功等同于下一批必定通过。
 
 配置依据：[systemd service](rai-api.service)、[env模板](rai.env.example)、[Nginx](nginx-rai.conf)。
 MemoryHigh=1100M、MemoryMax=1400M、MemorySwapMax=512M、CPUQuota=150%；Node堆每进程512MiB，数值库线程1。

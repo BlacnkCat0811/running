@@ -108,21 +108,22 @@ test("直连车道的事实范围是 full，且 worker **真的**有调用方（
   assert.deepEqual(decision, { lane: "direct", deltaMode: "full", reasons: [] });
 
   // 🔴 只有上面这一条是不够的：把判据改成 "full" 而 worker 仍然只投递 `data-only`，
-  // 行为上等于"车道窄了但标签宽了" —— 一个 Workout 载荷会被 record-only 车道拒收并掉回
-  // 旧候选链路（整库备份 + 换库）。所以这里同时钉住**调用方存在**与**顺序**：
-  // 先 record-only（它的入口判据更严），拒收之后必须走统一接收器，最后才允许回退旧链路。
+  // 行为上等于"车道窄了但标签宽了"。所以这里同时钉住**调用方存在**与**顺序**：
+  // 先 record-only（它的入口判据更严），拒收之后必须走统一接收器；两条都拒收（S3.3 收口后）
+  // 必须**显式失败**（带稳定码），不再回退任何旧链路 —— 见下面的出口断言。
   const worker = readStripped(new URL("../src/import-worker.ts", import.meta.url));
   const dataOnly = worker.indexOf('operation: "data-only"');
   const directSync = worker.indexOf('operation: "direct-sync"');
   assert.ok(dataOnly >= 0, "import-worker.ts 里找不到 data-only 车道的投递点");
   assert.ok(directSync >= 0,
     "import-worker.ts 里找不到 `direct-sync` 的投递点 —— deltaMode 放开了却没有调用方，" +
-    "接收器（direct-sync-ingest.ts）就是死代码，Workout 载荷仍会掉回旧候选链路");
+    "接收器（direct-sync-ingest.ts）就是死代码");
   assert.ok(dataOnly < directSync,
     "顺序反了：record-only 车道的入口判据（白名单 + 基线合同戳）比统一接收器更严，" +
     "必须先试它；反过来会让那两道闸门失去意义");
-  assert.match(worker.slice(directSync), /fastPathAttempted = false/,
-    "两条直连车道都拒收之后才允许回退旧链路 —— `fastPathAttempted` 清零的位置是这条顺序的证据");
+  assert.match(worker.slice(directSync), /throw new ImportLaneRefusal\(\[direct\.reason\], direct\)/,
+    "两条直连车道都拒收之后必须**显式失败**（带稳定码），不再回退任何旧链路 —— " +
+    "这个 throw 是收口语义的顺序证据（S3.3：旧候选回退已删除）");
 });
 
 test("两条车道的回执各守各的：record-only 恒 not_required；统一接收器按分类取 queued/not_required", () => {

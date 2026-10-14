@@ -2,7 +2,8 @@ import type { ImportJobRequest } from "@rai/api-contracts";
 import type { FastifyInstance } from "fastify";
 import { existsSync } from "node:fs";
 import { ImportArchiveTooLargeError, ImportSourceNotFoundError, type ImportSourceManager } from "../import-sources.js";
-import type { ImportWorker } from "../import-worker.js";
+import { preflightDirectSyncPayload } from "../direct-sync-ingest.js";
+import { laneRefusalFailure, type ImportWorker } from "../import-worker.js";
 import type { MutationCoordinator } from "../mutation-coordinator.js";
 import { identifierParamsSchema, importJobBodySchema, importSourceBodySchema } from "../schemas.js";
 
@@ -83,7 +84,28 @@ export function registerImportRoutes(app: FastifyInstance, dependencies: {
   });
 
   app.post<{ Body: { sourceId: string } }>("/v1/imports/inspect", { schema: { body: importSourceBodySchema } }, async (request, reply) => {
-    try { return await importSources.inspect(request.body.sourceId); }
+    try {
+      const inspection = await importSources.inspect(request.body.sourceId);
+      // S3.1：直连**预检**（同步 400；不建 job、零副作用）。判据与 worker 兜底**同源**
+      // （`preflightDirectSyncPayload`，单一来源）—— 超界/不合规的载荷在这里拿到稳定码 +
+      // bounds/actual，客户端据此拆批；不再"悄悄降级"进整库备份通路（那条链路已删，S3.3）。
+      const source = await importSources.get(request.body.sourceId);
+      if (source) {
+        const preflight = preflightDirectSyncPayload(source.inputPath);
+        if (!preflight.ok) {
+          const failure = laneRefusalFailure(preflight.rejection.reason);
+          return reply.code(400).send({
+            code: failure.code,
+            message: failure.message,
+            reason: preflight.rejection.reason,
+            ...(preflight.rejection.actual === undefined ? {} : { actual: preflight.rejection.actual }),
+            ...(preflight.rejection.bounds === undefined ? {} : { bounds: preflight.rejection.bounds }),
+            sourceId: request.body.sourceId
+          });
+        }
+      }
+      return inspection;
+    }
     catch (error) {
       if (error instanceof ImportSourceNotFoundError) return reply.code(404).send({ message: error.message });
       throw error;

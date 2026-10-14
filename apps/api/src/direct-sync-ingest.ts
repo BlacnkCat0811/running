@@ -83,6 +83,7 @@ export type DirectSyncRejectionReason =
   | "payload_identity_invalid"
   | "pending_migrations"
   | "identity_not_eligible"
+  | "baseline_rebuild_required"
   | "batch_without_receipt"
   | "write_guard_triggered";
 
@@ -373,48 +374,68 @@ const refuse = (
 ): PrepareOutcome => ({ ok: false, rejection: rejectDirect(reason, stage, extra) });
 
 /**
- * 事务之外的本批准备：路径安全、类型/配额、payload identity（§4.1）。
+ * 直连载荷的**预检**（不读 XML 全文做摘要复核）：目录形状 / 上界 / v2 身份 / 删除配额。
+ *
+ * 两个消费点**共用同一份判据**（单一来源）：
+ *   - `applyDirectSyncImport`（worker 兜底；收口后不合规 = 显式失败 + 稳定码）；
+ *   - `POST /v1/imports/inspect`（S3.1 的同步预检：不合规 ⇒ 400 + 稳定码 + bounds/actual，
+ *     **不建 job、零副作用**；客户端可据此拆批）。
+ * 拆成独立函数而不是"两处各写一份"：判据漂移的方向是"inspect 放过的载荷在 worker 又被拒"
+ * （用户看到"检查通过后失败"）或反方向（前端拆批规则与后端不一致），两种都很难排查。
+ */
+export function preflightDirectSyncPayload(inputPath: string):
+  | { ok: true; xmlPath: string; manifest: HealthSyncManifest }
+  | { ok: false; rejection: DirectSyncRejection } {
+  const entries = readdirSync(inputPath);
+  const xmlName = entries.includes("export.xml") ? "export.xml" : "导出.xml";
+  if (!entries.includes(xmlName) || !entries.includes("sync-manifest.json")) {
+    return { ok: false, rejection: rejectDirect("missing_required_files", "prepare",
+      { detail: `entries:${entries.slice(0, 8).join("|")}` }) };
+  }
+  const tree = inputTreeCheck(inputPath);
+  if (!tree.ok) return { ok: false, rejection: tree.rejection };
+  const xmlPath = join(inputPath, xmlName);
+  const manifestPath = join(inputPath, "sync-manifest.json");
+  const xmlFileBytes = statSync(xmlPath).size;
+  if (xmlFileBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    return { ok: false, rejection: rejectDirect("xml_exceeds_bounds", "prepare",
+      { actual: { xmlBytes: xmlFileBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
+  }
+  const manifestFileBytes = statSync(manifestPath).size;
+  if (manifestFileBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    return { ok: false, rejection: rejectDirect("manifest_exceeds_bounds", "prepare",
+      { actual: { manifestBytes: manifestFileBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
+  }
+  const manifestText = readFileSync(manifestPath, "utf8");
+  const manifestTextBytes = Buffer.byteLength(manifestText);
+  if (manifestTextBytes > DIRECT_SYNC_MAX_XML_BYTES) {
+    return { ok: false, rejection: rejectDirect("manifest_exceeds_bounds", "prepare",
+      { actual: { manifestBytes: manifestTextBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } }) };
+  }
+  const manifest = parseHealthSyncManifest(manifestText);
+  // v2 身份是这条车道的前提：没有 UUID 映射就无法保证"同一实体"（§7 的稳定身份）。
+  if (!manifest.recordIdentity) {
+    return { ok: false, rejection: rejectDirect("missing_record_identity", "prepare",
+      { detail: "manifest.recordIdentity 缺失" }) };
+  }
+  const deletions = manifest.deletedRecords.length + manifest.deletedWorkoutIds.length;
+  if (deletions > DIRECT_SYNC_MAX_RECORDS) {
+    return { ok: false, rejection: rejectDirect("deletions_exceed_bounds", "prepare",
+      { actual: { deletions }, bounds: { maxRecords: DIRECT_SYNC_MAX_RECORDS } }) };
+  }
+  return { ok: true, xmlPath, manifest };
+}
+
+/**
+ * 事务之外的本批准备：预检 + 载荷身份复核（§4.1）。
  *
  * 观测版：每一条"不合格"都带稳定机器码返回（`PrepareOutcome`），不再折成裸 `null`。
  * 判定顺序、判据、以及"载荷已变更"的**硬失败**语义与之前逐条等价。
  */
 async function preparePayload(input: DirectSyncImportInput): Promise<PrepareOutcome> {
-  const entries = readdirSync(input.inputPath);
-  const xmlName = entries.includes("export.xml") ? "export.xml" : "导出.xml";
-  if (!entries.includes(xmlName) || !entries.includes("sync-manifest.json")) {
-    return refuse("missing_required_files", "prepare", { detail: `entries:${entries.slice(0, 8).join("|")}` });
-  }
-  const tree = inputTreeCheck(input.inputPath);
-  if (!tree.ok) return { ok: false, rejection: tree.rejection };
-  const xmlPath = join(input.inputPath, xmlName);
-  const manifestPath = join(input.inputPath, "sync-manifest.json");
-  const xmlFileBytes = statSync(xmlPath).size;
-  if (xmlFileBytes > DIRECT_SYNC_MAX_XML_BYTES) {
-    return refuse("xml_exceeds_bounds", "prepare",
-      { actual: { xmlBytes: xmlFileBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
-  }
-  const manifestFileBytes = statSync(manifestPath).size;
-  if (manifestFileBytes > DIRECT_SYNC_MAX_XML_BYTES) {
-    return refuse("manifest_exceeds_bounds", "prepare",
-      { actual: { manifestBytes: manifestFileBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
-  }
-  const manifestText = readFileSync(manifestPath, "utf8");
-  const manifestTextBytes = Buffer.byteLength(manifestText);
-  if (manifestTextBytes > DIRECT_SYNC_MAX_XML_BYTES) {
-    return refuse("manifest_exceeds_bounds", "prepare",
-      { actual: { manifestBytes: manifestTextBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
-  }
-  const manifest = parseHealthSyncManifest(manifestText);
-  // v2 身份是这条车道的前提：没有 UUID 映射就无法保证"同一实体"（§7 的稳定身份）。
-  if (!manifest.recordIdentity) {
-    return refuse("missing_record_identity", "prepare", { detail: "manifest.recordIdentity 缺失" });
-  }
-  const deletions = manifest.deletedRecords.length + manifest.deletedWorkoutIds.length;
-  if (deletions > DIRECT_SYNC_MAX_RECORDS) {
-    return refuse("deletions_exceed_bounds", "prepare",
-      { actual: { deletions }, bounds: { maxRecords: DIRECT_SYNC_MAX_RECORDS } });
-  }
-  const xmlText = readFileSync(xmlPath, "utf8");
+  const preflight = preflightDirectSyncPayload(input.inputPath);
+  if (!preflight.ok) return { ok: false, rejection: preflight.rejection };
+  const xmlText = readFileSync(preflight.xmlPath, "utf8");
   const xmlBytes = Buffer.byteLength(xmlText);
   if (xmlBytes > DIRECT_SYNC_MAX_XML_BYTES) {
     return refuse("xml_exceeds_bounds", "prepare",
@@ -430,7 +451,7 @@ async function preparePayload(input: DirectSyncImportInput): Promise<PrepareOutc
     engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint()
   });
   if (capturedSha256 !== input.payloadSha256) throw new Error("Direct sync payload changed after admission");
-  return { ok: true, payload: { xmlPath, xmlText, manifest } };
+  return { ok: true, payload: { xmlPath: preflight.xmlPath, xmlText, manifest: preflight.manifest } };
 }
 
 /** 本地日期（`DATABASE_TIMEZONE`）——与读侧同一口径。 */
@@ -491,6 +512,29 @@ function eligibleIdentity(state: Map<string, string>): boolean {
   return Boolean(state.get("dataset_version") && state.get("import_completed_at")
     && state.get("parser_contract_version") === CONTRACT_VERSION
     && state.get("parser_identity_algorithm") === identityAlgorithmFingerprint());
+}
+
+/**
+ * 身份状态的**三态**（S3.2 / D3）：空库就地初始化 vs 代际不符 vs 现状。
+ *
+ * 为什么需要三态：收口前"空库"走候选链路（首包 = 整库备份 + CLI 全量导入），而
+ * **全新部署**（首次同步）本来就走那条路径 —— 收口后若把"空库"也判成不合格，
+ * 首包会硬失败（同步停摆，且没有任何路径能初始化它）。
+ *
+ * 判据：
+ *   - `eligible`：四要素齐备且与当前构建一致（现状路径）；
+ *   - `bootstrap`：四要素**全缺**（从未有完成过的导入）⇒ 允许首包**就地初始化**
+ *     （解析器会写 contract/algorithm、接收器写 dataset_version/import_completed_at ——
+ *     四要素在一批之内齐备；`preserveAbsent` 恒 true，墓碑/缺席删除不进这条路径）；
+ *   - `baseline_rebuild`：**有身份痕迹**但代际不符或部分缺失 —— 数据在、代际变了，
+ *     混用两代身份有风险，必须由运维显式处置（CLI 全量重建 / 回退服务端版本），
+ *     不是客户端能自动修的。
+ */
+export function classifyIdentityEligibility(state: Map<string, string>): "eligible" | "bootstrap" | "baseline_rebuild" {
+  if (eligibleIdentity(state)) return "eligible";
+  const anyTrace = state.get("dataset_version") || state.get("import_completed_at")
+    || state.get("parser_contract_version") || state.get("parser_identity_algorithm");
+  return anyTrace ? "baseline_rebuild" : "bootstrap";
 }
 
 /** 本批事实的分类输入。**来源是账本**，不是第二遍 XML 扫描（见设计文档 §7.1 修订一）。 */
@@ -560,9 +604,12 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
   const payload = prepared.payload;
   const probe = RaiDatabase.openReadonly(input.databasePath);
   try {
-    if (!eligibleIdentity(identityState(probe))) {
-      return rejectDirect("identity_not_eligible", "identity",
-        { detail: "dataset_version / import_completed_at 缺失，或契约/身份算法与当前构建不符" });
+    const eligibility = classifyIdentityEligibility(identityState(probe));
+    if (eligibility === "baseline_rebuild") {
+      // S3.2/D3：**有身份痕迹**但与当前契约/身份算法代际不符 —— 运维显式处置，
+      // 客户端不能自动修（混用两代身份有风险）。`bootstrap`（四项全缺）从下面放行。
+      return rejectDirect("baseline_rebuild_required", "identity",
+        { detail: "主库有身份痕迹但与当前契约/身份算法不符；需运维全量重建（CLI）或回退服务端版本" });
     }
     if (RaiDatabase.pendingMigrations(input.databasePath).length) {
       return rejectDirect("pending_migrations", "identity", { detail: "主库有待应用的迁移" });
@@ -596,11 +643,14 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     db.exec("PRAGMA synchronous=FULL");
     store.beginCallerTransaction();
     const state = identityState(db);
-    if (!eligibleIdentity(state)) {
-      throw new DirectSyncIngestRejected(rejectDirect("identity_not_eligible", "transaction",
-        { detail: "identity state changed before BEGIN" }));
+    const eligibility = classifyIdentityEligibility(state);
+    if (eligibility === "baseline_rebuild") {
+      throw new DirectSyncIngestRejected(rejectDirect("baseline_rebuild_required", "transaction",
+        { detail: "identity state changed before BEGIN（代际不符）" }));
     }
-    const previousVersion = state.get("dataset_version")!;
+    // S3.2/D3：`bootstrap`（空库首包）没有前驱 dataset_version —— 用固定引导符。
+    // 它是"这份库由谁生出来的"链条第一环，必须是**稳定**字面量（同一载荷重放要得出同一版本号）。
+    const previousVersion = state.get("dataset_version") ?? "bootstrap";
     if (db.prepare("SELECT 1 FROM import_batches WHERE id=?").get(input.jobId)) {
       throw new DirectSyncIngestRejected(rejectDirect("batch_without_receipt", "transaction",
         { detail: "existing batch has no completed receipt" }));

@@ -231,6 +231,25 @@ check(
     "(§10.3: no internal maintenance wording — keep the previous message instead)",
 )
 
+# 2c（S3.5，2026-10-14 新增）：**同一哨兵扩到服务端同步文件**。
+#
+# 为什么扫服务端：这三句文案原本也住在 `import-worker.ts` 的候选链路里，而 `job.message`
+# 会被 iOS 原样上屏（§10.3）—— 服务端把旧语义写回来，用户看到的是同一句假话。
+# 为什么用**原始文本**（含注释）而不是剥注释后的代码：注释里"重新引入旧措辞"是廉价且
+# 危险的重构前兆；剥注释会让它静默通过。这正是本脚本顶部的分工 —— 文案**持有者**判定
+# 必须剥注释（避免引用误报），**移除哨兵**必须不剥（宁误报不漏报）。
+SERVER_LEGACY_SCAN_FILES = [
+    "apps/api/src/import-worker.ts",
+    "apps/api/src/direct-sync-ingest.ts",
+]
+for relative in SERVER_LEGACY_SCAN_FILES:
+    server_source = read_source(relative)
+    for phrase in LEGACY_COPY:
+        check(
+            phrase not in server_source,
+            f"removed legacy status copy is back in server sync source: {phrase!r} in {relative}",
+        )
+
 # --- 3. §10.2 成功路径上的顺序与后台意图 ---------------------------------------
 
 mark_success = declaration_body(sync_code, re.compile(r"func markSuccess\s*\(")) if sync_code else None

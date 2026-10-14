@@ -9,15 +9,14 @@
 //   2. 直连车道跑完，**有没有任何一条被触发**？（行为性）
 //
 // 🔴 只有第 1 问是不够的：一个看得见但从不报警的守卫，与没有守卫无法区分。
-// 所以下面还有一条**阳性对照**——让旧候选路径真的跑一遍，断言守卫确实转红。
-// 没有这条对照，第 2 问的"全 0"可能只是守卫瞎了。
+// 所以下面还有一条**阳性对照**——**直接调用保留的禁止方法**，断言守卫确实转红。
+// 没有这条对照，第 2 问的"全 0"可能只是守卫瞎了。（2026-10-14 S3.3：旧候选路径的
+// 运行期调用链已删除，对照方式从"让它真的跑一遍"改为"直接调用保留方法"。）
 //
-// ⚠️ 覆盖边界（必须如实标注，2026-10-13 随 2e 更新）：现在有**两条**直连子车道，
-// 本文件两条都跑 —— record-only 快通路（记录白名单）与统一接收器（Workout / 评分类型 /
-// 删除 / GPX）。仍未迁移、因而**必然**会踩 §14.1 的场景：首次历史分页、大包分批（§5.2 分片计划
-// 未实现，超限直接回退旧链路）。所以"全 0"不能推广成"整份 §14.1 已通过"。
-// 这也是为什么"旧候选路径会触发守卫"被写成了**通过的用例**而不是失败的用例：
-// 它记录的正是尚未迁移的那一半。
+// ⚠️ 覆盖边界（2026-10-14 随 S3.3 更新）：两条直连子车道都跑 —— record-only 快通路
+// （记录白名单）与统一接收器（Workout / 评分类型 / 删除 / GPX）；**超限/不合规载荷
+// 现在显式失败（带稳定码），不再进入候选链路** —— 也就是说，本文件的两条车道上
+// "§14.1 全 0"是完整可证的（守卫的可见性由下一条阳性对照负责）。
 //
 // 用法：随 `npm test` 运行。
 
@@ -337,30 +336,39 @@ test("A01/§14.1 全类型：含 Workout 的增量走统一接收器，同样一
   }, { xml: WORKOUT_XML });
 });
 
-test("A01/§14.1 阳性对照：旧候选路径确实会触发守卫，所以上一条的「全 0」不是假绿", async () => {
-  await fixture(async ({ root, main, input, make }) => {
-    const worker = make(false);
+test("A01/§14.1 阳性对照（S3.3 改写）：直接调用保留方法，守卫必须转红 —— 「全 0」不是假绿", async () => {
+  // 2026-10-14（S3.3）**改写而非删除**：旧候选路径的调用链已从运行期删除，"让旧链路
+  // 真的跑一遍"的对照方式不再可达。判据不变 —— 守卫必须对**这些方法本身**看得见，
+  // 否则上一条"直连车道全 0"仍然不可证（看不见的守卫 = 没有守卫）。
+  // 保留的方法（阶段 5 之前仍在类上）直接调用即可，观测器照常生效。
+  await fixture(async ({ root, main, make }) => {
+    const worker = make();
     const guard = installGuard(worker);
     const surface = worker as unknown as Surface;
-    // 只拦住子进程：解析器要在真机上跑几十秒，而这条用例要证明的是"守卫看得见"，
-    // 不是"旧链路能跑完"。拦在 CLI 之前，前面几步（备份、整库 copy、quick_check）全部真实发生。
-    surface.command = (...args: unknown[]) => {
-      guard.commands.push(args.map((value) => String(value)));
-      throw new Error("fixture: legacy CLI stopped after the prohibited steps");
-    };
     try {
-      const job = worker.create(input);
-      await wait(worker);
-      assert.equal(worker.get(job.id)?.status, "failed");
+      // ① createCurrentBackup：真做一次项目级备份（内部走 backupCapacity/backupCopy/backupVerify）。
+      const backupPath = await (surface.createCurrentBackup as (id: string) => Promise<string | null>)
+        .call(worker, "guard-positive-backup");
+      assert.ok(backupPath !== null, "阳性对照前提：备份真的产出了产物");
 
-      const triggered = triggeredOperations(guard, stagesOf(worker, job.id)).map((operation) => operation.id);
+      // ② 整库 copy：与旧候选链路的 stagingCopy 同一个动作（node:sqlite 的在线备份）。
+      const source = new DatabaseSync(main);
+      try {
+        await (surface.backupDatabase as (database: DatabaseSync, destination: string) => Promise<void>)
+          .call(worker, source, join(root, "var", "guard-positive-staging.sqlite"));
+      } finally { source.close(); }
+
+      // ③ 全库 quick_check（verify 通道）。
+      await (surface.isReadableDatabase as (path: string) => Promise<boolean>).call(worker, main);
+
+      const triggered = triggeredOperations(guard, {}).map((operation) => operation.id);
       for (const id of ["current-backup", "whole-database-copy", "full-database-quick-check"]) {
         assert.ok(triggered.includes(id),
-          `阳性对照失效：旧候选路径没有触发 ${id}，守卫可能已经看不见它（实际触发：${triggered.join(", ") || "无"}）`);
+          `阳性对照失效：直接调用保留方法没有触发 ${id}，守卫可能已经看不见它（实际触发：${triggered.join(", ") || "无"}）`);
       }
       // 与函数计数无关的独立证据：磁盘上真的出现了项目备份。
       assert.ok(readdirSync(join(root, "var")).includes("backups"),
-        "旧候选路径应当留下 var/backups 目录 —— 这是它被守卫看到的另一条独立证据");
+        "备份路径应当留下 var/backups 目录 —— 这是守卫看到的另一条独立证据");
     } finally { await worker.close(); }
   });
 });

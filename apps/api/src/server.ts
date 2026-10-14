@@ -132,7 +132,10 @@ const predictionArtifactRoot = resolve(runtimeRoot, "var", "model-artifacts", "p
 const port = Number(process.env.RAI_API_PORT ?? 8787);
 const host = process.env.RAI_API_HOST ?? "127.0.0.1";
 const apiToken = process.env.RAI_API_TOKEN?.trim() || undefined;
-const maxImportZipBytes = Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 4 * 1024 ** 3);
+// 单批上传的 ZIP 上界（S3.6 收口：4 GiB → 64 MiB）。
+// 分批后（iOS 阶段 2）单批 ZIP 上界 = XML ≤2 MiB + routes ≤32 MiB + 包壳，64 MiB 有 ≥1.9× 余量；
+// 旧值在 50 GB 盘上构成真实威胁（一个异常包就能吃光解压预算）。生产 env 若显式设置该键需同步改。
+const maxImportZipBytes = Number(process.env.RAI_IMPORT_MAX_ZIP_BYTES ?? 64 * 1024 ** 2);
 const importExecutionEngine = { name: importEngine(), fallback: nativeFallback(), version: NATIVE_VERSION };
 if (importExecutionEngine.name === "rust" && importExecutionEngine.fallback === "none" && !existsSync(nativeBinary())) {
   throw new Error("Rust worker is missing. Run npm run rust:build or configure RAI_RUST_BINARY before enabling Rust.");

@@ -89,13 +89,16 @@ ROUTE_SYNC_MACHINE = "apps/ios/RAI/RouteSyncStateMachine.swift"
 STORE_RUNNER = "apps/ios/tests/run-store-tests.sh"
 HEALTH_ARCHIVE = "apps/ios/RAI/HealthSyncArchive.swift"
 HEALTH_PARSER = "packages/health-export-parser/src/apple-health-parser.ts"
+# S3.5（2026-10-14）：服务端同步文件也成了哨兵扫描面（`check-direct-sync-status-copy.py` 的 2c 节），
+# 反例夹具要往它里面写旧文案 —— 它必须进 SOURCES，否则 restore() 会静默跳过、把改坏的文件留在工作区。
+IMPORT_WORKER = "apps/api/src/import-worker.ts"
 # 🔴 凡是被突变**改到**的文件都必须在这里。少一个的失效方式是致命的：`restore()` 会静默跳过它
 # （那个"跳过"是为信号处理器的窗口留的），于是改坏的源码留在工作区、下一轮的基线检查才炸。
 SOURCES = [
     LIFECYCLE, SYNC, SYNC_PHASE, APP, APP_DELEGATE, ROOT_VIEW, TECH_THEME, TECH_PRESENTATION, MODEL_RUNNER,
     HEALTH_SYNC_RUNNER, BG_POLICY, RECOVERY, IDENTITY_PUBLISHER, UPLOAD_SESSION, API_CLIENT, HEALTH_EXPORT,
     SYNC_STATE_PLAN, SYNC_TASK_STORE, ROUTE_SYNC_MACHINE, STORE_RUNNER,
-    HEALTH_ARCHIVE, HEALTH_PARSER,
+    HEALTH_ARCHIVE, HEALTH_PARSER, IMPORT_WORKER,
 ]
 
 SWIFT_GATE = "bash apps/ios/tests/run-health-sync-tests.sh"
@@ -1289,6 +1292,20 @@ MUTATIONS = [
         ),
         SWIFT_GATE,
         "markSuccess must persist the continuation flag through commitSuccess",
+    ),
+    (
+        "[S3] 反例夹具: 服务端写回「正在创建项目级备份并校验现有数据」=> 旧语义经 job.message 上屏（S3.5 哨兵）",
+        # 插入一行**合法 TS 语句**（不改变编译结果类别）：门禁只扫文本，而这条要证明
+        # "服务端文案回潮"被哨兵抓住。锚点选 S3.3 收口注释（候选链路删除点），
+        # 插入位置在 `else` 块内（`job` 在作用域内，类型检查也过）。
+        lambda: edit(
+            IMPORT_WORKER,
+            "      // S3.3 收口：两条直连车道都不合格",
+            "      job.message = \"维护路径：正在创建项目级备份并校验现有数据（该批次未走直连车道）\";\n"
+            "      // S3.3 收口：两条直连车道都不合格",
+        ),
+        COPY_GATE,
+        "removed legacy status copy is back in server sync source",
     ),
     # --- 2026-09-23：§14「成功收尾的单事务提交」+ §10k 孤儿守卫 + §15 判据下限 --------------
     # 这 8 条的名字都带 `[本轮新增]` 前缀，便于 `RAI_MUTATION_ONLY=本轮新增` 单独复跑。
