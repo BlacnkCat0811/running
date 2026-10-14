@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { CONTRACT_VERSION } from "@rai/contracts";
-import { identityAlgorithmFingerprint } from "@rai/health-export-parser";
+import { NATIVE_VERSION, identityAlgorithmFingerprint } from "@rai/health-export-parser";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import {
@@ -17,6 +17,9 @@ import {
   readDatabaseImportIdentity
 } from "../src/import-payload-identity.js";
 import { ImportWorker } from "../src/worker.js";
+import { dataOnlyBaselineContract } from "../src/data-only-import.js";
+import { MutationCoordinator } from "../src/mutation-coordinator.js";
+import { TaskAdmissionScheduler } from "../src/task-admission.js";
 
 /**
  * The pre-flight short-circuit answers "did this payload change anything?" from
@@ -36,6 +39,17 @@ interface PreflightSurface {
   ): Promise<{ sha256: string; datasetVersion: string; unchangedWorkouts: number } | null>;
 }
 
+/**
+ * 排队构造（2026-10-14）：`planDirectSyncLane` 第一条要求 `job.queue && queueOptions`
+ * （`import-worker.ts:649`），无队列直跑会被 `not_queued` 拒收；收口后拒收 = 显式失败
+ * （旧候选回退已删）。`admission` 用测试同款的最小调度器。
+ */
+const preflightWorker = (databasePath: string, root: string): PreflightSurface =>
+  new ImportWorker(databasePath, root, root, undefined, undefined, undefined, {
+    scope: "preflight",
+    admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
+  }) as unknown as PreflightSurface;
+
 const BASE_CONTEXT = {
   preserveAbsent: true,
   contractVersion: CONTRACT_VERSION,
@@ -47,7 +61,7 @@ function exportXml(exportDate: string, extra = ""): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <HealthData locale="zh_CN">
  <ExportDate value="${exportDate}"/>
-${extra} <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Watch" unit="count/min" value="142" startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:00:01 +0800"/>
+${extra} <Record type="HKQuantityTypeIdentifierHeartRate" sourceName="Watch" unit="count/min" value="142" startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:00:01 +0800"><MetadataEntry key="RAIHealthKitSampleUUID" value="00000000-0000-4000-8000-0000000000a1"/></Record>
 </HealthData>`;
 }
 
@@ -55,15 +69,25 @@ function writeExport(root: string, xml: string): string {
   const inputPath = join(root, "export");
   mkdirSync(inputPath, { recursive: true });
   writeFileSync(join(inputPath, "export.xml"), xml, "utf8");
+  // S3 收口后两条车道都要求 v2 清单（`sync-manifest.json`）；缺它会被
+  // `missing_required_files` 显式拒绝（回退旧链路已删）。真机导出天然带它。
+  writeFileSync(join(inputPath, "sync-manifest.json"), JSON.stringify({
+    version: 2, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [], deletedRecords: []
+  }), "utf8");
   return inputPath;
 }
 
 async function seedDatabase(path: string): Promise<void> {
   const store = await RaiDatabase.open(path);
   try {
-    store.database
-      .prepare("INSERT OR REPLACE INTO import_manifest (key, value) VALUES ('dataset_version', ?)")
-      .run("preflight_fixture");
+    // S3.2 的库身份三态：直连车道要求 eligible（四项身份齐全且与当前契约相符）；
+    // 只写 dataset_version 会被判 `baseline_rebuild_required`。模板照抄
+    // `import-worker-direct-sync.test.ts` 的合规 fixture。
+    store.setManifest("dataset_version", "preflight_fixture");
+    store.setManifest("parser_contract_version", CONTRACT_VERSION);
+    store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
+    store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
+    store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
     for (let index = 0; index < 3; index += 1) {
       const workoutId = `preflight_workout_${index}`;
       const startedAt = new Date(Date.UTC(2026, 0, 1 + index)).toISOString();
@@ -96,6 +120,12 @@ function queuedJob(inputPath: string, preserveAbsent: boolean): Record<string, u
     completedAt: null,
     error: null,
     inputPath,
+    // lane 判定（`import-worker.ts:649`）要求 `job.queue && queueOptions` 双在；
+    // 形状与 `ImportWorker.create` 的排队分支一致。
+    queue: {
+      scope: "preflight", attempts: 0, finalized: false,
+      engine: { name: "typescript", version: NATIVE_VERSION, fallback: "none" }
+    },
     ...(preserveAbsent ? { preserveAbsent: true } : {})
   };
 }
@@ -247,7 +277,7 @@ test("an import records the payload anchor and the next identical sync skips the
   const inputPath = writeExport(root, exportXml("2026-09-23 10:01:26 +0800"));
   try {
     await seedDatabase(databasePath);
-    const worker = new ImportWorker(databasePath, root, root) as unknown as PreflightSurface;
+    const worker = preflightWorker(databasePath, root);
     const expected = await computeImportPayloadSha256(inputPath, {
       preserveAbsent: true,
       contractVersion: CONTRACT_VERSION,
@@ -255,29 +285,34 @@ test("an import records the payload anchor and the next identical sync skips the
       identityAlgorithm: identityAlgorithmFingerprint()
     });
 
-    let commandCount = 0;
-    worker.command = async () => { commandCount += 1; };
-
-    // First import: no anchor yet, so it must take the full path — and then record
-    // the anchor for the payload it applied. The stub command leaves staging equal
-    // to the live database, so the verdict is `unchanged` and the staging copy is
-    // discarded; the anchor is still recorded against the live database, because
-    // that is exactly the state the payload was just proven not to change.
+    // First import: no anchor yet, so it must take the full path — write the data,
+    // and record the anchor for the payload it applied. 收口后"全管线"= 直连接收器
+    // （备份/CLI 候选链路已删，A15/S3.3）；判据 = 数据真落库 + anchor 真记录
+    // （短路路径两者都不做）。
     const first = queuedJob(inputPath, true);
     await worker.run(first);
     assert.equal(first.status, "succeeded", String(first.error ?? ""));
-    assert.equal((first.summary as { importMode: string }).importMode, "unchanged");
-    assert.equal(commandCount, 1, "the first import has no anchor and must run the pipeline");
-    assert.deepEqual(anchorOf(databasePath), { sha256: expected, datasetVersion: "preflight_fixture" });
+    const counts = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      assert.equal((counts.prepare("SELECT COUNT(*) AS n FROM health_records").get() as { n: number }).n, 1,
+        "the first import must actually write the record (no anchor ⇒ no short-circuit)");
+    } finally { counts.close(); }
+    // 导入推进库代次（`dataset_delta_<hash>`，direct-sync-ingest.ts:724）——旧代次锚点
+    // 由此失效，这是设计行为；断言锁"新代次落库 + 摘要指向本 payload"。
+    const anchor = anchorOf(databasePath) as { sha256: string; datasetVersion: string } | null;
+    assert.ok(anchor, "导入后必须记录锚点");
+    assert.equal(anchor.sha256, expected);
+    assert.match(anchor.datasetVersion, /^dataset_delta_/, "锚点落在导入推进后的新代次上");
 
-    const backupsBefore = readdirSync(join(root, "var", "backups"));
+    // 收口后备份链路已删（A15/S3.3）：`var/backups` 应根本不存在——"第二次不产生新备份"
+    // 的判据由"前后目录内容相同"升级为"整个目录都不出现"。
+    assert.equal(existsSync(join(root, "var", "backups")), false, "收口后不产生备份目录");
 
     // Second import of the identical payload: nothing is backed up, copied, parsed
     // or diffed. This is the whole point of the change.
     const second = queuedJob(inputPath, true);
     await worker.run(second);
     assert.equal(second.status, "succeeded", String(second.error ?? ""));
-    assert.equal(commandCount, 1, "the identical payload must not invoke the CLI");
     assert.equal((second.summary as { importMode: string }).importMode, "unchanged");
     const summary = second.summary as { unchangedWorkouts: number; backupName: string | null; recomputeReasons: string[] };
     assert.equal(summary.unchangedWorkouts, 3, "every existing session is unchanged by a no-op payload");
@@ -288,7 +323,7 @@ test("an import records the payload anchor and the next identical sync skips the
     for (const skipped of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport"]) {
       assert.ok(!stageNames(second).includes(skipped), `${skipped} must not run`);
     }
-    assert.deepEqual(readdirSync(join(root, "var", "backups")), backupsBefore, "no new backup file");
+    assert.equal(existsSync(join(root, "var", "backups")), false, "no backup directory appears after the short-circuit either");
     assert.deepEqual(
       readdirSync(join(root, "var")).filter((name) => name.startsWith("rai.importing.")),
       [],
@@ -306,7 +341,7 @@ test("a payload that declares absence-as-deletion never short-circuits", async (
   const inputPath = writeExport(root, exportXml("2026-09-23 10:01:26 +0800"));
   try {
     await seedDatabase(databasePath);
-    const worker = new ImportWorker(databasePath, root, root) as unknown as PreflightSurface;
+    const worker = preflightWorker(databasePath, root);
     const module = await import("../src/import-payload-identity.js");
     // The anchor is recorded under deleting semantics, so the identity *would*
     // match a deleting re-import. Refusal can therefore only come from the guard.
@@ -354,7 +389,7 @@ test("a database that moved since the anchor was recorded disables the short-cir
   const inputPath = writeExport(root, exportXml("2026-09-23 10:01:26 +0800"));
   try {
     await seedDatabase(databasePath);
-    const worker = new ImportWorker(databasePath, root, root) as unknown as PreflightSurface;
+    const worker = preflightWorker(databasePath, root);
     const expected = await computeImportPayloadSha256(inputPath, {
       preserveAbsent: true,
       contractVersion: CONTRACT_VERSION,
@@ -391,25 +426,30 @@ test("a payload whose identity differs still runs the full pipeline", async () =
   const inputPath = writeExport(root, exportXml("2026-09-23 10:01:26 +0800"));
   try {
     await seedDatabase(databasePath);
-    const worker = new ImportWorker(databasePath, root, root) as unknown as PreflightSurface;
+    const worker = preflightWorker(databasePath, root);
     const module = await import("../src/import-payload-identity.js");
     module.writeImportPayloadAnchor(databasePath, { sha256: "not-this-payload", datasetVersion: "preflight_fixture" });
 
-    let commandCount = 0;
-    worker.command = async () => { commandCount += 1; };
     const job = queuedJob(inputPath, true);
     await worker.run(job);
-    assert.equal(commandCount, 1, "a differing payload must go through the CLI");
-    // 三段都要在：只断言"备份发生过"会漏掉容量检查与全库校验被跳过的情况。
-    for (const ran of ["backupCapacity", "backupCopy", "backupVerify"]) {
-      assert.ok(stageNames(job).includes(ran), `the full path still runs ${ran}`);
-    }
+    assert.equal(job.status, "succeeded", String(job.error ?? ""));
+    // 收口后"全管线"= 直连接收器真跑（备份/CLI 候选链路已删，A15/S3.3）；判据 =
+    // 锚点被更新为**本 payload** 的摘要（短路误命中时锚点保持 "not-this-payload" 不变）。
+    const anchor = anchorOf(databasePath) as { sha256: string; datasetVersion: string } | null;
+    assert.ok(anchor, "非短路导入后必须记录锚点");
+    assert.equal(anchor.sha256, await computeImportPayloadSha256(inputPath, {
+      preserveAbsent: true,
+      contractVersion: CONTRACT_VERSION,
+      engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
+      identityAlgorithm: identityAlgorithmFingerprint()
+    }));
+    assert.match(anchor.datasetVersion, /^dataset_delta_/, "锚点落在导入推进后的新代次上");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("an unreadable payload disables the short-circuit instead of failing the import", async () => {
+test("an unreadable payload disables the short-circuit and is refused explicitly (not a crash)", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-payload-preflight-unreadable-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
@@ -418,62 +458,46 @@ test("an unreadable payload disables the short-circuit instead of failing the im
   mkdirSync(inputPath);
   try {
     await seedDatabase(databasePath);
-    const worker = new ImportWorker(databasePath, root, root) as unknown as PreflightSurface;
+    const worker = preflightWorker(databasePath, root);
     const module = await import("../src/import-payload-identity.js");
     module.writeImportPayloadAnchor(databasePath, { sha256: "abc", datasetVersion: "preflight_fixture" });
     assert.equal(
       await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine),
       null
     );
-    // And the import still proceeds down the normal path rather than failing.
-    let commandCount = 0;
-    worker.command = async () => { commandCount += 1; };
-    await worker.run(queuedJob(inputPath, true));
-    assert.equal(commandCount, 1, "an unreadable payload must fall back to the full pipeline");
+    // 收口后"不可读"不再回退 CLI（已删），而是**显式失败**（稳定码；进程不崩、
+    // 不静默换道）——与"载荷摘要缺失 ⇒ ImportLaneRefusal"的收口语义一致。
+    const job = queuedJob(inputPath, true);
+    await worker.run(job);
+    assert.equal(job.status, "failed");
+    assert.equal((job as { failureCode?: string }).failureCode, "direct_sync_input_not_allowed");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("the recorded anchor survives a real activation into the live database", async () => {
+test("the recorded anchor survives a real direct import into the live database", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-payload-preflight-activate-"));
   const databasePath = join(root, "var", "rai.sqlite");
   mkdirSync(join(root, "var"));
   const inputPath = writeExport(root, exportXml("2026-09-23 10:01:26 +0800"));
   try {
     await seedDatabase(databasePath);
-    const worker = new ImportWorker(databasePath, root, root) as unknown as PreflightSurface;
-    let commandCount = 0;
-    worker.command = async (args) => {
-      commandCount += 1;
-      const databaseArgument = args.indexOf("--database");
-      const stagingPath = args[databaseArgument + 1];
-      assert.ok(stagingPath);
-      if (commandCount === 1) {
-        // Make the staged copy diverge so the verdict forces activation, which is
-        // the path that renames staging onto the live database.
-        const staging = new DatabaseSync(stagingPath);
-        try {
-          staging.prepare("INSERT OR REPLACE INTO import_manifest (key, value) VALUES ('fixture_marker', '1')").run();
-        } finally {
-          staging.close();
-        }
-        return;
-      }
-      assert.ok(args.includes("recompute"), "the second command must be the recompute pass");
-    };
+    const worker = preflightWorker(databasePath, root);
+    // 收口后导入是直连事务路径（无 CLI/staging/换库可注入）；这条用例现在验证的
+    // 是"真导入之后锚点与库同代"——换库前时代的"survives activation"判据已随链路退场。
     const job = queuedJob(inputPath, true);
     await worker.run(job);
     assert.equal(job.status, "succeeded", String(job.error ?? ""));
-    assert.deepEqual(anchorOf(databasePath), {
-      sha256: await computeImportPayloadSha256(inputPath, {
-        preserveAbsent: true,
-        contractVersion: CONTRACT_VERSION,
-        engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
-        identityAlgorithm: identityAlgorithmFingerprint()
-      }),
-      datasetVersion: "preflight_fixture"
-    });
+    const anchor = anchorOf(databasePath) as { sha256: string; datasetVersion: string } | null;
+    assert.ok(anchor, "真导入后锚点必须与库同代存在");
+    assert.equal(anchor.sha256, await computeImportPayloadSha256(inputPath, {
+      preserveAbsent: true,
+      contractVersion: CONTRACT_VERSION,
+      engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
+      identityAlgorithm: identityAlgorithmFingerprint()
+    }));
+    assert.match(anchor.datasetVersion, /^dataset_delta_/, "锚点落在导入推进后的新代次上");
     assert.equal(
       readFileSync(join(root, "var", "runtime.sqlite")).length > 0,
       true,

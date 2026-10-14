@@ -18,6 +18,11 @@ test("benchmark is opt-in and restores the same isolated baseline for the engine
       duration="30" durationUnit="min" totalDistance="5" totalDistanceUnit="km"
       creationDate="2026-01-01 08:00:00 +0800" startDate="2026-01-01 08:00:00 +0800" endDate="2026-01-01 08:30:00 +0800"/>
   </HealthData>`);
+  // S3 收口后两条车道都要求 v2 清单（`sync-manifest.json`）；无清单的裸导出会被
+  // `missing_required_files` 显式拒绝（回退旧链路已删）。真机导出天然带它。
+  writeFileSync(join(input, "sync-manifest.json"), JSON.stringify({
+    version: 2, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [], deletedRecords: []
+  }));
   const run = (...extra: string[]) => spawnSync(process.execPath, [
     "--import", "tsx", "apps/api/src/benchmark-import.ts", "--database", main,
     "--input", input, "--output", output, "--runs", "1", ...extra

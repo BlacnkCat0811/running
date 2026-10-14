@@ -5,6 +5,8 @@ import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { backup, DatabaseSync } from "node:sqlite";
 import { ImportWorker } from "./import-worker.js";
+import { MutationCoordinator } from "./mutation-coordinator.js";
+import { TaskAdmissionScheduler } from "./task-admission.js";
 import type { ImportJobResponse } from "@rai/api-contracts";
 import { importEngine, NATIVE_VERSION } from "@rai/health-export-parser";
 import { importEquivalence } from "./import-equivalence.js";
@@ -48,12 +50,20 @@ if (!args.includes("--execute")) {
         const runtime = await mkdtemp(join(root, "trial-"));
         const isolated = join(runtime, "rai.sqlite");
         await copyFile(baseline, isolated);
-        worker = new ImportWorker(isolated, projectRoot, runtime, undefined, undefined, undefined, undefined, evaluatedAt, {
+        // 排队构造（2026-10-14）：`planDirectSyncLane` 第一条要求 `job.queue && queueOptions`，
+        // 无队列直跑会被 `not_queued` 拒收（旧候选回退已删，拒收即显式失败）。
+        // admission 用测试同款的最小调度器（本工具是隔离样机，无服务器级资源管理）。
+        worker = new ImportWorker(isolated, projectRoot, runtime, undefined, undefined, undefined, {
+          scope: "benchmark",
+          admission: new TaskAdmissionScheduler(new MutationCoordinator()).owner("import")
+        }, evaluatedAt, {
           name: engine, version: NATIVE_VERSION, fallback: "none"
         });
         const job = worker.create(resolve(input));
         const deadline = Date.now() + 60 * 60_000;
-        while (worker.isRunning) {
+        // `isRunning` 只覆盖"正在执行"；排队模式下 create→scheduleNext 之间有一瞬 `false`
+        // ⇒ 用 `hasPending`（与 import-worker-direct-sync.test.ts 的 `wait` 同判据）。
+        while (worker.hasPending) {
           if (cancelled || Date.now() > deadline) { await worker.close(); throw new Error("Benchmark cancelled or timed out"); }
           await new Promise((done) => setTimeout(done, 200));
         }
