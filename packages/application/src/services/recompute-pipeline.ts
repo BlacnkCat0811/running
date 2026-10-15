@@ -1129,6 +1129,12 @@ export class RecomputePipeline {
       const v4 = extractWorkoutFeatureVectorV4(featureId, featureRun.id, source, request.featureConfig, request.evaluatedAt);
       const feature = projectFeatureV4(v4);
       // Small pure counterfactual, not a second full recomputation/shadow system.
+      // 🔴 2026-10-15（P2-6）口径：这是**运行期哨兵**，不是数据证据。恒真的根因比"强制
+      // null"更深 —— 突变实测（移除 `v4.ts:19-21` 的 null 覆盖后本反事实**仍恒真**）：V3
+      // 冻结提取器本身就不消费 recovery 输入，null 覆盖是双保险。哨兵真正转红的条件 =
+      // recovery 进入 **payload 输出**（已验证：给 payload.raw 注入一个 recovery 值，
+      // 测试层的属性断言即转红）。数据证据在 `packages/features/test/v4.test.ts` 的
+      // 参数化属性测试。
       const counterfactual = projectFeatureV4(extractWorkoutFeatureVectorV4(featureId, featureRun.id, {
         ...source, restingHeartRate: 99, hrvSdnn: 1, sleepDurationMinutes: 1, recentLoadMinutes: 9999
       }, request.featureConfig, request.evaluatedAt));
