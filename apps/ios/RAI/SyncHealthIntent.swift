@@ -15,6 +15,8 @@ struct SyncHealthIntent: AppIntent {
     private static func syncOnMainActor() async -> String {
         let model = AppModel.shared
         await model.healthSync.sync(to: model.session.serverURL, apiToken: model.session.apiToken)
+        // R1（2026-10-15）：快捷指令入口收工后接手未覆盖的代次 / 未读完的页（与视图入口同）。
+        await RaiStartup.handOffUncoveredGenerations(healthSync: model.healthSync, session: model.session)
         if let error = model.healthSync.lastError {
             return error
         }

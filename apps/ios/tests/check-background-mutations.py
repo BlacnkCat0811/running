@@ -778,6 +778,17 @@ MUTATIONS = [
         "a task row produced startFreshSync instead of runAtomicUnit",
     ),
     (
+        "[R1] 判据: 有待续页却不认 => 后台发现待续页后仍收工，BGTask 反复重排空转（活锁）",
+        # 锚点是**单行**（BackgroundSyncPolicy.swift 的最终形态），命中恰好一次。
+        lambda: edit(
+            BG_POLICY,
+            "        return wantsContinuation ? .resumeContinuation : .nothingToDo\n",
+            "        return .nothingToDo\n",
+        ),
+        SWIFT_GATE,
+        "a persisted continuation with nothing else on disk started nothing",
+    ),
+    (
         "[P2] 判据: reportedSuccess 改问「跑没跑起来」=> 单飞被拒也报成功",
         lambda: edit(
             BG_POLICY,

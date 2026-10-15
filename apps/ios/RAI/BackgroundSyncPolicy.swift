@@ -176,6 +176,13 @@ nonisolated enum BackgroundRunPolicy {
         case resumeJob
         /// 没有任何批次，但有"新数据待同步"的意图 ⇒ 从零开始一次同步。
         case startFreshSync
+        /// 没有任务行、也没有新代次，但盘上还有**没读完的页**（`sync_continuation` 槽）⇒ 接续读页。
+        ///
+        /// 与 `.startFreshSync` 分开：两者执行入口相同（都走 `performSync`），语义不同——新代次是
+        /// "外部产生了新数据、要重扫"，续页是"自己的活没读完、从已提交游标接着读"。分开之后，
+        /// `background pass: action=…` 的日志才能把 R1 那种"发现待续页却不执行"的活锁与
+        /// "真的没事做"区分开。
+        case resumeContinuation
     }
 
     /// 后台运行的软预算（秒）。**这是参数，不是验收标准。**
@@ -213,14 +220,19 @@ nonisolated enum BackgroundRunPolicy {
         hasTask: Bool,
         jobId: String?,
         hasBackgroundUploadTask: Bool,
-        wantsFreshSync: Bool
+        wantsFreshSync: Bool,
+        wantsContinuation: Bool = false
     ) -> Action {
         if let jobId, !jobId.isEmpty { return .resumeJob }
         if hasTask {
             if hasBackgroundUploadTask { return .awaitSystemUpload }
             return .runAtomicUnit
         }
-        return wantsFreshSync ? .startFreshSync : .nothingToDo
+        // 🔴 没有任务行时，先判"新代次"、再判"待续页"——与 `SyncFollowUp.handoff` 同源
+        // （两者同时挂起时先按新代次扣账）。续页必须在 `hasTask` 分支**之后**：任务行的
+        // 存在本身就是重试依据，轮不到续页判据说话。
+        if wantsFreshSync { return .startFreshSync }
+        return wantsContinuation ? .resumeContinuation : .nothingToDo
     }
 
     /// 这一轮后台运行是否已经该主动收手。

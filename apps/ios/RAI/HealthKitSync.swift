@@ -755,6 +755,13 @@ final class HealthKitSync {
         let hasNotification = backgroundIntentObservation(for: serverURL) != nil
         let hasRecoveryRequest = backgroundRecoveryStore.hasRequest(urlScope: Self.urlScope(for: serverURL))
         let wantsFresh = task == nil && (hasNotification || hasRecoveryRequest)
+        // 🔴 R1（2026-10-15）：没有任务行时，"待续页"也必须能驱动一轮。待续页产生于一次
+        // **成功提交之后**（`commitSuccess` 删掉任务行、同时写 `sync_continuation` 槽），
+        // 形态恰好是"无任务行 + 无通知/恢复请求 + 有续页"。旧实现只认通知/恢复请求 ⇒
+        // `.nothingToDo` 收工，而 `needsAnotherRound` 又因待续标记持续为真 ⇒ BGTask 反复
+        // 重排却不推进（活锁）。scope 与 `loadTask()` 同口径（`activeScope`）。
+        let wantsContinuation = task == nil
+            && taskStore.loadContinuation(scope: activeScope) != nil
         let action = BackgroundRunPolicy.action(
             hasTask: task != nil,
             jobId: task?.jobId,
@@ -763,7 +770,8 @@ final class HealthKitSync {
             // （后台一轮撞见前台同步在传）。刚盘点出来的孤儿**不是**不碰的理由 —— 它们已经被取消，
             // 这一轮该做的是用盘上的字节重传，让服务端幂等命中同一份来源。
             hasBackgroundUploadTask: systemUploadInFlight(payloadHash: task?.payloadHash),
-            wantsFreshSync: wantsFresh
+            wantsFreshSync: wantsFresh,
+            wantsContinuation: wantsContinuation
         )
         // 后台一轮「被派发了但什么都没做」与「压根没被派发」在服务端看是同一件事（都没有请求）。
         // 这一行把它们分开，也是排查活锁（每轮唤醒都落在 `.awaitSystemUpload`）的唯一入口。
@@ -773,7 +781,7 @@ final class HealthKitSync {
             // `.nothingToDo`：没有待办 ⇒ 立刻收工，报成功。
             // `.awaitSystemUpload`：字节归系统 ⇒ 一根手指都不许碰，连 `inspect` 都不做。
             return
-        case .runAtomicUnit, .resumeJob, .startFreshSync:
+        case .runAtomicUnit, .resumeJob, .startFreshSync, .resumeContinuation:
             // 观察点不在这里：通知只在**导出起点**被认领（`performSync` 里那条
             // `observeBackgroundIntentsForExportStart`）。放在这里等于让两条"不重新读 HealthKit"
             // 的恢复分支替通知背书 —— 它们用的是早于通知生成的字节。
@@ -2686,7 +2694,13 @@ final class HealthKitSync {
         let saved = HealthSyncBackgroundRecovery.persistThenAcknowledge(
             checkpoint: .taskPersisted,
             persist: { taskStore.save(data, scope: activeScope) },
-            acknowledge: { acknowledgeBackgroundIntent(checkpoint: $0) }
+            acknowledge: { checkpoint in
+                // 🔴 与 `markSuccess` 的 §10.2 同源（R1，2026-10-15）：这份任务行自己写着
+                // "还有页没读完"（`needsContinuation == true`）时，**不得**在 `.taskPersisted`
+                // 上确认后台待办意图——确认掉之后没人再发下一批，剩下的页永远读不完。
+                guard !(task.needsContinuation ?? false) else { return }
+                acknowledgeBackgroundIntent(checkpoint: checkpoint)
+            }
         )
         guard saved else {
             throw SyncHTTPError(message: taskStore.lastError ?? "同步进度未能保存")

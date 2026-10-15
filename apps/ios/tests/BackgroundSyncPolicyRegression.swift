@@ -82,6 +82,7 @@ struct BackgroundSyncPolicyRegression {
         try jobResumptionOutranksEverything()
         try aTaskRowNeverStartsAFreshExport()
         try noTaskFollowsTheRecordedIntent()
+        try noTaskFollowsTheContinuation()
         try budgetReservesTimeForPersistence()
         try softBudgetOnlyYieldsBackgroundPolling()
         try successIsReportedFromTheRemainingWork()
@@ -392,6 +393,46 @@ struct BackgroundSyncPolicyRegression {
                 hasTask: false, jobId: nil, hasBackgroundUploadTask: true, wantsFreshSync: true
             ) == .startFreshSync,
             "an orphan upload task blocked a fresh sync"
+        )
+    }
+
+    /// 🔴 契约（R1，2026-10-15）：没有任务行时，**待续页**也必须能驱动一轮同步。
+    ///
+    /// 待续页产生于一次**成功提交之后**（`commitSuccess` 的事务删掉任务行、同时写
+    /// `sync_continuation` 槽），形态恰好是"无任务行 + 无通知 + 只有待续标记"。旧实现只认
+    /// 通知/恢复请求 ⇒ `.nothingToDo` 立刻收工，而 `needsAnotherRound` 又因待续标记持续为真
+    /// ⇒ BGTask 反复重排却永远不推进（活锁）。
+    private static func noTaskFollowsTheContinuation() throws {
+        try require(
+            BackgroundRunPolicy.action(
+                hasTask: false, jobId: nil, hasBackgroundUploadTask: false,
+                wantsFreshSync: false, wantsContinuation: true
+            ) == .resumeContinuation,
+            "a persisted continuation with nothing else on disk started nothing"
+        )
+        // 对照：没有待续页时仍是"没事可做"（防"永远返回 resumeContinuation"通过）。
+        try require(
+            BackgroundRunPolicy.action(
+                hasTask: false, jobId: nil, hasBackgroundUploadTask: false,
+                wantsFreshSync: false, wantsContinuation: false
+            ) == .nothingToDo,
+            "a build with no continuation and no intent started work anyway"
+        )
+        // 新代次优先于待续页（与 SyncFollowUp.handoff 的"新代次先扣自己额度"同源）。
+        try require(
+            BackgroundRunPolicy.action(
+                hasTask: false, jobId: nil, hasBackgroundUploadTask: false,
+                wantsFreshSync: true, wantsContinuation: true
+            ) == .startFreshSync,
+            "a new generation lost to a pending page"
+        )
+        // 有任务行时待续页不作判据：任务行本身就是重试依据。
+        try require(
+            BackgroundRunPolicy.action(
+                hasTask: true, jobId: nil, hasBackgroundUploadTask: false,
+                wantsFreshSync: false, wantsContinuation: true
+            ) == .runAtomicUnit,
+            "a pending page outranked the persisted task row"
         )
     }
 

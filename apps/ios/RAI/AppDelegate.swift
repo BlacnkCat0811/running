@@ -96,8 +96,12 @@ enum RaiStartup {
     /// ⚠️ 这里读的是**这一轮自己按目标现读的快照**（`probePendingWork`），不是
     /// `lastError` / `phase` 这类展示字段：单飞被拒的那一次什么都没跑，拿它的落点判断
     /// "有没有没覆盖的活儿"就是拿别人的结论给自己打分。
+    ///
+    /// ⚠️ 自 2026-10-15（R1）起它是**跨文件入口**：视图层的手动同步与"回到前台"也调用它。
+    /// 改动调用形态（含本文件 :69 / :175 两处字面量）必须同步
+    /// `check-background-capabilities.py` 的 `ordered()` 与 `check-background-mutations.py` 的锚点。
     @MainActor
-    private static func handOffUncoveredGenerations(healthSync: HealthKitSync, session: ServerSession) async {
+    static func handOffUncoveredGenerations(healthSync: HealthKitSync, session: ServerSession) async {
         guard let serverURL = session.serverURL else { return }
         var roundsLeft = SyncFollowUp.maxForegroundRounds
         var continuationRoundsLeft = SyncFollowUp.maxForegroundContinuationRounds

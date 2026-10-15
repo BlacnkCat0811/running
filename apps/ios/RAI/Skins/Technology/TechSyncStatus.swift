@@ -18,6 +18,10 @@ struct TechHomeActions: View {
                         userSyncBusy = true
                         userSyncResult = nil
                         await sync.sync(to: session.serverURL, apiToken: session.apiToken)
+                        // R1（2026-10-15）：收工后接手"这一轮没覆盖到的那一代 / 没读完的页"——
+                        // 手动入口此前是缺口（只有观察者与解锁两处有）。放在 refreshAll 之前：
+                        // 让这次刷新带出全部轮次的数据。
+                        await RaiStartup.handOffUncoveredGenerations(healthSync: sync, session: session)
                         await native.refreshAll(requestHandshake: false)
                         userSyncBusy = false
                         guard configuration == native.feedbackScope + session.apiToken else { return }
@@ -109,6 +113,8 @@ struct TechSyncAction: View {
     private func performSync() {
         Task {
             await sync.sync(to: session.serverURL, apiToken: session.apiToken)
+            // R1（2026-10-15）：同今日页按钮——手动入口收工后接手未覆盖的代次 / 未读完的页。
+            await RaiStartup.handOffUncoveredGenerations(healthSync: sync, session: session)
             await native.refreshAll(requestHandshake: false)
         }
     }

@@ -74,6 +74,9 @@ struct RAIApp: App {
                                 to: model.session.serverURL,
                                 apiToken: model.session.apiToken
                             )
+                            // R1（2026-10-15）：回到前台也接手"未覆盖的代次 / 未读完的页"
+                            //（此前只有观察者与解锁两个入口有这条收尾）。
+                            await RaiStartup.handOffUncoveredGenerations(healthSync: model.healthSync, session: model.session)
                         }
                     } else {
                         if phase == .background {

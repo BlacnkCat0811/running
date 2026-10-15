@@ -2300,6 +2300,8 @@ struct TechNativeSettingsView: View {
                                   isDisabled: healthSync.isBusy || !session.isReachable, busyTitle: techSyncPhase(healthSync.phase)) {
                     Task {
                         await healthSync.sync(to: session.serverURL, apiToken: session.apiToken)
+                        // R1（2026-10-15）：手动入口收工后接手未覆盖的代次 / 未读完的页。
+                        await RaiStartup.handOffUncoveredGenerations(healthSync: healthSync, session: session)
                         await native.refreshAll(requestHandshake: false)
                     }
                 }.accessibilityIdentifier("health.sync")

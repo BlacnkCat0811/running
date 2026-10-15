@@ -927,6 +927,18 @@ check(
     "basis, and a synthesized intent can never be acknowledged by a resuming round, so it later turns "
     "into an extra export",
 )
+# 10g-quinquies（R1，2026-10-15）：🔴 `saveTask` 落盘一份"还有页没读完"的任务行
+#             （`needsContinuation == true`）时，**不得**在 `.taskPersisted` 上确认后台待办意图。
+#             与 `markSuccess` 的 §10.2 保护同源，但这是**另一条**提交路径——
+#             `check-direct-sync-status-copy.py` 明确声明不覆盖 `saveTask`（其 :21-24）。
+#             失效形态静默：意图被清掉之后没人再发下一批，剩下的页永远读不完。
+ordered(
+    save_body,
+    "guard !(task.needsContinuation ?? false) else { return }",
+    "acknowledgeBackgroundIntent(checkpoint:",
+    "saveTask acknowledges the background intent even when the persisted task still has pages to "
+    "read — the intent is cleared and nobody sends the next page (same class as §10.2 on markSuccess)",
+)
 
 # 10h. 🔴 `uploadTaskId` 目前**没有**写入点，谁把它当判据谁就会拿到恒假 ⇒ 每轮唤醒都重传一遍。
 check(
@@ -1989,7 +2001,9 @@ check(
 # 🔴 2026-10-15（审查 🟡-A5）：273 停在 10-11 水平，而当日实测打印 **288** 条 ⇒
 #   静默删掉 ≤15 条判据都不会触发地板（与本节自述"零容忍"矛盾）。
 #   按"打印总数 − 1"重设为 **287** —— 再改本文件必须**现跑现设**。
-MIN_CHECKS = 287
+# 🟡 2026-10-15（R1）：新增 10g-quinquies（saveTask 的 `.taskPersisted` 意图保护）后
+#   实测打印 **289** ⇒ 按同一纪律重设为 **288**。
+MIN_CHECKS = 288
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "
