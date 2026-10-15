@@ -6,7 +6,7 @@ import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { analyzeDatasetChange, type ImportDatasetChange } from "./import-dataset-analysis.js";
-import { computeImportPayloadSha256, readDatabaseImportIdentity } from "./import-payload-identity.js";
+import { computeImportPayloadSha256, readDatabaseImportIdentity, readImportIdentityInDatabase } from "./import-payload-identity.js";
 
 import type {
   ImportExecutionEngine, ImportJobPerformance, ImportJobResponse, ImportLaneRejection, ImportLaneTelemetry, ImportStage
@@ -32,7 +32,7 @@ import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
 import { RuntimeStateStore } from "./runtime-state.js";
 
-import { ImportPublicationJournal, readImportReceipt, writeImportReceipt } from "./import-publication.js";
+import { ImportPublicationJournal, readImportReceipt, writeImportReceipt, writeImportReceiptInDatabase } from "./import-publication.js";
 import type { TaskAdmission } from "./task-admission.js";
 import { waitForShutdown } from "./worker-process.js";
 
@@ -527,31 +527,26 @@ export class ImportWorker {
       });
       this.assertNotClosing();
       if (preflight) {
-        laneTelemetry = { outcome: "unchanged", reasons: [] };
-        job.phase = "activate"; // terminal decision is now irreversible, including no-op imports
-        terminalSucceeded = true;
-        publishTerminalState = () => {
-          job.status = "succeeded";
-          job.phase = "completed";
-          job.message = "导出文件与上次已导入的内容完全一致，未重新解析";
-          job.completedAt = new Date().toISOString();
-          job.summary = {
-            recomputeReasons: ["payload_identity_unchanged"],
-            importMode: "unchanged",
-            insertedWorkouts: 0,
-            updatedWorkouts: 0,
-            removedWorkouts: 0,
-            unchangedWorkouts: preflight.unchangedWorkouts,
-            routesUpdated: 0,
-            featuresReused: 0,
-            featuresRecomputed: 0,
-            modelReplayFrom: null,
-            durationMs: Date.now() - startedAtMs,
-            // 这一条路径根本没有生成备份，所以这里恒为 null，不是"备份失败"。
-            backupName: null
+        // R2（2026-10-15）：no-op 也必须落**可持久查询的回执**（见 `writeNoopReceipt` 的注释）。
+        // 旧行为只写内存 summary ⇒ 已建立 job 的客户端分支 `.hold(no_receipt)` 永久循环。
+        const noopSummary = this.writeNoopReceipt(job, preflight, startedAtMs);
+        if (noopSummary) {
+          fastPathAttempted = true; // 回执已持久提交：回复丢失时由 catch / 下轮从回执恢复同一结论
+          laneTelemetry = { outcome: "unchanged", reasons: [] };
+          job.phase = "activate"; // terminal decision is now irreversible, including no-op imports
+          terminalSucceeded = true;
+          publishTerminalState = () => {
+            job.status = "succeeded";
+            job.phase = "completed";
+            job.message = "导出文件与上次已导入的内容完全一致，未重新解析";
+            job.completedAt = new Date().toISOString();
+            job.summary = noopSummary;
           };
-        };
-        return;
+          return;
+        }
+        // 重验失败：两次检查之间另一批导入推进了 datasetVersion（anchor 已失效）。
+        // 此刻的载荷不再"可证明不变"，一律落回正式车道——不写回执、不短路。
+        process.stderr.write(`No-op preflight invalidated for ${job.id}: baseline moved before receipt could commit\n`);
       }
       // 车道判定抽成纯函数（`direct-sync-plan.ts`）：旧候选链路与直连链路的分歧只在这一个地方，
       // 每条否决原因都可单测。这里的取值与原内联六条件**逐条等价**。
@@ -948,6 +943,82 @@ export class ImportWorker {
       datasetVersion: identity.datasetVersion,
       unchangedWorkouts: this.countTrainingSessions()
     };
+  }
+
+  /**
+   * R2（2026-10-15）：无变化成功的**持久回执**。
+   *
+   * 为什么必须有：客户端对"已建立 job"的批次要求 `summary.directSync` 形式的
+   * committed 回执才推进游标（`DirectSyncCursorPolicy.decision` 的 `.hold(no_receipt)`）。
+   * 旧的 unchanged 早退只在内存里写 summary、没有任何持久回执 ⇒ 客户端每轮恢复都读到
+   * 同一份无回执的成功响应 ⇒ 永久循环（同内容并发来源、不经 inspect 直接建 job 的通道可达）。
+   *
+   * 事务纪律与重验：写回执在**一个短写事务**里完成，且在**同一事务内**重验
+   * 「库仍对应本载荷」——判据与 `detectUnchangedPayload` 逐条一致（anchor 存在、
+   * datasetVersion 未变、sha256 相等）。任何一个不成立 ⇒ 返回 `null`（调用方落回
+   * 正式车道）：两次检查之间任何导入都会推进 datasetVersion，让 anchor 失效。
+   *
+   * 回执形状（`packages/contracts/src/direct-sync.ts` 的 `DirectSyncReceipt`）：
+   *   - `ingestStatus: "committed"` —— 事实层的结论：本批没有要写入的新事实，
+   *     "服务端已确认当前库与此载荷一致"；
+   *   - `analysisStatus: "not_required"` —— 本批**没有**登记分析任务：内容与已导入
+   *     完全一致 ⇒ 结构上不影响分析（§9.1）。**绝不**复用/伪造其它批次的 `published`；
+   *   - 三个"没有值"的字段一律 `null`（合同：本批不影响分析 / 未发布 / 未分片）。
+   *
+   * 失败面：写库异常向上抛（基础设施故障 ⇒ job 失败；重试幂等——每轮开头的
+   * `readImportReceipt` 或再次走到这里都会收敛到同一结论）。
+   */
+  private writeNoopReceipt(
+    job: MutableImportJob,
+    preflight: PayloadPreflight,
+    startedAtMs: number
+  ): ImportJobResponse["summary"] | null {
+    let database: DatabaseSync | undefined;
+    try {
+      database = new DatabaseSync(this.databasePath);
+      database.exec("PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL");
+      database.exec("BEGIN IMMEDIATE");
+      const identity = readImportIdentityInDatabase(database);
+      const verified = identity.anchor !== null
+        && identity.datasetVersion !== null
+        && identity.datasetVersion === identity.anchor.datasetVersion
+        && identity.anchor.sha256 === preflight.sha256;
+      if (!verified) {
+        database.exec("ROLLBACK");
+        return null;
+      }
+      const summary: NonNullable<ImportJobResponse["summary"]> = {
+        recomputeReasons: ["payload_identity_unchanged"],
+        importMode: "unchanged",
+        insertedWorkouts: 0,
+        updatedWorkouts: 0,
+        removedWorkouts: 0,
+        unchangedWorkouts: preflight.unchangedWorkouts,
+        routesUpdated: 0,
+        featuresReused: 0,
+        featuresRecomputed: 0,
+        modelReplayFrom: null,
+        durationMs: Date.now() - startedAtMs,
+        // 这一条路径根本没有生成备份，所以这里恒为 null，不是"备份失败"。
+        backupName: null,
+        directSync: {
+          ingestStatus: "committed",
+          receiptId: job.id,
+          analysisStatus: "not_required",
+          dependencyGeneration: null,
+          publishedReleaseId: null,
+          parentBatchId: null
+        }
+      };
+      writeImportReceiptInDatabase(database, job.id, summary);
+      database.exec("COMMIT");
+      return summary;
+    } catch (error) {
+      try { database?.exec("ROLLBACK"); } catch { /* 事务可能未开启或已结束 */ }
+      throw error;
+    } finally {
+      database?.close();
+    }
   }
 
   /** Sessions in the live database; `0` when it cannot be read, never a thrown error. */

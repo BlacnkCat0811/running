@@ -152,6 +152,27 @@ import Foundation
             ) == .advance,
             "① committed receipt + declared capability + pending cursors advances"
         )
+        // R2（2026-10-15）：服务端 no-op（内容与已导入完全一致）的成功现在携带
+        // `directSync` 回执（`apps/api/src/import-worker.ts` 的 `writeNoopReceipt`）。
+        // 客户端必须能从这份形状走完确认——否则"已建立 job"的分支永远 `.hold(no_receipt)`，
+        // 而同内容并发来源是真实网络上可达的触发路径（本轮实证的停滞形态）。
+        let noopReceipt = decodeReceipt(DirectSyncFixture.noopCommittedNotRequired)
+        check(noopReceipt != nil, "the server's no-op receipt shape decodes")
+        check(noopReceipt?.ingestStatus == .committed, "a no-op receipt is committed on the facts half")
+        check(noopReceipt?.analysisStatus == .notRequired,
+              "a no-op batch registers no analysis: not_required is the accurate claim, never published")
+        check(noopReceipt?.analysisOutcome == .notRequired,
+              "not_required folds to its own outcome — it must not read as 'analysis updated' (§9.1)")
+        check(noopReceipt?.dependencyGeneration == nil && noopReceipt?.publishedReleaseId == nil
+                && noopReceipt?.parentBatchId == nil,
+              "the contract's nulls for 'this batch does not affect analysis' decode as nil")
+        check(
+            DirectSyncCursorPolicy.decision(
+                serverContractVersion: version, receipt: noopReceipt,
+                pendingCursorsPresent: true, requiresReceipt: true, phase: .importing
+            ) == .advance,
+            "a no-op receipt satisfies the gate: identical content answered with a queryable receipt advances"
+        )
         check(
             DirectSyncCursorPolicy.decision(
                 serverContractVersion: version, receipt: nil,
@@ -707,6 +728,20 @@ private enum DirectSyncFixture {
       "receiptId": "job-42",
       "analysisStatus": "queued",
       "dependencyGeneration": "7",
+      "publishedReleaseId": null,
+      "parentBatchId": null
+    }
+    """
+
+    /// R2（2026-10-15）：服务端 no-op（内容与已导入完全一致）的持久回执形状——
+    /// `apps/api/src/import-worker.ts` 的 `writeNoopReceipt` 输出（committed / not_required /
+    /// 三个"没有值"字段为 null）。同样的载荷、同样的字节，也要能被客户端走完确认。
+    static let noopCommittedNotRequired = """
+    {
+      "ingestStatus": "committed",
+      "receiptId": "web_import_noop_1",
+      "analysisStatus": "not_required",
+      "dependencyGeneration": null,
       "publishedReleaseId": null,
       "parentBatchId": null
     }

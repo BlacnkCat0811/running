@@ -17,6 +17,7 @@ import {
   readDatabaseImportIdentity
 } from "../src/import-payload-identity.js";
 import { ImportWorker } from "../src/worker.js";
+import { readImportReceipt } from "../src/import-publication.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 
@@ -326,6 +327,25 @@ test("an import records the payload anchor and the next identical sync skips the
     assert.equal(summary.unchangedWorkouts, 3, "every existing session is unchanged by a no-op payload");
     assert.equal(summary.backupName, null, "no backup is produced on this path");
     assert.deepEqual(summary.recomputeReasons, ["payload_identity_unchanged"]);
+    // R2（2026-10-15）：no-op 成功也必须留下**可持久查询的回执**——已建立 job 的客户端
+    // 分支只认 `summary.directSync` 形式的 committed 回执；旧的"内存 summary + 无回执"
+    // 会让客户端 `.hold(no_receipt)` 且每轮读到同一份无回执响应（永久循环，同内容并发可达）。
+    const secondId = String(second.id);
+    const receipt = readImportReceipt(databasePath, secondId) as
+      { directSync?: Record<string, unknown> } | null;
+    assert.ok(receipt, "no-op import must persist a queryable receipt");
+    const directSync = receipt.directSync;
+    assert.ok(directSync, "the no-op receipt must carry the directSync shape the client waits for");
+    assert.equal(directSync.ingestStatus, "committed");
+    assert.equal(directSync.analysisStatus, "not_required",
+      "a no-op batch registers no analysis task; it must not claim a published analysis");
+    assert.equal(directSync.receiptId, secondId);
+    assert.equal(directSync.dependencyGeneration, null,
+      "the contract reserves null for batches that do not affect analysis");
+    assert.equal(directSync.publishedReleaseId, null);
+    assert.equal(directSync.parentBatchId, null);
+    // 内存里的 summary 与持久回执同源：客户端读 job 拿到的形状 = 库里的那一份。
+    assert.deepEqual((second.summary as { directSync?: unknown }).directSync, directSync);
     // 🔴 这份清单必须跟着契约走。2026-10-11 `backup` 拆成三段后，若这里仍写 "backup"，
     // 断言会**恒真**（那个名字再也不可能出现）—— 守卫就静默失效了，而且不会变红。
     for (const skipped of ["backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport"]) {

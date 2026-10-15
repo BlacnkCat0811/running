@@ -166,6 +166,27 @@ function parseAnchor(value: string | undefined): ImportPayloadAnchor | null {
 }
 
 /**
+ * Reads the anchor and the current dataset version from an **already-open**
+ * connection. Split out of `readDatabaseImportIdentity` (2026-10-15, R2) so a
+ * caller that owns a write transaction can re-verify "the database still
+ * corresponds to this payload" **inside** that transaction — the no-op receipt
+ * writer does exactly that between its verification and its commit.
+ */
+export function readImportIdentityInDatabase(database: DatabaseSync): DatabaseImportIdentity {
+  const rows = database
+    .prepare("SELECT key, value FROM import_manifest WHERE key IN (?, ?)")
+    .all(IMPORT_PAYLOAD_ANCHOR_KEY, IMPORT_DATASET_VERSION_KEY) as unknown as Array<{
+      key: string;
+      value: string;
+    }>;
+  const values = new Map(rows.map((row) => [row.key, row.value]));
+  return {
+    anchor: parseAnchor(values.get(IMPORT_PAYLOAD_ANCHOR_KEY)),
+    datasetVersion: values.get(IMPORT_DATASET_VERSION_KEY) ?? null
+  };
+}
+
+/**
  * Reads the anchor and the current dataset version from one connection.
  *
  * Returns `null` only when the database is absent or unreadable — which the
@@ -178,17 +199,7 @@ export function readDatabaseImportIdentity(databasePath: string): DatabaseImport
   let database: DatabaseSync | undefined;
   try {
     database = new DatabaseSync(databasePath, { readOnly: true });
-    const rows = database
-      .prepare("SELECT key, value FROM import_manifest WHERE key IN (?, ?)")
-      .all(IMPORT_PAYLOAD_ANCHOR_KEY, IMPORT_DATASET_VERSION_KEY) as unknown as Array<{
-        key: string;
-        value: string;
-      }>;
-    const values = new Map(rows.map((row) => [row.key, row.value]));
-    return {
-      anchor: parseAnchor(values.get(IMPORT_PAYLOAD_ANCHOR_KEY)),
-      datasetVersion: values.get(IMPORT_DATASET_VERSION_KEY) ?? null
-    };
+    return readImportIdentityInDatabase(database);
   } catch {
     return null;
   } finally {
