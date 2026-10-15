@@ -1,10 +1,10 @@
 # RAI 同步数据与数据处理链路审查报告 · 2026-10-15
 
-> 审查对象：**同步数据链路**（iOS ↔ 服务端直连同步：协议 / 车道 / 批次预算 / 收敛重传 / 导入落库）
-> ＋ **数据处理链路**（解析 → 规范化 → 落库 → 派生计算）。
-> 基线 commit：`7532ff0`（工作区干净，无未提交改动）。审查方式：**全程只读，未修改任何代码**。
-> 方法：4 路子智能体并行只读审查（服务端同步 / iOS 同步端 / 导入落库 / 派生计算）
-> ＋ 主智能体**逐项抽样复核**（重点项读码亲验、1 项以 git worktree 定点突变实证）
+> 审查对象：**同步数据链路**（iOS ↔ 服务端直连同步：协议 / 车道 / 批次预算 / 收敛重传 / 导入落库）  
+> ＋ **数据处理链路**（解析 → 规范化 → 落库 → 派生计算）。  
+> 基线 commit：`7532ff0`（工作区干净，无未提交改动）。审查方式：**全程只读，未修改任何代码**。  
+> 方法：4 路子智能体并行只读审查（服务端同步 / iOS 同步端 / 导入落库 / 派生计算）  
+> ＋ 主智能体**逐项抽样复核**（重点项读码亲验、1 项以 git worktree 定点突变实证）  
 > ＋ 门禁实跑。**结论以主智能体复核后的口径为准；未复核项已逐条标注。**
 
 ---
@@ -13,31 +13,31 @@
 
 **健康度：🟡 中（无 P0；1 条 P1、8 条 P2 为实际待修项）。**
 
-最近 5 天（10-10 ~ 10-15）连续修复了 6 个批次的历史缺口（收口后遗症、上界放宽、尾页根治），本轮审查确认**这些修复的主体实现是正确的**；新发现集中在三类"接缝"：
-① 收口（`ed556a3`）删旧链路时的**遗漏与半接续**（data-only 死键、守卫假绿）；
-② **跨端对齐面**（服务端 ↔ iOS 的 code/上界/注释随时间漂移）；
+最近 5 天（10-10 ~ 10-15）连续修复了 6 个批次的历史缺口（收口后遗症、上界放宽、尾页根治），本轮审查确认**这些修复的主体实现是正确的**；新发现集中在三类"接缝"：  
+① 收口（`ed556a3`）删旧链路时的**遗漏与半接续**（data-only 死键、守卫假绿）；  
+② **跨端对齐面**（服务端 ↔ iOS 的 code/上界/注释随时间漂移）；  
 ③ **测试可信度**（假绿 1 例已突变实证、窗口盲区 1 例、夹具差变量 1 例）。
 
-| 维度 | 评级 | 一句话 |
-|---|---|---|
-| 服务端直连协议（apps/api direct-sync） | 🟡 | 无 P0/P1；边界测试存在"历史事故窗口"盲区；inspect 乐观 `ready` |
-| iOS 同步端（尾页根治 P0–P2b） | 🟡 | 主实现（写前判定/先判后取/有界重导）读码正确；**门禁假绿已实证**；循环耗尽不落档 |
-| 导入与落库（parser/storage/worker） | 🔴→🟡 | **data-only 准入死键（P1）**：测试绿/生产死；其余为死代码与不可达测试 |
-| 派生计算（scoring ~ model-eval） | 🟡 | `recoveryIsolationHolds` 恒真（激活门判据无信息量）；其余以低风险/未复核为主 |
-| 门禁与测试可信度 | 🟡 | 1 例假绿**已突变实证**、1 例窗口盲区、1 例夹具自写键；另有 1 例资源型超时（环境） |
+| 维度                            | 评级    | 一句话                                                 |
+| ----------------------------- | ----- | --------------------------------------------------- |
+| 服务端直连协议（apps/api direct-sync） | 🟡    | 无 P0/P1；边界测试存在"历史事故窗口"盲区；inspect 乐观 `ready`         |
+| iOS 同步端（尾页根治 P0–P2b）          | 🟡    | 主实现（写前判定/先判后取/有界重导）读码正确；**门禁假绿已实证**；循环耗尽不落档         |
+| 导入与落库（parser/storage/worker）  | 🔴→🟡 | **data-only 准入死键（P1）**：测试绿/生产死；其余为死代码与不可达测试         |
+| 派生计算（scoring ~ model-eval）    | 🟡    | `recoveryIsolationHolds` 恒真（激活门判据无信息量）；其余以低风险/未复核为主 |
+| 门禁与测试可信度                      | 🟡    | 1 例假绿**已突变实证**、1 例窗口盲区、1 例夹具自写键；另有 1 例资源型超时（环境）     |
 
 ---
 
 ## 二、质量门禁实跑（主智能体独立实跑）
 
-| 门禁 | 结果 | 证据（日志） |
-|---|---|---|
-| `npm run typecheck`（双 tsconfig） | ✅ **EXIT=0** | `.workbuddy/runlogs/audit20261015-typecheck.log` |
-| direct-sync 定向 7 文件（node --test） | 🟡 44 tests / 43 pass / **1 fail** | `.workbuddy/runlogs/audit20261015-directsync-batch.log`；唯一 fail = `direct-sync-handshake-capability` 的 60s 超时（**资源型**：当时 4 路子智能体并行；隔离单跑 **4/4 绿**，`.workbuddy/runlogs/audit20261015-handshake-isolated.log`） |
-| `direct-sync-http-acceptance.test.ts`（单文件） | ✅ **9 tests / 9 pass / 0 fail（EXIT=0，3m58s）** | `.workbuddy/runlogs/audit20261015-http-acceptance.log` |
-| `npm run test:ios` | ✅ **EXIT=0（7m57s）**：`iOS 门禁通过（类型检查 + 纯逻辑回归）`；含 `check-background-capabilities` **284/0**（⚠️ 其收敛三条判据的有效性问题见 P2-1）、export determinism 14/0、direct-sync 契约 parity 13 条、analysis reconcile 43 条 | `.workbuddy/runlogs/audit20261015-ios-gates.log` |
-| `npm run check:docs`（新增文档索引验证） | ✅ **EXIT=0**（61 文件 / 433 链接 / 0 问题） | 本批两份报告已挂 README 索引 |
-| check-background-capabilities.py **突变实证** | 🔴 假绿已证实（见 P2-1） | 两次实跑输出内嵌于 P2-1；证据归档 `.workbuddy/runlogs/mutation-audit-20261015.log` |
+| 门禁                                         | 结果                                                                                                                                                                                          | 证据（日志）                                                                                                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run typecheck`（双 tsconfig）            | ✅ **EXIT=0**                                                                                                                                                                                | `.workbuddy/runlogs/audit20261015-typecheck.log`                                                                                                                                                             |
+| direct-sync 定向 7 文件（node --test）           | 🟡 44 tests / 43 pass / **1 fail**                                                                                                                                                          | `.workbuddy/runlogs/audit20261015-directsync-batch.log`；唯一 fail = `direct-sync-handshake-capability` 的 60s 超时（**资源型**：当时 4 路子智能体并行；隔离单跑 **4/4 绿**，`.workbuddy/runlogs/audit20261015-handshake-isolated.log`） |
+| `direct-sync-http-acceptance.test.ts`（单文件） | ✅ **9 tests / 9 pass / 0 fail（EXIT=0，3m58s）**                                                                                                                                               | `.workbuddy/runlogs/audit20261015-http-acceptance.log`                                                                                                                                                       |
+| `npm run test:ios`                         | ✅ **EXIT=0（7m57s）**：`iOS 门禁通过（类型检查 + 纯逻辑回归）`；含 `check-background-capabilities` **284/0**（⚠️ 其收敛三条判据的有效性问题见 P2-1）、export determinism 14/0、direct-sync 契约 parity 13 条、analysis reconcile 43 条 | `.workbuddy/runlogs/audit20261015-ios-gates.log`                                                                                                                                                             |
+| `npm run check:docs`（新增文档索引验证）             | ✅ **EXIT=0**（61 文件 / 433 链接 / 0 问题）                                                                                                                                                         | 本批两份报告已挂 README 索引                                                                                                                                                                                           |
+| check-background-capabilities.py **突变实证**  | 🔴 假绿已证实（见 P2-1）                                                                                                                                                                            | 两次实跑输出内嵌于 P2-1；证据归档 `.workbuddy/runlogs/mutation-audit-20261015.log`                                                                                                                                         |
 
 > ⚠️ 环境记录：本沙箱下并发跑重测试会被 SIGTERM 掐断（一次实测 137），且 60s 启动窗口会被资源争抢击穿。上述失败与超时均按"环境证据 + 隔离复验"处理，未计为代码缺陷。
 
@@ -53,7 +53,7 @@
   - **全仓非测试代码中该键零写入方**：`grep -rn data_only_baseline_contract apps/api/src packages/*/src scripts/` ⇒ 仅 2 处，均为**读取**（`:83` / `:91`）。
   - 删除链：`ed556a3`（收口提交）移除了旧链路里唯一的生产写入（候选库 `INSERT OR REPLACE INTO import_manifest(key,value) VALUES ('data_only_baseline_contract',?)`，见 `git show ed556a3 -- apps/api/src/import-worker.ts`）。
   - **测试夹具自写该键**：`apps/api/test/direct-sync-prohibited-operations.test.ts:187`（`store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract())`）⇒ 夹具自己让 `compatible()` 为真，测试全绿；生产库无维护者。补充复核：**测试侧写入共 11 处、分布于 8 个文件**（`setManifest` 8 处 + `UPDATE import_manifest` 2 处 + `DELETE` 1 处），另有一条**刻意**不写该键的对照（`direct-sync-ingest.test.ts:92` 注释 + `:634` 断言键不存在）。
-- **影响**：对**从未写过该键的库**（新库 / 键失效库），record-only 快通路恒不合格 ⇒ 全部载荷落到统一接收器（`direct-sync` 车道）。功能等价、无数据正确性影响；代价 = 一条设计车道实质死亡 + 每次同步多一次无效的 data-only 评估 IO。
+- **影响**：对**从未写过该键的库**（新库 / 键失效库），record-only 快通路恒不合格 ⇒ 全部载荷落到统一接收器（`direct-sync` 车道）。功能等价、无数据正确性影响；代价 = 一条设计车道实质死亡 + 每次同步多一次无效的 data-only 评估 IO。  
   ⚠️ **两点必要限定（防误用）**：① 对由旧链路（`ed556a3` 之前）写入过该键的库**不必然成立**——若键残留且值恰好等于当前契约值，`compatible()` 为真；此类库是否存在**无法从代码判定**（需查线上库实际键值，超出本次只读范围）。② 这不等于"data-only 是死代码"——它是"结构上不可达的**回退分支**"；判"补齐写入方"或"删除该门槛"皆可，但**不能靠测试绿推断其在生产可用**。
 - **建议方向**：把该键的写入接回新链路（建议随 `direct-sync`/`data-only` 的成功提交事务内刷新，或删除该门槛并同步契约与文档）；补一条"生产形态夹具"（不预写该键）的用例，证明快通路真能走通。
 - **复核状态**：✔ 主智能体已复核（零写入方 + 早退逻辑 + 夹具自写键三点亲验）；分支计数等细节由补充复核确认（见 §补录）。
@@ -81,7 +81,7 @@
 ### P2-3 · 「单条超大轨迹」静默无法同步（原报告「零进展循环」的修正版）
 
 - **位置**：`apps/ios/RAI/HealthKitExport.swift:423-431,450-454`（先判后取 + 整条放弃）；`apps/ios/RAI/DirectSyncBatchBudget.swift:80-82`（route 闸门）。
-- **证据（主智能体复核修正）**：route 段对"装不进剩余额度"的单条轨迹整体放弃、零文件、状态不动（正确设计）；但**若某单条 GPX > 满额预算**（罕见超大轨迹），该条在每批都"发现→尝试→放弃"，且未取到的 workout 会持续参与 `rediscoveryCandidates` 轮转（每轮 ≤20）——**静默地永远同步不了，且反复消耗轮转预算**。
+- **证据（主智能体复核修正）**：route 段对"装不进剩余额度"的单条轨迹整体放弃、零文件、状态不动（正确设计）；但**若某单条 GPX > 满额预算**（罕见超大轨迹），该条在每批都"发现→尝试→放弃"，且未取到的 workout 会持续参与 `rediscoveryCandidates` 轮转（每轮 ≤20）——**静默地永远同步不了，且反复消耗轮转预算**。  
   原报告（子智能体）描述为「单 workout/单页 > 收敛后预算 ⇒ 零进展循环」；主智能体复核：**记录段不会死循环**（单条记录 ≈ 359 B ≪ 预算；批尾停止后下批满额可前进）、**整链不会卡死**，真实缺口如上。
 - **影响**：一条大轨迹的数据永久缺失（无用户可见提示）；持续的重试开销。不构成同步链卡死。
 - **建议方向**：对"单条超限"与"额度暂时不足"两种放弃原因做区分：前者打终态标记（如跳过并明细上报），不再放入 rediscovery 轮转。
@@ -126,6 +126,7 @@
 - **影响**：今天无缺陷（闸门兜住）。风险 = 一旦有人放宽 `:107`（例如为别的需求允许 `workout-routes/`），`data-only-import.ts:124` 会**抛硬错**（"Data-only payload changed after admission"），而单测因"两边一起错"不会红。
 - **建议方向**：把 `data-only-import.test.ts:65` 对齐 `direct-sync-ingest.test.ts:114`（改用 `computeImportPayloadSha256`），把"准入摘要 == 复核摘要"从巧合变成被钉住的契约。
 - **复核状态**：✔ 主智能体已抽查（三个位置亲验；来源：补充独立审查 `INGEST_PERSIST_CHAIN_REVIEW_2026-10-15.md` 🟡-1）。
+
 
 ### P3（低成本清理）
 

@@ -9,7 +9,7 @@ import { analyzeDatasetChange, type ImportDatasetChange } from "./import-dataset
 import { computeImportPayloadSha256, readDatabaseImportIdentity } from "./import-payload-identity.js";
 
 import type {
-  ImportExecutionEngine, ImportJobResponse, ImportLaneRejection, ImportLaneTelemetry, ImportStage
+  ImportExecutionEngine, ImportJobPerformance, ImportJobResponse, ImportLaneRejection, ImportLaneTelemetry, ImportStage
 } from "@rai/api-contracts";
 import { currentAbilityBaselineHash } from "@rai/application";
 import {
@@ -194,6 +194,20 @@ export interface ImportWorkerSource {
   displayName?: string | null;
   originalPath?: string | null;
 }
+
+/**
+ * 公开层白名单的**编译期穷尽守卫**（2026-10-15 审查 A2）：
+ * `ImportJobPerformance` 新增字段而没登记到这里 ⇒ `tsc` 立刻失败，
+ * 不会等到"键被 `publicPerformance` 静默丢弃"在线上发生。
+ * 运行期对偶在 `worker.test.ts`（"全键保留 + 拷贝隔离"用例）。
+ */
+export const PUBLIC_PERFORMANCE_KEYS = {
+  validationMode: true,
+  totalMs: true,
+  stagesMs: true,
+  computeStagesMs: true,
+  lane: true
+} satisfies Record<keyof ImportJobPerformance, true>;
 
 export class ImportWorker {
   private readonly jobs = new Map<string, MutableImportJob>();
@@ -1773,6 +1787,38 @@ export class ImportWorker {
     if (this.cancelRequested) throw new Error("Import cancelled");
   }
 
+  /**
+   * `performance` 的公开层白名单（2026-10-15）：只放**仍在使用**的键。
+   *
+   * `native` / `computeProcessMaxRssKiB` 随 CLI 子进程链路退役、写入端已删除，
+   * 但历史持久化行（`performance_json`）里仍带着残留键 —— 此前注释声称"会被响应
+   * schema（additionalProperties: false）剥掉"，部署实测**不剥**（运行时没有 response
+   * schema 层，OpenAPI 文档的 additionalProperties 不参与序列化）。现在在公开出口
+   * 统一剥掉；数据层（库与内存 job）保持原样、不重写历史行。
+   *
+   * 🔴 新增公开键必须显式加进来（并同步 `PUBLIC_PERFORMANCE_KEYS`（编译期穷尽守卫）、
+   * `ImportJobPerformance` 与 `schemas.ts` 的响应描述）；不在这里的键不会出现在任何
+   * job 响应里。
+   *
+   * 2026-10-15（审查 A-🔡4）：嵌套对象做浅拷贝 —— 公开返回值与内存 job 不共享可变
+   * 引用，调用方原地改返回值不会污染后续读取（运行期守卫见 `worker.test.ts`）。
+   */
+  private publicPerformance(performance: ImportJobPerformance): ImportJobPerformance {
+    return {
+      validationMode: performance.validationMode,
+      totalMs: performance.totalMs,
+      stagesMs: { ...performance.stagesMs },
+      ...(performance.computeStagesMs === undefined ? {} : { computeStagesMs: { ...performance.computeStagesMs } }),
+      ...(performance.lane === undefined ? {} : {
+        lane: {
+          ...performance.lane,
+          reasons: [...performance.lane.reasons],
+          ...(performance.lane.rejections === undefined ? {} : { rejections: [...performance.lane.rejections] })
+        }
+      })
+    };
+  }
+
   private publicJob(job: MutableImportJob): ImportJobResponse {
     const removalGuard = job.status === "failed"
       ? ImportRemovalGuardError.fromPayload(job.removalGuard) : null;
@@ -1793,7 +1839,8 @@ export class ImportWorker {
       ,...(job.failureCode === undefined ? {} : { failureCode: job.failureCode })
       ,...(job.progress === undefined ? {} : { progress: job.progress })
       ,...(job.summary === undefined ? {} : { summary: job.summary })
-      ,...(job.performance === undefined ? {} : { performance: job.performance })
+      // `== null` 同时挡 `undefined` 与历史 JSON 迁移可能带来的 `null`（否则白名单读取会抛错）。
+      ,...(job.performance == null ? {} : { performance: this.publicPerformance(job.performance) })
       ,...(job.status === "queued" && job.queue ? {
         queuePosition: [...this.jobs.values()].filter((item) => ["queued", "running"].includes(item.status)).indexOf(job) + 1,
         waitingReason: "writer_busy" as const

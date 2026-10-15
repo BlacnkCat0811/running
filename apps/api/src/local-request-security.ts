@@ -1,7 +1,25 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 
-const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+/// 写方法的唯一定义（2026-10-15 审查 D-🔡6）：`server.ts` 的路由准入守卫与这里的
+/// 鉴权 hook 必须对"什么算写"保持同一口径 —— 此前两处各声明一份相同字面量。
+export const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const safeMethods = new Set(["GET", "HEAD"]);
+
+/**
+ * 常量时间 token 比较（2026-10-15 审查 🟡-D1）。
+ *
+ * JS 的 `===` 在首个不同字符处短路 ⇒ 存在逐字符计时预言机（局域网抖动低时可被利用）。
+ * 先对两端各取 SHA-256 定长摘要、再 `timingSafeEqual`，长度差与内容差都不再泄漏到
+ * 比较耗时上；原始长度相等作为第二判据（摘要相等已隐含，保留它是显式契约）。
+ * 任何一侧缺失（未配置 token / 无 Authorization 头）一律 false。
+ */
+export function constantTimeTokenEquals(provided: string | undefined, expected: string | undefined): boolean {
+  if (typeof provided !== "string" || typeof expected !== "string") return false;
+  const a = createHash("sha256").update(provided).digest();
+  const b = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(a, b) && provided.length === expected.length;
+}
 
 export interface LocalRequestSecurityOptions {
   apiPort: number;
@@ -144,7 +162,7 @@ export function installLocalRequestSecurity(
       (request.url.split("?", 1)[0] ?? "").startsWith("/v1/")
     )) {
       const authorization = request.headers.authorization;
-      if (authorization === `Bearer ${options.apiToken}`) {
+      if (constantTimeTokenEquals(authorization, `Bearer ${options.apiToken}`)) {
         if (options.allowAuthenticatedRemote) {
           const origin = request.headers.origin;
           if (!origin || options.trustedOrigins?.has(origin)) return;

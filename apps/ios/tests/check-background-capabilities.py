@@ -1986,7 +1986,10 @@ check(
 #   的 `[P1]` 组）。同一批里另外两个"恢复分支计数"钉子（`recordCursors: restored…` 4→5、
 #   `routeDiscoveryCursor: restored…` 4→5）也一并更新 —— 它们数与不数得上新分支，本身就是
 #   这条缺陷当时没被抓住的原因之一。
-MIN_CHECKS = 273
+# 🔴 2026-10-15（审查 🟡-A5）：273 停在 10-11 水平，而当日实测打印 **288** 条 ⇒
+#   静默删掉 ≤15 条判据都不会触发地板（与本节自述"零容忍"矛盾）。
+#   按"打印总数 − 1"重设为 **287** —— 再改本文件必须**现跑现设**。
+MIN_CHECKS = 287
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "

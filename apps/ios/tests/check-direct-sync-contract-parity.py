@@ -199,6 +199,9 @@ if server_versions and ios_versions:
 #     payload_identity_invalid）→ `direct_sync_input_not_allowed`
 #     ⇒ iOS `.abandonTask`（清任务重传，自愈）—— 2026-10-15 起生效，此前落 `.keepTask`
 #     活锁（sourceId 保留、重撞同 400、nginx 再无 uploads）。
+#     ⚠️ 同族的 `payload_identity_unavailable` 由 worker 内部（摘要算不出来）产出、
+#     **不经** inspect 预检到达，但折进同一 code —— "输入族"的枚举两处都要带上它
+#     （2026-10-15 审查 A-🔡2）。
 # 本判据把输入族 code 在**两端**钉成逐字一致：服务端改码而 iOS 未跟时，这里先红，
 # 而不是在线上以"每次同步重撞 400"的形态暴露。
 
@@ -216,6 +219,68 @@ check(
     "(apps/ios/RAI/HealthSyncCancellation.swift) — a server inspect 400 with this code would "
     "fall back to .keepTask and livelock the sync",
 )
+
+# --- 3c. 拒收码全集钉死（2026-10-15 审查 A3） ---------------------------------
+#
+# 只钉"已知输入码会被处置"不够：`laneRefusalFailure` 是这些码的**唯一映射表**，
+# 一旦它新增/改名 code 而 iOS 的 `disposition` 没跟（默认 `.keepTask`），同步会退回
+# 活锁形态（sourceId 保留、每次同步重撞同一 400、nginx 再无 uploads —— 与
+# 2026-09-22 的 404、2026-10-14 的 400 同构的第三次）。本判据把 `laneRefusalFailure`
+# 能产出的 code 全集钉成封闭清单，并把「经 inspect 预检 400 可达」的子集与 iOS 的
+# 显式处置分支对齐：服务端改表 ⇒ 本门禁红，强制在同一次改动里补 iOS 分支
+# （或显式说明新码不经 inspect 到达）。
+
+lane_start = server_import_worker.find("export function laneRefusalFailure")
+lane_end = server_import_worker.find("\n}\n", lane_start) if lane_start != -1 else -1
+check(
+    lane_start != -1 and lane_end != -1,
+    "laneRefusalFailure could not be located in apps/api/src/import-worker.ts "
+    "(the rejection-code pin below depends on it)",
+)
+lane_body = server_import_worker[lane_start:lane_end] if lane_start != -1 and lane_end != -1 else ""
+server_lane_codes = sorted(set(re.findall(r'code: "(direct_sync_[a-z_]+)"', lane_body)))
+expected_lane_codes = [
+    "direct_sync_baseline_rebuild_required",
+    "direct_sync_full_snapshot_unsupported",
+    "direct_sync_input_not_allowed",
+    "direct_sync_internal_integrity",
+    "direct_sync_payload_exceeds_bounds",
+    "direct_sync_unavailable",
+]
+check(
+    server_lane_codes == expected_lane_codes,
+    f"laneRefusalFailure 的拒收码全集漂移：{server_lane_codes} != {expected_lane_codes}；"
+    "新增/改名必须同批更新本判据与 iOS 的处置分支（HealthSyncCancellation.disposition），"
+    "否则未知 400 会落 .keepTask 活锁",
+)
+ios_bounds_match = re.search(r'batchExceedsBoundsCode = "([a-z_]+)"', ios_cancellation)
+ios_input_match = re.search(r'inputNotAllowedCode = "([a-z_]+)"', ios_cancellation)
+check(
+    ios_bounds_match is not None,
+    "the iOS disposition no longer pins batchExceedsBoundsCode "
+    "(apps/ios/RAI/HealthSyncCancellation.swift)",
+)
+check(
+    ios_input_match is not None,
+    "the iOS disposition no longer pins inputNotAllowedCode "
+    "(apps/ios/RAI/HealthSyncCancellation.swift)",
+)
+if ios_bounds_match and ios_input_match:
+    # inspect 预检 400 当前可达的 code 恰为这两个（`import-routes.ts` 预检分支 →
+    # `laneRefusalFailure` 的 bounds 族与输入族）。这个等式是本门禁的核心判据：
+    # 任何新增的 inspect 可达码都会同时打破它（先在 6 码全集里出现，再要求 iOS 分支）。
+    inspect_reachable = {"direct_sync_payload_exceeds_bounds", "direct_sync_input_not_allowed"}
+    ios_handled = {ios_bounds_match.group(1), ios_input_match.group(1)}
+    check(
+        inspect_reachable == ios_handled,
+        f"inspect 预检 400 可达码与 iOS 处置分支不一致：可达 {sorted(inspect_reachable)} "
+        f"vs 已处置 {sorted(ios_handled)}",
+    )
+    check(
+        inspect_reachable <= set(server_lane_codes),
+        "iOS 处置的码在服务端 laneRefusalFailure 的全集里找不到 "
+        f"（iOS {sorted(inspect_reachable)} ⊆ server {server_lane_codes} 不成立）",
+    )
 
 # --- 4. 本门禁不得是孤儿 -------------------------------------------------------
 
@@ -237,5 +302,5 @@ if failures:
 
 print(
     f"Direct-sync contract parity checks passed ({checks} checks: status enums verbatim "
-    f"and in order, {VERSION_SYMBOL} identical, gate is mounted)"
+    f"and in order, {VERSION_SYMBOL} identical, lane refusal codes pinned, gate is mounted)"
 )

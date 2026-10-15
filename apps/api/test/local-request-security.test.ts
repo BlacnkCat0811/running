@@ -4,6 +4,7 @@ import test from "node:test";
 import Fastify from "fastify";
 
 import {
+  constantTimeTokenEquals,
   installLocalRequestSecurity,
   isPrivateIPv4,
   isPrivateLanHttpOrigin
@@ -285,4 +286,21 @@ test("authenticated remote access still checks the configured origins", async ()
   } finally {
     await app.close();
   }
+});
+
+test("constantTimeTokenEquals matches the exact token and rejects missing, partial and length-variant input", () => {
+  // 2026-10-15（审查 🟡-D1）：五处 token 比较收敛到这个常量时间实现。
+  // 语义必须与原来的 `===` 完全一致 —— 只是不再在首字符处短路。
+  assert.equal(constantTimeTokenEquals("Bearer s3cret", "Bearer s3cret"), true);
+  assert.equal(constantTimeTokenEquals(undefined, "Bearer s3cret"), false);
+  assert.equal(constantTimeTokenEquals("Bearer s3cret", undefined), false);
+  // 单字符差（前缀相同、不同字符出现的位置不同）都必须拒绝：
+  assert.equal(constantTimeTokenEquals("Bearer s3crey", "Bearer s3cret"), false);
+  assert.equal(constantTimeTokenEquals("Xearer s3cret", "Bearer s3cret"), false);
+  // 长度不同不得因"摘要先截断"之类的原因误判相等：
+  assert.equal(constantTimeTokenEquals("Bearer s3cret-extra", "Bearer s3cret"), false);
+  assert.equal(constantTimeTokenEquals("Bearer s3cre", "Bearer s3cret"), false);
+  // 空串相等是纯函数的边界事实（调用方负责在比较前先挡"未配置 token"：
+  // `!apiToken || ...` 的短路仍在，见 server.ts / installLocalRequestSecurity 的调用点）。
+  assert.equal(constantTimeTokenEquals("", ""), true);
 });

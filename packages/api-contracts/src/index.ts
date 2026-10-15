@@ -614,8 +614,15 @@ export interface CommandResponse {
  * 而独立进程做同一个备份只要 12.4 s ⇒ 旧口径把三件事/两件事糊在一个数字里，无法定位。
  * 旧口径对照：`backup` ≈ 三者之和，`activation` = `activationAudit + activationSwap`。
  */
-export type ImportStage = "dataOnlyApply" | "directSyncApply" | "backupCapacity" | "backupCopy" | "backupVerify" |
-  "stagingCopy" | "parseImport" | "changeAnalysis" | "recompute" | "activationAudit" | "activationSwap" | "cleanup";
+/**
+ * 阶段名的**运行期单一来源**（2026-10-15，审查 A1）：`stagesMs` 的响应描述
+ * （`apps/api/src/schemas.ts`）此前手抄了一份 11 项列表、漏了 `directSyncApply`
+ * ⇒ 文档枚举与类型全集漂移。现在两边都从这里派生：schema 用 `IMPORT_STAGES`
+ * 生成属性表，`schemas.test.ts` 断言"schema 键集 == IMPORT_STAGES"，手抄不再可能。
+ */
+export const IMPORT_STAGES = ["dataOnlyApply", "directSyncApply", "backupCapacity", "backupCopy", "backupVerify",
+  "stagingCopy", "parseImport", "changeAnalysis", "recompute", "activationAudit", "activationSwap", "cleanup"] as const;
+export type ImportStage = (typeof IMPORT_STAGES)[number];
 
 /**
  * `directSyncApply` 与 `dataOnlyApply` 分开计时的理由与上面 `activation` 拆分的理由相同：
@@ -672,8 +679,11 @@ export interface ImportJobPerformance {
   stagesMs: Partial<Record<ImportStage, number>>;
   computeStagesMs?: Record<string, number>;
   // ⚠️ 2026-10-15（G4）：`computeProcessMaxRssKiB` 与 `native` 两键已随 CLI 子进程链路退场
-  // 删除（唯一写入端 command() 的 IPC 回调退役；web/iOS 无消费者）。历史持久化作业行里的
-  // 残留键会被响应 schema（additionalProperties: false）剥掉。
+  // 删除（唯一写入端 command() 的 IPC 回调退役；web/iOS 无消费者）。
+  // 🔴 订正（2026-10-15 晚，部署实测）：此前写"残留键会被响应 schema（additionalProperties:
+  // false）剥掉"**不成立** —— 运行时没有任何 response schema 层（OpenAPI 文档的
+  // `additionalProperties: false` 不参与序列化）。现由公开层白名单剥掉：`import-worker.ts`
+  // 的 `publicPerformance`；数据层不重写历史行。
   /** 每次同步的车道决策与拒因（观测版阶段 1；老持久化作业没有该键）。 */
   lane?: ImportLaneTelemetry;
 }

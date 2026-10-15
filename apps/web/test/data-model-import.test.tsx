@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { apiMock, useRemoteMock } = vi.hoisted(() => ({
   apiMock: vi.fn(),
@@ -21,6 +21,11 @@ vi.mock("../src/hooks.js", () => ({ useRemote: useRemoteMock }));
 
 import { ApiError } from "../src/api.js";
 import { DataModelPage, uploadExport } from "../src/pages/DataModelPage.js";
+import { webcrypto } from "node:crypto";
+
+// uploadExport 现在会先算 SHA-256 幂等批次头（浏览器天然有 SubtleCrypto；jsdom 没有）。
+// 给整个测试文件装上 Node 的 WebCrypto，保持上传路径可测、并覆盖"发了什么头"的断言。
+beforeAll(() => { vi.stubGlobal("crypto", webcrypto); });
 
 const remote = (data: unknown) => ({
   data,
@@ -48,12 +53,14 @@ class FakeXMLHttpRequest {
   response: unknown = null;
   status = 0;
   aborted = false;
+  headers: Record<string, string> = {};
   onerror: ((event: ProgressEvent) => void) | null = null;
   ontimeout: ((event: ProgressEvent) => void) | null = null;
   onabort: ((event: ProgressEvent) => void) | null = null;
   onload: ((event: ProgressEvent) => void) | null = null;
   constructor() { FakeXMLHttpRequest.latest = this; }
   open() {}
+  setRequestHeader(name: string, value: string) { this.headers[name] = value; }
   send() {}
   abort() {
     this.aborted = true;
@@ -423,6 +430,24 @@ describe("DataModelPage import source selection", () => {
     const aborted = uploadExport(new File(["zip"], "export.zip"), vi.fn(), { signal: controller.signal });
     controller.abort();
     await expect(aborted).rejects.toThrow("上传已取消");
+  });
+
+  it("sends the file content hash as the idempotent X-RAI-Sync-Batch header", async () => {
+    // 2026-10-15（审查 🟡-A7）：同一份字节重传必须携带同一个幂等键 ——
+    // 服务端据此命中同一来源（`import-routes.ts` 的 X-RAI-Sync-Batch），
+    // 否则"上传超时后重试"会产生重复来源与重复导入。
+    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
+    const file = new File(["zip-payload"], "export.zip");
+    const pending = uploadExport(file, vi.fn());
+    const expectedDigest = await webcrypto.subtle.digest("SHA-256", await file.arrayBuffer());
+    const expected = Array.from(new Uint8Array(expectedDigest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    await waitFor(() => {
+      expect(FakeXMLHttpRequest.latest!.headers["X-RAI-Sync-Batch"]).toBe(expected);
+    });
+    FakeXMLHttpRequest.latest!.status = 200;
+    FakeXMLHttpRequest.latest!.response = { sourceId: "source-idempotent" };
+    FakeXMLHttpRequest.latest!.onload?.(new ProgressEvent("load"));
+    await expect(pending).resolves.toEqual({ sourceId: "source-idempotent" });
   });
 
   it("re-enables every import source after an upload timeout", async () => {

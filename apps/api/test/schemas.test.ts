@@ -4,6 +4,8 @@ import test from "node:test";
 
 import Fastify from "fastify";
 
+import { IMPORT_STAGES } from "@rai/api-contracts";
+
 import {
   importJobBodySchema,
   importSourceBodySchema,
@@ -84,6 +86,15 @@ test("OpenAPI operations declare responses and write contracts", () => {
   assert.ok("summary" in importJobSchema.properties);
   assert.ok("performance" in importJobSchema.properties);
   assert.deepEqual(importJobSchema.properties.performance.required, ["validationMode", "totalMs", "stagesMs"]);
+  // 2026-10-15（审查 A1）：响应描述的键枚举必须与契约的运行期单一来源一致 ——
+  // 之前手抄的 11 项列表漏了 `directSyncApply`，公开白名单里的 `lane` 也没进描述。
+  const performanceProperties = importJobSchema.properties.performance.properties as Record<string, { properties?: Record<string, unknown> }>;
+  assert.ok("lane" in performanceProperties, "performance 响应描述必须列出 lane（公开白名单保留的观测键）");
+  assert.deepEqual(
+    Object.keys(performanceProperties.stagesMs?.properties ?? {}).sort(),
+    [...IMPORT_STAGES].sort(),
+    "stagesMs 的属性集必须严格等于 ImportStage 全集（单源 IMPORT_STAGES；禁止手抄）"
+  );
   const latestImportSchema = openapiDocument.paths["/v1/import-jobs/latest"].get.responses["200"]
     .content["application/json"].schema as { anyOf: Array<{ $ref?: string }> };
   assert.equal(latestImportSchema.anyOf[0]?.$ref, "#/components/schemas/ImportJobResponse");

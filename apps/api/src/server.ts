@@ -55,8 +55,10 @@ import {
   DIRECT_SYNC_MAX_RECORDS, DIRECT_SYNC_MAX_ROUTE_BYTES, DIRECT_SYNC_MAX_ROUTE_FILES, DIRECT_SYNC_MAX_XML_BYTES
 } from "./direct-sync-ingest.js";
 import {
+  constantTimeTokenEquals,
   installLocalRequestSecurity,
-  isTrustedDevelopmentOrigin
+  isTrustedDevelopmentOrigin,
+  unsafeMethods
 } from "./local-request-security.js";
 import { DatabaseMaintenance, backupPolicyFromEnvironment } from "./maintenance.js";
 import {
@@ -233,7 +235,8 @@ await app.register(cors, {
 await app.register(multipart, {
   limits: { files: 1, fileSize: maxImportZipBytes }
 });
-const unsafeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+// 写方法集合由 `local-request-security.ts` 单一导出（2026-10-15 审查 D-🔡6：
+// 准入守卫与鉴权 hook 必须对"什么算写"保持同一口径，两处各写一份迟早分叉）。
 /**
  * Read routes an unauthenticated browser may call, once the request arrives on
  * a host named in `RAI_PUBLIC_HOSTS`.
@@ -1034,7 +1037,7 @@ app.get<{ Querystring: { localDate?: string; limit?: string; offset?: string; st
 // Never part of anonymous public reads, even when the public dashboard is enabled.
 app.get<{ Querystring: { from: string; through: string } }>("/v1/exports/workout-summary",
   { schema: { querystring: workoutExportQuerySchema } }, async (request, reply) => {
-    if (!apiToken || request.headers.authorization !== `Bearer ${apiToken}`) {
+    if (!apiToken || !constantTimeTokenEquals(request.headers.authorization, `Bearer ${apiToken}`)) {
       return reply.code(401).send({ code: "export_auth_required", message: "请配置访问令牌并连接后导出" });
     }
     reply.header("Cache-Control", "no-store");
@@ -1043,7 +1046,7 @@ app.get<{ Querystring: { from: string; through: string } }>("/v1/exports/workout
 
 app.get<{ Params: { id: string } }>("/v1/workouts/:id", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
   const includeRoute = apiToken
-    ? request.headers.authorization === `Bearer ${apiToken}`
+    ? constantTimeTokenEquals(request.headers.authorization, `Bearer ${apiToken}`)
     : process.env.RAI_ALLOW_ANONYMOUS_ROUTES === "1";
   reply.header("Cache-Control", "no-store");
   const detail = withReadStore((store) => store.workout(request.params.id, { includeRoute }));
@@ -1108,7 +1111,7 @@ type PrivacyZonesBody = {
 
 app.get<{ Params: { id: string } }>("/v1/workouts/:id/share-card", { schema: { params: identifierParamsSchema } }, async (request, reply) => {
   reply.header("Cache-Control", "no-store");
-  if (!apiToken || request.headers.authorization !== `Bearer ${apiToken}`) {
+  if (!apiToken || !constantTimeTokenEquals(request.headers.authorization, `Bearer ${apiToken}`)) {
     return reply.code(401).send({ message: "请配置访问令牌并连接后生成分享卡片" });
   }
   const card = withReadStore((store) => store.workoutShareCard(request.params.id));
@@ -1118,7 +1121,7 @@ app.get<{ Params: { id: string } }>("/v1/workouts/:id/share-card", { schema: { p
 
 app.get("/v1/privacy-zones", async (request, reply) => {
   reply.header("Cache-Control", "no-store");
-  if (!apiToken || request.headers.authorization !== `Bearer ${apiToken}`) {
+  if (!apiToken || !constantTimeTokenEquals(request.headers.authorization, `Bearer ${apiToken}`)) {
     return reply.code(401).send({ message: "请配置访问令牌并连接后读取隐私区" });
   }
   return withReadStore((store) => store.privacyZones());

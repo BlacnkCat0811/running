@@ -1915,13 +1915,20 @@ export class RaiReadStore {
     const durationSeconds = row.durationSeconds;
     const session = this.seriesRepository.sessionForSeries(id);
     const grade = session ? this.workoutGradeContext(session).grade.summary : null;
-    const note = trimmed.zonesApplied === 0
-      ? "未配置隐私区：卡片显示完整轨迹。"
-      : trimmed.polylines.length === 0
-        ? "整条轨迹都在隐私区内，卡片不含路线。"
-        : trimmed.gaps > 0
-          ? `路线在隐私区处断开（${trimmed.gaps} 处），区域内的坐标从未离开服务器。`
-          : "隐私区未与本次路线相交。";
+    // 2026-10-15（审查 🟡-B4/B5）：判定顺序修正 —— 先回答"有没有轨迹"，再区分"未配置"
+    // 与"配置了但参数无效"。旧顺序下无 GPS 的室内跑会被报成"未配置隐私区：卡片显示完整
+    // 轨迹"（而它根本没有轨迹），且 iOS 的兜底文案永不生效。
+    const note = trimmed.polylines.length === 0
+      ? (trimmed.zonesApplied === 0
+        ? "本次训练暂无可分享的 GPS 路线。"
+        : "整条轨迹都在隐私区内，卡片不含路线。")
+      : zones.length === 0
+        ? "未配置隐私区：卡片显示完整轨迹。"
+        : trimmed.zonesApplied === 0
+          ? "已配置的隐私区参数无效（半径或坐标异常），当前未生效；卡片显示完整轨迹。"
+          : trimmed.gaps > 0
+            ? `路线在隐私区处断开（${trimmed.gaps} 处），区域内的坐标从未离开服务器。`
+            : "隐私区未与本次路线相交。";
     return {
       trainingSessionId: id,
       generatedAt: new Date().toISOString(),

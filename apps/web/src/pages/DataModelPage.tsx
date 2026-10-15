@@ -167,8 +167,24 @@ export function uploadExport(
     options.signal?.addEventListener("abort", abort, { once: true });
     const data = new FormData();
     data.append("file", file);
-    request.send(data);
+    // 2026-10-15（审查 🟡-A7）：幂等批次头 —— 与服务端 `X-RAI-Sync-Batch` 合同对齐
+    // （与 iOS 侧 `HealthKitSync.swift:2275` 同一个头）。同一份**字节**重传命中同一来源，
+    // 不再产生重复来源/重复导入。摘要算完再 `send`：算不出来就中止本次上传，
+    // 宁可不传，也不发一个没有幂等保证、事后无法对账的请求。
+    sha256Hex(file).then((batchId) => {
+      if (settled) return;
+      request.setRequestHeader("X-RAI-Sync-Batch", batchId);
+      request.send(data);
+    }, () => fail(new Error("无法计算文件摘要，已取消上传")));
   });
+}
+
+/** `X-RAI-Sync-Batch` 的内容摘要（64 位十六进制，服务端 `import-routes.ts` 的格式校验
+ *  `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` 天然通过）。绑定的是**文件字节**：
+ *  重名重传不会误命中别的内容。 */
+async function sha256Hex(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 export function DataModelPage({ databaseReady }: { databaseReady: boolean }) {

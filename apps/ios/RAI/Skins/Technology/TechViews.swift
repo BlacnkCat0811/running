@@ -1123,7 +1123,7 @@ struct TechFreshnessBanner: View {
                         // 训练数据日期取契约顶层字段 `latestDataDate`；`coverage.latestTrainingDate`
                         // 是同一个值，不再重复渲染（覆盖明细里已有它的兄弟项）。
                         Text("最近已导入训练 \(nativeDay(today.latestDataDate ?? "未知"))")
-                        Text("最近健康样本 \(nativeDate(today.coverage.latestHealthSampleAt).isEmpty ? "暂无" : nativeDate(today.coverage.latestHealthSampleAt))")
+                        Text("最近健康样本 \(today.coverage.latestHealthSampleAt == nil ? "暂无" : nativeDate(today.coverage.latestHealthSampleAt))")
                         Text("睡眠记录 \(techCoverageStateName(today.coverage.sleep.state))· 夜间 HRV \(techCoverageStateName(today.coverage.hrv.state))· 静息心率 \(techCoverageStateName(today.coverage.restingHeartRate.state))")
                         Text("今日恢复监测 \(techRecoveryCoverageName(today.recoveryAssessment.coverage))· \(techRecoveryAssessmentName(today.recoveryAssessment.assessment))")
                         if let cacheDate {
@@ -2222,7 +2222,7 @@ struct TechNativeSettingsView: View {
                         Text("服务：\(identity.serverId)")
                         Text("个人数据：\(identity.athleteId)")
                         Text("数据代际：\(identity.datasetEpoch)")
-                        Text("协议：v\(identity.syncProtocolVersion) · API \(identity.apiVersion)")
+                        Text("协议：v\(identity.syncProtocolVersion) · API \(identity.apiVersion)\(identity.syncProtocolCompatible ? "" : "（与当前 App 不兼容，请升级）")")
                     }
                     .font(.caption)
                     .foregroundStyle(TechColor.muted)

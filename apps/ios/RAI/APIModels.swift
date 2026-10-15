@@ -1,6 +1,13 @@
 import Foundation
 
 struct RaiHandshake: Codable, Equatable {
+    /// 客户端理解的同步协议主版本（2026-10-15 审查 D-🔡2）。
+    ///
+    /// 服务端在 `/v1/handshake` 恒定宣告该值（`apps/api/src/server.ts`，当前 `1`）。
+    /// 判定点：`TechViews` 的"服务"区块 —— 版本不等时**显式提示升级**，
+    /// 而不是像此前那样只把它当任务同一性字段、静默照常使用。
+    static let supportedSyncProtocolVersion = 1
+    var syncProtocolCompatible: Bool { syncProtocolVersion == Self.supportedSyncProtocolVersion }
     let serverId: String
     let athleteId: String
     let datasetEpoch: String
@@ -653,6 +660,66 @@ struct MobileTodayResponse: Codable {
     let lock: MobileLockState
 }
 
+extension MobileTodayResponse {
+    /// 显式解码（2026-10-15 审查 🟡-B1）：四个核心子卡的**版本偏斜降级层**。
+    ///
+    /// 合成解码器对四个非可选字段（`sync` / `coverage` / `recoveryAssessment` /
+    /// `recommendation`）缺键即 `keyNotFound` ⇒ 整份 today 丢弃、"今日"面板整体回退缓存。
+    /// 主纪律仍是"服务端与 iOS 同批进退"（本仓服务端恒发这四键）；这里只把"缺键"从
+    /// "整页失败"降为**诚实的空态**（未知 / 未评估），与 `periodization` 等可选字段的
+    /// "缺就隐藏"策略一致。
+    ///
+    /// ⚠️ 本 init 取代合成解码：**新增字段必须同时加到声明与这里**，否则会静默不被解码
+    /// （合成解码已不存在，漏一处没有任何编译错误）。
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        func tolerant<T: Decodable>(_ type: T.Type, forKey key: CodingKeys, fallback: T) throws -> T {
+            if let value = try container.decodeIfPresent(type, forKey: key) { return value }
+            return fallback
+        }
+        recentPlanExecution = try container.decodeIfPresent([MobilePlanExecutionDay].self, forKey: .recentPlanExecution)
+        generatedAt = try container.decode(String.self, forKey: .generatedAt)
+        timezone = try container.decode(String.self, forKey: .timezone)
+        latestDataDate = try container.decodeIfPresent(String.self, forKey: .latestDataDate)
+        lastSyncedAt = try container.decodeIfPresent(String.self, forKey: .lastSyncedAt)
+        sync = try tolerant(MobileSyncStatus.self, forKey: .sync,
+            fallback: MobileSyncStatus(status: "never", lastAttemptAt: nil, lastSuccessAt: nil, error: nil))
+        coverage = try tolerant(MobileCoverage.self, forKey: .coverage,
+            fallback: MobileCoverage(latestTrainingDate: nil, latestHealthSampleAt: nil,
+                sleep: MobileCoverageMetric(state: "none", latestDate: nil),
+                hrv: MobileCoverageMetric(state: "none", latestDate: nil),
+                restingHeartRate: MobileCoverageMetric(state: "none", latestDate: nil)))
+        recoveryAssessment = try tolerant(MobileRecoveryAssessment.self, forKey: .recoveryAssessment,
+            fallback: MobileRecoveryAssessment(targetDate: nil, coverage: "none", assessment: "not_assessed",
+                reasonCodes: [], lastObservationDate: nil))
+        recommendation = try tolerant(MobileRecommendation.self, forKey: .recommendation,
+            fallback: MobileRecommendation(basis: "insufficient_training_history", recoveryAdjustment: "no_evidence",
+                uncertaintyReasons: [], reasonCodes: []))
+        freshness = try container.decode(Freshness.self, forKey: .freshness)
+        recommendationRevision = try container.decode(String.self, forKey: .recommendationRevision)
+        today = try container.decode(TodaySummary.self, forKey: .today)
+        week = try container.decode(WeekSummary.self, forKey: .week)
+        weekDaily = try container.decode([WeekDailyPoint].self, forKey: .weekDaily)
+        recentWorkouts = try container.decode([WorkoutListItem].self, forKey: .recentWorkouts)
+        ability = try container.decode(MobileAbilityCard.self, forKey: .ability)
+        calibration = try container.decode(MobileCalibrationCard.self, forKey: .calibration)
+        verdict = try container.decode(MobileVerdict.self, forKey: .verdict)
+        nextSession = try container.decode(MobileNextSession.self, forKey: .nextSession)
+        recovery = try container.decode(MobileRecoveryBreakdown.self, forKey: .recovery)
+        periodization = try container.decodeIfPresent(MobilePeriodization.self, forKey: .periodization)
+        adherence = try container.decodeIfPresent(MobilePlanAdherence.self, forKey: .adherence)
+        replan = try container.decodeIfPresent(MobileReplanAdvice.self, forKey: .replan)
+        recoveryTime = try container.decodeIfPresent(RecoveryTimeEstimate.self, forKey: .recoveryTime)
+        postRun = try container.decodeIfPresent(MobilePostRunVerdict.self, forKey: .postRun)
+        weekStructure = try container.decode(MobileWeekStructure.self, forKey: .weekStructure)
+        race = try container.decode(MobileRaceCard.self, forKey: .race)
+        injuryFlags = try container.decode([MobileInjuryFlag].self, forKey: .injuryFlags)
+        weekPlan = try container.decode([MobileWeekPlanDay].self, forKey: .weekPlan)
+        phase = try container.decode(String.self, forKey: .phase)
+        lock = try container.decode(MobileLockState.self, forKey: .lock)
+    }
+}
+
 // The body metrics page reuses existing physiology, zone and training
 // statistics endpoints. These model only fields rendered by the native page.
 struct NativePredictionResponse: Codable {
@@ -1277,6 +1344,12 @@ struct PlanReceiptScope: Codable, Equatable {
     let datasetEpoch: String
 }
 
+/// `/v1/mobile/workout-plan/synced` 的响应投影。
+///
+/// ⚠️ 服务端同时返回 `informationLevel`（`verifiedClient` / `legacy`，`server.ts` 的回执路由），
+/// 客户端**刻意不消费**（2026-10-15 审查 C-🔡2 的边界声明）：两种核验等级共用同一套
+/// "系统日程已核验"文案，解码层丢弃它不改变任何行为。若将来要在 UI 区分等级，
+/// 从这里加字段，并同步 `check-direct-sync-status-copy.py` 的文案门禁。
 struct PlanSyncReceiptResponse: Decodable {
     let recordedAt: String
     let matchesCurrent: Bool?

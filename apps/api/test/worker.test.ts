@@ -2342,6 +2342,105 @@ test("persists import jobs and marks an interrupted job after API restart", () =
   }
 });
 
+test("公开层剥掉历史行 performance 的退役键（native/computeProcessMaxRssKiB）并保留在用键", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-jobs-retired-performance-"));
+  mkdirSync(join(root, "var"));
+  // 2026-10-15：`native` / `computeProcessMaxRssKiB` 已随 CLI 子进程链路退役（写入端删除），
+  // 但修复前落盘的历史行仍带残留键；公开出口（`publicJob` → `publicPerformance` 白名单）
+  // 必须剥掉它们、且不得误伤在用键。用 legacy json 注入一条"历史行"，入库后从两条公开
+  // 出口（latest() / get()）读回 —— 键集期望**写死**，不引用被测模块的常量。
+  writeFileSync(join(root, "var", "import-jobs.json"), JSON.stringify([{
+    id: "web_import_retired_performance",
+    sourceId: "upload_retired_performance",
+    status: "succeeded",
+    phase: "completed",
+    message: "完成",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    completedAt: "2026-01-01T00:01:00.000Z",
+    error: null,
+    inputPath: join(root, "export"),
+    performance: {
+      validationMode: "off",
+      totalMs: 1234,
+      stagesMs: { parseImport: 100 },
+      computeStagesMs: { direct_sync_transaction: 50 },
+      lane: { outcome: "direct", directSource: "data-only", reasons: [] },
+      // ——— 退役键（历史残留；期望被剥） ———
+      computeProcessMaxRssKiB: 262144,
+      native: { decode: { rustCalls: 1, typescriptFallbacks: 0, wallMs: 12, peakRssKiB: 262144 } }
+    }
+  }]), "utf8");
+  try {
+    const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+    for (const job of [worker.latest(), worker.get("web_import_retired_performance")]) {
+      assert.equal(job?.id, "web_import_retired_performance");
+      assert.ok(job?.performance, "公开出口必须带 performance（注入的行里有）");
+      const performance = job?.performance as unknown as Record<string, unknown>;
+      // 期望键集写死（兼容性契约的期望值不引用被测模块的常量）：
+      assert.deepEqual(Object.keys(performance).sort(),
+        ["computeStagesMs", "lane", "stagesMs", "totalMs", "validationMode"]);
+      assert.equal("native" in performance, false, "退役键 native 必须被公开层剥掉");
+      assert.equal("computeProcessMaxRssKiB" in performance, false, "退役键 computeProcessMaxRssKiB 必须被公开层剥掉");
+      // 在用键的值原样保留（剥除不得误伤）：
+      assert.equal(performance.validationMode, "off");
+      assert.equal(performance.totalMs, 1234);
+      assert.deepEqual(performance.stagesMs, { parseImport: 100 });
+      assert.deepEqual(performance.computeStagesMs, { direct_sync_transaction: 50 });
+      assert.deepEqual(performance.lane, { outcome: "direct", directSource: "data-only", reasons: [] });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("公开层保留 performance 的全集在用键，且返回值与内存 job 不共享可变引用", () => {
+  const root = mkdtempSync(join(tmpdir(), "rai-import-jobs-performance-copies-"));
+  mkdirSync(join(root, "var"));
+  // 两类保真度一起钉（2026-10-15 审查 A2 / A-🔡4）：
+  // ① 全键（含可选键 computeStagesMs/lane）经公开出口一个不少 —— 与
+  //    `PUBLIC_PERFORMANCE_KEYS` 的编译期穷尽守卫互为运行期对偶；
+  // ② 浅拷贝隔离 —— 调用方原地改公开返回值，不得污染内存中的 job
+  //    （否则同一进程内后续所有读取都会看到被改过的观测值）。
+  writeFileSync(join(root, "var", "import-jobs.json"), JSON.stringify([{
+    id: "web_import_performance_copies",
+    sourceId: "upload_performance_copies",
+    status: "succeeded",
+    phase: "completed",
+    message: "完成",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    completedAt: "2026-01-01T00:01:00.000Z",
+    error: null,
+    inputPath: join(root, "export"),
+    performance: {
+      validationMode: "shadow",
+      totalMs: 4321,
+      stagesMs: { parseImport: 100 },
+      computeStagesMs: { direct_sync_transaction: 50 },
+      lane: { outcome: "direct", directSource: "direct-sync", reasons: ["engine_typescript"] }
+    }
+  }]), "utf8");
+  try {
+    const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
+    const first = worker.get("web_import_performance_copies");
+    const firstPerformance = first?.performance;
+    assert.ok(firstPerformance, "公开出口必须带 performance");
+    // 全键保留（期望键集写死，不引用被测模块常量）：
+    assert.deepEqual(Object.keys(firstPerformance).sort(),
+      ["computeStagesMs", "lane", "stagesMs", "totalMs", "validationMode"]);
+    // 原地改公开返回值：
+    firstPerformance.stagesMs.parseImport = 999;
+    firstPerformance.computeStagesMs!.direct_sync_transaction = 999;
+    firstPerformance.lane!.reasons.push("mutated");
+    // 第二次读取必须仍是源值（浅拷贝隔离生效；去掉拷贝后这里会读到 999 / mutated）：
+    const second = worker.get("web_import_performance_copies");
+    assert.equal(second?.performance?.stagesMs?.parseImport, 100, "stagesMs 必须与内存 job 隔离");
+    assert.equal(second?.performance?.computeStagesMs?.direct_sync_transaction, 50, "computeStagesMs 必须与内存 job 隔离");
+    assert.deepEqual(second?.performance?.lane?.reasons, ["engine_typescript"], "lane.reasons 必须与内存 job 隔离");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("adds sourceId storage when opening an existing runtime database", () => {
   const root = mkdtempSync(join(tmpdir(), "rai-import-jobs-schema-"));
   const runtimeDirectory = join(root, "var");

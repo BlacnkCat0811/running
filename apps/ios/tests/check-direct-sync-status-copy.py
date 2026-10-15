@@ -301,12 +301,17 @@ if mark_success is not None:
 
     # §10.1「保存可续接」：拦下的一轮必须被收尾兜底看见，否则它会当成"结清了" ⇒ 清任务行、
     # 清候选游标、界面改口"同步成功"（而游标其实一个字没写）。
+    settled_owner = mark_success
     settled_at = mark_success.find("let settled")
     if settled_at == -1:
+        settled_owner = sync_code
         settled_at = sync_code.find("let settled")
     check(settled_at != -1, "the `let settled` wrap-up predicate was not found in the sync file")
     if settled_at != -1:
-        settled_window = sync_code[settled_at : settled_at + 300]
+        # 2026-10-15（审查 🟡-A4）：偏移属于哪个字符串，切片就用哪个 —— 此前命中
+        # `mark_success` 的相对偏移却拿 `sync_code` 做绝对切片（当前恰因未命中走回退
+        # 而正确，属潜伏错位；重组 `markSuccess` 时会给假红/假绿）。
+        settled_window = settled_owner[settled_at : settled_at + 300]
         check(
             f"!{HOLD_FLAG}" in settled_window,
             f"the wrap-up predicate `let settled` must include `!{HOLD_FLAG}`: a round stopped by "

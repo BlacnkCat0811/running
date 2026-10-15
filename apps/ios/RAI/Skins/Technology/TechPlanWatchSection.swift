@@ -8,6 +8,7 @@ struct TechPlanWatchSection: View {
     let allowsSynchronization: Bool
     @State private var message: String?
     @State private var diagnosticURL: URL?
+    @State private var confirmAbandonPublication = false
 
     private var plan: MobileWorkoutPlanResponse? { native.planPresentation.executablePlan }
     private var hour: Int { TrainingReminders.storedHour(scope: native.feedbackScope) }
@@ -85,6 +86,12 @@ struct TechPlanWatchSection: View {
                 if native.hasPendingPlanPublication {
                     Button("确认上次发布结果") { Task { message = await native.resolvePlanPublication() } }
                         .disabled(native.isOffline || native.isPlanBusy)
+                    // 🔴 逃生阀（审查 🔴-1）：服务端给出"既非可重放、也不在已知终局码内"的
+                    // 答复时，上面那个按钮会原地打转；这里提供显式的二级破坏性操作 ——
+                    // 只放弃本地账目，服务端操作记录保留供人工核对。
+                    Button("放弃本次未确认发布", role: .destructive) { confirmAbandonPublication = true }
+                        .disabled(native.isPlanBusy)
+                        .accessibilityIdentifier("plan.watch.abandonPublication")
                 }
                 if native.hasPendingPlanReceipts {
                     Button("重试登记已核验日期") {
@@ -100,6 +107,14 @@ struct TechPlanWatchSection: View {
                 if let message = native.planMessage { Text(message).font(.caption).foregroundStyle(TechColor.muted) }
                 if native.planPersistenceFailed { Text(native.errorMessage ?? "本地确认记录未持久化，请联网刷新。") .font(.caption).foregroundStyle(TechColor.coral) }
             }
+        }
+        .confirmationDialog("放弃未确认的发布？", isPresented: $confirmAbandonPublication, titleVisibility: .visible) {
+            Button("放弃本地待确认账目", role: .destructive) {
+                Task { message = native.abandonPendingPlanPublication() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("服务端操作记录不会被删除；仅解除本地的发布楔死状态。放弃后请刷新完整计划核对。")
         }
     }
 

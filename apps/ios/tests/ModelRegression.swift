@@ -12,6 +12,10 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
     private static var entries: [String: Data] = [:]
     static var failPlanWrites = false
     static var failWrites = false
+    /// 与真实 `CacheStore` 的嵌套类型同名（`CacheStore.swift:13`）：模型代码读
+    /// `cache.lastReadIssue` 做损坏自愈判断时，两套实现必须能互换编译。
+    enum ReadIssue: String { case unavailable, unsupportedSchema, corruptPayload }
+    var lastReadIssue: ReadIssue?
     private static var acknowledgements: [String: PlanWriteAcknowledgement] = [:]
     private static var ledger: PlanWatchLedger?
     private static var scheduleJournal: PlanScheduleOperationJournal?
@@ -55,7 +59,22 @@ struct CachedValue<Value> { let value: Value; let cachedAt: Date }
     func watchLedger() -> PlanWatchLedger? { Self.ledger }
     func watchLedgerResult() -> CacheReadResult<PlanWatchLedger?> { .value(Self.ledger) }
     func saveWatchLedger(_ ledger: PlanWatchLedger?) -> Bool { Self.ledger = ledger; return true }
-    func clear(scope: String) { Self.entries = Self.entries.filter { !$0.key.hasPrefix(scope) } }
+    /// 与真实 `CacheStore.clear(scope:)`（只 `DELETE FROM cache_entries`）**语义对齐**：
+    /// `publication` / `coach-feedback` 住在 `app_metadata`、回执账目住在
+    /// `plan_receipt_journal`，三者都必须存活；只有普通缓存条目会被清掉。
+    ///
+    /// 2026-10-15（审查 🟡-C2）：此前替身把 `publication` 一并删掉 —— 与真实现**相反**，
+    /// 而发布/回执/台账整条行为链都跑在替身上 ⇒ 给出一批与生产相反的绿灯
+    /// （🔴-1 的"清除缓存解不开楔死"因此没有任何断言会变红）。
+    func clear(scope: String) {
+        let persistent = ["publication", "coach-feedback", "receipt-journal"]
+        Self.entries = Self.entries.filter { entry in
+            guard entry.key.hasPrefix(scope) else { return true }
+            return persistent.contains { entry.key.hasPrefix(scope + $0) }
+        }
+    }
+    /// 单条删除（真实 `CacheStore.remove` 的替身；自愈路径调用）。
+    func remove(scope: String, key: String) { Self.entries.removeValue(forKey: scope + key) }
     func scheduleJournalResult() -> CacheReadResult<PlanScheduleOperationJournal> { Self.scheduleJournal.map { .value($0) } ?? .notFound }
     func saveScheduleJournal(_ value: PlanScheduleOperationJournal) -> Bool { Self.scheduleJournal = value; return !Self.failWrites }
     func commitScheduleResult(_ operation: PlanScheduleOperationJournal, ledger: PlanWatchLedger?, receipts: [PlanSyncReceipt]) -> Bool {
@@ -1359,6 +1378,263 @@ final class RequestLog: @unchecked Sendable {
             check(!restarted.hasPendingPlanPublication && restarted.currentPlanRevision == 13 &&
                   resolved.contains("没有再次发布") && log.count(method: "PUT", path: "/v1/mobile/goals") == 1,
                   "foreground operation query after restart accepts committed result without another business write")
+        }
+
+        do {
+            // 终局码白名单的**纯判据对账**（审查 🔴-1 / 🟡-C1 / 🟡-C4）：
+            // 三组名单是"作废本地账目"的全部依据，名单成员错了就是要么锁死、要么误删。
+            for code in ["plan_operation_scope_mismatch", "plan_operation_expired", "plan_operation_key_conflict"] {
+                check(PlanMutationDisposition.isTerminalPlanPublicationError(code),
+                      "publication terminal code \(code) must be classified terminal")
+            }
+            for code in ["network", "mutation_conflict", "unauthorized", "http_503", "http_500"] {
+                check(!PlanMutationDisposition.isTerminalPlanPublicationError(code),
+                      "transient publication code \(code) must NOT be terminal")
+            }
+            for code in ["plan_receipt_scope_mismatch", "plan_receipt_evidence_mismatch", "plan_receipt_contract_mismatch",
+                         "plan_receipt_date_invalid", "plan_receipt_key_conflict",
+                         "coach_receipt_contract_mismatch", "coach_receipt_evidence_mismatch"] {
+                check(PlanMutationDisposition.isTerminalPlanReceiptError(code),
+                      "receipt terminal code \(code) must be classified terminal")
+            }
+            for code in ["network", "http_500", "coach_receipt_unknown_schedule", "coach_receipt_unknown_prescription"] {
+                check(!PlanMutationDisposition.isTerminalPlanReceiptError(code),
+                      "receipt code \(code) must NOT be terminal (server state can still advance)")
+            }
+            for code in ["coach_feedback_invalid", "coach_feedback_revision_conflict", "coach_feedback_not_found",
+                         "FST_ERR_VALIDATION", "coach_scope_mismatch"] {
+                check(PlanMutationDisposition.isTerminalCoachFeedbackError(code),
+                      "feedback terminal code \(code) must be classified terminal")
+            }
+            check(!PlanMutationDisposition.isTerminalCoachFeedbackError("network"),
+                  "a transient feedback failure must stay retryable")
+        }
+
+        do {
+            // 版本偏斜降级（审查 🟡-B1）：缺四个核心子卡键的 today 必须**仍能解码**，
+            // 且降级为诚实的空态（sync=never / coverage=none / assessment=not_assessed）。
+            let skewed = """
+            {"generatedAt":"2026-10-09T00:00:00Z","timezone":"Asia/Shanghai","latestDataDate":null,"lastSyncedAt":null,
+            "freshness":{"state":"unknown","checkedAt":null,"latestTrainingDate":null,"recoveryDate":null},"recommendationRevision":"fixture",
+            "today":{"localDate":"2026-10-09","distanceKm":0,"durationSeconds":0,"paceSecondsPerKm":null,"energyKcal":null,"workoutCount":0},
+            "week":{"periodStart":"2026-10-05","periodEnd":"2026-10-11","distanceKm":0,"durationSeconds":0,"workoutCount":0},"weekDaily":[],"recentWorkouts":[],
+            "ability":{"trueAbility":null,"currentAbility":null,"changeFrom7DaysAgo":null,"growthVelocityPerWeek":null,"decayPoints":0,"snapshotDate":null,"explanation":""},
+            "calibration":{"status":"not_started","eligibleSessions":0,"eligibleDurationMinutes":0,"spanDays":0,"highCoverageSessions":0,"requirements":{"sessions":12,"durationMinutes":360,"spanDays":28,"highCoverageSessions":6},"message":""},
+            "verdict":{"tone":"yellow","title":"","reason":"","triggers":[],"stale":false,"reasonCodes":[]},
+            "nextSession":{"kind":"rest","title":"","reason":"","distanceKm":null,"durationMinutes":null,"paceSecondsPerKmLower":null,"paceSecondsPerKmUpper":null,"heartRateBpmLower":null,"heartRateBpmUpper":null,"structure":null},
+            "recovery":{"score":null,"lastNightSleepMinutes":null,"sleepBaselineMinutes":null,"morningHrvMs":null,"hrvBaselineMs":null,"restingHeartRateBpm":null,"restingHeartRateBaselineBpm":null,"state":"unknown","hrvSampleCount":0,"note":""},
+            "weekStructure":{"easyDurationFraction":null,"easyDurationFloorFraction":0.7,"qualitySessionCount":0,"qualitySessionCap":2,"easyHonesty":{"intendedEasyCount":0,"easyEnoughCount":0,"honestyFraction":null,"note":""}},
+            "race":{"target":null,"daysUntil":null,"taper":false,"shapeScore":null,"volumeFraction":null,"longRunFraction":null,"note":""},"injuryFlags":[],"weekPlan":[],"phase":"morning_open","lock":{"present":false,"relockSuggested":false,"lockedAt":null}}
+            """
+            let decodedSkew = try JSONDecoder().decode(MobileTodayResponse.self, from: Data(skewed.utf8))
+            check(decodedSkew.sync.status == "never" && decodedSkew.coverage.sleep.state == "none" &&
+                  decodedSkew.recoveryAssessment.assessment == "not_assessed" &&
+                  decodedSkew.recommendation.basis == "insufficient_training_history",
+                  "a today payload missing the four core cards decodes into honest empty states instead of failing the whole page")
+        }
+
+        do {
+            // 失败态可区分（审查 🟡-B2/B3）：4 个面板全部 200+非法 JSON ⇒ 不点亮"离线"、
+            // 给出"版本不兼容"文案；全部 503 ⇒ 命中全失败分支（failedPanels == 4）。
+            let decodeClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let decodeCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete",
+                datasetEpoch: "epoch", syncProtocolVersion: 1, apiVersion: "v1", planReceiptContractVersion: 2))
+            let decodeModel = NativeAppModel(session: ServerSession(), api: api, now: { decodeClock })
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/handshake" { return (200, decodeCapabilities, 0) }
+                return (200, "{\"junk\":", 0)
+            }
+            await decodeModel.bootstrap()
+            check(!decodeModel.isOffline && ((decodeModel.errorMessage ?? "").contains("版本不兼容")),
+                  "200-with-bad-JSON must be reported as a version mismatch, never as offline")
+            let networkModel = NativeAppModel(session: ServerSession(), api: api, now: { decodeClock })
+            StubProtocol.handler = { request in
+                // 握手成功、四个面板全失败 —— 才走到 refreshAll 的全失败分类
+                // （握手本身失败会停在 connect 的"连不上"分支，那是另一条既有路径）。
+                if request.url!.path == "/v1/handshake" { return (200, decodeCapabilities, 0) }
+                return (503, "{}", 0)
+            }
+            await networkModel.bootstrap()
+            check(networkModel.isOffline && ((networkModel.errorMessage ?? "").contains("核心数据均未能更新")),
+                  "an all-network failure hits the whole-page branch with the true denominator (4)")
+        }
+
+        do {
+            // 终局答复的清算（审查 🔴-1）：expired（410）必须作废本地账目，
+            // 否则 `plan_publication_pending` 会永久拒绝后续全部计划写与手表排期。
+            CacheStore.resetScheduleSafety()
+            let terminalSession = ServerSession()
+            let terminalClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let terminalInitial = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let terminalCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2))
+            let terminalLog = RequestLog()
+            let terminalModel = NativeAppModel(session: terminalSession, api: api, now: { terminalClock })
+            StubProtocol.handler = { request in
+                terminalLog.record(request)
+                if request.url!.path == "/v1/handshake" { return (200, terminalCapabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, terminalInitial, 0) }
+                return (503, "{}", 0)
+            }
+            await terminalModel.bootstrap()
+            let lostTerminalReply = await terminalModel.saveRaceTarget(nil, expectedRevision: 12)
+            check(!lostTerminalReply && terminalModel.hasPendingPlanPublication,
+                  "terminal-answer fixture starts from a durable pending publication")
+            let terminalBody = terminalLog.lastBody(method: "PUT", path: "/v1/mobile/goals")!
+            let terminalOperationId = (try JSONSerialization.jsonObject(with: terminalBody) as! [String: Any])["operationId"] as! String
+            StubProtocol.handler = { request in
+                terminalLog.record(request)
+                if request.url!.path == "/v1/handshake" { return (200, terminalCapabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, terminalInitial, 0) }
+                if request.url!.path == "/v1/mobile/plan-operations/" + terminalOperationId {
+                    return (200, "{\"status\":\"expired\",\"operationId\":\"\(terminalOperationId)\"}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            let expiredMessage = await terminalModel.resolvePlanPublication()
+            check(!terminalModel.hasPendingPlanPublication && expiredMessage.contains("已作废"),
+                  "an expired terminal answer clears the durable ledger instead of wedging every later publication")
+            // 账目已清 ⇒ 新发布必须重新被允许（此前会被 plan_publication_pending 永久拒绝）：
+            let terminalGoals = try PlanTestFixtures.json(PlanTestFixtures.state().goals)
+            StubProtocol.handler = { request in
+                terminalLog.record(request)
+                if request.url!.path == "/v1/handshake" { return (200, terminalCapabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, terminalInitial, 0) }
+                if request.url!.path == "/v1/mobile/goals" { return (200, terminalGoals, 0) }
+                return (503, "{}", 0)
+            }
+            let republishedAfterTerminal = await terminalModel.saveRaceTarget(nil, expectedRevision: 12)
+            check(republishedAfterTerminal, "after a terminal answer clears the ledger, publishing is allowed again")
+        }
+
+        do {
+            // scopeMismatch（409）与 expired 同族：同样必须清账；未知答复则必须保留账目、
+            // 并由显式的「放弃本次未确认发布」出口兜底（审查 🔴-1）。
+            CacheStore.resetScheduleSafety()
+            let mismatchSession = ServerSession()
+            let mismatchClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let mismatchInitial = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let mismatchCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2))
+            let mismatchLog = RequestLog()
+            let mismatchModel = NativeAppModel(session: mismatchSession, api: api, now: { mismatchClock })
+            StubProtocol.handler = { request in
+                mismatchLog.record(request)
+                if request.url!.path == "/v1/handshake" { return (200, mismatchCapabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, mismatchInitial, 0) }
+                return (503, "{}", 0)
+            }
+            await mismatchModel.bootstrap()
+            _ = await mismatchModel.saveRaceTarget(nil, expectedRevision: 12)
+            let mismatchBody = mismatchLog.lastBody(method: "PUT", path: "/v1/mobile/goals")!
+            let mismatchOperationId = (try JSONSerialization.jsonObject(with: mismatchBody) as! [String: Any])["operationId"] as! String
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/plan-operations/" + mismatchOperationId {
+                    return (200, "{\"status\":\"scopeMismatch\",\"operationId\":\"\(mismatchOperationId)\"}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            let mismatchMessage = await mismatchModel.resolvePlanPublication()
+            check(!mismatchModel.hasPendingPlanPublication && mismatchMessage.contains("已作废"),
+                  "a scopeMismatch terminal answer also clears the durable ledger")
+            // 未知答复（503）保留账目；「放弃」是唯一用户可控出口，且只清本地账目：
+            StubProtocol.handler = { _ in (503, "{}", 0) }
+            let abandonedPublish = await mismatchModel.saveRaceTarget(nil, expectedRevision: 12)
+            check(!abandonedPublish && mismatchModel.hasPendingPlanPublication,
+                  "an unknown outcome retains the ledger — the explicit abandon exit is the way out")
+            let abandonMessage = mismatchModel.abandonPendingPlanPublication()
+            check(!mismatchModel.hasPendingPlanPublication && abandonMessage.contains("已放弃"),
+                  "the explicit abandon exit clears the ledger without claiming the server operation never happened")
+        }
+
+        do {
+            // 回执终局拒绝的清算（审查 🟡-C1）：内容级终局必须作废该条回执，
+            // 瞬时失败必须保留 —— 否则要么永久锁死教练启用，要么把断点续传删了。
+            CacheStore.resetScheduleSafety()
+            let receiptSession = ServerSession()
+            let receiptClock = ISO8601DateFormatter().date(from: "2026-10-09T04:00:00Z")!
+            let receiptState = try PlanTestFixtures.json(PlanTestFixtures.state())
+            let receiptCapabilities = try PlanTestFixtures.json(RaiHandshake(serverId: "server", athleteId: "athlete", datasetEpoch: "epoch",
+                syncProtocolVersion: 1, apiVersion: "v1", planSnapshotContractVersion: 1, planReceiptContractVersion: 2))
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/handshake" { return (200, receiptCapabilities, 0) }
+                if request.url!.path == "/v1/mobile/training-plan-state" { return (200, receiptState, 0) }
+                return (503, "{}", 0)
+            }
+            let receiptTerminalModel = NativeAppModel(session: receiptSession, api: api, now: { receiptClock })
+            await receiptTerminalModel.bootstrap()
+            let receiptScheduler = FakeWorkoutScheduler()
+            let receiptCoordinator = PlanWatchSyncCoordinator()
+            _ = await receiptCoordinator.sync(model: receiptTerminalModel, scheduler: receiptScheduler)
+            let pendingVerified = CacheStore().pendingPlanReceipts(scope: receiptTerminalModel.feedbackScope)
+                .filter { $0.lifecycleEvent == "verified" }
+            check(!pendingVerified.isEmpty && receiptTerminalModel.hasPendingPlanReceipts,
+                  "terminal-rejection fixture starts from pending verified receipts (coach enable is blocked)")
+            // 瞬时失败（500）必须保留账目：
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/workout-plan/synced" { return (500, "{}", 0) }
+                return (503, "{}", 0)
+            }
+            let retainedCount = CacheStore().pendingPlanReceipts(scope: receiptTerminalModel.feedbackScope).count
+            _ = await receiptTerminalModel.recordPlanSyncReceipts([pendingVerified[0]])
+            check(CacheStore().pendingPlanReceipts(scope: receiptTerminalModel.feedbackScope).count == retainedCount,
+                  "a transient 5xx keeps the receipt queued for the next foreground retry")
+            // 内容级终局拒绝（422 evidence_mismatch）⇒ 全部作废 + 解除阻塞：
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/workout-plan/synced" {
+                    return (422, "{\"code\":\"plan_receipt_evidence_mismatch\",\"message\":\"导出摘要不匹配\"}", 0)
+                }
+                return (503, "{}", 0)
+            }
+            let terminalReceiptMessage = await receiptTerminalModel.recordPlanSyncReceipts(pendingVerified)
+            check(terminalReceiptMessage?.contains("终局拒绝") == true && terminalReceiptMessage?.contains("已作废") == true,
+                  "a terminal receipt rejection is reported as final — not as another foreground retry")
+            check(!receiptTerminalModel.hasPendingPlanReceipts &&
+                  CacheStore().pendingPlanReceipts(scope: receiptTerminalModel.feedbackScope).isEmpty,
+                  "terminal rejections drop the receipts so hasPendingPlanReceipts no longer blocks coach enable")
+        }
+
+        do {
+            // 教练反馈终局白名单（审查 🟡-C4）：coach_scope_mismatch 必须清账而不是"重试原反馈"。
+            CacheStore.resetScheduleSafety()
+            let feedbackData = try Data(contentsOf: URL(fileURLWithPath: "apps/ios/tests/fixtures/coach-loop-v1.json"))
+            let feedbackLoop = try JSONDecoder().decode(CoachLoopResponse.self, from: feedbackData)
+            let feedbackJSON = String(decoding: feedbackData, as: UTF8.self)
+            let feedbackSession = ServerSession()
+            let feedbackHandshake = RaiHandshake(serverId: feedbackLoop.scope.serverId, athleteId: feedbackLoop.scope.athleteId,
+                datasetEpoch: feedbackLoop.scope.datasetEpoch, syncProtocolVersion: 1, apiVersion: "v1",
+                planSnapshotContractVersion: 1, planPublicationContractVersion: 1, planReceiptContractVersion: 2, coachLoopContractVersion: 1)
+            CacheStore.saveHandshake(feedbackHandshake, baseURL: feedbackSession.serverURL!)
+            let feedbackModel = NativeAppModel(session: feedbackSession, api: api,
+                now: { ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")! })
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/coach-loop" { return (200, feedbackJSON, 0) }
+                return (503, "{}", 0)
+            }
+            _ = await feedbackModel.refreshPlanState()
+            check(feedbackModel.coachLoop != nil, "coach feedback fixture loads the new contract")
+            // 瞬时失败：保留账目并提示"重试原反馈"：
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/coach-feedback" { return (503, "{}", 0) }
+                if request.url!.path == "/v1/mobile/coach-loop" { return (200, feedbackJSON, 0) }
+                return (503, "{}", 0)
+            }
+            let transientFeedback = await feedbackModel.saveCoachFeedback(fields: .init(phase: "post_run", observedAt: "2026-10-08T04:00:00Z"))
+            check(!transientFeedback && feedbackModel.runCoachError?.contains("重试原反馈") == true &&
+                  (CacheStore().pendingCoachFeedback(scope: feedbackModel.feedbackScope).value ?? nil) != nil,
+                  "a transient feedback failure keeps the queued command and asks for an explicit retry")
+            // 终局（coach_scope_mismatch）：清账 + 如实告知，不再要求重试：
+            StubProtocol.handler = { request in
+                if request.url!.path == "/v1/mobile/coach-feedback" {
+                    return (409, "{\"code\":\"coach_scope_mismatch\",\"message\":\"反馈属于其他数据集。\"}", 0)
+                }
+                if request.url!.path == "/v1/mobile/coach-loop" { return (200, feedbackJSON, 0) }
+                return (503, "{}", 0)
+            }
+            let terminalFeedback = await feedbackModel.saveCoachFeedback(retry: true)
+            check(!terminalFeedback && feedbackModel.runCoachError?.contains("未保存") == true &&
+                  (CacheStore().pendingCoachFeedback(scope: feedbackModel.feedbackScope).value ?? nil) == nil,
+                  "coach_scope_mismatch is terminal: the queued feedback is cleared instead of a doomed retry")
         }
 
         do {

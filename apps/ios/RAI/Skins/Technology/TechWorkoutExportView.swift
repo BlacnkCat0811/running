@@ -66,10 +66,16 @@ struct TechWorkoutExportView: View {
         defer { busy = false }
         do {
             let result = try await RaiAPIClient().exportWorkouts(from: start, through: end, baseURL: url, token: session.apiToken)
-            guard scope == identity, start == dateText(from), end == dateText(through), !Task.isCancelled else { return }
+            guard scope == identity, start == dateText(from), end == dateText(through), !Task.isCancelled else {
+                // 2026-10-15（审查 C-🔡3）：日期/身份在请求期间变化时，此前静默 return ——
+                // 用户看到的是"点了没有任何反应"。给一句轻量提示（busy 由 defer 复位）。
+                if scope != identity { message = "服务已切换，导出结果未应用；请重新导出。" }
+                else if start != dateText(from) || end != dateText(through) { message = "日期已更改，请按当前区间重新导出。" }
+                return
+            }
             preview = result
         } catch {
-            guard scope == identity else { return }
+            guard scope == identity else { message = "服务已切换，导出结果未应用；请重新导出。"; return }
             message = error.localizedDescription
         }
     }

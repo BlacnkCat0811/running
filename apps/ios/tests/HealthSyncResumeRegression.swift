@@ -71,7 +71,8 @@ struct HealthSyncResumeRegression {
     /// 🔴 P2-7（2026-10-15）：inspect/preflight 的「载荷内容不合规」稳定码必须**清任务重导**。
     ///
     /// `missing_required_files` / `input_tree_not_allowed` / `missing_record_identity` /
-    /// `payload_identity_invalid` 等确定性输入拒绝折成 `direct_sync_input_not_allowed`
+    /// `payload_identity_invalid`（inspect 预检可达）与 worker 内部产出、不经 inspect
+    /// 到达的 `payload_identity_unavailable`，一并折成 `direct_sync_input_not_allowed`
     /// （`apps/api/src/import-worker.ts` 的 `laneRefusalFailure`），由 inspect 的预检 400 返回。
     /// 若落 `.keepTask`：sourceId 留着 ⇒ 下次仍从同一句 inspect 进来、撞同一个 400，
     /// nginx 里再也不会出现 uploads（与 2026-09-22 的 404 死锁同构）。

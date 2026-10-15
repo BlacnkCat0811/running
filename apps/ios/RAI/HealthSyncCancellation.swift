@@ -64,8 +64,10 @@ nonisolated enum HealthSyncResumePolicy {
     /// 服务端 inspect/preflight 的「**载荷内容不合规**」稳定码（确定性拒绝，P2-7，2026-10-15）。
     ///
     /// 出处：`apps/api/src/import-worker.ts` 的 `laneRefusalFailure` —— `missing_required_files` /
-    /// `input_tree_not_allowed` / `missing_record_identity` / `payload_identity_invalid` 四个 reason
-    /// 折成这一个 code，由 inspect 的预检 400 返回。处置 = `.abandonTask`：清任务后客户端会
+    /// `input_tree_not_allowed` / `missing_record_identity` / `payload_identity_invalid` 四个
+    /// **inspect 预检可达**的 reason，加上 worker 内部（摘要算不出来）产出、不经 inspect
+    /// 到达的 `payload_identity_unavailable`，共五个 reason 折成这一个 code（前四个由
+    /// inspect 的预检 400 返回）。处置 = `.abandonTask`：清任务后客户端会
     /// **重新导出**（输入完整 ⇒ 自愈）；若落 `.keepTask`，sourceId 留着 ⇒ 下次仍从同一句 inspect
     /// 进来、撞同一个 400（与 2026-09-22 的 404 死锁同构）。
     static let inputNotAllowedCode = "direct_sync_input_not_allowed"

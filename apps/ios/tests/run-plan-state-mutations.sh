@@ -30,6 +30,7 @@ for mutant in forgot-watermark id-only-lease; do
     apps/ios/RAI/HealthSyncBackgroundRecovery.swift apps/ios/RAI/HealthSyncIdentityPublisher.swift \
     apps/ios/RAI/PlanStatePolicy.swift apps/ios/RAI/PlanWatchScheduling.swift apps/ios/RAI/PlanReceiptMatcher.swift \
     apps/ios/RAI/PlanWatchSyncCoordinator.swift apps/ios/RAI/PlanScheduleOperationJournal.swift apps/ios/RAI/TrainingPlanRepository.swift \
+    apps/ios/RAI/PlanMutationDisposition.swift \
     "$tmp/$mutant/NativeAppModel.swift" "$tmp/$mutant/TrainingPlanStore.swift" \
     apps/ios/tests/PlanTestFixtures.swift apps/ios/tests/ModelRegression.swift -o "$tmp/$mutant/test"
   python3 - "$tmp/$mutant/test" "$mutant" <<'PY'

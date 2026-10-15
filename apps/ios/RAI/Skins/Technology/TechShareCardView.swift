@@ -111,7 +111,14 @@ private struct TechWorkoutShareSheet: View {
             guard !Task.isCancelled, key == requestKey else { return }
             guard result.trainingSessionId == detail.id else { error = "训练记录不匹配，请重试。"; return }
             guard result.polylines.contains(where: { $0.count >= 2 }) else {
-                error = result.note ?? "本次训练暂无可分享的 GPS 路线。"; return
+                // 2026-10-15（审查 🟡-B4）：无有效折线时**先判服务端的隐私区语义** ——
+                // 未生效任何隐私区（含"配置了但参数无效"）时"没有轨迹"才是首要事实，
+                // 不能让旧服务端那句"未配置隐私区：卡片显示完整轨迹"冒充错误文案
+                // （本地兜底文案此前永不可达）。
+                error = result.privacy.zonesApplied == 0
+                    ? "本次训练暂无可分享的 GPS 路线。"
+                    : (result.note ?? "本次训练暂无可分享的 GPS 路线。")
+                return
             }
             card = result
         } catch {

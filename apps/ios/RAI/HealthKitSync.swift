@@ -2161,11 +2161,25 @@ final class HealthKitSync {
         // 此处只把三者当成「这一轮有没有读到任何东西」的判据（任一非 0 即非空导出），
         // 所以偏小的值不会误报。⚠️ 将来若要展示「导出了几条轨迹」，**不要**直接读这个字段
         // —— 它会给出一个偏小的数且不报错。详见 `HealthKitExportResult.routeCount` 的声明注释。
+        let budgetNotes = exported.budgetStopReason.map { [Self.budgetStopNote($0)] } ?? []
         guard exported.workoutCount == 0, exported.recordCount == 0, exported.routeCount == 0,
               exported.deletionCount == 0 else {
-            return latestMessage(base: base, warnings: notes + exported.warnings)
+            return latestMessage(base: base, warnings: notes + exported.warnings + budgetNotes)
         }
-        return latestMessage(base: base, warnings: notes + exported.warnings + [Self.emptyExportHint])
+        return latestMessage(base: base, warnings: notes + exported.warnings + budgetNotes + [Self.emptyExportHint])
+    }
+
+    /// 本批被单批预算截断的原因（P2c 可观测，2026-10-15 审查 🟡-A6）。
+    ///
+    /// 截断是**设计行为**（分批），但此前完全不可见：用户只看到"同步继续转"，
+    /// 分不清"正常分批推进"与"卡在收敛耗尽"。作为尾注与计数同处一对括号
+    /// （格式与既有 warnings 一致），只在**发生截断的这一轮**出现。
+    private static func budgetStopNote(_ reason: HealthKitExportResult.BudgetStopReason) -> String {
+        switch reason {
+        case .recordPage: return "本批达单批预算，记录按页截断，将分批继续"
+        case .recordNone: return "单条记录放不进本批剩余预算，该类型本轮零进展"
+        case .routeFile: return "轨迹文件放不进本批剩余预算，本轮未取新轨迹"
+        }
     }
 
     private static let emptyExportHint =

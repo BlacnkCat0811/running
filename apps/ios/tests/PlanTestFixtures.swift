@@ -21,17 +21,17 @@ enum PlanTestFixtures {
         let today = """
         {"generatedAt":"2026-10-09T00:00:00Z","timezone":"Asia/Shanghai","latestDataDate":null,"lastSyncedAt":null,
         "sync":{"status":"never","lastAttemptAt":null,"lastSuccessAt":null,"error":null},
-        "coverage":{"latestTrainingDate":null,"latestHealthSampleAt":null,"sleep":{"state":"missing","latestDate":null},"hrv":{"state":"missing","latestDate":null},"restingHeartRate":{"state":"missing","latestDate":null}},
-        "recoveryAssessment":{"targetDate":"2026-10-09","coverage":"missing","assessment":"unavailable","reasonCodes":[],"lastObservationDate":null},
+        "coverage":{"latestTrainingDate":null,"latestHealthSampleAt":null,"sleep":{"state":"none","latestDate":null},"hrv":{"state":"none","latestDate":null},"restingHeartRate":{"state":"none","latestDate":null}},
+        "recoveryAssessment":{"targetDate":"2026-10-09","coverage":"none","assessment":"not_assessed","reasonCodes":[],"lastObservationDate":null},
         "recommendation":{"planRevision":\(revision),"basis":"training_load_and_plan","recoveryAdjustment":"none","uncertaintyReasons":[],"reasonCodes":[]},
         "freshness":{"state":"unknown","checkedAt":null,"latestTrainingDate":null,"recoveryDate":null},"recommendationRevision":"fixture",
         "today":{"localDate":"2026-10-09","distanceKm":0,"durationSeconds":0,"paceSecondsPerKm":null,"energyKcal":null,"workoutCount":0},
         "week":{"periodStart":"2026-10-05","periodEnd":"2026-10-11","distanceKm":0,"durationSeconds":0,"workoutCount":0},"weekDaily":[],"recentWorkouts":[],
         "ability":{"trueAbility":null,"currentAbility":null,"changeFrom7DaysAgo":null,"growthVelocityPerWeek":null,"decayPoints":0,"snapshotDate":null,"explanation":""},
-        "calibration":{"status":"pending","eligibleSessions":0,"eligibleDurationMinutes":0,"spanDays":0,"highCoverageSessions":0,"requirements":{"sessions":12,"durationMinutes":360,"spanDays":28,"highCoverageSessions":6},"message":""},
+        "calibration":{"status":"not_started","eligibleSessions":0,"eligibleDurationMinutes":0,"spanDays":0,"highCoverageSessions":0,"requirements":{"sessions":12,"durationMinutes":360,"spanDays":28,"highCoverageSessions":6},"message":""},
         "verdict":{"tone":"yellow","title":"","reason":"","triggers":[],"stale":false,"reasonCodes":[]},"nextSession":{"kind":"rest","title":"","reason":"","distanceKm":null,"durationMinutes":null,"paceSecondsPerKmLower":null,"paceSecondsPerKmUpper":null,"heartRateBpmLower":null,"heartRateBpmUpper":null,"structure":null},
         "recovery":{"score":null,"lastNightSleepMinutes":null,"sleepBaselineMinutes":null,"morningHrvMs":null,"hrvBaselineMs":null,"restingHeartRateBpm":null,"restingHeartRateBaselineBpm":null,"state":"unknown","hrvSampleCount":0,"note":""},
-        "weekStructure":{"easyDurationFraction":null,"easyDurationFloorFraction":0.7,"qualitySessionCount":0,"qualitySessionCap":2,"easyHonesty":{"intendedEasyCount":0,"easyEnoughCount":0,"honestyFraction":null,"note":""},"remainingDistanceKm":0},
+        "weekStructure":{"easyDurationFraction":null,"easyDurationFloorFraction":0.7,"qualitySessionCount":0,"qualitySessionCap":2,"easyHonesty":{"intendedEasyCount":0,"easyEnoughCount":0,"honestyFraction":null,"note":""}},
         "race":{"target":null,"daysUntil":null,"taper":false,"shapeScore":null,"volumeFraction":null,"longRunFraction":null,"note":""},"injuryFlags":[],"weekPlan":[],"phase":"morning_open","lock":{"present":false,"relockSuggested":false,"lockedAt":null}}
         """
         let goals = MobileGoalsResponse(revision: revision, easyDurationFloorFraction: 0.7, qualitySessionCap: 2,

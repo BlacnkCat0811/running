@@ -1360,6 +1360,11 @@ nonisolated enum HealthKitExport {
                 pointTotal += locations.count
                 writtenBytes += bytes
                 digest.update(data: Data(document.utf8))
+            } else {
+                // 2026-10-15（审查 A-🔡1）：写入成功但文件不在（极罕见）⇒ 该条此前被
+                // **静默丢弃**（不进 entries、不进 warnings、xml 也不声明它）。给一条可见
+                // 警告，避免"单条轨迹没同步"完全没有线索。
+                warnings.add("有一条轨迹写入后未找到；本条未计入，已保留其同步状态")
             }
         }
         // 部分段读取失败也不输出不完整路线，不以它覆盖已有 GPX 或积累稳定证据。

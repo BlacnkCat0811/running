@@ -125,9 +125,10 @@ struct RaiAPIClient {
         try await get(path: "/v1/mobile/run-coach", baseURL: baseURL, token: token)
     }
 
-    func runCoachCommand(_ input: MobileRunCoachCommand, baseURL: URL, token: String) async throws -> MobileRunCoachResponse {
-        try await send(path: "/v1/mobile/run-coach", method: "POST", body: input, baseURL: baseURL, token: token)
-    }
+    // 2026-10-15（审查 C-🔡1）：四个"无 operationId 的直发写方法"（runCoachCommand /
+    // confirmWeeklyPlan / updateGoals / lockSession）已删除 —— 持久发布统一走
+    // `publishPlan(route:)` + `replayPlanPublication`（带 operationId 幂等键）。
+    // 保留直发入口等于给"静默丢幂等"留一条可误用的后路。
 
     func coachLoop(baseURL: URL, token: String) async throws -> CoachLoopResponse {
         try await get(path: "/v1/mobile/coach-loop", baseURL: baseURL, token: token)
@@ -166,10 +167,6 @@ struct RaiAPIClient {
     func previewWeeklyPlan(_ input: PreviewWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanPreview {
         try await send(path: "/v1/mobile/workout-plan/preview", method: "POST", body: input,
                        baseURL: baseURL, token: token)
-    }
-
-    func confirmWeeklyPlan(_ input: ConfirmWeeklyPlanRequest, baseURL: URL, token: String) async throws -> MobileWeeklyPlanGenerationResponse {
-        try await send(path: "/v1/mobile/workout-plan/confirm", method: "POST", body: input, baseURL: baseURL, token: token)
     }
 
     /// Registers a client-verified LOCAL SYSTEM workout schedule. Physical
@@ -273,22 +270,6 @@ struct RaiAPIClient {
         try await get(path: "/v1/workouts/\(escapedPath(id))/share-card", baseURL: baseURL, token: token)
     }
 
-    func updateGoals(
-        _ input: UpdateMobileGoalsRequest,
-        baseURL: URL,
-        token: String
-    ) async throws -> MobileGoalsResponse {
-        try await send(path: "/v1/mobile/goals", method: "PUT", body: input, baseURL: baseURL, token: token)
-    }
-
-    func lockSession(
-        _ input: LockMobileSessionRequest,
-        baseURL: URL,
-        token: String
-    ) async throws -> MobileGoalsResponse {
-        try await send(path: "/v1/mobile/lock", method: "POST", body: input, baseURL: baseURL, token: token)
-    }
-
     func submitFeedback(_ command: NativeFeedbackCommand, baseURL: URL, token: String) async throws -> NativeCommandResponse {
         try await send(path: "/v1/commands", method: "POST", body: command, baseURL: baseURL, token: token)
     }
@@ -372,9 +353,19 @@ struct RaiAPIClient {
         guard (200...299).contains(status) else {
             if status == 401 { throw RaiAPIClientError.unauthorized }
             let apiError = try? decoder.decode(RaiAPIError.self, from: data)
+            // 2026-10-15（审查 C-🔡3）：429 的 `Retry-After` 是服务端给出的**建议等待秒数**
+            // （`apps/api/src/server.ts` 对 429 恒带该头）。折叠进文案，让"容量瞬时满"
+            // 与"确定性拒绝"在提示层可分（此前两者文案完全一样，重试节奏只能靠猜）。
+            let retryHint: String
+            if status == 429,
+               let seconds = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After").flatMap({ Int($0) }) {
+                retryHint = "（建议 \(seconds) 秒后重试）"
+            } else {
+                retryHint = ""
+            }
             throw RaiAPIClientError.server(
                 code: apiError?.code ?? "http_\(status)",
-                message: apiError?.message ?? "服务器返回 HTTP \(status)",
+                message: (apiError?.message ?? "服务器返回 HTTP \(status)") + retryHint,
                 status: status
             )
         }

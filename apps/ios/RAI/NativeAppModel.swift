@@ -19,6 +19,10 @@ final class NativeAppModel {
     var workoutPlan: MobileWorkoutPlanResponse? { trainingPlanStore.workoutPlan }
     var runCoach: MobileRunCoachResponse? { trainingPlanStore.coach }
     var coachLoop: CoachLoopResponse? { trainingPlanStore.coachLoop }
+
+    /// 读取面板的单次结果分类（2026-10-15 审查 🟡-B2/B3）：
+    /// `decoding` = 契约漂移（服务端可达、载荷解不开），`failure` = 其余（网络/服务端）。
+    enum ReadPanelOutcome: Equatable { case ok, decoding, failure }
     var isCoachLoopManaged: Bool { coachLoop?.settings != nil }
     private(set) var isLoadingRunCoach = false
     private(set) var isUpdatingRunCoach = false
@@ -286,37 +290,49 @@ final class NativeAppModel {
         async let pendingStatistics = api.statistics(baseURL: baseURL, token: token)
         async let pendingTrends = api.trends(baseURL: baseURL, token: token)
         let planSucceeded = await pendingPlanState
-        let fetchedStatistics = try? await pendingStatistics
-        let fetchedTrends = try? await pendingTrends
-        guard isCurrent() else { return }
-        var failedPanels = 0
-        if !planSucceeded { failedPanels += 1 }
-        if let fetchedStatistics {
+        // 每个面板记录**失败类别**（2026-10-15 审查 🟡-B2/B3）："解码失败"（契约漂移）
+        // 与"连不上/服务端错"对用户的含义相反，不能再在同一个 `try? == nil` 里折叠；
+        // 且分母必须是全部 4 个面板（此前 workouts 未计入，`failedPanels == 4` 是死分支）。
+        var panelOutcomes: [ReadPanelOutcome] = []
+        panelOutcomes.append(planSucceeded ? .ok : Self.planPanelOutcome(trainingPlanStore.issue))
+        do {
+            let fetchedStatistics = try await pendingStatistics
             statistics = fetchedStatistics
             recordCache(fetchedStatistics, key: "statistics")
-        } else {
-            failedPanels += 1
+            panelOutcomes.append(.ok)
+        } catch {
+            panelOutcomes.append(Self.panelOutcome(for: error))
         }
-        if let fetchedTrends {
+        do {
+            let fetchedTrends = try await pendingTrends
             trends = fetchedTrends
             recordCache(fetchedTrends, key: "trends")
-        } else {
-            failedPanels += 1
+            panelOutcomes.append(.ok)
+        } catch {
+            panelOutcomes.append(Self.panelOutcome(for: error))
         }
         let workoutsSucceeded = await refreshWorkouts()
         guard isCurrent() else { return }
-        // Any successful panel proves service reachability. Recommendation freshness is
-        // tracked separately, so a list-only failure cannot invalidate every panel.
-        let anySucceeded = workoutsSucceeded || planSucceeded || fetchedStatistics != nil || fetchedTrends != nil
-        isOffline = !anySucceeded
-        session.isReachable = anySucceeded
+        panelOutcomes.append(workoutsSucceeded ? .ok : workoutReadOutcome)
+        let failedPanels = panelOutcomes.filter { $0 != .ok }.count
+        // 全部失败且全部是解码失败 ⇒ 契约漂移：服务端**可达**，但不该点亮"离线"横幅。
+        let decodingOnly = failedPanels > 0 && panelOutcomes.allSatisfy { $0 != .failure }
+        let anySucceeded = panelOutcomes.contains { $0 == .ok }
+        isOffline = !anySucceeded && !decodingOnly
+        session.isReachable = anySucceeded || decodingOnly
         if failedPanels > 0 {
             // 刻意不在这里 `loadCachedData()`：那会把刚刚成功的那几项也推回旧值，
             // 等于用一次部分失败抹掉一次部分成功。首启的空态由 `bootstrap()`
             // 的 `loadCachedData()` 兜底。
-            errorMessage = failedPanels == 4
-                ? "核心数据均未能更新，当前显示的是上次结果。"
-                : "有 \(failedPanels) 项数据未能更新，其余已刷新。"
+            if failedPanels == 4 && decodingOnly {
+                errorMessage = "数据格式与当前版本不兼容（4 项均未能解析），请升级应用或检查服务端版本。"
+            } else if failedPanels == 4 {
+                errorMessage = "核心数据均未能更新，当前显示的是上次结果。"
+            } else if decodingOnly {
+                errorMessage = "有 \(failedPanels) 项数据未能更新（数据格式与当前版本不兼容），其余已刷新。"
+            } else {
+                errorMessage = "有 \(failedPanels) 项数据未能更新，其余已刷新。"
+            }
         }
         if goals?.runCoach != nil { await refreshRunCoach() }
     }
@@ -486,8 +502,10 @@ final class NativeAppModel {
             return true
         } catch {
             guard scope == cacheScope, configuration == configurationID else { return false }
+            // 终局白名单（审查 🟡-C4）：并入 `coach_scope_mismatch`（这份反馈属于另一个
+            // 数据集，同一份字节重试永远失败）。留在"重试原反馈"路径会把账目永久卡住。
             if case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status),
-               ["coach_feedback_invalid", "coach_feedback_revision_conflict", "coach_feedback_not_found", "FST_ERR_VALIDATION"].contains(code) {
+               PlanMutationDisposition.isTerminalCoachFeedbackError(code) {
                 guard cache.saveCoachFeedback(nil, scope: scope) else {
                     runCoachError = "反馈被拒绝，但操作记录无法确认，请恢复存储。"; return false
                 }
@@ -517,6 +535,18 @@ final class NativeAppModel {
         }
     }
 
+    /// 失败面板的分类工具：解码失败与网络/服务端失败的含义相反，不能折叠成一件事。
+    private static func panelOutcome(for error: Error) -> ReadPanelOutcome {
+        if case RaiAPIClientError.decoding = error { return .decoding }
+        return .failure
+    }
+
+    private static func planPanelOutcome(_ issue: PlanReadIssue?) -> ReadPanelOutcome {
+        issue?.code == .contractMismatch ? .decoding : .failure
+    }
+
+    private var workoutReadOutcome: ReadPanelOutcome = .failure
+
     @discardableResult
     func refreshWorkouts() async -> Bool {
         guard let baseURL = session.serverURL else { return false }
@@ -527,6 +557,7 @@ final class NativeAppModel {
         let filter = workoutSessionType
         let key = workoutsCacheKey
         workoutListError = nil
+        workoutReadOutcome = .failure
         isLoadingWorkouts = true
         defer { if workoutRequestID == requestID { isLoadingWorkouts = false } }
         do {
@@ -539,6 +570,7 @@ final class NativeAppModel {
                   !Task.isCancelled else { return false }
             workouts = response.items
             workoutTotal = response.total
+            workoutReadOutcome = .ok
             recordCache(response, key: key)
             return true
         } catch {
@@ -546,6 +578,7 @@ final class NativeAppModel {
                   baseURL == session.serverURL, token == session.apiToken,
                   !Task.isCancelled else { return false }
             isOffline = true
+            workoutReadOutcome = Self.panelOutcome(for: error)
             workoutListError = friendlyMessage(error)
             errorMessage = workoutListError
             loadCachedWorkouts()
@@ -1030,15 +1063,23 @@ final class NativeAppModel {
 
     private var workoutPlanCacheKey: String { "workout-plan" }
 
+    /// 读缓存并在**解码损坏**时自愈（删掉损坏行、下一次联网重建）——
+    /// 损坏行留在库里只会每次启动重复解不开，且此前没有任何告警（审查 B-🔡3）。
+    private func readCacheHealing<Value: Codable>(_ type: Value.Type, key: String) -> CachedValue<Value>? {
+        if let value = cache.read(type, scope: cacheScope, key: key) { return value }
+        if cache.lastReadIssue == .corruptPayload { cache.remove(scope: cacheScope, key: key) }
+        return nil
+    }
+
     private func loadCachedData() {
         isTodayAvailable = false
         restorePlanSafetyState()
         trainingPlanStore.loadCache()
         // 每个 key 只读一次：原先为了拿 cachedAt 又重复读了一遍，10 个 key 变成 20 次查询。
-        let cachedStatistics = cache.read(MobileStatisticsResponse.self, scope: cacheScope, key: "statistics")
-        let cachedTrends = cache.read(MobileTrendsResponse.self, scope: cacheScope, key: "trends")
-        let cachedPredictions = cache.read(NativePredictionResponse.self, scope: cacheScope, key: "predictions")
-        let cachedZones = cache.read(NativeTrainingZonesCurrentResponse.self, scope: cacheScope, key: "training-zones")
+        let cachedStatistics = readCacheHealing(MobileStatisticsResponse.self, key: "statistics")
+        let cachedTrends = readCacheHealing(MobileTrendsResponse.self, key: "trends")
+        let cachedPredictions = readCacheHealing(NativePredictionResponse.self, key: "predictions")
+        let cachedZones = readCacheHealing(NativeTrainingZonesCurrentResponse.self, key: "training-zones")
         statistics = cachedStatistics?.value
         trends = cachedTrends?.value
         predictions = cachedPredictions?.value
@@ -1049,9 +1090,9 @@ final class NativeAppModel {
                 message: "当前显示的是缓存中的预测，等待刷新。"
             )
         }
-        dashboard = cache.read(NativeDashboardResponse.self, scope: cacheScope, key: "dashboard")?.value
+        dashboard = readCacheHealing(NativeDashboardResponse.self, key: "dashboard")?.value
         trainingZones = cachedZones?.value
-        trainingStatistics = cache.read(NativeTrainingStatisticsOverviewResponse.self, scope: cacheScope, key: "training-statistics")?.value
+        trainingStatistics = readCacheHealing(NativeTrainingStatisticsOverviewResponse.self, key: "training-statistics")?.value
         loadCachedWorkouts()
         // 缓存新鲜度：陈旧数据不隐藏，由 TechFreshnessBanner 显式告知用户，因此这里不设硬 TTL。
         lastCacheUpdate = [
@@ -1283,19 +1324,33 @@ final class NativeAppModel {
         guard response.operationId == pending.operationId else { throw RaiAPIClientError.decoding("发布查询返回了其他操作的结果") }
         if response.status == "committed", let result = response.result { return result }
         if response.status == "scopeMismatch" {
-            throw RaiAPIClientError.server(code: "plan_operation_scope_mismatch", message: "原操作属于其他数据集，请回到原连接确认，不能重放。", status: 409)
+            // 🔴 终局（审查 🔴-1）：该操作属于其他数据集，同一份载荷永远不可能在当前
+            // 身份下重放成功 ⇒ **先作废本地账目再抛**。不作废时守卫
+            // `plan_publication_pending` 会永久拒绝本 scope 的全部计划写与手表排期
+            // （`clearCache` 碰不到 `app_metadata`，UI 无出口）。
+            _ = cache.savePublication(nil, scope: scope)
+            throw RaiAPIClientError.server(code: "plan_operation_scope_mismatch",
+                message: "该操作属于其他数据集，本地待确认发布已作废；当前数据集可重新发布。", status: 409)
         }
         if response.status == "notFound" {
             do { return try await api.replayPlanPublication(pending, baseURL: baseURL, token: token) }
             catch {
-                if case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status), !code.hasPrefix("plan_operation_") {
+                // 非 `plan_operation_*` 的 4xx：服务端没有留下该操作行（请求被拒），
+                // 重放没有意义；`plan_operation_*` 中**终局**的三个码同样作废。其余
+                // （未来新增的 `plan_operation_*`）保持保守：保留账目，由「放弃本次未确认发布」
+                // 的显式出口兜底（审查 🔴-1）。
+                if case RaiAPIClientError.server(let code, _, let status) = error, (400..<500).contains(status),
+                   !code.hasPrefix("plan_operation_") || PlanMutationDisposition.isTerminalPlanPublicationError(code) {
                     _ = cache.savePublication(nil, scope: scope)
                 }
                 throw error
             }
         }
         if response.status == "expired" {
-            throw RaiAPIClientError.server(code: "plan_operation_expired", message: "原操作结果已过保留期，不能重放；请核对历史。", status: 410)
+            // 终局（同 scopeMismatch）：保留期已过 ⇒ 不存在任何可重放的可能。
+            _ = cache.savePublication(nil, scope: scope)
+            throw RaiAPIClientError.server(code: "plan_operation_expired",
+                message: "该操作已过保留期，本地待确认发布已作废；如需继续请重新发布。", status: 410)
         }
         throw RaiAPIClientError.decoding("未知的发布操作状态，原操作不会重放")
     }
@@ -1336,7 +1391,28 @@ final class NativeAppModel {
             finishPlanPublication()
             let refreshed = await refreshPlanState()
             return refreshed ? "原操作已保存，完整计划已刷新；没有再次发布。" : "原操作已保存，等待完整计划刷新；不要重复发布。"
-        } catch { return "原操作结果尚未确认：" + friendlyMessage(error) }
+        } catch {
+            // 终局码的账目已在 `resolvePendingPublication` 里作废，其文案自述了这一结果
+            // （再加"尚未确认"前缀会与事实矛盾；审查 🔴-1）。
+            if case RaiAPIClientError.server(let code, _, _) = error,
+               PlanMutationDisposition.isTerminalPlanPublicationError(code) {
+                return friendlyMessage(error)
+            }
+            return "原操作结果尚未确认：" + friendlyMessage(error)
+        }
+    }
+
+    /// 显式放弃一个**既不能重放、也不在已知终局码内**的未确认发布（审查 🔴-1 的逃生阀）。
+    ///
+    /// 只在 UI 上作为二级破坏性操作暴露：清除的是**本地**账目，服务端操作行仍保留在
+    /// 操作账本中供人工核对；本动作不声明该操作从未生效，放弃后应刷新完整计划核对。
+    func abandonPendingPlanPublication() -> String {
+        guard !isPlanBusy else { return "当前有操作进行中，请稍后再试。" }
+        guard cache.savePublication(nil, scope: cacheScope) else {
+            return "放弃失败：本地账目无法清除；请恢复本地存储后重试。"
+        }
+        planMessage = "已放弃本次未确认发布（服务端记录保留在操作账本中）。如担心该操作曾生效，请刷新完整计划核对。"
+        return planMessage ?? ""
     }
 
     var hasPendingPlanReceipts: Bool {
@@ -1380,6 +1456,7 @@ final class NativeAppModel {
         var persisted = cache.savePendingPlanReceipts(pending, scope: scope)
         var staleReceipts = false
         var historicalReceipts = false
+        var terminalRejections = 0
         for receipt in receipts {
             guard current() else { break }
             do {
@@ -1415,11 +1492,22 @@ final class NativeAppModel {
                 guard current() else { break }
                 let code: String
                 if case RaiAPIClientError.server(let value, _, _) = error { code = value } else { code = "network" }
-                if code == "plan_receipt_scope_mismatch", receipt.lifecycleEvent == "verified",
-                   var ledger = matchingLedger(for: receipt) {
-                    staleReceipts = true; watchState = .stale
-                    ledger.requiresWithdrawal = true; watchLedger = ledger
-                    if !cache.saveWatchLedger(ledger) { persisted = false }
+                // 🔴 终局拒绝（审查 🟡-C1）：内容级 / 身份级不可通过 —— 同一份字节重放永远失败。
+                // 此前只特判 scope_mismatch 且**只标记账本、不作废回执** ⇒
+                // `hasPendingPlanReceipts` 恒真 ⇒ 教练启用（:421-424）被永久锁死。
+                // 终局 ⇒ 作废该条回执 + 如实告知；瞬时失败仍走下方"保留重试"。
+                if PlanMutationDisposition.isTerminalPlanReceiptError(code) {
+                    if receipt.lifecycleEvent == "verified", var ledger = matchingLedger(for: receipt) {
+                        staleReceipts = true; watchState = .stale
+                        ledger.requiresWithdrawal = true; watchLedger = ledger
+                        if !cache.saveWatchLedger(ledger) { persisted = false }
+                    }
+                    terminalRejections += 1
+                    pending.removeAll { $0.idempotencyKey == receipt.idempotencyKey && $0.localDate == receipt.localDate }
+                    if !cache.savePendingPlanReceipts(pending, scope: scope) { persisted = false }
+                    cache.recordPlanDiagnostic(.init(at: now(), name: "receipt_terminal_rejected", scopeDigest: scope,
+                        operationId: receipt.operationId, revision: receipt.revision, owed: nil, confirmed: nil, errorCode: code))
+                    continue
                 }
                 cache.recordPlanDiagnostic(.init(at: now(), name: "receipt_retry_failed", scopeDigest: scope,
                     operationId: receipt.operationId, revision: receipt.revision, owed: nil, confirmed: nil, errorCode: code))
@@ -1427,6 +1515,12 @@ final class NativeAppModel {
         }
         if !persisted { return "系统日程结果与服务端登记分别处理；本地待登记账目未持久化，请检查存储后重试。" }
         let failures = receipts.filter { receipt in pending.contains { $0.idempotencyKey == receipt.idempotencyKey && $0.localDate == receipt.localDate } }.count
+        if terminalRejections > 0 {
+            // 终局拒绝已作废（审查 🟡-C1）：文案必须说"不再重试"，与下方"可前台重试"分开 ——
+            // 后者只服务瞬时失败；混用会把用户永久留在失败的重试里。
+            return "\(terminalRejections) 天的系统日程回执被服务端终局拒绝（数据校验冲突），已作废不再重试；请撤回旧排期后重新同步手表。"
+                + (failures > 0 ? "另有 \(failures) 天仍待登记。" : "")
+        }
         if staleReceipts { return "已登记历史核验，但服务端事实已变化，不计当前覆盖；请撤回或更新。" + (failures > 0 ? "另有 \(failures) 天仍待登记。" : "") }
         if historicalReceipts { return "历史核验已登记，不计当前覆盖；当前系统排期状态未变。" + (failures > 0 ? "另有 \(failures) 天仍待登记。" : "") }
         return failures == 0 ? nil : "\(failures) 天的系统日程回执未在服务端登记；可前台重试，系统排期核验结果不因此作废。"

@@ -614,6 +614,32 @@ for enum_name, values, mappings in [
             f"unexpected {sorted(actual - expected)}")
         enum_checks += 1
 
+# 2026-10-15（审查 B-🔡1）：**测试夹具**也不得使用契约域外取值 —— `PlanTestFixtures` 的
+# JSON 曾被解码到 `state:"missing"` / `coverage:"missing"` / `assessment:"unavailable"` /
+# `status:"pending"` 这些契约里不存在的取值上，回归因此建立在域外数据上而无人察觉；
+# 已退役的 `weekStructure.remainingDistanceKm` 也混在里面。取值从契约源码解析
+# （与上面的闭集对账同源），不在这里手抄。
+fixture_source = pathlib.Path("apps/ios/tests/PlanTestFixtures.swift").read_text()
+for pattern, interface_name, field_name in [
+    (r'"sleep":\{"state":"([^"]+)"', "MobileCoverageMetric", "state"),
+    (r'"hrv":\{"state":"([^"]+)"', "MobileCoverageMetric", "state"),
+    (r'"restingHeartRate":\{"state":"([^"]+)"', "MobileCoverageMetric", "state"),
+    (r'"sync":\{"status":"([^"]+)"', "MobileSyncStatus", "status"),
+    (r'"recoveryAssessment":\{"targetDate":[^,]+,"coverage":"([^"]+)"', "MobileRecoveryAssessment", "coverage"),
+    (r'"assessment":"([^"]+)"', "MobileRecoveryAssessment", "assessment"),
+    (r'"calibration":\{"status":"([^"]+)"', "MobileCalibrationCard", "status"),
+]:
+    found = set(re.findall(pattern, fixture_source))
+    assert found, (
+        f"PlanTestFixtures no longer contains any {interface_name}.{field_name} literal — the "
+        "fixture-domain gate must fail loudly instead of skipping")
+    allowed = set(union_values(interface_name, field_name))
+    assert found <= allowed, (
+        f"PlanTestFixtures uses out-of-contract {interface_name}.{field_name} values: "
+        f"{sorted(found - allowed)} (contract: {sorted(allowed)})")
+assert "remainingDistanceKm" not in fixture_source, (
+    "a retired field (weekStructure.remainingDistanceKm) came back into PlanTestFixtures")
+
 print(f"Technology color tokens: {checks} foreground/background pairs meet the 4.5:1 project target")
 print("Token checks do not replace rendered-view accessibility auditing.")
 print(f"Field coverage: {len(field_anchors)}/{len(contract_fields)} MobileTodayResponse fields have a "

@@ -132,13 +132,13 @@ loop:
 
 ---
 
-## 5. P2 —— 收敛与可观测（可下一批，建议至少做 P2a）
+## 5. P2 —— 收敛与可观测（**状态更正 2026-10-15**：P2a 已于 10-14 落地、P2c 已合入；正文保留为设计记录）
 
 | 项 | 内容 | 判据 |
 |---|---|---|
 | **P2a** | 兑现契约承诺（`packages/api-contracts/src/index.ts:682`）：`direct_sync_payload_exceeds_bounds` ⇒ **收敛拆批预算后重传**。落点 = **inspect 的 catch**（不是 `SyncUploadRecovery`）。在 `SyncPhase.disposition` 的**状态码判断之前**新增 code 分支 ⇒ 新 `Action.convergeBudget`（Swift 穷尽 switch 会在编译期逼出所有消费点）；收敛标记**必须持久化**（否则下次同步又用满预算重撞） | 单测：给定该失败码 ⇒ 下一轮 `DirectSyncBatchBudget` 确实变小；且**不会删除已成功的批次** |
 | **P2b** | 导出后、上传前**本地产物自校验**：用本地实际 `export.xml` 大小 + route 字节数 + 文件数，对比**服务端上界**（不是 ×0.9 的预算，留安全垫）⇒ 超界则**不发** inspect/upload，就地收敛。这是"接收端之外的第二个守卫"，把 400 变成**本地可判定** | 单测：造一个"略超界"的产物 ⇒ 断言**没有发生网络请求** |
-| **P2c** | 可观测：`budgetExceeded`（现仅成为 `sync_continuation` 哨兵，`HealthKitExport.swift:44`、**不上屏、不落日志**）、停止原因、收敛事件 —— 至少要能回答"这批为什么被截断/为什么卡住" | 用**阳性对照**：人为造一次截断 ⇒ 断言能在状态/日志里看到可区分的信号 |
+| **P2c** | 可观测：`budgetExceeded`（现仅成为 `sync_continuation` 哨兵，`HealthKitExport.swift:44`、**不上屏、不落日志**）、停止原因、收敛事件 —— 至少要能回答"这批为什么被截断/为什么卡住" | 用**阳性对照**：人为造一次截断 ⇒ 断言能在状态/日志里看到可区分的信号。**✅ 2026-10-15 已落地**：`HealthKitSync.exportMessage` 的尾注携带 `budgetStopReason` 的三种形态文案（`budgetStopNote`）；`HealthKitExport.swift` 的"轨迹写入后未找到"也补了可见告警 |
 
 > P2b 的可行性已核实：服务端判据用的就是**真实产物**（`export.xml` 的 `statSync().size` 与 route 的磁盘字节累加），
 > 而这两个数客户端**本来就有** ⇒ 自校验是精确的，不需要新增协议。
@@ -404,6 +404,8 @@ iOS 侧天然原子：它随同一个 app 构建发布，回滚粒度本就不�
 ### 11.7 未验项（如实标注）
 
 - **真机 4 条**（§8）本机沙箱**无法验证**（HealthKit 不可用）⇒ 唯一有效证据仍待真机。
-- P2a / P2c 按批准**留待下一批**（本批只做 P2b）。
+- P2a / P2c 按批准**留待下一批**（本批只做 P2b）。 ⚠️ **2026-10-15 口径更正**：P2a（`convergeBudget` +
+  持久化收敛档）实际已于 10-14 随尾页根治同批落地；P2c（截断原因尾注 + 轨迹缺失告警）于 10-15 审查后合入。
+  两处状态以 `deliverables/IOS_BACKEND_AUDIT_2026-10-15.md` 的修复记录为准。
 - node 侧与 web 侧（vitest）**分开报**（见 11.2 / 11.2b），不合并成一个"全绿"。
 

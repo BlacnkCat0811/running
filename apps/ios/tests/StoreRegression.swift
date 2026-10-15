@@ -308,6 +308,11 @@ struct StoreRegression {
         check(safety.read(String.self, scope: "C", key: "schema") == nil && safety.lastReadIssue == .unsupportedSchema, "unknown cache schema is classified and fails closed")
         precondition(sqlite3_exec(failureDB, "UPDATE cache_entries SET schema_version=2,payload=x'00' WHERE cache_key='schema'", nil, nil, nil) == SQLITE_OK)
         check(safety.read(String.self, scope: "C", key: "schema") == nil && safety.lastReadIssue == .corruptPayload, "corrupt cache is distinct from cache absence without logging payload")
+        // 2026-10-15（审查 B-🔡3）：损坏行必须能被单条清掉（自愈入口 = NativeAppModel.readCacheHealing）——
+        // 清掉后的下一次读取是"干净的 miss"，而不是再一次解码失败。
+        safety.remove(scope: "C", key: "schema")
+        check(safety.read(String.self, scope: "C", key: "schema") == nil && safety.lastReadIssue == nil,
+              "removing a corrupt cache row heals it: the next read is a clean miss, not a repeat decode failure")
         precondition(sqlite3_exec(failureDB, "UPDATE plan_write_acknowledgements SET payload=x'00' WHERE scope='A'", nil, nil, nil) == SQLITE_OK)
         check(safety.planWriteAcknowledgement(scope: "A") == nil && safety.planRevisionFloor(scope: "A") == 13,
               "corrupt explanatory write metadata cannot erase the authoritative scalar revision floor")
@@ -327,6 +332,17 @@ struct StoreRegression {
         safety.clearAll()
         check((CacheStore(fileURL: safetyURL).pendingPublication(scope: "journal-scope").value ?? nil)?.operationId == publication.operationId,
               "lost-response business operation survives clear-cache and reopen")
+        // 2026-10-15（审查 🟡-C2）：上面那条钉的是 `clearAll()`；"清除缓存"按钮实际走
+        // `clear(scope:)` —— 两者都不得删除未决发布账目。这条钉 scope 版，并与模型回归里
+        // 替身 `clear` 的对齐改动构成同一事实的两端（替身给反向绿灯曾让这条性质无人守）。
+        _ = safety.write("payload", scope: "scope-clear", key: "goals")
+        check(safety.read(String.self, scope: "scope-clear", key: "goals") != nil, "scope-clear fixture writes an ordinary cache entry")
+        check(safety.savePublication(publication, scope: "scope-clear"), "scope-clear fixture saves a publication")
+        safety.clear(scope: "scope-clear")
+        check(safety.read(String.self, scope: "scope-clear", key: "goals") == nil,
+              "clearing one scope's cache removes its ordinary entries")
+        check((CacheStore(fileURL: safetyURL).pendingPublication(scope: "scope-clear").value ?? nil)?.operationId == publication.operationId,
+              "the scoped clear-cache path must not delete an unresolved publication ledger")
         precondition(sqlite3_exec(failureDB, "CREATE TRIGGER fail_receipt BEFORE INSERT ON plan_receipt_journal BEGIN SELECT RAISE(ABORT, 'injected'); END", nil, nil, nil) == SQLITE_OK)
         check(!scheduleJournal.finish(ledger: ledger, receipts: [pendingReceipt], verified: true),
               "ledger, schedule journal and pending receipts do not report a partial transaction as committed")

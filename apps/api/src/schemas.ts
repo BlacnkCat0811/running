@@ -1,5 +1,7 @@
 import { workoutExportQuerySchema } from "./workout-summary-export.js";
 import { DATABASE_TIMEZONE, MOBILE_SESSION_KINDS } from "@rai/contracts";
+// `stagesMs` 的键枚举从契约的**运行期单一来源**生成（审查 A1：手抄列表漏过 directSyncApply）。
+import { IMPORT_STAGES } from "@rai/api-contracts";
 
 import {
   MAX_ALERT_HEART_RATE_BPM,
@@ -696,10 +698,22 @@ const importJobResponseSchema = {
           type: "object",
           additionalProperties: false,
           properties: Object.fromEntries(
-            ["dataOnlyApply", "backupCapacity", "backupCopy", "backupVerify", "stagingCopy", "parseImport",
-              "changeAnalysis", "recompute", "activationAudit", "activationSwap", "cleanup"]
-              .map((stage) => [stage, { type: "number", minimum: 0 }])
+            IMPORT_STAGES.map((stage) => [stage, { type: "number", minimum: 0 }])
           )
+        },
+        // 2026-10-15（审查 A1）：公开白名单保留的观测键（`ImportLaneTelemetry`）。
+        // 此前响应描述漏列 ⇒ 文档与实现漂移；新增公开键必须在这里与
+        // `import-worker.ts` 的 `PUBLIC_PERFORMANCE_KEYS` 同步（后者有编译期穷尽守卫）。
+        lane: {
+          type: "object",
+          additionalProperties: false,
+          required: ["outcome", "reasons"],
+          properties: {
+            outcome: { type: "string", enum: ["direct", "fallback", "unchanged"] },
+            directSource: { type: "string", enum: ["data-only", "direct-sync"] },
+            reasons: { type: "array", items: { type: "string" } },
+            rejections: { type: "array", items: { type: "object", additionalProperties: true } }
+          }
         }
       }
     },

@@ -377,6 +377,19 @@ final class CacheStore: PlanSchedulePersistence {
         if sqlite3_step(statement) != SQLITE_DONE { SQLiteSupport.report("cache delete", database: database) }
     }
 
+    /// 删除**单个**缓存条目（不清 `app_metadata`、不动其它 scope）。
+    ///
+    /// 2026-10-15（审查 B-🔡3）：缓存读解码失败的条目此前只写 `lastReadIssue` 就返回 nil，
+    /// 而消费方不读该字段 ⇒ 损坏行会**永远解不开**、每次启动重复失败且无告警。
+    /// 由消费方（`NativeAppModel.readCacheHealing`）检测到 `.corruptPayload` 后调用本方法自愈。
+    func remove(scope: String, key: String) {
+        guard let statement = prepare("DELETE FROM cache_entries WHERE scope = ? AND cache_key = ?") else { return }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        bind(key, to: statement, at: 2)
+        if sqlite3_step(statement) != SQLITE_DONE { SQLiteSupport.report("cache remove", database: database) }
+    }
+
     func clearAll() {
         execute("DELETE FROM cache_entries")
     }
