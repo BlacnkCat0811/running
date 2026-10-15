@@ -8,6 +8,28 @@
 
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
+- [SYNC_DATA_PIPELINE_AUDIT_2026-10-15.md](SYNC_DATA_PIPELINE_AUDIT_2026-10-15.md)：
+  **同步数据与数据处理链路审查（多智能体协作 · 只读）** —— 4 路并行子审查（服务端直连 / iOS 同步端 /
+  导入落库 / 派生计算）＋ 1 路补充独立审查 ＋ 主智能体逐项抽样复核（含 1 项 git worktree 定点突变实证：
+  收敛门禁"**接线全拆 284/0 绿、函数改名才 2 红**" ⇒ 假绿成立）。结论：无 P0；**P1×1**（data-only
+  准入死键 `data_only_baseline_contract` 无生产写入方、夹具自写键 ⇒ 测试绿/生产死）、**P2×8**
+  （门禁假绿已实证 / P2b 耗尽不落档 / 单条超大轨迹静默不同步 / (2,8] MiB 窗口无正向测试 / inspect
+  乐观 ready / `recoveryIsolationHolds` 恒真 / inspect 未知 400 无保险丝 / data-only 单测摘要不对齐）、
+  P3×6；**主智能体证伪 1 条、修正 2 条**（§四复核记录）。门禁实跑：typecheck=0、http-acceptance
+  9/9、direct-sync 定向 43/44（1 例资源型超时、隔离复验绿）。**零代码改动**（仅新增本文档）。
+  **→ 修复已于同日落全部落地**（§八：P1-1 删门槛 / P2-1 逐接线判据突变红 / P2-2 耗尽落档 /
+  P2-3 可见化 / P2-5 inspect 404 / P2-6 属性测试 / P2-7 abandonTask / P3-c 全面清理；
+  验收：typecheck=0、test:ios EXIT=0（288 checks）、G4 定向批串行复验 107/106、
+  doc-refs 越界 0 漂移 0；1 处 G4 期真回归（漏网 CommandSurface 用例）已当场删修）。
+
+- [INGEST_PERSIST_CHAIN_REVIEW_2026-10-15.md](INGEST_PERSIST_CHAIN_REVIEW_2026-10-15.md)：
+  **导入与落库链补充独立审查**（同批多智能体协作的独立第 5 路）—— 🟡×2 + 🔡×1：data-only 单测用
+  「实现自己的摘要函数」算载荷身份（跨层契约靠远处闸门兜着，一旦放宽即硬失败）/ `payloadSha256`
+  方法文档与 S3.1 后行为矛盾 / `unchangedWorkouts` 全表 `COUNT(*)` 语义挪用；并含任务回执：死代码
+  现状两族归类（静态有引用/运行期不可达 vs 强死码）、`data_only_baseline_contract` 零写入方证实。
+  其结论经主报告抽查并入（P2-8 / P3-c/d/e）。**→ P2-8 / P3-b/d/e 已同日修复**（P3-e 仅留口径注记，
+  O(N) 修正待体量测量）；死代码两族已按 P3-c 全面退役（17 符号残留断言全零）。
+
 - [INCREMENTAL_SYNC_IMPLEMENTATION_PLAN_2026-10-14.md](INCREMENTAL_SYNC_IMPLEMENTATION_PLAN_2026-10-14.md)：
   **纯增量原地同步改造 · 实施方案（可执行版 v2）** —— 本轮的**实施锚定文档**（非审查报告）。
   基线 `51b19cf`（= origin/main = 生产 HEAD），目标：回退率降 0 + 消灭两次全库校验成本，不动 DB 引擎、
