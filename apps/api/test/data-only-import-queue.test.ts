@@ -14,7 +14,7 @@ import { readImportReceipt } from "../src/import-publication.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 import { RaiReadStore } from "../src/data.js";
 import type { ImportDatabaseTask } from "../src/import-database-tasks.js";
-import { applyDataOnlyImport, dataOnlyBaselineContract } from "../src/data-only-import.js";
+import { applyDataOnlyImport } from "../src/data-only-import.js";
 import { computeImportPayloadSha256 } from "../src/import-payload-identity.js";
 import { NATIVE_VERSION } from "@rai/health-export-parser";
 
@@ -45,7 +45,6 @@ async function fixture(run: (ctx: {
   store.setManifest("parser_contract_version", CONTRACT_VERSION);
   store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
   store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
-  store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
   store.close();
   const make = (enabled = true) => new ImportWorker(main, project, root, () => {
     throw new Error("delta must not enter the replacement gate");
@@ -189,7 +188,7 @@ test("缺身份代际的库 ⇒ 显式失败 direct_sync_baseline_rebuild_requir
   // （运维显式处置，客户端不能自动修）；两条车道的拒收都进遥测，主库零写入。
   await fixture(async ({ main, input, make }) => {
     const db = new DatabaseSync(main);
-    db.exec("DELETE FROM import_manifest WHERE key IN ('parser_identity_algorithm','data_only_baseline_contract')");
+    db.exec("DELETE FROM import_manifest WHERE key = 'parser_identity_algorithm'");
     db.close();
     const worker = make();
     forbidBulk(worker);

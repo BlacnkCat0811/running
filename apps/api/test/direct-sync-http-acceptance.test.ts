@@ -36,7 +36,6 @@ import {
 import { identityAlgorithmFingerprint } from "@rai/health-export-parser";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
-import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 import type { ImportInspection } from "../src/import-sources.js";
 
 const projectRoot = resolve(import.meta.dirname, "../../..");
@@ -253,8 +252,7 @@ async function prepareDatabase(harness: Harness): Promise<void> {
       ["dataset_version", "baseline"],
       ["parser_contract_version", CONTRACT_VERSION],
       ["parser_identity_algorithm", identityAlgorithmFingerprint()],
-      ["import_completed_at", "2026-01-01T00:00:00.000Z"],
-      ["data_only_baseline_contract", dataOnlyBaselineContract()]
+      ["import_completed_at", "2026-01-01T00:00:00.000Z"]
     ] as const) put.run(key, value);
   } finally { db.close(); }
 }
@@ -1055,4 +1053,31 @@ test("夹具自身的时区口径：本地日期必须按 DATABASE_TIMEZONE 计�
   // 而不是让 A17 的断言以"窗口差一天"的形式变得难以解释。
   assert.equal(typeof DATABASE_TIMEZONE, "string");
   assert.ok(DATABASE_TIMEZONE.length > 0);
+});
+
+// ---------------------------------------------------------------------------
+// P2-5（2026-10-15）：目录被外部删除 + 来源从未导入 ⇒ 404（不再给乐观 `ready`）。
+// ---------------------------------------------------------------------------
+
+test("P2-5：目录缺失且从未导入 ⇒ inspect 404（iOS 走 sourceGone 分支自愈重传）", async () => {
+  const harness = createHarness("rai-direct-sync-http-p25-");
+  await prepareDatabase(harness);
+  const server = await harness.start();
+  const api = session(server.baseUrl);
+  try {
+    const receipt = await api.upload(
+      healthKitZip(stepRecordXml(0), syncManifest()),
+      "p2-5-batch-0001", "apple-health-healthkit-p25.zip"
+    );
+    // 模拟"上传后目录被外部清理"（运维清 var/imports / 磁盘回收）：来源仍在注册表、从未导入。
+    removeTree(join(harness.root, "var", "imports", receipt.sourceId));
+    // 旧行为：200 + `ready`（乐观）⇒ 客户端 startImport 必然 missing_required_files，
+    // 多走一步注定失败的导入。新行为：404 ⇒ iOS sourceGone 分支 ⇒ 清任务重传（自愈）。
+    const response = await api.post("/v1/imports/inspect", { sourceId: receipt.sourceId });
+    const text = await response.text();
+    assert.equal(response.status, 404, `期望 404（目录已不存在且从未导入），实际 ${response.status}：${text}`);
+  } finally {
+    await server.stop();
+    harness.dispose();
+  }
 });

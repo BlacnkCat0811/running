@@ -27,9 +27,10 @@ import { NATIVE_VERSION, identityAlgorithmFingerprint } from "@rai/health-export
 
 import {
   DIRECT_SYNC_WRITE_GUARD, INGEST_TABLE_DISPOSITIONS, applyDirectSyncImport, isDirectSyncRejection,
-  installDirectSyncWriteGuards, unclassifiedIngestTables, type DirectSyncImportInput, type DirectSyncImportResult
+  installDirectSyncWriteGuards, preflightDirectSyncPayload, unclassifiedIngestTables,
+  type DirectSyncImportInput, type DirectSyncImportResult
 } from "../src/direct-sync-ingest.js";
-import { dataOnlyBaselineContract } from "../src/data-only-import.js";
+import { applyDataOnlyImport } from "../src/data-only-import.js";
 import { readImportReceipt } from "../src/import-publication.js";
 import { importPayloadSha256 } from "../src/import-payload-identity.js";
 import { computeImportPayloadSha256 } from "../src/import-payload-identity.js";
@@ -89,7 +90,7 @@ async function fixture(run: (ctx: Fixture) => Promise<void>): Promise<void> {
   store.setManifest("parser_contract_version", CONTRACT_VERSION);
   store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
   store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
-  // ⚠️ 刻意**不**写 `data_only_baseline_contract`：本车道不得把它当作资格门槛（§4.3）。
+  // （G4，2026-10-15）`data_only_baseline_contract` 键已退役（§4.3 不再作门槛、写入端已删），fixture 不再需要刻意跳过它。
   store.setProfile({ dateOfBirth: "1990-01-01" });
   store.close();
   let ordinal = 0;
@@ -361,6 +362,63 @@ test("超限/杂物载荷 ⇒ **带码拒收**（回退旧链路）且零写入�
       assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM recompute_jobs"), 0);
       assert.equal((db.prepare("SELECT raw_generation AS raw FROM import_generations WHERE singleton=1").get() as { raw: number }).raw, 0);
     } finally { db.close(); }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-4（2026-10-15）：收口核心窗口 (2, 8] MiB 的正向覆盖。
+//
+// 为什么单列：2026-10-14 真机事故（2.41 MB 批被 400 硬拒）正落在该窗口，而当时全部
+// 测试只覆盖两个端点（<2 MiB 的夹具自证、>8 MiB 的拒收）——窗口内部与边界没有任何用例。
+// 上界再被调整、或比较符被改（`>` 变 `>=`）时，都不该没有测试拦住。
+// ---------------------------------------------------------------------------
+
+test("收口窗口 (2, 8] MiB：data-only 拒、统一接收器接受（P2-4）", async () => {
+  await fixture(async ({ main, input }) => {
+    // 批量记录把 xml 推过 2 MiB（record-only 上界），但仍在 8 MiB（直连上界）以内。
+    // startDate 逐条 +1 秒：canonical id 依赖它，重复时刻会让夹具撞唯一约束（造出真机不存在形态）。
+    const pad = (value: number): string => String(value).padStart(2, "0");
+    const bulk = Array.from({ length: 9_000 }, (_, index) => {
+      const moment = new Date(Date.UTC(2018, 0, 1, 0, 0, index));
+      const stamp = `${moment.getUTCFullYear()}-${pad(moment.getUTCMonth() + 1)}-${pad(moment.getUTCDate())} ` +
+        `${pad(moment.getUTCHours())}:${pad(moment.getUTCMinutes())}:${pad(moment.getUTCSeconds())} +0000`;
+      const uuid = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+      return `<Record type="${step}" sourceName="Watch" unit="count" value="10" startDate="${stamp}" endDate="${stamp}">` +
+        `<MetadataEntry key="RAIHealthKitSampleUUID" value="${uuid}"/></Record>`;
+    }).join("\n");
+    const windowed = await input(bulk);
+    const bytes = statSync(join(windowed.inputPath, "export.xml")).size;
+    assert.ok(bytes > 2 * 1024 * 1024 && bytes < 8 * 1024 * 1024,
+      `夹具必须落在收口窗口 (2, 8] MiB 内，实际 ${bytes} 字节`);
+    // 1) record-only 快通路在形状层超限 ⇒ 拒（大小检查先于 compatible，不解析、零写入）。
+    assert.equal(await applyDataOnlyImport(windowed), null,
+      ">2 MiB 载荷必须被 record-only 快通路拒收（两条车道的大小上界本就不同）");
+    // 2) 统一接收器必须接受同一载荷：窗口内合法，数据真的落库。
+    await applyOrFail(windowed);
+    const db = new DatabaseSync(main, { readOnly: true });
+    try {
+      assert.equal(scalar(db, "SELECT COUNT(*) AS n FROM health_records"), 9_000);
+    } finally { db.close(); }
+  });
+});
+
+test("边界：恰好等于 8 MiB 不算超（服务端语义是严格 >，P2-4）", async () => {
+  await fixture(async ({ input }) => {
+    // 精确构造：`record(a, value)` 的 xml 字节长度对 value 长度线性，按差值补足到恰好上界。
+    const skeleton = Buffer.byteLength(xml(record(a, "")), "utf8");
+    const filler = "1".repeat(8 * 1024 * 1024 - skeleton);
+    const exact = await input(record(a, filler));
+    assert.equal(statSync(join(exact.inputPath, "export.xml")).size, 8 * 1024 * 1024,
+      "夹具必须精确落在上界（构造偏差会让这条用例测的不是边界）");
+    // 恰好上界 ⇒ 预检通过（`direct-sync-ingest.ts:418` 是严格 `>`；本用例只走预检、不解析）。
+    const atBound = preflightDirectSyncPayload(exact.inputPath);
+    assert.ok(atBound.ok, `恰好 8 MiB 必须通过预检，实际：${JSON.stringify(atBound)}`);
+    // 对照：上界 +1 字节 ⇒ 必须以 xml_exceeds_bounds 拒收。
+    const over = await input(record(a, filler + "1"));
+    assert.equal(statSync(join(over.inputPath, "export.xml")).size, 8 * 1024 * 1024 + 1);
+    const overBound = preflightDirectSyncPayload(over.inputPath);
+    assert.ok(!overBound.ok && overBound.rejection.reason === "xml_exceeds_bounds",
+      `8 MiB+1 必须拒收且带对应 reason，实际：${JSON.stringify(overBound)}`);
   });
 });
 

@@ -28,7 +28,6 @@ import { ImportWorker } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 import { readImportReceipt } from "../src/import-publication.js";
-import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 import type { ImportDatabaseTask } from "../src/import-database-tasks.js";
 
 const project = resolve(import.meta.dirname, "../../..");
@@ -89,7 +88,6 @@ async function fixture(
   store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
   // 快通路资格 stamp **故意写上**：这样"record-only 拒收"只可能由**载荷形状**造成，
   // 而不是"缺 stamp 导致谁都不合格"。拒收原因越单一，这条用例证明的东西越清楚。
-  store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
   store.setProfile({ dateOfBirth: "1990-01-01" });
   store.close();
   const make = () => new ImportWorker(main, project, root, () => {

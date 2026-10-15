@@ -195,29 +195,3 @@ export function readDatabaseImportIdentity(databasePath: string): DatabaseImport
     database?.close();
   }
 }
-
-/** Best-effort read of a single database's `dataset_version`; `null` when unknown. */
-export function readDatasetVersion(databasePath: string): string | null {
-  return readDatabaseImportIdentity(databasePath)?.datasetVersion ?? null;
-}
-
-/**
- * Records the anchor for a database that has just absorbed `anchor.datasetVersion`.
- *
- * Mirrors `writeImportReceipt`: the row is written with `synchronous = FULL` and
- * then the WAL is checkpointed into the main file. The checkpoint is not
- * cosmetic — activation installs a database with a plain `rename`, which carries
- * the main file only, so an uncheckpointed row would be silently dropped.
- */
-export function writeImportPayloadAnchor(databasePath: string, anchor: ImportPayloadAnchor): void {
-  const database = new DatabaseSync(databasePath);
-  try {
-    database.exec("PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL");
-    database
-      .prepare("INSERT OR REPLACE INTO import_manifest (key, value) VALUES (?, ?)")
-      .run(IMPORT_PAYLOAD_ANCHOR_KEY, JSON.stringify(anchor));
-    database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-  } finally {
-    database.close();
-  }
-}

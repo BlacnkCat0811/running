@@ -758,6 +758,10 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
         : ["data_only_transaction"],
       importMode: "incremental",
       insertedWorkouts: changes.inserted, updatedWorkouts: changes.updated, removedWorkouts: changes.removed,
+      // 口径（2026-10-15，P3-e）：该字段 = 从库读的**会话总数**（历史语义、对外回执字段，勿按
+      // "本批未变化数"解读）。no-op 路径下它恰好等于"未变更数"——那是该场景的事实
+      // （`import-worker.ts` 的 PayloadPreflight 注释），不是本字段的定义。表为百行级，
+      // 此 COUNT 不进热路径（10-15 库量快照：workouts 287）。
       unchangedWorkouts: Number(db.prepare("SELECT COUNT(*) AS n FROM training_sessions").get()!.n),
       routesUpdated: routes.importedRouteCount,
       featuresReused: 0, featuresRecomputed: 0, modelReplayFrom: null,

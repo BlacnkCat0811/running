@@ -7,8 +7,7 @@ import { RaiDatabase } from "@rai/storage-sqlite";
 import {
   DATA_ONLY_MAX_XML_BYTES, DATA_ONLY_MAX_RECORDS, DATA_ONLY_RECORD_TYPES,
   DATA_ONLY_WRITE_GUARD, RecordDeltaNotEligibleError, isDataOnlyRecordXml,
-  identityAlgorithmFingerprint, parseAppleHealthXml, parseHealthSyncManifest, NATIVE_VERSION,
-  CANONICAL_NIGHT_ALGORITHM_VERSION
+  identityAlgorithmFingerprint, parseAppleHealthXml, parseHealthSyncManifest, NATIVE_VERSION
 } from "@rai/health-export-parser";
 import { createHash } from "node:crypto";
 import { readImportReceiptInDatabase, writeImportReceiptInDatabase } from "./import-publication.js";
@@ -16,17 +15,6 @@ import { assertDirectSyncRequestShape, directSyncParserOptions } from "./direct-
 import { importPayloadSha256 } from "./import-payload-identity.js";
 import { digestHealthKitRecordSnapshot } from "./import-sources.js";
 import { scoringHealthTypes } from "./health-change-plan.js";
-
-/** Only the completed candidate pipeline may attest that its derived baseline
- * matches today's policy. A raw parser stamp alone cannot prove canonical
- * recovery facts are current after a canonicalization algorithm upgrade. */
-export function dataOnlyBaselineContract(): string {
-  return createHash("sha256").update(JSON.stringify({
-    policy: "record-delta-v1", parser: CONTRACT_VERSION, identity: identityAlgorithmFingerprint(),
-    canonicalNights: CANONICAL_NIGHT_ALGORITHM_VERSION, timezone: DATABASE_TIMEZONE,
-    scoringTypes: scoringHealthTypes, deltaTypes: DATA_ONLY_RECORD_TYPES
-  })).digest("hex");
-}
 
 export interface DataOnlyImportInput {
   databasePath: string;
@@ -80,15 +68,18 @@ function installWriteGuards(db: DatabaseSync): void {
 
 function identityState(db: DatabaseSync): Map<string, string> {
   return new Map((db.prepare(`SELECT key,value FROM import_manifest
-    WHERE key IN ('dataset_version','parser_contract_version','parser_identity_algorithm','import_completed_at','data_only_baseline_contract')`)
+    WHERE key IN ('dataset_version','parser_contract_version','parser_identity_algorithm','import_completed_at')`)
     .all() as { key: string; value: string }[]).map(({ key, value }) => [key, value]));
 }
 
 function compatible(state: Map<string, string>): boolean {
+  // 2026-10-15（P1-1）：第 5 条件（`data_only_baseline_contract`）已按设计 §4.3 退役 ——
+  // `docs/SQLITE_DIRECT_SYNC_DESIGN.md:166`：「不再作为普通原始接收能否进入直接路径的门槛」。
+  // 该键在收口后没有任何生产写入方（旧写手随候选链路删除），继续检查它 = 对从未写过该键的库恒 false。
+  // 该基线契约哈希函数本体已随死代码清理批次（G4，2026-10-15）退役。
   return Boolean(state.get("dataset_version") && state.get("import_completed_at")
     && state.get("parser_contract_version") === CONTRACT_VERSION
-    && state.get("parser_identity_algorithm") === identityAlgorithmFingerprint()
-    && state.get("data_only_baseline_contract") === dataOnlyBaselineContract());
+    && state.get("parser_identity_algorithm") === identityAlgorithmFingerprint());
 }
 
 /** Executed only under the API's existing writer admission, off the HTTP thread.
@@ -178,6 +169,8 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
           summary = {
             recomputeReasons: ["data_only_transaction"], importMode: "incremental",
             insertedWorkouts: 0, updatedWorkouts: 0, removedWorkouts: 0,
+            // 口径（2026-10-15，P3-e）：同 `direct-sync-ingest.ts` 的同名字段 —— 从库读的
+            // **会话总数**（历史语义、对外回执字段），勿按"本批未变化数"解读。
             unchangedWorkouts: Number(db.prepare("SELECT COUNT(*) AS n FROM training_sessions").get()!.n),
             routesUpdated: 0, featuresReused: 0, featuresRecomputed: 0, modelReplayFrom: null,
             durationMs: Date.now() - input.startedAtMs, backupName: null,

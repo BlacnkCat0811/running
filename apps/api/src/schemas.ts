@@ -692,13 +692,6 @@ const importJobResponseSchema = {
         validationMode: { type: "string", enum: ["shadow", "off", "not-run"] },
         totalMs: { type: "number", minimum: 0 },
         computeStagesMs: { type: "object", additionalProperties: { type: "number", minimum: 0 } },
-        computeProcessMaxRssKiB: { type: "number", minimum: 0 },
-        native: { type: "object", additionalProperties: {
-          type: "object", properties: {
-            rustCalls: { type: "integer", minimum: 0 }, typescriptFallbacks: { type: "integer", minimum: 0 },
-            wallMs: { type: "number", minimum: 0 }, peakRssKiB: { type: "number", minimum: 0 }
-          }
-        } },
         stagesMs: {
           type: "object",
           additionalProperties: false,

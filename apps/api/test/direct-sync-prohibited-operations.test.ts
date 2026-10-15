@@ -38,7 +38,6 @@ import { ImportWorker } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 import { readImportReceipt } from "../src/import-publication.js";
-import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 import type { ImportDatabaseTask } from "../src/import-database-tasks.js";
 
 const project = resolve(import.meta.dirname, "../../..");
@@ -184,7 +183,6 @@ async function fixture(run: (ctx: {
   store.setManifest("parser_contract_version", CONTRACT_VERSION);
   store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
   store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
-  store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
   store.close();
   const make = (enabled = true) => new ImportWorker(main, project, root, () => {
     throw new Error("delta must not enter the replacement gate");

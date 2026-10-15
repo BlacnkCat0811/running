@@ -106,8 +106,8 @@ test("engine mismatch is refused explicitly instead of silently switching engine
       await new Promise((done) => setTimeout(done, 30));
     }
     const done = worker.get(job.id);
-    // 收口后"不静默切换引擎"升级为"显式拒绝"：`waiting_engine` 挂起机制随候选链路退场
-    // （`nativeFailure` 恒 null ⇒ 分支不可达），引擎不符的 job 直接失败并**保留输入**，
+    // 收口后"不静默切换引擎"升级为"显式拒绝"：引擎不符时的挂起重试机制随候选链路
+    // 退场（G4，2026-10-15：其写入端已一并退役），引擎不符的 job 直接失败并**保留输入**，
     // 供重试/诊断——绝不偷偷换成 TS 跑。
     assert.equal(done?.status, "failed", JSON.stringify(done));
     assert.equal((done as { failureCode?: string } | undefined)?.failureCode, "direct_sync_unavailable");

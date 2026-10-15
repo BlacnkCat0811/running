@@ -1,5 +1,4 @@
 import { CONTRACT_VERSION, DATABASE_TIMEZONE } from "@rai/contracts";
-import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { copyFile, mkdir, readdir, rename, rm } from "node:fs/promises";
@@ -7,15 +6,10 @@ import { basename, dirname, resolve } from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { analyzeDatasetChange, type ImportDatasetChange } from "./import-dataset-analysis.js";
-import {
-  computeImportPayloadSha256,
-  readDatabaseImportIdentity,
-  readDatasetVersion,
-  writeImportPayloadAnchor
-} from "./import-payload-identity.js";
+import { computeImportPayloadSha256, readDatabaseImportIdentity } from "./import-payload-identity.js";
 
 import type {
-  ImportExecutionEngine, ImportJobResponse, ImportJobPerformance, ImportLaneRejection, ImportLaneTelemetry, ImportStage
+  ImportExecutionEngine, ImportJobResponse, ImportLaneRejection, ImportLaneTelemetry, ImportStage
 } from "@rai/api-contracts";
 import { currentAbilityBaselineHash } from "@rai/application";
 import {
@@ -31,7 +25,7 @@ import {
 import { isStructurallyReadable, RaiDatabase } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
 import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
-import { dataOnlyBaselineContract, type DataOnlyImportResult } from "./data-only-import.js";
+import { type DataOnlyImportResult } from "./data-only-import.js";
 import { isDirectSyncRejection, type DirectSyncImportResult, type DirectSyncRejection } from "./direct-sync-ingest.js";
 import { planDirectSyncLane } from "./direct-sync-plan.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
@@ -40,7 +34,7 @@ import { RuntimeStateStore } from "./runtime-state.js";
 
 import { ImportPublicationJournal, readImportReceipt, writeImportReceipt } from "./import-publication.js";
 import type { TaskAdmission } from "./task-admission.js";
-import { terminateProcessTree, waitForShutdown } from "./worker-process.js";
+import { waitForShutdown } from "./worker-process.js";
 
 /** Client-visible failure text; diagnostics stay in server logs and internal runtime state. */
 export const PUBLIC_IMPORT_FAILURE_ERROR = "导入失败，请查看服务日志";
@@ -177,89 +171,6 @@ interface PayloadPreflight {
   unchangedWorkouts: number;
 }
 
-/**
- * `rai:compute-performance` 的 stage 名格式：字母开头，后接字母/数字/下划线。
- *
- * 🔴 这里曾经是一份**硬编码白名单**（`features` / `trainingMetrics` / `modelReplay` /
- * `parse_health_xml` / `import_gpx_routes` / `canonicalize_workouts` / `canonicalize_nights` /
- * `stage_audit_files`）。2026-09-21 在 `packages/health-export-parser/src/cli.ts` 里新增了
- * 7 个 `timedStage` 埋点后，线上 `computeStagesMs` **一个都没出现、且零报错** ——
- * 发送端改了、接收端白名单没改，新埋点被静默丢弃。
- *
- * 而 `computeStagesMs` 的契约本身就是**开放字典**（`packages/api-contracts/src/index.ts`
- * 的 `Record<string, number>` + `apps/api/src/schemas.ts` 的
- * `additionalProperties: { type: "number" }`）—— 白名单与契约不一致。
- * 改成格式校验：去掉「每加一个埋点就要改两处」的隐藏耦合，同时仍限制子进程
- * 不能往 `performance_json` 里注入任意键。
- */
-export const COMPUTE_STAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,47}$/;
-
-/** 解析一条 `rai:compute-performance` 消息；不合法返回 `null`。导出以便单测。 */
-export function parseComputeStageMessage(message: unknown): {
-  stage: string;
-  durationMs: number;
-  processMaxRssKiB: number | null;
-} | null {
-  if (typeof message !== "object" || message === null) return null;
-  const payload = message as { type?: unknown; stage?: unknown; durationMs?: unknown; processMaxRssKiB?: unknown };
-  if (payload.type !== "rai:compute-performance") return null;
-  if (typeof payload.stage !== "string" || !COMPUTE_STAGE_NAME_PATTERN.test(payload.stage)) return null;
-  if (typeof payload.durationMs !== "number" || !Number.isFinite(payload.durationMs) || payload.durationMs < 0) return null;
-  return {
-    stage: payload.stage,
-    durationMs: payload.durationMs,
-    processMaxRssKiB: typeof payload.processMaxRssKiB === "number" && Number.isFinite(payload.processMaxRssKiB) && payload.processMaxRssKiB >= 0
-      ? payload.processMaxRssKiB
-      : null
-  };
-}
-
-/**
- * `rai:native-engine` 的 operation 名格式：小写字母开头，后接小写字母/数字/连字符。
- *
- * 🔴 这里曾经是一份**硬编码白名单**（`["health","gpx","aggregate","apply-records"]`）——
- * 它与上面 `computeStagesMs` 那次是**同一个坑的下一处**：Rust 侧新增一个 operation 时，
- * 发送端（`packages/health-export-parser/src/native-worker.ts` 的 `NATIVE_OPERATIONS`）、
- * Rust 二进制、CLI 都得改，而这份白名单是**唯一改了也不报错**的一处 ——
- * 新 operation 的 `rustCalls` / `wallMs` / `peakRssKiB` 会被静默吃掉，
- * `performance.native` 里就是没有它，`/v1/data-summary` 的 `issues` 也照旧是 `[]`。
- *
- * 而 `native` 的契约本身就是**开放字典**（`packages/api-contracts/src/index.ts` 的
- * `Record<string, { rustCalls; typescriptFallbacks; wallMs; peakRssKiB }>` +
- * `apps/api/src/schemas.ts` 的 `additionalProperties: {...}`）—— 白名单与契约不一致。
- * 改成格式校验：去掉「每加一个 operation 就要改两处」的隐藏耦合，同时仍限制子进程
- * 不能往 `performance_json` 里注入任意键。
- *
- * ⚠️ 紧邻的 `rai:native-failure` 那份 `["unavailable","invalid_protocol"]` **不属此类**：
- * 它是**语义判定表**（哪些 code 意味着"引擎不可用、必须拦住回退"），改它会改变行为，
- * 所以刻意保留为显式判定，不做格式校验。
- */
-export const NATIVE_OPERATION_NAME_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
-
-/** 解析一条 `rai:native-engine` 消息；不合法返回 `null`。导出以便单测。 */
-export function parseNativeEngineMessage(message: unknown): {
-  operation: string;
-  actual: "rust" | "typescript";
-  durationMs: number;
-  peakRssKiB: number | null;
-} | null {
-  if (typeof message !== "object" || message === null) return null;
-  const payload = message as { type?: unknown; operation?: unknown; actual?: unknown; durationMs?: unknown; peakRssKiB?: unknown };
-  if (payload.type !== "rai:native-engine") return null;
-  if (typeof payload.operation !== "string" || !NATIVE_OPERATION_NAME_PATTERN.test(payload.operation)) return null;
-  if (payload.actual !== "rust" && payload.actual !== "typescript") return null;
-  if (typeof payload.durationMs !== "number" || !Number.isFinite(payload.durationMs) || payload.durationMs < 0) return null;
-  // 与 `parseComputeStageMessage` 对齐：单个可选字段非法只降级成"没上报"，不整条丢弃。
-  return {
-    operation: payload.operation,
-    actual: payload.actual,
-    durationMs: payload.durationMs,
-    peakRssKiB: typeof payload.peakRssKiB === "number" && Number.isFinite(payload.peakRssKiB) && payload.peakRssKiB >= 0
-      ? payload.peakRssKiB
-      : null
-  };
-}
-
 export interface ImportQueueOptions {
   engine?: ImportExecutionEngine;
   /** Roll back to the candidate-publication path without changing sync identity. */
@@ -292,17 +203,12 @@ export class ImportWorker {
   private closing = false;
   private timer: NodeJS.Timeout | null = null;
   private runPromise: Promise<void> | null = null;
-  private activeChild: ChildProcess | null = null;
   private activeAnalysis: Worker | null = null;
   private activeJob: MutableImportJob | null = null;
   private cancelRequested = false;
   private readonly publicationJournal: ImportPublicationJournal | undefined;
   private computeStagesMs: Record<string, number> = {};
-  private computeProcessMaxRssKiB = 0;
   private recoveryBlocked = false;
-  private engineBlockedJobId: string | null = null;
-  private nativeFailure: string | null = null;
-  private nativeStats: NonNullable<ImportJobPerformance["native"]> = {};
 
   constructor(
     private readonly databasePath: string,
@@ -362,7 +268,6 @@ export class ImportWorker {
         try { this.persistJobs(); } catch (error) { delete job.queue.cancelRequested; throw error; }
       }
       this.cancelRequested = true;
-      if (this.activeChild) await terminateProcessTree(this.activeChild);
       await this.activeAnalysis?.terminate();
       return "requested";
     }
@@ -370,7 +275,6 @@ export class ImportWorker {
     Object.assign(job, { status: "cancelled", phase: "cancelled", message: "导入已取消", completedAt: new Date().toISOString() });
     try { this.persistJobs(); } catch (error) { Object.assign(job, previous); throw error; }
     await this.runTerminalCallbackWithRetry(job, false, true);
-    if (this.engineBlockedJobId === id) { this.engineBlockedJobId = null; this.scheduleNext(); }
     return "cancelled";
   }
 
@@ -380,7 +284,6 @@ export class ImportWorker {
       item.queue.scope === this.queueOptions!.scope &&
       (item.status === "queued" || ["succeeded", "failed", "cancelled"].includes(item.status)));
     if (!job) { this.queueOptions.admission.withdraw(); return; }
-    if (job.id === this.engineBlockedJobId) { this.queueOptions.admission.withdraw(); return; }
     this.timer = setTimeout(() => {
       this.timer = null;
       const release = this.queueOptions!.admission.acquire();
@@ -515,10 +418,8 @@ export class ImportWorker {
     let terminationError: unknown;
     try {
       await this.activeAnalysis?.terminate();
-      if (this.activeChild) await terminateProcessTree(this.activeChild);
     } catch (error) {
       terminationError = error;
-      this.activeChild?.kill("SIGKILL");
     } finally {
       if (terminationError) await waitForShutdown(this.runPromise, 3_000);
       else await this.runPromise;
@@ -548,18 +449,13 @@ export class ImportWorker {
   }
 
   private async run(job: MutableImportJob): Promise<void> {
-    this.nativeFailure = null;
-    this.nativeStats = {};
     // Pre-upgrade queued jobs have no engine stamp and must stay TypeScript.
     const engine = job.queue
       ? job.queue.engine ?? { name: "typescript" as const, version: NATIVE_VERSION, fallback: "none" as const }
       : this.executionEngine;
     const attempt = job.queue ? `.attempt-${job.queue.attempts}` : "";
     const nativeSpoolRoot = resolve(this.runtimeRoot, "var", `native.${job.id}${attempt}`);
-    const engineArgs = ["--engine", engine.name, "--native-version", engine.version, "--native-fallback", engine.fallback,
-      "--native-spool-root", nativeSpoolRoot];
     this.computeStagesMs = {};
-    this.computeProcessMaxRssKiB = 0;
     const startedAtMs = Date.now();
     const timing = new ImportPerformanceTracker();
     const stagingDatabase = resolve(this.runtimeRoot, "var", `rai.importing.${job.id}${attempt}.sqlite`);
@@ -797,16 +693,13 @@ export class ImportWorker {
       console.error(`Import job ${job.id} failed: ${detail}`);
       publishTerminalState = () => {
         // publicJob must never expose these internal diagnostics.
-        const waitForEngine = Boolean(job.queue && ["unavailable", "invalid_protocol"].includes(this.nativeFailure ?? ""));
-        const resume = Boolean(waitForEngine || (this.queueOptions && this.closing && job.queue && !this.cancelRequested));
-        if (waitForEngine) {
-          this.engineBlockedJobId = job.id;
-          job.queue!.attempts = Math.max(0, job.queue!.attempts - 1);
-        }
+        // G4（2026-10-15）：执行器不可用时的挂起重试机制（原 waitForEngine 逻辑与
+        // waitingEngine 挂起相位）随 CLI 子进程链路退场（其唯一写入端是已删的
+        // command() IPC 回调）；closing 时的优雅恢复（resume）保留。
+        const resume = Boolean(this.queueOptions && this.closing && job.queue && !this.cancelRequested);
         job.status = resume ? "queued" : this.cancelRequested ? "cancelled" : "failed";
         job.phase = resume ? "queued" : this.cancelRequested ? "cancelled" : "failed";
         job.message = resume ? "服务停止，重启后继续导入" : this.cancelRequested ? "导入已取消" : "导入失败，原始导出文件未被修改";
-        if (waitForEngine) { job.phase = "waiting_engine"; job.message = "原任务的 Rust 执行器不可用，请安装匹配版本后重启服务"; }
         // The guard refusal is a deliberate safety stop, not an opaque crash, so
         // the operator is told exactly what was about to be deleted and why.
         job.error = resume || this.cancelRequested ? null : removalGuard ? removalGuard.userMessage : detail;
@@ -833,8 +726,6 @@ export class ImportWorker {
           job.performance = {
             ...timing.snapshot(),
             computeStagesMs: { ...this.computeStagesMs },
-            computeProcessMaxRssKiB: this.computeProcessMaxRssKiB
-            ,native: { ...this.nativeStats },
             ...(laneTelemetry === null ? {} : { lane: laneTelemetry })
           };
           publishTerminalState?.();
@@ -980,9 +871,12 @@ export class ImportWorker {
   /**
    * Payload identity of an import's input, or `null` when it cannot be computed.
    *
-   * A payload that cannot be read is *not* a pre-flight failure: the import itself
-   * will report the real problem with a proper message. Failing here would turn an
-   * optimisation into a new way to fail an import.
+   * 🔴 2026-10-15（P3-d）语义订正：本注释曾写 "A payload that cannot be read is *not* a
+   * pre-flight failure … Failing here would turn an optimisation into a new way to fail an
+   * import." —— 那是收口（S3.1）**之前**的行为。现在直连段调用方把 `null` 升级为
+   * `ImportLaneRefusal(["payload_identity_unavailable"])` 的**带码终态失败**，这是刻意的
+   * 语义变更（"算不出摘要 ⇒ 静默回退旧链路"的路径随候选链路一并删除）。照旧注释"改回
+   * 静默回退"会重新打开 S3.1 关掉的缺口。本方法自身分工不变：只报告状态、不下处置判断。
    */
   private async payloadSha256(job: MutableImportJob, engine: ImportExecutionEngine): Promise<string | null> {
     try {
@@ -1048,25 +942,6 @@ export class ImportWorker {
       return this.countRows(this.databasePath, "training_sessions");
     } catch {
       return 0;
-    }
-  }
-
-  /**
-   * Records the payload identity for the database that is about to become live.
-   *
-   * Best-effort by design: the anchor is an optimisation, so a failure to write it
-   * must not fail an import that has already succeeded. It is logged rather than
-   * swallowed so that a persistently failing anchor stays visible.
-   */
-  private recordPayloadAnchor(databasePath: string, sha256: string | null): void {
-    if (sha256 === null) return;
-    const datasetVersion = readDatasetVersion(databasePath);
-    if (datasetVersion === null) return;
-    try {
-      writeImportPayloadAnchor(databasePath, { sha256, datasetVersion });
-    } catch (error) {
-      const message = error instanceof Error ? error.stack ?? error.message : String(error);
-      process.stderr.write(`Recording the payload anchor failed: ${message}\n`);
     }
   }
 
@@ -1891,78 +1766,6 @@ export class ImportWorker {
     const prefix = `${basename(stagingDatabase)}.replaced.`;
     const names = (await readdir(directory)).filter((name) => name.startsWith(prefix));
     await Promise.all(names.map((name) => this.removeDatabaseFiles(resolve(directory, name))));
-  }
-
-  private command(args: string[]): Promise<void> {
-    if (this.closing) return Promise.reject(new Error("Import worker is shutting down"));
-    return new Promise((resolvePromise, reject) => {
-      const child = spawn(process.execPath, args, {
-        cwd: this.projectRoot,
-        detached: process.platform !== "win32",
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe", "ipc"]
-      });
-      this.activeChild = child;
-      if (this.closing) void terminateProcessTree(child).catch(reject);
-      // Drain BOTH pipes, including successful commands. Keeping only bounded
-      // tails prevents a large export from filling a pipe or the API heap.
-      const outputLimit = 16_384;
-      let errorOutput = "";
-      let standardOutput = "";
-      let removalGuard: ImportRemovalGuardError | null = null;
-      child.on("message", (message: unknown) => {
-        if (typeof message === "object" && message !== null) {
-          const failure = message as { type?: unknown; code?: unknown };
-          // 刻意保留的**语义判定表**（不是过滤名单）：哪些 code 意味着"引擎不可用、必须拦住回退"。
-          if (failure.type === "rai:native-failure" && typeof failure.code === "string" &&
-              ["unavailable", "invalid_protocol"].includes(failure.code)) this.nativeFailure = failure.code;
-          // 白名单已移除：operation 名走格式校验（见 `parseNativeEngineMessage` 的文档）。
-          const nativeMetric = parseNativeEngineMessage(message);
-          if (nativeMetric) {
-            const previous = this.nativeStats[nativeMetric.operation] ?? { rustCalls: 0, typescriptFallbacks: 0, wallMs: 0, peakRssKiB: 0 };
-            if (nativeMetric.actual === "rust") previous.rustCalls++; else previous.typescriptFallbacks++;
-            previous.wallMs += nativeMetric.durationMs;
-            if (nativeMetric.peakRssKiB !== null) previous.peakRssKiB = Math.max(previous.peakRssKiB, nativeMetric.peakRssKiB);
-            this.nativeStats[nativeMetric.operation] = previous;
-          }
-        }
-        // 白名单已移除：stage 名走格式校验（见 `parseComputeStageMessage` 的文档）。
-        const computeStage = parseComputeStageMessage(message);
-        if (computeStage) {
-          this.computeStagesMs[computeStage.stage] = (this.computeStagesMs[computeStage.stage] ?? 0) + computeStage.durationMs;
-          if (computeStage.processMaxRssKiB !== null) {
-            this.computeProcessMaxRssKiB = Math.max(this.computeProcessMaxRssKiB, computeStage.processMaxRssKiB);
-          }
-        }
-        if (ImportRemovalGuardError.fromPayload(message)) {
-          removalGuard = ImportRemovalGuardError.fromPayload(message) ?? removalGuard;
-          // Acknowledge receipt before the child disconnects so the guard
-          // cannot be lost between IPC delivery and the close event.
-          if (child.connected) child.send({ type: "rai:removal-guard-ack" });
-        }
-      });
-      child.stdout?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk: string) => {
-        standardOutput = `${standardOutput}${chunk}`.slice(-outputLimit);
-      });
-      child.stderr?.setEncoding("utf8");
-      child.stderr?.on("data", (chunk: string) => {
-        errorOutput = `${errorOutput}${chunk}`.slice(-outputLimit);
-      });
-      child.on("error", (error) => {
-        if (this.activeChild === child) this.activeChild = null;
-        reject(error);
-      });
-      child.on("close", (code, signal) => {
-        if (this.activeChild === child) this.activeChild = null;
-        if (code === 0) resolvePromise();
-        else reject(removalGuard ?? new Error([
-          `Import subprocess failed (code=${String(code)}, signal=${signal ?? "none"})`,
-          ...(errorOutput.trim() ? [`stderr:\n${errorOutput.trim()}`] : []),
-          ...(standardOutput.trim() ? [`stdout:\n${standardOutput.trim()}`] : [])
-        ].join("\n")));
-      });
-    });
   }
 
   private assertNotClosing(): void {

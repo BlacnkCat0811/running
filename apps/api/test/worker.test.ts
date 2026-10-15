@@ -8,7 +8,6 @@ import test from "node:test";
 
 import { RaiApplicationService, currentAbilityBaselineHash } from "@rai/application";
 import { healthTypes, PROHIBITED_DIRECT_SYNC_OPERATIONS, type PredictionModelTrainingRequest } from "@rai/contracts";
-import { ImportRemovalGuardError } from "@rai/health-export-parser";
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 import { DatabaseMaintenance } from "../src/maintenance.js";
@@ -72,7 +71,6 @@ interface ImportWorkerTestSurface {
   removeDatabaseFile(path: string): Promise<void>;
   reclaimDisplacedImportDatabases(stagingDatabase: string): Promise<void>;
   persistJobs(): void;
-  command(args: string[]): Promise<void>;
   run(job: Record<string, unknown>): Promise<void>;
 }
 
@@ -2629,28 +2627,8 @@ test("失败批次公开层只给受控文案：无泄漏，且跨重启保持�
   }
 });
 
-test("rejects malformed guard IPC without treating child text as a public error", async () => {
-  const root = mkdtempSync(join(tmpdir(), "rai-worker-invalid-guard-"));
-  const worker = new ImportWorker(join(root, "rai.sqlite"), root, root);
-  try {
-    const surface = worker as unknown as ImportWorkerTestSurface;
-    await assert.rejects(surface.command(["-e", `
-      process.send({code:'import_removal_guard', preview:{workouts:'private/path'}, userMessage:'private/path'}, () => {
-        process.stderr.write('ordinary failure');
-        process.exitCode = 1;
-        process.disconnect();
-      });
-    `]), (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.equal(error instanceof ImportRemovalGuardError, false);
-      assert.match(error.message, /ordinary failure/);
-      return true;
-    });
-  } finally {
-    await worker.close();
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+// G4（2026-10-15）："rejects malformed guard IPC…" 用例已随 command() IPC 面退役 ——
+// CLI 子进程链路删除后，该 IPC 通道与其 malformed-guard 分支不再存在。
 
 
 for (const operation of ["add", "clear", "repeat", "upgrade"] as const) {

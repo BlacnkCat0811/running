@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -10,10 +10,9 @@ import { CONTRACT_VERSION, healthTypes } from "@rai/contracts";
 import { RaiDatabase } from "@rai/storage-sqlite";
 import { identityAlgorithmFingerprint, parseAppleHealthXml, isDataOnlyRecordXml, NATIVE_VERSION,
   DATA_ONLY_RECORD_TYPES } from "@rai/health-export-parser";
-import { applyDataOnlyImport, dataOnlyBaselineContract, type DataOnlyImportInput } from "../src/data-only-import.js";
+import { applyDataOnlyImport, type DataOnlyImportInput } from "../src/data-only-import.js";
 import { readImportReceipt } from "../src/import-publication.js";
-import { importPayloadSha256 } from "../src/import-payload-identity.js";
-import { digestHealthKitRecordSnapshot } from "../src/import-sources.js";
+import { computeImportPayloadSha256 } from "../src/import-payload-identity.js";
 import { scoringHealthTypes } from "../src/health-change-plan.js";
 
 const a = "00000000-0000-0000-0000-00000000000a";
@@ -41,7 +40,7 @@ function snapshot(path: string): Record<string, unknown[]> {
 
 async function fixture(run: (ctx: {
   root: string; main: string;
-  input(rows?: string, deletions?: { type: string; uuid: string }[], job?: string): DataOnlyImportInput;
+  input(rows?: string, deletions?: { type: string; uuid: string }[], job?: string): Promise<DataOnlyImportInput>;
   seed(rows: string): Promise<void>;
 }) => Promise<void>): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), "rai-data-only-atomic-"));
@@ -51,21 +50,25 @@ async function fixture(run: (ctx: {
   store.setManifest("parser_contract_version", CONTRACT_VERSION);
   store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
   store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
-  store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
   store.setProfile({ dateOfBirth: "1990-01-01" });
   store.close();
   let ordinal = 0;
-  const input = (rows = "", deletions: { type: string; uuid: string }[] = [], job = "delta") => {
+  const input = async (rows = "", deletions: { type: string; uuid: string }[] = [], job = "delta") => {
     const inputPath = join(root, `input-${ordinal++}`);
     mkdirSync(inputPath);
     writeFileSync(join(inputPath, "export.xml"), xml(rows));
     writeFileSync(join(inputPath, "sync-manifest.json"), JSON.stringify({
       version: 2, sourceScope: "healthkit", sourceIds: [], deletedSourceIds: [], deletedRecords: deletions
     }));
-    const payloadSha256 = importPayloadSha256(digestHealthKitRecordSnapshot(
-      readFileSync(join(inputPath, "export.xml"), "utf8"), readFileSync(join(inputPath, "sync-manifest.json"), "utf8")
-    ), { preserveAbsent: true, contractVersion: CONTRACT_VERSION,
-      engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint() });
+    // 2026-10-15（P2-8）：摘要必须用**生产端同一个函数**算（worker 的 `computeImportPayloadSha256`）。
+    // 从前这里用 `digestHealthKitRecordSnapshot`（= 被复核方自己的配方）——与生产准入的
+    // `computeImportPayloadSha256` 只在"目录里恰好没有 workout-routes/"时字节相同，靠
+    // `data-only-import.ts:107` 的目录形状检查"远距离兜着"。改用生产函数后，"准入摘要 ==
+    // 复核摘要"从巧合变成被测试钉住的契约（姊妹车道 `direct-sync-ingest.test.ts:109-113` 同款教训）。
+    const payloadSha256 = await computeImportPayloadSha256(inputPath, {
+      preserveAbsent: true, contractVersion: CONTRACT_VERSION,
+      engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint()
+    });
     return { databasePath: main, inputPath, jobId: job, payloadSha256, startedAtMs: Date.now() };
   };
   const seed = async (rows: string) => {
@@ -109,7 +112,7 @@ test("raw inserts, corrections, deletions, UUID facts, ledger and receipt commit
     oldReader.exec("BEGIN");
     assert.equal(oldReader.prepare("SELECT SUM(value_numeric) AS n FROM health_records").get()!.n, 109);
     try {
-      const batch = input(record(a, "20") + record(b, "65", "HKQuantityTypeIdentifierBodyMass"),
+      const batch = await input(record(a, "20") + record(b, "65", "HKQuantityTypeIdentifierBodyMass"),
         [{ type: step, uuid: c }]);
       const applied = await applyDataOnlyImport(batch);
       assert.ok(applied);
@@ -152,7 +155,7 @@ test("raw inserts, corrections, deletions, UUID facts, ledger and receipt commit
 
 test("a durable same-batch replay performs no writes and refuses a changed payload identity", async () => {
   await fixture(async ({ main, input }) => {
-    const batch = input(record(a));
+    const batch = await input(record(a));
     const first = await applyDataOnlyImport(batch);
     assert.ok(first);
     const before = snapshot(main);
@@ -161,7 +164,7 @@ test("a durable same-batch replay performs no writes and refuses a changed paylo
     assert.deepEqual(replay?.summary, first.summary);
     assert.deepEqual(snapshot(main), before);
     await assert.rejects(applyDataOnlyImport({ ...batch, payloadSha256: "b".repeat(64) }), /payload changed after admission/);
-    await assert.rejects(applyDataOnlyImport(input(record(a, "99"), [], batch.jobId)), /reused with different content/);
+    await assert.rejects(applyDataOnlyImport(await input(record(a, "99"), [], batch.jobId)), /reused with different content/);
     assert.deepEqual(snapshot(main), before);
   });
 });
@@ -169,7 +172,7 @@ test("a durable same-batch replay performs no writes and refuses a changed paylo
 test("SIGKILL immediately before the receipt write leaves no accepted facts or partial deletion state", { timeout: 30_000 }, async () => {
   await fixture(async ({ root, main, input, seed }) => {
     await seed(record(c));
-    const batch = input(record(a), [{ type: step, uuid: c }], "crash-before-receipt");
+    const batch = await input(record(a), [{ type: step, uuid: c }], "crash-before-receipt");
     const db = new DatabaseSync(main);
     db.exec(`CREATE TRIGGER pause_before_receipt BEFORE INSERT ON import_manifest
       WHEN NEW.key LIKE 'rai.applied-import.%' BEGIN SELECT hold_receipt(); END`);
@@ -221,9 +224,9 @@ test("SIGKILL immediately before the receipt write leaves no accepted facts or p
 
 test("deletion before arrival cannot resurrect a carried or later UUID", async () => {
   await fixture(async ({ main, input }) => {
-    assert.ok(await applyDataOnlyImport(input(record(a), [{ type: step, uuid: a }], "deleted-first")));
+    assert.ok(await applyDataOnlyImport(await input(record(a), [{ type: step, uuid: a }], "deleted-first")));
     assert.equal(snapshot(main).health_records!.length, 0);
-    assert.ok(await applyDataOnlyImport(input(record(a), [], "late-replay")));
+    assert.ok(await applyDataOnlyImport(await input(record(a), [], "late-replay")));
     assert.equal(snapshot(main).health_records!.length, 0);
     assert.equal(snapshot(main).import_source_tombstones!.length, 1);
     assert.ok(readImportReceipt(main, "late-replay"));
@@ -233,7 +236,7 @@ test("deletion before arrival cannot resurrect a carried or later UUID", async (
 test("a deletion-only delta restores a surviving shared UUID and records the correction", async () => {
   await fixture(async ({ main, input, seed }) => {
     await seed(record(a, "10", step, "vendor") + record(b, "20", step, "vendor"));
-    assert.ok(await applyDataOnlyImport(input("", [{ type: step, uuid: b }], "shared-delete")));
+    assert.ok(await applyDataOnlyImport(await input("", [{ type: step, uuid: b }], "shared-delete")));
     const db = new DatabaseSync(main, { readOnly: true });
     try {
       assert.equal(db.prepare("SELECT value_numeric FROM health_records").get()!.value_numeric, 10);
@@ -287,7 +290,7 @@ for (const [name, trigger] of [
       // A distinct natural identity is essential: equal legacy fields would
       // legitimately share C's canonical row and neither INSERT nor DELETE
       // triggers would run.
-      await assert.rejects(applyDataOnlyImport(input(record(a, "20"), [{ type: step, uuid: c }])));
+      await assert.rejects(applyDataOnlyImport(await input(record(a, "20"), [{ type: step, uuid: c }])));
       assert.deepEqual(snapshot(main), before);
       assert.equal(readImportReceipt(main, "delta"), null);
     });
@@ -301,7 +304,7 @@ test("a silently ignored canonical correction cannot be acknowledged with only t
     db.exec("CREATE TRIGGER ignore_correction BEFORE UPDATE ON health_records BEGIN SELECT RAISE(IGNORE); END");
     db.close();
     const before = snapshot(main);
-    await assert.rejects(applyDataOnlyImport(input(record(a, "20"))), /pre-commit assertion/);
+    await assert.rejects(applyDataOnlyImport(await input(record(a, "20"))), /pre-commit assertion/);
     assert.deepEqual(snapshot(main), before);
   });
 });
@@ -309,9 +312,9 @@ test("a silently ignored canonical correction cannot be acknowledged with only t
 test("profile drift rolls back earlier records and returns a no-write fallback", async () => {
   await fixture(async ({ main, input }) => {
     const before = snapshot(main);
-    assert.equal(await applyDataOnlyImport(input(record(a) + "<Me dateOfBirth=\"1980-01-01\"/>")), null);
+    assert.equal(await applyDataOnlyImport(await input(record(a) + "<Me dateOfBirth=\"1980-01-01\"/>")), null);
     assert.deepEqual(snapshot(main), before);
-    assert.ok(await applyDataOnlyImport(input(record(a) + "<Me dateOfBirth=\"1990-01-01\"/>", [], "same-profile")));
+    assert.ok(await applyDataOnlyImport(await input(record(a) + "<Me dateOfBirth=\"1990-01-01\"/>", [], "same-profile")));
   });
 });
 
@@ -324,7 +327,7 @@ test("an incoming non-scoring UUID mapped to a scoring row cannot evade the SQL 
     db.prepare("INSERT INTO healthkit_record_sources VALUES (?,?,?)").run(step, a, id);
     db.close();
     const before = snapshot(main);
-    assert.equal(await applyDataOnlyImport(input(record(a, "99"))), null);
+    assert.equal(await applyDataOnlyImport(await input(record(a, "99"))), null);
     assert.deepEqual(snapshot(main), before);
   });
 });
@@ -336,31 +339,27 @@ test("missing/old parser attestation and uninitialized legacy hashes use the nor
     db.prepare("DELETE FROM import_entity_generations WHERE entity_kind='record'").run();
     db.close();
     const before = snapshot(main);
-    assert.equal(await applyDataOnlyImport(input(record(a, "99"))), null);
+    assert.equal(await applyDataOnlyImport(await input(record(a, "99"))), null);
     assert.deepEqual(snapshot(main), before);
     const old = new DatabaseSync(main);
     old.prepare("DELETE FROM import_manifest WHERE key='parser_identity_algorithm'").run();
     old.close();
     const older = snapshot(main);
-    assert.equal(await applyDataOnlyImport(input(record(b), [], "older-parser")), null);
+    assert.equal(await applyDataOnlyImport(await input(record(b), [], "older-parser")), null);
     assert.deepEqual(snapshot(main), older);
   });
 });
 
-test("a stale derivation policy or missing UUID lookup index cannot qualify for data-only", async () => {
+test("a missing UUID lookup index cannot qualify for data-only", async () => {
   await fixture(async ({ main, input }) => {
-    const db = new DatabaseSync(main);
-    db.prepare("UPDATE import_manifest SET value='old-canonical-policy' WHERE key='data_only_baseline_contract'").run();
-    db.close();
-    const old = snapshot(main);
-    assert.equal(await applyDataOnlyImport(input(record(a))), null);
-    assert.deepEqual(snapshot(main), old);
+    // 2026-10-15（P1-1）：这里曾还有一段"陈旧 `data_only_baseline_contract` ⇒ 拒收"的断言。
+    // 该门槛已按设计 §4.3 退役（`docs/SQLITE_DIRECT_SYNC_DESIGN.md:166`：「不再作为……门槛」），
+    // 故整段删除；保留"UUID 查找索引缺失 ⇒ 拒收"（`:129` 的列序检查是活的准入门槛）。
     const current = new DatabaseSync(main);
-    current.prepare("UPDATE import_manifest SET value=? WHERE key='data_only_baseline_contract'").run(dataOnlyBaselineContract());
     current.exec("DROP INDEX idx_healthkit_record_aliases_source");
     current.close();
     const missing = snapshot(main);
-    assert.equal(await applyDataOnlyImport(input(record(a), [], "no-index")), null);
+    assert.equal(await applyDataOnlyImport(await input(record(a), [], "no-index")), null);
     assert.deepEqual(snapshot(main), missing);
   });
 });
@@ -368,15 +367,15 @@ test("a stale derivation policy or missing UUID lookup index cannot qualify for 
 test("workout deletions, routes and unknown record types cannot take the fast path", async () => {
   await fixture(async ({ main, input }) => {
     const before = snapshot(main);
-    const batch = input(record(a));
+    const batch = await input(record(a));
     mkdirSync(join(batch.inputPath, "workout-routes"));
     assert.equal(await applyDataOnlyImport(batch), null);
-    const deletion = input();
+    const deletion = await input();
     writeFileSync(join(deletion.inputPath, "sync-manifest.json"), JSON.stringify({
       version: 2, sourceScope: "healthkit", deletedSourceIds: ["workout"], deletedRecords: []
     }));
     assert.equal(await applyDataOnlyImport(deletion), null);
-    assert.equal(await applyDataOnlyImport(input(record(a, "10", "HKQuantityTypeIdentifierUnknown"))), null);
+    assert.equal(await applyDataOnlyImport(await input(record(a, "10", "HKQuantityTypeIdentifierUnknown"))), null);
     assert.deepEqual(snapshot(main), before);
   });
 });

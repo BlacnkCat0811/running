@@ -32,7 +32,6 @@ import { ImportWorker } from "../src/import-worker.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 import { readImportReceipt } from "../src/import-publication.js";
-import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 import type { ImportDatabaseTask } from "../src/import-database-tasks.js";
 import { RaiReadStore } from "../src/data.js";
 
@@ -141,7 +140,6 @@ test("A10：分析故障隔离——原回执不变、失败独立可见、重�
     store.setManifest("parser_contract_version", CONTRACT_VERSION);
     store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
     store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
-    store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
     store.setProfile({ dateOfBirth: "1990-01-01" });
     store.close();
 

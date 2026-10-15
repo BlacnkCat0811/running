@@ -125,9 +125,11 @@ dataset version、完成时间及 `rai.applied-import.<jobId>` 成功回执一�
 
 ### 接纳范围
 
-- 已建立基线、schema 与解析合同/身份指纹匹配，且完整候选管线已登记
-  `data_only_baseline_contract`（包含 canonical 恢复算法、时区和评分类型政策）；
-  v2 `healthkit`、preserve-absent。单独跑 raw parser 不构成派生基线资格。
+- 已建立基线、schema 与解析合同/身份指纹匹配；v2 `healthkit`、preserve-absent。
+  ⚠️ **2026-10-15 订正（P1-1）**：本节原文另有"完整候选管线已登记 `data_only_baseline_contract`
+  （包含 canonical 恢复算法、时区和评分类型政策）"一句 —— 该门槛已按设计 §4.3 退役
+  （`SQLITE_DIRECT_SYNC_DESIGN.md:166`：「不再作为普通原始接收能否进入直接路径的门槛」）。
+  单独跑 raw parser 不构成派生基线资格。
 - 当前先支持 TypeScript 执行身份、XML 与 manifest 各不超过 2 MiB、
   最多 5000 条 Record 和 5000 条删除事件的记录-only 包。
 - 封闭类型集合包括步数、体重、能量、步行/跑步距离、跑姿/功率、

@@ -649,8 +649,10 @@ export interface ImportLaneRejection {
 /**
  * 每次同步的**车道决策**遥测（`performance_json.lane`）。
  *
- * 验收口径（实施方案 §5.2 S1.3）：跑一条直连、一条回退，本字段分别为
+ * 验收口径（实施方案 §5.2 S1.3 的**时点记录**，2026-10-12）：跑一条直连、一条回退，本字段分别为
  * `outcome: "direct"`（`directSource` 标出哪条子车道）与 `outcome: "fallback"`（附 reasons/rejections）。
+ * ⚠️ 2026-10-15 注：收口（`ed556a3`）后"回退旧链路"已不存在 —— `fallback` 现在的含义是
+ * 「两条直连子车道都拒收、任务以稳定码终态失败」（reasons/rejections 一并携带）。
  * `unchanged` = 载荷与上次一致、在**车道判定之前**早退（既非直连也非回退）。
  */
 export interface ImportLaneTelemetry {
@@ -669,8 +671,9 @@ export interface ImportJobPerformance {
   totalMs: number;
   stagesMs: Partial<Record<ImportStage, number>>;
   computeStagesMs?: Record<string, number>;
-  computeProcessMaxRssKiB?: number;
-  native?: Record<string, { rustCalls: number; typescriptFallbacks: number; wallMs: number; peakRssKiB: number }>;
+  // ⚠️ 2026-10-15（G4）：`computeProcessMaxRssKiB` 与 `native` 两键已随 CLI 子进程链路退场
+  // 删除（唯一写入端 command() 的 IPC 回调退役；web/iOS 无消费者）。历史持久化作业行里的
+  // 残留键会被响应 schema（additionalProperties: false）剥掉。
   /** 每次同步的车道决策与拒因（观测版阶段 1；老持久化作业没有该键）。 */
   lane?: ImportLaneTelemetry;
 }

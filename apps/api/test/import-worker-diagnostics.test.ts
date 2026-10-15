@@ -9,61 +9,17 @@ import { ImportWorker, PUBLIC_IMPORT_FAILURE_ERROR } from "../src/import-worker.
 import { mobileRefreshOutcome } from "../src/mobile-sync.js";
 import { RuntimeStateStore } from "../src/runtime-state.js";
 
-interface CommandSurface {
-  command(args: string[]): Promise<void>;
-}
-
 function fixture(project?: string) {
   const root = mkdtempSync(join(tmpdir(), "rai-import-diagnostics-"));
   const worker = new ImportWorker(join(root, "rai.sqlite"), project ?? root, root);
   return {
     root, worker,
-    surface: worker as unknown as CommandSurface,
     async close() {
       await worker.close();
       rmSync(root, { recursive: true, force: true });
     }
   };
 }
-
-test("import command preserves stdout business failure, stderr warning, and exit code", async () => {
-  const f = fixture();
-  try {
-    await assert.rejects(f.surface.command(["-e", `
-      console.error("ExperimentalWarning: SQLite is an experimental feature");
-      console.log(JSON.stringify({status: "failed", error: {message: "fixture recompute business failure"}}));
-      process.exitCode = 7;
-    `]), (error: unknown) => {
-      assert.ok(error instanceof Error);
-      assert.match(error.message, /code=7, signal=none/);
-      assert.match(error.message, /stderr:\nExperimentalWarning/);
-      assert.match(error.message, /stdout:\n.*fixture recompute business failure/);
-      return true;
-    });
-  } finally { await f.close(); }
-});
-
-test("import command drains output larger than pipe capacity while retaining bounded tails",
-  { timeout: 10_000 }, async () => {
-    const f = fixture();
-    try {
-      const output = `
-        console.log("stdout-prefix-" + "x".repeat(2 * 1024 * 1024) + "-stdout-tail");
-        console.error("stderr-prefix-" + "y".repeat(2 * 1024 * 1024) + "-stderr-tail");
-      `;
-      // Successful children also need both pipes drained, not just failed ones.
-      await f.surface.command(["-e", output]);
-      await assert.rejects(f.surface.command(["-e", output + "process.exitCode = 1;"]),
-        (error: unknown) => {
-          assert.ok(error instanceof Error);
-          assert.ok(error.message.length < 34_000, "diagnostics must not retain the entire export");
-          assert.match(error.message, /-stdout-tail/);
-          assert.match(error.message, /-stderr-tail/);
-          assert.doesNotMatch(error.message, /stdout-prefix|stderr-prefix/);
-          return true;
-        });
-    } finally { await f.close(); }
-  });
 
 test("失败批次的诊断按持久化纪律落盘，且不留任何候选产物（S3.3：staging 链路已删）",
   { timeout: 60_000 }, async () => {
@@ -111,23 +67,6 @@ test("失败批次的诊断按持久化纪律落盘，且不留任何候选产�
     } finally { live.close(); }
   } finally { await f.close(); }
 });
-
-test("import command reports empty-output exits", async () => {
-  const f = fixture();
-  try {
-    await assert.rejects(f.surface.command(["-e", "process.exitCode = 3;"]),
-      /code=3, signal=none/);
-  } finally { await f.close(); }
-});
-
-test("import command reports terminating signals",
-  { skip: process.platform === "win32" }, async () => {
-    const f = fixture();
-    try {
-      await assert.rejects(f.surface.command(["-e", "process.kill(process.pid, 'SIGTERM');"]),
-        /code=null, signal=SIGTERM/);
-    } finally { await f.close(); }
-  });
 
 test("失败批次的诊断跨清理与重启保持，且不泄漏到公共/移动端 DTO（S3.3：收口路径）",
   { timeout: 10_000 }, async () => {

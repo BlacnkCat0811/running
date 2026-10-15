@@ -94,6 +94,15 @@ export function registerImportRoutes(app: FastifyInstance, dependencies: {
       // 盘上没有可预检的载荷，跳过 `preflightDirectSyncPayload` 直接返回 `inspection`
       // （`lastUsedAt` 非空 ⇒ `status:"unchanged"`，这是重放/恢复场景的正确结局）。
       // 不加这一条时：对缺失目录 `readdirSync` 抛 ENOENT ⇒ 500（收口版引入的回归）。
+      //
+      // 🔴 2026-10-15（P2-5）：目录缺失必须**分流** ——「已导入 ⇒ unchanged」保持原语义；
+      // 但"从未导入"的来源拿到 `ready` 是**乐观信号**（目录都不在了，客户端 startImport
+      // 必然 `missing_required_files`）。此处直接 404：iOS 的 `sourceGoneStatusCode` 分支
+      // 会清任务并重新上传（自愈），把"检查通过后失败"变成"检查时如实失败"。
+      // ⚠️ 不用 410：iOS 没有 410 的处置分支（会落 `.keepTask` 活锁）。
+      if (source && !existsSync(source.inputPath) && inspection.status === "ready") {
+        return reply.code(404).send({ message: "暂存上传已不存在，请重新上传" });
+      }
       if (source && existsSync(source.inputPath)) {
         const preflight = preflightDirectSyncPayload(source.inputPath);
         if (!preflight.ok) {

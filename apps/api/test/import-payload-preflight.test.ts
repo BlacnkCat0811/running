@@ -17,7 +17,6 @@ import {
   readDatabaseImportIdentity
 } from "../src/import-payload-identity.js";
 import { ImportWorker } from "../src/worker.js";
-import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 
@@ -29,10 +28,21 @@ import { TaskAdmissionScheduler } from "../src/task-admission.js";
  * guard which makes a short-circuit unsound actually disables it.
  */
 
+/**
+ * G4（2026-10-15）：锚点写入函数已随死代码清理退役（生产唯一调用方 command()
+ * 不复存在）。fixture 需要的"预置锚点"改为内联 SQL 直写 manifest。
+ */
+function writeAnchor(databasePath: string, anchor: { sha256: string; datasetVersion: string }): void {
+  const db = new DatabaseSync(databasePath);
+  try {
+    db.prepare("INSERT OR REPLACE INTO import_manifest (key, value) VALUES (?, ?)")
+      .run(IMPORT_PAYLOAD_ANCHOR_KEY, JSON.stringify(anchor));
+  } finally { db.close(); }
+}
+
 interface PreflightSurface {
   executionEngine: { name: string; version: string; fallback: "none" | "typescript" };
   run(job: Record<string, unknown>): Promise<void>;
-  command(args: string[]): Promise<void>;
   detectUnchangedPayload(
     job: Record<string, unknown>,
     engine: { name: string; version: string; fallback: "none" | "typescript" }
@@ -87,7 +97,6 @@ async function seedDatabase(path: string): Promise<void> {
     store.setManifest("parser_contract_version", CONTRACT_VERSION);
     store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
     store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
-    store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
     for (let index = 0; index < 3; index += 1) {
       const workoutId = `preflight_workout_${index}`;
       const startedAt = new Date(Date.UTC(2026, 0, 1 + index)).toISOString();
@@ -237,8 +246,7 @@ test("payload anchors round-trip, and an unusable anchor reads as absent", async
     // Nothing recorded yet: the pre-flight must have no basis to short-circuit.
     assert.deepEqual(readDatabaseImportIdentity(databasePath), { anchor: null, datasetVersion: "preflight_fixture" });
 
-    const module = await import("../src/import-payload-identity.js");
-    module.writeImportPayloadAnchor(databasePath, { sha256: "abc", datasetVersion: "preflight_fixture" });
+    writeAnchor(databasePath, { sha256: "abc", datasetVersion: "preflight_fixture" });
     assert.deepEqual(readDatabaseImportIdentity(databasePath), {
       anchor: { sha256: "abc", datasetVersion: "preflight_fixture" },
       datasetVersion: "preflight_fixture"
@@ -342,10 +350,9 @@ test("a payload that declares absence-as-deletion never short-circuits", async (
   try {
     await seedDatabase(databasePath);
     const worker = preflightWorker(databasePath, root);
-    const module = await import("../src/import-payload-identity.js");
     // The anchor is recorded under deleting semantics, so the identity *would*
     // match a deleting re-import. Refusal can therefore only come from the guard.
-    module.writeImportPayloadAnchor(databasePath, {
+    writeAnchor(databasePath, {
       sha256: await computeImportPayloadSha256(inputPath, {
         preserveAbsent: false,
         contractVersion: CONTRACT_VERSION,
@@ -362,7 +369,7 @@ test("a payload that declares absence-as-deletion never short-circuits", async (
     // Sanity: the same payload under non-deleting semantics, anchored under those
     // semantics, does hit — so the refusal above is the guard and not a broken
     // identity path.
-    module.writeImportPayloadAnchor(databasePath, {
+    writeAnchor(databasePath, {
       sha256: await computeImportPayloadSha256(inputPath, {
         preserveAbsent: true,
         contractVersion: CONTRACT_VERSION,
@@ -396,8 +403,7 @@ test("a database that moved since the anchor was recorded disables the short-cir
       engine: `${worker.executionEngine.name}@${worker.executionEngine.version}`,
       identityAlgorithm: identityAlgorithmFingerprint()
     });
-    const module = await import("../src/import-payload-identity.js");
-    module.writeImportPayloadAnchor(databasePath, { sha256: expected, datasetVersion: "preflight_fixture" });
+    writeAnchor(databasePath, { sha256: expected, datasetVersion: "preflight_fixture" });
     assert.ok(await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine));
 
     // Another import landed in between. `dataset_version` is what makes that
@@ -427,8 +433,7 @@ test("a payload whose identity differs still runs the full pipeline", async () =
   try {
     await seedDatabase(databasePath);
     const worker = preflightWorker(databasePath, root);
-    const module = await import("../src/import-payload-identity.js");
-    module.writeImportPayloadAnchor(databasePath, { sha256: "not-this-payload", datasetVersion: "preflight_fixture" });
+    writeAnchor(databasePath, { sha256: "not-this-payload", datasetVersion: "preflight_fixture" });
 
     const job = queuedJob(inputPath, true);
     await worker.run(job);
@@ -459,8 +464,7 @@ test("an unreadable payload disables the short-circuit and is refused explicitly
   try {
     await seedDatabase(databasePath);
     const worker = preflightWorker(databasePath, root);
-    const module = await import("../src/import-payload-identity.js");
-    module.writeImportPayloadAnchor(databasePath, { sha256: "abc", datasetVersion: "preflight_fixture" });
+    writeAnchor(databasePath, { sha256: "abc", datasetVersion: "preflight_fixture" });
     assert.equal(
       await worker.detectUnchangedPayload(queuedJob(inputPath, true), worker.executionEngine),
       null

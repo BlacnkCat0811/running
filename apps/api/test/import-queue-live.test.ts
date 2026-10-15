@@ -11,7 +11,6 @@ import { ImportWorker } from "../src/import-worker.js";
 import { TaskAdmissionScheduler } from "../src/task-admission.js";
 import { MutationCoordinator } from "../src/mutation-coordinator.js";
 import { readImportReceipt } from "../src/import-publication.js";
-import { dataOnlyBaselineContract } from "../src/data-only-import.js";
 
 test("真实排队直连：Workout 增量走统一接收器（离线程执行）、回执落盘、跨重启可恢复", async () => {
   // 2026-10-14（S3.3）**改写而非删除**：原用例让**真实项目根的候选 CLI**（子进程解析、
@@ -59,7 +58,6 @@ test("真实排队直连：Workout 增量走统一接收器（离线程执行）
     store.setManifest("parser_contract_version", CONTRACT_VERSION);
     store.setManifest("parser_identity_algorithm", identityAlgorithmFingerprint());
     store.setManifest("import_completed_at", "2026-01-01T00:00:00.000Z");
-    store.setManifest("data_only_baseline_contract", dataOnlyBaselineContract());
     store.close();
     worker = make();
     const first = worker.create(input("2026-01-01", "00000000-0000-0000-0000-0000000000a1"), undefined, "source-first");
