@@ -30,6 +30,7 @@ struct HealthSyncResumeRegression {
         try transientFailuresKeepTheTask()
         try pollingAndResumeAgreeOnTheSourceGoneStatus()
         try oversizedBatchConvergesInsteadOfLivelocking()
+        try inputNotAllowedAbandonsTask()
         print("Health sync resume regression tests passed")
     }
 
@@ -64,6 +65,38 @@ struct HealthSyncResumeRegression {
         try require(
             HealthSyncResumePolicy.disposition(statusCode: 400, errorCode: nil) == .keepTask,
             "a bare 400 must stay transient — only the payload-bounds code is a deterministic batch rejection"
+        )
+    }
+
+    /// 🔴 P2-7（2026-10-15）：inspect/preflight 的「载荷内容不合规」稳定码必须**清任务重导**。
+    ///
+    /// `missing_required_files` / `input_tree_not_allowed` / `missing_record_identity` /
+    /// `payload_identity_invalid` 等确定性输入拒绝折成 `direct_sync_input_not_allowed`
+    /// （`apps/api/src/import-worker.ts` 的 `laneRefusalFailure`），由 inspect 的预检 400 返回。
+    /// 若落 `.keepTask`：sourceId 留着 ⇒ 下次仍从同一句 inspect 进来、撞同一个 400，
+    /// nginx 里再也不会出现 uploads（与 2026-09-22 的 404 死锁同构）。
+    /// `.abandonTask` ⇒ 客户端重新导出，输入完整 ⇒ 自愈。
+    ///
+    /// 突变验证：删掉 `disposition` 里的 `inputNotAllowedCode` 分支 ⇒ 本条必须变红
+    /// （它会落回 `.keepTask`，正是活锁的形态）。
+    private static func inputNotAllowedAbandonsTask() throws {
+        try require(
+            HealthSyncResumePolicy.inputNotAllowedCode == "direct_sync_input_not_allowed",
+            "the input-not-allowed code drifted away from import-worker's laneRefusalFailure mapping"
+        )
+        // 真实形态：inspect 回 400 + 该 code（`import-routes.ts` 的预检出口）。
+        try require(
+            HealthSyncResumePolicy.disposition(
+                statusCode: 400,
+                errorCode: HealthSyncResumePolicy.inputNotAllowedCode
+            ) == .abandonTask,
+            "a deterministic input rejection must abandon the task — keeping it re-inspects the same batch forever"
+        )
+        // ⚠️ 裸 400（无 code）**仍必须** keepTask：只有已知稳定码才升级为确定性处置
+        // （`oversizedBatchConvergesInsteadOfLivelocking` 的既有断言不变）。
+        try require(
+            HealthSyncResumePolicy.disposition(statusCode: 400, errorCode: nil) == .keepTask,
+            "a bare 400 must stay transient — only known codes get deterministic dispositions"
         )
     }
 

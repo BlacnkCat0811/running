@@ -1586,9 +1586,21 @@ ordered(
     "overshoot the batch bound by one whole GPX (device-measured: 34 MB across 58 files)",
 )
 check(
-    "return RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: true)" in route_entries,
+    "return RouteFetch(entries: [], observation: nil, bytes: 0," in route_entries
+    and "budgetExhausted: true, oversized: oversized" in route_entries,
     "a route that does not fit must be abandoned wholesale (bytes 0, no observation) — a half-written "
     "track is worse than none: xml does not reference it, so the payload gains an ownerless file",
+)
+check(
+    "let oversized = bytes > budget.maxRouteBytes" in route_entries,
+    "P2-3A: the abandon path must distinguish \"balance temporarily short\" (the next full batch may "
+    "fit) from \"this single track exceeds the FULL batch budget\" (no batch can ever take it) — the "
+    "latter must surface as a visible warning instead of silently disappearing",
+)
+check(
+    "if fetch.oversized {" in route_loop,
+    "P2-3A: the export loop must surface an oversized single track as a visible warning — silently "
+    "skipping it means the user never learns that data is missing",
 )
 check(
     "routeStopReason = .routeFile" in route_loop,
@@ -1614,13 +1626,28 @@ check(
     "the inspect catch no longer handles .convergeBudget — the payload-bounds 400 falls into the "
     "abandon path without shrinking the budget, so every sync re-exports the same oversized payload",
 )
+# P2-1（2026-10-15）：曾用 `"fn()" in sync` 全文子串 —— 函数**定义行**同样命中（worktree
+# 突变实证：拆 4 处接线 284/0 绿、把定义改名才 2 红）。改为**逐接线**的形态断言（全部在
+# :860 的 performSync 切片内；切片不含定义 ⇒ 删任一接线必然子串消失）。含 P2-2a 新增的
+# 落档接线。
 check(
-    "loadBudgetConvergence()" in sync and "saveBudgetConvergence(" in sync,
-    "the budget convergence memory is no longer wired into the export path — a server rejection "
-    "would not change the next export's budget, i.e. the convergence is a no-op",
+    "let advanced = loadBudgetConvergence().advanced()" in perform_body
+    and "saveBudgetConvergence(advanced)" in perform_body,
+    "the inspect-catch convergence wiring (advance on rejection, persist before clearTask) is gone — "
+    "a server rejection would not change the next export's budget, i.e. the convergence is a no-op",
 )
 check(
-    "clearBudgetConvergence()" in sync,
+    "let baseBudget = loadBudgetConvergence()" in perform_body,
+    "the export path no longer starts from the persisted convergence budget — a prior server "
+    "rejection would not shrink the next export",
+)
+check(
+    "saveBudgetConvergence(DirectSyncBudgetConvergence(steps: DirectSyncBudgetConvergence.maxSteps))" in perform_body,
+    "P2-2a: the P2b loop-exhaustion path must persist the exhausted convergence — without it the "
+    "next sync re-exports from the old budget and re-runs the same expensive loop",
+)
+check(
+    "clearBudgetConvergence()" in perform_body,
     "nothing ever clears the convergence — the budget would stay shrunk forever after a single "
     "rejection, and the user's explicit full re-import could not restore it",
 )
@@ -1821,8 +1848,10 @@ ordered(
     "HealthKitExport.exportArchive(",
     "the intent observation point is not at the export start",
 )
+# P2-1（2026-10-15）：曾用 `in sync` 全文子串 —— 定义行（HealthKitSync.swift:574）同样命中，
+# "删光调用点"时仍绿。改为 performSync 切片（调用点 :864 在 defer 块内；定义在切片外）。
 check(
-    "clearBackgroundIntentObservations()" in sync,
+    "clearBackgroundIntentObservations()" in perform_body,
     "the per-sync intent observations are never cleared, so a later sync's saveTask/commit could "
     "acknowledge a notification it never saw",
 )

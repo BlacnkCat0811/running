@@ -189,6 +189,34 @@ if server_versions and ios_versions:
     )
     print(f"  {VERSION_SYMBOL}: server {server_versions}, iOS {ios_versions}")
 
+# --- 3b. P2-7（2026-10-15）：inspect 预检 400 的「确定性输入拒绝」码两端逐字一致 -----------
+#
+# 服务端 inspect 的 400 出口（`import-routes.ts` 的预检分支）经 `laneRefusalFailure`
+# （`apps/api/src/import-worker.ts`）折码。preflight 可产出的 reason 只有两族：
+#   bounds 族（xml/manifest/deletions/route_exceeds_bounds）→ `direct_sync_payload_exceeds_bounds`
+#     ⇒ iOS `.convergeBudget`（预算收敛后重导）；
+#   输入族（missing_required_files / input_tree_not_allowed / missing_record_identity /
+#     payload_identity_invalid）→ `direct_sync_input_not_allowed`
+#     ⇒ iOS `.abandonTask`（清任务重传，自愈）—— 2026-10-15 起生效，此前落 `.keepTask`
+#     活锁（sourceId 保留、重撞同 400、nginx 再无 uploads）。
+# 本判据把输入族 code 在**两端**钉成逐字一致：服务端改码而 iOS 未跟时，这里先红，
+# 而不是在线上以"每次同步重撞 400"的形态暴露。
+
+server_import_worker = read_source("apps/api/src/import-worker.ts")
+ios_cancellation = read_source("apps/ios/RAI/HealthSyncCancellation.swift")
+
+check(
+    '"direct_sync_input_not_allowed"' in server_import_worker,
+    "the server laneRefusalFailure mapping no longer emits direct_sync_input_not_allowed "
+    "(apps/api/src/import-worker.ts) — the iOS disposition pins this exact code",
+)
+check(
+    'inputNotAllowedCode = "direct_sync_input_not_allowed"' in ios_cancellation,
+    "the iOS disposition no longer pins direct_sync_input_not_allowed "
+    "(apps/ios/RAI/HealthSyncCancellation.swift) — a server inspect 400 with this code would "
+    "fall back to .keepTask and livelock the sync",
+)
+
 # --- 4. 本门禁不得是孤儿 -------------------------------------------------------
 
 aggregator = read_source(AGGREGATOR_FILE)

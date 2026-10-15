@@ -452,6 +452,11 @@ nonisolated enum HealthKitExport {
                     // 状态一个字不动（与 `else` 分支同语义，只是原因不同）。
                     routeFiles = []
                     routeStopReason = .routeFile
+                    // P2-3A：单条轨迹超过**满额**单批预算 —— 额度重置也装不下它。静默跳过会让
+                    // 用户永远不知道有数据没同步（2026-10-15 审查 P2-3），这里如实上报。
+                    if fetch.oversized {
+                        warnings.add("有一条跑步轨迹超过单批上限，暂未同步：\(routeKey)；已保留其同步状态")
+                    }
                 } else {
                     routeFiles = fetch.entries
                     // 预算按**字节**累计，口径 = 盘上 GPX 的 UTF-8 字节数（服务端 `statSync` 同口径）。
@@ -1265,8 +1270,13 @@ nonisolated enum HealthKitExport {
         /// `entries` 必为空、`observation` 必为 nil、`bytes` 必为 0、**状态一律不推进**；
         /// 调用方只跳过这一个 workout（后面的照常尝试，不做"一次装不下就全停"）。
         let budgetExhausted: Bool
+        /// P2-3A（2026-10-15）：`budgetExhausted` 的**细分**——这条轨迹**自身**就超过满额单批
+        /// 预算（`bytes > budget.maxRouteBytes`）。任何后续批次（哪怕满额）都装不下它 ⇒ 不是
+        /// "余额暂时不足、下批可再试"，而是"这条轨迹按当前上界永远进不了载荷"。调用方据此
+        /// 上报**可见警告**（静默跳过 = 用户永远不知道有数据没同步）。
+        let oversized: Bool
 
-        static let empty = RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: false)
+        static let empty = RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: false, oversized: false)
     }
 
     private static func routeEntries(
@@ -1335,7 +1345,12 @@ nonisolated enum HealthKitExport {
                 routeFiles: usedRouteFiles + entries.count + 1
             ) {
                 for entry in entries { try? FileManager.default.removeItem(at: entry.url) }
-                return RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: true)
+                // P2-3A：细分两种放弃 ——「余额暂时不足」（下批满额可再试，保持既有轮转语义）
+                // 与「这条轨迹**自身**超过满额预算」（bytes > maxRouteBytes ⇒ 任何批次都装不下）。
+                // 后者必须上报可见警告（调用侧），否则用户永远不知道有数据没同步。
+                let oversized = bytes > budget.maxRouteBytes
+                return RouteFetch(entries: [], observation: nil, bytes: 0,
+                                  budgetExhausted: true, oversized: oversized)
             }
             let name = "workout-routes/\(workoutId)_\(entries.count + 1).gpx"
             let url = directory.appendingPathComponent(name)
@@ -1358,7 +1373,8 @@ nonisolated enum HealthKitExport {
             pointCount: entries.isEmpty ? 0 : pointTotal,
             routeHash: entries.isEmpty ? nil : digest.finalize().map { String(format: "%02x", $0) }.joined()
         )
-        return RouteFetch(entries: entries, observation: observation, bytes: writtenBytes, budgetExhausted: false)
+        return RouteFetch(entries: entries, observation: observation, bytes: writtenBytes,
+                          budgetExhausted: false, oversized: false)
     }
 
     private static func workoutSyncId(_ workout: HKWorkout) -> String {

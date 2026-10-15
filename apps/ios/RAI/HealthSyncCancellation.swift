@@ -61,9 +61,20 @@ nonisolated enum HealthSyncResumePolicy {
     /// （inspect 的 catch 里没有任何 contentRejection 消费点，改那边对本缺陷无效）。
     static let batchExceedsBoundsCode = "direct_sync_payload_exceeds_bounds"
 
+    /// 服务端 inspect/preflight 的「**载荷内容不合规**」稳定码（确定性拒绝，P2-7，2026-10-15）。
+    ///
+    /// 出处：`apps/api/src/import-worker.ts` 的 `laneRefusalFailure` —— `missing_required_files` /
+    /// `input_tree_not_allowed` / `missing_record_identity` / `payload_identity_invalid` 四个 reason
+    /// 折成这一个 code，由 inspect 的预检 400 返回。处置 = `.abandonTask`：清任务后客户端会
+    /// **重新导出**（输入完整 ⇒ 自愈）；若落 `.keepTask`，sourceId 留着 ⇒ 下次仍从同一句 inspect
+    /// 进来、撞同一个 400（与 2026-09-22 的 404 死锁同构）。
+    static let inputNotAllowedCode = "direct_sync_input_not_allowed"
+
     static func disposition(statusCode: Int?, errorCode: String?) -> Disposition {
         // 🔴 先判 code、后判状态码：它是 400 而不是 404，落到下面只会得到 `.keepTask`。
         if errorCode == batchExceedsBoundsCode { return .convergeBudget }
+        // P2-7（2026-10-15）：确定性输入拒绝 ⇒ 清任务重导（自愈），不能落 `.keepTask` 活锁。
+        if errorCode == inputNotAllowedCode { return .abandonTask }
         if statusCode == sourceGoneStatusCode { return .abandonTask }
         if errorCode == terminalJobCode { return .abandonTask }
         return .keepTask

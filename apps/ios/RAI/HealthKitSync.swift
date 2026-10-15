@@ -1141,7 +1141,15 @@ final class HealthKitSync {
                     let advanced = loadBudgetConvergence().advanced()
                     saveBudgetConvergence(advanced)
                     if advanced.isExhausted {
+                        // 🔴 P2-2b（2026-10-15）：到顶即**终态失败**，不再继续当场重导。
+                        // 上文注释说"到顶就把确定性失败如实报出去、不再默默重导"，但实现此前
+                        // 缺这个 return：流程会继续落到 `phase = collecting` 用同一档位再导一遍，
+                        // 形成"每次同步重撞 400"的活锁。到顶后**保留任务行**（不清）：下一次
+                        // 同步只重放一次便宜的 inspect 并在此处停下（不再白读 HealthKit）。
                         lastError = "健康数据单批始终超过服务端上限，已停止自动重导；请稍后手动重试或联系维护者。"
+                        message = nil
+                        phase = SyncPhase.failed.rawValue
+                        return
                     }
                 }
                 // 这个 task 不可能恢复了，先清掉它。留着它的后果不是"下次说不定能成"，
@@ -1398,8 +1406,11 @@ final class HealthKitSync {
                     try? FileManager.default.removeItem(at: produced.zipURL)
                     attempt += 1
                     guard attempt < DirectSyncBudgetConvergence.maxSteps else {
+                        // P2-2a（2026-10-15）：带**专用本地 code** —— 外层兜底 catch 据此把"耗尽"
+                        // 落进跨批收敛档（否则下一轮仍从旧档重导、白读一遍 HealthKit）。
                         throw SyncHTTPError(
-                            message: "健康数据单批始终超过服务端上限，本次同步已停止；请稍后重试或联系维护者。"
+                            message: "健康数据单批始终超过服务端上限，本次同步已停止；请稍后重试或联系维护者。",
+                            code: DirectSyncBudgetConvergence.exhaustedErrorCode
                         )
                     }
                 }
@@ -1547,6 +1558,12 @@ final class HealthKitSync {
                 // `uploadWithRecovery` 已经落好了 `auth_required` 与文案（它知道当时是哪个
                 // 响应、盘上哪一批），这里只负责**不要**把它覆盖成失败。
                 return
+            }
+            // 🔴 P2-2a（2026-10-15）：P2b 的**重导循环耗尽**（本地信号）必须把"已到顶"落进
+            // 跨批收敛档 —— 否则下一轮同步从旧档位重新导出、重跑同一耗尽循环，每次都白读
+            // 一遍 HealthKit（GB 级，全流程最贵一步）。耗尽态 = 满档；幂等，重复触发无害。
+            if (error as? SyncHTTPError)?.code == DirectSyncBudgetConvergence.exhaustedErrorCode {
+                saveBudgetConvergence(DirectSyncBudgetConvergence(steps: DirectSyncBudgetConvergence.maxSteps))
             }
             phase = SyncPhase.failed.rawValue
             lastError = friendlyMessage(error)
