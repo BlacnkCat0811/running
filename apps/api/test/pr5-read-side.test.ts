@@ -194,7 +194,7 @@ test("S3：直连车道写过一个批次之后 versions 报数字，且版本�
   });
 });
 
-test("S3：dependency 落后于 raw ⇒ analysis_behind（C4 的输入前提）", async () => {
+test("S3（R6 修正）：只有非评分批次 ⇒ raw 前进而无需分析 ⇒ up_to_date（不再是假 stale）", async () => {
   await withFixture("rai-pr5-generations-behind-", ({ store }) => {
     // 直连车道里"本批不影响分析"的情形：raw +1、dependency 不动。
     bumpGenerations(store, 1, 0);
@@ -202,8 +202,11 @@ test("S3：dependency 落后于 raw ⇒ analysis_behind（C4 的输入前提）"
     const view = readFactReadView(store.database, { factRows: 50, analysisRows: 50 });
     assert.equal(view.versions.facts, "2");
     assert.equal(view.versions.analysis, "0");
-    assert.equal(view.freshness.reason, "analysis_behind");
-    assert.equal(view.freshness.stale, true);
+    // R6（2026-10-15）修正：旧口径比较 `analysis !== facts` ⇒ 报 `analysis_behind`——
+    // 而"只有非评分批次"恰恰是**不需要分析**的情形，报落后是假 stale。新口径比较
+    // `published vs required`：required=0 ⇒ 分析侧无需追 ⇒ up_to_date。
+    assert.equal(view.freshness.reason, "up_to_date");
+    assert.equal(view.freshness.stale, false);
   });
 });
 
@@ -234,8 +237,37 @@ test("S3：取**最新**那个绑定到当前依赖代次的任务，而不是�
     assert.equal(view.versions.analysis, "2");
     assert.equal(view.versions.analysisStatus, "queued",
       "取最早那次成功会把「还在算」说成「已发布」");
-    assert.equal(view.freshness.reason, "analysis_missing");
+    // R6（2026-10-15）：published=1（job-1 succeeded@1）< required=2 ⇒ 落在
+    // (published, required] 的最新任务是 job-2（queued）⇒ 分析**确实落后** ⇒
+    // `analysis_behind`（旧口径因 `analysis(2) !== facts(2)` 为假而报 `analysis_missing`，
+    // 把"落后"说成了"缺失"）。
+    assert.equal(view.freshness.reason, "analysis_behind");
     assert.equal(view.freshness.stale, true);
+  });
+});
+
+test("S3（R6）：交替两车道后追平 ⇒ up_to_date；真未发布的评分变更仍报落后", async () => {
+  await withFixture("rai-pr5-generations-r6-interleave-", ({ store }) => {
+    // 非评分批（raw+1）→ 评分批（raw+1, required+1）交替——旧口径下 raw 恒超前 required，
+    // 报永久 analysis_behind；新口径只看 published vs required。
+    bumpGenerations(store, 1, 0); // data-only 批
+    bumpGenerations(store, 1, 1); // 评分批
+    bumpGenerations(store, 1, 0); // data-only 批
+    bindJob(store, "job-score", "succeeded", 1);
+    const settled = readFactReadView(store.database, { factRows: 50, analysisRows: 50 });
+    assert.equal(settled.versions.facts, "3");
+    assert.equal(settled.versions.analysis, "1");
+    assert.equal(settled.freshness.reason, "up_to_date",
+      "非评分批次制造的差额不得读成落后（R6 现象②的回归）");
+    assert.equal(settled.freshness.stale, false);
+
+    // 真未发布的评分变更：required 追到 2、没有对应的成功任务 ⇒ 必须报落后。
+    bumpGenerations(store, 1, 1);
+    bindJob(store, "job-pending", "queued", 2);
+    const pending = readFactReadView(store.database, { factRows: 50, analysisRows: 50 });
+    assert.equal(pending.freshness.reason, "analysis_behind");
+    assert.equal(pending.freshness.stale, true);
+    assert.equal(pending.versions.analysisStatus, "queued");
   });
 });
 

@@ -743,12 +743,12 @@ test("A17：record-only 载荷必须写 not_required（不许为了省事一律�
     assert.equal((done.summary as { analysisJobId?: string | null }).analysisJobId, null,
       "不登记分析时 analysisJobId 必须是 null（不是缺键：缺键在老服务端才有意义）");
     assert.equal(direct.publishedReleaseId, null);
-    // 代次：**record-only 快通路不动 `import_generations`**（实测：这里读到的仍是 0）。
-    // 这不是缺陷，`FactVersions` / `Freshness` 的合同明写了这一点（`packages/contracts/src/direct-sync.ts`：
-    // "全新库与只走过普通导入路径的老库里 `import_generations` 都是 (0, 0)，而训练事实已经在库里"，
-    // 并要求消费方在该状态下**沿用今天的行为**）。真正的判据因此是"没动"，不是"动了 1 次"：
-    // 把它写成 == 1 会凭空发明一条服务端从未承诺的语义（而且会红）。
-    assert.equal(facts.rawGeneration, 0, "record-only 快通路不推进 raw 代次（Freshness 的 generations_absent 状态）");
+    // 代次（R6 修正，2026-10-15）：record-only 快通路**要推进 raw**（0 → 1）。
+    // 旧断言写 `== 0` 并把它解释成设计——但那条"设计"正是 R6 的现象①：data-only 车道
+    // 更新了记录与 `dataset_version` 却不推 raw，读侧的 `analysis !== facts` 便把它
+    // 读成"分析永久落后"（假 stale）。修复后本车道与直连同语义：**成功批次 ⇒ raw +1**；
+    // 不推 dependency —— 本批结构上碰不到分析（`not_required`，见上）。
+    assert.equal(facts.rawGeneration, 1, "record-only 快通路每个成功批次推进一次 raw 代次");
     assert.equal(facts.dependencyGeneration, 0, "record-only 更不许推进 dependency 代次");
   } finally {
     await server.stop();
@@ -905,11 +905,11 @@ test("A05：COMMIT 前强杀真子进程 ⇒ 没有半批，重启后任务重�
     assert.equal(after.receiptKeys.length, 1, "只许留下一个持久回执");
     assert.equal(after.dependencyGeneration, baseline.dependencyGeneration,
       "纯非评分记录载荷不影响分析，dependency 代次不许动");
+    assert.equal(after.rawGeneration, baseline.rawGeneration + 1,
+      "R6（2026-10-15）起 record-only 快通路也推进 raw：成功批次恰好 +1（恢复的「恰好一次」）");
     assert.equal(after.recomputeJobs.length, 0);
-    // ⚠️ 这里**不**断言 `raw_generation`：本批走的是 record-only 快通路，而那条车道**不推进**
-    // `import_generations`（同文件 record-only 用例已把这一点钉成判据，依据是 `Freshness` 的合同）。
-    // 用代次来证明"只提交一次"会依赖一条服务端从未承诺的语义；"恰好一次"的判据是上面三条
-    // ——一个账本行、一个回执、4500 条事实（半批会表现为 0 或 9000）。
+    // （旧注记曾写"本车道不推进 import_generations"——那是 R6 现象①被当成设计的年代；
+    //   修复后同文件 record-only 用例与这里共同钉住"成功恰好 +1"。）
   } finally {
     await server.stop();
     harness.dispose();

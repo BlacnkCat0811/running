@@ -134,8 +134,13 @@ export function readFactReadViewInTransaction(
   run: (context: FactReadViewContext) => void = () => {}
 ): FactReadView {
   const generations = readGenerations(database);
-  const versions = buildVersions(database, generations);
-  const freshness = deriveFreshness(versions, generations.present);
+  // R6（2026-10-15）：published 与 required 的比较是"分析是否跟上"的唯一判据（读侧推断，
+  // 不落盘）。一次查询、两处消费（versions.analysisStatus 与 freshness），保证同源。
+  const published = generations.present
+    ? readPublishedDependency(database, generations.dependency)
+    : null;
+  const versions = buildVersions(database, generations, published);
+  const freshness = deriveFreshness(versions, generations.present, published);
   const facts = readFactsBlock(database, versions, limits.factRows);
   const analysis = readAnalysisBlock(database, versions, freshness.stale, limits.analysisRows);
   const view: FactReadView = {
@@ -180,22 +185,50 @@ function readGenerations(database: DatabaseSync): Generations {
 }
 
 /**
- * 分析状态由三个**既有**事实派生（D2 未决 2 的暂定口径）：最新一个绑定了当前依赖代次的
- * 分析任务的状态、该任务是否成功、以及已发布指针有没有动。
+ * 「已发布分析覆盖到的依赖代次」（R6，2026-10-15，**读侧推断、不落盘**）。
+ *
+ * 语义：所有**已成功**的 import 分析任务里，目标依赖代次不超过 `required` 的最大值。
+ * `null` = 从未有成功任务（"分析从未发布过"）。
+ *
+ * 🔴 为什么不落盘一个 `published_dependency_generation` 计数器：唯一自然的写点是
+ * `activateSucceeded` 的发布事务，而那是**被回滚包着**的敏感区（本仓有过"审计类写入
+ * 被调用方 ROLLBACK 撤掉"的实测教训）；"任务 succeeded ⇔ 结论已发布"这条等价关系已被
+ * 现有 `deriveAnalysisStatus` 使用（见下），推断与它**同源**，不引入第二份真相。
+ */
+function readPublishedDependency(database: DatabaseSync, required: number): number | null {
+  const row = database.prepare(`
+    SELECT MAX(job.target_dependency_generation) AS published
+    FROM recompute_jobs job
+    WHERE job.job_type = 'import' AND job.status = 'succeeded'
+      AND job.target_dependency_generation IS NOT NULL AND job.target_dependency_generation <= ?
+  `).get(required) as { published?: unknown } | undefined;
+  return integerOrNull(row?.published);
+}
+
+/**
+ * 分析状态由**两个既有事实**派生（R6 起）：`published`（已发布覆盖到的代次）与
+ * `required`（当前所需代次）；两者关系决定终态，中间状态取"最新一个落在
+ * (published, required] 区间里的任务"的状态。
  *
  * 🔴 为什么必须跟 `active_model_run` 一起看：`recompute_jobs.status = 'succeeded'` 只说明
  * **任务跑完了**，不说明**它的结论被发布了**（`SqliteModelRunRepository.activateSucceeded`
  * 才是发布动作，见 `apps/api/src/command-queue.ts` 的 `activate_model`）。只看任务状态会
  * 把"算完了但没启用"报成 `published`，那正是"拿旧分析冒充最新"的另一种写法。
+ *
+ * 🔴 `required === 0`（只有非评分批次）或 `published >= required` ⇒ `published`：
+ * 这里的 `published` 表达"分析侧已追上当前所需"（含"无需分析"这一情形）——旧口径把
+ * "无需分析"读成"差分析"（比较 `analysis !== facts`），正是 R6 的假 stale 病灶。
  */
-function deriveAnalysisStatus(database: DatabaseSync, dependency: number): AnalysisStatus {
+function deriveAnalysisStatus(database: DatabaseSync, required: number, published: number | null): AnalysisStatus {
+  if (required === 0 || (published !== null && published >= required)) return "published";
   const job = database.prepare(`
-    SELECT job.status AS status, job.completed_at AS completedAt
+    SELECT job.status AS status
     FROM recompute_jobs job
-    WHERE job.target_dependency_generation = ?
+    WHERE job.job_type = 'import' AND job.target_dependency_generation IS NOT NULL
+      AND job.target_dependency_generation > ? AND job.target_dependency_generation <= ?
     ORDER BY job.created_at DESC, job.rowid DESC
     LIMIT 1
-  `).get(dependency) as { status?: unknown; completedAt?: unknown } | undefined;
+  `).get(published ?? -1, required) as { status?: unknown } | undefined;
   if (job === undefined) return "not_required";
   switch (String(job.status)) {
     case "succeeded":
@@ -223,31 +256,43 @@ function activeReleaseId(database: DatabaseSync): string | null {
   return typeof row?.id === "string" && row.id.length > 0 ? row.id : null;
 }
 
-function buildVersions(database: DatabaseSync, generations: Generations): FactVersions {
+function buildVersions(database: DatabaseSync, generations: Generations, published: number | null): FactVersions {
   return {
     // 计数器不可用时是 `null`，**不是** `"0"`：`"0"` 会被读成"版本 0"，而它表达的是
     // "这一侧还没有版本可报"。两种语义共用一个取值是本仓反复踩过的坑（对照 §10.1 回执里
     // `dependencyGeneration: null` 与空串的区别）。
+    // `analysis` 报的是"当前**所需**依赖代次"（`dependency_generation` 的本义，R6 起读侧
+    // 按此语义使用它）——不要按"已发布"读它。
     facts: generations.present ? String(generations.raw) : null,
     analysis: generations.present ? String(generations.dependency) : null,
     releaseId: activeReleaseId(database),
-    analysisStatus: generations.present ? deriveAnalysisStatus(database, generations.dependency) : "published"
+    analysisStatus: generations.present
+      ? deriveAnalysisStatus(database, generations.dependency, published)
+      : "published"
   };
 }
 
 /**
- * `stale === true` ⇔ `analysisStatus !== "published"` **或** `analysis !== facts`（D2 原文）。
+ * `stale === true` ⇔ `analysisStatus !== "published"`（R6 起）。
  *
- * `generations_absent` 优先判断：在那个状态下 `analysis` 与 `facts` 都是 `null`（"相等"），
- * 若只按字面比较会得出 `up_to_date` —— 那会把"数字不可信"说成"一切同步"。
+ * 🔴 为什么删掉旧的 `analysis !== facts` 那半句：`raw`（每批 +1）与所需依赖代次只在
+ * **评分批次**上同步前进；非评分批次会合法地让两者不等。旧比较把这种"合法差额"读成
+ * "分析落后"，data-only 车道更因为从不推进 raw 而制造**永久假 stale**（R6 的现象②）。
+ * 现在"落后与否"完全由 `published vs required` 的关系决定（见 `deriveAnalysisStatus`）。
+ *
+ * `generations_absent` 优先判断：在那个状态下 `analysis` 与 `facts` 都是 `null`，
+ * 顺带也把"数字不可信"与"一切同步"分开。
  */
-function deriveFreshness(versions: FactVersions, generationsPresent: boolean): Freshness {
+function deriveFreshness(
+  versions: FactVersions,
+  generationsPresent: boolean,
+  published: number | null
+): Freshness {
   if (!generationsPresent) return { stale: true, reason: "generations_absent", versions };
-  const behind = versions.analysis !== versions.facts;
   const reason: Freshness["reason"] =
     versions.analysisStatus === "failed" ? "analysis_failed"
-      : versions.analysisStatus !== "published" ? (behind ? "analysis_behind" : "analysis_missing")
-        : behind ? "analysis_behind" : "up_to_date";
+      : versions.analysisStatus === "published" ? "up_to_date"
+        : published === null ? "analysis_missing" : "analysis_behind";
   return { stale: reason !== "up_to_date", reason, versions };
 }
 

@@ -31,15 +31,18 @@ export const ANALYSIS_STATUSES = ["not_required", "queued", "running", "publishe
 export type AnalysisStatus = (typeof ANALYSIS_STATUSES)[number];
 
 /**
- * 事实侧与已发布分析侧各自的版本号（PR5 D2，见 `docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md` §2）。
+ * 事实侧与**所需**分析侧各自的版本号（PR5 D2，见 `docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md` §2）。
  *
  * 🔴 **只派生、不新增存储。** 四个值全部来自既有表：`import_generations` 的两列、
- * `active_model_run` 的单行指针、以及该代次上最新一个分析任务的状态 —— 本类型不是
- * 第 N 份真相，它是那几份真相在**同一个读快照**里的投影。
+ * `active_model_run` 的单行指针、以及分析任务表（`recompute_jobs`）——本类型不是
+ * 第 N 份真相，它是那几份真相在**同一个读快照**里的投影。**"已发布覆盖到哪个代次"
+ * 也走推断**（`fact-read-view.ts` 的 `readPublishedDependency`），不落盘成第三个计数器：
+ * 它唯一自然的写点是发布事务（被回滚包着的敏感区），推断与 `analysisStatus` 同源。
  *
- * `facts` / `analysis` 是**批次计数器**（`import_generations`，PR4 2d 起由直连车道
- * `apps/api/src/direct-sync-ingest.ts` 递增），不是墙上时钟：`facts` 每个批次 +1，
- * `analysis` 只在本批会影响分析时 +1。对外呈现用 `String(n)`（§10.1 的口径）。
+ * `facts` / `analysis` 是**批次计数器**（`import_generations`），不是墙上时钟：
+ * `facts` 每个成功批次 +1（直连与 data-only **两条车道**都推，R6 起）；`analysis` 是
+ * "当前**所需**依赖代次"——只在本批会影响分析时 +1。**两者可以合法不等**（非评分批次
+ * 只推 `facts`），别按"必须相等"解读。对外呈现用 `String(n)`（§10.1 的口径）。
  */
 export interface FactVersions {
   /** `import_generations.raw_generation`；`null` = 这一侧还没有版本可报（见 `Freshness.reason`）。 */
@@ -52,8 +55,9 @@ export interface FactVersions {
 }
 
 /**
- * 新鲜度**派生值**。`stale === true` ⇔ `analysisStatus !== "published"` **或**
- * `analysis !== facts`（D2 原文）。
+ * 新鲜度**派生值**。`stale === true` ⇔ `analysisStatus !== "published"`（R6 起：
+ * "分析是否跟上"由 `published vs required` 的关系推断，**不再**比较 `analysis` 与
+ * `facts` —— 后者会把非评分批次的合法差额读成"分析落后"，制造假 stale）。
  *
  * ⚠️ `generations_absent` 也算 stale，但它的**行为不同**：它表示"计数器的数字还不可信"
  * （见 {@link FactVersions} 与 `apps/api/src/data.ts` 的回退分支），消费方在该状态下必须

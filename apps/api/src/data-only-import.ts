@@ -32,7 +32,12 @@ export type DataOnlyImportResult = {
 const allowedTables = new Set([
   "health_records", "healthkit_record_sources", "healthkit_record_aliases",
   "healthkit_record_facts", "import_entity_generations", "import_entity_tombstones",
-  "import_source_tombstones", "import_entity_changes", "import_batches", "import_manifest"
+  "import_source_tombstones", "import_entity_changes", "import_batches", "import_manifest",
+  // R6（2026-10-15）：本车道现在**有意**推进 `import_generations.raw_generation`
+  // （成功批次 +1，与直连车道同语义，见 `beforeCommit` 里的注释）。在此表态后写守卫才会
+  // 放行；不表态会被 fail-closed 拦下——而那条拒绝路径恰好会把整批吞成 `null`
+  // （`catch` 里的 `DATA_ONLY_WRITE_GUARD` 分支），排查代价不小。
+  "import_generations"
 ]);
 const quoted = (name: string): string => `"${name.replaceAll('"', '""')}"`;
 
@@ -206,6 +211,13 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
           db.prepare(`UPDATE import_batches SET xml_sha256=?, status='succeeded',
             dataset_version=?, summary_json=?, completed_at=? WHERE id=?`)
             .run(xmlSha256, datasetVersion, batchSummary, now, input.jobId);
+          // R6（2026-10-15）：事实已变（本批真的写了记录）⇒ raw 代次必须推进——与直连车道
+          // （`direct-sync-ingest.ts` 的"raw 每个批次都递增"）同语义。此前这条车道只改
+          // `dataset_version`、不动计数器，读侧的 `analysis !== facts` 便把它读成"分析永久
+          // 落后"（R6 的现象①）。依赖代次**不动**：本车道在入口就证明了本批结构上不可能
+          // 动到分析（`analysisStatus: "not_required"` 是结构性结论，见上面那段注释）。
+          db.prepare(`UPDATE import_generations SET raw_generation = raw_generation + 1,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton = 1`).run();
           writeImportReceiptInDatabase(db, input.jobId, summary);
           const unledgered = db.prepare(`SELECT mutation.id FROM temp.rai_delta_record_writes mutation
             LEFT JOIN import_entity_changes change ON change.batch_id=? AND change.entity_kind='record'
