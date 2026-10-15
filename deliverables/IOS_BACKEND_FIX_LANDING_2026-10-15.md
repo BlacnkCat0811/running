@@ -74,3 +74,27 @@
 4. **Web**：`apps/web/**`（A7 幂等修复）。
 
 _本记录与审查报告同日成对；两文件中所有引用均经 `check:doc-refs` 核对（0 越界 / 0 漂移）。_
+
+---
+
+## 七、状态更新（2026-10-15 傍晚 · 提交与部署后补记）
+
+- **提交**：全部 41 文件合并为单提交 `9e08301`（+1482/−138），已推送 gitee `main`。
+  按用户要求：**单提交、未跑测试、经 `--no-verify` 提交**（§六的四组建议未采用）。
+- **部署**：线上 `e2344dc → 9e08301`（`git pull --ff-only` + `npm run build` + `systemctl restart rai-api`）。
+  迁移预演 `"pending": []`（version 36）；重启后 `NRestarts=0`、`RAI local API ready`、
+  匿名只读 `publicReadRoutes: 29 / tokenRequiredReadRoutes: 20`（与既定值一致）。
+- **线上验收（16:49–16:55 CST，全部实测）**：
+  - 匿名经域名：`/v1/health` 200（`status:"ok"` + `databaseReady:true`）、`/v1/dashboard` 200、`/v1/backups` 401；
+  - 本批白名单出口的**线上实证**：245 个历史 job 中 122 个 `performance_json` 带 `native` 残留键，
+    取其一打 `/v1/import-jobs/:id`，响应仅剩 `{validationMode,totalMs,stagesMs,computeStagesMs}` ——
+    `native` / `computeProcessMaxRssKiB` 在出口被剥（`publicPerformance` 生效）；
+  - `/v1/exports/workout-summary`（本批改过鉴权的端点）带 token 200；
+  - 前端：`INDEX_CHUNK index-DCZSk6gf.js` 与本次构建逐字一致；备案号在 `App-Cp1nOJu_.js`（true/true）；
+  - `/v1/data-summary` `issues: []`、counts 与部署前一致（healthRecords 526672 / workouts 288 / routePoints 243615）；
+  - `pgrep -c rai-data-worker` = 0。
+- **拆分纪要（实测推翻原计划）**：原拟 iOS 拆「客户端 / 测试门禁」两组，**实测不可拆** ——
+  `NativeAppModel.swift` 新调 `cache.lastReadIssue` / `cache.remove`，而 `run-model-tests.sh`
+  编译进测试二进制的 `CacheStore` 是 `ModelRegression.swift` 中的**测试替身**；替身同步若推迟到
+  测试组，客户端组单独 checkout 时编译失败（`has no member 'lastReadIssue'`）。
+  ⇒ **生产调用点与测试替身必须同批**（与「契约与构造点同批」同族）。
