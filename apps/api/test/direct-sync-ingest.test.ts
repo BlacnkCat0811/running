@@ -638,6 +638,33 @@ test("PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical �
   });
 });
 
+test("R7：同 UUID 睡眠段从 1/1 移到 1/10 ⇒ 旧夜被重建（before 范围进窗口）", async () => {
+  await fixture(async ({ main, input }) => {
+    // 两夜：1/1 与 1/10（wake_date 1/2 / 1/11）——1/10 那一夜全程不动，作"窗口外"对照。
+    const first = await applyOrFail(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000f1", "2026-01-01")
+      + sleepSegment("00000000-0000-0000-0000-0000000000f2", "2026-01-10")));
+    assert.ok(first, "第一批必须被接收");
+    const before = nightsByDate(main);
+    assert.equal(before.size, 2, `两夜都要有 canonical 行（实际 ${JSON.stringify([...before.keys()])}）`);
+
+    // 第二批：**同一个 UUID**（f1）改到 1/10——旧的 1/1 范围只剩在账本 previous_* 里。
+    const second = await applyOrFail(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000f1", "2026-01-10"), { job: "delta-night-r7" }));
+    assert.ok(second, "第二批必须被接收");
+    const range = second.summary.canonicalNights!;
+    assert.equal(range.mode, "window");
+    // 🔴 核心判据（R7）：窗口必须覆盖**旧**夜（1/2）。修复前只读 `effective_at`（新范围），
+    // 窗口落 1/11 一带 —— 旧的 1/2 夜永远不重建，旧派生残留。
+    assert.ok(range.from! <= "2026-01-02" && range.to! >= "2026-01-02",
+      `窗口必须覆盖被移走的那一夜（旧范围进窗口），实际 ${range.from}..${range.to}`);
+
+    const after = nightsByDate(main);
+    assert.notEqual(after.get("2026-01-02") ?? "missing", before.get("2026-01-02"),
+      "旧夜必须真的被重建（或消失）——否则 R7 的残留没有被清掉");
+  });
+});
+
 test("PR4 步骤 4：不碰夜的批次连窗口重建都不做（模式 none、两张表逐字节不变）", async () => {
   await fixture(async ({ main, input }) => {
     const first = await applyOrFail(await input(

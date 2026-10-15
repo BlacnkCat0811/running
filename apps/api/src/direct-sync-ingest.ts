@@ -502,19 +502,29 @@ function nightWindow(db: DatabaseSync, batchId: string, manifest: HealthSyncMani
   const types = NIGHT_FEEDING_TYPE_VALUES as readonly string[];
   const placeholders = types.map(() => "?").join(",");
   const written = db.prepare(`
-    SELECT record.start_at AS startAt, record.end_at AS endAt
+    SELECT record.start_at AS startAt, record.end_at AS endAt,
+      change.previous_effective_at AS previousAt, change.previous_end_at AS previousEndAt
     FROM import_entity_changes change
     JOIN health_records record ON record.id = change.entity_id
-    WHERE change.batch_id = ? AND change.entity_kind = 'record' AND record.type IN (${placeholders})
-  `).all(batchId, ...types) as Array<{ startAt: string | null; endAt: string | null }>;
+    WHERE change.batch_id = ? AND change.entity_kind = 'record'
+      AND (record.type IN (${placeholders}) OR change.previous_type IN (${placeholders}))
+  `).all(batchId, ...types, ...types) as Array<{
+    startAt: string | null; endAt: string | null;
+    previousAt: string | null; previousEndAt: string | null;
+  }>;
   const deletesNightType = manifest.deletedRecords.some((row) => types.includes(row.type));
   const removed = deletesNightType ? db.prepare(`
     SELECT effective_at AS effectiveAt FROM import_entity_changes
     WHERE batch_id = ? AND entity_kind = 'record' AND change_type = 'removed'
   `).all(batchId) as Array<{ effectiveAt: string | null }> : [];
   const instants: number[] = [];
-  for (const row of [...written, ...removed.map((row) => ({ startAt: row.effectiveAt, endAt: row.effectiveAt }))]) {
-    for (const value of [row.startAt, row.endAt]) {
+  for (const row of [...written, ...removed.map((row) => ({
+    startAt: row.effectiveAt, endAt: row.effectiveAt, previousAt: null, previousEndAt: null
+  }))]) {
+    // R7（2026-10-15）：更新前的旧范围（previous_*）一并进窗口——记录从 A 日移到 B 日时，
+    // A 日的旧夜必须被重建/清掉（否则残留，R7 的实证）。current 与 previous 取**并集**，
+    // 宽出来的部分由 ±1 天 padding 与"窗口外逐字节不变"的金丝雀兜住。
+    for (const value of [row.startAt, row.endAt, row.previousAt, row.previousEndAt]) {
       if (typeof value !== "string") continue;
       const parsed = Date.parse(value);
       if (Number.isFinite(parsed)) instants.push(parsed);
@@ -580,16 +590,24 @@ function ledgerFacts(db: DatabaseSync, batchId: string, manifest: HealthSyncMani
   };
 }
 
-/** `dirtyFromAt` = 本批账目里最早的 `effective_at`；出现缺失/非法时刻就退回全量（fail-safe）。 */
+/**
+ * `dirtyFromAt` = 本批账目里最早的时刻；出现缺失/非法时刻就退回全量（fail-safe）。
+ *
+ * R7（2026-10-15）：取 `effective_at` 与 `previous_effective_at` 的**并集**——记录被挪到更晚
+ * 的日期时（A→B），A 日同样是"脏"的（旧范围仍被认为有效过），漏掉它会留下旧派生。
+ * `previous_effective_at` 为 NULL（inserted 或无旧行）时跳过它，其余规则不变。
+ */
 function dirtyFromAt(db: DatabaseSync, batchId: string): string | null {
   const rows = db.prepare(
-    "SELECT effective_at AS effectiveAt FROM import_entity_changes WHERE batch_id = ?"
-  ).all(batchId) as Array<{ effectiveAt: string | null }>;
+    "SELECT effective_at AS effectiveAt, previous_effective_at AS previousAt FROM import_entity_changes WHERE batch_id = ?"
+  ).all(batchId) as Array<{ effectiveAt: string | null; previousAt: string | null }>;
   let earliest: string | null = null;
   for (const row of rows) {
-    const value = row.effectiveAt;
-    if (typeof value !== "string" || !/^\d{4}-/.test(value) || !Number.isFinite(Date.parse(value))) return null;
-    if (earliest === null || value < earliest) earliest = value;
+    for (const value of [row.effectiveAt, row.previousAt]) {
+      if (value === null || value === undefined) continue;
+      if (typeof value !== "string" || !/^\d{4}-/.test(value) || !Number.isFinite(Date.parse(value))) return null;
+      if (earliest === null || value < earliest) earliest = value;
+    }
   }
   return earliest;
 }

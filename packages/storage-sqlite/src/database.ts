@@ -12,6 +12,7 @@ import { migrateModelV33 } from "./v33-migration.js";
 import { migrateModelV34 } from "./v34-migration.js";
 import { migrateModelV35 } from "./v35-migration.js";
 import { migrateModelV36 } from "./v36-migration.js";
+import { migrateModelV37 } from "./v37-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1674,7 +1675,8 @@ const migrations: readonly Migration[] = [
   { version: 33, name: "healthkit_alias_source_lookup", up: migrateModelV33 },
   { version: 34, name: "sparse_fact_history_and_generation_counters", up: migrateModelV34 },
   { version: 35, name: "route_versions_and_analysis_job_bindings", up: migrateModelV35 },
-  { version: 36, name: "workout_soft_delete_marker", up: migrateModelV36 }
+  { version: 36, name: "workout_soft_delete_marker", up: migrateModelV36 },
+  { version: 37, name: "ledger_before_ranges", up: migrateModelV37 }
 ];
 
 /**
@@ -1753,7 +1755,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   33: "bf321666c206a9f74500e938a7f8e8b13edb21576c9f0dd4a81da28ddce1f076",
   34: "36798b3793aa3cebc92ad6ea76285ec4a40073d030902dde81525bfa0259aa21",
   35: "de0d2cdac1f7ac80b2e67cff026c40a3152324269e3328eba6f6c718f31611ce",
-  36: "ff6a727de7b765bf928806db0dff59bdf937e3bdf868f379d04c95efac34d144"
+  36: "ff6a727de7b765bf928806db0dff59bdf937e3bdf868f379d04c95efac34d144",
+  37: "8dcbadf599c2eda028143d3305dbb5d4d6a94a4a913e3f510a51fcd0d9698a7f"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -3256,6 +3259,18 @@ export class RaiDatabase {
     const exists = (kind === "workout"
       ? this.database.prepare(`SELECT 1 FROM workouts WHERE id = ? AND ${workoutPresentConditionSql()}`)
       : this.database.prepare(`SELECT 1 FROM ${table} WHERE ${key} = ?`)).get(id) !== undefined;
+    // R7（2026-10-15）：更新前保存旧行的 type/start/end（账本 before 侧）。
+    // 🔴 时序前提：本方法在解析器**写入新行之前**被调用（上面的 `exists` 判断依赖"当前行
+    // 还是旧值"）。workout 分支刻意**不带** `workoutPresentConditionSql()`：软删行也要取
+    // 旧值（"恢复"场景的 before 范围）。取不到（无行）⇒ undefined ⇒ 账本写 NULL。
+    const previousRange = !exists ? undefined
+      : kind === "record"
+        ? this.database.prepare("SELECT start_at AS startAt, end_at AS endAt, type AS type FROM health_records WHERE id = ?").get(id)
+        : kind === "workout"
+          ? this.database.prepare("SELECT start_at AS startAt, end_at AS endAt, activity_type AS type FROM workouts WHERE id = ?").get(id)
+          : undefined;
+    const previousRows = previousRange as unknown as
+      { startAt?: string | null; endAt?: string | null; type?: string | null } | undefined;
     const previous = this.database.prepare(`
       SELECT content_hash AS contentHash FROM import_entity_generations
       WHERE entity_kind = ? AND entity_id = ?
@@ -3278,9 +3293,11 @@ export class RaiDatabase {
     if (batchId && (!exists || updated)) {
       this.database.prepare(`
         INSERT OR REPLACE INTO import_entity_changes (
-          batch_id, entity_kind, entity_id, change_type, effective_at, content_hash
-        ) VALUES (?, ?, ?, ?, ?, ?)
-      `).run(batchId, kind, id, exists ? "updated" : "inserted", effectiveAt, contentHash);
+          batch_id, entity_kind, entity_id, change_type, effective_at, content_hash,
+          previous_effective_at, previous_end_at, previous_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(batchId, kind, id, exists ? "updated" : "inserted", effectiveAt, contentHash,
+        previousRows?.startAt ?? null, previousRows?.endAt ?? null, previousRows?.type ?? null);
     }
     return { inserted: !exists, updated, tombstoned: false };
   }
