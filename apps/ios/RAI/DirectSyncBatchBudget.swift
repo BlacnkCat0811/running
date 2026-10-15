@@ -20,6 +20,16 @@ import Foundation
 nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
     let maxXmlBytes: Int
     let maxRecords: Int
+    /// manifest 的**删除配额**维度（R3，2026-10-15）：`deletedRecords + deletedWorkoutIds` 的
+    /// 单批上界。服务端用 `DIRECT_SYNC_MAX_RECORDS`（5000）约束它（`direct-sync-ingest.ts:445-448`），
+    /// 与 `maxRecords` 数值同源 —— 分开命名是因为**语义不同**（一个是"发送记录数"，
+    /// 一个是"删除引用数"）。
+    ///
+    /// 🔴 删除**不参与** `accepts` 的页接受判定：一页的 `deletedObjects` 不随 `limit` 缩小
+    /// （HKAnchoredObjectQuery 的 limit 约束的是样本），所以"拒绝一页再 retry"对删除维度无解。
+    /// 截断+暂存才是收敛形态：超出的部分**持久暂存**到下一批再发，锚点照常推进（见
+    /// `HealthKitExport` 的三分预扣与 `SyncTaskStore.sync_pending_deletions`）。
+    let maxDeletions: Int
     let maxRouteFiles: Int
     let maxRouteBytes: Int
 
@@ -33,6 +43,7 @@ nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
     static let conservative = DirectSyncBatchBudget(
         maxXmlBytes: 1_887_436,  // 1.8 MiB（2 MiB × 0.9 向下取整，宁小勿大）
         maxRecords: 4_500,
+        maxDeletions: 4_500,     // 与 maxRecords 同源（服务端删除配额就是 maxRecords）
         maxRouteFiles: 180,
         maxRouteBytes: 30_198_988  // 28.8 MiB（32 MiB × 0.9 向下取整）
     )
@@ -43,6 +54,7 @@ nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
         return DirectSyncBatchBudget(
             maxXmlBytes: Int(Double(bounds.maxXmlBytes) * 0.9),
             maxRecords: Int(Double(bounds.maxRecords) * 0.9),
+            maxDeletions: Int(Double(bounds.maxRecords) * 0.9),
             maxRouteFiles: Int(Double(bounds.maxRouteFiles) * 0.9),
             maxRouteBytes: Int(Double(bounds.maxRouteBytes) * 0.9)
         )
@@ -99,6 +111,7 @@ nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
         DirectSyncBatchBudget(
             maxXmlBytes: max(1, maxXmlBytes / 2),
             maxRecords: max(1, maxRecords / 2),
+            maxDeletions: max(1, maxDeletions / 2),
             maxRouteFiles: max(1, maxRouteFiles / 2),
             maxRouteBytes: max(1, maxRouteBytes / 2)
         )
@@ -165,5 +178,51 @@ nonisolated struct DirectSyncBudgetConvergence: Equatable, Codable, Sendable {
     /// 把收敛作用到预算上：折半 `steps` 次。
     func apply(to budget: DirectSyncBatchBudget) -> DirectSyncBatchBudget {
         (0..<steps).reduce(budget) { partial, _ in partial.halved() }
+    }
+}
+
+/// 删除的**溢出暂存**（R3b，2026-10-15）：本批装不下（或上一批没发完）的删除引用，
+/// 持久到下一批再发。
+///
+/// 🔴 为什么必须有它：一页的 `deletedObjects` 不随 `limit` 缩小（`HKAnchoredObjectQuery`
+/// 的 limit 约束的是样本），所以「装不下的删除」既不能被 retry 缩掉，也**不能丢弃**
+/// （锚点一旦推进，未发送的删除永远不会再被查询返回）。唯一安全形态 = **截断 + 暂存 +
+/// 照常推进**：未发送的部分以本类型持久进 `SyncTaskStore.sync_pending_deletions`，
+/// 下一批先发旧槽再发新删除。
+///
+/// 形状与 manifest 的两段删除**一一对应**：`recordDeletions` 是 `[type, uuid]` 数组
+/// （`deletedRecords` 的形状），`workoutIds` 是 UUID 串数组（`deletedSourceIds` 的形状）。
+/// `Codable` + `Equatable` + `Sendable`：槽里存 JSON，回归可直接钉。
+nonisolated struct DirectSyncPendingDeletions: Codable, Equatable, Sendable {
+    var recordDeletions: [[String: String]] = []
+    var workoutIds: [String] = []
+
+    var isEmpty: Bool { recordDeletions.isEmpty && workoutIds.isEmpty }
+
+    static let empty = DirectSyncPendingDeletions()
+}
+
+/// 删除额度的**可变分配器**（R3b）：`HealthKitExport.writeGlobalRecords` 的 commit 闭包
+/// 逐条咨询它，装不下的进 `overflow`（由调用方回传成 `pendingDeletions`、持久成下一批的输入）。
+///
+/// 为什么是 `final class`（引用语义）而不是 struct：闭包在 `drain` 内部执行、
+/// 需要从"外面"改写同一个状态；struct 的 `inout` 写回路径穿不过那个闭包。
+/// 使用范围严格限于单次 `exportArchive` 调用内（同一任务、非跨隔离域）。
+/// 放在本文件（而非 `HealthKitExport`）的理由：预算回归**不编译** Export（HealthKit 依赖），
+/// 而分配器是纯逻辑、必须有可执行的判据 —— 同 `DirectSyncPendingDeletions`。
+nonisolated final class DirectSyncDeletionAllocation {
+    private(set) var remaining: Int
+    private(set) var overflow: [[String: String]] = []
+
+    init(remaining: Int) { self.remaining = max(0, remaining) }
+
+    /// 装得下就记账（`true` = 调用方应把该 uuid 收进 `deletions` 字典），装不下就进溢出。
+    func allocate(uuid: String, type: String) -> Bool {
+        if remaining > 0 {
+            remaining -= 1
+            return true
+        }
+        overflow.append(["type": type, "uuid": uuid])
+        return false
     }
 }

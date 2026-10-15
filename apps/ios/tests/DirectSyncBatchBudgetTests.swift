@@ -39,6 +39,7 @@ struct DirectSyncBatchBudgetTests {
         let budget = DirectSyncBatchBudget.from(bounds: bounds)
         check(budget.maxXmlBytes == 7_549_747, "xml bytes budget = 8 MiB × 0.9")
         check(budget.maxRecords == 4_500, "records budget = 5000 × 0.9")
+        check(budget.maxDeletions == 4_500, "deletions budget = 5000 × 0.9 (server deletion quota is maxRecords)")
         check(budget.maxRouteFiles == 180, "route files budget = 200 × 0.9")
         check(budget.maxRouteBytes == 60_397_977, "route bytes budget = 64 MiB × 0.9")
         check(DirectSyncBatchBudget.from(bounds: nil) == DirectSyncBatchBudget.conservative,
@@ -46,7 +47,7 @@ struct DirectSyncBatchBudgetTests {
 
         // route 闸门边界：恰好等于上界即"已到上界"（>= 语义）——fetch 侧据此停手。
         let probe = DirectSyncBatchBudget(
-            maxXmlBytes: 100, maxRecords: 10, maxRouteFiles: 4, maxRouteBytes: 200
+            maxXmlBytes: 100, maxRecords: 10, maxDeletions: 10, maxRouteFiles: 4, maxRouteBytes: 200
         )
         check(!probe.routeBudgetExhausted(routeBytes: 0, routeFiles: 0),
               "empty accumulator is not exhausted")
@@ -107,10 +108,37 @@ struct DirectSyncBatchBudgetTests {
         let halved = DirectSyncBatchBudget.conservative.halved()
         check(halved.maxXmlBytes == 943_718, "halving the xml budget is exact integer division")
         check(halved.maxRecords == 2_250, "halving the record budget is exact integer division")
+        check(halved.maxDeletions == 2_250, "halving the deletions budget is exact integer division")
         check(halved.maxRouteFiles == 90, "halving the route file budget is exact integer division")
         check(halved.maxRouteBytes == 15_099_494, "halving the route byte budget is exact integer division")
-        let atFloor = DirectSyncBatchBudget(maxXmlBytes: 1, maxRecords: 1, maxRouteFiles: 1, maxRouteBytes: 1)
+        let atFloor = DirectSyncBatchBudget(maxXmlBytes: 1, maxRecords: 1, maxDeletions: 1, maxRouteFiles: 1, maxRouteBytes: 1)
         check(atFloor.halved() == atFloor, "halving never reaches zero: every dimension floors at one")
+
+        // 删除分配器（R3b，2026-10-15）：装得下就记账、装不下进溢出；**绝不丢弃**
+        // （截断但暂存才是合法形态 —— 审计禁止的只是"截断却不暂存"）。
+        let allocation = DirectSyncDeletionAllocation(remaining: 2)
+        check(allocation.allocate(uuid: "a", type: "T1"), "first deletion fits")
+        check(allocation.allocate(uuid: "b", type: "T2"), "second deletion fits")
+        check(!allocation.allocate(uuid: "c", type: "T1"), "third deletion overflows")
+        check(allocation.remaining == 0, "allocation reports zero remaining after exhaustion")
+        check(allocation.overflow == [["type": "T1", "uuid": "c"]],
+              "overflow keeps the full record for the next batch")
+        let negative = DirectSyncDeletionAllocation(remaining: -5)
+        check(!negative.allocate(uuid: "x", type: "T1"),
+              "a negative starting budget refuses everything (never traps)")
+
+        // 溢出载荷的编解码往返（它就是 `sync_pending_deletions` 槽里的字节）。
+        let pending = DirectSyncPendingDeletions(
+            recordDeletions: [["type": "A", "uuid": "u1"]], workoutIds: ["w1"]
+        )
+        check(!pending.isEmpty, "non-empty payload reports non-empty")
+        check(DirectSyncPendingDeletions.empty.isEmpty, "the empty constant is empty")
+        if let data = try? JSONEncoder().encode(pending),
+           let round = try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: data) {
+            check(round == pending, "pending deletions round-trip through JSON")
+        } else {
+            check(false, "pending deletions must round-trip through JSON")
+        }
 
         // 本地自校验（P2b）：比的是**服务端硬上界**，边界与 `accepts` 同向
         // （恰好等于上界**不算**超 —— 服务端那三处判据用的都是严格 `>`）。

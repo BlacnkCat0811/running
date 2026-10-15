@@ -57,6 +57,14 @@ nonisolated struct HealthKitExportResult: Sendable {
     /// 本批产物里 GPX 轨迹的**实际字节和**（= 各 GPX 盘上字节之和，与服务端
     /// `inputTreeCheck` 的累加口径一致）。同上，只服务 P2b。
     let routeBytes: Int
+    /// **本批未能发送的删除余量**（R3b）：下一批的输入 = 这里。
+    ///
+    /// 与 `budgetStopReason` **正交**：即使 `hasMorePages == false`（记录页全部读完），
+    /// 删除仍可能装不下（一页的 `deletedObjects` 不随 limit 缩小）—— 消费方
+    /// （`HealthKitSync`）必须把它**持久进 `sync_pending_deletions` 槽**，
+    /// 且 `saveTask` 的 `needsContinuation` 要并入 `!pendingDeletions.isEmpty`
+    /// （"还有未发送的工作"与"还有未读的页"同族）。
+    let pendingDeletions: DirectSyncPendingDeletions
 
     /// 单批预算停住的形态（S2.5）。**不是错误**：分批是设计行为。
     nonisolated enum BudgetStopReason: String, Sendable {
@@ -74,6 +82,10 @@ nonisolated struct HealthKitExportResult: Sendable {
     /// —— 续传判定永远以 (hasMorePages, 回执) 合取为准（`DirectSyncCursorPolicy.continuationNeeded`）。
     var hasMorePages: Bool { budgetStopReason != nil }
 }
+
+/// 删除额度的**可变分配器**已挪到 `DirectSyncBatchBudget.swift`（R3b）：
+/// 修正理由 = 预算回归**不编译**本文件（HealthKit 依赖），而分配器是纯逻辑、
+/// 必须有可执行的判据。
 
 nonisolated enum HealthKitExportError: LocalizedError, Equatable {
     case unavailable
@@ -341,6 +353,7 @@ nonisolated enum HealthKitExport {
         routeDiscoveryCursor: String? = nil,
         routeForceRescan: Bool = false,
         budget: DirectSyncBatchBudget = .conservative,
+        pendingDeletions: DirectSyncPendingDeletions = .empty,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
         try Task.checkCancellation()
@@ -361,6 +374,21 @@ nonisolated enum HealthKitExport {
             anchorData: workoutAnchor
         )
         try Task.checkCancellation()
+        // R3b 删除三分预扣（固定顺序：旧槽 → 本批 workout → 本批 record）。
+        // 🔴 顺序不是风格：workout 删除（deletedSourceIds）在 `runningWorkouts` 就已定形、
+        // 且必须**先于** record 删除占额 —— 否则 record 侧会在 drain 里把额度吃光，
+        // workout 侧再溢出就与本批已计入 manifest 的 record 删除**打架**（一份额度算两次）。
+        var deletionBudget = budget.maxDeletions
+        let stashRecordDeletions = Array(pendingDeletions.recordDeletions.prefix(deletionBudget))
+        deletionBudget -= stashRecordDeletions.count
+        let stashWorkoutIds = Array(pendingDeletions.workoutIds.prefix(deletionBudget))
+        deletionBudget -= stashWorkoutIds.count
+        let freshWorkoutIds = workoutBatch.deleted.map { $0.uuid.uuidString }
+        let keptWorkoutIds = Array(freshWorkoutIds.prefix(deletionBudget))
+        deletionBudget -= keptWorkoutIds.count
+        let overflowWorkoutIds = Array(freshWorkoutIds.dropFirst(keptWorkoutIds.count))
+        // record 侧按剩余额度截断；溢出经 `allocation.overflow` 回传（下一批的输入）。
+        let allocation = DirectSyncDeletionAllocation(remaining: deletionBudget)
         var merged = Dictionary(uniqueKeysWithValues: workoutBatch.added.map {
             (routeFileWorkoutId($0), $0)
         })
@@ -504,7 +532,8 @@ nonisolated enum HealthKitExport {
         try Task.checkCancellation()
         let records = try await writeGlobalRecords(
             store: store, cursorData: recordCursors, forceHistory: recordsForceRescan,
-            xml: xml, warnings: warnings, budget: budget, onProgress: onProgress
+            xml: xml, warnings: warnings, budget: budget,
+            deletionAllocation: allocation, onProgress: onProgress
         )
         recordCount += records.count
         let exportedThrough = Date()
@@ -519,8 +548,10 @@ nonisolated enum HealthKitExport {
             "sourceScope": "healthkit",
             "sourceEntityType": "HKWorkoutActivityTypeRunning",
             "sourceIds": exportedWorkouts.map(workoutSyncId),
-            "deletedSourceIds": workoutBatch.deleted.map { $0.uuid.uuidString }.sorted(),
-            "deletedRecords": records.deleted,
+            // R3b：旧槽里能装下的（stash）与本批新删的（kept）一起发；装不下的进
+            // `pendingDeletions` 回传（持久到下一批）。两段都要 **sorted**（确定性门禁）。
+            "deletedSourceIds": (stashWorkoutIds + keptWorkoutIds).sorted(),
+            "deletedRecords": stashRecordDeletions + records.deleted,
             "sampleTypes": ["workout", "sleep", "heart_rate", "hrv", "resting_heart_rate"]
         ]
         let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
@@ -543,7 +574,9 @@ nonisolated enum HealthKitExport {
             zipURL: zipURL,
             workoutCount: exportedWorkouts.count,
             recordCount: recordCount,
-            deletionCount: workoutBatch.deleted.count + records.deleted.count,
+            // = 实际发出的删除总数（manifest 两段之和；本地自校验与回执口径）。
+            deletionCount: stashRecordDeletions.count + records.deleted.count
+                + stashWorkoutIds.count + keptWorkoutIds.count,
             routeCount: routeCount,
             warnings: warnings.snapshot,
             maxEndDate: exportedWorkouts.map(\.endDate).max(),
@@ -560,7 +593,12 @@ nonisolated enum HealthKitExport {
             // 实际产物大小（P2b 本地自校验的输入）：这一句在 `</HealthData>` 与
             // `synchronize()` **之后**执行 ⇒ `offsetInFile` 就是最终盘上大小。
             xmlBytes: Int(xml.offsetInFile),
-            routeBytes: routeBytes
+            routeBytes: routeBytes,
+            // R3b：本批仍未发送的删除（旧槽没装完的 record 溢出 + 本批 workout 溢出）。
+            pendingDeletions: DirectSyncPendingDeletions(
+                recordDeletions: allocation.overflow,
+                workoutIds: overflowWorkoutIds
+            )
         )
     }
 
@@ -899,6 +937,7 @@ nonisolated enum HealthKitExport {
         xml: FileHandle,
         warnings: WarningBag,
         budget: DirectSyncBatchBudget,
+        deletionAllocation: DirectSyncDeletionAllocation,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> (
         count: Int, cursors: Data, deleted: [[String: String]],
@@ -1037,7 +1076,14 @@ nonisolated enum HealthKitExport {
                         commit: { page, _ in
                             // 字节与删除事件**一起**提交：被丢弃的页其删除必须留到下一轮。
                             try xml.write(contentsOf: page.data)
-                            for uuid in page.deletions { deletions[xmlType, default: []].insert(uuid) }
+                            // R3b：删除按 `deletionAllocation` 截断——装得下的进本批 manifest，
+                            // 装不下的进溢出（回传持久、下一批先发）。**绝不丢弃**：
+                            // 锚点随本页推进后，未发送的 uuid 不会再被查询返回。
+                            for uuid in page.deletions {
+                                if deletionAllocation.allocate(uuid: uuid, type: xmlType) {
+                                    deletions[xmlType, default: []].insert(uuid)
+                                }
+                            }
                             count += page.recordCount
                         }
                     )

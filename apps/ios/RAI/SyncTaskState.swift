@@ -95,6 +95,14 @@ nonisolated struct SyncTaskState: Codable {
     /// `Bool?` 而不是 `Bool`：老 payload 没有这个键，而"没有这个键"与"这一轮没剩下什么"
     /// 是两件事 —— 读的人必须能分清"未记录"与"记录为 false"（见类型顶部的兼容纪律）。
     var needsContinuation: Bool?
+    /// 本批删除溢出的**跨轮记忆**（R3b）：导出时算出的余量，供"上传成功前崩溃"的恢复轮
+    /// 原样写入 `sync_pending_deletions` 槽 —— 没有它，恢复轮只能提交空余量，
+    /// 而那批未发送的删除会随锚点推进**永久丢失**（`needsContinuation` 的同族问题：
+    /// 导出态的跨轮记忆）。
+    ///
+    /// `Data?`（`DirectSyncPendingDeletions` 的 JSON）：与 `needsContinuation` 同样
+    /// "缺键 = 未记录"（老 payload 没有它），不是"没有余量"。
+    var pendingDeletions: Data?
     /// 分析那一半的**独立**结论（§1.4 / §9.1）。
     ///
     /// 为什么不从 `lastReceipt.analysisStatus` 读：`committed` 之后事实那一半就冻结了，
@@ -133,6 +141,7 @@ nonisolated struct SyncTaskState: Codable {
         lastBackgroundRunAt: Date? = nil,
         lastReceipt: DirectSyncReceipt? = nil,
         needsContinuation: Bool? = nil,
+        pendingDeletions: Data? = nil,
         lastAnalysisStatus: DirectSyncAnalysisStatus? = nil
     ) {
         self.target = target
@@ -162,6 +171,7 @@ nonisolated struct SyncTaskState: Codable {
         self.lastBackgroundRunAt = lastBackgroundRunAt
         self.lastReceipt = lastReceipt
         self.needsContinuation = needsContinuation
+        self.pendingDeletions = pendingDeletions
         self.lastAnalysisStatus = lastAnalysisStatus
     }
 
@@ -209,6 +219,7 @@ nonisolated struct SyncTaskState: Codable {
         // 于是"任务消失"，症状是升级后重导整个窗口。上面那些老键保持 `decode` 不变。
         lastReceipt = try container.decodeIfPresent(DirectSyncReceipt.self, forKey: .lastReceipt)
         needsContinuation = try container.decodeIfPresent(Bool.self, forKey: .needsContinuation)
+        pendingDeletions = try container.decodeIfPresent(Data.self, forKey: .pendingDeletions)
         lastAnalysisStatus = try container.decodeIfPresent(
             DirectSyncAnalysisStatus.self, forKey: .lastAnalysisStatus
         )

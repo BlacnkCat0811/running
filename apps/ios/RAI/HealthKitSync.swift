@@ -1084,6 +1084,9 @@ final class HealthKitSync {
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        // R3b：从任务行透传删除余量（导出时算的），恢复轮的提交用它写槽。
+                        pendingDeletions: restored.pendingDeletions
+                            .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) },
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
                         // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
@@ -1217,6 +1220,9 @@ final class HealthKitSync {
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        // R3b：从任务行透传删除余量（导出时算的），恢复轮的提交用它写槽。
+                        pendingDeletions: restored.pendingDeletions
+                            .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) },
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
                         // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
@@ -1246,6 +1252,9 @@ final class HealthKitSync {
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        // R3b：从任务行透传删除余量（导出时算的），恢复轮的提交用它写槽。
+                        pendingDeletions: restored.pendingDeletions
+                            .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) },
                         receipt: finished.summary?.directSync,
                         // 同上：`.upload` 恢复分支也真的等了一个 `jobId` 的终态。
                         requiresReceipt: directSyncNegotiated,
@@ -1346,6 +1355,12 @@ final class HealthKitSync {
             let routeStates = taskStore.loadRouteStates(scope: activeScope)
             let routeDiscoveryCursor = taskStore.loadRouteDiscoveryCursor(scope: activeScope)
             if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
+            // R3b：删除溢出的旧槽（上一批没发完的删除）。损坏当空 + 不阻断 —— 写入路径带
+            // readBack 断言，损坏本不该发生；为它卡死同步链反而更糟。
+            let pendingDeletionsData = taskStore.loadPendingDeletions(scope: activeScope)
+            if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
+            let pendingDeletions = pendingDeletionsData
+                .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) } ?? .empty
             let onProgress: @Sendable (String) async -> Void = { [weak self] status in
                 await MainActor.run { [weak self] in
                     // 任何来源的中止一旦发生就不再发布晚到的进度：原因分类只影响 phase 怎么写，
@@ -1398,6 +1413,9 @@ final class HealthKitSync {
                         // 于是这一轮每个都重查一次，不受低频间隔或候选数限制。
                         routeForceRescan: full,
                         budget: attemptBudget,
+                        // R3b：上一批没发完的删除（旧槽）。本批先发它，再发新删除；
+                        // 仍装不下的余量在 `produced.pendingDeletions` 回传。
+                        pendingDeletions: pendingDeletions,
                         onProgress: onProgress
                     )
                     guard let bounds = identity.directSyncBounds,
@@ -1462,7 +1480,12 @@ final class HealthKitSync {
                 // 任务行透传进 `markSuccess`（提交时再落 `sync_continuation` 槽）。
                 // 不写它的话，恢复轮只能传 false —— 一次被预算截断的导出会在崩溃后
                 // 静默失去"还有页"的记忆。
-                needsContinuation: exported.hasMorePages
+                //
+                // R3b：删除余量与它**同族**（都是"导出态"），走同一条透传通道 ——
+                // 少了它，恢复轮的提交会把余量当空、那批删除随锚点推进永久丢失。
+                needsContinuation: exported.hasMorePages || !exported.pendingDeletions.isEmpty,
+                pendingDeletions: exported.pendingDeletions.isEmpty
+                    ? nil : (try? JSONEncoder().encode(exported.pendingDeletions))
             ))
             // 日志落盘后产物归可恢复任务所有；之后取消或上传失败都必须保留它。
             uncommittedArchive = nil
@@ -1502,6 +1525,8 @@ final class HealthKitSync {
                     hasMorePages: exported.hasMorePages,
                     routeStates: exported.routeStates,
                     routeDiscoveryCursor: exported.routeDiscoveryCursor,
+                    // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
+                    pendingDeletions: exported.pendingDeletions,
                     // 同两条恢复分支：`unchanged` 是对已存在批次的确认，没有新回执可等。
                     requiresReceipt: false
                 )
@@ -1526,6 +1551,8 @@ final class HealthKitSync {
                     hasMorePages: exported.hasMorePages,
                     routeStates: exported.routeStates,
                     routeDiscoveryCursor: exported.routeDiscoveryCursor,
+                    // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
+                    pendingDeletions: exported.pendingDeletions,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1714,6 +1741,9 @@ final class HealthKitSync {
         recordWorkoutCount: Bool = true,
         routeStates: [String: RouteSyncRecord] = [:],
         routeDiscoveryCursor: String? = nil,
+        // R3b：删除余量（`nil` = 不改旧槽 —— 老调用点与"本轮没重估删除"的路径都靠它）；
+        // 空 = 清；非空 = 写。语义与 `SyncTaskStore.commitSuccess` 的同名参数逐字一致。
+        pendingDeletions: DirectSyncPendingDeletions? = nil,
         receipt: DirectSyncReceipt? = nil,
         requiresReceipt: Bool = true,
         job: ImportJobResponse? = nil
@@ -1828,7 +1858,7 @@ final class HealthKitSync {
         )
         let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(
             checkpoint: .syncCommitted,
-            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors, continuationPending: needsContinuation) },
+            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation) },
             acknowledge: { checkpoint in
                 // §10.2「连续分页尚未 drain 完时，不清空后台待办意图」：认领了它，用户不打开
                 // App 就再也没人接着发下一批。`persistThenAcknowledge` 因此**不再**无条件确认，

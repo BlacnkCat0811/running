@@ -83,6 +83,10 @@ final class SyncTaskStore {
                 scope TEXT PRIMARY KEY,
                 payload BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sync_pending_deletions (
+                scope TEXT PRIMARY KEY,
+                payload BLOB NOT NULL
+            );
             """
         let execResult = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
@@ -388,7 +392,7 @@ final class SyncTaskStore {
     ///   拆开就会出现"游标已提交、待续标记没写上"的窗口，而那个窗口里没人会去读剩下的页。
     ///   默认 `false`：既有的调用点（恢复/无导出轮次）不产生新的待续，且会**清掉**完成后的旧标记。
     @discardableResult
-    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil, continuationPending: Bool = false) -> Bool {
+    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil, pendingDeletions: DirectSyncPendingDeletions? = nil, continuationPending: Bool = false) -> Bool {
         guard isAvailable, let database else { fail("commit"); return false }
         lastError = nil
         // 🔴 写入前先把时间点吸附到 REAL 列能逐位往返的那一个值上（`Date.canonicalForREAL`）。
@@ -424,10 +428,38 @@ final class SyncTaskStore {
                 return false
             }
         }
+        // 删除暂存（R3b）与游标同一个事务落账。语义三态：`nil` = 不改旧槽（默认，老调用点零变化）；
+        // 空 = 清；非空 = 写。写路径**带 readBack 断言**（这是数据——删不掉的引用若不落盘就
+        // 随锚点推进永久丢失；与待续标记的"提示性判据"不同级）。清路径不做断言：
+        // 旧槽本来就不存在（nil）时删 0 行是期望状态。
+        if let pendingDeletions {
+            if pendingDeletions.isEmpty {
+                guard writePendingDeletions(nil, scope: scope) else {
+                    lastError = "删除暂存清空失败，本次提交已回滚。"
+                    return false
+                }
+            } else {
+                guard let payload = try? JSONEncoder().encode(pendingDeletions) else {
+                    lastError = "删除暂存编码失败，本次提交已回滚。"
+                    return false
+                }
+                guard writePendingDeletions(payload, scope: scope),
+                      loadPendingDeletions(scope: scope) == payload else {
+                    lastError = "删除暂存写入后无法读回一致的值，本次提交已回滚。"
+                    return false
+                }
+            }
+        }
         // 待续标记与游标同一个事务落账（S2.3）。刻意**不做** readBack 断言：它的读点是
         // `probePendingWork` 的提示性判据，错了只会让前台补跑少几轮/多几轮，不是数据正确性
         // 问题；而每条提交都多开一条查询的代价是实打实的。写失败仍然 fail（宁可整段回滚）。
-        guard writeContinuation(continuationPending ? Self.continuationPendingSentinel : nil, scope: scope) else {
+        //
+        // 🔴 哨兵条件（R3b）：**槽非空也是「还有未发送的工作」**——删除暂时装不下时
+        // `hasMorePages` 可能为 false（页已被接受），只靠 `continuationPending` 会让
+        // 后台续批机器看不见它（无人续发的形态与 R1 同族）。把三种「还有活」并成一个哨兵：
+        // 续页、本批新暂存的删除、以及"本轮没重估删除但旧槽仍非空"。
+        let deletionsStillPending = pendingDeletions.map { !$0.isEmpty } ?? (loadPendingDeletions(scope: scope) != nil)
+        guard writeContinuation((continuationPending || deletionsStillPending) ? Self.continuationPendingSentinel : nil, scope: scope) else {
             lastError = "待续标记写入失败，本次提交已回滚。"
             return false
         }
@@ -586,6 +618,51 @@ final class SyncTaskStore {
         // `changes() == 1` 纪律刻意不同：那里的 0 行意味着"找不到本轮任务行"（错位），
         // 这里的 0 行意味着"已经是干净的"，正是期望状态。
         guard sqlite3_step(statement) == SQLITE_DONE else { fail("continuation clear"); return false }
+        return true
+    }
+
+    // MARK: 删除暂存槽（R3b：删除引用装不下时的持久溢出）
+
+    /// 读删除暂存。`nil` = 这个 scope 没有暂存的删除（或从没有过）。
+    ///
+    /// 与 `loadContinuation` 不同，这里读的是**载荷本身**（`DirectSyncPendingDeletions` 的 JSON），
+    /// 因为下一批要把这些引用**真的发出去** —— 不是只回答"有没有活"。
+    func loadPendingDeletions(scope: String) -> Data? {
+        guard let statement = prepare("SELECT payload FROM sync_pending_deletions WHERE scope = ?") else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { fail("pending deletions read"); return nil }
+        let count = Int(sqlite3_column_bytes(statement, 0))
+        guard count > 0, let pointer = sqlite3_column_blob(statement, 0) else {
+            fail("pending deletions payload"); return nil
+        }
+        return Data(bytes: pointer, count: count)
+    }
+
+    /// 写/清删除暂存（只在 `commitSuccess` 的事务内调用）。`nil` = 清（删行），
+    /// 与 `writeContinuation` 同一条纪律：删 0 行不是错误（"已经是干净的"正是期望状态）。
+    private func writePendingDeletions(_ data: Data?, scope: String) -> Bool {
+        if let data, !data.isEmpty {
+            guard data.count <= Int(Int32.max), let database,
+                  let statement = prepare("""
+                    INSERT INTO sync_pending_deletions(scope, payload) VALUES (?, ?)
+                    ON CONFLICT(scope) DO UPDATE SET payload = excluded.payload
+                    """) else { fail("pending deletions prepare"); return false }
+            defer { sqlite3_finalize(statement) }
+            bind(scope, to: statement, at: 1)
+            let bound = data.withUnsafeBytes {
+                sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32(data.count), SQLiteSupport.transient)
+            }
+            guard bound == SQLITE_OK, sqlite3_step(statement) == SQLITE_DONE,
+                  sqlite3_changes(database) == 1 else { fail("pending deletions write"); return false }
+            return true
+        }
+        guard let statement = prepare("DELETE FROM sync_pending_deletions WHERE scope = ?") else { return false }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        guard sqlite3_step(statement) == SQLITE_DONE else { fail("pending deletions clear"); return false }
         return true
     }
 

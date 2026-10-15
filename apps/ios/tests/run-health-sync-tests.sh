@@ -102,6 +102,8 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/DirectSyncBatchBudget.swift \
   apps/ios/RAI/SQLiteSupport.swift \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/RAI/HealthSyncBackgroundRecovery.swift \
@@ -133,6 +135,8 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/DirectSyncBatchBudget.swift \
   apps/ios/RAI/SQLiteSupport.swift \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/tests/SyncStateCommitRegression.swift \
@@ -169,6 +173,8 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/SyncStateCommitPlan.swift \
   apps/ios/RAI/SyncTaskStore.swift \
+  apps/ios/RAI/APIModels.swift \
+  apps/ios/RAI/DirectSyncBatchBudget.swift \
   apps/ios/RAI/SQLiteSupport.swift \
   apps/ios/RAI/RouteSyncState.swift \
   apps/ios/RAI/RouteSyncStateMachine.swift \

@@ -97,8 +97,10 @@ check("RAIHealthKitSampleUUID" in export and "sampleMetadataXML(sample)" in quan
       "quantity records must carry their sample UUID into the XML metadata")
 check('sampleMetadataXML(sample))</Record>' in records,
       "sleep must carry UUIDs too")
-check('"version": 2' in export and '"deletedRecords": records.deleted' in export,
-      "the export manifest must be v2 and carry the record deletions")
+check('"version": 2' in export and '"deletedRecords": stashRecordDeletions + records.deleted' in export,
+      "the export manifest must be v2 and carry the record deletions (stash + this batch, R3b)")
+check('"deletedSourceIds": (stashWorkoutIds + keptWorkoutIds).sorted()' in export,
+      "the manifest must send stashed workout deletions together with this batch's (R3b)")
 check("writeWorkoutRecords" not in export,
       "associated samples must use type cursors too")
 check("pendingRecordCursors: exported.recordCursors" in sync,
@@ -176,8 +178,14 @@ check("loadContinuation(scope:" in sync,
       "probePendingWork must read the continuation slot (otherwise nobody sends the next page)")
 check("CREATE TABLE IF NOT EXISTS sync_continuation" in store,
       "the continuation slot table is missing from the store schema")
-check("func writeContinuation(" in store and "continuationPending ?" in store,
-      "commitSuccess must write/clear the continuation slot inside its transaction")
+check("func writeContinuation(" in store and "continuationPending || deletionsStillPending" in store,
+      "commitSuccess must write/clear the continuation slot inside its transaction "
+      "(the sentinel now also covers still-pending deletions, R3b)")
+check("CREATE TABLE IF NOT EXISTS sync_pending_deletions" in store
+      and "func writePendingDeletions(" in store and "func loadPendingDeletions(" in store,
+      "the pending-deletions slot must exist with its write/load pair (R3b)")
+check("pendingDeletions: DirectSyncPendingDeletions? = nil" in store,
+      "commitSuccess must accept the pending-deletions payload (nil = leave the old slot)")
 # 任务行透传：导出轮必须把 hasMorePages 写进任务行（崩溃/挂起后恢复轮才有得透传）。
 check("needsContinuation: exported.hasMorePages" in sync,
       "the export round must persist hasMorePages into the task row for resume rounds")
@@ -186,7 +194,8 @@ check("needsContinuation: exported.hasMorePages" in sync,
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
 # （或把它挪进走不到的分支）都会让它变红。
-MIN_CHECKS = 41
+# 2026-10-16（R3b）：新增删除暂存/截断判据后实测打印 52 ⇒ 按同一纪律重设为 51。
+MIN_CHECKS = 51
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"
