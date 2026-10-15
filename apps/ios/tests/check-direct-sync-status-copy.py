@@ -27,6 +27,11 @@ Cross-platform by construction: explicit UTF-8 on every read and on stdout,
 read-only, exit code 0/1, one printed reason per failure.
 """
 
+# Python 3.9 兼容（D1，2026-10-15）：`str | None` 这类 PEP 604 注解在 3.9 下会在
+# **函数定义时**求值并 TypeError（macOS 自带的 /usr/bin/python3 正是 3.9）；
+# 延迟注解求值后即可在 3.9 上运行。先例：check-export-determinism.py:22。
+from __future__ import annotations
+
 import re
 import sys
 from pathlib import Path

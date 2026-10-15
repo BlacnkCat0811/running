@@ -23,6 +23,11 @@
 跨平台：显式 UTF-8、只读、退出码 0/1、失败逐条打印原因。
 """
 
+# Python 3.9 兼容（D1，2026-10-15）：`tuple[int, int] | None` 这类 PEP 604 注解在
+# 3.9 下会在函数定义时 TypeError（macOS 自带的 /usr/bin/python3 正是 3.9）；延迟注解
+# 求值后即可在 3.9 上运行。
+from __future__ import annotations
+
 import re
 import sys
 from pathlib import Path

@@ -48,6 +48,23 @@ fi
 # 会拿到没有 iOS SDK 的工具链。显式固定 DEVELOPER_DIR，与两条子脚本保持一致。
 export DEVELOPER_DIR="$developer_dir"
 
+# Python 解释器预检（D2，2026-10-15）：三支 direct-sync 门禁需要 Python ≥ 3.9
+# （模块级 PEP 604 注解在 3.9 下会 TypeError；更低版本更不行）。macOS 默认的
+# /usr/bin/python3 恰是 3.9 —— "默认机即绿"就是这条阈值的来源。
+# 缺解释器 / 版本过低时**显式失败**：门禁在"没跑"的时候必须说出来，不能静默跳过。
+gate_python="$(command -v python3 || true)"
+if [ -z "$gate_python" ]; then
+  echo "❌ iOS 门禁需要 Python 3（找不到 python3）" >&2
+  exit 1
+fi
+gate_python_version="$("$gate_python" -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+case "$gate_python_version" in
+  3.[0-8])
+    echo "❌ iOS 门禁需要 Python ≥ 3.9（当前 ${gate_python_version}，来自 ${gate_python}）" >&2
+    exit 1
+    ;;
+esac
+
 set -e
 bash apps/ios/tests/typecheck-ios.sh
 bash apps/ios/tests/run-model-tests.sh
