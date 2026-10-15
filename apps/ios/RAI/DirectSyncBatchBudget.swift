@@ -64,10 +64,17 @@ nonisolated struct DirectSyncBatchBudget: Equatable, Sendable {
     /// 唯一触发场景是"满页比整批预算还大"（正常批走不到这里）。`HealthKitRecordCursor.drain`
     /// 会把它夹到 `min(返回值, 当前 limit − 1)` ⇒ 收缩严格单调、有限步终止；夹到 <1 时收手（零提交）。
     /// 🔴 这是"每轮至少前进 1 条记录"的兜底：去掉它，页首回退就会退化成死循环。
+    ///
+    /// 🔴 「先比较再相减」（R4 修复，2026-10-15）：旧式 `Int(max(0, UInt64(maxXmlBytes) - usedXmlBytes))`
+    /// 里那一截是无符号减法，`usedXmlBytes > maxXmlBytes` 时会**先于**外层 `max(0, …)` 触发算术陷阱
+    /// （SIGILL 杀进程）。该输入可达：workout XML 在记录分页之前连续写出、没有写前字节闸门，
+    /// 全量重扫或预算已收缩时可以先耗尽字节账。余量不足一律返回 1 —— 由 `drain` 的
+    /// `limit == 1` 零提交收手兜底，不自锁（收缩仍严格单调、有界步终止）。
     func shrinkLimit(pageBytes: Int, pageRecords: Int, usedXmlBytes: UInt64, usedRecords: Int) -> Int {
         guard pageRecords > 0 else { return 1 }
         let perRecord = max(1, pageBytes / pageRecords)
-        let remainingBytes = Int(max(0, UInt64(maxXmlBytes) - usedXmlBytes))
+        guard usedXmlBytes < UInt64(maxXmlBytes) else { return 1 }
+        let remainingBytes = maxXmlBytes - Int(usedXmlBytes)
         let remainingRecords = max(0, maxRecords - usedRecords)
         return max(1, min(remainingBytes / perRecord, remainingRecords))
     }

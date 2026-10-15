@@ -86,6 +86,21 @@ struct DirectSyncBatchBudgetTests {
         check(probe.shrinkLimit(pageBytes: 0, pageRecords: 0, usedXmlBytes: 0, usedRecords: 0) == 1,
               "a page with no records cannot produce a zero estimate")
 
+        // 下溢边界（R4 修复，2026-10-15）：已用字节 ≥ 上限时旧的 `UInt64 - UInt64` 是算术陷阱
+        // （SIGILL 杀进程，`max(0, …)` 拦不住——它在外层）。触发路径真实存在：workout XML 在
+        // 记录分页前没有写前闸门，可先把 `offsetInFile` 推过预算。判据只能是"不崩溃且返回 ≥1"；
+        // 返回 1 后由 `drain` 的 `limit == 1` 零提交收手兜底，不退化成死循环。
+        check(probe.shrinkLimit(pageBytes: 100, pageRecords: 10, usedXmlBytes: 100, usedRecords: 0) == 1,
+              "used bytes at exactly the xml cap returns one instead of trapping")
+        check(probe.shrinkLimit(pageBytes: 100, pageRecords: 10, usedXmlBytes: 101, usedRecords: 0) == 1,
+              "one byte over the xml cap returns one instead of underflowing")
+        check(probe.shrinkLimit(pageBytes: 100, pageRecords: 10, usedXmlBytes: 1_000_000, usedRecords: 0) == 1,
+              "far over the xml cap still returns one")
+        check(probe.shrinkLimit(pageBytes: 100, pageRecords: 10, usedXmlBytes: 101, usedRecords: 99) == 1,
+              "over the xml cap with the record budget also exhausted returns one")
+        check(probe.shrinkLimit(pageBytes: 0, pageRecords: 0, usedXmlBytes: 101, usedRecords: 0) == 1,
+              "an empty page over the xml cap returns one")
+
         // 缩一档（`halved`）：四维同时折半，且**永不落到 0**。
         // 落 0 的失效方式很安静：`accepts` 会把每一页都判成放不下 ⇒ 收缩路径一路走到
         // `limit == 1` 才收手（有界，但该类型本轮零进展、每批都是空批）。
