@@ -65,6 +65,10 @@ nonisolated struct HealthKitExportResult: Sendable {
     /// 且 `saveTask` 的 `needsContinuation` 要并入 `!pendingDeletions.isEmpty`
     /// （"还有未发送的工作"与"还有未读的页"同族）。
     let pendingDeletions: DirectSyncPendingDeletions
+    /// B2：下一批的**类型轮转起点**（`descriptors` 下标）。半批被预算截断时，本批从
+    /// `typeRotationStart` 开始、读到第 k 个类型停下 ⇒ 下一批从 `(起点 + k) % 类型数`
+    /// 开始 —— 每批都换起点，任何类型都不会因为长期排在尾部而饿死。
+    let nextTypeRotationStart: Int
 
     /// 单批预算停住的形态（S2.5）。**不是错误**：分批是设计行为。
     nonisolated enum BudgetStopReason: String, Sendable {
@@ -369,6 +373,7 @@ nonisolated enum HealthKitExport {
         routeForceRescan: Bool = false,
         budget: DirectSyncBatchBudget = .conservative,
         pendingDeletions: DirectSyncPendingDeletions = .empty,
+        typeRotationStart: Int = 0,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
         try Task.checkCancellation()
@@ -581,7 +586,10 @@ nonisolated enum HealthKitExport {
         let records = try await writeGlobalRecords(
             store: store, cursorData: recordCursors, forceHistory: recordsForceRescan,
             xml: xml, warnings: warnings, budget: budget,
-            deletionAllocation: allocation, onProgress: onProgress
+            deletionAllocation: allocation,
+            // B2：轮转起点透传（窗口 pass 不受轮转影响 —— 它恒扫全部类型）。
+            typeRotationStart: typeRotationStart,
+            onProgress: onProgress
         )
         recordCount += records.count
         let exportedThrough = Date()
@@ -645,7 +653,9 @@ nonisolated enum HealthKitExport {
             pendingDeletions: DirectSyncPendingDeletions(
                 recordDeletions: allocation.overflow,
                 workoutIds: overflowWorkoutIds
-            )
+            ),
+            // B2：下一批的轮转起点（由 `writeGlobalRecords` 算出并回传）。
+            nextTypeRotationStart: records.nextTypeRotationStart
         )
     }
 
@@ -1003,10 +1013,13 @@ nonisolated enum HealthKitExport {
         warnings: WarningBag,
         budget: DirectSyncBatchBudget,
         deletionAllocation: DirectSyncDeletionAllocation,
+        // B2：类型轮转起点（由 `exportArchive` 透传；见该函数参数说明）。
+        typeRotationStart: Int,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> (
         count: Int, cursors: Data, deleted: [[String: String]],
-        budgetStopReason: HealthKitExportResult.BudgetStopReason?
+        budgetStopReason: HealthKitExportResult.BudgetStopReason?,
+        nextTypeRotationStart: Int
     ) {
         // Corrupt cursors fail closed. They are never silently turned into a
         // window query; a missing type starts from nil and reads all history.
@@ -1127,10 +1140,17 @@ nonisolated enum HealthKitExport {
                 throw error
             }
         }
-        for (index, descriptor) in descriptors.enumerated() {
+        // B2（2026-10-16）：从**持久化的轮转起点**开始环绕 —— 固定序下排尾的类型（睡眠最典型）
+        // 在"预算总被前排类型耗尽"时永远读不到。每批换起点，N 批内每个类型都轮到头位。
+        // `index` 仍是环绕到的**实际下标**；进度文案改用 `offset + 1`（处理的第几个）。
+        var processedTypeCount = 0
+        for offset in 0..<descriptors.count {
+            let index = (typeRotationStart + offset) % descriptors.count
+            let descriptor = descriptors[index]
             // 预算在**上一个类型**停下 ⇒ 本轮不再开始新类型（未处理的类型保持旧游标，
             // `hasMorePages` 冒泡给上层 —— S2.1 的"未处理类型不动"纪律）。
             if budgetStopReason != nil { break }
+            processedTypeCount = offset + 1
             let (type, unit, xmlType, xmlUnit) = descriptor
             try Task.checkCancellation()
             // 🔴 逐类型进度。这一段是整轮导出里**最长**的一段 —— 全量历史时单个类型
@@ -1142,7 +1162,7 @@ nonisolated enum HealthKitExport {
             // "确实要开始读这一类型了"，而不是一句凭空的乐观话术。
             // ⚠️ 进度文案**不进载荷**：它只走 `onProgress`，`export.xml` / manifest 的字节
             // 由 `check-export-determinism.py` 钉着，加这一段不得改变任何一个字节。
-            await onProgress("正在读取健康记录 \(index + 1)/\(descriptors.count)（已 \(count) 条）")
+            await onProgress("正在读取健康记录 \(offset + 1)/\(descriptors.count)（已 \(count) 条）")
             let previous = cursors[xmlType]
             let decoded = previous.flatMap { decodeAnchor($0.anchor) }
             guard previous == nil || decoded != nil || forceHistory else {
@@ -1261,7 +1281,9 @@ nonisolated enum HealthKitExport {
         let deleted = deletions.keys.sorted().flatMap { type in
             deletions[type]!.sorted().map { ["type": type, "uuid": $0] }
         }
-        return (count, try encoder.encode(cursors), deleted, budgetStopReason)
+        // B2：下一批的轮转起点 = 本批已开始处理的类型数（环绕推进；全批完成时回到原起点）。
+        let nextRotation = (typeRotationStart + processedTypeCount) % max(1, descriptors.count)
+        return (count, try encoder.encode(cursors), deleted, budgetStopReason, nextRotation)
     }
 
     /// 一页记录的**渲染**（S2.5 写前判定）：把这一页要写进 `export.xml` 的**全部字节**先在内存里

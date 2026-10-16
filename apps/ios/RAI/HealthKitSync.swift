@@ -169,6 +169,12 @@ final class HealthKitSync {
     /// 预算收敛档位的键（P1b/P2b）。**刻意不放在 `taskKey` 里**：这条记忆唯一发挥
     /// 作用的时刻，正是我们清掉 task 行的那一刻 —— 放进 task 就等于把它一起删了。
     private static let budgetConvergenceKey = "rai.hk.budgetConvergence"
+    /// B2（2026-10-16）：记录类型轮转起点的 UserDefaults 键。
+    ///
+    /// 🔴 为什么不放任务行/内存：历史重放跨越多批**且跨进程**，而"上一批读到哪个类型"
+    /// 是跨批记忆；任务行在成功提交时被删除（`commitSuccess`），内存值一重启就没 ——
+    /// 与 `budgetConvergenceKey` 同一条"活过 `clearTask()`"的理由。
+    private static let recordTypeRotationKey = "rai.hk.recordTypeRotation"
     /// Inclusive overlap so workouts finalized just after the previous export are not missed.
     private static let overlap: TimeInterval = 48 * 60 * 60
     private static let autoSyncInterval: TimeInterval = 15 * 60
@@ -1416,6 +1422,8 @@ final class HealthKitSync {
                         // R3b：上一批没发完的删除（旧槽）。本批先发它，再发新删除；
                         // 仍装不下的余量在 `produced.pendingDeletions` 回传。
                         pendingDeletions: pendingDeletions,
+                        // B2：类型轮转起点（上一批读到的位置；让历史重放无类型饿死）。
+                        typeRotationStart: self.loadRecordTypeRotation(),
                         onProgress: onProgress
                     )
                     guard let bounds = identity.directSyncBounds,
@@ -1487,6 +1495,9 @@ final class HealthKitSync {
                 pendingDeletions: exported.pendingDeletions.isEmpty
                     ? nil : (try? JSONEncoder().encode(exported.pendingDeletions))
             ))
+            // B2：轮转起点在**导出成功之后**立刻落盘（与任务行同批；即使随后上传失败，
+            // 下一轮从新起点继续 —— 起点只影响"从哪个类型先读"，多走一步无害）。
+            saveRecordTypeRotation(exported.nextTypeRotationStart)
             // 日志落盘后产物归可恢复任务所有；之后取消或上传失败都必须保留它。
             uncommittedArchive = nil
             try checkCancellation()
@@ -2700,6 +2711,19 @@ final class HealthKitSync {
     /// `clearTask()` 把"别再撞同一面墙"的记忆一起删掉，于是下一轮用满预算产出同一份
     /// 必被拒的产物 —— 每轮白读一遍 HealthKit（GB 级导出，整个流程最贵的一步）。
     /// 作用域与 task 同源（`activeScope` = 服务端 URL 指纹），换服务端不共享。
+    /// B2：记录类型轮转起点（下一个应从哪个 `descriptors` 下标开始读）。
+    /// 读不到/损坏 ⇒ 0（等价旧行为：固定从第一个类型开始）—— 轮转是**优化**，不是正确性，
+    /// 所以这一侧的失败方向是"回退到旧行为"，而不是"拒绝同步"。
+    private func loadRecordTypeRotation() -> Int {
+        guard let value = UserDefaults.standard.object(forKey: scopedKey(Self.recordTypeRotationKey)) as? Int,
+              value >= 0 else { return 0 }
+        return value
+    }
+
+    private func saveRecordTypeRotation(_ index: Int) {
+        UserDefaults.standard.set(index, forKey: scopedKey(Self.recordTypeRotationKey))
+    }
+
     private func loadBudgetConvergence() -> DirectSyncBudgetConvergence {
         guard let data = UserDefaults.standard.data(forKey: scopedKey(Self.budgetConvergenceKey)),
               let stored = try? JSONDecoder().decode(DirectSyncBudgetConvergence.self, from: data) else {
