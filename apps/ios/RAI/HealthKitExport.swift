@@ -69,6 +69,15 @@ nonisolated struct HealthKitExportResult: Sendable {
     /// `typeRotationStart` 开始、读到第 k 个类型停下 ⇒ 下一批从 `(起点 + k) % 类型数`
     /// 开始 —— 每批都换起点，任何类型都不会因为长期排在尾部而饿死。
     let nextTypeRotationStart: Int
+    /// O02/WP-11：本批**新登记**的待查路线（页交付后生效）。它们是"训练 XML 已交付、
+    /// 锚已推进、但 route 查询被预算挡住"且**没有状态行**的 UUID —— 没有这条待办，
+    /// 它们重启后永久不可发现。调用方**超前登记**（崩在提交前只会让待办早到、下批多查
+    /// 一次，绝不丢）。
+    let pendingRouteTodos: [PendingRouteTodo]
+    /// O02/WP-11：本批**已成功交付**（fetch 完成）的待办 UUID，可从队列移除。
+    /// 🔴 调用方必须在**批次持久提交成功之后**才移除 —— 载荷未被接受时移除会让那些
+    /// 「无状态行」的 UUID 再也回不来。
+    let completedRouteTodos: [String]
 
     /// 单批预算停住的形态（S2.5）。**不是错误**：分批是设计行为。
     nonisolated enum BudgetStopReason: String, Sendable {
@@ -373,6 +382,10 @@ nonisolated enum HealthKitExport {
         routeForceRescan: Bool = false,
         budget: DirectSyncBatchBudget = .conservative,
         pendingDeletions: DirectSyncPendingDeletions = .empty,
+        // O02/WP-11：待查路线队列（上一批登记、尚未查询的 workout UUID）。它们会被
+        // **定点查询**（与 rediscovery 同一条 `knownRunningWorkouts` 通道）并在本批
+        // 成功交付后回传 `completedRouteTodos`（由调用方在**提交成功后**移除）。
+        pendingRouteTodos: [String] = [],
         typeRotationStart: Int = 0,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
@@ -417,6 +430,12 @@ nonisolated enum HealthKitExport {
         // WP-12 的三分预扣随之移到页循环之后 —— 那时 fresh 集合才完整。
         var freshWorkoutIds: [String] = []
         var freshWorkoutIdSet = Set<String>()
+        // O02/WP-11：待办路线 —— `pendingRouteTodoSet` 是**注入**的（上一批登记的，用于在
+        // fetch 成功后回传"可移除"）；`newRouteTodos` 是本批新登记的（**页交付后才生效**，
+        // 与 route 状态/文件同进同退）。
+        let pendingRouteTodoSet = Set(pendingRouteTodos)
+        var newRouteTodos: [String: PendingRouteTodo] = [:]
+        var completedRouteTodos: [String] = []
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("rai-hk-\(UUID().uuidString)", isDirectory: true)
@@ -465,7 +484,11 @@ nonisolated enum HealthKitExport {
                     cursor: routeDiscoveryCursor
                 )
                 rediscoveryIDs = Set(rediscovery)
-                let historicalIDs = rediscovery.filter { !seen.contains($0) }
+                // O02/WP-11：rediscovery 候选**并入待办队列** —— 后者是"没有状态行"的
+                // UUID 的**唯一**发现通道（`rediscoveryCandidates` 只遍历已有状态行，
+                // 从没查过的历史训练不在其中；这正是 O02 修正的缺口）。
+                let dueIDs = Set(rediscovery).union(pendingRouteTodos)
+                let historicalIDs = dueIDs.sorted().filter { !seen.contains($0) }
                 var discovered: [HKWorkout] = []
                 if !historicalIDs.isEmpty {
                     // 按有限 UUID 集合定点取 workout，不使用最近窗口，更不扫描全部历史。
@@ -506,6 +529,8 @@ nonisolated enum HealthKitExport {
             var pageRouteBytes = 0
             var pageRouteCount = 0
             var pageExported: [HKWorkout] = []
+            var pageNewTodos: [String: PendingRouteTodo] = [:]
+            var pageCompletedTodos: [String] = []
         for (index, workout) in workouts.enumerated() {
             try Task.checkCancellation()
             await onProgress("正在读取第 \(index + 1)/\(workouts.count) 次跑步")
@@ -550,6 +575,11 @@ nonisolated enum HealthKitExport {
                     // 状态一个字不动（与 `else` 分支同语义，只是原因不同）。
                     routeFiles = []
                     routeStopReason = .routeFile
+                    // O02/WP-11：登记持久待办（区别于一次性 warning：待办跨批次存活，
+                    // 下一批仍会定点重试它；"整条超满额"的阻塞态也要有最终的可见性）。
+                    pageNewTodos[routeKey] = PendingRouteTodo(
+                        workoutUUID: routeKey, reason: .routeOversized, createdAt: routeNow
+                    )
                     // P2-3A：单条轨迹超过**满额**单批预算 —— 额度重置也装不下它。静默跳过会让
                     // 用户永远不知道有数据没同步（2026-10-15 审查 P2-3），这里如实上报。
                     if fetch.oversized {
@@ -557,6 +587,11 @@ nonisolated enum HealthKitExport {
                     }
                 } else {
                     routeFiles = fetch.entries
+                    // O02/WP-11：这条待办路线**查过了** —— 记入可移除（页交付后才生效；
+                    // 移除本身由调用方在**批次持久提交成功之后**执行）。
+                    if pendingRouteTodoSet.contains(routeKey) {
+                        pageCompletedTodos.append(routeKey)
+                    }
                     // 预算按**字节**累计，口径 = 盘上 GPX 的 UTF-8 字节数（服务端 `statSync` 同口径）。
                     // 取 `fetch.bytes`（写文件时算好的 `document.utf8.count`）而不是回头再 `statSync`：
                     // 值与盘上逐字节同一次，且和 `entries` 严格同进同退。
@@ -583,6 +618,19 @@ nonisolated enum HealthKitExport {
                 // 一个字节都不动。这条前提一旦不成立（例如哪天改成导出全量快照），
                 // 这里的省略就会变成"把服务端的轨迹删掉"。
                 routeFiles = []
+                // O02/WP-11：**区分两种跳过** —— 预算拒绝（本应查 ⇒ 登记持久待办，下批从
+                // 待办队列定点补查）与状态机决定不查（有记忆、不算待办）。判据用**同一**个
+                // 生产函数 `shouldQuery`（与上方闸门逐字同参，不重写阈值）。
+                if routeBudgetExhausted && RouteSyncStateMachine.shouldQuery(
+                    existing: previous,
+                    now: routeNow,
+                    isForceManualRescan: routeForceRescan,
+                    hasWorkoutChange: hasWorkoutChange
+                ) && (previous.status != .settled || routeForceRescan || hasWorkoutChange || rediscoveryIDs.contains(routeKey)) {
+                    pageNewTodos[routeKey] = PendingRouteTodo(
+                        workoutUUID: routeKey, reason: .routeBudget, createdAt: routeNow
+                    )
+                }
             }
             // The recent window and bounded historical queue only discover late
             // routes. Without a workout change or a GPX retry, omit workout XML.
@@ -619,6 +667,10 @@ nonisolated enum HealthKitExport {
         for object in page.deleted where freshWorkoutIdSet.insert(object.uuid.uuidString).inserted {
             freshWorkoutIds.append(object.uuid.uuidString)
         }
+        // O02/WP-11：待办同样"页级生效" —— 页交付后新登记才并入、已查完的才记入可移除
+        // （被拒页的两种记录都随锚一起回退，下批重来）。
+        for (uuid, todo) in pageNewTodos { newRouteTodos[uuid] = todo }
+        completedRouteTodos.append(contentsOf: pageCompletedTodos)
         if !streamDone { deliveredAnchor = page.next; anchorBefore = page.next }
         attachmentWorkouts = []
         pageLimit = Self.workoutPageLimit
@@ -724,7 +776,10 @@ nonisolated enum HealthKitExport {
                 workoutIds: deletionPlan.pendingWorkoutIds + deletionPlan.overflowWorkoutIds
             ),
             // B2：下一批的轮转起点（由 `writeGlobalRecords` 算出并回传）。
-            nextTypeRotationStart: records.nextTypeRotationStart
+            nextTypeRotationStart: records.nextTypeRotationStart,
+            // O02/WP-11：排序输出（表键 `(scope, uuid)`，顺序只影响确定性，不影响语义）。
+            pendingRouteTodos: newRouteTodos.values.sorted { $0.workoutUUID < $1.workoutUUID },
+            completedRouteTodos: completedRouteTodos
         )
     }
 

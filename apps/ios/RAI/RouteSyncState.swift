@@ -40,3 +40,28 @@ nonisolated struct RouteSyncRecord: Equatable, Sendable {
     /// 连续多少次观测与上一次**完全一致**（点数 + 摘要）。任何变化都清零。
     var stableCheckCount: Int
 }
+
+/// 待查路线（O02/WP-11）：**预算拒绝时未能查询**的训练的持久待办。
+///
+/// 与 `RouteSyncRecord` 的分工：那是"查过没有"的记忆（每个 workout 一行状态）；这是
+/// "**还没查**"的队列 —— 训练 XML 已交付、锚已推进、但它的 route 查询被预算挡住，
+/// 且**没有**状态行（`rediscoveryCandidates` 只遍历已有状态行，不认识它）⇒ 没有这条
+/// 待办，那些 UUID 重启后永久不可发现（O02 的病灶：只设 `routeStopReason` 布尔带不回 UUID）。
+///
+/// 只是 UUID 队列（不存轨迹）；唯一标识 `(scope, workout_uuid)`，重复登记幂等。
+nonisolated struct PendingRouteTodo: Codable, Equatable, Sendable {
+    /// 小写化的 workout UUID（与 `HealthKitExport.routeFileWorkoutId` 同源）。
+    let workoutUUID: String
+    /// 为什么被延后（展示用；闭集）。
+    let reason: PendingRouteReason
+    /// **首次**入队时刻（公平轮转的年龄依据；重复 upsert **不刷新**它）。
+    let createdAt: Date
+
+    /// 延后原因（闭集：落盘字符串会被读回比较，裸字符串改错不会在编译期报错）。
+    nonisolated enum PendingRouteReason: String, Codable, Sendable {
+        /// route 预算耗尽（"先判后取"闸门）：本批没查，下批应优先补。
+        case routeBudget
+        /// 单条轨迹超过**满额**单批预算：额度重置也装不下（需后续处置，不无限前台补跑）。
+        case routeOversized
+    }
+}

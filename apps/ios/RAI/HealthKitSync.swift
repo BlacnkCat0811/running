@@ -1363,6 +1363,10 @@ final class HealthKitSync {
             let routeStates = taskStore.loadRouteStates(scope: activeScope)
             let routeDiscoveryCursor = taskStore.loadRouteDiscoveryCursor(scope: activeScope)
             if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
+            // O02/WP-11：待查路线队列（上一批登记、尚未查询的 = 没有状态行的 UUID）。
+            // 与 rediscovery 同一条定点查询通道消费；本批查完的回传在提交后移除。
+            let pendingRouteTodos = taskStore.loadPendingRoutes(scope: activeScope)
+            if let error = taskStore.lastError { throw SyncHTTPError(message: error) }
             // R3b：删除溢出的旧槽（上一批没发完的删除）。损坏当空 + 不阻断 —— 写入路径带
             // readBack 断言，损坏本不该发生；为它卡死同步链反而更糟。
             let pendingDeletionsData = taskStore.loadPendingDeletions(scope: activeScope)
@@ -1424,6 +1428,8 @@ final class HealthKitSync {
                         // R3b：上一批没发完的删除（旧槽）。本批先发它，再发新删除；
                         // 仍装不下的余量在 `produced.pendingDeletions` 回传。
                         pendingDeletions: pendingDeletions,
+                        // O02/WP-11：待办队列的 UUID（定点补查 + 回报可移除）。
+                        pendingRouteTodos: Array(pendingRouteTodos.keys),
                         // B2：类型轮转起点（上一批读到的位置；让历史重放无类型饿死）。
                         typeRotationStart: self.loadRecordTypeRotation(),
                         onProgress: onProgress
@@ -1459,6 +1465,12 @@ final class HealthKitSync {
             uncommittedArchive = prepared
             transientExportURL = nil
             try checkCancellation()
+            // O02/WP-11：待办路线的**超前登记**（先表后锚）—— 本批被预算挡住、没有状态行的
+            // UUID 必须在下批可发现。崩在随后任何一步只会让待办早到（下批多查一次、upsert
+            // 幂等），绝不会丢：锚的提交链在任务行与回执之后。
+            guard taskStore.upsertPendingRoutes(exported.pendingRouteTodos, scope: activeScope) else {
+                throw SyncHTTPError(message: taskStore.lastError ?? "路线待办未能写入")
+            }
             let payloadHash = prepared.payloadHash
             let persisted = prepared.zipURL
             batchHash = payloadHash
@@ -1542,6 +1554,8 @@ final class HealthKitSync {
                     routeDiscoveryCursor: exported.routeDiscoveryCursor,
                     // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
                     pendingDeletions: exported.pendingDeletions,
+                    // O02/WP-11：本批已查完的待办（提交成功后移除）。
+                    completedRouteTodos: exported.completedRouteTodos,
                     // 同两条恢复分支：`unchanged` 是对已存在批次的确认，没有新回执可等。
                     requiresReceipt: false
                 )
@@ -1568,6 +1582,8 @@ final class HealthKitSync {
                     routeDiscoveryCursor: exported.routeDiscoveryCursor,
                     // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
                     pendingDeletions: exported.pendingDeletions,
+                    // O02/WP-11：本批已查完的待办（提交成功后移除）。
+                    completedRouteTodos: exported.completedRouteTodos,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1781,6 +1797,11 @@ final class HealthKitSync {
         // `SyncTaskStore.commitSuccess` 的同名参数逐字一致：`nil` = 不改旧槽；空 = 清；非空 = 写；
         // 新增调用点必须显式表达属于哪一种（漏传 = 编译失败）。
         pendingDeletions: DirectSyncPendingDeletions?,
+        // O02/WP-11：本批已成功交付、可从待办队列移除的 UUID。默认空 = 不动队列
+        // （恢复轮的 completed 不在任务行里 ⇒ 残留只会让下批多查一次，无害）。
+        // 🔴 移除只在**提交成功之后**执行 —— 载荷未被接受时移除会让「无状态行」的
+        // UUID 再也回不来。
+        completedRouteTodos: [String] = [],
         receipt: DirectSyncReceipt? = nil,
         requiresReceipt: Bool = true,
         job: ImportJobResponse? = nil
@@ -1926,6 +1947,12 @@ final class HealthKitSync {
                 Array(routeStates.values), scope: activeScope, discoveryCursor: routeDiscoveryCursor
            ) {
             NSLog("[RAI] route state flush after commit failed: %@", taskStore.lastError ?? "unknown")
+        }
+        // O02/WP-11：待办路线的移除 —— 与 `upsertRouteStates` 同款纪律（提交后的收尾写）。
+        // 失败只落 NSLog：残留的后果是"下批多查一次"，为它阻断收尾反而得更少。
+        if !completedRouteTodos.isEmpty,
+           !taskStore.removePendingRoutes(completedRouteTodos, scope: activeScope) {
+            NSLog("[RAI] pending route todo flush after commit failed: %@", taskStore.lastError ?? "unknown")
         }
         // `hasPendingTask` 只在**真的清掉了那一行**之后才翻 —— 它现在与 `clearTask()` 同为
         // 日志清空点，两处是判据要求的全部（多一处就等于界面可以凭空说"没有待办了"）。

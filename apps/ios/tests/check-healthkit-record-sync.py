@@ -246,6 +246,20 @@ check("recentWindowShare(of: budget)" in export,
 check("recent.count >= Self.recentWindowLimit" in export,
       "a window query that hits the per-type limit must say so (warnings), not pass silently")
 
+# O02/WP-11：待办路线队列的落盘与接线判据。
+check("CREATE TABLE IF NOT EXISTS sync_pending_routes" in store
+      and "func upsertPendingRoutes(" in store and "func loadPendingRoutes(" in store
+      and "func removePendingRoutes(" in store,
+      "the pending-routes queue must exist in the journal with its upsert/load/remove trio (O02)")
+check(export.count("pageNewTodos[routeKey] = PendingRouteTodo(") == 2,
+      "exactly two budget paths may enqueue a todo: the pre-fetch gate and the oversized single route")
+check("upsertPendingRoutes(exported.pendingRouteTodos" in sync,
+      "the export round must register new todos BEFORE the task row persists the advanced anchor "
+      "(register-after-anchor would lose the uuids forever — they have no state row)")
+check("removePendingRoutes(completedRouteTodos" in sync,
+      "delivered todos must be removed only after the durable commit (an earlier removal would "
+      "drop the only discovery path for stateless uuids if the payload is never accepted)")
+
 # --- 判据总数的下限（**必须放在全部判据之后**） ---------------------------------
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
@@ -255,7 +269,8 @@ check("recent.count >= Self.recentWindowLimit" in export,
 # 2026-10-16（WP-12/O03）：新增删除守恒四条判据后实测打印 59 ⇒ 重设为 58。
 # 2026-10-16（WP-10/O01）：新增页循环三条判据后实测打印 62 ⇒ 重设为 61。
 # 2026-10-16（WP-13/O05）：新增窗口三条判据后实测打印 65 ⇒ 重设为 64。
-MIN_CHECKS = 64
+# 2026-10-16（WP-11/O02）：新增待办队列四条判据后实测打印 70 ⇒ 重设为 69。
+MIN_CHECKS = 69
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

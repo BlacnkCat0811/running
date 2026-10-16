@@ -328,6 +328,54 @@ struct RouteSyncStatePersistenceRegression {
         check(withDiscovery.upsertRouteStates([], scope: scopeA, discoveryCursor: "installed-last"),
               "the upgraded table can persist a traversal cursor")
 
+        // ── O02/WP-11：待查路线队列（sync_pending_routes） ────────────────────────────
+        // 三条语义：登记幂等（reason 更新、**createdAt 不刷新**）、提交前回读、移除幂等
+        // （不在表里的 uuid 也算成功 —— 恢复轮残留与重复移除都靠它）。
+        let todoA = PendingRouteTodo(
+            workoutUUID: "todo-a", reason: .routeBudget,
+            createdAt: Date(timeIntervalSince1970: 1_700_500_000)
+        )
+        let todoOversized = PendingRouteTodo(
+            workoutUUID: "todo-b", reason: .routeOversized,
+            createdAt: Date(timeIntervalSince1970: 1_700_500_100)
+        )
+        check(store.loadPendingRoutes(scope: scopeA).isEmpty, "a fresh scope has no pending route todos")
+        check(store.upsertPendingRoutes([todoA, todoOversized], scope: scopeA),
+              "pending route todos persist")
+        let loadedTodos = store.loadPendingRoutes(scope: scopeA)
+        check(loadedTodos[todoA.workoutUUID]?.reason == .routeBudget
+              && loadedTodos[todoOversized.workoutUUID]?.reason == .routeOversized,
+              "both reasons round-trip")
+        // 重复登记幂等：reason 更新、`createdAt` 保持**首次**值（年龄是公平轮转的依据）。
+        let reregistered = PendingRouteTodo(
+            workoutUUID: "todo-a", reason: .routeOversized,
+            createdAt: Date(timeIntervalSince1970: 1_700_600_000)
+        )
+        check(store.upsertPendingRoutes([reregistered], scope: scopeA),
+              "re-registering an existing todo is idempotent")
+        let afterReregister = store.loadPendingRoutes(scope: scopeA)
+        check(afterReregister["todo-a"]?.reason == .routeOversized, "re-registering refreshes the reason")
+        check(afterReregister["todo-a"]?.createdAt == todoA.createdAt.canonicalForREAL,
+              "re-registering never refreshes createdAt (age is the fair-rotation key)")
+        check(store.loadPendingRoutes(scope: scopeB).isEmpty, "scope B never sees scope A's todos")
+        check(store.removePendingRoutes(["todo-a", "never-there"], scope: scopeA),
+              "removing a missing uuid is a no-op success (idempotent)")
+        check(store.loadPendingRoutes(scope: scopeA)["todo-a"] == nil, "a removed todo does not come back")
+        check(store.loadRouteStates(scope: scopeA)[a.workoutUUID] == cursorBatchRecord,
+              "todo bookkeeping leaves this journal's settled route memory untouched")
+
+        // 已安装 v2 库缺 sync_pending_routes：ensure-schema 幂等补表且不丢既有数据。
+        var todoDB: OpaquePointer?
+        precondition(sqlite3_open(legacyRoot.appendingPathComponent("sync.sqlite").path, &todoDB) == SQLITE_OK)
+        precondition(sqlite3_exec(todoDB, "DROP TABLE sync_pending_routes", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(todoDB)
+        let withTodos = SyncTaskStore(directory: legacyRoot)
+        check(withTodos.isAvailable, "an installed v2 journal gains the pending-routes table")
+        check(withTodos.loadRouteStates(scope: scopeA)[a.workoutUUID] == a,
+              "adding the pending-routes table preserves settled memory")
+        check(withTodos.upsertPendingRoutes([todoOversized], scope: scopeA),
+              "the upgraded table can persist todos")
+
         print("\(checks) route state persistence regression checks passed")
     }
 }

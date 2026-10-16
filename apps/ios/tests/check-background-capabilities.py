@@ -1577,8 +1577,10 @@ check(
     "recent settled workouts bypass the rediscovery batch budget",
 )
 check(
-    route_loop.count("hasWorkoutChange: hasWorkoutChange") == 2,
-    "anchored workout changes must bypass throttling both when planning and recording the observation",
+    route_loop.count("hasWorkoutChange: hasWorkoutChange") == 3,
+    "every consult of shouldQuery in the loop must carry the anchored-change bypass: "
+    "planning the query, recording the observation, and the WP-11 budget-rejection todo probe "
+    "(a fourth consult without the bypass would silently drop anchored changes at one of them)",
 )
 check(
     "if let observation = fetch.observation" in route_loop,

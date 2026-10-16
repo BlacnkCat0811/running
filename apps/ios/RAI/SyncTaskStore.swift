@@ -87,6 +87,13 @@ final class SyncTaskStore {
                 scope TEXT PRIMARY KEY,
                 payload BLOB NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS sync_pending_routes (
+                scope TEXT NOT NULL,
+                workout_uuid TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                PRIMARY KEY (scope, workout_uuid)
+            );
             """
         let execResult = schema.withCString { sql in
             sqlite3_exec(database, sql, nil, nil, nil)
@@ -1027,6 +1034,134 @@ final class SyncTaskStore {
         }
         guard SQLiteSupport.execute("COMMIT", database: database) else {
             fail("route state commit"); return false
+        }
+        committed = true
+        return true
+    }
+
+    /// 待查路线队列（O02/WP-11）的**登记**。唯一标识 `(scope, workout_uuid)` ⇒ 重复登记
+    /// 幂等（`ON CONFLICT` 只更新 reason，**不刷新 createdAt** —— 年龄是公平轮转的依据）。
+    /// 三条护栏与 `upsertRouteStates` 同源：单事务、提交前回读、`changes()` 逐行校验。
+    @discardableResult
+    func upsertPendingRoutes(_ todos: [PendingRouteTodo], scope: String) -> Bool {
+        guard isAvailable, let database else { fail("pending routes upsert"); return false }
+        guard !todos.isEmpty else { return true }
+        lastError = nil
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
+            fail("pending routes begin"); return false
+        }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        guard let statement = prepare("""
+            INSERT INTO sync_pending_routes(scope, workout_uuid, reason, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(scope, workout_uuid) DO UPDATE SET reason = excluded.reason
+            """) else { return false }
+        defer { sqlite3_finalize(statement) }
+        for todo in todos {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            guard SQLiteSupport.bind(scope, to: statement, at: 1),
+                  SQLiteSupport.bind(todo.workoutUUID, to: statement, at: 2),
+                  SQLiteSupport.bind(todo.reason.rawValue, to: statement, at: 3),
+                  // `createdAt` 走与 `upsertRouteStates` 同一份 `canonicalForREAL` 规范化：
+                  // REAL 列的往返不是双射，规范化让"首写入的值"可被逐位读回、可被断言。
+                  sqlite3_bind_double(statement, 4, todo.createdAt.canonicalForREAL.timeIntervalSince1970) == SQLITE_OK else {
+                fail("pending routes bind"); return false
+            }
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                fail("pending routes upsert"); return false
+            }
+            let touched = Int(sqlite3_changes(database))
+            guard touched == 1 else {
+                lastError = "路线待办未能写入，本次提交已回滚。"
+                SQLiteSupport.report("pending routes upsert touched \(touched) row(s)", database: database)
+                return false
+            }
+        }
+        // 提交前回读（集合级）：这批 todo 必须逐条在表里。只比 uuid + reason —— `createdAt`
+        // 经 REAL 列往返不保证双射（同 `upsertRouteStates` 的 canonicalForREAL 一节），
+        // 逐字段相等会假红；年龄字段的语义由"首次写入后不被覆写"保证，不靠回读。
+        let written = loadPendingRoutes(scope: scope)
+        for todo in todos {
+            guard written[todo.workoutUUID]?.reason == todo.reason else {
+                lastError = "路线待办写入后无法读回一致的值。"
+                return false
+            }
+        }
+        guard SQLiteSupport.execute("COMMIT", database: database) else {
+            fail("pending routes commit"); return false
+        }
+        committed = true
+        return true
+    }
+
+    /// 读待查路线队列（O02/WP-11）。键 = 小写 workout UUID。
+    func loadPendingRoutes(scope: String) -> [String: PendingRouteTodo] {
+        guard isAvailable else { return [:] }
+        guard let statement = prepare("""
+            SELECT workout_uuid, reason, created_at FROM sync_pending_routes WHERE scope = ?
+            """) else { return [:] }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        var result: [String: PendingRouteTodo] = [:]
+        while true {
+            let step = sqlite3_step(statement)
+            if step == SQLITE_DONE { return result }
+            guard step == SQLITE_ROW else { fail("read pending routes"); return result }
+            guard let uuidPointer = sqlite3_column_text(statement, 0) else { continue }
+            let uuid = String(cString: uuidPointer)
+            let rawReason = columnText(statement, 1) ?? ""
+            result[uuid] = PendingRouteTodo(
+                workoutUUID: uuid,
+                // 未知 reason **兜底不丢**：`reason` 只影响展示，查询动作对所有原因一致；
+                // 丢一条待办会让"无状态行"的 UUID 永久不被发现（正是 O02 的病灶形态）。
+                reason: PendingRouteTodo.PendingRouteReason(rawValue: rawReason) ?? .routeBudget,
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
+            )
+        }
+    }
+
+    /// 从待办移除（**批次持久提交之后**调用；O02/WP-11）。
+    ///
+    /// 幂等：不在表里的 uuid 删除影响 0 行，照样算成功（重复移除、恢复轮残留都靠它）。
+    /// 失败方向是安全的（残留 ⇒ 下批多查一次），但依然留痕可诊断。
+    @discardableResult
+    func removePendingRoutes(_ workoutUUIDs: [String], scope: String) -> Bool {
+        guard isAvailable, let database else { fail("pending routes remove"); return false }
+        guard !workoutUUIDs.isEmpty else { return true }
+        lastError = nil
+        guard SQLiteSupport.execute("BEGIN IMMEDIATE", database: database) else {
+            fail("pending routes remove begin"); return false
+        }
+        var committed = false
+        defer {
+            if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
+        }
+        guard let statement = prepare(
+            "DELETE FROM sync_pending_routes WHERE scope = ? AND workout_uuid = ?"
+        ) else { return false }
+        defer { sqlite3_finalize(statement) }
+        for uuid in workoutUUIDs {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            guard SQLiteSupport.bind(scope, to: statement, at: 1),
+                  SQLiteSupport.bind(uuid, to: statement, at: 2) else {
+                fail("pending routes remove bind"); return false
+            }
+            guard sqlite3_step(statement) == SQLITE_DONE else {
+                fail("pending routes remove"); return false
+            }
+        }
+        let written = loadPendingRoutes(scope: scope)
+        for uuid in workoutUUIDs where written[uuid] != nil {
+            lastError = "路线待办移除后仍能读回。"
+            return false
+        }
+        guard SQLiteSupport.execute("COMMIT", database: database) else {
+            fail("pending routes remove commit"); return false
         }
         committed = true
         return true
