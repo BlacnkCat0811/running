@@ -319,5 +319,64 @@
 就是坏提交 ⇒ 两个迁移先合成一个自洽的 schema 提交（`aef5951`），代码各自随后落地。
 同理 `apps/api/src/direct-sync-ingest.ts` 同时承载 O06-A 与 O10 的 hunk，落在 `93fd898`。
 
-**S3/S4/S5 待办**：WP-22b、WP-32（O09）、WP-40（O06-B）、WP-41（O12）、WP-50（O11）；
-以及全量 `npm test` 与性能工况基准（审查文档 §6.1 的六类工况）。
+**S3/S4/S5 提交清单（本轮全部落地）**：
+
+| 提交 | 工作包 | 内容 |
+|---|---|---|
+| `30b7f3b` | WP-32（O09） | v41 `training_metric_checkpoints`；分域边界接通（`domains.{features,fitness,readiness}` 此前是**生产了但无人读取的死输出**）；集合式前缀拷贝（run 分区 id + FK 重映射）；**先证后写**（日级前缀在任何 INSERT 之前独立重建比对，不一致即收窄）；证据链进证明；物理证据读取批量化（`loadDatedRecoveryFactsBatch`，取代"逐日 7 条 SQL、窗口重叠 27/28"）；计数写进 `summary_json.reuse` |
+| `84d553e` | WP-41（O12） | 两条导入车道移进**同一个任务 Worker**（顺序不可交换）+ 常驻 ingest/analysis 线程（每任务重新 survey，不缓存连接；崩溃即替换；成功仍从**持久回执**恢复）；计时拆成"等槽 / spawn+tsx / 事务往返 / 车道净耗时"；载荷身份主线程只算 1 次 |
+| `5e98f69` | WP-22b（O06-A 步骤 3–5） | `analysis-fact-view.ts`：`SnapshotFactView`（**捕获读事务内**物化，事务在 CPU 之前关闭）与 `SegmentedFactView`（每次短读事务 + 事务内校验代次）；预算 400k 行 / 256 MiB，**没有"关掉"取值**；漂移 ⇒ 候选作废 + 已发布结果不动 + 按合并范围重排（上限 3） |
+| `7e1cb9a` | WP-40（O06-B） | v42 `analysis_job_merges`：**不改 `recompute_jobs.status` 的 CHECK、不引入 `superseded`**；原任务行逐字节不动，`GET /v1/jobs/:id` 沿**原 id** 报告覆盖进度 ⇒ **HTTP 合同不变、iOS 不需改**；只有覆盖任务真的发布才结算；防饿死三条有界常量（成员 32 / 跨度 120 s / 合并次数 2） |
+| `13787a1` | WP-50（O11） | v43 视图 `readable_route_points` + `read/route-point-reader.ts` **唯一读入口**；重复复制改**搬行**（`UPDATE … SET route_version_id`）；退役双写（`route_points` 只装指针 NULL 的 legacy 路线，逐条在下次真实发布时转换，**不做全库回填**）；Rust 聚合器与 `importEquivalence` 一并迁移 |
+| `9b08132` | 文档 | S2/S3 执行记录 |
+| `b798448` | WP-31 收尾 | 逐时期重建永久回归（间隙金丝雀）+ 行号修正 |
+
+**全量成果（12 个提交，O06–O12 全部落地）**：
+`95ef798`(WP-21) → `7c86f16`(WP-30) → `aef5951`(v39+v40 迁移) → `b44ea80`(WP-31) →
+`93fd898`(WP-22a) → `b798448`(WP-31 收尾) → `9b08132`(文档) → `30b7f3b`(WP-32) →
+`84d553e`(WP-41) → `5e98f69`(WP-22b) → `7e1cb9a`(WP-40) → `13787a1`(WP-50)。
+
+**迁移编号（按落地顺序占用，历史迁移与冻结校验和一行未动）**：
+v38 `recompute_jobs.attempts` · v39 输入绑定/覆盖证明 + `import_batches` 代次三列 ·
+v40 `(type,end_at,start_at)` 读索引 · v41 `training_metric_checkpoints` ·
+v42 `analysis_job_merges` · v43 视图 `readable_route_points`。
+
+**🔴 本轮查出并修掉的 4 个既有缺陷（都是"证明增量 == 从头"或结构性判据逼出来的）**：
+
+1. **`persistDailyTrainingMetrics` 的日指标计数错值** —— WP-21 把它改成 `ChunkedWriter` 时，
+   延迟执行的写闭包**按引用**捕获了 `let cumulativeWorkoutCount`，于是每一天的
+   `load_workout_count` 都写成整段总数。⚠️ **历史行仍是错值，未回填**（超出范围）。
+2. **`analysis-input-reader.ts` 的账本查询选了 `id` 而契约要 `batchId`** —— "依赖代次前进
+   ⇒ 合并中介账本"这条路径**不是产出计划，而是抛 SQLite 绑定错误**，让审查要求的
+   "账本缺口 ⇒ 显式原因"根本不可达。
+3. **`dirty-range-input.ts` 的第二处可见性判据字面量** —— WP-22a 把该函数从 `apps/api`
+   （不在结构判据扫描范围）搬进 `packages/`（在扫描范围）时带进去的。
+4. **`data.test.ts` 的 query-plan 断言**被 v40 索引撞红 —— 它钉死的是"规划器的一个偶然
+   索引名"而不是不变式，已改为钉"必须是类型前缀的**覆盖**索引"。
+
+**🔴 三个"响亮失败"而不是静默错误的整合缺口（同批补齐）**：
+`analysis-fact-view.ts` 的钉住清单漏了 `route_version_points`（双写退役后物化快照里
+一个已发布路线的点都没有 —— 读端会**显式拒绝**，不是静默改分数）；
+`INGEST_TABLE_DISPOSITIONS` 两次漏表态（v41 与 v42 的新表）——
+该守卫是**失败关闭**的，新表不表态会让**整条直连同步车道**被拒，
+两个独立工作包各自撞上并报了同一个根因。
+
+**必须与成果一起读的三项"未达成/未做"（不掩盖）**：
+
+1. **O08 的「200 空窗口 < 100 ms」未达成**（p50 101–141 ms、min 74–78 ms）。
+   固定延时放大已消除（10.9 ms/窗口 → 0.5–0.7 ms/窗口）；剩余成本是跨线程唤醒本身 ——
+   **不含任何生产代码**的裸 ping-pong 同口径也要 71–168 ms。
+   **未调测量、未改目标**，基准未达成时退出码 1。
+2. **无真机 HealthKit 验收**：本机无 Xcode/设备，A3/R1 行为与 build①/②/③ 仍待排期。
+   模拟器与 Swift 门禁**不替代**真机证明。
+3. **性能工况基准（审查文档 §6.1 的六类工况）未系统跑**：已落地的实测是
+   O08 租约基准（`scripts/measure-write-lease.mjs`，驱动生产实现）、O10 索引
+   `EXPLAIN QUERY PLAN` 对照、O09 分域复用计数、O11 写放大与 WAL 字节、
+   O12 线程启动次数与耗时拆分。其余工况（冷启动、大批量首同步、稳态增量、
+   极端历史长度）**未测**，按审查文档"未测不填达标"处理。
+
+**遗留 1 条既有红（如实标注，不当成已排除）**：
+`packages/health-export-parser/test/native-worker.test.ts` 的
+`import_entity_changes` TS↔Rust 分歧。判定既有：本批没有任何提交改动该表的写入路径。
+未做 stash 对照 —— Rust 二进制已被就地重建（`target/` 是 gitignore），
+换回旧 TS 只会造成"新旧错配"，那样的对照证明不了什么。
