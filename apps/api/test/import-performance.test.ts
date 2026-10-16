@@ -31,8 +31,33 @@ test("stage timing survives failure and snapshots are detached from subsequent m
   assert.deepEqual(first.stagesMs, { backupCopy: 5 });
 });
 
-test("runtime metadata upgrades old jobs and round-trips timings without changing business schema", () => {
-  const root = mkdtempSync(join(tmpdir(), "rai-import-performance-"));
+/**
+ * WP-41 / O12 步骤 7：两条导入车道搬进**同一个**任务 Worker 之后，主线程再也无法用
+ * "围着一次调用计时"的方式分别量出两条车道 —— 它只能看到"任务整体"。所以阶段账本必须有
+ * 一个入口，把 worker 线程内测得的**外部时长**记进来（`record`）。
+ *
+ * 这条用例钉三件事：①同名阶段累加；②"没跑"不得被写成 0（非正数/非有限值一律不落键，
+ * 于是 `undefined` 与 `0` 可分辨）；③`record` 不改 `totalMs`（总时长只由 tracker 自己的
+ * 时钟决定，否则阶段之和会与总时长脱钩、`totalMs >= ΣstagesMs` 那条断言就变成假绿）。
+ */
+test("record() 记入外部测得的车道耗时：累加、跳过非正数、不改总时长", () => {
+  let now = 100;
+  const timing = new ImportPerformanceTracker(() => now);
+  timing.record("dataOnlyApply", 12.5);
+  timing.record("dataOnlyApply", 7.5);
+  // 没跑过的车道：0 / NaN / Infinity 都不落键 —— "跳过"与"跑了 0 ms"必须可分辨。
+  timing.record("directSyncApply", 0);
+  timing.record("directSyncApply", Number.NaN);
+  timing.record("directSyncApply", Number.POSITIVE_INFINITY);
+  const snapshot = timing.snapshot();
+  assert.deepEqual(snapshot.stagesMs, { dataOnlyApply: 20 });
+  assert.equal(Object.prototype.hasOwnProperty.call(snapshot.stagesMs, "directSyncApply"), false,
+    "没跑过的车道不得留下键（0 会被读成「跑过、耗时 0」）");
+  now += 40;
+  assert.equal(timing.snapshot().totalMs, 40, "record 不得改动总时长：它只记外部测得的片段");
+});
+
+test("runtime metadata upgrades old jobs and round-trips timings without changing business schema", () => {  const root = mkdtempSync(join(tmpdir(), "rai-import-performance-"));
   try {
     const old = new RuntimeStateStore(root);
     const job = {

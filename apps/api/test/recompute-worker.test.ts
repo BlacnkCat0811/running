@@ -22,6 +22,11 @@ import { RecomputeWorker } from "../src/recompute-worker.js";
  *
  * `runOneInWorkerThread` is the only spawn site, so counting its invocations is the
  * direct measurement of "did an idle drain pay for a thread it had no work for".
+ *
+ * ⚠️ 2026-10-16（WP-41 / O12 第二阶段）**订正判据**：线程改为**常驻**（跨轮复用）之后，
+ * "调用次数 = 起过几条线程"这个等式不再成立 —— 同一条线程可以跑很多轮。所以上面数的是
+ * **轮数**（调度粒度），而"到底起了几条线程"改由 `workerStartupStats().started` 数出来
+ * （见本文件末尾的常驻用例）。两问必须分开数，否则"复用"会被读成"没起线程"。
  */
 
 interface RecomputeWorkerTestSurface {
@@ -155,6 +160,41 @@ test("wakeIfPending：空队列不动作，有 queued 任务就唤醒（兜底�
     } finally {
       await worker.close();
     }
+  });
+});
+
+/**
+ * WP-41 / O12 第二阶段：分析线程**常驻**（跨轮复用）。
+ *
+ * 🔴 为什么这条必须与"空闲不 spawn"分开：那条钉的是"**有没有必要**起线程"（0 次），
+ * 这条钉的是"起**几条**"。老实现一轮一条线程，于是"调用 3 次 ⇒ 3 条线程"；常驻之后
+ * 同一等式不再成立（3 轮可能只有 1 条线程）。判据因此拆成两个独立数字：
+ *   · `runOneInWorkerThread()` 调用次数 = **轮数**（调度粒度）；
+ *   · `workerStartupStats().started` = **真正起过的线程数**（spawn 粒度）。
+ * "3 轮 1 条线程"于是可以被直接断言 —— 复用省下的正是（轮数 − 1）次 tsx 注册与依赖链加载。
+ */
+test("常驻分析线程：连续多轮只起一条线程，且轮次之间不持有线程句柄", async () => {
+  await withDatabase(async (databasePath) => {
+    const worker = new RecomputeWorker(databasePath);
+    const surface = worker as unknown as {
+      runOneInWorkerThread(): Promise<{ ran: boolean }>;
+      activeWorker: unknown;
+    };
+    try {
+      for (let round = 0; round < 3; round += 1) {
+        const outcome = await surface.runOneInWorkerThread();
+        assert.equal(outcome.ran, false, "空队列的轮次必须如实报告「没跑」");
+        assert.equal(surface.activeWorker, null,
+          "轮次结束之后不得再持有线程句柄（常驻的是线程，不是「正在跑一轮」这个状态）");
+      }
+      assert.equal(worker.workerStartupStats().rounds, 3, "三轮就是三轮：轮数是调度粒度");
+      assert.equal(worker.workerStartupStats().started, 1,
+        "3 轮只允许起 1 条线程（老实现是 3 条：tsx 注册与依赖链加载每轮各付一遍）");
+      assert.equal(worker.workerStartupStats().retired, 0, "没有崩溃就不得替换线程");
+
+      // 租约必须在轮次之间**放回去**：常驻线程若把写许可也"常驻"下来，写路由会永久 409。
+      assert.equal(worker.leaseStats(), null, "没有分析任务时不得留下租约统计（说明租约已归还）");
+    } finally { await worker.close(); }
   });
 });
 

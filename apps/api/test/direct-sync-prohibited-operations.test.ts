@@ -18,6 +18,16 @@
 // 现在显式失败（带稳定码），不再进入候选链路** —— 也就是说，本文件的两条车道上
 // "§14.1 全 0"是完整可证的（守卫的可见性由下一条阳性对照负责）。
 //
+// 🔴 2026-10-16（WP-41 / O12 第一阶段）**有意的判据迁移，不是放宽**：
+// 两条导入车道合并进**同一个**任务（`import-lanes`），于是一个载荷不再起两条线程。
+// 旧的两条断言是 `databaseTaskCalls == ["data-only"]` 与 `["data-only","direct-sync"]`；
+// 现在拆成**两问**，合起来与旧断言等价：
+//   ① `databaseTaskCalls == ["import-lanes"]` —— 一个载荷**只投递一次**（= 不起两条线程）；
+//   ② `guard.laneAttempts == ["data-only"]` / `["data-only","direct-sync"]` —— worker 线程
+//      **实际执行过**的车道序列（由线程在跑完之后回报，不是主线程的投递顺序）。
+// 第②问比旧写法更接近事实（它来自真正执行的那一侧），而"顺序被颠倒"仍然会红
+// （突变验证：把 `runImportLanesTask` 改成先跑宽车道 ⇒ 上面两条用例都红）。
+//
 // 用法：随 `npm test` 运行。
 
 import assert from "node:assert/strict";
@@ -46,9 +56,14 @@ const uuid = "00000000-0000-0000-0000-00000000000a";
 /**
  * `ImportDatabaseTask["operation"]` 的穷尽取值。用 `Record<..., true>` 而不是普通数组：
  * 少写一个键或多写一个键都会**编译不过**，守卫因此不会因为对端新增任务类型而静默失效。
+ *
+ * ⚠️ 2026-10-16（WP-41 / O12 第一阶段）：`data-only` 与 `direct-sync` 两个任务类型**合并**成
+ * 一个 `import-lanes` 任务（两条车道在同一个 Worker 里按顺序执行）。这次改动是**收窄**守卫
+ * 的观察面（从前看"投递了哪两个任务"，现在看"一次投递 + 线程回报的尝试序列"），
+ * 所以下面每条断言都必须同时钉住**新的**事实（见 `laneAttempts`）。
  */
 const databaseTaskOperations: Record<ImportDatabaseTask["operation"], true> = {
-  verify: true, audit: true, checkpoint: true, "data-only": true, "direct-sync": true
+  verify: true, audit: true, checkpoint: true, "import-lanes": true
 };
 
 interface Guard {
@@ -56,6 +71,16 @@ interface Guard {
   commands: string[][];
   databaseTaskCalls: string[];
   storeMethodCalls: string[];
+  /**
+   * worker 回报的**实际执行过的车道序列**（逐次投递累加）。
+   *
+   * 🔴 为什么这条通道必须存在：`data-only`/`direct-sync` 合并成一个任务之后，
+   * "投递序列"再也说不出车道顺序 —— 它只会说 `["import-lanes"]`。而顺序本身是**判据**
+   * （record-only 的入口判据更严，必须先试）。序列由 worker 线程在**真的跑完**之后回报，
+   * 所以它比"主线程打算投递什么"更接近事实：主线程投递了 `import-lanes`，但线程内部
+   * 到底试了几条车道、顺序如何，只有回报能证明。
+   */
+  laneAttempts: string[];
 }
 
 interface Surface extends Record<string, unknown> {
@@ -73,6 +98,7 @@ function installGuard(worker: ImportWorker): Guard {
   const commands: string[][] = [];
   const databaseTaskCalls: string[] = [];
   const storeMethodCalls: string[] = [];
+  const laneAttempts: string[] = [];
   const surface = worker as unknown as Surface;
 
   for (const operation of PROHIBITED_DIRECT_SYNC_OPERATIONS) {
@@ -117,10 +143,20 @@ function installGuard(worker: ImportWorker): Guard {
   surface.databaseTask = (...args: unknown[]) => {
     const task = args[0] as { operation?: unknown } | undefined;
     databaseTaskCalls.push(String(task?.operation));
-    return originalTask.apply(worker, args);
+    const dispatched = originalTask.apply(worker, args);
+    // 车道序列只能从**任务回报**里取（见 `Guard.laneAttempts` 的说明）。原样转发返回值，
+    // 只在旁边记一笔 —— 观测器不得改变被测对象的语义。
+    if (task?.operation === "import-lanes" && dispatched instanceof Promise) {
+      return dispatched.then((value: unknown) => {
+        const reported = (value as { laneAttempts?: unknown } | null)?.laneAttempts;
+        if (Array.isArray(reported)) laneAttempts.push(...reported.map(String));
+        return value;
+      });
+    }
+    return dispatched;
   };
 
-  return { counters, commands, databaseTaskCalls, storeMethodCalls };
+  return { counters, commands, databaseTaskCalls, storeMethodCalls, laneAttempts };
 }
 
 /** 把观测结果判成"哪几条 §14.1 被触发了"。空数组 = 一条都没踩。 */
@@ -267,8 +303,16 @@ test("A01/§14.1 逐项：真实排队的 v2 增量不触发任何禁止操作�
         `直连车道触发了 §14.1 禁止操作：${triggered.join(", ")}`);
 
       assert.deepEqual(guard.commands, [], "直连车道不得调用任何子进程 CLI");
-      assert.deepEqual(guard.databaseTaskCalls, ["data-only"],
-        "直连车道只允许投递 data-only 任务；verify/audit/checkpoint 都是禁止操作");
+      // 🔴 WP-41 / O12 第一阶段：两条车道合并成**同一个**任务 ⇒ 投递序列只剩一项。
+      // 这一条现在钉的是"一个载荷**不会**起两条线程"（从前是 ["data-only","direct-sync"]，
+      // 也就是两次 `new Worker`：两次 tsx 注册 + 两次模块加载）。车道顺序改由下面
+      // `laneAttempts` 钉住 —— 两条断言合起来才等价于旧的那一条。
+      assert.deepEqual(guard.databaseTaskCalls, ["import-lanes"],
+        "直连车道只允许投递一个 import-lanes 任务（verify/audit/checkpoint 都是禁止操作，"
+        + "而两条车道不得再各起一条线程）");
+      assert.deepEqual(guard.laneAttempts, ["data-only"],
+        "record-only 载荷必须**只有** record-only 车道真的跑过：统一接收器没有理由被启动，"
+        + "启动了就是「为合格载荷白付一次尝试」（而且会让那条更严的入口判据失去意义）");
       // 🔴 进程内通道也必须为 0，而且它**真的能响**（见文件末尾的阳性对照）。
       // 从前 `seed-import-generations` 只有 `commandSubcommands` 通道，而本车道的
       // `commands` 恒为空 ⇒ 那条守卫在这里**构造性恒为 0**，"全 0"什么都没证明。
@@ -311,9 +355,16 @@ test("A01/§14.1 全类型：含 Workout 的增量走统一接收器，同样一
       assert.deepEqual(triggered, [],
         `full 车道触发了 §14.1 禁止操作：${triggered.join(", ")}`);
       assert.deepEqual(guard.commands, [], "full 车道同样不得调用任何子进程 CLI");
-      // 两条子车道的顺序也是判据：先 record-only（入口判据更严），拒收后才走统一接收器。
-      assert.deepEqual(guard.databaseTaskCalls, ["data-only", "direct-sync"],
-        "full 车道的投递序列必须是 data-only（拒收）→ direct-sync（接收）");
+      // 🔴 两条子车道的顺序仍是判据：先 record-only（入口判据更严），拒收后才走统一接收器。
+      // WP-41 之后这条判据**不能**再写成"投递序列" —— 两条车道在**同一个任务**里执行，
+      // 投递序列只会是 ["import-lanes"]（上一条用例已经把它钉住：一个载荷不再起两条线程）。
+      // 顺序改由 worker 线程**回报的尝试序列**钉住：它在真的跑完之后产生，因此"顺序被颠倒"
+      // 或"宽车道先跑"都会在这里露出来（见下方 mutation 说明）。
+      assert.deepEqual(guard.databaseTaskCalls, ["import-lanes"],
+        "full 车道同样只投递一个 import-lanes 任务：两次尝试必须在**同一条线程**里完成");
+      assert.deepEqual(guard.laneAttempts, ["data-only", "direct-sync"],
+        "full 车道的**尝试序列**必须是 data-only（拒收）→ direct-sync（接收）："
+        + "顺序反了就等于跳过了 record-only 更严的入口判据");
       assert.deepEqual(guard.storeMethodCalls, []);
       const leftovers = readdirSync(join(root, "var")).filter((name) => /^(backups|rai\.importing)/.test(name));
       assert.deepEqual(leftovers, [], `full 车道不得创建项目备份或整库候选，但 var/ 里出现了：${leftovers.join(", ")}`);

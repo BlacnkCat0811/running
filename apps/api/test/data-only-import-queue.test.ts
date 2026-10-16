@@ -110,7 +110,15 @@ test("a reply lost after the real SQLite COMMIT is recovered as success, not rep
     const original = surface.databaseTask.bind(worker);
     surface.databaseTask = async <T>(task: ImportDatabaseTask): Promise<T> => {
       const result = await original<T>(task);
-      if (task.operation === "data-only" && result) throw new Error("fixture lost reply after COMMIT");
+      // 🔴 WP-41（O12 第一阶段）：两条车道合并成一个 `import-lanes` 任务 ⇒ "回复在 COMMIT
+      // 之后丢失"的注入点必须跟着走。判据从"投递的任务是 data-only"改成"这次回报说明
+      // **record-only 车道真的把事务提交了**"（`kind: "applied"` + `lane: "data-only"`）——
+      // 语义一个字节都没变：SQLite 已经 COMMIT，回复丢失，主线程**必须**从同一事务里写的
+      // 持久回执恢复成功，而不是把已提交的批次报成失败。
+      const outcome = result as unknown as { kind?: unknown; lane?: unknown } | null;
+      if (task.operation === "import-lanes" && outcome?.kind === "applied" && outcome.lane === "data-only") {
+        throw new Error("fixture lost reply after COMMIT");
+      }
       return result;
     };
     try {

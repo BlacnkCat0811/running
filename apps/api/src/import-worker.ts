@@ -24,9 +24,12 @@ import {
 } from "@rai/health-export-parser";
 import { isStructurallyReadable, RaiDatabase } from "@rai/storage-sqlite";
 import { ImportPerformanceTracker } from "./import-performance.js";
-import { databaseReadable, type ImportDatabaseTask } from "./import-database-tasks.js";
-import { type DataOnlyImportResult } from "./data-only-import.js";
-import { isDirectSyncRejection, type DirectSyncImportResult, type DirectSyncRejection } from "./direct-sync-ingest.js";
+import {
+  databaseReadable, IMPORT_LANE_ATTEMPTS,
+  type ImportDatabaseTask, type ImportLaneTimings, type ImportLanesOutcome,
+  type IngestWorkerMessage, type IngestWorkerReadyMessage, type IngestWorkerReply
+} from "./import-database-tasks.js";
+import { type DirectSyncRejection } from "./direct-sync-ingest.js";
 import { planDirectSyncLane } from "./direct-sync-plan.js";
 import { resolvePreserveAbsent } from "./import-sources.js";
 import { backupPolicyFromEnvironment, DatabaseMaintenance } from "./maintenance.js";
@@ -209,6 +212,61 @@ export const PUBLIC_PERFORMANCE_KEYS = {
   lane: true
 } satisfies Record<keyof ImportJobPerformance, true>;
 
+/**
+ * 两条导入车道的**下发顺序**（WP-41 / O12 第一阶段：两条车道在同一个任务 Worker 内执行）。
+ *
+ * 🔴 为什么顺序是一份显式数据：`data-only` 的入口判据（记录白名单 + 基线合同戳）比统一
+ * 接收器**更严**，必须先被尝试；反过来那两道闸门就失去意义。写死成 worker 里的语句顺序
+ * 时，"顺序被改动"只留下一次 diff。现在是主线程下发、worker 侧 `assertLanePlan` **校验**
+ * （只接受这一份，fail-closed）—— 为了少起线程而先跑宽车道在结构上做不到。
+ *
+ * 这份清单同时是"两条车道**真的**有调用方"的源码级证据：`data-only` 在前、`direct-sync`
+ * 在后（`direct-sync-analysis-registration.test.ts` 的源码守卫读的就是这里）。
+ */
+export const IMPORT_LANE_SEQUENCE = [
+  { operation: "data-only" },
+  { operation: "direct-sync" }
+] as const;
+
+/** 下发的车道序列（字符串形态）—— 与 {@link IMPORT_LANE_SEQUENCE} 同源，不手抄第二份。 */
+export const importLaneAttempts = () => IMPORT_LANE_SEQUENCE.map((lane) => lane.operation);
+
+// 🔴 加载期一致性的第二道：本地清单必须与 worker 侧允许的顺序**逐项**相同。两边任何一处
+// 被改（例如有人为了"省一次尝试"把 direct-sync 提前），这里立刻抛错，而不是等到某一批
+// 载荷悄悄走了宽车道。
+if (IMPORT_LANE_SEQUENCE.length !== IMPORT_LANE_ATTEMPTS.length
+    || IMPORT_LANE_SEQUENCE.some((lane, index) => lane.operation !== IMPORT_LANE_ATTEMPTS[index])) {
+  throw new Error("Import lane plan drifted from the worker-side allowed sequence");
+}
+
+/**
+ * 常驻 ingest Worker 的句柄（WP-41 / O12 第二阶段）。
+ *
+ * `pending` 按 **taskId** 索引：线程复用了，回复就必须能对上"是哪一批" ——
+ * 否则一次丢失/错配的回复会把 A 批的结论记到 B 批头上。崩溃或某批抛错时，
+ * 未决任务**逐个** reject（绝不当成"没跑"静默放过），线程随后被替换。
+ */
+interface ResidentIngestWorker {
+  thread: Worker;
+  /** 线程内 tsx 注册 + 模块加载完成（第一条 `ready` 消息）。 */
+  ready: Promise<void>;
+  /** 启动耗时（`new Worker` → `ready`）：spawn + tsx 注册 + 模块加载。 */
+  startupMs: number;
+  startError: Error | null;
+  retired: boolean;
+  pending: Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; stage: string; startedAt: number }>;
+  /**
+   * 当前安装着的 `message` 监听器 —— **只在有任务在飞时存在**。
+   *
+   * 🔴 为什么监听器要跟着任务装上/卸下：`Worker` 上的 `message` 监听器会**引用住**那个
+   * `MessagePort`，即使 `unref()` 过也一样（Node v22 实测：`unref()` 之后进程仍不退出）。
+   * 于是"常驻线程"会把整个进程钉在事件循环里 —— 任何一条忘记 `close()` 的路径都会让
+   * 进程永远退不出去。装上/卸下之后语义正好是我们想要的：**有任务在飞 ⇒ 线程保活进程；
+   * 空闲的常驻线程 ⇒ 不再是进程存活的原因**。
+   */
+  listener: ((message: IngestWorkerMessage) => void) | null;
+}
+
 export class ImportWorker {
   private readonly jobs = new Map<string, MutableImportJob>();
   private readonly jobStatePath: string;
@@ -223,6 +281,14 @@ export class ImportWorker {
   private readonly publicationJournal: ImportPublicationJournal | undefined;
   private computeStagesMs: Record<string, number> = {};
   private recoveryBlocked = false;
+  /** 常驻 ingest Worker（WP-41 第二阶段）：懒创建、跨批复用、崩溃或任务抛错后替换。 */
+  private ingest: ResidentIngestWorker | null = null;
+  private ingestSequence = 0;
+  private readonly ingestStats = {
+    started: 0, tasks: 0, retired: 0, targetResets: 0, startupMs: 0, lastRssKiB: 0, maxRssKiB: 0
+  };
+  /** 载荷身份计算次数（观测面：O12 步骤 2 的"少算一遍"必须能被测量，而不是被声称）。 */
+  private readonly payloadIdentityStats = { computations: 0 };
 
   constructor(
     private readonly databasePath: string,
@@ -282,7 +348,15 @@ export class ImportWorker {
         try { this.persistJobs(); } catch (error) { delete job.queue.cancelRequested; throw error; }
       }
       this.cancelRequested = true;
-      await this.activeAnalysis?.terminate();
+      // 🔴 取消要真的让这一批**停下写**：常驻 ingest 线程正跑着这条车道（可能已经进了
+      // 事务），所以整条线程作废（在飞任务被 reject ⇒ 走 catch 的持久回执恢复路径），
+      // 而不是只把一个标志位交给它。下一次任务会拿到一条**新**线程。
+      const resident = this.ingest;
+      if (resident && resident.pending.size > 0) {
+        this.retireIngestWorker(resident, new Error("Import cancelled"));
+      } else {
+        await this.activeAnalysis?.terminate();
+      }
       return "requested";
     }
     const previous = { status: job.status, phase: job.phase, message: job.message, completedAt: job.completedAt };
@@ -431,7 +505,16 @@ export class ImportWorker {
     }
     let terminationError: unknown;
     try {
-      await this.activeAnalysis?.terminate();
+      // 🔴 关闭时必须让**常驻** ingest 线程也停下：从前线程是"一个任务一条"，
+      // 任务结束它就没了；常驻之后没有任何别的路径会回收它 ⇒ 这里显式退休。
+      const resident = this.ingest;
+      if (resident) {
+        const stopped = resident.thread.terminate();
+        this.retireIngestWorker(resident, new Error("Import worker closing"));
+        await stopped;
+      } else {
+        await this.activeAnalysis?.terminate();
+      }
     } catch (error) {
       terminationError = error;
     } finally {
@@ -470,6 +553,15 @@ export class ImportWorker {
     const attempt = job.queue ? `.attempt-${job.queue.attempts}` : "";
     const nativeSpoolRoot = resolve(this.runtimeRoot, "var", `native.${job.id}${attempt}`);
     this.computeStagesMs = {};
+    // WP-41 / O12 步骤 7：**等待许可**也单独计时。
+    // 这一段是"入队 → 真正开始执行"的等待：主线程在 `scheduleNext` 里先取 admission
+    // 的单写者许可、拿到了才调用 `run()`，所以它就是"这一批排队等许可等了多久"（含退避）。
+    // ⛔ 它与 `import_worker_startup`（起线程）和 `import_lanes_transaction`（车道执行）
+    // 是**互不重叠**的三段，账本上分开记，才能看出成本究竟在排队还是在启动。
+    const queuedAtMs = Date.parse(job.createdAt);
+    if (Number.isFinite(queuedAtMs)) {
+      this.recordComputeStage("import_admission_wait", Math.max(0, Date.now() - queuedAtMs));
+    }
     const startedAtMs = Date.now();
     const timing = new ImportPerformanceTracker();
     const stagingDatabase = resolve(this.runtimeRoot, "var", `rai.importing.${job.id}${attempt}.sqlite`);
@@ -520,11 +612,12 @@ export class ImportWorker {
       // 判据的安全边界见 `import-payload-identity.ts` 的模块注释：锚点绑定
       // `dataset_version`，任何后续导入都会让它失效。
       let payloadSha256: string | null = null;
-      const preflight = await timing.measure("changeAnalysis", async () => {
-        const result = await this.detectUnchangedPayload(job, engine);
-        if (result) payloadSha256 = result.sha256;
-        return result;
-      });
+      // 🔴 WP-41（O12 步骤 2）：载荷身份**算一次就够了**，别把预检算出来的那个丢掉。
+      // 从前 `detectUnchangedPayload` 未命中（= 正常的增量批）时已经把整棵输入树读过一遍
+      // 却把结果扔了，然后下面派发车道时再算第二遍。现在它把算出来的值从 `onDigest` 交回，
+      // 未命中也能复用（返回值形状**不变**：`import-payload-preflight.test.ts` 直接调它）。
+      const preflight = await timing.measure("changeAnalysis", () =>
+        this.detectUnchangedPayload(job, engine, (digest) => { payloadSha256 = digest; }));
       this.assertNotClosing();
       if (preflight) {
         // R2（2026-10-15）：no-op 也必须落**可持久查询的回执**（见 `writeNoopReceipt` 的注释）。
@@ -567,7 +660,13 @@ export class ImportWorker {
         throw new ImportLaneRefusal(lane.reasons);
       }
       if (lane.lane === "direct") {
-        payloadSha256 = await this.payloadSha256(job, engine);
+        // 🔴 复用准入时算出的载荷身份（`??=`）：上面 `detectUnchangedPayload` 用的是
+        // **同一个函数、同一份上下文**，算出来就是同一个值 —— 未命中的增量批从前在这里
+        // 又要付一遍整棵输入树的摘要。复用**更早**的那个值还更保守：目录若在两次之间被
+        // 改过，车道的**内容**摘要复核会直接失败（"payload changed after admission"），
+        // 而不是拿一份新摘要悄悄放行。⛔ 这**不是**用 mtime/大小替代内容摘要：
+        // 两条车道仍然各自复核它们真正要写的那份内容。
+        payloadSha256 ??= await this.payloadSha256(job, engine);
         this.assertNotClosing();
         if (payloadSha256 === null) {
           // S3.1 收口：载荷摘要算不出来（输入不可读）⇒ 显式失败（带码），不再是回退理由。
@@ -579,13 +678,29 @@ export class ImportWorker {
           job.message = "正在按增量事务保存原始健康记录";
           this.persistJobs();
           fastPathAttempted = true;
-          const fast = await timing.measure("dataOnlyApply", () => this.databaseTask<DataOnlyImportResult>({
-            operation: "data-only", input: {
+          // 🔴 WP-41 / O12 第一阶段：两条车道现在在**同一个任务 Worker** 内按
+          // `IMPORT_LANE_SEQUENCE` 顺序执行。从前这里是两次 `databaseTask` ——
+          // 先 record-only、它拒收后再投递统一接收器 ⇒ **一个载荷两次 `new Worker`**
+          // （两次 tsx 注册与模块加载）。顺序与闸门逐条不变：record-only 在前，
+          // 它的严格资格判定（白名单 + 基线合同戳）、表写守卫与载荷身份复核一条都没动；
+          // worker 侧 `assertLanePlan` 只接受这一份顺序，接受了别的就拒绝执行。
+          //
+          // ⚠️ 中间态文案：从前 record-only 拒收后会先把 `job.message` 改成
+          // "正在按增量事务保存原始事实并登记分析" 再投递第二条车道。两段现在是一次
+          // 投递，所以中途改文案的位置没有了 —— 终态文案仍由 `publishTerminalState`
+          // 逐条分别给出（两条车道的措辞都保留）。
+          const lanes = await this.databaseTask<ImportLanesOutcome>({
+            operation: "import-lanes", input: {
               databasePath: this.databasePath, inputPath: job.inputPath, jobId: job.id,
-              payloadSha256: payloadSha256!, startedAtMs
+              payloadSha256: payloadSha256!, startedAtMs, laneAttempts: importLaneAttempts()
             }
-          }));
-          if (fast) {
+          });
+          // 阶段账本：两条车道的净耗时由线程内测量并回传（线程启动/tsx 注册单独记在
+          // `computeStagesMs.import_worker_startup`，见 `databaseTask`），所以
+          // `dataOnlyApply` / `directSyncApply` 不再各自包含一次线程启动。
+          this.recordLaneTimings(timing, lanes.timings);
+          if (lanes.kind === "applied" && lanes.lane === "data-only") {
+            const fast = lanes.result;
             terminalSucceeded = true;
             laneTelemetry = { outcome: "direct", directSource: "data-only", reasons: [], rejections: laneRejections };
             publishTerminalState = () => {
@@ -605,17 +720,8 @@ export class ImportWorker {
           // 它接受 Workout / 评分类型 / 显式删除 / GPX，并由账本决定要不要登记分析任务。
           // ⚠️ 这里**不能**改成"先统一接收器、再 record-only"：record-only 车道的入口判据
           // 比本车道更严（白名单 + 基线合同戳），把它放在后面会让它的两条闸门失去意义。
-          this.assertNotClosing();
-          job.message = "正在按增量事务保存原始事实并登记分析";
-          this.persistJobs();
-          const direct = await timing.measure("directSyncApply", () =>
-            this.databaseTask<DirectSyncImportResult | DirectSyncRejection>({
-              operation: "direct-sync", input: {
-                databasePath: this.databasePath, inputPath: job.inputPath, jobId: job.id,
-                payloadSha256: payloadSha256!, startedAtMs
-              }
-            }));
-          if (!isDirectSyncRejection(direct)) {
+          if (lanes.kind === "applied") {
+            const direct = lanes.result;
             terminalSucceeded = true;
             laneTelemetry = { outcome: "direct", directSource: "direct-sync", reasons: [], rejections: laneRejections };
             publishTerminalState = () => {
@@ -630,6 +736,7 @@ export class ImportWorker {
             };
             return;
           }
+          const direct = lanes.rejection;
           laneRejections.push({
             source: "direct-sync", reason: direct.reason, stage: direct.stage,
             ...(direct.detail === undefined ? {} : { detail: direct.detail }),
@@ -828,28 +935,197 @@ export class ImportWorker {
     return this.stageAuditReports(databasePath, markdownPath, jsonPath, audit);
   }
 
+  /** 常驻 ingest Worker 的观测面：启动次数（每起一条线程算一次）、任务数、换库次数与 RSS。 */
+  ingestWorkerStats(): {
+    started: number; tasks: number; retired: number; targetResets: number;
+    startupMs: number; lastRssKiB: number; maxRssKiB: number;
+  } {
+    return { ...this.ingestStats };
+  }
+
+  /**
+   * 载荷身份（`computeImportPayloadSha256`：会把**整棵输入树**读一遍）在本 worker 生命周期
+   * 内的**实际计算次数**。
+   *
+   * 🔴 为什么需要这个计数：O12 步骤 2 要求"把重复的摘要计算折叠掉"，而"折叠掉了"是一种
+   * 关于**次数**的声明 —— 没有计数就只能靠读代码相信它。有了它，测试可以直接断言
+   * "预检未命中的增量批只算 1 次"（从前是 2 次：预检 1 次 + 车道派发前重算 1 次）。
+   * ⛔ 它数的是**主线程**的这一遍；两条车道各自的内容摘要复核不在其中，也不该被折叠。
+   */
+  payloadIdentityComputations(): number {
+    return this.payloadIdentityStats.computations;
+  }
+
+  /**
+   * 惰性创建常驻 ingest Worker。
+   *
+   * 🔴 为什么"常驻"是这次改动的重点：线程的固定成本（tsx 注册 + 模块加载）与线程的
+   * **用途**无关，每批新建一次就是每批付一遍。所以线程只在第一次真正需要时创建，
+   * 之后每批只发一条消息；它的启动耗时被单独记进 `computeStagesMs.import_worker_startup`，
+   * 于是"省下来的启动成本"是**测出来的**，不是声称的。
+   *
+   * 线程**不**在空闲时创建：没有任务就没有线程（与 `RecomputeWorker` 的空队列早退同款纪律）。
+   *
+   * ⚠️ `unref()` + 监听器随手任务装卸：常驻线程**不得单独把进程留在事件循环里**。
+   * 线程常驻之后，"创建它的那个对象没有被收掉"（例如某条测试路径提前抛错、跳过了
+   * `close()`）会让整个进程在跑完之后永远退不出去 —— 那是拿一个资源泄漏去换启动成本。
+   * 而 `unref()` **单独并不够**：`message` 监听器会引用住 `MessagePort`（Node v22 实测，
+   * 只 `unref()` 进程照样不退出），所以监听器跟着任务装上、任务结算时卸下（见
+   * {@link armIngestListener} / {@link disarmIngestListener}）。语义因此正好是想要的：
+   * 有任务在飞 ⇒ 线程保活；空闲 ⇒ 常驻线程不再是进程存活的原因。
+   * 最坏情况（进程在任务中途退出）也只是未提交事务回滚、作业重启后从持久回执/队列恢复。
+   */
+  private ensureIngestWorker(): ResidentIngestWorker {
+    const existing = this.ingest;
+    if (existing && !existing.retired) return existing;
+    const startedAt = performance.now();
+    const thread = new Worker(new URL("./import-database-bootstrap.mjs", import.meta.url));
+    thread.unref();
+    const resident: ResidentIngestWorker = {
+      thread, ready: Promise.resolve(), startupMs: 0, startError: null, retired: false,
+      pending: new Map(), listener: null
+    };
+    this.ingest = resident;
+    this.ingestStats.started += 1;
+    resident.ready = new Promise<void>((resolveReady, rejectReady) => {
+      thread.once("message", (message: IngestWorkerMessage) => {
+        if (message.kind !== "ready") return;
+        const ready = message as IngestWorkerReadyMessage;
+        const startupMs = performance.now() - startedAt;
+        resident.startupMs = startupMs;
+        this.ingestStats.startupMs += startupMs;
+        this.recordComputeStage("import_worker_startup", startupMs);
+        resolveReady();
+      });
+      thread.once("error", (error: Error) => {
+        resident.startError = error;
+        rejectReady(error);
+      });
+    });
+    // 🔴 崩溃必须按 taskId 逐个归因并**替换线程**：静默地让在飞的任务悬着，
+    // 会把"这一批到底写没写"变成没人知道的事（导入成功与否仍由持久回执裁决）。
+    thread.once("error", (error: Error) => { this.retireIngestWorker(resident, error); });
+    thread.once("exit", (code: number) => {
+      if (!resident.retired) {
+        this.retireIngestWorker(resident, new Error(`Ingest worker thread exited with code ${code}`));
+      }
+    });
+    return resident;
+  }
+
+  /** 装上结果监听器（并把线程 ref 回事件循环）：只在**投递任务之前**调用。 */
+  private armIngestListener(resident: ResidentIngestWorker): void {
+    if (resident.listener) return;
+    resident.thread.ref();
+    const listener = (message: IngestWorkerMessage): void => {
+      if (message.kind === "result") this.settleIngestReply(resident, message);
+    };
+    resident.listener = listener;
+    resident.thread.on("message", listener);
+  }
+
+  /**
+   * 卸下结果监听器并 `unref()`：**没有任务在飞时**必须调用。
+   * 少这一步，空闲的常驻线程就会把进程钉在事件循环里（见 `ensureIngestWorker` 的注释）。
+   */
+  private disarmIngestListener(resident: ResidentIngestWorker): void {
+    const listener = resident.listener;
+    if (!listener) return;
+    resident.listener = null;
+    resident.thread.off("message", listener);
+    resident.thread.unref();
+  }
+
+  /** 一条任务回复：按 taskId 结算，并在失败时按约定替换线程。 */
+  private settleIngestReply(resident: ResidentIngestWorker, message: IngestWorkerReply): void {
+    const waiting = resident.pending.get(message.taskId);
+    this.ingestStats.lastRssKiB = message.rssKiB;
+    this.ingestStats.maxRssKiB = Math.max(this.ingestStats.maxRssKiB, message.rssKiB);
+    this.ingestStats.targetResets = message.targetResets;
+    if (!waiting) {
+      // 已经因崩溃/取消结算过的任务：迟到的回复不得再触发任何副作用。
+      process.stderr.write(`Ingest worker reply for unknown task ${message.taskId} ignored\n`);
+      return;
+    }
+    resident.pending.delete(message.taskId);
+    this.ingestStats.tasks += 1;
+    this.recordComputeStage(waiting.stage, performance.now() - waiting.startedAt);
+    if (resident.pending.size === 0) {
+      if (this.activeAnalysis === resident.thread) this.activeAnalysis = null;
+      // 没有任务在飞了 ⇒ 卸下监听器，让空闲的常驻线程不再保活进程。
+      this.disarmIngestListener(resident);
+    }
+    if (message.ok) {
+      waiting.resolve(message.value);
+      return;
+    }
+    // 🔴 任务抛错 ⇒ 这一批失败（按 taskId 归因），并且**整条线程不再复用**：
+    // 上一批可能留下半开的连接或锁，换一条线程比赌它干净便宜。
+    const failure = new Error(`${message.error} (ingest task ${message.taskId})`);
+    this.retireIngestWorker(resident, failure);
+    waiting.reject(failure);
+  }
+
+  /** 线程作废：拒绝在飞任务、清空 pending、终止线程。可重入（第一次生效）。 */
+  private retireIngestWorker(resident: ResidentIngestWorker, error: Error): void {
+    if (resident.retired) return;
+    resident.retired = true;
+    if (this.ingest === resident) this.ingest = null;
+    if (this.activeAnalysis === resident.thread) this.activeAnalysis = null;
+    this.ingestStats.retired += 1;
+    for (const [taskId, waiting] of resident.pending) {
+      this.recordComputeStage(waiting.stage, performance.now() - waiting.startedAt);
+      waiting.reject(new Error(`${error.message} (ingest task ${taskId} did not complete)`));
+    }
+    resident.pending.clear();
+    this.disarmIngestListener(resident);
+    void resident.thread.terminate().catch(() => { /* 线程可能已经退出 */ });
+  }
+
+  private recordComputeStage(stage: string, milliseconds: number): void {
+    if (!Number.isFinite(milliseconds)) return;
+    this.computeStagesMs[stage] = (this.computeStagesMs[stage] ?? 0) + Math.max(0, milliseconds);
+  }
+
+  /**
+   * 把 worker 线程内测得的**两条车道**耗时落进阶段账本（WP-41 / O12 步骤 7）。
+   *
+   * 为什么不让主线程自己围着 `databaseTask` 计时：两条车道现在在**一次**投递里跑完，
+   * 主线程只能看到"任务整体"，那正是从前把两次尝试糊成一个数字的形态。线程内的时间戳
+   * 才是"每条车道自己花了多久"，且不含线程启动与 IPC。
+   * 没跑过的车道**不落键**：`undefined` 与 `0` 必须能分辨（"跳过"不是"跑了 0 ms"）。
+   */
+  private recordLaneTimings(timing: ImportPerformanceTracker, timings: ImportLaneTimings): void {
+    timing.record("dataOnlyApply", timings.laneMs["data-only"] ?? 0);
+    timing.record("directSyncApply", timings.laneMs["direct-sync"] ?? 0);
+  }
+
   /** A Promise wrapper around synchronous SQL is not sufficient: own the
    * SQLite connection on a separate thread, and propagate termination as a
    * task failure, never as evidence that a healthy database is corrupt. */
-  private databaseTask<T>(task: ImportDatabaseTask, stage = task.operation === "verify"
+  private async databaseTask<T>(task: ImportDatabaseTask, stage = task.operation === "verify"
     ? "database_quick_check" : task.operation === "audit" ? "final_audit_build"
-      : task.operation === "data-only" ? "data_only_transaction"
-        : task.operation === "direct-sync" ? "direct_sync_transaction" : "database_checkpoint"): Promise<T> {
-    const started = performance.now();
-    return new Promise<T>((resolveResult, reject) => {
-      const thread = new Worker(new URL("./import-database-bootstrap.mjs", import.meta.url), { workerData: task });
-      this.activeAnalysis = thread;
-      let received = false;
-      let result: T;
-      thread.once("message", (value: T) => { result = value; received = true; });
-      thread.once("error", reject);
-      thread.once("exit", (code) => {
-        if (this.activeAnalysis === thread) this.activeAnalysis = null;
-        this.computeStagesMs[stage] = (this.computeStagesMs[stage] ?? 0) + performance.now() - started;
-        if (code === 0 && received) resolveResult(result);
-        else reject(new Error(`Import database ${task.operation} interrupted`));
+      : task.operation === "import-lanes" ? "import_lanes_transaction" : "database_checkpoint"): Promise<T> {
+    // 🔴 两轮：只在"线程恰好在我们投递之前作废"（崩溃、取消、任务抛错后退休）时重试一次。
+    // `ensureIngestWorker()` → `await ready` 之间有 await，线程可能在那一刻退休；投递本身
+    // 是同步的，所以过了下面那道检查就不可能再插进一次退休。
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const resident = this.ensureIngestWorker();
+      await resident.ready;
+      if (resident.retired) continue;
+      const taskId = this.ingestSequence += 1;
+      return new Promise<T>((resolveResult, reject) => {
+        resident.pending.set(taskId, {
+          resolve: resolveResult as (value: unknown) => void, reject, stage, startedAt: performance.now()
+        });
+        this.activeAnalysis = resident.thread;
+        // 🔴 先装监听器再投递：任务在飞 ⇒ 线程 ref 回来（进程保活、回复不丢）；
+        // 任务结算时卸下（见 `disarmIngestListener`）。
+        this.armIngestListener(resident);
+        resident.thread.postMessage({ kind: "task", taskId, task });
       });
-    });
+    }
+    throw new Error("Ingest worker unavailable: the resident thread was retired before dispatch");
   }
 
   private countRows(databasePath: string, table: string): number {
@@ -888,6 +1164,7 @@ export class ImportWorker {
    * 静默回退"会重新打开 S3.1 关掉的缺口。本方法自身分工不变：只报告状态、不下处置判断。
    */
   private async payloadSha256(job: MutableImportJob, engine: ImportExecutionEngine): Promise<string | null> {
+    this.payloadIdentityStats.computations += 1;
     try {
       return await computeImportPayloadSha256(job.inputPath, {
         preserveAbsent: job.preserveAbsent === true,
@@ -927,16 +1204,27 @@ export class ImportWorker {
    * gate a *write* ("do not build a new database on top of a corrupt one"), and this
    * path performs no write and produces no backup. A real import still runs it, and
    * a structurally unreadable database fails step 2 and takes the full path anyway.
+   *
+   * 🔴 WP-41（O12 步骤 2）：**算出来的摘要**从 `onDigest` 交回调用方，返回值形状不变。
+   * 从前未命中时（= 正常的增量批）摘要被就地丢弃，调用方随后再算一遍整棵输入树；
+   * 现在未命中也能把它交给车道派发复用。两条车道仍然各自复核内容摘要 —— 少算的
+   * 只是**主线程这一遍重复**，不是任何一道校验。
+   * ⚠️ 返回值刻意保持 `PayloadPreflight | null`（而不是包一层结果对象）：
+   * `import-payload-preflight.test.ts` 直接调用本方法并断言"未命中就是 `null`"，
+   * 那是**既有的**判据，不该为了省一遍摘要而改掉它的形状。
    */
   private async detectUnchangedPayload(
     job: MutableImportJob,
-    engine: ImportExecutionEngine
+    engine: ImportExecutionEngine,
+    /** 可选出口：本方法**真的算了**摘要时把它交回（命中与未命中都给；没算则不调用）。 */
+    onDigest?: (sha256: string | null) => void
   ): Promise<PayloadPreflight | null> {
     if (job.preserveAbsent !== true) return null;
     const identity = readDatabaseImportIdentity(this.databasePath);
     if (!identity?.anchor || identity.datasetVersion === null) return null;
     if (identity.datasetVersion !== identity.anchor.datasetVersion) return null;
     const sha256 = await this.payloadSha256(job, engine);
+    onDigest?.(sha256);
     if (sha256 === null || sha256 !== identity.anchor.sha256) return null;
     return {
       sha256,

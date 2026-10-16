@@ -204,8 +204,24 @@ test("prediction worker passes the stored personal scope to its trainer", async 
   }
 });
 
+/**
+ * `runOneInWorkerThread` 的**结局对象**（O07/O08，2026-10-16）。
+ *
+ * 它此前是一个布尔（"跑没跑"）。改成对象是为了让 `drain()` 能分辨两件不能混为一谈的事：
+ * `ran`（是否消费了一条任务）与 `requeued`（任务是否因**可重试的调度失败**——写许可等待超时——
+ * 被放回队列）。后者必须退避一轮再调度，否则"许可暂时拿不到"会变成对队列的忙等。
+ */
+interface WorkerRunOutcomeLike {
+  ran: boolean;
+  requeued: boolean;
+  lease: unknown;
+}
+
+const notRun: WorkerRunOutcomeLike = { ran: false, requeued: false, lease: null };
+const ranOne: WorkerRunOutcomeLike = { ran: true, requeued: false, lease: null };
+
 interface RecomputeWorkerTestSurface {
-  runOneInWorkerThread(): Promise<boolean>;
+  runOneInWorkerThread(): Promise<WorkerRunOutcomeLike>;
   activeWorker: unknown | null;
   scheduled: boolean;
 }
@@ -368,10 +384,10 @@ test("recompute worker recovers a claimed job after the thread crashes then an e
         throw new Error("fixture crash after claim");
       }
       const recovered = jobs.claimNext();
-      if (!recovered) return false;
+      if (!recovered) return notRun;
       assert.equal(recovered.id, jobId);
       assert.equal(jobs.complete(jobId, "completed", 1, 1, "Recovered after crash"), true);
-      return true;
+      return ranOne;
     } finally {
       database.close();
     }
@@ -418,9 +434,9 @@ test("recompute worker wakeups while draining are not dropped", async () => {
     attempts += 1;
     if (attempts === 1) {
       await firstGate;
-      return false;
+      return notRun;
     }
-    return false;
+    return notRun;
   };
   try {
     worker.schedule();
@@ -533,7 +549,8 @@ test("recompute worker run completes only after its thread releases database res
   const worker = new RecomputeWorker(databasePath);
   const surface = worker as unknown as RecomputeWorkerTestSurface;
   try {
-    assert.equal(await surface.runOneInWorkerThread(), false);
+    // 结局对象（不是布尔）：`ran === false` 表示这一轮没有消费任何任务。
+    assert.equal((await surface.runOneInWorkerThread()).ran, false);
     assert.equal(surface.activeWorker, null);
     await worker.close();
   } finally {

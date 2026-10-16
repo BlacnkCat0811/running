@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import type { TaskAdmission } from "./task-admission.js";
-import { createWriteLeaseServer, LEASE_WORDS, type WriteLeaseStats } from "./write-lease.js";
+import { createWriteLeaseServer, LEASE_WORDS, type WriteLeaseServer, type WriteLeaseStats } from "./write-lease.js";
+import type { RecomputeRoundMessage, RecomputeRoundReply } from "./recompute-thread.js";
 const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => { database.exec(`PRAGMA busy_timeout = ${milliseconds}`); };
 
 /** 可重试失败（写许可等待超时）之后重新调度的最小间隔：别把队列打成忙等。 */
@@ -16,6 +17,45 @@ interface WorkerRunOutcome {
   lease: WriteLeaseStats | null;
 }
 
+/** 线程回报的两种结局：跑完一轮（含"这轮没任务"），或这一轮抛错。 */
+type RecomputeWorkerReply = RecomputeRoundReply | { kind: "round-failed"; round: number; error: string };
+
+/** 在飞的一轮（常驻线程一次只跑一轮：`drain()` 是串行的）。 */
+interface PendingRound {
+  round: number;
+  resolve: (outcome: WorkerRunOutcome) => void;
+  reject: (error: Error) => void;
+  /** 本轮的写许可授予方；轮次结束（含崩溃）必须 dispose，否则写路由永久 409。 */
+  lease: WriteLeaseServer | null;
+}
+
+/**
+ * 常驻分析线程的句柄（WP-41 / O12 第二阶段）。
+ *
+ * 从前"一轮一条线程"：每轮重新注册 tsx、重新加载分析依赖链、重新打开连接。现在线程跨轮
+ * 复用，代价是**必须证明跨轮不串**：连接每轮重开（`recompute-thread.ts`）、写许可共享内存
+ * 每轮新分配、数据库目标（`dev:ino`）每轮重查。
+ */
+interface ResidentRecomputeWorker {
+  thread: Worker;
+  /** 线程内 tsx 注册 + 模块加载完成（第一条 `ready` 消息）。 */
+  ready: Promise<void>;
+  startError: Error | null;
+  retired: boolean;
+  /** 轮次序号：线程常驻 ⇒ 回复必须按轮次对上，不能凭"收到一条消息"就当成当前这轮。 */
+  round: number;
+  pending: PendingRound | null;
+  /**
+   * 当前安装着的 `message` 监听器 —— **只在有轮次在飞时存在**。
+   *
+   * 🔴 为什么监听器要跟着轮次装卸：`Worker` 上的 `message` 监听器会引用住 `MessagePort`，
+   * 即使 `unref()` 过也一样（Node v22 实测：只 `unref()` 进程仍不退出）⇒ 空闲的常驻线程
+   * 会把整个进程钉在事件循环里。装上/卸下之后语义正好是想要的：**有轮次在飞 ⇒ 保活进程；
+   * 空闲 ⇒ 不是进程存活的原因**。
+   */
+  listener: ((message: RecomputeWorkerReply) => void) | null;
+}
+
 export class RecomputeWorker {
   private scheduled = false;
   private running = false;
@@ -24,6 +64,9 @@ export class RecomputeWorker {
   private timer: NodeJS.Timeout | null = null;
   private drainPromise: Promise<void> | null = null;
   private activeWorker: Worker | null = null;
+  /** 常驻分析线程：懒创建、跨轮复用、崩溃/退出后替换。 */
+  private resident: ResidentRecomputeWorker | null = null;
+  private readonly workerStats = { started: 0, rounds: 0, retired: 0 };
   /** 上一轮线程回报的租约统计（诊断面：`/v1/performance`）。 */
   private lastLeaseStats: WriteLeaseStats | null = null;
   /** 上一轮是因为可重试失败被重排的 —— 用退避而不是立刻重跑。 */
@@ -95,7 +138,12 @@ export class RecomputeWorker {
     this.scheduled = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    await this.activeWorker?.terminate();
+    // 🔴 常驻线程必须**显式**收掉：从前"一轮一条线程"时它跑完就结束了，常驻之后没有任何
+    // 别的路径会回收它。`closing` 已在上面置位 ⇒ 退出处理器把未决轮次按"这一轮没跑"结算
+    // （关闭不是任务的失败面），同时 dispose 租约。
+    const resident = this.resident;
+    if (resident) await resident.thread.terminate();
+    else await this.activeWorker?.terminate();
     await this.drainPromise;
   }
 
@@ -207,42 +255,167 @@ export class RecomputeWorker {
   }
 
   private runOneInWorkerThread(): Promise<WorkerRunOutcome> {
-    return new Promise((resolvePromise, reject) => {
-      // 写租约的共享内存（PR4 §3.2.1）：worker 线程请求、主线程授权。
-      // 缓冲区随线程创建/销毁，**不跨轮复用** —— 否则上一轮的残留请求（例如线程被杀时）
-      // 会让下一轮以为"许可已经被授出去了"。
-      const admission = this.admission;
-      const buffer = admission
-        ? new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * LEASE_WORDS)
-        : null;
-      const lease = admission && buffer ? createWriteLeaseServer(admission, new Int32Array(buffer)) : null;
-      const worker = new Worker(new URL("./recompute-worker-bootstrap.mjs", import.meta.url), {
-        workerData: { databasePath: this.databasePath, ...(buffer === null ? {} : { lease: buffer }) }
+    return this.runOneInResidentThread();
+  }
+
+  /**
+   * 观测面：线程启动次数 / 跑过的轮数 / 因崩溃或失败被替换的次数。
+   *
+   * 🔴 为什么要有它：`apps/api/test/recompute-worker.test.ts` 从前用
+   * `runOneInWorkerThread` 的**调用次数**证明"空队列不起线程"。线程常驻之后那个数字不再是
+   * "起了几条线程"（同一条线程可以跑很多轮），所以判据换成：调用次数 = 调度的轮数，
+   * 而**真正起线程**的次数由这里数出来 —— "20 轮 1 条线程"是可以在测试里直接断言的。
+   */
+  workerStartupStats(): { started: number; rounds: number; retired: number } {
+    return { ...this.workerStats };
+  }
+
+  /**
+   * 惰性创建常驻分析线程。
+   *
+   * ⛔ 空闲时**不**创建：`drain()` 的 `hasPendingJob()` 早退在调用本方法之前，所以
+   * "空队列 ⇒ 零线程"这条纪律原样保留（`recompute-worker.test.ts` 用调用计数钉住它）。
+   *
+   * ⚠️ `unref()` + 监听器随轮次装卸：常驻线程**不得单独把进程留在事件循环里**。
+   * 线程从"一轮一条"变成常驻之后，任何"创建它的对象没被收掉"的路径（例如某条测试提前
+   * 抛错、跳过了 `close()`）都会让进程永远退不出去 —— 那是拿资源泄漏换启动成本。
+   * 而 `unref()` **单独并不够**：`message` 监听器会引用住 `MessagePort`（Node v22 实测，
+   * 只 `unref()` 进程照样不退出），所以监听器跟着轮次装上、结算时卸下（见
+   * {@link armResidentListener} / {@link disarmResidentListener}）。语义因此正好是想要的：
+   * 有轮次在飞 ⇒ 保活；空闲 ⇒ 常驻线程不是进程存活的原因。
+   */
+  private ensureResidentWorker(): ResidentRecomputeWorker {
+    const existing = this.resident;
+    if (existing && !existing.retired) return existing;
+    const thread = new Worker(new URL("./recompute-worker-bootstrap.mjs", import.meta.url));
+    thread.unref();
+    const resident: ResidentRecomputeWorker = {
+      thread, ready: Promise.resolve(), startError: null, retired: false, round: 0, pending: null, listener: null
+    };
+    this.resident = resident;
+    this.workerStats.started += 1;
+    resident.ready = new Promise<void>((resolveReady, rejectReady) => {
+      thread.once("message", (message: { kind?: string }) => {
+        if (message?.kind === "ready") resolveReady();
       });
-      this.activeWorker = worker;
-      let outcome: WorkerRunOutcome | null = null;
-      let workerError: Error | null = null;
-      const finish = (): void => {
-        // 🔴 线程退出（含崩溃）必须释放租约，否则写路由会永久 409。
-        lease?.dispose();
-      };
-      worker.once("message", (message: { ran?: boolean; requeued?: boolean; lease?: WriteLeaseStats | null }) => {
-        outcome = {
-          ran: message.ran === true,
-          requeued: message.requeued === true,
-          lease: message.lease ?? null
-        };
+      thread.once("error", (error: Error) => {
+        resident.startError = error;
+        rejectReady(error);
       });
-      worker.once("error", (error) => {
-        workerError = error;
-      });
-      worker.once("exit", (code) => {
-        finish();
-        if (this.activeWorker === worker) this.activeWorker = null;
-        if (workerError) reject(workerError);
-        else if (code !== 0 && !this.closing) reject(new Error(`Recompute worker thread exited with code ${code}`));
-        else resolvePromise(outcome ?? { ran: false, requeued: false, lease: null });
-      });
+    });
+    // 🔴 崩溃必须（a）释放租约（否则写路由永久 409）、（b）按轮次 reject 或按关闭语义结算、
+    // （c）把线程标记为不可复用 —— 下一次调度会拿到一条**新**线程。
+    thread.once("error", (error: Error) => {
+      const pending = this.retireResidentWorker(resident);
+      pending?.reject(error);
+    });
+    thread.once("exit", (code: number) => {
+      const pending = this.retireResidentWorker(resident);
+      if (!pending) return;
+      if (code !== 0 && !this.closing) {
+        pending.reject(new Error(`Recompute worker thread exited with code ${code}`));
+        return;
+      }
+      // 关闭时的退出、以及正常退出：这一轮"没跑"，不是失败面。
+      pending.resolve({ ran: false, requeued: false, lease: null });
+    });
+    return resident;
+  }
+
+  /** 装上轮次监听器（并把线程 ref 回事件循环）：只在**投递轮次之前**调用。 */
+  private armResidentListener(resident: ResidentRecomputeWorker): void {
+    if (resident.listener) return;
+    resident.thread.ref();
+    const listener = (message: RecomputeWorkerReply): void => this.settleResidentRound(resident, message);
+    resident.listener = listener;
+    resident.thread.on("message", listener);
+  }
+
+  /** 卸下轮次监听器并 `unref()`：**没有轮次在飞时**必须调用（见 `ensureResidentWorker`）。 */
+  private disarmResidentListener(resident: ResidentRecomputeWorker): void {
+    const listener = resident.listener;
+    if (!listener) return;
+    resident.listener = null;
+    resident.thread.off("message", listener);
+    resident.thread.unref();
+  }
+
+  /** 一条轮次回报：按轮次结算（含 dispose 租约），并把可重试失败原样带回去。 */
+  private settleResidentRound(resident: ResidentRecomputeWorker, message: RecomputeWorkerReply): void {
+    const pending = resident.pending;
+    if (!pending || pending.round !== message.round) {
+      process.stderr.write(`Recompute worker reply for unknown round ${message.round} ignored\n`);
+      return;
+    }
+    resident.pending = null;
+    if (this.activeWorker === resident.thread) this.activeWorker = null;
+    // 没有轮次在飞了 ⇒ 卸下监听器，让空闲的常驻线程不再保活进程。
+    this.disarmResidentListener(resident);
+    // 🔴 轮次结束（不是线程结束）就要放许可：常驻线程在两轮之间**不持有**写许可，
+    // 否则"分析线程常驻"会变成"写许可常驻" —— 那正是 A11/O07 要消灭的形态。
+    pending.lease?.dispose();
+    if (message.kind === "round-failed") {
+      pending.reject(new Error(`${message.error} (recompute round ${message.round})`));
+      return;
+    }
+    if (message.targetChanged) {
+      process.stderr.write(
+        "Recompute worker: database target changed between rounds "
+        + `(${message.targetKey}); connections were reopened from scratch\n`
+      );
+    }
+    pending.resolve({ ran: message.ran, requeued: message.requeued, lease: message.lease });
+  }
+
+  /** 线程作废：dispose 租约、交出在飞轮次、终止线程。可重入（第一次生效）。 */
+  private retireResidentWorker(resident: ResidentRecomputeWorker): PendingRound | null {
+    if (resident.retired) return null;
+    resident.retired = true;
+    if (this.resident === resident) this.resident = null;
+    if (this.activeWorker === resident.thread) this.activeWorker = null;
+    this.workerStats.retired += 1;
+    const pending = resident.pending;
+    resident.pending = null;
+    pending?.lease?.dispose();
+    this.disarmResidentListener(resident);
+    void resident.thread.terminate().catch(() => { /* 线程可能已经退出 */ });
+    return pending;
+  }
+
+  /**
+   * 常驻线程里跑**一轮**分析。
+   *
+   * 与"一轮一条线程"的差别只有生命周期：注册/加载只付一次；每轮的连接、许可缓冲区与
+   * 数据库目标都重新来过（见 `recompute-thread.ts` 的头注释）。
+   */
+  private async runOneInResidentThread(): Promise<WorkerRunOutcome> {
+    const resident = this.ensureResidentWorker();
+    await resident.ready;
+    if (resident.retired) {
+      throw new Error(`Recompute worker unavailable: ${resident.startError?.message ?? "thread retired"}`);
+    }
+    // 写租约的共享内存（PR4 §3.2.1）：worker 线程请求、主线程授权。
+    // 🔴 **每轮**新分配（而不是随线程创建/销毁）：常驻线程复用的只是执行体，共享内存不跨轮
+    // —— 上一轮残留的请求（例如线程被杀时的半开请求）会让下一轮以为"许可已经授出去了"。
+    const admission = this.admission;
+    const buffer = admission
+      ? new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * LEASE_WORDS)
+      : null;
+    const lease = admission && buffer ? createWriteLeaseServer(admission, new Int32Array(buffer)) : null;
+    resident.round += 1;
+    this.workerStats.rounds += 1;
+    const round = resident.round;
+    const message: RecomputeRoundMessage = {
+      kind: "round", round, databasePath: this.databasePath,
+      ...(buffer === null ? {} : { lease: buffer })
+    };
+    this.activeWorker = resident.thread;
+    return new Promise<WorkerRunOutcome>((resolvePromise, reject) => {
+      resident.pending = { round, resolve: resolvePromise, reject, lease };
+      // 🔴 先装监听器再投递：轮次在飞 ⇒ 线程 ref 回来（进程保活、回复不丢）；
+      // 轮次结算时卸下（见 `disarmResidentListener`）。
+      this.armResidentListener(resident);
+      resident.thread.postMessage(message);
     });
   }
 }
