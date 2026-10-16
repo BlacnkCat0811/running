@@ -1025,6 +1025,9 @@ final class HealthKitSync {
                     recordCursors: restored.pendingRecordCursors,
                     hasMorePages: restored.needsContinuation ?? false,
                     routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                    // WP-12（O03）：恢复轮的提交必须把任务行里那份删除余量解析出来 ——
+                    // 遗漏它是 R3b 的两处缺陷之一（同内容的批次在其它分支会写槽、这里不会）。
+                    pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1090,9 +1093,8 @@ final class HealthKitSync {
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
-                        // R3b：从任务行透传删除余量（导出时算的），恢复轮的提交用它写槽。
-                        pendingDeletions: restored.pendingDeletions
-                            .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) },
+                        // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
+                        pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
                         // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
@@ -1126,6 +1128,8 @@ final class HealthKitSync {
                     recordCursors: restored.pendingRecordCursors,
                     hasMorePages: restored.needsContinuation ?? false,
                     routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                    // WP-12（O03）：与 `.waitJob` 分支同一处补漏 —— 恢复轮必须透传余量。
+                    pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1226,9 +1230,8 @@ final class HealthKitSync {
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
-                        // R3b：从任务行透传删除余量（导出时算的），恢复轮的提交用它写槽。
-                        pendingDeletions: restored.pendingDeletions
-                            .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) },
+                        // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
+                        pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
                         // **已存在批次**的确认（§10.1「COMMIT 后回复丢失 ⇒ 返回同一成功」），
                         // 这一轮**没有新回执可等**。照旧要求回执 ⇒ `.hold("no_receipt")` ⇒
@@ -1258,9 +1261,8 @@ final class HealthKitSync {
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
                         routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
-                        // R3b：从任务行透传删除余量（导出时算的），恢复轮的提交用它写槽。
-                        pendingDeletions: restored.pendingDeletions
-                            .flatMap { try? JSONDecoder().decode(DirectSyncPendingDeletions.self, from: $0) },
+                        // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
+                        pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                         receipt: finished.summary?.directSync,
                         // 同上：`.upload` 恢复分支也真的等了一个 `jobId` 的终态。
                         requiresReceipt: directSyncNegotiated,
@@ -1492,8 +1494,10 @@ final class HealthKitSync {
                 // R3b：删除余量与它**同族**（都是"导出态"），走同一条透传通道 ——
                 // 少了它，恢复轮的提交会把余量当空、那批删除随锚点推进永久丢失。
                 needsContinuation: exported.hasMorePages || !exported.pendingDeletions.isEmpty,
-                pendingDeletions: exported.pendingDeletions.isEmpty
-                    ? nil : (try? JSONEncoder().encode(exported.pendingDeletions))
+                // WP-12（O03）：**空也编码**（显式空对象）—— 恢复轮据此把"清槽"执行掉。
+                // 旧的 `isEmpty ? nil` 让空余量伪装成"未记录"（老任务语义）⇒ 恢复轮不更新
+                // 旧槽 ⇒ 已发完的删除被反复重发。只有**老任务缺键**才表示"未记录，不更新"。
+                pendingDeletions: try? JSONEncoder().encode(exported.pendingDeletions)
             ))
             // B2：轮转起点在**导出成功之后**立刻落盘（与任务行同批；即使随后上传失败，
             // 下一轮从新起点继续 —— 起点只影响"从哪个类型先读"，多走一步无害）。
@@ -1705,6 +1709,26 @@ final class HealthKitSync {
         activeIdentity.flatMap(HealthSyncIdentityPublisher.directSyncCapabilityVersion) != nil
     }
 
+    /// 恢复轮的删除余量（**唯一入口**，WP-12 / O03）：损坏 ⇒ 抛错、保留任务。
+    ///
+    /// 三态语义见 `RestoredPendingDeletions`；这里只把 `corrupted` 翻译成用户可见的失败 ——
+    /// 抛出 ⇒ `markSuccess` 不会删任务行、anchor 不推进，下一轮可重试或人工处置。
+    /// 静默按空推进会把那批删除永久丢失（任务行已删、余量没进槽）。
+    private static func restoredCommitDeletions(
+        from task: SyncTaskState
+    ) throws -> DirectSyncPendingDeletions? {
+        switch DirectSyncPendingDeletions.restoredFromTask(task.pendingDeletions) {
+        case .notRecorded:
+            return nil
+        case .decoded(let deletions):
+            return deletions
+        case .corrupted:
+            throw SyncHTTPError(
+                message: "同步任务中的删除余量记录已损坏；为避免漏发删除，本轮不提交（任务已保留）"
+            )
+        }
+    }
+
     /// 成功收尾：**一次事务**把「水位前进/清空 + 任务行清空」落下去，然后才更新展示字段。
     ///
     /// 与改造前的区别（V2.1 规范 §2 原则 3「单状态源真相」）：
@@ -1752,9 +1776,11 @@ final class HealthKitSync {
         recordWorkoutCount: Bool = true,
         routeStates: [String: RouteSyncRecord] = [:],
         routeDiscoveryCursor: String? = nil,
-        // R3b：删除余量（`nil` = 不改旧槽 —— 老调用点与"本轮没重估删除"的路径都靠它）；
-        // 空 = 清；非空 = 写。语义与 `SyncTaskStore.commitSuccess` 的同名参数逐字一致。
-        pendingDeletions: DirectSyncPendingDeletions? = nil,
+        // WP-12（O03）：删除余量。**无默认值**是刻意的 —— 有默认值时"某处调用漏传"会静默
+        // 通过（R3b 就漏了 `.waitJob` 与 `.inspect 续接` 两处恢复分支）。三态语义与
+        // `SyncTaskStore.commitSuccess` 的同名参数逐字一致：`nil` = 不改旧槽；空 = 清；非空 = 写；
+        // 新增调用点必须显式表达属于哪一种（漏传 = 编译失败）。
+        pendingDeletions: DirectSyncPendingDeletions?,
         receipt: DirectSyncReceipt? = nil,
         requiresReceipt: Bool = true,
         job: ImportJobResponse? = nil

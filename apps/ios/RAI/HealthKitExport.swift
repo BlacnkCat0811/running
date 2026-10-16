@@ -398,17 +398,20 @@ nonisolated enum HealthKitExport {
         // 🔴 顺序不是风格：workout 删除（deletedSourceIds）在 `runningWorkouts` 就已定形、
         // 且必须**先于** record 删除占额 —— 否则 record 侧会在 drain 里把额度吃光，
         // workout 侧再溢出就与本批已计入 manifest 的 record 删除**打架**（一份额度算两次）。
-        var deletionBudget = budget.maxDeletions
-        let stashRecordDeletions = Array(pendingDeletions.recordDeletions.prefix(deletionBudget))
-        deletionBudget -= stashRecordDeletions.count
-        let stashWorkoutIds = Array(pendingDeletions.workoutIds.prefix(deletionBudget))
-        deletionBudget -= stashWorkoutIds.count
+        // WP-12（O03）：三段预扣抽成纯函数（`DirectSyncDeletionPartition`），并把它原先
+        // `prefix` 截断后**丢弃**的旧槽尾部并入回传余量（守恒式与去重口径见该函数文档）。
         let freshWorkoutIds = workoutBatch.deleted.map { $0.uuid.uuidString }
-        let keptWorkoutIds = Array(freshWorkoutIds.prefix(deletionBudget))
-        deletionBudget -= keptWorkoutIds.count
-        let overflowWorkoutIds = Array(freshWorkoutIds.dropFirst(keptWorkoutIds.count))
-        // record 侧按剩余额度截断；溢出经 `allocation.overflow` 回传（下一批的输入）。
-        let allocation = DirectSyncDeletionAllocation(remaining: deletionBudget)
+        let deletionPlan = DirectSyncDeletionPartition.plan(
+            pending: pendingDeletions,
+            freshWorkoutIds: freshWorkoutIds,
+            budget: budget.maxDeletions
+        )
+        let stashRecordDeletions = deletionPlan.stashRecordDeletions
+        let stashWorkoutIds = deletionPlan.stashWorkoutIds
+        let keptWorkoutIds = deletionPlan.keptWorkoutIds
+        // record 侧按剩余额度截断；本批新溢出经 `allocation.overflow` 回传，与计划里的
+        // 旧槽尾部在收尾处合并成完整余量。
+        let allocation = DirectSyncDeletionAllocation(remaining: deletionPlan.remainingRecordBudget)
         var merged = Dictionary(uniqueKeysWithValues: workoutBatch.added.map {
             (routeFileWorkoutId($0), $0)
         })
@@ -649,10 +652,12 @@ nonisolated enum HealthKitExport {
             // `synchronize()` **之后**执行 ⇒ `offsetInFile` 就是最终盘上大小。
             xmlBytes: Int(xml.offsetInFile),
             routeBytes: routeBytes,
-            // R3b：本批仍未发送的删除（旧槽没装完的 record 溢出 + 本批 workout 溢出）。
+            // WP-12（O03）守恒余量 = 旧槽装不下的尾部（record/workout 两段）＋ 本批溢出
+            // （record 侧来自 allocation、workout 侧来自 plan）。四段并集满足 partition 的
+            // 守恒式：`旧 ∪ 新 = 发送 ∪ 下批`，`发送 ∩ 下批 = ∅`。
             pendingDeletions: DirectSyncPendingDeletions(
-                recordDeletions: allocation.overflow,
-                workoutIds: overflowWorkoutIds
+                recordDeletions: deletionPlan.pendingRecordDeletions + allocation.overflow,
+                workoutIds: deletionPlan.pendingWorkoutIds + deletionPlan.overflowWorkoutIds
             ),
             // B2：下一批的轮转起点（由 `writeGlobalRecords` 算出并回传）。
             nextTypeRotationStart: records.nextTypeRotationStart

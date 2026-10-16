@@ -180,6 +180,117 @@ struct DirectSyncBatchBudgetTests {
         check(capped.advanced() == capped,
               "advancing past the cap is a no-op: repeated rejections cannot shrink the budget without limit")
 
+        // ── WP-12（O03）删除队列守恒 ─────────────────────────────────────────────
+        // 🔴 缺陷本体：R3b 的旧实现用 `prefix` 截断旧槽后**丢弃尾部** ⇒ 那些删除随 anchor
+        // 推进永久丢失。以下断言把它钉死：①尾部必须进余量 ②三批 10,000 条全量交付
+        // ③去重后 `发送 ∩ 下批 = ∅`（身份 = record (type, 小写 uuid) / 小写 uuid）。
+        let tenThousandDeletions: [[String: String]] = (0..<10_000).map {
+            ["type": "HKQuantityTypeIdentifierHeartRate", "uuid": String(format: "u-%05d", $0)]
+        }
+        let roundOne = DirectSyncDeletionPartition.plan(
+            pending: DirectSyncPendingDeletions(recordDeletions: tenThousandDeletions, workoutIds: []),
+            freshWorkoutIds: [],
+            budget: 4_500
+        )
+        check(roundOne.stashRecordDeletions.count == 4_500,
+              "round 1 sends exactly the deletion budget (4,500 of 10,000)")
+        check(roundOne.pendingRecordDeletions.count == 5_500,
+              "round 1 keeps the TAIL in the durable backlog (the old prefix-drop lost exactly these)")
+        let roundTwo = DirectSyncDeletionPartition.plan(
+            pending: DirectSyncPendingDeletions(recordDeletions: roundOne.pendingRecordDeletions, workoutIds: []),
+            freshWorkoutIds: [],
+            budget: 4_500
+        )
+        check(roundTwo.stashRecordDeletions.count == 4_500 && roundTwo.pendingRecordDeletions.count == 1_000,
+              "round 2 sends 4,500 and the backlog shrinks to 1,000")
+        let roundThree = DirectSyncDeletionPartition.plan(
+            pending: DirectSyncPendingDeletions(recordDeletions: roundTwo.pendingRecordDeletions, workoutIds: []),
+            freshWorkoutIds: [],
+            budget: 4_500
+        )
+        check(roundThree.stashRecordDeletions.count == 1_000 && roundThree.pendingRecordDeletions.isEmpty,
+              "round 3 drains the remaining 1,000 and the backlog is empty")
+        let delivered = Set(
+            (roundOne.stashRecordDeletions + roundTwo.stashRecordDeletions + roundThree.stashRecordDeletions)
+                .compactMap { $0["uuid"] }
+        )
+        check(delivered.count == 10_000,
+              "the three rounds deliver all 10,000 deletions exactly once (sends form the input set)")
+
+        // 去重：重复条目只保留第一条；额度只扣**实际发送的唯一引用**。
+        let dedup = DirectSyncDeletionPartition.plan(
+            pending: DirectSyncPendingDeletions(
+                recordDeletions: [
+                    ["type": "T", "uuid": "ABC"], ["type": "T", "uuid": "abc"],
+                    ["type": "T", "uuid": "ABC"], ["type": "T", "uuid": "OTHER"]
+                ],
+                workoutIds: ["W-XYZ", "w-xyz"]
+            ),
+            freshWorkoutIds: ["W-XYZ", "w-new"],
+            budget: 4_500
+        )
+        check(dedup.stashRecordDeletions.count == 2,
+              "duplicate record deletions (same type + case-insensitive uuid) collapse before spending quota")
+        check(dedup.stashWorkoutIds.count == 1 && dedup.keptWorkoutIds.count == 1,
+              "duplicate workout deletions collapse across the old slot AND the fresh batch")
+        check(dedup.pendingRecordDeletions.isEmpty && dedup.pendingWorkoutIds.isEmpty
+              && dedup.overflowWorkoutIds.isEmpty,
+              "nothing lands in the next batch when everything fits (sends ∩ backlog = ∅)")
+
+        // 溢出链与剩余额度：旧 record → 旧 workout → 新 workout 依次占额，record 侧拿剩余。
+        let overflowChain = DirectSyncDeletionPartition.plan(
+            pending: DirectSyncPendingDeletions(
+                recordDeletions: (0..<100).map { ["type": "T", "uuid": "r-\($0)"] },
+                workoutIds: (0..<100).map { "w-\($0)" }
+            ),
+            freshWorkoutIds: (0..<100).map { "f-\($0)" },
+            budget: 150
+        )
+        check(overflowChain.stashRecordDeletions.count == 100, "old record deletions take quota first")
+        check(overflowChain.stashWorkoutIds.count == 50, "old workout deletions use the remaining 50")
+        check(overflowChain.pendingWorkoutIds.count == 50,
+              "the old-slot workout tail goes to the backlog, not the void")
+        check(overflowChain.overflowWorkoutIds.count == 100, "the whole fresh workout batch overflows")
+        check(overflowChain.remainingRecordBudget == 0, "the fresh record allocation gets what is left (zero)")
+
+        // 零预算与恰好装下两个边界。
+        let zeroBudget = DirectSyncDeletionPartition.plan(
+            pending: DirectSyncPendingDeletions(
+                recordDeletions: [["type": "T", "uuid": "a"]], workoutIds: ["w"]
+            ),
+            freshWorkoutIds: ["f"],
+            budget: 0
+        )
+        check(zeroBudget.stashRecordDeletions.isEmpty && zeroBudget.pendingRecordDeletions.count == 1
+              && zeroBudget.pendingWorkoutIds.count == 1 && zeroBudget.overflowWorkoutIds.count == 1,
+              "a zero budget keeps every deletion in the durable backlog (nothing is dropped)")
+        let exact = DirectSyncDeletionPartition.plan(
+            pending: DirectSyncPendingDeletions(recordDeletions: [], workoutIds: ["w"]),
+            freshWorkoutIds: ["f"],
+            budget: 2
+        )
+        check(exact.stashWorkoutIds == ["w"] && exact.keptWorkoutIds == ["f"]
+              && exact.remainingRecordBudget == 0,
+              "an exactly-fitting budget accepts both and leaves nothing")
+
+        // 三态恢复（任务行 → 余量）：老任务缺键 / 显式空 / 非空 / 损坏。
+        check(DirectSyncPendingDeletions.restoredFromTask(nil) == .notRecorded,
+              "a legacy task (key absent) restores as notRecorded — the slot stays untouched")
+        if let emptyData = try? JSONEncoder().encode(DirectSyncPendingDeletions()) {
+            check(DirectSyncPendingDeletions.restoredFromTask(emptyData) == .decoded(.empty),
+                  "an explicit empty object restores as decoded empty — the commit clears the slot")
+        } else {
+            check(false, "the empty payload must encode")
+        }
+        if let realData = try? JSONEncoder().encode(pending),
+           case .decoded(let restored) = DirectSyncPendingDeletions.restoredFromTask(realData) {
+            check(restored == pending, "a real backlog round-trips through the task row")
+        } else {
+            check(false, "a real backlog must round-trip through the task row")
+        }
+        check(DirectSyncPendingDeletions.restoredFromTask(Data("###not-json###".utf8)) == .corrupted,
+              "a corrupted payload restores as corrupted — the caller must fail, never advance as empty")
+
         print("\(checks) checks passed")
     }
 }

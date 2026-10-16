@@ -226,3 +226,122 @@ nonisolated final class DirectSyncDeletionAllocation {
         return false
     }
 }
+
+/// 删除配额的三段预扣与**守恒结算**（WP-12 / O03）。
+///
+/// 输入 = 旧槽（上一批持久待办）+ 本批新 workout 删除 + 总配额；输出 = ①本批发送的
+/// 前三段 ②下批持久待办的前三段（**旧槽尾部** + 本批 workout 溢出）③留给 drain 的
+/// 「本批新 record 删除」额度（其溢出由 `DirectSyncDeletionAllocation.overflow` 回传，
+/// 两者在 `exportArchive` 收尾处合并成完整余量）。
+///
+/// 🔴 守恒式（按唯一身份集合；身份 = record `(type, 小写 uuid)` / workout `小写 uuid`）：
+///     `旧待办 ∪ 本批新增 = 本批实际发送 ∪ 下批持久待办`，且 `发送 ∩ 下批 = ∅`。
+/// 固定顺序：旧待办先于本批新增；同一输入 → 同一输出（可复现）。
+///
+/// 🔴 R3b 的旧实现用 `prefix` 截断旧槽后**丢弃尾部**（既不发送、也不回传）⇒ 那些删除
+/// 随 anchor 推进永久丢失。本函数把每一条的归宿都写进输出 —— 「丢在哪」在结构上不可能。
+nonisolated struct DirectSyncDeletionPlan: Equatable {
+    /// 本批发出的旧槽 record 段（`deletedRecords` 形状）。
+    let stashRecordDeletions: [[String: String]]
+    /// 本批发出的旧槽 workout 段（`deletedSourceIds` 形状）。
+    let stashWorkoutIds: [String]
+    /// 本批发出的新 workout 段。
+    let keptWorkoutIds: [String]
+    /// 下批持久待办：旧槽 record 段装不下的尾部。
+    let pendingRecordDeletions: [[String: String]]
+    /// 下批持久待办：旧槽 workout 段装不下的尾部。
+    let pendingWorkoutIds: [String]
+    /// 下批持久待办：本批新 workout 装不下的溢出。
+    let overflowWorkoutIds: [String]
+    /// 留给「本批新 record 删除」的剩余额度（交给 `DirectSyncDeletionAllocation`）。
+    let remainingRecordBudget: Int
+}
+
+nonisolated enum DirectSyncDeletionPartition {
+    /// 三段预扣：旧 record → 旧 workout → 新 workout；每段"先占额度、超出进下批"。
+    static func plan(
+        pending: DirectSyncPendingDeletions,
+        freshWorkoutIds: [String],
+        budget: Int
+    ) -> DirectSyncDeletionPlan {
+        var remaining = max(0, budget)
+
+        // 旧槽 record 段：身份去重（重复条目只保留第一条 —— 额度只扣**实际发送**的唯一引用）。
+        var seenRecordIdentities = Set<String>()
+        var stashRecordDeletions: [[String: String]] = []
+        var pendingRecordDeletions: [[String: String]] = []
+        for entry in pending.recordDeletions {
+            let identity = (entry["type"] ?? "") + "\u{1F}" + (entry["uuid"] ?? "").lowercased()
+            guard seenRecordIdentities.insert(identity).inserted else { continue }
+            if remaining > 0 {
+                stashRecordDeletions.append(entry)
+                remaining -= 1
+            } else {
+                pendingRecordDeletions.append(entry)
+            }
+        }
+
+        // 旧槽 workout 段：同一去重口径；与后面的"本批新"跨段共享身份集（同一 UUID 的
+        // 重复删除事件只占一次额度、只发一次）。
+        var seenWorkoutIdentities = Set<String>()
+        var stashWorkoutIds: [String] = []
+        var pendingWorkoutIds: [String] = []
+        for uuid in pending.workoutIds {
+            guard seenWorkoutIdentities.insert(uuid.lowercased()).inserted else { continue }
+            if remaining > 0 {
+                stashWorkoutIds.append(uuid)
+                remaining -= 1
+            } else {
+                pendingWorkoutIds.append(uuid)
+            }
+        }
+
+        // 本批新 workout：与旧槽同身份的不再重复（旧槽已持该删除）。
+        var keptWorkoutIds: [String] = []
+        var overflowWorkoutIds: [String] = []
+        for uuid in freshWorkoutIds {
+            guard seenWorkoutIdentities.insert(uuid.lowercased()).inserted else { continue }
+            if remaining > 0 {
+                keptWorkoutIds.append(uuid)
+                remaining -= 1
+            } else {
+                overflowWorkoutIds.append(uuid)
+            }
+        }
+
+        return DirectSyncDeletionPlan(
+            stashRecordDeletions: stashRecordDeletions,
+            stashWorkoutIds: stashWorkoutIds,
+            keptWorkoutIds: keptWorkoutIds,
+            pendingRecordDeletions: pendingRecordDeletions,
+            pendingWorkoutIds: pendingWorkoutIds,
+            overflowWorkoutIds: overflowWorkoutIds,
+            remainingRecordBudget: remaining
+        )
+    }
+}
+
+/// 任务行删除余量的**恢复结果**（WP-12 / O03）。
+///
+/// 三态与提交语义逐字对齐（`SyncTaskStore.commitSuccess` 的 `pendingDeletions` 参数）：
+/// - `notRecorded`：老任务**缺键** ⇒ 不更新旧槽（向后兼容的唯一出口）；
+/// - `decoded`：R3b 起空余量也**总是编码**（显式空对象）⇒ `.empty` 表示"清槽"；
+/// - `corrupted`：有字段但解码失败 ⇒ 调用方必须**报错并保留任务** ——
+///   静默按空推进 anchor 会把那批删除永久丢失（任务行已删、余量没进槽）。
+nonisolated enum RestoredPendingDeletions: Equatable {
+    case notRecorded
+    case decoded(DirectSyncPendingDeletions)
+    case corrupted
+}
+
+extension DirectSyncPendingDeletions {
+    /// 从任务行的 `Data?` 恢复（**唯一入口**）。
+    static func restoredFromTask(_ data: Data?) -> RestoredPendingDeletions {
+        guard let data else { return .notRecorded }
+        do {
+            return .decoded(try JSONDecoder().decode(DirectSyncPendingDeletions.self, from: data))
+        } catch {
+            return .corrupted
+        }
+    }
+}

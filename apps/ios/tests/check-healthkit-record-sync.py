@@ -203,13 +203,27 @@ check("pendingDeletions: DirectSyncPendingDeletions? = nil" in store,
 check("needsContinuation: exported.hasMorePages" in sync,
       "the export round must persist hasMorePages into the task row for resume rounds")
 
+# WP-12（O03）：删除余量守恒的接线判据。
+check("pendingDeletions: DirectSyncPendingDeletions? = nil" not in sync,
+      "markSuccess must NOT default pendingDeletions — a default silently covers a missed call site "
+      "(R3b missed two resume branches), and every call site must state its three-state intent")
+check("pendingDeletions: try? JSONEncoder().encode(exported.pendingDeletions)" in sync,
+      "the export round must encode an EMPTY payload too (explicit empty = clear the slot; "
+      "only a legacy task's missing key means 'do not touch')")
+check(sync.count("try Self.restoredCommitDeletions(from: restored)") == 5,
+      "all five resume/commit branches must go through the single restore entry "
+      "(nil = keep / empty = clear / corrupted = fail loudly)")
+check("case .corrupted:" in sync,
+      "the corrupted branch must exist — folding it into 'empty' would advance the anchor and lose the backlog")
+
 # --- 判据总数的下限（**必须放在全部判据之后**） ---------------------------------
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
 # （或把它挪进走不到的分支）都会让它变红。
 # 2026-10-16（R3b）：新增删除暂存/截断判据后实测打印 52 ⇒ 按同一纪律重设为 51。
 # 2026-10-16（B1）：新增窗口 pass 三条判据后实测打印 55 ⇒ 重设为 54。
-MIN_CHECKS = 54
+# 2026-10-16（WP-12/O03）：新增删除守恒四条判据后实测打印 59 ⇒ 重设为 58。
+MIN_CHECKS = 58
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

@@ -1296,10 +1296,13 @@ MUTATIONS = [
     ),
     (
         "[S2] 结构门禁: commitSuccess 不再写待续槽 => 提交后剩下的页没人读（前台续跑与后台唤醒都失去判据）",
+        # 2026-10-16（WP-12）重锚点：R3b 在 `recordCursors:` 与 `continuationPending:` 之间插入了
+        # `pendingDeletions:` 参数，旧两段式锚点失配（stale pattern ⇒ 整条什么都没验到）。
+        # 本批按当前文本重锚；本突变的意图不变（拿掉待续标记的写入）。
         lambda: edit(
             SYNC,
-            "recordCursors: recordCursors, continuationPending: needsContinuation) },",
-            "recordCursors: recordCursors) },",
+            "recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation) },",
+            "recordCursors: recordCursors, pendingDeletions: pendingDeletions) },",
         ),
         SWIFT_GATE,
         "markSuccess must persist the continuation flag through commitSuccess",
