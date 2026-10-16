@@ -346,6 +346,20 @@ extension DirectSyncPendingDeletions {
     }
 }
 
+extension DirectSyncBatchBudget {
+    /// 近期窗口的**独立份额**（O05/WP-13）：窗口 pass 最多使用单批总预算的 20%。
+    ///
+    /// 语义（审查 §5 O05 步骤 3）：
+    /// - 正式增量**至少保留 80%** —— 窗口不得借走这部分；
+    /// - 窗口**用不满**的份额不回流（正式流的判定仍走 `accepts` 的总额，天然可用剩余部分）；
+    /// - 20% 是**待基准校准的初始值**（1/5），不是已测最优。
+    ///
+    /// 纯函数（本文件被回归单元单独编译；Export 本体依赖 HealthKit、测不了它）。
+    static func recentWindowShare(of budget: DirectSyncBatchBudget) -> (maxBytes: Int, maxRecords: Int) {
+        (maxBytes: budget.maxXmlBytes / 5, maxRecords: budget.maxRecords / 5)
+    }
+}
+
 /// workout 页被字节闸门拒绝时的**收缩决策**（O01/WP-10，纯函数）。
 ///
 /// 与记录侧的 `shrinkLimit` 同族：把"每轮至少前进一格、**有限步终止**"的收缩规则

@@ -230,6 +230,22 @@ check("freshWorkoutIdSet.insert(object.uuid.uuidString)" in export,
       "workout deletions must be de-duplicated into the page-scoped pool "
       "(shrinking re-queries the same page and re-returns the same deletedObjects)")
 
+# O05（WP-13）：窗口条件化 + 独立份额 + 截断可观测的接线判据。
+# 🔴 这条必须两条腿一起钉（首版只数调用次数，突变实测暴露了盲区：把 `guard` 换成
+# `_ = needsRecentWindow` 后调用仍在、计数不变 ⇒ 条件化已被旁路而门禁全绿）。
+check(export.count("needsHistoryRead(now: now, force: forceHistory)") == 2,
+      "the recent-window pass must be gated on the production backlog judgement "
+      "(needsHistoryRead) — the usual two call sites are the window pass and the anchored "
+      "stream; otherwise the window re-reads every batch in steady state")
+check("guard needsRecentWindow else { continue }" in export,
+      "the backlog judgement must actually GATE the window pass (computing it and discarding "
+      "it wires nothing — the window would run every batch again)")
+check("recentWindowShare(of: budget)" in export,
+      "the window pass must use its own 20% share — sharing the whole batch budget "
+      "lets the window starve the anchored stream")
+check("recent.count >= Self.recentWindowLimit" in export,
+      "a window query that hits the per-type limit must say so (warnings), not pass silently")
+
 # --- 判据总数的下限（**必须放在全部判据之后**） ---------------------------------
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
@@ -238,7 +254,8 @@ check("freshWorkoutIdSet.insert(object.uuid.uuidString)" in export,
 # 2026-10-16（B1）：新增窗口 pass 三条判据后实测打印 55 ⇒ 重设为 54。
 # 2026-10-16（WP-12/O03）：新增删除守恒四条判据后实测打印 59 ⇒ 重设为 58。
 # 2026-10-16（WP-10/O01）：新增页循环三条判据后实测打印 62 ⇒ 重设为 61。
-MIN_CHECKS = 61
+# 2026-10-16（WP-13/O05）：新增窗口三条判据后实测打印 65 ⇒ 重设为 64。
+MIN_CHECKS = 64
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

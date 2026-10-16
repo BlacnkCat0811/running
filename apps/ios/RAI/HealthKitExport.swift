@@ -1110,15 +1110,25 @@ nonisolated enum HealthKitExport {
                             "HKCategoryTypeIdentifierSleepAnalysis", nil))
         // B1（2026-10-16）**近期窗口 pass**：每个类型先用一次**有界**查询把近 48h 数据送到
         // —— 历史重放可能持续数天，而训练详情/恢复评估要用的近期心率/睡眠不能排在队尾。
-        // 🔴 三条纪律：
+        // 🔴 四条纪律：
         //   ① 窗口**独立于正式 anchor**（它自己记账在 `recentWindowReadAt`；正式锚只由下面的
         //      历史/增量段推进）；
         //   ② 窗口**绝不**把整批预算吃光 —— 装不下就跳过该类型（不推进记账，下批重试），
         //      历史段照跑（`continue`，不是 `break`）；
-        //   ③ 删除事件**不**由窗口负责（无锚点查询看不到删除；删除仍归增量流/历史段）。
+        //   ③ 删除事件**不**由窗口负责（无锚点查询看不到删除；删除仍归增量流/历史段）；
+        //   ④ WP-13（O05）：窗口只在"确有初始化/积压"时启用，且有**独立份额**（见下）。
+        var windowBytesUsed = 0
+        var windowRecordsUsed = 0
         for (type, unit, xmlType, xmlUnit) in descriptors {
             try Task.checkCancellation()
             let previousWindow = cursors[xmlType]
+            // WP-13（O05，步骤 1-2）：窗口只为"重放期"服务 —— 该类型**首装**（无游标）或
+            // **历史重放还没做完**（复用正式循环同源的生产判据 `needsHistoryRead`，含显式
+            // force）时才补读近窗。稳态（普通增量）下正式流本身就近实时，每批补读窗口
+            // 只是白花查询与预算。
+            let needsRecentWindow = previousWindow == nil
+                || previousWindow!.needsHistoryRead(now: now, force: forceHistory)
+            guard needsRecentWindow else { continue }
             let windowStart = max(
                 now.addingTimeInterval(-Self.recentWindowLookback),
                 (previousWindow?.recentWindowReadAt ?? .distantPast)
@@ -1132,15 +1142,27 @@ nonisolated enum HealthKitExport {
                     type: type, predicate: windowPredicate,
                     limit: Self.recentWindowLimit, store: store
                 )
+                // WP-13（O05，步骤 6）：命中单类型上限只说明**窗口可能被截断**，如实记入
+                // warnings（其余部分由正式流补齐 —— 窗口是加速器，不是唯一通道）。
+                // 记账照常推进：不推进会让每批重读同一段被截断的窗口（B1"空窗也推进"同理）。
+                if recent.count >= Self.recentWindowLimit {
+                    warnings.add("近期窗口查询命中单类型上限（\(xmlType)）：该窗口可能被截断，其余由增量流补齐")
+                }
                 if !recent.isEmpty {
                     let page = try renderedRecordPage(
                         added: recent, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
                     )
-                    // 同一字节账：装不下 ⇒ 该类型窗口本轮跳过（**不**推进记账）。
-                    if budget.accepts(xmlBytes: xml.offsetInFile, records: count,
-                                      pageBytes: page.data.count, pageRecords: page.recordCount) {
+                    // 同一字节账 + **窗口独立份额**（WP-13/O05：窗口 ≤ 总预算 20%，正式流保留
+                    // ≥80%；窗口自己的份额用满就跳过该类型 —— 剩余份额不回流给窗口超用）。
+                    let windowShare = DirectSyncBatchBudget.recentWindowShare(of: budget)
+                    let windowFits = windowBytesUsed + page.data.count <= windowShare.maxBytes
+                        && windowRecordsUsed + page.recordCount <= windowShare.maxRecords
+                    if windowFits && budget.accepts(xmlBytes: xml.offsetInFile, records: count,
+                                                    pageBytes: page.data.count, pageRecords: page.recordCount) {
                         try xml.write(contentsOf: page.data)
                         count += page.recordCount
+                        windowBytesUsed += page.data.count
+                        windowRecordsUsed += page.recordCount
                         // 读完整窗才推进记账（空窗同样推进：避免每批重复空查询）。
                         if let previousWindow {
                             cursors[xmlType] = HealthKitRecordCursor(

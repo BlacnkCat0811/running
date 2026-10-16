@@ -308,6 +308,14 @@ struct DirectSyncBatchBudgetTests {
         check(shrinkLimit == 1 && shrinkSteps <= 10,
               "the shrink chain terminates at one within bounded steps (1000 → … → 1 → nil)")
 
+        // ── O05（WP-13）窗口独立份额 = 单批总预算的 20%（初始值 1/5，待基准校准） ──
+        let windowShare = DirectSyncBatchBudget.recentWindowShare(of: budget)
+        check(windowShare.maxBytes == budget.maxXmlBytes / 5
+              && windowShare.maxRecords == budget.maxRecords / 5,
+              "the recent-window share is one fifth of the batch budget")
+        check(windowShare.maxBytes < budget.maxXmlBytes && windowShare.maxRecords < budget.maxRecords,
+              "the window share must never equal the whole batch budget — 80% is reserved for the anchored stream")
+
         print("\(checks) checks passed")
     }
 }
