@@ -280,3 +280,59 @@ test("回归：RecomputeWorker 在没有 admission 时也必须能跑（不引�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// O07 复现夹具（2026-10-16 审查 §2.4 的"事务许可最小验证"；WP-02 固化）。
+//
+// 缺陷：`withWriteGate` 逐语句包 `exec`/`run`，而 `BEGIN IMMEDIATE … COMMIT` 是三条
+// 独立语句 ⇒ 事务未结束时许可已被释放 ——「许可空闲但数据库仍被锁」。
+// 本用例断言**正确语义**（事务期间许可必须仍被持有），故在修复前为红；以 `skip`
+// 形态入库（不把已知红带进基线），**WP-21 落地后删除 skip 并转绿**。
+// 对照半段（另一连接被 SQLite 锁挡）修复前后都应为真 —— 它证明"事务确实开着"，
+// 防止夹具在"事务根本没开始"的假场景下静默通过。
+test("O07 复现：事务的许可覆盖必须等于事务本身（BEGIN→COMMIT 之间不许出现许可空窗）",
+  { skip: "WP-21 未落地：BEGIN/COMMIT 与中间写语句处在不同许可窗口（许可在事务期间空闲）；修复后删除本 skip" },
+  () => {
+    const root = mkdtempSync(join(tmpdir(), "rai-o07-lease-window-"));
+    const databasePath = join(root, "lease.sqlite");
+    try {
+      const raw = new DatabaseSync(databasePath);
+      raw.exec("CREATE TABLE t (id TEXT)");
+      // 记录型闸门：可观测"此刻许可是否被某个 scope 持有"。
+      let permitHeld = false;
+      const gate = {
+        scope<T>(fn: () => T): T {
+          permitHeld = true;
+          try { return fn(); } finally { permitHeld = false; }
+        },
+        yieldIfStale(): void {}
+      };
+      const gated = withWriteGate(raw, gate);
+      gated.exec("BEGIN IMMEDIATE");
+      // 事务已开始、尚未 COMMIT。正确语义：此刻许可仍应被持有。
+      const permitFreeInsideTransaction = !permitHeld;
+      // 对照：另一条连接此刻写库必须被 SQLite 锁挡 —— 证明事务确实开着。
+      let otherWriterBlocked = false;
+      const other = new DatabaseSync(databasePath);
+      other.exec("PRAGMA busy_timeout=0");
+      try {
+        other.exec("INSERT INTO t VALUES ('probe')");
+      } catch (error) {
+        otherWriterBlocked = /busy|locked/i.test(String(error));
+      } finally {
+        other.close();
+      }
+      gated.exec("COMMIT");
+      // 提交后许可必须回到空闲（对照另一半：防止夹具绑死在"永远持锁"的假实现上）。
+      const permitFreeAfterCommit = !permitHeld;
+      raw.close();
+
+      assert.equal(otherWriterBlocked, true,
+        "对照失败：事务未开始或 SQLite 锁未生效 —— 本用例的前提不成立，不能据此判断许可边界");
+      assert.equal(permitFreeInsideTransaction, false,
+        "事务未结束时许可已空闲 —— 应用许可与数据库锁边界不一致（O07；WP-21 目标：许可覆盖整个短事务）");
+      assert.equal(permitFreeAfterCommit, true, "COMMIT 之后许可必须回到空闲（短事务原则不变）");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
