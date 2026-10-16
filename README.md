@@ -72,6 +72,7 @@ npm run check:package-boundaries
 | iOS 构建、权限和平台入口 | [iOS](apps/ios/README.md) |
 | 新版跑步教练流程与未复刻边界 | [跑步教练](docs/RUN_COACH.md) |
 | iOS 训练计划现状复核与后续实施方案 | [训练计划架构方案](docs/IOS_TRAINING_PLAN_ARCHITECTURE_PROPOSAL.md) |
+| iOS 增量同步、解析入库与模型计算审查及具体优化方法 | [同步与计算优化方案](docs/IOS_SYNC_PERFORMANCE_REVIEW.md) |
 | Rust 可选数据执行器 | [Rust](docs/RUST_DATA_ENGINE.md) |
 | 直接增量同步 PR2+PR3 落地设计（同库事务、版本化事实与路线） | [直接同步落地设计](docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md) |
 | 直接增量同步 PR4 落地设计（全部类型接收、分析任务登记、短写调度） | [PR4 落地设计](docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md) |

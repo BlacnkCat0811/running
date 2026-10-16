@@ -85,7 +85,12 @@ const DEFAULT_DOCS = [
   // 所以它必须在门禁范围里，而不是"谁想起来谁手动传"。
   "docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md",
   "docs/SQLITE_DIRECT_SYNC_PR4_DESIGN.md",
-  "docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md"
+  "docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md",
+  // 2026-10-16：O01–O12 审查与实施方案（锚定基线 `2e7a231`）。⚠️ 首跑实测（2026-10-16）：
+  // 该文档正文用 markdown 链接、**0 处** `文件:行号` 引用 ⇒ 当前是**真空**（它的 27 个链接
+  // 由 `check:docs` 覆盖）。挂载意图：实施期为条目补行号证据时门禁自动生效；
+  // 且"0 处"会显式出现在输出里，避免把真空读成已保护。文档手改锚点请同步此说明。
+  "docs/IOS_SYNC_PERFORMANCE_REVIEW.md"
 ];
 
 /** 同名文件消歧：文档里的缩写写法指向哪一个。 */

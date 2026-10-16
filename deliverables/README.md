@@ -8,6 +8,14 @@
 
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
+- [SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md](SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md)：
+  **同步与计算优化 · 落地方案（O01–O12 → 16 工作包 / S0–S5）· S0+S1 执行中** —— 把
+  [审查文档](../docs/IOS_SYNC_PERFORMANCE_REVIEW.md) 的 12 项优化转成可执行、可验证、可回滚的工作包：
+  三方只读核实全部与审查一致 + 唯一失败门禁亲验（1 fail / 6 pass，第三 `directSync` 产出方）、
+  16 包依赖拓扑与关键路径、8 项决策点、5 大风险与缓解、每包门禁/突变/回滚纪律。
+  S1 执行序 = WP-12(O03) → WP-10(O01) → WP-13(O05) → WP-11(O02)（O03 为共同底座）。
+  执行完成后按本目录约定归档或删除。
+
 - [IOS_SYNC_INGEST_REVIEW_OPTIMIZATION_2026-10-15.md](IOS_SYNC_INGEST_REVIEW_OPTIMIZATION_2026-10-15.md)：
   **iOS 数据同步 / 解析与入库 外部审查及优化方案** —— 4 项 P1（后台待续页能发现却不执行 / 无变化成功缺持久回执致
   客户端永久 hold / 删除事件不计导出预算 / 预算收缩无符号下溢）+ 3 项 P2（历史回填挤占近期 / 代次语义错配 /
