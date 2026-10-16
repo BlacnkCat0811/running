@@ -63,8 +63,12 @@ check("guard let next else" in query,
       "missing anchor is an error, never cursor zero")
 check("withTaskCancellationHandler" in query and "box.cancel()" in query,
       "the anchored record query lost its cancellation handling")
-check("predicateForSamples" not in records,
-      "historical changes cannot be event-date filtered")
+# B1（2026-10-16）：锚点从 `records`（writeGlobalRecords 全体）收窄到 `query`
+# （anchoredRecords 本体）—— 窗口 pass 是**有意**引入的、独立于正式 anchor 的近期通道，
+# 它用时间谓词恰恰是它的定义；而"历史/增量 anchor 查询不得事件时间过滤"这条不变式
+# 依然逐字成立（:58 的 `predicate: nil` 与这里构成双保险）。
+check("predicateForSamples" not in query,
+      "historical changes cannot be event-date filtered (the anchored record query stays predicate-free)")
 check("HealthKitRecordCursor.drain" in records,
       "tested pagination must drive the production query")
 check("recordsForceRescan: full," in sync,
@@ -166,6 +170,15 @@ check("Double(bounds.maxRouteBytes) * 0.9" in budget and "Double(bounds.maxRoute
 check("func routeBudgetExhausted(routeBytes:" in budget
       and "budget.routeBudgetExhausted(routeBytes:" in export,
       "the route budget gate must sit in the export loop (pre-fetch; state and files advance together)")
+
+# B1（2026-10-16）：近期窗口 pass —— 三条硬形态（存在 / 有界+最新优先 / 命名常量）。
+check("recentWindowReadAt" in cursor and "recentWindowReadAt" in export,
+      "the recent-window watermark must exist in both the cursor and the export loop (B1)")
+check("func recentSamples<T: HKSample>(" in export and "ascending: false" in export,
+      "the window query must be bounded and newest-first (ascending order would revisit the oldest end)")
+check("recentWindowLookback" in export and "recentWindowLimit" in export
+      and "recentWindowOverlap" in export,
+      "the window bounds must be named constants (drifting literals would hide a runaway window)")
 # 导出路径：drain 调用必须接**写前判定**与**收缩**（判定用渲染后的整页字节 + 已提交字节）。
 check("budget.accepts(" in export and "budget.shrinkLimit(" in export,
       "writeGlobalRecords must decide before committing the page (accepts) and be able to shrink it")
@@ -195,7 +208,8 @@ check("needsContinuation: exported.hasMorePages" in sync,
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
 # （或把它挪进走不到的分支）都会让它变红。
 # 2026-10-16（R3b）：新增删除暂存/截断判据后实测打印 52 ⇒ 按同一纪律重设为 51。
-MIN_CHECKS = 51
+# 2026-10-16（B1）：新增窗口 pass 三条判据后实测打印 55 ⇒ 重设为 54。
+MIN_CHECKS = 54
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

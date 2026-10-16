@@ -26,6 +26,17 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     /// （`historyReadAt` 的旧注释同源：保留键是为了向后兼容）。
     var historyReplayPhase: HistoryReplayPhase? = nil
 
+    /// 最近一次**窗口 pass**读完的时刻（B1，2026-10-16）。
+    ///
+    /// 窗口 = `[max(now − 48h, 上次读完 − 6h), now]`（6h 重叠覆盖"数据迟到"）。它是
+    /// **独立于正式 anchor 的独立状态**：历史重放可能持续数天，而"最近 48 小时"的数据
+    /// （训练详情、恢复评估要用的）不能排在队尾 —— 窗口 pass 每批先用一次**有界**查询把
+    /// 近期数据送到，正式 anchor 只由历史/增量段推进（窗口**绝不**污染它）。
+    ///
+    /// `var` + 默认值：与 `historyReplayPhase` 同一条兼容纪律（老 payload 缺键 = 没记过 ⇒
+    /// 下批从完整 48h 窗重扫一次，服务端按 UUID 幂等）。
+    var recentWindowReadAt: Date? = nil
+
     /// 下一次 drain 是否要先做**全量重放**。
     ///
     /// 判据 = 显式请求（`force`）**或**上次重放被预算截断还没做完（`historyReplayPhase != nil`）。

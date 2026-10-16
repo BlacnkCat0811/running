@@ -37,6 +37,22 @@ struct HealthKitRecordCursorRegression {
         let legacy = Data(#"{"anchor":"AQID","historyReadAt":0}"#.utf8)
         let legacyCursor = try JSONDecoder().decode(HealthKitRecordCursor.self, from: legacy)
         check(legacyCursor.historyReplayPhase == nil, "a legacy payload decodes with no replay phase")
+        // B1（2026-10-16）：窗口记账字段的**两条兼容 + 一条往返**。
+        // 老 payload（连 `recentWindowReadAt` 都没有）必须解出 nil —— 语义是"没记过 ⇒
+        // 下批从完整 48h 窗重扫一次"（服务端按 UUID 幂等），不是"该类型没有近期数据"。
+        check(legacyCursor.recentWindowReadAt == nil,
+              "a legacy payload decodes with no recent-window bookkeeping")
+        let windowed = HealthKitRecordCursor(
+            anchor: Data([9]), historyReadAt: now,
+            historyReplayPhase: nil, recentWindowReadAt: now.addingTimeInterval(-3600)
+        )
+        let windowedRound = try JSONDecoder().decode(
+            HealthKitRecordCursor.self, from: JSONEncoder().encode(windowed)
+        )
+        check(windowedRound == windowed,
+              "the recent-window watermark survives pending-batch serialization")
+        check(windowedRound.recentWindowReadAt == now.addingTimeInterval(-3600),
+              "the recent-window watermark keeps its exact value (not truncated)")
 
         // ── 读到底：每页（含 deletion-only 页）都被提交，锚点推进到最后 ──
         var drainedQueried: [Int?] = []

@@ -269,6 +269,14 @@ nonisolated enum HealthKitExport {
     /// 页是**字节闸门**的边界（整页渲染进内存判定，放不下就整页不写），不是"取多少条"的
     /// 性能参数。query 级与渲染级共用同一个值。
     private static let workoutPageLimit = 1000
+    /// B1（2026-10-16）：近期窗口的**回看时长**与**重叠**。窗口每批先扫一遍，
+    /// 让"最近 48 小时"（训练详情/恢复评估的输入）不排在历史重放的队尾。
+    /// 6h 重叠覆盖"数据迟到"（样本时间早、写入晚）——与增量流的 overlap 同源思路。
+    private static let recentWindowLookback: TimeInterval = 48 * 3600
+    private static let recentWindowOverlap: TimeInterval = 6 * 3600
+    /// 窗口 pass 的单类型条数上限（query 降序取**最新** N 条）。有界是判据的一部分：
+    /// 窗口**绝不**把整批预算吃光（装不下就跳过该类型、下批重试，历史段照跑）。
+    private static let recentWindowLimit = 1500
 
     /// 一页记录的**渲染产物**（S2.5 写前判定）：先渲染进内存，判定通过才落盘。
     ///
@@ -1060,6 +1068,65 @@ nonisolated enum HealthKitExport {
         }
         descriptors.append((HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!, nil,
                             "HKCategoryTypeIdentifierSleepAnalysis", nil))
+        // B1（2026-10-16）**近期窗口 pass**：每个类型先用一次**有界**查询把近 48h 数据送到
+        // —— 历史重放可能持续数天，而训练详情/恢复评估要用的近期心率/睡眠不能排在队尾。
+        // 🔴 三条纪律：
+        //   ① 窗口**独立于正式 anchor**（它自己记账在 `recentWindowReadAt`；正式锚只由下面的
+        //      历史/增量段推进）；
+        //   ② 窗口**绝不**把整批预算吃光 —— 装不下就跳过该类型（不推进记账，下批重试），
+        //      历史段照跑（`continue`，不是 `break`）；
+        //   ③ 删除事件**不**由窗口负责（无锚点查询看不到删除；删除仍归增量流/历史段）。
+        for (type, unit, xmlType, xmlUnit) in descriptors {
+            try Task.checkCancellation()
+            let previousWindow = cursors[xmlType]
+            let windowStart = max(
+                now.addingTimeInterval(-Self.recentWindowLookback),
+                (previousWindow?.recentWindowReadAt ?? .distantPast)
+                    .addingTimeInterval(-Self.recentWindowOverlap)
+            )
+            let windowPredicate = HKQuery.predicateForSamples(
+                withStart: windowStart, end: nil, options: .strictStartDate
+            )
+            do {
+                let recent: [HKSample] = try await recentSamples(
+                    type: type, predicate: windowPredicate,
+                    limit: Self.recentWindowLimit, store: store
+                )
+                if !recent.isEmpty {
+                    let page = try renderedRecordPage(
+                        added: recent, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
+                    )
+                    // 同一字节账：装不下 ⇒ 该类型窗口本轮跳过（**不**推进记账）。
+                    if budget.accepts(xmlBytes: xml.offsetInFile, records: count,
+                                      pageBytes: page.data.count, pageRecords: page.recordCount) {
+                        try xml.write(contentsOf: page.data)
+                        count += page.recordCount
+                        // 读完整窗才推进记账（空窗同样推进：避免每批重复空查询）。
+                        if let previousWindow {
+                            cursors[xmlType] = HealthKitRecordCursor(
+                                anchor: previousWindow.anchor,
+                                historyReadAt: previousWindow.historyReadAt,
+                                historyReplayPhase: previousWindow.historyReplayPhase,
+                                recentWindowReadAt: now
+                            )
+                        }
+                    }
+                } else if let previousWindow {
+                    cursors[xmlType] = HealthKitRecordCursor(
+                        anchor: previousWindow.anchor,
+                        historyReadAt: previousWindow.historyReadAt,
+                        historyReplayPhase: previousWindow.historyReplayPhase,
+                        recentWindowReadAt: now
+                    )
+                }
+            } catch {
+                // 与类型循环同口径：授权/无数据 ⇒ 跳过该类型窗口（下批重试）；
+                // 库不可达 ⇒ 抛（绝不把锁屏当成空窗口）。
+                if isAuthorizationError(error) || isNoDataError(error) { continue }
+                if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
+                throw error
+            }
+        }
         for (index, descriptor) in descriptors.enumerated() {
             // 预算在**上一个类型**停下 ⇒ 本轮不再开始新类型（未处理的类型保持旧游标，
             // `hasMorePages` 冒泡给上层 —— S2.1 的"未处理类型不动"纪律）。
@@ -1173,7 +1240,10 @@ nonisolated enum HealthKitExport {
                     // 重放完成（未被预算截断）才把 `historyReadAt` 推到 `now`；中断时保留旧值 ——
                     // "未完成"由 `historyReplayPhase` 承载，下轮据此续段（R-03 防护）。
                     historyReadAt: (history && interruptedPhase == nil) ? now : (previous?.historyReadAt ?? now),
-                    historyReplayPhase: interruptedPhase
+                    historyReplayPhase: interruptedPhase,
+                    // B1：窗口记账必须**透传** —— 窗口 pass 已在本循环之前写过它（`previous`
+                    // 读到的就是那时的值）；不带上就会被这次构造覆盖，症状是每批重扫整个 48h 窗。
+                    recentWindowReadAt: previous?.recentWindowReadAt
                 )
             } catch {
                 if isAuthorizationError(error) || isNoDataError(error) {
@@ -1280,6 +1350,48 @@ nonisolated enum HealthKitExport {
                 return []
             }
             throw error
+        }
+    }
+
+    /// B1：窗口查询 —— 时间窗内**最新 N 条**（降序 + 有界 limit）。与 `samples` 的差别只有
+    /// 两处：`limit` 有界、排序**降序**（近期优先；渲染侧 `renderedRecordPage` 会再按
+    /// startDate 升序重排，`export.xml` 的字节确定性不受本排序影响）。
+    ///
+    /// 🔴 为什么不用 `anchoredRecords`（HKAnchoredObjectQuery）：nil 锚点返回的是**插入序**
+    /// 的前 N 条（"最早插入的"），与"近期优先"正好相反；且滚动时间窗与持久 anchor 的
+    /// 复用语义不搭（predicate 漂移时结果不可依赖）。窗口用"无锚点 + 滚动谓词"反而简单正确。
+    private static func recentSamples<T: HKSample>(
+        type: HKSampleType,
+        predicate: NSPredicate,
+        limit: Int,
+        store: HKHealthStore
+    ) async throws -> [T] {
+        let box = QueryContinuation<[T]>()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let result = try await withCheckedThrowingContinuation { continuation in
+                box.set(continuation)
+                let query = HKSampleQuery(
+                    sampleType: type,
+                    predicate: predicate,
+                    limit: limit,
+                    sortDescriptors: [
+                        NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false),
+                        NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+                    ]
+                ) { _, samples, error in
+                    if let error {
+                        box.resume(throwing: error)
+                        return
+                    }
+                    box.resume(returning: (samples as? [T]) ?? [])
+                }
+                box.execute(query, on: store)
+            }
+            try Task.checkCancellation()
+            return result
+        } onCancel: {
+            box.cancel()
         }
     }
 
