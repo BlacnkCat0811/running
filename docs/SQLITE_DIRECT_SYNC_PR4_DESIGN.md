@@ -266,8 +266,28 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 **③ `drain()` 不再取许可。** `RecomputeWorker` 只在 worker 线程存活期内挂着租约服务器；
 线程退出（含崩溃）时 `dispose()` 必须释放，否则写路由永久 409 —— 这条有专门用例。
 
-**④ 失败开放，不是失败关闭。** worker 等不到授权时等 30 s 后**记诊断并继续写**：
-把整条分析队列挂死比"这一批少一层互斥保护"更糟。诊断计数器在客户端统计里可见（`timeouts`）。
+**④ 超时是"可重试失败"，不是"失败开放"。**（2026-10-16 O07 / 决策 D1 **修订**，原文为
+"等 30 s 后记诊断并继续写"。）
+
+worker 等不到授权时等 `LEASE_DEFAULT_TIMEOUT_MS`（30 s）后**撤回请求并抛
+`WriteLeaseTimeoutError`**：这一批**不写**。理由：旧行为让"SQLite 事务已经拿着数据库锁、
+应用许可却是空的"成为常态 —— 那正是 O07 要消灭的边界不一致。正确取舍是这一批晚一点跑，
+而不是让两个写者同时进库。
+
+撤回必须**同时撤销 admission 排队位**（`WriteLeaseServerStats.withdraws`）：`acquire()` 一调用
+就把 owner 名字放进 `waiting`，而 FIFO 判据是"队首必须是自己" —— 不撤销的话，一个已经不存在的
+请求会永远占住队首，之后 import/HTTP 一律拿不到许可（表现为永久 409）。
+
+任务侧：`RecomputeJobRepository.fail` 按**结构**识别可重试错误（`retryable === true`），
+把任务放回 `queued`（`progress_phase='retry_pending'`，`attempts + 1`，原因留在 `error_json`），
+**有界**（`RETRYABLE_JOB_ATTEMPT_LIMIT = 3`）—— 没有上限时"永远拿不到许可"会变成任务在队列里
+无限打转、用户看不到结论。超限即终态 `failed`。`job_type` / `status` 的 CHECK 不变，
+iOS 与 `/v1/jobs` 的取值集合一个字节都没动。
+
+诊断计数器仍在客户端统计里（`timeouts`），且**真的读得到**：`RecomputeWorker` 接住线程回传的
+`lease.stats()` 并在 `timeouts > 0` 时写 stderr（此前回传了却被丢弃）。
+
+回归：`apps/api/test/write-lease.test.ts`（超时可重试失败 + 撤销排队位 + 重排有界）。
 
 **⑤ 实施中撞到并修掉两个真缺陷**（都是用例当场抓到的，不是设想）：
 - **漏 `Atomics.notify`**：worker 只 `store` 不 `notify`，主线程的 `waitAsync` 永远不醒 ⇒
@@ -279,6 +299,31 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 **⑥ 明确不做的事**：读仍不取许可（§6 许可表如此），所以分析输入在窗口之间可能被并发批次改动。
 这一点在"固定 `FactsReader`"（PR4 的另一项）落地前依赖既有时序（后续批次会重新登记分析），
 **必须与租约同批说明**，不能当成已经解决。
+
+**⑦ 许可覆盖的是"一个短事务"，不是"一条语句"。**（2026-10-16 O07 追加。）
+
+逐语句包代理有一个结构性缺口：`BEGIN IMMEDIATE … COMMIT` 是三条独立语句 ⇒ 事务**开着**的
+时候许可已经交回去了 —— "许可空闲但数据库仍被锁"。修法两半，缺一不可：
+
+- `withWriteGate` 的代理按 SQL 的**净事务增量**开合保留（`BEGIN` +1、`COMMIT`/`END`/`ROLLBACK`
+  -1、`SAVEPOINT`/`RELEASE`/`ROLLBACK TO` 0），一次 `exec` 里的多条语句（`"PRAGMA …; BEGIN
+  IMMEDIATE"`）按分号逐条判定 —— **不是** `startsWith("BEGIN")`；
+- 代理在自身上暴露 `withWriteTransaction(op)`，仓库层经 `@rai/storage-sqlite` 的
+  `withDatabaseTransaction` 按**结构**发现它（该包不 import `apps/api`）。没有代理时
+  （CLI、单测、主线程）回落成裸 `BEGIN IMMEDIATE`/`COMMIT`，行为逐字节不变。
+
+另外三条同批纪律：
+
+- **让路点必须在提交之后**：事务开着时 `yieldIfStale` 直接返回（交回许可会重新制造上面那个缺口）。
+  pipeline 的六个逐行写入循环改走 `ChunkedWriter`（≤100 行一个事务，提交后让路）。
+- **写与读按 SQL 语义判定**：`run` 不是唯一写路径 —— `INSERT/UPDATE/DELETE … RETURNING` 完全
+  可能经 `get()`/`all()` 执行。代理按语句文本判定（`isWriteStatement`），不按调用名。
+- **事务内只允许短 SQL**：不得有网络、HealthKit 或长 CPU 计算。单条耗时 SQL 要单独治理，
+  "100 行"不等于短事务；实际事务耗时记在租约统计的 `transactions`/`transactionMs`/`slowTransactions`。
+
+回归：`apps/api/test/write-lease.test.ts` 的 O07 夹具（含事务期间许可必须被持有、另一条连接
+必须被 SQLite 挡住、`COMMIT` 后必须回到空闲三个断言）、生产路径夹具（真 `claimNext` + 真
+`TaskAdmissionScheduler`）、以及 `apps/api/test/write-lease.test.ts` 的事务增量/SQL 语义判据。
 
 ### 3.3 空队列不启动计算 Worker
 

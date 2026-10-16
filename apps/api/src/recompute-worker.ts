@@ -3,8 +3,18 @@ import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import type { TaskAdmission } from "./task-admission.js";
-import { createWriteLeaseServer, LEASE_WORDS } from "./write-lease.js";
+import { createWriteLeaseServer, LEASE_WORDS, type WriteLeaseStats } from "./write-lease.js";
 const applyBusyTimeout = (database: DatabaseSync, milliseconds = 5000): void => { database.exec(`PRAGMA busy_timeout = ${milliseconds}`); };
+
+/** 可重试失败（写许可等待超时）之后重新调度的最小间隔：别把队列打成忙等。 */
+const REQUEUE_BACKOFF_MS = 250;
+
+/** 一次 worker 线程执行的结局：跑没跑、以及任务是否被**重排**（可重试失败）。 */
+interface WorkerRunOutcome {
+  ran: boolean;
+  requeued: boolean;
+  lease: WriteLeaseStats | null;
+}
 
 export class RecomputeWorker {
   private scheduled = false;
@@ -14,6 +24,10 @@ export class RecomputeWorker {
   private timer: NodeJS.Timeout | null = null;
   private drainPromise: Promise<void> | null = null;
   private activeWorker: Worker | null = null;
+  /** 上一轮线程回报的租约统计（诊断面：`/v1/performance`）。 */
+  private lastLeaseStats: WriteLeaseStats | null = null;
+  /** 上一轮是因为可重试失败被重排的 —— 用退避而不是立刻重跑。 */
+  private lastRunRequeued = false;
 
   constructor(
     private readonly databasePath: string,
@@ -23,6 +37,18 @@ export class RecomputeWorker {
 
   get isRunning(): boolean {
     return this.running || this.scheduled;
+  }
+
+  /**
+   * 写租约的最近一轮统计（O07/O08 的观测面：windows / waitMs / yields / timeouts /
+   * transactions / slowTransactions）。
+   *
+   * 🔴 为什么必须暴露出来：`timeouts` 非 0 就是异常（可重试失败），而此前 worker 线程
+   * **回传了却被丢弃**（`recompute-thread.ts` post、`recompute-worker.ts` 只读 `ran`）——
+   * 一个"看得见才算数"的诊断项，读不到就等于没有。
+   */
+  leaseStats(): WriteLeaseStats | null {
+    return this.lastLeaseStats === null ? null : { ...this.lastLeaseStats };
   }
 
   schedule(): void {
@@ -102,9 +128,21 @@ export class RecomputeWorker {
       if (!this.hasPendingJob()) return;
       this.recoverInterruptedJobs();
       while (!this.closing && existsSync(this.databasePath)) {
-        const ran = await this.runOneInWorkerThread();
-        if (ran) this.consecutiveFailures = 0;
-        if (!ran) break;
+        const outcome = await this.runOneInWorkerThread();
+        this.lastLeaseStats = outcome.lease;
+        if (outcome.lease && outcome.lease.timeouts > 0) {
+          // 可重试失败必须**看得见**：任务会回到队列而不是终态失败，静默重排会让人
+          // 以为"分析跑得慢"，实际是许可一直拿不到。
+          process.stderr.write(
+            `Recompute lease timed out ${outcome.lease.timeouts} time(s); ` +
+            `windows=${outcome.lease.windows} waitMs=${outcome.lease.waitMs} yields=${outcome.lease.yields}\n`
+          );
+        }
+        this.lastRunRequeued = outcome.requeued;
+        if (outcome.ran) this.consecutiveFailures = 0;
+        if (!outcome.ran) break;
+        // 被重排的任务不要立刻重跑：退避一轮，让持有许可的那些写先走完。
+        if (outcome.requeued) { this.scheduled = true; break; }
         // Yield after each job so another executor cannot starve.
         if (this.admission) { this.scheduled = true; break; }
       }
@@ -129,7 +167,11 @@ export class RecomputeWorker {
     } finally {
       this.running = false;
       if (!this.closing && this.scheduled) {
-        const retryDelay = Math.min(1000, 20 * (2 ** this.consecutiveFailures));
+        // 重排过的任务用固定退避；普通失败仍按连续失败次数指数退避。
+        const retryDelay = this.lastRunRequeued
+          ? REQUEUE_BACKOFF_MS
+          : Math.min(1000, 20 * (2 ** this.consecutiveFailures));
+        this.lastRunRequeued = false;
         this.queueDrain(retryDelay);
       }
     }
@@ -164,7 +206,7 @@ export class RecomputeWorker {
     }
   }
 
-  private runOneInWorkerThread(): Promise<boolean> {
+  private runOneInWorkerThread(): Promise<WorkerRunOutcome> {
     return new Promise((resolvePromise, reject) => {
       // 写租约的共享内存（PR4 §3.2.1）：worker 线程请求、主线程授权。
       // 缓冲区随线程创建/销毁，**不跨轮复用** —— 否则上一轮的残留请求（例如线程被杀时）
@@ -178,14 +220,18 @@ export class RecomputeWorker {
         workerData: { databasePath: this.databasePath, ...(buffer === null ? {} : { lease: buffer }) }
       });
       this.activeWorker = worker;
-      let result: boolean | null = null;
+      let outcome: WorkerRunOutcome | null = null;
       let workerError: Error | null = null;
       const finish = (): void => {
         // 🔴 线程退出（含崩溃）必须释放租约，否则写路由会永久 409。
         lease?.dispose();
       };
-      worker.once("message", (message: { ran?: boolean }) => {
-        result = message.ran === true;
+      worker.once("message", (message: { ran?: boolean; requeued?: boolean; lease?: WriteLeaseStats | null }) => {
+        outcome = {
+          ran: message.ran === true,
+          requeued: message.requeued === true,
+          lease: message.lease ?? null
+        };
       });
       worker.once("error", (error) => {
         workerError = error;
@@ -195,7 +241,7 @@ export class RecomputeWorker {
         if (this.activeWorker === worker) this.activeWorker = null;
         if (workerError) reject(workerError);
         else if (code !== 0 && !this.closing) reject(new Error(`Recompute worker thread exited with code ${code}`));
-        else resolvePromise(result ?? false);
+        else resolvePromise(outcome ?? { ran: false, requeued: false, lease: null });
       });
     });
   }

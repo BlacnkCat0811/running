@@ -13,6 +13,7 @@ import { migrateModelV34 } from "./v34-migration.js";
 import { migrateModelV35 } from "./v35-migration.js";
 import { migrateModelV36 } from "./v36-migration.js";
 import { migrateModelV37 } from "./v37-migration.js";
+import { migrateModelV38 } from "./v38-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1676,7 +1677,8 @@ const migrations: readonly Migration[] = [
   { version: 34, name: "sparse_fact_history_and_generation_counters", up: migrateModelV34 },
   { version: 35, name: "route_versions_and_analysis_job_bindings", up: migrateModelV35 },
   { version: 36, name: "workout_soft_delete_marker", up: migrateModelV36 },
-  { version: 37, name: "ledger_before_ranges", up: migrateModelV37 }
+  { version: 37, name: "ledger_before_ranges", up: migrateModelV37 },
+  { version: 38, name: "recompute_job_retry_attempts", up: migrateModelV38 }
 ];
 
 /**
@@ -1756,7 +1758,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   34: "36798b3793aa3cebc92ad6ea76285ec4a40073d030902dde81525bfa0259aa21",
   35: "de0d2cdac1f7ac80b2e67cff026c40a3152324269e3328eba6f6c718f31611ce",
   36: "ff6a727de7b765bf928806db0dff59bdf937e3bdf868f379d04c95efac34d144",
-  37: "8dcbadf599c2eda028143d3305dbb5d4d6a94a4a913e3f510a51fcd0d9698a7f"
+  37: "8dcbadf599c2eda028143d3305dbb5d4d6a94a4a913e3f510a51fcd0d9698a7f",
+  38: "c067f7ecb14abe5c19ca8708ccb9b884dcb1d54cf3e66b7866a67d7da531db17"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */

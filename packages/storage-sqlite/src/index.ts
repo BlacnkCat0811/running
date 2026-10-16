@@ -50,6 +50,15 @@ export {
   type JobCancellationResult
 } from "./recompute-job-repository.js";
 export {
+  isRetryableJobFailure,
+  isWriteTransactionScope,
+  RETRYABLE_JOB_ATTEMPT_LIMIT,
+  rollbackWithoutReplacing,
+  withDatabaseTransaction,
+  type RetryableJobFailure,
+  type WriteTransactionScope
+} from "./transaction.js";
+export {
   activeDurationSecondsSql,
   MODEL_RUN_SUMMARY_SELECT,
   sessionFactPresentConditionSql,

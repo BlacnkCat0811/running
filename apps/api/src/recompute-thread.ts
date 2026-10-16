@@ -31,10 +31,15 @@ try {
     lease === null ? undefined : { scope: (fn) => lease.scope(fn), yieldIfStale: (maxHoldMs) => lease.yieldIfStale(maxHoldMs) }
   ).runNextJob();
 } finally {
+  // 🔴 先关连接（释放 SQLite 锁），线程退出后主线程才 dispose 租约（释放应用许可）。
+  // 顺序反过来的话，"库还锁着、许可已经放回去"会短暂成立 —— 那正是 O07 的形态。
   store.close();
 }
 parentPort?.postMessage({
   ran: completed !== null,
+  // 可重试的调度失败（写许可等待超时）会让任务**回到 queued** 而不是终态失败；
+  // 主线程据此退避一轮再调度，而不是立刻重跑同一批写。
+  requeued: completed?.status === "queued",
   jobId: completed?.id ?? null,
   lease: lease?.stats() ?? null
 });

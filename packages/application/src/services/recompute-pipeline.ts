@@ -7,6 +7,7 @@ import type { ModelLineageV2, WorkoutFeaturePayloadV4 } from "@rai/contracts";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { RecomputeProgressGate } from "./recompute-progress.js";
 import { BoundedCache } from "./bounded-cache.js";
+import { ChunkedWriter } from "./chunked-write.js";
 
 import {
   DATABASE_TIMEZONE,
@@ -1117,9 +1118,12 @@ export class RecomputePipeline {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const features: WorkoutFeatureVector[] = [];
+    // O07 步骤 4：≤100 行一个许可窗口（让路点在**提交之后**，见 `ChunkedWriter`）。
+    const writer = new ChunkedWriter(this.database, this.gate);
     for (const [index, session] of sessions.entries()) {
       this.throwIfCancelled(jobId);
       // 让路点（PR4 §3.2.1）：把"接收优先"的等待上界从"一整轮"压到"一小段计算"。
+      // 此刻没有开着的事务（分块在 `add()` 内即时提交），所以它是真的让路点。
       this.gate.yieldIfStale();
       const featureId = deterministicId("workout_feature", {
         featureRunId: featureRun.id,
@@ -1139,33 +1143,36 @@ export class RecomputePipeline {
         ...source, restingHeartRate: 99, hrvSdnn: 1, sleepDurationMinutes: 1, recentLoadMinutes: 9999
       }, request.featureConfig, request.evaluatedAt));
       this.recoveryIsolationHolds &&= semanticHash(feature) === semanticHash(counterfactual);
-      insert.run(
-        feature.id,
-        feature.featureRunId,
-        feature.trainingSessionId,
-        feature.canonicalWorkoutId,
-        feature.workoutStartAt,
-        feature.durationSeconds,
-        feature.distanceKm,
-        feature.averageSpeedMetersPerSecond,
-        feature.averageHeartRateBpm,
-        feature.heartRateSampleCount,
-        feature.heartRateCoverage,
-        feature.routePointCount,
-        feature.routeQuality,
-        feature.sourceConfidence,
-        feature.sessionType,
-        feature.sessionTypeSource,
-        feature.eligibilityStatus,
-        feature.qualityScore,
-        JSON.stringify(feature.missingReasons),
-        encodeFeaturePayloadV4(v4.payload),
-        JSON.stringify(v4.provenance),
-        feature.computedAt
-      );
+      writer.add(() => {
+        insert.run(
+          feature.id,
+          feature.featureRunId,
+          feature.trainingSessionId,
+          feature.canonicalWorkoutId,
+          feature.workoutStartAt,
+          feature.durationSeconds,
+          feature.distanceKm,
+          feature.averageSpeedMetersPerSecond,
+          feature.averageHeartRateBpm,
+          feature.heartRateSampleCount,
+          feature.heartRateCoverage,
+          feature.routePointCount,
+          feature.routeQuality,
+          feature.sourceConfidence,
+          feature.sessionType,
+          feature.sessionTypeSource,
+          feature.eligibilityStatus,
+          feature.qualityScore,
+          JSON.stringify(feature.missingReasons),
+          encodeFeaturePayloadV4(v4.payload),
+          JSON.stringify(v4.provenance),
+          feature.computedAt
+        );
+        this.updateJobProgress(jobId, "feature_extraction", index + 1, sessions.length, "Feature extracted");
+      });
       features.push(feature);
-      this.updateJobProgress(jobId, "feature_extraction", index + 1, sessions.length, "Feature extracted");
     }
+    writer.flush();
     this.database.prepare(`
       UPDATE feature_runs SET reused_feature_count = ?, recomputed_feature_count = ? WHERE id = ?
     `).run(reuse?.count ?? 0, features.length, featureRun.id);
@@ -1230,9 +1237,11 @@ export class RecomputePipeline {
         missing_reasons_json, features_json, provenance_json, computed_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    // O07 步骤 4：复用前缀的逐行拷贝同样按分块短事务落地。
+    const writer = new ChunkedWriter(this.database, this.gate);
     for (const row of rows) {
       this.gate.yieldIfStale();
-      insert.run(
+      writer.add(() => insert.run(
         deterministicId("workout_feature", { featureRunId: featureRun.id, trainingSessionId: row.training_session_id }),
         featureRun.id, row.training_session_id as SQLInputValue, row.canonical_workout_id as SQLInputValue,
         row.workout_start_at as SQLInputValue, row.duration_seconds as SQLInputValue, row.distance_km as SQLInputValue,
@@ -1242,8 +1251,9 @@ export class RecomputePipeline {
         row.session_type as SQLInputValue, row.session_type_source as SQLInputValue, row.eligibility_status as SQLInputValue,
         row.quality_score as SQLInputValue, row.missing_reasons_json as SQLInputValue,
         row.features_json as SQLInputValue, row.provenance_json as SQLInputValue, row.computed_at as SQLInputValue
-      );
+      ));
     }
+    writer.flush();
     this.database.prepare("UPDATE feature_runs SET parent_feature_run_id = ? WHERE id = ?").run(parent.id, featureRun.id);
     return { count: rows.length, dirtyFromAt };
   }
@@ -1398,6 +1408,8 @@ export class RecomputePipeline {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     let previous: DailyZoneProfile | null = null;
+    // O07 步骤 4：逐日分区行按分块短事务落地（让路点在提交之后）。
+    const writer = new ChunkedWriter(this.database, this.gate);
     for (let date = firstDate; date <= throughDate; date = addDays(date, 1)) {
       this.gate.yieldIfStale();
       const effectiveAt = localDateStartAt(date, request.timezoneIdentifier);
@@ -1455,17 +1467,18 @@ export class RecomputePipeline {
         previousProfile: previous,
         settings: activeSettings
       });
-      insert.run(
+      writer.add(() => insert.run(
         profile.id, metricRunId, profile.localDate, profile.timezoneIdentifier,
         profile.effectiveAt, profile.dataThroughAt, profile.restingHeartRateBpm,
         profile.maximumHeartRateBpm, profile.lactateThresholdPaceSecondsPerKm,
         profile.heartRateSource, profile.paceSource, profile.heartRateConfidence,
         profile.paceConfidence, profile.status, JSON.stringify(profile.heartRateBands),
         JSON.stringify(profile.paceBands), JSON.stringify(profile.evidence), profile.createdAt
-      );
+      ));
       profiles.set(date, profile);
       previous = profile;
     }
+    writer.flush();
     return profiles;
   }
 
@@ -1502,6 +1515,8 @@ export class RecomputePipeline {
     `);
     const loads: WorkoutTrainingLoad[] = [];
     const priorDistances: Array<{ observedAt: number; distanceMeters: number }> = [];
+    // O07 步骤 4：训练负荷/分区摘要/域快照的逐训练写入按分块短事务落地。
+    const writer = new ChunkedWriter(this.database, this.gate);
     for (const [index, feature] of features.entries()) {
       this.throwIfCancelled(jobId);
       this.gate.yieldIfStale();
@@ -1586,6 +1601,7 @@ export class RecomputePipeline {
       });
       if (load) {
         const modelId = String(this.database.prepare("SELECT model_run_id FROM training_metric_runs WHERE id=?").get(metricRunId)?.model_run_id);
+        writer.add(() => {
         new SqliteModelReleaseRepository(this.database).putSnapshot(modelId,"load_vector",feature.trainingSessionId,feature.workoutStartAt,
           buildLoadVectorV2({load,zoneSummary}));
         new SqliteModelReleaseRepository(this.database).putSnapshot(modelId,"zone_coherence",feature.trainingSessionId,feature.workoutStartAt,zoneSummary);
@@ -1643,13 +1659,15 @@ export class RecomputePipeline {
           load.breakdown.heartRateConfidence,
           load.breakdown.paceConfidence
         );
+        this.updateJobProgress(jobId, "training_metrics", index + 1, features.length, "Training load calculated");
+        });
         loads.push(load);
       }
       if (!excluded && distanceMeters !== null && distanceMeters > 0) {
         priorDistances.push({ observedAt: Date.parse(feature.workoutStartAt), distanceMeters });
       }
-      this.updateJobProgress(jobId, "training_metrics", index + 1, features.length, "Training load calculated");
     }
+    writer.flush();
     const throughDate = localDateAt(request.evaluatedAt, request.timezoneIdentifier);
     const startDate = loads[0]?.localDate ?? throughDate;
     const physEvidence = this.loadDailyPhysEvidence(startDate, throughDate, request.timezoneIdentifier, request.evaluatedAt);
@@ -1674,9 +1692,11 @@ export class RecomputePipeline {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     let cumulativeWorkoutCount = 0;
+    // O07 步骤 4：逐日训练指标按分块短事务落地。
+    const writer = new ChunkedWriter(this.database, this.gate);
     for (const [index, metric] of metrics.entries()) {
       cumulativeWorkoutCount += metric.workoutCount;
-      insert.run(
+      writer.add(() => insert.run(
         deterministicId("daily_training_metric", { metricRunId, localDate: metric.localDate }),
         metricRunId,
         metric.localDate,
@@ -1701,8 +1721,9 @@ export class RecomputePipeline {
         JSON.stringify(metric.statusExplanations.map((explanation) => explanation.code)),
         JSON.stringify(metric.statusExplanations),
         request.evaluatedAt
-      );
+      ));
     }
+    writer.flush();
   }
 
   private loadPersistedTrainingLoads(metricRunId: string): WorkoutTrainingLoad[] {
@@ -1994,6 +2015,8 @@ export class RecomputePipeline {
       : buildLegacyStratumHistory(sorted);
     const baselineEpochId = this.fitnessEpochId(baseline, features, request, modelRun);
 
+    // O07 步骤 4：能力评估的逐训练写入按分块短事务落地（checkpoint 另算，频率低）。
+    const writer = new ChunkedWriter(this.database, this.gate);
     for (const [index, feature] of sorted.entries()) {
       if (resume && index <= resume.throughSequence) continue;
       this.throwIfCancelled(jobId);
@@ -2103,7 +2126,7 @@ export class RecomputePipeline {
         }
       }
 
-      this.insertAssessment(insert, assessment);
+      writer.add(() => this.insertAssessment(insert, assessment));
       timeline.push({
         id: assessment.id,
         workoutStartAt: feature.workoutStartAt,
@@ -2128,6 +2151,7 @@ export class RecomputePipeline {
       }
       this.updateJobProgress(jobId, "model_replay", index + 1, sorted.length, "Assessment replayed");
     }
+    writer.flush();
 
     this.writeDailySnapshots(
       modelRun.id,
@@ -2313,6 +2337,9 @@ export class RecomputePipeline {
     let lastEligibleAbility: number | null = null;
     let lastAssessmentId: string | null = null;
 
+    // O07 步骤 4：逐日快照按分块短事务落地（`snapshots` 仍在循环内即时累积，`lastEligible*`
+    // 的推进依赖它，所以只有写本身进批）。
+    const writer = new ChunkedWriter(this.database, this.gate);
     for (let date = startDate; date <= endDate; date = addDays(date, 1)) {
       this.gate.yieldIfStale();
       for (const assessment of byDate.get(date) ?? []) {
@@ -2348,7 +2375,7 @@ export class RecomputePipeline {
           currentAbility === null ? "calibrating" : decayPoints > 0 ? "decay" : "active",
         computedAt: evaluatedAt
       };
-      insert.run(
+      writer.add(() => insert.run(
         snapshot.id,
         snapshot.modelRunId,
         snapshot.localDate,
@@ -2359,9 +2386,10 @@ export class RecomputePipeline {
         snapshot.lastAssessmentId,
         snapshot.snapshotStatus,
         snapshot.computedAt
-      );
+      ));
       snapshots.push(snapshot);
     }
+    writer.flush();
   }
 
   private theilSenVelocity(values: number[]): number | null {

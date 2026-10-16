@@ -3,6 +3,11 @@ import type { DatabaseSync } from "node:sqlite";
 import { isApplicationConsumableJob, type RecomputeJob, type RecomputeJobType, type RunStatus } from "@rai/contracts";
 
 import { appNow, opaqueId, parseJson } from "./utils.js";
+import {
+  isRetryableJobFailure,
+  RETRYABLE_JOB_ATTEMPT_LIMIT,
+  withDatabaseTransaction
+} from "./transaction.js";
 // Recompute job lifecycle SQL lives only in @rai/storage-sqlite.
 
 export type JobCancellationResult =
@@ -102,41 +107,33 @@ export class RecomputeJobRepository {
   }
 
   claimNext(): RecomputeJob | null {
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
+    // 🔴 领取是**一个短事务**：许可必须覆盖 BEGIN…COMMIT，而不是被切成三段
+    // （O07：`BEGIN IMMEDIATE` 与写语句、`COMMIT` 处在不同许可窗口时，事务开着而许可已空闲）。
+    // 读出 `get()` 放在事务**之后**：读不需要写许可，也不该被算进事务耗时。
+    const claimedId = withDatabaseTransaction(this.database, () => {
       const row = this.database.prepare(`
         SELECT id FROM recompute_jobs
         WHERE status = 'queued'
         ORDER BY created_at, rowid
         LIMIT 1
       `).get() as unknown as { id: string } | undefined;
-      if (!row) {
-        this.database.exec("COMMIT");
-        return null;
-      }
+      if (!row) return null;
       this.database.prepare(`
         UPDATE recompute_jobs
-        SET status = 'running', started_at = ?, progress_phase = 'claimed'
+        SET status = 'running', started_at = ?, progress_phase = 'claimed', error_json = NULL
         WHERE id = ? AND status = 'queued'
       `).run(appNow(), row.id);
       this.logEvent(row.id, "claimed", 0, 0, "Single worker claimed task");
-      this.database.exec("COMMIT");
-      return this.get(row.id);
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
+      return row.id;
+    });
+    return claimedId === null ? null : this.get(claimedId);
   }
 
   requestCancellation(jobId: string): JobCancellationResult {
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
+    return withDatabaseTransaction(this.database, (): JobCancellationResult => {
       const job = this.database.prepare("SELECT status FROM recompute_jobs WHERE id = ?")
         .get(jobId) as unknown as { status: string } | undefined;
-      if (!job) {
-        this.database.exec("COMMIT");
-        return { outcome: "not_found" };
-      }
+      if (!job) return { outcome: "not_found" };
       if (job.status === "queued") {
         this.database.prepare(`
           UPDATE recompute_jobs
@@ -145,20 +142,14 @@ export class RecomputeJobRepository {
           WHERE id = ? AND status = 'queued'
         `).run(appNow(), jobId);
         this.logEvent(jobId, "cancelled", 0, 0, "Queued task cancelled before execution");
-        this.database.exec("COMMIT");
         return { outcome: "cancelled", status: "cancelled", cancelRequested: false };
       }
       if (job.status === "running") {
         this.database.prepare("UPDATE recompute_jobs SET cancel_requested = 1 WHERE id = ?").run(jobId);
-        this.database.exec("COMMIT");
         return { outcome: "cancellation_requested", status: "running", cancelRequested: true };
       }
-      this.database.exec("COMMIT");
       return { outcome: "terminal" };
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   recoverInterrupted(): number {
@@ -176,8 +167,7 @@ export class RecomputeJobRepository {
       name: "InterruptedExternalJob",
       message: "Job was interrupted before its owning process completed it"
     });
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
+    return withDatabaseTransaction(this.database, () => {
       const jobs = this.database.prepare(`
         SELECT id, job_type AS jobType, request_json AS requestJson,
           feature_run_id AS featureRunId, model_run_id AS modelRunId,
@@ -191,10 +181,7 @@ export class RecomputeJobRepository {
         modelRunId: string | null;
         cancelRequested: number;
       }>;
-      if (jobs.length === 0) {
-        this.database.exec("COMMIT");
-        return 0;
-      }
+      if (jobs.length === 0) return 0;
       for (const job of jobs) {
         this.failAssociatedRuns(job.featureRunId, job.modelRunId, now, failure);
         const cancelled = job.cancelRequested === 1;
@@ -238,17 +225,12 @@ export class RecomputeJobRepository {
           now
         );
       }
-      this.database.exec("COMMIT");
       return jobs.length;
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   cancelIfRequested(jobId: string): boolean {
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
+    return withDatabaseTransaction(this.database, () => {
       const row = this.database.prepare(`
         SELECT status, cancel_requested AS cancelRequested,
           progress_current AS progressCurrent, progress_total AS progressTotal
@@ -259,10 +241,7 @@ export class RecomputeJobRepository {
         progressCurrent: number;
         progressTotal: number;
       } | undefined;
-      if (row?.status !== "running" || row.cancelRequested !== 1) {
-        this.database.exec("COMMIT");
-        return false;
-      }
+      if (row?.status !== "running" || row.cancelRequested !== 1) return false;
       const changed = this.database.prepare(`
         UPDATE recompute_jobs
         SET status = 'cancelled', completed_at = ?, progress_phase = 'cancelled',
@@ -271,12 +250,8 @@ export class RecomputeJobRepository {
       `).run(appNow(), jobId);
       if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while cancelling");
       this.logEvent(jobId, "cancelled", row.progressCurrent, row.progressTotal, "Task cancelled");
-      this.database.exec("COMMIT");
       return true;
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   setRunIds(jobId: string, featureRunId: string | null, modelRunId: string | null): void {
@@ -305,8 +280,9 @@ export class RecomputeJobRepository {
     message: string,
     beforeComplete?: () => void
   ): boolean {
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
+    // 🔴 发布**必须**与任务结算同事务（`beforeComplete` 里是 `verifyAndPoint` + 指针翻转），
+    // 所以它也只能在**一个**许可窗口里 —— 中间换窗口就会露出"指针已动、结算未落"的缝。
+    return withDatabaseTransaction(this.database, () => {
       const job = this.database.prepare(`
         SELECT status, cancel_requested AS cancelRequested
         FROM recompute_jobs WHERE id = ?
@@ -314,10 +290,7 @@ export class RecomputeJobRepository {
         status: string;
         cancelRequested: number;
       } | undefined;
-      if (job?.status !== "running") {
-        this.database.exec("COMMIT");
-        return false;
-      }
+      if (job?.status !== "running") return false;
       if (job.cancelRequested === 1) {
         const progress = this.database.prepare(`
           SELECT progress_current AS progressCurrent, progress_total AS progressTotal
@@ -337,7 +310,6 @@ export class RecomputeJobRepository {
           progress.progressTotal,
           "Task cancelled"
         );
-        this.database.exec("COMMIT");
         return false;
       }
       beforeComplete?.();
@@ -349,22 +321,18 @@ export class RecomputeJobRepository {
       `).run(appNow(), phase, current, total, jobId);
       if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while completing");
       this.logEvent(jobId, phase, current, total, message);
-      this.database.exec("COMMIT");
       return true;
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
 
   fail(jobId: string, error: unknown): void {
     const payload = this.errorPayload(error);
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
+    withDatabaseTransaction(this.database, () => {
       const current = this.database.prepare(`
         SELECT status, cancel_requested AS cancelRequested,
                progress_current AS progressCurrent, progress_total AS progressTotal,
-               feature_run_id AS featureRunId, model_run_id AS modelRunId
+               feature_run_id AS featureRunId, model_run_id AS modelRunId,
+               attempts
         FROM recompute_jobs WHERE id = ?
       `).get(jobId) as unknown as {
         status: string;
@@ -373,19 +341,48 @@ export class RecomputeJobRepository {
         progressTotal: number;
         featureRunId: string | null;
         modelRunId: string | null;
+        attempts: number;
       } | undefined;
-      if (current?.status !== "running") {
-        this.database.exec("COMMIT");
-        return;
-      }
+      if (current?.status !== "running") return;
 
       const now = appNow();
+      // 半写就的 run 行无论如何都要结算：重排下一次会**新建**一套 run，
+      // 留着 'running' 的孤儿行会让"这一轮到底算了什么"再也说不清。
       this.failAssociatedRuns(
         current.featureRunId,
         current.modelRunId,
         now,
         JSON.stringify(payload)
       );
+
+      // 🔴 可重试的调度失败（O07 / D1：写许可等待超时）**不是**终态失败。
+      // 把它结算成 `failed` 会让"许可恰好被别人占着"变成用户可见的失败任务；
+      // 而"失败开放继续写"（旧行为）又会破坏单写者互斥。第三条路：回到队列、有界重试。
+      // 上限必须存在 —— 否则"永远拿不到许可"会变成任务在队列里无限打转、用户看不到结论。
+      if (
+        isRetryableJobFailure(error)
+        && current.cancelRequested !== 1
+        && Number(current.attempts) + 1 < RETRYABLE_JOB_ATTEMPT_LIMIT
+      ) {
+        const requeued = this.database.prepare(`
+          UPDATE recompute_jobs
+          SET status = 'queued', started_at = NULL, completed_at = NULL,
+              progress_phase = 'retry_pending', progress_current = 0, progress_total = 0,
+              cancel_requested = 0, error_json = ?, attempts = attempts + 1
+          WHERE id = ? AND status = 'running' AND cancel_requested = 0
+        `).run(JSON.stringify(payload), jobId);
+        if (Number(requeued.changes) !== 1) throw new Error("Recompute job changed while re-queueing");
+        this.logEvent(
+          jobId,
+          "retry_pending",
+          0,
+          0,
+          `Retryable scheduling failure (attempt ${Number(current.attempts) + 1}/${RETRYABLE_JOB_ATTEMPT_LIMIT}): ` +
+            payload.message
+        );
+        return;
+      }
+
       const cancelled = current.cancelRequested === 1;
       const phase = cancelled ? "cancelled" : "failed";
       const changed = this.database.prepare(`
@@ -409,11 +406,7 @@ export class RecomputeJobRepository {
         current.progressTotal,
         cancelled ? "Task cancelled" : "Task failed"
       );
-      this.database.exec("COMMIT");
-    } catch (transactionError) {
-      this.database.exec("ROLLBACK");
-      throw transactionError;
-    }
+    });
   }
 
   failOutstanding(error: unknown): number {
@@ -464,8 +457,7 @@ export class RecomputeJobRepository {
 
   private failQueued(jobId: string, error: unknown): void {
     const payload = this.errorPayload(error);
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
+    withDatabaseTransaction(this.database, () => {
       const current = this.database.prepare(`
         SELECT status, progress_current AS progressCurrent, progress_total AS progressTotal
         FROM recompute_jobs WHERE id = ?
@@ -474,10 +466,7 @@ export class RecomputeJobRepository {
         progressCurrent: number;
         progressTotal: number;
       } | undefined;
-      if (current?.status !== "queued") {
-        this.database.exec("COMMIT");
-        return;
-      }
+      if (current?.status !== "queued") return;
       const changed = this.database.prepare(`
         UPDATE recompute_jobs
         SET status = 'failed', completed_at = ?, progress_phase = 'failed',
@@ -486,11 +475,7 @@ export class RecomputeJobRepository {
       `).run(appNow(), JSON.stringify(payload), jobId);
       if (Number(changed.changes) !== 1) throw new Error("Recompute job changed while failing queued task");
       this.logEvent(jobId, "failed", current.progressCurrent, current.progressTotal, "Task failed");
-      this.database.exec("COMMIT");
-    } catch (transactionError) {
-      this.database.exec("ROLLBACK");
-      throw transactionError;
-    }
+    });
   }
 
   private failAssociatedRuns(
