@@ -2065,7 +2065,30 @@ export class RaiReadStore {
     const job = this.jobsRepository.get(id);
     if (!job) return null;
     const events = this.jobsRepository.listEvents(id);
-    return { ...this.mapJobFromDomain(job), events: events.map((event) => this.mapJobEvent(event)) };
+    const mapped = this.mapJobFromDomain(job);
+    // 🔴 O06-B / WP-40：这条任务可能已经被合并进一条**覆盖任务**（十条兼容批次只算一份）。
+    // 客户端手里的仍然是它回执里那个 `analysisJobId`，所以查询必须**沿原 id**回答
+    // "这一批的分析进行到哪了"：覆盖关系还是 `pending` 时，把进度/终态字段换成覆盖任务的
+    // 真实取值。**id 不变、字段集不变、枚举不变 ⇒ HTTP 合同不变，iOS 不需要改。**
+    //
+    // ⚠️ 身份字段（`id`/`jobType`/`createdAt`/三个 v35 绑定列）仍然来自**原任务**：
+    // 它们描述的是"这条回执对应的登记"，不该被覆盖任务改写。
+    // `published` 之后原任务自己就是 `succeeded`（发布事务里结算的），这里不再改读；
+    // `released` 之后它回到队列，也必须报它自己的状态（否则"重排"会被报成别的含义）。
+    const coverage = this.jobsRepository.coveringReport(id);
+    if (coverage?.state === "pending" && coverage.covering !== null) {
+      const covering = this.mapJobFromDomain(coverage.covering);
+      mapped.status = covering.status;
+      mapped.progressPhase = covering.progressPhase;
+      mapped.progressCurrent = covering.progressCurrent;
+      mapped.progressTotal = covering.progressTotal;
+      mapped.cancelRequested = covering.cancelRequested;
+      mapped.modelRunId = covering.modelRunId;
+      mapped.error = covering.error;
+      mapped.startedAt = covering.startedAt;
+      mapped.completedAt = covering.completedAt;
+    }
+    return { ...mapped, events: events.map((event) => this.mapJobEvent(event)) };
   }
 
   private toWorkoutListItem(item: StoredWorkoutListItem | undefined): WorkoutListItem | null {

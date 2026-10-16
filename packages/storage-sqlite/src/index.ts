@@ -47,7 +47,13 @@ export {
 } from "./database.js";
 export {
   RecomputeJobRepository,
-  type JobCancellationResult
+  ANALYSIS_JOB_MERGE_MAX_ATTEMPTS,
+  ANALYSIS_JOB_MERGE_MAX_MEMBERS,
+  ANALYSIS_JOB_MERGE_MAX_SPAN_MS,
+  ANALYSIS_JOB_MERGE_REQUEST_KEY,
+  type AnalysisJobMergeState,
+  type JobCancellationResult,
+  type JobCoverageReport
 } from "./recompute-job-repository.js";
 export {
   isRetryableJobFailure,

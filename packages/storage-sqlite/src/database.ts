@@ -17,6 +17,7 @@ import { migrateModelV38 } from "./v38-migration.js";
 import { migrateModelV39 } from "./v39-migration.js";
 import { migrateModelV40 } from "./v40-migration.js";
 import { migrateModelV41 } from "./v41-migration.js";
+import { migrateModelV42 } from "./v42-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1684,7 +1685,8 @@ const migrations: readonly Migration[] = [
   { version: 38, name: "recompute_job_retry_attempts", up: migrateModelV38 },
   { version: 39, name: "analysis_input_bindings_and_coverage", up: migrateModelV39 },
   { version: 40, name: "night_range_read_index", up: migrateModelV40 },
-  { version: 41, name: "training_metric_domain_checkpoints", up: migrateModelV41 }
+  { version: 41, name: "training_metric_domain_checkpoints", up: migrateModelV41 },
+  { version: 42, name: "analysis_job_merge_links", up: migrateModelV42 }
 ];
 
 /**
@@ -1768,7 +1770,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   38: "c067f7ecb14abe5c19ca8708ccb9b884dcb1d54cf3e66b7866a67d7da531db17",
   39: "4cab9e783bdf766d4882d45b3a437602b4923aa77988c83aabc410054cde4bea",
   40: "4629f500de901acc69521ba28276a2f01d107f8902c1c65fda8b24ed5047f139",
-  41: "03f4844e9c559ad80a36374f61e2be6f3cb3eea534d1a9953cfce68f75ccb0f7"
+  41: "03f4844e9c559ad80a36374f61e2be6f3cb3eea534d1a9953cfce68f75ccb0f7",
+  42: "964c0218cf5634cb17372029e784f45bb5f3cc36790b5e205153b4797532b0a9"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */

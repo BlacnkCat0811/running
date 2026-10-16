@@ -254,9 +254,30 @@ function readActiveReleaseBinding(database: DatabaseSync, required: number): num
  */
 function deriveAnalysisStatus(database: DatabaseSync, required: number, published: number | null): AnalysisStatus {
   if (required === 0 || (published !== null && published >= required)) return "published";
+  // 🔴 O06-B / WP-40：被覆盖任务的状态必须**沿持久覆盖关系**读，不能只看它自己那一行。
+  // 一条被合并的任务在本表里仍然是 `queued`（v35 禁止放宽 `recompute_jobs.status` 的 CHECK，
+  // 所以没有 `superseded` 这种取值），真正在推进的是它的**覆盖任务**。只看成员行会把
+  // "分析正在跑"报成"排队中"，而这里的两个消费方（`versions.analysisStatus` 与 `freshness`）
+  // 正是产品判断"分析跟没跟上"的唯一入口。
+  //
+  // ⚠️ 只在 `state='pending'` 时改读覆盖任务：`published` 的成员自己就是 `succeeded`
+  // （发布事务里结算的），`released` 的成员回到队列、必须报它自己的状态。
+  // 于是"被覆盖"这件事**只能由持久关系证明**，不由内存推断。
+  //
+  // ⚠️ 表可能不存在（v42 之前的库在迁移前被只读打开，与 `readActiveReleaseBinding` 同因）：
+  // 那时这条 JOIN 整段不出现，行为与合并功能引入之前逐字节相同。
+  const coverageJoin = database.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='analysis_job_merges'"
+  ).get()
+    ? `LEFT JOIN analysis_job_merges merge
+         ON merge.covered_job_id = job.id AND merge.state = 'pending'
+       LEFT JOIN recompute_jobs covering ON covering.id = merge.covering_job_id`
+    : "";
+  const status = coverageJoin === "" ? "job.status" : "COALESCE(covering.status, job.status)";
   const job = database.prepare(`
-    SELECT job.status AS status
+    SELECT ${status} AS status
     FROM recompute_jobs job
+    ${coverageJoin}
     WHERE job.job_type = 'import' AND job.target_dependency_generation IS NOT NULL
       AND job.target_dependency_generation > ? AND job.target_dependency_generation <= ?
     ORDER BY job.created_at DESC, job.rowid DESC

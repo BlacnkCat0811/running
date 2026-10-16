@@ -237,6 +237,9 @@ export const INGEST_TABLE_DISPOSITIONS: readonly IngestTableDisposition[] = [
   // 同批在这里表态，否则坏的不是"新功能"，而是**整条同步车道**
   // （2026-10-16 实测：v41 加表未表态期间，三条直连用例整批红，而根因在另一个包里）。
   { table: "training_metric_checkpoints", kind: "analysis", why: "训练指标域 checkpoint（分析写入）" },
+  // O06-B / WP-40（v42）：原任务 → 覆盖任务的合并关联。与 `analysis_job_coverage` 同类：
+  // 只在分析车道的短事务里写入，接收事务里没有任何合法写入理由。
+  { table: "analysis_job_merges", kind: "analysis", why: "原任务→覆盖任务的合并关联（分析侧写入）" },
   { table: "active_prediction_model", kind: "analysis", why: "活跃预测模型指针" },
   { table: "baseline_rebase_reviews", kind: "analysis", why: "基准确立复核" },
   { table: "recompute_validations", kind: "analysis", why: "重算校验记录" },
