@@ -1428,13 +1428,14 @@ MUTATIONS = [
         "回填复活、降频收益归零，而这一切在别处看不到任何异常",
         lambda: edit(
             HEALTH_EXPORT,
-            "            if RouteSyncStateMachine.shouldQuery(\n"
+            "            if !routeBudgetExhausted && RouteSyncStateMachine.shouldQuery(\n"
             "                existing: previous,\n"
             "                now: routeNow,\n"
             "                isForceManualRescan: routeForceRescan,\n"
             "                hasWorkoutChange: hasWorkoutChange\n"
             "            ) && (previous.status != .settled || routeForceRescan || hasWorkoutChange || rediscoveryIDs.contains(routeKey)) {\n",
-            "            if true {\n",
+            # 只禁用 shouldQuery 过滤、保留预算闸门：一条突变只许打破一条判据。
+            "            if !routeBudgetExhausted {\n",
         ),
         PY_GATE,
         "no longer consults the state machine",

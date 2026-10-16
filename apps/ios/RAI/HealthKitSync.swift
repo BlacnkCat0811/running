@@ -2217,6 +2217,7 @@ final class HealthKitSync {
         case .recordPage: return "本批达单批预算，记录按页截断，将分批继续"
         case .recordNone: return "单条记录放不进本批剩余预算，该类型本轮零进展"
         case .routeFile: return "轨迹文件放不进本批剩余预算，本轮未取新轨迹"
+        case .workoutBytes: return "本批达单批预算，workout 按页截断，将分批继续"
         }
     }
 

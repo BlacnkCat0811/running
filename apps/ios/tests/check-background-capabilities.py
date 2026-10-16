@@ -1625,9 +1625,10 @@ check(
     "would be invisible to `hasMorePages` and the sync would stop with routes still unread",
 )
 check(
-    "routeBytes += fetch.bytes" in route_loop,
-    "route bytes must be accumulated from what routeEntries actually wrote (`fetch.bytes`) — "
-    "re-stat'ing the files would be a second, driftable source of the same fact",
+    "pageRouteBytes += fetch.bytes" in route_loop and "routeBytes += pageRouteBytes" in route_loop,
+    "route bytes must be accumulated from what routeEntries actually wrote (`fetch.bytes` — now "
+    "staged per page and merged after the byte gate) — re-stat'ing the files would be a second, "
+    "driftable source of the same fact",
 )
 
 # 14h-10. inspect 的「本批超单批上限」400 必须与瞬时失败分开处置（P1b，2026-10-14）。

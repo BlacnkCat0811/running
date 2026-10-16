@@ -74,6 +74,9 @@ nonisolated struct HealthKitExportResult: Sendable {
         case recordNone
         /// route 侧：轨迹文件放不进剩余额度（本轮不再取新轨迹，状态不动）。
         case routeFile
+        /// workout 侧（R4b，2026-10-16）：整页 workout 的 XML 放不进剩余字节账 ——
+        /// 停在**页首**（整页不写、页 anchor 不推进），下一批重来。
+        case workoutBytes
     }
 
     /// 本轮是否还有未读的页（= 被预算停住）。
@@ -262,6 +265,10 @@ nonisolated enum HealthKitExport {
     /// 记录单页的**满页**上限。**可被收缩**（S2.5）：预算放不下整页时，drain 用更小的 `limit`
     /// 重查同一锚点（极限 1 条）—— 这是"每轮至少前进 1 条记录"的兜底，去掉它就退化成死循环。
     private static let recordPageLimit = 1000
+    /// R4b（2026-10-16）：workout 侧的分页/渲染页大小。与 `recordPageLimit` 同量级 ——
+    /// 页是**字节闸门**的边界（整页渲染进内存判定，放不下就整页不写），不是"取多少条"的
+    /// 性能参数。query 级与渲染级共用同一个值。
+    private static let workoutPageLimit = 1000
 
     /// 一页记录的**渲染产物**（S2.5 写前判定）：先渲染进内存，判定通过才落盘。
     ///
@@ -406,7 +413,9 @@ nonisolated enum HealthKitExport {
             let historical = try await knownRunningWorkouts(store: store, uuids: historicalIDs)
             for workout in historical { merged[routeFileWorkoutId(workout)] = workout }
         }
-        let workouts = merged.values.sorted {
+        // R4b：全量集合改名 `allWorkouts`（页数组在页循环里沿用 `workouts` 这个名字 ——
+        // 逐 workout 循环的定界符/门禁切片锚在它的 `for` 头上，改名会砸掉那个切片）。
+        let allWorkouts = merged.values.sorted {
             $0.startDate == $1.startDate
                 ? $0.uuid.uuidString < $1.uuid.uuidString : $0.startDate < $1.startDate
         }
@@ -436,6 +445,20 @@ nonisolated enum HealthKitExport {
           \(meElement(store: store))
         """)
 
+        // R4b：**渲染分页**（写前字节闸门落在页边界上）。每页先渲染进内存 → 同一字节账
+        // 判定 → 通过才写；拒绝则整页不写、后续页不发（`workoutStop = .workoutBytes`）。
+        // 全量集合是 `allWorkouts`，页数组沿用 `workouts`（循环头是门禁切片的定界符）。
+        var pageStart = 0
+        var workoutStop: HealthKitExportResult.BudgetStopReason?
+        while pageStart < allWorkouts.count {
+            let pageEnd = min(pageStart + Self.workoutPageLimit, allWorkouts.count)
+            let workouts = Array(allWorkouts[pageStart..<pageEnd])
+            var pageText = ""
+            var pageRouteFiles: [(name: String, url: URL)] = []
+            var pageRouteDecisions: [String: RouteSyncRecord] = [:]
+            var pageRouteBytes = 0
+            var pageRouteCount = 0
+            var pageExported: [HKWorkout] = []
         for (index, workout) in workouts.enumerated() {
             try Task.checkCancellation()
             await onProgress("正在读取第 \(index + 1)/\(workouts.count) 次跑步")
@@ -452,7 +475,7 @@ nonisolated enum HealthKitExport {
             // `routeDecisions` 不写 ⇒ 状态与文件严格同进同退（未查的 workout 保持原状，
             // 由 `rediscoveryCandidates` 在后续轮次继续发现，cursor 轮转、每轮 ≤ 20 个）。
             // 若改成"fetch 之后丢弃"，状态会先行推进到 settled 而文件永久丢失。
-            let routeBudgetExhausted = budget.routeBudgetExhausted(routeBytes: routeBytes, routeFiles: routeCount)
+            let routeBudgetExhausted = budget.routeBudgetExhausted(routeBytes: routeBytes + pageRouteBytes, routeFiles: routeCount + pageRouteCount)
             // 预算已满 ⇒ 本批路线到此为止：剩余 workout 一律不再取新轨迹（走 `else` 分支，状态不动）。
             // 记下停因让 `hasMorePages` 为真 ⇒ 调用方续批；未取到的 workout 保持原状态，
             // 由 `rediscoveryCandidates` 在下一轮继续发现。
@@ -469,8 +492,8 @@ nonisolated enum HealthKitExport {
                     directory: directory,
                     warnings: warnings,
                     budget: budget,
-                    usedRouteBytes: routeBytes,
-                    usedRouteFiles: routeCount
+                    usedRouteBytes: routeBytes + pageRouteBytes,
+                    usedRouteFiles: routeCount + pageRouteCount
                 )
                 // An observation hash is not a server acknowledgement: a prior
                 // GPX may still be pending after a quota refusal. Keep bounded
@@ -490,9 +513,9 @@ nonisolated enum HealthKitExport {
                     // 预算按**字节**累计，口径 = 盘上 GPX 的 UTF-8 字节数（服务端 `statSync` 同口径）。
                     // 取 `fetch.bytes`（写文件时算好的 `document.utf8.count`）而不是回头再 `statSync`：
                     // 值与盘上逐字节同一次，且和 `entries` 严格同进同退。
-                    routeBytes += fetch.bytes
+                    pageRouteBytes += fetch.bytes
                     if let observation = fetch.observation {
-                        routeDecisions[routeKey] = RouteSyncStateMachine.decide(
+                        pageRouteDecisions[routeKey] = RouteSyncStateMachine.decide(
                             existing: previous,
                             observation: observation,
                             now: routeNow,
@@ -517,10 +540,27 @@ nonisolated enum HealthKitExport {
             // The recent window and bounded historical queue only discover late
             // routes. Without a workout change or a GPX retry, omit workout XML.
             guard hasWorkoutChange || routeForceRescan || !routeFiles.isEmpty else { continue }
-            exportedWorkouts.append(workout)
-            routeCount += routeFiles.count
-            files.append(contentsOf: routeFiles)
-            try write(xml, workoutXML(workout, routeNames: routeFiles.map(\.name)))
+            // R4b：本页先渲染进**内存缓冲** —— 写前字节闸门在页边境界定，
+            // 整页放不下时一个字都不落盘（见页尾的 `budget.accepts`）。
+            pageExported.append(workout)
+            pageRouteCount += routeFiles.count
+            pageRouteFiles.append(contentsOf: routeFiles)
+            pageText += workoutXML(workout, routeNames: routeFiles.map(\.name))
+        }
+        // R4b 页收尾：同一字节账判定 → 通过才写（并在此时才合并路由状态与文件）。
+        let pageBytes = pageText.utf8.count
+        guard budget.accepts(xmlBytes: xml.offsetInFile, records: recordCount,
+                             pageBytes: pageBytes, pageRecords: 0) else {
+            workoutStop = .workoutBytes
+            break
+        }
+        try write(xml, pageText)
+        for (key, value) in pageRouteDecisions { routeDecisions[key] = value }
+        exportedWorkouts.append(contentsOf: pageExported)
+        routeCount += pageRouteCount
+        routeBytes += pageRouteBytes
+        files.append(contentsOf: pageRouteFiles)
+        pageStart = pageEnd
         }
 
         // ⚠️ 这一句**刻意不并入** `DirectSyncCopy.readingIncrement`：它同时是
@@ -586,10 +626,9 @@ nonisolated enum HealthKitExport {
             sourceScope: "healthkit",
             routeStates: routeDecisions,
             routeDiscoveryCursor: rediscovery.last,
-            // 两个收集阶段各有自己的停因，**取并**：记录侧先发生就报记录侧。
-            // 同一批里两侧正常不会同时非空（记录侧停在页首时 route 循环尚未跑到），
-            // 并起来只为在异常组合下也不丢信号。
-            budgetStopReason: records.budgetStopReason ?? routeStopReason,
+            // 三个收集阶段各有自己的停因，**取并**：workout 侧先发生就报 workout 侧，
+            // 其次记录侧，再次 route 侧。同一批里正常不会同时非空，并起来只为在异常组合下也不丢信号。
+            budgetStopReason: workoutStop ?? records.budgetStopReason ?? routeStopReason,
             // 实际产物大小（P2b 本地自校验的输入）：这一句在 `</HealthData>` 与
             // `synchronize()` **之后**执行 ⇒ `offsetInFile` 就是最终盘上大小。
             xmlBytes: Int(xml.offsetInFile),
@@ -664,11 +703,26 @@ nonisolated enum HealthKitExport {
             predicates.append(HKQuery.predicateForSamples(withStart: startDate, end: nil, options: .strictStartDate))
         }
         do {
-            let batch = try await anchoredWorkouts(
-                store: store,
-                anchor: stored,
-                predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-            )
+            // R4b（2026-10-16）：query 级分页 —— 单次 `HKAnchoredObjectQuery` 不再无界取回
+            // 全部历史 workout（回填期可能上千条）。锚点逐页单调前进、累积到空页为止；
+            // 与旧行为语义等价（全量），但每一页都有界，内存峰值与查询时长可控。
+            var batchAdded: [HKWorkout] = []
+            var batchDeleted: [HKDeletedObject] = []
+            var pageAnchor = stored
+            let batchPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+            while true {
+                let page = try await anchoredWorkouts(
+                    store: store,
+                    anchor: pageAnchor,
+                    predicate: batchPredicate,
+                    limit: Self.workoutPageLimit
+                )
+                batchAdded.append(contentsOf: page.added)
+                batchDeleted.append(contentsOf: page.deleted)
+                pageAnchor = page.next
+                if page.added.isEmpty && page.deleted.isEmpty { break }
+            }
+            let batch = (added: batchAdded, deleted: batchDeleted, next: pageAnchor)
             var merged: [UUID: HKWorkout] = [:]
             for workout in batch.added {
                 merged[workout.uuid] = workout
@@ -692,8 +746,11 @@ nonisolated enum HealthKitExport {
                 if left.startDate == right.startDate { return left.uuid.uuidString < right.uuid.uuidString }
                 return left.startDate < right.startDate
             }
+            // 页循环至少执行一次 ⇒ `pageAnchor` 必然已被 `page.next` 赋过值；
+            // `?? fromValue(0)` 只是给类型系统的兜底（不可达 —— 真到底的空页也返回非 nil 锚）。
+            let finalAnchor = pageAnchor ?? HKQueryAnchor(fromValue: 0)
             return (
-                workouts, batch.deleted, encodeAnchor(batch.next),
+                workouts, batch.deleted, encodeAnchor(finalAnchor),
                 Set(batch.added.map(routeFileWorkoutId))
             )
         } catch {
@@ -1588,7 +1645,8 @@ nonisolated enum HealthKitExport {
     private static func anchoredWorkouts(
         store: HKHealthStore,
         anchor: HKQueryAnchor?,
-        predicate: NSPredicate?
+        predicate: NSPredicate?,
+        limit: Int = HKObjectQueryNoLimit
     ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor) {
         let box = QueryContinuation<(added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor)>()
         return try await withTaskCancellationHandler {
@@ -1599,7 +1657,7 @@ nonisolated enum HealthKitExport {
                     type: .workoutType(),
                     predicate: predicate,
                     anchor: anchor,
-                    limit: HKObjectQueryNoLimit
+                    limit: limit
                 ) { _, samples, deletedObjects, newAnchor, error in
                     if let error {
                         box.resume(throwing: error)
