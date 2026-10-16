@@ -420,6 +420,16 @@ test("防饿死（B6）：被覆盖次数达到上限的任务必须单独执行
       assert.notEqual(covering.id, head);
       jobs.fail(covering.id, new Error("publication refused"));
     }
+    // 🔴 再放两条**全新**（未到上限）的兼容任务 —— 这是唯一能区分"队首到上限"这一判断的场景，
+    // 也是 2026-10-16 突变实测发现的盲区：只放**两条都到上限**的任务时，
+    // `members` 里的 `mergeAttempts < 上限` 过滤会把它们全丢掉、`members.length < 2` 于是返回 null，
+    // 所以**去掉队首判断一样是绿的**（M2 当时 20/20 全绿）。
+    // 真正会饿死的情形是"队首到上限、后面还有 ≥2 条没到上限"：此时若没有队首判断，
+    // 队首会被 `members` 丢掉，而后面两条凑够数去生成**新的覆盖任务**，
+    // 到上限的队首就永远等不到属于自己的那一次执行。
+    insertSucceededBatch(store, { id: "batch_3", raw: 3, dependency: 3, bumped: 1 });
+    enqueueDirectSyncAnalysis(store, jobs, { batchId: "batch_2", targetRaw: 2, targetDependency: 2 });
+    enqueueDirectSyncAnalysis(store, jobs, { batchId: "batch_3", targetRaw: 3, targetDependency: 3 });
     // 上限已到：队首那条**必须自己跑**，而不是被第三次并进一条新的覆盖任务。
     const before = Number(store.database.prepare("SELECT COUNT(*) AS n FROM recompute_jobs").get()!.n);
     const solo = jobs.claimNext();
