@@ -675,6 +675,53 @@ test("PR4 步骤 4：只重建本批触及的**夜**，窗口外的 canonical �
   });
 });
 
+test("O10（WP-31）：一批里两个**不相邻**时期 ⇒ 逐时期重建，中间那段（间隙）逐字节不变", async () => {
+  await fixture(async ({ main, input }) => {
+    // 三个夜：1/1（wake 1/2）、1/6（wake 1/7，**间隙**）、1/12（wake 1/13）。
+    const first = await applyOrFail(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000d1", "2026-01-01")
+      + sleepSegment("00000000-0000-0000-0000-0000000000d2", "2026-01-06")
+      + sleepSegment("00000000-0000-0000-0000-0000000000d3", "2026-01-12")));
+    assert.ok(first, "第一批必须被接收");
+    assert.equal(nightsByDate(main).size, 3, "三个夜都要有 canonical 行");
+
+    // 🔴 间隙金丝雀：把**中间那一夜**（1/7）故意写错。1/1 与 1/12 的更正不该碰到它 ——
+    // 而"一个全局 min/max 跨度"的实现会把 1/2..1/13 全卷进来，包括 1/7。
+    // 没有这条金丝雀，两种实现都会给出同样的最终行（重建一个输入未变的夜是确定性的）。
+    const canary = new DatabaseSync(main);
+    try {
+      canary.prepare("UPDATE canonical_nights SET asleep_union_minutes = 999 WHERE wake_date = '2026-01-07'").run();
+    } finally { canary.close(); }
+    const canaryBefore = nightsByDate(main);
+    assert.equal(JSON.parse(canaryBefore.get("2026-01-07")!).asleep_union_minutes, 999,
+      "金丝雀没写进去的话，下面那条断言什么都没证明");
+
+    // 第二批在**同一个载荷**里更正两端：1/1 与 1/12（彼此不相邻）。
+    const second = await applyOrFail(await input(
+      sleepSegment("00000000-0000-0000-0000-0000000000d1", "2026-01-01", "05:30:00")
+      + sleepSegment("00000000-0000-0000-0000-0000000000d3", "2026-01-12", "05:30:00"),
+      { job: "delta-night-two-periods" }));
+    assert.ok(second);
+    const range = second.summary.canonicalNights!;
+    assert.equal(range.mode, "window");
+    // 回执的 from/to 仍是**单一跨度**（首时期下界..末时期上界）—— 与改动前逐字节相同，
+    // 于是"按时期重建"这件事对回执契约是不可见的。
+    assert.equal(range.from, "2025-12-31", `回执下界必须仍是首时期的下界（实际 ${range.from}）`);
+    // 末时期的上界 = 末次变更的**结束时刻**所在本地日 +1：段是 1/12 23:10 → 1/13 06:40，
+    // 所以 max 本地日是 1/13 ⇒ to = 1/14（不是 1/13）。
+    assert.equal(range.to, "2026-01-14", `回执上界必须仍是末时期的上界（实际 ${range.to}）`);
+
+    const after = nightsByDate(main);
+    assert.notEqual(after.get("2026-01-02"), canaryBefore.get("2026-01-02"),
+      "被更正的第一端必须真的重建（否则这条用例证明不了任何事）");
+    assert.notEqual(after.get("2026-01-13"), canaryBefore.get("2026-01-13"),
+      "被更正的第二端必须真的重建");
+    assert.equal(after.get("2026-01-07"), canaryBefore.get("2026-01-07"),
+      "🔴 **间隙**里的 canonical 行必须逐字节不变：金丝雀 999 必须原封不动。" +
+      "这条正是『逐时期重建』与『一个全局跨度』的唯一可区分之处（O10 步骤 4）");
+  });
+});
+
 test("R7：同 UUID 睡眠段从 1/1 移到 1/10 ⇒ 旧夜被重建（before 范围进窗口）", async () => {
   await fixture(async ({ main, input }) => {
     // 两夜：1/1 与 1/10（wake_date 1/2 / 1/11）——1/10 那一夜全程不动，作"窗口外"对照。

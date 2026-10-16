@@ -30,7 +30,7 @@ PR4（分析输入与短写调度）、PR5（读侧一致性）、PR6（客户�
 | `healthkit_record_facts` 有 `UNIQUE(sample_type, sample_uuid)`，只存**当前**事实 | `packages/storage-sqlite/src/v31-migration.ts:39-48` | 历史版本**不能**塞进这张表，必须新表 |
 | `workout_routes.relative_path TEXT UNIQUE`、`file_status DEFAULT 'pending'` | `database.ts:209-222` | 路线版本不能复用同一 `relative_path`；`file_status` 可作为"未发布"标记复用 |
 | `recompute_jobs` 在主库，`job_type CHECK IN ('import','full_recompute','snapshot_refresh')`，`status CHECK IN (queued…cancelled)` | `database.ts:482-498` | 分析任务可与 raw 同事务落库（§4.2 要求）；要加绑定列只能 `ALTER TABLE ADD COLUMN` |
-| `canonicalizeNights` 每次 `DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;` 再全量重建 | `packages/health-export-parser/src/canonicalize-nights.ts:352` | 局部化必须改成按窗口 `DELETE ... WHERE`，且夜间日期范围由段的**开始与结束**共同决定（见同文件注释 `canonicalize-nights.ts:10` 与实现 `canonicalize-nights.ts:277-280`） |
+| `canonicalizeNights` 每次 `DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;` 再全量重建 | `packages/health-export-parser/src/canonicalize-nights.ts:521` | 局部化必须改成按窗口 `DELETE ... WHERE`，且夜间日期范围由段的**开始与结束**共同决定（见同文件注释 `canonicalize-nights.ts:10` 与实现 `canonicalize-nights.ts:447-449`） |
 | 迁移注册表 `migrations` 到 v33 为止；`FROZEN_MIGRATION_CHECKSUMS` 按版本冻结；门禁在 `test/migration-policy.test.ts` | `database.ts:123`（注册表；v33 条目在 `database.ts:1673`）、`database.ts:1718`（冻结值）；`MIGRATION_VERSIONS`/`transpiledChecksumFor` 在 `1757/1769`（同文件） | 新增迁移必须补冻结值，否则门禁转红 |
 | 守卫观测口：`databaseTask` 是唯一线程投递口，`task.operation` ∈ {verify, audit, checkpoint, data-only} | `apps/api/src/import-worker.ts:948-966`；`apps/api/src/import-database-tasks.ts:7-12` | PR2 扩展车道要**新增 operation**，否则守卫看不见新通道 |
 
@@ -248,7 +248,7 @@ ALTER TABLE recompute_jobs ADD COLUMN dirty_json TEXT;
 
 ### 3.4 canonical 局部化（PR3 边界内只做"可局部"的部分）
 
-`canonicalizeNights` 现在无条件整表删重建（`canonicalize-nights.ts:352`）。本 PR 只做：
+`canonicalizeNights` 现在无条件整表删重建（`canonicalize-nights.ts:521`）。本 PR 只做：
 
 - 新增 `canonicalizeNightsForWindow(database, timezone, fromLocalDate, toLocalDate)`：
   把 `DELETE FROM canonical_nights` 换成 `DELETE ... WHERE wake_date BETWEEN ? AND ?`（`canonical_hrv_days` 同理），
@@ -338,7 +338,7 @@ export interface FactsReader {
 | 级别 | 项 | 处置 |
 |---|---|---|
 | 🔴 | full 载荷被以 `preserveAbsent: false` 送进直连 ⇒ **静默全库删除** | 用 §2.6 的类型约束封死；补一条断言（"参数类型里不存在这个字段"） |
-| 🔴 | `canonicalizeNightsForWindow` 的窗口边界算错 ⇒ 夜间事实丢失或重复 | 复用 `canonicalize-nights.ts:277-280` 的"开始与结束都算"口径；合成用例钉住跨界夜 |
+| 🔴 | `canonicalizeNightsForWindow` 的窗口边界算错 ⇒ 夜间事实丢失或重复 | 复用 `canonicalize-nights.ts:447-449` 的"开始与结束都算"口径；合成用例钉住跨界夜 |
 | 🟡 | 新增两个迁移不可逆 | 先隔离库演练 + 冻结校验和；API 以 `refuse` 开库，pending 直接 exit 78（现有机制） |
 | 🟡 | `workout_routes.relative_path UNIQUE` 与版本表并存会不会冲突 | 版本表不写 `relative_path`；待实施时用一条断言钉住 |
 | ⚪ | ~~未决：`route_version_points` 与既有 `route_points` 是否长期双写~~ | **已定（步骤 5）**：过渡期双写（发布时点写两处），PR5/PR6 让读侧改走版本表后 `route_points` 退役 |

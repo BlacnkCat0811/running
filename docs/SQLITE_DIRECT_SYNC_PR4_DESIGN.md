@@ -33,8 +33,8 @@
 | 代次计数器 `import_generations(singleton, raw_generation, dependency_generation)` 只有 schema | `packages/storage-sqlite/src/v34-migration.ts:42-49` | **没有写入方**⇒ 数值版本号今天不存在（回执刻意不承诺，见 `packages/contracts/src/direct-sync.ts:60-67`） |
 | 稀疏历史 `import_fact_history`（`record`/`workout`）也只有 schema | `packages/storage-sqlite/src/v34-migration.ts:27-40` | 分析"读固定 G"缺的是**写入方**，不是读取方 |
 | `FactsReader` 已实现，但**无生产调用方**，且只覆盖 update、不覆盖 delete（裁决 D1） | `packages/storage-sqlite/src/read/facts-reader.ts:97-137`、同文件 29-35 | PR4 接它时必须同时定掉"删除是否要在旧代次可见" |
-| 局部 canonical 已实现：`canonicalizeNightsForWindow` 不做 DELETE/事务，由调用方按作用域处理 | `packages/health-export-parser/src/canonicalize-nights.ts:266-274` | 直连车道可以调它；**谁调、在哪个事务里调**是 PR4 要定的 |
-| 既有 `canonicalizeNights` 仍整表 `DELETE` 重建 | `packages/health-export-parser/src/canonicalize-nights.ts:346-352` | 旧链路不变；直连车道不许走它（§14.1 已把它列为禁止操作） |
+| 局部 canonical 已实现：`canonicalizeNightsForWindow` 不做 DELETE/事务，由调用方按作用域处理 | `packages/health-export-parser/src/canonicalize-nights.ts:435-441` | 直连车道可以调它；**谁调、在哪个事务里调**是 PR4 要定的 |
+| 既有 `canonicalizeNights` 仍整表 `DELETE` 重建 | `packages/health-export-parser/src/canonicalize-nights.ts:515-521` | 旧链路不变；直连车道不许走它（§14.1 已把它列为禁止操作） |
 | 路线版本 API 已就绪：`beginRouteVersion` / `publishRouteVersion`（发布段自带 SAVEPOINT） | `packages/storage-sqlite/src/database.ts:2613`、`2665`、`2672` | 路线"不发布半条"是现成能力；直连车道接上即可 |
 | record-only 车道的两道闸门：类型白名单 + XML 形状 | `apps/api/src/data-only-import.ts:102`、`119` | 扩到全部类型时**不许放宽这两道**，要新增并列车道 |
 | 解析器的 `recordDelta` 资格：`atomic !== false && recordIdentity && preserveAbsent && isDataOnlyRecordXml` | `packages/health-export-parser/src/apple-health-parser.ts:309-312` | 新车道不能复用 `recordDelta` 的资格判定（它是 record-only 专用） |
@@ -338,7 +338,7 @@ iOS 与 `/v1/jobs` 的取值集合一个字节都没动。
 禁止操作清单里已列）。接入点与作用域：
 
 - 本批触及的睡眠/HRV 类型 ⇒ 由账目算出受影响**夜**（含跨夜：窗口边界按
-  `canonicalize-nights.ts:277-280` 的"开始与结束都算"口径）。
+  `canonicalize-nights.ts:447-449` 的"开始与结束都算"口径）。
 - 在**接收事务内**调用 `canonicalizeNightsForWindow(...)`（受本批窗口限制，保持有界）。
 - 窗口外的 canonical 行必须**逐字节不变**（PR3 已有等价判据，直连车道复用同一条）。
 
