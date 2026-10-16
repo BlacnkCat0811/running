@@ -67,10 +67,19 @@ export {
 export {
   activeDurationSecondsSql,
   MODEL_RUN_SUMMARY_SELECT,
+  READABLE_ROUTE_POINTS_VIEW,
   sessionFactPresentConditionSql,
   usableRouteConditionSql,
   workoutPresentConditionSql
 } from "./sql/fragments.js";
+// O11 / WP-50：路线点的**唯一**读取入口。任何新的读端都应注入它，而不是自己 JOIN
+// `route_points` 或 `route_version_points` —— 那正是这条工作包要收口的东西。
+// （`StoredRoutePoint` 由下面的 `series-read-repository` 出口转出，与改造前同名同形。）
+export {
+  ROUTE_ELEVATION_SAMPLE_LIMIT,
+  ROUTE_POINT_SAMPLE_LIMIT,
+  SqliteRoutePointReader
+} from "./read/route-point-reader.js";
 export {
   SqliteTrainingSessionRepository,
   type FeatureSessionRow

@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { nullableNumber } from "./read-utils.js";
+import { SqliteRoutePointReader } from "./route-point-reader.js";
 
 export interface StoredDataSummary {
   datasetVersion: string | null;
@@ -53,7 +54,12 @@ export interface StoredDiagnosticsActiveModel {
 }
 
 export class SqliteAuditReadRepository {
-  constructor(private readonly database: DatabaseSync) {}
+  /** 路线点只有这一个入口（视图 + 唯一判据），见 `read/route-point-reader.ts`。 */
+  private readonly routePointReader: SqliteRoutePointReader;
+
+  constructor(private readonly database: DatabaseSync) {
+    this.routePointReader = new SqliteRoutePointReader(database);
+  }
 
   private manifestMap(): Map<string, string> {
     const manifestRows = this.database
@@ -70,7 +76,6 @@ export class SqliteAuditReadRepository {
           (SELECT COUNT(*) FROM health_records) AS health_records,
           (SELECT COUNT(*) FROM workouts) AS workouts,
           (SELECT COUNT(*) FROM training_sessions) AS training_sessions,
-          (SELECT COUNT(*) FROM route_points) AS route_points,
           (SELECT COUNT(*) FROM active_ability_assessments) AS assessments
       `)
       .get() as Record<string, unknown>;
@@ -84,7 +89,7 @@ export class SqliteAuditReadRepository {
         healthRecords: Number(counts.health_records ?? 0),
         workouts: Number(counts.workouts ?? 0),
         trainingSessions: Number(counts.training_sessions ?? 0),
-        routePoints: Number(counts.route_points ?? 0),
+        routePoints: this.routePointReader.countReadablePoints(),
         assessments: Number(counts.assessments ?? 0)
       },
       issues: issues.map((row) => ({ severity: String(row.severity), count: Number(row.count) }))
@@ -110,8 +115,7 @@ export class SqliteAuditReadRepository {
           (SELECT COUNT(*) FROM workouts WHERE is_canonical = 1) AS canonical_workouts,
           (SELECT COUNT(*) FROM workout_groups) AS workout_groups,
           (SELECT COUNT(*) FROM training_sessions) AS training_sessions,
-          (SELECT COUNT(*) FROM workout_routes) AS routes,
-          (SELECT COUNT(*) FROM route_points) AS route_points
+          (SELECT COUNT(*) FROM workout_routes) AS routes
       `)
       .get() as Record<string, unknown>;
     const quality = this.database
@@ -148,7 +152,7 @@ export class SqliteAuditReadRepository {
         workoutGroups: Number(canonical.workout_groups ?? 0),
         trainingSessions: Number(canonical.training_sessions ?? 0),
         routes: Number(canonical.routes ?? 0),
-        routePoints: Number(canonical.route_points ?? 0)
+        routePoints: this.routePointReader.countReadablePoints()
       },
       featureQuality: {
         averageQualityScore: nullableNumber(quality.average_quality_score),

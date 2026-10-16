@@ -18,6 +18,7 @@ import { migrateModelV39 } from "./v39-migration.js";
 import { migrateModelV40 } from "./v40-migration.js";
 import { migrateModelV41 } from "./v41-migration.js";
 import { migrateModelV42 } from "./v42-migration.js";
+import { migrateModelV43 } from "./v43-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1686,7 +1687,8 @@ const migrations: readonly Migration[] = [
   { version: 39, name: "analysis_input_bindings_and_coverage", up: migrateModelV39 },
   { version: 40, name: "night_range_read_index", up: migrateModelV40 },
   { version: 41, name: "training_metric_domain_checkpoints", up: migrateModelV41 },
-  { version: 42, name: "analysis_job_merge_links", up: migrateModelV42 }
+  { version: 42, name: "analysis_job_merge_links", up: migrateModelV42 },
+  { version: 43, name: "readable_route_points_view", up: migrateModelV43 }
 ];
 
 /**
@@ -1771,7 +1773,8 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   39: "4cab9e783bdf766d4882d45b3a437602b4923aa77988c83aabc410054cde4bea",
   40: "4629f500de901acc69521ba28276a2f01d107f8902c1c65fda8b24ed5047f139",
   41: "03f4844e9c559ad80a36374f61e2be6f3cb3eea534d1a9953cfce68f75ccb0f7",
-  42: "964c0218cf5634cb17372029e784f45bb5f3cc36790b5e205153b4797532b0a9"
+  42: "964c0218cf5634cb17372029e784f45bb5f3cc36790b5e205153b4797532b0a9",
+  43: "878e51d8d84763824ca5434c6e34234d9c4abae6273e7a839e9772351668ee59"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -2596,6 +2599,16 @@ export class RaiDatabase {
     return routeId;
   }
 
+  /**
+   * 直接落一份"当前轨迹"。
+   *
+   * ⚠️ v43 之后这是**legacy 通路**：它写 `route_points` 这张表，而该路由
+   * `readable_route_points` 视图**只对指针为 NULL 的路线**暴露（见 `v43-migration.ts`）。
+   * 也就是说，对一条已经发布过版本的路线调用它，写进去的行对任何读者都**不可见**
+   * —— 那不是缺陷，而是"发布过的路线只读版本内容"的机械保证：点不再有第二处存放地，
+   * 也就没有"改一处、读另一处"的分叉。生产写路径走的是
+   * `beginRouteVersion` / `appendRouteVersionPoints` / `publishRouteVersion`。
+   */
   replaceRoutePoints(routeId: string, points: RoutePoint[]): void {
     this.beginRoutePointReplacement(routeId);
     this.appendRoutePoints(routeId, points);
@@ -2638,6 +2651,16 @@ export class RaiDatabase {
     this.markObject();
   }
 
+  /**
+   * 改路线状态。
+   *
+   * `status !== 'imported'` 时清掉 `route_points` 里属于这条路线的那份**旧副本**，
+   * 并把 `point_count` 归零 —— 两条合起来让 `readable_route_points` 视图不再吐出它的点
+   * （视图的判据就是 `file_status = 'imported' AND point_count > 0`）。
+   * 对已经发布过版本的路线，真正的点仍在 published 版本行里；把它们打成不可读靠的是
+   * 这两个元数据字段，而不是删点 —— 于是"文件不在了"与"轨迹内容没了"是两件事，
+   * 而后者可逆（同一份文件再出现时重新发布即可）。
+   */
   markRouteStatus(routeId: string, status: string): void {
     this.begin();
     if (status !== "imported") {
@@ -2738,19 +2761,26 @@ export class RaiDatabase {
   }
 
   /**
-   * 发布一个 **已完整写入** 的版本：在一个短事务里换掉该路线的点、移动指针、置 `imported`。
+   * 发布一个 **已完整写入** 的版本：在一个短事务里把暂存的点**搬到** published 版本行、
+   * 移动指针、置 `imported`。
    *
    * 🔴 发布前自证：点数必须与调用方声明的相等、序号必须从 0 连续到 n-1。
    * 只数行数是不够的 —— 分片写入少了一片、或者片内顺序错乱，行数一样可能对上，
    * 那会发布出一条**中间断掉的轨迹**而无人察觉。
    *
    * 自证不通过 ⇒ 抛错且**不做任何写入**，旧轨迹原样可用。
+   *
+   * 🔴 发布之后的形态（O11 / WP-50 定稿）：这条路线**只有一份**点，落在
+   * `route_version_points` 里、挂在指针指向的那条 `complete` 版本下；
+   * `route_points` 里属于它的旧副本被排空。读侧不直接看这两张表，而是看
+   * `readable_route_points` 视图（v43）—— 视图按指针把两条分支切开，
+   * 于是"点在哪张表"不再由每个读者各自判断。
    */
   publishRouteVersion(versionId: string, contentSha256: string, expectedPointCount: number): void {
     this.begin();
-    // 🔴 「换点 + 移指针 + 建 published 行」必须**全有或全无**。
+    // 🔴 「搬点 + 移指针 + 建 published 行」必须**全有或全无**。
     // 中途失败若把中间态留在库里，就会出现 `file_status='imported'`、`point_count=2`，
-    // 而 `route_points` 是空的 —— 轨迹静默消失，状态却说它一切正常。
+    // 而指针指向的版本里一行点都没有 —— 轨迹静默消失，状态却说它一切正常。
     // 用 SAVEPOINT 把这一段包起来：它不需要事务所有权（store / caller 两种模式下都可用），
     // 失败时只回滚到自己这一点，不影响外层已做的工作。
     const savepoint = "route_version_publish";
@@ -2775,18 +2805,16 @@ export class RaiDatabase {
           `${shape.pointCount} (sequence ${String(shape.minSequence)}..${String(shape.maxSequence)})`
         );
       }
-      this.database.prepare("DELETE FROM route_points WHERE route_id = ?").run(version.routeId);
-      this.database.prepare(`
-        INSERT INTO route_points (
-          route_id, sequence, timestamp, latitude, longitude, elevation_meters,
-          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
-        )
-        SELECT ?, sequence, timestamp, latitude, longitude, elevation_meters,
-          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
-        FROM route_version_points WHERE route_version_id = ?
-      `).run(version.routeId, versionId);
-      // published 槽位：先 upsert 成 complete，再把指针移过去 —— 顺序不能反，
-      // 指针有外键指向本行，先移指针会在行还不存在时撞 FOREIGN KEY。
+      // published 槽位：先 upsert 成 complete，然后把**同一批行**搬过去。
+      // 顺序不能反：指针有外键指向本行，先移指针会在行还不存在时撞 FOREIGN KEY；
+      // 而下面的 `UPDATE route_version_points` 把点的外键指到 published 行上，
+      // 那一行同样必须先存在。
+      //
+      // 🔴 版本 id 仍然是**确定性**的（`routeVersionId()`），这一点不能改成"每次唯一"：
+      // `published_route_version_id` 落在 `workout_routes` 里，而 `importEquivalence`
+      // 对那张表的**所有列**求摘要 —— 随机 id 会让同样的输入产出不同的库，
+      // TS 与 Rust 两次导入因此不等价（`native-worker.test.ts` 实测报红）。
+      // 于是"暂存槽位复用"的代价（下一次接管前必须清掉旧内容）由下面这条 DELETE 付清。
       const publishedId = this.routeVersionId(version.routeId, "published");
       const completedAt = new Date().toISOString();
       this.database.prepare(`
@@ -2798,25 +2826,38 @@ export class RaiDatabase {
           status = 'complete',
           completed_at = excluded.completed_at
       `).run(publishedId, version.routeId, contentSha256, expectedPointCount, completedAt);
-      // 🔴 **真双写**：published 版本行必须**自己带着**这份轨迹的内容。
-      // 只写元数据会让它 `point_count = N` 却没有一行点 —— 那是一条自称完整的谎言，
-      // 而 PR5 正是要按 `status='complete'` 的版本去读内容（docs §3.2 / §2.6）。
+      // 上一次发布的点先清掉：主键是 `(route_version_id, sequence)`，不清就与搬过来的行撞键。
       this.database.prepare("DELETE FROM route_version_points WHERE route_version_id = ?").run(publishedId);
-      this.database.prepare(`
-        INSERT INTO route_version_points (
-          route_version_id, sequence, timestamp, latitude, longitude, elevation_meters,
-          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
-        )
-        SELECT ?, sequence, timestamp, latitude, longitude, elevation_meters,
-          speed_mps, course_degrees, horizontal_accuracy_meters, vertical_accuracy_meters
-        FROM route_version_points WHERE route_version_id = ?
-      `).run(publishedId, versionId);
+      // 🔴 **搬行**，不是 `INSERT … SELECT` 再删源行 —— 这是 O11「消除轨迹点重复复制」的落点。
+      // 旧写法把这一批点先整份拷进 `route_points`、再整份拷进 published 版本，同一份内容
+      // 写两处（还要各删一遍上一版），于是"两份真相"只能靠人保证一致。搬行之后
+      // **点只有一个存放处**：published 版本行；读侧通过 `readable_route_points` 视图
+      // 按同一个判据读到它们。
+      //
+      // 旧表的行这里**不再写**：这就是 `route_points` 双写的退役（退役 ≠ 删表，
+      // 老库指针为 NULL 的路线仍然靠那张表，见 `v43-migration.ts`）。
+      const moved = this.database.prepare(
+        "UPDATE route_version_points SET route_version_id = ? WHERE route_version_id = ?"
+      ).run(publishedId, versionId);
+      // 搬行数必须与自证过的点数相等：`UPDATE` 少搬一行（例如某个 `sequence` 已被
+      // 上一版占住而那句 DELETE 被改坏）时，行数对不上就会静默发布一条**缺行的轨迹**。
+      if (Number(moved.changes) !== shape.pointCount) {
+        throw new Error(
+          `Route version move touched ${String(moved.changes)} rows, expected ${shape.pointCount}`
+        );
+      }
       this.database.prepare(`
         UPDATE workout_routes
         SET point_count = ?, file_status = 'imported', published_route_version_id = ?
         WHERE id = ?
       `).run(expectedPointCount, publishedId, version.routeId);
-      // 内容已在 published 行里各存一份 ⇒ 暂存行可以丢掉（其点随外键 CASCADE 消失）。
+      // 指针已经指向版本内容 ⇒ 这条路线在 `route_points` 里的那份**旧副本**可以排空。
+      // 这是「老路线在下一次真实更正时逐条转换」的转换动作：转换之后该路线的点只由
+      // published 版本行承载。它**不是**删数据 —— 同一份轨迹此刻由版本行给出，
+      // 读侧读到的内容与搬行前逐字节相同；而视图的 legacy 分支只认指针为 NULL 的路线，
+      // 所以即使这行 DELETE 被删掉，读侧也不会看到两份（只是白占空间）。
+      this.database.prepare("DELETE FROM route_points WHERE route_id = ?").run(version.routeId);
+      // 暂存版本行已经空了（点都搬走了）⇒ 丢掉它。稳态下每条路线只留一条版本行。
       this.database.prepare("DELETE FROM route_versions WHERE id = ?").run(versionId);
       this.database.exec(`RELEASE ${savepoint}`);
     } catch (error) {

@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { workoutPresentConditionSql } from "@rai/storage-sqlite";
+
 import type { DirtyRangeChange, DirtyRangeWorkout } from "./dirty-range.js";
 
 /**
@@ -89,8 +91,17 @@ export function loadDirtyRangeInput(
       previousType: null, previousStart: null, previousEnd: null
     });
   }
+  // 可见性判据**只有一处**：`workoutPresentConditionSql()`（`@rai/storage-sqlite` 的
+  // `sql/fragments.ts`）。结构判据（`workout-presence.test.ts`）要求全仓只有 `fragments.ts`
+  // 允许出现该可见性字面量 —— 本文件在 WP-22 从 `apps/api` 搬过来时把这行字面量一起搬了进来，
+  // 于是成为第二处（2026-10-16 由 WP-50 发现）。
+  // ⛔ 不要用"参数化 `deleted_at IS ?` + 绑定 null"来绕开那条结构判据：语义一样，
+  // 但那会让判据**看不见**，而它要防的正是"同一件事两处写法迟早分叉"。
+  // 同理：这段注释本身也不能照抄那个字面量 —— 结构判据读的是**文件原文**，注释一样会命中
+  // （这一版就是这么被发现是"第二处"的）。
+  // `health-export-parser -> storage-sqlite` 是仓里允许的依赖边（check-package-boundaries）。
   const workouts = db.prepare(
-    "SELECT start_at AS startAt, end_at AS endAt FROM workouts WHERE deleted_at IS NULL"
+    `SELECT start_at AS startAt, end_at AS endAt FROM workouts WHERE ${workoutPresentConditionSql()}`
   ).all() as unknown as Array<DirtyRangeWorkout>;
   return { changes, workouts, recoveryBoundaries: [...recoveryBoundaries] };
 }

@@ -492,7 +492,7 @@ test("C9：training-plan-state 的 metadata 只**新增**两个键，旧 12 键�
 // S5 —— C8：分析块路线走版本表 + 老库退化分支
 // ---------------------------------------------------------------------------
 
-test("C8：分析块路线点 == route_version_points（按 sequence），事实块走当前 route_points", async () => {
+test("C8：分析块路线点 == 版本内容（按 sequence）；双写退役后旧表的副本对读侧不可见，老库退化分支仍在", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-pr5-c8-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await seed(databasePath);
@@ -526,10 +526,11 @@ test("C8：分析块路线点 == route_version_points（按 sequence），事实
     ).get() as { id: string }).id;
     assert.ok(publishedId, "前置：必须有一条已发布版本");
 
-    // 🔴 发布之后**改掉当前轨迹**：`publishRouteVersion` 会把版本内容双写进 `route_points`
-    //（那正是"真双写"，见 `database.ts` 的同名注释），所以不改的话两张表内容相同，
-    // "分析块到底读了哪张表"就**不可观测** —— C8 也就没有牙。
-    // 这个形态也是真实的：新一批路线数据已经落进当前表，但还没发布成新版本。
+    // 🔴 发布之后往**旧表**再写一份轨迹（O11 / WP-50 之后这是被退役的那条通路）。
+    // 它必须**一行都读不到**：点只有一处真相（published 版本行），事实块与分析块因此
+    // 对同一条已发布路线给出同一份内容。改造前 `publishRouteVersion` 会把版本内容
+    // 双写进 `route_points`，两张表于是可以被人为改成不同内容 —— 那条"分叉能力"
+    // 正是本工作包要消掉的东西，所以这条写入同时是"双写被重新打开"的突变靶子。
     store.replaceRoutePoints("api_route_0", [0, 1, 2].map((sequence) => ({
       sequence, latitude: 31 + sequence / 10, longitude: 121.1, elevationMeters: 5,
       speedMetersPerSecond: 2.5, courseDegrees: null, horizontalAccuracyMeters: 4,
@@ -539,16 +540,20 @@ test("C8：分析块路线点 == route_version_points（按 sequence），事实
     const analysis = series.routePointsByVersion(publishedId);
     assert.ok(analysis, "版本状态为 complete 且有点，必须读得到");
     assert.deepEqual(analysis.map((point) => point.latitude), [40, 40.1, 40.2],
-      "分析块必须读**版本表**的点（并按 sequence 排序），而不是当前 route_points");
-    assert.deepEqual(series.routePoints("api_workout_route").map((point) => point.latitude), [31, 31.1, 31.2],
-      "事实块必须继续读当前 route_points（D5：两块走两张表）");
+      "分析块必须读**版本表**的点（并按 sequence 排序）");
+    assert.deepEqual(series.routePoints("api_workout_route").map((point) => point.latitude), [40, 40.1, 40.2],
+      "事实块读**当前可读**的那一份 = published 版本内容；旧表里的副本（31.x）不得泄漏到读侧");
 
-    // 老库退化分支：指针 NULL ⇒ 调用方退化读当前轨迹并标 routeVersionId: null。
+    // 老库退化分支：指针 NULL ⇒ 视图改走 legacy 分支，读 `route_points` 里那份。
+    // 这条断言是"退役双写 ≠ 删表、老库轨迹不许读空"的机械证明 —— 把 `route_points`
+    // 从视图里摘掉，或者让 legacy 分支也去 JOIN 版本表，这里立刻读空。
     store.database.prepare("UPDATE workout_routes SET published_route_version_id = NULL WHERE id = 'api_route_0'").run();
     const pointer = store.database.prepare(
       "SELECT published_route_version_id AS id FROM workout_routes WHERE id = 'api_route_0'"
     ).get() as { id: string | null };
     assert.equal(pointer.id, null, "前置：模拟老库（v35 之前发布的路线）");
+    assert.deepEqual(series.routePoints("api_workout_route").map((point) => point.latitude), [31, 31.1, 31.2],
+      "指针为 NULL 的路线仍然从 `route_points` 读：老库的轨迹一个点都不许少");
     assert.equal(series.routePointsByVersion("does-not-exist"), null,
       "不存在的版本必须返回 null（不回落、不猜）");
 
@@ -599,7 +604,8 @@ test("C8：退化必须可观测 —— 详情端点的分析块带 routeVersion
       "退化时两块读同一张当前轨迹表 —— 这正是需要被标注出来的状态");
     assert.equal(degraded.facts?.routeVersionId, null);
 
-    // 真发布一个版本、并让当前轨迹与版本内容**分叉** ⇒ 分析块必须换到版本内容上。
+    // 真发布一个版本 ⇒ 分析块换到版本内容上。事实块也读同一份内容（点只有一处真相，
+    // 见上一条 C8 的说明）：旧表里那份 31.x 的副本对读侧不可见。
     const staging = store.beginRouteVersion("route-degraded");
     store.appendRouteVersionPoints(staging, [0, 1].map((sequence) => ({
       sequence, latitude: 40 + sequence / 10, longitude: 130.3, elevationMeters: 9,
@@ -607,7 +613,7 @@ test("C8：退化必须可观测 —— 详情端点的分析块带 routeVersion
       verticalAccuracyMeters: null, timestamp: start
     })));
     store.publishRouteVersion(staging, "c8-endpoint-hash", 2);
-    // 发布把版本内容双写进 `route_points`；再改回来，让两张表分叉（见 C8 上一条的注释）。
+    // 旧表里那份 31.x 的副本：发布时已被排空，这里再写一遍证明它读不出来（退役的通路）。
     store.replaceRoutePoints("route-degraded", [0, 1].map((sequence) => ({
       sequence, latitude: 31 + sequence / 10, longitude: 121.1, elevationMeters: 5,
       speedMetersPerSecond: 2.5, courseDegrees: null, horizontalAccuracyMeters: 4,
@@ -619,9 +625,9 @@ test("C8：退化必须可观测 —— 详情端点的分析块带 routeVersion
     assert.equal(versioned?.analysis?.routeVersionId === null, false,
       "有已发布指针时必须真的读版本表并报出 routeVersionId");
     assert.deepEqual(versioned?.analysis?.route.map((point) => point.latitude), [40, 40.1],
-      "分析块的轨迹必须是**版本内容**，而不是当前 route_points");
-    assert.deepEqual(versioned?.facts?.route.map((point) => point.latitude), [31, 31.1],
-      "事实块的轨迹必须是**当前** route_points");
+      "分析块的轨迹必须是**版本内容**");
+    assert.deepEqual(versioned?.facts?.route.map((point) => point.latitude), [40, 40.1],
+      "事实块的轨迹是**当前可读**的那份 = 版本内容：双写退役后它不再能由图外写入改写");
   });
 });
 

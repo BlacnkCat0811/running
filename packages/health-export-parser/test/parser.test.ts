@@ -74,6 +74,16 @@ test("streams Health XML, imports GPX, and selects a canonical workout", async (
     assert.equal(routeResult.importedRouteCount, 1);
     assert.equal(routeResult.pointCount, 2);
 
+    // 🔴 指纹缓存**命中**的那一侧必须有断言（O11 / WP-50）。
+    // 命中判据里的"落库点数"现在读 `readable_route_points`（唯一的路线点入口）：
+    // 若它仍然去数已经退役的 `route_points` 表，已发布路线会数出 0 ⇒ 每次重导入都退化成
+    // "重解析 + 重发布"，而**没有任何断言会红**（本文件其余用例断的都是"跳过 0 个"）。
+    // 所以这一条同时是"缓存命中判据没被改坏"的机械守卫。
+    const cacheHit = await importGpxRoutes(root, store);
+    assert.equal(cacheHit.skippedRouteCount, 1, "内容与指纹都没变 ⇒ 必须命中缓存、跳过重解析");
+    assert.equal(cacheHit.importedRouteCount, 0, "命中缓存不得重新发布路线");
+    assert.equal(cacheHit.pointCount, 2, "跳过时仍然要把这个文件的点数报出来");
+
     const canonical = canonicalizeRunningWorkouts(store.database);
     assert.equal(canonical.groupCount, 1);
     assert.equal(canonical.duplicateGroupCount, 1);
@@ -112,6 +122,8 @@ test("streams Health XML, imports GPX, and selects a canonical workout", async (
     assert.equal(audit.running.canonicalWorkouts, 1);
     assert.equal(audit.running.withRoute, 1);
     assert.equal(audit.readiness.goldAppleWatchOutdoor, 1);
+    // 审计的路线点数走唯一的路线点入口（O11）：双写退役后直接数旧表会**少报**已发布路线的点。
+    assert.equal(audit.totals.routePoints, 2, "档案审计的轨迹点数必须是可读的那一份");
 
     const routePath = join(routeDirectory, "sample.gpx");
     const originalTimes = statSync(routePath);
@@ -123,7 +135,8 @@ test("streams Health XML, imports GPX, and selects a canonical workout", async (
     assert.equal(changedRouteResult.importedRouteCount, 1);
     assert.equal(changedRouteResult.skippedRouteCount, 0);
     const changedLatitude = store.database.prepare(`
-      SELECT latitude FROM route_points WHERE sequence = 0
+      -- O11 / WP-50：读**可读**的那一份（视图），不是旧的实现表。
+      SELECT latitude FROM readable_route_points WHERE sequence = 0
     `).get() as unknown as { latitude: number };
     assert.equal(changedLatitude.latitude, 32.1);
 
@@ -142,7 +155,7 @@ test("streams Health XML, imports GPX, and selects a canonical workout", async (
     `).get() as unknown as { fileStatus: string; pointCount: number };
     assert.deepEqual({ ...afterInvalid }, { fileStatus: "imported", pointCount: 2 });
     const survivingPoint = store.database.prepare(
-      "SELECT latitude FROM route_points WHERE sequence = 0"
+      "SELECT latitude FROM readable_route_points WHERE sequence = 0"
     ).get() as unknown as { latitude: number };
     assert.equal(survivingPoint.latitude, 32.1, "坏文件不得把上一次成功的轨迹擦掉");
     assert.equal(
@@ -176,7 +189,7 @@ test("streams Health XML, imports GPX, and selects a canonical workout", async (
       "SELECT point_count AS pointCount, file_status AS fileStatus FROM workout_routes"
     ).get() as unknown as { pointCount: number; fileStatus: string };
     assert.deepEqual({ ...missingRoute }, { pointCount: 0, fileStatus: "missing" });
-    const remainingPoints = store.database.prepare("SELECT COUNT(*) AS count FROM route_points").get() as unknown as { count: number };
+    const remainingPoints = store.database.prepare("SELECT COUNT(*) AS count FROM readable_route_points").get() as unknown as { count: number };
     assert.equal(remainingPoints.count, 0);
   } finally {
     store.close();

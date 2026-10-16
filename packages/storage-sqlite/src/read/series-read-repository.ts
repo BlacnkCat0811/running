@@ -2,6 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
 import { nullableNumber } from "./read-utils.js";
+import {
+  SqliteRoutePointReader,
+  type StoredRoutePoint
+} from "./route-point-reader.js";
+
+export type { StoredRoutePoint } from "./route-point-reader.js";
 
 export interface MetricInterval {
   value: number;
@@ -13,14 +19,6 @@ export interface StoredMetricSeries {
   unit: string;
   totalSamples: number;
   points: Array<{ timestamp: string; offsetSeconds: number; value: number }>;
-}
-
-export interface StoredRoutePoint {
-  latitude: number;
-  longitude: number;
-  elevationMeters: number | null;
-  speedMetersPerSecond: number | null;
-  timestamp: string | null;
 }
 
 export interface StoredWorkoutSplit {
@@ -80,7 +78,12 @@ export interface StoredSeriesSession {
 }
 
 export class SqliteSeriesReadRepository {
-  constructor(private readonly database: DatabaseSync) {}
+  /** 路线点只有这一个入口（视图 + 唯一判据），见 `read/route-point-reader.ts`。 */
+  private readonly routePointReader: SqliteRoutePointReader;
+
+  constructor(private readonly database: DatabaseSync) {
+    this.routePointReader = new SqliteRoutePointReader(database);
+  }
 
   sessionForSeries(trainingSessionId: string): StoredSeriesSession | null {
     const session = this.database
@@ -105,41 +108,31 @@ export class SqliteSeriesReadRepository {
     };
   }
 
+  /**
+   * 事实块的路线点（采样 ≤ {@link ROUTE_POINT_SAMPLE_LIMIT}）。
+   *
+   * 🔴 改造前这里**一个字都不判**（`JOIN route_points` 没有 `file_status`/`point_count` 条件）：
+   * 一条 `file_status = 'pending'`、`point_count = 0` 的路线照样能吐出点，而同一行的
+   * `FactsReader.routeFor()` 说它"没有轨迹"。两处判据不一致时，客户端看到的是
+   * "详情页有轨迹、地图页没有"这类无法归因的差异。现在取数走
+   * `readable_route_points`（判据写在视图里），两条路径**在结构上**给同一结论。
+   */
   routePoints(workoutId: string): StoredRoutePoint[] {
-    const points = this.database
-      .prepare(`
-        WITH numbered AS (
-          SELECT rp.latitude, rp.longitude, rp.elevation_meters, rp.speed_mps, rp.timestamp,
-            ROW_NUMBER() OVER (ORDER BY COALESCE(wr.start_at, rp.timestamp), wr.id, rp.sequence) AS sample_number,
-            COUNT(*) OVER () AS total_samples
-          FROM workout_routes wr
-          JOIN route_points rp ON rp.route_id = wr.id
-          WHERE wr.workout_id = ?
-        )
-        SELECT latitude, longitude, elevation_meters, speed_mps, timestamp
-        FROM numbered
-        WHERE (sample_number - 1) % MAX(1, (total_samples + 499) / 500) = 0
-          OR sample_number = total_samples
-        ORDER BY sample_number
-      `)
-      .all(workoutId) as Record<string, unknown>[];
-    return points.map((row) => ({
-      latitude: Number(row.latitude),
-      longitude: Number(row.longitude),
-      elevationMeters: nullableNumber(row.elevation_meters),
-      speedMetersPerSecond: nullableNumber(row.speed_mps),
-      timestamp: typeof row.timestamp === "string" ? row.timestamp : null
-    }));
+    return this.routePointReader.sampledPointsForWorkout(workoutId);
   }
 
   /**
    * **分析块**的路线点：按已发布版本读（PR5 S5 / D5 最后一段、清单 5）。
    *
-   * 这条路与 {@link routePoints} 走的是**两张不同的表**，这是刻意的（D5）：
-   * - 事实块读当前 `route_points`（"现在是什么样的"）；
-   * - 分析块读 `route_versions` → `route_version_points`（"那次发布时输入的是什么"）。
+   * 与 {@link routePoints} 回答的是**两个不同的问题**，这不是需要消除的重复：
+   * - 事实块读"此刻这条训练能看到的轨迹"（可读性判据 + 老库 legacy 分支）；
+   * - 分析块读"那次发布时输入的轨迹"（版本 id + `status='complete'`）。
    *
-   * 🔴 三点是这条 SQL 的存在理由，改任何一点都会让它退化成 `routePoints`：
+   * ⚠️ O11 / WP-50 之后两者对**同一条已发布路线**必然给出相同内容 —— 因为点只有一份
+   * （搬行到 published 版本 + `route_points` 双写退役）。仍然分成两个方法，是因为
+   * 一条 `missing` 的路线可以"此刻读不到、但那次发布的内容仍在"。
+   *
+   * 🔴 三点是这条契约的存在理由，改任何一点都会让它退化成 `routePoints`：
    * 1. **`status = 'complete'`**：`pending` 版本是"正在写"的暂存槽（`beginRouteVersion`
    *    会先清掉它的点），读它等于把半条轨迹当成已发布内容。
    * 2. **按 `sequence` 排序**，不是按插入顺序也不是 `rowid`：发布时自证过
@@ -150,28 +143,7 @@ export class SqliteSeriesReadRepository {
    *    与"有版本但读不到"是两件事，只有调用方知道该报哪一种。
    */
   routePointsByVersion(routeVersionId: string): StoredRoutePoint[] | null {
-    const version = this.database.prepare(
-      "SELECT status FROM route_versions WHERE id = ?"
-    ).get(routeVersionId) as { status?: unknown } | undefined;
-    if (version === undefined || String(version.status) !== "complete") return null;
-    const rows = this.database
-      .prepare(`
-        SELECT latitude, longitude, elevation_meters, speed_mps, timestamp
-        FROM route_version_points
-        WHERE route_version_id = ?
-        ORDER BY sequence
-      `)
-      .all(routeVersionId) as Record<string, unknown>[];
-    // 版本行存在但点为空 ⇒ `null`（"没有轨迹"），不是 `[]`：契约里 `[]` 与 `null`
-    // 是两种取值，`usableRouteConditionSql` 那边的 `point_count > 0` 也是同一个口径。
-    if (rows.length === 0) return null;
-    return rows.map((row) => ({
-      latitude: Number(row.latitude),
-      longitude: Number(row.longitude),
-      elevationMeters: nullableNumber(row.elevation_meters),
-      speedMetersPerSecond: nullableNumber(row.speed_mps),
-      timestamp: typeof row.timestamp === "string" ? row.timestamp : null
-    }));
+    return this.routePointReader.pointsForPublishedVersion(routeVersionId);
   }
 
   metricSeries(
@@ -265,34 +237,23 @@ export class SqliteSeriesReadRepository {
     });
   }
 
+  /**
+   * 训练会话的高程序列（采样 ≤ {@link ROUTE_ELEVATION_SAMPLE_LIMIT}）。
+   *
+   * 取数走唯一的路线点入口（见 `read/route-point-reader.ts`）：改造前这里同样
+   * **一个字都不判**，于是"状态说没导入、曲线却有海拔"这种自相矛盾只在图上显形。
+   */
   routeElevationSeries(trainingSessionId: string): StoredMetricSeries {
-    const rows = this.database
-      .prepare(`
-        WITH numbered AS (
-          SELECT ts.anchor_start_at, rp.timestamp, rp.elevation_meters,
-            ROW_NUMBER() OVER (ORDER BY COALESCE(wr.start_at, rp.timestamp), wr.id, rp.sequence) AS sample_number,
-            COUNT(*) OVER () AS total_samples
-          FROM training_sessions ts
-          JOIN workout_routes wr ON wr.workout_id = ts.canonical_workout_id
-          JOIN route_points rp ON rp.route_id = wr.id
-          WHERE ts.id = ? AND rp.timestamp IS NOT NULL AND rp.elevation_meters IS NOT NULL
-        )
-        SELECT anchor_start_at, timestamp, elevation_meters, total_samples
-        FROM numbered
-        WHERE (sample_number - 1) % MAX(1, (total_samples + 599) / 600) = 0
-          OR sample_number = total_samples
-        ORDER BY sample_number
-      `)
-      .all(trainingSessionId) as Record<string, unknown>[];
-    const startedAt = typeof rows[0]?.anchor_start_at === "string" ? rows[0].anchor_start_at : "";
+    const series = this.routePointReader.elevationSeriesForSession(trainingSessionId);
+    const startedAt = series.anchorStartAt ?? "";
     return {
       unit: "m",
-      totalSamples: Number(rows[0]?.total_samples ?? 0),
-      points: rows
-        .map((row) => ({
-          timestamp: String(row.timestamp),
-          offsetSeconds: Math.max(0, (Date.parse(String(row.timestamp)) - Date.parse(startedAt)) / 1000),
-          value: Number(row.elevation_meters)
+      totalSamples: series.totalSamples,
+      points: series.points
+        .map((point) => ({
+          timestamp: String(point.timestamp),
+          offsetSeconds: Math.max(0, (Date.parse(String(point.timestamp)) - Date.parse(startedAt)) / 1000),
+          value: Number(point.elevationMeters)
         }))
         .filter((point) => Number.isFinite(point.offsetSeconds) && Number.isFinite(point.value))
     };

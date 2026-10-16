@@ -46,6 +46,7 @@ import {
   RaiDatabase,
   SqliteModelRunRepository, SqliteModelReleaseRepository, semanticHash, evaluateModelTransitionGateV2,
   RecomputeJobRepository,
+  SqliteRoutePointReader,
   SqliteTrainingSessionRepository,
   type ModelTransitionSourceBackfillEvidence
 } from "@rai/storage-sqlite";
@@ -1367,45 +1368,25 @@ export class RecomputePipeline {
     return asNullableNumber(row?.value);
   }
 
+  /**
+   * 路线质量证据（点数 + 水平精度均值）。
+   *
+   * 🔴 取数走**唯一**的路线点入口（`SqliteRoutePointReader` → `readable_route_points` 视图）：
+   * 改造前这里点数来自不判状态的 `route_points`，与隔壁 {@link loadElevationGain}
+   * 的口径不一致。现在两者同源，且"哪种路线算可读"只有一处定义。
+   */
   private loadRouteQuality(workoutId: string): RouteQualityRow {
-    const row = this.facts
-      .prepare(`
-        SELECT
-          COUNT(point.sequence) AS pointCount,
-          AVG(point.horizontal_accuracy_meters) AS averageHorizontalAccuracy
-        FROM workout_routes route
-        LEFT JOIN route_points point ON point.route_id = route.id
-        WHERE route.workout_id = ? AND route.file_status = 'imported'
-      `)
-      .get(workoutId) as unknown as RouteQualityRow | undefined;
-    return {
-      pointCount: Number(row?.pointCount ?? 0),
-      averageHorizontalAccuracy: asNullableNumber(row?.averageHorizontalAccuracy)
-    };
+    return new SqliteRoutePointReader(this.facts).routeQualityForWorkout(workoutId);
   }
 
   private loadElevationGain(workoutId: string): number | null {
     if (this.allowNativeAggregates && this.nativeElevationGains?.has(workoutId)) {
       return this.nativeElevationGains.get(workoutId) ?? null;
     }
-    const rows = this.facts.prepare(`
-      SELECT point.elevation_meters AS elevation
-      FROM workout_routes route
-      JOIN route_points point ON point.route_id = route.id
-      WHERE route.workout_id = ? AND point.elevation_meters IS NOT NULL
-      ORDER BY point.sequence
-    `).all(workoutId) as unknown as Array<{ elevation: number }>;
-    if (rows.length < 2) return null;
-    let gain = 0;
-    let previous = Number(rows[0]!.elevation);
-    for (const row of rows.slice(1)) {
-      const current = Number(row.elevation);
-      const delta = current - previous;
-      // Reject GPS altitude spikes while preserving ordinary climbing.
-      if (Number.isFinite(delta) && delta > 0 && delta < 30) gain += delta;
-      previous = current;
-    }
-    return gain;
+    // 与 `loadRouteQuality` 同一个入口：判据不对称就是那两个方法各写一遍条件的产物。
+    // Rust 侧的 `aggregate()` 读的也是同一个视图（`crates/rai-data-worker/src/main.rs`），
+    // 所以"走 native 聚合"与"回落到这里"给出的数字来自同一份可读集合。
+    return new SqliteRoutePointReader(this.facts).elevationGain(workoutId);
   }
 
   private buildFeatureSource(row: SessionRow, override: WorkoutOverride | null, timezoneIdentifier: string = DATABASE_TIMEZONE): WorkoutFeatureSource {

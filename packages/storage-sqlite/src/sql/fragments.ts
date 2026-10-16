@@ -39,6 +39,21 @@ export function usableRouteConditionSql(alias?: string): string {
 }
 
 /**
+ * 「此刻可读的路线点」这个**唯一**的关系（v43 视图，见 `v43-migration.ts`）。
+ *
+ * 为什么要有这个名字常量：视图的判据是上面那条 `usableRouteConditionSql()` 的**字面副本**
+ * （迁移冻结之后不能再引用会变的东西），而引用视图的地方散在多个包
+ * （`sqlite` 读仓储、`apps/api` 的等价性摘要、`health-export-parser` 的审计、
+ * `scripts/normalization-coverage.mts`）。写字符串容易打错成"表名看起来对、其实读的是
+ * legacy 表"这种静默错误；写成常量之后，拼错是**编译期**的事。
+ *
+ * ⚠️ 引用它只解决"名字对不对"，**不**替代 `read/route-point-reader.ts`：
+ * 视图负责"哪些点可读"，reader 负责"怎么读、怎么排序、空集怎么表达"。
+ * 新的读端应当直接注入 {@link SqliteRoutePointReader}，而不是自己拼 SQL。
+ */
+export const READABLE_ROUTE_POINTS_VIEW = "readable_route_points";
+
+/**
  * 「这条训练事实此刻**还在不在**」的**唯一**判据（PR5 D4，见
  * `docs/SQLITE_DIRECT_SYNC_PR5_DESIGN.md`）。
  *

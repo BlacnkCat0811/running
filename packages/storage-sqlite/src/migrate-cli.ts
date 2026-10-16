@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 
 import { RaiDatabase } from "./database.js";
 import { acquireDatabasePublicationLock } from "./publication-lock.js";
+import { SqliteRoutePointReader } from "./read/route-point-reader.js";
 
 try {
   const { values } = parseArgs({ options: {
@@ -19,12 +20,21 @@ try {
     if (!existsSync(path)) return { version: 0, counts: {}, pending };
     const database = RaiDatabase.openReadonly(path);
     try {
-      const has = (name: string) => database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+      const has = (name: string, type = "table") =>
+        database.prepare("SELECT 1 FROM sqlite_master WHERE type=? AND name=?").get(type, name);
       const version = has("schema_migrations")
         ? database.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get()?.version : 0;
-      const counts = Object.fromEntries(["workouts", "route_points", "health_records"].map((name) => [name,
+      const counts: Record<string, unknown> = Object.fromEntries(["workouts", "health_records"].map((name) => [name,
         has(name) ? database.prepare(`SELECT COUNT(*) AS count FROM ${name}`).get()?.count : 0
       ]));
+      // 🔴 路线点数按**可读**那份数（v43 的 `readable_route_points` 视图 = 唯一的路线点入口）。
+      // 直接数 `route_points` 表在 O11 之后会**少报**：已发布路线的点搬到了版本表里，
+      // 旧表只剩指针为 NULL 的老路线。这个数字是给 `--apply` 前后对照用的，口径必须是
+      // "这个库现在有多少条轨迹点"，而不是"某一张实现表里有多少行"。
+      // 库还没跑到 v43 时视图不存在，退回旧表（那时的旧表就是全部）。
+      counts.route_points = has("readable_route_points", "view")
+        ? new SqliteRoutePointReader(database).countReadablePoints()
+        : has("route_points") ? database.prepare("SELECT COUNT(*) AS count FROM route_points").get()?.count : 0;
       return { version, counts, pending };
     } finally { database.close(); }
   };

@@ -734,7 +734,7 @@ claimNext      : import                                            ← 被消费
 | 断言 | 证据 |
 |---|---|
 | 分析消费者**存在** | `apps/api/src/recompute-worker.ts:75` 调 `hasPendingJob()`；`packages/application/src/service.ts:283` 的 `claimNext()` 是真正的消费者 |
-| 消费者**只认识两种类型** | `service.ts:287-293`：只处理 `full_recompute` / `snapshot_refresh`，其余落进 `else` 抛 ``Unsupported application job type: ${jobType}`` |
+| 消费者**只认识两种类型** | `service.ts:288-294`：只处理 `full_recompute` / `snapshot_refresh`，其余落进 `else` 抛 ``Unsupported application job type: ${jobType}`` |
 | 未知类型被**置为失败**（不是留在队列里） | `service.ts:296` 调 `this.jobs.fail(job.id, error)`；`RecomputeJobRepository.fail` 把 `status` 置 `failed` 并写 `error_json` |
 
 实跑（临时库：`enqueue("import", null, {})` → `service.runNextJob()`）：
@@ -843,7 +843,7 @@ final error:         {"message":"Unsupported application job type: import","name
 | 正文位置 | 当时（2026-10-12） | 现在（2026-10-13） |
 |---|---|---|
 | `packages/health-export-parser/src/cli.ts:340` 的 `.run(..., JSON.stringify({ mode: "cli_export_import" }))` | 行号 340 | 判别物走共享常量，`.run` 挪到 `packages/health-export-parser/src/cli.ts:343`；原 `421-432` → `424-435`、原 `505-512` → `508-515` |
-| "消费者只认识两种类型 ⇒ `import` 落 `else` 抛 `Unsupported`" | `service.ts:287-293` / `:296` | 准入判定在 `service.ts:293-296`，`fail` 在 `:310`；`import` 分支在 `:304`，**不再**落 `Unsupported` |
+| "消费者只认识两种类型 ⇒ `import` 落 `else` 抛 `Unsupported`" | `service.ts:288-294` / `:296` | 准入判定在 `service.ts:293-296`，`fail` 在 `:310`；`import` 分支在 `:304`，**不再**落 `Unsupported` |
 | "`APPLICATION_CONSUMABLE_JOB_TYPES` 只含两种 / `EXTERNALLY_OWNED_JOB_TYPES` 类型级清单" | `packages/contracts/src/index.ts:564-579` | 换成 `RECOMPUTE_JOB_TYPE_DISPOSITIONS`（`:595`）+ `PAYLOAD_SCOPED_JOB_OWNERSHIP`；`isApplicationConsumableJob` 在 `:659` |
 | "`recoverInterrupted()` 的 SELECT 不过滤 `job_type`" | `packages/storage-sqlite/src/recompute-job-repository.ts:181-191` | SELECT 移到 `packages/storage-sqlite/src/recompute-job-repository.ts:182-192`，并读出 `request_json` 参与判别 |
 

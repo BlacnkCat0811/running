@@ -1453,16 +1453,19 @@ export class RaiReadStore {
   }
 
   /**
-   * 详情路线的两块（PR5 S5，判据 C8）。
+   * 详情路线的两块（PR5 S5，判据 C8；O11 / WP-50 之后更新过一次口径）。
    *
    * 🔴 三个决定，每一个都是 C8 的突变靶子：
    * 1. **分析块读版本表**（`routeVersions.publishedRouteVersionId` →
-   *    `route_version_points` 按 `sequence`），**不是**当前 `route_points`。
-   * 2. **事实块读当前 `route_points`**。两块走两张表，所以"分析块偷偷读了当前轨迹"
-   *    可以被一条断言钉住（两条轨迹的内容在夹具里刻意不同）。
-   * 3. **老库退化必须标注**：指针为 `NULL` ⇒ 分析块退回当前 `route_points`，且
-   *    `routeVersionId` 是 `null`。若不标注，"读了版本表"与"退化了"在响应里
-   *    完全一样 —— 那正是 C8 的突变靶子（"让分析块继续读当前 route_points 且不标注退化"）。
+   *    `route_version_points` 按 `sequence`），**不是**"当前可读的那一份"。
+   * 2. **事实块读"此刻可读"的那一份**（`readable_route_points` 视图 = 唯一的路线点入口，
+   *    见 `packages/storage-sqlite/src/read/route-point-reader.ts`）。有了已发布指针之后，
+   *    这条路线**只有一份**点（published 版本行）—— 双写已退役，所以事实块与分析块
+   *    对同一条已发布路线必然给同一内容，两块的分歧只剩"老库退化"那一种。
+   * 3. **老库退化必须标注**：指针为 `NULL` ⇒ 分析块退回事实块那份轨迹（此时它来自
+   *    `route_points`，因为 `v35` 之前发布的路线没有版本行），且 `routeVersionId` 是 `null`。
+   *    若不标注，"读了版本表"与"退化了"在响应里完全一样 —— 那正是 C8 的突变靶子
+   *    （"让分析块继续读当前轨迹且不标注退化"）。
    *
    * ⚠️ `includeRoute === false`（匿名公开读）时**一个坐标查询都不许发生**：这不是本批新增的
    * 约束，而是 `/v1/workouts/:id` 既有的安全语义（`data.test.ts` 用 `mock.callCount() === 0`
@@ -1489,8 +1492,9 @@ export class RaiReadStore {
       facts: {
         workoutId: row.sessionId,
         route: currentRoute,
-        // 事实块**永远**没有版本指针：它读的就是当前 `route_points`（D5）。写成字面量
-        // `null` 而不是省略，让"这一侧没有版本概念"变成可断言的取值。
+        // 事实块**永远**没有版本指针：它回答的是"此刻能读到哪份轨迹"（老库路线读的
+        // 就是 `route_points`，已发布路线读的是版本内容，但这一侧不暴露版本概念）。
+        // 写成字面量 `null` 而不是省略，让"这一侧没有版本概念"变成可断言的取值。
         routeVersionId: null,
         analysisState: assessed ? "analyzed" : "pending"
       },

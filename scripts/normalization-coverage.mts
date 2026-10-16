@@ -25,6 +25,7 @@ import {
   type NormalizationStatus
 } from "@rai/normalization";
 import { MODEL_CONFIG_VERSION, defaultRaiModelConfig } from "@rai/scoring";
+import { SqliteRoutePointReader } from "@rai/storage-sqlite";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const argv = process.argv.slice(2);
@@ -109,9 +110,13 @@ for (const row of metadataRows) {
 const workoutsWithRoute = scalar(
   "SELECT COUNT(DISTINCT w.id) c FROM workouts w JOIN workout_routes wr ON wr.workout_id = w.id WHERE w.is_canonical = 1"
 );
-const routePoints = scalar("SELECT COUNT(*) c FROM route_points");
-const routeElevation = scalar("SELECT COUNT(*) c FROM route_points WHERE elevation_meters IS NOT NULL");
-const routeSpeed = scalar("SELECT COUNT(*) c FROM route_points WHERE speed_mps IS NOT NULL");
+// 🔴 路线点的三个计数走**唯一**的路线点入口（O11 / WP-50）：`route_points` 表在双写退役后
+// 只剩指针为 NULL 的老路线，直接数它会**少报**已发布路线的点（覆盖率凭空掉一半）。
+// 口径仍是"按点计"，只是"点"现在定义为"此刻可读的点"（`readable_route_points` 视图）。
+const routePointCounts = new SqliteRoutePointReader(database).readablePointCounts();
+const routePoints = routePointCounts.points;
+const routeElevation = routePointCounts.elevationPoints;
+const routeSpeed = routePointCounts.speedPoints;
 
 const rate = (value: number, total: number): number | null => (total === 0 ? null : value / total);
 const notReference = canonicalWorkouts - statusCounts.not_needed;
@@ -194,7 +199,8 @@ const report = {
   notes: [
     "本报告只做观测与记账，不改变任何数值，也不接入评分路径（§5.4 的 N0）。",
     "构建 identity adapter 只判状态，因此 distance/duration 传 1/1：这里问的是环境上下文的可得性，不是这条训练本身。",
-    "route_points 的覆盖率按**点**计，不按 workout 计；有路线的 workout 只有一所列比例，两个口径不能混用。",
+    "路线点的覆盖率按**点**计，不按 workout 计；有路线的 workout 只有一所列比例，两个口径不能混用。",
+    "路线点数取**此刻可读**的那一份（`readable_route_points` 视图 = 唯一的路线点入口），不是某一张实现表的行数 —— 双写退役后两者会差一半。",
     "§5.4 的 N3（温湿度候选校准）在天气字段可得率为 0 时不可能推进；引入新天气服务须按 §5.2 第 3 条另开一批。"
   ]
 };

@@ -437,11 +437,19 @@ fn close(
 
 /// Read-only native route aggregation for unambiguous, single-route workouts.
 /// Multi-route ordering is left to the reference implementation.
+///
+/// 🔴 `readable_route_points` is the **one** relation that answers "which route points are
+/// readable right now" (v43; see `packages/storage-sqlite/src/v43-migration.ts`). Reading the
+/// `route_points` table directly would return nothing for a published route after the O11
+/// write-amplification fix moved its points into the published version — the aggregate would
+/// silently degrade to "this workout has no elevation gain", and it would disagree with the
+/// TypeScript fallback in `recompute-pipeline.ts` that reads the same view. The view's
+/// readability predicate is the same one the write side uses (`usableRouteConditionSql()`).
 fn aggregate(input: &Path, output: &Connection) -> Result<Value> {
     let source = Connection::open_with_flags(input, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut query = source.prepare(
         "SELECT route.workout_id, point.elevation_meters FROM workout_routes route
-         JOIN route_points point ON point.route_id=route.id
+         JOIN readable_route_points point ON point.route_id=route.id
          WHERE route.workout_id IN (SELECT workout_id FROM workout_routes WHERE workout_id IS NOT NULL GROUP BY workout_id HAVING COUNT(*)=1)
            AND point.elevation_meters IS NOT NULL
          ORDER BY route.workout_id, point.sequence")?;

@@ -560,7 +560,18 @@ test("bounds workout route and metric samples in SQL while preserving totals and
   }
 });
 
-test("record type audit uses the covering type-time index", async () => {
+// 判据：这条"记录类型审计"（`GROUP BY type` 的计数）必须由**类型前缀的覆盖索引**回答 ——
+// 不许退化成全表 `SCAN health_records`，也不许回表。
+//
+// 🔴 为什么**不**钉具体索引名（2026-10-16 改）：v40（O10 / WP-31）为夜间范围读加了
+// `idx_health_records_type_end(type, end_at, start_at)`，它与既有的
+// `idx_health_records_type_time(type, start_at, end_at)` 对这条查询**同样覆盖**
+// （分组键 `type` 在两者都是首列），于是规划器改了选择。实测新计划仍是
+// `SCAN health_records USING COVERING INDEX idx_health_records_type_end` + 临时 B-tree 排序。
+// 原来那句 `detail.includes("COVERING INDEX idx_health_records_type_time")` 钉死的其实是
+// **规划器的一个偶然选择**，而不是这条用例真正要守的东西 —— 它会在任何新增覆盖索引时误报。
+// 改成钉不变式之后牙还在：全表扫描 / 回表 / 非类型前缀的索引都会让它红。
+test("record type audit is answered by a covering type-prefixed index", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-api-plan-"));
   const databasePath = join(root, "rai.sqlite");
   const store = await seed(databasePath);
@@ -573,7 +584,13 @@ test("record type audit uses the covering type-time index", async () => {
       ORDER BY count DESC, type
       LIMIT 24
     `).all() as unknown as Array<{ detail: string }>;
-    assert.ok(plan.some((row) => row.detail.includes("COVERING INDEX idx_health_records_type_time")));
+    const details = plan.map((row) => row.detail);
+    const tableAccess = details.filter((detail) => /\b(SCAN|SEARCH)\s+health_records\b/.test(detail));
+    assert.ok(tableAccess.length > 0, `计划里必须能看到对 health_records 的访问：${JSON.stringify(details)}`);
+    for (const detail of tableAccess) {
+      assert.match(detail, /USING COVERING INDEX idx_health_records_type_/,
+        `记录类型审计必须走**类型前缀的覆盖索引**（不许全表扫描、不许回表）：${detail}`);
+    }
   } finally {
     store.close();
     rmSync(root, { recursive: true, force: true });

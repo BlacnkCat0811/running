@@ -4,7 +4,8 @@ import type { CanonicalHealthRecord, CanonicalWorkout } from "@rai/contracts";
 
 import type { StoredRoutePoint } from "./series-read-repository.js";
 import { nullableNumber, parseJson } from "./read-utils.js";
-import { usableRouteConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
+import { SqliteRoutePointReader } from "./route-point-reader.js";
+import { workoutPresentConditionSql } from "../sql/fragments.js";
 
 /**
  * 固定版本的事实读取器（docs/SQLITE_DIRECT_SYNC_PR2_PR3_DESIGN.md §4）。
@@ -57,7 +58,9 @@ import { usableRouteConditionSql, workoutPresentConditionSql } from "../sql/frag
  *   {@link CHUNK_SIZE} 行，逐页产出，从不把整表读进内存。keyset 直接走主键索引，总量 O(n)。
  * - **路线不走版本表**：v34 的 `import_fact_history` 的 `entity_kind` 只允许 `record`/`workout`，
  *   路线版本（v35 `route_versions`）改由读侧消费是 PR5/PR6 的事。所以 `routeFor()` 读的是
- *   **当前**的 `workout_routes` / `route_points`，`generation` 对它不生效。这是刻意的，见 §7。
+ *   **当前**可读的那份轨迹（`readable_route_points` 视图：有指针的路线读指针指向的
+ *   已发布版本，老库指针为 NULL 的路线读 `route_points`），`generation` 对它不生效。
+ *   这是刻意的，见 §7。
  */
 
 /** 每页读取的行数上界。同时也约束了 history 查询里 `IN (...)` 的绑定变量个数。 */
@@ -120,8 +123,9 @@ export interface FactsReader {
    * 该 workout 当前可用轨迹的点；没有可用轨迹时为 `null`。
    *
    * 「可用」不是本文件自己的定义，而是 `sql/fragments.ts` 的 `usableRouteConditionSql()`
-   * （`file_status = 'imported' AND point_count > 0`）—— 与写侧 `hasUsableRoute()` 同一份判据。
-   * 一个 workout 下有多条 `workout_routes` 行时，只拼接**可用**那些行的点。
+   * （`file_status = 'imported' AND point_count > 0`）—— 与写侧 `hasUsableRoute()` 同一份判据；
+   * 取数走**唯一**的路线点入口 `read/route-point-reader.ts`。一个 workout 下有多条
+   * `workout_routes` 行时，只拼接**可用**那些行的点。
    */
   routeFor(workoutId: string): StoredRoutePoint[] | null;
   /** 关闭底层连接。幂等；关闭后再调用任何读取方法都会抛错。 */
@@ -144,9 +148,12 @@ export function openFactsReader(path: string, generation: number): FactsReader {
 class SqliteFactsReader implements FactsReader {
   readonly generation: number;
   private closed = false;
+  /** 路线点只有这一个入口（视图 + 唯一判据），见 `read/route-point-reader.ts`。 */
+  private readonly routePointReader: SqliteRoutePointReader;
 
   constructor(private readonly database: DatabaseSync, generation: number) {
     this.generation = generation;
+    this.routePointReader = new SqliteRoutePointReader(database);
   }
 
   records(filter: FactsRecordFilter): Iterable<CanonicalHealthRecord> {
@@ -166,29 +173,14 @@ class SqliteFactsReader implements FactsReader {
   routeFor(workoutId: string): StoredRoutePoint[] | null {
     this.assertOpen();
     // 🔴 "可用"的判据与写侧 `RaiDatabase.hasUsableRoute()` **同源**（`sql/fragments.ts` 的
-    // `usableRouteConditionSql()`）。这里曾经只判 `point_count > 0`、不看 `file_status`，
-    // 于是同一行 `workout_routes` 会被读侧说成"有轨迹"、被写侧说成"没有"。
-    //
-    // 判定与取数**合成一次查询**，不再"先 COUNT 再取点"：分两步就要把条件写两遍，
-    // 而条件写两遍正是上面那个分叉的来源；此外"COUNT 说有、取点却一行都没有"会返回 `[]`
-    // —— 它既不是"有点"也不是 `null`，落在契约的两种取值之外。判据只写一次，空即没有。
-    const rows = this.database
-      .prepare(`
-        SELECT rp.latitude, rp.longitude, rp.elevation_meters, rp.speed_mps, rp.timestamp
-        FROM workout_routes wr
-        JOIN route_points rp ON rp.route_id = wr.id
-        WHERE wr.workout_id = ? AND ${usableRouteConditionSql("wr")}
-        ORDER BY COALESCE(wr.start_at, rp.timestamp), wr.id, rp.sequence
-      `)
-      .all(workoutId) as Row[];
-    if (rows.length === 0) return null;
-    return rows.map((row) => ({
-      latitude: Number(row.latitude),
-      longitude: Number(row.longitude),
-      elevationMeters: nullableNumber(row.elevation_meters),
-      speedMetersPerSecond: nullableNumber(row.speed_mps),
-      timestamp: typeof row.timestamp === "string" ? row.timestamp : null
-    }));
+    // `usableRouteConditionSql()`），取数关系是**唯一**的路线点入口
+    // （`read/route-point-reader.ts` → `readable_route_points` 视图）。
+    // 这里曾经只判 `point_count > 0`、不看 `file_status`，于是同一行 `workout_routes`
+    // 会被读侧说成"有轨迹"、被写侧说成"没有"；后来又会直接 `JOIN route_points` ——
+    // 那条路在 O11 退役双写之后对**已发布**的路线是空的（点只剩 published 版本那一份），
+    // 于是"读空"会伪装成"这条训练没有轨迹"。判据与取数都收进 reader 之后，
+    // 本方法不再需要知道点存在哪张表。
+    return this.routePointReader.pointsForWorkout(workoutId);
   }
 
   close(): void {

@@ -76,7 +76,14 @@ export const PINNED_FACT_TABLES: readonly string[] = [
   "workouts",
   "workout_statistics",
   "workout_routes",
+  // 🔴 O11 / WP-50（v43）之后，**已发布路线**的点只存在 `route_version_points` 一处：
+  // `route_points` 退化成"只装指针为 NULL 的 legacy 路线"。所以两张都要进快照 ——
+  // 只钉 `route_points` 的话，任何有过已发布路线的库在物化快照里**一个点都没有**，
+  // CPU 相位的 routeQuality / 高程会与主库和 native 聚合器不是同一个世界。
+  // 读端对"快照里取不到路线点"是**显式拒绝**（`RoutePointSourceUnavailableError`），
+  // 所以漏钉不会静默改分数，但会硬失败 —— 那同样是错的，故此处在同批补齐。
   "route_points",
+  "route_version_points",
   "training_sessions",
   "workout_overrides",
   "canonical_nights",
@@ -89,8 +96,18 @@ export const PINNED_FACT_TABLES: readonly string[] = [
   "import_entity_tombstones"
 ];
 
-/** 事实侧的视图：`effective_workout_overrides` 是 `workout_overrides` 上的 take-latest 视图。 */
-export const PINNED_FACT_VIEWS: readonly string[] = ["effective_workout_overrides"];
+/**
+ * 事实侧的视图：`effective_workout_overrides` 是 `workout_overrides` 上的 take-latest 视图；
+ * `readable_route_points` 是 v43 的**唯一路线点读入口**（按 `published_route_version_id`
+ * 切开"已发布版本 / legacy 旧表"两条互斥分支）。
+ *
+ * 视图必须和表一起钉住：它们是同一个"读什么"的答案（O11 的判据只有一处），
+ * 少钉一个就等于快照里少半条路径。
+ */
+export const PINNED_FACT_VIEWS: readonly string[] = [
+  "effective_workout_overrides",
+  "readable_route_points"
+];
 
 /**
  * **已发布派生结果**里被证据读取 JOIN 到的那几张（成绩/标签证据走

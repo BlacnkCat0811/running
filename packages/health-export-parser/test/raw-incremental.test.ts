@@ -415,7 +415,7 @@ test("preserve-absent GPX import keeps historical route points when the archive 
     const before = store.database.prepare(`
       SELECT route.relative_path AS relativePath, COUNT(point.sequence) AS pointCount
       FROM workout_routes route
-      JOIN route_points point ON point.route_id = route.id
+      JOIN readable_route_points point ON point.route_id = route.id
       GROUP BY route.relative_path
       ORDER BY route.relative_path
     `).all() as Array<{ relativePath: string; pointCount: number }>;
@@ -452,7 +452,7 @@ test("preserve-absent GPX import keeps historical route points when the archive 
       SELECT route.relative_path AS relativePath, COUNT(point.sequence) AS pointCount,
         route.file_status AS fileStatus
       FROM workout_routes route
-      LEFT JOIN route_points point ON point.route_id = route.id
+      LEFT JOIN readable_route_points point ON point.route_id = route.id
       GROUP BY route.id
       ORDER BY route.relative_path
     `).all() as Array<{ relativePath: string; pointCount: number; fileStatus: string }>;
@@ -563,7 +563,7 @@ test("preserve-absent workout upsert keeps GPS when HealthKit omits WorkoutRoute
     const route = store.database.prepare(`
       SELECT point_count AS pointCount, file_status AS fileStatus FROM workout_routes
     `).get() as { pointCount: number; fileStatus: string };
-    const points = store.database.prepare("SELECT COUNT(*) AS count FROM route_points").get() as { count: number };
+    const points = store.database.prepare("SELECT COUNT(*) AS count FROM readable_route_points").get() as { count: number };
     const duration = store.database.prepare(
       "SELECT duration_seconds AS duration FROM workouts"
     ).get() as { duration: number };

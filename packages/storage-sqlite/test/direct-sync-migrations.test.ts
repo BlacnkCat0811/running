@@ -163,6 +163,10 @@ test("老库补迁移：数据一行不少，且补完后 refuse 模式才放行
     // "duplicate column name" —— 那不是真老库，是造出来的假现场。
     const previous = new DatabaseSync(path);
     previous.exec(`
+      -- v43 的视图引用 route_version_points 与 published_route_version_id ⇒ 必须先丢掉它，
+      -- 否则下面两条 DROP 会被 SQLite 拒绝（实测 "error in view readable_route_points"）。
+      -- 真实 v33 库里从来没有这个视图，所以这一步属于"把现场造真"，不是绕过检查。
+      DROP VIEW IF EXISTS readable_route_points;
       DROP TABLE import_fact_history;
       DROP TABLE import_generations;
       DROP TABLE route_versions;
@@ -175,7 +179,7 @@ test("老库补迁移：数据一行不少，且补完后 refuse 模式才放行
       ALTER TABLE recompute_jobs DROP COLUMN target_dependency_generation;
       ALTER TABLE recompute_jobs DROP COLUMN expected_incumbent_release_id;
       ALTER TABLE recompute_jobs DROP COLUMN dirty_json;
-      DELETE FROM schema_migrations WHERE version IN (34, 35);
+      DELETE FROM schema_migrations WHERE version IN (34, 35, 43);
       INSERT INTO workouts (id, activity_type, source_name, source_category, start_at, end_at,
         duration_seconds, metadata_json, raw_attributes_json) VALUES
         ('w-old','HKWorkoutActivityTypeRunning','Watch','active','2026-01-01T00:00:00.000Z',
@@ -189,7 +193,8 @@ test("老库补迁移：数据一行不少，且补完后 refuse 模式才放行
 
     await assert.rejects(RaiDatabase.open(path, { migrationPolicy: "refuse" }), (error: unknown) => {
       assert.ok(error instanceof PendingMigrationsError);
-      assert.deepEqual(error.versions, [34, 35]);
+      // 43 与 34/35 同类：它的产物（视图）在造现场时被一起丢掉了，所以它是**真的**待补迁移。
+      assert.deepEqual(error.versions, [34, 35, 43]);
       return true;
     });
 

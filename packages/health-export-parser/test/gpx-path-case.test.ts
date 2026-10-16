@@ -78,7 +78,8 @@ test("imports a route whose archived path case differs from the XML reference", 
     assert.equal(routes[0]!.point_count, 2);
 
     const points = store.database
-      .prepare("SELECT elevation_meters FROM route_points WHERE route_id = ? ORDER BY sequence")
+      // O11 / WP-50：轨迹点读唯一入口（视图）；旧表在双写退役后已不承载已发布路线的点。
+      .prepare("SELECT elevation_meters FROM readable_route_points WHERE route_id = ? ORDER BY sequence")
       .all(routes[0]!.id) as unknown as Array<{ elevation_meters: number }>;
     assert.deepEqual(points.map((point) => point.elevation_meters), [12.5, 15]);
 

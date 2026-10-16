@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { relative, resolve } from "node:path";
 
 import type { RoutePoint } from "@rai/contracts";
+import { SqliteRoutePointReader } from "@rai/storage-sqlite";
 import { SaxesParser, type SaxesTagPlain } from "saxes";
 
 import { RaiDatabase } from "./database.js";
@@ -312,6 +313,8 @@ export async function importGpxRoutes(
   const unresolvedRoutePaths: string[] = [];
   const changedRouteIds: string[] = [];
   const bundleHash = createHash("sha256");
+  // 路线点只有这一个入口（视图 + 唯一判据），见 `read/route-point-reader.ts`。
+  const routePointReader = new SqliteRoutePointReader(store.database);
 
   for (const relativePath of allPaths) {
     const key = relativePath.toLowerCase();
@@ -365,6 +368,11 @@ export async function importGpxRoutes(
         });
         continue;
       }
+      // 🔴 指纹缓存命中判据里的"落库点数"改由**唯一**的路线点入口给（`readable_route_points`
+      // 视图），不再直接数 `route_points` 表：O11 退役双写之后，已发布路线的点在版本表里，
+      // 直接数旧表会让**每一次重导入都判定缓存未命中**（于是重解析一遍、再发布一遍），
+      // 或者更糟 —— 数出 0 而把一条本来可读的轨迹当成"没有点"。
+      // 判据本身的四条（摘要相同、route id 相同、`imported`、三个点数彼此相等）一条不改。
       const cached = store.database.prepare(`
         SELECT fingerprint.size_bytes AS sizeBytes,
                fingerprint.modified_at_ms AS modifiedAtMs,
@@ -372,17 +380,17 @@ export async function importGpxRoutes(
                fingerprint.route_id AS routeId,
                fingerprint.point_count AS pointCount,
                route.file_status AS fileStatus,
-               route.point_count AS routePointCount,
-               (SELECT COUNT(*) FROM route_points point
-                WHERE point.route_id = fingerprint.route_id) AS storedPointCount
+               route.point_count AS routePointCount
         FROM route_file_fingerprints fingerprint
         LEFT JOIN workout_routes route ON route.id = fingerprint.route_id
         WHERE fingerprint.relative_path = ?
       `).get(relativePath) as unknown as {
         sizeBytes: number; modifiedAtMs: number; sha256: string; routeId: string;
         pointCount: number; fileStatus: string | null; routePointCount: number | null;
-        storedPointCount: number;
       } | undefined;
+      const storedPointCount = cached === undefined
+        ? 0
+        : routePointReader.readablePointCountForRoute(cached.routeId);
       const currentSha256 = await hashFile(fullPath);
       if (
         cached &&
@@ -390,7 +398,7 @@ export async function importGpxRoutes(
         cached.routeId === routeId &&
         cached.fileStatus === "imported" &&
         cached.routePointCount === cached.pointCount &&
-        cached.storedPointCount === cached.pointCount
+        storedPointCount === cached.pointCount
       ) {
         bundleHash.update(relativePath, "utf8");
         bundleHash.update("\0");

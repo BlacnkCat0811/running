@@ -44,7 +44,7 @@
 | 4 | 详情行：`JOIN workouts w` + `JOIN model_runs mr`，同时给出分析分数与当前 `w.indoor/source_category` | `read/workout-read-repository.ts:246-285` |
 | 5 | 详情路线点、`sessionForSeries`、第二条路线读路径都读**当前** `workout_routes`；删 workout 后 `sessionForSeries` 返回 `null`（404） | `read/series-read-repository.ts:85-97`、`:107-116`、`:232-233` |
 | 6 | `mobileTodayWithExecutablePlan` 一个响应混分析视图与当前事实（`canonical_nights`/`health_records`/`import_manifest`） | `apps/api/src/data.ts:570-596`、`:598-613`、`:636-646` |
-| 7 | 今日/周/28 天汇总多条 SQL **不 JOIN** `workouts`：删训练后其分析负荷仍计入里程、次数、能量、`planActual` | `data.ts:603`、`:620`、`:641`、`:655`、`:713` |
+| 7 | 今日/周/28 天汇总多条 SQL **不 JOIN** `workouts`：删训练后其分析负荷仍计入里程、次数、能量、`planActual` | `data.ts:604`、`:620`、`:641`、`:655`、`:713` |
 | 8 | 周跑步汇总、月统计 JOIN `training_sessions`（当前事实）判 `activity_type`，无删除判据 | `data.ts:665-672`、`:975-989` |
 | 9 | 计划状态快照：发布指针 + 当前事实同一响应，带 `coherenceToken` 与 `metadata: { contractVersion: 1, …` | `data.ts:454-496` |
 | 10 | `coachLoopFacts` 的 `facts` 显式 `s.status='active'` 且 JOIN `workouts`；但 `qualityDates` 只读分析负荷，无删除过滤 | `data.ts:255-262`、`:271-274` |
@@ -246,7 +246,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 |---|---|---|
 | 1 | `sql/fragments.ts`（新增，对照 `:36-38`） | 新增 `workoutPresentConditionSql(alias)`；`read/` 与 `apps/api` 的事实侧 JOIN 全部引用它；配结构判据（全仓 `JOIN workouts` 站点必须引用） |
 | 2 | `database.ts:3358`/`:3387`/`:3446`/`:3485`（写侧，受 D4.5 约束） | `workouts.deleted_at` 软删标记（只新增可空列）+ 两处调用改标记；tombstone/账目照旧写 |
-| 3 | `read/workout-read-repository.ts:182-195`、`:196-235` | 加存在性判据；`has_route` 改用 `usableRouteConditionSql`（与 `facts-reader.ts:166-183` 同源）；返回两块视图 |
+| 3 | `read/workout-read-repository.ts:182-195`、`:196-235` | 加存在性判据；`has_route` 改用 `usableRouteConditionSql`（与 `facts-reader.ts:167-185` 同源）；返回两块视图 |
 | 4 | `read/workout-read-repository.ts:246-285` | 分析块走 `workout_features` 冻结列；`indoor`/`source_category` 移入事实块；加存在性判据 |
 | 5 | `read/series-read-repository.ts:85-97`、`:107-116`、`:232-233` | 分析块路线改读版本表（`complete` + 指针 + `route_version_points` 按 `sequence`）；老库退化读 `route_points` 并标 `routeVersionId: null`；`sessionForSeries` 保持 404 语义；#5 的三处共用一个内部函数 |
 | 6 | `data.ts:598-613`、`:615-634`、`:636-646`、`:651-656`、`:711-714` | 全部 JOIN `training_sessions` + 存在性判据；或在分析块保留并标 `factDeleted`——**同一个数字不许两处不一致** |
@@ -260,7 +260,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 | 14 | `mobile-read.ts:567`、`:614` + `data.ts:858-868` + `mobile-sync.ts:99-104` + `server.ts:1552-1557` | 接入 D2：置 `executable=false`；锁课加 `analysis_stale`（`generations_absent` 下不拒） |
 | 15 | `apps/api/src/coach-prediction-companion.ts:15-31` | `factsHash` 的输入拆成 `versions` 与事实摘要两个域；`dataThroughAt` 取自分析块的冻结输入 |
 | 16 | `data.ts:354-364`、`:208-209` | D3 五元组 + `RaiReadStore.versionSnapshot()`；`data_version` 退为测试期断言 |
-| 17 | `read/facts-reader.ts:166-183`、`:363-371` | 路线读取加版本语义或明确标注"本方法读当前"；**不改** `records`/`workouts` 的代次语义 |
+| 17 | `read/facts-reader.ts:167-185`、`:363-371` | 路线读取加版本语义或明确标注"本方法读当前"；**不改** `records`/`workouts` 的代次语义 |
 | 18 | `packages/storage-sqlite/src/recompute-job-repository.ts:527-548` + `contracts/src/index.ts:934-941` | `RecomputeJob` 加**可选** `targetRawGeneration`/`targetDependencyGeneration`/`expectedIncumbentReleaseId`（12 个旧字段不动） |
 
 ---

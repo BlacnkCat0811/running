@@ -12,7 +12,22 @@ export function importEquivalence(path: string): Record<string, { rows: number; 
     // ⚠️ 忽略它**不会**让"删除"变得不可见：删除同时写 tombstone 与 `import_entity_changes`
     // （两者都在比对范围内），所以等价性判断仍然能看见删除这件事本身。
     workouts: ["deleted_at"],
-    workout_statistics: [], workout_events: [], workout_routes: [], route_points: [],
+    workout_statistics: [], workout_events: [], workout_routes: [],
+    // 🔴 O11 / WP-50（v43）：路线点这一域从**实现表**换成**语义关系**。
+    //
+    // 双写退役之后 `route_points` 只剩"指针为 NULL 的老路线"的点，用它算摘要会让
+    // 这条域对新导入的库**恒为空**（已发布路线的点在 `route_version_points` 里）——
+    // 于是"TS 与 Rust 两次导入的轨迹内容是否一致"这件事就没人在看了。
+    // `readable_route_points` 视图按指针把两条分支合起来，正是"这个库此刻有哪些轨迹点"
+    // 的唯一定义（判据与读侧同源，见 `v43-migration.ts`）。
+    //
+    // **记录的基线怎么变**：同一份夹具在改造前后行数与 sha256 **完全相同** ——
+    // 改造前 `route_points` 里的行 = 每个已发布路线的一份副本（双写）+ 老路线的行，
+    // 视图给出的正是同一个多重集（2026-10-16 合成夹具实测：rows 5，
+    // sha256 `9f19f624b636e920216a08d6949687d971a829000de1df9413dd97d2ac52c990`）。
+    // 变的是**域名**：`route_points` → `readable_route_points`。按域名比对的记录
+    // （`benchmark-import.ts` 的输出、以及任何按表名键控的历史记录）必须改名后比对。
+    readable_route_points: [],
     activity_summaries: [], entity_inventory: [],
     training_sessions: ["created_at", "updated_at"],
     import_entity_generations: ["generation"],

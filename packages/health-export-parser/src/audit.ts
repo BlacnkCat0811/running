@@ -14,6 +14,7 @@ import { dirname } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
 import { healthTypes, workoutTypes } from "@rai/contracts";
+import { SqliteRoutePointReader } from "@rai/storage-sqlite";
 
 import { distanceToKilometers } from "./utils.js";
 
@@ -393,6 +394,10 @@ export function buildAudit(database: DatabaseSync, sourceDatabase: string | null
     "SELECT COUNT(*) AS count FROM workout_groups WHERE member_count > 1"
   );
   const routeFiles = scalarCount(database, "SELECT COUNT(*) AS count FROM workout_routes");
+  // 🔴 路线点数按**可读**那份数（O11 / WP-50）：`route_points` 表在双写退役后只剩
+  // 指针为 NULL 的老路线，直接数它会**少报**已发布路线的点。这个字段是给"档案里有多少
+  // 轨迹点"用的诊断数字，口径必须是可读集合 —— 与 `data:migrate` 的计数同源。
+  const routePointReader = new SqliteRoutePointReader(database);
   const parsedRecords = manifestNumber(database, "record_count");
   const uniqueRecords = scalarCount(
     database,
@@ -432,7 +437,7 @@ export function buildAudit(database: DatabaseSync, sourceDatabase: string | null
         "SELECT COUNT(*) AS count FROM activity_summaries"
       ),
       routeFiles,
-      routePoints: scalarCount(database, "SELECT COUNT(*) AS count FROM route_points"),
+      routePoints: routePointReader.countReadablePoints(),
       importIssues: scalarCount(database, "SELECT COUNT(*) AS count FROM import_issues")
     },
     running: {

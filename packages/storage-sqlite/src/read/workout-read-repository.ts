@@ -1,9 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
-import { sessionFactPresentConditionSql, usableRouteConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
+import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../sql/fragments.js";
 
 import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
 
 import { nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
+import { SqliteRoutePointReader } from "./route-point-reader.js";
 
 const rawAverageMetricTypes = new Set([
   "HKQuantityTypeIdentifierRunningPower",
@@ -111,7 +112,12 @@ export interface WorkoutListSqlFilter {
 }
 
 export class SqliteWorkoutReadRepository {
-  constructor(private readonly database: DatabaseSync) {}
+  /** 路线点只有这一个入口（视图 + 唯一判据），见 `read/route-point-reader.ts`。 */
+  private readonly routePointReader: SqliteRoutePointReader;
+
+  constructor(private readonly database: DatabaseSync) {
+    this.routePointReader = new SqliteRoutePointReader(database);
+  }
 
   latestWorkoutStartAt(): string | null {
     const latest = this.database
@@ -340,21 +346,7 @@ export class SqliteWorkoutReadRepository {
    * （`file_status = 'pending'`）"当成"有轨迹"。判据与写侧同源（`usableRouteConditionSql()`）。
    */
   routePointer(workoutId: string): { routeId: string; publishedRouteVersionId: string | null; usable: boolean } | null {
-    const row = this.database.prepare(`
-      SELECT wr.id AS routeId, wr.published_route_version_id AS publishedRouteVersionId,
-        CASE WHEN ${usableRouteConditionSql("wr")} THEN 1 ELSE 0 END AS usable
-      FROM workout_routes wr
-      WHERE wr.workout_id = ?
-      ORDER BY COALESCE(wr.start_at, wr.created_at), wr.id
-      LIMIT 1
-    `).get(workoutId) as { routeId?: unknown; publishedRouteVersionId?: unknown; usable?: unknown } | undefined;
-    if (row === undefined) return null;
-    return {
-      routeId: String(row.routeId),
-      publishedRouteVersionId: typeof row.publishedRouteVersionId === "string"
-        ? row.publishedRouteVersionId : null,
-      usable: Number(row.usable) === 1
-    };
+    return this.routePointReader.routePointer(workoutId);
   }
 
   workoutStatistic(
@@ -491,28 +483,16 @@ export class SqliteWorkoutReadRepository {
       : null;
   }
 
+  /**
+   * 这条训练的高程增益（GPS 尖峰过滤：单段上升 < 30 m 才计入）。
+   *
+   * 🔴 改造前这里 `JOIN route_points` 而**一个字都不判**，于是同一次训练可以在
+   * `loadRouteQuality` 那边"没有点"、在这边"有高程"。现在两边都走同一个入口
+   * （`readable_route_points` 视图），数字对**在两种判据下都可读**的路线逐位不变
+   * （见 `test/route-point-reader.test.ts` 的对照金标）。
+   */
   elevationGain(workoutId: string): number | null {
-    const rows = this.database
-      .prepare(`
-        SELECT rp.elevation_meters
-        FROM workout_routes wr
-        JOIN route_points rp ON rp.route_id = wr.id
-        WHERE wr.workout_id = ? AND rp.elevation_meters IS NOT NULL
-        ORDER BY rp.sequence
-      `)
-      .all(workoutId) as Record<string, unknown>[];
-    if (rows.length < 2) return null;
-    let gain = 0;
-    let previous = nullableNumber(rows[0]?.elevation_meters);
-    for (const row of rows.slice(1)) {
-      const current = nullableNumber(row.elevation_meters);
-      if (current !== null && previous !== null) {
-        const delta = current - previous;
-        if (delta > 0 && delta < 30) gain += delta;
-      }
-      if (current !== null) previous = current;
-    }
-    return gain;
+    return this.routePointReader.elevationGain(workoutId);
   }
 
   override(trainingSessionId: string): StoredWorkoutOverride | null {
