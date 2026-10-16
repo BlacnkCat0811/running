@@ -238,4 +238,35 @@
 
 ---
 
-*执行记录随各工作包提交更新；S1 收官后补「验收实跑」小节（门禁 EXIT、突变记录、真机验收排期）。*
+## 八、执行记录（S0+S1，2026-10-16）
+
+**提交清单（全部已推送 origin/main）**：
+
+| 提交 | 工作包 | 内容 | 关键验证 |
+|---|---|---|---|
+| `19a48bd` | WP-00 | 审查文档 + 落地方案入库；`check-doc-line-refs.mjs` DEFAULT_DOCS 挂载审查文档 | `check:docs` 476 链接 0 问题；doc-refs 139 处 0 越界（审查文档自身 0 处行号引用＝真空，已如实标注） |
+| `4a91732` | WP-01 | no-op 回执登记为第三产出方（白名单 2→3，附行为守卫指引） | 组合 19/19 绿；突变 `analysisStatus→queued` ⇒ preflight 精确红 |
+| `f34930b` | WP-02 | O07 许可边界复现夹具（skip 形态，WP-21 转绿） | 去 skip 实跑红（`true!==false`）→ 恢复 6 pass + 1 skip |
+| `2e681dc` | WP-12 (O03) | 删除队列守恒：`DirectSyncDeletionPartition`（旧槽尾部入余量）+ 三态恢复 + 5 处统一入口 + `pendingDeletions` 去默认值 + 空余量显式编码 | Budget 77/77；record-sync 59/0（MIN_CHECKS 58）；4 突变命中 |
+| `a2c9ede` | WP-10 (O01) | 查询页=交付单位：`workoutPage` 单页原语 + `deliveredAnchor` 只随完整交付页推进 + `WorkoutPageShrink` 收缩 + 删除池 UUID 去重 | Budget 83/83；record-sync 62/0；3 突变命中 |
+| `96f480b` | WP-13 (O05) | 窗口条件化（复用 `needsHistoryRead` 生产判据）+ `recentWindowShare` 20% 独立份额 + 命中上限记 warnings | Budget 85/85；record-sync 66/0；3 突变命中（含首版判据盲区被突变实测修正） |
+| `d4dcf9d` | WP-11 (O02) | `sync_pending_routes` 待办队列：预算拒绝两路径登记（页交付生效）+ `knownRunningWorkouts` 定点消费 + 超前登记/提交后移除 | PersistenceRegression 79/79（+13）；record-sync 70/0（MIN_CHECKS 69）；3 突变命中 |
+
+**S1 收官态全量门禁**（2026-10-16）：`typecheck-ios` EXIT=0（94 文件）· `run-health-sync-tests.sh` EXIT=0 ·
+`check-background-capabilities.py` 289/0 · `check-export-determinism.py` 14/0 · 每包 pre-commit 全过。
+（长跑门禁的稳定姿势：hook 带 `apps/ios/` 时走后台任务提交，前台直跑两次被平台信号掐断——非门禁失败。）
+
+**设计偏离（如实记录，两处）**：
+1. **O02 未走 `SyncTaskState`/`commitSuccess` 通道**（审查文档 §3-O02 步骤 3 的建议），改
+   「超前登记（导出后立即）+ 提交后移除（markSuccess 内、与 `upsertRouteStates` 同款收尾写）」两阶段。
+   依据：锚的提交链在任务行与回执之后，任何崩溃窗口只会造成"待办早到"（upsert 幂等、下批多查一次），
+   绝不丢数据；走完整同通道需再动 `SyncTaskState` 三态语义，风险/收益不划算。
+2. **O05 步骤 5「窗口与正式流批内按 (type, UUID) 去重」未做** —— 服务端按 id 幂等去重，
+   重复 XML 是字节效率问题（非正确性）；去重需要在 drain 渲染层加过滤，改动面大。
+   留待基准校准阶段连同"去重收益"一起评估。
+
+**遗留（S1 之外）**：
+- 真机验收（A3/R1 行为 + build①/②/③）仍待排期；模拟器/Swift 门禁不替代真机 HealthKit 证明。
+- 全量突变门禁（`test:ios:mutation`）本批未整体跑完（两次被平台信号掐断，抽查 2 条全 RED+hit）；
+  每包 3–4 个手工突变逐条命中。顺手修复 1 条 R3b 遗留的失配锚 + 修正 1 条判据盲区。
+- S2 起各决策点（§五）在对应工作包动工前逐项确认。
