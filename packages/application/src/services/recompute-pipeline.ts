@@ -150,6 +150,67 @@ interface OverrideSnapshot {
 }
 
 /**
+ * 一场训练的**一次装配结果**（O09 步骤 6）。
+ *
+ * 特征阶段要的是区间原样，分区阶段要 30 秒持续峰值，负荷阶段要 30 秒平滑样本与高程增益 ——
+ * 今天这三处各自重扫同一批记录。装配一次之后它们共享同一份派生结果。
+ * 高程是懒加载：最大心率证据与分区阶段并不需要它（路线点表是最贵的一次扫描）。
+ */
+class WorkoutAssembly {
+  private elevation: number | null | undefined = undefined;
+  constructor(
+    /** 心率区间（源记录 → 加权区间），特征/最大心率/负荷三个阶段共用。 */
+    readonly heartIntervals: WeightedRecordInterval[],
+    readonly speedIntervals: WeightedRecordInterval[],
+    /** 负荷阶段的 30 秒（心率）/平滑（配速）样本。 */
+    readonly heartSamples: TimedMetricSample[],
+    readonly speedSamples: TimedMetricSample[],
+    private readonly elevationLoader: () => number | null,
+    /** 权重 = 本次装配持有的源记录行数（缓存按行数设上限）。 */
+    readonly rows: number
+  ) {}
+  elevationGainMeters(): number | null {
+    if (this.elevation === undefined) this.elevation = this.elevationLoader();
+    return this.elevation;
+  }
+}
+
+/** 复用计划（O09 步骤 2/4）：父 run、边界、恢复出的滚动状态。 */
+interface MetricReusePlan {
+  parentMetricRunId: string;
+  parentModelRunId: string;
+  parentEvaluatedAt: string;
+  parentThroughDate: string;
+  /** 父 run 的第一个分区日（拷贝区间的起点）。 */
+  firstDate: string;
+  /** 分区/负荷的后缀起点（本地日）。 */
+  zoneStart: string;
+  /** `zoneStart-1` 那天的分区（链的续点）；前缀为空时为 null。 */
+  previousProfile: DailyZoneProfile | null;
+  /** 从 checkpoint 恢复的 90 天距离参考队列。 */
+  distanceQueue: DistanceQueueEntry[];
+  state: TrainingMetricCheckpointState;
+}
+
+/** 待落库的一行（分区摘要 / 训练负荷）。 */
+interface StagedLoadWrite {
+  table: "workout_zone_summaries" | "workout_training_loads";
+  values: SQLInputValue[];
+}
+
+/** 待落库的逐训练域快照（`model_domain_snapshots`）。 */
+interface StagedSnapshot { domain: string; key: string; asOf: string; payload: unknown }
+
+/** 一次负荷/分区装配的产物（写入前先全部算完，证明失败就一行都不写）。 */
+interface TrainingLoadPass {
+  loads: WorkoutTrainingLoad[];
+  writes: StagedLoadWrite[];
+  snapshots: StagedSnapshot[];
+  distanceQueue: DistanceQueueEntry[];
+  modelId: string;
+}
+
+/**
  * Superseded recomputation runs kept beyond the active one.
  *
  * Every recompute writes a new model_run / feature_run / training_metric_run
@@ -162,6 +223,115 @@ interface OverrideSnapshot {
 export const SUPERSEDED_RUN_RETENTION = 2;
 
 /**
+ * 负荷／分区／日级三域 checkpoint 的版本号（O09 步骤 2）。
+ *
+ * 口径变化（滚动状态形状、复用判据）必须**上调**它：旧 checkpoint 由此不再被复用，
+ * 而不是被新代码按新口径解释。历史 row 保留，不迁移、不回填。
+ */
+export const TRAINING_METRIC_CHECKPOINT_VERSION = "rai-training-metric-checkpoint-v1";
+
+/** 日级指标的算法版本（`buildDailyTrainingMetrics(V2)` 的口径）。 */
+export const DAILY_METRIC_ALGORITHM_VERSION = "rai-daily-metric-v2";
+
+/**
+ * 滚动状态里距离参考队列的条数上限。
+ *
+ * 90 天窗内不可能有这么多训练；超过就说明状态被篡改或口径变了 ⇒ **不复用**
+ * （不截断成"看起来够用"，那会把错误状态当有效历史）。
+ */
+export const MAX_DISTANCE_QUEUE_ENTRIES = 2000;
+
+/** 证据时刻列表的条数上限；超过即视为"状态不可信"（不复用），不截断。 */
+export const MAX_EVIDENCE_TIMESTAMPS = 4000;
+
+/** 分区链尾：`through_local_date` 那天那一行的业务值（下一段链的起点）。 */
+interface ZoneChainState {
+  localDate: string;
+  effectiveAt: string;
+  dataThroughAt: string | null;
+  restingHeartRateBpm: number;
+  maximumHeartRateBpm: number;
+  lactateThresholdPaceSecondsPerKm: number | null;
+  heartRateSource: string;
+  paceSource: string;
+  heartRateConfidence: number;
+  paceConfidence: number;
+  status: string;
+  heartRateBandsJson: string;
+  paceBandsJson: string;
+  evidenceJson: string;
+}
+
+/** 距离参考队列的一条（`priorDistances` 的可复用部分）。 */
+interface DistanceQueueEntry { observedAt: string; distanceMeters: number }
+
+/**
+ * 负荷／分区／日级的**滚动状态**（O09 步骤 2、4）。
+ *
+ * 🔴 缺项一律表示"不可复用"，**不是**"按 0 续算"：把 EWMA 从 0 续、把分区链从 `null` 续，
+ * 都会让近期小变更在**历史前缀**里产出与离线从头计算不同的值，且行数与覆盖都看不出来。
+ * 平滑与累计状态不按固定天数截尾 —— 它们本来就不是固定窗口能表达的。
+ */
+/**
+ * 分区/负荷证据的**快照**（O09 步骤 2 的"输入绑定"在证据链上的那一半）。
+ *
+ * 🔴 为什么必须有它：分区链的证据不是只从原始表读的 —— `labeled_performance` /
+ * `performance_vdot` / `lactate_threshold` 三类**经 `active_model_run` 的 feature 行**读取
+ * （`performanceRows` 里那个 `JOIN active_model_run`）。于是同一批事实在不同 run 上会得到
+ * **不同的证据集**：一条刚发布的候选会让下一次分析的证据"从无到有"。
+ * 实测（本工作包的回归夹具）：首次全量 run 时还没有 active run ⇒ 证据为空、阈值配速为空、
+ * 分区带全为 null；第二次 run 就有了 —— 此时若照抄第一次的前缀，增量结果与离线从头计算
+ * **不一致**（合成库上差 5 倍负荷）。
+ *
+ * 判据（复用侧按 `prefixAt = zoneStart 的本地日起点` 收紧）：`observedAt < prefixAt` 的证据集合
+ * 必须逐条相同。比 `prefixAt` 新的证据不可能影响前缀日（前缀日的 `effectiveAt <= prefixAt`）。
+ */
+export interface ZoneEvidenceSnapshot {
+  /** 当时的证据源 run（即当时的 active run）；`null` = 当时根本没有证据源 ⇒ 不可复用。 */
+  sourceRunId: string | null;
+  /** 三类"经 active run 读取"的证据的 `observedAt`；可重算的两类（RHR / VO2）不存。 */
+  labeled: string[];
+  performance: string[];
+  threshold: string[];
+}
+
+export interface TrainingMetricCheckpointState {
+  version: string;
+  zonePrevious: ZoneChainState | null;
+  evidence: ZoneEvidenceSnapshot;
+  /**
+   * 队列是否**完整**。`false` = 条数超限，队列存的是空数组 ⇒ 不可复用。
+   * 不按天数截尾是刻意的：未来任何一个更早的后缀都要用这条队列做 90 天参考。
+   */
+  distanceQueueComplete: boolean;
+  distanceQueue: DistanceQueueEntry[];
+  daily: { localDate: string; acuteEwma: number; chronicEwma: number; workoutCount: number; historyDays: number } | null;
+}
+
+/** 每域 reused/recomputed 计数（落到 `training_metric_runs.summary_json.reuse`）。 */
+export interface MetricReuseCounters {
+  attempted: boolean;
+  proof: "verified" | "rejected" | "not_attempted";
+  rejectionReason: string | null;
+  loads: { reused: number; recomputed: number };
+  zoneProfiles: { reused: number; recomputed: number };
+  dailyMetrics: { reused: number; recomputed: number };
+  checkpointWritten: boolean;
+  /** 实际复用的日期区间（`null` = 没有复用）。 */
+  reuseFromLocalDate: string | null;
+  reuseThroughLocalDate: string | null;
+}
+
+/** 各计算域的排他边界（`null` = 该域不可增量，必须全算）。 */
+interface DomainBoundaries {
+  features: string | null;
+  fitness: string | null;
+  readiness: string | null;
+  /** 边界来源：`domains`（O04 分域）／`legacy`（老 payload 的单一边界）／`none`（全量）。 */
+  source: "domains" | "legacy" | "none";
+}
+
+/**
  * Feature extraction, training metrics/zones, and ability timeline replay.
  * Split from RaiApplicationService (ARCHITECTURE_DEBT_MIGRATION P4).
  */
@@ -169,8 +339,20 @@ export class RecomputePipeline {
   private allowNativeAggregates = true;
   private recoveryIsolationHolds = true;
   private readonly recordCache = new BoundedCache<RecordRow[]>(16, 20_000);
+  /**
+   * 一次装配、多次复用（O09 步骤 6）：训练的心率／速度区间、路线质量、高程聚合。
+   *
+   * 为什么需要它：`loadRecordSeries` 的缓存按"来源＋时间窗＋类型"键控，容量只有 16 条 ——
+   * 一场训练就要两条（心率／速度），于是跨阶段（特征 → 最大心率证据 → 分区 → 负荷）
+   * 的复用**在真实数据量下必然抖动失效**，同一批记录被反复扫描。
+   * 这里缓存的是**派生结果**（区间、30 秒平滑样本、高程增益、路线质量），
+   * 键含输入绑定与参数标识，容量有上限（条数 + 行数），换一次 run 就整体清空。
+   */
+  private readonly workoutAssemblyCache = new BoundedCache<WorkoutAssembly>(512, 200_000);
   private readonly progressGate = new RecomputeProgressGate();
   private healthRecordHasUnitColumn: boolean | null = null;
+  /** 本次 metric run 的复用计数（`finishTrainingMetricRun` 落进 `summary_json.reuse`）。 */
+  private pendingReuseCounters: MetricReuseCounters | null = null;
 
   constructor(
     private readonly store: AnalysisStore,
@@ -209,6 +391,9 @@ export class RecomputePipeline {
 
   runFullRecompute(job: RecomputeJob): void {
     this.recordCache.clear();
+    // 装配缓存与记录缓存同寿命：绑定或事实一变，派生结果就不能跨 run 复用。
+    this.workoutAssemblyCache.clear();
+    this.pendingReuseCounters = null;
     this.recoveryIsolationHolds = true;
     const request = this.parseRequest(job.request);
     // Capture the incumbent before writing a candidate. The incumbent remains
@@ -516,6 +701,8 @@ export class RecomputePipeline {
 
   runSnapshotRefresh(job: RecomputeJob): void {
     this.recordCache.clear();
+    this.workoutAssemblyCache.clear();
+    this.pendingReuseCounters = null;
     const request = this.parseRequest(job.request);
     this.throwIfCancelled(job.id);
     const active = this.database
@@ -760,13 +947,19 @@ export class RecomputePipeline {
             (SELECT COUNT(*) FROM daily_training_metrics WHERE training_metric_run_id = ?) AS dayCount
         `).get(id, id)
       : null;
+    // O09 步骤 2/7：每域 reused／recomputed 计数落进 `summary_json.reuse`（durable、可读）。
+    // 失败或取消时不写：一次没跑完的 run 的"复用了几行"不是事实。
+    const payload = summary === null ? null : {
+      ...(summary as Record<string, unknown>),
+      ...(this.pendingReuseCounters === null ? {} : { reuse: this.pendingReuseCounters })
+    };
     this.database.prepare(`
       UPDATE training_metric_runs
       SET status = ?, summary_json = ?, failure_json = ?, completed_at = ?
       WHERE id = ?
     `).run(
       status,
-      summary === null ? null : JSON.stringify(summary),
+      payload === null ? null : JSON.stringify(payload),
       error === null ? null : JSON.stringify(this.errorPayload(error)),
       appNow(),
       id
@@ -1123,18 +1316,13 @@ export class RecomputePipeline {
       routePointCount: route.pointCount,
       routeQuality,
       speed,
-      speedSamples: weightedRecordIntervals(
-        speedRecords,
-        row.workoutStartAt,
-        row.workoutEndAt,
-        (value, unit) => convertSpeedToMetersPerSecond(value, unit)
-      ).map((interval) => ({
+      speedSamples: this.workoutAssembly(row).speedIntervals.map((interval) => ({
         value: interval.value,
         startOffsetSeconds: Math.max(0, (interval.startMs - Date.parse(row.workoutStartAt)) / 1000),
         durationSeconds: interval.durationSeconds
       })),
       heartRate,
-      heartRateSamples: weightedRecordIntervals(heartRecords, row.workoutStartAt, row.workoutEndAt, (value) => value).map((interval) => ({
+      heartRateSamples: this.workoutAssembly(row).heartIntervals.map((interval) => ({
         value: interval.value, startOffsetSeconds: Math.max(0,(interval.startMs-Date.parse(row.workoutStartAt))/1000),durationSeconds:interval.durationSeconds
       })),
       environment: parsePerformanceConditions(String(this.database.prepare("SELECT metadata_json FROM workouts WHERE id=?").get(row.canonicalWorkoutId)?.metadata_json ?? "{}")),
@@ -1340,17 +1528,48 @@ export class RecomputePipeline {
     }));
   }
 
-  private metricSamplesForSession(
-    session: SessionRow,
-    type: string,
-    converter: (value: number, unit: string | null) => number
-  ): TimedMetricSample[] {
-    const intervals = weightedRecordIntervals(
-      this.loadRecordSeries(session.sourceName, session.workoutStartAt, session.workoutEndAt, type),
-      session.workoutStartAt,
-      session.workoutEndAt,
-      converter
+  /** 装配缓存的绑定键：输入绑定（或 dataset 身份）+ 参数形状。换一次 run 就整体清空。 */
+  private assemblyBindingKey(): string {
+    const capture = this.pendingInputCapture;
+    if (capture !== null) return `binding:${capture.binding.inputDigest}`;
+    return `dataset:${this.manifestValue("dataset_version") ?? "unknown"}`;
+  }
+
+  /**
+   * 一次装配、多次复用（O09 步骤 6）：心率/速度区间、30 秒样本、高程聚合。
+   *
+   * 缓存键含**输入绑定**与参数标识（来源 + 训练窗 + 工作 identity），
+   * 容量按条数与**源记录行数**双重设限（`BoundedCache` 的 weight）。
+   */
+  private workoutAssembly(session: SessionRow): WorkoutAssembly {
+    const key = `${this.assemblyBindingKey()}|${session.trainingSessionId}|${session.canonicalWorkoutId}|` +
+      `${session.workoutStartAt}|${session.workoutEndAt}|${session.sourceName}`;
+    const cached = this.workoutAssemblyCache.get(key);
+    if (cached !== undefined) return cached;
+    const heartRecords = this.loadRecordSeries(session.sourceName, session.workoutStartAt, session.workoutEndAt, heartRateType);
+    const speedRecords = this.loadRecordSeries(session.sourceName, session.workoutStartAt, session.workoutEndAt, runningSpeedType);
+    const heartIntervals = weightedRecordIntervals(heartRecords, session.workoutStartAt, session.workoutEndAt, (value) => value);
+    const speedIntervals = weightedRecordIntervals(
+      speedRecords, session.workoutStartAt, session.workoutEndAt,
+      (value, unit) => convertSpeedToMetersPerSecond(value, unit)
     );
+    const assembly = new WorkoutAssembly(
+      heartIntervals, speedIntervals,
+      this.timedMetricSamples(heartIntervals, heartRateType, session),
+      this.timedMetricSamples(speedIntervals, runningSpeedType, session),
+      () => this.loadElevationGain(session.canonicalWorkoutId),
+      heartRecords.length + speedRecords.length
+    );
+    this.workoutAssemblyCache.set(key, assembly, Math.max(1, assembly.rows));
+    return assembly;
+  }
+
+  /** 区间 → 负荷/分区口径的定时样本（配速额外做 30 秒中位平滑，样本不足 30 条视为不可用）。 */
+  private timedMetricSamples(
+    intervals: readonly WeightedRecordInterval[],
+    type: string,
+    session: SessionRow
+  ): TimedMetricSample[] {
     const startMs = Date.parse(session.workoutStartAt);
     const samples = intervals.map((interval) => ({
       value: interval.value,
@@ -1379,6 +1598,22 @@ export class RecomputePipeline {
       smoothed.push({ value, durationSeconds: 1, startOffsetSeconds: second, distanceMeters: value });
     }
     return smoothed.length >= 30 ? smoothed : [];
+  }
+
+  private metricSamplesForSession(
+    session: SessionRow,
+    type: string,
+    converter: (value: number, unit: string | null) => number
+  ): TimedMetricSample[] {
+    // 两个热类型走装配缓存；其它类型保持逐次计算（今天没有调用方，不为它扩大口径）。
+    if (type === heartRateType) return this.workoutAssembly(session).heartSamples;
+    if (type === runningSpeedType) return this.workoutAssembly(session).speedSamples;
+    return this.timedMetricSamples(weightedRecordIntervals(
+      this.loadRecordSeries(session.sourceName, session.workoutStartAt, session.workoutEndAt, type),
+      session.workoutStartAt,
+      session.workoutEndAt,
+      converter
+    ), type, session);
   }
 
   private loadRestingHeartRateEvidence(evaluatedAt: string): RestingHeartRateEvidence[] {
@@ -1427,20 +1662,40 @@ export class RecomputePipeline {
     sessions: Map<string, SessionRow>,
     request: RecomputeRequest
   ): Map<string, DailyZoneProfile> {
+    const built = this.buildZoneProfilesRange(metricRunId, features, sessions, request, { startDate: null, previous: null });
+    this.persistZoneProfileRows(built.rows);
+    return built.profiles;
+  }
+
+  /**
+   * 分区链的**纯计算**（O09 步骤 3）：只产出领域对象与待写行，不碰数据库。
+   *
+   * 拆开的理由是复用路径必须"先证明、后写入"：前缀证明要在任何 INSERT 之前完成，
+   * 所以计算与落库必须能分开。全量路径（`startDate = null`、`previous = null`）行为与
+   * 拆分前逐字节相同。
+   *
+   * `previous` = `startDate - 1` 那天的分区：链是**逐日继承**的，从半路续算必须带上它，
+   * 否则第一个重算日的 `carried_forward` 判定会与从头算不同（这正是"把默认值当历史"的缺陷）。
+   */
+  private buildZoneProfilesRange(
+    metricRunId: string,
+    features: WorkoutFeatureVector[],
+    sessions: Map<string, SessionRow>,
+    request: RecomputeRequest,
+    options: { startDate: string | null; previous: DailyZoneProfile | null }
+  ): { profiles: Map<string, DailyZoneProfile>; rows: SQLInputValue[][]; evidence: ZoneEvidenceSnapshot } {
     const profiles = new Map<string, DailyZoneProfile>();
-    if (features.length === 0) return profiles;
+    const rows: SQLInputValue[][] = [];
+    const evidence = this.zoneEvidenceSnapshot();
+    if (features.length === 0) return { profiles, rows, evidence };
     const restingEvidence = this.loadRestingHeartRateEvidence(request.evaluatedAt);
     const maximumEvidence: MaximumHeartRateEvidence[] = [];
     for (const feature of features) {
       if ((feature.heartRateCoverage ?? 0) < 0.7 || feature.sourceConfidence < 0.6) continue;
       const session = sessions.get(feature.trainingSessionId);
       if (!session) continue;
-      const intervals = weightedRecordIntervals(
-        this.loadRecordSeries(session.sourceName, session.workoutStartAt, session.workoutEndAt, heartRateType),
-        session.workoutStartAt,
-        session.workoutEndAt,
-        (value) => value
-      );
+      // O09 步骤 6：心率区间与最大心率证据走**同一份装配**（特征阶段已装配过就不重扫记录）。
+      const intervals = this.workoutAssembly(session).heartIntervals;
       const peak = sustainedThirtySecondPeak(intervals, session.workoutStartAt, session.workoutEndAt);
       if (peak !== null) maximumEvidence.push({
         peakBpm: peak,
@@ -1453,25 +1708,19 @@ export class RecomputePipeline {
     const labeledPerformance = loadLabeledPerformanceEvidence(this.database, request.evaluatedAt);
     const performanceEvidence = loadPerformanceVdotEvidence(this.database, request.evaluatedAt);
     const thresholdEvidence = loadLactateThresholdEvidence(this.database, request.evaluatedAt);
+    // 证据快照：只记"经 active run 读取"的三类；时刻列表就是复用侧要比的那一份。
+    evidence.labeled = labeledPerformance.map((item) => item.observedAt).sort();
+    evidence.performance = performanceEvidence.map((item) => item.observedAt).sort();
+    evidence.threshold = thresholdEvidence.map((item) => item.observedAt).sort();
     const settings = this.loadZoneProfileSettings();
     const firstDate = features
       .map((feature) => localDateAt(feature.workoutStartAt, request.timezoneIdentifier))
       .sort()[0]!;
+    const fromDate = options.startDate ?? firstDate;
     const throughDate = localDateAt(request.evaluatedAt, request.timezoneIdentifier);
     const dateOfBirth = this.loadDateOfBirth();
-    const insert = this.database.prepare(`
-      INSERT OR IGNORE INTO daily_zone_profiles (
-        id, training_metric_run_id, local_date, timezone_identifier, effective_at,
-        data_through_at, resting_heart_rate_bpm, maximum_heart_rate_bpm,
-        threshold_pace_seconds_per_km, heart_rate_source, pace_source,
-        heart_rate_confidence, pace_confidence, profile_status,
-        heart_rate_bands_json, pace_bands_json, evidence_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    let previous: DailyZoneProfile | null = null;
-    // O07 步骤 4：逐日分区行按分块短事务落地（让路点在提交之后）。
-    const writer = new ChunkedWriter(this.database, this.gate);
-    for (let date = firstDate; date <= throughDate; date = addDays(date, 1)) {
+    let previous: DailyZoneProfile | null = options.previous;
+    for (let date = fromDate; date <= throughDate; date = addDays(date, 1)) {
       this.gate.yieldIfStale();
       const effectiveAt = localDateStartAt(date, request.timezoneIdentifier);
       const activeSettings = [...settings].reverse().find((item) => item.effectiveFromLocalDate <= date) ?? null;
@@ -1528,21 +1777,451 @@ export class RecomputePipeline {
         previousProfile: previous,
         settings: activeSettings
       });
-      writer.add(() => insert.run(
+      rows.push([
         profile.id, metricRunId, profile.localDate, profile.timezoneIdentifier,
         profile.effectiveAt, profile.dataThroughAt, profile.restingHeartRateBpm,
         profile.maximumHeartRateBpm, profile.lactateThresholdPaceSecondsPerKm,
         profile.heartRateSource, profile.paceSource, profile.heartRateConfidence,
         profile.paceConfidence, profile.status, JSON.stringify(profile.heartRateBands),
         JSON.stringify(profile.paceBands), JSON.stringify(profile.evidence), profile.createdAt
-      ));
+      ]);
       profiles.set(date, profile);
       previous = profile;
     }
-    writer.flush();
-    return profiles;
+    return { profiles, rows, evidence };
   }
 
+  /**
+   * 当前（本 run 视角）的证据来源：当时生效的 active run。首次全量 run 时**可能为空** ——
+   * 那正是"证据从无到有"的转折点，必须记下来，否则下一次会照抄一份没有证据的前缀。
+   */
+  private zoneEvidenceSnapshot(): ZoneEvidenceSnapshot {
+    const active = this.database.prepare(
+      "SELECT model_run_id AS id FROM active_model_run WHERE singleton = 1"
+    ).get() as { id: string } | undefined;
+    return { sourceRunId: active?.id ?? null, labeled: [], performance: [], threshold: [] };
+  }
+
+  /**
+   * 证据链一致性判据（O09 步骤 7）。返回 `null` = 通过，否则返回拒绝原因。
+   *
+   * - `sourceRunId === null`：父 run 计算时**没有证据源**（该库的首次全量）⇒ 它的前缀是在
+   *   空证据下算出来的，照抄会与离线从头计算不一致 ⇒ 拒绝。
+   * - 三类经 active run 读取的证据（labeled / performance / threshold）：`observedAt < prefixAt`
+   *   的时刻集合必须逐条相同。这一条同时覆盖两种情况：新证据进入前缀窗口，以及
+   *   **窗口滑动**把旧证据挤出去（performance 56 天、threshold 365 天都相对 `asOf`）。
+   *   比 `prefixAt` 新的证据不可能影响前缀日（前缀日的 `effectiveAt <= prefixAt`）。
+   * - RHR / VO2 直读 `health_records`，任何 `asOf` 都能重算 ⇒ 两个 `asOf` 各现算一次再比。
+   */
+  private checkZoneEvidenceParity(input: {
+    snapshot: ZoneEvidenceSnapshot;
+    parentEvaluatedAt: string;
+    currentAsOf: string;
+    zoneStart: string;
+    timezone: string;
+  }): string | null {
+    if (input.snapshot.sourceRunId === null) return "evidence_source_missing";
+    const prefixAt = localDateStartAt(input.zoneStart, input.timezone);
+    const restricted = (list: readonly string[]): string[] =>
+      list.filter((at) => Number.isFinite(Date.parse(at)) && at < prefixAt).sort();
+    const sameSet = (left: readonly string[], right: readonly string[]): boolean => {
+      const a = restricted(left), b = restricted(right);
+      return a.length === b.length && a.every((value, index) => value === b[index]);
+    };
+    const labeled = loadLabeledPerformanceEvidence(this.database, input.currentAsOf).map((item) => item.observedAt);
+    if (!sameSet(input.snapshot.labeled, labeled)) return "evidence_labeled_changed";
+    const performance = loadPerformanceVdotEvidence(this.database, input.currentAsOf).map((item) => item.observedAt);
+    if (!sameSet(input.snapshot.performance, performance)) return "evidence_performance_changed";
+    const threshold = loadLactateThresholdEvidence(this.database, input.currentAsOf).map((item) => item.observedAt);
+    if (!sameSet(input.snapshot.threshold, threshold)) return "evidence_threshold_changed";
+    const restingNow = this.recomputableEvidenceTimestamps(input.currentAsOf).resting;
+    const restingThen = this.recomputableEvidenceTimestamps(input.parentEvaluatedAt).resting;
+    if (!sameSet(restingThen, restingNow)) return "evidence_resting_changed";
+    const vo2Now = this.recomputableEvidenceTimestamps(input.currentAsOf).directVo2;
+    const vo2Then = this.recomputableEvidenceTimestamps(input.parentEvaluatedAt).directVo2;
+    if (!sameSet(vo2Then, vo2Now)) return "evidence_direct_vo2_changed";
+    return null;
+  }
+
+  /** RHR / VO2 两类证据直读 `health_records`，任何 `asOf` 都能重算 ⇒ 复用侧两边现算比较。 */
+  private recomputableEvidenceTimestamps(asOf: string): { resting: string[]; directVo2: string[] } {
+    const resting = this.database.prepare(`
+      SELECT start_at AS observedAt FROM health_records
+      WHERE type = ? AND value_numeric IS NOT NULL AND start_at < ? ORDER BY start_at
+    `).all(restingHeartRateType, asOf) as unknown as Array<{ observedAt: string }>;
+    const vo2 = loadDirectVo2Evidence(this.database, asOf);
+    return {
+      resting: resting.map((row) => row.observedAt),
+      directVo2: vo2.map((item) => item.observedAt).sort()
+    };
+  }
+
+  /** 分区行的落库（O07 步骤 4：分块短事务；让路点在提交之后）。 */
+  private persistZoneProfileRows(rows: readonly SQLInputValue[][]): void {
+    if (rows.length === 0) return;
+    const insert = this.database.prepare(`
+      INSERT OR IGNORE INTO daily_zone_profiles (
+        id, training_metric_run_id, local_date, timezone_identifier, effective_at,
+        data_through_at, resting_heart_rate_bpm, maximum_heart_rate_bpm,
+        threshold_pace_seconds_per_km, heart_rate_source, pace_source,
+        heart_rate_confidence, pace_confidence, profile_status,
+        heart_rate_bands_json, pace_bands_json, evidence_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const writer = new ChunkedWriter(this.database, this.gate);
+    for (const row of rows) writer.add(() => insert.run(...row));
+    writer.flush();
+  }
+
+  // ===================== O09（WP-32）：分域边界、checkpoint 与安全前缀复用 =====================
+
+  /**
+   * 各计算域的排他边界（O09 步骤 1）。
+   *
+   * `domains` 存在时逐域取用：`features` 只服务特征前缀与能力重放，`fitness` 服务
+   * 负荷／分区，`readiness` 服务恢复证据。**不**把所有健康变化一律扩大成 Fitness 全历史重算，
+   * 也**不**在 `domains` 存在但某域为 null 时回落单一边界 —— 那会把"该域不可增量"
+   * 读成"可以增量"。老 payload（无 `domains`）才回落 `dirtyFromAt`。
+   *
+   * 非法时刻 ⇒ 该域为 null（全算）：方向永远是"宁可全算，不可错复用"。
+   */
+  private domainBoundaries(request: RecomputeRequest): DomainBoundaries {
+    const plan = request.incrementalPlan;
+    if (!plan || plan.mode !== "partial") return { features: null, fitness: null, readiness: null, source: "none" };
+    const legacy = this.normalizeBoundary(plan.dirtyFromAt);
+    if (!plan.domains) return { features: legacy, fitness: legacy, readiness: legacy, source: "legacy" };
+    return {
+      features: this.normalizeBoundary(plan.domains.features),
+      fitness: this.normalizeBoundary(plan.domains.fitness),
+      readiness: this.normalizeBoundary(plan.domains.readiness),
+      source: "domains"
+    };
+  }
+
+  private normalizeBoundary(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    try { return normalizeInstant(value, "domainBoundary"); } catch { return null; }
+  }
+
+  /** override 快照摘要：与输入读取器/发布判据**同源**（有序 id 集合）。 */
+  private overrideSnapshotDigest(overrideSnapshot: OverrideSnapshot): string {
+    return overrideSnapshot.ids.join("\u0001");
+  }
+
+  /** 分区设置摘要：设置一改，历史分区与负荷不再可复用。 */
+  private zoneSettingsDigest(): string {
+    const rows = this.database.prepare(
+      "SELECT id, revision FROM training_zone_profile_settings ORDER BY effective_from_local_date, id"
+    ).all() as unknown as Array<{ id: string; revision: number }>;
+    return rows.map((row) => `${row.id}:${row.revision}`).join("\u0001");
+  }
+
+  /**
+   * 复用用的输入绑定摘要。
+   *
+   * 🔴 刻意**不含** `runId` / `jobId` / `cutoffAt` / `datasetVersion`：前三项每次 run 都变，
+   * 含进去等于永不匹配；`datasetVersion` 每批导入都变（`dataset_delta_<hash>`），
+   * 而"前缀事实有没有变"由**边界**声明、由下面的前缀证明与摘要比对**证伪**，
+   * 不由"整批的版本号有没有动"回答 —— 拿版本号当复用条件会把复用率压到恒零。
+   *
+   * 直连车道用捕获到的绑定（scope/代次/override/config 摘要）；CLI 车道没有捕获，
+   * 用同一形状的本地摘要（scope=`cli-recompute`），两条车道的摘要形状不同 ⇒ 天然不互相复用。
+   */
+  private metricInputBindingDigest(overrideSnapshot: OverrideSnapshot): string {
+    const capture = this.pendingInputCapture;
+    // ⛔ 分隔符**不能是 `\u0000`**：node:sqlite 按 C 字符串传参，NUL 之后的字节不入库，
+    // 摘要会被静默截断成第一段（实测就是 `"cli-recompute"`）——判据随即退化成
+    // "scope 相同就复用"，而那正是"输入变了却仍然复用"的形态。
+    if (capture !== null) {
+      const binding = capture.binding;
+      return [
+        binding.scope, String(binding.capturedRawGeneration), String(binding.capturedDependencyGeneration),
+        binding.timezoneIdentifier, binding.overrideDigest, binding.configDigest
+      ].join("\u0001");
+    }
+    return [
+      "cli-recompute", "-", "-",
+      this.manifestValue("timezone_identifier") ?? DATABASE_TIMEZONE,
+      this.overrideSnapshotDigest(overrideSnapshot), this.zoneSettingsDigest()
+    ].join("\u0001");
+  }
+
+  /**
+   * 分区/负荷/日级三个域共同消费的配置。**同一份对象**既用于建 run、也用于复用比对 ——
+   * 两处各写一份必然漂移（漂移的后果是"配置变了还复用"）。
+   */
+  private metricRunConfig(overrideSnapshotIds: string[]): Record<string, unknown> {
+    return {
+      dailyMetrics: defaultDailyMetricConfig,
+      zoneVersion: TRAINING_ZONE_CONFIG_VERSION,
+      heartRateReserveBoundaries: [0.6, 0.7, 0.8, 0.9],
+      paceThresholdMultipliers: [1.15, 1.06, 0.97, 0.9],
+      overrideSnapshotIds
+    };
+  }
+
+  private metricRunConfigHash(overrideSnapshotIds: string[]): string {
+    return configHash({ version: TRAINING_LOAD_CONFIG_VERSION, config: this.metricRunConfig(overrideSnapshotIds) });
+  }
+
+  /** 库里的一行分区 → 领域对象（复用链尾、证明比对共用）。 */
+  private dailyZoneProfileFromRow(row: Record<string, unknown>): DailyZoneProfile {
+    return {
+      id: String(row.id), localDate: String(row.local_date), timezoneIdentifier: String(row.timezone_identifier),
+      effectiveAt: String(row.effective_at), dataThroughAt: row.data_through_at === null ? null : String(row.data_through_at),
+      restingHeartRateBpm: Number(row.resting_heart_rate_bpm), maximumHeartRateBpm: Number(row.maximum_heart_rate_bpm),
+      lactateThresholdPaceSecondsPerKm: asNullableNumber(row.threshold_pace_seconds_per_km),
+      heartRateSource: String(row.heart_rate_source) as DailyZoneProfile["heartRateSource"],
+      paceSource: String(row.pace_source) as DailyZoneProfile["paceSource"],
+      heartRateConfidence: Number(row.heart_rate_confidence), paceConfidence: Number(row.pace_confidence),
+      status: String(row.profile_status) as DailyZoneProfile["status"],
+      heartRateBands: parseJson(String(row.heart_rate_bands_json), []),
+      paceBands: parseJson(String(row.pace_bands_json), []),
+      evidence: parseJson(String(row.evidence_json), { restingHeartRateDays: 0, maximumHeartRateWorkouts: 0, thresholdEvidenceCount: 0 }),
+      createdAt: String(row.created_at)
+    };
+  }
+
+  private zoneChainState(profile: DailyZoneProfile | null): ZoneChainState | null {
+    if (profile === null) return null;
+    return {
+      localDate: profile.localDate, effectiveAt: profile.effectiveAt, dataThroughAt: profile.dataThroughAt,
+      restingHeartRateBpm: profile.restingHeartRateBpm, maximumHeartRateBpm: profile.maximumHeartRateBpm,
+      lactateThresholdPaceSecondsPerKm: profile.lactateThresholdPaceSecondsPerKm,
+      heartRateSource: profile.heartRateSource, paceSource: profile.paceSource,
+      heartRateConfidence: profile.heartRateConfidence, paceConfidence: profile.paceConfidence,
+      status: profile.status, heartRateBandsJson: JSON.stringify(profile.heartRateBands),
+      paceBandsJson: JSON.stringify(profile.paceBands), evidenceJson: JSON.stringify(profile.evidence)
+    };
+  }
+
+  private zoneChainMatchesProfile(state: ZoneChainState, profile: DailyZoneProfile): boolean {
+    return state.localDate === profile.localDate && state.effectiveAt === profile.effectiveAt &&
+      state.dataThroughAt === profile.dataThroughAt &&
+      state.restingHeartRateBpm === profile.restingHeartRateBpm &&
+      state.maximumHeartRateBpm === profile.maximumHeartRateBpm &&
+      state.lactateThresholdPaceSecondsPerKm === profile.lactateThresholdPaceSecondsPerKm &&
+      state.heartRateSource === profile.heartRateSource && state.paceSource === profile.paceSource &&
+      state.heartRateConfidence === profile.heartRateConfidence && state.paceConfidence === profile.paceConfidence &&
+      state.status === profile.status && state.heartRateBandsJson === JSON.stringify(profile.heartRateBands) &&
+      state.paceBandsJson === JSON.stringify(profile.paceBands) &&
+      state.evidenceJson === JSON.stringify(profile.evidence);
+  }
+
+  /**
+   * checkpoint 状态解析 + 形状校验（O09 步骤 2：缺失即不复用）。
+   *
+   * `state_hash` 是写入侧自己算的，所以它证明的是"这份 JSON 没被改动"，不是"它算得对"。
+   * 形状校验负责另一半：**默认零值不是有效历史** —— 缺项、NaN、队列超限、乱序都判不可信。
+   */
+  private parseMetricCheckpointState(stateJson: string, stateHash: string): TrainingMetricCheckpointState | null {
+    const state = parseJson<TrainingMetricCheckpointState | null>(stateJson, null);
+    if (state === null || typeof state !== "object") return null;
+    if (state.version !== TRAINING_METRIC_CHECKPOINT_VERSION) return null;
+    if (configHash(state) !== stateHash) return null;
+    const evidence = state.evidence;
+    // `sourceRunId === null` 是**合法**形状（当时的库还没有 active run）；它由证据一致性判据
+    // 判成"不可复用"，而不是被当成"状态损坏" —— 两种原因的处置相同，但诊断不能混为一谈。
+    if (evidence === null || typeof evidence !== "object" ||
+      (evidence.sourceRunId !== null && typeof evidence.sourceRunId !== "string")) return null;
+    for (const list of [evidence.labeled, evidence.performance, evidence.threshold]) {
+      if (!Array.isArray(list) || list.length > MAX_EVIDENCE_TIMESTAMPS) return null;
+      if (list.some((at) => typeof at !== "string" || !Number.isFinite(Date.parse(at)))) return null;
+    }
+    if (state.distanceQueueComplete !== true) return null;
+    if (!Array.isArray(state.distanceQueue) || state.distanceQueue.length > MAX_DISTANCE_QUEUE_ENTRIES) return null;
+    for (const [index, entry] of state.distanceQueue.entries()) {
+      if (entry === null || typeof entry !== "object") return null;
+      if (typeof entry.observedAt !== "string" || !Number.isFinite(Date.parse(entry.observedAt))) return null;
+      if (!Number.isFinite(entry.distanceMeters) || entry.distanceMeters <= 0) return null;
+      if (index > 0 && state.distanceQueue[index - 1]!.observedAt > entry.observedAt) return null;
+    }
+    if (state.daily !== null) {
+      const daily = state.daily;
+      if (typeof daily.localDate !== "string" || !Number.isFinite(daily.acuteEwma) ||
+        !Number.isFinite(daily.chronicEwma) || !Number.isFinite(daily.workoutCount) ||
+        !Number.isFinite(daily.historyDays)) return null;
+    }
+    if (state.zonePrevious !== null) {
+      const zone = state.zonePrevious;
+      if (typeof zone.localDate !== "string" || typeof zone.effectiveAt !== "string" ||
+        !Number.isFinite(zone.restingHeartRateBpm) || !Number.isFinite(zone.maximumHeartRateBpm) ||
+        typeof zone.heartRateBandsJson !== "string" || typeof zone.paceBandsJson !== "string" ||
+        typeof zone.evidenceJson !== "string") return null;
+    }
+    return state;
+  }
+
+  /**
+   * 复用计划（只读）：解析边界、取父 run 的 checkpoint、逐项校验。
+   *
+   * 任何一项不满足 ⇒ **不复用**（`attempted: true` 表示"试过了、被拒"，与"没有增量计划"
+   * 区分开；两者都不假装复用成功）。
+   */
+  private resolveMetricReuse(input: {
+    request: RecomputeRequest;
+    metricRunId: string;
+    features: WorkoutFeatureVector[];
+    overrideSnapshot: OverrideSnapshot;
+  }): { ok: true; plan: MetricReusePlan } | { ok: false; attempted: boolean; reason: string } {
+    const boundaries = this.domainBoundaries(input.request);
+    if (boundaries.fitness === null) {
+      return { ok: false, attempted: boundaries.source !== "none", reason: `no_fitness_boundary:${boundaries.source}` };
+    }
+    const timezone = input.request.timezoneIdentifier;
+    const overrideDigest = this.overrideSnapshotDigest(input.overrideSnapshot);
+    const configHashExpected = this.metricRunConfigHash(input.overrideSnapshot.ids);
+    const row = this.database.prepare(`
+      SELECT metric.id AS metricRunId, metric.evaluated_at AS evaluatedAt, metric.config_hash AS configHash,
+             metric.timezone_identifier AS checkpointTimezone, metric.model_run_id AS modelRunId,
+             model.feature_run_id AS featureRunId,
+             checkpoint.checkpoint_version AS checkpointVersion,
+             checkpoint.load_algorithm_version AS loadVersion,
+             checkpoint.zone_algorithm_version AS zoneVersion,
+             checkpoint.daily_algorithm_version AS dailyVersion,
+             checkpoint.config_hash AS checkpointConfigHash,
+             checkpoint.zone_settings_digest AS zoneSettingsDigest,
+             checkpoint.override_digest AS overrideDigest,
+             checkpoint.input_binding_digest AS inputBindingDigest,
+             checkpoint.through_local_date AS throughLocalDate,
+             checkpoint.state_json AS stateJson, checkpoint.state_hash AS stateHash
+      FROM active_model_run active
+      JOIN model_runs model ON model.id = active.model_run_id AND model.status = 'succeeded'
+      JOIN training_metric_runs metric ON metric.model_run_id = model.id AND metric.status = 'succeeded'
+      JOIN training_metric_checkpoints checkpoint ON checkpoint.training_metric_run_id = metric.id
+      WHERE active.singleton = 1
+      ORDER BY metric.created_at DESC, metric.id DESC LIMIT 1
+    `).get() as unknown as Record<string, unknown> | undefined;
+    if (!row) return { ok: false, attempted: true, reason: "no_parent_checkpoint" };
+    if (String(row.checkpointVersion) !== TRAINING_METRIC_CHECKPOINT_VERSION) return { ok: false, attempted: true, reason: "checkpoint_version" };
+    if (String(row.loadVersion) !== TRAINING_LOAD_CONFIG_VERSION) return { ok: false, attempted: true, reason: "load_algorithm_version" };
+    if (String(row.zoneVersion) !== TRAINING_ZONE_CONFIG_VERSION) return { ok: false, attempted: true, reason: "zone_algorithm_version" };
+    if (String(row.dailyVersion) !== DAILY_METRIC_ALGORITHM_VERSION) return { ok: false, attempted: true, reason: "daily_algorithm_version" };
+    if (String(row.configHash) !== configHashExpected || String(row.checkpointConfigHash) !== configHashExpected) {
+      return { ok: false, attempted: true, reason: "config_hash" };
+    }
+    if (String(row.zoneSettingsDigest) !== this.zoneSettingsDigest()) return { ok: false, attempted: true, reason: "zone_settings" };
+    if (String(row.overrideDigest) !== overrideDigest) return { ok: false, attempted: true, reason: "override_snapshot" };
+    if (String(row.checkpointTimezone) !== timezone) return { ok: false, attempted: true, reason: "timezone" };
+    if (String(row.inputBindingDigest) !== this.metricInputBindingDigest(input.overrideSnapshot)) {
+      return { ok: false, attempted: true, reason: "input_binding" };
+    }
+    const state = this.parseMetricCheckpointState(String(row.stateJson), String(row.stateHash));
+    if (state === null) return { ok: false, attempted: true, reason: "checkpoint_state" };
+    const zoneStart = localDateAt(boundaries.fitness, timezone);
+    // 证据链一致性（O09 步骤 2/7）：前缀日只用 `observedAt < prefixAt` 的证据，
+    // 所以只比这一段。三类经 active run 读取的证据按记录的时刻集合比；RHR/VO2 两边现算。
+    const evidenceVerdict = this.checkZoneEvidenceParity({
+      snapshot: state.evidence, parentEvaluatedAt: String(row.evaluatedAt),
+      currentAsOf: input.request.evaluatedAt, zoneStart, timezone
+    });
+    if (evidenceVerdict !== null) return { ok: false, attempted: true, reason: evidenceVerdict };
+
+    const parentMetricRunId = String(row.metricRunId);
+    const parentModelRunId = String(row.modelRunId);
+    const parentEvaluatedAt = String(row.evaluatedAt);
+    if (!Number.isFinite(Date.parse(parentEvaluatedAt))) return { ok: false, attempted: true, reason: "parent_evaluated_at" };
+    const parentThroughDate = localDateAt(parentEvaluatedAt, timezone);
+    if (String(row.throughLocalDate) !== parentThroughDate) return { ok: false, attempted: true, reason: "checkpoint_through" };
+    const first = this.database.prepare(
+      "SELECT MIN(local_date) AS firstDate, COUNT(*) AS rowCount FROM daily_zone_profiles WHERE training_metric_run_id = ?"
+    ).get(parentMetricRunId) as unknown as { firstDate: string | null; rowCount: number };
+    const firstDate = first.firstDate ?? localDateAt(
+      input.features[0]?.workoutStartAt ?? input.request.evaluatedAt, timezone);
+    if (zoneStart < firstDate) return { ok: false, attempted: true, reason: "boundary_before_parent" };
+    if (zoneStart > addDays(parentThroughDate, 1)) return { ok: false, attempted: true, reason: "boundary_gap" };
+    // 前缀必须**稠密**：拷贝 [firstDate, zoneStart) 与重算 [zoneStart, throughDate) 拼起来
+    // 覆盖全区间，中间不能有洞（洞在发布层面看起来像"那天没有数据"，不是像"没算"）。
+    const prefixDays = Math.max(0, daysBetween(firstDate, zoneStart));
+    if (Number(first.rowCount) !== daysBetween(firstDate, parentThroughDate) + 1) {
+      return { ok: false, attempted: true, reason: "parent_profiles_not_dense" };
+    }
+    // 特征前缀：新 run 的 feature run 的父级必须**正是**父 model run 的 feature run。
+    // 没有这条，负荷前缀就可能与"这批特征"不是同一代事实 —— 那是"混代复用"。
+    const parentFeatureRunId = String((this.database.prepare(
+      "SELECT feature_run_id AS id FROM model_runs WHERE id = ?"
+    ).get(parentModelRunId) as { id: string }).id);
+    const currentFeature = this.database.prepare(`
+      SELECT feature.parent_feature_run_id AS parent
+      FROM training_metric_runs metric
+      JOIN model_runs model ON model.id = metric.model_run_id
+      JOIN feature_runs feature ON feature.id = model.feature_run_id
+      WHERE metric.id = ?
+    `).get(input.metricRunId) as { parent: string | null } | undefined;
+    if (!currentFeature || currentFeature.parent === null || currentFeature.parent !== parentFeatureRunId) {
+      return { ok: false, attempted: true, reason: "feature_prefix" };
+    }
+    // 逐表前缀完整性：没有对应 feature / 分区行的父行会在集合拷贝里**静默丢行**。
+    const missing = this.database.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM workout_training_loads old
+          WHERE old.training_metric_run_id = ? AND old.local_date < ?
+            AND NOT EXISTS (SELECT 1 FROM workout_features f JOIN model_runs m ON m.feature_run_id = f.feature_run_id
+              WHERE m.id = ? AND f.training_session_id = old.training_session_id)) AS loadsMissingFeature,
+        (SELECT COUNT(*) FROM workout_zone_summaries old
+          JOIN workout_training_loads load ON load.training_metric_run_id = old.training_metric_run_id
+            AND load.training_session_id = old.training_session_id
+          WHERE old.training_metric_run_id = ? AND load.local_date < ?
+            AND NOT EXISTS (SELECT 1 FROM workout_features f JOIN model_runs m ON m.feature_run_id = f.feature_run_id
+              WHERE m.id = ? AND f.training_session_id = old.training_session_id)) AS summariesMissingParent
+    `).get(parentMetricRunId, zoneStart, parentModelRunId, parentMetricRunId, zoneStart, parentModelRunId) as unknown as { loadsMissingFeature: number; summariesMissingParent: number };
+    if (Number(missing.loadsMissingFeature) !== 0 || Number(missing.summariesMissingParent) !== 0) {
+      return { ok: false, attempted: true, reason: "prefix_rows_incomplete" };
+    }
+    // 复用链尾：`zoneStart-1` 那天的那一行就是下一段链的 `previous`。
+    const previousRow = prefixDays === 0 ? undefined : this.database.prepare(
+      "SELECT * FROM daily_zone_profiles WHERE training_metric_run_id = ? AND local_date = ?"
+    ).get(parentMetricRunId, addDays(zoneStart, -1)) as unknown as Record<string, unknown> | undefined;
+    if (prefixDays > 0 && !previousRow) return { ok: false, attempted: true, reason: "missing_previous_profile" };
+    // 状态与**库中事实**必须对齐：链尾 = 父 run 最后一天那一行；日级种子 = 父 run 最后一天的 EWMA。
+    const parentLastProfileRow = this.database.prepare(
+      "SELECT * FROM daily_zone_profiles WHERE training_metric_run_id = ? AND local_date = ?"
+    ).get(parentMetricRunId, parentThroughDate) as unknown as Record<string, unknown> | undefined;
+    if (parentLastProfileRow === undefined) return { ok: false, attempted: true, reason: "missing_parent_tail_profile" };
+    const parentTailProfile = this.dailyZoneProfileFromRow(parentLastProfileRow);
+    if (state.zonePrevious === null || !this.zoneChainMatchesProfile(state.zonePrevious, parentTailProfile)) {
+      return { ok: false, attempted: true, reason: "zone_chain_mismatch" };
+    }
+    const parentTailDaily = this.database.prepare(`SELECT local_date AS localDate, acute_ewma AS acute, chronic_ewma AS chronic,
+      load_workout_count AS workoutCount, history_days AS historyDays FROM daily_training_metrics
+      WHERE training_metric_run_id = ? AND local_date = ?`).get(parentMetricRunId, parentThroughDate) as unknown as
+      { localDate: string; acute: number; chronic: number; workoutCount: number; historyDays: number } | undefined;
+    if (state.daily === null || parentTailDaily === undefined ||
+      state.daily.localDate !== parentTailDaily.localDate ||
+      state.daily.acuteEwma !== Number(parentTailDaily.acute) ||
+      state.daily.chronicEwma !== Number(parentTailDaily.chronic) ||
+      state.daily.workoutCount !== Number(parentTailDaily.workoutCount) ||
+      state.daily.historyDays !== Number(parentTailDaily.historyDays)) {
+      return { ok: false, attempted: true, reason: "daily_seed_mismatch" };
+    }
+    // 距离队列的来源证明：按父 run 的同一套判据重算期望队列并**逐条比对**（含顺序）。
+    // 这证明的是"队列就是这批特征事实推出来的那一条"，而不是"某个数字看着合理"。
+    const expectedQueue = this.deriveDistanceQueue(
+      (this.database.prepare("SELECT feature_run_id AS id FROM model_runs WHERE id = ?").get(parentModelRunId) as { id: string }).id,
+      input.overrideSnapshot
+    );
+    if (expectedQueue.length !== state.distanceQueue.length ||
+      expectedQueue.some((entry, index) => entry.observedAt !== state.distanceQueue[index]!.observedAt ||
+        Math.abs(entry.distanceMeters - state.distanceQueue[index]!.distanceMeters) > 1e-6)) {
+      return { ok: false, attempted: true, reason: "distance_queue_provenance" };
+    }
+    return {
+      ok: true,
+      plan: {
+        parentMetricRunId, parentModelRunId, parentEvaluatedAt, parentThroughDate, firstDate, zoneStart,
+        previousProfile: previousRow === undefined ? null : this.dailyZoneProfileFromRow(previousRow),
+        distanceQueue: state.distanceQueue.map((entry) => ({ ...entry })),
+        state
+      }
+    };
+  }
+
+  /**
+   * 负荷／分区／日级三域入口（O09 步骤 1/3/4/7）。
+   *
+   * 复用路径**先证明、后写入**：前缀证明在写任何一行之前完成；证明失败 ⇒ 一行都没有写、
+   * 退回全量重算并把 `reused` 记 0。绝不让"证明失败"看起来像"复用成功"。
+   */
   private replayTrainingMetrics(
     jobId: string,
     metricRunId: string,
@@ -1553,34 +2232,507 @@ export class RecomputePipeline {
     const sessions = new Map(
       this.loadSessions(request.evaluatedAt).map((session) => [session.trainingSessionId, session])
     );
-    const zoneProfiles = this.buildAndPersistZoneProfiles(metricRunId, features, sessions, request);
-    const insert = this.database.prepare(`
+    const resolved = this.resolveMetricReuse({ request, metricRunId, features, overrideSnapshot });
+    if (resolved.ok) {
+      const reused = this.replayTrainingMetricsReused(jobId, metricRunId, features, sessions, request, overrideSnapshot, resolved.plan);
+      if (reused.ok) {
+        this.pendingReuseCounters = reused.counters;
+        return;
+      }
+      const full = this.replayTrainingMetricsFull(jobId, metricRunId, features, sessions, request, overrideSnapshot);
+      this.pendingReuseCounters = {
+        attempted: true, proof: "rejected", rejectionReason: reused.reason,
+        loads: { reused: 0, recomputed: full.loads },
+        zoneProfiles: { reused: 0, recomputed: full.zoneProfiles },
+        dailyMetrics: { reused: 0, recomputed: full.dailyMetrics },
+        checkpointWritten: full.checkpointWritten, reuseFromLocalDate: null, reuseThroughLocalDate: null
+      };
+      return;
+    }
+    const full = this.replayTrainingMetricsFull(jobId, metricRunId, features, sessions, request, overrideSnapshot);
+    this.pendingReuseCounters = {
+      attempted: resolved.attempted, proof: resolved.attempted ? "rejected" : "not_attempted",
+      rejectionReason: resolved.reason,
+      loads: { reused: 0, recomputed: full.loads },
+      zoneProfiles: { reused: 0, recomputed: full.zoneProfiles },
+      dailyMetrics: { reused: 0, recomputed: full.dailyMetrics },
+      checkpointWritten: full.checkpointWritten, reuseFromLocalDate: null, reuseThroughLocalDate: null
+    };
+  }
+
+  /**
+   * 全量路径（O09 之前的行为）：从第一个 feature／最早负荷日算到 `evaluatedAt`。
+   * 复用被拒或没有增量计划时走它；它同样写 checkpoint —— 链的**起点**必须是一条全量 run，
+   * 否则第二次分析永远没有可复用的来源。
+   */
+  private replayTrainingMetricsFull(
+    jobId: string,
+    metricRunId: string,
+    features: WorkoutFeatureVector[],
+    sessions: Map<string, SessionRow>,
+    request: RecomputeRequest,
+    overrideSnapshot: OverrideSnapshot
+  ): { loads: number; zoneProfiles: number; dailyMetrics: number; checkpointWritten: boolean } {
+    const throughDate = localDateAt(request.evaluatedAt, request.timezoneIdentifier);
+    const built = this.buildZoneProfilesRange(metricRunId, features, sessions, request, { startDate: null, previous: null });
+    this.persistZoneProfileRows(built.rows);
+    const pass = this.buildTrainingLoadsRange(jobId, metricRunId, features, sessions, request, overrideSnapshot, built.profiles, {
+      skipTrainingSessionIds: null, distanceSeed: []
+    });
+    this.persistTrainingLoadWrites(pass);
+    const loads = pass.loads;
+    const startDate = loads[0]?.localDate ?? throughDate;
+    const physEvidence = this.loadDailyPhysEvidence(startDate, throughDate, request.timezoneIdentifier, request.evaluatedAt);
+    const daily = buildDailyTrainingMetrics(loads, throughDate, physEvidence);
+    this.persistDailyTrainingMetrics(metricRunId, daily, request, false);
+    const checkpointWritten = this.writeTrainingMetricCheckpoint({
+      metricRunId, request, overrideSnapshot, throughDate,
+      state: this.buildMetricCheckpointState({
+        zoneProfiles: built.profiles, throughDate, distanceQueue: pass.distanceQueue, daily,
+        evidence: built.evidence
+      }),
+      prefixFromLocalDate: null, prefixThroughLocalDate: null,
+      counters: {
+        loads: { reused: 0, recomputed: loads.length },
+        zoneProfiles: { reused: 0, recomputed: built.rows.length },
+        dailyMetrics: { reused: 0, recomputed: daily.length }
+      }
+    });
+    return { loads: loads.length, zoneProfiles: built.rows.length, dailyMetrics: daily.length, checkpointWritten };
+  }
+
+  /**
+   * 复用路径（O09 步骤 3/4）：集合拷贝安全前缀 + 从 checkpoint 恢复滚动状态后算到 `evaluatedAt`。
+   *
+   * 顺序（**证明先于写入**）：
+   * 1. 父 run 的前缀负荷（内存）→ 独立重算前缀日指标并逐字段比对父 run 已落库的行；
+   *    不一致就从第一处不一致起收窄复用区间（不是"整体放弃"，也不是"当作一致"）。
+   * 2. 后缀分区（从父 run 的链尾续）与后缀负荷（从 checkpoint 的距离队列续）—— 只在内存里。
+   * 3. 用**全部负荷**（拷贝前缀 ∪ 重算后缀）走真正的 `buildDailyTrainingMetrics`，
+   *    后缀日指标直接取它的输出 ⇒ 与离线从头计算逐位一致，不需要手写第二套平滑。
+   * 4. 全部通过之后才：集合拷贝前缀 → 落库后缀 → 写新 checkpoint。
+   */
+  private replayTrainingMetricsReused(
+    jobId: string,
+    metricRunId: string,
+    features: WorkoutFeatureVector[],
+    sessions: Map<string, SessionRow>,
+    request: RecomputeRequest,
+    overrideSnapshot: OverrideSnapshot,
+    plan: MetricReusePlan
+  ): { ok: true; counters: MetricReuseCounters } | { ok: false; reason: string } {
+    const timezone = request.timezoneIdentifier;
+    const throughDate = localDateAt(request.evaluatedAt, timezone);
+    const parentLoads = this.loadPersistedTrainingLoads(plan.parentMetricRunId);
+    const prefixLoads = parentLoads.filter((load) => load.localDate < plan.zoneStart);
+    const evidenceStart = features.length === 0
+      ? (prefixLoads[0]?.localDate ?? throughDate)
+      : [prefixLoads[0]?.localDate ?? throughDate, localDateAt(features[0]!.workoutStartAt, timezone)].sort()[0]!;
+    const physEvidence = this.loadDailyPhysEvidence(evidenceStart, throughDate, timezone, request.evaluatedAt);
+
+    // ---- 1. 前缀证明（还没有写任何一行）----
+    const proof = this.proveDailyPrefix(plan, prefixLoads, physEvidence);
+    if (!proof.ok) return { ok: false, reason: proof.reason };
+    const dailyCopyThrough = proof.dailyCopyThrough;
+
+    // ---- 2. 后缀计算（内存）----
+    const suffix = this.buildZoneProfilesRange(metricRunId, features, sessions, request, {
+      startDate: plan.zoneStart, previous: plan.previousProfile
+    });
+    // 🔴 距离参考队列的种子必须**截到边界**：从头的循环在处理某个后缀训练时，队列里只有
+    // 它之前（更早）的训练；把父 run 的整条队列都塞进去，就等于让"未来"的训练参与
+    // 90 天参考 —— 实测（合成库的训练内更正）会让边界后第一场训练的负荷偏 1.2%。
+    // 队列是按时间升序的，所以"取前缀"就是取 `observedAt < 第一场后缀训练的开始时刻`。
+    const suffixFeaturesInOrder = features.filter((feature) => localDateAt(feature.workoutStartAt, timezone) >= plan.zoneStart);
+    const firstSuffixStartAt = suffixFeaturesInOrder[0]?.workoutStartAt ?? null;
+    const distanceSeed = firstSuffixStartAt === null
+      ? []
+      : plan.distanceQueue.filter((entry) => entry.observedAt < firstSuffixStartAt);
+    const pass = this.buildTrainingLoadsRange(jobId, metricRunId, features, sessions, request, overrideSnapshot, suffix.profiles, {
+      skipTrainingSessionIds: new Set(features
+        .filter((feature) => localDateAt(feature.workoutStartAt, timezone) < plan.zoneStart)
+        .map((feature) => feature.trainingSessionId)),
+      distanceSeed
+    });
+    const allLoads = [...prefixLoads, ...pass.loads];
+    const daily = buildDailyTrainingMetrics(allLoads, throughDate, physEvidence);
+
+    // ---- 3. 后缀日指标 = 全量输入上真算式的结果（不是第二套平滑）----
+    const copyIndex = daily.findIndex((metric) => metric.localDate >= dailyCopyThrough);
+    const dailyReused = copyIndex < 0 ? daily.length : copyIndex;
+    const suffixDaily = daily.slice(dailyReused);
+    if (dailyReused > 0) {
+      // 收窄后的复用区间必须仍在"已证明"的范围内（证明是针对 [firstDate, dailyCopyThrough) 的）。
+      const lastReused = daily[dailyReused - 1]!;
+      if (lastReused.localDate >= dailyCopyThrough) return { ok: false, reason: "daily_suffix_alignment" };
+    }
+    const zoneRows = suffix.rows.length;
+    const profileRows = Number(this.database.prepare(
+      "SELECT COUNT(*) AS n FROM daily_zone_profiles WHERE training_metric_run_id = ? AND local_date < ?"
+    ).get(plan.parentMetricRunId, plan.zoneStart)?.n ?? 0);
+    const loadRows = prefixLoads.length;
+    // ---- 4. 写入 ----
+    this.copyMetricPrefixRows(metricRunId, plan, dailyCopyThrough);
+    this.persistZoneProfileRows(suffix.rows);
+    this.persistTrainingLoadWrites(pass);
+    this.persistDailyTrainingMetrics(metricRunId, daily, request, false, dailyReused);
+    const counters: MetricReuseCounters = {
+      attempted: true, proof: "verified", rejectionReason: null,
+      loads: { reused: loadRows, recomputed: pass.loads.length },
+      zoneProfiles: { reused: profileRows, recomputed: zoneRows },
+      dailyMetrics: { reused: dailyReused, recomputed: suffixDaily.length },
+      checkpointWritten: false,
+      reuseFromLocalDate: loadRows > 0 || profileRows > 0 ? plan.firstDate : null,
+      reuseThroughLocalDate: dailyCopyThrough > plan.firstDate ? addDays(dailyCopyThrough, -1) : null
+    };
+    const checkpointWritten = this.writeTrainingMetricCheckpoint({
+      metricRunId, request, overrideSnapshot, throughDate,
+      state: this.buildMetricCheckpointState({
+        zoneProfiles: suffix.profiles, throughDate, distanceQueue: pass.distanceQueue, daily,
+        evidence: suffix.evidence
+      }),
+      prefixFromLocalDate: counters.reuseFromLocalDate,
+      prefixThroughLocalDate: counters.reuseThroughLocalDate,
+      counters: {
+        loads: counters.loads, zoneProfiles: counters.zoneProfiles, dailyMetrics: counters.dailyMetrics
+      }
+    });
+    return { ok: true, counters: { ...counters, checkpointWritten } };
+  }
+
+  /**
+   * 前缀证明（O09 步骤 7 的"证明失败不假装复用成功"）。
+   *
+   * 判据：拿父 run 的**前缀负荷**独立重算一遍日指标，与父 run **已落库**的行逐字段比对
+   * （分类与 missing reason 精确比较，浮点留余量）。第一处不一致起，复用区间收窄到它之前 ——
+   * 那之前的行已经被逐字段证明过，之后的行走重算。
+   *
+   * 为什么这件事非做不可：日指标的输入之一是**恢复物理状态**，而恢复证据的"到达时间"
+   * 按每天自己的 `asOf` 判定（`publicationAt` 只在该日之前已有发布完成时才非空）。
+   * 一次新导入会把 `import_completed_at` 推后，于是**某些历史日**的可用性判定随之改变 ——
+   * 那时前缀就不再等于离线从头计算的结果。这个检查把"边界声明错了"变成一次可观察的收窄，
+   * 而不是一次静默的错误复用。
+   */
+  private proveDailyPrefix(
+    plan: MetricReusePlan,
+    prefixLoads: WorkoutTrainingLoad[],
+    physEvidence: DailyPhysEvidence[]
+  ): { ok: true; dailyCopyThrough: string } | { ok: false; reason: string } {
+    const candidate = prefixLoads.length === 0
+      ? []
+      : buildDailyTrainingMetrics(prefixLoads, addDays(plan.zoneStart, -1), physEvidence);
+    const rows = this.database.prepare(`
+      SELECT local_date AS localDate, daily_load AS load, current_7d_load AS current7dLoad,
+             previous_7d_load AS previous7dLoad, acute_ewma AS acuteEwma, chronic_ewma AS chronicEwma,
+             load_ratio AS loadRatio, ramp_rate AS rampRate, monotony, strain, workout_count AS workoutCount,
+             training_status AS trainingStatus, confidence, explanation_codes_json AS codesJson
+      FROM daily_training_metrics WHERE training_metric_run_id = ? AND local_date < ?
+      ORDER BY local_date
+    `).all(plan.parentMetricRunId, plan.zoneStart) as unknown as Array<Record<string, unknown>>;
+    const byDate = new Map(rows.map((row) => [String(row.localDate), row]));
+    for (const metric of candidate) {
+      const row = byDate.get(metric.localDate);
+      if (row === undefined) return { ok: false, reason: `daily_prefix_missing:${metric.localDate}` };
+      if (!this.dailyRowMatchesMetric(row, metric)) {
+        const narrowed = metric.localDate > plan.firstDate ? metric.localDate : plan.firstDate;
+        return { ok: true, dailyCopyThrough: narrowed };
+      }
+    }
+    if (byDate.size !== candidate.length) return { ok: false, reason: "daily_prefix_shape" };
+    return { ok: true, dailyCopyThrough: plan.zoneStart };
+  }
+
+  /** 已落库的一行日指标 vs 重算出来的一行：业务值（浮点留余量）与分类/解释码（精确）都要一致。 */
+  private dailyRowMatchesMetric(row: Record<string, unknown>, metric: DailyTrainingMetric): boolean {
+    const sameNumber = (left: unknown, right: number | null): boolean => {
+      if (left === null || left === undefined) return right === null;
+      if (right === null) return false;
+      const value = Number(left);
+      return Number.isFinite(value) && Math.abs(value - right) <= 1e-6 * Math.max(1, Math.abs(right));
+    };
+    return String(row.trainingStatus) === metric.trainingStatus &&
+      String(row.codesJson) === JSON.stringify(metric.statusExplanations.map((explanation) => explanation.code)) &&
+      sameNumber(row.workoutCount, metric.workoutCount) &&
+      sameNumber(row.load, metric.load) && sameNumber(row.current7dLoad, metric.current7dLoad) &&
+      sameNumber(row.previous7dLoad, metric.previous7dLoad) && sameNumber(row.acuteEwma, metric.acuteEwma) &&
+      sameNumber(row.chronicEwma, metric.chronicEwma) && sameNumber(row.loadRatio, metric.loadRatio) &&
+      sameNumber(row.rampRate, metric.rampRate) && sameNumber(row.monotony, metric.monotony) &&
+      sameNumber(row.strain, metric.strain) && sameNumber(row.confidence, metric.loadConfidence);
+  }
+
+  /**
+   * 集合 SQL 拷贝安全前缀（O09 步骤 3），按依赖顺序：
+   * `daily_zone_profiles` → `workout_training_loads`（含域快照）→ `workout_zone_summaries`
+   * → `daily_training_metrics`。
+   *
+   * 外键口径：
+   * - 新 id 由 SQL 现算（`<kind>:<新 run>:<业务键>`），**不**沿用源 run 的 id ——
+   *   逐 run 分区的确定性 id 一旦带上旧 run，就是这个缺陷本身；
+   * - `feature_id` / `zone_profile_id` 通过 JOIN 新 run 的行重映射
+   *   （`workout_zone_summaries.zone_profile_id` 是 NOT NULL，必须先有分区行）；
+   * - `daily_training_metrics` 的 `history_days` / `load_workout_count` 是累计列，**原样**拷贝。
+   *
+   * 拷贝是 INSERT…SELECT（每表一条语句），不是逐行循环；行数在计划阶段已证明等于父 run 的前缀行数，
+   * 拷完再核对一次，少了就抛错（宁可任务失败重试，不可静默发布半份前缀）。
+   */
+  private copyMetricPrefixRows(metricRunId: string, plan: MetricReusePlan, dailyCopyThrough: string): void {
+    const newFeatureRunId = String(this.database.prepare(
+      "SELECT feature_run_id AS id FROM model_runs WHERE id = (SELECT model_run_id FROM training_metric_runs WHERE id = ?)"
+    ).get(metricRunId)?.id ?? "");
+    const newModelRunId = String(this.database.prepare(
+      "SELECT model_run_id AS id FROM training_metric_runs WHERE id = ?"
+    ).get(metricRunId)?.id ?? "");
+    const parent = plan.parentMetricRunId;
+    const profiles = this.database.prepare(`
+      INSERT INTO daily_zone_profiles (
+        id, training_metric_run_id, local_date, timezone_identifier, effective_at, data_through_at,
+        resting_heart_rate_bpm, maximum_heart_rate_bpm, threshold_pace_seconds_per_km,
+        heart_rate_source, pace_source, heart_rate_confidence, pace_confidence, profile_status,
+        heart_rate_bands_json, pace_bands_json, evidence_json, created_at
+      )
+      SELECT ? || old.local_date, ?, old.local_date, old.timezone_identifier,
+        old.effective_at, old.data_through_at, old.resting_heart_rate_bpm, old.maximum_heart_rate_bpm,
+        old.threshold_pace_seconds_per_km, old.heart_rate_source, old.pace_source,
+        old.heart_rate_confidence, old.pace_confidence, old.profile_status,
+        old.heart_rate_bands_json, old.pace_bands_json, old.evidence_json, old.created_at
+      FROM daily_zone_profiles old
+      WHERE old.training_metric_run_id = ? AND old.local_date < ?
+    `).run(`daily_zone_profile:${metricRunId}:`, metricRunId, parent, plan.zoneStart);
+    const loads = this.database.prepare(`
       INSERT INTO workout_training_loads (
-        id, training_metric_run_id, training_session_id, feature_id,
-        local_date, timezone_identifier, distance_km, duration_seconds,
-        training_load, intensity, load_source, confidence, heart_rate_coverage,
-        average_heart_rate_bpm, elevation_gain_meters, rpe, session_type,
-        explanation_codes_json, provenance_json, computed_at, zone_profile_id,
-        stimulus_type, raw_hrr_trimp, internal_load, pace_load,
-        distance_reference_meters, distance_exposure_ratio, distance_factor,
-        heart_rate_load_confidence, pace_load_confidence
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    const insertZoneSummary = this.database.prepare(`
+        id, training_metric_run_id, training_session_id, feature_id, local_date, timezone_identifier,
+        distance_km, duration_seconds, training_load, intensity, load_source, confidence,
+        heart_rate_coverage, average_heart_rate_bpm, elevation_gain_meters, rpe, session_type,
+        explanation_codes_json, provenance_json, computed_at, zone_profile_id, stimulus_type,
+        raw_hrr_trimp, internal_load, pace_load, distance_reference_meters, distance_exposure_ratio,
+        distance_factor, heart_rate_load_confidence, pace_load_confidence
+      )
+      SELECT ? || old.training_session_id, ?, old.training_session_id, fresh.id,
+        old.local_date, old.timezone_identifier, old.distance_km, old.duration_seconds, old.training_load,
+        old.intensity, old.load_source, old.confidence, old.heart_rate_coverage, old.average_heart_rate_bpm,
+        old.elevation_gain_meters, old.rpe, old.session_type, old.explanation_codes_json, old.provenance_json,
+        old.computed_at, profile.id, old.stimulus_type, old.raw_hrr_trimp, old.internal_load, old.pace_load,
+        old.distance_reference_meters, old.distance_exposure_ratio, old.distance_factor,
+        old.heart_rate_load_confidence, old.pace_load_confidence
+      FROM workout_training_loads old
+      JOIN workout_features fresh ON fresh.feature_run_id = ? AND fresh.training_session_id = old.training_session_id
+      JOIN daily_zone_profiles profile ON profile.training_metric_run_id = ? AND profile.local_date = old.local_date
+      WHERE old.training_metric_run_id = ? AND old.local_date < ?
+    `).run(`workout_training_load:${metricRunId}:`, metricRunId, newFeatureRunId, metricRunId, parent, plan.zoneStart);
+    const summaries = this.database.prepare(`
       INSERT INTO workout_zone_summaries (
-        id, training_metric_run_id, training_session_id, feature_id, zone_profile_id,
-        stimulus_type, secondary_stimulus_types_json, stimulus_confidence,
-        heart_rate_coverage, pace_coverage, heart_rate_exposure_json,
-        pace_exposure_json, stimulus_scores_json, explanation_codes_json, computed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+        id, training_metric_run_id, training_session_id, feature_id, zone_profile_id, stimulus_type,
+        secondary_stimulus_types_json, stimulus_confidence, heart_rate_coverage, pace_coverage,
+        heart_rate_exposure_json, pace_exposure_json, stimulus_scores_json, explanation_codes_json, computed_at
+      )
+      SELECT ? || old.training_session_id, ?, old.training_session_id, fresh.id,
+        profile.id, old.stimulus_type, old.secondary_stimulus_types_json, old.stimulus_confidence,
+        old.heart_rate_coverage, old.pace_coverage, old.heart_rate_exposure_json, old.pace_exposure_json,
+        old.stimulus_scores_json, old.explanation_codes_json, old.computed_at
+      FROM workout_zone_summaries old
+      JOIN workout_training_loads load ON load.training_metric_run_id = ?
+        AND load.training_session_id = old.training_session_id
+      JOIN daily_zone_profiles profile ON profile.training_metric_run_id = ? AND profile.local_date = load.local_date
+      JOIN workout_features fresh ON fresh.feature_run_id = ? AND fresh.training_session_id = old.training_session_id
+      WHERE old.training_metric_run_id = ?
+    `).run(`workout_zone_summary:${metricRunId}:`, metricRunId, metricRunId, metricRunId, newFeatureRunId, parent);
+    const daily = this.database.prepare(`
+      INSERT INTO daily_training_metrics (
+        id, training_metric_run_id, local_date, timezone_identifier, distance_km, duration_seconds,
+        workout_count, daily_load, current_7d_load, previous_7d_load, acute_ewma, chronic_ewma,
+        load_ratio, ramp_rate, monotony, strain, recovery_evidence, history_days, load_workout_count,
+        training_status, confidence, explanation_codes_json, explanation_json, computed_at
+      )
+      SELECT ? || old.local_date, ?, old.local_date, old.timezone_identifier,
+        old.distance_km, old.duration_seconds, old.workout_count, old.daily_load, old.current_7d_load,
+        old.previous_7d_load, old.acute_ewma, old.chronic_ewma, old.load_ratio, old.ramp_rate, old.monotony,
+        old.strain, old.recovery_evidence, old.history_days, old.load_workout_count, old.training_status,
+        old.confidence, old.explanation_codes_json, old.explanation_json, old.computed_at
+      FROM daily_training_metrics old
+      WHERE old.training_metric_run_id = ? AND old.local_date < ?
+    `).run(`daily_training_metric:${metricRunId}:`, metricRunId, parent, dailyCopyThrough);
+    // 逐训练域快照同时搬过去：新 run 的 `load_vector` / `zone_coherence` 覆盖度不能因为复用而残缺。
+    this.database.prepare(`
+      INSERT INTO model_domain_snapshots (model_run_id, domain, snapshot_key, as_of, payload_json, payload_hash)
+      SELECT ?, old.domain, old.snapshot_key, old.as_of, old.payload_json, old.payload_hash
+      FROM model_domain_snapshots old
+      WHERE old.model_run_id = ? AND old.domain IN ('load_vector', 'zone_coherence')
+        AND EXISTS (SELECT 1 FROM workout_training_loads load
+          WHERE load.training_metric_run_id = ? AND load.training_session_id = old.snapshot_key
+            AND load.local_date < ?)
+    `).run(newModelRunId, plan.parentModelRunId, metricRunId, plan.zoneStart);
+    const expectedProfiles = Number(this.database.prepare(
+      "SELECT COUNT(*) AS n FROM daily_zone_profiles WHERE training_metric_run_id = ? AND local_date < ?"
+    ).get(parent, plan.zoneStart)?.n ?? 0);
+    const expectedLoads = Number(this.database.prepare(
+      "SELECT COUNT(*) AS n FROM workout_training_loads WHERE training_metric_run_id = ? AND local_date < ?"
+    ).get(parent, plan.zoneStart)?.n ?? 0);
+    const expectedSummaries = Number(this.database.prepare(`
+      SELECT COUNT(*) AS n FROM workout_zone_summaries old
+      WHERE old.training_metric_run_id = ?
+        AND EXISTS (SELECT 1 FROM workout_training_loads load
+          WHERE load.training_metric_run_id = ? AND load.training_session_id = old.training_session_id
+            AND load.local_date < ?)
+    `).get(parent, parent, plan.zoneStart)?.n ?? 0);
+    const expectedDaily = Number(this.database.prepare(
+      "SELECT COUNT(*) AS n FROM daily_training_metrics WHERE training_metric_run_id = ? AND local_date < ?"
+    ).get(parent, dailyCopyThrough)?.n ?? 0);
+    const copied = {
+      profiles: Number(profiles.changes), loads: Number(loads.changes),
+      summaries: Number(summaries.changes), daily: Number(daily.changes)
+    };
+    if (copied.profiles !== expectedProfiles || copied.loads !== expectedLoads ||
+      copied.summaries !== expectedSummaries || copied.daily !== expectedDaily) {
+      throw new Error(
+        `Metric prefix copy is incomplete (profiles ${copied.profiles}/${expectedProfiles}, ` +
+        `loads ${copied.loads}/${expectedLoads}, summaries ${copied.summaries}/${expectedSummaries}, ` +
+        `daily ${copied.daily}/${expectedDaily})`
+      );
+    }
+  }
+
+  /**
+   * 滚动状态（O09 步骤 2/4）：分区链尾、**完整**的距离参考队列、日级平滑与累计种子。
+   *
+   * 队列刻意**不按天数截尾**：队列的用途是"任何未来的后缀都要拿它做 90 天参考"，
+   * 而未来的边界可以落在任何历史位置 —— 截尾后的队列对更早的后缀就是**错的历史**。
+   * 超过 {@link MAX_DISTANCE_QUEUE_ENTRIES} 时记 `distanceQueueComplete = false` 并存空队列：
+   * 那是"不可复用"，不是"用一个不完整的队列凑合"。
+   */
+  private buildMetricCheckpointState(input: {
+    zoneProfiles: Map<string, DailyZoneProfile>;
+    throughDate: string;
+    distanceQueue: readonly DistanceQueueEntry[];
+    daily: readonly DailyTrainingMetric[];
+    evidence: ZoneEvidenceSnapshot;
+  }): TrainingMetricCheckpointState {
+    const tailProfile = input.zoneProfiles.get(input.throughDate) ??
+      [...input.zoneProfiles.values()].at(-1) ?? null;
+    const lastDaily = input.daily.at(-1) ?? null;
+    const complete = input.distanceQueue.length <= MAX_DISTANCE_QUEUE_ENTRIES;
+    return {
+      version: TRAINING_METRIC_CHECKPOINT_VERSION,
+      zonePrevious: this.zoneChainState(tailProfile),
+      evidence: {
+        sourceRunId: input.evidence.sourceRunId,
+        labeled: [...input.evidence.labeled], performance: [...input.evidence.performance],
+        threshold: [...input.evidence.threshold]
+      },
+      distanceQueueComplete: complete,
+      distanceQueue: complete ? input.distanceQueue.map((entry) => ({ ...entry })) : [],
+      daily: lastDaily === null ? null : {
+        localDate: lastDaily.localDate, acuteEwma: lastDaily.acuteEwma, chronicEwma: lastDaily.chronicEwma,
+        workoutCount: input.daily.reduce((sum, metric) => sum + metric.workoutCount, 0),
+        historyDays: input.daily.length
+      }
+    };
+  }
+
+  /**
+   * 距离参考队列的**来源证明**：按父 run 的同一套判据重算一遍期望队列，逐条比对。
+   *
+   * 判据与 `buildTrainingLoadsRange` 里的 `!excluded && distanceMeters > 0` 逐字同义：
+   * 会话必须 active、override 不得 exclude、平均配速不合理的训练除非被显式 include 否则排除、
+   * 距离必须为正。比对的是**整条队列**（含顺序），所以截断、伪造、漏项都会被抓到。
+   */
+  private deriveDistanceQueue(featureRunId: string, overrideSnapshot: OverrideSnapshot): DistanceQueueEntry[] {
+    const rows = this.database.prepare(`
+      SELECT feature.workout_start_at AS startAt, feature.distance_km AS distanceKm,
+             feature.missing_reasons_json AS missingReasons, feature.training_session_id AS trainingSessionId,
+             session.status AS sessionStatus
+      FROM workout_features feature
+      JOIN training_sessions session ON session.id = feature.training_session_id
+      WHERE feature.feature_run_id = ?
+      ORDER BY feature.workout_start_at, feature.id
+    `).all(featureRunId) as unknown as Array<{
+      startAt: string; distanceKm: number | null; missingReasons: string;
+      trainingSessionId: string; sessionStatus: string;
+    }>;
+    const queue: DistanceQueueEntry[] = [];
+    for (const row of rows) {
+      const override = overrideSnapshot.byTrainingSessionId.get(row.trainingSessionId) ?? null;
+      const implausible = (parseJson<string[]>(row.missingReasons, []).includes("implausible_average_pace")) &&
+        override?.statisticsParticipation !== "include";
+      const excluded = row.sessionStatus !== "active" ||
+        override?.statisticsParticipation === "exclude" || implausible;
+      const distanceMeters = row.distanceKm === null ? null : Number(row.distanceKm) * 1000;
+      if (excluded || distanceMeters === null || !(distanceMeters > 0)) continue;
+      queue.push({ observedAt: row.startAt, distanceMeters });
+    }
+    return queue;
+  }
+
+  /**
+   * 写本 run 的 checkpoint（O09 步骤 2）。
+   *
+   * 记录算法/配置版本、时区、override 摘要、输入绑定摘要与**滚动状态**；
+   * `state_hash` 是写入侧的完整性戳（防改动，不代替形状校验）。
+   * 状态一律从**已落库的行**里取（`zoneProfiles` 最后一天、`daily` 最后一行），
+   * 于是"状态"与"表里的前缀"天然对得上 —— 恢复时两者都要能对上才复用。
+   */
+  private writeTrainingMetricCheckpoint(input: {
+    metricRunId: string;
+    request: RecomputeRequest;
+    overrideSnapshot: OverrideSnapshot;
+    throughDate: string;
+    state: TrainingMetricCheckpointState;
+    prefixFromLocalDate: string | null;
+    prefixThroughLocalDate: string | null;
+    counters: Pick<MetricReuseCounters, "loads" | "zoneProfiles" | "dailyMetrics">;
+  }): boolean {
+    // 摘要一律走**与读取侧同一对函数**（`overrideSnapshotDigest` / `metricInputBindingDigest`）：
+    // 两处各写一份必然会漂移，而漂移的后果是"输入变了却仍然复用"。
+    const overrideDigest = this.overrideSnapshotDigest(input.overrideSnapshot);
+    const inputBindingDigest = this.metricInputBindingDigest(input.overrideSnapshot);
+    const stateJson = JSON.stringify(input.state);
+    this.database.prepare(`
+      INSERT OR REPLACE INTO training_metric_checkpoints (
+        id, training_metric_run_id, checkpoint_version, load_algorithm_version, zone_algorithm_version,
+        daily_algorithm_version, config_hash, zone_settings_digest, override_digest, input_binding_digest,
+        timezone_identifier, through_local_date, through_at, prefix_from_local_date, prefix_through_local_date,
+        state_json, state_hash, counters_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      deterministicId("training_metric_checkpoint", { metricRunId: input.metricRunId }),
+      input.metricRunId, TRAINING_METRIC_CHECKPOINT_VERSION, TRAINING_LOAD_CONFIG_VERSION,
+      TRAINING_ZONE_CONFIG_VERSION, DAILY_METRIC_ALGORITHM_VERSION,
+      String(this.database.prepare("SELECT config_hash AS hash FROM training_metric_runs WHERE id = ?")
+        .get(input.metricRunId)?.hash ?? ""),
+      this.zoneSettingsDigest(), overrideDigest, inputBindingDigest,
+      input.request.timezoneIdentifier, input.throughDate, input.request.evaluatedAt,
+      input.prefixFromLocalDate, input.prefixThroughLocalDate,
+      stateJson, configHash(input.state), JSON.stringify(input.counters), appNow()
+    );
+    return true;
+  }
+
+  /**
+   * 逐训练负荷与分区摘要的**计算**（O09 步骤 3/6）：只产出领域对象、待写行与域快照。
+   *
+   * `skipTrainingSessionIds` = 已由集合拷贝搬过来的训练（前缀），不再重算；
+   * `distanceSeed` = checkpoint 里的 90 天距离参考队列（从**边界之前**续上的那段历史）。
+   */
+  private buildTrainingLoadsRange(
+    jobId: string,
+    metricRunId: string,
+    features: WorkoutFeatureVector[],
+    sessions: Map<string, SessionRow>,
+    request: RecomputeRequest,
+    overrideSnapshot: OverrideSnapshot,
+    zoneProfiles: Map<string, DailyZoneProfile>,
+    options: { skipTrainingSessionIds: ReadonlySet<string> | null; distanceSeed: readonly DistanceQueueEntry[] }
+  ): TrainingLoadPass {
     const loads: WorkoutTrainingLoad[] = [];
-    const priorDistances: Array<{ observedAt: number; distanceMeters: number }> = [];
-    // O07 步骤 4：训练负荷/分区摘要/域快照的逐训练写入按分块短事务落地。
-    const writer = new ChunkedWriter(this.database, this.gate);
+    const writes: StagedLoadWrite[] = [];
+    const snapshots: StagedSnapshot[] = [];
+    const modelId = String(this.database.prepare(
+      "SELECT model_run_id AS model_run_id FROM training_metric_runs WHERE id=?"
+    ).get(metricRunId)?.model_run_id);
+    const priorDistances: DistanceQueueEntry[] = options.distanceSeed.map((entry) => ({ ...entry }));
     for (const [index, feature] of features.entries()) {
       this.throwIfCancelled(jobId);
       this.gate.yieldIfStale();
+      if (options.skipTrainingSessionIds?.has(feature.trainingSessionId)) continue;
       const session = sessions.get(feature.trainingSessionId);
       const override = overrideSnapshot.byTrainingSessionId.get(feature.trainingSessionId) ?? null;
       const implausibleStatistics = feature.missingReasons.includes("implausible_average_pace") &&
@@ -1590,12 +2742,11 @@ export class RecomputePipeline {
       const localDate = localDateAt(feature.workoutStartAt, request.timezoneIdentifier);
       const zoneProfile = zoneProfiles.get(localDate);
       if (!zoneProfile) throw new Error(`Missing zone profile for ${localDate}`);
-      const heartMetricSamples = session
-        ? this.metricSamplesForSession(session, heartRateType, (value) => value)
-        : [];
-      const speedSamples = session
-        ? this.metricSamplesForSession(session, runningSpeedType, (value, unit) => convertSpeedToMetersPerSecond(value, unit))
-        : [];
+      // O09 步骤 6：一次装配（心率/速度区间、30 秒平滑、高程聚合）在特征、最大心率证据、
+      // 分区与负荷四个阶段之间复用；这里拿到的是同一份缓存对象。
+      const assembly = session === undefined ? null : this.workoutAssembly(session);
+      const heartMetricSamples = assembly?.heartSamples ?? [];
+      const speedSamples = assembly?.speedSamples ?? [];
       const distanceMeters = feature.distanceKm === null ? null : feature.distanceKm * 1000;
       const averagePaceSecondsPerKm = feature.distanceKm !== null && feature.distanceKm > 0
         ? feature.durationSeconds / feature.distanceKm
@@ -1620,7 +2771,7 @@ export class RecomputePipeline {
       });
       const cutoff = Date.parse(feature.workoutStartAt) - 90 * 86_400_000;
       const distanceValues = priorDistances
-        .filter((item) => item.observedAt >= cutoff)
+        .filter((item) => Date.parse(item.observedAt) >= cutoff)
         .map((item) => item.distanceMeters);
       const distanceReferenceMeters = distanceValues.length >= 5 ? percentile(distanceValues, 0.75) : null;
       const breakdown = calculateCompositeTrainingLoad({
@@ -1654,93 +2805,125 @@ export class RecomputePipeline {
         observedMaxHeartRate: zoneProfile.maximumHeartRateBpm,
         rpe: override?.rpe ?? null,
         sessionType: feature.sessionType,
-        elevationGainMeters: session ? this.loadElevationGain(session.canonicalWorkoutId) : null,
+        elevationGainMeters: assembly === null ? null : assembly.elevationGainMeters(),
         sourceConfidence: feature.sourceConfidence,
         excluded,
         zoneSummary,
         loadBreakdown: breakdown
       });
       if (load) {
-        const modelId = String(this.database.prepare("SELECT model_run_id FROM training_metric_runs WHERE id=?").get(metricRunId)?.model_run_id);
-        writer.add(() => {
-        new SqliteModelReleaseRepository(this.database).putSnapshot(modelId,"load_vector",feature.trainingSessionId,feature.workoutStartAt,
-          buildLoadVectorV2({load,zoneSummary}));
-        new SqliteModelReleaseRepository(this.database).putSnapshot(modelId,"zone_coherence",feature.trainingSessionId,feature.workoutStartAt,zoneSummary);
-        insertZoneSummary.run(
-          deterministicId("workout_zone_summary", { metricRunId, trainingSessionId: feature.trainingSessionId }),
-          metricRunId, feature.trainingSessionId, feature.id, zoneProfile.id,
-          zoneSummary.stimulusType, JSON.stringify(zoneSummary.secondaryStimulusTypes),
-          zoneSummary.stimulusConfidence, zoneSummary.heartRateCoverage, zoneSummary.paceCoverage,
-          JSON.stringify(zoneSummary.heartRateExposure), JSON.stringify(zoneSummary.paceExposure),
-          JSON.stringify(zoneSummary.stimulusScores), JSON.stringify(zoneSummary.explanationCodes),
-          request.evaluatedAt
-        );
-        insert.run(
-          deterministicId("workout_training_load", {
-            trainingMetricRunId: metricRunId,
-            trainingSessionId: feature.trainingSessionId
-          }),
-          metricRunId,
-          feature.trainingSessionId,
-          feature.id,
-          load.localDate,
-          request.timezoneIdentifier,
-          load.distanceMeters === null ? null : load.distanceMeters / 1000,
-          load.durationSeconds,
-          load.load,
-          load.intensity,
-          load.source,
-          load.confidence,
-          feature.heartRateCoverage,
-          load.averageHeartRate,
-          load.elevationGainMeters,
-          load.rpe,
-          load.sessionType,
-          JSON.stringify(load.explanations.map((explanation) => explanation.code)),
-          JSON.stringify({
-            explanations: load.explanations,
-            zoneExplanations: zoneSummary.explanationCodes,
-            sourceConfidence: feature.sourceConfidence,
-            loadComposition: {
-              heartRateConfidence: load.breakdown.heartRateConfidence,
-              paceConfidence: load.breakdown.paceConfidence,
-              distanceFactor: load.breakdown.distanceFactor
-            },
-            statisticsParticipation: override?.statisticsParticipation ?? null
-          }),
-          request.evaluatedAt,
-          zoneProfile.id,
-          load.stimulusType,
-          load.breakdown.rawHrrTrimp,
-          load.breakdown.internalLoad,
-          load.breakdown.paceLoad,
-          load.breakdown.distanceReferenceMeters,
-          load.breakdown.distanceExposureRatio,
-          load.breakdown.distanceFactor,
-          load.breakdown.heartRateConfidence,
-          load.breakdown.paceConfidence
-        );
-        this.updateJobProgress(jobId, "training_metrics", index + 1, features.length, "Training load calculated");
+        snapshots.push({ domain: "load_vector", key: feature.trainingSessionId, asOf: feature.workoutStartAt, payload: buildLoadVectorV2({ load, zoneSummary }) });
+        snapshots.push({ domain: "zone_coherence", key: feature.trainingSessionId, asOf: feature.workoutStartAt, payload: zoneSummary });
+        writes.push({
+          table: "workout_zone_summaries",
+          values: [
+            deterministicId("workout_zone_summary", { metricRunId, trainingSessionId: feature.trainingSessionId }),
+            metricRunId, feature.trainingSessionId, feature.id, zoneProfile.id,
+            zoneSummary.stimulusType, JSON.stringify(zoneSummary.secondaryStimulusTypes),
+            zoneSummary.stimulusConfidence, zoneSummary.heartRateCoverage, zoneSummary.paceCoverage,
+            JSON.stringify(zoneSummary.heartRateExposure), JSON.stringify(zoneSummary.paceExposure),
+            JSON.stringify(zoneSummary.stimulusScores), JSON.stringify(zoneSummary.explanationCodes),
+            request.evaluatedAt
+          ]
+        });
+        writes.push({
+          table: "workout_training_loads",
+          values: [
+            deterministicId("workout_training_load", { trainingMetricRunId: metricRunId, trainingSessionId: feature.trainingSessionId }),
+            metricRunId,
+            feature.trainingSessionId,
+            feature.id,
+            load.localDate,
+            request.timezoneIdentifier,
+            load.distanceMeters === null ? null : load.distanceMeters / 1000,
+            load.durationSeconds,
+            load.load,
+            load.intensity,
+            load.source,
+            load.confidence,
+            feature.heartRateCoverage,
+            load.averageHeartRate,
+            load.elevationGainMeters,
+            load.rpe,
+            load.sessionType,
+            JSON.stringify(load.explanations.map((explanation) => explanation.code)),
+            JSON.stringify({
+              explanations: load.explanations,
+              zoneExplanations: zoneSummary.explanationCodes,
+              sourceConfidence: feature.sourceConfidence,
+              loadComposition: {
+                heartRateConfidence: load.breakdown.heartRateConfidence,
+                paceConfidence: load.breakdown.paceConfidence,
+                distanceFactor: load.breakdown.distanceFactor
+              },
+              statisticsParticipation: override?.statisticsParticipation ?? null
+            }),
+            request.evaluatedAt,
+            zoneProfile.id,
+            load.stimulusType,
+            load.breakdown.rawHrrTrimp,
+            load.breakdown.internalLoad,
+            load.breakdown.paceLoad,
+            load.breakdown.distanceReferenceMeters,
+            load.breakdown.distanceExposureRatio,
+            load.breakdown.distanceFactor,
+            load.breakdown.heartRateConfidence,
+            load.breakdown.paceConfidence
+          ]
         });
         loads.push(load);
+        this.updateJobProgress(jobId, "training_metrics", index + 1, features.length, "Training load calculated");
       }
       if (!excluded && distanceMeters !== null && distanceMeters > 0) {
-        priorDistances.push({ observedAt: Date.parse(feature.workoutStartAt), distanceMeters });
+        priorDistances.push({ observedAt: feature.workoutStartAt, distanceMeters });
       }
     }
+    return { loads, writes, snapshots, distanceQueue: priorDistances, modelId };
+  }
+
+  /** 训练负荷/分区摘要/域快照的落库（O07 步骤 4：分块短事务）。 */
+  private persistTrainingLoadWrites(pass: TrainingLoadPass): void {
+    if (pass.writes.length === 0) return;
+    const insertZoneSummary = this.database.prepare(`
+      INSERT INTO workout_zone_summaries (
+        id, training_metric_run_id, training_session_id, feature_id, zone_profile_id,
+        stimulus_type, secondary_stimulus_types_json, stimulus_confidence,
+        heart_rate_coverage, pace_coverage, heart_rate_exposure_json,
+        pace_exposure_json, stimulus_scores_json, explanation_codes_json, computed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertLoad = this.database.prepare(`
+      INSERT INTO workout_training_loads (
+        id, training_metric_run_id, training_session_id, feature_id,
+        local_date, timezone_identifier, distance_km, duration_seconds,
+        training_load, intensity, load_source, confidence, heart_rate_coverage,
+        average_heart_rate_bpm, elevation_gain_meters, rpe, session_type,
+        explanation_codes_json, provenance_json, computed_at, zone_profile_id,
+        stimulus_type, raw_hrr_trimp, internal_load, pace_load,
+        distance_reference_meters, distance_exposure_ratio, distance_factor,
+        heart_rate_load_confidence, pace_load_confidence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const releases = new SqliteModelReleaseRepository(this.database);
+    const writer = new ChunkedWriter(this.database, this.gate);
+    // 域快照先写：它是发布 gate 覆盖度的一部分，不能因为后面的载荷写入被截断而残缺。
+    for (const snapshot of pass.snapshots) {
+      releases.putSnapshot(pass.modelId, snapshot.domain, snapshot.key, snapshot.asOf, snapshot.payload);
+    }
+    for (const write of pass.writes) {
+      writer.add(() => (write.table === "workout_zone_summaries"
+        ? insertZoneSummary.run(...(write.values as SQLInputValue[]))
+        : insertLoad.run(...(write.values as SQLInputValue[]))));
+    }
     writer.flush();
-    const throughDate = localDateAt(request.evaluatedAt, request.timezoneIdentifier);
-    const startDate = loads[0]?.localDate ?? throughDate;
-    const physEvidence = this.loadDailyPhysEvidence(startDate, throughDate, request.timezoneIdentifier, request.evaluatedAt);
-    const daily = buildDailyTrainingMetrics(loads, throughDate, physEvidence);
-    this.persistDailyTrainingMetrics(metricRunId, daily, request, false);
   }
 
   private persistDailyTrainingMetrics(
     metricRunId: string,
     metrics: DailyTrainingMetric[],
     request: RecomputeRequest,
-    ignoreExisting: boolean
+    ignoreExisting: boolean,
+    writeFromIndex = 0
   ): void {
     const insert = this.database.prepare(`
       INSERT ${ignoreExisting ? "OR IGNORE" : ""} INTO daily_training_metrics (
@@ -1757,6 +2940,13 @@ export class RecomputePipeline {
     const writer = new ChunkedWriter(this.database, this.gate);
     for (const [index, metric] of metrics.entries()) {
       cumulativeWorkoutCount += metric.workoutCount;
+      // 🔴 累计列必须**按行取值**再进闭包：`writer.add` 是延迟执行（≤100 行一批 + 收尾 flush），
+      // 闭包若直接引用 `let cumulativeWorkoutCount`，等到真正执行时它已经涨到总数 ——
+      // 于是每一天的 `load_workout_count` 都写成"全期总数"。这是本工作包在"增量 vs 从头"
+      // 对照里先发现的现象（复制前缀保留父 run 的值、重算后缀拿到总数 ⇒ 同一天两个值）。
+      // `history_days` / `load_workout_count` 是**累计**列；复用时只写后缀，但序号按整条序列算。
+      const cumulativeThroughDay = cumulativeWorkoutCount;
+      if (index < writeFromIndex) continue;
       writer.add(() => insert.run(
         deterministicId("daily_training_metric", { metricRunId, localDate: metric.localDate }),
         metricRunId,
@@ -1776,7 +2966,7 @@ export class RecomputePipeline {
         metric.strain,
         metric.recoveryEvidence,
         index + 1,
-        cumulativeWorkoutCount,
+        cumulativeThroughDay,
         metric.trainingStatus,
         metric.loadConfidence,
         JSON.stringify(metric.statusExplanations.map((explanation) => explanation.code)),

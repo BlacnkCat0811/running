@@ -52,6 +52,11 @@ export interface AnalysisInputBinding {
  * ⛔ 它不是密码学承诺，也不能替代逐项校验：发布时仍要分别核验 incumbent、override 摘要与
  * 依赖覆盖。它的用途是**同批比较**（"发布时的输入与捕获时是不是同一版"）与审计留痕。
  * 刻意**不含 `runId`**：绑定行要等 `model_runs` 建好之后才写，而摘要在捕获时就算出来了。
+ *
+ * ⛔ 分隔符用 `\u0001` 而**不是** `\u0000`：`node:sqlite` 绑定字符串时按 C 字符串处理，
+ * NUL 会被**静默截断** —— 摘要于是退化成"只有第一个字段"，而它看起来仍是一个正常摘要。
+ * （2026-10-16 由 WP-32 实测发现；`overrideSnapshotDigest` 一开始就用的 `\u0001`，
+ * 所以只有这里中了。本摘要不参与任何安全判定，但"看起来对、其实只剩一个字段"正是要避免的。）
  */
 export function analysisInputDigest(parts: {
   scope: string;
@@ -74,5 +79,5 @@ export function analysisInputDigest(parts: {
     parts.overrideDigest,
     parts.configDigest,
     parts.cutoffAt
-  ].join("\u0000");
+  ].join("\u0001");
 }

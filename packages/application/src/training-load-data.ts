@@ -2,7 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 import type { SessionType, WorkoutTrainingLoad } from "@rai/contracts";
 import type { DailyPhysEvidence } from "@rai/training-load";
 import { physStateFromReadiness } from "@rai/readiness";
-import { loadDatedReadiness } from "./model-v2-snapshots.js";
+import { loadDatedRecoveryFactsBatch } from "./model-v2-snapshots.js";
+import { assessDatedReadiness } from "@rai/readiness";
 import { addDays, localDateStartAt, parseJson } from "./utils.js";
 import { asNullableNumber } from "./recompute-helpers.js";
 
@@ -48,11 +49,18 @@ export function loadPersistedTrainingLoads(database: DatabaseSync, metricRunId: 
 
 
 export function loadDailyPhysEvidence(database: DatabaseSync, startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {
-    const result:DailyPhysEvidence[]=[];
-    for(let date=startDate;date<=throughDate;date=addDays(date,1)){
-      const end=Date.parse(localDateStartAt(addDays(date,1),timezoneIdentifier))-1;
-      const asOf=new Date(Math.min(end,Date.parse(asOfAt))).toISOString();
-      result.push({localDate:date,physState:physStateFromReadiness(loadDatedReadiness(database,asOf,timezoneIdentifier))});
+    if (throughDate < startDate) return [];
+    // O09 步骤 5：一次范围读 + 按日双指针，取代"每天 7 条 SQL、重复扫重叠的 28 天窗口"。
+    // 🔴 `asOf` 仍是**那一天自己的日终**（`min(日终, asOfAt)`；日终减 1ms 与单日路径逐位一致）：
+    // 塌缩成 run 级 `asOfAt` 会让历史日提前拿到 `import_completed_at`，
+    // 进而改变 `publicationAt` 与基线可用性 —— 那是"用未来证据解释过去"。
+    const days: Array<{ asOf: string; localDate: string }> = [];
+    for (let date = startDate; date <= throughDate; date = addDays(date, 1)) {
+      const end = Date.parse(localDateStartAt(addDays(date, 1), timezoneIdentifier)) - 1;
+      days.push({ localDate: date, asOf: new Date(Math.min(end, Date.parse(asOfAt))).toISOString() });
     }
-    return result;
+    return loadDatedRecoveryFactsBatch(database, days, timezoneIdentifier).map((facts) => ({
+      localDate: facts.localDate,
+      physState: physStateFromReadiness(assessDatedReadiness(facts))
+    }));
   }

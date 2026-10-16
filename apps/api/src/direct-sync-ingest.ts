@@ -229,6 +229,14 @@ export const INGEST_TABLE_DISPOSITIONS: readonly IngestTableDisposition[] = [
   // 这正是"接收端不许顺手改发布证据"的表达。
   { table: "analysis_run_input_bindings", kind: "analysis", why: "分析输入绑定（发布事务写入）" },
   { table: "analysis_job_coverage", kind: "analysis", why: "分析覆盖证明（发布事务写入）" },
+  // O09 / WP-32（v41）：负荷／分区／日级的带版本 checkpoint。它是**分析侧**的滚动状态，
+  // 只在分析写入窗口里落库，接收事务里没有任何合法写入理由。
+  //
+  // 🔴 这一行不是装饰：本守卫是**失败关闭**的 —— 库里出现一张没表过态的新表，
+  // **每一次**直连接收都会被整体拒绝（`write_guard_triggered`）。所以新迁移加表时必须
+  // 同批在这里表态，否则坏的不是"新功能"，而是**整条同步车道**
+  // （2026-10-16 实测：v41 加表未表态期间，三条直连用例整批红，而根因在另一个包里）。
+  { table: "training_metric_checkpoints", kind: "analysis", why: "训练指标域 checkpoint（分析写入）" },
   { table: "active_prediction_model", kind: "analysis", why: "活跃预测模型指针" },
   { table: "baseline_rebase_reviews", kind: "analysis", why: "基准确立复核" },
   { table: "recompute_validations", kind: "analysis", why: "重算校验记录" },
