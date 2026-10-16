@@ -20,6 +20,10 @@ export {
   type LabeledRaceOutcome
 } from "./prediction-data.js";
 export { RecomputePipeline } from "./services/recompute-pipeline.js";
+// O06-A / WP-22：分析输入读取器（只读连接上的**一个读事务**捕获输入绑定与账本覆盖）。
+// 注入点在 worker 线程（`apps/api/src/recompute-thread.ts`）——分析不允许自己去开连接。
+export { SqliteAnalysisInputReader, type AnalysisInputCapture, type AnalysisInputSource } from "./services/analysis-input-reader.js";
+export { analysisInputDigest, type AnalysisInputBinding } from "./analysis-input-binding.js";
 // §12.11 个人自校准：留一法回放产出残差样本，拟合与展示闸门在 @rai/model-eval。
 export {
   buildPersonalCalibrationSamples,

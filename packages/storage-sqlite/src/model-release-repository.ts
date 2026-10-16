@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import { canonicalSemanticJson, type ModelLineageV2 } from "@rai/contracts";
+import {
+  canonicalSemanticJson,
+  dependencyCoverageHolds,
+  selectInterveningBatches,
+  type BatchGenerationFacts,
+  type ModelLineageV2
+} from "@rai/contracts";
 
 export const semanticHash = (value: unknown): string =>
   createHash("sha256").update(canonicalSemanticJson(value)).digest("hex");
@@ -82,7 +88,16 @@ export class SqliteModelReleaseRepository {
     }
     if (semanticHash(this.snapshots(runId)) !== bundle.snapshot_hash) throw new Error("V2 release snapshot digest mismatch");
     const currentDataset = this.db.prepare("SELECT value FROM import_manifest WHERE key='dataset_version'").get()?.value ?? "dataset_unknown";
-    if (bundle.dataset_version !== currentDataset) throw new Error("Dataset changed since candidate evaluation");
+    if (bundle.dataset_version !== currentDataset) {
+      // 🔴 O06-A / 决策 D4（2026-10-16）：dataset 版本不等**不再一律拒绝** ——
+      // 允许"已证明不影响分析"的 raw-only 批次通过。但放宽的是判据的**形式**：
+      // {@link dependencyAdmissionHolds} 要求候选之后进来的**每一个**批次都自己声明了
+      // 没有推进依赖代次；只要有一个说不清（v39 之前的历史行是 NULL）就是拒绝。
+      // 没有绑定行的老候选走 legacy 严格分支（与今天逐字节相同）。
+      if (!this.dependencyAdmissionHolds(runId)) {
+        throw new Error("Dataset changed since candidate evaluation");
+      }
+    }
     const current = this.db.prepare("SELECT model_run_id AS id FROM active_model_run WHERE singleton=1").get()?.id ?? null;
     if (current !== runId && !rollback && current !== bundle.base_model_run_id) throw new Error("Incumbent changed since evaluation");
     if (rollback && bundle.activated_at === null) throw new Error("Rollback requires a previously published bundle");
@@ -91,9 +106,43 @@ export class SqliteModelReleaseRepository {
     this.db.prepare(`UPDATE model_release_bundles SET activated_at=COALESCE(activated_at,?) WHERE model_run_id=?`).run(at, runId);
   }
 
+  /**
+   * 依赖级发布判据（O06-A / 决策 D4）：候选之后进来的批次**有没有动过分析输入**。
+   *
+   * 判据本体住在 `@rai/contracts` 的 `dependencyCoverageHolds` —— 与计算端**同一份实现**。
+   * 两处各写一遍时，漂移方向恰好是"发布判据比计算判据松"，而那正是"旧计算当最新展示"的入口。
+   *
+   * 没有绑定行（v39 之前的候选，以及非直连的 `full_recompute`）⇒ `false` ⇒ 走与今天
+   * 逐字节相同的严格分支。**这就是"不能全局删掉 dataset 校验"的落实方式**。
+   */
+  private dependencyAdmissionHolds(runId: string): boolean {
+    const binding = this.db.prepare(`
+      SELECT captured_raw_generation AS capturedRaw,
+             captured_dependency_generation AS capturedDependency
+      FROM analysis_run_input_bindings WHERE run_id = ?
+    `).get(runId) as { capturedRaw: number; capturedDependency: number } | undefined;
+    if (binding === undefined) return false;
+    const generations = this.db.prepare(
+      "SELECT raw_generation AS raw, dependency_generation AS dependency FROM import_generations WHERE singleton = 1"
+    ).get() as { raw: number; dependency: number } | undefined;
+    if (generations === undefined) return false;
+    const capturedRaw = Number(binding.capturedRaw);
+    const batches = this.db.prepare(`
+      SELECT id AS batchId, raw_generation AS rawGeneration,
+             dependency_generation AS dependencyGeneration, dependency_bumped AS dependencyBumped
+      FROM import_batches WHERE status = 'succeeded'
+    `).all() as unknown as BatchGenerationFacts[];
+    return dependencyCoverageHolds({
+      capturedRawGeneration: capturedRaw,
+      capturedDependencyGeneration: Number(binding.capturedDependency),
+      currentRawGeneration: Number(generations.raw),
+      currentDependencyGeneration: Number(generations.dependency),
+      interveningBatches: selectInterveningBatches(batches, capturedRaw)
+    }).holds;
+  }
+
   /** Release receipts pin rollback dependencies; retire older receipts before normal run pruning. */
-  retireOldReleases(keepHistorical=2): void {
-    if (!Number.isInteger(keepHistorical)||keepHistorical<1) throw new Error("Keep at least one rollback release");
+  retireOldReleases(keepHistorical=2): void {    if (!Number.isInteger(keepHistorical)||keepHistorical<1) throw new Error("Keep at least one rollback release");
     const active=this.db.prepare("SELECT model_run_id AS id FROM active_model_release WHERE singleton=1").get()?.id;
     if(typeof active!=="string")return;
     const rows=this.db.prepare("SELECT model_run_id AS id FROM model_release_bundles WHERE model_run_id<>? ORDER BY activated_at DESC,created_at DESC,rowid DESC").all(active) as Array<{id:string}>;

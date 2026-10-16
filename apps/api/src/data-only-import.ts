@@ -208,16 +208,26 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
           for (const [key, value] of Object.entries(metadata)) store.setManifest(key, value);
           const batchSummary = JSON.stringify({ payloadSha256: input.payloadSha256, changes, xml: result,
             publication: "transactional-delta" });
-          db.prepare(`UPDATE import_batches SET xml_sha256=?, status='succeeded',
-            dataset_version=?, summary_json=?, completed_at=? WHERE id=?`)
-            .run(xmlSha256, datasetVersion, batchSummary, now, input.jobId);
           // R6（2026-10-15）：事实已变（本批真的写了记录）⇒ raw 代次必须推进——与直连车道
           // （`direct-sync-ingest.ts` 的"raw 每个批次都递增"）同语义。此前这条车道只改
           // `dataset_version`、不动计数器，读侧的 `analysis !== facts` 便把它读成"分析永久
           // 落后"（R6 的现象①）。依赖代次**不动**：本车道在入口就证明了本批结构上不可能
           // 动到分析（`analysisStatus: "not_required"` 是结构性结论，见上面那段注释）。
+          //
+          // WP-22（v39）：计数器先推，批次行随后**声明**它推到了哪里 —— 发布判据要按"候选之后
+          // 进来的批次有没有动过分析输入"来证明 raw-only，而 `dependency_bumped=0` 正是这条车道的
+          // 结构性结论（不是观察）。
           db.prepare(`UPDATE import_generations SET raw_generation = raw_generation + 1,
             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE singleton = 1`).run();
+          const generation = db.prepare(
+            "SELECT raw_generation AS raw, dependency_generation AS dependency FROM import_generations WHERE singleton = 1"
+          ).get() as { raw: number; dependency: number };
+          db.prepare(`UPDATE import_batches SET xml_sha256=?, status='succeeded',
+            dataset_version=?, summary_json=?, completed_at=?,
+            raw_generation=?, dependency_generation=?, dependency_bumped=0 WHERE id=?`)
+            .run(xmlSha256, datasetVersion, batchSummary, now,
+              Number(generation.raw), Number(generation.dependency),
+              input.jobId);
           writeImportReceiptInDatabase(db, input.jobId, summary);
           const unledgered = db.prepare(`SELECT mutation.id FROM temp.rai_delta_record_writes mutation
             LEFT JOIN import_entity_changes change ON change.batch_id=? AND change.entity_kind='record'
@@ -226,10 +236,20 @@ export async function applyDataOnlyImport(input: DataOnlyImportInput): Promise<D
               OR (mutation.removed=1 AND change.change_type<>'removed')
               OR (mutation.removed=0 AND change.change_type NOT IN ('inserted','updated')) LIMIT 1`).get(input.jobId);
           if (unledgered) throw new Error("Data-only write has no matching atomic change ledger");
-          const batch = db.prepare("SELECT status,xml_sha256,dataset_version,summary_json,completed_at FROM import_batches WHERE id=?").get(input.jobId);
+          const batch = db.prepare("SELECT status,xml_sha256,dataset_version,summary_json,completed_at,raw_generation AS rawGeneration,dependency_generation AS dependencyGeneration,dependency_bumped AS dependencyBumped FROM import_batches WHERE id=?").get(input.jobId);
           if (batch?.status !== "succeeded" || batch.xml_sha256 !== xmlSha256 || batch.dataset_version !== datasetVersion
               || batch.summary_json !== batchSummary || batch.completed_at !== now) {
             throw new Error("Data-only batch failed its pre-commit assertion");
+          }
+          // WP-22（v39）回读断言：批次必须真的**声明**了它把计数器推到了哪里。
+          // 🔴 这条是被一个真实缺陷逼出来的：绑定参数顺序写错时 UPDATE 匹配不到行、
+          // 批次留在 'running'，而**只看 status 的断言**只有在真的读回代次列时才会转红。
+          // 没有它，发布判据会读到"未知代次"的历史行并按不安全处理 —— 表现为分析被无故拒绝，
+          // 而根因（一次 UPDATE 没生效）完全看不见。
+          if (Number(batch.rawGeneration) !== Number(generation.raw)
+              || Number(batch.dependencyGeneration) !== Number(generation.dependency)
+              || Number(batch.dependencyBumped) !== 0) {
+            throw new Error("Data-only batch generation binding failed its pre-commit assertion");
           }
           for (const [key, value] of Object.entries({ ...metadata, parser_contract_version: CONTRACT_VERSION,
             parser_identity_algorithm: identityAlgorithmFingerprint(), source_xml_sha256: xmlSha256 })) {

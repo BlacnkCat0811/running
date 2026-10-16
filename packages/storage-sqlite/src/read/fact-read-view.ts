@@ -196,6 +196,14 @@ function readGenerations(database: DatabaseSync): Generations {
  * 现有 `deriveAnalysisStatus` 使用（见下），推断与它**同源**，不引入第二份真相。
  */
 function readPublishedDependency(database: DatabaseSync, required: number): number | null {
+  // 🔴 O06-A / WP-22：新鲜度必须读**当前 active release 绑定的实际覆盖代次**，
+  // 不能用"任意历史成功任务的最大代次"替代当前发布证据 —— 后者会把一条算完但没发布、
+  // 或发布的是另一个候选的任务算进"已发布"。绑定行与指针翻转同事务写入，所以它表达的
+  // 就是"这一版发布真正算到了哪一代输入"。
+  const bound = readActiveReleaseBinding(database, required);
+  if (bound !== null) return bound;
+  // legacy 回落：没有绑定行的 release（v39 之前的发布，以及非直连的 `full_recompute`）。
+  // 这条分支必须**显式存在**，不能把"没有绑定"读成"没有发布"。
   const row = database.prepare(`
     SELECT MAX(job.target_dependency_generation) AS published
     FROM recompute_jobs job
@@ -203,6 +211,31 @@ function readPublishedDependency(database: DatabaseSync, required: number): numb
       AND job.target_dependency_generation IS NOT NULL AND job.target_dependency_generation <= ?
   `).get(required) as { published?: unknown } | undefined;
   return integerOrNull(row?.published);
+}
+
+/**
+ * 当前 active release 的绑定覆盖代次；没有绑定行（老 release / 非直连任务）时 `null`
+ * 表示"回落 legacy 推断"。
+ *
+ * ⚠️ 表可能不存在（v39 之前的库在迁移前被只读打开）：探测一次 `sqlite_master`，
+ * 不把"表不存在"当成错误。
+ */
+function readActiveReleaseBinding(database: DatabaseSync, required: number): number | null {
+  if (!database.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='analysis_run_input_bindings'"
+  ).get()) return null;
+  const row = database.prepare(`
+    SELECT binding.captured_dependency_generation AS captured
+    FROM active_model_run active
+    JOIN analysis_run_input_bindings binding ON binding.run_id = active.model_run_id
+    WHERE active.singleton = 1
+  `).get() as { captured?: unknown } | undefined;
+  const captured = integerOrNull(row?.captured);
+  if (captured === null) return null;
+  // 绑定代次**超过**当前所需代次时也要如实报告（那是"分析超前于事实"，不是落后）；
+  // 但绝不能把大于 `required` 的绑定当成"已覆盖 required"以外的其它含义 —— 调用方
+  // 用 `published >= required` 判定，所以这里原样返回。
+  return captured;
 }
 
 /**

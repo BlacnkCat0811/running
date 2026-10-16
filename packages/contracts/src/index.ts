@@ -15,6 +15,11 @@ export * from "./direct-sync.js";
 // 被 `npm run check:package-boundaries` 拦下（详见该文件头注释）。
 export * from "./facts-analysis-view.js";
 
+// 分析输入覆盖证明（O06-A / WP-22）。同样放这里：计算端（`@rai/application` 的输入读取器）
+// 与发布端（`@rai/storage-sqlite` 的 `verifyAndPoint`）**必须用同一份实现** ——
+// 两处各写一遍时，漂移方向恰好是"发布判据比计算判据松"，而那正是"旧计算当最新展示"的入口。
+export * from "./analysis-input-coverage.js";
+
 export const CONTRACT_VERSION = "canonical-health-v2" as const;
 
 export const healthTypes = {

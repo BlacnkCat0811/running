@@ -8,6 +8,8 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { RecomputeProgressGate } from "./recompute-progress.js";
 import { BoundedCache } from "./bounded-cache.js";
 import { ChunkedWriter } from "./chunked-write.js";
+import type { AnalysisInputCapture, AnalysisInputSource } from "./analysis-input-reader.js";
+import type { AnalysisDirtyDomains } from "@rai/health-export-parser";
 
 import {
   DATABASE_TIMEZONE,
@@ -176,8 +178,20 @@ export class RecomputePipeline {
     private readonly modelRuns: SqliteModelRunRepository,
     private readonly sessions: SqliteTrainingSessionRepository,
     private readonly nativeElevationGains?: ReadonlyMap<string, number | null>,
-    private readonly gate: WriteGate = NO_WRITE_GATE
+    private readonly gate: WriteGate = NO_WRITE_GATE,
+    /**
+     * 分析输入源（O06-A / WP-22）。**注入**而不是在这里开连接：`write-lease.test.ts` 的
+     * 结构判据（**按原文匹配**，连注释里的构造调用也算）钉住本文件不得出现直接构造
+     * `DatabaseSync` / 直接打开 `RaiDatabase` 的写法 —— 分析只允许用被写租约代理包住的
+     * 那一条连接。判据按原文而不是"去掉注释再匹配"，是为了让"把代码注释掉"这种
+     * 「方法仍在、逻辑失效」的突变同样转红。
+     * 读取器由 worker 线程构造（那里允许开只读连接），默认 `undefined` = 老行为。
+     */
+    private readonly inputSource?: AnalysisInputSource
   ) {}
+
+  /** 本次直连分析捕获到的输入绑定；非直连任务为 null ⇒ 不写绑定行（老路径零改动）。 */
+  private pendingInputCapture: AnalysisInputCapture | null = null;
 
   get database(): DatabaseSync {
     return this.store.database;
@@ -450,7 +464,54 @@ export class RecomputePipeline {
    * 步骤 6b 的三步上线顺序）。
    */
   runDirectSyncAnalysis(job: RecomputeJob): void {
-    this.runFullRecompute(job);
+    // WP-22（O06-A）：消费端**终于读**登记时写下的代次绑定。
+    //
+    // 没有输入源时（CLI、老调用方、单测）行为与以前逐字节相同 —— 直接跑全量管线。
+    // 有输入源时先在一个**只读连接的一致读事务**里捕获输入绑定，再按"捕获到的实际代次"
+    // 决定执行计划（可能要把未覆盖账本并进 dirty；并不动就退回全量）。
+    this.pendingInputCapture = null;
+    if (!this.inputSource) {
+      this.runFullRecompute(job);
+      return;
+    }
+    const raw = job.request as Record<string, unknown>;
+    const capture = this.inputSource.capture({
+      runId: "",
+      jobId: job.id,
+      scope: "direct-sync",
+      timezoneIdentifier: typeof raw.timezoneIdentifier === "string" ? raw.timezoneIdentifier : DATABASE_TIMEZONE,
+      evaluatedAt: typeof raw.evaluatedAt === "string" ? normalizeInstant(raw.evaluatedAt, "evaluatedAt") : appNow(),
+      targetRawGeneration: job.targetRawGeneration ?? null,
+      targetDependencyGeneration: job.targetDependencyGeneration ?? null,
+      expectedIncumbentReleaseId: job.expectedIncumbentReleaseId ?? null,
+      registeredPlan: typeof raw.incrementalPlan === "object" && raw.incrementalPlan !== null
+        && (raw.incrementalPlan as { mode?: unknown }).mode === "partial"
+        && typeof (raw.incrementalPlan as { dirtyFromAt?: unknown }).dirtyFromAt === "string"
+        ? {
+            dirtyFromAt: normalizeInstant((raw.incrementalPlan as { dirtyFromAt: string }).dirtyFromAt, "dirtyFromAt"),
+            domains: (raw.incrementalPlan as { domains?: AnalysisDirtyDomains }).domains
+              ?? { features: normalizeInstant((raw.incrementalPlan as { dirtyFromAt: string }).dirtyFromAt, "dirtyFromAt"), fitness: null, readiness: null }
+          }
+        : null
+    });
+    this.pendingInputCapture = typeof raw.importBatchId === "string"
+      && !capture.mergedBatchIds.includes(raw.importBatchId)
+      ? { ...capture, mergedBatchIds: [...capture.mergedBatchIds, raw.importBatchId] }
+      : capture;
+    // 计划被调整（代次前进了）时，把实际计划写回请求：`reuseFeaturePrefix` /
+    // `resumeModelReplay` 读的都是 `request.incrementalPlan`。计划为 null ⇒ 删掉键 ⇒ 全量。
+    const request: Record<string, unknown> = { ...raw };
+    if (capture.plan === null) delete request.incrementalPlan;
+    else request.incrementalPlan = { mode: "partial", dirtyFromAt: capture.plan.dirtyFromAt, domains: capture.plan.domains };
+    if (capture.planAdjustment !== null) {
+      this.jobs.logEvent(job.id, "input_binding", 0, 0,
+        `Analysis input plan adjusted: ${capture.planAdjustment} (coverage=${capture.coverage.reason})`);
+    }
+    try {
+      this.runFullRecompute({ ...job, request });
+    } finally {
+      this.pendingInputCapture = null;
+    }
   }
 
   runSnapshotRefresh(job: RecomputeJob): void {
@@ -2416,6 +2477,10 @@ export class RecomputePipeline {
       featureCount,
       "Model run activated",
       () => {
+        // 🔴 绑定必须**先于** `activateSucceeded` 落库：发布短事务里的 `verifyAndPoint`
+        // 要读它来做依赖级判据（决策 D4）。两者在同一个事务里，所以候选一旦激活，
+        // "它算的是哪一版输入"就已经是持久事实 —— 不会出现"指针动了、绑定没写"。
+        this.writeAnalysisInputBinding(modelRunId);
         this.modelRuns.activateSucceeded(modelRunId, appNow());
         // CA/feature rebuild changes residual baselines; drop active CatBoost until retrain.
         this.modelRuns.clearActivePredictionModel();
@@ -2426,6 +2491,59 @@ export class RecomputePipeline {
     // housekeeping, so it must never be able to roll back or fail a recompute
     // that already succeeded.
     this.pruneSupersededRuns();
+  }
+
+  /**
+   * 写下"这条发布算了哪一版输入"（O06-A / WP-22）。
+   *
+   * 非直连任务（CLI `full_recompute`）没有捕获过绑定 ⇒ 不写行，行为与以前逐字节相同；
+   * 老 release 因此没有绑定行，`verifyAndPoint` 会走**显式**的 legacy 严格分支。
+   *
+   * ⛔ 调用点必须在发布事务里（`complete()` 的 `beforeComplete`）——它记录的是
+   * "与指针翻转同一时刻的输入"，写到事务外就等于两件事各说各话。
+   */
+  private writeAnalysisInputBinding(modelRunId: string): void {
+    const capture = this.pendingInputCapture;
+    if (capture === null) return;
+    const binding = capture.binding;
+    this.database.prepare(`
+      INSERT INTO analysis_run_input_bindings (
+        run_id, job_id, scope, dataset_version, captured_raw_generation,
+        captured_dependency_generation, target_raw_generation, target_dependency_generation,
+        incumbent_release_id, timezone_identifier, override_digest, config_digest,
+        cutoff_at, input_digest, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(run_id) DO UPDATE SET
+        job_id = excluded.job_id, scope = excluded.scope, dataset_version = excluded.dataset_version,
+        captured_raw_generation = excluded.captured_raw_generation,
+        captured_dependency_generation = excluded.captured_dependency_generation,
+        target_raw_generation = excluded.target_raw_generation,
+        target_dependency_generation = excluded.target_dependency_generation,
+        incumbent_release_id = excluded.incumbent_release_id,
+        timezone_identifier = excluded.timezone_identifier,
+        override_digest = excluded.override_digest, config_digest = excluded.config_digest,
+        cutoff_at = excluded.cutoff_at, input_digest = excluded.input_digest
+    `).run(
+      modelRunId, binding.jobId, binding.scope, binding.datasetVersion,
+      binding.capturedRawGeneration, binding.capturedDependencyGeneration,
+      binding.targetRawGeneration, binding.targetDependencyGeneration,
+      binding.incumbentReleaseId, binding.timezoneIdentifier,
+      binding.overrideDigest, binding.configDigest, binding.cutoffAt,
+      binding.inputDigest, binding.createdAt
+    );
+    // 覆盖记录：这条任务把哪些导入批次算进去了（含捕获代次前进时并进来的那些）。
+    const jobId = binding.jobId;
+    const from = binding.targetDependencyGeneration ?? binding.capturedDependencyGeneration;
+    for (const batchId of capture.mergedBatchIds) {
+      this.database.prepare(`
+        INSERT INTO analysis_job_coverage (
+          job_id, import_batch_id, dependency_generation_from, dependency_generation_to
+        ) VALUES (?, ?, ?, ?)
+        ON CONFLICT(job_id, import_batch_id) DO UPDATE SET
+          dependency_generation_from = excluded.dependency_generation_from,
+          dependency_generation_to = excluded.dependency_generation_to
+      `).run(jobId, batchId, from, binding.capturedDependencyGeneration);
+    }
   }
 
   private pruneSupersededRuns(): void {

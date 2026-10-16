@@ -1,6 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
 
-import { RaiApplicationService } from "@rai/application";
+import { RaiApplicationService, SqliteAnalysisInputReader } from "@rai/application";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { createWriteLeaseClient, withWriteGate } from "./write-lease.js";
@@ -22,17 +22,24 @@ const gatedStore = lease === null ? store : {
     lease.scope(() => store.pruneSupersededModelRuns(options))
 };
 
+// O06-A / WP-22：输入绑定要在**独立只读连接**的同一个读事务里捕获 —— 用写租约代理那条连接
+// 读"输入是哪一版"，读到的东西会被并发批次改动，而那正是 O06 的病灶。只读连接不参与写租约，
+// 也不影响单写者纪律（它不开写事务、不迁移）。
+const inputDatabase = RaiDatabase.openReadonly(databasePath);
+
 let completed: ReturnType<RaiApplicationService["runNextJob"]> = null;
 try {
   completed = new RaiApplicationService(
     gatedStore,
     "owned",
     undefined,
-    lease === null ? undefined : { scope: (fn) => lease.scope(fn), yieldIfStale: (maxHoldMs) => lease.yieldIfStale(maxHoldMs) }
+    lease === null ? undefined : { scope: (fn) => lease.scope(fn), yieldIfStale: (maxHoldMs) => lease.yieldIfStale(maxHoldMs) },
+    new SqliteAnalysisInputReader(inputDatabase)
   ).runNextJob();
 } finally {
   // 🔴 先关连接（释放 SQLite 锁），线程退出后主线程才 dispose 租约（释放应用许可）。
   // 顺序反过来的话，"库还锁着、许可已经放回去"会短暂成立 —— 那正是 O07 的形态。
+  inputDatabase.close();
   store.close();
 }
 parentPort?.postMessage({

@@ -12,9 +12,9 @@ import {
   DATA_ONLY_MAX_RECORDS, NATIVE_VERSION, NIGHT_FEEDING_TYPE_VALUES,
   RecordDeltaNotEligibleError, canonicalizeNightsForWindow, canonicalizeRunningWorkouts,
   classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes,
+  loadDirtyRangeInput,
   parseAppleHealthXml, parseHealthSyncManifest, planIncrementalAnalysisDirtyRange,
-  type DirectSyncPayloadFacts, type DirtyRangeChange, type DirtyRangeWorkout,
-  type HealthSyncManifest
+  type DirectSyncPayloadFacts, type HealthSyncManifest
 } from "@rai/health-export-parser";
 
 import { readImportReceiptInDatabase, writeImportReceiptInDatabase } from "./import-publication.js";
@@ -224,6 +224,11 @@ export const INGEST_TABLE_DISPOSITIONS: readonly IngestTableDisposition[] = [
   { table: "daily_zone_profiles", kind: "analysis", why: "逐日分区剖面" },
   { table: "active_model_run", kind: "analysis", why: "活跃发布指针" },
   { table: "active_model_release", kind: "analysis", why: "V2 活跃发布指针" },
+  // O06-A / WP-22（v39）：输入绑定与覆盖证明是**发布事务**的产物（与指针翻转同一事务）。
+  // 接收事务里没有任何合法的写入理由 —— 归 analysis 一侧即被写守卫挡住，
+  // 这正是"接收端不许顺手改发布证据"的表达。
+  { table: "analysis_run_input_bindings", kind: "analysis", why: "分析输入绑定（发布事务写入）" },
+  { table: "analysis_job_coverage", kind: "analysis", why: "分析覆盖证明（发布事务写入）" },
   { table: "active_prediction_model", kind: "analysis", why: "活跃预测模型指针" },
   { table: "baseline_rebase_reviews", kind: "analysis", why: "基准确立复核" },
   { table: "recompute_validations", kind: "analysis", why: "重算校验记录" },
@@ -498,12 +503,30 @@ const shiftLocalDate = (localDate: string, days: number): string => {
  * （`import_entity_changes.effective_at` = 删除前那条记录的起点），而"删的是不是喂夜类型"
  * 只能取自 manifest 的**类型化删除**（v2 才有类型）。只要本批有喂夜类型的删除，就把本批
  * **全部** record 删除的时刻并进窗口 —— 宁可窗口宽一点（仍然有界），也不要漏掉一个夜。
+ *
+ * O10（WP-31）步骤 4 —— **不相邻的时期不再被一个全局 min/max 跨度连起来**：
+ * 一批同时更正 1 月初与 12 月末两条睡眠段时，旧实现返回一个覆盖全年的 `[1/1-1d, 12/31+1d]`，
+ * 于是中间 **约 11 个月**的夜被整体 `DELETE` + 重建。那些夜与这批变更毫无关系：结果虽然相同
+ * （同样的输入段 ⇒ 同样的行），代价却是无界的，而且会把中间那些行的到达时间快照也做一遍。
+ * 现在先按**本地日期连续段**分组，每个连续段各自 ±1 天 padding，再归并重叠/相接的时期。
+ *
+ * 等价性（单时期情形）：受影响本地日期**连续**时，分组结果只有一个连续段，padding 后正好是
+ * `[min-1, max+1]` —— 与旧实现的返回值**逐字相同**。`from`/`to` 仍然返回这个总跨度
+ * （= 第一个时期的 `from` / 最后一个时期的 `to`），所以回执里的窗口字段语义一个字节都没变；
+ * 真正被重建的是 `periods`，它是总跨度的一个子集。`earliestInstant` 同样逐字不变。
  */
 function nightWindow(
   db: DatabaseSync,
   batchId: string,
   manifest: HealthSyncManifest
-): { from: string; to: string; earliestInstant: string } | null {
+): {
+  /** 总跨度（= 第一个时期的 `from` … 最后一个时期的 `to`）：回执展示用，与旧实现逐字相同。 */
+  from: string;
+  to: string;
+  /** 真正要重建的时期：本地日期闭区间、各自 ±1 天 padding、**互不重叠也不相接**。 */
+  periods: Array<{ from: string; to: string }>;
+  earliestInstant: string;
+} | null {
   const types = NIGHT_FEEDING_TYPE_VALUES as readonly string[];
   const placeholders = types.map(() => "?").join(",");
   const written = db.prepare(`
@@ -537,11 +560,29 @@ function nightWindow(
   }
   if (instants.length === 0) return null;
   const dates = instants.map(localDateOf).sort();
+  // 连续段分组：`YYYY-MM-DD` 的字典序 == 日历序，所以"下一个受影响日期正好是上一段末日的次日"
+  // 才并进同一段。相隔多日的两个日期落在不同段 —— 中间那些日期**没有任何本批变更**。
+  const runs: Array<{ from: string; to: string }> = [];
+  for (const date of dates) {
+    const last = runs.at(-1);
+    if (last !== undefined && date <= shiftLocalDate(last.to, 1)) { if (date > last.to) last.to = date; continue; }
+    runs.push({ from: date, to: date });
+  }
+  // 每个连续段各自 ±1 天 padding，再归并重叠/相接的时期（两个相隔一天的连续段，padding 后会相接）。
+  const periods: Array<{ from: string; to: string }> = [];
+  for (const run of runs) {
+    const from = shiftLocalDate(run.from, -1); const to = shiftLocalDate(run.to, 1);
+    const last = periods.at(-1);
+    if (last !== undefined && from <= shiftLocalDate(last.to, 1)) { if (to > last.to) last.to = to; continue; }
+    periods.push({ from, to });
+  }
   // O04（WP-20）：最早触及时刻一并回传 —— 它是恢复（canonical 夜）维的脏下界贡献，
   // 直接取 instants 的 min（UTC 毫秒）转 ISO，不经本地日期往返（无时区再解释风险）。
   return {
-    from: shiftLocalDate(dates[0]!, -1),
-    to: shiftLocalDate(dates.at(-1)!, 1),
+    // 总跨度 = 首时期的 from … 末时期的 to：与旧的 `[min-1, max+1]` 恒等（见函数头注释）。
+    from: periods[0]!.from,
+    to: periods.at(-1)!.to,
+    periods,
     earliestInstant: new Date(Math.min(...instants)).toISOString()
   };
 }
@@ -609,74 +650,6 @@ function ledgerFacts(db: DatabaseSync, batchId: string, manifest: HealthSyncMani
  * 并附上 route 变更的合成条目 —— 纯函数 `planIncrementalAnalysisDirtyRange` 据此
  * 做区间并集与**相交训练回退**（记录时间更正不再错复用旧特征）。
  */
-function loadDirtyRangeInput(
-  db: DatabaseSync,
-  batchId: string,
-  routeDirtyTimes: readonly string[],
-  recoveryBoundaries: readonly string[]
-): { changes: DirtyRangeChange[]; workouts: DirtyRangeWorkout[]; recoveryBoundaries: string[] } {
-  const rows = db.prepare(`
-    SELECT change.entity_kind AS kind, change.change_type AS changeType,
-           change.effective_at AS effectiveAt,
-           change.previous_effective_at AS previousAt, change.previous_end_at AS previousEndAt,
-           change.previous_type AS previousType,
-           record.type AS recordType, record.start_at AS recordStart, record.end_at AS recordEnd,
-           workout.start_at AS workoutStart, workout.end_at AS workoutEnd
-    FROM import_entity_changes change
-    LEFT JOIN health_records record ON change.entity_kind='record' AND record.id=change.entity_id
-    LEFT JOIN workouts workout ON change.entity_kind='workout' AND workout.id=change.entity_id
-    WHERE change.batch_id=?
-  `).all(batchId) as Array<{
-    kind: string; changeType: "inserted" | "updated" | "removed";
-    effectiveAt: string | null;
-    previousAt: string | null; previousEndAt: string | null; previousType: string | null;
-    recordType: string | null; recordStart: string | null; recordEnd: string | null;
-    workoutStart: string | null; workoutEnd: string | null;
-  }>;
-  const changes: DirtyRangeChange[] = [];
-  for (const row of rows) {
-    if (row.kind === "record") {
-      changes.push({
-        entityKind: "record",
-        changeType: row.changeType,
-        newType: row.recordType, newStart: row.recordStart, newEnd: row.recordEnd,
-        previousType: row.previousType, previousStart: row.previousAt, previousEnd: row.previousEndAt
-      });
-    } else if (row.kind === "workout") {
-      // workout 变更不看类型（天然影响分析）；新行经 JOIN 取（软删行仍在表里）。
-      changes.push({
-        entityKind: "workout",
-        changeType: row.changeType,
-        newType: row.workoutStart === null ? null : "workout",
-        newStart: row.workoutStart, newEnd: row.workoutEnd,
-        previousType: row.previousType, previousStart: row.previousAt, previousEnd: row.previousEndAt
-      });
-    } else {
-      // activity_summary 等：只有时刻（新 = 账本 effective_at；旧 = previous_*）。
-      changes.push({
-        entityKind: "activity_summary",
-        changeType: row.changeType,
-        newType: null, newStart: row.effectiveAt, newEnd: null,
-        previousType: null, previousStart: row.previousAt, previousEnd: row.previousEndAt
-      });
-    }
-  }
-  // route 变更（本批改过的路线所属训练的时刻）作为合成条目 —— 路线-only 批次不再
-  // 退化成"无边界即全量"。
-  for (const routeTime of routeDirtyTimes) {
-    changes.push({
-      entityKind: "route",
-      changeType: "updated",
-      newType: null, newStart: routeTime, newEnd: routeTime,
-      previousType: null, previousStart: null, previousEnd: null
-    });
-  }
-  const workouts = db.prepare(
-    "SELECT start_at AS startAt, end_at AS endAt FROM workouts WHERE deleted_at IS NULL"
-  ).all() as unknown as Array<DirtyRangeWorkout>;
-  return { changes, workouts, recoveryBoundaries: [...recoveryBoundaries] };
-}
-
 function countWorkoutChanges(db: DatabaseSync, batchId: string): Record<"inserted" | "updated" | "removed", number> {
   const rows = db.prepare(`SELECT change_type AS kind, COUNT(*) AS count FROM import_entity_changes
     WHERE batch_id = ? AND entity_kind = 'workout' GROUP BY change_type`).all(batchId) as
@@ -792,10 +765,24 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     // 恢复事实的**局部**重建（PR4 步骤 4）：只重建本批真正碰到的**夜**。
     // 窗口外的 canonical 行必须逐字节不变 —— 这是 `canonicalizeNightsForWindow` 的绝对担保，
     // 也是 §14.1「全表 canonical 删除/重建」在直连车道上仍为 0 的判据。
+    //
+    // O10（WP-31）步骤 4：`nightWindow` 现在返回**互不相邻的多个时期**（本批同时更正相隔多日的
+    // 两夜时，中间那些夜不该被碰）。逐时期各跑一次窗口重建并相加计数 —— 时期已归并（不重叠、
+    // 不相接），所以既不会重复计数，也不会重复重建同一天；跨时期也不存在"窗口外被改"，
+    // 因为每次调用的 DELETE 与到达时间快照都限制在它自己的 `[from, to]` 内。
     const nightRange = nightWindow(db, input.jobId, payload.manifest);
-    const canonicalNights = nightRange === null ? null
-      : canonicalizeNightsForWindow(db, DATABASE_TIMEZONE, nightRange.from, nightRange.to,
-        { callerOwnedTransaction: true });
+    const canonicalNights = nightRange === null ? null : nightRange.periods.reduce(
+      (totals, period) => {
+        const counts = canonicalizeNightsForWindow(db, DATABASE_TIMEZONE, period.from, period.to,
+          { callerOwnedTransaction: true });
+        return {
+          mainCount: totals.mainCount + counts.mainCount,
+          napCount: totals.napCount + counts.napCount,
+          hrvCount: totals.hrvCount + counts.hrvCount
+        };
+      },
+      { mainCount: 0, napCount: 0, hrvCount: 0 }
+    );
 
     const facts = ledgerFacts(db, input.jobId, payload.manifest, routes.changedRouteIds?.length ?? routes.importedRouteCount);
     const classification = classifyDirectSyncPayload(facts);
@@ -817,8 +804,10 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
         .get() as { modelRunId: string } | undefined;
       // O04（WP-20）：脏范围 = 账本区间并集 + **相交训练回退** + 路线变更 + 恢复边界。
       // `full` 或边界未知 ⇒ 不写 `incrementalPlan`（分析侧全量重算；安全档）。
+      // WP-22：装配实现下沉到 `@rai/health-export-parser`，与消费端（输入读取器）共用同一份 ——
+      // 登记端按"本批"装配，消费端按"未覆盖的若干批"装配，口径必须只有一个。
       const dirtyRange = planIncrementalAnalysisDirtyRange(loadDirtyRangeInput(
-        db, input.jobId, routeDirtyTimes,
+        db, [input.jobId], routeDirtyTimes,
         nightRange === null ? [] : [nightRange.earliestInstant]
       ));
       const dirty = dirtyRange.full ? null : dirtyRange.dirtyFromAt;
@@ -903,9 +892,15 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       classification: { payloadClass: classification.payloadClass, reasons: classification.reasons },
       analysisJobId, publication: "transactional-direct-sync"
     });
+    // WP-22（v39）：批次**自己**声明它把两个计数器推到了哪里、以及有没有推依赖代次。
+    // 没有这三列，"raw-only 批次"只能靠推理猜；有了它，发布判据才能靠证据判
+    // （证明"候选之后进来的批次都没动过分析输入"）。
     db.prepare(`UPDATE import_batches SET xml_sha256=?, status='succeeded',
-      dataset_version=?, summary_json=?, completed_at=? WHERE id=?`)
-      .run(xmlSha256, datasetVersion, batchSummary, now, input.jobId);
+      dataset_version=?, summary_json=?, completed_at=?,
+      raw_generation=?, dependency_generation=?, dependency_bumped=? WHERE id=?`)
+      .run(xmlSha256, datasetVersion, batchSummary, now,
+        Number(generations.raw), Number(generations.dependency), analysisRequired ? 1 : 0,
+        input.jobId);
     writeImportReceiptInDatabase(db, input.jobId, summary);
 
     // 提交前回读：账目齐全、任务真在、回执真的落库（§4.2 的"回读必要的事实"）。
@@ -926,6 +921,19 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       }
     } else if (analysisJobId !== null) {
       throw new Error("Direct sync batch registered an analysis job while claiming not_required");
+    }
+    // WP-22（v39）回读断言：批次必须真的声明了它把两个计数器推到了哪里。
+    // 这条与 receipt 断言**并列**而不是合并：回执说的是"写完了"，这里说的是
+    // "发布判据将来读到的代次足迹确实是这一批的" —— 两者可以各自独立地坏。
+    const batchBinding = db.prepare(`SELECT status, raw_generation AS raw,
+      dependency_generation AS dependency, dependency_bumped AS bumped
+      FROM import_batches WHERE id=?`).get(input.jobId) as
+      { status: string; raw: number | null; dependency: number | null; bumped: number | null } | undefined;
+    if (!batchBinding || batchBinding.status !== "succeeded"
+        || Number(batchBinding.raw) !== Number(generations.raw)
+        || Number(batchBinding.dependency) !== Number(generations.dependency)
+        || Number(batchBinding.bumped) !== (analysisRequired ? 1 : 0)) {
+      throw new Error("Direct sync batch generation binding failed its pre-commit assertion");
     }
     const receipt = readImportReceiptInDatabase(db, input.jobId);
     if (!receipt || receipt.directSync?.analysisStatus !== summary.directSync?.analysisStatus

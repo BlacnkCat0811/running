@@ -80,3 +80,4 @@ export {
   type DirtyRangeChange,
   type DirtyRangeWorkout
 } from "./dirty-range.js";
+export { loadDirtyRangeInput } from "./dirty-range-input.js";

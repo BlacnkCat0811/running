@@ -35,6 +35,7 @@ import {
 } from "./service-types.js";
 import { defaultRequest, finiteNumber, normalizeInstant } from "./recompute-helpers.js";
 import { RecomputePipeline } from "./services/recompute-pipeline.js";
+import type { AnalysisInputSource } from "./services/analysis-input-reader.js";
 import { NO_WRITE_GATE, type AnalysisStore, type WriteGate } from "./write-gate.js";
 import { addDays, localDateAt } from "./utils.js";
 
@@ -62,12 +63,15 @@ export class RaiApplicationService {
     private readonly store: AnalysisStore,
     private readonly transactionMode: "owned" | "savepoint" = "owned",
     elevationGains?: ReadonlyMap<string, number | null>,
-    gate: WriteGate = NO_WRITE_GATE
+    gate: WriteGate = NO_WRITE_GATE,
+    inputSource?: AnalysisInputSource
   ) {
     this.jobs = new RecomputeJobRepository(store.database);
     this.modelRuns = new SqliteModelRunRepository(store.database);
     this.sessions = new SqliteTrainingSessionRepository(store.database);
-    this.pipeline = new RecomputePipeline(store, this.jobs, this.modelRuns, this.sessions, elevationGains, gate);
+    this.pipeline = new RecomputePipeline(
+      store, this.jobs, this.modelRuns, this.sessions, elevationGains, gate, inputSource
+    );
   }
 
   get database(): DatabaseSync {
