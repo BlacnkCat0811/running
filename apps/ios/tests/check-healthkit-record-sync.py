@@ -80,7 +80,10 @@ check("timeIntervalSince" not in history_policy and "force" in history_policy,
       "ordinary sync must not periodically reset an established record cursor")
 check("previous == nil || decoded != nil || forceHistory" in records,
       "a corrupt stored anchor must not silently trigger automatic history replay")
-check("guard anchorData == nil || stored != nil" in export,
+# 2026-10-16（WP-10）重锚点：校验从 `runningWorkouts` 移入 `exportArchive`（查询页改造），
+# 变量随之为 `workoutAnchor` / `storedWorkoutAnchor`；不变量不变（损坏的存储锚必须显式报错，
+# 不得静默重置成"全量从零重查"）。
+check("guard workoutAnchor == nil || storedWorkoutAnchor != nil" in export,
       "a corrupt stored workout anchor must not silently reset the workout query")
 check("guard hasWorkoutChange || routeForceRescan || !routeFiles.isEmpty" in export,
       "workout candidates without a change or GPX retry must not be exported")
@@ -216,6 +219,17 @@ check(sync.count("try Self.restoredCommitDeletions(from: restored)") == 5,
 check("case .corrupted:" in sync,
       "the corrupted branch must exist — folding it into 'empty' would advance the anchor and lose the backlog")
 
+# O01（WP-10）：页循环的推进/收缩/删除池接线判据。
+check(export.count("deliveredAnchor = page.next") == 2,
+      "deliveredAnchor may only advance in exactly two places — a fully delivered page and a "
+      "drained stream; anywhere else the anchor would skip undelivered workouts")
+check("WorkoutPageShrink.nextLimit(after: pageLimit)" in export
+      and "workoutStop = .workoutBytes" in export,
+      "a rejected workout page must shrink via WorkoutPageShrink and end in the visible-blocked stop")
+check("freshWorkoutIdSet.insert(object.uuid.uuidString)" in export,
+      "workout deletions must be de-duplicated into the page-scoped pool "
+      "(shrinking re-queries the same page and re-returns the same deletedObjects)")
+
 # --- 判据总数的下限（**必须放在全部判据之后**） ---------------------------------
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
 # `checks` 还不含这条地板本身 ⇒ 地板 = 印制总数 − 1。**零容忍**：删掉任意一条判据
@@ -223,7 +237,8 @@ check("case .corrupted:" in sync,
 # 2026-10-16（R3b）：新增删除暂存/截断判据后实测打印 52 ⇒ 按同一纪律重设为 51。
 # 2026-10-16（B1）：新增窗口 pass 三条判据后实测打印 55 ⇒ 重设为 54。
 # 2026-10-16（WP-12/O03）：新增删除守恒四条判据后实测打印 59 ⇒ 重设为 58。
-MIN_CHECKS = 58
+# 2026-10-16（WP-10/O01）：新增页循环三条判据后实测打印 62 ⇒ 重设为 61。
+MIN_CHECKS = 61
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

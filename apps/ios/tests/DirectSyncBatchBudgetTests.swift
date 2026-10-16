@@ -291,6 +291,23 @@ struct DirectSyncBatchBudgetTests {
         check(DirectSyncPendingDeletions.restoredFromTask(Data("###not-json###".utf8)) == .corrupted,
               "a corrupted payload restores as corrupted — the caller must fail, never advance as empty")
 
+        // ── O01（WP-10）workout 页收缩：严格下降、有限步到单条、单条仍放不下 = 可见阻塞 ──
+        // （页循环的"每轮至少前进一格"就靠这条链：拒绝 → 缩半 → 重查同一锚点。）
+        check(WorkoutPageShrink.nextLimit(after: 1_000) == 500, "shrinking halves the query page")
+        check(WorkoutPageShrink.nextLimit(after: 3) == 1, "shrinking clamps to a single workout")
+        check(WorkoutPageShrink.nextLimit(after: 2) == 1, "exactly two shrinks to one")
+        check(WorkoutPageShrink.nextLimit(after: 1) == nil,
+              "a single-workout page that still does not fit is the visible-blocked exit (not a loop)")
+        check(WorkoutPageShrink.nextLimit(after: 0) == nil, "a zero limit is already blocked")
+        var shrinkSteps = 0
+        var shrinkLimit = 1_000
+        while let next = WorkoutPageShrink.nextLimit(after: shrinkLimit) {
+            shrinkLimit = next
+            shrinkSteps += 1
+        }
+        check(shrinkLimit == 1 && shrinkSteps <= 10,
+              "the shrink chain terminates at one within bounded steps (1000 → … → 1 → nil)")
+
         print("\(checks) checks passed")
     }
 }

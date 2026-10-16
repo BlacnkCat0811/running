@@ -388,53 +388,35 @@ nonisolated enum HealthKitExport {
         // 这段进度是用户看到的「读取」，不是"备份/临时库/换库"。
         await onProgress(DirectSyncCopy.readingIncrement)
         try Task.checkCancellation()
-        let workoutBatch = try await runningWorkouts(
-            store: store,
-            from: startDate,
-            anchorData: workoutAnchor
-        )
-        try Task.checkCancellation()
-        // R3b 删除三分预扣（固定顺序：旧槽 → 本批 workout → 本批 record）。
-        // 🔴 顺序不是风格：workout 删除（deletedSourceIds）在 `runningWorkouts` 就已定形、
-        // 且必须**先于** record 删除占额 —— 否则 record 侧会在 drain 里把额度吃光，
-        // workout 侧再溢出就与本批已计入 manifest 的 record 删除**打架**（一份额度算两次）。
-        // WP-12（O03）：三段预扣抽成纯函数（`DirectSyncDeletionPartition`），并把它原先
-        // `prefix` 截断后**丢弃**的旧槽尾部并入回传余量（守恒式与去重口径见该函数文档）。
-        let freshWorkoutIds = workoutBatch.deleted.map { $0.uuid.uuidString }
-        let deletionPlan = DirectSyncDeletionPartition.plan(
-            pending: pendingDeletions,
-            freshWorkoutIds: freshWorkoutIds,
-            budget: budget.maxDeletions
-        )
-        let stashRecordDeletions = deletionPlan.stashRecordDeletions
-        let stashWorkoutIds = deletionPlan.stashWorkoutIds
-        let keptWorkoutIds = deletionPlan.keptWorkoutIds
-        // record 侧按剩余额度截断；本批新溢出经 `allocation.overflow` 回传，与计划里的
-        // 旧槽尾部在收尾处合并成完整余量。
-        let allocation = DirectSyncDeletionAllocation(remaining: deletionPlan.remainingRecordBudget)
-        var merged = Dictionary(uniqueKeysWithValues: workoutBatch.added.map {
-            (routeFileWorkoutId($0), $0)
-        })
-        let rediscovery = routeForceRescan ? [] : RouteSyncStateMachine.rediscoveryCandidates(
-            existing: Array(routeStates.values),
-            currentWorkoutUUIDs: Set(merged.keys),
-            changedWorkoutUUIDs: workoutBatch.changedUUIDs,
-            now: routeNow,
-            cursor: routeDiscoveryCursor
-        )
-        let rediscoveryIDs = Set(rediscovery)
-        let historicalIDs = rediscovery.filter { merged[$0] == nil }
-        if !historicalIDs.isEmpty {
-            // 按有限 UUID 集合定点取 workout，不使用最近窗口，更不扫描全部历史。
-            let historical = try await knownRunningWorkouts(store: store, uuids: historicalIDs)
-            for workout in historical { merged[routeFileWorkoutId(workout)] = workout }
+        // O01（WP-10）：**查询页 = 交付单位**（旧实现把 anchor 推到"查询流末尾"，被预算
+        // 截断的页随锚前推**永久丢失**）。页循环在下方：每页独立"查询 → 渲染 → 写前判定"，
+        // 判定通过才推进 `deliveredAnchor`；放不下就缩 `pageLimit` 从同一页起点重查。
+        let storedWorkoutAnchor = workoutAnchor.flatMap(decodeAnchor)
+        guard workoutAnchor == nil || storedWorkoutAnchor != nil else {
+            throw HealthKitExportError.invalidWorkoutAnchor
         }
-        // R4b：全量集合改名 `allWorkouts`（页数组在页循环里沿用 `workouts` 这个名字 ——
-        // 逐 workout 循环的定界符/门禁切片锚在它的 `for` 头上，改名会砸掉那个切片）。
-        let allWorkouts = merged.values.sorted {
-            $0.startDate == $1.startDate
-                ? $0.uuid.uuidString < $1.uuid.uuidString : $0.startDate < $1.startDate
+        var workoutPredicates = [HKQuery.predicateForWorkouts(with: .running)]
+        if storedWorkoutAnchor == nil, let startDate {
+            workoutPredicates.append(HKQuery.predicateForSamples(withStart: startDate, end: nil, options: .strictStartDate))
         }
+        let workoutPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: workoutPredicates)
+        // 附加集合（发现通道，**不消费 anchor**）：近期回填（14 天）× rediscovery 定点。
+        // O01：它们并入**第一个成功交付的页**（缩 limit 重查复用同一份结果；rediscovery 只在
+        // 第一次查询后算一次 —— 它要看"本批第一页已见到的 workout"来排除候选）。
+        var attachmentWorkouts: [HKWorkout] = []
+        var rediscovery: [String] = []
+        var rediscoveryIDs = Set<String>()
+        var attachmentsPending = true
+        // 页循环状态：`anchorBefore` 是当前页的查询起点；`deliveredAnchor` 只随"完整交付的
+        // 页"推进（初值 = 上一批确认的锚；一页都没交付时原样回传 —— 绝不提前）。
+        var anchorBefore = storedWorkoutAnchor
+        var deliveredAnchor = storedWorkoutAnchor
+        var pageLimit = Self.workoutPageLimit
+        // 删除池：workout 删除随**完整交付的页**逐页并入（`HKAnchoredObjectQuery` 的 limit
+        // 不约束 `deletedObjects` ⇒ 缩 limit 重查会重复返回同一批删除，按 UUID 去重）。
+        // WP-12 的三分预扣随之移到页循环之后 —— 那时 fresh 集合才完整。
+        var freshWorkoutIds: [String] = []
+        var freshWorkoutIdSet = Set<String>()
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("rai-hk-\(UUID().uuidString)", isDirectory: true)
@@ -461,14 +443,63 @@ nonisolated enum HealthKitExport {
           \(meElement(store: store))
         """)
 
-        // R4b：**渲染分页**（写前字节闸门落在页边界上）。每页先渲染进内存 → 同一字节账
-        // 判定 → 通过才写；拒绝则整页不写、后续页不发（`workoutStop = .workoutBytes`）。
-        // 全量集合是 `allWorkouts`，页数组沿用 `workouts`（循环头是门禁切片的定界符）。
-        var pageStart = 0
+        // O01（WP-10）**页循环**：查询一页 → 渲染（写前字节闸门在页边境界定）→ 判定。
+        // 判定通过才写、才推进 `deliveredAnchor`；放不下先缩 `pageLimit` 从同一 `anchorBefore`
+        // 重查（逐级降到单条）；连单条都放不下 ⇒ 可见阻塞（整页不写、锚不推进）。
         var workoutStop: HealthKitExportResult.BudgetStopReason?
-        while pageStart < allWorkouts.count {
-            let pageEnd = min(pageStart + Self.workoutPageLimit, allWorkouts.count)
-            let workouts = Array(allWorkouts[pageStart..<pageEnd])
+        while true {
+            let page = try await workoutPage(
+                store: store, anchor: anchorBefore, predicate: workoutPredicate, limit: pageLimit
+            )
+            try Task.checkCancellation()
+            let streamDone = page.added.isEmpty && page.deleted.isEmpty
+            // 附加集合懒计算（只一次；EOF 页也要算 —— 发现通道与锚无关）。
+            if attachmentsPending {
+                attachmentsPending = false
+                let seen = Set(page.added.map(routeFileWorkoutId))
+                rediscovery = routeForceRescan ? [] : RouteSyncStateMachine.rediscoveryCandidates(
+                    existing: Array(routeStates.values),
+                    currentWorkoutUUIDs: seen,
+                    changedWorkoutUUIDs: seen,
+                    now: routeNow,
+                    cursor: routeDiscoveryCursor
+                )
+                rediscoveryIDs = Set(rediscovery)
+                let historicalIDs = rediscovery.filter { !seen.contains($0) }
+                var discovered: [HKWorkout] = []
+                if !historicalIDs.isEmpty {
+                    // 按有限 UUID 集合定点取 workout，不使用最近窗口，更不扫描全部历史。
+                    discovered += try await knownRunningWorkouts(store: store, uuids: historicalIDs)
+                }
+                if storedWorkoutAnchor != nil {
+                    // 近期回填（14 天）：近期窗口只负责发现"迟到的轨迹"，与锚是否覆盖无关。
+                    let backfillStart = (startDate ?? Date()).addingTimeInterval(-routeBackfillWindow)
+                    let recentPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                        HKQuery.predicateForWorkouts(with: .running),
+                        HKQuery.predicateForSamples(withStart: backfillStart, end: nil, options: .strictStartDate)
+                    ])
+                    let recent: [HKWorkout] = try await samples(
+                        type: .workoutType(), predicate: recentPredicate, store: store
+                    )
+                    discovered += recent
+                }
+                attachmentWorkouts = discovered
+            }
+            if streamDone {
+                // 流已尽：锚可安全推进到末尾（没有任何未消费的流变更）。剩下的只有附件页。
+                deliveredAnchor = page.next
+                if attachmentWorkouts.isEmpty { break }
+            }
+            // 页数组 = 本页 added ∪ 附加集合（后者交付后即清空）；同一比较器排序（确定性）。
+            var merged = Dictionary(uniqueKeysWithValues: page.added.map {
+                (routeFileWorkoutId($0), $0)
+            })
+            for workout in attachmentWorkouts { merged[routeFileWorkoutId(workout)] = workout }
+            let workouts = merged.values.sorted {
+                $0.startDate == $1.startDate
+                    ? $0.uuid.uuidString < $1.uuid.uuidString : $0.startDate < $1.startDate
+            }
+            let changedWorkoutIDs = Set(page.added.map(routeFileWorkoutId))
             var pageText = ""
             var pageRouteFiles: [(name: String, url: URL)] = []
             var pageRouteDecisions: [String: RouteSyncRecord] = [:]
@@ -485,7 +516,7 @@ nonisolated enum HealthKitExport {
             let routeKey = routeFileWorkoutId(workout)
             let previous = routeStates[routeKey]
                 ?? RouteSyncStateMachine.baseline(workoutUUID: routeKey, workoutEndDate: workout.endDate)
-            let hasWorkoutChange = workoutBatch.changedUUIDs.contains(routeKey)
+            let hasWorkoutChange = changedWorkoutIDs.contains(routeKey)
             let routeFiles: [(name: String, url: URL)]
             // 🔴 route 预算闸门（2026-10-14，S2 补全）：**先判后取** —— 预算满就不 fetch，
             // `routeDecisions` 不写 ⇒ 状态与文件严格同进同退（未查的 workout 保持原状，
@@ -563,10 +594,17 @@ nonisolated enum HealthKitExport {
             pageRouteFiles.append(contentsOf: routeFiles)
             pageText += workoutXML(workout, routeNames: routeFiles.map(\.name))
         }
-        // R4b 页收尾：同一字节账判定 → 通过才写（并在此时才合并路由状态与文件）。
+        // 页收尾：同一字节账判定。放不下 ⇒ 先缩查询页从同一 `anchorBefore` 重查；连单条
+        // 都放不下才是有观测的阻塞（整页不写、锚不推进）。
         let pageBytes = pageText.utf8.count
         guard budget.accepts(xmlBytes: xml.offsetInFile, records: recordCount,
                              pageBytes: pageBytes, pageRecords: 0) else {
+            if let shrunk = WorkoutPageShrink.nextLimit(after: pageLimit) {
+                // 整页放不下 ⇒ 缩查询页从**同一** `anchorBefore` 重查（更小页更可能放得下）。
+                pageLimit = shrunk
+                continue
+            }
+            // 连单条都放不下 ⇒ 可见阻塞：整页不写、锚不推进（下一批从同一 anchorBefore 重来）。
             workoutStop = .workoutBytes
             break
         }
@@ -576,8 +614,32 @@ nonisolated enum HealthKitExport {
         routeCount += pageRouteCount
         routeBytes += pageRouteBytes
         files.append(contentsOf: pageRouteFiles)
-        pageStart = pageEnd
+        // O01：页**完整交付** ⇒ 锚推进 + 本页删除并入池（未交付页的删除不进池、随锚一起
+        // 回退，下批从同一 `anchorBefore` 重来 —— 与锚推进严格同进退）。
+        for object in page.deleted where freshWorkoutIdSet.insert(object.uuid.uuidString).inserted {
+            freshWorkoutIds.append(object.uuid.uuidString)
         }
+        if !streamDone { deliveredAnchor = page.next; anchorBefore = page.next }
+        attachmentWorkouts = []
+        pageLimit = Self.workoutPageLimit
+        if streamDone { break }
+        }
+
+        // WP-12/WP-10：删除三分预扣（固定顺序：旧槽 → 本批 workout → 本批 record）。
+        // 🔴 顺序不是风格：workout 删除必须**先于** record 删除占额 —— 否则 record 侧会在
+        // drain 里把额度吃光。WP-10 改点：这里的 fresh 集合来自"已完整交付的页"（删除池），
+        // 未交付页的删除随锚回退、下批重来（守恒式见 `DirectSyncDeletionPartition`）。
+        let deletionPlan = DirectSyncDeletionPartition.plan(
+            pending: pendingDeletions,
+            freshWorkoutIds: freshWorkoutIds,
+            budget: budget.maxDeletions
+        )
+        let stashRecordDeletions = deletionPlan.stashRecordDeletions
+        let stashWorkoutIds = deletionPlan.stashWorkoutIds
+        let keptWorkoutIds = deletionPlan.keptWorkoutIds
+        // record 侧按剩余额度截断；本批新溢出经 `allocation.overflow` 回传，与计划里的
+        // 旧槽尾部在收尾处合并成完整余量。
+        let allocation = DirectSyncDeletionAllocation(remaining: deletionPlan.remainingRecordBudget)
 
         // ⚠️ 这一句**刻意不并入** `DirectSyncCopy.readingIncrement`：它同时是
         // `apps/ios/tests/check-background-capabilities.py` 切出「逐 workout 轨迹循环」的
@@ -640,7 +702,9 @@ nonisolated enum HealthKitExport {
             warnings: warnings.snapshot,
             maxEndDate: exportedWorkouts.map(\.endDate).max(),
             exportedThrough: exportedThrough,
-            workoutAnchor: workoutBatch.anchor,
+            // O01（WP-10）：候选锚 = **最后完整交付页**的页锚（不是查询流末尾；被截断的页
+            // 绝不随锚前推）。nil = 首装且一页都没交付（下批从全量重来 —— 重复导出但不丢）。
+            workoutAnchor: deliveredAnchor.flatMap(encodeAnchor),
             recordCursors: records.cursors,
             sourceScope: "healthkit",
             routeStates: routeDecisions,
@@ -712,69 +776,27 @@ nonisolated enum HealthKitExport {
         }.sorted { $0.identifier < $1.identifier }
     }
 
-    private static func runningWorkouts(
+    /// 单页查询（O01/WP-10）：从 `anchor` 起把 anchored 流取**一页**（最多 `limit` 条样本）。
+    ///
+    /// 返回的 `next` 是**消费该页后**的候选锚 —— 只有"整页交付"后才允许提交（页循环负责；
+    /// 旧 `runningWorkouts` 把整个流查到末尾、把**末尾锚**直接回传，被预算截断的页就永久丢了）。
+    ///
+    /// 🔴 `HKAnchoredObjectQuery` 的 `limit` 约束**样本**（`deletedObjects` 不随 limit 缩小
+    /// —— 缩页重查会重复返回同一批删除，调用侧按 UUID 去重）。
+    ///
+    /// 错误转换与旧实现逐条同语义：授权失败 / 锁屏**绝不伪装成"空数据"**。
+    private static func workoutPage(
         store: HKHealthStore,
-        from startDate: Date?,
-        anchorData: Data?
-    ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], anchor: Data?, changedUUIDs: Set<String>) {
-        let stored = anchorData.flatMap(decodeAnchor)
-        guard anchorData == nil || stored != nil else {
-            throw HealthKitExportError.invalidWorkoutAnchor
-        }
-        var predicates = [HKQuery.predicateForWorkouts(with: .running)]
-        if stored == nil, let startDate {
-            predicates.append(HKQuery.predicateForSamples(withStart: startDate, end: nil, options: .strictStartDate))
-        }
+        anchor: HKQueryAnchor?,
+        predicate: NSPredicate,
+        limit: Int
+    ) async throws -> (added: [HKWorkout], deleted: [HKDeletedObject], next: HKQueryAnchor) {
         do {
-            // R4b（2026-10-16）：query 级分页 —— 单次 `HKAnchoredObjectQuery` 不再无界取回
-            // 全部历史 workout（回填期可能上千条）。锚点逐页单调前进、累积到空页为止；
-            // 与旧行为语义等价（全量），但每一页都有界，内存峰值与查询时长可控。
-            var batchAdded: [HKWorkout] = []
-            var batchDeleted: [HKDeletedObject] = []
-            var pageAnchor = stored
-            let batchPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
-            while true {
-                let page = try await anchoredWorkouts(
-                    store: store,
-                    anchor: pageAnchor,
-                    predicate: batchPredicate,
-                    limit: Self.workoutPageLimit
-                )
-                batchAdded.append(contentsOf: page.added)
-                batchDeleted.append(contentsOf: page.deleted)
-                pageAnchor = page.next
-                if page.added.isEmpty && page.deleted.isEmpty { break }
-            }
-            let batch = (added: batchAdded, deleted: batchDeleted, next: pageAnchor)
-            var merged: [UUID: HKWorkout] = [:]
-            for workout in batch.added {
-                merged[workout.uuid] = workout
-            }
-            if stored != nil {
-                let backfillStart = (startDate ?? Date()).addingTimeInterval(-routeBackfillWindow)
-                let recentPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
-                    HKQuery.predicateForWorkouts(with: .running),
-                    HKQuery.predicateForSamples(withStart: backfillStart, end: nil, options: .strictStartDate)
-                ])
-                let recent: [HKWorkout] = try await samples(
-                    type: .workoutType(),
-                    predicate: recentPredicate,
-                    store: store
-                )
-                for workout in recent {
-                    merged[workout.uuid] = workout
-                }
-            }
-            let workouts = merged.values.sorted { left, right in
-                if left.startDate == right.startDate { return left.uuid.uuidString < right.uuid.uuidString }
-                return left.startDate < right.startDate
-            }
-            // 页循环至少执行一次 ⇒ `pageAnchor` 必然已被 `page.next` 赋过值；
-            // `?? fromValue(0)` 只是给类型系统的兜底（不可达 —— 真到底的空页也返回非 nil 锚）。
-            let finalAnchor = pageAnchor ?? HKQueryAnchor(fromValue: 0)
-            return (
-                workouts, batch.deleted, encodeAnchor(finalAnchor),
-                Set(batch.added.map(routeFileWorkoutId))
+            return try await anchoredWorkouts(
+                store: store,
+                anchor: anchor,
+                predicate: predicate,
+                limit: limit
             )
         } catch {
             if isAuthorizationError(error) {

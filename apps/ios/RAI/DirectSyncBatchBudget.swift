@@ -345,3 +345,17 @@ extension DirectSyncPendingDeletions {
         }
     }
 }
+
+/// workout 页被字节闸门拒绝时的**收缩决策**（O01/WP-10，纯函数）。
+///
+/// 与记录侧的 `shrinkLimit` 同族：把"每轮至少前进一格、**有限步终止**"的收缩规则
+/// 集中在一处（Export 本体依赖 HealthKit、回归编译不了它，纯逻辑必须可独立断言）。
+/// `nil` = 已到单条仍放不下 ⇒ 调用方进入**可见阻塞**（整页不写、锚不推进）——
+/// 不是无限重导，也不是静默跳过。
+nonisolated enum WorkoutPageShrink {
+    /// - Returns: 缩一档后的 limit（严格下降且 ≥1）；`nil` = 单条仍放不下。
+    static func nextLimit(after limit: Int) -> Int? {
+        guard limit > 1 else { return nil }
+        return max(1, limit / 2)
+    }
+}
