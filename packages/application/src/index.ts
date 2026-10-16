@@ -22,7 +22,28 @@ export {
 export { RecomputePipeline } from "./services/recompute-pipeline.js";
 // O06-A / WP-22：分析输入读取器（只读连接上的**一个读事务**捕获输入绑定与账本覆盖）。
 // 注入点在 worker 线程（`apps/api/src/recompute-thread.ts`）——分析不允许自己去开连接。
-export { SqliteAnalysisInputReader, type AnalysisInputCapture, type AnalysisInputSource } from "./services/analysis-input-reader.js";
+export {
+  SqliteAnalysisInputReader,
+  type AnalysisInputCapture,
+  type AnalysisInputCaptureRequest,
+  type AnalysisInputSource
+} from "./services/analysis-input-reader.js";
+// O06-A / WP-22 步骤 3–5：固定输入的事实视图（物化快照 / 分段校验读）。
+export {
+  AnalysisInputDriftError,
+  DEFAULT_ANALYSIS_INPUT_BUDGET,
+  PINNED_FACT_TABLES,
+  PINNED_PUBLISHED_EVIDENCE_TABLES,
+  SNAPSHOT_TABLES,
+  SegmentedFactView,
+  SnapshotFactView,
+  materializeFactSnapshot,
+  probeFactSize,
+  type AnalysisFactView,
+  type AnalysisFactViewStats,
+  type AnalysisInputBudget,
+  type FactViewGenerations
+} from "./services/analysis-fact-view.js";
 export { analysisInputDigest, type AnalysisInputBinding } from "./analysis-input-binding.js";
 // §12.11 个人自校准：留一法回放产出残差样本，拟合与展示闸门在 @rai/model-eval。
 export {

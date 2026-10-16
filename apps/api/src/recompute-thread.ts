@@ -1,7 +1,12 @@
 import { statSync } from "node:fs";
 import { parentPort } from "node:worker_threads";
 
-import { RaiApplicationService, SqliteAnalysisInputReader } from "@rai/application";
+import {
+  DEFAULT_ANALYSIS_INPUT_BUDGET,
+  RaiApplicationService,
+  SqliteAnalysisInputReader,
+  type AnalysisInputBudget
+} from "@rai/application";
 import { RaiDatabase } from "@rai/storage-sqlite";
 
 import { createWriteLeaseClient, withWriteGate, type WriteLeaseStats } from "./write-lease.js";
@@ -62,6 +67,28 @@ function databaseTargetKey(path: string): string | null {
 }
 
 /**
+ * 事实物化预算的环境覆盖（O06-A 步骤 4）。
+ *
+ * 只允许**调上限**：解析失败或非正数一律退回默认值（"变 0"会让每个任务都走分段路径，
+ * 那是运维事故而不是开关）。**不存在"关掉预算"的取值** —— 超预算的路径是分段校验读
+ * （每条读核对依赖代次），不是无限读。
+ */
+export function analysisInputBudgetFrom(env: NodeJS.ProcessEnv): AnalysisInputBudget {
+  const read = (name: string, fallback: number): number => {
+    const raw = env[name];
+    if (raw === undefined || raw === "") return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+  };
+  return {
+    maxRows: read("RAI_ANALYSIS_INPUT_MAX_ROWS", DEFAULT_ANALYSIS_INPUT_BUDGET.maxRows),
+    maxBytes: read("RAI_ANALYSIS_INPUT_MAX_BYTES", DEFAULT_ANALYSIS_INPUT_BUDGET.maxBytes),
+    maxReadRows: read("RAI_ANALYSIS_INPUT_MAX_READ_ROWS", DEFAULT_ANALYSIS_INPUT_BUDGET.maxReadRows),
+    maxReadMs: read("RAI_ANALYSIS_INPUT_MAX_READ_MS", DEFAULT_ANALYSIS_INPUT_BUDGET.maxReadMs)
+  };
+}
+
+/**
  * 跑**一轮**分析（真实入口：常驻循环每条 `round` 消息调它一次）。
  *
  * 返回值把"这一轮的结局"和"这一轮看到的目标"一起交出去，主线程据此结算与留痕。
@@ -95,6 +122,10 @@ export async function runOneRecomputeRound(
   // O06-A / WP-22：输入绑定要在**独立只读连接**的同一个读事务里捕获 —— 用写租约代理那条连接
   // 读"输入是哪一版"，读到的东西会被并发批次改动，而那正是 O06 的病灶。只读连接不参与写租约，
   // 也不影响单写者纪律（它不开写事务、不迁移）。
+  //
+  // 步骤 3–5：同一个读事务里还要把**事实**取出来（预算内 = 内存快照；超预算 = 分段校验读）。
+  // 预算是运维可调的上限（库大小差别很大），但**只有上限可以调**：超预算时的行为固定为
+  // "分段 + 每条读核对依赖代次"，不存在"把预算调大到无限读"的开关。
   const inputDatabase = RaiDatabase.openReadonly(databasePath);
 
   let completed: ReturnType<RaiApplicationService["runNextJob"]> = null;
@@ -104,7 +135,7 @@ export async function runOneRecomputeRound(
       "owned",
       undefined,
       lease === null ? undefined : { scope: (fn) => lease.scope(fn), yieldIfStale: (maxHoldMs) => lease.yieldIfStale(maxHoldMs) },
-      new SqliteAnalysisInputReader(inputDatabase)
+      new SqliteAnalysisInputReader(inputDatabase, "direct-sync", analysisInputBudgetFrom(process.env))
     ).runNextJob();
   } finally {
     // 🔴 先关连接（释放 SQLite 锁），**本轮结算之后**主线程才 dispose 租约（释放应用许可）。

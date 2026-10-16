@@ -9,6 +9,7 @@ import { RecomputeProgressGate } from "./recompute-progress.js";
 import { BoundedCache } from "./bounded-cache.js";
 import { ChunkedWriter } from "./chunked-write.js";
 import type { AnalysisInputCapture, AnalysisInputSource } from "./analysis-input-reader.js";
+import { AnalysisInputDriftError, type AnalysisFactView } from "./analysis-fact-view.js";
 import type { AnalysisDirtyDomains } from "@rai/health-export-parser";
 
 import {
@@ -148,6 +149,15 @@ interface OverrideSnapshot {
   ids: string[];
   byTrainingSessionId: Map<string, WorkoutOverride>;
 }
+
+/**
+ * 输入漂移（O06-A 步骤 5）最多重排几次。
+ *
+ * 为什么必须有上限：每次漂移都登记一条续算任务，若导入持续到达、而这条库又大到只能分段读，
+ * 就会变成"不停创建又废弃候选"的活锁（O06-B 的防饿死上限是另一条独立要求）。
+ * 到顶之后当前任务以**显式原因**失败，而不是把候选悄悄发布出去。
+ */
+const MAX_BINDING_DRIFT_REPLANS = 3;
 
 /**
  * 一场训练的**一次装配结果**（O09 步骤 6）。
@@ -375,8 +385,34 @@ export class RecomputePipeline {
   /** 本次直连分析捕获到的输入绑定；非直连任务为 null ⇒ 不写绑定行（老路径零改动）。 */
   private pendingInputCapture: AnalysisInputCapture | null = null;
 
+  /**
+   * 本次运行的**事实视图**（O06-A / WP-22 步骤 3）：
+   *
+   * - `null`（CLI、老调用方、单测）⇒ 事实从 `store.database` 读，行为与改动前**逐字节相同**；
+   * - 非空 ⇒ 事实（`health_records` / `workouts` / `canonical_*` / override / 分区设置 /
+   *   成绩证据 / 账本…）一律从被固定的那一版读，**绝不再碰写连接**。
+   *
+   * 为什么默认 `null` 而不是"总去固定"：固定需要一条独立的只读连接，那是 worker 线程
+   * （`apps/api/src/recompute-thread.ts`）的权限；分析侧不允许自己开连接（写租约结构判据：
+   * 本文件里不得出现**直连构造**或**直连打开**主库的写法，判据按原文匹配 —— 连注释里
+   * 出现那几个字面量也算，这正是 2026-10-16 踩过一次的坑）。于是本类只**使用**注入的视图，
+   * 没有注入时保持老行为。
+   */
+  private factView: AnalysisFactView | null = null;
+
   get database(): DatabaseSync {
     return this.store.database;
+  }
+
+  /**
+   * 事实读取句柄：有固定输入就从它读，否则退回写连接。
+   *
+   * ⛔ 只给**事实**用。派生结果（`workout_features` / `ability_assessments` / `daily_*` /
+   * `model_*`）必须继续走 `this.database`：它们要么由本次运行自己写（读快照会读到旧行），
+   * 要么属于发布证据。写仍然只经 `AnalysisStore`（本 getter 不存在写路径）。
+   */
+  private get facts(): DatabaseSync {
+    return this.factView === null ? this.database : this.factView.database;
   }
 
   private hasHealthRecordUnitColumn(): boolean {
@@ -592,7 +628,7 @@ export class RecomputePipeline {
   ): ModelTransitionSourceBackfillEvidence | undefined {
     if (importBatchId === undefined) return undefined;
     const count = (sql: string, ...args: SQLInputValue[]): number =>
-      Number(this.database.prepare(sql).get(...args)?.n ?? 0);
+      Number(this.facts.prepare(sql).get(...args)?.n ?? 0);
     // `import_entity_changes` is the per-batch change ledger and is the only place
     // a removal of a fact row is written with its batch identity: rows with
     // `change_type='removed'` are inserted by `removeDeletedHealthKitAliasCopies`
@@ -620,7 +656,7 @@ export class RecomputePipeline {
     // holds the global minimum `start_at` must be one of this batch's *inserted*
     // records; an update of an already-present row would not have moved the
     // timeline backwards, so only `inserted` proves the backfill.
-    const earliest = this.database.prepare(
+    const earliest = this.facts.prepare(
       `SELECT id FROM health_records
        WHERE start_at = (SELECT MIN(start_at) FROM health_records) LIMIT 1`
     ).get() as { id: string } | undefined;
@@ -660,7 +696,61 @@ export class RecomputePipeline {
       return;
     }
     const raw = job.request as Record<string, unknown>;
-    const capture = this.inputSource.capture({
+    const capture = this.inputSource.capture(this.captureRequest(job, raw));
+    this.pendingInputCapture = typeof raw.importBatchId === "string"
+      && !capture.mergedBatchIds.includes(raw.importBatchId)
+      ? { ...capture, mergedBatchIds: [...capture.mergedBatchIds, raw.importBatchId] }
+      : capture;
+    // 计划被调整（代次前进了）时，把实际计划写回请求：`reuseFeaturePrefix` /
+    // `resumeModelReplay` 读的都是 `request.incrementalPlan`。计划为 null ⇒ 删掉键 ⇒ 全量。
+    const request: Record<string, unknown> = { ...raw };
+    if (capture.plan === null) delete request.incrementalPlan;
+    else request.incrementalPlan = { mode: "partial", dirtyFromAt: capture.plan.dirtyFromAt, domains: capture.plan.domains };
+    if (capture.planAdjustment !== null) {
+      this.jobs.logEvent(job.id, "input_binding", 0, 0,
+        `Analysis input plan adjusted: ${capture.planAdjustment} (coverage=${capture.coverage.reason})`);
+    }
+    // 步骤 3–4 证据：这一版输入是**物化**取出的还是**分段**读的、多少行／字节、为什么降级。
+    // 写进任务事件，"这一版算的是什么"事后可查（不进健康明细，只有计数与原因码）。
+    this.jobs.logEvent(job.id, "input_materialization", 0, 0, JSON.stringify(capture.materialization));
+    // 🔴 固定输入就位：从这一刻起，事实读取只命中这一版（见 `facts` getter）。
+    this.factView = capture.facts;
+    try {
+      this.runFullRecompute({ ...job, request });
+    } catch (error) {
+      if (error instanceof AnalysisInputDriftError) this.replanAfterInputDrift(job, raw, error);
+      throw error;
+    } finally {
+      // 分段模式的**逐条记账**必须落到任务事件上：单条读越过 `maxReadRows` / `maxReadMs`、
+      // 以及 raw-only 前进，都只在 `stats()` 里活着；不写下来就等于"超预算没人知道"。
+      // （读多少行、越了多少次是计数，不含任何健康明细。）
+      const finished = this.factView;
+      if (finished !== null) {
+        const stats = finished.stats();
+        if (stats.overruns.length > 0 || stats.rawAdvances.length > 0) {
+          try {
+            this.jobs.logEvent(job.id, "input_materialization", 0, 0, JSON.stringify({
+              mode: stats.mode, reads: stats.reads, rows: stats.rows,
+              overruns: stats.overruns.slice(0, 8),
+              rawAdvances: stats.rawAdvances.slice(0, 8),
+              observedGenerations: stats.observedGenerations.slice(0, 8)
+            }));
+          } catch {
+            // 记账失败不能盖住本次运行的结局（成功/失败原因才是主线）。
+          }
+        }
+      }
+      // 快照的寿命就是这一次运行：关掉它（内存快照；分段视图不关别人的只读连接），
+      // 下一轮任务不会带着上一版的输入开工。
+      this.factView?.dispose();
+      this.factView = null;
+      this.pendingInputCapture = null;
+    }
+  }
+
+  /** 捕获请求的构造（登记计划 → 捕获请求的映射只留一份）。 */
+  private captureRequest(job: RecomputeJob, raw: Record<string, unknown>): Parameters<AnalysisInputSource["capture"]>[0] {
+    return {
       runId: "",
       jobId: job.id,
       scope: "direct-sync",
@@ -678,25 +768,76 @@ export class RecomputePipeline {
               ?? { features: normalizeInstant((raw.incrementalPlan as { dirtyFromAt: string }).dirtyFromAt, "dirtyFromAt"), fitness: null, readiness: null }
           }
         : null
-    });
-    this.pendingInputCapture = typeof raw.importBatchId === "string"
-      && !capture.mergedBatchIds.includes(raw.importBatchId)
-      ? { ...capture, mergedBatchIds: [...capture.mergedBatchIds, raw.importBatchId] }
-      : capture;
-    // 计划被调整（代次前进了）时，把实际计划写回请求：`reuseFeaturePrefix` /
-    // `resumeModelReplay` 读的都是 `request.incrementalPlan`。计划为 null ⇒ 删掉键 ⇒ 全量。
-    const request: Record<string, unknown> = { ...raw };
-    if (capture.plan === null) delete request.incrementalPlan;
-    else request.incrementalPlan = { mode: "partial", dirtyFromAt: capture.plan.dirtyFromAt, domains: capture.plan.domains };
-    if (capture.planAdjustment !== null) {
-      this.jobs.logEvent(job.id, "input_binding", 0, 0,
-        `Analysis input plan adjusted: ${capture.planAdjustment} (coverage=${capture.coverage.reason})`);
+    };
+  }
+
+  /**
+   * 段间判据（O06-A 步骤 5）：每个续算分段/阶段开工前核对依赖绑定未变。
+   *
+   * - **分段模式**：`assertPinned` 在依赖代次变化时抛 `AnalysisInputDriftError` ⇒ 候选作废、
+   *   保留旧发布结果、合并新增 dirty 范围后重排（{@link replanAfterInputDrift}）。
+   * - **物化模式**：整份输入来自一个读事务，快照本身就是判据 —— 代次前进**不**作废候选，
+   *   它由发布短事务里的依赖级判据（D4）裁决。这里只留痕，避免"悄悄放过一次代次前进"。
+   */
+  private assertPinnedStage(jobId: string, stage: string): void {
+    const view = this.factView;
+    if (view === null) return;
+    const binding = this.pendingInputCapture?.binding;
+    const observed = view.observeGenerations();
+    view.assertPinned(`stage:${stage}`);
+    if (binding === undefined) return;
+    if (observed.raw !== binding.capturedRawGeneration ||
+        observed.dependency !== binding.capturedDependencyGeneration) {
+      this.jobs.logEvent(jobId, "input_binding", 0, 0,
+        `Generation advanced during ${stage}: captured ${binding.capturedRawGeneration}/${binding.capturedDependencyGeneration}, ` +
+        `observed ${observed.raw}/${observed.dependency} (materialized snapshot kept)`);
     }
+  }
+
+  /**
+   * 漂移后的重排（O06-A 步骤 5）：**保留旧发布结果**（本次候选什么都没发布），
+   * 把"旧捕获代次之后"的全部账本并进 dirty 范围，登记一条续算任务。
+   *
+   * ⛔ 不在这里发布任何东西、不拼接"最新一段"：漂移的候选整体丢掉。
+   * ⛔ 重排次数有上限（`MAX_BINDING_DRIFT_REPLANS`）：反复漂移时不再无限登记任务，
+   * 当前任务以显式原因失败，由调用方/调度决定下一步（防饿死的上限属 O06-B）。
+   */
+  private replanAfterInputDrift(job: RecomputeJob, raw: Record<string, unknown>, drift: AnalysisInputDriftError): void {
+    const attempts = Number(raw.bindingDriftReplans ?? 0);
+    this.jobs.logEvent(job.id, "input_binding", 0, 0,
+      `Analysis input drifted during ${drift.stage} (dependency ${drift.expected.dependency} -> ${drift.observed.dependency}); ` +
+      `published release kept, candidate dropped (replan attempt ${attempts + 1}/${MAX_BINDING_DRIFT_REPLANS})`);
+    if (attempts >= MAX_BINDING_DRIFT_REPLANS || this.inputSource === undefined) return;
+    let replan: AnalysisInputCapture;
     try {
-      this.runFullRecompute({ ...job, request });
-    } finally {
-      this.pendingInputCapture = null;
+      // 重新捕获一次：这次要求把"漂移前捕获的 raw 代次之后"的账本**全部**并进来
+      // （`mergeFromRawGeneration`），于是新计划覆盖新批次弄脏的范围。
+      replan = this.inputSource.capture({
+        ...this.captureRequest(job, raw),
+        registeredPlan: null,
+        mergeFromRawGeneration: drift.expected.raw
+      });
+    } catch (error) {
+      // 重排捕获本身失败（例如刚被写者占住）：不再登记任务，让当前任务以显式原因失败 ——
+      // 但**必须留痕**，"想重排却没排成"不能只在日志里缺失。
+      this.jobs.logEvent(job.id, "input_binding", 0, 0,
+        `Replan capture failed after input drift: ${error instanceof Error ? error.message : String(error)}`);
+      return;
     }
+    const request: Record<string, unknown> = { ...raw, bindingDriftReplans: attempts + 1 };
+    if (replan.plan === null) delete request.incrementalPlan;
+    else request.incrementalPlan = { mode: "partial", dirtyFromAt: replan.plan.dirtyFromAt, domains: replan.plan.domains };
+    // ⛔ datasetVersion 取**重排捕获自己的绑定**，不要走 `this.manifestValue`：那会经过
+    // `this.facts`，而此刻旧的（已漂移的）事实视图还挂着 —— 再去读它等于让同一个漂移
+    // 在重排路径里再抛一次，于是"登记重排任务"这一步永远走不到。
+    this.jobs.enqueue("import", replan.binding.datasetVersion, request, {
+      targetRawGeneration: replan.binding.capturedRawGeneration,
+      targetDependencyGeneration: replan.binding.capturedDependencyGeneration,
+      ...(replan.binding.incumbentReleaseId === null
+        ? {}
+        : { expectedIncumbentReleaseId: replan.binding.incumbentReleaseId })
+    });
+    replan.facts.dispose();
   }
 
   runSnapshotRefresh(job: RecomputeJob): void {
@@ -782,7 +923,7 @@ export class RecomputePipeline {
   }
 
   private manifestValue(key: string): string | null {
-    const row = this.database
+    const row = this.facts
       .prepare("SELECT value FROM import_manifest WHERE key = ?")
       .get(key) as unknown as { value: string } | undefined;
     return row?.value ?? null;
@@ -967,13 +1108,18 @@ export class RecomputePipeline {
   }
 
   private loadSessions(evaluatedAt: string): SessionRow[] {
-    return (this.sessions.listActiveForFeatures() as SessionRow[]).filter(
+    // 事实读（O06-A 步骤 3）：固定输入存在时，"这次算哪些训练"必须来自**那一版**事实。
+    // 仓储只读且只碰 training_sessions / workouts / workout_statistics，把它构造在事实视图上即可，
+    // SQL 不必在这里手抄第二份（两处 SQL 必然漂移）。
+    const repository: SqliteTrainingSessionRepository =
+      this.factView === null ? this.sessions : new SqliteTrainingSessionRepository(this.facts);
+    return (repository.listActiveForFeatures() as SessionRow[]).filter(
       (session) => session.workoutStartAt <= evaluatedAt && session.workoutEndAt <= evaluatedAt
     );
   }
 
   private captureOverrideSnapshot(): OverrideSnapshot {
-    const rows = this.database.prepare(`
+    const rows = this.facts.prepare(`
       SELECT * FROM effective_workout_overrides ORDER BY training_session_id
     `).all() as unknown as Array<Record<string, unknown>>;
     const overrides = rows.map((row): WorkoutOverride => ({
@@ -1005,7 +1151,7 @@ export class RecomputePipeline {
   }
 
   private loadStatistic(workoutId: string, type: string): StatisticRow | null {
-    const row = this.database
+    const row = this.facts
       .prepare(`
         SELECT average_value AS averageValue, minimum_value AS minimumValue,
                maximum_value AS maximumValue, unit
@@ -1036,7 +1182,7 @@ export class RecomputePipeline {
     sourceName: string, workoutStartAt: string, workoutEndAt: string, type: string
   ): RecordRow[] {
     const unitSelect = this.hasHealthRecordUnitColumn() ? ", unit" : "";
-    const exact = this.database
+    const exact = this.facts
       .prepare(`
         SELECT value_numeric AS value, start_at AS startAt, end_at AS endAt${unitSelect}
         FROM (
@@ -1053,7 +1199,7 @@ export class RecomputePipeline {
       .all(sourceName, type, workoutEndAt, workoutStartAt) as unknown as RecordRow[];
     if (exact.length > 0 || type !== heartRateType) return exact;
 
-    const fallback = this.database.prepare(`
+    const fallback = this.facts.prepare(`
       SELECT source_name AS sourceName
       FROM health_records
       WHERE source_name <> ? AND type = ? AND value_numeric IS NOT NULL
@@ -1070,7 +1216,7 @@ export class RecomputePipeline {
       LIMIT 1
     `).get(sourceName, type, workoutEndAt, workoutStartAt) as unknown as { sourceName: string } | undefined;
     if (!fallback) return exact;
-    return this.database.prepare(`
+    return this.facts.prepare(`
       SELECT value_numeric AS value, start_at AS startAt, end_at AS endAt${unitSelect}
       FROM (
         SELECT DISTINCT value_numeric, start_at, end_at${unitSelect}
@@ -1096,7 +1242,7 @@ export class RecomputePipeline {
       const valid = values.filter((value) => Number.isFinite(value));
       return valid.length ? median(valid) : null;
     };
-    const night = this.database.prepare(`
+    const night = this.facts.prepare(`
       SELECT id, wake_at AS wakeAt, asleep_union_minutes AS sleepMinutes
       FROM canonical_nights
       WHERE kind = 'main' AND timezone_identifier = ? AND wake_at IS NOT NULL AND wake_at < ?
@@ -1106,14 +1252,14 @@ export class RecomputePipeline {
       ? night
       : undefined;
     const hrv = recentNight
-      ? this.database.prepare(`
+      ? this.facts.prepare(`
           SELECT hrv_sdnn_ms AS value, confidence
           FROM canonical_hrv_days WHERE night_id = ? AND hrv_sdnn_ms IS NOT NULL
             AND window_end_at IS NOT NULL AND window_end_at < ?
           ORDER BY computed_at DESC LIMIT 1
         `).get(recentNight.id, workoutStartAt) as unknown as { value: number; confidence: string } | undefined
       : undefined;
-    const rhrRows = this.database.prepare(`
+    const rhrRows = this.facts.prepare(`
       SELECT source_category AS sourceCategory, value_numeric AS value
       FROM health_records
       WHERE type = ? AND value_numeric IS NOT NULL
@@ -1131,13 +1277,13 @@ export class RecomputePipeline {
     const readBaseline = (table: "sleep" | "hrv" | "rhr" | "load", days: number): number[] => {
       const fromDate = addDays(localDate, -days);
       if (table === "sleep") {
-        return (this.database.prepare(`SELECT asleep_union_minutes AS value FROM canonical_nights WHERE kind='main' AND timezone_identifier=? AND wake_date >= ? AND wake_date < ? AND wake_at < ?`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number | null }>).flatMap((row) => row.value == null ? [] : [Number(row.value)]);
+        return (this.facts.prepare(`SELECT asleep_union_minutes AS value FROM canonical_nights WHERE kind='main' AND timezone_identifier=? AND wake_date >= ? AND wake_date < ? AND wake_at < ?`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number | null }>).flatMap((row) => row.value == null ? [] : [Number(row.value)]);
       }
       if (table === "hrv") {
-        return (this.database.prepare(`SELECT hrv_sdnn_ms AS value FROM canonical_hrv_days WHERE timezone_identifier=? AND local_date >= ? AND local_date < ? AND confidence <> 'missing' AND window_end_at < ? AND hrv_sdnn_ms IS NOT NULL`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number }>).map((row) => Number(row.value));
+        return (this.facts.prepare(`SELECT hrv_sdnn_ms AS value FROM canonical_hrv_days WHERE timezone_identifier=? AND local_date >= ? AND local_date < ? AND confidence <> 'missing' AND window_end_at < ? AND hrv_sdnn_ms IS NOT NULL`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number }>).map((row) => Number(row.value));
       }
       if (table === "rhr") {
-        const rows = this.database.prepare(`SELECT source_category AS sourceCategory, value_numeric AS value, start_at AS startAt FROM health_records WHERE type=? AND value_numeric IS NOT NULL AND source_category IN ('apple_watch', 'connect') AND start_at >= ? AND start_at < ? AND end_at < ?`).all(restingHeartRateType, localDateStartAt(fromDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier)) as Array<{ sourceCategory: string; value: number; startAt: string }>;
+        const rows = this.facts.prepare(`SELECT source_category AS sourceCategory, value_numeric AS value, start_at AS startAt FROM health_records WHERE type=? AND value_numeric IS NOT NULL AND source_category IN ('apple_watch', 'connect') AND start_at >= ? AND start_at < ? AND end_at < ?`).all(restingHeartRateType, localDateStartAt(fromDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier)) as Array<{ sourceCategory: string; value: number; startAt: string }>;
         // Apply Watch-first/Connect fallback independently for each local day.
         const byDate = new Map<string, Array<{ sourceCategory: string; value: number }>>();
         for (const row of rows) {
@@ -1152,7 +1298,7 @@ export class RecomputePipeline {
           return value === null ? [] : [value];
         });
       }
-      const rows = this.database.prepare(`SELECT workout.start_at AS startAt, workout.duration_seconds AS durationSeconds FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at < ?`).all(runningType, workoutStartAt) as Array<{ startAt: string; durationSeconds: number }>;
+      const rows = this.facts.prepare(`SELECT workout.start_at AS startAt, workout.duration_seconds AS durationSeconds FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at < ?`).all(runningType, workoutStartAt) as Array<{ startAt: string; durationSeconds: number }>;
       const byDate = new Map<string, number>();
       for (const row of rows) {
         const date = localDateAt(row.startAt, timezoneIdentifier);
@@ -1170,7 +1316,7 @@ export class RecomputePipeline {
     const hrvBase = baselineFor("hrv");
     const rhrBase = baselineFor("rhr");
     const loadBase = baselineFor("load");
-    const recentLoadRows = this.database.prepare(`SELECT SUM(duration_seconds)/60.0 AS value FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at >= ? AND workout.start_at < ?`).get(runningType, new Date(instant - 7 * 86_400_000).toISOString(), workoutStartAt) as unknown as { value: number | null } | undefined;
+    const recentLoadRows = this.facts.prepare(`SELECT SUM(duration_seconds)/60.0 AS value FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at >= ? AND workout.start_at < ?`).get(runningType, new Date(instant - 7 * 86_400_000).toISOString(), workoutStartAt) as unknown as { value: number | null } | undefined;
     return {
       restingHeartRate,
       hrvSdnn: hrv?.value == null ? null : Number(hrv.value),
@@ -1195,7 +1341,7 @@ export class RecomputePipeline {
 
   private loadObservedMaximumHeartRate(workoutStartAt: string): number | null {
     const cutoff = new Date(Date.parse(workoutStartAt) - 180 * 86_400_000).toISOString();
-    const row = this.database
+    const row = this.facts
       .prepare(`
         SELECT MAX(value_numeric) AS value
         FROM health_records
@@ -1209,7 +1355,7 @@ export class RecomputePipeline {
 
   private loadRecentLoadMinutes(workoutStartAt: string): number | null {
     const cutoff = new Date(Date.parse(workoutStartAt) - 7 * 86_400_000).toISOString();
-    const row = this.database
+    const row = this.facts
       .prepare(`
         SELECT SUM(workout.duration_seconds) / 60.0 AS value
         FROM training_sessions session
@@ -1222,7 +1368,7 @@ export class RecomputePipeline {
   }
 
   private loadRouteQuality(workoutId: string): RouteQualityRow {
-    const row = this.database
+    const row = this.facts
       .prepare(`
         SELECT
           COUNT(point.sequence) AS pointCount,
@@ -1242,7 +1388,7 @@ export class RecomputePipeline {
     if (this.allowNativeAggregates && this.nativeElevationGains?.has(workoutId)) {
       return this.nativeElevationGains.get(workoutId) ?? null;
     }
-    const rows = this.database.prepare(`
+    const rows = this.facts.prepare(`
       SELECT point.elevation_meters AS elevation
       FROM workout_routes route
       JOIN route_points point ON point.route_id = route.id
@@ -1325,7 +1471,7 @@ export class RecomputePipeline {
       heartRateSamples: this.workoutAssembly(row).heartIntervals.map((interval) => ({
         value: interval.value, startOffsetSeconds: Math.max(0,(interval.startMs-Date.parse(row.workoutStartAt))/1000),durationSeconds:interval.durationSeconds
       })),
-      environment: parsePerformanceConditions(String(this.database.prepare("SELECT metadata_json FROM workouts WHERE id=?").get(row.canonicalWorkoutId)?.metadata_json ?? "{}")),
+      environment: parsePerformanceConditions(String(this.facts.prepare("SELECT metadata_json FROM workouts WHERE id=?").get(row.canonicalWorkoutId)?.metadata_json ?? "{}")),
       ...(() => {
         const recovery = this.loadPersonalRecovery(row.workoutStartAt, timezoneIdentifier);
         return {
@@ -1468,7 +1614,7 @@ export class RecomputePipeline {
     const bySession = new Map(rows.map((row) => [String(row.training_session_id), row]));
     const oldOverrideIds = parseJson<{ overrideSnapshotIds?: unknown } | null>(parent.metricConfig, null)?.overrideSnapshotIds;
     if (!Array.isArray(oldOverrideIds) || oldOverrideIds.some((id) => typeof id !== "string")) return null;
-    const oldOverrides = this.database.prepare(`SELECT id,training_session_id AS sessionId FROM workout_overrides
+    const oldOverrides = this.facts.prepare(`SELECT id,training_session_id AS sessionId FROM workout_overrides
       WHERE id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(oldOverrideIds)) as { id: string; sessionId: string }[];
     if (oldOverrides.length !== new Set(oldOverrideIds).size) return null;
     const previousOverrides = new Map(oldOverrides.map((override) => [override.sessionId, override.id]));
@@ -1617,7 +1763,7 @@ export class RecomputePipeline {
   }
 
   private loadRestingHeartRateEvidence(evaluatedAt: string): RestingHeartRateEvidence[] {
-    return (this.database.prepare(`
+    return (this.facts.prepare(`
       SELECT value_numeric AS valueBpm, start_at AS observedAt
       FROM health_records
       WHERE type = ? AND value_numeric IS NOT NULL AND start_at < ?
@@ -1626,7 +1772,7 @@ export class RecomputePipeline {
   }
 
   private loadDateOfBirth(): string | null {
-    const row = this.database.prepare("SELECT attributes_json AS attributesJson FROM profile WHERE id = 1")
+    const row = this.facts.prepare("SELECT attributes_json AS attributesJson FROM profile WHERE id = 1")
       .get() as unknown as { attributesJson: string } | undefined;
     const attributes = parseJson<Record<string, unknown>>(row?.attributesJson, {});
     const value = attributes.HKCharacteristicTypeIdentifierDateOfBirth;
@@ -1634,7 +1780,7 @@ export class RecomputePipeline {
   }
 
   private loadZoneProfileSettings(): TrainingZoneProfileSettings[] {
-    const rows = this.database.prepare(`
+    const rows = this.facts.prepare(`
       SELECT * FROM training_zone_profile_settings ORDER BY revision
     `).all() as unknown as Array<Record<string, unknown>>;
     return rows.map((row) => ({
@@ -1704,10 +1850,10 @@ export class RecomputePipeline {
         sourceConfidence: feature.sourceConfidence
       });
     }
-    const directVo2 = loadDirectVo2Evidence(this.database, request.evaluatedAt);
-    const labeledPerformance = loadLabeledPerformanceEvidence(this.database, request.evaluatedAt);
-    const performanceEvidence = loadPerformanceVdotEvidence(this.database, request.evaluatedAt);
-    const thresholdEvidence = loadLactateThresholdEvidence(this.database, request.evaluatedAt);
+    const directVo2 = loadDirectVo2Evidence(this.facts, request.evaluatedAt);
+    const labeledPerformance = loadLabeledPerformanceEvidence(this.facts, request.evaluatedAt);
+    const performanceEvidence = loadPerformanceVdotEvidence(this.facts, request.evaluatedAt);
+    const thresholdEvidence = loadLactateThresholdEvidence(this.facts, request.evaluatedAt);
     // 证据快照：只记"经 active run 读取"的三类；时刻列表就是复用侧要比的那一份。
     evidence.labeled = labeledPerformance.map((item) => item.observedAt).sort();
     evidence.performance = performanceEvidence.map((item) => item.observedAt).sort();
@@ -1828,11 +1974,11 @@ export class RecomputePipeline {
       const a = restricted(left), b = restricted(right);
       return a.length === b.length && a.every((value, index) => value === b[index]);
     };
-    const labeled = loadLabeledPerformanceEvidence(this.database, input.currentAsOf).map((item) => item.observedAt);
+    const labeled = loadLabeledPerformanceEvidence(this.facts, input.currentAsOf).map((item) => item.observedAt);
     if (!sameSet(input.snapshot.labeled, labeled)) return "evidence_labeled_changed";
-    const performance = loadPerformanceVdotEvidence(this.database, input.currentAsOf).map((item) => item.observedAt);
+    const performance = loadPerformanceVdotEvidence(this.facts, input.currentAsOf).map((item) => item.observedAt);
     if (!sameSet(input.snapshot.performance, performance)) return "evidence_performance_changed";
-    const threshold = loadLactateThresholdEvidence(this.database, input.currentAsOf).map((item) => item.observedAt);
+    const threshold = loadLactateThresholdEvidence(this.facts, input.currentAsOf).map((item) => item.observedAt);
     if (!sameSet(input.snapshot.threshold, threshold)) return "evidence_threshold_changed";
     const restingNow = this.recomputableEvidenceTimestamps(input.currentAsOf).resting;
     const restingThen = this.recomputableEvidenceTimestamps(input.parentEvaluatedAt).resting;
@@ -1845,11 +1991,11 @@ export class RecomputePipeline {
 
   /** RHR / VO2 两类证据直读 `health_records`，任何 `asOf` 都能重算 ⇒ 复用侧两边现算比较。 */
   private recomputableEvidenceTimestamps(asOf: string): { resting: string[]; directVo2: string[] } {
-    const resting = this.database.prepare(`
+    const resting = this.facts.prepare(`
       SELECT start_at AS observedAt FROM health_records
       WHERE type = ? AND value_numeric IS NOT NULL AND start_at < ? ORDER BY start_at
     `).all(restingHeartRateType, asOf) as unknown as Array<{ observedAt: string }>;
-    const vo2 = loadDirectVo2Evidence(this.database, asOf);
+    const vo2 = loadDirectVo2Evidence(this.facts, asOf);
     return {
       resting: resting.map((row) => row.observedAt),
       directVo2: vo2.map((item) => item.observedAt).sort()
@@ -1910,7 +2056,7 @@ export class RecomputePipeline {
 
   /** 分区设置摘要：设置一改，历史分区与负荷不再可复用。 */
   private zoneSettingsDigest(): string {
-    const rows = this.database.prepare(
+    const rows = this.facts.prepare(
       "SELECT id, revision FROM training_zone_profile_settings ORDER BY effective_from_local_date, id"
     ).all() as unknown as Array<{ id: string; revision: number }>;
     return rows.map((row) => `${row.id}:${row.revision}`).join("\u0001");
@@ -2988,26 +3134,26 @@ export class RecomputePipeline {
    * null and is retained only as a compatibility column.
    */
   private loadDailyPhysEvidence(startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {
-    return loadDailyPhysEvidence(this.database, startDate, throughDate, timezoneIdentifier, asOfAt);
+    return loadDailyPhysEvidence(this.facts, startDate, throughDate, timezoneIdentifier, asOfAt);
   }
 
   private loadLegacyDailyPhysEvidence(startDate: string, throughDate: string, timezoneIdentifier: string, asOfAt: string): DailyPhysEvidence[] {
     if (throughDate < startDate) return [];
     const baselineStart = addDays(startDate, -60);
-    const nightRows = this.database.prepare(`
+    const nightRows = this.facts.prepare(`
       SELECT wake_date AS wakeDate, wake_at AS wakeAt, asleep_union_minutes AS sleepMinutes
       FROM canonical_nights
       WHERE kind = 'main' AND timezone_identifier = ?
         AND wake_date >= ? AND wake_date <= ? AND wake_at < ?
       ORDER BY wake_date
     `).all(timezoneIdentifier, baselineStart, throughDate, asOfAt) as unknown as Array<{ wakeDate: string; wakeAt: string | null; sleepMinutes: number | null }>;
-    const hrvRows = this.database.prepare(`
+    const hrvRows = this.facts.prepare(`
       SELECT local_date AS localDate, window_end_at AS windowEndAt, hrv_sdnn_ms AS hrvMs
       FROM canonical_hrv_days
       WHERE timezone_identifier = ? AND local_date >= ? AND local_date <= ?
       ORDER BY local_date
     `).all(timezoneIdentifier, baselineStart, throughDate) as unknown as Array<{ localDate: string; windowEndAt: string | null; hrvMs: number | null }>;
-    const rhrRows = this.database.prepare(`
+    const rhrRows = this.facts.prepare(`
       SELECT start_at AS startAt, source_category AS sourceCategory, value_numeric AS value
       FROM health_records
       WHERE type = 'HKQuantityTypeIdentifierRestingHeartRate'
@@ -3442,7 +3588,7 @@ export class RecomputePipeline {
     const put=(domain:string,payload:unknown)=>releases.putSnapshot(model.id,domain,"summary",asOf,payload);
     const assessments=this.database.prepare("SELECT * FROM ability_assessments WHERE model_run_id=? ORDER BY sequence_number").all(model.id);
     put("fitness",{lineage,assessments,daily:this.database.prepare("SELECT local_date,true_ability,snapshot_status FROM daily_ability_snapshots WHERE model_run_id=? ORDER BY local_date").all(model.id)});
-    put("readiness",readinessForRun(this.database,lineage));
+    put("readiness",readinessForRun(this.facts,lineage));
     put("load",{lineage:{...lineage,modelVersion:"rai-training-load-v2.0.0",configVersion:TRAINING_LOAD_CONFIG_VERSION,configHash:semanticHash({config:defaultDailyMetricConfig,version:TRAINING_LOAD_CONFIG_VERSION}),baselineEpochId:null,calibrationCohortHash:null},days:this.database.prepare("SELECT * FROM daily_training_metrics WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
     put("zones",{lineage:{...lineage,modelVersion:"rai-training-zones-v2.0.0",configVersion:TRAINING_ZONE_CONFIG_VERSION,configHash:semanticHash({version:TRAINING_ZONE_CONFIG_VERSION,physiology:"rai-physiology-v1.8.0"}),baselineEpochId:null,calibrationCohortHash:null},profiles:this.database.prepare("SELECT * FROM daily_zone_profiles WHERE training_metric_run_id=? ORDER BY local_date").all(metricRunId)});
     const cutoff=Date.parse(asOf)-56*86400000;
@@ -3769,6 +3915,8 @@ export class RecomputePipeline {
 
   private measureCompute<T>(jobId: string, stage: string, operation: () => T): T {
     const started = performance.now();
+    // 步骤 5：每个计算阶段开工前先核对依赖绑定未变（分段模式一变就抛 drift ⇒ 候选作废）。
+    this.assertPinnedStage(jobId, stage);
     try { return operation(); }
     finally {
       const metrics = {
