@@ -16,8 +16,15 @@ import type { TaskAdmission } from "./task-admission.js";
  * —— 后续窗口看到 `GRANT` 仍为 1 就直接通过，互斥其实已经失效（2026-10-13 实测复现，
  * 见 `scripts/measure-write-lease.mjs` 头注释）。序列号版本：`GRANT === 本次 REQUEST` 才算授权。
  *
- * ⚠️ 成本实测：**每窗口约 7 ms**（200 窗口 1415 ms，本机）。所以调用方**不得**逐语句取租约；
- * 必须按**有界阶段窗口**取，并在长计算里用 {@link WriteLeaseClient.yieldIfStale} 让路。
+ * ⚠️ 成本实测（**O08 之后**，2026-10-16，Node v22.23.2 / 本机 `darwin/x64`、AMD Ryzen 5
+ * 3600X 6 核，测量时机器上还有别的测试在跑；以 `scripts/measure-write-lease.mjs` 当次输出为准）：
+ * 200 个空窗口 p50 **106–141 ms**、min **74–78 ms** ⇒ 每窗口 p50 **0.53–0.71 ms**。
+ * 这已经贴着本机的天花板：一个窗口必须付两次跨线程唤醒（worker→主线程授权、主线程→worker
+ * 发许可），而本机主线程 `Atomics.waitAsync` 的唤醒延迟 p50 就有 0.22–0.29 ms（p95 0.7–1.9 ms）；
+ * 不含任何生产代码的裸 ping-pong 同口径也要 200 窗口 71–168 ms。O08 之前的同口径实测是
+ * **12.0 ms/窗口（200 窗口 2397 ms）**——差额全部来自"授权/释放也当成 pending 睡 5 ms"。
+ * 逐语句仍不划算（10³ 条写语句 ⇒ 光握手 ≈0.5 s），所以调用方**仍应**按**有界阶段窗口**取租约，
+ * 并在长计算里用 {@link WriteLeaseClient.yieldIfStale} 让路。
  *
  * ## O07（2026-10-16）：许可必须覆盖**整个短事务**，不是每条语句一段
  *
@@ -42,6 +49,18 @@ import type { TaskAdmission } from "./task-admission.js";
  * - 让路：`yieldIfStale` 释放后**立刻重取**，而 `TaskAdmissionScheduler` 的 FIFO 保证
  *   已经在等的接收方先拿到许可（"接收优先"，不是无限提高 `busy_timeout` 去抢）。
  *   ⛔ 事务开着时**绝不让路**（见下）。
+ *
+ * ## O08（2026-10-16）：授权/释放是**进展**，不是"待重试"
+ *
+ * 状态机只有三态（{@link createWriteLeaseServer} 里的 `step()`）：`progressed`（刚授权/刚释放
+ * 许可 —— 立刻继续判定，**不等待**）、`blocked`（许可被别的 owner 占着 —— 有界退避 +
+ * `TaskAdmission.onChange` 通知）、`idle`（挂起等下一次 notify）。旧实现是二态 `idle|pending`，
+ * 而 `pending` 同时表示"刚做完事"和"真的被挡住"，于是每个窗口白付两次固定 5 ms。
+ *
+ * 🔴 还有一半更容易被忽略：**"释放"也必须是 `progressed`**。释放之后 worker 可能已经把
+ * 下一个窗口的 REQUEST 写上来了，此时若就地进入等待（用刚读到的那个请求值当 expected），
+ * 主线程就睡在一个**已经到达但尚未授权**的请求上，直到 worker 超时 —— 见
+ * `apps/api/test/write-lease-handoff.test.ts` 的竞态用例与"等待前重读 REQUEST"的结构判据。
  */
 
 /** 共享槽位：[0] = REQUEST（本次窗口的序号，0 = 无请求），[1] = GRANT（已授权的序号，0 = 未授权）。 */
@@ -53,10 +72,31 @@ export const LEASE_WORDS = 2;
 export const LEASE_DEFAULT_TIMEOUT_MS = 30_000;
 /** 让路的默认时间预算：持有超过它就释放并重取，把"接收优先"的等待上界压到这一段。 */
 export const LEASE_DEFAULT_YIELD_MS = 50;
-/** 主线程待重试时的退避间隔（有未满足请求时才醒来，空闲不烧 CPU）。 */
+/**
+ * 握手两端的**基础等待粒度**，也是阻塞退避的起点：worker 侧它是 `Atomics.wait` 的超时上界
+ * （错过一次 notify 时最坏多等这么久），主线程侧它是 `blocked` 状态第一次重试的间隔。
+ * ⛔ 它**不再**是"授权/释放之后也睡一下"的固定延时 —— 那正是 O08 拆掉的东西。
+ */
 export const LEASE_POLL_MS = 5;
 /** 授权循环自身异常后的退避。 */
 export const LEASE_ERROR_BACKOFF_MS = 25;
+/**
+ * `blocked` 状态的退避上界（O08 步骤 2）。
+ *
+ * 争用期间**不是**每 5 ms 撞一次：退避从 {@link LEASE_POLL_MS} 起有界放大到本值。而常见的
+ * "持有者放手"由 admission 的状态变化通知**提前**唤醒（见 `TaskAdmission.onChange`），
+ * 所以上界只负责通知看不见的那一类阻塞（外部 owner 直接持有 `MutationCoordinator` 许可、
+ * 或 `blocked`=恢复中）—— 它是兜底，不是主要唤醒源。
+ */
+export const LEASE_BLOCKED_MAX_MS = 25;
+/**
+ * 连续"观测值已经变了 ⇒ 本轮立即重判"的次数上限。
+ *
+ * 观测值过期时**不等待、同一轮内重判**是 O08 步骤 3 的关键：等一次宏任务（`setImmediate`）
+ * 就是零点几毫秒，而这个窗口正好是"请求刚落进判定与等待之间"的高频形态。连续发生说明
+ * REQUEST 正在被另一个线程高频改写 —— 那就让出一次宏任务，⛔ 不能把主线程变成空转轮询。
+ */
+export const LEASE_IMMEDIATE_REJUDGE_MAX = 4;
 
 /**
  * 可重试的调度失败：等待写许可超时。**不是**数据/逻辑错误 —— 重排一次就可能成功。
@@ -269,7 +309,7 @@ export interface WriteLeaseServerStats {
   grants: number;
   /** 释放次数（含让路、结束与 dispose）。 */
   releases: number;
-  /** 想授权但许可被别人占着、回到等待的次数（诊断用）。回调 = 真的发生让路/争用。 */
+  /** 想授权但许可被别人占着、回到等待的**次数**（每次重试各记一次；回调 = 真的发生争用）。 */
   busyWaits: number;
   /**
    * 撤销等待位的次数。
@@ -280,6 +320,15 @@ export interface WriteLeaseServerStats {
    * 表现为永久 409。所以"请求消失"必须伴随一次 withdraw。
    */
   withdraws: number;
+  /**
+   * **owner 等待分布**（O08 步骤 6）：每个"被阻塞的窗口"归因到谁身上。
+   *
+   * 键来自 `TaskAdmission.blocker?.()`：持有者名字 / `restart` / `control` / `fifo:<owner>`；
+   * 老实现没有这个方法时记成 `unknown`。同一个窗口只记**第一次**观测到的阻塞者
+   * （否则一个窗口会被记进多个 owner，数字就不再是"多少个窗口在等谁"）。
+   * 键是组件名，不是健康数据。
+   */
+  waitedOn: Record<string, number>;
 }
 
 export interface WriteLeaseServer {
@@ -293,9 +342,13 @@ export interface WriteLeaseServer {
  *
  * 🔴 **事件驱动，不轮询**：主线程用 `Atomics.waitAsync`（它在主线程合法，`Atomics.wait` 不合法）
  * 挂在 REQUEST 槽上，worker 每次请求/结束都 `notify` 一次。
- * 这不是微优化：轮询版（`setTimeout(1)`）实测**每窗口 7.1 ms**
- * （`scripts/measure-write-lease.mjs`），事件驱动版实测**每窗口 0.070 ms**（400 窗口 28 ms）。
- * 差 100 倍决定了"能不能逐语句取租约" —— 而"写锁只覆盖短 SQL 事务"正是 A11 的判据。
+ *
+ * ⚠️ 旧的性能注记（"轮询版 7.1 ms/窗口 vs 事件驱动版 0.070 ms/窗口"）**已作废**：
+ * 后半句与这条生产路径无关 —— 生产路径当时每个窗口还要为"授权"和"释放"各付一次固定
+ * `setTimeout(5)`（`step()` 把两者都返回 `pending`），同口径实测 200 空窗口 2170 ms
+ * ⇒ 10.9 ms/窗口。O08（WP-30）把状态机改成三态后同口径实测 ≈0.35–0.70 ms/窗口，
+ * 剩下的全部是跨线程唤醒本身（见文件头）。要复现请看 `scripts/measure-write-lease.mjs`
+ * —— 它现在**驱动这套生产实现**（真 worker / 真共享内存 / 真 `TaskAdmissionScheduler`）。
  *
  * ⚠️ 它**不**自己持有许可 —— 取到的释放函数必须原样交回 `TaskAdmissionScheduler`，
  * 否则 FIFO 与 `controls`（取消窗口）的语义会漂移。
@@ -308,12 +361,18 @@ export function createWriteLeaseServer(
   const onError = options.onError ?? ((error: unknown) => {
     process.stderr.write(`[write-lease] 授权循环异常：${String(error)}\n`);
   });
-  const stats: WriteLeaseServerStats = { grants: 0, releases: 0, busyWaits: 0, withdraws: 0 };
+  const stats: WriteLeaseServerStats = { grants: 0, releases: 0, busyWaits: 0, withdraws: 0, waitedOn: {} };
   let releaseAdmission: (() => void) | null = null;
   let grantedSequence = 0;
   let disposed = false;
   /** 已经向 admission 排过队、但还没拿到许可（`acquire()` 返回 null）。 */
   let queuedForAdmission = false;
+  /** 已经做过"阻塞归因"的窗口序号（一个窗口只记一次，见 {@link WriteLeaseServerStats.waitedOn}）。 */
+  let attributedSequence = 0;
+  /** 当前等待的唤醒函数（`idle` 与 `blocked` 两条路都会挂上它）。 */
+  let wakeCurrent: (() => void) | null = null;
+  /** 当前等待是否订阅 admission 状态变化（只有 `blocked` 订阅，见 `waitForWake`）。 */
+  let wakeOnAdmission = false;
 
   const releaseHeld = (): void => {
     if (grantedSequence !== 0) Atomics.store(words, LEASE_GRANT, 0);
@@ -333,15 +392,35 @@ export function createWriteLeaseServer(
     stats.withdraws += 1;
   };
 
+  /** 阻塞归因：同一个窗口只记第一次，避免一个窗口被记进多个 owner。 */
+  const attributeWait = (sequence: number): void => {
+    if (sequence === 0 || sequence === attributedSequence) return;
+    attributedSequence = sequence;
+    const owner = admission.blocker ? admission.blocker() : "unknown";
+    stats.waitedOn[owner] = (stats.waitedOn[owner] ?? 0) + 1;
+  };
+
   /**
-   * 走一步状态机。返回值告诉调用方**要不要立刻重试**：
-   * `"pending"` = 有请求但许可被别人占着（必须重试，否则 worker 会一直等到超时）、
-   * `"idle"` = 可以挂起等下一次 notify。
+   * 走一步状态机（O08 步骤 1）。返回值是**三态**，不再是旧的二态 `idle | pending`：
+   *
+   * - `progressed`：这一轮**已经做成了事**（授权 / 释放许可）。立刻继续判定，⛔ 不等待 ——
+   *   旧实现把"授权/释放"也返回 `pending`，主循环据此 `setTimeout(5)`，于是**每个**窗口
+   *   白付两次固定等待（2026-10-16 实测：200 空窗口 2170 ms ≈ 10.9 ms/窗口）。
+   * - `blocked`：请求还在、但许可被别的 owner 占着（`admission.acquire()` 返回 null）——
+   *   **只有它**需要等待，且是有界退避 + admission 变化通知。
+   * - `idle`：没有可推进的请求，可以挂起等下一次 notify。
+   *
+   * 同时返回本轮**已经读过**的 REQUEST 观测值（O08 步骤 3）：`idle`/`blocked` 两条路都必须
+   * 原样把它交给 `Atomics.waitAsync` 当 expected，**禁止在等待前重读**。重读会把一个
+   * "已经到达但尚未处理"的请求当成新的静默基线，于是主线程睡在一个**不会再变**的值上：
+   * worker 等 GRANT、主线程等"下一次 REQUEST 变化" —— 直到 worker 超时撤回才解开
+   * （现象是偶发 30 s 停顿 + 可重试失败，且只在请求恰好落在"判定"和"等待"之间时出现）。
+   * 用观测值则相反：值一变 `waitAsync` 立刻 not-equal 返回，本轮立即重判。
    */
-  const step = (): "idle" | "pending" => {
+  const step = (): { status: "progressed" | "blocked" | "idle"; request: number } => {
     if (disposed) {
       withdrawQueued();
-      return "idle";
+      return { status: "idle", request: 0 };
     }
     const request = Atomics.load(words, LEASE_REQUEST);
     const grant = Atomics.load(words, LEASE_GRANT);
@@ -353,7 +432,7 @@ export function createWriteLeaseServer(
     if (grant !== 0 && request !== grant) {
       // worker 让路或结束：立刻把许可交回去，让排队中的接收方先走。
       releaseHeld();
-      return "pending";
+      return { status: "progressed", request };
     }
     if (request !== 0 && grant === 0) {
       const release = admission.acquire();
@@ -363,7 +442,8 @@ export function createWriteLeaseServer(
         // 不重试就是死锁（2026-10-13 实测：整轮分析卡到 120s 超时）。
         queuedForAdmission = true;
         stats.busyWaits += 1;
-        return "pending";
+        attributeWait(request);
+        return { status: "blocked", request };
       }
       queuedForAdmission = false;
       releaseAdmission = release;
@@ -371,29 +451,96 @@ export function createWriteLeaseServer(
       Atomics.store(words, LEASE_GRANT, request);
       Atomics.notify(words, LEASE_GRANT);
       stats.grants += 1;
-      return "pending";
+      // 授权是**进展**：立刻回到判定（worker 可能已经开始写了）。
+      return { status: "progressed", request };
     }
     if (request !== 0 && grant === request) {
       // 已授权、worker 还在写：补一次 notify 是廉价安全网（它可能刚进入等待）。
       Atomics.notify(words, LEASE_GRANT);
     }
-    return "idle";
+    return { status: "idle", request };
   };
 
+  /**
+   * 连续"观测值已过期、本轮立即重判"的次数（见 {@link LEASE_IMMEDIATE_REJUDGE_MAX}）。
+   * 一次真正的挂起等待就把它清零。
+   */
+  let immediateRejudges = 0;
+
+  /**
+   * 等一个"可能有进展"的信号：REQUEST 槽变化、admission 状态变化（仅阻塞时）、或退避到期。
+   *
+   * `observation` 必须是本轮 `step()` 已经处理过的那个值（O08 步骤 3），别处不许重读。
+   *
+   * `backoffMs === null` ⇒ `idle`：挂起等下一次 notify，不烧 CPU、也不订阅 admission 变化
+   * （没有请求时许可的可得性变化与本循环无关）。阻塞时给一个有界退避 —— 它兜底的是
+   * 通知**看不见**的那类阻塞（外部 owner 直接持有 `MutationCoordinator` 许可等）。
+   */
+  const waitForWake = async (observation: number, backoffMs: number | null): Promise<void> => {
+    const waiter = waitAsync(words, LEASE_REQUEST, observation);
+    if (!waiter.async) {
+      // 观测值已经变了（请求刚好落在"判定"与"等待"之间）：立即重判，绝不等待一个
+      // **已经到达**的请求。前几次在同一轮里继续（`await` 只让出微任务，不让出宏任务）；
+      // 连续发生说明 REQUEST 在被别的线程高频改写，那就让出一次宏任务，避免主线程空转。
+      if (immediateRejudges < LEASE_IMMEDIATE_REJUDGE_MAX) {
+        immediateRejudges += 1;
+        return;
+      }
+      immediateRejudges = 0;
+      await new Promise((done) => setImmediate(done));
+      return;
+    }
+    immediateRejudges = 0;
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        if (timer !== null) clearTimeout(timer);
+        if (wakeCurrent === finish) {
+          wakeCurrent = null;
+          wakeOnAdmission = false;
+        }
+        resolve();
+      };
+      const timer = backoffMs === null ? null : setTimeout(finish, backoffMs);
+      wakeCurrent = finish;
+      wakeOnAdmission = backoffMs !== null;
+      void (waiter.value as Promise<string>).then(finish, finish);
+    });
+  };
+
+  /**
+   * 阻塞期间的唤醒源之一（O08 步骤 2）：admission 一变就重判，不必等退避计时器。
+   *
+   * 老 `TaskAdmission`（只实现 `acquire`/`withdraw`）没有这个可选方法 ⇒ 退化成有界退避重试，
+   * 行为与今天一致。通知只是**延迟**优化，不是正确性契约：漏一次最多多等一个退避周期。
+   */
+  const unsubscribe = admission.onChange
+    ? admission.onChange(() => { if (wakeOnAdmission) wakeCurrent?.(); })
+    : null;
+
   const loop = async (): Promise<void> => {
+    /** 阻塞退避：从 `LEASE_POLL_MS` 起有界放大到 `LEASE_BLOCKED_MAX_MS`。 */
+    let backoffMs = LEASE_POLL_MS;
     while (!disposed) {
       try {
-        if (step() === "pending") {
-          // 有未满足的请求：短睡重试（只在**有请求**时醒来，空闲时不烧 CPU）。
-          await new Promise((done) => setTimeout(done, LEASE_POLL_MS));
+        const outcome = step();
+        if (outcome.status === "progressed") {
+          // 已经做成了事（授权 / 释放）：立刻重判，**不付任何固定等待**（O08 步骤 1）。
           continue;
         }
-        const request = Atomics.load(words, LEASE_REQUEST);
-        // 挂起等下一次请求/结束。值已经变了 ⇒ waitAsync 立刻返回 not-equal，回到循环重新判定
-        // （所以"错过一次 notify"不会卡死：状态永远在每轮开头重读）。
-        const waiter = waitAsync(words, LEASE_REQUEST, request);
-        if (waiter.async) await waiter.value;
-        else await new Promise((done) => setImmediate(done));
+        if (outcome.status === "blocked") {
+          // 只有真正被占用才等待，而且是有界退避 + 状态变化通知（O08 步骤 2）。
+          await waitForWake(outcome.request, backoffMs);
+          backoffMs = Math.min(backoffMs * 2, LEASE_BLOCKED_MAX_MS);
+          continue;
+        }
+        backoffMs = LEASE_POLL_MS;
+        // 挂起等下一次请求/结束。expected 用本轮**已处理**的观测值（O08 步骤 3）：
+        // 值已经变了 ⇒ waitAsync 立刻 not-equal，回到循环重新判定（所以"错过一次 notify"
+        // 不会卡死：状态永远在每轮开头重读）。
+        await waitForWake(outcome.request, null);
       } catch (error) {
         onError(error);
         await new Promise((done) => setTimeout(done, LEASE_ERROR_BACKOFF_MS));
@@ -408,11 +555,14 @@ export function createWriteLeaseServer(
       releaseHeld();
       withdrawQueued();
       Atomics.store(words, LEASE_REQUEST, 0);
-      // 唤醒可能正在等待的授权循环，让它看到 disposed 退出。
+      // 唤醒可能正在等待的授权循环（REQUEST 槽的 notify + 直接解掉本轮等待）：
+      // 少任何一个，一次"退出时尚有等待者"就可能拖到退避/客户端超时才收尾。
       Atomics.notify(words, LEASE_REQUEST);
+      wakeCurrent?.();
+      unsubscribe?.();
     },
     stats(): WriteLeaseServerStats {
-      return { ...stats };
+      return { ...stats, waitedOn: { ...stats.waitedOn } };
     }
   };
 }
