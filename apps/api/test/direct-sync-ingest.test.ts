@@ -241,6 +241,43 @@ test("Workout 载荷：同事务登记分析任务，回执 queued，且消费�
   });
 });
 
+/** 训练**内**的心率记录（起于给定时刻）。 */
+function heartRateRecord(uuid: string, startAt: string): string {
+  return `<Record type="${heartRate}" sourceName="Watch" unit="count/min" value="150"
+    startDate="${startAt}" endDate="${startAt.replace(":10:00", ":11:00")}">
+    <MetadataEntry key="RAIHealthKitSampleUUID" value="${uuid}"/>
+  </Record>`;
+}
+
+test("O04：训练内的记录变更把脏下界回退到相交训练起点（不再是变更时刻）", async () => {
+  await fixture(async ({ main, input, seed }) => {
+    // 先落下一个训练（08:00–08:30）。
+    await seed(workout("2018-01-02 08:00:00 +0000", "workout-1"));
+    // 第二批只有训练**内**（08:10）的一条心率：旧 `dirtyFromAt()` 的边界会是 08:10
+    // （训练起点之后）⇒ `extractFeatures` 把该训练当成未受影响、错误复用旧特征。
+    // 相交回退必须把下界压到训练起点 08:00。
+    const batch = await input(heartRateRecord("00000000-0000-0000-0000-0000000000c1", "2018-01-02 08:10:00 +0000"));
+    const applied = await applyOrFail(batch);
+    assert.ok(applied);
+
+    const db = new DatabaseSync(main, { readOnly: true });
+    try {
+      const job = db.prepare("SELECT request_json AS request, dirty_json AS dirty FROM recompute_jobs")
+        .get() as { request: string; dirty: string };
+      const plan = JSON.parse(job.request).incrementalPlan as {
+        mode: string; dirtyFromAt: string; domains?: { features: string | null };
+      };
+      assert.equal(plan.mode, "partial", "有界变更必须走 partial");
+      assert.equal(plan.dirtyFromAt, "2018-01-02T08:00:00.000Z",
+        "脏下界必须回退到相交训练的起点（训练 08:00 起、变更 08:10）");
+      assert.equal(plan.domains?.features, "2018-01-02T08:00:00.000Z",
+        "分域边界与总边界一致（本批无恢复/路线变更）");
+      const dirty = JSON.parse(job.dirty) as { from: string };
+      assert.equal(dirty.from, "2018-01-02T08:00:00.000Z", "dirty.from 与 incrementalPlan 同源");
+    } finally { db.close(); }
+  });
+});
+
 test("删除-only 载荷：显式删除先于到达也要求分析，且不误删同来源其它事实", async () => {
   await fixture(async ({ main, input, seed }) => {
     await seed(workout() + workout("2018-01-03 08:00:00 +0000", "workout-2"));

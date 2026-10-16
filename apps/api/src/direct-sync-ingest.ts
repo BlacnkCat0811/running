@@ -12,7 +12,8 @@ import {
   DATA_ONLY_MAX_RECORDS, NATIVE_VERSION, NIGHT_FEEDING_TYPE_VALUES,
   RecordDeltaNotEligibleError, canonicalizeNightsForWindow, canonicalizeRunningWorkouts,
   classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes,
-  parseAppleHealthXml, parseHealthSyncManifest, type DirectSyncPayloadFacts,
+  parseAppleHealthXml, parseHealthSyncManifest, planIncrementalAnalysisDirtyRange,
+  type DirectSyncPayloadFacts, type DirtyRangeChange, type DirtyRangeWorkout,
   type HealthSyncManifest
 } from "@rai/health-export-parser";
 
@@ -498,7 +499,11 @@ const shiftLocalDate = (localDate: string, days: number): string => {
  * 只能取自 manifest 的**类型化删除**（v2 才有类型）。只要本批有喂夜类型的删除，就把本批
  * **全部** record 删除的时刻并进窗口 —— 宁可窗口宽一点（仍然有界），也不要漏掉一个夜。
  */
-function nightWindow(db: DatabaseSync, batchId: string, manifest: HealthSyncManifest): { from: string; to: string } | null {
+function nightWindow(
+  db: DatabaseSync,
+  batchId: string,
+  manifest: HealthSyncManifest
+): { from: string; to: string; earliestInstant: string } | null {
   const types = NIGHT_FEEDING_TYPE_VALUES as readonly string[];
   const placeholders = types.map(() => "?").join(",");
   const written = db.prepare(`
@@ -532,7 +537,13 @@ function nightWindow(db: DatabaseSync, batchId: string, manifest: HealthSyncMani
   }
   if (instants.length === 0) return null;
   const dates = instants.map(localDateOf).sort();
-  return { from: shiftLocalDate(dates[0]!, -1), to: shiftLocalDate(dates.at(-1)!, 1) };
+  // O04（WP-20）：最早触及时刻一并回传 —— 它是恢复（canonical 夜）维的脏下界贡献，
+  // 直接取 instants 的 min（UTC 毫秒）转 ISO，不经本地日期往返（无时区再解释风险）。
+  return {
+    from: shiftLocalDate(dates[0]!, -1),
+    to: shiftLocalDate(dates.at(-1)!, 1),
+    earliestInstant: new Date(Math.min(...instants)).toISOString()
+  };
 }
 
 /** 库里已有的清单状态；决定这条车道能不能接（§4.3：**不**要求快通路资格 stamp）。 */
@@ -591,25 +602,79 @@ function ledgerFacts(db: DatabaseSync, batchId: string, manifest: HealthSyncMani
 }
 
 /**
- * `dirtyFromAt` = 本批账目里最早的时刻；出现缺失/非法时刻就退回全量（fail-safe）。
+ * O04（WP-20）：直连车道的脏范围**输入装配**（账本 JOIN 视图 + 全表训练）。
  *
- * R7（2026-10-15）：取 `effective_at` 与 `previous_effective_at` 的**并集**——记录被挪到更晚
- * 的日期时（A→B），A 日同样是"脏"的（旧范围仍被认为有效过），漏掉它会留下旧派生。
- * `previous_effective_at` 为 NULL（inserted 或无旧行）时跳过它，其余规则不变。
+ * 与旧 `dirtyFromAt()`（只取账本时刻 min，删除）的差异：这里把每条账本行规范化成
+ * "新旧两侧的完整区间视图"（新行 = 对当前表的 JOIN；旧行 = 账本 v37 `previous_*` 列）
+ * 并附上 route 变更的合成条目 —— 纯函数 `planIncrementalAnalysisDirtyRange` 据此
+ * 做区间并集与**相交训练回退**（记录时间更正不再错复用旧特征）。
  */
-function dirtyFromAt(db: DatabaseSync, batchId: string): string | null {
-  const rows = db.prepare(
-    "SELECT effective_at AS effectiveAt, previous_effective_at AS previousAt FROM import_entity_changes WHERE batch_id = ?"
-  ).all(batchId) as Array<{ effectiveAt: string | null; previousAt: string | null }>;
-  let earliest: string | null = null;
+function loadDirtyRangeInput(
+  db: DatabaseSync,
+  batchId: string,
+  routeDirtyTimes: readonly string[],
+  recoveryBoundaries: readonly string[]
+): { changes: DirtyRangeChange[]; workouts: DirtyRangeWorkout[]; recoveryBoundaries: string[] } {
+  const rows = db.prepare(`
+    SELECT change.entity_kind AS kind, change.change_type AS changeType,
+           change.effective_at AS effectiveAt,
+           change.previous_effective_at AS previousAt, change.previous_end_at AS previousEndAt,
+           change.previous_type AS previousType,
+           record.type AS recordType, record.start_at AS recordStart, record.end_at AS recordEnd,
+           workout.start_at AS workoutStart, workout.end_at AS workoutEnd
+    FROM import_entity_changes change
+    LEFT JOIN health_records record ON change.entity_kind='record' AND record.id=change.entity_id
+    LEFT JOIN workouts workout ON change.entity_kind='workout' AND workout.id=change.entity_id
+    WHERE change.batch_id=?
+  `).all(batchId) as Array<{
+    kind: string; changeType: "inserted" | "updated" | "removed";
+    effectiveAt: string | null;
+    previousAt: string | null; previousEndAt: string | null; previousType: string | null;
+    recordType: string | null; recordStart: string | null; recordEnd: string | null;
+    workoutStart: string | null; workoutEnd: string | null;
+  }>;
+  const changes: DirtyRangeChange[] = [];
   for (const row of rows) {
-    for (const value of [row.effectiveAt, row.previousAt]) {
-      if (value === null || value === undefined) continue;
-      if (typeof value !== "string" || !/^\d{4}-/.test(value) || !Number.isFinite(Date.parse(value))) return null;
-      if (earliest === null || value < earliest) earliest = value;
+    if (row.kind === "record") {
+      changes.push({
+        entityKind: "record",
+        changeType: row.changeType,
+        newType: row.recordType, newStart: row.recordStart, newEnd: row.recordEnd,
+        previousType: row.previousType, previousStart: row.previousAt, previousEnd: row.previousEndAt
+      });
+    } else if (row.kind === "workout") {
+      // workout 变更不看类型（天然影响分析）；新行经 JOIN 取（软删行仍在表里）。
+      changes.push({
+        entityKind: "workout",
+        changeType: row.changeType,
+        newType: row.workoutStart === null ? null : "workout",
+        newStart: row.workoutStart, newEnd: row.workoutEnd,
+        previousType: row.previousType, previousStart: row.previousAt, previousEnd: row.previousEndAt
+      });
+    } else {
+      // activity_summary 等：只有时刻（新 = 账本 effective_at；旧 = previous_*）。
+      changes.push({
+        entityKind: "activity_summary",
+        changeType: row.changeType,
+        newType: null, newStart: row.effectiveAt, newEnd: null,
+        previousType: null, previousStart: row.previousAt, previousEnd: row.previousEndAt
+      });
     }
   }
-  return earliest;
+  // route 变更（本批改过的路线所属训练的时刻）作为合成条目 —— 路线-only 批次不再
+  // 退化成"无边界即全量"。
+  for (const routeTime of routeDirtyTimes) {
+    changes.push({
+      entityKind: "route",
+      changeType: "updated",
+      newType: null, newStart: routeTime, newEnd: routeTime,
+      previousType: null, previousStart: null, previousEnd: null
+    });
+  }
+  const workouts = db.prepare(
+    "SELECT start_at AS startAt, end_at AS endAt FROM workouts WHERE deleted_at IS NULL"
+  ).all() as unknown as Array<DirtyRangeWorkout>;
+  return { changes, workouts, recoveryBoundaries: [...recoveryBoundaries] };
 }
 
 function countWorkoutChanges(db: DatabaseSync, batchId: string): Record<"inserted" | "updated" | "removed", number> {
@@ -750,7 +815,13 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     if (analysisRequired) {
       const incumbent = db.prepare("SELECT model_run_id AS modelRunId FROM active_model_run WHERE singleton = 1")
         .get() as { modelRunId: string } | undefined;
-      const dirty = dirtyFromAt(db, input.jobId);
+      // O04（WP-20）：脏范围 = 账本区间并集 + **相交训练回退** + 路线变更 + 恢复边界。
+      // `full` 或边界未知 ⇒ 不写 `incrementalPlan`（分析侧全量重算；安全档）。
+      const dirtyRange = planIncrementalAnalysisDirtyRange(loadDirtyRangeInput(
+        db, input.jobId, routeDirtyTimes,
+        nightRange === null ? [] : [nightRange.earliestInstant]
+      ));
+      const dirty = dirtyRange.full ? null : dirtyRange.dirtyFromAt;
       analysisJobId = new RecomputeJobRepository(db).enqueue(
         "import", datasetVersion,
         {
@@ -758,7 +829,9 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
           importBatchId: input.jobId,
           evaluatedAt: now,
           timezoneIdentifier: DATABASE_TIMEZONE,
-          ...(dirty === null ? {} : { incrementalPlan: { mode: "partial" as const, dirtyFromAt: dirty } })
+          ...(dirty === null ? {} : {
+            incrementalPlan: { mode: "partial" as const, dirtyFromAt: dirty, domains: dirtyRange.domains }
+          })
         },
         {
           targetRawGeneration: Number(generations.raw),

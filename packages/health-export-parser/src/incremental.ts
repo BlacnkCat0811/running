@@ -3,6 +3,8 @@ import { createReadStream, type Stats } from "node:fs";
 import { stat } from "node:fs/promises";
 import type { DatabaseSync } from "node:sqlite";
 
+import type { AnalysisDirtyDomains } from "./dirty-range.js";
+
 export type ImportEntityKind = "workout" | "route" | "heart_rate" | "sleep" | "resting_heart_rate" | "hrv" | "maximum_heart_rate" | "other";
 export type ImportChangeType = "inserted" | "updated" | "removed" | "unchanged";
 
@@ -40,6 +42,12 @@ export interface RecomputePlan {
    */
   dirtySessionIds: string[];
   dirtyFromAt: string | null;
+  /**
+   * O04（WP-20）：按影响域给出的保守下界（特征/Fitness/恢复）。可选且向后兼容 ——
+   * 老 payload 缺键时消费方回落 `dirtyFromAt`（单一边界）；直连车道由
+   * `planIncrementalAnalysisDirtyRange` 产出。
+   */
+  domains?: AnalysisDirtyDomains;
   reasons: string[];
 }
 

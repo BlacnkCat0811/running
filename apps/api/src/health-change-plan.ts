@@ -1,5 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import { healthTypes, scoringHealthTypes } from "@rai/contracts";
+import {
+  isCanonicalInstant as canonicalInstant,
+  rewindToOverlappingWorkoutStart,
+  type DirtyRangeWorkout
+} from "@rai/health-export-parser";
 
 /**
  * 评分类型清单的**唯一定义**在 `@rai/contracts`（见那里的说明：它同时是批次分类与
@@ -13,11 +18,6 @@ export interface HealthChangePlan {
   full: boolean;
   dirtyFromAt: string | null;
   reasons: string[];
-}
-
-function canonicalInstant(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-/.test(value) && Number.isFinite(Date.parse(value)) &&
-    new Date(value).toISOString() === value;
 }
 
 /** Requires a completed import ledger. Read both before/after facts: updates
@@ -97,18 +97,21 @@ export function planHealthChanges(database: DatabaseSync, batchId: string | null
   if (changed && dirtyFromAt !== null && !full) {
     // Rewind to a workout that began before the changed sample. Recomputing all
     // later workouts also covers the 180-day HR maximum and recovery baselines.
-    const crossing = database.prepare(`
-      SELECT MIN(startAt) AS startAt FROM (
-        SELECT workout.start_at AS startAt FROM training_sessions session
-        JOIN workouts workout ON workout.id=session.canonical_workout_id
-        WHERE workout.start_at < ? AND workout.end_at >= ?
-        UNION ALL
-        SELECT workout.start_at FROM previous.training_sessions session
-        JOIN previous.workouts workout ON workout.id=session.canonical_workout_id
-        WHERE workout.start_at < ? AND workout.end_at >= ?
-      )
-    `).get(dirtyFromAt, dirtyFromAt, dirtyFromAt, dirtyFromAt) as { startAt: string | null };
-    if (crossing.startAt) { add(crossing.startAt); reasons.add("overlapping_workout_rewound"); }
+    //
+    // O04（WP-20）：判定谓词与直连车道**共用同一个原语**（`rewindToOverlappingWorkoutStart`，
+    // 单点区间 = 与 `start_at < ? AND end_at >= ?` 逐字同义）—— 这里保持两代库的读法
+    // （main ∪ previous），只把"怎么判相交"收敛到单点定义，防止两处悄悄分叉。
+    const crossingRows = database.prepare(`
+      SELECT workout.start_at AS startAt, workout.end_at AS endAt FROM training_sessions session
+      JOIN workouts workout ON workout.id=session.canonical_workout_id
+      UNION ALL
+      SELECT workout.start_at AS startAt, workout.end_at AS endAt FROM previous.training_sessions session
+      JOIN previous.workouts workout ON workout.id=session.canonical_workout_id
+    `).all() as unknown as DirtyRangeWorkout[];
+    const rewound = rewindToOverlappingWorkoutStart(
+      [{ start: dirtyFromAt, end: dirtyFromAt }], crossingRows
+    );
+    if (rewound !== null) { add(rewound); reasons.add("overlapping_workout_rewound"); }
   }
   if (changed && dirtyFromAt === null) { full = true; reasons.add("health_boundary_unknown"); }
   return { changed, full, dirtyFromAt, reasons: [...reasons] };

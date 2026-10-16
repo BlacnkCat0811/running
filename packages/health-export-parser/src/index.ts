@@ -71,3 +71,12 @@ export {
   IDENTITY_ALGORITHM_PROBES,
   identityAlgorithmFingerprint
 } from "./identity-algorithm.js";
+export {
+  isCanonicalInstant,
+  planIncrementalAnalysisDirtyRange,
+  rewindToOverlappingWorkoutStart,
+  type AnalysisDirtyDomains,
+  type AnalysisDirtyRange,
+  type DirtyRangeChange,
+  type DirtyRangeWorkout
+} from "./dirty-range.js";

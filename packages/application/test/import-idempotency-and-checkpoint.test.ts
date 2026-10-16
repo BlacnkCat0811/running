@@ -332,3 +332,43 @@ test("S03: an incremental recompute under a different feature config refuses to 
     assert.equal(counts.loads, days.length);
   });
 });
+
+test("O04: rewinding the dirty boundary to the overlapping workout start recomputes that workout instead of reusing it", async () => {
+  await withFixture(async (store, xmlPath) => {
+    await parseAppleHealthXml(xmlPath, store, { fileSize: 1 });
+    canonicalizeRunningWorkouts(store.database);
+    const service = new RaiApplicationService(store);
+    service.enqueueFullRecompute({ evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" });
+    assert.equal(service.runNextJob()?.status, "succeeded");
+
+    const reusedCounts = async (datasetVersion: string, dirtyFromAt: string) => {
+      store.setManifest("dataset_version", datasetVersion);
+      store.flush();
+      service.enqueueIncrementalRecompute(
+        { mode: "partial", dirtySessionIds: [], dirtyFromAt, reasons: ["test"] },
+        { evaluatedAt: "2026-01-25T04:00:00.000Z", timezoneIdentifier: "Asia/Shanghai" }
+      );
+      assert.equal(service.runNextJob()?.status, "succeeded");
+      return store.database.prepare(`
+        SELECT reused_feature_count AS reused, recomputed_feature_count AS recomputed
+        FROM feature_runs WHERE dataset_version = ?
+      `).get(datasetVersion) as unknown as { reused: number; recomputed: number };
+    };
+
+    // 每个训练都是本地 08:00 起（= 00:00Z）；01-16 的"训练内变更"（08:10 本地 = 00:10Z）
+    // 在旧实现里会把边界留在 00:10Z —— 该训练（00:00Z）不满足 `>= dirtyFromAt` ⇒ 被错误复用。
+    const withoutRewind = await reusedCounts("dataset_no_rewind", "2026-01-16T00:10:00.000Z");
+    assert.equal(withoutRewind.reused, 6);
+    assert.equal(withoutRewind.recomputed, 1);
+    // O04 修复形态：边界回退到相交训练起点（00:00Z）⇒ 01-16 进入重算集（与 S03 的同口径 5/2 对齐）。
+    const rewound = await reusedCounts("dataset_rewound", "2026-01-16T00:00:00.000Z");
+    assert.equal(rewound.reused, withoutRewind.reused - 1,
+      "回退必须恰好多抢回一条（被更正的那次训练）——不是少复用几条、也不是整体退化");
+    assert.equal(rewound.reused, 5);
+    assert.equal(rewound.recomputed, 2);
+    // 拒绝复用不等于产出残缺 run：重算之后齐全。
+    const counts = readCounts(store);
+    assert.equal(counts.features, days.length);
+    assert.equal(counts.loads, days.length);
+  });
+});

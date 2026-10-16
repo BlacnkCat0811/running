@@ -1177,7 +1177,11 @@ export class RecomputePipeline {
     request: RecomputeRequest,
     overrideSnapshot: OverrideSnapshot
   ): { count: number; dirtyFromAt: string } | null {
-    const dirtyFromAt = request.incrementalPlan?.dirtyFromAt;
+    // O04（WP-20）：优先取分域边界（`domains.features` = 相交训练回退后的保守下界）；
+    // 老 payload 没有 `domains` 时回落单一边界 `dirtyFromAt`。`domains` 存在但为 null
+    // 表示"full"（不复用）——不得再回落到 dirtyFromAt（那是 payload 内部矛盾态）。
+    const plan = request.incrementalPlan;
+    const dirtyFromAt = plan?.domains ? plan.domains.features : plan?.dirtyFromAt;
     if (!dirtyFromAt) return null;
     const parent = this.database.prepare(`
       SELECT feature.id, feature.feature_config_hash AS configHash,
@@ -1810,7 +1814,9 @@ export class RecomputePipeline {
     features: WorkoutFeatureVector[],
     baseline: PersonalBaseline
   ): ReplayResume | null {
-    const dirtyFromAt = request.incrementalPlan?.dirtyFromAt;
+    // O04（WP-20）：与特征前缀**同一份边界解析**（domains 优先、老 payload 回落）。
+    const replayPlan = request.incrementalPlan;
+    const dirtyFromAt = replayPlan?.domains ? replayPlan.domains.features : replayPlan?.dirtyFromAt;
     if (!dirtyFromAt || dirtyFromAt <= baseline.calibrationEndAt) return null;
     // A complete feature-prefix copy is a prerequisite for assessment reuse.
     // Newly eligible historical workouts or a timezone change invalidate it.
