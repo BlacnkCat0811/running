@@ -380,3 +380,32 @@ v42 `analysis_job_merges` · v43 视图 `readable_route_points`。
 `import_entity_changes` TS↔Rust 分歧。判定既有：本批没有任何提交改动该表的写入路径。
 未做 stash 对照 —— Rust 二进制已被就地重建（`target/` 是 gitignore），
 换回旧 TS 只会造成"新旧错配"，那样的对照证明不了什么。
+
+### 全量 `npm test` 结果（`RAI_TEST_CONCURRENCY=1`）
+
+```
+NPM_TEST_EXIT=1
+# fail 2
+Test Files  25 passed (25)      ← apps/web 全绿
+```
+
+**2 条红，两条都判定为既有，且都已给出可复核的证据**：
+
+1. `apps/api/test/workout-summary-export.test.ts` —
+   "export route is never in the anonymous read list and explicitly requires a configured token"。
+   它钉的是 `server.ts` 源码文本里的字面量
+   ``!apiToken || request.headers.authorization !== `Bearer ${apiToken}` ``，
+   而该处早已改成 `constantTimeTokenEquals(...)`（安全加固，提交 `9e08301`，**早于本批基线**）。
+   **证据**：`git diff 2e7a231 HEAD -- apps/api/src/server.ts` **无差异**（逐字节相同），
+   且 `git show 2e7a231:apps/api/src/server.ts | grep -c '<该字面量>'` = **0** ——
+   即在这批工作开始**之前**它就已经不可能通过。判据钉的是被替换掉的实现写法，需要另行更新。
+2. `packages/health-export-parser/test/native-worker.test.ts` —
+   `import_entity_changes` 的 TS↔Rust 分歧（同上"遗留"一节的说明）。
+
+**一次假红已排除**：第一次全量跑时 `apps/web` 的
+`test/share-card-panel.test.tsx`（"下载图片"）报 `encoders` 长度 0。
+该文件所在包 **本批 13 个提交一行未动**（`git diff --name-only 2e7a231..HEAD -- apps/web` 为空），
+单独跑 **17/17 绿**，第二次全量跑 **Web 25/25 文件全绿** ⇒ 负载下的墙钟抖动。
+另外：第一次跑用了 `| tail -80`，**管道会吞掉退出码**，所以那次读到的 `exit 0` 不是 `npm test` 的
+退出码 —— 第二次改为重定向到文件并显式打印 `$?`，才拿到真实的 `EXIT=1`。这一条记在这里，
+因为"看起来通过"的管道输出本身就是一种会骗人的证据形态。
