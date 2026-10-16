@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { RaiDatabase } from "@rai/storage-sqlite";
-import { healthTypes, SLEEP_ANALYSIS_VALUES } from "@rai/contracts";
+import { healthTypes, localDateTimeAt, SLEEP_ANALYSIS_VALUES } from "@rai/contracts";
 
 import { canonicalizeNights, canonicalizeNightsForWindow } from "../src/index.js";
+import { loadHrv, loadSegments, type NightRecordReadRange } from "../src/canonicalize-nights.js";
 
 /**
  * `canonicalizeNightsForWindow` 的**窗口不变性**。
@@ -119,7 +121,7 @@ function seedFixture(store: RaiDatabase): void {
 
 /**
  * 形状 B：**同一窗口内多个来源都有 Asleep** ⇒ 走到 `sourceGroups` 的 rank 排序，
- * 以及 rank 并列时"先按 asleep 段数、再按 sourceName"两条决胜规则（`canonicalize-nights.ts:268`），
+ * 以及 rank 并列时"先按 asleep 段数、再按 sourceName"两条决胜规则（`canonicalize-nights.ts:456` 的 `sourceGroups` 排序），
  * 并让 `competingSourceCount > 1`。fixture A 的 iPhone 只有 InBed、且独占一个日期，
  * 所以 A 里 `competingSourceCount` 恒为 0/1，这条分支一次都没走到。
  *
@@ -146,7 +148,7 @@ function seedCompetingSources(store: RaiDatabase): void {
 
 /**
  * 形状 C：**同一晚多个 Asleep 段中间 > 90 min 的间隔** ⇒ 走到 `sessions` 的切分判据
- * （`canonicalize-nights.ts:277` 起的 `seg.start - max(end) > 90min`），产出 main + 夜内 nap；
+ * （`canonicalize-nights.ts:461` 的 `seg.start - max(end) > 90min`），产出 main + 夜内 nap；
  * 并且 HRV 样本**精确落在**主夜 `[onset, wake]` 的闭区间两端点，钉住 `>= onset && <= wake` 的边界。
  */
 function seedSplitSessionsWithBoundaryHrv(store: RaiDatabase): void {
@@ -459,9 +461,9 @@ test("hand-computed golden values pin the full rebuild baseline itself", async (
       stage_minutes_json: '{"core":60,"deep":0,"rem":0,"unspecified":0,"awake":0}', segment_count: 1,
       // ⚠️ `competingSourceCount: 0` 在这里是**既有语义怪癖**，不是"没有竞争来源"的通用表达，
       // 读 provenance 的人不要照这句话反推：
-      //   · 夜内 nap（`sessions` 切分那条 pass）传 `sourceGroups.length`（`canonicalize-nights.ts:277`）；
-      //   · **午后 nap pass 传字面量 0**（同文件 `:316`）。
-      // 即 0 只说明"这条走的是午后那条 pass"，不说明"没有竞争来源"。本条 golden 钉的正是 `:316`。
+      //   · 夜内 nap（`sessions` 切分那条 pass）传 `sourceGroups.length`（`canonicalize-nights.ts:463`）；
+      //   · **午后 nap pass 传字面量 0**（同文件 `:502`）。
+      // 即 0 只说明"这条走的是午后那条 pass"，不说明"没有竞争来源"。本条 golden 钉的正是 `:502`。
       // 将来若统一两处语义，请同时改这条 golden 与 provenance 契约（本次只搬移、未改语义）。
       provenance_json: '{"algorithmVersion":"canonical-night-v2","competingSourceCount":0,"rejectedInBedOnly":false}'
     });
@@ -604,5 +606,303 @@ test("sweep over every sub-window — shape C (sessions split by >90min gap + HR
       { confidence: "missing", sample_count: 0 }, { confidence: "missing", sample_count: 0 }
     ], "样本恰在 [onset, wake] 两端点必须计入（闭区间）");
     sweepSubWindows(store, SPLIT_SWEEP_DATES);
+  });
+});
+
+/* ================================================================================================
+ * O10（WP-31）：**读取阶段**的范围化（`loadSegments`/`loadHrv` 的可选范围参数）
+ *
+ * 缺陷形态（本组用例要防的）：`canonicalizeNightsForWindow` 原先无窗口地
+ * `loadSegments(database)` / `loadHrv(database)` 读**整段历史**，再在 JavaScript 里
+ * `.filter((s) => s.end > rangeStart && s.start < rangeEnd)`。窗口重建的代价因此与全历史成正比，
+ * 与窗口大小无关 —— 历史涨 10 倍，近期窗口的输入装配也涨 10 倍。
+ *
+ * 改动把**同一个谓词**下推到 SQL（`end_at > ? AND start_at < ?` / `start_at >= ? AND start_at < ?`，
+ * 都在 `GROUP BY` 之前）。但 SQL 比的是**文本**、历史语义比的是**毫秒**，两者只在
+ * "列值都是 `normalizeAppleDate` 的定宽 UTC 形状"时才等价。所以本组用例钉三件事：
+ *   ① 谓词真的下推到了 SQL（断言 SQL 文本形状与参数，而不是只看最终行）；
+ *   ② 范围读与"全量读 + JS 过滤"返回**同一批行**（id 与值逐个相同）—— 这条才能同时抓住
+ *      "少带进来一行"（危险：静默丢夜）与"多带进来一行"（最终行看不出来，见下）；
+ *   ③ 窗口前后的**精确边界**（`end == rangeStart` / `start == rangeEnd`）保持历史的
+ *      `>` / `<` 选择；混入异构时间格式时必须**回退**到全量读，不得按文本序静默改日期含义。
+ *
+ * ⚠️ 为什么必须比对"读出来的行"而不是只比最终 canonical 行：SQL 谓词**多**带进来的行是无害的
+ * （`rebuildCanonicalNights` 对每一天仍按毫秒重新过滤），所以"多一行"在最终结果里**看不见**；
+ * 只有读侧等价性断言能把 `>` 写成 `>=` 这类放宽突变变红。
+ * ============================================================================================== */
+
+/** 窗口 `[2026-09-02, 2026-09-03]` 的生产范围：`[from-1T18:00, toT18:00)` 本地时间。 */
+const RANGE_START = Date.parse(localDateTimeAt("2026-09-01T18:00:00", TIMEZONE));
+const RANGE_END = Date.parse(localDateTimeAt("2026-09-03T18:00:00", TIMEZONE));
+const READ_RANGE: NightRecordReadRange = { startInstant: RANGE_START, endInstant: RANGE_END };
+const RANGE_START_LITERAL = "2026-09-01T10:00:00.000Z";
+const RANGE_END_LITERAL = "2026-09-03T10:00:00.000Z";
+
+/**
+ * 边界夹具：每条记录都压在窗口的某一侧，用来钉住**严格/非严格**的选择。
+ *
+ * - `s-inside`：窗口内的主夜（09-03 的夜，本地 09-02 22:00 → 09-03 06:00）。
+ * - `s-before-L-inside`：**开始于 rangeStart 之前、结束于其内**（L-1h → L+1h）⇒ 必须**被带上**
+ *   （它是 `windowStart` 处的裁剪对象，漏掉它会少算这一段睡眠）。
+ * - `s-ends-at-L`：`end_at` **恰好等于** rangeStart ⇒ 历史语义 `end > rangeStart` 为假 ⇒ 必须**不带**。
+ * - `s-starts-at-U`：`start_at` **恰好等于** rangeEnd ⇒ 历史语义 `start < rangeEnd` 为假 ⇒ 必须**不带**。
+ * - `s-ends-just-inside`：紧贴 rangeEnd 内侧结束（09:30Z < 10:00Z）⇒ 必须**带上**。
+ * - HRV：`hrv-at-L`（恰好等于 rangeStart）⇒ **带上**（HRV 是左闭 `>=`）；
+ *   `hrv-at-U`（恰好等于 rangeEnd）⇒ **不带**（右开 `<`）；`hrv-inside` ⇒ 带上。
+ */
+function seedRangeBoundaries(store: RaiDatabase): void {
+  insertSegment(store, { id: "s-inside", ...WATCH, value: SLEEP_ANALYSIS_VALUES.asleepCore, startAt: "2026-09-02T14:00:00.000Z", endAt: "2026-09-02T22:00:00.000Z" });
+  insertSegment(store, { id: "s-before-L-inside", ...WATCH, value: SLEEP_ANALYSIS_VALUES.inBed, startAt: "2026-09-01T09:00:00.000Z", endAt: "2026-09-01T11:00:00.000Z" });
+  insertSegment(store, { id: "s-ends-at-L", ...WATCH, value: SLEEP_ANALYSIS_VALUES.asleepCore, startAt: "2026-09-01T08:00:00.000Z", endAt: RANGE_START_LITERAL });
+  insertSegment(store, { id: "s-starts-at-U", ...WATCH, value: SLEEP_ANALYSIS_VALUES.asleepCore, startAt: RANGE_END_LITERAL, endAt: "2026-09-03T11:00:00.000Z" });
+  insertSegment(store, { id: "s-ends-just-inside", ...WATCH, value: SLEEP_ANALYSIS_VALUES.asleepDeep, startAt: "2026-09-03T09:00:00.000Z", endAt: "2026-09-03T09:30:00.000Z" });
+  insertHrv(store, "hrv-at-L", WATCH.sourceName, RANGE_START_LITERAL, 40);
+  insertHrv(store, "hrv-at-U", WATCH.sourceName, RANGE_END_LITERAL, 60);
+  insertHrv(store, "hrv-inside", WATCH.sourceName, "2026-09-02T15:00:00.000Z", 50);
+}
+
+/** 记录 `prepare()` 的语句与调用参数 —— 用来断言"谓词真的在 SQL 里"，而不是读完再在 JS 里过滤。 */
+function audited(database: DatabaseSync): { prepared: Array<{ sql: string; params: unknown[] }>; database: DatabaseSync } {
+  const prepared: Array<{ sql: string; params: unknown[] }> = [];
+  const proxy = new Proxy(database, {
+    get(target, property) {
+      if (property !== "prepare") {
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      }
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        return new Proxy(statement, {
+          get(statementTarget, statementProperty) {
+            const value = Reflect.get(statementTarget, statementProperty, statementTarget) as unknown;
+            if (statementProperty !== "all" && statementProperty !== "get") {
+              return typeof value === "function" ? (value as (...args: unknown[]) => unknown).bind(statementTarget) : value;
+            }
+            return (...params: unknown[]) => {
+              prepared.push({ sql, params });
+              return (value as (...args: unknown[]) => unknown).apply(statementTarget, params);
+            };
+          }
+        });
+      };
+    }
+  }) as DatabaseSync;
+  return { prepared, database: proxy };
+}
+
+/** 本组用例自己实现的**历史读法**：无过滤读 + JS 按毫秒过滤（即本次改动前的逐字语义）。 */
+function legacyRead(database: DatabaseSync): { segments: ReturnType<typeof loadSegments>; hrv: ReturnType<typeof loadHrv> } {
+  return {
+    segments: loadSegments(database).filter((segment) => segment.end > RANGE_START && segment.start < RANGE_END),
+    hrv: loadHrv(database).filter((sample) => sample.start >= RANGE_START && sample.start < RANGE_END)
+  };
+}
+
+test("range read: the SQL predicate is pushed down before GROUP BY and the limits are the local-night boundaries", async () => {
+  await withDatabase((store) => {
+    // 先钉测试自己的边界口径：Asia/Shanghai 无夏令时，[09-01T18:00, 09-03T18:00) 本地 =
+    // [2026-09-01T10:00Z, 2026-09-03T10:00Z)。若这条红了，下面所有断言都在测另一段范围。
+    assert.equal(new Date(RANGE_START).toISOString(), RANGE_START_LITERAL);
+    assert.equal(new Date(RANGE_END).toISOString(), RANGE_END_LITERAL);
+
+    seedRangeBoundaries(store);
+    const { prepared, database } = audited(store.database);
+    loadSegments(database, READ_RANGE);
+    loadHrv(database, READ_RANGE);
+
+    const segmentSql = prepared.map((entry) => entry.sql).filter((sql) => sql.includes("GROUP BY source_name, source_category"));
+    assert.equal(segmentSql.length, 1, "睡眠分段只应发出一条分组查询");
+    assert.ok(/WHERE type = \? AND end_at > \? AND start_at < \?/.test(segmentSql[0]!),
+      `睡眠谓词必须是 end_at > ? AND start_at < ?（严格两侧），实际：${segmentSql[0]}`);
+    assert.ok(segmentSql[0]!.indexOf("end_at > ?") < segmentSql[0]!.indexOf("GROUP BY"),
+      "范围谓词必须在 GROUP BY **之前**：放到之后就不是范围读，重复折叠的输入也随之改变");
+    const segmentCall = prepared.find((entry) => entry.sql === segmentSql[0]!)!;
+    assert.deepEqual(segmentCall.params, [healthTypes.sleepAnalysis, RANGE_START_LITERAL, RANGE_END_LITERAL],
+      "参数必须是本地夜间边界换算出的规范 UTC 字面量，不能换成 UTC 午夜");
+
+    const hrvSql = prepared.map((entry) => entry.sql).filter((sql) => sql.includes("value_numeric IS NOT NULL") && sql.includes("GROUP BY"));
+    assert.equal(hrvSql.length, 1, "HRV 只应发出一条分组查询");
+    assert.ok(/WHERE type = \? AND value_numeric IS NOT NULL AND start_at >= \? AND start_at < \?/.test(hrvSql[0]!),
+      `HRV 谓词必须是 start_at >= ? AND start_at < ?（左闭右开），实际：${hrvSql[0]}`);
+    assert.ok(hrvSql[0]!.indexOf("start_at >= ?") < hrvSql[0]!.indexOf("GROUP BY"), "HRV 范围谓词也必须在 GROUP BY 之前");
+    const hrvCall = prepared.find((entry) => entry.sql === hrvSql[0]!)!;
+    assert.deepEqual(hrvCall.params, [healthTypes.hrvSdnn, RANGE_START_LITERAL, RANGE_END_LITERAL]);
+  });
+});
+
+test("range read: the scoped read returns exactly the rows the legacy full-scan + JS filter returned", async () => {
+  await withDatabase((store) => {
+    seedRangeBoundaries(store);
+    const { database } = audited(store.database);
+    const scoped = { segments: loadSegments(database, READ_RANGE), hrv: loadHrv(database, READ_RANGE) };
+    const legacy = legacyRead(store.database);
+
+    // 逐对象相同（id / 来源 / 值 / 毫秒边界）：这就是"谓词下推 == 旧 JS 谓词"的等价性主张。
+    // 任一方向出错都会红 —— 少一行（漏夜）与多一行（放宽边界）都算。
+    assert.deepEqual(scoped.segments, legacy.segments,
+      "范围读与全量读+JS 过滤必须返回同一批段（逐字段相同）");
+    assert.deepEqual(scoped.hrv, legacy.hrv,
+      "范围读与全量读+JS 过滤必须返回同一批 HRV 样本（逐字段相同）");
+
+    // 把边界逐条点名，免得"两边一起错"（例如把 `>` 同时改成 `>=` 的自我一致回归）混过去。
+    const segmentIds = scoped.segments.map((segment) => segment.id);
+    assert.deepEqual(segmentIds, ["s-before-L-inside", "s-inside", "s-ends-just-inside"],
+      "跨越 rangeStart 的段必须带上；end == rangeStart 与 start == rangeEnd 的两条必须不带");
+    assert.deepEqual(scoped.hrv.map((sample) => sample.id), ["hrv-at-L", "hrv-inside"],
+      "HRV 左闭右开：start == rangeStart 计入、start == rangeEnd 不计入");
+  });
+});
+
+test("range read: the scoped read assembles rows for the window only, however long the history is", async () => {
+  await withDatabase((store) => {
+    // 2.5 年历史（每晚 2 段 ≈ 1830 行）+ 窗口内 2 段。历史量在增长，窗口读取必须不跟着涨。
+    const historyStart = Date.parse("2024-01-01T00:00:00.000Z");
+    for (let day = 0; day < 900; day += 1) {
+      const evening = new Date(historyStart + day * 86_400_000);
+      const startAt = evening.toISOString();
+      const endAt = new Date(evening.getTime() + 8 * 3_600_000).toISOString();
+      insertSegment(store, { id: `hist-inbed-${day}`, ...WATCH, value: SLEEP_ANALYSIS_VALUES.inBed, startAt, endAt });
+      insertSegment(store, { id: `hist-asleep-${day}`, ...WATCH, value: SLEEP_ANALYSIS_VALUES.asleepCore, startAt, endAt });
+    }
+    insertSegment(store, { id: "window-a", ...WATCH, value: SLEEP_ANALYSIS_VALUES.inBed, startAt: "2026-09-02T14:00:00.000Z", endAt: "2026-09-02T22:00:00.000Z" });
+    insertSegment(store, { id: "window-b", ...WATCH, value: SLEEP_ANALYSIS_VALUES.asleepCore, startAt: "2026-09-02T14:30:00.000Z", endAt: "2026-09-02T21:30:00.000Z" });
+
+    const full = loadSegments(store.database);
+    assert.ok(full.length >= 1800, `夹具必须真有长历史（实际 ${full.length} 行）`);
+    const scoped = loadSegments(store.database, READ_RANGE);
+    assert.deepEqual(scoped.map((segment) => segment.id), ["window-a", "window-b"],
+      "输入装配必须只随窗口增长：历史涨到 1800 行时，窗口读仍只带回窗口内的行");
+    // 无 range 的入口保持全量语义（`canonicalizeNights` 走的就是它）。
+    assert.ok(full.length > scoped.length * 100, "范围读必须比全量读小两个数量级，否则范围参数没生效");
+  });
+});
+
+/**
+ * 异构时间格式：**绝不能**按文本序静默改变日期含义。
+ *
+ * 夹具里的两条记录瞬时都在窗口内，但文本是带 `+08:00` 偏移的形式：
+ *   `2026-09-03T16:00:00+08:00` = `2026-09-03T08:00:00.000Z`（09-03 本地 16:00–17:00 ⇒ 落在
+ *   09-03 的**午后 nap 窗口**里，全量重建会为它产出一条 nap 行）。
+ * 纯文本谓词会把它们判在窗口之外（`start_at < '2026-09-03T10:00:00.000Z'` 为假）⇒ 静默丢掉一条
+ * 真实存在的夜/午睡。守卫（形状普查）必须发现异构格式并**回退**到"全量读 + JS 过滤"，
+ * 于是窗口重建与全量重建仍然逐列相同。
+ */
+test("mixed-format timestamps fall back to the unfiltered read instead of silently dropping rows", async () => {
+  await withDatabase((store) => {
+    seedRangeBoundaries(store);
+    // 偏移格式的段：瞬时 09-03T08:00Z–09:00Z（窗口内），文本却排在 rangeEnd 之后。
+    store.database.prepare(`INSERT INTO health_records
+      (id,type,source_name,source_category,unit,value_text,start_at,end_at,metadata_json,raw_attributes_json)
+      VALUES (?,?,'Watch','apple_watch','',?,?,?,'{}','{}')`).run(
+      "s-offset-format", healthTypes.sleepAnalysis, SLEEP_ANALYSIS_VALUES.asleepCore,
+      "2026-09-03T16:00:00+08:00", "2026-09-03T17:00:00+08:00");
+    // 偏移格式的 HRV 样本：瞬时 09-02T17:00Z（落在 09-03 主夜里），文本同样排在 rangeEnd 之后。
+    store.database.prepare(`INSERT INTO health_records
+      (id,type,source_name,source_category,unit,value_numeric,start_at,end_at,metadata_json,raw_attributes_json)
+      VALUES (?,?,'Watch','apple_watch','ms',?,?,?,'{}','{}')`).run(
+      "hrv-offset-format", healthTypes.hrvSdnn, 44, "2026-09-03T01:00:00+08:00", "2026-09-03T01:00:00+08:00");
+
+    const { database } = audited(store.database);
+    const scoped = { segments: loadSegments(database, READ_RANGE), hrv: loadHrv(database, READ_RANGE) };
+    const legacy = legacyRead(store.database);
+    assert.deepEqual(scoped.segments, legacy.segments, "异构格式下范围读必须回退到全量读 + JS 过滤");
+    assert.deepEqual(scoped.hrv, legacy.hrv, "HRV 侧同理");
+    assert.ok(scoped.segments.some((segment) => segment.id === "s-offset-format"),
+      "瞬时在窗口内的偏移格式段必须被带回（文本序把它排在窗口之外）");
+
+    // 端到端：混合格式在场时，窗口重建仍必须与全量重建逐列相同（含那条 nap 行与 HRV 行）。
+    const window = "wake_date BETWEEN '2026-09-02' AND '2026-09-03'";
+    canonicalizeNights(store.database, TIMEZONE);
+    const baselineNights = selectNights(store, NIGHT_COLUMNS, window);
+    const baselineHrv = selectHrv(store, HRV_COLUMNS, "local_date BETWEEN '2026-09-02' AND '2026-09-03'");
+    const result = canonicalizeNightsForWindow(store.database, TIMEZONE, "2026-09-02", "2026-09-03");
+    assert.ok(result.napCount >= 1, "夹具必须真的走到 nap 分支，否则这条用例证明不了漏行");
+    assert.deepEqual(selectNights(store, NIGHT_COLUMNS, window), baselineNights);
+    assert.deepEqual(selectHrv(store, HRV_COLUMNS, "local_date BETWEEN '2026-09-02' AND '2026-09-03'"), baselineHrv);
+  });
+});
+
+/**
+ * 索引决策必须**可核验**，否则"谓词下推"会静默退化成"在 `start_at < U` 上扫过整段历史"：
+ * 行为断言全部照旧绿（结果一样），只是又慢回去了。v40 迁移建出 `(type, end_at, start_at)`
+ * 的**唯一**理由就是让计划器能选另一个更有选择性的 seek（实测：近期窗口中位耗时
+ * 3 年 9.8ms → 0.17ms、10 年 33.1ms → 0.19ms；seek 走过的索引项 21,860 → 60 / 72,960 → 60，
+ * 完整表格见 `packages/storage-sqlite/src/v40-migration.ts` 文件头）。
+ *
+ * 这里用生产**原样**发出的 SQL（由 `audited()` 捕获）去问计划，避免测试自己抄一份 SQL 而与生产漂移。
+ * HRV 的谓词是同一列的双侧范围，既有 `(type, start_at, end_at)` 已经能 seek，v40 刻意**不**为它加索引。
+ */
+test("range read: v40's (type, end_at, start_at) index serves the sleep predicate while HRV keeps the two-sided one", async () => {
+  await withDatabase((store) => {
+    const insert = store.database.prepare(`INSERT INTO health_records
+      (id,type,source_name,source_category,unit,value_text,start_at,end_at,metadata_json,raw_attributes_json)
+      VALUES (?,?,?,'apple_watch','',?,?,?,'{}','{}')`);
+    const base = Date.parse("2026-10-16T00:00:00.000Z");
+    store.database.exec("BEGIN");
+    for (let day = 0; day < 200; day += 1) {
+      const start = base - day * 86_400_000 - 10 * 3_600_000;
+      insert.run(`hist-${day}`, healthTypes.sleepAnalysis, "Watch", SLEEP_ANALYSIS_VALUES.asleepCore,
+        new Date(start).toISOString(), new Date(start + 25 * 60_000).toISOString());
+    }
+    store.database.exec("COMMIT");
+
+    const indexes = (store.database.prepare(
+      "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='health_records'").all() as Array<{ name: string }>)
+      .map((row) => row.name);
+    assert.ok(indexes.includes("idx_health_records_type_end"),
+      `v40 迁移必须建出 idx_health_records_type_end（实际索引：${indexes.join(", ")}）`);
+
+    const { prepared, database } = audited(store.database);
+    loadSegments(database, READ_RANGE);
+    loadHrv(database, READ_RANGE);
+    const planOf = (query: { sql: string; params: unknown[] }) => (store.database
+      .prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(...query.params as never[]) as Array<{ detail: string }>)
+      .map((row) => row.detail);
+    const segmentQuery = prepared.find((entry) => entry.sql.includes("GROUP BY source_name, source_category"))!;
+    const hrvQuery = prepared.find((entry) => entry.sql.includes("value_numeric IS NOT NULL") && entry.sql.includes("GROUP BY"))!;
+    assert.match(planOf(segmentQuery)[0]!, /USING INDEX idx_health_records_type_end \(type=\? AND end_at>\?\)/,
+      `睡眠范围谓词必须走新索引的 end_at seek，实际计划：${planOf(segmentQuery).join(" | ")}`);
+    assert.match(planOf(hrvQuery)[0]!, /USING (COVERING )?INDEX idx_health_records_type_time \(type=\? AND start_at>\? AND start_at<\?\)/,
+      `HRV 双侧 start_at 谓词必须继续走既有索引，实际计划：${planOf(hrvQuery).join(" | ")}`);
+  });
+});
+
+/**
+ * 异构格式的**第二种形态**：文本序整体落在规范 family **之外**。
+ *
+ * `Sep 3, 2026 08:00:00 GMT` 是 `Date.parse` 能确定解析的形式（⇒ 旧的全量读 + JS 按毫秒过滤
+ * 会正确地把它算进 09-03 的午后 nap 窗口），但它以 `S` 开头 ⇒ 字典序排在所有 `2xxx-...`
+ * 规范文本**之后**，既不在窗口放宽带内，也不满足 `start_at < rangeEnd`。纯文本谓词会把它
+ * 丢掉；只有"索引两端各取一行"的端点普查能看见它（它必然排在索引末端）。
+ *
+ * 没有这条用例时，端点普查可以整段删掉而所有断言照绿 —— 那就是"守着的东西没人验"。
+ */
+test("mixed-format timestamps outside the canonical text family are caught by the index-edge probe", async () => {
+  await withDatabase((store) => {
+    seedRangeBoundaries(store);
+    // 瞬时 09-03T08:00Z–09:00Z（09-03 本地 16:00–17:00 ⇒ nap 窗口），文本排在规范 family 之外。
+    store.database.prepare(`INSERT INTO health_records
+      (id,type,source_name,source_category,unit,value_text,start_at,end_at,metadata_json,raw_attributes_json)
+      VALUES (?,?,'Watch','apple_watch','',?,?,?,'{}','{}')`).run(
+      "s-us-format", healthTypes.sleepAnalysis, SLEEP_ANALYSIS_VALUES.asleepCore,
+      "Sep 3, 2026 08:00:00 GMT", "Sep 3, 2026 09:00:00 GMT");
+    // 夹具自检：这条文本确实排在规范 family 之外（否则测的是另一条路径）。
+    const maxStart = (store.database.prepare(
+      "SELECT MAX(start_at) AS v FROM health_records WHERE type = ?").get(healthTypes.sleepAnalysis) as { v: string }).v;
+    assert.equal(maxStart, "Sep 3, 2026 08:00:00 GMT");
+
+    const { database } = audited(store.database);
+    const scoped = loadSegments(database, READ_RANGE);
+    const legacy = legacyRead(store.database).segments;
+    assert.deepEqual(scoped, legacy, "端点普查发现异构格式后必须回退到全量读 + JS 过滤");
+    assert.ok(scoped.some((segment) => segment.id === "s-us-format"), "瞬时在窗口内的行必须被带回");
+
+    const window = "wake_date BETWEEN '2026-09-02' AND '2026-09-03'";
+    canonicalizeNights(store.database, TIMEZONE);
+    const baselineNights = selectNights(store, NIGHT_COLUMNS, window);
+    canonicalizeNightsForWindow(store.database, TIMEZONE, "2026-09-02", "2026-09-03");
+    assert.ok(baselineNights.some((row) => row.kind === "nap"),
+      "夹具必须真的产出 nap 行，否则这条用例证明不了漏行");
+    assert.deepEqual(selectNights(store, NIGHT_COLUMNS, window), baselineNights);
   });
 });

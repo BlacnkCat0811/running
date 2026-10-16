@@ -116,31 +116,200 @@ export const NIGHT_FEEDING_RECORD_TYPES = {
 export const NIGHT_FEEDING_TYPE_VALUES: readonly string[] =
   [NIGHT_FEEDING_RECORD_TYPES.sleep, NIGHT_FEEDING_RECORD_TYPES.hrv];
 
-function loadSegments(database: DatabaseSync): Segment[] {
-  const rows = database.prepare(`
-    SELECT MIN(id) AS id, source_name AS sourceName, source_category AS sourceCategory,
-           value_text AS value, start_at AS startAt, end_at AS endAt
-    FROM health_records
-    WHERE type = ?
-    GROUP BY source_name, source_category, value_text, start_at, end_at
-    ORDER BY start_at, id
-  `).all(NIGHT_FEEDING_RECORD_TYPES.sleep) as unknown as Array<Record<string, string>>;
-  return rows.map((row) => ({
+/**
+ * 读窗口（**毫秒**，语义由各加载器的谓词决定：段是"与窗口相交"，样本是"起点落在窗口内"）。
+ *
+ * 为什么是毫秒而不是文本：谓词的历史语义（改动前）就是毫秒比较
+ * （`canonicalizeNightsForWindow` 里 `.filter((s) => s.end > rangeStart && s.start < rangeEnd)`），
+ * 本次改动只是把**同一个谓词**下推到 SQL。窗口本身由 `localDateTimeAt` 的本地夜间边界换算而来，
+ * 不能在 SQL 里换成"UTC 午夜"——那是另一套日期语义。
+ */
+export interface NightRecordReadRange {
+  startInstant: number;
+  endInstant: number;
+}
+
+/**
+ * 规范时间戳的**唯一**形状：`normalizeAppleDate()`（`utils.ts`，内部是 `Date#toISOString()`）
+ * 的输出 —— 定宽、UTC、毫秒三位、`Z` 结尾。
+ *
+ * 🔴 为什么这条形状断言是**读路径的前置条件**而不是"数据说明"：下推到 SQL 的谓词比较的是
+ * **文本**（`end_at > ?` / `start_at < ?`），而历史语义比较的是**毫秒**。只有当列值都是这个定宽形状时，
+ * 字典序才等于时间序、两个谓词才等价。混合格式（例如带偏移的 `2026-09-03T17:00:00+08:00`、
+ * 或空格分隔、或只有日期）会让字典序**偏离**时间序：一条瞬时确实落在窗口内的行，可能因为
+ * 文本排在窗口之外而被静默丢掉。所以这里**证明**（而不是假设）本次读取用到的区域满足该形状；
+ * 证明不了就整体回退到"无过滤读 + JS 按毫秒过滤"，即本次改动前的逐字语义。
+ */
+const CANONICAL_INSTANT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/** 同一形状的 GLOB 版本（GLOB 的 `.` 是字面量、大小写敏感、无正则回溯，代价可控）。 */
+const CANONICAL_INSTANT_GLOB =
+  "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z";
+
+/**
+ * 形状普查的文本放宽量（±2 天）与行数上限。
+ *
+ * 放宽的理由：异构格式与规范文本的差异，在现实中是**有界位移**（时区偏移 ≤ 14h、
+ * 本地时间无偏移 ≤ 14h、只差分隔符 ≤ 1 天）。一条"瞬时落在窗口内、文本却在窗口外"的行，
+ * 其文本必然落在窗口附近的这个放宽带里 —— 普查这个带就能看见它。
+ *
+ * 上限的理由：普查只为**发现**异构格式，不为证明全表；上限让代价与窗口同阶而非与历史同阶
+ * （实测，合成库每晚 20 段、窗口 1 天）：带宽内 100 行，带内普查单次 **0.22 ms**（覆盖索引上的
+ * 双侧 seek），两个索引端点各 **0.03 ms** ⇒ 整个守卫 **≈0.28 ms**，3 年（8.7 万行）与
+ * 10 年（29.2 万行）**同值** —— 与历史长度无关。对照：全表 GLOB 普查在 10 年库上要
+ * 60 ms(sleep) + 160 ms(hrv)，把这次优化直接抵消（见 v40 迁移文件头的实测记录）。
+ */
+const SHAPE_CENSUS_PADDING_MS = 2 * 86_400_000;
+const SHAPE_CENSUS_ROW_LIMIT = 500;
+
+/** 毫秒 → 规范字面量；`toISOString` 与 `Date.parse` 必须是**不动点**，否则本次范围读不可表达。 */
+function canonicalInstantLiteral(instant: number): string | null {
+  if (!Number.isFinite(instant)) return null;
+  const literal = new Date(instant).toISOString();
+  if (!CANONICAL_INSTANT_PATTERN.test(literal)) return null;
+  if (Date.parse(literal) !== instant) return null;
+  return literal;
+}
+
+/**
+ * 范围读守卫（G1 + G2）。返回 `null` ⇒ 调用方必须走**无过滤读 + JS 过滤**的回退路径。
+ *
+ * - **G1（字面量往返，O(1)）**：两个边界各自 `ms → toISOString → Date.parse` 回到原值。
+ *   这证明"毫秒谓词 ↔ 文本谓词"的换算是精确的（没有丢精度、没有时区再解释），
+ *   也就是对**规范行**两个谓词逐字等价。
+ * - **G2（形状普查，O(窗口 + log n)）**：检查
+ *   ① 窗口文本 ±2 天带内的行（走 `idx_health_records_type_time` 的**双侧有界** seek，
+ *      代价只与带宽内的行数有关，与历史无关）；
+ *   ② 索引两端各一行（`ORDER BY start_at` 的首/末行，O(log n) 的 seek）——
+ *      任何"文本序整体落在规范 family 之外"的表示（`9/1/2026`、`January 5, 2026` 一类）
+ *      必然出现在这两个端点上。
+ *   任一被检查列的文本不匹配 `CANONICAL_INSTANT_PATTERN` ⇒ 判定"本库存在异构时间格式"。
+ *
+ * ⚠️ G2 **不是**全表证明，这是刻意的取舍：全表证明的代价与历史同阶（实测数据见
+ * `packages/storage-sqlite/src/v40-migration.ts` 文件头），而这次优化的全部意义就是让读取与历史解耦。
+ * G2 证明的是："窗口邻域与索引两端没有异构格式"。窗口邻域之外的、文本看起来规范、
+ * 且瞬时落在窗口内的异构行**不在覆盖范围内**（要覆盖它必须全表扫描）。因此本函数把
+ * 已知的、可检测的异构格式一律导向回退路径 —— 回退路径是逐字的历史语义，不会静默改日期含义。
+ *
+ * 回退的**方向性**（为什么可以只守"漏行"这一侧）：SQL 谓词比 JS 谓词**多**带进来的行是无害的，
+ * `rebuildCanonicalNights` 对每一天仍按毫秒重新过滤（`candidates`、午后 nap pass 都是毫秒比较），
+ * 多出来的行既不会进入任何一天，也不会改变窗口内任何一行的字节。危险的只有"少行"。
+ */
+function scopedReadLiterals(
+  database: DatabaseSync,
+  type: string,
+  columns: readonly ("start_at" | "end_at")[],
+  range: NightRecordReadRange
+): { startLiteral: string; endLiteral: string } | null {
+  const startLiteral = canonicalInstantLiteral(range.startInstant);
+  const endLiteral = canonicalInstantLiteral(range.endInstant);
+  if (startLiteral === null || endLiteral === null) return null;
+  // 规范字面量的字典序 == 时间序（前提正是本函数要守的形状），所以这里可以直接比字符串。
+  if (!(startLiteral < endLiteral)) return null;
+  const lowLiteral = canonicalInstantLiteral(range.startInstant - SHAPE_CENSUS_PADDING_MS);
+  const highLiteral = canonicalInstantLiteral(range.endInstant + SHAPE_CENSUS_PADDING_MS);
+  if (lowLiteral === null || highLiteral === null) return null;
+
+  const projection = columns.join(", ");
+  const census = database.prepare(`
+    SELECT ${projection} FROM health_records
+    WHERE type = ? AND start_at >= ? AND start_at < ?
+    LIMIT ${SHAPE_CENSUS_ROW_LIMIT}
+  `).all(type, lowLiteral, highLiteral) as unknown as Array<Record<string, unknown>>;
+  const edges = [
+    database.prepare(`SELECT ${projection} FROM health_records WHERE type = ? ORDER BY start_at LIMIT 1`).get(type),
+    database.prepare(`SELECT ${projection} FROM health_records WHERE type = ? ORDER BY start_at DESC LIMIT 1`).get(type)
+  ] as Array<Record<string, unknown> | undefined>;
+  for (const row of [...census, ...edges]) {
+    if (row === undefined) continue;
+    for (const column of columns) {
+      if (!CANONICAL_INSTANT_PATTERN.test(String(row[column] ?? ""))) return null;
+    }
+  }
+  return { startLiteral, endLiteral };
+}
+
+/**
+ * 睡眠分段。`range` 省略 = **全量语义**（`canonicalizeNights` 走的入口，与本次改动前逐字相同）。
+ * 传了 `range` = 把历史谓词 `s.end > rangeStart && s.start < rangeEnd` 下推到 SQL 的
+ * `end_at > ? AND start_at < ?`（**在 `GROUP BY` 之前**）。
+ *
+ * 为什么谓词放在 `GROUP BY` 之前不改变折叠结果：分组键
+ * `(source_name, source_category, value_text, start_at, end_at)` **包含**被比较的两列，
+ * 所以一个组要么整组满足、要么整组不满足 —— 满足的组的 `MIN(id)` 与折叠后过滤完全相同。
+ *
+ * 导出说明：这两个加载器是"范围读与旧全量读等价"这条回归的**唯一**可直测入口
+ * （见 `test/canonicalize-nights-window.test.ts` 的读侧等价性用例）。它们不出现在
+ * `src/index.ts` 的包级 API 里。
+ */
+export function loadSegments(database: DatabaseSync, range?: NightRecordReadRange): Segment[] {
+  const literals = range === undefined
+    ? null
+    : scopedReadLiterals(database, NIGHT_FEEDING_RECORD_TYPES.sleep, ["start_at", "end_at"], range);
+  const rows = (literals === null
+    ? database.prepare(`
+        SELECT MIN(id) AS id, source_name AS sourceName, source_category AS sourceCategory,
+               value_text AS value, start_at AS startAt, end_at AS endAt
+        FROM health_records
+        WHERE type = ?
+        GROUP BY source_name, source_category, value_text, start_at, end_at
+        ORDER BY start_at, id
+      `).all(NIGHT_FEEDING_RECORD_TYPES.sleep)
+    : database.prepare(`
+        SELECT MIN(id) AS id, source_name AS sourceName, source_category AS sourceCategory,
+               value_text AS value, start_at AS startAt, end_at AS endAt
+        FROM health_records
+        WHERE type = ? AND end_at > ? AND start_at < ?
+        GROUP BY source_name, source_category, value_text, start_at, end_at
+        ORDER BY start_at, id
+      `).all(NIGHT_FEEDING_RECORD_TYPES.sleep, literals.startLiteral, literals.endLiteral)
+  ) as unknown as Array<Record<string, string>>;
+  const mapped = rows.map((row) => ({
     id: row.id!, sourceName: row.sourceName!, sourceCategory: row.sourceCategory!, value: row.value ?? "",
     start: Date.parse(row.startAt!), end: Date.parse(row.endAt!)
   })).filter((row) => Number.isFinite(row.start) && Number.isFinite(row.end) && row.end > row.start);
+  // 回退路径必须在 JS 里补上同一谓词（守卫不成立 / 无范围），否则"回退"就不是历史语义。
+  return literals === null && range !== undefined
+    ? mapped.filter((row) => row.end > range.startInstant && row.start < range.endInstant)
+    : mapped;
 }
 
-function loadHrv(database: DatabaseSync): Array<{ id: string; sourceName: string; start: number; value: number }> {
-  const rows = database.prepare(`
-    SELECT MIN(id) AS id, source_name AS sourceName, start_at AS startAt, value_numeric AS value
-    FROM health_records
-    WHERE type = ? AND value_numeric IS NOT NULL
-    GROUP BY source_name, start_at, value_numeric
-    ORDER BY start_at, id
-  `).all(NIGHT_FEEDING_RECORD_TYPES.hrv) as unknown as Array<Record<string, string | number>>;
-  return rows.map((row) => ({ id: String(row.id), sourceName: String(row.sourceName), start: Date.parse(String(row.startAt)), value: Number(row.value) }))
-    .filter((row) => Number.isFinite(row.start) && Number.isFinite(row.value) && row.value >= 0);
+/**
+ * HRV 样本。`range` 省略 = 全量语义；传了 = `start_at >= ? AND start_at < ?` 下推到 SQL
+ * （边界与历史谓词 `s.start >= rangeStart && s.start < rangeEnd` 严格一致：**左闭右开**，
+ * 与段的开闭区间刻意不同）。分组键 `(source_name, start_at, value_numeric)` 含被比较列，
+ * 所以"先折叠后过滤"与"先过滤后折叠"的组集合相同。
+ */
+export function loadHrv(
+  database: DatabaseSync,
+  range?: NightRecordReadRange
+): Array<{ id: string; sourceName: string; start: number; value: number }> {
+  const literals = range === undefined
+    ? null
+    : scopedReadLiterals(database, NIGHT_FEEDING_RECORD_TYPES.hrv, ["start_at"], range);
+  const rows = (literals === null
+    ? database.prepare(`
+        SELECT MIN(id) AS id, source_name AS sourceName, start_at AS startAt, value_numeric AS value
+        FROM health_records
+        WHERE type = ? AND value_numeric IS NOT NULL
+        GROUP BY source_name, start_at, value_numeric
+        ORDER BY start_at, id
+      `).all(NIGHT_FEEDING_RECORD_TYPES.hrv)
+    : database.prepare(`
+        SELECT MIN(id) AS id, source_name AS sourceName, start_at AS startAt, value_numeric AS value
+        FROM health_records
+        WHERE type = ? AND value_numeric IS NOT NULL AND start_at >= ? AND start_at < ?
+        GROUP BY source_name, start_at, value_numeric
+        ORDER BY start_at, id
+      `).all(NIGHT_FEEDING_RECORD_TYPES.hrv, literals.startLiteral, literals.endLiteral)
+  ) as unknown as Array<Record<string, string | number>>;
+  const mapped = rows.map((row) => ({
+    id: String(row.id), sourceName: String(row.sourceName),
+    start: Date.parse(String(row.startAt)), value: Number(row.value)
+  })).filter((row) => Number.isFinite(row.start) && Number.isFinite(row.value) && row.value >= 0);
+  return literals === null && range !== undefined
+    ? mapped.filter((row) => row.start >= range.startInstant && row.start < range.endInstant)
+    : mapped;
 }
 
 function buildNight(wakeDate: string, timezone: string, kind: CanonicalNightKind, source: { sourceName: string; sourceCategory: string; rank: number }, segments: Segment[], competingSourceCount: number): CanonicalNight {
@@ -426,8 +595,11 @@ export function canonicalizeNightsForWindow(
   // 窗口内每一天用到的段/样本都落在 [from-1T18:00, toT18:00) 内。
   const rangeStart = Date.parse(localDateTimeAt(`${addLocalDays(fromLocalDate, -1)}T18:00:00`, timezoneIdentifier));
   const rangeEnd = Date.parse(localDateTimeAt(`${toLocalDate}T18:00:00`, timezoneIdentifier));
-  const all = loadSegments(database).filter((s) => s.end > rangeStart && s.start < rangeEnd);
-  const hrv = loadHrv(database).filter((s) => s.start >= rangeStart && s.start < rangeEnd);
+  // O10（WP-31）：范围**在读取阶段**下推到 SQL（谓词与历史逐字一致，见两个加载器的注释），
+  // 不再"读全表再在 JS 里过滤"。守卫不成立时加载器自己回退到全量读 + JS 过滤。
+  const readRange: NightRecordReadRange = { startInstant: rangeStart, endInstant: rangeEnd };
+  const all = loadSegments(database, readRange);
+  const hrv = loadHrv(database, readRange);
 
   // FK 守卫：`canonical_hrv_days.night_id → canonical_nights(id) ON DELETE CASCADE`。
   // 生产路径下 hrv 行只由本模块写入（:289），且恒有 `local_date == night.wake_date`，
