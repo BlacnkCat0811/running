@@ -23,6 +23,7 @@ import {
 } from "../format.js";
 import { useRemote } from "../hooks.js";
 import { MapTrifold } from "../icons.js";
+import { hasNativeBridge, postNative, useNativeStatus } from "./native.js";
 import {
   Card,
   dimensionLabels,
@@ -39,6 +40,9 @@ export function IosWorkoutDetail() {
   const seriesPath = `/v1/workouts/${id ?? ""}/series`;
   const detail = useRemote<WorkoutDetailResponse>(detailPath, Boolean(id), false);
   const series = useRemote<WorkoutSeriesResponse>(seriesPath, Boolean(id));
+  // §4.2 步骤 6：定点重试只在 iOS 壳里可用（需要原生桥去碰 HealthKit）。
+  const native = useNativeStatus();
+  const nativeBridge = hasNativeBridge();
 
   if (!id) return <IosLoading error="训练不存在" />;
   if (detail.loading && (!detail.data || detail.dataPath !== detailPath)) {
@@ -184,6 +188,21 @@ export function IosWorkoutDetail() {
               </div>
             )}
           </div>
+          {nativeBridge ? (
+            <button
+              type="button"
+              className="ios-save ios-save-secondary"
+              disabled={native.isBusy}
+              onClick={() =>
+                postNative({
+                  action: "syncHealth",
+                  routeRetryWorkoutIds: [workout.id],
+                })
+              }
+            >
+              重试这条轨迹
+            </button>
+          ) : null}
         </Card>
       ) : null}
       {/* The session actually executed, above the neutral 1 km ruler, so the page

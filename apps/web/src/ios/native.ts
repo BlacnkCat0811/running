@@ -10,7 +10,13 @@ export type RaiNative = {
 };
 
 type NativeMessage =
-  | { action: "syncHealth"; full: boolean }
+  | { action: "syncHealth"; routeRetryWorkoutIds?: string[] }
+  /**
+   * 定点修复**损坏的增量游标**（只清坏掉的那一个，不重置已同步数据、不重读全部历史）。
+   * 「重新导入全部」已停用：全量同步会让 `sync_state` 与全部游标一起重置，
+   * 与"永不自动清空游标"的边界冲突（见 docs/HEALTHKIT_RECORD_SYNC_V2.md）。
+   */
+  | { action: "repairSyncCursor" }
   | { action: "openServer" }
   | { action: "openHealthSettings" }
   | { action: "reload" };

@@ -289,7 +289,7 @@ function StaleBanner({
           <button
             type="button"
             className="ios-stale-action"
-            onClick={() => postNative({ action: "syncHealth", full: false })}
+            onClick={() => postNative({ action: "syncHealth" })}
           >
             点同步健康读取跑步
           </button>
@@ -306,7 +306,7 @@ function StaleBanner({
         <button
           type="button"
           className="ios-stale-action"
-          onClick={() => postNative({ action: "syncHealth", full: false })}
+          onClick={() => postNative({ action: "syncHealth" })}
         >
           同步健康
         </button>

@@ -19,6 +19,9 @@ export function IosSettings() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // 「修复增量游标」是两步确认：不依赖 WebView 的 `window.confirm`（它在 WKWebView 里
+  // 需要宿主实现 UIDelegate，没实现时点击会被静默吞掉 —— 用户会以为按钮坏了）。
+  const [repairPending, setRepairPending] = useState(false);
   const nativeBridge = hasNativeBridge();
 
   const easyFloorValue = goals.data?.easyDurationFloorFraction;
@@ -104,18 +107,41 @@ export function IosSettings() {
               type="button"
               className="ios-save"
               disabled={native.isBusy}
-              onClick={() => postNative({ action: "syncHealth", full: false })}
+              onClick={() => postNative({ action: "syncHealth" })}
             >
               同步健康
             </button>
-            <button
-              type="button"
-              className="ios-save ios-save-secondary"
-              disabled={native.isBusy}
-              onClick={() => postNative({ action: "syncHealth", full: true })}
-            >
-              重新导入全部
-            </button>
+            {repairPending ? (
+              <>
+                <button
+                  type="button"
+                  className="ios-save ios-save-secondary"
+                  disabled={native.isBusy}
+                  onClick={() => {
+                    setRepairPending(false);
+                    postNative({ action: "repairSyncCursor" });
+                  }}
+                >
+                  确认修复（只重读受影响项）
+                </button>
+                <button
+                  type="button"
+                  className="ios-save ios-save-secondary"
+                  onClick={() => setRepairPending(false)}
+                >
+                  取消
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="ios-save ios-save-secondary"
+                disabled={native.isBusy}
+                onClick={() => setRepairPending(true)}
+              >
+                修复增量游标
+              </button>
+            )}
             <button
               type="button"
               className="ios-save ios-save-secondary"

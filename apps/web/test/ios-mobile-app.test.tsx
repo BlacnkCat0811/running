@@ -752,7 +752,9 @@ describe("iOS mobile detail navigation", () => {
       expect(screen.getByText("服务器连接")).toBeTruthy();
       expect(screen.getByText("健康数据")).toBeTruthy();
       expect(screen.getByRole("button", { name: "同步健康" })).toBeTruthy();
-      expect(screen.getByRole("button", { name: "重新导入全部" })).toBeTruthy();
+      // 全量重导入口已停用（2026-10-17 边界收紧）：只剩定点修复。
+      expect(screen.getByRole("button", { name: "修复增量游标" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "重新导入全部" })).toBeNull();
       expect(screen.getByText("无法读取周目标")).toBeTruthy();
       expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
       expect(screen.queryByLabelText("每周跑量（km）")).toBeNull();
