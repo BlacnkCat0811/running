@@ -128,8 +128,12 @@ function generations(store: RaiDatabase): { raw: number; dependency: number } {
 
 /**
  * 模拟"覆盖任务真的发布了"：写 feature/model run、给任务挂上 run id，
- * 再在 `complete()` 的发布事务里写下输入绑定（真实路径由 pipeline 的
- * `writeAnalysisInputBinding` + `verifyAndPoint` 完成，这里只保留**可核验的那些落库事实**）。
+ * 再在 `complete()` 的发布事务里写下输入绑定与**执行覆盖记录**（真实路径由 pipeline 的
+ * `writeAnalysisInputBinding` 完成：绑定 + `capture.mergedBatchIds` 的覆盖行 + 执行边界证据）。
+ *
+ * 🔴 R02 契约：覆盖记录由**执行方**在发布事务里写下（⊇ 调度并集）；结算只核验、不改写。
+ * 所以这里必须自己写 —— "只说 publish 不写覆盖记录"的模拟会因为
+ * `publication_missing_union_batch` 不被结算（那是正确行为）。
  */
 function publishCovering(
   store: RaiDatabase,
@@ -139,8 +143,10 @@ function publishCovering(
     capturedRaw: number;
     capturedDependency: number;
     timezoneIdentifier?: string;
-    /** 模拟运行期 `coverage_merged`：发布时把并集之外的批次写进覆盖记录。 */
+    /** 模拟"执行覆盖清单里出现并集之外的批次"（合法的 required 批次，或伪造批次）。 */
     foreignCoverageBatchId?: string;
+    /** 模拟 v44 的执行边界证据；缺省 = 不写（核验方退回旧判据）。 */
+    executedPlan?: { dirtyFromAt: string | null; domains: Record<string, string | null> };
   }
 ): boolean {
   const featureRunId = `feature_run_test_${coveringJobId}`;
@@ -164,8 +170,8 @@ function publishCovering(
         run_id, job_id, scope, dataset_version, captured_raw_generation,
         captured_dependency_generation, target_raw_generation, target_dependency_generation,
         incumbent_release_id, timezone_identifier, override_digest, config_digest,
-        cutoff_at, input_digest
-      ) VALUES (?, ?, 'direct-sync', 'dataset_test', ?, ?, NULL, NULL, NULL, ?, 'overrides', 'config', ?, ?)
+        cutoff_at, input_digest, executed_plan_json
+      ) VALUES (?, ?, 'direct-sync', 'dataset_test', ?, ?, NULL, NULL, NULL, ?, 'overrides', 'config', ?, ?, ?)
     `).run(
       modelRunId,
       coveringJobId,
@@ -173,14 +179,25 @@ function publishCovering(
       options.capturedDependency,
       options.timezoneIdentifier ?? DATABASE_TIMEZONE,
       new Date().toISOString(),
-      `input_digest_${coveringJobId}`
+      `input_digest_${coveringJobId}`,
+      options.executedPlan === undefined ? null : JSON.stringify(options.executedPlan)
     );
+    // 执行覆盖记录（真实写入方 = `writeAnalysisInputBinding`）：调度并集 ∪ 运行期并入的批次。
+    const unionRow = store.database.prepare(`
+      SELECT union_batch_ids_json AS json FROM analysis_job_merges
+      WHERE covering_job_id = ? ORDER BY covered_job_id LIMIT 1
+    `).get(coveringJobId) as { json: string } | undefined;
+    const union = unionRow === undefined ? [] : (JSON.parse(unionRow.json) as string[]);
+    const writeCoverage = store.database.prepare(`
+      INSERT INTO analysis_job_coverage (
+        job_id, import_batch_id, dependency_generation_from, dependency_generation_to
+      ) VALUES (?, ?, 0, ?)
+      ON CONFLICT(job_id, import_batch_id) DO UPDATE SET
+        dependency_generation_to = excluded.dependency_generation_to
+    `);
+    for (const batchId of union) writeCoverage.run(coveringJobId, batchId, options.capturedDependency);
     if (options.foreignCoverageBatchId !== undefined) {
-      store.database.prepare(`
-        INSERT INTO analysis_job_coverage (
-          job_id, import_batch_id, dependency_generation_from, dependency_generation_to
-        ) VALUES (?, ?, 0, ?)
-      `).run(coveringJobId, options.foreignCoverageBatchId, options.capturedDependency);
+      writeCoverage.run(coveringJobId, options.foreignCoverageBatchId, options.capturedDependency);
     }
   });
 }

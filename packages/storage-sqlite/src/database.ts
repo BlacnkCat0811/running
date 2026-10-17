@@ -19,6 +19,8 @@ import { migrateModelV40 } from "./v40-migration.js";
 import { migrateModelV41 } from "./v41-migration.js";
 import { migrateModelV42 } from "./v42-migration.js";
 import { migrateModelV43 } from "./v43-migration.js";
+import { migrateModelV44 } from "./v44-migration.js";
+import { migrateModelV45 } from "./v45-migration.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statfsSync, statSync } from "node:fs";
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
@@ -1688,7 +1690,9 @@ const migrations: readonly Migration[] = [
   { version: 40, name: "night_range_read_index", up: migrateModelV40 },
   { version: 41, name: "training_metric_domain_checkpoints", up: migrateModelV41 },
   { version: 42, name: "analysis_job_merge_links", up: migrateModelV42 },
-  { version: 43, name: "readable_route_points_view", up: migrateModelV43 }
+  { version: 43, name: "readable_route_points_view", up: migrateModelV43 },
+  { version: 44, name: "coverage_evidence_columns", up: migrateModelV44 },
+  { version: 45, name: "batch_analysis_dirty_evidence", up: migrateModelV45 }
 ];
 
 /**
@@ -1774,7 +1778,9 @@ export const FROZEN_MIGRATION_CHECKSUMS: Readonly<Record<number, string>> = {
   40: "4629f500de901acc69521ba28276a2f01d107f8902c1c65fda8b24ed5047f139",
   41: "03f4844e9c559ad80a36374f61e2be6f3cb3eea534d1a9953cfce68f75ccb0f7",
   42: "964c0218cf5634cb17372029e784f45bb5f3cc36790b5e205153b4797532b0a9",
-  43: "878e51d8d84763824ca5434c6e34234d9c4abae6273e7a839e9772351668ee59"
+  43: "878e51d8d84763824ca5434c6e34234d9c4abae6273e7a839e9772351668ee59",
+  44: "468191aa5d7f6742d2b135d797bf8cb4e977ccecf679cb45ebb64c2edcd20970",
+  45: "2112d288848cb7b253d0e9f46e45b82da8c676dd3628da14cd04444222f6e9d1"
 };
 
 /** 全部迁移的版本号（供门禁核对「每个迁移都已冻结」）。 */
@@ -2553,6 +2559,26 @@ export class RaiDatabase {
       issue.objectId,
       issue.message
     );
+  }
+
+  /**
+   * 按（已规范化的）相对路径查一条"仍被引用"的路线 id。
+   *
+   * 与 {@link routesToImport} 同一可见性判据，但走 `relative_path` 的 UNIQUE 索引：
+   * 直连批次只关心本批的那几十个文件，不该为此扫全表（旧调用点是每批一次全表读）。
+   * 未命中返回 `null` —— 调用方仍走 `ensureOrphanRoute`（它内部有大小写兜底）。
+   */
+  routeIdForPath(relativePath: string): string | null {
+    const row = this.database
+      .prepare(
+        `SELECT route.id AS id FROM workout_routes route
+         LEFT JOIN workouts workout ON workout.id = route.workout_id
+         WHERE route.relative_path = ?
+           AND (workout.id IS NULL OR ${workoutPresentConditionSql("workout")})
+         LIMIT 1`
+      )
+      .get(relativePath) as { id: string } | undefined;
+    return row?.id ?? null;
   }
 
   routesToImport(): RouteImportTarget[] {

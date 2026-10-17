@@ -556,6 +556,80 @@ export class RecomputeJobRepository {
     });
   }
 
+  /**
+   * B03（2026-10-17）：**可重排的输入漂移** —— 把原任务从 `running` 退回 `queued`。
+   *
+   * ## 为什么不是新建一条后继任务
+   *
+   * `replanAfterInputDrift` 以前用 `enqueue("import", …)` 建一条新任务，然后原任务被
+   * `runNextJob` 的 catch 送进 `fail` ⇒ 客户端手里那个 `analysisJobId` **永久是 failed**，
+   * 而真正算完的是另一个 id；回执里的 id 与后来发生的事对不上，客户端也没有任何持久关联
+   * 可以沿过去（复查的合成端到端：后继成功、原 job failed、覆盖关联不存在）。
+   *
+   * 退回队列保住三件事：原 id、原回执、原请求身份。重试次数与新计划写在 `request_json`
+   * 里，不改写登记证据。
+   *
+   * 返回三态而不是 void：调用方必须能区分"已重排（不要抛错）"与"该如实失败"。
+   */
+  requeueForReplan(
+    jobId: string,
+    request: object,
+    bindings: RecomputeJobBindings,
+    reason: string
+  ): "requeued" | "cancelled" | "not_running" {
+    let outcome: "requeued" | "cancelled" | "not_running" = "not_running";
+    withDatabaseTransaction(this.database, () => {
+      const current = this.database.prepare(`
+        SELECT status, cancel_requested AS cancelRequested,
+               feature_run_id AS featureRunId, model_run_id AS modelRunId
+        FROM recompute_jobs WHERE id = ?
+      `).get(jobId) as unknown as {
+        status: string;
+        cancelRequested: number;
+        featureRunId: string | null;
+        modelRunId: string | null;
+      } | undefined;
+      if (current?.status !== "running") return;
+      // 取消优先：用户已经要求停，就不要再把它放回队列（否则取消看起来"没生效"）。
+      if (current.cancelRequested === 1) {
+        outcome = "cancelled";
+        return;
+      }
+      const now = appNow();
+      // 这一轮半写就的 run 行必须结算：下一次领取会新建一套，孤儿 'running' 行会让
+      // "这一轮到底算了什么"再也说不清（与 `fail` 同一处置）。
+      this.failAssociatedRuns(
+        current.featureRunId,
+        current.modelRunId,
+        now,
+        JSON.stringify({ name: "InputDriftReplan", message: reason })
+      );
+      const changed = this.database.prepare(`
+        UPDATE recompute_jobs
+        SET status = 'queued', started_at = NULL, completed_at = NULL,
+            progress_phase = 'replan_pending', progress_current = 0, progress_total = 0,
+            cancel_requested = 0, error_json = NULL, attempts = attempts + 1,
+            request_json = ?, target_raw_generation = ?, target_dependency_generation = ?,
+            expected_incumbent_release_id = ?
+        WHERE id = ? AND status = 'running' AND cancel_requested = 0
+      `).run(
+        JSON.stringify(request),
+        bindings.targetRawGeneration ?? null,
+        bindings.targetDependencyGeneration ?? null,
+        bindings.expectedIncumbentReleaseId ?? null,
+        jobId
+      );
+      if (Number(changed.changes) !== 1) {
+        throw new Error("Recompute job changed while re-queueing for replan");
+      }
+      // 阶段名是**给客户端看的**：`GET /v1/jobs/:id` 在重排周期里应该看到 queued +
+      // 明确阶段，而不是提前看到终态 failed。
+      this.logEvent(jobId, "replan_pending", 0, 0, reason);
+      outcome = "requeued";
+    });
+    return outcome;
+  }
+
   failOutstanding(error: unknown): number {
     const jobs = this.database.prepare(`
       SELECT id, status FROM recompute_jobs
@@ -765,6 +839,10 @@ export class RecomputeJobRepository {
     const head = members[0]!;
     const evaluatedAt = appNow();
     const request: Record<string, unknown> = {
+      // R02 步骤 3：成员共同的**稳定语义字段**整体带进覆盖任务（时区、feature/model 配置、
+      // 任何决定"算什么"的键）。合并键保证全体成员逐字一致；重建时丢字段会让覆盖任务
+      // 掉回默认配置 —— 那是对同一批输入换了算法再发布。
+      ...stableRequestFields(head.request),
       mode: DIRECT_SYNC_ANALYSIS_REQUEST_MODE,
       // 现有业务 gate（`sourceBackfillEvidence`）读的是**单数** `importBatchId`，
       // 选出来的那一个批次让它的结论与并集一致（见 selectEvidenceBatch）。
@@ -884,7 +962,7 @@ export class RecomputeJobRepository {
   /**
    * 结算被覆盖任务：**只在覆盖任务真的发布之后**（`complete()` 的事务里，`beforeComplete` 之后）。
    *
-   * ## 判定（步骤 B5：只有持久覆盖关系证明"这个发布包含该任务 dirty 范围"才算已覆盖）
+   * ## 判定（步骤 B5；R02 之后"覆盖"的判据是**执行证据**，不是"调度成员清单"）
    *
    * 逐条成员核验，全部成立才结算：
    * 1. 覆盖任务的发布绑定（若存在）证明输入快照**包含**该成员的目标代次
@@ -892,9 +970,14 @@ export class RecomputeJobRepository {
    * 2. 覆盖任务的依赖覆盖证明**在发布时刻仍然成立**
    *    （`dependencyCoverageHolds`，与 `verifyAndPoint` 的 D4 判据同一份实现）：
    *    捕获之后没有任何批次动过分析输入；
-   * 3. 覆盖任务的脏下界**不晚于**成员的脏下界（`merged <= covered`，或覆盖任务是全量）；
-   * 4. 发布写下的覆盖记录（`analysis_job_coverage`）里**没有并集之外的批次** ——
-   *    出现外来批次说明运行期把计划改写过，边界不再可证，此时**不结算**。
+   * 3. **并集 ⊆ 发布覆盖记录**（`analysis_job_coverage`）—— 每个成员的批次都必须真的
+   *    在执行覆盖清单里。清单由**发布事务里的执行方**写下（`writeAnalysisInputBinding`
+   *    写 `capture.mergedBatchIds`）。⛔ 结算在这里**只核验、不写表**：把调度成员写进
+   *    覆盖表、再拿同一张表当"已经计算"的证明，是 R02 抓到的循环论证。
+   * 4. 执行覆盖证据（v44 `executed_plan_json`）存在时，逐域核验**执行边界**
+   *    不晚于成员登记边界（"执行范围确实覆盖了它登记的 dirty"）。该列缺失
+   *    （v44 之前的绑定行）⇒ 退回旧判据：合并边界 ≤ 成员边界、且覆盖记录**没有并集之外的批次**。
+   *    证据损坏（有值但解不开）⇒ 拒绝，绝不当作"没有证据"放行。
    *
    * 任一条不成立 ⇒ 关联改成 `released`（原任务留在队列，由下一次合并重新规划）。
    * 🔴 绝不因为"覆盖任务被创建了"就结算，也绝不把失败报成覆盖。
@@ -902,13 +985,17 @@ export class RecomputeJobRepository {
   private settleCoveredJobs(coveringJobId: string): void {
     if (!this.mergeTableExists()) return;
     const members = this.database.prepare(`
-      SELECT covered_job_id AS coveredJobId, import_batch_id AS importBatchId,
-             covered_dirty_from_at AS coveredDirtyFromAt, merged_dirty_from_at AS mergedDirtyFromAt,
-             covered_target_raw_generation AS coveredTargetRaw,
-             covered_target_dependency_generation AS coveredTargetDependency,
-             union_batch_ids_json AS unionBatchIdsJson, attempts
-      FROM analysis_job_merges WHERE covering_job_id = ? AND state = 'pending'
-      ORDER BY created_at, covered_job_id
+      SELECT merge.covered_job_id AS coveredJobId, merge.import_batch_id AS importBatchId,
+             merge.covered_dirty_from_at AS coveredDirtyFromAt,
+             merge.merged_dirty_from_at AS mergedDirtyFromAt,
+             merge.covered_target_raw_generation AS coveredTargetRaw,
+             merge.covered_target_dependency_generation AS coveredTargetDependency,
+             merge.union_batch_ids_json AS unionBatchIdsJson, merge.attempts,
+             job.request_json AS coveredRequestJson
+      FROM analysis_job_merges merge
+      JOIN recompute_jobs job ON job.id = merge.covered_job_id
+      WHERE merge.covering_job_id = ? AND merge.state = 'pending'
+      ORDER BY merge.created_at, merge.covered_job_id
     `).all(coveringJobId) as unknown as Array<{
       coveredJobId: string;
       importBatchId: string;
@@ -918,6 +1005,7 @@ export class RecomputeJobRepository {
       coveredTargetDependency: number;
       unionBatchIdsJson: string;
       attempts: number;
+      coveredRequestJson: string | null;
     }>;
     if (members.length === 0) return;
 
@@ -933,22 +1021,31 @@ export class RecomputeJobRepository {
           SELECT job_id AS jobId, captured_raw_generation AS capturedRaw,
                  captured_dependency_generation AS capturedDependency,
                  input_digest AS inputDigest, override_digest AS overrideDigest,
-                 config_digest AS configDigest, timezone_identifier AS timezoneIdentifier
+                 config_digest AS configDigest, timezone_identifier AS timezoneIdentifier,
+                 executed_plan_json AS executedPlanJson
           FROM analysis_run_input_bindings WHERE run_id = ?
         `).get(covering.modelRunId) as {
           jobId: string; capturedRaw: number; capturedDependency: number; inputDigest: string;
           overrideDigest: string; configDigest: string; timezoneIdentifier: string;
+          executedPlanJson: string | null;
         } | undefined;
     const coverageVerdict = binding === undefined ? null : this.dependencyCoverageVerdict(binding);
     const now = appNow();
-    // 并集先写进 `analysis_job_coverage`：它是现有业务 gate／诊断读的**那一张**表，
-    // 写在发布事务里（与指针翻转、成员结算同事务）才叫"证据"，写在事务外只是注释。
-    this.writeUnionCoverage(coveringJobId, members, binding, covering?.targetDependency ?? null, now);
+    // 发布的**实际执行覆盖**批次：发布事务里由执行方写的、现有业务 gate／诊断读的那一张表。
+    // 这里只读 —— 结算绝不改写它（"先写成员、再拿表当证明"正是 R02 的病灶）。
     const coveredBatches = new Set(
       (this.database.prepare(
         "SELECT import_batch_id AS batchId FROM analysis_job_coverage WHERE job_id = ?"
       ).all(coveringJobId) as unknown as Array<{ batchId: string }>).map((row) => row.batchId)
     );
+    // 覆盖清单里的每个批次都必须是真实成功过的批次（执行方写的行同样要过这道；
+    // 悬挂/伪造的批次 id 会让"清单 ⊇ 并集"变成空话）。
+    const declaredBatches = [...coveredBatches];
+    const declaredBatchesAllReal = declaredBatches.length === 0 || Number((this.database.prepare(`
+      SELECT COUNT(*) AS n FROM import_batches
+      WHERE status = 'succeeded' AND id IN (${declaredBatches.map(() => "?").join(", ")})
+    `).get(...declaredBatches) as { n: number }).n) === declaredBatches.length;
+    const executed = parseExecutedPlan(binding?.executedPlanJson ?? null);
 
     const settle = this.database.prepare(`
       UPDATE recompute_jobs
@@ -977,17 +1074,52 @@ export class RecomputeJobRepository {
           reasons.push("captured_dependency_behind");
         }
       }
-      if (
-        member.mergedDirtyFromAt !== null
-        && (member.coveredDirtyFromAt === null || member.mergedDirtyFromAt > member.coveredDirtyFromAt)
-      ) {
-        reasons.push("merged_dirty_range_later_than_covered");
-      }
       const union = new Set(parseJson<string[]>(member.unionBatchIdsJson, []));
-      if ([...coveredBatches].some((batchId) => !union.has(batchId))) {
-        reasons.push("publication_included_unplanned_batches");
+      // 要求 3：并集的每个批次都必须真的在**实际执行覆盖**清单里（每个成员各自核验，
+      // 于是"某个成员的批次没被记"不会被别的成员的成功掩盖）。
+      if ([...union].some((batchId) => !coveredBatches.has(batchId))) {
+        reasons.push("publication_missing_union_batch");
       }
       if (!coveredBatches.has(member.importBatchId)) reasons.push("publication_missing_covered_batch");
+      if (executed === "invalid") {
+        // 证据损坏 ≠ 证据缺失："解不开"必须拒绝，绝不当作"老行"退回宽松判据。
+        reasons.push("executed_plan_evidence_invalid");
+      } else if (typeof executed === "object") {
+        // 要求 4（新证据路径）：**执行范围**必须覆盖成员登记的逐域边界。
+        //
+        // 🔴 B04：`mode: "rebuild"` 意味着这一版是**全量重算** —— 它的执行范围覆盖一切
+        // 登记边界，逐域比较没有意义（旧代码要求 `executed.dirtyFromAt !== null` 才比，
+        // 但 rebuild 现在显式写 `null`，语义从"未知"变成"覆盖一切"）。这条分支因此只核
+        // 批次真实性与下面的 `mode: "partial"` 分支分开，绝不把 rebuild 当成"没证据"。
+        const boundaries = executed.mode === "partial"
+          ? memberBoundaries(parseJson<Record<string, unknown>>(member.coveredRequestJson, {}))
+          : null;
+        if (boundaries !== null) {
+          for (const domain of ["features", "fitness", "readiness"] as const) {
+            const executedBoundary = executed.domains[domain];
+            // `null` 域 = 该域全算（覆盖一切边界），不构成"更晚"。
+            if (executedBoundary !== null && executedBoundary > boundaries[domain]) {
+              reasons.push(`executed_${domain}_range_later_than_covered`);
+            }
+          }
+          if (executed.dirtyFromAt !== null && member.coveredDirtyFromAt !== null
+              && executed.dirtyFromAt > member.coveredDirtyFromAt) {
+            reasons.push("executed_dirty_range_later_than_covered");
+          }
+        }
+        if (!declaredBatchesAllReal) reasons.push("publication_included_unknown_batches");
+      } else {
+        // 旧判据（v44 之前的绑定行 / 无绑定）：合并边界 ≤ 成员边界；且覆盖清单**不许**出现并集之外。
+        if (
+          member.mergedDirtyFromAt !== null
+          && (member.coveredDirtyFromAt === null || member.mergedDirtyFromAt > member.coveredDirtyFromAt)
+        ) {
+          reasons.push("merged_dirty_range_later_than_covered");
+        }
+        if ([...coveredBatches].some((batchId) => !union.has(batchId))) {
+          reasons.push("publication_included_unplanned_batches");
+        }
+      }
       if (reasons.length > 0) {
         this.releaseCoveredJob(member.coveredJobId, reasons.join(","), now);
         continue;
@@ -1026,29 +1158,6 @@ export class RecomputeJobRepository {
         now
       );
     }
-  }
-
-  /** 现有业务 gate 读的那张表：覆盖任务发布的**并集**覆盖记录（同事务写入）。 */
-  private writeUnionCoverage(
-    coveringJobId: string,
-    members: readonly { importBatchId: string }[],
-    binding: { capturedDependency: number } | undefined,
-    targetDependency: number | null,
-    now: string
-  ): void {
-    const to = binding === undefined
-      ? Number(targetDependency ?? 0)
-      : Number(binding.capturedDependency);
-    const from = Number(targetDependency ?? to);
-    const write = this.database.prepare(`
-      INSERT INTO analysis_job_coverage (
-        job_id, import_batch_id, dependency_generation_from, dependency_generation_to, created_at
-      ) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(job_id, import_batch_id) DO UPDATE SET
-        dependency_generation_from = excluded.dependency_generation_from,
-        dependency_generation_to = excluded.dependency_generation_to
-    `);
-    for (const member of members) write.run(coveringJobId, member.importBatchId, from, to, now);
   }
 
   /** 发布时刻的依赖覆盖证明（与 `verifyAndPoint` 的 D4 判据**同一份实现**、同样的输入装配）。 */
@@ -1381,13 +1490,26 @@ const MERGE_VOLATILE_REQUEST_KEYS = new Set([
   ANALYSIS_JOB_MERGE_REQUEST_KEY
 ]);
 
-function mergeBindingKey(request: Record<string, unknown>): string {
+/**
+ * 载荷里**稳定**的语义字段（除易变键之外的全部）。
+ *
+ * 两个用途共用这一份实现：
+ * - `mergeBindingKey` 用它算"同一次合并"的键；
+ * - `insertCoveringJob` 把它整体带进覆盖任务 —— 重建请求时**不得**丢掉成员的
+ *   语义字段（时区、feature/model 配置…）；丢掉会让覆盖任务掉回默认配置，
+ *   等于对一批"声明了非默认配置"的输入换了个算法再发布。
+ */
+function stableRequestFields(request: Record<string, unknown>): Record<string, unknown> {
   const stable: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(request)) {
     if (MERGE_VOLATILE_REQUEST_KEYS.has(key)) continue;
     stable[key] = value;
   }
-  return canonicalJson(stable);
+  return stable;
+}
+
+function mergeBindingKey(request: Record<string, unknown>): string {
+  return canonicalJson(stableRequestFields(request));
 }
 
 /** 稳定序列化（键排序）：同样的载荷永远得到同样的键，不受属性顺序影响。 */
@@ -1424,6 +1546,69 @@ function memberBoundaries(
     fitness: domains === undefined ? features : pick(domains.fitness),
     readiness: domains === undefined ? features : pick(domains.readiness)
   };
+}
+
+/**
+ * 解析发布事务写下的执行覆盖证据（v44 `executed_plan_json`）。
+ *
+ * 三态（区分本身是判据："损坏当作缺失"必须被拒绝）：
+ * - `"absent"`：绑定行没有这份证据（v44 之前的行 / 无绑定）⇒ 调用方退回旧判据；
+ * - `"invalid"`：有值但解不开 / 形状不对 ⇒ 调用方**拒绝**（绝不按"没证据"放行）；
+ * - 其余：执行计划（`dirtyFromAt` 与逐域边界，`null` 域 = 该域全算、覆盖一切边界）。
+ */
+function parseExecutedPlan(json: string | null):
+  | "absent"
+  | "invalid"
+  | {
+      mode: "partial" | "rebuild";
+      dirtyFromAt: string | null;
+      domains: { features: string | null; fitness: string | null; readiness: string | null };
+    } {
+  if (json === null) return "absent";
+  try {
+    const parsed = JSON.parse(json) as {
+      version?: unknown;
+      mode?: unknown;
+      dirtyFromAt?: unknown;
+      domains?: { features?: unknown; fitness?: unknown; readiness?: unknown };
+    } | null;
+    if (parsed === null || typeof parsed !== "object") return "invalid";
+    const pick = (value: unknown): string | null =>
+      value === null || value === undefined || typeof value !== "string" || value.length === 0
+        ? null
+        : value;
+    const dirtyFromAt = pick(parsed.dirtyFromAt);
+    const domains = {
+      features: pick(parsed.domains?.features),
+      fitness: pick(parsed.domains?.fitness),
+      readiness: pick(parsed.domains?.readiness)
+    };
+    // 旧形状（v44 首版，无 version/mode）：按边界推断模式。全空 = 旧版全量（覆盖一切），
+    // 否则按 `partial` 逐域核验 —— 两种解释都不比原判据宽松。
+    if (parsed.version === undefined && parsed.mode === undefined) {
+      const rebuild = dirtyFromAt === null && domains.features === null
+        && domains.fitness === null && domains.readiness === null;
+      return { mode: rebuild ? "rebuild" : "partial", dirtyFromAt, domains };
+    }
+    // 🔴 B04：版本或模式不认识 ⇒ **失败关闭**。缺字段不能被解释成"该域全部算过"。
+    if (parsed.version !== 1) return "invalid";
+    if (parsed.mode !== "partial" && parsed.mode !== "rebuild") return "invalid";
+    if (parsed.mode === "rebuild") {
+      // `rebuild` 的边界必须为空。带了具体边界说明生产端与判据已经分叉 —— 不猜哪一边对。
+      if (dirtyFromAt !== null || domains.features !== null
+          || domains.fitness !== null || domains.readiness !== null) {
+        return "invalid";
+      }
+      return {
+        mode: "rebuild",
+        dirtyFromAt: null,
+        domains: { features: null, fitness: null, readiness: null }
+      };
+    }
+    return { mode: "partial", dirtyFromAt, domains };
+  } catch {
+    return "invalid";
+  }
 }
 
 /**
