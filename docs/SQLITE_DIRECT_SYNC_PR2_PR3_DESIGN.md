@@ -21,17 +21,17 @@ PR4（分析输入与短写调度）、PR5（读侧一致性）、PR6（客户�
 
 | 事实 | 位置 | 对设计的影响 |
 |---|---|---|
-| 写入器自动攒批：非原子模式下每 5000 个对象自行 `COMMIT` | `packages/storage-sqlite/src/database.ts:2117-2121`（`markObject()`） | 组件会**自己提交**，必须做成结构性禁止 |
-| `flush()` 直接 `exec("COMMIT")`；`rollback()` 直接 `ROLLBACK` | `database.ts:2143-2157` | 事务所有权目前只有"自动 / 原子"两种，没有"调用方持有" |
-| `beginAtomicImport()` 只置标志 + `BEGIN`；`commitAtomicImport()` 调 `flush()` | `database.ts:2123-2135` | 原子模式下**仍然是组件提交**，不是调用方提交 |
+| 写入器自动攒批：非原子模式下每 5000 个对象自行 `COMMIT` | `packages/storage-sqlite/src/database.ts:2198-2202`（`markObject()`） | 组件会**自己提交**，必须做成结构性禁止 |
+| `flush()` 直接 `exec("COMMIT")`；`rollback()` 直接 `ROLLBACK` | `database.ts:2224-2234` | 事务所有权目前只有"自动 / 原子"两种，没有"调用方持有" |
+| `beginAtomicImport()` 只置标志 + `BEGIN`；`commitAtomicImport()` 调 `flush()` | `database.ts:2204-2216` | 原子模式下**仍然是组件提交**，不是调用方提交 |
 | 全库补种只在 `incremental` 且**非** `preserveAbsent`（即 `removalDetection`）时发生 | `packages/health-export-parser/src/apple-health-parser.ts:336-345` | 直连车道恒为 `preserveAbsent`（资格检查强制，`:309-312`）⇒ 补种对它**结构上不可能**；推广到全部类型要靠这个开关 |
-| `preserveAbsent` 时 `finalizeImportGeneration` **直接早退返回 0 删除** | `database.ts:3324-3337` | ⇒ **增量的补种是无用功**：删除判定根本不会跑。这是"不全库 seed"安全的**根据**，不是节省 |
-| `import_entity_generations.entity_kind` 有 `CHECK IN ('record','workout','activity_summary')` | `database.ts:1037`（v12 的建表语句） | 🔴 想加 `'route'` 必须**重建表** ⇒ 改历史迁移。**不要在它上面加路线**，另开表 |
+| `preserveAbsent` 时 `finalizeImportGeneration` **直接早退返回 0 删除** | `database.ts:3473-3487` | ⇒ **增量的补种是无用功**：删除判定根本不会跑。这是"不全库 seed"安全的**根据**，不是节省 |
+| `import_entity_generations.entity_kind` 有 `CHECK IN ('record','workout','activity_summary')` | `database.ts:1045-1046`（v12 的建表语句） | 🔴 想加 `'route'` 必须**重建表** ⇒ 改历史迁移。**不要在它上面加路线**，另开表 |
 | `healthkit_record_facts` 有 `UNIQUE(sample_type, sample_uuid)`，只存**当前**事实 | `packages/storage-sqlite/src/v31-migration.ts:39-48` | 历史版本**不能**塞进这张表，必须新表 |
-| `workout_routes.relative_path TEXT UNIQUE`、`file_status DEFAULT 'pending'` | `database.ts:209-222` | 路线版本不能复用同一 `relative_path`；`file_status` 可作为"未发布"标记复用 |
-| `recompute_jobs` 在主库，`job_type CHECK IN ('import','full_recompute','snapshot_refresh')`，`status CHECK IN (queued…cancelled)` | `database.ts:482-498` | 分析任务可与 raw 同事务落库（§4.2 要求）；要加绑定列只能 `ALTER TABLE ADD COLUMN` |
+| `workout_routes.relative_path TEXT UNIQUE`、`file_status DEFAULT 'pending'` | `database.ts:218-231` | 路线版本不能复用同一 `relative_path`；`file_status` 可作为"未发布"标记复用 |
+| `recompute_jobs` 在主库，`job_type CHECK IN ('import','full_recompute','snapshot_refresh')`，`status CHECK IN (queued…cancelled)` | `database.ts:491-506` | 分析任务可与 raw 同事务落库（§4.2 要求）；要加绑定列只能 `ALTER TABLE ADD COLUMN` |
 | `canonicalizeNights` 每次 `DELETE FROM canonical_hrv_days; DELETE FROM canonical_nights;` 再全量重建 | `packages/health-export-parser/src/canonicalize-nights.ts:521` | 局部化必须改成按窗口 `DELETE ... WHERE`，且夜间日期范围由段的**开始与结束**共同决定（见同文件注释 `canonicalize-nights.ts:10` 与实现 `canonicalize-nights.ts:447-449`） |
-| 迁移注册表 `migrations` 到 v33 为止；`FROZEN_MIGRATION_CHECKSUMS` 按版本冻结；门禁在 `test/migration-policy.test.ts` | `database.ts:123`（注册表；v33 条目在 `database.ts:1673`）、`database.ts:1718`（冻结值）；`MIGRATION_VERSIONS`/`transpiledChecksumFor` 在 `1757/1769`（同文件） | 新增迁移必须补冻结值，否则门禁转红 |
+| 迁移注册表 `migrations` 到 v33 为止；`FROZEN_MIGRATION_CHECKSUMS` 按版本冻结；门禁在 `test/migration-policy.test.ts` | `database.ts:132`（注册表；v33 条目在 `database.ts:1682`）、`database.ts:1736`（冻结值）；`MIGRATION_VERSIONS`/`transpiledChecksumFor` 在 `1784/1796`（同文件） | 新增迁移必须补冻结值，否则门禁转红 |
 | 守卫观测口：`databaseTask` 是唯一线程投递口，`task.operation` ∈ {verify, audit, checkpoint, data-only} | `apps/api/src/import-worker.ts:948-966`；`apps/api/src/import-database-tasks.ts:7-12` | PR2 扩展车道要**新增 operation**，否则守卫看不见新通道 |
 
 ---
@@ -240,8 +240,8 @@ ALTER TABLE recompute_jobs ADD COLUMN dirty_json TEXT;
 
 ### 3.4 迁移的硬规矩
 
-- **只新增**，不修改任何历史 `up`（`database.ts:123-1673` 是 v1–v33 那一段，一行不动；v34/v35 追加在 `database.ts:1674-1675`）。
-- 新迁移必须在 `FROZEN_MIGRATION_CHECKSUMS`（`database.ts:1718`）补 v34/v35 的冻结值，
+- **只新增**，不修改任何历史 `up`（`database.ts:132-1682` 是 v1–v33 那一段，一行不动；v34/v35 追加在 `database.ts:1683-1684`）。
+- 新迁移必须在 `FROZEN_MIGRATION_CHECKSUMS`（`database.ts:1736`）补 v34/v35 的冻结值，
   否则 `test/migration-policy.test.ts` 的 `every migration has a frozen checksum` 转红。
 - 部署闸门不变：`npm run data:migrate -- --database <path>` 必须报 `"pending": []`。
 - **不提供反向迁移**。回退是应用级 + 外部恢复（见 §6）。
@@ -654,7 +654,7 @@ PR5/PR6 让读侧改走版本表之后，`route_points` 与这次的双写一起
    `:334-340` 为**每次** CLI 导入插入 `job_type='import', status='running'` 的任务；
 2. CLI 进程崩溃 / 掉电后该任务停在 `running`；
 3. API 下次启动在 `server.ts:568` 调 `recoverInterruptedJobs()`；
-4. `packages/storage-sqlite/src/recompute-job-repository.ts:181-191` 的 SELECT **不过滤 `job_type`**，把所有 `running`
+4. `packages/storage-sqlite/src/recompute-job-repository.ts:303-306` 的 SELECT **不过滤 `job_type`**，把所有 `running`
    一律写回 `queued`、`progress_phase='recovered'`，并**把 `error_json` 清空**；
 5. 唯一那个消费者（`application/src/service.ts:283 runNextJob`）只认
    `full_recompute` / `snapshot_refresh`，`import` 落进 `else` 抛错，`:296` 置为 **failed**。
@@ -683,7 +683,7 @@ claimNext      : import                                            ← 被消费
 **新增 `packages/storage-sqlite/test/recompute-job-recovery.test.ts`（4 条）**，含**两条负向对照**
 （可消费类型仍回队列 / 已请求取消仍走 cancelled）—— 只断言"import 不再被放回队列"是无法区分的：
 把整段恢复逻辑删掉、或让它把一切判失败，都能让那条通过。另有一条**结构约束**：从**生产 DDL**
-（`database.ts:484` 的 `CHECK (job_type IN (...))`）解出类型清单，断言每个类型要么在
+（`database.ts:493` 的 `CHECK (job_type IN (...))`）解出类型清单，断言每个类型要么在
 `APPLICATION_CONSUMABLE_JOB_TYPES`、要么在 `EXTERNALLY_OWNED_JOB_TYPES`
 ⇒ 新增一个"既没消费者、也没声明所有者"的 job_type 会被判红，恢复流程不可能再不知道拿它怎么办。
 
@@ -711,7 +711,7 @@ claimNext      : import                                            ← 被消费
 
 | 项 | 位置 |
 |---|---|
-| 登记入口 | `packages/storage-sqlite/src/recompute-job-repository.ts:46` `enqueue(jobType, datasetVersion, request, bindings?)`（`bindings` 为本步新增的可选参数） |
+| 登记入口 | `packages/storage-sqlite/src/recompute-job-repository.ts:115` `enqueue(jobType, datasetVersion, request, bindings?)`（`bindings` 为本步新增的可选参数） |
 | 它**不自开事务** | 同上（只有裸 `INSERT` + `logEvent`）⇒ 正好能在 §4.2 要求的**同一个**主库事务里落库 |
 | 绑定列已就位 | `recompute_jobs.target_raw_generation` / `target_dependency_generation` / `expected_incumbent_release_id` / `dirty_json`（v35 加的） |
 | 代次来源 | `import_generations(singleton=1, raw_generation, dependency_generation)`（v34 加的） |
@@ -845,7 +845,7 @@ final error:         {"message":"Unsupported application job type: import","name
 | `packages/health-export-parser/src/cli.ts:340` 的 `.run(..., JSON.stringify({ mode: "cli_export_import" }))` | 行号 340 | 判别物走共享常量，`.run` 挪到 `packages/health-export-parser/src/cli.ts:343`；原 `421-432` → `424-435`、原 `505-512` → `508-515` |
 | "消费者只认识两种类型 ⇒ `import` 落 `else` 抛 `Unsupported`" | `service.ts:288-294` / `:296` | 准入判定在 `service.ts:293-296`，`fail` 在 `:310`；`import` 分支在 `:304`，**不再**落 `Unsupported` |
 | "`APPLICATION_CONSUMABLE_JOB_TYPES` 只含两种 / `EXTERNALLY_OWNED_JOB_TYPES` 类型级清单" | `packages/contracts/src/index.ts:564-579` | 换成 `RECOMPUTE_JOB_TYPE_DISPOSITIONS`（`:595`）+ `PAYLOAD_SCOPED_JOB_OWNERSHIP`；`isApplicationConsumableJob` 在 `:659` |
-| "`recoverInterrupted()` 的 SELECT 不过滤 `job_type`" | `packages/storage-sqlite/src/recompute-job-repository.ts:181-191` | SELECT 移到 `packages/storage-sqlite/src/recompute-job-repository.ts:182-192`，并读出 `request_json` 参与判别 |
+| "`recoverInterrupted()` 的 SELECT 不过滤 `job_type`" | `packages/storage-sqlite/src/recompute-job-repository.ts:303-306` | SELECT 移到 `packages/storage-sqlite/src/recompute-job-repository.ts:303-306`，并读出 `request_json` 参与判别 |
 
 #### 同轮发现的一处**既有**测试缺陷（在测试自身，不在产品代码）
 

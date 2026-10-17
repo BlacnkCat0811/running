@@ -105,6 +105,9 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
 - 结构门禁钉住 `full` 重新导入必须**同时** `forgetState(scope:)` 与删老键，
   否则迁移期回退路径会把刚忘掉的锚读回来（`check-background-capabilities.py` §14e，突变已验证会红）。
 
+> ⚠️ **2026-10-17 修订（见文末「修订 1」）**：`full` 入口已删除，判据改为
+> 「`if full` 块与 `forgetState` 必须**不存在**」。本条其余论证仍成立。
+
 ### ❌ 不要这样改
 
 - 不要把顺序改成"提交 → 删产物"，除非**同时**引入一个真正的孤儿回收机制
@@ -184,6 +187,9 @@ BEGIN IMMEDIATE → 读旧值 → upsertState(UPSERT) → 回读断言 → DELET
    （`BackgroundSyncPolicy.swift`）。任务行的存在本身就说明"有一个批次还没走完"；
    想重新导出只有**一个合法入口**：用户显式点「重新导入全部」。
    这条不变式由 `BackgroundSyncPolicyRegression` 在**全参数组合**上钉死。
+
+   > ⚠️ **2026-10-17 修订（见文末「修订 1」）**：该入口已删除。现在不存在任何"重新导出全部"
+   > 的入口；损坏游标只能显式「修复增量游标」（只清坏掉的那一个）。
 2. 内容层面另有一把**稳定的**摘要：`digestHealthKitExportContent`
    （`apps/api/src/import-sources.ts`，会剥掉 `<ExportDate>`），
    供"这份载荷是否就是产生当前主库的那一份"这类判断使用。
@@ -472,3 +478,47 @@ route 一侧同因：`HealthKitExport.swift` 的 `routeNow = Date()` 同样带�
 ⚠️ 边界：这条修复保证的是**自动同步链路不会断**（每一代变化要么被某一轮导出覆盖，要么被记下
 并且有一轮被排出来）。它**不**保证时延 —— BGProcessingTask 何时被系统派发仍由系统决定，
 `earliestBeginDate` 只是下界。
+
+---
+
+## 修订 1（2026-10-17）：删除全量重导入口，恢复改为定点修复
+
+### 变更
+
+- 删除 `HealthKitSync.sync(full:)` / `performSync(full:)`、`SyncAtomicUnit.nextStep(full:)`
+  重载、`AppWebView` 的 `full` 字段、设置页的「重新导入全部」按钮，以及 `if full` 重置分支
+  （它 `forgetState` 删整行 `sync_state` + 删老锚键 + 清预算档位）。
+- 删除随之失去生产者的开关：`recordsForceRescan` / `forceHistory` / `routeForceRescan` /
+  `RouteQueryPolicy.isForceManualRescan`。`HealthKitRecordCursor.needsHistoryRead()` 不再有
+  `force` 参数 —— 重放只能由"上一轮被预算截断"触发。
+- 删除 `SyncTaskStore.forgetState`（整行删除），新增两个**窄原语**：
+  `clearWorkoutAnchor(scope:)`（只清锚，保留 `export_end`，写后读回）
+  与 `clearRecordCursors(_:scope:)`（只删指定类型的键，其余逐字节保留，写后读回）。
+- 新增显式 `HealthKitSync.repairSyncCursor()`：只清**解不开**的那一个游标；记录侧的游标包
+  整体不可解码时清该行。它同时复位预算收敛档位（该函数原本只有"全量重导"一个调用点）。
+- `loadCommittedState()` 读失败从"返回 nil（退化成没有水位 ⇒ 全历史）"改为抛
+  `stateStoreUnreadable` 明确阻塞。只有"确实没有行"（首装 / 换 scope）才是合法的无水位状态。
+- 旧服务端页面仍可能下发 `full: true`：桥接层**明确拒绝**并提示改用定点修复，不静默忽略。
+
+### 为什么
+
+"不做全量同步、不自动清空游标"如果只靠 UI 约定，就不是结构约束。`full` 分支是**唯一**
+会把 `sync_state` 整行删掉的地方；留着它，任何一次误触或旧页面都会把全部增量游标清零。
+删除之后，"清空已提交状态"在类型层面不可达（`forgetState` 不存在），恢复只有窄原语。
+
+### 代价（已接受）
+
+- 记录侧游标损坏时无法先 drain 旧锚点（本来就解不开），只能从 `nil` 重读该类型；
+  重读期间发生的删除事件无法上报（无锚点查询看不到 `deletedObjects`）。这不是新增回归。
+- 服务端的数据重建不再经过手机：改用服务器侧 CLI 导入（`npm run data:import`）。
+- 预算收敛档位不再由普通同步复位，只由显式修复复位（否则一次历史超界会永久折半）。
+
+### 判据
+
+- `check-background-capabilities.py`：`if full` / `forgetState` 必须不存在；修复入口必须调用
+  `clearWorkoutAnchor(` 与 `clearBudgetConvergence()`；老锚键只允许两处删除（提交 + 修复）。
+- `check-healthkit-record-sync.py`：`recordsForceRescan` / `forceHistory` / `routeForceRescan`
+  必须不存在；`needsHistoryRead` 不得含 `force` 或时间参数；损坏锚不得静默触发重放。
+- `SyncStateCommitRegression`：`clearWorkoutAnchor` 保留 `export_end` 与任务行；
+  `clearRecordCursors` 只删指定类型、其余保留。
+- 突变：见 `check-background-mutations.py` 的 `[第三轮]` 三条。

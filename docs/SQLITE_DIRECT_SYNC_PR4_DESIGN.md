@@ -29,13 +29,13 @@
 | 写许可是**整段 drain**：`admission.acquire()` 在 spawn 之前拿到，直到 `finally release()` | `apps/api/src/recompute-worker.ts:64`、`102-104` | §6 要拆的正是这一段；spawn 本身实测 ~2.5 s（同文件注释） |
 | 单写者闸门 = `MutationCoordinator`（一次只允许一个 operation 名） | `apps/api/src/mutation-coordinator.ts:11-25` | 接收侧与分析侧共用它；"接收优先 + 分析最小份额"要在这一层设计 |
 | 接收侧自己也是一个 owner：`admission: taskAdmission.owner("import")` | `apps/api/src/server.ts:475` | 两个 owner 并存 ⇒ 今天的实际语义是"谁先拿到谁独占到底" |
-| `job_type` 的 `CHECK` 只有三值；v35 只加了**可空绑定列** | `packages/storage-sqlite/src/database.ts:484`、`packages/storage-sqlite/src/v35-migration.ts:61-64` | 分析任务仍是 `'import'`；判别靠载荷 `mode`（步骤 1 的合同） |
+| `job_type` 的 `CHECK` 只有三值；v35 只加了**可空绑定列** | `packages/storage-sqlite/src/database.ts:493`、`packages/storage-sqlite/src/v35-migration.ts:61-64` | 分析任务仍是 `'import'`；判别靠载荷 `mode`（步骤 1 的合同） |
 | 代次计数器 `import_generations(singleton, raw_generation, dependency_generation)` 只有 schema | `packages/storage-sqlite/src/v34-migration.ts:42-49` | **没有写入方**⇒ 数值版本号今天不存在（回执刻意不承诺，见 `packages/contracts/src/direct-sync.ts:60-67`） |
 | 稀疏历史 `import_fact_history`（`record`/`workout`）也只有 schema | `packages/storage-sqlite/src/v34-migration.ts:27-40` | 分析"读固定 G"缺的是**写入方**，不是读取方 |
 | `FactsReader` 已实现，但**无生产调用方**，且只覆盖 update、不覆盖 delete（裁决 D1） | `packages/storage-sqlite/src/read/facts-reader.ts:97-137`、同文件 29-35 | PR4 接它时必须同时定掉"删除是否要在旧代次可见" |
 | 局部 canonical 已实现：`canonicalizeNightsForWindow` 不做 DELETE/事务，由调用方按作用域处理 | `packages/health-export-parser/src/canonicalize-nights.ts:435-441` | 直连车道可以调它；**谁调、在哪个事务里调**是 PR4 要定的 |
 | 既有 `canonicalizeNights` 仍整表 `DELETE` 重建 | `packages/health-export-parser/src/canonicalize-nights.ts:515-521` | 旧链路不变；直连车道不许走它（§14.1 已把它列为禁止操作） |
-| 路线版本 API 已就绪：`beginRouteVersion` / `publishRouteVersion`（发布段自带 SAVEPOINT） | `packages/storage-sqlite/src/database.ts:2613`、`2665`、`2672` | 路线"不发布半条"是现成能力；直连车道接上即可 |
+| 路线版本 API 已就绪：`beginRouteVersion` / `publishRouteVersion`（发布段自带 SAVEPOINT） | `packages/storage-sqlite/src/database.ts:2723`、`2782`、`2790` | 路线"不发布半条"是现成能力；直连车道接上即可 |
 | record-only 车道的两道闸门：类型白名单 + XML 形状 | `apps/api/src/data-only-import.ts:102`、`119` | 扩到全部类型时**不许放宽这两道**，要新增并列车道 |
 | 解析器的 `recordDelta` 资格：`atomic !== false && recordIdentity && preserveAbsent && isDataOnlyRecordXml` | `packages/health-export-parser/src/apple-health-parser.ts:309-312` | 新车道不能复用 `recordDelta` 的资格判定（它是 record-only 专用） |
 | `transactionOwner: "caller"` + SAVEPOINT 已实现（组件提不了、flush 抛错、LIFO 强制） | `packages/storage-sqlite/test/transaction-owner.test.ts`（8 条） | 解析器进"上层持有的事务"有机械保证可用 |
@@ -121,7 +121,7 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
      targetRawGeneration, targetDependencyGeneration,
      expectedIncumbentReleaseId: <读自 active_model_run>,
      dirty: { entityKinds, beforeAfterTimes }
-   })` —— `enqueue` 不自开事务（`packages/storage-sqlite/src/recompute-job-repository.ts:46-90`），
+   })` —— `enqueue` 不自开事务（`packages/storage-sqlite/src/recompute-job-repository.ts:109-159`），
    正好可以放在这里。
 4. 回执的 `analysisStatus: "queued"`（**不是** `"published"`），`dependencyGeneration: String(n)`。
 
@@ -165,7 +165,7 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
   3. `createModelRun` + 时间线重放写；
   4. 发布指针（`verifyAndPoint`，`model-release-repository.ts:89-91`）。
 - **跨窗口的一致性靠"未发布"而不是长事务**：读侧只认 `succeeded` run + `active_model_run`
-  指针（`packages/storage-sqlite/src/database.ts:932-938` 一类视图），所以中间态对读侧不可见。
+  指针（`packages/storage-sqlite/src/database.ts:926-932` 一类视图），所以中间态对读侧不可见。
   这一点必须由**一条读侧用例**钉住（分析跑到一半时读到的仍是旧 release）。
 - 接收优先：接收侧仍用 `owner("import")` 的名字拿同一个闸门；分析侧在两次租约之间让路
   （§6 的"给分析落地最小服务份额避免饿死"= 允许分析侧在**没有接收任务排队**时优先，
@@ -221,7 +221,7 @@ PR5 让读侧改走版本表后 `route_points` 退役。这条双写是**临时*
 **显式让路点**（每 N 条/每个分块边界一次），而不是逐语句。
 
 **(6) 非事务副作用**：`process.send({type:"rai:compute-performance"})`（每轮 3 次，
-`recompute-pipeline.ts:2423`）把各计算阶段耗时报给导入进程的 `computeStagesMs`。
+`recompute-pipeline.ts:4173`）把各计算阶段耗时报给导入进程的 `computeStagesMs`。
 窗口边界**不得**移动 `measureCompute` 的包围范围，否则诊断口径会悄悄变。
 
 **修订后的步骤 3 形状**（取代 §3.2 的四窗口标签）：
@@ -411,7 +411,7 @@ after : workouts=0 workout_routes=0 route_versions=0 route_version_points=0
 ```
 
 外键链是 `workouts --CASCADE--> workout_routes --CASCADE--> route_versions --CASCADE--> route_version_points`
-（`packages/storage-sqlite/src/database.ts:211`、`packages/storage-sqlite/src/v35-migration.ts:24`、`:35`），
+（`packages/storage-sqlite/src/database.ts:220`、`packages/storage-sqlite/src/v35-migration.ts:24`、`:35`），
 `published_route_version_id` 的 `NO ACTION` **拦不住级联**。这直接违反 §7「删除优先留
 inactive/tombstone 身份…不让 raw FK 级联删掉不可变 release 所需的证据和路线」。
 

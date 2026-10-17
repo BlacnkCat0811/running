@@ -28,17 +28,17 @@
 
 | 事实 | 位置 | 逐字证据（节选） |
 |---|---|---|
-| 物理删 workout 沿外键级联删掉**已发布路线版本的全部点**，并令"不可变版本"永久不可读 | `packages/storage-sqlite/src/database.ts:211`、`:225`；`v35-migration.ts:34`、`:48` | `workout_id TEXT REFERENCES workouts(id) ON DELETE CASCADE,` / `route_id TEXT NOT NULL REFERENCES route_versions(id) ON DELETE CASCADE` |
-| `route_versions` 行本身被指针以 `NO ACTION` 挡住显式删除，但**拦不住级联**：链一旦从 `workouts` 触发，`route_versions` 与 `route_version_points` 一并消失 | `v35-migration.ts:48`、`database.ts:2732-2736` | `ALTER TABLE workout_routes ADD COLUMN published_route_version_id TEXT REFERENCES route_versions(id);` |
-| published 版本行**自带完整点内容**（真双写），所以它的内容确实在 `route_version_points` 里；级联删掉它 = 丢掉"已发布轨迹的版本证据" | `database.ts:2716-2730` | `FROM route_version_points WHERE route_version_id = ?` |
-| 生产代码里删 workout 只有两处，且都是物理删 | `database.ts:3358`、`:3387`、`:3446`、`:3485` | `const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");` |
+| 物理删 workout 沿外键级联删掉**已发布路线版本的全部点**，并令"不可变版本"永久不可读 | `packages/storage-sqlite/src/database.ts:220`、`v35-migration.ts:35`；`v35-migration.ts:34`、`:48` | `workout_id TEXT REFERENCES workouts(id) ON DELETE CASCADE,` / `route_id TEXT NOT NULL REFERENCES route_versions(id) ON DELETE CASCADE` |
+| `route_versions` 行本身被指针以 `NO ACTION` 挡住显式删除，但**拦不住级联**：链一旦从 `workouts` 触发，`route_versions` 与 `route_version_points` 一并消失 | `v35-migration.ts:48`、`database.ts:2852-2856` | `ALTER TABLE workout_routes ADD COLUMN published_route_version_id TEXT REFERENCES route_versions(id);` |
+| published 版本行**自带完整点内容**（真双写），所以它的内容确实在 `route_version_points` 里；级联删掉它 = 丢掉"已发布轨迹的版本证据" | `database.ts:2798-2800` | `FROM route_version_points WHERE route_version_id = ?` |
+| 生产代码里删 workout 只有两处，且都是物理删 | `database.ts:3512`、`:3607` | `const deleteWorkout = this.database.prepare("DELETE FROM workouts WHERE id = ?");` |
 | 全仓**没有**任何测试断言"删 workout 后路线版本仍在" | `packages/storage-sqlite/test/`、`apps/api/test/` | 搜索 `workout_routes` 与 `delete\|cascade\|remove` 合取：0 命中 |
 
 ### 1.2 已由本文作者重读并确认（合并同类项）
 
 | # | 事实 | 位置 |
 |---|---|---|
-| 1 | 读侧唯一权威发布指针是单行表 `active_model_run`；所有 `active_*` 视图每次查询重新 JOIN 它 | `database.ts:517-521`、`:932-938`、`:948-955` |
+| 1 | 读侧唯一权威发布指针是单行表 `active_model_run`；所有 `active_*` 视图每次查询重新 JOIN 它 | `database.ts:525-529`、`:926-932`、`:949-955` |
 | 2 | 第二条发布指针 `active_model_release` 指向已过 gate 的 bundle；发布 = 单行 `ON CONFLICT DO UPDATE` | `v2-migration.ts:33-35`、`model-release-repository.ts:89-91` |
 | 3 | 训练列表与计数：assessment × session × workout × zone summary 一条 SQL；`has_route` 读**当前** `workout_routes` 且只判 `point_count > 0` | `read/workout-read-repository.ts:182-195`、`:218-232`；对照 `sql/fragments.ts:36-38` |
 | 4 | 详情行：`JOIN workouts w` + `JOIN model_runs mr`，同时给出分析分数与当前 `w.indoor/source_category` | `read/workout-read-repository.ts:246-285` |
@@ -55,7 +55,7 @@
 | 15 | 锁课 gate 只查 `syncStatus === "failed"` 与 `recommendationRevision`；锁课的 workout 校验只查 `training_sessions.status` | `mobile-sync.ts:99-104`；`server.ts:1552-1557`；`coach-loop-routes.ts:56` |
 | 16 | 缓存开关 = `PRAGMA data_version`（任何一页写清空全部 key），只用于两个 key | `data.ts:208-209`、`:354-364`、`:1824`、`:1837`；`server.ts:926-927` |
 | 17 | `recommendationRevision` 的哈希**已经包含** `activeModel`（旧 release 边界的既成先例） | `data.ts:785-797` |
-| 18 | 任务 DTO 只透传 12 个旧字段，v35 绑定列**读不出去** | `packages/storage-sqlite/src/recompute-job-repository.ts:63`、`:527-548`；`contracts/src/index.ts:934-941`；`data.ts:1922-1945` |
+| 18 | 任务 DTO 只透传 12 个旧字段，v35 绑定列**读不出去** | `packages/storage-sqlite/src/recompute-job-repository.ts:121-135`、`:527-548`；`contracts/src/index.ts:934-941`；`data.ts:1922-1945` |
 | 19 | 回执状态合同已存在，唯一生产者恒为 `not_required` / `publishedReleaseId: null` | `contracts/src/direct-sync.ts:24-52`；`data-only-import.ts:184-195` |
 | 20 | 能力协商既成范式：`/v1/handshake` 用**可选**版本字段宣告，客户端 `guard` 后才使用 | `server.ts:906-916`；`apps/ios/RAI/NativeAppModel.swift:414` |
 | 21 | iOS `TrainingPlanStateResponse.Metadata` 是**非可选**字段结构体 ⇒ 给它加必填字段会让旧客户端 decode 失败 | `apps/ios/RAI/APIModels.swift:1185-1198` |
@@ -68,7 +68,7 @@
 | `RaiReadStore` 只按**路径**缓存连接对象，与版本无关 | `read-store-manager.ts:52-64`、`:141-144` |
 | PR3 的 `FactsReader.routeFor()` 读**当前** `workout_routes`（注释自陈"改由读侧消费是 PR5/PR6 的事"） | `read/facts-reader.ts:58-60`、`:166-183` |
 | `FactsReader` 只覆盖更正、**不覆盖删除**（被删实体在任何代次不可见），该边界被测试钉住 | `read/facts-reader.ts:29-48`；`test/facts-reader.test.ts:187-200` |
-| 删除会留持久 tombstone（`import_entity_tombstones`），而 `read/` 目录搜索 `tombstone` 无命中 | `database.ts:1381-1388`、`:3395-3397` |
+| 删除会留持久 tombstone（`import_entity_tombstones`），而 `read/` 目录搜索 `tombstone` 无命中 | `database.ts:1382-1390`、`:2960` |
 
 ---
 
@@ -186,7 +186,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 5. 🔴 **物理删 → 软删标记，这是 PR5 的硬前置**：§1.1 证明 `DELETE FROM workouts` 沿
    `workout_routes → route_versions → route_version_points` 级联，**把已发布路线的版本内容一起删掉**，
    于是"旧 release 保持可读"在最需要它的删除场景下不成立。最小正确改法：`workouts` 增**可空列**
-   `deleted_at TEXT`（只新增列，不改历史 `up`，§14.2 A18），`database.ts:3387`/`:3485` 改为"标记 + 保留行"，
+   `deleted_at TEXT`（只新增列，不改历史 `up`，§14.2 A18），`database.ts:3512`/`:3607` 改为"标记 + 保留行"，
    `workoutPresentConditionSql` 同步改为 `deleted_at IS NULL`；tombstone 与账目继续写（它们还有防复活的独立职责）。
    ⚠️ 该改动同时改变写侧可见行为（`workout_routes` 不再级联消失、`import_equivalence` 的摘要可能变化），
    **必须与 PR4 owner 同批评审**。
@@ -206,7 +206,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 - 路线：分析块走 v35 版本表（`route_versions.status='complete'` + `workout_routes.published_route_version_id`
   + `route_version_points` 按 `sequence` 读）；事实块走当前 `route_points`。这是 PR4 §2.4 承诺的
   "PR5 让读侧改走版本表后 `route_points` 退役"（`SQLITE_DIRECT_SYNC_PR4_DESIGN.md:107-109`）。
-  ⚠️ 老库行 `published_route_version_id` 仍为 `NULL`（`database.ts:2571` 的既有注释），
+  ⚠️ 老库行 `published_route_version_id` 仍为 `NULL`（`database.ts:2681` 的既有注释），
   所以分析块必须**允许**退化读当前 `route_points` 并标 `routeVersionId: null`——不猜、不假装它有版本。
 
 **理由**：两块若允许重叠，`currentFacts`/`publishedAnalysis` 就只是同一堆字段的两个名字，
@@ -232,7 +232,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 ### D7 `route_points` 过渡期双写的退役时点
 
 读侧（S5/S11）改走版本表、并在两个读侧入口断言"分析块路线 == 版本表内容"之后，
-才停止在 `publishRouteVersion` 里写 `route_points`（`database.ts:2732-2736` 那句 `UPDATE workout_routes` 保留，
+才停止在 `publishRouteVersion` 里写 `route_points`（`database.ts:2852-2856` 那句 `UPDATE workout_routes` 保留，
 它写的是指针与 `point_count`，不是 `route_points` 的点）。不退役 = 让 `route_points` 与
 `route_version_points` 构成**第二份真相**，而两份真相迟早分叉。
 **代价**：退役后老库（指针 `NULL`）**只能**读 `route_points`，所以退役不是删表，而是"新版本不再写"。
@@ -245,7 +245,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 | # | 位置（今天） | 最小正确改法 |
 |---|---|---|
 | 1 | `sql/fragments.ts`（新增，对照 `:36-38`） | 新增 `workoutPresentConditionSql(alias)`；`read/` 与 `apps/api` 的事实侧 JOIN 全部引用它；配结构判据（全仓 `JOIN workouts` 站点必须引用） |
-| 2 | `database.ts:3358`/`:3387`/`:3446`/`:3485`（写侧，受 D4.5 约束） | `workouts.deleted_at` 软删标记（只新增可空列）+ 两处调用改标记；tombstone/账目照旧写 |
+| 2 | `database.ts:3512`/`:3607`（写侧，受 D4.5 约束） | `workouts.deleted_at` 软删标记（只新增可空列）+ 两处调用改标记；tombstone/账目照旧写 |
 | 3 | `read/workout-read-repository.ts:182-195`、`:196-235` | 加存在性判据；`has_route` 改用 `usableRouteConditionSql`（与 `facts-reader.ts:167-185` 同源）；返回两块视图 |
 | 4 | `read/workout-read-repository.ts:246-285` | 分析块走 `workout_features` 冻结列；`indoor`/`source_category` 移入事实块；加存在性判据 |
 | 5 | `read/series-read-repository.ts:85-97`、`:107-116`、`:232-233` | 分析块路线改读版本表（`complete` + 指针 + `route_version_points` 按 `sequence`）；老库退化读 `route_points` 并标 `routeVersionId: null`；`sessionForSeries` 保持 404 语义；#5 的三处共用一个内部函数 |
@@ -261,7 +261,7 @@ type ReadCacheKey = `${scope}|${factsVer}|${analysisVer}|${controlRev}|${busines
 | 15 | `apps/api/src/coach-prediction-companion.ts:15-31` | `factsHash` 的输入拆成 `versions` 与事实摘要两个域；`dataThroughAt` 取自分析块的冻结输入 |
 | 16 | `data.ts:354-364`、`:208-209` | D3 五元组 + `RaiReadStore.versionSnapshot()`；`data_version` 退为测试期断言 |
 | 17 | `read/facts-reader.ts:167-185`、`:363-371` | 路线读取加版本语义或明确标注"本方法读当前"；**不改** `records`/`workouts` 的代次语义 |
-| 18 | `packages/storage-sqlite/src/recompute-job-repository.ts:527-548` + `contracts/src/index.ts:934-941` | `RecomputeJob` 加**可选** `targetRawGeneration`/`targetDependencyGeneration`/`expectedIncumbentReleaseId`（12 个旧字段不动） |
+| 18 | `packages/storage-sqlite/src/recompute-job-repository.ts:1296-1340` + `contracts/src/index.ts:934-941` | `RecomputeJob` 加**可选** `targetRawGeneration`/`targetDependencyGeneration`/`expectedIncumbentReleaseId`（12 个旧字段不动） |
 
 ---
 
