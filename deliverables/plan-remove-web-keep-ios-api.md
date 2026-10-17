@@ -1176,12 +1176,25 @@ npm run ml:test
 | B2 | `fd10daf` | 两个 systemd 去 check-web-build；nginx 纯 /v1 反代；upgrade.sh 去 build；部署文档/env；deploy-cloud.test 重写 | deploy 三个测试 14/14 |
 | B3 | `c7079bb` | 删 apps/web（92 文件）与静态托管、门禁/CI/tsconfig/docs 联动、lock 重生成（429→153 包，无版本漂移） | typecheck、npm test、check:*、验收矩阵全绿 |
 | B4 | `7d8e329` | pbxproj 只留 iOS；删 AppWebView/ChromeController/NativeBridgeSnapshot；RootView/RAIApp/ServerSession 收敛 | `test:ios` 通过；xcodebuild 模拟器构建成功；showdestinations 无 macOS |
-| B5 | 本次提交 | README/ARCHITECTURE/OPERATIONS/RUNBOOK/ALGORITHM/PROJECT_REVIEW 与索引收尾 | check:docs / check:doc-refs / 验收矩阵 |
+| B5 | `b95993e` | README/ARCHITECTURE/OPERATIONS/RUNBOOK/ALGORITHM/PROJECT_REVIEW 与索引收尾 | check:docs / check:doc-refs / 验收矩阵 |
+
+**B6 本地终验（2026-10-17，本机）**：
+
+| 检查 | 结果 |
+|---|---|
+| `npm run typecheck` | exit 0 |
+| `npm test`（全量 Node 套件） | 1969 项：**1963 通过 / 3 失败 / 3 跳过**；3 项失败均为**基线既存**（`workout-summary-export.test.ts:37` 断言的字面量在 `9e08301` 已被移除；`native-worker.test.ts` 2 项跑的是 2026-09-22 的旧 Rust 二进制，`crates/` 在 10-16/17 改过且本机无 cargo） |
+| `npm run check:docs` / `check:doc-refs` | 73 文件 554 链接 0 问题；138 处行号引用 0 越界 0 漂移 |
+| `check:scripts` / `check:acceptance-matrix` / `check:package-boundaries` | 18 manifest·104 script 通过；77/77 cited；包边界通过 |
+| `npm run smoke:api` | **通过**（生产启动/退出契约；不再依赖 web dist） |
+| `npm run test:ios` + `xcodebuild -sdk iphonesimulator` | 通过；工程 destination 已无 macOS |
+| `npm ci --dry-run` | lock 与 package.json 同步（干净安装会移除 225 个旧依赖） |
+| 悬挂引用 | 代码/脚本/配置/现行文档中无 `apps/web`、`@rai/web`、`check-web-build`、`test:e2e:web`；仅 AGENTS.md 的 Retired Surfaces 明确禁止重建 |
 
 **未完成 / 需在真实环境执行**：
 
 - B6 云端发布：本机无服务器访问权限，`deploy/` 模板与 runbook（§6）已就绪，`nginx -t`、`systemctl`、`curl` 需在服务器执行。
 - 真机验收：HealthKit 同步、分享卡、成绩摘要需 iPhone + 云端 API。
-- 本机环境备注（不影响仓库结论）：该机 PATH 无 npm，验证用官方 Node 24.21 + 下载的 npm CLI；`onnxruntime-node` 原生库因未签名无法加载，已用 `codesign --force --sign -` 临时签名 + 官方 Node（关闭 library validation）跑通全量 Node 套件。
+- 本机环境备注（不影响仓库结论）：该机 PATH 无 npm，验证用官方 Node 24.21 + 下载的 npm CLI；`onnxruntime-node` 原生库因未签名无法加载，已用 `codesign --force --sign -` 临时签名 + 官方 Node（关闭 library validation）跑通全量 Node 套件与 smoke。
 
 > **执行完成后的收尾**：按 [deliverables/README.md](README.md) 的约定，本文档应归档或删除；执行证据（门禁输出、云端 curl、真机截图）另存或在 PR 中引用，不要把证据回写进本文档。
