@@ -8,6 +8,22 @@
 
 已收尾批次（2026-10-09 ~ 10-11）的原文档已删除，指针见 [项目审查 §8](../docs/PROJECT_REVIEW.md)。
 
+- [review-ios-sync-data-ingest.md](review-ios-sync-data-ingest.md)：
+  **iOS 同步与数据解析入库审查 + 复核与实施状态** —— 8 项候选（P1×2 / P2×4 / P3×2）；
+  二次核对判定 **2 项与代码事实不符**（P2-2 目标函数无生产调用方、P3-1 的建议无效），
+  **1 项由"事实错误"降级为取舍**（P1-2：服务端不限制记录条数，第二次 apply 按批有界但总成本随批数增长），
+  **4 项已在工作树实现（未提交）**（P1-1 去掉冗余全量读 / P2-1 白名单↔迁移双向门禁 /
+  P2-3 spool 检查间隔 512 且可测 / P2-4 升级协议与钉版本）。§4.4 列出未跑完的项目与环境边界
+  （全量 `npm test` 中止、application 套件受当时沙箱 TMPDIR 限制且当前不可复现、native-worker 2 红为旧二进制既存）。
+
+- [plan-remove-web-keep-ios-api.md](plan-remove-web-keep-ios-api.md)：
+  **移除 Web、保留 iOS + API 直连的实施方案（草案，未获授权、未执行）** —— 范围、耦合面清单
+  （含 `scripts/run-tests.mjs`、`apps/api/test/node-version.test.ts`、docs/AGENTS、macOS target）、
+  分步改动/验收/回滚。⚠️ **不可按现稿直接执行**：需先取得"移除 Web/桌面端"的明确产品授权，
+  并按文中步骤补 `run-tests.mjs` 等跨包改动；`apps/web` 仍是 `AGENTS.md` 定义的受支持产品。
+  与更完整的 [WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md](WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md)
+  重叠，合并前以已评审的那份为准。
+
 - [SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md](SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md)：
   **同步与计算优化 · 落地方案（O01–O12 → 16 工作包 / S0–S5）· S0+S1 执行中** —— 把
   [审查文档](../docs/IOS_SYNC_PERFORMANCE_REVIEW.md) 的 12 项优化转成可执行、可验证、可回滚的工作包：
