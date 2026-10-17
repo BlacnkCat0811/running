@@ -122,11 +122,13 @@ export function dependencyCoverageHolds(input: DependencyCoverageInput): Depende
  * 为什么要 **或 `raw_generation IS NULL`**：v39 之前的历史批次没有这三列。把 NULL 排除在外
  * 等于把未知当成不存在 —— 而"未知"必须留在证明里，才能让 {@link dependencyCoverageHolds}
  * 拒绝它。这是"保守优先"在选取层的落实。
+ *
+ * 泛型保留元素类型（调用方常常带着账本摘要一起用）：选取规则仍然只有这一份实现。
  */
-export function selectInterveningBatches(
-  batches: readonly BatchGenerationFacts[],
+export function selectInterveningBatches<T extends BatchGenerationFacts>(
+  batches: readonly T[],
   capturedRawGeneration: number
-): BatchGenerationFacts[] {
+): T[] {
   return batches.filter((batch) =>
     batch.rawGeneration === null || batch.rawGeneration === undefined
       ? true
