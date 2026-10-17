@@ -4,14 +4,13 @@
 本页是唯一现行云部署入口，资源预算和维护顺序见文末。
 不要用示例环境文件覆盖现有 Token、身份标识或路径；仓库修改不代表线上已部署。
 
-应用只监听 `127.0.0.1:8787`（`RAI_API_HOST` / `RAI_API_PORT` 可覆盖），由 Nginx 提供 HTTPS 并托管静态 Web。SQLite、上传文件、运行时状态和备份放在 `/var/lib/rai`，不要把该目录放到 Web 根目录或共享盘。
+应用只监听 `127.0.0.1:8787`（`RAI_API_HOST` / `RAI_API_PORT` 可覆盖），由 Nginx 提供 HTTPS 并反代 API；**Nginx 不再托管任何静态文件**（Web 前端已于 2026-10-17 退役）。SQLite、上传文件、运行时状态和备份放在 `/var/lib/rai`，不要把该目录放到 Web 根目录或共享盘。
 
 本页描述目标拓扑（不代表已核实或修改你的线上状态）：
 
-- Nginx 直接托管 `apps/web/dist`（SPA，`try_files` 回退到 `index.html`）；
-- 仅 `location /v1/` 反代到 `127.0.0.1:8787`，**透传客户端自己的 Bearer Token**；
+- 站点根路径与 `/assets/*` 一律 `404`，只有 `location /v1/` 反代到 `127.0.0.1:8787`，**透传客户端自己的 Bearer Token**；
 - 不做 Nginx 侧 Token 注入，必须透传客户端自己的 Bearer Token；
-- 后端 `apps/api/src/local-request-security.ts` 统一校验 Bearer 与请求上下文。
+- 后端 `apps/api/src/local-request-security.ts` 统一校验 Bearer 与请求上下文；云上必须配置 `RAI_API_TOKEN`。
 
 ## 首次部署
 
@@ -32,7 +31,6 @@ cd /opt/rai
 # onnxruntime-node postinstall 需要直连 Nuget 下载构建清单，国内网络常被 302/超时
 # 卡住；用 ONNXRUNTIME_NODE_INSTALL=skip 跳过即可（napi-v6 Linux 二进制随包内置）。
 sudo -u rai env ONNXRUNTIME_NODE_INSTALL=skip npm ci
-sudo -u rai npm run build
 
 sudo mkdir -p /etc/rai
 sudo install -m 600 deploy/rai.env.example /etc/rai/rai.env
@@ -64,24 +62,22 @@ sudo certbot renew --dry-run
 
 把示例中的 `api.example.com` 换成已解析到服务器公网 IP 的域名。若暂时没有域名，可用 HTTP 公网 IP 做连通性测试；正式导入 HealthKit 数据前必须切换 HTTPS。
 
-不要把 API Token 放入 Web build 环境变量：那会把 Token 发布到 JavaScript。iOS 应用在首次连接页（`apps/ios/RAI/Skins/Technology/TechSetupView.swift:45-56` 的「服务地址」与「访问令牌」）填写 HTTPS 地址与同一个 Token，Token 存 Keychain，只由 App 自身的请求携带（含 HealthKit 同步请求），不注入任何页面。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
+不要把 API Token 放进任何浏览器或 Web 构建产物：那会把 Token 发布到 JavaScript（前端已退役，但同类错误仍可能以脚本示例形式出现）。iOS 应用在首次连接页（`apps/ios/RAI/Skins/Technology/TechSetupView.swift:45-56` 的「服务地址」与「访问令牌」）填写 HTTPS 地址与同一个 Token，Token 存 Keychain，只由 App 自身的请求携带（含 HealthKit 同步请求），不注入任何页面。设备或账号丢失时应轮换 Token（改 `/etc/rai/rai.env` 的 `RAI_API_TOKEN` 后 `systemctl restart rai-api`）。
 
-### 浏览器匿名只读（可选）
+### 匿名只读（历史 Web 能力，默认关闭）
 
-默认（`RAI_PUBLIC_HOSTS` 留空）每个 `/v1` 请求都要 Token，桌面浏览器打开站点能加载页面但数据请求返回 401。若希望**浏览器不配置令牌就能看数据**，在 `/etc/rai/rai.env` 里设：
+该模式原本给浏览器 SPA「打开即看」用；Web 退役后**默认不需要**。保留的代码路径与边界如下，供将来确有匿名只读需求时参考：
 
-```bash
-RAI_PUBLIC_HOSTS=api.example.com
-```
+默认（`RAI_PUBLIC_HOSTS` 留空）每个 `/v1` 请求都要 Token。
 
-效果与边界：
+若确需开放匿名读，在 `/etc/rai/rai.env` 里设 `RAI_PUBLIC_HOSTS=<域名>`。效果与边界：
 
-- **公开**：`server.ts` 里 `publicReadRoutes` 列举的读接口，包括训练列表与不含原始坐标的详情、趋势、统计、训练分区、预测、课表等。训练详情的原始轨迹仍需正确令牌，匿名响应的 `route` 为空，且响应不缓存。
-- **仍需 Token**：所有写请求（`POST/PUT/PATCH/DELETE`），以及 `GET /v1/backups/:name`（直接下载整个 SQLite 库）、`GET /v1/import-sources/*`（返回服务器文件系统路径）、`GET /v1/diagnostics`、`GET /v1/openapi.json`、`GET /v1/jobs*`、`GET /v1/import-jobs*`。
+- **公开**：`server.ts` 里 `publicReadRoutes` 列举的读接口（训练列表与不含原始坐标的详情、趋势、统计、训练分区、预测、课表等）。原始轨迹仍需正确令牌。
+- **仍需 Token**：所有写请求（`POST/PUT/PATCH/DELETE`），以及 `GET /v1/backups/:name`、`GET /v1/import-sources/*`、`GET /v1/diagnostics`、`GET /v1/openapi.json`、`GET /v1/jobs*`、`GET /v1/import-jobs*`。
 - Host 白名单与只读白名单**同时生效**：伪造其它 Host 的匿名读仍返回 401，DNS-rebinding 防护不退化。
 - 这是**隐私降级**：知道域名的人仍可看到已公开的健康摘要。`RAI_PUBLIC_HOSTS` 不开放原始轨迹、分享卡或隐私区读路由。
-- 未配置 `RAI_API_TOKEN` 时原始轨迹同样默认隐藏；仅本地显式 `RAI_ALLOW_ANONYMOUS_ROUTES=1` 可开启匿名原始轨迹，生产环境不得设置此开关。`check-runtime-readonly.sh` 会对缺失令牌或开启匿名轨迹给出 ACTION。
-- 配套限速在 `deploy/nginx-rai.conf` 的 `limit_req_zone`（5 r/s + burst 100），读接口公开后它是防批量抓取与流量包超额的第一道闸，不要单独关掉。
+- 未配置 `RAI_API_TOKEN` 时原始轨迹同样默认隐藏；仅本地显式 `RAI_ALLOW_ANONYMOUS_ROUTES=1` 可开启匿名原始轨迹，生产环境不得设置此开关。
+- 配套限速在 `deploy/nginx-rai.conf` 的 `limit_req_zone`（300 r/m + burst 100），读接口公开后它是防批量抓取与流量包超额的第一道闸，不要单独关掉。
 
 ## 验证
 
@@ -95,9 +91,9 @@ curl -fsS https://api.example.com/v1/health -H "Authorization: Bearer $TOKEN"
 curl -fsS https://api.example.com/v1/health          # 期望 200
 curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/backups   # 期望 401
 curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: attacker.example' https://api.example.com/v1/health  # 期望 401
-# SPA 与深链接
-curl -fsSI https://api.example.com/
-curl -fsSI https://api.example.com/settings
+# 站点根路径与静态资源已退役：应返回 404
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/                 # 期望 404
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.com/assets/app.js    # 期望 404
 ```
 
 ## 数据目录与自动备份
@@ -110,7 +106,8 @@ curl -fsSI https://api.example.com/settings
 
 **应用不再创建备份。** `POST /v1/backups` 与 `DELETE /v1/backups/:name` 已退役：
 两者都返回 `410 Gone` 与一条维护提示，且**不碰任何文件**；`GET /v1/backups` 只剩只读清单，
-用于人工点选后从设置页保留的「恢复」入口回滚。见
+恢复入口改由运维用 `POST /v1/backups/:name/restore` 的 curl 流程执行（见
+[运维](../docs/OPERATIONS.md)「备份恢复」）。设计边界见
 [SQLite直接增量同步](../docs/SQLITE_DIRECT_SYNC_DESIGN.md) §11。
 
 ⛔ 因此**不要**再为本机部署 `POST /v1/backups` 的 systemd timer —— 那个接口已退役，
@@ -134,7 +131,7 @@ sudo -u rai bash deploy/backup-runtime.sh --output-dir /srv/rai-backups --apply
 
 ## 后续发布新版
 
-推荐用脚本（已把「拉取 → lockfile 变了才 npm ci → 重建前端 → 重启并验证真实就绪」
+推荐用脚本（已把「拉取 → lockfile 变了才 npm ci → 重启并验证真实就绪」
 的顺序固化，默认 dry-run，确认后再 `--apply`）：
 
 ```bash
@@ -143,14 +140,13 @@ sudo bash deploy/upgrade.sh            # 预演，只打印将执行的命令
 sudo bash deploy/upgrade.sh --apply    # 执行
 ```
 
-以下旧式构建命令本身**不包含备份或低内存停服保护**，
+以下旧式发布命令本身**不包含备份或低内存停服保护**，
 2C2G 当前部署应按本页资源预算与维护流程操作：
 
 ```bash
 cd /opt/rai
 sudo -u rai git pull --ff-only origin main
 sudo -u rai env ONNXRUNTIME_NODE_INSTALL=skip npm ci
-sudo -u rai npm run build
 sudo systemctl restart rai-api
 ```
 
@@ -194,7 +190,7 @@ curl -fsS http://127.0.0.1:8787/v1/health -H "Authorization: Bearer $RAI_API_TOK
 
 ## 用户体验版本的发布核验（2026-09-28）
 
-先发布兼容 API，再发布 Web/iOS；本次用户体验改动不新增数据库迁移。摘要导出接口 `/v1/exports/workout-summary` 即使在公开 Host 下也要求配置并携带 `RAI_API_TOKEN`，不要为解决导出失败扩大匿名读取权限。
+先发布兼容 API，再发布 iOS；本次用户体验改动不新增数据库迁移。摘要导出接口 `/v1/exports/workout-summary` 即使在公开 Host 下也要求配置并携带 `RAI_API_TOKEN`，不要为解决导出失败扩大匿名读取权限。
 
 可在服务器运行 `bash deploy/check-runtime-readonly.sh` 收集只读运行证据；脚本不重启服务、不迁移、不输出令牌。它不能代替 TLS 检查、实际任务引擎核验或完整运行时恢复演练。环境变量只证明配置意图，备份文件存在也不证明能够完整恢复。
 

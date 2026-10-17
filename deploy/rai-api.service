@@ -12,7 +12,6 @@ Group=rai
 WorkingDirectory=/opt/rai
 EnvironmentFile=/etc/rai/rai.env
 ExecStartPre=/usr/bin/node scripts/check-node-version.mjs
-ExecStartPre=/usr/bin/node scripts/check-web-build.mjs
 # Supervise Node directly: preserve exit 78 and deliver SIGTERM to the API.
 ExecStart=/usr/bin/node --import tsx apps/api/src/server.ts
 Restart=on-failure

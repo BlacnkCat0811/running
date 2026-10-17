@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# 服务器端发布脚本：把 /opt/rai 的 main 快进到远端，重建前端产物并重启 API。
+# 服务器端发布脚本：把 /opt/rai 的 main 快进到远端并重启 API。
 #
 # 背景：deploy/README-UBUNTU.md 的「后续发布新版」是 4 条手敲命令，
 # 顺序错一步（例如漏做备份、忘记 npm ci）就会把线上库置于无备份状态。
@@ -102,9 +102,6 @@ else
   say "package-lock.json 未变化 → 跳过 npm ci"
 fi
 
-# --- 4. 重建前端产物（Nginx 直接读 dist）--------------------------------------
-as_user npm --prefix "$APP_DIR" run build
-
 # 显式授权后才停服迁移。失败时保持停止，不重启一个半迁移的数据库。
 if [ "$MIGRATE" -eq 1 ]; then
   run systemctl stop "$SERVICE"
@@ -112,7 +109,7 @@ if [ "$MIGRATE" -eq 1 ]; then
   run systemctl reset-failed "$SERVICE"
 fi
 
-# --- 5. 重启并验证 -----------------------------------------------------------
+# --- 4. 重启并验证 -----------------------------------------------------------
 run systemctl restart "$SERVICE"
 
 if [ "$APPLY" -eq 1 ]; then

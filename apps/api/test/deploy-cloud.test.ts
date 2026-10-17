@@ -37,10 +37,13 @@ test("cloud deployment documents generic cold backups in the single maintained g
 });
 
 
-test("direct static hosting never falls back to arbitrary dist files", () => {
+test("static hosting is retired: nginx only proxies the API", () => {
   const nginx = read("nginx-rai.conf").split("\n").filter((line) => !line.trimStart().startsWith("#")).join("\n");
-  assert.doesNotMatch(nginx, /try_files \$uri \$uri\//);
-  assert.match(nginx, /location = \/index\.html \{ disable_symlinks on; try_files \/index\.html =404;/);
+  assert.doesNotMatch(nginx, /root\s+\/opt\/rai\/apps\/web\/dist/);
+  assert.doesNotMatch(nginx, /try_files/);
+  assert.doesNotMatch(nginx, /location ~ \^\/assets\//);
+  assert.doesNotMatch(nginx, /index index\.html/);
+  assert.match(nginx, /location \/v1\/ \{/);
+  assert.match(nginx, /proxy_pass http:\/\/127\.0\.0\.1:8787/);
   assert.match(nginx, /location \/ \{ return 404; \}/);
-  assert.match(nginx, /disable_symlinks on;\s+try_files \$uri =404;/);
 });
