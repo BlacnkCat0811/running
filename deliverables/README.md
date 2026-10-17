@@ -17,15 +17,17 @@
   （全量 `npm test` 中止、application 套件受当时沙箱 TMPDIR 限制且当前不可复现、native-worker 2 红为旧二进制既存）。
 
 - [plan-remove-web-keep-ios-api.md](plan-remove-web-keep-ios-api.md)：
-  **移除 Web 与 macOS 壳、收敛为「原生 iOS + 云 API」· 可执行实施文档（v2，B0–B5 已执行、云端配置层已上线）** ——
+  **移除 Web 与 macOS 壳、收敛为「原生 iOS + 云 API」· 可执行实施文档（v2，B0–B5 已执行；云端已全量上线）** ——
   合并原草案与旧版退役方案，按 B0–B7 批次给出逐文件逐行改动、每批验收命令与回滚；实测基线 `9a1e2c8`。
   关键纠错：nginx 须保留 3600s 超时/限速/robots（不可收紧到 120s）、删 `DOM` lib 会让 API 测试 42 处报错、
   验收矩阵 B02 的唯一引用在 `apps/web` 测试、`check-web-build.mjs` 有 3 个调用方、iOS 直连 API 需要开发 Token。
-  执行记录见附录 E（提交 `6f8e6ca`/`fd25f8c`/`fd10daf`/`c7079bb`/`7d8e329`；云端 nginx/systemd 已切换，Web 全路径 404）；
-  回滚锚点 tag `pre-web-retirement`。服务器代码层停在 `2e7a231`，落后远端 main 36 个提交且含 v38–v45 迁移，
-  代码部署与迁移需单独授权。
+  执行记录见附录 E：本地提交 `6f8e6ca`…`6ed6fa4`；云端 `2e7a231 → 6ed6fa4`、主库 v37 → v45（61s，纯 DDL，
+  已做 2.3G 一致性备份）、Web 全路径 404、iOS 读写/分享卡/导出全 200。
+  回滚锚点 tag `pre-web-retirement` + 服务器备份 `/root/rai-retire-backup-20261017-205451/` 与
+  `/var/lib/rai/var/backups/rai.before-v45.20261017-210024.sqlite`。遗留：`RAI_PUBLIC_HOSTS` 仍开启匿名读，
+  建议单独评审后关闭；真机同步验收待 iPhone 端执行。
   旧方案 [WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md](WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md)
-  的内容已并入本文件；云端代码发布与真机验收完成后两者一并按本目录约定归档。
+  的内容已并入本文件；真机验收完成后两者一并按本目录约定归档。
 
 - [SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md](SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md)：
   **同步与计算优化 · 落地方案（O01–O12 → 16 工作包 / S0–S5）· S0+S1 执行中** —— 把

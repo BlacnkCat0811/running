@@ -1201,17 +1201,27 @@ npm run ml:test
 | 重启耗时 | API 约 19s 完成启动（2.3G 主库），期间 nginx 短暂 502 |
 | 未删除 | 服务器上的 `apps/web/dist`（仍被旧代码的 `check-web-build` 不再检查；保留作回滚，等代码层部署后再删） |
 
-**B6 代码+数据层：未执行（需单独授权）**。核查发现服务器并非基线版本，而是停在 `2e7a231`（比远端 `main` 落后 36 个提交），远端 `main` 之上还有本次的 8 个退役提交；部署新代码会同时带入 **v38–v45 共 8 个数据库迁移**：
+**B6 云端代码+数据层（2026-10-17 21:06 CST，已上线）**：
 
-- 迁移内容经核对为纯 DDL（加列/建表/建索引/建视图），无数据回填；主库 2.3G（288 训练、24.4 万路线点、53.2 万健康记录），现有备份是 10-16 的 **v37 之前**版本。
-- 老代码 `data:migrate --dry-run` 当前显示 `version:37, pending: []`；新代码启动会因 `pending v38–v45` 直接退出 78，**必须显式迁移**。
-- 回滚路径：停服 → 恢复迁移前 DB 备份（需先做 2.3G 一致性备份）→ `git reset` 回旧提交 → `npm ci` 旧 lock。
-- 该批同时是 36 个未发布的同步优化提交，属于「退役」之外的产品发布决策；实施文档 §9 明确迁移必须单独授权。
+| 项 | 结果 |
+|---|---|
+| 代码 | 服务器 `2e7a231` → `6ed6fa4`（fast-forward 44 个提交，含 36 个未发布的同步优化与本次 8 个退役提交）；`git status` 干净 |
+| 依赖 | `npm ci`（镜像 `registry.npmmirror.com`，`ONNXRUNTIME_NODE_INSTALL=skip`）新增 109 包；`vite`/`playwright-core` 已消失 |
+| 备份 | ① 运维一致性备份 `/var/lib/rai/var/backups/rai.before-v45.20261017-210024.sqlite`（2.3G，`quick_check: ok`）；② 迁移 CLI 自动备份 `rai.before-v38.2026-10-17T13-05-55-774Z.sqlite`；③ 配置备份 `/root/rai-retire-backup-20261017-205451/` |
+| 迁移 | v37 → **v45**（8 个迁移，纯 DDL），耗时 61s；`foreignKeyCheck: ok`；行数不变（288 训练 / 53.2 万健康记录 / 24.4 万路线点）；API 约 6s 就绪 |
+| 清理 | `/opt/rai/apps/web`（仅剩 dist）已删除，`/opt/rai/apps` 只剩 api/ios |
+| 验收 | `/v1/health` 200 且 `databaseReady:true`；`/v1/handshake` 已宣告 `directSyncBounds`（8 MiB XML / 5000 records / 200 route files / 64 MiB route）；`/v1/mobile/today`、`/v1/mobile/training-plan-state`、`/v1/mobile/statistics`、`/v1/predictions`、`/v1/workouts?limit=1`、`share-card`、`/v1/exports/workout-summary` 全部 **200**；`/`、`/index.html`、`/assets/*`、`/settings` 全部 **404**；匿名 health 200（`RAI_PUBLIC_HOSTS` 仍含域名与 IP，见下） |
+| 运行证据 | `deploy/check-runtime-readonly.sh`：ActiveState=active、TokenConfigured=true、三库存在；脚本给出 ACTION「匿名健康读取仍配置」 |
+
+**遗留（建议，未擅自改动）**：
+
+- `RAI_PUBLIC_HOSTS` 仍含 `tpandmr.xyz,101.33.202.40`。它原本只服务已退役的 Web SPA；iOS 恒带 Token，不依赖它。建议单独评审后置空（`check-runtime-readonly.sh` 的 ACTION 即指此事），属隐私姿态变更，不在本次退役批内。
+- 真机验收：HealthKit 同步、分享卡、成绩摘要仍需 iPhone 端跑一遍（API 侧已验证 200）。
+- 回滚：停服 → 恢复 `rai.before-v45.*.sqlite` → `git reset --hard 2e7a231` → `npm ci`（旧 lock）→ 重启；配置回滚用 `/root/rai-retire-backup-20261017-205451/`。
 
 **未完成 / 需在真实环境执行**：
 
-- 真机验收：HealthKit 同步、分享卡、成绩摘要需 iPhone + 云端 API（当前云端仍是旧版 API，iOS 现有版本可正常读写）。
-- 服务器代码层与 `apps/web/dist` 清理：等迁移授权与维护窗口。
+- 真机验收（需 iPhone + 云端 API；云端现已是最新 API）。
 - 本机环境备注（不影响仓库结论）：该机 PATH 无 npm，验证用官方 Node 24.21 + 下载的 npm CLI；`onnxruntime-node` 原生库因未签名无法加载，已用 `codesign --force --sign -` 临时签名 + 官方 Node（关闭 library validation）跑通全量 Node 套件与 smoke。
 
 > **执行完成后的收尾**：按 [deliverables/README.md](README.md) 的约定，本文档应归档或删除；执行证据（门禁输出、云端 curl、真机截图）另存或在 PR 中引用，不要把证据回写进本文档。
