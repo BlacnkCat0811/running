@@ -1210,12 +1210,18 @@ npm run ml:test
 | 备份 | ① 运维一致性备份 `/var/lib/rai/var/backups/rai.before-v45.20261017-210024.sqlite`（2.3G，`quick_check: ok`）；② 迁移 CLI 自动备份 `rai.before-v38.2026-10-17T13-05-55-774Z.sqlite`；③ 配置备份 `/root/rai-retire-backup-20261017-205451/` |
 | 迁移 | v37 → **v45**（8 个迁移，纯 DDL），耗时 61s；`foreignKeyCheck: ok`；行数不变（288 训练 / 53.2 万健康记录 / 24.4 万路线点）；API 约 6s 就绪 |
 | 清理 | `/opt/rai/apps/web`（仅剩 dist）已删除，`/opt/rai/apps` 只剩 api/ios |
-| 验收 | `/v1/health` 200 且 `databaseReady:true`；`/v1/handshake` 已宣告 `directSyncBounds`（8 MiB XML / 5000 records / 200 route files / 64 MiB route）；`/v1/mobile/today`、`/v1/mobile/training-plan-state`、`/v1/mobile/statistics`、`/v1/predictions`、`/v1/workouts?limit=1`、`share-card`、`/v1/exports/workout-summary` 全部 **200**；`/`、`/index.html`、`/assets/*`、`/settings` 全部 **404**；匿名 health 200（`RAI_PUBLIC_HOSTS` 仍含域名与 IP，见下） |
-| 运行证据 | `deploy/check-runtime-readonly.sh`：ActiveState=active、TokenConfigured=true、三库存在；脚本给出 ACTION「匿名健康读取仍配置」 |
+| 验收 | `/v1/health` 200 且 `databaseReady:true`；`/v1/handshake` 已宣告 `directSyncBounds`（8 MiB XML / 5000 records / 200 route files / 64 MiB route）；`/v1/mobile/today`、`/v1/mobile/training-plan-state`、`/v1/mobile/statistics`、`/v1/predictions`、`/v1/workouts?limit=1`、`share-card`、`/v1/exports/workout-summary` 全部 **200**；`/`、`/index.html`、`/assets/*`、`/settings` 全部 **404**（部署当时匿名 health 仍 200，随后已按下方「匿名读关闭」收紧） |
+| 运行证据 | 部署后 `deploy/check-runtime-readonly.sh` 曾给出 ACTION「匿名健康读取仍配置」；置空 `RAI_PUBLIC_HOSTS` 后重跑：`anonymousReadsConfigured:false`、`apiTokenConfigured:true`、ActiveState=active、无 ACTION |
 
-**遗留（建议，未擅自改动）**：
+**匿名读关闭（2026-10-17 21:14 CST，已生效）**：
 
-- `RAI_PUBLIC_HOSTS` 仍含 `tpandmr.xyz,101.33.202.40`。它原本只服务已退役的 Web SPA；iOS 恒带 Token，不依赖它。建议单独评审后置空（`check-runtime-readonly.sh` 的 ACTION 即指此事），属隐私姿态变更，不在本次退役批内。
+- 变更：`/etc/rai/rai.env` 的 `RAI_PUBLIC_HOSTS` 由 `tpandmr.xyz,101.33.202.40` 改为空；备份 `.../rai-retire-backup-20261017-205451/rai.env.before-public-hosts-clear.20261017-211438`；重启后 API 约 6s 就绪。
+- 验证：无 Token 的 `/v1/health`、`/v1/mobile/today`、`/v1/workouts`、`/v1/trends`、`/v1/predictions` 全部 **401**（响应 `{"code":"unauthorized",...}`）；带 Token 的同批接口与 `/v1/handshake` 全部 **200**；Web 路径仍 404。
+- 容器回归：`workbuddy2api`（LLM API 面板）仍 `healthy`、`frps` 仍 Up；`/panel/` 经 nginx 200；两者本就不调用 RAI API（RAI 日志 Host 只有域名/IP/loopback，nginx `/v1` 客户端只有 iOS App、curl 与扫描器），置空不影响它们。
+- 回滚：把原值写回 `RAI_PUBLIC_HOSTS=tpandmr.xyz,101.33.202.40` 并 `systemctl restart rai-api`。
+
+**遗留**：
+
 - 真机验收：HealthKit 同步、分享卡、成绩摘要仍需 iPhone 端跑一遍（API 侧已验证 200）。
 - 回滚：停服 → 恢复 `rai.before-v45.*.sqlite` → `git reset --hard 2e7a231` → `npm ci`（旧 lock）→ 重启；配置回滚用 `/root/rai-retire-backup-20261017-205451/`。
 

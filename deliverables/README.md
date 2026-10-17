@@ -21,11 +21,11 @@
   合并原草案与旧版退役方案，按 B0–B7 批次给出逐文件逐行改动、每批验收命令与回滚；实测基线 `9a1e2c8`。
   关键纠错：nginx 须保留 3600s 超时/限速/robots（不可收紧到 120s）、删 `DOM` lib 会让 API 测试 42 处报错、
   验收矩阵 B02 的唯一引用在 `apps/web` 测试、`check-web-build.mjs` 有 3 个调用方、iOS 直连 API 需要开发 Token。
-  执行记录见附录 E：本地提交 `6f8e6ca`…`6ed6fa4`；云端 `2e7a231 → 6ed6fa4`、主库 v37 → v45（61s，纯 DDL，
-  已做 2.3G 一致性备份）、Web 全路径 404、iOS 读写/分享卡/导出全 200。
+  执行记录见附录 E：本地提交 `6f8e6ca`…`15b68bb`；云端 `2e7a231 → 6ed6fa4`、主库 v37 → v45（61s，纯 DDL，
+  已做 2.3G 一致性备份）、Web 全路径 404、iOS 读写/分享卡/导出全 200；`RAI_PUBLIC_HOSTS` 已置空
+  （匿名读 401、带 Token 200，`workbuddy2api`/`frps` 两个容器不受影响）。
   回滚锚点 tag `pre-web-retirement` + 服务器备份 `/root/rai-retire-backup-20261017-205451/` 与
-  `/var/lib/rai/var/backups/rai.before-v45.20261017-210024.sqlite`。遗留：`RAI_PUBLIC_HOSTS` 仍开启匿名读，
-  建议单独评审后关闭；真机同步验收待 iPhone 端执行。
+  `/var/lib/rai/var/backups/rai.before-v45.20261017-210024.sqlite`。遗留：真机同步验收待 iPhone 端执行。
   旧方案 [WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md](WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md)
   的内容已并入本文件；真机验收完成后两者一并按本目录约定归档。
 
