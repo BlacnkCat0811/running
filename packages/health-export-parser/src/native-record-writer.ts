@@ -13,6 +13,22 @@ export interface NativeApplyOutcome {
   observed: number;
 }
 
+/**
+ * 输入 spool 的字节上限。与 `crates/rai-data-worker` 的 `SPOOL_LIMIT` 同值 —— 两侧**不共享代码**，
+ * 各自守各自的 spool：Rust 那条在 XML 解码循环里量它自己写的 spool，这条量 TS 写的
+ * `canonical.sqlite`。同一批里两者可以同时生效，互不读取。
+ */
+export const SPOOL_LIMIT_BYTES = 8 * 1024 ** 3;
+
+/**
+ * 每多少行做一次体积检查。
+ *
+ * 原值 4096：按平均记录大小估算，"超界不被察觉"的窗口最大可到 4096 条记录的空间（约 4–40 MiB）。
+ * 512 把窗口压到 1/8；代价是每 512 行一次 `PRAGMA page_count`（100 万行 ⇒ 1953 次，不是 1953 万次）。
+ * `page_size` 不再每次都查 —— 它对已存在的库文件是不变量（改它要 VACUUM 重排），见构造函数。
+ */
+const SPOOL_LIMIT_CHECK_INTERVAL = 512;
+
 /** Keep normalization and ID hashing in JS; send typed rows via a private DB,
  * not millions of JSON IPC messages. Rust owns the hot observation/upsert loop. */
 export class NativeRecordWriter {
@@ -21,6 +37,10 @@ export class NativeRecordWriter {
   private readonly insert: StatementSync;
   private readonly batchId: string | undefined;
   private readonly incremental: boolean;
+  /** 见 `SPOOL_LIMIT_BYTES`；构造参数可覆盖，**仅用于测试**。 */
+  private readonly spoolLimitBytes: number;
+  /** `page_size` 是库文件的不变量，只在构造时读一次；会变的是 `page_count`。 */
+  private readonly pageSizeBytes: number;
   private closed = false;
   private count = 0;
   /** B1: folded over every captured row; finalized at most once by `inputDigest()`. */
@@ -28,10 +48,18 @@ export class NativeRecordWriter {
   private digestHex: string | null = null;
   /** False when the installed worker predates B1; the import still proceeds. */
   private digestAvailable = true;
-  constructor(directory: string, generation: string, batchId: string | undefined, incremental: boolean) {
+  constructor(
+    directory: string, generation: string, batchId: string | undefined, incremental: boolean,
+    /**
+     * 只给测试用（参数名带 `test` 前缀）：把上限降到可触发的量级，才能在不造 8 GiB 数据的前提下
+     * 证明这条守卫真的会响。⛔ 生产不许从这里接配置/环境变量 —— 一个误配就能打死全部导入。
+     */
+    testOptions: { spoolLimitBytes?: number } = {}
+  ) {
     this.path = join(directory, "canonical.sqlite");
     this.batchId = batchId;
     this.incremental = incremental;
+    this.spoolLimitBytes = testOptions.spoolLimitBytes ?? SPOOL_LIMIT_BYTES;
     this.db = new DatabaseSync(this.path);
     this.db.exec(`PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA cache_size=-8192;
       CREATE TABLE apply_config (generation TEXT,batch_id TEXT,incremental INTEGER);
@@ -40,6 +68,8 @@ export class NativeRecordWriter {
         device TEXT,unit TEXT,value_numeric REAL,value_text TEXT,start_at TEXT,end_at TEXT,created_at TEXT,
         metadata_json TEXT,raw_attributes_json TEXT,content_hash TEXT
       ); BEGIN`);
+    // 页大小在建库时定死（改它要 VACUUM 重排），所以读一次就够；随写入变化的是 page_count。
+    this.pageSizeBytes = (this.db.prepare("PRAGMA page_size").get() as { page_size: number }).page_size;
     this.db.prepare("INSERT INTO apply_config VALUES (?,?,?)").run(generation, batchId ?? null, incremental ? 1 : 0);
     this.insert = this.db.prepare("INSERT INTO canonical_records VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
   }
@@ -54,10 +84,11 @@ export class NativeRecordWriter {
     // `sequence`) is used because the worker never SELECTs `sequence`; both sides
     // count every row, so both are gap-free.
     this.digest.update(`${this.count}|${record.id}|${hash}\n`);
-    if (this.count % 4096 === 0) {
+    if (this.count % SPOOL_LIMIT_CHECK_INTERVAL === 0) {
       const pages = this.db.prepare("PRAGMA page_count").get() as { page_count: number };
-      const size = this.db.prepare("PRAGMA page_size").get() as { page_size: number };
-      if (pages.page_count * size.page_size > 8 * 1024 ** 3) throw new NativeWorkerError("resource_limit");
+      if (pages.page_count * this.pageSizeBytes > this.spoolLimitBytes) {
+        throw new NativeWorkerError("resource_limit");
+      }
     }
   }
   /** `createHash` can only be finalized once, and B3 replays the apply step. */

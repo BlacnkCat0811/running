@@ -102,3 +102,38 @@ test("B05：路线时刻去重并排序（同一训练被多次改动只留一�
     "2026-03-01T09:00:00.000Z", "2026-03-02T09:00:00.000Z"
   ]);
 });
+
+test("B05：缺 routeDirtyTimes / recoveryBoundaries / reasons ⇒ invalid（缺字段 ≠ 空数组）", () => {
+  // 写端 `encodeBatchAnalysisDirtyEvidence` 永远写出这三个键；缺键只可能是截断/漏写。
+  // 读成 `[]` 会把"证据不完整"说成"这批没有路线变更" —— 正是这份证据最危险的失效形态。
+  for (const [key, reason] of Object.entries({
+    routeDirtyTimes: "route_dirty_times_invalid",
+    recoveryBoundaries: "recovery_boundaries_invalid",
+    reasons: "reasons_invalid"
+  })) {
+    const raw: Record<string, unknown> = { ...valid() };
+    delete raw[key];
+    const parsed = parseBatchAnalysisDirtyEvidence(JSON.stringify(raw));
+    assert.deepEqual(parsed, { status: "invalid", reason }, `${key} 缺失必须 invalid`);
+  }
+});
+
+test("B05：当前版本号被**字面量**钉住（抬常量必须是一次显式决定）", () => {
+  // 绝对判据，刻意不跟着常量漂移。上面那条 `+1` 用例是**相对**判据 —— 常量抬到 2 时它
+  // 只是在测 3，永远绿，所以它证明不了"版本号没被随手改过"。
+  assert.equal(BATCH_ANALYSIS_DIRTY_EVIDENCE_VERSION, 1,
+    "抬版本号前先读 batch-dirty-evidence.ts 的「升级协议」：库里旧批次的证据会全部 invalid ⇒ 退全量");
+
+  // 已知的旧版本与未来版本都必须 invalid —— 不许"尽量读懂"。
+  // 用"当前值 ±1"而不是写死 `[0, 2]`：将来抬版本时，写死的列表会把**新的当前版本**也判成
+  // invalid，与本条判据的本意（只拒绝不认识的版本）自相矛盾。
+  for (const version of [
+    BATCH_ANALYSIS_DIRTY_EVIDENCE_VERSION - 1,
+    BATCH_ANALYSIS_DIRTY_EVIDENCE_VERSION + 1
+  ]) {
+    const parsed = parseBatchAnalysisDirtyEvidence(JSON.stringify({ ...valid(), version }));
+    assert.equal(parsed.status, "invalid", `version=${version} 必须 invalid`);
+  }
+  // 反向对照：当前版本必须仍然 ok。否则"拒绝未知版本"可以靠"什么都拒绝"骗过去。
+  assert.equal(parseBatchAnalysisDirtyEvidence(encodeBatchAnalysisDirtyEvidence(valid())).status, "ok");
+});

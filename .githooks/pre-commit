@@ -76,6 +76,28 @@ if git diff --cached --name-only --diff-filter=ACMR -- packages/storage-sqlite |
   node --import tsx --test packages/storage-sqlite/test/migration-policy.test.ts
 fi
 
+# 直连写守卫的「表分类清单」必须与**迁移产物**双向一致。这条规则此前只活在
+# `INGEST_TABLE_DISPOSITIONS` 的注释里，没有任何东西在守：
+#   · 迁移加了表却没表态 ⇒ 运行期 installDirectSyncWriteGuards 抛错，**整条直连车道每次都被拒**
+#     （direct-sync-ingest.ts 的注释里记着 2026-10-16 的实测代价：三条直连用例整批红，
+#      而根因在另一个包里）；
+#   · 清单留下已删表 ⇒ 「每张表都表态」这句话变成假话，而守卫对"清单有、库里没有"是静默放行。
+# 判据是**跑完迁移的临时库**，不是 grep `CREATE TABLE`：v30 建临时表再 DROP+RENAME、
+# 三张表被重建过两次，静态扫会假阳性。
+#
+# 触发面含测试与 hook 自己；`--diff-filter=ACMRD` 让"只删除"也触发（删门禁测试/迁移同样要跑）。
+# 🔴 门禁跑的是**工作树**（node --test 读盘），而触发条件看的是 index：
+#    这些路径若还有未暂存改动，绿只能证明工作树、不能证明即将提交的内容 ⇒ 直接拒。
+GATE_PATHS="packages/storage-sqlite apps/api/src/direct-sync-ingest.ts apps/api/test/direct-sync-table-dispositions.test.ts .githooks/pre-commit"
+if ! git diff --cached --quiet --diff-filter=ACMRD -- $GATE_PATHS; then
+  if ! git diff --quiet -- $GATE_PATHS; then
+    echo "pre-commit: 表分类门禁相关路径有未暂存改动，无法证明提交内容；先 git add 再提交" >&2
+    exit 1
+  fi
+  echo "pre-commit: 表分类清单有改动，跑『迁移产物 ↔ 白名单』一致性门禁"
+  node --import tsx --test apps/api/test/direct-sync-table-dispositions.test.ts
+fi
+
 # §16.1 验收矩阵的覆盖检查。此前"覆盖了多少条"只是一个断言：2026-09-30 实测矩阵共 54 条，
 # 而按 ID 被引用的只有 19 条 —— 但"没引用"与"没覆盖"是两件事，看数字分不出来。
 # 这个检查把每条判成 cited / declared-gap / missing，missing 即失败；

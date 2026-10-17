@@ -20,6 +20,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+import ts from "typescript";
+
 import { CONTRACT_VERSION, healthTypes, workoutTypes } from "@rai/contracts";
 import { RaiApplicationService } from "@rai/application";
 import { RaiDatabase } from "@rai/storage-sqlite";
@@ -78,6 +80,8 @@ interface Fixture {
     deletedWorkoutIds?: string[];
     gpx?: Record<string, string>;
     job?: string;
+    /** 直接给 `export.xml` 的原始字节（用于构造非法 UTF-8；提供时 `rows` 被忽略）。 */
+    xmlBytes?: Buffer;
   }): Promise<DirectSyncImportInput>;
   seed(rows: string): Promise<void>;
 }
@@ -97,7 +101,7 @@ async function fixture(run: (ctx: Fixture) => Promise<void>): Promise<void> {
   const input: Fixture["input"] = async (rows = "", options = {}) => {
     const inputPath = join(root, `input-${ordinal++}`);
     mkdirSync(inputPath);
-    writeFileSync(join(inputPath, "export.xml"), xml(rows));
+    writeFileSync(join(inputPath, "export.xml"), options.xmlBytes ?? xml(rows));
     writeFileSync(join(inputPath, "sync-manifest.json"), JSON.stringify({
       version: 2, sourceScope: "healthkit", sourceIds: [],
       deletedSourceIds: options.deletedWorkoutIds ?? [],
@@ -834,4 +838,82 @@ test("§4.3：缺少快通路资格 stamp 的库不得被拒（它不是直接�
     const applied = await applyOrFail(await input(record(a)));
     assert.ok(applied, "没有资格 stamp 也必须能走直连（§4.3 明令它不是门槛）");
   });
+});
+
+// ── P1-1：prepare 阶段不再整读 XML ─────────────────────────────────────────────
+//
+// 这条改动把「XML 读三遍」降到两遍（摘要流读 + 解析器按路径读）。其中一遍是
+// `readFileSync` 同步阻塞 worker 线程的 8 MiB 全量读，只为算一个字节数。
+//
+// 两条判据分工**必须分清**，否则会自我欺骗：
+//   1. 行为判据：在**合法 UTF-8** 上与旧口径恰好相等，所以夹具里故意放一个**非法 UTF-8**
+//      字节，让旧口径（解码后重编码 = 磁盘 + 2）与新口径（磁盘字节）分开。它钉的是语义来源。
+//   2. 源码判据才是回归检测器，且必须用 **AST**：`stripComments` 只跳双引号串，模板字符串/
+//      单引号/正则里的 `/*` 会把其后全文截掉，使负断言恒绿（2026-10-17 复核实测）；
+//      字符串匹配也抓不住"先赋给局部变量"的别名回退。AST 两者都能覆盖。
+//   3. 源码判据的作用域是 `preparePayload` **函数体**：同文件的预检函数合法地读 manifest，
+//      按整文件断言会把"读任何东西"都判红。
+
+test("P1-1：source_xml_bytes 报磁盘字节数，不是解码后重编码的长度", async () => {
+  await fixture(async ({ main, input }) => {
+    // 🔴 非法 UTF-8 放在 XML 注释里（语义上被忽略）：0x80 解码成 U+FFFD（3 字节），
+    // 于是旧口径 `Buffer.byteLength(解码文本)` = 磁盘字节 + 2 —— 这条判据才能真的区分新旧实现。
+    const invalidUtf8 = Buffer.concat([
+      Buffer.from("<HealthData><!--"),
+      Buffer.from([0x80]),
+      Buffer.from(`-->${record(a)}${record(b, "25")}</HealthData>`)
+    ]);
+    const batch = await input("", { xmlBytes: invalidUtf8 });
+    const diskBytes = statSync(join(batch.inputPath, "export.xml")).size;
+    assert.equal(diskBytes, invalidUtf8.length, "夹具写盘字节数不对，判据前提已失效");
+    await applyOrFail(batch);
+    const db = new DatabaseSync(main, { readOnly: true });
+    try {
+      const row = db.prepare("SELECT value FROM import_manifest WHERE key='source_xml_bytes'").get() as
+        { value: string } | undefined;
+      assert.ok(row, "本批必须写下 source_xml_bytes");
+      assert.equal(Number(row.value), diskBytes,
+        "source_xml_bytes 必须等于 statSync(export.xml).size；等于 diskBytes + 2 说明又被解码再重编码了");
+    } finally { db.close(); }
+  });
+});
+
+test("P1-1：prepare 阶段不得再整读 XML（AST 级，行为判据看不见这一条）", () => {
+  const file = ts.createSourceFile(
+    "direct-sync-ingest.ts",
+    readFileSync(join(import.meta.dirname, "../src/direct-sync-ingest.ts"), "utf8"),
+    ts.ScriptTarget.Latest,
+    true
+  );
+  const prepare = file.statements.find((node): node is ts.FunctionDeclaration =>
+    ts.isFunctionDeclaration(node) && node.name?.text === "preparePayload");
+  const preparedPayload = file.statements.find((node): node is ts.InterfaceDeclaration =>
+    ts.isInterfaceDeclaration(node) && node.name.text === "PreparedPayload");
+  assert.ok(prepare, "找不到 preparePayload：判据锚点已失效，需要更新判据");
+  assert.ok(preparedPayload, "找不到 PreparedPayload：判据锚点已失效，需要更新判据");
+
+  const fileReads: string[] = [];
+  const xmlTextUses: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)
+        && node.expression.text === "readFileSync") {
+      fileReads.push(node.getText(file));
+    }
+    if (ts.isIdentifier(node) && node.text === "xmlText") xmlTextUses.push(node.getText(file));
+    if (ts.isStringLiteralLike(node) && node.text === "xmlText") xmlTextUses.push(node.getText(file));
+    ts.forEachChild(node, visit);
+  };
+  visit(prepare);
+  assert.deepEqual(fileReads, [],
+    "preparePayload 不得再 readFileSync：摘要流读 + 解析器按路径读各一遍就够了");
+  assert.deepEqual(xmlTextUses, [],
+    "preparePayload 不应再承载 XML 全文：全文没有消费点，只为一个字节数付 8 MiB 阻塞读");
+
+  const members = preparedPayload.members
+    .filter((member): member is ts.PropertySignature => ts.isPropertySignature(member))
+    .map((member) => member.name.getText(file));
+  assert.ok(!members.includes("xmlText"),
+    `PreparedPayload 不应再携带 xmlText（成员：${members.join(", ")}）`);
+  assert.ok(members.includes("xmlFileBytes"),
+    `PreparedPayload 应改携带磁盘字节数 xmlFileBytes（成员：${members.join(", ")}）`);
 });

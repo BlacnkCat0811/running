@@ -25,7 +25,22 @@ import { isCanonicalInstant, type AnalysisDirtyDomains } from "./dirty-range.js"
  * ⛔ 不做"缺字段 ⇒ 取默认值"的宽容：缺 `domains.features` 与"该域全算"在语义上相反。
  */
 
-/** 当前形态。改动字段语义时必须递增；读侧对未知版本返回 `invalid`。 */
+/**
+ * 当前形态。
+ *
+ * ## 升级协议（改这个数之前逐条确认）
+ *
+ * 1. **只有字段语义/形状变了才递增**。「加了字段、旧证据仍能正确解读」⇒ 不要递增：解析器
+ *    对多余键是宽容的，只有已知键的类型错误才会 `invalid`。
+ * 2. 递增之后，库里**已经写出的旧版本证据全部变成 `invalid`**（解析对未知版本 fail-closed），
+ *    消费端 `analysis-input-reader.ts` 的 `invalid` 分支 ⇒ 退全量。方向是**安全**的（慢，不漏算），
+ *    但要接受一次全量重算的代价，并且**在提交 message 里写明**这次代价。
+ * 3. 若不愿付这次全量：在解析器里为旧版本**显式加一个分支**（按旧语义构造等价的新证据），
+ *    或在迁移里回填历史批次。⛔ 禁止"只抬常量、让旧行按新语义解读"—— 那是漏算。
+ * 4. 生产写入点的 `version` 字段类型是 `typeof BATCH_ANALYSIS_DIRTY_EVIDENCE_VERSION`，
+ *    所以"常量抬了、写入点没跟"是**类型错**，不需要人工守。真正需要人工守的是 1–3 条。
+ *    本文件的测试另用**字面量**钉住当前值，等于强制在抬常量时回到这里写下结论。
+ */
 export const BATCH_ANALYSIS_DIRTY_EVIDENCE_VERSION = 1;
 
 export interface BatchAnalysisDirtyEvidence {
@@ -92,14 +107,13 @@ export function parseBatchAnalysisDirtyEvidence(
   if (recoveryBoundaries === null) {
     return { status: "invalid", reason: "recovery_boundaries_invalid" };
   }
-  let reasons: string[] = [];
-  if (record.reasons !== undefined) {
-    if (!Array.isArray(record.reasons)
-        || record.reasons.some((value) => typeof value !== "string")) {
-      return { status: "invalid", reason: "reasons_invalid" };
-    }
-    reasons = [...record.reasons] as string[];
+  // `reasons` 是诊断字段，但**缺键**与"空数组"是两件事：前者是形状损坏（写端从来不会省），
+  // 后者是合法的"没有原因"。缺键取默认值等于把"证据不完整"读成"没问题"。
+  if (!Array.isArray(record.reasons)
+      || record.reasons.some((value) => typeof value !== "string")) {
+    return { status: "invalid", reason: "reasons_invalid" };
   }
+  const reasons = [...record.reasons] as string[];
   if (!record.full && dirtyFromAt === null) {
     // "可增量但没有边界" 与 "全量" 是两件事。前者说明证据自相矛盾。
     return { status: "invalid", reason: "partial_without_boundary" };
@@ -141,8 +155,13 @@ function parseDomains(value: unknown): AnalysisDirtyDomains | null {
   return { features, fitness, readiness };
 }
 
+/**
+ * 时刻数组。**缺键 = invalid**：写端 `encodeBatchAnalysisDirtyEvidence` 总是写出这两个数组，
+ * 因此 `undefined` 只可能来自截断/漏写；把它读成 `[]` 会把"证据不完整"说成"没有路线变更"。
+ * 显式 `[]` 才是合法的"空"。
+ */
 function parseInstants(value: unknown): string[] | null {
-  if (value === undefined) return [];
+  if (value === undefined) return null;
   if (!Array.isArray(value)) return null;
   const instants: string[] = [];
   for (const item of value) {

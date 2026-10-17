@@ -338,7 +338,14 @@ export type DirectSyncImportResult = {
 
 interface PreparedPayload {
   xmlPath: string;
-  xmlText: string;
+  /**
+   * XML 的**磁盘字节数**（`statSync().size`），来源是预检。
+   *
+   * 🔴 不要在这里塞 `xmlText`：全文会被 `digestHealthKitExportContent` 流式读过一遍，
+   * 解析器 `parseAppleHealthXml` 还会按路径再读一遍；第三遍只为拿一个字节数是纯浪费，
+   * 而且 `readFileSync` 是**同步阻塞** worker 线程的。语义差异见 `preparePayload` 的注释。
+   */
+  xmlFileBytes: number;
   manifest: HealthSyncManifest;
 }
 
@@ -396,12 +403,6 @@ function inputTreeCheck(root: string, relative = "", seen = { files: 0, bytes: 0
 
 type InputTreeOutcome = { ok: true } | { ok: false; rejection: DirectSyncRejection };
 
-/** `preparePayload` 的失败出口（拒绝原因 + 观测字段一次成型）。 */
-const refuse = (
-  reason: DirectSyncRejectionReason, stage: DirectSyncRejectionStage,
-  extra: { detail?: string; actual?: Record<string, number>; bounds?: Record<string, number> } = {}
-): PrepareOutcome => ({ ok: false, rejection: rejectDirect(reason, stage, extra) });
-
 /**
  * 直连载荷的**预检**（不读 XML 全文做摘要复核）：目录形状 / 上界 / v2 身份 / 删除配额。
  *
@@ -413,7 +414,7 @@ const refuse = (
  * （用户看到"检查通过后失败"）或反方向（前端拆批规则与后端不一致），两种都很难排查。
  */
 export function preflightDirectSyncPayload(inputPath: string):
-  | { ok: true; xmlPath: string; manifest: HealthSyncManifest }
+  | { ok: true; xmlPath: string; xmlFileBytes: number; manifest: HealthSyncManifest }
   | { ok: false; rejection: DirectSyncRejection } {
   // 🔴 输入目录整体缺失 ⇒ 受控拒收，不让 ENOENT 冒泡成 500。
   // 正常流程不会走到这里（inspect 路由对"已导入"来源已在上一层跳过本函数），
@@ -465,7 +466,7 @@ export function preflightDirectSyncPayload(inputPath: string):
     return { ok: false, rejection: rejectDirect("deletions_exceed_bounds", "prepare",
       { actual: { deletions }, bounds: { maxRecords: DIRECT_SYNC_MAX_RECORDS } }) };
   }
-  return { ok: true, xmlPath, manifest };
+  return { ok: true, xmlPath, xmlFileBytes, manifest };
 }
 
 /**
@@ -477,12 +478,19 @@ export function preflightDirectSyncPayload(inputPath: string):
 async function preparePayload(input: DirectSyncImportInput): Promise<PrepareOutcome> {
   const preflight = preflightDirectSyncPayload(input.inputPath);
   if (!preflight.ok) return { ok: false, rejection: preflight.rejection };
-  const xmlText = readFileSync(preflight.xmlPath, "utf8");
-  const xmlBytes = Buffer.byteLength(xmlText);
-  if (xmlBytes > DIRECT_SYNC_MAX_XML_BYTES) {
-    return refuse("xml_exceeds_bounds", "prepare",
-      { actual: { xmlBytes }, bounds: { maxXmlBytes: DIRECT_SYNC_MAX_XML_BYTES } });
-  }
+  // 🔴 这里**不再**把 XML 读成字符串。
+  //
+  // 全文已经在本函数下面被 `digestHealthKitExportContent` 流式读过一遍（它必须读，
+  // 摘要要覆盖 XML + manifest + `workout-routes/**`，与 worker 准入用的是同一份配方），
+  // 解析器 `parseAppleHealthXml` 还会按路径再读一遍。第三遍只为拿一个字节数，代价是
+  // 一次同步阻塞的 8 MiB 读 —— 而预检已在 `statSync` 时量过同一个文件、并用同一个上界判过。
+  //
+  // 语义差异**只出现在非法 UTF-8**：utf8 解码会把每个非法子序列替换成 U+FFFD，
+  // 于是旧口径 `Buffer.byteLength(解码文本)` ≥ 新口径 `stat.size`（孤立的非法单字节最多 3×）。
+  // 两者都不参与直接比较（`source_xml_bytes` 无直接读点，但会随 manifest 全量摘要间接进 publicationDigest；`fileSize` 只进进度回调），
+  // 且合法的 HealthKit 导出不可能是非法 UTF-8。原先"解码后字节数 > 8 MiB"的第二道上界
+  // 随之删除：它只可能被非法 UTF-8 触发，而即便触发也有界（≤ 8 MiB × 3）。
+  // "载荷已变更"仍由下面的 sha256 复核兜住 —— 它读文件本身，不依赖这里的字符串。
   // 🔴 必须与**准入时**（worker 的 `computeImportPayloadSha256`）用**同一个**摘要函数：
   // 两者都折进 `workout-routes/**` 的路由内容。2026-10-13 实测的缺陷：这里曾经只算
   // XML+manifest（`digestHealthKitRecordSnapshot`），于是任何**带 GPX** 的载荷都会在
@@ -493,7 +501,7 @@ async function preparePayload(input: DirectSyncImportInput): Promise<PrepareOutc
     engine: `typescript@${NATIVE_VERSION}`, identityAlgorithm: identityAlgorithmFingerprint()
   });
   if (capturedSha256 !== input.payloadSha256) throw new Error("Direct sync payload changed after admission");
-  return { ok: true, payload: { xmlPath: preflight.xmlPath, xmlText, manifest: preflight.manifest } };
+  return { ok: true, payload: { xmlPath: preflight.xmlPath, xmlFileBytes: preflight.xmlFileBytes, manifest: preflight.manifest } };
 }
 
 /** 本地日期（`DATABASE_TIMEZONE`）——与读侧同一口径。 */
@@ -782,7 +790,7 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       if (row !== undefined && row.startAt !== null) routeOwnerBefore.set(row.id, row.startAt);
     }
     const parsed = await parseAppleHealthXml(payload.xmlPath, store, {
-      fileSize: Buffer.byteLength(payload.xmlText),
+      fileSize: payload.xmlFileBytes,
       healthKitRecordIdentity: true,
       deletedRecords: payload.manifest.deletedRecords,
       deletedWorkoutIds: payload.manifest.deletedWorkoutIds,
@@ -950,7 +958,7 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     const metadata: Record<string, string> = {
       dataset_version: datasetVersion,
       source_xml_name: basename(payload.xmlPath),
-      source_xml_bytes: String(Buffer.byteLength(payload.xmlText)),
+      source_xml_bytes: String(payload.xmlFileBytes),
       import_started_at: new Date(input.startedAtMs).toISOString(),
       import_completed_at: now,
       direct_sync_payload_class: classification.payloadClass,
