@@ -79,10 +79,9 @@ nonisolated enum RouteSyncStateMachine {
     static func shouldQuery(
         existing: RouteSyncRecord,
         now: Date,
-        isForceManualRescan: Bool = false,
         hasWorkoutChange: Bool = false
     ) -> Bool {
-        if isForceManualRescan || hasWorkoutChange { return true }
+        if hasWorkoutChange { return true }
         switch existing.status {
         case .unknown:
             // 从未观测过。不查就永远没有点数与摘要，冷却与休眠都无从谈起。
@@ -132,12 +131,10 @@ nonisolated enum RouteSyncStateMachine {
         existing: RouteSyncRecord,
         observation: RouteObservation?,
         now: Date,
-        isForceManualRescan: Bool = false,
         hasWorkoutChange: Bool = false
     ) -> Decision {
         let needsQuery = shouldQuery(
-            existing: existing, now: now,
-            isForceManualRescan: isForceManualRescan, hasWorkoutChange: hasWorkoutChange
+            existing: existing, now: now, hasWorkoutChange: hasWorkoutChange
         )
         guard needsQuery, let observation else {
             // 没查 ⇒ 状态一动不动。宁可下一轮再判，也不许把"这次没看"记成一次检查。
@@ -148,15 +145,6 @@ nonisolated enum RouteSyncStateMachine {
         next.pointCount = observation.pointCount
         next.routeHash = observation.routeHash
         next.lastCheckedAt = now
-
-        // 人工重扫的语义是"我不信这个状态了，从零重来"：回 `active`、稳定性清零。
-        // 放在变化判定**之前**，否则一条恰好没变的轨迹会保留住旧的 `stableCheckCount`，
-        // 于是"重扫"完的第一轮就又够格降频了 —— 那等于没重扫。
-        if isForceManualRescan {
-            next.status = .active
-            next.stableCheckCount = 0
-            return Decision(shouldQuery: true, nextState: next)
-        }
 
         let isFirstObservation = existing.status == .unknown
         let changed = isFirstObservation
@@ -190,5 +178,105 @@ nonisolated enum RouteSyncStateMachine {
             next.status = .settled
         }
         return Decision(shouldQuery: true, nextState: next)
+    }
+}
+
+/// B02（2026-10-17 复查）：**最终执行闸门** —— 所有路线来源在 fetch 之前必须经过这里。
+///
+/// ## 病灶
+///
+/// `RouteTodoScheduler.executable` 只筛"待办发现集合"：`blocked-size` 与未到期的
+/// `retry-wait` 不进 `executableTodoIDs`。但导出侧的最终 fetch 条件还有三个**平行**放行口：
+///
+/// ```swift
+/// previous.status != .settled || hasWorkoutChange
+///   || rediscoveryIDs.contains(routeKey) || executableTodoIDs.contains(routeKey)
+/// ```
+///
+/// 同一 UUID 只要从正式 workout 页（`hasWorkoutChange`）、近期回填或 rediscovery 再次
+/// 被"发现"，就能绕过调度读到那份已经判定装不下的 GPX —— 每批白读一次，正是 R07 要治的
+/// 形态。调度器本身没错，错在**它不是唯一入口**。
+///
+/// ## 判据顺序（顺序本身是契约）
+///
+/// 1. 待办调度态：`blocked-size` / 未到期 `retry-wait` 阻止**全部**普通来源；
+/// 2. 本批预算：满额 ⇒ 延后（不是阻塞，下批可再试）；
+/// 3. 既有路线的查询间隔（`RouteSyncStateMachine.shouldQuery`）；
+/// 4. 以上都通过 ⇒ 执行。
+///
+/// ⚠️ 第 2 / 3 步的例外是**明确待办**：`ready` 或已到期的待办不能被 `settled` 降频
+/// 永久挡住，否则"有待办 + 已有状态行"会每轮被发现、每轮被跳过，卡在队列里永远不查。
+///
+/// ⚠️ `hasWorkoutChange` **不**清除 `blocked-size`：它只证明"workout 行变了"，不证明
+/// "那条超大路线变小了"。能力指纹提高或显式重试才是重开依据（没有可靠的内容版本信号）。
+nonisolated enum RouteQueryPolicy {
+    enum Decision: Equatable, Sendable {
+        case execute
+        /// 本批不做，但下批/下一轮可以再做（不是路线的属性）。
+        case deferred(reason: DeferReason)
+        /// 这条路线当前不可执行，必须等能力变化或显式重试。
+        case blocked(reason: BlockReason)
+
+        var executes: Bool { self == .execute }
+    }
+
+    nonisolated enum DeferReason: String, Equatable, Sendable {
+        /// 本批路线字节/文件额度已满。
+        case routeBudget
+        /// 既有状态的查询间隔未到（冷却/休眠），且没有明确待办。
+        case notDue
+    }
+
+    nonisolated enum BlockReason: String, Equatable, Sendable {
+        /// 满额也装不下，且预算能力没有提高。
+        case blockedSize
+        /// 上次读取失败的有界退避尚未到期。
+        case retryWait
+    }
+
+    static func decide(
+        todo: PendingRouteTodo?,
+        existing: RouteSyncRecord,
+        now: Date,
+        maxRouteBytes: Int,
+        maxRouteFiles: Int,
+        hasWorkoutChange: Bool,
+        /// 用户对**这一条** UUID 的显式重试（§4.2 步骤 6）。
+        ///
+        /// 它能重开 `blocked-size` / 未到期 `retry-wait`，但**只重开这一条** ——
+        /// 其余 UUID 的退避与阻塞原样保留（"其他待办不饿死"是同一条判据的另一半）。
+        isExplicitRetry: Bool = false,
+        routeBudgetExhausted: Bool
+    ) -> Decision {
+        if let todo, !isExplicitRetry {
+            switch todo.effectiveState {
+            case .blockedSize:
+                let improved = todo.blockedBudgetFingerprint.map { stored in
+                    RouteTodoScheduler.abilityImproved(
+                        current: RouteTodoScheduler.budgetFingerprint(
+                            maxRouteBytes: maxRouteBytes, maxRouteFiles: maxRouteFiles
+                        ),
+                        stored: stored
+                    )
+                } ?? false
+                guard improved else { return .blocked(reason: .blockedSize) }
+            case .retryWait:
+                if let next = todo.nextRetryAt, next > now {
+                    return .blocked(reason: .retryWait)
+                }
+            case .ready:
+                break
+            }
+        }
+        guard !routeBudgetExhausted else { return .deferred(reason: .routeBudget) }
+        let due = RouteSyncStateMachine.shouldQuery(
+            existing: existing,
+            now: now,
+            hasWorkoutChange: hasWorkoutChange
+        )
+        // 明确待办（ready / 到期 / 能力提高）本身就是"要查"的证据 —— 不能被降频挡住。
+        // 普通发现（`todo == nil`）才服从状态机的查询间隔。
+        if !due && todo == nil { return .deferred(reason: .notDue) }
+        return .execute
     }
 }

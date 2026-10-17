@@ -129,6 +129,15 @@ nonisolated enum HealthKitExportError: LocalizedError, Equatable {
     case missingRecordAnchor
     case invalidRecordAnchor
     case invalidWorkoutAnchor
+    /// 本地同步状态库不可读（不是游标损坏）：继续跑只能退化成"没有水位"，即全历史重读。
+    /// 明确阻塞并要求修复，比"静默全量"安全（2026-10-17 边界收紧）。
+    case stateStoreUnreadable
+    /// R04：打包前自校验发现同一路径出现两次（ZIP 接收器拒收的形态）。
+    /// 上游（批次级路线清单）本应去重；走到这里说明它有缺口 —— 当场失败、保留可恢复状态。
+    case duplicateArtifactPath(String)
+    /// R04：打包前自校验发现清单引用了一个不存在的文件（页级暂存被误清、或渲染与写盘
+    /// 不同步）。同样当场失败，绝不把缺文件的载荷发出去。
+    case missingArtifact(String)
 
     var errorDescription: String? {
         switch self {
@@ -145,13 +154,19 @@ nonisolated enum HealthKitExportError: LocalizedError, Equatable {
         case .missingRecordAnchor:
             return "健康记录查询未返回可恢复游标，请重试同步。"
         case .invalidRecordAnchor:
-            return "健康记录增量游标无法读取，本次未自动重读全部历史。请使用「重新导入全部」恢复。"
+            return "健康记录增量游标已损坏，本次未推进、也未重读历史。请在设置页点「修复增量游标」。"
         case .invalidWorkoutAnchor:
-            return "跑步增量游标无法读取，本次未自动重读全部历史。请使用「重新导入全部」恢复。"
+            return "跑步增量游标已损坏，本次未推进、也未重读历史。请在设置页点「修复增量游标」。"
+        case .stateStoreUnreadable:
+            return "本地同步状态库暂时无法读取，已停止同步以免误读成「从未同步过」而重读全部历史。请解锁设备后重试；若仍失败，请重装应用（服务端数据不受影响）。"
         case .databaseLocked:
             // 用户不需要做任何事，所以文案刻意不含"请重试"之外的动作项 ——
             // 设备一解锁就会自动继续（见 `RaiStartup.observeProtectedDataAvailability`）。
             return "设备已锁定，暂时无法读取 Apple 健康数据。解锁后将自动继续同步。"
+        case .duplicateArtifactPath(let name):
+            return "本次同步产物出现重复路径（\(name)），已停止上传以免被服务端拒收。请重试同步。"
+        case .missingArtifact(let name):
+            return "本次同步产物缺少文件（\(name)），已停止上传。请重试同步。"
         }
     }
 }
@@ -367,8 +382,6 @@ nonisolated enum HealthKitExport {
     ///   - routeStates: 导出**开始前**从 `SyncTaskStore.sync_route_state` 整批读出的伴生状态，
     ///     键是小写化的 workout uuid。传空字典等于"没有任何记忆"，于是每个 workout 都会被
     ///     当作首查（安全方向：多查一次，不会漏）。
-    ///   - routeForceRescan: 人工重扫（"重新导入全部"）。所有 workout 的状态复位成
-    ///     `.active` 且稳定性清零，于是这一轮**每个** workout 都会重查一次。
     ///   - budget: 单批载荷预算（S2.1/S2.5）。**写前判定**：整页先渲染进内存、判定通过才落盘
     ///     ⇒ 单批字节严格 ≤ 预算。截断时停在**页首**（整页不提交、锚点不推进），结果
     ///     `budgetStopReason != nil`。默认取保守值 —— 调用点漏传时宁小勿大（多分几批），绝不超界。
@@ -376,16 +389,23 @@ nonisolated enum HealthKitExport {
         from startDate: Date?,
         workoutAnchor: Data?,
         recordCursors: Data? = nil,
-        recordsForceRescan: Bool = false,
         routeStates: [String: RouteSyncRecord] = [:],
         routeDiscoveryCursor: String? = nil,
-        routeForceRescan: Bool = false,
+        /// 用户点名的**定点重试**（§4.2 步骤 6）：只重开这些 UUID 的阻塞/退避，
+        /// 其余待办原样保留。空集 = 没有定点重试（默认）。
+        routeRetryWorkoutIDs: Set<String> = [],
         budget: DirectSyncBatchBudget = .conservative,
         pendingDeletions: DirectSyncPendingDeletions = .empty,
-        // O02/WP-11：待查路线队列（上一批登记、尚未查询的 workout UUID）。它们会被
-        // **定点查询**（与 rediscovery 同一条 `knownRunningWorkouts` 通道）并在本批
-        // 成功交付后回传 `completedRouteTodos`（由调用方在**提交成功后**移除）。
-        pendingRouteTodos: [String] = [],
+        // O02/WP-11 + R07：待查路线队列（上一批登记、尚未查询的 workout）。它们会被
+        // **定点查询**（与 rediscovery 同一条 `knownRunningWorkouts` 通道）；完整观测后
+        // 回传 `completedRouteTodos`（由调用方在**提交成功后**移除）。R07 起这里传的是
+        // **完整待办对象**（含调度状态）：
+        //   - 只有 `RouteTodoScheduler` 判为**可执行**的子集才进入本批的发现通道与查询
+        //     （blocked-size 与未到期的 retry-wait 不查 —— 不再对同一份不可装入的 GPX
+        //     无限续批）；
+        //   - 每条被实际尝试的待办按结局回传调度更新（读取失败 ⇒ 有界退避；确认超满额
+        //     ⇒ size 阻塞 + 预算指纹），由调用方在导出后写回（"超前登记"同款纪律）。
+        pendingRouteTodos: [PendingRouteTodo] = [],
         typeRotationStart: Int = 0,
         onProgress: @escaping @Sendable (String) async -> Void
     ) async throws -> HealthKitExportResult {
@@ -418,7 +438,6 @@ nonisolated enum HealthKitExport {
         // 第一次查询后算一次 —— 它要看"本批第一页已见到的 workout"来排除候选）。
         var attachmentWorkouts: [HKWorkout] = []
         var rediscovery: [String] = []
-        var rediscoveryIDs = Set<String>()
         var attachmentsPending = true
         // 页循环状态：`anchorBefore` 是当前页的查询起点；`deliveredAnchor` 只随"完整交付的
         // 页"推进（初值 = 上一批确认的锚；一页都没交付时原样回传 —— 绝不提前）。
@@ -430,10 +449,48 @@ nonisolated enum HealthKitExport {
         // WP-12 的三分预扣随之移到页循环之后 —— 那时 fresh 集合才完整。
         var freshWorkoutIds: [String] = []
         var freshWorkoutIdSet = Set<String>()
-        // O02/WP-11：待办路线 —— `pendingRouteTodoSet` 是**注入**的（上一批登记的，用于在
-        // fetch 成功后回传"可移除"）；`newRouteTodos` 是本批新登记的（**页交付后才生效**，
-        // 与 route 状态/文件同进同退）。
-        let pendingRouteTodoSet = Set(pendingRouteTodos)
+        // O02/WP-11 + R07：待办路线 —— `pendingTodoByUUID` 是**注入**的（上一批登记的，
+        // 用于在 fetch 成功后回传"可移除"、并作为调度记账的底稿）；`newRouteTodos` 是本批
+        // 新登记的（**页交付后才生效**，与 route 状态/文件同进同退）。
+        //
+        // R07：**本批可执行子集**（有界 + 公平序）—— `blocked-size` 与未到期的 `retry-wait`
+        // 既不进发现通道、也不会被 fetch（否则"满额也装不下"的路线每轮被重读一遍，无限续批）。
+        // 显式重扫（"重新导入全部"）是用户明确重试 ⇒ 把全部待办复位 ready 后放行。
+        let pendingTodoByUUID: [String: PendingRouteTodo]
+        let pendingRouteTodoSet: Set<String>
+        let executableTodos: [PendingRouteTodo]
+        let retryWorkoutIDs = Set(routeRetryWorkoutIDs.map { $0.lowercased() })
+        do {
+            // 🔴 §4.2 步骤 6：定点重试。点名的 UUID 即使**没有待办**也要临时登记一条 ——
+            // 否则 `todo == nil` 会让它服从状态机降频（settled 未到期 ⇒ 不查），
+            // 用户在界面上点了"重试"，实际什么也没发生。
+            var allTodos = pendingRouteTodos
+            for uuid in retryWorkoutIDs where !allTodos.contains(where: { $0.workoutUUID == uuid }) {
+                allTodos.append(PendingRouteTodo(
+                    workoutUUID: uuid, reason: .routeBudget, createdAt: routeNow
+                ))
+            }
+            pendingTodoByUUID = Dictionary(uniqueKeysWithValues: allTodos.map {
+                ($0.workoutUUID, $0)
+            })
+            pendingRouteTodoSet = Set(pendingTodoByUUID.keys)
+            // 定点重试走 `reopened`（清阻塞/退避），但**只对那几条** —— 全量重扫才会重开整队。
+            let candidates = retryWorkoutIDs.isEmpty
+                ? allTodos
+                : allTodos.map {
+                    retryWorkoutIDs.contains($0.workoutUUID)
+                        ? RouteTodoScheduler.reopened($0) : $0
+                }
+            executableTodos = RouteTodoScheduler.executable(
+                candidates, now: routeNow,
+                maxRouteBytes: budget.maxRouteBytes, maxRouteFiles: budget.maxRouteFiles
+            )
+        }
+        let executableTodoIDs = Set(executableTodos.map(\.workoutUUID))
+        // 调度记账底稿：被实际尝试的待办按结局更新（见页内 `switch fetch.outcome`）。
+        var todoUpdates: [String: PendingRouteTodo] = Dictionary(
+            uniqueKeysWithValues: executableTodos.map { ($0.workoutUUID, $0) }
+        )
         var newRouteTodos: [String: PendingRouteTodo] = [:]
         var completedRouteTodos: [String] = []
 
@@ -454,6 +511,13 @@ nonisolated enum HealthKitExport {
         /// 不复用一个变量：两个停因来自两个收集阶段，唯一的合并点是 `HealthKitExportResult` 那一处。
         var routeStopReason: HealthKitExportResult.BudgetStopReason?
         var exportedWorkouts: [HKWorkout] = []
+        // 🔴 R04（2026-10-16 复查）：**批次级路线清单** —— 按相对路径**跨页去重**（同名时
+        // 后页版本原子替换前页的引用）。旧形态是页交付时 `files.append(contentsOf: pageRouteFiles)`：
+        // 页 1 的"附件"版本与页 N 的"正式流"版本引用同一 `workout-routes/<uuid>_1.gpx`
+        // ⇒ ZIP 里同路径两个条目 ⇒ 接收器整批拒收（复查的最小夹具已复现）。
+        // XML 侧同 UUID 的重复渲染由接收端既有语义承接（同一 syncIdentifier 出现两次 =
+        // 后者生效），这里只保证**文件清单**唯一。合并规则住 `RouteBatchFileList`（可单测）。
+        var routeBatchFiles = RouteBatchFileList()
 
         try write(xml, """
         <?xml version="1.0" encoding="UTF-8"?>
@@ -467,6 +531,15 @@ nonisolated enum HealthKitExport {
         // 重查（逐级降到单条）；连单条都放不下 ⇒ 可见阻塞（整页不写、锚不推进）。
         var workoutStop: HealthKitExportResult.BudgetStopReason?
         while true {
+            // R04：本页的产物写进**页级独立临时目录** —— 拒绝页/缩页重试里的一切写入与
+            // 回滚（包括 `routeEntries` 的"装不下 ⇒ 删掉本轮已写分片"）都只作用于这一支
+            // 私有目录，**永不触碰已接受页引用的文件**（旧形态共用同一个 `workout-routes/`：
+            // 重试里的一次超预算回滚可以删掉页 1 已接受、且已进清单的 GPX）。
+            // 页交付后目录保留（批次清单引用它）；页被拒时删除（下一轮换新目录重来）。
+            let pageStaging = directory.appendingPathComponent(
+                ".page-staging-\(UUID().uuidString)", isDirectory: true
+            )
+            try FileManager.default.createDirectory(at: pageStaging, withIntermediateDirectories: true)
             let page = try await workoutPage(
                 store: store, anchor: anchorBefore, predicate: workoutPredicate, limit: pageLimit
             )
@@ -476,18 +549,19 @@ nonisolated enum HealthKitExport {
             if attachmentsPending {
                 attachmentsPending = false
                 let seen = Set(page.added.map(routeFileWorkoutId))
-                rediscovery = routeForceRescan ? [] : RouteSyncStateMachine.rediscoveryCandidates(
+                rediscovery = RouteSyncStateMachine.rediscoveryCandidates(
                     existing: Array(routeStates.values),
                     currentWorkoutUUIDs: seen,
                     changedWorkoutUUIDs: seen,
                     now: routeNow,
                     cursor: routeDiscoveryCursor
                 )
-                rediscoveryIDs = Set(rediscovery)
-                // O02/WP-11：rediscovery 候选**并入待办队列** —— 后者是"没有状态行"的
-                // UUID 的**唯一**发现通道（`rediscoveryCandidates` 只遍历已有状态行，
-                // 从没查过的历史训练不在其中；这正是 O02 修正的缺口）。
-                let dueIDs = Set(rediscovery).union(pendingRouteTodos)
+                // O02/WP-11 + R07：rediscovery 候选**并入待办队列的可执行子集** —— 后者是
+                // "没有状态行"的 UUID 的**唯一**发现通道（`rediscoveryCandidates` 只遍历已有
+                // 状态行，从没查过的历史训练不在其中；这正是 O02 修正的缺口）。
+                // R07：只并**可执行**的待办 —— blocked-size 与退避未到期的 UUID 不进发现
+                // 通道，因此不会每轮被重新取回、重读同一份不可装入的 GPX。
+                let dueIDs = Set(rediscovery).union(executableTodoIDs)
                 let historicalIDs = dueIDs.sorted().filter { !seen.contains($0) }
                 var discovered: [HKWorkout] = []
                 if !historicalIDs.isEmpty {
@@ -511,7 +585,11 @@ nonisolated enum HealthKitExport {
             if streamDone {
                 // 流已尽：锚可安全推进到末尾（没有任何未消费的流变更）。剩下的只有附件页。
                 deliveredAnchor = page.next
-                if attachmentWorkouts.isEmpty { break }
+                if attachmentWorkouts.isEmpty {
+                    // R04：本页没有产出（空附件页）⇒ 页级暂存目录没有内容，删掉它。
+                    try? FileManager.default.removeItem(at: pageStaging)
+                    break
+                }
             }
             // 页数组 = 本页 added ∪ 附加集合（后者交付后即清空）；同一比较器排序（确定性）。
             var merged = Dictionary(uniqueKeysWithValues: page.added.map {
@@ -552,16 +630,35 @@ nonisolated enum HealthKitExport {
             // 记下停因让 `hasMorePages` 为真 ⇒ 调用方续批；未取到的 workout 保持原状态，
             // 由 `rediscoveryCandidates` 在下一轮继续发现。
             if routeBudgetExhausted { routeStopReason = .routeFile }
-            if !routeBudgetExhausted && RouteSyncStateMachine.shouldQuery(
+            // 🔴 B02（2026-10-17）：所有来源（正式页 / 近期回填 / rediscovery / 待办）在
+            // fetch 之前统一过 `RouteQueryPolicy`。
+            //
+            // 旧条件把四个放行口**并排**写在这里：`previous.status != .settled`、
+            // `hasWorkoutChange`、`rediscoveryIDs`、`executableTodoIDs`（全量重扫标志已删除）。
+            // 于是同一条已被调度器判为 `blocked-size` / 未到期 `retry-wait` 的 UUID，
+            // 只要被"近期窗口"或"正式页变更"重新发现一次，就绕过调度读一遍那份装不下的
+            // GPX —— 调度器本身没错，错在它不是唯一入口。
+            let queryDecision = RouteQueryPolicy.decide(
+                todo: pendingTodoByUUID[routeKey],
                 existing: previous,
                 now: routeNow,
-                isForceManualRescan: routeForceRescan,
-                hasWorkoutChange: hasWorkoutChange
-            ) && (previous.status != .settled || routeForceRescan || hasWorkoutChange || rediscoveryIDs.contains(routeKey)) {
+                maxRouteBytes: budget.maxRouteBytes,
+                maxRouteFiles: budget.maxRouteFiles,
+                hasWorkoutChange: hasWorkoutChange,
+                // §4.2 步骤 6：定点重试只重开这一条；其他 UUID 的退避/阻塞不受影响。
+                isExplicitRetry: retryWorkoutIDs.contains(routeKey),
+                routeBudgetExhausted: routeBudgetExhausted
+            )
+            if queryDecision.executes {
+                // R07：`executableTodoIDs` 是第四条件的**定点补查**通道 —— 待办被调度为
+                // 可执行时不服从 `settled` 的降频（否则"有待办 + 已有状态行"的组合会每轮
+                // 被发现、每轮被跳过，卡在队列里永远不查）。
                 let fetch = try await routeEntries(
                     for: workout,
                     store: store,
-                    directory: directory,
+                    // R04：页级暂存目录（不是批次目录）—— 本条的一切写入与"装不下 ⇒ 删
+                    // 本轮分片"的回滚都只作用于本页私有文件；已接受页的产物不受影响。
+                    directory: pageStaging,
                     warnings: warnings,
                     budget: budget,
                     usedRouteBytes: routeBytes + pageRouteBytes,
@@ -570,25 +667,70 @@ nonisolated enum HealthKitExport {
                 // An observation hash is not a server acknowledgement: a prior
                 // GPX may still be pending after a quota refusal. Keep bounded
                 // route retries until the protocol can acknowledge each route.
-                if fetch.budgetExhausted {
+                // Switches on the **discriminated outcome**, never on `!budgetExhausted`:
+                // a failed read (`RouteFetch.empty`) also has `budgetExhausted == false`,
+                // and treating it as "done" used to drop the only retry lead (R03).
+                // R07 同时修正归类：余额不足写 `routeBudget`、确实超满额才写 `routeOversized`。
+                switch fetch.outcome {
+                case .oversized:
                     // 整条轨迹装不进剩余额度：`routeEntries` 已把本轮分片回滚 ⇒ 零文件、
-                    // 状态一个字不动（与 `else` 分支同语义，只是原因不同）。
+                    // 状态一个字不动；且**已知**该 workout 自身就超过满额预算 —— 额度重置
+                    // 也装不下它。静默跳过会让用户永远不知道有数据没同步（P2-3），如实上报。
                     routeFiles = []
                     routeStopReason = .routeFile
-                    // O02/WP-11：登记持久待办（区别于一次性 warning：待办跨批次存活，
-                    // 下一批仍会定点重试它；"整条超满额"的阻塞态也要有最终的可见性）。
-                    pageNewTodos[routeKey] = PendingRouteTodo(
+                    // O02/WP-11 + R07：登记/更新为**持久 size 阻塞**（含**当时**的预算能力
+                    // 指纹）—— 下批不再自动重读同一份不可装入的 GPX；只有能力提高或
+                    // 用户显式重试（`reopened`）才重开。"整条超满额"的阻塞态也要有可见性。
+                    // 记账走 `todoUpdates`（导出后立即落盘）：这是与页无关的事实，
+                    // 不随页的交付/拒绝回退。
+                    let oversizedBase = pendingTodoByUUID[routeKey] ?? PendingRouteTodo(
                         workoutUUID: routeKey, reason: .routeOversized, createdAt: routeNow
                     )
-                    // P2-3A：单条轨迹超过**满额**单批预算 —— 额度重置也装不下它。静默跳过会让
-                    // 用户永远不知道有数据没同步（2026-10-15 审查 P2-3），这里如实上报。
-                    if fetch.oversized {
-                        warnings.add("有一条跑步轨迹超过单批上限，暂未同步：\(routeKey)；已保留其同步状态")
+                    todoUpdates[routeKey] = RouteTodoScheduler.afterOversized(
+                        oversizedBase, now: routeNow,
+                        maxRouteBytes: budget.maxRouteBytes, maxRouteFiles: budget.maxRouteFiles
+                    )
+                    warnings.add("有一条跑步轨迹超过单批上限，暂未同步：\(routeKey)；已保留其同步状态")
+                case .budgetDeferred:
+                    // 余额不足（本轮分片已回滚、状态不动）：下批满额可再试 —— 不是"超满额"。
+                    // R07：这条**不**改调度状态（余额不足不是这条路线的属性；已在队列里的
+                    // 保持原状态 —— `todoUpdates` 底稿里已有它的现值）。只登记新发现的。
+                    routeFiles = []
+                    routeStopReason = .routeFile
+                    pageNewTodos[routeKey] = PendingRouteTodo(
+                        workoutUUID: routeKey, reason: .routeBudget, createdAt: routeNow
+                    )
+                case .unreadable:
+                    // 🔴 R03：读取失败 ≠ 完成。待办**保留**（不记入 completed），状态一个字不动。
+                    // `RouteFetch.empty`（授权拒绝 / 无数据 / 部分分段失败）曾经因为
+                    // `budgetExhausted == false` 落进"完成"分支：那条路线的唯一重试线索被删掉，
+                    // 而**无状态行**的 UUID 只能靠待办队列被发现（`rediscoveryCandidates`
+                    // 只遍历已有状态行）⇒ 重启后永久不可发现。下轮由状态行的重查间隔、
+                    // 发现队列或这条待办再次重试（读取失败本身是安全的：零文件、零状态推进）。
+                    routeFiles = []
+                    // R07：读取暂不可用 ⇒ **有界退避**（尝试 +1、`nextRetryAt` 由调度器给出）。
+                    // 🔴 R03 的注释说过"普通 workout 的失败由状态行与发现队列的常规节奏重试"。
+                    // 那个前提在**首次读取就失败**时不成立：它没有状态行（`rediscoveryCandidates`
+                    // 只遍历已有状态行）、不在待办队列里、14 天近期窗口又够不到它，而 anchor
+                    // 已经越过它 —— 四条发现通道同时关闭，这条路线永久不可发现（第三轮，2026-10-17）。
+                    // 现在：首次失败也登记持久待办，按同一套有界退避定点重试。
+                    let unreadable = RouteTodoScheduler.afterUnreadableFailure(
+                        existing: pendingTodoByUUID[routeKey],
+                        now: routeNow,
+                        workoutUUID: routeKey
+                    )
+                    if pendingTodoByUUID[routeKey] == nil {
+                        // 新登记与页交付同进同退：页被拒时下一批从同一 anchor 重查，
+                        // 不会把同一次失败计成两次尝试。
+                        pageNewTodos[routeKey] = unreadable
+                    } else {
+                        todoUpdates[routeKey] = unreadable
                     }
-                } else {
+                case .observation(let observation):
                     routeFiles = fetch.entries
                     // O02/WP-11：这条待办路线**查过了** —— 记入可移除（页交付后才生效；
-                    // 移除本身由调用方在**批次持久提交成功之后**执行）。
+                    // 移除本身由调用方在**批次持久提交成功之后**、与状态落盘同一个本地
+                    // 短事务里执行 —— 见 `SyncTaskStore.upsertRouteStates(removePendingTodos:)`）。
                     if pendingRouteTodoSet.contains(routeKey) {
                         pageCompletedTodos.append(routeKey)
                     }
@@ -596,15 +738,12 @@ nonisolated enum HealthKitExport {
                     // 取 `fetch.bytes`（写文件时算好的 `document.utf8.count`）而不是回头再 `statSync`：
                     // 值与盘上逐字节同一次，且和 `entries` 严格同进同退。
                     pageRouteBytes += fetch.bytes
-                    if let observation = fetch.observation {
-                        pageRouteDecisions[routeKey] = RouteSyncStateMachine.decide(
-                            existing: previous,
-                            observation: observation,
-                            now: routeNow,
-                            isForceManualRescan: routeForceRescan,
-                            hasWorkoutChange: hasWorkoutChange
-                        ).nextState
-                    }
+                    pageRouteDecisions[routeKey] = RouteSyncStateMachine.decide(
+                        existing: previous,
+                        observation: observation,
+                        now: routeNow,
+                        hasWorkoutChange: hasWorkoutChange
+                    ).nextState
                 }
             } else {
                 // 跳过：这一轮既不产出任何 route 文件，也不改动状态一个字。
@@ -619,22 +758,26 @@ nonisolated enum HealthKitExport {
                 // 这里的省略就会变成"把服务端的轨迹删掉"。
                 routeFiles = []
                 // O02/WP-11：**区分两种跳过** —— 预算拒绝（本应查 ⇒ 登记持久待办，下批从
-                // 待办队列定点补查）与状态机决定不查（有记忆、不算待办）。判据用**同一**个
-                // 生产函数 `shouldQuery`（与上方闸门逐字同参，不重写阈值）。
-                if routeBudgetExhausted && RouteSyncStateMachine.shouldQuery(
-                    existing: previous,
-                    now: routeNow,
-                    isForceManualRescan: routeForceRescan,
-                    hasWorkoutChange: hasWorkoutChange
-                ) && (previous.status != .settled || routeForceRescan || hasWorkoutChange || rediscoveryIDs.contains(routeKey)) {
-                    pageNewTodos[routeKey] = PendingRouteTodo(
+                // 待办队列定点补查）与调度/状态机决定不查（有记忆、不算待办）。
+                //
+                // 🔴 R07 步骤 9：已有待办必须**原样带旧对象**。用三字段新构造的 todo 会把
+                // `schedState` / `attemptCount` / `nextRetryAt` / `blockedBudgetFingerprint`
+                // 清成 NULL ⇒ 读侧按 ready 解释 ⇒ 退避与 size 阻塞每批被意外复位 ——
+                // 那正是"无限续批"复发的方式。
+                if case .deferred(reason: .routeBudget) = queryDecision,
+                   RouteSyncStateMachine.shouldQuery(
+                       existing: previous,
+                       now: routeNow,
+                       hasWorkoutChange: hasWorkoutChange
+                   ) {
+                    pageNewTodos[routeKey] = pendingTodoByUUID[routeKey] ?? PendingRouteTodo(
                         workoutUUID: routeKey, reason: .routeBudget, createdAt: routeNow
                     )
                 }
             }
             // The recent window and bounded historical queue only discover late
             // routes. Without a workout change or a GPX retry, omit workout XML.
-            guard hasWorkoutChange || routeForceRescan || !routeFiles.isEmpty else { continue }
+            guard hasWorkoutChange || !routeFiles.isEmpty else { continue }
             // R4b：本页先渲染进**内存缓冲** —— 写前字节闸门在页边境界定，
             // 整页放不下时一个字都不落盘（见页尾的 `budget.accepts`）。
             pageExported.append(workout)
@@ -647,6 +790,9 @@ nonisolated enum HealthKitExport {
         let pageBytes = pageText.utf8.count
         guard budget.accepts(xmlBytes: xml.offsetInFile, records: recordCount,
                              pageBytes: pageBytes, pageRecords: 0) else {
+            // R04：被拒页的页级暂存目录整支删除 —— 它含本页已渲染但未交付的一切路线
+            // 产物；已接受页的文件在**各自**的目录里，物理上不可能被这次删除碰到。
+            try? FileManager.default.removeItem(at: pageStaging)
             if let shrunk = WorkoutPageShrink.nextLimit(after: pageLimit) {
                 // 整页放不下 ⇒ 缩查询页从**同一** `anchorBefore` 重查（更小页更可能放得下）。
                 pageLimit = shrunk
@@ -661,7 +807,10 @@ nonisolated enum HealthKitExport {
         exportedWorkouts.append(contentsOf: pageExported)
         routeCount += pageRouteCount
         routeBytes += pageRouteBytes
-        files.append(contentsOf: pageRouteFiles)
+        // R04：页交付 ⇒ 把本页路线文件并入**批次级清单**，按相对路径去重 —— 同名的后写
+        // 版本**原子替换**前页的引用（"正式流版本优先"；不"遇到重复就丢弃后者"）。
+        // 页级暂存目录继续保留：清单里的 `url` 指向它，打包时读的就是这里的版本。
+        routeBatchFiles.merge(pageRouteFiles)
         // O01：页**完整交付** ⇒ 锚推进 + 本页删除并入池（未交付页的删除不进池、随锚一起
         // 回退，下批从同一 `anchorBefore` 重来 —— 与锚推进严格同进退）。
         for object in page.deleted where freshWorkoutIdSet.insert(object.uuid.uuidString).inserted {
@@ -701,7 +850,7 @@ nonisolated enum HealthKitExport {
         await onProgress("正在读取心率与恢复数据")
         try Task.checkCancellation()
         let records = try await writeGlobalRecords(
-            store: store, cursorData: recordCursors, forceHistory: recordsForceRescan,
+            store: store, cursorData: recordCursors,
             xml: xml, warnings: warnings, budget: budget,
             deletionAllocation: allocation,
             // B2：轮转起点透传（窗口 pass 不受轮转影响 —— 它恒扫全部类型）。
@@ -729,7 +878,26 @@ nonisolated enum HealthKitExport {
         ]
         let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys])
         try manifestData.write(to: manifestURL, options: .atomic)
+        // R04：页面阶段收集的路线文件**在此一次并入**（按首次出现顺序；同名已在页交付时
+        // 被后页版本替换）。顺序 = 页序（确定性）；路径集合在下面自校验唯一。
+        files.append(contentsOf: routeBatchFiles.files)
         files.append(("sync-manifest.json", manifestURL))
+
+        // R04 步骤 6：**打包前自校验** —— 路径集合唯一 + 每个引用真实存在。
+        // 这是上游的明确判据（不是靠 ZIP 写入器兜底）：唯一性破了就当场失败、保留可恢复
+        // 状态（任务行与产物都还在，下一次同步从同一份本地产物接着走）——绝不把一份
+        // 必被接收器拒收的载荷发出去。
+        do {
+            var seenArtifactNames = Set<String>()
+            for file in files {
+                guard seenArtifactNames.insert(file.name).inserted else {
+                    throw HealthKitExportError.duplicateArtifactPath(file.name)
+                }
+                guard FileManager.default.fileExists(atPath: file.url.path) else {
+                    throw HealthKitExportError.missingArtifact(file.name)
+                }
+            }
+        }
 
         // 打包是本批"读取"的最后一步（写出 ZIP 仍属于把这一批准备好），沿用同一条 §10.3 文案。
         await onProgress(DirectSyncCopy.readingIncrement)
@@ -743,6 +911,9 @@ nonisolated enum HealthKitExport {
             try? FileManager.default.removeItem(at: zipURL)
             throw error
         }
+        // R07：待办调度的最终输出 = 被尝试待办的结局更新 ∪ 本批新登记（新登记覆盖）。
+        var finalRouteTodos = todoUpdates
+        for (uuid, todo) in newRouteTodos { finalRouteTodos[uuid] = todo }
         return HealthKitExportResult(
             zipURL: zipURL,
             workoutCount: exportedWorkouts.count,
@@ -777,8 +948,12 @@ nonisolated enum HealthKitExport {
             ),
             // B2：下一批的轮转起点（由 `writeGlobalRecords` 算出并回传）。
             nextTypeRotationStart: records.nextTypeRotationStart,
-            // O02/WP-11：排序输出（表键 `(scope, uuid)`，顺序只影响确定性，不影响语义）。
-            pendingRouteTodos: newRouteTodos.values.sorted { $0.workoutUUID < $1.workoutUUID },
+            // O02/WP-11 + R07：排序输出（表键 `(scope, uuid)`，顺序只影响确定性，不影响语义）。
+            // 🔴 R07：输出 = **调度更新**（`finalRouteTodos`：被尝试待办的结局 + 显式重开的
+            // 复位）∪ 本批新登记；同名时新登记覆盖（较新的判定）。旧的 `blocked-size`/退避
+            // 行**原样带着调度字段**回传 ⇒ 调用方 upsert 时不会把它们清成 ready（否则
+            // 退避/阻塞每批被意外复位 = 把 R07 要治的"无限续批"放回来）。
+            pendingRouteTodos: finalRouteTodos.values.sorted { $0.workoutUUID < $1.workoutUUID },
             completedRouteTodos: completedRouteTodos
         )
     }
@@ -1090,7 +1265,6 @@ nonisolated enum HealthKitExport {
     private static func writeGlobalRecords(
         store: HKHealthStore,
         cursorData: Data?,
-        forceHistory: Bool,
         xml: FileHandle,
         warnings: WarningBag,
         budget: DirectSyncBatchBudget,
@@ -1182,7 +1356,7 @@ nonisolated enum HealthKitExport {
             // force）时才补读近窗。稳态（普通增量）下正式流本身就近实时，每批补读窗口
             // 只是白花查询与预算。
             let needsRecentWindow = previousWindow == nil
-                || previousWindow!.needsHistoryRead(now: now, force: forceHistory)
+                || previousWindow!.needsHistoryRead()
             guard needsRecentWindow else { continue }
             let windowStart = max(
                 now.addingTimeInterval(-Self.recentWindowLookback),
@@ -1269,11 +1443,11 @@ nonisolated enum HealthKitExport {
             await onProgress("正在读取健康记录 \(offset + 1)/\(descriptors.count)（已 \(count) 条）")
             let previous = cursors[xmlType]
             let decoded = previous.flatMap { decodeAnchor($0.anchor) }
-            guard previous == nil || decoded != nil || forceHistory else {
+            guard previous == nil || decoded != nil else {
                 throw HealthKitExportError.invalidRecordAnchor
             }
             let history = previous == nil || decoded == nil
-                || previous!.needsHistoryRead(now: now, force: forceHistory)
+                || previous!.needsHistoryRead()
             do {
                 // 本轮的段计划由 `RecordReplayPlan`（纯逻辑，回归逐组合钉着）决定：
                 // 初次重放 = 先增量段（保住删除事件）再历史段（从头）；上轮中断在历史段 =
@@ -1618,6 +1792,34 @@ nonisolated enum HealthKitExport {
         let oversized: Bool
 
         static let empty = RouteFetch(entries: [], observation: nil, bytes: 0, budgetExhausted: false, oversized: false)
+
+        /// 🔴 R03（2026-10-16 复查）：路线的**结局面** —— 不再让调用方用
+        /// `!budgetExhausted` 这个布尔补集去近似"成功"。
+        ///
+        /// 缺陷形态（复查证据："`observation == nil` 的失败结果进入完成分支"）：
+        /// `RouteFetch.empty`（授权拒绝 / 无数据 / 部分分段失败的**读取失败**）的
+        /// `budgetExhausted == false` ⇒ 旧调用侧把它读成"查完了" ⇒ 把待办从队列里移除 ——
+        /// 而**没有状态行**的 UUID 只能靠待办队列被发现（`rediscoveryCandidates` 只遍历
+        /// 已有状态行）⇒ 那条路线重启后永久不可发现。
+        ///
+        /// 四态互斥且穷尽；调用方 `switch` 它，漏判在编译期可见。
+        var outcome: Outcome {
+            if budgetExhausted { return oversized ? .oversized : .budgetDeferred }
+            if let observation { return .observation(observation) }
+            return .unreadable
+        }
+
+        nonisolated enum Outcome {
+            /// 完整观测（含"零个点"的**合法零点**）：可以推进状态、可以把待办记入完成候选。
+            case observation(RouteObservation)
+            /// 暂不可读（读取失败；`RouteFetch.empty`）：状态一个字不动、待办**保留**
+            ///（删掉它 = 把唯一的重试线索删掉）。
+            case unreadable
+            /// 余额不足（本轮的 workout 已按分片回滚）：登记/保留待办，下批满额可再试。
+            case budgetDeferred
+            /// 这条轨迹**按满额预算也装不下**：登记待办 + 可见警告，不无限前台重试。
+            case oversized
+        }
     }
 
     private static func routeEntries(
@@ -1644,15 +1846,20 @@ nonisolated enum HealthKitExport {
             if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
             throw error
         }
-        var entries: [(name: String, url: URL)] = []
-        // 本 workout 已写出的**字节**（口径 = 盘上 GPX 的 UTF-8 字节数，与服务端
-        // `statSync` 的累计口径一致）。与 `entries` 严格同进同退：判定失败时一起回退。
-        var writtenBytes = 0
         let routesDirectory = directory.appendingPathComponent("workout-routes", isDirectory: true)
         try FileManager.default.createDirectory(at: routesDirectory, withIntermediateDirectories: true)
-        let workoutId = routeFileWorkoutId(workout)
-        var digest = SHA256()
-        var pointTotal = 0
+        // 🔴 流式写出（第三轮，2026-10-17）：旧实现先把整段路线拼成一个 `String`、算完字节
+        // 再判预算 —— 一条 24 小时越野在"判定不通过"之前就已经付出整串内存。现在逐点写、
+        // 逐点累计字节与 SHA256，每 512 点判一次预算，超限当场停读。
+        // 产物与旧的 `gpx(_:)` 逐字节相同（格式串只有 `RouteGpxWriter.pointXML` 一份实现）。
+        let writer = RouteGpxWriter(
+            directory: directory,
+            workoutId: routeFileWorkoutId(workout),
+            maxRouteBytes: budget.maxRouteBytes,
+            maxRouteFiles: budget.maxRouteFiles,
+            usedRouteBytes: usedRouteBytes,
+            usedRouteFiles: usedRouteFiles
+        )
         var complete = true
         for route in routes {
             try Task.checkCancellation()
@@ -1669,57 +1876,42 @@ nonisolated enum HealthKitExport {
                     complete = false
                     continue
                 }
+                writer.abort()
                 if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
                 throw error
             }
             guard !locations.isEmpty else { continue }
             try Task.checkCancellation()
-            let document = try gpx(locations)
-            let bytes = document.utf8.count
-            // 🔴 写前判定（与记录侧同一纪律）：**先算字节、判定放得下，再落盘**。
-            // 旧写法"先落盘、由调用方在下一轮判" ⇒ 单批可超额**一整个 GPX 文件**
-            // （2026-10-14 真机：route 34,009,725 B / 58 文件，均值 586 KB，最坏可达数 MB）。
-            // 装不下 ⇒ **整个 workout 的轨迹一起放弃**，并删掉本轮已写的分片：半条轨迹比没有更坏
-            // （xml 不声明它 ⇒ 载荷里会多出一个无主文件）。
-            if budget.routeBudgetExhausted(
-                routeBytes: usedRouteBytes + writtenBytes + bytes,
-                routeFiles: usedRouteFiles + entries.count + 1
-            ) {
-                for entry in entries { try? FileManager.default.removeItem(at: entry.url) }
-                // P2-3A：细分两种放弃 ——「余额暂时不足」（下批满额可再试，保持既有轮转语义）
-                // 与「这条轨迹**自身**超过满额预算」（bytes > maxRouteBytes ⇒ 任何批次都装不下）。
-                // 后者必须上报可见警告（调用侧），否则用户永远不知道有数据没同步。
-                let oversized = bytes > budget.maxRouteBytes
+            do {
+                for location in locations {
+                    try writer.append(RouteGpxPoint(location))
+                }
+                try writer.endSegment()
+            } catch let stop as RouteGpxBudgetStop {
+                // 装不下 ⇒ **整个 workout 的轨迹一起放弃**：半条轨迹比没有更坏
+                // （xml 不声明它 ⇒ 载荷里会多出一个无主文件）。
+                writer.abort()
                 return RouteFetch(entries: [], observation: nil, bytes: 0,
-                                  budgetExhausted: true, oversized: oversized)
-            }
-            let name = "workout-routes/\(workoutId)_\(entries.count + 1).gpx"
-            let url = directory.appendingPathComponent(name)
-            try document.write(to: url, atomically: true, encoding: .utf8)
-            if FileManager.default.fileExists(atPath: url.path) {
-                entries.append((name: name, url: url))
-                pointTotal += locations.count
-                writtenBytes += bytes
-                digest.update(data: Data(document.utf8))
-            } else {
-                // 2026-10-15（审查 A-🔡1）：写入成功但文件不在（极罕见）⇒ 该条此前被
-                // **静默丢弃**（不进 entries、不进 warnings、xml 也不声明它）。给一条可见
-                // 警告，避免"单条轨迹没同步"完全没有线索。
-                warnings.add("有一条轨迹写入后未找到；本条未计入，已保留其同步状态")
+                                  budgetExhausted: true, oversized: stop == .oversized)
+            } catch {
+                writer.abort()
+                if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
+                throw error
             }
         }
         // 部分段读取失败也不输出不完整路线，不以它覆盖已有 GPX 或积累稳定证据。
         guard complete else {
-            for entry in entries { try? FileManager.default.removeItem(at: entry.url) }
+            writer.abort()
             return .empty
         }
         // 查询成功且没有任何条目 ⇒ 观测是"0 个点、没有摘要"。摘要用 `nil` 而不是空 SHA256 的十六进制：
         // 后者是一个"看起来像内容摘要"的值，会让"没有轨迹"和"有一段空轨迹"变成两回事。
+        let written = try writer.finish()
         let observation = RouteObservation(
-            pointCount: entries.isEmpty ? 0 : pointTotal,
-            routeHash: entries.isEmpty ? nil : digest.finalize().map { String(format: "%02x", $0) }.joined()
+            pointCount: written.pointCount,
+            routeHash: written.routeHash
         )
-        return RouteFetch(entries: entries, observation: observation, bytes: writtenBytes,
+        return RouteFetch(entries: written.entries, observation: observation, bytes: written.bytes,
                           budgetExhausted: false, oversized: false)
     }
 
@@ -1766,28 +1958,17 @@ nonisolated enum HealthKitExport {
         }
     }
 
+    /// 把一组点组合成一份 GPX 文档。**仅供回归做字节对照**：生产路径走 `RouteGpxWriter` 的流式写出，
+    /// 两者共用同一份逐点格式（`RouteGpxWriter.pointXML`），所以"流式 == 组合"是可断言的。
     private static func gpx(_ locations: [CLLocation]) throws -> String {
-        var xml = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <gpx version="1.1" creator="RAI">
-          <trk><name>RAI HealthKit route</name><trkseg>
-        """
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
+        var xml = RouteGpxWriter.header
         for location in locations {
             try Task.checkCancellation()
-            xml += "\n    <trkpt lat=\"\(location.coordinate.latitude)\" lon=\"\(location.coordinate.longitude)\">"
-            if location.verticalAccuracy >= 0 {
-                xml += "<ele>\(location.altitude)</ele>"
-            }
-            xml += "<time>\(iso.string(from: location.timestamp))</time>"
-            if location.speed >= 0 { xml += "<speed>\(location.speed)</speed>" }
-            if location.course >= 0 { xml += "<course>\(location.course)</course>" }
-            if location.horizontalAccuracy >= 0 { xml += "<hAcc>\(location.horizontalAccuracy)</hAcc>" }
-            if location.verticalAccuracy >= 0 { xml += "<vAcc>\(location.verticalAccuracy)</vAcc>" }
-            xml += "</trkpt>"
+            xml += RouteGpxWriter.pointXML(RouteGpxPoint(location), iso: iso)
         }
-        xml += "\n  </trkseg></trk>\n</gpx>\n"
+        xml += RouteGpxWriter.footer
         return xml
     }
 
@@ -1924,6 +2105,11 @@ nonisolated enum HealthKitExport {
         try? NSKeyedUnarchiver.unarchivedObject(ofClass: HKQueryAnchor.self, from: data)
     }
 
+    /// 供修复入口判断"这个锚还解不解得开"（与导出侧**同一个**解码实现）。
+    static func anchorIsReadable(_ data: Data) -> Bool {
+        decodeAnchor(data) != nil
+    }
+
     private static func isIndoor(_ workout: HKWorkout) -> Bool {
         if let value = workout.metadata?[HKMetadataKeyIndoorWorkout] as? Bool { return value }
         if let value = workout.metadata?[HKMetadataKeyIndoorWorkout] as? NSNumber { return value.boolValue }
@@ -2009,6 +2195,25 @@ nonisolated enum HealthKitExport {
     private static func write(_ handle: FileHandle, _ text: String) throws {
         guard let data = text.data(using: .utf8) else { return }
         try handle.write(contentsOf: data)
+    }
+}
+
+/// `CLLocation` → `RouteGpxPoint`。
+///
+/// 旧格式里"精度/速度/航向为负"就等于**省略该字段**（不是写 `-1`）。这里把它们映射成 `nil`，
+/// 保持字节一致；负精度的点仍然保留时间与坐标，这是 Apple 的"不可信定位"的常见形态。
+private extension RouteGpxPoint {
+    nonisolated init(_ location: CLLocation) {
+        self.init(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            elevationMeters: location.verticalAccuracy >= 0 ? location.altitude : nil,
+            timestamp: location.timestamp,
+            speedMetersPerSecond: location.speed >= 0 ? location.speed : nil,
+            courseDegrees: location.course >= 0 ? location.course : nil,
+            horizontalAccuracyMeters: location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil,
+            verticalAccuracyMeters: location.verticalAccuracy >= 0 ? location.verticalAccuracy : nil
+        )
     }
 }
 #endif

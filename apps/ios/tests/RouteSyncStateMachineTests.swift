@@ -284,32 +284,13 @@ struct RouteSyncStateMachineTests {
         check(grantedLater.shouldQuery && grantedLater.nextState.status == .active,
               "late arrival or later read permission recovers automatically after repeated empty observations")
 
-        // ---- 8. 人工重扫：回 active、稳定计数清零、这一轮必查。
-        //      清零放在**变化判定之前**是必须的：一条恰好没变的轨迹若保留了旧的
-        //      `stableCheckCount`，重扫完的第一轮就又够格降频 —— 那等于没重扫。
-        let woken = RouteSyncStateMachine.decide(
-            existing: settled,
-            observation: observation(500, "h1"),
-            now: end.addingTimeInterval(10 * day),
-            isForceManualRescan: true
-        )
-        check(woken.shouldQuery, "a manual rescan always queries")
-        check(woken.nextState.status == .active, "a manual rescan resets the status to active")
-        check(woken.nextState.stableCheckCount == 0, "a manual rescan wipes the stability count even for an identical look")
-        check(
-            woken.nextState.lastCheckedAt == end.addingTimeInterval(10 * day),
-            "a manual rescan stamps the batch clock"
-        )
-        let forcedIdentical = RouteSyncStateMachine.decide(
-            existing: record(.cooling, checkedAt: end, stable: 5),
-            observation: observation(500, "h1"),
-            now: end.addingTimeInterval(hour),
-            isForceManualRescan: true
-        )
-        check(
-            forcedIdentical.nextState.stableCheckCount == 0 && forcedIdentical.nextState.status == .active,
-            "a manual rescan must not let an unchanged route keep its old stability count"
-        )
+        // ---- 8. 人工全量重扫通道**已删除**（2026-10-17）。
+        //
+        //  `decide` / `shouldQuery` 不再接受 `isForceManualRescan`：它唯一的调用方是
+        //  「重新导入全部」，而那个入口会把 `sync_state` 整行与全部游标清空 —— 与
+        //  "永不自动清空游标、不做全量同步"的边界冲突。现在恢复只能由用户显式点
+        //  「修复增量游标」（只清损坏项）触发；普通同步没有任何"复位全部状态"的通道。
+        //  这条删除由**编译期**保证：那两处形参不存在，任何调用点都会编译失败。
 
         // ---- 9. 不变式（对全部状态成立）：`shouldQuery == false` ⇒ 状态原样携带。
         //      把它写成一条遍历断言，是为了让以后**新增一个状态**时自动被覆盖 ——
@@ -382,6 +363,34 @@ struct RouteSyncStateMachineTests {
         check(candidates([notDue]).isEmpty, "not-yet-due settled routes are not admitted to rediscovery")
         check(candidates(backlog, cursor: "deleted-cursor") == candidates(backlog),
               "a cursor whose row disappeared still has a deterministic next page")
+
+        // ---- 12. 首次读取失败必须留下重试入口（第三轮，2026-10-17）。
+        //      旧实现只给"已在队列里"的待办退避；"没有状态行、也没有待办"的迟到训练在
+        //      anchor 越过之后再无发现通道。这条用例把"新建 → 退避 → 到期可执行 → 计次"
+        //      整条链路钉住。
+        let firstFailure = RouteTodoScheduler.afterUnreadableFailure(
+            existing: nil, now: end, workoutUUID: uuid
+        )
+        check(firstFailure.reason == .routeUnreadable,
+              "a first read failure creates a persistent todo instead of dropping the only retry lead")
+        check(firstFailure.effectiveState == .retryWait && firstFailure.effectiveAttempts == 1,
+              "the new todo backs off instead of retrying on the next batch")
+        // 退避 = base × 2^attempts（base 30min，attempts=1 ⇒ 60min）。
+        check(firstFailure.nextRetryAt == end.addingTimeInterval(3_600),
+              "the first backoff is base x 2^1")
+        check(!RouteTodoScheduler.isExecutable(
+            firstFailure, now: end.addingTimeInterval(60), maxRouteBytes: 4_000_000, maxRouteFiles: 40
+        ), "the new todo is not executable before its nextRetryAt")
+        check(RouteTodoScheduler.isExecutable(
+            firstFailure, now: end.addingTimeInterval(3_601), maxRouteBytes: 4_000_000, maxRouteFiles: 40
+        ), "it becomes executable once the backoff expires")
+        let secondFailure = RouteTodoScheduler.afterUnreadableFailure(
+            existing: firstFailure, now: end.addingTimeInterval(3_600), workoutUUID: uuid
+        )
+        check(secondFailure.effectiveAttempts == 2 && secondFailure.createdAt == firstFailure.createdAt,
+              "a repeated failure keeps the queue age and raises the attempt count")
+        check(secondFailure.nextRetryAt == end.addingTimeInterval(3_600 + 7_200),
+              "the second backoff doubles (base x 2^2) instead of resetting")
 
         print("\(checks) route sync state machine checks passed")
     }

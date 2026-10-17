@@ -66,6 +66,7 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/DirectSyncReceiptState.swift \
   apps/ios/RAI/SyncTaskState.swift \
+  apps/ios/RAI/RouteSyncState.swift \
   apps/ios/tests/SyncTaskMigrationRegression.swift \
   -o "$tmp/sync-task-migration-tests"
 "$tmp/sync-task-migration-tests"
@@ -155,6 +156,17 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   -o "$tmp/route-sync-state-machine-tests"
 "$tmp/route-sync-state-machine-tests"
 
+# B01/B02（第二轮复查）：路线结算的证据判据 + 最终执行闸门。
+# 两件事共用 `RouteSyncState.swift` 的同一份类型（候选/结算/策略），所以同编一个单元 ——
+# 分家会让"要删哪些待办"与"允不允许 fetch"各自演化，而它们必须回答同一个问题：
+# 这条 UUID 这一批到底有没有**完整观测**。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  apps/ios/RAI/RouteSyncState.swift \
+  apps/ios/RAI/RouteSyncStateMachine.swift \
+  apps/ios/tests/RouteCommitSettlementRegression.swift \
+  -o "$tmp/route-commit-settlement-tests"
+"$tmp/route-commit-settlement-tests"
+
 # 直连单批预算（S2.1/S2.2 + 2026-10-14 route 维度补全）：换算与边界都是纯函数，
 # 失效方向静默（换算漏 0.9 ⇒ 载荷贴服务端硬上界；闸门边界写错 ⇒ 恰好等于上界时
 # 放行一个必被拒的批）。`APIModels.swift` 必须一起编：决策依赖 `DirectSyncBounds`。
@@ -181,6 +193,16 @@ xcrun swiftc -parse-as-library -disable-sandbox \
   apps/ios/tests/RouteSyncStatePersistenceRegression.swift \
   -o "$tmp/route-sync-state-persistence-tests"
 "$tmp/route-sync-state-persistence-tests"
+
+# 路线 GPX 的**流式写出**：判据是"与旧的拼串实现逐字节相同" + 预算分类 + 放弃时不留残片。
+# 只有 `RouteGpxWriter.swift`（纯 Foundation/CryptoKit）进本单元 —— 它刻意不依赖 CLLocation，
+# 所以"格式漂移"这条在 macOS 上就能抓到，不必等真机。
+xcrun swiftc -parse-as-library -disable-sandbox \
+  -swift-version 5 -default-isolation MainActor \
+  apps/ios/RAI/RouteGpxWriter.swift \
+  apps/ios/tests/RouteGpxStreamingRegression.swift \
+  -o "$tmp/route-gpx-streaming-tests"
+"$tmp/route-gpx-streaming-tests"
 
 # 这个 python 门禁除了 iOS 源码，还读 `packages/health-export-parser/src/apple-health-parser.ts`
 # 做文本判据。静态输入面解析看不穿 bash → python 的间接层，所以这里**显式点名**它 ——

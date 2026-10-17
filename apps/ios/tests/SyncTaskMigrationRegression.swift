@@ -22,6 +22,7 @@ struct SyncTaskMigrationRegression {
         try newFieldsSurviveARoundTrip()
         try dateEncodingStrategyIsNotChanged()
         try legacyNamedArtifactsAreDetectedAsAbsent()
+        try corruptRouteCommitDegradesToNil()
         print("Sync task migration regression tests passed")
     }
 
@@ -251,6 +252,30 @@ struct SyncTaskMigrationRegression {
         let minimal = try decode(legacyMinimal)
         try require(!full.hasNamedArtifacts, "a legacy payload claimed named artifacts")
         try require(!minimal.hasNamedArtifacts, "the minimal payload claimed named artifacts")
+    }
+
+    /// B01：**损坏的路线候选不能拖垮整份任务**。
+    ///
+    /// 候选只是"这一批查过什么"的可选证据。`loadTask` 用 `try?` 解码：如果候选解不开时
+    /// 让它抛出去，整份任务会被当成"没有任务" ⇒ 升级后首次同步重导整个窗口。
+    /// 正确方向是把它降级为 `nil`（这一轮不结算、待办保留），**不是**牺牲任务行。
+    ///
+    /// 反向的失败形态也在判据里：这条不能靠"没有 routeCommit 键"通过 —— 那个用例
+    /// 被 `legacyPayloadDecodesWithNewFieldsNil` 覆盖；这里必须给一个**存在但损坏**的键。
+    private static func corruptRouteCommitDegradesToNil() throws {
+        let json = """
+        {
+          "target": "http://127.0.0.1:8787",
+          "phase": "uploading",
+          "payloadHash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "workoutCount": 3,
+          "routeCommit": { "version": 1 }
+        }
+        """
+        let task = try decode(json)
+        try require(task.routeCommit == nil, "a corrupt route candidate must degrade to nil")
+        try require(task.workoutCount == 3, "the rest of the task must survive a corrupt candidate")
+        try require(task.target == "http://127.0.0.1:8787", "the task identity must survive")
     }
 
     private static func newFieldNames(_ task: SyncTaskState) -> [(String, Any?)] {

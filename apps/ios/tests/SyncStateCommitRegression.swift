@@ -226,18 +226,24 @@ struct SyncStateCommitRegression {
         sqlite3_exec(control, "DROP TRIGGER fail_task_delete", nil, nil, nil)
         sqlite3_close(control)
 
-        // ---- 4. `forgetState`：「重新导入全部」用它。删**整行**，这样"从未提交过"与
-        //      "提交过、值是空"不会变成同一种形状 —— 后者会让 `HealthKitSync` 的
-        //      迁移回退把老 `UserDefaults` 键又读回来。
-        check(store.loadState(scope: "s1") != nil, "state exists before a full re-import")
-        check(store.forgetState(scope: "s1"), "forgetState succeeds")
-        check(store.loadState(scope: "s1") == nil, "forgetState removes the row, not just its values")
-        check(store.load(scope: "s1") == Data([7]), "forgetState leaves the task row alone")
+        // ---- 4. 定点清除（2026-10-17）：只剩"清锚"与"清指定类型游标"两种原语。
+        //      整行删除（`forgetState`）已随「重新导入全部」删除 —— 它是唯一能把
+        //      `sync_state` 整行抹掉的地方，留着它边界就只是 UI 约定。
+        // 上一段成功提交（`advance(late)` + `anchor: nil`）留下的状态：
+        // anchor = anchorB、exportEnd = late、任务行已被该次提交清掉。
+        check(store.loadState(scope: "s1")?.exportEnd == late, "the watermark is present before the repair")
+        check(store.loadState(scope: "s1")?.workoutAnchor == anchorB, "the anchor is present before the repair")
+        check(store.clearWorkoutAnchor(scope: "s1"), "clearing the workout anchor succeeds")
+        check(store.loadState(scope: "s1")?.workoutAnchor == nil, "only the anchor is cleared")
+        check(store.loadState(scope: "s1")?.exportEnd == late, "the watermark survives the repair")
+        // 上一段失败提交留下的任务行（`saveTask(7)`）必须原样在 —— 修复只碰 `sync_state`。
+        check(store.load(scope: "s1") == Data([7]), "the repair leaves the task row untouched")
 
         // Record cursors are business-delivery state, not best-effort route
         // memory. They share the success transaction and survive manual rescan
         // so old deletions can be drained before resetting an anchored query.
-        let cursorsA = Data("cursor-a".utf8)
+        // 必须是**合法 JSON**：定点修复要按类型删键（`clearRecordCursors`）。
+        let cursorsA = Data(#"{"hrv":{"anchor":"AQID","historyReadAt":0},"sleep":{"anchor":"AQID","historyReadAt":0}}"#.utf8)
         let cursorsB = Data("cursor-b".utf8)
         saveTask(30, scope: "records")
         check(store.commitSuccess(scope: "records", anchor: anchorA, watermark: .keep, recordCursors: cursorsA),
@@ -253,8 +259,17 @@ struct SyncStateCommitRegression {
         check(store.commitSuccess(scope: "records", anchor: nil, watermark: .keep),
               "legacy pending tasks may commit without record cursors")
         check(store.loadRecordCursors(scope: "records") == cursorsA, "legacy task does not erase v2 cursors")
-        check(store.forgetState(scope: "records"), "manual workout reset succeeds")
-        check(store.loadRecordCursors(scope: "records") == cursorsA, "manual rescan retains cursors to drain deletions")
+        // 定点修复只清指定类型。用**独立 scope**：不动上面那条 v2 游标断言链。
+        saveTask(33, scope: "clear-scope")
+        check(store.commitSuccess(scope: "clear-scope", anchor: anchorA, watermark: .keep, recordCursors: cursorsA),
+              "a dedicated scope holds the cursor payload under repair")
+        check(store.clearRecordCursors(["sleep"], scope: "clear-scope"), "clearing one record type succeeds")
+        let afterClear = store.loadRecordCursors(scope: "clear-scope").flatMap {
+            (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any]
+        }
+        check(afterClear.map { Array($0.keys).sorted() } == ["hrv"],
+              "only the requested record type is cleared; the others stay byte-identical")
+        check(store.clearRecordCursors(["sleep"], scope: "clear-scope"), "clearing an absent type is idempotent")
         var cursorControl: OpaquePointer?
         precondition(sqlite3_open(path, &cursorControl) == SQLITE_OK)
         defer { sqlite3_close(cursorControl) }
@@ -266,7 +281,13 @@ struct SyncStateCommitRegression {
         check(!store.commitSuccess(scope: "records", anchor: anchorB, watermark: .advance(late), recordCursors: cursorsB),
               "record cursor failure rolls back the entire success transaction")
         check(store.loadRecordCursors(scope: "records") == cursorsA, "failed cursor write keeps the old cursor")
-        check(store.loadState(scope: "records") == nil, "failed cursor write rolls back the workout watermark too")
+        // 🔴 这一条原先断言"没有行"。但同一 scope 早前的 `.keep` 提交已经把
+        // `sync_state` 那一行**建起来了**（anchor=anchorA、exportEnd=NULL）——
+        // 真正的不变式是"失败的水位写入没有把 `late` 留下来"，而不是"没有行"。
+        check(store.loadState(scope: "records")?.exportEnd == nil,
+              "failed cursor write rolls back the workout watermark too")
+        check(store.loadState(scope: "records")?.workoutAnchor == anchorA,
+              "failed cursor write keeps the previously committed anchor")
         check(store.load(scope: "records") == Data([32]), "failed cursor write preserves the pending batch")
         sqlite3_exec(cursorControl, "DROP TRIGGER fail_record_cursor", nil, nil, nil)
         check(store.commitSuccess(scope: "records", anchor: anchorB, watermark: .advance(late), recordCursors: cursorsB),

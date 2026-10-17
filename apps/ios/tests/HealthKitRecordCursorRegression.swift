@@ -11,21 +11,14 @@ struct HealthKitRecordCursorRegression {
 
         let now = Date(timeIntervalSince1970: 1_790_000_000)
         let cursor = HealthKitRecordCursor(anchor: Data([1, 2, 3]), historyReadAt: now)
-        check(!cursor.needsHistoryRead(now: now, force: false), "normal sync uses the type anchor")
-        check(cursor.needsHistoryRead(now: now, force: true), "explicit full import replays newly authorized history")
-        check(!cursor.needsHistoryRead(now: now.addingTimeInterval(7 * 86400 - 1), force: false),
-              "a week minus a second is not a replay")
-        for days in [7, 30, 365, 3650] {
-            check(!cursor.needsHistoryRead(now: now.addingTimeInterval(Double(days) * 86400), force: false),
-                  "automatic sync must remain incremental even after \(days) days")
-        }
-        check(cursor.needsHistoryRead(now: now.addingTimeInterval(365 * 86400), force: true),
-              "explicit full import remains available after a long idle period")
-        // 中断记账（S2.1）：带 phase 的游标在 force=false 时也要求续做重放；没有 phase 的保持增量。
+        // 🔴 2026-10-17：`needsHistoryRead()` 已经没有时间参数、也没有 `force` 通道 ——
+        // 「重新导入全部」被删除，重放只能由"上轮被预算截断"触发。时间流逝从来不是理由。
+        check(!cursor.needsHistoryRead(), "normal sync uses the type anchor")
+        check(!cursor.needsHistoryRead(), "an uninterrupted cursor never replays")
+        // 中断记账（S2.1）：带 phase 的游标要求续做重放；没有 phase 的保持增量。
         let replaying = HealthKitRecordCursor(anchor: Data([9]), historyReadAt: now, historyReplayPhase: .history)
-        check(replaying.needsHistoryRead(now: now, force: false),
-              "an interrupted history replay must resume without a new force")
-        check(!HealthKitRecordCursor(anchor: Data([9]), historyReadAt: now).needsHistoryRead(now: now, force: false),
+        check(replaying.needsHistoryRead(), "an interrupted history replay must resume")
+        check(!HealthKitRecordCursor(anchor: Data([9]), historyReadAt: now).needsHistoryRead(),
               "a cursor without a replay phase stays incremental")
         let cursors = ["sleep": cursor, "hrv": cursor, "steps": replaying]
         let decoded = try JSONDecoder().decode([String: HealthKitRecordCursor].self,

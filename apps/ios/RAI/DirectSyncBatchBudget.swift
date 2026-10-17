@@ -373,3 +373,42 @@ nonisolated enum WorkoutPageShrink {
         return max(1, limit / 2)
     }
 }
+
+/// R04（2026-10-16 复查）：批次级**路线文件清单** —— 按相对路径**跨页去重**。
+///
+/// 缺陷形态（复查的最小夹具已复现）：页 1 的"附件"版本与页 N 的"正式流"版本各自
+/// 产出并收录同一 `workout-routes/<uuid>_1.gpx` ⇒ ZIP 里同路径两个条目 ⇒ 实际接收器
+/// 整批拒收。旧实现是页交付时 `files.append(contentsOf: pageRouteFiles)`：页内
+/// `Dictionary` 去重只覆盖单页，**跨页**没有身份。
+///
+/// 语义（与文档 R04 步骤 2/4 对应）：
+/// - 身份 = **相对路径**（`workout-routes/<小写 uuid>_N.gpx`；大小写口径与导入侧一致）；
+/// - 同名再现 = **后写版本原子替换**前写的引用（"正式流版本优先"，而不是"遇到重复就
+///   丢弃后者"）——XML 侧同 UUID 的重复渲染由接收端 last-wins 语义承接，这里只保证
+///   清单唯一；
+/// - 顺序 = **首次出现顺序**（确定性：同一输入产出同一清单顺序）。
+///
+/// 纯值类型、放本文件：Export 本体依赖 HealthKit（回归编译不了它），而这条合并规则
+/// 必须能被独立断言。
+nonisolated struct RouteBatchFileList: Equatable {
+    private var entriesByPath: [String: URL] = [:]
+    private var order: [String] = []
+
+    /// 合并一页的产物；同名时用**后者**的 url 替换（保持首次出现的顺序位）。
+    mutating func merge(_ files: [(name: String, url: URL)]) {
+        for file in files {
+            if entriesByPath.updateValue(file.url, forKey: file.name) == nil {
+                order.append(file.name)
+            }
+        }
+    }
+
+    /// 按首次出现顺序展开的清单（打包输入）。
+    var files: [(name: String, url: URL)] {
+        order.compactMap { name in
+            entriesByPath[name].map { (name: name, url: $0) }
+        }
+    }
+
+    var count: Int { entriesByPath.count }
+}

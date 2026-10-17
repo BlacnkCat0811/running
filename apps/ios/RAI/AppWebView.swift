@@ -186,7 +186,7 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
         didReceive message: WKScriptMessage
     ) {
         // `add(_:name:)` delivers on the main thread; parse here so the Task only hops Sendable fields.
-        let parsed = MainActor.assumeIsolated { () -> (action: String, full: Bool)? in
+        let parsed = MainActor.assumeIsolated { () -> (action: String, fullRequested: Bool, routeRetryWorkoutIds: [String])? in
             guard message.frameInfo.isMainFrame,
                   self.isTrustedFrame(message.frameInfo.securityOrigin) else { return nil }
             return parseRaiMessage(message.body)
@@ -277,16 +277,31 @@ final class WebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDown
     }
     #endif
 
-    private func handleRaiMessage(_ parsed: (action: String, full: Bool)) {
+    private func handleRaiMessage(_ parsed: (action: String, fullRequested: Bool, routeRetryWorkoutIds: [String])) {
         switch parsed.action {
         case "syncHealth":
             guard let healthSync, let session else {
                 reportMissingDependency("同步组件未就绪，请刷新后重试")
                 return
             }
-            Task {
-                await healthSync.sync(to: session.serverURL, apiToken: session.apiToken, full: parsed.full)
+            // 旧服务端仍可能下发带 `full: true` 的旧页面。**明确拒绝**并指出替代入口 ——
+            // 静默忽略会让用户以为"重新导入全部"真的跑过一次。
+            guard !parsed.fullRequested else {
+                healthSync.rejectFullImportRequest()
+                return
             }
+            Task {
+                await healthSync.sync(
+                    to: session.serverURL, apiToken: session.apiToken,
+                    routeRetryWorkoutIDs: parsed.routeRetryWorkoutIds
+                )
+            }
+        case "repairSyncCursor":
+            guard let healthSync else {
+                reportMissingDependency("同步组件未就绪，请刷新后重试")
+                return
+            }
+            Task { await healthSync.repairSyncCursor() }
         case "openServer":
             guard let chrome else {
                 reportMissingDependency("无法打开服务器设置")
@@ -514,19 +529,30 @@ private func nativeStatusChanged(_ a: NativeBridgeSnapshot, _ b: NativeBridgeSna
         || a.trustedOrigin != b.trustedOrigin
 }
 
-nonisolated private func parseRaiMessage(_ body: Any) -> (action: String, full: Bool)? {
+nonisolated private func parseRaiMessage(
+    _ body: Any
+) -> (action: String, fullRequested: Bool, routeRetryWorkoutIds: [String])? {
     if let dict = body as? NSDictionary, let action = dict["action"] as? String {
-        let full = (dict["full"] as? NSNumber)?.boolValue ?? boolValue(dict["full"])
-        return (action, full)
+        let fullRequested = (dict["full"] as? NSNumber)?.boolValue ?? boolValue(dict["full"])
+        return (action, fullRequested, stringArray(dict["routeRetryWorkoutIds"]))
     }
     if let dict = body as? [String: Any], let action = dict["action"] as? String {
-        return (action, boolValue(dict["full"]))
+        return (action, boolValue(dict["full"]), stringArray(dict["routeRetryWorkoutIds"]))
     }
     if let text = body as? String, let data = text.data(using: .utf8),
        let json = try? JSONSerialization.jsonObject(with: data) {
         return parseRaiMessage(json)
     }
     return nil
+}
+
+/// bridge 里的 UUID 数组只接受字符串元素；其它类型静默忽略（宁可少重试一条，
+/// 也不要因为 Web 侧多塞了一个数字就整条消息解析失败）。
+nonisolated private func stringArray(_ value: Any?) -> [String] {
+    if let array = value as? [String] { return array }
+    if let array = value as? [Any] { return array.compactMap { $0 as? String } }
+    if let array = value as? NSArray { return array.compactMap { $0 as? String } }
+    return []
 }
 
 nonisolated private func boolValue(_ value: Any?) -> Bool {

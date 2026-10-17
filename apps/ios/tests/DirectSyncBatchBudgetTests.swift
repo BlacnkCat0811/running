@@ -316,6 +316,35 @@ struct DirectSyncBatchBudgetTests {
         check(windowShare.maxBytes < budget.maxXmlBytes && windowShare.maxRecords < budget.maxRecords,
               "the window share must never equal the whole batch budget — 80% is reserved for the anchored stream")
 
+        // ── R04（2026-10-16 复查）批次级路线清单的跨页去重 ──────────────────────────
+        // 缺陷本体：页 1 的"附件"版本与页 N 的"正式流"版本各自收录同一路径
+        //（`workout-routes/<uuid>_1.gpx`）⇒ ZIP 里同名两个条目 ⇒ 接收器整批拒收。
+        // 语义：①跨页身份 = 相对路径；②同名再现 = 后写版本**替换**（不是丢弃）；
+        // ③顺序 = 首次出现顺序（确定性）。
+        var batch = RouteBatchFileList()
+        let pageOneURL = URL(fileURLWithPath: "/tmp/page-1/workout-routes/aaaa_1.gpx")
+        let pageTwoURL = URL(fileURLWithPath: "/tmp/page-2/workout-routes/aaaa_1.gpx")
+        let otherURL = URL(fileURLWithPath: "/tmp/page-1/workout-routes/bbbb_1.gpx")
+        batch.merge([
+            ("workout-routes/aaaa_1.gpx", pageOneURL),
+            ("workout-routes/bbbb_1.gpx", otherURL)
+        ])
+        check(batch.count == 2, "two distinct paths land in the batch list")
+        batch.merge([("workout-routes/aaaa_1.gpx", pageTwoURL)])
+        check(batch.count == 2, "a cross-page repeat does not grow the manifest")
+        check(batch.files.map { $0.name } == ["workout-routes/aaaa_1.gpx", "workout-routes/bbbb_1.gpx"],
+              "first-seen order is preserved across pages")
+        check(batch.files.first?.url == pageTwoURL,
+              "the later page's version replaces the earlier reference (the repeat is never dropped)")
+        var intraPage = RouteBatchFileList()
+        intraPage.merge([
+            ("workout-routes/cccc_1.gpx", pageOneURL),
+            ("workout-routes/cccc_1.gpx", pageOneURL)
+        ])
+        check(intraPage.count == 1 && intraPage.files.count == 1,
+              "intra-page repeats collapse to one entry")
+        check(RouteBatchFileList().files.isEmpty, "an empty list expands to nothing")
+
         print("\(checks) checks passed")
     }
 }

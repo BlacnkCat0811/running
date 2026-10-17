@@ -39,11 +39,14 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
 
     /// 下一次 drain 是否要先做**全量重放**。
     ///
-    /// 判据 = 显式请求（`force`）**或**上次重放被预算截断还没做完（`historyReplayPhase != nil`）。
+    /// 判据 = 上次重放被预算截断还没做完（`historyReplayPhase != nil`）。
+    ///
     /// 刻意不看"距今多久"：时间流逝不是 HealthKit 变更游标过期的证据
     /// （`check-healthkit-record-sync.py` 的反向哨兵钉着这一点）。
-    func needsHistoryRead(now _: Date, force: Bool) -> Bool {
-        force || historyReplayPhase != nil
+    /// 也**没有**显式 `force` 通道了：「重新导入全部」于 2026-10-17 删除，重放只能由
+    /// "上一轮没做完"或"游标被显式修复（`repairSyncCursor`）后为空"触发。
+    func needsHistoryRead() -> Bool {
+        historyReplayPhase != nil
     }
 
     /// 单批预算下"这一整页放得下吗"的裁决（S2.5 写前判定，2026-10-14）。
@@ -147,7 +150,7 @@ nonisolated enum RecordReplayPlan {
     ///
     /// - Parameters:
     ///   - decodedAvailable: 游标存在且 anchor 能解码（首读/损坏 = false）。
-    ///   - history: `needsHistoryRead` 的结论（force 或"上轮重放未完成"）。
+    ///   - history: `needsHistoryRead` 的结论（"上轮重放未完成"）。
     ///   - resumingHistoryPhase: 上轮的中断记账停在 `history` 段。
     static func segments(
         decodedAvailable: Bool,

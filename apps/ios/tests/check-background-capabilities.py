@@ -1239,13 +1239,19 @@ check(
     "that is the two-sources-of-truth shape §4.2 exists to remove",
 )
 # 反方向也要钉：老键必须**只被删**、且在提交成功之后删 —— 迁移期回退读的正是它们。
+# 2026-10-17：全量重导入口删除后，老锚键只剩两个删除点：
+#   ① 成功提交（`markSuccess`，非 self 形式）；② 显式修复（`repairSyncCursor`，self 形式）。
+# 水位键**只有**提交那一处 —— 修复刻意保留它，否则有界重读会退化成全历史。
 check(
-    sync.count("removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))") == 2
+    sync.count("removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))") == 1
+    and sync.count("removeObject(forKey: self.scopedKey(Self.lastWorkoutAnchorKey))") == 1
     and sync.count("removeObject(forKey: scopedKey(Self.lastExportEndKey))") == 1,
-    "the legacy UserDefaults keys must be removed in exactly the two migration points "
-    "(full re-import + a successful commit); found %d anchor / %d watermark removals"
+    "the legacy anchor key may only be removed by a successful commit and by the explicit "
+    "repair; the watermark key must stay commit-only. found %d commit-anchor / %d repair-anchor "
+    "/ %d watermark removals"
     % (
         sync.count("removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))"),
+        sync.count("removeObject(forKey: self.scopedKey(Self.lastWorkoutAnchorKey))"),
         sync.count("removeObject(forKey: scopedKey(Self.lastExportEndKey))"),
     ),
 )
@@ -1361,16 +1367,17 @@ check(
     "one — a legitimate `.advance` to an earlier date then looks like a failed write and rolls back",
 )
 
-# 14e. 「重新导入全部」必须把**两处**都清掉。只清老键 ⇒ `loadCommittedState` 会把锚读回来。
-full_block = re.search(r"if full \{(.*?)\n            \}", sync, re.S)
-check(full_block is not None, "could not find the `if full` re-import block in performSync")
-if full_block is not None:
-    check(
-        "forgetState(" in full_block.group(1),
-        "a full re-import clears the legacy anchor key but not the committed state row — "
-        "loadCommittedState would read the old anchor straight back and the sync would keep "
-        "taking only the delta while the UI claims everything was re-imported",
-    )
+# 14e. 2026-10-17（边界收紧）：`if full` 块与整行删除（`forgetState`）必须**不存在**。
+#      它们是唯一能清空已提交游标的地方；留着它们，"禁止全量同步"就只是一句 UI 约定。
+check("if full {" not in sync and "forgetState(" not in sync,
+      "the full re-import block must be gone: it was the only place that deleted the whole "
+      "sync_state row (and with it every committed anchor)")
+repair_body = re.search(r"func repairSyncCursor\(\)(.*?)\n    \}\n", sync, re.S)
+check(repair_body is not None and "clearBudgetConvergence()" in repair_body.group(1),
+      "the explicit repair must also reset the budget convergence step — it is the only "
+      "remaining way back to a full budget after a historical oversize")
+check("clearWorkoutAnchor(" in (repair_body.group(1) if repair_body else ""),
+      "the repair must clear the stored anchor through the narrow primitive, never the row")
 
 # 14f. `clearExportWatermark()` 必须已经并进提交。留着它就还有"清空了水位、任务行没动"的窗口。
 #      必须先剥注释行：本节的说明与 `markSuccess` 的文件注释里逐字写着这个名字。
@@ -1530,22 +1537,37 @@ else:
     route_loop = ""
 
 check(
-    "RouteSyncStateMachine.shouldQuery(" in route_loop,
-    "the per-workout loop no longer consults the state machine — the 14-day backfill is "
-    "unconditional again, every route is re-read on every sync, and no gate notices",
+    "RouteQueryPolicy.decide(" in route_loop,
+    "the per-workout loop no longer consults the FINAL query policy — the 14-day backfill is "
+    "unconditional again, and a blocked-size / unexpired retry-wait UUID could be re-read from any "
+    "discovery source while every other gate stays green (B02)",
 )
 ordered(
     route_loop,
-    "RouteSyncStateMachine.shouldQuery(",
+    "RouteQueryPolicy.decide(",
     "routeEntries(",
-    "the route query happens BEFORE the state machine is consulted — the filter has to decide "
-    "first, otherwise the saving is exactly zero while every gate stays green",
+    "the route query happens BEFORE the final gate is consulted — the filter has to decide first, "
+    "otherwise the saving is exactly zero while every gate stays green",
 )
 check(
-    "fetch.observation" in route_loop,
-    "the observation returned by routeEntries is dropped on the floor — the state machine would "
-    "never learn what it saw, so stable_check_count could never advance and nothing would ever "
-    "slow down",
+    "RouteSyncStateMachine.shouldQuery(" not in route_loop.split("RouteQueryPolicy.decide(")[0],
+    "a second, unconditional query condition still runs before the final gate — that is exactly the "
+    "shape B02 fixed (four parallel pass-throughs bypassing the scheduler)",
+)
+check(
+    "fetch.outcome" in route_loop and "case .observation(let observation):" in route_loop,
+    "the observation returned by routeEntries must be consumed through its discriminated outcome — "
+    "`!budgetExhausted` is also true for a failed read (`RouteFetch.empty`), so a boolean-complement "
+    "check silently claims success while the state machine never learns what it saw (R03)",
+)
+check(
+    "todo: pendingTodoByUUID[routeKey]" in route_loop
+    and "RouteTodoScheduler.executable(" in health_export
+    and "RouteTodoScheduler.afterUnreadableFailure(" in route_loop
+    and "RouteTodoScheduler.afterOversized(" in route_loop,
+    "B02/R07: the final gate must be fed the persisted todo for this UUID (that is the only place "
+    "blocked-size / retry-wait can stop a freshly rediscovered route), and attempt outcomes must "
+    "book bounded retry / size-block state",
 )
 check(
     "RouteSyncStateMachine.decide(" in route_loop,
@@ -1573,18 +1595,24 @@ check(
     "the periodic policy has no exporter caller — routes outside the recent window stay lost",
 )
 check(
-    "rediscoveryIDs.contains(routeKey)" in route_loop,
-    "recent settled workouts bypass the rediscovery batch budget",
+    "let dueIDs = Set(rediscovery).union(executableTodoIDs)" in health_export,
+    "settled routes and the persisted todo queue must share ONE bounded discovery set — two "
+    "independent paths would let a settled workout bypass the rediscovery batch budget",
 )
 check(
     route_loop.count("hasWorkoutChange: hasWorkoutChange") == 3,
-    "every consult of shouldQuery in the loop must carry the anchored-change bypass: "
-    "planning the query, recording the observation, and the WP-11 budget-rejection todo probe "
-    "(a fourth consult without the bypass would silently drop anchored changes at one of them)",
+    "every remaining consult of the state machine in the loop must carry the anchored-change "
+    "bypass: the final gate and the budget-rejection todo probe (B02 removed the extra parallel "
+    "condition; a consult without the bypass would silently drop anchored changes)",
 )
 check(
-    "if let observation = fetch.observation" in route_loop,
-    "a failed/partial route query must not write an empty observation or stability evidence",
+    "case .observation(let observation):" in route_loop
+    and "case .unreadable:" in route_loop
+    and route_loop.count("pageCompletedTodos.append(routeKey)") == 1,
+    "R03: a failed/partial route query must not write an empty observation, stability evidence, or "
+    "a completed-todo candidate — only `.observation` may reach decide()/pageCompletedTodos, and the "
+    "single append must live in that branch (a failed read used to be treated as done, deleting the "
+    "only retry lead for stateless uuids)",
 )
 
 # 14h-9. route 侧的**写前判定**（S2.5 route 侧，2026-10-14）。只判"循环里有没有 fetch"
@@ -1592,29 +1620,41 @@ check(
 # **一整个 GPX 文件**（真机实测 34,009,725 B / 58 文件 ≈ 586 KB 均值，最坏可达数 MB）。
 route_entries = tail_after(health_export, "private static func routeEntries(", "routeEntries(")
 route_entries = route_entries.split("\n    private static func ")[0]
+# 2026-10-17：写盘与预算判定搬进 `RouteGpxWriter`（流式写），不变量不变：
+# **先判预算、再创建文件**；装不下 ⇒ 整个 workout 的轨迹一起放弃。
+writer_source = read(RAI / "RouteGpxWriter.swift")
 ordered(
-    route_entries,
-    "budget.routeBudgetExhausted(",
-    "try document.write(to: url",
-    "routeEntries writes the GPX BEFORE consulting the route budget — the tail file would then "
-    "overshoot the batch bound by one whole GPX (device-measured: 34 MB across 58 files)",
+    writer_source,
+    "guard usedRouteBytes + writtenBytes < maxRouteBytes else",
+    "FileManager.default.createFile(",
+    "RouteGpxWriter creates the GPX file BEFORE consulting the remaining route budget — the tail "
+    "file would then overshoot the batch bound by one whole GPX (device-measured: 34 MB across 58 files)",
 )
 check(
-    "return RouteFetch(entries: [], observation: nil, bytes: 0," in route_entries
-    and "budgetExhausted: true, oversized: oversized" in route_entries,
-    "a route that does not fit must be abandoned wholesale (bytes 0, no observation) — a half-written "
-    "track is worse than none: xml does not reference it, so the payload gains an ownerless file",
+    "writer.abort()" in route_entries
+    and "return RouteFetch(entries: [], observation: nil, bytes: 0," in route_entries
+    and "budgetExhausted: true, oversized: stop == .oversized" in route_entries,
+    "a route that does not fit must be abandoned wholesale (abort removes every file, bytes 0, no "
+    "observation) — a half-written track is worse than none: xml does not reference it, so the "
+    "payload gains an ownerless file",
 )
 check(
-    "let oversized = bytes > budget.maxRouteBytes" in route_entries,
-    "P2-3A: the abandon path must distinguish \"balance temporarily short\" (the next full batch may "
-    "fit) from \"this single track exceeds the FULL batch budget\" (no batch can ever take it) — the "
-    "latter must surface as a visible warning instead of silently disappearing",
+    "if writtenBytes > maxRouteBytes { throw RouteGpxBudgetStop.oversized }" in writer_source
+    and "if usedRouteBytes + writtenBytes >= maxRouteBytes { throw RouteGpxBudgetStop.budgetDeferred }"
+        in writer_source
+    and "guard usedRouteFiles + entries.count + 1 <= maxRouteFiles else" in writer_source,
+    "P2-3A/R07: the abandon path must distinguish \"balance temporarily short\" (the next full batch "
+    "may fit) from \"this workout exceeds the FULL batch budget\" — multi-segment tracks included, "
+    "or the same GPX is re-read forever; the latter must surface as a visible warning instead of "
+    "silently disappearing",
 )
 check(
-    "if fetch.oversized {" in route_loop,
-    "P2-3A: the export loop must surface an oversized single track as a visible warning — silently "
-    "skipping it means the user never learns that data is missing",
+    "case .oversized:" in route_loop and "case .budgetDeferred:" in route_loop
+    and "超过单批上限，暂未同步" in route_loop,
+    "P2-3A/R07: the export loop must classify the abandon reason — `routeOversized` only when the "
+    "workout itself exceeds the full budget (visible warning), `routeBudget` when the balance was "
+    "merely short (retryable next batch); silently skipping either means the user never learns "
+    "that data is missing",
 )
 check(
     "routeStopReason = .routeFile" in route_loop,
@@ -1662,9 +1702,13 @@ check(
     "next sync re-exports from the old budget and re-runs the same expensive loop",
 )
 check(
-    "clearBudgetConvergence()" in perform_body,
+    "clearBudgetConvergence()" not in perform_body,
+    "ordinary sync must not reset the convergence — it would immediately hit the same wall again",
+)
+check(
+    "clearBudgetConvergence()" in (repair_body.group(1) if repair_body else ""),
     "nothing ever clears the convergence — the budget would stay shrunk forever after a single "
-    "rejection, and the user's explicit full re-import could not restore it",
+    "rejection; the explicit repair is the only remaining way back to a full budget",
 )
 
 historical_fetch = tail_after(health_export, "private static func knownRunningWorkouts(", "knownRunningWorkouts(")
@@ -1685,19 +1729,23 @@ check(
     "the exporter never receives the persisted traversal position",
 )
 check(
-    sync.count("routeDiscoveryCursor: exported.routeDiscoveryCursor") == 2,
-    "both normal-import and unchanged success must advance the rediscovery queue",
+    without_comment_lines(sync).count("routeCommit: Self.routeCommitCandidate(") == 3,
+    "both success branches (normal import and unchanged) must hand the batch's route evidence to "
+    "markSuccess — the branch that does not would drop the memory for every workout it processed",
 )
 check(
-    "pendingRouteDiscoveryCursor: exported.routeDiscoveryCursor" in sync
-    # 5 = 四条恢复分支 + 2026-10-11 补上的 `.waitJob`（见 §15d）。续接一个**已经跑完**的
-    # job 时，候选队列位置同样要跟着推进 —— 否则后台每被中断一次就重新困在首批。
-    and sync.count("routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor") == 5,
-    "interrupted uploads must persist the traversal position and advance it in every resumed-success branch",
+    "pendingRouteDiscoveryCursor: exported.routeDiscoveryCursor" in sync,
+    "the export round must persist the traversal position for a resumed round",
 )
 check(
-    "discoveryCursor: routeDiscoveryCursor" in commit_body,
-    "the cursor is not flushed with route observations after successful delivery",
+    without_comment_lines(sync).count("routeCommit: restored.routeCommit") == 5,
+    "interrupted uploads must carry the persisted route candidate into every resumed-success branch "
+    "(5 = four resume branches + the `.waitJob` branch). A resumed branch without it can neither "
+    "write route state nor prove which todos are removable",
+)
+check(
+    "discoveryCursor: settlement.discoveryCursor" in sync,
+    "the cursor is not flushed together with route observations after successful delivery",
 )
 ordered(
     upsert_body,
@@ -1730,26 +1778,24 @@ ordered(
     "snapshot has to exist before it starts",
 )
 check(
-    "routeForceRescan: full" in sync,
-    "the manual-rescan flag is not wired to `full`: `settled` routes would then have no wake-up "
-    "path at all, and '重新导入全部' would keep silently skipping the very routes it promises to redo",
+    "routeForceRescan" not in sync,
+    "the full route rescan flag must be deleted with the re-import entry; the only remaining "
+    "wake-up path is `routeRetryWorkoutIDs` (a targeted retry), which is asserted above",
 )
 check(
-    without_comment_lines(sync).count("routeStates: exported.routeStates") == 2,
-    "only %d of the two success branches hand the observations to markSuccess — the branch that "
-    "does not would drop the memory for every workout it processed"
-    % without_comment_lines(sync).count("routeStates: exported.routeStates"),
+    "routeCommit: Self.routeCommitCandidate(" in without_comment_lines(sync),
+    "the success branches must hand the observations to markSuccess — a branch without it would "
+    "drop the memory for every workout it processed (B01: the candidate carries the observations; "
+    "a bare UUID set is not enough to settle)",
 )
 
-# 🔴 顺序判据：记忆只能写在**水位提交之后**。
-ordered(
-    commit_body,
-    "taskStore.commitSuccess(",
-    "taskStore.upsertRouteStates(",
-    "the route memory is flushed BEFORE the watermark commit. A sync that never delivered its "
-    "payload would then be recorded as 'this route is stable'; it walks down to settled, and "
-    "settled is only woken by a manual rescan — so the server can never receive that route. "
-    "Flushing after the commit can only ever cost one extra query next round",
+# 🔴 顺序判据：记忆只能写在**水位提交之后**（B01：结算入口唯一，见 `settlePendingRouteCommit`）。
+# `commit_body` 里必须出现候选写入（与任务行同一事务）与结算调用，且结算在提交之后。
+check(
+    "taskStore.upsertRouteStates(" not in commit_body,
+    "route memory is flushed directly inside markSuccess again — it must go through the single "
+    "settlement entry (`settlePendingRouteCommit`), otherwise the 'commit succeeded, settlement "
+    "failed' window has no durable evidence to resume from",
 )
 
 # 14i. 交叉依赖：凡编译 `SyncTaskStore.swift` 的编译单元，都必须同时编 `RouteSyncState.swift`。
@@ -1815,9 +1861,24 @@ check("PRIMARY KEY (scope, workout_uuid)" in store_src,
 check("PRAGMA user_version = 2" in store_src and "ALTER TABLE sync_route_state RENAME" in store_src,
       "installed route schemas need an explicit versioned migration")
 check(re.search(
-          r"taskStore\.upsertRouteStates\(\s*Array\(routeStates\.values\),\s*scope: activeScope,"
-          r"\s*discoveryCursor: routeDiscoveryCursor\s*\)", commit_body) is not None,
-      "route observations must be saved under the active authoritative scope")
+          r"taskStore\.upsertRouteStates\(\s*settlement\.states,\s*scope: activeScope,"
+          r"\s*discoveryCursor: settlement\.discoveryCursor,\s*removePendingTodos: settlement\.removals\s*\)",
+          sync) is not None,
+      "route observations and the delivered-todo removal must be saved under the active "
+      "authoritative scope in the SAME local transaction (B01 — a state flush that fails must keep "
+      "the todos, not delete the only discovery path for stateless uuids)")
+# B01（2026-10-17）：结算入口唯一。提交路径必须**在 `commitSuccess` 之后**消费结算槽；
+# 候选与任务行删除同事务写入（`commitSuccess(routeSettlement:)`），于是"提交成功、结算未完成"
+# 这个窗口由 `sync_route_settlements` 承接，而不是靠重新导出。
+check("routeSettlement: routeSettlement" in commit_body,
+      "the route settlement candidate must be written in the SAME transaction as the task-row delete")
+ordered(commit_body, "commitSuccess(", "settlePendingRouteCommit()",
+        "the route settlement must run AFTER the durable commit — settling first would write route "
+        "memory for a batch that may never be accepted")
+check("settlePendingRouteCommit()" in without_comment_lines(
+          tail_after(sync, "func performSync(", "performSync").split("\n    private func ")[0]),
+      "a settlement left behind by a killed process must be consumed at the start of the next sync "
+      "WITHOUT re-reading HealthKit")
 
 # --- 15b. 冷启动恢复的第二轮（2026-09-24）：调度与回执一律走"按目标读到的快照" ----------
 # 这一节的失效方式全是**静默**的：标志与目标错配时没有任何报错，只是某一天起"后台跑过一次
@@ -2006,7 +2067,9 @@ check(
 #   按"打印总数 − 1"重设为 **287** —— 再改本文件必须**现跑现设**。
 # 🟡 2026-10-15（R1）：新增 10g-quinquies（saveTask 的 `.taskPersisted` 意图保护）后
 #   实测打印 **289** ⇒ 按同一纪律重设为 **288**。
-MIN_CHECKS = 288
+# 🟡 2026-10-16（R07）：新增"循环消费待办调度器"一条（§14h）后实测打印 **290**
+#   ⇒ 按同一纪律重设为 **289**。
+MIN_CHECKS = 289
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — judgements were silently dropped (an anchor stopped "

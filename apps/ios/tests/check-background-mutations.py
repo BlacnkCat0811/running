@@ -104,6 +104,7 @@ SOURCES = [
 SWIFT_GATE = "bash apps/ios/tests/run-health-sync-tests.sh"
 PRESENTATION_GATE = "bash apps/ios/tests/run-tech-presentation-tests.sh"
 PY_GATE = "python3 apps/ios/tests/check-background-capabilities.py"
+RECORD_GATE = "python3 apps/ios/tests/check-healthkit-record-sync.py"
 EXPORT_GATE = "python3 apps/ios/tests/check-export-determinism.py"
 # S2.4 的反例夹具用：status-copy 门禁是纯 python、可独立跑（与 PY_GATE 同风格）。
 COPY_GATE = "python3 apps/ios/tests/check-direct-sync-status-copy.py"
@@ -374,6 +375,29 @@ def classify(code: int, out: str) -> str:
 
 # (说明, 破坏动作, 用哪个门禁, 必须在输出里出现的断言消息)
 MUTATIONS = [
+    (
+        "[第三轮] 判据: 首次读取失败不再登记待办 => 迟到训练在 anchor 越过后永久不可发现",
+        lambda: edit(
+            HEALTH_EXPORT,
+            "                        pageNewTodos[routeKey] = unreadable",
+            "                        // dropped",
+        ),
+        RECORD_GATE,
+        "a FIRST route read failure must register a persistent todo",
+    ),
+    (
+        "[第三轮] 判据: 定点修复不再复位预算档位 => 历史超界后预算永久折半，没有任何回满额的路",
+        lambda: edit(SYNC, "self.clearBudgetConvergence()", "// convergence kept"),
+        PY_GATE,
+        "the explicit repair must also reset the budget convergence step",
+    ),
+    (
+        "[第三轮] 判据: 修复改成整行删除（或绕过窄原语）=> 「禁止全量同步」退回成 UI 约定",
+        lambda: edit(SYNC, "self.taskStore.clearWorkoutAnchor(scope: self.activeScope)",
+                     "self.taskStore.clearWorkoutAnchorRenamed(scope: self.activeScope)"),
+        PY_GATE,
+        "the repair must clear the stored anchor through the narrow primitive",
+    ),
     (
         "判据: 删掉 importing 分支 => 在飞工作被报成 doNothing",
         lambda: edit(
@@ -1338,13 +1362,6 @@ MUTATIONS = [
         "performSync(: anchor",
     ),
     (
-        "[本轮新增] 判据: full 重新导入不再 forgetState => loadCommittedState 会把老锚读回来，"
-        "界面说「全部重导」而实际只取增量",
-        lambda: edit(SYNC, "taskStore.forgetState(scope: activeScope)", "// forgetState removed"),
-        PY_GATE,
-        "clears the legacy anchor key but not the committed state row",
-    ),
-    (
         "[本轮新增] 判据: 提交前回读断言整段删掉 => 静默失败的写入会留下旧锚 + 没有任务行，还报成功",
         lambda: edit(
             SYNC_TASK_STORE,
@@ -1427,33 +1444,37 @@ MUTATIONS = [
     # 这一批挑的都是"**收益归零**"或"**数据静默丢在服务端之外**"两类失效 —— 它们都不会报错、
     # 不会崩、也大多不会让现有回归变红，只会让这次改造白做，或者少一批轨迹。
     (
-        "[本轮新增2] 判据: 每 workout 循环里去掉 shouldQuery 过滤（写成 `if true`）=> 14 天全量"
-        "回填复活、降频收益归零，而这一切在别处看不到任何异常",
+        "[第三轮] 判据: 在最终闸门之前插一次 routeEntries => 过滤晚于查询，节省归零而全部门禁照绿",
         lambda: edit(
             HEALTH_EXPORT,
-            "            if !routeBudgetExhausted && RouteSyncStateMachine.shouldQuery(\n"
-            "                existing: previous,\n"
-            "                now: routeNow,\n"
-            "                isForceManualRescan: routeForceRescan,\n"
-            "                hasWorkoutChange: hasWorkoutChange\n"
-            "            ) && (previous.status != .settled || routeForceRescan || hasWorkoutChange || rediscoveryIDs.contains(routeKey)) {\n",
-            # 只禁用 shouldQuery 过滤、保留预算闸门：一条突变只许打破一条判据。
-            "            if !routeBudgetExhausted {\n",
+            "            let queryDecision = RouteQueryPolicy.decide(",
+            "            _ = routeEntries\n            let queryDecision = RouteQueryPolicy.decide(",
         ),
         PY_GATE,
-        "no longer consults the state machine",
+        "the route query happens BEFORE the final gate is consulted",
     ),
     (
-        "[本轮新增2] 判据: 把降频记忆挪到 commitSuccess **之前** => 一次从未交付的同步也会被记成"
+        "[B01] 判据: 把路线结算挪到 commitSuccess **之前** => 一次从未交付的同步也会被记成"
         "「这条轨迹已经稳定」，之后一路降到 settled，错过及时补齐窗口",
         lambda: edit(
             SYNC,
-            "        let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(",
-            "        _ = taskStore.upsertRouteStates(Array(routeStates.values), scope: activeScope)\n"
-            "        let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(",
+            "        let routeSettlement = routeCommit.flatMap { try? JSONEncoder().encode($0) }",
+            "        _ = settlePendingRouteCommit()\n"
+            "        let routeSettlement = routeCommit.flatMap { try? JSONEncoder().encode($0) }",
         ),
         PY_GATE,
-        "the route memory is flushed BEFORE the watermark commit",
+        "the route settlement must run AFTER the durable commit",
+    ),
+    (
+        "[B02] 最终闸门不再喂入待办（`todo: nil`）=> blocked-size / 未到期 retry-wait 对任何"
+        "发现来源都不再生效：近期回填或正式页变更一到就重读同一份装不下的 GPX",
+        lambda: edit(
+            HEALTH_EXPORT,
+            "                todo: pendingTodoByUUID[routeKey],",
+            "                todo: nil,",
+        ),
+        PY_GATE,
+        "the final gate must be fed the persisted todo for this UUID",
     ),
     (
         "[本轮新增2] 判据: manifest 的 sourceScope 改成 full-snapshot => 服务端对省略的 GPX "
@@ -1471,13 +1492,6 @@ MUTATIONS = [
         ),
         PY_GATE,
         "no longer loads the route state snapshot",
-    ),
-    (
-        "[本轮新增2] 判据: routeForceRescan 不再接 `full` => 人工重扫不能绕过低频休眠间隔，"
-        "而「重新导入全部」会继续跳过它自己承诺要重做的那些 workout",
-        lambda: edit(SYNC, "routeForceRescan: full,", "routeForceRescan: false,"),
-        PY_GATE,
-        "the manual-rescan flag is not wired to `full`",
     ),
     (
         "[本轮新增2] 判据: 删掉批量写的事务内回读断言 => 「我写进去了」又只是一句假设",

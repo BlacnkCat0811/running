@@ -71,27 +71,39 @@ check("predicateForSamples" not in query,
       "historical changes cannot be event-date filtered (the anchored record query stays predicate-free)")
 check("HealthKitRecordCursor.drain" in records,
       "tested pagination must drive the production query")
-check("recordsForceRescan: full," in sync,
-      "ordinary sync must not force full record history; only explicit full import does")
+# 2026-10-17（边界收紧）：全量重导通道被**删除**（不是隐藏）。判据改成"通道不存在、
+# 只剩定点修复"：任何把 `recordsForceRescan` / `full` 加回来的改动都必须让这条转红。
+check("recordsForceRescan" not in sync and "forceHistory" not in export,
+      "the full-replay channel must be gone (no recordsForceRescan / forceHistory)")
+check("func repairSyncCursor()" in sync and "clearWorkoutAnchor(" in sync,
+      "the only recovery must be the explicit cursor repair (it clears one cursor, not the row)")
+# 第三轮（2026-10-17）：**首次**读取失败也必须登记待办。只给"已在队列里"的待办退避时，
+# 一条既无状态行、又无待办的迟到训练在 anchor 越过之后四条发现通道全关（永久不可发现）。
+check("afterUnreadableFailure(" in export and "pageNewTodos[routeKey] = unreadable" in export,
+      "a FIRST route read failure must register a persistent todo — without it a late workout "
+      "with no state row has no discovery channel left once the anchor passes it")
 check("manual: true" not in sync and "full || manual" not in sync,
       "the button/shortcut entry point must not turn incremental sync into history replay")
 history_policy = body(cursor, "func needsHistoryRead(", "/// An additions-empty")
-check("timeIntervalSince" not in history_policy and "force" in history_policy,
-      "ordinary sync must not periodically reset an established record cursor")
-check("previous == nil || decoded != nil || forceHistory" in records,
+check("timeIntervalSince" not in history_policy and "force" not in history_policy
+      and "historyReplayPhase != nil" in history_policy,
+      "an established record cursor may only replay because an earlier replay was interrupted — "
+      "neither elapsed time nor an explicit force may reset it")
+check("previous == nil || decoded != nil else" in records,
       "a corrupt stored anchor must not silently trigger automatic history replay")
 # 2026-10-16（WP-10）重锚点：校验从 `runningWorkouts` 移入 `exportArchive`（查询页改造），
 # 变量随之为 `workoutAnchor` / `storedWorkoutAnchor`；不变量不变（损坏的存储锚必须显式报错，
 # 不得静默重置成"全量从零重查"）。
 check("guard workoutAnchor == nil || storedWorkoutAnchor != nil" in export,
       "a corrupt stored workout anchor must not silently reset the workout query")
-check("guard hasWorkoutChange || routeForceRescan || !routeFiles.isEmpty" in export,
+check("guard hasWorkoutChange || !routeFiles.isEmpty" in export,
       "workout candidates without a change or GPX retry must not be exported")
 check('"sourceIds": exportedWorkouts.map(workoutSyncId)' in export
       and "workoutCount: exportedWorkouts.count" in export,
       "the manifest and UI count must describe exported deltas, not rechecked workouts")
-check("routeForceRescan: full," in sync,
-      "explicit full import must still rescan routes as well as records")
+check("routeForceRescan" not in sync,
+      "the full route rescan flag must be gone with the re-import entry; the only wake-up path "
+      "left is a targeted retry (routeRetryWorkoutIDs)")
 # 2026-10-14（S2.1）**改写而非删除**：段序从内联数组搬进了 `RecordReplayPlan.segments`
 # （纯逻辑；`HealthKitRecordCursorRegression` 用相等断言逐组合钉着）。判据拆成两处：
 # 一处钉**段序本身**（先增量后历史 —— 内联形态消失但语义不变），一处钉
@@ -233,7 +245,7 @@ check("freshWorkoutIdSet.insert(object.uuid.uuidString)" in export,
 # O05（WP-13）：窗口条件化 + 独立份额 + 截断可观测的接线判据。
 # 🔴 这条必须两条腿一起钉（首版只数调用次数，突变实测暴露了盲区：把 `guard` 换成
 # `_ = needsRecentWindow` 后调用仍在、计数不变 ⇒ 条件化已被旁路而门禁全绿）。
-check(export.count("needsHistoryRead(now: now, force: forceHistory)") == 2,
+check(export.count("needsHistoryRead()") == 2,
       "the recent-window pass must be gated on the production backlog judgement "
       "(needsHistoryRead) — the usual two call sites are the window pass and the anchored "
       "stream; otherwise the window re-reads every batch in steady state")
@@ -251,14 +263,30 @@ check("CREATE TABLE IF NOT EXISTS sync_pending_routes" in store
       and "func upsertPendingRoutes(" in store and "func loadPendingRoutes(" in store
       and "func removePendingRoutes(" in store,
       "the pending-routes queue must exist in the journal with its upsert/load/remove trio (O02)")
-check(export.count("pageNewTodos[routeKey] = PendingRouteTodo(") == 2,
-      "exactly two budget paths may enqueue a todo: the pre-fetch gate and the oversized single route")
+# 2026-10-17：第三条 page-scoped 登记通道 = **首次读取失败**（`.routeUnreadable`）。
+# 它必须与页交付同进同退（页被拒时下一批从同一 anchor 重查，不会把一次失败计成两次）。
+check(export.count("pageNewTodos[routeKey] =") == 3,
+      "exactly three page-level paths may enqueue a todo: the pre-fetch budget gate, the "
+      "mid-write exhaustion (both routeBudget) and a FIRST read failure (routeUnreadable) — "
+      "R07 registers the full-budget oversized route as a persistent size block instead")
+check("RouteTodoScheduler.executable(" in export and "executableTodoIDs" in export
+      and "Set(rediscovery).union(executableTodoIDs)" in export
+      and "RouteTodoScheduler.afterUnreadableFailure(" in export
+      and "RouteTodoScheduler.afterOversized(" in export,
+      "R07: the export loop must consume the todo scheduler — only the executable subset enters "
+      "discovery/query (blocked-size and unexpired retry-wait never re-read the same GPX), and "
+      "attempt outcomes must book bounded retry / size-block state")
 check("upsertPendingRoutes(exported.pendingRouteTodos" in sync,
       "the export round must register new todos BEFORE the task row persists the advanced anchor "
       "(register-after-anchor would lose the uuids forever — they have no state row)")
-check("removePendingRoutes(completedRouteTodos" in sync,
-      "delivered todos must be removed only after the durable commit (an earlier removal would "
-      "drop the only discovery path for stateless uuids if the payload is never accepted)")
+check("settlePendingRouteCommit()" in sync
+      and "removePendingTodos: settlement.removals" in sync
+      and "RouteCommitSettlement.settle(" in sync,
+      "delivered todos must be removed in the SAME local transaction as the route-state flush "
+      "(upsertRouteStates(removePendingTodos:)), and only after the durable commit — an earlier or "
+      "non-atomic removal would drop the only discovery path for stateless uuids if the state "
+      "flush fails or the payload is never accepted (R03). B01: the removal set is derived from "
+      "the persisted candidate (observation + uuid), never from a bare uuid")
 
 # --- 判据总数的下限（**必须放在全部判据之后**） ---------------------------------
 # 照 `check-background-capabilities.py`：`check()` 的参数在调用前求值，所以这里读到的
@@ -270,7 +298,8 @@ check("removePendingRoutes(completedRouteTodos" in sync,
 # 2026-10-16（WP-10/O01）：新增页循环三条判据后实测打印 62 ⇒ 重设为 61。
 # 2026-10-16（WP-13/O05）：新增窗口三条判据后实测打印 65 ⇒ 重设为 64。
 # 2026-10-16（WP-11/O02）：新增待办队列四条判据后实测打印 70 ⇒ 重设为 69。
-MIN_CHECKS = 69
+# 2026-10-16（R03/R04/R07）：R03 原子结算改写一条 + R07 调度接线新增一条后实测打印 71 ⇒ 重设为 70。
+MIN_CHECKS = 70
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

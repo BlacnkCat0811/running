@@ -376,6 +376,227 @@ struct RouteSyncStatePersistenceRegression {
         check(withTodos.upsertPendingRoutes([todoOversized], scope: scopeA),
               "the upgraded table can persist todos")
 
+        // ── R03（2026-10-16 复查）：状态落盘与待办移除的**同一事务** ─────────────────
+        // 语义：状态写不进去 ⇒ 待办**不得**被移除（旧形态是两次独立写：状态失败只 NSLog、
+        // 待办照删 —— 那条被删掉的待办就是"无状态行"的 UUID 的唯一发现路径）；反过来，
+        // 待办删不掉 ⇒ 状态也**不得**落地（否则"成功了一半"没人分得清）。
+        // 故障注入沿用本文件既有手法（另开连接挂 BEFORE UPDATE / BEFORE DELETE 触发器）。
+        let r03UUID = "r03aaaa-0000-0000-0000-0000000000a1"
+        check(store.upsertPendingRoutes(
+            [PendingRouteTodo(workoutUUID: r03UUID, reason: .routeBudget,
+                              createdAt: Date(timeIntervalSince1970: 1_700_700_000))],
+            scope: scopeA), "R03: a todo registers before the atomic settle")
+        var r03Record = cursorBatchRecord
+        r03Record.pointCount += 17
+
+        // ① 状态写入失败 ⇒ 待办保留、状态不落。
+        precondition(sqlite3_exec(control, """
+            CREATE TRIGGER reject_route_state_update_r03 BEFORE UPDATE ON sync_route_state
+            BEGIN SELECT RAISE(ABORT, 'injected route state failure'); END;
+            """, nil, nil, nil) == SQLITE_OK)
+        check(!store.upsertRouteStates([r03Record], scope: scopeA, removePendingTodos: [r03UUID]),
+              "R03: a state write that cannot land fails the whole batch")
+        check(store.loadPendingRoutes(scope: scopeA)[r03UUID] != nil,
+              "R03: a failed state flush leaves the delivered todo intact (it is the only retry lead)")
+        check(store.loadRouteStates(scope: scopeA)[cursorBatchRecord.workoutUUID] == cursorBatchRecord,
+              "R03: a failed state flush leaves the previous state value untouched")
+        sqlite3_exec(control, "DROP TRIGGER reject_route_state_update_r03", nil, nil, nil)
+
+        // ② 待办删除失败 ⇒ 状态同样回滚（不能"成功了一半"）。
+        precondition(sqlite3_exec(control, """
+            CREATE TRIGGER reject_pending_delete_r03 BEFORE DELETE ON sync_pending_routes
+            BEGIN SELECT RAISE(ABORT, 'injected pending delete failure'); END;
+            """, nil, nil, nil) == SQLITE_OK)
+        check(!store.upsertRouteStates([r03Record], scope: scopeA, removePendingTodos: [r03UUID]),
+              "R03: a todo that cannot be removed fails the whole batch")
+        check(store.loadRouteStates(scope: scopeA)[cursorBatchRecord.workoutUUID] == cursorBatchRecord,
+              "R03: the state write rolls back with the failed todo removal (no half-success)")
+        check(store.loadPendingRoutes(scope: scopeA)[r03UUID] != nil, "R03: the todo stays on disk")
+        sqlite3_exec(control, "DROP TRIGGER reject_pending_delete_r03", nil, nil, nil)
+
+        // ③ 恢复之后一次成功结算：状态落盘 + 待办移除同批生效；重复结算幂等。
+        check(store.upsertRouteStates([r03Record], scope: scopeA, removePendingTodos: [r03UUID]),
+              "R03: after recovery, state and todo settle in one transaction")
+        check(store.loadRouteStates(scope: scopeA)[cursorBatchRecord.workoutUUID] == r03Record,
+              "R03: the state value lands in the same commit")
+        check(store.loadPendingRoutes(scope: scopeA)[r03UUID] == nil,
+              "R03: the delivered todo is removed in the same commit")
+        check(store.upsertRouteStates([r03Record], scope: scopeA, removePendingTodos: [r03UUID]),
+              "R03: repeating the same settle is idempotent (a missing uuid is a no-op success)")
+        check(store.lastError == nil, "R03: the idempotent settle leaves no error behind")
+
+        // ── R07（2026-10-16 复查）：待办调度的落盘与纯函数语义 ──────────────────────
+        // 缺陷本体：原因字段不参与调度 —— "满额也装不下"的路线每轮都被当成"下批可再试"，
+        // 每批重读同一份不可装入的 GPX（无限续批）。以下断言钉四件事：
+        // ① 调度字段的落盘往返；② 老行（新列 NULL）映射成 ready（**不**迁移成永久阻塞）；
+        // ③ 纯函数语义（退避有界、上限与公平序、blocked 只在能力提高时重开、显式重试复位）；
+        // ④ 结局记账（读取失败 ⇒ 退避；确认超满额 ⇒ 阻塞 + 指纹）。
+        let r07Now = Date(timeIntervalSince1970: 1_700_800_000)
+        let r07Retry = PendingRouteTodo(
+            workoutUUID: "r07-retry", reason: .routeBudget, createdAt: r07Now,
+            schedState: .retryWait, attemptCount: 2,
+            lastAttemptAt: r07Now, nextRetryAt: r07Now.addingTimeInterval(600)
+        )
+        let r07Blocked = PendingRouteTodo(
+            workoutUUID: "r07-blocked", reason: .routeOversized, createdAt: r07Now,
+            schedState: .blockedSize, attemptCount: 3,
+            blockedBudgetFingerprint: RouteTodoScheduler.budgetFingerprint(
+                maxRouteBytes: 100, maxRouteFiles: 10
+            )
+        )
+        check(store.upsertPendingRoutes([r07Retry, r07Blocked], scope: scopeA),
+              "R07: scheduled todos persist")
+        let r07Loaded = store.loadPendingRoutes(scope: scopeA)
+        check(r07Loaded["r07-retry"]?.effectiveState == .retryWait
+              && r07Loaded["r07-retry"]?.attemptCount == 2,
+              "R07: the retry-wait state and attempt count round-trip")
+        check(r07Loaded["r07-blocked"]?.effectiveState == .blockedSize
+              && r07Loaded["r07-blocked"]?.blockedBudgetFingerprint == "100:10",
+              "R07: the blocked-size state and budget fingerprint round-trip")
+
+        // ② 老行映射：直接 SQL 造一行"只有旧四列"（模拟 R07 之前的表形态；新列 NULL）。
+        precondition(sqlite3_exec(control, """
+            INSERT INTO sync_pending_routes(scope, workout_uuid, reason, created_at)
+            VALUES ('\(scopeA)', 'r07-legacy', 'routeOversized', 1700800000);
+            """, nil, nil, nil) == SQLITE_OK)
+        let legacyTodo = store.loadPendingRoutes(scope: scopeA)["r07-legacy"]
+        check(legacyTodo?.effectiveState == .ready,
+              "R07: a legacy row (no scheduling columns) maps to ready — never a permanent size block")
+        check(legacyTodo?.effectiveAttempts == 0, "R07: a legacy row starts with zero attempts")
+
+        // ③a 退避有界。
+        check(RouteTodoScheduler.retryBackoff(attempts: 0) == 1800,
+              "R07: backoff starts at 30 minutes")
+        check(RouteTodoScheduler.retryBackoff(attempts: 3) == 1800 * 8,
+              "R07: backoff doubles per attempt")
+        check(RouteTodoScheduler.retryBackoff(attempts: 99) == RouteTodoScheduler.retryBackoffCap,
+              "R07: backoff is bounded by the cap (frequency drops, the todo never leaves the queue)")
+
+        // ③b 可执行子集：上限 + 公平序（最老优先）+ 状态过滤。
+        let r07Many = (0..<25).map { index in
+            PendingRouteTodo(
+                workoutUUID: String(format: "r07-%02d", index), reason: .routeBudget,
+                createdAt: r07Now.addingTimeInterval(Double(index))
+            )
+        }
+        let executableMany = RouteTodoScheduler.executable(
+            r07Many, now: r07Now, maxRouteBytes: 100, maxRouteFiles: 10
+        )
+        check(executableMany.count == RouteTodoScheduler.executableBatchLimit,
+              "R07: the executable batch is bounded")
+        check(executableMany.first?.workoutUUID == "r07-00"
+              && executableMany.last?.workoutUUID == "r07-19",
+              "R07: fairness order is oldest-first")
+        let mixed = [r07Retry, r07Blocked]
+            + [PendingRouteTodo(workoutUUID: "r07-ready", reason: .routeBudget, createdAt: r07Now)]
+        let executableMixed = RouteTodoScheduler.executable(
+            mixed, now: r07Now, maxRouteBytes: 100, maxRouteFiles: 10
+        )
+        check(executableMixed.map { $0.workoutUUID } == ["r07-ready"],
+              "R07: blocked-size and unexpired retry-wait stay out of the executable batch")
+        let retryDueSoon = RouteTodoScheduler.executable(
+            [r07Retry], now: r07Now.addingTimeInterval(601), maxRouteBytes: 100, maxRouteFiles: 10
+        )
+        check(retryDueSoon.count == 1, "R07: a due retry-wait becomes executable again")
+
+        // ③c blocked 只在**能力提高**时重开（相同、缩小、一维升一维降都不算）。
+        check(!RouteTodoScheduler.isExecutable(
+            r07Blocked, now: r07Now, maxRouteBytes: 100, maxRouteFiles: 10
+        ), "R07: identical budget capability keeps the size block")
+        check(!RouteTodoScheduler.isExecutable(
+            r07Blocked, now: r07Now, maxRouteBytes: 90, maxRouteFiles: 10
+        ), "R07: a shrunk budget keeps the size block")
+        check(!RouteTodoScheduler.isExecutable(
+            r07Blocked, now: r07Now, maxRouteBytes: 200, maxRouteFiles: 5
+        ), "R07: one dimension up with another down is NOT 'ability improved'")
+        check(RouteTodoScheduler.isExecutable(
+            r07Blocked, now: r07Now, maxRouteBytes: 200, maxRouteFiles: 10
+        ), "R07: a strictly improved budget capability reopens the block")
+        check(RouteTodoScheduler.reopened(r07Blocked).effectiveState == .ready,
+              "R07: an explicit rescan reopens a blocked todo")
+
+        // ④ 结局记账：读取失败 ⇒ 有界退避（尝试 +1）；确认超满额 ⇒ 阻塞 + 指纹。
+        let afterRetry = RouteTodoScheduler.afterUnreadable(r07Retry, now: r07Now)
+        check(afterRetry.effectiveState == .retryWait && afterRetry.effectiveAttempts == 3
+              && afterRetry.nextRetryAt
+                  == r07Now.addingTimeInterval(RouteTodoScheduler.retryBackoff(attempts: 3)),
+              "R07: an unreadable outcome books a bounded retry")
+        let afterOversize = RouteTodoScheduler.afterOversized(
+            r07Retry, now: r07Now, maxRouteBytes: 100, maxRouteFiles: 10
+        )
+        check(afterOversize.effectiveState == .blockedSize
+              && afterOversize.blockedBudgetFingerprint == "100:10",
+              "R07: an oversized outcome books a size block with the capability fingerprint")
+
+        // ⑤ B01（2026-10-17）：结算槽与"待办 / 状态"的证据链。
+        //
+        // 复现的病灶形态是「待办 1 条 / 状态 0 行 → 恢复轮提交后待办 0 / 状态仍 0」。
+        // 这一段的断言顺序刻意照着那条时间线走：先造出"只有待办"的状态，再提交（只写槽），
+        // 再结算（写状态 + 删待办），最后证明"只有 UUID 没有观测"的候选删不掉任何东西。
+        let settleScope = "sync-scope-settlement"
+        let todoUUID = "AAAAAAAA-1111-2222-3333-444444444444"
+        let observedUUID = todoUUID.lowercased()
+        check(store.upsertPendingRoutes([
+            PendingRouteTodo(workoutUUID: observedUUID, reason: .routeBudget, createdAt: t0)
+        ], scope: settleScope), "B01: the retry lead is queued")
+        check(store.loadRouteStates(scope: settleScope, uuids: [observedUUID]).isEmpty,
+              "B01: the workout has no route state yet")
+
+        let candidate = RouteCommitCandidate(
+            scope: settleScope, batchId: "batch-settlement",
+            states: [observedUUID: record(observedUUID, .active)],
+            completedTodoUUIDs: [todoUUID],
+            discoveryCursor: observedUUID
+        )
+        let settlementPayload = try JSONEncoder().encode(candidate)
+        check(store.save(Data("task".utf8), scope: settleScope), "B01: a live task row exists")
+        check(store.commitSuccess(
+            scope: settleScope, anchor: Data("anchor".utf8), watermark: .keep,
+            routeSettlement: settlementPayload, routeSettlementBatchId: candidate.batchId
+        ), "B01: the commit writes the settlement slot in the same transaction")
+        check(store.loadRouteSettlement(scope: settleScope) == settlementPayload,
+              "B01: the candidate survives the commit (a crash here still has the evidence)")
+        check(store.loadRouteSettlementBatchId(scope: settleScope) == "batch-settlement",
+              "B01: the slot names the batch it belongs to")
+        check(store.loadRouteStates(scope: settleScope, uuids: [observedUUID]).isEmpty,
+              "B01: commit alone does not fabricate a route state")
+        check(store.loadPendingRoutes(scope: settleScope)[observedUUID] != nil,
+              "B01: commit alone does not remove the todo")
+
+        let settlement = RouteCommitSettlement.settle(candidate, scope: settleScope)
+        check(settlement.removals == [observedUUID], "B01: the observed todo is the only removable one")
+        check(store.upsertRouteStates(
+            settlement.states, scope: settleScope,
+            discoveryCursor: settlement.discoveryCursor,
+            removePendingTodos: settlement.removals
+        ), "B01: settlement writes state and removes the todo in one transaction")
+        check(store.loadRouteStates(scope: settleScope, uuids: [observedUUID]).count == 1,
+              "B01: the observation is persisted")
+        check(store.loadPendingRoutes(scope: settleScope)[observedUUID] == nil,
+              "B01: the retry lead is consumed only together with its observation")
+        check(store.clearRouteSettlement(scope: settleScope),
+              "B01: the slot is released after settlement")
+        check(store.loadRouteSettlement(scope: settleScope) == nil,
+              "B01: a released slot reads as absent")
+
+        // 反向：只有 UUID、没有观测的候选（老 payload 的形态）⇒ 一条待办都不删。
+        let legacy = RouteCommitCandidate(
+            scope: settleScope, batchId: "batch-legacy",
+            states: [:], completedTodoUUIDs: [observedUUID], discoveryCursor: nil
+        )
+        check(store.upsertPendingRoutes([
+            PendingRouteTodo(workoutUUID: observedUUID, reason: .routeBudget, createdAt: t0)
+        ], scope: settleScope), "B01: the retry lead is queued again for the negative case")
+        let legacySettlement = RouteCommitSettlement.settle(legacy, scope: settleScope)
+        check(legacySettlement.removals.isEmpty && legacySettlement.unproven == [observedUUID],
+              "B01: a candidate with only a UUID proves nothing")
+        check(store.upsertRouteStates(
+            legacySettlement.states, scope: settleScope,
+            removePendingTodos: legacySettlement.removals
+        ), "B01: an evidence-free settlement is a successful no-op")
+        check(store.loadPendingRoutes(scope: settleScope)[observedUUID] != nil,
+              "B01: the retry lead survives an evidence-free settlement")
+
         print("\(checks) route state persistence regression checks passed")
     }
 }

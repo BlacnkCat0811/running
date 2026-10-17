@@ -9,6 +9,7 @@ struct HealthSyncCancellationRegression {
         try await cancellationWinsOverLateSuccess()
         try await taskOwnerEnforcesSingleFlight()
         try await storedZipCancellationDoesNotPublishArchive()
+        try duplicateZipEntriesFailClosed()
         try cancellationGateBlocksPostCancelSideEffects()
         try await mutationConflictsWaitAndResume()
         try await mutationWaitHonorsCancellationAndTimeout()
@@ -247,6 +248,38 @@ struct HealthSyncCancellationRegression {
         try require(
             !FileManager.default.fileExists(atPath: archive.path),
             "cancelled ZIP creation published a partial archive"
+        )
+    }
+
+    /// R04（2026-10-16 复查）：ZIP 写入器对**重复路径**失败关闭。
+    ///
+    /// 缺陷形态：清单里两个条目同名（页 1 的附件版本与页 N 的正式流版本引用同一
+    /// `workout-routes/<uuid>_1.gpx`）⇒ ZIP 里同路径两个条目 ⇒ 接收器整批拒收。
+    /// 写入器是最后一道防线：**静默去重会把上游的清单错误藏起来**，所以必须当场失败
+    /// ——而且要在写入任何字节之前失败（不产出"看起来正常"的坏 ZIP）。
+    private static func duplicateZipEntriesFailClosed() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("rai-health-sync-dupzip-test-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = directory.appendingPathComponent("first.xml")
+        let second = directory.appendingPathComponent("second.xml")
+        let archive = directory.appendingPathComponent("duplicate.zip")
+        try Data("first".utf8).write(to: first)
+        try Data("second".utf8).write(to: second)
+        do {
+            try StoredZip.write(
+                files: [("workout-routes/x_1.gpx", first), ("workout-routes/x_1.gpx", second)],
+                to: archive
+            )
+            throw RegressionFailure("a duplicate entry was silently accepted into the ZIP")
+        } catch let error as StoredZip.StoredZipError {
+            try require(error == .duplicateEntry("workout-routes/x_1.gpx"),
+                        "the duplicate entry did not surface its path")
+        }
+        try require(
+            !FileManager.default.fileExists(atPath: archive.path),
+            "a rejected duplicate manifest still published an archive"
         )
     }
 

@@ -175,6 +175,14 @@ final class HealthKitSync {
     /// 是跨批记忆；任务行在成功提交时被删除（`commitSuccess`），内存值一重启就没 ——
     /// 与 `budgetConvergenceKey` 同一条"活过 `clearTask()`"的理由。
     private static let recordTypeRotationKey = "rai.hk.recordTypeRotation"
+    /// 显式修复使用的**一次性读下界**（不是水位：它只缩小一次导出的查询窗口）。
+    ///
+    /// 场景：锚损坏、而 `export_end` 从未写过（老行/从未成功提交）。没有它，
+    /// 修复后 `lowerBound` 会是 `nil` ⇒ 从零重读全部历史 —— 正是边界要禁止的那件事。
+    /// 有水位时**不用**它（真实缺口由水位界定，截断等于丢数据）。
+    private static let repairFloorKey = "rai.hk.repairFloor"
+    /// 修复下界的窗口：够覆盖"锚坏了但水位丢了"的常见情形，又不会退化成全史。
+    private static let repairFloorWindow: TimeInterval = 90 * 24 * 60 * 60
     /// Inclusive overlap so workouts finalized just after the previous export are not missed.
     private static let overlap: TimeInterval = 48 * 60 * 60
     private static let autoSyncInterval: TimeInterval = 15 * 60
@@ -390,7 +398,7 @@ final class HealthKitSync {
                 let last = UserDefaults.standard.object(forKey: key) as? Date
                 if let last, Date().timeIntervalSince(last) < Self.autoSyncInterval { return }
             }
-            await self.performSync(to: serverURL, apiToken: apiToken, full: false)
+            await self.performSync(to: serverURL, apiToken: apiToken)
         }
     }
 
@@ -541,11 +549,105 @@ final class HealthKitSync {
     /// `@discardableResult` 是为了让既有的六个前台调用点（`TechSyncStatus` / `TechViews` /
     /// `RootView` / `SyncHealthIntent` / `AppWebView`）一个字都不用改。
     @discardableResult
-    func sync(to serverURL: URL?, apiToken: String = "", full: Bool = false) async -> Bool {
+    func sync(
+        to serverURL: URL?, apiToken: String = "",
+        /// §4.2 步骤 6：对指定 workout UUID 的小范围重试（保留全部 anchor）。
+        /// 空数组 = 普通同步。**这是唯一的重试通道** —— 全量重导入口已于 2026-10-17 删除。
+        routeRetryWorkoutIDs: [String] = []
+    ) async -> Bool {
         await syncOwner.run { [weak self] in
             guard let self else { return }
             guard self.prepareJournalForExecution() else { return }
-            await self.performSync(to: serverURL, apiToken: apiToken, full: full)
+            await self.performSync(
+                to: serverURL, apiToken: apiToken,
+                routeRetryWorkoutIDs: routeRetryWorkoutIDs
+            )
+        }
+    }
+
+    /// 旧服务端页面仍可能发 `syncHealth full:true`：明确拒绝并说明替代入口。
+    ///
+    /// 静默忽略是最坏的一种"成功" —— 用户看到按钮消失/无反应，会以为重导已经跑过。
+    func rejectFullImportRequest() {
+        lastError = "「重新导入全部」已停用：它会清空已提交的增量游标。请改用设置页的「修复增量游标」。"
+        message = nil
+    }
+
+    /// 显式修复**损坏的增量游标**（只清坏掉的那一个）。
+    ///
+    /// 与已删除的「重新导入全部」的区别只有一条，但它是本质的：**范围**。
+    /// 这里不删 `sync_state` 整行、不清其它类型、不写水位；`export_end` 原样保留，
+    /// 所以下一次导出仍从真实缺口开始，而不是从零重读全部历史。
+    func repairSyncCursor() async {
+        await syncOwner.run { [weak self] in
+            guard let self else { return }
+            guard !self.isBusy else { return }
+            var repaired: [String] = []
+
+            let state = self.taskStore.loadState(scope: self.activeScope)
+            if self.taskStore.lastError != nil {
+                self.lastError = HealthKitExportError.stateStoreUnreadable.errorDescription
+                self.message = nil
+                return
+            }
+            if let anchor = state?.workoutAnchor, !HealthKitExport.anchorIsReadable(anchor) {
+                guard self.taskStore.clearWorkoutAnchor(scope: self.activeScope) else {
+                    self.lastError = self.taskStore.lastError ?? "修复跑步游标失败"
+                    self.message = nil
+                    return
+                }
+                // 老键一起删：`sync_state` 有行时不会回退读它，但迁移期还没写过行的设备会。
+                UserDefaults.standard.removeObject(forKey: self.scopedKey(Self.lastWorkoutAnchorKey))
+                repaired.append("跑步")
+            }
+
+            if let payload = self.taskStore.loadRecordCursors(scope: self.activeScope) {
+                if let cursors = try? JSONDecoder().decode([String: HealthKitRecordCursor].self, from: payload) {
+                    let broken = cursors
+                        .filter { !HealthKitExport.anchorIsReadable($0.value.anchor) }
+                        .map(\.key).sorted()
+                    if !broken.isEmpty {
+                        guard self.taskStore.clearRecordCursors(broken, scope: self.activeScope) else {
+                            self.lastError = self.taskStore.lastError ?? "修复记录游标失败"
+                            self.message = nil
+                            return
+                        }
+                        repaired.append("记录（\(broken.count) 类）")
+                    }
+                } else {
+                    // 整包 JSON 解不开 ⇒ 所有类型都没有可用锚点。清这一行仍然是"只清游标"：
+                    // 不碰任务行、不碰 `export_end`。
+                    let allTypes = ((try? JSONSerialization.jsonObject(with: payload)) as? [String: Any])
+                        .map { Array($0.keys) } ?? []
+                    guard self.taskStore.clearRecordCursors(allTypes, scope: self.activeScope) else {
+                        self.lastError = self.taskStore.lastError ?? "修复记录游标失败"
+                        self.message = nil
+                        return
+                    }
+                    repaired.append("记录（全部类型，游标包已损坏）")
+                }
+            } else if self.taskStore.lastError != nil {
+                self.lastError = HealthKitExportError.stateStoreUnreadable.errorDescription
+                self.message = nil
+                return
+            }
+
+            // 预算收敛档位原本也由「重新导入全部」复位；现在归修复入口 ——
+            // 否则一次历史超界会把档位永久折半（`clearBudgetConvergence` 没有第二个调用点）。
+            self.clearBudgetConvergence()
+            // 锚坏了、水位也没了：给**下一次导出**一个有界下界（一次性，不进水位）。
+            // 有水位时不用它 —— 真实缺口由水位界定。
+            if state?.exportEnd == nil {
+                UserDefaults.standard.set(
+                    Date().addingTimeInterval(-Self.repairFloorWindow),
+                    forKey: self.scopedKey(Self.repairFloorKey)
+                )
+            }
+            self.lastError = nil
+            self.phase = SyncPhase.idle.rawValue
+            self.message = repaired.isEmpty
+                ? "没有发现损坏的增量游标，未做任何修改。"
+                : "已修复增量游标：\(repaired.joined(separator: "、"))。已同步数据与其它类型不受影响。"
         }
     }
 
@@ -791,7 +893,7 @@ final class HealthKitSync {
             // 观察点不在这里：通知只在**导出起点**被认领（`performSync` 里那条
             // `observeBackgroundIntentsForExportStart`）。放在这里等于让两条"不重新读 HealthKit"
             // 的恢复分支替通知背书 —— 它们用的是早于通知生成的字节。
-            await performSync(to: serverURL, apiToken: apiToken, full: false)
+            await performSync(to: serverURL, apiToken: apiToken)
         }
         // 握手失败时 `performSync` 会把 activeScope 暂时退回 URL scope。恢复离线候选上下文，
         // 让旧任务仍能驱动重排；握手成功时 activeIdentity 非空，绝不覆盖权威 scope。
@@ -808,7 +910,10 @@ final class HealthKitSync {
         }
     }
 
-    private func performSync(to serverURL: URL?, apiToken: String, full: Bool) async {
+    private func performSync(
+        to serverURL: URL?, apiToken: String,
+        routeRetryWorkoutIDs: [String] = []
+    ) async {
         guard !isBusy else { return }
         guard let serverURL else {
             lastError = "请先连接 RAI 服务"
@@ -948,6 +1053,10 @@ final class HealthKitSync {
             message = nil
             return
         }
+        // 🔴 B01（2026-10-17）：先补上一次"提交成功但结算未完成"的路线候选。
+        // 它只动 `sync_route_state` / `sync_pending_routes`，不读 HealthKit、不动水位 ——
+        // 放在推导下一步之前，是为了让"待办已结算"成为本轮导出看得见的事实。
+        settlePendingRouteCommit()
         // 🔴 在推导"下一步做什么"**之前**盘点系统手上的传输。放在后面等于让
         // `SyncAtomicUnit.nextStep` 在"字节已经归系统"的情况下再发起一次上传 ——
         // 两份同样的字节同时打向服务端，其中一份必然撞 `import_upload_busy`（429）。
@@ -986,7 +1095,6 @@ final class HealthKitSync {
             return
         }
         let unitStep = SyncAtomicUnit.nextStep(
-            full: full,
             sourceId: restoredTask?.sourceId,
             jobId: restoredTask?.jobId,
             hasZip: restoredZip != nil,
@@ -1024,7 +1132,9 @@ final class HealthKitSync {
                     anchor: restored.pendingAnchor,
                     recordCursors: restored.pendingRecordCursors,
                     hasMorePages: restored.needsContinuation ?? false,
-                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                    // 🔴 B01：恢复轮只认任务行里的**候选**（观测 + 完成 UUID）。
+                    // 老任务没有候选 ⇒ `nil` ⇒ 不结算、**不删待办**（安全分支）。
+                    routeCommit: restored.routeCommit,
                     // WP-12（O03）：恢复轮的提交必须把任务行里那份删除余量解析出来 ——
                     // 遗漏它是 R3b 的两处缺陷之一（同内容的批次在其它分支会写槽、这里不会）。
                     pendingDeletions: try Self.restoredCommitDeletions(from: restored),
@@ -1092,7 +1202,7 @@ final class HealthKitSync {
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
-                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        routeCommit: restored.routeCommit,
                         // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
                         pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
@@ -1127,7 +1237,7 @@ final class HealthKitSync {
                     anchor: restored.pendingAnchor,
                     recordCursors: restored.pendingRecordCursors,
                     hasMorePages: restored.needsContinuation ?? false,
-                    routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                    routeCommit: restored.routeCommit,
                     // WP-12（O03）：与 `.waitJob` 分支同一处补漏 —— 恢复轮必须透传余量。
                     pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                     receipt: finished.summary?.directSync,
@@ -1229,7 +1339,7 @@ final class HealthKitSync {
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
-                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        routeCommit: restored.routeCommit,
                         // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
                         pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                         // 服务端回的是 `unchanged`：它明确回答"这批**不必导入**"，那是对
@@ -1260,7 +1370,7 @@ final class HealthKitSync {
                         anchor: restored.pendingAnchor,
                         recordCursors: restored.pendingRecordCursors,
                         hasMorePages: restored.needsContinuation ?? false,
-                        routeDiscoveryCursor: restored.pendingRouteDiscoveryCursor,
+                        routeCommit: restored.routeCommit,
                         // WP-12（O03）：从任务行恢复删除余量（统一入口；损坏 ⇒ 报错保留任务）。
                         pendingDeletions: try Self.restoredCommitDeletions(from: restored),
                         receipt: finished.summary?.directSync,
@@ -1321,19 +1431,14 @@ final class HealthKitSync {
                 break
             }
             try checkCancellation()
-            if full {
-                // 🔴 「重新导入全部」= 忘掉已提交的锚，从零重取。水位搬进 `sync_state` 之后
-                // **两处都要清**：只清老键的话，`loadCommittedState` 会从 `sync_state` 把锚
-                // 读回来，于是"全量重导"只做了前半程 —— 下一次同步又按老锚只取增量，
-                // 而界面已经宣称"重新导入了全部"。漏掉哪一处都是**静默**的。
-                taskStore.forgetState(scope: activeScope)
-                UserDefaults.standard.removeObject(forKey: scopedKey(Self.lastWorkoutAnchorKey))
-                // 第三处本地记忆：**预算收敛档位**（P1b/P2b）。语义与上面两处同源 ——
-                // 用户显式要求"从头来一次"就该回到满预算；收敛本是对"服务端拒过这个量级"
-                // 的临时让步（每档把四个维度都折半），不是永久降档。
-                // ⚠️ 只在这一处清：自动同步里清它会在下一次立刻重撞同一面墙。
-                clearBudgetConvergence()
-            }
+            // 🔴 2026-10-17（边界收紧）：「重新导入全部」已**删除**，不是隐藏。
+            //
+            // 旧分支会 `forgetState` 删整行 `sync_state`、删老锚键、清预算档位，然后从零
+            // 重取全部历史。它与"永不自动清空游标、不做全量同步"的边界直接冲突，而且它是
+            // **唯一**会把 `sync_state` 整行删掉的地方 —— 留着它，边界就只是一句 UI 约定。
+            // 现在恢复入口只有一个：显式「修复增量游标」（`repairSyncCursor`），只清坏掉的
+            // 那一个游标，`export_end` 与其它类型原样保留。服务端的数据重建走服务器侧 CLI
+            // 导入，不经过手机同步。
             // 🔴 这里原先还有第三个恢复分支：「UserDefaults 里记着一个失败 ZIP ⇒ 直接重传它」。
             // 它已随 P1 删除，理由是它**与 `SyncAtomicUnit` 覆盖同一件事、判据却各不相同**：
             // 它用 `try? fileHash(...)` 现算 batchId（哈希失败 ⇒ 静默不发幂等头 ⇒ 服务端每次
@@ -1344,12 +1449,19 @@ final class HealthKitSync {
             // 锚与导出水位都从 `loadCommittedState()` 一处取 —— 这是**唯一**的读取点。
             // 改造前它们各自直接读 `UserDefaults`（这里三处 + `markSuccess` 一写），
             // 而"两套真相"的全部代价都来自读取点分散：漏改一处就静默分裂。
-            let committed = loadCommittedState()
+            let committed = try loadCommittedState()
             let lastExportEnd = committed?.exportEnd
-            let lowerBound: Date? = (full || lastExportEnd == nil)
-                ? nil
-                : lastExportEnd!.addingTimeInterval(-Self.overlap)
-            let anchor = full ? nil : committed?.workoutAnchor
+            let repairFloor = UserDefaults.standard
+                .object(forKey: scopedKey(Self.repairFloorKey)) as? Date
+            if lastExportEnd != nil, repairFloor != nil {
+                // 水位回来了 ⇒ 一次性下界没有意义了（留着只会在下次水位丢失时误导）。
+                UserDefaults.standard.removeObject(forKey: scopedKey(Self.repairFloorKey))
+            }
+            // 有水位：读真实缺口（可能很长，但那是真实的未同步集合）；
+            // 没水位：只有修复显式写下的有界下界，否则才是首装的无下界。
+            let lowerBound: Date? = lastExportEnd.map { $0.addingTimeInterval(-Self.overlap) }
+                ?? repairFloor
+            let anchor = committed?.workoutAnchor
             // 伴生 Route 状态必须在**导出开始之前**整批读出来：导出跑在脱离主线程的上下文里
             // （`HealthSyncCancellation.runDetached`），那里碰不了 `@MainActor` 的 `taskStore`。
             // 表很小（每 workout 一行），整表读比"导出中发现一个 uuid 再跨 actor 回来查"更省。
@@ -1415,21 +1527,19 @@ final class HealthKitSync {
                         from: lowerBound,
                         workoutAnchor: anchor,
                         recordCursors: recordCursors,
-                        // 普通同步（按钮/快捷指令/自动）均续接记录游标。只有显式
-                        // 「重新导入全部」强制补读。权限扩大后的历史也由用户显式补读，
-                        // 不再把日常自动同步每七天升级成全历史导出。
-                        recordsForceRescan: full,
                         routeStates: routeStates,
                         routeDiscoveryCursor: routeDiscoveryCursor,
-                        // 人工重扫 = `full`（"重新导入全部"）：所有 workout 的状态复位成 `active`，
-                        // 于是这一轮每个都重查一次，不受低频间隔或候选数限制。
-                        routeForceRescan: full,
+                        // §4.2 步骤 6：定点重试只重开这些 UUID（全量重扫通道已随
+                        // 「重新导入全部」一起删除）。
+                        routeRetryWorkoutIDs: Set(routeRetryWorkoutIDs.map { $0.lowercased() }),
                         budget: attemptBudget,
                         // R3b：上一批没发完的删除（旧槽）。本批先发它，再发新删除；
                         // 仍装不下的余量在 `produced.pendingDeletions` 回传。
                         pendingDeletions: pendingDeletions,
-                        // O02/WP-11：待办队列的 UUID（定点补查 + 回报可移除）。
-                        pendingRouteTodos: Array(pendingRouteTodos.keys),
+                        // O02/WP-11 + R07：待办队列（**完整对象**，含调度状态）——导出层
+                        // 据此决定"本批可执行子集"（blocked/退避未到期的不查）并按结局回传
+                        // 调度更新；登记/移除仍由本函数在提交前后按既有纪律执行。
+                        pendingRouteTodos: Array(pendingRouteTodos.values),
                         // B2：类型轮转起点（上一批读到的位置；让历史重放无类型饿死）。
                         typeRotationStart: self.loadRecordTypeRotation(),
                         onProgress: onProgress
@@ -1509,7 +1619,18 @@ final class HealthKitSync {
                 // WP-12（O03）：**空也编码**（显式空对象）—— 恢复轮据此把"清槽"执行掉。
                 // 旧的 `isEmpty ? nil` 让空余量伪装成"未记录"（老任务语义）⇒ 恢复轮不更新
                 // 旧槽 ⇒ 已发完的删除被反复重发。只有**老任务缺键**才表示"未记录，不更新"。
-                pendingDeletions: try? JSONEncoder().encode(exported.pendingDeletions)
+                pendingDeletions: try? JSONEncoder().encode(exported.pendingDeletions),
+                // R03：本批"已交付、待提交后结算"的路线待办随任务行落盘 —— 恢复轮（崩在
+                // 导出完成与提交成功之间）凭它把待办从队列里结算掉；缺键（老任务）=
+                // 没有完成证明 ⇒ 恢复轮不移除（残留只多查一次，安全方向）。
+                completedRouteTodos: exported.completedRouteTodos,
+                // 🔴 B01（2026-10-17）：把**完整观测**与完成 UUID 一起持久化。只存 UUID 的
+                // 形态让恢复轮只能删待办、写不出状态 —— 那条路线会从两条发现通道同时消失
+                // （见 `RouteCommitCandidate`）。候选在**上传之前**就落盘：崩在提交成功与
+                // 结算完成之间时，本地仍有一份可执行的结算证据，不必重读 HealthKit。
+                routeCommit: Self.routeCommitCandidate(
+                    scope: activeScope, batchId: payloadHash, exported: exported
+                )
             ))
             // B2：轮转起点在**导出成功之后**立刻落盘（与任务行同批；即使随后上传失败，
             // 下一轮从新起点继续 —— 起点只影响"从哪个类型先读"，多走一步无害）。
@@ -1550,12 +1671,11 @@ final class HealthKitSync {
                     anchor: pendingAnchor,
                     recordCursors: exported.recordCursors,
                     hasMorePages: exported.hasMorePages,
-                    routeStates: exported.routeStates,
-                    routeDiscoveryCursor: exported.routeDiscoveryCursor,
+                    routeCommit: Self.routeCommitCandidate(
+                        scope: activeScope, batchId: payloadHash, exported: exported
+                    ),
                     // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
                     pendingDeletions: exported.pendingDeletions,
-                    // O02/WP-11：本批已查完的待办（提交成功后移除）。
-                    completedRouteTodos: exported.completedRouteTodos,
                     // 同两条恢复分支：`unchanged` 是对已存在批次的确认，没有新回执可等。
                     requiresReceipt: false
                 )
@@ -1578,12 +1698,11 @@ final class HealthKitSync {
                     anchor: pendingAnchor,
                     recordCursors: exported.recordCursors,
                     hasMorePages: exported.hasMorePages,
-                    routeStates: exported.routeStates,
-                    routeDiscoveryCursor: exported.routeDiscoveryCursor,
+                    routeCommit: Self.routeCommitCandidate(
+                        scope: activeScope, batchId: payloadHash, exported: exported
+                    ),
                     // R3b：本批算出的删除余量（可能为空 = 清旧槽）。
                     pendingDeletions: exported.pendingDeletions,
-                    // O02/WP-11：本批已查完的待办（提交成功后移除）。
-                    completedRouteTodos: exported.completedRouteTodos,
                     receipt: finished.summary?.directSync,
                     // 这一轮真的跑过导入作业（`startImport` → `waitForJob`），配得上的回执
                     // 会随这次 `finished` 一起到 —— 服务端宣告了能力位才等它（老服务端 §10.2
@@ -1760,9 +1879,9 @@ final class HealthKitSync {
     /// 自比，却**没有任何生产调用点**：真正拦住它的是 `performSync` 里两处提前 `return`，
     /// 而那两处是"锁屏/等凭证该怎么办"的副产品，不是"anchor 该怎么写"的判据。
     /// 挂到这里之后，它才第一次出现在 anchor 的写入路径上。
-    /// - Parameter routeStates: 本轮实际查询过的 workout 的伴生 Route 状态（键 = workout uuid）。
-    ///   默认空 —— 只有**从导出一路走到底**的那两条分支有得传（`SyncAtomicUnit` 的续传分支
-    ///   是接着一份已经落盘的本地产物走，没有本轮导出，也就没有新的观测）。
+    /// - Parameter routeCommit: 本批路线证据（观测 + 完成待办 + 发现游标）。导出轮传本批
+    ///   刚算出的候选；恢复轮传任务行里的候选；没有路线的批次传 `nil`（= 不结算，
+    ///   **不等于**"删光待办"）。老任务没有候选 ⇒ 一条待办都不删（§3.2 步骤 9）。
     /// - Parameter receipt: 服务端 `summary.directSync` 的持久回执（§10.1）。`nil` = 没拿到
     ///   （老服务端 / 旧候选链路 / 本次没有导入任务）—— 调用方**必须**沿用今天的文案，
     ///   并把游标交给闸门去判，不许把单一 `succeeded` 当成回执（§10.2）。
@@ -1790,18 +1909,29 @@ final class HealthKitSync {
         recordCursors: Data? = nil,
         hasMorePages: Bool = false,
         recordWorkoutCount: Bool = true,
-        routeStates: [String: RouteSyncRecord] = [:],
-        routeDiscoveryCursor: String? = nil,
+        // 🔴 B01（2026-10-17）：本批路线证据 = 观测 + 完成待办 + 发现游标。
+        //
+        // **无默认值**是刻意的：漏传会让"这一批查过的路线"静默不结算（下一轮重读
+        // HealthKit 才发现），而有默认值时编译器不会提醒。恢复轮传任务行里的候选；
+        // 导出轮传本批刚算出的候选；没有路线的批次传 `nil` —— 它表示"不结算"，
+        // **不是**"删光待办"。
+        routeCommit: RouteCommitCandidate?,
         // WP-12（O03）：删除余量。**无默认值**是刻意的 —— 有默认值时"某处调用漏传"会静默
         // 通过（R3b 就漏了 `.waitJob` 与 `.inspect 续接` 两处恢复分支）。三态语义与
         // `SyncTaskStore.commitSuccess` 的同名参数逐字一致：`nil` = 不改旧槽；空 = 清；非空 = 写；
         // 新增调用点必须显式表达属于哪一种（漏传 = 编译失败）。
         pendingDeletions: DirectSyncPendingDeletions?,
-        // O02/WP-11：本批已成功交付、可从待办队列移除的 UUID。默认空 = 不动队列
-        // （恢复轮的 completed 不在任务行里 ⇒ 残留只会让下批多查一次，无害）。
-        // 🔴 移除只在**提交成功之后**执行 —— 载荷未被接受时移除会让「无状态行」的
-        // UUID 再也回不来。
-        completedRouteTodos: [String] = [],
+        // O02/WP-11 + R03：本批已成功交付、可从待办队列移除的 UUID。
+        // 🔴 只有**完整观测**（`RouteFetch.Outcome.observation`，含合法零点）才会成为
+        // 候选 —— 读取失败（`.unreadable`）绝不进这里（2026-10-16 复查：旧实现对
+        // `observation == nil` 的失败结果也记"查完"，把唯一的重试线索删掉）。
+        // 🔴 移除只在**提交成功之后**执行，且与路线状态落盘在**同一个本地短事务**里
+        // （`SyncTaskStore.upsertRouteStates(removePendingTodos:)`，状态写不进去 ⇒ 待办
+        // 原样保留）。
+        //
+        // 🔴 B01：这个集合现在**只从候选**派生（`RouteCommitSettlement.settle`）。候选为
+        // `nil`（老任务 / 本轮没查路线）⇒ 集合为空 ⇒ 一条待办都不删。"只有 UUID 没有观测"
+        // 的旧任务因此走安全分支，而不是从 UUID 猜造状态。
         receipt: DirectSyncReceipt? = nil,
         requiresReceipt: Bool = true,
         job: ImportJobResponse? = nil
@@ -1914,9 +2044,12 @@ final class HealthKitSync {
             clear: clearWatermark,
             exportEnd: exportEnd
         )
+        // B01：候选与任务行删除**同一事务**落盘（见 `commitSuccess` 的 `routeSettlement`）。
+        // 编码失败 ⇒ 传 `nil`，宁可这一轮不结算（待办保留、下轮重读）也不写半份证据。
+        let routeSettlement = routeCommit.flatMap { try? JSONEncoder().encode($0) }
         let committed = HealthSyncBackgroundRecovery.persistThenAcknowledge(
             checkpoint: .syncCommitted,
-            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation) },
+            persist: { taskStore.commitSuccess(scope: activeScope, anchor: anchor, watermark: watermark, recordCursors: recordCursors, pendingDeletions: pendingDeletions, continuationPending: needsContinuation, routeSettlement: routeSettlement, routeSettlementBatchId: routeCommit?.batchId ?? "") },
             acknowledge: { checkpoint in
                 // §10.2「连续分页尚未 drain 完时，不清空后台待办意图」：认领了它，用户不打开
                 // App 就再也没人接着发下一批。`persistThenAcknowledge` 因此**不再**无条件确认，
@@ -1942,18 +2075,19 @@ final class HealthKitSync {
         // 写失败**不**让本次同步变红：durable 的部分（水位 + 进度）已经提交，这里失败的后果
         // 只是"下一轮重查一次"。但也不静默——`upsertRouteStates` 会把原因推进
         // `taskStore.lastError`，并由 `SQLiteSupport.report` 打出带错误码的日志。
-        if !routeStates.isEmpty || routeDiscoveryCursor != nil,
-           !taskStore.upsertRouteStates(
-                Array(routeStates.values), scope: activeScope, discoveryCursor: routeDiscoveryCursor
-           ) {
-            NSLog("[RAI] route state flush after commit failed: %@", taskStore.lastError ?? "unknown")
-        }
-        // O02/WP-11：待办路线的移除 —— 与 `upsertRouteStates` 同款纪律（提交后的收尾写）。
-        // 失败只落 NSLog：残留的后果是"下批多查一次"，为它阻断收尾反而得更少。
-        if !completedRouteTodos.isEmpty,
-           !taskStore.removePendingRoutes(completedRouteTodos, scope: activeScope) {
-            NSLog("[RAI] pending route todo flush after commit failed: %@", taskStore.lastError ?? "unknown")
-        }
+        //
+        // 🔴 R03（2026-10-16 复查）：路线状态落盘 + 待办移除 = **同一个本地短事务**
+        //（`upsertRouteStates(removePendingTodos:)`）。旧形态是两次独立写：状态落盘失败
+        // 只 NSLog、待办照删 —— 那条"读取失败"的路线既没有状态又没了待办，而**无状态行**的
+        // UUID 只能靠待办队列被发现（`rediscoveryCandidates` 只遍历已有状态行）⇒ 永久不可
+        // 发现。现在状态写不进去 ⇒ 整个事务回滚 ⇒ 待办原样保留（下批重查，幂等）。
+        //
+        // 🔴 B01（2026-10-17）：结算入口只有 `settlePendingRouteCommit()` —— 它读的是刚写进
+        // `sync_route_settlements` 的候选，与"下次启动补结算"走**同一条**代码路径。
+        // 这样"提交成功 → 崩溃 → 重启"与"提交成功 → 当场结算"不可能分叉。
+        // 结算失败时**保留候选**（不抛错）：durable 的部分已经提交，这里失败的后果只是
+        // 下一轮少一次 HealthKit 重读，而不会把一次已保存的同步报成失败。
+        settlePendingRouteCommit()
         // `hasPendingTask` 只在**真的清掉了那一行**之后才翻 —— 它现在与 `clearTask()` 同为
         // 日志清空点，两处是判据要求的全部（多一处就等于界面可以凭空说"没有待办了"）。
         hasPendingTask = false
@@ -1981,6 +2115,76 @@ final class HealthKitSync {
         self.message = message
         dataUpdatedGeneration += 1
         phase = SyncPhase.succeeded.rawValue
+    }
+
+    /// B01：把导出结果折成**可持久、可结算**的路线候选。
+    ///
+    /// 为什么在这里装配而不是在导出层：scope 与 `payloadHash`（批次身份）都是同步层的
+    /// 事实，导出层刻意不碰身份（它只描述"看到了什么"）。
+    ///
+    /// ⚠️ `states` 传的是 `exported.routeStates`（**已完整观测**的下一状态），
+    /// `completedRouteTodos` 只包含"原本在待办队列里、且本轮 `observation` 成功"的 UUID ——
+    /// 读取失败（`.unreadable`）与预算拒绝（`.budgetDeferred`）都不进这两个集合。
+    private static func routeCommitCandidate(
+        scope: String, batchId: String, exported: HealthKitExportResult
+    ) -> RouteCommitCandidate? {
+        // 一轮既没有观测、也没有待办要结算 ⇒ 没有候选（不占用结算槽，也不改动旧槽）。
+        guard !exported.routeStates.isEmpty || !exported.completedRouteTodos.isEmpty else {
+            return nil
+        }
+        return RouteCommitCandidate(
+            scope: scope,
+            batchId: batchId,
+            states: exported.routeStates,
+            completedTodoUUIDs: exported.completedRouteTodos,
+            discoveryCursor: exported.routeDiscoveryCursor
+        )
+    }
+
+    /// B01：只凭**本地**结算候选补完上一批的路线结算。
+    ///
+    /// 它不读 HealthKit、不上传、不动水位 —— 唯一动的是 `sync_route_state` 与
+    /// `sync_pending_routes`，两者在 `upsertRouteStates` 的**同一个事务**里同进同退。
+    ///
+    /// 两条调用路径共用它（这是刻意的）：
+    ///   * `markSuccess` 提交成功之后当场结算；
+    ///   * `performSync` 开头补上一次"提交成功但进程被杀"留下的候选（§3.2 步骤 8）。
+    ///
+    /// 失败方向：
+    ///   * 候选解不开 ⇒ 清掉它（留着只会每次启动重试同一份坏数据），待办**保留**；
+    ///   * 结算无内容（全缺证明）⇒ 清掉候选，待办保留（下一轮重新观测）；
+    ///   * 事务失败 ⇒ **保留候选**，下次再来（不重读 HealthKit）。
+    @discardableResult
+    private func settlePendingRouteCommit() -> Bool {
+        guard let data = taskStore.loadRouteSettlement(scope: activeScope) else { return false }
+        guard let candidate = try? JSONDecoder().decode(RouteCommitCandidate.self, from: data) else {
+            NSLog("[RAI] route settlement payload unreadable; dropping it (todos stay queued)")
+            taskStore.clearRouteSettlement(scope: activeScope)
+            return false
+        }
+        let settlement = RouteCommitSettlement.settle(candidate, scope: activeScope)
+        if !settlement.unproven.isEmpty {
+            // 缺观测的 UUID **不移除**：它们留在待办队列里由下一轮重新发现。
+            NSLog(
+                "[RAI] route settlement kept %d todo(s) without observation (batch %@)",
+                settlement.unproven.count, candidate.batchId
+            )
+        }
+        guard !settlement.isEmpty else {
+            taskStore.clearRouteSettlement(scope: activeScope)
+            return false
+        }
+        guard taskStore.upsertRouteStates(
+            settlement.states, scope: activeScope,
+            discoveryCursor: settlement.discoveryCursor,
+            removePendingTodos: settlement.removals
+        ) else {
+            NSLog("[RAI] route settlement failed (batch %@): %@",
+                  candidate.batchId, taskStore.lastError ?? "unknown")
+            return false
+        }
+        taskStore.clearRouteSettlement(scope: activeScope)
+        return true
     }
 
     // MARK: 分析终态对账（§10.2「分析另行跟踪」/ §10.3 后两句文案）
@@ -2732,20 +2936,21 @@ final class HealthKitSync {
     /// 拿"值是不是空"当迁移判据，会把一次合法的"清空水位"误读成"还没迁移"从而把老值读回来。
     ///
     /// 「`sync_state` 有行 ⇒ 老键已被删」这条不变式由**写方**保证：`markSuccess` 在提交成功后
-    /// 才删老键，`full` 那条路同时 `forgetState` + 删老键。两处都做全，迁移期就不存在
-    /// "两边都有值且不一致"的第三态。
+    /// 才删老键（`forgetState` 那条「全量重导」路径已于 2026-10-17 删除）。
     ///
-    /// ⚠️ 读失败（`lastError != nil`）时返回 nil，与 `loadTask` 同一口径：日志读不出来时宁可
-    /// 退化成"没有水位"（多做一次全量导出），也不要拿一个来路不明的值去推进。
-    private func loadCommittedState() -> SyncTaskStore.CommittedState? {
+    /// 🔴 **读失败必须阻塞，不能退化成"没有水位"**。旧实现返回 nil ⇒ `lowerBound = nil` ⇒
+    /// 从零重取全部历史 —— 那是一条自动全量通道，与"永不自动清空游标"的边界冲突。
+    /// 只有"确实没有行"（首装 / 换 scope）才是合法的无水位状态。
+    private func loadCommittedState() throws -> SyncTaskStore.CommittedState? {
         let committed = taskStore.loadState(scope: activeScope)
-        guard taskStore.lastError == nil else { return nil }
+        guard taskStore.lastError == nil else {
+            throw HealthKitExportError.stateStoreUnreadable
+        }
         if let committed { return committed }
         var legacy = SyncTaskStore.CommittedState()
         legacy.workoutAnchor = UserDefaults.standard.data(forKey: scopedKey(Self.lastWorkoutAnchorKey))
         legacy.exportEnd = UserDefaults.standard.object(forKey: scopedKey(Self.lastExportEndKey)) as? Date
-        // 两个都没有 ⇒ 返回 nil，与"没有这一行"等价（否则一次全量导出会被 `full` 的判据
-        // 之外的分支当成"水位存在但为空"，走向另一条路）。
+        // 两个都没有 ⇒ 返回 nil，与"没有这一行"等价（首装）。
         return legacy == SyncTaskStore.CommittedState() ? nil : legacy
     }
 

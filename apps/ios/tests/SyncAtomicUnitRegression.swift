@@ -21,7 +21,6 @@ struct SyncAtomicUnitRegression {
         try sourceIsInspectedBeforeAnyImport()
         try localBatchResumesAtUpload()
         try nothingLocalStartsFromExport()
-        try fullIgnoresEveryRecoveryBranch()
         try waitForJobIsNeverReuploaded()
         try onlyWaitingForTheServerIsTheCheapStep()
         try uploadRecoveryKeepsTheSameBatch()
@@ -95,23 +94,6 @@ struct SyncAtomicUnitRegression {
             SyncAtomicUnit.nextStep(sourceId: nil, jobId: nil, hasZip: false, hasMultipart: false) == .export,
             "an empty state did not start from export"
         )
-    }
-
-    /// 「重新导入全部」必须短路三个恢复分支，否则"重新导入"会悄悄复用旧批次。
-    private static func fullIgnoresEveryRecoveryBranch() throws {
-        let combos: [(String?, String?, Bool, Bool)] = [
-            (nil, nil, false, false), (nil, nil, true, false), (nil, nil, false, true),
-            ("s", nil, true, true), ("s", "j", true, true), (nil, "j", false, false)
-        ]
-        for (sourceId, jobId, hasZip, hasMultipart) in combos {
-            let step = SyncAtomicUnit.nextStep(
-                full: true, sourceId: sourceId, jobId: jobId, hasZip: hasZip, hasMultipart: hasMultipart
-            )
-            try require(
-                step == .export,
-                "full re-import resumed at \(step) for source=\(sourceId ?? "-") job=\(jobId ?? "-")"
-            )
-        }
     }
 
     /// `jobId` 在就必须等它 —— 包括等超时之后。§8：`waitForJob` 超时**不得** `clearTask`、

@@ -77,7 +77,7 @@ xcrun swiftc "${swiftc_flags[@]}" -swift-version 5 -default-isolation MainActor 
 # `cannot find type 'SyncPhase' in scope` 炸，而全量类型检查（一起编）完全看不出来。
 xcrun swiftc "${swiftc_flags[@]}" apps/ios/RAI/SyncPhase.swift \
   apps/ios/RAI/DirectSyncReceiptState.swift apps/ios/RAI/DirectSyncCursorPolicy.swift \
-  apps/ios/RAI/SyncTaskState.swift \
+  apps/ios/RAI/SyncTaskState.swift apps/ios/RAI/RouteSyncState.swift \
   apps/ios/tests/DirectSyncReceiptRegression.swift -o "$tmp/direct-sync-receipt-tests"
 "$tmp/direct-sync-receipt-tests"
 

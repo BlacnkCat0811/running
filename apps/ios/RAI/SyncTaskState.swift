@@ -113,6 +113,32 @@ nonisolated struct SyncTaskState: Codable {
     /// **分析另行跟踪**"。
     var lastAnalysisStatus: DirectSyncAnalysisStatus?
 
+    /// R03（2026-10-16）：本批**已交付、待提交后结算**的路线待办 UUID（跨进程恢复用）。
+    ///
+    /// 为什么需要它：这些"完成候选"此前只活在导出轮的**内存**里
+    ///（`markSuccess(completedRouteTodos:)` 的默认空参数）。崩在"导出完成 → 提交成功"
+    /// 之间、由恢复轮提交时，候选丢失 ⇒ 待办残留 ⇒ 下批多查一次（方向安全，但白读
+    /// HealthKit 的轨迹是整条链最贵的一步之一）。
+    ///
+    /// `nil`（老 payload 缺键）= **没有完成证明** ⇒ 恢复轮按"不移除"处理 —— 安全方向与
+    /// `pendingDeletions` 同款：残留只会让下批多查一次，绝不丢。
+    ///
+    /// 🔴 B01（2026-10-17）：本字段**不再单独作为删除依据**。它只保留"当时打算删哪些"的
+    /// 诊断信息；真正的结算走 {@link routeCommit}。原因是"完成 UUID"不带观测 —— 恢复轮
+    /// 拿着它只能删待办、写不出状态，于是那条路线永久不可发现（见 `RouteCommitCandidate`）。
+    var completedRouteTodos: [String]?
+
+    /// B01（2026-10-17）：本批路线观测的**持久提交候选**（§3.2）。
+    ///
+    /// 与 `completedRouteTodos` 的差别是它带**完整观测**（点数、摘要、状态、检查时刻）。
+    /// 恢复轮凭它同时做两件事：
+    ///   1. 写 `sync_route_state`（这条路线"查过了"的记忆）；
+    ///   2. 删 `sync_pending_routes`（"还没查"的队列）。
+    ///
+    /// 两者必须由同一份证据驱动，否则"删了待办却没写状态"会让该 UUID 从两条发现通道
+    /// 同时消失。`nil`（老 payload / 本轮没查路线）= 不结算、不删待办。
+    var routeCommit: RouteCommitCandidate?
+
     init(
         target: String,
         serverId: String? = nil,
@@ -142,7 +168,9 @@ nonisolated struct SyncTaskState: Codable {
         lastReceipt: DirectSyncReceipt? = nil,
         needsContinuation: Bool? = nil,
         pendingDeletions: Data? = nil,
-        lastAnalysisStatus: DirectSyncAnalysisStatus? = nil
+        lastAnalysisStatus: DirectSyncAnalysisStatus? = nil,
+        completedRouteTodos: [String]? = nil,
+        routeCommit: RouteCommitCandidate? = nil
     ) {
         self.target = target
         self.serverId = serverId
@@ -173,6 +201,8 @@ nonisolated struct SyncTaskState: Codable {
         self.needsContinuation = needsContinuation
         self.pendingDeletions = pendingDeletions
         self.lastAnalysisStatus = lastAnalysisStatus
+        self.completedRouteTodos = completedRouteTodos
+        self.routeCommit = routeCommit
     }
 
     /// 显式解码：老键保持必填，新键一律 `decodeIfPresent`。
@@ -223,6 +253,17 @@ nonisolated struct SyncTaskState: Codable {
         lastAnalysisStatus = try container.decodeIfPresent(
             DirectSyncAnalysisStatus.self, forKey: .lastAnalysisStatus
         )
+        completedRouteTodos = try container.decodeIfPresent([String].self, forKey: .completedRouteTodos)
+        // B01：路线提交候选。**解不开时降级为 `nil`，绝不让它拖垮整份任务。**
+        //
+        // 理由是本文件顶部那条兼容纪律：`HealthKitSync.loadTask` 用 `try?`，任何一处抛错都会
+        // 让整份任务被当成"没有任务" —— 症状是升级后首次同步**重导整个窗口**，而 `sync_tasks`
+        // 那一行明明还在。候选只是**可选的结算证据**：丢了它，待办仍在队列里（下一轮重新观测），
+        // 而丢掉整份任务是不可接受的。
+        //
+        // 这与"损坏证据失败关闭"不矛盾：失败关闭发生在**结算**侧（`RouteCommitSettlement`
+        // 校验失败 ⇒ 一条待办都不删），不是发生在**解码**侧（解码失败 ⇒ 这一轮不结算）。
+        routeCommit = try? container.decodeIfPresent(RouteCommitCandidate.self, forKey: .routeCommit)
     }
 
     /// 落盘的那个字符串 → 闭集取值。老 payload 的 `recomputing` 在这里归一到 `importing`。

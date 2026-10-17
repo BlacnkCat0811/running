@@ -4,6 +4,16 @@ import zlib
 nonisolated enum StoredZip {
     static func write(files: [(name: String, url: URL)], to url: URL) throws {
         try Task.checkCancellation()
+        // 🔴 R04（2026-10-16 复查）：**重复路径 = 接收端拒收的形态**（ZIP 里两个条目同名，
+        // 服务端 `gpx-parser`/接收器按路径集合校验 ⇒ 整批被拒）。写入器是**最后一道防线**：
+        // 静默去重会把上游的清单错误藏起来，所以这里**失败关闭** —— 上游必须保证清单唯一
+        // （`HealthKitExport` 的批次级路线清单按相对路径跨页去重）。
+        var seenNames = Set<String>()
+        for file in files {
+            guard seenNames.insert(file.name).inserted else {
+                throw StoredZipError.duplicateEntry(file.name)
+            }
+        }
         let fileManager = FileManager.default
         let temporaryURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString).tmp")
@@ -129,10 +139,13 @@ nonisolated enum StoredZip {
         let localOffset: UInt64
     }
 
-    private enum StoredZipError: Error {
+    enum StoredZipError: Error, Equatable {
         case compressionFailed
         case fileTooLarge
         case outputCreationFailed
+        /// R04：清单里出现两个同名条目 —— 这是接收器拒收的形态，必须在写入任何字节之前失败
+        /// （由上游的批次级清单去重保证它不可达；它是"上游错了也别把坏 ZIP 发出去"的兜底）。
+        case duplicateEntry(String)
     }
 
     private static func compressFile(at sourceURL: URL, to destinationURL: URL) throws -> FileStats {

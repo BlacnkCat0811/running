@@ -164,21 +164,6 @@ nonisolated enum SyncAtomicUnit {
         if hasMultipart || hasZip { return .upload }
         return .export
     }
-
-    /// 用户明确要求"重新导入全部"时的下一步。
-    ///
-    /// `full` 不是**状态**而是**指令**，所以它单独一个入口而不是塞进上面那个函数：
-    /// 把指令混进状态推导里，读的人就再也分不清"状态要求这样"和"用户要求这样"。
-    /// 全量时三个恢复分支一律跳过 —— 否则"重新导入"会悄悄复用旧批次。
-    static func nextStep(
-        full: Bool,
-        sourceId: String?,
-        jobId: String?,
-        hasZip: Bool,
-        hasMultipart: Bool
-    ) -> Step {
-        full ? .export : nextStep(sourceId: sourceId, jobId: jobId, hasZip: hasZip, hasMultipart: hasMultipart)
-    }
 }
 
 /// 上传这一步失败之后的处置。

@@ -92,7 +92,26 @@ final class SyncTaskStore {
                 workout_uuid TEXT NOT NULL,
                 reason TEXT NOT NULL,
                 created_at REAL NOT NULL,
+                -- R07（2026-10-16）：调度状态与字段（旧库经 `ensurePendingRouteColumns` 幂等补列）。
+                -- 全部可空：NULL 由读侧归一（`schedState == nil` ⇒ ready）。
+                sched_state TEXT,
+                attempt_count INTEGER,
+                last_attempt_at REAL,
+                next_retry_at REAL,
+                blocked_budget_fingerprint TEXT,
                 PRIMARY KEY (scope, workout_uuid)
+            );
+            -- B01（2026-10-17）：路线提交候选的**结算槽**。
+            -- 为什么要独立于 sync_tasks：`commitSuccess` 在同一个事务里删掉任务行，
+            -- 而"写状态 + 删待办"发生在提交**之后**。候选若只活在任务行里，崩在
+            -- 提交成功与结算完成之间就丢了 —— 待办残留（安全，但白读一次 HealthKit），
+            -- 且没有任何本地记录能说明"这批已经交付、只差结算"。
+            -- 候选只含点数/摘要/状态，不含轨迹点（不是另一份健康库）。
+            CREATE TABLE IF NOT EXISTS sync_route_settlements (
+                scope TEXT PRIMARY KEY,
+                batch_id TEXT NOT NULL,
+                payload BLOB NOT NULL,
+                created_at REAL NOT NULL
             );
             """
         let execResult = schema.withCString { sql in
@@ -217,6 +236,40 @@ final class SyncTaskStore {
                 last_workout_uuid TEXT NOT NULL
             );
             """, database: database)
+        guard ensurePendingRouteColumns(database: database) else { return false }
+        return true
+    }
+
+    /// R07（2026-10-16）：`sync_pending_routes` 的调度列**幂等补齐**。
+    ///
+    /// 判据就是表自己（`PRAGMA table_info`）：这组列是**纯追加**（每列可空），对已有行无损，
+    /// 缺哪列补哪列。⛔ 不要用 `user_version` 升版本替代它 —— 那会让"旧表"与"新表"在版本号上
+    /// 前缀相同、内容不同，反而要再造一个版本；而这个检查天然幂等（已补齐 ⇒ 零次 ALTER）。
+    private func ensurePendingRouteColumns(database: OpaquePointer) -> Bool {
+        guard let statement = SQLiteSupport.prepare(
+            "PRAGMA table_info(sync_pending_routes)", database: database
+        ) else { return false }
+        var columns = Set<String>()
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let pointer = sqlite3_column_text(statement, 1) {
+                columns.insert(String(cString: pointer))
+            }
+        }
+        sqlite3_finalize(statement)
+        let additions: [(name: String, type: String)] = [
+            ("sched_state", "TEXT"),
+            ("attempt_count", "INTEGER"),
+            ("last_attempt_at", "REAL"),
+            ("next_retry_at", "REAL"),
+            ("blocked_budget_fingerprint", "TEXT")
+        ]
+        for (name, type) in additions where !columns.contains(name) {
+            guard SQLiteSupport.execute(
+                "ALTER TABLE sync_pending_routes ADD COLUMN \(name) \(type)",
+                database: database
+            ) else { return false }
+        }
+        return true
     }
 
     /// Logs a failure that has no user-facing surface. `NSLog` rather than `print`
@@ -359,21 +412,60 @@ final class SyncTaskStore {
         return state
     }
 
-    /// 忘掉已提交的水位 ——「重新导入全部」用它。
+    /// 只清**跑步 anchor**，保留 `export_end`（2026-10-17 定点修复用）。
     ///
-    /// 删**整行**而不是把两个字段置空，因为"这一 scope 从未提交过"正是 `HealthKitSync`
-    /// 判断"该不该回退去读老 `UserDefaults` 键"的判据（见 `loadCommittedState`）。
-    /// 置空会让"还没迁移"与"迁移过、值是空"变成同一种形状，于是老键会被重新读回来。
-    ///
-    /// 调用方必须**同时**删掉老键，否则回退路径会把刚刚忘掉的锚又读回来。
+    /// 🔴 不能走 `commitSuccess(anchor: nil)`：那里 `nil` 的语义是 **`.keep`**（保留），
+    /// 走它等于什么都没做，而且读回自检还会通过 —— 一个"看起来成功了"的空操作。
+    /// 写后必须读回：修复失败要能被调用方看见，不能让游标停在半清状态。
     @discardableResult
-    func forgetState(scope: String) -> Bool {
-        guard let statement = prepare("DELETE FROM sync_state WHERE scope = ?") else { return false }
+    func clearWorkoutAnchor(scope: String) -> Bool {
+        lastError = nil
+        guard let statement = prepare("UPDATE sync_state SET workout_anchor = NULL WHERE scope = ?") else {
+            return false
+        }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
-        let step = sqlite3_step(statement)
-        if step != SQLITE_DONE { fail("forget state") }
-        return step == SQLITE_DONE
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            fail("clear workout anchor")
+            return false
+        }
+        let readBack = loadState(scope: scope)
+        guard lastError == nil, readBack?.workoutAnchor == nil else {
+            lastError = "跑步游标修复后无法读回一致的值。"
+            return false
+        }
+        return true
+    }
+
+    /// 只清**指定类型**的记录游标，其余类型逐字节保留（2026-10-17 定点修复用）。
+    ///
+    /// 用 `JSONSerialization` 而不是 `JSONDecoder([String: HealthKitRecordCursor])`：
+    /// 本文件被若干**不含** `HealthKitRecordCursor.swift` 的编译单元引用，引具体类型会让
+    /// 那些单元编译不过。JSON 是"字符串键 + 值"的结构，删键不需要知道值的形状。
+    /// 写后读回比较的是**我们写下去的那份字节**，所以编码顺序不影响判据。
+    @discardableResult
+    func clearRecordCursors(_ types: [String], scope: String) -> Bool {
+        guard !types.isEmpty else { return true }
+        lastError = nil
+        guard let payload = loadRecordCursors(scope: scope) else {
+            // 没有 payload = 没有游标可清（首装）。`loadRecordCursors` 的失败会置 lastError。
+            return lastError == nil
+        }
+        guard var object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else {
+            lastError = "健康记录游标无法解码，修复失败。"
+            return false
+        }
+        for type in types { object.removeValue(forKey: type) }
+        guard let encoded = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
+            lastError = "健康记录游标无法重新编码。"
+            return false
+        }
+        guard writeRecordCursors(encoded, scope: scope) else { return false }
+        guard let readBack = loadRecordCursors(scope: scope), readBack == encoded else {
+            lastError = "记录游标修复后无法读回一致的值。"
+            return false
+        }
+        return true
     }
 
     /// 成功收尾的**单事务**提交：水位前进 + 任务行清空，要么都成、要么都不成。
@@ -399,7 +491,7 @@ final class SyncTaskStore {
     ///   拆开就会出现"游标已提交、待续标记没写上"的窗口，而那个窗口里没人会去读剩下的页。
     ///   默认 `false`：既有的调用点（恢复/无导出轮次）不产生新的待续，且会**清掉**完成后的旧标记。
     @discardableResult
-    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil, pendingDeletions: DirectSyncPendingDeletions? = nil, continuationPending: Bool = false) -> Bool {
+    func commitSuccess(scope: String, anchor: Data?, watermark requested: SyncWatermarkUpdate, recordCursors: Data? = nil, pendingDeletions: DirectSyncPendingDeletions? = nil, continuationPending: Bool = false, routeSettlement: Data? = nil, routeSettlementBatchId: String = "") -> Bool {
         guard isAvailable, let database else { fail("commit"); return false }
         lastError = nil
         // 🔴 写入前先把时间点吸附到 REAL 列能逐位往返的那一个值上（`Date.canonicalForREAL`）。
@@ -469,6 +561,22 @@ final class SyncTaskStore {
         guard writeContinuation((continuationPending || deletionsStillPending) ? Self.continuationPendingSentinel : nil, scope: scope) else {
             lastError = "待续标记写入失败，本次提交已回滚。"
             return false
+        }
+        // 🔴 B01（2026-10-17）：路线结算候选与"任务行删除"**同一事务**写入。
+        //
+        // 顺序不能反：先删任务行、再另存候选，两者之间退出就同时丢掉任务与候选 —— 那正是
+        // §3.2 步骤 5 禁止的形态。候选落在这里之后，即使进程在提交成功后立刻被杀，
+        // 下次启动也能只凭本地候选完成结算（不重读 HealthKit）。
+        //
+        // 语义：`nil` = 本轮没有路线候选（不改旧槽）；非空 = 覆盖写入并**提交前回读**。
+        // 回读断言与删除余量同级：候选丢了就等于"这批白读了"，而它承载的正是待办的删除证明。
+        if let routeSettlement {
+            guard writeRouteSettlement(
+                routeSettlement, batchId: routeSettlementBatchId, scope: scope
+            ), loadRouteSettlement(scope: scope) == routeSettlement else {
+                lastError = "路线结算候选写入后无法读回一致的值，本次提交已回滚。"
+                return false
+            }
         }
         guard let statement = prepare("DELETE FROM sync_tasks WHERE scope = ?") else { return false }
         bind(scope, to: statement, at: 1)
@@ -565,6 +673,80 @@ final class SyncTaskStore {
         }
         guard bound == SQLITE_OK, sqlite3_step(statement) == SQLITE_DONE,
               sqlite3_changes(database) == 1 else { fail("analysis reconcile write"); return false }
+        return true
+    }
+
+    // MARK: 路线结算槽（B01：提交成功但结算未完成的证据）
+
+    /// 读本 scope 的路线结算候选。`nil` = 没有待结算的批次。
+    func loadRouteSettlement(scope: String) -> Data? {
+        guard let statement = prepare(
+            "SELECT payload FROM sync_route_settlements WHERE scope = ?"
+        ) else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        let step = sqlite3_step(statement)
+        if step == SQLITE_DONE { return nil }
+        guard step == SQLITE_ROW else { fail("route settlement read"); return nil }
+        let count = Int(sqlite3_column_bytes(statement, 0))
+        guard count > 0, let pointer = sqlite3_column_blob(statement, 0) else {
+            fail("route settlement payload"); return nil
+        }
+        return Data(bytes: pointer, count: count)
+    }
+
+    /// 读本 scope 结算候选的批次身份（诊断用：日志里要能说出"这是哪一批"）。
+    func loadRouteSettlementBatchId(scope: String) -> String? {
+        guard let statement = prepare(
+            "SELECT batch_id FROM sync_route_settlements WHERE scope = ?"
+        ) else { return nil }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+        return columnText(statement, 0)
+    }
+
+    /// 写（或覆盖）结算候选。**只在 `commitSuccess` 的事务内调用** —— 它必须与任务行删除
+    /// 同进同退，否则"提交成功、候选丢失"会让那批路线白读一次。
+    private func writeRouteSettlement(_ data: Data, batchId: String, scope: String) -> Bool {
+        guard !data.isEmpty, data.count <= Int(Int32.max), let database, let statement = prepare("""
+            INSERT INTO sync_route_settlements(scope, batch_id, payload, created_at)
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(scope) DO UPDATE SET
+                batch_id = excluded.batch_id,
+                payload = excluded.payload,
+                created_at = excluded.created_at
+            """) else { fail("route settlement prepare"); return false }
+        defer { sqlite3_finalize(statement) }
+        guard SQLiteSupport.bind(scope, to: statement, at: 1),
+              SQLiteSupport.bind(batchId, to: statement, at: 2) else {
+            fail("route settlement bind"); return false
+        }
+        let bound = data.withUnsafeBytes {
+            sqlite3_bind_blob(statement, 3, $0.baseAddress, Int32(data.count), SQLiteSupport.transient)
+        }
+        guard bound == SQLITE_OK,
+              sqlite3_bind_double(statement, 4, Date().timeIntervalSince1970) == SQLITE_OK,
+              sqlite3_step(statement) == SQLITE_DONE,
+              sqlite3_changes(database) == 1 else {
+            fail("route settlement write"); return false
+        }
+        return true
+    }
+
+    /// 清结算候选。**只能在一批真正结算成功之后调用**：删早了就等于放弃那份删除证明，
+    /// 下一次重读 HealthKit 才能补回来。幂等：没有行时删除影响 0 行也算成功。
+    @discardableResult
+    func clearRouteSettlement(scope: String) -> Bool {
+        guard isAvailable, database != nil else { fail("route settlement clear"); return false }
+        guard let statement = prepare(
+            "DELETE FROM sync_route_settlements WHERE scope = ?"
+        ) else { return false }
+        defer { sqlite3_finalize(statement) }
+        bind(scope, to: statement, at: 1)
+        guard sqlite3_step(statement) == SQLITE_DONE else {
+            fail("route settlement clear"); return false
+        }
         return true
     }
 
@@ -905,10 +1087,19 @@ final class SyncTaskStore {
     /// `changes()` 逐行校验。
     @discardableResult
     func upsertRouteStates(
-        _ specified: [RouteSyncRecord], scope: String, discoveryCursor: String? = nil
+        _ specified: [RouteSyncRecord],
+        scope: String,
+        discoveryCursor: String? = nil,
+        // 🔴 R03（2026-10-16 复查）：待办移除与状态落盘**必须在同一个本地短事务里**。
+        // 旧形态是 `HealthKitSync` 里的两次独立写：状态落盘失败只 NSLog、待办照删 ——
+        // 那条"读取失败"的路线既没有状态又没了待办，而**无状态行**的 UUID 只能靠待办
+        // 队列被发现（`rediscoveryCandidates` 只遍历已有状态行）⇒ 永久不可发现。
+        // 现在状态侧任何一步失败 ⇒ 整个事务 ROLLBACK ⇒ 待办原样保留（下批重查，幂等）。
+        // 默认空 = 只写状态（既有调用点/测试语义不变）。
+        removePendingTodos: [String] = []
     ) -> Bool {
         guard isAvailable, let database else { fail("route state upsert"); return false }
-        guard !specified.isEmpty || discoveryCursor != nil else { return true }
+        guard !specified.isEmpty || discoveryCursor != nil || !removePendingTodos.isEmpty else { return true }
         lastError = nil
         // 🔴 与 `commitSuccess` 同源的一步：两个时间列都是 REAL，而 `Date` ↔
         //    `timeIntervalSince1970` 的往返**不是双射**（实测约一半有损，见
@@ -1032,6 +1223,31 @@ final class SyncTaskStore {
                 fail("route discovery cursor upsert"); return false
             }
         }
+        // 🔴 R03：待办移除 —— 与状态落盘**同一个事务**（见形参注释）。幂等：不在表里的
+        // uuid 删除影响 0 行，照样算成功（重复移除、恢复轮残留都靠它）。提交前回读校验
+        // "无残留"；任何一步失败 ⇒ 外层 `defer` 的 ROLLBACK 会把状态与待办**一起**回退
+        // ——"状态没写上但待办被删"在结构上不可能发生。
+        if !removePendingTodos.isEmpty {
+            guard let deleteStatement = prepare(
+                "DELETE FROM sync_pending_routes WHERE scope = ? AND workout_uuid = ?"
+            ) else { return false }
+            defer { sqlite3_finalize(deleteStatement) }
+            for uuid in removePendingTodos {
+                sqlite3_reset(deleteStatement)
+                sqlite3_clear_bindings(deleteStatement)
+                guard SQLiteSupport.bind(scope, to: deleteStatement, at: 1),
+                      SQLiteSupport.bind(uuid, to: deleteStatement, at: 2),
+                      sqlite3_step(deleteStatement) == SQLITE_DONE else {
+                    fail("pending routes remove in commit"); return false
+                }
+            }
+            let stillThere = loadPendingRoutes(scope: scope)
+            for uuid in removePendingTodos where stillThere[uuid] != nil {
+                lastError = "路线待办移除后仍能读回，本次提交已回滚。"
+                SQLiteSupport.report("pending routes read-back after commit", database: database)
+                return false
+            }
+        }
         guard SQLiteSupport.execute("COMMIT", database: database) else {
             fail("route state commit"); return false
         }
@@ -1039,9 +1255,16 @@ final class SyncTaskStore {
         return true
     }
 
-    /// 待查路线队列（O02/WP-11）的**登记**。唯一标识 `(scope, workout_uuid)` ⇒ 重复登记
-    /// 幂等（`ON CONFLICT` 只更新 reason，**不刷新 createdAt** —— 年龄是公平轮转的依据）。
-    /// 三条护栏与 `upsertRouteStates` 同源：单事务、提交前回读、`changes()` 逐行校验。
+    /// 待查路线队列（O02/WP-11 + R07）的**登记/更新**。唯一标识 `(scope, workout_uuid)`
+    /// ⇒ 重复登记幂等（`ON CONFLICT` 更新 reason 与调度列，**不刷新 createdAt** —— 年龄是
+    /// 公平轮转的依据）。三条护栏与 `upsertRouteStates` 同源：单事务、提交前回读、
+    /// `changes()` 逐行校验。
+    ///
+    /// 🔴 R07：写方必须**给全调度字段**（生产的读-改-写模式 = `loadPendingRoutes` 读出 →
+    /// `RouteTodoScheduler` 更新 → 写回）。用三条旧字段构造的 todo（缺调度列）会把既有行的
+    /// 调度列**清成 NULL**（= 复位 `ready`）——"清空"本身是 `reopened` 的合法形态（它带
+    /// `schedState = .ready`），所以这里用直接覆盖而不是 `COALESCE`（后者会把退避/指纹的
+    /// 显式清除也挡掉）。
     @discardableResult
     func upsertPendingRoutes(_ todos: [PendingRouteTodo], scope: String) -> Bool {
         guard isAvailable, let database else { fail("pending routes upsert"); return false }
@@ -1055,9 +1278,18 @@ final class SyncTaskStore {
             if !committed { _ = SQLiteSupport.execute("ROLLBACK", database: database) }
         }
         guard let statement = prepare("""
-            INSERT INTO sync_pending_routes(scope, workout_uuid, reason, created_at)
-            VALUES (?1, ?2, ?3, ?4)
-            ON CONFLICT(scope, workout_uuid) DO UPDATE SET reason = excluded.reason
+            INSERT INTO sync_pending_routes(
+                scope, workout_uuid, reason, created_at,
+                sched_state, attempt_count, last_attempt_at, next_retry_at, blocked_budget_fingerprint
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(scope, workout_uuid) DO UPDATE SET
+                reason = excluded.reason,
+                sched_state = excluded.sched_state,
+                attempt_count = excluded.attempt_count,
+                last_attempt_at = excluded.last_attempt_at,
+                next_retry_at = excluded.next_retry_at,
+                blocked_budget_fingerprint = excluded.blocked_budget_fingerprint
             """) else { return false }
         defer { sqlite3_finalize(statement) }
         for todo in todos {
@@ -1068,7 +1300,14 @@ final class SyncTaskStore {
                   SQLiteSupport.bind(todo.reason.rawValue, to: statement, at: 3),
                   // `createdAt` 走与 `upsertRouteStates` 同一份 `canonicalForREAL` 规范化：
                   // REAL 列的往返不是双射，规范化让"首写入的值"可被逐位读回、可被断言。
-                  sqlite3_bind_double(statement, 4, todo.createdAt.canonicalForREAL.timeIntervalSince1970) == SQLITE_OK else {
+                  sqlite3_bind_double(statement, 4, todo.createdAt.canonicalForREAL.timeIntervalSince1970) == SQLITE_OK,
+                  // R07 调度列：NULL 显式绑定（"未记录"与"记录为空"在列语义上都归一为 NULL，
+                  // 读侧统一按 ready 处理 —— 见 `PendingRouteTodo.effectiveState`）。
+                  bindOptionalText(todo.schedState?.rawValue, to: statement, at: 5),
+                  bindOptionalInt(todo.attemptCount, to: statement, at: 6),
+                  bindOptionalReal(todo.lastAttemptAt, to: statement, at: 7),
+                  bindOptionalReal(todo.nextRetryAt, to: statement, at: 8),
+                  bindOptionalText(todo.blockedBudgetFingerprint, to: statement, at: 9) else {
                 fail("pending routes bind"); return false
             }
             guard sqlite3_step(statement) == SQLITE_DONE else {
@@ -1081,12 +1320,17 @@ final class SyncTaskStore {
                 return false
             }
         }
-        // 提交前回读（集合级）：这批 todo 必须逐条在表里。只比 uuid + reason —— `createdAt`
-        // 经 REAL 列往返不保证双射（同 `upsertRouteStates` 的 canonicalForREAL 一节），
-        // 逐字段相等会假红；年龄字段的语义由"首次写入后不被覆写"保证，不靠回读。
+        // 提交前回读（集合级）：这批 todo 必须逐条在表里。理由：
+        // - `createdAt` / 时间类调度列经 REAL 列往返不保证双射（同 `upsertRouteStates` 的
+        //   canonicalForREAL 一节），逐字段相等会假红，不比；
+        // - `reason` / `sched_state` / `attempt_count` 走 TEXT/INTEGER，**可比且必须比** ——
+        //   R07 的调度状态是"下一批查不查这条路线"的唯一依据，写歪一格就是无限续批或误阻塞。
         let written = loadPendingRoutes(scope: scope)
         for todo in todos {
-            guard written[todo.workoutUUID]?.reason == todo.reason else {
+            guard let stored = written[todo.workoutUUID],
+                  stored.reason == todo.reason,
+                  stored.effectiveState == todo.effectiveState,
+                  stored.effectiveAttempts == todo.effectiveAttempts else {
                 lastError = "路线待办写入后无法读回一致的值。"
                 return false
             }
@@ -1098,11 +1342,17 @@ final class SyncTaskStore {
         return true
     }
 
-    /// 读待查路线队列（O02/WP-11）。键 = 小写 workout UUID。
+    /// 读待查路线队列（O02/WP-11 + R07）。键 = 小写 workout UUID。
+    ///
+    /// 老行（R07 之前的表）的新列是 NULL ⇒ 调度字段读成 `nil`，由 `effectiveState` 归一为
+    /// **ready** —— "预算不足不能迁移成永久 size 阻塞"的落实点（不信任旧标签，下一轮按
+    /// 真实结局重写状态；同时不丢弃任何既有未交付 UUID）。
     func loadPendingRoutes(scope: String) -> [String: PendingRouteTodo] {
         guard isAvailable else { return [:] }
         guard let statement = prepare("""
-            SELECT workout_uuid, reason, created_at FROM sync_pending_routes WHERE scope = ?
+            SELECT workout_uuid, reason, created_at,
+                   sched_state, attempt_count, last_attempt_at, next_retry_at, blocked_budget_fingerprint
+            FROM sync_pending_routes WHERE scope = ?
             """) else { return [:] }
         defer { sqlite3_finalize(statement) }
         bind(scope, to: statement, at: 1)
@@ -1119,7 +1369,18 @@ final class SyncTaskStore {
                 // 未知 reason **兜底不丢**：`reason` 只影响展示，查询动作对所有原因一致；
                 // 丢一条待办会让"无状态行"的 UUID 永久不被发现（正是 O02 的病灶形态）。
                 reason: PendingRouteTodo.PendingRouteReason(rawValue: rawReason) ?? .routeBudget,
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2)),
+                // 未知 sched_state（损坏/未来版本）同样兜底为 nil ⇒ ready：给一次机会，
+                // 由真实结局重写 —— 保守方向与 reason 的兜底一致（永不把行"卡死"）。
+                schedState: columnText(statement, 3)
+                    .flatMap(PendingRouteTodo.SchedState.init(rawValue:)),
+                attemptCount: sqlite3_column_type(statement, 4) == SQLITE_NULL
+                    ? nil : Int(sqlite3_column_int64(statement, 4)),
+                lastAttemptAt: sqlite3_column_type(statement, 5) == SQLITE_NULL
+                    ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                nextRetryAt: sqlite3_column_type(statement, 6) == SQLITE_NULL
+                    ? nil : Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)),
+                blockedBudgetFingerprint: columnText(statement, 7)
             )
         }
     }
@@ -1183,5 +1444,23 @@ final class SyncTaskStore {
 
     private func bind(_ value: String, to statement: OpaquePointer, at index: Int32) {
         if !SQLiteSupport.bind(value, to: statement, at: index) { fail("bind") }
+    }
+
+    /// R07：可空调度列的三件套 —— NULL **显式绑定**（不依赖"未绑定即 NULL"的默认行为，
+    /// 让"未记录"在绑定代码里也是显式的）。
+    private func bindOptionalText(_ value: String?, to statement: OpaquePointer, at index: Int32) -> Bool {
+        guard let value else { return sqlite3_bind_null(statement, index) == SQLITE_OK }
+        return SQLiteSupport.bind(value, to: statement, at: index)
+    }
+
+    private func bindOptionalInt(_ value: Int?, to statement: OpaquePointer, at index: Int32) -> Bool {
+        guard let value else { return sqlite3_bind_null(statement, index) == SQLITE_OK }
+        return sqlite3_bind_int64(statement, index, Int64(value)) == SQLITE_OK
+    }
+
+    private func bindOptionalReal(_ value: Date?, to statement: OpaquePointer, at index: Int32) -> Bool {
+        // 与 `createdAt` 同一份 `canonicalForREAL` 规范化（REAL 往返非双射）。
+        guard let value else { return sqlite3_bind_null(statement, index) == SQLITE_OK }
+        return sqlite3_bind_double(statement, index, value.canonicalForREAL.timeIntervalSince1970) == SQLITE_OK
     }
 }
