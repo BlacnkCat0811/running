@@ -53,7 +53,6 @@ final class AppModel {
     static let shared = AppModel()
     let session: ServerSession
     let healthSync: HealthKitSync
-    let chrome = ChromeController()
     let discovery = ServerDiscovery()
     let native: NativeAppModel
 

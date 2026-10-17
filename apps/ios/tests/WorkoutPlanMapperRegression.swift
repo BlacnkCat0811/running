@@ -318,9 +318,8 @@ import Foundation
 
         // MARK: Session summary text
 
-        // Mirrored by `structureSummary` in `apps/web/src/ios/shared.tsx`. The
-        // same cases are asserted on both sides, so the two renderings of a
-        // prescription cannot drift apart without a test failing.
+        // The retired Web shell used to mirror `structureSummary`; the native
+        // cases below are now the only assertions for the prescription wording.
         func summary(iterations: Int, goal: MobileStepGoal) -> String {
             WorkoutPlanMapper.structureSummary(
                 MobileSessionStructure(

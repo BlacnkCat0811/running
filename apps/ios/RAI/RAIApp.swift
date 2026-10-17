@@ -9,7 +9,6 @@ final class AppModel {
     static let shared = AppModel()
     let session: ServerSession
     let healthSync: HealthKitSync
-    let chrome = ChromeController()
     let discovery = ServerDiscovery()
     #if os(iOS)
     let native: NativeAppModel
@@ -47,7 +46,6 @@ struct RAIApp: App {
             RootView()
                 .environment(model.session)
                 .environment(model.healthSync)
-                .environment(model.chrome)
                 .environment(model.discovery)
                 #if os(iOS)
                 .environment(model.native)
@@ -90,8 +88,5 @@ struct RAIApp: App {
                 }
                 #endif
         }
-        #if os(macOS)
-        .defaultSize(width: 1440, height: 900)
-        #endif
     }
 }

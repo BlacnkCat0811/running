@@ -74,11 +74,7 @@ final class ServerSession {
 
         let storedURL = userDefaults.string(forKey: Self.storageKey) ?? ""
         if storedURL.isEmpty {
-            #if os(macOS) && DEBUG
-            serverURLString = "http://127.0.0.1:5173"
-            #else
             serverURLString = ""
-            #endif
             apiToken = ""
         } else {
             serverURLString = storedURL

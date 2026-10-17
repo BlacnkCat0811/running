@@ -546,8 +546,8 @@ final class HealthKitSync {
     /// "这个 App 的后台预算够用"，于是以后每次派活都撞在同一个闸门上 —— 而 nginx 那一侧
     /// 全程没有任何 uploads。
     ///
-    /// `@discardableResult` 是为了让既有的六个前台调用点（`TechSyncStatus` / `TechViews` /
-    /// `RootView` / `SyncHealthIntent` / `AppWebView`）一个字都不用改。
+    /// `@discardableResult` 是为了让既有的前台调用点（`TechSyncStatus` / `TechViews` /
+    /// `RootView` / `SyncHealthIntent`）一个字都不用改。
     @discardableResult
     func sync(
         to serverURL: URL?, apiToken: String = "",

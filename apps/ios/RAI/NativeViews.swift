@@ -48,7 +48,7 @@ struct NativeRootView: View {
     var body: some View {
         ZStack {
             TechBackground()
-            // Reserve real layout space for chrome. A safeAreaInset outside
+            // Reserve real layout space for the tab bar. A safeAreaInset outside
             // NavigationStack did not reach its scrolling destinations and
             // required a hard-coded 90pt spacer in every page.
             VStack(spacing: 0) {

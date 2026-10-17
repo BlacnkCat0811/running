@@ -2,7 +2,7 @@
 
 已有产品：SwiftUI原生界面、HealthKit只读导出/后台同步、API查询/控制、本地缓存与续传。
 TypeScript评分在服务器执行；iOS不运行Node、不复制scorer、不写HealthKit，也不包含独立Watch产品。
-生产iOS分支进入NativeRootView；旧Web壳兼容代码不代表原生App使用WKWebView。
+生产分支直接进入NativeRootView；工程只有 iOS 平台，没有 WKWebView、没有 macOS destination。
 
 ## 构建
 
@@ -11,7 +11,7 @@ macOS、项目所需Xcode/iOS SDK、CocoaPods；最低iOS17，以[工程配置](
 跨平台入口用 `npm run`（Windows 上不会失败也不会假装成功，详见[运行说明](../../docs/IOS_NATIVE_RUNBOOK.md)）：
 
 ```bash
-npm run dev:device    # 仓库根目录：启动手机可达的服务
+npm run dev:device    # 仓库根目录：只启动 API，打印局域网地址与开发用 RAI_API_TOKEN
 npm run open:ios      # macOS 打开 RAI.xcworkspace；其它平台显式跳过
 ```
 
