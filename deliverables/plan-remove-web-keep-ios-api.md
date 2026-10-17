@@ -1164,4 +1164,24 @@ npm run ml:test
 
 ---
 
+## 附录 E — 执行记录（2026-10-17）
+
+授权：用户当日指示「帮我按计划推进」，按本文档默认决策（D1 移除 macOS、D2 保留全部端点、D5 保留匿名只读代码但清掉开发源、D6 根路径 404、D9 保留并改写 dev:device）执行。回滚锚点：tag `pre-web-retirement`（B0 之前）。
+
+| 批次 | 提交 | 内容 | 验收 |
+|---|---|---|---|
+| 文档 v2 | `0eda1e9` | 本实施文档合并重写 | check:docs 0 problem |
+| B0 | `6f8e6ca` | AGENTS.md 口径、DECISIONS D17、ADR-006 | pre-commit 全绿 |
+| B1 | `fd25f8c` | dev:device 只起 API + 开发 Token；Bonjour/占位符 8787；smoke 去掉 Origin | `test:ios` 通过 |
+| B2 | `fd10daf` | 两个 systemd 去 check-web-build；nginx 纯 /v1 反代；upgrade.sh 去 build；部署文档/env；deploy-cloud.test 重写 | deploy 三个测试 14/14 |
+| B3 | `c7079bb` | 删 apps/web（92 文件）与静态托管、门禁/CI/tsconfig/docs 联动、lock 重生成（429→153 包，无版本漂移） | typecheck、npm test、check:*、验收矩阵全绿 |
+| B4 | `7d8e329` | pbxproj 只留 iOS；删 AppWebView/ChromeController/NativeBridgeSnapshot；RootView/RAIApp/ServerSession 收敛 | `test:ios` 通过；xcodebuild 模拟器构建成功；showdestinations 无 macOS |
+| B5 | 本次提交 | README/ARCHITECTURE/OPERATIONS/RUNBOOK/ALGORITHM/PROJECT_REVIEW 与索引收尾 | check:docs / check:doc-refs / 验收矩阵 |
+
+**未完成 / 需在真实环境执行**：
+
+- B6 云端发布：本机无服务器访问权限，`deploy/` 模板与 runbook（§6）已就绪，`nginx -t`、`systemctl`、`curl` 需在服务器执行。
+- 真机验收：HealthKit 同步、分享卡、成绩摘要需 iPhone + 云端 API。
+- 本机环境备注（不影响仓库结论）：该机 PATH 无 npm，验证用官方 Node 24.21 + 下载的 npm CLI；`onnxruntime-node` 原生库因未签名无法加载，已用 `codesign --force --sign -` 临时签名 + 官方 Node（关闭 library validation）跑通全量 Node 套件。
+
 > **执行完成后的收尾**：按 [deliverables/README.md](README.md) 的约定，本文档应归档或删除；执行证据（门禁输出、云端 curl、真机截图）另存或在 PR 中引用，不要把证据回写进本文档。

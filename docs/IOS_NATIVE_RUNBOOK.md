@@ -7,10 +7,8 @@
 | 命令 | Windows（cmd / PowerShell） | macOS |
 |---|---|---|
 | `npm run typecheck` | 真跑 | 真跑 |
-| `npm test` | 真跑（Node 套件 + Web vitest） | 真跑 |
+| `npm test` | 真跑（Node 套件） | 真跑 |
 | `npm run test:ios` | **显式跳过**：打印「本次没有检查任何 iOS 源码」，退出 0 | 真跑（类型检查 + 纯逻辑回归） |
-| `npm run build` | 真跑 | 真跑 |
-| `npm run test:e2e:web` | 真跑 | 真跑 |
 
 三条硬规则由 `npm run check:scripts` 执行（`scripts/check-npm-scripts-portable.mjs`），不是口头约定：
 
@@ -21,7 +19,7 @@
    不写 `./x.sh`（Windows 的 git 默认不记录 +x 位）。
 
 ⛔ **不要用 WSL / Git Bash 去"模拟"Mac**：`xcodebuild`、CocoaPods、模拟器只在 macOS 上真跑。
-Windows 侧的职责只是让**跨平台可验证**的部分（typecheck、纯逻辑回归、Web e2e）与 Mac 一致；
+Windows 侧的职责只是让**跨平台可验证**的部分（typecheck、纯逻辑回归、文档与脚本门禁）与 Mac 一致；
 iOS 真编译与模拟器验收在 Windows 上拿到的是**显式跳过**，既不是失败，也不是假通过。
 
 为什么这三条要写死（2026-10-13 本机实测，改前全是红的）：`npm run test:ios` 当时是裸
@@ -38,7 +36,7 @@ iOS 真编译与模拟器验收在 Windows 上拿到的是**显式跳过**，既
 ## 前置条件
 
 > 下面这些前置**只对"必须在 macOS 上执行"的步骤成立**。仓库根目录的
-> `typecheck` / `test` / `build` / `test:e2e:web` 在 Windows 上同样真跑，不需要它们。
+> `typecheck` / `test` / `check:*` 在 Windows 上同样真跑，不需要它们。
 
 - macOS、Xcode 和 iOS 17 或更新的 SDK。
 - 已安装本项目使用的 iOS 平台组件。
@@ -48,11 +46,14 @@ iOS 真编译与模拟器验收在 Windows 上拿到的是**显式跳过**，既
 
 ## 构建与运行
 
-从仓库根目录启动可被手机访问的服务（跨平台，Node 入口）：
+从仓库根目录启动可被手机访问的服务（跨平台，Node 入口；**只启动 API**）：
 
 ```bash
 npm run dev:device
 ```
+
+它会打印局域网地址与开发用 `RAI_API_TOKEN`（默认 `rai-local-dev`）。Web 前端已退役，
+不再有 vite 代理端口 5173；App 里直接填 `http://<LAN-IP>:8787` 与该 Token。
 
 在 macOS 上打开工作副本；`darwin` 调 `open`，Windows/Linux 上**显式跳过**并说明"本次没有打开任何东西"，
 不会用 `start` 假装打开（`.xcworkspace` 在 Windows 上没有关联程序，只会弹一个对话框然后照样退出 0）：

@@ -15,19 +15,19 @@ Node/Fastify → 持久化串行任务 → 私有候选SQLite
                                            ↓ 验证、generation/锁、原子发布
                                  主SQLite + 不可变run/bundle
                                            ↓
-                                 API DTO → React Web / SwiftUI iOS
+                                 API DTO → SwiftUI iOS
 Python离线训练 → 固定工件/独立评估 → 校验后Node ONNX推理（否则公式fallback）
 ```
 
 不存在设备端 Swift scorer、手机 Node runtime、独立 Watch 产品，也不默认维护两套常驻 V1/V2 重算。
-iOS 的 WKWebView 不是生产页面路径；Web 内保留的壳兼容布局不等同于原生 App。
+客户端只有原生 SwiftUI iOS（2026-10-17 起 Web 前端与 macOS target 已退役）：没有 WKWebView 路径，也没有浏览器静态托管。
 
 ## Workspace 职责
 
 | 包/目录 | 职责 |
 |---|---|
 | [contracts](../packages/contracts/src/index.ts) | 领域合同、schema/version、语义 JSON |
-| [api-contracts](../packages/api-contracts/src/index.ts) | Web/API/iOS 消费的 HTTP DTO |
+| [api-contracts](../packages/api-contracts/src/index.ts) | API/iOS 消费的 HTTP DTO |
 | [health-export-parser](../packages/health-export-parser/src/index.ts) | XML/GPX、安全导入、canonical、身份/删除、恢复事实 |
 | [features](../packages/features/src/index.ts) | 显式时点的训练特征及V3兼容读取 |
 | [scoring](../packages/scoring/src/model.ts) | CA/TA、质量门控、基线/epoch；不读取当天恢复 |

@@ -430,7 +430,7 @@ not_evaluable 是正式状态，不能按“不是 failed”绕过激活。
 
 ### 16.2 核验层级
 
-默认 typecheck、npm test、build，桌面流程用 test:e2e:web；不因“完整审查”运行冻结窄屏。
+默认 typecheck、npm test、check:docs、check:acceptance-matrix；iOS 另有 test:ios。不因“完整审查”运行冻结窄屏（窄屏冻结区已随 Web 前端一起退役）。
 iOS 自动门禁不替代真机 HealthKit/后台/地图与视觉验收；Python 训练合同另跑 ml:test。
 精度未校准、原库未部署、失败或平台跳过必须分别列出。
 

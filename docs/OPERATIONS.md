@@ -12,15 +12,13 @@ npm ci
 npm run dev
 npm run typecheck
 npm test
-npm run build
-npm run test:e2e:web
 npm run check:docs
 npm run check:doc-refs
 npm run check:acceptance-matrix
 npm run check:package-boundaries
 ```
 
-`npm test`通过[Node入口](../scripts/run-tests.mjs)显式枚举用例并分别启动Node/Vitest，不依赖POSIX shell；两组退出码均影响最终结果。
+`npm test`通过[Node入口](../scripts/run-tests.mjs)显式枚举用例并启动Node套件，不依赖POSIX shell；退出码即最终结果。
 
 本地hooks在[pre-commit](../.githooks/pre-commit)；[CI配置](../.github/workflows/ci.yml)存在不证明当前远端已触发它。
 完整审查另跑`npm run ml:test`、`npm run test:ios`、按需要`npm run rust:verify`；缺工具/SDK应报跳过或阻塞，不自动安装大型依赖。
@@ -40,7 +38,7 @@ npm run data:migrate -- --database /absolute/path/rai.sqlite --apply
 
 ## 导入、重算与事实回填
 
-首选Web导入ZIP。CLI输入目录导入`--replace`会重建指定目标，只对明确可丢弃副本使用。
+首选 iOS App 的「同步健康」（HealthKit 导出 → ZIP/直连批次）；CLI 输入目录导入`--replace`会重建指定目标，只对明确可丢弃副本使用。
 
 ```bash
 npm run data:audit -- --database /absolute/path/copy.sqlite --report /tmp/rai-audit.md
@@ -90,7 +88,20 @@ npm run data:verify-v2-release -- --database /absolute/path/rai.sqlite --as-of 2
 
 **应用不再创建备份**（[SQLite直接增量同步](SQLITE_DIRECT_SYNC_DESIGN.md) §11，2026-10-13 起）：
 `POST /v1/backups` 与 `DELETE /v1/backups/:name` 退役为 `410 Gone` + 维护提示，且不碰任何文件。
-Web设置页因此**只剩**只读清单、下载与「恢复」；「创建备份」与「删除备份」入口已移除。恢复能力必须保留——那是 §12「发现corruption就保留文件、交运维」的最后一道线，退役它换不来 §11 想要的任何东西。
+Web 前端已于 2026-10-17 退役，恢复入口改为**运维 curl 流程**（端点保留）：恢复能力必须保留——那是 §12「发现corruption就保留文件、交运维」的最后一道线，退役它换不来 §11 想要的任何东西。
+
+```bash
+# 列出备份；下载单个备份（原始 SQLite 字节流）
+curl -fsS -H "Authorization: Bearer $RAI_API_TOKEN" https://<domain>/v1/backups
+curl -fsS -H "Authorization: Bearer $RAI_API_TOKEN" -o /srv/rai-backups/<name> \
+  https://<domain>/v1/backups/<name>
+# 触发恢复。confirmation 必须逐字为「恢复此备份」；恢复期间会停写，可能进入 recovery_required
+curl -fsS -X POST -H "Authorization: Bearer $RAI_API_TOKEN" -H "content-type: application/json" \
+  -d '{"confirmation":"恢复此备份"}' \
+  https://<domain>/v1/backups/<name>/restore
+# 轮询健康；必须同时 status=ok 且 databaseReady=true
+curl -fsS -H "Authorization: Bearer $RAI_API_TOKEN" https://<domain>/v1/health
+```
 
 云端[backup-runtime.sh](../deploy/backup-runtime.sh)是现成的外部备份工具：停服、整runtime冷备，默认dry-run；要求所有数据库/工件处于该runtime且没有独立CLI写者。
 恢复前记录原版本与配置，验证备份hash/格式，在维护窗口按原目录权限恢复并检查完整性、身份与datasetEpoch。仓库没有名为restore-runtime.sh的自动整runtime恢复脚本，不应臆造命令。

@@ -1,12 +1,12 @@
 # RAI — Running Ability Intelligence
 
-RAI 是个人跑步数据分析应用：Apple Health XML/GPX 或 iOS HealthKit 导出的 ZIP → Node API/SQLite → 共享 TypeScript 计算 → 桌面 Web 与 SwiftUI iOS。
+RAI 是个人跑步数据分析应用：Apple Health XML/GPX 或 iOS HealthKit 导出的 ZIP → Node API/SQLite → 共享 TypeScript 计算 → SwiftUI iOS（唯一客户端，2026-10-17 起 Web 前端已退役）。
 **iOS 不运行 Node.js、不复制评分核心**；“本地优先”指部署者控制自己的数据库，不表示手机与云端之间不传健康数据。
 
 ## 当前边界
 
-- 桌面 Web：主要验收 1440×900，最低主动支持宽度 1024px；更窄布局仅保留兼容，不默认扩展。
-- iOS：已有 SwiftUI App、HealthKit 只读导出/同步、后台恢复和 API 消费；不新增 Watch、Android、桌面原生产品。
+- iOS：唯一客户端。SwiftUI App、HealthKit 只读导出/同步、后台恢复和 API 消费；不新增 Watch、Android、桌面原生产品，也不重建浏览器前端。
+- 后端：iOS 直连云 API；全部 `/v1` 端点保留（含此前仅 Web 使用的备份/模型/数据运维端点，裁剪属独立决策）。
 - 计算：Fitness CA/TA、Readiness、Preparation/Durability 证据、复合负荷/分区、5K/10K/半马预测；未知/未校准必须如实呈现。
 - 导入使用私有候选库和受控发布；**没有常驻 shadow 全量双跑**。ML/经验区间必须经过独立标签和发布门槛。
 - 源码版本、数据库已计算版本、线上已激活版本是三件事。本机没有足够真实比赛标签，不宣称准确率已经提高。
@@ -15,31 +15,29 @@ RAI 是个人跑步数据分析应用：Apple Health XML/GPX 或 iOS HealthKit �
 
 ## 快速开始
 
-要求 Node.js 22 LTS（≥22.12，默认版本见 [.nvmrc](.nvmrc)）或 24 LTS（24.x）；两条线都已实测通过。npm workspace。Python 只用于可选训练，不是 Web/API 启动依赖。
+要求 Node.js 22 LTS（≥22.12，默认版本见 [.nvmrc](.nvmrc)）或 24 LTS（24.x）；两条线都已实测通过。npm workspace。Python 只用于可选训练，不是 API 启动依赖。
 
 ```bash
 npm ci
 npm run dev
-# Web http://127.0.0.1:5173；API http://127.0.0.1:8787
+# API http://127.0.0.1:8787
+# 真机联调：npm run dev:device（只起 API，打印局域网地址与开发 Token）
 ```
 
-在 Web“数据与模型”导入 Apple Health ZIP。真实 XML、GPX、SQLite、上传包和备份不得提交 Git。
+导入 Apple Health ZIP 走 iOS App 的「同步健康」或 CLI（`npm run data:import`）。真实 XML、GPX、SQLite、上传包和备份不得提交 Git。
 已有数据库若存在未应用 migration，应先按 [运维](docs/OPERATIONS.md) 备份、检查，再明确决定是否迁移；不要把启动失败当作删除数据库的理由。
 
 ```bash
-npm run build
-npm start
+RAI_API_TOKEN=<token> npm start
 ```
 
-生产部署见 [Ubuntu 部署](deploy/README-UBUNTU.md)。只把 Nginx HTTPS 暴露到公网，API 默认回环地址；不要打开匿名健康数据读取或把 Token 写入源码。
+生产部署见 [Ubuntu 部署](deploy/README-UBUNTU.md)。只把 Nginx HTTPS 暴露到公网，API 默认回环地址；Nginx 只反代 `/v1`，站点根路径 404。不要打开匿名健康数据读取或把 Token 写入源码。
 
 ## 检查
 
 ```bash
 npm run typecheck
 npm test
-npm run build
-npm run test:e2e:web
 npm run check:docs
 npm run check:doc-refs
 npm run check:scripts
@@ -47,7 +45,6 @@ npm run check:acceptance-matrix
 npm run check:package-boundaries
 ```
 
-`test:e2e:web` 跳过390px；完整项目审查仍遵守窄屏冻结范围。
 现有 iOS 用 `npm run test:ios`；Python 用 `npm run ml:test`。缺 Xcode/平台导致跳过必须报告，不能当通过。
 真机 HealthKit、后台唤醒、地图与视觉验收不能由上述自动检查替代。
 
