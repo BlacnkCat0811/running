@@ -8,7 +8,7 @@ import { RaiDatabase } from "@rai/storage-sqlite";
 import { readDatasetEpoch, writeDatasetEpoch, writeDeletedDatasetEpoch } from "../src/dataset-epoch.js";
 import { DatabaseMaintenance } from "../src/maintenance.js";
 
-test("persisted epochs survive reopening while an explicit namespace change takes precedence", async () => {
+test("B02: persisted epochs survive reopening while an explicit namespace change takes precedence", async () => {
   const root = mkdtempSync(join(tmpdir(), "rai-dataset-epoch-"));
   const path = join(root, "rai.sqlite");
   try {

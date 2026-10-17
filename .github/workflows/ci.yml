@@ -109,9 +109,6 @@ jobs:
       - name: Run Windows unit and integration tests
         run: npm test
 
-      - name: Build production Web application
-        run: npm run build
-
       - name: Smoke test production API startup and shutdown
         run: npm run smoke:api
 
@@ -157,9 +154,6 @@ jobs:
       - name: Run Python training tests
         run: npm run ml:test
 
-      - name: Build and test desktop Web flows
-        run: npm run test:e2e:web
-
       - name: Smoke test production API startup and shutdown
         run: npm run smoke:api
 
@@ -167,4 +161,6 @@ jobs:
         run: |
           npm ci --omit=dev
           test ! -e node_modules/.bin/vite
+          test ! -e node_modules/react
+          test ! -e node_modules/vitest
           npm run smoke:api

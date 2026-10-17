@@ -13,10 +13,7 @@ import test from "node:test";
  * Deliberately out of scope, and why:
  * - `packages/contracts/src/timezone.ts` — it *is* the constant.
  * - `packages/api-contracts/src/index.ts` — the response `timezone` field is a literal
- *   *type*; widening it is an outward contract change touching API schemas, Web and iOS.
- * - `apps/web/src/**` — the frontend still reads the device timezone on purpose
- *   (decision (b): backend-only convergence). Re-scope this test when the frontend is
- *   unified.
+ *   *type*; widening it is an outward contract change touching API schemas and iOS.
  */
 const AUTHORISED = new Set([
   "packages/contracts/src/timezone.ts",

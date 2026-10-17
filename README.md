@@ -66,7 +66,6 @@ npm run check:package-boundaries
 | 导入、身份、恢复事实、存储与谱系 | [数据管线](docs/DATA_PIPELINE.md) |
 | 开发、迁移、备份、回放、发布操作 | [运维](docs/OPERATIONS.md) |
 | 长期约束与不能随意“优化”的决策 | [决策](docs/DECISIONS.md) |
-| Web 页面、写命令与桌面验收 | [Web](docs/WEB.md) |
 | 当前审查结果与未决问题 | [项目审查](docs/PROJECT_REVIEW.md) |
 | 今日页计划类卡片的口径冲突与改法 | [计划卡口径](docs/TODAY_PLAN_CARDS_REVIEW.md) |
 | iOS 构建、权限和平台入口 | [iOS](apps/ios/README.md) |

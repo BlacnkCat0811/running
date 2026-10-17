@@ -1,8 +1,0 @@
-.desktop-share-card { display: none; }
-@media (min-width: 1024px) {
-  .desktop-share-card { display: block; }
-  .desktop-share-card .share-card { display: block; width: min(100%, 400px); height: auto; aspect-ratio: 2; }
-  .desktop-share-card .share-card-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0 0; }
-  .desktop-share-card .share-card-stats dt { color: var(--muted); font-size: 12px; }
-  .desktop-share-card .share-card-stats dd { margin: 4px 0 0; overflow-wrap: anywhere; }
-}

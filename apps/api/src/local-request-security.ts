@@ -170,10 +170,11 @@ export function installLocalRequestSecurity(
         }
         return;
       }
-      // A token-less read of a listed route, from a listed host, is the Web
-      // SPA's normal case and is answered here. Everything else — every write,
-      // every unlisted read, every other Host — still lands on the 401 below,
-      // so widening reads cannot widen writes.
+      // A token-less read of a listed route, from a listed host, is the
+      // anonymous-read case (introduced for the retired Web SPA) and is
+      // answered here. Everything else — every write, every unlisted read,
+      // every other Host — still lands on the 401 below, so widening reads
+      // cannot widen writes.
       if (isAnonymousPublicRead(request.method, request.headers.host, request.routeOptions.url, options)) return;
       return reply.code(401).send({ code: "unauthorized", message: "需要有效的 API Token" });
     }

@@ -41,7 +41,6 @@ iOS 的 WKWebView 不是生产页面路径；Web 内保留的壳兼容布局不�
 | [application](../packages/application/src/service.ts) | 装配、命令、重算、checkpoint、领域快照和发布编排 |
 | [storage-sqlite](../packages/storage-sqlite/src/database.ts) | migrations、repositories、锁/发布/备份 |
 | [api](../apps/api/src/server.ts) | Fastify鉴权、上传、命令、查询与运行时协调 |
-| [web](../apps/web/src/App.tsx) | React桌面工作台；冻结窄屏兼容 |
 | [ios](../apps/ios/README.md) | SwiftUI、HealthKit、缓存/续传；消费服务端结果 |
 
 [包边界检查](../scripts/check-package-boundaries.mjs) 限制 package→app、Fitness→Readiness 等禁线；不能靠“类型检查能过”引入循环职责。

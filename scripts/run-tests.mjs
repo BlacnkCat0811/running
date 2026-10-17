@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -94,12 +93,8 @@ export function nodeSuiteArgs(files, concurrency) {
 export function main() {
   const files = nodeTestFiles();
   if (!files.length) throw new Error("No Node test files found; refuse an empty green test run");
-  const web = join(root, "apps", "web");
-  const requireWeb = createRequire(join(web, "package.json"));
-  const vitest = join(dirname(requireWeb.resolve("vitest/package.json")), "vitest.mjs");
   return executeSuites([
-    { name: "Node", cwd: root, args: nodeSuiteArgs(files, testConcurrency()) },
-    { name: "Web", cwd: web, args: [vitest, "run"] }
+    { name: "Node", cwd: root, args: nodeSuiteArgs(files, testConcurrency()) }
   ]);
 }
 

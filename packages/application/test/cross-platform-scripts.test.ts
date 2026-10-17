@@ -39,7 +39,7 @@ test("命令矩阵与 iOS 入口在 package.json 里只走 node 包装（cmd / P
   assert.equal(manifest.scripts["test:ios:mutation:scope"], "node scripts/run-ios.mjs mutation-scope");
   assert.equal(manifest.scripts["open:ios"], "node scripts/open-ios.mjs");
   assert.equal(manifest.scripts["check:scripts"], "node scripts/check-npm-scripts-portable.mjs");
-  for (const name of ["typecheck", "build", "test:e2e:web"]) {
+  for (const name of ["typecheck"]) {
     assert.match(manifest.scripts[name], /^(npm |node |tsc )/, `${name} 应当是纯命令 + &&`);
   }
 });
@@ -78,7 +78,7 @@ test("闸门对每种禁用写法都能红，且不误伤合法写法", () => {
   for (const legal of [
     "node scripts/run-tests.mjs",
     "tsc --noEmit -p tsconfig.pure.json && tsc --noEmit -p tsconfig.json",
-    "npm run build && node --import tsx --test --test-concurrency=1 apps/web/e2e/web-flows.test.ts",
+    "npm run typecheck && node --import tsx --test --test-concurrency=1 apps/api/test/deploy-cloud.test.ts",
     "npm run typecheck && npm test && npm run test:ios && npm run ml:test",
     "node scripts/run-ios.mjs mutation-scope"
   ]) {

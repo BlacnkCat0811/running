@@ -12,7 +12,6 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "jsx": "react-jsx",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "types": [
@@ -22,7 +21,6 @@
   "include": [
     "packages/**/*.ts",
     "apps/**/*.ts",
-    "apps/**/*.tsx",
     "scripts/**/*.mts"
   ]
 }

@@ -1,5 +1,0 @@
-/* New tools are desktop-only. Frozen narrow Web layouts stay unchanged. */
-.desktop-workout-export { display: none; }
-@media (min-width: 1024px) {
-  .desktop-workout-export { display: block; }
-}

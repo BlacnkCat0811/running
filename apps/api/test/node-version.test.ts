@@ -37,7 +37,7 @@ test("every public runtime command executes the Node gate through npm lifecycle 
     scripts: Record<string, string>;
   };
   const publicScripts = [
-    "dev:api", "dev:web",
+    "dev:api",
     ...Object.keys(rootPackage.scripts).filter((name) => name.startsWith("data:") || name.startsWith("ml:"))
   ];
   for (const script of publicScripts) {
@@ -45,7 +45,7 @@ test("every public runtime command executes the Node gate through npm lifecycle 
     assert.equal(rootPackage.scripts[hook], "npm run check:node", `${script} must have a Node gate`);
   }
 
-  for (const workspace of ["apps/api", "apps/web"]) {
+  for (const workspace of ["apps/api"]) {
     const manifest = JSON.parse(readFileSync(resolve(projectRoot, workspace, "package.json"), "utf8")) as {
       scripts: Record<string, string>;
     };
@@ -60,8 +60,7 @@ test("every public runtime command executes the Node gate through npm lifecycle 
 
   const lifecycleChecks = [
     ["run", "--silent", "predev:api"],
-    ["run", "--silent", "predev", "-w", "@rai/api"],
-    ["run", "--silent", "predev", "-w", "@rai/web"]
+    ["run", "--silent", "predev", "-w", "@rai/api"]
   ];
   for (const args of lifecycleChecks) {
     const result = spawnSync("npm", args, {

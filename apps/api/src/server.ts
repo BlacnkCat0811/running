@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
-import { registerWebAssets } from "./web-assets.js";
 import type {
   HandshakeResponse,
   HealthResponse,
@@ -162,8 +161,9 @@ const allowAuthenticatedRemote = process.env.RAI_ALLOW_REMOTE_TOKEN_AUTH === "1"
 /**
  * Hosts allowed to read the public routes below without a token.
  *
- * Empty by default, which keeps the token gate on everything: opening the Web
- * SPA to anonymous browsers is a deployment decision, not a code default.
+ * Empty by default, which keeps the token gate on everything. The mode was
+ * introduced for the (now retired) browser SPA; keeping the switch is a
+ * deployment choice, not a code default.
  * Nginx forwards `Host: tpandmr.xyz` (no port), so that is the spelling to use.
  */
 const publicReadHosts = new Set((process.env.RAI_PUBLIC_HOSTS ?? "")
@@ -204,31 +204,24 @@ app.addHook("onRoute", (routeOptions) => {
   const methods = Array.isArray(routeOptions.method) ? routeOptions.method : [routeOptions.method];
   for (const method of methods) mountedRoutes.push({ method, url: routeOptions.url });
 });
-// Local-first product: keep the SPA and API out of third-party iframes and
-// guard against content-type sniffing. frame-ancestors does not constrain any
-// resource loading, so this cannot break the app itself.
+// Local-first product: keep the API out of third-party iframes and guard
+// against content-type sniffing. frame-ancestors does not constrain any
+// resource loading, so this cannot break native clients.
 app.addHook("onSend", async (_request, reply) => {
   reply.header("X-Frame-Options", "DENY");
   reply.header("X-Content-Type-Options", "nosniff");
   reply.header("Content-Security-Policy", "frame-ancestors 'none'");
 });
-const parsedWebPort = Number(process.env.RAI_WEB_PORT ?? 5173);
-const webPort = Number.isFinite(parsedWebPort) && parsedWebPort > 0 ? parsedWebPort : 5173;
-const allowPrivateLanWebPort = process.env.RAI_ALLOW_LAN_DEV === "1" ? webPort : undefined;
-const developmentOrigins = new Set([
-  `http://127.0.0.1:${webPort}`,
-  `http://localhost:${webPort}`
-]);
 await app.register(cors, {
   origin: (origin, callback) => {
     if (!origin) {
       callback(null, true);
       return;
     }
+    // Native clients send no Origin. Browser origins are accepted only when
+    // explicitly configured, or when they point at this API's own loopback port.
     callback(null, configuredOrigins.has(origin) || isTrustedDevelopmentOrigin(origin, {
-      apiPort: port,
-      developmentOrigins,
-      ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort })
+      apiPort: port
     }));
   }
 });
@@ -238,15 +231,14 @@ await app.register(multipart, {
 // 写方法集合由 `local-request-security.ts` 单一导出（2026-10-15 审查 D-🔡6：
 // 准入守卫与鉴权 hook 必须对"什么算写"保持同一口径，两处各写一份迟早分叉）。
 /**
- * Read routes an unauthenticated browser may call, once the request arrives on
+ * Read routes an unauthenticated client may call, once the request arrives on
  * a host named in `RAI_PUBLIC_HOSTS`.
  *
- * The Web SPA is meant to open without a token and render every view; the API
- * keeps the write surface shut. Two entries here are load-bearing rather than
- * incidental: `/v1/health` decides whether pages render at all, and
- * `/v1/runtime-status` is polled by `GlobalTaskStatus` from every page — leave
- * it out and the whole app grows a "reconnecting" banner instead of showing
- * data.
+ * Introduced for the retired Web SPA, which opened without a token and rendered
+ * every view; the API keeps the write surface shut regardless. Two entries here
+ * are load-bearing rather than incidental: `/v1/health` decides whether a
+ * client renders at all, and `/v1/runtime-status` was polled from every page —
+ * leave it out and the client falls back to a "reconnecting" banner.
  *
  * Deliberately absent, and each for a reason that would not survive a review
  * that only asked "is it a GET?":
@@ -393,10 +385,8 @@ const mutationReleases = new WeakMap<object, () => void>();
 const localRequestSecurityOptions = {
   apiPort: port,
   ...(apiToken ? { apiToken } : {}),
-  developmentOrigins,
   allowAuthenticatedRemote,
   trustedOrigins: configuredOrigins,
-  ...(allowPrivateLanWebPort == null ? {} : { allowPrivateLanWebPort }),
   // Both halves are needed for anonymous reads to work at all, so they travel
   // together: routes without hosts passes nothing through, hosts without routes
   // match no path.
@@ -449,10 +439,6 @@ const releaseMutation = (request: object): void => {
 };
 app.addHook("onError", async (request) => releaseMutation(request));
 installMutationLifetime(app, releaseMutation);
-const webDist = resolve(projectRoot, "apps/web/dist");
-if (existsSync(webDist)) {
-  await registerWebAssets(app, webDist);
-}
 
 // Both annotated: `readStores` asks the import worker for the newest refresh and
 // the worker asks the store pool to drain before it swaps the database file, so
