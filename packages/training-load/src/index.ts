@@ -456,7 +456,7 @@ export function buildLoadVectorV2(input: {
   };
 }
 
-export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughDate: string, physEvidence: DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
+export function buildDailyTrainingMetrics(loads: readonly WorkoutTrainingLoad[], throughDate: string, physEvidence: readonly DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
   if (loads.length === 0) return [];
   const sorted = [...loads].sort((a, b) => a.localDate.localeCompare(b.localDate));
   const start = sorted[0]!.localDate; if (throughDate < start) return [];
@@ -464,6 +464,12 @@ export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughD
   const byDate = new Map<string, WorkoutTrainingLoad[]>();
   for (const load of sorted) byDate.set(load.localDate, [...(byDate.get(load.localDate) ?? []), load]);
   const dailyLoads: number[] = []; const results: DailyTrainingMetric[] = [];
+  // 🔴 生理证据按日期索引，且**保留首次出现**（与原 `physEvidence.find(...)` 的语义一致）。
+  // 原来每天一次线性 `find` ⇒ O(天数 × 证据条数)。
+  const physStateByDate = new Map<string, PhysState>();
+  for (const item of physEvidence) {
+    if (!physStateByDate.has(item.localDate)) physStateByDate.set(item.localDate, item.physState);
+  }
   const acuteAlpha = 1 - Math.exp(-Math.LN2 / config.acuteHalfLifeDays); const chronicAlpha = 1 - Math.exp(-Math.LN2 / config.chronicHalfLifeDays);
   // The series starts on the first observed workout day. Seed both EWMAs from
   // that observation so the absent pre-history is not interpreted as zero load.
@@ -479,13 +485,16 @@ export function buildDailyTrainingMetrics(loads: WorkoutTrainingLoad[], throughD
     const seven = dailyLoads.slice(Math.max(0, index - 6), index + 1); const mean = seven.reduce((a, b) => a + b, 0) / seven.length;
     const variance = seven.reduce((sum, value) => sum + (value - mean) ** 2, 0) / seven.length;
     const monotony = mean > 0 ? Math.min(5, variance === 0 ? 5 : mean / Math.sqrt(variance)) : null; const strain = monotony === null ? null : current7dLoad * monotony;
-    const physState = physEvidence.find((item) => item.localDate === localDate)?.physState;
+    const physState = physStateByDate.get(localDate);
     // Recovery evidence is intentionally retired. Training status consumes the
     // factual daily physiological state; the legacy column remains nullable for
     // schema/API compatibility only.
     const recoveryEvidence = null;
     const loadRatio = index + 1 >= config.minimumHistoryDays && workouts >= config.minimumWorkoutCount && chronic >= config.minimumChronicLoad ? acute / chronic : null;
-    const historicalStrains = results.filter(item => dateDiff(item.localDate, localDate) <= 56).map(item => item.strain).filter(finite);
+    // 🔴 56 天回看用**下标窗口**，不再逐行 `dateDiff` 过滤（那是 O(天数²)，10 年 ≈ 7 秒）。
+    // 等价性：`days` 由 `addDays` 逐日生成、`results[j].localDate === days[j]` ⇒
+    // `dateDiff(days[j], days[index]) === index - j`，所以"差 ≤56 天"就是 `j ≥ index-56`。
+    const historicalStrains = results.slice(Math.max(0, index - 56), index).map(item => item.strain).filter(finite);
     const classified = classifyTrainingStatus({ historyDays: index + 1, workoutCount: workouts, chronicEwma: chronic, loadRatio, rampRate, recoveryEvidence, physState, strain, strainP90: index >= 55 ? percentile(historicalStrains, 0.9) : null, daysSinceLastRun: lastRunIndex < 0 ? index + 1 : index - lastRunIndex }, config);
     const duration = items.reduce((sum, item) => sum + item.durationSeconds, 0);
     results.push({ localDate, distanceMeters: items.reduce((sum, item) => sum + (item.distanceMeters ?? 0), 0), durationSeconds: duration, workoutCount: items.length,
@@ -610,9 +619,14 @@ export function assessLoadV2(input: LoadAssessmentInput): LoadAssessment {
   };
 }
 
-export function buildDailyTrainingMetricsV2(loads: WorkoutTrainingLoad[], throughDate: string,
-  physEvidence: DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
+export function buildDailyTrainingMetricsV2(loads: readonly WorkoutTrainingLoad[], throughDate: string,
+  physEvidence: readonly DailyPhysEvidence[] = [], config = defaultDailyMetricConfig): DailyTrainingMetric[] {
   const days = buildDailyTrainingMetrics(loads, throughDate, physEvidence, config);
+  // 与基础实现同一条纪律：生理证据按日期索引（首次出现为准），不要在每日回调里线性 find。
+  const physStateByDate = new Map<string, PhysState>();
+  for (const item of physEvidence) {
+    if (!physStateByDate.has(item.localDate)) physStateByDate.set(item.localDate, item.physState);
+  }
   let workouts = 0, lastRun = -1;
   return days.map((day,index)=>{
     workouts += day.workoutCount;
@@ -621,7 +635,7 @@ export function buildDailyTrainingMetricsV2(loads: WorkoutTrainingLoad[], throug
     const assessment=assessLoadV2({historyDays:index+1,workoutCount:workouts,acuteEwma:day.acuteEwma,
       chronicEwma:day.chronicEwma,loadRatio:day.loadRatio,rampRate:day.rampRate,strain:day.strain,
       strainP90:index>=55?percentile(strainValues,0.9):null,
-      daysSinceLastRun:lastRun<0?index+1:index-lastRun,physState:physEvidence.find((row)=>row.localDate===day.localDate)?.physState});
+      daysSinceLastRun:lastRun<0?index+1:index-lastRun,physState:physStateByDate.get(day.localDate)});
     return {...day,trainingStatus:assessment.risk==="unknown"?"insufficient_data":assessment.risk==="high"?"attention":
       day.trainingStatus==="attention"||day.trainingStatus==="high_load"?"maintaining":day.trainingStatus,
       statusExplanations:assessment.explanations};

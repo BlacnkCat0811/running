@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { HeartRateZone, WorkoutTrainingLoad } from "@rai/contracts";
+import type { DailyTrainingMetric, HeartRateZone, WorkoutTrainingLoad } from "@rai/contracts";
 
 import {
   HIGH_INTENSITY_MINIMUM_HEART_RATE_COVERAGE,
@@ -19,11 +19,14 @@ import {
   classifyPhysState,
   classifyTrainingStatus,
   countNightsBelowSleepBaseline,
+  defaultDailyMetricConfig,
   heartRateReserve,
   latestAcuteChronicLoadRatio,
   localDateInTimeZone,
   periodBounds,
-  trimpMinuteLoad
+  trimpMinuteLoad,
+  type DailyPhysEvidence,
+  type PhysState
 } from "../src/index.js";
 
 const historicalLoad = (
@@ -655,4 +658,155 @@ test("L04: an unobserved prehistory is never filled with zero load", () => {
   // 对照：**观测到的**休息日确实按 0 计入并让 EWMA 衰减 —— 补零只允许发生在有观测的地方。
   assert.equal(days[1]?.load, 0);
   assert.ok(days[1]!.chronicEwma < days[0]!.chronicEwma);
+});
+
+// ===================== 56 天回看窗口：与优化前的实现逐位对照 =====================
+//
+// 🔴 这是**冻结的参考实现**：它逐字保留优化前的两处写法 ——
+// `physEvidence.find(...)` 与 `results.filter(dateDiff(...) <= 56)`。
+// 生产实现改成 Map + 下标窗口后，两者必须给出逐位相同的结果（含 round(1e-6)）。
+// ⛔ 不要"顺手"把它也改成新写法 —— 那会让这个测试失去 oracle 的作用。
+
+const referenceAddDays = (value: string, days: number): string => {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+const referenceDateDiff = (start: string, end: string): number =>
+  Math.round((Date.parse(`${end}T00:00:00.000Z`) - Date.parse(`${start}T00:00:00.000Z`)) / 86_400_000);
+const referenceSumRange = (values: number[], end: number, length: number): number =>
+  values.slice(Math.max(0, end - length + 1), end + 1).reduce((sum, value) => sum + value, 0);
+const referencePercentile = (values: number[], fraction: number): number | null => {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * fraction))] ?? null;
+};
+/** 落库精度：`round(1e-6)`。**必须**在 oracle 里也做 —— 下一日的 p90 读的是已落库的值。 */
+const referenceRound = (value: number): number => Math.round(value * 1e6) / 1e6;
+
+function legacyBuildDailyTrainingMetrics(
+  loads: WorkoutTrainingLoad[],
+  throughDate: string,
+  physEvidence: DailyPhysEvidence[] = [],
+  config = defaultDailyMetricConfig
+): DailyTrainingMetric[] {
+  if (loads.length === 0) return [];
+  const sorted = [...loads].sort((left, right) => left.localDate.localeCompare(right.localDate));
+  const start = sorted[0]!.localDate;
+  if (throughDate < start) return [];
+  const days = Array.from(
+    { length: referenceDateDiff(start, throughDate) + 1 },
+    (_, index) => referenceAddDays(start, index)
+  );
+  const byDate = new Map<string, WorkoutTrainingLoad[]>();
+  for (const load of sorted) byDate.set(load.localDate, [...(byDate.get(load.localDate) ?? []), load]);
+  const dailyLoads: number[] = [];
+  const results: DailyTrainingMetric[] = [];
+  const acuteAlpha = 1 - Math.exp(-Math.LN2 / config.acuteHalfLifeDays);
+  const chronicAlpha = 1 - Math.exp(-Math.LN2 / config.chronicHalfLifeDays);
+  let acute: number | null = null;
+  let chronic: number | null = null;
+  let workouts = 0;
+  let lastRunIndex = -1;
+  for (let index = 0; index < days.length; index++) {
+    const localDate = days[index]!;
+    const items = byDate.get(localDate) ?? [];
+    const load = items.reduce((sum, item) => sum + item.load, 0);
+    dailyLoads.push(load);
+    acute = acute === null ? load : acuteAlpha * load + (1 - acuteAlpha) * acute;
+    chronic = chronic === null ? load : chronicAlpha * load + (1 - chronicAlpha) * chronic;
+    workouts += items.length;
+    if (items.length > 0) lastRunIndex = index;
+    const current7dLoad = referenceSumRange(dailyLoads, index, 7);
+    const previous7dLoad = dailyLoads
+      .slice(Math.max(0, index - 13), Math.max(0, index - 6))
+      .reduce((sum, value) => sum + value, 0);
+    const floor = Math.max(10, chronic * 7 * 0.25);
+    const rampRate = (current7dLoad - previous7dLoad) / Math.max(previous7dLoad, floor);
+    const seven = dailyLoads.slice(Math.max(0, index - 6), index + 1);
+    const mean = seven.reduce((sum, value) => sum + value, 0) / seven.length;
+    const variance = seven.reduce((sum, value) => sum + (value - mean) ** 2, 0) / seven.length;
+    const monotony = mean > 0 ? Math.min(5, variance === 0 ? 5 : mean / Math.sqrt(variance)) : null;
+    const strain = monotony === null ? null : current7dLoad * monotony;
+    const physState = physEvidence.find((item) => item.localDate === localDate)?.physState;
+    const loadRatio = index + 1 >= config.minimumHistoryDays
+      && workouts >= config.minimumWorkoutCount
+      && chronic >= config.minimumChronicLoad
+      ? acute / chronic
+      : null;
+    const historicalStrains = results
+      .filter((item) => referenceDateDiff(item.localDate, localDate) <= 56)
+      .map((item) => item.strain)
+      .filter((value): value is number => value !== null && Number.isFinite(value));
+    const classified = classifyTrainingStatus({
+      historyDays: index + 1,
+      workoutCount: workouts,
+      chronicEwma: chronic,
+      loadRatio,
+      rampRate,
+      recoveryEvidence: null,
+      physState,
+      strain,
+      strainP90: index >= 55 ? referencePercentile(historicalStrains, 0.9) : null,
+      daysSinceLastRun: lastRunIndex < 0 ? index + 1 : index - lastRunIndex
+    }, config);
+    results.push({
+      localDate,
+      distanceMeters: items.reduce((sum, item) => sum + (item.distanceMeters ?? 0), 0),
+      durationSeconds: items.reduce((sum, item) => sum + item.durationSeconds, 0),
+      workoutCount: items.length,
+      load: referenceRound(load),
+      current7dLoad: referenceRound(current7dLoad),
+      previous7dLoad: referenceRound(previous7dLoad),
+      acuteEwma: referenceRound(acute),
+      chronicEwma: referenceRound(chronic),
+      loadRatio: loadRatio === null ? null : referenceRound(loadRatio),
+      rampRate: referenceRound(rampRate),
+      monotony: monotony === null ? null : referenceRound(monotony),
+      strain: strain === null ? null : referenceRound(strain),
+      recoveryEvidence: null,
+      trainingStatus: classified.status,
+      statusExplanations: classified.explanations,
+      loadConfidence: items.length
+        ? referenceRound(items.reduce((sum, item) => sum + item.confidence * item.load, 0) / Math.max(load, Number.EPSILON))
+        : null
+    });
+  }
+  return results;
+}
+
+test("the indexed 56-day window matches the pre-optimization implementation bit for bit", () => {
+  const physStates: PhysState[] = ["unknown", "depleted", "reduced", "recovered_phys"];
+  // 固定种子的 LCG：不引第三方依赖，且失败可复现。
+  let seed = 0x5eed1234;
+  const next = (): number => {
+    seed = (seed * 1664525 + 1013904223) % 0x100000000;
+    return seed / 0x100000000;
+  };
+  const dayCounts = [1, 2, 6, 21, 55, 56, 57, 64, 120, 400];
+  for (const days of dayCounts) {
+    const start = "2024-01-01";
+    const loads: WorkoutTrainingLoad[] = [];
+    const evidence: DailyPhysEvidence[] = [];
+    for (let index = 0; index < days; index += 1) {
+      const localDate = referenceAddDays(start, index);
+      // 稀疏训练 + 偶发同日两练：真实序列既不是每天都练，也不是每天只有一场。
+      if (next() < 0.62) {
+        loads.push(historicalLoad(`session-${index}`, localDate, Math.round(next() * 120)));
+        if (next() < 0.15) {
+          loads.push(historicalLoad(`session-${index}-b`, localDate, Math.round(next() * 60)));
+        }
+      }
+      // 证据故意缺日，且只给一部分日子 —— 缺失必须等价于 undefined。
+      if (next() < 0.5) {
+        evidence.push({ localDate, physState: physStates[Math.floor(next() * physStates.length)]! });
+      }
+    }
+    const throughDate = referenceAddDays(start, days - 1);
+    assert.deepEqual(
+      buildDailyTrainingMetrics(loads, throughDate, evidence),
+      legacyBuildDailyTrainingMetrics(loads, throughDate, evidence),
+      `days=${days}`
+    );
+  }
 });
