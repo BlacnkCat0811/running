@@ -17,12 +17,13 @@
   （全量 `npm test` 中止、application 套件受当时沙箱 TMPDIR 限制且当前不可复现、native-worker 2 红为旧二进制既存）。
 
 - [plan-remove-web-keep-ios-api.md](plan-remove-web-keep-ios-api.md)：
-  **移除 Web、保留 iOS + API 直连的实施方案（草案，未获授权、未执行）** —— 范围、耦合面清单
-  （含 `scripts/run-tests.mjs`、`apps/api/test/node-version.test.ts`、docs/AGENTS、macOS target）、
-  分步改动/验收/回滚。⚠️ **不可按现稿直接执行**：需先取得"移除 Web/桌面端"的明确产品授权，
-  并按文中步骤补 `run-tests.mjs` 等跨包改动；`apps/web` 仍是 `AGENTS.md` 定义的受支持产品。
-  与更完整的 [WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md](WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md)
-  重叠，合并前以已评审的那份为准。
+  **移除 Web 与 macOS 壳、收敛为「原生 iOS + 云 API」· 可执行实施文档（v2，待授权、未执行）** ——
+  合并原草案与旧版退役方案，按 B0–B7 批次给出逐文件逐行改动、每批验收命令与回滚；实测基线 `9a1e2c8`。
+  关键纠错：nginx 须保留 3600s 超时/限速/robots（不可收紧到 120s）、删 `DOM` lib 会让 API 测试 42 处报错、
+  验收矩阵 B02 的唯一引用在 `apps/web` 测试、`check-web-build.mjs` 有 3 个调用方、iOS 直连 API 需要开发 Token。
+  ⚠️ **仍未获产品授权**：`apps/web` 仍是 `AGENTS.md` 定义的受支持产品，D0 未完成前不得开工。
+  旧方案 [WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md](WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md)
+  的内容已并入本文件；执行完成后两者一并按本目录约定归档。
 
 - [SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md](SYNC_OPTIMIZATION_EXECUTION_PLAN_2026-10-16.md)：
   **同步与计算优化 · 落地方案（O01–O12 → 16 工作包 / S0–S5）· S0+S1 执行中** —— 把
@@ -46,7 +47,7 @@
   P0/P1/P2 修复建议。🔴 运维铁律：勿点「重新导入全部」。
 
 - [WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md](WEB_DESKTOP_REMOVAL_PLAN_2026-10-15.md)：
-  **Web 与 macOS 退役方案（三端收敛为「iOS + 后端」）· 待评审（未执行）** —— 只读编制（未改代码、未跑门禁），
+  **Web 与 macOS 退役方案（三端收敛为「iOS + 后端」）· 待评审（未执行）· 已并入 v2 实施文档** —— 只读编制（未改代码、未跑门禁），
   证据基线 `8081ed6`。范围：移除 `apps/web`（92 跟踪文件）与 `apps/ios` 的 macOS 平台 + WKWebView 壳；
   保留 iOS / API / 16 个算法包 / Rust 引擎 / ML 研究。六大耦合面逐条落行号（API 静态托管 `server.ts:452-454`、
   nginx `:53`、systemd `:15`、**iOS 默认地址踩在 vite 代理 5173 上的隐藏耦合**、门禁与 CI、pbxproj 五组行号）。
