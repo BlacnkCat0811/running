@@ -38,6 +38,13 @@ export interface GpxImportResult {
   changedRouteIds?: string[];
   /** Files refused by the per-route quotas below (V2.1 §5.2). */
   oversizedRouteCount?: number;
+  /**
+   * `source_gpx_bundle_sha256` 是**复用**了上一批的值还是**重算**的。
+   *
+   * 可断言观测：本批没有任何路线变化时必须 `reused`（否则"小批同步"仍然每批扫全表）；
+   * 有变化时必须 `recomputed`（否则摘要会停在旧值上，成了一条假证据）。
+   */
+  bundleHashSource?: "reused" | "recomputed";
 }
 
 /**
@@ -289,19 +296,34 @@ function bundleHashFromFingerprints(store: RaiDatabase): string {
   return hash.digest("hex");
 }
 
+/**
+ * 导出目录下的 GPX 相对路径（排序、不跟随软链）。
+ *
+ * 接收器要在**解析 XML 之前**快照本批路线的旧归属，而它手里只有解压后的根目录 ——
+ * 这个清单就是"本批会碰哪些路线"的唯一来源。与 `importGpxRoutes` 内部用的是同一份实现，
+ * 不允许接收器自己再写一遍目录遍历（两份遍历迟早会在软链/大小写上分叉）。
+ */
+export function listGpxRelativePaths(exportRoot: string): string[] {
+  return allGpxRelativePaths(exportRoot);
+}
+
 export async function importGpxRoutes(
   exportRoot: string,
   store: RaiDatabase,
   options?: { preserveAbsent?: boolean; native?: NativeOptions }
 ): Promise<GpxImportResult> {
   const preserveAbsent = options?.preserveAbsent === true;
-  const referencedTargets = new Map(
-    store.routesToImport().map((target) => [
-      // normalizeRelativePath 内部已 toLowerCase（见 utils.ts:157），无需再调一次。
-      normalizeRelativePath(target.relativePath),
-      target
-    ])
-  );
+  // 全量快照（CLI）需要"库里被引用、但本批没带文件"的完整清单 ⇒ 才建全表映射。
+  // 直连批次（`preserveAbsent`）只处理本批那几十个文件：逐个点查走 `relative_path` 的 UNIQUE 索引。
+  const referencedTargets = preserveAbsent
+    ? null
+    : new Map(
+        store.routesToImport().map((target) => [
+          // normalizeRelativePath 内部已 toLowerCase（见 utils.ts:157），无需再调一次。
+          normalizeRelativePath(target.relativePath),
+          target
+        ])
+      );
   const allPaths = allGpxRelativePaths(exportRoot);
   // Partial archives are not evidence that omitted GPX files were deleted.
   if (!preserveAbsent) store.pruneOrphanRoutes(allPaths);
@@ -317,11 +339,11 @@ export async function importGpxRoutes(
   const routePointReader = new SqliteRoutePointReader(store.database);
 
   for (const relativePath of allPaths) {
-    const key = relativePath.toLowerCase();
-    const referenced = referencedTargets.get(key);
-    const routeId = referenced
-      ? referenced.id
-      : store.ensureOrphanRoute(
+    // 路径身份已由 `normalizeRelativePath` 规范到与落库值同形（小写、正斜杠）⇒ 点查是精确的。
+    const referencedId = referencedTargets === null
+      ? store.routeIdForPath(normalizeRelativePath(relativePath))
+      : referencedTargets.get(relativePath.toLowerCase())?.id ?? null;
+    const routeId = referencedId ?? store.ensureOrphanRoute(
           stableId("route", ["orphan", relativePath]),
           relativePath,
           preserveAbsent ? { preserveAbsent: true } : undefined
@@ -517,11 +539,14 @@ export async function importGpxRoutes(
       if (!currentPaths.has(cached.relativePath.toLowerCase())) deleteFingerprint.run(cached.relativePath);
     }
 
-    for (const [key, target] of referencedTargets) {
-      if (allPaths.some((path) => path.toLowerCase() === key)) continue;
-      store.markRouteStatus(target.id, "missing");
-      changedRouteIds.push(target.id);
-      missingRouteCount += 1;
+    const targets = referencedTargets;
+    if (targets !== null) {
+      for (const [key, target] of targets) {
+        if (allPaths.some((path) => path.toLowerCase() === key)) continue;
+        store.markRouteStatus(target.id, "missing");
+        changedRouteIds.push(target.id);
+        missingRouteCount += 1;
+      }
     }
   }
 
@@ -552,10 +577,40 @@ export async function importGpxRoutes(
   store.setManifest("gpx_point_count", String(pointCount));
   store.setManifest("gpx_unresolved_count", String(unresolvedRoutePaths.length));
   // Subset archives must hash remaining fingerprints, not only files in this ZIP.
+  //
+  // 🔴 但"本批一个文件都没变"时不必重算：`source_gpx_bundle_sha256` 是一个对**整表**
+  // 排序后求的摘要，每批都扫一遍等于把"小批同步"的成本绑在历史路线数上。复用的两个前提
+  // 各自可验证：①本批没有任何指纹行被增/改/删；②指纹行数与上次写入时相等（防"被外部删了
+  // 一行但没人记账"）。任一不满足就老老实实重算。
+  const fingerprintCount = Number((store.database
+    .prepare("SELECT COUNT(*) AS n FROM route_file_fingerprints")
+    .get() as { n: number } | undefined)?.n ?? 0);
+  const previousBundle = store.database
+    .prepare("SELECT value FROM import_manifest WHERE key = 'source_gpx_bundle_sha256'")
+    .get() as { value: string } | undefined;
+  const previousFingerprintCount = store.database
+    .prepare("SELECT value FROM import_manifest WHERE key = 'gpx_fingerprint_count'")
+    .get() as { value: string } | undefined;
+  const routesUnchanged = changedRouteIds.length === 0
+    && importedRouteCount === 0
+    && missingRouteCount === 0
+    && oversizedRouteCount === 0
+    && unresolvedRoutePaths.length === 0;
+  const bundleHashSource: "reused" | "recomputed" = preserveAbsent
+    && routesUnchanged
+    && previousBundle !== undefined
+    && previousBundle.value.length > 0
+    && Number(previousFingerprintCount?.value ?? Number.NaN) === fingerprintCount
+    ? "reused"
+    : "recomputed";
   store.setManifest(
     "source_gpx_bundle_sha256",
-    preserveAbsent ? bundleHashFromFingerprints(store) : bundleHash.digest("hex")
+    bundleHashSource === "reused"
+      ? String(previousBundle?.value)
+      : (preserveAbsent ? bundleHashFromFingerprints(store) : bundleHash.digest("hex"))
   );
+  // 给"复用"留下可验证的规模证据：下一次同名键对不上就重算。
+  store.setManifest("gpx_fingerprint_count", String(fingerprintCount));
   // 🔴 按**所有权**提交，不是"擅自提交"：store 模式下这里就是提交自己那一段；
   // caller 模式（直连接收事务）下提交权归调用方，这里什么都不做。
   // 直接写 `store.flush()` 会让整条直连车道在**每一批**上失败（实测：解析器/路线写入器
@@ -572,6 +627,7 @@ export async function importGpxRoutes(
     // Bounded sample; `unresolvedRouteCount` is the authoritative total.
     unresolvedRoutePaths: unresolvedRoutePaths.slice(0, 10),
     changedRouteIds,
-    oversizedRouteCount
+    oversizedRouteCount,
+    bundleHashSource
   };
 }

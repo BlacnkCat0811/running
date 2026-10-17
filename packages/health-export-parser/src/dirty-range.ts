@@ -92,10 +92,58 @@ export function rewindToOverlappingWorkoutStart(
  * 主入口：把"本批变更 + 全表训练 + 恢复边界"归约成一个脏范围与分域边界。
  *
  * - `record`/`workout`：为新旧两侧各构造区间（区间并集语义），区间进相交回退；
- * - `activity_summary`/`route`：点时刻（其自身由"边界之后全部重算"覆盖）；
+ * - `activity_summary`/`route`：通常只有时刻（`newEnd` 为 `null`）⇒ 构造**点区间** `[t, t]`
+ *   后同样进相交回退。🔴 不能只 `addInstant`：路线／活动摘要的时刻可能落在训练**中段**，
+ *   只取该时刻会让训练前半段的特征、负荷与分区不复算（§7.2 步骤 7，2026-10-17 修复）；
  * - `recoveryBoundaries`：canonical 恢复（夜/HRV）重建触及的时刻（可为空集）；
  * - 变更非空但没有任何可用边界 ⇒ `full`（`health_boundary_unknown`，与 CLI 同口径）。
  */
+/**
+ * 覆盖计划的**规范化形态**：一个"从某边界起需要重算"的声明。
+ * `null`（整体）= 没有可信边界 ⇒ 调用方必须全量。
+ */
+export interface AnalysisDirtyPlan {
+  dirtyFromAt: string | null;
+  domains: AnalysisDirtyDomains;
+}
+
+/**
+ * 覆盖计划的**合并**（R01 重排 / R02 合并 / capture 主路径**唯一的**一处实现）。
+ *
+ * ## 为什么必须只有一处
+ *
+ * "把两份 dirty 合并成一份"曾经在重排与合并函数里各写一遍（`MIN(dirty)` 的两份方言），
+ * 而复查抓到的两类漏算（R01 重排丢原任务范围、R02 合并丢未入选批次）本质是**同一件事**：
+ * 合并时丢了一侧的边界。两处实现必然继续分叉 —— 所以收敛到这一个纯函数，
+ * 两个调用方只负责"把哪两份喂进来"。
+ *
+ * ## 合并语义（保守优先，与全仓方向一致）
+ *
+ * - 任一侧为 `null`（无计划/全量承诺）⇒ 合并结果 `null`（全量）。**不许**把"不可知的
+ *   一侧"读成"不需要重算"。
+ * - 任一侧某域为 `null`（该域不可复用/全算）⇒ 结果该域为 `null`：较晚的新边界
+ *   **不得覆盖**"这个域不可增量"的声明。
+ * - 其余逐域取**最早**（更早必然覆盖更晚：早边界包含晚边界的全部变更时刻）。
+ * - 三域与顶层边界全为 `null` ⇒ 结果 `null`（等价于全量，不保留一个空壳计划）。
+ */
+export function mergeDirtyPlans(
+  left: AnalysisDirtyPlan | null,
+  right: AnalysisDirtyPlan | null
+): AnalysisDirtyPlan | null {
+  if (left === null || right === null) return null;
+  const pick = (a: string | null, b: string | null): string | null =>
+    a === null || b === null ? null : a <= b ? a : b;
+  const domains: AnalysisDirtyDomains = {
+    features: pick(left.domains.features, right.domains.features),
+    fitness: pick(left.domains.fitness, right.domains.fitness),
+    readiness: pick(left.domains.readiness, right.domains.readiness)
+  };
+  const dirtyFromAt = pick(left.dirtyFromAt, right.dirtyFromAt)
+    ?? domains.features ?? domains.fitness ?? domains.readiness;
+  if (dirtyFromAt === null) return null;
+  return { dirtyFromAt, domains };
+}
+
 export function planIncrementalAnalysisDirtyRange(input: {
   changes: readonly DirtyRangeChange[];
   workouts: readonly DirtyRangeWorkout[];
@@ -141,10 +189,41 @@ export function planIncrementalAnalysisDirtyRange(input: {
         addInstant(side.start);
       }
     } else {
-      // activity_summary / 合成 route：只有点时刻（区间在下界之外无须单独回退）。
-      addInstant(change.newStart);
-      addInstant(change.previousStart);
-      addInstant(change.previousEnd);
+      // activity_summary / 合成 route：点时刻（或旧的区间，若有 previous_end）。
+      //
+      // 🔴 B05（2026-10-17）：**仍然要进相交回退**。旧注释说"区间在下界之外无须单独回退"，
+      // 但对路线变更不成立：路线文件时刻（或活动摘要）可能落在训练**中段**，只取该时刻
+      // 会让训练前半段的特征、负荷与分区不被重算 —— 那正是"只改一条路线就只改一行分数"。
+      // 点区间 `[t, t]` 与训练相交时，回退原语会把它压到训练开始。
+      const sides = [
+        { start: change.newStart, end: change.newEnd },
+        { start: change.previousStart, end: change.previousEnd }
+      ];
+      for (const side of sides) {
+        if (side.start === null || side.start === undefined) {
+          // 只有 `end` 没有 `start`：不知道这次变更从哪儿开始，**不能**拿 `end` 当起点
+          // （那会把更早的半段留在边界之外 = 漏算）。旧实现在这里 `addInstant(end)`，
+          // 方向是错的；fail-safe 只有一条路 —— 全量。
+          if (side.end !== null && side.end !== undefined) {
+            full = true;
+            reasons.add("invalid_health_interval");
+          }
+          continue;
+        }
+        if (!isCanonicalInstant(side.start)) {
+          full = true;
+          reasons.add("invalid_health_time");
+          continue;
+        }
+        const end = side.end === null || side.end === undefined ? side.start : side.end;
+        if (!isCanonicalInstant(end) || end < side.start) {
+          full = true;
+          reasons.add("invalid_health_interval");
+          continue;
+        }
+        intervals.push({ start: side.start, end });
+        addInstant(side.start);
+      }
     }
   }
 

@@ -52,7 +52,8 @@ export {
   type RaiDatabaseOpenOptions,
   type RouteImportTarget
 } from "./database.js";
-export { importGpxRoutes } from "./gpx-parser.js";
+export { importGpxRoutes, listGpxRelativePaths } from "./gpx-parser.js";
+export { normalizeRelativePath } from "./utils.js";
 export { acquireDatabasePublicationLock } from "@rai/storage-sqlite";
 export {
   diffDataset,
@@ -73,11 +74,20 @@ export {
 } from "./identity-algorithm.js";
 export {
   isCanonicalInstant,
+  mergeDirtyPlans,
   planIncrementalAnalysisDirtyRange,
   rewindToOverlappingWorkoutStart,
   type AnalysisDirtyDomains,
+  type AnalysisDirtyPlan,
   type AnalysisDirtyRange,
   type DirtyRangeChange,
   type DirtyRangeWorkout
 } from "./dirty-range.js";
 export { loadDirtyRangeInput } from "./dirty-range-input.js";
+export {
+  BATCH_ANALYSIS_DIRTY_EVIDENCE_VERSION,
+  encodeBatchAnalysisDirtyEvidence,
+  parseBatchAnalysisDirtyEvidence,
+  type BatchAnalysisDirtyEvidence,
+  type ParsedBatchAnalysisDirtyEvidence
+} from "./batch-dirty-evidence.js";
