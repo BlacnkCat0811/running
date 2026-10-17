@@ -4,14 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { RaiApplicationService } from "@rai/application";
-import { healthTypes, workoutTypes } from "@rai/contracts";
+import { RaiApplicationService, SqliteAnalysisInputReader } from "@rai/application";
+import { DIRECT_SYNC_ANALYSIS_REQUEST_MODE, healthTypes, workoutTypes } from "@rai/contracts";
 import {
   canonicalizeRunningWorkouts, parseAppleHealthXml, planIncrementalAnalysisDirtyRange,
   type DirtyRangeChange, type DirtyRangeWorkout, type RecomputePlan
 } from "@rai/health-export-parser";
 import { physStateFromReadiness } from "@rai/readiness";
-import { RaiDatabase } from "@rai/storage-sqlite";
+import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 import { addDays, configHash, localDateStartAt } from "../src/utils.js";
 import { loadDatedReadiness, loadDatedRecoveryFacts, loadDatedRecoveryFactsBatch } from "../src/model-v2-snapshots.js";
 import { loadDailyPhysEvidence } from "../src/training-load-data.js";
@@ -682,17 +682,22 @@ test("O09: the checkpoint records versions, digests and rolling state (and hashe
       "SELECT * FROM training_metric_checkpoints WHERE training_metric_run_id = ?"
     ).get(metricRunId) as Record<string, unknown>;
     assert.ok(row, "the baseline run must write a checkpoint");
-    assert.equal(row.checkpoint_version, "rai-training-metric-checkpoint-v1");
+    assert.equal(row.checkpoint_version, "rai-training-metric-checkpoint-v2");
     assert.equal(row.load_algorithm_version, "training-load-config-v5");
     assert.equal(row.zone_algorithm_version, "training-zone-config-v4");
     assert.equal(row.daily_algorithm_version, "rai-daily-metric-v2");
     assert.equal(row.timezone_identifier, TZ);
     assert.equal(row.through_local_date, "2026-02-10");
+    // R05：两列摘要各有职责，同一处写出 —— 身份摘要（含代次）留作谱系；复用判据读的是
+    // **前缀兼容摘要**（不含代次）。空串 = 缺证明（核验方会拒绝），不允许出现。
+    assert.equal(typeof row.input_binding_digest, "string", "身份摘要必须留作谱系证据");
+    assert.equal(typeof row.prefix_compat_digest, "string", "前缀兼容摘要必须与 checkpoint 同批落库");
+    assert.notEqual(row.prefix_compat_digest, "", "prefix_compat_digest 不允许为空串");
     const state = JSON.parse(String(row.state_json)) as {
       version: string; distanceQueueComplete: boolean; distanceQueue: Array<{ observedAt: string; distanceMeters: number }>;
       zonePrevious: { localDate: string } | null; daily: { acuteEwma: number; chronicEwma: number } | null;
     };
-    assert.equal(state.version, "rai-training-metric-checkpoint-v1");
+    assert.equal(state.version, "rai-training-metric-checkpoint-v2");
     assert.equal(configHash(state), row.state_hash, "state_hash must be the write-side integrity stamp");
     assert.equal(state.distanceQueueComplete, true);
     assert.equal(state.distanceQueue.length, BASE_DAYS.length, "every non-excluded workout is in the 90-day queue");
@@ -784,5 +789,156 @@ test("O09: a parent whose zone-chain tail no longer matches the checkpoint is re
   } finally {
     closeWorkspace(incremental);
     closeWorkspace(offline);
+  }
+});
+
+// ===================== R05（2026-10-16 复查）：直连车道的前缀复用 =====================
+//
+// 复查证据：生产增量路径（直连任务）的负荷／分区／日级前缀复用被**代次摘要恒定拒绝**
+// （原因码 `input_binding`）—— 一条心率更正仍重算 7 次训练、46 天分区和日指标。
+// 根因：旧复用判据 `input_binding_digest` 含 raw／dependency 代次，而每批导入都推进代次。
+// 修复：判据拆成「前缀兼容摘要（不含代次）＋**覆盖基线存在**（旧发布输入绑定）」。
+// 下面两条：合法直连增量必须真的复用；没有覆盖基线（CLI 直接发布 / 从未发布）时必须拒绝。
+
+/** 直连任务登记 + 执行（与 `direct-sync-ingest.ts` 登记端同形状的最小版本）。 */
+async function runDirectTask(
+  workspace: Workspace,
+  options: {
+    batchId: string;
+    evaluatedAt: string;
+    plan: RecomputePlan | null;
+    targetRaw: number;
+    targetDependency: number;
+  }
+): Promise<string> {
+  workspace.store.flush();
+  const input = RaiDatabase.openReadonly(join(workspace.root, "rai.sqlite"));
+  try {
+    const reader = new SqliteAnalysisInputReader(input);
+    const service = new RaiApplicationService(workspace.store, "owned", undefined, undefined, reader);
+    const datasetVersion = String(workspace.store.database.prepare(
+      "SELECT value FROM import_manifest WHERE key = 'dataset_version'"
+    ).get()?.value ?? "dataset_unknown");
+    new RecomputeJobRepository(workspace.store.database).enqueue(
+      "import",
+      datasetVersion,
+      {
+        mode: DIRECT_SYNC_ANALYSIS_REQUEST_MODE,
+        importBatchId: options.batchId,
+        evaluatedAt: options.evaluatedAt,
+        timezoneIdentifier: TZ,
+        ...(options.plan === null
+          ? {}
+          : { incrementalPlan: { mode: "partial", dirtyFromAt: options.plan.dirtyFromAt, domains: options.plan.domains } })
+      },
+      { targetRawGeneration: options.targetRaw, targetDependencyGeneration: options.targetDependency }
+    );
+    const job = service.runNextJob();
+    assert.equal(job?.status, "succeeded", `direct task failed: ${JSON.stringify(job?.error ?? job)}`);
+    return String(job?.modelRunId);
+  } finally {
+    input.close();
+  }
+}
+
+/** 第二批落库：真实成功批次行 + 账本 + 两个代次推进（与直连接收端同形状）。 */
+function commitDeltaBatch(workspace: Workspace, batchId: string): DirtyRangeChange {
+  const inserted = insertedWorkoutChange(readWorkoutInterval(workspace.store, "start_at >= ?", NEW_WORKOUT_FROM));
+  const workout = workspace.store.database.prepare(
+    "SELECT id AS workoutId, start_at AS startAt FROM workouts WHERE start_at >= ? ORDER BY start_at LIMIT 1"
+  ).get(NEW_WORKOUT_FROM) as { workoutId: string; startAt: string };
+  workspace.store.database.prepare(`
+    INSERT INTO import_batches (
+      id, xml_sha256, status, import_mode, created_at, raw_generation, dependency_generation, dependency_bumped
+    ) VALUES (?, ?, 'succeeded', 'incremental', ?, 1, 1, 1)
+  `).run(batchId, "0".repeat(64), new Date().toISOString());
+  workspace.store.database.prepare(`
+    INSERT INTO import_entity_changes (batch_id, entity_kind, entity_id, change_type, effective_at)
+    VALUES (?, 'workout', ?, 'inserted', ?)
+  `).run(batchId, workout.workoutId, workout.startAt);
+  workspace.store.database.prepare(
+    "UPDATE import_generations SET raw_generation = 1, dependency_generation = 1 WHERE singleton = 1"
+  ).run();
+  return inserted;
+}
+
+test("R05: 连续两次真实直连增量（代次不同）仍然复用安全前缀，不再恒定拒绝", async () => {
+  const workspace = await openWorkspace();
+  try {
+    await ingest(workspace, BASE_DAYS);
+    workspace.store.setManifest("dataset_version", "dataset_r05_before");
+    workspace.store.flush();
+    // 两次直连全量基线：第一次建立发布、第二次让"证据源"成为真实存在的已发布 run
+    //（与 CLI 用例的两次全量同理；直连发布会在发布事务里写下输入绑定 —— 覆盖基线的载体）。
+    await runDirectTask(workspace, { batchId: "batch_r05_a1", evaluatedAt: EVAL_1, plan: null, targetRaw: 0, targetDependency: 0 });
+    await runDirectTask(workspace, { batchId: "batch_r05_a2", evaluatedAt: EVAL_1, plan: null, targetRaw: 0, targetDependency: 0 });
+
+    await ingest(workspace, [...BASE_DAYS, NEW_WORKOUT_DAY]);
+    workspace.store.setManifest("dataset_version", "dataset_r05_after");
+    workspace.store.flush();
+    const inserted = commitDeltaBatch(workspace, "batch_r05_delta");
+
+    const incrementalRun = await runDirectTask(workspace, {
+      batchId: "batch_r05_delta",
+      evaluatedAt: EVAL_2,
+      plan: planFor(workspace.store, [inserted]),
+      targetRaw: 1,
+      targetDependency: 1
+    });
+    const reuse = readReuse(workspace.store, incrementalRun);
+    assert.equal(reuse.proof, "verified",
+      `直连增量必须复用安全前缀（拒绝原因：${reuse.rejectionReason ?? "none"}）`);
+    assert.ok(reuse.loads.reused > 0, "loads 前缀必须真的被复用");
+    assert.ok(reuse.zoneProfiles.reused > 0, "分区前缀必须真的被复用");
+    assert.ok(reuse.dailyMetrics.reused > 0, "日级前缀必须真的被复用");
+    // 复用计数与真实落库行数一致（不是只报了数）。
+    const rowsInRun = Number(workspace.store.database.prepare(
+      "SELECT COUNT(*) AS n FROM workout_training_loads WHERE training_metric_run_id = ?"
+    ).get(activeMetricRunId(workspace.store, incrementalRun))?.n ?? 0);
+    assert.equal(reuse.loads.reused + reuse.loads.recomputed, rowsInRun);
+  } finally {
+    closeWorkspace(workspace);
+  }
+});
+
+test("R05: 无可信覆盖基线（历史发布无输入绑定）的直连增量拒绝复用 —— 不允许把无法证明的前缀当安全", async () => {
+  const workspace = await openWorkspace();
+  try {
+    await ingest(workspace, BASE_DAYS);
+    workspace.store.setManifest("dataset_version", "dataset_r05_nobase_before");
+    workspace.store.flush();
+    // 同一条车道（直连发布写直连形状的 checkpoint），但把旧发布的**输入绑定**去掉 ——
+    // 等价于 v39 之前的老发布 / 绑定行缺失的历史库：checkpoint 在，覆盖基线不在。
+    // 摘要匹配（prefix_compat ✓）而基线缺失 ⇒ 必须拒于 `coverage_base_missing`，
+    // 而不是"反正摘要对了就复用"。
+    await runDirectTask(workspace, { batchId: "batch_r05_nb_a1", evaluatedAt: EVAL_1, plan: null, targetRaw: 0, targetDependency: 0 });
+    await runDirectTask(workspace, { batchId: "batch_r05_nb_a2", evaluatedAt: EVAL_1, plan: null, targetRaw: 0, targetDependency: 0 });
+    workspace.store.database.prepare(
+      "DELETE FROM analysis_run_input_bindings WHERE run_id = ?"
+    ).run(activeModelRunId(workspace.store));
+    workspace.store.flush();
+
+    await ingest(workspace, [...BASE_DAYS, NEW_WORKOUT_DAY]);
+    workspace.store.setManifest("dataset_version", "dataset_r05_nobase_after");
+    workspace.store.flush();
+    const inserted = commitDeltaBatch(workspace, "batch_r05_nobase_delta");
+
+    const incrementalRun = await runDirectTask(workspace, {
+      batchId: "batch_r05_nobase_delta",
+      evaluatedAt: EVAL_2,
+      plan: planFor(workspace.store, [inserted]),
+      targetRaw: 1,
+      targetDependency: 1
+    });
+    const reuse = readReuse(workspace.store, incrementalRun);
+    assert.equal(reuse.proof, "rejected");
+    assert.equal(reuse.rejectionReason, "coverage_base_missing",
+      "没有旧发布输入绑定就证明不了'父到当前无未处理影响' ⇒ 拒绝复用");
+    assert.equal(reuse.loads.reused, 0);
+    assert.equal(reuse.zoneProfiles.reused, 0);
+    assert.equal(reuse.dailyMetrics.reused, 0);
+    // 拒绝复用 ≠ 结果错：全量重算照常发布（上面 runDirectTask 已断言 succeeded）。
+  } finally {
+    closeWorkspace(workspace);
   }
 });

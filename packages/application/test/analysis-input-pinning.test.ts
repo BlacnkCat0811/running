@@ -26,7 +26,9 @@ import {
 import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 
 // 逼出分段路径：行数预算 1（事实远多于 1 行），并把单条读上限压到 1 行以便验证"越界必须记账"。
-const SMALL_BUDGET: AnalysisInputBudget = { maxRows: 1, maxBytes: 1, maxReadRows: 1, maxReadMs: 60_000 };
+// `maxRows`/`maxBytes` 只负责把捕获逼进**分段模式**；`maxReadRows` 必须留足余量 ——
+// 2026-10-17 起它是一条**硬上限**（超过就抛错），不再是"记账继续算"。
+const SMALL_BUDGET: AnalysisInputBudget = { maxRows: 1, maxBytes: 1, maxReadRows: 10_000, maxReadMs: 60_000 };
 const SESSION_COUNT = 6;
 
 function dateForRun(index: number): string {
@@ -298,7 +300,7 @@ test("注入下一批（含新训练、推依赖代次）⇒ 候选只含固定�
   });
 });
 
-test("注入下一批（推依赖代次）且输入超出物化预算 ⇒ 候选作废、旧发布保留、登记重排", async () => {
+test("注入下一批（推依赖代次）且输入超出物化预算 ⇒ 候选作废、旧发布保留、**原任务**退回队列重排", async () => {
   await withFixture(async (fixture) => {
     const baseline = publishBaseline(fixture);
     const input = RaiDatabase.openReadonly(fixture.path);
@@ -322,9 +324,12 @@ test("注入下一批（推依赖代次）且输入超出物化预算 ⇒ 候选
       });
       const job = service.runNextJob();
       assert.equal(job?.id, jobId);
-      assert.equal(job?.status, "failed");
-      assert.match(String(job?.error?.message ?? ""), /Analysis input changed during/,
-        "漂移必须以显式原因失败，而不是发布一个混代候选");
+      // 🔴 B03（2026-10-17）：漂移重排**退回原任务**（同 id、同回执），不再新建后继，
+      // 也不再把原 id 判死。客户端唯一持有的句柄就是 `analysisJobId` —— 把它写成 failed，
+      // 而真正算完的是另一个 id，等于让客户端永远读不到真实结局。
+      assert.equal(job?.status, "queued",
+        "漂移后原任务必须退回队列，而不是永久 failed（原 id 是客户端唯一持有的句柄）");
+      assert.equal(job?.error ?? null, null, "重排不是失败：不得留下终态错误");
       // ① 旧发布结果原样保留。
       const active = fixture.store.database
         .prepare("SELECT model_run_id AS id FROM active_model_run WHERE singleton = 1").get() as { id: string };
@@ -340,22 +345,30 @@ test("注入下一批（推依赖代次）且输入超出物化预算 ⇒ 候选
       assert.equal(declared.reason, "fact_rows_exceed_budget");
       // （"越界读必须上报"由下面那条'分段路径照样算完并发布'的用例判：本用例在第一条读上
       //   就因依赖代次前进而作废，不会产生任何**完成**的读。）
-      // ③ 合并新增 dirty 范围后重排：登记了一条续算任务，并带上重排计数。
+      // ③ 合并新增 dirty 范围后重排：**同一条任务**带上新计划与重排计数。
       const replanned = fixture.store.database.prepare(`
-        SELECT request_json AS request FROM recompute_jobs
-        WHERE id <> ? AND job_type = 'import' AND status = 'queued'`).all(jobId) as Array<{ request: string }>;
-      assert.equal(replanned.length, 1, "漂移后必须重排（恰好一条续算任务）");
-      const request = JSON.parse(replanned[0]!.request) as Record<string, unknown>;
+        SELECT request_json AS request, progress_phase AS phase, error_json AS errorJson
+        FROM recompute_jobs WHERE id = ?`).get(jobId) as {
+          request: string; phase: string; errorJson: string | null;
+        };
+      assert.equal(replanned.phase, "replan_pending", "阶段必须说明正在重排，而不是失败");
+      assert.equal(replanned.errorJson, null, "重排不得留下错误载荷");
+      const request = JSON.parse(replanned.request) as Record<string, unknown>;
       assert.equal(Number(request.bindingDriftReplans), 1);
       assert.equal((request.incrementalPlan as { mode?: string } | undefined)?.mode, "partial");
       assert.equal((request.incrementalPlan as { dirtyFromAt?: string }).dirtyFromAt, dateForRun(SESSION_COUNT));
+      // ④ 没有后继任务：原 id 是唯一句柄，"重排"不等于"另起一条"。
+      const total = fixture.store.database.prepare(
+        "SELECT COUNT(*) AS n FROM recompute_jobs WHERE job_type = 'import'"
+      ).get() as { n: number };
+      assert.equal(Number(total.n), 1, "重排不得新建后继任务");
     } finally {
       input.close();
     }
   });
 });
 
-test("超过预算的分段路径照样算完并发布：输入仍固定、越界读逐条上报", async () => {
+test("超过**物化**预算的分段路径照样算完并发布：输入仍固定、单条读预算充足时不留越界记账", async () => {
   await withFixture(async (fixture) => {
     const baseline = publishBaseline(fixture);
     const input = RaiDatabase.openReadonly(fixture.path);
@@ -384,16 +397,16 @@ test("超过预算的分段路径照样算完并发布：输入仍固定、越�
       // ① 分段路径下输入同样固定：捕获之后到达的训练不得进入候选。
       assert.equal(featureCount(fixture.store, job!.modelRunId!), SESSION_COUNT);
       assert.notEqual(job!.modelRunId, baseline);
-      // ② 降级与越界都必须留痕（越界只记账、不截断）。
+      // ② 降级必须留痕；单条读的硬上限由 `analysis-read-budget.test.ts` 判（超限即抛错）。
       const events = (fixture.store.database.prepare(`
         SELECT message FROM recompute_job_events
         WHERE job_id = ? AND phase = 'input_materialization' ORDER BY rowid`).all(jobId) as Array<{ message: string }>)
-        .map((row) => JSON.parse(row.message) as { mode?: string; reason?: string; overruns?: string[]; rawAdvances?: string[] });
+        .map((row) => JSON.parse(row.message) as { mode?: string; reason?: string; nearLimit?: string[]; rawAdvances?: string[] });
       assert.equal(events[0]?.mode, "segmented");
       assert.equal(events[0]?.reason, "fact_rows_exceed_budget");
-      assert.ok(
-        events.flatMap((event) => event.overruns ?? []).length > 0,
-        "单条读越过 maxReadRows 必须上报，不能静默"
+      assert.deepEqual(
+        events.flatMap((event) => event.nearLimit ?? []), [],
+        "单条读都在预算内时，不得留下任何\"接近上限\"的记账"
       );
       assert.ok(
         events.flatMap((event) => event.rawAdvances ?? []).length > 0,

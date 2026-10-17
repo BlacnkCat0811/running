@@ -30,19 +30,31 @@ export {
 } from "./services/analysis-input-reader.js";
 // O06-A / WP-22 步骤 3–5：固定输入的事实视图（物化快照 / 分段校验读）。
 export {
+  AnalysisInputCoverageOutOfBoundsError,
   AnalysisInputDriftError,
   DEFAULT_ANALYSIS_INPUT_BUDGET,
+  FACT_PRUNE_ALWAYS_KEPT_RECORD_TYPES,
+  FACT_PRUNE_WINDOWED_RECORD_TYPES,
+  PEAK_EVIDENCE_LOOKBACK_MS,
   PINNED_FACT_TABLES,
   PINNED_PUBLISHED_EVIDENCE_TABLES,
+  RECORDS_MAX_LOOKBACK_MS,
+  SESSION_RECORDS_LOOKBACK_MS,
   SNAPSHOT_TABLES,
   SegmentedFactView,
   SnapshotFactView,
+  buildFactTableFilters,
   materializeFactSnapshot,
   probeFactSize,
+  AnalysisInputReadBudgetExceeded,
   type AnalysisFactView,
   type AnalysisFactViewStats,
   type AnalysisInputBudget,
-  type FactViewGenerations
+  type FactPruneCoverage,
+  type FactTableFilter,
+  type FactTableFilters,
+  type FactViewGenerations,
+  type SnapshotCoverage
 } from "./services/analysis-fact-view.js";
 export { analysisInputDigest, type AnalysisInputBinding } from "./analysis-input-binding.js";
 // §12.11 个人自校准：留一法回放产出残差样本，拟合与展示闸门在 @rai/model-eval。

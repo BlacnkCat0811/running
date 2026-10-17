@@ -8,8 +8,16 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { RecomputeProgressGate } from "./recompute-progress.js";
 import { BoundedCache } from "./bounded-cache.js";
 import { ChunkedWriter } from "./chunked-write.js";
+import { RecoveryBaselineReader } from "./recovery-baseline-reader.js";
 import type { AnalysisInputCapture, AnalysisInputSource } from "./analysis-input-reader.js";
-import { AnalysisInputDriftError, type AnalysisFactView } from "./analysis-fact-view.js";
+import {
+  AnalysisInputCoverageOutOfBoundsError,
+  AnalysisInputDriftError,
+  PEAK_EVIDENCE_LOOKBACK_MS,
+  RECORDS_MAX_LOOKBACK_MS,
+  SESSION_RECORDS_LOOKBACK_MS,
+  type AnalysisFactView
+} from "./analysis-fact-view.js";
 import type { AnalysisDirtyDomains } from "@rai/health-export-parser";
 
 import {
@@ -239,7 +247,21 @@ export const SUPERSEDED_RUN_RETENTION = 2;
  * 口径变化（滚动状态形状、复用判据）必须**上调**它：旧 checkpoint 由此不再被复用，
  * 而不是被新代码按新口径解释。历史 row 保留，不迁移、不回填。
  */
-export const TRAINING_METRIC_CHECKPOINT_VERSION = "rai-training-metric-checkpoint-v1";
+export const TRAINING_METRIC_CHECKPOINT_VERSION = "rai-training-metric-checkpoint-v2";
+
+/**
+ * 日级**生理证据**快照的分块长度（v2）。
+ *
+ * 为什么存"每天一个字符"而不是每块一个 sha256：摘要只能回答"这一块变没变"，
+ * 而复用边界 `zoneStart` 通常落在块的中间 —— 哈希无法在块内定位，只能整块重算
+ * （短历史直接退化成零复用）。每天一个字符（4 态 + 缺失）既精确到天、又比哈希更小：
+ * 20 年 ≈ 7.3 KB，和已存的 90 天距离参考队列同量级。
+ */
+export const DAILY_EVIDENCE_CHUNK_DAYS = 64;
+/** 20 年 × 366 天的分块上限；超过即视为状态损坏（不截断）。 */
+const MAX_DAILY_EVIDENCE_CHUNKS = Math.ceil((366 * 20) / DAILY_EVIDENCE_CHUNK_DAYS);
+/** 单日状态的编码：缺失 `.`、unknown `u`、depleted `d`、reduced `r`、recovered_phys `p`。 */
+const DAILY_EVIDENCE_ALPHABET = ".udrp";
 
 /** 日级指标的算法版本（`buildDailyTrainingMetrics(V2)` 的口径）。 */
 export const DAILY_METRIC_ALGORITHM_VERSION = "rai-daily-metric-v2";
@@ -317,6 +339,25 @@ export interface TrainingMetricCheckpointState {
   distanceQueueComplete: boolean;
   distanceQueue: DistanceQueueEntry[];
   daily: { localDate: string; acuteEwma: number; chronicEwma: number; workoutCount: number; historyDays: number } | null;
+  /**
+   * 日级证据快照的**序列首日**（比对原点）。下一 run 的首日与它不一致 ⇒ 无法逐日对齐，
+   * 退回 {@link RecomputePipeline.proveDailyPrefix} 的逐行证明。
+   */
+  dailyEvidenceFrom: string;
+  /**
+   * 从 `dailyEvidenceFrom` 起**每天一个字符**的 `physState`（每块 ≤ {@link DAILY_EVIDENCE_CHUNK_DAYS}），
+   * 缺失日记 `.`。它证明的是"这些天的分类输入没变"；日指标是这些输入的确定性函数，
+   * 所以边界之前的行必然逐位相同，不必逐行重算 —— 前提是**父 run 的行本身没被改过**。
+   */
+  dailyEvidenceDays: string[];
+  /**
+   * 父 run `daily_training_metrics` **整表**的业务列摘要（写入时从盘上算）。
+   *
+   * 与证据快照是两道独立证明：快照证明"输入没变"，它证明"算出来的行还在"。
+   * 少了它，一个被就地改过的前缀行会被当成"输入没变"照抄下去（旧实现靠逐行重算顺带发现，
+   * v2 不再逐行重算 ⇒ 必须显式把这条证据补回来）。不一致时退回逐行证明。
+   */
+  dailyRowsDigest: string;
 }
 
 /** 每域 reused/recomputed 计数（落到 `training_metric_runs.summary_json.reuse`）。 */
@@ -340,6 +381,46 @@ interface DomainBoundaries {
   readiness: string | null;
   /** 边界来源：`domains`（O04 分域）／`legacy`（老 payload 的单一边界）／`none`（全量）。 */
   source: "domains" | "legacy" | "none";
+}
+
+/**
+ * 逐日证据快照的比较结果。
+ *
+ * `insufficient` = 任一侧比待证明的跨度短（父 run 的快照没覆盖到边界 / 本 run 的证据缺失），
+ * 此时**不能**把"已比较的部分相同"当成整段证明 —— 调用方必须退回逐行证明。
+ */
+export type DailyEvidenceComparison =
+  | { kind: "match" }
+  | { kind: "mismatch"; offset: number }
+  | { kind: "insufficient" };
+
+/** 纯函数：只比较 `[0, span)` 这一段；`offset` 是第一个不同的日偏移。 */
+export function compareDailyEvidenceDays(
+  stored: string,
+  current: string,
+  span: number
+): DailyEvidenceComparison {
+  if (span < 0) return { kind: "insufficient" };
+  if (stored.length < span || current.length < span) return { kind: "insufficient" };
+  for (let offset = 0; offset < span; offset += 1) {
+    if (stored[offset] !== current[offset]) return { kind: "mismatch", offset };
+  }
+  return { kind: "match" };
+}
+
+/**
+ * 单日生理状态 → 一个字符。未知枚举值返回 `null`：**宁可退回逐行证明**，也不能把两个
+ * 不同的新状态编码成同一个字符（那会让比较得出"没变"）。
+ */
+function encodeDailyEvidenceState(state: string | undefined): string | null {
+  switch (state) {
+    case undefined: return ".";
+    case "unknown": return "u";
+    case "depleted": return "d";
+    case "reduced": return "r";
+    case "recovered_phys": return "p";
+    default: return null;
+  }
 }
 
 /**
@@ -385,6 +466,12 @@ export class RecomputePipeline {
 
   /** 本次直连分析捕获到的输入绑定；非直连任务为 null ⇒ 不写绑定行（老路径零改动）。 */
   private pendingInputCapture: AnalysisInputCapture | null = null;
+
+  /**
+   * 恢复基线读取器（按 `localDate` 缓存）。**生命周期 = 一次事实视图**：
+   * 视图被替换时必须丢弃，否则会拿旧事实算基线（"输入变了却仍然复用"的形态）。
+   */
+  private recoveryBaselineCache: { timezoneIdentifier: string; reader: RecoveryBaselineReader } | null = null;
 
   /**
    * 本次运行的**事实视图**（O06-A / WP-22 步骤 3）：
@@ -657,10 +744,17 @@ export class RecomputePipeline {
     // holds the global minimum `start_at` must be one of this batch's *inserted*
     // records; an update of an already-present row would not have moved the
     // timeline backwards, so only `inserted` proves the backfill.
-    const earliest = this.facts.prepare(
-      `SELECT id FROM health_records
-       WHERE start_at = (SELECT MIN(start_at) FROM health_records) LIMIT 1`
-    ).get() as { id: string } | undefined;
+    //
+    // R06：**裁剪后**快照里的 `MIN(start_at)` 是"被裁集合的最小值"（更早的心率明细行已经
+    // 不在快照里），照读会让这条判据换一个答案。用捕获读事务里算出的全局最早行 id
+    // （`analysis-input-reader.ts` 与这里逐字同 SQL）；未裁剪（或分段模式）时才回落到原查询。
+    const coverage = this.factView?.snapshotCoverage;
+    const earliest = coverage !== undefined && coverage.recordsFrom !== null
+      ? (coverage.globalEarliestRecordId === null ? undefined : { id: coverage.globalEarliestRecordId })
+      : this.facts.prepare(
+        `SELECT id FROM health_records
+         WHERE start_at = (SELECT MIN(start_at) FROM health_records) LIMIT 1`
+      ).get() as { id: string } | undefined;
     const earliestInsertedIsNewGlobalEarliest = earliest !== undefined && count(
       `SELECT COUNT(*) AS n FROM import_entity_changes
        WHERE batch_id = ? AND entity_kind = 'record' AND change_type = 'inserted' AND entity_id = ?`,
@@ -697,30 +791,33 @@ export class RecomputePipeline {
       return;
     }
     const raw = job.request as Record<string, unknown>;
-    const capture = this.inputSource.capture(this.captureRequest(job, raw));
-    this.pendingInputCapture = typeof raw.importBatchId === "string"
-      && !capture.mergedBatchIds.includes(raw.importBatchId)
-      ? { ...capture, mergedBatchIds: [...capture.mergedBatchIds, raw.importBatchId] }
-      : capture;
-    // 计划被调整（代次前进了）时，把实际计划写回请求：`reuseFeaturePrefix` /
-    // `resumeModelReplay` 读的都是 `request.incrementalPlan`。计划为 null ⇒ 删掉键 ⇒ 全量。
-    const request: Record<string, unknown> = { ...raw };
-    if (capture.plan === null) delete request.incrementalPlan;
-    else request.incrementalPlan = { mode: "partial", dirtyFromAt: capture.plan.dirtyFromAt, domains: capture.plan.domains };
-    if (capture.planAdjustment !== null) {
-      this.jobs.logEvent(job.id, "input_binding", 0, 0,
-        `Analysis input plan adjusted: ${capture.planAdjustment} (coverage=${capture.coverage.reason})`);
-    }
-    // 步骤 3–4 证据：这一版输入是**物化**取出的还是**分段**读的、多少行／字节、为什么降级。
-    // 写进任务事件，"这一版算的是什么"事后可查（不进健康明细，只有计数与原因码）。
-    this.jobs.logEvent(job.id, "input_materialization", 0, 0, JSON.stringify(capture.materialization));
-    // 🔴 固定输入就位：从这一刻起，事实读取只命中这一版（见 `facts` getter）。
-    this.factView = capture.facts;
+    let capture = this.adoptInputCapture(job, raw, false);
     try {
-      this.runFullRecompute({ ...job, request });
-    } catch (error) {
-      if (error instanceof AnalysisInputDriftError) this.replanAfterInputDrift(job, raw, error);
-      throw error;
+      // 最多两次：第 1 次按裁剪快照跑；只有**覆盖越界**（R06 的显式失败）才关闭裁剪重来一次。
+      // 其它任何错误（含输入漂移）都不在这里重试 —— 漂移走 `replanAfterInputDrift` 的登记路径。
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          this.runFullRecompute({ ...job, request: this.requestWithPlan(raw, capture) });
+          return;
+        } catch (error) {
+          if (error instanceof AnalysisInputCoverageOutOfBoundsError && attempt === 1) {
+            // 回退证据先落事件：谁把"计划说会复用、实际却要更早事实"逼出来了，事后要能查。
+            this.jobs.logEvent(job.id, "input_materialization", 0, 0, JSON.stringify({
+              fallback: "fact_pruning_disabled", kind: error.kind,
+              requiredFrom: error.requiredFrom, coverageFrom: error.coverageFrom, context: error.context
+            }));
+            capture = this.adoptInputCapture(job, raw, true);
+            continue;
+          }
+          if (error instanceof AnalysisInputDriftError
+              && this.replanAfterInputDrift(job, raw, error) === "requeued") {
+            // 原任务已经退回队列（同一个 `analysisJobId`）⇒ 这一轮**不是**失败。
+            // 抛出去会让 `runNextJob` 的 catch 把原 id 写成 failed，那正是 B03 的病灶。
+            return;
+          }
+          throw error;
+        }
+      }
     } finally {
       // 分段模式的**逐条记账**必须落到任务事件上：单条读越过 `maxReadRows` / `maxReadMs`、
       // 以及 raw-only 前进，都只在 `stats()` 里活着；不写下来就等于"超预算没人知道"。
@@ -728,11 +825,11 @@ export class RecomputePipeline {
       const finished = this.factView;
       if (finished !== null) {
         const stats = finished.stats();
-        if (stats.overruns.length > 0 || stats.rawAdvances.length > 0) {
+        if (stats.nearLimit.length > 0 || stats.rawAdvances.length > 0) {
           try {
             this.jobs.logEvent(job.id, "input_materialization", 0, 0, JSON.stringify({
               mode: stats.mode, reads: stats.reads, rows: stats.rows,
-              overruns: stats.overruns.slice(0, 8),
+              nearLimit: stats.nearLimit.slice(0, 8),
               rawAdvances: stats.rawAdvances.slice(0, 8),
               observedGenerations: stats.observedGenerations.slice(0, 8)
             }));
@@ -746,11 +843,76 @@ export class RecomputePipeline {
       this.factView?.dispose();
       this.factView = null;
       this.pendingInputCapture = null;
+      // 基线缓存挂在事实视图上：视图关了，缓存必须一起失效（否则下一轮用旧事实算基线）。
+      this.recoveryBaselineCache = null;
     }
+  }
+
+  /**
+   * 捕获一次输入并把捕获结果挂成"这一次运行的固定输入"。
+   *
+   * `disableFactPruning` = R06 的覆盖越界回退（全量物化）：不是性能开关，只有
+   * {@link runDirectSyncAnalysis} 的越界分支会传 `true`，且**整个任务最多一次**。
+   * 上一份视图（通常是内存快照）在这里关掉 —— 回退重捕获时不能让两份输入同时活着。
+   */
+  private adoptInputCapture(
+    job: RecomputeJob,
+    raw: Record<string, unknown>,
+    disableFactPruning: boolean
+  ): AnalysisInputCapture {
+    const capture = this.inputSource!.capture({
+      ...this.captureRequest(job, raw),
+      ...(disableFactPruning ? { disableFactPruning: true } : {})
+    });
+    this.pendingInputCapture = typeof raw.importBatchId === "string"
+      && !capture.mergedBatchIds.includes(raw.importBatchId)
+      ? { ...capture, mergedBatchIds: [...capture.mergedBatchIds, raw.importBatchId] }
+      : capture;
+    if (capture.planAdjustment !== null) {
+      this.jobs.logEvent(job.id, "input_binding", 0, 0,
+        `Analysis input plan adjusted: ${capture.planAdjustment} (coverage=${capture.coverage.reason})`);
+    }
+    // 步骤 3–4 证据：这一版输入是**物化**取出的还是**分段**读的、多少行／字节、为什么降级、
+    // 裁剪到哪。写进任务事件，"这一版算的是什么"事后可查（不进健康明细，只有计数与原因码）。
+    this.jobs.logEvent(job.id, "input_materialization", 0, 0, JSON.stringify(capture.materialization));
+    // 🔴 固定输入就位：从这一刻起，事实读取只命中这一版（见 `facts` getter）。
+    this.factView?.dispose();
+    this.factView = capture.facts;
+    // 视图换了 ⇒ 基线缓存作废（同一次捕获内仍按 localDate 复用）。
+    this.recoveryBaselineCache = null;
+    return capture;
+  }
+
+  /**
+   * 把捕获到的**实际计划**写回请求：`reuseFeaturePrefix` / `resumeModelReplay` 读的都是
+   * `request.incrementalPlan`（计划被覆盖合并调整过时，登记时那一档已经不代表实际输入）。
+   * 计划为 `null` ⇒ 删掉键 ⇒ 全量。
+   */
+  private requestWithPlan(raw: Record<string, unknown>, capture: AnalysisInputCapture): Record<string, unknown> {
+    const request: Record<string, unknown> = { ...raw };
+    if (capture.plan === null) delete request.incrementalPlan;
+    else request.incrementalPlan = { mode: "partial", dirtyFromAt: capture.plan.dirtyFromAt, domains: capture.plan.domains };
+    return request;
   }
 
   /** 捕获请求的构造（登记计划 → 捕获请求的映射只留一份）。 */
   private captureRequest(job: RecomputeJob, raw: Record<string, unknown>): Parameters<AnalysisInputSource["capture"]>[0] {
+    // 「原任务未发布范围」的批次证据：单任务 = 它自己的批次；合并任务 = 成员并集
+    // （`importBatchIds` 由 `insertCoveringJob` 写进载荷）。捕获器用它①在无可信基线时
+    // 判断"库里还有没有未被任何途径覆盖的影响批次"，②写 `analysis_job_coverage`
+    // 的"实际执行覆盖批次"。
+    const registeredBatchIds: string[] = [];
+    if (Array.isArray(raw.importBatchIds)) {
+      for (const value of raw.importBatchIds) {
+        if (typeof value === "string" && value.length > 0 && !registeredBatchIds.includes(value)) {
+          registeredBatchIds.push(value);
+        }
+      }
+    }
+    if (typeof raw.importBatchId === "string" && raw.importBatchId.length > 0
+        && !registeredBatchIds.includes(raw.importBatchId)) {
+      registeredBatchIds.push(raw.importBatchId);
+    }
     return {
       runId: "",
       jobId: job.id,
@@ -760,6 +922,7 @@ export class RecomputePipeline {
       targetRawGeneration: job.targetRawGeneration ?? null,
       targetDependencyGeneration: job.targetDependencyGeneration ?? null,
       expectedIncumbentReleaseId: job.expectedIncumbentReleaseId ?? null,
+      registeredBatchIds,
       registeredPlan: typeof raw.incrementalPlan === "object" && raw.incrementalPlan !== null
         && (raw.incrementalPlan as { mode?: unknown }).mode === "partial"
         && typeof (raw.incrementalPlan as { dirtyFromAt?: unknown }).dirtyFromAt === "string"
@@ -796,26 +959,86 @@ export class RecomputePipeline {
   }
 
   /**
+   * R06 **覆盖守卫**：某一步"需要的最早事实时刻"必须落在快照的物化覆盖之内。
+   *
+   * ## 它防的是什么（唯一的病灶形态）
+   *
+   * "计划说会复用、实际却要更早的事实"：计划一边给出裁剪边界（物化按它裁），运行时复用
+   * 被更深层证据拒绝、退化成从头重算（例如 `reuseFeaturePrefix` 返回 null ⇒ 特征阶段要吃
+   * 全史训练；`resumeModelReplay` 拒绝 ⇒ 分区日链从最早一天起）。那一刻快照里**没有**
+   * 那些更早的行 —— 照旧读就是静默少读（少几行心率 ⇒ 峰值证据消失 ⇒ 分区/负荷悄悄变值）。
+   * 越界必须显式失败：调用方（{@link runDirectSyncAnalysis}）捕获后关闭裁剪重捕获一次。
+   *
+   * ## 判据的量（不是"会话起点比边界早就算越界"）
+   *
+   * 比较的是**读取窗口的下沿**：`需要的最早时刻 = 最早被算会话/日期 − 该阶段的最大回看窗`。
+   * 阶段窗常量与各读口一一对应（{@link SESSION_RECORDS_LOOKBACK_MS} 训练装配、
+   * {@link RECORDS_MAX_LOOKBACK_MS} 证据链），加错窗就是把守卫调成恒真或恒假。
+   *
+   * `requiredFrom === null`（本阶段没有需要的事实）、越界侧未裁剪（`snapshotCoverage`
+   * 缺省 = 分段模式读源库；`recordsFrom/routeFrom === null` = 全量物化）都直接放行。
+   */
+  private assertFactCoverage(
+    requiredFrom: string | null,
+    kind: "records" | "route",
+    context: string
+  ): void {
+    const coverage = this.factView?.snapshotCoverage;
+    if (coverage === undefined || requiredFrom === null) return;
+    const coverageFrom = kind === "records" ? coverage.recordsFrom : coverage.routeFrom;
+    if (coverageFrom === null) return;
+    if (Date.parse(requiredFrom) >= Date.parse(coverageFrom)) return;
+    throw new AnalysisInputCoverageOutOfBoundsError(kind, requiredFrom, coverageFrom, context);
+  }
+
+  /** 一组会话里最早的 `workout_start_at`（毫秒）；一个都不可解析 ⇒ `null`（本阶段无事实需求）。 */
+  private earliestWorkoutStartAt(sessions: Iterable<{ workoutStartAt: string }>): number | null {
+    let earliest: number | null = null;
+    for (const session of sessions) {
+      const parsed = Date.parse(session.workoutStartAt);
+      if (!Number.isFinite(parsed)) continue;
+      if (earliest === null || parsed < earliest) earliest = parsed;
+    }
+    return earliest;
+  }
+
+  /**
    * 漂移后的重排（O06-A 步骤 5）：**保留旧发布结果**（本次候选什么都没发布），
-   * 把"旧捕获代次之后"的全部账本并进 dirty 范围，登记一条续算任务。
+   * 把"漂移弄脏的范围"并进 dirty 后登记一条续算任务。
+   *
+   * ## 🔴 R01（2026-10-16 复查）：重排必须守恒原任务尚未发布的 dirty 范围
+   *
+   * 这里**不得**清空原任务的登记计划（曾经的 `registeredPlan: null` 就是 R01 的病灶）：
+   * 原任务范围内的早期更正（A）只活在它自己的 `incrementalPlan` 里，候选漂移作废之后
+   * 没有任何其他载体保存它 —— 重排时把它丢掉，后继任务只会算"漂移之后"的批次（B），
+   * A 永远不被重算，而发布却宣称已到最新代次。
+   *
+   * 修复后的合并语义：**新计划 = 漂移弄脏的批次账本 ∪ 原任务计划**（逐域取最早），
+   * 由捕获器里的**同一份**合并实现（`mergeDirtyPlans`）执行 —— 与合并任务的
+   * "调度成员 ∪ 未入选批次"共用一处，不允许这个函数里再写一套 MIN(dirty)。
+   * 计划边界可以保持或向前扩大，永不后移。
    *
    * ⛔ 不在这里发布任何东西、不拼接"最新一段"：漂移的候选整体丢掉。
    * ⛔ 重排次数有上限（`MAX_BINDING_DRIFT_REPLANS`）：反复漂移时不再无限登记任务，
    * 当前任务以显式原因失败，由调用方/调度决定下一步（防饿死的上限属 O06-B）。
    */
-  private replanAfterInputDrift(job: RecomputeJob, raw: Record<string, unknown>, drift: AnalysisInputDriftError): void {
+  private replanAfterInputDrift(
+    job: RecomputeJob,
+    raw: Record<string, unknown>,
+    drift: AnalysisInputDriftError
+  ): "requeued" | "gave_up" {
     const attempts = Number(raw.bindingDriftReplans ?? 0);
     this.jobs.logEvent(job.id, "input_binding", 0, 0,
       `Analysis input drifted during ${drift.stage} (dependency ${drift.expected.dependency} -> ${drift.observed.dependency}); ` +
       `published release kept, candidate dropped (replan attempt ${attempts + 1}/${MAX_BINDING_DRIFT_REPLANS})`);
-    if (attempts >= MAX_BINDING_DRIFT_REPLANS || this.inputSource === undefined) return;
+    if (attempts >= MAX_BINDING_DRIFT_REPLANS || this.inputSource === undefined) return "gave_up";
     let replan: AnalysisInputCapture;
     try {
-      // 重新捕获一次：这次要求把"漂移前捕获的 raw 代次之后"的账本**全部**并进来
-      // （`mergeFromRawGeneration`），于是新计划覆盖新批次弄脏的范围。
+      // 重新捕获一次：`captureRequest` 会带上原任务的登记计划与批次证据（R01 守恒的一半），
+      // `mergeFromRawGeneration` 补上"漂移前捕获的 raw 代次之后"的账本（另一半的兼容路径
+      // 起点；有可信基线时由基线起算，本字段不再承担语义）。
       replan = this.inputSource.capture({
         ...this.captureRequest(job, raw),
-        registeredPlan: null,
         mergeFromRawGeneration: drift.expected.raw
       });
     } catch (error) {
@@ -823,7 +1046,7 @@ export class RecomputePipeline {
       // 但**必须留痕**，"想重排却没排成"不能只在日志里缺失。
       this.jobs.logEvent(job.id, "input_binding", 0, 0,
         `Replan capture failed after input drift: ${error instanceof Error ? error.message : String(error)}`);
-      return;
+      return "gave_up";
     }
     const request: Record<string, unknown> = { ...raw, bindingDriftReplans: attempts + 1 };
     if (replan.plan === null) delete request.incrementalPlan;
@@ -831,14 +1054,29 @@ export class RecomputePipeline {
     // ⛔ datasetVersion 取**重排捕获自己的绑定**，不要走 `this.manifestValue`：那会经过
     // `this.facts`，而此刻旧的（已漂移的）事实视图还挂着 —— 再去读它等于让同一个漂移
     // 在重排路径里再抛一次，于是"登记重排任务"这一步永远走不到。
-    this.jobs.enqueue("import", replan.binding.datasetVersion, request, {
-      targetRawGeneration: replan.binding.capturedRawGeneration,
-      targetDependencyGeneration: replan.binding.capturedDependencyGeneration,
-      ...(replan.binding.incumbentReleaseId === null
-        ? {}
-        : { expectedIncumbentReleaseId: replan.binding.incumbentReleaseId })
-    });
+    //
+    // 🔴 B03（2026-10-17）：**退回原任务**，不新建后继。原 `analysisJobId` 就是客户端
+    // 手里那个 id —— 新建一条后继会让原 id 永久停在 failed，而真正算完的是另一个 id。
+    // 重排次数写在请求载荷里（`bindingDriftReplans`），原回执与登记代次的含义不变。
+    const outcome = this.jobs.requeueForReplan(
+      job.id,
+      request,
+      {
+        targetRawGeneration: replan.binding.capturedRawGeneration,
+        targetDependencyGeneration: replan.binding.capturedDependencyGeneration,
+        ...(replan.binding.incumbentReleaseId === null
+          ? {}
+          : { expectedIncumbentReleaseId: replan.binding.incumbentReleaseId })
+      },
+      `Replanned after input drift during ${drift.stage} (attempt ${attempts + 1}/${MAX_BINDING_DRIFT_REPLANS})`
+    );
     replan.facts.dispose();
+    if (outcome === "cancelled") {
+      // 用户取消优先：不放回队列，也不在这里改写终态 —— `runNextJob` 的 catch 会按
+      // `cancel_requested` 把任务结算成 cancelled。
+      return "gave_up";
+    }
+    return outcome === "requeued" ? "requeued" : "gave_up";
   }
 
   runSnapshotRefresh(job: RecomputeJob): void {
@@ -1229,6 +1467,17 @@ export class RecomputePipeline {
     `).all(fallback.sourceName, type, workoutEndAt, workoutStartAt) as unknown as RecordRow[];
   }
 
+  /** 本次事实视图下的基线读取器（按 `localDate` 缓存）；时区变化时重建。 */
+  private recoveryBaselines(timezoneIdentifier: string): RecoveryBaselineReader {
+    if (this.recoveryBaselineCache?.timezoneIdentifier !== timezoneIdentifier) {
+      this.recoveryBaselineCache = {
+        timezoneIdentifier,
+        reader: new RecoveryBaselineReader(this.facts, timezoneIdentifier)
+      };
+    }
+    return this.recoveryBaselineCache.reader;
+  }
+
   private loadPersonalRecovery(workoutStartAt: string, timezoneIdentifier: string): {
     restingHeartRate: number | null;
     hrvSdnn: number | null;
@@ -1275,48 +1524,9 @@ export class RecomputePipeline {
     const watchRhr = rhrRows.filter((row) => row.sourceCategory === "apple_watch");
     const restingHeartRate = medianValue((watchRhr.length ? watchRhr : rhrRows).map((row) => Number(row.value)));
 
-    const readBaseline = (table: "sleep" | "hrv" | "rhr" | "load", days: number): number[] => {
-      const fromDate = addDays(localDate, -days);
-      if (table === "sleep") {
-        return (this.facts.prepare(`SELECT asleep_union_minutes AS value FROM canonical_nights WHERE kind='main' AND timezone_identifier=? AND wake_date >= ? AND wake_date < ? AND wake_at < ?`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number | null }>).flatMap((row) => row.value == null ? [] : [Number(row.value)]);
-      }
-      if (table === "hrv") {
-        return (this.facts.prepare(`SELECT hrv_sdnn_ms AS value FROM canonical_hrv_days WHERE timezone_identifier=? AND local_date >= ? AND local_date < ? AND confidence <> 'missing' AND window_end_at < ? AND hrv_sdnn_ms IS NOT NULL`).all(timezoneIdentifier, fromDate, localDate, workoutStartAt) as Array<{ value: number }>).map((row) => Number(row.value));
-      }
-      if (table === "rhr") {
-        const rows = this.facts.prepare(`SELECT source_category AS sourceCategory, value_numeric AS value, start_at AS startAt FROM health_records WHERE type=? AND value_numeric IS NOT NULL AND source_category IN ('apple_watch', 'connect') AND start_at >= ? AND start_at < ? AND end_at < ?`).all(restingHeartRateType, localDateStartAt(fromDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier), localDateStartAt(localDate, timezoneIdentifier)) as Array<{ sourceCategory: string; value: number; startAt: string }>;
-        // Apply Watch-first/Connect fallback independently for each local day.
-        const byDate = new Map<string, Array<{ sourceCategory: string; value: number }>>();
-        for (const row of rows) {
-          const date = localDateAt(row.startAt, timezoneIdentifier);
-          const bucket = byDate.get(date) ?? [];
-          bucket.push(row);
-          byDate.set(date, bucket);
-        }
-        return [...byDate.values()].flatMap((dayRows) => {
-          const watch = dayRows.filter((row) => row.sourceCategory === "apple_watch");
-          const value = medianValue((watch.length ? watch : dayRows).map((row) => Number(row.value)));
-          return value === null ? [] : [value];
-        });
-      }
-      const rows = this.facts.prepare(`SELECT workout.start_at AS startAt, workout.duration_seconds AS durationSeconds FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at < ?`).all(runningType, workoutStartAt) as Array<{ startAt: string; durationSeconds: number }>;
-      const byDate = new Map<string, number>();
-      for (const row of rows) {
-        const date = localDateAt(row.startAt, timezoneIdentifier);
-        if (date >= fromDate && date < localDate) byDate.set(date, (byDate.get(date) ?? 0) + Number(row.durationSeconds) / 60);
-      }
-      return [...byDate.values()];
-    };
-    const baselineFor = (table: "sleep" | "hrv" | "rhr" | "load"): { value: number | null; lookbackDays: number; validDays: number } => {
-      const recent = readBaseline(table, 28).filter(Number.isFinite);
-      if (recent.length >= 7) return { value: medianValue(recent), lookbackDays: 28, validDays: recent.length };
-      const extended = readBaseline(table, 60).filter(Number.isFinite);
-      return { value: extended.length >= 7 ? medianValue(extended) : null, lookbackDays: 60, validDays: extended.length };
-    };
-    const sleepBase = baselineFor("sleep");
-    const hrvBase = baselineFor("hrv");
-    const rhrBase = baselineFor("rhr");
-    const loadBase = baselineFor("load");
+    // 🔴 四条基线只由 `localDate` 决定，与本次会话的具体时刻无关（见 RecoveryBaselineReader）：
+    // 同一本地日的多场训练共用一次计算，load 基线的时间下界也进了 SQL。
+    const baseline = this.recoveryBaselines(timezoneIdentifier).baseline(localDate);
     const recentLoadRows = this.facts.prepare(`SELECT SUM(duration_seconds)/60.0 AS value FROM training_sessions session JOIN workouts workout ON workout.id=session.canonical_workout_id WHERE session.activity_type=? AND session.status='active' AND workout.start_at >= ? AND workout.start_at < ?`).get(runningType, new Date(instant - 7 * 86_400_000).toISOString(), workoutStartAt) as unknown as { value: number | null } | undefined;
     return {
       restingHeartRate,
@@ -1324,12 +1534,12 @@ export class RecomputePipeline {
       sleepDurationMinutes: recentNight?.sleepMinutes == null ? null : Number(recentNight.sleepMinutes),
       recentLoadMinutes: asNullableNumber(recentLoadRows?.value),
       baseline: {
-        sleepMinutes: sleepBase.value,
-        restingHeartRateBpm: rhrBase.value,
-        hrvSdnnMs: hrvBase.value,
-        loadMinutes: loadBase.value,
-        lookbackDays: Math.max(sleepBase.lookbackDays, hrvBase.lookbackDays, rhrBase.lookbackDays, loadBase.lookbackDays),
-        validDays: { sleep: sleepBase.validDays, hrv: hrvBase.validDays, rhr: rhrBase.validDays, load: loadBase.validDays }
+        sleepMinutes: baseline.sleepMinutes,
+        restingHeartRateBpm: baseline.restingHeartRateBpm,
+        hrvSdnnMs: baseline.hrvSdnnMs,
+        loadMinutes: baseline.loadMinutes,
+        lookbackDays: baseline.lookbackDays,
+        validDays: baseline.validDays
       },
       context: {
         asOfAt: workoutStartAt,
@@ -1479,10 +1689,26 @@ export class RecomputePipeline {
     overrideSnapshot: OverrideSnapshot
   ): WorkoutFeatureVector[] {
     const allSessions = this.loadSessions(request.evaluatedAt);
-    const reuse = this.reuseFeaturePrefix(featureRun, request, overrideSnapshot);
+    const reuse = this.featurePrefixPlan(request, overrideSnapshot);
     const sessions = reuse === null
       ? allSessions
       : allSessions.filter((session) => session.workoutStartAt >= reuse.dirtyFromAt);
+    // R06 覆盖守卫（特征阶段）：本阶段读的是"被算会话窗内的明细 + 每场训练 180 天心率回看
+    // （`loadObservedMaximumHeartRate`）"与会话名下的路线点（质量/高程）。复用被拒
+    // （`reuse === null`）时 `sessions` 是全史 —— 需要的最早时刻一下子退到最早一场训练，
+    // 越界必须在这里显式失败，而不是对着被裁掉的快照照读（那会静默少读心率/高程）。
+    const earliestSessionStart = this.earliestWorkoutStartAt(sessions);
+    this.assertFactCoverage(
+      earliestSessionStart === null
+        ? null
+        : new Date(earliestSessionStart - SESSION_RECORDS_LOOKBACK_MS).toISOString(),
+      "records", "feature_extraction");
+    this.assertFactCoverage(
+      earliestSessionStart === null ? null : new Date(earliestSessionStart).toISOString(),
+      "route", "feature_extraction");
+    // ⛔ 前缀拷贝排在守卫之后（"证明先于写入"）：越界时整条候选作废重来，此时若前缀行已经
+    // 拷进 `workout_features`，库里就多出一份挂在废弃 feature run 下的孤儿行。
+    const reusedCount = reuse === null ? 0 : this.copyFeaturePrefix(featureRun, reuse);
     const insert = this.database.prepare(`
       INSERT INTO workout_features (
         id, feature_run_id, training_session_id, canonical_workout_id,
@@ -1551,18 +1777,45 @@ export class RecomputePipeline {
     writer.flush();
     this.database.prepare(`
       UPDATE feature_runs SET reused_feature_count = ?, recomputed_feature_count = ? WHERE id = ?
-    `).run(reuse?.count ?? 0, features.length, featureRun.id);
+    `).run(reusedCount, features.length, featureRun.id);
     return reuse === null ? features : this.loadFeatureRunVectors(featureRun.id);
   }
 
-  private reuseFeaturePrefix(
-    featureRun: FeatureRun,
+  /**
+   * 前缀**行**（只读）：父 feature run 里"边界之前、且已到达 asOf"的那一段。
+   * O04（WP-20）：边界优先取分域边界（`domains.features` = 相交训练回退后的保守下界）；
+   * 老 payload 没有 `domains` 时回落单一边界 `dirtyFromAt`。`domains` 存在但为 null
+   * 表示"full"（不复用）——不得再回落到 dirtyFromAt（那是 payload 内部矛盾态），
+   * 所以调用方在 `dirtyFromAt` 缺失时直接不选行（{@link featurePrefixPlan}）。
+   */
+  private featurePrefixRows(
+    parentFeatureRunId: string,
+    request: RecomputeRequest,
+    dirtyFromAt: string
+  ): Array<Record<string, SQLInputValue>> {
+    return this.database.prepare(`
+      SELECT feature.*
+      FROM workout_features feature
+      JOIN training_sessions session ON session.id = feature.training_session_id
+      JOIN workouts workout ON workout.id = session.canonical_workout_id
+      WHERE feature.feature_run_id = ? AND feature.workout_start_at < ?
+        AND workout.start_at <= ? AND workout.end_at <= ?
+      ORDER BY feature.workout_start_at, feature.id
+    `).all(parentFeatureRunId, dirtyFromAt, request.evaluatedAt, request.evaluatedAt) as unknown as Array<Record<string, SQLInputValue>>;
+  }
+
+  /**
+   * 前缀重用**决策**（O09 步骤 2 的特征侧；纯读，不写任何行）。
+   *
+   * 🔴 R06（2026-10-17）把"决策"与"拷贝"拆开（拷贝见 {@link copyFeaturePrefix}）：覆盖守卫
+   * 必须落在"证明之后、写入之前"—— 越界时整条候选要作废重来，若前缀行已经拷进
+   * `workout_features`（挂在这条即将废弃的 feature run 下），库里就多出一份没人读的孤儿行。
+   * 这与仓里既有的"证明先于写入"（分区/负荷的集合拷贝）是同一条纪律。
+   */
+  private featurePrefixPlan(
     request: RecomputeRequest,
     overrideSnapshot: OverrideSnapshot
-  ): { count: number; dirtyFromAt: string } | null {
-    // O04（WP-20）：优先取分域边界（`domains.features` = 相交训练回退后的保守下界）；
-    // 老 payload 没有 `domains` 时回落单一边界 `dirtyFromAt`。`domains` 存在但为 null
-    // 表示"full"（不复用）——不得再回落到 dirtyFromAt（那是 payload 内部矛盾态）。
+  ): { dirtyFromAt: string; parentId: string; rows: Array<Record<string, SQLInputValue>> } | null {
     const plan = request.incrementalPlan;
     const dirtyFromAt = plan?.domains ? plan.domains.features : plan?.dirtyFromAt;
     if (!dirtyFromAt) return null;
@@ -1581,16 +1834,7 @@ export class RecomputePipeline {
     if (!parent || parent.configHash !== configHash({ version: FEATURE_CONFIG_VERSION, config: request.featureConfig }) ||
         parent.schemaVersion !== FEATURE_SCHEMA_VERSION || parent.contractVersion !== contract ||
         parent.timezone !== request.timezoneIdentifier) return null;
-
-    const rows = this.database.prepare(`
-      SELECT feature.*
-      FROM workout_features feature
-      JOIN training_sessions session ON session.id = feature.training_session_id
-      JOIN workouts workout ON workout.id = session.canonical_workout_id
-      WHERE feature.feature_run_id = ? AND feature.workout_start_at < ?
-        AND workout.start_at <= ? AND workout.end_at <= ?
-      ORDER BY feature.workout_start_at, feature.id
-    `).all(parent.id, dirtyFromAt, request.evaluatedAt, request.evaluatedAt) as unknown as Array<Record<string, unknown>>;
+    const rows = this.featurePrefixRows(parent.id, request, dirtyFromAt);
     const expected = this.loadSessions(request.evaluatedAt).filter((session) => session.workoutStartAt < dirtyFromAt);
     const bySession = new Map(rows.map((row) => [String(row.training_session_id), row]));
     const oldOverrideIds = parseJson<{ overrideSnapshotIds?: unknown } | null>(parent.metricConfig, null)?.overrideSnapshotIds;
@@ -1604,6 +1848,17 @@ export class RecomputePipeline {
       return !row || row.canonical_workout_id !== session.canonicalWorkoutId || row.workout_start_at !== session.workoutStartAt ||
         (previousOverrides.get(session.trainingSessionId) ?? null) !== (overrideSnapshot.byTrainingSessionId.get(session.trainingSessionId)?.id ?? null);
     })) return null;
+    return { dirtyFromAt, parentId: parent.id, rows };
+  }
+
+  /**
+   * 前缀拷贝（写入）：把决策阶段选中的行按分块短事务拷进新 feature run，并记下父指针。
+   * ⛔ 调用点必须在 R06 覆盖守卫**之后**（见 {@link extractFeatures}）。
+   */
+  private copyFeaturePrefix(
+    featureRun: FeatureRun,
+    plan: { dirtyFromAt: string; parentId: string; rows: Array<Record<string, SQLInputValue>> }
+  ): number {
     const insert = this.database.prepare(`
       INSERT INTO workout_features (
         id, feature_run_id, training_session_id, canonical_workout_id, workout_start_at,
@@ -1615,23 +1870,21 @@ export class RecomputePipeline {
     `);
     // O07 步骤 4：复用前缀的逐行拷贝同样按分块短事务落地。
     const writer = new ChunkedWriter(this.database, this.gate);
-    for (const row of rows) {
+    for (const row of plan.rows) {
       this.gate.yieldIfStale();
       writer.add(() => insert.run(
-        deterministicId("workout_feature", { featureRunId: featureRun.id, trainingSessionId: row.training_session_id }),
-        featureRun.id, row.training_session_id as SQLInputValue, row.canonical_workout_id as SQLInputValue,
-        row.workout_start_at as SQLInputValue, row.duration_seconds as SQLInputValue, row.distance_km as SQLInputValue,
-        row.average_speed_mps as SQLInputValue, row.average_heart_rate_bpm as SQLInputValue,
-        row.heart_rate_sample_count as SQLInputValue, row.heart_rate_coverage as SQLInputValue,
-        row.route_point_count as SQLInputValue, row.route_quality as SQLInputValue, row.source_confidence as SQLInputValue,
-        row.session_type as SQLInputValue, row.session_type_source as SQLInputValue, row.eligibility_status as SQLInputValue,
-        row.quality_score as SQLInputValue, row.missing_reasons_json as SQLInputValue,
-        row.features_json as SQLInputValue, row.provenance_json as SQLInputValue, row.computed_at as SQLInputValue
+        deterministicId("workout_feature", { featureRunId: featureRun.id, trainingSessionId: row.training_session_id! }),
+        featureRun.id, row.training_session_id!, row.canonical_workout_id!,
+        row.workout_start_at!, row.duration_seconds!, row.distance_km!, row.average_speed_mps!,
+        row.average_heart_rate_bpm!, row.heart_rate_sample_count!, row.heart_rate_coverage!,
+        row.route_point_count!, row.route_quality!, row.source_confidence!,
+        row.session_type!, row.session_type_source!, row.eligibility_status!,
+        row.quality_score!, row.missing_reasons_json!, row.features_json!, row.provenance_json!, row.computed_at!
       ));
     }
     writer.flush();
-    this.database.prepare("UPDATE feature_runs SET parent_feature_run_id = ? WHERE id = ?").run(parent.id, featureRun.id);
-    return { count: rows.length, dirtyFromAt };
+    this.database.prepare("UPDATE feature_runs SET parent_feature_run_id = ? WHERE id = ?").run(plan.parentId, featureRun.id);
+    return plan.rows.length;
   }
 
   private loadFeatureRunVectors(featureRunId: string): WorkoutFeatureVector[] {
@@ -1844,6 +2097,14 @@ export class RecomputePipeline {
       .map((feature) => localDateAt(feature.workoutStartAt, request.timezoneIdentifier))
       .sort()[0]!;
     const fromDate = options.startDate ?? firstDate;
+    // R06 覆盖守卫（分区日链）：日 `D` 的峰值证据窗是 `[D - 365d, D)`（`comparableEvidence`，
+    // 见 `PEAK_EVIDENCE_LOOKBACK_MS`）；`localDateStartAt` 给出该日的**精确**起点（含时区），
+    // 所以这里比的是真需求。全量路径（`fromDate` = 最早一天）走到这里会显式失败 —— 那正是
+    // "复用被拒、日链要从头算"的真实需求，绝不能对着被裁掉的快照照读（峰值会凭空消失）。
+    this.assertFactCoverage(
+      new Date(Date.parse(localDateStartAt(fromDate, request.timezoneIdentifier)) - PEAK_EVIDENCE_LOOKBACK_MS)
+        .toISOString(),
+      "records", "zone_profiles");
     const throughDate = localDateAt(request.evaluatedAt, request.timezoneIdentifier);
     const dateOfBirth = this.loadDateOfBirth();
     let previous: DailyZoneProfile | null = options.previous;
@@ -2044,11 +2305,15 @@ export class RecomputePipeline {
   }
 
   /**
-   * 复用用的输入绑定摘要。
+   * **输入身份摘要**（含实际 raw／dependency 代次）——谱系与审计用。
+   *
+   * 🔴 R05（2026-10-16 复查）：它**不再是复用判据**。含代次的摘要会让"连续两次真实增量"
+   * 永远匹配不上（每批导入都推进代次），安全前缀复用被恒定拒绝——一条心率更正就能重算
+   * 7 次训练、46 天分区。复用判据见 {@link metricPrefixCompatibilityDigest}。
    *
    * 🔴 刻意**不含** `runId` / `jobId` / `cutoffAt` / `datasetVersion`：前三项每次 run 都变，
    * 含进去等于永不匹配；`datasetVersion` 每批导入都变（`dataset_delta_<hash>`），
-   * 而"前缀事实有没有变"由**边界**声明、由下面的前缀证明与摘要比对**证伪**，
+   * 而"前缀事实有没有变"由**边界**声明、由前缀证明与摘要比对**证伪**，
    * 不由"整批的版本号有没有动"回答 —— 拿版本号当复用条件会把复用率压到恒零。
    *
    * 直连车道用捕获到的绑定（scope/代次/override/config 摘要）；CLI 车道没有捕获，
@@ -2068,6 +2333,32 @@ export class RecomputePipeline {
     }
     return [
       "cli-recompute", "-", "-",
+      this.manifestValue("timezone_identifier") ?? DATABASE_TIMEZONE,
+      this.overrideSnapshotDigest(overrideSnapshot), this.zoneSettingsDigest()
+    ].join("\u0001");
+  }
+
+  /**
+   * **前缀兼容摘要**（R05）：只回答"父 checkpoint 与本次运行能不能拼前缀"，**不含代次**。
+   *
+   * 组成 = scope + 时区 + override 摘要 + 配置摘要（直连）；CLI 用同形状的本地摘要。
+   * 算法／checkpoint 版本与 config hash 另在 `resolveMetricReuse` 里逐列比对（本摘要
+   * 是防漂移的第二道，不替代那些逐项校验）。
+   *
+   * "父发布到当前之间有没有**未处理影响**"**不在这个摘要里回答** —— 那是覆盖计划的
+   * 职责（`capture.coverageBase` + 从基线起算的执行计划）：两件事各自有各自的证据，
+   * 混进同一个摘要正是 R05 病灶的形态。
+   */
+  private metricPrefixCompatibilityDigest(overrideSnapshot: OverrideSnapshot): string {
+    const capture = this.pendingInputCapture;
+    if (capture !== null) {
+      const binding = capture.binding;
+      return [
+        binding.scope, binding.timezoneIdentifier, binding.overrideDigest, binding.configDigest
+      ].join("\u0001");
+    }
+    return [
+      "cli-recompute",
       this.manifestValue("timezone_identifier") ?? DATABASE_TIMEZONE,
       this.overrideSnapshotDigest(overrideSnapshot), this.zoneSettingsDigest()
     ].join("\u0001");
@@ -2169,6 +2460,17 @@ export class RecomputePipeline {
         !Number.isFinite(daily.chronicEwma) || !Number.isFinite(daily.workoutCount) ||
         !Number.isFinite(daily.historyDays)) return null;
     }
+    // v2 日级证据快照：形状不对就判"状态损坏"（不复用），**不允许**"缺字段当全一致"。
+    if (typeof state.dailyEvidenceFrom !== "string" ||
+      (state.dailyEvidenceFrom !== "" && !Number.isFinite(Date.parse(state.dailyEvidenceFrom)))) return null;
+    if (!Array.isArray(state.dailyEvidenceDays) ||
+      state.dailyEvidenceDays.length > MAX_DAILY_EVIDENCE_CHUNKS) return null;
+    const evidenceAlphabet = new RegExp(`^[${DAILY_EVIDENCE_ALPHABET}]+$`);
+    if (state.dailyEvidenceDays.some((chunk) =>
+      typeof chunk !== "string" || chunk.length === 0 ||
+      chunk.length > DAILY_EVIDENCE_CHUNK_DAYS || !evidenceAlphabet.test(chunk))) return null;
+    if (state.dailyEvidenceDays.length > 0 && state.dailyEvidenceFrom === "") return null;
+    if (typeof state.dailyRowsDigest !== "string" || !/^[0-9a-f]{64}$/.test(state.dailyRowsDigest)) return null;
     if (state.zonePrevious !== null) {
       const zone = state.zonePrevious;
       if (typeof zone.localDate !== "string" || typeof zone.effectiveAt !== "string" ||
@@ -2209,7 +2511,7 @@ export class RecomputePipeline {
              checkpoint.config_hash AS checkpointConfigHash,
              checkpoint.zone_settings_digest AS zoneSettingsDigest,
              checkpoint.override_digest AS overrideDigest,
-             checkpoint.input_binding_digest AS inputBindingDigest,
+             checkpoint.prefix_compat_digest AS prefixCompatDigest,
              checkpoint.through_local_date AS throughLocalDate,
              checkpoint.state_json AS stateJson, checkpoint.state_hash AS stateHash
       FROM active_model_run active
@@ -2230,8 +2532,24 @@ export class RecomputePipeline {
     if (String(row.zoneSettingsDigest) !== this.zoneSettingsDigest()) return { ok: false, attempted: true, reason: "zone_settings" };
     if (String(row.overrideDigest) !== overrideDigest) return { ok: false, attempted: true, reason: "override_snapshot" };
     if (String(row.checkpointTimezone) !== timezone) return { ok: false, attempted: true, reason: "timezone" };
-    if (String(row.inputBindingDigest) !== this.metricInputBindingDigest(input.overrideSnapshot)) {
-      return { ok: false, attempted: true, reason: "input_binding" };
+    // 🔴 R05（2026-10-16）：复用判据 = **前缀兼容摘要**（不含代次）+ **覆盖基线存在**。
+    //
+    // 旧实现比的是含代次的 `input_binding_digest` ⇒ 每批导入都推进代次 ⇒ 连续两次真实
+    // 增量永远以 `input_binding` 拒绝复用（一条心率更正重算 7 次训练、46 天分区）。
+    // 现在拆成两件事，各自有各自的证据：
+    //   · 摘要回答"算法/配置/时区/override 这一层能不能拼"；
+    //   · 覆盖基线（旧发布的输入绑定）回答"父发布到当前之间有没有未处理影响" ——
+    //     没有它（v39 前的老发布 / CLI 直接发布）就拒绝复用：不允许把无法证明的前缀当安全。
+    // 旧 checkpoint 缺新摘要（v44 之前的行）⇒ 拒绝，"缺少必要证明时拒绝复用"。
+    const prefixCompatDigest = String(row.prefixCompatDigest ?? "");
+    if (prefixCompatDigest.length === 0) {
+      return { ok: false, attempted: true, reason: "prefix_compat_missing" };
+    }
+    if (prefixCompatDigest !== this.metricPrefixCompatibilityDigest(input.overrideSnapshot)) {
+      return { ok: false, attempted: true, reason: "prefix_compat" };
+    }
+    if (this.pendingInputCapture !== null && this.pendingInputCapture.coverageBase === null) {
+      return { ok: false, attempted: true, reason: "coverage_base_missing" };
     }
     const state = this.parseMetricCheckpointState(String(row.stateJson), String(row.stateHash));
     if (state === null) return { ok: false, attempted: true, reason: "checkpoint_state" };
@@ -2356,6 +2674,15 @@ export class RecomputePipeline {
     request: RecomputeRequest,
     overrideSnapshot: OverrideSnapshot
   ): void {
+    // R06 覆盖守卫（证据阶段，先于任何证据读）：`resolveMetricReuse` →
+    // `checkZoneEvidenceParity` 与分区阶段都按 `evaluatedAt` 读证据链 —— 乳酸阈值会话取
+    // `evaluatedAt - 365d` 窗，每场会话的最大心率证据再回看 180 天 ⇒ 明细下沿 =
+    // `evaluatedAt - 545d`（`RECORDS_MAX_LOOKBACK_MS` 的完整推导见 `analysis-fact-view.ts`）。
+    // 这一条同时是"裁剪边界与执行计划同源"的结构断言：边界若被改回按登记计划算（偏晚），
+    // 它会立刻转红，而不是让证据链悄悄少几个会话。
+    this.assertFactCoverage(
+      new Date(Date.parse(request.evaluatedAt) - RECORDS_MAX_LOOKBACK_MS).toISOString(),
+      "records", "metric_evidence");
     const sessions = new Map(
       this.loadSessions(request.evaluatedAt).map((session) => [session.trainingSessionId, session])
     );
@@ -2415,8 +2742,9 @@ export class RecomputePipeline {
     const checkpointWritten = this.writeTrainingMetricCheckpoint({
       metricRunId, request, overrideSnapshot, throughDate,
       state: this.buildMetricCheckpointState({
+        metricRunId,
         zoneProfiles: built.profiles, throughDate, distanceQueue: pass.distanceQueue, daily,
-        evidence: built.evidence
+        evidence: built.evidence, physEvidence
       }),
       prefixFromLocalDate: null, prefixThroughLocalDate: null,
       counters: {
@@ -2458,7 +2786,8 @@ export class RecomputePipeline {
     const physEvidence = this.loadDailyPhysEvidence(evidenceStart, throughDate, timezone, request.evaluatedAt);
 
     // ---- 1. 前缀证明（还没有写任何一行）----
-    const proof = this.proveDailyPrefix(plan, prefixLoads, physEvidence);
+    // v2：先按证据摘要桶判"前缀输入有没有变"；摘要有缺口才退回逐行重算。
+    const proof = this.resolveDailyCopyThrough(plan, prefixLoads, physEvidence);
     if (!proof.ok) return { ok: false, reason: proof.reason };
     const dailyCopyThrough = proof.dailyCopyThrough;
 
@@ -2515,8 +2844,9 @@ export class RecomputePipeline {
     const checkpointWritten = this.writeTrainingMetricCheckpoint({
       metricRunId, request, overrideSnapshot, throughDate,
       state: this.buildMetricCheckpointState({
+        metricRunId,
         zoneProfiles: suffix.profiles, throughDate, distanceQueue: pass.distanceQueue, daily,
-        evidence: suffix.evidence
+        evidence: suffix.evidence, physEvidence
       }),
       prefixFromLocalDate: counters.reuseFromLocalDate,
       prefixThroughLocalDate: counters.reuseThroughLocalDate,
@@ -2525,6 +2855,102 @@ export class RecomputePipeline {
       }
     });
     return { ok: true, counters: { ...counters, checkpointWritten } };
+  }
+
+  /**
+   * 日级生理证据的**逐日快照**（v2）。
+   *
+   * 覆盖 `[fromDate, throughDate]` 每一天的**有效** `physState`：同一天取首次出现（与
+   * `buildDailyTrainingMetrics` 的 Map 同语义），缺失日记 `.` —— "缺失变成有值"
+   * 同样会让快照变化。每块 {@link DAILY_EVIDENCE_CHUNK_DAYS} 天，块内位置即日期偏移。
+   */
+  private buildDailyEvidenceDays(
+    physEvidence: readonly DailyPhysEvidence[],
+    fromDate: string,
+    throughDate: string
+  ): string[] {
+    if (throughDate < fromDate) return [];
+    const byDate = new Map<string, string>();
+    for (const item of physEvidence) {
+      if (!byDate.has(item.localDate)) byDate.set(item.localDate, item.physState);
+    }
+    const lastOffset = daysBetween(fromDate, throughDate);
+    const chunks: string[] = [];
+    let chunk = "";
+    for (let offset = 0; offset <= lastOffset; offset += 1) {
+      const encoded = encodeDailyEvidenceState(byDate.get(addDays(fromDate, offset)));
+      // 未知枚举值：无法证明"两种新状态是否相同" ⇒ 本次快照不可用（回退逐行证明）。
+      if (encoded === null) return [];
+      chunk += encoded;
+      if (chunk.length === DAILY_EVIDENCE_CHUNK_DAYS) {
+        chunks.push(chunk);
+        chunk = "";
+      }
+      if (chunks.length > MAX_DAILY_EVIDENCE_CHUNKS) {
+        // 超过上限说明状态被篡改或年限异常 ⇒ 不复用（不截断成"看起来够用"）。
+        return [];
+      }
+    }
+    if (chunk.length > 0) chunks.push(chunk);
+    return chunks;
+  }
+
+  /**
+   * 一个 run 的日表**业务列**摘要（从盘上算）。
+   *
+   * 列集与 {@link proveDailyPrefix} 的逐字段比较同源，再加两条累计列
+   * （`history_days` / `load_workout_count`）—— 保证"摘要一致"蕴含"逐字段一致"。
+   */
+  private dailyRowsDigest(metricRunId: string): string {
+    const rows = this.database.prepare(`
+      SELECT local_date AS localDate, daily_load AS load, current_7d_load AS current7dLoad,
+             previous_7d_load AS previous7dLoad, acute_ewma AS acuteEwma, chronic_ewma AS chronicEwma,
+             load_ratio AS loadRatio, ramp_rate AS rampRate, monotony, strain,
+             workout_count AS workoutCount, training_status AS trainingStatus, confidence,
+             explanation_codes_json AS codesJson, history_days AS historyDays,
+             load_workout_count AS loadWorkoutCount
+      FROM daily_training_metrics WHERE training_metric_run_id = ? ORDER BY local_date
+    `).all(metricRunId) as unknown as Array<Record<string, unknown>>;
+    return configHash(rows);
+  }
+
+  /**
+   * 前缀日指标的复用边界（v2）：逐日比较本 run 现算的证据快照与父 run 存下的快照。
+   *
+   * - 完全一致 ⇒ 边界推进到 `zoneStart`，前缀整段拷贝；
+   * - 第 k 天不一致 ⇒ 边界 = 该天（精确到天，不是"整块重算"）；
+   * - 快照缺失/首日不一致/比 `zoneStart` 短 ⇒ 退回 {@link proveDailyPrefix} 逐行证明。
+   *
+   * 之所以能替掉逐行重算：日指标是「前缀负荷 + 每日 physState + 配置/版本」的确定性函数，
+   * 前两项由快照逐日证明、后一项由 `resolveMetricReuse` 的版本闸门证明。
+   */
+  private resolveDailyCopyThrough(
+    plan: MetricReusePlan,
+    prefixLoads: readonly WorkoutTrainingLoad[],
+    physEvidence: readonly DailyPhysEvidence[]
+  ): { ok: true; dailyCopyThrough: string } | { ok: false; reason: string } {
+    const stored = plan.state;
+    const firstDate = prefixLoads[0]?.localDate;
+    if (firstDate === undefined) return this.proveDailyPrefix(plan, prefixLoads, physEvidence);
+    if (stored.dailyEvidenceFrom !== firstDate || stored.dailyEvidenceDays.length === 0) {
+      return this.proveDailyPrefix(plan, prefixLoads, physEvidence);
+    }
+    // 第二道证明：父 run 的行本身必须还是写入时那一份。被就地改过 ⇒ 逐行证明去定位/收窄。
+    if (stored.dailyRowsDigest !== this.dailyRowsDigest(plan.parentMetricRunId)) {
+      return this.proveDailyPrefix(plan, prefixLoads, physEvidence);
+    }
+    const span = daysBetween(firstDate, plan.zoneStart);
+    if (span < 0) return { ok: false, reason: "daily_boundary_before_series" };
+    if (span === 0) return { ok: true, dailyCopyThrough: firstDate };
+    const currentDays = this.buildDailyEvidenceDays(physEvidence, firstDate, addDays(firstDate, span - 1))
+      .join("");
+    const comparison = compareDailyEvidenceDays(stored.dailyEvidenceDays.join(""), currentDays, span);
+    // 父 run 的快照没覆盖到边界（或本次证据缺失）⇒ 退回逐行证明，不拿"部分相同"近似。
+    if (comparison.kind === "insufficient") return this.proveDailyPrefix(plan, prefixLoads, physEvidence);
+    if (comparison.kind === "mismatch") {
+      return { ok: true, dailyCopyThrough: addDays(firstDate, comparison.offset) };
+    }
+    return { ok: true, dailyCopyThrough: plan.zoneStart };
   }
 
   /**
@@ -2542,8 +2968,8 @@ export class RecomputePipeline {
    */
   private proveDailyPrefix(
     plan: MetricReusePlan,
-    prefixLoads: WorkoutTrainingLoad[],
-    physEvidence: DailyPhysEvidence[]
+    prefixLoads: readonly WorkoutTrainingLoad[],
+    physEvidence: readonly DailyPhysEvidence[]
   ): { ok: true; dailyCopyThrough: string } | { ok: false; reason: string } {
     const candidate = prefixLoads.length === 0
       ? []
@@ -2727,15 +3153,18 @@ export class RecomputePipeline {
    * 那是"不可复用"，不是"用一个不完整的队列凑合"。
    */
   private buildMetricCheckpointState(input: {
+    metricRunId: string;
     zoneProfiles: Map<string, DailyZoneProfile>;
     throughDate: string;
     distanceQueue: readonly DistanceQueueEntry[];
     daily: readonly DailyTrainingMetric[];
     evidence: ZoneEvidenceSnapshot;
+    physEvidence: readonly DailyPhysEvidence[];
   }): TrainingMetricCheckpointState {
     const tailProfile = input.zoneProfiles.get(input.throughDate) ??
       [...input.zoneProfiles.values()].at(-1) ?? null;
     const lastDaily = input.daily.at(-1) ?? null;
+    const firstDaily = input.daily[0]?.localDate;
     const complete = input.distanceQueue.length <= MAX_DISTANCE_QUEUE_ENTRIES;
     return {
       version: TRAINING_METRIC_CHECKPOINT_VERSION,
@@ -2751,7 +3180,13 @@ export class RecomputePipeline {
         localDate: lastDaily.localDate, acuteEwma: lastDaily.acuteEwma, chronicEwma: lastDaily.chronicEwma,
         workoutCount: input.daily.reduce((sum, metric) => sum + metric.workoutCount, 0),
         historyDays: input.daily.length
-      }
+      },
+      // 没有日行就无法定义快照原点：写空值，下一 run 会走逐行证明（不会把"空"当"全一致"）。
+      dailyEvidenceFrom: firstDaily ?? "",
+      dailyEvidenceDays: firstDaily === undefined
+        ? []
+        : this.buildDailyEvidenceDays(input.physEvidence, firstDaily, input.throughDate),
+      dailyRowsDigest: this.dailyRowsDigest(input.metricRunId)
     };
   }
 
@@ -2807,18 +3242,22 @@ export class RecomputePipeline {
     prefixThroughLocalDate: string | null;
     counters: Pick<MetricReuseCounters, "loads" | "zoneProfiles" | "dailyMetrics">;
   }): boolean {
-    // 摘要一律走**与读取侧同一对函数**（`overrideSnapshotDigest` / `metricInputBindingDigest`）：
-    // 两处各写一份必然会漂移，而漂移的后果是"输入变了却仍然复用"。
+    // 摘要一律走**与读取侧同一对函数**（`overrideSnapshotDigest` / `metricInputBindingDigest`
+    // / `metricPrefixCompatibilityDigest`）：两处各写一份必然会漂移，
+    // 而漂移的后果是"输入变了却仍然复用"。
+    // R05：`input_binding_digest` 存**身份摘要**（含代次，谱系用）；复用判据读的是
+    // `prefix_compat_digest`（不含代次）—— 两列各有各的职责，同一处写出。
     const overrideDigest = this.overrideSnapshotDigest(input.overrideSnapshot);
     const inputBindingDigest = this.metricInputBindingDigest(input.overrideSnapshot);
+    const prefixCompatDigest = this.metricPrefixCompatibilityDigest(input.overrideSnapshot);
     const stateJson = JSON.stringify(input.state);
     this.database.prepare(`
       INSERT OR REPLACE INTO training_metric_checkpoints (
         id, training_metric_run_id, checkpoint_version, load_algorithm_version, zone_algorithm_version,
         daily_algorithm_version, config_hash, zone_settings_digest, override_digest, input_binding_digest,
         timezone_identifier, through_local_date, through_at, prefix_from_local_date, prefix_through_local_date,
-        state_json, state_hash, counters_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        state_json, state_hash, counters_json, created_at, prefix_compat_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       deterministicId("training_metric_checkpoint", { metricRunId: input.metricRunId }),
       input.metricRunId, TRAINING_METRIC_CHECKPOINT_VERSION, TRAINING_LOAD_CONFIG_VERSION,
@@ -2828,7 +3267,8 @@ export class RecomputePipeline {
       this.zoneSettingsDigest(), overrideDigest, inputBindingDigest,
       input.request.timezoneIdentifier, input.throughDate, input.request.evaluatedAt,
       input.prefixFromLocalDate, input.prefixThroughLocalDate,
-      stateJson, configHash(input.state), JSON.stringify(input.counters), appNow()
+      stateJson, configHash(input.state), JSON.stringify(input.counters), appNow(),
+      prefixCompatDigest
     );
     return true;
   }
@@ -2856,6 +3296,20 @@ export class RecomputePipeline {
       "SELECT model_run_id AS model_run_id FROM training_metric_runs WHERE id=?"
     ).get(metricRunId)?.model_run_id);
     const priorDistances: DistanceQueueEntry[] = options.distanceSeed.map((entry) => ({ ...entry }));
+    // R06 覆盖守卫（负荷阶段）：本阶段按会话读心率/速度明细与**高程聚合**（路线点）。
+    // 取"实际会被算的会话"（`features` 去掉前缀跳过集）里最早的起点 —— 负荷的驱动量是
+    // 会话而不是日，且日粒度与时刻粒度之间隔着时区偏移（`routeFrom` 已为此留一天余量，
+    // 这里再判一次）。越界同样显式失败 + 回退，绝不静默少读高程/明细。
+    const earliestLoadedStart = this.earliestWorkoutStartAt(
+      options.skipTrainingSessionIds === null
+        ? features
+        : features.filter((feature) => !options.skipTrainingSessionIds!.has(feature.trainingSessionId))
+    );
+    const earliestLoaded = earliestLoadedStart === null
+      ? null
+      : new Date(earliestLoadedStart).toISOString();
+    this.assertFactCoverage(earliestLoaded, "route", "training_loads");
+    this.assertFactCoverage(earliestLoaded, "records", "training_loads");
     for (const [index, feature] of features.entries()) {
       this.throwIfCancelled(jobId);
       this.gate.yieldIfStale();
@@ -3811,7 +4265,7 @@ export class RecomputePipeline {
   }
 
   /**
-   * 写下"这条发布算了哪一版输入"（O06-A / WP-22）。
+   * 写下"这条发布算了哪一版输入"（O06-A / WP-22）与**执行覆盖证据**（R02，v44）。
    *
    * 非直连任务（CLI `full_recompute`）没有捕获过绑定 ⇒ 不写行，行为与以前逐字节相同；
    * 老 release 因此没有绑定行，`verifyAndPoint` 会走**显式**的 legacy 严格分支。
@@ -3823,13 +4277,18 @@ export class RecomputePipeline {
     const capture = this.pendingInputCapture;
     if (capture === null) return;
     const binding = capture.binding;
+    // 执行覆盖证据（R02 + B04）：计划**实际覆盖**的范围，**版本化**。
+    // 旧形态用 SQL NULL 表示"全量重算"，与"v44 之前的绑定行没有证据"撞成同一种形状 ——
+    // 结算方只能退回最宽松的判据。现在每次捕获都写一份 `{version:1, mode}`：
+    // `rebuild` 明确覆盖一切，`partial` 带逐域真实边界；NULL 只剩"旧行缺证据"一种含义。
+    const executedPlanJson = JSON.stringify(capture.executedPlan);
     this.database.prepare(`
       INSERT INTO analysis_run_input_bindings (
         run_id, job_id, scope, dataset_version, captured_raw_generation,
         captured_dependency_generation, target_raw_generation, target_dependency_generation,
         incumbent_release_id, timezone_identifier, override_digest, config_digest,
-        cutoff_at, input_digest, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        cutoff_at, input_digest, created_at, executed_plan_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(run_id) DO UPDATE SET
         job_id = excluded.job_id, scope = excluded.scope, dataset_version = excluded.dataset_version,
         captured_raw_generation = excluded.captured_raw_generation,
@@ -3839,16 +4298,19 @@ export class RecomputePipeline {
         incumbent_release_id = excluded.incumbent_release_id,
         timezone_identifier = excluded.timezone_identifier,
         override_digest = excluded.override_digest, config_digest = excluded.config_digest,
-        cutoff_at = excluded.cutoff_at, input_digest = excluded.input_digest
+        cutoff_at = excluded.cutoff_at, input_digest = excluded.input_digest,
+        executed_plan_json = excluded.executed_plan_json
     `).run(
       modelRunId, binding.jobId, binding.scope, binding.datasetVersion,
       binding.capturedRawGeneration, binding.capturedDependencyGeneration,
       binding.targetRawGeneration, binding.targetDependencyGeneration,
       binding.incumbentReleaseId, binding.timezoneIdentifier,
       binding.overrideDigest, binding.configDigest, binding.cutoffAt,
-      binding.inputDigest, binding.createdAt
+      binding.inputDigest, binding.createdAt, executedPlanJson
     );
     // 覆盖记录：这条任务把哪些导入批次算进去了（含捕获代次前进时并进来的那些）。
+    // R02 之后这是**执行覆盖批次** = required ∪ 登记批次 —— 结算方不再改写这张表，
+    // 它只核验"并集 ⊆ 这里"（见 `settleCoveredJobs`）。
     const jobId = binding.jobId;
     const from = binding.targetDependencyGeneration ?? binding.capturedDependencyGeneration;
     for (const batchId of capture.mergedBatchIds) {
