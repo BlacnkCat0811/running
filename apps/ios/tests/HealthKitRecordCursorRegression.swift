@@ -47,6 +47,78 @@ struct HealthKitRecordCursorRegression {
         check(windowedRound.recentWindowReadAt == now.addingTimeInterval(-3600),
               "the recent-window watermark keeps its exact value (not truncated)")
 
+        // 2026-10-17：跑步动态「迟到样本」补读记账的兼容 + 往返 + 判据。
+        // 背景：10-14 的跑步在 10-16 用 48h 窗口查时样本还没到手机，窗口随后越过那天 ⇒
+        // 服务端永远缺这两类。补读就是为"晚到的样本"留的一条按日期通道。
+        check(legacyCursor.lateBackfillAt == nil,
+              "a legacy payload decodes with no late-backfill bookkeeping")
+        let backfilled = HealthKitRecordCursor(
+            anchor: Data([9]), historyReadAt: now,
+            historyReplayPhase: nil, recentWindowReadAt: now,
+            lateBackfillAt: now, lateBackfillBefore: now.addingTimeInterval(-7 * 24 * 3600)
+        )
+        let backfilledRound = try JSONDecoder().decode(
+            HealthKitRecordCursor.self, from: JSONEncoder().encode(backfilled)
+        )
+        check(backfilledRound == backfilled,
+              "the late-backfill bookkeeping survives pending-batch serialization")
+        check(backfilledRound.lateBackfillAt == now && backfilledRound.lateBackfillBefore == now.addingTimeInterval(-7 * 24 * 3600),
+              "the late-backfill bookkeeping keeps its exact values")
+        // 触发判据：有游标 + （从没完成 或 完成已超过 retryInterval）。首装（无游标）不补。
+        check(!LateDynamicsBackfill.needs(cursor: nil, now: now),
+              "a first install does not run the backfill (history replay covers it)")
+        check(LateDynamicsBackfill.needs(cursor: cursor, now: now),
+              "an established cursor that has never backfilled runs it")
+        check(!LateDynamicsBackfill.needs(cursor: backfilled, now: now),
+              "a just-completed backfill does not run again")
+        check(LateDynamicsBackfill.needs(
+                cursor: backfilled,
+                now: now.addingTimeInterval(LateDynamicsBackfill.retryInterval + 1)),
+              "the backfill re-arms after retryInterval — a later permission grant or a new late arrival still has a channel")
+        check(LateDynamicsBackfill.types == Set([
+                "HKQuantityTypeIdentifierRunningPower",
+                "HKQuantityTypeIdentifierRunningGroundContactTime",
+                "HKQuantityTypeIdentifierRunningStrideLength",
+                "HKQuantityTypeIdentifierRunningVerticalOscillation"
+              ]),
+              "the backfill covers exactly the running-dynamics family")
+        check(LateDynamicsBackfill.lookback >= 7 * 24 * 3600,
+              "the backfill lookback must comfortably exceed the 48h window it compensates for")
+        // 一页之后的记账（纯逻辑 —— HealthKitExport 不进任何回归编译，所以结论必须在这里钉住）。
+        let windowStart = now.addingTimeInterval(-LateDynamicsBackfill.lookback)
+        let oldestInWindow = now.addingTimeInterval(-3 * 24 * 3600)
+        check(LateDynamicsBackfill.pageOutcome(
+                returned: LateDynamicsBackfill.limit, truncated: true,
+                oldestSample: oldestInWindow, windowStart: windowStart, paging: false)
+              == .nextPage(before: oldestInWindow),
+              "a truncated page must page older — never mark the 14-day window complete")
+        check(LateDynamicsBackfill.pageOutcome(
+                returned: LateDynamicsBackfill.limit, truncated: true,
+                oldestSample: windowStart, windowStart: windowStart, paging: true)
+              == .completed,
+              "paging stops at the window start (same-instant samples must not loop forever)")
+        check(LateDynamicsBackfill.pageOutcome(
+                returned: 0, truncated: false, oldestSample: nil,
+                windowStart: windowStart, paging: false)
+              == .retry,
+              "an EMPTY first page must not mark the backfill done (unauthorized read / sample not yet on the phone)")
+        check(LateDynamicsBackfill.pageOutcome(
+                returned: 0, truncated: false, oldestSample: nil,
+                windowStart: windowStart, paging: true)
+              == .completed,
+              "an empty continuation page means the older slice is covered")
+        check(LateDynamicsBackfill.pageOutcome(
+                returned: 12, truncated: false, oldestSample: oldestInWindow,
+                windowStart: windowStart, paging: false)
+              == .completed,
+              "a page shorter than the limit means the whole window was read")
+        // 窗口水位：**空窗不推进**（2026-10-17 修正）。旧行为把"此刻没数据"记成"这段已交付"，
+        // 于是迟到样本永远失去被窗口覆盖的机会 —— 这正是 10-14 那次的放大机制。
+        check(RecentWindowAccounting.nextMark(written: 0, now: now) == nil,
+              "an EMPTY window must not advance the watermark (a late sample could still arrive)")
+        check(RecentWindowAccounting.nextMark(written: 1, now: now) == now,
+              "a window that actually delivered samples advances the watermark to now")
+
         // ── 读到底：每页（含 deletion-only 页）都被提交，锚点推进到最后 ──
         var drainedQueried: [Int?] = []
         var drainedCommitted: [String] = []

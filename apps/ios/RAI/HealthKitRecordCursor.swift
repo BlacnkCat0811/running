@@ -37,6 +37,28 @@ nonisolated struct HealthKitRecordCursor: Codable, Equatable, Sendable {
     /// 下批从完整 48h 窗重扫一次，服务端按 UUID 幂等）。
     var recentWindowReadAt: Date? = nil
 
+    /// 跑步动态「迟到样本」一次性补读的完成时刻（2026-10-17；`nil` = 还没补过）。
+    ///
+    /// 为什么需要它：Apple Watch → iPhone 的样本传输有延迟，跑步动态（功率/触地时间/
+    /// 步幅/垂直振幅）可能**晚于** B1 的近 48h 窗口到达。窗口一旦过期、锚点流又排在
+    /// 历史重放队尾，那段时间就再没有任何通道能捡回 —— 2026-10-14 的跑步实测踩中：
+    /// 10-16 的窗口查回空，10-17 手机健康 App 里已有样本，服务端却永远是 0 条。
+    ///
+    /// 语义（`LateDynamicsBackfill`）：
+    /// - `lateBackfillAt` = 最近一次**完整覆盖**近 14 天窗口的时刻；过了
+    ///   `LateDynamicsBackfill.retryInterval`（30 天）允许再补一次 —— 权限后开、或又一次
+    ///   样本迟到都还有通道。
+    /// - `lateBackfillBefore` = 分页上界：还有 `[windowStart, before)` 这一段没读；
+    ///   nil = 没有未读段（补读被单类型上限截断时才会出现）。
+    ///
+    /// 🔴 **空页不记账**（`PageOutcome.retry`）：HealthKit 对未授权读、或样本尚未从手表同步到
+    /// 手机时都只返回空、不报错。若把一次空查询当成"补过了"，这条唯一的恢复通道就被自己关死
+    /// —— 那正是本次事故的同类形态。空查询不写字节，重试成本只是一次 `HKSampleQuery`。
+    ///
+    /// `var` + 默认值：老 payload 缺键 ⇒ nil ⇒ 升级后的第一批补读一次，这正是恢复路径。
+    var lateBackfillAt: Date? = nil
+    var lateBackfillBefore: Date? = nil
+
     /// 下一次 drain 是否要先做**全量重放**。
     ///
     /// 判据 = 上次重放被预算截断还没做完（`historyReplayPhase != nil`）。
@@ -179,5 +201,87 @@ nonisolated enum RecordReplayPlan {
         guard segments.contains(where: { $0 != .incremental }) else { return nil }
         guard segments.indices.contains(interruptedIndex) else { return nil }
         return segments[interruptedIndex] == .incremental ? .incremental : .history
+    }
+}
+
+/// B1 近期窗口的水位推进判定（2026-10-17 修正）。
+///
+/// 旧行为：窗口查询**空**也把 `recentWindowReadAt` 推到 `now`，等于宣称"这段时间已交付"。
+/// 于是样本迟到时该类型再也不会覆盖那段时间 —— 2026-10-14 跑步的功率/触地时间就是这样
+/// 从"晚一点到"变成"永远缺失"的（10-16 的两次窗口查询都返回空，之后窗口下界越过那天）。
+///
+/// 空窗只能说明**此刻**没有数据，不能当成已覆盖：保持水位不动，下批用同一个窗口再查一次
+/// （空查询没有写入、没有字节，成本仅为一次 `HKSampleQuery`）。
+nonisolated enum RecentWindowAccounting {
+    /// 返回 `nil` = **不要推进水位**（空窗）；有数据才推进到 `now`。
+    ///
+    /// 截断（命中 `recentWindowLimit`）仍推进到 `now`：页面是"最新优先"，剩余部分由正式
+    /// 锚点流补齐（`docs/IOS_SYNC_PERFORMANCE_REVIEW.md` O05 步骤 6 的"明确交由正式流补齐"）；
+    /// 截断本身已被 warning 记录，不再静默。
+    static func nextMark(written: Int, now: Date) -> Date? {
+        written > 0 ? now : nil
+    }
+}
+
+/// 跑步动态「迟到样本」的一次性补读计划（2026-10-17）。
+///
+/// 为什么必须**按日期**而不是按锚点：`HKAnchoredObjectQuery` 的锚点是变更序，但客户端可能
+/// 正处在历史重放态（每批 4500 条几乎全是重复），跑步动态类型的锚点页排在队尾；而迟到样本
+/// 的时间点又已经滑出 B1 的 48h 窗口。两条通道同时够不着 ⇒ 只能显式按日期补读。
+nonisolated enum LateDynamicsBackfill {
+    /// 补读对象：跑步动态家族（只在跑步时才有样本，是训练详情时序的来源）。
+    static let types: Set<String> = [
+        "HKQuantityTypeIdentifierRunningPower",
+        "HKQuantityTypeIdentifierRunningGroundContactTime",
+        "HKQuantityTypeIdentifierRunningStrideLength",
+        "HKQuantityTypeIdentifierRunningVerticalOscillation"
+    ]
+    /// 回看时长：覆盖"跑步 → 手表 → 手机"可能达到的样本延迟（实测 2 天以上）。
+    static let lookback: TimeInterval = 14 * 24 * 60 * 60
+    /// 单类型单批上限。有界是判据的一部分；**命中上限不是完成** —— 下一批继续读更老的一段。
+    static let limit = 1500
+    /// 完成后再补一次的间隔。它让"空结果不记账"不至于变成永远不补：
+    /// 权限后开 / 又一次样本迟到，最迟过这么久也会有下一次机会。
+    static let retryInterval: TimeInterval = 30 * 24 * 60 * 60
+
+    /// 触发判据：**流已建立**（有游标）且（从没完成 或 完成已超过 `retryInterval`）。
+    ///
+    /// 没有游标 = 首装/游标被清空 ⇒ 历史重放本身会从头读一遍，不需要补读
+    /// （也就不会平白多送一份重复数据）。
+    static func needs(cursor: HealthKitRecordCursor?, now: Date) -> Bool {
+        guard let cursor else { return false }
+        guard let completed = cursor.lateBackfillAt else { return true }
+        return now.timeIntervalSince(completed) >= retryInterval
+    }
+
+    /// 一页之后的记账结论（纯逻辑，回归逐组合钉住 —— `HealthKitExport` 不进任何回归编译）。
+    enum PageOutcome: Equatable {
+        /// 整窗已读完：记完成时刻、清分页上界。
+        case completed
+        /// 单类型上限截断了这一页：还有更老的一段没读，把分页上界移到 `before`。
+        case nextPage(before: Date)
+        /// 空页且不在分页中：可能是未授权 / 样本尚未同步到手机 ⇒ **不记账**，下批重试。
+        case retry
+    }
+
+    /// - Parameters:
+    ///   - returned: 本页拿到的样本数（0 = 空页）。
+    ///   - truncated: 是否命中 `limit`（`returned >= limit`）。
+    ///   - oldestSample: 本页最早样本的 startDate（"最新优先" ⇒ 它就是本页覆盖的最老边界）。
+    ///   - windowStart: 回看窗口的下界；分页到它就该收手（否则同一时刻的样本会来回打转）。
+    ///   - paging: 本页是否属于"上一批被截断后的续读"（`lateBackfillBefore != nil`）。
+    static func pageOutcome(
+        returned: Int,
+        truncated: Bool,
+        oldestSample: Date?,
+        windowStart: Date,
+        paging: Bool
+    ) -> PageOutcome {
+        if truncated, let oldestSample, oldestSample > windowStart {
+            return .nextPage(before: oldestSample)
+        }
+        // 分页到底（或本来就没被截断）⇒ 整窗已覆盖；首次查询就空 ⇒ 当作"还不能下结论"。
+        if returned == 0, !paging { return .retry }
+        return .completed
     }
 }

@@ -853,7 +853,8 @@ nonisolated enum HealthKitExport {
             store: store, cursorData: recordCursors,
             xml: xml, warnings: warnings, budget: budget,
             deletionAllocation: allocation,
-            // B2：轮转起点透传（窗口 pass 不受轮转影响 —— 它恒扫全部类型）。
+            // B2：轮转起点透传。2026-10-17 起**窗口 pass 与正式段共用同一个起点**（旧实现
+            // 窗口恒从下标 0 开始，预算总被前几个高频类型用光，排尾的跑步动态类型被挤掉）。
             typeRotationStart: typeRotationStart,
             onProgress: onProgress
         )
@@ -1337,6 +1338,102 @@ nonisolated enum HealthKitExport {
         }
         descriptors.append((HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!, nil,
                             "HKCategoryTypeIdentifierSleepAnalysis", nil))
+        // 本批真正写进 XML 的类型（只用于末尾的"该有却没有"可见告警，不参与任何控制流）。
+        var writtenTypes: Set<String> = []
+        // 本批**窗口 pass 真正查过**的类型（O05 门控之后），以及其中**查回空**的类型。
+        // 告警必须用"查过且为空"，不能用 `writtenTypes`：被 `needsHistoryRead` 门控掉的类型
+        // 没查过、被 20% 份额挤掉的类型是"没写完"，都不能算"该有却没有"。
+        var windowEligible: Set<String> = []
+        var windowReturnedEmpty: Set<String> = []
+        // 2026-10-17：**跑步动态迟到样本**的一次性按日期补读（`LateDynamicsBackfill`）。
+        //
+        // 为什么单独一条通道：Apple Watch → iPhone 的样本传输可能晚于 B1 的近 48h 窗口
+        // （2026-10-14 的跑步实测踩中：10-16 的两次窗口查询都返回空，样本 10-17 才出现在
+        // 手机健康 App 里，而那时窗口下界已经越过那天）。窗口过期后锚点流又排在历史重放
+        // 队尾，两条通道都够不着 ⇒ 只能按**日期**补一次。
+        //
+        // 四条纪律与窗口 pass 同源：
+        //   ① 有界 + 最新优先（`recentSamples` 按 startDate 降序、单类型 ≤ `LateDynamicsBackfill.limit`）；
+        //   ② **写前判定**：整页装不下就整页不写、**不推进记账**（下一批重试）；
+        //   ③ 每个类型只在 `lateBackfillAt == nil` 时跑一次，成功后记 `now`（空结果同样记账：
+        //      该类型这 14 天确实没有样本，不必每批重查）；
+        //   ④ 只服务**已建立游标**的类型（首装由历史重放从头读，不需要补读）。
+        //
+        // 重复发送是无害的：同一 UUID 可能也被同批的历史重放再发一次，服务端按
+        // `RAIHealthKitSampleUUID` 身份幂等（last-wins），且本函数从不推进正式 anchor。
+        for (type, unit, xmlType, xmlUnit) in descriptors {
+            guard LateDynamicsBackfill.types.contains(xmlType) else { continue }
+            guard let before = cursors[xmlType],
+                  LateDynamicsBackfill.needs(cursor: before, now: now) else { continue }
+            try Task.checkCancellation()
+            // 分页上界：上一批被单类型上限截断时，本批只读 `[windowStart, before)` 那段 ——
+            // "14 天里跑步很多"也不会因为只取"最新 1500 条"而漏掉更老的那次跑步。
+            let windowStart = now.addingTimeInterval(-LateDynamicsBackfill.lookback)
+            let pageUpperBound = before.lateBackfillBefore ?? now
+            do {
+                let late: [HKSample] = try await recentSamples(
+                    type: type,
+                    predicate: HKQuery.predicateForSamples(
+                        withStart: windowStart,
+                        end: pageUpperBound,
+                        options: .strictStartDate
+                    ),
+                    limit: LateDynamicsBackfill.limit,
+                    store: store
+                )
+                if late.count >= LateDynamicsBackfill.limit {
+                    warnings.add("近 14 天跑步动态补读命中单类型上限（\(xmlType)）：下一批继续读更老的一段")
+                }
+                if !late.isEmpty {
+                    let page = try renderedRecordPage(
+                        added: late, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
+                    )
+                    guard budget.accepts(
+                        xmlBytes: xml.offsetInFile, records: count,
+                        pageBytes: page.data.count, pageRecords: page.recordCount
+                    ) else { continue }   // 装不下 ⇒ 不记账，下一批重试
+                    try xml.write(contentsOf: page.data)
+                    count += page.recordCount
+                    writtenTypes.insert(xmlType)
+                }
+                switch LateDynamicsBackfill.pageOutcome(
+                    returned: late.count,
+                    truncated: late.count >= LateDynamicsBackfill.limit,
+                    oldestSample: late.map(\.startDate).min(),
+                    windowStart: windowStart,
+                    paging: before.lateBackfillBefore != nil
+                ) {
+                case .completed:
+                    cursors[xmlType] = HealthKitRecordCursor(
+                        anchor: before.anchor,
+                        historyReadAt: before.historyReadAt,
+                        historyReplayPhase: before.historyReplayPhase,
+                        recentWindowReadAt: before.recentWindowReadAt,
+                        lateBackfillAt: now,
+                        lateBackfillBefore: nil
+                    )
+                case .nextPage(let nextPageUpperBound):
+                    cursors[xmlType] = HealthKitRecordCursor(
+                        anchor: before.anchor,
+                        historyReadAt: before.historyReadAt,
+                        historyReplayPhase: before.historyReplayPhase,
+                        recentWindowReadAt: before.recentWindowReadAt,
+                        lateBackfillAt: before.lateBackfillAt,
+                        lateBackfillBefore: nextPageUpperBound
+                    )
+                case .retry:
+                    // 🔴 空页**不记账**：HealthKit 对未授权读取、或样本还没从手表同步到手机时
+                    // 都只返回空、不报错。把一次空查询当成"补过了"，这条唯一的恢复通道就被
+                    // 自己关死 —— 升级后第一次同步若恰好碰上权限未开/样本未到，就再也补不回来。
+                    continue
+                }
+            } catch {
+                // 与类型循环同口径：授权/无数据 ⇒ 跳过该类型（下批重试）；库不可达 ⇒ 抛。
+                if isAuthorizationError(error) || isNoDataError(error) { continue }
+                if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
+                throw error
+            }
+        }
         // B1（2026-10-16）**近期窗口 pass**：每个类型先用一次**有界**查询把近 48h 数据送到
         // —— 历史重放可能持续数天，而训练详情/恢复评估要用的近期心率/睡眠不能排在队尾。
         // 🔴 四条纪律：
@@ -1348,9 +1445,21 @@ nonisolated enum HealthKitExport {
         //   ④ WP-13（O05）：窗口只在"确有初始化/积压"时启用，且有**独立份额**（见下）。
         var windowBytesUsed = 0
         var windowRecordsUsed = 0
-        for (type, unit, xmlType, xmlUnit) in descriptors {
+        // 2026-10-17：窗口 pass 也按**持久化轮转起点**环绕（O05 步骤 4「窗口类型公平调度」）。
+        // 旧实现恒从描述符下标 0 开始：份额固定时，能在这批拿到窗口的永远是前几个高频类型，
+        // 排尾的低频类型（跑步动态、睡眠）要等前面全部"当场无数据"才轮得到。
+        // ⚠️ 这不是 2026-10-14 那次的成因（那次是 HealthKit 对这两类查回空，且当时批内
+        // 余量充足 —— 见 deliverables/RUNNING_POWER_GCT_MISSING_2026-10-17.md §二.3/§四），
+        // 它是一条**独立的防饿死**修正；轮转起点由 B2 的 `typeRotationStart` 透传。
+        for offset in 0..<descriptors.count {
+            let index = (typeRotationStart + offset) % descriptors.count
+            let (type, unit, xmlType, xmlUnit) = descriptors[index]
             try Task.checkCancellation()
             let previousWindow = cursors[xmlType]
+            // 本批刚被「迟到样本补读」整页覆盖过（补读是"最新优先"⇒ 最近 48h 必在其中）：
+            // 再走窗口只会在同一份 `export.xml` 里把同一批样本写第二遍（O05 步骤 5 的批内
+            // 去重；服务端虽然按 UUID 幂等，但没必要白占预算）。
+            guard !writtenTypes.contains(xmlType) else { continue }
             // WP-13（O05，步骤 1-2）：窗口只为"重放期"服务 —— 该类型**首装**（无游标）或
             // **历史重放还没做完**（复用正式循环同源的生产判据 `needsHistoryRead`，含显式
             // force）时才补读近窗。稳态（普通增量）下正式流本身就近实时，每批补读窗口
@@ -1358,6 +1467,7 @@ nonisolated enum HealthKitExport {
             let needsRecentWindow = previousWindow == nil
                 || previousWindow!.needsHistoryRead()
             guard needsRecentWindow else { continue }
+            windowEligible.insert(xmlType)
             let windowStart = max(
                 now.addingTimeInterval(-Self.recentWindowLookback),
                 (previousWindow?.recentWindowReadAt ?? .distantPast)
@@ -1373,10 +1483,13 @@ nonisolated enum HealthKitExport {
                 )
                 // WP-13（O05，步骤 6）：命中单类型上限只说明**窗口可能被截断**，如实记入
                 // warnings（其余部分由正式流补齐 —— 窗口是加速器，不是唯一通道）。
-                // 记账照常推进：不推进会让每批重读同一段被截断的窗口（B1"空窗也推进"同理）。
+                // 截断仍推进水位（页面是"最新优先"，更早的部分交给锚点流）；但见下面的
+                // 2026-10-17 修正：**空窗**不再推进。
+                if recent.isEmpty { windowReturnedEmpty.insert(xmlType) }
                 if recent.count >= Self.recentWindowLimit {
                     warnings.add("近期窗口查询命中单类型上限（\(xmlType)）：该窗口可能被截断，其余由增量流补齐")
                 }
+                var windowWritten = false
                 if !recent.isEmpty {
                     let page = try renderedRecordPage(
                         added: recent, deleted: [], xmlType: xmlType, unit: unit, xmlUnit: xmlUnit
@@ -1392,22 +1505,27 @@ nonisolated enum HealthKitExport {
                         count += page.recordCount
                         windowBytesUsed += page.data.count
                         windowRecordsUsed += page.recordCount
-                        // 读完整窗才推进记账（空窗同样推进：避免每批重复空查询）。
-                        if let previousWindow {
-                            cursors[xmlType] = HealthKitRecordCursor(
-                                anchor: previousWindow.anchor,
-                                historyReadAt: previousWindow.historyReadAt,
-                                historyReplayPhase: previousWindow.historyReplayPhase,
-                                recentWindowReadAt: now
-                            )
-                        }
+                        writtenTypes.insert(xmlType)
+                        windowWritten = true
                     }
-                } else if let previousWindow {
+                }
+                // 2026-10-17 修正：只有**整页真的写进本批**才算"这段已交付" —— 判据统一走
+                // `RecentWindowAccounting.nextMark`：空窗 / 装不下的页一律 `written: 0` ⇒
+                // 返回 `nil` ⇒ 不重建游标、水位原地不动。空结果只说明"此刻没有数据"，不等于
+                // "这段时间已交付"：样本迟到（Apple Watch → iPhone 传输延迟）时，只有靠下一批
+                // 用同一个窗口再查一次才能捡回。旧实现把空窗也记成 `now`，窗口下界随之越过
+                // 那段时间 ⇒ 该类型永远不再覆盖它 —— 2026-10-14 跑步的功率/触地时间就是这样
+                // 从"晚一点到"变成"永远缺失"的。空查询不写字节，成本只是多一次 `HKSampleQuery`。
+                if let previousWindow,
+                   let mark = RecentWindowAccounting.nextMark(
+                       written: windowWritten ? recent.count : 0, now: now) {
                     cursors[xmlType] = HealthKitRecordCursor(
                         anchor: previousWindow.anchor,
                         historyReadAt: previousWindow.historyReadAt,
                         historyReplayPhase: previousWindow.historyReplayPhase,
-                        recentWindowReadAt: now
+                        recentWindowReadAt: mark,
+                        lateBackfillAt: previousWindow.lateBackfillAt,
+                        lateBackfillBefore: previousWindow.lateBackfillBefore
                     )
                 }
             } catch {
@@ -1417,6 +1535,24 @@ nonisolated enum HealthKitExport {
                 if isDatabaseInaccessible(error) { throw HealthKitExportError.databaseLocked }
                 throw error
             }
+        }
+        // 2026-10-17：**"该有却没有"的可见性**。跑步动态在同一个窗口里出现「配速/步幅/
+        // 垂直振幅有数据、功率/触地时间没有」时，此前整条链**零痕迹**（空结果不写 warning、
+        // 回执也不带类型信息），排查只能靠线上库反推。
+        // 判据必须落在「本批**真的查了**、且**查回空**」的类型上（`windowReturnedEmpty`）：
+        // 被 O05 门控掉的类型没查过、被 20% 份额挤掉的类型是"没写完"而不是"没有数据"，
+        // 都不能算"该有却没有"（否则会把预算问题误报成权限问题）。
+        // 这里只加一条提示，不改任何控制流。
+        let dynamicsSilent = ["HKQuantityTypeIdentifierRunningPower",
+                              "HKQuantityTypeIdentifierRunningGroundContactTime"]
+            .filter { windowReturnedEmpty.contains($0) }
+        let dynamicsSiblingsWritten = ["HKQuantityTypeIdentifierRunningSpeed",
+                                       "HKQuantityTypeIdentifierRunningStrideLength",
+                                       "HKQuantityTypeIdentifierRunningVerticalOscillation"]
+            .contains { writtenTypes.contains($0) }
+        if !dynamicsSilent.isEmpty && dynamicsSiblingsWritten {
+            warnings.add("本次同步没有跑步功率/触地时间样本（其余跑步动态有）；"
+                + "若健康 App 该时段有数据，请检查本 App 的读取权限，或在设置里重试同步")
         }
         // B2（2026-10-16）：从**持久化的轮转起点**开始环绕 —— 固定序下排尾的类型（睡眠最典型）
         // 在"预算总被前排类型耗尽"时永远读不到。每批换起点，N 批内每个类型都轮到头位。
@@ -1541,7 +1677,13 @@ nonisolated enum HealthKitExport {
                     historyReplayPhase: interruptedPhase,
                     // B1：窗口记账必须**透传** —— 窗口 pass 已在本循环之前写过它（`previous`
                     // 读到的就是那时的值）；不带上就会被这次构造覆盖，症状是每批重扫整个 48h 窗。
-                    recentWindowReadAt: previous?.recentWindowReadAt
+                    recentWindowReadAt: previous?.recentWindowReadAt,
+                    // 2026-10-17：补读记账同样**透传**（上一段可能刚把它写成 `now`）。
+                    // 新建游标保持 `nil`（= 还没补过）：首装/游标被清后，等这个类型读完第一页
+                    // 出现游标，下一批再补一次近 14 天 —— 代价是一批重复记录（服务端按 UUID
+                    // 幂等），换来的是"任何一次漏投都有一条确定的按日期恢复路径"。
+                    lateBackfillAt: previous?.lateBackfillAt,
+                    lateBackfillBefore: previous?.lateBackfillBefore
                 )
             } catch {
                 if isAuthorizationError(error) || isNoDataError(error) {

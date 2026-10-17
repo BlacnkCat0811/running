@@ -258,6 +258,30 @@ check("recentWindowShare(of: budget)" in export,
 check("recent.count >= Self.recentWindowLimit" in export,
       "a window query that hits the per-type limit must say so (warnings), not pass silently")
 
+# 2026-10-17：跑步动态「迟到样本」补读 + 空窗水位修正的接线判据。
+# 🔴 为什么必须钉：这两段都是"删掉/绕开也能全绿"的形态（既有判据没有任何一条参考它们），
+# 而它们正是 2026-10-14 那次「样本晚到 ⇒ 永久缺失」的恢复通道与防复发通道。
+# 口径同 O05 那组的教训：**只钉"存在"不够，要钉到调用与传参**。
+check("lateBackfillAt" in cursor and "lateBackfillBefore" in cursor
+      and "LateDynamicsBackfill.needs(cursor: before, now: now)" in export,
+      "the running-dynamics late backfill must key off the per-type cursor bookkeeping "
+      "(otherwise every batch re-reads 14 days, or nothing runs at all)")
+check("LateDynamicsBackfill.pageOutcome(" in export
+      and "lateBackfillBefore: previous?.lateBackfillBefore" in export
+      and "lateBackfillBefore: previousWindow.lateBackfillBefore" in export,
+      "the paged backfill must decide through pageOutcome and pass the paging bound through "
+      "BOTH cursor rebuilds (a rebuild that drops it re-reads the same page every batch)")
+check("RecentWindowAccounting.nextMark(" in export
+      and "written: windowWritten ? recent.count : 0" in export,
+      "the empty-window watermark rule must go through the shared judgement AND feed it 0 when "
+      "the page was not written — the old 'else if let previousWindow' branch must stay deleted")
+check("else if let previousWindow" not in records,
+      "the deleted empty-window advance branch is back — that is exactly the 2026-10-14 defect "
+      "(an empty query marking the period as delivered)")
+check("windowReturnedEmpty.insert(" in export,
+      "the '该有却没有' warning must key off queried-and-empty types, not on every eligible one "
+      "(otherwise a 20%-share budget skip is misreported as a permission problem)")
+
 # O02/WP-11：待办路线队列的落盘与接线判据。
 check("CREATE TABLE IF NOT EXISTS sync_pending_routes" in store
       and "func upsertPendingRoutes(" in store and "func loadPendingRoutes(" in store
@@ -299,7 +323,8 @@ check("settlePendingRouteCommit()" in sync
 # 2026-10-16（WP-13/O05）：新增窗口三条判据后实测打印 65 ⇒ 重设为 64。
 # 2026-10-16（WP-11/O02）：新增待办队列四条判据后实测打印 70 ⇒ 重设为 69。
 # 2026-10-16（R03/R04/R07）：R03 原子结算改写一条 + R07 调度接线新增一条后实测打印 71 ⇒ 重设为 70。
-MIN_CHECKS = 70
+# 2026-10-17（迟到样本补读）：新增补读/水位接线五条判据后实测打印 78 ⇒ 重设为 77。
+MIN_CHECKS = 77
 check(
     checks >= MIN_CHECKS,
     "only %d judgements ran, floor is %d — a wiring judgement was silently dropped"

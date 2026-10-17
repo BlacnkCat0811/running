@@ -334,7 +334,12 @@ nonisolated enum RestoredPendingDeletions: Equatable {
     case corrupted
 }
 
-extension DirectSyncPendingDeletions {
+/// ⚠️ `nonisolated` 不是装饰：本仓的 Xcode target（`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`）
+/// 与 `typecheck-ios.sh` 都按 `-default-isolation MainActor` 编译，而**扩展成员不会从
+/// `nonisolated` 类型继承隔离** —— 默认会被算成 MainActor 隔离的。`restoredFromTask` 是
+/// 纯解码函数（只碰传入的 `Data` 与局部 `JSONDecoder`），任何非主 actor 的调用点都会因此
+/// 撞上「main actor-isolated static method cannot be called from outside of the actor」。
+nonisolated extension DirectSyncPendingDeletions {
     /// 从任务行的 `Data?` 恢复（**唯一入口**）。
     static func restoredFromTask(_ data: Data?) -> RestoredPendingDeletions {
         guard let data else { return .notRecorded }
@@ -346,7 +351,12 @@ extension DirectSyncPendingDeletions {
     }
 }
 
-extension DirectSyncBatchBudget {
+/// ⚠️ `nonisolated` 不是装饰：扩展成员不会从 `nonisolated struct DirectSyncBatchBudget`
+/// 继承隔离，默认会被算成 MainActor 隔离的。调用方 `HealthKitExport.writeGlobalRecords`
+/// 住在 `nonisolated enum HealthKitExport` 里、在非主 actor 上下文执行 —— 不写这一行就是
+/// 「main actor-isolated static method 'recentWindowShare(of:)' cannot be called from outside
+/// of the actor」（Swift 6 模式下是**错误**，Swift 5 模式下只是警告，于是很容易漏过去）。
+nonisolated extension DirectSyncBatchBudget {
     /// 近期窗口的**独立份额**（O05/WP-13）：窗口 pass 最多使用单批总预算的 20%。
     ///
     /// 语义（审查 §5 O05 步骤 3）：
