@@ -1191,10 +1191,27 @@ npm run ml:test
 | `npm ci --dry-run` | lock 与 package.json 同步（干净安装会移除 225 个旧依赖） |
 | 悬挂引用 | 代码/脚本/配置/现行文档中无 `apps/web`、`@rai/web`、`check-web-build`、`test:e2e:web`；仅 AGENTS.md 的 Retired Surfaces 明确禁止重建 |
 
+**B6 云端配置层（2026-10-17 20:54 CST，已生效）**：
+
+| 项 | 结果 |
+|---|---|
+| 变更 | `/etc/nginx/sites-available/rai` 与 `rai-ip` 删除 `root/index.html/favicon/assets/SPA` 回退（保留 `/v1/`、uploads、`/wb2api/`、`/panel/`、robots、限速、TLS）；`rai-api.service` 删除 `check-web-build.mjs` 前置检查 |
+| 备份 | `/root/rai-retire-backup-20261017-205451/`（两个 nginx 站点 + unit + `git-head.txt`） |
+| 验证 | `nginx -t` 通过；服务 active；`/v1/health`=200 且 `databaseReady:true`；`/v1/handshake`、`/v1/mobile/today`、`/v1/workouts?limit=1` 均 200；匿名 health=200（`RAI_PUBLIC_HOSTS` 保持原值）；`/`、`/index.html`、`/assets/*`、`/settings`、`/workouts` 全部 **404**；IP 站点 `/`=404、`/v1/health`=200 |
+| 重启耗时 | API 约 19s 完成启动（2.3G 主库），期间 nginx 短暂 502 |
+| 未删除 | 服务器上的 `apps/web/dist`（仍被旧代码的 `check-web-build` 不再检查；保留作回滚，等代码层部署后再删） |
+
+**B6 代码+数据层：未执行（需单独授权）**。核查发现服务器并非基线版本，而是停在 `2e7a231`（比远端 `main` 落后 36 个提交），远端 `main` 之上还有本次的 8 个退役提交；部署新代码会同时带入 **v38–v45 共 8 个数据库迁移**：
+
+- 迁移内容经核对为纯 DDL（加列/建表/建索引/建视图），无数据回填；主库 2.3G（288 训练、24.4 万路线点、53.2 万健康记录），现有备份是 10-16 的 **v37 之前**版本。
+- 老代码 `data:migrate --dry-run` 当前显示 `version:37, pending: []`；新代码启动会因 `pending v38–v45` 直接退出 78，**必须显式迁移**。
+- 回滚路径：停服 → 恢复迁移前 DB 备份（需先做 2.3G 一致性备份）→ `git reset` 回旧提交 → `npm ci` 旧 lock。
+- 该批同时是 36 个未发布的同步优化提交，属于「退役」之外的产品发布决策；实施文档 §9 明确迁移必须单独授权。
+
 **未完成 / 需在真实环境执行**：
 
-- B6 云端发布：本机无服务器访问权限，`deploy/` 模板与 runbook（§6）已就绪，`nginx -t`、`systemctl`、`curl` 需在服务器执行。
-- 真机验收：HealthKit 同步、分享卡、成绩摘要需 iPhone + 云端 API。
+- 真机验收：HealthKit 同步、分享卡、成绩摘要需 iPhone + 云端 API（当前云端仍是旧版 API，iOS 现有版本可正常读写）。
+- 服务器代码层与 `apps/web/dist` 清理：等迁移授权与维护窗口。
 - 本机环境备注（不影响仓库结论）：该机 PATH 无 npm，验证用官方 Node 24.21 + 下载的 npm CLI；`onnxruntime-node` 原生库因未签名无法加载，已用 `codesign --force --sign -` 临时签名 + 官方 Node（关闭 library validation）跑通全量 Node 套件与 smoke。
 
 > **执行完成后的收尾**：按 [deliverables/README.md](README.md) 的约定，本文档应归档或删除；执行证据（门禁输出、云端 curl、真机截图）另存或在 PR 中引用，不要把证据回写进本文档。
