@@ -338,6 +338,34 @@ test("GPX 路线：路线变更同样要求分析，且路线版本对读侧可�
       assert.ok(pointer.id, "整条补齐后必须原子发布指针");
       assert.equal(scalar(db, `SELECT COUNT(*) AS n FROM route_versions
         WHERE id = ? AND status='complete'`, pointer.id), 1);
+      // 🔴 B05（2026-10-17）：路线变更的计划必须**持久化到批次行**（v45）。
+      // 没有它，消费端只能从账本重建计划 —— 而账本不记路线，于是含 GPX 的批次一律全量。
+      const evidenceJson = (db.prepare(
+        "SELECT analysis_dirty_plan_json AS json FROM import_batches WHERE id = ?"
+      ).get("delta") as { json: string | null } | undefined)?.json;
+      assert.ok(evidenceJson, "含路线的批次必须写下分析影响证据");
+      const evidence = JSON.parse(evidenceJson) as {
+        version: number; full: boolean; dirtyFromAt: string | null;
+        routeDirtyTimes: string[]; domains: Record<string, string | null>;
+      };
+      assert.equal(evidence.version, 1, "证据必须版本化");
+      assert.equal(evidence.full, false,
+        "一场新增跑步 + 有效 GPX 不应退化成 full —— 这正是 B05 的收益");
+      assert.ok(evidence.dirtyFromAt, "必须给出可复用的边界");
+      assert.equal(evidence.routeDirtyTimes.length, 1,
+        "路线变更必须记下所属训练的时刻（合成 route 条目的原始输入）");
+      const routeDirtyTime = evidence.routeDirtyTimes[0] ?? "";
+      assert.ok(routeDirtyTime.startsWith("2018-01-02T08:00:00"),
+        `路线影响时刻必须指向该训练：${routeDirtyTime}`);
+      // §7.2 步骤 7：路线变更**同时**推进三个域 —— 只推进 features 会让负荷/分区
+      // 拿旧训练量去拼新轨迹（"只改一条路线"不等于"只改一行分数"）。
+      assert.equal(evidence.domains.features, evidence.dirtyFromAt);
+      assert.equal(evidence.domains.fitness, evidence.dirtyFromAt,
+        "路线变更必须同时推进负荷边界");
+      assert.equal(evidence.domains.readiness, evidence.dirtyFromAt,
+        "路线变更必须同时推进恢复/分区边界");
+      assert.ok((evidence.dirtyFromAt ?? "") <= routeDirtyTime,
+        "边界不得晚于路线所属训练的开始时刻（否则训练前半段不会被重算）");
     } finally { db.close(); }
   });
 });

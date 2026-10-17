@@ -11,10 +11,11 @@ import { RaiDatabase, RecomputeJobRepository } from "@rai/storage-sqlite";
 import {
   DATA_ONLY_MAX_RECORDS, NATIVE_VERSION, NIGHT_FEEDING_TYPE_VALUES,
   RecordDeltaNotEligibleError, canonicalizeNightsForWindow, canonicalizeRunningWorkouts,
-  classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes,
-  loadDirtyRangeInput,
+  classifyDirectSyncPayload, identityAlgorithmFingerprint, importGpxRoutes, listGpxRelativePaths,
+  loadDirtyRangeInput, normalizeRelativePath,
+  encodeBatchAnalysisDirtyEvidence,
   parseAppleHealthXml, parseHealthSyncManifest, planIncrementalAnalysisDirtyRange,
-  type DirectSyncPayloadFacts, type HealthSyncManifest
+  type BatchAnalysisDirtyEvidence, type DirectSyncPayloadFacts, type HealthSyncManifest
 } from "@rai/health-export-parser";
 
 import { readImportReceiptInDatabase, writeImportReceiptInDatabase } from "./import-publication.js";
@@ -752,6 +753,34 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
       (id,xml_sha256,status,import_mode,previous_dataset_version,summary_json)
       VALUES (?,'pending','running','incremental',?,'{}')`).run(input.jobId, previousVersion);
 
+    // 🔴 B05（2026-10-17）：路线**归属变化 / 删除**的旧范围必须在解析**之前**快照。
+    //
+    // `routeDirtyTimes` 原来只查"变更后"的归属训练。路线从 A 移到 B 时（XML 的
+    // `WorkoutRoute` 换了父训练，`ON CONFLICT(id) DO UPDATE workout_id`），A 的时刻
+    // 当场丢失 —— 那条训练的轨迹特征与时间线不会被重算。删除同理：行没了就什么都查不到。
+    //
+    // 快照只用于本批的 dirty 证据，不落盘、不回填。
+    //
+    // 🔴 2026-10-17（第三轮）：只查**本批**携带的 GPX 路径。导入器只遍历这一份清单
+    // （`importGpxRoutes` 的 `allPaths`），别的路径的归属不会因本批改变 —— 旧实现每批
+    // 扫一遍 `workout_routes` 全表，让"小批同步"的成本随历史路线数增长。
+    // 落库值由 `normalizeRouteRelativePath`（database.ts:129）统一小写 + 正斜杠，
+    // 与这里的 `normalizeRelativePath` 同形，所以按 `relative_path` 的 UNIQUE 索引点查是精确的。
+    const routeOwnerBefore = new Map<string, string>();
+    const routeOwnerLookup = db.prepare(`
+      SELECT route.id AS id, workout.start_at AS startAt
+      FROM workout_routes route
+      JOIN workouts workout ON workout.id = route.workout_id
+      WHERE route.relative_path = ?
+    `);
+    const batchRoutePaths = [...new Set(
+      listGpxRelativePaths(input.inputPath).map((path) => normalizeRelativePath(path))
+    )];
+    for (const relativePath of batchRoutePaths) {
+      const row = routeOwnerLookup.get(relativePath) as
+        { id: string; startAt: string | null } | undefined;
+      if (row !== undefined && row.startAt !== null) routeOwnerBefore.set(row.id, row.startAt);
+    }
     const parsed = await parseAppleHealthXml(payload.xmlPath, store, {
       fileSize: Buffer.byteLength(payload.xmlText),
       healthKitRecordIdentity: true,
@@ -763,11 +792,16 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
     const routes = await importGpxRoutes(input.inputPath, store, { preserveAbsent: true });
     // 训练会话的**局部**规范化：只处理本批弄脏的训练时刻（解析器给的 dirtyWorkoutTimes
     // + 本批改过的路线所属训练）。不做全量重建（§8.2）。
+    //
+    // 每条被改的路线取「**旧归属** ∪ 新归属」：归属移动时两个训练都被改写；删除时只有旧侧
+    // 存在。去重交给证据的 `routeDirtyTimes`（构造时 `Set` + 排序）。
     const routeDirtyTimes = (routes.changedRouteIds ?? []).flatMap((routeId) => {
       const row = db.prepare(`SELECT workout.start_at AS startAt FROM workout_routes route
         JOIN workouts workout ON workout.id = route.workout_id WHERE route.id = ?`)
         .get(routeId) as { startAt: string } | undefined;
-      return row ? [row.startAt] : [];
+      const before = routeOwnerBefore.get(routeId);
+      const after = row?.startAt;
+      return [before, after].filter((value): value is string => typeof value === "string");
     });
     canonicalizeRunningWorkouts(db, {
       dirtyWorkoutTimes: [...(parsed.dirtyWorkoutTimes ?? []), ...routeDirtyTimes]
@@ -822,6 +856,34 @@ export async function applyDirectSyncImport(input: DirectSyncImportInput): Promi
         nightRange === null ? [] : [nightRange.earliestInstant]
       ));
       const dirty = dirtyRange.full ? null : dirtyRange.dirtyFromAt;
+      // 🔴 B05（2026-10-17）：把这份计划**持久化到批次行**（v45）。
+      //
+      // 为什么不能只留在任务的 `incrementalPlan` 里：重排、合并、以及后续批次把这一批
+      // 重新并进来时，消费端只能从账本重建计划 —— 而**账本不记路线**。证据落在批次行上
+      // 之后，「这一批让哪些域变脏」与「它属于哪个批次」在同一个事务里同生共死。
+      //
+      // 写入后**提交前回读**：这份证据是消费端决定"允不允许 partial"的唯一依据。
+      // 写丢了只会退化成全量（慢，安全）；写错了是**漏算**，所以不匹配就整批回滚。
+      const dirtyEvidence: BatchAnalysisDirtyEvidence = {
+        version: 1,
+        full: dirtyRange.full,
+        dirtyFromAt: dirtyRange.dirtyFromAt,
+        domains: dirtyRange.domains,
+        routeDirtyTimes: [...new Set(routeDirtyTimes)].sort(),
+        recoveryBoundaries: nightRange === null ? [] : [nightRange.earliestInstant],
+        reasons: dirtyRange.reasons
+      };
+      const dirtyEvidenceJson = encodeBatchAnalysisDirtyEvidence(dirtyEvidence);
+      db.prepare("UPDATE import_batches SET analysis_dirty_plan_json = ? WHERE id = ?")
+        .run(dirtyEvidenceJson, input.jobId);
+      const writtenEvidence = db.prepare(
+        "SELECT analysis_dirty_plan_json AS json FROM import_batches WHERE id = ?"
+      ).get(input.jobId) as { json: string | null } | undefined;
+      if (writtenEvidence?.json !== dirtyEvidenceJson) {
+        // 普通 Error（不是 `DirectSyncIngestRejected`）：这是数据库写入问题，不是载荷不合格，
+        // 不该冒充成一个对外的拒收码；整批事务在这里回滚。
+        throw new Error("analysis dirty plan read-back mismatch");
+      }
       analysisJobId = new RecomputeJobRepository(db).enqueue(
         "import", datasetVersion,
         {
