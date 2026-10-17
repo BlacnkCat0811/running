@@ -43,7 +43,7 @@ struct TechSetupView: View {
                         }
                     }
                     TechField("服务地址") {
-                        TextField("http://192.168.1.8:5173", text: $draftURL)
+                        TextField("http://192.168.1.8:8787", text: $draftURL)
                             .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                             .accessibilityIdentifier("setup.url")
                             .focused($field, equals: .url).submitLabel(.next)

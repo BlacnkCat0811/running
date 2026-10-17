@@ -2192,7 +2192,7 @@ struct TechNativeSettingsView: View {
             VStack(alignment: .leading, spacing: 11) {
                 TechSectionHeader(title: "服务连接", trailing: session.isReachable ? "已连接" : "待连接", trailingColor: session.isReachable ? TechColor.green : TechColor.coral)
                 TechField("服务器地址") {
-                    TextField("http://192.168.x.x:5173", text: Binding(
+                    TextField("http://192.168.x.x:8787", text: Binding(
                         get: { draftURL },
                         set: {
                             draftURL = $0

@@ -68,7 +68,7 @@ final class ServerDiscovery {
                 switch state {
                 case .ready:
                     if case .hostPort(let host, let port) = connection.currentPath?.remoteEndpoint {
-                        let portNumber = port.rawValue == 0 ? 5173 : Int(port.rawValue)
+                        let portNumber = port.rawValue == 0 ? 8787 : Int(port.rawValue)
                         finish(Self.serverURL(host: "\(host)", port: portNumber, scheme: scheme))
                     } else {
                         finish(nil)

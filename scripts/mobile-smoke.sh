@@ -3,7 +3,6 @@
 set -u
 PORT=8791
 BASE="http://127.0.0.1:${PORT}"
-ORIGIN="http://127.0.0.1:5173"
 BEFORE_GOAL=""
 
 echo "== boot API (RAI_DATABASE=var/rai.sqlite) =="
@@ -16,7 +15,7 @@ API_PID=$!
 cleanup() {
   if [ -n "$BEFORE_GOAL" ]; then
     curl -s -m 2 -X PUT "$BASE/v1/mobile/goals" \
-      -H "content-type: application/json" -H "Origin: $ORIGIN" \
+      -H "content-type: application/json" \
       -d "$BEFORE_GOAL" >/dev/null || true
   fi
   kill $API_PID 2>/dev/null
@@ -76,7 +75,7 @@ echo "== GET/PUT /v1/mobile/goals =="
 curl -s "$BASE/v1/mobile/goals" -o var/smoke-goals-before.json
 echo "before: $(cat var/smoke-goals-before.json)"
 HTTP=$(curl -s -o var/smoke-goals-put.json -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
-  -H "content-type: application/json" -H "Origin: $ORIGIN" \
+  -H "content-type: application/json" \
   -d '{"easyDurationFloorFraction": 0.75}')
 echo "PUT http=$HTTP body=$(cat var/smoke-goals-put.json)"
 [ "$HTTP" = "200" ] && { echo "PASS: PUT returns 200"; pass=$((pass+1)); } || { echo "FAIL: PUT expected 200 got $HTTP"; fail=$((fail+1)); }
@@ -85,7 +84,7 @@ node -e "const a=require('./var/smoke-goals-after.json'); console.log('after:', 
 
 echo "== validation: PUT rejects out-of-range =="
 HTTP2=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE/v1/mobile/goals" \
-  -H "content-type: application/json" -H "Origin: $ORIGIN" -d '{"easyDurationFloorFraction": 9}')
+  -H "content-type: application/json" -d '{"easyDurationFloorFraction": 9}')
 [ "$HTTP2" = "400" ] && { echo "PASS: floor 9 rejected with 400"; pass=$((pass+1)); } || { echo "FAIL: expected 400 got $HTTP2"; fail=$((fail+1)); }
 
 echo ""
