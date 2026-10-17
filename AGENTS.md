@@ -2,75 +2,47 @@
 
 ## Supported Product
 
-This repository develops the browser-based Web application in `apps/web`, the
-API/shared packages required by it, and the explicitly requested native iOS
-debug host in `apps/ios`.
+This repository develops the native iOS application in `apps/ios` and the
+Node.js API / shared algorithm packages it uses (`apps/api`, `packages/*`).
 
-Native mobile applications and native desktop applications are out of scope.
-Do not create or modify Electron, Tauri, React Native, Flutter, iOS, Android,
+The browser-based SPA that used to live in `apps/web`, and the macOS platform
+support inside the Xcode project, were retired on 2026-10-17 by product
+decision. See [DECISIONS](docs/DECISIONS.md) D17 and
+[ADR-006](docs/adr/ADR-006-retire-web-and-macos.md). Do not recreate a browser
+client, a WebView shell, or a macOS/desktop target.
+
+Native desktop applications and non-iOS mobile applications are out of scope.
+Do not create or modify Electron, Tauri, React Native, Flutter, Android,
 macOS, or Windows client projects unless the user explicitly requests it.
 
-`apps/ios` is an explicitly requested local Xcode iOS application. Its
-production path is SwiftUI native and it may use the existing Node.js API for
-read/write business flows. The former WKWebView shell remains only as a
-development fallback until native acceptance is complete. HealthKit read-only
-sync is authorized: the iOS app may request Apple Health read permission,
-export running-related samples to the existing Apple Health ZIP/XML import
-pipeline, and upload them to the local API. Do not rewrite the TypeScript
-scoring core on device, and do not add HealthKit write, or a standalone
-Watch/macOS/mobile product unless the user explicitly asks. HealthKit
-background delivery, BGProcessingTask, and a background URLSession are
-authorized for the iOS health sync pipeline (2026-09-22 product decision); any
-further background mechanism still requires explicit user request.
+`apps/ios` is the only client. Its production path is SwiftUI native and it
+uses the existing Node.js API for read/write business flows. There is no
+WKWebView path and no macOS destination any more; the API is reached directly
+over HTTPS with a Bearer token. HealthKit read-only sync is authorized: the iOS
+app may request Apple Health read permission, export running-related samples to
+the existing Apple Health ZIP/XML import pipeline, and upload them to the API.
+Do not rewrite the TypeScript scoring core on device, and do not add HealthKit
+write, or a standalone Watch/macOS/mobile product unless the user explicitly
+asks. HealthKit background delivery, BGProcessingTask, and a background
+URLSession are authorized for the iOS health sync pipeline (2026-09-22 product
+decision); any further background mechanism still requires explicit user
+request.
 
-## Supported Web Viewport
-
-The actively supported experience is desktop browser Web:
-
-- Primary verification viewport: 1440 x 900.
-- Minimum actively supported width: 1024px.
-- Target browsers: current Chrome and Edge.
-
-Existing behavior below 1024px is frozen compatibility code. Preserve it, but
-do not extend, redesign, or optimize it unless the user explicitly puts narrow
-or responsive layouts in scope.
-
-Unless the user explicitly requests responsive or narrow-screen work:
-
-- Do not add or modify native mobile or native desktop client behavior.
-- Do not modify CSS media queries targeting widths below 1024px.
-- Do not modify mobile navigation or mobile-only components.
-- Do not add mobile viewport tests, screenshots, or visual baselines.
-- Do not run responsive or mobile-specific E2E tests.
-- Do not treat mobile-browser polish as an implicit acceptance criterion.
-- Preserve existing narrow-screen behavior when changing shared Web code.
-
-## Frozen Responsive Areas
-
-Do not modify these areas without explicit user authorization:
-
-- `mobileNavigation` in `apps/web/src/App.tsx`.
-- `.mobile-nav-links` and `.workout-mobile-list` behavior.
-- Media-query rules below 1024px in `apps/web/src/styles.css`.
-- The 390px E2E coverage in `apps/web/e2e/web-flows.test.ts`.
-
-> 断点实况（供措辞统一，不改变冻结范围）：styles.css 中 <1024px 冻结的媒体查询为
-> `@media (max-width: 820px)`（820px 以下切底部导航 / mobile-nav-links / 紧凑列表）
-> 与 `@media (max-width: 480px)`（细节微调）；`@media (max-width: 1180px)` 段不在
-> 窄屏冻结之列，但桌面 1024–1180px 宽度依赖它，改动必须走桌面回归（e2e:web）。
+The API keeps every `/v1` route that existed before the retirement, including
+routes that were only consumed by the retired Web SPA (backups, model and
+prediction management, data operations, audit, import administration,
+performance entries, privacy zones). Removing those endpoints is a separate
+product decision, not part of the Web retirement.
 
 ## Default Verification
 
-Choose checks proportionate to the change. For ordinary Web work, use:
+Choose checks proportionate to the change. For ordinary API / package work:
 
 - `npm run typecheck`
 - `npm test`
-- `npm run build`
-- `npm run test:e2e:web` when browser-flow verification is warranted
-
-Do not run `npm run test:e2e:responsive` or the full `npm run test:e2e` unless
-the user explicitly requests responsive coverage or the task directly changes
-frozen responsive code.
+- `npm run check:docs` when README, AGENTS, or anything under `docs/` changes
+- `npm run check:acceptance-matrix` when tests or `docs/ALGORITHM.md` change
+- `npm run smoke:api` when server startup or `deploy/` changes
 
 For iOS work under `apps/ios`, use:
 
@@ -81,6 +53,23 @@ For iOS work under `apps/ios`, use:
 - Simulator-bound acceptance (`apps/ios/tests/run-visual-tests.sh`) and the AMap
   coordinate cross-check stay manual; they need a booted Simulator and, for the
   former, `var/rai.sqlite`.
+
+For `deploy/` template changes, `npm test` covers the text-contract tests
+(`deploy-cloud`, `deploy-n100`, `deploy-upgrade`); `nginx -t` and
+`systemctl daemon-reload` belong to the server runbook
+([operations](docs/OPERATIONS.md)).
+
+## Retired Surfaces
+
+Do not reintroduce any of the following without a new explicit product decision:
+
+- `apps/web`, React/Vite/Vitest/Playwright, `npm run build`, `test:e2e:*`,
+  `scripts/check-web-build.mjs`, or a `@rai/web` workspace.
+- The macOS destination in `apps/ios/RAI.xcodeproj`, `AppWebView.swift`, the
+  `#if os(macOS)` branches, or any WebKit import under `apps/ios/RAI/`.
+- A browser fallback served by the API: the API has no static file hosting.
+- `RAI_WEB_PORT` / `RAI_ALLOW_LAN_DEV`: local device debugging now starts the
+  API only (`npm run dev:device`) and requires a dev `RAI_API_TOKEN`.
 
 ## Cross-Platform Command Rules
 
@@ -103,4 +92,3 @@ Do not rely on filename case: Windows and macOS are both case-insensitive, so a
 mismatch stays silent on both ends. `.gitattributes` pins `*.sh`, `*.py`,
 `*.swift` and `*.pbxproj` to LF; verify with `git ls-files --eol` (`i/lf w/lf`)
 instead of assuming.
-

@@ -142,3 +142,18 @@
 新教练合同在正常base/build/peak以量带指导S，而用历史独立H做追加保护；减量、比赛周、14天附加保护仍禁止超S追加。这一版本化差异仅作用于已选择新合同者，不将旧量带字段改名后继续交给旧客户端。
 
 契约影响：`MobileRunCoachResponse.phase` 对自定义距离由 `"base"` 变为 `null`，界面落到既有的「持续训练」文案，iOS 无需改动。同批**未**处理、留待单独决定：`phases` 区间数组对无骨架计划仍以 `"base"` 填充，与 `phase: null` 的语义不自洽。
+
+## D17. 客户端收敛为原生 iOS + API（Web 与 macOS 退役）
+
+2026-10-17 产品决定：移除浏览器 SPA（`apps/web`）与 `apps/ios` 的 macOS destination / WKWebView 壳，仓库只保留两个可交付物——原生 SwiftUI iOS App 与它直连的 Node API。执行手册与逐批验收见 [Web/macOS 退役实施计划](../deliverables/plan-remove-web-keep-ios-api.md)，决策记录见 [ADR-006](adr/ADR-006-retire-web-and-macos.md)。
+
+**这不是"暂停维护"，而是删除**：不得重建浏览器客户端、WebView 壳、macOS/桌面 target，也不得用 `npm run build`/`test:e2e:*`/`check-web-build.mjs` 把旧门禁偷偷加回来。`AGENTS.md` 同步改写为该口径。
+
+**后端端点不随客户端退役**：全部 `/v1` 路由保留，包括 36 条此前只有 Web 在用的端点（备份、模型/预测管理、数据运维、审计、导入管理、手工成绩、隐私区）。裁剪端点属于独立产品决策，且必须连同 `server-runtime`/`schemas`/OpenAPI 断言一起改，不能按「Web 清理」名义批量删。`/v1/performance` 是运维遥测端点，两边客户端都不调用，尤其不要误删。
+
+**服务地址与鉴权边界**：iOS 首次连接手填 HTTPS 地址（Release 在应用层强制 https），Token 存 Keychain；API 必须配置 `RAI_API_TOKEN`——否则经 nginx 转发后 Host 不是 loopback，原生请求会被 local-request-security 判 403。`RAI_ALLOW_REMOTE_TOKEN_AUTH` 对 iOS 不是必需（无 Origin 的请求在两条分支都放行），但 `deploy-cloud` 测试钉住了该 env 行，退役它要单独改测试并走安全评审。
+
+**开发流**：`npm run dev:device` 只启动 API（`RAI_API_HOST=0.0.0.0`）并注入/打印开发用 `RAI_API_TOKEN`；旧的「vite 代理 5173」路径随 `apps/web` 一起消失。`RAI_WEB_PORT`/`RAI_ALLOW_LAN_DEV` 仅服务浏览器跨源，已随 Web 退役清理。
+
+**部署**：API 不再托管静态文件，nginx 只反代 `/v1`，站点根路径与 `/assets/*` 一律 404；systemd 前置检查删掉 `check-web-build.mjs`，发布脚本不再构建前端。回滚 = revert 退役批次 + 恢复备份的 nginx/systemd 文件；数据库 schema 未改动。
+
