@@ -19,7 +19,7 @@ export {
   type LabelFunnelReport,
   type LabeledRaceOutcome
 } from "./prediction-data.js";
-export { RecomputePipeline, TRAINING_METRIC_CHECKPOINT_VERSION } from "./services/recompute-pipeline.js";
+export { RecomputePipeline } from "./services/recompute-pipeline.js";
 // The formula baseline version enters `currentAbilityBaselineHash`, so it is part of
 // the public identity of a prediction — exported for the doc/version consistency test.
 export { FORMULA_PREDICTION_BASE_VERSION } from "./prediction-ability-baseline.js";
