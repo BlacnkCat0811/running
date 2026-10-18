@@ -102,3 +102,44 @@ test("raw running-dynamics average clips a record that overlaps the workout star
     database.close();
   }
 });
+
+// 2026-10-18（复查 P2）：cadence 的原始 step 回退读此前只有 `end_at` 下界（老 workout 随时间
+// 轴增长扫描历史）。现在走有界计划（按该 type 最长记录时长收紧候选起点）。本测试用
+// "24h 跨起点长记录 + 偏移格式 + 窗口外记录"钉住：结果按重叠比例计入长记录，且旧窗口与
+// 新窗口的行为一致。
+test("average cadence fallback counts a long record crossing the workout start proportionally", () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec(`
+    CREATE TABLE workout_statistics (
+      workout_id TEXT, type TEXT, ordinal INTEGER, sum_value REAL, average_value REAL
+    );
+    CREATE TABLE workouts (
+      id TEXT, source_name TEXT, start_at TEXT, end_at TEXT, deleted_at TEXT
+    );
+    CREATE TABLE health_records (
+      source_name TEXT, type TEXT, value_numeric REAL, start_at TEXT, end_at TEXT
+    );
+    CREATE INDEX idx_health_records_type_time ON health_records(type, start_at, end_at);
+    CREATE INDEX idx_health_records_source_time ON health_records(source_name, start_at, end_at);
+    CREATE INDEX idx_health_records_type_end ON health_records(type, end_at, start_at);
+    INSERT INTO workouts VALUES (
+      'workout_old', 'RQ Run', '2023-01-01T00:00:00.000Z', '2023-01-01T01:00:00.000Z', NULL
+    );
+    INSERT INTO health_records VALUES
+      -- 24h 长记录跨过窗口起点：只有 30 min 在窗口内 ⇒ 86400 × 0.5h/24h = 1800 步。
+      ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 86400, '2022-12-31T00:30:00.000Z', '2023-01-01T00:30:00.000Z'),
+      -- 窗口内 10 min 的 600 步。
+      ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 600, '2023-01-01T00:00:00.000Z', '2023-01-01T00:10:00.000Z'),
+      -- 偏移格式（-05:00 书写，绝对时刻在窗口内，但写下的本地日期是 12-31）：历史谓词是
+      -- 文本比较：end_at > 窗口起点文本 不成立 ⇒ 与改造前一致地被排除（不是有界计划引入的）。
+      ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 300, '2022-12-31T19:20:00-05:00', '2022-12-31T19:50:00-05:00'),
+      -- 完全在窗口外。
+      ('RQ Run', 'HKQuantityTypeIdentifierStepCount', 999, '2022-12-30T00:00:00.000Z', '2022-12-30T01:00:00.000Z');
+  `);
+  try {
+    // (1800 + 600) 步 / 60 min = 40 步/分钟：偏移行按历史文本语义不计入（见上）。
+    assert.equal(new SqliteWorkoutReadRepository(database).averageCadence("workout_old", 3600), 40);
+  } finally {
+    database.close();
+  }
+});

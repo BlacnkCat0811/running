@@ -3,7 +3,8 @@ import { sessionFactPresentConditionSql, workoutPresentConditionSql } from "../s
 
 import type { PerformanceProtocol, SessionType, StimulusType, WorkoutTrainingLoad } from "@rai/contracts";
 
-import { adaptiveHealthRecordOverlapQuery, nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
+import { nullableNumber, paceSeconds, parseJson } from "./read-utils.js";
+import { readHealthRecordOverlap } from "./health-record-overlap-reads.js";
 import { SqliteRoutePointReader } from "./route-point-reader.js";
 
 const rawAverageMetricTypes = new Set([
@@ -393,20 +394,18 @@ export class SqliteWorkoutReadRepository {
     }
     // 2026-10-18（P0-1）：与 `SqliteSeriesReadRepository.metricIntervals` 同一条
     // "OR 分支让 start_at 失去下界 ⇒ 全来源历史扫描"的谓词（同一类读放大）。
-    // 拆成两个各自可走索引 seek 的 UNION 分支（窗口内 start_at 双端；跨窗口起点
-    // 只有 end_at 下界 + 24 h slack）；精确归属仍由 julianday 残差判断（与改造前逐行等价）。
-    // 2026-10-18（复查 P1）：同一处"split 分支 B 只有 end_at 下界、窗口越老越慢"的自适应
-    // （形状、成本模型与回退规则见 `read/read-utils.ts` 的 `HealthRecordOverlapShape`）。
+    // 2026-10-18（复查 P2）：改走 `read/health-record-overlap-reads.ts` 的**有界计划**
+    // （该 type 最长记录时长把候选起点收紧成固定宽度区间；中段/老窗口不再走半段历史），
+    // 拿不到有界证据时回退两种逐行等价的 split / legacy 形状。
     // 注意这里的投影**不含 unit**：本方法的去重键历来是 (start_at, end_at, value_numeric)，
     // 加 unit 会把"同区间同值、仅 unit 文本不同"的行从两行变一行，改变加权分母。
-    const { sql, params } = adaptiveHealthRecordOverlapQuery(this.database, {
+    const { rows } = readHealthRecordOverlap(this.database, {
       type,
       sourceName: workout.source_name,
       startedAt: workout.start_at,
       endedAt: workout.end_at,
       columns: ["start_at", "end_at", "value_numeric"]
     });
-    const rows = this.database.prepare(sql).all(...params) as Record<string, unknown>[];
     let weightedValue = 0;
     let coveredMs = 0;
     for (const [index, row] of rows.entries()) {
@@ -450,19 +449,20 @@ export class SqliteWorkoutReadRepository {
     if (!Number.isFinite(workoutStartMs) || !Number.isFinite(workoutEndMs) || workoutEndMs <= workoutStartMs) {
       return null;
     }
-    const records = this.database
-      .prepare(`
-        SELECT value_numeric, start_at, end_at
-        FROM (
-          SELECT DISTINCT value_numeric, start_at, end_at
-          FROM health_records
-          WHERE source_name = ?
-            AND type = 'HKQuantityTypeIdentifierStepCount'
-            AND value_numeric IS NOT NULL
-            AND start_at < ? AND end_at > ?
-        )
-      `)
-      .all(workout.source_name, workout.end_at, workout.start_at) as Record<string, unknown>[];
+    // 2026-10-18（复查 P2）：原始 step 回退读此前是 `start_at < 窗口终点 AND end_at > 窗口起点`
+    // 的单条谓词 —— 只有 `end_at` 下界时，老 workout 会随时间轴增长扫描整段历史
+    // （与 metricIntervals 的 P0-1 前形态同类，只是没有 julianday 残差）。现在改走
+    // `readHealthRecordOverlap` 的有界计划（该 type 最长记录时长收紧候选起点，与窗口
+    // 位置无关），拿不到有界证据时回退 `pureOverlap` 的 split / legacy 两种逐行等价形状。
+    // 谓词仍是纯文本比较（`start_at < U AND end_at > L`），与历史实现逐行一致。
+    const { rows: records } = readHealthRecordOverlap(this.database, {
+      type: "HKQuantityTypeIdentifierStepCount",
+      sourceName: workout.source_name,
+      startedAt: workout.start_at,
+      endedAt: workout.end_at,
+      columns: ["start_at", "end_at", "value_numeric"],
+      predicate: "pureOverlap"
+    });
     const recordedSteps = records.reduce((total, record) => {
       const value = nullableNumber(record.value_numeric);
       const startMs = Date.parse(String(record.start_at));

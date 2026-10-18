@@ -154,7 +154,8 @@ const TIMELINE_IN_MS: HealthRecordOverlapTimeline = {
   typeStartMs: Date.parse("2022-01-01T00:01:00.000Z"),
   typeEndMs: Date.parse("2024-01-01T00:01:00.000Z"),
   typeEndIndexAvailable: true,
-  sourceTimeIndexAvailable: true
+  sourceTimeIndexAvailable: true,
+  typeTimeIndexAvailable: true
 };
 
 test("shape selector picks split for a window at the newest edge of the timeline", () => {
@@ -229,7 +230,8 @@ test("shape selector falls back to split for an empty database or failed probes"
     typeStartMs: null,
     typeEndMs: null,
     typeEndIndexAvailable: true,
-    sourceTimeIndexAvailable: true
+    sourceTimeIndexAvailable: true,
+    typeTimeIndexAvailable: true
   };
   assert.equal(chooseHealthRecordOverlapShape("2023-01-01T00:00:00.000Z", "2023-01-01T00:30:00.000Z", empty).shape, "split");
   const partial = { ...TIMELINE_IN_MS, typeEndMs: null };
@@ -263,7 +265,8 @@ test("shape selector treats a raw 0.5/0.5 cost tie as split (legacy rows cost ~3
     typeStartMs: 0,
     typeEndMs: 100,
     typeEndIndexAvailable: true,
-    sourceTimeIndexAvailable: true
+    sourceTimeIndexAvailable: true,
+    typeTimeIndexAvailable: true
   };
   const choice = chooseHealthRecordOverlapShape(new Date(50).toISOString(), new Date(50).toISOString(), symmetric);
   assert.equal(choice.legacyCost, 0.5);
@@ -305,7 +308,8 @@ test("timeline probe reads both timeline ends when the indexes exist", () => {
       typeStartMs: 61_000,
       typeEndMs: 2_060_000,
       typeEndIndexAvailable: true,
-      sourceTimeIndexAvailable: true
+      sourceTimeIndexAvailable: true,
+      typeTimeIndexAvailable: true
     });
   } finally {
     database.close();
